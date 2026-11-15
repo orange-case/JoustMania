@@ -38,6 +38,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORKFLOW="${1:-${REPO_ROOT}/.github/workflows/ci.yml}"
 
 python3 - "$WORKFLOW" <<'PY'
+import os
 import re
 import sys
 
@@ -625,6 +626,28 @@ if "e2e_required" in jobs["changes"]["outputs"]:
     check(jobs["integration-test"].get("env", {}).get("OTEL_COLLECTOR_TAG")
           == "${{ needs.collector-image.outputs.tag }}",
           "integration-test: OTEL_COLLECTOR_TAG must be exactly collector-image's tag output")
+    # The overlay must be part of the full-build trigger, and its collector image must live under
+    # the same registry prefix collector-image pushes to (run 43746737162: a hard-coded foreign
+    # prefix made every overlay run pull an unpullable image).
+    int_filter = next(s for s in jobs["changes"]["steps"] if s.get("id") == "f")["with"]["filters"]
+    int_deps = yaml.safe_load(int_filter).get("integration_deps") or []
+    check("docker-compose.collector-prebuilt.yml" in int_deps,
+          "changes/f: integration_deps must list docker-compose.collector-prebuilt.yml")
+    overlay_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), "..", "..",
+                                "docker-compose.collector-prebuilt.yml")
+    # Regex, not yaml: the overlay uses compose-only tags (!reset) that PyYAML cannot load.
+    with open(overlay_path, encoding="utf-8") as fh:
+        img_m = re.search(r"^\s+image:\s*(\S+)\s*$", fh.read(), re.M)
+    overlay_image = img_m.group(1) if img_m else ""
+    check(overlay_image.startswith("${IMAGE_PREFIX:-")
+          and "}/otel-collector:${OTEL_COLLECTOR_TAG" in overlay_image,
+          f"docker-compose.collector-prebuilt.yml: otel-collector image must be ${{IMAGE_PREFIX:-...}}/otel-collector:${{OTEL_COLLECTOR_TAG..., got {overlay_image!r}")
+    ref_step = next((st for st in ci_steps if st.get("id") == "ref"), {})
+    ref_m = re.search(r'ref=(\S+?)/otel-collector:', ref_step.get("run", ""))
+    prefix_step = next((st for st in jobs["integration-test"]["steps"] if st.get("name") == "Set image prefix"), {})
+    prefix_m = re.search(r'IMAGE_PREFIX=(\S+?)"? >>', prefix_step.get("run", ""))
+    check(bool(ref_m) and bool(prefix_m) and ref_m.group(1) == prefix_m.group(1),
+          f"collector-image pushed ref prefix {ref_m and ref_m.group(1)!r} must equal integration-test IMAGE_PREFIX {prefix_m and prefix_m.group(1)!r}")
     # Publish result: the tag only when the image is available, else empty.
     publish = next((st for st in ci_steps if st.get("id") == "result"), None)
     check(publish is not None, "collector-image: needs a `result` step")
