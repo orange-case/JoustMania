@@ -62,4 +62,21 @@ run_check 1 "no-pull, rejected config" STUB_RUN_RC=1 -- --no-pull example/otel:l
 run_check 0 "default pulls" -- example/otel:latest "$config"
 grep -q '^pull' "$DOCKER_LOG" || fail "default mode did not pull"
 
+# Several configs (#2571, UC-035 A7): one --config flag per file, in the order
+# given, so the image validates the merge of base and overlay.
+# UC: UC-035 A7
+overlay="${WORK}/config.gateway.yaml"
+echo "exporters: {}" >"$overlay"
+run_check 0 "base + overlay" -- --no-pull example/otel:latest "$config" "$overlay"
+run_line="$(grep '^run' "$DOCKER_LOG")"
+[[ "$run_line" == *"validate --config=/etc/otel-collector-config-0.yaml --config=/etc/otel-collector-config-1.yaml" ]] ||
+  fail "base + overlay: want two --config flags in order, got: ${run_line}"
+[[ "$run_line" == *"${config}:/etc/otel-collector-config-0.yaml:ro"*"${overlay}:/etc/otel-collector-config-1.yaml:ro"* ]] ||
+  fail "base + overlay: each file must be mounted at its own path, got: ${run_line}"
+[[ "$run_line" == *"--network none"* ]] || fail "validate must run without a network"
+pass=$((pass + 3))
+# A missing overlay is an error, not a silent base-only validation.
+run_check 1 "missing overlay" -- --no-pull example/otel:latest "$config" "${WORK}/absent.yaml"
+if grep -q '^run' "$DOCKER_LOG"; then fail "missing overlay still ran validate"; fi
+
 echo "test-check-collector-config: ${pass} checks passed"

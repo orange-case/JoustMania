@@ -77,6 +77,9 @@ expect "docs/specs/notes/grpc-rpcs.yaml" "$ALWAYS contract yaml-dupkeys"
 expect "docs/README.md" "$ALWAYS"
 expect "docker-compose.yml" "$ALWAYS contract contract-flagd service compose yaml-dupkeys"
 expect "docker-compose.lite.yml" "$ALWAYS compose yaml-dupkeys"
+# gateway overlay (#2571): tests/contract reads it, the compose gate renders it
+expect "docker-compose.gateway.yml" "$ALWAYS contract compose yaml-dupkeys"
+expect "services/otel-collector/config.gateway.yaml" "$ALWAYS contract yaml-dupkeys"
 # voice catalog (#2107): the catalog, the generated assets and the generator
 expect "services/audio/voice/lines.yaml" "$ALWAYS py:audio voice-check contract yaml-dupkeys"
 expect "services/audio/assets/Menu/vox/gen_male/high.ogg" "$ALWAYS py:audio voice-check contract"

@@ -1,0 +1,70 @@
+# Overlay for the opt-in gateway export (#2571, FR-086, UC-035 A7).
+#
+# Loaded as a second --config after config.yaml (see docker-compose.gateway.yml).
+# The collector merges the two files key by key: maps are merged, lists are
+# replaced. So this file only ADDS map keys (one exporter, three pipelines) and
+# never restates a list of config.yaml. The in-case pipelines (Jaeger,
+# VictoriaMetrics, agent) stay as they are, and the case keeps working without
+# an uplink. tests/contract/test_collector_gateway_overlay.py checks the merge.
+#
+# The case sends everything once to one remote collector (the gateway), which
+# forwards to the external backends. The gateway is deployed outside this repo;
+# no backend name or key lives in the case.
+#
+# Env (docker-compose.gateway.yml):
+#   ORANGECASE_GATEWAY_ENDPOINT  base URL, e.g. https://otlp.example.org
+#                                (OTLP/HTTP over TLS on 443; the exporter adds
+#                                /v1/traces, /v1/metrics, /v1/logs)
+#   ORANGECASE_GATEWAY_TOKEN     bearer token (a secret: environment only, C-016)
+
+exporters:
+  # Degrade, never stall (C-004, NFR-029): bounded retry and a queue bounded in
+  # bytes, like otlp/agent is bounded (NFR-024).
+  #
+  # - Unreachable gateway, or HTTP 429 / 502 / 503 / 504: a batch is retried for
+  #   at most 5 min, then dropped. While batches wait, new ones go to the queue;
+  #   a full queue drops the new batch at once (block_on_overflow is off).
+  # - Wrong token (HTTP 401 / 403) or any other status: not retried, dropped.
+  # - The queue is sized in BYTES, not in batches: each signal has its own queue
+  #   of 16 MiB of serialized data, 48 MiB in total. A queue counted in batches
+  #   has no memory bound, and a full one could push the collector to the
+  #   memory_limiter (600 MiB), which refuses data for the in-case pipelines too.
+  #
+  # The in-case backends still have everything the gateway copy lost. A
+  # persistent queue is #2578 (needs the file_storage extension in
+  # images/otel-collector).
+  otlp_http/gateway:
+    endpoint: ${env:ORANGECASE_GATEWAY_ENDPOINT}
+    headers:
+      Authorization: Bearer ${env:ORANGECASE_GATEWAY_TOKEN}
+    compression: gzip
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      sizer: bytes
+      queue_size: 16777216
+
+service:
+  pipelines:
+    # Game telemetry only: what the services push over OTLP. Host, container
+    # and scraped infrastructure metrics and the span metrics stay in the case.
+    # Each pipeline reuses the processors of its in-case twin, so the gateway
+    # receives the same data (health-check spans dropped, same resource
+    # attributes). Its own batch processor decouples it from the in-case twin.
+    traces/gateway:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/grpc_health, batch/traces, resource]
+      exporters: [otlp_http/gateway]
+    metrics/gateway:
+      receivers: [otlp]
+      processors: [memory_limiter, batch/fast, resource]
+      exporters: [otlp_http/gateway]
+    logs/gateway:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp_http/gateway]

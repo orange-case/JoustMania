@@ -237,6 +237,7 @@ jobs:
               - 'tests/integration/setup_guard.py'  # tested by tests/contract (#1649)
               - 'docker-compose.yml'
               - 'docker-compose.ci.yml'  # CI overlay env vars (env-var coverage contract, #1535)
+              - 'docker-compose.gateway.yml'  # gateway overlay wiring (tests/contract, #2571)
               - 'docs/specs/**'
               - 'scripts/**'
               - 'tools/**'
@@ -1431,6 +1432,13 @@ jobs:
       - name: Validate collector config against the HEAD build
         if: steps.collector_image.outputs.build == 'true'
         run: bash scripts/ci/check-collector-config.sh --no-pull "${{ steps.collector_image.outputs.ref }}" services/otel-collector/config.yaml
+
+      # #2571 (UC-035 A7): the opt-in gateway overlay is loaded as a second
+      # --config. Validate the merge of base and overlay with the collector
+      # image this run uses (pulled, or built at HEAD by the step above).
+      - name: Validate collector config with the gateway overlay
+        if: needs.changes.outputs.e2e_full_build == 'false'
+        run: bash scripts/ci/check-collector-config.sh --no-pull "${{ steps.collector_image.outputs.ref }}" services/otel-collector/config.yaml services/otel-collector/config.gateway.yaml
 
       # #1254: the Go agent has no dev mount, so on the fast path it would run the
       # published :latest, which can lag the code under test: a PR changing only
