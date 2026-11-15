@@ -685,7 +685,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256m
+          # #2605: Grafana 13.3 peaks at about 295 MB right after start (cgroup
+          # memory.peak with this config); 256m got it OOM-killed in CI.
+          memory: 512m
           cpus: '0.5'
     logging: *default-logging
 
