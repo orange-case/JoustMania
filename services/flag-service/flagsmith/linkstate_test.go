@@ -114,6 +114,25 @@ func TestLinkState(t *testing.T) {
 			t.Fatal("ForgetRemote kept the remote value")
 		}
 	})
+	// #2594 delta finding 1: Refuse without a value must not drop a fresh
+	// pending entry that Next never handed out.
+	t.Run("UC-055/BR-001 Refuse keeps a fresh pending entry Next never handed out", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		s.Offer(stack, val(`1`), t0, 1)
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "1" {
+			t.Fatalf("in flight %s ok %v, want 1", v.Value, ok)
+		}
+		s.Offer(stack, val(`0`), t0, 2)             // equal to the remote value: drops pending
+		s.Offer(stack, val(`3`), t0, 3)             // a fresh entry, never handed out
+		s.Refuse(stack, SideRemote, ReasonNotFound) // the refusal is of 1
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "3" {
+			t.Fatalf("pending %s ok %v, want 3 kept", v.Value, ok)
+		}
+		if r, side := s.Refusal(stack); r != ReasonNotFound || side != SideRemote {
+			t.Fatalf("refusal %q %q, want recorded", r, side)
+		}
+	})
 	// #2594 review finding 1: the mirror of "a newer pending value survives
 	// ConfirmPushed of the older one".
 	t.Run("UC-055/BR-001 a newer pending value survives a remote refusal of the older one", func(t *testing.T) {
