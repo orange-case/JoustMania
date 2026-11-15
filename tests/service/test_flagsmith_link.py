@@ -48,6 +48,29 @@ def _wait_link(flag_service: FlagService, timeout: float, **want) -> dict:
     raise AssertionError(f"flagsmith link {link}, want {want}")
 
 
+def _put_when_synced(flag_service: FlagService, set_id: str, flag: str, variant: str) -> None:
+    """PUT once flagd has reopened its sync stream after a restart (503 no_sync_stream until then)."""
+    deadline = time.monotonic() + RESTART_SECONDS
+    while True:
+        try:
+            flag_service.put(set_id, flag, variant=variant)
+            return
+        except FlagServiceError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.25)
+
+
+def _wait_overlay(flag_service: FlagService, set_id: str, flag: str, timeout: float) -> dict:
+    """The stack overlay once it is set (a pulled write deferred by no_sync_stream lands on a later poll)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        overlay = flag_service.get(set_id, flag).get("stack_overlay") or {}
+        if overlay or time.monotonic() > deadline:
+            return overlay
+        time.sleep(0.25)
+
+
 def _registry_keys() -> set[str]:
     import yaml
 
@@ -86,15 +109,7 @@ def test_offline_start_serves_baseline(stack, flag_service):
         status, body = flag_service.request("GET", "/healthz")
         assert status == 200, body
         # flagd reconnects on its own after the restart (503 no_sync_stream until then).
-        deadline = time.monotonic() + RESTART_SECONDS
-        while True:
-            try:
-                flag_service.put("agent", "decision.capture_content", variant="off")
-                break
-            except FlagServiceError:
-                if time.monotonic() > deadline:
-                    raise
-                time.sleep(0.25)
+        _put_when_synced(flag_service, "agent", "decision.capture_content", "off")
         assert flag_service.get("agent", "decision.capture_content")["stack_overlay"]["variant"] == "off"
     finally:
         fake.down = False
@@ -124,7 +139,8 @@ def test_restart_clears_own_overlay(stack, flag_service):
     fake = stack.fake_flagsmith
     _wait_link(flag_service, FIRST_START_SECONDS, link="online")
     # An in-memory overlay is pushed (out side), then the flag service restarts.
-    flag_service.put("agent", "decision.capture_content", variant="off")
+    # An earlier test may have just restarted the flag service: wait for flagd's sync stream.
+    _put_when_synced(flag_service, "agent", "decision.capture_content", "off")
     deadline = time.monotonic() + RESTART_SECONDS
     while time.monotonic() < deadline and not fake.requests(path_contains="__future__"):
         time.sleep(0.25)
@@ -149,7 +165,9 @@ def test_restart_keeps_persons_value(stack, flag_service):
     try:
         stack.flag_plane.restart_flag_service()
         _wait_link(flag_service, RESTART_SECONDS, link="online", restart_rule="audit_log")
-        overlay = flag_service.get("agent", "decision.capture_content").get("stack_overlay") or {}
-        assert overlay.get("variant") == "off" and overlay.get("writer") == "flagsmith"
+        # The start reconcile defers the write while flagd has no sync stream yet (no_sync_stream);
+        # a later poll applies it, within FR-208's 30 s.
+        overlay = _wait_overlay(flag_service, "agent", "decision.capture_content", RESTART_SECONDS)
+        assert overlay.get("variant") == "off" and overlay.get("writer") == "flagsmith", overlay
     finally:
         fake.set_document([])
