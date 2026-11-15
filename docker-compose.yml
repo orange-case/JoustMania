@@ -642,7 +642,12 @@ services:
     # Port exposed only within Docker network (envoy proxies to it)
     expose:
       - "3000"
-    environment: []
+    environment:
+      # #2600: no background install/auto-update of Grafana 13's "preinstalled"
+      # catalog plugins. The zipkin update OOM-killed Grafana at the 256m limit in
+      # CI and made start-up depend on grafana.com. The prometheus and jaeger data
+      # sources we provision ship in the image (data/plugins-bundled) and still load.
+      - GF_PLUGINS_PREINSTALL_DISABLED=true
     volumes:
       - ./services/grafana/grafana.ini:/etc/grafana/grafana.ini
       - ./services/grafana/provisioning:/etc/grafana/provisioning:ro
