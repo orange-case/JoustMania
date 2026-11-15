@@ -69,8 +69,8 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | registry flag `<set>/<key>` | one **feature** named `<key>`, tagged `<set>`, description = registry `description` | keys are unique across sets (flag-service.md §5.2); one tag per flag set, created on demand |
 | stack overlay (in memory or persisted) | the feature's **environment value**: `enabled=true`, value = §4.1 | |
 | no stack overlay | `enabled=false`, value = the baseline default (shown for reference) | `enabled=false` never means "flag off"; it means "baseline applies" |
-| game value | override on identity `game:<gameId>` | identity traits `game_kind`, `coordinator_instance` |
-| player value in a game | override on identity `game:<gameId>:<serial>` | trait `game_id`, `serial` |
+| game value | override on identity `game:<gameId>` | identity traits `game_kind`, `coordinator_instance` (best effort) |
+| player value in a game | override on identity `game:<gameId>:<serial>` | no traits (the identifier names the game and serial) |
 | experiment-arm value | override on identity `experiment:<id>:<arm>` | shown only (F3) |
 | `real` overlay | override on identity `real` | shown only (F3) |
 | fraction overlay | override on identity `fraction`, value `{"variant":…, "fraction_percent":…}` | shown only (F3) |
@@ -122,13 +122,22 @@ entity.
    `(set, key, scope)` into `pending`, replacing an older pending entry (merge, BR-001 of UC-055).
 2. One sender goroutine drains `pending` in order of first change, at most `FLAGSMITH_PUSH_RATE` requests per
    second (default 5), and stops on `429` for the `Retry-After` the API answers.
-3. Stack value: `PATCH /api/__future__/environments/{env_key}/features/{feature_id}/` with `enabled` and
-   `value: {type, value}` (the experimental flag API, `api/features/future/views.py`; it refuses with an error when
-   the environment requires change requests: A4 of UC-055). Fallback for a Flagsmith without `__future__`:
-   `PUT /api/v1/environments/{env_key}/featurestates/{id}/`.
-4. Identity scopes: `POST /api/v1/environments/{env_key}/edge-identities/` (`identifier`, traits) once per
-   identity, then `POST`/`PUT /edge-identities/{uuid}/edge-featurestates/` per override; an ended value is a
-   `DELETE` of the override, a game end a `DELETE` of the game and player identities.
+3. Stack value: `PATCH /api/__future__/environments/{env_key}/features/{feature_id}/` with
+   `{"environment_default": {"enabled": …, "value": {"type": "string|integer|boolean", "value": "<text>"}}}` (the
+   experimental flag API, `api/features/future/serializers.py` `UpdateFlagSerializer`; the inner `value` is always
+   text). A cleared overlay sends `enabled: false` with the baseline default as the value. An environment that
+   requires change requests answers `409 change_requests_enabled` (A4 of UC-055). Fallback for a Flagsmith without
+   `__future__` (a 404 whose body is not JSON `{"detail": …}`, latched per process):
+   `GET /api/v1/environments/{env_key}/featurestates/?feature=<id>`, then `PUT …/featurestates/{id}/`.
+4. Identity scopes: values are upserted by identifier, without a uuid round trip:
+   `PUT /api/v1/environments/{env_key}/edge-identities-featurestates` (no trailing slash) with
+   `{"identifier", "feature", "enabled", "feature_state_value"}` (typed JSON value); it creates a missing identity.
+   An ended value is a `DELETE` on the same path with `{"identifier", "feature"}` (204, also when absent). A game
+   registration lists the game and its players with `POST /api/v1/environments/{env_key}/edge-identities/`
+   (`identifier`; 400 "already exists" counts as created); the game identity gets the traits `game_kind` and
+   `coordinator_instance` (best effort; skipped when the organisation does not persist traits). A game end deletes
+   the game and player identities (`DELETE …/edge-identities/{uuid}/`, the uuid found by the exact search
+   `?q="<identifier>"` when unknown). Edge identities need an edge-enabled project (the SaaS has it).
 5. On success `remote := pending`, `pending := none` (no echo, §4.4).
 
 ### 4.2 In (UC-054)
