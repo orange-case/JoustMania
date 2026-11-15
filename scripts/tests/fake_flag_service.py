@@ -5,7 +5,8 @@ file, with the REAL registry (services/flag-service/registry.yaml) deciding
 which flags are mutable, so a script that writes a read-only flag or an
 undeclared variant fails here exactly as it would against the service:
 
-    GET    /state                 epoch, one sync stream, served sets
+    GET    /state                 epoch, one sync stream, served sets (+ the "flagsmith" block of
+                                  --flagsmith '<json>', services.md §7.3, only when given)
     GET    /{set}                 every flag: effective_default, variants, variant_values, stack_overlay,
                                   admin_value
     GET    /{set}/{flag}
@@ -75,6 +76,7 @@ class Fake:
         self.arms = {}  # (set, flag) -> {experiment_id: {arm: {"variant", "value", "writer"}}}
         self.games = games
         self.games_file = ""
+        self.flagsmith = None  # GET /state's flagsmith block (--flagsmith)
         self.scope_values = scope_values
         self.fail_put = fail_put  # 1-based index of the PUT answered with 503
         self.puts = 0
@@ -150,17 +152,17 @@ def make_handler(fake):
             parts, _ = self._parts()
             with fake.lock:
                 if parts == ["state"]:
-                    return self._send(
-                        200,
-                        {
-                            "epoch": "fake0001",
-                            "sync_streams": 1,
-                            "served_sets": sorted(fake.sets),
-                            "live_games": fake.games,
-                            "scope_values": fake.scope_values,
-                            "overlays": len(fake.overlays),
-                        },
-                    )
+                    state = {
+                        "epoch": "fake0001",
+                        "sync_streams": 1,
+                        "served_sets": sorted(fake.sets),
+                        "live_games": fake.games,
+                        "scope_values": fake.scope_values,
+                        "overlays": len(fake.overlays),
+                    }
+                    if fake.flagsmith is not None:
+                        state["flagsmith"] = fake.flagsmith
+                    return self._send(200, state)
                 if parts == ["games"]:
                     games = []
                     if fake.games_file:
@@ -328,6 +330,11 @@ def main():
         help="JSON list served by GET /games, read per request",
     )
     ap.add_argument(
+        "--flagsmith",
+        default="",
+        help="JSON object served as GET /state's flagsmith block (absent when empty)",
+    )
+    ap.add_argument(
         "--fail-put", type=int, default=0, help="answer the Nth PUT with 503"
     )
     ap.add_argument(
@@ -349,6 +356,7 @@ def main():
         args.fail_delete,
     )
     fake.games_file = args.games_file
+    fake.flagsmith = json.loads(args.flagsmith) if args.flagsmith else None
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(fake))
     with open(args.port_file + ".tmp", "w") as fh:
         fh.write(str(server.server_address[1]))

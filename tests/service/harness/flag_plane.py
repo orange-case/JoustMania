@@ -154,13 +154,21 @@ def _http_ok(url: str, body: bytes | None = None) -> bool:
 class FlagPlane:
     """One flag service + one flagd, both fresh, on ephemeral ports."""
 
-    def __init__(self, workdir: Path, variant_values: Mapping[tuple[str, str, str], object] | None = None):
+    def __init__(
+        self,
+        workdir: Path,
+        variant_values: Mapping[tuple[str, str, str], object] | None = None,
+        extra_env: Mapping[str, str] | None = None,
+    ):
         """``variant_values``: ``{(flag_set, flag, variant): value}`` rewritten in the
         temporary baseline copy before the flag service starts (e.g. the ``fake``
         variant of ``decision.openai.base_url`` -> the stack's fake). The variant must
-        exist: a test-only value never adds a variant the registry does not know."""
+        exist: a test-only value never adds a variant the registry does not know.
+        ``extra_env``: more flag-service env, applied last (e.g. the FLAGSMITH_* env of a
+        fake Flagsmith, #2591; without it the link is off)."""
         self.workdir = workdir
         self.variant_values = dict(variant_values or {})
+        self.extra_env = dict(extra_env or {})
         self.flag_dir = workdir / "flags"
         self.state_file = workdir / "flag-service-state" / "admin-ci.json"
         self.grpc_port = free_port()
@@ -198,6 +206,7 @@ class FlagPlane:
                 "FLAG_SERVICE_HTTP_PORT": str(self.http_port),
                 # No OTEL_EXPORTER_OTLP_ENDPOINT (the env starts empty, base_env
                 # does not pass it through): tracing and metrics are no-ops.
+                **self.extra_env,
             },
             log_path=self.workdir / "logs" / "flag-service.log",
             ready=lambda: _http_ok(f"{self.flag_service_url}/healthz"),
