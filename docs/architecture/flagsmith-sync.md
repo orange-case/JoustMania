@@ -243,7 +243,10 @@ Flagsmith's audit API shows `author` (a user, or null) but not **which** API key
 - an admin setting (`persist: yes`) with an API key as author → replaced by the state-file value (or the baseline),
   and that value is sent to Flagsmith; with a person as author → applied and persisted;
 - author set (a Flagsmith user) or a system event → applied as a change from Flagsmith;
-- an override on a game that is not registered yet is neither applied nor refused: it applies once the game registers;
+- an override on a game that is not registered yet is neither applied nor refused: it applies once the game registers. Game and
+  player overrides are classified by the same author rule at start but applied only when the game registers: an override
+  made with an API key (the link's own) is removed once its game registers, a person's override is applied, and overrides
+  of games that never register are removed after the grace period (next bullet);
 - identities of games that are not live → deleted, but **start never deletes identities**: the cleanup runs once the
   coordinator has re-registered its games, or 45 s after start, whichever is later, and keeps every identity that a
   registered game matches (the whole identifier is compared with `game:<id>` and `game:<id>:<serial>`), so a game
@@ -260,7 +263,7 @@ without a row is treated as a person's and the rule reports `degraded` (one warn
 written asynchronously, so a push seconds before a crash may be misread as a person's value (§10).
 
 **Kill switches win over the clear (safety over reset).** The more restrictive value wins even over the API-key clear
-above: a kill switch that an in-memory write tightened before the restart stays tightened after it and is reported as
+and over the admin-setting replace above (`agent/interventions_allowed` is both persisted and a kill switch): a kill switch that an in-memory write tightened before the restart stays tightened after it and is reported as
 a conflict. A person-set looser value is not brought
 back for a kill switch (BR-005).
 
