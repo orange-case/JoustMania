@@ -608,12 +608,12 @@ Flagsmith environment. Off by default; nothing of §7.1 or §7.2 changes while i
 
 | Item | Value |
 |---|---|
-| Direction | outbound HTTPS only (C-037): pull `GET {FLAGSMITH_API_URL}environment-document/` (server-side key, `If-Modified-Since`), optional realtime SSE, pushes through the Admin API, feature-health webhook posts. No port is opened, no webhook reaches the stack |
-| Config | `FLAGSMITH_LINK` (`off`/`on`, default `off` in every compose file; the stage stack opts in through `.env.local`), `FLAGSMITH_API_URL` (default `https://api.flagsmith.com/api/v1/`), `FLAGSMITH_SERVER_KEY` (secret, `ser.…`), `FLAGSMITH_ADMIN_API_KEY` (secret), `FLAGSMITH_ENVIRONMENT_KEY`, `FLAGSMITH_PROJECT_ID`, `FLAGSMITH_POLL_SECONDS` (30), `FLAGSMITH_REALTIME_URL` (empty = polling only), `FLAGSMITH_PUSH_RATE` (5 per second), `FLAGSMITH_HEALTH_WEBHOOK_URL` (secret, empty = no health events), `FLAGSMITH_TIMEOUT_SECONDS` (5). A missing key with `on` starts the service with the link `off` and an error log; the link never stops the service from starting |
+| Direction | outbound HTTPS only (C-037): pull `GET {FLAGSMITH_DOCUMENT_URL}environment-document/` (server-side key, `If-Modified-Since`), optional realtime SSE, pushes through the Admin API, feature-health webhook posts. No port is opened, no webhook reaches the stack |
+| Config | `FLAGSMITH_LINK` (`off`/`on`, default `off` in every compose file; the stage stack opts in through `.env.local`), `FLAGSMITH_API_URL` (Admin API, default `https://api.flagsmith.com/api/v1/`), `FLAGSMITH_DOCUMENT_URL` (environment-document pull, default `https://edge.api.flagsmith.com/api/v1/`), `FLAGSMITH_SERVER_KEY` (secret, `ser.…`), `FLAGSMITH_ADMIN_API_KEY` (secret), `FLAGSMITH_ENVIRONMENT_KEY`, `FLAGSMITH_PROJECT_ID`, `FLAGSMITH_POLL_SECONDS` (30), `FLAGSMITH_REALTIME_URL` (empty = polling only), `FLAGSMITH_PUSH_RATE` (5 per second), `FLAGSMITH_HEALTH_WEBHOOK_URL` (secret, empty = no health events), `FLAGSMITH_TIMEOUT_SECONDS` (5). A missing key with `on` starts the service with the link `off` and an error log; the link never stops the service from starting |
 | State | in memory only (C-030, C-036): per `(set, key, scope)` the last state seen from Flagsmith, the pending local value, in-sync flag and last refusal; link state `off`, `starting`, `online`, `offline`. Lost on restart |
 | Writer label | pulled changes are writes with writer `flagsmith`; the label is reserved: an HTTP write that names it is `400 malformed` |
 | Write path | a pulled change goes through the same validation and apply code as `PUT` / `POST` / `DELETE /{flagSetId}/{flagName}` (in process, not over HTTP); refusals are the codes of §7.2. Experiment-arm, `real` and fraction scopes are refused as `422 flagsmith_scope_read_only` |
-| Start | serves baseline + admin settings at once (FR-130); then, in the background: resolve ids, create missing features and tags (FR-214), the restart rule by authorship (FR-215, architecture note §5.1), then poll |
+| Start | serves baseline + admin settings at once (FR-130); then, in the background: resolve ids from `GET /api/v1/environments/{env_key}/` (the link stays offline when the environment's project differs from `FLAGSMITH_PROJECT_ID`, `project_mismatch`, or when `use_identity_overrides_in_local_eval` is off, `identity_overrides_disabled`), create missing features and tags (FR-214; names compared case-insensitively, existing features never re-tagged or re-described, `initial_value` only when Flagsmith would infer the same type), the restart rule by authorship (FR-215, architecture note §5.1), then poll |
 | Offline | timeouts and errors set the link `offline`; retries with backoff 1, 2, 4 … 60 s; local writes fill the pending set (latest per flag and scope); on reconnect: full pull, 3-way reconcile (FR-210), then pushes |
 
 `GET /state` gains a `flagsmith` object:
@@ -624,8 +624,8 @@ Flagsmith environment. Off by default; nothing of §7.1 or §7.2 changes while i
 ```
 
 `link` is `off`, `starting`, `online` or `offline`; `restart_rule` is `audit_log`, `versioning` or `degraded`
-(architecture note §5.1); `offline_reason` is added while offline (`timeout`, `unauthorized`,
-`identity_overrides_disabled`, `http_<code>`). `GET /healthz` does not depend on the link.
+(architecture note §5.1); `offline_reason` is added while offline (`timeout`, `tls`, `unauthorized`,
+`project_mismatch`, `identity_overrides_disabled`, `http_<code>`). `GET /healthz` does not depend on the link.
 
 **Consumers:** `scripts/talk-preflight.sh` WARNs while the link is `on` and not `online`, or `restart_rule` is
 `degraded`; `talk-stage.sh reset` needs no change (its deletes are pushed like any write).

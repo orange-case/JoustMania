@@ -38,7 +38,7 @@ flowchart LR
         fs[flag service<br/>registry, overlays, game scopes] -->|flagd.sync.v1| flagd[(stock flagd)]
         fs --- link[Flagsmith link<br/>last-seen state, outbox,<br/>in memory only]
     end
-    link -->|"pull: environment document<br/>If-Modified-Since, every 30 s"| fsm[(hosted Flagsmith<br/>one environment per stack)]
+    link -->|"pull: environment document (FLAGSMITH_DOCUMENT_URL)<br/>If-Modified-Since, every 30 s"| fsm[(hosted Flagsmith<br/>one environment per stack)]
     link -->|"push: Admin API<br/>features, flag values, identity overrides"| fsm
     fsm -.->|"optional realtime SSE:<br/>'environment changed'"| link
     link -->|"feature health: unhealthy / healthy"| fsm
@@ -56,7 +56,7 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | F4 | **Flagsmith wins a conflict, kill switches tighten** (UC-054 BR-005, §6). | decided by the maintainer |
 | F5 | **No disk copy.** The last-seen state and the outbox are in memory only (C-030 unchanged). An offline restart runs baseline + admin settings. | decided by the maintainer ("Keep, no cache") |
 | F6 | **Agent limits under full Flagsmith control**, capped by the env ceilings of C-034; on a conflict they tighten (F4). | decided by the maintainer |
-| F7 | **Restart rule by authorship** (UC-054 BR-006): only values a person set in Flagsmith, and admin settings, come back; values the flag service pushed from in-memory writes are cleared in Flagsmith at start. | decided in the review of UC-054 |
+| F7 | **Restart rule by authorship** (UC-054 BR-006): only values a person (a Flagsmith user) set in Flagsmith, and admin settings, come back; every value made with an API key (the link's own, Terraform, the Flagsmith MCP server) is cleared in Flagsmith at start. Flagsmith's audit API shows the author but not which API key, so any API key counts as the link. | decided by the maintainer, 2026-11-15 |
 | F8 | **Pull, not webhooks.** Polling the environment document (conditional `GET`) is the baseline; realtime SSE only shortens the delay. Flagsmith webhooks are rejected (§9.1). | recommendation |
 | F9 | **Non-stack scopes are identities.** Game, player, experiment-arm, `real` and fraction values are identity overrides on identities named after the scope (§4.2). | recommendation |
 | F10 | **Off by default.** `FLAGSMITH_LINK=off` in every stack; CI and the dry-run stacks never call the SaaS; the stage stack opts in through `.env.local`. | recommendation |
@@ -143,8 +143,10 @@ entity.
 ### 4.2 In (UC-054)
 
 1. Every `FLAGSMITH_POLL_SECONDS` (default 30), and at once when the optional realtime stream announces a change,
-   the link fetches `GET /api/v1/environment-document/` with the server-side key (`X-Environment-Key: ser.…`) and
-   `If-Modified-Since: <last_modified>`; a `304` ends the round.
+   the link fetches `GET {FLAGSMITH_DOCUMENT_URL}environment-document/` (default
+   `https://edge.api.flagsmith.com/api/v1/`; the Admin API stays on `FLAGSMITH_API_URL`) with the server-side key
+   (`X-Environment-Key: ser.…`) and `If-Modified-Since: <last_modified>`; a `304` ends the round. On the SaaS, edge
+   identity overrides appear only in the edge document.
 2. The document holds the environment values of every feature and, **only when the environment has
    `use_identity_overrides_in_local_eval` on** (`api/util/mappers/sdk.py`), the identity overrides. The link
    refuses to go online without it (`state=offline`, reason `identity_overrides_disabled`), because without it
@@ -181,22 +183,37 @@ what was pushed, so its own change is never "new". Because variants are opaque a
 | Link drops while running | `state=offline`; writes keep working and fill `pending`; on reconnect: full pull, reconcile (§6), then drain `pending` |
 | Restart while offline | `pending` and Flagsmith-only values are gone until Flagsmith is reached (F5, UC-054 BR-007) |
 
+### 5.0 Start checks
+
+The ids are resolved from `GET /api/v1/environments/{env_key}/`. The link refuses to go online (`state=offline`)
+when the environment's project differs from `FLAGSMITH_PROJECT_ID` (`offline_reason` `project_mismatch`) or when
+`use_identity_overrides_in_local_eval` is off (`identity_overrides_disabled`). Feature creation compares names
+case-insensitively; an existing feature is never re-tagged or re-described; `initial_value` is sent only when
+Flagsmith would infer the same type.
+
 ### 5.1 Restart rule (F7)
 
 At start, `remote` is empty, so the link cannot tell its own pushes from a person's changes by comparison. It
-reads the **author** of the latest change of each enabled environment value and each override from the audit log
-(`GET /api/v1/audit/?environments=<id>`, `AuditLog.author` vs `AuditLog.master_api_key`), or from the feature
-version (`published_by` vs `published_by_api_key`) when the environment uses feature versioning:
+reads the **author** of the latest change of each enabled environment value and each override from the project
+audit log: `GET /api/v1/projects/{project_id}/audit/?environments=<env_id>`, newest first, paged. (The
+organisation-wide `/audit/` fails for API keys.) The link never sends `is_system_event` (Flagsmith parses it
+wrongly) and filters system events on the client. The feature or identity is read from the `log` text, pinned to
+the Flagsmith log constants, because `related_object_id` is not reliable. With feature versioning v2, the version's
+`published_by` is the author; `null` means an API key.
 
-- changed by the link's own Admin API key → the value came from an in-memory write before the restart → cleared in
-  Flagsmith (`enabled=false`, override deleted), unless the registry row is `persist: yes`, whose value the state
-  file already restored;
-- changed by a person (or another API key: Terraform, the Flagsmith MCP server) → applied as a change from
-  Flagsmith;
+Flagsmith's audit API shows `author` (a user, or null) but not **which** API key. Maintainer decision 2026-11-15:
+**any API key counts as the link**.
+
+- author null and not a system event (any API key: the link's own, Terraform, the Flagsmith MCP server) → cleared
+  in Flagsmith (`enabled=false`, override deleted), unless the registry row is `persist: yes`, whose value the
+  state file already restored, or an admin setting;
+- author set (a Flagsmith user) or a system event → applied as a change from Flagsmith;
 - identities of games that are not live → deleted.
 
-If the audit log is not available on the plan, the link treats every value as set by a person and logs a warning
-at start (`restart_rule_degraded`); `talk-preflight.sh` shows it. This is the main open risk (§10).
+**Degraded mode:** the audit call does not answer 200, or it returns no row for a candidate (the free plan answers
+200 with an empty list). The link then treats every value as a person's and logs a warning at start
+(`restart_rule_degraded`); `talk-preflight.sh` shows it. Risk: audit rows are written asynchronously, so a push
+seconds before a crash may be misread as a person's value (§10).
 
 ## 6. Conflicts (FR-210, UC-054 BR-005)
 
@@ -215,7 +232,8 @@ The flag service's own configuration is environment (C-035); the keys are secret
 | Variable | Default | Meaning |
 |---|---|---|
 | `FLAGSMITH_LINK` | `off` | `off` or `on` (F10) |
-| `FLAGSMITH_API_URL` | `https://api.flagsmith.com/api/v1/` | Flagsmith API base (also a self-hosted Flagsmith) |
+| `FLAGSMITH_API_URL` | `https://api.flagsmith.com/api/v1/` | Flagsmith Admin API base (also a self-hosted Flagsmith) |
+| `FLAGSMITH_DOCUMENT_URL` | `https://edge.api.flagsmith.com/api/v1/` | base of the environment-document pull (§4.2); on the SaaS the edge document holds the edge identity overrides |
 | `FLAGSMITH_SERVER_KEY` | none (secret) | server-side environment key `ser.…` for the environment document |
 | `FLAGSMITH_ADMIN_API_KEY` | none (secret) | organisation Admin API key for pushes; with RBAC, give it a role limited to the project |
 | `FLAGSMITH_ENVIRONMENT_KEY` | none | the environment's client key, used in Admin API paths |
@@ -278,7 +296,10 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 
 | Risk | Mitigation |
 |---|---|
-| Audit log or versioning author not available on the plan: the restart rule cannot tell own pushes from a person's changes | degraded mode treats all as a person's (§5.1), warns at start and in the pre-flight; `talk-stage.sh reset` also clears the stage overlays in Flagsmith through the flag service |
+| Audit log or versioning author not available on the plan (or no audit row for a candidate): the restart rule cannot tell own pushes from a person's changes | degraded mode treats all as a person's (§5.1), warns at start and in the pre-flight; `talk-stage.sh reset` also clears the stage overlays in Flagsmith through the flag service |
+| Audit rows are written asynchronously: a push seconds before a crash may be misread as a person's value | accepted; the value is then applied as a change from Flagsmith at the next start |
+| Terraform / MCP values set with an API key are cleared at restart (any API key counts as the link, F7) | decided by the maintainer 2026-11-15; a lasting value is set by a person in the Flagsmith UI, or is an admin setting |
+| Edge overrides in the document: the SaaS serves edge identity overrides only in the edge document | `FLAGSMITH_DOCUMENT_URL` defaults to the edge URL; to verify live against the SaaS |
 | `use_identity_overrides_in_local_eval` off: game and player values cannot be read back | the link stays offline with reason `identity_overrides_disabled`; documented in the setup |
 | SaaS request limits (`MASTER_API_KEY_THROTTLE_RATE` is a per-deployment setting; the SaaS value is not published) under many games and events | merge per flag and scope, `FLAGSMITH_PUSH_RATE`, honour `429 Retry-After`; to measure with 8 live games (NFR-057) |
 | Edge identity count grows with games on the plan's identity quota | identities deleted at game end and at start; to verify against the plan |

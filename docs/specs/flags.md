@@ -761,12 +761,17 @@ these flags take the more restrictive value; every other flag takes the Flagsmit
 | Flag | More restrictive first |
 |---|---|
 | `agent/enabled` | `off`, then `on` |
-| `agent/interventions_allowed` | the variant whose allowed actions are a subset of the other's (`none` ⊂ `probe` ⊂ `ambient` ⊂ `standard` ⊂ `full` ⊂ `shadow_experimental`; `standard` ⊂ `standard_group`; `shadow_experimental` ⊂ `shadow_group`), computed from the declared action lists, `noop` counting as no action; when neither contains the other (for example `standard_group` and `full`), the local value stays |
+| `agent/interventions_allowed` | the variant whose allowed actions are a subset of the other's (`none` ⊂ `probe` ⊂ `ambient` ⊂ `standard` ⊂ `full` ⊂ `shadow_experimental`; `standard` ⊂ `standard_group`; `shadow_experimental` ⊂ `shadow_group`), computed from the declared action lists, `noop` counting as no action (equal action sets after dropping `noop` are ordered by their raw tokens, so `none` before `probe`); when neither contains the other (for example `standard_group` and `full`), the local value stays |
 | `agent/code_improvement.mode` | `issue`, `pr`, `autonomous` |
 | `agent/code_improvement.target` | `local`, then `github` |
-| `agent/llm.max_requests_per_minute`, `agent/decision.claude.max_requests_per_minute`, `agent/decision.openai.max_requests_per_minute` | the lower number; any number before `inherit` |
+| `agent/llm.max_requests_per_minute`, `agent/decision.claude.max_requests_per_minute`, `agent/decision.openai.max_requests_per_minute` | the lower number; `inherit` (-1) counts as the highest; any other negative value counts as 0, as in the agent |
 | `agent/experiment_proposer_enabled` | `off`, then `on` |
-| `agent/experiment_dynamic_max_concurrent`, `agent/experiment_max_games` | the lower number; a value that means unlimited (`experiment_max_games` `unlimited` = 0) counts as the highest |
+| `agent/experiment_max_games` | the lower number; `unlimited` (0) counts as the highest |
+| `agent/experiment_dynamic_max_concurrent` | the lower number; a value ≤ 0 resolves to the compiled default 3, as in the agent |
+| `agent/code_improvement.min_interval_seconds` | the higher number |
+
+`code_improvement.*` and `experiment_dynamic_max_concurrent` have no registry row today, so they are not Flagsmith
+features; their rules keep the table complete for when they get one.
 
 The list is the kill switches of §13 (`registry.killSwitches`) plus the agent-limiting flags of FR-152; a test keeps
 it in sync with FR-152. A deliberate change in Flagsmith, with no local change since the last sync, is applied
