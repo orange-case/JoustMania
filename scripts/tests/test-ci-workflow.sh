@@ -27,6 +27,8 @@
 #   #1801: the validate job checks the committed agent Go stubs (services/agent/gen)
 #          on every proto_pkg change, PR, push and dispatch; in the merge queue
 #          only for an entry whose own diff touches proto_pkg (simulated).
+#   #2592: the Flagsmith link journeys run once, in flagsmith-service-tests (the
+#          service_tests filter, needed by CI Complete); Service Tests ignores them.
 #
 # Needs python3 + PyYAML (as scripts/ci/check-retag-source.sh).
 #   ./scripts/tests/test-ci-workflow.sh [path/to/ci.yml]
@@ -681,11 +683,26 @@ for publish in ("docker-build-merge", "docker-build-extra-merge"):
           f"{publish}: :main/:latest must be added only after the guard")
     check('[[ "$rc" == 0 || "$rc" == 3 ]] || exit "$rc"' in run, f"{publish}: guard skip (3) must not fail the run")
 
+# 8b. (#2592) The Flagsmith link journeys run once, in their own job: flagsmith-service-tests
+# runs exactly the two modules on the service_tests filter, and Service Tests ignores them.
+def _run_of(job):
+    return " ".join(st.get("run", "") for st in jobs.get(job, {}).get("steps", []))
+FLAGSMITH_MODULES = ("tests/service/test_flagsmith_link.py", "tests/service/test_flagsmith_sync.py")
+check("flagsmith-service-tests" in jobs, "flagsmith-service-tests: job missing (#2592)")
+check(job_if("flagsmith-service-tests") == job_if("service-tests"),
+      f"flagsmith-service-tests: must use the service-tests filter: {job_if('flagsmith-service-tests')}")
+check('SERVICE_TESTS="' + " ".join(FLAGSMITH_MODULES) + '"' in _run_of("flagsmith-service-tests"),
+      "flagsmith-service-tests: must run exactly the Flagsmith link modules")
+check(all(f"--ignore={m}" in _run_of("service-tests") for m in FLAGSMITH_MODULES),
+      "service-tests: must --ignore the Flagsmith link modules (they run in flagsmith-service-tests)")
+check(jobs.get("flagsmith-service-tests", {}).get("timeout-minutes"),
+      "flagsmith-service-tests: needs its own timeout-minutes")
+
 # 9. (#1569) The CI Complete gate stays blocking.
 REQUIRED_NEEDS = {
     "changes", "dashboard-tests", "connect-proxy-tests", "lib-tests", "service-checks",
     "rust-checks", "rust-deny", "agent-tests", "flag-service-tests", "registry-pinned", "script-tests", "telemetry-contract",
-    "flagd-contract", "service-tests", "lint-dockerfiles", "spec-gate", "validate",
+    "flagd-contract", "service-tests", "flagsmith-service-tests", "lint-dockerfiles", "spec-gate", "validate",
     "integration-test", "docker-build", "docker-build-extra", "docker-build-merge",
     "docker-build-extra-merge", "retag-skipped",
 }

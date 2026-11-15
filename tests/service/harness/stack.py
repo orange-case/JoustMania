@@ -33,14 +33,14 @@ from .agent import AgentProcess
 from .fake_audio import FakeAudio
 from .fakes.claude import API_KEY as FAKE_CLAUDE_API_KEY
 from .fakes.claude import FakeClaude
-from .fakes.flagsmith import FakeFlagsmith
+from .fakes.flagsmith import FakeFlagsmith, registry_features
 from .fakes.github import FakeGitHub
 from .fakes.jev import API_KEY as FAKE_JEV_API_KEY
 from .fakes.jev import FakeJev
 from .fakes.openai import API_KEY as FAKE_OPENAI_API_KEY
 from .fakes.openai import FakeOpenAI
 from .fakes.otlp import OtlpSink
-from .flag_plane import FlagPlane
+from .flag_plane import FLAG_SERVICE_SRC, FlagPlane
 from .processes import PyService, ServiceStartError, free_port
 
 # Compose name -> (source dir under services/, compose gRPC port, compose OTEL_SERVICE_NAME).
@@ -97,6 +97,11 @@ class Composition:
     # is turned on against (FLAGSMITH_LINK=on and the fake's URLs and dummy keys, #2591).
     # Off by default: every other composition runs with the link off, as compose does.
     fake_flagsmith: bool = False
+    # The fake Flagsmith already holds every registry flag as a feature, with its flag-set tag,
+    # before the flag service starts (as after an earlier start): the start creates nothing and
+    # the link is online in seconds, not after ~130 creations at 5/s (#2592). FR-214's creation
+    # is tested without it (test_flagsmith_link.py).
+    fake_flagsmith_preseed: bool = False
     # Extra env for the agent process, applied last (e.g. a test-only ceiling).
     agent_env: Mapping[str, str] = field(default_factory=dict)
     # Agent-set flag overlays served before the agent starts, so its first tick already reads
@@ -119,6 +124,8 @@ class Composition:
             raise ValueError("fake_jev=True needs agent=True")
         if self.fake_github and not self.agent:
             raise ValueError("fake_github=True needs agent=True")
+        if self.fake_flagsmith_preseed and not self.fake_flagsmith:
+            raise ValueError("fake_flagsmith_preseed=True needs fake_flagsmith=True")
         unknown = set(self.services) - set(SERVICES)
         if unknown:
             raise ValueError(f"unknown services {sorted(unknown)}; known: {sorted(SERVICES)}")
@@ -214,6 +221,8 @@ class ServiceStack:
         if self.fake_github is not None:
             self.fake_github.start()
         if self.fake_flagsmith is not None:
+            if self.composition.fake_flagsmith_preseed:
+                self.fake_flagsmith.preseed(registry_features(FLAG_SERVICE_SRC / "registry.yaml"))
             self.fake_flagsmith.start()
         plane = self.flag_plane
         plane.start()
