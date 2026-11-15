@@ -31,11 +31,15 @@ func TestEncodeDecode(t *testing.T) {
 		if err != nil || fv.Type != TypeUnicode || string(fv.Value) != `"slow"` {
 			t.Fatalf("got %+v %v", fv, err)
 		}
-		if fv, _ := Encode(variants, sens, Value{}); string(fv.Value) != `"mid"` {
-			t.Fatalf("absent encodes %s, want the default mid", fv.Value)
+		if v, raw, ferr := Decode(variants, sens, fv); ferr != nil || v != "slow" || raw != nil {
+			t.Fatalf("decode %q %s %v, want the variant slow", v, raw, ferr)
 		}
-		if v, raw, ferr := Decode(variants, sens, fv); ferr != nil || v != "mid" || raw != nil {
-			t.Fatalf("decode %q %s %v", v, raw, ferr)
+		absent, err := Encode(variants, sens, Value{})
+		if err != nil || string(absent.Value) != `"mid"` {
+			t.Fatalf("absent encodes %s %v, want the default mid", absent.Value, err)
+		}
+		if v, raw, ferr := Decode(variants, sens, absent); ferr != nil || v != "mid" || raw != nil {
+			t.Fatalf("decode %q %s %v, want the variant mid", v, raw, ferr)
 		}
 	})
 	t.Run("UC-054/A4 integer range is int, float range decimal text", func(t *testing.T) {

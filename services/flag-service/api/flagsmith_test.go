@@ -2,13 +2,84 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/joustmania/flag-service/flagsmith"
+	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
 	"github.com/joustmania/flag-service/fserr"
 	"github.com/joustmania/flag-service/state"
 )
+
+// UC: UC-054 A1
+// /healthz does not depend on the link (services.md §7.3): an unreachable
+// Flagsmith leaves the link offline and the service healthy.
+func TestHealthzWhileLinkOffline(t *testing.T) {
+	t.Run("UC-054/A1 /healthz is 200 while the link is offline", func(t *testing.T) {
+		e := newEnv(t, true)
+		f := flagsmithtest.New(t)
+		f.Fail(http.StatusBadGateway)
+		cfg := flagsmith.Config{
+			Enabled: true, APIURL: f.URL(), DocumentURL: f.URL(),
+			ServerKey: "ser.testkey", AdminKey: "testadminkey", EnvironmentKey: "envkey", ProjectID: 1,
+			Poll: flagsmith.DefaultPoll, PushRate: flagsmith.DefaultPushRate, Timeout: flagsmith.DefaultTimeout,
+		}
+		// The backoff sleep waits for the end of the test: the link stays offline.
+		sleep := func(ctx context.Context, _ time.Duration) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		a := &API{State: e.st, Metrics: e.api.Metrics, Tracer: e.api.Tracer, Links: e.links}
+		link, err := flagsmith.New(cfg, flagsmith.Deps{State: e.st, Writer: a, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Sleep: sleep})
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.Flagsmith = link
+		e.st.SetObserver(link)
+		srv := httptest.NewServer(a.Handler())
+		t.Cleanup(srv.Close)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			link.Run(ctx)
+			close(done)
+		}()
+		t.Cleanup(func() {
+			cancel()
+			<-done
+		})
+		deadline := time.Now().Add(5 * time.Second)
+		for link.Mode() != flagsmith.ModeOffline {
+			if time.Now().After(deadline) {
+				t.Fatalf("link %s, want offline", link.Mode())
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		get := func(path string) (int, map[string]any) {
+			resp, err := http.Get(srv.URL + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			out := map[string]any{}
+			_ = json.NewDecoder(resp.Body).Decode(&out)
+			return resp.StatusCode, out
+		}
+		if s, body := get("/healthz"); s != http.StatusOK || body["status"] != "ok" {
+			t.Fatalf("GET /healthz %d %v while the link is offline, want 200 ok", s, body)
+		}
+		s, body := get("/state")
+		fs, _ := body["flagsmith"].(map[string]any)
+		if s != http.StatusOK || fs["link"] != "offline" || fs["offline_reason"] != "http_502" {
+			t.Fatalf("GET /state %d flagsmith %v, want offline http_502", s, fs)
+		}
+	})
+}
 
 // UC: UC-053 BR-002
 // The writer label "flagsmith" is reserved for the Flagsmith link

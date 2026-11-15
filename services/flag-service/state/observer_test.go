@@ -20,7 +20,7 @@ func (r *recorder) take() []Change {
 	return out
 }
 
-func observed(t *testing.T, o fixtureOpts) (*fixture, *recorder) {
+func observedFixture(t *testing.T, o fixtureOpts) (*fixture, *recorder) {
 	t.Helper()
 	f := newFixture(t, o)
 	rec := &recorder{}
@@ -45,7 +45,7 @@ func wantOne(t *testing.T, got []Change, kind ChangeKind, flag string) Change {
 // holds now, in order, and paths that change nothing report nothing.
 func TestObserver_MutationPaths(t *testing.T) {
 	t.Run("UC-055/BR-001 a stack Put reports the value in force with its writer and version", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		res := f.put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev", Writer: "stage"})
 		c := wantOne(t, rec.take(), ChangeValue, "decision.backend")
 		if c.ScopeName != registry.ScopeStack || c.Writer != "stage" || c.DeclaredVariant != "jev" || c.Version != res.SnapshotVersion {
@@ -56,7 +56,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 two Puts are reported in order", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		f.put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev", Writer: "a"})
 		f.put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "rules", Writer: "b"})
 		got := rec.take()
@@ -65,7 +65,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 a dry run, a rejected write and a no-op clear report nothing", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		if _, err := f.state.Put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev", DryRun: true}); err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +80,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 clearing the stack overlay above an admin value reports the admin value with its writer", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
+		f, rec := observedFixture(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, Writer: "menu"})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Writer: "stage"})
 		rec.take()
@@ -93,7 +93,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 an expired stack overlay above an admin value reports the admin value", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
+		f, rec := observedFixture(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, Writer: "menu"})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Writer: "stage", TTLSeconds: ttl(1)})
 		rec.take()
@@ -107,7 +107,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 DELETE /{set}?writer= reports each cleared overlay with the selector", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		f.put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev", Writer: "stage"})
 		rec.take()
 		if _, err := f.state.ClearWriter("agent", "stage"); err != nil {
@@ -119,7 +119,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 a fraction write carries its percent", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		f.put(WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: f.anyVariant("bluetooth_backend"), Scope: Scope{FractionPercent: intp(10)}, Writer: "proxy"})
 		c := wantOne(t, rec.take(), ChangeValue, "bluetooth_backend")
 		if c.ScopeName != registry.ScopeFraction || c.Scope.FractionPercent == nil || *c.Scope.FractionPercent != 10 {
@@ -127,7 +127,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 an append reports the event list, a clear reports an empty list", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		f.register("game_a", "c1", "MOCK0001")
 		rec.take()
 		if _, err := f.state.Append(AppendRequest{Set: "interventions", Flag: "audio_cue", Scope: Scope{GameID: "game_a"}, Payload: map[string]any{"sound": "agent_cue"}, Writer: "agent"}); err != nil {
@@ -146,7 +146,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 a game end reports one ChangeGameEnded with the game, even with no values", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		f.register("game_a", "c1", "MOCK0001")
 		c := wantOne(t, rec.take(), ChangeGameRegistered, "")
 		if c.Game == nil || c.Game.ID != "game_a" || c.Prev != nil {
@@ -159,7 +159,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 a reconcile refresh reports nothing, a serial drop reports the dropped value", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		f.register("game_a", "c1", "MOCK0001", "MOCK0002")
 		f.put(WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("5"), Scope: Scope{GameID: "game_a", Serial: "MOCK0002"}})
 		rec.take()
@@ -176,7 +176,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/BR-001 experiment expiry reports each arm value cleared, then the arm ended", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Scope: Scope{ExperimentID: "exp_1", Arm: "control"}})
 		rec.take()
 		f.clock.Advance(DefaultExperimentIdle)
@@ -190,7 +190,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 	})
 	t.Run("UC-055/BR-001 a failed persisted write that rolls back reports nothing, a kill switch reports its in-memory value", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "admin.json")
-		f, rec := observed(t, fixtureOpts{stateFile: path})
+		f, rec := observedFixture(t, fixtureOpts{stateFile: path})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true})
 		breakStateFile(t, path)
 		rec.take()
@@ -219,7 +219,7 @@ func TestObserver_MutationPaths(t *testing.T) {
 // between makes it 412 slot_changed and nothing changes (opposer blocker 2).
 func TestSlotVersion_CompareAndSet(t *testing.T) {
 	t.Run("UC-054/BR-005 a local kill switch between read and write wins", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{})
+		f, rec := observedFixture(t, fixtureOpts{})
 		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "menu"})
 		cs, _ := f.state.Changes()
 		read := findChange(t, cs, "enabled", registry.ScopeStack)
@@ -235,7 +235,7 @@ func TestSlotVersion_CompareAndSet(t *testing.T) {
 		}
 	})
 	t.Run("UC-054/BR-005 an unchanged slot takes the write; a clear and an append check it too", func(t *testing.T) {
-		f, _ := observed(t, fixtureOpts{})
+		f, _ := observedFixture(t, fixtureOpts{})
 		cs, _ := f.state.Changes()
 		read := findChange(t, cs, "enabled", registry.ScopeStack)
 		res, err := f.state.Put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", IfSlotVersion: read.SlotVersion})
@@ -249,7 +249,7 @@ func TestSlotVersion_CompareAndSet(t *testing.T) {
 		wantReason(t, err, 412, fserr.SlotChanged)
 	})
 	t.Run("UC-054/BR-005 StackAll clears overlay and admin value in one change", func(t *testing.T) {
-		f, rec := observed(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
+		f, rec := observedFixture(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, Writer: "menu"})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Writer: "stage"})
 		rec.take()
