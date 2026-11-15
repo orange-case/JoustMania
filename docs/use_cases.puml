@@ -9,6 +9,7 @@ actor "Agent" as agent
 actor "Maintainer" as maintainer
 actor "Model API" as modelapi
 actor "GitHub" as github
+actor "Flagsmith" as flagsmith
 
 rectangle "JoustMania" {
     package "Pairing & controllers" {
@@ -56,6 +57,8 @@ rectangle "JoustMania" {
         usecase "UC-051\nRoll Back Automatically on Degradation\n(parked)" as UC051
         usecase "UC-052\nCanary a Backend by Hand\n(parked)" as UC052
         usecase "UC-053\nChange a Runtime Flag through the Flag Service" as UC053
+        usecase "UC-054\nManage Runtime Flags from Hosted Flagsmith" as UC054
+        usecase "UC-055\nSee Runtime Flag Changes in Flagsmith" as UC055
     }
     package "Operations" {
         usecase "UC-060\nOperate the Stage Pi" as UC060
@@ -153,6 +156,15 @@ UC015 ..> UC013 : <<include>>
 UC015 ..> UC014 : <<include>>
 UC015 ..> UC027 : <<include>>
 UC015 ..> UC053 : <<include>>
+operator --> UC054
+presenter --> UC054
+UC054 --> flagsmith
+UC054 ..> UC053 : <<include>>
+operator --> UC055
+presenter --> UC055
+UC055 --> flagsmith
+host --> UC055
+agent --> UC055
 
 note right of maintainer
   Reviews tier-3 proposals
