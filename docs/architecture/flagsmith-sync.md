@@ -122,6 +122,8 @@ entity.
    `(set, key, scope)` into `pending`, replacing an older pending entry (merge, BR-001 of UC-055).
 2. One sender goroutine drains `pending` in order of first change, at most `FLAGSMITH_PUSH_RATE` requests per
    second (default 5), and stops on `429` for the `Retry-After` the API answers.
+   It wakes on every queued value: a local write (step 1) and the end of a pull round that queued one (§4.2,
+   §6 push rows; once per round, #2608).
 3. Stack value: `PATCH /api/__future__/environments/{env_key}/features/{feature_id}/` with
    `{"environment_default": {"enabled": …, "value": {"type": "string|integer|boolean", "value": "<text>"}}}` (the
    experimental flag API, `api/features/future/serializers.py` `UpdateFlagSerializer`; the inner `value` is always

@@ -483,6 +483,16 @@ func (l *Link) Wake() {
 // WakeC is the channel Wake feeds (capacity 1).
 func (l *Link) WakeC() <-chan struct{} { return l.wake }
 
+// wakeOut asks the out side to send what a pull round queued, the wake the
+// observer path uses (non-blocking, #2608). While the out side does not run
+// (the start and reconnect rounds run before it) the wake is kept: Run sends
+// whatever is pending first anyway, so it costs no request.
+func (l *Link) wakeOut() {
+	if o, ok := l.out.(*out); ok {
+		o.poke()
+	}
+}
+
 // SetRestartReport records the restart rule the start sequence chose and the
 // author of each Flagsmith value it found (a copy is kept). The values it
 // cleared are the AuthorAPIKey entries.

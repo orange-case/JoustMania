@@ -392,6 +392,9 @@ type roundCtx struct {
 	// accepted after the refusal timeout; kill switches merge without their
 	// remote value (more restrictive wins).
 	staleAccepted bool
+	// queued: the round queued at least one local value to send (offer);
+	// the round wakes the out side once at its end (#2608).
+	queued bool
 }
 
 // skip leaves a key for the next round, which pulls in full.
@@ -490,6 +493,12 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	_, attribution, _ := l.RestartReport()
 	for _, k := range keys {
 		p.reconcileKey(rc, k, d, local, start, attribution)
+	}
+	// A value the round queued is sent now, not with the next local write
+	// (#2608): one wake per round, none when every offer was held back (a
+	// refused value, an existing pending entry).
+	if rc.queued {
+		l.wakeOut()
 	}
 
 	// Last-Modified (§4.2 step 8): advance only to the document's own update
@@ -884,7 +893,11 @@ func (p *puller) offer(rc *roundCtx, k Key, le localEntry) bool {
 	if le.slot != 0 && p.slotVersion(k, le.v) != le.slot {
 		return false
 	}
-	return p.l.links.Reoffer(k, le.v, rc.now, le.version)
+	if !p.l.links.Reoffer(k, le.v, rc.now, le.version) {
+		return false
+	}
+	rc.queued = true
+	return true
 }
 
 // markSegments keeps one health entry per synced feature with a segment
