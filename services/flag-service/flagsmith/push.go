@@ -300,12 +300,12 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 	}
 	featureID, haveFeature := l.featureID(k)
 	if !haveFeature {
-		l.Links().Refuse(k, SideRemote, ReasonNotFound)
+		o.refuseUnsent(ctx, k, v, merged, version, ReasonNotFound)
 		return true, nil
 	}
 	fv, encErr := l.encodeFor(k, v)
 	if encErr != nil {
-		l.Links().Refuse(k, SideRemote, "bad_value")
+		o.refuseUnsent(ctx, k, v, merged, version, ReasonBadValue)
 		return true, nil
 	}
 	if err := o.pace(ctx); err != nil {
@@ -320,6 +320,12 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 	})
 	switch {
 	case oc.err != nil:
+		if ctx.Err() == nil {
+			// The link goes down on this key. Keep it pending but move it to
+			// the back, so a key that always fails does not stay first after
+			// every reconnect and starve the others.
+			l.Links().Retry(k, l.Now().Add(defaultRetryWait))
+		}
 		return false, oc.err
 	case oc.wait > 0:
 		return true, l.Sleep(ctx, oc.wait)
@@ -327,7 +333,25 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 		l.Links().ConfirmPushed(k, v)
 		l.Links().ClearRefusal(k)
 	default:
-		l.Links().Refuse(k, SideRemote, oc.reason)
+		// Refuse the value that was pushed: a newer one merged meanwhile
+		// stays pending.
+		l.Links().RefuseValue(k, v, SideRemote, oc.reason)
 	}
 	return true, nil
+}
+
+// refuseUnsent refuses v of k without a request (its feature id is unknown, or
+// the value cannot be encoded) and records the push like a refused call: one
+// pushes_total point and one push span.
+func (o *out) refuseUnsent(ctx context.Context, k Key, v Value, merged int, version uint64, reason string) {
+	l := o.l
+	var link trace.SpanContext
+	if sc, found := l.WriteSpanContext(version); found {
+		link = sc
+	}
+	op := valueOp(k, v)
+	_, span := StartPush(ctx, l.Tracer(), k, op, v.Writer, merged, link)
+	l.Metrics().RecordPush(ctx, op, ResultRejected, reason)
+	EndSpan(span, ResultRejected, reason)
+	l.Links().RefuseValue(k, v, SideRemote, reason)
 }

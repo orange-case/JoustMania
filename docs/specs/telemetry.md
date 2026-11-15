@@ -533,7 +533,7 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 |---|---|---|---|
 | `flagservice_flagsmith_link` | gauge | `state` | 1 for the current link state (`off`, `starting`, `online`, `offline`), 0 for the others |
 | `flagservice_flagsmith_pulls_total` | counter | `trigger`, `result` | environment-document fetches; `result` = `changed`, `not_modified`, `error` |
-| `flagservice_flagsmith_pushes_total` | counter | `op`, `result`, `reason` | Admin API calls; `reason` on refusals (`change_request_required`, `not_found`, `unauthorized`, `rate_limited`, `timeout`) |
+| `flagservice_flagsmith_pushes_total` | counter | `op`, `result`, `reason` | Admin API calls; `reason` on refusals (`change_request_required`, `not_found`, `bad_value`, `unauthorized`, `rate_limited`, `timeout`) |
 | `flagservice_flagsmith_pending` | gauge | | local values waiting to be sent |
 | `flagservice_flagsmith_out_of_sync` | gauge | | flags and scopes whose value differs between the stack and Flagsmith |
 | `flagservice_flagsmith_conflicts_total` | counter | `resolution` | conflicts in any pull or reconcile round (FR-210) |

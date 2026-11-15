@@ -714,3 +714,137 @@ func TestSpanWriterLabel(t *testing.T) {
 		t.Fatalf("UC-055/main span links %v, want one to the write span", links)
 	}
 }
+
+// UC: UC-055 BR-003
+// A game that ends while the create request of its identity is on the wire
+// still gets the identity deleted: the entry turns into a delete, it is not
+// dropped.
+func TestGameEndsWhileCreateInFlight(t *testing.T) {
+	e := newOutEnv(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	e.setOn(http.MethodPost, apiEnv+"edge-identities/", func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		writeJSON(w, http.StatusCreated, `{"identity_uuid":"`+uuidOf("game:g1")+`"}`)
+	})
+	g := gameOf("g1", "real")
+	e.out.Changed(e.registered(g, nil))
+	r := e.start()
+	<-started
+	e.out.Changed(e.ended(g))
+	close(release)
+	waitFor(t, "the out side to go idle", e.idle)
+	if err := r.stop(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run: %v", err)
+	}
+	if n := e.count(http.MethodDelete, apiEnv+"edge-identities/"+uuidOf("game:g1")+"/"); n != 1 {
+		t.Fatalf("UC-055/BR-003 %d deletes of the identity created while the game ended, want 1", n)
+	}
+}
+
+// UC: UC-055 A4
+// A refusal drops the value that was pushed, not a newer one merged while the
+// request was in flight: the newer value is pushed next.
+func TestRefusalKeepsNewerValue(t *testing.T) {
+	e := newOutEnv(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	e.setOn(http.MethodPatch, e.futurePath("decision.backend"), func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+			writeJSON(w, http.StatusBadRequest, `{"detail":"bad"}`)
+			return
+		}
+		writeJSON(w, http.StatusOK, `{}`)
+	})
+	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
+	r := e.start()
+	<-started
+	e.out.Changed(e.stack("decision.backend", "claude", `"claude"`))
+	close(release)
+	waitFor(t, "the out side to go idle", e.idle)
+	_ = r.stop()
+	bodies := e.bodies(http.MethodPatch, e.futurePath("decision.backend"))
+	if len(bodies) != 2 || !strings.Contains(bodies[1], "claude") {
+		t.Fatalf("UC-055/A4 PATCH bodies %v, want the refused jev then the newer claude", bodies)
+	}
+	if pending, _, _ := e.link.Links().Counts(); pending != 0 {
+		t.Fatalf("UC-055/A4 pending %d, want 0", pending)
+	}
+}
+
+// UC: UC-055 A4
+// NFR: NFR-057
+// A refusal without a request (feature id unresolved, value that cannot be
+// encoded) is counted and traced like any refused push, with a reason of
+// telemetry.md §10.4.
+func TestRefusalWithoutRequestRecorded(t *testing.T) {
+	e := newOutEnv(t)
+	kn := Key{Set: "agent", Flag: "decision.backend", Scope: ScopeStack}
+	kb := Key{Set: "agent", Flag: "decision.min_interval_ms", Scope: ScopeStack}
+	delete(e.link.IDs().FeatureID, "decision.backend")
+	e.link.Links().Offer(kn, Value{Present: true, Variant: "jev", Value: json.RawMessage(`"jev"`)}, e.clk.Now(), 1)
+	e.link.Links().Offer(kb, Value{Present: true}, e.clk.Now(), 2)
+	e.drain()
+	if n := len(e.fake.Requests()); n != 0 {
+		t.Fatalf("UC-055/A4 %d requests, want 0", n)
+	}
+	for _, reason := range []string{ReasonNotFound, ReasonBadValue} {
+		if n := e.pushes(reason); n != 1 {
+			t.Fatalf("UC-055/A4 %d pushes_total points with reason %q, want 1", n, reason)
+		}
+	}
+	if n := len(e.pushSpans()); n != 2 {
+		t.Fatalf("UC-055/A4 %d push spans, want 2", n)
+	}
+	if r, _ := e.link.Links().Refusal(kb); r != ReasonBadValue {
+		t.Fatalf("UC-055/A4 refusal %q, want bad_value", r)
+	}
+}
+
+// UC: UC-055 A2
+// A player that left the game loses its keys with the identity: no override
+// request runs after the identity delete.
+func TestRemovedSerialKeysForgotten(t *testing.T) {
+	e := newOutEnv(t)
+	both, onlyA := gameOf("g1", "real", "A", "B"), gameOf("g1", "real", "A")
+	e.out.Changed(e.registered(both, nil))
+	e.drain()
+	kb := Key{Set: "interventions", Flag: "player_sensitivity_factor", Scope: "game:g1:B"}
+	e.link.Links().Offer(kb, Value{Writer: "menu"}, e.clk.Now(), 9)
+	e.out.Changed(e.registered(onlyA, both))
+	e.drain()
+	if n := e.count(http.MethodDelete, apiEnv+"edge-identities-featurestates"); n != 0 {
+		t.Fatalf("UC-055/A2 %d override deletes for a removed player, want 0", n)
+	}
+	if n := e.count(http.MethodDelete, apiEnv+"edge-identities/"+uuidOf("game:g1:B")+"/"); n != 1 {
+		t.Fatalf("UC-055/A2 %d identity deletes of the removed player, want 1", n)
+	}
+	for _, k := range e.link.Links().Keys() {
+		if k.Scope == "game:g1:B" {
+			t.Fatalf("UC-055/A2 key %v of the removed player still known", k)
+		}
+	}
+}
+
+// UC: UC-055 A4
+// A key whose push keeps failing does not stay first in the queue: after the
+// link comes back, the other keys are pushed before it is tried again.
+func TestFailingKeyDoesNotBlockQueue(t *testing.T) {
+	e := newOutEnv(t)
+	e.setOn(http.MethodPatch, e.futurePath("decision.backend"), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusInternalServerError, `{}`)
+	})
+	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
+	e.out.Changed(e.stack("decision.min_interval_ms", "", `2500`))
+	r := e.start()
+	if err := r.wait(); err == nil {
+		t.Fatal("UC-055/A4 Run ended without an error, want the link down on the 5xx")
+	}
+	r = e.start()
+	waitFor(t, "the second key to be pushed", func() bool {
+		return e.count(http.MethodPatch, e.futurePath("decision.min_interval_ms")) == 1
+	})
+	_ = r.stop()
+}

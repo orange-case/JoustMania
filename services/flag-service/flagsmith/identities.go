@@ -24,8 +24,11 @@ type identityWant struct {
 	// generation does not touch the entry.
 	gen     uint64
 	created bool
-	uuid    string
-	traits  []trait
+	// inflight: the create request is on the wire (Start). A game that ends
+	// meanwhile must still delete the identity that request creates.
+	inflight bool
+	uuid     string
+	traits   []trait
 }
 
 // identityOp is the next step for one identity.
@@ -80,12 +83,23 @@ func (q *identityQueue) Want(identifier string, present bool, traits []trait) {
 	case w.present == present:
 	case present:
 		q.gen++
-		w.present, w.gen, w.created, w.uuid, w.traits = true, q.gen, false, "", traits
-	case !w.created:
+		w.present, w.gen, w.created, w.inflight, w.uuid, w.traits = true, q.gen, false, false, "", traits
+	case !w.created && !w.inflight:
 		q.removeLocked(identifier)
 	default:
+		// Created, or being created right now: the identity exists or will,
+		// so the entry becomes a delete (never dropped).
 		q.gen++
-		w.present, w.gen, w.traits = false, q.gen, nil
+		w.present, w.gen, w.inflight, w.traits = false, q.gen, false, nil
+	}
+}
+
+// Start marks the create request of op as on the wire.
+func (q *identityQueue) Start(op identityOp) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if w := q.current(op); w != nil && op.Present && !op.Created {
+		w.inflight = true
 	}
 }
 
@@ -168,6 +182,7 @@ func (o *out) identityStep(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	var oc outcome
+	o.ids.Start(op)
 	switch {
 	case !op.Present:
 		oc = o.deleteIdentity(ctx, op)

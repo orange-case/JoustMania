@@ -91,7 +91,10 @@ func (o *out) gameRegistered(c state.Change) {
 	if c.Prev != nil {
 		for _, s := range c.Prev.Serials {
 			if !slices.Contains(g.Serials, s) {
-				o.ids.Want("game:"+g.ID+":"+s, false, nil)
+				id := "game:" + g.ID + ":" + s
+				// No override request after the identity is gone.
+				o.l.Links().ForgetIdentity(id)
+				o.ids.Want(id, false, nil)
 			}
 		}
 	}
