@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -398,7 +399,10 @@ func (b *syncBuffer) String() string {
 	return b.Buffer.String()
 }
 
-func newStartEnv(t *testing.T) *startEnv {
+func newStartEnv(t *testing.T) *startEnv { return newStartEnvHTTP(t, nil) }
+
+// newStartEnvHTTP is newStartEnv with Deps.HTTPClient set (nil: the default).
+func newStartEnvHTTP(t *testing.T, hc *http.Client) *startEnv {
 	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(file), "..")
@@ -418,7 +422,7 @@ func newStartEnv(t *testing.T) *startEnv {
 	clk := newStartClock()
 	logs := &syncBuffer{}
 	cfg := testConfig(a.f)
-	l, err := New(cfg, Deps{State: st, Logger: slog.New(slog.NewTextHandler(logs, nil)), Now: clk.Now, Sleep: clk.Sleep})
+	l, err := New(cfg, Deps{State: st, Logger: slog.New(slog.NewTextHandler(logs, nil)), Now: clk.Now, Sleep: clk.Sleep, HTTPClient: hc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -773,6 +777,21 @@ func TestStartCreatesFeatures(t *testing.T) {
 			t.Fatalf("backend still refused %q after the re-run found it usable", r)
 		}
 	})
+	t.Run("UC-054/A3 a local refusal survives a re-run: only remote start refusals are cleared", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.allFeaturesExist()
+		e.l.Links().Refuse(kBackend, SideLocal, ReasonFeatureNameCase)
+		e.l.Links().Refuse(kTick, SideRemote, ReasonFeatureNameCase)
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if r, side := e.l.Links().Refusal(kBackend); r != ReasonFeatureNameCase || side != SideLocal {
+			t.Fatalf("local refusal now %q %q, want it kept by the re-run", r, side)
+		}
+		if r, _ := e.l.Links().Refusal(kTick); r != "" {
+			t.Fatalf("remote start refusal %q survived the re-run that found the feature", r)
+		}
+	})
 }
 
 // UC: UC-054 A3 BR-006
@@ -1037,6 +1056,50 @@ func TestStartRestartRule(t *testing.T) {
 			t.Fatalf("decision.backend remote generation %d, want seeded exactly once", g)
 		}
 	})
+	t.Run("UC-054/A3 a cancel right after the audit was answered seeds nothing (O7, deterministic)", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		hc := &http.Client{Transport: cancelAfterAudit{cancel: cancel}}
+		e := newStartEnvHTTP(t, hc)
+		e.allFeaturesExist()
+		e.admin.f.SetDocument(doc, "")
+		e.admin.audit = rows
+		err := e.s.Start(ctx)
+		if err == nil {
+			t.Fatal("Start passed although it was cancelled after the audit answered")
+		}
+		if ctx.Err() == nil {
+			t.Fatal("the audit request never ran, the guard was not exercised")
+		}
+		for _, k := range e.l.Links().Keys() {
+			if _, ok := e.l.Links().Remote(k); ok {
+				t.Fatalf("%v seeded by a start cancelled after its audit", k)
+			}
+		}
+		if _, _, ok := e.l.RestartReport(); ok {
+			t.Fatal("restart report recorded by a start cancelled after its audit")
+		}
+	})
+}
+
+// cancelAfterAudit answers every request for real and, for the audit log,
+// reads the whole response, cancels the start's context and only then hands
+// the (complete) response back: answered, then cancelled.
+type cancelAfterAudit struct{ cancel context.CancelFunc }
+
+func (c cancelAfterAudit) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil || !strings.Contains(req.URL.Path, "/audit/") {
+		return resp, err
+	}
+	body, rerr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if rerr != nil {
+		return nil, rerr
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	c.cancel()
+	return resp, nil
 }
 
 // UC: UC-054 A3
