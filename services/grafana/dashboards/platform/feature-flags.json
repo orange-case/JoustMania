@@ -2407,6 +2407,7 @@
             "uid": "prometheus"
           },
           "expr": "max by (state) (flagservice_flagsmith_link) == 1",
+          "instant": true,
           "refId": "A",
           "legendFormat": "{{state}}"
         }

@@ -326,3 +326,25 @@ def test_step6_every_latency_panel_reads_a_histogram():
         assert re.search(r"_bucket\b", expr), (
             f"{name}: quantile without a histogram: {expr}"
         )
+
+
+@pytest.mark.uc("UC-054", cond=["Post-S-3"])
+def test_flagsmith_link_state_stat_is_an_instant_query():
+    """The link-state stat shows only the current state: a range query would keep every state that was 1 in the range."""
+    for path in (DASHBOARDS / "platform").glob("*.json"):
+        dash = json.loads(path.read_text())
+        if dash["uid"] != "feature-flags":
+            continue
+        found = []
+
+        def walk(panels):
+            for p in panels:
+                if p.get("title") == "Flagsmith link state":
+                    found.append(p)
+                walk(p.get("panels", []))
+
+        walk(dash["panels"])
+        assert len(found) == 1, "expected one 'Flagsmith link state' panel"
+        assert found[0]["targets"] and all(t.get("instant") is True for t in found[0]["targets"])
+        return
+    raise AssertionError("no feature-flags dashboard")
