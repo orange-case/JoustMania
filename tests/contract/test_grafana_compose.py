@@ -11,15 +11,20 @@ neither downloads from grafana.com nor grows memory for plugins nobody uses.
 from __future__ import annotations
 
 import infra_config as ic
+import pytest
 
 
 def _environment(service: dict) -> dict[str, str]:
     env = service.get("environment") or {}
     if isinstance(env, dict):
         return {k: str(v) for k, v in env.items()}
-    return dict(item.split("=", 1) for item in env)
+    # A pass-through entry ("- GF_FOO", no "=") takes its value from the host: unset here.
+    return {
+        key: value for key, sep, value in (item.partition("=") for item in env) if sep
+    }
 
 
+@pytest.mark.uc("UC-035", flow="main", steps=[6])
 def test_grafana_disables_the_preinstalled_plugin_installer():
     env = _environment(ic.compose_services()["grafana"])
     assert env.get("GF_PLUGINS_PREINSTALL_DISABLED", "").lower() == "true", (
