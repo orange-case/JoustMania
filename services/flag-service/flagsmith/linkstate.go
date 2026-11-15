@@ -225,7 +225,10 @@ func (s *LinkState) Retry(k Key, notBefore time.Time) {
 
 // ConfirmPushed records that Flagsmith accepted v for k: v is the remote value
 // now, and the pending entry goes unless a newer local value replaced it
-// meanwhile. A key forgotten meanwhile (game end) is ignored.
+// meanwhile. It ends the refusal and the refused value, unless the local value
+// went back to that refused value while v was in flight (heldLocalLocked): the
+// key then stays refused and out of sync. A key forgotten meanwhile (game end)
+// is ignored.
 func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -236,6 +239,10 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	e.remote, e.hasRemote = v, true
 	e.gen++
 	e.confirmedAt = s.now()
+	if heldLocalLocked(e, v) {
+		e.inSync = false
+		return
+	}
 	e.refused, e.side = "", ""
 	e.pushRefused, e.hasPushRefused = Value{}, false
 	if e.pending != nil && e.pending.value.Equal(v) {
@@ -392,11 +399,25 @@ func (s *LinkState) RefuseValue(k Key, v Value, side Side, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e := s.entries[k]; e != nil {
+		held := side == SideRemote && heldLocalLocked(e, v)
 		s.refuseLocked(k, e, v, side, reason)
-		if side == SideRemote {
+		if side == SideRemote && !held {
 			e.pushRefused, e.hasPushRefused = v, true
 		}
 	}
+}
+
+// heldLocalLocked reports whether e's local value is its refused value and
+// differs from v, the value a push outcome refers to. With no pending entry a
+// held refused value is the local value: a pending entry goes only by a local
+// value equal to the remote one (which ends the refused value too), by an
+// Offer of the refused value, or by the outcome of a push of its own value
+// (which makes that value the held one or ends it). So a confirmed or refused
+// v that differs from the held value was in flight when the operator went back
+// to the refused value: its outcome must neither end nor replace the held
+// value (UC-055 A4).
+func heldLocalLocked(e *entry, v Value) bool {
+	return e.pending == nil && e.hasPushRefused && !e.pushRefused.Equal(v)
 }
 
 func (s *LinkState) refuseLocked(k Key, e *entry, v Value, side Side, reason string) {

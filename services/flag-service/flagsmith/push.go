@@ -330,8 +330,9 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 	case oc.wait > 0:
 		return true, l.Sleep(ctx, oc.wait)
 	case oc.ok:
+		// ConfirmPushed ends the refusal itself, except while the local
+		// value is the refused one again (no ClearRefusal here, UC-055 A4).
 		l.Links().ConfirmPushed(k, v)
-		l.Links().ClearRefusal(k)
 	default:
 		// Refuse the value that was pushed: a newer one merged meanwhile
 		// stays pending. The refused value is remembered, so no pull round
