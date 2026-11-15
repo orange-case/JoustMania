@@ -755,21 +755,33 @@ value of a row whose scope allows it, and an `event` for a live game (one payloa
 `experiment+arm`, `real` and `fraction` values are shown in Flagsmith and refused when changed there
 (`422 flagsmith_scope_read_only`). A Flagsmith value of a `persist: yes` row is persisted like the menu admin's.
 
-**Kill switches and their order** (UC-054 BR-005, FR-210). On a conflict (both sides changed since the last sync)
+**Kill switches and their order** (UC-054 BR-005, FR-210). On a conflict (both sides changed since the last sync,
+or, without a last state seen from Flagsmith after a restart, any difference between the two values)
 these flags take the more restrictive value; every other flag takes the Flagsmith value.
 
 | Flag | More restrictive first |
 |---|---|
 | `agent/enabled` | `off`, then `on` |
-| `agent/interventions_allowed` | the variant whose allowed actions are a subset of the other's (`none` ⊂ `probe` ⊂ `ambient` ⊂ `standard` ⊂ `full` ⊂ `shadow_experimental`; `standard` ⊂ `standard_group`; `shadow_experimental` ⊂ `shadow_group`), computed from the declared action lists, `noop` counting as no action; when neither contains the other (for example `standard_group` and `full`), the local value stays |
-| `agent/code_improvement.mode` | `issue`, `pr`, `autonomous` |
-| `agent/code_improvement.target` | `local`, then `github` |
-| `agent/llm.max_requests_per_minute`, `agent/decision.claude.max_requests_per_minute`, `agent/decision.openai.max_requests_per_minute` | the lower number; any number before `inherit` |
-| `agent/experiment_proposer_enabled` | `off`, then `on` |
-| `agent/experiment_dynamic_max_concurrent`, `agent/experiment_max_games` | the lower number; a value that means unlimited (`experiment_max_games` `unlimited` = 0) counts as the highest |
+| `agent/interventions_allowed` | the variant whose allowed actions are a subset of the other's (`none` ⊂ `probe` ⊂ `ambient` ⊂ `standard` ⊂ `full` ⊂ `shadow_experimental`; `standard` ⊂ `standard_group`; `shadow_experimental` ⊂ `shadow_group`), computed from the declared action lists, `noop` counting as no action (equal action sets after dropping `noop` are ordered by their raw tokens, so `none` before `probe`); when neither contains the other (for example `standard_group` and `full`), the local value stays |
+| `agent/code_improvement.mode` | `issue`, `pr`, `autonomous`; an unknown value counts as `issue`, as the agent reads it |
+| `agent/code_improvement.target` | `local`, then `github`; an unknown value counts as `local`, as the agent reads it |
+| `agent/llm.max_requests_per_minute` | the lower number; a value ≤ 0 means closed and counts as the lowest (`inherit` does not apply to it) |
+| `agent/decision.claude.max_requests_per_minute`, `agent/decision.openai.max_requests_per_minute` | the lower number; `inherit` (-1) counts as the highest; any other negative value counts as 0, as in the agent |
+| `agent/experiment_proposer_enabled`, `agent/interventions_enabled`, `agent/experiments_enabled`, `rollout/remediation_allowed` | `off`, then `on` |
+| `agent/rollout_enabled` | `off`, then `on` |
+| `agent/experiment_max_games` | the lower number; `unlimited` (0) counts as the highest |
+| `agent/experiment_dynamic_max_concurrent` | the lower number; a value ≤ 0 resolves to the compiled default 3, as in the agent |
+| `agent/code_improvement.min_interval_seconds` | the higher number; a value ≤ 0 counts as the default 300 s, as the agent reads it |
 
-The list is the kill switches of §13 (`registry.killSwitches`) plus the agent-limiting flags of FR-152; a test keeps
-it in sync with FR-152. A deliberate change in Flagsmith, with no local change since the last sync, is applied
+`code_improvement.*` and `experiment_dynamic_max_concurrent` have no row in the mutable-flag registry (§13.2) today,
+so they are not runtime-mutable and not Flagsmith features; their rules keep the table complete for when they get one.
+
+Every value is normalised exactly as the agent reads it before the two are ordered.
+
+The table is the source of truth: `agent/enabled`, the registry kill switch `agent/interventions_allowed`
+(`registry.killSwitches`), the agent-limiting flags of FR-152, and the agent gates `interventions_enabled`,
+`experiments_enabled`, `rollout_enabled` and `rollout/remediation_allowed`; a test keeps the implementation in sync with
+the table. A deliberate change in Flagsmith, with a last sync and no local change since, is applied
 like any write, also when it loosens one; the env ceilings of C-034 still cap the agent-limiting flags.
 
 **Values in Flagsmith** (architecture note §2.1): a declared variant is its name (string); an integer range is an

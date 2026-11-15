@@ -32,7 +32,9 @@ type Client struct {
 
 // NewClient builds a client for cfg. hc (nil: a client with cfg.Timeout) is
 // used for every call but Stream, which keeps hc's transport without a total
-// timeout.
+// timeout. Redirects are never followed (C-016: Go would forward
+// X-Environment-Key to any host and allow an https->http downgrade): a 3xx
+// answer is an HTTPError (http_30x). hc itself is not changed.
 func NewClient(cfg Config, hc *http.Client) *Client {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultTimeout
@@ -48,11 +50,17 @@ func NewClient(cfg Config, hc *http.Client) *Client {
 			ResponseHeaderTimeout: cfg.Timeout,
 		}}
 	} else {
-		c.http = hc
+		cp := *hc
+		c.http = &cp
 		c.stream = &http.Client{Transport: hc.Transport}
 	}
+	c.http.CheckRedirect = noRedirect
+	c.stream.CheckRedirect = noRedirect
 	return c
 }
+
+// noRedirect makes the client return a 3xx answer as it is.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 func orDefault(s, def string) string {
 	if s == "" {

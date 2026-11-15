@@ -90,8 +90,17 @@ func (s *State) Registry() *registry.Registry { return s.reg }
 func (s *State) Baseline() *baseline.Baseline { return s.base }
 
 // firstSlotVersion is the version of a slot no write has touched since start
-// (or since its game or experiment ended). 0 is never a slot version: it is
-// the "no precondition" value of IfSlotVersion.
+// (or since its game ended or its experiment expired). 0 is never a slot
+// version: it is the "no precondition" value of IfSlotVersion.
+//
+// Slot versions (services.md §7.3, compare-and-set): every write, clear,
+// expiry and serial drop of a slot moves its version to the next value of one
+// counter, so a version survives clears and an empty slot can be read and
+// checked like a full one. The versions of a game's slots go when the game
+// ends, those of an experiment's arms when it expires or, with its arm values
+// cleared, when no registered game carries it any more (memory stays bounded,
+// NFR-051): a game registered again under the same id starts at 1 (an
+// experiment slot is read-only to the link).
 const firstSlotVersion = 1
 
 // slotRef returns where a slot's version is kept: the outer key groups the
@@ -107,6 +116,30 @@ func slotRef(f *flagState, scopeName string, sc Scope) (outer, inner string) {
 		return "x:" + sc.ExperimentID, f.key + "\x00" + sc.Arm
 	}
 	return "", f.key + "\x00" + scopeName
+}
+
+// SlotVersion returns the slot version a pulled write passes as
+// IfSlotVersion for the slot (set, flag, scope), empty slots included. It is
+// 0 (no slot) when the flag is not a registry flag of set, the scope
+// properties fit no scope, or a game or game:serial scope names a game that is
+// not registered; any other slot has a version of at least 1.
+func (s *State) SlotVersion(set, flag string, scope Scope) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f := s.flags[flag]
+	if f == nil || f.set != set || f.policy == nil {
+		return 0
+	}
+	scopeName := scope.Name()
+	switch scopeName {
+	case "":
+		return 0
+	case registry.ScopeGame, registry.ScopeGameSerial:
+		if s.games[scope.GameID] == nil {
+			return 0
+		}
+	}
+	return s.slotVersionLocked(f, scopeName, scope)
 }
 
 func (s *State) slotVersionLocked(f *flagState, scopeName string, sc Scope) uint64 {
@@ -140,8 +173,8 @@ func (s *State) slotChangedLocked(f *flagState, scopeName string, sc Scope, writ
 	s.outbox = append(s.outbox, c)
 }
 
-// slotDroppedLocked reports a value removed together with its game serial or
-// experiment (no write of its own) and forgets the slot's version.
+// slotDroppedLocked reports an experiment arm value removed by expiry (no
+// write of its own) and forgets the slot's version: the experiment is gone.
 func (s *State) slotDroppedLocked(f *flagState, scopeName string, sc Scope) {
 	outer, inner := slotRef(f, scopeName, sc)
 	if m := s.slotVer[outer]; m != nil {

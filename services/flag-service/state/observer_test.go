@@ -262,6 +262,116 @@ func TestSlotVersion_CompareAndSet(t *testing.T) {
 			t.Fatalf("change %+v, want cleared by flagsmith", c)
 		}
 	})
+	// services.md §7.3 / UC-054 Pull: every pulled write is conditional on the
+	// local slot, empty slots included (#2594 review finding 2).
+	t.Run("UC-054/BR-005 a value slot cleared locally after the read refuses the pulled Put and Clear", func(t *testing.T) {
+		cases := []struct {
+			name, set, flag string
+			scope           Scope
+			write           WriteRequest
+		}{
+			{"stack", "agent", "enabled", Scope{}, WriteRequest{Variant: "on"}},
+			{"game:<id>", "interventions", "volume_override", Scope{GameID: "game_a"}, WriteRequest{Value: raw("0.5")}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				f, rec := observedFixture(t, fixtureOpts{})
+				f.register("game_a", "c1", "MOCK0001")
+				w := tc.write
+				w.Set, w.Flag, w.Scope, w.Writer = tc.set, tc.flag, tc.scope, "menu"
+				f.put(w)
+				read := f.state.SlotVersion(tc.set, tc.flag, tc.scope)
+				if read <= firstSlotVersion {
+					t.Fatalf("read slot version %d, want a written slot", read)
+				}
+				if _, err := f.state.Clear(ClearRequest{Set: tc.set, Flag: tc.flag, Scope: tc.scope, Writer: "menu"}); err != nil {
+					t.Fatal(err)
+				}
+				if now := f.state.SlotVersion(tc.set, tc.flag, tc.scope); now <= read {
+					t.Fatalf("slot version %d after the clear, want above %d (versions survive clears)", now, read)
+				}
+				rec.take()
+				pulled := tc.write
+				pulled.Set, pulled.Flag, pulled.Scope, pulled.Writer, pulled.IfSlotVersion = tc.set, tc.flag, tc.scope, "flagsmith", read
+				_, err := f.state.Put(pulled)
+				wantReason(t, err, 412, fserr.SlotChanged)
+				_, err = f.state.Clear(ClearRequest{Set: tc.set, Flag: tc.flag, Scope: tc.scope, Writer: "flagsmith", IfSlotVersion: read})
+				wantReason(t, err, 412, fserr.SlotChanged)
+				if got := rec.take(); len(got) != 0 {
+					t.Fatalf("got %+v, want nothing changed", got)
+				}
+				if _, err := f.state.Put(WriteRequest{Set: tc.set, Flag: tc.flag, Scope: tc.scope, Variant: tc.write.Variant, Value: tc.write.Value, Writer: "flagsmith", IfSlotVersion: f.state.SlotVersion(tc.set, tc.flag, tc.scope)}); err != nil {
+					t.Fatalf("a pulled write with the current version of the empty slot: %v", err)
+				}
+			})
+		}
+	})
+}
+
+// UC: UC-054 BR-005
+// State.SlotVersion reads any slot, empty ones included (#2594 F3).
+func TestSlotVersion_Read(t *testing.T) {
+	f := newFixture(t, fixtureOpts{})
+	game := Scope{GameID: "game_a"}
+	serial := Scope{GameID: "game_a", Serial: "MOCK0001"}
+	if v := f.state.SlotVersion("interventions", "volume_override", game); v != 0 {
+		t.Fatalf("version %d of an unregistered game's slot, want 0", v)
+	}
+	f.register("game_a", "c1", "MOCK0001", "MOCK0002")
+	for _, tc := range []struct {
+		set, flag string
+		scope     Scope
+		want      uint64
+	}{
+		{"agent", "enabled", Scope{}, firstSlotVersion},
+		{"interventions", "volume_override", game, firstSlotVersion},
+		{"interventions", "shield_seconds", serial, firstSlotVersion},
+		{"game", "enabled", Scope{}, 0},          // not a flag of that set
+		{"agent", "no_such_flag", Scope{}, 0},    // unknown flag
+		{"agent", "enabled", Scope{Arm: "x"}, 0}, // fits no scope
+	} {
+		if v := f.state.SlotVersion(tc.set, tc.flag, tc.scope); v != tc.want {
+			t.Fatalf("SlotVersion(%s, %s, %+v) = %d, want %d", tc.set, tc.flag, tc.scope, v, tc.want)
+		}
+	}
+	// A serial drop moves the slot version on (it survives the drop).
+	two := Scope{GameID: "game_a", Serial: "MOCK0002"}
+	f.put(WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("5"), Scope: two})
+	before := f.state.SlotVersion("interventions", "shield_seconds", two)
+	f.register("game_a", "c1", "MOCK0001")
+	if after := f.state.SlotVersion("interventions", "shield_seconds", two); after <= before {
+		t.Fatalf("slot version %d after the serial drop, want above %d", after, before)
+	}
+	// A game end forgets them: the slot has no version until the game is back.
+	f.state.EndGame("game_a", EndReasonEnded)
+	if v := f.state.SlotVersion("interventions", "shield_seconds", two); v != 0 {
+		t.Fatalf("version %d after the game ended, want 0", v)
+	}
+}
+
+// UC: UC-053 A3
+// An experiment whose arm values were cleared by DELETE leaves no slot
+// versions behind once no game carries it (NFR-051, #2594 review finding 7).
+func TestSlotVersion_ClearedExperimentIsForgotten(t *testing.T) {
+	f := newFixture(t, fixtureOpts{})
+	arm := Scope{ExperimentID: "exp_1", Arm: "control"}
+	if _, err := f.state.RegisterGame(Game{ID: "game_a", CoordinatorInstance: "c1", Kind: "shadow", ExperimentID: "exp_1", Arm: "control"}); err != nil {
+		t.Fatal(err)
+	}
+	f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Scope: arm})
+	if _, err := f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", Scope: arm}); err != nil {
+		t.Fatal(err)
+	}
+	f.state.ExpireExperiments()
+	if f.state.slotVer["x:exp_1"] == nil {
+		t.Fatal("the versions of an experiment a live game carries went")
+	}
+	f.state.EndGame("game_a", EndReasonEnded)
+	f.state.ExpireExperiments() // last sweep's carrier still counts
+	f.state.ExpireExperiments()
+	if m := f.state.slotVer["x:exp_1"]; m != nil {
+		t.Fatalf("slot versions %v of a cleared experiment no game carries, want none", m)
+	}
 }
 
 // UC: UC-054 BR-005

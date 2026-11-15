@@ -22,6 +22,10 @@ type pending struct {
 	merged    int       // local changes merged into this entry
 	version   uint64    // snapshot version of the latest change (push span link)
 	notBefore time.Time // retry backoff after a failed push
+	// sent is the value Next last handed out for this entry (hasSent): the
+	// value a Refuse without one refers to.
+	sent    Value
+	hasSent bool
 }
 
 type entry struct {
@@ -135,7 +139,8 @@ func (s *LinkState) Offer(k Key, v Value, at time.Time, version uint64) (queued 
 }
 
 // Next peeks at the oldest pending entry whose retry time has come; it does
-// not remove it (ConfirmPushed, Refuse or Retry do).
+// not remove it (ConfirmPushed, Refuse or Retry do). It records the value it
+// hands out: Refuse refers to it.
 func (s *LinkState) Next() (k Key, v Value, merged int, version uint64, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,6 +150,7 @@ func (s *LinkState) Next() (k Key, v Value, merged int, version uint64, ok bool)
 		if p.notBefore.After(now) {
 			continue
 		}
+		p.sent, p.hasSent = p.value, true
 		return q, p.value, p.merged, p.version, true
 	}
 	return Key{}, Value{}, 0, 0, false
@@ -186,20 +192,45 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 }
 
 // SetRemote records the value last seen in Flagsmith and returns the previous
-// one (had: one was known). In sync follows when nothing is pending.
+// one (had: one was known). The key is in sync when nothing is pending (the
+// pull applies the value; a refusal of that write sets it out of sync again).
 func (s *LinkState) SetRemote(k Key, v Value) (prev Value, had bool) {
+	prev, had, _ = s.SetRemoteGen(k, v)
+	return prev, had
+}
+
+// SetRemoteGen is SetRemote that also returns the generation it produced,
+// for an exact RestoreRemoteGen.
+func (s *LinkState) SetRemoteGen(k Key, v Value) (prev Value, had bool, gen uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
 	prev, had = e.remote, e.hasRemote
 	e.remote, e.hasRemote = v, true
 	e.gen++
-	return prev, had
+	e.inSync = e.pending == nil
+	return prev, had, e.gen
+}
+
+// RestoreRemoteGen puts prev back (or forgets the remote value when !had),
+// only while k's generation is still gen (from SetRemoteGen): the exact undo
+// of a SetRemote whose write was refused, which never undoes a later
+// SetRemote, confirm or forget, even one that recorded the same value.
+func (s *LinkState) RestoreRemoteGen(k Key, gen uint64, prev Value, had bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entries[k]
+	if e == nil || e.gen != gen {
+		return false
+	}
+	s.restoreLocked(e, prev, had)
+	return true
 }
 
 // RestoreRemote puts prev back (or forgets the remote value when !had), only
-// while the remote value still equals expect: the undo of a SetRemote whose
-// write was refused, which must not undo a newer SetRemote or confirm.
+// while the remote value still equals expect. It compares values, not
+// generations: a later SetRemote of the same value is undone too (the next
+// pull heals it). Prefer SetRemoteGen + RestoreRemoteGen.
 func (s *LinkState) RestoreRemote(k Key, expect Value, prev Value, had bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -207,13 +238,17 @@ func (s *LinkState) RestoreRemote(k Key, expect Value, prev Value, had bool) boo
 	if e == nil || !e.hasRemote || !e.remote.Equal(expect) {
 		return false
 	}
+	s.restoreLocked(e, prev, had)
+	return true
+}
+
+func (s *LinkState) restoreLocked(e *entry, prev Value, had bool) {
 	if had {
 		e.remote = prev
 	} else {
 		e.remote, e.hasRemote = Value{}, false
 	}
 	e.gen++
-	return true
 }
 
 // Gen returns k's remote generation (0: never seen).
@@ -268,8 +303,14 @@ func (s *LinkState) Remote(k Key) (Value, bool) {
 	return e.remote, true
 }
 
-// Refuse records a refusal of k on side. A remote refusal drops the pending
-// entry (the push will not be retried until the next local change).
+// Refuse records a refusal of k on side. A remote refusal refers to the value
+// Next last handed out for k (the push in flight) and drops the pending entry
+// only while it still holds that value: a newer local value offered during the
+// push stays pending and is pushed next (as with ConfirmPushed). When Next
+// never handed the current entry out (it was created after the refused push,
+// e.g. by an Offer following one equal to the remote value), the refusal
+// cannot be about it: the refusal is recorded and the entry kept. See
+// RefuseValue.
 func (s *LinkState) Refuse(k Key, side Side, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -277,9 +318,33 @@ func (s *LinkState) Refuse(k Key, side Side, reason string) {
 	if e == nil {
 		return
 	}
+	if p := e.pending; p != nil && !p.hasSent {
+		e.refused, e.side = reason, side
+		e.inSync = false
+		return
+	}
+	v := Value{}
+	if p := e.pending; p != nil {
+		v = p.sent
+	}
+	s.refuseLocked(k, e, v, side, reason)
+}
+
+// RefuseValue records a refusal of k on side; a remote refusal of v drops the
+// pending entry only while it still holds v (a newer local value stays
+// pending).
+func (s *LinkState) RefuseValue(k Key, v Value, side Side, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil {
+		s.refuseLocked(k, e, v, side, reason)
+	}
+}
+
+func (s *LinkState) refuseLocked(k Key, e *entry, v Value, side Side, reason string) {
 	e.refused, e.side = reason, side
 	e.inSync = false
-	if side == SideRemote && e.pending != nil {
+	if side == SideRemote && e.pending != nil && e.pending.value.Equal(v) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}

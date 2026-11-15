@@ -22,6 +22,7 @@ const (
 	ReasonChangeRequestRequired     = "change_request_required"
 	ReasonIdentityOverridesDisabled = "identity_overrides_disabled"
 	ReasonProjectMismatch           = "project_mismatch"
+	ReasonEdgeRequired              = "edge_required" // link-down: the project has no edge identities
 	ReasonResponseTooLarge          = "response_too_large"
 	ReasonStopped                   = "stopped"
 	ReasonOther                     = "error"

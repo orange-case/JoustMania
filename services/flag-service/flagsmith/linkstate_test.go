@@ -114,4 +114,85 @@ func TestLinkState(t *testing.T) {
 			t.Fatal("ForgetRemote kept the remote value")
 		}
 	})
+	// #2594 delta finding 1: Refuse without a value must not drop a fresh
+	// pending entry that Next never handed out.
+	t.Run("UC-055/BR-001 Refuse keeps a fresh pending entry Next never handed out", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		s.Offer(stack, val(`1`), t0, 1)
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "1" {
+			t.Fatalf("in flight %s ok %v, want 1", v.Value, ok)
+		}
+		s.Offer(stack, val(`0`), t0, 2)             // equal to the remote value: drops pending
+		s.Offer(stack, val(`3`), t0, 3)             // a fresh entry, never handed out
+		s.Refuse(stack, SideRemote, ReasonNotFound) // the refusal is of 1
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "3" {
+			t.Fatalf("pending %s ok %v, want 3 kept", v.Value, ok)
+		}
+		if r, side := s.Refusal(stack); r != ReasonNotFound || side != SideRemote {
+			t.Fatalf("refusal %q %q, want recorded", r, side)
+		}
+	})
+	// #2594 review finding 1: the mirror of "a newer pending value survives
+	// ConfirmPushed of the older one".
+	t.Run("UC-055/BR-001 a newer pending value survives a remote refusal of the older one", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.Offer(stack, val(`1`), t0, 1)
+		if _, v, _, _, _ := s.Next(); string(v.Value) != "1" {
+			t.Fatalf("in flight %s, want 1", v.Value)
+		}
+		s.Offer(stack, val(`2`), t0, 2) // offered while 1 is in flight
+		s.Refuse(stack, SideRemote, ReasonChangeRequestRequired)
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "2" {
+			t.Fatalf("pending %s ok %v, want 2 still pending after 1 was refused", v.Value, ok)
+		}
+		if _, side := s.Refusal(stack); side != SideRemote {
+			t.Fatalf("refusal side %q, want remote", side)
+		}
+		s.Refuse(stack, SideRemote, ReasonNotFound) // 2 is in flight now
+		if _, _, _, _, ok := s.Next(); ok {
+			t.Fatal("the refused value is still pending")
+		}
+		s.Offer(stack, val(`3`), t0, 3)
+		s.RefuseValue(stack, val(`1`), SideRemote, ReasonNotFound)
+		if p, _, _ := s.Counts(); p != 1 {
+			t.Fatalf("pending %d, want 3 kept after a refusal of 1", p)
+		}
+		s.RefuseValue(stack, val(`3`), SideRemote, ReasonNotFound)
+		if p, _, refused := s.Counts(); p != 0 || refused != 1 {
+			t.Fatalf("pending %d refused %d, want 0 1", p, refused)
+		}
+	})
+	t.Run("UC-054/BR-005 a key first seen by a pull is in sync while nothing is pending", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`1`))
+		if _, oos, _ := s.Counts(); oos != 0 {
+			t.Fatalf("out of sync %d, want 0 after a pull of a key with nothing pending", oos)
+		}
+		s.Offer(other, val(`2`), t0, 1)
+		s.SetRemote(other, val(`3`))
+		if _, oos, _ := s.Counts(); oos != 1 {
+			t.Fatalf("out of sync %d, want 1: a pending value is not in sync", oos)
+		}
+	})
+	// #2594 review finding 6: the undo is exact by generation.
+	t.Run("UC-054/BR-005 RestoreRemoteGen undoes only its own SetRemote, not a later one of the same value", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		prev, had, gen := s.SetRemoteGen(stack, val(`1`))
+		s.SetRemote(stack, val(`1`)) // a second pull saw 1 too
+		if s.RestoreRemoteGen(stack, gen, prev, had) {
+			t.Fatal("the first write's undo restored over a later pull")
+		}
+		if v, _ := s.Remote(stack); string(v.Value) != "1" {
+			t.Fatalf("remote %s, want 1", v.Value)
+		}
+		prev, had, gen = s.SetRemoteGen(stack, val(`2`))
+		if !s.RestoreRemoteGen(stack, gen, prev, had) {
+			t.Fatal("the undo of the latest SetRemote was refused")
+		}
+		if v, _ := s.Remote(stack); string(v.Value) != "1" {
+			t.Fatalf("remote %s, want 1 restored", v.Value)
+		}
+	})
 }

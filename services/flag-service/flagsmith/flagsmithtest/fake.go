@@ -37,8 +37,14 @@ type Fake struct {
 	// ServerKey, when set, is the X-Environment-Key the document needs (else
 	// 401).
 	ServerKey string
+	// ProjectID is the project the default Admin routes report (42).
+	ProjectID int
 
-	mux          *http.ServeMux
+	mux          *http.ServeMux // the tests' handlers (Handle), tried first
+	defaults     *http.ServeMux // the default routes
+	features     []map[string]any
+	tags         []map[string]any
+	nextID       int
 	mu           sync.Mutex
 	doc          []byte
 	lastModified string
@@ -48,13 +54,19 @@ type Fake struct {
 	events       chan string
 }
 
-// New starts a fake Flagsmith, closed when the test ends. The document is
-// empty until SetDocument.
+// DefaultDocument is the document a new fake serves: no features, no
+// identities, identity overrides in local evaluation on (the link stays
+// offline without it, identity_overrides_disabled).
+const DefaultDocument = `{"name":"test","use_identity_overrides_in_local_eval":true,"feature_states":[],"identity_overrides":[]}`
+
+// New starts a fake Flagsmith, closed when the test ends. It serves
+// DefaultDocument until SetDocument.
 func New(t testing.TB) *Fake {
 	t.Helper()
-	f := &Fake{mux: http.NewServeMux(), doc: []byte(`{"name":"test","feature_states":[],"identity_overrides":[]}`), events: make(chan string, 16)}
-	f.mux.HandleFunc("GET "+APIPath+"environment-document/", f.document)
-	f.mux.HandleFunc("GET /sse/", f.sse)
+	f := &Fake{mux: http.NewServeMux(), defaults: http.NewServeMux(), ProjectID: 42, nextID: 1000, doc: []byte(DefaultDocument), events: make(chan string, 16)}
+	f.defaults.HandleFunc("GET "+APIPath+"environment-document/", f.document)
+	f.defaults.HandleFunc("GET /sse/", f.sse)
+	f.registerAdminDefaults()
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Server.Close)
 	return f
@@ -68,7 +80,7 @@ func (f *Fake) URL() string { return f.Server.URL + APIPath }
 func (f *Fake) SSEURL() string { return f.Server.URL + "/sse/" }
 
 // Handle adds a handler for a net/http ServeMux pattern ("PUT /api/v1/...").
-// A pattern can be added once.
+// It takes precedence over the default routes; a pattern can be added once.
 func (f *Fake) Handle(pattern string, h http.HandlerFunc) { f.mux.HandleFunc(pattern, h) }
 
 // SetDocument sets the environment document (any JSON-encodable value or raw
@@ -84,6 +96,23 @@ func (f *Fake) SetDocument(doc any, lastModified string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.doc, f.lastModified = raw, lastModified
+}
+
+// SetIdentityOverridesInLocalEval sets use_identity_overrides_in_local_eval
+// in the current document (true in DefaultDocument).
+func (f *Fake) SetIdentityOverridesInLocalEval(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var doc map[string]any
+	if err := json.Unmarshal(f.doc, &doc); err != nil {
+		panic(err)
+	}
+	doc["use_identity_overrides_in_local_eval"] = on
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		panic(err)
+	}
+	f.doc = raw
 }
 
 // Fail makes every request answer status (0: serve normally).
@@ -140,7 +169,11 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"failing"}`, fail)
 		return
 	}
-	f.mux.ServeHTTP(w, r)
+	if _, pattern := f.mux.Handler(r); pattern != "" {
+		f.mux.ServeHTTP(w, r)
+		return
+	}
+	f.defaults.ServeHTTP(w, r)
 }
 
 func (f *Fake) document(w http.ResponseWriter, r *http.Request) {
