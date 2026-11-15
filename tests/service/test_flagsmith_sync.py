@@ -52,12 +52,6 @@ def settled_link(stack, flag_service):
     fl.settle(flag_service, fake)
 
 
-def _flagd_bool(stack, flag_set: str, flag: str) -> object:
-    """What flagd serves through the in-process resolver, the path every service reads."""
-    with flagd_probe_client(stack, flag_set) as client:
-        return client.get_boolean_value(flag, True, None)
-
-
 def _hold_next_push(fake, feature: str, seconds: int = 15) -> None:
     """One 429 with Retry-After: the next local value of ``feature`` waits ``seconds`` in the
     out side while the test changes Flagsmith (plan #2592 §8.1, §8.2)."""
@@ -83,7 +77,12 @@ def test_person_stack_value_applied_as_flagsmith_write(stack, flag_service, sett
     got = fl.wait_overlay(flag_service, *CAPTURE, timeout=fl.POLL_SECONDS + 10, variant="off")
     assert got["writer"] == "flagsmith", got
     # Step 3: flagd serves it to every reader.
-    fl.wait_for(lambda: _flagd_bool(stack, *CAPTURE) is False, 15, "flagd serving capture_content=off")
+    with flagd_probe_client(stack, CAPTURE[0]) as client:  # the in-process resolver every service reads
+        fl.wait_for(
+            lambda: (lambda d: d.value is False or None)(client.get_boolean_details(CAPTURE[1], True, None)),
+            15,
+            "flagd serving capture_content=off",
+        )
     # Step 4: in sync, and the applied value is not echoed back to Flagsmith (BR-004).
     fl.wait_pulls(flag_service, 1)
     state = fl.link(flag_service)
