@@ -221,12 +221,12 @@ func TestReconcileSpanRecordsRestartRule(t *testing.T) {
 	t.Run("UC-054/A3 BR-006 the start reconcile span carries restart_rule and cleared", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{before: func(h *harness) {
 			h.link.SetRestartReport(flagsmith.RestartAuditLog, map[flagsmith.Key]flagsmith.Author{
-				{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}:                 flagsmith.AuthorAPIKey,
-				{Set: "interventions", Flag: "global_sensitivity_override", Scope: "game:g7"}:          flagsmith.AuthorAPIKey,
-				{Set: "agent", Flag: "enabled", Scope: flagsmith.ScopeStack}:                          flagsmith.AuthorAPIKey,
-				{Set: "interventions", Flag: "audio_cue", Scope: "game:g7"}:                            flagsmith.AuthorAPIKey,
-				{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}:         flagsmith.AuthorPerson,
-				{Set: "interventions", Flag: "volume_override", Scope: "game:g7"}:                      flagsmith.AuthorUnknown,
+				{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}:         flagsmith.AuthorAPIKey,
+				{Set: "interventions", Flag: "global_sensitivity_override", Scope: "game:g7"}: flagsmith.AuthorAPIKey,
+				{Set: "agent", Flag: "enabled", Scope: flagsmith.ScopeStack}:                  flagsmith.AuthorAPIKey,
+				{Set: "interventions", Flag: "audio_cue", Scope: "game:g7"}:                   flagsmith.AuthorAPIKey,
+				{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}: flagsmith.AuthorPerson,
+				{Set: "interventions", Flag: "volume_override", Scope: "game:g7"}:             flagsmith.AuthorUnknown,
 			})
 		}})
 		h.online()
@@ -236,7 +236,7 @@ func TestReconcileSpanRecordsRestartRule(t *testing.T) {
 		}
 		got := map[string]string{}
 		for _, kv := range spans[0].Attributes() {
-			got[string(kv.Key)] = kv.Value.Emit()
+			got[string(kv.Key)] = kv.Value.String()
 		}
 		if got[flagsmith.AttrTrigger] != flagsmith.TriggerStart {
 			t.Fatalf("trigger %q, want start", got[flagsmith.AttrTrigger])
