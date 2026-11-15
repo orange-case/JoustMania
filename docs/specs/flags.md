@@ -770,8 +770,8 @@ these flags take the more restrictive value; every other flag takes the Flagsmit
 | `agent/experiment_dynamic_max_concurrent` | the lower number; a value ≤ 0 resolves to the compiled default 3, as in the agent |
 | `agent/code_improvement.min_interval_seconds` | the higher number |
 
-`code_improvement.*` and `experiment_dynamic_max_concurrent` have no registry row today, so they are not Flagsmith
-features; their rules keep the table complete for when they get one.
+`code_improvement.*` and `experiment_dynamic_max_concurrent` have no row in the mutable-flag registry (§13.2) today,
+so they are not runtime-mutable and not Flagsmith features; their rules keep the table complete for when they get one.
 
 The list is the kill switches of §13 (`registry.killSwitches`) plus the agent-limiting flags of FR-152; a test keeps
 it in sync with FR-152. A deliberate change in Flagsmith, with no local change since the last sync, is applied
