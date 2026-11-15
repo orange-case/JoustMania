@@ -7,6 +7,11 @@
 # instead of compiling the collector with OCB (~7 min, fetches Go modules).
 # Without OTEL_COLLECTOR_TAG (local runs, fork PRs) nothing changes: the
 # `build:` in docker-compose.yml applies.
+#
+# The image is pulled from the repository that pushed it: the e2e jobs export
+# IMAGE_PREFIX=ghcr.io/<owner>/joustmania (lower case), which differs from the
+# release owner in docker-compose.yml when the repository is not that one.
 services:
   otel-collector:
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/otel-collector:${OTEL_COLLECTOR_TAG:-latest}
     build: !reset null

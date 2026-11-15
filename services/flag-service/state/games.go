@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/joustmania/flag-service/fserr"
+	"github.com/joustmania/flag-service/registry"
 )
 
 // Reasons a game scope ends (telemetry.md §10.1 flagservice.game.end).
@@ -72,7 +73,8 @@ func (s *State) RegisterGame(g Game) (already bool, err *fserr.Error) {
 
 func (s *State) registerLocked(g Game) {
 	g.LastSeenAt = s.opts.Now()
-	if old := s.games[g.ID]; old != nil {
+	old := s.games[g.ID]
+	if old != nil {
 		g.RegisteredAt = old.RegisteredAt
 		s.dropRemovedSerialsLocked(g.ID, old.Serials, g.Serials)
 	} else {
@@ -82,6 +84,13 @@ func (s *State) registerLocked(g Game) {
 	sort.Strings(serials)
 	g.Serials = serials
 	s.games[g.ID] = &g
+	// The Flagsmith link mirrors a game as an identity: report a first
+	// registration and a change of kind, serials or arm, never a pure
+	// LastSeenAt refresh (the coordinator reconciles every 15 s).
+	if gameChanged(old, &g) {
+		s.noteLocked(Change{Kind: ChangeGameRegistered, ScopeName: registry.ScopeGame, Scope: Scope{GameID: g.ID}, Game: copyGame(&g), Prev: copyGame(old)})
+		s.flushLocked()
+	}
 	// A first registration changes no flag value. A re-registration that
 	// drops serials removes their per-player values and re-pushes the snapshot
 	// (dropRemovedSerialsLocked, UC-053 A13).
@@ -105,8 +114,16 @@ func (s *State) endLocked(gameID, reason string) (GameEnd, bool) {
 	for _, f := range s.flags {
 		end.DroppedValues += f.dropGame(gameID)
 	}
+	// Every slot of the game goes with it, and so do their versions: a game
+	// registered again under the same id starts its slots at 1 (services.md
+	// §7.3; memory stays bounded by the live games).
+	delete(s.slotVer, "g:"+gameID)
+	endCopy := end
+	s.noteLocked(Change{Kind: ChangeGameEnded, ScopeName: registry.ScopeGame, Scope: Scope{GameID: gameID}, Game: copyGame(g), End: &endCopy})
 	if end.DroppedValues > 0 {
 		s.changed()
+	} else {
+		s.flushLocked()
 	}
 	return end, true
 }
@@ -249,6 +266,9 @@ func (s *State) dropRemovedSerialsLocked(gameID string, old, now []string) {
 					if len(m) == 0 {
 						delete(f.serials, gameID)
 					}
+					// The dropped serial's slot version moves on (it survives the
+					// drop, services.md §7.3): writer "" as for an expiry.
+					s.slotChangedLocked(f, registry.ScopeGameSerial, Scope{GameID: gameID, Serial: serial}, "")
 				}
 			}
 		}

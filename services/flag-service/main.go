@@ -35,6 +35,7 @@ import (
 
 	"github.com/joustmania/flag-service/api"
 	"github.com/joustmania/flag-service/baseline"
+	"github.com/joustmania/flag-service/flagsmith"
 	"github.com/joustmania/flag-service/registry"
 	"github.com/joustmania/flag-service/state"
 	"github.com/joustmania/flag-service/syncserver"
@@ -224,6 +225,21 @@ func run(logger *slog.Logger) error {
 	}()
 
 	httpAPI := &api.API{State: st, Metrics: metrics, Tracer: tracer, Links: links, Logger: logger, Ready: grpcUp.Load}
+	// The Flagsmith link (services.md §7.3): off by default; the observer is
+	// set before the HTTP server starts, so no write is missed. It never stops
+	// the service from starting, and runs after the servers are up (FR-130:
+	// baseline + admin settings are served at once).
+	fsCfg := flagsmith.LoadConfig(logger)
+	link, err := flagsmith.New(fsCfg, flagsmith.Deps{
+		State: st, Writer: httpAPI, Tracer: tracer, Meter: otel.Meter(telemetry.Name), Logger: logger, Links: links,
+	})
+	if err != nil {
+		logger.Error("flagsmith link: metrics not registered", "error", err)
+	}
+	httpAPI.Flagsmith = link
+	if fsCfg.Enabled {
+		st.SetObserver(link)
+	}
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           httpAPI.Handler(),
@@ -235,10 +251,11 @@ func run(logger *slog.Logger) error {
 	go func() { httpErr <- httpServer.ListenAndServe() }()
 
 	go sweep(ctx, st, metrics, tracer, cfg.SweepInterval, logger)
+	go link.Run(ctx)
 
 	logger.Info("flag service started", "epoch", epoch, "served_sets", cfg.Served,
 		"grpc_port", cfg.GRPCPort, "http_port", cfg.HTTPPort, "admin_values", report.AdminValues,
-		"state_file", cfg.StateFile)
+		"state_file", cfg.StateFile, "flagsmith_link", fsCfg.Enabled)
 
 	select {
 	case <-ctx.Done():

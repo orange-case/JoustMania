@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/joustmania/flag-service/fserr"
@@ -71,6 +72,11 @@ type WriteRequest struct {
 	// no real overlay is present and the list holds "". Else 412
 	// writer_mismatch and nothing changes. nil = no precondition.
 	IfWriterIn []string
+	// IfSlotVersion is the in-process compare-and-set of a pulled Flagsmith
+	// write (services.md §7.3): the write applies only while the slot's
+	// version (Change.SlotVersion) is still this one, else 412 slot_changed
+	// and nothing changes. 0 = no precondition. Never parsed from HTTP.
+	IfSlotVersion uint64
 }
 
 // MaxIfWriterIn bounds the entries of ?if_writer_in=.
@@ -84,6 +90,8 @@ type AppendRequest struct {
 	Payload    map[string]any
 	Writer     string
 	DecisionID string
+	// IfSlotVersion: as WriteRequest.IfSlotVersion (in process only).
+	IfSlotVersion uint64
 }
 
 // ClearRequest is a DELETE /{flagSetId}/{flagName}. Persist clears the
@@ -105,6 +113,12 @@ type ClearRequest struct {
 	// nothing changes. "" = no precondition. It is not the informational
 	// Writer label, which is never checked (D11).
 	IfWriter string
+	// IfSlotVersion: as WriteRequest.IfSlotVersion (in process only).
+	IfSlotVersion uint64
+	// StackAll clears the in-memory stack overlay and the persisted admin
+	// value under one lock, as one change (in process only: Flagsmith
+	// enabled=false on a persist row, services.md §7.3).
+	StackAll bool
 }
 
 // WriteResult is the response of an accepted write, and the telemetry of a
@@ -279,6 +293,7 @@ func (s *State) Put(req WriteRequest) (WriteResult, *fserr.Error) {
 	} else {
 		f.place(scopeName, req.Scope, v)
 	}
+	s.slotChangedLocked(f, scopeName, req.Scope, req.Writer)
 	s.changed()
 	res.Variant = v.Variant
 	res.SnapshotVersion = s.version
@@ -301,7 +316,7 @@ type putPlan struct {
 //	lookup 404/422 > kind 400 > variant|value 400 > ids 400 > scope fit 400 >
 //	ttl 400 > if_writer_in shape 400 > persist 400 > live (served, game,
 //	serial, real game) 409/422 > value 422 > fraction 422 > stream 503 >
-//	if_writer_in 412
+//	if_writer_in 412 > if_slot_version 412 (in process only)
 //
 // The 412 is last, a dry run included, under the lock of the write, so no
 // other write can slip in between the compare and the write (#2260, UC-043
@@ -372,6 +387,9 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 	}
 	if req.IfWriterIn != nil && !realWriterAllowed(f.real, req.IfWriterIn) {
 		return plan, fserr.PreconditionFailed(fserr.WriterMismatch, "the real overlay of %s is owned by %s, not one of %q; nothing written", f.key, describeRealWriter(f.real), req.IfWriterIn)
+	}
+	if err := s.checkSlotVersionLocked(f, scopeName, req.Scope, req.IfSlotVersion); err != nil {
+		return plan, err
 	}
 	return plan, nil
 }
@@ -459,6 +477,9 @@ func (s *State) Append(req AppendRequest) (WriteResult, *fserr.Error) {
 	if err := s.streamCheckLocked(f.set); err != nil {
 		return res, err
 	}
+	if err := s.checkSlotVersionLocked(f, res.ScopeKey, req.Scope, req.IfSlotVersion); err != nil {
+		return res, err
+	}
 
 	list := f.events[req.Scope.GameID]
 	if list == nil {
@@ -471,6 +492,7 @@ func (s *State) Append(req AppendRequest) (WriteResult, *fserr.Error) {
 		list.Events = append([]event(nil), list.Events[len(list.Events)-k:]...)
 	}
 	list.Variant = s.nextVariant("r")
+	s.slotChangedLocked(f, registry.ScopeGame, req.Scope, req.Writer)
 	s.changed()
 	raw, _ := json.Marshal(payload)
 	res.Value = raw
@@ -501,17 +523,33 @@ func (s *State) Clear(req ClearRequest) (WriteResult, *fserr.Error) {
 		res.Cleared = 1
 	}
 	if res.Cleared > 0 {
+		s.slotChangedLocked(f, scopeName, req.Scope, req.Writer)
 		s.changed()
 	}
 	res.SnapshotVersion = s.version
 	return res, nil
 }
 
+// checkSlotVersionLocked is the 412 slot_changed of an in-process write with
+// IfSlotVersion (0 = none): checked last, under the lock of the write, so a
+// local write landing between the link's read and its write is never
+// overwritten by an older Flagsmith value (UC-054, FR-210).
+func (s *State) checkSlotVersionLocked(f *flagState, scopeName string, sc Scope, want uint64) *fserr.Error {
+	if want == 0 {
+		return nil
+	}
+	if got := s.slotVersionLocked(f, scopeName, sc); got != want {
+		return fserr.PreconditionFailed(fserr.SlotChanged, "%s changed since it was read (slot version %d, not %d); nothing written", f.key, got, want)
+	}
+	return nil
+}
+
 // checkClearLocked runs every precondition of a Clear in this order (the first
 // failure answers; TestPreconditionMatrix_Clear pins each pair):
 //
 //	lookup 404/422 > ids 400 > scope fit 400 > served 409 > stream 503 > persist 400 >
-//	if_writer shape 400 > guarded revert 409 > if_writer 412
+//	if_writer shape 400 > stack_all 400 > guarded revert 409 > if_writer 412 >
+//	if_slot_version 412 (in process only)
 //
 // Like Put it refuses an id or label over MaxIDLength with 400 (#2370); unlike
 // Put there is no game-live check: clearing what is not there is an
@@ -543,6 +581,9 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 	if req.IfWriter != "" && scopeName != registry.ScopeReal {
 		return nil, fserr.BadRequest("if_writer applies to the real overlay only (game_kind=real)")
 	}
+	if req.StackAll && (scopeName != registry.ScopeStack || req.Persist) {
+		return nil, fserr.BadRequest("stack_all clears the stack scope, without persist")
+	}
 	// #2236, UC-043 A17 step 3: the guarded revert. Checked under s.mu, like the
 	// Put guard, so a game registering between the agent's own read and this
 	// DELETE still blocks it. A plain DELETE (the kill switch) never comes here.
@@ -554,6 +595,9 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 	if req.IfWriter != "" && f.real != nil && f.real.Writer != req.IfWriter {
 		return nil, fserr.PreconditionFailed(fserr.WriterMismatch, "the real overlay of %s was written by %q, not %q; nothing cleared", f.key, f.real.Writer, req.IfWriter)
 	}
+	if err := s.checkSlotVersionLocked(f, scopeName, req.Scope, req.IfSlotVersion); err != nil {
+		return nil, err
+	}
 	return f, nil
 }
 
@@ -561,6 +605,42 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 // Persist the persisted admin value (also leaving the state file).
 func (s *State) clearStackLocked(f *flagState, req ClearRequest, res *WriteResult) *fserr.Error {
 	switch {
+	case req.StackAll:
+		prevStack, prevAdmin := f.stack, f.admin
+		if prevAdmin == nil && s.persistBlocked && f.policy.Persist {
+			// As the Persist branch below: no admin value in memory, but the
+			// unreadable state file may still hold one that returns at the
+			// next start (UC-053 A12, #2368). A kill switch clears the
+			// overlay and answers not persisted; any other flag keeps its
+			// overlay and is refused.
+			err := s.saveAdminLocked()
+			if f.policy.AppliesWhenPersistFails() {
+				s.opts.Logger.Error("flag service: kill switch clear not persisted; the state file was unreadable at start", "flag", f.key, "error", err)
+				if prevStack != nil {
+					f.stack, res.Cleared = nil, 1
+				}
+				res.PersistFailed = true
+				return nil
+			}
+			return fserr.PersistFailed("the persisted value of %s was not cleared: %v", req.Flag, err)
+		}
+		if prevStack == nil && prevAdmin == nil {
+			return nil
+		}
+		f.stack, f.admin, res.Cleared = nil, nil, 1
+		if prevAdmin == nil {
+			return nil
+		}
+		if err := s.saveAdminLocked(); err != nil {
+			if f.policy.AppliesWhenPersistFails() {
+				s.opts.Logger.Error("flag service: kill switch cleared in memory only; the state file could not be written", "flag", f.key, "error", err)
+				res.PersistFailed = true
+				return nil
+			}
+			f.stack, f.admin, res.Cleared = prevStack, prevAdmin, 0
+			return fserr.PersistFailed("%s was not cleared: the state file could not be written: %v", req.Flag, err)
+		}
+		res.Persisted = true
 	case req.Persist && f.admin != nil:
 		prevAdmin := f.admin
 		f.admin = nil
@@ -685,14 +765,17 @@ func (s *State) ClearWriter(set, writer string) (int, *fserr.Error) {
 		if f.stack != nil && f.stack.Writer == writer {
 			f.stack = nil
 			n++
+			s.slotChangedLocked(f, registry.ScopeStack, Scope{}, writer)
 		}
 		if f.real != nil && f.real.Writer == writer {
 			f.real = nil
 			n++
+			s.slotChangedLocked(f, registry.ScopeReal, Scope{}, writer)
 		}
 		if f.fraction != nil && f.fraction.Writer == writer {
 			f.fraction = nil
 			n++
+			s.slotChangedLocked(f, registry.ScopeFraction, Scope{}, writer)
 		}
 	}
 	if n > 0 {
@@ -713,14 +796,17 @@ func (s *State) ExpireOverlays() int {
 		if expired(f.stack) {
 			f.stack = nil
 			n++
+			s.slotChangedLocked(f, registry.ScopeStack, Scope{}, "")
 		}
 		if expired(f.real) {
 			f.real = nil
 			n++
+			s.slotChangedLocked(f, registry.ScopeReal, Scope{}, "")
 		}
 		if expired(f.fraction) {
 			f.fraction = nil
 			n++
+			s.slotChangedLocked(f, registry.ScopeFraction, Scope{}, "")
 		}
 	}
 	if n > 0 {
@@ -777,12 +863,45 @@ func (s *State) ExpireExperiments() int {
 			present[id] = true
 		}
 	}
+	arms := map[string]map[string]bool{}
 	for _, f := range s.flags {
-		for id := range f.experiments {
-			if dropped[id] {
-				delete(f.experiments, id)
+		for id, byArm := range f.experiments {
+			if !dropped[id] {
+				continue
+			}
+			delete(f.experiments, id)
+			if arms[id] == nil {
+				arms[id] = map[string]bool{}
+			}
+			for _, arm := range sortedKeys(byArm) {
+				arms[id][arm] = true
+				s.slotDroppedLocked(f, registry.ScopeExperiment, Scope{ExperimentID: id, Arm: arm})
 			}
 		}
+	}
+	for _, id := range sortedKeys(arms) {
+		delete(s.slotVer, "x:"+id)
+		for _, arm := range sortedKeys(arms[id]) {
+			s.noteLocked(Change{Kind: ChangeExperimentEnded, ScopeName: registry.ScopeExperiment, Scope: Scope{ExperimentID: id, Arm: arm}})
+		}
+	}
+	// The slot versions of an experiment whose arm values were all cleared
+	// (DELETE) go once no registered game carries it: the loops above never
+	// see an experiment without values (NFR-051, #2594). expSeen still holds
+	// last sweep's ids here, so a cleared experiment keeps its versions while
+	// a game carries it.
+	for outer := range s.slotVer {
+		id, ok := strings.CutPrefix(outer, "x:")
+		if !ok {
+			continue
+		}
+		if _, hasValues := lastWrite[id]; hasValues {
+			continue
+		}
+		if _, seen := s.expSeen[id]; seen {
+			continue
+		}
+		delete(s.slotVer, outer)
 	}
 	for id := range s.expSeen {
 		if !present[id] {

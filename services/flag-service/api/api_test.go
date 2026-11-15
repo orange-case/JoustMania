@@ -35,6 +35,7 @@ type env struct {
 	spans  *tracetest.SpanRecorder
 	reader *sdkmetric.ManualReader
 	links  *telemetry.Links
+	api    *API
 }
 
 func newEnv(t *testing.T, stream bool) *env {
@@ -79,7 +80,7 @@ func newEnvRegistry(t *testing.T, stream bool, regYAML string) *env {
 	a := &API{State: st, Metrics: metrics, Tracer: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)).Tracer("t"), Links: links}
 	srv := httptest.NewServer(a.Handler())
 	t.Cleanup(srv.Close)
-	return &env{t: t, srv: srv, st: st, spans: spans, reader: reader, links: links}
+	return &env{t: t, srv: srv, st: st, spans: spans, reader: reader, links: links, api: a}
 }
 
 func (e *env) do(method, path string, body any) (int, map[string]any) {
