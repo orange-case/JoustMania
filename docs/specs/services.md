@@ -641,4 +641,4 @@ not depend on the link.
 **Traceability:** FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037 / UC-054, UC-055 / `services/flag-service/flagsmith/`
 (foundation, #2588), `services/flag-service/api/inprocess.go`, `services/flag-service/state/observer.go`,
 `services/flag-service/flagsmith/*_test.go` with the fake Flagsmith `flagsmith/flagsmithtest`,
-`tests/contract/test_flagsmith_compose.py`; planned `tests/service/test_flagsmith_link.py`.
+`tests/contract/test_flagsmith_compose.py`, `tests/service/test_flagsmith_link.py`.

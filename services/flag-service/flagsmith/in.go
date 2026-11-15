@@ -762,8 +762,11 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 		}
 	}
 	// Edge lag: the first round after start skips what the restart rule
-	// cleared (#2590 P13).
-	if rc.trigger == TriggerStart && attribution[k] == AuthorAPIKey {
+	// cleared (#2590 P13). Kill switches are never cleared (nothing was
+	// pushed, so a lagging document is merely older) and merge without a
+	// remote to the more restrictive value: the start round applies them.
+	// UC-054 BR-005: a kill switch an API key tightened is in force at once.
+	if rc.trigger == TriggerStart && attribution[k] == AuthorAPIKey && !isKillKey(k) {
 		rc.skip()
 		return
 	}

@@ -112,6 +112,9 @@ type harnessOpts struct {
 	doc    any
 	// docURL is FLAGSMITH_DOCUMENT_URL (nil: the fake's API base).
 	docURL func(*flagsmithtest.Fake) string
+	// realStart keeps the link's real start sequence and out side (restart
+	// rule journeys); otherwise UseInSideOnly replaces them.
+	realStart bool
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -187,7 +190,9 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	h.link = link
-	flagsmith.UseInSideOnly(link)
+	if !o.realStart {
+		flagsmith.UseInSideOnly(link)
+	}
 	st.SetObserver(link)
 	if o.before != nil {
 		o.before(h)

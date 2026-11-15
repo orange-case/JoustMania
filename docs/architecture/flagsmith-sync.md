@@ -3,9 +3,9 @@
 > Architecture note. Status: **proposed** (epic #2587, sub-issues #2588 to #2592). Written 2026-11-15 against `main` and the Flagsmith API
 > source at v2.269 (`Flagsmith/flagsmith`, `api/`). Spec rows: [UC-054](../use_cases/UC-054.md),
 > [UC-055](../use_cases/UC-055.md), FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037, the C-008 amendment
-> ([requirements](../requirements.md)); [services.md §7.3](../specs/services.md#73-flagsmith-link-planned-uc-054-uc-055),
-> [flags.md §13.6](../specs/flags.md#136-flagsmith-link-planned-uc-054-uc-055),
-> [telemetry.md §10.4](../specs/telemetry.md#104-flagsmith-link-planned-uc-054-uc-055).
+> ([requirements](../requirements.md)); [services.md §7.3](../specs/services.md#73-flagsmith-link-implemented-2588-to-2591-uc-054-uc-055),
+> [flags.md §13.6](../specs/flags.md#136-flagsmith-link-implemented-2588-to-2591-uc-054-uc-055),
+> [telemetry.md §10.4](../specs/telemetry.md#104-flagsmith-link-implemented-2588-to-2591-uc-054-uc-055).
 > Builds on the flag service ([flag-service.md](flag-service.md)); nothing there changes for a stack without the link.
 
 ## 1. Summary
@@ -271,7 +271,8 @@ Flagsmith's audit API shows `author` (a user, or null) but not **which** API key
   coordinator has re-registered its games, or 45 s after start, whichever is later, and keeps every identity that a
   registered game matches (the whole identifier is compared with `game:<id>` and `game:<id>:<serial>`), so a game
   that registers late keeps its overrides. The first pull round after start skips the keys the rule just cleared
-  (edge lag).
+  (edge lag). Kill switches are never cleared, so that round merges them (more restrictive value, below): a kill
+  switch an API key tightened is in force from the start round, not only from the first poll.
 
 All writes of the rule happen in its final step, after every other step succeeded, so a failed start leaves no
 half-seeded state and a re-run seeds once.
