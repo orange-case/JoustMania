@@ -33,6 +33,7 @@ from .agent import AgentProcess
 from .fake_audio import FakeAudio
 from .fakes.claude import API_KEY as FAKE_CLAUDE_API_KEY
 from .fakes.claude import FakeClaude
+from .fakes.flagsmith import FakeFlagsmith
 from .fakes.github import FakeGitHub
 from .fakes.jev import API_KEY as FAKE_JEV_API_KEY
 from .fakes.jev import FakeJev
@@ -92,6 +93,10 @@ class Composition:
     # Also a fake GitHub REST API (``stack.fake_github``) the agent's promoter opens issues and
     # PRs on (the promotion env gate + GITHUB_API_URL; needs ``agent``). Never github.com.
     fake_github: bool = False
+    # Also a fake hosted Flagsmith (``stack.fake_flagsmith``) the flag service's Flagsmith link
+    # is turned on against (FLAGSMITH_LINK=on and the fake's URLs and dummy keys, #2591).
+    # Off by default: every other composition runs with the link off, as compose does.
+    fake_flagsmith: bool = False
     # Extra env for the agent process, applied last (e.g. a test-only ceiling).
     agent_env: Mapping[str, str] = field(default_factory=dict)
     # Agent-set flag overlays served before the agent starts, so its first tick already reads
@@ -152,6 +157,7 @@ class ServiceStack:
         )
         self.fake_jev: FakeJev | None = FakeJev() if composition.fake_jev else None
         self.fake_github: FakeGitHub | None = FakeGitHub() if composition.fake_github else None
+        self.fake_flagsmith: FakeFlagsmith | None = FakeFlagsmith() if composition.fake_flagsmith else None
         # Picked up front: the sink tees to it, and the agent must not be found by a stale address.
         self.agent_port: int | None = free_port() if composition.agent else None
         self.agent: AgentProcess | None = None
@@ -161,7 +167,11 @@ class ServiceStack:
         if self.fake_jev is not None:
             variant_values[FAKE_JEV_VARIANT] = self.fake_jev.base_url
         variant_values.update(composition.flag_variant_values)
-        self.flag_plane = FlagPlane(workdir, variant_values=variant_values or None)
+        self.flag_plane = FlagPlane(
+            workdir,
+            variant_values=variant_values or None,
+            extra_env=self.fake_flagsmith.flag_service_env() if self.fake_flagsmith else None,
+        )
         self.fake_audio = FakeAudio()
         forward_to = f"127.0.0.1:{self.agent_port}" if self.agent_port else None
         self.otlp_sink: OtlpSink | None = OtlpSink(forward_to=forward_to) if composition.otlp else None
@@ -203,6 +213,8 @@ class ServiceStack:
             self.fake_jev.start()
         if self.fake_github is not None:
             self.fake_github.start()
+        if self.fake_flagsmith is not None:
+            self.fake_flagsmith.start()
         plane = self.flag_plane
         plane.start()
         self._seed_agent_overlays()
@@ -403,6 +415,8 @@ class ServiceStack:
             self.fake_jev.stop()
         if self.fake_github is not None:
             self.fake_github.stop()
+        if self.fake_flagsmith is not None:
+            self.fake_flagsmith.stop()
 
     # ------------------------------------------------------------- debugging
     def log_tail(self) -> str:
@@ -417,6 +431,8 @@ class ServiceStack:
             parts.append(self.fake_jev.log_tail())
         if self.fake_github is not None:
             parts.append(self.fake_github.log_tail())
+        if self.fake_flagsmith is not None:
+            parts.append(self.fake_flagsmith.log_tail())
         parts.append(self.flag_plane.log_tail())
         return "\n".join(parts)
 
