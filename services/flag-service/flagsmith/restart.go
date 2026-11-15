@@ -40,7 +40,8 @@ import (
 // (O1, services.md §7.3 Start).
 const StaleIdentityGrace = 45 * time.Second
 
-// ReasonEdgeRequired: the project has no edge identities (Flagsmith answers
+// ReasonEdgeRequired is the offline reason of a project without edge
+// identities (Flagsmith answers
 // DynamoNotEnabled), so game and player overrides cannot be held (O8).
 const ReasonEdgeRequired = "edge_required"
 

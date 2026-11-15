@@ -744,7 +744,8 @@ func TestStartRestartRule(t *testing.T) {
 		for i := 0; i < auditPageSize*auditMaxPages; i++ {
 			many = append(many, auditRowOf("Segment updated: s"+strconv.Itoa(i), "op@example.com"))
 		}
-		e.admin.audit = append(many, auditRowOf("Flag state updated for feature: experiment_tick_seconds", ""))
+		many = append(many, auditRowOf("Flag state updated for feature: experiment_tick_seconds", ""))
+		e.admin.audit = many
 		if err := e.s.Start(e.ctx); err != nil {
 			t.Fatal(err)
 		}
