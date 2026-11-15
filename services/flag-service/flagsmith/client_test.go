@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,6 +52,17 @@ func TestClient(t *testing.T) {
 		reqs := f.RequestsTo(http.MethodGet, flagsmithtest.APIPath+"environment-document/")
 		if len(reqs) != 2 || reqs[1].Header.Get("If-Modified-Since") != lm || reqs[0].Header.Get("If-Modified-Since") != "" {
 			t.Fatalf("requests %+v, want a full then a conditional pull", reqs)
+		}
+	})
+	t.Run("UC-054/A1 the fake's default document has identity overrides in local evaluation on, with a knob", func(t *testing.T) {
+		f := flagsmithtest.New(t)
+		c := NewClient(testConfig(f), nil)
+		if doc, _, _, err := c.EnvironmentDocument(ctx, ""); err != nil || !doc.UseIdentityOverridesInLocalEval {
+			t.Fatalf("doc %+v err %v, want use_identity_overrides_in_local_eval on", doc, err)
+		}
+		f.SetIdentityOverridesInLocalEval(false)
+		if doc, _, _, err := c.EnvironmentDocument(ctx, ""); err != nil || doc.UseIdentityOverridesInLocalEval {
+			t.Fatalf("doc %+v err %v, want it off", doc, err)
 		}
 	})
 	t.Run("UC-054/A1 a wrong server key is unauthorized and the link goes down", func(t *testing.T) {
@@ -126,6 +139,40 @@ func TestClient(t *testing.T) {
 			t.Fatalf("err %v reason %q, want a connection error", err, Reason(err))
 		}
 		noSecret(t, err)
+	})
+	// C-016 (#2594 review finding 4): a redirect would carry the keys to
+	// another host.
+	t.Run("UC-054/A1 a redirect is not followed: no key reaches another host, the 3xx is the error", func(t *testing.T) {
+		var hits atomic.Int64
+		other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits.Add(1)
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		defer other.Close()
+		f := flagsmithtest.New(t)
+		f.Handle("GET /api/v1/moved/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, other.URL+"/api/v1/moved/", http.StatusFound)
+		})
+		f.Handle("GET /sse-moved/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, other.URL+"/sse/", http.StatusTemporaryRedirect)
+		})
+		for name, hc := range map[string]*http.Client{"default client": nil, "injected client": {Timeout: time.Second}} {
+			c := NewClient(testConfig(f), hc)
+			_, err := c.Admin(ctx, http.MethodGet, "moved/", nil, nil)
+			if Reason(err) != "http_302" {
+				t.Fatalf("%s: err %v reason %q, want http_302", name, err, Reason(err))
+			}
+			_, err = c.Stream(ctx, f.Server.URL+"/sse-moved/", map[string]string{"X-Environment-Key": "ser.secretserverkey"})
+			if Reason(err) != "http_307" {
+				t.Fatalf("%s: stream err %v reason %q, want http_307", name, err, Reason(err))
+			}
+			if hc != nil && hc.CheckRedirect != nil {
+				t.Fatalf("%s: the injected client was changed", name)
+			}
+		}
+		if n := hits.Load(); n != 0 {
+			t.Fatalf("the other host got %d requests, want none", n)
+		}
 	})
 }
 
