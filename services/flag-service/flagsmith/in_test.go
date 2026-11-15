@@ -334,7 +334,11 @@ var (
 // same document again writes nothing (no echo, BR-004); the change delay is
 // recorded (NFR-058).
 func TestPullAppliesChange(t *testing.T) {
-	h := newHarness(t, harnessOpts{})
+	var echo echoProbe
+	h := newHarness(t, harnessOpts{before: func(h *harness) {
+		echo.link = h.link
+		h.st.SetObserver(&echo)
+	}})
 	h.online()
 	h.setDoc([]map[string]any{fsState("decision.backend", true, "claude")})
 	h.round()
@@ -365,10 +369,41 @@ func TestPullAppliesChange(t *testing.T) {
 	if n := h.histogramCount(flagsmith.MetricChangeDelay); n != 1 {
 		t.Fatalf("NFR-058 change delay samples %d, want 1", n)
 	}
+	if r, ok := echo.remoteAtWrite(); !ok || r.Variant != "claude" {
+		t.Fatalf("UC-054/BR-004 remote %+v when the out side saw the write, want claude set before it (no echo)", r)
+	}
 	h.round()
 	if len(h.writeSpans("decision.backend")) != 1 {
 		t.Fatal("UC-054/BR-004 the same document was applied twice")
 	}
+}
+
+// echoProbe is the state observer in front of the link: it records the
+// link's remote value of decision.backend when the flagsmith write reaches
+// the observer, which is when the out side would compare it (BR-004).
+type echoProbe struct {
+	link   *flagsmith.Link
+	mu     sync.Mutex
+	remote *flagsmith.Value
+}
+
+func (e *echoProbe) StateChanged(c state.Change) {
+	if c.Flag == "decision.backend" && c.Writer == flagsmith.WriterLabel {
+		r, _ := e.link.Links().Remote(flagsmith.Key{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack})
+		e.mu.Lock()
+		e.remote = &r
+		e.mu.Unlock()
+	}
+	e.link.StateChanged(c)
+}
+
+func (e *echoProbe) remoteAtWrite() (flagsmith.Value, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.remote == nil {
+		return flagsmith.Value{}, false
+	}
+	return *e.remote, true
 }
 
 // racingWriter writes agent/enabled=off locally (as an operator's HTTP write
@@ -428,6 +463,7 @@ func TestNoStreamDefers(t *testing.T) {
 	h := newHarness(t, harnessOpts{noStream: true})
 	h.online()
 	lm := h.link.LastModified()
+	h.clock.Advance(10 * time.Second) // a newer document: its Last-Modified differs
 	h.setDoc([]map[string]any{fsState("decision.backend", true, "claude")})
 	h.round()
 	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Present {
