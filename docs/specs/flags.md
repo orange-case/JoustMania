@@ -787,8 +787,8 @@ like any write, also when it loosens one; the env ceilings of C-034 still cap th
 **Values in Flagsmith** (architecture note §2.1): a declared variant is its name (string); an integer range is an
 integer; a float range, a `free string` and an object flag are strings (decimal text, the string, compact JSON).
 
-**Traceability:** FR-206, FR-208, FR-210, FR-214, C-034, C-036 / UC-054, UC-055 / planned
-`services/flag-service/flagsmith/killswitch.go` and its test.
+**Traceability:** FR-206, FR-208, FR-210, FR-214, C-034, C-036 / UC-054, UC-055 /
+`services/flag-service/flagsmith/killswitch.go` (#2590); `TestKillSwitchTableInSync` keeps it equal to this table.
 
 ## 14. Ownership composition: invalidation and visibility
 

@@ -164,7 +164,24 @@ entity.
    remote value(s) the push replaced. In a pull round a key is skipped (no write; the next pull is unconditional)
    while the document value differs from the last-seen value and equals one of those replaced values: the document
    still shows the pre-push value and is stale. The guard ends once the document shows the pushed value, or after
-   max(10 min, 10 x the poll interval). The next round looks at the key again.
+   max(10 min, 10 x the poll interval). The next round looks at the key again. A push confirmed during a round that
+   read no document (an error, a skipped older document, `304`) also guards the value of the last document read.
+   A whole document whose update time (body `updated_at`, else the `X-Flagsmith-Document-Updated-At` header) is
+   older than the newest one the process already read is a stale copy and is skipped: nothing is written, the pull
+   counts as an error with reason `stale_document`, and the next pull is in full. Only Flagsmith's own times are
+   compared, never the local clock (a Pi without RTC may run at 1970 before NTP); an update time that is not a finite
+   epoch after 1970 or lies beyond year 9999 counts as none, so a garbled value cannot block every later document.
+   The refusal is bounded: one update time ahead of all later ones (Flagsmith's clock skewed forward and corrected, an
+   environment database restore, a garbled but in-range time) would otherwise refuse every document, kill-switch
+   tightenings included, until a restart. Once older documents have been refused in a row for max(10 min, 10 x the
+   poll interval), measured as local elapsed time (the monotonic clock, never a wall-clock comparison, so a local
+   clock at 1970 plays no part), the next older document is accepted and its update time becomes the newest; the
+   link logs a warning `flagsmith stale document accepted`. Any document accepted in between ends the run of
+   refusals; errors and unchanged (`304`) pulls in between do not end it (they return before the update-time
+   check), so after an outage longer than the threshold the first older document is accepted at once. In that one round every kill switch merges the document as after a restart, without its remote value
+   (§6 "R absent" row): it takes the more restrictive of the document and the local value, so an accepted pre-push
+   copy never loosens a kill switch below the local value the link pushed. The generation snapshot and the value
+   guard above still apply to every key in that round.
 7. **Every pulled write is conditional**: it carries the version of the local slot as read, empty slots included, so a
    local write that lands between the read and the apply wins (the pulled write is refused as stale, and the next round
    sees the conflict). Event appends (§4.3) are the one unconditional write.
@@ -370,7 +387,8 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | `use_identity_overrides_in_local_eval` off: game and player values cannot be read back | the link stays offline with reason `identity_overrides_disabled`; documented in the setup |
 | SaaS request limits (`MASTER_API_KEY_THROTTLE_RATE` is a per-deployment setting; the SaaS value is not published) under many games and events | merge per flag and scope, `FLAGSMITH_PUSH_RATE`, honour `429 Retry-After`; to measure with 8 live games (NFR-057) |
 | Edge identity count grows with games on the plan's identity quota | identities deleted at game end and, for games that are not live, after start (§5.1); to verify against the plan |
-| A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round are skipped, and the value guard skips a key whose document value still equals a value its confirmed push replaced (§4.2 step 6); pulled writes are conditional on the local slot (§4.2) |
+| A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round are skipped, and the value guard skips a key whose document value still equals a value its confirmed push replaced (§4.2 step 6); a document whose update time is older than the newest one read is skipped whole (`stale_document`, server time only; §4.2 step 6); pulled writes are conditional on the local slot (§4.2) |
+| One document update time ahead of all later ones (Flagsmith clock skew, an environment database restore, a garbled but in-range time) would refuse every later document as `stale_document`, kill-switch tightenings included | the refusal ends after max(10 min, 10 x poll interval) of refusals in a row, local elapsed time; the older document is then accepted and becomes the newest, with a warning log; in that round kill switches merge without their remote value and take the more restrictive value (§4.2 step 6). Residuals, accepted by the maintainer 2026-11-15 (follow-up #2602): (a) the copy stamped with the too-new time (a cache or region still serving it) is not older, so it is accepted normally and ends the run: served at least once per max(10 min, 10 x poll interval), it keeps the run from ever reaching the threshold and the tightening stays refused as before; served less often, it makes kill switches flap: the accepted older document tightens, then the too-new copy is newer than the accepted time again and merges normally (`R != D`, `R = L` -> apply), a deliberate loosening, and the refusals start over (an operator's kill in Flagsmith takes effect, then is undone for about the threshold, repeatedly). (b) In the accepted round a kill switch whose local value is tighter than the accepted document keeps local and pushes it; when a lagging copy answers that round while Flagsmith already holds a tighter value set during the refusal run, the push overwrites that value in Flagsmith and the operator's value is lost on both sides (as in the "push overwrites a person's change" row, but the window is the whole refusal run). (c) Every non-kill-switch value in the accepted document that differs from the link's remote value while the local value still equals it applies as a change from Flagsmith (a value Flagsmith changed itself as well as a pushed one) until a newer document is read and corrects it; a pushed value is protected only while its value guard lives, and the guard can end before the threshold (the newest document showed the pushed value), as for a document without an update time |
 | A local write to a game or player slot that is empty during a document fetch is not detected by the per-slot version check for that round (game values only; stack and kill-switch slots are fully covered) | accepted; last writer wins |
 | `__future__` flag API is experimental and may change | fallback to the stable `featurestates` endpoints (§4.1 step 3); a contract test against the pinned Flagsmith version |
 | Change requests on the environment make every push fail | A4 of UC-055, reported as out of sync; the stage environment runs without change requests |
