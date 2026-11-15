@@ -3,6 +3,7 @@ package flagsmith
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // The start sequence (UC-054 A3, services.md §7.3 Start, architecture note
@@ -15,12 +16,16 @@ import (
 //     error goes back and no Admin call is made;
 //  2. resolve ids and check the environment (project_mismatch,
 //     identity_overrides_disabled);
-//  3. create the missing features and tags (FR-214);
-//  4. classify the document's values by author (the restart rule, FR-215);
-//  5. check that the project has edge identities (edge_required);
+//  3. check that the project has edge identities (edge_required), a read,
+//     before any project-level write;
+//  4. create the missing features and tags (FR-214);
+//  5. classify the document's values by author (the restart rule, FR-215);
 //  6. the final step: seed the API-key values, record the RestartReport, and
-//     schedule the one-shot stale game identity cleanup (StaleIdentityGrace
-//     after this success; start itself never deletes an identity).
+//     schedule the stale game identity cleanup (start itself never deletes an
+//     identity): it runs once the first game registered (Link.GamesSeen) and
+//     StaleIdentityGrace after this success, whichever is later, and is
+//     retried every staleCleanupRetryEvery, at most staleCleanupRetries
+//     times, while a listing or a delete fails.
 
 func newStarter(l *Link) starter { return &startup{l: l, pace: newAdminPacer(l)} }
 
@@ -42,6 +47,9 @@ func (s *startup) Start(ctx context.Context) error {
 	if err := s.resolveIDs(ctx); err != nil {
 		return err
 	}
+	if err := s.checkEdgeIdentities(ctx); err != nil {
+		return err
+	}
 	if err := s.ensureFeatures(ctx); err != nil {
 		return err
 	}
@@ -49,7 +57,9 @@ func (s *startup) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.checkEdgeIdentities(ctx); err != nil {
+	// A cancel during the last audit call may still have answered: nothing
+	// is seeded by a start that did not end (O7).
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.apply(plan)
@@ -57,9 +67,17 @@ func (s *startup) Start(ctx context.Context) error {
 	return nil
 }
 
-// scheduleCleanup starts the stale identity cleanup in the background: after
-// StaleIdentityGrace, so the coordinator has re-registered its live games
-// (two reconcile periods); liveness is checked again before every delete.
+// Stale identity cleanup retries (FR-211: a listing error or a 5xx delete
+// does not leave the identities for the life of the process).
+const (
+	staleCleanupRetryEvery = 60 * time.Second
+	staleCleanupRetries    = 10
+)
+
+// scheduleCleanup starts the stale identity cleanup in the background, once
+// the coordinator re-registered its games (the first registration, GamesSeen)
+// and StaleIdentityGrace passed, whichever is later; liveness is checked again
+// before every delete. A pass that could not list or delete is retried.
 func (s *startup) scheduleCleanup(ctx context.Context) {
 	done := make(chan struct{})
 	s.mu.Lock()
@@ -70,7 +88,23 @@ func (s *startup) scheduleCleanup(ctx context.Context) {
 		if s.l.Sleep(ctx, StaleIdentityGrace) != nil {
 			return
 		}
-		s.cleanupStaleIdentities(ctx)
+		select {
+		case <-s.l.GamesSeen():
+		case <-ctx.Done():
+			return
+		}
+		for retry := 0; ; retry++ {
+			if s.cleanupStaleIdentities(ctx) || ctx.Err() != nil {
+				return
+			}
+			if retry == staleCleanupRetries {
+				s.l.Logger().Warn("flagsmith stale identities left", "detail", "the cleanup failed after its retries", "retries", staleCleanupRetries)
+				return
+			}
+			if s.l.Sleep(ctx, staleCleanupRetryEvery) != nil {
+				return
+			}
+		}
 	}()
 }
 

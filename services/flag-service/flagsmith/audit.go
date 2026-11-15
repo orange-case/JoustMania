@@ -37,7 +37,14 @@ var envLogPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^New version published for feature: (.+)$`),
 	regexp.MustCompile(`^Flag state / Remote config updated for feature: (.+?) by Change Request: .*$`),
 	regexp.MustCompile(`^Scheduled change to Flag state / Remote config value went live for feature: (.+?) by Change Request: .*$`),
+	releasePipelinePattern,
 }
+
+// releasePipelinePattern matches FEATURE_STATE_UPDATED_BY_RELEASE_PIPELINE_MESSAGE
+// ("... for feature: %s by Release pipeline: %s (stage: %s)"). A configured
+// release pipeline is a deliberate change: such a row counts as a person's,
+// whatever its author field says.
+var releasePipelinePattern = regexp.MustCompile(`^Flag state / Remote config updated for feature: (.+?) by Release pipeline: .*$`)
 
 // overrideLogPattern matches an edge identity override row; group 1 is the
 // feature name, group 2 the identity's identifier. Core-identity rows are not
@@ -68,6 +75,15 @@ func (r auditRow) author() Author {
 	return AuthorPerson
 }
 
+// attributed is the author the restart rule uses: a release pipeline's row is
+// a person's, any other row author().
+func (r auditRow) attributed() Author {
+	if releasePipelinePattern.MatchString(r.Log) {
+		return AuthorPerson
+	}
+	return r.author()
+}
+
 // key returns the value the row is about.
 func (r auditRow) key() (authorKey, bool) {
 	if m := overrideLogPattern.FindStringSubmatch(r.Log); m != nil {
@@ -84,7 +100,8 @@ func (r auditRow) key() (authorKey, bool) {
 // latestAuthors finds the author of the latest audit row of each wanted
 // value: the newest-first scan (auditMaxPages pages), then one search per
 // feature still missing. ok is false when an audit call did not answer 200
-// (after retries); a 401 or a cancel is returned as the error (link down).
+// (after retries; a 401 too: an audit error never takes the link down,
+// architecture note §5.1); only a cancel is returned as the error.
 // A value with no row is absent from the map.
 func (s *startup) latestAuthors(ctx context.Context, want map[authorKey]bool) (map[authorKey]Author, bool, error) {
 	found := map[authorKey]Author{}
@@ -129,7 +146,7 @@ func (s *startup) scanAudit(ctx context.Context, path string, pages int, want ma
 		}
 		_, _, err := s.pace.call(ctx, http.MethodGet, path+"&page="+strconv.Itoa(page), nil, &p, true, nil)
 		if err != nil {
-			if ctx.Err() != nil || httpStatus(err) == http.StatusUnauthorized {
+			if ctx.Err() != nil {
 				return false, err
 			}
 			s.l.Logger().Warn("flagsmith audit log not readable", "reason", Reason(err))
@@ -141,7 +158,7 @@ func (s *startup) scanAudit(ctx context.Context, path string, pages int, want ma
 				continue
 			}
 			if _, has := found[k]; !has {
-				found[k] = r.author()
+				found[k] = r.attributed()
 			}
 		}
 		if len(found) >= len(want) || p.Next == nil || *p.Next == "" {

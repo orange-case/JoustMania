@@ -341,7 +341,7 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 		f, err := s.createFeature(ctx, k, p, tagID)
 		switch {
 		case err == nil:
-			s.setFeatureID(p.Key, f.ID)
+			s.setFeatureID(k, f.ID)
 		case ctx.Err() != nil:
 			return err
 		case httpStatus(err) == http.StatusBadRequest && alreadyExists(err) && !relisted:
@@ -379,14 +379,26 @@ func (s *startup) useExisting(k Key, f fsFeature) {
 	case f.IsArchived:
 		s.refuse(k, ReasonFeatureArchived)
 	default:
-		s.setFeatureID(k.Flag, f.ID)
+		s.setFeatureID(k, f.ID)
 	}
 }
 
-func (s *startup) setFeatureID(key string, id int) {
+// setFeatureID records k's feature id and clears a refusal an earlier,
+// failed start run left on k (feature_create_*, feature_name_case,
+// feature_archived): the feature exists and is usable now (O7, every step
+// idempotent).
+func (s *startup) setFeatureID(k Key, id int) {
 	s.l.ids.Lock()
-	s.l.ids.FeatureID[key] = id
+	s.l.ids.FeatureID[k.Flag] = id
 	s.l.ids.Unlock()
+	if r, side := s.l.links.Refusal(k); side == SideRemote && isStartRefusal(r) {
+		s.l.links.ClearRefusal(k)
+	}
+}
+
+// isStartRefusal: a refusal reason only the start sequence sets.
+func isStartRefusal(reason string) bool {
+	return strings.HasPrefix(reason, "feature_create_") || reason == ReasonFeatureNameCase || reason == ReasonFeatureArchived
 }
 
 // refuse marks k refused on the remote side with a warning.

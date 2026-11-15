@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -23,37 +25,47 @@ import (
 
 // --- fixtures ---------------------------------------------------------------
 
-// fakeClock is the start's clock: Sleep records the wait and moves the clock;
-// the stale identity grace waits for release (or the end of the test).
-type fakeClock struct {
+// startClock is the start's clock: Sleep records the wait and moves the clock;
+// the stale identity grace waits for release (or the end of the test), and,
+// when backoff is set, the link's first backoff (BackoffMin) waits for it.
+type startClock struct {
 	mu      sync.Mutex
 	now     time.Time
 	sleeps  []time.Duration
 	release chan struct{}
+	backoff chan struct{}
 	// hook runs once at the next Sleep (one-shot).
 	hook func()
 }
 
-func (c *fakeClock) onNextSleep(f func()) {
+func (c *startClock) onNextSleep(f func()) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.hook = f
 }
 
-func newFakeClock() *fakeClock {
-	return &fakeClock{now: time.Date(2026, 11, 15, 18, 0, 0, 0, time.UTC), release: make(chan struct{})}
+func newStartClock() *startClock {
+	return &startClock{now: time.Date(2026, 11, 15, 18, 0, 0, 0, time.UTC), release: make(chan struct{})}
 }
 
-func (c *fakeClock) Now() time.Time {
+func (c *startClock) Now() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.now
 }
 
-func (c *fakeClock) Sleep(ctx context.Context, d time.Duration) error {
-	if d == StaleIdentityGrace {
+func (c *startClock) Sleep(ctx context.Context, d time.Duration) error {
+	c.mu.Lock()
+	gate := c.release
+	if d == BackoffMin {
+		gate = c.backoff
+	} else if d != StaleIdentityGrace {
+		gate = nil
+	}
+	c.mu.Unlock()
+	if gate != nil {
 		select {
-		case <-c.release:
+		case <-gate:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -72,14 +84,15 @@ func (c *fakeClock) Sleep(ctx context.Context, d time.Duration) error {
 	return ctx.Err()
 }
 
-func (c *fakeClock) got() []time.Duration {
+func (c *startClock) got() []time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]time.Duration(nil), c.sleeps...)
 }
 
 // fakeAdmin serves the Admin API endpoints of the start sequence on a
-// flagsmithtest.Fake.
+// flagsmithtest.Fake with the state and failures the start tests script
+// (the fake's default start-up routes serve every other link test).
 type fakeAdmin struct {
 	f *flagsmithtest.Fake
 
@@ -90,11 +103,15 @@ type fakeAdmin struct {
 	tagPages    [][]fsTag
 	audit       []map[string]any // newest first
 	auditStatus int
-	auditNext   bool // every audit page says there is a next one
-	audit429    int  // the first audit calls answer 429 Retry-After 3
-	edgeStatus  []int
+	auditNext   bool  // every audit page says there is a next one
+	audit429    int   // the first audit calls answer 429 Retry-After 3
+	edgeStatus  []int // statuses of the next edge checks (page_size=1)
+	listStatus  []int // statuses of the next cleanup listings
+	listFail    bool  // every cleanup listing answers 500
 	identities  [][]edgeIdentity
 	onDelete    func(uuid string)
+	delStatus   map[string][]int // uuid -> statuses of its next deletes
+	onAudit     func()
 	create      func(name string, attempt int) (int, string) // status, body; 0: created
 	attempts    map[string]int
 	posts       []map[string]any
@@ -111,10 +128,11 @@ const (
 func newFakeAdmin(t *testing.T) *fakeAdmin {
 	t.Helper()
 	a := &fakeAdmin{
-		f:        flagsmithtest.New(t),
-		env:      map[string]any{"id": testEnvID, "name": "stage", "project": testProjectID, "use_v2_feature_versioning": false, "use_identity_overrides_in_local_eval": true},
-		attempts: map[string]int{},
-		nextID:   1000,
+		f:         flagsmithtest.New(t),
+		env:       map[string]any{"id": testEnvID, "name": "stage", "project": testProjectID, "use_v2_feature_versioning": false, "use_identity_overrides_in_local_eval": true},
+		attempts:  map[string]int{},
+		delStatus: map[string][]int{},
+		nextID:    1000,
 	}
 	p := flagsmithtest.APIPath
 	a.f.Handle("GET "+p+"environments/{key}/{$}", a.environment)
@@ -126,12 +144,6 @@ func newFakeAdmin(t *testing.T) *fakeAdmin {
 	a.f.Handle("POST "+p+"projects/{pid}/tags/{$}", a.tagCreate)
 	a.f.Handle("GET "+p+"projects/{pid}/audit/{$}", a.auditList)
 	return a
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }
 
 func pageOf(r *http.Request) int {
@@ -146,28 +158,37 @@ func (a *fakeAdmin) environment(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.envStatus != 0 {
-		writeJSON(w, a.envStatus, map[string]any{"detail": "no"})
+		flagsmithtest.WriteJSON(w, a.envStatus, map[string]any{"detail": "no"})
 		return
 	}
-	writeJSON(w, 200, a.env)
+	flagsmithtest.WriteJSON(w, 200, a.env)
 }
 
 func (a *fakeAdmin) edgeList(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
-	if len(a.edgeStatus) > 0 {
-		st := a.edgeStatus[0]
-		a.edgeStatus = a.edgeStatus[1:]
+	if r.URL.Query().Get("page_size") == "1" {
+		st := 200
+		if len(a.edgeStatus) > 0 {
+			st, a.edgeStatus = a.edgeStatus[0], a.edgeStatus[1:]
+		}
 		a.mu.Unlock()
 		if st != 200 {
-			writeJSON(w, st, map[string]any{"detail": "Dynamo DB is not enabled for this project"})
+			flagsmithtest.WriteJSON(w, st, map[string]any{"detail": "Dynamo DB is not enabled for this project"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"results": []any{}, "last_evaluated_key": nil})
+		flagsmithtest.WriteJSON(w, 200, map[string]any{"results": []any{}, "last_evaluated_key": nil})
 		return
 	}
-	if r.URL.Query().Get("page_size") == "1" {
+	st := 200
+	if len(a.listStatus) > 0 {
+		st, a.listStatus = a.listStatus[0], a.listStatus[1:]
+	}
+	if a.listFail {
+		st = 500
+	}
+	if st != 200 {
 		a.mu.Unlock()
-		writeJSON(w, 200, map[string]any{"results": []any{}, "last_evaluated_key": nil})
+		flagsmithtest.WriteJSON(w, st, map[string]any{"detail": "list"})
 		return
 	}
 	i := 0
@@ -183,16 +204,33 @@ func (a *fakeAdmin) edgeList(w http.ResponseWriter, r *http.Request) {
 		next = "p" + strconv.Itoa(i+1)
 	}
 	a.mu.Unlock()
-	writeJSON(w, 200, map[string]any{"results": page, "last_evaluated_key": next})
+	flagsmithtest.WriteJSON(w, 200, map[string]any{"results": page, "last_evaluated_key": next})
 }
 
 func (a *fakeAdmin) edgeDelete(w http.ResponseWriter, r *http.Request) {
+	uuid := r.PathValue("uuid")
 	a.mu.Lock()
-	a.deletes = append(a.deletes, r.PathValue("uuid"))
+	if q := a.delStatus[uuid]; len(q) > 0 {
+		a.delStatus[uuid] = q[1:]
+		a.mu.Unlock()
+		flagsmithtest.WriteJSON(w, q[0], map[string]any{"detail": "delete"})
+		return
+	}
+	a.deletes = append(a.deletes, uuid)
+	// A deleted identity is no longer listed.
+	for i, page := range a.identities {
+		kept := page[:0:0]
+		for _, id := range page {
+			if id.IdentityUUID != uuid {
+				kept = append(kept, id)
+			}
+		}
+		a.identities[i] = kept
+	}
 	onDelete := a.onDelete
 	a.mu.Unlock()
 	if onDelete != nil {
-		onDelete(r.PathValue("uuid"))
+		onDelete(uuid)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -200,7 +238,7 @@ func (a *fakeAdmin) edgeDelete(w http.ResponseWriter, r *http.Request) {
 func (a *fakeAdmin) featureList(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	writeJSON(w, 200, map[string]any{"count": len(a.features), "next": nil, "results": a.features})
+	flagsmithtest.WriteJSON(w, 200, map[string]any{"count": len(a.features), "next": nil, "results": a.features})
 }
 
 func (a *fakeAdmin) featureCreate(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +252,7 @@ func (a *fakeAdmin) featureCreate(w http.ResponseWriter, r *http.Request) {
 	a.mu.Unlock()
 	if create != nil {
 		if st, msg := create(name, attempt); st != 0 {
-			writeJSON(w, st, map[string]any{"name": []string{msg}})
+			flagsmithtest.WriteJSON(w, st, map[string]any{"name": []string{msg}})
 			return
 		}
 	}
@@ -224,7 +262,7 @@ func (a *fakeAdmin) featureCreate(w http.ResponseWriter, r *http.Request) {
 	a.nextID++
 	f := fsFeature{ID: a.nextID, Name: name}
 	a.features = append(a.features, f)
-	writeJSON(w, 201, f)
+	flagsmithtest.WriteJSON(w, 201, f)
 }
 
 func (a *fakeAdmin) tagList(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +277,7 @@ func (a *fakeAdmin) tagList(w http.ResponseWriter, r *http.Request) {
 	if n < len(a.tagPages) {
 		next = "more"
 	}
-	writeJSON(w, 200, map[string]any{"next": next, "results": results})
+	flagsmithtest.WriteJSON(w, 200, map[string]any{"next": next, "results": results})
 }
 
 func (a *fakeAdmin) tagCreate(w http.ResponseWriter, r *http.Request) {
@@ -249,20 +287,26 @@ func (a *fakeAdmin) tagCreate(w http.ResponseWriter, r *http.Request) {
 	defer a.mu.Unlock()
 	a.tagPosts = append(a.tagPosts, body)
 	a.nextID++
-	writeJSON(w, 201, map[string]any{"id": a.nextID, "label": body["label"]})
+	flagsmithtest.WriteJSON(w, 201, map[string]any{"id": a.nextID, "label": body["label"]})
 }
 
 func (a *fakeAdmin) auditList(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	onAudit := a.onAudit
+	a.mu.Unlock()
+	if onAudit != nil {
+		onAudit()
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.audit429 > 0 {
 		a.audit429--
 		w.Header().Set("Retry-After", "3")
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{"detail": "throttled"})
+		flagsmithtest.WriteJSON(w, http.StatusTooManyRequests, map[string]any{"detail": "throttled"})
 		return
 	}
 	if a.auditStatus != 0 {
-		writeJSON(w, a.auditStatus, map[string]any{"detail": "audit"})
+		flagsmithtest.WriteJSON(w, a.auditStatus, map[string]any{"detail": "audit"})
 		return
 	}
 	rows := a.audit
@@ -284,7 +328,7 @@ func (a *fakeAdmin) auditList(w http.ResponseWriter, r *http.Request) {
 	if hi < len(rows) || a.auditNext {
 		next = "more"
 	}
-	writeJSON(w, 200, map[string]any{"next": next, "results": rows[lo:hi]})
+	flagsmithtest.WriteJSON(w, 200, map[string]any{"next": next, "results": rows[lo:hi]})
 }
 
 func (a *fakeAdmin) postNames() []string {
@@ -310,7 +354,7 @@ func fstate(name string, enabled bool, value any) map[string]any {
 	return map[string]any{"feature": map[string]any{"id": 1, "name": name, "type": "STANDARD"}, "enabled": enabled, "feature_segment": nil, "feature_state_value": value}
 }
 
-func override(identifier, uuid string, states ...map[string]any) map[string]any {
+func identityOverride(identifier, uuid string, states ...map[string]any) map[string]any {
 	return map[string]any{"identifier": identifier, "identity_uuid": uuid, "identity_features": states}
 }
 
@@ -330,7 +374,7 @@ type startEnv struct {
 	l     *Link
 	s     *startup
 	admin *fakeAdmin
-	clock *fakeClock
+	clock *startClock
 	st    *state.State
 	reg   *registry.Registry
 	logs  *syncBuffer
@@ -371,7 +415,7 @@ func newStartEnv(t *testing.T) *startEnv {
 		t.Fatal(err)
 	}
 	a := newFakeAdmin(t)
-	clk := newFakeClock()
+	clk := newStartClock()
 	logs := &syncBuffer{}
 	cfg := testConfig(a.f)
 	l, err := New(cfg, Deps{State: st, Logger: slog.New(slog.NewTextHandler(logs, nil)), Now: clk.Now, Sleep: clk.Sleep})
@@ -387,6 +431,22 @@ func newStartEnv(t *testing.T) *startEnv {
 		}
 	})
 	return &startEnv{l: l, s: s, admin: a, clock: clk, st: st, reg: reg, logs: logs, ctx: ctx}
+}
+
+// waitStatus polls Status until one snapshot satisfies ok.
+func waitStatus(t *testing.T, l *Link, ok func(Status) bool, want string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		st := l.Status()
+		if ok(st) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status %+v, want %s", st, want)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // allFeaturesExist makes every registry flag an existing feature.
@@ -444,12 +504,16 @@ func TestStartPingAndChecks(t *testing.T) {
 			t.Fatalf("Start %v, want identity_overrides_disabled", err)
 		}
 	})
-	t.Run("UC-054/A3 a project without edge identities keeps the link offline (edge_required)", func(t *testing.T) {
+	t.Run("UC-054/A3 a project without edge identities keeps the link offline (edge_required) before any write", func(t *testing.T) {
 		e := newStartEnv(t)
-		e.allFeaturesExist()
 		e.admin.edgeStatus = []int{400}
 		if err := e.s.Start(e.ctx); Reason(err) != ReasonEdgeRequired {
 			t.Fatalf("Start %v, want edge_required", err)
+		}
+		// The check is a read right after the ids: no feature or tag is
+		// created (project-level writes) in a project that cannot link.
+		if n := len(e.admin.f.RequestsTo(http.MethodPost, "")); n != 0 {
+			t.Fatalf("%d POSTs before edge_required, want 0 (posts %v)", n, e.admin.postNames())
 		}
 		if _, _, ok := e.l.RestartReport(); ok {
 			t.Fatal("restart report recorded by a failed start")
@@ -459,16 +523,26 @@ func TestStartPingAndChecks(t *testing.T) {
 		e := newStartEnv(t)
 		e.allFeaturesExist()
 		e.admin.env["project"] = 99
+		// The real start with test doubles for the in and out sides
+		// (link_test.go): this case does not depend on #2589 / #2590.
+		e.l.in, e.l.out = &scriptedIn{}, &idleOut{}
+		// The first backoff holds until the project is fixed, so the link
+		// stays offline while the test reads it; one snapshot must show both
+		// the mode and the reason.
+		backoff := make(chan struct{})
+		e.clock.mu.Lock()
+		e.clock.backoff = backoff
+		e.clock.mu.Unlock()
 		ctx, cancel := context.WithCancel(e.ctx)
 		defer cancel()
 		done := runLink(ctx, e.l)
-		waitMode(t, e.l, ModeOffline)
-		if st := e.l.Status(); st.OfflineReason != ReasonProjectMismatch {
-			t.Fatalf("status %+v, want offline project_mismatch", st)
-		}
+		waitStatus(t, e.l, func(st Status) bool {
+			return st.Link == ModeOffline && st.OfflineReason == ReasonProjectMismatch
+		}, "offline project_mismatch")
 		e.admin.mu.Lock()
 		e.admin.env["project"] = testProjectID
 		e.admin.mu.Unlock()
+		close(backoff)
 		waitMode(t, e.l, ModeOnline)
 		if st := e.l.Status(); st.RestartRule != RestartAuditLog || st.Environment != "stage" {
 			t.Fatalf("status %+v, want restart_rule audit_log, environment stage", st)
@@ -624,21 +698,79 @@ func TestStartCreatesFeatures(t *testing.T) {
 			t.Fatalf("5xx create tried %d times, want %d", tries, transientAttempts)
 		}
 	})
-	t.Run("UC-054/A3 a re-run after a failed start creates only what is still missing", func(t *testing.T) {
+	t.Run("UC-054/A3 a re-run after a failed start creates only what is still missing and clears its refusals", func(t *testing.T) {
 		e := newStartEnv(t)
-		e.admin.edgeStatus = []int{503}
-		if err := e.s.Start(e.ctx); err == nil {
-			t.Fatal("Start passed with the edge identity check failing")
+		e.admin.f.SetDocument(testDocument([]map[string]any{fstate("experiment_tick_seconds", true, 10)}, nil), "")
+		e.admin.create = func(name string, attempt int) (int, string) {
+			if name == "experiment_tick_seconds" && attempt <= transientAttempts {
+				return 503, "busy"
+			}
+			return 0, ""
+		}
+		// The first run ends during the audit read, after the features step.
+		ctx, cancel := context.WithCancel(e.ctx)
+		defer cancel()
+		e.admin.onAudit = cancel
+		if err := e.s.Start(ctx); err == nil {
+			t.Fatal("Start passed although it was cancelled")
 		}
 		first := len(e.admin.postNames())
-		if first != len(e.reg.Policies()) {
-			t.Fatalf("first start created %d, want %d", first, len(e.reg.Policies()))
+		if first != len(e.reg.Policies())-1 {
+			t.Fatalf("first start created %d, want %d (all but the failing one)", first, len(e.reg.Policies())-1)
 		}
+		if r, _ := e.l.Links().Refusal(kTick); r != ReasonFeatureCreateFailed {
+			t.Fatalf("tick refusal %q after the first run, want feature_create_failed", r)
+		}
+		e.admin.mu.Lock()
+		e.admin.onAudit = nil
+		e.admin.mu.Unlock()
 		if err := e.s.Start(e.ctx); err != nil {
 			t.Fatal(err)
 		}
-		if n := len(e.admin.postNames()); n != first {
-			t.Fatalf("re-run created %d more features, want 0", n-first)
+		if posts := e.admin.postNames(); len(posts) != first+1 || posts[first] != "experiment_tick_seconds" {
+			t.Fatalf("re-run created %v, want only experiment_tick_seconds", posts[first:])
+		}
+		if r, side := e.l.Links().Refusal(kTick); r != "" {
+			t.Fatalf("tick still refused %q %q after the re-run created it", r, side)
+		}
+		if _, _, refused := e.l.Links().Counts(); refused != 0 {
+			t.Fatalf("%d keys counted refused after the re-run, want 0", refused)
+		}
+	})
+	t.Run("UC-054/A3 a re-run that finds a fixed feature clears its refusal", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.allFeaturesExist()
+		e.admin.mu.Lock()
+		for i, f := range e.admin.features {
+			if f.Name == "decision.backend" {
+				e.admin.features[i].IsArchived = true
+			}
+		}
+		e.admin.mu.Unlock()
+		e.admin.f.SetDocument(testDocument([]map[string]any{fstate("experiment_tick_seconds", true, 10)}, nil), "")
+		ctx, cancel := context.WithCancel(e.ctx)
+		defer cancel()
+		e.admin.onAudit = cancel
+		if err := e.s.Start(ctx); err == nil {
+			t.Fatal("Start passed although it was cancelled")
+		}
+		if r, _ := e.l.Links().Refusal(kBackend); r != ReasonFeatureArchived {
+			t.Fatalf("backend refusal %q, want feature_archived", r)
+		}
+		// A person unarchives the feature before the re-run.
+		e.admin.mu.Lock()
+		e.admin.onAudit = nil
+		for i, f := range e.admin.features {
+			if f.Name == "decision.backend" {
+				e.admin.features[i].IsArchived = false
+			}
+		}
+		e.admin.mu.Unlock()
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if r, _ := e.l.Links().Refusal(kBackend); r != "" {
+			t.Fatalf("backend still refused %q after the re-run found it usable", r)
 		}
 	})
 }
@@ -655,8 +787,8 @@ func TestStartRestartRule(t *testing.T) {
 			fstate("not.a.registry.flag", true, "x"),        // no registry row: ignored
 		},
 		[]map[string]any{
-			override("game:g1", "u-g1", fstate("pacing_profile", true, "calm"), fstate("end_game", true, `{"x":1}`)),
-			override("game:g2", "u-g2", fstate("pacing_profile", true, "frantic")),
+			identityOverride("game:g1", "u-g1", fstate("pacing_profile", true, "calm"), fstate("end_game", true, `{"x":1}`)),
+			identityOverride("game:g2", "u-g2", fstate("pacing_profile", true, "frantic")),
 		},
 	)
 	rows := []map[string]any{
@@ -736,6 +868,24 @@ func TestStartRestartRule(t *testing.T) {
 			t.Fatal("a system event's value was seeded")
 		}
 	})
+	t.Run("UC-054/A3 BR-006 a release pipeline's change counts as a person's", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.allFeaturesExist()
+		e.admin.f.SetDocument(testDocument([]map[string]any{fstate("experiment_tick_seconds", true, 10)}, nil), "")
+		e.admin.audit = []map[string]any{
+			auditRowOf("Flag state / Remote config updated for feature: experiment_tick_seconds by Release pipeline: rp1 (stage: prod)", ""),
+			auditRowOf("Flag state updated for feature: experiment_tick_seconds", ""),
+		}
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if rule, a, _ := e.l.RestartReport(); rule != RestartAuditLog || a[kTick] != AuthorPerson {
+			t.Fatalf("rule %q author %q, want audit_log person (the pipeline row is the latest)", rule, a[kTick])
+		}
+		if _, ok := e.l.Links().Remote(kTick); ok {
+			t.Fatal("a release pipeline's value was seeded (it would be cleared)")
+		}
+	})
 	t.Run("UC-054/A3 a row beyond the scan is found by the per-feature search", func(t *testing.T) {
 		e := newStartEnv(t)
 		e.allFeaturesExist()
@@ -801,7 +951,7 @@ func TestStartRestartRule(t *testing.T) {
 			t.Fatalf("%d restart_rule_degraded warnings, want 1:\n%s", n, e.logs.String())
 		}
 	})
-	t.Run("UC-054/A3 audit 500: degraded, the link still starts; audit 401: link down", func(t *testing.T) {
+	t.Run("UC-054/A3 audit 500 or 401: degraded, the link still starts (an audit error never takes it down)", func(t *testing.T) {
 		e := newStartEnv(t)
 		e.allFeaturesExist()
 		e.admin.f.SetDocument(doc, "")
@@ -820,8 +970,16 @@ func TestStartRestartRule(t *testing.T) {
 		e2.allFeaturesExist()
 		e2.admin.f.SetDocument(doc, "")
 		e2.admin.auditStatus = 401
-		if err := e2.s.Start(e2.ctx); Reason(err) != ReasonUnauthorized {
-			t.Fatalf("Start %v with audit 401, want unauthorized", err)
+		if err := e2.s.Start(e2.ctx); err != nil {
+			t.Fatalf("Start %v with audit 401, want success (degraded; architecture note §5.1)", err)
+		}
+		if rule, _, _ := e2.l.RestartReport(); rule != RestartDegraded {
+			t.Fatalf("rule %q with audit 401, want degraded", rule)
+		}
+		for _, k := range e2.l.Links().Keys() {
+			if _, ok := e2.l.Links().Remote(k); ok {
+				t.Fatalf("%v seeded with the audit log unreadable", k)
+			}
 		}
 	})
 	t.Run("UC-054/A3 versioning v2: the version-published row decides; no row is unknown, never API key (O3)", func(t *testing.T) {
@@ -855,15 +1013,23 @@ func TestStartRestartRule(t *testing.T) {
 		e.allFeaturesExist()
 		e.admin.f.SetDocument(doc, "")
 		e.admin.audit = rows
-		e.admin.edgeStatus = []int{503}
-		if err := e.s.Start(e.ctx); err == nil {
-			t.Fatal("Start passed with the edge identity check failing")
+		ctx, cancel := context.WithCancel(e.ctx)
+		defer cancel()
+		e.admin.onAudit = cancel // the run ends during the audit read
+		if err := e.s.Start(ctx); err == nil {
+			t.Fatal("Start passed although it was cancelled")
 		}
 		for _, k := range e.l.Links().Keys() {
 			if _, ok := e.l.Links().Remote(k); ok {
 				t.Fatalf("%v seeded by a failed start", k)
 			}
 		}
+		if _, _, ok := e.l.RestartReport(); ok {
+			t.Fatal("restart report recorded by a failed start")
+		}
+		e.admin.mu.Lock()
+		e.admin.onAudit = nil
+		e.admin.mu.Unlock()
 		if err := e.s.Start(e.ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -877,6 +1043,7 @@ func TestStartRestartRule(t *testing.T) {
 func TestStartStaleIdentities(t *testing.T) {
 	t.Run("UC-054/A3 start never deletes; after the grace only unregistered game identities go (O1)", func(t *testing.T) {
 		e := newStartEnv(t)
+		e.st.SetObserver(e.l)
 		e.allFeaturesExist()
 		e.admin.identities = [][]edgeIdentity{
 			{{IdentityUUID: "u1", Identifier: "game:g1"}, {IdentityUUID: "u2", Identifier: "game:g1:S1"}, {IdentityUUID: "u3", Identifier: "game:dead"}},
@@ -934,6 +1101,174 @@ func TestStartStaleIdentities(t *testing.T) {
 	})
 }
 
+// waitCleanup waits for the scheduled cleanup to end.
+func (e *startEnv) waitCleanup(t *testing.T) {
+	t.Helper()
+	select {
+	case <-e.s.cleanupDone():
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup did not end")
+	}
+}
+
+func (e *startEnv) deleted() string {
+	e.admin.mu.Lock()
+	defer e.admin.mu.Unlock()
+	return strings.Join(e.admin.deletes, ",")
+}
+
+func (e *startEnv) sleepsOf(d time.Duration) int {
+	n := 0
+	for _, s := range e.clock.got() {
+		if s == d {
+			n++
+		}
+	}
+	return n
+}
+
+// UC: UC-054 A3, FR-211
+func TestStartStaleIdentityTrigger(t *testing.T) {
+	t.Run("UC-054/A3 after the grace the cleanup still waits for the first registration (whichever is later)", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.st.SetObserver(e.l)
+		e.allFeaturesExist()
+		e.admin.identities = [][]edgeIdentity{{{IdentityUUID: "u1", Identifier: "game:g1"}, {IdentityUUID: "u3", Identifier: "game:dead"}}}
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		close(e.clock.release)
+		time.Sleep(200 * time.Millisecond)
+		select {
+		case <-e.s.cleanupDone():
+			t.Fatal("cleanup ended before any game registered")
+		default:
+		}
+		if n := len(e.admin.f.RequestsTo(http.MethodDelete, "")); n != 0 {
+			t.Fatalf("%d deletes before the first registration, want 0 (every live game would be deleted)", n)
+		}
+		if _, err := e.st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "real"}); err != nil {
+			t.Fatal(err)
+		}
+		e.waitCleanup(t)
+		if got := e.deleted(); got != "u3" {
+			t.Fatalf("deleted %s, want u3", got)
+		}
+	})
+}
+
+// UC: UC-054 A3, FR-211
+func TestStartStaleIdentityRetry(t *testing.T) {
+	t.Run("UC-054/A3 a listing error or a 5xx delete is retried every 60 s", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.st.SetObserver(e.l)
+		e.allFeaturesExist()
+		e.admin.identities = [][]edgeIdentity{{{IdentityUUID: "u3", Identifier: "game:dead"}, {IdentityUUID: "u4", Identifier: "game:dead2"}}}
+		// Pass 1: the listing fails (every transient attempt); pass 2: the
+		// delete of u4 fails (every attempt); pass 3 deletes it.
+		e.admin.listStatus = []int{500, 500, 500}
+		e.admin.delStatus["u4"] = []int{503, 503, 503}
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "real"}); err != nil {
+			t.Fatal(err)
+		}
+		close(e.clock.release)
+		e.waitCleanup(t)
+		if got := e.deleted(); got != "u3,u4" {
+			t.Fatalf("deleted %s, want u3,u4", got)
+		}
+		if n := e.sleepsOf(staleCleanupRetryEvery); n != 2 {
+			t.Fatalf("%d retry waits of %s, want 2", n, staleCleanupRetryEvery)
+		}
+	})
+	t.Run("UC-054/A3 a cleanup failing every time stops after 10 retries with a warning", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.st.SetObserver(e.l)
+		e.allFeaturesExist()
+		e.admin.listFail = true
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "real"}); err != nil {
+			t.Fatal(err)
+		}
+		close(e.clock.release)
+		e.waitCleanup(t)
+		if n := e.sleepsOf(staleCleanupRetryEvery); n != staleCleanupRetries {
+			t.Fatalf("%d retry waits, want %d", n, staleCleanupRetries)
+		}
+		lists := 0
+		for _, r := range e.admin.f.RequestsTo(http.MethodGet, flagsmithtest.APIPath+"environments/envkey123/edge-identities/") {
+			if strings.Contains(r.Query, "page_size=100") {
+				lists++
+			}
+		}
+		if want := (staleCleanupRetries + 1) * transientAttempts; lists != want {
+			t.Fatalf("%d listing requests, want %d (one pass and %d retries, %d attempts each)", lists, want, staleCleanupRetries, transientAttempts)
+		}
+		if !strings.Contains(e.logs.String(), "flagsmith stale identities left") {
+			t.Fatalf("no warning after the last retry:\n%s", e.logs.String())
+		}
+	})
+}
+
+// UC: UC-054 BR-005
+// The restart rule's kill switches equal the first column of the flags.md
+// §13.6 kill-switch table (the same table drives the in side, #2590).
+func TestRestartKillSwitchesMatchTable(t *testing.T) {
+	_, file, _, _ := runtime.Caller(0)
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "docs", "specs", "flags.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	const anchor = "**Kill switches and their order**"
+	i := strings.Index(doc, anchor)
+	if i < 0 {
+		t.Fatalf("flags.md: the anchor %s is missing", anchor)
+	}
+	name := regexp.MustCompile("`([^`]+)`")
+	table := map[string]bool{}
+	inTable := false
+	for _, line := range strings.Split(doc[i:], "\n") {
+		if !strings.HasPrefix(line, "|") {
+			if inTable {
+				break
+			}
+			continue
+		}
+		inTable = true
+		cells := strings.Split(line, "|")
+		if len(cells) < 3 {
+			continue
+		}
+		first := strings.TrimSpace(cells[1])
+		if first == "Flag" || strings.HasPrefix(first, "---") {
+			continue
+		}
+		for _, m := range name.FindAllStringSubmatch(first, -1) {
+			table[m[1]] = true
+		}
+	}
+	if len(table) < 10 {
+		t.Fatalf("flags.md §13.6: %d kill switches parsed, want the whole table (anchor drift?): %v", len(table), table)
+	}
+	t.Run("UC-054/BR-005 restartKillSwitches equals the flags.md §13.6 table", func(t *testing.T) {
+		for k := range table {
+			if !restartKillSwitches[k] {
+				t.Errorf("%s is in the §13.6 table but not a restart kill switch", k)
+			}
+		}
+		for k := range restartKillSwitches {
+			if !table[k] {
+				t.Errorf("%s is a restart kill switch but not in the §13.6 table", k)
+			}
+		}
+	})
+}
+
 // UC: UC-054 A3
 func TestStartPacing(t *testing.T) {
 	t.Run("UC-054/A3 a 429 waits its Retry-After; calls are paced at PUSH_RATE; no key in the logs", func(t *testing.T) {
@@ -984,6 +1319,7 @@ func TestAuditLogPatterns(t *testing.T) {
 		"New version published for feature: a.b":                                                               {feature: "a.b"},
 		"Flag state / Remote config updated for feature: a.b by Change Request: cr 1":                          {feature: "a.b"},
 		"Scheduled change to Flag state / Remote config value went live for feature: a.b by Change Request: x": {feature: "a.b"},
+		"Flag state / Remote config updated for feature: a.b by Release pipeline: rp 1 (stage: s1)":            {feature: "a.b"},
 		"Feature override created for feature 'a.b' and identity 'game:g1:00:06:f7'":                           {feature: "a.b", identity: "game:g1:00:06:f7"},
 		"Feature override deleted for feature 'a.b' and identity 'real'":                                       {feature: "a.b", identity: "real"},
 	}
@@ -1003,6 +1339,13 @@ func TestAuditLogPatterns(t *testing.T) {
 			(auditRow{Author: json.RawMessage(`{"id":1}`)}).author() != AuthorPerson ||
 			(auditRow{}).author() != AuthorPerson {
 			t.Fatal("author mapping")
+		}
+		pipeline := auditRow{Log: "Flag state / Remote config updated for feature: a.b by Release pipeline: rp (stage: s)", Author: json.RawMessage("null")}
+		if pipeline.attributed() != AuthorPerson {
+			t.Fatal("a release pipeline row with a null author attributed to an API key, want person")
+		}
+		if (auditRow{Log: "Flag state updated for feature: a.b", Author: json.RawMessage("null")}).attributed() != AuthorAPIKey {
+			t.Fatal("attributed changed the author of an ordinary row")
 		}
 	})
 }

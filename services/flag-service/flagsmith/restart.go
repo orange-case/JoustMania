@@ -40,11 +40,6 @@ import (
 // (O1, services.md §7.3 Start).
 const StaleIdentityGrace = 45 * time.Second
 
-// ReasonEdgeRequired is the offline reason of a project without edge
-// identities (Flagsmith answers
-// DynamoNotEnabled), so game and player overrides cannot be held (O8).
-const ReasonEdgeRequired = "edge_required"
-
 // ReasonRestartRuleDegraded is the warning of a degraded restart rule.
 const ReasonRestartRuleDegraded = "restart_rule_degraded"
 
@@ -157,8 +152,9 @@ func isGameIdentity(scope string) bool { return strings.HasPrefix(scope, "game:"
 // audit row and decides what to seed. The rule is versioning when the
 // environment uses feature versioning v2 (its "New version published" rows
 // carry the author, O3), else audit_log, and degraded when the audit log did
-// not answer or a candidate has no row (then counted as a person's, never an
-// API key). A 401 or a cancel is returned.
+// not answer (any status, 401 included: an audit error never takes the link
+// down, architecture note §5.1) or a candidate has no row (then counted as a
+// person's, never an API key). Only a cancel is returned.
 func (s *startup) restartRule(ctx context.Context, doc *EnvironmentDocument) (restartPlan, error) {
 	cands, uuids := s.candidates(doc)
 	plan := restartPlan{attribution: map[Key]Author{}, seed: map[Key]Value{}, uuids: uuids}
@@ -259,9 +255,12 @@ func (s *startup) gameIdentityLive(identifier string) bool {
 
 // cleanupStaleIdentities deletes the edge identities of games that are not
 // registered (UC-054 A3 step 4): one listing of game:* identities, liveness
-// checked again right before each delete. Errors are logged; it is a
-// one-shot task (game ends while running are the out side's, #2589).
-func (s *startup) cleanupStaleIdentities(ctx context.Context) {
+// checked again right before each delete. It reports whether the pass was
+// complete: false after a listing error or a transient (5xx, timeout,
+// transport) delete error, so the caller retries (game ends while running are
+// the out side's, #2589).
+func (s *startup) cleanupStaleIdentities(ctx context.Context) bool {
+	complete := true
 	lek := ""
 	for page := 0; page < maxListPages; page++ {
 		path := s.environmentPath() + "edge-identities/?q=game:&page_size=100"
@@ -276,7 +275,7 @@ func (s *startup) cleanupStaleIdentities(ctx context.Context) {
 			if ctx.Err() == nil {
 				s.l.Logger().Warn("flagsmith stale identities not listed", "reason", Reason(err))
 			}
-			return
+			return false
 		}
 		for _, id := range resp.Results {
 			if !isGameIdentity(id.Identifier) {
@@ -286,15 +285,19 @@ func (s *startup) cleanupStaleIdentities(ctx context.Context) {
 				s.rememberIdentity(id)
 				continue
 			}
-			if !s.deleteIdentity(ctx, id) {
-				return
+			switch s.deleteIdentity(ctx, id) {
+			case deleteCancelled:
+				return false
+			case deleteRetry:
+				complete = false
 			}
 		}
 		if resp.LastEvaluatedKey == nil || *resp.LastEvaluatedKey == "" {
-			return
+			return complete
 		}
 		lek = *resp.LastEvaluatedKey
 	}
+	return complete
 }
 
 func (s *startup) rememberIdentity(id edgeIdentity) {
@@ -303,9 +306,18 @@ func (s *startup) rememberIdentity(id edgeIdentity) {
 	s.l.ids.Unlock()
 }
 
+// deleteOutcome is what one stale identity delete did.
+type deleteOutcome int
+
+const (
+	deleteDone      deleteOutcome = iota // deleted, already gone, kept (live) or refused for good
+	deleteRetry                          // a transient error: the next pass tries again
+	deleteCancelled                      // ctx ended: the cleanup stops
+)
+
 // deleteIdentity deletes one stale identity (404: already gone), unless its
-// game registered meanwhile; false stops the cleanup (cancel).
-func (s *startup) deleteIdentity(ctx context.Context, id edgeIdentity) bool {
+// game registered meanwhile.
+func (s *startup) deleteIdentity(ctx context.Context, id edgeIdentity) deleteOutcome {
 	k := Key{Scope: id.Identifier}
 	sctx, span := s.pushSpan(ctx, k, OpDeleteIdentity)
 	path := s.environmentPath() + "edge-identities/" + url.PathEscape(id.IdentityUUID) + "/"
@@ -316,20 +328,23 @@ func (s *startup) deleteIdentity(ctx context.Context, id edgeIdentity) bool {
 		// The game registered between the listing and the delete: no call.
 		EndSpan(span, ResultOK, "game_live")
 		s.rememberIdentity(id)
-		return true
+		return deleteDone
 	case err == nil || httpStatus(err) == http.StatusNotFound:
 		s.endPush(sctx, span, OpDeleteIdentity, ResultOK, "")
 	case ctx.Err() != nil:
 		s.endPush(sctx, span, OpDeleteIdentity, ResultError, Reason(err))
-		return false
+		return deleteCancelled
 	default:
 		s.endPush(sctx, span, OpDeleteIdentity, ResultError, Reason(err))
 		s.l.Logger().Warn("flagsmith stale identity not deleted", "reason", Reason(err))
-		return true
+		if isTransient(err) {
+			return deleteRetry
+		}
+		return deleteDone
 	}
 	s.l.links.ForgetIdentity(id.Identifier)
 	s.l.ids.Lock()
 	delete(s.l.ids.IdentityUUID, id.Identifier)
 	s.l.ids.Unlock()
-	return true
+	return deleteDone
 }
