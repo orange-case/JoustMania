@@ -97,6 +97,9 @@ type harness struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	sub    *state.Subscription
+
+	sleepMu sync.Mutex
+	sleeps  []time.Duration // every wait the link asked for
 }
 
 type harnessOpts struct {
@@ -107,6 +110,8 @@ type harnessOpts struct {
 	// before runs before the link starts.
 	before func(h *harness)
 	doc    any
+	// docURL is FLAGSMITH_DOCUMENT_URL (nil: the fake's API base).
+	docURL func(*flagsmithtest.Fake) string
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -153,6 +158,9 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		Poll: time.Hour, PushRate: 5, Timeout: 2 * time.Second,
 		HealthWebhookURL: h.fake.Server.URL + "/health",
 	}
+	if o.docURL != nil {
+		cfg.DocumentURL = o.docURL(h.fake)
+	}
 	if o.realtime != nil {
 		cfg.RealtimeURL = o.realtime(h.fake)
 	}
@@ -164,6 +172,9 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		State: st, Writer: w, Tracer: tracer, Meter: meter, Logger: logger, Links: links,
 		Now: h.clock.Now,
 		Sleep: func(ctx context.Context, d time.Duration) error {
+			h.sleepMu.Lock()
+			h.sleeps = append(h.sleeps, d)
+			h.sleepMu.Unlock()
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -194,6 +205,18 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		}
 	})
 	return h
+}
+
+// longestSleep is the longest wait the link asked for since mark (an index
+// into the recorded waits) and the new mark.
+func (h *harness) longestSleep(mark int) (time.Duration, int) {
+	h.sleepMu.Lock()
+	defer h.sleepMu.Unlock()
+	var m time.Duration
+	for _, d := range h.sleeps[min(mark, len(h.sleeps)):] {
+		m = max(m, d)
+	}
+	return m, len(h.sleeps)
 }
 
 func (h *harness) waitFor(what string, cond func() bool) {
@@ -678,8 +701,7 @@ func TestRealtimeWakes(t *testing.T) {
 // the confirmation: off stays.
 func TestStaleDocumentNeverReverts(t *testing.T) {
 	setup := func(t *testing.T, docUpdated func(now time.Time) time.Time) *harness {
-		var h *harness
-		h = newHarness(t, harnessOpts{before: func(hh *harness) {
+		h := newHarness(t, harnessOpts{before: func(hh *harness) {
 			if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "operator"}); ferr != nil {
 				t.Fatal(ferr)
 			}
@@ -715,6 +737,45 @@ func TestStaleDocumentNeverReverts(t *testing.T) {
 		h.round()
 		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
 			t.Fatalf("UC-054/BR-005 agent/enabled = %+v: a stale document reverted the confirmed push", v)
+		}
+	})
+	t.Run("UC-054/BR-005 stale document stamped ahead of the local clock (skew)", func(t *testing.T) {
+		// Flagsmith's clock is an hour ahead: a time comparison would take
+		// the stale on for a change made after the push.
+		h := setup(t, func(now time.Time) time.Time { return now.Add(time.Hour) })
+		h.link.Links().ConfirmPushed(enabledKey, offValue)
+		for range 3 {
+			h.round()
+		}
+		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
+			t.Fatalf("UC-054/BR-005 agent/enabled = %+v: a stale document loosened the kill switch", v)
+		}
+	})
+	t.Run("UC-054/BR-005 once the document shows the push, a later change applies", func(t *testing.T) {
+		h := setup(t, func(now time.Time) time.Time { return now.Add(-time.Minute) })
+		h.link.Links().ConfirmPushed(enabledKey, offValue)
+		h.round()
+		h.setDoc([]map[string]any{fsState("enabled", true, "off")})
+		h.round()
+		h.setDoc([]map[string]any{fsState("enabled", true, "on")})
+		h.round()
+		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
+			t.Fatalf("UC-054/BR-005 agent/enabled = %+v: a deliberate on after the push was not applied", v)
+		}
+	})
+	t.Run("UC-054/BR-005 the guard expires after ten poll intervals", func(t *testing.T) {
+		h := setup(t, func(now time.Time) time.Time { return now.Add(-time.Minute) })
+		h.link.Links().ConfirmPushed(enabledKey, offValue)
+		h.round()
+		h.clock.Advance(9 * time.Hour) // poll interval 1 h: the guard lives 10 h
+		h.round()
+		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
+			t.Fatalf("UC-054/BR-005 agent/enabled = %+v inside the guard", v)
+		}
+		h.clock.Advance(2 * time.Hour)
+		h.round()
+		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
+			t.Fatalf("UC-054/BR-005 agent/enabled = %+v: the guard outlived its bound", v)
 		}
 	})
 }

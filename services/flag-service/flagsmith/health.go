@@ -114,17 +114,6 @@ func (h *health) prune(keep func(Key) bool) {
 	}
 }
 
-// refusedKeys is the number of refused keys (tests, logs).
-func (h *health) refusedKeys() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	n := 0
-	for _, m := range h.keys {
-		n += len(m)
-	}
-	return n
-}
-
 func (h *health) transitionLocked(feature string) {
 	want := HealthHealthy
 	text := "the stack runs the Flagsmith value"

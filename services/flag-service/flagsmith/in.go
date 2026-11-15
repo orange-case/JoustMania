@@ -7,8 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +44,14 @@ const (
 	segmentReason = "segment overrides are not applied by JoustMania"
 	// segmentScope is the health pseudo-scope of a feature's segment override.
 	segmentScope = "segment"
+	// pushGuardMin is the shortest life of a push guard (§4.2 step 6): a
+	// document that still shows the value a confirmed push replaced is
+	// treated as stale for max(pushGuardMin, pushGuardPolls x poll interval).
+	pushGuardMin   = 10 * time.Minute
+	pushGuardPolls = 10
+	// headerDocumentUpdated is the sub-second update time of the document
+	// (the fallback when the body has no updated_at).
+	headerDocumentUpdated = "X-Flagsmith-Document-Updated-At"
 )
 
 // puller implements inSide. Reconcile and Poll never run at the same time
@@ -59,6 +71,37 @@ type puller struct {
 	notBefore time.Time
 	health    *health
 	after     func(time.Duration) <-chan time.Time
+	// seen is every key's remote value, generation and confirmation time
+	// at the end of the last round: a change of them between two rounds is
+	// a push the out side confirmed (or a remote value it forgot).
+	seen map[Key]remoteMark
+	// guards holds, per key, the remote values a confirmed push replaced
+	// (#2590 P1, value guard): a document that still shows one of them is
+	// stale and is not applied.
+	guards map[Key]*pushGuard
+}
+
+// remoteMark is one key's remote state as LinkState holds it.
+type remoteMark struct {
+	v    Value // Value{} when no remote value is known
+	gen  uint64
+	conf time.Time
+}
+
+// pushGuard is a confirmed push of a key: the remote values it replaced and
+// when the in side saw it (local clock, compared with the local clock only).
+type pushGuard struct {
+	replaced []Value
+	at       time.Time
+}
+
+func (g *pushGuard) covers(v Value) bool {
+	for _, r := range g.replaced {
+		if r.Equal(v) {
+			return true
+		}
+	}
+	return false
 }
 
 // deferral is a key whose apply was put off (flagd not connected, a stale
@@ -75,6 +118,8 @@ func newIn(l *Link) inSide {
 		refused:  map[Key]refusal{},
 		deferred: map[Key]*deferral{},
 		after:    time.After,
+		seen:     map[Key]remoteMark{},
+		guards:   map[Key]*pushGuard{},
 	}
 	if l.deps.Registry != nil {
 		for _, pol := range l.deps.Registry.Policies() {
@@ -312,6 +357,7 @@ type roundCtx struct {
 	updated  time.Time
 	hasUpd   bool
 	games    map[string]bool
+	doc      map[Key]docEntry // the decoded document (nil before it is read)
 	writes   int
 	deferred bool
 	stats    roundStats
@@ -326,30 +372,33 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	ctx, span := StartPull(ctx, l.Tracer(), trigger)
 	result, reason := ResultError, ""
 	rc := &roundCtx{ctx: ctx, span: span, trigger: trigger}
+	var start map[Key]remoteMark
 	defer func() {
+		p.guardPushesDuring(rc, start)
 		span.SetAttributes(attribute.Int(AttrChanges, rc.stats.changes), attribute.Int(AttrConflicts, rc.stats.conflicts))
 		EndSpan(span, result, reason)
 		l.Metrics().RecordPull(ctx, trigger, result)
 	}()
 
-	// The local snapshot and the remote generations are read before the
-	// fetch: a local write after it is caught by IfSlotVersion, a push
-	// confirmed during it by the generation (a stale document).
+	// The local snapshot and the remote state are read before the fetch: a
+	// local write after it is caught by IfSlotVersion, a push confirmed
+	// during it by the generation and a push guard (a stale document).
 	var changes []state.Change
 	if st := l.State(); st != nil {
 		changes, _ = st.Changes()
 	}
 	local, games := localSnapshot(changes)
 	rc.games = games
-	gens := l.links.Gens()
+	rc.now = l.Now()
+	start = p.remoteMarks()
+	p.guardPushesBetween(start, rc.now)
 
 	p.pulls++
 	ims := ""
 	if !full && !p.forceFull && len(games) == 0 && p.pulls%unconditionalEvery != 0 {
 		ims = l.LastModified()
 	}
-	rc.now = l.Now()
-	doc, lm, notModified, err := l.client.EnvironmentDocument(ctx, ims)
+	doc, lm, hdrUpdated, notModified, err := p.fetchDocument(ctx, ims)
 	p.lastPull = l.Now()
 	if err != nil {
 		var he *HTTPError
@@ -372,25 +421,18 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 		reason = ReasonIdentityOverridesDisabled
 		return rc.stats, ReasonError{Reason: ReasonIdentityOverridesDisabled}
 	}
-	rc.updated, rc.hasUpd = doc.Updated()
+	rc.updated, rc.hasUpd = documentUpdated(doc, hdrUpdated)
 	p.health.setEnvironment(doc.Name)
 
 	d, segments := p.decodeDocument(doc)
+	rc.doc = d
 	p.markSegments(segments)
-	keep := func(k Key) bool {
-		g := GameOfIdentity(k.Scope)
-		return g == "" || games[g]
-	}
-	p.health.prune(keep)
-	for k := range p.refused {
-		if !keep(k) {
-			delete(p.refused, k)
-		}
-	}
+	keys := p.roundKeys(d, local)
+	p.prune(keys, games)
 
 	_, attribution, _ := l.RestartReport()
-	for _, k := range p.roundKeys(d, local) {
-		p.reconcileKey(rc, k, d, local, gens, attribution)
+	for _, k := range keys {
+		p.reconcileKey(rc, k, d, local, start, attribution)
 	}
 
 	// Last-Modified (§4.2 step 8): advance only to the document's own update
@@ -451,8 +493,181 @@ func isKillKey(k Key) bool {
 	return k.Scope == ScopeStack && killRuleOf(k.Set, k.Flag) != nil
 }
 
+// prune forgets the refusals, deferrals, push guards and health entries of
+// keys that left the round (a game that ended or is not registered, a
+// forgotten identity, an override deleted on both sides): their feature turns
+// healthy when nothing else of it is refused (P7).
+func (p *puller) prune(keys []Key, games map[string]bool) {
+	inRound := make(map[Key]bool, len(keys))
+	for _, k := range keys {
+		inRound[k] = true
+	}
+	keep := func(k Key) bool {
+		if k.Scope == segmentScope {
+			return true
+		}
+		g := GameOfIdentity(k.Scope)
+		return inRound[k] && (g == "" || games[g])
+	}
+	p.health.prune(keep)
+	for k := range p.refused {
+		if !keep(k) {
+			delete(p.refused, k)
+		}
+	}
+	for k := range p.deferred {
+		if !keep(k) {
+			delete(p.deferred, k)
+		}
+	}
+	for k := range p.guards {
+		if !keep(k) {
+			delete(p.guards, k)
+		}
+	}
+}
+
+// fetchDocument is Client.EnvironmentDocument that also returns the
+// X-Flagsmith-Document-Updated-At header (the update time when the body has
+// none). TODO(foundation): move into Client.EnvironmentDocument.
+func (p *puller) fetchDocument(ctx context.Context, ifModifiedSince string) (doc *EnvironmentDocument, lastModified, updated string, notModified bool, err error) {
+	c := p.l.client
+	u := c.doc.ResolveReference(&url.URL{Path: "environment-document/"})
+	req, err := newRequest(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, "", "", false, err
+	}
+	req.Header.Set("X-Environment-Key", c.cfg.ServerKey)
+	if ifModifiedSince != "" {
+		req.Header.Set("If-Modified-Since", ifModifiedSince)
+	}
+	status, header, body, err := c.do(c.http, req, MaxDocumentBytes)
+	if err != nil {
+		return nil, "", "", false, err
+	}
+	if status == http.StatusNotModified {
+		return nil, ifModifiedSince, "", true, nil
+	}
+	if status < 200 || status > 299 {
+		return nil, "", "", false, httpError(status, header, body)
+	}
+	doc = &EnvironmentDocument{}
+	if err := json.Unmarshal(body, doc); err != nil {
+		return nil, "", "", false, ReasonError{Reason: "malformed_document"}
+	}
+	return doc, header.Get("Last-Modified"), header.Get(headerDocumentUpdated), false, nil
+}
+
+// documentUpdated is the document's update time: the body updated_at, else
+// the X-Flagsmith-Document-Updated-At header (Unix seconds with a fraction,
+// or RFC 3339).
+func documentUpdated(doc *EnvironmentDocument, header string) (time.Time, bool) {
+	if t, ok := doc.Updated(); ok {
+		return t, true
+	}
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse(time.RFC3339Nano, header); err == nil {
+		return t, true
+	}
+	f, err := strconv.ParseFloat(header, 64)
+	if err != nil || f <= 0 || math.IsInf(f, 0) {
+		return time.Time{}, false
+	}
+	sec, frac := math.Modf(f)
+	return time.Unix(int64(sec), int64(frac*1e9)).UTC(), true
+}
+
+// remoteMarks reads every key's remote value, generation and confirmation
+// time, each key consistently (re-read while its generation moves).
+func (p *puller) remoteMarks() map[Key]remoteMark {
+	ls := p.l.links
+	keys := ls.Keys()
+	out := make(map[Key]remoteMark, len(keys))
+	for _, k := range keys {
+		for range 3 {
+			gen := ls.Gen(k)
+			conf := ls.ConfirmedAt(k)
+			v, _ := ls.Remote(k)
+			out[k] = remoteMark{v: v, gen: gen, conf: conf}
+			if ls.Gen(k) == gen {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// guardPushesBetween guards every key whose remote state changed since the
+// last round: only the out side changes it between rounds (a confirmed push,
+// a forgotten remote value), so the value it replaced is stale from then on.
+func (p *puller) guardPushesBetween(start map[Key]remoteMark, now time.Time) {
+	for k, m := range start {
+		prev, ok := p.seen[k]
+		if !ok && m.conf.IsZero() {
+			continue // a key the out side only queued
+		}
+		if ok && m.gen == prev.gen {
+			continue
+		}
+		p.addGuard(k, prev.v, m.v, now)
+	}
+	for k := range p.guards {
+		if _, ok := start[k]; !ok {
+			delete(p.guards, k) // forgotten (game end, dropped identity)
+		}
+	}
+}
+
+// guardPushesDuring guards every key whose push was confirmed while the round
+// ran: the value it replaced is the remote value at the start of the round or
+// the document value the round set. It then records the remote state for the
+// next round.
+func (p *puller) guardPushesDuring(rc *roundCtx, start map[Key]remoteMark) {
+	end := p.remoteMarks()
+	for k, m := range end {
+		s := start[k]
+		if m.conf.Equal(s.conf) {
+			continue
+		}
+		p.addGuard(k, s.v, m.v, rc.now)
+		if rc.doc != nil {
+			p.addGuard(k, rc.doc[k].v, m.v, rc.now)
+		}
+	}
+	p.seen = end
+}
+
+// addGuard records that a confirmed push replaced v by now (nothing when the
+// push did not change the value).
+func (p *puller) addGuard(k Key, v, now Value, at time.Time) {
+	if v.Equal(now) {
+		return
+	}
+	g := p.guards[k]
+	if g == nil {
+		g = &pushGuard{}
+		p.guards[k] = g
+	}
+	g.at = at
+	if !g.covers(v) {
+		g.replaced = append(g.replaced, v)
+	}
+}
+
+// guardTTL is how long a push guard lives: max(10 min, 10 poll intervals).
+func (p *puller) guardTTL() time.Duration {
+	interval := p.l.cfg.Poll
+	if interval <= 0 {
+		interval = DefaultPoll
+	}
+	return max(pushGuardMin, pushGuardPolls*interval)
+}
+
 // reconcileKey merges and acts on one key.
-func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map[Key]localEntry, gens map[Key]uint64, attribution map[Key]Author) {
+func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map[Key]localEntry, start map[Key]remoteMark, attribution map[Key]Author) {
 	l := p.l
 	pol := l.Policy(k.Set, k.Flag)
 	if pol == nil {
@@ -463,14 +678,25 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 	if g := GameOfIdentity(k.Scope); g != "" && !rc.games[g] {
 		return
 	}
-	// A stale document never reverts a confirmed push (§4.2 step 6).
-	if l.links.Gen(k) != gens[k] {
+	// A stale document never reverts a confirmed push (§4.2 step 6): a push
+	// confirmed while the document was in flight skips the key this round.
+	if l.links.Gen(k) != start[k].gen {
 		rc.skip()
 		return
 	}
-	if rc.hasUpd && l.links.ConfirmedAt(k).After(rc.updated) {
-		rc.skip()
-		return
+	de := d[k]
+	r, hasR := l.links.Remote(k)
+	// After a confirmed push, a document that still shows a value the push
+	// replaced is stale (value guard, no clock comparison): skipped until the
+	// document shows the pushed value or the guard expires.
+	if g := p.guards[k]; g != nil {
+		switch {
+		case r.Equal(de.v) || rc.now.Sub(g.at) > p.guardTTL():
+			delete(p.guards, k)
+		case g.covers(de.v):
+			rc.skip()
+			return
+		}
 	}
 	// Edge lag: the first round after start skips what the restart rule
 	// cleared (#2590 P13).
@@ -482,12 +708,15 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 		rc.skip()
 		return
 	}
-	de := d[k]
-	le := local[k]
+	le, ok := local[k]
+	if !ok {
+		// An empty game, game:serial or fraction slot is not in the snapshot:
+		// its version still makes the write conditional (#2590 P2).
+		le.slot = p.slotVersion(k, de.v)
+	}
 	if rf, ok := p.refused[k]; ok && !rf.d.Equal(de.v) {
 		delete(p.refused, k)
 	}
-	r, hasR := l.links.Remote(k)
 	in := mergeIn{R: r, HasR: hasR, D: de.v, L: le.v, Base: l.BaselineFlag(k.Set, k.Flag)}
 	if k.Scope == ScopeStack {
 		in.Kill = killRuleOf(k.Set, k.Flag)
@@ -516,21 +745,24 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 	switch dec.action {
 	case actNone:
 		l.links.SetInSync(k, true)
+		p.accepted(k)
 	case actSkip:
 	case actPush:
-		if l.links.Offer(k, le.v, rc.now, le.version) {
+		if p.offer(rc, k, le) {
 			rc.stats.pushed++
 		}
+		p.accepted(k)
 	case actAdopt:
 		l.links.SetRemote(k, de.v)
-		l.links.Offer(k, le.v, rc.now, le.version)
+		p.offer(rc, k, le)
 		l.links.ClearRefusal(k)
 		p.accepted(k)
 	case actKeepLocal:
 		l.links.SetRemote(k, de.v)
-		if l.links.Offer(k, le.v, rc.now, le.version) {
+		if p.offer(rc, k, le) {
 			rc.stats.pushed++
 		}
+		p.accepted(k)
 	case actApply:
 		rc.stats.changes++
 		p.apply(rc, k, pol, de, le)
@@ -548,11 +780,39 @@ func describe(v Value) string {
 	return string(v.Value)
 }
 
-// accepted forgets k's refusal and deferral and clears its health.
+// accepted ends k's refusal and deferral and clears its health: the
+// feature's health follows its set of refused keys (P7).
 func (p *puller) accepted(k Key) {
 	delete(p.refused, k)
 	delete(p.deferred, k)
+	if _, side := p.l.links.Refusal(k); side == SideLocal {
+		p.l.links.ClearRefusal(k)
+	}
 	p.health.accept(k.Flag, k)
+}
+
+// slotVersion reads the current version of k's slot (0: no slot).
+func (p *puller) slotVersion(k Key, v Value) uint64 {
+	st := p.l.State()
+	if st == nil {
+		return 0
+	}
+	sc, _, ok := scopeOfKey(k, v)
+	if !ok {
+		return 0
+	}
+	return st.SlotVersion(k.Set, k.Flag, sc)
+}
+
+// offer queues the local value read in the snapshot for the out side, only
+// while its slot has not changed since: a newer local write was offered by
+// the observer already and must not be replaced by the older value (#2596
+// finding 6).
+func (p *puller) offer(rc *roundCtx, k Key, le localEntry) bool {
+	if le.slot != 0 && p.slotVersion(k, le.v) != le.slot {
+		return false
+	}
+	return p.l.links.Offer(k, le.v, rc.now, le.version)
 }
 
 // markSegments keeps one health entry per synced feature with a segment
@@ -585,7 +845,7 @@ func (p *puller) apply(rc *roundCtx, k Key, pol *registry.Policy, de docEntry, l
 	if !ok {
 		return
 	}
-	prev, had := l.links.SetRemote(k, de.v)
+	prev, had, gen := l.links.SetRemoteGen(k, de.v)
 	rc.writes++
 	var res state.WriteResult
 	var ferr *fserr.Error
@@ -607,7 +867,14 @@ func (p *puller) apply(rc *roundCtx, k Key, pol *registry.Policy, de docEntry, l
 	default:
 		res, ferr = w.FlagsmithClear(rc.ctx, state.ClearRequest{Set: k.Set, Flag: k.Flag, Scope: sc, IfSlotVersion: le.slot})
 	}
-	p.result(rc, k, de.v, le.v, prev, had, res, ferr)
+	p.result(rc, k, de.v, le.v, undo{prev: prev, had: had, gen: gen}, res, ferr)
+}
+
+// undo is the remote value a pulled write replaced, for an exact restore.
+type undo struct {
+	prev Value
+	had  bool
+	gen  uint64
 }
 
 // scopeOfKey returns the write scope of k. A fraction key always carries a
@@ -640,16 +907,17 @@ func (p *puller) applyEvent(rc *roundCtx, k Key, de docEntry, le localEntry) {
 	if !de.v.Present {
 		// The override was deleted in Flagsmith: the list is sent again.
 		l.links.SetRemote(k, de.v)
-		if l.links.Offer(k, le.v, rc.now, le.version) {
+		if p.offer(rc, k, le) {
 			rc.stats.pushed++
 		}
+		p.accepted(k)
 		return
 	}
 	kind, payload := classifyEvent(de.v, le.v)
 	switch kind {
 	case evAdopt:
 		l.links.SetRemote(k, de.v)
-		l.links.Offer(k, le.v, rc.now, le.version)
+		p.offer(rc, k, le)
 		p.accepted(k)
 		return
 	case evStale:
@@ -660,14 +928,14 @@ func (p *puller) applyEvent(rc *roundCtx, k Key, de docEntry, le localEntry) {
 		return
 	}
 	sc, _, _ := ScopeOfIdentity(k.Scope)
-	prev, had := l.links.SetRemote(k, de.v)
+	prev, had, gen := l.links.SetRemoteGen(k, de.v)
 	rc.writes++
 	res, ferr := l.Writer().FlagsmithAppend(rc.ctx, state.AppendRequest{Set: k.Set, Flag: k.Flag, Scope: sc, Payload: payload})
-	p.result(rc, k, de.v, le.v, prev, had, res, ferr)
+	p.result(rc, k, de.v, le.v, undo{prev: prev, had: had, gen: gen}, res, ferr)
 }
 
 // result handles a write's outcome (#2590 plan §3, Results).
-func (p *puller) result(rc *roundCtx, k Key, d, lv, prev Value, had bool, res state.WriteResult, ferr *fserr.Error) {
+func (p *puller) result(rc *roundCtx, k Key, d, lv Value, u undo, res state.WriteResult, ferr *fserr.Error) {
 	l := p.l
 	if ferr == nil {
 		if res.PersistFailed {
@@ -685,7 +953,7 @@ func (p *puller) result(rc *roundCtx, k Key, d, lv, prev Value, had bool, res st
 	switch ferr.Reason {
 	case fserr.NoSyncStream, fserr.ReasonPersistFailed, fserr.SlotChanged, fserr.RealGameLive:
 		// Not seen: the next round tries again (UC-054 A5).
-		l.links.RestoreRemote(k, d, prev, had)
+		l.links.RestoreRemoteGen(k, u.gen, u.prev, u.had)
 		p.deferKey(rc, k, ferr)
 	case fserr.GameNotLive:
 		p.refused[k] = refusal{d: d, l: lv}

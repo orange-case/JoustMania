@@ -1,7 +1,6 @@
 package flagsmith
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -26,7 +25,7 @@ func loadBaseline(t *testing.T, dir string) *baseline.Baseline {
 }
 
 func variant(b *baseline.Flag, name string) Value {
-	return Value{Present: true, Variant: name, Value: json.RawMessage(b.Variants[name])}
+	return Value{Present: true, Variant: name, Value: b.Variants[name]}
 }
 
 var none = Value{}
