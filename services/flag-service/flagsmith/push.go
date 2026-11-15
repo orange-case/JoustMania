@@ -323,8 +323,8 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 		if ctx.Err() == nil {
 			// The link goes down on this key. Keep it pending but move it to
 			// the back, so a key that always fails does not stay first after
-			// every reconnect and starve the others.
-			l.Links().Retry(k, l.Now().Add(defaultRetryWait))
+			// every reconnect and starve the others (the link backs off, not the key).
+			l.Links().Retry(k, l.Now())
 		}
 		return false, oc.err
 	case oc.wait > 0:
