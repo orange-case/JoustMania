@@ -160,8 +160,11 @@ entity.
 5. A `503 no_sync_stream` leaves `remote` unchanged, so the next round tries again (A5 of UC-054).
 6. **A stale document never reverts a confirmed push.** The link snapshots the last-seen generation of every key
    before the fetch and skips, in this round, every key whose last-seen state changed during the round, and every key
-   whose own push was confirmed after the document's update time (the body `updated_at`, else the sub-second header
-   `X-Flagsmith-Document-Updated-At`); the next round looks at it again.
+   the **value guard** holds back. No clock comparison is used. When a push is confirmed, the link remembers the
+   remote value(s) the push replaced. In a pull round a key is skipped (no write; the next pull is unconditional)
+   while the document value differs from the last-seen value and equals one of those replaced values: the document
+   still shows the pre-push value and is stale. The guard ends once the document shows the pushed value, or after
+   max(10 min, 10 x the poll interval). The next round looks at the key again.
 7. **Every pulled write is conditional**: it carries the version of the local slot as read, empty slots included, so a
    local write that lands between the read and the apply wins (the pulled write is refused as stale, and the next round
    sees the conflict). Event appends (§4.3) are the one unconditional write.
@@ -367,7 +370,8 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | `use_identity_overrides_in_local_eval` off: game and player values cannot be read back | the link stays offline with reason `identity_overrides_disabled`; documented in the setup |
 | SaaS request limits (`MASTER_API_KEY_THROTTLE_RATE` is a per-deployment setting; the SaaS value is not published) under many games and events | merge per flag and scope, `FLAGSMITH_PUSH_RATE`, honour `429 Retry-After`; to measure with 8 live games (NFR-057) |
 | Edge identity count grows with games on the plan's identity quota | identities deleted at game end and, for games that are not live, after start (§5.1); to verify against the plan |
-| A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round, or whose push was confirmed after the document's update time, are skipped; pulled writes are conditional on the local slot (§4.2) |
+| A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round are skipped, and the value guard skips a key whose document value still equals a value its confirmed push replaced (§4.2 step 6); pulled writes are conditional on the local slot (§4.2) |
+| A local write to a game or player slot that is empty during a document fetch is not detected by the per-slot version check for that round (game values only; stack and kill-switch slots are fully covered) | accepted; last writer wins |
 | `__future__` flag API is experimental and may change | fallback to the stable `featurestates` endpoints (§4.1 step 3); a contract test against the pinned Flagsmith version |
 | Change requests on the environment make every push fail | A4 of UC-055, reported as out of sync; the stage environment runs without change requests |
 | A person in Flagsmith loosens an agent limit (F6) | env ceilings of C-034 still cap; kill switches tighten on conflict; the change is a `flagservice.write` span with writer `flagsmith` |
