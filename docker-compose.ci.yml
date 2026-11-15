@@ -41,6 +41,12 @@ services:
       - flag-service-state:/var/lib/flag-service
     environment:
       - FLAG_SERVICE_STATE_FILE=/var/lib/flag-service/admin-ci.json
+      # The Flagsmith link never runs here, whatever the shell exports
+      # (services.md §7.3, #2588): no SaaS calls, no developer keys copied in.
+      - FLAGSMITH_LINK=off
+      - FLAGSMITH_SERVER_KEY=
+      - FLAGSMITH_ADMIN_API_KEY=
+      - FLAGSMITH_HEALTH_WEBHOOK_URL=
 
   # Controller Manager - Mock mode via flagd (backend=mock in ci/controller.json)
   controller-manager:

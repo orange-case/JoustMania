@@ -50,6 +50,21 @@ services:
       - FLAG_SERVICE_STATE_FILE=/var/lib/flag-service/admin.json
       # Go runtime soft limit under the 64 MiB container limit (NFR-051).
       - GOMEMLIMIT=48MiB
+      # Flagsmith link (services.md §7.3, #2588): off unless the host opts in
+      # (the stage stack's .env.local). Passthroughs, so the host values reach the
+      # container; the keys and the webhook URL are secrets (never logged).
+      - FLAGSMITH_LINK=${FLAGSMITH_LINK:-off}
+      - FLAGSMITH_API_URL=${FLAGSMITH_API_URL:-https://api.flagsmith.com/api/v1/}
+      - FLAGSMITH_DOCUMENT_URL=${FLAGSMITH_DOCUMENT_URL:-https://edge.api.flagsmith.com/api/v1/}
+      - FLAGSMITH_SERVER_KEY=${FLAGSMITH_SERVER_KEY:-}
+      - FLAGSMITH_ADMIN_API_KEY=${FLAGSMITH_ADMIN_API_KEY:-}
+      - FLAGSMITH_ENVIRONMENT_KEY=${FLAGSMITH_ENVIRONMENT_KEY:-}
+      - FLAGSMITH_PROJECT_ID=${FLAGSMITH_PROJECT_ID:-}
+      - FLAGSMITH_POLL_SECONDS=${FLAGSMITH_POLL_SECONDS:-30}
+      - FLAGSMITH_REALTIME_URL=${FLAGSMITH_REALTIME_URL:-}
+      - FLAGSMITH_PUSH_RATE=${FLAGSMITH_PUSH_RATE:-5}
+      - FLAGSMITH_HEALTH_WEBHOOK_URL=${FLAGSMITH_HEALTH_WEBHOOK_URL:-}
+      - FLAGSMITH_TIMEOUT_SECONDS=${FLAGSMITH_TIMEOUT_SECONDS:-5}
     volumes:
       - ./services/flagd:/etc/flagd:ro
       - ./services/flag-service/registry.yaml:/etc/flag-service/registry.yaml:ro

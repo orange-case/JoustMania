@@ -1,0 +1,160 @@
+package flagsmith
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
+)
+
+func testConfig(f *flagsmithtest.Fake) Config {
+	return Config{
+		Enabled: true, APIURL: f.URL(), DocumentURL: f.URL(),
+		ServerKey: "ser.secretserverkey", AdminKey: "secretadminkey", EnvironmentKey: "envkey123", ProjectID: 42,
+		Poll: DefaultPoll, PushRate: DefaultPushRate, Timeout: DefaultTimeout,
+	}
+}
+
+func noSecret(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	for _, s := range []string{"secretserverkey", "secretadminkey", "token=hush"} {
+		if strings.Contains(err.Error(), s) {
+			t.Fatalf("error %q leaks %q", err, s)
+		}
+	}
+}
+
+// UC: UC-054 A1
+func TestClient(t *testing.T) {
+	ctx := context.Background()
+	t.Run("UC-054/A1 the document pull sends the server key and is conditional", func(t *testing.T) {
+		f := flagsmithtest.New(t)
+		f.ServerKey = "ser.secretserverkey"
+		f.SetDocument(map[string]any{"name": "stage", "feature_states": []any{}}, "Wed, 11 Nov 2026 10:00:00 GMT")
+		c := NewClient(testConfig(f), nil)
+		doc, lm, notModified, err := c.EnvironmentDocument(ctx, "")
+		if err != nil || notModified || doc.Name != "stage" || lm != "Wed, 11 Nov 2026 10:00:00 GMT" {
+			t.Fatalf("doc %+v lm %q nm %v err %v", doc, lm, notModified, err)
+		}
+		_, _, notModified, err = c.EnvironmentDocument(ctx, lm)
+		if err != nil || !notModified {
+			t.Fatalf("second pull: not modified %v err %v, want a 304", notModified, err)
+		}
+		reqs := f.RequestsTo(http.MethodGet, flagsmithtest.APIPath+"environment-document/")
+		if len(reqs) != 2 || reqs[1].Header.Get("If-Modified-Since") != lm || reqs[0].Header.Get("If-Modified-Since") != "" {
+			t.Fatalf("requests %+v, want a full then a conditional pull", reqs)
+		}
+	})
+	t.Run("UC-054/A1 a wrong server key is unauthorized and the link goes down", func(t *testing.T) {
+		f := flagsmithtest.New(t)
+		f.ServerKey = "other"
+		_, _, _, err := NewClient(testConfig(f), nil).EnvironmentDocument(ctx, "")
+		if Reason(err) != ReasonUnauthorized || !IsLinkDown(err) {
+			t.Fatalf("err %v reason %q, want unauthorized, link down", err, Reason(err))
+		}
+		noSecret(t, err)
+	})
+	t.Run("UC-055/BR-001 Admin sends the admin key, resolves relative and host-root paths, keeps the query", func(t *testing.T) {
+		f := flagsmithtest.New(t)
+		f.Handle("GET /api/v1/projects/42/features/", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"results":[{"id":7}]}`))
+		})
+		f.Handle("DELETE /api/__future__/x/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+		c := NewClient(testConfig(f), nil)
+		var out struct {
+			Results []struct{ ID int } `json:"results"`
+		}
+		if _, err := c.Admin(ctx, http.MethodGet, "projects/42/features/?q=enabled", nil, &out); err != nil || len(out.Results) != 1 || out.Results[0].ID != 7 {
+			t.Fatalf("out %+v err %v", out, err)
+		}
+		if _, err := c.Admin(ctx, http.MethodDelete, "/api/__future__/x/", map[string]string{"a": "b"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		reqs := f.Requests()
+		if reqs[0].Header.Get("Authorization") != "Api-Key secretadminkey" || reqs[0].Query != "q=enabled" {
+			t.Fatalf("request %+v, want the admin key and the query", reqs[0])
+		}
+		if reqs[1].Path != "/api/__future__/x/" || string(reqs[1].Body) != `{"a":"b"}` {
+			t.Fatalf("request %+v, want the host-root path with a JSON body on DELETE", reqs[1])
+		}
+	})
+	t.Run("UC-055/BR-001 429 carries Retry-After and is a per-key refusal", func(t *testing.T) {
+		f := flagsmithtest.New(t)
+		f.Handle("POST /api/v1/x/", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Retry-After", "7")
+			http.Error(w, `{"detail":"slow down"}`, http.StatusTooManyRequests)
+		})
+		_, err := NewClient(testConfig(f), nil).Admin(ctx, http.MethodPost, "x/", map[string]int{"a": 1}, nil)
+		var he *HTTPError
+		if !asHTTP(err, &he) || he.RetryAfter != 7*time.Second || !he.JSONDetail || Reason(err) != ReasonRateLimited || IsLinkDown(err) {
+			t.Fatalf("err %v (%+v), want 429 rate_limited after 7 s, not link down", err, he)
+		}
+	})
+	t.Run("UC-054/A1 a slow Flagsmith times out within the timeout", func(t *testing.T) {
+		f := flagsmithtest.New(t)
+		f.Delay(2 * time.Second)
+		cfg := testConfig(f)
+		cfg.Timeout = 200 * time.Millisecond
+		start := time.Now()
+		_, _, _, err := NewClient(cfg, nil).EnvironmentDocument(ctx, "")
+		if Reason(err) != ReasonTimeout || !IsLinkDown(err) || time.Since(start) > time.Second {
+			t.Fatalf("err %v reason %q after %v, want timeout within 1 s", err, Reason(err), time.Since(start))
+		}
+		noSecret(t, err)
+	})
+	t.Run("UC-054/A1 an oversized document is refused", func(t *testing.T) {
+		f := flagsmithtest.New(t)
+		f.SetDocument([]byte(`{"name":"`+strings.Repeat("x", MaxDocumentBytes)+`"}`), "")
+		_, _, _, err := NewClient(testConfig(f), nil).EnvironmentDocument(ctx, "")
+		if Reason(err) != ReasonResponseTooLarge {
+			t.Fatalf("err %v, want response_too_large", err)
+		}
+	})
+	t.Run("UC-054/A1 no error names the webhook URL or a key", func(t *testing.T) {
+		f := flagsmithtest.New(t)
+		url := f.Server.URL + "/hook?token=hush"
+		f.Server.Close()
+		_, err := NewClient(testConfig(f), nil).PostJSON(ctx, url, map[string]string{"status": "unhealthy"})
+		if err == nil || Reason(err) != ReasonConnection {
+			t.Fatalf("err %v reason %q, want a connection error", err, Reason(err))
+		}
+		noSecret(t, err)
+	})
+}
+
+func asHTTP(err error, he **HTTPError) bool {
+	return errors.As(err, he)
+}
+
+// UC: UC-054 A1
+func TestReasonClasses(t *testing.T) {
+	cases := []struct {
+		err      error
+		reason   string
+		linkDown bool
+	}{
+		{&HTTPError{Status: 401}, ReasonUnauthorized, true},
+		{&HTTPError{Status: 404}, ReasonNotFound, false},
+		{&HTTPError{Status: 400, Body: []byte(`{"detail":"A change request is required"}`)}, ReasonChangeRequestRequired, false},
+		{&HTTPError{Status: 502}, "http_502", true},
+		{&HTTPError{Status: 400}, "http_400", false},
+		{ReasonError{Reason: ReasonIdentityOverridesDisabled}, ReasonIdentityOverridesDisabled, true},
+		{ReasonError{Reason: ReasonProjectMismatch}, ReasonProjectMismatch, true},
+		{context.DeadlineExceeded, ReasonTimeout, true},
+	}
+	for _, c := range cases {
+		if got := Reason(c.err); got != c.reason {
+			t.Errorf("Reason(%v) = %q, want %q", c.err, got, c.reason)
+		}
+		if got := IsLinkDown(c.err); got != c.linkDown {
+			t.Errorf("IsLinkDown(%v) = %v, want %v", c.err, got, c.linkDown)
+		}
+	}
+}

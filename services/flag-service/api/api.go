@@ -3,6 +3,12 @@
 // /{flagSetId}/{flagName}, the game lifecycle under /games and /coordinators,
 // and the read endpoints. There are no roles or tokens (architecture note
 // D11): writer, decision_id and reason are informational and go on the span.
+//
+// One exception to D11 (services.md §7.2, UC-053 BR-002): the writer label
+// "flagsmith" is reserved for the Flagsmith link's in-process writes
+// (inprocess.go). An HTTP write that labels itself "flagsmith" is 400
+// malformed; the label may still be named as a selector (DELETE
+// /{set}?writer=, if_writer, if_writer_in).
 package api
 
 import (
@@ -23,6 +29,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/joustmania/flag-service/flagsmith"
 	"github.com/joustmania/flag-service/fserr"
 	"github.com/joustmania/flag-service/state"
 	"github.com/joustmania/flag-service/telemetry"
@@ -47,6 +54,8 @@ type API struct {
 	// Ready reports whether the gRPC sync listener is up (GET /healthz).
 	Ready func() bool
 	Now   func() time.Time
+	// Flagsmith is the Flagsmith link (services.md §7.3); nil reads as off.
+	Flagsmith *flagsmith.Link
 }
 
 func (a *API) now() time.Time {
@@ -131,8 +140,26 @@ func (a *API) listSets(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"epoch": a.State.Epoch(), "flag_sets": a.State.Sets()})
 }
 
+// stateBody is GET /state: the state's sizes, flattened as before, plus the
+// link's status (services.md §7.3).
+type stateBody struct {
+	state.Stats
+	Flagsmith flagsmith.Status `json:"flagsmith"`
+}
+
 func (a *API) stateView(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.State.Stats())
+	writeJSON(w, http.StatusOK, stateBody{Stats: a.State.Stats(), Flagsmith: a.Flagsmith.Status()})
+}
+
+// reservedWriter is the 400 of an HTTP write that labels itself with the
+// Flagsmith link's reserved writer label (services.md §7.2): checked after the
+// request is parsed and before any State call, so it answers 400 even for an
+// unknown flag.
+func reservedWriter(writer string) *fserr.Error {
+	if writer == flagsmith.WriterLabel {
+		return fserr.BadRequest("writer label %q is reserved for the Flagsmith link", writer)
+	}
+	return nil
 }
 
 func (a *API) listGames(w http.ResponseWriter, _ *http.Request) {
@@ -243,6 +270,9 @@ func (a *API) put(w http.ResponseWriter, r *http.Request) {
 			req.IfWriterIn, ferr = ifWriterIn(r)
 		}
 		if ferr == nil {
+			ferr = reservedWriter(req.Writer)
+		}
+		if ferr == nil {
 			res, ferr = a.State.Put(req)
 		} else {
 			res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: req.Scope.Name()}
@@ -291,10 +321,14 @@ func (a *API) post(w http.ResponseWriter, r *http.Request) {
 		if body.Reason != "" {
 			span.SetAttributes(attribute.String("flagservice.write_reason", body.Reason))
 		}
-		res, ferr = a.State.Append(state.AppendRequest{
-			Set: req.Set, Flag: req.Flag, Scope: body.Scope, Payload: body.Payload,
-			Writer: body.Writer, DecisionID: body.DecisionID,
-		})
+		if ferr = reservedWriter(req.Writer); ferr == nil {
+			res, ferr = a.State.Append(state.AppendRequest{
+				Set: req.Set, Flag: req.Flag, Scope: body.Scope, Payload: body.Payload,
+				Writer: body.Writer, DecisionID: body.DecisionID,
+			})
+		} else {
+			res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: req.Scope.Name()}
+		}
 	} else {
 		res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch()}
 	}
@@ -370,6 +404,11 @@ func (a *API) clear(w http.ResponseWriter, r *http.Request) {
 	if ferr == nil && len(ifWriter) > state.MaxIDLength {
 		ferr = fserr.BadRequest("if_writer is longer than %d characters", state.MaxIDLength)
 		res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
+	}
+	if ferr == nil {
+		if ferr = reservedWriter(req.Writer); ferr != nil {
+			res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
+		}
 	}
 	if ferr == nil {
 		res, ferr = a.State.Clear(state.ClearRequest{Set: req.Set, Flag: req.Flag, Scope: sc, Writer: req.Writer, Persist: persist, UnlessRealGame: guarded, IfWriter: ifWriter})

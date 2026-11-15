@@ -199,6 +199,16 @@ type State struct {
 
 	subs map[*Subscription]struct{}
 
+	// obs receives every Change (the Flagsmith link, services.md §7.3); nil
+	// when the link is off. outbox holds the Changes of the running mutation
+	// until changed() or flushLocked() hands them over.
+	obs    Observer
+	outbox []Change
+	// slotSeq numbers slot changes; slotVer holds each touched slot's version
+	// (observer.go, slotRef): the compare-and-set of a pulled write.
+	slotSeq uint64
+	slotVer map[string]map[string]uint64
+
 	persistErrors int64
 	lastPersistOK bool
 	// persistBlocked: the state file exists but could not be read (not a parse
@@ -251,6 +261,8 @@ func New(b *baseline.Baseline, r *registry.Registry, opts Options) (*State, Load
 		expSeen: map[string]time.Time{},
 		cache:   map[string][]byte{},
 		subs:    map[*Subscription]struct{}{},
+		slotSeq: firstSlotVersion,
+		slotVer: map[string]map[string]uint64{},
 	}
 	for _, set := range opts.Served {
 		if b.Sets[set] == nil {
@@ -322,6 +334,7 @@ func (s *State) changed() {
 	for sub := range s.subs {
 		sub.wake()
 	}
+	s.flushLocked()
 }
 
 // Stats is the state's size, for GET /state and the gauges (telemetry.md §10.2).
