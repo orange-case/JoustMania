@@ -514,7 +514,7 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 
 **Traceability:** FR-139, NFR-050 to NFR-053 / UC-053 / `services/flag-service/telemetry/` / `services/flag-service/api/api_test.go`, `tests/service/test_flag_propagation.py`, `tests/contract/test_telemetry_contract.py`.
 
-### 10.4 Flagsmith link (partially implemented, #2588; UC-054, UC-055)
+### 10.4 Flagsmith link (partially implemented, #2588, #2590; UC-054, UC-055)
 
 > Partially implemented: #2588 registers every metric below (also with the link off; the link gauge then shows `off`) and
 > defines the span names and helpers; the pushes (#2589), pulls (#2590) and the start sequence (#2591) record them.

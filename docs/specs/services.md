@@ -597,7 +597,7 @@ validation harness (`curl http://localhost/flags/...`; `scripts/agent-group-ab.s
 **Traceability:** FR-130 to FR-139, NFR-050 to NFR-053, C-030 to C-033 / UC-053 / `services/flag-service/`
 / `services/flag-service/*/*_test.go`, `tests/service/test_flag_service_*.py`, `tests/service/test_tc019_flag_service_restart.py`, TC-018 to TC-020.
 
-### 7.3 Flagsmith link (partially implemented, #2588; UC-054, UC-055)
+### 7.3 Flagsmith link (partially implemented, #2588, #2590; UC-054, UC-055)
 
 > Partially implemented (#2588: config, client, link state, the `flagsmith` block of `GET /state`, the reserved label and the
 > in-process write entry; the link starts, pings and goes online or offline, but pushes (#2589), pulls (#2590) and the start
