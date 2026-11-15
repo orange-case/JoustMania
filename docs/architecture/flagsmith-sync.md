@@ -171,6 +171,16 @@ entity.
    counts as an error with reason `stale_document`, and the next pull is in full. Only Flagsmith's own times are
    compared, never the local clock (a Pi without RTC may run at 1970 before NTP); an update time that is not a finite
    epoch after 1970 or lies beyond year 9999 counts as none, so a garbled value cannot block every later document.
+   The refusal is bounded: one update time ahead of all later ones (Flagsmith's clock skewed forward and corrected, an
+   environment database restore, a garbled but in-range time) would otherwise refuse every document, kill-switch
+   tightenings included, until a restart. Once older documents have been refused in a row for max(10 min, 10 x the
+   poll interval), measured as local elapsed time (the monotonic clock, never a wall-clock comparison, so a local
+   clock at 1970 plays no part), the next older document is accepted and its update time becomes the newest; the
+   link logs a warning `flagsmith stale document accepted`. Any document accepted in between ends the run of
+   refusals. In that one round every kill switch merges the document as after a restart, without its remote value
+   (§6 "R absent" row): it takes the more restrictive of the document and the local value, so an accepted pre-push
+   copy never loosens a kill switch below the local value the link pushed. The generation snapshot and the value
+   guard above still apply to every key in that round.
 7. **Every pulled write is conditional**: it carries the version of the local slot as read, empty slots included, so a
    local write that lands between the read and the apply wins (the pulled write is refused as stale, and the next round
    sees the conflict). Event appends (§4.3) are the one unconditional write.
@@ -377,6 +387,7 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | SaaS request limits (`MASTER_API_KEY_THROTTLE_RATE` is a per-deployment setting; the SaaS value is not published) under many games and events | merge per flag and scope, `FLAGSMITH_PUSH_RATE`, honour `429 Retry-After`; to measure with 8 live games (NFR-057) |
 | Edge identity count grows with games on the plan's identity quota | identities deleted at game end and, for games that are not live, after start (§5.1); to verify against the plan |
 | A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round are skipped, and the value guard skips a key whose document value still equals a value its confirmed push replaced (§4.2 step 6); a document whose update time is older than the newest one read is skipped whole (`stale_document`, server time only; §4.2 step 6); pulled writes are conditional on the local slot (§4.2) |
+| One document update time ahead of all later ones (Flagsmith clock skew, an environment database restore, a garbled but in-range time) would refuse every later document as `stale_document`, kill-switch tightenings included | the refusal ends after max(10 min, 10 x poll interval) of refusals in a row, local elapsed time; the older document is then accepted and becomes the newest, with a warning log; in that round kill switches merge without their remote value and take the more restrictive value (§4.2 step 6). Residual: a cache serving a pre-push copy for longer than that can bring back a non-kill-switch value once the value guard has ended, as for a document without an update time |
 | A local write to a game or player slot that is empty during a document fetch is not detected by the per-slot version check for that round (game values only; stack and kill-switch slots are fully covered) | accepted; last writer wins |
 | `__future__` flag API is experimental and may change | fallback to the stable `featurestates` endpoints (§4.1 step 3); a contract test against the pinned Flagsmith version |
 | Change requests on the environment make every push fail | A4 of UC-055, reported as out of sync; the stage environment runs without change requests |

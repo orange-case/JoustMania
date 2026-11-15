@@ -550,3 +550,150 @@ func TestUpdateTimeAheadOfLocalClockUsed(t *testing.T) {
 		t.Fatalf("UC-054/2 decision.backend = %+v: an older document was applied after a time ahead of the 1970 local clock", v)
 	}
 }
+
+// UC: UC-054 2
+// A body updated_at outside 1970 to year 9999 (after its offset) is no update
+// time: it sets no Last-Modified and never pins the newest time (#2596 delta
+// 3 finding 2).
+func TestGarbledBodyUpdateTimeIgnored(t *testing.T) {
+	start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC) // the harness clock
+	for _, body := range []string{"9999-12-31T23:59:59-23:00", "1970-01-01T00:00:00Z"} {
+		t.Run("UC-054/2 body "+body, func(t *testing.T) {
+			doc := document(start, []map[string]any{fsState("decision.backend", true, "claude")})
+			doc["updated_at"] = body
+			h := newHarness(t, harnessOpts{doc: doc})
+			h.online()
+			h.round()
+			if got := h.link.LastModified(); got != "" {
+				t.Fatalf("UC-054/2 Last-Modified %q from the body updated_at %q, want none", got, body)
+			}
+			h.fake.SetDocument(document(start.Add(-30*time.Second), []map[string]any{fsState("decision.backend", true, "openai")}), "")
+			h.round()
+			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
+				t.Fatalf("UC-054/2 decision.backend = %+v after the body updated_at %q: the later document was refused as older", v, body)
+			}
+		})
+	}
+}
+
+// lastPull returns the attributes of the last pull span.
+func (h *harness) lastPull() map[string]string {
+	pulls := h.ended(flagsmith.SpanPull)
+	attrs := map[string]string{}
+	for _, a := range pulls[len(pulls)-1].Attributes() {
+		attrs[string(a.Key)] = a.Value.String()
+	}
+	return attrs
+}
+
+// staleWedge starts a harness whose first document is stamped in 2100 (an
+// update time ahead of every later one: Flagsmith's clock skewed forward, a
+// database restore, a garbled but in-range time) with agent/enabled on, and
+// then serves a document with a normal update time and enabled off.
+func staleWedge(t *testing.T) *harness {
+	t.Helper()
+	future := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+	h := newHarness(t, harnessOpts{before: func(hh *harness) {
+		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "operator"}); ferr != nil {
+			t.Fatal(ferr)
+		}
+		hh.fake.SetDocument(document(future, []map[string]any{fsState("enabled", true, "on")}), "")
+	}})
+	h.online()
+	h.round()
+	h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off")}), "")
+	return h
+}
+
+// wantStaleRefusal fails unless the last pull was refused as stale_document
+// and agent/enabled is still on.
+func wantStaleRefusal(t *testing.T, h *harness, when string) {
+	t.Helper()
+	if a := h.lastPull(); a[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
+		t.Fatalf("UC-054/BR-005 %s: pull span %v, want reason stale_document", when, a)
+	}
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
+		t.Fatalf("UC-054/BR-005 %s: agent/enabled = %+v, want on (refused)", when, v)
+	}
+}
+
+// UC: UC-054 BR-005
+// One update time ahead of all later ones must not wedge the in side: older
+// documents are refused only until the refusals in a row have lasted
+// max(10 min, 10 polls) of local elapsed time (10 h at the harness's 1 h
+// poll); then the document is accepted and the kill-switch tightening in it
+// applies. A document accepted in between starts the count again (#2596
+// delta 3 finding 1).
+func TestStaleRefusalEndsAfterTimeout(t *testing.T) {
+	t.Run("UC-054/BR-005 accepted after 10 polls", func(t *testing.T) {
+		h := staleWedge(t)
+		h.round()
+		wantStaleRefusal(t, h, "first refusal")
+		h.clock.Advance(10*time.Hour - time.Minute)
+		h.round()
+		wantStaleRefusal(t, h, "refusals for just under 10 h")
+		h.clock.Advance(time.Minute)
+		h.round()
+		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
+			t.Fatalf("UC-054/BR-005 agent/enabled = %+v after 10 h of stale_document refusals: the Flagsmith kill-switch tightening is still refused", v)
+		}
+		if a := h.lastPull(); a[flagsmith.AttrResult] != flagsmith.ResultChanged {
+			t.Fatalf("telemetry §10.4 pull span %v, want result changed", a)
+		}
+		// The accepted time is the newest now: a later document is not refused.
+		h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off"), fsState("decision.backend", true, "openai")}), "")
+		h.round()
+		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
+			t.Fatalf("UC-054/2 decision.backend = %+v: the document after the accepted one was refused", v)
+		}
+	})
+	t.Run("UC-054/BR-005 a document accepted in between restarts the count", func(t *testing.T) {
+		h := staleWedge(t)
+		h.round()
+		wantStaleRefusal(t, h, "first refusal")
+		h.fake.SetDocument(document(time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), []map[string]any{fsState("enabled", true, "on")}), "")
+		h.clock.Advance(5 * time.Hour)
+		h.round()
+		h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off")}), "")
+		h.clock.Advance(6 * time.Hour)
+		h.round()
+		wantStaleRefusal(t, h, "first refusal after an accepted document, 11 h after the first run began")
+	})
+}
+
+// UC: UC-054 BR-005
+// An older document accepted after the refusal timeout may be a pre-push copy:
+// a kill switch then merges it without its remote value and takes the more
+// restrictive value, so it never loosens below what the link pushed even when
+// the push guard has ended (the newest document showed the pushed value)
+// (#2596 delta 3 finding 1).
+func TestStaleAcceptedNeverLoosensKillSwitch(t *testing.T) {
+	future := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+	h := newHarness(t, harnessOpts{before: func(hh *harness) {
+		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "operator"}); ferr != nil {
+			t.Fatal(ferr)
+		}
+		hh.fake.SetDocument(document(future, []map[string]any{fsState("enabled", true, "on")}), "")
+	}})
+	h.online()
+	if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "operator"}); ferr != nil {
+		t.Fatal(ferr)
+	}
+	h.link.Links().ConfirmPushed(enabledKey, offValue)
+	h.round()
+	h.fake.SetDocument(document(future.Add(time.Second), []map[string]any{fsState("enabled", true, "off")}), "")
+	h.round() // the newest document shows the push: the guard ends
+	h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "on")}), "")
+	h.round()
+	if a := h.lastPull(); a[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
+		t.Fatalf("setup: pull span %v, want reason stale_document", a)
+	}
+	h.clock.Advance(10 * time.Hour)
+	h.round()
+	if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
+		t.Fatalf("setup: pull span %v, want the older document accepted after 10 h", a)
+	}
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %+v: the older document accepted after the timeout loosened the pushed kill switch", v)
+	}
+}

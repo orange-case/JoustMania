@@ -48,6 +48,14 @@ const (
 	// treated as stale for max(pushGuardMin, pushGuardPolls x poll interval).
 	pushGuardMin   = 10 * time.Minute
 	pushGuardPolls = 10
+	// staleAcceptMin and staleAcceptPolls bound the older-document refusal
+	// (§4.2 step 6): once consecutive stale_document refusals have lasted
+	// max(staleAcceptMin, staleAcceptPolls x poll interval) of local elapsed
+	// time, the document is accepted and becomes the newest update time, so
+	// one update time ahead of all later ones (server clock skew, a database
+	// restore, a garbled but in-range value) cannot wedge the in side.
+	staleAcceptMin   = 10 * time.Minute
+	staleAcceptPolls = 10
 	// ReasonStaleDocument is the pull reason of a document older than one
 	// this process already read (a cache or region serving an older copy):
 	// the round is skipped (telemetry.md §10.4).
@@ -86,6 +94,11 @@ type puller struct {
 	// newest is the newest document update time this process read (server
 	// clock only): an older document is a stale copy and is not applied.
 	newest time.Time
+	// staleRun: the last documents read were all refused as older, the first
+	// of them at staleSince (local clock, compared with the local clock only:
+	// time.Now carries a monotonic reading, so this is elapsed time).
+	staleRun   bool
+	staleSince time.Time
 }
 
 // remoteMark is one key's remote state as LinkState holds it.
@@ -374,6 +387,11 @@ type roundCtx struct {
 	writes   int
 	deferred bool
 	stats    roundStats
+
+	// staleAccepted: the document is older than the newest one read and was
+	// accepted after the refusal timeout; kill switches merge without their
+	// remote value (more restrictive wins).
+	staleAccepted bool
 }
 
 // skip leaves a key for the next round, which pulls in full.
@@ -438,12 +456,26 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	// A document older than one already read is a stale copy (a second
 	// cache or region): applying it could revert a push it predates, so the
 	// round is skipped, Last-Modified kept and the next pull is in full.
+	// After max(10 min, 10 polls) of refusals in a row (local elapsed time)
+	// the document is accepted: the newest time itself may be wrong.
 	if rc.hasUpd && rc.updated.Before(p.newest) {
-		p.forceFull = true
-		l.NotePull(rc.now, "")
-		reason = ReasonStaleDocument
-		return rc.stats, nil
+		if !p.staleRun {
+			p.staleRun, p.staleSince = true, rc.now
+		}
+		refusing := rc.now.Sub(p.staleSince)
+		if refusing < p.staleAcceptAfter() {
+			p.forceFull = true
+			l.NotePull(rc.now, "")
+			reason = ReasonStaleDocument
+			return rc.stats, nil
+		}
+		rc.staleAccepted = true
+		l.Logger().Warn("flagsmith stale document accepted",
+			"updated_at", rc.updated.UTC().Format(time.RFC3339Nano),
+			"newest", p.newest.UTC().Format(time.RFC3339Nano),
+			"refused_for", refusing.String())
 	}
+	p.staleRun = false
 	if rc.hasUpd {
 		p.newest = rc.updated
 	}
@@ -687,6 +719,16 @@ func (p *puller) guardTTL() time.Duration {
 	return max(pushGuardMin, pushGuardPolls*interval)
 }
 
+// staleAcceptAfter is how long older documents are refused in a row before
+// one is accepted: max(10 min, 10 poll intervals).
+func (p *puller) staleAcceptAfter() time.Duration {
+	interval := p.l.cfg.Poll
+	if interval <= 0 {
+		interval = DefaultPoll
+	}
+	return max(staleAcceptMin, staleAcceptPolls*interval)
+}
+
 // reconcileKey merges and acts on one key.
 func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map[Key]localEntry, start map[Key]remoteMark, attribution map[Key]Author) {
 	l := p.l
@@ -741,6 +783,13 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 	in := mergeIn{R: r, HasR: hasR, D: de.v, L: le.v, Base: l.BaselineFlag(k.Set, k.Flag)}
 	if k.Scope == ScopeStack {
 		in.Kill = killRuleOf(k.Set, k.Flag)
+	}
+	// An older document accepted after the refusal timeout may predate the
+	// remote value: a kill switch merges it as after a restart (no remote),
+	// so it takes the more restrictive of the document and the local value
+	// and never loosens below the local value the link pushed.
+	if rc.staleAccepted && in.Kill != nil {
+		in.R, in.HasR = Value{}, false
 	}
 	if rf, ok := p.refused[k]; ok {
 		in.Refused = &rf
