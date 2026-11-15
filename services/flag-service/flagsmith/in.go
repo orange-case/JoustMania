@@ -858,9 +858,7 @@ func describe(v Value) string {
 func (p *puller) accepted(k Key) {
 	delete(p.refused, k)
 	delete(p.deferred, k)
-	if _, side := p.l.links.Refusal(k); side == SideLocal {
-		p.l.links.ClearRefusal(k)
-	}
+	p.l.links.ClearLocalRefusal(k)
 	p.health.accept(k.Flag, k)
 }
 
@@ -880,12 +878,13 @@ func (p *puller) slotVersion(k Key, v Value) uint64 {
 // offer queues the local value read in the snapshot for the out side, only
 // while its slot has not changed since: a newer local write was offered by
 // the observer already and must not be replaced by the older value (#2596
-// finding 6).
+// finding 6). Reoffer never re-queues a value Flagsmith refused (UC-055 A4,
+// #2604) nor replaces a pending entry.
 func (p *puller) offer(rc *roundCtx, k Key, le localEntry) bool {
 	if le.slot != 0 && p.slotVersion(k, le.v) != le.slot {
 		return false
 	}
-	return p.l.links.Offer(k, le.v, rc.now, le.version)
+	return p.l.links.Reoffer(k, le.v, rc.now, le.version)
 }
 
 // markSegments keeps one health entry per synced feature with a segment

@@ -196,3 +196,185 @@ func TestLinkState(t *testing.T) {
 		}
 	})
 }
+
+// UC: UC-055 A4
+// A value Flagsmith refused is remembered per key: a pull round (Reoffer)
+// never queues it again, a re-save of the same value does not either, and a
+// different local value, a confirmed push, ClearRefusal or the key's deletion
+// ends it (#2604).
+func TestLinkStateRefusedValue(t *testing.T) {
+	t0 := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	stack := Key{Set: "agent", Flag: "decision.backend", Scope: ScopeStack}
+	game := Key{Set: "interventions", Flag: "volume_override", Scope: "game:g1"}
+	// refused returns a state where Flagsmith (remote 0) refused 1 for k.
+	refused := func(t *testing.T, k Key) *LinkState {
+		t.Helper()
+		s := NewLinkState(nil)
+		s.SetRemote(k, val(`0`))
+		s.Offer(k, val(`1`), t0, 1)
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "1" {
+			t.Fatalf("setup: in flight %s ok %v, want 1", v.Value, ok)
+		}
+		s.RefuseValue(k, val(`1`), SideRemote, ReasonChangeRequestRequired)
+		return s
+	}
+	// heldWithInFlight returns a state where Flagsmith (remote 0) refused 1
+	// while 2 was offered, and 2 is in flight now.
+	heldWithInFlight := func(t *testing.T) *LinkState {
+		t.Helper()
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		s.Offer(stack, val(`1`), t0, 1)
+		s.Next()
+		s.Offer(stack, val(`2`), t0, 2) // merged while 1 is in flight
+		s.RefuseValue(stack, val(`1`), SideRemote, ReasonChangeRequestRequired)
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "2" {
+			t.Fatalf("setup: in flight %s ok %v, want 2", v.Value, ok)
+		}
+		return s
+	}
+	t.Run("UC-055/A4 back to the refused value while a newer one is in flight: its confirm keeps the refusal, out of sync", func(t *testing.T) {
+		s := heldWithInFlight(t)
+		s.Offer(stack, val(`1`), t0, 3) // the operator goes back to the refused 1
+		s.ConfirmPushed(stack, val(`2`))
+		if p, oos, r := s.Counts(); p != 0 || oos != 1 || r != 1 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 1: the stack runs the refused 1, Flagsmith holds 2", p, oos, r)
+		}
+		if got, _ := s.Remote(stack); string(got.Value) != "2" {
+			t.Fatalf("remote %s, want 2 (confirmed)", got.Value)
+		}
+		if s.Reoffer(stack, val(`1`), t0, 4) {
+			t.Fatal("the next pull round queued the refused 1 again")
+		}
+	})
+	t.Run("UC-055/A4 back to the refused value while a newer one is in flight: its refusal keeps the held value", func(t *testing.T) {
+		s := heldWithInFlight(t)
+		s.Offer(stack, val(`1`), t0, 3) // the operator goes back to the refused 1
+		s.RefuseValue(stack, val(`2`), SideRemote, ReasonChangeRequestRequired)
+		if s.Reoffer(stack, val(`1`), t0, 4) {
+			t.Fatal("the next pull round re-sends the refused 1")
+		}
+		if p, oos, r := s.Counts(); p != 0 || oos != 1 || r != 1 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 1", p, oos, r)
+		}
+		if !s.Reoffer(stack, val(`2`), t0, 5) {
+			t.Fatal("a later local 2 differs from the held 1 and must be sent (Q1)")
+		}
+	})
+	t.Run("UC-055/A4 a pull round does not queue the refused value again and keeps the key out of sync", func(t *testing.T) {
+		s := refused(t, stack)
+		s.SetInSync(stack, true) // as SetRemote of a keep-local round does
+		if s.Reoffer(stack, val(`1`), t0, 2) {
+			t.Fatal("Reoffer queued the refused value")
+		}
+		if p, oos, r := s.Counts(); p != 0 || oos != 1 || r != 1 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 1", p, oos, r)
+		}
+		if !s.Reoffer(stack, val(`2`), t0, 3) {
+			t.Fatal("Reoffer did not queue a different value")
+		}
+	})
+	t.Run("UC-055/A4 a re-save of the refused value does not retry, a different value does", func(t *testing.T) {
+		s := refused(t, stack)
+		if s.Offer(stack, val(`1`), t0, 2) {
+			t.Fatal("a re-save of the refused value was queued")
+		}
+		if _, _, _, _, ok := s.Next(); ok {
+			t.Fatal("a re-save of the refused value is pending")
+		}
+		if !s.Offer(stack, val(`2`), t0, 3) {
+			t.Fatal("a different value was not queued")
+		}
+		s.Offer(stack, val(`1`), t0, 4) // back to the refused value: no longer remembered
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "1" {
+			t.Fatalf("pending %s ok %v, want 1 queued after a different value ended the refusal", v.Value, ok)
+		}
+	})
+	t.Run("UC-055/A4 a re-save of the refused value drops an older pending value", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		s.Offer(stack, val(`1`), t0, 1)
+		s.Next()
+		s.Offer(stack, val(`2`), t0, 2) // offered while 1 is in flight
+		s.RefuseValue(stack, val(`1`), SideRemote, ReasonChangeRequestRequired)
+		if s.Reoffer(stack, val(`2`), t0, 3) {
+			t.Fatal("Reoffer replaced or re-queued the pending entry")
+		}
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "2" {
+			t.Fatalf("pending %s ok %v, want 2 kept", v.Value, ok)
+		}
+		s.Offer(stack, val(`1`), t0, 4) // the operator goes back to the refused 1
+		if p, _, _ := s.Counts(); p != 0 {
+			t.Fatalf("pending %d, want 2 dropped: the local value is the refused 1", p)
+		}
+	})
+	t.Run("UC-055/A4 Reoffer never replaces a pending entry", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		s.Offer(stack, val(`5`), t0, 1)
+		if s.Reoffer(stack, val(`4`), t0, 2) {
+			t.Fatal("Reoffer replaced a pending entry")
+		}
+		if _, v, _, _, _ := s.Next(); string(v.Value) != "5" {
+			t.Fatalf("pending %s, want 5", v.Value)
+		}
+	})
+	t.Run("UC-055/A4 a confirmed push, ClearRefusal and deletion end the refused value", func(t *testing.T) {
+		s := heldWithInFlight(t)
+		s.ConfirmPushed(stack, val(`2`)) // 2 was the local value
+		if !s.Reoffer(stack, val(`1`), t0, 3) {
+			t.Fatal("the refused value is still held back after a confirmed push")
+		}
+		s = refused(t, stack)
+		s.ClearRefusal(stack)
+		if !s.Reoffer(stack, val(`1`), t0, 2) {
+			t.Fatal("the refused value is still held back after ClearRefusal")
+		}
+		s = refused(t, game)
+		s.ForgetGame("g1")
+		s.SetRemote(game, val(`0`))
+		if !s.Reoffer(game, val(`1`), t0, 2) {
+			t.Fatal("the refused value survived ForgetGame")
+		}
+	})
+	t.Run("UC-055/A4 only a push refusal with its value is remembered", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		s.Offer(stack, val(`1`), t0, 1)
+		s.Refuse(stack, SideRemote, ReasonNotFound) // no value (start sequence)
+		s.Offer(stack, val(`0`), t0, 2)
+		if !s.Reoffer(stack, val(`1`), t0, 3) {
+			t.Fatal("a refusal without a value held the value back")
+		}
+		s = NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		s.RefuseValue(stack, val(`1`), SideLocal, "slot_changed")
+		if !s.Reoffer(stack, val(`1`), t0, 2) {
+			t.Fatal("a local refusal held the value back")
+		}
+	})
+	t.Run("UC-055/A4 ClearLocalRefusal keeps a push refusal and its value", func(t *testing.T) {
+		s := refused(t, stack)
+		s.ClearLocalRefusal(stack)
+		if r, side := s.Refusal(stack); r != ReasonChangeRequestRequired || side != SideRemote {
+			t.Fatalf("refusal %q %q, want the push refusal kept", r, side)
+		}
+		if s.Reoffer(stack, val(`1`), t0, 2) {
+			t.Fatal("ClearLocalRefusal ended the refused value")
+		}
+		s.Refuse(stack, SideLocal, "slot_changed")
+		s.ClearLocalRefusal(stack)
+		if r, _ := s.Refusal(stack); r != "" {
+			t.Fatalf("refusal %q, want a local refusal cleared", r)
+		}
+	})
+	t.Run("UC-055/A4 the remembered value alone counts as refused", func(t *testing.T) {
+		s := refused(t, stack)
+		s.ClearLocalRefusal(stack)
+		s.Refuse(stack, SideLocal, "slot_changed")
+		s.ClearLocalRefusal(stack) // the reason is gone, the refused value stays
+		if _, _, r := s.Counts(); r != 1 {
+			t.Fatalf("refused %d, want 1 while the refused value is held back", r)
+		}
+	})
+}

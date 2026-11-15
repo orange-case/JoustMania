@@ -62,7 +62,7 @@ func (d decision) conflict() bool { return d.resolution != "" }
 // of UC-054 BR-005 (flags.md §13.6):
 //
 //	R = D, R = L              -> none
-//	R = D, R ≠ L              -> push (skip while D is the refused value)
+//	R = D, R ≠ L              -> push (skip while D is the refused value; not re-sent while Flagsmith refused that local value, LinkState.Reoffer, UC-055 A4)
 //	R ≠ D, R = L              -> apply (a deliberate change, also one that loosens a kill switch)
 //	R ≠ D, R ≠ L, D = L       -> adopt
 //	R ≠ D, R ≠ L, D ≠ L       -> conflict: Flagsmith wins, a kill switch takes the more restrictive value

@@ -107,7 +107,7 @@ Per flag and scope (`(set, key, scope)`), the link holds:
 | `remote` | last state **seen** from Flagsmith (enabled + value), or none | 
 | `pending` | latest local value not yet confirmed by Flagsmith (the outbox entry), or none |
 | `in_sync` | `remote` equals what the stack runs |
-| `refused` | reason of the last refusal on either side, cleared on the next accepted change |
+| `refused` | reason of the last refusal on either side, cleared on the next accepted change; a refused push also keeps the refused local value, which is not sent again until the local value changes to a different one or the process restarts (UC-055 A4, #2604) |
 
 Plus link-wide: `state` (`off`, `starting`, `online`, `offline`), `last_pull_at`, `last_modified` (for the
 conditional pull), the boot epoch of the flag service and the Flagsmith ids it resolved (project, environment,
@@ -300,7 +300,7 @@ cannot loosen a kill switch; only a later deliberate change in Flagsmith, seen a
 | `remote` vs document | `remote` vs local | Result |
 |---|---|---|
 | equal | equal | nothing |
-| equal | differs | local change not yet pushed: push it |
+| equal | differs | local change not yet pushed: push it, unless Flagsmith refused that local value (any refusal but `429`): it is not sent again until the local value changes to a different one or the process restarts (UC-055 A4); the same holds for every other row that pushes the local value |
 | differs | equal | change made in Flagsmith: apply it |
 | differs | differs, document == local | both moved to the same value: `remote := document` |
 | absent (no last state: restart, first sighting) | differs | kill switch → **conflict** (the more restrictive value wins; a local winner is pushed and the feature is out of sync until then); other flags: apply the document value |
