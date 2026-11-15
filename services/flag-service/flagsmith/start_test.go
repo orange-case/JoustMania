@@ -780,6 +780,8 @@ func TestStartCreatesFeatures(t *testing.T) {
 	t.Run("UC-054/A3 a local refusal survives a re-run: only remote start refusals are cleared", func(t *testing.T) {
 		e := newStartEnv(t)
 		e.allFeaturesExist()
+		e.l.Links().SetInSync(kBackend, false) // creates the entry Refuse needs
+		e.l.Links().SetInSync(kTick, false)
 		e.l.Links().Refuse(kBackend, SideLocal, ReasonFeatureNameCase)
 		e.l.Links().Refuse(kTick, SideRemote, ReasonFeatureNameCase)
 		if err := e.s.Start(e.ctx); err != nil {
