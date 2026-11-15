@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/joustmania/flag-service/flagsmith"
 	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
@@ -13,7 +14,9 @@ import (
 )
 
 // Journeys with the in side (UC-054) and the out side (UC-055) together: a
-// pull round must not send again a value Flagsmith refused (UC-055 A4, #2604).
+// pull round must not send again a value Flagsmith refused (UC-055 A4, #2604),
+// and a value a pull round decides to send goes out without another local
+// write (#2608).
 
 // Feature ids of the flags these journeys push.
 var inoutIDs = map[string]int{
@@ -28,10 +31,7 @@ const (
 	overridesPath = flagsmithtest.APIPath + "environments/envkey/edge-identities-featurestates"
 )
 
-var (
-	backendKey = flagsmith.Key{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}
-	nudgeKey   = minIntervalKey
-)
+var backendKey = flagsmith.Key{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}
 
 // fsModel is what the fake Flagsmith holds: environment values by feature
 // name and identity overrides; publish serves it as the document.
@@ -81,16 +81,13 @@ func (m *fsModel) publish() {
 	m.h.setDoc(states, ovs...)
 }
 
-// inoutHarness starts the link with the real out side. Flagsmith accepts the
-// nudge flag (and updates the document like Flagsmith would); handlers add
-// the other answers. before runs before the link starts.
+// inoutHarness starts the link with the real out side. Flagsmith lists
+// identities; handlers add the other answers. before runs before the link
+// starts.
 func inoutHarness(t *testing.T, m *fsModel, handlers map[string]http.HandlerFunc, before func(h *harness)) *harness {
 	t.Helper()
 	return newHarness(t, harnessOpts{realOut: true, featureIDs: inoutIDs, before: func(h *harness) {
 		m.h = h
-		h.fake.Handle("PATCH "+futureAPI+strconv.Itoa(inoutIDs["decision.min_interval_ms"])+"/", func(w http.ResponseWriter, _ *http.Request) {
-			flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
-		})
 		h.fake.Handle("POST "+flagsmithtest.APIPath+"environments/envkey/edge-identities/", func(w http.ResponseWriter, r *http.Request) {
 			var body struct {
 				Identifier string `json:"identifier"`
@@ -127,19 +124,147 @@ func (h *harness) requests(method, prefix string) int {
 	return len(h.fake.RequestsTo(method, prefix))
 }
 
-// roundAndNudge runs one pull round, then makes another local change that
-// wakes the sender, as any local write in a live stack does, and waits until
-// Flagsmith confirmed it. The sender sends in first-change order, so whatever
-// the round queued has been sent by then.
-func (h *harness) roundAndNudge(m *fsModel, i int) {
+// roundAndSettle runs one pull round and waits until nothing is pending: the
+// round wakes the sender for whatever it queued (#2608), so a value it queued
+// has been answered by then and shows in the request counts.
+func (h *harness) roundAndSettle() {
 	h.t.Helper()
 	h.round()
-	n := 700 + 10*i
-	m.set("decision.min_interval_ms", n)
-	h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage(strconv.Itoa(n))})
-	h.waitFor("the nudge confirmed", func() bool {
-		r, ok := h.link.Links().Remote(nudgeKey)
-		return ok && string(r.Value) == strconv.Itoa(n)
+	h.waitFor("the sender idle", func() bool {
+		p, _, _ := h.link.Links().Counts()
+		return p == 0
+	})
+}
+
+// waitWithin is waitFor with a shorter deadline.
+func (h *harness) waitWithin(d time.Duration, what string, cond func() bool) {
+	h.t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	h.t.Fatalf("%s not within %v", what, d)
+}
+
+// pushedBack is the PATCH handler of a flag whose first push the test holds
+// in flight (entered, release) while the operator goes back to the value
+// Flagsmith had: Flagsmith stores first, then back for every later push.
+func pushedBack(m *fsModel, name string, first, back any, entered chan<- struct{}, release <-chan struct{}) (http.HandlerFunc, func() int) {
+	var mu sync.Mutex
+	calls := 0
+	handler := func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			entered <- struct{}{}
+			<-release
+			m.set(name, first)
+		} else {
+			m.set(name, back)
+		}
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
+	}
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return calls
+	}
+	return handler, count
+}
+
+// sendWithin is how long a value a pull round queued may take to reach
+// Flagsmith after the round: the push interval (200 ms at PushRate 5) plus
+// slack for -race. Without the wake it waits for the next local write.
+const sendWithin = time.Second
+
+// UC: UC-054 A2
+// R = D, L ≠ R after a push that went out while the operator went back to
+// the old value: the next pull round finds the local value unsent (push) and
+// it reaches Flagsmith without any other local write (#2608).
+func TestPullRoundPushWakesSender(t *testing.T) {
+	m := newFSModel()
+	m.values["decision.min_interval_ms"] = 700
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	path := futureAPI + strconv.Itoa(inoutIDs["decision.min_interval_ms"]) + "/"
+	handler, calls := pushedBack(m, "decision.min_interval_ms", 900, 700, entered, release)
+	h := inoutHarness(t, m, map[string]http.HandlerFunc{"PATCH " + path: handler}, func(h *harness) {
+		h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("700")})
+	})
+	h.online()
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("900")})
+	<-entered // 900 in flight
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("700")})
+	close(release) // Flagsmith stores 900; the stack runs 700, nothing pending
+	h.waitFor("900 confirmed", func() bool {
+		r, ok := h.link.Links().Remote(minIntervalKey)
+		return ok && string(r.Value) == "900"
+	})
+	if p, _, _ := h.link.Links().Counts(); p != 0 || calls() != 1 {
+		t.Fatalf("setup: pending %d, %d PATCHes, want 0 and 1", p, calls())
+	}
+	h.round()
+	t.Run("UC-054/A2 step 3 the local value a pull round queues is sent without another local write", func(t *testing.T) {
+		h.waitWithin(sendWithin, "the local 700 confirmed in Flagsmith", func() bool {
+			r, ok := h.link.Links().Remote(minIntervalKey)
+			return ok && string(r.Value) == "700"
+		})
+		if n := calls(); n != 2 {
+			t.Fatalf("%d PATCHes, want 2", n)
+		}
+		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 0 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 0 0", p, oos, r)
+		}
+	})
+}
+
+// UC: UC-054 A2
+// A conflict a kill switch's tighter local value wins (Flagsmith looser) is
+// pushed back to Flagsmith by the round itself, with no other local write
+// (#2608).
+func TestKeepLocalKillSwitchSentAfterRound(t *testing.T) {
+	m := newFSModel()
+	m.values["experiment_max_games"] = 10
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	path := futureAPI + strconv.Itoa(inoutIDs["experiment_max_games"]) + "/"
+	handler, calls := pushedBack(m, "experiment_max_games", 100, 10, entered, release)
+	h := inoutHarness(t, m, map[string]http.HandlerFunc{"PATCH " + path: handler}, func(h *harness) {
+		h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("10")})
+	})
+	h.online()
+	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("100")})
+	<-entered // 100 in flight
+	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("10")})
+	close(release) // Flagsmith stores 100; the stack runs 10, nothing pending
+	h.waitFor("100 confirmed", func() bool {
+		r, ok := h.link.Links().Remote(maxGamesKey)
+		return ok && string(r.Value) == "100"
+	})
+	// Someone loosens it further in Flagsmith: R=100, D=500, L=10.
+	h.clock.Advance(2 * time.Second)
+	m.set("experiment_max_games", 500)
+	h.round()
+	t.Run("UC-054/A2 step 1 (BR-005) the tighter local value wins and is sent without another local write", func(t *testing.T) {
+		h.waitWithin(sendWithin, "the local 10 confirmed in Flagsmith", func() bool {
+			r, ok := h.link.Links().Remote(maxGamesKey)
+			return ok && string(r.Value) == "10"
+		})
+		if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionTightened); n != 1 {
+			t.Fatalf("conflicts{resolution=tightened} = %d, want 1", n)
+		}
+		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
+			t.Fatalf("experiment_max_games = %+v, want the local 10 kept", v)
+		}
+		if n := calls(); n != 2 {
+			t.Fatalf("%d PATCHes, want 2", n)
+		}
+		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 0 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 0 0", p, oos, r)
+		}
 	})
 }
 
@@ -163,8 +288,8 @@ func TestRefusedPushNotResentByPolls(t *testing.T) {
 		r, side := h.link.Links().Refusal(backendKey)
 		return r == flagsmith.ReasonChangeRequestRequired && side == flagsmith.SideRemote
 	})
-	for i := range 3 {
-		h.roundAndNudge(m, i)
+	for range 3 {
+		h.roundAndSettle()
 	}
 	t.Run("UC-055/A4 step 2 pull rounds do not send the refused value again", func(t *testing.T) {
 		if n := h.requests(http.MethodPatch, backendPath); n != 1 {
@@ -185,7 +310,7 @@ func TestRefusedPushNotResentByPolls(t *testing.T) {
 	})
 	t.Run("UC-055/A4 step 2 a re-save of the refused value does not retry", func(t *testing.T) {
 		h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"})
-		h.roundAndNudge(m, 3)
+		h.roundAndSettle()
 		if n := h.requests(http.MethodPatch, backendPath); n != 1 {
 			t.Fatalf("%d PATCHes after a re-save of jev, want 1", n)
 		}
@@ -193,7 +318,7 @@ func TestRefusedPushNotResentByPolls(t *testing.T) {
 	t.Run("UC-055/A4 step 2 a different local value is sent", func(t *testing.T) {
 		h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "openai"})
 		h.waitFor("the second push", func() bool { return h.requests(http.MethodPatch, backendPath) == 2 })
-		h.roundAndNudge(m, 4)
+		h.roundAndSettle()
 		if n := h.requests(http.MethodPatch, backendPath); n != 2 {
 			t.Fatalf("%d PATCHes after a different value and a round, want 2", n)
 		}
@@ -222,15 +347,15 @@ func TestRefusedKillSwitchPushNeverLoosens(t *testing.T) {
 		_, side := h.link.Links().Refusal(maxGamesKey)
 		return side == flagsmith.SideRemote
 	})
-	for i := range 3 {
-		h.roundAndNudge(m, i)
+	for range 3 {
+		h.roundAndSettle()
 	}
 	if n := h.requests(http.MethodPatch, maxPath); n != 1 {
 		t.Fatalf("UC-055/A4 %d PATCHes of experiment_max_games after 3 rounds, want 1", n)
 	}
 	t.Run("UC-054/BR-005 a looser document value keeps the refused local value, out of sync, unsent", func(t *testing.T) {
 		m.set("experiment_max_games", 500)
-		h.roundAndNudge(m, 3)
+		h.roundAndSettle()
 		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
 			t.Fatalf("experiment_max_games = %+v, want 10 kept", v)
 		}
@@ -246,7 +371,7 @@ func TestRefusedKillSwitchPushNeverLoosens(t *testing.T) {
 	})
 	t.Run("UC-054/BR-005 a tighter document value is applied and ends the refusal", func(t *testing.T) {
 		m.set("experiment_max_games", 5)
-		h.roundAndNudge(m, 4)
+		h.roundAndSettle()
 		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "5" {
 			t.Fatalf("experiment_max_games = %+v, want the tighter 5 applied", v)
 		}
@@ -278,8 +403,8 @@ func TestRefusedOverrideAndDeleteNotResent(t *testing.T) {
 		_, side := h.link.Links().Refusal(volumeOverrideG1)
 		return side == flagsmith.SideRemote
 	})
-	for i := range 3 {
-		h.roundAndNudge(m, i)
+	for range 3 {
+		h.roundAndSettle()
 	}
 	t.Run("UC-055/A4 a refused override is not sent again (no override in Flagsmith)", func(t *testing.T) {
 		if n := h.requests(http.MethodPut, overridesPath); n != 1 {
@@ -289,7 +414,7 @@ func TestRefusedOverrideAndDeleteNotResent(t *testing.T) {
 	t.Run("UC-055/A4 a refused removal is not sent again", func(t *testing.T) {
 		// Flagsmith gets the same override another way: both sides agree.
 		m.setOverride("game:g1", "volume_override", "0.5")
-		h.roundAndNudge(m, 3)
+		h.roundAndSettle()
 		if r, ok := h.link.Links().Remote(volumeOverrideG1); !ok || !r.Present {
 			t.Fatalf("setup: remote %+v %v, want the override adopted", r, ok)
 		}
@@ -301,8 +426,8 @@ func TestRefusedOverrideAndDeleteNotResent(t *testing.T) {
 			r, _ := h.link.Links().Refusal(volumeOverrideG1)
 			return r == flagsmith.ReasonUnauthorized
 		})
-		for i := range 3 {
-			h.roundAndNudge(m, 4+i)
+		for range 3 {
+			h.roundAndSettle()
 		}
 		if n := h.requests(http.MethodDelete, overridesPath); n != 1 {
 			t.Fatalf("%d DELETEs after 3 rounds, want 1", n)
@@ -400,8 +525,8 @@ func TestRefusedValueBackWhileNewerInFlight(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/A4 step 2 pull rounds do not send the refused value again", func(t *testing.T) {
-		for i := range 2 {
-			h.roundAndNudge(m, i)
+		for range 2 {
+			h.roundAndSettle()
 		}
 		if n := h.requests(http.MethodPatch, backendPath); n != 2 {
 			t.Fatalf("%d PATCHes of decision.backend, want 2 (jev refused once, openai confirmed)", n)
