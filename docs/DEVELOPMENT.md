@@ -91,6 +91,43 @@ A bare `docker compose` also loads `docker-compose.override.yml`, which publishe
 interfaces. That is fine on a dev machine and wrong on the Pi, so the Pi wrapper names
 `-f docker-compose.yml` and the env files explicitly (#1319, #1488).
 
+### Gateway export (opt-in, UC-035 A7)
+
+By default no telemetry leaves the machine. `docker-compose.gateway.yml` makes the collector also send the
+game telemetry (the traces, metrics and logs the services push over OTLP) to one remote OpenTelemetry
+Collector, the gateway, which forwards it to the external backends. The gateway is deployed outside this
+repo. Jaeger, VictoriaMetrics and the agent keep receiving everything.
+
+| Variable | Value |
+|---|---|
+| `ORANGECASE_GATEWAY_ENDPOINT` | Base URL of the gateway's OTLP/HTTP receiver, `https` on port 443, for example `https://otlp.example.org`. The collector adds `/v1/traces`, `/v1/metrics` and `/v1/logs`. |
+| `ORANGECASE_GATEWAY_TOKEN` | The bearer token the gateway expects. A secret. |
+
+Both are required; compose refuses the file without them. Keep them in the environment: the shell, or
+`.env.local` on the Pi (not in git). Never put the token in a flag, a compose file or any file of this repo
+(C-016). Use an `https` endpoint: over plain `http` the token travels unencrypted.
+
+```bash
+# On: recreates the collector with the overlay
+export ORANGECASE_GATEWAY_ENDPOINT=https://otlp.example.org
+export ORANGECASE_GATEWAY_TOKEN=...
+docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d otel-collector
+
+# Off: recreates the collector without it; what was still queued for the gateway is dropped
+docker compose -f docker-compose.yml up -d otel-collector
+```
+
+On the Pi use the wrapper, which reads both variables from `.env.local`:
+`./scripts/setup/joustmania-compose.sh -f docker-compose.gateway.yml up -d otel-collector` (off: the same
+command without `-f docker-compose.gateway.yml`). The autostart unit does not load the overlay, so a reboot
+or `systemctl restart joustmania` starts the collector without it: run the command again.
+
+An unreachable gateway or a wrong token never slows the game or the in-case backends (NFR-029): the
+collector retries a batch for at most 5 minutes, queues at most 16 MiB per signal and then drops the
+gateway copy. Check with `docker compose logs otel-collector | grep gateway`: `Exporting failed. Will retry`
+means the gateway is unreachable, `Exporting failed. Dropping data.` with status 401 or 403 means the token
+is wrong. No such line: the export works.
+
 ### Upgrade, rollback and the one-time migration (UC-060 A2, A3)
 
 The Pi runs a pinned checkout (a `joustmania-vX.Y.Z` release tag or an exact commit sha, UC-060 BR-003); the
