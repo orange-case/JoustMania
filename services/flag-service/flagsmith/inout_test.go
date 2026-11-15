@@ -351,3 +351,63 @@ func TestRateLimitedPushStillRetried(t *testing.T) {
 		t.Fatalf("UC-055/A4 pending %d refused %d, want 0 0", p, r)
 	}
 }
+
+// UC: UC-055 A4
+// The operator goes back to a refused value while a newer value is in
+// flight: the newer value's confirmation does not end the refusal, so the
+// key stays out of sync and pull rounds do not send the refused value again.
+func TestRefusedValueBackWhileNewerInFlight(t *testing.T) {
+	m := newFSModel()
+	m.values["decision.backend"] = "claude"
+	backendPath := futureAPI + strconv.Itoa(inoutIDs["decision.backend"]) + "/"
+	entered := make(chan int, 2)
+	release := make(chan struct{}, 2)
+	var calls int
+	var mu sync.Mutex
+	h := inoutHarness(t, m, map[string]http.HandlerFunc{
+		"PATCH " + backendPath: func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			calls++
+			n := calls
+			mu.Unlock()
+			if n <= 2 { // the two pushes the test steps through
+				entered <- n
+				<-release
+			}
+			if n != 2 {
+				flagsmithtest.WriteJSON(w, http.StatusConflict, json.RawMessage(`{"detail":"change requests enabled"}`))
+				return
+			}
+			m.set("decision.backend", "openai") // Flagsmith holds the accepted value
+			flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
+		},
+	}, nil)
+	h.online()
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"})
+	<-entered // jev in flight
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "openai"})
+	release <- struct{}{} // jev refused, openai still pending
+	<-entered             // openai in flight
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"})
+	release <- struct{}{} // openai confirmed
+	h.waitFor("openai confirmed", func() bool {
+		r, ok := h.link.Links().Remote(backendKey)
+		return ok && r.Variant == "openai"
+	})
+	t.Run("UC-055/A4 the confirmation of the newer value keeps the refused local value out of sync", func(t *testing.T) {
+		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 1 || r != 1 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 1: the stack runs the refused jev", p, oos, r)
+		}
+	})
+	t.Run("UC-055/A4 step 2 pull rounds do not send the refused value again", func(t *testing.T) {
+		for i := range 2 {
+			h.roundAndNudge(m, i)
+		}
+		if n := h.requests(http.MethodPatch, backendPath); n != 2 {
+			t.Fatalf("%d PATCHes of decision.backend, want 2 (jev refused once, openai confirmed)", n)
+		}
+		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "jev" {
+			t.Fatalf("decision.backend = %+v, want the local jev kept", v)
+		}
+	})
+}
