@@ -114,7 +114,9 @@ func (s *State) endLocked(gameID, reason string) (GameEnd, bool) {
 	for _, f := range s.flags {
 		end.DroppedValues += f.dropGame(gameID)
 	}
-	// Every slot of the game goes with it, and so do their versions.
+	// Every slot of the game goes with it, and so do their versions: a game
+	// registered again under the same id starts its slots at 1 (services.md
+	// §7.3; memory stays bounded by the live games).
 	delete(s.slotVer, "g:"+gameID)
 	endCopy := end
 	s.noteLocked(Change{Kind: ChangeGameEnded, ScopeName: registry.ScopeGame, Scope: Scope{GameID: gameID}, Game: copyGame(g), End: &endCopy})
@@ -264,7 +266,9 @@ func (s *State) dropRemovedSerialsLocked(gameID string, old, now []string) {
 					if len(m) == 0 {
 						delete(f.serials, gameID)
 					}
-					s.slotDroppedLocked(f, registry.ScopeGameSerial, Scope{GameID: gameID, Serial: serial})
+					// The dropped serial's slot version moves on (it survives the
+					// drop, services.md §7.3): writer "" as for an expiry.
+					s.slotChangedLocked(f, registry.ScopeGameSerial, Scope{GameID: gameID, Serial: serial}, "")
 				}
 			}
 		}

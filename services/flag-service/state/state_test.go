@@ -1380,6 +1380,40 @@ func TestUnreadableStateFileBlocksPersistence(t *testing.T) {
 			t.Fatalf("result %+v errors %d, want persist failed and 1 error", res, f.state.PersistErrors())
 		}
 	})
+	t.Run("UC-053/A12 a read error refuses a StackAll clear with only an overlay in memory (#2594)", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "admin.json")
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		f := newFixture(t, fixtureOpts{stateFile: path})
+		if _, err := f.state.Put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Writer: "menu"}); err != nil {
+			t.Fatal(err)
+		}
+		res, err := f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", Writer: "flagsmith", StackAll: true})
+		if err == nil || err.Status != 500 || err.Reason != fserr.ReasonPersistFailed {
+			t.Fatalf("err = %v, want 500 persist_failed: the unreadable file may still hold an admin value", err)
+		}
+		if res.Cleared != 0 || f.state.PersistErrors() != 1 {
+			t.Fatalf("result %+v errors %d, want nothing cleared and 1 error", res, f.state.PersistErrors())
+		}
+		if got := f.snapshotFlag("sensitivity")["defaultVariant"]; got != "slow" {
+			t.Fatalf("defaultVariant = %v, want the overlay kept", got)
+		}
+	})
+	t.Run("UC-053/A12 a read error answers a kill switch's StackAll clear as not persisted (#2594)", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "admin.json")
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		f := newFixture(t, fixtureOpts{stateFile: path})
+		res, err := f.state.Clear(ClearRequest{Set: "agent", Flag: "interventions_allowed", Writer: "flagsmith", StackAll: true})
+		if err != nil {
+			t.Fatalf("err = %v: a kill switch clear is never refused", err)
+		}
+		if res.Persisted || !res.PersistFailed || f.state.PersistErrors() != 1 {
+			t.Fatalf("result %+v errors %d, want persist failed and 1 error", res, f.state.PersistErrors())
+		}
+	})
 }
 
 // UC: UC-053 A2 UC-015 BR-018
