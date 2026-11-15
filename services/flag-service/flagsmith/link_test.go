@@ -349,7 +349,7 @@ func TestLinkRun(t *testing.T) {
 		k := Key{Set: "game", Flag: "sensitivity", Scope: ScopeStack}
 		l.SetRestartReport(RestartAuditLog, map[Key]Author{k: AuthorAPIKey, {Set: "agent", Flag: "enabled", Scope: ScopeStack}: AuthorPerson})
 		rule, attribution, ok := l.RestartReport()
-		if !ok || rule != RestartAuditLog || RestartCleared(attribution) != 1 || l.Status().RestartRule != RestartAuditLog {
+		if !ok || rule != RestartAuditLog || RestartCleared(attribution, nil) != 1 || l.Status().RestartRule != RestartAuditLog {
 			t.Fatalf("report %q %v %v", rule, attribution, ok)
 		}
 	})

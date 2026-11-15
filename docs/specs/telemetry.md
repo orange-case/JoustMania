@@ -515,25 +515,28 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 
 **Traceability:** FR-139, NFR-050 to NFR-053 / UC-053 / `services/flag-service/telemetry/` / `services/flag-service/api/api_test.go`, `tests/service/test_flag_propagation.py`, `tests/contract/test_telemetry_contract.py`.
 
-### 10.4 Flagsmith link (partially implemented, #2588, #2589; UC-054, UC-055)
+### 10.4 Flagsmith link (implemented, #2588 to #2591; UC-054, UC-055)
 
-> Partially implemented: #2588 registers every metric below (also with the link off; the link gauge then shows `off`) and
-> defines the span names and helpers; the pushes (#2589), pulls (#2590) and the start sequence (#2591) record them.
+> Implemented: #2588 registers every metric below (also with the link off; the link gauge then shows `off`) and
+> defines the span names and helpers; the pushes (#2589, implemented) record the push spans and metrics; the pulls (#2590, implemented)
+> record the pull and reconcile spans and metrics; the start sequence (#2591, implemented) records the feature, tag and
+> identity-cleanup push spans; the start reconcile records `flagservice.flagsmith.cleared` and
+> `flagservice.flagsmith.restart_rule` (#2592, implemented; the restart rule also shows as `restart_rule` in `GET /state`, services.md §7.3).
 > [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md). A pulled change is a
 > `flagservice.write` span (§10.1) with `flagservice.writer=flagsmith`, a child of the `flagservice.flagsmith.pull`
 > span that found it; it counts in `flagservice_writes_total` like every write.
 
 | Span | Kind | Attributes | When |
 |---|---|---|---|
-| `flagservice.flagsmith.pull` | client | `flagservice.flagsmith.trigger` (`poll`, `realtime`, `start`, `reconnect`), `http.response.status_code`, `flagservice.flagsmith.changes` (remote changes found), `flagservice.flagsmith.conflicts`, `flagservice.result` | each environment-document fetch |
+| `flagservice.flagsmith.pull` | client | `flagservice.flagsmith.trigger` (`poll`, `realtime`, `start`, `reconnect`), `http.response.status_code`, `flagservice.flagsmith.changes` (remote changes found), `flagservice.flagsmith.conflicts`, `flagservice.result`, `flagservice.reason` (`stale_document`: a document whose update time is older than one the process already read, skipped with nothing written; else the error reason). After max(10 min, 10 x poll interval) of `stale_document` refusals in a row the older document is accepted: the pull ends `ok` or `changed` and the link logs a WARN `flagsmith stale document accepted` (`updated_at`, `newest`, `refused_for`) | each environment-document fetch |
 | `flagservice.flagsmith.push` | client, linked to the `flagservice.write` that queued it | `feature_flag.key`, `feature_flag.set.id`, `flagservice.scope`, `flagservice.flagsmith.op` (`value`, `override`, `delete_override`, `identity`, `delete_identity`, `feature`, `tag`; feature and tag creation at start are push spans and count in the push metric with these ops), `flagservice.writer`, `flagservice.flagsmith.merged` (local changes merged into this send), `http.response.status_code`, `flagservice.result`, `flagservice.reason` | each Admin API call |
-| `flagservice.flagsmith.reconcile` | internal | `flagservice.flagsmith.trigger` (`start`, `reconnect`), `flagservice.flagsmith.applied`, `flagservice.flagsmith.pushed`, `flagservice.flagsmith.cleared` (restart rule), `flagservice.flagsmith.conflicts`, `flagservice.flagsmith.restart_rule` | start and each reconnect |
+| `flagservice.flagsmith.reconcile` | internal | `flagservice.flagsmith.trigger` (`start`, `reconnect`), `flagservice.flagsmith.applied`, `flagservice.flagsmith.pushed`, `flagservice.flagsmith.conflicts`; on the `start` reconcile only: `flagservice.flagsmith.restart_rule` (`audit_log`, `versioning`, `degraded`) and `flagservice.flagsmith.cleared` (values the restart rule clears: those made with the link's API key, on the stack and on game identities, the latter deleted when their game registers; kill switches, never cleared (flags.md §13.6), and event-flag overrides, one-shot payloads, are not counted) | start and each reconnect |
 | `flagservice.flagsmith.conflict` | event on the pull or reconcile span | `feature_flag.key`, `flagservice.scope`, `flagservice.flagsmith.local_value`, `flagservice.flagsmith.remote_value`, `flagservice.flagsmith.resolution` (`flagsmith`, `tightened`, `local`) | each conflict (FR-210) |
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `flagservice_flagsmith_link` | gauge | `state` | 1 for the current link state (`off`, `starting`, `online`, `offline`), 0 for the others |
-| `flagservice_flagsmith_pulls_total` | counter | `trigger`, `result` | environment-document fetches; `result` = `changed`, `not_modified`, `error` |
+| `flagservice_flagsmith_pulls_total` | counter | `trigger`, `result` | environment-document fetches; `result` = `changed`, `not_modified`, `error` (a stale document counts as `error`, reason `stale_document` on the span) |
 | `flagservice_flagsmith_pushes_total` | counter | `op`, `result`, `reason` | Admin API calls; `reason` on refusals (`change_request_required`, `not_found`, `bad_value`, `unauthorized`, `rate_limited`, `timeout`) |
 | `flagservice_flagsmith_pending` | gauge | | local values waiting to be sent |
 | `flagservice_flagsmith_out_of_sync` | gauge | | flags and scopes whose value differs between the stack and Flagsmith |
@@ -543,10 +546,15 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 
 Labels never carry a game id, a serial or the flag key of a scoped value (cardinality); those live on the spans.
 
-**Consumers:** Grafana **Flags / OpenFeature**, new row "Flagsmith link": link state, pending and out of sync,
-pushes and pulls by result, conflicts by resolution, change delay p95 (NFR-058).
+**Consumers** (implemented, #2592): Grafana **Flags / OpenFeature** (`services/grafana/dashboards/platform/feature-flags.json`),
+row "Flagsmith link": link state, pending and out of sync, pushes by op and result, refusals
+(`flagservice_flagsmith_pushes_total{result="rejected"}`) by op and reason, pulls by trigger and result, conflicts by
+resolution, change delay p95 (NFR-058), feature-health posts by status and result; pinned by
+`tests/contract/test_grafana_panel_contents.py` (every link metric read, only labels `telemetry.go` records).
+`scripts/talk-preflight.sh` reads the same counts from `GET /state` (services.md §7.3).
 
 **Traceability:** FR-207 to FR-213, NFR-057, NFR-058 / UC-054, UC-055 /
 `services/flag-service/flagsmith/telemetry.go`, `services/flag-service/flagsmith/telemetry_test.go`,
 `services/flag-service/flagsmith/out.go`, `services/flag-service/flagsmith/push.go`, `services/flag-service/flagsmith/out_test.go`,
-`tests/contract/test_telemetry_contract.py`.
+`services/flag-service/flagsmith/in.go`, `services/flag-service/flagsmith/features.go`, `services/flag-service/flagsmith/restart.go`, `services/flag-service/flagsmith/start_test.go`, `services/flag-service/flagsmith/in_rounds_test.go`,
+`tests/contract/test_telemetry_contract.py`, `tests/contract/test_grafana_panel_contents.py`.

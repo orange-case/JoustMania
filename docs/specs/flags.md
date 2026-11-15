@@ -740,10 +740,12 @@ by a file edit and a restart. Several of their flags are read only at process st
 **Traceability:** FR-018, FR-132, FR-133, FR-134, FR-136, FR-137, FR-138, C-008, C-030, C-032, C-033 / UC-053 /
 planned `services/flag-service/registry.yaml` / planned tests in #1409.
 
-### 13.6 Flagsmith link (planned, UC-054, UC-055)
+### 13.6 Flagsmith link (implemented, #2588 to #2591; UC-054, UC-055)
 
-> Planned (status Open), [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md). No registry attribute
-> is added: the link follows the rows above.
+> Implemented: features and tags are created at start (#2591), the kill-switch merge and order below by the in side
+> (#2590, #2596), kill switches kept out of the restart clear (#2591), [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md).
+> Requirements stay Open until UC-054 and UC-055 are tested and leave Draft. No registry attribute is added: the link
+> follows the rows above.
 
 **Which flags.** Every row of §13.1 to §13.4 (and the mutable `observability` rows of §13.5) is one Flagsmith
 feature named after its key and tagged with its set; the row's `description` is the feature description. Flags
@@ -787,8 +789,8 @@ like any write, also when it loosens one; the env ceilings of C-034 still cap th
 **Values in Flagsmith** (architecture note §2.1): a declared variant is its name (string); an integer range is an
 integer; a float range, a `free string` and an object flag are strings (decimal text, the string, compact JSON).
 
-**Traceability:** FR-206, FR-208, FR-210, FR-214, C-034, C-036 / UC-054, UC-055 / planned
-`services/flag-service/flagsmith/killswitch.go` and its test.
+**Traceability:** FR-206, FR-208, FR-210, FR-214, C-034, C-036 / UC-054, UC-055 /
+`services/flag-service/flagsmith/killswitch.go` (#2590); `TestKillSwitchTableInSync` keeps it equal to this table.
 
 ## 14. Ownership composition: invalidation and visibility
 

@@ -10,6 +10,8 @@
 #
 # UC: UC-070 main A9 BR-003 BR-004 BR-006 BR-007 Pre-4
 # UC: UC-002 BR-003
+# UC: UC-054 A1 A3 BR-006 BR-007
+# UC: UC-055 A4 Post-F-3
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 # curl is stubbed below; the expected messages name the default entry point
@@ -520,6 +522,63 @@ fixture experiments_enabled=on
 STUB_BUDGET=30 run_preflight
 check "experiments on without the fallback fails the stage baseline" "FAIL  experiments_enabled = on (true), stage baseline is off (reset: ./scripts/talk-stage.sh reset)"
 if has "screen-only fallback is ON"; then not_ok "no fallback without real_and_shadow"; else ok "no fallback without real_and_shadow"; fi
+
+# --- the Flagsmith link (services.md §7.3, UC-054 A1 A3, #2591) --------------
+# UC: UC-054 A1 A3 BR-006 BR-007
+# UC: UC-055 A4 Post-F-3
+fixture
+STUB_BUDGET=30 run_preflight
+if has "Flagsmith link"; then not_ok "no flagsmith block: no link line"; else ok "no flagsmith block: no link line"; fi
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":0,"refused":0,"restart_rule":"audit_log"}'
+STUB_BUDGET=30 run_preflight
+check "link online with the audit-log rule passes" "PASS  Flagsmith link online (environment stage, restart rule audit_log)"
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":0,"refused":0,"restart_rule":"versioning"}'
+STUB_BUDGET=30 run_preflight
+check "link online with the versioning rule passes" "PASS  Flagsmith link online (environment stage, restart rule versioning)"
+restart_fake --flagsmith '{"link":"offline","pending":3,"out_of_sync":3,"refused":0,"offline_reason":"timeout"}'
+STUB_BUDGET=30 run_preflight
+check "link offline warns with its reason" "WARN  Flagsmith link offline (timeout)"
+if [[ "${RC}" -eq 0 ]]; then ok "a link WARN alone exits 0"; else not_ok "a link WARN alone exits 0 (rc=${RC}): $(grep FAIL <<<"${OUT}")"; fi
+warns_offline="$(grep -oE '[0-9]+ WARN' <<<"${OUT}" | tail -1)"
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":0,"refused":0,"restart_rule":"audit_log"}'
+STUB_BUDGET=30 run_preflight
+warns_online="$(grep -oE '[0-9]+ WARN' <<<"${OUT}" | tail -1)"
+if [[ "${warns_offline%% *}" -eq $(( ${warns_online%% *} + 1 )) ]]; then ok "the link WARN is counted"; else not_ok "the link WARN is counted (${warns_offline} vs ${warns_online})"; fi
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":0,"refused":0,"restart_rule":"degraded"}'
+STUB_BUDGET=30 run_preflight
+check "degraded restart rule warns" "WARN  Flagsmith link online, restart rule degraded"
+if has "PASS  Flagsmith link online"; then not_ok "degraded restart rule: no link PASS line"; else ok "degraded restart rule: no link PASS line"; fi
+# UC: UC-055 A4 Post-F-3 (#2592): stuck keys warn while online; pushes in flight do not.
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1,"restart_rule":"audit_log"}'
+STUB_BUDGET=30 run_preflight
+check "online with a refused value warns with the counts" "WARN  Flagsmith link online, out of sync: 1 refused, 1 out of sync, 0 pending"
+if has "PASS  Flagsmith link online"; then not_ok "refused: no link PASS line"; else ok "refused: no link PASS line"; fi
+if [[ "${RC}" -eq 0 ]]; then ok "a refused WARN exits 0"; else not_ok "a refused WARN exits 0 (rc=${RC})"; fi
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":1,"out_of_sync":3,"refused":0,"restart_rule":"audit_log"}'
+STUB_BUDGET=30 run_preflight
+check "online with stuck keys (out of sync above pending) warns" "WARN  Flagsmith link online, out of sync: 0 refused, 3 out of sync, 1 pending"
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":2,"out_of_sync":2,"refused":0,"restart_rule":"audit_log"}'
+STUB_BUDGET=30 run_preflight
+check "online with pushes in flight only passes" "PASS  Flagsmith link online (environment stage, restart rule audit_log)"
+if has "out of sync:"; then not_ok "pushes in flight: no out-of-sync WARN"; else ok "pushes in flight: no out-of-sync WARN"; fi
+warns_inflight="$(grep -oE '[0-9]+ WARN' <<<"${OUT}" | tail -1)"
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1,"restart_rule":"degraded"}'
+STUB_BUDGET=30 run_preflight
+check "degraded and refused: the degraded WARN" "WARN  Flagsmith link online, restart rule degraded"
+check "degraded and refused: the out-of-sync WARN" "WARN  Flagsmith link online, out of sync: 1 refused"
+if has "PASS  Flagsmith link online"; then not_ok "degraded and refused: no link PASS line"; else ok "degraded and refused: no link PASS line"; fi
+warns_both="$(grep -oE '[0-9]+ WARN' <<<"${OUT}" | tail -1)"
+if [[ "${warns_both%% *}" -eq $(( ${warns_inflight%% *} + 2 )) ]]; then ok "degraded and refused: both WARNs counted"; else not_ok "degraded and refused: both WARNs counted (${warns_both} vs ${warns_inflight})"; fi
+if [[ "${RC}" -eq 0 ]]; then ok "degraded and refused exit 0"; else not_ok "degraded and refused exit 0 (rc=${RC})"; fi
+restart_fake --flagsmith '{"link":"starting","pending":0,"out_of_sync":0,"refused":0}'
+STUB_BUDGET=30 run_preflight
+check "link starting warns" "WARN  Flagsmith link starting"
+restart_fake --flagsmith '{"link":"off","pending":0,"out_of_sync":0,"refused":0,"config_error":["FLAGSMITH_ADMIN_API_KEY"]}'
+STUB_BUDGET=30 run_preflight
+check "link off with a config error names the variable" "WARN  Flagsmith link off: FLAGSMITH_LINK=on but missing or invalid: FLAGSMITH_ADMIN_API_KEY"
+restart_fake --flagsmith '{"link":"off","pending":0,"out_of_sync":0,"refused":0}'
+STUB_BUDGET=30 run_preflight
+if has "Flagsmith link"; then not_ok "link off by choice: no link line"; else ok "link off by choice: no link line"; fi
 
 # --- usage -----------------------------------------------------------------
 run_preflight --minutes abc
