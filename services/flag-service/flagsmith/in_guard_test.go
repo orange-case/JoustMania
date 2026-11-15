@@ -485,18 +485,26 @@ func TestGuardPushDuringRoundWithoutDocument(t *testing.T) {
 // (#2596 delta 2 finding 3).
 func TestGarbledUpdateTimeIgnored(t *testing.T) {
 	start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC) // the harness clock
-	for _, hdr := range []string{"NaN", "1e300", "1e11", fmt.Sprintf("%d", start.AddDate(1, 0, 0).Unix())} {
+	cases := []string{"NaN", "1e300", "1e11", fmt.Sprintf("%d", start.AddDate(1, 0, 0).Unix()), "body a year ahead"}
+	for _, hdr := range cases {
 		t.Run("UC-054/2 header "+hdr, func(t *testing.T) {
 			var mu sync.Mutex
-			header, backend := hdr, "claude"
+			header, backend, body := hdr, "claude", time.Time{}
+			if hdr == "body a year ahead" {
+				header, body = "", start.AddDate(1, 0, 0)
+			}
 			h := newHarness(t, harnessOpts{docURL: func(f *flagsmithtest.Fake) string {
 				f.Handle("GET /hdr/environment-document/", func(w http.ResponseWriter, _ *http.Request) {
 					mu.Lock()
-					hv, bv := header, backend
+					hv, bv, bt := header, backend, body
 					mu.Unlock()
-					doc := document(start, []map[string]any{fsState("decision.backend", true, bv)})
-					delete(doc, "updated_at")
-					w.Header().Set("X-Flagsmith-Document-Updated-At", hv)
+					doc := document(bt, []map[string]any{fsState("decision.backend", true, bv)})
+					if bt.IsZero() {
+						delete(doc, "updated_at")
+					}
+					if hv != "" {
+						w.Header().Set("X-Flagsmith-Document-Updated-At", hv)
+					}
 					flagsmithtest.WriteJSON(w, http.StatusOK, doc)
 				})
 				return f.Server.URL + "/hdr/"
@@ -507,7 +515,7 @@ func TestGarbledUpdateTimeIgnored(t *testing.T) {
 				t.Fatalf("UC-054/2 Last-Modified %q from the garbled header %q, want none", got, hdr)
 			}
 			mu.Lock()
-			header, backend = fmt.Sprintf("%d", start.Add(-30*time.Second).Unix()), "openai"
+			header, backend, body = fmt.Sprintf("%d", start.Add(-30*time.Second).Unix()), "openai", time.Time{}
 			mu.Unlock()
 			h.round()
 			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
