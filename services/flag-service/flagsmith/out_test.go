@@ -363,6 +363,11 @@ func TestChangedNeverBlocks(t *testing.T) {
 	}
 	e := newOutEnvWith(t, Deps{State: st})
 	st.SetObserver(e.link)
+	sub, serr := st.Subscribe("")
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	t.Cleanup(sub.Close)
 	e.fake.Delay(300 * time.Millisecond)
 	r := e.start()
 	var worst time.Duration
