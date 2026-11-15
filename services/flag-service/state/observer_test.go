@@ -326,8 +326,8 @@ func TestSlotVersion_Read(t *testing.T) {
 		{"agent", "enabled", Scope{}, firstSlotVersion},
 		{"interventions", "volume_override", game, firstSlotVersion},
 		{"interventions", "shield_seconds", serial, firstSlotVersion},
-		{"game", "enabled", Scope{}, 0},           // not a flag of that set
-		{"agent", "no_such_flag", Scope{}, 0},     // unknown flag
+		{"game", "enabled", Scope{}, 0},          // not a flag of that set
+		{"agent", "no_such_flag", Scope{}, 0},    // unknown flag
 		{"agent", "enabled", Scope{Arm: "x"}, 0}, // fits no scope
 	} {
 		if v := f.state.SlotVersion(tc.set, tc.flag, tc.scope); v != tc.want {
