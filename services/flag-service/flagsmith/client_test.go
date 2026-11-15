@@ -65,6 +65,23 @@ func TestClient(t *testing.T) {
 			t.Fatalf("doc %+v err %v, want it off", doc, err)
 		}
 	})
+	t.Run("UC-054/A1 the document carries the X-Flagsmith-Document-Updated-At header, empty when absent", func(t *testing.T) {
+		for _, want := range []string{"2026-11-11T10:00:00.123456Z", ""} {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if want != "" {
+					w.Header().Set("X-Flagsmith-Document-Updated-At", want)
+				}
+				_, _ = w.Write([]byte(`{"name":"stage"}`))
+			}))
+			cfg := Config{Enabled: true, APIURL: srv.URL + "/api/v1/", DocumentURL: srv.URL + "/api/v1/", ServerKey: "ser.secretserverkey",
+				Poll: DefaultPoll, PushRate: DefaultPushRate, Timeout: DefaultTimeout}
+			doc, _, _, err := NewClient(cfg, nil).EnvironmentDocument(ctx, "")
+			srv.Close()
+			if err != nil || doc.HeaderUpdatedAt != want {
+				t.Fatalf("doc %+v err %v, want HeaderUpdatedAt %q", doc, err, want)
+			}
+		}
+	})
 	t.Run("UC-054/A1 a wrong server key is unauthorized and the link goes down", func(t *testing.T) {
 		f := flagsmithtest.New(t)
 		f.ServerKey = "other"
