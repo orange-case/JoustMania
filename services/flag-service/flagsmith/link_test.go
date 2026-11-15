@@ -258,8 +258,8 @@ func TestLinkRun(t *testing.T) {
 		if st.calls != 3 {
 			t.Fatalf("Start called %d times, want 3 (2 failures, then once)", st.calls)
 		}
-		if tr := in.got(); len(tr) != 3 || tr[0] != TriggerStart || tr[1] != TriggerReconnect || tr[2] != TriggerReconnect {
-			t.Fatalf("reconcile triggers %v, want start, reconnect, reconnect", tr)
+		if tr := in.got(); len(tr) != 2 || tr[0] != TriggerStart || tr[1] != TriggerReconnect {
+			t.Fatalf("reconcile triggers %v, want start then reconnect", tr)
 		}
 	})
 	// #2594 review finding 11.
@@ -284,10 +284,11 @@ func TestLinkRun(t *testing.T) {
 	t.Run("UC-054/A1 a failed first reconcile retries with trigger start", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		sl := &sleeper{max: 2, cancel: cancel}
+		sl := &sleeper{max: 3, cancel: cancel}
 		l := newTestLink(t, Config{Enabled: true}, sl)
 		st := &countingStarter{}
-		in := &scriptedIn{failReconciles: 1, drops: 1}
+		// reconcile fails (sleep), start ok, drop (sleep), reconnect, drop (sleep: cancel).
+		in := &scriptedIn{failReconciles: 1, drops: 2}
 		l.start, l.in = st, in
 		waitDone(t, runLink(ctx, l))
 		if tr := in.got(); len(tr) != 3 || tr[0] != TriggerStart || tr[1] != TriggerStart || tr[2] != TriggerReconnect {
