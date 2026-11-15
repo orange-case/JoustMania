@@ -18,6 +18,7 @@ const (
 	ReasonTLS                       = "tls"
 	ReasonUnauthorized              = "unauthorized"
 	ReasonNotFound                  = "not_found"
+	ReasonBadValue                  = "bad_value" // the value cannot be encoded; no request is sent
 	ReasonRateLimited               = "rate_limited"
 	ReasonChangeRequestRequired     = "change_request_required"
 	ReasonIdentityOverridesDisabled = "identity_overrides_disabled"
