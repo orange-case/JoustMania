@@ -597,12 +597,13 @@ validation harness (`curl http://localhost/flags/...`; `scripts/agent-group-ab.s
 **Traceability:** FR-130 to FR-139, NFR-050 to NFR-053, C-030 to C-033 / UC-053 / `services/flag-service/`
 / `services/flag-service/*/*_test.go`, `tests/service/test_flag_service_*.py`, `tests/service/test_tc019_flag_service_restart.py`, TC-018 to TC-020.
 
-### 7.3 Flagsmith link (partially implemented, #2588, #2590; UC-054, UC-055)
+### 7.3 Flagsmith link (partially implemented, #2588, #2589, #2590; UC-054, UC-055)
 
 > Partially implemented (#2588: config, client, link state, the `flagsmith` block of `GET /state`, the reserved label and the
-> in-process write entry; the link starts, pings and goes online or offline). Pulls are implemented by #2590 (the Pull row,
-> UC-054); pushes (#2589) and the start sequence (#2591) are not implemented yet. Requirements stay Open until UC-054 and
-> UC-055 are tested and leave Draft. Use cases [UC-054](../use_cases/UC-054.md), [UC-055](../use_cases/UC-055.md); requirements
+> in-process write entry; the link starts, pings and goes online or offline; #2589: the out side, UC-055: stack values, identity
+> overrides, the game's identities, merge, rate limit, refusals; #2590: pulls, the Pull row, UC-054). The start sequence (#2591)
+> is not implemented yet. `pending` in `GET /state` counts values only: identity listings and removals are not counted.
+> Requirements stay Open until UC-054 and UC-055 are tested and leave Draft. Use cases [UC-054](../use_cases/UC-054.md), [UC-055](../use_cases/UC-055.md); requirements
 > FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037; design in
 > [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md).
 
