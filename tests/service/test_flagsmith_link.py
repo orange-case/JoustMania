@@ -11,7 +11,7 @@ off, as every compose file does.
   200, writes are accepted, ``/state`` shows the link offline with the reason (BR-007);
 - degraded rule: values the audit log has no author for are a person's and the rule is
   ``degraded`` (BR-006, architecture note §5.1);
-- the restart journeys that need the in and out sides (#2589, #2590) are strict xfails.
+- restart: an API key's overlay is cleared, a person's value comes back (BR-006).
 
 Unit detail (ping first, audit parsing, kill switches, game identities, pacing) is in
 ``services/flag-service/flagsmith/start_test.go``.
@@ -119,7 +119,6 @@ def test_degraded_rule_in_state(stack, flag_service):
         fake.set_document([])
 
 
-@pytest.mark.xfail(strict=True, reason="needs the out and in sides (#2589, #2590)")
 @pytest.mark.uc("UC-054", flow="A3", br=["BR-006"])
 def test_restart_clears_own_overlay(stack, flag_service):
     fake = stack.fake_flagsmith
@@ -134,10 +133,10 @@ def test_restart_clears_own_overlay(stack, flag_service):
     stack.flag_plane.restart_flag_service()
     _wait_link(flag_service, RESTART_SECONDS, link="online")
     # The API-key value is cleared in Flagsmith, not applied locally.
+    # Passes partly because a restart drops in-memory overlays anyway; #2592 strengthens it.
     assert flag_service.get("agent", "decision.capture_content").get("stack_overlay") is None
 
 
-@pytest.mark.xfail(strict=True, reason="needs the in side (#2590)")
 @pytest.mark.uc("UC-054", flow="A3", br=["BR-006"])
 def test_restart_keeps_persons_value(stack, flag_service):
     fake = stack.fake_flagsmith
