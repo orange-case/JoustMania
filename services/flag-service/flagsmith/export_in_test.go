@@ -16,6 +16,13 @@ func UseInSideOnly(l *Link) {
 	l.start, l.out = inOnlyStarter{l: l}, inOnlyOut{}
 }
 
+// UsePingStart replaces only l's start sequence by a ping and keeps the real
+// out side: the in and out sides run together (inout_test.go, #2604). Call it
+// before l.Run.
+func UsePingStart(l *Link) {
+	l.start = inOnlyStarter{l: l}
+}
+
 type inOnlyStarter struct{ l *Link }
 
 func (s inOnlyStarter) Start(ctx context.Context) error {
