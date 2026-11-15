@@ -118,6 +118,9 @@ type harnessOpts struct {
 	// featureIDs are the Flagsmith feature ids the start sequence would
 	// resolve, by flag key (the out side needs them).
 	featureIDs map[string]int
+	// realStart keeps the link's real start sequence and out side (restart
+	// rule journeys); otherwise UseInSideOnly replaces them.
+	realStart bool
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -193,9 +196,11 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	h.link = link
-	if o.realOut {
+	switch {
+	case o.realStart:
+	case o.realOut:
 		flagsmith.UsePingStart(link)
-	} else {
+	default:
 		flagsmith.UseInSideOnly(link)
 	}
 	if len(o.featureIDs) > 0 {

@@ -15,7 +15,10 @@
 #      reachable from the connect-proxy container (TCP connect only); WARN
 #      otherwise: every dashboard unpair answers 502 (UC-005 A7, BR-003, #1450)
 #   2. the flag service: flagd holds an open sync stream (else every write is
-#      refused with 503 no_sync_stream), the boot epoch, the agent set served
+#      refused with 503 no_sync_stream), the boot epoch, the agent set served,
+#      and the Flagsmith link (GET /state flagsmith, services.md §7.3): PASS
+#      online; WARN starting, offline (with the reason), a degraded restart
+#      rule, or off with a config_error (the variables); nothing while off
 #   3. the stage baseline of the decision.* + safety flags (the effective variant
 #      the flag service serves, from scripts/talk-baseline.json;
 #      interventions_allowed=standard, #1301), at least one perceptible
@@ -199,12 +202,33 @@ if "agent" in state.get("served_sets", []):
     print("PASS  the agent flag set is served by the flag service")
 else:
     print(f"FAIL  the agent flag set is not served (served: {', '.join(state.get('served_sets', []))})")
+# The Flagsmith link (services.md §7.3, UC-054 A1/A3): never a FAIL, the stack works without it.
+link = state.get("flagsmith")
+if isinstance(link, dict):
+    mode, rule = link.get("link"), link.get("restart_rule")
+    config_error = link.get("config_error") or []
+    if mode == "off":
+        if config_error:
+            print(f"WARN  Flagsmith link off: FLAGSMITH_LINK=on but missing or invalid: {', '.join(config_error)} "
+                  "(fix .env.local and restart the flag service)")
+    elif mode == "online" and rule == "degraded":
+        print("WARN  Flagsmith link online, restart rule degraded: the audit log does not say who made every "
+              "value, so values without an author were applied as a person's (a pushed overlay may be back; "
+              "reset: ./scripts/talk-stage.sh reset)")
+    elif mode == "online":
+        print(f"PASS  Flagsmith link online (environment {link.get('environment', '?')}, restart rule {rule or 'pending'})")
+    elif mode == "starting":
+        print("WARN  Flagsmith link starting: Flagsmith changes are not applied yet")
+    else:
+        print(f"WARN  Flagsmith link {mode} ({link.get('offline_reason') or 'no reason'}): the stack runs its "
+              "current configuration; Flagsmith changes are not applied until it is back")
 PY
 )"
 while IFS= read -r line; do
   [[ -z "${line}" ]] && continue
   case "${line}" in
     PASS*) echo "${line}"; n_pass=$((n_pass + 1)) ;;
+    WARN*) echo "${line}"; n_warn=$((n_warn + 1)) ;;
     FAIL*) echo "${line}"; n_fail=$((n_fail + 1)) ;;
     *) echo "${line}" ;;
   esac

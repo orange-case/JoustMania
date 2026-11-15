@@ -31,3 +31,20 @@ def test_grafana_disables_the_preinstalled_plugin_installer():
         "grafana must set GF_PLUGINS_PREINSTALL_DISABLED=true: the background "
         "plugin installer OOM-kills it at start-up (#2600)"
     )
+
+
+def _megabytes(limit: str) -> float:
+    units = {"k": 1 / 1024, "m": 1, "g": 1024}
+    value = str(limit).strip().lower().rstrip("b")
+    if value[-1] in units:
+        return float(value[:-1]) * units[value[-1]]
+    return int(value) / (1024 * 1024)
+
+
+@pytest.mark.uc("UC-035", flow="main", steps=[6])
+def test_grafana_memory_limit_covers_its_start_up_peak():
+    limits = ic.compose_services()["grafana"]["deploy"]["resources"]["limits"]
+    # Grafana 13.3 uses about 245 MB of anonymous memory right after start (#2605).
+    assert _megabytes(limits["memory"]) >= 512, (
+        f"grafana memory limit {limits['memory']} is below its start-up peak (#2605)"
+    )

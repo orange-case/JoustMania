@@ -685,7 +685,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256m
+          # #2605: Grafana 13.3 uses about 245 MB of anonymous memory right after
+          # start with this config, leaving no headroom at 256m (CI start-ups
+          # went unhealthy); 512m gives about 2x.
+          memory: 512m
           cpus: '0.5'
     logging: *default-logging
 
