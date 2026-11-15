@@ -647,6 +647,23 @@ func TestStaleRefusalEndsAfterTimeout(t *testing.T) {
 			t.Fatalf("UC-054/2 decision.backend = %+v: the document after the accepted one was refused", v)
 		}
 	})
+	t.Run("UC-054/BR-005 accepted at exactly the threshold", func(t *testing.T) {
+		// round() advances the clock by 2 s before it pulls: the second
+		// refusal is 10 h - 2 s after the first, the third exactly 10 h.
+		h := staleWedge(t)
+		h.round()
+		wantStaleRefusal(t, h, "first refusal")
+		h.clock.Advance(10*time.Hour - 4*time.Second)
+		h.round()
+		wantStaleRefusal(t, h, "refusals for 10 h - 2 s")
+		h.round()
+		if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
+			t.Fatalf("UC-054/BR-005 pull span %v: a document refused for exactly max(10 min, 10 polls) is refused again, want accepted", a)
+		}
+		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
+			t.Fatalf("UC-054/BR-005 agent/enabled = %+v after exactly 10 h of refusals, want off", v)
+		}
+	})
 	t.Run("UC-054/BR-005 a document accepted in between restarts the count", func(t *testing.T) {
 		h := staleWedge(t)
 		h.round()
