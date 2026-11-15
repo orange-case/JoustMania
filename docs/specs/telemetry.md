@@ -514,7 +514,7 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 
 **Traceability:** FR-139, NFR-050 to NFR-053 / UC-053 / `services/flag-service/telemetry/` / `services/flag-service/api/api_test.go`, `tests/service/test_flag_propagation.py`, `tests/contract/test_telemetry_contract.py`.
 
-### 10.4 Flagsmith link (partially implemented, #2588; UC-054, UC-055)
+### 10.4 Flagsmith link (partially implemented, #2588, #2589; UC-054, UC-055)
 
 > Partially implemented: #2588 registers every metric below (also with the link off; the link gauge then shows `off`) and
 > defines the span names and helpers; the pushes (#2589), pulls (#2590) and the start sequence (#2591) record them.
@@ -533,7 +533,7 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 |---|---|---|---|
 | `flagservice_flagsmith_link` | gauge | `state` | 1 for the current link state (`off`, `starting`, `online`, `offline`), 0 for the others |
 | `flagservice_flagsmith_pulls_total` | counter | `trigger`, `result` | environment-document fetches; `result` = `changed`, `not_modified`, `error` |
-| `flagservice_flagsmith_pushes_total` | counter | `op`, `result`, `reason` | Admin API calls; `reason` on refusals (`change_request_required`, `not_found`, `unauthorized`, `rate_limited`, `timeout`) |
+| `flagservice_flagsmith_pushes_total` | counter | `op`, `result`, `reason` | Admin API calls; `reason` on refusals (`change_request_required`, `not_found`, `bad_value`, `unauthorized`, `rate_limited`, `timeout`) |
 | `flagservice_flagsmith_pending` | gauge | | local values waiting to be sent |
 | `flagservice_flagsmith_out_of_sync` | gauge | | flags and scopes whose value differs between the stack and Flagsmith |
 | `flagservice_flagsmith_conflicts_total` | counter | `resolution` | conflicts in any pull or reconcile round (FR-210) |
@@ -547,4 +547,5 @@ pushes and pulls by result, conflicts by resolution, change delay p95 (NFR-058).
 
 **Traceability:** FR-207 to FR-213, NFR-057, NFR-058 / UC-054, UC-055 /
 `services/flag-service/flagsmith/telemetry.go`, `services/flag-service/flagsmith/telemetry_test.go`,
+`services/flag-service/flagsmith/out.go`, `services/flag-service/flagsmith/push.go`, `services/flag-service/flagsmith/out_test.go`,
 `tests/contract/test_telemetry_contract.py`.
