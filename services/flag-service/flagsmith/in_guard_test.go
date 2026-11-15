@@ -478,49 +478,75 @@ func TestGuardPushDuringRoundWithoutDocument(t *testing.T) {
 	})
 }
 
+// headerDocHarness serves a document without body updated_at whose
+// X-Flagsmith-Document-Updated-At header and decision.backend value set
+// changes; clock1970 runs the local clock at 1970 (a Pi without RTC before NTP).
+func headerDocHarness(t *testing.T, header, backend string, clock1970 bool) (*harness, func(header, backend string)) {
+	t.Helper()
+	var mu sync.Mutex
+	start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	o := harnessOpts{docURL: func(f *flagsmithtest.Fake) string {
+		f.Handle("GET /hdr/environment-document/", func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			hv, bv := header, backend
+			mu.Unlock()
+			doc := document(start, []map[string]any{fsState("decision.backend", true, bv)})
+			delete(doc, "updated_at")
+			w.Header().Set("X-Flagsmith-Document-Updated-At", hv)
+			flagsmithtest.WriteJSON(w, http.StatusOK, doc)
+		})
+		return f.Server.URL + "/hdr/"
+	}}
+	if clock1970 {
+		o.before = func(hh *harness) {
+			hh.clock.mu.Lock()
+			hh.clock.t = time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC)
+			hh.clock.mu.Unlock()
+		}
+	}
+	h := newHarness(t, o)
+	return h, func(hv, bv string) {
+		mu.Lock()
+		header, backend = hv, bv
+		mu.Unlock()
+	}
+}
+
 // UC: UC-054 2
-// A garbled update time (not a finite epoch, beyond year 9999, or more than a
-// day ahead of the newest time read and the local clock) is no update time:
-// it never pins the newest time, so a later document is not refused as older
-// (#2596 delta 2 finding 3).
+// A garbled update time (not a finite epoch after 1970, or after year 9999)
+// is no update time: it never pins the newest time, so a later document is
+// not refused as older (#2596 delta 2 finding 3). No local clock is involved.
 func TestGarbledUpdateTimeIgnored(t *testing.T) {
 	start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC) // the harness clock
-	cases := []string{"NaN", "1e300", "1e11", fmt.Sprintf("%d", start.AddDate(1, 0, 0).Unix()), "body a year ahead"}
-	for _, hdr := range cases {
+	for _, hdr := range []string{"NaN", "+Inf", "1e300", "-5", "253402300800"} {
 		t.Run("UC-054/2 header "+hdr, func(t *testing.T) {
-			var mu sync.Mutex
-			header, backend, body := hdr, "claude", time.Time{}
-			if hdr == "body a year ahead" {
-				header, body = "", start.AddDate(1, 0, 0)
-			}
-			h := newHarness(t, harnessOpts{docURL: func(f *flagsmithtest.Fake) string {
-				f.Handle("GET /hdr/environment-document/", func(w http.ResponseWriter, _ *http.Request) {
-					mu.Lock()
-					hv, bv, bt := header, backend, body
-					mu.Unlock()
-					doc := document(bt, []map[string]any{fsState("decision.backend", true, bv)})
-					if bt.IsZero() {
-						delete(doc, "updated_at")
-					}
-					if hv != "" {
-						w.Header().Set("X-Flagsmith-Document-Updated-At", hv)
-					}
-					flagsmithtest.WriteJSON(w, http.StatusOK, doc)
-				})
-				return f.Server.URL + "/hdr/"
-			}})
+			h, set := headerDocHarness(t, hdr, "claude", false)
 			h.online()
 			h.round()
 			if got := h.link.LastModified(); got != "" {
 				t.Fatalf("UC-054/2 Last-Modified %q from the garbled header %q, want none", got, hdr)
 			}
-			mu.Lock()
-			header, backend, body = fmt.Sprintf("%d", start.Add(-30*time.Second).Unix()), "openai", time.Time{}
-			mu.Unlock()
+			set(fmt.Sprintf("%d", start.Add(-30*time.Second).Unix()), "openai")
 			h.round()
 			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
 				t.Fatalf("UC-054/2 decision.backend = %+v after the garbled header %q: the later document was refused as older", v, hdr)
 			}
 		})
+	}
+}
+
+// UC: UC-054 2
+// A genuine Flagsmith time far ahead of the local clock (a Pi at 1970 before
+// NTP) is still an update time: an older document after it is refused, so the
+// stale-document refusal never depends on the local clock.
+func TestUpdateTimeAheadOfLocalClockUsed(t *testing.T) {
+	start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	h, set := headerDocHarness(t, fmt.Sprintf("%d", start.Unix()), "claude", true)
+	h.online()
+	h.round()
+	set(fmt.Sprintf("%d", start.Add(-time.Hour).Unix()), "openai")
+	h.round()
+	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" {
+		t.Fatalf("UC-054/2 decision.backend = %+v: an older document was applied after a time ahead of the 1970 local clock", v)
 	}
 }

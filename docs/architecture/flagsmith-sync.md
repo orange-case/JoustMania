@@ -169,8 +169,8 @@ entity.
    A whole document whose update time (body `updated_at`, else the `X-Flagsmith-Document-Updated-At` header) is
    older than the newest one the process already read is a stale copy and is skipped: nothing is written, the pull
    counts as an error with reason `stale_document`, and the next pull is in full. Only Flagsmith's own times are
-   compared; an update time that is not a finite epoch, lies beyond year 9999 or more than a day ahead of both the
-   newest time read and the local clock counts as none, so a garbled value cannot block every later document.
+   compared, never the local clock (a Pi without RTC may run at 1970 before NTP); an update time that is not a finite
+   epoch after 1970 or lies beyond year 9999 counts as none, so a garbled value cannot block every later document.
 7. **Every pulled write is conditional**: it carries the version of the local slot as read, empty slots included, so a
    local write that lands between the read and the apply wins (the pulled write is refused as stale, and the next round
    sees the conflict). Event appends (§4.3) are the one unconditional write.
