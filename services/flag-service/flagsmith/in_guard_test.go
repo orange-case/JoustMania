@@ -1,0 +1,330 @@
+package flagsmith_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/joustmania/flag-service/api"
+	"github.com/joustmania/flag-service/flagsmith"
+	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
+	"github.com/joustmania/flag-service/fserr"
+	"github.com/joustmania/flag-service/state"
+)
+
+// Push guards, refusal ends, pruning and slot checks of the in side (#2596
+// delta review findings 1 to 3).
+
+var (
+	maxGamesKey      = flagsmith.Key{Set: "agent", Flag: "experiment_max_games", Scope: flagsmith.ScopeStack}
+	minIntervalKey   = flagsmith.Key{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}
+	volumeOverrideG1 = flagsmith.Key{Set: "interventions", Flag: "volume_override", Scope: "game:g1"}
+)
+
+func num(n string) flagsmith.Value { return flagsmith.Value{Present: true, Value: json.RawMessage(n)} }
+
+// operatorWriter lets the operator write 10 to experiment_max_games between
+// the round's snapshot and its pulled write, once (the pulled write is then
+// 412 slot_changed: a deferral that leaves the remote value unknown). With
+// confirm, the out side's push of 10 is confirmed while the round still runs.
+type operatorWriter struct {
+	*api.API
+	st      *state.State
+	confirm bool
+	link    *flagsmith.Link
+	done    atomic.Bool
+}
+
+func (w *operatorWriter) FlagsmithPut(ctx context.Context, req state.WriteRequest) (state.WriteResult, *fserr.Error) {
+	if req.Flag != "experiment_max_games" || w.done.Swap(true) {
+		return w.API.FlagsmithPut(ctx, req)
+	}
+	if _, ferr := w.st.Put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("10"), Writer: "operator"}); ferr != nil {
+		panic(ferr)
+	}
+	res, ferr := w.API.FlagsmithPut(ctx, req)
+	if w.confirm {
+		w.link.Links().ConfirmPushed(maxGamesKey, num("10"))
+	}
+	return res, ferr
+}
+
+// maxGamesRace starts a harness where the operator holds 500, the document
+// 100 (tighter: applied at start) and the operator's 10 races the apply.
+func maxGamesRace(t *testing.T, confirm bool) *harness {
+	t.Helper()
+	ow := &operatorWriter{confirm: confirm}
+	h := newHarness(t, harnessOpts{
+		writer: func(a *api.API, st *state.State) flagsmith.LocalWriter {
+			ow.API, ow.st = a, st
+			return ow
+		},
+		before: func(hh *harness) {
+			ow.link = hh.link
+			if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("500"), Writer: "operator"}); ferr != nil {
+				t.Fatal(ferr)
+			}
+			hh.fake.SetDocument(document(hh.clock.Now().Add(-time.Minute), []map[string]any{fsState("experiment_max_games", true, 100)}), "")
+		}})
+	h.online()
+	if !ow.done.Load() {
+		t.Fatal("setup: the start round did not apply the tighter document value")
+	}
+	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
+		t.Fatalf("setup: local %+v, want the operator's 10", v)
+	}
+	return h
+}
+
+// UC: UC-054 BR-005
+// A push confirmed after a deferred first apply (the remote value unknown) is
+// guarded against the document that round read: the stale document (100)
+// never loosens the operator's confirmed 10 (#2596 delta finding 1).
+func TestGuardAfterDeferredApply(t *testing.T) {
+	h := maxGamesRace(t, false)
+	if r, ok := h.link.Links().Remote(maxGamesKey); ok {
+		t.Fatalf("setup: remote %+v known, want unknown after the deferred apply", r)
+	}
+	h.link.Links().ConfirmPushed(maxGamesKey, num("10"))
+	h.clock.Advance(time.Minute)
+	for range 2 {
+		h.round()
+	}
+	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
+		t.Fatalf("UC-054/BR-005 experiment_max_games = %+v: a stale document (100) loosened the confirmed 10", v)
+	}
+}
+
+// UC: UC-054 BR-005
+// The same push confirmed while the round runs: the document value that round
+// read is guarded too.
+func TestGuardPushConfirmedDuringRound(t *testing.T) {
+	h := maxGamesRace(t, true)
+	h.clock.Advance(time.Minute)
+	for range 2 {
+		h.round()
+	}
+	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
+		t.Fatalf("UC-054/BR-005 experiment_max_games = %+v: a stale document (100) loosened the push confirmed mid-round", v)
+	}
+}
+
+// UC: UC-054 BR-005
+// A document older than one already read (a second cache or region still
+// serving the pre-push copy) is refused: the round writes nothing, the pull
+// counts as error with reason stale_document and the next pull is in full
+// (#2596 delta finding 3).
+func TestOlderDocumentRefused(t *testing.T) {
+	var old time.Time
+	h := newHarness(t, harnessOpts{before: func(hh *harness) {
+		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "operator"}); ferr != nil {
+			t.Fatal(ferr)
+		}
+		old = hh.clock.Now().Add(-time.Minute)
+		hh.fake.SetDocument(document(old, []map[string]any{fsState("enabled", true, "on")}), "")
+	}})
+	h.online()
+	if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "operator"}); ferr != nil {
+		t.Fatal(ferr)
+	}
+	h.link.Links().ConfirmPushed(enabledKey, offValue)
+	h.round()
+	h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off")}), "")
+	h.round()
+	h.fake.SetDocument(document(old, []map[string]any{fsState("enabled", true, "on")}), "")
+	h.round()
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %+v: an older document copy loosened the kill switch", v)
+	}
+	pulls := h.ended(flagsmith.SpanPull)
+	last := pulls[len(pulls)-1]
+	attrs := map[string]string{}
+	for _, a := range last.Attributes() {
+		attrs[string(a.Key)] = a.Value.Emit()
+	}
+	if attrs[flagsmith.AttrResult] != flagsmith.ResultError || attrs[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
+		t.Fatalf("telemetry §10.4 pull span %v, want result error, reason stale_document", attrs)
+	}
+	if n := h.counter("flagservice_flagsmith_pulls_total", "result", flagsmith.ResultError); n != 1 {
+		t.Fatalf("telemetry §10.4 %d pulls with result error, want 1", n)
+	}
+	h.round()
+	reqs := h.docRequests()
+	if ims := reqs[len(reqs)-1].Header.Get("If-Modified-Since"); ims != "" {
+		t.Fatalf("UC-054/2 the pull after a stale document sent If-Modified-Since %q, want a full pull", ims)
+	}
+}
+
+// healthOf returns the statuses posted for feature, in order.
+func healthOf(h *harness, feature string) []any {
+	var out []any
+	for _, p := range h.healthPosts() {
+		if p["feature"] == feature {
+			out = append(out, p["status"])
+		}
+	}
+	return out
+}
+
+// UC: UC-054 A4
+// A feature unhealthy after 5 deferrals turns healthy when the deferral ends
+// without an apply: by a push (the document no longer holds a value, the
+// local one is sent) and by keeping the local value (a kill switch whose
+// document value is now looser) (#2596 delta finding 2, E and K).
+func TestDeferralEndsByPushOrKeepLocal(t *testing.T) {
+	h := newHarness(t, harnessOpts{noStream: true})
+	h.online()
+	sub, _ := h.st.Subscribe("")
+	for _, w := range []state.WriteRequest{
+		{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("700"), Writer: "operator"},
+		{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("500"), Writer: "operator"},
+	} {
+		if _, ferr := h.st.Put(w); ferr != nil {
+			t.Fatal(ferr)
+		}
+	}
+	sub.Close()
+	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 900), fsState("experiment_max_games", true, 100)})
+	for range 5 {
+		h.clock.Advance(time.Minute)
+		h.round()
+	}
+	h.waitFor("two unhealthy posts", func() bool {
+		return len(healthOf(h, "decision.min_interval_ms")) == 1 && len(healthOf(h, "experiment_max_games")) == 1
+	})
+	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", false, nil), fsState("experiment_max_games", true, 1000)})
+	h.clock.Advance(time.Minute)
+	h.round()
+	h.waitFor("two healthy posts", func() bool {
+		return len(healthOf(h, "decision.min_interval_ms")) == 2 && len(healthOf(h, "experiment_max_games")) == 2
+	})
+	for _, f := range []string{"decision.min_interval_ms", "experiment_max_games"} {
+		if s := healthOf(h, f); s[1] != flagsmith.HealthHealthy {
+			t.Fatalf("UC-054/A4 %s posts %v, want unhealthy then healthy", f, s)
+		}
+	}
+	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "500" {
+		t.Fatalf("UC-054/BR-005 experiment_max_games = %+v, want the tighter local 500 kept", v)
+	}
+}
+
+// UC: UC-054 A4
+// A refused key that leaves the round (the identity forgotten and its
+// override deleted in Flagsmith) is pruned: its feature turns healthy (#2596
+// delta finding 2, F).
+func TestRefusedKeyLeavingRoundIsPruned(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	sens := h.base.Flag("game", "sensitivity")
+	h.setDoc(nil, override{"real", []map[string]any{fsState("sensitivity", true, sens.VariantNames()[0])}})
+	h.round()
+	h.waitFor("an unhealthy post", func() bool { return len(healthOf(h, "sensitivity")) == 1 })
+	h.link.Links().ForgetIdentity("real")
+	h.setDoc(nil)
+	h.round()
+	h.waitFor("a healthy post", func() bool { return len(healthOf(h, "sensitivity")) == 2 })
+	if s := healthOf(h, "sensitivity"); s[1] != flagsmith.HealthHealthy {
+		t.Fatalf("UC-054/A4 posts %v, want unhealthy then healthy", s)
+	}
+}
+
+// UC: UC-054 BR-004
+// A local write that lands while the document is in flight is not replaced
+// in the push queue by the older value the round's snapshot read (#2596
+// finding 6; delta finding 2, G).
+func TestOfferKeepsNewerLocalValue(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		doc   any
+		race  atomic.Bool
+		hooks func()
+	)
+	h := newHarness(t, harnessOpts{docURL: func(f *flagsmithtest.Fake) string {
+		f.Handle("GET /racy/environment-document/", func(w http.ResponseWriter, _ *http.Request) {
+			if race.Swap(false) {
+				hooks()
+			}
+			mu.Lock()
+			d := doc
+			mu.Unlock()
+			if d == nil {
+				d = document(time.Date(2026, 11, 15, 11, 0, 0, 0, time.UTC), nil)
+			}
+			flagsmithtest.WriteJSON(w, http.StatusOK, d)
+		})
+		return f.Server.URL + "/racy/"
+	}})
+	h.online()
+	setDoc := func(v int) {
+		mu.Lock()
+		doc = document(h.clock.Now().Add(-time.Minute), []map[string]any{fsState("decision.min_interval_ms", true, v)})
+		mu.Unlock()
+	}
+	setDoc(700)
+	h.round()
+	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
+		t.Fatalf("setup: local %+v, want 700", v)
+	}
+	if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("800"), Writer: "operator"}); ferr != nil {
+		t.Fatal(ferr)
+	}
+	// While the document is in flight the operator writes 900; the out side's
+	// observer queues it (here the test, the out side is idle).
+	hooks = func() {
+		ch, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("900"), Writer: "operator"})
+		if ferr != nil {
+			panic(ferr)
+		}
+		h.link.Links().Offer(minIntervalKey, num("900"), h.clock.Now(), ch.SnapshotVersion)
+	}
+	race.Store(true)
+	h.round()
+	k, v, _, _, ok := h.link.Links().Next()
+	if !ok || k != minIntervalKey || string(v.Value) != "900" {
+		t.Fatalf("UC-054/BR-004 pending %v %+v %v, want 900 (the older 800 must not replace it)", k, v, ok)
+	}
+}
+
+// slotRacer writes the operator's 0.7 on game g1 between the round's slot
+// read and the pulled write, once.
+type slotRacer struct {
+	*api.API
+	st   *state.State
+	done atomic.Bool
+}
+
+func (w *slotRacer) FlagsmithPut(ctx context.Context, req state.WriteRequest) (state.WriteResult, *fserr.Error) {
+	if req.Flag == "volume_override" && !w.done.Swap(true) {
+		if _, ferr := w.st.Put(state.WriteRequest{Set: "interventions", Flag: "volume_override", Scope: state.Scope{GameID: "g1"}, Value: json.RawMessage("0.7"), Writer: "operator"}); ferr != nil {
+			panic(ferr)
+		}
+	}
+	return w.API.FlagsmithPut(ctx, req)
+}
+
+// UC: UC-054 3
+// A pulled write to an empty game slot (not in the round's snapshot) is
+// conditional too: a local write that lands first wins, the pulled one is
+// deferred (#2590 P2; #2596 finding 5, delta finding 2, H).
+func TestEmptyGameSlotWriteIsConditional(t *testing.T) {
+	h := newHarness(t, harnessOpts{
+		writer: func(a *api.API, st *state.State) flagsmith.LocalWriter { return &slotRacer{API: a, st: st} },
+		before: func(hh *harness) {
+			if _, ferr := hh.st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "shadow", Serials: []string{"MOCK0003"}}); ferr != nil {
+				t.Fatal(ferr)
+			}
+		}})
+	h.online()
+	h.setDoc(nil, override{"game:g1", []map[string]any{fsState("volume_override", true, "0.5")}})
+	h.round()
+	if v, _ := h.local("interventions", "volume_override", "game:g1"); string(v.Value) != "0.7" {
+		t.Fatalf("UC-054/3 volume_override on g1 = %+v, want the operator's 0.7 (the pulled write must be 412 slot_changed)", v)
+	}
+	if _, ok := h.link.Links().Remote(volumeOverrideG1); ok {
+		t.Fatal("UC-054/A5 the remote value is known after a deferred apply, want it restored to unknown")
+	}
+}

@@ -263,6 +263,23 @@ func TestLastModifiedForcesFullPull(t *testing.T) {
 			t.Fatalf("UC-054/2 Last-Modified %q, want %q from X-Flagsmith-Document-Updated-At", got, want)
 		}
 	})
+	t.Run("UC-054/2 a header that is not a float epoch is no update time", func(t *testing.T) {
+		start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+		doc := document(start, []map[string]any{fsState("decision.backend", true, "claude")})
+		delete(doc, "updated_at")
+		h := newHarness(t, harnessOpts{docURL: func(f *flagsmithtest.Fake) string {
+			f.Handle("GET /hdr/environment-document/", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("X-Flagsmith-Document-Updated-At", start.Add(-90*time.Second).Format(time.RFC3339Nano))
+				flagsmithtest.WriteJSON(w, http.StatusOK, doc)
+			})
+			return f.Server.URL + "/hdr/"
+		}})
+		h.online()
+		h.round()
+		if got := h.link.LastModified(); got != "" {
+			t.Fatalf("UC-054/2 Last-Modified %q from an RFC 3339 header, want none (the header is a float epoch)", got)
+		}
+	})
 }
 
 // countingWriter counts the pulled writes of one flag.

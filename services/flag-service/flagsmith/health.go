@@ -57,10 +57,54 @@ type health struct {
 	posted  map[string]string         // feature -> last status queued
 	queue   map[string]healthPost     // feature -> latest post not yet sent
 	running bool
+	// stopped: no drain starts (between stop and resume); ctx ends the
+	// running drain's post; wg joins it.
+	stopped bool
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	// send posts one transition (h.post; a test double in tests).
+	send func(ctx context.Context, feature, env string, p healthPost) error
 }
 
 func newHealth(l *Link) *health {
-	return &health{l: l, keys: map[string]map[Key]string{}, posted: map[string]string{}, queue: map[string]healthPost{}}
+	h := &health{l: l, keys: map[string]map[Key]string{}, posted: map[string]string{}, queue: map[string]healthPost{}}
+	h.ctx, h.cancel = context.WithCancel(context.Background())
+	h.send = h.post
+	return h
+}
+
+// resume lets the drain run again after stop and sends what stop left queued.
+func (h *health) resume() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.stopped {
+		return
+	}
+	h.stopped = false
+	h.ctx, h.cancel = context.WithCancel(context.Background())
+	h.startLocked()
+}
+
+// stop ends the running post and joins the drain goroutine: the poller does
+// not return while a post it started is still running. The posts not sent
+// stay queued for resume.
+func (h *health) stop() {
+	h.mu.Lock()
+	h.stopped = true
+	h.cancel()
+	h.mu.Unlock()
+	h.wg.Wait()
+}
+
+// startLocked starts the drain when posts are queued and none runs.
+func (h *health) startLocked() {
+	if h.running || h.stopped || len(h.queue) == 0 {
+		return
+	}
+	h.running = true
+	h.wg.Add(1)
+	go h.drain(h.ctx)
 }
 
 // setEnvironment records the environment name the posts carry.
@@ -139,17 +183,17 @@ func (h *health) transitionLocked(feature string) {
 		return
 	}
 	h.queue[feature] = healthPost{status: want, text: text}
-	if !h.running {
-		h.running = true
-		go h.drain()
-	}
+	h.startLocked()
 }
 
-// drain sends the queued posts, the latest per feature, then exits.
-func (h *health) drain() {
+// drain sends the queued posts, the latest per feature, then exits; it exits
+// early when ctx ends (stop), keeping the post it was sending queued unless a
+// newer one replaced it.
+func (h *health) drain(ctx context.Context) {
+	defer h.wg.Done()
 	for {
 		h.mu.Lock()
-		if len(h.queue) == 0 {
+		if len(h.queue) == 0 || ctx.Err() != nil {
 			h.running = false
 			h.mu.Unlock()
 			return
@@ -164,20 +208,29 @@ func (h *health) drain() {
 		delete(h.queue, f)
 		env := h.env
 		h.mu.Unlock()
-		h.post(f, env, p)
+		if err := h.send(ctx, f, env, p); err != nil && ctx.Err() != nil {
+			h.mu.Lock()
+			if _, newer := h.queue[f]; !newer {
+				h.queue[f] = p
+			}
+			h.mu.Unlock()
+		}
 	}
 }
 
-func (h *health) post(feature, env string, p healthPost) {
+func (h *health) post(ctx context.Context, feature, env string, p healthPost) error {
 	body := healthBody{
 		Feature: feature, Environment: env, Status: p.status,
 		Reason: healthReason{TextBlocks: []healthText{{Title: healthTitle, Text: p.text}}, URLBlocks: []healthURL{}},
 	}
-	ctx := context.Background()
 	if _, err := h.l.client.PostJSON(ctx, h.l.cfg.HealthWebhookURL, body); err != nil {
+		if ctx.Err() != nil {
+			return err // stopped: sent again after resume
+		}
 		h.l.Metrics().RecordHealthPost(ctx, p.status, ResultError)
 		h.l.Logger().Warn("flagsmith feature health post failed", "feature", feature, "status", p.status, "reason", Reason(err))
-		return
+		return err
 	}
 	h.l.Metrics().RecordHealthPost(ctx, p.status, ResultOK)
+	return nil
 }

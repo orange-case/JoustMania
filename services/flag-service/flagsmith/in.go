@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,9 +48,10 @@ const (
 	// treated as stale for max(pushGuardMin, pushGuardPolls x poll interval).
 	pushGuardMin   = 10 * time.Minute
 	pushGuardPolls = 10
-	// headerDocumentUpdated is the sub-second update time of the document
-	// (the fallback when the body has no updated_at).
-	headerDocumentUpdated = "X-Flagsmith-Document-Updated-At"
+	// ReasonStaleDocument is the pull reason of a document older than one
+	// this process already read (a cache or region serving an older copy):
+	// the round is skipped (telemetry.md §10.4).
+	ReasonStaleDocument = "stale_document"
 )
 
 // puller implements inSide. Reconcile and Poll never run at the same time
@@ -79,6 +79,13 @@ type puller struct {
 	// (#2590 P1, value guard): a document that still shows one of them is
 	// stale and is not applied.
 	guards map[Key]*pushGuard
+	// lastDoc is every key's value in the last document a round read (nil
+	// before one): a push confirmed between two rounds replaced it too, also
+	// when the remote value was unknown (a deferred first apply).
+	lastDoc map[Key]Value
+	// newest is the newest document update time this process read (server
+	// clock only): an older document is a stale copy and is not applied.
+	newest time.Time
 }
 
 // remoteMark is one key's remote state as LinkState holds it.
@@ -139,6 +146,7 @@ type roundStats struct {
 // reconnect (FR-210).
 func (p *puller) Reconcile(ctx context.Context, trigger string) error {
 	ctx, span := StartReconcile(ctx, p.l.Tracer(), trigger)
+	p.health.resume()
 	rs, err := p.round(ctx, trigger, true)
 	span.SetAttributes(
 		attribute.Int(AttrApplied, rs.applied),
@@ -146,6 +154,9 @@ func (p *puller) Reconcile(ctx context.Context, trigger string) error {
 		attribute.Int(AttrConflicts, rs.conflicts),
 	)
 	if err != nil {
+		// The link goes offline: the health posts stop with it (the queue
+		// is kept for the next Reconcile or Poll).
+		p.health.stop()
 		EndSpan(span, ResultError, Reason(err))
 		return err
 	}
@@ -154,14 +165,16 @@ func (p *puller) Reconcile(ctx context.Context, trigger string) error {
 }
 
 // Poll pulls every FLAGSMITH_POLL_SECONDS and on every Wake until ctx ends or
-// the link goes down. The realtime reader, when configured, has returned
+// the link goes down. The realtime reader and the health posts have returned
 // before Poll does.
 func (p *puller) Poll(ctx context.Context) error {
 	rctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
+	p.health.resume()
 	defer func() {
 		cancel()
 		wg.Wait()
+		p.health.stop()
 	}()
 	if p.l.cfg.RealtimeURL != "" {
 		wg.Add(1)
@@ -398,7 +411,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	if !full && !p.forceFull && len(games) == 0 && p.pulls%unconditionalEvery != 0 {
 		ims = l.LastModified()
 	}
-	doc, lm, hdrUpdated, notModified, err := p.fetchDocument(ctx, ims)
+	doc, lm, notModified, err := l.client.EnvironmentDocument(ctx, ims)
 	p.lastPull = l.Now()
 	if err != nil {
 		var he *HTTPError
@@ -421,7 +434,19 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 		reason = ReasonIdentityOverridesDisabled
 		return rc.stats, ReasonError{Reason: ReasonIdentityOverridesDisabled}
 	}
-	rc.updated, rc.hasUpd = documentUpdated(doc, hdrUpdated)
+	rc.updated, rc.hasUpd = documentUpdated(doc)
+	// A document older than one already read is a stale copy (a second
+	// cache or region): applying it could revert a push it predates, so the
+	// round is skipped, Last-Modified kept and the next pull is in full.
+	if rc.hasUpd && rc.updated.Before(p.newest) {
+		p.forceFull = true
+		l.NotePull(rc.now, "")
+		reason = ReasonStaleDocument
+		return rc.stats, nil
+	}
+	if rc.hasUpd {
+		p.newest = rc.updated
+	}
 	p.health.setEnvironment(doc.Name)
 
 	d, segments := p.decodeDocument(doc)
@@ -527,50 +552,17 @@ func (p *puller) prune(keys []Key, games map[string]bool) {
 	}
 }
 
-// fetchDocument is Client.EnvironmentDocument that also returns the
-// X-Flagsmith-Document-Updated-At header (the update time when the body has
-// none). TODO(foundation): move into Client.EnvironmentDocument.
-func (p *puller) fetchDocument(ctx context.Context, ifModifiedSince string) (doc *EnvironmentDocument, lastModified, updated string, notModified bool, err error) {
-	c := p.l.client
-	u := c.doc.ResolveReference(&url.URL{Path: "environment-document/"})
-	req, err := newRequest(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, "", "", false, err
-	}
-	req.Header.Set("X-Environment-Key", c.cfg.ServerKey)
-	if ifModifiedSince != "" {
-		req.Header.Set("If-Modified-Since", ifModifiedSince)
-	}
-	status, header, body, err := c.do(c.http, req, MaxDocumentBytes)
-	if err != nil {
-		return nil, "", "", false, err
-	}
-	if status == http.StatusNotModified {
-		return nil, ifModifiedSince, "", true, nil
-	}
-	if status < 200 || status > 299 {
-		return nil, "", "", false, httpError(status, header, body)
-	}
-	doc = &EnvironmentDocument{}
-	if err := json.Unmarshal(body, doc); err != nil {
-		return nil, "", "", false, ReasonError{Reason: "malformed_document"}
-	}
-	return doc, header.Get("Last-Modified"), header.Get(headerDocumentUpdated), false, nil
-}
-
-// documentUpdated is the document's update time: the body updated_at, else
-// the X-Flagsmith-Document-Updated-At header (Unix seconds with a fraction,
-// or RFC 3339).
-func documentUpdated(doc *EnvironmentDocument, header string) (time.Time, bool) {
+// documentUpdated is the document's update time: the body updated_at
+// (ISO 8601), else the X-Flagsmith-Document-Updated-At header
+// (doc.HeaderUpdatedAt), a float Unix epoch in seconds with a fraction
+// ("1731693731.123456"); any other header format is no update time.
+func documentUpdated(doc *EnvironmentDocument) (time.Time, bool) {
 	if t, ok := doc.Updated(); ok {
 		return t, true
 	}
-	header = strings.TrimSpace(header)
+	header := strings.TrimSpace(doc.HeaderUpdatedAt)
 	if header == "" {
 		return time.Time{}, false
-	}
-	if t, err := time.Parse(time.RFC3339Nano, header); err == nil {
-		return t, true
 	}
 	f, err := strconv.ParseFloat(header, 64)
 	if err != nil || f <= 0 || math.IsInf(f, 0) {
@@ -603,6 +595,9 @@ func (p *puller) remoteMarks() map[Key]remoteMark {
 // guardPushesBetween guards every key whose remote state changed since the
 // last round: only the out side changes it between rounds (a confirmed push,
 // a forgotten remote value), so the value it replaced is stale from then on.
+// The replaced value is the remote value at the end of the last round and the
+// value the last document showed: the remote value is unknown after a
+// deferred first apply, and that document may still be served (#2596).
 func (p *puller) guardPushesBetween(start map[Key]remoteMark, now time.Time) {
 	for k, m := range start {
 		prev, ok := p.seen[k]
@@ -613,6 +608,9 @@ func (p *puller) guardPushesBetween(start map[Key]remoteMark, now time.Time) {
 			continue
 		}
 		p.addGuard(k, prev.v, m.v, now)
+		if p.lastDoc != nil {
+			p.addGuard(k, p.lastDoc[k], m.v, now)
+		}
 	}
 	for k := range p.guards {
 		if _, ok := start[k]; !ok {
@@ -623,8 +621,8 @@ func (p *puller) guardPushesBetween(start map[Key]remoteMark, now time.Time) {
 
 // guardPushesDuring guards every key whose push was confirmed while the round
 // ran: the value it replaced is the remote value at the start of the round or
-// the document value the round set. It then records the remote state for the
-// next round.
+// the document value the round set. It then records the remote state and the
+// document's values for the next round.
 func (p *puller) guardPushesDuring(rc *roundCtx, start map[Key]remoteMark) {
 	end := p.remoteMarks()
 	for k, m := range end {
@@ -638,6 +636,12 @@ func (p *puller) guardPushesDuring(rc *roundCtx, start map[Key]remoteMark) {
 		}
 	}
 	p.seen = end
+	if rc.doc != nil {
+		p.lastDoc = make(map[Key]Value, len(rc.doc))
+		for k, de := range rc.doc {
+			p.lastDoc[k] = de.v
+		}
+	}
 }
 
 // addGuard records that a confirmed push replaced v by now (nothing when the

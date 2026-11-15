@@ -154,7 +154,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	h.fake.SetDocument(doc, "")
 	cfg := flagsmith.Config{
 		Enabled: true, APIURL: h.fake.URL(), DocumentURL: h.fake.URL(),
-		ServerKey: "ser.test", AdminKey: "admin", EnvironmentKey: "envkey", ProjectID: 1,
+		ServerKey: "ser.test", AdminKey: "admin", EnvironmentKey: "envkey", ProjectID: h.fake.ProjectID,
 		Poll: time.Hour, PushRate: 5, Timeout: 2 * time.Second,
 		HealthWebhookURL: h.fake.Server.URL + "/health",
 	}
@@ -187,6 +187,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	h.link = link
+	flagsmith.UseInSideOnly(link)
 	st.SetObserver(link)
 	if o.before != nil {
 		o.before(h)
