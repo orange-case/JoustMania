@@ -103,6 +103,17 @@ func (q *identityQueue) Start(op identityOp) {
 	}
 }
 
+// CreateEnded marks the create request of op as off the wire, whatever its
+// outcome (created, refused, link down): a create that did not happen must not
+// make a later game end queue a delete.
+func (q *identityQueue) CreateEnded(op identityOp) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if w := q.current(op); w != nil {
+		w.inflight = false
+	}
+}
+
 // Peek returns the first identity with work left, without removing it.
 func (q *identityQueue) Peek() (identityOp, bool) {
 	q.mu.Lock()
@@ -220,6 +231,7 @@ func (o *out) createIdentity(ctx context.Context, op identityOp) outcome {
 		}
 		return status, err
 	})
+	o.ids.CreateEnded(op)
 	switch {
 	case oc.ok:
 		if uuid != "" {

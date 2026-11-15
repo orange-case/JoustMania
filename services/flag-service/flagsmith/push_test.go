@@ -2,11 +2,13 @@ package flagsmith
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
 	"github.com/joustmania/flag-service/registry"
 	"github.com/joustmania/flag-service/state"
 )
@@ -132,7 +134,7 @@ func TestFutureFallbackLatch(t *testing.T) {
 	t.Run("UC-055/A4 Flagsmith's own 404 is a refusal, not a fallback", func(t *testing.T) {
 		e := newOutEnv(t)
 		e.setOn(http.MethodPatch, e.futurePath("decision.backend"), func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusNotFound, `{"detail":"Not found."}`)
+			flagsmithtest.WriteJSON(w, http.StatusNotFound, json.RawMessage(`{"detail":"Not found."}`))
 		})
 		e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
 		e.drain()

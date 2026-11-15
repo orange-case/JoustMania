@@ -159,12 +159,6 @@ const apiEnv = "/api/v1/environments/envkey/"
 
 func uuidOf(identifier string) string { return "uuid_" + strings.ReplaceAll(identifier, ":", "_") }
 
-func writeJSON(w http.ResponseWriter, status int, body string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = io.WriteString(w, body)
-}
-
 // route is the fake Admin API: every call succeeds unless a test set a
 // handler for its method and path.
 func (e *outEnv) route(w http.ResponseWriter, r *http.Request) {
@@ -178,28 +172,28 @@ func (e *outEnv) route(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	switch {
 	case r.Method == http.MethodPatch && strings.HasPrefix(p, "/api/__future__/"):
-		writeJSON(w, http.StatusOK, `{}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	case p == apiEnv+"edge-identities-featurestates" && r.Method == http.MethodDelete:
 		w.WriteHeader(http.StatusNoContent)
 	case p == apiEnv+"edge-identities-featurestates":
-		writeJSON(w, http.StatusOK, `{}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	case p == apiEnv+"edge-identities/" && r.Method == http.MethodPost:
 		var b struct {
 			Identifier string `json:"identifier"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&b)
-		writeJSON(w, http.StatusCreated, `{"identity_uuid":"`+uuidOf(b.Identifier)+`"}`)
+		flagsmithtest.WriteJSON(w, http.StatusCreated, json.RawMessage(`{"identity_uuid":"`+uuidOf(b.Identifier)+`"}`))
 	case p == apiEnv+"edge-identities/" && r.Method == http.MethodGet:
 		q := strings.Trim(r.URL.Query().Get("q"), `"`)
-		writeJSON(w, http.StatusOK, `{"results":[{"identity_uuid":"`+uuidOf(q)+`","identifier":"`+q+`"}]}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{"results":[{"identity_uuid":"`+uuidOf(q)+`","identifier":"`+q+`"}]}`))
 	case strings.HasPrefix(p, apiEnv+"edge-identities/") && strings.HasSuffix(p, "/update-traits/") && r.Method == http.MethodPut:
-		writeJSON(w, http.StatusOK, `{}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	case strings.HasPrefix(p, apiEnv+"edge-identities/") && r.Method == http.MethodDelete:
 		w.WriteHeader(http.StatusNoContent)
 	case p == apiEnv+"featurestates/" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, `{"results":[{"id":`+r.URL.Query().Get("feature")+`0}]}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{"results":[{"id":`+r.URL.Query().Get("feature")+`0}]}`))
 	case strings.HasPrefix(p, apiEnv+"featurestates/") && r.Method == http.MethodPut:
-		writeJSON(w, http.StatusOK, `{}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	default:
 		http.NotFound(w, r)
 	}
@@ -403,7 +397,7 @@ func TestMergeLatestWins(t *testing.T) {
 			close(started)
 			<-release
 		}
-		writeJSON(w, http.StatusOK, `{}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	})
 	e.out.Changed(e.stack("decision.backend", "rules", `"rules"`))
 	r := e.start()
@@ -464,10 +458,10 @@ func TestRetryAfter(t *testing.T) {
 	e.setOn(http.MethodPatch, e.futurePath("decision.backend"), func(w http.ResponseWriter, _ *http.Request) {
 		if calls.Add(1) == 1 {
 			w.Header().Set("Retry-After", "7")
-			writeJSON(w, http.StatusTooManyRequests, `{"detail":"throttled"}`)
+			flagsmithtest.WriteJSON(w, http.StatusTooManyRequests, json.RawMessage(`{"detail":"throttled"}`))
 			return
 		}
-		writeJSON(w, http.StatusOK, `{}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	})
 	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
 	e.drain()
@@ -495,13 +489,13 @@ func TestRefusalOutOfSync(t *testing.T) {
 	var calls atomic.Int32
 	e.setOn(http.MethodPatch, e.futurePath("decision.backend"), func(w http.ResponseWriter, _ *http.Request) {
 		if calls.Add(1) == 1 {
-			writeJSON(w, http.StatusConflict, `{"detail":"change requests enabled"}`)
+			flagsmithtest.WriteJSON(w, http.StatusConflict, json.RawMessage(`{"detail":"change requests enabled"}`))
 			return
 		}
-		writeJSON(w, http.StatusOK, `{}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	})
 	e.setOn(http.MethodPatch, e.futurePath("decision.min_interval_ms"), func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusNotFound, `{"detail":"Not found."}`)
+		flagsmithtest.WriteJSON(w, http.StatusNotFound, json.RawMessage(`{"detail":"Not found."}`))
 	})
 	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
 	e.out.Changed(e.stack("decision.min_interval_ms", "", `2500`))
@@ -588,10 +582,10 @@ func TestGameStartListsIdentities(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&b)
 		if b.Identifier == "game:g1:B" {
-			writeJSON(w, http.StatusBadRequest, `{"identifier":["Identity with this identifier already exists."]}`)
+			flagsmithtest.WriteJSON(w, http.StatusBadRequest, json.RawMessage(`{"identifier":["Identity with this identifier already exists."]}`))
 			return
 		}
-		writeJSON(w, http.StatusCreated, `{"identity_uuid":"`+uuidOf(b.Identifier)+`"}`)
+		flagsmithtest.WriteJSON(w, http.StatusCreated, json.RawMessage(`{"identity_uuid":"`+uuidOf(b.Identifier)+`"}`))
 	})
 	first := gameOf("g1", "shadow", "A", "B")
 	e.out.Changed(e.registered(first, nil))
@@ -725,7 +719,7 @@ func TestGameEndsWhileCreateInFlight(t *testing.T) {
 	e.setOn(http.MethodPost, apiEnv+"edge-identities/", func(w http.ResponseWriter, _ *http.Request) {
 		close(started)
 		<-release
-		writeJSON(w, http.StatusCreated, `{"identity_uuid":"`+uuidOf("game:g1")+`"}`)
+		flagsmithtest.WriteJSON(w, http.StatusCreated, json.RawMessage(`{"identity_uuid":"`+uuidOf("game:g1")+`"}`))
 	})
 	g := gameOf("g1", "real")
 	e.out.Changed(e.registered(g, nil))
@@ -742,6 +736,30 @@ func TestGameEndsWhileCreateInFlight(t *testing.T) {
 	}
 }
 
+// UC: UC-055 A2
+// A create that fails with the link down is not on the wire any more: a game
+// that ends afterwards drops the entry and queues no delete for an identity
+// that was never created.
+func TestCreateFailsLinkDownThenGameEnds(t *testing.T) {
+	e := newOutEnv(t)
+	e.fake.Fail(http.StatusServiceUnavailable)
+	g := gameOf("g1", "real")
+	e.out.Changed(e.registered(g, nil))
+	r := e.start()
+	if err := r.wait(); !IsLinkDown(err) {
+		t.Fatalf("UC-055/A2 Run returned %v, want a link-down error", err)
+	}
+	e.out.Changed(e.ended(g))
+	e.fake.Fail(0)
+	e.drain()
+	if n := e.count(http.MethodDelete, apiEnv+"edge-identities/"+uuidOf("game:g1")+"/"); n != 0 {
+		t.Fatalf("UC-055/A2 %d deletes of an identity that was never created, want 0", n)
+	}
+	if n := e.count(http.MethodPost, apiEnv+"edge-identities/"); n != 1 {
+		t.Fatalf("UC-055/A2 %d creates, want only the failed one", n)
+	}
+}
+
 // UC: UC-055 A4
 // A refusal drops the value that was pushed, not a newer one merged while the
 // request was in flight: the newer value is pushed next.
@@ -753,10 +771,10 @@ func TestRefusalKeepsNewerValue(t *testing.T) {
 		if calls.Add(1) == 1 {
 			close(started)
 			<-release
-			writeJSON(w, http.StatusBadRequest, `{"detail":"bad"}`)
+			flagsmithtest.WriteJSON(w, http.StatusBadRequest, json.RawMessage(`{"detail":"bad"}`))
 			return
 		}
-		writeJSON(w, http.StatusOK, `{}`)
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	})
 	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
 	r := e.start()
@@ -834,7 +852,7 @@ func TestRemovedSerialKeysForgotten(t *testing.T) {
 func TestFailingKeyDoesNotBlockQueue(t *testing.T) {
 	e := newOutEnv(t)
 	e.setOn(http.MethodPatch, e.futurePath("decision.backend"), func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusInternalServerError, `{}`)
+		flagsmithtest.WriteJSON(w, http.StatusInternalServerError, json.RawMessage(`{}`))
 	})
 	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
 	e.out.Changed(e.stack("decision.min_interval_ms", "", `2500`))
