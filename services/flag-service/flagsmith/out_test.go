@@ -3,6 +3,7 @@ package flagsmith
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -291,7 +292,7 @@ func (e *outEnv) drain() {
 	e.t.Helper()
 	r := e.start()
 	waitFor(e.t, "the out side to go idle", e.idle)
-	if err := r.stop(); err != context.Canceled {
+	if err := r.stop(); !errors.Is(err, context.Canceled) {
 		e.t.Fatalf("Run: %v, want context canceled", err)
 	}
 }
@@ -319,7 +320,7 @@ func (e *outEnv) pushSpans() []sdktrace.ReadOnlySpan {
 func spanAttr(s sdktrace.ReadOnlySpan, key string) string {
 	for _, kv := range s.Attributes() {
 		if string(kv.Key) == key {
-			return kv.Value.Emit()
+			return kv.Value.String()
 		}
 	}
 	return ""
