@@ -55,9 +55,13 @@ const (
 )
 
 // Backoff of the reconnect loop (services.md §7.3 Offline): 1, 2, 4 ... 60 s.
+// It starts again at BackoffMin only after the link stayed online for
+// BackoffResetAfter: a side that fails right after each reconnect keeps
+// backing off (each reconnect is a full pull and a reconcile).
 const (
-	BackoffMin = time.Second
-	BackoffMax = 60 * time.Second
+	BackoffMin        = time.Second
+	BackoffMax        = 60 * time.Second
+	BackoffResetAfter = 30 * time.Second
 )
 
 // LocalWriter is the flag service's in-process write entry (*api.API): the
@@ -170,6 +174,13 @@ type Link struct {
 	restartAuthor map[Key]Author
 	restartSet    bool
 	started       bool
+	// reconciled: a Reconcile succeeded once; until then every connect
+	// reconciles with TriggerStart (the first round after start is special,
+	// architecture note §5.1).
+	reconciled bool
+
+	gamesSeenOnce sync.Once
+	gamesSeen     chan struct{}
 }
 
 // New builds the link. It never fails in a way that should stop the service:
@@ -204,6 +215,8 @@ func New(cfg Config, d Deps) (*Link, error) {
 		ids:    &IDs{FeatureID: map[string]int{}, TagID: map[string]int{}, IdentityUUID: map[string]string{}},
 		wake:   make(chan struct{}, 1),
 		mode:   ModeOff,
+
+		gamesSeen: make(chan struct{}),
 	}
 	l.out, l.in, l.start = newOut(l), newIn(l), newStarter(l)
 	m, err := NewMetrics(d.Meter, l.Mode, l.links.Counts)
@@ -232,7 +245,8 @@ func (l *Link) Enabled() bool { return l != nil && l.cfg.Enabled }
 // Start runs until it succeeds once, never again in this process; then
 // Reconcile, online, and the out and in sides until one fails. A failure sets
 // the link offline with its reason and retries after the backoff (1, 2, 4 ...
-// 60 s, back to 1 s after a time online) with Reconcile("reconnect").
+// 60 s, back to 1 s once the link stayed online for BackoffResetAfter) with
+// Reconcile("reconnect"), or Reconcile("start") while no Reconcile succeeded.
 func (l *Link) Run(ctx context.Context) {
 	if !l.Enabled() {
 		l.setMode(ModeOff, "")
@@ -243,8 +257,11 @@ func (l *Link) Run(ctx context.Context) {
 		err := l.connect(ctx)
 		if err == nil {
 			l.setMode(ModeOnline, "")
-			backoff = 0
+			onlineAt := l.deps.Now()
 			err = l.runSides(ctx)
+			if l.deps.Now().Sub(onlineAt) >= BackoffResetAfter {
+				backoff = 0
+			}
 		}
 		if ctx.Err() != nil {
 			return
@@ -270,22 +287,32 @@ func nextBackoff(d time.Duration) time.Duration {
 	return d
 }
 
-// connect runs Start (until it succeeded once) and the reconcile.
+// connect runs Start (until it succeeded once) and the reconcile: trigger
+// "start" until a Reconcile succeeded once, then "reconnect".
 func (l *Link) connect(ctx context.Context) error {
 	l.mu.Lock()
-	started := l.started
+	started, reconciled := l.started, l.reconciled
 	l.mu.Unlock()
-	if started {
-		return l.in.Reconcile(ctx, TriggerReconnect)
+	if !started {
+		l.setMode(ModeStarting, "")
+		if err := l.start.Start(ctx); err != nil {
+			return err
+		}
+		l.mu.Lock()
+		l.started = true
+		l.mu.Unlock()
 	}
-	l.setMode(ModeStarting, "")
-	if err := l.start.Start(ctx); err != nil {
+	trigger := TriggerReconnect
+	if !reconciled {
+		trigger = TriggerStart
+	}
+	if err := l.in.Reconcile(ctx, trigger); err != nil {
 		return err
 	}
 	l.mu.Lock()
-	l.started = true
+	l.reconciled = true
 	l.mu.Unlock()
-	return l.in.Reconcile(ctx, TriggerStart)
+	return nil
 }
 
 // runSides runs out.Run and in.Poll on one derived context: the first to
@@ -348,13 +375,23 @@ func (l *Link) Status() Status {
 }
 
 // StateChanged is the state.Observer: it hands every Change to the out side.
-// Called under State.mu.
+// A game registration also closes GamesSeen (the first one) and wakes the in
+// side for a round right away (Wake, non-blocking). Called under State.mu.
 func (l *Link) StateChanged(c state.Change) {
 	if !l.Enabled() {
 		return
 	}
 	l.out.Changed(c)
+	if c.Kind == state.ChangeGameRegistered {
+		l.gamesSeenOnce.Do(func() { close(l.gamesSeen) })
+		l.Wake()
+	}
 }
+
+// GamesSeen is closed once StateChanged observed the first
+// ChangeGameRegistered (the start sequence's stale-identity cleanup waits for
+// it, architecture note §5.1).
+func (l *Link) GamesSeen() <-chan struct{} { return l.gamesSeen }
 
 // Client returns the Flagsmith client.
 func (l *Link) Client() *Client { return l.client }

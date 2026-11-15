@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/joustmania/flag-service/fserr"
@@ -606,6 +607,23 @@ func (s *State) clearStackLocked(f *flagState, req ClearRequest, res *WriteResul
 	switch {
 	case req.StackAll:
 		prevStack, prevAdmin := f.stack, f.admin
+		if prevAdmin == nil && s.persistBlocked && f.policy.Persist {
+			// As the Persist branch below: no admin value in memory, but the
+			// unreadable state file may still hold one that returns at the
+			// next start (UC-053 A12, #2368). A kill switch clears the
+			// overlay and answers not persisted; any other flag keeps its
+			// overlay and is refused.
+			err := s.saveAdminLocked()
+			if f.policy.AppliesWhenPersistFails() {
+				s.opts.Logger.Error("flag service: kill switch clear not persisted; the state file was unreadable at start", "flag", f.key, "error", err)
+				if prevStack != nil {
+					f.stack, res.Cleared = nil, 1
+				}
+				res.PersistFailed = true
+				return nil
+			}
+			return fserr.PersistFailed("the persisted value of %s was not cleared: %v", req.Flag, err)
+		}
 		if prevStack == nil && prevAdmin == nil {
 			return nil
 		}
@@ -866,6 +884,24 @@ func (s *State) ExpireExperiments() int {
 		for _, arm := range sortedKeys(arms[id]) {
 			s.noteLocked(Change{Kind: ChangeExperimentEnded, ScopeName: registry.ScopeExperiment, Scope: Scope{ExperimentID: id, Arm: arm}})
 		}
+	}
+	// The slot versions of an experiment whose arm values were all cleared
+	// (DELETE) go once no registered game carries it: the loops above never
+	// see an experiment without values (NFR-051, #2594). expSeen still holds
+	// last sweep's ids here, so a cleared experiment keeps its versions while
+	// a game carries it.
+	for outer := range s.slotVer {
+		id, ok := strings.CutPrefix(outer, "x:")
+		if !ok {
+			continue
+		}
+		if _, hasValues := lastWrite[id]; hasValues {
+			continue
+		}
+		if _, seen := s.expSeen[id]; seen {
+			continue
+		}
+		delete(s.slotVer, outer)
 	}
 	for id := range s.expSeen {
 		if !present[id] {
