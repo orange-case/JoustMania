@@ -304,10 +304,13 @@ func (s *LinkState) Remote(k Key) (Value, bool) {
 }
 
 // Refuse records a refusal of k on side. A remote refusal refers to the value
-// Next last handed out for k (the push in flight; the pending value when Next
-// never handed one out) and drops the pending entry only while it still holds
-// that value: a newer local value offered during the push stays pending and
-// is pushed next (as with ConfirmPushed). See RefuseValue.
+// Next last handed out for k (the push in flight) and drops the pending entry
+// only while it still holds that value: a newer local value offered during the
+// push stays pending and is pushed next (as with ConfirmPushed). When Next
+// never handed the current entry out (it was created after the refused push,
+// e.g. by an Offer following one equal to the remote value), the refusal
+// cannot be about it: the refusal is recorded and the entry kept. See
+// RefuseValue.
 func (s *LinkState) Refuse(k Key, side Side, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -315,12 +318,14 @@ func (s *LinkState) Refuse(k Key, side Side, reason string) {
 	if e == nil {
 		return
 	}
+	if p := e.pending; p != nil && !p.hasSent {
+		e.refused, e.side = reason, side
+		e.inSync = false
+		return
+	}
 	v := Value{}
 	if p := e.pending; p != nil {
-		v = p.value
-		if p.hasSent {
-			v = p.sent
-		}
+		v = p.sent
 	}
 	s.refuseLocked(k, e, v, side, reason)
 }
