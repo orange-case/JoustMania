@@ -14,6 +14,11 @@ type EnvironmentDocument struct {
 	UseIdentityOverridesInLocalEval bool               `json:"use_identity_overrides_in_local_eval"`
 	FeatureStates                   []FeatureState     `json:"feature_states"`
 	IdentityOverrides               []IdentityOverride `json:"identity_overrides"`
+
+	// HeaderUpdatedAt is the X-Flagsmith-Document-Updated-At response header of
+	// the pull that produced this document ("" when the header is absent). It is
+	// not part of the JSON body; Client.EnvironmentDocument sets it on a 200.
+	HeaderUpdatedAt string `json:"-"`
 }
 
 // Updated parses UpdatedAt (the change time of NFR-058's delay metric).

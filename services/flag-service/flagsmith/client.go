@@ -71,7 +71,9 @@ func orDefault(s, def string) string {
 
 // EnvironmentDocument pulls the environment document. ifModifiedSince (the
 // Last-Modified of the previous pull, "" for a full pull) makes it
-// conditional: notModified is true on a 304 and doc is nil.
+// conditional: notModified is true on a 304 and doc is nil. On a 200 the
+// X-Flagsmith-Document-Updated-At response header is carried in
+// doc.HeaderUpdatedAt ("" when absent).
 func (c *Client) EnvironmentDocument(ctx context.Context, ifModifiedSince string) (doc *EnvironmentDocument, lastModified string, notModified bool, err error) {
 	u := c.doc.ResolveReference(&url.URL{Path: "environment-document/"})
 	req, err := newRequest(ctx, http.MethodGet, u.String(), nil)
@@ -96,6 +98,7 @@ func (c *Client) EnvironmentDocument(ctx context.Context, ifModifiedSince string
 	if err := json.Unmarshal(body, doc); err != nil {
 		return nil, "", false, ReasonError{Reason: "malformed_document"}
 	}
+	doc.HeaderUpdatedAt = header.Get("X-Flagsmith-Document-Updated-At")
 	return doc, header.Get("Last-Modified"), false, nil
 }
 
