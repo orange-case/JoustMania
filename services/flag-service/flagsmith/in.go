@@ -434,7 +434,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 		reason = ReasonIdentityOverridesDisabled
 		return rc.stats, ReasonError{Reason: ReasonIdentityOverridesDisabled}
 	}
-	rc.updated, rc.hasUpd = documentUpdated(doc)
+	rc.updated, rc.hasUpd = documentUpdated(doc, p.updateLimit(rc.now))
 	// A document older than one already read is a stale copy (a second
 	// cache or region): applying it could revert a push it predates, so the
 	// round is skipped, Last-Modified kept and the next pull is in full.
@@ -556,8 +556,15 @@ func (p *puller) prune(keys []Key, games map[string]bool) {
 // (ISO 8601), else the X-Flagsmith-Document-Updated-At header
 // (doc.HeaderUpdatedAt), a float Unix epoch in seconds with a fraction
 // ("1731693731.123456"); any other header format is no update time.
-func documentUpdated(doc *EnvironmentDocument) (time.Time, bool) {
+//
+// A time after limit (implausible, see updateLimit) or one that is not a
+// finite epoch after 1970 and before year 10000 counts as no update time, so a
+// garbled value never pins the newest time and refuses every later document.
+func documentUpdated(doc *EnvironmentDocument, limit time.Time) (time.Time, bool) {
 	if t, ok := doc.Updated(); ok {
+		if t.After(limit) || t.Unix() <= 0 {
+			return time.Time{}, false
+		}
 		return t, true
 	}
 	header := strings.TrimSpace(doc.HeaderUpdatedAt)
@@ -565,11 +572,33 @@ func documentUpdated(doc *EnvironmentDocument) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	f, err := strconv.ParseFloat(header, 64)
-	if err != nil || f <= 0 || math.IsInf(f, 0) {
+	if err != nil || math.IsNaN(f) || f <= 0 || f > maxEpoch {
 		return time.Time{}, false
 	}
 	sec, frac := math.Modf(f)
-	return time.Unix(int64(sec), int64(frac*1e9)).UTC(), true
+	t := time.Unix(int64(sec), int64(frac*1e9)).UTC()
+	if t.After(limit) {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// maxEpoch is the last second of year 9999 as a Unix epoch.
+const maxEpoch = 253402300799
+
+// maxUpdateAhead is how far a document update time may lie ahead of both the
+// newest one read and the local clock before it counts as garbled.
+const maxUpdateAhead = 24 * time.Hour
+
+// updateLimit is the latest plausible document update time: a day after the
+// newest one read or the local clock, whichever is later. It only rejects a
+// garbled value; documents are still compared by server time alone.
+func (p *puller) updateLimit(now time.Time) time.Time {
+	base := now
+	if p.newest.After(base) {
+		base = p.newest
+	}
+	return base.Add(maxUpdateAhead)
 }
 
 // remoteMarks reads every key's remote value, generation and confirmation
@@ -633,6 +662,11 @@ func (p *puller) guardPushesDuring(rc *roundCtx, start map[Key]remoteMark) {
 		p.addGuard(k, s.v, m.v, rc.now)
 		if rc.doc != nil {
 			p.addGuard(k, rc.doc[k].v, m.v, rc.now)
+		} else if p.lastDoc != nil {
+			// The round read no document (an error, a stale document, 304):
+			// the next one may still be the last document read, whose value
+			// the push replaced too (a deferred first apply leaves s.v absent).
+			p.addGuard(k, p.lastDoc[k], m.v, rc.now)
 		}
 	}
 	p.seen = end

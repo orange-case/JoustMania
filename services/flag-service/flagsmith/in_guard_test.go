@@ -3,6 +3,8 @@ package flagsmith_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -372,5 +374,145 @@ func TestEmptyGameSlotWriteIsConditional(t *testing.T) {
 	}
 	if _, ok := h.link.Links().Remote(volumeOverrideG1); ok {
 		t.Fatal("UC-054/A5 the remote value is known after a deferred apply, want it restored to unknown")
+	}
+}
+
+// docSwitch serves the environment document itself; when armed, the NEXT
+// document request runs fn (a push confirmed while the round is in flight)
+// and answers with status (an error) or else with alt.
+type docSwitch struct {
+	mu     sync.Mutex
+	body   []byte
+	armed  bool
+	fn     func()
+	status int
+	alt    []byte
+}
+
+func (d *docSwitch) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	d.mu.Lock()
+	armed, fn, status, alt, body := d.armed, d.fn, d.status, d.alt, d.body
+	d.armed = false
+	d.mu.Unlock()
+	if armed {
+		fn()
+		if status != 0 {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, `{"detail":"x"}`, status)
+			return
+		}
+		body = alt
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
+}
+
+// currentDoc is the document the fake serves now.
+func currentDoc(t *testing.T, h *harness) []byte {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, h.fake.URL()+"environment-document/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Environment-Key", "ser.test")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("setup: document %d %s", res.StatusCode, b)
+	}
+	return b
+}
+
+// pushDuringRound runs the deferred-first-apply race of maxGamesRace (remote
+// unknown, last document 100) with the push of 10 confirmed while the next
+// round's fetch is in flight; that fetch fails with status, or (status 0)
+// returns alt, or the current document when alt is nil. The rounds after it
+// read the pre-push document (100) again.
+func pushDuringRound(t *testing.T, status int, alt func(h *harness) []byte) {
+	t.Helper()
+	h := maxGamesRace(t, false)
+	if _, ok := h.link.Links().Remote(maxGamesKey); ok {
+		t.Fatal("setup: remote known, want unknown after the deferred first apply")
+	}
+	ds := &docSwitch{body: currentDoc(t, h), status: status}
+	ds.alt = ds.body
+	if alt != nil {
+		ds.alt = alt(h)
+	}
+	ds.fn = func() { h.link.Links().ConfirmPushed(maxGamesKey, num("10")) }
+	ds.armed = true
+	h.fake.Handle("GET "+flagsmithtest.APIPath+"environment-document/", ds.ServeHTTP)
+	h.clock.Advance(time.Minute)
+	for range 4 {
+		h.round()
+	}
+	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
+		t.Fatalf("UC-054/BR-005 experiment_max_games = %s: the pre-push document (100) loosened the push of 10 confirmed during a round that read no document", v.Value)
+	}
+}
+
+// UC: UC-054 BR-005
+// A push confirmed during a round that read no document (a 429, an older
+// document refused as stale) replaced the last document's value too: after a
+// deferred first apply the remote is unknown, so only the last document can
+// guard it (#2596 delta 2 finding 1).
+func TestGuardPushDuringRoundWithoutDocument(t *testing.T) {
+	t.Run("UC-054/BR-005 429", func(t *testing.T) {
+		pushDuringRound(t, http.StatusTooManyRequests, nil)
+	})
+	t.Run("UC-054/BR-005 older document (stale_document)", func(t *testing.T) {
+		pushDuringRound(t, 0, func(h *harness) []byte {
+			b, err := json.Marshal(document(h.clock.Now().Add(-time.Hour), []map[string]any{fsState("experiment_max_games", true, 100)}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return b
+		})
+	})
+	t.Run("UC-054/BR-005 control: a round that read the document", func(t *testing.T) {
+		pushDuringRound(t, 0, nil)
+	})
+}
+
+// UC: UC-054 2
+// A garbled update time (not a finite epoch, beyond year 9999, or more than a
+// day ahead of the newest time read and the local clock) is no update time:
+// it never pins the newest time, so a later document is not refused as older
+// (#2596 delta 2 finding 3).
+func TestGarbledUpdateTimeIgnored(t *testing.T) {
+	start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC) // the harness clock
+	for _, hdr := range []string{"NaN", "1e300", "1e11", fmt.Sprintf("%d", start.AddDate(1, 0, 0).Unix())} {
+		t.Run("UC-054/2 header "+hdr, func(t *testing.T) {
+			var mu sync.Mutex
+			header, backend := hdr, "claude"
+			h := newHarness(t, harnessOpts{docURL: func(f *flagsmithtest.Fake) string {
+				f.Handle("GET /hdr/environment-document/", func(w http.ResponseWriter, _ *http.Request) {
+					mu.Lock()
+					hv, bv := header, backend
+					mu.Unlock()
+					doc := document(start, []map[string]any{fsState("decision.backend", true, bv)})
+					delete(doc, "updated_at")
+					w.Header().Set("X-Flagsmith-Document-Updated-At", hv)
+					flagsmithtest.WriteJSON(w, http.StatusOK, doc)
+				})
+				return f.Server.URL + "/hdr/"
+			}})
+			h.online()
+			h.round()
+			if got := h.link.LastModified(); got != "" {
+				t.Fatalf("UC-054/2 Last-Modified %q from the garbled header %q, want none", got, hdr)
+			}
+			mu.Lock()
+			header, backend = fmt.Sprintf("%d", start.Add(-30*time.Second).Unix()), "openai"
+			mu.Unlock()
+			h.round()
+			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
+				t.Fatalf("UC-054/2 decision.backend = %+v after the garbled header %q: the later document was refused as older", v, hdr)
+			}
+		})
 	}
 }
