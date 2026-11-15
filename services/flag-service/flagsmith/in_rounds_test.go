@@ -213,6 +213,54 @@ func TestRestartRuleAttribution(t *testing.T) {
 	}
 }
 
+// UC: UC-054 A3
+// The start reconcile span records the restart rule and how many values it
+// clears (telemetry.md §10.4): the API key's values, never a person's, a kill
+// switch (BR-005) or an event-flag override (one-shot).
+func TestReconcileSpanRecordsRestartRule(t *testing.T) {
+	t.Run("UC-054/A3 BR-006 the start reconcile span carries restart_rule and cleared", func(t *testing.T) {
+		h := newHarness(t, harnessOpts{before: func(h *harness) {
+			h.link.SetRestartReport(flagsmith.RestartAuditLog, map[flagsmith.Key]flagsmith.Author{
+				{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}:                 flagsmith.AuthorAPIKey,
+				{Set: "interventions", Flag: "global_sensitivity_override", Scope: "game:g7"}:          flagsmith.AuthorAPIKey,
+				{Set: "agent", Flag: "enabled", Scope: flagsmith.ScopeStack}:                          flagsmith.AuthorAPIKey,
+				{Set: "interventions", Flag: "audio_cue", Scope: "game:g7"}:                            flagsmith.AuthorAPIKey,
+				{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}:         flagsmith.AuthorPerson,
+				{Set: "interventions", Flag: "volume_override", Scope: "game:g7"}:                      flagsmith.AuthorUnknown,
+			})
+		}})
+		h.online()
+		spans := h.ended(flagsmith.SpanReconcile)
+		if len(spans) != 1 {
+			t.Fatalf("%d reconcile spans, want 1", len(spans))
+		}
+		got := map[string]string{}
+		for _, kv := range spans[0].Attributes() {
+			got[string(kv.Key)] = kv.Value.Emit()
+		}
+		if got[flagsmith.AttrTrigger] != flagsmith.TriggerStart {
+			t.Fatalf("trigger %q, want start", got[flagsmith.AttrTrigger])
+		}
+		if got[flagsmith.AttrRestartRule] != flagsmith.RestartAuditLog {
+			t.Fatalf("UC-054/A3 %s = %q, want %q", flagsmith.AttrRestartRule, got[flagsmith.AttrRestartRule], flagsmith.RestartAuditLog)
+		}
+		if got[flagsmith.AttrCleared] != "2" {
+			t.Fatalf("UC-054/BR-006 %s = %q, want 2 (the stack and the game value; not the kill switch, the event, a person's)", flagsmith.AttrCleared, got[flagsmith.AttrCleared])
+		}
+	})
+	t.Run("UC-054/A3 without a restart report the span has no restart attributes", func(t *testing.T) {
+		h := newHarness(t, harnessOpts{})
+		h.online()
+		for _, s := range h.ended(flagsmith.SpanReconcile) {
+			for _, kv := range s.Attributes() {
+				if k := string(kv.Key); k == flagsmith.AttrCleared || k == flagsmith.AttrRestartRule {
+					t.Fatalf("%s set without a restart report", k)
+				}
+			}
+		}
+	})
+}
+
 // UC: UC-054 2
 // Last-Modified (§4.2 step 8, #2590 P6): a body older than its Last-Modified
 // header is a stale copy, and a body whose second has not passed may still

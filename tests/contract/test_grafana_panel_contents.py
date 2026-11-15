@@ -166,6 +166,19 @@ STEP6_PANELS = [
         "Writes / min (by flag set, result and op)",
         r"flagservice_writes_total",
     ),
+    # Platform: the Flagsmith link (telemetry.md §10.4, #2592).
+    (
+        "platform",
+        "feature-flags",
+        "Flagsmith link state",
+        r"flagservice_flagsmith_link\b",
+    ),
+    (
+        "platform",
+        "feature-flags",
+        "Flagsmith change delay p95 (NFR-058)",
+        r"flagservice_flagsmith_change_delay_seconds_bucket",
+    ),
 ]
 
 
@@ -196,6 +209,106 @@ def test_step7_grafana_provisions_only_prometheus_and_jaeger_datasources():
     # The dashboard's Experiments link opens the experiment.progress spans in Jaeger.
     spa = (ic.REPO_ROOT / "services" / "dashboard" / "src" / "index.html").read_text()
     assert "/jaeger/search?service=agent&operation=experiment.progress" in spa
+
+
+FLAGSMITH_TELEMETRY = (
+    ic.REPO_ROOT / "services" / "flag-service" / "flagsmith" / "telemetry.go"
+)
+FLAGSMITH_METRICS = {
+    "flagservice_flagsmith_link",
+    "flagservice_flagsmith_pulls_total",
+    "flagservice_flagsmith_pushes_total",
+    "flagservice_flagsmith_pending",
+    "flagservice_flagsmith_out_of_sync",
+    "flagservice_flagsmith_conflicts_total",
+    "flagservice_flagsmith_change_delay_seconds",
+    "flagservice_flagsmith_health_posts_total",
+}
+
+
+def _flagsmith_instrument_labels() -> dict[str, set[str]]:
+    """Metric name -> the label names telemetry.go records on it."""
+    src = FLAGSMITH_TELEMETRY.read_text()
+    names = dict(
+        (var, name)
+        for var, name in re.findall(
+            r"(?:m\.)?(\w+)(?:, err)?\s*:?=\s*meter\.\w+\(\s*\"([^\"]+)\"", src
+        )
+    )
+    labels: dict[str, set[str]] = {name: set() for name in names.values()}
+    for field, gauge, rest in re.findall(
+        r"(?:m\.(\w+)\.(?:Add|Record)\(|o\.ObserveInt64\((\w+),)([^\n]*)", src
+    ):
+        var = field or gauge
+        assert var in names, f"{var} records but is no instrument of telemetry.go"
+        labels[names[var]].update(re.findall(r"attribute\.String\(\"(\w+)\"", rest))
+    return labels
+
+
+def _row_panels(folder: str, uid: str, row: str) -> dict[str, list[str]]:
+    """Panel title -> target expressions of the panels in one dashboard row."""
+    for path in (DASHBOARDS / folder).glob("*.json"):
+        dash = json.loads(path.read_text())
+        if dash["uid"] != uid:
+            continue
+        out: dict[str, list[str]] = {}
+        inside = False
+        for p in dash["panels"]:
+            if p.get("type") == "row":
+                if inside:
+                    break
+                inside = p.get("title") == row
+                if inside:
+                    _flatten(p.get("panels", []), out)
+            elif inside:
+                _flatten([p], out)
+        assert inside or out, f"no row {row!r} in {uid}"
+        return out
+    raise AssertionError(f"no dashboard {uid} in {folder}")
+
+
+@pytest.mark.uc("UC-054", cond=["Post-S-3"])
+@pytest.mark.uc("UC-055", cond=["Post-S-3", "Post-F-3"])
+def test_flagsmith_link_row_reads_every_link_metric():
+    """The "Flagsmith link" row reads every link metric of telemetry.md §10.4, by the labels telemetry.go records."""
+    labels = _flagsmith_instrument_labels()
+    assert set(labels) == FLAGSMITH_METRICS, (
+        "telemetry.go and telemetry.md §10.4 list different link metrics"
+    )
+    panels = _row_panels("platform", "feature-flags", "Flagsmith link")
+    assert panels, "the Flagsmith link row has no panels"
+    metric_re = re.compile(
+        r"\b(" + "|".join(sorted(FLAGSMITH_METRICS, key=len, reverse=True)) + r")(_bucket)?\b"
+    )
+    read: set[str] = set()
+    for title, exprs in panels.items():
+        assert exprs, f"{title!r} has no query"
+        for expr in exprs:
+            found = metric_re.findall(expr)
+            assert found, f"{title!r} reads no Flagsmith link metric: {expr}"
+            allowed = set().union(*(labels[m] for m, _ in found))
+            if any(bucket for _, bucket in found):
+                allowed.add("le")
+            used = set()
+            for group in re.findall(r"\bby \(([^)]*)\)", expr):
+                used.update(x.strip() for x in group.split(",") if x.strip())
+            for selector in re.findall(r"\{([^}]*)\}", expr):
+                used.update(re.findall(r"(\w+)\s*(?:=~|!~|!=|=)", selector))
+            used.update(re.findall(r"label_replace\(vector\(0\),\s*\"(\w+)\"", expr))
+            unknown = used - allowed
+            assert not unknown, (
+                f"{title!r} uses labels {sorted(unknown)} that telemetry.go never records: {expr}"
+            )
+            read.update(m for m, _ in found)
+    missing = FLAGSMITH_METRICS - read
+    assert not missing, f"the Flagsmith link row does not read {sorted(missing)}"
+    # Refusals are pushes the Admin API rejected, by reason (no refused gauge).
+    assert any(
+        re.search(r"flagservice_flagsmith_pushes_total\{result=\"rejected\"\}", e)
+        and re.search(r"\bby \([^)]*\breason\b", e)
+        for exprs in panels.values()
+        for e in exprs
+    ), "no panel shows the refused pushes by reason"
 
 
 @pytest.mark.uc("UC-035", flow="main", steps=[6], br=["BR-004"])

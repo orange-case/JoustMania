@@ -636,7 +636,10 @@ off the object is `{"link": "off", "pending": 0, "out_of_sync": 0, "refused": 0}
 not depend on the link.
 
 **Consumers:** `scripts/talk-preflight.sh` WARNs while the link is `on` and not `online`, or `restart_rule` is
-`degraded`; `talk-stage.sh reset` needs no change (its deletes are pushed like any write).
+`degraded`; while it is `online` it also WARNs when `refused > 0` or `out_of_sync > pending` (keys stuck on a refusal,
+not pushes in flight; the line names the three counts, #2592). An online link with a degraded rule and stuck keys gets
+both WARN lines and no PASS line; the preflight never FAILs on the link. Grafana **Flags / OpenFeature**, row
+"Flagsmith link" (telemetry.md §10.4). `talk-stage.sh reset` needs no change (its deletes are pushed like any write).
 
 **Traceability:** FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037 / UC-054, UC-055 / `services/flag-service/flagsmith/`
 (foundation, #2588), `services/flag-service/api/inprocess.go`, `services/flag-service/state/observer.go`,

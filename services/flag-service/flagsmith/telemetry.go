@@ -77,7 +77,9 @@ const (
 	AttrHTTPStatus  = "http.response.status_code"
 )
 
-// Metric names (telemetry.md §10.4).
+// Metric names (telemetry.md §10.4). NewMetrics spells them as literals, so
+// the telemetry contract scanner (tests/contract/telemetry_inventory.py) finds
+// the producers; TestMetricsRegistered keeps these constants equal to them.
 const (
 	MetricLink        = "flagservice_flagsmith_link"
 	MetricPulls       = "flagservice_flagsmith_pulls_total"
@@ -109,38 +111,38 @@ func NewMetrics(meter metric.Meter, mode func() Mode, counts func() (pending, ou
 	}
 	m := &Metrics{}
 	var err error
-	if m.pulls, err = meter.Int64Counter(MetricPulls,
+	if m.pulls, err = meter.Int64Counter("flagservice_flagsmith_pulls_total",
 		metric.WithDescription("Flagsmith environment-document fetches by trigger and result")); err != nil {
 		return nil, err
 	}
-	if m.pushes, err = meter.Int64Counter(MetricPushes,
+	if m.pushes, err = meter.Int64Counter("flagservice_flagsmith_pushes_total",
 		metric.WithDescription("Flagsmith Admin API calls by op, result and reason")); err != nil {
 		return nil, err
 	}
-	if m.conflicts, err = meter.Int64Counter(MetricConflicts,
+	if m.conflicts, err = meter.Int64Counter("flagservice_flagsmith_conflicts_total",
 		metric.WithDescription("Conflicts between the stack and Flagsmith on reconnect, by resolution (FR-210)")); err != nil {
 		return nil, err
 	}
-	if m.healthPosts, err = meter.Int64Counter(MetricHealthPosts,
+	if m.healthPosts, err = meter.Int64Counter("flagservice_flagsmith_health_posts_total",
 		metric.WithDescription("Flagsmith feature-health webhook posts by status and result (FR-213)")); err != nil {
 		return nil, err
 	}
-	if m.changeDelay, err = meter.Float64Histogram(MetricChangeDelay,
+	if m.changeDelay, err = meter.Float64Histogram("flagservice_flagsmith_change_delay_seconds",
 		metric.WithDescription("Flagsmith change time to the write accepted (NFR-058)"),
 		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 10, 15, 20, 30, 45, 60, 120)); err != nil {
 		return nil, err
 	}
-	link, err := meter.Int64ObservableGauge(MetricLink,
+	link, err := meter.Int64ObservableGauge("flagservice_flagsmith_link",
 		metric.WithDescription("1 for the Flagsmith link's current state (off, starting, online, offline), 0 for the others"))
 	if err != nil {
 		return nil, err
 	}
-	pendingG, err := meter.Int64ObservableGauge(MetricPending,
+	pendingG, err := meter.Int64ObservableGauge("flagservice_flagsmith_pending",
 		metric.WithDescription("Local values waiting to be sent to Flagsmith"))
 	if err != nil {
 		return nil, err
 	}
-	outOfSyncG, err := meter.Int64ObservableGauge(MetricOutOfSync,
+	outOfSyncG, err := meter.Int64ObservableGauge("flagservice_flagsmith_out_of_sync",
 		metric.WithDescription("Flags and scopes whose value differs between the stack and Flagsmith"))
 	if err != nil {
 		return nil, err

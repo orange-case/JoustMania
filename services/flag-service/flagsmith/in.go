@@ -166,6 +166,16 @@ func (p *puller) Reconcile(ctx context.Context, trigger string) error {
 		attribute.Int(AttrPushed, rs.pushed),
 		attribute.Int(AttrConflicts, rs.conflicts),
 	)
+	// The restart rule the start sequence chose and what it clears
+	// (telemetry.md §10.4): on the start reconcile only.
+	if trigger == TriggerStart {
+		if rule, attribution, ok := p.l.RestartReport(); ok {
+			span.SetAttributes(
+				attribute.Int(AttrCleared, RestartCleared(attribution, p.isEvent)),
+				attribute.String(AttrRestartRule, rule),
+			)
+		}
+	}
 	if err != nil {
 		// The link goes offline: the health posts stop with it (the queue
 		// is kept for the next Reconcile or Poll).
@@ -544,6 +554,12 @@ func (p *puller) roundKeys(d map[Key]docEntry, local map[Key]localEntry) []Key {
 		return isKillKey(keys[i]) && !isKillKey(keys[j])
 	})
 	return keys
+}
+
+// isEvent reports whether k is an event flag's game override.
+func (p *puller) isEvent(k Key) bool {
+	pol := p.byName[k.Flag]
+	return pol != nil && isEventKey(pol.Kind, k)
 }
 
 func isKillKey(k Key) bool {

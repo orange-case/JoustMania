@@ -211,12 +211,27 @@ if isinstance(link, dict):
         if config_error:
             print(f"WARN  Flagsmith link off: FLAGSMITH_LINK=on but missing or invalid: {', '.join(config_error)} "
                   "(fix .env.local and restart the flag service)")
-    elif mode == "online" and rule == "degraded":
-        print("WARN  Flagsmith link online, restart rule degraded: the audit log does not say who made every "
-              "value, so values without an author were applied as a person's (a pushed overlay may be back; "
-              "reset: ./scripts/talk-stage.sh reset)")
     elif mode == "online":
-        print(f"PASS  Flagsmith link online (environment {link.get('environment', '?')}, restart rule {rule or 'pending'})")
+        def count(name):
+            try:
+                return int(link.get(name) or 0)
+            except (TypeError, ValueError):
+                return 0
+        refused, out_of_sync, pending = count("refused"), count("out_of_sync"), count("pending")
+        warned = False
+        if rule == "degraded":
+            print("WARN  Flagsmith link online, restart rule degraded: the audit log does not say who made every "
+                  "value, so values without an author were applied as a person's (a pushed overlay may be back; "
+                  "reset: ./scripts/talk-stage.sh reset)")
+            warned = True
+        # Stuck keys only (#2592): out_of_sync up to pending is pushes in flight.
+        if refused > 0 or out_of_sync > pending:
+            print(f"WARN  Flagsmith link online, out of sync: {refused} refused, {out_of_sync} out of sync, "
+                  f"{pending} pending: Flagsmith refused values the stack keeps (scripts/flags.sh state; Grafana "
+                  "Flags / OpenFeature, row Flagsmith link)")
+            warned = True
+        if not warned:
+            print(f"PASS  Flagsmith link online (environment {link.get('environment', '?')}, restart rule {rule or 'pending'})")
     elif mode == "starting":
         print("WARN  Flagsmith link starting: Flagsmith changes are not applied yet")
     else:
