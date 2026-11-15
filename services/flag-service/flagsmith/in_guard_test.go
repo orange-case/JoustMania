@@ -100,6 +100,45 @@ func TestGuardAfterDeferredApply(t *testing.T) {
 }
 
 // UC: UC-054 BR-005
+// A push confirmed after a deferred apply is also guarded against the remote
+// value known before that apply: a stale copy without an update time (no
+// body updated_at, no header) that still shows it is not applied.
+func TestGuardKeepsRemoteBeforeDeferredApply(t *testing.T) {
+	ow := &operatorWriter{}
+	ow.done.Store(true)
+	h := newHarness(t, harnessOpts{writer: func(a *api.API, st *state.State) flagsmith.LocalWriter {
+		ow.API, ow.st = a, st
+		return ow
+	}})
+	h.online()
+	setDoc := func(v int) {
+		d := document(h.clock.Now(), []map[string]any{fsState("experiment_max_games", true, v)})
+		delete(d, "updated_at")
+		h.fake.SetDocument(d, "")
+	}
+	setDoc(100)
+	h.round()
+	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "100" {
+		t.Fatalf("setup: local %+v, want 100", v)
+	}
+	ow.done.Store(false)
+	setDoc(50)
+	h.round()
+	if r, ok := h.link.Links().Remote(maxGamesKey); !ok || string(r.Value) != "100" {
+		t.Fatalf("setup: remote %+v %v after the deferred apply, want 100 restored", r, ok)
+	}
+	h.link.Links().ConfirmPushed(maxGamesKey, num("10"))
+	h.clock.Advance(time.Minute)
+	setDoc(100)
+	for range 2 {
+		h.round()
+	}
+	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
+		t.Fatalf("UC-054/BR-005 experiment_max_games = %+v: a stale copy (100) loosened the confirmed 10", v)
+	}
+}
+
+// UC: UC-054 BR-005
 // The same push confirmed while the round runs: the document value that round
 // read is guarded too.
 func TestGuardPushConfirmedDuringRound(t *testing.T) {
@@ -135,8 +174,16 @@ func TestOlderDocumentRefused(t *testing.T) {
 	h.round()
 	h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off")}), "")
 	h.round()
+	h.round() // unchanged: the next pull is conditional again
 	h.fake.SetDocument(document(old, []map[string]any{fsState("enabled", true, "on")}), "")
 	h.round()
+	lastIMS := func() string {
+		reqs := h.docRequests()
+		return reqs[len(reqs)-1].Header.Get("If-Modified-Since")
+	}
+	if lastIMS() == "" {
+		t.Fatal("setup: the pull of the older copy was unconditional, want a conditional pull")
+	}
 	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
 		t.Fatalf("UC-054/BR-005 agent/enabled = %+v: an older document copy loosened the kill switch", v)
 	}
@@ -144,7 +191,7 @@ func TestOlderDocumentRefused(t *testing.T) {
 	last := pulls[len(pulls)-1]
 	attrs := map[string]string{}
 	for _, a := range last.Attributes() {
-		attrs[string(a.Key)] = a.Value.Emit()
+		attrs[string(a.Key)] = a.Value.String()
 	}
 	if attrs[flagsmith.AttrResult] != flagsmith.ResultError || attrs[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
 		t.Fatalf("telemetry §10.4 pull span %v, want result error, reason stale_document", attrs)
@@ -153,8 +200,7 @@ func TestOlderDocumentRefused(t *testing.T) {
 		t.Fatalf("telemetry §10.4 %d pulls with result error, want 1", n)
 	}
 	h.round()
-	reqs := h.docRequests()
-	if ims := reqs[len(reqs)-1].Header.Get("If-Modified-Since"); ims != "" {
+	if ims := lastIMS(); ims != "" {
 		t.Fatalf("UC-054/2 the pull after a stale document sent If-Modified-Since %q, want a full pull", ims)
 	}
 }
