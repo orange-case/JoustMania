@@ -334,7 +334,8 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 		l.Links().ClearRefusal(k)
 	default:
 		// Refuse the value that was pushed: a newer one merged meanwhile
-		// stays pending.
+		// stays pending. The refused value is remembered, so no pull round
+		// re-sends it before a different local value (UC-055 A4).
 		l.Links().RefuseValue(k, v, SideRemote, oc.reason)
 	}
 	return true, nil

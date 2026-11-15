@@ -112,6 +112,12 @@ type harnessOpts struct {
 	doc    any
 	// docURL is FLAGSMITH_DOCUMENT_URL (nil: the fake's API base).
 	docURL func(*flagsmithtest.Fake) string
+	// realOut keeps the real out side (only the start sequence is a ping):
+	// local writes are pushed to the fake (inout_test.go).
+	realOut bool
+	// featureIDs are the Flagsmith feature ids the start sequence would
+	// resolve, by flag key (the out side needs them).
+	featureIDs map[string]int
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -187,7 +193,19 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	h.link = link
-	flagsmith.UseInSideOnly(link)
+	if o.realOut {
+		flagsmith.UsePingStart(link)
+	} else {
+		flagsmith.UseInSideOnly(link)
+	}
+	if len(o.featureIDs) > 0 {
+		ids := link.IDs()
+		ids.Lock()
+		for k, id := range o.featureIDs {
+			ids.FeatureID[k] = id
+		}
+		ids.Unlock()
+	}
 	st.SetObserver(link)
 	if o.before != nil {
 		o.before(h)
