@@ -44,7 +44,7 @@ def _megabytes(limit: str) -> float:
 @pytest.mark.uc("UC-035", flow="main", steps=[6])
 def test_grafana_memory_limit_covers_its_start_up_peak():
     limits = ic.compose_services()["grafana"]["deploy"]["resources"]["limits"]
-    # Grafana 13.3 peaks at about 295 MB right after start with this config (#2605).
+    # Grafana 13.3 uses about 245 MB of anonymous memory right after start (#2605).
     assert _megabytes(limits["memory"]) >= 512, (
         f"grafana memory limit {limits['memory']} is below its start-up peak (#2605)"
     )
