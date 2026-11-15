@@ -353,6 +353,7 @@ jobs:
               - 'images/**'
               - 'docker-compose.yml'
               - 'docker-compose.ci.yml'
+              - 'docker-compose.collector-prebuilt.yml'
 
       # #1422: `non_docs` is true when the PR changes ANY file outside the
       # docs-only set below. It gates Integration Tests, so a PR touching only
