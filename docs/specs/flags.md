@@ -755,7 +755,8 @@ value of a row whose scope allows it, and an `event` for a live game (one payloa
 `experiment+arm`, `real` and `fraction` values are shown in Flagsmith and refused when changed there
 (`422 flagsmith_scope_read_only`). A Flagsmith value of a `persist: yes` row is persisted like the menu admin's.
 
-**Kill switches and their order** (UC-054 BR-005, FR-210). On a conflict (both sides changed since the last sync)
+**Kill switches and their order** (UC-054 BR-005, FR-210). On a conflict (both sides changed since the last sync,
+or, without a last state seen from Flagsmith after a restart, any difference between the two values)
 these flags take the more restrictive value; every other flag takes the Flagsmith value.
 
 | Flag | More restrictive first |
@@ -765,7 +766,7 @@ these flags take the more restrictive value; every other flag takes the Flagsmit
 | `agent/code_improvement.mode` | `issue`, `pr`, `autonomous` |
 | `agent/code_improvement.target` | `local`, then `github` |
 | `agent/llm.max_requests_per_minute`, `agent/decision.claude.max_requests_per_minute`, `agent/decision.openai.max_requests_per_minute` | the lower number; `inherit` (-1) counts as the highest; any other negative value counts as 0, as in the agent |
-| `agent/experiment_proposer_enabled` | `off`, then `on` |
+| `agent/experiment_proposer_enabled`, `agent/interventions_enabled`, `agent/experiments_enabled`, `rollout/remediation_allowed` | `off`, then `on` |
 | `agent/experiment_max_games` | the lower number; `unlimited` (0) counts as the highest |
 | `agent/experiment_dynamic_max_concurrent` | the lower number; a value ≤ 0 resolves to the compiled default 3, as in the agent |
 | `agent/code_improvement.min_interval_seconds` | the higher number |
@@ -774,7 +775,7 @@ these flags take the more restrictive value; every other flag takes the Flagsmit
 so they are not runtime-mutable and not Flagsmith features; their rules keep the table complete for when they get one.
 
 The list is the kill switches of §13 (`registry.killSwitches`) plus the agent-limiting flags of FR-152; a test keeps
-it in sync with FR-152. A deliberate change in Flagsmith, with no local change since the last sync, is applied
+it in sync with FR-152. A deliberate change in Flagsmith, with a last sync and no local change since, is applied
 like any write, also when it loosens one; the env ceilings of C-034 still cap the agent-limiting flags.
 
 **Values in Flagsmith** (architecture note §2.1): a declared variant is its name (string); an integer range is an

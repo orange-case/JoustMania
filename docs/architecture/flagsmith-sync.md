@@ -1,6 +1,6 @@
 # Flagsmith link: hosted Flagsmith as a writer and audit view of the flag service
 
-> Architecture note. Status: **proposed** (no issue yet). Written 2026-11-15 against `main` and the Flagsmith API
+> Architecture note. Status: **proposed** (epic #2587, sub-issues #2588 to #2592). Written 2026-11-15 against `main` and the Flagsmith API
 > source at v2.269 (`Flagsmith/flagsmith`, `api/`). Spec rows: [UC-054](../use_cases/UC-054.md),
 > [UC-055](../use_cases/UC-055.md), FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037, the C-008 amendment
 > ([requirements](../requirements.md)); [services.md §7.3](../specs/services.md#73-flagsmith-link-planned-uc-054-uc-055),
@@ -145,7 +145,7 @@ entity.
 1. Every `FLAGSMITH_POLL_SECONDS` (default 30), and at once when the optional realtime stream announces a change,
    the link fetches `GET {FLAGSMITH_DOCUMENT_URL}environment-document/` (default
    `https://edge.api.flagsmith.com/api/v1/`; the Admin API stays on `FLAGSMITH_API_URL`) with the server-side key
-   (`X-Environment-Key: ser.…`) and `If-Modified-Since: <last_modified>`; a `304` ends the round. On the SaaS, edge
+   (`X-Environment-Key: ser.…`) and `If-Modified-Since: <last_modified>`; a `304` ends the round. The `304` is an optimisation only: Flagsmith may not move the environment `updated_at` for an edge identity override change, so while any game is live the pull is unconditional (no `If-Modified-Since`), and otherwise every 10th pull is unconditional. On the SaaS, edge
    identity overrides appear only in the edge document.
 2. The document holds the environment values of every feature and, **only when the environment has
    `use_identity_overrides_in_local_eval` on** (`api/util/mappers/sdk.py`), the identity overrides. The link
@@ -154,9 +154,9 @@ entity.
 3. For each synced `(set, key, scope)` the link computes the 3-way state of `remote`, the document value and the
    local value (§6) and turns each remote change into a write through the same in-process call the HTTP handler
    uses (writer `flagsmith`, `persist: true` when the registry row has `persist: yes`).
-4. A write refused by the registry, the game scope or the hold-key guard keeps the local value, records the
+4. A write refused by the registry or the game scope keeps the local value, records the
    reason and posts **unhealthy** to the feature-health webhook (§8). It is not retried until the document changes
-   again, except `409 real_game_live`, which is retried after the game ends.
+   again.
 5. A `503 no_sync_stream` leaves `remote` unchanged, so the next round tries again (A5 of UC-054).
 
 ### 4.3 Events from Flagsmith
@@ -215,6 +215,13 @@ Flagsmith's audit API shows `author` (a user, or null) but not **which** API key
 (`restart_rule_degraded`); `talk-preflight.sh` shows it. Risk: audit rows are written asynchronously, so a push
 seconds before a crash may be misread as a person's value (§10).
 
+**Kill switches never loosen at start.** At start the link has no last-seen Flagsmith state (`remote` is empty), so
+for every kill switch of flags.md §13.6 a Flagsmith value that differs from the local value (the baseline, or the
+value restored from the state file for a persisted kill switch) is a conflict (§6, row "remote absent"): the more
+restrictive value wins, and a local winner is pushed to Flagsmith and the feature is out of sync until then. This
+holds in degraded mode and in the async-audit window too, so a restart, a lost pending push or a misread audit row
+cannot loosen a kill switch; only a later deliberate change in Flagsmith, seen against a last state, does.
+
 ## 6. Conflicts (FR-210, UC-054 BR-005)
 
 | `remote` vs document | `remote` vs local | Result |
@@ -223,6 +230,7 @@ seconds before a crash may be misread as a person's value (§10).
 | equal | differs | local change not yet pushed: push it |
 | differs | equal | change made in Flagsmith: apply it |
 | differs | differs, document == local | both moved to the same value: `remote := document` |
+| absent (no last state: restart, first sighting) | differs | kill switch → **conflict** (the more restrictive value wins; a local winner is pushed and the feature is out of sync until then); other flags: apply the document value |
 | differs | differs | **conflict**: Flagsmith wins, except kill switches → the more restrictive (flags.md §13.6); the loser is recorded on the span and in `flagservice_flagsmith_conflicts_total{resolution}` |
 
 ## 7. Credentials and configuration
@@ -297,7 +305,9 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | Risk | Mitigation |
 |---|---|
 | Audit log or versioning author not available on the plan (or no audit row for a candidate): the restart rule cannot tell own pushes from a person's changes | degraded mode treats all as a person's (§5.1), warns at start and in the pre-flight; `talk-stage.sh reset` also clears the stage overlays in Flagsmith through the flag service |
-| Audit rows are written asynchronously: a push seconds before a crash may be misread as a person's value | accepted; the value is then applied as a change from Flagsmith at the next start |
+| Audit rows are written asynchronously: a push seconds before a crash may be misread as a person's value | accepted; the value is then applied as a change from Flagsmith at the next start, except a kill switch, which is a conflict and tightens (§5.1, §6) |
+| A conditional pull (`If-Modified-Since`) may miss an edge identity override change, because the environment `updated_at` may not move | while any game is live the pull is unconditional, otherwise every 10th pull is unconditional (§4.2); the fake-Flagsmith test changes an override without a newer `Last-Modified` and expects it to be applied |
+| A person changes a flag in Flagsmith between a pull and the push of a pending local change: the push overwrites it | accepted; last writer wins for non-kill-switch flags, the next pull shows the stack value, and the window is at most one push |
 | Terraform / MCP values set with an API key are cleared at restart (any API key counts as the link, F7) | decided by the maintainer 2026-11-15; a lasting value is set by a person in the Flagsmith UI, or is an admin setting |
 | Edge overrides in the document: the SaaS serves edge identity overrides only in the edge document | `FLAGSMITH_DOCUMENT_URL` defaults to the edge URL; to verify live against the SaaS |
 | `use_identity_overrides_in_local_eval` off: game and player values cannot be read back | the link stays offline with reason `identity_overrides_disabled`; documented in the setup |
