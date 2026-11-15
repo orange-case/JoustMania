@@ -596,3 +596,40 @@ validation harness (`curl http://localhost/flags/...`; `scripts/agent-group-ab.s
 
 **Traceability:** FR-130 to FR-139, NFR-050 to NFR-053, C-030 to C-033 / UC-053 / `services/flag-service/`
 / `services/flag-service/*/*_test.go`, `tests/service/test_flag_service_*.py`, `tests/service/test_tc019_flag_service_restart.py`, TC-018 to TC-020.
+
+### 7.3 Flagsmith link (planned, UC-054, UC-055)
+
+> Planned (status Open). Use cases [UC-054](../use_cases/UC-054.md), [UC-055](../use_cases/UC-055.md); requirements
+> FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037; design in
+> [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md).
+
+A component of the flag service (`services/flag-service/flagsmith/`, Go) that links one stack to one hosted
+Flagsmith environment. Off by default; nothing of §7.1 or §7.2 changes while it is off.
+
+| Item | Value |
+|---|---|
+| Direction | outbound HTTPS only (C-037): pull `GET {FLAGSMITH_DOCUMENT_URL}environment-document/` (server-side key, `If-Modified-Since`; unconditional on every pull while any game, real or shadow, is live, and otherwise on every 10th pull), optional realtime SSE, pushes through the Admin API, feature-health webhook posts. No port is opened, no webhook reaches the stack |
+| Config | `FLAGSMITH_LINK` (`off`/`on`, default `off` in every compose file; the stage stack opts in through `.env.local`), `FLAGSMITH_API_URL` (Admin API, default `https://api.flagsmith.com/api/v1/`), `FLAGSMITH_DOCUMENT_URL` (environment-document pull, default `https://edge.api.flagsmith.com/api/v1/`), `FLAGSMITH_SERVER_KEY` (secret, `ser.…`), `FLAGSMITH_ADMIN_API_KEY` (secret), `FLAGSMITH_ENVIRONMENT_KEY`, `FLAGSMITH_PROJECT_ID`, `FLAGSMITH_POLL_SECONDS` (30), `FLAGSMITH_REALTIME_URL` (empty = polling only), `FLAGSMITH_PUSH_RATE` (5 per second), `FLAGSMITH_HEALTH_WEBHOOK_URL` (secret, empty = no health events), `FLAGSMITH_TIMEOUT_SECONDS` (5). A missing key with `on` starts the service with the link `off` and an error log; the link never stops the service from starting |
+| State | in memory only (C-030, C-036): per `(set, key, scope)` the last state seen from Flagsmith, the pending local value, in-sync flag and last refusal; link state `off`, `starting`, `online`, `offline`. Lost on restart |
+| Writer label | pulled changes are writes with writer `flagsmith`; the label is reserved: an HTTP write that names it is `400 malformed` |
+| Write path | a pulled change goes through the same validation and apply code as `PUT` / `POST` / `DELETE /{flagSetId}/{flagName}` (in process, not over HTTP); refusals are the codes of §7.2. Experiment-arm, `real` and fraction scopes are refused as `422 flagsmith_scope_read_only` |
+| Start | serves baseline + admin settings at once (FR-130); then, in the background: resolve ids from `GET /api/v1/environments/{env_key}/` (the link stays offline when the environment's project differs from `FLAGSMITH_PROJECT_ID`, `project_mismatch`, or when `use_identity_overrides_in_local_eval` is off, `identity_overrides_disabled`), create missing features and tags (FR-214; names compared case-insensitively, existing features never re-tagged or re-described, never an `initial_value`; a name differing only in case or an archived feature is refused, `feature_name_case` / `feature_archived`; a create failing 3 times is refused, `feature_create_failed`; each created feature makes Flagsmith rebuild the document of every environment of the project), the restart rule by authorship (FR-215, architecture note §5.1: start never deletes identities, stale game identities go after the coordinator re-registered its games or 45 s, whichever is later), then poll. A project without edge identities keeps the link offline, `edge_required` |
+| Pull | rounds at least 1 s apart, at most 50 writes per round; every pulled write is conditional on the local slot (empty slots included); a key changed during the round is skipped, and so is a key whose document value still equals a value its confirmed push replaced (value guard, no clock comparison; ends when the document shows the pushed value or after max(10 min, 10 x poll interval)); `Last-Modified` advances only to the document body's update time; event appends are unconditional; repeated deferral backs off up to 60 s and marks the feature unhealthy after 5; segment or multivariate overrides are not applied (feature unhealthy once); health posts are asynchronous and per feature (architecture note §4.2, §8) |
+| Offline | timeouts and errors set the link `offline`; retries with backoff 1, 2, 4 … 60 s; local writes fill the pending set (latest per flag and scope); on reconnect: full pull, 3-way reconcile (FR-210), then pushes |
+
+`GET /state` gains a `flagsmith` object:
+
+```json
+"flagsmith": {"link": "online", "environment": "stage", "last_pull_at": "2026-11-15T18:02:11Z",
+              "pending": 0, "out_of_sync": 1, "refused": 1, "restart_rule": "audit_log"}
+```
+
+`link` is `off`, `starting`, `online` or `offline`; `restart_rule` is `audit_log`, `versioning` or `degraded`
+(architecture note §5.1); `offline_reason` is added while offline (`timeout`, `tls`, `unauthorized`,
+`project_mismatch`, `identity_overrides_disabled`, `edge_required`, `http_<code>`). `GET /healthz` does not depend on the link.
+
+**Consumers:** `scripts/talk-preflight.sh` WARNs while the link is `on` and not `online`, or `restart_rule` is
+`degraded`; `talk-stage.sh reset` needs no change (its deletes are pushed like any write).
+
+**Traceability:** FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037 / UC-054, UC-055 / planned
+`services/flag-service/flagsmith/`, planned `tests/service/test_flagsmith_link.py` with a fake Flagsmith.

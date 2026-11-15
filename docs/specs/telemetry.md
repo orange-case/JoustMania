@@ -513,3 +513,35 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 | Alerts | none: Prometheus alerting was removed (#1425, FR-083 Rejected); a disconnected flagd shows as `flagservice_sync_streams` = 0 on the dashboard and as 503 `no_sync_stream` to every writer |
 
 **Traceability:** FR-139, NFR-050 to NFR-053 / UC-053 / `services/flag-service/telemetry/` / `services/flag-service/api/api_test.go`, `tests/service/test_flag_propagation.py`, `tests/contract/test_telemetry_contract.py`.
+
+### 10.4 Flagsmith link (planned, UC-054, UC-055)
+
+> Planned (status Open), [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md). A pulled change is a
+> `flagservice.write` span (§10.1) with `flagservice.writer=flagsmith`, a child of the `flagservice.flagsmith.pull`
+> span that found it; it counts in `flagservice_writes_total` like every write.
+
+| Span | Kind | Attributes | When |
+|---|---|---|---|
+| `flagservice.flagsmith.pull` | client | `flagservice.flagsmith.trigger` (`poll`, `realtime`, `start`, `reconnect`), `http.response.status_code`, `flagservice.flagsmith.changes` (remote changes found), `flagservice.flagsmith.conflicts`, `flagservice.result` | each environment-document fetch |
+| `flagservice.flagsmith.push` | client, linked to the `flagservice.write` that queued it | `feature_flag.key`, `feature_flag.set.id`, `flagservice.scope`, `flagservice.flagsmith.op` (`value`, `override`, `delete_override`, `identity`, `delete_identity`, `feature`, `tag`; feature and tag creation at start are push spans and count in the push metric with these ops), `flagservice.writer`, `flagservice.flagsmith.merged` (local changes merged into this send), `http.response.status_code`, `flagservice.result`, `flagservice.reason` | each Admin API call |
+| `flagservice.flagsmith.reconcile` | internal | `flagservice.flagsmith.trigger` (`start`, `reconnect`), `flagservice.flagsmith.applied`, `flagservice.flagsmith.pushed`, `flagservice.flagsmith.cleared` (restart rule), `flagservice.flagsmith.conflicts`, `flagservice.flagsmith.restart_rule` | start and each reconnect |
+| `flagservice.flagsmith.conflict` | event on the pull or reconcile span | `feature_flag.key`, `flagservice.scope`, `flagservice.flagsmith.local_value`, `flagservice.flagsmith.remote_value`, `flagservice.flagsmith.resolution` (`flagsmith`, `tightened`, `local`) | each conflict (FR-210) |
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `flagservice_flagsmith_link` | gauge | `state` | 1 for the current link state (`off`, `starting`, `online`, `offline`), 0 for the others |
+| `flagservice_flagsmith_pulls_total` | counter | `trigger`, `result` | environment-document fetches; `result` = `changed`, `not_modified`, `error` |
+| `flagservice_flagsmith_pushes_total` | counter | `op`, `result`, `reason` | Admin API calls; `reason` on refusals (`change_request_required`, `not_found`, `unauthorized`, `rate_limited`, `timeout`) |
+| `flagservice_flagsmith_pending` | gauge | | local values waiting to be sent |
+| `flagservice_flagsmith_out_of_sync` | gauge | | flags and scopes whose value differs between the stack and Flagsmith |
+| `flagservice_flagsmith_conflicts_total` | counter | `resolution` | conflicts in any pull or reconcile round (FR-210) |
+| `flagservice_flagsmith_change_delay_seconds` | histogram | `trigger` | Flagsmith change time (the environment's `updated_at`) to the write accepted (NFR-058). The link's own pushes also move the environment's `updated_at`, so NFR-058 measured with this metric is a lower bound |
+| `flagservice_flagsmith_health_posts_total` | counter | `status`, `result` | feature-health webhook posts (FR-213) |
+
+Labels never carry a game id, a serial or the flag key of a scoped value (cardinality); those live on the spans.
+
+**Consumers:** Grafana **Flags / OpenFeature**, new row "Flagsmith link": link state, pending and out of sync,
+pushes and pulls by result, conflicts by resolution, change delay p95 (NFR-058).
+
+**Traceability:** FR-207 to FR-213, NFR-057, NFR-058 / UC-054, UC-055 / planned
+`services/flag-service/flagsmith/telemetry.go`, `tests/contract/test_telemetry_contract.py`.
