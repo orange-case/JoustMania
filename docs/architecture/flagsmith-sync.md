@@ -1,6 +1,6 @@
 # Flagsmith link: hosted Flagsmith as a writer and audit view of the flag service
 
-> Architecture note. Status: **proposed** (no issue yet). Written 2026-11-15 against `main` and the Flagsmith API
+> Architecture note. Status: **proposed** (epic #2587, sub-issues #2588 to #2592). Written 2026-11-15 against `main` and the Flagsmith API
 > source at v2.269 (`Flagsmith/flagsmith`, `api/`). Spec rows: [UC-054](../use_cases/UC-054.md),
 > [UC-055](../use_cases/UC-055.md), FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037, the C-008 amendment
 > ([requirements](../requirements.md)); [services.md §7.3](../specs/services.md#73-flagsmith-link-planned-uc-054-uc-055),
@@ -38,7 +38,7 @@ flowchart LR
         fs[flag service<br/>registry, overlays, game scopes] -->|flagd.sync.v1| flagd[(stock flagd)]
         fs --- link[Flagsmith link<br/>last-seen state, outbox,<br/>in memory only]
     end
-    link -->|"pull: environment document<br/>If-Modified-Since, every 30 s"| fsm[(hosted Flagsmith<br/>one environment per stack)]
+    link -->|"pull: environment document (FLAGSMITH_DOCUMENT_URL)<br/>If-Modified-Since, every 30 s"| fsm[(hosted Flagsmith<br/>one environment per stack)]
     link -->|"push: Admin API<br/>features, flag values, identity overrides"| fsm
     fsm -.->|"optional realtime SSE:<br/>'environment changed'"| link
     link -->|"feature health: unhealthy / healthy"| fsm
@@ -56,7 +56,7 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | F4 | **Flagsmith wins a conflict, kill switches tighten** (UC-054 BR-005, §6). | decided by the maintainer |
 | F5 | **No disk copy.** The last-seen state and the outbox are in memory only (C-030 unchanged). An offline restart runs baseline + admin settings. | decided by the maintainer ("Keep, no cache") |
 | F6 | **Agent limits under full Flagsmith control**, capped by the env ceilings of C-034; on a conflict they tighten (F4). | decided by the maintainer |
-| F7 | **Restart rule by authorship** (UC-054 BR-006): only values a person set in Flagsmith, and admin settings, come back; values the flag service pushed from in-memory writes are cleared in Flagsmith at start. | decided in the review of UC-054 |
+| F7 | **Restart rule by authorship** (UC-054 BR-006): only values a person (a Flagsmith user) set in Flagsmith, and admin settings, come back; every value made with an API key (the link's own, Terraform, the Flagsmith MCP server) is cleared in Flagsmith at start. Flagsmith's audit API shows the author but not which API key, so any API key counts as the link. | decided by the maintainer, 2026-11-15 |
 | F8 | **Pull, not webhooks.** Polling the environment document (conditional `GET`) is the baseline; realtime SSE only shortens the delay. Flagsmith webhooks are rejected (§9.1). | recommendation |
 | F9 | **Non-stack scopes are identities.** Game, player, experiment-arm, `real` and fraction values are identity overrides on identities named after the scope (§4.2). | recommendation |
 | F10 | **Off by default.** `FLAGSMITH_LINK=off` in every stack; CI and the dry-run stacks never call the SaaS; the stage stack opts in through `.env.local`. | recommendation |
@@ -69,8 +69,8 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | registry flag `<set>/<key>` | one **feature** named `<key>`, tagged `<set>`, description = registry `description` | keys are unique across sets (flag-service.md §5.2); one tag per flag set, created on demand |
 | stack overlay (in memory or persisted) | the feature's **environment value**: `enabled=true`, value = §4.1 | |
 | no stack overlay | `enabled=false`, value = the baseline default (shown for reference) | `enabled=false` never means "flag off"; it means "baseline applies" |
-| game value | override on identity `game:<gameId>` | identity traits `game_kind`, `coordinator_instance` |
-| player value in a game | override on identity `game:<gameId>:<serial>` | trait `game_id`, `serial` |
+| game value | override on identity `game:<gameId>` | identity traits `game_kind`, `coordinator_instance` (best effort) |
+| player value in a game | override on identity `game:<gameId>:<serial>` | no traits (the identifier names the game and serial) |
 | experiment-arm value | override on identity `experiment:<id>:<arm>` | shown only (F3) |
 | `real` overlay | override on identity `real` | shown only (F3) |
 | fraction overlay | override on identity `fraction`, value `{"variant":…, "fraction_percent":…}` | shown only (F3) |
@@ -122,20 +122,31 @@ entity.
    `(set, key, scope)` into `pending`, replacing an older pending entry (merge, BR-001 of UC-055).
 2. One sender goroutine drains `pending` in order of first change, at most `FLAGSMITH_PUSH_RATE` requests per
    second (default 5), and stops on `429` for the `Retry-After` the API answers.
-3. Stack value: `PATCH /api/__future__/environments/{env_key}/features/{feature_id}/` with `enabled` and
-   `value: {type, value}` (the experimental flag API, `api/features/future/views.py`; it refuses with an error when
-   the environment requires change requests: A4 of UC-055). Fallback for a Flagsmith without `__future__`:
-   `PUT /api/v1/environments/{env_key}/featurestates/{id}/`.
-4. Identity scopes: `POST /api/v1/environments/{env_key}/edge-identities/` (`identifier`, traits) once per
-   identity, then `POST`/`PUT /edge-identities/{uuid}/edge-featurestates/` per override; an ended value is a
-   `DELETE` of the override, a game end a `DELETE` of the game and player identities.
+3. Stack value: `PATCH /api/__future__/environments/{env_key}/features/{feature_id}/` with
+   `{"environment_default": {"enabled": …, "value": {"type": "string|integer|boolean", "value": "<text>"}}}` (the
+   experimental flag API, `api/features/future/serializers.py` `UpdateFlagSerializer`; the inner `value` is always
+   text). A cleared overlay sends `enabled: false` with the baseline default as the value. An environment that
+   requires change requests answers `409 change_requests_enabled` (A4 of UC-055). Fallback for a Flagsmith without
+   `__future__` (a 404 whose body is not JSON `{"detail": …}`, latched per process):
+   `GET /api/v1/environments/{env_key}/featurestates/?feature=<id>`, then `PUT …/featurestates/{id}/`.
+4. Identity scopes: values are upserted by identifier, without a uuid round trip:
+   `PUT /api/v1/environments/{env_key}/edge-identities-featurestates` (no trailing slash) with
+   `{"identifier", "feature", "enabled", "feature_state_value"}` (typed JSON value); it creates a missing identity.
+   An ended value is a `DELETE` on the same path with `{"identifier", "feature"}` (204, also when absent). A game
+   registration lists the game and its players with `POST /api/v1/environments/{env_key}/edge-identities/`
+   (`identifier`; 400 "already exists" counts as created); the game identity gets the traits `game_kind` and
+   `coordinator_instance` (best effort; skipped when the organisation does not persist traits). A game end deletes
+   the game and player identities (`DELETE …/edge-identities/{uuid}/`, the uuid found by the exact search
+   `?q="<identifier>"` when unknown). Edge identities need an edge-enabled project (the SaaS has it).
 5. On success `remote := pending`, `pending := none` (no echo, §4.4).
 
 ### 4.2 In (UC-054)
 
 1. Every `FLAGSMITH_POLL_SECONDS` (default 30), and at once when the optional realtime stream announces a change,
-   the link fetches `GET /api/v1/environment-document/` with the server-side key (`X-Environment-Key: ser.…`) and
-   `If-Modified-Since: <last_modified>`; a `304` ends the round.
+   the link fetches `GET {FLAGSMITH_DOCUMENT_URL}environment-document/` (default
+   `https://edge.api.flagsmith.com/api/v1/`; the Admin API stays on `FLAGSMITH_API_URL`) with the server-side key
+   (`X-Environment-Key: ser.…`) and `If-Modified-Since: <last_modified>`; a `304` ends the round. The `304` is an optimisation only: Flagsmith may not move the environment `updated_at` for an edge identity override change, so while any game (real or shadow) is live the pull is unconditional (no `If-Modified-Since`), and otherwise every 10th pull is unconditional. On the SaaS, edge
+   identity overrides appear only in the edge document.
 2. The document holds the environment values of every feature and, **only when the environment has
    `use_identity_overrides_in_local_eval` on** (`api/util/mappers/sdk.py`), the identity overrides. The link
    refuses to go online without it (`state=offline`, reason `identity_overrides_disabled`), because without it
@@ -143,10 +154,29 @@ entity.
 3. For each synced `(set, key, scope)` the link computes the 3-way state of `remote`, the document value and the
    local value (§6) and turns each remote change into a write through the same in-process call the HTTP handler
    uses (writer `flagsmith`, `persist: true` when the registry row has `persist: yes`).
-4. A write refused by the registry, the game scope or the hold-key guard keeps the local value, records the
+4. A write refused by the registry or the game scope keeps the local value, records the
    reason and posts **unhealthy** to the feature-health webhook (§8). It is not retried until the document changes
-   again, except `409 real_game_live`, which is retried after the game ends.
+   again.
 5. A `503 no_sync_stream` leaves `remote` unchanged, so the next round tries again (A5 of UC-054).
+6. **A stale document never reverts a confirmed push.** The link snapshots the last-seen generation of every key
+   before the fetch and skips, in this round, every key whose last-seen state changed during the round, and every key
+   whose own push was confirmed after the document's update time (the body `updated_at`, else the sub-second header
+   `X-Flagsmith-Document-Updated-At`); the next round looks at it again.
+7. **Every pulled write is conditional**: it carries the version of the local slot as read, empty slots included, so a
+   local write that lands between the read and the apply wins (the pulled write is refused as stale, and the next round
+   sees the conflict). Event appends (§4.3) are the one unconditional write.
+8. `last_modified` advances only to the document body's update time (or the sub-second header), never to the `Date`
+   of the response, and the next pull is unconditional while the body is older than the header or the second has not
+   passed. Pulls are at least 1 s apart (wake-ups are coalesced) and `429 Retry-After` on the document is honoured. A
+   round applies at most 50 writes; the rest follow in the next round, so a large change never delays a local write
+   (NFR-050). Health posts (§8) are asynchronous, never inline in the round.
+9. A key whose apply is deferred (flagd not connected, a stale slot) backs off 1, 2, 4 … 60 s; after 5 consecutive
+   deferrals the feature is marked unhealthy with that reason.
+10. A segment override or a multivariate option on a synced feature is not applied (JoustMania reads only the
+    environment value and the identity overrides); the feature is marked unhealthy once, "segment overrides are not
+    applied by JoustMania".
+11. The change-delay metric (telemetry.md §10.4) uses the environment's update time, which the link's own pushes also
+    move; NFR-058 measured this way is a lower bound.
 
 ### 4.3 Events from Flagsmith
 
@@ -154,7 +184,9 @@ A person may set an override on `game:<gameId>` for an event flag (`eliminate_pl
 object that is **one event payload** (`{"serial":"MOCK0003"}`). The link sends it as `POST /interventions/{flag}`
 (UC-053 A4) with `scope.game_id`; the flag service checks the payload exactly as for the agent (shape, serial of
 the game). The resulting event list is then pushed back (§4.1), and since `remote` is set to the pushed list, the
-payload is not appended twice.
+payload is not appended twice. The append is unconditional (the list is append-only), and a document list that is
+equal to, or a prefix of, the local list does nothing and is never a refusal (a stale document after the list was
+pushed appends nothing).
 
 ### 4.4 No echo
 
@@ -172,22 +204,75 @@ what was pushed, so its own change is never "new". Because variants are opaque a
 | Link drops while running | `state=offline`; writes keep working and fill `pending`; on reconnect: full pull, reconcile (§6), then drain `pending` |
 | Restart while offline | `pending` and Flagsmith-only values are gone until Flagsmith is reached (F5, UC-054 BR-007) |
 
+### 5.0 Start checks
+
+The ids are resolved from `GET /api/v1/environments/{env_key}/`. The link refuses to go online (`state=offline`)
+when the environment's project differs from `FLAGSMITH_PROJECT_ID` (`offline_reason` `project_mismatch`) or when
+`use_identity_overrides_in_local_eval` is off (`identity_overrides_disabled`). Feature creation compares names
+case-insensitively; an existing feature is never re-tagged or re-described. A project without edge identities
+(the edge identity endpoint answers `DynamoNotEnabled` or 400) is refused as well (`edge_required`): the link goes
+offline with that reason, because game and player overrides are edge identities and core identities are not
+supported.
+
+**Feature creation** never sends `initial_value` (the new feature gets Flagsmith's default and the registry value is
+pushed afterwards like any value), because an initial value would change what every other environment of the project
+serves. A feature whose name differs only in case from the registry key is refused (`feature_name_case`), an archived
+one too (`feature_archived`), both with a warning; the link never renames or unarchives a feature. A create that fails
+three times (5xx or timeout) is refused (`feature_create_failed`) and the start continues with the other features;
+only a `401` on resolving the ids or on the document takes the link down. Side effect: every created feature makes
+Flagsmith rebuild the environment document of every environment of the project, so features and tags are created once,
+at start.
+
 ### 5.1 Restart rule (F7)
 
 At start, `remote` is empty, so the link cannot tell its own pushes from a person's changes by comparison. It
-reads the **author** of the latest change of each enabled environment value and each override from the audit log
-(`GET /api/v1/audit/?environments=<id>`, `AuditLog.author` vs `AuditLog.master_api_key`), or from the feature
-version (`published_by` vs `published_by_api_key`) when the environment uses feature versioning:
+reads the **author** of the latest change of each enabled environment value and each override from the project
+audit log: `GET /api/v1/projects/{project_id}/audit/?environments=<env_id>`, newest first, paged. (The
+organisation-wide `/audit/` fails for API keys.) The link never sends `is_system_event` (Flagsmith parses it
+wrongly) and filters system events on the client. The feature or identity is read from the `log` text, pinned to
+the Flagsmith log constants, because `related_object_id` is not reliable. A candidate without an audit row (the page
+cap was hit, or the row is outside the visibility window) is searched once per feature (`search=<feature name>`)
+before it is given up. With feature versioning v2, the author is read from the "New version published" audit row
+(author set: a person; author null: an API key); a version without that row is unknown, never an API key.
 
-- changed by the link's own Admin API key → the value came from an in-memory write before the restart → cleared in
-  Flagsmith (`enabled=false`, override deleted), unless the registry row is `persist: yes`, whose value the state
-  file already restored;
-- changed by a person (or another API key: Terraform, the Flagsmith MCP server) → applied as a change from
-  Flagsmith;
-- identities of games that are not live → deleted.
+Flagsmith's audit API shows `author` (a user, or null) but not **which** API key. Maintainer decision 2026-11-15:
+**any API key counts as the link**.
 
-If the audit log is not available on the plan, the link treats every value as set by a person and logs a warning
-at start (`restart_rule_degraded`); `talk-preflight.sh` shows it. This is the main open risk (§10).
+- author null and not a system event (any API key: the link's own, Terraform, the Flagsmith MCP server) → cleared
+  in Flagsmith (`enabled=false`, override deleted);
+- an admin setting (`persist: yes`) with an API key as author → replaced by the state-file value (or the baseline),
+  and that value is sent to Flagsmith; with a person as author → applied and persisted;
+- author set (a Flagsmith user) or a system event → applied as a change from Flagsmith;
+- an override on a game that is not registered yet is neither applied nor refused: it applies once the game registers. Game and
+  player overrides are classified by the same author rule at start but applied only when the game registers: an override
+  made with an API key (the link's own) is removed once its game registers, a person's override is applied, and overrides
+  of games that never register are removed after the grace period (next bullet);
+- identities of games that are not live → deleted, but **start never deletes identities**: the cleanup runs once the
+  coordinator has re-registered its games, or 45 s after start, whichever is later, and keeps every identity that a
+  registered game matches (the whole identifier is compared with `game:<id>` and `game:<id>:<serial>`), so a game
+  that registers late keeps its overrides. The first pull round after start skips the keys the rule just cleared
+  (edge lag).
+
+All writes of the rule happen in its final step, after every other step succeeded, so a failed start leaves no
+half-seeded state and a re-run seeds once.
+
+**Degraded mode:** the audit call does not answer 200, or it returns no row for a candidate after the per-feature
+search (the free plan answers 200 with an empty list), or it fails after retries (timeout, 5xx, `429`). A candidate
+without a row is treated as a person's and the rule reports `degraded` (one warning at start,
+`restart_rule_degraded`); `talk-preflight.sh` shows it. An audit error never takes the link down. Risk: audit rows are
+written asynchronously, so a push seconds before a crash may be misread as a person's value (§10).
+
+**Kill switches win over the clear (safety over reset).** The more restrictive value wins even over the API-key clear
+and over the admin-setting replace above (`agent/interventions_allowed` is both persisted and a kill switch): a kill switch that an in-memory write tightened before the restart stays tightened after it and is reported as
+a conflict. A person-set looser value is not brought
+back for a kill switch (BR-005).
+
+**Kill switches never loosen at start.** At start the link has no last-seen Flagsmith state (`remote` is empty), so
+for every kill switch of flags.md §13.6 a Flagsmith value that differs from the local value (the baseline, or the
+value restored from the state file for a persisted kill switch) is a conflict (§6, row "remote absent"): the more
+restrictive value wins, and a local winner is pushed to Flagsmith and the feature is out of sync until then. This
+holds in degraded mode and in the async-audit window too, so a restart, a lost pending push or a misread audit row
+cannot loosen a kill switch; only a later deliberate change in Flagsmith, seen against a last state, does.
 
 ## 6. Conflicts (FR-210, UC-054 BR-005)
 
@@ -197,6 +282,7 @@ at start (`restart_rule_degraded`); `talk-preflight.sh` shows it. This is the ma
 | equal | differs | local change not yet pushed: push it |
 | differs | equal | change made in Flagsmith: apply it |
 | differs | differs, document == local | both moved to the same value: `remote := document` |
+| absent (no last state: restart, first sighting) | differs | kill switch → **conflict** (the more restrictive value wins; a local winner is pushed and the feature is out of sync until then); other flags: apply the document value |
 | differs | differs | **conflict**: Flagsmith wins, except kill switches → the more restrictive (flags.md §13.6); the loser is recorded on the span and in `flagservice_flagsmith_conflicts_total{resolution}` |
 
 ## 7. Credentials and configuration
@@ -206,7 +292,8 @@ The flag service's own configuration is environment (C-035); the keys are secret
 | Variable | Default | Meaning |
 |---|---|---|
 | `FLAGSMITH_LINK` | `off` | `off` or `on` (F10) |
-| `FLAGSMITH_API_URL` | `https://api.flagsmith.com/api/v1/` | Flagsmith API base (also a self-hosted Flagsmith) |
+| `FLAGSMITH_API_URL` | `https://api.flagsmith.com/api/v1/` | Flagsmith Admin API base (also a self-hosted Flagsmith) |
+| `FLAGSMITH_DOCUMENT_URL` | `https://edge.api.flagsmith.com/api/v1/` | base of the environment-document pull (§4.2); on the SaaS the edge document holds the edge identity overrides |
 | `FLAGSMITH_SERVER_KEY` | none (secret) | server-side environment key `ser.…` for the environment document |
 | `FLAGSMITH_ADMIN_API_KEY` | none (secret) | organisation Admin API key for pushes; with RBAC, give it a role limited to the project |
 | `FLAGSMITH_ENVIRONMENT_KEY` | none | the environment's client key, used in Admin API paths |
@@ -231,7 +318,9 @@ A refusal of a pulled change (UC-054 A4) posts to the feature-health webhook of 
             "url_blocks": []}}
 ```
 
-The next accepted change of that feature posts `"status": "healthy"`. Flagsmith then shows the refusal on the
+The health of a feature is per feature: it is unhealthy while any key of it is refused (several identities of one
+feature count together) and healthy again when the last refusal is gone (an accepted change, or the game or identity
+left). A post is made only when this changes, asynchronously and coalesced per feature. Flagsmith then shows the refusal on the
 feature itself, next to the value the operator just set. Grafana's own Flagsmith provider is not used: the stack
 has no Prometheus alerting (#1425).
 
@@ -241,7 +330,7 @@ has no Prometheus alerting (#1425).
 
 Environment webhooks (`FLAG_UPDATED`) need an inbound HTTPS endpoint on the stage device: a public port or a tunnel
 on a Pi behind a venue network or its own hotspot (UC-061, C-044). Rejected (C-037). The pull with
-`If-Modified-Since` costs one `304` per interval.
+`If-Modified-Since` costs one `304` per interval when no game is live; while any game (real or shadow) is live, and on every 10th pull otherwise, the pull is unconditional (§4.2).
 
 ### 9.2 Segments for game scope
 
@@ -269,10 +358,16 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 
 | Risk | Mitigation |
 |---|---|
-| Audit log or versioning author not available on the plan: the restart rule cannot tell own pushes from a person's changes | degraded mode treats all as a person's (§5.1), warns at start and in the pre-flight; `talk-stage.sh reset` also clears the stage overlays in Flagsmith through the flag service |
+| Audit log or versioning author not available on the plan (or no audit row for a candidate): the restart rule cannot tell own pushes from a person's changes | degraded mode treats all as a person's (§5.1), warns at start and in the pre-flight; `talk-stage.sh reset` also clears the stage overlays in Flagsmith through the flag service |
+| Audit rows are written asynchronously: a push seconds before a crash may be misread as a person's value | accepted; the value is then applied as a change from Flagsmith at the next start, except a kill switch, which is a conflict and tightens (§5.1, §6) |
+| A conditional pull (`If-Modified-Since`) may miss an edge identity override change, because the environment `updated_at` may not move | while any game is live the pull is unconditional, otherwise every 10th pull is unconditional (§4.2); the fake-Flagsmith test changes an override without a newer `Last-Modified` and expects it to be applied |
+| A person changes a flag in Flagsmith between a pull and the push of a pending local change: the push overwrites it | accepted; last writer wins for every flag, kill switches included: a person's change between the last pull and the push is overwritten (the window lasts from the last pull to the push); for a kill switch the next pull re-applies a tighter Flagsmith value only as a deliberate change |
+| Terraform / MCP values set with an API key are cleared at restart (any API key counts as the link, F7) | decided by the maintainer 2026-11-15; a lasting value is set by a person in the Flagsmith UI, or is an admin setting |
+| Edge overrides in the document: the SaaS serves edge identity overrides only in the edge document | `FLAGSMITH_DOCUMENT_URL` defaults to the edge URL; to verify live against the SaaS |
 | `use_identity_overrides_in_local_eval` off: game and player values cannot be read back | the link stays offline with reason `identity_overrides_disabled`; documented in the setup |
 | SaaS request limits (`MASTER_API_KEY_THROTTLE_RATE` is a per-deployment setting; the SaaS value is not published) under many games and events | merge per flag and scope, `FLAGSMITH_PUSH_RATE`, honour `429 Retry-After`; to measure with 8 live games (NFR-057) |
-| Edge identity count grows with games on the plan's identity quota | identities deleted at game end and at start; to verify against the plan |
+| Edge identity count grows with games on the plan's identity quota | identities deleted at game end and, for games that are not live, after start (§5.1); to verify against the plan |
+| A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round, or whose push was confirmed after the document's update time, are skipped; pulled writes are conditional on the local slot (§4.2) |
 | `__future__` flag API is experimental and may change | fallback to the stable `featurestates` endpoints (§4.1 step 3); a contract test against the pinned Flagsmith version |
 | Change requests on the environment make every push fail | A4 of UC-055, reported as out of sync; the stage environment runs without change requests |
 | A person in Flagsmith loosens an agent limit (F6) | env ceilings of C-034 still cap; kill switches tighten on conflict; the change is a `flagservice.write` span with writer `flagsmith` |
