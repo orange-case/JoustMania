@@ -44,7 +44,7 @@
 # start script never loads it (scripts/setup/joustmania-start.sh, #1319).
 #
 # Notes:
-# - All images default to ghcr.io/watchmejoustmyflags/joustmania registry;
+# - All images default to ghcr.io/orange-case/joustmania registry;
 #   IMAGE_PREFIX overrides the registry prefix (CI exports
 #   ghcr.io/<owner>/joustmania, the repository that publishes, #2599)
 # - Use IMAGE_TAG to specify version (e.g., IMAGE_TAG=main docker compose up)
@@ -69,7 +69,7 @@ services:
   # at start and never writes them (C-030, C-033); flagd has no other source.
   # Writers: HTTP/JSON on 8070 (envoy /flags/ from the host, C-015). flagd: 50064.
   flag-service:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/flag-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/flag-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/flag-service/Dockerfile
@@ -224,7 +224,7 @@ services:
 
   # OpenTelemetry Collector (custom build: contrib components)
   otel-collector:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/otel-collector:${OTEL_COLLECTOR_TAG:-${IMAGE_TAG:-latest}}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/otel-collector:${OTEL_COLLECTOR_TAG:-${IMAGE_TAG:-latest}}
     build:
       context: images/otel-collector
       dockerfile: Dockerfile
@@ -276,7 +276,7 @@ services:
 
   # Controller Manager Service
   controller-manager:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/controller-manager-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/controller-manager-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/controller_manager/Dockerfile
@@ -332,7 +332,7 @@ services:
 
   # Pairing Daemon - USB controller pairing and Bluetooth monitoring
   pairing-daemon:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/pairing-daemon-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/pairing-daemon-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/pairing_daemon/Dockerfile
@@ -384,7 +384,7 @@ services:
   # backend (#1371): the controller manager reads real controllers through it and
   # the pairing daemon pairs through its PairingService.
   rust-hid:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/rust-hid:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/rust-hid:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/rust-hid/Dockerfile
@@ -425,7 +425,7 @@ services:
   python-hid:
     profiles:
       - python-hid
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/python-hid:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/python-hid:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/python_hid/Dockerfile
@@ -455,7 +455,7 @@ services:
 
   # Game Coordinator Service
   game-coordinator:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/game-coordinator-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/game-coordinator-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/game_coordinator/Dockerfile
@@ -489,7 +489,7 @@ services:
 
   # Menu Service
   menu:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/menu-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/menu-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/menu/Dockerfile
@@ -527,7 +527,7 @@ services:
 
   # Audio Service
   audio:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/audio-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/audio-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/audio/Dockerfile
@@ -581,7 +581,7 @@ services:
   operator-pad:
     profiles:
       - operator-pad
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/operator-pad:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/operator-pad:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/operator_pad/Dockerfile
@@ -697,7 +697,7 @@ services:
   # Connect-Web Proxy (gRPC to Connect protocol translation)
   # No dependencies - proxy handles connection failures gracefully
   connect-proxy:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/connect-proxy:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/connect-proxy:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/connect-proxy/Dockerfile
@@ -750,7 +750,7 @@ services:
   # No dependencies and no depends_on FROM the collector: the collector must run
   # standalone even when the agent is down (best-effort delivery).
   agent:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/agent:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/agent:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/agent/Dockerfile
@@ -861,7 +861,7 @@ services:
 
   # Dashboard (Real-time controller visualization SPA)
   dashboard:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/dashboard:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/dashboard:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/dashboard/Dockerfile

@@ -120,7 +120,7 @@ loudly with a one-line diagnosis on mismatch (the stale-image cascade), instead
 of silently mounting incompatible source.
 
 ```bash
-IMAGE_PREFIX=ghcr.io/watchmejoustmyflags/joustmania IMAGE_TAG=latest \
+IMAGE_PREFIX=ghcr.io/orange-case/joustmania IMAGE_TAG=latest \
   bash scripts/ci/check-image-freshness.sh
 ```
 
