@@ -97,7 +97,7 @@ def test_shared_fake_implements_the_intervention_target():
 # --------------------------------------------------------------------------- #
 # The handler modules stay on the Protocol (#2361 PR 2)
 # --------------------------------------------------------------------------- #
-HANDLER_MODULES = ("interventions.py", "lifecycle_handlers.py", "difficulty_handlers.py")
+HANDLER_MODULES = ("interventions.py", "intervention_effects.py", "lifecycle_handlers.py", "difficulty_handlers.py")
 PLAYER_NAMES = frozenset({"player", "p"})  # the loop names the handlers use for a game's players
 
 
