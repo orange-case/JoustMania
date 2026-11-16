@@ -213,8 +213,9 @@ apart by `otel_scope_name`: `github.com/joustmania/agent/inference` for the offl
 `gen_ai_client_operation_duration_seconds_{bucket,sum,count}` and `gen_ai_client_token_usage_{bucket,sum,count}`
 (prometheus_remote_write adds `_seconds` for the unit `s`, nothing for `{token}`), with labels
 `gen_ai_operation_name`, `gen_ai_provider_name`, `gen_ai_request_model`, `gen_ai_response_model`,
-`server_address`, `server_port`, `gen_ai_token_type` (token usage) and `error_type` (failed calls only). The Agent
-Decisions & Interventions dashboard shows latency, calls and tokens by `gen_ai_request_model` (§6.1).
+`server_address`, `server_port`, `gen_ai_token_type` (token usage), `error_type` (failed calls only) and the
+pipeline's `otel_scope_name`. The Agent Decisions & Interventions dashboard shows latency, calls and tokens by
+`caller` (the last segment of `otel_scope_name`) and `gen_ai_request_model` (§6.1).
 
 ### 4.3 Decision attributes
 

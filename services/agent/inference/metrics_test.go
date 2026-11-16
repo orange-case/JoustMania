@@ -3,6 +3,7 @@ package inference
 import (
 	"context"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
+	"github.com/joustmania/agent/internal/genaimetrics"
 	"github.com/joustmania/agent/llm"
 )
 
@@ -32,9 +34,10 @@ func withMetricReader(t *testing.T) *sdkmetric.ManualReader {
 }
 
 type tokenPoint struct {
-	sum   int64
-	count uint64
-	attrs attribute.Set
+	sum    int64
+	count  uint64
+	bounds []float64
+	attrs  attribute.Set
 }
 
 func collect(t *testing.T, reader *sdkmetric.ManualReader) (tokens map[string]tokenPoint, durations []metricdata.HistogramDataPoint[float64]) {
@@ -53,7 +56,7 @@ func collect(t *testing.T, reader *sdkmetric.ManualReader) (tokens map[string]to
 			case "gen_ai.client.token.usage":
 				for _, dp := range md.Data.(metricdata.Histogram[int64]).DataPoints {
 					typ, _ := dp.Attributes.Value("gen_ai.token.type")
-					tokens[typ.AsString()] = tokenPoint{sum: dp.Sum, count: dp.Count, attrs: dp.Attributes}
+					tokens[typ.AsString()] = tokenPoint{sum: dp.Sum, count: dp.Count, bounds: dp.Bounds, attrs: dp.Attributes}
 				}
 			case "gen_ai.client.operation.duration":
 				durations = md.Data.(metricdata.Histogram[float64]).DataPoints
@@ -97,6 +100,13 @@ func TestClaude_RecordsGenAIClientMetrics(t *testing.T) {
 		if _, ok := durations[0].Attributes.Value("error.type"); ok {
 			t.Error("error.type set on a successful call")
 		}
+		// BR-004: the semconv advisory buckets, not the SDK defaults (#1434).
+		if !slices.Equal(durations[0].Bounds, genaimetrics.OperationDurationBuckets) {
+			t.Errorf("duration bounds = %v, want %v", durations[0].Bounds, genaimetrics.OperationDurationBuckets)
+		}
+		if !slices.Equal(input.bounds, genaimetrics.TokenUsageBuckets) {
+			t.Errorf("token bounds = %v, want %v", input.bounds, genaimetrics.TokenUsageBuckets)
+		}
 	})
 
 	t.Run("UC-035/BR-004 refusal still records tokens, duration carries error.type", func(t *testing.T) {
@@ -115,6 +125,9 @@ func TestClaude_RecordsGenAIClientMetrics(t *testing.T) {
 		}
 		if v, _ := durations[0].Attributes.Value("error.type"); v.AsString() != "refusal" {
 			t.Errorf("error.type = %q, want refusal", v.AsString())
+		}
+		if v, _ := durations[0].Attributes.Value("gen_ai.response.model"); v.AsString() != "claude-opus-5-5" {
+			t.Errorf("duration gen_ai.response.model = %q, want claude-opus-5-5 (the answered call's model)", v.AsString())
 		}
 	})
 
