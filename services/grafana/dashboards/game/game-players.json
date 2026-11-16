@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Live games, their settings and thresholds, games started and completed by outcome, deaths, game-loop health, movement intensity and, as the last (repeated) row, a per-player drill-down: 100 Hz acceleration against the warning and death lines. Replaces Game Quality, Game Analytics and Player Insights (#1427).",
+  "description": "Live games, their settings and thresholds, games started and completed by outcome, deaths, game-loop health, movement intensity and, as the last (repeated) row, a per-player drill-down for every connected controller: acceleration (about 10 Hz) against the warning and death lines. Replaces Game Quality, Game Analytics and Player Insights (#1427).",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -2991,8 +2991,8 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "description": "The list is empty between games and shows only players alive in the running primary game.",
-        "definition": "query_result(controller_info * on(serial) group_left() max by (serial) ((game_player_alive == 1) and on(game_id) (max by (game_id) (game_active{game_kind=\"primary\"}) == 1)))",
+        "description": "Every connected controller by name (controller_info), whether or not a game is running; the controller manager removes a controller's series when it disconnects.",
+        "definition": "query_result(controller_info == 1)",
         "hide": 0,
         "includeAll": true,
         "label": "Player",
@@ -3000,7 +3000,7 @@
         "name": "player",
         "options": [],
         "query": {
-          "query": "query_result(controller_info * on(serial) group_left() max by (serial) ((game_player_alive == 1) and on(game_id) (max by (game_id) (game_active{game_kind=\"primary\"}) == 1)))",
+          "query": "query_result(controller_info == 1)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,

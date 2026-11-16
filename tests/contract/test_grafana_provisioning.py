@@ -138,24 +138,22 @@ def _game_players() -> dict:
 
 
 @pytest.mark.uc("UC-035", flow="main", steps=[6])
-def test_player_variable_dedupes_serials_alive_in_two_games():
-    """#1471 item 2: a serial alive in two games must not duplicate the join's right-hand side.
+def test_player_variable_lists_every_connected_controller():
+    """The player list is every connected controller, so a player can be picked between games.
 
-    game_player_alive carries (serial, game_id) only, so the query keeps primary games through
-    game_active and collapses the result to one series per serial before joining controller_info.
+    controller_info{serial,name} exists while the controller manager tracks a controller and is
+    removed on untrack, so it alone is the connected roster: no game_active / game_player_alive
+    join (#1471's live-game filter left the list empty between games).
     """
     variable = next(
         v for v in _game_players()["templating"]["list"] if v["name"] == "player"
     )
     query = re.sub(r"\s+", "", variable["query"]["query"])
     assert variable["definition"] == variable["query"]["query"]
-    assert "group_left()maxby(serial)(" in query, query
-    liveness = 'and on(game_id)(max by(game_id)(game_active{game_kind="primary"})==1)'
-    assert re.sub(r"\s+", "", liveness) in query, query
-    assert "empty between games" in variable["description"], variable
-    assert "game_player_alive{" not in query, (
-        "game_player_alive has no game_kind label; filter through game_active"
-    )
+    assert query == "query_result(controller_info==1)", query
+    assert variable["regex"] == '/name="([^"]+)"/', variable["regex"]
+    assert variable["includeAll"] and variable["multi"], variable
+    assert "game_active" not in query and "game_player_alive" not in query, query
 
 
 def _histogram_buckets(metric: str) -> set[float]:
