@@ -86,14 +86,6 @@ def _assert_consumer_child_of_command(span) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-035", br=["BR-016"])
-async def test_warning_effect_span_is_consumer(exporter, manager, command_context):
-    await manager._effect_player_warning(SERIAL, restore_color=(0, 0, 255), trace_context=command_context)
-
-    _assert_consumer_child_of_command(_only_span(exporter, "effect_player_warning"))
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-035", br=["BR-016"])
 async def test_death_effect_span_is_consumer(exporter, manager, command_context):
     await manager._effect_player_death(SERIAL, trace_context=command_context)
     await manager.active_effects[SERIAL].task

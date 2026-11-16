@@ -129,6 +129,11 @@ type Status struct {
 	Refused       int        `json:"refused"`
 	OfflineReason string     `json:"offline_reason,omitempty"`
 	ConfigError   []string   `json:"config_error,omitempty"`
+	// Keys names the keys out of sync or refused (flag set, flag, scope,
+	// reason, since; never a value), refused first, at most MaxStateKeys;
+	// KeysOmitted counts the ones cut off (#2639).
+	Keys        []KeyState `json:"keys,omitempty"`
+	KeysOmitted int        `json:"keys_omitted,omitempty"`
 }
 
 // Link is the Flagsmith link of one stack.
@@ -358,6 +363,9 @@ func (l *Link) Status() Status {
 	st.Environment = l.ids.EnvironmentName
 	l.ids.Unlock()
 	st.Pending, st.OutOfSync, st.Refused = l.links.Counts()
+	var total int
+	st.Keys, total = l.links.Unsynced(MaxStateKeys)
+	st.KeysOmitted = total - len(st.Keys)
 	return st
 }
 

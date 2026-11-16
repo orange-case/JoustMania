@@ -14,6 +14,7 @@ import (
 // capped so the experiment proposer's prompt stays bounded (#2345).
 //
 // UC: UC-042 BR-008
+// UC: UC-043 BR-008
 func TestParseDescription(t *testing.T) {
 	b, err := baseline.Load(filepath.Join(root(t), "..", "flagd", "ci"), baseline.DefaultFiles)
 	if err != nil {
@@ -111,6 +112,7 @@ func parseDescriptionsMD(t *testing.T) map[string]string {
 // another set (agent/decision.prompt_profile, #2530) is quoted in flags.md §13.2.
 //
 // UC: UC-042 BR-008
+// UC: UC-043 BR-008
 func TestDescriptionsMatchFlagsMD(t *testing.T) {
 	t.Run("UC-042/BR-008 registry descriptions equal the flags.md §13.3 description table", func(t *testing.T) {
 		md := parseDescriptionsMD(t)

@@ -460,7 +460,7 @@ Outcomes are recorded **only as span attributes** (the dashboard Agent tab reads
 a `decide.discarded_reason` is counted in `agent_decide_discarded_total{reason}`
 (`services/agent/decision/metrics.go:newDecideDiscardedCounter`), so dropped answers show without Jaeger.
 
-### 6.1 Prediction registration (planned, #2479)
+### 6.1 Prediction registration (#2479)
 
 A decision record that is not a `noop` and carries a prediction registers it with the agent's prediction book: every rules
 record, the rules fallback record (outcome `fallback`), and every remote record whose outcome is `act` (including a decision blocked by the permission chain, A10, or dropped by the actuation gate, A11) or `held` (A5, which ends at step 9) after `mapAnswers`, or `discarded` only for `target_gone`, `target_stale` and `state_too_old` (A7, step 10; a `stale_context`, `game_ended`, `backend_changed`, `kill_switch` or `shutdown` discard registers nothing, and neither does a game that ended or a stale context). Noops carry no prediction in
@@ -814,7 +814,7 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   (`services/agent/decision/decide_hook.go:emitDecideSpan`, `setDecideAttributes`).
 - **`decide.prompt_profile`** (#2467 PR 5): on a remote-path `agent.decide` span, the normalized profile the request was
   rendered with (`v1` or `neutral`, §3); absent on the rules path.
-- **Prediction attributes (planned, #2479).** On `agent.decide`, when the record carries a prediction:
+- **Prediction attributes (#2479).** On `agent.decide`, when the record carries a prediction:
   `decide.prediction.id` (uuid), `decide.prediction.template`, `decide.prediction.characteristic`,
   `decide.prediction.scope`, `decide.prediction.horizon_s`, `decide.prediction.p`, `decide.prediction.source`
   (`rules`, `lever_default`, `model`) and `decide.prediction.rule` (rules `R1`..`R9`, `R4d`, or the lever name);
@@ -859,15 +859,15 @@ The contract tests live in `decide/*_test.go`, the backend tests `decide/backend
 `contract_test.go`; jev also has `stages_test.go` and `wire_test.go`), and `decision/decide_hook_test.go`
 (per-backend threshold: `decision/decide_hook_threshold_test.go`; empty allow-list: `decision/decide_no_allowed_test.go`).
 
-**Traceability:** FR-044, FR-045, FR-046, FR-047, FR-048, FR-049, FR-050, FR-051, FR-052, FR-053, FR-054, FR-200, FR-201 (in progress, #2479) / UC-040, UC-044, UC-045 /
+**Traceability:** FR-044, FR-045, FR-046, FR-047, FR-048, FR-049, FR-050, FR-051, FR-052, FR-053, FR-054, FR-200, FR-201 (#2479) / UC-040, UC-044, UC-045 /
 `services/agent/decide/` (`state.go`, `danger.go`, `hold.go`, `backends/jev/criteria.go`, `llmio/llmio.go`), `services/agent/decision/decide_hook.go`, `chargeledger.go`, `rules.go`, `decide_registry.go`, `decide_rules.go`, `decision.go`, `services/agent/decide_backends.go`, `services/agent/actions/`, `services/game_coordinator/interventions.py` /
 `services/agent/decide/*_test.go`, `services/agent/decision/decide_hook_test.go`, `tests/service/test_tc008_remote_backend_routing.py`, `tests/service/test_tc009_kill_switch.py`, `tests/service/test_tc006_agent_blocked_by_host.py`, `tests/integration/test_tc013_shadow_alongside_real.py`.
 
-## 14. Characteristics, predictions, goals (planned, #2479)
+## 14. Characteristics, predictions, goals (#2479)
 
-> Status `Open`. Delivered in slices (characteristics and rules predictions and the Book, #2485; the game summary, the
+> Status `Implemented` (FR-200, FR-201; not yet Verified, see the **Planned** line of UC-040). Delivered in slices, all on `main` (characteristics and rules predictions and the Book, #2485; the game summary, the
 > retro block and the dashboard Agent tab, #2479 PR C; model ask; goal profiles, #2479 PR E; jev's goal criterion and the
-> report-only arm calibration, #2498: §14.4 is implemented except the dashboard goal strip, #2499). The maintainer decisions of 2026-10-31: `activity` is the movement intensity relative to the
+> report-only arm calibration, #2498; the dashboard goal strip, PR #2499). The maintainer decisions of 2026-10-31: `activity` is the movement intensity relative to the
 > death threshold (always present, not the optional variance); noop predictions are not scored in v1; arm calibration is
 > report-only. Requirements: FR-200, FR-201. Rules: UC-040 A44, A45, BR-034.
 

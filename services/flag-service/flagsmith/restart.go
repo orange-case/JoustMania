@@ -223,6 +223,14 @@ func (s *startup) deleteIdentity(ctx context.Context, id edgeIdentity) deleteOut
 		return deleteDone
 	case err == nil || httpStatus(err) == http.StatusNotFound:
 		s.endPush(sctx, span, OpDeleteIdentity, ResultOK, "")
+		if s.gameIdentityLive(id.Identifier) {
+			// The game registered while the delete was on the wire (#2639):
+			// its identity is gone, but its keys, pending values included,
+			// stay. The out side re-lists it and re-sends its confirmed
+			// values on its own goroutine, after any push in flight.
+			s.l.identityGone(id.Identifier, id.IdentityUUID)
+			return deleteDone
+		}
 	case ctx.Err() != nil:
 		s.endPush(sctx, span, OpDeleteIdentity, ResultError, Reason(err))
 		return deleteCancelled
