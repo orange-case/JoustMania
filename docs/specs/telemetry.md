@@ -123,6 +123,17 @@ Mode-specific span events on the player (`player_lifecycle` / `player: {name}`) 
 | FightClub | `round_lost` (`accel_magnitude`, `round`, `winner`), `game_ended` (`winner`, `score`, `final_rank`; `winner` false for everyone after a force-end, or a stream end before the game decided, UC-025 BR-003) | `games/fight_club.py` |
 | Tournament | `match_death` (`match_id`, `accel_magnitude`, `sensitivity`), `eliminated` (`match_id`, `round`, `eliminated_by`) and `match_complete` (`winner`, `loser`) on the match span, `tournament_ended` (`is_champion`, `wins`, `final_round`; `is_champion` is true only for the latched champion, false for everyone after a force-end or a stream end before the final was decided, UC-025 BR-003, BR-005; `final_round` is the round the player reached, and an out player carried forward by a match with no winner keeps its round) | `services/game_coordinator/games/tournament.py:_kill_player_impl`, `_finalize_match`, `_end_game_impl` |
 
+**Moment shapes (planned, #2658, UC-036, FR-216, FR-217, NFR-060; status Open).** The warning (`death_warning`) and the death (`player_death`) are *moments*: each has one identity and can be sent in one of four shapes, chosen per match by the flag `telemetry.moment_shape` ([flags.md §10](flags.md#10-observability)), read once when the game root span starts and held for the match (UC-036 BR-002). The shape in effect is recorded on the game root span as `telemetry.moment_shape`. Default, and fallback for an absent, unknown or unreadable flag: `span_event`, today's shape, emitted exactly as now (NFR-060). Until the agent reads every shape (FR-218), the death always stays `span_event` (UC-036 BR-007).
+
+| Shape | What is sent | Parent / correlation | Exported |
+|---|---|---|---|
+| `span_event` (default) | span event `death_warning` / `player_death` on the player span, as now | the player span | with the player span, at game end |
+| `span` | span `game.death_warning` (start at the warning, end when the warning window `WARNING_DURATION` ends) / `game.player_death` (start and end at the death) | child of the player span | when the span ends |
+| `log_event` | OTLP log record with `event_name` `death_warning` / `player_death`, severity INFO, the moment's attributes as log attributes | trace and span id of the player span | with the log batch, within about a second |
+| `both` | `span_event` and `log_event`, one `moment.id` | as the two shapes | as the two shapes |
+
+Every shape carries the same attributes: today's attributes of the event, plus `player.serial`, `player.name` (once known), `game.id`, `game.kind` and **`moment.id`**, one value per moment, equal in every copy (game id, player serial and a per-player sequence number of that moment; format fixed with the implementation). Readers that count moments count one per `moment.id` (UC-036 BR-005).
+
 Game events of §5 are additionally recorded as span events on whatever span is current when they are
 published (`services/game_coordinator/event_bus.py:publish`).
 
