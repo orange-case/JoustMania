@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.16.0...joustmania-v0.17.0) (2026-11-16)
+
+
+### Features
+
+* **flag-service:** Flagsmith is the source of truth once online ([#2621](https://github.com/orange-case/JoustMania/issues/2621)) ([#2627](https://github.com/orange-case/JoustMania/issues/2627)) ([291c13b](https://github.com/orange-case/JoustMania/commit/291c13bd3d41e949435c55cd366efc268a776b93))
+* **flag-service:** one Flagsmith identity per controller ([#2624](https://github.com/orange-case/JoustMania/issues/2624)) ([#2628](https://github.com/orange-case/JoustMania/issues/2628)) ([4558360](https://github.com/orange-case/JoustMania/commit/455836095d160e6525f618a4e8c1eeb39a931455))
+* **setup:** the Pi loads the gateway overlay when host and token are set ([#2625](https://github.com/orange-case/JoustMania/issues/2625)) ([5cbf069](https://github.com/orange-case/JoustMania/commit/5cbf0698fe7797414a99fbc59a8f1a325b17f2d9))
+
+
+### Bug Fixes
+
+* **grafana:** acceleration graphs and player list for all controllers ([#2626](https://github.com/orange-case/JoustMania/issues/2626)) ([be52772](https://github.com/orange-case/JoustMania/commit/be527725c8f8501e6aa08d21b014b2b3831190df))
+
 ## [0.16.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.15.0...joustmania-v0.16.0) (2026-11-16)
 
 
