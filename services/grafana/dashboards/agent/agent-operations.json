@@ -766,7 +766,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "p95 of gen_ai.client.operation.duration (OTel GenAI semantic conventions; Prometheus name gen_ai_client_operation_duration_seconds) per requested model, recorded by the claude, openai and jev backends for every chat call, failed calls included. Buckets: the semconv advisory boundaries (10 ms to 82 s).",
+      "description": "p95 of gen_ai.client.operation.duration (OTel GenAI semantic conventions; Prometheus name gen_ai_client_operation_duration_seconds) per caller and requested model, failed calls included. Caller = the last segment of otel_scope_name: claude, openai, jev (in-game decide backends) or inference (the offline proposer / retro calls). Buckets: the semconv advisory boundaries (10 ms to 82 s).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -839,12 +839,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (gen_ai_request_model, le) (rate(gen_ai_client_operation_duration_seconds_bucket[5m])))",
-          "legendFormat": "{{gen_ai_request_model}}",
+          "expr": "histogram_quantile(0.95, sum by (caller, gen_ai_request_model, le) (label_replace(rate(gen_ai_client_operation_duration_seconds_bucket[5m]), \"caller\", \"$1\", \"otel_scope_name\", \".*/([^/]+)\")))",
+          "legendFormat": "{{caller}} {{gen_ai_request_model}}",
           "refId": "A"
         }
       ],
-      "title": "Model Call Latency p95 (by model)",
+      "title": "Model Call Latency p95 (by caller, model)",
       "type": "timeseries"
     },
     {
@@ -852,7 +852,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Chat calls per minute per requested model and provider; error_type is set only on failed calls (timeout, HTTP status class, ...). Source: gen_ai_client_operation_duration_seconds_count.",
+      "description": "Chat calls per minute per caller (last segment of otel_scope_name: claude, openai, jev = in-game decide; inference = offline proposer / retro), requested model and provider; error_type is set only on failed calls (timeout, HTTP status class, ...). Source: gen_ai_client_operation_duration_seconds_count.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -925,12 +925,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (gen_ai_provider_name, gen_ai_request_model, error_type) (rate(gen_ai_client_operation_duration_seconds_count[5m])) * 60",
-          "legendFormat": "{{gen_ai_provider_name}} {{gen_ai_request_model}} {{error_type}}",
+          "expr": "sum by (caller, gen_ai_provider_name, gen_ai_request_model, error_type) (label_replace(rate(gen_ai_client_operation_duration_seconds_count[5m]), \"caller\", \"$1\", \"otel_scope_name\", \".*/([^/]+)\")) * 60",
+          "legendFormat": "{{caller}} {{gen_ai_provider_name}} {{gen_ai_request_model}} {{error_type}}",
           "refId": "A"
         }
       ],
-      "title": "Model Calls / min (by model, error type)",
+      "title": "Model Calls / min (by caller, model, error type)",
       "type": "timeseries"
     },
     {
@@ -938,7 +938,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Input and output tokens per minute per requested model, from gen_ai.client.token.usage (Prometheus name gen_ai_client_token_usage, a histogram; the _sum is the token count).",
+      "description": "Input and output tokens per minute per caller (last segment of otel_scope_name: claude, openai, jev = in-game decide; inference = offline proposer / retro) and requested model, from gen_ai.client.token.usage (Prometheus name gen_ai_client_token_usage, a histogram; the _sum is the token count).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1011,12 +1011,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (gen_ai_request_model, gen_ai_token_type) (rate(gen_ai_client_token_usage_sum[5m])) * 60",
-          "legendFormat": "{{gen_ai_request_model}} {{gen_ai_token_type}}",
+          "expr": "sum by (caller, gen_ai_request_model, gen_ai_token_type) (label_replace(rate(gen_ai_client_token_usage_sum[5m]), \"caller\", \"$1\", \"otel_scope_name\", \".*/([^/]+)\")) * 60",
+          "legendFormat": "{{caller}} {{gen_ai_request_model}} {{gen_ai_token_type}}",
           "refId": "A"
         }
       ],
-      "title": "Tokens / min (by model, token type)",
+      "title": "Tokens / min (by caller, model, token type)",
       "type": "timeseries"
     },
     {
