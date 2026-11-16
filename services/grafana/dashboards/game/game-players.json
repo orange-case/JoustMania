@@ -1564,6 +1564,199 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "Acceleration magnitude of every connected controller, one line per controller name, whether or not a game is running; dashed lines = warning and death thresholds of the live primary game. ~10 Hz (OTLP export every 100 ms).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMin": 0.8,
+            "axisSoftMax": 3.5,
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "area"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "rgba(50, 172, 45, 0.15)",
+                "value": null
+              },
+              {
+                "color": "rgba(237, 129, 40, 0.15)",
+                "value": 1.6
+              },
+              {
+                "color": "rgba(245, 54, 54, 0.2)",
+                "value": 2.5
+              }
+            ]
+          },
+          "unit": "g"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Warning"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Death"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 37,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "xAxis": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "controller_accel_magnitude * on(serial) group_left(name) controller_info",
+          "legendFormat": "{{name}}",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(game_effective_warning_threshold{game_kind=\"primary\"})",
+          "legendFormat": "Warning",
+          "refId": "B",
+          "instant": false,
+          "interval": "1s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(game_effective_death_threshold{game_kind=\"primary\"})",
+          "legendFormat": "Death",
+          "refId": "C",
+          "instant": false,
+          "interval": "1s"
+        }
+      ],
+      "title": "Acceleration (all controllers)",
+      "type": "timeseries",
+      "maxDataPoints": 10000
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "description": "Average current acceleration magnitude over all players in live games (g).",
       "fieldConfig": {
         "defaults": {
@@ -1598,7 +1791,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 31
+        "y": 40
       },
       "id": 23,
       "options": {
@@ -1688,7 +1881,7 @@
         "h": 8,
         "w": 9,
         "x": 6,
-        "y": 31
+        "y": 40
       },
       "id": 24,
       "options": {
@@ -1777,7 +1970,7 @@
         "h": 8,
         "w": 9,
         "x": 15,
-        "y": 31
+        "y": 40
       },
       "id": 25,
       "options": {
@@ -1866,7 +2059,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 48
       },
       "id": 26,
       "options": {
@@ -1923,7 +2116,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 48
       },
       "id": 27,
       "options": {
@@ -2018,7 +2211,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 46
+        "y": 55
       },
       "id": 28,
       "options": {
@@ -2085,7 +2278,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 46
+        "y": 55
       },
       "id": 29,
       "options": {
@@ -2144,7 +2337,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 46
+        "y": 55
       },
       "id": 30,
       "options": {
@@ -2182,7 +2375,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 59
       },
       "id": 31,
       "panels": [],
@@ -2237,7 +2430,7 @@
         "h": 6,
         "w": 4,
         "x": 0,
-        "y": 51
+        "y": 60
       },
       "id": 32,
       "options": {
@@ -2264,8 +2457,7 @@
           "expr": "controller_accel_magnitude and on(serial) controller_info{name=~\"$player\"}",
           "legendFormat": "Accel",
           "refId": "A",
-          "instant": false,
-          "interval": "10ms"
+          "instant": false
         }
       ],
       "title": "Acceleration",
@@ -2276,7 +2468,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Real-time acceleration with warning (yellow) and death (red) threshold lines",
+      "description": "Acceleration magnitude with warning (yellow) and death (red) threshold lines. The controller manager polls at 100 Hz, but OTLP exports the gauge every 100 ms, so VictoriaMetrics stores about 10 samples per second; maxDataPoints 10000 keeps every stored sample up to ~16 min and stays under VictoriaMetrics' 30000-point limit on longer ranges (a fixed 10ms step failed with 422 beyond 5 min).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2427,7 +2619,7 @@
         "h": 5,
         "w": 14,
         "x": 4,
-        "y": 51
+        "y": 60
       },
       "id": 33,
       "options": {
@@ -2454,8 +2646,7 @@
           "expr": "controller_accel_magnitude and on(serial) controller_info{name=~\"$player\"}",
           "legendFormat": "Acceleration",
           "refId": "A",
-          "instant": false,
-          "interval": "10ms"
+          "instant": false
         },
         {
           "datasource": {
@@ -2480,8 +2671,9 @@
           "interval": "1s"
         }
       ],
-      "title": "High-Res Acceleration (100Hz)",
-      "type": "timeseries"
+      "title": "Acceleration (10 Hz)",
+      "type": "timeseries",
+      "maxDataPoints": 10000
     },
     {
       "datasource": {
@@ -2520,7 +2712,7 @@
         "h": 6,
         "w": 3,
         "x": 18,
-        "y": 51
+        "y": 60
       },
       "id": 34,
       "options": {
@@ -2617,7 +2809,7 @@
         "h": 6,
         "w": 3,
         "x": 21,
-        "y": 51
+        "y": 60
       },
       "id": 35,
       "options": {
@@ -2719,7 +2911,7 @@
         "h": 1,
         "w": 14,
         "x": 4,
-        "y": 56
+        "y": 65
       },
       "id": 36,
       "options": {
