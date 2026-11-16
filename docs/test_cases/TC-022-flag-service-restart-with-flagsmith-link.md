@@ -51,6 +51,5 @@
 
 - `tests/service/test_flagsmith_link.py`: step 1 `test_start_creates_missing_features`, step 2 `test_offline_start_serves_baseline`, step 4 `test_degraded_rule_in_state`, step 5 `test_restart_clears_own_overlay`, step 6 `test_restart_keeps_persons_value`, step 7 `test_restart_never_loosens_kill_switch`, step 8 `test_restart_game_overrides_wait_for_registration`, step 9 `test_restart_removes_stale_identities_after_grace`, step 10 `test_restart_loses_unsent_changes`, step 11 `test_identity_overrides_disabled_keeps_link_offline`.
 - Step 3 is `tests/service/test_flagsmith_sync.py::test_person_admin_setting_persisted_and_survives_offline_restart`.
-- Step 8 nudges the sender with an unrelated local write while it waits for the removal: a pull round that queues a push does not wake the sender yet (#2608); drop the nudge when #2608 lands.
 - Unit detail: `services/flag-service/flagsmith/start_test.go` (ping first, audit parsing, pacing), `in_rounds_test.go` (the start round's edge-lag skip).
 - Not covered here: the live hosted Flagsmith's audit authorship timing (a Known gap, maintainer decision D1, #2592).

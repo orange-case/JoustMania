@@ -125,11 +125,8 @@ def test_restart_clears_own_overlay(stack, flag_service, settled_link):
     # Step 2: the flag service restarts.
     restarted = _restart(stack, flag_service, link="online", restart_rule="audit_log")
     # Step 3: the link's own value is cleared in Flagsmith (enabled false), not applied locally.
-    # The clear is queued by a pull round after the start round: nudge the sender (#2608).
-    fl.wait_push(
-        fake, CAPTURE[1], lambda r: not fl.patch_value(r)[0], after=restarted, timeout=RESTART_SECONDS,
-        flag_service=flag_service,
-    )  # fmt: skip
+    # The clear is queued by the first pull round after the start round (#2610 wakes the sender).
+    fl.wait_push(fake, CAPTURE[1], lambda r: not fl.patch_value(r)[0], after=restarted, timeout=RESTART_SECONDS)
     assert fake.env_value(CAPTURE[1])[0] is False
     fl.wait_pulls(flag_service, 2)
     assert fl.overlay(flag_service, *CAPTURE) == {}, "the link's own value came back after a restart"
@@ -157,11 +154,7 @@ def test_restart_never_loosens_kill_switch(stack, flag_service, settled_link):
     fl.wait_overlay(flag_service, *MAX_GAMES, value=baseline + 30, writer="flagsmith")
     # Step 2: restart: with no last state the tighter local baseline stays and is pushed.
     restarted = _restart(stack, flag_service, link="online")
-    # Queued by the start reconcile, or by a pull round if flagd was not synced yet (#2608: nudge).
-    fl.wait_push(
-        fake, MAX_GAMES[1], lambda r: not fl.patch_value(r)[0], after=restarted, timeout=RESTART_SECONDS,
-        flag_service=flag_service,
-    )  # fmt: skip
+    fl.wait_push(fake, MAX_GAMES[1], lambda r: not fl.patch_value(r)[0], after=restarted, timeout=RESTART_SECONDS)
     fl.wait_pulls(flag_service, 2)
     assert fl.overlay(flag_service, *MAX_GAMES) == {}, "a restart loosened a kill switch"
     # (b) Step 3: an API key tightened it; the restart clear does not undo the tightening.
@@ -194,12 +187,8 @@ def test_restart_game_overrides_wait_for_registration(stack, flag_service, settl
             lambda: (flag_service.get(*PACING).get("games") or {}).get(person_game), fl.PULL_TIMEOUT, "person's value"
         )
         assert got["value"] == "calm" and got["writer"] == "flagsmith", got
-        # The restart rule queues the removal in a pull round; nudge the sender (#2608).
         fl.wait_for(
-            lambda: (fl.nudge(flag_service), fake.override(f"game:{own_game}", PACING[1]) is None)[1],
-            fl.PULL_TIMEOUT,
-            "own override removed",
-            interval=2.0,
+            lambda: fake.override(f"game:{own_game}", PACING[1]) is None, fl.PULL_TIMEOUT, "own override removed"
         )
         assert own_game not in (flag_service.get(*PACING).get("games") or {})
     finally:

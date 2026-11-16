@@ -110,25 +110,13 @@ def ok_pushes(fake, feature: str) -> list[dict]:
     return [r for r in fake.pushes(feature) if r["status"] // 100 == 2]
 
 
-def wait_push(
-    fake,
-    feature: str,
-    check: Callable[[dict], bool],
-    after: float = 0.0,
-    timeout: float = PULL_TIMEOUT,
-    flag_service: FlagService | None = None,
-):
-    """The first accepted push of ``feature`` at or after monotonic ``after`` matching ``check``.
-
-    With ``flag_service``, nudge the sender while waiting: the push is queued by a pull round (#2608)."""
-
-    def found():
-        hit = next((r for r in ok_pushes(fake, feature) if r["t"] >= after and check(r)), None)
-        if hit is None and flag_service is not None:
-            nudge(flag_service)
-        return hit
-
-    return wait_for(found, timeout, f"a push of {feature}", interval=2.0 if flag_service else 0.25)
+def wait_push(fake, feature: str, check: Callable[[dict], bool], after: float = 0.0, timeout: float = PULL_TIMEOUT):
+    """The first accepted push of ``feature`` at or after monotonic ``after`` matching ``check``."""
+    return wait_for(
+        lambda: next((r for r in ok_pushes(fake, feature) if r["t"] >= after and check(r)), None),
+        timeout,
+        f"a push of {feature}",
+    )
 
 
 def patch_value(req: dict) -> tuple[bool, str]:
@@ -161,29 +149,8 @@ def settle(flag_service: FlagService, fake) -> None:
     fake.delay = 0.0
     fake.clear_refusals()
     wait_link(flag_service, RESTART_SECONDS + 60, link="online")
-    # A push a pull round queued waits for the next local change (#2608): nudge until none is pending.
-    wait_for(
-        lambda: link(flag_service).get("pending") == 0 or nudge(flag_service),
-        PULL_TIMEOUT * 2,
-        "pending 0",
-        interval=2.0,
-    )
+    wait_for(lambda: link(flag_service).get("pending") == 0, PULL_TIMEOUT * 2, "pending 0")
     wait_pulls(flag_service, 1)
     fake.reset_values()
     wait_pulls(flag_service, 1)
-    wait_for(
-        lambda: link(flag_service).get("pending") == 0 or nudge(flag_service),
-        PULL_TIMEOUT,
-        "pending 0 after the reset",
-        interval=2.0,
-    )
-
-
-def nudge(flag_service: FlagService) -> None:
-    """An unrelated local write that wakes the link's sender.
-
-    #2608: a pull round that queues a push (actKeepLocal: a kill switch kept local, or the
-    restart rule removing the link's own game value) does not wake the sender; the push goes
-    out with the next local change. Journeys that wait for such a push nudge with this write
-    until #2608 lands (then drop the nudge and tighten the wait)."""
-    flag_service.put("observability", "flagservice.propagation_probe", value=uuid.uuid4().hex)
+    wait_for(lambda: link(flag_service).get("pending") == 0, PULL_TIMEOUT, "pending 0 after the reset")
