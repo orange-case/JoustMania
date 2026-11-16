@@ -3,6 +3,7 @@
  *
  * Real-time controller visualization and game controls using Connect-Web.
  */
+import { initTheme } from "./theme.js";
 import { html, setHtml } from "./html.js";
 import { keepGameEventStreamOpen } from "./stream.js";
 import { keepControllerStreamOpen } from "./controllerStream.js";
@@ -142,6 +143,10 @@ let agentView: AgentView;
 // Initialize the dashboard
 async function init() {
   console.log("JoustMania Dashboard initializing...");
+
+  // Light / dark theme matching the Orange Case website; first, so the
+  // Grafana embed URL is themed before the embed gate loads it.
+  initTheme();
 
   // Initialize components
   controllerGrid = new ControllerGrid("controller-grid", "adapter-counts");
