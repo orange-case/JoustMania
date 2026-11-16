@@ -287,6 +287,11 @@ func TestStaleDeleteRacingRegistration(t *testing.T) {
 		t.Fatal("UC-055/A1 the live game's key was forgotten with the deleted identity")
 	}
 	o := e.l.out.(*out)
+	// The sender had listed game:dead already (POST "already exists", before
+	// the delete landed): its identity work is done.
+	o.ids.mu.Lock()
+	o.ids.removeLocked("game:dead")
+	o.ids.mu.Unlock()
 	o.relistGone() // what Run does first in every step
 	ids := e.l.IDs()
 	ids.Lock()
