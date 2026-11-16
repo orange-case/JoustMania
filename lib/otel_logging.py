@@ -29,6 +29,10 @@ from lib.otel_resource import get_otel_resource
 _initialized = False
 _init_lock = threading.Lock()
 _test_mode = False
+# The LoggerProvider init_logging built, for SDK log events that must not go through
+# Python logging (lib/moments.py, #2658): None until init_logging ran, and in tests.
+# Not registered globally, so ordinary logs keep flowing only through the handler.
+_logger_provider: LoggerProvider | None = None
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +59,16 @@ def is_test_mode() -> bool:
     return _test_mode
 
 
+def get_logger_provider() -> LoggerProvider | None:
+    """The process's OTLP ``LoggerProvider``, or ``None`` when OTLP logging is not initialised.
+
+    For SDK log events emitted on a ``Logger`` directly (UC-100 moments, #2658), which
+    the ``observability/log_level`` flag never filters. ``None`` in tests and in a
+    process that never called ``init_logging``.
+    """
+    return _logger_provider
+
+
 def init_logging() -> None:
     """
     Initialize OTLP log export with trace correlation.
@@ -74,7 +88,7 @@ def init_logging() -> None:
         LOG_LEVEL: bootstrap-only (the startup level until the flag resolves; default: INFO); the
             ``observability/log_level`` flag wins and is followed at runtime (lib/log_level.py)
     """
-    global _initialized
+    global _initialized, _logger_provider
 
     with _init_lock:
         if _initialized:
@@ -99,6 +113,7 @@ def init_logging() -> None:
         logging.getLogger().addHandler(handler)
         register_handler(handler)
 
+        _logger_provider = provider
         _initialized = True
         start_runtime_log_level()
 

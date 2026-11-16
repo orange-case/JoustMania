@@ -36,6 +36,7 @@ from opentelemetry.context import Context
 
 from lib.feature_flags import eval_game_kind, read_string_flag, set_game_session_kind_context
 from lib.otel_metrics import get_export_interval_ms
+from lib.moments import MOMENT_SHAPE_ATTR, read_moment_shape
 from lib.telemetry import get_tracer
 from lib.types import get_game_display_name
 from proto import game_coordinator_pb2
@@ -627,6 +628,10 @@ class GameSession:
             game_span.set_attribute("experiment.id", self.experiment_id)
             game_span.set_attribute("experiment.arm", self.arm)
             game_span.set_attribute("player.count", len(self.players))
+            # UC-100 BR-002: the warning's moment shape, read once here and held for
+            # the game (not waited on: a not-READY provider gives span_event, A1).
+            moment_shape = read_moment_shape()
+            game_span.set_attribute(MOMENT_SHAPE_ATTR, moment_shape)
 
             # Trace-correlation signal: capture THIS game span's trace_id and
             # publish it as the game_trace_correlation gauge so the agent can read it
@@ -707,6 +712,7 @@ class GameSession:
                 # analytics cleanup and game-state gauges are per-session (#775,
                 # FR-041).
                 game.game_kind = self.game_kind
+                game.moment_shape = moment_shape
                 # Thread experiment attribution onto the game so its in-loop
                 # set_game_transaction_context carries it for flag evaluation.
                 game.experiment_id = self.experiment_id

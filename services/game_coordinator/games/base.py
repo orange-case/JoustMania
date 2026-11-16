@@ -43,6 +43,7 @@ from lib.feature_flags import (
     read_string_flag,  # noqa: F401  games/shields.py reads it as base.read_string_flag (tests patch it here)
     set_game_transaction_context,
 )
+from lib.moments import MOMENT_ID_ATTR, MOMENT_SHAPE_SPAN_EVENT, moment_id, record_moment
 from lib.telemetry import inject_trace_context
 from lib.types import GameEvent, Sensitivity, Sound
 from services.game_coordinator import game_clock, metrics
@@ -708,6 +709,11 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # empty for a non-experiment game. The servicer overrides
         #     these from the owning GameSession (set by #976's spawn binding).
         self.game_kind = "real"
+        # UC-100 BR-002: the warning's moment shape, read once per game by the session
+        # (telemetry.moment_shape) and held for the game; and the per-serial moment
+        # sequence behind moment.id, kept by the game, not the Player (BR-003).
+        self.moment_shape = MOMENT_SHAPE_SPAN_EVENT
+        self._moment_sequence: dict[str, int] = {}
         self.experiment_id = ""
         self.arm = ""
         # UC-046 BR-018 / UC-040 BR-019: set by the session for a shadow game
@@ -2537,17 +2543,23 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             player.analytics.record_warning()
             metrics.player_warnings_total.labels(serial=serial, game_mode=self.get_game_name()).inc()
 
-        # Add warning event to player's lifecycle span
+        # The warning moment on the player's lifecycle span, in the game's moment shape
+        # (UC-100 BR-001; span event by default, BR-004).
         if player.span:
-            player.span.add_event(
+            record_moment(
                 "death_warning",
+                shape=self.moment_shape,
+                parent_span=player.span,
                 attributes={
                     "accel_magnitude": accel_mag,
                     "threshold": threshold,
                     "sensitivity": self.sensitivity.name,
                     "sensitivity_factor": player.sensitivity_factor,
                     "music_speed": self.music_speed,
+                    **self._moment_identity(player, serial),
                 },
+                duration_s=WARNING_DURATION,
+                tracer=tracer,
             )
         logger.info(f"Player {serial} triggered warning (accel: {accel_mag:.2f}, threshold: {threshold:.2f})")
 
@@ -2564,6 +2576,20 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 )
             )
             await serialized_write(self.gameplay_stream, effect_cmd)
+
+    def _moment_identity(self, player: "Player", serial: str) -> dict[str, str]:
+        """Identity attributes of a new moment of ``serial`` (UC-100 BR-003, telemetry.md §3.2)."""
+        sequence = self._moment_sequence.get(serial, 0) + 1
+        self._moment_sequence[serial] = sequence
+        identity = {
+            MOMENT_ID_ATTR: moment_id(self.game_id, serial, sequence),
+            "player.serial": serial,
+            "game.id": self.game_id,
+            "game.kind": self.game_kind,
+        }
+        if player.name:
+            identity["player.name"] = player.name
+        return identity
 
     @staticmethod
     def effective_grace_until(player: "Player") -> float:

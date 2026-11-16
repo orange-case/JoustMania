@@ -152,7 +152,18 @@ class TestUC030DeathDetection:
         assert game.gameplay_stream.effects(controller_manager_pb2.GAME_EFFECT_PLAYER_WARNING) == ["p0"]
         warnings = _span_events(span, "death_warning")
         assert len(warnings) == 1
-        assert set(warnings[0]) == {"accel_magnitude", "threshold", "sensitivity", "sensitivity_factor", "music_speed"}
+        # Today's attributes plus the moment identity keys (UC-100 BR-004, NFR-060); no name yet.
+        assert set(warnings[0]) == {
+            "accel_magnitude",
+            "threshold",
+            "sensitivity",
+            "sensitivity_factor",
+            "music_speed",
+            "moment.id",
+            "player.serial",
+            "game.id",
+            "game.kind",
+        }
         assert warnings[0]["threshold"] == pytest.approx(warn)
         assert warn < warnings[0]["accel_magnitude"] < death
         assert player.warning_until >= before + WARNING_DURATION
