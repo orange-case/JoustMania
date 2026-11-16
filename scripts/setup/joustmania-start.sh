@@ -49,7 +49,8 @@ on_exit() {
 trap on_exit EXIT
 
 # Every compose call goes through joustmania-compose.sh: docker-compose.yml
-# only, never the dev override that publishes the mock control and gRPC ports
+# (plus the gateway overlay when it is configured, UC-035 BR-015), never the
+# dev override that publishes the mock control and gRPC ports
 # to the venue network (#1319), with .env and, when present, the git-ignored
 # .env.local (stage IMAGE_TAG and decision-backend API keys, #1488).
 COMPOSE_WRAPPER="$SCRIPT_DIR/joustmania-compose.sh"

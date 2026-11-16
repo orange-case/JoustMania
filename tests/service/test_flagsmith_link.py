@@ -13,8 +13,9 @@ author) and a person's changes as a user's; since #2621 a restart reads no autho
 - restart, Flagsmith wins (BR-006, FR-215): every value Flagsmith holds comes back,
   whoever wrote it: the link's own push, a person's value, an admin setting an API key set
   (persisted), a kill switch a person loosened (no restart tightening, BR-005); game values
-  wait for their game's registration; stale game identities go after the grace (FR-211);
-  unsent local changes are lost (FR-212);
+  wait for their game's registration; stale game identities go after the grace (FR-211); a
+  controller of a live game keeps its overrides and a controller without one is released (its
+  identity kept, #2624); unsent local changes are lost (FR-212);
 - start refused: identity overrides off in local evaluation keeps the link offline.
 
 Unit detail (ping first, kill switches, game identities, events, pacing) is in
@@ -43,6 +44,7 @@ BACKEND = ("agent", "decision.backend")  # an admin setting (persist: yes)
 TICK = ("agent", "experiment_tick_seconds")
 MAX_GAMES = ("agent", "experiment_max_games")  # kill switch: lower is tighter, baseline 50
 PACING = ("interventions", "pacing_profile")
+HANDICAP = ("interventions", "player_handicap_factor")  # game+serial scope: a controller identity (#2624)
 
 
 @pytest.fixture(autouse=True)
@@ -219,10 +221,23 @@ def test_restart_removes_stale_identities_after_grace(stack, flag_service, settl
     stale, live = fl.new_game_id(), fl.new_game_id()
     fake.add_identity(f"game:{stale}")
     fake.add_identity(f"game:{live}")
+    # Controller identities (#2624): MOCK0013 plays in the live real game, and a person set its
+    # handicap there before the restart; MOCK0014's overrides belong to the stale game.
+    fake.add_identity("controller:MOCK0013", {"game_id": live})
+    fake.person_overrides("controller:MOCK0013", HANDICAP[1], "1.5")
+    fake.add_identity("controller:MOCK0014", {"game_id": stale})
+    fake.person_overrides("controller:MOCK0014", HANDICAP[1], "1.75")
     try:
         # Step 1: restart; the live game registers again, the stale one never does.
         restarted = _restart(stack, flag_service)
-        fl.wait_for(lambda: fl.register_game(flag_service, live, ["MOCK0013"]) or True, 30, "register")
+        fl.wait_for(lambda: fl.register_game(flag_service, live, ["MOCK0013"], kind="real") or True, 30, "register")
+        # The live game's controller keeps its override across the restart and it applies.
+        player = fl.wait_for(
+            lambda: (flag_service.get(*HANDICAP).get("serials") or {}).get(live, {}).get("MOCK0013"),
+            fl.PULL_TIMEOUT,
+            "the live game's controller override applied after the restart",
+        )
+        assert float(player["value"]) == 1.5, player
         # Step 2: the stale identity is deleted after the 45 s grace (bound 75 s), never before.
         fl.wait_for(lambda: f"game:{stale}" not in fake.identities(), 75, "the stale identity deleted")
         deletes = [r["t"] - restarted for r in fake.requests("DELETE", "/edge-identities/") if r["t"] >= restarted]
@@ -230,6 +245,13 @@ def test_restart_removes_stale_identities_after_grace(stack, flag_service, settl
         assert deletes and 45 <= min(deletes) <= 75, deletes
         # Step 3: the registered game's identity stays.
         assert f"game:{live}" in fake.identities()
+        # Step 4: a controller without a live game keeps its identity, loses its overrides and traits.
+        fl.wait_for(
+            lambda: fake.override("controller:MOCK0014", HANDICAP[1]) is None, 30, "the stale controller released"
+        )
+        # The traits are cleared after the overrides.
+        fl.wait_for(lambda: fake.identities()["controller:MOCK0014"]["traits"] == {}, 30, "its traits cleared")
+        assert fake.override("controller:MOCK0013", HANDICAP[1]) is not None
     finally:
         fl.end_game(flag_service, live)
 

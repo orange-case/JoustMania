@@ -230,3 +230,23 @@ def test_down_answers_503_before_the_webhook(fake):
     with pytest.raises(urllib.error.HTTPError) as err:
         urllib.request.urlopen(req, timeout=5)
     assert err.value.code == 503 and fake.health_posts() == []
+
+
+def test_controller_identity_traits_and_override_listing(fake):
+    """The controller settle's reads (#2624): list-traits, the override list, a null trait deletes."""
+    base = f"/api/v1/environments/{ENVIRONMENT_KEY}/"
+    _, _, created = _call(fake, "POST", base + "edge-identities/", {"identifier": "controller:MOCK0001"})
+    one = base + f"edge-identities/{created['identity_uuid']}/"
+    _call(fake, "PUT", one + "update-traits/", {"trait_key": "game_id", "trait_value": "g1"})
+    fid = fake.feature_id("sensitivity")
+    _call(
+        fake, "PUT", base + "edge-identities-featurestates",
+        {"identifier": "controller:MOCK0001", "feature": fid, "enabled": True, "feature_state_value": "2"},
+    )  # fmt: skip
+    status, _, traits = _call(fake, "GET", one + "list-traits/")
+    assert status == 200 and traits == [{"trait_key": "game_id", "trait_value": "g1"}]
+    status, _, overrides = _call(fake, "GET", one + "edge-featurestates/")
+    assert status == 200 and [(o["feature"], o["feature_state_value"]) for o in overrides] == [(fid, "2")]
+    _call(fake, "PUT", one + "update-traits/", {"trait_key": "game_id", "trait_value": None})
+    assert fake.identities()["controller:MOCK0001"]["traits"] == {}
+    assert _call(fake, "GET", base + "edge-identities/nope/list-traits/")[0] == 404

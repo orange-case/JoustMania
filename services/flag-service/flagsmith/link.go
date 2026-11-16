@@ -133,10 +133,12 @@ type Status struct {
 
 // Link is the Flagsmith link of one stack.
 type Link struct {
-	cfg     Config
-	deps    Deps
-	client  *Client
-	links   *LinkState
+	cfg    Config
+	deps   Deps
+	client *Client
+	links  *LinkState
+	// ctrl is the controller map (controller identities, #2624).
+	ctrl    *controllers
 	metrics *Metrics
 	ids     *IDs
 	wake    chan struct{}
@@ -193,6 +195,7 @@ func New(cfg Config, d Deps) (*Link, error) {
 		deps:   d,
 		client: NewClient(cfg, d.HTTPClient),
 		links:  NewLinkState(d.Now),
+		ctrl:   newControllers(),
 		ids:    &IDs{FeatureID: map[string]int{}, TagID: map[string]int{}, IdentityUUID: map[string]string{}},
 		wake:   make(chan struct{}, 1),
 		mode:   ModeOff,
@@ -362,6 +365,7 @@ func (l *Link) StateChanged(c state.Change) {
 	if !l.Enabled() {
 		return
 	}
+	c = l.trackGames(c)
 	l.out.Changed(c)
 	if c.Kind == state.ChangeGameRegistered {
 		l.gamesSeenOnce.Do(func() { close(l.gamesSeen) })

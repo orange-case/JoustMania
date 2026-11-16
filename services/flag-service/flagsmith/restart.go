@@ -37,15 +37,18 @@ func (s *startup) rememberIdentities(doc *EnvironmentDocument) {
 	ids.Lock()
 	defer ids.Unlock()
 	for _, io := range doc.IdentityOverrides {
-		if _, _, ok := ScopeOfIdentity(io.Identifier); !ok || io.IdentityUUID == "" {
+		if _, _, ok := ScopeOfIdentity(io.Identifier); (!ok && !isControllerIdentity(io.Identifier)) || io.IdentityUUID == "" {
 			continue
 		}
 		ids.IdentityUUID[io.Identifier] = io.IdentityUUID
 	}
 }
 
-// isGameIdentity: a game or player scope.
-func isGameIdentity(scope string) bool { return strings.HasPrefix(scope, "game:") }
+// isControllerIdentity: a controller:<serial> identity.
+func isControllerIdentity(identifier string) bool {
+	_, ok := SerialOfController(identifier)
+	return ok
+}
 
 // checkEdgeIdentities fails the start when the project has no edge
 // identities (O8): Flagsmith answers 400 DynamoNotEnabled.
@@ -90,7 +93,65 @@ func (s *startup) gameIdentityLive(identifier string) bool {
 // complete: false after a listing error or a transient (5xx, timeout,
 // transport) delete error, so the caller retries (game ends while running are
 // the out side's, #2589).
+//
+// Controller identities (#2624) are never deleted: one listing of
+// controller:* identities hands each controller without a live game to the
+// out side, which releases it (removes its overrides and traits) on its
+// sender goroutine, the owner checked again right before.
 func (s *startup) cleanupStaleIdentities(ctx context.Context) bool {
+	complete := s.cleanupGameIdentities(ctx)
+	if ctx.Err() != nil {
+		return false
+	}
+	return s.releaseStaleControllers(ctx) && complete
+}
+
+// releaseStaleControllers lists the controller identities and queues the
+// release of each one without an owner. It reports whether the listing was
+// complete.
+func (s *startup) releaseStaleControllers(ctx context.Context) bool {
+	lek := ""
+	queued := false
+	defer func() {
+		if queued {
+			s.l.wakeOut()
+		}
+	}()
+	for page := 0; page < maxListPages; page++ {
+		path := s.environmentPath() + "edge-identities/?q=" + url.QueryEscape(ControllerPrefix) + "&page_size=100"
+		if lek != "" {
+			path += "&last_evaluated_key=" + url.QueryEscape(lek)
+		}
+		var resp struct {
+			Results          []edgeIdentity `json:"results"`
+			LastEvaluatedKey *string        `json:"last_evaluated_key"`
+		}
+		if _, _, err := s.pace.call(ctx, http.MethodGet, path, nil, &resp, true, nil); err != nil {
+			if ctx.Err() == nil {
+				s.l.Logger().Warn("flagsmith controller identities not listed", "reason", Reason(err))
+			}
+			return false
+		}
+		for _, id := range resp.Results {
+			serial, ok := SerialOfController(id.Identifier)
+			if !ok {
+				continue
+			}
+			s.rememberIdentity(id)
+			if s.l.ctrl.markRelease(serial) {
+				queued = true
+			}
+		}
+		if resp.LastEvaluatedKey == nil || *resp.LastEvaluatedKey == "" {
+			return true
+		}
+		lek = *resp.LastEvaluatedKey
+	}
+	return true
+}
+
+// cleanupGameIdentities is the game:* half of cleanupStaleIdentities.
+func (s *startup) cleanupGameIdentities(ctx context.Context) bool {
 	complete := true
 	lek := ""
 	for page := 0; page < maxListPages; page++ {
@@ -109,7 +170,7 @@ func (s *startup) cleanupStaleIdentities(ctx context.Context) bool {
 			return false
 		}
 		for _, id := range resp.Results {
-			if !isGameIdentity(id.Identifier) {
+			if !strings.HasPrefix(id.Identifier, "game:") {
 				continue
 			}
 			if s.gameIdentityLive(id.Identifier) {

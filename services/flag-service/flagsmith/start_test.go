@@ -1033,7 +1033,7 @@ func TestStartStaleIdentityRetry(t *testing.T) {
 		}
 		lists := 0
 		for _, r := range e.admin.f.RequestsTo(http.MethodGet, flagsmithtest.APIPath+"environments/envkey123/edge-identities/") {
-			if strings.Contains(r.Query, "page_size=100") {
+			if strings.Contains(r.Query, "page_size=100") && strings.Contains(r.Query, "q=game") {
 				lists++
 			}
 		}

@@ -9,7 +9,8 @@
 #
 # Compose calls go through scripts/setup/joustmania-compose.sh: -f
 # docker-compose.yml (a bare `docker compose` also loads the dev override
-# that publishes the mock control and gRPC ports, #1319) plus .env and the
+# that publishes the mock control and gRPC ports, #1319), the gateway overlay
+# when it is configured (UC-035 BR-015, #2622), plus .env and the
 # git-ignored .env.local when present (stage IMAGE_TAG + API keys, #1488).
 [Unit]
 Description=JoustMania Docker Compose Application

@@ -73,9 +73,11 @@ func emptyList(raw []byte) bool {
 	return len(raw) == 0 || string(raw) == "[]" || string(raw) == "null"
 }
 
-// gameRegistered lists the game on its first registration and each player it
-// did not have before; a player that left is removed (their values are
-// cleared by their own Changes).
+// gameRegistered lists the game on its first registration. A shadow game
+// lists each player it did not have before as game:<id>:<serial> and removes
+// a player that left; the players of a real game are the controller map's
+// (Link.trackGames, controllers.go), which settles each controller identity
+// for its owner.
 func (o *out) gameRegistered(c state.Change) {
 	g := c.Game
 	if g == nil || g.ID == "" {
@@ -84,18 +86,20 @@ func (o *out) gameRegistered(c state.Change) {
 	if c.Prev == nil {
 		o.ids.Want("game:"+g.ID, true, o.gameTraits(g))
 	}
-	for _, s := range g.Serials {
-		if c.Prev == nil || !slices.Contains(c.Prev.Serials, s) {
-			o.ids.Want("game:"+g.ID+":"+s, true, nil)
+	if isShadowKind(g.Kind) {
+		for _, s := range g.Serials {
+			if c.Prev == nil || !slices.Contains(c.Prev.Serials, s) {
+				o.ids.Want("game:"+g.ID+":"+s, true, nil)
+			}
 		}
-	}
-	if c.Prev != nil {
-		for _, s := range c.Prev.Serials {
-			if !slices.Contains(g.Serials, s) {
-				id := "game:" + g.ID + ":" + s
-				// No override request after the identity is gone.
-				o.l.Links().ForgetIdentity(id)
-				o.ids.Want(id, false, nil)
+		if c.Prev != nil {
+			for _, s := range c.Prev.Serials {
+				if !slices.Contains(g.Serials, s) {
+					id := "game:" + g.ID + ":" + s
+					// No override request after the identity is gone.
+					o.l.Links().ForgetIdentity(id)
+					o.ids.Want(id, false, nil)
+				}
 			}
 		}
 	}
@@ -119,7 +123,9 @@ func (o *out) gameTraits(g *state.Game) []trait {
 }
 
 // gameEnded drops every value of the game that was not sent yet and removes
-// the game and its players from Flagsmith (UC-055 A2, BR-003).
+// the game from Flagsmith (UC-055 A2, BR-003): the game identity is deleted,
+// and a shadow game's player identities too. The controllers of a real game
+// are released by the controller map (Link.trackGames).
 func (o *out) gameEnded(c state.Change) {
 	id := c.Scope.GameID
 	if id == "" && c.Game != nil {
@@ -130,7 +136,7 @@ func (o *out) gameEnded(c state.Change) {
 	}
 	o.l.Links().ForgetGame(id)
 	o.ids.Want("game:"+id, false, nil)
-	if c.Game != nil {
+	if c.Game != nil && isShadowKind(c.Game.Kind) {
 		for _, s := range c.Game.Serials {
 			o.ids.Want("game:"+id+":"+s, false, nil)
 		}
@@ -165,6 +171,9 @@ func (o *out) Run(ctx context.Context) error {
 // any.
 func (o *out) step(ctx context.Context) (bool, error) {
 	if did, err := o.identityStep(ctx); did || err != nil {
+		return did, err
+	}
+	if did, err := o.controllerStep(ctx); did || err != nil {
 		return did, err
 	}
 	return o.pushNext(ctx)
