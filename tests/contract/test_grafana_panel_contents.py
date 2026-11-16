@@ -53,7 +53,7 @@ STEP6_PANELS = [
     (
         "game",
         "game-players",
-        "High-Res Acceleration (100Hz)",
+        "Acceleration (10 Hz)",
         r"controller_accel_magnitude",
         r"game_effective_warning_threshold",
         r"game_effective_death_threshold",
