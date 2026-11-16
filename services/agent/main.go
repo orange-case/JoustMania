@@ -546,9 +546,13 @@ type components struct {
 	shieldSeconds *actions.ShieldSecondsReader
 	llmBudget     llmBudgetShare
 	groupLog      *decision.GroupLog
-	tuning        *agentTuning
-	text          *textBackends
-	window        *gamewindow.Store
+
+	// interventionLog feeds the agent.game.summary intervention list (#2640).
+	interventionLog *decision.InterventionLog
+
+	tuning *agentTuning
+	text   *textBackends
+	window *gamewindow.Store
 
 	decideBackends *decision.DecideRegistry
 	// predictions is the shared prediction book (#2479, UC-040 A44, BR-034).
@@ -617,6 +621,7 @@ func newComponents(ctx context.Context, logger *slog.Logger, agentFlags *flags.F
 	c.shieldSeconds = actions.NewShieldSecondsReader(c.gameFlags, logger)
 	c.llmBudget = newLLMBudgetShare(agentFlags, logger)
 	c.groupLog = decision.NewGroupLog()
+	c.interventionLog = decision.NewInterventionLog()
 	// Agent tuning (#1788, FR-150, C-035): model, effort, timeout, effect window and
 	// promotion timers resolve at use time from the agent flags; the compiled defaults
 	// (equal to the flag defaults) apply while a flag cannot be resolved (#1907).
@@ -780,6 +785,8 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	c.llmBudget.loop(loop)
 	// Group-shield decisions feed the game summary (#2529, UC-040 BR-033).
 	loop.SetGroupLog(c.groupLog)
+	// Every intervention of the game feeds the summary span's list (#2640).
+	loop.SetInterventionLog(c.interventionLog)
 	// Async wiring for the remote decide path (#1226) and the effect sampler
 	// (#918): a remote decide call runs in its own goroutine and, when the answer
 	// lands, re-validates against this game's CURRENT context (fetched from the
@@ -932,6 +939,7 @@ func (c *components) buildGameEnd() {
 	// chain, so the summary and the retro read them from its lookup (UC-042 A12).
 	wirePredictionLookups(c.predictions, c.summaries, c.retro)
 	wireGroupLookup(c.groupLog, c.summaries)
+	wireInterventionLookup(c.interventionLog, c.summaries)
 	// Advance the M7-2 rolling window on every game end (#929): the coordinator
 	// Records each freshly-built Summary into the shared window, which reduces a game to
 	// its aggregates: a real game goes to the real-game window, a shadow game to its

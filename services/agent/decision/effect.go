@@ -2,6 +2,8 @@ package decision
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -13,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/joustmania/agent/gamecontext"
+	"github.com/joustmania/agent/telemetry/keys"
 )
 
 // newInterventionID returns a fresh dispatch-unique id used to tie an intervention's
@@ -34,7 +37,7 @@ func newInterventionID() string { return uuid.NewString() }
 //  2. After a follow-up window (DefaultEffectWindow, env-tunable) the sampler reads the
 //     SAME signals for the SAME game again and computes the per-objective DELTA.
 //  3. It emits an effect record attributed to the intervention id: an
-//     agent.intervention.effect span (per evaluated objective) AND an
+//     agent.intervention.effect span (one per intervention, #2640) AND an
 //     agent_intervention_effect_delta metric, both carrying baseline/follow-up/delta +
 //     window, so the M5 dashboard (#791/#792) and the #844 retro can consume it.
 //
@@ -277,112 +280,155 @@ type pendingEffect struct {
 // emitEffectSample is the follow-up half (#918): it re-reads the game's CURRENT signals
 // through the ContextProvider (same per-game source the #917 async path uses), recomputes
 // the SAME fitness functions with the dispatch-time thresholds, computes the per-signal
-// delta, and emits the agent.intervention.effect span(s) + agent_intervention_effect_delta
+// delta, and emits ONE agent.intervention.effect span + the agent_intervention_effect_delta
 // metric (progress-type signals only, see effectMetricSignal). If the partition is
-// gone (game ended/evicted before the window elapsed) it emits
-// a single ABORTED record — clearly marked, no delta, no metric — so the cancellation is
-// visible rather than silent.
+// gone (game ended/evicted before the window elapsed) the span is marked ABORTED — no
+// delta, no metric — so the cancellation is visible rather than silent.
 //
-// Span shape (#1325, UC-040 BR-013): every agent.intervention.effect span — one per
-// evaluated signal, or the single aborted one — is a DIRECT remote child of the CAUSING
+// Span shape (#2640): one span per intervention. Every signal evaluated at dispatch is
+// an entry of the intervention.signals JSON attribute; the objective's primary signal
+// (primaryEffectSignal) is also stamped as intervention.signal / fitness_baseline /
+// fitness_followup / fitness_delta, so the headline number reads without parsing JSON.
+// Before #2640 there was one span per signal (~12 per intervention), which buried the
+// decisions in a game's trace.
+//
+// Parenting (#1325, UC-040 BR-013): the span is a DIRECT remote child of the CAUSING
 // agent.decision span (#1178), backdated to dispatch time so it covers the follow-up
-// window. There is deliberately NO intermediate effect span: before #1325 a per-sample
-// effect "root" parented the per-signal spans of the same name, which Jaeger rendered as
-// effect spans nesting under the previous effect span (trace c8e9aa27: 7 decisions x
-// (1 root + 12 signals) = 91 spans, 84 of them under another effect span). Every span is
-// started from the SAME decision-parent context (effectParent), never from a sibling's
-// returned context.
-//
-// The effect outlives its decision (the window is 20 s, the decision span milliseconds).
-// That is valid OTel (a child may end after its parent) and keeps the cause one click
-// away; parenting under game_cycle with a Link to the decision would hide the cause
-// behind a Link and still outlive game_cycle when the game ends inside the window.
-// Graceful fallback: an invalid decisionSC (no-op tracer / no active decision span) yields
-// no remote parent, so the effect spans are their own roots.
+// window. The effect outlives its decision (the window is 20 s, the decision span
+// milliseconds). That is valid OTel (a child may end after its parent) and keeps the
+// cause one click away. Graceful fallback: an invalid decisionSC (no-op tracer / no
+// active decision span) yields no remote parent, so the effect span is its own root.
 func (l *Loop) emitEffectSample(ctx context.Context, s pendingEffect) {
 	current, ok := l.ctxProvider.Current(l.gameID)
-	windowSeconds := s.window.Seconds()
 
 	effectParent := ctx
 	if s.decisionSC.IsValid() {
 		effectParent = trace.ContextWithRemoteSpanContext(ctx, s.decisionSC)
 	}
-	// Attributes every effect span carries. game.id + the intervention id (#1174) make a
-	// span found in isolation attributable to its game and cause; the SAME key the
-	// decision span uses joins decision<->effect even on backends that don't surface Link
-	// attrs. The game trace ids stay as searchable attributes.
-	common := []attribute.KeyValue{
+	// game.id + the intervention id (#1174) make a span found in isolation attributable
+	// to its game and cause; the SAME key the decision span uses joins decision<->effect
+	// even on backends that don't surface Link attrs. The game trace ids stay as
+	// searchable attributes.
+	attrs := []attribute.KeyValue{
 		attribute.String(AttrSessionID, l.gameID),
 		attribute.String(AttrGameID, l.gameID),
 		attribute.String(AttrEffectInterventionID, s.id),
 		attribute.String(AttrDecisionInterventionID, s.id),
 		attribute.String(AttrEffectIntervention, s.intervention),
 		attribute.String(AttrEffectObjective, s.objective),
-		attribute.Float64(AttrEffectWindowSeconds, windowSeconds),
+		attribute.Float64(AttrEffectWindowSeconds, s.window.Seconds()),
 	}
 	if s.gameTraceID != "" {
-		common = append(common, attribute.String(AttrGameTraceID, s.gameTraceID))
+		attrs = append(attrs, attribute.String(AttrGameTraceID, s.gameTraceID))
 	}
 	if s.gameTraceSpanID != "" {
-		common = append(common, attribute.String(AttrGameTraceSpanID, s.gameTraceSpanID))
-	}
-	startEffect := func(extra ...attribute.KeyValue) trace.Span {
-		_, span := l.Tracer.Start(effectParent, SpanInterventionEffect,
-			trace.WithTimestamp(s.dispatchedAt),
-			trace.WithSpanKind(trace.SpanKindInternal),
-			trace.WithAttributes(common...),
-			trace.WithAttributes(extra...),
-		)
-		return span
+		attrs = append(attrs, attribute.String(AttrGameTraceSpanID, s.gameTraceSpanID))
 	}
 
-	if !ok {
+	var followUp map[string]float64
+	if ok {
+		followUp = EvaluateFitness(current, s.thresholds).Evaluated()
+		attrs = append(attrs, effectSignalAttributes(s.objective, s.baseline, followUp)...)
+	} else {
 		// Game ended / partition evicted before the window elapsed (#918 cancellation):
-		// there is no current context to sample, so the effect is unmeasurable. One span
-		// marked aborted — no fabricated delta, no metric.
-		span := startEffect(attribute.Bool(AttrEffectAborted, true))
-		span.End()
+		// there is no current context to sample, so the effect is unmeasurable. The
+		// span is marked aborted — no fabricated delta, no metric.
+		attrs = append(attrs, attribute.Bool(AttrEffectAborted, true))
+	}
+	_, span := l.Tracer.Start(effectParent, SpanInterventionEffect,
+		trace.WithTimestamp(s.dispatchedAt),
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(attrs...),
+	)
+	span.End()
+	if !ok {
 		return
 	}
 
-	followUp := EvaluateFitness(current, s.thresholds).Evaluated()
-
-	// Walk the baseline signal vocabulary in a stable order so the spans/metric are
-	// deterministic. Each signal that is still present at follow-up gets a delta; a
-	// signal that disappeared (the objective stopped evaluating) is recorded aborted.
+	// The metric keeps one point per progress-type signal still present at follow-up,
+	// in a stable order (#1444).
 	for _, key := range sortedKeys(s.baseline) {
-		base := s.baseline[key]
 		fu, present := followUp[key]
-		span := startEffect(
-			attribute.String(AttrEffectSignal, key),
-			attribute.Float64(AttrEffectBaseline, base),
-		)
-		if !present {
-			// The signal was evaluable at dispatch but not at follow-up (the objective's
-			// required signals went missing). We cannot honestly compute a delta, so mark
-			// this signal aborted rather than treating absence as zero.
-			span.SetAttributes(attribute.Bool(AttrEffectAborted, true))
-			span.End()
+		if !present || !effectMetricSignal(key) {
+			// A vanished signal has no honest delta; elapsed time and constant
+			// thresholds stay on the span only (#1444).
 			continue
 		}
-		delta := fu - base
-		span.SetAttributes(
-			attribute.Float64(AttrEffectFollowUp, fu),
-			attribute.Float64(AttrEffectDelta, delta),
-		)
-		span.End()
-
-		if !effectMetricSignal(key) {
-			// Elapsed time and constant thresholds stay on the span only (#1444).
-			continue
-		}
-		l.effectDelta.Record(ctx, delta, otelmetric.WithAttributes(
+		l.effectDelta.Record(ctx, fu-s.baseline[key], otelmetric.WithAttributes(
 			attribute.String(AttrEffectIntervention, s.intervention),
 			attribute.String(AttrEffectObjective, s.objective),
 			attribute.String(AttrEffectSignal, key),
 		))
 	}
 }
+
+// primaryEffectSignal is the signal each objective's fitness binds on (fitness.go):
+// its Progress. The effect span stamps it as the top-level
+// intervention.fitness_delta (#2640). Chaos and "unset" have none.
+var primaryEffectSignal = map[string]string{
+	ObjectiveEndurance:  "endurance.session_progress",
+	ObjectiveBalanced:   "balanced.skill_gap_progress",
+	ObjectiveAccelerate: "accelerate.session_progress",
+}
+
+// effectSignalEntry is one intervention.signals JSON entry. FollowUp and Delta are
+// absent for a signal that was evaluable at dispatch but not at follow-up (Aborted).
+type effectSignalEntry struct {
+	Baseline float64  `json:"baseline"`
+	FollowUp *float64 `json:"followup,omitempty"`
+	Delta    *float64 `json:"delta,omitempty"`
+	Aborted  bool     `json:"aborted,omitempty"`
+}
+
+// effectSignalAttributes builds the measured-sample attributes of the single effect
+// span (#2640): intervention.signals (every baseline signal, values rounded to 4
+// decimals, keys sorted by encoding/json), the primary signal's exact
+// baseline/follow-up/delta when the objective has one, and effect_aborted when no
+// baseline signal survived to the follow-up.
+func effectSignalAttributes(objective string, baseline, followUp map[string]float64) []attribute.KeyValue {
+	entries := make(map[string]effectSignalEntry, len(baseline))
+	measured := 0
+	for key, base := range baseline {
+		e := effectSignalEntry{Baseline: round4(base)}
+		if fu, present := followUp[key]; present {
+			f, d := round4(fu), round4(fu-base)
+			e.FollowUp, e.Delta = &f, &d
+			measured++
+		} else {
+			e.Aborted = true
+		}
+		entries[key] = e
+	}
+	var attrs []attribute.KeyValue
+	if raw, err := json.Marshal(entries); err == nil {
+		attrs = append(attrs, attribute.String(keys.AttrEffectSignals, string(raw)))
+	}
+	if measured == 0 {
+		attrs = append(attrs, attribute.Bool(AttrEffectAborted, true))
+	}
+	key, ok := primaryEffectSignal[objective]
+	if !ok {
+		return attrs
+	}
+	base, ok := baseline[key]
+	if !ok {
+		return attrs
+	}
+	attrs = append(attrs,
+		attribute.String(AttrEffectSignal, key),
+		attribute.Float64(AttrEffectBaseline, base),
+	)
+	if fu, present := followUp[key]; present {
+		attrs = append(attrs,
+			attribute.Float64(AttrEffectFollowUp, fu),
+			attribute.Float64(AttrEffectDelta, fu-base),
+		)
+	}
+	return attrs
+}
+
+// round4 rounds v to 4 decimals for the compact JSON attribute.
+func round4(v float64) float64 { return math.Round(v*1e4) / 1e4 }
 
 // effectMetricSignal reports whether a fitness signal's delta is recorded on the
 // agent_intervention_effect_delta metric (#1444). Only the 0..1 progress signals
@@ -405,12 +451,12 @@ func effectMetricSignal(key string) bool {
 
 // sortedKeys returns the map keys sorted, for deterministic span/metric emission order.
 func sortedKeys(m map[string]float64) []string {
-	keys := make([]string, 0, len(m))
+	out := make([]string, 0, len(m))
 	for k := range m {
-		keys = append(keys, k)
+		out = append(out, k)
 	}
-	sort.Strings(keys)
-	return keys
+	sort.Strings(out)
+	return out
 }
 
 // realAfterFunc is the production follow-up scheduler: a time.Timer whose firing is
