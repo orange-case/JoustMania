@@ -16,7 +16,9 @@ identities.go, audit.go, document.go):
   (``environment_default``: enabled and ``value {type, value}``; an unknown feature 404 with a
   JSON ``detail``), ``PUT|DELETE .../edge-identities-featurestates`` (JSON body, no trailing
   slash; a PUT creates a missing identity), ``POST .../edge-identities/`` (a duplicate is 400
-  "already exists"), ``PUT .../edge-identities/<uuid>/update-traits/``,
+  "already exists"), ``PUT .../edge-identities/<uuid>/update-traits/`` (a null value deletes
+  the trait), ``GET .../edge-identities/<uuid>/list-traits/`` and
+  ``GET .../edge-identities/<uuid>/edge-featurestates/`` (the controller settle, #2624),
   ``DELETE .../edge-identities/<uuid>/`` (with its overrides);
 - ``GET .../edge-identities/?q=``: a quoted ``"x"`` is an exact match, unquoted a prefix;
 - an Admin API write adds an audit row (newest first) with ``author: None`` (an API key) and
@@ -64,6 +66,8 @@ _ENV = re.compile(r"^/api/v1/environments/([^/]+)/$")
 _EDGE_LIST = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/$")
 _EDGE_ONE = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/$")
 _EDGE_TRAITS = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/update-traits/$")
+# A controller identity (#2624): its traits and its overrides, read by the link.
+_EDGE_SUB = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/(list-traits|edge-featurestates)/$")
 # No trailing slash: push.go sends exactly this path (and Flagsmith 404s the other form).
 _EDGE_FS = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities-featurestates$")
 # Every Admin path names the environment by its client key and the project by its id.
@@ -310,10 +314,13 @@ class FakeFlagsmith:
             self._audit(f"Feature override {verb} for feature '{f['name']}' and identity '{identifier}'", author)
             self._bump()
 
-    def add_identity(self, identifier: str) -> str:
-        """An identity that exists in Flagsmith already (e.g. from an earlier run); returns its uuid."""
+    def add_identity(self, identifier: str, traits: dict | None = None) -> str:
+        """An identity that exists in Flagsmith already (e.g. from an earlier run), with ``traits``;
+        returns its uuid."""
         with self._lock:
-            return self._identity(identifier, create=True)["identity_uuid"]
+            identity = self._identity(identifier, create=True)
+            identity["traits"].update(traits or {})
+            return identity["identity_uuid"]
 
     def reset_values(self) -> None:
         """Back to a fresh environment: every value off, no identities, overrides, audit rows,
@@ -455,9 +462,32 @@ class FakeFlagsmith:
         if (m := _EDGE_TRAITS.match(path)) and method == "PUT":
             for identity in self._identities.values():
                 if identity["identity_uuid"] == m.group(2):
-                    identity["traits"][body["trait_key"]] = body["trait_value"]
+                    if body["trait_value"] is None:
+                        # Flagsmith deletes a trait set to null.
+                        identity["traits"].pop(body["trait_key"], None)
+                    else:
+                        identity["traits"][body["trait_key"]] = body["trait_value"]
                     return 200, {"trait_key": body["trait_key"], "trait_value": body["trait_value"]}, {}
             return 404, {"detail": "Not found."}, {}
+        if (m := _EDGE_SUB.match(path)) and method == "GET":
+            identity = next((i for i in self._identities.values() if i["identity_uuid"] == m.group(2)), None)
+            if identity is None:
+                return 404, {"detail": "Not found."}, {}
+            if m.group(3) == "list-traits":
+                return 200, [{"trait_key": k, "trait_value": v} for k, v in identity["traits"].items()], {}
+            return (
+                200,
+                [
+                    {
+                        "feature": fid,
+                        "enabled": state["enabled"],
+                        "feature_state_value": state["value"],
+                        "identity_uuid": identity["identity_uuid"],
+                    }
+                    for fid, state in identity["overrides"].items()
+                ],
+                {},
+            )
         if (m := _EDGE_ONE.match(path)) and method == "DELETE":
             for identifier, identity in list(self._identities.items()):
                 if identity["identity_uuid"] == m.group(2):
