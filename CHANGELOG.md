@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.15.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.14.0...joustmania-v0.15.0) (2026-11-16)
+
+
+### Features
+
+* **agent:** enforce the substrate validity bar on autonomous promotion ([#2541](https://github.com/orange-case/JoustMania/issues/2541)) ([#2555](https://github.com/orange-case/JoustMania/issues/2555)) ([22a7402](https://github.com/orange-case/JoustMania/commit/22a7402ba135d1a5c9e7889367617d5dc605d615))
+* **agent:** group-shield summary fields, dashboard group badge, replay --use-aliases ([#2529](https://github.com/orange-case/JoustMania/issues/2529)) ([#2568](https://github.com/orange-case/JoustMania/issues/2568)) ([22648c8](https://github.com/orange-case/JoustMania/commit/22648c8a1d8bc8a3d9cc3e7659e3ffb4960cf5ca))
+* **agent:** journal each real game end for calibration ([#1055](https://github.com/orange-case/JoustMania/issues/1055)) ([#2558](https://github.com/orange-case/JoustMania/issues/2558)) ([69210ea](https://github.com/orange-case/JoustMania/commit/69210ea1758aa04ea50cadbe0f374d4ddd80dbdc))
+* **agent:** per-arm prompt profile for the group A/B run ([#2530](https://github.com/orange-case/JoustMania/issues/2530)) ([#2559](https://github.com/orange-case/JoustMania/issues/2559)) ([1c2398d](https://github.com/orange-case/JoustMania/commit/1c2398df12adcf134e9f8005c98086eef192de72))
+* **agent:** per-backend decide caps for the paid LLM backends ([#2519](https://github.com/orange-case/JoustMania/issues/2519)) ([#2557](https://github.com/orange-case/JoustMania/issues/2557)) ([28d3caf](https://github.com/orange-case/JoustMania/commit/28d3caf339ea20bd0a45dcaa8fea4be5df99bda8))
+* **flag-service:** apply flag changes made in Flagsmith (UC-054) ([#2590](https://github.com/orange-case/JoustMania/issues/2590)) ([#2596](https://github.com/orange-case/JoustMania/issues/2596)) ([c868142](https://github.com/orange-case/JoustMania/commit/c86814254698901b05d1be71d9a1aa4b50157989))
+* **flag-service:** Flagsmith link foundation: config, client, link state ([#2588](https://github.com/orange-case/JoustMania/issues/2588)) ([#2594](https://github.com/orange-case/JoustMania/issues/2594)) ([90fd55a](https://github.com/orange-case/JoustMania/commit/90fd55aea76ad7be9776cb04622917c84a8e39cb))
+* **flag-service:** Flagsmith link Grafana row, preflight drift WARN, reconcile attributes ([#2609](https://github.com/orange-case/JoustMania/issues/2609)) ([dbe8188](https://github.com/orange-case/JoustMania/commit/dbe81887b426e0d968edb25174bc19dfceeb6221))
+* **flag-service:** Flagsmith start-up: create features, restart rule (UC-054) ([#2591](https://github.com/orange-case/JoustMania/issues/2591)) ([#2597](https://github.com/orange-case/JoustMania/issues/2597)) ([4e6c7da](https://github.com/orange-case/JoustMania/commit/4e6c7dadef6a43c861955441cad48e3da809d4e0))
+* **flag-service:** send local flag changes to Flagsmith (UC-055) ([#2589](https://github.com/orange-case/JoustMania/issues/2589)) ([#2595](https://github.com/orange-case/JoustMania/issues/2595)) ([0a63d15](https://github.com/orange-case/JoustMania/commit/0a63d154e9b35b7f640a47cbdd9f9a6d997eb472))
+* **otel-collector:** opt-in OTLP/HTTP export to the gateway ([#2571](https://github.com/orange-case/JoustMania/issues/2571)) ([#2603](https://github.com/orange-case/JoustMania/issues/2603)) ([683aaee](https://github.com/orange-case/JoustMania/commit/683aaeea3a55743a729b7d2e4219fcef5feea77b))
+
+
+### Bug Fixes
+
+* **agent:** no elimination measure is scored in a respawn mode ([#2532](https://github.com/orange-case/JoustMania/issues/2532)) ([#2552](https://github.com/orange-case/JoustMania/issues/2552)) ([e3bb8b3](https://github.com/orange-case/JoustMania/commit/e3bb8b3339a6a56694d5e6c81101b5724fa1ba07))
+* **ci:** pull fast-path service images from IMAGE_PREFIX ([#2599](https://github.com/orange-case/JoustMania/issues/2599)) ([#2613](https://github.com/orange-case/JoustMania/issues/2613)) ([798e583](https://github.com/orange-case/JoustMania/commit/798e583ea67b41f95b4174852f96f930ac120e9c))
+* **controller-manager:** gameplay command reader does not block on effect holds ([#2540](https://github.com/orange-case/JoustMania/issues/2540)) ([#2553](https://github.com/orange-case/JoustMania/issues/2553)) ([6144d79](https://github.com/orange-case/JoustMania/commit/6144d79dd1e6ea07d90e64c877a6de43d58668fb))
+* **deps:** bump pulldown-cmark to 0.13.6 for RUSTSEC-2026-0433 ([#2561](https://github.com/orange-case/JoustMania/issues/2561)) ([93cd4a0](https://github.com/orange-case/JoustMania/commit/93cd4a06af3fb7237a6a4237da7348b0ae0f0f8a))
+* **flag-service:** DELETE over-long id answers 400 like PUT ([#2370](https://github.com/orange-case/JoustMania/issues/2370)) ([#2567](https://github.com/orange-case/JoustMania/issues/2567)) ([087dfa9](https://github.com/orange-case/JoustMania/commit/087dfa91f5d6700d62163ede046fe85ca133fab3))
+* **flag-service:** do not re-send a value Flagsmith refused (UC-055 A4) ([#2607](https://github.com/orange-case/JoustMania/issues/2607)) ([bdb09f8](https://github.com/orange-case/JoustMania/commit/bdb09f8a4860d20a55b44802dd7eb88223c2f288))
+* **flag-service:** wake the Flagsmith sender after a pull round queues a push ([#2610](https://github.com/orange-case/JoustMania/issues/2610)) ([6004cb6](https://github.com/orange-case/JoustMania/commit/6004cb68d9f93f74417bd76e9897a6d0893a5eaa))
+* **observability:** unique service.instance.id for Go services and rust-hid ([#2546](https://github.com/orange-case/JoustMania/issues/2546)) ([#2550](https://github.com/orange-case/JoustMania/issues/2550)) ([25298ff](https://github.com/orange-case/JoustMania/commit/25298ff0a78e4b605b2c6a0fb51efb9850c83099))
+
+
+### Refactoring
+
+* **flag-service:** drop deprecated GetSelector, property and fuzz tests, golangci-lint in CI ([#2370](https://github.com/orange-case/JoustMania/issues/2370)) ([#2566](https://github.com/orange-case/JoustMania/issues/2566)) ([30a75b9](https://github.com/orange-case/JoustMania/commit/30a75b9e60744e5964733cb328859b7cb73b7e53))
+
+
+### Documentation
+
+* add SECURITY.md for responsible disclosure ([#488](https://github.com/orange-case/JoustMania/issues/488)) ([#2549](https://github.com/orange-case/JoustMania/issues/2549)) ([6671ac8](https://github.com/orange-case/JoustMania/commit/6671ac8b400909db252d5543e8da5dff36e3f376))
+* **env:** Flagsmith link and gateway export variables in .env.example ([#2616](https://github.com/orange-case/JoustMania/issues/2616)) ([ebae0b5](https://github.com/orange-case/JoustMania/commit/ebae0b532ae49a649cd8c61e99824bb93869a2d3))
+* **spec:** Flagsmith link for the flag service (UC-054, UC-055) ([#2587](https://github.com/orange-case/JoustMania/issues/2587)) ([#2593](https://github.com/orange-case/JoustMania/issues/2593)) ([cc97774](https://github.com/orange-case/JoustMania/commit/cc97774caaa5b50ee049fd47b1c08864ff737164))
+* **specs:** re-anchor drifted line references to symbols ([#2562](https://github.com/orange-case/JoustMania/issues/2562)) ([#2563](https://github.com/orange-case/JoustMania/issues/2563)) ([85a84af](https://github.com/orange-case/JoustMania/commit/85a84af58b64a96f2748d731fe990958064d739d))
+* **specs:** UC-054/UC-055 Tested, FR-206..FR-215 Verified, Flagsmith link close-out ([#2592](https://github.com/orange-case/JoustMania/issues/2592)) ([#2615](https://github.com/orange-case/JoustMania/issues/2615)) ([270d84b](https://github.com/orange-case/JoustMania/commit/270d84be0b23f28a780115f389ac82502f74ccc1))
+* **spec:** UC-047 recalibrate the shadow players from real games ([#1055](https://github.com/orange-case/JoustMania/issues/1055)) ([#2544](https://github.com/orange-case/JoustMania/issues/2544)) ([1c39ef1](https://github.com/orange-case/JoustMania/commit/1c39ef1b67465eb2a41e6b93ec4d2bb3c36fba3e))
+
+
+### Tests
+
+* **flag-service:** Flagsmith link service journeys, TC-021/TC-022, separate CI job ([#2612](https://github.com/orange-case/JoustMania/issues/2612)) ([0b32feb](https://github.com/orange-case/JoustMania/commit/0b32feb38fc709dac999ddc339ce37c6cf096bc0))
+
 ## [0.14.0](https://github.com/WatchMeJoustMyFlags/JoustMania/compare/joustmania-v0.13.0...joustmania-v0.14.0) (2026-11-01)
 
 
