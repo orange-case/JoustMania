@@ -69,7 +69,7 @@ rectangle "JoustMania" {
         usecase "UC-070\nPresent the Talk Demo" as UC070
     }
     package "Orange Case" {
-        usecase "UC-036\nFind a Game Moment in Every Shape" as UC036
+        usecase "UC-100\nFind a Game Moment in Every Shape" as UC100
     }
 }
 
@@ -124,11 +124,11 @@ agent --> UC051
 agent --> UC053
 
 presenter --> UC070
-presenter --> UC036
-player --> UC036
-UC036 --> obsbackend
-UC036 ..> UC010 : <<include>>
-UC036 ..> UC030 : <<include>>
+presenter --> UC100
+player --> UC100
+UC100 --> obsbackend
+UC100 ..> UC010 : <<include>>
+UC100 ..> UC030 : <<include>>
 presenter --> UC035
 agent --> UC070
 player --> UC070
