@@ -23,9 +23,6 @@ on:
         required: false
         type: string
 
-env:
-  IMAGE_PREFIX: ghcr.io/watchmejoustmyflags/joustmania
-
 jobs:
   release-please:
     name: Release Please
@@ -216,6 +213,11 @@ jobs:
           - flag-service
           - agent
     steps:
+      # Same expression as ci.yml, which publishes IMAGE:<sha> (#2614): a hard-coded prefix
+      # went stale when the org was renamed and 0.15.0 waited for an image CI never pushes.
+      - name: Set image prefix
+        run: echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 

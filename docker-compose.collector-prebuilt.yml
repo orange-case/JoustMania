@@ -13,5 +13,5 @@
 # release owner in docker-compose.yml when the repository is not that one.
 services:
   otel-collector:
-    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/otel-collector:${OTEL_COLLECTOR_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/otel-collector:${OTEL_COLLECTOR_TAG:-latest}
     build: !reset null

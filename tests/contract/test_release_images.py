@@ -16,7 +16,12 @@ import pytest
 
 # #2599: compose takes the registry prefix from IMAGE_PREFIX (CI exports the
 # publishing repository's prefix); the default is the release registry.
-DEFAULT_PREFIX = "ghcr.io/watchmejoustmyflags/joustmania"
+# #2614: the GitHub repository that publishes the images. ci.yml and release.yml derive
+# the prefix from it at run time; compose cannot, so its default must match this repo.
+PUBLISHING_REPO = "orange-case/JoustMania"
+DEFAULT_PREFIX = "ghcr.io/orange-case/joustmania"
+# The one expression that sets IMAGE_PREFIX in ci.yml (publish) and release.yml (retag).
+PREFIX_EXPR = "ghcr.io/${GITHUB_REPOSITORY,,}"
 PREFIX = "${IMAGE_PREFIX:-" + DEFAULT_PREFIX + "}/"
 # Compose images under PREFIX that CI deliberately does not release. None today.
 NOT_RELEASED: set[str] = set()
@@ -150,3 +155,52 @@ def test_retag_ch_variable_matches_check_retag_source_filter():
         assert ch_keys[ch] in filter_keys, (
             f"{image}: filter {ch_keys[ch]!r} not in ci.yml paths-filter"
         )
+
+
+def _prefix_assignments(workflow: str) -> list[str]:
+    """Every value a workflow gives IMAGE_PREFIX: `IMAGE_PREFIX=...` written to
+    $GITHUB_ENV in a run step, and `IMAGE_PREFIX:` in any env block."""
+    path = ic.REPO_ROOT / ".github/workflows" / workflow
+    found = re.findall(r'IMAGE_PREFIX=(\S+?)"? >>', path.read_text())
+    wf = ic.load_yaml(path)
+    blocks = [wf.get("env") or {}]
+    for job in wf["jobs"].values():
+        blocks.append(job.get("env") or {})
+        blocks.extend(st.get("env") or {} for st in job.get("steps", []))
+    found.extend(str(b["IMAGE_PREFIX"]) for b in blocks if "IMAGE_PREFIX" in b)
+    return found
+
+
+def test_release_retag_uses_the_prefix_ci_publishes_to():
+    """#2614: release.yml hard-coded ghcr.io/watchmejoustmyflags/joustmania after the
+    org rename while CI published to ghcr.io/orange-case/joustmania, so the 0.15.0
+    retag waited for IMAGE:<sha> in a registry nothing pushes to. Both workflows must
+    set IMAGE_PREFIX only with the same run-time expression."""
+    ci = _prefix_assignments("ci.yml")
+    release = _prefix_assignments("release.yml")
+    assert ci and set(ci) == {PREFIX_EXPR}, f"ci.yml IMAGE_PREFIX values: {ci}"
+    assert release and set(release) == {PREFIX_EXPR}, (
+        f"release.yml IMAGE_PREFIX values {release} must all be {PREFIX_EXPR!r} (as ci.yml)"
+    )
+    steps = ic.load_yaml(ic.REPO_ROOT / ".github/workflows/release.yml")["jobs"][
+        "tag-images"
+    ]["steps"]
+    names = [st.get("name", "") for st in steps]
+    assert "Set image prefix" in names and "Tag image with release version" in names
+    assert names.index("Set image prefix") < names.index(
+        "Tag image with release version"
+    ), "tag-images must set IMAGE_PREFIX before the retag step"
+
+
+def test_compose_default_is_the_publishing_registry():
+    """#2614: the Pi sets no IMAGE_PREFIX, so the compose default is what it pulls; it
+    must be the prefix CI's expression yields for the publishing repository."""
+    assert DEFAULT_PREFIX == "ghcr.io/" + PUBLISHING_REPO.lower()
+    for name in (
+        "docker-compose.yml",
+        "docker-compose.lite.yml",
+        "docker-compose.collector-prebuilt.yml",
+    ):
+        text = (ic.REPO_ROOT / name).read_text()
+        defaults = set(re.findall(r"\$\{IMAGE_PREFIX:-([^}]*)\}", text))
+        assert defaults == {DEFAULT_PREFIX}, f"{name}: IMAGE_PREFIX defaults {defaults}"
