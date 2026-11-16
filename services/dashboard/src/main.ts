@@ -3,6 +3,7 @@
  *
  * Real-time controller visualization and game controls using Connect-Web.
  */
+import { initTheme } from "./theme.js";
 import { html, setHtml } from "./html.js";
 import { keepGameEventStreamOpen } from "./stream.js";
 import { keepControllerStreamOpen } from "./controllerStream.js";
@@ -211,11 +212,18 @@ const pageGate = new PageGate(
 // page; the Grafana iframe loads on first open of its tab and is blanked 60 s after the
 // tab is left or at once on a hidden page; the Jaeger search loads once, on first open.
 const streamGate = new VisibilityGate(document, globalThis);
+// Light / dark theme matching the Orange Case website (FR-084). It rewrites the
+// Grafana embed's data-src (theme=light|dark), so the embed gate reads data-src at
+// load time instead of a copy taken here.
+initTheme();
+const grafanaFrame = document.getElementById("grafana-embed") as HTMLIFrameElement;
 const embedGate = new EmbedGate([
   {
-    frame: document.getElementById("grafana-embed") as HTMLIFrameElement,
+    frame: grafanaFrame,
     tab: "metrics",
-    src: document.getElementById("grafana-embed")?.dataset.src ?? "",
+    get src() {
+      return grafanaFrame?.dataset.src ?? "";
+    },
     unloadWhenAway: true,
   },
   {

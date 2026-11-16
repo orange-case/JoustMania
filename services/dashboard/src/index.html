@@ -4,12 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JoustMania Dashboard</title>
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/brand/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/brand/big-shoulders-stencil-display-800-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <div id="app">
       <header class="header">
-        <h1>JoustMania Dashboard</h1>
+        <div class="brand">
+          <img class="brand-logo" src="/brand/favicon.svg" width="36" height="36" alt="" />
+          <h1>JoustMania <span>Dashboard</span></h1>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button">&#9680; Auto</button>
       </header>
 
       <div class="controls-bar">
