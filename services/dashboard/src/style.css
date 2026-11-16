@@ -53,6 +53,9 @@
   --success-rgb: 46, 125, 50;
   --warning-rgb: 232, 112, 26;
   --info-rgb: 29, 95, 168;
+  /* text on the filled quality badges (AA at 0.7rem) */
+  --quality-good-text: #ffffff;
+  --quality-poor-text: #ffffff;
 
   /* agent.decide backends and accents */
   --decide-rules: #1d5fa8;
@@ -87,6 +90,8 @@
     --danger-rgb: 255, 107, 107;
     --success-rgb: 108, 192, 112;
     --info-rgb: 100, 168, 240;
+    --quality-good-text: #10141f;
+    --quality-poor-text: #10141f;
     --decide-rules: #9ec9ff;
     --decide-claude: #ffb37a;
     --decide-openai: #7ee2b8;
@@ -116,6 +121,8 @@
   --danger-rgb: 255, 107, 107;
   --success-rgb: 108, 192, 112;
   --info-rgb: 100, 168, 240;
+  --quality-good-text: #10141f;
+  --quality-poor-text: #10141f;
   --decide-rules: #9ec9ff;
   --decide-claude: #ffb37a;
   --decide-openai: #7ee2b8;
@@ -547,6 +554,7 @@ a {
 
 .quality-badge.quality-good {
   background: var(--accent-success);
+  color: var(--quality-good-text);
 }
 
 .quality-badge.quality-fair {
@@ -555,7 +563,7 @@ a {
 
 .quality-badge.quality-poor {
   background: var(--accent-primary);
-  color: white;
+  color: var(--quality-poor-text);
 }
 
 /* Agent shield (#1301, UC-040 A16): the LED circle shows the live colour; the

@@ -1,4 +1,10 @@
-import { describe, expect, it, beforeEach } from "vitest";
+// @vitest-environment happy-dom
+/**
+ * FR-084: the dashboard's light / dark theme (Orange Case look). Auto follows the
+ * OS, the header toggle pins Light or Dark per browser, the Grafana embed follows.
+ */
+import { describe, expect, it, beforeEach, vi } from "vitest";
+import { EmbedGate } from "../visibilityGate";
 import {
   THEME_STORAGE_KEY,
   applyTheme,
@@ -66,5 +72,55 @@ describe("theme", () => {
     btn.click();
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+  });
+
+  it("starts from a stored choice", () => {
+    localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    expect(initTheme(window)).toBe("dark");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(document.getElementById("theme-toggle")!.textContent).toContain("Dark");
+  });
+
+  it("keeps working for this page when storage refuses writes", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    try {
+      initTheme(window);
+      document.getElementById("theme-toggle")!.click();
+      expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it("re-themes an already loaded Grafana frame", () => {
+    const frame = document.getElementById("g") as HTMLIFrameElement;
+    frame.setAttribute("src", "/grafana/d/x/x?orgId=1&theme=dark&kiosk");
+    applyTheme(document, "light", true);
+    expect(frame.getAttribute("src")).toContain("theme=light");
+  });
+
+  it("the embed gate loads Grafana in the theme shown at load time, also after an unload", () => {
+    const frame = document.getElementById("g") as HTMLIFrameElement;
+    const gate = new EmbedGate([
+      {
+        frame,
+        tab: "metrics",
+        get src() {
+          return frame.dataset.src ?? "";
+        },
+        unloadWhenAway: true,
+      },
+    ]);
+    applyTheme(document, "light", true);
+    gate.sync("metrics", false);
+    expect(frame.getAttribute("src")).toContain("theme=light");
+
+    gate.sync("metrics", true); // hidden page: unloaded at once
+    expect(frame.getAttribute("src")).toBe("about:blank");
+    applyTheme(document, "dark", false);
+    gate.sync("metrics", false);
+    expect(frame.getAttribute("src")).toContain("theme=dark");
   });
 });
