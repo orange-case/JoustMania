@@ -79,7 +79,7 @@ def test_link_is_pinned_off_without_secrets(name):
 # the flagd sync stream (services.md §7).
 FLAG_SERVICE_PORTS = {8070, 50064}
 _LISTEN_RE = re.compile(
-    r"\bnet\.Listen\w*\(|\bhttp\.ListenAndServe\w*\(|\bhttp\.Server\{|\bhttp\.Serve\("
+    r"\bnet\.Listen\w*\b|\bhttp\.ListenAndServe\w*\b|\bhttp\.Server\b|\bhttp\.Serve\b"
 )
 LINK_PACKAGE = inv.REPO_ROOT / "services" / "flag-service" / "flagsmith"
 
