@@ -166,6 +166,16 @@ func (p *puller) Reconcile(ctx context.Context, trigger string) error {
 		attribute.Int(AttrPushed, rs.pushed),
 		attribute.Int(AttrConflicts, rs.conflicts),
 	)
+	// The restart rule the start sequence chose and what it clears
+	// (telemetry.md §10.4): on the start reconcile only.
+	if trigger == TriggerStart {
+		if rule, attribution, ok := p.l.RestartReport(); ok {
+			span.SetAttributes(
+				attribute.Int(AttrCleared, RestartCleared(attribution, p.isEvent)),
+				attribute.String(AttrRestartRule, rule),
+			)
+		}
+	}
 	if err != nil {
 		// The link goes offline: the health posts stop with it (the queue
 		// is kept for the next Reconcile or Poll).
@@ -392,6 +402,9 @@ type roundCtx struct {
 	// accepted after the refusal timeout; kill switches merge without their
 	// remote value (more restrictive wins).
 	staleAccepted bool
+	// queued: the round queued at least one local value to send (offer);
+	// the round wakes the out side once at its end (#2608).
+	queued bool
 }
 
 // skip leaves a key for the next round, which pulls in full.
@@ -491,6 +504,12 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	for _, k := range keys {
 		p.reconcileKey(rc, k, d, local, start, attribution)
 	}
+	// A value the round queued is sent now, not with the next local write
+	// (#2608): one wake per round, none when every offer was held back (a
+	// refused value, an existing pending entry).
+	if rc.queued {
+		l.wakeOut()
+	}
 
 	// Last-Modified (§4.2 step 8): advance only to the document's own update
 	// time, never when a key was deferred, and pull in full while the
@@ -544,6 +563,12 @@ func (p *puller) roundKeys(d map[Key]docEntry, local map[Key]localEntry) []Key {
 		return isKillKey(keys[i]) && !isKillKey(keys[j])
 	})
 	return keys
+}
+
+// isEvent reports whether k is an event flag's game override.
+func (p *puller) isEvent(k Key) bool {
+	pol := p.byName[k.Flag]
+	return pol != nil && isEventKey(pol.Kind, k)
 }
 
 func isKillKey(k Key) bool {
@@ -884,7 +909,11 @@ func (p *puller) offer(rc *roundCtx, k Key, le localEntry) bool {
 	if le.slot != 0 && p.slotVersion(k, le.v) != le.slot {
 		return false
 	}
-	return p.l.links.Reoffer(k, le.v, rc.now, le.version)
+	if !p.l.links.Reoffer(k, le.v, rc.now, le.version) {
+		return false
+	}
+	rc.queued = true
+	return true
 }
 
 // markSegments keeps one health entry per synced feature with a segment
