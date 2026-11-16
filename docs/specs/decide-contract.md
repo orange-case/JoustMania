@@ -859,13 +859,13 @@ The contract tests live in `decide/*_test.go`, the backend tests `decide/backend
 `contract_test.go`; jev also has `stages_test.go` and `wire_test.go`), and `decision/decide_hook_test.go`
 (per-backend threshold: `decision/decide_hook_threshold_test.go`; empty allow-list: `decision/decide_no_allowed_test.go`).
 
-**Traceability:** FR-044, FR-045, FR-046, FR-047, FR-048, FR-049, FR-050, FR-051, FR-052, FR-053, FR-054, FR-200, FR-201 (in progress, #2479) / UC-040, UC-044, UC-045 /
+**Traceability:** FR-044, FR-045, FR-046, FR-047, FR-048, FR-049, FR-050, FR-051, FR-052, FR-053, FR-054, FR-200, FR-201 (#2479) / UC-040, UC-044, UC-045 /
 `services/agent/decide/` (`state.go`, `danger.go`, `hold.go`, `backends/jev/criteria.go`, `llmio/llmio.go`), `services/agent/decision/decide_hook.go`, `chargeledger.go`, `rules.go`, `decide_registry.go`, `decide_rules.go`, `decision.go`, `services/agent/decide_backends.go`, `services/agent/actions/`, `services/game_coordinator/interventions.py` /
 `services/agent/decide/*_test.go`, `services/agent/decision/decide_hook_test.go`, `tests/service/test_tc008_remote_backend_routing.py`, `tests/service/test_tc009_kill_switch.py`, `tests/service/test_tc006_agent_blocked_by_host.py`, `tests/integration/test_tc013_shadow_alongside_real.py`.
 
 ## 14. Characteristics, predictions, goals (#2479)
 
-> Status `In Progress` (FR-200, FR-201). Delivered in slices, all on `main` (characteristics and rules predictions and the Book, #2485; the game summary, the
+> Status `Implemented` (FR-200, FR-201; not yet Verified, see the **Planned** line of UC-040). Delivered in slices, all on `main` (characteristics and rules predictions and the Book, #2485; the game summary, the
 > retro block and the dashboard Agent tab, #2479 PR C; model ask; goal profiles, #2479 PR E; jev's goal criterion and the
 > report-only arm calibration, #2498; the dashboard goal strip, PR #2499). The maintainer decisions of 2026-10-31: `activity` is the movement intensity relative to the
 > death threshold (always present, not the optional variance); noop predictions are not scored in v1; arm calibration is

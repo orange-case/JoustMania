@@ -36,7 +36,7 @@ Humans set the bounds (C-034, kill switch, allow-lists) and the goals (objective
 - **a neutral description** of what each lever does, never what it is for;
 - **a goal** the behaviour could serve.
 
-Then we measure whether it finds the move on its own, in shadow experiments where possible and on hardware where players matter. A hard-coded rule is only a labelled, opt-in fallback for when no LLM is available. Unprompted, explainable moves within the bounds are what we want to see. Every agent decision states what it expects to happen and is scored against what did happen, so its creativity stays accountable (#2479, in progress: FR-200).
+Then we measure whether it finds the move on its own, in shadow experiments where possible and on hardware where players matter. A hard-coded rule is only a labelled, opt-in fallback for when no LLM is available. Unprompted, explainable moves within the bounds are what we want to see. Every agent decision states what it expects to happen and is scored against what did happen, so its creativity stays accountable (FR-200, #2479).
 
 ## Data flywheel
 
