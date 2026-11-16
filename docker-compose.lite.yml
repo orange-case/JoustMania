@@ -33,7 +33,7 @@ services:
   # contract as docker-compose.yml; no OTel
   # export here (no collector in lite). Memory limit 64 MiB (NFR-051).
   flag-service:
-    image: ghcr.io/watchmejoustmyflags/joustmania/flag-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/flag-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/flag-service/Dockerfile
@@ -112,7 +112,7 @@ services:
     logging: *default-logging
   # Controller Manager Service
   controller-manager:
-    image: ghcr.io/watchmejoustmyflags/joustmania/controller-manager-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/controller-manager-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/controller_manager/Dockerfile
@@ -147,7 +147,7 @@ services:
 
   # Pairing Daemon - USB controller pairing and Bluetooth monitoring
   pairing-daemon:
-    image: ghcr.io/watchmejoustmyflags/joustmania/pairing-daemon-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/pairing-daemon-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/pairing_daemon/Dockerfile
@@ -196,7 +196,7 @@ services:
   # propagation, so hot-plugged hidraw nodes appear. No OTLP endpoint is set, so
   # it exports no telemetry (the lite stack has no collector).
   rust-hid:
-    image: ghcr.io/watchmejoustmyflags/joustmania/rust-hid:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/rust-hid:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/rust-hid/Dockerfile
@@ -236,7 +236,7 @@ services:
 
   # Game Coordinator Service
   game-coordinator:
-    image: ghcr.io/watchmejoustmyflags/joustmania/game-coordinator-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/game-coordinator-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/game_coordinator/Dockerfile
@@ -258,7 +258,7 @@ services:
 
   # Menu Service
   menu:
-    image: ghcr.io/watchmejoustmyflags/joustmania/menu-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/menu-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/menu/Dockerfile
@@ -284,7 +284,7 @@ services:
 
   # Audio Service
   audio:
-    image: ghcr.io/watchmejoustmyflags/joustmania/audio-service:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/audio-service:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/audio/Dockerfile
@@ -316,7 +316,7 @@ services:
 
   # Connect-Web Proxy
   connect-proxy:
-    image: ghcr.io/watchmejoustmyflags/joustmania/connect-proxy:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/connect-proxy:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/connect-proxy/Dockerfile
@@ -354,7 +354,7 @@ services:
 
   # Dashboard (SPA)
   dashboard:
-    image: ghcr.io/watchmejoustmyflags/joustmania/dashboard:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/dashboard:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/dashboard/Dockerfile
