@@ -184,24 +184,33 @@ func (o *out) controllerUUID(ctx context.Context, identifier string, create bool
 // controllerGameID reads the game_id trait of a controller identity ("" when
 // it has none, or the traits cannot be read: the identity is then cleared).
 func (o *out) controllerGameID(ctx context.Context, identifier, uuid string) (string, ctrlStop, error) {
+	traits, stop, err := o.controllerTraitList(ctx, identifier, uuid)
+	if stop == ctrlRefused {
+		return "", ctrlGoOn, nil
+	}
+	s, _ := traits[TraitGameID].(string)
+	return s, stop, err
+}
+
+// controllerTraitList reads the traits of a controller identity (key ->
+// value; a null value is no trait).
+func (o *out) controllerTraitList(ctx context.Context, identifier, uuid string) (map[string]any, ctrlStop, error) {
 	l := o.l
-	gameID := ""
+	traits := map[string]any{}
 	_, stop, err := o.ctrlCall(ctx, Key{Scope: identifier}, OpIdentity, func(c context.Context) (int, error) {
 		var raw json.RawMessage
 		status, err := l.Client().Admin(c, http.MethodGet, l.envPath("edge-identities/"+url.PathEscape(uuid)+"/list-traits/"), nil, &raw)
 		if err == nil {
-			gameID = traitValue(raw, TraitGameID)
+			traits = traitList(raw)
 		}
 		return status, err
 	})
-	if stop == ctrlRefused {
-		return "", ctrlGoOn, nil
-	}
-	return gameID, stop, err
+	return traits, stop, err
 }
 
-// traitValue finds a string trait in a trait list answer, plain or paged.
-func traitValue(raw json.RawMessage, key string) string {
+// traitList reads a trait list answer, plain or paged; a null value is no
+// trait.
+func traitList(raw json.RawMessage) map[string]any {
 	type item struct {
 		Key   string `json:"trait_key"`
 		Value any    `json:"trait_value"`
@@ -214,14 +223,13 @@ func traitValue(raw json.RawMessage, key string) string {
 		_ = json.Unmarshal(raw, &paged)
 		list = paged.Results
 	}
+	out := map[string]any{}
 	for _, t := range list {
-		if t.Key == key {
-			if s, ok := t.Value.(string); ok {
-				return s
-			}
+		if t.Value != nil {
+			out[t.Key] = t.Value
 		}
 	}
-	return ""
+	return out
 }
 
 // clearController removes every override of a registry feature from a
@@ -303,6 +311,13 @@ func overrideList(raw json.RawMessage) []FeatureState {
 // controllerTraits sets the owner's traits (settle) or clears them (release,
 // trait_value null). Traits are best effort, as on game identities: a refusal
 // skips the rest, a 400 switches traits off for the process.
+//
+// A settle writes game_id last: an op cut short before it (a 429, the link
+// going down) leaves the former game_id, so the restarted first settle does
+// not take its own half-done work for a restart while the game was live. A
+// release reads the traits first and clears only those that are set, so a
+// controller released already costs no write (the start cleanup of idle
+// controllers: two reads each, no write).
 func (o *out) controllerTraits(ctx context.Context, op ctrlOp, identifier, uuid string) (ctrlStop, error) {
 	if o.traitsOff.Load() {
 		return ctrlGoOn, nil
@@ -315,13 +330,23 @@ func (o *out) controllerTraits(ctx context.Context, op ctrlOp, identifier, uuid 
 	var bodies []traitBody
 	if op.kind == ctrlSettle {
 		g := op.game
-		for _, t := range [][2]string{{TraitGameID, g.id}, {TraitGameKind, g.kind}, {TraitCoordinatorInstance, g.instance}} {
+		for _, t := range [][2]string{{TraitGameKind, g.kind}, {TraitCoordinatorInstance, g.instance}, {TraitGameID, g.id}} {
 			v := t[1]
 			bodies = append(bodies, traitBody{Key: t[0], Value: &v})
 		}
 	} else {
+		set, stop, err := o.controllerTraitList(ctx, identifier, uuid)
+		switch {
+		case err != nil || stop == ctrlAgain:
+			return ctrlAgain, err
+		case stop == ctrlRefused:
+			// Unknown: clear every trait.
+			set = map[string]any{TraitGameID: true, TraitGameKind: true, TraitCoordinatorInstance: true}
+		}
 		for _, key := range []string{TraitGameID, TraitGameKind, TraitCoordinatorInstance} {
-			bodies = append(bodies, traitBody{Key: key})
+			if _, has := set[key]; has {
+				bodies = append(bodies, traitBody{Key: key})
+			}
 		}
 	}
 	for _, b := range bodies {

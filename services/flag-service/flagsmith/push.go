@@ -298,12 +298,18 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	identifier, sendable := l.ctrl.identityFor(k)
-	if !sendable {
+	identifier, decision := l.ctrl.identityFor(k)
+	switch decision {
+	case sendDrop:
 		// A player value of a game that ended or does not own the
 		// controller (any more): never sent to a controller another game
 		// owns (#2624).
 		l.Links().ForgetIdentity(k.Scope)
+		return true, nil
+	case sendWait:
+		// The controller's settle is due (it became due after this step
+		// looked for controller work): the next step settles it, then
+		// sends this value.
 		return true, nil
 	}
 	featureID, haveFeature := l.featureID(k)

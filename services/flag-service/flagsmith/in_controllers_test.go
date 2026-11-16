@@ -1,9 +1,13 @@
 package flagsmith_test
 
 import (
+	"net/http"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/joustmania/flag-service/flagsmith"
+	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
 	"github.com/joustmania/flag-service/state"
 )
 
@@ -75,5 +79,39 @@ func TestControllerRemovedOverrideNotAppliedFromLaggingDocument(t *testing.T) {
 	h.round()
 	if v, _ := h.local("interventions", "player_sensitivity_factor", "game:g2:MOCK0001"); string(v.Value) != "1.75" {
 		t.Fatalf("UC-054/BR-003 a new value on the controller = %+v, want 1.75", v)
+	}
+}
+
+// UC: UC-054 BR-010
+// The controller moves to a later game while the document request is in
+// flight: the round read its owner before the fetch, so it must not apply
+// the document's controller value to the former owner's key. The round skips
+// the controller; the next round applies the value to the new owner.
+func TestControllerMovedDuringFetchSkipped(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	registerReal(t, h, "g1", "MOCK0001")
+	flagsmith.SettleControllers(h.link)
+	doc := mustJSON(document(h.clock.Now().Add(-time.Minute), nil,
+		override{"controller:MOCK0001", []map[string]any{fsState("player_sensitivity_factor", true, "1.75")}}))
+	var moved atomic.Bool
+	h.fake.Handle("GET "+flagsmithtest.APIPath+"environment-document/", func(w http.ResponseWriter, _ *http.Request) {
+		if !moved.Swap(true) {
+			registerReal(t, h, "g2", "MOCK0001")
+			flagsmith.SettleControllers(h.link)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(doc)
+	})
+	h.round()
+	if v, _ := h.local("interventions", "player_sensitivity_factor", "game:g1:MOCK0001"); v.Present {
+		t.Fatalf("UC-054/BR-010 the new owner's value was applied to the former owner: %+v", v)
+	}
+	if st := h.link.Status(); st.Refused != 0 {
+		t.Fatalf("UC-054/BR-010 status %+v: the former owner's key was refused", st)
+	}
+	h.round()
+	if v, _ := h.local("interventions", "player_sensitivity_factor", "game:g2:MOCK0001"); string(v.Value) != "1.75" {
+		t.Fatalf("UC-054/BR-010 next round: game:g2:MOCK0001 = %+v, want 1.75", v)
 	}
 }

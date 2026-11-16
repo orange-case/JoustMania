@@ -236,28 +236,43 @@ func (c *controllers) end(id string) (ctrlGame, bool) {
 	return g, true
 }
 
+// sendDecision is what pushNext does with a pending key.
+type sendDecision int
+
+const (
+	sendNow  sendDecision = iota // send it to the identity
+	sendDrop                     // drop the key: its game ended or does not own the controller
+	sendWait                     // keep it pending: its controller's settle is still due
+)
+
 // identityFor is the identity a key's value is sent to. A player key of a
-// real game goes to its controller while that game owns it; ok is false for
-// a player key of a game that is not live or does not own the controller
-// (the key is dropped). Every other key keeps its own identity.
-func (c *controllers) identityFor(k Key) (string, bool) {
+// real game goes to its controller while that game owns it, and only once
+// the controller is settled for it (sendWait until then: no value of the
+// owner reaches the controller before the former overrides are gone,
+// UC-055 BR-004); a player key of a game that is not live or does not own
+// the controller is dropped. Every other key keeps its own identity.
+func (c *controllers) identityFor(k Key) (string, sendDecision) {
 	sc, name, ok := ScopeOfIdentity(k.Scope)
 	if !ok || name != registry.ScopeGameSerial {
-		return IdentityOf(k), true
+		return IdentityOf(k), sendNow
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	g, live := c.games[sc.GameID]
 	switch {
 	case !live:
-		return "", false
+		return "", sendDrop
 	case g.shadow():
-		return k.Scope, true
+		return k.Scope, sendNow
 	}
-	if e := c.entries[sc.Serial]; e != nil && e.owner == g.id {
-		return ControllerIdentity(sc.Serial), true
+	e := c.entries[sc.Serial]
+	switch {
+	case e == nil || e.owner != g.id:
+		return "", sendDrop
+	case e.settled != e.owner:
+		return "", sendWait
 	}
-	return "", false
+	return ControllerIdentity(sc.Serial), sendNow
 }
 
 // markRelease asks for the release of a controller without an owner (the

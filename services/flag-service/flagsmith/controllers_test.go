@@ -445,3 +445,79 @@ func TestControllerMarkReleaseOnlyWithoutOwner(t *testing.T) {
 		t.Fatalf("UC-054/A3 the live game's controller override was removed: %v", m.events())
 	}
 }
+
+// UC: UC-055 BR-004
+// A value of the owner that is queued while its controller's settle is still
+// due stays pending: nothing reaches the controller before the former
+// overrides are removed.
+func TestControllerValueWaitsForSettle(t *testing.T) {
+	e := newOutEnv(t)
+	newIDModel(e)
+	e.link.StateChanged(e.registered(realGame("g1", e.clk.Now(), "A"), nil))
+	e.link.StateChanged(e.player("g1", "A", "1.5"))
+	// The sender looks at the value first (the settle became due after it
+	// looked for controller work).
+	did, err := e.out.pushNext(context.Background())
+	if err != nil || !did {
+		t.Fatalf("pushNext: did %v err %v", did, err)
+	}
+	if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 0 {
+		t.Fatalf("UC-055/BR-004 %d override requests before the controller was settled, want 0", n)
+	}
+	if pending, _, _ := e.link.Links().Counts(); pending != 1 {
+		t.Fatalf("UC-055/BR-004 pending %d, want the value kept", pending)
+	}
+	e.drain()
+	if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 1 {
+		t.Fatalf("UC-055/BR-004 %d override requests after the settle, want 1", n)
+	}
+}
+
+// UC: UC-055 A1
+// Flagsmith says the controller identity exists but the search does not show
+// it: the settle is given up for this game (the controller is not read back),
+// never retried in a loop, and the value is still sent by identifier.
+func TestControllerDuplicateCreateRefusedNotRetried(t *testing.T) {
+	e := newOutEnv(t)
+	m := newIDModel(e)
+	m.add("controller:A", nil, nil)
+	e.setOn(http.MethodGet, apiEnv+"edge-identities/", func(w http.ResponseWriter, _ *http.Request) {
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{"results":[],"last_evaluated_key":null}`))
+	})
+	e.link.StateChanged(e.registered(realGame("g1", e.clk.Now(), "A"), nil))
+	e.link.StateChanged(e.player("g1", "A", "1.5"))
+	e.drain()
+	creates := 0
+	for _, b := range e.bodies(http.MethodPost, apiEnv+"edge-identities/") {
+		if strings.Contains(b, "controller:A") {
+			creates++
+		}
+	}
+	if creates != 1 {
+		t.Fatalf("UC-055/A1 %d creates of controller:A, want 1 (no retry loop)", creates)
+	}
+	if m.index("put controller:A") < 0 {
+		t.Fatalf("UC-055/A1 the value was not sent: %v", m.events())
+	}
+	if v, _ := e.link.ctrl.view(); v["A"].readable {
+		t.Fatal("UC-055/A1 controller read back although its settle was refused")
+	}
+}
+
+// UC: UC-054 A3
+// The start cleanup's release of a controller that holds nothing writes
+// nothing (two reads); one that still names a game has those traits cleared.
+func TestControllerReleaseWritesOnlyWhatIsSet(t *testing.T) {
+	e := newOutEnv(t)
+	m := newIDModel(e)
+	m.add("controller:Z", nil, nil)
+	m.add("controller:Y", nil, map[string]string{"game_id": "gone"})
+	e.link.ctrl.markRelease("Z")
+	e.link.ctrl.markRelease("Y")
+	e.drain()
+	got := m.events()
+	want := []string{"trait controller:Y game_id=null"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("UC-054/A3 writes %v, want %v", got, want)
+	}
+}
