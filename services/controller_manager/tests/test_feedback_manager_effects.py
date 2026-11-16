@@ -435,7 +435,7 @@ class TestWarningAndDeathEffectTimings:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="main", steps=[7])
-    async def test_warning_is_a_span_event_not_a_span(self, feedback_manager, recorded):
+    async def test_warning_is_a_span_event_not_a_span(self, feedback_manager, recorded, monkeypatch):
         """#2647: a warning adds one `player_warning` event to the current span and creates no span of its own."""
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -443,6 +443,7 @@ class TestWarningAndDeathEffectTimings:
 
         import services.controller_manager.feedback_manager as fm
 
+        monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)  # conftest disables the SDK
         exporter = InMemorySpanExporter()
         provider = TracerProvider()
         provider.add_span_processor(SimpleSpanProcessor(exporter))
