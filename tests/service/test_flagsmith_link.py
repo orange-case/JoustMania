@@ -1,27 +1,33 @@
-"""The flag service's Flagsmith link on the service tier (T2): start and restart (UC-054 A3, #2591).
+"""TC-022: the flag service's Flagsmith link on start and restart (UC-054 A3, UC-055 A5, #2591, #2592).
 
-The flag service is built from HEAD and linked to an in-process fake hosted Flagsmith
+The flag service is built from HEAD and linked to the stateful fake hosted Flagsmith
 (``tests/service/harness/fakes/flagsmith.py``, ``Composition(fake_flagsmith=True)``):
 FLAGSMITH_LINK=on, the fake's URLs and dummy keys. Every other composition keeps the link
-off, as every compose file does.
+off, as every compose file does. No preseed here: the first start creates the features
+(FR-214). The fake keeps the link's own pushes as API-key values (audit rows without an
+author) and a person's changes as a user's, so a restart reads the authors as it would
+from Flagsmith.
 
 - start: the link resolves the environment, creates every registry flag that is not a
   feature yet (FR-214, BR-002, never an ``initial_value``) and reports the restart rule;
-- offline start: an unreachable Flagsmith never stops the flag service: ``/healthz`` is
-  200, writes are accepted, ``/state`` shows the link offline with the reason (BR-007);
-- degraded rule: values the audit log has no author for are a person's and the rule is
-  ``degraded`` (BR-006, architecture note §5.1);
-- restart: an API key's overlay is cleared, a person's value comes back (BR-006).
+- offline start: an unreachable Flagsmith never stops the flag service (BR-007);
+- degraded rule: values the audit log has no author for are a person's (BR-006);
+- restart: an API key's value is cleared in Flagsmith, a person's value comes back, a kill
+  switch is never loosened (BR-005), game values wait for their game's registration, stale
+  game identities go after the grace (FR-211), unsent local changes are lost (FR-212);
+- start refused: identity overrides off in local evaluation keeps the link offline.
 
 Unit detail (ping first, audit parsing, kill switches, game identities, pacing) is in
 ``services/flag-service/flagsmith/start_test.go``.
 """
 
+from __future__ import annotations
+
 import time
 
 import pytest
 
-from tests.integration.flag_service import FlagService, FlagServiceError
+from tests.service import flagsmith_flow as fl
 from tests.service.harness import Composition
 
 pytestmark = pytest.mark.tier("service")
@@ -30,61 +36,46 @@ SERVICE_COMPOSITION = Composition(("controller-manager", "game-coordinator"), fa
 
 # The first start creates ~130 features and their tags at FLAGSMITH_PUSH_RATE (5/s).
 FIRST_START_SECONDS = 90.0
-RESTART_SECONDS = 30.0
+RESTART_SECONDS = fl.RESTART_SECONDS
+
+CAPTURE = ("agent", "decision.capture_content")
+TICK = ("agent", "experiment_tick_seconds")
+MAX_GAMES = ("agent", "experiment_max_games")  # kill switch: lower is tighter, baseline 50
+PACING = ("interventions", "pacing_profile")
 
 
-def _link(flag_service: FlagService) -> dict:
-    return flag_service.state().get("flagsmith", {})
+@pytest.fixture(autouse=True)
+def settled_link(stack, flag_service):
+    fake = stack.fake_flagsmith
+    fl.wait_link(flag_service, FIRST_START_SECONDS, link="online")
+    yield fake
+    flag_service.cleanup()
+    fl.settle(flag_service, fake)
 
 
-def _wait_link(flag_service: FlagService, timeout: float, **want) -> dict:
-    deadline = time.monotonic() + timeout
-    link: dict = {}
-    while time.monotonic() < deadline:
-        link = _link(flag_service)
-        if all(link.get(k) == v for k, v in want.items()):
-            return link
-        time.sleep(0.25)
-    raise AssertionError(f"flagsmith link {link}, want {want}")
+def _restart(stack, flag_service, **want) -> float:
+    """Restart the flag service; returns the monotonic time taken BEFORE the restart.
 
-
-def _put_when_synced(flag_service: FlagService, set_id: str, flag: str, variant: str) -> None:
-    """PUT once flagd has reopened its sync stream after a restart (503 no_sync_stream until then)."""
-    deadline = time.monotonic() + RESTART_SECONDS
-    while True:
-        try:
-            flag_service.put(set_id, flag, variant=variant)
-            return
-        except FlagServiceError:
-            if time.monotonic() > deadline:
-                raise
-            time.sleep(0.25)
-
-
-def _wait_overlay(flag_service: FlagService, set_id: str, flag: str, timeout: float) -> dict:
-    """The stack overlay once it is set (a pulled write deferred by no_sync_stream lands on a later poll)."""
-    deadline = time.monotonic() + timeout
-    while True:
-        overlay = flag_service.get(set_id, flag).get("stack_overlay") or {}
-        if overlay or time.monotonic() > deadline:
-            return overlay
-        time.sleep(0.25)
+    Every effect of the new process (its Start, the stale-identity grace that starts at the end
+    of Start, its pushes) is after this point, whatever the readiness probe's timing."""
+    before = time.monotonic()
+    stack.flag_plane.restart_flag_service()
+    if want:
+        fl.wait_link(flag_service, RESTART_SECONDS, **want)
+    return before
 
 
 def _registry_keys() -> set[str]:
-    import yaml
-
+    from tests.service.harness.fakes.flagsmith import registry_features
     from tests.service.harness.flag_plane import FLAG_SERVICE_SRC
 
-    doc = yaml.safe_load((FLAG_SERVICE_SRC / "registry.yaml").read_text())
-    rows = doc["flags"] if isinstance(doc, dict) and "flags" in doc else doc
-    return {row["key"] for row in rows}
+    return {key for _, key in registry_features(FLAG_SERVICE_SRC / "registry.yaml")}
 
 
-@pytest.mark.uc("UC-054", flow="A3", br=["BR-002"])
+@pytest.mark.uc("UC-054", flow="A3", br=["BR-002"], tc="TC-022")
 def test_start_creates_missing_features(stack, flag_service):
     fake = stack.fake_flagsmith
-    link = _wait_link(flag_service, FIRST_START_SECONDS, link="online")
+    link = fl.wait_link(flag_service, FIRST_START_SECONDS, link="online")
     assert link["environment"] == "service-tier"
     assert link["restart_rule"] == "audit_log"  # an empty document has nothing to classify
     created = fake.created_features()
@@ -97,77 +88,171 @@ def test_start_creates_missing_features(stack, flag_service):
         assert body.get("tags"), f"{body['name']} has no flag-set tag"
 
 
-@pytest.mark.uc("UC-054", flow="A3", br=["BR-007"])
-def test_offline_start_serves_baseline(stack, flag_service):
-    fake = stack.fake_flagsmith
-    _wait_link(flag_service, FIRST_START_SECONDS, link="online")
+@pytest.mark.uc("UC-054", flow="A3", br=["BR-007"], tc="TC-022")
+def test_offline_start_serves_baseline(stack, flag_service, settled_link):
+    fake = settled_link
     fake.down = True
     try:
-        stack.flag_plane.restart_flag_service()
-        link = _wait_link(flag_service, RESTART_SECONDS, link="offline")
+        link = _restart(stack, flag_service, link="offline") and fl.link(flag_service)
         assert link["offline_reason"] == "http_503"
         status, body = flag_service.request("GET", "/healthz")
         assert status == 200, body
         # flagd reconnects on its own after the restart (503 no_sync_stream until then).
-        _put_when_synced(flag_service, "agent", "decision.capture_content", "off")
-        assert flag_service.get("agent", "decision.capture_content")["stack_overlay"]["variant"] == "off"
+        fl.put_when_synced(flag_service, *CAPTURE, variant="off")
+        assert fl.overlay(flag_service, *CAPTURE)["variant"] == "off"
     finally:
         fake.down = False
-    _wait_link(flag_service, RESTART_SECONDS + 60, link="online")
+    fl.wait_link(flag_service, RESTART_SECONDS + 60, link="online")
 
 
-@pytest.mark.uc("UC-054", flow="A3", br=["BR-006"])
-def test_degraded_rule_in_state(stack, flag_service):
-    fake = stack.fake_flagsmith
-    _wait_link(flag_service, FIRST_START_SECONDS, link="online")
-    fake.set_document(
-        [{"feature": {"id": 1, "name": "experiment_tick_seconds", "type": "STANDARD"},
-          "enabled": True, "feature_segment": None, "feature_state_value": 10}]
-    )  # fmt: skip
+@pytest.mark.uc("UC-054", flow="A3", br=["BR-006"], tc="TC-022")
+def test_degraded_rule_in_state(stack, flag_service, settled_link):
+    fake = settled_link
+    fake.person_sets(TICK[1], 40)
     fake.audit_rows = []  # the free plan: 200 with no rows
+    _restart(stack, flag_service, link="online", restart_rule="degraded")
+    assert "restart_rule_degraded" in stack.flag_plane.flag_service.log_tail()
+    # A value without an author is applied as a person's.
+    fl.wait_overlay(flag_service, *TICK, timeout=RESTART_SECONDS, value=40, writer="flagsmith")
+
+
+@pytest.mark.uc("UC-054", flow="A3", br=["BR-006"], tc="TC-022")
+def test_restart_clears_own_overlay(stack, flag_service, settled_link):
+    fake = settled_link
+    # Step 1: a local overlay is pushed: Flagsmith holds it with an API key's audit row.
+    t0 = time.monotonic()
+    fl.put_when_synced(flag_service, *CAPTURE, variant="off")
+    fl.wait_push(fake, CAPTURE[1], lambda r: fl.patch_value(r) == (True, "off"), after=t0)
+    assert fake.audit_rows[0] == {"log": f"Flag state updated for feature: {CAPTURE[1]}", "author": None}
+    fl.wait_pulls(flag_service, 1)
+    # Step 2: the flag service restarts.
+    restarted = _restart(stack, flag_service, link="online", restart_rule="audit_log")
+    # Step 3: the link's own value is cleared in Flagsmith (enabled false), not applied locally.
+    # The clear is queued by the first pull round after the start round (#2610 wakes the sender).
+    fl.wait_push(fake, CAPTURE[1], lambda r: not fl.patch_value(r)[0], after=restarted, timeout=RESTART_SECONDS)
+    assert fake.env_value(CAPTURE[1])[0] is False
+    fl.wait_pulls(flag_service, 2)
+    assert fl.overlay(flag_service, *CAPTURE) == {}, "the link's own value came back after a restart"
+
+
+@pytest.mark.uc("UC-054", flow="A3", br=["BR-006"], tc="TC-022")
+def test_restart_keeps_persons_value(stack, flag_service, settled_link):
+    fake = settled_link
+    # Step 1: a person's value is in force.
+    fake.person_sets(CAPTURE[1], "off")
+    fl.wait_overlay(flag_service, *CAPTURE, variant="off", writer="flagsmith")
+    # Step 2: the flag service restarts (the in-memory overlay is gone).
+    restarted = _restart(stack, flag_service, link="online", restart_rule="audit_log")
+    # Step 3: the person's value comes back (a start defers it while flagd has no sync stream yet).
+    fl.wait_overlay(flag_service, *CAPTURE, timeout=RESTART_SECONDS, variant="off", writer="flagsmith")
+    assert not [r for r in fake.pushes(CAPTURE[1]) if r["t"] >= restarted], "a person's value was cleared"
+
+
+@pytest.mark.uc("UC-054", flow="A3", br=["BR-005"], tc="TC-022")
+def test_restart_never_loosens_kill_switch(stack, flag_service, settled_link):
+    fake = settled_link
+    baseline = flag_service.get(*MAX_GAMES)["variant_values"][flag_service.get(*MAX_GAMES)["baseline_default"]]
+    # (a) Step 1: a person loosened the kill switch above the baseline; it is in force.
+    fake.person_sets(MAX_GAMES[1], baseline + 30)
+    fl.wait_overlay(flag_service, *MAX_GAMES, value=baseline + 30, writer="flagsmith")
+    # Step 2: restart: with no last state the tighter local baseline stays and is pushed.
+    restarted = _restart(stack, flag_service, link="online")
+    fl.wait_push(fake, MAX_GAMES[1], lambda r: not fl.patch_value(r)[0], after=restarted, timeout=RESTART_SECONDS)
+    fl.wait_pulls(flag_service, 2)
+    assert fl.overlay(flag_service, *MAX_GAMES) == {}, "a restart loosened a kill switch"
+    # (b) Step 3: an API key tightened it; the restart clear does not undo the tightening.
+    fake.set_value(MAX_GAMES[1], baseline - 30)  # author None: an API key
+    fl.wait_overlay(flag_service, *MAX_GAMES, value=baseline - 30, writer="flagsmith")
+    fl.wait_pulls(flag_service, 1)
+    restarted = _restart(stack, flag_service, link="online")
+    fl.wait_overlay(flag_service, *MAX_GAMES, timeout=RESTART_SECONDS, value=baseline - 30, writer="flagsmith")
+    fl.wait_pulls(flag_service, 2)
+    assert fake.env_value(MAX_GAMES[1]) == (True, baseline - 30)
+    assert not [r for r in fake.pushes(MAX_GAMES[1]) if r["t"] >= restarted], "the tightening was cleared"
+
+
+@pytest.mark.uc("UC-054", flow="A3", br=["BR-006"], tc="TC-022")
+def test_restart_game_overrides_wait_for_registration(stack, flag_service, settled_link):
+    fake = settled_link
+    person_game, own_game = fl.new_game_id(), fl.new_game_id()
+    # Step 1: Flagsmith holds a person's game value and one an API key (the link) set.
+    fake.person_overrides(f"game:{person_game}", PACING[1], "calm")
+    fake.set_override(f"game:{own_game}", PACING[1], "frantic")  # author None
     try:
-        stack.flag_plane.restart_flag_service()
-        link = _wait_link(flag_service, RESTART_SECONDS, link="online")
-        assert link["restart_rule"] == "degraded"
-        assert "restart_rule_degraded" in stack.flag_plane.flag_service.log_tail()
+        # Step 2: restart; no game is registered yet: nothing is applied.
+        _restart(stack, flag_service, link="online")
+        fl.wait_pulls(flag_service, 2)
+        assert not (flag_service.get(*PACING).get("games") or {}), "a game value applied before registration"
+        # Step 3: the games register: the person's value is applied, the link's own is removed.
+        fl.register_game(flag_service, person_game, ["MOCK0011"])
+        fl.register_game(flag_service, own_game, ["MOCK0012"])
+        got = fl.wait_for(
+            lambda: (flag_service.get(*PACING).get("games") or {}).get(person_game), fl.PULL_TIMEOUT, "person's value"
+        )
+        assert got["value"] == "calm" and got["writer"] == "flagsmith", got
+        fl.wait_for(
+            lambda: fake.override(f"game:{own_game}", PACING[1]) is None, fl.PULL_TIMEOUT, "own override removed"
+        )
+        assert own_game not in (flag_service.get(*PACING).get("games") or {})
     finally:
-        fake.set_document([])
+        fl.end_game(flag_service, person_game)
+        fl.end_game(flag_service, own_game)
 
 
-@pytest.mark.uc("UC-054", flow="A3", br=["BR-006"])
-def test_restart_clears_own_overlay(stack, flag_service):
-    fake = stack.fake_flagsmith
-    _wait_link(flag_service, FIRST_START_SECONDS, link="online")
-    # An in-memory overlay is pushed (out side), then the flag service restarts.
-    # An earlier test may have just restarted the flag service: wait for flagd's sync stream.
-    _put_when_synced(flag_service, "agent", "decision.capture_content", "off")
-    deadline = time.monotonic() + RESTART_SECONDS
-    while time.monotonic() < deadline and not fake.requests(path_contains="__future__"):
-        time.sleep(0.25)
-    assert fake.requests(path_contains="__future__"), "the overlay was not pushed"
-    fake.audit_rows = [{"log": "Flag state updated for feature: decision.capture_content", "author": None}]
-    stack.flag_plane.restart_flag_service()
-    _wait_link(flag_service, RESTART_SECONDS, link="online")
-    # The API-key value is cleared in Flagsmith, not applied locally.
-    # Passes partly because a restart drops in-memory overlays anyway; #2592 strengthens it.
-    assert flag_service.get("agent", "decision.capture_content").get("stack_overlay") is None
-
-
-@pytest.mark.uc("UC-054", flow="A3", br=["BR-006"])
-def test_restart_keeps_persons_value(stack, flag_service):
-    fake = stack.fake_flagsmith
-    _wait_link(flag_service, FIRST_START_SECONDS, link="online")
-    fake.set_document(
-        [{"feature": {"id": 1, "name": "decision.capture_content", "type": "STANDARD"},
-          "enabled": True, "feature_segment": None, "feature_state_value": "off"}]
-    )  # fmt: skip
-    fake.audit_rows = [{"log": "Flag state updated for feature: decision.capture_content", "author": {"id": 1}}]
+@pytest.mark.uc("UC-054", flow="A3", tc="TC-022")
+def test_restart_removes_stale_identities_after_grace(stack, flag_service, settled_link):
+    fake = settled_link
+    stale, live = fl.new_game_id(), fl.new_game_id()
+    fake.add_identity(f"game:{stale}")
+    fake.add_identity(f"game:{live}")
     try:
-        stack.flag_plane.restart_flag_service()
-        _wait_link(flag_service, RESTART_SECONDS, link="online", restart_rule="audit_log")
-        # The start reconcile defers the write while flagd has no sync stream yet (no_sync_stream);
-        # a later poll applies it, within FR-208's 30 s.
-        overlay = _wait_overlay(flag_service, "agent", "decision.capture_content", RESTART_SECONDS)
-        assert overlay.get("variant") == "off" and overlay.get("writer") == "flagsmith", overlay
+        # Step 1: restart; the live game registers again, the stale one never does.
+        restarted = _restart(stack, flag_service)
+        fl.wait_for(lambda: fl.register_game(flag_service, live, ["MOCK0013"]) or True, 30, "register")
+        # Step 2: the stale identity is deleted after the 45 s grace (bound 75 s), never before.
+        fl.wait_for(lambda: f"game:{stale}" not in fake.identities(), 75, "the stale identity deleted")
+        deletes = [r["t"] - restarted for r in fake.requests("DELETE", "/edge-identities/") if r["t"] >= restarted]
+        # The grace starts at the end of Start, after ``restarted`` (taken before the restart).
+        assert deletes and 45 <= min(deletes) <= 75, deletes
+        # Step 3: the registered game's identity stays.
+        assert f"game:{live}" in fake.identities()
     finally:
-        fake.set_document([])
+        fl.end_game(flag_service, live)
+
+
+@pytest.mark.uc("UC-055", flow="A5", tc="TC-022")
+def test_restart_loses_unsent_changes(stack, flag_service, settled_link):
+    fake = settled_link
+    # Step 1: Flagsmith is down; a local change waits to be sent.
+    fake.down = True
+    try:
+        fl.wait_link(flag_service, fl.PULL_TIMEOUT, link="offline")
+        flag_service.put(*TICK, value=77)
+        assert fl.link(flag_service)["pending"] >= 1
+        # Step 2: the flag service restarts before Flagsmith is back.
+        _restart(stack, flag_service, link="offline")
+    finally:
+        fake.down = False
+    # Step 3: back online, the unsent change is gone: never sent, not in force.
+    state = fl.wait_link(flag_service, RESTART_SECONDS + 60, link="online")
+    assert state["restart_rule"], state
+    fl.wait_pulls(flag_service, 2)
+    assert not [r for r in fake.pushes(TICK[1]) if fl.patch_value(r) == (True, "77")], fake.pushes(TICK[1])
+    assert fl.overlay(flag_service, *TICK) == {}
+    assert fl.link(flag_service)["pending"] == 0
+
+
+@pytest.mark.uc("UC-054", flow="A3", tc="TC-022")
+def test_identity_overrides_disabled_keeps_link_offline(stack, flag_service, settled_link):
+    """Last in the module: the link stays offline until the setting is back."""
+    fake = settled_link
+    fake.identity_overrides_in_local_eval = False
+    try:
+        state = _restart(stack, flag_service, link="offline") and fl.link(flag_service)
+        assert state["offline_reason"] == "identity_overrides_disabled", state
+        # Local writes still work.
+        fl.put_when_synced(flag_service, *TICK, value=55)
+        assert fl.overlay(flag_service, *TICK)["value"] == 55
+    finally:
+        fake.identity_overrides_in_local_eval = True
+    fl.wait_link(flag_service, RESTART_SECONDS + 60, link="online")

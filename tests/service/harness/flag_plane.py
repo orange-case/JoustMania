@@ -251,6 +251,17 @@ class FlagPlane:
         _docker("restart", "-t", "5", self.container)
         self._wait_flagd_ready()
 
+    def stop_flagd(self) -> None:
+        """``docker stop`` flagd (the container stays): the flag service loses its sync
+        stream and answers writes 503 no_sync_stream until ``start_flagd`` (UC-054 A5).
+        Always pair it with ``start_flagd`` in a ``finally``."""
+        _docker("stop", "-t", "5", self.container)
+
+    def start_flagd(self) -> None:
+        """``docker start`` the flagd stopped by ``stop_flagd`` (same host ports); wait until it serves."""
+        _docker("start", self.container)
+        self._wait_flagd_ready()
+
     # ----------------------------------------------------------------- flagd
     def _start_flagd(self) -> None:
         fh.remove_stale_containers(OWNERSHIP)

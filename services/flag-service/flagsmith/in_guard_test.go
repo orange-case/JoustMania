@@ -203,7 +203,7 @@ func TestOlderDocumentRefused(t *testing.T) {
 	}
 	h.round()
 	if ims := lastIMS(); ims != "" {
-		t.Fatalf("UC-054/2 the pull after a stale document sent If-Modified-Since %q, want a full pull", ims)
+		t.Fatalf("UC-054/main step 2 the pull after a stale document sent If-Modified-Since %q, want a full pull", ims)
 	}
 }
 
@@ -354,7 +354,7 @@ func (w *slotRacer) FlagsmithPut(ctx context.Context, req state.WriteRequest) (s
 	return w.API.FlagsmithPut(ctx, req)
 }
 
-// UC: UC-054 3
+// UC: UC-054 main step 3
 // A pulled write to an empty game slot (not in the round's snapshot) is
 // conditional too: a local write that lands first wins, the pulled one is
 // deferred (#2590 P2; #2596 finding 5, delta finding 2, H).
@@ -370,7 +370,7 @@ func TestEmptyGameSlotWriteIsConditional(t *testing.T) {
 	h.setDoc(nil, override{"game:g1", []map[string]any{fsState("volume_override", true, "0.5")}})
 	h.round()
 	if v, _ := h.local("interventions", "volume_override", "game:g1"); string(v.Value) != "0.7" {
-		t.Fatalf("UC-054/3 volume_override on g1 = %+v, want the operator's 0.7 (the pulled write must be 412 slot_changed)", v)
+		t.Fatalf("UC-054/main step 3 volume_override on g1 = %+v, want the operator's 0.7 (the pulled write must be 412 slot_changed)", v)
 	}
 	if _, ok := h.link.Links().Remote(volumeOverrideG1); ok {
 		t.Fatal("UC-054/A5 the remote value is known after a deferred apply, want it restored to unknown")
@@ -512,30 +512,30 @@ func headerDocHarness(t *testing.T, header, backend string, clock1970 bool) (*ha
 	}
 }
 
-// UC: UC-054 2
+// UC: UC-054 main step 2
 // A garbled update time (not a finite epoch after 1970, or after year 9999)
 // is no update time: it never pins the newest time, so a later document is
 // not refused as older (#2596 delta 2 finding 3). No local clock is involved.
 func TestGarbledUpdateTimeIgnored(t *testing.T) {
 	start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC) // the harness clock
 	for _, hdr := range []string{"NaN", "+Inf", "1e300", "-5", "253402300800"} {
-		t.Run("UC-054/2 header "+hdr, func(t *testing.T) {
+		t.Run("UC-054/main step 2 header "+hdr, func(t *testing.T) {
 			h, set := headerDocHarness(t, hdr, "claude", false)
 			h.online()
 			h.round()
 			if got := h.link.LastModified(); got != "" {
-				t.Fatalf("UC-054/2 Last-Modified %q from the garbled header %q, want none", got, hdr)
+				t.Fatalf("UC-054/main step 2 Last-Modified %q from the garbled header %q, want none", got, hdr)
 			}
 			set(fmt.Sprintf("%d", start.Add(-30*time.Second).Unix()), "openai")
 			h.round()
 			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
-				t.Fatalf("UC-054/2 decision.backend = %+v after the garbled header %q: the later document was refused as older", v, hdr)
+				t.Fatalf("UC-054/main step 2 decision.backend = %+v after the garbled header %q: the later document was refused as older", v, hdr)
 			}
 		})
 	}
 }
 
-// UC: UC-054 2
+// UC: UC-054 main step 2
 // A genuine Flagsmith time far ahead of the local clock (a Pi at 1970 before
 // NTP) is still an update time: an older document after it is refused, so the
 // stale-document refusal never depends on the local clock.
@@ -547,30 +547,30 @@ func TestUpdateTimeAheadOfLocalClockUsed(t *testing.T) {
 	set(fmt.Sprintf("%d", start.Add(-time.Hour).Unix()), "openai")
 	h.round()
 	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" {
-		t.Fatalf("UC-054/2 decision.backend = %+v: an older document was applied after a time ahead of the 1970 local clock", v)
+		t.Fatalf("UC-054/main step 2 decision.backend = %+v: an older document was applied after a time ahead of the 1970 local clock", v)
 	}
 }
 
-// UC: UC-054 2
+// UC: UC-054 main step 2
 // A body updated_at outside 1970 to year 9999 (after its offset) is no update
 // time: it sets no Last-Modified and never pins the newest time (#2596 delta
 // 3 finding 2).
 func TestGarbledBodyUpdateTimeIgnored(t *testing.T) {
 	start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC) // the harness clock
 	for _, body := range []string{"9999-12-31T23:59:59-23:00", "1970-01-01T00:00:00Z"} {
-		t.Run("UC-054/2 body "+body, func(t *testing.T) {
+		t.Run("UC-054/main step 2 body "+body, func(t *testing.T) {
 			doc := document(start, []map[string]any{fsState("decision.backend", true, "claude")})
 			doc["updated_at"] = body
 			h := newHarness(t, harnessOpts{doc: doc})
 			h.online()
 			h.round()
 			if got := h.link.LastModified(); got != "" {
-				t.Fatalf("UC-054/2 Last-Modified %q from the body updated_at %q, want none", got, body)
+				t.Fatalf("UC-054/main step 2 Last-Modified %q from the body updated_at %q, want none", got, body)
 			}
 			h.fake.SetDocument(document(start.Add(-30*time.Second), []map[string]any{fsState("decision.backend", true, "openai")}), "")
 			h.round()
 			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
-				t.Fatalf("UC-054/2 decision.backend = %+v after the body updated_at %q: the later document was refused as older", v, body)
+				t.Fatalf("UC-054/main step 2 decision.backend = %+v after the body updated_at %q: the later document was refused as older", v, body)
 			}
 		})
 	}
@@ -644,7 +644,7 @@ func TestStaleRefusalEndsAfterTimeout(t *testing.T) {
 		h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off"), fsState("decision.backend", true, "openai")}), "")
 		h.round()
 		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
-			t.Fatalf("UC-054/2 decision.backend = %+v: the document after the accepted one was refused", v)
+			t.Fatalf("UC-054/main step 2 decision.backend = %+v: the document after the accepted one was refused", v)
 		}
 	})
 	t.Run("UC-054/BR-005 accepted at exactly the threshold", func(t *testing.T) {
