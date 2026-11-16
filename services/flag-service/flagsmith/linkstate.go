@@ -26,6 +26,10 @@ type pending struct {
 	// value a Refuse without one refers to.
 	sent    Value
 	hasSent bool
+	// offline: the latest change was made while the link was not connected
+	// (UC-054 A2, #2621). Such an entry is never sent: the in side discards
+	// it in favour of Flagsmith. Only stack-scope entries are marked.
+	offline bool
 }
 
 type entry struct {
@@ -98,6 +102,54 @@ func (s *LinkState) dropFromQueueLocked(k Key) {
 	}
 }
 
+// HasPending reports whether k has a local value waiting to be sent.
+func (s *LinkState) HasPending(k Key) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entries[k]
+	return e != nil && e.pending != nil
+}
+
+// PendingOffline reports whether k's pending local value was made while the
+// link was not connected (UC-054 A2, #2621): the in side discards it.
+func (s *LinkState) PendingOffline(k Key) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entries[k]
+	return e != nil && e.pending != nil && e.pending.offline
+}
+
+// DropOffline discards k's pending value made offline, only while it is still
+// the change of snapshot version (a local write made since is kept).
+func (s *LinkState) DropOffline(k Key, version uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil && e.pending != nil && e.pending.offline && e.pending.version == version {
+		e.pending = nil
+		s.dropFromQueueLocked(k)
+	}
+}
+
+// HoldRefused keeps v as k's refused local value (UC-055 A4) after a pull
+// round reverted it to Flagsmith's value: a re-save of v is not sent again.
+func (s *LinkState) HoldRefused(k Key, v Value) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil {
+		e.pushRefused, e.hasPushRefused = v, true
+	}
+}
+
+// PushRefused returns the local value Flagsmith last refused for k.
+func (s *LinkState) PushRefused(k Key) (Value, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil && e.hasPushRefused {
+		return e.pushRefused, true
+	}
+	return Value{}, false
+}
+
 func (s *LinkState) deleteLocked(k Key) {
 	if e := s.entries[k]; e != nil && e.pending != nil {
 		s.dropFromQueueLocked(k)
@@ -122,6 +174,12 @@ func (s *LinkState) deleteLocked(k Key) {
 // A4); a different value clears that refusal. It runs under State.mu: map work
 // only.
 func (s *LinkState) Offer(k Key, v Value, at time.Time, version uint64) (queued bool) {
+	return s.OfferFrom(k, v, at, version, false)
+}
+
+// OfferFrom is Offer that records whether the change was made while the link
+// was not connected (offline: marks a stack-scope entry, UC-054 A2, #2621).
+func (s *LinkState) OfferFrom(k Key, v Value, at time.Time, version uint64, offline bool) (queued bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
@@ -142,7 +200,7 @@ func (s *LinkState) Offer(k Key, v Value, at time.Time, version uint64) (queued 
 		}
 		e.pushRefused, e.hasPushRefused = Value{}, false
 	}
-	return s.offerLocked(k, e, v, at, version)
+	return s.offerLocked(k, e, v, at, version, offline)
 }
 
 // Reoffer is Offer for a pull round (the in side), which re-reads a local value
@@ -164,7 +222,7 @@ func (s *LinkState) Reoffer(k Key, v Value, at time.Time, version uint64) (queue
 	case e.pending != nil:
 		return false
 	}
-	return s.offerLocked(k, e, v, at, version)
+	return s.offerLocked(k, e, v, at, version, false)
 }
 
 // inSyncLocked records a local value equal to the remote one: nothing to
@@ -178,15 +236,15 @@ func (s *LinkState) inSyncLocked(k Key, e *entry) {
 	e.inSync = true
 }
 
-func (s *LinkState) offerLocked(k Key, e *entry, v Value, at time.Time, version uint64) bool {
+func (s *LinkState) offerLocked(k Key, e *entry, v Value, at time.Time, version uint64, offline bool) bool {
 	e.inSync = false
 	if e.pending != nil {
 		e.pending.value = v
 		e.pending.merged++
-		e.pending.version = version
+		e.pending.version, e.pending.offline = version, offline
 		return true
 	}
-	e.pending = &pending{value: v, at: at, merged: 1, version: version}
+	e.pending = &pending{value: v, at: at, merged: 1, version: version, offline: offline}
 	s.queue = append(s.queue, k)
 	return true
 }
@@ -200,7 +258,8 @@ func (s *LinkState) Next() (k Key, v Value, merged int, version uint64, ok bool)
 	now := s.now()
 	for _, q := range s.queue {
 		p := s.entries[q].pending
-		if p.notBefore.After(now) {
+		if p.notBefore.After(now) || p.offline {
+			// An offline-made change waits for the in side (UC-054 A2).
 			continue
 		}
 		p.sent, p.hasSent = p.value, true

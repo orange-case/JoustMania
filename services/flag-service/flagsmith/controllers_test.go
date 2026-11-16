@@ -521,3 +521,26 @@ func TestControllerReleaseWritesOnlyWhatIsSet(t *testing.T) {
 		t.Fatalf("UC-054/A3 writes %v, want %v", got, want)
 	}
 }
+
+// UC: UC-054 A2
+// UC: UC-055 A3
+// A controller's value (a real game's player value) written while the link is
+// not connected is player-scoped live game state: it is never held back as an
+// offline stack change, and it is sent to controller:<serial> (#2621).
+func TestControllerValueWrittenOfflineIsSent(t *testing.T) {
+	e := newOutEnv(t)
+	m := newIDModel(e)
+	fid := e.fid("player_sensitivity_factor")
+	e.link.connected.Store(false) // the change is made offline
+	g1 := realGame("g1", e.clk.Now(), "A")
+	e.link.StateChanged(e.registered(g1, nil))
+	e.link.StateChanged(e.player("g1", "A", "1.5"))
+	if e.link.Links().PendingOffline(Key{Set: "interventions", Flag: "player_sensitivity_factor", Scope: "game:g1:A"}) {
+		t.Fatal("UC-054/A2 a controller value written offline is marked for discard")
+	}
+	e.link.connected.Store(true) // back online: the sender drains
+	e.drain()
+	if v := string(m.get("controller:A").overrides[fid]); v != `"1.5"` {
+		t.Fatalf("UC-055/A3 controller:A override %s after the reconnect, want \"1.5\" sent", v)
+	}
+}

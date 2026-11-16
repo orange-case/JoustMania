@@ -352,6 +352,12 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 		// stays pending. The refused value is remembered, so no pull round
 		// re-sends it before a different local value (UC-055 A4).
 		l.Links().RefuseValue(k, v, SideRemote, oc.reason)
+		if k.Scope == ScopeStack {
+			// The in side reverts it to Flagsmith's value at once (UC-055 A4,
+			// #2621), with a full pull: the document did not change.
+			l.fullPull.Store(true)
+			l.Wake()
+		}
 	}
 	return true, nil
 }
@@ -370,4 +376,8 @@ func (o *out) refuseUnsent(ctx context.Context, k Key, v Value, merged int, vers
 	l.Metrics().RecordPush(ctx, op, ResultRejected, reason)
 	EndSpan(span, ResultRejected, reason)
 	l.Links().RefuseValue(k, v, SideRemote, reason)
+	if k.Scope == ScopeStack {
+		l.fullPull.Store(true)
+		l.Wake()
+	}
 }

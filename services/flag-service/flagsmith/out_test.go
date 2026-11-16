@@ -136,6 +136,7 @@ func newOutEnvWith(t *testing.T, d Deps) *outEnv {
 		t.Fatal(err)
 	}
 	e.link = l
+	l.connected.Store(true) // the out side alone: every change is made online
 	e.out = l.out.(*out)
 	for i, f := range testFlags {
 		l.IDs().FeatureID[f.key] = 100 + i

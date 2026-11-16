@@ -205,7 +205,7 @@ else:
 # The Flagsmith link (services.md §7.3, UC-054 A1/A3): never a FAIL, the stack works without it.
 link = state.get("flagsmith")
 if isinstance(link, dict):
-    mode, rule = link.get("link"), link.get("restart_rule")
+    mode = link.get("link")
     config_error = link.get("config_error") or []
     if mode == "off":
         if config_error:
@@ -219,11 +219,6 @@ if isinstance(link, dict):
                 return 0
         refused, out_of_sync, pending = count("refused"), count("out_of_sync"), count("pending")
         warned = False
-        if rule == "degraded":
-            print("WARN  Flagsmith link online, restart rule degraded: the audit log does not say who made every "
-                  "value, so values without an author were applied as a person's (a pushed overlay may be back; "
-                  "reset: ./scripts/talk-stage.sh reset)")
-            warned = True
         # Stuck keys only (#2592): out_of_sync up to pending is pushes in flight.
         if refused > 0 or out_of_sync > pending:
             print(f"WARN  Flagsmith link online, out of sync: {refused} refused, {out_of_sync} out of sync, "
@@ -231,7 +226,7 @@ if isinstance(link, dict):
                   "Flags / OpenFeature, row Flagsmith link)")
             warned = True
         if not warned:
-            print(f"PASS  Flagsmith link online (environment {link.get('environment', '?')}, restart rule {rule or 'pending'})")
+            print(f"PASS  Flagsmith link online (environment {link.get('environment', '?')})")
     elif mode == "starting":
         print("WARN  Flagsmith link starting: Flagsmith changes are not applied yet")
     else:

@@ -36,7 +36,7 @@ SERVICE_COMPOSITION = Composition(
 
 CAPTURE = ("agent", "decision.capture_content")  # variants on/off, stack only
 TICK = ("agent", "experiment_tick_seconds")  # integer 1..1000, stack only
-MAX_GAMES = ("agent", "experiment_max_games")  # kill switch (flags.md §13.6): lower is tighter
+MAX_GAMES = ("agent", "experiment_max_games")  # kill switch (flags.md §13.6): Flagsmith wins it too
 BACKEND = ("agent", "decision.backend")  # persist: true (an admin setting)
 PACING = ("interventions", "pacing_profile")  # game scope
 HANDICAP = ("interventions", "player_handicap_factor")  # game+serial scope
@@ -195,29 +195,47 @@ def test_own_push_never_comes_back(flag_service, settled_link):
 
 
 # ------------------------------------------------------------------ UC-054 A1 + UC-055 A3
-@pytest.mark.uc("UC-054", flow="A1", tc="TC-021")
+@pytest.mark.uc("UC-054", flow="A1", br=["BR-007"], tc="TC-021")
+@pytest.mark.uc("UC-054", flow="A2", br=["BR-007"], tc="TC-021")
 @pytest.mark.uc("UC-055", flow="A3", tc="TC-021")
-def test_offline_keeps_local_writes_and_drains_on_reconnect(flag_service, settled_link):
+def test_offline_discards_stack_writes_and_drains_game_writes(flag_service, settled_link):
+    """Flagsmith is the source of truth once online (#2621): stack-scope changes made offline
+    are discarded at the reconnect; game values (live game state) are still sent."""
     fake = settled_link
-    # Step 1: Flagsmith goes down: the link goes offline.
-    fake.down = True
+    _establish(flag_service, fake, *TICK, 13)
+    game = fl.new_game_id()
     try:
-        state = fl.wait_link(flag_service, fl.PULL_TIMEOUT, link="offline")
-        assert state["offline_reason"] == "http_503", state
-        # Step 2: local writes, a kill switch included, are answered at once.
-        flag_service.put(*TICK, value=14)
-        flag_service.put(*MAX_GAMES, value=20)
-        state = fl.link(flag_service)
-        assert state["pending"] >= 1, state
-        assert fl.overlay(flag_service, *MAX_GAMES).get("value") == 20
+        fl.register_game(flag_service, game, ["MOCK0004"])
+        fl.wait_for(lambda: f"game:{game}" in fake.identities(), fl.PULL_TIMEOUT, "game identity listed")
+        # Step 1: Flagsmith goes down: the link goes offline.
+        fake.down = True
+        try:
+            state = fl.wait_link(flag_service, fl.PULL_TIMEOUT, link="offline")
+            assert state["offline_reason"] == "http_503", state
+            # Step 2: local writes, a kill switch and a game value included, are answered at once:
+            # the case plays on its offline configuration.
+            flag_service.put(*TICK, value=14)
+            flag_service.put(*MAX_GAMES, value=20)
+            flag_service.put(*PACING, value="frantic", scope={"game_id": game})
+            assert fl.link(flag_service)["pending"] >= 3
+            assert fl.overlay(flag_service, *MAX_GAMES).get("value") == 20
+            reconnect = time.monotonic()
+        finally:
+            # Step 3: Flagsmith is back.
+            fake.down = False
+        fl.wait_link(flag_service, fl.RESTART_SECONDS + 60, link="online")
+        # Step 4: the stack-scope changes are discarded: Flagsmith's value (or, with none, the
+        # baseline) is in force and nothing of them is sent; the game value is sent.
+        fl.wait_for(lambda: fl.link(flag_service).get("pending") == 0, fl.PULL_TIMEOUT, "pending 0")
+        fl.wait_pulls(flag_service, 1)
+        assert fl.overlay(flag_service, *TICK).get("value") == 13, fl.overlay(flag_service, *TICK)
+        assert fl.overlay(flag_service, *MAX_GAMES) == {}, fl.overlay(flag_service, *MAX_GAMES)
+        assert fake.env_value(TICK[1]) == (True, 13)
+        assert fake.env_value(MAX_GAMES[1])[0] is False
+        assert not [r for r in fake.pushes(TICK[1]) + fake.pushes(MAX_GAMES[1]) if r["t"] >= reconnect]
+        fl.wait_for(lambda: fake.override(f"game:{game}", PACING[1]) is not None, fl.PULL_TIMEOUT, "game value sent")
     finally:
-        # Step 3: Flagsmith is back.
-        fake.down = False
-    fl.wait_link(flag_service, fl.RESTART_SECONDS + 60, link="online")
-    # Step 4: the queue drains; Flagsmith holds the latest local values.
-    fl.wait_for(lambda: fl.link(flag_service).get("pending") == 0, fl.PULL_TIMEOUT, "pending 0")
-    assert fake.env_value(TICK[1]) == (True, 14)
-    assert fake.env_value(MAX_GAMES[1]) == (True, 20)
+        fl.end_game(flag_service, game)
 
 
 # ------------------------------------------------------------------ UC-054 A2 (FR-210)
@@ -226,8 +244,8 @@ CONFLICT_ROWS = [
     ("local-change-pushed", TICK, 15, 16, None, 16, "local", 16),
     ("both-same-adopted", TICK, 15, 17, 17, 17, "local", 17),
     ("both-changed-flagsmith-wins", TICK, 15, 18, 19, 19, "flagsmith", 19),
-    ("kill-switch-local-tighter-kept", MAX_GAMES, 40, 20, 30, 20, "local", 20),
-    ("kill-switch-flagsmith-tighter-applied", MAX_GAMES, 40, 20, 10, 10, "flagsmith", 10),
+    ("kill-switch-flagsmith-looser-wins", MAX_GAMES, 40, 20, 30, 30, "flagsmith", 30),
+    ("kill-switch-flagsmith-tighter-wins", MAX_GAMES, 40, 20, 10, 10, "flagsmith", 10),
 ]
 
 
@@ -267,7 +285,7 @@ def test_conflict_table(flag_service, settled_link, flag, r, l_val, d, want, wri
 @pytest.mark.uc("UC-054", flow="A2", tc="TC-021")
 def test_conflict_after_reconnect_flagsmith_wins(flag_service, settled_link):
     """The one truly offline row: both sides changed while the link was down; on reconnect the
-    reconcile runs before the queue drains, and Flagsmith wins (not a kill switch)."""
+    reconcile runs before the queue drains, and Flagsmith wins (#2621: a kill switch too)."""
     fake = settled_link
     _establish(flag_service, fake, *TICK, 21)
     fake.down = True
@@ -507,14 +525,16 @@ def test_flagsmith_refusal_marks_out_of_sync(flag_service, settled_link):
     # Step 1: Flagsmith refuses the change (a change request is required).
     fake.refuse(TICK[1], 409)
     flag_service.put(*TICK, value=31)
-    # Step 2: the local value stays in force; the key is refused and out of sync.
+    # Step 2: the refusal is reported and the stack-scope value is reverted to Flagsmith's (none here: the
+    # baseline) at once (#2621, UC-055 A4).
     fl.wait_for(lambda: fl.link(flag_service).get("refused", 0) >= 1, fl.PULL_TIMEOUT, "refused")
-    assert fl.overlay(flag_service, *TICK).get("value") == 31
-    assert fl.link(flag_service)["out_of_sync"] >= 1
-    # Step 3: the refused value is not sent again over the next polls (#2604).
+    fl.wait_for(lambda: fl.overlay(flag_service, *TICK) == {}, fl.PULL_TIMEOUT, "the refused 31 reverted")
+    # Step 3: the refused value is not sent again over the next polls (#2604), and the refusal stays reported.
     sent = len(fake.pushes(TICK[1]))
     fl.wait_pulls(flag_service, 3)
     assert len(fake.pushes(TICK[1])) == sent, fake.pushes(TICK[1])
+    assert fl.link(flag_service)["refused"] >= 1
+    assert fl.overlay(flag_service, *TICK) == {}
     # Step 4: Flagsmith accepts again; the next local change lands and the key is in sync.
     fake.clear_refusals()
     flag_service.put(*TICK, value=32)

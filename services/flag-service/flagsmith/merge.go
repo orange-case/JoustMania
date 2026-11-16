@@ -1,7 +1,5 @@
 package flagsmith
 
-import "github.com/joustmania/flag-service/baseline"
-
 // The 3-way merge of one key (architecture note §6, FR-210, UC-054 A2): R the
 // last state seen from Flagsmith, D the document value, L the local value.
 
@@ -40,17 +38,18 @@ type mergeIn struct {
 	R    Value
 	HasR bool
 	D, L Value
-	// Kill is the key's kill-switch rule (nil: not a kill switch). Only stack
-	// keys carry one.
-	Kill *killRule
-	// Base resolves variant names for the kill-switch order.
-	Base *baseline.Flag
 	// Refused is the last refusal of this key, nil when none.
 	Refused *refusal
+	// Discard: L is a stack-scope local change made while the link was not
+	// connected, or a stack value Flagsmith refused (#2621); Flagsmith is the
+	// source of truth once online, so L is not sent: D is applied, or the
+	// baseline when Flagsmith holds no value (admin settings too). Game and
+	// player values are never discarded.
+	Discard bool
 }
 
 // decision is decide's verdict: the action and, for a conflict, its
-// resolution (ResolutionFlagsmith, ResolutionTightened, ResolutionLocal).
+// resolution (ResolutionFlagsmith).
 type decision struct {
 	action     action
 	resolution string
@@ -58,16 +57,17 @@ type decision struct {
 
 func (d decision) conflict() bool { return d.resolution != "" }
 
-// decide is the merge table of architecture note §6 with the kill-switch rule
-// of UC-054 BR-005 (flags.md §13.6):
+// decide is the merge table of architecture note §6 (UC-054 BR-005: Flagsmith
+// wins a conflict, a kill switch too, #2621):
 //
 //	R = D, R = L              -> none
-//	R = D, R ≠ L              -> push (skip while D is the refused value; not re-sent while Flagsmith refused that local value, LinkState.Reoffer, UC-055 A4)
-//	R ≠ D, R = L              -> apply (a deliberate change, also one that loosens a kill switch)
+//	R = D, R ≠ L              -> push (skip while D is the refused value; not re-sent while Flagsmith refused that local value, LinkState.Reoffer, UC-055 A4);
+//	                             Discard: apply D (D absent: the baseline), a conflict
+//	R ≠ D, R = L              -> apply (a deliberate change in Flagsmith)
 //	R ≠ D, R ≠ L, D = L       -> adopt
-//	R ≠ D, R ≠ L, D ≠ L       -> conflict: Flagsmith wins, a kill switch takes the more restrictive value
+//	R ≠ D, R ≠ L, D ≠ L       -> conflict: Flagsmith wins
 //	R absent, D = L           -> adopt
-//	R absent, D ≠ L           -> kill switch: conflict (#2590 R1); D absent: push; else apply
+//	R absent, D ≠ L           -> D absent: push (Discard: apply, back to the baseline); else apply
 //
 // A refused key merges against the local value it kept, so a new document
 // value is a deliberate change and the refused one is skipped.
@@ -82,9 +82,7 @@ func decide(in mergeIn) decision {
 		switch {
 		case in.D.Equal(in.L):
 			return decision{action: actAdopt}
-		case in.Kill != nil:
-			return conflictDecision(in)
-		case !in.D.Present:
+		case !in.D.Present && !in.Discard:
 			// Nothing in Flagsmith to apply: the local value is sent.
 			return decision{action: actPush}
 		}
@@ -94,6 +92,8 @@ func decide(in mergeIn) decision {
 	switch {
 	case rd && rl:
 		return decision{action: actNone}
+	case rd && in.Discard:
+		return decision{action: actApply, resolution: ResolutionFlagsmith}
 	case rd:
 		return decision{action: actPush}
 	case rl:
@@ -101,19 +101,5 @@ func decide(in mergeIn) decision {
 	case in.D.Equal(in.L):
 		return decision{action: actAdopt}
 	}
-	return conflictDecision(in)
-}
-
-func conflictDecision(in mergeIn) decision {
-	if in.Kill == nil {
-		return decision{action: actApply, resolution: ResolutionFlagsmith}
-	}
-	side, ok := in.Kill.tighter(in.Base, in.L, in.D)
-	switch {
-	case !ok:
-		return decision{action: actKeepLocal, resolution: ResolutionLocal}
-	case side == SideLocal:
-		return decision{action: actKeepLocal, resolution: ResolutionTightened}
-	}
-	return decision{action: actApply, resolution: ResolutionTightened}
+	return decision{action: actApply, resolution: ResolutionFlagsmith}
 }

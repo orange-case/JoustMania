@@ -34,8 +34,8 @@ func (o *out) controllerStep(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	identifier := ControllerIdentity(op.serial)
-	finish := func(readable, kept bool, removed []FeatureState) {
-		ctrl.done(op, readable, kept, removed, o.l.flagOfFeature, o.l.Now())
+	finish := func(readable bool, removed []FeatureState) {
+		ctrl.done(op, readable, removed, o.l.flagOfFeature, o.l.Now())
 	}
 
 	uuid, fresh, stop, err := o.controllerUUID(ctx, identifier, op.kind == ctrlSettle)
@@ -46,11 +46,11 @@ func (o *out) controllerStep(ctx context.Context) (bool, error) {
 		return true, nil
 	case stop == ctrlRefused:
 		o.l.Logger().Warn("flagsmith: controller identity not settled", "identifier", identifier)
-		finish(false, false, nil)
+		finish(false, nil)
 		return true, nil
 	case uuid == "":
 		// Release of an identity Flagsmith does not have: nothing to do.
-		finish(true, false, nil)
+		finish(true, nil)
 		return true, nil
 	}
 
@@ -94,7 +94,7 @@ func (o *out) controllerStep(ctx context.Context) (bool, error) {
 		ctrl.noteRemoved(op.serial, removed, o.l.flagOfFeature, o.l.Now())
 		return true, nil
 	}
-	finish(readable, op.kind == ctrlSettle && op.verify && !fresh && !clear, removed)
+	finish(readable, removed)
 	return true, nil
 }
 

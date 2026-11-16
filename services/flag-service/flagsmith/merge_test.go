@@ -85,38 +85,26 @@ func TestDecideTable(t *testing.T) {
 }
 
 // UC: UC-054 BR-005
-// Kill switches: a conflict takes the more restrictive value; a deliberate
-// change applies even when it loosens; with no remote (restart, first
-// sighting) any difference is a conflict (#2590 R1).
+// Flagsmith wins a conflict for a kill switch like for any flag (#2621): no
+// "more restrictive" merge, neither on a live conflict nor at a restart.
 func TestDecideKillSwitch(t *testing.T) {
 	base := loadBaseline(t, "ci")
 	enabled := base.Flag("agent", "enabled")
-	allowed := base.Flag("agent", "interventions_allowed")
 	on, off := variant(enabled, "on"), variant(enabled, "off")
-	kill := killRuleOf("agent", "enabled")
-	ia := killRuleOf("agent", "interventions_allowed")
 	cases := []struct {
 		name string
 		in   mergeIn
 		want action
 		res  string
 	}{
-		{"UC-054/BR-005 L=off vs D=on: local stays, pushed",
-			mergeIn{R: none, HasR: true, D: on, L: off, Kill: kill, Base: enabled}, actKeepLocal, ResolutionTightened},
-		{"UC-054/BR-005 L=on vs D=off: off applied",
-			mergeIn{R: none, HasR: true, D: off, L: on, Kill: kill, Base: enabled}, actApply, ResolutionTightened},
+		{"UC-054/BR-005 live conflict, L=off vs D=on: Flagsmith wins (loosens)",
+			mergeIn{R: none, HasR: true, D: on, L: off}, actApply, ResolutionFlagsmith},
+		{"UC-054/BR-005 live conflict, L=on vs D=off: Flagsmith wins",
+			mergeIn{R: none, HasR: true, D: off, L: on}, actApply, ResolutionFlagsmith},
 		{"UC-054/BR-005 R=L=off, D=on: a deliberate change loosens",
-			mergeIn{R: off, HasR: true, D: on, L: off, Kill: kill, Base: enabled}, actApply, ""},
-		{"UC-054/BR-005 no remote, D tighter: applied",
-			mergeIn{D: off, L: on, Kill: kill, Base: enabled}, actApply, ResolutionTightened},
-		{"UC-054/BR-005 no remote, L tighter: local stays (R1)",
-			mergeIn{D: on, L: off, Kill: kill, Base: enabled}, actKeepLocal, ResolutionTightened},
-		{"UC-054/BR-005 no remote, D absent (baseline off) vs L=on: baseline applied",
-			mergeIn{D: none, L: on, Kill: kill, Base: enabled}, actApply, ResolutionTightened},
-		{"UC-054/BR-005 no remote, incomparable: local stays (R1)",
-			mergeIn{D: variant(allowed, "full"), L: variant(allowed, "standard_group"), Kill: ia, Base: allowed}, actKeepLocal, ResolutionLocal},
-		{"UC-054/BR-005 conflict, incomparable: local stays",
-			mergeIn{R: variant(allowed, "none"), HasR: true, D: variant(allowed, "full"), L: variant(allowed, "standard_group"), Kill: ia, Base: allowed}, actKeepLocal, ResolutionLocal},
+			mergeIn{R: off, HasR: true, D: on, L: off}, actApply, ""},
+		{"UC-054/A3 no remote (restart), L tighter: Flagsmith wins",
+			mergeIn{D: on, L: off}, actApply, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -126,10 +114,40 @@ func TestDecideKillSwitch(t *testing.T) {
 			}
 		})
 	}
-	t.Run("UC-054/A2 step 2 a non-kill conflict takes the document", func(t *testing.T) {
-		got := decide(mergeIn{R: none, HasR: true, D: on, L: off, Base: enabled})
-		if got.action != actApply || got.resolution != ResolutionFlagsmith {
-			t.Fatalf("decide = %v/%q, want apply/flagsmith", got.action, got.resolution)
-		}
-	})
+}
+
+// UC: UC-054 A1 A2 BR-007
+// A stack-scope local change made while the link was not connected, or a
+// stack value Flagsmith refused, is discarded (#2621): Flagsmith's value is
+// applied; with no Flagsmith value it goes back to the baseline, an admin
+// setting too.
+func TestDecideDiscard(t *testing.T) {
+	a, b := val(`"a"`), val(`"b"`)
+	cases := []struct {
+		name string
+		in   mergeIn
+		want action
+		res  string
+	}{
+		{"UC-054/A2 R=D, offline change: Flagsmith value applied",
+			mergeIn{R: a, HasR: true, D: a, L: b, Discard: true}, actApply, ResolutionFlagsmith},
+		{"UC-054/A2 R=D absent, offline overlay: back to the baseline",
+			mergeIn{R: none, HasR: true, D: none, L: b, Discard: true}, actApply, ResolutionFlagsmith},
+		{"UC-054/A2 no remote, D absent, offline overlay: back to the baseline",
+			mergeIn{D: none, L: b, Discard: true}, actApply, ""},
+		{"UC-054/A3 no remote, D absent, not discarded (persisted admin value at boot): sent",
+			mergeIn{D: none, L: b}, actPush, ""},
+		{"UC-055/main R=D, online local change (no Discard): pushed",
+			mergeIn{R: a, HasR: true, D: a, L: b}, actPush, ""},
+		{"UC-054/A2 R=D=L: nothing to discard",
+			mergeIn{R: a, HasR: true, D: a, L: a, Discard: true}, actNone, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := decide(c.in)
+			if got.action != c.want || got.resolution != c.res {
+				t.Fatalf("decide = %v/%q, want %v/%q", got.action, got.resolution, c.want, c.res)
+			}
+		})
+	}
 }

@@ -7,7 +7,7 @@ fake's recorded requests, never on fixed sleeps.
 Rules these helpers encode (architecture note flagsmith-sync.md §4.2, plan #2592 §6, §8):
 - after a confirmed push, a pull must see the pushed value before the test changes the
   value back (the value guard skips a document that still shows a value the push replaced);
-- the first pull after a start skips the keys the restart rule cleared: allow one more poll;
+- a start defers a value while flagd has no sync stream yet: allow one more poll;
 - each test leaves the link settled: ``settle`` waits until nothing is pending and a pull
   ran after the last push, then ``reset_values`` and one more pull.
 """

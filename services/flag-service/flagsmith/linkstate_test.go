@@ -379,3 +379,35 @@ func TestLinkStateRefusedValue(t *testing.T) {
 		}
 	})
 }
+
+// UC: UC-054 A2
+// An offline-made pending value is held for the in side (never handed to the
+// sender); DropOffline drops it only while it is still the change of the
+// snapshot version, so a write made online during the reconcile is kept and
+// sent (#2621, review of #2627 finding 5).
+func TestOfflinePendingHeldAndDroppedByVersion(t *testing.T) {
+	k := Key{Set: "agent", Flag: "decision.min_interval_ms", Scope: ScopeStack}
+	s := NewLinkState(nil)
+	s.SetRemote(k, val(`700`))
+	s.OfferFrom(k, val(`900`), time.Now(), 5, true)
+	if _, _, _, _, ok := s.Next(); ok {
+		t.Fatal("UC-054/A2 an offline-made value is handed to the sender")
+	}
+	s.OfferFrom(k, val(`800`), time.Now(), 6, false) // an online write merges
+	s.DropOffline(k, 5)
+	if !s.HasPending(k) || s.PendingOffline(k) {
+		t.Fatalf("UC-054/A2 pending %v offline %v after an online write merged, want pending and online", s.HasPending(k), s.PendingOffline(k))
+	}
+	if gk, v, _, _, ok := s.Next(); !ok || gk != k || string(v.Value) != "800" {
+		t.Fatalf("UC-055/A3 Next = %v %s %v, want the online 800 sent", gk, v.Value, ok)
+	}
+	s.OfferFrom(k, val(`950`), time.Now(), 7, true)
+	s.DropOffline(k, 6)
+	if !s.HasPending(k) {
+		t.Fatal("UC-054/A2 DropOffline with an older version dropped a newer offline value")
+	}
+	s.DropOffline(k, 7)
+	if s.HasPending(k) {
+		t.Fatal("UC-054/A2 DropOffline of the current offline version kept it")
+	}
+}

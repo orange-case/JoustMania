@@ -17,10 +17,6 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func emptyPage() map[string]any {
-	return map[string]any{"count": 0, "next": nil, "previous": nil, "results": []any{}}
-}
-
 // registerAdminDefaults serves working defaults for the Admin endpoints the
 // link's start-up uses; Handle overrides any of them.
 func (f *Fake) registerAdminDefaults() {
@@ -44,9 +40,6 @@ func (f *Fake) registerAdminDefaults() {
 	d.HandleFunc("GET "+APIPath+"projects/{pid}/tags/", f.listTags)
 	d.HandleFunc("POST "+APIPath+"projects/{pid}/tags/", func(w http.ResponseWriter, r *http.Request) {
 		f.create(w, r, &f.tags)
-	})
-	d.HandleFunc("GET "+APIPath+"projects/{pid}/audit/", func(w http.ResponseWriter, _ *http.Request) {
-		WriteJSON(w, http.StatusOK, emptyPage())
 	})
 	d.HandleFunc("GET "+APIPath+"environments/{env}/edge-identities/", func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]any{"results": []any{}, "last_evaluated_key": nil})

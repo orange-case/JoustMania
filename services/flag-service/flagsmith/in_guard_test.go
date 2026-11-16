@@ -221,9 +221,9 @@ func healthOf(h *harness, feature string) []any {
 // UC: UC-054 A4
 // A feature unhealthy after 5 deferrals turns healthy when the deferral ends
 // without an apply: by a push (the document no longer holds a value, the
-// local one is sent) and by keeping the local value (a kill switch whose
-// document value is now looser) (#2596 delta finding 2, E and K).
-func TestDeferralEndsByPushOrKeepLocal(t *testing.T) {
+// local one is sent) and by adopting it (the document now holds the local
+// value) (#2596 delta finding 2, E and K; no kill-switch keep-local since #2621).
+func TestDeferralEndsByPushOrAdopt(t *testing.T) {
 	h := newHarness(t, harnessOpts{noStream: true})
 	h.online()
 	sub, _ := h.st.Subscribe("")
@@ -244,7 +244,7 @@ func TestDeferralEndsByPushOrKeepLocal(t *testing.T) {
 	h.waitFor("two unhealthy posts", func() bool {
 		return len(healthOf(h, "decision.min_interval_ms")) == 1 && len(healthOf(h, "experiment_max_games")) == 1
 	})
-	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", false, nil), fsState("experiment_max_games", true, 1000)})
+	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", false, nil), fsState("experiment_max_games", true, 500)})
 	h.clock.Advance(time.Minute)
 	h.round()
 	h.waitFor("two healthy posts", func() bool {
@@ -256,7 +256,7 @@ func TestDeferralEndsByPushOrKeepLocal(t *testing.T) {
 		}
 	}
 	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "500" {
-		t.Fatalf("UC-054/BR-005 experiment_max_games = %+v, want the tighter local 500 kept", v)
+		t.Fatalf("UC-054/A2 experiment_max_games = %+v, want 500 adopted", v)
 	}
 }
 
@@ -679,12 +679,11 @@ func TestStaleRefusalEndsAfterTimeout(t *testing.T) {
 }
 
 // UC: UC-054 BR-005
-// An older document accepted after the refusal timeout may be a pre-push copy:
-// a kill switch then merges it without its remote value and takes the more
-// restrictive value, so it never loosens below what the link pushed even when
-// the push guard has ended (the newest document showed the pushed value)
-// (#2596 delta 3 finding 1).
-func TestStaleAcceptedNeverLoosensKillSwitch(t *testing.T) {
+// An older document accepted after the refusal timeout is what Flagsmith
+// serves: since #2621 a kill switch takes it like any flag (no "more
+// restrictive" merge without the remote value any more), also when it
+// loosens what the link pushed (#2596 delta 3 finding 1, reversed).
+func TestStaleAcceptedAppliesLikeAnyFlag(t *testing.T) {
 	future := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	h := newHarness(t, harnessOpts{before: func(hh *harness) {
 		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "operator"}); ferr != nil {
@@ -710,7 +709,7 @@ func TestStaleAcceptedNeverLoosensKillSwitch(t *testing.T) {
 	if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
 		t.Fatalf("setup: pull span %v, want the older document accepted after 10 h", a)
 	}
-	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
-		t.Fatalf("UC-054/BR-005 agent/enabled = %+v: the older document accepted after the timeout loosened the pushed kill switch", v)
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %+v: want on, the accepted document applied like any flag (Flagsmith wins)", v)
 	}
 }

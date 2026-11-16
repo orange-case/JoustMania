@@ -2769,7 +2769,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "flagservice_flagsmith_conflicts_total by resolution (flagsmith, tightened, local): a value changed on both sides (FR-210; tightened = a kill switch kept its more restrictive value, flags.md §13.6).",
+      "description": "flagservice_flagsmith_conflicts_total by resolution (flagsmith): a value changed on both sides, or a stack-scope local change discarded at a reconnect; Flagsmith wins every conflict (FR-210, #2621).",
       "fieldConfig": {
         "defaults": {
           "color": {

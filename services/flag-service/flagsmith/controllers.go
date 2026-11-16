@@ -19,7 +19,7 @@ import (
 //
 // The link's own keys do not change: a player value is still the key
 // game:<id>:<serial> (LinkState, the refused-value memory of #2604, the value
-// guards, the restart report), and only the identity a key is sent to and
+// guards), and only the identity a key is sent to and
 // read from is the controller's. So a value refused or guarded in one game is
 // never held back in the next.
 //
@@ -94,10 +94,6 @@ type ctrlEntry struct {
 	// verified: the identity was settled or released once in this process;
 	// a later settle always removes (no trait check).
 	verified bool
-	// kept: the settle found the owner's game_id on the identity and removed
-	// nothing (a restart while the game was live): only then does the restart
-	// report's attribution of controller:<serial> apply to the owner's keys.
-	kept bool
 	// release: remove the overrides and the traits although no game was
 	// settled in this process (start cleanup).
 	release bool
@@ -334,7 +330,7 @@ func (c *controllers) current(op ctrlOp) bool {
 // done records a finished op: settled for its game (readable when nothing was
 // refused) or released. removed are the overrides it took off (they guard the
 // pull either way). An op whose controller moved meanwhile records only them.
-func (c *controllers) done(op ctrlOp, readable, kept bool, removed []FeatureState, flagOf func(int) string, now time.Time) {
+func (c *controllers) done(op ctrlOp, readable bool, removed []FeatureState, flagOf func(int) string, now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e := c.entries[op.serial]
@@ -347,9 +343,9 @@ func (c *controllers) done(op ctrlOp, readable, kept bool, removed []FeatureStat
 	}
 	switch op.kind {
 	case ctrlSettle:
-		e.settled, e.readable, e.kept = op.game.id, readable, kept
+		e.settled, e.readable = op.game.id, readable
 	case ctrlRelease:
-		e.settled, e.readable, e.release, e.kept = "", false, false, false
+		e.settled, e.readable, e.release = "", false, false
 	}
 	e.verified = true
 	c.bumpLocked(e)
@@ -381,7 +377,6 @@ func noteRemovedLocked(e *ctrlEntry, removed []FeatureState, flagOf func(int) st
 type ctrlView struct {
 	owner    string
 	readable bool // settled for owner, nothing refused, no work left
-	kept     bool // settled for owner without a removal (restart while live)
 	gen      uint64
 }
 
@@ -393,7 +388,7 @@ func (c *controllers) view() (map[string]ctrlView, map[string]string) {
 	out := make(map[string]ctrlView, len(c.entries))
 	for s, e := range c.entries {
 		_, work := c.workLocked(s, e)
-		out[s] = ctrlView{owner: e.owner, readable: e.owner != "" && e.settled == e.owner && e.readable && !work, kept: e.kept, gen: e.gen}
+		out[s] = ctrlView{owner: e.owner, readable: e.owner != "" && e.settled == e.owner && e.readable && !work, gen: e.gen}
 	}
 	kinds := make(map[string]string, len(c.games))
 	for id, g := range c.games {
@@ -483,17 +478,6 @@ func (rc *roundCtx) controllerOf(k Key) (string, bool) {
 		return "", false
 	}
 	return sc.Serial, true
-}
-
-// attrKey is the key the restart report attributes k under: the controller
-// identity for the player key of a controller whose overrides were kept
-// at its first settle (they predate this process), else k: an override
-// found at start never speaks for a later game.
-func (rc *roundCtx) attrKey(k Key) Key {
-	if serial, ok := rc.controllerOf(k); ok && rc.ctrl[serial].kept {
-		k.Scope = ControllerIdentity(serial)
-	}
-	return k
 }
 
 // controllerGate decides whether a round looks at a controller's player key

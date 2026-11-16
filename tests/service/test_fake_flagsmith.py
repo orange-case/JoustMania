@@ -1,7 +1,7 @@
 """The fake hosted Flagsmith itself (#2592): it keeps state the way Flagsmith does, so the
 Flagsmith link journeys (test_flagsmith_link.py, test_flagsmith_sync.py) test the link, not
 the fake. Pinned to the Go client's requests (services/flag-service/flagsmith: push.go,
-identities.go, audit.go, document.go, in.go).
+identities.go, document.go, in.go; the audit log is Flagsmith's own).
 
 No stack is started here; these run without docker or go.
 """

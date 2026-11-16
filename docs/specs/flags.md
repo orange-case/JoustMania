@@ -742,9 +742,9 @@ planned `services/flag-service/registry.yaml` / planned tests in #1409.
 
 ### 13.6 Flagsmith link (implemented, #2588 to #2592; UC-054, UC-055)
 
-> Implemented: features and tags are created at start (#2591), the kill-switch merge and order below by the in side
-> (#2590, #2596), kill switches kept out of the restart clear (#2591), [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md).
-> UC-054 and UC-055 are Tested (#2592; the kill-switch rows by `tests/service/test_flagsmith_sync.py::test_conflict_table`, `tests/service/test_flagsmith_link.py::test_restart_never_loosens_kill_switch` and `services/flag-service/flagsmith/killswitch_test.go`). No registry attribute is added: the link
+> Implemented: features and tags are created at start (#2591), the kill switches below applied first by the in side
+> (#2590, #2596), Flagsmith the source of truth once online: it wins every conflict, at a restart and at a reconnect, kill switches included, and stack-wide local changes made offline are discarded at the reconnect (#2621), [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md).
+> UC-054 and UC-055 are Tested (#2592; the kill-switch rows by `tests/service/test_flagsmith_sync.py::test_conflict_table`, `tests/service/test_flagsmith_link.py::test_restart_takes_flagsmith_kill_switch` and `services/flag-service/flagsmith/killswitch_test.go`). No registry attribute is added: the link
 > follows the rows above.
 
 **Which flags.** Every row of §13.1 to §13.4 (and the mutable `observability` rows of §13.5) is one Flagsmith
@@ -755,13 +755,20 @@ service (FR-214).
 **What Flagsmith may set** (UC-054 BR-003): a `stack` value of any row (an `overlay`), a `game` or `game+serial`
 value of a row whose scope allows it, and an `event` for a live game (one payload, checked like the agent's).
 `experiment+arm`, `real` and `fraction` values are shown in Flagsmith and refused when changed there
-(`422 flagsmith_scope_read_only`). A Flagsmith value of a `persist: yes` row is persisted like the menu admin's.
+(`422 flagsmith_scope_read_only`). A Flagsmith value of a `persist: yes` row is persisted like the menu admin's,
+also the value Flagsmith holds at a restart of the flag service: at a restart Flagsmith wins over the persisted
+local value, whoever set the Flagsmith value (UC-054 BR-006, FR-215, #2621); with Flagsmith unreachable the
+persisted value is served. An admin value changed while the link was not connected (offline, or before the first
+connect) is replaced by the Flagsmith value at the connect and persisted; when Flagsmith holds no value it is dropped:
+the built-in default applies and the state file is updated (UC-054 A2, BR-007). A persisted value from before the
+outage that was never changed offline is kept and, with no Flagsmith value, sent to Flagsmith (UC-054 A3).
 
-**Kill switches and their order** (UC-054 BR-005, FR-210). On a conflict (both sides changed since the last sync,
-or, without a last state seen from Flagsmith after a restart, any difference between the two values)
-these flags take the more restrictive value; every other flag takes the Flagsmith value.
+**Kill switches** (UC-054 BR-005, FR-210). Since #2621 Flagsmith wins a conflict for these flags like for every
+other flag, at a restart, on a live conflict and at a reconnect: once online, Flagsmith is the source of truth. The
+link applies them first in a round (before the write budget defers anything). The second column is informational
+only: it is how the agent reads "more restrictive" for each flag, and the link no longer merges by it.
 
-| Flag | More restrictive first |
+| Flag | More restrictive first (informational) |
 |---|---|
 | `agent/enabled` | `off`, then `on` |
 | `agent/interventions_allowed` | the variant whose allowed actions are a subset of the other's (`none` ⊂ `probe` ⊂ `ambient` ⊂ `standard` ⊂ `full` ⊂ `shadow_experimental`; `standard` ⊂ `standard_group`; `shadow_experimental` ⊂ `shadow_group`), computed from the declared action lists, `noop` counting as no action (equal action sets after dropping `noop` are ordered by their raw tokens, so `none` before `probe`); when neither contains the other (for example `standard_group` and `full`), the local value stays |
@@ -778,19 +785,18 @@ these flags take the more restrictive value; every other flag takes the Flagsmit
 `code_improvement.*` and `experiment_dynamic_max_concurrent` have no row in the mutable-flag registry (§13.2) today,
 so they are not runtime-mutable and not Flagsmith features; their rules keep the table complete for when they get one.
 
-Every value is normalised exactly as the agent reads it before the two are ordered.
+The agent normalises every value this way when it reads it.
 
 The table is the source of truth: `agent/enabled`, the registry kill switch `agent/interventions_allowed`
 (`registry.killSwitches`), the agent-limiting flags of FR-152, and the agent gates `interventions_enabled`,
-`experiments_enabled`, `rollout_enabled` and `rollout/remediation_allowed`; a test keeps the implementation in sync with
-the table. A deliberate change in Flagsmith, with a last sync and no local change since, is applied
-like any write, also when it loosens one; the env ceilings of C-034 still cap the agent-limiting flags.
+`experiments_enabled`, `rollout_enabled` and `rollout/remediation_allowed`; a test keeps the link's kill-switch set in sync with the table.
+A change in Flagsmith is applied like any write, also when it loosens one; the agent never writes its own limits, and the env ceilings of C-034 still cap the agent-limiting flags, also a value from Flagsmith.
 
 **Values in Flagsmith** (architecture note §2.1): a declared variant is its name (string); an integer range is an
 integer; a float range, a `free string` and an object flag are strings (decimal text, the string, compact JSON).
 
 **Traceability:** FR-206, FR-208, FR-210, FR-214, C-034, C-036 / UC-054, UC-055 /
-`services/flag-service/flagsmith/killswitch.go` (#2590); `TestKillSwitchTableInSync` keeps it equal to this table.
+`services/flag-service/flagsmith/killswitch.go` (#2590, #2621: the set of kill switches, no order); `TestKillSwitchTableInSync` keeps it equal to this table.
 
 ## 14. Ownership composition: invalidation and visibility
 
