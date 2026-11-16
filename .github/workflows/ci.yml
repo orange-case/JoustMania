@@ -1143,7 +1143,7 @@ jobs:
     if: >-
       !cancelled() && !contains(needs.*.result, 'failure') &&
       github.event_name != 'merge_group' &&
-      (github.repository == 'WatchMeJoustMyFlags/JoustMania' || vars.ENABLE_SONARCLOUD == 'true')
+      (github.repository == 'orange-case/JoustMania' || vars.ENABLE_SONARCLOUD == 'true')
     timeout-minutes: 15
     # Informational only: a Sonar failure (quality gate, or an expired
     # SONAR_TOKEN returning 403) must not fail CI Complete, the one required
