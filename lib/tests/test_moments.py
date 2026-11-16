@@ -160,13 +160,17 @@ def test_unknown_flag_value_is_span_event(value):
 
 
 @pytest.mark.uc("UC-100", flow="main", steps=[3], br=["BR-002"])
-@pytest.mark.parametrize("value", [MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN, MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH])
-def test_declared_shapes_are_kept_with_otlp_logging(logs, value):
+@pytest.mark.parametrize(
+    "value", [MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN, MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH]
+)
+@pytest.mark.usefixtures("logs")
+def test_declared_shapes_are_kept_with_otlp_logging(value):
     assert effective_moment_shape(value) == value
 
 
 @pytest.mark.uc("UC-100", flow="A1", br=["BR-004"])
-def test_not_ready_observability_provider_reads_span_event(monkeypatch, logs):
+@pytest.mark.usefixtures("logs")
+def test_not_ready_observability_provider_reads_span_event(monkeypatch):
     """The coordinator does not wait for ``observability``: a not-READY provider gives the default."""
     from openfeature import api
     from openfeature.exception import ProviderNotReadyError
@@ -185,7 +189,8 @@ def test_not_ready_observability_provider_reads_span_event(monkeypatch, logs):
 
 
 @pytest.mark.uc("UC-100", flow="main", steps=[3], br=["BR-002"])
-def test_read_moment_shape_reads_the_observability_flag(monkeypatch, logs):
+@pytest.mark.usefixtures("logs")
+def test_read_moment_shape_reads_the_observability_flag(monkeypatch):
     calls = []
 
     def fake_read(domain, key, default):
@@ -202,7 +207,8 @@ def test_moment_id_format():
     assert moment_id("g-1", "00:06:f7:aa", 3) == "g-1/00:06:f7:aa/3"
 
 
-def test_moment_logger_is_cached_per_provider(logs, monkeypatch):
+@pytest.mark.usefixtures("logs")
+def test_moment_logger_is_cached_per_provider(monkeypatch):
     """get_logger runs once per provider, not per moment (NFR-060: no per-warning setup)."""
     first = moments._moment_logger()
     assert moments._moment_logger() is first

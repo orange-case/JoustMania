@@ -35,8 +35,8 @@ from opentelemetry import trace
 from opentelemetry.context import Context
 
 from lib.feature_flags import eval_game_kind, read_string_flag, set_game_session_kind_context
-from lib.otel_metrics import get_export_interval_ms
 from lib.moments import MOMENT_SHAPE_ATTR, read_moment_shape
+from lib.otel_metrics import get_export_interval_ms
 from lib.telemetry import get_tracer
 from lib.types import get_game_display_name
 from proto import game_coordinator_pb2

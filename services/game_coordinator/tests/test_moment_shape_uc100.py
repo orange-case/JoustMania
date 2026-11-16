@@ -167,7 +167,8 @@ async def _run_session(flag_value):
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", flow="main", steps=[3], br=["BR-002"])
 @pytest.mark.parametrize("shape", ["span_event", "span", "log_event", "both"])
-async def test_session_reads_the_shape_once_and_records_it_on_the_game_root(otlp_logs, shape):
+@pytest.mark.usefixtures("otlp_logs")
+async def test_session_reads_the_shape_once_and_records_it_on_the_game_root(shape):
     root, game, reads = await _run_session(shape)
 
     assert reads.moment_reads == 1
@@ -178,7 +179,8 @@ async def test_session_reads_the_shape_once_and_records_it_on_the_game_root(otlp
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", flow="A1", br=["BR-004"])
 @pytest.mark.parametrize("value", ["", "spans", None])
-async def test_absent_or_unknown_flag_runs_the_game_as_span_event(otlp_logs, value):
+@pytest.mark.usefixtures("otlp_logs")
+async def test_absent_or_unknown_flag_runs_the_game_as_span_event(value):
     root, game, _ = await _run_session(value)
 
     assert root.attributes["telemetry.moment_shape"] == "span_event"
@@ -194,4 +196,3 @@ async def test_without_otlp_logging_log_event_runs_and_is_recorded_as_span_event
 
     assert root.attributes["telemetry.moment_shape"] == "span_event"
     assert game.moment_shape == "span_event"
-
