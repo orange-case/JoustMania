@@ -371,6 +371,10 @@ type Loop struct {
 
 	// flagState is this partition's agent.flag_state digest (#2059, flag_state.go).
 	flagState flagStateTracker
+	// questionsSeen holds the (game, sha) pairs whose decide.questions JSON was already
+	// written on an agent.decide span (#2648), guarded by questionsMu.
+	questionsMu   sync.Mutex
+	questionsSeen map[string]struct{}
 	// applied is this game's applied-value ledger (UC-040 A35, BR-023,
 	// appliedledger.go), guarded by its own mutex. suppressReapplied switches the
 	// already-applied check on; alreadyAppliedRecorder is its timeline seam.
@@ -706,8 +710,8 @@ func (l *Loop) OnEvaluate(ctx context.Context, c gamecontext.GameContext, trig E
 	// otelgrpc.NewServerHandler is ever added to the agent's gRPC server,
 	// demote this span to SpanKindInternal and drop the rpc.* attributes to
 	// avoid a duplicate server span for the same RPC.
-	rootCtx, root := l.startSignalReceivedSpan(ctx, c, trig)
-	defer root.End()
+	rootCtx, ev, endCycle := l.startCycle(ctx, c, trig)
+	defer endCycle()
 
 	// #1226: the decide-contract record of this cycle's rules ranking (the answers
 	// from the SAME ranking that produced these decisions), as an agent.decide
@@ -717,6 +721,7 @@ func (l *Loop) OnEvaluate(ctx context.Context, c gamecontext.GameContext, trig E
 	// chain did with the decision its answers describe (decide.blocked).
 	if decideRec != nil {
 		state.DecideBackend = decideRec.used // rides every agent.decision span
+		state.DecideStateDigest = decideRec.req.State.Digest
 	}
 	decisions = l.stampShieldSeconds(rootCtx, snapshot, decisions, decideRec)
 	before := len(state.Outcomes)
@@ -724,6 +729,7 @@ func (l *Loop) OnEvaluate(ctx context.Context, c gamecontext.GameContext, trig E
 		l.runDecision(rootCtx, snapshot, c, d, now(), &state)
 	}
 	if decideRec != nil {
+		decideRec.trig = ev
 		decideRec.notePermission(&state, before)
 		l.emitDecideSpan(rootCtx, decideRec, c)
 	}
@@ -796,6 +802,40 @@ func (l *Loop) startSignalReceivedSpan(ctx context.Context, c gamecontext.GameCo
 		startOpts = append(startOpts, trace.WithAttributes(attribute.String(AttrGameTraceSpanID, c.GameTraceSpanID)))
 	}
 	return l.Tracer.Start(ctx, SignalReceived, startOpts...)
+}
+
+// startCycle opens the scope the cycle's agent spans hang under. In a game whose
+// trace ids the agent knows, the spans (agent.decide, agent.decision, agent.disabled)
+// are direct remote children of the game's game_cycle (#2648): no agent.signal_received
+// span is added to the game trace, one per OTLP Export is noise there, and the trigger
+// rides the spans as an agent.signal_received event (signalEvent). The returned trigger
+// is non-nil exactly then. Without game ids the cycle keeps the agent.signal_received
+// root span (startSignalReceivedSpan) so its spans still share one trace. end must be
+// called once the cycle's spans are done.
+func (l *Loop) startCycle(ctx context.Context, c gamecontext.GameContext, trig EvalTrigger) (cycleCtx context.Context, ev *EvalTrigger, end func()) {
+	if parentCtx, ok := inGameRemoteParent(ctx, c.GameTraceID, c.GameTraceSpanID, c.GameplayPhaseSpanID, c.GameCycleSpanID); ok {
+		return parentCtx, &trig, func() {}
+	}
+	rootCtx, root := l.startSignalReceivedSpan(ctx, c, trig)
+	return rootCtx, nil, func() { root.End() }
+}
+
+// signalEvent records the triggering OTLP Export on span as an agent.signal_received
+// event at the Export's arrival time (#2648): which signal and RPC woke the agent,
+// what the agent.signal_received span's attributes carried. A nil trigger (the cycle
+// has the span instead) adds nothing.
+func signalEvent(span trace.Span, trig *EvalTrigger) {
+	if trig == nil {
+		return
+	}
+	span.AddEvent(SignalReceived,
+		trace.WithTimestamp(trig.T0),
+		trace.WithAttributes(
+			semconv.RPCSystemGRPC,
+			semconv.RPCService(trig.RPCService),
+			semconv.RPCMethod("Export"),
+			attribute.String("otlp.signal", trig.Signal),
+		))
 }
 
 // decide runs this cycle's decision path with the engine rulesFor resolved once
@@ -1099,8 +1139,8 @@ func (l *Loop) emitDisabledSpan(ctx context.Context, snapshot flags.Snapshot, c 
 	if !l.shouldLog() {
 		return
 	}
-	rootCtx, root := l.startSignalReceivedSpan(ctx, c, trig)
-	defer root.End()
+	rootCtx, ev, endCycle := l.startCycle(ctx, c, trig)
+	defer endCycle()
 
 	// One agent.disabled span carrying the full flag attribution; it is named
 	// distinctly (not agent.decision) so kill-switch traces are trivial to find
@@ -1109,6 +1149,7 @@ func (l *Loop) emitDisabledSpan(ctx context.Context, snapshot flags.Snapshot, c 
 	// false (no decision was blocked by a permission gate — the loop never ran).
 	_, dSpan := l.Tracer.Start(rootCtx, SpanDisabled,
 		trace.WithAttributes(decisionAttributes(&state, Decision{}, false, "", c.GameKind, c.SessionID)...))
+	signalEvent(dSpan, ev)
 	dSpan.End()
 }
 
@@ -1473,6 +1514,9 @@ func layerStateAttributes(state *LayerState) []attribute.KeyValue {
 	// engines without the decide seam keep their exact pre-#1226 attribute set.
 	if state.DecideBackend != "" {
 		attrs = append(attrs, attribute.String(AttrDecideBackend, state.DecideBackend))
+	}
+	if state.DecideStateDigest != "" {
+		attrs = append(attrs, attribute.String(AttrDecideStateDigest, state.DecideStateDigest))
 	}
 	// Fitness layer (#731 hook): only present when populated, so the attribute
 	// stays absent until the fitness engine lands rather than carrying an

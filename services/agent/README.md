@@ -672,7 +672,7 @@ Every evaluation that produces decisions emits one trace (hierarchy always
 parent → child):
 
 ```
-agent.signal_received          one per triggering OTLP Export (backdated to arrival)
+agent.signal_received          one per triggering OTLP Export (backdated to arrival); only without game ids, in a game it is an event on agent.decide (#2648)
   └─ agent.decision          one per Decision the rules engine returns
        └─ agent.action       one per decision, wrapping the ActionSink call
 ```

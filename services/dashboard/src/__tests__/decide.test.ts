@@ -261,6 +261,31 @@ describe("rendering + escaping", () => {
   });
 });
 
+describe("UC-035: rules path in a game trace (#2648: no agent.signal_received span)", () => {
+  type Span = { spanID: string; operationName: string; tags: { key: string; type: string; value: unknown }[] };
+  const inGame = () => {
+    const f = structuredClone(rulesFixture) as unknown as { data: { spans: Span[] }[] };
+    const spans = f.data[0].spans;
+    spans[0].operationName = "game_cycle"; // the per-cycle signal span is gone; game_cycle is the parent
+    const digest = { key: "decide.state.digest", type: "string", value: "sha256:9f2c" };
+    const decisions = spans.filter((s) => s.operationName === "agent.decision");
+    decisions.forEach((d) => d.tags.push(digest));
+    // A decision of another cycle under the same game_cycle must not attach.
+    const stray = structuredClone(decisions[0]);
+    stray.spanID = "stray";
+    stray.tags = stray.tags.filter((t) => t.key !== "decide.state.digest");
+    stray.tags.push({ key: "decide.state.digest", type: "string", value: "sha256:other" });
+    spans.push(stray);
+    return { f, expected: decisions.length };
+  };
+
+  it("links the decisions that share the decide's state digest, not the cycle's other decisions", () => {
+    const { f, expected } = inGame();
+    const row = only(f);
+    expect(row.decisions).toHaveLength(expected);
+  });
+});
+
 describe("multi-decide game trace (#1195 shape)", () => {
   const { rows } = parseDecideTraces(asResp(multiFixture));
   const byId = new Map(rows.map((r) => [r.spanId, r]));

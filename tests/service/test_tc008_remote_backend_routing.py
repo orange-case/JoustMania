@@ -106,11 +106,12 @@ async def test_rules_backend_default_unchanged(fresh_stack):
             assert tags.get("decide.outcome") == "act", tags
             # The coordinator's "primary" label is normalised to "real" (#1249).
             assert tags.get("game.kind") == "real", tags
-            # Sync rules path shape: agent.decide and agent.decision share the
-            # agent.signal_received parent; no backend chat span.
+            # Sync rules path shape: agent.decide and agent.decision share one parent
+            # (the game's game_cycle, or agent.signal_received without game ids,
+            # #2648); no backend chat span.
             assert span.parent_span_id, "agent.decide has no parent on the rules path"
             signal = parent(stack, span)
-            assert signal is not None and signal.name == "agent.signal_received", signal
+            assert signal is not None, "agent.decide parent missing"
             assert children(stack, signal, "agent.decision"), "no sibling agent.decision"
             assert not children(stack, span), "the rules agent.decide span must have no children"
             assert stack.fake_openai.requests(game_id) == [], "the rules backend must never call the remote backend"

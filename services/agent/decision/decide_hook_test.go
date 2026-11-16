@@ -1079,17 +1079,17 @@ func TestRemote_SpanParentAndFireCycleLink(t *testing.T) {
 	spans := h.sr.Ended()
 	ds := spansByName(spans, SpanDecide)
 	anchors := spansByName(spans, SignalReceived)
-	if len(ds) != 1 || len(anchors) != 1 {
-		t.Fatalf("decide=%d anchors=%d, want 1 each", len(ds), len(anchors))
+	if len(ds) != 1 || len(anchors) != 0 {
+		t.Fatalf("decide=%d anchors=%d, want 1 decide and no anchor span (#2648)", len(ds), len(anchors))
 	}
 	span := ds[0]
 	if span.Parent().TraceID().String() != traceID || span.Parent().SpanID().String() != phaseID {
 		t.Fatalf("parent = %v, want the gameplay_phase span %s", span.Parent(), phaseID)
 	}
-	links := span.Links()
-	if len(links) != 1 || links[0].SpanContext.SpanID() != anchors[0].SpanContext().SpanID() {
-		t.Fatalf("links = %+v, want one Link to the fire-cycle agent.signal_received", links)
+	if links := span.Links(); len(links) != 0 {
+		t.Fatalf("links = %+v, want none: the trigger is an event (#2648)", links)
 	}
+	requireSignalEvent(t, span, "metrics")
 }
 
 // TestRemote_RealCadenceFlag drives the remote path through the real flags
