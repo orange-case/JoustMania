@@ -232,9 +232,8 @@ class TestNoGroundTruthWithoutNormalEnd:
             raise RuntimeError("teardown failed")
 
         game._teardown_after_outcome = _boom
-        with tracer.start_as_current_span("Joust Free-for-All") as root:
-            with pytest.raises(RuntimeError):
-                await asyncio.wait_for(game.run(), timeout=20)
+        with tracer.start_as_current_span("Joust Free-for-All") as root, pytest.raises(RuntimeError):
+            await asyncio.wait_for(game.run(), timeout=20)
 
         assert [e for e in root.events if e.name == EVENT] == []
 

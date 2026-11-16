@@ -47,7 +47,6 @@ from lib.telemetry import inject_trace_context
 from lib.types import GameEvent, Sensitivity, Sound
 from services.game_coordinator import game_clock, metrics
 from services.game_coordinator.games.analytics import PlayerAnalytics
-from services.game_coordinator.games.ground_truth import GroundTruth
 from services.game_coordinator.games.flag_snapshot import (  # noqa: F401  re-exported: games/shields.py and the tests import them from base
     CHARGE_EXPIRY_MAX_SECONDS,
     DEFAULT_CHARGE_EXPIRY_SECONDS,
@@ -92,6 +91,7 @@ from services.game_coordinator.games.flag_snapshot import (  # noqa: F401  re-ex
     resolve_shield_activation,
     resolve_shield_limit,
 )
+from services.game_coordinator.games.ground_truth import GroundTruth
 from services.game_coordinator.runtime_config import GamePerformanceConfig, get_config_manager
 from services.game_coordinator.stream_writes import serialized_write
 
