@@ -8,6 +8,9 @@
 #  - both set in .env.local: the overlay is added, after the env files
 #  - none set: no overlay, nothing on stderr
 #  - only one set: no overlay, one line on stderr, exit 0 (the stack starts)
+#  - both set: compose is asked once (`config -q`) before the overlay is added;
+#    when compose refuses, no overlay, one line on stderr, exit 0
+#  - nothing set: compose is not asked (no extra call on an unconfigured Pi)
 #  - the shell wins over the files, also when it sets a variable to empty
 #  - .env.local wins over .env; quotes and a CR line ending are stripped
 #  - no overlay file in the checkout: never added
@@ -47,7 +50,10 @@ run_wrapper() {
   printf '%b' "${env}" >"${dir}/repo/.env"
   [[ "${env_local}" == "-" ]] || printf '%b' "${env_local}" >"${dir}/repo/.env.local"
   [[ "${overlay}" == yes ]] && : >"${dir}/repo/docker-compose.gateway.yml"
-  printf '#!/usr/bin/env bash\necho "$*" >>"%s/docker.log"\n' "${dir}" >"${dir}/bin/docker"
+  # The stub records every call; `config -q` (the wrapper's question "does
+  # compose render this?") fails when the case asks for it (COMPOSE_REFUSES=yes)
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/docker.log"\nif [[ "$*" == *" config -q" && -e "%s/compose-refuses" ]]; then echo "required variable is missing a value" >&2; exit 1; fi\n' "${dir}" "${dir}" >"${dir}/bin/docker"
+  [[ "${COMPOSE_REFUSES}" == yes ]] && : >"${dir}/compose-refuses"
   # On a branch: nothing is pinned, so IMAGE_TAG is not derived (not under test here)
   printf '#!/usr/bin/env bash\ncase " $* " in *" symbolic-ref "*) echo refs/heads/main ;; *) exit 1 ;; esac\n' >"${dir}/bin/git"
   chmod +x "${dir}/bin/"*
@@ -55,15 +61,30 @@ run_wrapper() {
   RC=0
   env -u ORANGECASE_GATEWAY_HOST -u ORANGECASE_GATEWAY_TOKEN "${SHELL_ENV[@]}" PATH="${dir}/bin:${PATH}" \
     bash "${dir}/repo/scripts/setup/joustmania-compose.sh" "$@" >"${dir}/out.log" 2>"${dir}/err.log" || RC=$?
-  CALL="$(cat "${dir}/docker.log")"
+  # CALL: the call the wrapper ends in. CONFIRMS: its `config -q` questions before that.
+  CALL="$(tail -n 1 "${dir}/docker.log")"
+  CONFIRMS="$(sed '$d' "${dir}/docker.log")"
   ERR="$(cat "${dir}/err.log")"
   [[ "${RC}" -eq 0 ]] || fail "${name}: the wrapper exited ${RC}"
   if grep -rqF -e "${TOKEN_VALUE}" -e "${HOST_VALUE}" "${dir}/out.log" "${dir}/err.log" "${dir}/docker.log"; then
     fail "${name}: a gateway value was printed or passed on the command line"
   fi
   SHELL_ENV=()
+  COMPOSE_REFUSES=no
 }
-expect_call() { [[ "${CALL}" == "$2" ]] || fail "$1: expected 'docker $2', got 'docker ${CALL}'"; }
+COMPOSE_REFUSES=no
+# $2 = the final call. With the overlay in it the wrapper must have asked compose
+# first, exactly once, with the same files; without it and without a refusal it
+# must not have asked at all (no extra compose call on an unconfigured Pi).
+expect_call() {
+  [[ "${CALL}" == "$2" ]] || fail "$1: expected 'docker $2', got 'docker ${CALL}'"
+  if [[ "$2" == *"${OVERLAY}"* && "$1" != named-by-caller ]]; then
+    local files="${2%% up *}"
+    [[ "${CONFIRMS}" == "${files} config -q" ]] || fail "$1: expected one 'docker ${files} config -q' before the call, got '${CONFIRMS}'"
+  elif [[ "${3-}" != asked ]]; then
+    [[ -z "${CONFIRMS}" ]] || fail "$1: unexpected compose call before the final one: ${CONFIRMS}"
+  fi
+}
 expect_quiet() { [[ -z "${ERR}" ]] || fail "$1: unexpected stderr: ${ERR}"; }
 expect_warning() {
   [[ "$(grep -c 'gateway export off' <<<"${ERR}")" -eq 1 ]] || fail "$1: expected one 'gateway export off' line on stderr, got: ${ERR}"
@@ -124,6 +145,21 @@ expect_call quoted-crlf "${BASE} --env-file .env.local ${OVERLAY} up -d"
 run_wrapper blank-values "ORANGECASE_GATEWAY_HOST=''\r\nORANGECASE_GATEWAY_TOKEN=\"\"  \n" "IMAGE_TAG=1\n" yes up -d
 expect_call blank-values "${BASE} --env-file .env.local up -d"
 expect_quiet blank-values
+
+# The `NAME = value` and `NAME: value` forms compose also reads
+run_wrapper spaced-and-colon "ORANGECASE_GATEWAY_HOST = ${HOST_VALUE}\nORANGECASE_GATEWAY_TOKEN: ${TOKEN_VALUE}\n" "IMAGE_TAG=1\n" yes up -d
+expect_call spaced-and-colon "${BASE} --env-file .env.local ${OVERLAY} up -d"
+expect_quiet spaced-and-colon
+
+# Compose has the last word (review of #2625): a value this script reads as set
+# but compose interpolates to empty (`"" # note`, `${UNSET}`, `$name`) would make
+# compose refuse the overlay and stop the whole stack. The wrapper asks compose
+# first and leaves the overlay out, with one line, when compose refuses.
+COMPOSE_REFUSES=yes
+run_wrapper compose-refuses "ORANGECASE_GATEWAY_HOST=${HOST_VALUE}\nORANGECASE_GATEWAY_TOKEN=\${MY_UNSET_TOKEN}\n" "IMAGE_TAG=1\n" yes up -d
+expect_call compose-refuses "${BASE} --env-file .env.local up -d" asked
+[[ "${CONFIRMS}" == "${BASE} --env-file .env.local ${OVERLAY} config -q" ]] || fail "compose-refuses: compose was not asked: '${CONFIRMS}'"
+expect_warning compose-refuses
 
 # A commented-out line and a longer name do not count
 run_wrapper commented "# ORANGECASE_GATEWAY_HOST=${HOST_VALUE}\nORANGECASE_GATEWAY_HOST_OLD=x\nORANGECASE_GATEWAY_TOKEN=${TOKEN_VALUE}\n" "IMAGE_TAG=1\n" yes up -d

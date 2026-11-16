@@ -124,8 +124,10 @@ On the Pi the two variables are the switch (#2622): put both in `.env.local`. Th
 `./scripts/setup/joustmania-compose.sh` then adds the overlay to every compose call, so the autostart, a
 reboot and an upgrade keep the export on. After changing `.env.local`, recreate the collector:
 `./scripts/setup/joustmania-compose.sh up -d otel-collector`. Off: remove both lines and run the same
-command. With only one of the two set the wrapper starts the stack without the overlay and says so on
-stderr.
+command. Write them as plain `NAME=value` lines. With only one of the two set, or with a value compose
+reads as empty (for example `${UNSET}`), the wrapper starts the stack without the overlay and says so on
+stderr. Keep both in `.env.local`, not in a `systemctl edit` drop-in: a drop-in reaches the autostart but
+not a compose call from your shell.
 
 An unreachable gateway or a wrong token never slows the game or the in-case backends (NFR-029): the
 collector retries a batch for at most 5 minutes, queues at most 16 MiB per signal and then drops the

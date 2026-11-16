@@ -3,7 +3,8 @@
 # systemd unit's ExecStop and the Pi helper scripts; run it by hand the same way:
 #   ./scripts/setup/joustmania-compose.sh up -d agent
 #
-# - Compose file: docker-compose.yml only, named with -f. A bare
+# - Compose files: docker-compose.yml, named with -f, plus the gateway overlay
+#   when it is configured (below); never anything else. A bare
 #   `docker compose` also auto-loads docker-compose.override.yml, the dev/test
 #   file that publishes the mock control port (50062) and the gRPC ports on all
 #   interfaces, i.e. to the venue network (#1319).
@@ -19,10 +20,13 @@
 #   stderr line). On a branch nothing is derived.
 # - Gateway export (UC-035 BR-015, #2622): docker-compose.gateway.yml is added
 #   exactly when ORANGECASE_GATEWAY_HOST and ORANGECASE_GATEWAY_TOKEN both have
-#   a non-empty value, read as compose would (the shell, else .env.local, else
-#   .env). The two variables are the switch, so a reboot and an upgrade keep
-#   the export on. With only one set the overlay is left out (compose would
-#   refuse to render it and the stack would not start) and one line says so.
+#   a non-empty value (the shell, else .env.local, else .env) and compose
+#   renders the stack with it. The two variables are the switch, so a reboot
+#   and an upgrade keep the export on. The wrapper reads plain NAME=value lines
+#   itself and then lets compose confirm (`config -q`), because compose is the
+#   one that interpolates: with a value compose reads as empty (`"" # note`,
+#   `${UNSET}`) it would refuse the overlay and the whole stack would not
+#   start. In every other case the overlay is left out and one line says so.
 # Never prints the env files or their values. Never run `config` without
 # `--services`/`--images`/`-q` where output is logged; it prints interpolated
 # secrets.
@@ -56,10 +60,13 @@ compose_env_value() {
     fi
     for file in .env.local .env; do
         [[ -f "$file" ]] || continue
-        line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${name}=" "$file" | tail -n 1 || true)"
+        # `NAME=value`, and the `NAME = value` and `NAME: value` forms compose also reads
+        line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${name}[[:space:]]*[=:]" "$file" | tail -n 1 || true)"
         [[ -n "$line" ]] || continue
-        line="${line#*=}"
-        # Trailing whitespace, which includes the CR of a CRLF line ending
+        line="${line#*[=:]}"
+        # Leading whitespace, and trailing whitespace (which includes the CR of
+        # a CRLF line ending)
+        line="${line#"${line%%[![:space:]]*}"}"
         line="${line%"${line##*[![:space:]]}"}"
         # One pair of surrounding quotes, as compose strips them
         first="${line:0:1}"
@@ -77,7 +84,13 @@ if [[ -f "$GATEWAY_OVERLAY" && " $* " != *" $GATEWAY_OVERLAY "* ]]; then
     gateway_host="$(compose_env_value ORANGECASE_GATEWAY_HOST)"
     gateway_token="$(compose_env_value ORANGECASE_GATEWAY_TOKEN)"
     if [[ -n "$gateway_host" && -n "$gateway_token" ]]; then
-        COMPOSE_FILES+=(-f "$GATEWAY_OVERLAY")
+        # Compose has the last word: it interpolates the env files, this script
+        # does not. `config -q` prints nothing and needs no docker daemon.
+        if docker compose "${COMPOSE_FILES[@]}" -f "$GATEWAY_OVERLAY" config -q >/dev/null 2>&1; then
+            COMPOSE_FILES+=(-f "$GATEWAY_OVERLAY")
+        else
+            echo "joustmania-compose: gateway export off: compose does not render the stack with $GATEWAY_OVERLAY; check ORANGECASE_GATEWAY_HOST and ORANGECASE_GATEWAY_TOKEN (UC-035 BR-015)" >&2
+        fi
     elif [[ -n "$gateway_host" || -n "$gateway_token" ]]; then
         echo "joustmania-compose: gateway export off: ORANGECASE_GATEWAY_HOST and ORANGECASE_GATEWAY_TOKEN must both be set (UC-035 BR-015)" >&2
     fi
