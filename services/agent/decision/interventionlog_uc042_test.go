@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/joustmania/agent/decide"
 	"github.com/joustmania/agent/flags"
@@ -57,6 +58,20 @@ func TestInterventionLog_NotesEveryOutcome(t *testing.T) {
 		}
 		if got.Held != 1 || got.Noop != 1 {
 			t.Errorf("held/noop = %d/%d, want 1/1", got.Held, got.Noop)
+		}
+	})
+
+	t.Run("UC-040/A35 an already-in-place value is not listed as blocked", func(t *testing.T) {
+		l, _, clock, _ := appliedLoop(t, sens("WEAK", "0.8"))
+		log := NewInterventionLog()
+		l.SetInterventionLog(log)
+		expectOutcome(t, runCycle(l, budgetCtx()), "adjust_player_sensitivity/WEAK:dispatched")
+		*clock = clock.Add(time.Second)
+		expectOutcome(t, runCycle(l, budgetCtx()), "adjust_player_sensitivity/WEAK:already_applied")
+
+		got := log.Take(budgetCtx().SessionID)
+		if len(got.Records) != 1 || got.Records[0].Outcome != NotedApplied {
+			t.Fatalf("records = %+v, want only the applied write", got.Records)
 		}
 	})
 

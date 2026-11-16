@@ -2,6 +2,7 @@ package decision
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -90,6 +91,36 @@ func TestEffect_OneSpanPerIntervention(t *testing.T) {
 		}
 		if _, ok := attrValue(spans[0], AttrEffectDelta); ok {
 			t.Error("no primary delta without a follow-up value")
+		}
+	})
+
+	t.Run("UC-040/BR-013 a non-finite signal is marked aborted, the others stay listed", func(t *testing.T) {
+		provider := newFakeContextProvider()
+		const gameID = "game_nan"
+		provider.set(gameID, durationContext(gameID, 90))
+		l, sr, _, sched := effectLoop(t, provider, gameID)
+
+		baseline := enduranceBaseline()
+		baseline["balanced.skill_gap"] = math.NaN()
+		if l.schedule(shieldDecision(), baseline, defaultFit()) == "" {
+			t.Fatal("expected a scheduled sample")
+		}
+		sched.fire()
+		l.AwaitEffects()
+
+		spans := spansByName(sr.Ended(), SpanInterventionEffect)
+		if len(spans) != 1 {
+			t.Fatalf("effect spans = %d, want 1", len(spans))
+		}
+		got := effectSignalsOf(t, spans[0])
+		if len(got) != len(baseline) {
+			t.Fatalf("signals = %v, want all %d listed", got, len(baseline))
+		}
+		if e := got["balanced.skill_gap"]; !e.Aborted || e.Baseline != nil {
+			t.Errorf("NaN signal entry = %+v, want aborted without a baseline", e)
+		}
+		if e := got["endurance.session_progress"]; e.Delta == nil || *e.Delta != 0.5 {
+			t.Errorf("finite signal entry = %+v, want delta 0.5", e)
 		}
 	})
 

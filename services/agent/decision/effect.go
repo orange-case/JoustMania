@@ -373,8 +373,10 @@ var primaryEffectSignal = map[string]string{
 
 // effectSignalEntry is one intervention.signals JSON entry. FollowUp and Delta are
 // absent for a signal that was evaluable at dispatch but not at follow-up (Aborted).
+// A non-finite value (NaN, Inf) has no JSON encoding: it is left out and the entry
+// is marked Aborted, so one bad signal never drops the whole attribute.
 type effectSignalEntry struct {
-	Baseline float64  `json:"baseline"`
+	Baseline *float64 `json:"baseline,omitempty"`
 	FollowUp *float64 `json:"followup,omitempty"`
 	Delta    *float64 `json:"delta,omitempty"`
 	Aborted  bool     `json:"aborted,omitempty"`
@@ -389,8 +391,12 @@ func effectSignalAttributes(objective string, baseline, followUp map[string]floa
 	entries := make(map[string]effectSignalEntry, len(baseline))
 	measured := 0
 	for key, base := range baseline {
-		e := effectSignalEntry{Baseline: round4(base)}
-		if fu, present := followUp[key]; present {
+		var e effectSignalEntry
+		if finite(base) {
+			b := round4(base)
+			e.Baseline = &b
+		}
+		if fu, present := followUp[key]; present && finite(fu) && e.Baseline != nil {
 			f, d := round4(fu), round4(fu-base)
 			e.FollowUp, e.Delta = &f, &d
 			measured++
@@ -426,6 +432,9 @@ func effectSignalAttributes(objective string, baseline, followUp map[string]floa
 	}
 	return attrs
 }
+
+// finite reports whether v has a JSON encoding (not NaN, not +-Inf).
+func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 // round4 rounds v to 4 decimals for the compact JSON attribute.
 func round4(v float64) float64 { return math.Round(v*1e4) / 1e4 }

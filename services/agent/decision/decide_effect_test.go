@@ -187,7 +187,9 @@ func landingBaselines(t *testing.T, sent, landing gamecontext.GameContext) map[s
 	out := map[string]float64{}
 	for _, s := range spansByName(h.sr.Ended(), SpanInterventionEffect) {
 		for signal, e := range effectSignalsOf(t, s) {
-			out[signal] = e.Baseline
+			if e.Baseline != nil {
+				out[signal] = *e.Baseline
+			}
 		}
 	}
 	if len(out) == 0 {
