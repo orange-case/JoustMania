@@ -392,19 +392,19 @@ func sortKeys(keys []Key) {
 
 // roundCtx is the state of one round.
 type roundCtx struct {
-	ctx      context.Context
-	span     trace.Span
-	trigger  string
-	now      time.Time
-	updated  time.Time
-	hasUpd   bool
-	games    map[string]bool
+	ctx     context.Context
+	span    trace.Span
+	trigger string
+	now     time.Time
+	updated time.Time
+	hasUpd  bool
+	games   map[string]bool
 	// ctrl and kinds are the controller map at the round's start (#2624):
 	// each controller's owner and whether the pull may read it, each live
 	// game's kind.
-	ctrl  map[string]ctrlView
-	kinds map[string]string
-	doc     map[Key]docEntry // the decoded document (nil before it is read)
+	ctrl     map[string]ctrlView
+	kinds    map[string]string
+	doc      map[Key]docEntry // the decoded document (nil before it is read)
 	writes   int
 	deferred bool
 	stats    roundStats

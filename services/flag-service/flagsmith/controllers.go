@@ -236,14 +236,6 @@ func (c *controllers) end(id string) (ctrlGame, bool) {
 	return g, true
 }
 
-// kind returns a live game's kind (ok false when the game is not live).
-func (c *controllers) kind(id string) (string, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	g, ok := c.games[id]
-	return g.kind, ok
-}
-
 // identityFor is the identity a key's value is sent to. A player key of a
 // real game goes to its controller while that game owns it; ok is false for
 // a player key of a game that is not live or does not own the controller

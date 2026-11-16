@@ -98,7 +98,6 @@ func (o *out) controllerStep(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-
 // ctrlCall paces and runs one request of controller work inside a push span
 // and maps its outcome.
 func (o *out) ctrlCall(ctx context.Context, k Key, opName string, fn func(context.Context) (int, error)) (outcome, ctrlStop, error) {
@@ -161,7 +160,7 @@ func (o *out) controllerUUID(ctx context.Context, identifier string, create bool
 		status, err := l.Client().Admin(c, http.MethodPost, l.envPath("edge-identities/"), map[string]string{"identifier": identifier}, &created)
 		var he *HTTPError
 		if errors.As(err, &he) && he.Status == http.StatusBadRequest && strings.Contains(strings.ToLower(string(he.Body)), "already exist") {
-			// Created meanwhile by someone else: search again next time.
+			// Created meanwhile by someone else.
 			exists = true
 			return status, nil
 		}
@@ -172,7 +171,11 @@ func (o *out) controllerUUID(ctx context.Context, identifier string, create bool
 	case err != nil || stop != ctrlGoOn:
 		return "", false, stop, err
 	case exists || uuid == "":
-		return "", false, ctrlAgain, nil
+		// Flagsmith has it but the search did not show it (or answered no
+		// uuid): the settle is refused for this game rather than retried
+		// in a loop that would hold every value push back; the values are
+		// still sent by identifier.
+		return "", false, ctrlRefused, nil
 	}
 	l.setIdentityUUID(identifier, uuid)
 	return uuid, true, ctrlGoOn, nil

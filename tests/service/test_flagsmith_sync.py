@@ -458,9 +458,7 @@ def test_real_game_end_releases_controllers(flag_service, settled_link):
         fl.wait_for(
             lambda: fake.override("controller:MOCK0023", HANDICAP[1]) is None, fl.PULL_TIMEOUT, "override removed"
         )
-        fl.wait_for(
-            lambda: fake.identities()["controller:MOCK0023"]["traits"] == {}, fl.PULL_TIMEOUT, "traits cleared"
-        )
+        fl.wait_for(lambda: fake.identities()["controller:MOCK0023"]["traits"] == {}, fl.PULL_TIMEOUT, "traits cleared")
         assert f"game:{game}" not in fake.identities()
     finally:
         if not ended:

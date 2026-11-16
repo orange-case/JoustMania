@@ -86,7 +86,7 @@ type outEnv struct {
 	on     map[string]http.HandlerFunc
 	// hook, when set, answers a request first (true: answered).
 	hook func(w http.ResponseWriter, r *http.Request) bool
-	ver    uint64
+	ver  uint64
 }
 
 func loadBaseReg(t *testing.T) (*baseline.Baseline, *registry.Registry) {

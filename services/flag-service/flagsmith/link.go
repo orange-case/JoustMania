@@ -153,10 +153,10 @@ type Status struct {
 
 // Link is the Flagsmith link of one stack.
 type Link struct {
-	cfg     Config
-	deps    Deps
-	client  *Client
-	links   *LinkState
+	cfg    Config
+	deps   Deps
+	client *Client
+	links  *LinkState
 	// ctrl is the controller map (controller identities, #2624).
 	ctrl    *controllers
 	metrics *Metrics
