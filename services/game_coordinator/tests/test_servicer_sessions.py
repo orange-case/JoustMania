@@ -312,7 +312,7 @@ class TestSingleGameCharacterization:
         gid2, session2 = await _start_running(servicer, _config(serials=("b1", "b2")))
         assert gid2 != gid1
         assert gid1 not in servicer.sessions
-        assert session2.game_kind == "primary"
+        assert session2.game_kind == "real"
         assert servicer._primary_game_id == gid2
         # The new primary reuses the persistent primary bus (menu compat).
         assert session2.event_bus is servicer.primary_event_bus
@@ -373,7 +373,7 @@ class TestMultiSession:
 
         assert ok1 and ok2
         assert gid1 != gid2
-        assert servicer.sessions[gid1].game_kind == "primary"
+        assert servicer.sessions[gid1].game_kind == "real"
         assert servicer.sessions[gid2].game_kind == "shadow"
         # Only the first session owns the primary slot.
         assert servicer.game_id == gid1
@@ -454,7 +454,7 @@ class TestMultiSession:
             # New start with no live primary becomes primary again.
             _, gid2 = await servicer._start_game_from_config(_config(serials=("b1", "b2")), _MockSpan())
 
-        assert servicer.sessions[gid2].game_kind == "primary"
+        assert servicer.sessions[gid2].game_kind == "real"
         assert servicer._primary_game_id == gid2
 
     def test_shadow_end_clears_only_its_serials_and_game_state_series(self):
@@ -485,7 +485,7 @@ class TestMultiSession:
             # this cleanup's own calls count.
             leaked_removal = threading.Thread(
                 target=metrics.clear_game_state_gauges,
-                args=("primary", "game_other"),
+                args=("real", "game_other"),
                 name="retire-metrics-game_other",
             )
             leaked_removal.start()
@@ -505,10 +505,10 @@ class TestMultiSession:
             patch.object(metrics, "clear_player_analytics") as mock_clear,
             patch.object(metrics, "clear_game_state_gauges") as mock_state,
         ):
-            metrics.clear_session_player_analytics(["primary_p1"], game_id="primary_game", game_kind="primary")
+            metrics.clear_session_player_analytics(["primary_p1"], game_id="primary_game", game_kind="real")
 
             mock_clear.assert_called_once_with("primary_p1", "primary_game")
-            mock_state.assert_called_once_with("primary", "primary_game")
+            mock_state.assert_called_once_with("real", "primary_game")
 
 
 @pytest.mark.nfr("NFR-018")
@@ -573,7 +573,7 @@ class TestConcurrentShadowGames:
             ok2, error = await servicer._start_game_from_config(_config(serials=("r3", "r4")), _MockSpan())
 
         assert ok1 and oks
-        assert servicer.sessions[gid1].game_kind == "primary"
+        assert servicer.sessions[gid1].game_kind == "real"
         assert ok2 is False
         assert "already in progress" in error.lower()
 
@@ -595,7 +595,7 @@ class TestConcurrentShadowGames:
         # Every shadow was preempted/retired; only the real game remains.
         for gid in shadow_gids:
             assert gid not in servicer.sessions
-        assert servicer.sessions[real_gid].game_kind == "primary"
+        assert servicer.sessions[real_gid].game_kind == "real"
         assert servicer._primary_game_id == real_gid
 
     @pytest.mark.asyncio
@@ -962,7 +962,7 @@ class TestShadowGameGovernance:
             ok, gid = await servicer._start_game_from_config(_config(serials=("a1", "a2")), _MockSpan())
         assert ok is True
         session = servicer.sessions[gid]
-        assert session.game_kind == "primary"
+        assert session.game_kind == "real"
         assert servicer._primary_game_id == gid
         assert session.event_bus is servicer.primary_event_bus
 
@@ -1000,7 +1000,7 @@ class TestShadowGameGovernance:
         assert ok is True, f"real game lost the admission race: {gid}"
         # Pass 1 (no-op), pass 2 after the cap rejection, pass 3 after the admission.
         assert calls["n"] == 3, "expected a second preemption pass after the cap rejection"
-        assert servicer.sessions[gid].game_kind == "primary"
+        assert servicer.sessions[gid].game_kind == "real"
         assert servicer._primary_game_id == gid
 
     @pytest.mark.asyncio
@@ -1412,7 +1412,7 @@ class TestShadowGameGovernance:
         assert ok is True
         # Shadow was force-ended + retired; real game is the new primary.
         assert gid_shadow not in servicer.sessions
-        assert servicer.sessions[gid_real].game_kind == "primary"
+        assert servicer.sessions[gid_real].game_kind == "real"
         assert servicer._primary_game_id == gid_real
 
         # The shadow's bus received game_force_ended with the preemption reason.
@@ -1437,7 +1437,7 @@ class TestShadowGameGovernance:
             ok, gid_real = await servicer._start_game_from_config(_config(serials=("a1", "a2")), _MockSpan())
         assert ok is True
         assert gid_shadow not in servicer.sessions
-        assert servicer.sessions[gid_real].game_kind == "primary"
+        assert servicer.sessions[gid_real].game_kind == "real"
 
     @pytest.mark.asyncio
     @pytest.mark.nfr("NFR-018")
@@ -1453,7 +1453,7 @@ class TestShadowGameGovernance:
             ok, gid_real = await servicer._start_game_from_config(_config(serials=("a1", "a2")), _MockSpan())
 
         assert ok is True
-        assert servicer.sessions[gid_real].game_kind == "primary"
+        assert servicer.sessions[gid_real].game_kind == "real"
         # Both shadows were preempted to make room.
         assert len(servicer.sessions) == 1
 
@@ -1507,7 +1507,7 @@ class TestShadowGameGovernance:
 
         gid_real, real = await _start_running(servicer, _config(serials=("a1", "a2")))
         assert gid_shadow not in servicer.sessions
-        assert real.game_kind == "primary"
+        assert real.game_kind == "real"
         assert servicer._primary_game_id == gid_real
 
 
@@ -1583,7 +1583,7 @@ class TestExperimentSpawnBinding:
             ok, gid = await servicer._start_game_from_config(_config(serials=("a1", "a2")), _MockSpan())
         assert ok is True
         session = servicer.sessions[gid]
-        assert session.game_kind == "primary"
+        assert session.game_kind == "real"
         assert session.experiment_id == ""
         assert session.arm == ""
 
@@ -1605,7 +1605,7 @@ class TestExperimentSpawnBinding:
             )
         assert ok is True
         session = servicer.sessions[gid]
-        assert session.game_kind == "primary"
+        assert session.game_kind == "real"
         # The invariant: the real game dropped the experiment fields entirely.
         assert session.experiment_id == ""
         assert session.arm == ""
@@ -1631,7 +1631,7 @@ class TestExperimentSpawnBinding:
             # The real start preempts the shadow game (UC-043 A2); check it alone.
             ok_real, real_gid = await servicer._start_game_from_config(real_config, _MockSpan())
         assert ok_real is True
-        assert servicer.sessions[real_gid].game_kind == "primary"
+        assert servicer.sessions[real_gid].game_kind == "real"
         assert servicer.sessions[real_gid].rng_seed == 0
 
     @pytest.mark.uc("UC-040", flow="A30", br=["BR-019"])
@@ -1654,7 +1654,7 @@ class TestExperimentSpawnBinding:
             assert servicer.sessions[shadow_gid].pattern_trigger_policy is True
             ok_real, real_gid = await servicer._start_game_from_config(real_config, _MockSpan())
         assert ok_real is True
-        assert servicer.sessions[real_gid].game_kind == "primary"
+        assert servicer.sessions[real_gid].game_kind == "real"
         assert servicer.sessions[real_gid].pattern_trigger_policy is False
 
     @pytest.mark.asyncio

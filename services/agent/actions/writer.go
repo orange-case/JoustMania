@@ -162,7 +162,7 @@ func NewWriterFromEnv(log *slog.Logger) *Writer {
 func newWritesCounter(mp otelmetric.MeterProvider) otelmetric.Int64Counter {
 	c, err := mp.Meter(meterName).Int64Counter(
 		"agent_intervention_writes_total",
-		otelmetric.WithDescription("Intervention writes the agent sent to the flag service, labeled by outcome and game_kind (primary|shadow, #2294)"),
+		otelmetric.WithDescription("Intervention writes the agent sent to the flag service, labeled by outcome and game_kind (real|shadow, #2294)"),
 	)
 	if err != nil {
 		c, _ = metricnoop.NewMeterProvider().Meter(meterName).Int64Counter("agent_intervention_writes_total")

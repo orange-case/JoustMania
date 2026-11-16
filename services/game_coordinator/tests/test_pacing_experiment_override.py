@@ -182,7 +182,7 @@ async def test_experiment_value_equal_to_the_requested_preset_is_applied(game_fl
     ("game_kind", "experiment_id", "arm"),
     [
         ("shadow", EXPERIMENT_ID, "control"),  # control arm: no experiment value
-        ("primary", "", ""),  # real game
+        ("real", "", ""),  # real game
         ("shadow", "", ""),  # shadow game in no experiment
     ],
     ids=["control-arm", "real-game", "non-experiment-shadow"],

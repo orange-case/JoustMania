@@ -547,7 +547,7 @@ func metricAction(intervention string) string {
 // (#790), applied OR blocked. block_reason is empty when applied and the specific
 // BlockReason ("not_allowed"/"battery_threshold"/"rate_limit") when blocked, so the
 // dashboard can split applied vs blocked by reason. Labels are bounded: game_kind
-// (primary|shadow, #2294), action (the
+// (real|shadow, #2294), action (the
 // intervention vocabulary), blocked (bool), block_reason (the closed BlockReason
 // set). The counter is never nil (NewLoop seeds a no-op), so this is safe from the
 // concurrent Export-handler goroutines that drive runDecision.

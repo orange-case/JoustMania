@@ -11,7 +11,7 @@
 #
 # READ-ONLY. It sends GET requests to the VictoriaMetrics Prometheus API and (with --jaeger-url)
 # Jaeger's query API v3, nothing else: no flag write, no game start, no docker call. The
-# game_kind label (primary = real, shadow) separates the kinds. Safe while games are running.
+# game_kind label (real, shadow; the legacy primary = real) separates the kinds. Safe while games are running.
 #
 # Usage:
 #   scripts/agent-shadow-realism.sh [--since 24h | --start EPOCH --end EPOCH] [--mode FFA]

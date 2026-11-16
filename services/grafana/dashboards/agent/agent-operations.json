@@ -54,7 +54,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Games whose loop is running, by kind: primary = the real (menu) game, shadow = headless agent games. game_active is 1 while a game runs; each game has its own series (game_id).",
+      "description": "Games whose loop is running, by kind: real = the menu game, shadow = headless agent games. game_active is 1 while a game runs; each game has its own series (game_id).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -105,7 +105,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(game_active{game_kind=\"primary\"}) or vector(0)",
+          "expr": "sum(game_active{game_kind=~\"real|primary\"}) or vector(0)",
           "legendFormat": "real",
           "refId": "A"
         },
@@ -699,7 +699,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Agent decisions in the selected time range by game kind (primary = real games, shadow = shadow games), action, blocked and block reason (increase of agent_decisions_total). Replaces the Jaeger trace-search table that Grafana 13 cannot run against Jaeger 2.21+ (jaeger#7594); open a single trace from the Jaeger UI at /jaeger/.",
+      "description": "Agent decisions in the selected time range by game kind (real = player-facing games, shadow = shadow games), action, blocked and block reason (increase of agent_decisions_total). Replaces the Jaeger trace-search table that Grafana 13 cannot run against Jaeger 2.21+ (jaeger#7594); open a single trace from the Jaeger UI at /jaeger/.",
       "fieldConfig": {
         "defaults": {
           "custom": {

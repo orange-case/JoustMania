@@ -15,12 +15,12 @@ function tracesTabUrls(): URL[] {
 }
 
 describe("UC-035: dashboard Traces tab search", () => {
-  it("UC-035 step 5: searches game roots by the game.kind=primary tag, so Health/Check spans never match", () => {
+  it("UC-035 step 5: searches game roots by the game.kind=real tag, so Health/Check spans never match", () => {
     const urls = tracesTabUrls();
     expect(urls.length).toBeGreaterThanOrEqual(2); // the link and the iframe
     for (const url of urls) {
       expect(url.searchParams.get("service")).toBe("game-coordinator-service");
-      expect(JSON.parse(url.searchParams.get("tags") ?? "{}")).toEqual({ "game.kind": "primary" });
+      expect(JSON.parse(url.searchParams.get("tags") ?? "{}")).toEqual({ "game.kind": "real" });
     }
   });
 });
