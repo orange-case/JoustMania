@@ -15,7 +15,11 @@
 #   ORANGECASE_GATEWAY_HOST      host name of the gateway, e.g. otlp.example.org
 #                                (no scheme, no path; host:port for a port other
 #                                than 443). The scheme is fixed to https below,
-#                                so the token never travels unencrypted (C-016).
+#                                so the case only ever dials https (C-016). The
+#                                gateway must answer /v1/* directly, without a
+#                                redirect: the collector follows redirects (no
+#                                option turns that off) and sends the token to
+#                                the target, even over plain http.
 #                                The exporter adds /v1/traces, /v1/metrics,
 #                                /v1/logs.
 #   ORANGECASE_GATEWAY_TOKEN     bearer token (a secret: environment only, C-016)

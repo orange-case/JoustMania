@@ -105,8 +105,10 @@ repo. Jaeger, VictoriaMetrics and the agent keep receiving everything.
 
 Both are required; compose refuses the file without them. Keep them in the environment: the shell, or
 `.env.local` on the Pi (not in git). Never put the token in a flag, a compose file or any file of this repo
-(C-016). The scheme is fixed to `https`, so the token never travels unencrypted; with a value that
-carries a scheme (`http://...`) every export fails and nothing is sent.
+(C-016). The scheme is fixed to `https`, so the case only ever dials `https`; with a value that
+carries a scheme (`http://...`) every export fails and nothing is sent. The gateway must answer
+`/v1/traces`, `/v1/metrics` and `/v1/logs` directly, without a redirect: the collector follows
+redirects (no option turns that off) and sends the token to the target, even over plain `http`.
 
 ```bash
 # On: recreates the collector with the overlay

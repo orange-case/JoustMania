@@ -226,9 +226,10 @@ def test_endpoint_and_token_come_from_the_environment_only(gateway):
 
 
 @pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])
-def test_gateway_export_cannot_send_the_token_over_plain_http(gateway, overlay):
+def test_gateway_export_only_ever_dials_https(gateway, overlay):
     """C-016, FR-086: the scheme is a literal `https://` in the config and only the host comes
-    from the environment, so no value of the variable makes the exporter speak plain http."""
+    from the environment, so no value of the variable makes the exporter dial plain http. (A
+    redirect from the gateway is followed with the token; the gateway must not send one.)"""
     endpoint = gateway["endpoint"]
     assert endpoint.startswith("https://"), (
         "the scheme must not come from the environment"
@@ -238,6 +239,13 @@ def test_gateway_export_cannot_send_the_token_over_plain_http(gateway, overlay):
     assert set(overlay["exporters"]) == {EXPORTER}, (
         "a second exporter could carry the token"
     )
+
+
+@pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])
+def test_gateway_export_is_gzip_compressed(gateway):
+    """UC-035 A7 step 2, telemetry.md: the copy goes over the venue uplink gzip-compressed
+    (gzip is also the exporter's default in v0.164.0, so an absent key is gzip)."""
+    assert gateway.get("compression", "gzip") == "gzip"
 
 
 @pytest.mark.nfr("NFR-029")
