@@ -17,6 +17,12 @@
 #   joustmania-vX.Y.Z tag, else the 40-character sha) and exported, so it wins
 #   over .env, .env.local and the shell (a different shell IMAGE_TAG gets one
 #   stderr line). On a branch nothing is derived.
+# - Gateway export (UC-035 BR-015, #2622): docker-compose.gateway.yml is added
+#   exactly when ORANGECASE_GATEWAY_HOST and ORANGECASE_GATEWAY_TOKEN both have
+#   a non-empty value, read as compose would (the shell, else .env.local, else
+#   .env). The two variables are the switch, so a reboot and an upgrade keep
+#   the export on. With only one set the overlay is left out (compose would
+#   refuse to render it and the stack would not start) and one line says so.
 # Never prints the env files or their values. Never run `config` without
 # `--services`/`--images`/`-q` where output is logged; it prints interpolated
 # secrets.
@@ -39,5 +45,43 @@ fi
 COMPOSE_FILES=(-f docker-compose.yml)
 [[ -f .env ]] && COMPOSE_FILES+=(--env-file .env)
 [[ -f .env.local ]] && COMPOSE_FILES+=(--env-file .env.local)
+
+# Prints the value compose would use for $1: the shell when the variable is set
+# there (also when empty), else the last assignment in .env.local, else in .env.
+compose_env_value() {
+    local name="$1" file line first
+    if [[ -n "${!name+set}" ]]; then
+        printf '%s' "${!name}"
+        return 0
+    fi
+    for file in .env.local .env; do
+        [[ -f "$file" ]] || continue
+        line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${name}=" "$file" | tail -n 1 || true)"
+        [[ -n "$line" ]] || continue
+        line="${line#*=}"
+        # Trailing whitespace, which includes the CR of a CRLF line ending
+        line="${line%"${line##*[![:space:]]}"}"
+        # One pair of surrounding quotes, as compose strips them
+        first="${line:0:1}"
+        if [[ ${#line} -ge 2 && "$first" == "${line: -1}" ]] && [[ "$first" == '"' || "$first" == "'" ]]; then
+            line="${line:1:${#line}-2}"
+        fi
+        printf '%s' "$line"
+        return 0
+    done
+    return 0
+}
+
+GATEWAY_OVERLAY=docker-compose.gateway.yml
+if [[ -f "$GATEWAY_OVERLAY" && " $* " != *" $GATEWAY_OVERLAY "* ]]; then
+    gateway_host="$(compose_env_value ORANGECASE_GATEWAY_HOST)"
+    gateway_token="$(compose_env_value ORANGECASE_GATEWAY_TOKEN)"
+    if [[ -n "$gateway_host" && -n "$gateway_token" ]]; then
+        COMPOSE_FILES+=(-f "$GATEWAY_OVERLAY")
+    elif [[ -n "$gateway_host" || -n "$gateway_token" ]]; then
+        echo "joustmania-compose: gateway export off: ORANGECASE_GATEWAY_HOST and ORANGECASE_GATEWAY_TOKEN must both be set (UC-035 BR-015)" >&2
+    fi
+    unset gateway_host gateway_token
+fi
 
 exec docker compose "${COMPOSE_FILES[@]}" "$@"

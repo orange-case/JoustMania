@@ -120,10 +120,12 @@ docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d otel-co
 docker compose -f docker-compose.yml up -d otel-collector
 ```
 
-On the Pi use the wrapper, which reads both variables from `.env.local`:
-`./scripts/setup/joustmania-compose.sh -f docker-compose.gateway.yml up -d otel-collector` (off: the same
-command without `-f docker-compose.gateway.yml`). The autostart unit does not load the overlay, so a reboot
-or `systemctl restart joustmania` starts the collector without it: run the command again.
+On the Pi the two variables are the switch (#2622): put both in `.env.local`. The wrapper
+`./scripts/setup/joustmania-compose.sh` then adds the overlay to every compose call, so the autostart, a
+reboot and an upgrade keep the export on. After changing `.env.local`, recreate the collector:
+`./scripts/setup/joustmania-compose.sh up -d otel-collector`. Off: remove both lines and run the same
+command. With only one of the two set the wrapper starts the stack without the overlay and says so on
+stderr.
 
 An unreachable gateway or a wrong token never slows the game or the in-case backends (NFR-029): the
 collector retries a batch for at most 5 minutes, queues at most 16 MiB per signal and then drops the
