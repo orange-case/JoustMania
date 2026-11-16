@@ -42,6 +42,7 @@ PACING = ("interventions", "pacing_profile")  # game scope
 HANDICAP = ("interventions", "player_handicap_factor")  # game+serial scope
 AUDIO_CUE = ("interventions", "audio_cue")  # event flag, game scope
 SENSITIVITY = ("game", "sensitivity")  # also experiment+arm: read-only from Flagsmith
+PUSH_RATE = 5  # FLAGSMITH_PUSH_RATE default (requests per second, UC-055 BR-001)
 
 
 @pytest.fixture(autouse=True)
@@ -72,6 +73,7 @@ def _establish(flag_service, fake, flag_set: str, flag: str, value) -> None:
 @pytest.mark.uc("UC-054", flow="main", steps=[1, 2, 3, 4, 5, 6, 7], br=["BR-001", "BR-009"], tc="TC-021")
 def test_person_stack_value_applied_as_flagsmith_write(stack, flag_service, settled_link):
     fake = settled_link
+    t0 = time.monotonic()
     # Step 1: a person turns content capture off in Flagsmith.
     fake.person_sets(CAPTURE[1], "off")
     # Step 2: within a poll the flag service writes it as the flagsmith writer.
@@ -88,7 +90,7 @@ def test_person_stack_value_applied_as_flagsmith_write(stack, flag_service, sett
     fl.wait_pulls(flag_service, 1)
     state = fl.link(flag_service)
     assert state["out_of_sync"] == 0 and state["pending"] == 0, state
-    assert fake.pushes(CAPTURE[1]) == [], "an applied Flagsmith value was pushed back"
+    assert [r for r in fake.pushes(CAPTURE[1]) if r["t"] >= t0] == [], "an applied Flagsmith value was pushed back"
 
 
 @pytest.mark.uc("UC-054", flow="main", steps=[2, 3], br=["BR-003", "BR-009"], tc="TC-021")
@@ -192,8 +194,8 @@ def test_own_push_never_comes_back(flag_service, settled_link):
 
 
 # ------------------------------------------------------------------ UC-054 A1 + UC-055 A3
-@pytest.mark.uc("UC-054", flow="A1", tc="TC-022")
-@pytest.mark.uc("UC-055", flow="A3", tc="TC-022")
+@pytest.mark.uc("UC-054", flow="A1", tc="TC-021")
+@pytest.mark.uc("UC-055", flow="A3", tc="TC-021")
 def test_offline_keeps_local_writes_and_drains_on_reconnect(flag_service, settled_link):
     fake = settled_link
     # Step 1: Flagsmith goes down: the link goes offline.
@@ -338,10 +340,13 @@ def test_local_write_reaches_flagsmith_merged(flag_service, settled_link):
         start = time.monotonic()
         flag_service.put(*TICK, value=value)
         assert time.monotonic() - start < 0.5
-    # Step 2: Flagsmith ends with the last value, merged into fewer requests (at most 5/s).
+    writing = time.monotonic() - t0
+    # Step 2: Flagsmith ends with the last value, merged: at most FLAGSMITH_PUSH_RATE (5/s) requests
+    # while the writes ran, plus the first and the merged last one (+1 for timer jitter).
     fl.wait_for(lambda: fake.env_value(TICK[1]) == (True, 115), fl.PULL_TIMEOUT, "the last value in Flagsmith")
     sent = [r for r in fake.pushes(TICK[1]) if r["t"] >= t0]
-    assert len(sent) < 15, f"{len(sent)} requests for 15 writes: not merged"
+    bound = min(14, int(writing * PUSH_RATE) + 3)
+    assert len(sent) <= bound, f"{len(sent)} requests for 15 writes in {writing:.2f}s (bound {bound}): not merged"
     # Step 3: a local clear turns the feature off with the baseline value.
     default = flag_service.get(*TICK)["baseline_default"]
     t1 = time.monotonic()
@@ -444,11 +449,14 @@ def test_local_write_latency_with_flagsmith_down_and_slow(stack, flag_service, s
     )
 
     fake = settled_link
-    reports = []
+    reports, reasons = [], []
     for label, setup in (("down", {"down": True}), ("slow", {"delay": 3.0})):
         for name, value in setup.items():
             setattr(fake, name, value)
         try:
+            # Sample only once the link has noticed: offline (down: http_503, slow: the 1 s timeout).
+            state = fl.wait_link(flag_service, fl.PULL_TIMEOUT, link="offline")
+            reasons.append(f"{label}: {state.get('offline_reason')}")
             latencies = measure_write_propagation(stack, flag_service, samples=10)
             # The write's own answer: the flag service never waits for Flagsmith before answering.
             answers = []

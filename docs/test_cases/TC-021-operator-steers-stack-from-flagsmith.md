@@ -45,7 +45,7 @@
 
 ## Postconditions
 
-- Each step clears its local values (the client's `cleanup`), ends its games, waits until nothing is pending and a pull ran after the last push, then resets the fake and waits for two pulls.
+- Each step clears its local values (the client's `cleanup`), ends its games, waits until nothing is pending and a pull ran after the last push, then resets the fake, waits for one pull of the reset document and for nothing pending.
 
 ## Automation
 

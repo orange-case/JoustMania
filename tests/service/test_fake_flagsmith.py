@@ -8,6 +8,7 @@ No stack is started here; these run without docker or go.
 
 from __future__ import annotations
 
+import datetime as dt
 import email.utils
 import json
 import time
@@ -16,7 +17,14 @@ import urllib.request
 
 import pytest
 
-from tests.service.harness.fakes.flagsmith import ADMIN_KEY, ENVIRONMENT_KEY, SERVER_KEY, FakeFlagsmith
+from tests.service.harness.fakes.flagsmith import (
+    ADMIN_KEY,
+    ENVIRONMENT_ID,
+    ENVIRONMENT_KEY,
+    PROJECT_ID,
+    SERVER_KEY,
+    FakeFlagsmith,
+)
 
 pytestmark = pytest.mark.tier("service")
 
@@ -173,3 +181,52 @@ def test_reset_values_keeps_features_and_drops_the_rest(fake):
     assert fake.env_value("decision.capture_content") == (False, None)
     assert fake.identities() == {} and fake.audit_rows == [] and fake.down is False
     assert len(fake.features) == 3
+
+
+def test_admin_paths_need_the_environment_key_and_project_id(fake):
+    fid = fake.feature_id("experiment_tick_seconds")
+    body = {"environment_default": {"enabled": True, "value": {"type": "integer", "value": "3"}}}
+    status, _, answer = _call(fake, "PATCH", f"/api/__future__/environments/{SERVER_KEY}/features/{fid}/", body)
+    assert status == 404 and "detail" in answer  # the server key is not the environment key
+    assert _call(fake, "GET", "/api/v1/environments/otherEnv/edge-identities/?q=game:")[0] == 404
+    assert _call(fake, "GET", "/api/v1/projects/1/features/")[0] == 404
+    assert _call(fake, "GET", f"/api/v1/projects/{PROJECT_ID}/features/")[0] == 200
+    assert fake.env_value("experiment_tick_seconds") == (False, None)
+
+
+def test_override_path_has_no_trailing_slash_and_delete_takes_a_json_body(fake):
+    fid = fake.feature_id("sensitivity")
+    base = f"/api/v1/environments/{ENVIRONMENT_KEY}/edge-identities-featurestates"
+    put = {"identifier": "game:g4", "feature": fid, "enabled": True, "feature_state_value": "1"}
+    assert _call(fake, "PUT", base + "/", put)[0] == 404
+    assert _call(fake, "PUT", base, put)[0] == 200
+    status, _, _ = _call(fake, "DELETE", base, {"identifier": "game:g4", "feature": fid})
+    assert status == 204 and fake.override("game:g4", "sensitivity") is None
+    assert fake.audit_rows[0]["log"] == "Feature override deleted for feature 'sensitivity' and identity 'game:g4'"
+
+
+def test_audit_needs_the_environment_filter(fake):
+    fake.person_sets("decision.capture_content", "off")
+    path = f"/api/v1/projects/{PROJECT_ID}/audit/"
+    assert _call(fake, "GET", path + "?page_size=10")[0] == 400
+    status, _, rows = _call(fake, "GET", path + f"?environments={ENVIRONMENT_ID}&page_size=10")
+    assert status == 200 and rows["results"][0]["log"].endswith("decision.capture_content")
+
+
+def test_document_header_is_the_body_updated_at(fake):
+    _, headers, doc = _document(fake)
+    stamp = dt.datetime.fromisoformat(doc["updated_at"].replace("Z", "+00:00")).timestamp()
+    assert abs(float(headers["X-Flagsmith-Document-Updated-At"]) - stamp) < 1e-5
+
+
+def test_down_answers_503_before_the_webhook(fake):
+    fake.down = True
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{fake.port}/health-webhook/",
+        method="POST",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as err:
+        urllib.request.urlopen(req, timeout=5)
+    assert err.value.code == 503 and fake.health_posts() == []

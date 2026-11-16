@@ -64,7 +64,11 @@ _ENV = re.compile(r"^/api/v1/environments/([^/]+)/$")
 _EDGE_LIST = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/$")
 _EDGE_ONE = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/$")
 _EDGE_TRAITS = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/update-traits/$")
-_EDGE_FS = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities-featurestates/?$")
+# No trailing slash: push.go sends exactly this path (and Flagsmith 404s the other form).
+_EDGE_FS = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities-featurestates$")
+# Every Admin path names the environment by its client key and the project by its id.
+_ANY_ENV = re.compile(r"^/api/(?:v1|__future__)/environments/([^/]+)/")
+_ANY_PROJECT = re.compile(r"^/api/v1/projects/([^/]+)/")
 _FUTURE = re.compile(r"^/api/__future__/environments/([^/]+)/features/(\d+)/$")
 _PROJECT = re.compile(r"^/api/v1/projects/(\d+)/(features|tags|audit)/$")
 
@@ -422,6 +426,10 @@ class FakeFlagsmith:
             return self._document_answer(headers)
         if headers.get("authorization") != f"Api-Key {ADMIN_KEY}":
             return 401, {"detail": "Authentication credentials were not provided."}, {}
+        if (m := _ANY_ENV.match(path)) and m.group(1) != ENVIRONMENT_KEY:
+            return 404, {"detail": "Not found."}, {}
+        if (m := _ANY_PROJECT.match(path)) and m.group(1) != str(PROJECT_ID):
+            return 404, {"detail": "Not found."}, {}
         if (m := _FUTURE.match(path)) and method == "PATCH":
             return self._patch(int(m.group(2)), body, record)
         if _EDGE_FS.match(path) and method in ("PUT", "DELETE"):
@@ -568,6 +576,9 @@ class FakeFlagsmith:
             return 200, {"count": len(self.tags), "next": None, "previous": None, "results": self.tags}, {}
         if self.audit_status != 200:
             return self.audit_status, {"detail": "audit"}, {}
+        if (query.get("environments") or [""])[0] != str(ENVIRONMENT_ID):
+            # The link reads its own environment's rows only (audit.go): a missing or wrong filter is a bug.
+            return 400, {"environments": ["the fake expects environments=<the environment id>"]}, {}
         rows = self.audit_rows
         search = (query.get("search") or [""])[0].lower()
         if search:

@@ -54,12 +54,15 @@ def settled_link(stack, flag_service):
 
 
 def _restart(stack, flag_service, **want) -> float:
-    """Restart the flag service; returns the monotonic time the restart returned."""
+    """Restart the flag service; returns the monotonic time taken BEFORE the restart.
+
+    Every effect of the new process (its Start, the stale-identity grace that starts at the end
+    of Start, its pushes) is after this point, whatever the readiness probe's timing."""
+    before = time.monotonic()
     stack.flag_plane.restart_flag_service()
-    returned = time.monotonic()
     if want:
         fl.wait_link(flag_service, RESTART_SECONDS, **want)
-    return returned
+    return before
 
 
 def _registry_keys() -> set[str]:
@@ -208,8 +211,9 @@ def test_restart_removes_stale_identities_after_grace(stack, flag_service, settl
         fl.wait_for(lambda: fl.register_game(flag_service, live, ["MOCK0013"]) or True, 30, "register")
         # Step 2: the stale identity is deleted after the 45 s grace (bound 75 s), never before.
         fl.wait_for(lambda: f"game:{stale}" not in fake.identities(), 75, "the stale identity deleted")
-        deletes = [r for r in fake.requests("DELETE", "/edge-identities/") if r["t"] >= restarted]
-        assert deletes and min(r["t"] for r in deletes) - restarted >= 45, [r["t"] - restarted for r in deletes]
+        deletes = [r["t"] - restarted for r in fake.requests("DELETE", "/edge-identities/") if r["t"] >= restarted]
+        # The grace starts at the end of Start, after ``restarted`` (taken before the restart).
+        assert deletes and 45 <= min(deletes) <= 75, deletes
         # Step 3: the registered game's identity stays.
         assert f"game:{live}" in fake.identities()
     finally:
