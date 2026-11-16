@@ -14,6 +14,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from opentelemetry import trace
 from opentelemetry.context import Context
 
 from lib.colors import Colors
@@ -499,14 +500,24 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         """
         flash_ms = WARNING_FLASH_MS
         vibration_ms = WARNING_VIBRATION_MS
-        with tracer.start_as_current_span("effect_player_warning", context=trace_context) as span:
-            span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
-
-            span.add_event("flash_start", {"color": "white", "duration_ms": flash_ms})
-            await self.play_effect_with_restore(serial, "flash", Colors.White.value, flash_ms, 5, restore_color or True)
-
-            span.add_event("vibration", {"intensity": 100, "duration_ms": vibration_ms})
-            await self.set_vibration(serial, 100, vibration_ms)
+        # A ~150 us flash + rumble is no span of its own (#2647): one span event on the span that is
+        # current here (the gameplay stream's server span), next to the coordinator's death_warning
+        # event. trace_context is the coordinator's remote span, which this process cannot add
+        # events to, so it is not used.
+        current = trace.get_current_span()
+        if current.is_recording():
+            current.add_event(
+                "player_warning",
+                {
+                    CONTROLLER_SERIAL_ATTR: serial,
+                    "flash_color": "white",
+                    "flash_duration_ms": flash_ms,
+                    "vibration_intensity": 100,
+                    "vibration_duration_ms": vibration_ms,
+                },
+            )
+        await self.play_effect_with_restore(serial, "flash", Colors.White.value, flash_ms, 5, restore_color or True)
+        await self.set_vibration(serial, 100, vibration_ms)
 
     async def _effect_player_death(self, serial: str, trace_context: Context | None = None, **_kwargs) -> None:
         """Red + vibrate, then fade to off to signal player is out.

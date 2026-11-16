@@ -434,6 +434,38 @@ class TestWarningAndDeathEffectTimings:
         recorded["vibration"].assert_awaited_once_with("test_ctrl", 100, 200)
 
     @pytest.mark.asyncio
+    @pytest.mark.uc("UC-030", flow="main", steps=[7])
+    async def test_warning_is_a_span_event_not_a_span(self, feedback_manager, recorded):
+        """#2647: a warning adds one `player_warning` event to the current span and creates no span of its own."""
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        import services.controller_manager.feedback_manager as fm
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        stream_tracer = provider.get_tracer("test")
+        with patch.object(fm, "tracer", provider.get_tracer("feedback")):
+            with stream_tracer.start_as_current_span("StreamGameplayData"):
+                await feedback_manager._effect_player_warning("test_ctrl", restore_color=(0, 0, 255))
+                assert trace.get_current_span().is_recording()
+
+        spans = exporter.get_finished_spans()
+        assert [s.name for s in spans] == ["StreamGameplayData"]
+        events = [e for e in spans[0].events if e.name == "player_warning"]
+        assert len(events) == 1
+        assert dict(events[0].attributes) == {
+            "controller.serial": "test_ctrl",
+            "flash_color": "white",
+            "flash_duration_ms": 200,
+            "vibration_intensity": 100,
+            "vibration_duration_ms": 200,
+        }
+
+    @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="main", steps=[9])
     async def test_death_is_rumble_red_hold_then_fade_for_the_fixed_times(self, feedback_manager, recorded):
         """UC-030 step 9: 1000 ms rumble, 300 ms red hold, 700 ms fade."""
