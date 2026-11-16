@@ -71,6 +71,9 @@ type puller struct {
 	// kept); deleted on any other outcome and when the document changes.
 	refused  map[Key]refusal
 	deferred map[Key]*deferral
+	// discard holds the stack keys whose local value was discarded at a
+	// reconnect and is not yet replaced (#2621); see reconcileKey.
+	discard map[Key]bool
 	// forceFull: the next pull is unconditional.
 	forceFull bool
 	docHash   [32]byte
@@ -137,6 +140,7 @@ func newIn(l *Link) inSide {
 		byName:   map[string]*registry.Policy{},
 		refused:  map[Key]refusal{},
 		deferred: map[Key]*deferral{},
+		discard:  map[Key]bool{},
 		after:    time.After,
 		seen:     map[Key]remoteMark{},
 		guards:   map[Key]*pushGuard{},
@@ -166,16 +170,6 @@ func (p *puller) Reconcile(ctx context.Context, trigger string) error {
 		attribute.Int(AttrPushed, rs.pushed),
 		attribute.Int(AttrConflicts, rs.conflicts),
 	)
-	// The restart rule the start sequence chose and what it clears
-	// (telemetry.md §10.4): on the start reconcile only.
-	if trigger == TriggerStart {
-		if rule, attribution, ok := p.l.RestartReport(); ok {
-			span.SetAttributes(
-				attribute.Int(AttrCleared, RestartCleared(attribution, p.isEvent)),
-				attribute.String(AttrRestartRule, rule),
-			)
-		}
-	}
 	if err != nil {
 		// The link goes offline: the health posts stop with it (the queue
 		// is kept for the next Reconcile or Poll).
@@ -398,10 +392,6 @@ type roundCtx struct {
 	deferred bool
 	stats    roundStats
 
-	// staleAccepted: the document is older than the newest one read and was
-	// accepted after the refusal timeout; kill switches merge without their
-	// remote value (more restrictive wins).
-	staleAccepted bool
 	// queued: the round queued at least one local value to send (offer);
 	// the round wakes the out side once at its end (#2608).
 	queued bool
@@ -482,7 +472,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 			reason = ReasonStaleDocument
 			return rc.stats, nil
 		}
-		rc.staleAccepted = true
+
 		l.Logger().Warn("flagsmith stale document accepted",
 			"updated_at", rc.updated.UTC().Format(time.RFC3339Nano),
 			"newest", p.newest.UTC().Format(time.RFC3339Nano),
@@ -500,9 +490,8 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	keys := p.roundKeys(d, local)
 	p.prune(keys, games)
 
-	_, attribution, _ := l.RestartReport()
 	for _, k := range keys {
-		p.reconcileKey(rc, k, d, local, start, attribution)
+		p.reconcileKey(rc, k, d, local, start)
 	}
 	// A value the round queued is sent now, not with the next local write
 	// (#2608): one wake per round, none when every offer was held back (a
@@ -565,16 +554,6 @@ func (p *puller) roundKeys(d map[Key]docEntry, local map[Key]localEntry) []Key {
 	return keys
 }
 
-// isEvent reports whether k is an event flag's game override.
-func (p *puller) isEvent(k Key) bool {
-	pol := p.byName[k.Flag]
-	return pol != nil && isEventKey(pol.Kind, k)
-}
-
-func isKillKey(k Key) bool {
-	return k.Scope == ScopeStack && killRuleOf(k.Set, k.Flag) != nil
-}
-
 // prune forgets the refusals, deferrals, push guards and health entries of
 // keys that left the round (a game that ended or is not registered, a
 // forgotten identity, an override deleted on both sides): their feature turns
@@ -595,6 +574,11 @@ func (p *puller) prune(keys []Key, games map[string]bool) {
 	for k := range p.refused {
 		if !keep(k) {
 			delete(p.refused, k)
+		}
+	}
+	for k := range p.discard {
+		if !keep(k) {
+			delete(p.discard, k)
 		}
 	}
 	for k := range p.deferred {
@@ -755,7 +739,7 @@ func (p *puller) staleAcceptAfter() time.Duration {
 }
 
 // reconcileKey merges and acts on one key.
-func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map[Key]localEntry, start map[Key]remoteMark, attribution map[Key]Author) {
+func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map[Key]localEntry, start map[Key]remoteMark) {
 	l := p.l
 	pol := l.Policy(k.Set, k.Flag)
 	if pol == nil {
@@ -786,15 +770,6 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 			return
 		}
 	}
-	// Edge lag: the first round after start skips what the restart rule
-	// cleared (#2590 P13). Kill switches are never cleared (nothing was
-	// pushed, so a lagging document is merely older) and merge without a
-	// remote to the more restrictive value: the start round applies them.
-	// UC-054 BR-005: a kill switch an API key tightened is in force at once.
-	if rc.trigger == TriggerStart && attribution[k] == AuthorAPIKey && !isKillKey(k) {
-		rc.skip()
-		return
-	}
 	if df := p.deferred[k]; df != nil && rc.now.Before(df.until) {
 		rc.skip()
 		return
@@ -808,27 +783,36 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 	if rf, ok := p.refused[k]; ok && !rf.d.Equal(de.v) {
 		delete(p.refused, k)
 	}
-	in := mergeIn{R: r, HasR: hasR, D: de.v, L: le.v, Base: l.BaselineFlag(k.Set, k.Flag)}
+	in := mergeIn{R: r, HasR: hasR, D: de.v, L: le.v}
+	// Flagsmith is the source of truth once online (UC-054 A2, #2621): a
+	// stack-scope local change the link did not send before it went offline
+	// is discarded at the reconnect, and stays discarded (a deferred apply)
+	// until a new local write queues a value to send. Game and player values
+	// are live game state with no Flagsmith counterpart: they are sent.
 	if k.Scope == ScopeStack {
-		in.Kill = killRuleOf(k.Set, k.Flag)
-	}
-	// An older document accepted after the refusal timeout may predate the
-	// remote value: a kill switch merges it as after a restart (no remote),
-	// so it takes the more restrictive of the document and the local value
-	// and never loosens below the local value the link pushed.
-	if rc.staleAccepted && in.Kill != nil {
-		in.R, in.HasR = Value{}, false
+		switch {
+		case rc.trigger == TriggerReconnect:
+			in.Discard = true
+		case p.discard[k] && l.links.HasPending(k):
+			delete(p.discard, k)
+		case p.discard[k]:
+			in.Discard = true
+		}
+		in.KeepAbsent = pol.Persist
 	}
 	if rf, ok := p.refused[k]; ok {
 		in.Refused = &rf
 	}
 	dec := decide(in)
-	// The restart rule (BR-006, #2590 P10, R6): without a last state, a value
-	// an API key set on an admin setting or on a game identity is not brought
-	// back; the local value wins and is sent. Kill switches keep their order
-	// (safety over reset).
-	if !hasR && in.Kill == nil && dec.action == actApply && attribution[k] == AuthorAPIKey &&
-		((k.Scope == ScopeStack && pol.Persist) || GameOfIdentity(k.Scope) != "") {
+	if in.Discard && dec.action == actApply {
+		l.links.DropPending(k)
+		p.discard[k] = true
+	}
+	// Events are one-shot payloads, not values (architecture note D3): without
+	// a last state (after a restart) an event list in the document is the
+	// list the link pushed before the restart. It is not brought back; the
+	// local list is kept and sent. A single payload a person set is applied.
+	if !hasR && dec.action == actApply && isEventKey(pol.Kind, k) && isEventList(de.v) {
 		dec = decision{action: actKeepLocal}
 	}
 	if dec.action == actApply && rc.writes >= writeBudget {
@@ -883,6 +867,7 @@ func describe(v Value) string {
 func (p *puller) accepted(k Key) {
 	delete(p.refused, k)
 	delete(p.deferred, k)
+	delete(p.discard, k)
 	p.l.links.ClearLocalRefusal(k)
 	p.health.accept(k.Flag, k)
 }

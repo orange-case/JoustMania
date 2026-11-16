@@ -1,220 +1,51 @@
 package flagsmith
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/joustmania/flag-service/registry"
 )
 
-// The restart rule (FR-215, UC-054 A3 step 4, BR-006; architecture note §5.1).
-//
-// At start remote is empty, so the link cannot tell its own pushes from a
-// person's changes by comparison: it reads who made each value of the start
-// document from the audit log. Start never clears anything directly: a value
-// made with an API key is SEEDED as the last remote state
-// (LinkState.SetRemote), so the reconcile sees remote == document and local
-// != remote and pushes the local value (the baseline clear, or the restored
-// admin value of a persist: yes row). A person's value is not seeded and the
-// reconcile applies it (no remote: the document wins). Seeding happens only
-// in the start's final step (O7).
-//
-// Never seeded at start:
-//   - game identities (game:<id>, game:<id>:<serial>): no game is registered
-//     yet after a restart; their attribution goes into the RestartReport and
-//     the in side applies it when the game registers (O1, O14, #2590 R6);
-//   - kill switches (flags.md §13.6): with no remote the reconcile's
-//     kill-switch rule keeps the more restrictive value, even over the API-key
-//     clear (safety over reset, BR-005).
-//
-// Event-flag overrides are reported as AuthorAPIKey without an audit lookup:
-// an event in Flagsmith is a one-shot payload, never brought back by a
-// restart (D3).
+// A restart (UC-054 A3, FR-215, architecture note §5.1; #2621): Flagsmith
+// wins. The start sequence does not classify the start document by author and
+// seeds nothing: the link has no last state seen from Flagsmith, so the start
+// reconcile applies every Flagsmith value that differs from the local value
+// (the baseline, or the persisted value of an admin setting), whoever wrote
+// it, a kill switch included (merge.go, "R absent"). An admin setting
+// (persist: yes) pulled from Flagsmith is persisted like the menu admin's
+// value. Two things are not values and keep their own rule:
+//   - game identities (game:<id>, game:<id>:<serial>): applied only when the
+//     game registers; identities of games that never register are removed
+//     after StaleIdentityGrace (below);
+//   - event lists: one-shot payloads the link pushed before the restart, not
+//     brought back (in.go, D3).
 
 // StaleIdentityGrace is how long after a successful start the stale game
 // identities are removed: two coordinator reconcile periods (15 s) and a grace
 // (O1, services.md §7.3 Start).
 const StaleIdentityGrace = 45 * time.Second
 
-// ReasonRestartRuleDegraded is the warning of a degraded restart rule.
-const ReasonRestartRuleDegraded = "restart_rule_degraded"
-
-// restartKillSwitches are the kill switches of flags.md §13.6 (UC-054
-// BR-005). The same table drives the in side's order (killswitch.go, #2590).
-var restartKillSwitches = map[string]bool{
-	"agent/enabled":                                 true,
-	"agent/interventions_allowed":                   true,
-	"agent/code_improvement.mode":                   true,
-	"agent/code_improvement.target":                 true,
-	"agent/code_improvement.min_interval_seconds":   true,
-	"agent/llm.max_requests_per_minute":             true,
-	"agent/decision.claude.max_requests_per_minute": true,
-	"agent/decision.openai.max_requests_per_minute": true,
-	"agent/experiment_proposer_enabled":             true,
-	"agent/interventions_enabled":                   true,
-	"agent/experiments_enabled":                     true,
-	"agent/rollout_enabled":                         true,
-	"rollout/remediation_allowed":                   true,
-	"agent/experiment_max_games":                    true,
-	"agent/experiment_dynamic_max_concurrent":       true,
-}
-
-// candidate is one value of the start document the rule classifies.
-type candidate struct {
-	key   Key
-	audit authorKey
-	value Value
-	event bool
-}
-
-// restartPlan is what the rule decided; apply makes it so.
-type restartPlan struct {
-	rule        string
-	attribution map[Key]Author
-	seed        map[Key]Value
-	uuids       map[string]string
-}
-
-// candidates lists the enabled environment values (segment overrides
-// excluded) and the identity overrides of registry features in doc.
-func (s *startup) candidates(doc *EnvironmentDocument) ([]candidate, map[string]string) {
-	uuids := map[string]string{}
-	if doc == nil || s.l.deps.Registry == nil {
-		return nil, uuids
+// rememberIdentities keeps the identity uuids of the start document's game
+// identities, so a later write or delete needs no lookup.
+func (s *startup) rememberIdentities(doc *EnvironmentDocument) {
+	if doc == nil {
+		return
 	}
-	byName := map[string]*registry.Policy{}
-	for _, p := range s.l.deps.Registry.Policies() {
-		byName[p.Key] = p
-	}
-	var out []candidate
-	for _, fs := range doc.FeatureStates {
-		p := byName[fs.Feature.Name]
-		if p == nil || !fs.Enabled || hasSegment(fs) {
-			continue
-		}
-		out = append(out, candidate{
-			key:   Key{Set: p.Set, Flag: p.Key, Scope: ScopeStack},
-			audit: authorKey{feature: p.Key},
-			value: s.docValue(p, fs),
-		})
-	}
+	ids := s.l.ids
+	ids.Lock()
+	defer ids.Unlock()
 	for _, io := range doc.IdentityOverrides {
-		if _, _, ok := ScopeOfIdentity(io.Identifier); !ok {
+		if _, _, ok := ScopeOfIdentity(io.Identifier); !ok || io.IdentityUUID == "" {
 			continue
 		}
-		if io.IdentityUUID != "" {
-			uuids[io.Identifier] = io.IdentityUUID
-		}
-		for _, fs := range io.IdentityFeatures {
-			p := byName[fs.Feature.Name]
-			if p == nil {
-				continue
-			}
-			out = append(out, candidate{
-				key:   Key{Set: p.Set, Flag: p.Key, Scope: io.Identifier},
-				audit: authorKey{feature: p.Key, identity: io.Identifier},
-				value: s.docValue(p, fs),
-				event: p.Kind == registry.KindEvent,
-			})
-		}
+		ids.IdentityUUID[io.Identifier] = io.IdentityUUID
 	}
-	return out, uuids
-}
-
-func hasSegment(fs FeatureState) bool {
-	raw := bytes.TrimSpace(fs.FeatureSegment)
-	return len(raw) > 0 && !bytes.Equal(raw, []byte("null"))
-}
-
-// docValue is the Value of a document feature state as the reconcile reads
-// it: Present is enabled; a declared variant carries its name and value; a
-// value Decode refuses is kept raw.
-func (s *startup) docValue(p *registry.Policy, fs FeatureState) Value {
-	b := s.l.BaselineFlag(p.Set, p.Key)
-	variant, value, ferr := Decode(p, b, FSValueOf(fs.FeatureStateValue))
-	if ferr != nil {
-		return Value{Present: fs.Enabled, Value: compact(fs.FeatureStateValue)}
-	}
-	if variant != "" && b != nil {
-		value = compact(b.Variants[variant])
-	}
-	return Value{Present: fs.Enabled, Variant: variant, Value: value}
 }
 
 // isGameIdentity: a game or player scope.
 func isGameIdentity(scope string) bool { return strings.HasPrefix(scope, "game:") }
-
-// restartRule classifies every candidate of doc by the author of its latest
-// audit row and decides what to seed. The rule is versioning when the
-// environment uses feature versioning v2 (its "New version published" rows
-// carry the author, O3), else audit_log, and degraded when the audit log did
-// not answer (any status, 401 included: an audit error never takes the link
-// down, architecture note §5.1) or a candidate has no row (then counted as a
-// person's, never an API key). Only a cancel is returned.
-func (s *startup) restartRule(ctx context.Context, doc *EnvironmentDocument) (restartPlan, error) {
-	cands, uuids := s.candidates(doc)
-	plan := restartPlan{attribution: map[Key]Author{}, seed: map[Key]Value{}, uuids: uuids}
-	want := map[authorKey]bool{}
-	for _, c := range cands {
-		if !c.event {
-			want[c.audit] = true
-		}
-	}
-	found, ok, err := s.latestAuthors(ctx, want)
-	if err != nil {
-		return plan, err
-	}
-	degraded := !ok
-	for _, c := range cands {
-		a := AuthorAPIKey
-		if !c.event {
-			var has bool
-			if a, has = found[c.audit]; !has {
-				a, degraded = AuthorUnknown, true
-			}
-		}
-		plan.attribution[c.key] = a
-		if a == AuthorAPIKey && !isGameIdentity(c.key.Scope) && !restartKillSwitches[c.key.Set+"/"+c.key.Flag] {
-			plan.seed[c.key] = c.value
-		}
-	}
-	s.l.ids.Lock()
-	v2 := s.l.ids.V2Versioning
-	s.l.ids.Unlock()
-	switch {
-	case degraded:
-		plan.rule = RestartDegraded
-	case v2:
-		plan.rule = RestartVersioning
-	default:
-		plan.rule = RestartAuditLog
-	}
-	return plan, nil
-}
-
-// apply is the start's final step (O7): seed, remember the identity uuids
-// and record the report.
-func (s *startup) apply(plan restartPlan) {
-	for k, v := range plan.seed {
-		s.l.links.SetRemote(k, v)
-	}
-	ids := s.l.ids
-	ids.Lock()
-	for identifier, u := range plan.uuids {
-		ids.IdentityUUID[identifier] = u
-	}
-	ids.Unlock()
-	s.l.SetRestartReport(plan.rule, plan.attribution)
-	if plan.rule == RestartDegraded {
-		s.l.Logger().Warn(ReasonRestartRuleDegraded,
-			"detail", "the audit log does not say who made every Flagsmith value; values without an author are applied as a person's",
-			"values", len(plan.attribution))
-	}
-}
 
 // checkEdgeIdentities fails the start when the project has no edge
 // identities (O8): Flagsmith answers 400 DynamoNotEnabled.

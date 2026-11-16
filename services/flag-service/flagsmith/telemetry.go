@@ -38,11 +38,9 @@ const (
 	OpTag            = "tag"
 )
 
-// Conflict resolutions (FR-210).
+// Conflict resolutions (FR-210): Flagsmith wins every conflict since #2621.
 const (
 	ResolutionFlagsmith = "flagsmith"
-	ResolutionTightened = "tightened"
-	ResolutionLocal     = "local"
 )
 
 // Results.
@@ -63,8 +61,6 @@ const (
 	AttrMerged      = "flagservice.flagsmith.merged"
 	AttrApplied     = "flagservice.flagsmith.applied"
 	AttrPushed      = "flagservice.flagsmith.pushed"
-	AttrCleared     = "flagservice.flagsmith.cleared"
-	AttrRestartRule = "flagservice.flagsmith.restart_rule"
 	AttrLocalValue  = "flagservice.flagsmith.local_value"
 	AttrRemoteValue = "flagservice.flagsmith.remote_value"
 	AttrResolution  = "flagservice.flagsmith.resolution"

@@ -11,21 +11,23 @@ import (
 // process; every step is idempotent, so a re-run after a failure redoes only
 // what is missing:
 //
-//  1. ping: one full environment-document pull (kept for the restart rule; no
-//     NotePull, the first Reconcile pulls in full again). Unreachable: the
+//  1. ping: one full environment-document pull (its identity uuids are kept;
+//     no NotePull, the first Reconcile pulls in full again). Unreachable: the
 //     error goes back and no Admin call is made;
 //  2. resolve ids and check the environment (project_mismatch,
 //     identity_overrides_disabled);
 //  3. check that the project has edge identities (edge_required), a read,
 //     before any project-level write;
 //  4. create the missing features and tags (FR-214);
-//  5. classify the document's values by author (the restart rule, FR-215);
-//  6. the final step: seed the API-key values, record the RestartReport, and
-//     schedule the stale game identity cleanup (start itself never deletes an
-//     identity): it runs once the first game registered (Link.GamesSeen) and
+//  5. the final step: remember the document's identity uuids and schedule the
+//     stale game identity cleanup (start itself never deletes an identity):
+//     it runs once the first game registered (Link.GamesSeen) and
 //     StaleIdentityGrace after this success, whichever is later, and is
 //     retried every staleCleanupRetryEvery, at most staleCleanupRetries
 //     times, while a listing or a delete fails.
+//
+// No value is classified, seeded or cleared at start: the start reconcile
+// applies what Flagsmith holds (Flagsmith wins at a restart, FR-215, #2621).
 
 func newStarter(l *Link) starter { return &startup{l: l, pace: newAdminPacer(l)} }
 
@@ -53,16 +55,12 @@ func (s *startup) Start(ctx context.Context) error {
 	if err := s.ensureFeatures(ctx); err != nil {
 		return err
 	}
-	plan, err := s.restartRule(ctx, doc)
-	if err != nil {
-		return err
-	}
-	// A cancel during the last audit call may still have answered: nothing
-	// is seeded by a start that did not end (O7).
+	// A cancel during the last Admin call may still have answered: the final
+	// step runs only for a start that ended (O7).
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.apply(plan)
+	s.rememberIdentities(doc)
 	s.scheduleCleanup(ctx)
 	return nil
 }

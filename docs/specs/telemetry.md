@@ -520,8 +520,8 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 > Implemented: #2588 registers every metric below (also with the link off; the link gauge then shows `off`) and
 > defines the span names and helpers; the pushes (#2589, implemented) record the push spans and metrics; the pulls (#2590, implemented)
 > record the pull and reconcile spans and metrics; the start sequence (#2591, implemented) records the feature, tag and
-> identity-cleanup push spans; the start reconcile records `flagservice.flagsmith.cleared` and
-> `flagservice.flagsmith.restart_rule` (#2592, implemented; the restart rule also shows as `restart_rule` in `GET /state`, services.md §7.3).
+> identity-cleanup push spans. The start reconcile attributes `flagservice.flagsmith.cleared` and
+> `flagservice.flagsmith.restart_rule` (#2592) are removed with the restart rule (#2621: Flagsmith wins at a restart; `GET /state` has no `restart_rule` either, services.md §7.3).
 > [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md). A pulled change is a
 > `flagservice.write` span (§10.1) with `flagservice.writer=flagsmith`, a child of the `flagservice.flagsmith.pull`
 > span that found it; it counts in `flagservice_writes_total` like every write.
@@ -530,8 +530,8 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 |---|---|---|---|
 | `flagservice.flagsmith.pull` | client | `flagservice.flagsmith.trigger` (`poll`, `realtime`, `start`, `reconnect`), `http.response.status_code`, `flagservice.flagsmith.changes` (remote changes found), `flagservice.flagsmith.conflicts`, `flagservice.result`, `flagservice.reason` (`stale_document`: a document whose update time is older than one the process already read, skipped with nothing written; else the error reason). After max(10 min, 10 x poll interval) of `stale_document` refusals in a row the older document is accepted: the pull ends `ok` or `changed` and the link logs a WARN `flagsmith stale document accepted` (`updated_at`, `newest`, `refused_for`) | each environment-document fetch |
 | `flagservice.flagsmith.push` | client, linked to the `flagservice.write` that queued it | `feature_flag.key`, `feature_flag.set.id`, `flagservice.scope`, `flagservice.flagsmith.op` (`value`, `override`, `delete_override`, `identity`, `delete_identity`, `feature`, `tag`; feature and tag creation at start are push spans and count in the push metric with these ops), `flagservice.writer`, `flagservice.flagsmith.merged` (local changes merged into this send), `http.response.status_code`, `flagservice.result`, `flagservice.reason` | each Admin API call |
-| `flagservice.flagsmith.reconcile` | internal | `flagservice.flagsmith.trigger` (`start`, `reconnect`), `flagservice.flagsmith.applied`, `flagservice.flagsmith.pushed`, `flagservice.flagsmith.conflicts`; on the `start` reconcile only: `flagservice.flagsmith.restart_rule` (`audit_log`, `versioning`, `degraded`) and `flagservice.flagsmith.cleared` (values the restart rule clears: those made with any API key, which counts as the link's (architecture note F7), on the stack and on game identities, the latter deleted when their game registers; kill switches, never cleared (flags.md §13.6), and event-flag overrides, one-shot payloads, are not counted) | start and each reconnect |
-| `flagservice.flagsmith.conflict` | event on the pull or reconcile span | `feature_flag.key`, `flagservice.scope`, `flagservice.flagsmith.local_value`, `flagservice.flagsmith.remote_value`, `flagservice.flagsmith.resolution` (`flagsmith`, `tightened`, `local`) | each conflict (FR-210) |
+| `flagservice.flagsmith.reconcile` | internal | `flagservice.flagsmith.trigger` (`start`, `reconnect`), `flagservice.flagsmith.applied`, `flagservice.flagsmith.pushed`, `flagservice.flagsmith.conflicts` (on a `reconnect`, a stack-scope local change made offline and discarded counts as a conflict, #2621) | start and each reconnect |
+| `flagservice.flagsmith.conflict` | event on the pull or reconcile span | `feature_flag.key`, `flagservice.scope`, `flagservice.flagsmith.local_value`, `flagservice.flagsmith.remote_value`, `flagservice.flagsmith.resolution` (`flagsmith`: Flagsmith wins every conflict since #2621; `tightened` and `local` are gone with the kill-switch rule) | each conflict (FR-210) |
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
@@ -540,7 +540,7 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 | `flagservice_flagsmith_pushes_total` | counter | `op`, `result`, `reason` | Admin API calls; `reason` on refusals (`change_request_required`, `not_found`, `bad_value`, `unauthorized`, `rate_limited`, `timeout`) |
 | `flagservice_flagsmith_pending` | gauge | | local values waiting to be sent |
 | `flagservice_flagsmith_out_of_sync` | gauge | | flags and scopes whose value differs between the stack and Flagsmith |
-| `flagservice_flagsmith_conflicts_total` | counter | `resolution` | conflicts in any pull or reconcile round (FR-210) |
+| `flagservice_flagsmith_conflicts_total` | counter | `resolution` (`flagsmith`) | conflicts in any pull or reconcile round, a discarded offline stack change included (FR-210, #2621) |
 | `flagservice_flagsmith_change_delay_seconds` | histogram | `trigger` | Flagsmith change time (the environment's `updated_at`) to the write accepted (NFR-058). The link's own pushes also move the environment's `updated_at`, so NFR-058 measured with this metric is a lower bound |
 | `flagservice_flagsmith_health_posts_total` | counter | `status`, `result` | feature-health webhook posts (FR-213) |
 

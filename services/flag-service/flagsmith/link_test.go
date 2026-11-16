@@ -199,7 +199,7 @@ func TestLinkRun(t *testing.T) {
 		l := newTestLink(t, Config{ConfigError: []string{"FLAGSMITH_ADMIN_API_KEY"}}, &sleeper{})
 		waitDone(t, runLink(context.Background(), l))
 		st := l.Status()
-		if st.Link != ModeOff || len(st.ConfigError) != 1 || st.RestartRule != "" {
+		if st.Link != ModeOff || len(st.ConfigError) != 1 {
 			t.Fatalf("status %+v, want off with the config error", st)
 		}
 		var nilLink *Link
@@ -338,19 +338,6 @@ func TestLinkRun(t *testing.T) {
 		case <-l.WakeC():
 		default:
 			t.Fatal("a game registration did not wake the in side")
-		}
-	})
-	t.Run("UC-054/A1 the restart rule shows once reported", func(t *testing.T) {
-		l := newTestLink(t, Config{Enabled: true}, &sleeper{})
-		l.setMode(ModeOnline, "")
-		if l.Status().RestartRule != "" {
-			t.Fatal("restart rule before Start")
-		}
-		k := Key{Set: "game", Flag: "sensitivity", Scope: ScopeStack}
-		l.SetRestartReport(RestartAuditLog, map[Key]Author{k: AuthorAPIKey, {Set: "agent", Flag: "enabled", Scope: ScopeStack}: AuthorPerson})
-		rule, attribution, ok := l.RestartReport()
-		if !ok || rule != RestartAuditLog || RestartCleared(attribution, nil) != 1 || l.Status().RestartRule != RestartAuditLog {
-			t.Fatalf("report %q %v %v", rule, attribution, ok)
 		}
 	})
 }

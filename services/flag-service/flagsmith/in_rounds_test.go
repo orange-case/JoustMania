@@ -15,11 +15,10 @@ import (
 	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
 	"github.com/joustmania/flag-service/fserr"
 	"github.com/joustmania/flag-service/state"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // Round rules of the in side (architecture note §4.2, #2590 plan §8): push
-// guards, health per refused-key set, the restart rule, kill switches first,
+// guards, health per refused-key set, Flagsmith wins at a restart, kill switches first,
 // the write budget, Last-Modified, backoff, 429 and segment overrides.
 
 // UC: UC-054 A4
@@ -162,141 +161,55 @@ func serialValues(h *harness, serials []string) int {
 }
 
 // UC: UC-054 A3 BR-006
-// The restart rule (#2590 P10, P13, R6): the first round after start skips
-// the keys the rule cleared; later, a value an API key set on an admin
-// setting or on a game identity is not brought back (the local value wins and
-// is queued), a person's value is applied, also on a game that registers after
-// the restart.
-func TestRestartRuleAttribution(t *testing.T) {
-	interval := flagsmith.Key{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}
-	backend := flagsmith.Key{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}
-	apiOverride := flagsmith.Key{Set: "interventions", Flag: "global_sensitivity_override", Scope: "game:g7"}
-	personOverride := flagsmith.Key{Set: "interventions", Flag: "volume_override", Scope: "game:g7"}
+// Flagsmith wins at a restart (#2621): without a last state the start round
+// applies what Flagsmith holds, an admin setting included (persisted), and a
+// game value once its game registers. Events are not values (D3): an event
+// list in the document is the link's own push from before the restart and is
+// not brought back (the local list is kept and sent); a single payload a
+// person set is applied.
+func TestRestartAppliesWhatFlagsmithHolds(t *testing.T) {
 	h := newHarness(t, harnessOpts{before: func(h *harness) {
-		h.link.SetRestartReport(flagsmith.RestartAuditLog, map[flagsmith.Key]flagsmith.Author{
-			interval: flagsmith.AuthorAPIKey, backend: flagsmith.AuthorAPIKey,
-			apiOverride: flagsmith.AuthorAPIKey, personOverride: flagsmith.AuthorPerson,
-		})
 		h.fake.SetDocument(document(h.clock.Now().Add(-time.Minute),
 			[]map[string]any{fsState("decision.min_interval_ms", true, 700), fsState("decision.backend", true, "claude")},
-			override{"game:g7", []map[string]any{fsState("global_sensitivity_override", true, 2), fsState("volume_override", true, "0.5")}},
+			override{"game:g7", []map[string]any{
+				fsState("global_sensitivity_override", true, 2),
+				fsState("eliminate_player", true, `[{"serial":"MOCK0001"}]`),
+			}},
 		), "")
 	}})
 	h.online()
-	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) == "700" {
-		t.Fatal("UC-054/BR-006 the start round applied a key the restart rule cleared (P13: edge lag)")
-	}
-	h.round()
 	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
-		t.Fatalf("UC-054/main step 3 decision.min_interval_ms = %+v after the start round, want 700 (not an admin setting)", v)
+		t.Fatalf("UC-054/A3 decision.min_interval_ms = %+v after the start round, want 700", v)
 	}
-	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant == "claude" {
-		t.Fatal("UC-054/BR-006 decision.backend: an API key's value on an admin setting was brought back after a restart")
-	}
-	if r, ok := h.link.Links().Remote(backend); !ok || r.Variant != "claude" {
-		t.Fatalf("UC-054/BR-006 remote %+v %v, want claude seeded so the local value is pushed", r, ok)
+	if v, persisted := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" || !persisted {
+		t.Fatalf("UC-054/BR-006 decision.backend = %+v persisted %v after the start round, want claude persisted", v, persisted)
 	}
 	if _, ferr := h.st.RegisterGame(state.Game{ID: "g7", CoordinatorInstance: "c1", Kind: "shadow", Serials: []string{"MOCK0001"}}); ferr != nil {
 		t.Fatal(ferr)
 	}
 	h.round()
-	if v, _ := h.local("interventions", "volume_override", "game:g7"); string(v.Value) != "0.5" {
-		t.Fatalf("UC-054/BR-006 a person's game override = %+v after the game registered, want 0.5", v)
+	if v, _ := h.local("interventions", "global_sensitivity_override", "game:g7"); string(v.Value) != "2" {
+		t.Fatalf("UC-054/A3 the game override = %+v after the game registered, want 2", v)
 	}
-	if v, _ := h.local("interventions", "global_sensitivity_override", "game:g7"); v.Present {
-		t.Fatalf("UC-054/BR-006 an API key's game override was brought back: %+v", v)
+	if v, _ := h.local("interventions", "eliminate_player", "game:g7"); v.Present {
+		t.Fatalf("UC-054/A3 D3 the event list from before the restart was brought back: %+v", v)
 	}
-	if r, ok := h.link.Links().Remote(apiOverride); !ok || string(r.Value) != "2" {
-		t.Fatalf("UC-054/BR-006 remote %+v %v, want 2 seeded so the out side deletes the override", r, ok)
+	if st := h.link.Status(); st.Refused != 0 {
+		t.Fatalf("UC-054/A3 D3 status %+v: the old event list was refused, want it replaced by the local list", st)
 	}
-	if st := h.link.Status(); st.Pending != 2 {
-		t.Fatalf("UC-054/BR-006 pending %d, want 2 (decision.backend and the API key's override)", st.Pending)
+	if r, ok := h.link.Links().Remote(flagsmith.Key{Set: "interventions", Flag: "eliminate_player", Scope: "game:g7"}); !ok || !strings.HasPrefix(string(r.Value), "[") {
+		t.Fatalf("UC-054/A3 D3 remote %+v %v, want the old list as the last state so the local list is sent", r, ok)
 	}
-}
 
-// UC: UC-054 A3
-// The start reconcile span records the restart rule and how many values it
-// clears (telemetry.md §10.4): the API key's values, never a person's, a kill
-// switch (BR-005) or an event-flag override (one-shot).
-func TestReconcileSpanRecordsRestartRule(t *testing.T) {
-	t.Run("UC-054/A3 BR-006 the start reconcile span carries restart_rule and cleared", func(t *testing.T) {
-		h := newHarness(t, harnessOpts{before: func(h *harness) {
-			h.link.SetRestartReport(flagsmith.RestartAuditLog, map[flagsmith.Key]flagsmith.Author{
-				{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}:         flagsmith.AuthorAPIKey,
-				{Set: "interventions", Flag: "global_sensitivity_override", Scope: "game:g7"}: flagsmith.AuthorAPIKey,
-				{Set: "agent", Flag: "enabled", Scope: flagsmith.ScopeStack}:                  flagsmith.AuthorAPIKey,
-				{Set: "interventions", Flag: "audio_cue", Scope: "game:g7"}:                   flagsmith.AuthorAPIKey,
-				{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}: flagsmith.AuthorPerson,
-				{Set: "interventions", Flag: "volume_override", Scope: "game:g7"}:             flagsmith.AuthorUnknown,
-			})
-		}})
-		h.online()
-		spans := h.ended(flagsmith.SpanReconcile)
-		if len(spans) != 1 {
-			t.Fatalf("%d reconcile spans, want 1", len(spans))
-		}
-		got := map[string]string{}
-		for _, kv := range spans[0].Attributes() {
-			got[string(kv.Key)] = kv.Value.String()
-		}
-		if got[flagsmith.AttrTrigger] != flagsmith.TriggerStart {
-			t.Fatalf("trigger %q, want start", got[flagsmith.AttrTrigger])
-		}
-		if got[flagsmith.AttrRestartRule] != flagsmith.RestartAuditLog {
-			t.Fatalf("UC-054/A3 %s = %q, want %q", flagsmith.AttrRestartRule, got[flagsmith.AttrRestartRule], flagsmith.RestartAuditLog)
-		}
-		if got[flagsmith.AttrCleared] != "2" {
-			t.Fatalf("UC-054/BR-006 %s = %q, want 2 (the stack and the game value; not the kill switch, the event, a person's)", flagsmith.AttrCleared, got[flagsmith.AttrCleared])
-		}
-	})
-	t.Run("UC-054/A3 BR-006 a reconnect reconcile does not record the restart rule", func(t *testing.T) {
-		h := newHarness(t, harnessOpts{before: func(h *harness) {
-			h.link.SetRestartReport(flagsmith.RestartAuditLog, map[flagsmith.Key]flagsmith.Author{
-				{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}: flagsmith.AuthorAPIKey,
-			})
-		}})
-		h.online()
-		h.fake.Fail(http.StatusBadGateway)
-		h.round() // the pull fails: the link goes offline and reconnects
-		h.fake.Fail(0)
-		triggerOf := func(s sdktrace.ReadOnlySpan) string {
-			for _, kv := range s.Attributes() {
-				if string(kv.Key) == flagsmith.AttrTrigger {
-					return kv.Value.String()
-				}
-			}
-			return ""
-		}
-		h.waitFor("a reconnect reconcile", func() bool {
-			for _, s := range h.ended(flagsmith.SpanReconcile) {
-				if triggerOf(s) == flagsmith.TriggerReconnect {
-					return true
-				}
-			}
-			return false
-		})
-		for _, s := range h.ended(flagsmith.SpanReconcile) {
-			if triggerOf(s) == flagsmith.TriggerStart {
-				continue
-			}
-			for _, kv := range s.Attributes() {
-				if k := string(kv.Key); k == flagsmith.AttrCleared || k == flagsmith.AttrRestartRule {
-					t.Fatalf("UC-054/BR-006 the %s reconcile span carries %s (telemetry.md §10.4: the start reconcile only)", triggerOf(s), k)
-				}
-			}
-		}
-	})
-	t.Run("UC-054/A3 without a restart report the span has no restart attributes", func(t *testing.T) {
-		h := newHarness(t, harnessOpts{})
-		h.online()
-		for _, s := range h.ended(flagsmith.SpanReconcile) {
-			for _, kv := range s.Attributes() {
-				if k := string(kv.Key); k == flagsmith.AttrCleared || k == flagsmith.AttrRestartRule {
-					t.Fatalf("%s set without a restart report", k)
-				}
-			}
-		}
-	})
+	// A person's single payload for the live game is applied (appended).
+	h.setDoc(nil, override{"game:g7", []map[string]any{
+		fsState("global_sensitivity_override", true, 2),
+		fsState("eliminate_player", true, `{"serial":"MOCK0001"}`),
+	}})
+	h.round()
+	if v, _ := h.local("interventions", "eliminate_player", "game:g7"); !v.Present || !strings.Contains(string(v.Value), "MOCK0001") {
+		t.Fatalf("UC-054/main step 4 the person's event payload = %+v, want appended", v)
+	}
 }
 
 // UC: UC-054 main step 2
@@ -514,4 +427,158 @@ func TestSegmentOverrideIsUnhealthy(t *testing.T) {
 	h.setDoc(nil)
 	h.round()
 	h.waitFor("a healthy post", func() bool { return len(h.healthPosts()) == 2 })
+}
+
+// UC: UC-054 A1 A2 BR-007
+// Flagsmith is the source of truth once online (#2621): a stack-scope local
+// change written while the link was offline is discarded at the reconnect
+// (Flagsmith's value applied, or the baseline when Flagsmith holds none),
+// except an admin setting (persist: yes) Flagsmith holds no value for, which
+// keeps its persisted value and sends it; a game value written offline is
+// live game state and is still sent.
+func TestReconnectDiscardsOfflineStackChanges(t *testing.T) {
+	interval := flagsmith.Key{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}
+	maxGames := flagsmith.Key{Set: "agent", Flag: "experiment_max_games", Scope: flagsmith.ScopeStack}
+	backend := flagsmith.Key{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}
+	gameKey := flagsmith.Key{Set: "interventions", Flag: "global_sensitivity_override", Scope: "game:g7"}
+	h := newHarness(t, harnessOpts{before: func(h *harness) {
+		h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 700)})
+		if _, ferr := h.st.RegisterGame(state.Game{ID: "g7", CoordinatorInstance: "c1", Kind: "shadow", Serials: []string{"MOCK0001"}}); ferr != nil {
+			t.Fatal(ferr)
+		}
+	}})
+	h.online()
+	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
+		t.Fatalf("setup: decision.min_interval_ms = %+v, want 700", v)
+	}
+	reconnects := func() int {
+		n := 0
+		for _, s := range h.ended(flagsmith.SpanReconcile) {
+			for _, kv := range s.Attributes() {
+				if string(kv.Key) == flagsmith.AttrTrigger && kv.Value.AsString() == flagsmith.TriggerReconnect {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	h.fake.Fail(http.StatusBadGateway)
+	h.round() // the pull fails: the link goes offline
+	h.waitFor("link offline", func() bool { return h.link.Mode() == flagsmith.ModeOffline })
+	for _, w := range []state.WriteRequest{
+		{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("900"), Writer: "operator"},
+		{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("3"), Writer: "operator"},
+		{Set: "agent", Flag: "decision.backend", Variant: "claude", Writer: "operator", Persist: true},
+		{Set: "interventions", Flag: "global_sensitivity_override", Scope: state.Scope{GameID: "g7"}, Value: json.RawMessage("3"), Writer: "agent"},
+	} {
+		if _, ferr := h.st.Put(w); ferr != nil {
+			t.Fatal(ferr)
+		}
+	}
+	for _, k := range []flagsmith.Key{interval, maxGames, backend, gameKey} {
+		h.waitFor("the offline write queued", func() bool { return h.link.Links().HasPending(k) })
+	}
+	h.fake.Fail(0)
+	h.waitFor("a reconnect reconcile", func() bool { return reconnects() >= 1 })
+
+	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
+		t.Fatalf("UC-054/A2 decision.min_interval_ms = %+v after the reconnect, want Flagsmith's 700 (the offline 900 discarded)", v)
+	}
+	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); v.Present {
+		t.Fatalf("UC-054/A2 experiment_max_games = %+v after the reconnect, want the baseline (Flagsmith holds no value)", v)
+	}
+	if v, persisted := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" || !persisted {
+		t.Fatalf("UC-054/A2 decision.backend = %+v persisted %v, want the persisted claude kept (Flagsmith holds no value)", v, persisted)
+	}
+	for _, k := range []flagsmith.Key{interval, maxGames} {
+		if h.link.Links().HasPending(k) {
+			t.Fatalf("UC-054/A2 %v still queued for Flagsmith after the reconnect, want discarded", k)
+		}
+	}
+	if !h.link.Links().HasPending(backend) {
+		t.Fatal("UC-054/A2 decision.backend not queued: the kept admin value must be sent to Flagsmith")
+	}
+	if v, _ := h.local("interventions", "global_sensitivity_override", "game:g7"); string(v.Value) != "3" || !h.link.Links().HasPending(gameKey) {
+		t.Fatalf("UC-055/A3 the offline game value = %+v pending %v, want 3 kept and queued for Flagsmith", v, h.link.Links().HasPending(gameKey))
+	}
+	if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionFlagsmith); n < 1 {
+		t.Fatalf("UC-054/A2 conflicts{resolution=flagsmith} = %d, want the discarded offline change recorded", n)
+	}
+
+	// A later poll keeps the discard; a new online write is sent as usual.
+	h.round()
+	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
+		t.Fatalf("UC-054/A2 decision.min_interval_ms = %+v after a poll, want 700", v)
+	}
+	if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("800"), Writer: "operator"}); ferr != nil {
+		t.Fatal(ferr)
+	}
+	h.round()
+	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "800" || !h.link.Links().HasPending(interval) {
+		t.Fatalf("UC-055/main an online write after the reconnect = %+v pending %v, want 800 kept and queued", v, h.link.Links().HasPending(interval))
+	}
+}
+
+// deferNextPut answers the next pulled write of one flag with 503
+// no_sync_stream (UC-054 A5: deferred, not seen) while armed.
+type deferNextPut struct {
+	*api.API
+	flag  string
+	armed atomic.Bool
+}
+
+func (w *deferNextPut) FlagsmithPut(ctx context.Context, req state.WriteRequest) (state.WriteResult, *fserr.Error) {
+	if req.Flag == w.flag && w.armed.CompareAndSwap(true, false) {
+		return state.WriteResult{}, &fserr.Error{Status: http.StatusServiceUnavailable, Reason: fserr.NoSyncStream}
+	}
+	return w.API.FlagsmithPut(ctx, req)
+}
+
+// UC: UC-054 A2 A5
+// A discarded offline change whose Flagsmith apply is deferred at the
+// reconnect stays discarded (#2621): it is not queued for Flagsmith and a
+// later poll applies Flagsmith's value; a new online write before that poll is
+// a fresh local change and is sent as usual.
+func TestReconnectDiscardSurvivesDeferral(t *testing.T) {
+	interval := flagsmith.Key{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}
+	for _, online := range []bool{false, true} {
+		name := "UC-054/A2 a later poll applies Flagsmith's value"
+		if online {
+			name = "UC-055/main an online write after the deferred discard is kept and queued"
+		}
+		t.Run(name, func(t *testing.T) {
+			w := &deferNextPut{flag: interval.Flag}
+			h := newHarness(t, harnessOpts{
+				writer: func(a *api.API, _ *state.State) flagsmith.LocalWriter { w.API = a; return w },
+				before: func(h *harness) { h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 700)}) },
+			})
+			h.online()
+			h.fake.Fail(http.StatusBadGateway)
+			h.round()
+			h.waitFor("link offline", func() bool { return h.link.Mode() == flagsmith.ModeOffline })
+			if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("900"), Writer: "operator"}); ferr != nil {
+				t.Fatal(ferr)
+			}
+			w.armed.Store(true)
+			h.fake.Fail(0)
+			h.waitFor("the deferred apply at the reconnect", func() bool { return !w.armed.Load() && h.link.Mode() == flagsmith.ModeOnline })
+			if h.link.Links().HasPending(interval) {
+				t.Fatal("UC-054/A2 the discarded offline 900 is still queued for Flagsmith after a deferred apply")
+			}
+			want := "700"
+			if online {
+				if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("800"), Writer: "operator"}); ferr != nil {
+					t.Fatal(ferr)
+				}
+				want = "800"
+			}
+			h.round()
+			if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != want {
+				t.Fatalf("decision.min_interval_ms = %+v after the poll, want %s", v, want)
+			}
+			if got := h.link.Links().HasPending(interval); got != online {
+				t.Fatalf("pending %v after the poll, want %v", got, online)
+			}
+		})
+	}
 }

@@ -43,19 +43,16 @@ func TestFakeAdminDefaults(t *testing.T) {
 	if code, m := do("GET", "projects/42/tags/?page=2", ""); code != 200 || len(m["results"].([]any)) != 2 || m["next"] != nil {
 		t.Fatalf("tags page 2 %d %v", code, m)
 	}
-	if code, m := do("GET", "projects/42/audit/", ""); code != 200 || len(m["results"].([]any)) != 0 {
-		t.Fatalf("audit %d %v", code, m)
-	}
 	if code, m := do("GET", "environments/k/edge-identities/", ""); code != 200 || len(m["results"].([]any)) != 0 || m["last_evaluated_key"] != nil {
 		t.Fatalf("edge identities %d %v", code, m)
 	}
 	if code, _ := do("DELETE", "environments/k/edge-identities/u-1/", ""); code != 204 {
 		t.Fatalf("delete identity %d", code)
 	}
-	f.Handle("GET /api/v1/projects/42/audit/", func(w http.ResponseWriter, _ *http.Request) {
+	f.Handle("GET /api/v1/projects/42/tags/", func(w http.ResponseWriter, _ *http.Request) {
 		flagsmithtest.WriteJSON(w, 418, map[string]any{})
 	})
-	if code, _ := do("GET", "projects/42/audit/", ""); code != 418 {
+	if code, _ := do("GET", "projects/42/tags/", ""); code != 418 {
 		t.Fatalf("override %d, want 418", code)
 	}
 }

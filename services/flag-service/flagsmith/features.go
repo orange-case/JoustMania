@@ -180,7 +180,6 @@ type environmentInfo struct {
 	ID                              int    `json:"id"`
 	Name                            string `json:"name"`
 	Project                         int    `json:"project"`
-	UseV2FeatureVersioning          bool   `json:"use_v2_feature_versioning"`
 	UseIdentityOverridesInLocalEval bool   `json:"use_identity_overrides_in_local_eval"`
 }
 
@@ -205,7 +204,6 @@ func (s *startup) resolveIDs(ctx context.Context) error {
 	ids := s.l.ids
 	ids.Lock()
 	ids.ProjectID, ids.EnvironmentID, ids.EnvironmentName = s.l.cfg.ProjectID, env.ID, env.Name
-	ids.V2Versioning = env.UseV2FeatureVersioning
 	ids.Unlock()
 	return nil
 }

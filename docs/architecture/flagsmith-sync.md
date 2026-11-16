@@ -53,10 +53,10 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | F1 | **Flagsmith is a writer, not an evaluator.** Pulled changes are `flagsmith`-labelled writes through the registry (C-032, C-036); no OpenFeature client talks to Flagsmith (C-031). | decided by the maintainer |
 | F2 | **Every registry flag is synced**, every scope is shown (stack, game, player, experiment arm, `real`, fraction, event lists). Read-only baseline flags are not features. | decided by the maintainer ("Everything") |
 | F3 | **Flagsmith may set stack, game, player values and game events**; experiment-arm, `real` and fraction values are shown only, so a Flagsmith value never competes with an agent experiment or promotion (UC-054 BR-003). | decided in the review of UC-054 |
-| F4 | **Flagsmith wins a conflict, kill switches tighten** (UC-054 BR-005, §6). | decided by the maintainer |
+| F4 | **Flagsmith wins a conflict**, kill switches included, and is the source of truth once online: stack-scope changes made offline are discarded at the reconnect, game and player values are sent (UC-054 A2, BR-005, BR-007, §6). | decided by the maintainer 2026-11-16 (#2621; replaces "kill switches tighten" of 2026-11-15) |
 | F5 | **No disk copy.** The last-seen state and the outbox are in memory only (C-030 unchanged). An offline restart runs baseline + admin settings. | decided by the maintainer ("Keep, no cache") |
-| F6 | **Agent limits under full Flagsmith control**, capped by the env ceilings of C-034; on a conflict they tighten (F4). | decided by the maintainer |
-| F7 | **Restart rule by authorship** (UC-054 BR-006): only values a person (a Flagsmith user) set in Flagsmith, and admin settings, come back; every value made with an API key (the link's own, Terraform, the Flagsmith MCP server) is cleared in Flagsmith at start. Flagsmith's audit API shows the author but not which API key, so any API key counts as the link. | decided by the maintainer, 2026-11-15 |
+| F6 | **Agent limits under full Flagsmith control**, capped by the env ceilings of C-034; on a conflict Flagsmith wins (F4); the agent never writes its own limits. | decided by the maintainer |
+| F7 | **Flagsmith wins at a restart** (UC-054 BR-006, FR-215): every value Flagsmith holds comes back, whoever made it (a person, the link's own pushes, Terraform, the Flagsmith MCP server); no authorship is read, nothing is cleared in Flagsmith (§5.1). | decided by the maintainer 2026-11-16 (#2621; replaces the restart rule by authorship of 2026-11-15) |
 | F8 | **Pull, not webhooks.** Polling the environment document (conditional `GET`) is the baseline; realtime SSE only shortens the delay. Flagsmith webhooks are rejected (§9.1). | recommendation |
 | F9 | **Non-stack scopes are identities.** Game, player, experiment-arm, `real` and fraction values are identity overrides on identities named after the scope (§4.2). | recommendation |
 | F10 | **Off by default.** `FLAGSMITH_LINK=off` in every stack; CI and the dry-run stacks never call the SaaS; the stage stack opts in through `.env.local`. | recommendation |
@@ -175,15 +175,14 @@ entity.
    epoch after 1970 or lies beyond year 9999 counts as none, so a garbled value cannot block every later document.
    The refusal is bounded: one update time ahead of all later ones (Flagsmith's clock skewed forward and corrected, an
    environment database restore, a garbled but in-range time) would otherwise refuse every document, kill-switch
-   tightenings included, until a restart. Once older documents have been refused in a row for max(10 min, 10 x the
+   changes included, until a restart. Once older documents have been refused in a row for max(10 min, 10 x the
    poll interval), measured as local elapsed time (the monotonic clock, never a wall-clock comparison, so a local
    clock at 1970 plays no part), the next older document is accepted and its update time becomes the newest; the
    link logs a warning `flagsmith stale document accepted`. Any document accepted in between ends the run of
    refusals; errors and unchanged (`304`) pulls in between do not end it (they return before the update-time
-   check), so after an outage longer than the threshold the first older document is accepted at once. In that one round every kill switch merges the document as after a restart, without its remote value
-   (§6 "R absent" row): it takes the more restrictive of the document and the local value, so an accepted pre-push
-   copy never loosens a kill switch below the local value the link pushed. The generation snapshot and the value
-   guard above still apply to every key in that round.
+   check), so after an outage longer than the threshold the first older document is accepted at once and applied
+   like any document, kill switches included (#2621). The generation snapshot and the value guard above still apply
+   to every key in that round.
 7. **Every pulled write is conditional**: it carries the version of the local slot as read, empty slots included, so a
    local write that lands between the read and the apply wins (the pulled write is refused as stale, and the next round
    sees the conflict). Event appends (§4.3) are the one unconditional write.
@@ -221,9 +220,9 @@ what was pushed, so its own change is never "new". Because variants are opaque a
 | Situation | Behaviour |
 |---|---|
 | Start, link off | nothing changes against today |
-| Start, Flagsmith reachable | serve baseline + admin settings at once (FR-130); in the background: resolve ids, create missing features and tags (FR-214), apply the restart rule (§5.1), then poll |
+| Start, Flagsmith reachable | serve baseline + admin settings at once (FR-130); in the background: resolve ids, create missing features and tags (FR-214), then the start reconcile applies what Flagsmith holds (§5.1: Flagsmith wins), then poll |
 | Start, Flagsmith unreachable | `state=offline`; the stack runs baseline + admin settings; retries with backoff 1, 2, 4 … 60 s |
-| Link drops while running | `state=offline`; writes keep working and fill `pending`; on reconnect: full pull, reconcile (§6), then drain `pending` |
+| Link drops while running | `state=offline`; writes keep working and fill `pending`, the case plays on them; on reconnect: full pull, reconcile (§6: Flagsmith is the source of truth, stack-scope changes made offline are discarded and dropped from `pending`), then drain what is left of `pending` (game and player values, admin settings Flagsmith holds no value for) |
 | Restart while offline | `pending` and Flagsmith-only values are gone until Flagsmith is reached (F5, UC-054 BR-007) |
 
 ### 5.0 Start checks
@@ -245,68 +244,46 @@ only a `401` on resolving the ids or on the document takes the link down. Side e
 Flagsmith rebuild the environment document of every environment of the project, so features and tags are created once,
 at start.
 
-### 5.1 Restart rule (F7)
+### 5.1 Restart: Flagsmith wins (F7)
 
-At start, `remote` is empty, so the link cannot tell its own pushes from a person's changes by comparison. It
-reads the **author** of the latest change of each enabled environment value and each override from the project
-audit log: `GET /api/v1/projects/{project_id}/audit/?environments=<env_id>`, newest first, paged. (The
-organisation-wide `/audit/` fails for API keys.) The link never sends `is_system_event` (Flagsmith parses it
-wrongly) and filters system events on the client. The feature or identity is read from the `log` text, pinned to
-the Flagsmith log constants, because `related_object_id` is not reliable. A candidate without an audit row (the page
-cap was hit, or the row is outside the visibility window) is searched once per feature (`search=<feature name>`)
-before it is given up. With feature versioning v2, the author is read from the "New version published" audit row
-(author set: a person; author null: an API key); a version without that row is unknown, never an API key.
+Maintainer decision 2026-11-16 (#2621), replacing the restart rule by authorship of #2591: at a restart, and
+from then on, **Flagsmith is the source of truth once the link is online**. The start sequence reads no audit log
+and seeds no last state: `remote` is empty, so the start reconcile (§6, rows "remote absent") applies every
+Flagsmith value that differs from the local value (the baseline, or the persisted value of an admin setting),
+whoever made it:
 
-Flagsmith's audit API shows `author` (a user, or null) but not **which** API key. Maintainer decision 2026-11-15:
-**any API key counts as the link**.
-
-- author null and not a system event (any API key: the link's own, Terraform, the Flagsmith MCP server) → cleared
-  in Flagsmith (`enabled=false`, override deleted);
-- an admin setting (`persist: yes`) with an API key as author → replaced by the state-file value (or the baseline),
-  and that value is sent to Flagsmith; with a person as author → applied and persisted;
-- author set (a Flagsmith user) or a system event → applied as a change from Flagsmith;
-- an override on a game that is not registered yet is neither applied nor refused: it applies once the game registers. Game and
-  player overrides are classified by the same author rule at start but applied only when the game registers: an override
-  made with an API key (the link's own) is removed once its game registers, a person's override is applied, and overrides
-  of games that never register are removed after the grace period (next bullet);
+- a value made with an API key (the link's own pushes of in-memory writes, Terraform, the Flagsmith MCP server)
+  comes back like a person's; nothing is cleared in Flagsmith;
+- an admin setting (`persist: yes`) takes the Flagsmith value and persists it, as the menu admin's write would; with
+  no Flagsmith value its persisted value stays and is sent to Flagsmith;
+- a kill switch takes the Flagsmith value like any flag (no "more restrictive" merge, §6);
+- an override on a game that is not registered yet is neither applied nor refused: it applies once the game
+  registers, whoever made it;
+- an event list in a game's override (the list the link pushed before the restart) is not brought back: events are
+  one-shot payloads (§4.3); the local list is kept and sent. A single payload a person set is appended;
 - identities of games that are not live → deleted, but **start never deletes identities**: the cleanup runs once the
   coordinator has re-registered its games, or 45 s after start, whichever is later, and keeps every identity that a
   registered game matches (the whole identifier is compared with `game:<id>` and `game:<id>:<serial>`), so a game
-  that registers late keeps its overrides. The first pull round after start skips the keys the rule just cleared
-  (edge lag). Kill switches are never cleared, so that round merges them (more restrictive value, below): a kill
-  switch an API key tightened is in force from the start round, not only from the first poll.
+  that registers late keeps its overrides.
 
-All writes of the rule happen in its final step, after every other step succeeded, so a failed start leaves no
-half-seeded state and a re-run seeds once.
-
-**Degraded mode:** the audit call does not answer 200, or it returns no row for a candidate after the per-feature
-search (the free plan answers 200 with an empty list), or it fails after retries (timeout, 5xx, `429`). A candidate
-without a row is treated as a person's and the rule reports `degraded` (one warning at start,
-`restart_rule_degraded`); `talk-preflight.sh` shows it. An audit error never takes the link down. Risk: audit rows are
-written asynchronously, so a push seconds before a crash may be misread as a person's value (§10).
-
-**Kill switches win over the clear (safety over reset).** The more restrictive value wins even over the API-key clear
-and over the admin-setting replace above (`agent/interventions_allowed` is both persisted and a kill switch): a kill switch that an in-memory write tightened before the restart stays tightened after it and is reported as
-a conflict. A person-set looser value is not brought
-back for a kill switch (BR-005).
-
-**Kill switches never loosen at start.** At start the link has no last-seen Flagsmith state (`remote` is empty), so
-for every kill switch of flags.md §13.6 a Flagsmith value that differs from the local value (the baseline, or the
-value restored from the state file for a persisted kill switch) is a conflict (§6, row "remote absent"): the more
-restrictive value wins, and a local winner is pushed to Flagsmith and the feature is out of sync until then. This
-holds in degraded mode and in the async-audit window too, so a restart, a lost pending push or a misread audit row
-cannot loosen a kill switch; only a later deliberate change in Flagsmith, seen against a last state, does.
+The identity uuids of the start document are remembered in the start's final step, after every other step
+succeeded, so a failed start leaves nothing half done. Consequence (§10): an in-memory write the link pushed
+before a restart (a stage script, an agent's game-scoped write) is in force again after the restart; a restart is
+no stage reset while Flagsmith is reachable.
 
 ## 6. Conflicts (FR-210, UC-054 BR-005)
+
+Flagsmith wins every conflict, a kill switch included (maintainer decision 2026-11-16, #2621, replacing the
+"more restrictive wins" rule of #2590). A round still applies the kill switches of flags.md §13.6 first.
 
 | `remote` vs document | `remote` vs local | Result |
 |---|---|---|
 | equal | equal | nothing |
-| equal | differs | local change not yet pushed: push it, unless Flagsmith refused that local value (any refusal but `429`): it is not sent again until the local value changes to a different one or the process restarts (UC-055 A4); the same holds for every other row that pushes the local value |
+| equal | differs | local change not yet pushed: push it, unless Flagsmith refused that local value (any refusal but `429`): it is not sent again until the local value changes to a different one or the process restarts (UC-055 A4); the same holds for every round. **On a `reconnect` round a stack-scope local change is discarded instead** (it was not sent before the link went offline): the document value is applied, recorded as a `flagsmith` conflict, and the pending entry is dropped; with no document value an in-memory value goes back to the baseline and an admin setting keeps its persisted value, which is pushed. The discard holds while a deferred apply waits and ends with a new local write. Game and player values are pushed (UC-054 A2, BR-007) |
 | differs | equal | change made in Flagsmith: apply it |
 | differs | differs, document == local | both moved to the same value: `remote := document` |
-| absent (no last state: restart, first sighting) | differs | kill switch → **conflict** (the more restrictive value wins; a local winner is pushed and the feature is out of sync until then); other flags: apply the document value |
-| differs | differs | **conflict**: Flagsmith wins, except kill switches → the more restrictive (flags.md §13.6); the loser is recorded on the span and in `flagservice_flagsmith_conflicts_total{resolution}` |
+| absent (no last state: restart) | differs | apply the document value, a kill switch too; no document value: push the local value (an in-memory stack value discarded at a reconnect goes back to the baseline instead) |
+| differs | differs | **conflict**: Flagsmith wins, a kill switch too; the loser is recorded on the span and in `flagservice_flagsmith_conflicts_total{resolution="flagsmith"}` |
 
 ## 7. Credentials and configuration
 
@@ -381,21 +358,21 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 
 | Risk | Mitigation |
 |---|---|
-| Audit log or versioning author not available on the plan (or no audit row for a candidate): the restart rule cannot tell own pushes from a person's changes | degraded mode treats all as a person's (§5.1), warns at start and in the pre-flight; `talk-stage.sh reset` also clears the stage overlays in Flagsmith through the flag service |
-| Audit rows are written asynchronously: a push seconds before a crash may be misread as a person's value | accepted; the value is then applied as a change from Flagsmith at the next start, except a kill switch, which is a conflict and tightens (§5.1, §6) |
+| In-memory writes the case pushed before a restart (stage scripts, an agent's game-scoped writes, a stage reset made online) come back after the restart from Flagsmith: a restart is no stage reset while Flagsmith is reachable (F7, #2621) | accepted by the maintainer 2026-11-16: Flagsmith is the source of truth once online (the stage Pi's agent gates switched on in Flagsmith survive an upgrade or reboot). A reset is a change in Flagsmith (or `talk-stage.sh reset` while online, whose deletes are pushed); a game-scoped value comes back only for a game that registers again |
+| Stack-scope changes made while offline (menu admin, stage scripts, an operator write, a kill switch switched off on stage) are discarded at the reconnect in favour of Flagsmith (F4, #2621) | accepted by the maintainer 2026-11-16: offline the case plays on its offline configuration; once online Flagsmith decides. A safety stop made offline must also be made in Flagsmith; a persisted admin setting Flagsmith holds no value for is kept and sent; game and player values of running games are sent |
+| A kill switch loosened in Flagsmith (or by an accepted older document) is applied as is: there is no "more restrictive" merge any more (F4, #2621) | the env ceilings of C-034 still cap the agent-limiting flags; the agent never writes its own limits; kill switches are applied first in a round |
 | A conditional pull (`If-Modified-Since`) may miss an edge identity override change, because the environment `updated_at` may not move | while any game is live the pull is unconditional, otherwise every 10th pull is unconditional (§4.2); the fake-Flagsmith test changes an override without a newer `Last-Modified` and expects it to be applied |
 | A person changes a flag in Flagsmith between a pull and the push of a pending local change: the push overwrites it | accepted; last writer wins for every flag, kill switches included: a person's change between the last pull and the push is overwritten (the window lasts from the last pull to the push); for a kill switch the next pull re-applies a tighter Flagsmith value only as a deliberate change |
-| Terraform / MCP values set with an API key are cleared at restart (any API key counts as the link, F7) | decided by the maintainer 2026-11-15; a lasting value is set by a person in the Flagsmith UI, or is an admin setting |
 | Edge overrides in the document: the SaaS serves edge identity overrides only in the edge document | `FLAGSMITH_DOCUMENT_URL` defaults to the edge URL; to verify live against the SaaS (Known gap of UC-054 and UC-055, maintainer decision D1) |
 | `use_identity_overrides_in_local_eval` off: game and player values cannot be read back | the link stays offline with reason `identity_overrides_disabled`; documented in the setup |
 | SaaS request limits (`MASTER_API_KEY_THROTTLE_RATE` is a per-deployment setting; the SaaS value is not published) under many games and events | merge per flag and scope, `FLAGSMITH_PUSH_RATE`, honour `429 Retry-After`; to measure with 8 live games (NFR-057; Known gap of UC-054 and UC-055, maintainer decision D1) |
 | Edge identity count grows with games on the plan's identity quota | identities deleted at game end and, for games that are not live, after start (§5.1); to verify against the plan |
 | A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round are skipped, and the value guard skips a key whose document value still equals a value its confirmed push replaced (§4.2 step 6); a document whose update time is older than the newest one read is skipped whole (`stale_document`, server time only; §4.2 step 6); pulled writes are conditional on the local slot (§4.2) |
-| One document update time ahead of all later ones (Flagsmith clock skew, an environment database restore, a garbled but in-range time) would refuse every later document as `stale_document`, kill-switch tightenings included | the refusal ends after max(10 min, 10 x poll interval) of refusals in a row, local elapsed time; the older document is then accepted and becomes the newest, with a warning log; in that round kill switches merge without their remote value and take the more restrictive value (§4.2 step 6). Residuals, accepted by the maintainer 2026-11-15 (follow-up #2602): (a) the copy stamped with the too-new time (a cache or region still serving it) is not older, so it is accepted normally and ends the run: served at least once per max(10 min, 10 x poll interval), it keeps the run from ever reaching the threshold and the tightening stays refused as before; served less often, it makes kill switches flap: the accepted older document tightens, then the too-new copy is newer than the accepted time again and merges normally (`R != D`, `R = L` -> apply), a deliberate loosening, and the refusals start over (an operator's kill in Flagsmith takes effect, then is undone for about the threshold, repeatedly). (b) In the accepted round a kill switch whose local value is tighter than the accepted document keeps local and pushes it; when a lagging copy answers that round while Flagsmith already holds a tighter value set during the refusal run, the push overwrites that value in Flagsmith and the operator's value is lost on both sides (as in the "push overwrites a person's change" row, but the window is the whole refusal run). (c) Every non-kill-switch value in the accepted document that differs from the link's remote value while the local value still equals it applies as a change from Flagsmith (a value Flagsmith changed itself as well as a pushed one) until a newer document is read and corrects it; a pushed value is protected only while its value guard lives, and the guard can end before the threshold (the newest document showed the pushed value), as for a document without an update time |
+| One document update time ahead of all later ones (Flagsmith clock skew, an environment database restore, a garbled but in-range time) would refuse every later document as `stale_document`, kill-switch changes included | the refusal ends after max(10 min, 10 x poll interval) of refusals in a row, local elapsed time; the older document is then accepted and becomes the newest, with a warning log; in that round kill switches merge without their remote value and take the more restrictive value (§4.2 step 6). Residuals, accepted by the maintainer 2026-11-15 (follow-up #2602): (a) the copy stamped with the too-new time (a cache or region still serving it) is not older, so it is accepted normally and ends the run: served at least once per max(10 min, 10 x poll interval), it keeps the run from ever reaching the threshold and the tightening stays refused as before; served less often, it makes kill switches flap: the accepted older document tightens, then the too-new copy is newer than the accepted time again and merges normally (`R != D`, `R = L` -> apply), a deliberate loosening, and the refusals start over (an operator's kill in Flagsmith takes effect, then is undone for about the threshold, repeatedly). (b) In the accepted round a kill switch whose local value is tighter than the accepted document keeps local and pushes it; when a lagging copy answers that round while Flagsmith already holds a tighter value set during the refusal run, the push overwrites that value in Flagsmith and the operator's value is lost on both sides (as in the "push overwrites a person's change" row, but the window is the whole refusal run). (c) Every non-kill-switch value in the accepted document that differs from the link's remote value while the local value still equals it applies as a change from Flagsmith (a value Flagsmith changed itself as well as a pushed one) until a newer document is read and corrects it; a pushed value is protected only while its value guard lives, and the guard can end before the threshold (the newest document showed the pushed value), as for a document without an update time |
 | A local write to a game or player slot that is empty during a document fetch is not detected by the per-slot version check for that round (game values only; stack and kill-switch slots are fully covered) | accepted; last writer wins |
 | `__future__` flag API is experimental and may change | fallback to the stable `featurestates` endpoints (§4.1 step 3); a contract test against the pinned Flagsmith version |
 | Change requests on the environment make every push fail | A4 of UC-055, reported as out of sync; the stage environment runs without change requests |
-| A person in Flagsmith loosens an agent limit (F6) | env ceilings of C-034 still cap; kill switches tighten on conflict; the change is a `flagservice.write` span with writer `flagsmith` |
+| A person in Flagsmith loosens an agent limit (F6) | env ceilings of C-034 still cap; Flagsmith wins a conflict (F4, #2621), so the operator in Flagsmith decides; the change is a `flagservice.write` span with writer `flagsmith` |
 | Admin API key on the Pi | a role limited to the project (Flagsmith RBAC), stored in `.env.local` (C-016), never in a flag |
 
 ## 11. Implementation outline
@@ -404,6 +381,6 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 |---|---|---|
 | 1 | `services/flag-service/flagsmith/`: client (document pull, Admin API pushes), link state, `GET /state` block, config, spans and metrics; link `off` everywhere | services.md §7.3, telemetry.md §10.4 |
 | 2 | Out: stack values, identities for game and player scopes, game end cleanup, outbox with merge and rate limit | UC-055, FR-207, FR-211, NFR-057 |
-| 3 | In: pull, 3-way merge, kill-switch order, events, feature health | UC-054, FR-208 to FR-210, FR-213, flags.md §13.6 |
-| 4 | Start: feature creation, restart rule by authorship | FR-214, FR-215 |
+| 3 | In: pull, 3-way merge, kill switches first (their "more restrictive" order dropped in #2621), events, feature health | UC-054, FR-208 to FR-210, FR-213, flags.md §13.6 |
+| 4 | Start: feature creation, restart rule by authorship (replaced by "Flagsmith wins at a restart", #2621) | FR-214, FR-215 |
 | 5 | Tests: a fake Flagsmith (HTTP) in `tests/service/`, the echo and conflict table of §6, offline start and reconnect; `talk-preflight.sh` shows the link state | done (#2592): TC-021, TC-022, the fake in `tests/service/harness/fakes/flagsmith.py` |

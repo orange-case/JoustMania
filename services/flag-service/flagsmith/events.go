@@ -74,6 +74,13 @@ func isEventKey(kind string, k Key) bool {
 	return kind == registry.KindEvent && GameOfIdentity(k.Scope) != "" && !hasSerial(k.Scope)
 }
 
+// isEventList reports whether v holds an event list (a JSON array): the form
+// the out side pushes; a person sets one payload (a JSON object).
+func isEventList(v Value) bool {
+	raw := bytes.TrimSpace(v.Value)
+	return v.Present && len(raw) > 0 && raw[0] == '['
+}
+
 func hasSerial(identifier string) bool {
 	sc, _, ok := ScopeOfIdentity(identifier)
 	return ok && sc.Serial != ""

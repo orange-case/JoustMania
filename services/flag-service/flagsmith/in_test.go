@@ -477,7 +477,7 @@ func (w *racingWriter) FlagsmithPut(ctx context.Context, req state.WriteRequest)
 // person turns agent/enabled on in Flagsmith while the operator turns it off
 // locally between the snapshot and the write: the pulled write is refused as
 // stale (412 slot_changed), remote is restored, and the next round sees the
-// conflict and keeps the tighter local off, queued for push.
+// conflict: Flagsmith wins, also for a kill switch (#2621).
 func TestPulledWriteIsConditional(t *testing.T) {
 	h := newHarness(t, harnessOpts{writer: func(a *api.API, st *state.State) flagsmith.LocalWriter {
 		return &racingWriter{API: a, st: st}
@@ -492,14 +492,14 @@ func TestPulledWriteIsConditional(t *testing.T) {
 		t.Fatalf("UC-054/A5 remote %+v after a stale write, want restored", r)
 	}
 	h.round()
-	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
-		t.Fatalf("UC-054/BR-005 agent/enabled = %+v after the conflict, want off (tightened)", v)
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %+v after the conflict, want on (Flagsmith wins)", v)
 	}
-	if st := h.link.Status(); st.Pending != 1 {
-		t.Fatalf("UC-054/A2 step 1 pending %d, want the local off queued for push", st.Pending)
+	if st := h.link.Status(); st.Pending != 0 {
+		t.Fatalf("UC-054/A2 step 1 pending %d, want nothing queued (the local off is not sent)", st.Pending)
 	}
-	if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionTightened); n != 1 {
-		t.Fatalf("UC-054/A2 step 1 tightened conflicts %d, want 1", n)
+	if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionFlagsmith); n != 1 {
+		t.Fatalf("UC-054/A2 step 1 conflicts{resolution=flagsmith} %d, want 1", n)
 	}
 }
 

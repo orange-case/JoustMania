@@ -98,6 +98,26 @@ func (s *LinkState) dropFromQueueLocked(k Key) {
 	}
 }
 
+// HasPending reports whether k has a local value waiting to be sent.
+func (s *LinkState) HasPending(k Key) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entries[k]
+	return e != nil && e.pending != nil
+}
+
+// DropPending discards k's unsent local value (a stack-scope change made
+// while offline, discarded at the reconnect: Flagsmith is the source of truth
+// once online, #2621).
+func (s *LinkState) DropPending(k Key) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil && e.pending != nil {
+		e.pending = nil
+		s.dropFromQueueLocked(k)
+	}
+}
+
 func (s *LinkState) deleteLocked(k Key) {
 	if e := s.entries[k]; e != nil && e.pending != nil {
 		s.dropFromQueueLocked(k)

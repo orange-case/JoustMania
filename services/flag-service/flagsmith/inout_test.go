@@ -223,10 +223,9 @@ func TestPullRoundPushWakesSender(t *testing.T) {
 }
 
 // UC: UC-054 A2
-// A conflict a kill switch's tighter local value wins (Flagsmith looser) is
-// pushed back to Flagsmith by the round itself, with no other local write
-// (#2608).
-func TestKeepLocalKillSwitchSentAfterRound(t *testing.T) {
+// A kill-switch conflict (Flagsmith looser than the local value) takes the
+// Flagsmith value like any flag since #2621: nothing is pushed back.
+func TestKillSwitchConflictFlagsmithWins(t *testing.T) {
 	m := newFSModel()
 	m.values["experiment_max_games"] = 10
 	entered, release := make(chan struct{}, 1), make(chan struct{})
@@ -248,19 +247,16 @@ func TestKeepLocalKillSwitchSentAfterRound(t *testing.T) {
 	h.clock.Advance(2 * time.Second)
 	m.set("experiment_max_games", 500)
 	h.round()
-	t.Run("UC-054/A2 step 1 (BR-005) the tighter local value wins and is sent without another local write", func(t *testing.T) {
-		h.waitWithin(sendWithin, "the local 10 confirmed in Flagsmith", func() bool {
-			r, ok := h.link.Links().Remote(maxGamesKey)
-			return ok && string(r.Value) == "10"
-		})
-		if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionTightened); n != 1 {
-			t.Fatalf("conflicts{resolution=tightened} = %d, want 1", n)
+	t.Run("UC-054/A2 step 1 (BR-005) Flagsmith wins the kill-switch conflict; the local value is not sent", func(t *testing.T) {
+		h.roundAndSettle()
+		if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionFlagsmith); n != 1 {
+			t.Fatalf("conflicts{resolution=flagsmith} = %d, want 1", n)
 		}
-		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
-			t.Fatalf("experiment_max_games = %+v, want the local 10 kept", v)
+		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "500" {
+			t.Fatalf("experiment_max_games = %+v, want the Flagsmith 500", v)
 		}
-		if n := calls(); n != 2 {
-			t.Fatalf("%d PATCHes, want 2", n)
+		if n := calls(); n != 1 {
+			t.Fatalf("%d PATCHes, want 1 (only the 100; the local 10 is not pushed back)", n)
 		}
 		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 0 {
 			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 0 0", p, oos, r)
@@ -326,10 +322,9 @@ func TestRefusedPushNotResentByPolls(t *testing.T) {
 }
 
 // UC: UC-054 BR-005
-// A refused push of a tighter kill-switch value never loosens it and is not
-// sent again: a looser document value is a conflict the local value wins
-// (out of sync, nothing sent), a tighter one is applied.
-func TestRefusedKillSwitchPushNeverLoosens(t *testing.T) {
+// A refused push of a kill-switch value is not sent again; a new document
+// value is a conflict Flagsmith wins (#2621), which ends the refusal.
+func TestRefusedKillSwitchPushThenFlagsmithWins(t *testing.T) {
 	m := newFSModel()
 	m.values["experiment_max_games"] = 100
 	maxPath := futureAPI + strconv.Itoa(inoutIDs["experiment_max_games"]) + "/"
@@ -353,27 +348,27 @@ func TestRefusedKillSwitchPushNeverLoosens(t *testing.T) {
 	if n := h.requests(http.MethodPatch, maxPath); n != 1 {
 		t.Fatalf("UC-055/A4 %d PATCHes of experiment_max_games after 3 rounds, want 1", n)
 	}
-	t.Run("UC-054/BR-005 a looser document value keeps the refused local value, out of sync, unsent", func(t *testing.T) {
+	t.Run("UC-054/BR-005 a looser document value wins the conflict; the refused 10 is not sent again", func(t *testing.T) {
 		m.set("experiment_max_games", 500)
 		h.roundAndSettle()
-		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
-			t.Fatalf("experiment_max_games = %+v, want 10 kept", v)
+		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "500" {
+			t.Fatalf("experiment_max_games = %+v, want the Flagsmith 500 (Flagsmith wins)", v)
 		}
-		if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionTightened); n != 1 {
-			t.Fatalf("conflicts{resolution=tightened} = %d, want 1", n)
+		if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionFlagsmith); n != 1 {
+			t.Fatalf("conflicts{resolution=flagsmith} = %d, want 1", n)
 		}
 		if n := h.requests(http.MethodPatch, maxPath); n != 1 {
 			t.Fatalf("%d PATCHes, want 1: the refused 10 is not sent again", n)
 		}
-		if _, oos, _ := h.link.Links().Counts(); oos != 1 {
-			t.Fatalf("out_of_sync %d, want 1 (the local 10 is not in Flagsmith)", oos)
+		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 0 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 0 0", p, oos, r)
 		}
 	})
-	t.Run("UC-054/BR-005 a tighter document value is applied and ends the refusal", func(t *testing.T) {
+	t.Run("UC-054/main step 3 a later document value is applied", func(t *testing.T) {
 		m.set("experiment_max_games", 5)
 		h.roundAndSettle()
 		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "5" {
-			t.Fatalf("experiment_max_games = %+v, want the tighter 5 applied", v)
+			t.Fatalf("experiment_max_games = %+v, want 5 applied", v)
 		}
 		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 0 {
 			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 0 0", p, oos, r)

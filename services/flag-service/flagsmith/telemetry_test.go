@@ -23,7 +23,7 @@ func TestMetricsRegistered(t *testing.T) {
 	m := l.Metrics()
 	m.RecordPull(ctx, TriggerPoll, ResultChanged)
 	m.RecordPush(ctx, OpValue, ResultOK, "")
-	m.RecordConflict(ctx, ResolutionTightened)
+	m.RecordConflict(ctx, ResolutionFlagsmith)
 	m.RecordHealthPost(ctx, "unhealthy", ResultOK)
 	m.RecordChangeDelay(ctx, TriggerPoll, 2*time.Second)
 

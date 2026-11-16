@@ -177,7 +177,7 @@ func TestStateHasFlagsmithBlock(t *testing.T) {
 		t.Fatalf("flagsmith %v, want link off with zero counts", body["flagsmith"])
 	}
 	if _, has := fs["restart_rule"]; has {
-		t.Fatalf("flagsmith %v: restart_rule before Start", fs)
+		t.Fatalf("flagsmith %v: restart_rule is gone (#2621)", fs)
 	}
 	if body["epoch"] != "e1" || body["snapshot_version"] == nil {
 		t.Fatalf("state %v, want epoch and snapshot_version at the top level", body)

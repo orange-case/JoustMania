@@ -13,7 +13,7 @@ import (
 // UseInSideOnly replaces l's start sequence by a ping and its out side by an
 // idle one. Call it before l.Run.
 func UseInSideOnly(l *Link) {
-	l.start, l.out = inOnlyStarter{l: l}, inOnlyOut{}
+	l.start, l.out = inOnlyStarter{l: l}, inOnlyOut{l: l}
 }
 
 // UsePingStart replaces only l's start sequence by a ping and keeps the real
@@ -30,9 +30,17 @@ func (s inOnlyStarter) Start(ctx context.Context) error {
 	return err
 }
 
-type inOnlyOut struct{}
+// inOnlyOut queues local values like the real out side's observer and never
+// sends them.
+type inOnlyOut struct{ l *Link }
 
-func (inOnlyOut) Changed(state.Change) {}
+func (o inOnlyOut) Changed(c state.Change) {
+	if c.Kind == state.ChangeValue || c.Kind == state.ChangeCleared {
+		if k, v, ok := ValueOfChange(c); ok {
+			o.l.Links().Offer(k, v, c.At, c.Version)
+		}
+	}
+}
 
 func (inOnlyOut) Run(ctx context.Context) error {
 	<-ctx.Done()

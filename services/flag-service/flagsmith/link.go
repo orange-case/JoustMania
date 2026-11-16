@@ -36,24 +36,6 @@ const (
 // Modes lists every link state (the link gauge's label values).
 var Modes = []Mode{ModeOff, ModeStarting, ModeOnline, ModeOffline}
 
-// Restart rules (UC-054 BR-006, architecture note §5.1).
-const (
-	RestartAuditLog   = "audit_log"
-	RestartVersioning = "versioning"
-	RestartDegraded   = "degraded"
-)
-
-// Author is who last set a value in Flagsmith (the restart rule's authorship,
-// UC-054 BR-006).
-type Author string
-
-// The authors.
-const (
-	AuthorPerson  Author = "person"
-	AuthorAPIKey  Author = "api_key" // the flag service pushed it: cleared at start
-	AuthorUnknown Author = "unknown"
-)
-
 // Backoff of the reconnect loop (services.md §7.3 Offline): 1, 2, 4 ... 60 s.
 // It starts again at BackoffMin only after the link stayed online for
 // BackoffResetAfter: a side that fails right after each reconnect keeps
@@ -98,7 +80,7 @@ type inSide interface {
 }
 
 // starter runs the start sequence once per process (start.go, #2591): ping,
-// resolve ids, create features and tags, the restart rule. It must not call
+// resolve ids, create features and tags, schedule the identity cleanup. It must not call
 // NotePull (the first Reconcile pulls in full).
 type starter interface {
 	Start(ctx context.Context) error
@@ -130,8 +112,6 @@ type IDs struct {
 	ProjectID       int
 	EnvironmentID   int
 	EnvironmentName string
-	// V2Versioning: the environment uses feature versioning v2.
-	V2Versioning bool
 	// FeatureID by flag key, TagID by flag set, IdentityUUID by identifier.
 	FeatureID    map[string]int
 	TagID        map[string]int
@@ -146,7 +126,6 @@ type Status struct {
 	Pending       int        `json:"pending"`
 	OutOfSync     int        `json:"out_of_sync"`
 	Refused       int        `json:"refused"`
-	RestartRule   string     `json:"restart_rule,omitempty"`
 	OfflineReason string     `json:"offline_reason,omitempty"`
 	ConfigError   []string   `json:"config_error,omitempty"`
 }
@@ -170,9 +149,6 @@ type Link struct {
 	offlineReason string
 	lastPullAt    time.Time
 	lastModified  string
-	restartRule   string
-	restartAuthor map[Key]Author
-	restartSet    bool
 	started       bool
 	// reconciled: a Reconcile succeeded once; until then every connect
 	// reconciles with TriggerStart (the first round after start is special,
@@ -355,9 +331,6 @@ func (l *Link) Status() Status {
 	}
 	l.mu.Lock()
 	st := Status{Link: l.mode, OfflineReason: l.offlineReason, ConfigError: append([]string(nil), l.cfg.ConfigError...)}
-	if l.restartSet {
-		st.RestartRule = l.restartRule
-	}
 	if !l.lastPullAt.IsZero() {
 		t := l.lastPullAt.UTC()
 		st.LastPullAt = &t
@@ -491,49 +464,4 @@ func (l *Link) wakeOut() {
 	if o, ok := l.out.(*out); ok {
 		o.poke()
 	}
-}
-
-// SetRestartReport records the restart rule the start sequence chose and the
-// author of each Flagsmith value it found (a copy is kept). The values it
-// cleared are the AuthorAPIKey entries.
-func (l *Link) SetRestartReport(rule string, attribution map[Key]Author) {
-	cp := make(map[Key]Author, len(attribution))
-	for k, a := range attribution {
-		cp[k] = a
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.restartRule, l.restartAuthor, l.restartSet = rule, cp, true
-}
-
-// RestartReport returns what SetRestartReport recorded, as a copy (ok false
-// before).
-func (l *Link) RestartReport() (rule string, attribution map[Key]Author, ok bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !l.restartSet {
-		return "", nil, false
-	}
-	attribution = make(map[Key]Author, len(l.restartAuthor))
-	for k, a := range l.restartAuthor {
-		attribution[k] = a
-	}
-	return l.restartRule, attribution, true
-}
-
-// RestartCleared counts the values the restart rule clears (the
-// flagservice.flagsmith.cleared attribute, telemetry.md §10.4): the
-// AuthorAPIKey entries of the restart report, except kill switches (never
-// cleared, flags.md §13.6, UC-054 BR-005) and event-flag overrides (one-shot
-// payloads, never brought back by a restart). isEvent tells an event-flag key
-// (nil: none is).
-func RestartCleared(attribution map[Key]Author, isEvent func(Key) bool) int {
-	n := 0
-	for k, a := range attribution {
-		if a != AuthorAPIKey || isKillKey(k) || (isEvent != nil && isEvent(k)) {
-			continue
-		}
-		n++
-	}
-	return n
 }

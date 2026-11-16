@@ -4,7 +4,7 @@ The flag service's Flagsmith link (``services/flag-service/flagsmith``) is point
 with ``FLAGSMITH_API_URL`` and ``FLAGSMITH_DOCUMENT_URL`` (``flag_service_env()``), so
 the service tier never reaches flagsmith.com. The fake keeps state like Flagsmith does
 (architecture note flagsmith-sync.md §4, §5; the Go client's requests in push.go,
-identities.go, audit.go, document.go):
+identities.go, document.go; the audit log is Flagsmith's, the link reads it no more since #2621):
 
 - one environment value per feature (created disabled, value null) and one override
   per (edge identity, feature); the environment document lists them all;
@@ -20,7 +20,7 @@ identities.go, audit.go, document.go):
   ``DELETE .../edge-identities/<uuid>/`` (with its overrides);
 - ``GET .../edge-identities/?q=``: a quoted ``"x"`` is an exact match, unquoted a prefix;
 - an Admin API write adds an audit row (newest first) with ``author: None`` (an API key) and
-  the log text ``audit.go`` parses; ``person_sets`` / ``person_overrides`` change the state
+  the log text Flagsmith writes; ``person_sets`` / ``person_overrides`` change the state
   as a person in the Flagsmith UI (``author: {"id": 1}``);
 - ``POST /health-webhook/`` (``FLAGSMITH_HEALTH_WEBHOOK_URL``) records the feature health
   posts (``health_posts()``), answered after the ``down`` check and before the key check.

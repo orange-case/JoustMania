@@ -53,6 +53,10 @@ The helper scripts change flags **only through the flag service** (epic #1407):
 `http://localhost/flags/...` through envoy, the same on both stacks. Every stage
 change is an in-memory overlay (`writer=stage`); no flag file is edited, and a
 restart of the flag service drops the overlays (run `talk-stage.sh reset` again).
+**With the Flagsmith link on (`FLAGSMITH_LINK=on`) a restart is no reset** (#2621): the overlays the link
+pushed to Flagsmith come back from Flagsmith after the restart, kill switches and agent gates included, and a
+stage change made while the link was offline is discarded at the reconnect in favour of Flagsmith. Reset with
+`talk-stage.sh reset` while the link is online (its deletes are pushed), or change the values in Flagsmith.
 The exception is the decision backend and its model: `agent-backend.sh`
 writes them **persisted** (#1682), as the operator's choice, so they survive a flag-service restart or a reboot. A stage
 overlay over a persisted backend is temporary: a restart brings the persisted
