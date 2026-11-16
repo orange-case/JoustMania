@@ -424,13 +424,14 @@ def test_real_game_players_are_controller_identities(flag_service, settled_link)
         # Step 1: a real game starts with two players.
         fl.register_game(flag_service, game, ["MOCK0021", "MOCK0022"], kind="real")
         # Step 2: each controller is its own identity with the game's traits; no per-game player identity.
+        want = {"game_id": game, "game_kind": "real", "coordinator_instance": fl.COORDINATOR_INSTANCE}
         for serial in ("MOCK0021", "MOCK0022"):
-            fl.wait_for(lambda s=serial: _settled_for(fake, s, game), fl.PULL_TIMEOUT, f"controller:{serial} settled")
-            assert fake.identities()[f"controller:{serial}"]["traits"] == {
-                "game_id": game,
-                "game_kind": "real",
-                "coordinator_instance": fl.COORDINATOR_INSTANCE,
-            }
+            # The traits are sent one after another: wait for all three.
+            fl.wait_for(
+                lambda s=serial: (fake.identities().get(f"controller:{s}") or {}).get("traits") == want,
+                fl.PULL_TIMEOUT,
+                f"controller:{serial} traits",
+            )
             assert f"game:{game}:{serial}" not in fake.identities()
         # Step 3: a player value of the game is an override on the controller (BR-002).
         flag_service.put(*HANDICAP, value=1.25, scope={"game_id": game, "serial": "MOCK0021"})

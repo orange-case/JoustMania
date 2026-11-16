@@ -236,7 +236,8 @@ def test_restart_removes_stale_identities_after_grace(stack, flag_service, settl
         fl.wait_for(
             lambda: fake.override("controller:MOCK0014", HANDICAP[1]) is None, 30, "the stale controller released"
         )
-        assert fake.identities()["controller:MOCK0014"]["traits"] == {}, fake.identities()["controller:MOCK0014"]
+        # The traits are cleared after the overrides.
+        fl.wait_for(lambda: fake.identities()["controller:MOCK0014"]["traits"] == {}, 30, "its traits cleared")
         assert fake.override("controller:MOCK0013", HANDICAP[1]) is not None
     finally:
         fl.end_game(flag_service, live)
