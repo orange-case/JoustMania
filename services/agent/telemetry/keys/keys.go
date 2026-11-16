@@ -241,9 +241,16 @@ const (
 	AttrEffectObjective = "intervention.objective"
 	// AttrEffectSignal is the dotted fitness signal key whose delta this span carries
 	// (e.g. "endurance.session_progress"), from the shared fitness.evaluated vocabulary.
+	// Since #2640 the effect span names the objective's PRIMARY signal here (the
+	// metric still labels every progress-type signal with it).
 	AttrEffectSignal = "intervention.signal"
+	// AttrEffectSignals is the compact JSON object of every signal evaluated at
+	// dispatch, {"<signal>":{"baseline","followup","delta"}} (#2640): one effect span
+	// per intervention instead of one per signal.
+	AttrEffectSignals = "intervention.signals"
 	// AttrEffectBaseline / AttrEffectFollowUp / AttrEffectDelta are the three numeric
-	// stamps: the signal value at dispatch, at follow-up, and follow_up-baseline.
+	// stamps of the primary signal: the value at dispatch, at follow-up, and
+	// follow_up-baseline.
 	AttrEffectBaseline = "intervention.fitness_baseline"
 	AttrEffectFollowUp = "intervention.fitness_followup"
 	AttrEffectDelta    = "intervention.fitness_delta"

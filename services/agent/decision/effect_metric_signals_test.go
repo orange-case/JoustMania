@@ -119,14 +119,15 @@ func TestEffect_MetricOmitsSecondsAndThresholdKeys(t *testing.T) {
 		}
 	}
 
-	// The spans still carry every key, the span-only ones included.
+	// The span still carries every key, the span-only ones included (#2640: as
+	// entries of intervention.signals on the one span).
 	var spanned []string
 	for _, s := range sr.Ended() {
 		if s.Name() != SpanInterventionEffect {
 			continue
 		}
-		if v, ok := attrMap(s.Attributes())[AttrEffectSignal].(string); ok {
-			spanned = append(spanned, v)
+		for k := range effectSignalsOf(t, s) {
+			spanned = append(spanned, k)
 		}
 	}
 	sort.Strings(spanned)

@@ -128,6 +128,22 @@ func wireGroupLookup(log *decision.GroupLog, summaries *gamesummary.Coordinator)
 	})
 }
 
+// wireInterventionLookup hands the decision loops' intervention log to the game
+// summary span (#2640). The summary takes a game's notes once, at game end.
+func wireInterventionLookup(log *decision.InterventionLog, summaries *gamesummary.Coordinator) {
+	summaries.SetInterventionLookup(func(gameID string) gamesummary.AgentInterventions {
+		noted := log.Take(gameID)
+		out := gamesummary.AgentInterventions{Dropped: noted.Dropped, Held: noted.Held, Noop: noted.Noop, Backends: noted.Backends}
+		for _, r := range noted.Records {
+			out.Entries = append(out.Entries, gamesummary.AgentIntervention{
+				At: r.At, Action: r.Action, Target: r.Target, TargetName: r.TargetName,
+				Value: r.Value, Outcome: r.Outcome, Backend: r.Backend,
+			})
+		}
+		return out
+	})
+}
+
 // wireArmCalibration hands each ended shadow game's prediction tally from the
 // Book to the experiment registry (UC-043 A21, BR-010, #2498). The Book runs
 // before the experiment hook in the game-end chain, so the game is still bound to
