@@ -531,6 +531,48 @@ func TestNoStreamDefers(t *testing.T) {
 	}
 }
 
+// UC: UC-054 A2
+// A flag (not a kill switch) changed both locally and in Flagsmith since the
+// last state seen from Flagsmith: the Flagsmith value wins and the conflict is
+// recorded with both values on the pull span.
+func TestConflictRecordedWithBothValues(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 700)})
+	h.round()
+	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
+		t.Fatalf("setup: decision.min_interval_ms = %+v, want 700 from Flagsmith", v)
+	}
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("800")})
+	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 900)})
+	h.round()
+	t.Run("UC-054/A2 step 2 Flagsmith wins and the conflict carries both values", func(t *testing.T) {
+		if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "900" {
+			t.Fatalf("decision.min_interval_ms = %+v after the conflict, want 900 (Flagsmith wins)", v)
+		}
+		var got []map[string]string
+		for _, s := range h.ended("flagservice.flagsmith.pull") {
+			for _, ev := range s.Events() {
+				if ev.Name != flagsmith.EventConflict {
+					continue
+				}
+				attrs := map[string]string{}
+				for _, a := range ev.Attributes {
+					attrs[string(a.Key)] = a.Value.Emit()
+				}
+				got = append(got, attrs)
+			}
+		}
+		if len(got) != 1 {
+			t.Fatalf("%d conflict events %v, want 1", len(got), got)
+		}
+		c := got[0]
+		if c[flagsmith.AttrLocalValue] != "800" || c[flagsmith.AttrRemoteValue] != "900" || c[flagsmith.AttrResolution] != flagsmith.ResolutionFlagsmith {
+			t.Fatalf("conflict event %v, want local 800, remote 900, resolution flagsmith", c)
+		}
+	})
+}
+
 // UC: UC-054 A4
 // A refused change keeps the local value, marks the feature unhealthy once,
 // is not retried and not pushed over; the next valid value is applied and the
