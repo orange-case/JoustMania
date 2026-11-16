@@ -9,6 +9,7 @@ import (
 func val(raw string) Value { return Value{Present: true, Value: json.RawMessage(raw)} }
 
 // UC: UC-055 BR-001
+// UC: UC-054 BR-005
 func TestLinkState(t *testing.T) {
 	t0 := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 	stack := Key{Set: "game", Flag: "sensitivity", Scope: ScopeStack}

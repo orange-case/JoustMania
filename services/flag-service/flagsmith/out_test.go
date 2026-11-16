@@ -614,7 +614,7 @@ func TestGameStartListsIdentities(t *testing.T) {
 	}
 }
 
-// UC: UC-055 A2, BR-003
+// UC: UC-055 A2 BR-003
 // A game that ends removes itself and its players from Flagsmith, drops the
 // values it had not sent, and leaves a game whose id starts the same alone.
 func TestGameEndDeletesIdentities(t *testing.T) {
@@ -668,6 +668,55 @@ func TestGameEndDeletesIdentities(t *testing.T) {
 			}
 		})
 	}
+}
+
+// UC: UC-055 A2 BR-003
+// A game the expiry sweep drops because its end was never reported (UC-053
+// A11) leaves Flagsmith like a game whose end was reported: the real state
+// reports the end, the out side deletes the game and its players, and a game
+// still seen is left alone.
+func TestExpiredGameDeletesIdentities(t *testing.T) {
+	base, reg := loadBaseReg(t)
+	clk := &testClock{now: time.Unix(1_700_000_000, 0)}
+	st, _, err := state.New(base, reg, state.Options{Epoch: "e1", Served: base.Order, Now: clk.Now, MaxGameAge: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newOutEnvWith(t, Deps{State: st})
+	st.SetObserver(e.link)
+	sub, serr := st.Subscribe("")
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	t.Cleanup(sub.Close)
+	advance := func(d time.Duration) { _ = clk.Sleep(context.Background(), d) }
+	if _, ferr := st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "real", Serials: []string{"A"}}); ferr != nil {
+		t.Fatal(ferr)
+	}
+	e.drain()
+	advance(30 * time.Minute)
+	if _, ferr := st.RegisterGame(state.Game{ID: "g2", CoordinatorInstance: "c1", Kind: "real", Serials: []string{"Z"}}); ferr != nil {
+		t.Fatal(ferr)
+	}
+	e.drain()
+	advance(31 * time.Minute)
+	t.Run("UC-055/A2 a game dropped by the expiry sweep is removed from Flagsmith", func(t *testing.T) {
+		ends := st.ExpireGames()
+		if len(ends) != 1 || ends[0].GameID != "g1" || ends[0].Reason != state.EndReasonExpired {
+			t.Fatalf("UC-055/A2 expired %+v, want g1 only", ends)
+		}
+		e.drain()
+		for _, id := range []string{"game:g1", "game:g1:A"} {
+			if n := e.count(http.MethodDelete, apiEnv+"edge-identities/"+uuidOf(id)+"/"); n != 1 {
+				t.Fatalf("UC-055/A2 %d deletes of %s, want 1", n, id)
+			}
+		}
+		for _, id := range []string{"game:g2", "game:g2:Z"} {
+			if n := e.count(http.MethodDelete, apiEnv+"edge-identities/"+uuidOf(id)+"/"); n != 0 {
+				t.Fatalf("UC-055/A2 %d deletes of %s, a game still seen, want 0", n, id)
+			}
+		}
+	})
 }
 
 // UC: UC-055 BR-003

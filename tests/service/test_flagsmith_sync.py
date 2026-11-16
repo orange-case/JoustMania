@@ -449,14 +449,18 @@ def test_local_write_latency_with_flagsmith_down_and_slow(stack, flag_service, s
     )
 
     fake = settled_link
-    reports, reasons = [], []
-    for label, setup in (("down", {"down": True}), ("slow", {"delay": 3.0})):
+    reports = []
+    for label, setup, reason in (
+        ("down", {"down": True}, "http_503"),
+        ("slow", {"delay": 3.0}, "timeout"),
+    ):
         for name, value in setup.items():
             setattr(fake, name, value)
         try:
             # Sample only once the link has noticed: offline (down: http_503, slow: the 1 s timeout).
             state = fl.wait_link(flag_service, fl.PULL_TIMEOUT, link="offline")
-            reasons.append(f"{label}: {state.get('offline_reason')}")
+            # The slow phase must exercise the timeout path, not another offline reason.
+            assert state.get("offline_reason") == reason, f"{label}: {state}"
             latencies = measure_write_propagation(stack, flag_service, samples=10)
             # The write's own answer: the flag service never waits for Flagsmith before answering.
             answers = []

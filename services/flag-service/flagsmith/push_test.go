@@ -151,7 +151,7 @@ func TestFutureFallbackLatch(t *testing.T) {
 	})
 }
 
-// UC: UC-055 A3, A4
+// UC: UC-055 A3 A4
 // How an Admin API answer is told to the link: a refusal marks one key, only
 // a missing answer or a 5xx takes the link offline.
 func TestClassify(t *testing.T) {
@@ -191,7 +191,7 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-// UC: UC-055 A1, A2
+// UC: UC-055 A1 A2
 // The identity queue keeps the latest wish per identifier, and a listing that
 // was never sent is dropped when the identity is not wanted any more.
 func TestIdentityQueueCoalesce(t *testing.T) {

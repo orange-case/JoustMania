@@ -30,7 +30,7 @@ func variant(b *baseline.Flag, name string) Value {
 
 var none = Value{}
 
-// UC: UC-054 A2
+// UC: UC-054 main step 3 A2 A3 A4
 // The merge table of architecture note §6 for a stack key and a game key
 // (neither a kill switch): every row, and a refused document value is never
 // pushed over.
@@ -42,12 +42,12 @@ func TestDecideTable(t *testing.T) {
 		want    action
 		res     string
 	}{
-		{"UC-054/3 R=D=L none", a, a, a, actNone, ""},
-		{"UC-054/A2.3 R=D, L moved: push", a, a, b, actPush, ""},
-		{"UC-054/3 R=L, D moved: apply", a, b, a, actApply, ""},
+		{"UC-054/main step 3 R=D=L none", a, a, a, actNone, ""},
+		{"UC-054/A2 step 3 R=D, L moved: push", a, a, b, actPush, ""},
+		{"UC-054/main step 3 R=L, D moved: apply", a, b, a, actApply, ""},
 		{"UC-054/A2 both moved to the same value: adopt", a, b, b, actAdopt, ""},
-		{"UC-054/A2.2 conflict: Flagsmith wins", a, b, c, actApply, ResolutionFlagsmith},
-		{"UC-054/A2.2 conflict, document cleared: Flagsmith wins", a, none, c, actApply, ResolutionFlagsmith},
+		{"UC-054/A2 step 2 conflict: Flagsmith wins", a, b, c, actApply, ResolutionFlagsmith},
+		{"UC-054/A2 step 2 conflict, document cleared: Flagsmith wins", a, none, c, actApply, ResolutionFlagsmith},
 	}
 	for _, scope := range []string{ScopeStack, "game:g1"} {
 		for _, row := range rows {
@@ -59,13 +59,13 @@ func TestDecideTable(t *testing.T) {
 			})
 		}
 	}
-	t.Run("UC-054/A4.3 the refused document value is skipped, not pushed over", func(t *testing.T) {
+	t.Run("UC-054/A4 step 3 the refused document value is skipped, not pushed over", func(t *testing.T) {
 		got := decide(mergeIn{R: b, HasR: true, D: b, L: a, Refused: &refusal{d: b, l: a}})
 		if got.action != actSkip {
 			t.Fatalf("decide = %v, want skip", got.action)
 		}
 	})
-	t.Run("UC-054/A4.3 a new document value after a refusal is a deliberate change", func(t *testing.T) {
+	t.Run("UC-054/A4 step 3 a new document value after a refusal is a deliberate change", func(t *testing.T) {
 		got := decide(mergeIn{R: b, HasR: true, D: c, L: a, Refused: &refusal{d: b, l: a}})
 		if got.action != actApply || got.conflict() {
 			t.Fatalf("decide = %v/%q, want apply without conflict", got.action, got.resolution)
@@ -126,7 +126,7 @@ func TestDecideKillSwitch(t *testing.T) {
 			}
 		})
 	}
-	t.Run("UC-054/A2.2 a non-kill conflict takes the document", func(t *testing.T) {
+	t.Run("UC-054/A2 step 2 a non-kill conflict takes the document", func(t *testing.T) {
 		got := decide(mergeIn{R: none, HasR: true, D: on, L: off, Base: enabled})
 		if got.action != actApply || got.resolution != ResolutionFlagsmith {
 			t.Fatalf("decide = %v/%q, want apply/flagsmith", got.action, got.resolution)
