@@ -71,9 +71,8 @@ type puller struct {
 	// kept); deleted on any other outcome and when the document changes.
 	refused  map[Key]refusal
 	deferred map[Key]*deferral
-	// discard holds the stack keys whose local value was discarded at a
-	// reconnect and is not yet replaced (#2621); see reconcileKey.
-	discard map[Key]bool
+	// reverting holds the refused stack value a round reverts (UC-055 A4).
+	reverting map[Key]Value
 	// forceFull: the next pull is unconditional.
 	forceFull bool
 	docHash   [32]byte
@@ -136,14 +135,14 @@ type deferral struct {
 
 func newIn(l *Link) inSide {
 	p := &puller{
-		l:        l,
-		byName:   map[string]*registry.Policy{},
-		refused:  map[Key]refusal{},
-		deferred: map[Key]*deferral{},
-		discard:  map[Key]bool{},
-		after:    time.After,
-		seen:     map[Key]remoteMark{},
-		guards:   map[Key]*pushGuard{},
+		l:         l,
+		byName:    map[string]*registry.Policy{},
+		refused:   map[Key]refusal{},
+		deferred:  map[Key]*deferral{},
+		reverting: map[Key]Value{},
+		after:     time.After,
+		seen:      map[Key]remoteMark{},
+		guards:    map[Key]*pushGuard{},
 	}
 	if l.deps.Registry != nil {
 		for _, pol := range l.deps.Registry.Policies() {
@@ -433,6 +432,9 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 		ims = l.LastModified()
 	}
 	doc, lm, notModified, err := l.client.EnvironmentDocument(ctx, ims)
+	if err == nil {
+		l.connected.Store(true) // local changes from now on are made online
+	}
 	p.lastPull = l.Now()
 	if err != nil {
 		var he *HTTPError
@@ -574,11 +576,6 @@ func (p *puller) prune(keys []Key, games map[string]bool) {
 	for k := range p.refused {
 		if !keep(k) {
 			delete(p.refused, k)
-		}
-	}
-	for k := range p.discard {
-		if !keep(k) {
-			delete(p.discard, k)
 		}
 	}
 	for k := range p.deferred {
@@ -784,29 +781,44 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 		delete(p.refused, k)
 	}
 	in := mergeIn{R: r, HasR: hasR, D: de.v, L: le.v}
-	// Flagsmith is the source of truth once online (UC-054 A2, #2621): a
-	// stack-scope local change the link did not send before it went offline
-	// is discarded at the reconnect, and stays discarded (a deferred apply)
-	// until a new local write queues a value to send. Game and player values
-	// are live game state with no Flagsmith counterpart: they are sent.
+	// Flagsmith is the source of truth once online (UC-054 A2, UC-055 A4,
+	// #2621). A stack-scope local change made while the link was not
+	// connected (before the first connect, or while offline) is discarded:
+	// the out side never sends it (LinkState.Next) and this round applies
+	// Flagsmith's value, or the baseline. The mark is on the pending entry, so
+	// it holds across a skip or deferral and ends with the next change made
+	// online. A stack value Flagsmith refused is reverted the same way, and
+	// stays held, so a re-save is not sent again. Game and player values are
+	// live game state with no Flagsmith counterpart: they are sent.
+	revert := false
 	if k.Scope == ScopeStack {
-		switch {
-		case rc.trigger == TriggerReconnect:
+		if l.links.PendingOffline(k) {
 			in.Discard = true
-		case p.discard[k] && l.links.HasPending(k):
-			delete(p.discard, k)
-		case p.discard[k]:
-			in.Discard = true
+		} else if rv, ok := l.links.PushRefused(k); ok && rv.Equal(le.v) && !l.links.HasPending(k) {
+			in.Discard, revert = true, true
 		}
-		in.KeepAbsent = pol.Persist
 	}
 	if rf, ok := p.refused[k]; ok {
 		in.Refused = &rf
 	}
 	dec := decide(in)
-	if in.Discard && dec.action == actApply {
-		l.links.DropPending(k)
-		p.discard[k] = true
+	if in.Discard {
+		switch dec.action {
+		case actApply:
+			if revert {
+				// A refusal is reported as one (state, span, metric), not
+				// as a conflict.
+				dec.resolution = ""
+				p.reverting[k] = le.v
+			}
+			if de.err != nil {
+				// Flagsmith's value is refused here: the offline change
+				// stays in force but is never sent.
+				l.links.DropOffline(k, le.version)
+			}
+		case actNone, actAdopt, actSkip:
+			l.links.DropOffline(k, le.version)
+		}
 	}
 	// Events are one-shot payloads, not values (architecture note D3): without
 	// a last state (after a restart) an event list in the document is the
@@ -867,7 +879,6 @@ func describe(v Value) string {
 func (p *puller) accepted(k Key) {
 	delete(p.refused, k)
 	delete(p.deferred, k)
-	delete(p.discard, k)
 	p.l.links.ClearLocalRefusal(k)
 	p.health.accept(k.Flag, k)
 }
@@ -1028,7 +1039,14 @@ func (p *puller) result(rc *roundCtx, k Key, d, lv Value, u undo, res state.Writ
 			l.Logger().Warn("flagsmith change applied in memory only: the state file could not be written", "flag", k.Flag)
 		}
 		rc.stats.applied++
-		l.links.ClearRefusal(k)
+		if rv, ok := p.reverting[k]; ok {
+			// A refused stack value reverted (UC-055 A4): the refusal stays
+			// reported and the value held, so a re-save is not sent again.
+			delete(p.reverting, k)
+			l.links.HoldRefused(k, rv)
+		} else {
+			l.links.ClearRefusal(k)
+		}
 		l.links.SetInSync(k, true)
 		p.accepted(k)
 		if rc.hasUpd {
@@ -1036,6 +1054,7 @@ func (p *puller) result(rc *roundCtx, k Key, d, lv Value, u undo, res state.Writ
 		}
 		return
 	}
+	delete(p.reverting, k)
 	switch ferr.Reason {
 	case fserr.NoSyncStream, fserr.ReasonPersistFailed, fserr.SlotChanged, fserr.RealGameLive:
 		// Not seen: the next round tries again (UC-054 A5).

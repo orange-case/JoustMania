@@ -117,10 +117,10 @@ func TestDecideKillSwitch(t *testing.T) {
 }
 
 // UC: UC-054 A1 A2 BR-007
-// A stack-scope local change not sent before the link went offline is
-// discarded at the reconnect (#2621): Flagsmith's value is applied; with no
-// Flagsmith value an in-memory overlay goes back to the baseline and a
-// persisted admin setting (KeepAbsent) keeps its local value, which is sent.
+// A stack-scope local change made while the link was not connected, or a
+// stack value Flagsmith refused, is discarded (#2621): Flagsmith's value is
+// applied; with no Flagsmith value it goes back to the baseline, an admin
+// setting too.
 func TestDecideDiscard(t *testing.T) {
 	a, b := val(`"a"`), val(`"b"`)
 	cases := []struct {
@@ -133,14 +133,10 @@ func TestDecideDiscard(t *testing.T) {
 			mergeIn{R: a, HasR: true, D: a, L: b, Discard: true}, actApply, ResolutionFlagsmith},
 		{"UC-054/A2 R=D absent, offline overlay: back to the baseline",
 			mergeIn{R: none, HasR: true, D: none, L: b, Discard: true}, actApply, ResolutionFlagsmith},
-		{"UC-054/A2 R=D absent, offline admin setting: kept and sent",
-			mergeIn{R: none, HasR: true, D: none, L: b, Discard: true, KeepAbsent: true}, actPush, ""},
-		{"UC-054/A2 R=D, offline admin setting with a Flagsmith value: Flagsmith wins",
-			mergeIn{R: a, HasR: true, D: a, L: b, Discard: true, KeepAbsent: true}, actApply, ResolutionFlagsmith},
 		{"UC-054/A2 no remote, D absent, offline overlay: back to the baseline",
 			mergeIn{D: none, L: b, Discard: true}, actApply, ""},
-		{"UC-054/A2 no remote, D absent, admin setting: kept and sent",
-			mergeIn{D: none, L: b, Discard: true, KeepAbsent: true}, actPush, ""},
+		{"UC-054/A3 no remote, D absent, not discarded (persisted admin value at boot): sent",
+			mergeIn{D: none, L: b}, actPush, ""},
 		{"UC-055/main R=D, online local change (no Discard): pushed",
 			mergeIn{R: a, HasR: true, D: a, L: b}, actPush, ""},
 		{"UC-054/A2 R=D=L: nothing to discard",

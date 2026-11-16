@@ -758,8 +758,10 @@ value of a row whose scope allows it, and an `event` for a live game (one payloa
 (`422 flagsmith_scope_read_only`). A Flagsmith value of a `persist: yes` row is persisted like the menu admin's,
 also the value Flagsmith holds at a restart of the flag service: at a restart Flagsmith wins over the persisted
 local value, whoever set the Flagsmith value (UC-054 BR-006, FR-215, #2621); with Flagsmith unreachable the
-persisted value is served. At a reconnect, an admin value changed while offline is replaced by the Flagsmith value
-and persisted; when Flagsmith holds no value it is kept and sent to Flagsmith (UC-054 A2, BR-007).
+persisted value is served. An admin value changed while the link was not connected (offline, or before the first
+connect) is replaced by the Flagsmith value at the connect and persisted; when Flagsmith holds no value it is dropped:
+the built-in default applies and the state file is updated (UC-054 A2, BR-007). A persisted value from before the
+outage that was never changed offline is kept and, with no Flagsmith value, sent to Flagsmith (UC-054 A3).
 
 **Kill switches** (UC-054 BR-005, FR-210). Since #2621 Flagsmith wins a conflict for these flags like for every
 other flag, at a restart, on a live conflict and at a reconnect: once online, Flagsmith is the source of truth. The

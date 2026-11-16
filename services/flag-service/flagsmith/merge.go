@@ -40,15 +40,12 @@ type mergeIn struct {
 	D, L Value
 	// Refused is the last refusal of this key, nil when none.
 	Refused *refusal
-	// Discard: L is a stack-scope local change the link could not send
-	// before it went offline (or one already discarded and not changed
-	// since); Flagsmith is the source of truth once online, so it is not
-	// sent (#2621). Game and player values are never discarded.
+	// Discard: L is a stack-scope local change made while the link was not
+	// connected, or a stack value Flagsmith refused (#2621); Flagsmith is the
+	// source of truth once online, so L is not sent: D is applied, or the
+	// baseline when Flagsmith holds no value (admin settings too). Game and
+	// player values are never discarded.
 	Discard bool
-	// KeepAbsent: when Flagsmith holds no value (D absent), a discarded
-	// local value is kept and sent instead of going back to the baseline:
-	// the persisted value of an admin setting (persist: yes).
-	KeepAbsent bool
 }
 
 // decision is decide's verdict: the action and, for a conflict, its
@@ -65,12 +62,12 @@ func (d decision) conflict() bool { return d.resolution != "" }
 //
 //	R = D, R = L              -> none
 //	R = D, R ≠ L              -> push (skip while D is the refused value; not re-sent while Flagsmith refused that local value, LinkState.Reoffer, UC-055 A4);
-//	                             Discard: apply D, a conflict (D absent and KeepAbsent: push)
+//	                             Discard: apply D (D absent: the baseline), a conflict
 //	R ≠ D, R = L              -> apply (a deliberate change in Flagsmith)
 //	R ≠ D, R ≠ L, D = L       -> adopt
 //	R ≠ D, R ≠ L, D ≠ L       -> conflict: Flagsmith wins
 //	R absent, D = L           -> adopt
-//	R absent, D ≠ L           -> D absent: push (Discard and not KeepAbsent: apply, back to the baseline); else apply
+//	R absent, D ≠ L           -> D absent: push (Discard: apply, back to the baseline); else apply
 //
 // A refused key merges against the local value it kept, so a new document
 // value is a deliberate change and the refused one is skipped.
@@ -85,7 +82,7 @@ func decide(in mergeIn) decision {
 		switch {
 		case in.D.Equal(in.L):
 			return decision{action: actAdopt}
-		case !in.D.Present && (!in.Discard || in.KeepAbsent):
+		case !in.D.Present && !in.Discard:
 			// Nothing in Flagsmith to apply: the local value is sent.
 			return decision{action: actPush}
 		}
@@ -95,7 +92,7 @@ func decide(in mergeIn) decision {
 	switch {
 	case rd && rl:
 		return decision{action: actNone}
-	case rd && in.Discard && (in.D.Present || !in.KeepAbsent):
+	case rd && in.Discard:
 		return decision{action: actApply, resolution: ResolutionFlagsmith}
 	case rd:
 		return decision{action: actPush}

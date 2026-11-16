@@ -196,6 +196,7 @@ def test_own_push_never_comes_back(flag_service, settled_link):
 
 # ------------------------------------------------------------------ UC-054 A1 + UC-055 A3
 @pytest.mark.uc("UC-054", flow="A1", br=["BR-007"], tc="TC-021")
+@pytest.mark.uc("UC-054", flow="A2", br=["BR-007"], tc="TC-021")
 @pytest.mark.uc("UC-055", flow="A3", tc="TC-021")
 def test_offline_discards_stack_writes_and_drains_game_writes(flag_service, settled_link):
     """Flagsmith is the source of truth once online (#2621): stack-scope changes made offline
@@ -434,14 +435,16 @@ def test_flagsmith_refusal_marks_out_of_sync(flag_service, settled_link):
     # Step 1: Flagsmith refuses the change (a change request is required).
     fake.refuse(TICK[1], 409)
     flag_service.put(*TICK, value=31)
-    # Step 2: the local value stays in force; the key is refused and out of sync.
+    # Step 2: the refusal is reported and the stack-scope value is reverted to Flagsmith's (none here: the
+    # baseline) at once (#2621, UC-055 A4).
     fl.wait_for(lambda: fl.link(flag_service).get("refused", 0) >= 1, fl.PULL_TIMEOUT, "refused")
-    assert fl.overlay(flag_service, *TICK).get("value") == 31
-    assert fl.link(flag_service)["out_of_sync"] >= 1
-    # Step 3: the refused value is not sent again over the next polls (#2604).
+    fl.wait_for(lambda: fl.overlay(flag_service, *TICK) == {}, fl.PULL_TIMEOUT, "the refused 31 reverted")
+    # Step 3: the refused value is not sent again over the next polls (#2604), and the refusal stays reported.
     sent = len(fake.pushes(TICK[1]))
     fl.wait_pulls(flag_service, 3)
     assert len(fake.pushes(TICK[1])) == sent, fake.pushes(TICK[1])
+    assert fl.link(flag_service)["refused"] >= 1
+    assert fl.overlay(flag_service, *TICK) == {}
     # Step 4: Flagsmith accepts again; the next local change lands and the key is in sync.
     fake.clear_refusals()
     flag_service.put(*TICK, value=32)

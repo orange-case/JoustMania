@@ -431,11 +431,10 @@ func TestSegmentOverrideIsUnhealthy(t *testing.T) {
 
 // UC: UC-054 A1 A2 BR-007
 // Flagsmith is the source of truth once online (#2621): a stack-scope local
-// change written while the link was offline is discarded at the reconnect
-// (Flagsmith's value applied, or the baseline when Flagsmith holds none),
-// except an admin setting (persist: yes) Flagsmith holds no value for, which
-// keeps its persisted value and sends it; a game value written offline is
-// live game state and is still sent.
+// change made while the link was offline is discarded at the reconnect
+// (Flagsmith's value applied, or the built-in default when Flagsmith holds
+// none, an admin setting too, with its state file updated); a game value
+// written offline is live game state and is still sent.
 func TestReconnectDiscardsOfflineStackChanges(t *testing.T) {
 	interval := flagsmith.Key{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}
 	maxGames := flagsmith.Key{Set: "agent", Flag: "experiment_max_games", Scope: flagsmith.ScopeStack}
@@ -487,16 +486,13 @@ func TestReconnectDiscardsOfflineStackChanges(t *testing.T) {
 	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); v.Present {
 		t.Fatalf("UC-054/A2 experiment_max_games = %+v after the reconnect, want the baseline (Flagsmith holds no value)", v)
 	}
-	if v, persisted := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" || !persisted {
-		t.Fatalf("UC-054/A2 decision.backend = %+v persisted %v, want the persisted claude kept (Flagsmith holds no value)", v, persisted)
+	if v, persisted := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Present || persisted {
+		t.Fatalf("UC-054/A2 decision.backend = %+v persisted %v, want the offline admin change dropped: the built-in default, the state file updated", v, persisted)
 	}
-	for _, k := range []flagsmith.Key{interval, maxGames} {
+	for _, k := range []flagsmith.Key{interval, maxGames, backend} {
 		if h.link.Links().HasPending(k) {
 			t.Fatalf("UC-054/A2 %v still queued for Flagsmith after the reconnect, want discarded", k)
 		}
-	}
-	if !h.link.Links().HasPending(backend) {
-		t.Fatal("UC-054/A2 decision.backend not queued: the kept admin value must be sent to Flagsmith")
 	}
 	if v, _ := h.local("interventions", "global_sensitivity_override", "game:g7"); string(v.Value) != "3" || !h.link.Links().HasPending(gameKey) {
 		t.Fatalf("UC-055/A3 the offline game value = %+v pending %v, want 3 kept and queued for Flagsmith", v, h.link.Links().HasPending(gameKey))
@@ -562,8 +558,8 @@ func TestReconnectDiscardSurvivesDeferral(t *testing.T) {
 			w.armed.Store(true)
 			h.fake.Fail(0)
 			h.waitFor("the deferred apply at the reconnect", func() bool { return !w.armed.Load() && h.link.Mode() == flagsmith.ModeOnline })
-			if h.link.Links().HasPending(interval) {
-				t.Fatal("UC-054/A2 the discarded offline 900 is still queued for Flagsmith after a deferred apply")
+			if _, _, _, _, ok := h.link.Links().Next(); ok || !h.link.Links().PendingOffline(interval) {
+				t.Fatal("UC-054/A2 the offline 900 is offered for sending after a deferred discard, want it held for the in side")
 			}
 			want := "700"
 			if online {

@@ -265,9 +265,10 @@ func TestKillSwitchConflictFlagsmithWins(t *testing.T) {
 }
 
 // UC: UC-055 A4
-// A push Flagsmith refused (409, change requests) is sent once: pull rounds
-// that find the local value differing from Flagsmith do not send it again, a
-// re-save of the same value does not either, a different local value does.
+// A stack value Flagsmith refused (409, change requests) is sent once and
+// reverted to Flagsmith's value at once (#2621, UC-055 A4): pull rounds
+// do not send it again, a re-save of the same value is reverted again and not
+// sent, a different local value is sent.
 func TestRefusedPushNotResentByPolls(t *testing.T) {
 	m := newFSModel()
 	m.values["decision.backend"] = "claude"
@@ -291,11 +292,11 @@ func TestRefusedPushNotResentByPolls(t *testing.T) {
 		if n := h.requests(http.MethodPatch, backendPath); n != 1 {
 			t.Fatalf("%d PATCHes of decision.backend after 3 rounds, want 1", n)
 		}
-		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 1 || r != 1 {
-			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 1", p, oos, r)
+		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 1 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 0 1 (reverted, the refusal still reported)", p, oos, r)
 		}
-		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "jev" {
-			t.Fatalf("decision.backend = %+v, want the local jev in force (A4 step 1)", v)
+		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" {
+			t.Fatalf("decision.backend = %+v, want Flagsmith's claude: the refused stack value is reverted at once (A4 step 1, #2621)", v)
 		}
 		if n := h.counter(flagsmith.MetricPushes, "reason", flagsmith.ReasonChangeRequestRequired); n != 1 {
 			t.Fatalf("pushes_total{reason=change_request_required} = %d, want 1", n)
@@ -310,6 +311,9 @@ func TestRefusedPushNotResentByPolls(t *testing.T) {
 		if n := h.requests(http.MethodPatch, backendPath); n != 1 {
 			t.Fatalf("%d PATCHes after a re-save of jev, want 1", n)
 		}
+		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" {
+			t.Fatalf("decision.backend = %+v after a re-save of jev, want it reverted to claude again", v)
+		}
 	})
 	t.Run("UC-055/A4 step 2 a different local value is sent", func(t *testing.T) {
 		h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "openai"})
@@ -322,8 +326,8 @@ func TestRefusedPushNotResentByPolls(t *testing.T) {
 }
 
 // UC: UC-054 BR-005
-// A refused push of a kill-switch value is not sent again; a new document
-// value is a conflict Flagsmith wins (#2621), which ends the refusal.
+// A refused push of a kill-switch value is not sent again and is reverted to
+// Flagsmith's value at once (#2621, UC-055 A4); a later document value applies.
 func TestRefusedKillSwitchPushThenFlagsmithWins(t *testing.T) {
 	m := newFSModel()
 	m.values["experiment_max_games"] = 100
@@ -348,14 +352,17 @@ func TestRefusedKillSwitchPushThenFlagsmithWins(t *testing.T) {
 	if n := h.requests(http.MethodPatch, maxPath); n != 1 {
 		t.Fatalf("UC-055/A4 %d PATCHes of experiment_max_games after 3 rounds, want 1", n)
 	}
-	t.Run("UC-054/BR-005 a looser document value wins the conflict; the refused 10 is not sent again", func(t *testing.T) {
+	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "100" {
+		t.Fatalf("UC-055/A4 experiment_max_games = %+v after the refusal, want Flagsmith's 100 (reverted at once, #2621)", v)
+	}
+	if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionFlagsmith); n != 0 {
+		t.Fatalf("UC-055/A4 conflicts = %d, want 0: a revert is reported as a refusal, not a conflict", n)
+	}
+	t.Run("UC-054/main step 3 a later document value is applied; the refused 10 is not sent again", func(t *testing.T) {
 		m.set("experiment_max_games", 500)
 		h.roundAndSettle()
 		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "500" {
 			t.Fatalf("experiment_max_games = %+v, want the Flagsmith 500 (Flagsmith wins)", v)
-		}
-		if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionFlagsmith); n != 1 {
-			t.Fatalf("conflicts{resolution=flagsmith} = %d, want 1", n)
 		}
 		if n := h.requests(http.MethodPatch, maxPath); n != 1 {
 			t.Fatalf("%d PATCHes, want 1: the refused 10 is not sent again", n)
@@ -514,9 +521,9 @@ func TestRefusedValueBackWhileNewerInFlight(t *testing.T) {
 		r, ok := h.link.Links().Remote(backendKey)
 		return ok && r.Variant == "openai"
 	})
-	t.Run("UC-055/A4 the confirmation of the newer value keeps the refused local value out of sync", func(t *testing.T) {
-		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 1 || r != 1 {
-			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 1: the stack runs the refused jev", p, oos, r)
+	t.Run("UC-055/A4 the confirmation of the newer value keeps the refusal of the local jev", func(t *testing.T) {
+		if p, oos, r := h.link.Links().Counts(); p != 0 || r != 1 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want nothing pending and the refusal of jev reported", p, oos, r)
 		}
 	})
 	t.Run("UC-055/A4 step 2 pull rounds do not send the refused value again", func(t *testing.T) {
@@ -526,8 +533,8 @@ func TestRefusedValueBackWhileNewerInFlight(t *testing.T) {
 		if n := h.requests(http.MethodPatch, backendPath); n != 2 {
 			t.Fatalf("%d PATCHes of decision.backend, want 2 (jev refused once, openai confirmed)", n)
 		}
-		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "jev" {
-			t.Fatalf("decision.backend = %+v, want the local jev kept", v)
+		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
+			t.Fatalf("decision.backend = %+v, want Flagsmith's openai: the re-saved refused jev is reverted, not sent (#2621)", v)
 		}
 	})
 }

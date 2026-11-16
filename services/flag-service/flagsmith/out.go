@@ -52,7 +52,8 @@ func (o *out) Changed(c state.Change) {
 			// An empty list shows no override.
 			v = Value{Writer: c.Writer}
 		}
-		if o.l.Links().Offer(k, v, c.At, c.Version) {
+		offline := k.Scope == ScopeStack && !o.l.connected.Load()
+		if o.l.Links().OfferFrom(k, v, c.At, c.Version, offline) {
 			o.poke()
 		}
 	case state.ChangeGameRegistered:

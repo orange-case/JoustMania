@@ -33,7 +33,7 @@
 | 8    | Both sides changed                 | The merge table: local change pushed; same value adopted; both changed, Flagsmith wins; a kill switch too (Flagsmith 30 over the local 20, Flagsmith 10 over 20, #2621); one row truly offline across a reconnect | R/L/D per row (test data in the test)              | [UC-054](../use_cases/UC-054.md) A2, BR-005 |
 | 9    | Flag service refuses a change      | An out-of-bounds value is refused: local value kept, `refused` counted, one unhealthy feature-health post, no repeat; a valid value is applied and a healthy post follows; an experiment arm is read-only | `experiment_tick_seconds` 5000, then 24; `experiment:x:a` | [UC-054](../use_cases/UC-054.md) A4, BR-003 |
 | 10   | flagd not connected                | flagd is stopped: a Flagsmith change is not applied; once flagd is back it is                                                     | within 70 s                                                             | [UC-054](../use_cases/UC-054.md) A5       |
-| 11   | Flagsmith refuses a change         | Flagsmith answers 409 (change request): the local value stays, the key is out of sync and refused and not sent again; after the refusal ends the next local change lands; a 429 is retried after its Retry-After | 31, 32, 33                         | [UC-055](../use_cases/UC-055.md) A4       |
+| 11   | Flagsmith refuses a change         | Flagsmith answers 409 (change request): the refusal is reported and the stack value is reverted at once to Flagsmith's (here the baseline, #2621) and not sent again; after the refusal ends the next local change lands; a 429 is retried after its Retry-After | 31, 32, 33                         | [UC-055](../use_cases/UC-055.md) A4       |
 
 ## Validation
 

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/metric"
@@ -154,6 +155,10 @@ type Link struct {
 	// reconciles with TriggerStart (the first round after start is special,
 	// architecture note §5.1).
 	reconciled bool
+	// connected: the last pull reached Flagsmith and the link has not gone
+	// offline since; a local change made while it is false is made offline
+	// (UC-054 A2, #2621).
+	connected atomic.Bool
 
 	gamesSeenOnce sync.Once
 	gamesSeen     chan struct{}
@@ -312,6 +317,9 @@ func (l *Link) setMode(m Mode, reason string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.mode, l.offlineReason = m, reason
+	if m != ModeOnline {
+		l.connected.Store(false)
+	}
 }
 
 // Mode returns the link state.

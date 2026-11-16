@@ -32,7 +32,7 @@ const (
 const (
 	// maxRateLimitRetries bounds the 429 retries of one call (Retry-After).
 	maxRateLimitRetries = 3
-	// transientAttempts is how often a create or an audit read is tried on a
+	// transientAttempts is how often a create is tried on a
 	// 5xx or a transport error before it is given up (O6).
 	transientAttempts = 3
 	// transientBackoff is the wait between two such attempts.

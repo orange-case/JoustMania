@@ -37,7 +37,7 @@ type inOnlyOut struct{ l *Link }
 func (o inOnlyOut) Changed(c state.Change) {
 	if c.Kind == state.ChangeValue || c.Kind == state.ChangeCleared {
 		if k, v, ok := ValueOfChange(c); ok {
-			o.l.Links().Offer(k, v, c.At, c.Version)
+			o.l.Links().OfferFrom(k, v, c.At, c.Version, k.Scope == ScopeStack && !o.l.connected.Load())
 		}
 	}
 }
