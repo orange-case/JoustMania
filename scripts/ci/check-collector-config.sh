@@ -13,8 +13,10 @@
 # config, so a mismatch is caught before `compose up`, whatever its cause.
 #
 # Usage:
-#   scripts/ci/check-collector-config.sh [--no-pull] <image-ref> [config]
-#     config defaults to services/otel-collector/config.yaml
+#   scripts/ci/check-collector-config.sh [--no-pull] <image-ref> [config...]
+#     config defaults to services/otel-collector/config.yaml. Several configs
+#     become several --config flags, in order, so the collector merges them as
+#     it does at run time (#2571: config.yaml + config.gateway.yaml).
 #     --no-pull: validate the image already present locally and never pull. Use
 #     it after building HEAD under <image-ref>, otherwise the pull replaces that
 #     build with the (stale) registry image.
@@ -30,13 +32,24 @@ if [[ "${1-}" == "--no-pull" ]]; then
   no_pull=1
   shift
 fi
-ref="${1:?usage: $0 [--no-pull] <image-ref> [config]}"
-config="${2:-services/otel-collector/config.yaml}"
-[[ -f "$config" ]] || {
-  echo "::error::check-collector-config: ${config} not found" >&2
-  exit 1
-}
-config="$(cd "$(dirname "$config")" && pwd)/$(basename "$config")"
+ref="${1:?usage: $0 [--no-pull] <image-ref> [config...]}"
+shift
+[[ $# -gt 0 ]] || set -- services/otel-collector/config.yaml
+mounts=()
+flags=()
+names=()
+for config in "$@"; do
+  [[ -f "$config" ]] || {
+    echo "::error::check-collector-config: ${config} not found" >&2
+    exit 1
+  }
+  config="$(cd "$(dirname "$config")" && pwd)/$(basename "$config")"
+  target="/etc/otel-collector-config-${#flags[@]}.yaml"
+  mounts+=(-v "${config}:${target}:ro")
+  flags+=("--config=${target}")
+  names+=("$config")
+done
+config="${names[*]}"
 
 if [[ "$no_pull" -eq 1 ]]; then
   if ! docker image inspect "$ref" >/dev/null 2>&1; then
@@ -54,10 +67,14 @@ fi
 hostfs="$(mktemp -d)"
 trap 'rm -rf "$hostfs"' EXIT
 
+# The gateway overlay (#2571) reads its host and token from the environment;
+# the placeholders satisfy validation. `--network none`: validate connects nowhere.
 if out="$(docker run --rm --network none \
-  -v "${config}:/etc/otel-collector-config.yaml:ro" \
+  -e ORANGECASE_GATEWAY_HOST=otlp.example.org \
+  -e ORANGECASE_GATEWAY_TOKEN=validate-only \
+  "${mounts[@]}" \
   -v "${hostfs}:/hostfs/root:ro" \
-  "$ref" validate --config=/etc/otel-collector-config.yaml 2>&1)"; then
+  "$ref" validate "${flags[@]}" 2>&1)"; then
   echo "check-collector-config: ${ref} accepts ${config}"
   exit 0
 fi

@@ -1,0 +1,30 @@
+# Opt-in: send the game telemetry to the gateway as well (#2571, FR-086, UC-035 A7).
+#
+# Without this file nothing leaves the case. With it, the collector loads
+# services/otel-collector/config.gateway.yaml on top of config.yaml and exports
+# once to the gateway (one remote OpenTelemetry Collector, deployed outside this
+# repo, which forwards to the external backends). The in-case backends keep
+# receiving everything.
+#
+# Both variables are required; compose refuses to render this file without
+# them. The token is a secret: keep it in the shell or in .env.local (not in
+# git), never in a flag or a file of this repo (C-016).
+#
+#   export ORANGECASE_GATEWAY_HOST=otlp.example.org   # host only; https is fixed
+#   export ORANGECASE_GATEWAY_TOKEN=...
+#   docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d otel-collector
+#
+# Back to local only (recreates the collector without the overlay):
+#   docker compose -f docker-compose.yml up -d otel-collector
+services:
+  otel-collector:
+    # Replaces the base command: the base --config first, then the overlay.
+    command:
+      - "--config=/etc/otel-collector-config.yaml"
+      - "--config=/etc/otel-collector-config.gateway.yaml"
+    # environment and volumes are appended to the base lists by compose.
+    environment:
+      - ORANGECASE_GATEWAY_HOST=${ORANGECASE_GATEWAY_HOST:?set ORANGECASE_GATEWAY_HOST, e.g. otlp.example.org}
+      - ORANGECASE_GATEWAY_TOKEN=${ORANGECASE_GATEWAY_TOKEN:?set ORANGECASE_GATEWAY_TOKEN}
+    volumes:
+      - ./services/otel-collector/config.gateway.yaml:/etc/otel-collector-config.gateway.yaml:ro

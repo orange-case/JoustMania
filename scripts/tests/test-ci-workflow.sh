@@ -536,6 +536,7 @@ if "e2e_required" in jobs["changes"]["outputs"]:
     # Full path in the queue (#1583 review): every stack image built at HEAD,
     # never the fast path that pulls :latest for connect-proxy/rust-hid/dashboard.
     FULL, FAST = "Run integration tests (full build)", "Run integration tests (fast - source only)"
+    GATEWAY_STEP = "Validate collector config with the gateway overlay"
     PATHS = [
         # (label, kwargs, expect_full)
         ("merge_group", dict(event="merge_group", e2e_paths=False, non_docs=True), True),
@@ -553,6 +554,27 @@ if "e2e_required" in jobs["changes"]["outputs"]:
         if expect_full:
             fast_only = [n for n in steps if "fast path" in n]
             check(not fast_only, f"{label}: no fast-path step may run on the full path, ran {fast_only}")
+        # (#2571) The gateway overlay is validated on every path, after the suite that leaves the
+        # collector image local: the queue always takes the full path.
+        ran = FULL if expect_full else FAST
+        check(GATEWAY_STEP in steps and ran in steps and steps.index(GATEWAY_STEP) > steps.index(ran),
+              f"{label}: {GATEWAY_STEP!r} must run after {ran!r}, ran {steps}")
+
+    # (#2571) Static shape of the gateway overlay checks: both configs, in order, and no path condition.
+    BOTH = "services/otel-collector/config.yaml services/otel-collector/config.gateway.yaml"
+    it_steps = jobs["integration-test"]["steps"]
+    gw = [st for st in it_steps if st.get("name") == GATEWAY_STEP]
+    check(len(gw) == 1, f"integration-test: exactly one step {GATEWAY_STEP!r} (#2571)")
+    if gw:
+        check("if" not in gw[0], f"integration-test/{GATEWAY_STEP}: must have no `if`, so it runs on both paths")
+        check("check-collector-config.sh --no-pull" in gw[0].get("run", "") and BOTH in gw[0].get("run", ""),
+              f"integration-test/{GATEWAY_STEP}: must validate base then overlay with --no-pull")
+        check("docker-compose.collector-prebuilt.yml" in gw[0].get("run", "") and "OTEL_COLLECTOR_TAG" in gw[0].get("run", ""),
+              f"integration-test/{GATEWAY_STEP}: must resolve the prebuilt collector ref when OTEL_COLLECTOR_TAG is set")
+    for name in ("Resolve collector image ref (fast path)", "Validate collector config against the HEAD build"):
+        st = next((x for x in it_steps if x.get("name") == name), {})
+        check(BOTH in st.get("run", ""),
+              f"integration-test/{name}: must check the base config together with the gateway overlay (#2571)")
 
     # (#1422 S13) One e2e job: no matrix, no matrix.* anywhere in it, no E2E_SHARD.
     it = jobs["integration-test"]

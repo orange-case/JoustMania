@@ -171,7 +171,7 @@ classify() {  # map one changed path to gates; each case mirrors a ci.yml filter
   esac
   # telemetry (telemetry-contract)
   case "$f" in
-    services/*|lib/*|proto/*|tests/contract/*|tests/integration/setup_guard.py|docker-compose.yml|docs/specs/*|scripts/*|tools/*|Makefile)
+    services/*|lib/*|proto/*|tests/contract/*|tests/integration/setup_guard.py|docker-compose.yml|docker-compose.gateway.yml|docs/specs/*|scripts/*|tools/*|Makefile)
       selected[contract]=1 ;;
   esac
   # flagd_contract (flagd-contract)
@@ -310,11 +310,12 @@ gate_cmd() {  # print the shell command for a gate
       [[ ${#list[@]} -eq 0 ]] && list=(services/grafana/dashboards/*.json)
       echo "for f in ${list[*]}; do python3 -m json.tool \"\$f\" >/dev/null || { echo \"invalid JSON: \$f\"; exit 1; }; done" ;;
     compose)
-      # The combinations the Makefile, CI and the runbooks bring up.
-      echo "set -e; for c in 'docker-compose.yml' 'docker-compose.yml docker-compose.override.yml' \
+      # The combinations the Makefile, CI and the runbooks bring up. The gateway
+      # overlay (#2571) refuses to render without its two variables: placeholders.
+      echo "set -e; export ORANGECASE_GATEWAY_HOST=otlp.example.org ORANGECASE_GATEWAY_TOKEN=config-check-only; for c in 'docker-compose.yml' 'docker-compose.yml docker-compose.override.yml' \
 'docker-compose.yml docker-compose.ci.yml' 'docker-compose.yml docker-compose.override.yml docker-compose.dev.yml' \
 'docker-compose.yml docker-compose.override.yml docker-compose.ci.yml docker-compose.dry-run.yml' \
-'docker-compose.lite.yml'; do \
+'docker-compose.lite.yml' 'docker-compose.yml docker-compose.gateway.yml'; do \
 a=(); for f in \$c; do a+=(-f \"\$f\"); done; echo \"compose: \$c\"; \
 docker compose \"\${a[@]}\" --profile agent --profile dashboard config -q; done" ;;
     yaml-dupkeys)
