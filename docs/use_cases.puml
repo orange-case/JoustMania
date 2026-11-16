@@ -10,6 +10,7 @@ actor "Maintainer" as maintainer
 actor "Model API" as modelapi
 actor "GitHub" as github
 actor "Flagsmith" as flagsmith
+actor "Gateway" as gateway
 actor "Observability Backend" as obsbackend
 
 rectangle "JoustMania" {
@@ -126,7 +127,9 @@ agent --> UC053
 presenter --> UC070
 presenter --> UC100
 player --> UC100
+UC100 --> gateway
 UC100 --> obsbackend
+UC100 ..> UC053 : <<include>>
 UC100 ..> UC010 : <<include>>
 UC100 ..> UC030 : <<include>>
 presenter --> UC035
