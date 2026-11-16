@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 
+from opentelemetry.trace import SpanKind
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from proto import menu_pb2
@@ -73,7 +74,7 @@ class EventPublisher:
 
         # Use descriptive span name with event type
         span_name = f"menu_publish:{event_type}"
-        with self._tracer.start_as_current_span(span_name) as span:
+        with self._tracer.start_as_current_span(span_name, kind=SpanKind.PRODUCER) as span:
             span.set_attribute("event.type", event_type)
 
             # Inject W3C Trace Context into event data for cross-service propagation

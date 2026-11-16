@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from opentelemetry import trace
 from opentelemetry.context import Context
+from opentelemetry.trace import SpanKind
 
 from lib.colors import Colors
 from lib.telemetry import extract_trace_context, get_tracer
@@ -526,7 +527,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         rumble_ms = DEATH_RUMBLE_MS
         red_hold_ms = DEATH_RED_HOLD_MS
         fade_ms = DEATH_FADE_MS
-        with tracer.start_as_current_span("effect_player_death", context=trace_context) as span:
+        with tracer.start_as_current_span("effect_player_death", context=trace_context, kind=SpanKind.CONSUMER) as span:
             span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
 
             # End the agent shield immediately for a clean transition (#1301, UC-040 A17); the
@@ -586,7 +587,9 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         duration_ms = get_winner_rainbow_duration_ms()
         # The winner rainbow ends an agent shield (#1301, UC-040 A17).
         await self.end_shield_effect(serial, restore=False)
-        with tracer.start_as_current_span("effect_winner_rainbow", context=trace_context) as span:
+        with tracer.start_as_current_span(
+            "effect_winner_rainbow", context=trace_context, kind=SpanKind.CONSUMER
+        ) as span:
             span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
             span.set_attribute("effect.duration_ms", duration_ms)
 
@@ -1052,7 +1055,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         """
         phase_duration_sec = phase_duration_ms / 1000.0
 
-        with tracer.start_as_current_span("effect_countdown", context=trace_context) as span:
+        with tracer.start_as_current_span("effect_countdown", context=trace_context, kind=SpanKind.CONSUMER) as span:
             span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
 
             try:
