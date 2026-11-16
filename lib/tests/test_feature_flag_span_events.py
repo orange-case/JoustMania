@@ -14,7 +14,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from lib.openfeature_otel_hooks import MAX_SEEN_PER_SPAN, SPAN_EVENT_SKIP_FLAGS, DedupingTracingHook
+from lib.openfeature_otel_hooks import MAX_EVENTS_PER_SPAN, SPAN_EVENT_SKIP_FLAGS, DedupingTracingHook
 
 pytestmark = pytest.mark.uc("UC-035", flow="main", steps=[6])
 
@@ -98,11 +98,9 @@ def test_seen_set_is_bounded_per_span(tracer, monkeypatch):
     monkeypatch.setattr(TracingHook, "finally_after", lambda *_a: calls.append(1))
     hook = DedupingTracingHook()
     with tracer.start_as_current_span("long"):
-        for i in range(MAX_SEEN_PER_SPAN * 3):
+        for i in range(MAX_EVENTS_PER_SPAN * 3):
             _evaluate(hook, "k", f"r{i:x}_1")
-        (seen,) = hook._seen.values()
-        assert len(seen) == MAX_SEEN_PER_SPAN
-    assert len(calls) == MAX_SEEN_PER_SPAN
+    assert len(calls) == MAX_EVENTS_PER_SPAN
 
 
 def test_seen_set_is_freed_with_the_span(tracer):
@@ -153,3 +151,50 @@ def test_error_with_same_variant_as_a_default_is_recorded(tracer):
         _evaluate(hook, "k", None, Reason.DEFAULT)
         _evaluate(hook, "k", None, Reason.ERROR)
     assert len(_events(tracer, "s")) == 2
+
+
+def test_return_to_an_earlier_variant_is_recorded(tracer):
+    hook = DedupingTracingHook()
+    with tracer.start_as_current_span("s"):
+        for variant in ("a", "a", "b", "b", "a", "a"):
+            _evaluate(hook, "k", variant)
+    assert _events(tracer, "s") == [("k", "a"), ("k", "b"), ("k", "a")]
+
+
+def test_state_per_span_is_bounded_by_recorded_events(tracer, monkeypatch):
+    from openfeature.contrib.hook.opentelemetry import TracingHook
+
+    monkeypatch.setattr(TracingHook, "finally_after", lambda *_a: None)
+    hook = DedupingTracingHook()
+    with tracer.start_as_current_span("long"):
+        for i in range(MAX_EVENTS_PER_SPAN * 3):
+            _evaluate(hook, f"flag{i}", "on")
+        (state,) = hook._seen.values()
+        assert len(state.last) == MAX_EVENTS_PER_SPAN
+
+
+def _error(hook, key, exc):
+    hook.error(HookContext(key, FlagType.STRING, "d", EvaluationContext()), exc, {})
+
+
+def _exception_events(tracer, name):
+    (span,) = [s for s in tracer.exporter.get_finished_spans() if s.name == name]
+    return [e for e in span.events if e.name == "exception"]
+
+
+def test_infrastructure_flag_exception_is_never_recorded(tracer):
+    hook = DedupingTracingHook()
+    with tracer.start_as_current_span("s"):
+        for _ in range(5):
+            _error(hook, "grpc_rpc_spans", RuntimeError("not ready"))
+    assert _exception_events(tracer, "s") == []
+
+
+def test_repeated_exception_is_recorded_once_per_type(tracer):
+    hook = DedupingTracingHook()
+    with tracer.start_as_current_span("s"):
+        for _ in range(5):
+            _error(hook, "k", RuntimeError("x"))
+        _error(hook, "k", ValueError("y"))
+        _error(hook, "k", ValueError("y"))
+    assert len(_exception_events(tracer, "s")) == 2

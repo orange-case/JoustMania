@@ -160,7 +160,7 @@ def init_flag_domain(domain: str) -> None:
 
     global _hooks_registered
     if not _hooks_registered:
-        # Standard OpenFeature OTel hooks (#1427): the span event per evaluation and the
+        # Standard OpenFeature OTel hooks (#1427): the span events (changes only, #2649) and the
         # feature_flag.evaluation_* metrics (through the global MeterProvider that
         # lib.otel_metrics.init_metrics sets).
         api.add_hooks([DedupingTracingHook(), MetricsHook()])

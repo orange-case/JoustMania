@@ -1,8 +1,9 @@
 """OpenFeature evaluation metrics with the standard OpenTelemetry hook names (#1427).
 
-The span side is the official hook: ``openfeature-hooks-opentelemetry``'s
-``TracingHook`` (registered in :func:`lib.feature_flags.init_flag_domain`) adds one
-``feature_flag.evaluation`` span event per evaluation. That package (0.3.1, the
+The span side is the official hook: ``openfeature-hooks-opentelemetry``'s ``TracingHook``, wrapped by
+:class:`DedupingTracingHook` (registered in :func:`lib.feature_flags.init_flag_domain`), which adds a
+``feature_flag.evaluation`` span event only when a flag's variant changed on the span (#2649, not per
+evaluation). That package (0.3.1, the
 latest release) has no metrics hook yet; its metrics hook is an open upstream PR
 (open-feature/python-sdk-contrib#344). Until it is released, :class:`MetricsHook`
 records the metrics of the Go reference hook (go-sdk-contrib
@@ -62,6 +63,7 @@ ATTR_REASON = "reason"
 # services/flag-service/state/state.go nextVariant: "<r|o><epoch hex>_<n>".
 _GENERATED_VARIANT = re.compile(r"^([ro])[0-9a-f]{1,16}_[0-9]+$")
 
+_UNSET = object()
 _STARTED = "joustmania.metrics_hook.started"
 
 
@@ -131,38 +133,63 @@ class MetricsHook(Hook):
 # created). Their metrics are unchanged. docs/specs/telemetry.md §6.
 SPAN_EVENT_SKIP_FLAGS: frozenset[str] = frozenset({"grpc_rpc_spans"})
 
-# Most (flag key, variant) pairs remembered per span; further new pairs on that span are dropped.
-MAX_SEEN_PER_SPAN = 256
+# Most span events (evaluation and exception events together) one span records through the hook;
+# past that the span's further events are dropped. This also bounds the per-span state (at most
+# one dict entry per recorded event). The SDK's own per-span event limit is 128.
+MAX_EVENTS_PER_SPAN = 256
+
+
+class _SpanState:
+    """Per-span dedupe state: the last recorded marker per flag, and the events recorded."""
+
+    __slots__ = ("last", "recorded")
+
+    def __init__(self) -> None:
+        self.last: dict[tuple[str, str], object] = {}
+        self.recorded = 0
 
 
 class DedupingTracingHook(TracingHook):
-    """The official ``TracingHook`` with one event per (span, flag key, variant).
+    """The official ``TracingHook`` that records an event only when a flag's outcome changed.
 
-    A flag read on every RPC or tick no longer adds an event per evaluation; a changed variant
-    (or an error after a success) is still recorded. The seen-set is held in a weak map keyed by
-    the span, so it is freed with the span, and capped at :data:`MAX_SEEN_PER_SPAN` pairs, so a
-    long-lived span (a game, a stream) stays bounded. Hot path: one weak-map get, one set lookup;
-    the lock is taken only the first time a span is seen. A race between two threads on a new
-    pair can at worst record it twice.
+    Per span and flag key, an evaluation event is recorded when its (variant, is-error) differs
+    from the last one recorded on that span, so repeats are dropped while every transition
+    (A -> B -> A included) is kept. The same holds for the exception event of a raising
+    evaluation (keyed by exception type). Flags in :data:`SPAN_EVENT_SKIP_FLAGS` record nothing.
+    The state sits in a weak map keyed by the span (freed with it) and is capped at
+    :data:`MAX_EVENTS_PER_SPAN` recorded events per span. Hot path: one weak-map get and one dict
+    lookup; the lock is taken only the first time a span is seen. A race between two threads can
+    at worst record an event twice.
     """
 
     def __init__(self, exclude_exceptions: bool = False) -> None:
         super().__init__(exclude_exceptions=exclude_exceptions)
-        self._seen: weakref.WeakKeyDictionary[Span, set[tuple[str, str | None, bool]]] = weakref.WeakKeyDictionary()
+        self._seen: weakref.WeakKeyDictionary[Span, _SpanState] = weakref.WeakKeyDictionary()
         self._lock = threading.Lock()
 
-    def finally_after(self, hook_context: HookContext, details: FlagEvaluationDetails, hints: HookHints) -> None:
-        if details.flag_key in SPAN_EVENT_SKIP_FLAGS:
-            return
+    def _should_record(self, flag_key: str, kind: str, marker: object) -> bool:
+        if flag_key in SPAN_EVENT_SKIP_FLAGS:
+            return False
         span = trace.get_current_span()
         if not span.is_recording():
-            return
-        seen = self._seen.get(span)
-        if seen is None:
+            return False
+        state = self._seen.get(span)
+        if state is None:
             with self._lock:
-                seen = self._seen.setdefault(span, set())
-        pair = (details.flag_key, details.variant, details.reason == Reason.ERROR)
-        if pair in seen or len(seen) >= MAX_SEEN_PER_SPAN:
+                state = self._seen.setdefault(span, _SpanState())
+        slot = (flag_key, kind)
+        if state.last.get(slot, _UNSET) == marker or state.recorded >= MAX_EVENTS_PER_SPAN:
+            return False
+        state.last[slot] = marker
+        state.recorded += 1
+        return True
+
+    def finally_after(self, hook_context: HookContext, details: FlagEvaluationDetails, hints: HookHints) -> None:
+        if self._should_record(details.flag_key, "eval", (details.variant, details.reason == Reason.ERROR)):
+            super().finally_after(hook_context, details, hints)
+
+    def error(self, hook_context: HookContext, exception: Exception, hints: HookHints) -> None:
+        if self.exclude_exceptions:
             return
-        seen.add(pair)
-        super().finally_after(hook_context, details, hints)
+        if self._should_record(hook_context.flag_key, "exc", type(exception).__name__):
+            super().error(hook_context, exception, hints)
