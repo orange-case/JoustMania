@@ -733,9 +733,56 @@ func TestRegisterThenEndBeforeSend(t *testing.T) {
 	}
 }
 
-// UC: UC-055 main step 6
-// The push span names the local writer and links the write span that queued
-// the value.
+// UC: UC-055 BR-002
+// A one-shot event list is shown in Flagsmith as its latest value: appends
+// that arrive before the send are merged into one override carrying the whole
+// latest list, and a list that empties removes the override.
+func TestEventListShownAsLatestValue(t *testing.T) {
+	e := newOutEnv(t)
+	e.out.Changed(e.registered(gameOf("g1", "real", "A"), nil))
+	e.drain()
+	events := func(raw string) state.Change {
+		c := e.change(state.ChangeEvents, "interventions", "audio_cue", registry.ScopeGame, state.Scope{GameID: "g1"}, "", "")
+		c.Events = json.RawMessage(raw)
+		return c
+	}
+	first := `[{"sound":"start"}]`
+	latest := `[{"sound":"start"},{"sound":"end"}]`
+	e.out.Changed(events(first))
+	e.out.Changed(events(latest))
+	e.drain()
+	puts := e.bodies(http.MethodPut, apiEnv+"edge-identities-featurestates")
+	if len(puts) != 1 {
+		t.Fatalf("UC-055/BR-002 %d override requests for two appends before the send, want 1: %v", len(puts), puts)
+	}
+	var body struct {
+		Identifier string          `json:"identifier"`
+		Value      json.RawMessage `json:"feature_state_value"`
+	}
+	if err := json.Unmarshal([]byte(puts[0]), &body); err != nil {
+		t.Fatal(err)
+	}
+	got := string(body.Value)
+	var s string
+	if json.Unmarshal(body.Value, &s) == nil {
+		got = s
+	}
+	if body.Identifier != "game:g1" || got != latest {
+		t.Fatalf("UC-055/BR-002 override %s = %s, want game:g1 = the latest list %s", body.Identifier, got, latest)
+	}
+	e.out.Changed(events(`[]`))
+	e.drain()
+	if n := e.count(http.MethodDelete, apiEnv+"edge-identities-featurestates"); n != 1 {
+		t.Fatalf("UC-055/BR-002 %d override deletes after the list emptied, want 1", n)
+	}
+	if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 1 {
+		t.Fatalf("UC-055/BR-002 %d override puts after the list emptied, want still 1 (no empty list shown)", n)
+	}
+}
+
+// UC: UC-055 main step 3 BR-002
+// The push span names the local writer (the writer is recorded on the send,
+// not stored in Flagsmith) and links the write span that queued the value.
 func TestSpanWriterLabel(t *testing.T) {
 	e := newOutEnv(t)
 	sc := trace.NewSpanContext(trace.SpanContextConfig{TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2}, TraceFlags: trace.FlagsSampled})
@@ -745,16 +792,16 @@ func TestSpanWriterLabel(t *testing.T) {
 	e.drain()
 	spans := e.pushSpans()
 	if len(spans) != 1 {
-		t.Fatalf("UC-055/main %d push spans, want 1", len(spans))
+		t.Fatalf("UC-055/BR-002 %d push spans, want 1", len(spans))
 	}
 	s := spans[0]
 	for key, want := range map[string]string{AttrWriter: "menu", AttrOp: OpValue, AttrFlagKey: "decision.backend", AttrFlagSet: "agent", AttrScope: ScopeStack, AttrResult: ResultOK} {
 		if got := spanAttr(s, key); got != want {
-			t.Fatalf("UC-055/main span attribute %s = %q, want %q", key, got, want)
+			t.Fatalf("UC-055/BR-002 span attribute %s = %q, want %q", key, got, want)
 		}
 	}
 	if links := s.Links(); len(links) != 1 || links[0].SpanContext.TraceID() != sc.TraceID() {
-		t.Fatalf("UC-055/main span links %v, want one to the write span", links)
+		t.Fatalf("UC-055/main step 3 span links %v, want one to the write span", links)
 	}
 }
 

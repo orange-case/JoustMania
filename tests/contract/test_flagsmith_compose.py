@@ -47,7 +47,6 @@ def _env(stack: tuple) -> dict[str, str | None]:
     return env
 
 
-@pytest.mark.uc("UC-054", cond=["Pre-2"])
 @pytest.mark.parametrize("name", PASSTHROUGH)
 def test_link_defaults_off_and_passes_every_var_through(name):
     env = _env(PASSTHROUGH[name])
@@ -60,7 +59,6 @@ def test_link_defaults_off_and_passes_every_var_through(name):
     )
 
 
-@pytest.mark.uc("UC-054", cond=["Pre-2"])
 @pytest.mark.parametrize("name", PINNED_OFF)
 def test_link_is_pinned_off_without_secrets(name):
     env = _env(PINNED_OFF[name])

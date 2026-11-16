@@ -170,6 +170,7 @@ def test_person_event_override_appends_once(flag_service, settled_link):
 
 # ------------------------------------------------------------------ UC-054 BR-004 / FR-209
 @pytest.mark.uc("UC-054", flow="main", br=["BR-004"], tc="TC-021")
+@pytest.mark.uc("UC-055", flow="main", steps=[5], tc="TC-021")
 def test_own_push_never_comes_back(flag_service, settled_link):
     """The document still holding the link's own last push is not a Flagsmith change
     (remote := pushed value): a newer local value waiting to be sent stays (plan #2592 §8.1)."""
@@ -283,7 +284,7 @@ def test_conflict_after_reconnect_flagsmith_wins(flag_service, settled_link):
 
 
 # ------------------------------------------------------------------ UC-054 A4 / FR-213
-@pytest.mark.uc("UC-054", flow="A4", br=["BR-003"], tc="TC-021")
+@pytest.mark.uc("UC-054", flow="A4", br=["BR-001", "BR-003"], tc="TC-021")
 def test_refused_change_marks_feature_unhealthy(flag_service, settled_link):
     fake = settled_link
 
@@ -331,9 +332,11 @@ def test_change_waits_for_flagd(stack, flag_service, settled_link):
 
 
 # --------------------------------------------------------------------------- UC-055 main
-@pytest.mark.uc("UC-055", flow="main", br=["BR-001", "BR-002"], tc="TC-021")
+@pytest.mark.uc("UC-055", flow="main", steps=[1, 2, 3, 4, 6], br=["BR-001", "BR-002"], tc="TC-021")
 def test_local_write_reaches_flagsmith_merged(flag_service, settled_link):
     fake = settled_link
+    history = f"Flag state updated for feature: {TICK[1]}"
+    rows_before = sum(r["log"] == history for r in fake.audit_rows)
     t0 = time.monotonic()
     # Step 1: 15 local writes in a row are each answered at once.
     for value in range(101, 116):
@@ -347,6 +350,14 @@ def test_local_write_reaches_flagsmith_merged(flag_service, settled_link):
     sent = [r for r in fake.pushes(TICK[1]) if r["t"] >= t0]
     bound = min(14, int(writing * PUSH_RATE) + 3)
     assert len(sent) <= bound, f"{len(sent)} requests for 15 writes in {writing:.2f}s (bound {bound}): not merged"
+    # UC-055 step 6: each accepted send is a change in the flag's history (an API key's audit row,
+    # no author), the newest one first.
+    accepted = sum(r["status"] == 200 for r in sent)
+    rows = [r for r in fake.audit_rows if r["log"] == history]
+    assert accepted >= 1 and len(rows) - rows_before == accepted, (
+        f"{len(rows) - rows_before} history rows for {accepted} accepted sends"
+    )
+    assert fake.audit_rows[0] == {"log": history, "author": None}, fake.audit_rows[:3]
     # Step 3: a local clear turns the feature off with the baseline value.
     default = flag_service.get(*TICK)["baseline_default"]
     t1 = time.monotonic()
