@@ -440,7 +440,8 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 
 	p.pulls++
 	ims := ""
-	if !full && !p.forceFull && len(games) == 0 && p.pulls%unconditionalEvery != 0 {
+	force := l.fullPull.Swap(false)
+	if !full && !force && !p.forceFull && len(games) == 0 && p.pulls%unconditionalEvery != 0 {
 		ims = l.LastModified()
 	}
 	doc, lm, notModified, err := l.client.EnvironmentDocument(ctx, ims)

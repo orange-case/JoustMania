@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/joustmania/flag-service/api"
 	"github.com/joustmania/flag-service/flagsmith"
@@ -131,5 +132,37 @@ func TestDeferredKeyOfflineChangeNotSent(t *testing.T) {
 	}
 	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "750" {
 		t.Fatalf("UC-054/A2 decision.min_interval_ms = %s, want Flagsmith's 750 once the apply goes through", v.Value)
+	}
+}
+
+// UC: UC-055 A4
+// A stack value Flagsmith refuses is reverted although the document did not
+// change: the refusal forces a full pull, so a conditional pull answered 304
+// never leaves the refused value in force (#2621, CI run 43865190304).
+func TestRefusedStackValueRevertedWithoutDocumentChange(t *testing.T) {
+	updated := time.Date(2026, 11, 15, 11, 59, 0, 0, time.UTC)
+	backendPath := futureAPI + strconv.Itoa(inoutIDs["decision.backend"]) + "/"
+	h := newHarness(t, harnessOpts{realOut: true, featureIDs: inoutIDs,
+		before: func(h *harness) {
+			h.fake.Handle("PATCH "+backendPath, answer(http.StatusConflict, `{"detail":"change requests enabled"}`))
+			// Last-Modified as the link sends it: an unchanged document answers 304.
+			h.fake.SetDocument(document(updated, []map[string]any{fsState("decision.backend", true, "claude")}), updated.Format(http.TimeFormat))
+		},
+	})
+	h.online()
+	h.round()
+	h.round() // settled: the next pulls are conditional
+	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" {
+		t.Fatalf("setup: decision.backend = %+v, want claude", v)
+	}
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"})
+	h.waitFor("the push refused", func() bool {
+		_, side := h.link.Links().Refusal(backendKey)
+		return side == flagsmith.SideRemote
+	})
+	h.round()
+	h.round()
+	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" {
+		t.Fatalf("UC-055/A4 decision.backend = %+v with an unchanged document, want the refused jev reverted to claude", v)
 	}
 }

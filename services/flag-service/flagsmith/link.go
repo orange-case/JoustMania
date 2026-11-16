@@ -161,6 +161,9 @@ type Link struct {
 	// offline since; a local change made while it is false is made offline
 	// (UC-054 A2, #2621).
 	connected atomic.Bool
+	// fullPull: the next pull is unconditional (a refused stack value must be
+	// reverted although the document did not change, UC-055 A4, #2621).
+	fullPull atomic.Bool
 
 	gamesSeenOnce sync.Once
 	gamesSeen     chan struct{}
