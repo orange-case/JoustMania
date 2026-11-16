@@ -119,16 +119,19 @@ value refused or guarded in one game is never held back in the next.
 **Settle.** Before any value of a new owner is sent or read, the link settles the controller: it finds the identity
 (the uuid it knows, else the exact search `?q="controller:<serial>"`, else it creates it), lists its overrides
 (`GET …/edge-identities/{uuid}/edge-featurestates/`), deletes every override of a registry feature on it (`DELETE
-…/edge-identities-featurestates`), then sets the traits `game_id`, `game_kind`, `coordinator_instance` (best effort,
-as on game identities). A refused removal leaves the controller unread for that game (its values are still sent),
-with a warning. Exception, the **first settle of a controller in a process**: the link first reads the identity's
+…/edge-identities-featurestates`), then sets the traits `game_kind`, `coordinator_instance` and, last, `game_id` (best
+effort, as on game identities; `game_id` last, so a settle cut short by a 429 or the link going down is never taken
+for a restart while the game was live). A value of the owner waits as pending until the settle ended. A refused
+removal leaves the controller unread for that game (its values are still sent), with a warning; so does a create
+that Flagsmith answers "already exists" while the search does not show the identity (never retried in a loop, which
+would hold every value push back). Exception, the **first settle of a controller in a process**: the link first reads the identity's
 traits (`GET …/edge-identities/{uuid}/list-traits/`); when `game_id` names the owner, the flag service restarted while
 that game was live and nothing is removed. Traits that cannot be read (traits off in the organisation, a refusal)
 count as another game: the overrides are removed.
 
 **Release.** When the controller leaves its owner (game end, the expiry sweep of UC-053 A11, the serial leaves the
-game) and no other live real game holds it, the link releases it: the same removal, then the traits are cleared
-(`trait_value: null`). The identity stays. When another live real game holds it, that game becomes the owner and the
+game) and no other live real game holds it, the link releases it: the same removal, then the traits that are set are cleared
+(`trait_value: null`; the traits are read first, so a controller released already costs two reads and no write). The identity stays. When another live real game holds it, that game becomes the owner and the
 controller is settled for it instead. The former owner's keys of that serial are dropped, so a value the former game
 writes afterwards is never sent to the controller.
 
@@ -148,7 +151,7 @@ before any value push, so:
 | game ends while a push is in flight | the release is queued behind the push on the same goroutine, lists the overrides after the push landed and removes it |
 | a pull round overlaps a settle or release | the round snapshots each controller's generation before the fetch; a controller that moved during the round is skipped (the next pull is in full). A document that lags behind a removal and still shows a removed value is skipped for that key until it shows another value, at most max(10 min, 10 polls), like the value guard of §4.2 step 6 |
 | restart while a game is live | the coordinator registers the game again; the first settle finds `game_id` = the game and keeps the overrides; the restart rule's authorship of `controller:<serial>` applies only to that kept game, never to a later one |
-| start / stale cleanup | with the game identity cleanup (§5.1, after the re-registration or 45 s, whichever is later): every `controller:*` identity without an owner is released (overrides removed, traits cleared, identity kept); the owner is checked again on the sender right before |
+| start / stale cleanup | with the game identity cleanup (§5.1, after the re-registration or 45 s, whichever is later): every `controller:*` identity without an owner is released (overrides removed, traits cleared, identity kept); the owner is checked again on the sender right before. Cost: one listing, then per idle controller two reads (traits, overrides) plus one write per override or trait still set, at `FLAGSMITH_PUSH_RATE`, ahead of value pushes (20 idle released controllers: about 8 s at 5/s) |
 | the 45 s grace | a game that registers after the cleanup ran gets its controller settled like any new owner: overrides left from before the restart are removed (the same outcome as a game identity deleted after the grace) |
 | refused-value memory (#2604) | keyed by `game:<gameId>:<serial>`, so a value Flagsmith refused in one game is sent again in the next |
 | an identity a person deleted | a 404 on its uuid forgets the uuid and the settle starts over (search, create) |
