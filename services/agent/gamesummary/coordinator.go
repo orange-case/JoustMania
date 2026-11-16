@@ -135,6 +135,9 @@ type Coordinator struct {
 	// groups returns the game's noted group-shield decisions (#2529). Set once at
 	// construction via SetGroupLookup; nil = none.
 	groups func(gameID string) []GroupDecision
+	// interventions returns the game's noted interventions (#2640). Set once at
+	// construction via SetInterventionLookup; nil = none.
+	interventions func(gameID string) AgentInterventions
 
 	mu sync.Mutex
 	// claimed is the set of recently summarized game ids; claimedOrder is the LRU
@@ -180,6 +183,13 @@ func (c *Coordinator) SetGoalLookup(f func(gameID string) *Goal) { c.goal = f }
 // BR-033). Set during construction, before the store fires OnGameEnd.
 func (c *Coordinator) SetGroupLookup(f func(gameID string) []GroupDecision) { c.groups = f }
 
+// SetInterventionLookup wires the lookup of a game's noted interventions (#2640),
+// listed on the agent.game.summary span. Set during construction, before the store
+// fires OnGameEnd.
+func (c *Coordinator) SetInterventionLookup(f func(gameID string) AgentInterventions) {
+	c.interventions = f
+}
+
 // SetExperimentParent wires the experiment ROOT-span SpanContext lookup seam (#1188):
 // a func returning the agent.experiment span's SpanContext for an experiment_id
 // (reading the registry's ExperimentSpanContext) and whether one is available. When
@@ -223,8 +233,8 @@ func (c *Coordinator) OnGameEnd(gc gamecontext.GameContext) {
 		now = time.Now
 	}
 
-	// The span IS the audit of the aggregation (#928 acceptance). It is a standalone
-	// root: there is no inbound RPC context at game end (same as the retro span).
+	// The span IS the audit of the aggregation (#928 acceptance). There is no inbound
+	// RPC context at game end; summaryParentCtx places it in the game's trace (#2640).
 	//
 	// Hub-and-spoke correlation (#1174): Link this per-game outcome span back to the
 	// game-session trace (the hub) via the SHARED gamecontext.TraceLink primitive — the
@@ -236,9 +246,9 @@ func (c *Coordinator) OnGameEnd(gc gamecontext.GameContext) {
 	// #1188: re-parent the summary under the experiment ROOT span for an
 	// experiment-bound game (the experiment outlives its games, so its per-game summary
 	// is a timeline-correct child). The game Link above is retained. A non-experiment
-	// game / unwired seam / torn-down experiment yields context.Background() — the
-	// pre-#1188 own-root behavior, unchanged.
-	parent := c.summaryParentCtx(gc.ExperimentID)
+	// game / unwired seam / torn-down experiment falls back to a remote child of the
+	// game trace root (#2640), else its own root.
+	parent := c.summaryParentCtx(gc)
 	_, span := c.tracer.Start(parent, SpanGameSummary, startOpts...)
 	defer span.End()
 
@@ -251,6 +261,10 @@ func (c *Coordinator) OnGameEnd(gc gamecontext.GameContext) {
 	}
 	if c.groups != nil {
 		opts.GroupDecisions = c.groups(gc.SessionID)
+	}
+	var noted AgentInterventions
+	if c.interventions != nil {
+		noted = c.interventions(gc.SessionID)
 	}
 	summary := BuildSummary(gc, opts)
 
@@ -269,6 +283,8 @@ func (c *Coordinator) OnGameEnd(gc gamecontext.GameContext) {
 		attribute.Int(attrEngagementPoints, len(summary.EngagementTrend)),
 		attribute.Bool(attrDominated, summary.Dominance.Dominated),
 	)
+	anchor, _ := timelineBounds(gc.Timeline)
+	span.SetAttributes(interventionAttributes(noted, anchor)...)
 	if len(summary.Predictions) > 0 {
 		n := CountPredictions(summary.Predictions)
 		span.SetAttributes(
@@ -318,6 +334,8 @@ func (c *Coordinator) OnGameEnd(gc gamecontext.GameContext) {
 		"eliminations", summary.EliminationCount,
 		"interventions_applied", summary.InterventionsApplied,
 		"interventions_blocked", summary.InterventionsBlocked,
+		"interventions_held", noted.Held,
+		"interventions_noop", noted.Noop,
 		"dominated", summary.Dominance.Dominated,
 		"predictions_scored", CountPredictions(summary.Predictions).Scored,
 		"predictions_hit", CountPredictions(summary.Predictions).Hit,
@@ -353,25 +371,25 @@ func (c *Coordinator) claimGame(gameID string) bool {
 	return true
 }
 
-// summaryParentCtx returns the context the agent.game.summary span is started from
-// (#1188): a context whose remote parent is the experiment ROOT span for an
-// experiment-bound game with a live root span, else plain context.Background() (the
-// pre-#1188 own-root behavior). Reads the SpanContext via the injected experimentParent
-// seam and installs it with gamecontext.RemoteParentFromSpanContext.
+// summaryParentCtx returns the context the agent.game.summary span is started from:
+//  1. an experiment-bound game with a live experiment ROOT span: a remote child of it
+//     (#1188), read through the experimentParent seam;
+//  2. otherwise, valid game.trace_id / game.trace_span_id: a remote child of the game
+//     root span (#2640), so the summary sits in the game's own trace, the way the
+//     agent.decision spans do (they also keep their Link to the game root);
+//  3. otherwise plain context.Background(): its own root.
 //
-// GRACEFUL FALLBACK: an empty experiment_id, a nil seam, or ok=false all yield
-// context.Background(), so the summary span is unchanged from before #1188 and emission
-// is never broken.
-func (c *Coordinator) summaryParentCtx(experimentID string) context.Context {
+// GRACEFUL FALLBACK: every miss falls to the next tier, so emission is never broken.
+func (c *Coordinator) summaryParentCtx(gc gamecontext.GameContext) context.Context {
 	base := context.Background()
-	if experimentID == "" || c.experimentParent == nil {
-		return base
+	if gc.ExperimentID != "" && c.experimentParent != nil {
+		if sc, ok := c.experimentParent(gc.ExperimentID); ok {
+			if ctx, ok := gamecontext.RemoteParentFromSpanContext(base, sc); ok {
+				return ctx
+			}
+		}
 	}
-	sc, ok := c.experimentParent(experimentID)
-	if !ok {
-		return base
-	}
-	ctx, _ := gamecontext.RemoteParentFromSpanContext(base, sc)
+	ctx, _ := gamecontext.RemoteParent(base, gc.GameTraceID, gc.GameTraceSpanID)
 	return ctx
 }
 

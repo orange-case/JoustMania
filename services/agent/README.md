@@ -833,15 +833,17 @@ fitness → rollback); the game path had nothing. #918 closes the **measurement*
    dispatch-time thresholds.
 3. It emits an **effect record** attributed to the intervention id:
 
-   - **Span** `agent.intervention.effect`: one span per evaluated fitness signal, each a
-     direct child of the `agent.decision` that dispatched the intervention and backdated
-     to dispatch time (no wrapper span, so effect spans never nest; #1325).
+   - **Span** `agent.intervention.effect`: one span per intervention (#2640), a
+     direct child of the `agent.decision` that dispatched it and backdated to dispatch
+     time (no wrapper span, so effect spans never nest; #1325).
      Attributes: `intervention.id`, `intervention.type`, `intervention.objective`,
-     `intervention.signal`, `intervention.fitness_baseline`,
-     `intervention.fitness_followup`, `intervention.fitness_delta`,
-     `intervention.window_seconds`, and `intervention.effect_aborted=true` when the
-     follow-up could not be measured (game ended/evicted before the window, or a
-     signal disappeared).
+     `intervention.window_seconds`, `intervention.signals` (compact JSON of every
+     signal: baseline, followup, delta, or `aborted` for a signal gone at follow-up),
+     the objective's primary signal as `intervention.signal`,
+     `intervention.fitness_baseline`, `intervention.fitness_followup`,
+     `intervention.fitness_delta`, and `intervention.effect_aborted=true` when the
+     follow-up could not be measured (game ended/evicted before the window, or no
+     signal left).
    - **Metric** `agent_intervention_effect_delta` (`Float64Histogram`, unit `1`): the
      `follow_up − baseline` change, labeled `intervention.type`,
      `intervention.objective`, `intervention.signal`. No point is recorded for an

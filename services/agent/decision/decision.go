@@ -276,6 +276,8 @@ type Loop struct {
 	groupInterventions otelmetric.Int64Counter
 	// groupLog notes group-shield decisions for the game summary (#2529); nil = none.
 	groupLog *GroupLog
+	// interventionLog notes every intervention for the game summary span (#2640); nil = none.
+	interventionLog *InterventionLog
 
 	// evaluations counts EVERY eval cycle (agent_evaluations_total{signal,outcome},
 	// #1053), so signal arrival is observable even on idle cycles where no rule fires
@@ -902,6 +904,9 @@ func (l *Loop) runDecision(ctx context.Context, snapshot flags.Snapshot, c gamec
 
 	if blocked {
 		l.recordGroupIntervention(ctx, c, state, d, GroupOutcomeBlocked, string(reason))
+		if reason != ReasonAlreadyApplied { // UC-040 A35: in place, not refused
+			l.noteIntervention(c, d, NotedBlocked, state.DecideBackend, now)
+		}
 		l.recordBlockedDecision(d, reason, cost, snapshot.InterventionsAllowed, state)
 		return
 	}
@@ -1024,6 +1029,7 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 			"error", err, "intervention", d.Intervention)
 		l.recordApplyOutcome(d.Intervention, gamecontext.ApplyOutcomeWriteFailed)
 		l.recordGroupIntervention(ctx, c, state, d, GroupOutcomeFailed, NotAppliedWriteFailed)
+		l.noteIntervention(c, d, NotedWriteFailed, state.DecideBackend, l.nowOrDefault()())
 		return
 	}
 	// Apply succeeded: count the intervention as applied (#790) — the numerator for
@@ -1041,6 +1047,7 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 		aSpan.SetAttributes(notApplied...)
 		l.recordApplyOutcome(d.Intervention, gamecontext.ApplyOutcomeGatedOff)
 		l.recordGroupIntervention(ctx, c, state, d, GroupOutcomeGatedOff, NotAppliedWriteGateOff)
+		l.noteIntervention(c, d, NotedGatedOff, state.DecideBackend, l.nowOrDefault()())
 		return
 	}
 	dSpan.SetAttributes(attribute.Bool(AttrDecisionApplied, true))
@@ -1049,6 +1056,7 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	l.recordApplyOutcome(d.Intervention, gamecontext.ApplyOutcomeApplied)
 	l.recordInterventionApplied(ctx, d.Intervention)
 	l.recordGroupIntervention(ctx, c, state, d, GroupOutcomeApplied, "")
+	l.noteIntervention(c, d, NotedApplied, state.DecideBackend, l.nowOrDefault()())
 	// Intervention-effect MEASUREMENT (#918): stamp a baseline of this game's
 	// fitness/objective signals NOW (the same fitness.evaluated quantities the decision
 	// span carries) and schedule a follow-up sample after the window to measure the

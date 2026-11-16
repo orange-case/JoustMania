@@ -22,6 +22,10 @@ type pending struct {
 	merged    int       // local changes merged into this entry
 	version   uint64    // snapshot version of the latest change (push span link)
 	notBefore time.Time // retry backoff after a failed push
+	// notFoundTries counts the 404s retried for this entry: a push to an
+	// identity the link listed or settled moments before, which Flagsmith's
+	// edge may not show yet (#2639).
+	notFoundTries int
 	// sent is the value Next last handed out for this entry (hasSent): the
 	// value a Refuse without one refers to.
 	sent    Value
@@ -44,11 +48,21 @@ type entry struct {
 	// ClearRefusal or the key's deletion clears it (UC-055 A4, #2604).
 	pushRefused    Value
 	hasPushRefused bool
+	// pushRefusedReason and pushRefusedStatus: Flagsmith's refusal of
+	// pushRefused, still shown after a local refusal replaced refused (#2639).
+	pushRefusedReason string
+	pushRefusedStatus int
 	// gen counts changes of the remote value (SetRemote, ConfirmPushed,
 	// ForgetRemote, RestoreRemote): a pull skips a key whose gen moved while
 	// the document was in flight (a stale document vs a confirmed push).
 	gen         uint64
 	confirmedAt time.Time
+	// outSince: when the key last went out of sync (GET /state keys, #2639).
+	outSince time.Time
+	// refusedAt and refusedStatus: when the last refusal was recorded and the
+	// HTTP status Flagsmith answered it with (0: refused without a request).
+	refusedAt     time.Time
+	refusedStatus int
 }
 
 // LinkState is the link's in-memory state per Key (architecture note §3,
@@ -79,7 +93,7 @@ func NewLinkState(now func() time.Time) *LinkState {
 func (s *LinkState) entryLocked(k Key) *entry {
 	e := s.entries[k]
 	if e == nil {
-		e = &entry{}
+		e = &entry{outSince: s.now()}
 		s.entries[k] = e
 		if g := GameOfIdentity(k.Scope); g != "" {
 			m := s.byGame[g]
@@ -195,7 +209,7 @@ func (s *LinkState) OfferFrom(k Key, v Value, at time.Time, version uint64, offl
 				e.pending = nil
 				s.dropFromQueueLocked(k)
 			}
-			e.inSync = false
+			s.syncLocked(e, false)
 			return false
 		}
 		e.pushRefused, e.hasPushRefused = Value{}, false
@@ -217,12 +231,20 @@ func (s *LinkState) Reoffer(k Key, v Value, at time.Time, version uint64) (queue
 		s.inSyncLocked(k, e)
 		return false
 	case e.hasPushRefused && e.pushRefused.Equal(v):
-		e.inSync = false
+		s.syncLocked(e, false)
 		return false
 	case e.pending != nil:
 		return false
 	}
 	return s.offerLocked(k, e, v, at, version, false)
+}
+
+// syncLocked sets e's in-sync flag and records when it went out of sync.
+func (s *LinkState) syncLocked(e *entry, inSync bool) {
+	if !inSync && (e.inSync || e.outSince.IsZero()) {
+		e.outSince = s.now()
+	}
+	e.inSync = inSync
 }
 
 // inSyncLocked records a local value equal to the remote one: nothing to
@@ -233,11 +255,11 @@ func (s *LinkState) inSyncLocked(k Key, e *entry) {
 		s.dropFromQueueLocked(k)
 	}
 	e.pushRefused, e.hasPushRefused = Value{}, false
-	e.inSync = true
+	s.syncLocked(e, true)
 }
 
 func (s *LinkState) offerLocked(k Key, e *entry, v Value, at time.Time, version uint64, offline bool) bool {
-	e.inSync = false
+	s.syncLocked(e, false)
 	if e.pending != nil {
 		e.pending.value = v
 		e.pending.merged++
@@ -299,7 +321,7 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	e.gen++
 	e.confirmedAt = s.now()
 	if heldLocalLocked(e, v) {
-		e.inSync = false
+		s.syncLocked(e, false)
 		return
 	}
 	e.refused, e.side = "", ""
@@ -308,7 +330,7 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}
-	e.inSync = e.pending == nil
+	s.syncLocked(e, e.pending == nil)
 }
 
 // SetRemote records the value last seen in Flagsmith and returns the previous
@@ -328,7 +350,7 @@ func (s *LinkState) SetRemoteGen(k Key, v Value) (prev Value, had bool, gen uint
 	prev, had = e.remote, e.hasRemote
 	e.remote, e.hasRemote = v, true
 	e.gen++
-	e.inSync = e.pending == nil
+	s.syncLocked(e, e.pending == nil)
 	return prev, had, e.gen
 }
 
@@ -440,14 +462,15 @@ func (s *LinkState) Refuse(k Key, side Side, reason string) {
 	}
 	if p := e.pending; p != nil && !p.hasSent {
 		e.refused, e.side = reason, side
-		e.inSync = false
+		e.refusedAt, e.refusedStatus = s.now(), 0
+		s.syncLocked(e, false)
 		return
 	}
 	v := Value{}
 	if p := e.pending; p != nil {
 		v = p.sent
 	}
-	s.refuseLocked(k, e, v, side, reason)
+	s.refuseLocked(k, e, v, side, reason, 0)
 }
 
 // RefuseValue records a refusal of k on side; a remote refusal of v drops the
@@ -455,13 +478,21 @@ func (s *LinkState) Refuse(k Key, side Side, reason string) {
 // pending) and keeps v as the refused value: neither the sender nor a pull
 // round sends it again until a different local value (UC-055 A4).
 func (s *LinkState) RefuseValue(k Key, v Value, side Side, reason string) {
+	s.RefuseValueStatus(k, v, side, reason, 0)
+}
+
+// RefuseValueStatus is RefuseValue that also records the HTTP status of
+// Flagsmith's answer (0: the value was refused without a request), shown in
+// GET /state (#2639).
+func (s *LinkState) RefuseValueStatus(k Key, v Value, side Side, reason string, status int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e := s.entries[k]; e != nil {
 		held := side == SideRemote && heldLocalLocked(e, v)
-		s.refuseLocked(k, e, v, side, reason)
+		s.refuseLocked(k, e, v, side, reason, status)
 		if side == SideRemote && !held {
 			e.pushRefused, e.hasPushRefused = v, true
+			e.pushRefusedReason, e.pushRefusedStatus = reason, status
 		}
 	}
 }
@@ -479,9 +510,10 @@ func heldLocalLocked(e *entry, v Value) bool {
 	return e.pending == nil && e.hasPushRefused && !e.pushRefused.Equal(v)
 }
 
-func (s *LinkState) refuseLocked(k Key, e *entry, v Value, side Side, reason string) {
+func (s *LinkState) refuseLocked(k Key, e *entry, v Value, side Side, reason string, status int) {
 	e.refused, e.side = reason, side
-	e.inSync = false
+	e.refusedAt, e.refusedStatus = s.now(), status
+	s.syncLocked(e, false)
 	if side == SideRemote && e.pending != nil && e.pending.value.Equal(v) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)
@@ -513,7 +545,7 @@ func (s *LinkState) ClearLocalRefusal(k Key) {
 func (s *LinkState) SetInSync(k Key, inSync bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entryLocked(k).inSync = inSync
+	s.syncLocked(s.entryLocked(k), inSync)
 }
 
 // Refusal returns k's last refusal and its side ("" when none).
@@ -595,4 +627,125 @@ func (s *LinkState) Counts() (pendingN, outOfSync, refused int) {
 		}
 	}
 	return pendingN, outOfSync, refused
+}
+
+// RetryNotFound counts one more 404 retry of k's pending entry (#2639) and
+// returns its number (1 for the first). It reports false when k has no
+// pending entry or the entry used its max retries: the caller refuses the
+// value then.
+func (s *LinkState) RetryNotFound(k Key, max int) (int, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entries[k]
+	if e == nil || e.pending == nil || e.pending.notFoundTries >= max {
+		return 0, false
+	}
+	e.pending.notFoundTries++
+	return e.pending.notFoundTries, true
+}
+
+// KeyState is one key of the flagsmith keys list of GET /state (services.md
+// §7.3, #2639): a key out of sync or refused, never its value.
+type KeyState struct {
+	FlagSet string `json:"flag_set"`
+	Flag    string `json:"flag"`
+	// Scope is "stack" or the key's identity (game:<id>, game:<id>:<serial>
+	// also for a real game's player value sent to controller:<serial>,
+	// experiment:<id>:<arm>, real, fraction).
+	Scope   string `json:"scope"`
+	InSync  bool   `json:"in_sync"`
+	Pending bool   `json:"pending"`
+	Reason  string `json:"reason,omitempty"`
+	Side    Side   `json:"side,omitempty"`
+	// HTTPStatus is Flagsmith's answer to the refused push (absent: refused
+	// without a request, e.g. a feature the start did not resolve).
+	HTTPStatus int `json:"http_status,omitempty"`
+	// Since is when the refusal was recorded, else when the key went out of
+	// sync.
+	Since time.Time `json:"since"`
+}
+
+// MaxStateKeys bounds the keys list of GET /state.
+const MaxStateKeys = 50
+
+// Unsynced lists the keys out of sync or refused, refused first, then the
+// oldest first, at most limit of them; total is how many there are.
+func (s *LinkState) Unsynced(limit int) (list []KeyState, total int) {
+	s.mu.Lock()
+	for k, e := range s.entries {
+		refused := e.refused != "" || e.hasPushRefused
+		if e.inSync && !refused {
+			continue
+		}
+		ks := KeyState{FlagSet: k.Set, Flag: k.Flag, Scope: k.Scope, InSync: e.inSync, Pending: e.pending != nil, Since: e.outSince.UTC()}
+		switch {
+		case e.refused != "":
+			ks.Reason, ks.Side, ks.HTTPStatus = e.refused, e.side, e.refusedStatus
+		case e.hasPushRefused:
+			// The refused value is held; Flagsmith's refusal of it is the reason.
+			ks.Reason, ks.Side, ks.HTTPStatus = e.pushRefusedReason, SideRemote, e.pushRefusedStatus
+			if ks.Reason == "" {
+				ks.Reason = ReasonOther
+			}
+		}
+		if refused && !e.refusedAt.IsZero() {
+			ks.Since = e.refusedAt.UTC()
+		}
+		list = append(list, ks)
+	}
+	s.mu.Unlock()
+	sort.Slice(list, func(i, j int) bool {
+		a, b := list[i], list[j]
+		if (a.Reason != "") != (b.Reason != "") {
+			return a.Reason != ""
+		}
+		if !a.Since.Equal(b.Since) {
+			return a.Since.Before(b.Since)
+		}
+		if a.FlagSet != b.FlagSet {
+			return a.FlagSet < b.FlagSet
+		}
+		if a.Flag != b.Flag {
+			return a.Flag < b.Flag
+		}
+		return a.Scope < b.Scope
+	})
+	total = len(list)
+	if limit >= 0 && len(list) > limit {
+		list = list[:limit]
+	}
+	return list, total
+}
+
+// Resend queues again every confirmed value on identifier (a value Flagsmith
+// accepted, not refused, nothing pending): the identity was deleted under a
+// live game (#2639). The remote value is forgotten, so the push confirms it
+// again.
+func (s *LinkState) Resend(identifier string) (n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := []Key{}
+	if g := GameOfIdentity(identifier); g != "" {
+		for k := range s.byGame[g] {
+			keys = append(keys, k)
+		}
+	} else {
+		for k := range s.entries {
+			keys = append(keys, k)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].Flag < keys[j].Flag })
+	now := s.now()
+	for _, k := range keys {
+		e := s.entries[k]
+		if k.Scope != identifier || e == nil || e.pending != nil || !e.hasRemote || !e.remote.Present || e.hasPushRefused {
+			continue
+		}
+		v := e.remote
+		e.remote, e.hasRemote = Value{}, false
+		e.gen++
+		s.offerLocked(k, e, v, now, 0, false)
+		n++
+	}
+	return n
 }

@@ -22,6 +22,19 @@ const (
 	maxRetryWait     = 60 * time.Second
 )
 
+// A 404 on an override push to an identity this process listed or settled
+// less than notFoundFreshFor ago is retried, at most notFoundRetries times per
+// pending value, after notFoundBackoff, then twice and four times that
+// (UC-055 A4, #2639): Flagsmith's edge storage may not show an identity it
+// just created yet. The waiting value goes to the back of the queue, so it
+// never holds the other keys back. Any other 404, and the one after the last
+// retry, refuses the value as before.
+const (
+	notFoundFreshFor = 30 * time.Second
+	notFoundRetries  = 3
+	notFoundBackoff  = 500 * time.Millisecond
+)
+
 // pace waits until the next request may go out: at most PushRate requests per
 // second, on the link's injected clock and sleep (UC-055 BR-001). Only the
 // Run goroutine calls it.
@@ -314,12 +327,12 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 	}
 	featureID, haveFeature := l.featureID(k)
 	if !haveFeature {
-		o.refuseUnsent(ctx, k, v, merged, version, ReasonNotFound)
+		o.refuseUnsent(ctx, k, v, merged, version, identifier, ReasonNotFound)
 		return true, nil
 	}
 	fv, encErr := l.encodeFor(k, v)
 	if encErr != nil {
-		o.refuseUnsent(ctx, k, v, merged, version, ReasonBadValue)
+		o.refuseUnsent(ctx, k, v, merged, version, identifier, ReasonBadValue)
 		return true, nil
 	}
 	if err := o.pace(ctx); err != nil {
@@ -332,6 +345,20 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 	oc := o.roundTrip(ctx, k, valueOp(k, v), v.Writer, merged, link, func(c context.Context) (int, error) {
 		return o.send(c, identifier, v, fv, featureID)
 	})
+	if oc.status == http.StatusNotFound && !oc.ok && oc.err == nil && identifier != "" && o.listedRecently(identifier) {
+		if try, ok := l.Links().RetryNotFound(k, notFoundRetries); ok {
+			// Per key: the value waits at the back of the queue, the other
+			// keys go on; a timer wakes the sender when it is due.
+			wait := notFoundBackoff << (try - 1)
+			l.Links().Retry(k, l.Now().Add(wait))
+			go func() {
+				if l.Sleep(ctx, wait) == nil {
+					o.poke()
+				}
+			}()
+			return true, nil
+		}
+	}
 	switch {
 	case oc.err != nil:
 		if ctx.Err() == nil {
@@ -351,7 +378,8 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 		// Refuse the value that was pushed: a newer one merged meanwhile
 		// stays pending. The refused value is remembered, so no pull round
 		// re-sends it before a different local value (UC-055 A4).
-		l.Links().RefuseValue(k, v, SideRemote, oc.reason)
+		l.Links().RefuseValueStatus(k, v, SideRemote, oc.reason, oc.status)
+		o.warnRefused(k, valueOp(k, v), identifier, oc.reason, oc.status)
 		if k.Scope == ScopeStack {
 			// The in side reverts it to Flagsmith's value at once (UC-055 A4,
 			// #2621), with a full pull: the document did not change.
@@ -365,7 +393,7 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 // refuseUnsent refuses v of k without a request (its feature id is unknown, or
 // the value cannot be encoded) and records the push like a refused call: one
 // pushes_total point and one push span.
-func (o *out) refuseUnsent(ctx context.Context, k Key, v Value, merged int, version uint64, reason string) {
+func (o *out) refuseUnsent(ctx context.Context, k Key, v Value, merged int, version uint64, identifier, reason string) {
 	l := o.l
 	var link trace.SpanContext
 	if sc, found := l.WriteSpanContext(version); found {
@@ -376,8 +404,38 @@ func (o *out) refuseUnsent(ctx context.Context, k Key, v Value, merged int, vers
 	l.Metrics().RecordPush(ctx, op, ResultRejected, reason)
 	EndSpan(span, ResultRejected, reason)
 	l.Links().RefuseValue(k, v, SideRemote, reason)
+	o.warnRefused(k, op, identifier, reason, 0)
 	if k.Scope == ScopeStack {
 		l.fullPull.Store(true)
 		l.Wake()
 	}
+}
+
+// warnRefused logs one WARN per refused push (#2639): flag set, flag, scope,
+// the identity it was sent to, op, reason and Flagsmith's HTTP status (0: no
+// request was sent). Never the value.
+func (o *out) warnRefused(k Key, op, identifier, reason string, status int) {
+	o.l.Logger().Warn("flagsmith push refused", "flag_set", k.Set, "flag", k.Flag, "scope", k.Scope,
+		"identity", identifier, "op", op, "reason", reason, "http_status", status)
+}
+
+// markListed records that this process just listed or settled identifier
+// (the identity exists in Flagsmith now). Only the Run goroutine calls it.
+func (o *out) markListed(identifier string) {
+	now := o.l.Now()
+	if len(o.listed) >= 64 {
+		for id, at := range o.listed {
+			if now.Sub(at) >= notFoundFreshFor {
+				delete(o.listed, id)
+			}
+		}
+	}
+	o.listed[identifier] = now
+}
+
+// listedRecently reports whether this process listed or settled identifier
+// less than notFoundFreshFor ago.
+func (o *out) listedRecently(identifier string) bool {
+	at, ok := o.listed[identifier]
+	return ok && o.l.Now().Sub(at) < notFoundFreshFor
 }

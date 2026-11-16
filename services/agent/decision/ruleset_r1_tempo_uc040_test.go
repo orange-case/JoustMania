@@ -1,7 +1,5 @@
 package decision
 
-// UC: UC-040 A51
-
 import (
 	"strconv"
 	"strings"
@@ -14,6 +12,8 @@ import (
 // coordinator's death threshold slides from SLOW_MAX to FAST_MAX with the tempo, so
 // R1, which wants the session to last, writes the fast end of adjust_music_tempo's
 // bounds (a higher threshold, more movement tolerated), never a slow or default value.
+//
+// UC: UC-040 A51 BR-040
 func TestEnduranceTempoSpeedsUp(t *testing.T) {
 	players := map[string]testPlayer{"A": {active: true}, "B": {active: true}}
 	bounds, ok := decide.MagnitudeBounds(InterventionAdjustMusicTempo)

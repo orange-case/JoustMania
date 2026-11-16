@@ -553,6 +553,69 @@ def test_flagsmith_refusal_marks_out_of_sync(flag_service, settled_link):
     assert statuses[:2] == [429, 200], statuses
 
 
+@pytest.mark.uc("UC-055", flow="A4", steps=[1, 2], tc="TC-021")
+def test_override_not_found_after_listing_retried_and_refusal_named(stack, flag_service, settled_link):
+    """#2639: Flagsmith may not show a game identity it created moments before; a 404 on the
+    first override pushes is retried and the value lands. A 404 that persists is refused after
+    three retries, and GET /state and one WARN name the key, never the value."""
+    fake = settled_link
+    game = fl.new_game_id()
+    try:
+        fl.register_game(flag_service, game, ["MOCK0007"])
+        fl.wait_for(lambda: f"game:{game}" in fake.identities(), fl.PULL_TIMEOUT, "game identity listed")
+        # Step 1: the first two override pushes are answered 404.
+        fake.refuse(PACING[1], 404, body={"detail": "Not found."}, times=2)
+        t0 = time.monotonic()
+        flag_service.put(*PACING, variant="calm", scope={"game_id": game})
+        # Step 2: retried with a backoff, the third push lands and nothing is refused.
+        fl.wait_for(
+            lambda: (fake.override(f"game:{game}", PACING[1]) or {}).get("value") == "calm",
+            fl.PULL_TIMEOUT,
+            "calm on the game identity after two 404s",
+        )
+        statuses = [r["status"] for r in fake.pushes(PACING[1]) if r["t"] >= t0]
+        assert statuses == [404, 404, 200], statuses
+        state = fl.link(flag_service)
+        assert state["refused"] == 0, state
+        assert not [k for k in state.get("keys", []) if k["scope"] == f"game:{game}"], state
+
+        # Step 1 again: Flagsmith keeps answering 404.
+        fake.refuse(PACING[1], 404, body={"detail": "Not found."})
+        t1 = time.monotonic()
+        flag_service.put(*PACING, variant="frantic", scope={"game_id": game})
+        # Step 2: refused after the push and three retries; GET /state names the key.
+        key = fl.wait_for(
+            lambda: next(
+                (k for k in fl.link(flag_service).get("keys", []) if k["scope"] == f"game:{game}" and k.get("reason")),
+                None,
+            ),
+            fl.PULL_TIMEOUT,
+            "the refused key in GET /state",
+        )
+        assert {k: key[k] for k in ("flag_set", "flag", "reason", "side", "http_status", "in_sync")} == {
+            "flag_set": PACING[0],
+            "flag": PACING[1],
+            "reason": "not_found",
+            "side": "remote",
+            "http_status": 404,
+            "in_sync": False,
+        }, key
+        assert key["since"], key
+        assert "frantic" not in json.dumps(fl.link(flag_service)), fl.link(flag_service)
+        fl.wait_pulls(flag_service, 1)
+        statuses = [r["status"] for r in fake.pushes(PACING[1]) if r["t"] >= t1]
+        assert statuses == [404] * 4, statuses
+        # One WARN for the refusal, naming flag, scope and reason, never the value.
+        log = stack.flag_plane.flag_service.log_path.read_text(errors="replace")
+        warns = [ln for ln in log.splitlines() if "flagsmith push refused" in ln and f"scope=game:{game}" in ln]
+        assert len(warns) == 1, warns
+        assert all(s in warns[0] for s in ("level=WARN", "flag=pacing_profile", "reason=not_found", "http_status=404"))
+        assert "frantic" not in warns[0] and "calm" not in warns[0], warns[0]
+    finally:
+        fake.clear_refusals()
+        fl.end_game(flag_service, game)
+
+
 # --------------------------------------------------------------------------- NFRs
 @pytest.mark.nfr("NFR-057")
 @pytest.mark.uc("UC-055", flow="main", br=["BR-001"], tc="TC-021")

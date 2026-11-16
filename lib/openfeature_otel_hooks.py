@@ -1,8 +1,9 @@
 """OpenFeature evaluation metrics with the standard OpenTelemetry hook names (#1427).
 
-The span side is the official hook: ``openfeature-hooks-opentelemetry``'s
-``TracingHook`` (registered in :func:`lib.feature_flags.init_flag_domain`) adds one
-``feature_flag.evaluation`` span event per evaluation. That package (0.3.1, the
+The span side is the official hook: ``openfeature-hooks-opentelemetry``'s ``TracingHook``, wrapped by
+:class:`DedupingTracingHook` (registered in :func:`lib.feature_flags.init_flag_domain`), which adds a
+``feature_flag.evaluation`` span event only when a flag's variant changed on the span (#2649, not per
+evaluation). That package (0.3.1, the
 latest release) has no metrics hook yet; its metrics hook is an open upstream PR
 (open-feature/python-sdk-contrib#344). Until it is released, :class:`MetricsHook`
 records the metrics of the Go reference hook (go-sdk-contrib
@@ -37,11 +38,15 @@ and in unit tests (no provider) they are no-ops.
 from __future__ import annotations
 
 import re
+import threading
 import time
+import weakref
 
-from openfeature.flag_evaluation import FlagEvaluationDetails
+from openfeature.contrib.hook.opentelemetry import TracingHook
+from openfeature.flag_evaluation import FlagEvaluationDetails, Reason
 from openfeature.hook import Hook, HookContext, HookHints
-from opentelemetry import metrics
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Span
 
 METER_NAME = "openfeature.hooks.opentelemetry"
 
@@ -58,6 +63,7 @@ ATTR_REASON = "reason"
 # services/flag-service/state/state.go nextVariant: "<r|o><epoch hex>_<n>".
 _GENERATED_VARIANT = re.compile(r"^([ro])[0-9a-f]{1,16}_[0-9]+$")
 
+_UNSET = object()
 _STARTED = "joustmania.metrics_hook.started"
 
 
@@ -118,3 +124,72 @@ class MetricsHook(Hook):
         # only an evaluation that was counted active is counted down.
         if hook_context.hook_data.pop(_STARTED, None) is not None:
             self._active.add(-1, {ATTR_KEY: hook_context.flag_key})
+
+
+# --- Span side (#2649) -------------------------------------------------------------------------
+
+# Flags that only decide whether telemetry exists: a ``feature_flag.evaluation`` event for them is
+# noise on every span (grpc_rpc_spans is read by every gRPC span to decide whether the span is
+# created). Their metrics are unchanged. docs/specs/telemetry.md §6.
+SPAN_EVENT_SKIP_FLAGS: frozenset[str] = frozenset({"grpc_rpc_spans"})
+
+# Most span events (evaluation and exception events together) one span records through the hook;
+# past that the span's further events are dropped. This also bounds the per-span state (at most
+# one dict entry per recorded event). The SDK's own per-span event limit is 128.
+MAX_EVENTS_PER_SPAN = 256
+
+
+class _SpanState:
+    """Per-span dedupe state: the last recorded marker per flag, and the events recorded."""
+
+    __slots__ = ("last", "recorded")
+
+    def __init__(self) -> None:
+        self.last: dict[tuple[str, str], object] = {}
+        self.recorded = 0
+
+
+class DedupingTracingHook(TracingHook):
+    """The official ``TracingHook`` that records an event only when a flag's outcome changed.
+
+    Per span and flag key, an evaluation event is recorded when its (variant, is-error) differs
+    from the last one recorded on that span, so repeats are dropped while every transition
+    (A -> B -> A included) is kept. The same holds for the exception event of a raising
+    evaluation (keyed by exception type). Flags in :data:`SPAN_EVENT_SKIP_FLAGS` record nothing.
+    The state sits in a weak map keyed by the span (freed with it) and is capped at
+    :data:`MAX_EVENTS_PER_SPAN` recorded events per span. Hot path: one weak-map get and one dict
+    lookup; the lock is taken only the first time a span is seen. A race between two threads can
+    at worst record an event twice.
+    """
+
+    def __init__(self, exclude_exceptions: bool = False) -> None:
+        super().__init__(exclude_exceptions=exclude_exceptions)
+        self._seen: weakref.WeakKeyDictionary[Span, _SpanState] = weakref.WeakKeyDictionary()
+        self._lock = threading.Lock()
+
+    def _should_record(self, flag_key: str, kind: str, marker: object) -> bool:
+        if flag_key in SPAN_EVENT_SKIP_FLAGS:
+            return False
+        span = trace.get_current_span()
+        if not span.is_recording():
+            return False
+        state = self._seen.get(span)
+        if state is None:
+            with self._lock:
+                state = self._seen.setdefault(span, _SpanState())
+        slot = (flag_key, kind)
+        if state.last.get(slot, _UNSET) == marker or state.recorded >= MAX_EVENTS_PER_SPAN:
+            return False
+        state.last[slot] = marker
+        state.recorded += 1
+        return True
+
+    def finally_after(self, hook_context: HookContext, details: FlagEvaluationDetails, hints: HookHints) -> None:
+        if self._should_record(details.flag_key, "eval", (details.variant, details.reason == Reason.ERROR)):
+            super().finally_after(hook_context, details, hints)
+
+    def error(self, hook_context: HookContext, exception: Exception, hints: HookHints) -> None:
+        if self.exclude_exceptions:
+            return
+        if self._should_record(hook_context.flag_key, "exc", type(exception).__name__):
+            super().error(hook_context, exception, hints)

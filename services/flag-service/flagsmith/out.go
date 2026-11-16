@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,10 +27,17 @@ type out struct {
 	traitsOff atomic.Bool
 	// nextAt is the earliest time of the next request (only Run reads it).
 	nextAt time.Time
+	// listed: when this process last listed or settled an identity (only
+	// Run reads and writes it): a 404 right after is retried (#2639).
+	listed map[string]time.Time
+	// gone: identities the start cleanup deleted while their game
+	// registered (identifier -> deleted uuid), handled by Run (#2639).
+	goneMu sync.Mutex
+	gone   map[string]string
 }
 
 func newOut(l *Link) *out {
-	return &out{l: l, wake: make(chan struct{}, 1), ids: newIdentityQueue()}
+	return &out{l: l, wake: make(chan struct{}, 1), ids: newIdentityQueue(), listed: map[string]time.Time{}, gone: map[string]string{}}
 }
 
 func (o *out) poke() {
@@ -170,6 +179,7 @@ func (o *out) Run(ctx context.Context) error {
 // step does one request (or one wait) of work and reports whether it found
 // any.
 func (o *out) step(ctx context.Context) (bool, error) {
+	o.relistGone()
 	if did, err := o.identityStep(ctx); did || err != nil {
 		return did, err
 	}
@@ -177,4 +187,66 @@ func (o *out) step(ctx context.Context) (bool, error) {
 		return did, err
 	}
 	return o.pushNext(ctx)
+}
+
+// identityGone records that the start cleanup deleted identifier (uuid) while
+// its game registered (#2639). Any goroutine may call it; Run handles it.
+func (l *Link) identityGone(identifier, uuid string) {
+	o, ok := l.out.(*out)
+	if !ok {
+		return
+	}
+	o.goneMu.Lock()
+	o.gone[identifier] = uuid
+	o.goneMu.Unlock()
+	o.poke()
+}
+
+// relistGone handles the identities the start cleanup deleted under a game
+// that registered meanwhile, on the Run goroutine, so every push that was in
+// flight has ended: the deleted uuid is forgotten, the identity is listed
+// again (with the game's traits) and its confirmed values are sent again.
+// An identity whose game ended meanwhile is left to the game end.
+func (o *out) relistGone() {
+	o.goneMu.Lock()
+	gone := o.gone
+	if len(gone) == 0 {
+		o.goneMu.Unlock()
+		return
+	}
+	o.gone = map[string]string{}
+	o.goneMu.Unlock()
+	l := o.l
+	for identifier, uuid := range gone {
+		l.ids.Lock()
+		if l.ids.IdentityUUID[identifier] == uuid {
+			delete(l.ids.IdentityUUID, identifier)
+		}
+		l.ids.Unlock()
+		g, live := l.liveGameOf(identifier)
+		if !live {
+			continue
+		}
+		var traits []trait
+		if identifier == "game:"+g.ID {
+			traits = o.gameTraits(&g)
+		}
+		o.ids.Recreate(identifier, traits)
+		l.Links().Resend(identifier)
+	}
+}
+
+// liveGameOf returns the registered game identifier belongs to as a whole
+// (game:<id>, or game:<id>:<serial> of one of its serials).
+func (l *Link) liveGameOf(identifier string) (state.Game, bool) {
+	st := l.State()
+	if st == nil || !strings.HasPrefix(identifier, "game:") {
+		return state.Game{}, false
+	}
+	for _, g := range st.Games() {
+		if identifier == "game:"+g.ID || slices.ContainsFunc(g.Serials, func(s string) bool { return identifier == "game:"+g.ID+":"+s }) {
+			return g.Game, true
+		}
+	}
+	return state.Game{}, false
 }
