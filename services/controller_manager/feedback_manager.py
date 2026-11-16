@@ -492,7 +492,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
             self.active_effects.pop(serial, None)
 
     async def _effect_player_warning(
-        self, serial: str, restore_color: tuple | None, trace_context: Context | None = None, **_kwargs
+        self, serial: str, restore_color: tuple | None, **_kwargs
     ) -> None:
         """White flash + vibrate, restore to base color.
 
