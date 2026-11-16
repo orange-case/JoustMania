@@ -491,9 +491,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         async with self.effect_lock:
             self.active_effects.pop(serial, None)
 
-    async def _effect_player_warning(
-        self, serial: str, restore_color: tuple | None, **_kwargs
-    ) -> None:
+    async def _effect_player_warning(self, serial: str, restore_color: tuple | None, **_kwargs) -> None:
         """White flash + vibrate, restore to base color.
 
         Always pass truthy value to ensure restoration to base_colors at effect end.
