@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 
 import pytest
 
@@ -432,7 +433,8 @@ def test_flagsmith_refusal_marks_out_of_sync(flag_service, settled_link):
 def test_local_write_latency_with_flagsmith_down_and_slow(stack, flag_service, settled_link, capsys):
     """A local write never waits for Flagsmith (NFR-057): the NFR-050 propagation probe with the
     link down, then with Flagsmith slower than the link's 1 s timeout (a timeout in this tier),
-    against the test_flag_propagation.py CI bounds (p95 0.5 s, max 1.5 s)."""
+    plus the write's own answer time, against the test_flag_propagation.py CI bounds (p95 0.5 s,
+    max 1.5 s)."""
     from tests.service.test_flag_propagation import (
         MAX_BOUND_SECONDS,
         P95_BOUND_SECONDS,
@@ -448,6 +450,13 @@ def test_local_write_latency_with_flagsmith_down_and_slow(stack, flag_service, s
             setattr(fake, name, value)
         try:
             latencies = measure_write_propagation(stack, flag_service, samples=10)
+            # The write's own answer: the flag service never waits for Flagsmith before answering.
+            answers = []
+            for _ in range(10):
+                start = time.monotonic()
+                flag_service.put("observability", "flagservice.propagation_probe", value=uuid.uuid4().hex)
+                answers.append(time.monotonic() - start)
+            latencies["write_answer"] = answers
         finally:
             fake.down, fake.delay = False, 0.0
         report = format_distribution(latencies)
