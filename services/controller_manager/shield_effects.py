@@ -13,6 +13,7 @@ import math
 from dataclasses import dataclass
 
 from opentelemetry.context import Context
+from opentelemetry.trace import SpanKind
 
 from lib.colors import Colors
 from lib.telemetry import get_tracer
@@ -300,7 +301,9 @@ class ShieldEffectsMixin:
     async def _shield_render_loop(self, serial: str, kind: str, trace_context: Context | None) -> None:
         """Paint the top shield layer at 20 Hz (a charge at 10 Hz, on change) while no overlay effect owns the LED."""
         interval = 0.05
-        with tracer.start_as_current_span("controller.shield_effect", context=trace_context) as span:
+        with tracer.start_as_current_span(
+            "controller.shield_effect", context=trace_context, kind=SpanKind.CONSUMER
+        ) as span:
             span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
             span.set_attribute("shield.kind", kind)
             first = self._shield_layers.get(serial, {}).get(kind)
