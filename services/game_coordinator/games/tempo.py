@@ -16,10 +16,13 @@ constants back from it. Import ``BaseGameMode`` from ``games/base.py``; do not
 import this module on its own first.
 
 Module globals: the logger and the constants are base.py's own objects, so log
-records and the metric labels are unchanged. ``metrics``, ``tracer`` and
-``read_float_flag`` are looked up on the base module at call time (``_base.``),
-so a test that patches them on ``games.base`` still reaches this code and the
-span instrumentation scope stays base.py's tracer. Never import them by value.
+records and the metric labels are unchanged. ``tracer`` and ``read_float_flag``
+are looked up on the base module at call time (``_base.``), so a test that
+patches them on ``games.base`` still reaches this code and the span
+instrumentation scope stays base.py's tracer; never import those two by value.
+``metrics`` is imported by value (as in ``games/shields.py``), so the telemetry
+contract inventory sees the gauges recorded here; patch ``games.tempo.metrics``
+in a test that needs to intercept them.
 """
 
 import asyncio
@@ -27,7 +30,7 @@ import asyncio
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 
-from services.game_coordinator import game_clock
+from services.game_coordinator import game_clock, metrics
 from services.game_coordinator.games import base as _base
 from services.game_coordinator.games.base import (
     AUDIO_TEMPO_RETRY_MAX_SECONDS,
@@ -120,12 +123,12 @@ class TempoMixin:
         effective_death = self._lerp(self.slow_max[sens_idx], self.fast_max[sens_idx], speed_percent)
 
         labels = self._game_state_labels()
-        _base.metrics.effective_warning_threshold.labels(**labels).set(effective_warn)
-        _base.metrics.effective_death_threshold.labels(**labels).set(effective_death)
+        metrics.effective_warning_threshold.labels(**labels).set(effective_warn)
+        metrics.effective_death_threshold.labels(**labels).set(effective_death)
 
     def _emit_music_tempo_metric(self) -> None:
         """Emit this game's current music tempo (Phase 80)."""
-        _base.metrics.music_tempo.labels(**self._game_state_labels()).set(self.music_speed)
+        metrics.music_tempo.labels(**self._game_state_labels()).set(self.music_speed)
 
     async def _start_game_music(self, volume: float | None = None):
         """
