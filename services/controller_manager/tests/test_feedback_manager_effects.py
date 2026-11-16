@@ -1,0 +1,558 @@
+"""
+Unit tests for FeedbackManager effect + base_color interaction.
+
+Tests the critical behavior where base_color is updated DURING an effect,
+and verifies that the effect restores to the NEW base_color, not the old one.
+"""
+
+import asyncio
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from lib.colors import Colors
+from proto import controller_manager_pb2
+from services.controller_manager.feedback_manager import FeedbackManager
+
+
+class MockBackend:
+    """Mock backend that tracks LED color changes."""
+
+    def __init__(self):
+        self.colors: dict[str, tuple[int, int, int]] = {}
+        self.effect_active: dict[str, bool] = {}
+        self.rumble: dict[str, int] = {}
+
+    async def set_led_color(self, serial: str, r: int, g: int, b: int) -> bool:
+        """Track color changes (async, matches real backend interface)."""
+        self.colors[serial] = (r, g, b)
+        return True
+
+    async def set_rumble(self, serial: str, intensity: int) -> bool:
+        """Track rumble/vibration (async, matches real backend interface)."""
+        self.rumble[serial] = intensity
+        return True
+
+    def set_effect_active(self, serial: str, active: bool):
+        """Track effect active state."""
+        self.effect_active[serial] = active
+
+    def get_current_color(self, serial: str) -> tuple[int, int, int]:
+        """Get current color for verification."""
+        return self.colors.get(serial, (0, 0, 0))
+
+
+@pytest.fixture
+def mock_backend():
+    """Create mock backend."""
+    return MockBackend()
+
+
+@pytest.fixture
+def feedback_manager(mock_backend):
+    """Create FeedbackManager with mock backend."""
+    return FeedbackManager(
+        backend=mock_backend,
+        tracked_controllers={
+            "test_ctrl": {"name": "Test Controller"},
+        },
+    )
+
+
+class TestBaseColorDuringEffect:
+    """Test base_color updates during active effects."""
+
+    @pytest.mark.asyncio
+    async def test_base_color_updated_during_rainbow_is_restored(self, feedback_manager, mock_backend):
+        """
+        Critical test: When base_color is changed DURING a rainbow effect,
+        the effect should restore to the NEW base_color when it completes.
+
+        This simulates the real-world scenario:
+        1. Game sets team color as base_color (e.g., Yellow)
+        2. Winner rainbow effect starts
+        3. Menu sends new base_color (lobby color, e.g., Cyan)
+        4. Rainbow effect completes
+        5. Controller should show Cyan (new base_color), NOT Yellow (old)
+        """
+        serial = "test_ctrl"
+        team_color = (255, 255, 0)  # Yellow team color
+        lobby_color = (0, 60, 76)  # Cyan lobby color (dimmed)
+
+        # 1. Set initial team color as base_color
+        feedback_manager.base_colors[serial] = team_color
+        await feedback_manager.set_controller_color(serial, team_color)
+        assert mock_backend.get_current_color(serial) == team_color
+
+        # 2. Start rainbow effect (short duration for test)
+        # This will capture restore_color = team_color at the START
+        with patch("services.controller_manager.feedback_manager.get_winner_rainbow_duration_ms", return_value=100):
+            # Start the game effect (this schedules a background task)
+            await feedback_manager.handle_game_effect(
+                serial,
+                controller_manager_pb2.GAME_EFFECT_WINNER_RAINBOW,
+                "test_stream",
+            )
+
+            # Get the actual background task that's running the effect
+            active = feedback_manager.active_effects.get(serial)
+            assert active is not None, "Effect task should be running"
+
+            # Give effect time to start
+            await asyncio.sleep(0.02)
+
+            # 3. Menu updates base_color to lobby color DURING effect
+            feedback_manager.base_colors[serial] = lobby_color
+
+            # 4. Wait for the actual effect task to complete
+            await active.task
+
+        # 5. Verify controller shows NEW base_color (lobby), not old (team)
+        final_color = mock_backend.get_current_color(serial)
+        assert final_color == lobby_color, (
+            f"Expected lobby color {lobby_color}, got {final_color}. "
+            f"Effect should restore to CURRENT base_color, not the one captured at effect start."
+        )
+
+    @pytest.mark.asyncio
+    async def test_base_color_not_set_initially_still_restores(self, feedback_manager, mock_backend):
+        """
+        When base_color was NOT set when effect started, but IS set during effect,
+        the effect should still restore to the new base_color.
+        """
+        serial = "test_ctrl"
+        lobby_color = (0, 60, 76)
+
+        # 1. NO initial base_color (simulates controller just connected during game)
+        assert serial not in feedback_manager.base_colors
+
+        # 2. Start effect
+        with patch("services.controller_manager.feedback_manager.get_winner_rainbow_duration_ms", return_value=100):
+            await feedback_manager.handle_game_effect(
+                serial,
+                controller_manager_pb2.GAME_EFFECT_WINNER_RAINBOW,
+                "test_stream",
+            )
+
+            # Get the actual background task
+            active = feedback_manager.active_effects.get(serial)
+            assert active is not None, "Effect task should be running"
+
+            await asyncio.sleep(0.02)
+
+            # 3. Menu sets base_color during effect
+            feedback_manager.base_colors[serial] = lobby_color
+
+            # 4. Wait for the actual effect task to complete
+            await active.task
+
+        # 5. Should restore to the base_color that was set during effect
+        final_color = mock_backend.get_current_color(serial)
+        assert final_color == lobby_color, (
+            f"Expected {lobby_color}, got {final_color}. "
+            f"Even when base_color wasn't set initially, setting it during effect should work."
+        )
+
+    @pytest.mark.asyncio
+    async def test_death_effect_then_lobby_reset(self, feedback_manager, mock_backend):
+        """
+        Simulate player death -> game end -> lobby color reset.
+
+        1. Player has team color
+        2. Player dies (death effect sets base_color to black)
+        3. Game ends
+        4. Menu resets base_color to lobby color
+        5. Controller should show lobby color
+        """
+        serial = "test_ctrl"
+        team_color = (255, 255, 0)
+        lobby_color = (0, 60, 76)
+
+        # 1. Set team color
+        feedback_manager.base_colors[serial] = team_color
+        await feedback_manager.set_controller_color(serial, team_color)
+
+        # 2. Death effect (this sets base_color to black after completion)
+        # Use short duration for test
+        with patch.object(
+            feedback_manager, "play_effect_with_restore", wraps=feedback_manager.play_effect_with_restore
+        ):
+            await feedback_manager.handle_game_effect(
+                serial,
+                controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH,
+                "test_stream",
+            )
+
+            # Get the actual background task
+            active = feedback_manager.active_effects.get(serial)
+            if active:
+                await active.task
+
+        # After death, base_color should be black
+        assert feedback_manager.base_colors[serial] == (0, 0, 0)
+        assert mock_backend.get_current_color(serial) == (0, 0, 0)
+
+        # 3 & 4. Menu resets to lobby color (no effect running now)
+        feedback_manager.base_colors[serial] = lobby_color
+        await feedback_manager.set_controller_color(serial, lobby_color)
+
+        # 5. Should show lobby color
+        assert mock_backend.get_current_color(serial) == lobby_color
+
+    @pytest.mark.asyncio
+    async def test_death_effect_sets_black_base_before_fade_spawns(self, feedback_manager, mock_backend):
+        """
+        Regression test for #757: base_colors must be black BEFORE the fade
+        task is spawned. If it's written after, a base_color command (menu
+        lobby reset) interleaving during the fade setup gets clobbered, and
+        the fade restore leaves the LED permanently black.
+        """
+        serial = "test_ctrl"
+        feedback_manager.base_colors[serial] = (255, 255, 0)
+
+        base_at_spawn = {}
+        orig = feedback_manager._effect_fade_out
+
+        async def capture(s, *args, **kwargs):
+            base_at_spawn["value"] = feedback_manager.base_colors.get(s)
+            return await orig(s, *args, **kwargs)
+
+        with patch.object(feedback_manager, "_effect_fade_out", side_effect=capture):
+            await feedback_manager.handle_game_effect(
+                serial,
+                controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH,
+                "test_stream",
+            )
+            active = feedback_manager.active_effects.get(serial)
+            if active:
+                await active.task
+
+        assert base_at_spawn["value"] == (0, 0, 0), (
+            "base_colors must already be black when the fade spawns, so a "
+            "concurrent lobby reset always wins the write race"
+        )
+
+    @pytest.mark.asyncio
+    async def test_lobby_reset_during_death_fade_wins(self, feedback_manager, mock_backend):
+        """
+        A menu lobby reset arriving while the death fade is still running
+        must end with the lobby color, not black (#757).
+        """
+        serial = "test_ctrl"
+        team_color = (255, 255, 0)
+        lobby_color = (0, 60, 76)
+
+        feedback_manager.base_colors[serial] = team_color
+        await feedback_manager.set_controller_color(serial, team_color)
+
+        # Death effect: red phase + spawns 700ms fade task
+        await feedback_manager.handle_game_effect(
+            serial,
+            controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH,
+            "test_stream",
+        )
+        active = feedback_manager.active_effects.get(serial)
+        assert active is not None, "Fade task should be running"
+
+        # Menu lobby reset lands mid-fade
+        await feedback_manager.apply_base_color(serial, lobby_color, label="test")
+
+        await active.task
+
+        assert feedback_manager.base_colors[serial] == lobby_color
+        assert mock_backend.get_current_color(serial) == lobby_color, (
+            "Fade restore must pick up the lobby color set during the fade"
+        )
+
+
+class TestEffectRestoreLogic:
+    """Test the restore_color logic in play_effect_with_restore."""
+
+    @pytest.mark.asyncio
+    async def test_restore_uses_current_base_colors(self, feedback_manager, mock_backend):
+        """
+        The effect restore should always use the CURRENT base_colors value,
+        not the value captured when the effect started.
+        """
+        serial = "test_ctrl"
+        old_color = (255, 0, 0)  # Red
+        new_color = (0, 255, 0)  # Green
+
+        feedback_manager.base_colors[serial] = old_color
+
+        # Start effect (this schedules a background task and returns immediately)
+        await feedback_manager.play_effect_with_restore(
+            serial,
+            effect_type="flash",
+            color=(255, 255, 255),
+            duration_ms=50,
+            speed=10,
+            restore_color=old_color,  # Initial restore_color
+        )
+
+        # Get the actual background task
+        active = feedback_manager.active_effects.get(serial)
+        assert active is not None, "Effect task should be running"
+
+        # Update base_colors during effect
+        await asyncio.sleep(0.02)
+        feedback_manager.base_colors[serial] = new_color
+
+        # Wait for effect to complete
+        await active.task
+
+        # Should have restored to NEW color (read from base_colors at effect end)
+        final_color = mock_backend.get_current_color(serial)
+        assert final_color == new_color
+
+
+class TestEffectCancellation:
+    """Test that effects properly cancel previous effects."""
+
+    @pytest.mark.asyncio
+    async def test_death_effect_cancels_warning_effect(self, feedback_manager, mock_backend):
+        """
+        Critical test: Death effect should immediately cancel any active warning effect.
+
+        This simulates the real-world scenario where a player triggers warning
+        (white flash) and then immediately exceeds the death threshold.
+        The death effect should:
+        1. Cancel the warning flash immediately
+        2. Show red (not white) right away
+        3. Then fade to black
+        """
+        serial = "test_ctrl"
+        team_color = (255, 255, 0)  # Yellow team color
+
+        # Set up initial state
+        feedback_manager.base_colors[serial] = team_color
+        await feedback_manager.set_controller_color(serial, team_color)
+
+        # Start warning effect (white flash, 200ms duration)
+        await feedback_manager.handle_game_effect(
+            serial,
+            controller_manager_pb2.GAME_EFFECT_PLAYER_WARNING,
+            "test_stream",
+        )
+
+        # Verify warning effect is running (white flash active)
+        assert serial in feedback_manager.active_effects, "Warning effect should be running"
+        warning_task = feedback_manager.active_effects[serial].task
+
+        # Small delay to let warning effect start
+        await asyncio.sleep(0.01)
+
+        # Now trigger death effect (simulates player exceeding death threshold)
+        await feedback_manager.handle_game_effect(
+            serial,
+            controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH,
+            "test_stream",
+        )
+
+        # Verify warning effect was cancelled
+        assert warning_task.cancelled() or warning_task.done(), (
+            "Warning effect task should be cancelled or done after death effect starts"
+        )
+
+        # The color should now be red (death effect), not white (warning). The red hold runs as the
+        # effect task (#2540): let it take its first step.
+        await asyncio.sleep(0.01)
+        current_color = mock_backend.get_current_color(serial)
+        assert current_color == (255, 0, 0), (
+            f"Expected red (255, 0, 0) from death effect, got {current_color}. "
+            f"Death effect should immediately show red, not linger on warning white."
+        )
+
+        # Wait for death effect to complete
+        active = feedback_manager.active_effects.get(serial)
+        if active:
+            await active.task
+
+        # After death, should be black and base_color should be black
+        assert mock_backend.get_current_color(serial) == (0, 0, 0)
+        assert feedback_manager.base_colors[serial] == (0, 0, 0)
+
+    @pytest.mark.asyncio
+    async def test_effect_cancellation_clears_active_effects(self, feedback_manager, mock_backend):
+        """
+        When cancel_effect is called, it should properly clean up all tracking state.
+        """
+        serial = "test_ctrl"
+
+        # Start a long-running effect
+        await feedback_manager.play_effect_with_restore(
+            serial,
+            effect_type="flash",
+            color=(255, 255, 255),
+            duration_ms=5000,  # Long duration
+            speed=5,
+            restore_color=(0, 0, 0),
+        )
+
+        # Verify effect is running
+        assert serial in feedback_manager.active_effects
+
+        # Cancel the effect
+        await feedback_manager.cancel_effect(serial)
+
+        # Verify cleanup
+        assert serial not in feedback_manager.active_effects, (
+            "cancel_effect should remove controller from active_effects"
+        )
+
+
+class TestWarningAndDeathEffectTimings:
+    """UC-030 steps 7 and 9, controller side: the warning and death effects use fixed timings.
+
+    Warning: 200 ms white flash and 200 ms rumble. Death: 1000 ms rumble, 300 ms red, 700 ms fade.
+    """
+
+    @pytest.fixture
+    def recorded(self, feedback_manager, monkeypatch):
+        """Record the backend-facing calls of the effect handlers (no real LED loop, no real sleep)."""
+        import services.controller_manager.feedback_manager as fm
+
+        calls = {
+            "effect": AsyncMock(),
+            "vibration": AsyncMock(),
+            "led": AsyncMock(),
+            "sleep": AsyncMock(),
+        }
+        monkeypatch.setattr(feedback_manager, "play_effect_with_restore", calls["effect"])
+        monkeypatch.setattr(feedback_manager, "set_vibration", calls["vibration"])
+        monkeypatch.setattr(feedback_manager, "_set_led_color", calls["led"])
+        monkeypatch.setattr(fm.asyncio, "sleep", calls["sleep"])
+        return calls
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-030", flow="main", steps=[7])
+    async def test_warning_is_white_flash_and_rumble_for_the_fixed_times(self, feedback_manager, recorded):
+        """UC-030 step 7: 200 ms white flash, 200 ms rumble."""
+        await feedback_manager._effect_player_warning("test_ctrl", restore_color=(0, 0, 255))
+
+        recorded["effect"].assert_awaited_once_with("test_ctrl", "flash", Colors.White.value, 200, 5, (0, 0, 255))
+        recorded["vibration"].assert_awaited_once_with("test_ctrl", 100, 200)
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-030", flow="main", steps=[7])
+    async def test_warning_is_a_span_event_not_a_span(self, feedback_manager, recorded, monkeypatch):
+        """#2647: a warning adds one `player_warning` event to the current span and creates no span of its own."""
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        import services.controller_manager.feedback_manager as fm
+
+        monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)  # conftest disables the SDK
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        stream_tracer = provider.get_tracer("test")
+        with (
+            patch.object(fm, "tracer", provider.get_tracer("feedback")),
+            stream_tracer.start_as_current_span("StreamGameplayData"),
+        ):
+            await feedback_manager._effect_player_warning("test_ctrl", restore_color=(0, 0, 255))
+
+        spans = exporter.get_finished_spans()
+        assert [s.name for s in spans] == ["StreamGameplayData"]
+        events = [e for e in spans[0].events if e.name == "player_warning"]
+        assert len(events) == 1
+        assert dict(events[0].attributes) == {
+            "controller.serial": "test_ctrl",
+            "flash_color": "white",
+            "flash_duration_ms": 200,
+            "vibration_intensity": 100,
+            "vibration_duration_ms": 200,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-030", flow="main", steps=[9])
+    async def test_death_is_rumble_red_hold_then_fade_for_the_fixed_times(self, feedback_manager, recorded):
+        """UC-030 step 9: 1000 ms rumble, 300 ms red hold, 700 ms fade."""
+        fade = AsyncMock()
+        feedback_manager._effect_fade_out = fade
+        await feedback_manager._effect_player_death("test_ctrl")
+        # The red hold and the fade run as the controller's effect task (#2540).
+        await feedback_manager.active_effects["test_ctrl"].task
+
+        recorded["vibration"].assert_awaited_once_with("test_ctrl", 255, 1000)
+        assert recorded["led"].await_args_list[0].args == ("test_ctrl", Colors.Red.value)
+        assert recorded["led"].await_args_list[-1].args == ("test_ctrl", Colors.Black.value)  # the restore
+        recorded["sleep"].assert_awaited_once_with(pytest.approx(0.3))
+        fade.assert_awaited_once_with("test_ctrl", Colors.Red.value, 700)
+        assert feedback_manager.base_colors["test_ctrl"] == Colors.Black.value
+
+
+class TestDeathRumbleRunsToTheEnd:
+    """UC-030 step 9 (#1832): the ~1 s death rumble is distinct from the warning and is not cut short.
+
+    Deterministic: the rumble stop timer (the one asyncio.sleep of DEATH_RUMBLE_MS) is held on a gate
+    instead of the wall clock; every other sleep passes through.
+    """
+
+    @pytest.fixture
+    def stop_gate(self, monkeypatch):
+        import services.controller_manager.feedback_manager as fm
+
+        real_sleep = asyncio.sleep
+        gate = asyncio.Event()
+        gate.durations = []
+
+        async def fake_sleep(delay, *_args, **_kwargs):
+            if delay == fm.DEATH_RUMBLE_MS / 1000.0:
+                gate.durations.append(delay)
+                await gate.wait()
+            else:
+                await real_sleep(0.001)
+
+        monkeypatch.setattr(fm.asyncio, "sleep", fake_sleep)
+        return gate
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-030", flow="main", steps=[9])
+    async def test_death_rumble_is_one_second_and_longer_than_warning(self, feedback_manager, mock_backend, stop_gate):
+        import services.controller_manager.feedback_manager as fm
+
+        assert fm.DEATH_RUMBLE_MS >= 1000
+        assert fm.DEATH_RUMBLE_MS > 4 * fm.WARNING_VIBRATION_MS
+
+        await feedback_manager.handle_game_effect("test_ctrl", controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH)
+        await asyncio.sleep(0)
+
+        assert stop_gate.durations == [1.0]
+        assert mock_backend.rumble["test_ctrl"] == 255
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-030", flow="main", steps=[9])
+    async def test_rumble_survives_fade_lobby_reset_and_game_end(self, feedback_manager, mock_backend, stop_gate):
+        """A base-colour reset (menu after game end) and cancel_if_cancellable do not stop the rumble.
+
+        The stop timer lives in the feedback manager, not in the gameplay stream, so closing the
+        stream at game end leaves it running until the 1 s are over.
+        """
+        await feedback_manager.handle_game_effect("test_ctrl", controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH)
+        await feedback_manager.apply_base_color("test_ctrl", (0, 60, 76), label="game end")
+        await feedback_manager.cancel_if_cancellable("test_ctrl")
+        await asyncio.sleep(0)
+        assert mock_backend.rumble["test_ctrl"] == 255, "rumble must still run before the stop timer fires"
+
+        stop_gate.set()
+        await feedback_manager.vibration_tasks["test_ctrl"]
+        assert mock_backend.rumble["test_ctrl"] == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-030", flow="main", steps=[9])
+    async def test_clear_controller_cancels_the_rumble_stop_timer(self, feedback_manager, mock_backend, stop_gate):
+        """A disconnect drops the stop timer so it cannot cut a reconnected controller's new rumble."""
+        await feedback_manager.handle_game_effect("test_ctrl", controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH)
+        timer = feedback_manager.vibration_tasks["test_ctrl"]
+
+        feedback_manager.clear_controller("test_ctrl")
+        await asyncio.sleep(0.01)
+
+        assert timer.cancelled()
+        assert "test_ctrl" not in feedback_manager.vibration_tasks
+        stop_gate.set()
+        await asyncio.sleep(0.01)
+        assert mock_backend.rumble["test_ctrl"] == 255, "cancelled timer must not write a stop"
