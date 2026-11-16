@@ -47,6 +47,7 @@ from lib.telemetry import inject_trace_context
 from lib.types import GameEvent, Sensitivity, Sound
 from services.game_coordinator import game_clock, metrics
 from services.game_coordinator.games.analytics import PlayerAnalytics
+from services.game_coordinator.games.ground_truth import GroundTruth
 from services.game_coordinator.games.flag_snapshot import (  # noqa: F401  re-exported: games/shields.py and the tests import them from base
     CHARGE_EXPIRY_MAX_SECONDS,
     DEFAULT_CHARGE_EXPIRY_SECONDS,
@@ -756,6 +757,8 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         self.game_error_published = False
         # The game root span (current when run() starts); the outcome lands on it.
         self._game_root_span: trace.Span | None = None
+        # Warning and death times per serial, recorded on the root at a normal end (UC-100 BR-006).
+        self._ground_truth = GroundTruth()
         self.gameplay_stream = None  # Phase 46: Bidirectional stream for feedback commands
         # Deaths whose PLAYER_DEATH write failed on a dying call: the next stream sends it (UC-030 BR-006, #2471).
         self._undelivered_deaths: set[str] = set()
@@ -2532,6 +2535,9 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # This is NOT protection - player can still die during this time!
         player.warning_until = game_clock.now() + WARNING_DURATION
 
+        # UC-100 BR-006: the warning's time, whatever analytics.enabled says.
+        self._ground_truth.record_warning(serial)
+
         # Analytics: Record warning event
         if player.analytics is not None:
             player.analytics.record_warning()
@@ -3199,6 +3205,8 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # UC-030 step 9: one increment per death (respawn modes count each death).
         # Aggregate {mode, game_kind} only; per-player order is the gauge above.
         metrics.player_deaths_total.labels(mode=self.get_game_name(), game_kind=self.game_kind).inc()
+        # UC-100 BR-006: the death's time, next to its player_death record.
+        self._ground_truth.record_death(serial)
 
         # Extract trace context BEFORE _kill_player_impl() which may close the span.
         # This ensures the death effect and sound are parented to the player_lifecycle
@@ -3372,6 +3380,16 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             self._game_root_span.set_attributes(attrs)
         if teardown_span is not None:
             teardown_span.add_event("game.outcome", attributes=attrs)
+
+    def _record_ground_truth(self) -> None:
+        """One ``challenge.ground_truth`` event per player on the game root (UC-100 step 6, BR-006).
+
+        Only at a normal end: none for a force-ended game or a run that failed (UC-100 A5).
+        """
+        if self._run_failed or self._game_outcome_attributes()["game.outcome"] == "force_ended":
+            return
+        names = {serial: player.name or "" for serial, player in self.players.items()}
+        self._ground_truth.record_on(self._game_root_span, names)
 
     def _record_force_ended_outcome_if_unrecorded(self) -> None:
         """For run() overrides: a game force-ended before its teardown still records force_ended."""
@@ -3685,6 +3703,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                         progress.shield_feedback_ended = True
                         self._record_game_outcome(teardown_span)
                         self._teardown_after_outcome()
+                        self._record_ground_truth()
                     if game_span is not None:
                         game_span.set_status(Status(StatusCode.OK))
             except Exception as e:
