@@ -198,9 +198,12 @@ func TestEffectSpans_EachChildOfItsOwnDecision(t *testing.T) {
 			}
 		}
 		for id, spans := range effects {
-			// One span per baseline signal, no extra wrapper span.
-			if len(spans) != len(enduranceBaseline()) {
-				t.Fatalf("intervention %s: %d effect spans, want %d (one per signal)", id, len(spans), len(enduranceBaseline()))
+			// One span per intervention (#2640), every baseline signal an entry of it.
+			if len(spans) != 1 {
+				t.Fatalf("intervention %s: %d effect spans, want 1 (one per intervention)", id, len(spans))
+			}
+			if got := effectSignalsOf(t, spans[0]); len(got) != len(enduranceBaseline()) {
+				t.Fatalf("intervention %s: %d signals on the span, want %d", id, len(got), len(enduranceBaseline()))
 			}
 			want := decisionOf[id]
 			for _, s := range spans {
@@ -211,7 +214,7 @@ func TestEffectSpans_EachChildOfItsOwnDecision(t *testing.T) {
 					t.Fatalf("effect parent = %s, want its own decision %s", s.Parent().SpanID(), want.SpanID())
 				}
 				if _, ok := attrValue(s, AttrEffectSignal); !ok {
-					t.Fatal("every effect span names its signal")
+					t.Fatal("the effect span names the objective's primary signal")
 				}
 			}
 		}

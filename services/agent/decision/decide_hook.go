@@ -825,6 +825,7 @@ func (l *Loop) decideRemoteApply(ctx context.Context, snapshot flags.Snapshot, c
 		return
 	case DecideOutcomeNoop:
 		rec.outcome = DecideOutcomeNoop
+		l.noteNoopAnswer(current, rec.used)
 		return
 	}
 	rec.routed = true
@@ -836,6 +837,7 @@ func (l *Loop) decideRemoteApply(ctx context.Context, snapshot flags.Snapshot, c
 	}
 	if rec.confidence < rec.threshold {
 		rec.outcome = DecideOutcomeHeld
+		l.noteIntervention(current, d, NotedHeld, rec.used, l.nowOrDefault()())
 		return
 	}
 	rec.outcome = DecideOutcomeAct

@@ -150,8 +150,9 @@ http://localhost/jaeger/search?service=agent&lookback=2d&limit=50&tags=%7B%22gam
 ```
 
 Manual: **Service** `agent` · leave **Operation** as *all* · **Tags**
-`{"game.id":"game_<id>"}`. **Validated live: 4 traces** for that id (the
-signal/decision/action spine plus the game summary). This pulls the whole agent
+`{"game.id":"game_<id>"}`. **Validated live (before #2640): 4 traces** for that id (the
+signal/decision/action spine plus the game summary). Since #2640 the game summary sits in
+the game's own trace when the agent knows the game trace ids, so expect one trace fewer. This pulls the whole agent
 storyline — signals, decisions, actions, the retro, and `agent.game.summary` —
 for one game.
 

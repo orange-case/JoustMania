@@ -186,13 +186,11 @@ func landingBaselines(t *testing.T, sent, landing gamecontext.GameContext) map[s
 
 	out := map[string]float64{}
 	for _, s := range spansByName(h.sr.Ended(), SpanInterventionEffect) {
-		attrs := attrMap(s.Attributes())
-		signal, _ := attrs[AttrEffectSignal].(string)
-		baseline, ok := attrs[AttrEffectBaseline].(float64)
-		if !ok {
-			t.Fatalf("effect span has no %s: %v", AttrEffectBaseline, attrs)
+		for signal, e := range effectSignalsOf(t, s) {
+			if e.Baseline != nil {
+				out[signal] = *e.Baseline
+			}
 		}
-		out[signal] = baseline
 	}
 	if len(out) == 0 {
 		t.Fatal("no agent.intervention.effect span for the remote decision")
