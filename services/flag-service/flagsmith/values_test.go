@@ -19,6 +19,7 @@ func flagOf(def string, variants map[string]string) *baseline.Flag {
 }
 
 // UC: UC-054 A4
+// UC: UC-055 BR-001
 func TestEncodeDecode(t *testing.T) {
 	variants := &registry.Policy{Key: "sensitivity", Kind: registry.KindOverlay}
 	sens := flagOf("mid", map[string]string{"slow": "1", "mid": "2"})

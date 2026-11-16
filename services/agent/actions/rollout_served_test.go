@@ -38,8 +38,11 @@ func servedVariant(t *testing.T, svc *fake.Service) string {
 
 // ServedStage reports the served stage, whether it is the agent's own overlay and
 // the boot epoch, so the loop can tell its write from an operator's and notice a
-// flag-service restart.
+// flag-service restart. A value the Flagsmith link applied (writer
+// "flagsmith") is an operator's, never the agent's, even when it equals the
+// agent's last write.
 // UC: UC-050 BR-001
+// UC: UC-054 BR-009
 func TestRolloutWriter_ServedStage(t *testing.T) {
 	svc := rolloutFlagService(t)
 	w := NewRolloutWriter(svc, discardLogger())
@@ -68,6 +71,21 @@ func TestRolloutWriter_ServedStage(t *testing.T) {
 		got, err := w.ServedStage(ctx)
 		if err != nil || got.ByAgent || got.Value != StageNoneValue {
 			t.Fatalf("ServedStage() = (%+v, %v), want none, not by agent", got, err)
+		}
+	})
+	t.Run("UC-054/BR-009 a value set in Flagsmith is not the agent's", func(t *testing.T) {
+		// The stage as the agent left it: its own write of three.
+		if err := w.SetControllerCount(StageThreeVariant); err != nil {
+			t.Fatal(err)
+		}
+		// The Flagsmith link applies the operator's value with writer "flagsmith".
+		if _, err := svc.Put(ctx, FlagSetRollout, flagCurrentControllerCount,
+			flagservice.Write{Variant: StageThreeVariant, Writer: "flagsmith"}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := w.ServedStage(ctx)
+		if err != nil || got.ByAgent || got.Value != StageThreeValue {
+			t.Fatalf("ServedStage() = (%+v, %v), want three, not by agent", got, err)
 		}
 	})
 	t.Run("UC-050/BR-001 a flag-service restart changes the epoch", func(t *testing.T) {

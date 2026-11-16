@@ -375,7 +375,7 @@ var (
 	offValue   = flagsmith.Value{Present: true, Variant: "off", Value: json.RawMessage("false")}
 )
 
-// UC: UC-054 3
+// UC: UC-054 main step 3 step 5 step 7 BR-001 BR-004
 // A change made in Flagsmith is applied as an in-process write labelled
 // flagsmith, persisted for an admin setting, a child of the pull span; the
 // same document again writes nothing (no echo, BR-004); the change delay is
@@ -391,11 +391,11 @@ func TestPullAppliesChange(t *testing.T) {
 	h.round()
 	v, persisted := h.local("agent", "decision.backend", flagsmith.ScopeStack)
 	if v.Variant != "claude" || !persisted {
-		t.Fatalf("UC-054/5 decision.backend = %+v persisted %v, want claude persisted", v, persisted)
+		t.Fatalf("UC-054/main step 5 decision.backend = %+v persisted %v, want claude persisted", v, persisted)
 	}
 	ws := h.writeSpans("decision.backend")
 	if len(ws) != 1 {
-		t.Fatalf("UC-054/5 %d write spans, want 1", len(ws))
+		t.Fatalf("UC-054/main step 5 %d write spans, want 1", len(ws))
 	}
 	var writer string
 	for _, a := range ws[0].Attributes() {
@@ -408,10 +408,10 @@ func TestPullAppliesChange(t *testing.T) {
 	}
 	pulls := h.ended(flagsmith.SpanPull)
 	if ws[0].Parent().SpanID() != pulls[len(pulls)-1].SpanContext().SpanID() {
-		t.Fatal("UC-054/7 the write span is not a child of flagservice.flagsmith.pull")
+		t.Fatal("UC-054/main step 7 the write span is not a child of flagservice.flagsmith.pull")
 	}
 	if st := h.link.Status(); st.Pending != 0 || st.OutOfSync != 0 {
-		t.Fatalf("UC-054/7 status %+v, want nothing pending, in sync", st)
+		t.Fatalf("UC-054/main step 7 status %+v, want nothing pending, in sync", st)
 	}
 	if n := h.histogramCount(flagsmith.MetricChangeDelay); n != 1 {
 		t.Fatalf("NFR-058 change delay samples %d, want 1", n)
@@ -496,10 +496,10 @@ func TestPulledWriteIsConditional(t *testing.T) {
 		t.Fatalf("UC-054/BR-005 agent/enabled = %+v after the conflict, want off (tightened)", v)
 	}
 	if st := h.link.Status(); st.Pending != 1 {
-		t.Fatalf("UC-054/A2.1 pending %d, want the local off queued for push", st.Pending)
+		t.Fatalf("UC-054/A2 step 1 pending %d, want the local off queued for push", st.Pending)
 	}
 	if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionTightened); n != 1 {
-		t.Fatalf("UC-054/A2.1 tightened conflicts %d, want 1", n)
+		t.Fatalf("UC-054/A2 step 1 tightened conflicts %d, want 1", n)
 	}
 }
 
@@ -514,21 +514,63 @@ func TestNoStreamDefers(t *testing.T) {
 	h.setDoc([]map[string]any{fsState("decision.backend", true, "claude")})
 	h.round()
 	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Present {
-		t.Fatalf("UC-054/A5.1 applied without a stream: %+v", v)
+		t.Fatalf("UC-054/A5 step 1 applied without a stream: %+v", v)
 	}
 	if got := h.link.LastModified(); got != lm {
-		t.Fatalf("UC-054/A5.1 Last-Modified moved %q -> %q on a deferral", lm, got)
+		t.Fatalf("UC-054/A5 step 1 Last-Modified moved %q -> %q on a deferral", lm, got)
 	}
 	if _, ok := h.link.Links().Remote(flagsmith.Key{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}); ok {
 		if r, _ := h.link.Links().Remote(flagsmith.Key{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}); r.Present {
-			t.Fatalf("UC-054/A5.1 remote %+v, want not seen", r)
+			t.Fatalf("UC-054/A5 step 1 remote %+v, want not seen", r)
 		}
 	}
 	h.sub, _ = h.st.Subscribe("")
 	h.round()
 	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" {
-		t.Fatalf("UC-054/A5.2 decision.backend = %+v once flagd connected, want claude", v)
+		t.Fatalf("UC-054/A5 step 2 decision.backend = %+v once flagd connected, want claude", v)
 	}
+}
+
+// UC: UC-054 A2
+// A flag (not a kill switch) changed both locally and in Flagsmith since the
+// last state seen from Flagsmith: the Flagsmith value wins and the conflict is
+// recorded with both values on the pull span.
+func TestConflictRecordedWithBothValues(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 700)})
+	h.round()
+	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
+		t.Fatalf("setup: decision.min_interval_ms = %+v, want 700 from Flagsmith", v)
+	}
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("800")})
+	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 900)})
+	h.round()
+	t.Run("UC-054/A2 step 2 Flagsmith wins and the conflict carries both values", func(t *testing.T) {
+		if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "900" {
+			t.Fatalf("decision.min_interval_ms = %+v after the conflict, want 900 (Flagsmith wins)", v)
+		}
+		var got []map[string]string
+		for _, s := range h.ended("flagservice.flagsmith.pull") {
+			for _, ev := range s.Events() {
+				if ev.Name != flagsmith.EventConflict {
+					continue
+				}
+				attrs := map[string]string{}
+				for _, a := range ev.Attributes {
+					attrs[string(a.Key)] = a.Value.AsString()
+				}
+				got = append(got, attrs)
+			}
+		}
+		if len(got) != 1 {
+			t.Fatalf("%d conflict events %v, want 1", len(got), got)
+		}
+		c := got[0]
+		if c[flagsmith.AttrLocalValue] != "800" || c[flagsmith.AttrRemoteValue] != "900" || c[flagsmith.AttrResolution] != flagsmith.ResolutionFlagsmith {
+			t.Fatalf("conflict event %v, want local 800, remote 900, resolution flagsmith", c)
+		}
+	})
 }
 
 // UC: UC-054 A4
@@ -545,29 +587,29 @@ func TestRefusedChangeIsUnhealthy(t *testing.T) {
 	p := h.healthPosts()[0]
 	if p["feature"] != "decision.min_interval_ms" || p["status"] != "unhealthy" || p["environment"] != "stage" ||
 		!strings.Contains(string(mustJSON(p["reason"])), fserr.OutOfBounds) {
-		t.Fatalf("UC-054/A4.2 health post %v", p)
+		t.Fatalf("UC-054/A4 step 2 health post %v", p)
 	}
 	if after, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); !after.Equal(before) {
-		t.Fatalf("UC-054/A4.1 local value changed to %+v", after)
+		t.Fatalf("UC-054/A4 step 1 local value changed to %+v", after)
 	}
 	if st := h.link.Status(); st.Refused != 1 {
-		t.Fatalf("UC-054/A4.1 refused %d, want 1", st.Refused)
+		t.Fatalf("UC-054/A4 step 1 refused %d, want 1", st.Refused)
 	}
 	writes := len(h.writeSpans("decision.min_interval_ms"))
 	h.round()
 	if got := len(h.writeSpans("decision.min_interval_ms")); got != writes {
-		t.Fatalf("UC-054/A4.3 the refused value was tried again (%d -> %d writes)", writes, got)
+		t.Fatalf("UC-054/A4 step 3 the refused value was tried again (%d -> %d writes)", writes, got)
 	}
 	if st := h.link.Status(); st.Pending != 0 {
-		t.Fatalf("UC-054/A4.3 pending %d: the local value would be pushed over the refused one", st.Pending)
+		t.Fatalf("UC-054/A4 step 3 pending %d: the local value would be pushed over the refused one", st.Pending)
 	}
 	if n := len(h.healthPosts()); n != 1 {
-		t.Fatalf("UC-054/A4.2 %d health posts, want 1 (posted on the transition only)", n)
+		t.Fatalf("UC-054/A4 step 2 %d health posts, want 1 (posted on the transition only)", n)
 	}
 	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 500)})
 	h.round()
 	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "500" {
-		t.Fatalf("UC-054/A4.3 the next valid value was not applied: %+v", v)
+		t.Fatalf("UC-054/A4 step 3 the next valid value was not applied: %+v", v)
 	}
 	h.waitFor("a healthy post", func() bool { return len(h.healthPosts()) == 2 })
 	if p := h.healthPosts()[1]; p["status"] != "healthy" {
@@ -599,7 +641,7 @@ func TestReadOnlyScopeRefused(t *testing.T) {
 	}
 }
 
-// UC: UC-054 A1
+// UC: UC-054 A3
 // Without use_identity_overrides_in_local_eval the link stays offline with
 // reason identity_overrides_disabled.
 func TestIdentityOverridesDisabled(t *testing.T) {
@@ -612,7 +654,7 @@ func TestIdentityOverridesDisabled(t *testing.T) {
 	})
 }
 
-// UC: UC-054 4
+// UC: UC-054 main step 4
 // An event payload set on game:<id> is appended once; the same document, and
 // a document holding the pushed list, append nothing (§4.3).
 func TestEventAppendedOnce(t *testing.T) {
@@ -631,7 +673,7 @@ func TestEventAppendedOnce(t *testing.T) {
 	h.setDoc(nil, override{"game:g1", []map[string]any{fsState("eliminate_player", true, `{"serial":"MOCK0003"}`)}})
 	h.round()
 	if n := len(events()); n != 1 {
-		t.Fatalf("UC-054/4 %d events after one payload, want 1", n)
+		t.Fatalf("UC-054/main step 4 %d events after one payload, want 1", n)
 	}
 	h.round()
 	if n := len(events()); n != 1 {
@@ -644,11 +686,11 @@ func TestEventAppendedOnce(t *testing.T) {
 		t.Fatalf("UC-054/BR-004 %d events after the pushed list came back, want 1", n)
 	}
 	if st := h.link.Status(); st.Refused != 0 {
-		t.Fatalf("UC-054/4 refused %d, want 0", st.Refused)
+		t.Fatalf("UC-054/main step 4 refused %d, want 0", st.Refused)
 	}
 }
 
-// UC: UC-054 2
+// UC: UC-054 main step 2
 // Conditional pulls (§4.2 steps 1 and 8): after a 200 with a changed document
 // the next pull has no If-Modified-Since; an unchanged one makes the next
 // conditional; every 10th pull is unconditional; while a game is live every
@@ -662,11 +704,11 @@ func TestConditionalPulls(t *testing.T) {
 	h.round()
 	n := len(h.docRequests())
 	if got := ims(n - 1); got != "" {
-		t.Fatalf("UC-054/2 pull after a changed document sent If-Modified-Since %q", got)
+		t.Fatalf("UC-054/main step 2 pull after a changed document sent If-Modified-Since %q", got)
 	}
 	h.round()
 	if got := ims(len(h.docRequests()) - 1); got == "" {
-		t.Fatal("UC-054/2 pull after an unchanged document is not conditional")
+		t.Fatal("UC-054/main step 2 pull after an unchanged document is not conditional")
 	}
 	unconditional := 0
 	for range 10 {
@@ -676,7 +718,7 @@ func TestConditionalPulls(t *testing.T) {
 		}
 	}
 	if unconditional != 1 {
-		t.Fatalf("UC-054/2 %d unconditional pulls in 10 unchanged rounds, want 1", unconditional)
+		t.Fatalf("UC-054/main step 2 %d unconditional pulls in 10 unchanged rounds, want 1", unconditional)
 	}
 	if _, ferr := h.st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "shadow", Serials: []string{"MOCK0001"}}); ferr != nil {
 		t.Fatal(ferr)
@@ -684,16 +726,16 @@ func TestConditionalPulls(t *testing.T) {
 	for range 3 {
 		h.round()
 		if got := ims(len(h.docRequests()) - 1); got != "" {
-			t.Fatalf("UC-054/2 a pull while a game is live sent If-Modified-Since %q", got)
+			t.Fatalf("UC-054/main step 2 a pull while a game is live sent If-Modified-Since %q", got)
 		}
 	}
 }
 
-// UC: UC-054 2
+// UC: UC-054 main step 2
 // The realtime stream wakes the poller (trigger realtime); a stream that
 // cannot open leaves the link online and polling.
 func TestRealtimeWakes(t *testing.T) {
-	t.Run("UC-054/2 an SSE event pulls at once", func(t *testing.T) {
+	t.Run("UC-054/main step 2 an SSE event pulls at once", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{realtime: func(f *flagsmithtest.Fake) string { return f.Server.URL + "/" }})
 		h.online()
 		h.waitFor("the SSE stream open", func() bool { return len(h.fake.RequestsTo(http.MethodGet, "/sse/environments/envkey/stream")) == 1 })
@@ -703,17 +745,17 @@ func TestRealtimeWakes(t *testing.T) {
 		last := h.ended(flagsmith.SpanPull)[n]
 		for _, a := range last.Attributes() {
 			if a.Key == flagsmith.AttrTrigger && a.Value.AsString() != flagsmith.TriggerRealtime {
-				t.Fatalf("UC-054/2 trigger %q, want realtime", a.Value.AsString())
+				t.Fatalf("UC-054/main step 2 trigger %q, want realtime", a.Value.AsString())
 			}
 		}
 	})
-	t.Run("UC-054/2 a stream that answers 404 leaves polling on", func(t *testing.T) {
+	t.Run("UC-054/main step 2 a stream that answers 404 leaves polling on", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{realtime: func(f *flagsmithtest.Fake) string { return f.Server.URL + "/nope/" }})
 		h.online()
 		h.waitFor("the stream tried", func() bool { return len(h.fake.RequestsTo(http.MethodGet, "/nope/")) >= 1 })
 		h.round()
 		if h.link.Mode() != flagsmith.ModeOnline {
-			t.Fatalf("UC-054/2 link %s after a failed stream, want online", h.link.Mode())
+			t.Fatalf("UC-054/main step 2 link %s after a failed stream, want online", h.link.Mode())
 		}
 	})
 }
@@ -823,7 +865,7 @@ func TestOverrideWaitsForGame(t *testing.T) {
 	}
 	h.round()
 	if v, _ := h.local("interventions", "global_sensitivity_override", "game:g9"); string(v.Value) != "2" {
-		t.Fatalf("UC-054/4 override = %+v after the game registered, want 2", v)
+		t.Fatalf("UC-054/main step 4 override = %+v after the game registered, want 2", v)
 	}
 	time.Sleep(50 * time.Millisecond)
 	if n := len(h.healthPosts()); n != 0 {

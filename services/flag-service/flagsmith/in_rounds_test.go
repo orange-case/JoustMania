@@ -161,7 +161,7 @@ func serialValues(h *harness, serials []string) int {
 	return n
 }
 
-// UC: UC-054 BR-006
+// UC: UC-054 A3 BR-006
 // The restart rule (#2590 P10, P13, R6): the first round after start skips
 // the keys the rule cleared; later, a value an API key set on an admin
 // setting or on a game identity is not brought back (the local value wins and
