@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.15.0...joustmania-v0.16.0) (2026-11-16)
+
+
+### Features
+
+* **dashboard:** Orange Case look with light and dark theme ([#2617](https://github.com/orange-case/JoustMania/issues/2617)) ([ff9315c](https://github.com/orange-case/JoustMania/commit/ff9315c324863cf6c40272c374e52302e403d2fa))
+
+
+### Bug Fixes
+
+* **ci:** release and compose default to ghcr.io/orange-case/joustmania ([#2618](https://github.com/orange-case/JoustMania/issues/2618)) ([fe95618](https://github.com/orange-case/JoustMania/commit/fe9561882f050f752deaa6c224e97b7377fb948d))
+
 ## [0.15.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.14.0...joustmania-v0.15.0) (2026-11-16)
 
 
