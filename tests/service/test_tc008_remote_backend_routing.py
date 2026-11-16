@@ -45,9 +45,9 @@ from tests.service.agent_flow import (
     decide_spans,
     evaluation_events,
     intervention_events,
-    parent,
     scripted_flag_value,
     start_ffa,
+    trace_of,
     wait_agent_flags_served,
     wait_decide_span,
     wait_first_call,
@@ -77,7 +77,8 @@ def _configure(stack, backend: str, **kwargs) -> None:
 async def test_rules_backend_default_unchanged(fresh_stack):
     """decision.backend=rules (TC-008 step 8): the rules engine decides, recorded on an
     agent.decide span (backend=rules, requested=rules, no fallback) that is a SIBLING of
-    the rules agent.decision under agent.signal_received; the fake is never called."""
+    the rules agent.decision (same parent, same decide.state.digest; #2648: no
+    agent.signal_received span in the game trace); the fake is never called."""
     stack = fresh_stack
     stack.fake_openai.script("valid", confidence=HIGH_CONFIDENCE)
     # interventions stay off: this case observes the rules decision, not its effect.
@@ -106,13 +107,23 @@ async def test_rules_backend_default_unchanged(fresh_stack):
             assert tags.get("decide.outcome") == "act", tags
             # The coordinator's "primary" label is normalised to "real" (#1249).
             assert tags.get("game.kind") == "real", tags
-            # Sync rules path shape: agent.decide and agent.decision share one parent
-            # (the game's game_cycle, or agent.signal_received without game ids,
-            # #2648); no backend chat span.
+            # Sync rules path shape (#2648): agent.decide and its agent.decision are
+            # siblings (one parent, the coordinator's game_cycle, which may still be
+            # open so it is not looked up), paired by decide.state.digest; the Export
+            # is an event on the decide, not a span; no backend chat span.
             assert span.parent_span_id, "agent.decide has no parent on the rules path"
-            signal = parent(stack, span)
-            assert signal is not None, "agent.decide parent missing"
-            assert children(stack, signal, "agent.decision"), "no sibling agent.decision"
+            digest = tags.get("decide.state.digest")
+            assert digest, tags
+            siblings = [
+                s
+                for s in trace_of(stack, span)
+                if s.name == "agent.decision"
+                and s.parent_span_id == span.parent_span_id
+                and s.attributes.get("decide.state.digest") == digest
+            ]
+            assert siblings, "no sibling agent.decision with the decide's state digest"
+            assert [e for e in span.events if e.name == "agent.signal_received"], span.events
+            assert not [s for s in trace_of(stack, span) if s.name == "agent.signal_received"]
             assert not children(stack, span), "the rules agent.decide span must have no children"
             assert stack.fake_openai.requests(game_id) == [], "the rules backend must never call the remote backend"
     finally:
