@@ -105,7 +105,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(game_active{game_kind=\"real\"}) or vector(0)",
+          "expr": "sum(game_active{game_kind=~\"real|primary\"}) or vector(0)",
           "refId": "A",
           "legendFormat": "real"
         },
@@ -186,12 +186,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(game_active_players{game_kind=\"real\"}) or vector(0)",
+          "expr": "sum(game_active_players{game_kind=~\"real|primary\"}) or vector(0)",
           "refId": "B",
           "legendFormat": "in game"
         }
       ],
-      "description": "Players alive and players in the real game. game_players_alive has no labels and only the real (primary) game sets it; shadow games never write it."
+      "description": "Players alive and players in the real game. game_players_alive has no labels and only the real game sets it; shadow games never write it."
     },
     {
       "type": "stat",
@@ -1564,7 +1564,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Acceleration magnitude of every connected real controller, one line per controller name, whether or not a game is running (mock controllers, including the agent's shadow-game bots, are left out); dashed lines = warning and death thresholds of the live primary game. About 10 Hz (OTLP export every 100 ms). topk by (serial) keeps one controller_info series per serial, so a rename inside the lookbehind cannot break the join.",
+      "description": "Acceleration magnitude of every connected real controller, one line per controller name, whether or not a game is running (mock controllers, including the agent's shadow-game bots, are left out); dashed lines = warning and death thresholds of the live real game. About 10 Hz (OTLP export every 100 ms). topk by (serial) keeps one controller_info series per serial, so a rename inside the lookbehind cannot break the join.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1730,7 +1730,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(game_effective_warning_threshold{game_kind=\"real\"})",
+          "expr": "max(game_effective_warning_threshold{game_kind=~\"real|primary\"})",
           "legendFormat": "Warning",
           "refId": "B",
           "instant": false,
@@ -1741,7 +1741,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(game_effective_death_threshold{game_kind=\"real\"})",
+          "expr": "max(game_effective_death_threshold{game_kind=~\"real|primary\"})",
           "legendFormat": "Death",
           "refId": "C",
           "instant": false,
@@ -2653,7 +2653,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(game_effective_warning_threshold{game_kind=\"real\"})",
+          "expr": "max(game_effective_warning_threshold{game_kind=~\"real|primary\"})",
           "legendFormat": "Warning",
           "refId": "B",
           "instant": false,
@@ -2664,7 +2664,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(game_effective_death_threshold{game_kind=\"real\"})",
+          "expr": "max(game_effective_death_threshold{game_kind=~\"real|primary\"})",
           "legendFormat": "Death",
           "refId": "C",
           "instant": false,
@@ -2967,7 +2967,7 @@
           "uid": "prometheus"
         },
         "definition": "label_values(games_started_total, game_kind)",
-        "description": "game_kind of the per-game panels: real = the menu game, shadow = headless agent games.",
+        "description": "game_kind of the per-game panels: real = the menu game, shadow = headless agent games. `primary` is the pre-#2646 label of the real game: it lists until the old series leave VictoriaMetrics (7 d retention after the release with #2646).",
         "hide": 0,
         "includeAll": true,
         "allValue": ".*",

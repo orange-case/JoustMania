@@ -9,13 +9,15 @@ import { vmQuery } from "./vm.js";
 import type { VmQueryResponse } from "./vm.js";
 import type { GetMenuStatusResponseLike } from "./gen/menu_pb.js";
 
+// TODO(#2646): `primary` is the pre-#2646 label of the real game; drop it from these selectors (and the
+// Grafana `game_kind=~"real|primary"` panels) 7 days after the release that carries #2646 (VictoriaMetrics retention).
 /** `last_over_time[1m]` drops the series of an ended game within a minute (OTLP writes no staleness marker). */
 export const STAGE_QUERY =
-  'last_over_time({__name__=~"game_shield_activation_mode|game_shield_hold_setting|game_sensitivity",game_kind="real"}[1m])';
+  'last_over_time({__name__=~"game_shield_activation_mode|game_shield_hold_setting|game_sensitivity",game_kind=~"real|primary"}[1m])';
 
 /** Newest sample time per series, to tell the live game from one that ended within the window. */
 export const STAGE_TS_QUERY =
-  'tlast_over_time({__name__=~"game_shield_activation_mode|game_shield_hold_setting|game_sensitivity",game_kind="real"}[1m])';
+  'tlast_over_time({__name__=~"game_shield_activation_mode|game_shield_hold_setting|game_sensitivity",game_kind=~"real|primary"}[1m])';
 
 const SENSITIVITY_NAMES = ["ultra slow", "slow", "medium", "fast", "ultra fast"];
 const HOLD_SHOWN: Array<[string, string]> = [
