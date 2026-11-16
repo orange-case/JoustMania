@@ -37,11 +37,15 @@ and in unit tests (no provider) they are no-ops.
 from __future__ import annotations
 
 import re
+import threading
 import time
+import weakref
 
-from openfeature.flag_evaluation import FlagEvaluationDetails
+from openfeature.contrib.hook.opentelemetry import TracingHook
+from openfeature.flag_evaluation import FlagEvaluationDetails, Reason
 from openfeature.hook import Hook, HookContext, HookHints
-from opentelemetry import metrics
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Span
 
 METER_NAME = "openfeature.hooks.opentelemetry"
 
@@ -118,3 +122,47 @@ class MetricsHook(Hook):
         # only an evaluation that was counted active is counted down.
         if hook_context.hook_data.pop(_STARTED, None) is not None:
             self._active.add(-1, {ATTR_KEY: hook_context.flag_key})
+
+
+# --- Span side (#2649) -------------------------------------------------------------------------
+
+# Flags that only decide whether telemetry exists: a ``feature_flag.evaluation`` event for them is
+# noise on every span (grpc_rpc_spans is read by every gRPC span to decide whether the span is
+# created). Their metrics are unchanged. docs/specs/telemetry.md §6.
+SPAN_EVENT_SKIP_FLAGS: frozenset[str] = frozenset({"grpc_rpc_spans"})
+
+# Most (flag key, variant) pairs remembered per span; further new pairs on that span are dropped.
+MAX_SEEN_PER_SPAN = 256
+
+
+class DedupingTracingHook(TracingHook):
+    """The official ``TracingHook`` with one event per (span, flag key, variant).
+
+    A flag read on every RPC or tick no longer adds an event per evaluation; a changed variant
+    (or an error after a success) is still recorded. The seen-set is held in a weak map keyed by
+    the span, so it is freed with the span, and capped at :data:`MAX_SEEN_PER_SPAN` pairs, so a
+    long-lived span (a game, a stream) stays bounded. Hot path: one weak-map get, one set lookup;
+    the lock is taken only the first time a span is seen. A race between two threads on a new
+    pair can at worst record it twice.
+    """
+
+    def __init__(self, exclude_exceptions: bool = False) -> None:
+        super().__init__(exclude_exceptions=exclude_exceptions)
+        self._seen: weakref.WeakKeyDictionary[Span, set[tuple[str, str | None, bool]]] = weakref.WeakKeyDictionary()
+        self._lock = threading.Lock()
+
+    def finally_after(self, hook_context: HookContext, details: FlagEvaluationDetails, hints: HookHints) -> None:
+        if details.flag_key in SPAN_EVENT_SKIP_FLAGS:
+            return
+        span = trace.get_current_span()
+        if not span.is_recording():
+            return
+        seen = self._seen.get(span)
+        if seen is None:
+            with self._lock:
+                seen = self._seen.setdefault(span, set())
+        pair = (details.flag_key, details.variant, details.reason == Reason.ERROR)
+        if pair in seen or len(seen) >= MAX_SEEN_PER_SPAN:
+            return
+        seen.add(pair)
+        super().finally_after(hook_context, details, hints)
