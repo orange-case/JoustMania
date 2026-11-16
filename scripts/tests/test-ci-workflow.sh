@@ -18,6 +18,9 @@
 #          e2e job runs, never fails or skips it, pushes only on
 #          merge_group / push (never from a PR), and the e2e job takes its tag as
 #          OTEL_COLLECTOR_TAG.
+#   #2599: integration-test sets IMAGE_PREFIX before the freshness guard and every
+#          compose call (nothing overrides it), and the collector resolve step adds
+#          the prebuilt overlay exactly when OTEL_COLLECTOR_TAG is set.
 #   #1569: the gate cannot go silently non-blocking: no `continue-on-error` on any
 #          CI Complete step, on integration-test (job or step), or at job level
 #          on any job CI Complete needs (job-level COE reports `success`), and
@@ -650,6 +653,39 @@ if "e2e_required" in jobs["changes"]["outputs"]:
     prefix_m = re.search(r'IMAGE_PREFIX=(\S+?)"? >>', prefix_step.get("run", ""))
     check(bool(ref_m) and bool(prefix_m) and ref_m.group(1) == prefix_m.group(1),
           f"collector-image pushed ref prefix {ref_m and ref_m.group(1)!r} must equal integration-test IMAGE_PREFIX {prefix_m and prefix_m.group(1)!r}")
+    # #2599: compose and the freshness guard read the same IMAGE_PREFIX, so it is set before
+    # the first step that uses it and no later env redefines it.
+    it_steps = jobs["integration-test"]["steps"]
+    users = [i for i, st in enumerate(it_steps)
+             if "check-image-freshness" in str(st.get("run", "")) or "docker compose" in str(st.get("run", ""))
+             or "make test-integration" in str(st.get("run", ""))]
+    prefix_idx = it_steps.index(prefix_step) if prefix_step in it_steps else len(it_steps)
+    check(users and prefix_idx < min(users),
+          "integration-test: 'Set image prefix' must run before the freshness guard, compose resolves and the suite")
+    check("IMAGE_PREFIX" not in (jobs["integration-test"].get("env") or {})
+          and not any("IMAGE_PREFIX" in (st.get("env") or {}) for st in it_steps),
+          "integration-test: no env may override IMAGE_PREFIX (pulled images and the freshness guard must agree)")
+    # #2599: the collector resolve step uses the compose files conftest.py uses: the prebuilt
+    # overlay exactly when OTEL_COLLECTOR_TAG is set (it otherwise resolved an unused ref).
+    resolve = next((st for st in it_steps if st.get("id") == "collector_image"), None)
+    check(resolve is not None, "integration-test: needs the `collector_image` resolve step")
+    if resolve:
+        for tag, want in (("abc123", True), ("", False)):
+            with tempfile.TemporaryDirectory() as fake:
+                log = os.path.join(fake, "log")
+                with open(os.path.join(fake, "docker"), "w") as fh:
+                    fh.write('#!/bin/sh\necho "$*" >> "%s"\n'
+                             'case "$*" in *config*) echo \'{"services":{"otel-collector":{"image":"x/otel-collector:t"}}}\';; esac\n'
+                             % log)
+                os.chmod(os.path.join(fake, "docker"), 0o755)
+                st = dict(resolve, env={**(resolve.get("env") or {}), "OTEL_COLLECTOR_TAG": tag})
+                rc, out = run_step(st, {}, extra_path=fake)
+                calls = open(log).read() if os.path.exists(log) else ""
+            compose_call = next((c for c in calls.splitlines() if c.startswith("compose ")), "")
+            check(out.get("ref") == "x/otel-collector:t",
+                  f"collector resolve (OTEL_COLLECTOR_TAG={tag!r}): no ref resolved (rc={rc}, calls={calls!r})")
+            check(("docker-compose.collector-prebuilt.yml" in compose_call) is want,
+                  f"collector resolve (OTEL_COLLECTOR_TAG={tag!r}): prebuilt overlay expected={want}, got {compose_call!r}")
     # Publish result: the tag only when the image is available, else empty.
     publish = next((st for st in ci_steps if st.get("id") == "result"), None)
     check(publish is not None, "collector-image: needs a `result` step")

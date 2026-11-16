@@ -1453,9 +1453,12 @@ jobs:
         if: needs.changes.outputs.e2e_full_build == 'false'
         env:
           IMAGE_TAG: latest
+        # #2599: the same files conftest.py uses: with OTEL_COLLECTOR_TAG set it
+        # appends the prebuilt overlay, so resolve with it too.
         run: |
-          ref="$(docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.ci.yml \
-            -f docker-compose.dev.yml config --format json | jq -r '.services."otel-collector".image')"
+          files=(-f docker-compose.yml -f docker-compose.override.yml -f docker-compose.ci.yml -f docker-compose.dev.yml)
+          [[ -z "${OTEL_COLLECTOR_TAG:-}" ]] || files+=(-f docker-compose.collector-prebuilt.yml)
+          ref="$(docker compose "${files[@]}" config --format json | jq -r '.services."otel-collector".image')"
           echo "Collector image ref: ${ref}"
           [[ -n "$ref" && "$ref" != "null" ]] || { echo "::error::could not resolve otel-collector image ref"; exit 1; }
           echo "ref=${ref}" >> "$GITHUB_OUTPUT"
