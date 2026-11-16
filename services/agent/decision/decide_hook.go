@@ -2,8 +2,10 @@ package decision
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -71,7 +73,11 @@ const (
 	// AttrDecideQuestions / AttrDecideAnswers are size-capped JSON renderings of the
 	// questions (id, kind, options, range; the prose text is omitted) and answers.
 	AttrDecideQuestions = "decide.questions"
-	AttrDecideAnswers   = "decide.answers"
+	// AttrDecideQuestionsSHA is the short SHA-256 of the decide.questions JSON, on
+	// every agent.decide span. The JSON itself rides only the first decide of a game
+	// carrying that hash (#2648): it is the same ~500 bytes on every decide.
+	AttrDecideQuestionsSHA = "decide.questions_sha"
+	AttrDecideAnswers      = "decide.answers"
 	// AttrDecideConfidence is the routing confidence: the ffa.intervention answer's.
 	AttrDecideConfidence = "decide.confidence"
 	// AttrDecideConfidenceMin is the minimum confidence over all answers.
@@ -190,6 +196,9 @@ func (l *Loop) SetDecideRegistry(r *DecideRegistry) { l.decideBackends = r }
 
 // decideRecord is everything the agent.decide span reports for one decision.
 type decideRecord struct {
+	// trig is the OTLP Export that triggered this decide when the cycle has no
+	// agent.signal_received span (in a game, #2648): emitted as an event on the span.
+	trig           *EvalTrigger
 	requested      string
 	used           string
 	fallbackReason string
@@ -450,9 +459,10 @@ func (l *Loop) emitQuietFallback(ctx context.Context, rec *decideRecord, c gamec
 	if !l.throttleAllows(l.quietFallbackClock(rec.fallbackReason)) {
 		return
 	}
-	rootCtx, root := l.startSignalReceivedSpan(ctx, c, trig)
+	rootCtx, ev, endCycle := l.startCycle(ctx, c, trig)
+	rec.trig = ev
 	l.emitDecideSpan(rootCtx, rec, c)
-	root.End()
+	endCycle()
 }
 
 // quietFallbackClock returns the per-reason throttle timestamp for
@@ -573,9 +583,16 @@ func (l *Loop) gateRemoteDecide(ctx context.Context, snapshot flags.Snapshot, c 
 // rootCtx (shutdown cancels it) and the fire-cycle anchor span the async root
 // Links to.
 func (l *Loop) launchDecideAsync(ctx context.Context, snapshot flags.Snapshot, backend decide.Backend, requested string, c gamecontext.GameContext, trig EvalTrigger) {
-	_, anchor := l.startSignalReceivedSpan(ctx, c, trig)
-	fireSC := anchor.SpanContext()
-	anchor.End()
+	// In a game the async span needs no anchor: it is a child of game_cycle and carries
+	// the trigger as an event (#2648). Without game ids it Links to an anchor span.
+	var fireSC trace.SpanContext
+	_, ev, endCycle := l.startCycle(ctx, c, trig)
+	if ev == nil {
+		_, anchor := l.startSignalReceivedSpan(ctx, c, trig)
+		fireSC = anchor.SpanContext()
+		anchor.End()
+	}
+	endCycle()
 
 	root := l.rootCtx
 	if root == nil {
@@ -589,7 +606,7 @@ func (l *Loop) launchDecideAsync(ctx context.Context, snapshot flags.Snapshot, b
 		defer l.inflight.Store(false)
 		// runDecideRemote starts the gap clock (noteDecideEnded) when the answer
 		// lands, while this goroutine still holds the slot (#2123).
-		l.runDecideRemote(root, snapshot, backend, requested, c, fireSC)
+		l.runDecideRemote(root, snapshot, backend, requested, c, fireSC, ev)
 	}()
 }
 
@@ -626,7 +643,7 @@ const (
 // act threshold, interventions_allowed and the policy gates all come from a fresh
 // Flags.Evaluate, so flipping a flag mid-flight takes effect on the in-flight
 // answer too.
-func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backend decide.Backend, requested string, c gamecontext.GameContext, fireSC trace.SpanContext) {
+func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backend decide.Backend, requested string, c gamecontext.GameContext, fireSC trace.SpanContext, ev *EvalTrigger) {
 	now := l.nowOrDefault()
 	start := now()
 	cfg, _ := fired.Decision.Remote(requested)
@@ -647,6 +664,7 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 	spanCtx, span := l.Tracer.Start(parent, SpanDecide, opts...)
 
 	rec := &decideRecord{
+		trig:      ev,
 		requested: requested,
 		used:      backend.Name(),
 		model:     cfg.Model,
@@ -1008,10 +1026,16 @@ func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecon
 		attribute.String(AttrDecideBackendRequested, rec.requested),
 		attribute.String(AttrDecideFallbackReason, rec.fallbackReason),
 		attribute.String(AttrDecideStateDigest, rec.req.State.Digest),
-		attribute.String(AttrDecideQuestions, questionsJSON(rec.req.Questions)),
 		attribute.Int64(AttrDecideLatencyMs, rec.end.Sub(rec.start).Milliseconds()),
 		attribute.String(AttrDecideOutcome, rec.outcome),
 	}
+	qJSON := questionsJSON(rec.req.Questions)
+	sha := questionsSHA(qJSON)
+	attrs = append(attrs, attribute.String(AttrDecideQuestionsSHA, sha))
+	if l.claimQuestions(c.SessionID, sha) {
+		attrs = append(attrs, attribute.String(AttrDecideQuestions, qJSON))
+	}
+	signalEvent(span, rec.trig)
 	if rec.routed {
 		attrs = append(attrs,
 			attribute.Float64(AttrDecideActThreshold, rec.threshold),
@@ -1098,6 +1122,35 @@ func questionsJSON(qs []decide.Question) string {
 		out = append(out, v)
 	}
 	return capJSON(out)
+}
+
+// questionsSHALen is the length of decide.questions_sha: 12 hex chars of SHA-256.
+const questionsSHALen = 12
+
+// questionsSHA is the short hash of the rendered decide.questions JSON.
+func questionsSHA(questionsJSON string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(questionsJSON)))[:questionsSHALen]
+}
+
+// questionsSeenMax bounds the per-loop memory of recorded question sets.
+const questionsSeenMax = 64
+
+// claimQuestions reports whether the decide.questions JSON with this hash still has
+// to be written on a span for this game: true on the first decide of the game and
+// whenever the question set changes (the offered interventions change it), false for
+// the repeats (#2648).
+func (l *Loop) claimQuestions(gameID, sha string) bool {
+	l.questionsMu.Lock()
+	defer l.questionsMu.Unlock()
+	if l.questionsSeen == nil || len(l.questionsSeen) >= questionsSeenMax {
+		l.questionsSeen = map[string]struct{}{}
+	}
+	k := gameID + "|" + sha
+	if _, ok := l.questionsSeen[k]; ok {
+		return false
+	}
+	l.questionsSeen[k] = struct{}{}
+	return true
 }
 
 // capJSON marshals v and caps it at maxDecideJSONBytes (cut on a rune boundary,

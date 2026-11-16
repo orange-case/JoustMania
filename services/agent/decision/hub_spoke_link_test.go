@@ -143,7 +143,10 @@ func TestSignalReceived_ChildOfGameSpan(t *testing.T) {
 		l.OnEvaluate(context.Background(), gameTraceCtx("game_sig01"),
 			EvalTrigger{Signal: "metrics", T0: time.Now(), RPCService: "svc"})
 
-		root := spansByName(sr.Ended(), SignalReceived)[0]
+		if n := len(spansByName(sr.Ended(), SignalReceived)); n != 0 {
+			t.Fatalf("agent.signal_received spans in the game trace = %d, want 0 (#2648)", n)
+		}
+		root := spansByName(sr.Ended(), SpanDecision)[0]
 		wantTID, _ := trace.TraceIDFromHex(hubGameTrace)
 		wantSID, _ := trace.SpanIDFromHex(hubGameSpanID)
 		if root.Parent().TraceID() != wantTID {
@@ -162,9 +165,6 @@ func TestSignalReceived_ChildOfGameSpan(t *testing.T) {
 		dec := spansByName(sr.Ended(), SpanDecision)[0]
 		if dec.SpanContext().TraceID() != wantTID {
 			t.Errorf("agent.decision must be pulled into the game trace; got %s want %s", dec.SpanContext().TraceID(), wantTID)
-		}
-		if v, ok := attrValue(root, AttrGameTraceID); !ok || v.AsString() != hubGameTrace {
-			t.Errorf("signal_received game.trace_id = %q (present=%v), want %q", v.AsString(), ok, hubGameTrace)
 		}
 	})
 

@@ -124,7 +124,7 @@ func initTracing(ctx context.Context) func(context.Context) error {
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
 	)
-	otel.SetTracerProvider(provider)
+	otel.SetTracerProvider(quietEvaluatorProvider{TracerProvider: provider})
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},

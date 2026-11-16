@@ -29,8 +29,8 @@ port 8080 is not published to the host).
 
 ## 1. The decision-audit hierarchy (what the audience is looking at)
 
-Every triggering OTLP Export from a watched game produces **one trace** with a
-three-span spine. Verified live (trace `4f0a8448…`):
+Every triggering OTLP Export from a watched game produces a three-span spine
+(since #2648 the `signal_received` span is a span event in a game trace, see below). Verified live (trace `4f0a8448…`):
 
 ```
 agent.signal_received          remote child of the game's game_cycle span — "a signal arrived, the agent woke up"
@@ -45,7 +45,12 @@ order `gameplay_phase`, the game root, else its own root; #1325, see
 action**. A blocked decision still emits `signal_received → decision`; the
 `action` span records the block reason rather than a real effect.
 
-`agent.signal_received` is the single entry span (SERVER kind) for both trigger kinds (an OTLP
+**Since #2648** a game trace has no `agent.signal_received` span (one per Export was
+noise): the Export is the event `agent.signal_received` (`otlp.signal`, `rpc.*`) on the
+cycle's `agent.decide` / `agent.disabled` span, and `agent.decide` / `agent.decision`
+are direct children of `game_cycle`. Without game ids the span below still exists.
+
+`agent.signal_received` is the single entry span (SERVER kind, own-root only without game ids) for both trigger kinds (an OTLP
 *metrics* or *trace* Export). The former `agent.span_received` root was retired;
 no such span is emitted any more.
 
