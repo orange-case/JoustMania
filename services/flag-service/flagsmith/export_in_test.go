@@ -38,3 +38,24 @@ func (inOnlyOut) Run(ctx context.Context) error {
 	<-ctx.Done()
 	return ctx.Err()
 }
+
+// SettleControllers marks every controller settled for its owner, as the out
+// side's settle would (the in-only journeys have no out side, #2624).
+func SettleControllers(l *Link) {
+	c := l.ctrl
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, e := range c.entries {
+		if e.owner != "" && e.settled != e.owner {
+			e.settled, e.readable, e.verified = e.owner, true, true
+			c.bumpLocked(e)
+		}
+	}
+}
+
+// NoteControllerRemoved records that a removal took value (a JSON literal) of
+// flag off serial's controller identity, as the out side's settle does.
+func NoteControllerRemoved(l *Link, serial, flag string, featureID int, value string) {
+	l.ctrl.noteRemoved(serial, []FeatureState{{Feature: Feature{ID: featureID}, Enabled: true, FeatureStateValue: []byte(value)}},
+		func(int) string { return flag }, l.Now())
+}

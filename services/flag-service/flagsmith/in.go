@@ -283,7 +283,13 @@ func localSnapshot(changes []state.Change) (map[Key]localEntry, map[string]bool)
 // decodeDocument maps the document to keys. Unknown feature names and
 // identities are ignored; segment overrides are reported per feature, never
 // applied.
-func (p *puller) decodeDocument(doc *EnvironmentDocument) (map[Key]docEntry, map[string]bool) {
+//
+// Player values (#2624): an override on controller:<serial> is read as the
+// player value of the controller's owner, and only while the controller is
+// settled for that owner (rc.ctrl); with no owner it is ignored. A
+// game:<id>:<serial> identity is read only for a live shadow game, so a
+// player value never comes from two identities.
+func (p *puller) decodeDocument(doc *EnvironmentDocument, rc *roundCtx) (map[Key]docEntry, map[string]bool) {
 	out := map[Key]docEntry{}
 	segments := map[string]bool{}
 	for _, fs := range doc.FeatureStates {
@@ -299,7 +305,7 @@ func (p *puller) decodeDocument(doc *EnvironmentDocument) (map[Key]docEntry, map
 		out[k] = p.decodeState(pol, registry.ScopeStack, fs)
 	}
 	for _, ov := range doc.IdentityOverrides {
-		_, scopeName, ok := ScopeOfIdentity(ov.Identifier)
+		scope, scopeName, ok := rc.scopeOfIdentity(ov.Identifier)
 		if !ok {
 			continue
 		}
@@ -308,7 +314,7 @@ func (p *puller) decodeDocument(doc *EnvironmentDocument) (map[Key]docEntry, map
 			if pol == nil {
 				continue
 			}
-			k := Key{Set: pol.Set, Flag: pol.Key, Scope: ov.Identifier}
+			k := Key{Set: pol.Set, Flag: pol.Key, Scope: scope}
 			out[k] = p.decodeState(pol, scopeName, fs)
 		}
 	}
@@ -386,13 +392,18 @@ func sortKeys(keys []Key) {
 
 // roundCtx is the state of one round.
 type roundCtx struct {
-	ctx      context.Context
-	span     trace.Span
-	trigger  string
-	now      time.Time
-	updated  time.Time
-	hasUpd   bool
-	games    map[string]bool
+	ctx     context.Context
+	span    trace.Span
+	trigger string
+	now     time.Time
+	updated time.Time
+	hasUpd  bool
+	games   map[string]bool
+	// ctrl and kinds are the controller map at the round's start (#2624):
+	// each controller's owner and whether the pull may read it, each live
+	// game's kind.
+	ctrl     map[string]ctrlView
+	kinds    map[string]string
 	doc      map[Key]docEntry // the decoded document (nil before it is read)
 	writes   int
 	deferred bool
@@ -433,6 +444,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	}
 	local, games := localSnapshot(changes)
 	rc.games = games
+	rc.ctrl, rc.kinds = l.ctrl.view()
 	rc.now = l.Now()
 	start = p.remoteMarks()
 	p.guardPushesBetween(start, rc.now)
@@ -494,7 +506,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	}
 	p.health.setEnvironment(doc.Name)
 
-	d, segments := p.decodeDocument(doc)
+	d, segments := p.decodeDocument(doc, rc)
 	rc.doc = d
 	p.markSegments(segments)
 	keys := p.roundKeys(d, local)
@@ -766,6 +778,9 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 	if g := GameOfIdentity(k.Scope); g != "" && !rc.games[g] {
 		return
 	}
+	if p.controllerGate(rc, k) {
+		return
+	}
 	// A stale document never reverts a confirmed push (§4.2 step 6): a push
 	// confirmed while the document was in flight skips the key this round.
 	if l.links.Gen(k) != start[k].gen {
@@ -786,12 +801,16 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 			return
 		}
 	}
+	// A controller's former game's override in a lagging document (#2624).
+	if p.removedGuard(rc, k, pol, de.v, r) {
+		return
+	}
 	// Edge lag: the first round after start skips what the restart rule
 	// cleared (#2590 P13). Kill switches are never cleared (nothing was
 	// pushed, so a lagging document is merely older) and merge without a
 	// remote to the more restrictive value: the start round applies them.
 	// UC-054 BR-005: a kill switch an API key tightened is in force at once.
-	if rc.trigger == TriggerStart && attribution[k] == AuthorAPIKey && !isKillKey(k) {
+	if rc.trigger == TriggerStart && attribution[rc.attrKey(k)] == AuthorAPIKey && !isKillKey(k) {
 		rc.skip()
 		return
 	}
@@ -827,7 +846,7 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 	// an API key set on an admin setting or on a game identity is not brought
 	// back; the local value wins and is sent. Kill switches keep their order
 	// (safety over reset).
-	if !hasR && in.Kill == nil && dec.action == actApply && attribution[k] == AuthorAPIKey &&
+	if !hasR && in.Kill == nil && dec.action == actApply && attribution[rc.attrKey(k)] == AuthorAPIKey &&
 		((k.Scope == ScopeStack && pol.Persist) || GameOfIdentity(k.Scope) != "") {
 		dec = decision{action: actKeepLocal}
 	}

@@ -371,9 +371,9 @@ def test_game_start_lists_identities(flag_service, settled_link):
     fake = settled_link
     game = fl.new_game_id()
     try:
-        # Step 1: a game starts with two players.
+        # Step 1: a (shadow) game starts with two players.
         fl.register_game(flag_service, game, ["MOCK0004", "MOCK0005"])
-        # Step 2: the game and each player are identities in Flagsmith; the game carries its traits.
+        # Step 2: the game and each shadow player are identities in Flagsmith; the game carries its traits.
         want = {f"game:{game}", f"game:{game}:MOCK0004", f"game:{game}:MOCK0005"}
         fl.wait_for(lambda: want <= set(fake.identities()), fl.PULL_TIMEOUT, f"identities {want}")
         fl.wait_for(
@@ -409,6 +409,96 @@ def test_game_end_removes_identities_and_values(flag_service, settled_link):
     finally:
         if not ended:
             fl.end_game(flag_service, game)
+
+
+def _settled_for(fake, serial: str, game: str) -> bool:
+    """The link settled controller:<serial> for ``game`` (its game_id trait names it)."""
+    return (fake.identities().get(f"controller:{serial}") or {}).get("traits", {}).get("game_id") == game
+
+
+@pytest.mark.uc("UC-055", flow="A1", br=["BR-002", "BR-004"], tc="TC-021")
+def test_real_game_players_are_controller_identities(flag_service, settled_link):
+    fake = settled_link
+    game = fl.new_game_id()
+    try:
+        # Step 1: a real game starts with two players.
+        fl.register_game(flag_service, game, ["MOCK0021", "MOCK0022"], kind="real")
+        # Step 2: each controller is its own identity with the game's traits; no per-game player identity.
+        want = {"game_id": game, "game_kind": "real", "coordinator_instance": fl.COORDINATOR_INSTANCE}
+        for serial in ("MOCK0021", "MOCK0022"):
+            # The traits are sent one after another: wait for all three.
+            fl.wait_for(
+                lambda s=serial: (fake.identities().get(f"controller:{s}") or {}).get("traits") == want,
+                fl.PULL_TIMEOUT,
+                f"controller:{serial} traits",
+            )
+            assert f"game:{game}:{serial}" not in fake.identities()
+        # Step 3: a player value of the game is an override on the controller (BR-002).
+        flag_service.put(*HANDICAP, value=1.25, scope={"game_id": game, "serial": "MOCK0021"})
+        override = fl.wait_for(
+            lambda: fake.override("controller:MOCK0021", HANDICAP[1]), fl.PULL_TIMEOUT, "the controller override"
+        )
+        assert float(override["value"]) == 1.25, override
+    finally:
+        fl.end_game(flag_service, game)
+
+
+@pytest.mark.uc("UC-055", flow="A2", br=["BR-003", "BR-004"], tc="TC-021")
+def test_real_game_end_releases_controllers(flag_service, settled_link):
+    fake = settled_link
+    game = fl.new_game_id()
+    ended = False
+    try:
+        fl.register_game(flag_service, game, ["MOCK0023"], kind="real")
+        # Step 1: a player value reaches the controller identity.
+        flag_service.put(*HANDICAP, value=1.25, scope={"game_id": game, "serial": "MOCK0023"})
+        fl.wait_for(lambda: fake.override("controller:MOCK0023", HANDICAP[1]), fl.PULL_TIMEOUT, "the override")
+        # Step 2: the game ends: the controller identity stays, without the game's override and traits.
+        fl.end_game(flag_service, game)
+        ended = True
+        fl.wait_for(
+            lambda: fake.override("controller:MOCK0023", HANDICAP[1]) is None, fl.PULL_TIMEOUT, "override removed"
+        )
+        fl.wait_for(lambda: fake.identities()["controller:MOCK0023"]["traits"] == {}, fl.PULL_TIMEOUT, "traits cleared")
+        assert f"game:{game}" not in fake.identities()
+    finally:
+        if not ended:
+            fl.end_game(flag_service, game)
+
+
+@pytest.mark.uc("UC-054", flow="main", steps=[2, 3], br=["BR-003", "BR-010"], tc="TC-021")
+def test_person_controller_override_applies_to_its_live_game_only(flag_service, settled_link):
+    fake = settled_link
+    game, later = fl.new_game_id(), fl.new_game_id()
+    try:
+        # Step 1: a person sets a handicap on a controller that plays in no game: it is not applied.
+        fake.person_overrides("controller:MOCK0024", HANDICAP[1], "1.75")
+        fl.wait_pulls(flag_service, 1, after=time.time())
+        # Step 2: the controller joins a real game: the settle removes the override of no game.
+        fl.register_game(flag_service, game, ["MOCK0024"], kind="real")
+        fl.wait_for(lambda: _settled_for(fake, "MOCK0024", game), fl.PULL_TIMEOUT, "controller settled")
+        assert fake.override("controller:MOCK0024", HANDICAP[1]) is None
+        assert game not in (flag_service.get(*HANDICAP).get("serials") or {})
+        # Step 3: a person sets it while the game is live: it is the game's player value.
+        fake.person_overrides("controller:MOCK0024", HANDICAP[1], "1.5")
+        player = fl.wait_for(
+            lambda: (flag_service.get(*HANDICAP).get("serials") or {}).get(game, {}).get("MOCK0024"),
+            fl.PULL_TIMEOUT,
+            "player value",
+        )
+        assert float(player["value"]) == 1.5 and player["writer"] == "flagsmith", player
+        # Step 4: the game ends and the controller joins a later game: the value does not follow it.
+        fl.end_game(flag_service, game)
+        fl.wait_for(
+            lambda: fake.override("controller:MOCK0024", HANDICAP[1]) is None, fl.PULL_TIMEOUT, "override removed"
+        )
+        fl.register_game(flag_service, later, ["MOCK0024"], kind="real")
+        fl.wait_for(lambda: _settled_for(fake, "MOCK0024", later), fl.PULL_TIMEOUT, "settled for the later game")
+        fl.wait_pulls(flag_service, 1, after=time.time())
+        assert later not in (flag_service.get(*HANDICAP).get("serials") or {})
+    finally:
+        fl.end_game(flag_service, game)
+        fl.end_game(flag_service, later)
 
 
 @pytest.mark.uc("UC-055", flow="A4", tc="TC-021")

@@ -1,6 +1,6 @@
 # Flagsmith link: hosted Flagsmith as a writer and audit view of the flag service
 
-> Architecture note. Status: **implemented** (epic #2587, sub-issues #2588 to #2592; UC-054 and UC-055 Tested against a fake Flagsmith, the live SaaS check is a Known gap on both). Written 2026-11-15 against `main` and the Flagsmith API
+> Architecture note. Status: **implemented** (epic #2587, sub-issues #2588 to #2592; controller identities #2624; UC-054 and UC-055 Tested against a fake Flagsmith, the live SaaS check is a Known gap on both). Written 2026-11-15 against `main` and the Flagsmith API
 > source at v2.269 (`Flagsmith/flagsmith`, `api/`). Spec rows: [UC-054](../use_cases/UC-054.md),
 > [UC-055](../use_cases/UC-055.md), FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037, the C-008 amendment
 > ([requirements](../requirements.md)); [services.md §7.3](../specs/services.md#73-flagsmith-link-implemented-2588-to-2592-uc-054-uc-055),
@@ -58,7 +58,8 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | F6 | **Agent limits under full Flagsmith control**, capped by the env ceilings of C-034; on a conflict they tighten (F4). | decided by the maintainer |
 | F7 | **Restart rule by authorship** (UC-054 BR-006): only values a person (a Flagsmith user) set in Flagsmith, and admin settings, come back; every value made with an API key (the link's own, Terraform, the Flagsmith MCP server) is cleared in Flagsmith at start. Flagsmith's audit API shows the author but not which API key, so any API key counts as the link. | decided by the maintainer, 2026-11-15 |
 | F8 | **Pull, not webhooks.** Polling the environment document (conditional `GET`) is the baseline; realtime SSE only shortens the delay. Flagsmith webhooks are rejected (§9.1). | recommendation |
-| F9 | **Non-stack scopes are identities.** Game, player, experiment-arm, `real` and fraction values are identity overrides on identities named after the scope (§4.2). | recommendation |
+| F9 | **Non-stack scopes are identities.** Game, experiment-arm, `real` and fraction values are identity overrides on identities named after the scope (§4.2); a real game's player values live on the controller's own identity (F11). | recommendation; player part amended by F11 |
+| F11 | **One identity per controller.** A Move controller is the Flagsmith identity `controller:<serial>`, kept across games, with the traits `game_id`, `game_kind`, `coordinator_instance` of the game it plays in; a real game's player values are overrides on it, removed when the controller leaves the game. A shadow game's players keep `game:<gameId>:<serial>` (§2.2). | decided by the maintainer, 2026-11-16 (#2624) |
 | F10 | **Off by default.** `FLAGSMITH_LINK=off` in every stack; CI and the dry-run stacks never call the SaaS; the stage stack opts in through `.env.local`. | recommendation |
 
 ## 2. Flagsmith model and the mapping
@@ -70,7 +71,8 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | stack overlay (in memory or persisted) | the feature's **environment value**: `enabled=true`, value = §4.1 | |
 | no stack overlay | `enabled=false`, value = the baseline default (shown for reference) | `enabled=false` never means "flag off"; it means "baseline applies" |
 | game value | override on identity `game:<gameId>` | identity traits `game_kind`, `coordinator_instance` (best effort) |
-| player value in a game | override on identity `game:<gameId>:<serial>` | no traits (the identifier names the game and serial) |
+| player value in a real game (any kind but `shadow`) | override on identity `controller:<serial>`, the controller's own identity (F11, §2.2) | traits `game_id`, `game_kind`, `coordinator_instance` of the controller's current game (cleared when it leaves); the identity is never deleted |
+| player value in a shadow game | override on identity `game:<gameId>:<serial>` | no traits; deleted at game end, so a shadow player never touches a real controller |
 | experiment-arm value | override on identity `experiment:<id>:<arm>` | shown only (F3) |
 | `real` overlay | override on identity `real` | shown only (F3) |
 | fraction overlay | override on identity `fraction`, value `{"variant":…, "fraction_percent":…}` | shown only (F3) |
@@ -80,7 +82,8 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 Identities are the one Flagsmith object that carries per-target overrides without segment rules. Using one
 identity per scope keeps the mapping 1:1 and lets game cleanup be one identity delete. Segments
 (`game_id == X`) were considered and rejected: a segment per live game churns project-level objects and every
-segment change touches every environment (§9.2).
+segment change touches every environment (§9.2). A person may still build a segment such as "controllers in game
+X" from the controller traits; the link never reads segment overrides (§4.2 step 10).
 
 ### 2.1 Values
 
@@ -97,6 +100,61 @@ Flagsmith stores `string`, `integer` and `boolean` (`FeatureValueType`, `api/fea
 The pull hands the value to the same parser as `PUT /{set}/{flag}`: a string that names a declared variant selects
 it, anything else is a `value` checked against the bounds. A value Flagsmith shows with another type than the
 table is refused (`flagsmith_type_mismatch`, A4 of UC-054).
+
+### 2.2 Controller identities (F11, #2624)
+
+**Why:** a demo shows "this controller has a shield" on a stable identity, not on a per-game identity that
+disappears with the game.
+
+**Owner.** The overrides on `controller:<serial>` always belong to one game, the controller's **owner**: the live
+real game whose players include the serial; when two live real games hold it (a new game registered before the old
+one's end reached the flag service), the one registered later (then the larger game id). Shadow games never own a
+controller.
+
+**Keys stay per game.** Inside the link a player value is still the key `(set, flag, game:<gameId>:<serial>)`; only
+the identity it is sent to and read from is the controller's. So the last state seen, the pending value, the
+refused-value memory of UC-055 A4 (#2604), the value guards and the restart report stay per game and serial: a
+value refused or guarded in one game is never held back in the next.
+
+**Settle.** Before any value of a new owner is sent or read, the link settles the controller: it finds the identity
+(the uuid it knows, else the exact search `?q="controller:<serial>"`, else it creates it), lists its overrides
+(`GET …/edge-identities/{uuid}/edge-featurestates/`), deletes every override of a registry feature on it (`DELETE
+…/edge-identities-featurestates`), then sets the traits `game_kind`, `coordinator_instance` and, last, `game_id` (best
+effort, as on game identities; `game_id` last, so a settle cut short by a 429 or the link going down is never taken
+for a restart while the game was live). A value of the owner waits as pending until the settle ended. A refused
+removal leaves the controller unread for that game (its values are still sent), with a warning; so does a create
+that Flagsmith answers "already exists" while the search does not show the identity (never retried in a loop, which
+would hold every value push back). Exception, the **first settle of a controller in a process**: the link first reads the identity's
+traits (`GET …/edge-identities/{uuid}/list-traits/`); when `game_id` names the owner, the flag service restarted while
+that game was live and nothing is removed. Traits that cannot be read (traits off in the organisation, a refusal)
+count as another game: the overrides are removed.
+
+**Release.** When the controller leaves its owner (game end, the expiry sweep of UC-053 A11, the serial leaves the
+game) and no other live real game holds it, the link releases it: the same removal, then the traits that are set are cleared
+(`trait_value: null`; the traits are read first, so a controller released already costs two reads and no write). The identity stays. When another live real game holds it, that game becomes the owner and the
+controller is settled for it instead. The former owner's keys of that serial are dropped, so a value the former game
+writes afterwards is never sent to the controller.
+
+**Pull.** An override on `controller:<serial>` is read as the owner's player value, and only while the controller is
+settled for that owner with nothing refused and no settle or release queued; otherwise it is ignored (no write, no
+refusal). An override a person sets on a controller that plays in no game is therefore never applied: it is removed
+when the controller joins its next game, or by the start cleanup. A `game:<gameId>:<serial>` identity is read only
+for a live shadow game, so a player value never comes from two identities.
+
+**Concurrency.** Every controller request runs on the out side's one sender goroutine, and the controller work runs
+before any value push, so:
+
+| Case | Behaviour |
+|---|---|
+| two live games | each real game's players are on their own controllers; a shadow game with the same serials uses `game:<id>:<serial>` and never touches them |
+| controller moves between games | the new owner's settle removes the former game's overrides before the new owner's first value is sent; the former game's keys of that serial are dropped, so its later writes are not sent; the pull ignores the controller until the settle ended |
+| game ends while a push is in flight | the release is queued behind the push on the same goroutine, lists the overrides after the push landed and removes it |
+| a pull round overlaps a settle or release | the round snapshots each controller's generation before the fetch; a controller that moved during the round is skipped (the next pull is in full). A document that lags behind a removal and still shows a removed value is skipped for that key until it shows another value, at most max(10 min, 10 polls), like the value guard of §4.2 step 6 |
+| restart while a game is live | the coordinator registers the game again; the first settle finds `game_id` = the game and keeps the overrides; the restart rule's authorship of `controller:<serial>` applies only to that kept game, never to a later one |
+| start / stale cleanup | with the game identity cleanup (§5.1, after the re-registration or 45 s, whichever is later): every `controller:*` identity without an owner is released (overrides removed, traits cleared, identity kept); the owner is checked again on the sender right before. Cost: one listing, then per idle controller two reads (traits, overrides) plus one write per override or trait still set, at `FLAGSMITH_PUSH_RATE`, ahead of value pushes (20 idle released controllers: about 8 s at 5/s) |
+| the 45 s grace | a game that registers after the cleanup ran gets its controller settled like any new owner: overrides left from before the restart are removed (the same outcome as a game identity deleted after the grace) |
+| refused-value memory (#2604) | keyed by `game:<gameId>:<serial>`, so a value Flagsmith refused in one game is sent again in the next |
+| an identity a person deleted | a 404 on its uuid forgets the uuid and the settle starts over (search, create) |
 
 ## 3. The link's state (in memory)
 
@@ -135,11 +193,14 @@ entity.
    `PUT /api/v1/environments/{env_key}/edge-identities-featurestates` (no trailing slash) with
    `{"identifier", "feature", "enabled", "feature_state_value"}` (typed JSON value); it creates a missing identity.
    An ended value is a `DELETE` on the same path with `{"identifier", "feature"}` (204, also when absent). A game
-   registration lists the game and its players with `POST /api/v1/environments/{env_key}/edge-identities/`
+   registration lists the game, and a shadow game's players, with `POST /api/v1/environments/{env_key}/edge-identities/`
    (`identifier`; 400 "already exists" counts as created); the game identity gets the traits `game_kind` and
-   `coordinator_instance` (best effort; skipped when the organisation does not persist traits). A game end deletes
-   the game and player identities (`DELETE …/edge-identities/{uuid}/`, the uuid found by the exact search
-   `?q="<identifier>"` when unknown). Edge identities need an edge-enabled project (the SaaS has it).
+   `coordinator_instance` (best effort; skipped when the organisation does not persist traits). A real game's players
+   are their controllers: each is settled for its owner before its first value (§2.2). A game end deletes the game
+   identity and a shadow game's player identities (`DELETE …/edge-identities/{uuid}/`, the uuid found by the exact
+   search `?q="<identifier>"` when unknown) and releases each controller of a real game (§2.2: overrides removed,
+   traits cleared, identity kept). Controller work and identity listings run before value pushes on the one sender.
+   Edge identities need an edge-enabled project (the SaaS has it).
 5. On success `remote := pending`, `pending := none` (no echo, §4.4).
 
 ### 4.2 In (UC-054)
@@ -155,7 +216,9 @@ entity.
    game and player values could be pushed but never read back.
 3. For each synced `(set, key, scope)` the link computes the 3-way state of `remote`, the document value and the
    local value (§6) and turns each remote change into a write through the same in-process call the HTTP handler
-   uses (writer `flagsmith`, `persist: true` when the registry row has `persist: yes`).
+   uses (writer `flagsmith`, `persist: true` when the registry row has `persist: yes`). An override on
+   `controller:<serial>` is read as the player value of the controller's owner, only while the controller is settled
+   for it; `game:<gameId>:<serial>` is read only for a live shadow game (§2.2).
 4. A write refused by the registry or the game scope keeps the local value, records the
    reason and posts **unhealthy** to the feature-health webhook (§8). It is not retried until the document changes
    again.
@@ -268,11 +331,14 @@ Flagsmith's audit API shows `author` (a user, or null) but not **which** API key
 - an override on a game that is not registered yet is neither applied nor refused: it applies once the game registers. Game and
   player overrides are classified by the same author rule at start but applied only when the game registers: an override
   made with an API key (the link's own) is removed once its game registers, a person's override is applied, and overrides
-  of games that never register are removed after the grace period (next bullet);
+  of games that never register are removed after the grace period (next bullet). An override on `controller:<serial>`
+  is classified the same way and applies to the game it was set in only: when that game registers again and owns the
+  controller, whose `game_id` trait names it (§2.2), else the controller's settle removes it;
 - identities of games that are not live → deleted, but **start never deletes identities**: the cleanup runs once the
   coordinator has re-registered its games, or 45 s after start, whichever is later, and keeps every identity that a
   registered game matches (the whole identifier is compared with `game:<id>` and `game:<id>:<serial>`), so a game
-  that registers late keeps its overrides. The first pull round after start skips the keys the rule just cleared
+  that registers late keeps its overrides. The same cleanup lists the `controller:*` identities and releases each one
+  without a live owner (§2.2: overrides removed, traits cleared, the identity never deleted). The first pull round after start skips the keys the rule just cleared
   (edge lag). Kill switches are never cleared, so that round merges them (more restrictive value, below): a kill
   switch an API key tightened is in force from the start round, not only from the first poll.
 
@@ -389,7 +455,9 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | Edge overrides in the document: the SaaS serves edge identity overrides only in the edge document | `FLAGSMITH_DOCUMENT_URL` defaults to the edge URL; to verify live against the SaaS (Known gap of UC-054 and UC-055, maintainer decision D1) |
 | `use_identity_overrides_in_local_eval` off: game and player values cannot be read back | the link stays offline with reason `identity_overrides_disabled`; documented in the setup |
 | SaaS request limits (`MASTER_API_KEY_THROTTLE_RATE` is a per-deployment setting; the SaaS value is not published) under many games and events | merge per flag and scope, `FLAGSMITH_PUSH_RATE`, honour `429 Retry-After`; to measure with 8 live games (NFR-057; Known gap of UC-054 and UC-055, maintainer decision D1) |
-| Edge identity count grows with games on the plan's identity quota | identities deleted at game end and, for games that are not live, after start (§5.1); to verify against the plan |
+| Edge identity count grows with games on the plan's identity quota | game and shadow player identities deleted at game end and, for games that are not live, after start (§5.1); controller identities stay but are bounded by the number of controllers (§2.2); to verify against the plan |
+| A controller's overrides belong to a game that ended while the flag service was down, and the controller joins a new game | the settle of a new owner removes them unless the `game_id` trait names that owner (§2.2); with traits off in the organisation every first settle removes, so a restart while a game is live loses that game's controller overrides |
+| A document that lags behind a controller's removal hands the former game's override to the new owner | a removed value is skipped for that controller key until the document shows another value, at most max(10 min, 10 polls) (§2.2); a person who sets exactly the removed value again for the new game waits that long |
 | A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round are skipped, and the value guard skips a key whose document value still equals a value its confirmed push replaced (§4.2 step 6); a document whose update time is older than the newest one read is skipped whole (`stale_document`, server time only; §4.2 step 6); pulled writes are conditional on the local slot (§4.2) |
 | One document update time ahead of all later ones (Flagsmith clock skew, an environment database restore, a garbled but in-range time) would refuse every later document as `stale_document`, kill-switch tightenings included | the refusal ends after max(10 min, 10 x poll interval) of refusals in a row, local elapsed time; the older document is then accepted and becomes the newest, with a warning log; in that round kill switches merge without their remote value and take the more restrictive value (§4.2 step 6). Residuals, accepted by the maintainer 2026-11-15 (follow-up #2602): (a) the copy stamped with the too-new time (a cache or region still serving it) is not older, so it is accepted normally and ends the run: served at least once per max(10 min, 10 x poll interval), it keeps the run from ever reaching the threshold and the tightening stays refused as before; served less often, it makes kill switches flap: the accepted older document tightens, then the too-new copy is newer than the accepted time again and merges normally (`R != D`, `R = L` -> apply), a deliberate loosening, and the refusals start over (an operator's kill in Flagsmith takes effect, then is undone for about the threshold, repeatedly). (b) In the accepted round a kill switch whose local value is tighter than the accepted document keeps local and pushes it; when a lagging copy answers that round while Flagsmith already holds a tighter value set during the refusal run, the push overwrites that value in Flagsmith and the operator's value is lost on both sides (as in the "push overwrites a person's change" row, but the window is the whole refusal run). (c) Every non-kill-switch value in the accepted document that differs from the link's remote value while the local value still equals it applies as a change from Flagsmith (a value Flagsmith changed itself as well as a pushed one) until a newer document is read and corrects it; a pushed value is protected only while its value guard lives, and the guard can end before the threshold (the newest document showed the pushed value), as for a document without an update time |
 | A local write to a game or player slot that is empty during a document fetch is not detected by the per-slot version check for that round (game values only; stack and kill-switch slots are fully covered) | accepted; last writer wins |

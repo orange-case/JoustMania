@@ -84,7 +84,9 @@ type outEnv struct {
 	links  *telemetry.Links
 	mu     sync.Mutex
 	on     map[string]http.HandlerFunc
-	ver    uint64
+	// hook, when set, answers a request first (true: answered).
+	hook func(w http.ResponseWriter, r *http.Request) bool
+	ver  uint64
 }
 
 func loadBaseReg(t *testing.T) (*baseline.Baseline, *registry.Registry) {
@@ -164,9 +166,13 @@ func uuidOf(identifier string) string { return "uuid_" + strings.ReplaceAll(iden
 func (e *outEnv) route(w http.ResponseWriter, r *http.Request) {
 	e.mu.Lock()
 	h := e.on[r.Method+" "+r.URL.Path]
+	hook := e.hook
 	e.mu.Unlock()
 	if h != nil {
 		h(w, r)
+		return
+	}
+	if hook != nil && hook(w, r) {
 		return
 	}
 	p := r.URL.Path
@@ -186,6 +192,8 @@ func (e *outEnv) route(w http.ResponseWriter, r *http.Request) {
 	case p == apiEnv+"edge-identities/" && r.Method == http.MethodGet:
 		q := strings.Trim(r.URL.Query().Get("q"), `"`)
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{"results":[{"identity_uuid":"`+uuidOf(q)+`","identifier":"`+q+`"}]}`))
+	case strings.HasPrefix(p, apiEnv+"edge-identities/") && (strings.HasSuffix(p, "/list-traits/") || strings.HasSuffix(p, "/edge-featurestates/")) && r.Method == http.MethodGet:
+		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`[]`))
 	case strings.HasPrefix(p, apiEnv+"edge-identities/") && strings.HasSuffix(p, "/update-traits/") && r.Method == http.MethodPut:
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	case strings.HasPrefix(p, apiEnv+"edge-identities/") && r.Method == http.MethodDelete:
@@ -229,11 +237,11 @@ func (e *outEnv) ended(g *state.Game) state.Change {
 	return state.Change{Kind: state.ChangeGameEnded, ScopeName: registry.ScopeGame, Scope: state.Scope{GameID: g.ID}, Game: g, At: e.clk.Now(), Version: e.ver}
 }
 
-// idle: nothing is pending and no identity work is left.
+// idle: nothing is pending and no identity or controller work is left.
 func (e *outEnv) idle() bool {
 	pending, _, _ := e.link.Links().Counts()
 	_, more := e.out.ids.Peek()
-	return pending == 0 && !more
+	return pending == 0 && !more && !e.link.ctrl.busy()
 }
 
 func waitFor(t *testing.T, what string, cond func() bool) {
@@ -399,11 +407,11 @@ func TestMergeLatestWins(t *testing.T) {
 		}
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	})
-	e.out.Changed(e.stack("decision.backend", "rules", `"rules"`))
+	e.link.StateChanged(e.stack("decision.backend", "rules", `"rules"`))
 	r := e.start()
 	<-started
-	e.out.Changed(e.stack("decision.backend", "claude", `"claude"`))
-	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
+	e.link.StateChanged(e.stack("decision.backend", "claude", `"claude"`))
+	e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
 	close(release)
 	waitFor(t, "the out side to go idle", e.idle)
 	_ = r.stop()
@@ -430,7 +438,7 @@ func TestPushRate(t *testing.T) {
 	e := newOutEnv(t)
 	for i := 0; i < 10; i++ {
 		sc := state.Scope{GameID: fmt.Sprintf("g%d", i)}
-		e.out.Changed(e.change(state.ChangeValue, "interventions", "music_tempo_override", registry.ScopeGame, sc, "", "1.25"))
+		e.link.StateChanged(e.change(state.ChangeValue, "interventions", "music_tempo_override", registry.ScopeGame, sc, "", "1.25"))
 	}
 	e.drain()
 	if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 10 {
@@ -463,7 +471,7 @@ func TestRetryAfter(t *testing.T) {
 		}
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	})
-	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
+	e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
 	e.drain()
 	found := false
 	for _, d := range e.clk.Slept() {
@@ -497,8 +505,8 @@ func TestRefusalOutOfSync(t *testing.T) {
 	e.setOn(http.MethodPatch, e.futurePath("decision.min_interval_ms"), func(w http.ResponseWriter, _ *http.Request) {
 		flagsmithtest.WriteJSON(w, http.StatusNotFound, json.RawMessage(`{"detail":"Not found."}`))
 	})
-	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
-	e.out.Changed(e.stack("decision.min_interval_ms", "", `2500`))
+	e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
+	e.link.StateChanged(e.stack("decision.min_interval_ms", "", `2500`))
 	e.drain()
 	pending, outOfSync, refused := e.link.Links().Counts()
 	if pending != 0 || outOfSync != 2 || refused != 2 {
@@ -521,7 +529,7 @@ func TestRefusalOutOfSync(t *testing.T) {
 		t.Fatalf("UC-055/A4 %d requests after a wake, want 2 (a refusal is not retried)", n)
 	}
 	// The next local change of the key sends again and clears the refusal.
-	e.out.Changed(e.stack("decision.backend", "claude", `"claude"`))
+	e.link.StateChanged(e.stack("decision.backend", "claude", `"claude"`))
 	e.drain()
 	if n := e.count(http.MethodPatch, "/api/__future__/"); n != 3 {
 		t.Fatalf("UC-055/A4 %d requests after a new change, want 3", n)
@@ -537,7 +545,7 @@ func TestRefusalOutOfSync(t *testing.T) {
 // never comes back as a new change from Flagsmith.
 func TestNoEcho(t *testing.T) {
 	e := newOutEnv(t)
-	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
+	e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
 	e.drain()
 	k := Key{Set: "agent", Flag: "decision.backend", Scope: ScopeStack}
 	got, ok := e.link.Links().Remote(k)
@@ -555,7 +563,7 @@ func TestNoEcho(t *testing.T) {
 func TestLinkDownKeepsPending(t *testing.T) {
 	e := newOutEnv(t)
 	e.fake.Fail(http.StatusServiceUnavailable)
-	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
+	e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
 	r := e.start()
 	err := r.wait()
 	if !IsLinkDown(err) {
@@ -588,7 +596,7 @@ func TestGameStartListsIdentities(t *testing.T) {
 		flagsmithtest.WriteJSON(w, http.StatusCreated, json.RawMessage(`{"identity_uuid":"`+uuidOf(b.Identifier)+`"}`))
 	})
 	first := gameOf("g1", "shadow", "A", "B")
-	e.out.Changed(e.registered(first, nil))
+	e.link.StateChanged(e.registered(first, nil))
 	e.drain()
 	posts := e.bodies(http.MethodPost, apiEnv+"edge-identities/")
 	want := []string{`{"identifier":"game:g1"}`, `{"identifier":"game:g1:A"}`, `{"identifier":"game:g1:B"}`}
@@ -606,7 +614,7 @@ func TestGameStartListsIdentities(t *testing.T) {
 		t.Fatalf("UC-055/A1 pending %d refused %d, want 0", pending, refused)
 	}
 	// A third player joins: one identity request, not four.
-	e.out.Changed(e.registered(gameOf("g1", "shadow", "A", "B", "C"), first))
+	e.link.StateChanged(e.registered(gameOf("g1", "shadow", "A", "B", "C"), first))
 	e.drain()
 	posts = e.bodies(http.MethodPost, apiEnv+"edge-identities/")
 	if len(posts) != 4 || posts[3] != `{"identifier":"game:g1:C"}` {
@@ -625,9 +633,9 @@ func TestGameEndDeletesIdentities(t *testing.T) {
 		}
 		t.Run("UC-055/A2 "+name, func(t *testing.T) {
 			e := newOutEnv(t)
-			g1, g10 := gameOf("g1", "real", "A"), gameOf("g10", "real", "Z")
-			e.out.Changed(e.registered(g1, nil))
-			e.out.Changed(e.registered(g10, nil))
+			g1, g10 := gameOf("g1", "shadow", "A"), gameOf("g10", "shadow", "Z")
+			e.link.StateChanged(e.registered(g1, nil))
+			e.link.StateChanged(e.registered(g10, nil))
 			e.drain()
 			if !known {
 				for _, id := range []string{"game:g1", "game:g1:A"} {
@@ -636,8 +644,8 @@ func TestGameEndDeletesIdentities(t *testing.T) {
 			}
 			before := len(e.fake.Requests())
 			sc := state.Scope{GameID: "g1"}
-			e.out.Changed(e.change(state.ChangeValue, "interventions", "music_tempo_override", registry.ScopeGame, sc, "", "1.25"))
-			e.out.Changed(e.ended(g1))
+			e.link.StateChanged(e.change(state.ChangeValue, "interventions", "music_tempo_override", registry.ScopeGame, sc, "", "1.25"))
+			e.link.StateChanged(e.ended(g1))
 			e.drain()
 			if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 0 {
 				t.Fatalf("UC-055/A2 %d override requests for a game that ended, want 0", n)
@@ -690,12 +698,12 @@ func TestExpiredGameDeletesIdentities(t *testing.T) {
 	}
 	t.Cleanup(sub.Close)
 	advance := func(d time.Duration) { _ = clk.Sleep(context.Background(), d) }
-	if _, ferr := st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "real", Serials: []string{"A"}}); ferr != nil {
+	if _, ferr := st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "shadow", Serials: []string{"A"}}); ferr != nil {
 		t.Fatal(ferr)
 	}
 	e.drain()
 	advance(30 * time.Minute)
-	if _, ferr := st.RegisterGame(state.Game{ID: "g2", CoordinatorInstance: "c1", Kind: "real", Serials: []string{"Z"}}); ferr != nil {
+	if _, ferr := st.RegisterGame(state.Game{ID: "g2", CoordinatorInstance: "c1", Kind: "shadow", Serials: []string{"Z"}}); ferr != nil {
 		t.Fatal(ferr)
 	}
 	e.drain()
@@ -724,9 +732,9 @@ func TestExpiredGameDeletesIdentities(t *testing.T) {
 func TestRegisterThenEndBeforeSend(t *testing.T) {
 	e := newOutEnv(t)
 	g := gameOf("g1", "shadow", "A", "B")
-	e.out.Changed(e.registered(g, nil))
-	e.out.Changed(e.change(state.ChangeValue, "interventions", "music_tempo_override", registry.ScopeGame, state.Scope{GameID: "g1"}, "", "1.25"))
-	e.out.Changed(e.ended(g))
+	e.link.StateChanged(e.registered(g, nil))
+	e.link.StateChanged(e.change(state.ChangeValue, "interventions", "music_tempo_override", registry.ScopeGame, state.Scope{GameID: "g1"}, "", "1.25"))
+	e.link.StateChanged(e.ended(g))
 	e.drain()
 	if n := len(e.fake.Requests()); n != 0 {
 		t.Fatalf("UC-055/BR-003 %d requests for a game that ended before the first send, want 0: %v", n, e.fake.Requests())
@@ -739,7 +747,7 @@ func TestRegisterThenEndBeforeSend(t *testing.T) {
 // latest list, and a list that empties removes the override.
 func TestEventListShownAsLatestValue(t *testing.T) {
 	e := newOutEnv(t)
-	e.out.Changed(e.registered(gameOf("g1", "real", "A"), nil))
+	e.link.StateChanged(e.registered(gameOf("g1", "real", "A"), nil))
 	e.drain()
 	events := func(raw string) state.Change {
 		c := e.change(state.ChangeEvents, "interventions", "audio_cue", registry.ScopeGame, state.Scope{GameID: "g1"}, "", "")
@@ -748,8 +756,8 @@ func TestEventListShownAsLatestValue(t *testing.T) {
 	}
 	first := `[{"sound":"start"}]`
 	latest := `[{"sound":"start"},{"sound":"end"}]`
-	e.out.Changed(events(first))
-	e.out.Changed(events(latest))
+	e.link.StateChanged(events(first))
+	e.link.StateChanged(events(latest))
 	e.drain()
 	puts := e.bodies(http.MethodPut, apiEnv+"edge-identities-featurestates")
 	if len(puts) != 1 {
@@ -770,7 +778,7 @@ func TestEventListShownAsLatestValue(t *testing.T) {
 	if body.Identifier != "game:g1" || got != latest {
 		t.Fatalf("UC-055/BR-002 override %s = %s, want game:g1 = the latest list %s", body.Identifier, got, latest)
 	}
-	e.out.Changed(events(`[]`))
+	e.link.StateChanged(events(`[]`))
 	e.drain()
 	if n := e.count(http.MethodDelete, apiEnv+"edge-identities-featurestates"); n != 1 {
 		t.Fatalf("UC-055/BR-002 %d override deletes after the list emptied, want 1", n)
@@ -788,7 +796,7 @@ func TestSpanWriterLabel(t *testing.T) {
 	sc := trace.NewSpanContext(trace.SpanContextConfig{TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2}, TraceFlags: trace.FlagsSampled})
 	c := e.stack("decision.backend", "jev", `"jev"`)
 	e.links.Remember(c.Version, sc, e.clk.Now())
-	e.out.Changed(c)
+	e.link.StateChanged(c)
 	e.drain()
 	spans := e.pushSpans()
 	if len(spans) != 1 {
@@ -818,10 +826,10 @@ func TestGameEndsWhileCreateInFlight(t *testing.T) {
 		flagsmithtest.WriteJSON(w, http.StatusCreated, json.RawMessage(`{"identity_uuid":"`+uuidOf("game:g1")+`"}`))
 	})
 	g := gameOf("g1", "real")
-	e.out.Changed(e.registered(g, nil))
+	e.link.StateChanged(e.registered(g, nil))
 	r := e.start()
 	<-started
-	e.out.Changed(e.ended(g))
+	e.link.StateChanged(e.ended(g))
 	close(release)
 	waitFor(t, "the out side to go idle", e.idle)
 	if err := r.stop(); !errors.Is(err, context.Canceled) {
@@ -840,12 +848,12 @@ func TestCreateFailsLinkDownThenGameEnds(t *testing.T) {
 	e := newOutEnv(t)
 	e.fake.Fail(http.StatusServiceUnavailable)
 	g := gameOf("g1", "real")
-	e.out.Changed(e.registered(g, nil))
+	e.link.StateChanged(e.registered(g, nil))
 	r := e.start()
 	if err := r.wait(); !IsLinkDown(err) {
 		t.Fatalf("UC-055/A2 Run returned %v, want a link-down error", err)
 	}
-	e.out.Changed(e.ended(g))
+	e.link.StateChanged(e.ended(g))
 	e.fake.Fail(0)
 	e.drain()
 	if n := e.count(http.MethodDelete, apiEnv+"edge-identities/"+uuidOf("game:g1")+"/"); n != 0 {
@@ -872,10 +880,10 @@ func TestRefusalKeepsNewerValue(t *testing.T) {
 		}
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	})
-	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
+	e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
 	r := e.start()
 	<-started
-	e.out.Changed(e.stack("decision.backend", "claude", `"claude"`))
+	e.link.StateChanged(e.stack("decision.backend", "claude", `"claude"`))
 	close(release)
 	waitFor(t, "the out side to go idle", e.idle)
 	_ = r.stop()
@@ -922,12 +930,12 @@ func TestRefusalWithoutRequestRecorded(t *testing.T) {
 // request runs after the identity delete.
 func TestRemovedSerialKeysForgotten(t *testing.T) {
 	e := newOutEnv(t)
-	both, onlyA := gameOf("g1", "real", "A", "B"), gameOf("g1", "real", "A")
-	e.out.Changed(e.registered(both, nil))
+	both, onlyA := gameOf("g1", "shadow", "A", "B"), gameOf("g1", "shadow", "A")
+	e.link.StateChanged(e.registered(both, nil))
 	e.drain()
 	kb := Key{Set: "interventions", Flag: "player_sensitivity_factor", Scope: "game:g1:B"}
 	e.link.Links().Offer(kb, Value{Writer: "menu"}, e.clk.Now(), 9)
-	e.out.Changed(e.registered(onlyA, both))
+	e.link.StateChanged(e.registered(onlyA, both))
 	e.drain()
 	if n := e.count(http.MethodDelete, apiEnv+"edge-identities-featurestates"); n != 0 {
 		t.Fatalf("UC-055/A2 %d override deletes for a removed player, want 0", n)
@@ -950,8 +958,8 @@ func TestFailingKeyDoesNotBlockQueue(t *testing.T) {
 	e.setOn(http.MethodPatch, e.futurePath("decision.backend"), func(w http.ResponseWriter, _ *http.Request) {
 		flagsmithtest.WriteJSON(w, http.StatusInternalServerError, json.RawMessage(`{}`))
 	})
-	e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
-	e.out.Changed(e.stack("decision.min_interval_ms", "", `2500`))
+	e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
+	e.link.StateChanged(e.stack("decision.min_interval_ms", "", `2500`))
 	r := e.start()
 	if err := r.wait(); err == nil {
 		t.Fatal("UC-055/A4 Run ended without an error, want the link down on the 5xx")

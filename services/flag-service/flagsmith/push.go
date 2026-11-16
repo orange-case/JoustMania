@@ -207,13 +207,13 @@ func (l *Link) futurePath(featureID int) string {
 	return "/api/__future__/environments/" + url.PathEscape(l.Config().EnvironmentKey) + "/features/" + strconv.Itoa(featureID) + "/"
 }
 
-// send sends one key's value: a stack value to the feature's environment
-// value, any other scope to the override on its identity (a value that is
-// not present deletes the override).
-func (o *out) send(ctx context.Context, k Key, v Value, fv FSValue, featureID int) (int, error) {
+// send sends one key's value: a stack value (id "") to the feature's
+// environment value, any other scope to the override on identity id (a
+// value that is not present deletes the override).
+func (o *out) send(ctx context.Context, id string, v Value, fv FSValue, featureID int) (int, error) {
 	l := o.l
 	cl := l.Client()
-	if id := IdentityOf(k); id != "" {
+	if id != "" {
 		path := l.envPath("edge-identities-featurestates")
 		if !v.Present {
 			status, err := cl.Admin(ctx, http.MethodDelete, path, overrideKey{Identifier: id, Feature: featureID}, nil)
@@ -298,6 +298,20 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 	if !ok {
 		return false, nil
 	}
+	identifier, decision := l.ctrl.identityFor(k)
+	switch decision {
+	case sendDrop:
+		// A player value of a game that ended or does not own the
+		// controller (any more): never sent to a controller another game
+		// owns (#2624).
+		l.Links().ForgetIdentity(k.Scope)
+		return true, nil
+	case sendWait:
+		// The controller's settle is due (it became due after this step
+		// looked for controller work): the next step settles it, then
+		// sends this value.
+		return true, nil
+	}
 	featureID, haveFeature := l.featureID(k)
 	if !haveFeature {
 		o.refuseUnsent(ctx, k, v, merged, version, ReasonNotFound)
@@ -316,7 +330,7 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 		link = sc
 	}
 	oc := o.roundTrip(ctx, k, valueOp(k, v), v.Writer, merged, link, func(c context.Context) (int, error) {
-		return o.send(c, k, v, fv, featureID)
+		return o.send(c, identifier, v, fv, featureID)
 	})
 	switch {
 	case oc.err != nil:

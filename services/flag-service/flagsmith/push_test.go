@@ -38,9 +38,9 @@ func TestStackValuePatchBody(t *testing.T) {
 		t.Run("UC-055/BR-002 "+c.name, func(t *testing.T) {
 			e := newOutEnv(t)
 			if c.clear {
-				e.out.Changed(e.change(state.ChangeCleared, "agent", c.flag, registry.ScopeStack, state.Scope{}, "", ""))
+				e.link.StateChanged(e.change(state.ChangeCleared, "agent", c.flag, registry.ScopeStack, state.Scope{}, "", ""))
 			} else {
-				e.out.Changed(e.stack(c.flag, c.variant, c.raw))
+				e.link.StateChanged(e.stack(c.flag, c.variant, c.raw))
 			}
 			e.drain()
 			got := e.bodies(http.MethodPatch, e.futurePath(c.flag))
@@ -61,6 +61,8 @@ type overrideCase struct {
 	raw        string
 	identifier string
 	value      string
+	// game is registered first (a player value needs its live game).
+	game *state.Game
 }
 
 // UC: UC-055 BR-002
@@ -71,7 +73,8 @@ func TestIdentityOverrideBody(t *testing.T) {
 	cases := []overrideCase{
 		{name: "game float", set: "interventions", flag: "music_tempo_override", scopeName: registry.ScopeGame, scope: state.Scope{GameID: "g1"}, raw: `1.25`, identifier: "game:g1", value: `"1.25"`},
 		{name: "game integer", set: "interventions", flag: "global_sensitivity_override", scopeName: registry.ScopeGame, scope: state.Scope{GameID: "g1"}, raw: `3`, identifier: "game:g1", value: `3`},
-		{name: "player", set: "interventions", flag: "player_sensitivity_factor", scopeName: registry.ScopeGameSerial, scope: state.Scope{GameID: "g1", Serial: "MOCK0001"}, raw: `1.5`, identifier: "game:g1:MOCK0001", value: `"1.5"`},
+		{name: "real game player (its controller, #2624)", set: "interventions", flag: "player_sensitivity_factor", scopeName: registry.ScopeGameSerial, scope: state.Scope{GameID: "g1", Serial: "MOCK0001"}, raw: `1.5`, identifier: "controller:MOCK0001", value: `"1.5"`, game: gameOf("g1", "real", "MOCK0001")},
+		{name: "shadow game player", set: "interventions", flag: "player_sensitivity_factor", scopeName: registry.ScopeGameSerial, scope: state.Scope{GameID: "g1", Serial: "MOCK0001"}, raw: `1.5`, identifier: "game:g1:MOCK0001", value: `"1.5"`, game: gameOf("g1", "shadow", "MOCK0001")},
 		{name: "experiment arm", set: "agent", flag: "decision.prompt_profile", scopeName: registry.ScopeExperiment, scope: state.Scope{ExperimentID: "e1", Arm: "armA"}, variant: "neutral", raw: `"neutral"`, identifier: "experiment:e1:armA", value: `"neutral"`},
 		{name: "real", set: "game", flag: "windows", scopeName: registry.ScopeReal, scope: state.Scope{GameKind: "real"}, raw: `{"min": 1}`, identifier: "real", value: `"{\"min\":1}"`},
 		{name: "fraction", set: "agent", flag: "decision.prompt_profile", scopeName: registry.ScopeFraction, scope: state.Scope{FractionPercent: &pct}, variant: "v1", raw: `"v1"`, identifier: "fraction", value: `"{\"variant\":\"v1\",\"fraction_percent\":25}"`},
@@ -80,7 +83,10 @@ func TestIdentityOverrideBody(t *testing.T) {
 	for _, c := range cases {
 		t.Run("UC-055/BR-002 "+c.name, func(t *testing.T) {
 			e := newOutEnv(t)
-			e.out.Changed(e.change(state.ChangeValue, c.set, c.flag, c.scopeName, c.scope, c.variant, c.raw))
+			if c.game != nil {
+				e.link.StateChanged(e.registered(c.game, nil))
+			}
+			e.link.StateChanged(e.change(state.ChangeValue, c.set, c.flag, c.scopeName, c.scope, c.variant, c.raw))
 			e.drain()
 			want := fmt.Sprintf(`{"identifier":%q,"feature":%d,"enabled":true,"feature_state_value":%s}`, c.identifier, e.fid(c.flag), c.value)
 			if got := e.bodies(http.MethodPut, path); len(got) != 1 || got[0] != want {
@@ -90,7 +96,7 @@ func TestIdentityOverrideBody(t *testing.T) {
 				t.Fatalf("UC-055/BR-002 %d stack PATCH requests for a %s value, want 0", n, c.name)
 			}
 			// The value ends: the override is deleted.
-			e.out.Changed(e.change(state.ChangeCleared, c.set, c.flag, c.scopeName, c.scope, "", ""))
+			e.link.StateChanged(e.change(state.ChangeCleared, c.set, c.flag, c.scopeName, c.scope, "", ""))
 			e.drain()
 			wantDel := fmt.Sprintf(`{"identifier":%q,"feature":%d}`, c.identifier, e.fid(c.flag))
 			if got := e.bodies(http.MethodDelete, path); len(got) != 1 || got[0] != wantDel {
@@ -110,8 +116,8 @@ func TestFutureFallbackLatch(t *testing.T) {
 		for _, flag := range []string{"decision.backend", "decision.min_interval_ms"} {
 			e.setOn(http.MethodPatch, e.futurePath(flag), func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 		}
-		e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
-		e.out.Changed(e.stack("decision.min_interval_ms", "", `2500`))
+		e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
+		e.link.StateChanged(e.stack("decision.min_interval_ms", "", `2500`))
 		e.drain()
 		if n := e.count(http.MethodPatch, "/api/__future__/"); n != 1 {
 			t.Fatalf("UC-055/A4 %d __future__ requests, want 1 (the second key goes straight to the fallback)", n)
@@ -136,7 +142,7 @@ func TestFutureFallbackLatch(t *testing.T) {
 		e.setOn(http.MethodPatch, e.futurePath("decision.backend"), func(w http.ResponseWriter, _ *http.Request) {
 			flagsmithtest.WriteJSON(w, http.StatusNotFound, json.RawMessage(`{"detail":"Not found."}`))
 		})
-		e.out.Changed(e.stack("decision.backend", "jev", `"jev"`))
+		e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
 		e.drain()
 		if n := e.count(http.MethodGet, apiEnv+"featurestates/"); n != 0 {
 			t.Fatalf("UC-055/A4 %d feature state lookups, want 0", n)
