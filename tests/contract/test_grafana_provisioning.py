@@ -139,7 +139,7 @@ def _game_players() -> dict:
 
 @pytest.mark.uc("UC-035", flow="main", steps=[6])
 def test_player_variable_lists_every_connected_controller():
-    """The player list is every connected controller, so a player can be picked between games.
+    """The player list is every connected real controller, so a player can be picked between games.
 
     controller_info{serial,name} exists while the controller manager tracks a controller and is
     removed on untrack, so it alone is the connected roster: no game_active / game_player_alive
@@ -150,7 +150,8 @@ def test_player_variable_lists_every_connected_controller():
     )
     query = re.sub(r"\s+", "", variable["query"]["query"])
     assert variable["definition"] == variable["query"]["query"]
-    assert query == "query_result(controller_info==1)", query
+    real = 'controller_infounlesson(serial)controller_backend_info{backend="mock"}'
+    assert query == f"query_result(({real})==1)", query
     assert variable["regex"] == '/name="([^"]+)"/', variable["regex"]
     assert variable["includeAll"] and variable["multi"], variable
     assert "game_active" not in query and "game_player_alive" not in query, query

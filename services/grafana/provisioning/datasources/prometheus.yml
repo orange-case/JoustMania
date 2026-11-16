@@ -18,4 +18,4 @@ datasources:
     isDefault: true
     editable: false
     jsonData:
-      timeInterval: "10ms"  # Support 100Hz queries
+      timeInterval: "10ms"  # floor only; samples arrive every 100 ms (OTLP export), panels bound points with maxDataPoints

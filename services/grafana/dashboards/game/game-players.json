@@ -1564,7 +1564,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Acceleration magnitude of every connected controller, one line per controller name, whether or not a game is running; dashed lines = warning and death thresholds of the live primary game. ~10 Hz (OTLP export every 100 ms).",
+      "description": "Acceleration magnitude of every connected real controller, one line per controller name, whether or not a game is running (mock controllers, including the agent's shadow-game bots, are left out); dashed lines = warning and death thresholds of the live primary game. About 10 Hz (OTLP export every 100 ms). topk by (serial) keeps one controller_info series per serial, so a rename inside the lookbehind cannot break the join.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1720,7 +1720,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "controller_accel_magnitude * on(serial) group_left(name) controller_info",
+          "expr": "controller_accel_magnitude * on(serial) group_left(name) topk by (serial) (1, controller_info unless on(serial) controller_backend_info{backend=\"mock\"})",
           "legendFormat": "{{name}}",
           "refId": "A",
           "instant": false
@@ -2991,8 +2991,8 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "description": "Every connected controller by name (controller_info), whether or not a game is running; the controller manager removes a controller's series when it disconnects.",
-        "definition": "query_result(controller_info == 1)",
+        "description": "Every connected real controller by name (controller_info), whether or not a game is running. Mock controllers (controller_backend_info backend=\"mock\", which includes the agent's reserved shadow-game bots) are left out. A disconnected controller's series is removed, so it drops out of the list within the metrics staleness window.",
+        "definition": "query_result((controller_info unless on(serial) controller_backend_info{backend=\"mock\"}) == 1)",
         "hide": 0,
         "includeAll": true,
         "label": "Player",
@@ -3000,7 +3000,7 @@
         "name": "player",
         "options": [],
         "query": {
-          "query": "query_result(controller_info == 1)",
+          "query": "query_result((controller_info unless on(serial) controller_backend_info{backend=\"mock\"}) == 1)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
