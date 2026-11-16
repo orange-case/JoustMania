@@ -140,6 +140,6 @@ HANDLER_FLAG_READS = {
     },
     ("user", "agent_intervention_cue"): {
         "targeting": [],
-        "readers": "interventions.py _cue_enabled <- _emit_agent_cue (no targeting)",
+        "readers": "interventions.py _cue_enabled <- intervention_effects.emit_agent_cue (no targeting)",
     },
 }
