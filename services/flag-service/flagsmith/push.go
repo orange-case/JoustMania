@@ -26,8 +26,9 @@ const (
 // less than notFoundFreshFor ago is retried, at most notFoundRetries times per
 // pending value, after notFoundBackoff, then twice and four times that
 // (UC-055 A4, #2639): Flagsmith's edge storage may not show an identity it
-// just created yet. Any other 404, and the one after the last retry, refuses
-// the value as before.
+// just created yet. The waiting value goes to the back of the queue, so it
+// never holds the other keys back. Any other 404, and the one after the last
+// retry, refuses the value as before.
 const (
 	notFoundFreshFor = 30 * time.Second
 	notFoundRetries  = 3
@@ -326,12 +327,12 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 	}
 	featureID, haveFeature := l.featureID(k)
 	if !haveFeature {
-		o.refuseUnsent(ctx, k, v, merged, version, ReasonNotFound)
+		o.refuseUnsent(ctx, k, v, merged, version, identifier, ReasonNotFound)
 		return true, nil
 	}
 	fv, encErr := l.encodeFor(k, v)
 	if encErr != nil {
-		o.refuseUnsent(ctx, k, v, merged, version, ReasonBadValue)
+		o.refuseUnsent(ctx, k, v, merged, version, identifier, ReasonBadValue)
 		return true, nil
 	}
 	if err := o.pace(ctx); err != nil {
@@ -346,8 +347,16 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 	})
 	if oc.status == http.StatusNotFound && !oc.ok && oc.err == nil && identifier != "" && o.listedRecently(identifier) {
 		if try, ok := l.Links().RetryNotFound(k, notFoundRetries); ok {
-			// The value stays first in the queue, like a 429's.
-			return true, l.Sleep(ctx, notFoundBackoff<<(try-1))
+			// Per key: the value waits at the back of the queue, the other
+			// keys go on; a timer wakes the sender when it is due.
+			wait := notFoundBackoff << (try - 1)
+			l.Links().Retry(k, l.Now().Add(wait))
+			go func() {
+				if l.Sleep(ctx, wait) == nil {
+					o.poke()
+				}
+			}()
+			return true, nil
 		}
 	}
 	switch {
@@ -384,7 +393,7 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 // refuseUnsent refuses v of k without a request (its feature id is unknown, or
 // the value cannot be encoded) and records the push like a refused call: one
 // pushes_total point and one push span.
-func (o *out) refuseUnsent(ctx context.Context, k Key, v Value, merged int, version uint64, reason string) {
+func (o *out) refuseUnsent(ctx context.Context, k Key, v Value, merged int, version uint64, identifier, reason string) {
 	l := o.l
 	var link trace.SpanContext
 	if sc, found := l.WriteSpanContext(version); found {
@@ -395,7 +404,7 @@ func (o *out) refuseUnsent(ctx context.Context, k Key, v Value, merged int, vers
 	l.Metrics().RecordPush(ctx, op, ResultRejected, reason)
 	EndSpan(span, ResultRejected, reason)
 	l.Links().RefuseValue(k, v, SideRemote, reason)
-	o.warnRefused(k, op, IdentityOf(k), reason, 0)
+	o.warnRefused(k, op, identifier, reason, 0)
 	if k.Scope == ScopeStack {
 		l.fullPull.Store(true)
 		l.Wake()

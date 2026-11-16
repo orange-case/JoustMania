@@ -213,9 +213,13 @@ func TestRefusedKeysNamedInStateAndLog(t *testing.T) {
 	if len(warns) != 2 {
 		t.Fatalf("UC-055/A4 %d refusal WARNs, want 2 (one per refusal):\n%s", len(warns), logs.String())
 	}
-	for _, want := range []string{"level=WARN", "flag_set=interventions", "flag=music_tempo_override", "scope=game:g1", "reason=not_found", "http_status=404"} {
-		if !strings.Contains(warns[0], want) {
-			t.Fatalf("UC-055/A4 WARN %q lacks %q", warns[0], want)
+	game := warns[0]
+	if !strings.Contains(game, "scope=game:g1") {
+		game = warns[1]
+	}
+	for _, want := range []string{"level=WARN", "flag_set=interventions", "flag=music_tempo_override", "scope=game:g1", "identity=game:g1", "reason=not_found", "http_status=404"} {
+		if !strings.Contains(game, want) {
+			t.Fatalf("UC-055/A4 WARN %q lacks %q", game, want)
 		}
 	}
 	for _, w := range warns {
@@ -244,4 +248,133 @@ func TestStateKeysBounded(t *testing.T) {
 	if list[0].Flag != "z" || list[0].HTTPStatus != http.StatusConflict {
 		t.Fatalf("UC-055/A4 first key %+v, want the refused one", list[0])
 	}
+}
+
+// UC: UC-054 A3
+// UC: UC-055 A1
+// A game that registers while the start cleanup's delete of its identity is on
+// the wire keeps its keys; the out side lists the identity again with the
+// game's traits and sends its confirmed values again (#2639).
+func TestStaleDeleteRacingRegistration(t *testing.T) {
+	e := newStartEnv(t)
+	e.st.SetObserver(e.l)
+	e.allFeaturesExist()
+	e.admin.identities = [][]edgeIdentity{{{IdentityUUID: "u1", Identifier: "game:g1"}, {IdentityUUID: "u3", Identifier: "game:dead"}}}
+	k := Key{Set: "interventions", Flag: "pacing_profile", Scope: "game:dead"}
+	e.admin.onDelete = func(uuid string) {
+		if uuid != "u3" {
+			return
+		}
+		// The delete is on the wire: game "dead" registers and its value is
+		// confirmed in Flagsmith before the delete lands.
+		if _, err := e.st.RegisterGame(state.Game{ID: "dead", CoordinatorInstance: "c1", Kind: "shadow"}); err != nil {
+			t.Error(err)
+		}
+		e.l.Links().SetRemote(k, Value{Present: true, Variant: "calm", Value: json.RawMessage(`"calm"`)})
+	}
+	if err := e.s.Start(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "real"}); err != nil {
+		t.Fatal(err)
+	}
+	close(e.clock.release)
+	e.waitCleanup(t)
+	if got := e.deleted(); got != "u3" {
+		t.Fatalf("UC-054/A3 deleted %s, want u3", got)
+	}
+	if !slicesContains(e.l.Links().Keys(), k) {
+		t.Fatal("UC-055/A1 the live game's key was forgotten with the deleted identity")
+	}
+	o := e.l.out.(*out)
+	o.relistGone() // what Run does first in every step
+	ids := e.l.IDs()
+	ids.Lock()
+	uuid := ids.IdentityUUID["game:dead"]
+	ids.Unlock()
+	if uuid == "u3" {
+		t.Fatal("UC-055/A1 the deleted uuid is still used")
+	}
+	o.ids.mu.Lock()
+	w := o.ids.want["game:dead"]
+	relisted := w != nil && w.present && !w.created && len(w.traits) == 2
+	o.ids.mu.Unlock()
+	if !relisted {
+		t.Fatalf("UC-055/A1 identity work for game:dead %+v, want it listed again with the game's traits", w)
+	}
+	if !e.l.Links().HasPending(k) {
+		t.Fatal("UC-055/A1 the confirmed value of the live game is not sent again")
+	}
+}
+
+func slicesContains(ks []Key, k Key) bool {
+	for _, x := range ks {
+		if x == k {
+			return true
+		}
+	}
+	return false
+}
+
+// UC: UC-055 A4
+// A value waiting for its 404 retry does not hold the other keys back: a
+// later stack value is sent before the retry (#2639).
+func TestNotFoundRetryDoesNotHoldOtherKeys(t *testing.T) {
+	e := newOutEnv(t)
+	e.overrideNotFound(1)
+	e.link.StateChanged(e.registered(gameOf("g1", "shadow"), nil))
+	e.link.StateChanged(e.gameValue("g1", "1.25"))
+	e.link.StateChanged(e.stack("decision.backend", "jev", `"jev"`))
+	e.drain()
+	var order []string
+	for _, r := range e.fake.Requests() {
+		switch {
+		case r.Method == http.MethodPut && strings.HasSuffix(r.Path, "edge-identities-featurestates"):
+			order = append(order, "put")
+		case r.Method == http.MethodPatch:
+			order = append(order, "patch")
+		}
+	}
+	if strings.Join(order, ",") != "put,patch,put" {
+		t.Fatalf("UC-055/A4 request order %v, want put (404), patch, put (the retry)", order)
+	}
+}
+
+// UC: UC-055 A4
+// A held refused value whose refusal was replaced by a local one still shows
+// Flagsmith's reason and status, refused first; a value refused without a
+// request names the identity it would go to (controller:<serial>).
+func TestRefusalNamesAfterLocalRefusalAndController(t *testing.T) {
+	t.Run("UC-055/A4 held refused value keeps its reason", func(t *testing.T) {
+		s := NewLinkState(nil)
+		k := Key{Set: "agent", Flag: "decision.backend", Scope: ScopeStack}
+		v := Value{Present: true, Value: json.RawMessage(`1`)}
+		s.Offer(k, v, time.Now(), 1)
+		s.Next()
+		s.RefuseValueStatus(k, v, SideRemote, ReasonChangeRequestRequired, http.StatusConflict)
+		s.Refuse(k, SideLocal, "flagsmith_type_mismatch")
+		s.ClearLocalRefusal(k)
+		list, _ := s.Unsynced(MaxStateKeys)
+		if len(list) != 1 || list[0].Reason != ReasonChangeRequestRequired || list[0].HTTPStatus != http.StatusConflict || list[0].Side != SideRemote {
+			t.Fatalf("UC-055/A4 keys %+v, want the held change_request_required 409", list)
+		}
+	})
+	t.Run("UC-055/A4 refusal without a request names controller:<serial>", func(t *testing.T) {
+		e := newOutEnv(t)
+		newIDModel(e)
+		logs := e.captureLog()
+		delete(e.link.IDs().FeatureID, "player_sensitivity_factor")
+		e.link.StateChanged(e.registered(realGame("g1", e.clk.Now(), "A"), nil))
+		e.link.StateChanged(e.player("g1", "A", "1.5"))
+		e.drain()
+		var warn string
+		for _, line := range strings.Split(logs.String(), "\n") {
+			if strings.Contains(line, "flagsmith push refused") {
+				warn = line
+			}
+		}
+		if !strings.Contains(warn, "scope=game:g1:A") || !strings.Contains(warn, "identity=controller:A") || !strings.Contains(warn, "http_status=0") {
+			t.Fatalf("UC-055/A4 WARN %q, want scope game:g1:A sent to identity controller:A without a request", warn)
+		}
+	})
 }

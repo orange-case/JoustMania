@@ -94,6 +94,24 @@ func (q *identityQueue) Want(identifier string, present bool, traits []trait) {
 	}
 }
 
+// Recreate lists identifier again although this process listed it before
+// (the start cleanup deleted it under a game that registered meanwhile,
+// #2639). A delete already wanted (the game ended) is left alone.
+func (q *identityQueue) Recreate(identifier string, traits []trait) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	w := q.want[identifier]
+	switch {
+	case w == nil:
+		q.gen++
+		q.want[identifier] = &identityWant{present: true, gen: q.gen, traits: traits}
+		q.order = append(q.order, identifier)
+	case w.present:
+		q.gen++
+		w.gen, w.created, w.inflight, w.uuid, w.traits = q.gen, false, false, "", traits
+	}
+}
+
 // Start marks the create request of op as on the wire.
 func (q *identityQueue) Start(op identityOp) {
 	q.mu.Lock()

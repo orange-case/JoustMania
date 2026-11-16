@@ -48,6 +48,10 @@ type entry struct {
 	// ClearRefusal or the key's deletion clears it (UC-055 A4, #2604).
 	pushRefused    Value
 	hasPushRefused bool
+	// pushRefusedReason and pushRefusedStatus: Flagsmith's refusal of
+	// pushRefused, still shown after a local refusal replaced refused (#2639).
+	pushRefusedReason string
+	pushRefusedStatus int
 	// gen counts changes of the remote value (SetRemote, ConfirmPushed,
 	// ForgetRemote, RestoreRemote): a pull skips a key whose gen moved while
 	// the document was in flight (a stale document vs a confirmed push).
@@ -488,6 +492,7 @@ func (s *LinkState) RefuseValueStatus(k Key, v Value, side Side, reason string, 
 		s.refuseLocked(k, e, v, side, reason, status)
 		if side == SideRemote && !held {
 			e.pushRefused, e.hasPushRefused = v, true
+			e.pushRefusedReason, e.pushRefusedStatus = reason, status
 		}
 	}
 }
@@ -673,11 +678,18 @@ func (s *LinkState) Unsynced(limit int) (list []KeyState, total int) {
 			continue
 		}
 		ks := KeyState{FlagSet: k.Set, Flag: k.Flag, Scope: k.Scope, InSync: e.inSync, Pending: e.pending != nil, Since: e.outSince.UTC()}
-		if e.refused != "" {
+		switch {
+		case e.refused != "":
 			ks.Reason, ks.Side, ks.HTTPStatus = e.refused, e.side, e.refusedStatus
-			if !e.refusedAt.IsZero() {
-				ks.Since = e.refusedAt.UTC()
+		case e.hasPushRefused:
+			// The refused value is held; Flagsmith's refusal of it is the reason.
+			ks.Reason, ks.Side, ks.HTTPStatus = e.pushRefusedReason, SideRemote, e.pushRefusedStatus
+			if ks.Reason == "" {
+				ks.Reason = ReasonOther
 			}
+		}
+		if refused && !e.refusedAt.IsZero() {
+			ks.Since = e.refusedAt.UTC()
 		}
 		list = append(list, ks)
 	}
@@ -703,4 +715,37 @@ func (s *LinkState) Unsynced(limit int) (list []KeyState, total int) {
 		list = list[:limit]
 	}
 	return list, total
+}
+
+// Resend queues again every confirmed value on identifier (a value Flagsmith
+// accepted, not refused, nothing pending): the identity was deleted under a
+// live game (#2639). The remote value is forgotten, so the push confirms it
+// again.
+func (s *LinkState) Resend(identifier string) (n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := []Key{}
+	if g := GameOfIdentity(identifier); g != "" {
+		for k := range s.byGame[g] {
+			keys = append(keys, k)
+		}
+	} else {
+		for k := range s.entries {
+			keys = append(keys, k)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].Flag < keys[j].Flag })
+	now := s.now()
+	for _, k := range keys {
+		e := s.entries[k]
+		if k.Scope != identifier || e == nil || e.pending != nil || !e.hasRemote || !e.remote.Present || e.hasPushRefused {
+			continue
+		}
+		v := e.remote
+		e.remote, e.hasRemote = Value{}, false
+		e.gen++
+		s.offerLocked(k, e, v, now, 0, false)
+		n++
+	}
+	return n
 }
