@@ -43,7 +43,7 @@ func counterByGameKind(t *testing.T, reader *metric.ManualReader, name string) m
 
 // UC: UC-035 A3
 // The agent's two counters carry game_kind in the TELEMETRY vocabulary
-// (primary / shadow), although the loop reasons in the flag vocabulary
+// (real / shadow, the coordinator vocabulary since #2646), although the loop reasons in the flag vocabulary
 // (real / shadow) (#1249, #2294).
 func TestAgentCounters_GameKindLabel(t *testing.T) {
 	cases := []struct {
@@ -51,9 +51,9 @@ func TestAgentCounters_GameKindLabel(t *testing.T) {
 		gameKind string
 		want     string
 	}{
-		{"UC-035/A3 real game is labelled primary", gamecontext.GameKindReal, "primary"},
+		{"UC-035/A3 real game is labelled real", gamecontext.GameKindReal, "real"},
 		{"UC-035/A3 shadow game is labelled shadow", gamecontext.GameKindShadow, "shadow"},
-		{"UC-035/A3 unknown kind never counts as primary", "", "shadow"},
+		{"UC-035/A3 unknown kind never counts as real", "", "shadow"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

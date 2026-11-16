@@ -703,11 +703,11 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # game instance after construction based on the owning GameSession. They
         # default to the single-game/primary values so a standalone game (and
         # every existing test) behaves exactly as before:
-        #   game_kind: "primary" or "shadow" — labels lifecycle metrics.
+        #   game_kind: "real" or "shadow" — labels lifecycle metrics.
         #   experiment_id / arm: experiment attribution within a shadow session;
         # empty for a non-experiment game. The servicer overrides
         #     these from the owning GameSession (set by #976's spawn binding).
-        self.game_kind = "primary"
+        self.game_kind = "real"
         self.experiment_id = ""
         self.arm = ""
         # UC-046 BR-018 / UC-040 BR-019: set by the session for a shadow game

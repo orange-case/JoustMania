@@ -173,7 +173,7 @@ class TestUC040BR019ShadowPolicy:
 class TestUC035BR008ShadowEnergy:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-035", flow="main", br=["BR-008"])
-    @pytest.mark.parametrize(("kind", "published"), [("shadow", 0), ("primary", 1)])
+    @pytest.mark.parametrize(("kind", "published"), [("shadow", 0), ("real", 1)])
     async def test_shadow_hold_game_publishes_no_energy_event(self, clock, events, kind, published):
         """UC-035 BR-008: a shadow hold game publishes no player_shield_energy; its agent gauges are still set."""
         flags = Flags("hold")

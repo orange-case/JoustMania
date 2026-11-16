@@ -250,7 +250,7 @@ processors:
   resource:
     attributes:
       - key: deployment.environment
-        value: development
+        value: ${env:DEPLOYMENT_ENVIRONMENT:-development}
         action: insert
       # service.namespace is set per-service in the Python SDK:
       #   "joustmania" for game services (game-coordinator, menu, audio)

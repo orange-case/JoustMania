@@ -11,11 +11,11 @@ import type { GetMenuStatusResponseLike } from "./gen/menu_pb.js";
 
 /** `last_over_time[1m]` drops the series of an ended game within a minute (OTLP writes no staleness marker). */
 export const STAGE_QUERY =
-  'last_over_time({__name__=~"game_shield_activation_mode|game_shield_hold_setting|game_sensitivity",game_kind="primary"}[1m])';
+  'last_over_time({__name__=~"game_shield_activation_mode|game_shield_hold_setting|game_sensitivity",game_kind="real"}[1m])';
 
 /** Newest sample time per series, to tell the live game from one that ended within the window. */
 export const STAGE_TS_QUERY =
-  'tlast_over_time({__name__=~"game_shield_activation_mode|game_shield_hold_setting|game_sensitivity",game_kind="primary"}[1m])';
+  'tlast_over_time({__name__=~"game_shield_activation_mode|game_shield_hold_setting|game_sensitivity",game_kind="real"}[1m])';
 
 const SENSITIVITY_NAMES = ["ultra slow", "slow", "medium", "fast", "ultra fast"];
 const HOLD_SHOWN: Array<[string, string]> = [

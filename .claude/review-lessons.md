@@ -84,7 +84,7 @@ _Verified against main f38f076d, 2026-10-23._
   that its flag reads are declared in `handler_flag_reads.py` and that it is dispatched through the wrapper (#1871).
   Conversely, per-game work that refreshes process-global config inside the session context leaks a shadow game's
   targeting into the real game.
-- **game_kind has two vocabularies** (telemetry `primary`/`shadow`, flags `real`/`shadow`) and the mode names
+- **game_kind is `real`/`shadow` everywhere since #2646** (the coordinator said `primary` before; old series and the agent's ingest still accept it), but the mode names
   differ (`JoustFFA` enum name vs `FFA` span name): normalise at ingest and grep both spellings.
 - **Safety gates fail closed, read at use time.** The wrong shape is a prime at init, or a "not found" mapped to
   permissive. Shipped defaults: `ci/*.json` may legally differ from base in DEFAULTS; a test requiring both to be

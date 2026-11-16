@@ -5,7 +5,7 @@ Answers the fixed query templates of scripts/agent_shadow_realism.py from a scen
 re-read on every request) and logs every request as "<METHOD> <path>?<query>". Any method other
 than GET is answered 405 and logged, so the test can prove the tool only reads.
 
-Scenario: {"games": [{"id", "kind" (primary|shadow), "mode", "start", "dur", "threshold",
+Scenario: {"games": [{"id", "kind" (real|shadow), "mode", "start", "dur", "threshold",
 "serials": [...], "accel": {serial: g}, "variance": {serial: v}, "skill": {serial: v},
 "elim": {serial: seconds after start}, "near_deaths": n, "jaeger_near_deaths": {serial: n} | null,
 "linger": seconds the duration gauge outlives the game}], "deaths": [{"game_kind", "mode",

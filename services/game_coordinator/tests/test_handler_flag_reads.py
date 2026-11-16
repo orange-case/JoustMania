@@ -344,7 +344,7 @@ async def test_handler_reads_carry_the_experiment_arm_game_context(seen):
 async def test_handler_reads_of_a_real_game_resolve_as_real(seen):
     """(iii) A real (primary) game: game_kind=real, no experiment or arm, its game context."""
     game = _make_ffa()
-    _bind(game, "primary")
+    _bind(game, "real")
     reads = await _run(game, seen, game_task=_running(game))
     assert reads
     for domain, key, ctx in reads:

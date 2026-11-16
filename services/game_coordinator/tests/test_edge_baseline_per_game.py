@@ -361,7 +361,7 @@ async def _start_through_servicer(game_kind: str):
         ok, game_id = await servicer._start_game_from_config(_start_config(game_kind), _MockSpan())
     assert ok, game_id
     session = servicer.sessions[game_id]
-    assert session.game_kind == ("primary" if game_kind == "real" else "shadow")
+    assert session.game_kind == game_kind
     game = FakeInterventionGame()
     session.current_game = game  # the game thread built the instance
     return servicer, flags, end_game_fn, game_id, game

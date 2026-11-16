@@ -49,8 +49,10 @@ logger = logging.getLogger(__name__)
 
 tracer = get_tracer(__name__)
 
-# UC-035 BR-002: coordinator spans say primary / shadow; the agent says real / shadow (D-T7).
-GAME_KIND_PRIMARY = "primary"
+# UC-035 BR-002 / D-T7 (#2646): one vocabulary on spans, metric labels and in the agent: real / shadow.
+# GAME_KIND_PRIMARY is the same value under its older name (the session that owns the primary slot).
+GAME_KIND_REAL = "real"
+GAME_KIND_PRIMARY = GAME_KIND_REAL
 GAME_KIND_SHADOW = "shadow"
 
 # games_completed_total{outcome} values: the game.outcome span attribute values

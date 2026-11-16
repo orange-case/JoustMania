@@ -21,7 +21,7 @@ const APPLIED_QUERY = `sum by (result, game_kind) (increase(agent_intervention_w
 
 /**
  * The agent counters carry `game_kind` in the telemetry vocabulary (#2294,
- * telemetry.md): `primary` is a real, player-facing game, `shadow` a parallel
+ * telemetry.md): `real` is a player-facing game, `shadow` a parallel
  * evaluation game. A series without the label comes from an agent image that
  * predates it and counts as real, as the panel did before the split.
  */

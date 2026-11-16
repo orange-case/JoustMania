@@ -6,10 +6,10 @@ package gamecontext
 //
 //   - Telemetry (what the agent ingests): the game coordinator labels its
 //     metrics (game_kind datapoint label) and spans (game.kind attribute) with
-//     "primary" for the player-facing menu game and "shadow" for a parallel
+//     "real" for the player-facing menu game and "shadow" for a parallel
 //     evaluation game (services/game_coordinator/game_session.py
-//     GAME_KIND_PRIMARY / GAME_KIND_SHADOW). Dashboards and alerts depend on
-//     "primary", so the coordinator keeps it.
+//     GAME_KIND_REAL / GAME_KIND_SHADOW). Until #2646 the coordinator said
+//     "primary"; the agent still accepts it, so a mixed-version stack works.
 //   - Flag evaluation (what the agent reasons in): "real" / "shadow"
 //     (lib/feature_flags.py GAME_KIND_REAL / GAME_KIND_SHADOW,
 //     experiment.GameKindReal). llm.eligible_game_kinds, the experiment
@@ -18,11 +18,12 @@ package gamecontext
 // The agent normalises once, at ingest, so GameContext.GameKind is always in the
 // flag-evaluation vocabulary.
 const (
-	// GameKindReal is a live, player-facing game (telemetry "primary").
+	// GameKindReal is a live, player-facing game.
 	GameKindReal = "real"
 	// GameKindShadow is a parallel evaluation game (same in both vocabularies).
 	GameKindShadow = "shadow"
-	// TelemetryGameKindPrimary is the coordinator's telemetry label for a real game.
+	// TelemetryGameKindPrimary is the legacy (pre-#2646) coordinator label for a
+	// real game: accepted at ingest, never emitted.
 	TelemetryGameKindPrimary = "primary"
 )
 
@@ -46,15 +47,15 @@ func NormalizeGameKind(kind string) string {
 	return kind
 }
 
-// TelemetryGameKind maps the flag-evaluation vocabulary back to the telemetry
-// vocabulary for the agent's OWN metric labels (agent_decisions_total and
-// agent_intervention_writes_total, #2294): "real" -> "primary", everything else
-// -> "shadow". The label has exactly two values; an empty or unrecognised kind
-// folds into "shadow" so an unknown game can never inflate the real-game counts
-// (the same fail-safe as NormalizeGameKind). "primary" passes through.
+// TelemetryGameKind maps a game kind onto the agent's OWN metric label
+// (agent_decisions_total, agent_intervention_writes_total, #2294): "real" (or the
+// legacy "primary") -> "real", everything else -> "shadow". Since #2646 this is
+// the coordinator's vocabulary too. The label has exactly two values; an empty or
+// unrecognised kind folds into "shadow" so an unknown game can never inflate the
+// real-game counts (the same fail-safe as NormalizeGameKind).
 func TelemetryGameKind(kind string) string {
 	if kind == GameKindReal || kind == TelemetryGameKindPrimary {
-		return TelemetryGameKindPrimary
+		return GameKindReal
 	}
 	return GameKindShadow
 }

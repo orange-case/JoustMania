@@ -76,7 +76,7 @@ def hold_game(clock, flags, events, gauges):  # noqa: F811, ARG001 - imported fi
         yield g
 
 
-GAME = {"game_kind": "primary", "game_id": "test_shield_hold", "experiment_id": "", "arm": ""}
+GAME = {"game_kind": "real", "game_id": "test_shield_hold", "experiment_id": "", "arm": ""}
 
 
 def player_value(gauges, name, serial="p1", **extra):
