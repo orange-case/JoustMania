@@ -12,9 +12,12 @@
 # no backend name or key lives in the case.
 #
 # Env (docker-compose.gateway.yml):
-#   ORANGECASE_GATEWAY_ENDPOINT  base URL, e.g. https://otlp.example.org
-#                                (OTLP/HTTP over TLS on 443; the exporter adds
-#                                /v1/traces, /v1/metrics, /v1/logs)
+#   ORANGECASE_GATEWAY_HOST      host name of the gateway, e.g. otlp.example.org
+#                                (no scheme, no path; host:port for a port other
+#                                than 443). The scheme is fixed to https below,
+#                                so the token never travels unencrypted (C-016).
+#                                The exporter adds /v1/traces, /v1/metrics,
+#                                /v1/logs.
 #   ORANGECASE_GATEWAY_TOKEN     bearer token (a secret: environment only, C-016)
 
 exporters:
@@ -26,15 +29,18 @@ exporters:
   #   a full queue drops the new batch at once (block_on_overflow is off).
   # - Wrong token (HTTP 401 / 403) or any other status: not retried, dropped.
   # - The queue is sized in BYTES, not in batches: each signal has its own queue
-  #   of 16 MiB of serialized data, 48 MiB in total. A queue counted in batches
-  #   has no memory bound, and a full one could push the collector to the
-  #   memory_limiter (600 MiB), which refuses data for the in-case pipelines too.
+  #   of 16 MiB of serialized data, 48 MiB in total. In memory a full queue costs
+  #   about four times its serialized size (measured: one full 16 MiB traces
+  #   queue raised the collector by about 65 MiB), so about 200 MiB for three
+  #   full queues. A queue counted in batches has no memory bound, and a full
+  #   one could push the collector to the memory_limiter (600 MiB), which
+  #   refuses data for the in-case pipelines too.
   #
   # The in-case backends still have everything the gateway copy lost. A
   # persistent queue is #2578 (needs the file_storage extension in
   # images/otel-collector).
   otlp_http/gateway:
-    endpoint: ${env:ORANGECASE_GATEWAY_ENDPOINT}
+    endpoint: https://${env:ORANGECASE_GATEWAY_HOST}
     headers:
       Authorization: Bearer ${env:ORANGECASE_GATEWAY_TOKEN}
     compression: gzip

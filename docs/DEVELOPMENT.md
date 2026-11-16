@@ -100,16 +100,17 @@ repo. Jaeger, VictoriaMetrics and the agent keep receiving everything.
 
 | Variable | Value |
 |---|---|
-| `ORANGECASE_GATEWAY_ENDPOINT` | Base URL of the gateway's OTLP/HTTP receiver, `https` on port 443, for example `https://otlp.example.org`. The collector adds `/v1/traces`, `/v1/metrics` and `/v1/logs`. |
+| `ORANGECASE_GATEWAY_HOST` | Host name of the gateway's OTLP/HTTP receiver, for example `otlp.example.org`: no scheme and no path (`host:port` for a port other than 443). The collector always uses `https://` and adds `/v1/traces`, `/v1/metrics` and `/v1/logs`. |
 | `ORANGECASE_GATEWAY_TOKEN` | The bearer token the gateway expects. A secret. |
 
 Both are required; compose refuses the file without them. Keep them in the environment: the shell, or
 `.env.local` on the Pi (not in git). Never put the token in a flag, a compose file or any file of this repo
-(C-016). Use an `https` endpoint: over plain `http` the token travels unencrypted.
+(C-016). The scheme is fixed to `https`, so the token never travels unencrypted; with a value that
+carries a scheme (`http://...`) every export fails and nothing is sent.
 
 ```bash
 # On: recreates the collector with the overlay
-export ORANGECASE_GATEWAY_ENDPOINT=https://otlp.example.org
+export ORANGECASE_GATEWAY_HOST=otlp.example.org
 export ORANGECASE_GATEWAY_TOKEN=...
 docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d otel-collector
 

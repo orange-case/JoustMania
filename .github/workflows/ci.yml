@@ -1406,11 +1406,13 @@ jobs:
           [[ -n "$ref" && "$ref" != "null" ]] || { echo "::error::could not resolve otel-collector image ref"; exit 1; }
           echo "ref=${ref}" >> "$GITHUB_OUTPUT"
           rc=0
-          bash scripts/ci/check-collector-config.sh "$ref" services/otel-collector/config.yaml || rc=$?
+          # #2571: base plus the opt-in gateway overlay, so an image that
+          # accepts the base but not the overlay is rebuilt at HEAD as well.
+          bash scripts/ci/check-collector-config.sh "$ref" services/otel-collector/config.yaml services/otel-collector/config.gateway.yaml || rc=$?
           case "$rc" in
             0) echo "build=false" >> "$GITHUB_OUTPUT" ;;
             1 | 2)
-              echo "::warning::${ref} does not accept services/otel-collector/config.yaml; building the collector at HEAD for this run"
+              echo "::warning::${ref} does not accept services/otel-collector/config.yaml with config.gateway.yaml; building the collector at HEAD for this run"
               echo "build=true" >> "$GITHUB_OUTPUT" ;;
             *) exit "$rc" ;;
           esac
@@ -1432,13 +1434,6 @@ jobs:
       # image: fail here with the collector's own error instead of 18 setup errors.
       - name: Validate collector config against the HEAD build
         if: steps.collector_image.outputs.build == 'true'
-        run: bash scripts/ci/check-collector-config.sh --no-pull "${{ steps.collector_image.outputs.ref }}" services/otel-collector/config.yaml
-
-      # #2571 (UC-035 A7): the opt-in gateway overlay is loaded as a second
-      # --config. Validate the merge of base and overlay with the collector
-      # image this run uses (pulled, or built at HEAD by the step above).
-      - name: Validate collector config with the gateway overlay
-        if: needs.changes.outputs.e2e_full_build == 'false'
         run: bash scripts/ci/check-collector-config.sh --no-pull "${{ steps.collector_image.outputs.ref }}" services/otel-collector/config.yaml services/otel-collector/config.gateway.yaml
 
       # #1254: the Go agent has no dev mount, so on the fast path it would run the
@@ -1496,6 +1491,23 @@ jobs:
       - name: Run integration tests (full build)
         if: needs.changes.outputs.e2e_full_build != 'false'
         run: PYTEST_EXTRA="--reruns 1 --durations=15" make test-integration
+
+      # #2571 (UC-035 A7): the opt-in gateway overlay is loaded as a second
+      # --config and no integration test starts the collector with it. Validate
+      # base plus overlay with the collector image this run just used, on BOTH
+      # paths: the merge queue always takes the full build, so a check on the
+      # fast path alone would never gate main (a collector bump that drops a
+      # component the overlay needs). The ref is resolved from the same compose
+      # files as tests/integration/conftest.py; the image is local after the
+      # suite (pulled by hash tag, or built at HEAD), hence --no-pull.
+      - name: Validate collector config with the gateway overlay
+        run: |
+          files=(-f docker-compose.yml -f docker-compose.override.yml -f docker-compose.ci.yml)
+          if [[ -n "${OTEL_COLLECTOR_TAG}" ]]; then files+=(-f docker-compose.collector-prebuilt.yml); fi
+          ref="$(docker compose "${files[@]}" config --format json | jq -r '.services."otel-collector".image')"
+          echo "Collector image ref: ${ref}"
+          [[ -n "$ref" && "$ref" != "null" ]] || { echo "::error::could not resolve otel-collector image ref"; exit 1; }
+          bash scripts/ci/check-collector-config.sh --no-pull "$ref" services/otel-collector/config.yaml services/otel-collector/config.gateway.yaml
 
       # #1649: a cancelled run never prints the pytest summary, so the cause of a
       # setup error was lost. Show every container's state and log tail instead.

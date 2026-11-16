@@ -67,10 +67,10 @@ fi
 hostfs="$(mktemp -d)"
 trap 'rm -rf "$hostfs"' EXIT
 
-# The gateway overlay (#2571) reads its endpoint and token from the environment;
+# The gateway overlay (#2571) reads its host and token from the environment;
 # the placeholders satisfy validation. `--network none`: validate connects nowhere.
 if out="$(docker run --rm --network none \
-  -e ORANGECASE_GATEWAY_ENDPOINT=https://otlp.example.org \
+  -e ORANGECASE_GATEWAY_HOST=otlp.example.org \
   -e ORANGECASE_GATEWAY_TOKEN=validate-only \
   "${mounts[@]}" \
   -v "${hostfs}:/hostfs/root:ro" \

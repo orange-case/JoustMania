@@ -29,7 +29,7 @@ GATEWAY_PIPELINES = {
     "metrics/gateway": "metrics",
     "logs/gateway": "logs",
 }
-ENDPOINT_VAR = "ORANGECASE_GATEWAY_ENDPOINT"
+HOST_VAR = "ORANGECASE_GATEWAY_HOST"
 TOKEN_VAR = "ORANGECASE_GATEWAY_TOKEN"
 MIB = 1024 * 1024
 
@@ -203,7 +203,7 @@ def test_gateway_pipeline_reuses_the_processors_of_its_in_case_twin(
 @pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])
 def test_endpoint_and_token_come_from_the_environment_only(gateway):
     """C-016: the config names no host and no token, only the two environment variables."""
-    assert gateway["endpoint"] == f"${{env:{ENDPOINT_VAR}}}"
+    assert gateway["endpoint"] == f"https://${{env:{HOST_VAR}}}"
     assert gateway["headers"] == {"Authorization": f"Bearer ${{env:{TOKEN_VAR}}}"}
     for key in (
         "traces_endpoint",
@@ -211,14 +211,33 @@ def test_endpoint_and_token_come_from_the_environment_only(gateway):
         "logs_endpoint",
         "profiles_endpoint",
     ):
-        assert key not in gateway, f"{key} would bypass {ENDPOINT_VAR}"
+        assert key not in gateway, (
+            f"{key} would bypass {HOST_VAR} and the fixed https scheme"
+        )
     tls = gateway.get("tls") or {}
     assert not tls.get("insecure") and not tls.get("insecure_skip_verify"), (
         "the gateway export verifies the server certificate"
     )
     text = OVERLAY_FILE.read_text() + COMPOSE_GATEWAY_FILE.read_text()
     hosts = set(re.findall(r"https?://([^\s/\"'<>}]+)", text))
-    assert hosts <= {"otlp.example.org"}, f"real host names in the overlay: {hosts}"
+    assert hosts <= {"otlp.example.org", f"${{env:{HOST_VAR}"}, (
+        f"real host names in the overlay: {hosts}"
+    )
+
+
+@pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])
+def test_gateway_export_cannot_send_the_token_over_plain_http(gateway, overlay):
+    """C-016, FR-086: the scheme is a literal `https://` in the config and only the host comes
+    from the environment, so no value of the variable makes the exporter speak plain http."""
+    endpoint = gateway["endpoint"]
+    assert endpoint.startswith("https://"), (
+        "the scheme must not come from the environment"
+    )
+    assert endpoint.count("${") == 1 and endpoint.endswith(f"${{env:{HOST_VAR}}}")
+    assert "http://" not in OVERLAY_FILE.read_text()
+    assert set(overlay["exporters"]) == {EXPORTER}, (
+        "a second exporter could carry the token"
+    )
 
 
 @pytest.mark.nfr("NFR-029")
@@ -252,9 +271,11 @@ def test_gateway_queue_is_bounded_in_bytes_and_never_blocks(base, gateway):
     spike = int(
         re.fullmatch(r"\$\{env:\w+:-(\d+)\}", limiter["spike_limit_mib"]).group(1)
     )
-    total_mib = len(GATEWAY_PIPELINES) * queue["queue_size"] / MIB
-    assert total_mib <= (limit - spike) / 4, (
-        "full gateway queues must stay far below the memory limiter's soft limit (NFR-021)"
+    # A full queue costs about four times its serialized size in collector memory (measured,
+    # UC-035 BR-015), so the heap of three full queues must stay below half the soft limit.
+    heap_mib = 4 * len(GATEWAY_PIPELINES) * queue["queue_size"] / MIB
+    assert heap_mib <= (limit - spike) / 2, (
+        "full gateway queues must stay well below the memory limiter's soft limit (NFR-021)"
     )
 
 
@@ -324,7 +345,7 @@ def test_compose_overlay_requires_both_variables_and_holds_no_value(compose_over
     """C-016: both variables are passed through from the environment with compose's
     required-variable form, so a missing one stops compose before the collector starts."""
     env = _env_map(compose_overlay["services"]["otel-collector"]["environment"])
-    assert set(env) == {ENDPOINT_VAR, TOKEN_VAR}
+    assert set(env) == {HOST_VAR, TOKEN_VAR}
     for name, value in env.items():
         assert re.fullmatch(rf"\$\{{{name}:\?[^}}]+\}}", value), (
             f"{name} must be ${{{name}:?...}}, got {value!r}"

@@ -312,7 +312,7 @@ gate_cmd() {  # print the shell command for a gate
     compose)
       # The combinations the Makefile, CI and the runbooks bring up. The gateway
       # overlay (#2571) refuses to render without its two variables: placeholders.
-      echo "set -e; export ORANGECASE_GATEWAY_ENDPOINT=https://otlp.example.org ORANGECASE_GATEWAY_TOKEN=config-check-only; for c in 'docker-compose.yml' 'docker-compose.yml docker-compose.override.yml' \
+      echo "set -e; export ORANGECASE_GATEWAY_HOST=otlp.example.org ORANGECASE_GATEWAY_TOKEN=config-check-only; for c in 'docker-compose.yml' 'docker-compose.yml docker-compose.override.yml' \
 'docker-compose.yml docker-compose.ci.yml' 'docker-compose.yml docker-compose.override.yml docker-compose.dev.yml' \
 'docker-compose.yml docker-compose.override.yml docker-compose.ci.yml docker-compose.dry-run.yml' \
 'docker-compose.lite.yml' 'docker-compose.yml docker-compose.gateway.yml'; do \

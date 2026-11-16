@@ -10,7 +10,7 @@
 # them. The token is a secret: keep it in the shell or in .env.local (not in
 # git), never in a flag or a file of this repo (C-016).
 #
-#   export ORANGECASE_GATEWAY_ENDPOINT=https://otlp.example.org
+#   export ORANGECASE_GATEWAY_HOST=otlp.example.org   # host only; https is fixed
 #   export ORANGECASE_GATEWAY_TOKEN=...
 #   docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d otel-collector
 #
@@ -24,7 +24,7 @@ services:
       - "--config=/etc/otel-collector-config.gateway.yaml"
     # environment and volumes are appended to the base lists by compose.
     environment:
-      - ORANGECASE_GATEWAY_ENDPOINT=${ORANGECASE_GATEWAY_ENDPOINT:?set ORANGECASE_GATEWAY_ENDPOINT, e.g. https://otlp.example.org}
+      - ORANGECASE_GATEWAY_HOST=${ORANGECASE_GATEWAY_HOST:?set ORANGECASE_GATEWAY_HOST, e.g. otlp.example.org}
       - ORANGECASE_GATEWAY_TOKEN=${ORANGECASE_GATEWAY_TOKEN:?set ORANGECASE_GATEWAY_TOKEN}
     volumes:
       - ./services/otel-collector/config.gateway.yaml:/etc/otel-collector-config.gateway.yaml:ro
