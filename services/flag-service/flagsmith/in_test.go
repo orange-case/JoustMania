@@ -558,7 +558,7 @@ func TestConflictRecordedWithBothValues(t *testing.T) {
 				}
 				attrs := map[string]string{}
 				for _, a := range ev.Attributes {
-					attrs[string(a.Key)] = a.Value.Emit()
+					attrs[string(a.Key)] = a.Value.AsString()
 				}
 				got = append(got, attrs)
 			}
