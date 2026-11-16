@@ -24,7 +24,7 @@ on:
         type: string
 
 env:
-  IMAGE_PREFIX: ghcr.io/watchmejoustmyflags/joustmania
+  IMAGE_PREFIX: ghcr.io/orange-case/joustmania
 
 jobs:
   release-please:

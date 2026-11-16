@@ -120,7 +120,7 @@ loudly with a one-line diagnosis on mismatch (the stale-image cascade), instead
 of silently mounting incompatible source.
 
 ```bash
-IMAGE_PREFIX=ghcr.io/watchmejoustmyflags/joustmania IMAGE_TAG=latest \
+IMAGE_PREFIX=ghcr.io/orange-case/joustmania IMAGE_TAG=latest \
   bash scripts/ci/check-image-freshness.sh
 ```
 
@@ -232,7 +232,7 @@ candidates). Never touches X.Y.Z, `latest`, `main`, `<sha>` or untagged
 versions. `KEEP` must be >= 1. `DRY_RUN=1` (workflow_dispatch default) only lists.
 The scheduled run deletes for real only when the repo variable
 `PRUNE_COLLECTOR_DELETE` is `true` (maintainer sets it); otherwise it is a dry
-run. The job runs only on `WatchMeJoustMyFlags/JoustMania`.
+run. The job runs only on `orange-case/JoustMania`.
 Known limit: a hash-only version whose digest is also an untagged child of a
 release index would be deleted and break that index's amd64 leg (not observed).
 Test: `scripts/tests/test-prune-collector-tags.sh` (fake `gh`).

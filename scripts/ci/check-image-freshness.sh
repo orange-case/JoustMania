@@ -21,7 +21,7 @@
 #   IMAGE_PREFIX=ghcr.io/owner/repo IMAGE_TAG=latest scripts/ci/check-image-freshness.sh
 #
 # Env:
-#   IMAGE_PREFIX  (required)  e.g. ghcr.io/watchmejoustmyflags/joustmania
+#   IMAGE_PREFIX  (required)  e.g. ghcr.io/orange-case/joustmania
 #   IMAGE_TAG     (default: latest)  tag the fast path will mount into
 #
 # Exit codes: 0 = all fresh; 1 = at least one image stale/unverifiable.

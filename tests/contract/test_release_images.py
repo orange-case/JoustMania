@@ -16,7 +16,7 @@ import pytest
 
 # #2599: compose takes the registry prefix from IMAGE_PREFIX (CI exports the
 # publishing repository's prefix); the default is the release registry.
-DEFAULT_PREFIX = "ghcr.io/watchmejoustmyflags/joustmania"
+DEFAULT_PREFIX = "ghcr.io/orange-case/joustmania"
 PREFIX = "${IMAGE_PREFIX:-" + DEFAULT_PREFIX + "}/"
 # Compose images under PREFIX that CI deliberately does not release. None today.
 NOT_RELEASED: set[str] = set()
@@ -74,6 +74,14 @@ def test_collector_overlay_uses_the_compose_image_prefix():
     assert m and m.group(1).startswith(PREFIX + "otel-collector:"), m and m.group(1)
     main = ic.compose_services()["otel-collector"]["image"]
     assert main.startswith(PREFIX + "otel-collector:"), main
+
+
+def test_release_retags_in_the_compose_default_registry():
+    """#2614: release.yml retagged in ghcr.io/watchmejoustmyflags (the org's old name)
+    while CI publishes to ghcr.io/orange-case; the old name only resolved for
+    authenticated pulls. The release registry and the compose default must agree."""
+    wf = ic.load_yaml(ic.REPO_ROOT / ".github/workflows/release.yml")
+    assert wf["env"]["IMAGE_PREFIX"] == DEFAULT_PREFIX
 
 
 @pytest.mark.parametrize("compose", ["docker-compose.yml", "docker-compose.lite.yml"])
