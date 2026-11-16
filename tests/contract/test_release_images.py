@@ -14,7 +14,10 @@ import re
 import infra_config as ic
 import pytest
 
-PREFIX = "ghcr.io/watchmejoustmyflags/joustmania/"
+# #2599: compose takes the registry prefix from IMAGE_PREFIX (CI exports the
+# publishing repository's prefix); the default is the release registry.
+DEFAULT_PREFIX = "ghcr.io/watchmejoustmyflags/joustmania"
+PREFIX = "${IMAGE_PREFIX:-" + DEFAULT_PREFIX + "}/"
 # Compose images under PREFIX that CI deliberately does not release. None today.
 NOT_RELEASED: set[str] = set()
 
@@ -45,6 +48,32 @@ def _ci_retag_images() -> set[str]:
 def _check_retag_source_images() -> set[str]:
     text = (ic.REPO_ROOT / "scripts/ci/check-retag-source.sh").read_text()
     return set(re.findall(r"^\s+([a-z0-9-]+)\) filter=\w+ ;;\s*$", text, re.MULTILINE))
+
+
+@pytest.mark.parametrize("compose", ["docker-compose.yml", "docker-compose.lite.yml"])
+def test_compose_images_take_the_registry_prefix_from_image_prefix(compose):
+    """#2599: a hard-coded registry prefix made the CI fast path pull images from a
+    registry this repository does not publish to, while the freshness guard checked
+    ${IMAGE_PREFIX}: every project image must follow IMAGE_PREFIX."""
+    services = ic.load_yaml(ic.REPO_ROOT / compose)["services"]
+    project = {
+        name: svc["image"]
+        for name, svc in services.items()
+        if "joustmania/" in svc.get("image", "") or "joustmania}/" in svc.get("image", "")
+    }
+    assert project, f"{compose}: no project images found"
+    hard_coded = {n: i for n, i in project.items() if not i.startswith(PREFIX)}
+    assert not hard_coded, f"{compose}: images must start with {PREFIX}: {hard_coded}"
+
+
+def test_collector_overlay_uses_the_compose_image_prefix():
+    """The prebuilt-collector overlay and docker-compose.yml resolve the same registry."""
+    text = (ic.REPO_ROOT / "docker-compose.collector-prebuilt.yml").read_text()
+    # Regex, not yaml: the overlay uses the compose-only !reset tag.
+    m = re.search(r"^\s+image:\s*(\S+)\s*$", text, re.MULTILINE)
+    assert m and m.group(1).startswith(PREFIX + "otel-collector:"), m and m.group(1)
+    main = ic.compose_services()["otel-collector"]["image"]
+    assert main.startswith(PREFIX + "otel-collector:"), main
 
 
 @pytest.mark.parametrize("compose", ["docker-compose.yml", "docker-compose.lite.yml"])

@@ -34,6 +34,7 @@ func noSecret(t *testing.T, err error) {
 }
 
 // UC: UC-054 A1
+// UC: UC-055 BR-001
 func TestClient(t *testing.T) {
 	ctx := context.Background()
 	t.Run("UC-054/A1 the document pull sends the server key and is conditional", func(t *testing.T) {

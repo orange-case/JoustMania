@@ -192,8 +192,11 @@ Each service has both `build:` and `image:` in the compose file, so a local buil
 the same canonical GHCR name:
 
 ```
-ghcr.io/watchmejoustmyflags/joustmania/<image>:${IMAGE_TAG:-latest}
+${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/<image>:${IMAGE_TAG:-latest}
 ```
+
+`IMAGE_PREFIX` selects the registry (#2599). Leave it unset to use the release registry; CI's integration
+job exports `ghcr.io/<owner>/joustmania`, the repository whose CI publishes the images it pulls.
 
 Images in `docker-compose.yml`: `agent`, `audio-service`, `connect-proxy`, `controller-manager-service`,
 `dashboard`, `flag-service`, `game-coordinator-service`, `menu-service`, `otel-collector`,
@@ -389,7 +392,7 @@ checklists below are the code side.
      compiler, only audio installs a toolchain), non-root user, pinned base.
   2. Proto in `proto/`, `make protos`, a servicer and `server.py` that reads its port with
      `lib.grpc_utils.port_from_env`.
-  3. A compose entry with `build:`, `image: ghcr.io/watchmejoustmyflags/joustmania/<name>:${IMAGE_TAG:-latest}`,
+  3. A compose entry with `build:`, `image: ${IMAGE_PREFIX:-ghcr.io/watchmejoustmyflags/joustmania}/<name>:${IMAGE_TAG:-latest}`,
      `container_name: joustmania-<name>`, the `joustmania` network, a healthcheck, memory and CPU limits
      (budget for a 4 GB Pi), and `OTEL_*` env. Publish no host port unless a test or the pairing daemon needs
      one, and then bind `127.0.0.1` ([host ports](specs/services.md#compose-variants-and-host-ports)).

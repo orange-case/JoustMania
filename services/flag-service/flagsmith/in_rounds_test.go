@@ -71,7 +71,7 @@ func TestPushGuardLetsNewValueThrough(t *testing.T) {
 	}
 }
 
-// UC: UC-054 4
+// UC: UC-054 main step 4
 // After the out side pushed the event list, a stale document that still holds
 // the payload object appends nothing (#2590 P1, event key).
 func TestStaleEventObjectNotAppendedTwice(t *testing.T) {
@@ -161,7 +161,7 @@ func serialValues(h *harness, serials []string) int {
 	return n
 }
 
-// UC: UC-054 BR-006
+// UC: UC-054 A3 BR-006
 // The restart rule (#2590 P10, P13, R6): the first round after start skips
 // the keys the rule cleared; later, a value an API key set on an admin
 // setting or on a game identity is not brought back (the local value wins and
@@ -188,7 +188,7 @@ func TestRestartRuleAttribution(t *testing.T) {
 	}
 	h.round()
 	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
-		t.Fatalf("UC-054/3 decision.min_interval_ms = %+v after the start round, want 700 (not an admin setting)", v)
+		t.Fatalf("UC-054/main step 3 decision.min_interval_ms = %+v after the start round, want 700 (not an admin setting)", v)
 	}
 	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant == "claude" {
 		t.Fatal("UC-054/BR-006 decision.backend: an API key's value on an admin setting was brought back after a restart")
@@ -299,7 +299,7 @@ func TestReconcileSpanRecordsRestartRule(t *testing.T) {
 	})
 }
 
-// UC: UC-054 2
+// UC: UC-054 main step 2
 // Last-Modified (§4.2 step 8, #2590 P6): a body older than its Last-Modified
 // header is a stale copy, and a body whose second has not passed may still
 // change: both make the next pull unconditional.
@@ -308,7 +308,7 @@ func TestLastModifiedForcesFullPull(t *testing.T) {
 		r := h.docRequests()
 		return r[len(r)-1].Header.Get("If-Modified-Since")
 	}
-	t.Run("UC-054/2 stale body with a fresh header", func(t *testing.T) {
+	t.Run("UC-054/main step 2 stale body with a fresh header", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{})
 		h.online()
 		hdr := h.clock.Now().Add(time.Minute).UTC().Format(http.TimeFormat)
@@ -317,10 +317,10 @@ func TestLastModifiedForcesFullPull(t *testing.T) {
 		h.round() // unchanged, the body older than its header
 		h.round()
 		if got := lastIMS(h); got != "" {
-			t.Fatalf("UC-054/2 pull after a stale body sent If-Modified-Since %q", got)
+			t.Fatalf("UC-054/main step 2 pull after a stale body sent If-Modified-Since %q", got)
 		}
 	})
-	t.Run("UC-054/2 the document's second has not passed", func(t *testing.T) {
+	t.Run("UC-054/main step 2 the document's second has not passed", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{})
 		h.online()
 		h.fake.SetDocument(document(h.clock.Now().Add(time.Hour), []map[string]any{fsState("decision.backend", true, "claude")}), "")
@@ -328,10 +328,10 @@ func TestLastModifiedForcesFullPull(t *testing.T) {
 		h.round() // unchanged, updated_at not in the past
 		h.round()
 		if got := lastIMS(h); got != "" {
-			t.Fatalf("UC-054/2 pull in the document's second sent If-Modified-Since %q", got)
+			t.Fatalf("UC-054/main step 2 pull in the document's second sent If-Modified-Since %q", got)
 		}
 	})
-	t.Run("UC-054/2 the update time from the header when the body has none", func(t *testing.T) {
+	t.Run("UC-054/main step 2 the update time from the header when the body has none", func(t *testing.T) {
 		start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC) // the harness clock
 		upd := start.Add(-90 * time.Second)
 		doc := document(start, []map[string]any{fsState("decision.backend", true, "claude")})
@@ -346,10 +346,10 @@ func TestLastModifiedForcesFullPull(t *testing.T) {
 		h.online()
 		h.round()
 		if got, want := h.link.LastModified(), upd.UTC().Format(http.TimeFormat); got != want {
-			t.Fatalf("UC-054/2 Last-Modified %q, want %q from X-Flagsmith-Document-Updated-At", got, want)
+			t.Fatalf("UC-054/main step 2 Last-Modified %q, want %q from X-Flagsmith-Document-Updated-At", got, want)
 		}
 	})
-	t.Run("UC-054/2 a header that is not a float epoch is no update time", func(t *testing.T) {
+	t.Run("UC-054/main step 2 a header that is not a float epoch is no update time", func(t *testing.T) {
 		start := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 		doc := document(start, []map[string]any{fsState("decision.backend", true, "claude")})
 		delete(doc, "updated_at")
@@ -363,7 +363,7 @@ func TestLastModifiedForcesFullPull(t *testing.T) {
 		h.online()
 		h.round()
 		if got := h.link.LastModified(); got != "" {
-			t.Fatalf("UC-054/2 Last-Modified %q from an RFC 3339 header, want none (the header is a float epoch)", got)
+			t.Fatalf("UC-054/main step 2 Last-Modified %q from an RFC 3339 header, want none (the header is a float epoch)", got)
 		}
 	})
 }
@@ -423,7 +423,7 @@ func TestDeferralBackoffAndHealth(t *testing.T) {
 	h.waitFor("a healthy post", func() bool { return len(h.healthPosts()) == 2 })
 }
 
-// UC: UC-054 2
+// UC: UC-054 main step 2
 // A 429 on the document is honoured: the next pull waits for Retry-After
 // (#2590 P8).
 func TestDocumentRetryAfter(t *testing.T) {
@@ -450,11 +450,11 @@ func TestDocumentRetryAfter(t *testing.T) {
 	h.link.Wake()
 	h.waitFor("the pull after the 429", func() bool { return h.pulls() > n })
 	if d, _ := h.longestSleep(mark); d < 25*time.Second {
-		t.Fatalf("UC-054/2 the pull after a 429 waited %s, want the Retry-After (30 s)", d)
+		t.Fatalf("UC-054/main step 2 the pull after a 429 waited %s, want the Retry-After (30 s)", d)
 	}
 }
 
-// UC: UC-054 4
+// UC: UC-054 main step 4
 // A document event list that is a prefix of the local list is a stale value:
 // nothing is appended and nothing is refused (#2590 P9).
 func TestEventPrefixIsNoOp(t *testing.T) {
@@ -477,14 +477,14 @@ func TestEventPrefixIsNoOp(t *testing.T) {
 	h.setDoc(nil, override{"game:g1", []map[string]any{fsState("eliminate_player", true, string(prefix))}})
 	h.round()
 	if n := eventCount(h, "game:g1"); n != 2 {
-		t.Fatalf("UC-054/4 %d events after a prefix document, want 2", n)
+		t.Fatalf("UC-054/main step 4 %d events after a prefix document, want 2", n)
 	}
 	if st := h.link.Status(); st.Refused != 0 {
-		t.Fatalf("UC-054/4 refused %d after a prefix document, want 0 (a no-op)", st.Refused)
+		t.Fatalf("UC-054/main step 4 refused %d after a prefix document, want 0 (a no-op)", st.Refused)
 	}
 	time.Sleep(50 * time.Millisecond)
 	if n := len(h.healthPosts()); n != 0 {
-		t.Fatalf("UC-054/4 %d health posts after a prefix document, want 0", n)
+		t.Fatalf("UC-054/main step 4 %d health posts after a prefix document, want 0", n)
 	}
 }
 

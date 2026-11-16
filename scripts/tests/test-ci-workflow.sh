@@ -18,6 +18,9 @@
 #          e2e job runs, never fails or skips it, pushes only on
 #          merge_group / push (never from a PR), and the e2e job takes its tag as
 #          OTEL_COLLECTOR_TAG.
+#   #2599: integration-test sets IMAGE_PREFIX before the freshness guard and every
+#          compose call (nothing overrides it), and the collector resolve step adds
+#          the prebuilt overlay exactly when OTEL_COLLECTOR_TAG is set.
 #   #1569: the gate cannot go silently non-blocking: no `continue-on-error` on any
 #          CI Complete step, on integration-test (job or step), or at job level
 #          on any job CI Complete needs (job-level COE reports `success`), and
@@ -27,6 +30,8 @@
 #   #1801: the validate job checks the committed agent Go stubs (services/agent/gen)
 #          on every proto_pkg change, PR, push and dispatch; in the merge queue
 #          only for an entry whose own diff touches proto_pkg (simulated).
+#   #2592: the Flagsmith link journeys run once, in flagsmith-service-tests (the
+#          service_tests filter, needed by CI Complete); Service Tests ignores them.
 #
 # Needs python3 + PyYAML (as scripts/ci/check-retag-source.sh).
 #   ./scripts/tests/test-ci-workflow.sh [path/to/ci.yml]
@@ -670,6 +675,39 @@ if "e2e_required" in jobs["changes"]["outputs"]:
     prefix_m = re.search(r'IMAGE_PREFIX=(\S+?)"? >>', prefix_step.get("run", ""))
     check(bool(ref_m) and bool(prefix_m) and ref_m.group(1) == prefix_m.group(1),
           f"collector-image pushed ref prefix {ref_m and ref_m.group(1)!r} must equal integration-test IMAGE_PREFIX {prefix_m and prefix_m.group(1)!r}")
+    # #2599: compose and the freshness guard read the same IMAGE_PREFIX, so it is set before
+    # the first step that uses it and no later env redefines it.
+    it_steps = jobs["integration-test"]["steps"]
+    users = [i for i, st in enumerate(it_steps)
+             if "check-image-freshness" in str(st.get("run", "")) or "docker compose" in str(st.get("run", ""))
+             or "make test-integration" in str(st.get("run", ""))]
+    prefix_idx = it_steps.index(prefix_step) if prefix_step in it_steps else len(it_steps)
+    check(users and prefix_idx < min(users),
+          "integration-test: 'Set image prefix' must run before the freshness guard, compose resolves and the suite")
+    check("IMAGE_PREFIX" not in (jobs["integration-test"].get("env") or {})
+          and not any("IMAGE_PREFIX" in (st.get("env") or {}) for st in it_steps),
+          "integration-test: no env may override IMAGE_PREFIX (pulled images and the freshness guard must agree)")
+    # #2599: the collector resolve step uses the compose files conftest.py uses: the prebuilt
+    # overlay exactly when OTEL_COLLECTOR_TAG is set (it otherwise resolved an unused ref).
+    resolve = next((st for st in it_steps if st.get("id") == "collector_image"), None)
+    check(resolve is not None, "integration-test: needs the `collector_image` resolve step")
+    if resolve:
+        for tag, want in (("abc123", True), ("", False)):
+            with tempfile.TemporaryDirectory() as fake:
+                log = os.path.join(fake, "log")
+                with open(os.path.join(fake, "docker"), "w") as fh:
+                    fh.write('#!/bin/sh\necho "$*" >> "%s"\n'
+                             'case "$*" in *config*) echo \'{"services":{"otel-collector":{"image":"x/otel-collector:t"}}}\';; esac\n'
+                             % log)
+                os.chmod(os.path.join(fake, "docker"), 0o755)
+                st = dict(resolve, env={**(resolve.get("env") or {}), "OTEL_COLLECTOR_TAG": tag})
+                rc, out = run_step(st, {}, extra_path=fake)
+                calls = open(log).read() if os.path.exists(log) else ""
+            compose_call = next((c for c in calls.splitlines() if c.startswith("compose ")), "")
+            check(out.get("ref") == "x/otel-collector:t",
+                  f"collector resolve (OTEL_COLLECTOR_TAG={tag!r}): no ref resolved (rc={rc}, calls={calls!r})")
+            check(("docker-compose.collector-prebuilt.yml" in compose_call) is want,
+                  f"collector resolve (OTEL_COLLECTOR_TAG={tag!r}): prebuilt overlay expected={want}, got {compose_call!r}")
     # Publish result: the tag only when the image is available, else empty.
     publish = next((st for st in ci_steps if st.get("id") == "result"), None)
     check(publish is not None, "collector-image: needs a `result` step")
@@ -703,11 +741,26 @@ for publish in ("docker-build-merge", "docker-build-extra-merge"):
           f"{publish}: :main/:latest must be added only after the guard")
     check('[[ "$rc" == 0 || "$rc" == 3 ]] || exit "$rc"' in run, f"{publish}: guard skip (3) must not fail the run")
 
+# 8b. (#2592) The Flagsmith link journeys run once, in their own job: flagsmith-service-tests
+# runs exactly the two modules on the service_tests filter, and Service Tests ignores them.
+def _run_of(job):
+    return " ".join(st.get("run", "") for st in jobs.get(job, {}).get("steps", []))
+FLAGSMITH_MODULES = ("tests/service/test_flagsmith_link.py", "tests/service/test_flagsmith_sync.py")
+check("flagsmith-service-tests" in jobs, "flagsmith-service-tests: job missing (#2592)")
+check(job_if("flagsmith-service-tests") == job_if("service-tests"),
+      f"flagsmith-service-tests: must use the service-tests filter: {job_if('flagsmith-service-tests')}")
+check('SERVICE_TESTS="' + " ".join(FLAGSMITH_MODULES) + '"' in _run_of("flagsmith-service-tests"),
+      "flagsmith-service-tests: must run exactly the Flagsmith link modules")
+check(all(f"--ignore={m}" in _run_of("service-tests") for m in FLAGSMITH_MODULES),
+      "service-tests: must --ignore the Flagsmith link modules (they run in flagsmith-service-tests)")
+check(jobs.get("flagsmith-service-tests", {}).get("timeout-minutes"),
+      "flagsmith-service-tests: needs its own timeout-minutes")
+
 # 9. (#1569) The CI Complete gate stays blocking.
 REQUIRED_NEEDS = {
     "changes", "dashboard-tests", "connect-proxy-tests", "lib-tests", "service-checks",
     "rust-checks", "rust-deny", "agent-tests", "flag-service-tests", "registry-pinned", "script-tests", "telemetry-contract",
-    "flagd-contract", "service-tests", "lint-dockerfiles", "spec-gate", "validate",
+    "flagd-contract", "service-tests", "flagsmith-service-tests", "lint-dockerfiles", "spec-gate", "validate",
     "integration-test", "docker-build", "docker-build-extra", "docker-build-merge",
     "docker-build-extra-merge", "retag-skipped",
 }

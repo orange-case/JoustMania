@@ -1,11 +1,11 @@
 # Flagsmith link: hosted Flagsmith as a writer and audit view of the flag service
 
-> Architecture note. Status: **proposed** (epic #2587, sub-issues #2588 to #2592). Written 2026-11-15 against `main` and the Flagsmith API
+> Architecture note. Status: **implemented** (epic #2587, sub-issues #2588 to #2592; UC-054 and UC-055 Tested against a fake Flagsmith, the live SaaS check is a Known gap on both). Written 2026-11-15 against `main` and the Flagsmith API
 > source at v2.269 (`Flagsmith/flagsmith`, `api/`). Spec rows: [UC-054](../use_cases/UC-054.md),
 > [UC-055](../use_cases/UC-055.md), FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037, the C-008 amendment
-> ([requirements](../requirements.md)); [services.md §7.3](../specs/services.md#73-flagsmith-link-implemented-2588-to-2591-uc-054-uc-055),
-> [flags.md §13.6](../specs/flags.md#136-flagsmith-link-implemented-2588-to-2591-uc-054-uc-055),
-> [telemetry.md §10.4](../specs/telemetry.md#104-flagsmith-link-implemented-2588-to-2591-uc-054-uc-055).
+> ([requirements](../requirements.md)); [services.md §7.3](../specs/services.md#73-flagsmith-link-implemented-2588-to-2592-uc-054-uc-055),
+> [flags.md §13.6](../specs/flags.md#136-flagsmith-link-implemented-2588-to-2592-uc-054-uc-055),
+> [telemetry.md §10.4](../specs/telemetry.md#104-flagsmith-link-implemented-2588-to-2592-uc-054-uc-055).
 > Builds on the flag service ([flag-service.md](flag-service.md)); nothing there changes for a stack without the link.
 
 ## 1. Summary
@@ -75,7 +75,7 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | `real` overlay | override on identity `real` | shown only (F3) |
 | fraction overlay | override on identity `fraction`, value `{"variant":…, "fraction_percent":…}` | shown only (F3) |
 | event list (one-shot interventions) | override on `game:<gameId>` with the list's latest value | a JSON payload set there by a person is appended as one event (§4.3) |
-| writer label | not stored on the value; the push records it in the change's audit entry via the Admin API key (§7) and on the span | |
+| writer label | not stored in Flagsmith: the change's audit entry names an API-key change, not which writer of the stack made it (F7); the writer is on the push span | |
 
 Identities are the one Flagsmith object that carries per-target overrides without segment rules. Using one
 identity per scope keeps the mapping 1:1 and lets game cleanup be one identity delete. Segments
@@ -122,6 +122,8 @@ entity.
    `(set, key, scope)` into `pending`, replacing an older pending entry (merge, BR-001 of UC-055).
 2. One sender goroutine drains `pending` in order of first change, at most `FLAGSMITH_PUSH_RATE` requests per
    second (default 5), and stops on `429` for the `Retry-After` the API answers.
+   It wakes on every queued value: a local write (step 1) and the end of a pull round that queued one (§4.2,
+   §6 push rows; once per round, #2608).
 3. Stack value: `PATCH /api/__future__/environments/{env_key}/features/{feature_id}/` with
    `{"environment_default": {"enabled": …, "value": {"type": "string|integer|boolean", "value": "<text>"}}}` (the
    experimental flag API, `api/features/future/serializers.py` `UpdateFlagSerializer`; the inner `value` is always
@@ -384,9 +386,9 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | A conditional pull (`If-Modified-Since`) may miss an edge identity override change, because the environment `updated_at` may not move | while any game is live the pull is unconditional, otherwise every 10th pull is unconditional (§4.2); the fake-Flagsmith test changes an override without a newer `Last-Modified` and expects it to be applied |
 | A person changes a flag in Flagsmith between a pull and the push of a pending local change: the push overwrites it | accepted; last writer wins for every flag, kill switches included: a person's change between the last pull and the push is overwritten (the window lasts from the last pull to the push); for a kill switch the next pull re-applies a tighter Flagsmith value only as a deliberate change |
 | Terraform / MCP values set with an API key are cleared at restart (any API key counts as the link, F7) | decided by the maintainer 2026-11-15; a lasting value is set by a person in the Flagsmith UI, or is an admin setting |
-| Edge overrides in the document: the SaaS serves edge identity overrides only in the edge document | `FLAGSMITH_DOCUMENT_URL` defaults to the edge URL; to verify live against the SaaS |
+| Edge overrides in the document: the SaaS serves edge identity overrides only in the edge document | `FLAGSMITH_DOCUMENT_URL` defaults to the edge URL; to verify live against the SaaS (Known gap of UC-054 and UC-055, maintainer decision D1) |
 | `use_identity_overrides_in_local_eval` off: game and player values cannot be read back | the link stays offline with reason `identity_overrides_disabled`; documented in the setup |
-| SaaS request limits (`MASTER_API_KEY_THROTTLE_RATE` is a per-deployment setting; the SaaS value is not published) under many games and events | merge per flag and scope, `FLAGSMITH_PUSH_RATE`, honour `429 Retry-After`; to measure with 8 live games (NFR-057) |
+| SaaS request limits (`MASTER_API_KEY_THROTTLE_RATE` is a per-deployment setting; the SaaS value is not published) under many games and events | merge per flag and scope, `FLAGSMITH_PUSH_RATE`, honour `429 Retry-After`; to measure with 8 live games (NFR-057; Known gap of UC-054 and UC-055, maintainer decision D1) |
 | Edge identity count grows with games on the plan's identity quota | identities deleted at game end and, for games that are not live, after start (§5.1); to verify against the plan |
 | A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round are skipped, and the value guard skips a key whose document value still equals a value its confirmed push replaced (§4.2 step 6); a document whose update time is older than the newest one read is skipped whole (`stale_document`, server time only; §4.2 step 6); pulled writes are conditional on the local slot (§4.2) |
 | One document update time ahead of all later ones (Flagsmith clock skew, an environment database restore, a garbled but in-range time) would refuse every later document as `stale_document`, kill-switch tightenings included | the refusal ends after max(10 min, 10 x poll interval) of refusals in a row, local elapsed time; the older document is then accepted and becomes the newest, with a warning log; in that round kill switches merge without their remote value and take the more restrictive value (§4.2 step 6). Residuals, accepted by the maintainer 2026-11-15 (follow-up #2602): (a) the copy stamped with the too-new time (a cache or region still serving it) is not older, so it is accepted normally and ends the run: served at least once per max(10 min, 10 x poll interval), it keeps the run from ever reaching the threshold and the tightening stays refused as before; served less often, it makes kill switches flap: the accepted older document tightens, then the too-new copy is newer than the accepted time again and merges normally (`R != D`, `R = L` -> apply), a deliberate loosening, and the refusals start over (an operator's kill in Flagsmith takes effect, then is undone for about the threshold, repeatedly). (b) In the accepted round a kill switch whose local value is tighter than the accepted document keeps local and pushes it; when a lagging copy answers that round while Flagsmith already holds a tighter value set during the refusal run, the push overwrites that value in Flagsmith and the operator's value is lost on both sides (as in the "push overwrites a person's change" row, but the window is the whole refusal run). (c) Every non-kill-switch value in the accepted document that differs from the link's remote value while the local value still equals it applies as a change from Flagsmith (a value Flagsmith changed itself as well as a pushed one) until a newer document is read and corrects it; a pushed value is protected only while its value guard lives, and the guard can end before the threshold (the newest document showed the pushed value), as for a document without an update time |
@@ -404,4 +406,4 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | 2 | Out: stack values, identities for game and player scopes, game end cleanup, outbox with merge and rate limit | UC-055, FR-207, FR-211, NFR-057 |
 | 3 | In: pull, 3-way merge, kill-switch order, events, feature health | UC-054, FR-208 to FR-210, FR-213, flags.md §13.6 |
 | 4 | Start: feature creation, restart rule by authorship | FR-214, FR-215 |
-| 5 | Tests: a fake Flagsmith (HTTP) in `tests/service/`, the echo and conflict table of §6, offline start and reconnect; `talk-preflight.sh` shows the link state | TC for UC-054, UC-055 |
+| 5 | Tests: a fake Flagsmith (HTTP) in `tests/service/`, the echo and conflict table of §6, offline start and reconnect; `talk-preflight.sh` shows the link state | done (#2592): TC-021, TC-022, the fake in `tests/service/harness/fakes/flagsmith.py` |

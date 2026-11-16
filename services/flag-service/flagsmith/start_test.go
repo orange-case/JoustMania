@@ -1192,7 +1192,7 @@ func (e *startEnv) sleepsOf(d time.Duration) int {
 	return n
 }
 
-// UC: UC-054 A3, FR-211
+// UC: UC-054 A3
 func TestStartStaleIdentityTrigger(t *testing.T) {
 	t.Run("UC-054/A3 after the grace the cleanup still waits for the first registration (whichever is later)", func(t *testing.T) {
 		e := newStartEnv(t)
@@ -1222,7 +1222,7 @@ func TestStartStaleIdentityTrigger(t *testing.T) {
 	})
 }
 
-// UC: UC-054 A3, FR-211
+// UC: UC-054 A3
 func TestStartStaleIdentityRetry(t *testing.T) {
 	t.Run("UC-054/A3 a listing error or a 5xx delete is retried every 60 s", func(t *testing.T) {
 		e := newStartEnv(t)
@@ -1375,7 +1375,7 @@ func TestStartPacing(t *testing.T) {
 	})
 }
 
-// UC: UC-054 A3
+// UC: UC-054 A3 BR-006
 func TestAuditLogPatterns(t *testing.T) {
 	cases := map[string]authorKey{
 		"Flag state updated for feature: a.b":                                                                  {feature: "a.b"},

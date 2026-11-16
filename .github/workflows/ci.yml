@@ -994,7 +994,8 @@ jobs:
         run: |
           set +e -o pipefail
           log="$RUNNER_TEMP/service-tests.log"
-          make test-service PYTEST_EXTRA="--durations=15" 2>&1 | tee "$log"
+          # The Flagsmith link journeys run in their own job (flagsmith-service-tests, #2592).
+          make test-service PYTEST_EXTRA="--durations=15 --ignore=tests/service/test_flagsmith_link.py --ignore=tests/service/test_flagsmith_sync.py" 2>&1 | tee "$log"
           status=$?
           echo "make test-service exit=$status"
           if [ "$status" -ne 0 ]; then
@@ -1007,6 +1008,60 @@ jobs:
             fi
             {
               echo "### Service Tests failed (exit $status)"
+              echo '```'
+              grep -E '^(FAILED|ERROR) |^=+ .*in [0-9.]+s' "$log" || tail -n 40 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+  # The Flagsmith link journeys (UC-054, UC-055, TC-021, TC-022, #2592): the service tier's
+  # flag service and coordinator against the in-process fake Flagsmith. Their own job, in
+  # parallel with service-tests (which --ignores them), so Service Tests time is unchanged;
+  # same filter (service_tests), required through CI Complete.
+  flagsmith-service-tests:
+    name: Flagsmith Service Tests
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.service_tests == 'true' || needs.changes.outputs.run_all_checks == 'true'
+    # Two stacks, flag service restarts and 5 s polls: ~15 min locally (WSL), plus the
+    # flag service go build; Service Tests runs in parallel, so the pipeline waits for the longer.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          cache-dependency-path: services/flag-service/go.sum
+
+      - name: Pre-pull docker images (bounded retries, #2551)
+        # The harness starts flagd (tests/service/harness/flag_plane.py); a registry TLS flake must not fail the job.
+        timeout-minutes: 5
+        run: scripts/ci/docker-pull-retry.sh compose:flagd
+
+      # #1612: the failing tests as annotations and in the job summary, as Service Tests.
+      - name: Run Flagsmith link journeys
+        shell: bash
+        run: |
+          set +e -o pipefail
+          log="$RUNNER_TEMP/flagsmith-service-tests.log"
+          make test-service SERVICE_TESTS="tests/service/test_flagsmith_link.py tests/service/test_flagsmith_sync.py" PYTEST_EXTRA="--durations=15" 2>&1 | tee "$log"
+          status=$?
+          echo "make test-service exit=$status"
+          if [ "$status" -ne 0 ]; then
+            if grep -qE '^(FAILED|ERROR) ' "$log"; then
+              grep -E '^(FAILED|ERROR) ' "$log" | while IFS= read -r line; do
+                echo "::error title=Flagsmith Service Tests (exit $status)::$line"
+              done
+            else
+              echo "::error title=Flagsmith Service Tests (exit $status)::no FAILED/ERROR line; see the log tail"
+            fi
+            {
+              echo "### Flagsmith Service Tests failed (exit $status)"
               echo '```'
               grep -E '^(FAILED|ERROR) |^=+ .*in [0-9.]+s' "$log" || tail -n 40 "$log"
               echo '```'
@@ -1399,9 +1454,12 @@ jobs:
         if: needs.changes.outputs.e2e_full_build == 'false'
         env:
           IMAGE_TAG: latest
+        # #2599: the same files conftest.py uses: with OTEL_COLLECTOR_TAG set it
+        # appends the prebuilt overlay, so resolve with it too.
         run: |
-          ref="$(docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.ci.yml \
-            -f docker-compose.dev.yml config --format json | jq -r '.services."otel-collector".image')"
+          files=(-f docker-compose.yml -f docker-compose.override.yml -f docker-compose.ci.yml -f docker-compose.dev.yml)
+          [[ -z "${OTEL_COLLECTOR_TAG:-}" ]] || files+=(-f docker-compose.collector-prebuilt.yml)
+          ref="$(docker compose "${files[@]}" config --format json | jq -r '.services."otel-collector".image')"
           echo "Collector image ref: ${ref}"
           [[ -n "$ref" && "$ref" != "null" ]] || { echo "::error::could not resolve otel-collector image ref"; exit 1; }
           echo "ref=${ref}" >> "$GITHUB_OUTPUT"
@@ -1967,6 +2025,7 @@ jobs:
       - telemetry-contract
       - flagd-contract
       - service-tests
+      - flagsmith-service-tests
       - lint-dockerfiles
       - spec-gate
       - sonarcloud
