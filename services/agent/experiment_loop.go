@@ -360,22 +360,14 @@ func buildExperimentLoop(
 		"max_shadow_games", experiment.DefaultMaxShadowGames,
 		"effective_concurrency_default", expDefaults.ShadowEffectiveConcurrency)
 
-	// TargetingWriter (#977): a Gate over a Writer pinned to the game flagset. The
-	// Gate validates THE INVARIANT on every Apply; Strip un-nests a branch on
-	// teardown. The Writer is shared by Gate (Apply) and the adapter (Strip).
-	writer := experiment.NewWriter(gameFlags, logger)
-	gate := experiment.NewGate(writer, nil, logger)
-	targeting := experiment.NewGateTargetingWriter(gate, writer)
+	targeting := newExperimentTargeting(gameFlags, logger)
 
 	// Promoter (#980/#961): adapt the already-built, env-gated #961 Promoter. The
 	// ConfigResolver reads the LIVE promotion mode/target AND the agent kill-switch
 	// each promotion, so the real-default path stays behind every existing gate.
 	promo := promote.NewExperimentPromoter(promoter, promotionConfigResolver(flagsClient))
 
-	// ShadowSpawner (#976): the real outbound game-coordinator client. Each experiment
-	// arm starts with its own resolved sensitivity (UC-046 BR-019, #2392).
-	spawner := newShadowSpawner(gamerunner.ConfigFromEnv(), logger, flagsClient.ShadowGameInt)
-	spawner.SetSpawnFailureCounter(newSpawnFailureCounter(globalMeterProvider()))
+	spawner := newExperimentSpawner(flagsClient, logger)
 
 	// FitnessStore (#965/#1017): the finalized-per-game fitness store onGameEnd
 	// Records into and the #992 recent-real anchor reads from. It is built
@@ -385,59 +377,12 @@ func buildExperimentLoop(
 	if fitnessStore == nil {
 		fitnessStore = newFitnessStore()
 	}
+	verdict := newExperimentVerdict(fitnessStore)
 
-	// CohortVerdict (#979) + recent-real SECONDARY anchor (#992): the within-experiment
-	// comparison gated by recent REAL play. The anchor reads the FitnessStore's
-	// RecentReal mean for the experiment's objective via a nil-safe accessor; it fails
-	// OPEN when no real-game baseline exists (the current mock/shadow-only reality), so
-	// it never blocks the shadow loop.
-	verdict := experiment.NewDefaultVerdict().WithRecentRealBaseline(
-		recentRealBaselineAccessor(fitnessStore, anchorBaselineRecentN, anchorBaselineMinSamples),
-		experiment.DefaultAnchorMargin,
-	)
-
-	// UC-046: experiments are archetype-only; the pinner resolves the selection in
-	// each experiment's first allocation pass.
-	pinner := &flagPatternPinner{
-		flags: flagsClient,
-		mode:  spawner.spec.GameName,
-		minPairs: func(ctx context.Context) int {
-			return flagsClient.Experiment(ctx, expDefaults).VerdictMinPairs
-		},
-		log: logger,
-	}
-	registry := experiment.NewRegistry(experiment.RegistryConfig{
-		Root:      journal.DirFromEnv(),
-		Spawner:   spawner,
-		Verdict:   verdict,
-		Promoter:  promo,
-		Targeting: targeting,
-		Log:       logger,
-		// UC-043 A17 step 3: a flag whose deferred promotion waits counts as under test.
-		PendingPromotions: pendingPromotionFlags(promoter),
-		// UC-046: pin experiment.mock_archetypes at each experiment's first spawn;
-		// the kill switch force-ends in-flight pattern games through the tracker.
-		Patterns: pinner,
-		// UC-043 A17 step 2: hold-flag experiments are checked at the pin and per tick.
-		HoldGate:       registryHoldGate(gameFlags),
-		FlagDigest:     resolvedFlagDigest,
-		PatternTracker: patterngame.Default,
-	})
-	var windowSink func(patterngame.Record)
-	if window != nil {
-		windowSink = window.RecordPattern
-		// UC-042 BR-005: a torn-down experiment's linked shadow history is evicted.
-		registry.SetTerminalHook(window.Forget)
-	}
-	spawner.SetPatternCallbacks(registry.RecordPatternStart, patternEndChain(registry.RecordPatternEnd, windowSink))
-
-	// UC-043 A17 step 1: the declarer offers a hold key only while the selected
-	// archetypes all press the trigger in a Free-for-All shadow mode.
-	hold := &holdGate{}
-	hold.setPolicy(func(ctx context.Context) bool {
-		pin := pinner.Pin(ctx)
-		return pin.Active() && len(experiment.ArchetypesWithoutTriggerPolicy(pin)) == 0
-	})
+	pinner := newPatternPinner(flagsClient, spawner.spec.GameName, expDefaults, logger)
+	registry := newExperimentRegistry(spawner, verdict, promo, targeting, pinner, promoter, gameFlags, logger)
+	wirePatternWindow(registry, spawner, window)
+	hold := newHoldPolicy(pinner)
 
 	thresholds := flagsFitnessSource{flags: flagsClient}
 	loop := &experimentLoop{
@@ -459,17 +404,7 @@ func buildExperimentLoop(
 		// declareFromRetroIfEnabled. Backlog is bounded (DefaultMaxRetroBacklog).
 		proposer: experiment.NewThesisProposer(0),
 	}
-	if promoter != nil {
-		loop.promotions = promoter
-		// A re-watch revert journals on its experiment (UC-043 step 7, #1883).
-		promoter.SetRewatchJournal(loop.journalRewatchRevert)
-		// UC-043 A17 step 3: the deferred real writes and reverts of hold keys.
-		loop.deferred = promoter
-		loop.promotionConfig = promotionConfigResolver(flagsClient)
-		if !promoter.HasRealGameProbe() {
-			logger.Warn("code_improvement: no real-game probe wired; every autonomous promotion of a hold key waits forever (UC-043 A17, fail closed)")
-		}
-	}
+	loop.wirePromoter(promoter, flagsClient, logger)
 	loop.dynamic.hold = hold
 	logger.Info("Dynamic experiment declarer constructed (#995/#1044) — gated LIVE by agent.json experiment_dynamic_enabled; settings are the experiment_dynamic_* flags, read per tick (#1907)")
 	// Wire the #1014 terminal-outcome backstop: each spawned game signals its
@@ -478,6 +413,120 @@ func buildExperimentLoop(
 	// effective_concurrency=1 loop can never deadlock on an errored game.
 	spawner.SetTerminalCallback(loop.onGameTerminal)
 	return loop
+}
+
+// newExperimentTargeting builds the TargetingWriter (#977): a Gate over a Writer
+// pinned to the game flagset. The Gate validates THE INVARIANT on every Apply; Strip
+// un-nests a branch on teardown. The Writer is shared by Gate (Apply) and the
+// adapter (Strip).
+func newExperimentTargeting(gameFlags experiment.FlagService, logger *slog.Logger) *experiment.GateTargetingWriter {
+	writer := experiment.NewWriter(gameFlags, logger)
+	gate := experiment.NewGate(writer, nil, logger)
+	return experiment.NewGateTargetingWriter(gate, writer)
+}
+
+// newExperimentSpawner builds the ShadowSpawner (#976): the real outbound
+// game-coordinator client. Each experiment arm starts with its own resolved
+// sensitivity (UC-046 BR-019, #2392).
+func newExperimentSpawner(flagsClient *flags.Flags, logger *slog.Logger) *shadowSpawner {
+	spawner := newShadowSpawner(gamerunner.ConfigFromEnv(), logger, flagsClient.ShadowGameInt)
+	spawner.SetSpawnFailureCounter(newSpawnFailureCounter(globalMeterProvider()))
+	return spawner
+}
+
+// newExperimentVerdict builds the CohortVerdict (#979) with the recent-real
+// SECONDARY anchor (#992): the within-experiment comparison gated by recent REAL
+// play. The anchor reads the FitnessStore's RecentReal mean for the experiment's
+// objective via a nil-safe accessor; it fails OPEN when no real-game baseline
+// exists (the current mock/shadow-only reality), so it never blocks the shadow loop.
+func newExperimentVerdict(fitnessStore *experiment.FitnessStore) *experiment.Verdict {
+	return experiment.NewDefaultVerdict().WithRecentRealBaseline(
+		recentRealBaselineAccessor(fitnessStore, anchorBaselineRecentN, anchorBaselineMinSamples),
+		experiment.DefaultAnchorMargin,
+	)
+}
+
+// newPatternPinner builds the UC-046 pinner: experiments are archetype-only; the
+// pinner resolves the selection in each experiment's first allocation pass.
+func newPatternPinner(flagsClient *flags.Flags, mode string, expDefaults flags.ExperimentDefaults, logger *slog.Logger) *flagPatternPinner {
+	return &flagPatternPinner{
+		flags: flagsClient,
+		mode:  mode,
+		minPairs: func(ctx context.Context) int {
+			return flagsClient.Experiment(ctx, expDefaults).VerdictMinPairs
+		},
+		log: logger,
+	}
+}
+
+// newExperimentRegistry builds the experiment registry over the wired seams.
+func newExperimentRegistry(
+	spawner *shadowSpawner,
+	verdict *experiment.Verdict,
+	promo *promote.ExperimentPromoter,
+	targeting *experiment.GateTargetingWriter,
+	pinner *flagPatternPinner,
+	promoter *promote.Promoter,
+	gameFlags experiment.FlagService,
+	logger *slog.Logger,
+) *experiment.Registry {
+	return experiment.NewRegistry(experiment.RegistryConfig{
+		Root:      journal.DirFromEnv(),
+		Spawner:   spawner,
+		Verdict:   verdict,
+		Promoter:  promo,
+		Targeting: targeting,
+		Log:       logger,
+		// UC-043 A17 step 3: a flag whose deferred promotion waits counts as under test.
+		PendingPromotions: pendingPromotionFlags(promoter),
+		// UC-046: pin experiment.mock_archetypes at each experiment's first spawn;
+		// the kill switch force-ends in-flight pattern games through the tracker.
+		Patterns: pinner,
+		// UC-043 A17 step 2: hold-flag experiments are checked at the pin and per tick.
+		HoldGate:       registryHoldGate(gameFlags),
+		FlagDigest:     resolvedFlagDigest,
+		PatternTracker: patterngame.Default,
+	})
+}
+
+// wirePatternWindow connects the registry's pattern hooks to the spawner and, when a
+// cross-game window is wired, feeds it finished pattern games (UC-042 BR-006).
+func wirePatternWindow(registry *experiment.Registry, spawner *shadowSpawner, window crossGameWindow) {
+	var windowSink func(patterngame.Record)
+	if window != nil {
+		windowSink = window.RecordPattern
+		// UC-042 BR-005: a torn-down experiment's linked shadow history is evicted.
+		registry.SetTerminalHook(window.Forget)
+	}
+	spawner.SetPatternCallbacks(registry.RecordPatternStart, patternEndChain(registry.RecordPatternEnd, windowSink))
+}
+
+// newHoldPolicy builds the UC-043 A17 step 1 hold gate: the declarer offers a hold
+// key only while the selected archetypes all press the trigger in a Free-for-All
+// shadow mode.
+func newHoldPolicy(pinner *flagPatternPinner) *holdGate {
+	hold := &holdGate{}
+	hold.setPolicy(func(ctx context.Context) bool {
+		pin := pinner.Pin(ctx)
+		return pin.Active() && len(experiment.ArchetypesWithoutTriggerPolicy(pin)) == 0
+	})
+	return hold
+}
+
+// wirePromoter connects the loop to the #961 Promoter when one is built.
+func (e *experimentLoop) wirePromoter(promoter *promote.Promoter, flagsClient *flags.Flags, logger *slog.Logger) {
+	if promoter == nil {
+		return
+	}
+	e.promotions = promoter
+	// A re-watch revert journals on its experiment (UC-043 step 7, #1883).
+	promoter.SetRewatchJournal(e.journalRewatchRevert)
+	// UC-043 A17 step 3: the deferred real writes and reverts of hold keys.
+	e.deferred = promoter
+	e.promotionConfig = promotionConfigResolver(flagsClient)
+	if !promoter.HasRealGameProbe() {
+		logger.Warn("code_improvement: no real-game probe wired; every autonomous promotion of a hold key waits forever (UC-043 A17, fail closed)")
+	}
 }
 
 // promotionConfigResolver builds the #980 ConfigResolver from the live agent

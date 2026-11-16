@@ -674,73 +674,87 @@ func (r *Registry) Declare(in Intent) (string, error) {
 // differentiation). Production always injects #977's writer; a nil writer is a
 // test/degraded shape only (see RegistryConfig).
 func (r *Registry) Start(ctx context.Context, id string) error {
+	intent, proceed, err := r.startableIntent(id)
+	if err != nil || !proceed {
+		return err
+	}
+	if err := r.applyStartTargeting(ctx, id, intent); err != nil {
+		return err
+	}
+	return r.commitStart(ctx, id, intent)
+}
+
+// startableIntent checks that experiment id may start and returns its intent. It
+// takes and releases r.mu itself. proceed is false with a nil error when the
+// experiment is already RUNNING (Start is a no-op).
+func (r *Registry) startableIntent(id string) (intent journal.Intent, proceed bool, err error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	e := r.entries[id]
 	if e == nil {
-		r.mu.Unlock()
-		return fmt.Errorf("registry: start: unknown experiment %q", id)
+		return intent, false, fmt.Errorf("registry: start: unknown experiment %q", id)
 	}
 	if e.status == StatusRunning {
-		r.mu.Unlock()
-		return nil
+		return intent, false, nil
 	}
 	if e.status != StatusProposed {
-		st := e.status
-		r.mu.Unlock()
-		return fmt.Errorf("registry: start: experiment %q is %s, not proposed", id, st)
+		return intent, false, fmt.Errorf("registry: start: experiment %q is %s, not proposed", id, e.status)
 	}
 	if r.shuttingDown() {
 		// UC-043 A20 (#2332): no targeting write once the stop began; the caller aborts
 		// the PROPOSED experiment (start_failed), or the shutdown AbortAll does.
+		return intent, false, fmt.Errorf("registry: start %q: %w", id, ErrShuttingDown)
+	}
+	return e.journal.Intent(), true, nil
+}
+
+// applyStartTargeting writes the experiment-scoped shadow targeting (#977). It runs
+// outside r.mu; it locks only for the #2340 re-check after a failed Apply.
+func (r *Registry) applyStartTargeting(ctx context.Context, id string, intent journal.Intent) error {
+	if r.target == nil {
+		return nil
+	}
+	p := Proposal{
+		FlagKey:           intent.FlagKey,
+		ExperimentID:      id,
+		ExperimentalValue: intent.ExperimentalValue,
+		Rationale:         intent.Hypothesis,
+	}
+	err := r.target.Apply(ctx, p)
+	if err == nil {
+		return nil
+	}
+	applyErr := fmt.Errorf("registry: start: write targeting for %q: %w", id, err)
+	// #2340: an Apply error (the client's request cap, the shutdown-cancelled
+	// ctx) does not prove the write missed the flag service: it may land after
+	// a concurrent teardown's strip. Strip again, best effort, when a teardown
+	// began; an experiment still PROPOSED is aborted by the caller, which strips.
+	r.mu.Lock()
+	e := r.entries[id]
+	if !startAbortedLocked(e) {
 		r.mu.Unlock()
-		return fmt.Errorf("registry: start %q: %w", id, ErrShuttingDown)
+		return applyErr
 	}
-	intent := e.journal.Intent()
+	jrnl := journalOf(e)
 	r.mu.Unlock()
-
-	if r.target != nil {
-		p := Proposal{
-			FlagKey:           intent.FlagKey,
-			ExperimentID:      id,
-			ExperimentalValue: intent.ExperimentalValue,
-			Rationale:         intent.Hypothesis,
-		}
-		if err := r.target.Apply(ctx, p); err != nil {
-			applyErr := fmt.Errorf("registry: start: write targeting for %q: %w", id, err)
-			// #2340: an Apply error (the client's request cap, the shutdown-cancelled
-			// ctx) does not prove the write missed the flag service: it may land after
-			// a concurrent teardown's strip. Strip again, best effort, when a teardown
-			// began; an experiment still PROPOSED is aborted by the caller, which strips.
-			r.mu.Lock()
-			e = r.entries[id]
-			if e != nil && !e.teardownBegun && !e.status.IsTerminal() {
-				r.mu.Unlock()
-				return applyErr
-			}
-			var jrnl *journal.Journal
-			if e != nil {
-				jrnl = e.journal
-			}
-			r.mu.Unlock()
-			if stripErr := r.stripAfterAbortedStart(ctx, id, intent.FlagKey, jrnl); stripErr != nil {
-				return errors.Join(applyErr, stripErr)
-			}
-			return applyErr
-		}
+	if stripErr := r.stripAfterAbortedStart(ctx, id, intent.FlagKey, jrnl); stripErr != nil {
+		return errors.Join(applyErr, stripErr)
 	}
+	return applyErr
+}
 
+// commitStart re-fetches the experiment after the targeting write and moves it to
+// RUNNING, or strips the targeting again when a teardown began meanwhile (#2340).
+func (r *Registry) commitStart(ctx context.Context, id string, intent journal.Intent) error {
 	r.mu.Lock()
 	// Re-fetch: a concurrent Abort may have removed/terminated it while unlocked.
-	e = r.entries[id]
-	if r.target != nil && (e == nil || e.teardownBegun || e.status.IsTerminal()) {
+	e := r.entries[id]
+	if r.target != nil && startAbortedLocked(e) {
 		// #2340: a teardown (Abort / AbortAll: kill switch, experiments_enabled off,
 		// shutdown) began while the Apply above was in flight, so its strip may have
 		// run before the Apply wrote the branch. Strip it again: the teardown does
 		// not strip a second time, and the experiment never becomes RUNNING.
-		var jrnl *journal.Journal
-		if e != nil {
-			jrnl = e.journal
-		}
+		jrnl := journalOf(e)
 		r.mu.Unlock()
 		return r.stripAfterAbortedStart(ctx, id, intent.FlagKey, jrnl)
 	}
@@ -750,6 +764,12 @@ func (r *Registry) Start(ctx context.Context, id string) error {
 		// Start won (RUNNING) and its targeting is the live one: keep it.
 		return nil
 	}
+	r.markRunningLocked(e, intent)
+	return nil
+}
+
+// markRunningLocked moves e to RUNNING. The caller holds r.mu.
+func (r *Registry) markRunningLocked(e *entry, intent journal.Intent) {
 	e.status = StatusRunning
 	// #1188: start the long-lived agent.experiment ROOT span now that the experiment is
 	// RUNNING (idempotent — a no-op if it is somehow already started). The analysis
@@ -757,8 +777,21 @@ func (r *Registry) Start(ctx context.Context, id string) error {
 	r.startSpanLocked(e, intent)
 	r.recordDecision(e.journal, StatusRunning, "experiment started")
 	r.emitProgressLocked(e, ProgressTriggerStarted, "", e.spanCtx) // #2059
-	r.log.Info("experiment.started", "experiment_id", id)
-	return nil
+	r.log.Info("experiment.started", "experiment_id", e.id)
+}
+
+// startAbortedLocked reports whether a teardown removed, began on or ended e while
+// its Start was unlocked (#2340). The caller holds r.mu.
+func startAbortedLocked(e *entry) bool {
+	return e == nil || e.teardownBegun || e.status.IsTerminal()
+}
+
+// journalOf returns e's journal, or nil when e is gone. The caller holds r.mu.
+func journalOf(e *entry) *journal.Journal {
+	if e == nil {
+		return nil
+	}
+	return e.journal
 }
 
 // Strip attempts and the per-attempt bound of the compensating strip (#2340).
@@ -1144,19 +1177,8 @@ func (r *Registry) nextPair() (pairPlan, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Gate on the EFFECTIVE concurrency cap (#998): the registry must not hold more
-	// in-flight spawns than the coordinator can actually run. At least ONE free slot
-	// is required to make any progress.
-	free := r.effectiveCap - r.inFlightLocked()
-	if free <= 0 {
-		return pairPlan{}, false
-	}
-	// UC-046 BR-010: no other shadow game while a pattern game is in flight.
-	if r.patternInFlightLocked() {
-		return pairPlan{}, false
-	}
-	live := r.liveIDsLocked()
-	if len(live) == 0 {
+	free, live, ok := r.pairGateLocked()
+	if !ok {
 		return pairPlan{}, false
 	}
 	// Scan starting from the rotating cursor so a different experiment leads each
@@ -1165,87 +1187,127 @@ func (r *Registry) nextPair() (pairPlan, bool) {
 	for i := 0; i < len(live); i++ {
 		cand := live[(start+i)%len(live)]
 		e := r.entries[cand]
-		nArms := len(e.arms)
-		if nArms == 0 {
-			continue
-		}
-		// Equal-share guard: bound an experiment to its fair ceil(cap/K) share so K
-		// live experiments converge to an even split. Skip an experiment with no
-		// room for even a single arm.
 		share := r.perExperimentShareLocked(len(live))
-		shareRoom := share - e.inFlight()
-		if shareRoom <= 0 {
+		n, pairIndex, pattern, ok := r.planPairLocked(cand, e, free, share)
+		if !ok {
 			continue
 		}
-
-		// CRN pairing (#1003): the per-experiment arm cursor lays out games as
-		// consecutive (experimental, control) PAIRS. The pair index is armCursor /
-		// nArms, and the shared seed = pairSeed(id, pairIndex) — so BOTH arms of a
-		// pair derive the SAME seed automatically (the seed only changes at a pair
-		// boundary). We reserve as many of the CURRENT pair's REMAINING arms as fit
-		// the free + share budget THIS tick:
-		//   - effective cap >= 2 (and a fresh pair) ⇒ reserve BOTH arms atomically,
-		//     so spawnPair rolls the whole pair back if either start fails.
-		//   - effective cap == 1 (the single-game coordinator) ⇒ reserve ONE arm now;
-		//     its seed-matched sibling is reserved on a later tick (after this game
-		//     concludes and frees the slot) with the SAME derived seed. The pair is
-		//     still seed-matched; it just spans two ticks.
-		pairIndex := e.armCursor / nArms
-		armInPair := e.armCursor % nArms
-		remainingInPair := nArms - armInPair // arms left to dispatch in this pair
-		budget := free
-		if shareRoom < budget {
-			budget = shareRoom
-		}
-		toReserve := remainingInPair
-		if budget < toReserve {
-			toReserve = budget
-		}
-		if toReserve <= 0 {
-			continue
-		}
-		var pattern *PatternSpawn
-		if e.pin == nil && r.patterns != nil {
-			continue // not pinned yet (pinPending runs first; a fresh Start waits a tick)
-		}
-		if r.patterns != nil && !e.patternActive() {
-			continue // archetype-only: never spawn without a pinned archetype (UC-046 A1)
-		}
-		if e.patternActive() {
-			// UC-046 BR-010: a pattern arm spawns only when no shadow game is in flight,
-			// one at a time. A6: one pair per pinned archetype, then no more.
-			if r.inFlightLocked() > 0 || pairIndex >= len(e.pin.Archetypes) {
-				continue
-			}
-			toReserve = 1
-			pattern = &PatternSpawn{
-				Archetype:      e.pin.Archetypes[pairIndex],
-				MaxGameSeconds: e.pin.MaxGameSeconds,
-				PairIndex:      pairIndex,
-			}
-		}
-
 		seed := pairSeed(cand, pairIndex)
 		r.rrCursor = (start + i + 1) % len(live)
-
-		arms := make([]string, 0, toReserve)
-		for s := 0; s < toReserve; s++ {
-			arm := e.arms[e.armCursor%nArms]
-			e.armCursor++
-			// Reserve against the cap by pre-incrementing via a placeholder game id; it
-			// is replaced by the real game id in bindGame, or released on spawn failure.
-			placeholder := reservationKey(cand, e.armCursor)
-			e.games[placeholder] = arm
-			// A spawn is now in flight (reserved, not yet bound). It is the only window
-			// in which a real game_id can be reported-terminal before bind, so this
-			// gates and bounds the tombstone map. Decremented in bindGame /
-			// releaseReservation (one per reserved arm).
-			r.spawnsInFlight++
-			arms = append(arms, arm)
-		}
+		arms := r.reserveArmsLocked(cand, e, n)
 		return pairPlan{id: cand, seed: seed, pairIndex: pairIndex, arms: arms, pattern: pattern}, true
 	}
 	return pairPlan{}, false
+}
+
+// pairGateLocked returns the free effective budget and the live experiments, or
+// ok=false when no pair can be reserved this tick. The caller holds r.mu; it does
+// not lock.
+func (r *Registry) pairGateLocked() (free int, live []string, ok bool) {
+	// Gate on the EFFECTIVE concurrency cap (#998): the registry must not hold more
+	// in-flight spawns than the coordinator can actually run. At least ONE free slot
+	// is required to make any progress.
+	free = r.effectiveCap - r.inFlightLocked()
+	if free <= 0 {
+		return 0, nil, false
+	}
+	// UC-046 BR-010: no other shadow game while a pattern game is in flight.
+	if r.patternInFlightLocked() {
+		return 0, nil, false
+	}
+	live = r.liveIDsLocked()
+	if len(live) == 0 {
+		return 0, nil, false
+	}
+	return free, live, true
+}
+
+// planPairLocked decides how many arms of experiment cand's current CRN pair to
+// reserve this tick (n), the pair index, and the archetype of a pattern arm, or
+// ok=false to skip the experiment. It is side-effect free: it never moves a cursor
+// or reserves a slot. The caller holds r.mu; it does not lock.
+func (r *Registry) planPairLocked(cand string, e *entry, free, share int) (n, pairIndex int, pattern *PatternSpawn, ok bool) {
+	nArms := len(e.arms)
+	if nArms == 0 {
+		return 0, 0, nil, false
+	}
+	// Equal-share guard: bound an experiment to its fair ceil(cap/K) share so K
+	// live experiments converge to an even split. Skip an experiment with no
+	// room for even a single arm.
+	shareRoom := share - e.inFlight()
+	if shareRoom <= 0 {
+		return 0, 0, nil, false
+	}
+
+	// CRN pairing (#1003): the per-experiment arm cursor lays out games as
+	// consecutive (experimental, control) PAIRS. The pair index is armCursor /
+	// nArms, and the shared seed = pairSeed(id, pairIndex) — so BOTH arms of a
+	// pair derive the SAME seed automatically (the seed only changes at a pair
+	// boundary). We reserve as many of the CURRENT pair's REMAINING arms as fit
+	// the free + share budget THIS tick:
+	//   - effective cap >= 2 (and a fresh pair) ⇒ reserve BOTH arms atomically,
+	//     so spawnPair rolls the whole pair back if either start fails.
+	//   - effective cap == 1 (the single-game coordinator) ⇒ reserve ONE arm now;
+	//     its seed-matched sibling is reserved on a later tick (after this game
+	//     concludes and frees the slot) with the SAME derived seed. The pair is
+	//     still seed-matched; it just spans two ticks.
+	pairIndex = e.armCursor / nArms
+	armInPair := e.armCursor % nArms
+	remainingInPair := nArms - armInPair // arms left to dispatch in this pair
+	budget := free
+	if shareRoom < budget {
+		budget = shareRoom
+	}
+	n = remainingInPair
+	if budget < n {
+		n = budget
+	}
+	if n <= 0 {
+		return 0, 0, nil, false
+	}
+	if e.pin == nil && r.patterns != nil {
+		return 0, 0, nil, false // not pinned yet (pinPending runs first; a fresh Start waits a tick)
+	}
+	if r.patterns != nil && !e.patternActive() {
+		return 0, 0, nil, false // archetype-only: never spawn without a pinned archetype (UC-046 A1)
+	}
+	if e.patternActive() {
+		// UC-046 BR-010: a pattern arm spawns only when no shadow game is in flight,
+		// one at a time. A6: one pair per pinned archetype, then no more.
+		if r.inFlightLocked() > 0 || pairIndex >= len(e.pin.Archetypes) {
+			return 0, 0, nil, false
+		}
+		n = 1
+		pattern = &PatternSpawn{
+			Archetype:      e.pin.Archetypes[pairIndex],
+			MaxGameSeconds: e.pin.MaxGameSeconds,
+			PairIndex:      pairIndex,
+		}
+	}
+	return n, pairIndex, pattern, true
+}
+
+// reserveArmsLocked reserves the next n arms of experiment cand against the cap: it
+// advances the arm cursor, writes a placeholder game per arm and counts each as an
+// in-flight spawn. The caller holds r.mu; it does not lock.
+func (r *Registry) reserveArmsLocked(cand string, e *entry, n int) []string {
+	nArms := len(e.arms)
+	arms := make([]string, 0, n)
+	for s := 0; s < n; s++ {
+		arm := e.arms[e.armCursor%nArms]
+		e.armCursor++
+		// Reserve against the cap by pre-incrementing via a placeholder game id; it
+		// is replaced by the real game id in bindGame, or released on spawn failure.
+		placeholder := reservationKey(cand, e.armCursor)
+		e.games[placeholder] = arm
+		// A spawn is now in flight (reserved, not yet bound). It is the only window
+		// in which a real game_id can be reported-terminal before bind, so this
+		// gates and bounds the tombstone map. Decremented in bindGame /
+		// releaseReservation (one per reserved arm).
+		r.spawnsInFlight++
+		arms = append(arms, arm)
+	}
+	return arms
 }
 
 // perExperimentShareLocked is the equal-share ceiling per live experiment:
@@ -1447,6 +1509,45 @@ func (r *Registry) ConcludeGame(ctx context.Context, gameID string, fitness floa
 		r.mu.Unlock()
 		return "", nil // not one of ours; ignore.
 	}
+	jrnl := r.foldConcludedGameLocked(e, gameID, arm, fitness, durationS)
+	r.mu.Unlock()
+
+	verdict, haveVerdict := r.recordInterimVerdict(jrnl)
+	r.emitConcludedProgress(id)
+
+	r.log.Info("experiment.game_concluded",
+		"experiment_id", id, "game_id", gameID, "arm", arm, "fitness", fitness)
+
+	// Decide whether to conclude the experiment. A promote/discard verdict
+	// concludes it; inconclusive keeps it running. (An under-powered timeout is the
+	// verdict seam's call — it returns promote/discard once it is willing to.)
+	if haveVerdict && verdict.Outcome != OutcomeInconclusive {
+		return r.conclude(ctx, id, verdict)
+	}
+
+	// TERMINATION GUARD (#1001): the verdict is inconclusive (or absent). Without a
+	// bound, an experiment that can never reach signal — e.g. all-zero fitness ⇒
+	// both arms zero-variance ⇒ undefined effect size ⇒ permanent "inconclusive" —
+	// spawns games forever. If any give-up condition holds, conclude+teardown the
+	// experiment as a FINAL inconclusive instead of leaving it RUNNING.
+	if reason, giveUp := r.shouldGiveUp(jrnl.Summary(), jrnl.Intent().TargetNPerArm); giveUp {
+		r.log.Info("experiment.terminated_inconclusive",
+			"experiment_id", id, "reason", reason)
+		return r.conclude(ctx, id, giveUpVerdict(reason, verdict, haveVerdict))
+	}
+
+	// UC-046 A6: a pattern experiment whose archetypes are all used concludes once
+	// its last game has ended.
+	if st, done := r.concludeIfPatternExhausted(ctx, id); done {
+		return st, nil
+	}
+	return StatusRunning, nil
+}
+
+// foldConcludedGameLocked unbinds the concluded game from e and appends its
+// game_concluded event (folding the fitness sample into the arm), and returns e's
+// journal. The caller holds r.mu; it does not lock.
+func (r *Registry) foldConcludedGameLocked(e *entry, gameID, arm string, fitness, durationS float64) *journal.Journal {
 	delete(e.games, gameID)
 	// UC-043 A21: the game's fitness is folded now, so its prediction tally joins
 	// the arm (report-only; the journal and the verdict never see it).
@@ -1475,14 +1576,15 @@ func (r *Registry) ConcludeGame(ctx context.Context, gameID string, fitness floa
 		Fitness:   &f,
 		DurationS: durationS,
 	})
-	jrnl := e.journal
-	r.mu.Unlock()
+	return e.journal
+}
 
-	// Recompute the interim verdict from the seam (outside the registry lock — the
-	// journal has its own lock). The verdict seam consumes the full Summary (raw
-	// per-arm Welford: Count/Mean/M2) so #979 can compute an unbiased / Welch
-	// estimator — CompactView would drop the raw M2. Record it as an interim_verdict
-	// event.
+// recordInterimVerdict recomputes the interim verdict from the seam (outside the
+// registry lock — the journal has its own lock). The verdict seam consumes the full
+// Summary (raw per-arm Welford: Count/Mean/M2) so #979 can compute an unbiased /
+// Welch estimator — CompactView would drop the raw M2. It records the verdict as an
+// interim_verdict event.
+func (r *Registry) recordInterimVerdict(jrnl *journal.Journal) (journal.Verdict, bool) {
 	var verdict journal.Verdict
 	haveVerdict := false
 	if r.verdict != nil {
@@ -1494,50 +1596,33 @@ func (r *Registry) ConcludeGame(ctx context.Context, gameID string, fitness floa
 			})
 		}
 	}
-	// #2059: after the fold AND the interim verdict, so the snapshot counts exactly
-	// the folded games and its verdict.* is this game's. An experiment torn down in
-	// between (AbortAll) already emitted its terminal snapshot.
+	return verdict, haveVerdict
+}
+
+// emitConcludedProgress emits the game_concluded progress snapshot (#2059): after
+// the fold AND the interim verdict, so the snapshot counts exactly the folded games
+// and its verdict.* is this game's. An experiment torn down in between (AbortAll)
+// already emitted its terminal snapshot. It takes and releases r.mu.
+func (r *Registry) emitConcludedProgress(id string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if e := r.entries[id]; e != nil && !e.status.IsTerminal() {
 		r.emitProgressLocked(e, ProgressTriggerGameConcluded, "", e.spanCtx)
 	}
-	r.mu.Unlock()
+}
 
-	r.log.Info("experiment.game_concluded",
-		"experiment_id", id, "game_id", gameID, "arm", arm, "fitness", fitness)
-
-	// Decide whether to conclude the experiment. A promote/discard verdict
-	// concludes it; inconclusive keeps it running. (An under-powered timeout is the
-	// verdict seam's call — it returns promote/discard once it is willing to.)
-	if haveVerdict && verdict.Outcome != OutcomeInconclusive {
-		return r.conclude(ctx, id, verdict)
+// giveUpVerdict is the FINAL inconclusive verdict of an experiment the termination
+// guard (#1001) gives up on. It keeps the interim verdict's Delta when there is one.
+func giveUpVerdict(reason string, v journal.Verdict, have bool) journal.Verdict {
+	final := journal.Verdict{
+		Outcome:     OutcomeInconclusive,
+		Significant: false,
+		Reason:      reason,
 	}
-
-	// TERMINATION GUARD (#1001): the verdict is inconclusive (or absent). Without a
-	// bound, an experiment that can never reach signal — e.g. all-zero fitness ⇒
-	// both arms zero-variance ⇒ undefined effect size ⇒ permanent "inconclusive" —
-	// spawns games forever. If any give-up condition holds, conclude+teardown the
-	// experiment as a FINAL inconclusive instead of leaving it RUNNING.
-	if reason, giveUp := r.shouldGiveUp(jrnl.Summary(), jrnl.Intent().TargetNPerArm); giveUp {
-		final := journal.Verdict{
-			Outcome:     OutcomeInconclusive,
-			Significant: false,
-			Reason:      reason,
-		}
-		if haveVerdict {
-			final.Delta = verdict.Delta
-		}
-		r.log.Info("experiment.terminated_inconclusive",
-			"experiment_id", id, "reason", reason)
-		return r.conclude(ctx, id, final)
+	if have {
+		final.Delta = v.Delta
 	}
-
-	// UC-046 A6: a pattern experiment whose archetypes are all used concludes once
-	// its last game has ended.
-	if st, done := r.concludeIfPatternExhausted(ctx, id); done {
-		return st, nil
-	}
-	return StatusRunning, nil
+	return final
 }
 
 // ReleaseGame frees the in-flight slot held by a shadow game that ended WITHOUT
