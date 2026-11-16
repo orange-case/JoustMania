@@ -537,7 +537,7 @@ spans. The names follow §8: service prefix `flagservice_`, counters end `_total
 |---|---|---|---|
 | `flagservice_flagsmith_link` | gauge | `state` | 1 for the current link state (`off`, `starting`, `online`, `offline`), 0 for the others |
 | `flagservice_flagsmith_pulls_total` | counter | `trigger`, `result` | environment-document fetches; `result` = `changed`, `not_modified`, `error` (a stale document counts as `error`, reason `stale_document` on the span) |
-| `flagservice_flagsmith_pushes_total` | counter | `op`, `result`, `reason` | Admin API calls; `reason` on refusals (`change_request_required`, `not_found`, `bad_value`, `unauthorized`, `rate_limited`, `timeout`) |
+| `flagservice_flagsmith_pushes_total` | counter | `op`, `result`, `reason` | Admin API calls; `reason` on refusals (`change_request_required`, `not_found`, `bad_value`, `unauthorized`, `rate_limited`, `timeout`). A value refused without a request (`bad_value`; `not_found` for a feature the start did not resolve) counts one point too. Every answer counts, also a retried one: a `429`, and a `404` of an override push to an identity the link listed or settled less than 30 s before (retried up to 3 times, #2639), each count `result=rejected`; `GET /state` `keys` tells which key a refusal is about (services.md §7.3) |
 | `flagservice_flagsmith_pending` | gauge | | local values waiting to be sent |
 | `flagservice_flagsmith_out_of_sync` | gauge | | flags and scopes whose value differs between the stack and Flagsmith |
 | `flagservice_flagsmith_conflicts_total` | counter | `resolution` (`flagsmith`) | conflicts in any pull or reconcile round, a discarded offline stack change included (FR-210, #2621) |

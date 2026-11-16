@@ -53,6 +53,10 @@ func (o *out) controllerStep(ctx context.Context) (bool, error) {
 		finish(true, nil)
 		return true, nil
 	}
+	if op.kind == ctrlSettle {
+		// The owner's values go to this identity next (#2639).
+		o.markListed(identifier)
+	}
 
 	clear := !fresh
 	if op.kind == ctrlSettle && op.verify && !fresh && !o.traitsOff.Load() {

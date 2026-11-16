@@ -25,10 +25,13 @@ type out struct {
 	traitsOff atomic.Bool
 	// nextAt is the earliest time of the next request (only Run reads it).
 	nextAt time.Time
+	// listed: when this process last listed or settled an identity (only
+	// Run reads and writes it): a 404 right after is retried (#2639).
+	listed map[string]time.Time
 }
 
 func newOut(l *Link) *out {
-	return &out{l: l, wake: make(chan struct{}, 1), ids: newIdentityQueue()}
+	return &out{l: l, wake: make(chan struct{}, 1), ids: newIdentityQueue(), listed: map[string]time.Time{}}
 }
 
 func (o *out) poke() {

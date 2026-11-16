@@ -237,6 +237,7 @@ func (o *out) createIdentity(ctx context.Context, op identityOp) outcome {
 		if uuid != "" {
 			l.setIdentityUUID(op.Identifier, uuid)
 		}
+		o.markListed(op.Identifier)
 		if o.traitsOff.Load() {
 			o.ids.DropTraits(op)
 		}
