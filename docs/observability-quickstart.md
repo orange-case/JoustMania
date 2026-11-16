@@ -267,7 +267,7 @@ The game-loop panels below are on Game & Players (row Game Loop Health).
 
 **Panel 1: Actual vs Configured Hz**
 ```promql
-game_actual_update_frequency_hz{game_kind="primary"}
+game_actual_update_frequency_hz{game_kind="real"}
 game_current_update_frequency_hz
 ```
 

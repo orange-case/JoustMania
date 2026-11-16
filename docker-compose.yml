@@ -107,6 +107,7 @@ services:
       - OTEL_SERVICE_NAMESPACE=infrastructure
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
     volumes:
       # Read-only from the start: the service never writes the flag files.
@@ -149,7 +150,8 @@ services:
       - "otel-collector:4317"
     environment:
       - OTEL_SERVICE_NAME=flagd
-      - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania},deployment.environment=${DEPLOYMENT_ENVIRONMENT:-development}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
     depends_on:
       flag-service:
         condition: service_healthy
@@ -232,6 +234,7 @@ services:
     command: [ "--config=/etc/otel-collector-config.yaml" ]
     environment:
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
     volumes:
       - ./services/otel-collector/config.yaml:/etc/otel-collector-config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -305,6 +308,7 @@ services:
       - OTEL_SERVICE_NAMESPACE=infrastructure
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
       # Rust HID service for canary controller I/O backend
       - RUST_HID_HOST=rust-hid
@@ -359,6 +363,7 @@ services:
       - OTEL_SERVICE_NAME=pairing-daemon
       - OTEL_SERVICE_NAMESPACE=infrastructure
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
       # Loopback because network_mode:host can't use Docker DNS. 127.0.0.1, not
       # localhost: 4317, 8015 and 50058 are published on 127.0.0.1 only (#1319),
@@ -404,6 +409,7 @@ services:
       - OTEL_SERVICE_NAMESPACE=infrastructure
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
       - RUST_LOG=info
     restart: unless-stopped
@@ -443,6 +449,7 @@ services:
       - OTEL_SERVICE_NAMESPACE=infrastructure
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
     restart: unless-stopped
     # Healthcheck defined in Dockerfile (uses grpc_health_probe)
@@ -468,6 +475,7 @@ services:
       - OTEL_SERVICE_NAMESPACE=joustmania
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
       # Game lifecycle reported to the flag service (FR-135, #1410)
       - FLAG_SERVICE_URL=http://flag-service:8070
@@ -502,6 +510,7 @@ services:
       - OTEL_SERVICE_NAMESPACE=joustmania
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
       # Phase 60: Audio service connection
       - AUDIO_HOST=audio
@@ -547,6 +556,7 @@ services:
       - OTEL_SERVICE_NAMESPACE=joustmania
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
       - FLAGD_HOST=flagd
       - FLAGD_PORT=8015
@@ -597,6 +607,7 @@ services:
       - OTEL_SERVICE_NAMESPACE=joustmania
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
       - FLAGD_HOST=flagd
       - FLAGD_PORT=8015
@@ -723,6 +734,7 @@ services:
       - OTEL_SERVICE_NAMESPACE=infrastructure
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
     volumes:
       # The Pi's host name for the unpair Host allow-list (UC-005 BR-003)
@@ -828,6 +840,7 @@ services:
       # Self-telemetry (#724): the agent's own decision-audit spans flow to Jaeger.
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
     volumes:
       # The agent writes flags only through the flag service (FLAG_SERVICE_URL);

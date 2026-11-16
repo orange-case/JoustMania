@@ -24,7 +24,7 @@ Read-only: the script sends only GET requests, to the VictoriaMetrics query API
 (`/victoria-metrics/api/v1/query`, `query_range`) and, unless you pass `--no-jaeger`, Jaeger's query
 API v3 (`/jaeger/api/v3/traces`). It writes no flag, starts no game and runs no `docker` command.
 You can run it while games are running. Real and shadow games are told apart by the
-coordinator's `game_kind` label (`primary` = real, `shadow`).
+coordinator's `game_kind` label (`real`, `shadow`; series from before #2646 say `primary` for real, and the script counts it as real).
 
 ### Run it on the stage Pi
 

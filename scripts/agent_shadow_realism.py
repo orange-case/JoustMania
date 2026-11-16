@@ -114,7 +114,7 @@ class VM:
 
 
 def _kind(label: str) -> str | None:
-    """The coordinator's game_kind label in the flag vocabulary (telemetry.md: primary = real)."""
+    """The coordinator's game_kind label in the flag vocabulary (telemetry.md: real, shadow; legacy primary = real, #2646)."""
     return {"primary": "real", "real": "real", "shadow": "shadow"}.get(label or "")
 
 

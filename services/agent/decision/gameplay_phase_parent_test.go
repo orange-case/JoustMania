@@ -44,7 +44,11 @@ func TestSignalReceived_ChildOfGameplayPhaseSpan(t *testing.T) {
 	l.OnEvaluate(context.Background(), gameplayPhaseCtx("game_gp01"),
 		EvalTrigger{Signal: "metrics", T0: time.Now(), RPCService: "svc"})
 
-	root := spansByName(sr.Ended(), SignalReceived)[0]
+	// #2648: in a game there is no signal_received span; the decision is the child.
+	if n := len(spansByName(sr.Ended(), SignalReceived)); n != 0 {
+		t.Fatalf("agent.signal_received spans in the game trace = %d, want 0", n)
+	}
+	root := spansByName(sr.Ended(), SpanDecision)[0]
 	wantTID, _ := trace.TraceIDFromHex(hubGameTrace)
 	wantSID, _ := trace.SpanIDFromHex(hubGameplayPhaseSpanID)
 	rootSID, _ := trace.SpanIDFromHex(hubGameSpanID)
@@ -78,7 +82,7 @@ func TestSignalReceived_FallsBackToGameRootWhenGameplayPhaseAbsent(t *testing.T)
 	l.OnEvaluate(context.Background(), gameTraceCtx("game_gp02"),
 		EvalTrigger{Signal: "metrics", T0: time.Now(), RPCService: "svc"})
 
-	root := spansByName(sr.Ended(), SignalReceived)[0]
+	root := spansByName(sr.Ended(), SpanDecision)[0]
 	wantSID, _ := trace.SpanIDFromHex(hubGameSpanID)
 	if root.Parent().SpanID() != wantSID {
 		t.Errorf("signal_received parent span_id = %s, want game ROOT %s (fallback)", root.Parent().SpanID(), wantSID)

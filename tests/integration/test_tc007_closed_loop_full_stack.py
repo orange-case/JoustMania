@@ -75,7 +75,7 @@ _envoy_jaeger_api = ""
 GAME_ROOT_SPAN = "Joust Free-for-All"  # the mode's display name
 GAME_PHASES = ("initialization_phase", "gameplay_phase", "game_cycle", "teardown_phase")
 # Agent spans that must name the game (validation 1); game.kind where the spec puts it.
-AGENT_SPANS_WITH_GAME_ID = ("agent.signal_received", "agent.decide", "agent.decision")
+AGENT_SPANS_WITH_GAME_ID = ("agent.decide", "agent.decision")
 AGENT_SPANS_WITH_GAME_KIND = ("agent.decide", "agent.decision")
 # The Agent tab's decide query (agentDecide.ts DECIDE_OPERATION, DECIDE_TRACE_LIMIT).
 DECIDE_QUERY = {"service": "agent", "operation": "agent.decide", "limit": 5}
@@ -311,15 +311,20 @@ def _decide_rows(traces: list[dict], game_id: str) -> list[dict]:
                 continue
             parent = by_id.get(_parent_id(span))
             siblings = []
-            if (
-                parent is not None
-                and parent["operationName"] == "agent.signal_received"
-            ):
+            if parent is not None:
+                # #2648: in a game the decide and its decisions are siblings under
+                # game_cycle and share decide.state.digest; without game ids they
+                # share an agent.signal_received parent.
+                digest = tags.get("decide.state.digest")
                 siblings = [
                     s
                     for s in spans
                     if s["operationName"] == "agent.decision"
                     and _parent_id(s) == parent["spanID"]
+                    and (
+                        parent["operationName"] == "agent.signal_received"
+                        or (digest and _tags(s).get("decide.state.digest") == digest)
+                    )
                 ]
             rows.append(
                 {
@@ -379,20 +384,18 @@ def _game_trace_problems(
             f"player spans for {player_serials}, expected one each for {sorted(serials)}"
         )
 
-    # UC-040 BR-013: the rules-path agent.decide sits under agent.signal_received,
-    # a remote child of the coordinator's game_cycle ...
+    # UC-040 BR-013: the rules-path agent.decide is a remote child of the coordinator's
+    # game_cycle (#2648: no agent.signal_received span in the game trace) ...
     decide = by_id.get(row["span_id"])
-    signal = by_id.get(_parent_id(decide)) if decide else None
-    cycle = by_id.get(_parent_id(signal)) if signal else None
+    cycle = by_id.get(_parent_id(decide)) if decide else None
     chain = [
         f"{s['operationName']}@{_service(trace, s)}" if s else "missing"
-        for s in (decide, signal, cycle)
+        for s in (decide, cycle)
     ]
-    if chain[1:] != [
-        "agent.signal_received@agent",
-        f"game_cycle@{COORDINATOR_SERVICE_NAME}",
-    ]:
+    if chain[1:] != [f"game_cycle@{COORDINATOR_SERVICE_NAME}"]:
         problems.append(f"decide chain {chain}")
+    if any(s["operationName"] == "agent.signal_received" for s in trace["spans"]):
+        problems.append("agent.signal_received span in the game trace")
     # ... and each of its agent.decision spans keeps its Link to the game root.
     for decision_id in row["decision_ids"]:
         refs = by_id.get(decision_id, {}).get("references", [])
@@ -537,7 +540,7 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
         )
 
         # Step 8 (Jaeger): G1's whole trace: root span, phases and player spans
-        # (UC-035 step 5); agent.decide -> agent.signal_received -> remote game_cycle,
+        # (UC-035 step 5); agent.decide -> remote game_cycle,
         # and the decisions' Link to the game root (UC-040 BR-013); every agent span
         # names G1 and kind real (validation 1).
         problems: list[str] = []

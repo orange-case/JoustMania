@@ -28,7 +28,7 @@ const metricGameEndStale = "agent_game_end_stale_total"
 
 // newGameEndStaleCounter builds agent_game_end_stale_total, incremented once per
 // game the agent ended on the stale game_active backstop, labeled game_kind
-// (primary / shadow, gamecontext.TelemetryGameKind; an empty kind counts as shadow). An instrument-creation error yields a no-op counter, as in
+// (real / shadow, gamecontext.TelemetryGameKind; an empty kind counts as shadow). An instrument-creation error yields a no-op counter, as in
 // decision/metrics.go.
 func newGameEndStaleCounter(mp otelmetric.MeterProvider) otelmetric.Int64Counter {
 	c, err := mp.Meter(gameEndMeterName).Int64Counter(

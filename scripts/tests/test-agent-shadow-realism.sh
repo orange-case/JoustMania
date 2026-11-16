@@ -54,27 +54,27 @@ def game(kind, i, prefix, f, mode="FFA", jaeger=True):
     return g
 
 for i in range(n_real):
-    games.append(game("primary", i, "r", 1.0))
+    games.append(game("real", i, "r", 1.0))
 for i in range(n_shadow):
     games.append(game("shadow", i, "s", factor, jaeger=False))
 if "fightclub" in extra:
-    games += [game("primary", 900 + i, "fc", 1.0, mode="Fight Club") for i in range(2)]
+    games += [game("real", 900 + i, "fc", 1.0, mode="Fight Club") for i in range(2)]
 if "clash" in extra:  # two concurrent shadow games on the same mock serials, ending 5 s apart
     a = game("shadow", 800, "c", 1.0, jaeger=False)
     b = dict(a, id="game_c0801", dur=a["dur"] + 5)
     games += [a, b]
 if "clashmode" in extra:  # a Fight Club game (filtered out by --mode FFA) on the serials of a FFA game
     a = game("shadow", 700, "m", 1.0, jaeger=False)
-    b = dict(a, id="game_m0701", kind="primary", mode="Fight Club", dur=a["dur"] + 3)
+    b = dict(a, id="game_m0701", kind="real", mode="Fight Club", dur=a["dur"] + 3)
     games += [a, b]
 if "reset" in extra:  # the counter reset inside the first game's window (#2543)
     games[0]["near_death_resets"] = 3
 if "linger" in extra:
     games[0]["linger"] = 10 ** 6  # the stale series is still exported long after the window
 # The counter with an in-window reset (two writers on one series): increase() would read 7227.
-deaths = [{"game_kind": "primary", "mode": "FFA", "instance": "a", "before": 100, "max": 7227},
-          {"game_kind": "primary", "mode": "FFA", "instance": "b", "before": None, "max": 20},
-          {"game_kind": "primary", "mode": "Fight Club", "instance": "b", "before": None, "max": 7},
+deaths = [{"game_kind": "real", "mode": "FFA", "instance": "a", "before": 100, "max": 7227},
+          {"game_kind": "real", "mode": "FFA", "instance": "b", "before": None, "max": 20},
+          {"game_kind": "real", "mode": "Fight Club", "instance": "b", "before": None, "max": 7},
           {"game_kind": "shadow", "mode": "FFA", "instance": "c", "before": None, "max": 10}]
 json.dump({"games": games, "deaths": deaths}, open(out, "w"))
 PY

@@ -61,3 +61,21 @@ func TestApplyMetrics_UnlabeledSignalDoesNotMakeShadowReal(t *testing.T) {
 		t.Fatalf("GameKind = %q, want shadow (unlabeled signal must not clobber)", k)
 	}
 }
+
+// UC: UC-035 BR-002
+// The agent's own metric label uses the coordinator's vocabulary (#2646): a real
+// game is "real", never "primary"; the legacy "primary" still maps to "real".
+func TestTelemetryGameKind_RealShadowVocabulary(t *testing.T) {
+	cases := map[string]string{
+		"real":    "real",
+		"primary": "real", // legacy coordinator label, accepted never emitted
+		"shadow":  "shadow",
+		"":        "shadow", // unknown folds into shadow (fail safe)
+		"weird":   "shadow",
+	}
+	for in, want := range cases {
+		if got := TelemetryGameKind(in); got != want {
+			t.Errorf("TelemetryGameKind(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

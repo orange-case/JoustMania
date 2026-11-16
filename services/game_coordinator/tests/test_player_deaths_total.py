@@ -66,7 +66,7 @@ async def test_kill_increments_deaths_total_once(ffa_game):
     with patch(DEATHS_METRIC) as mock_metric:
         await ffa_game._kill_player(serial, accel_mag=5.0)
 
-    mock_metric.labels.assert_called_once_with(mode="FFA", game_kind="primary")
+    mock_metric.labels.assert_called_once_with(mode="FFA", game_kind="real")
     mock_metric.labels.return_value.inc.assert_called_once_with()
 
 
@@ -151,7 +151,7 @@ async def test_respawn_mode_counts_every_death():
         await game._respawn_player(serial)
         await game._kill_player(serial, accel_mag=5.0)
 
-    mock_metric.labels.assert_called_with(mode="Nonstop Joust", game_kind="primary")
+    mock_metric.labels.assert_called_with(mode="Nonstop Joust", game_kind="real")
     assert mock_metric.labels.return_value.inc.call_count == 2
 
 

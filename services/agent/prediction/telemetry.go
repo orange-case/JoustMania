@@ -17,7 +17,7 @@ import (
 )
 
 // telemetry.go emits agent.prediction.outcome and the agent_prediction* metrics
-// (docs/specs/telemetry.md §4.1, §6). Every metric carries game_kind (primary /
+// (docs/specs/telemetry.md §4.1, §6). Every metric carries game_kind (real /
 // shadow, gamecontext.TelemetryGameKind), and the outcome and Brier metrics carry
 // acted, so counterfactuals never mix into the acted calibration.
 

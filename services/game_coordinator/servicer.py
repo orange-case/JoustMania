@@ -889,8 +889,8 @@ class GameCoordinatorServicer(game_coordinator_pb2_grpc.GameCoordinatorServiceSe
 
     @staticmethod
     def _game_record(session: GameSession) -> GameRecord:
-        """The flag service's view of a session. The telemetry kind ``primary``
-        is the flag vocabulary's ``real`` (FR-041, #1249)."""
+        """The flag service's view of a session. The session kind (``real`` /
+        ``shadow``) is already the flag vocabulary (FR-041, #2646)."""
         return GameRecord(
             game_id=session.game_id,
             game_kind="real" if session.game_kind == GAME_KIND_PRIMARY else "shadow",

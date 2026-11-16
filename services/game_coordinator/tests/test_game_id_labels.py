@@ -88,7 +88,7 @@ class TestPlayersAliveAggregateIsPrimaryOnly:
 
     @pytest.mark.asyncio
     async def test_primary_kill_writes_players_alive(self, ffa_game):
-        game = ffa_game  # default game_kind == "primary"
+        game = ffa_game  # default game_kind == "real"
         game.running = True  # the aggregate is only written while the game runs (#1943)
         serial = next(iter(game.players))
 
@@ -246,7 +246,7 @@ class TestGameStateGaugesPerGame:
 
     @pytest.mark.uc("UC-041", flow="main", steps=[5])
     def test_concurrent_games_do_not_overwrite_each_other(self, live_gauges):
-        real = _make_ffa("game_real", "primary")
+        real = _make_ffa("game_real", "real")
         shadow = _make_ffa("game_shadow", "shadow")
         real.music_speed = 1.0
         shadow.music_speed = 1.3
@@ -257,7 +257,7 @@ class TestGameStateGaugesPerGame:
             game._emit_threshold_metrics()
 
         tempo = _series_by_game(metrics.music_tempo)
-        assert tempo == {"game_real": ("primary", 1.0), "game_shadow": ("shadow", 1.3)}
+        assert tempo == {"game_real": ("real", 1.0), "game_shadow": ("shadow", 1.3)}
         death = _series_by_game(metrics.effective_death_threshold)
         assert set(death) == {"game_real", "game_shadow"}
         # Slow vs fast tempo interpolate to different thresholds; both survive.
@@ -267,7 +267,7 @@ class TestGameStateGaugesPerGame:
 
     @pytest.mark.uc("UC-041", flow="main", steps=[5])
     def test_game_end_removes_only_that_games_series(self, live_gauges):
-        real = _make_ffa("game_real", "primary")
+        real = _make_ffa("game_real", "real")
         shadow = _make_ffa("game_shadow", "shadow")
         for game in (real, shadow):
             game._emit_sensitivity_metric()
@@ -283,7 +283,7 @@ class TestGameStateGaugesPerGame:
         for gauge in GAME_STATE_GAUGES:
             assert set(_series_by_game(gauge)) == {"game_real"}, gauge.name
 
-        metrics.clear_session_player_analytics(list(real.players), game_id="game_real", game_kind="primary")
+        metrics.clear_session_player_analytics(list(real.players), game_id="game_real", game_kind="real")
         for gauge in GAME_STATE_GAUGES:
             assert _series_by_game(gauge) == {}, gauge.name
 

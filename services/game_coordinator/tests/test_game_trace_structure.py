@@ -17,6 +17,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from lib.types import get_game_display_name
+from services.game_coordinator.game_session import GAME_KIND_REAL, GAME_KIND_SHADOW
 from services.game_coordinator.tests.test_game_cycle_span_publish import _fast_ffa_game
 from services.game_coordinator.tests.test_game_session import _make_session
 
@@ -71,11 +72,11 @@ async def test_game_trace_has_mode_root_phases_and_one_span_per_player(mock_fact
 
 
 @pytest.mark.uc("UC-035", br=["BR-002"])
-@pytest.mark.parametrize("game_kind", ["primary", "shadow"])
+@pytest.mark.parametrize("game_kind", [GAME_KIND_REAL, GAME_KIND_SHADOW])
 @pytest.mark.asyncio
 @patch("services.game_coordinator.game_session.GameFactory")
 async def test_root_span_names_game_kind_in_coordinator_vocabulary(mock_factory, span_exporter, game_kind):
-    """BR-002: coordinator spans say primary / shadow, never the agent's `real`."""
+    """BR-002 (#2646): coordinator spans say real / shadow, the agent's vocabulary; never `primary`."""
     session = _make_session(game_kind=game_kind)
     session.game_running = True
     mock_factory.create_game.return_value = _fast_ffa_game()
@@ -85,4 +86,5 @@ async def test_root_span_names_game_kind_in_coordinator_vocabulary(mock_factory,
 
     (root,) = [s for s in span_exporter.get_finished_spans() if s.parent is None]
     assert root.attributes["game.kind"] == game_kind
-    assert root.attributes["game.kind"] != "real"
+    assert root.attributes["game.kind"] in ("real", "shadow")
+    assert root.attributes["game.kind"] != "primary"

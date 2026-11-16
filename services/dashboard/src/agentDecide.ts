@@ -502,13 +502,24 @@ function decideRowFrom(
   // Rules path: decisions are siblings under the same agent.signal_received.
   const children = byParent.get(span.spanID) ?? [];
   let decisionSpans = children.filter((s) => s.operationName === "agent.decision");
-  // Only the rules path shares a parent with its decisions, and that parent is
-  // always the cycle's agent.signal_received. A remote decide's parent is the
-  // game's gameplay_phase, whose other children are unrelated: never link those.
-  if (decisionSpans.length === 0 && byId.get(parent)?.operationName === SIGNAL_OPERATION) {
-    decisionSpans = (byParent.get(parent) ?? []).filter(
-      (s) => s.operationName === "agent.decision",
-    );
+  // Only the rules path shares a parent with its decisions. Without game ids that
+  // parent is the cycle's agent.signal_received. In a game (#2648) there is no such
+  // span: the decide and its decisions are siblings under game_cycle, and the
+  // decisions of one cycle carry the decide's decide.state.digest. A remote decide's
+  // parent is the game's game_cycle too, whose other children are unrelated: those
+  // are never linked (a remote decide has its decisions as children, above).
+  if (decisionSpans.length === 0) {
+    const siblings = (byParent.get(parent) ?? []).filter((s) => s.operationName === "agent.decision");
+    if (byId.get(parent)?.operationName === SIGNAL_OPERATION) {
+      decisionSpans = siblings;
+    } else {
+      const digest = tagString(tags, "decide.state.digest");
+      if (digest) {
+        decisionSpans = siblings.filter(
+          (s) => tagString(spanTags(s), "decide.state.digest") === digest,
+        );
+      }
+    }
   }
 
   let model = tagString(tags, "gen_ai.request.model");

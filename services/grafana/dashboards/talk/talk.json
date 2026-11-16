@@ -81,7 +81,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(game_active{game_kind=\"primary\"}) or vector(0)",
+          "expr": "sum(game_active{game_kind=~\"real|primary\"}) or vector(0)",
           "refId": "A",
           "legendFormat": "real"
         },

@@ -150,6 +150,10 @@ drop-in is honoured too. Set the whole comma-separated list in one place: a unit
 switching a profile off takes effect at the next start. The operator pad ([UC-015](use_cases/UC-015.md)) reads `/dev/input`
 as the host's `input` group: set `INPUT_GID` in `.env.local` when `getent group input` is not 996.
 
+The stage Pi sets `DEPLOYMENT_ENVIRONMENT=production` in `.env.local` (#2646): it becomes the OTel resource attribute
+`deployment.environment` on every service and the collector, which the gateway export (#2571) filters on. Unset, it
+is `development` (local and CI). Recreate the stack after changing it.
+
 Operator pad keys on stage (short form; the full table and rules are in [UC-015](use_cases/UC-015.md) BR-016 and BR-011).
 "Knob" means: hold the key, turn the knob, release the key to commit.
 

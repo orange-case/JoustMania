@@ -525,8 +525,8 @@ def read_int_flag(domain: str, flag_key: str, default: int, game_id: str | None 
 def eval_game_kind(session_kind: str | None) -> str:
     """Map a session kind to the flag ``game_kind`` vocabulary (#932).
 
-    Sessions say ``"primary"`` / ``"shadow"`` (metric labels, #775); flag targeting
-    says ``"real"`` / ``"shadow"`` (targeting.go). Only ``"shadow"`` resolves
+    Sessions say ``"real"`` / ``"shadow"`` since #2646 (metric labels, #775; before that
+    ``"primary"``, still mapped to real here); flag targeting says the same (targeting.go). Only ``"shadow"`` resolves
     experiments; anything else, ``"primary"`` and an unknown kind included, is the
     protected ``"real"``. Idempotent on the flag vocabulary. The one place this
     mapping lives (GameSession, the game's eval context and the handler context

@@ -52,16 +52,18 @@ func TestSignalReceived_ParentFallbackOrder(t *testing.T) {
 				EvalTrigger{Signal: "metrics", T0: time.Now(), RPCService: "svc"})
 
 			roots := spansByName(sr.Ended(), SignalReceived)
-			if len(roots) != 1 {
-				t.Fatalf("signal_received spans = %d, want 1", len(roots))
-			}
-			parent := roots[0].Parent()
 			if tc.wantParent == "" {
-				if parent.IsValid() {
-					t.Fatalf("want own root, got parent %v", parent)
+				// No game ids: the cycle keeps its agent.signal_received root span.
+				if len(roots) != 1 || roots[0].Parent().IsValid() {
+					t.Fatalf("want one own-root signal_received, got %d (parent %v)", len(roots), roots)
 				}
 				return
 			}
+			// #2648: in a game the decision is the direct child of the remote parent.
+			if len(roots) != 0 {
+				t.Fatalf("signal_received spans in the game trace = %d, want 0", len(roots))
+			}
+			parent := spansByName(sr.Ended(), SpanDecision)[0].Parent()
 			wantTID, _ := trace.TraceIDFromHex(hubGameTrace)
 			wantSID, _ := trace.SpanIDFromHex(tc.wantParent)
 			if parent.SpanID() != wantSID || parent.TraceID() != wantTID || !parent.IsRemote() {
@@ -128,16 +130,17 @@ func TestRemote_DecideLandsUnderGameCycle(t *testing.T) {
 		spans := h.sr.Ended()
 		ds := spansByName(spans, SpanDecide)
 		anchors := spansByName(spans, SignalReceived)
-		if len(ds) != 1 || len(anchors) != 1 {
-			t.Fatalf("decide=%d anchors=%d, want 1 each", len(ds), len(anchors))
+		if len(ds) != 1 || len(anchors) != 0 {
+			t.Fatalf("decide=%d anchors=%d, want 1 decide and no anchor span (#2648)", len(ds), len(anchors))
 		}
 		if p := ds[0].Parent(); p.TraceID().String() != hubGameTrace || p.SpanID().String() != hubGameCycleSpanID || !p.IsRemote() {
 			t.Fatalf("agent.decide parent = %v, want remote game_cycle %s", p, hubGameCycleSpanID)
 		}
-		// The fire-cycle Link stays intact.
-		if links := ds[0].Links(); len(links) != 1 || links[0].SpanContext.SpanID() != anchors[0].SpanContext().SpanID() {
-			t.Fatalf("links = %+v, want one Link to the fire-cycle agent.signal_received", links)
+		// The trigger rides the span as an event, not as a Link to an anchor span.
+		if len(ds[0].Links()) != 0 {
+			t.Fatalf("links = %+v, want none: the trigger is an event (#2648)", ds[0].Links())
 		}
+		requireSignalEvent(t, ds[0], "metrics")
 		// The landing's decision nests under the agent.decide span.
 		decisions := spansByName(spans, SpanDecision)
 		if len(decisions) != 1 || decisions[0].Parent().SpanID() != ds[0].SpanContext().SpanID() {

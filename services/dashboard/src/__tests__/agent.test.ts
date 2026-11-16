@@ -348,10 +348,10 @@ describe("UC-035: main step 3, parseAppliedCounts", () => {
     expect(out).toEqual({ appliedOk: 5, appliedError: 1, shadowAppliedOk: 0, shadowAppliedError: 0 });
   });
 
-  it("UC-035/A3 game_kind splits real (primary) from shadow; an unlabelled series counts as real", () => {
+  it("UC-035/A3 game_kind splits real from shadow; an unlabelled series counts as real", () => {
     const out = parseAppliedCounts(
       vm([
-        { metric: { result: "ok", game_kind: "primary" }, value: [1, "4"] },
+        { metric: { result: "ok", game_kind: "real" }, value: [1, "4"] },
         { metric: { result: "ok" }, value: [1, "1"] },
         { metric: { result: "ok", game_kind: "shadow" }, value: [1, "9"] },
         { metric: { result: "error", game_kind: "shadow" }, value: [1, "2"] },
@@ -426,7 +426,7 @@ describe("UC-040: A21 blocked tallies from agent_decisions_total", () => {
   it("UC-035/A3 shadow-game refusals are tallied apart and stay out of the real breakdowns", () => {
     const out = parseBlockedCounts(
       vm([
-        { metric: { action: "grant_shield", block_reason: "rate_limit", game_kind: "primary" }, value: [1, "2"] },
+        { metric: { action: "grant_shield", block_reason: "rate_limit", game_kind: "real" }, value: [1, "2"] },
         { metric: { action: "grant_shield", block_reason: "rate_limit", game_kind: "shadow" }, value: [1, "30"] },
       ]),
     );

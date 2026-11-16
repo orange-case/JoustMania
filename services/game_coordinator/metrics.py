@@ -13,9 +13,9 @@ from lib.otel_metrics import Counter, Gauge, Histogram
 # Game state metrics
 #
 # Multi-session: lifecycle metrics carry a ``game_kind`` label
-# ("primary" / "shadow") so shadow games are observable in their own series
+# ("real" / "shadow") so shadow games are observable in their own series
 # instead of being invisible or clobbering the primary game's series. The
-# primary (menu-driven) session reports game_kind="primary"; concurrent
+# primary (menu-driven) session reports game_kind="real"; concurrent
 # agent/shadow sessions report game_kind="shadow".
 #
 # Experiment attribution: the per-live-game GAUGES below carry
@@ -572,7 +572,7 @@ def clear_game_state_gauges(game_kind: str, game_id: str) -> None:
 def clear_session_player_analytics(
     serials: list[str],
     game_id: str = "",
-    game_kind: str = "primary",
+    game_kind: str = "real",
 ) -> None:
     """
     Clear analytics metrics for a single game session at game end (#775).
@@ -589,7 +589,7 @@ def clear_session_player_analytics(
     Args:
         serials: Controller serials of the ending session's players.
         game_id: The ending session's game_id (for serial+game_id gauges).
-        game_kind: The ending session's game_kind ("primary" / "shadow").
+        game_kind: The ending session's game_kind ("real" / "shadow").
     """
     for serial in serials:
         clear_player_analytics(serial, game_id)

@@ -73,7 +73,7 @@ class FakeInterventionGame:
         audio_client=None,
         gameplay_stream=None,
         flag_eval_context=None,
-        game_kind="primary",
+        game_kind="real",
         experiment_id="",
         arm="",
         revive_result=True,
