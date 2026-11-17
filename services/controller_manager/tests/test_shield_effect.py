@@ -203,7 +203,7 @@ class TestUC040ShieldEffect:
 
         class _Tracer:
             @contextlib.contextmanager
-            def start_as_current_span(self, name, context=None):
+            def start_as_current_span(self, name, context=None, kind=None):
                 span = _Span()
                 spans.append((name, span))
                 yield span
