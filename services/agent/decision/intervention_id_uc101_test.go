@@ -219,3 +219,20 @@ func TestInterventionID_NotSerialized(t *testing.T) {
 		}
 	})
 }
+
+// UC: UC-101 BR-003 NFR-061
+func TestInterventionID_IsSixteenHexCharacters(t *testing.T) {
+	t.Run("UC-101/BR-003 the id fits the flag service's served length (NFR-051)", func(t *testing.T) {
+		seen := map[string]bool{}
+		for i := 0; i < 1000; i++ {
+			id := newInterventionID()
+			if len(id) != 16 || strings.Trim(id, "0123456789abcdef") != "" {
+				t.Fatalf("id %q, want 16 lower-case hex characters", id)
+			}
+			if seen[id] {
+				t.Fatalf("id %q repeated within 1000 draws", id)
+			}
+			seen[id] = true
+		}
+	})
+}

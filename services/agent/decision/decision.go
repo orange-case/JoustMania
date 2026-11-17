@@ -1139,11 +1139,7 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	// thresholds from this cycle's snapshot, so baseline and follow-up sample the SAME
 	// fitness functions against the SAME thresholds. Off the hot path: a cheap map copy
 	// plus a goroutine + timer (bounded, leak-safe via effectWG + rootCtx).
-	// A probe-mode noop wrote nothing and has no id of its own: when its effect is
-	// sampled, the sample's fresh id goes on the decision span, as before #2665.
-	if id := l.scheduleEffectSample(dCtx, c, d, state.FitnessEvaluated, fitnessThresholds(snapshot.Fitness)); d.InterventionID == "" && id != "" {
-		dSpan.SetAttributes(attribute.String(AttrDecisionInterventionID, id))
-	}
+	l.scheduleEffectSample(dCtx, c, d, state.FitnessEvaluated, fitnessThresholds(snapshot.Fitness))
 }
 
 // applyAction applies d through sink and reports whether anything was written. A
