@@ -830,20 +830,25 @@ fitness → rollback); the game path had nothing. #918 closes the **measurement*
    `effect.window_seconds` flag since #1788; the compiled default while unresolved) a per-game sampler re-reads the **same** game's
    signals (through the same `ContextProvider` the #917 async path uses, so per-game
    isolation holds) and recomputes the **same** fitness functions with the
-   dispatch-time thresholds.
+   dispatch-time thresholds. When the game ends inside the window, the game-end hook
+   closes every open window of that game at once: the follow-up is read at game end
+   (#2668).
 3. It emits an **effect record** attributed to the intervention id:
 
    - **Span** `agent.intervention.effect`: one span per intervention (#2640), a
      direct child of the `agent.decision` that dispatched it and backdated to dispatch
      time (no wrapper span, so effect spans never nest; #1325).
      Attributes: `intervention.id`, `intervention.type`, `intervention.objective`,
-     `intervention.window_seconds`, `intervention.signals` (compact JSON of every
+     `intervention.window_seconds` (the window actually measured),
+     `intervention.window_end_reason` (`elapsed`, or `game_ended` when the game ended
+     inside the window and the follow-up was read at game end, #2668),
+     `intervention.signals` (compact JSON of every
      signal: baseline, followup, delta, or `aborted` for a signal gone at follow-up),
      the objective's primary signal as `intervention.signal`,
      `intervention.fitness_baseline`, `intervention.fitness_followup`,
      `intervention.fitness_delta`, and `intervention.effect_aborted=true` when the
-     follow-up could not be measured (game ended/evicted before the window, or no
-     signal left).
+     follow-up could not be measured (the game's partition was gone at follow-up, or
+     no signal left).
    - **Metric** `agent_intervention_effect_delta` (`Float64Histogram`, unit `1`): the
      `follow_up − baseline` change, labeled `intervention.type`,
      `intervention.objective`, `intervention.signal`. No point is recorded for an

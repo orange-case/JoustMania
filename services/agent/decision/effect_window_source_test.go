@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +15,15 @@ func TestEffect_WindowSourceReadPerIntervention(t *testing.T) {
 	const gameID = "game_window"
 	provider.set(gameID, durationContext(gameID, 90))
 	l, _, _, _ := effectLoop(t, provider, gameID)
+	// The stub scheduler never fires, so the three samples wait on the root: cancel
+	// it and join them, or they outlive the test and trip a later goleak check
+	// (go test -count=3).
+	ctx, cancel := context.WithCancel(context.Background())
+	l.SetRootContext(ctx)
+	t.Cleanup(func() {
+		cancel()
+		l.AwaitEffects()
+	})
 
 	var windows []time.Duration
 	l.afterFunc = func(d time.Duration, _ func()) func() bool {

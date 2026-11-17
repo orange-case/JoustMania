@@ -1245,8 +1245,12 @@ func (c *components) newStore(staleEnds otelmetric.Int64Counter) func(gameID str
 		// A stale end (UC-041 A4, #1494: the game's game_active series went silent,
 		// so its telemetry broke) is counted, kept out of experiments by
 		// expLoop.onGameEnd itself, and skipped by retro, summary and proposer.
-		s.OnGameEnd = buildGameEndChain(staleEnds, c.predictions.OnGameEnd,
-			experimentOnGameEnd, c.retro.OnGameEnd, c.summaries.OnGameEnd, c.proposeOnGameEnd, c.gameJournal.OnGameEnd)
+		// The game's open effect samples close first (#2668): the hook only signals
+		// their goroutines, which read the follow-up at game end instead of waiting
+		// out effect.window_seconds; a stale end closes them too (the game is over).
+		s.OnGameEnd = chainGameEnd(c.loops.EffectsOnGameEnd(gameID),
+			buildGameEndChain(staleEnds, c.predictions.OnGameEnd,
+				experimentOnGameEnd, c.retro.OnGameEnd, c.summaries.OnGameEnd, c.proposeOnGameEnd, c.gameJournal.OnGameEnd))
 		return s
 	}
 }
