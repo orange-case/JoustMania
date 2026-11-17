@@ -80,6 +80,11 @@ type Store struct {
 	// event is the fallback. game_player_deaths_total is an aggregate
 	// {mode,game_kind} counter with no serial, so it is not an elimination source.
 	elimOrder map[string]int
+	// moments holds the ids of the moments this partition applied, so a moment
+	// sent as a span event and a log event (shape both) counts once (UC-041
+	// BR-009). At most momentIDsCap ids; never reset, it dies with the partition.
+	// Guarded by mu.
+	moments boundedIDs
 	// disconnected marks serials whose connection dropped, for eviction.
 	disconnected map[string]bool
 	// retained holds the whole-game aggregates of the players evicted for silence
@@ -185,6 +190,7 @@ func NewStore(playerTTL, sessionGrace time.Duration, now func() time.Time) *Stor
 		history:       newTimeline(),
 		playerHistory: make(map[string]*playerHistory),
 		elimOrder:     make(map[string]int),
+		moments:       boundedIDs{cap: momentIDsCap},
 		disconnected:  make(map[string]bool),
 		retained:      make(map[string]retainedPlayer),
 		playerTTL:     playerTTL,
@@ -1113,6 +1119,27 @@ func (s *Store) RecordElimination(serial string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.appendElimination(serial)
+}
+
+// momentIDsCap bounds Store.moments (UC-041 BR-009): far more moments than one
+// game produces within any late-delivery window, a few KiB per partition.
+const momentIDsCap = 1024
+
+// recordDeathMoment applies one player_death moment, from a span event or a log
+// event, under one lock. It returns false when a moment with this id was applied
+// before (UC-041 BR-009): the later record changes nothing. An empty id (a span
+// event from a coordinator before #2658 slice 3) always applies. A death adds the
+// player to the elimination sequence only when it eliminates (UC-041 BR-008).
+func (s *Store) recordDeathMoment(id, serial string, eliminates bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id != "" && !s.moments.add(id) {
+		return false
+	}
+	if eliminates {
+		s.appendElimination(serial)
+	}
+	return true
 }
 
 // isEliminatedLocked reports whether serial is in the elimination sequence.

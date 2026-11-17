@@ -117,15 +117,15 @@ func defaultPredictionDroppedCounter() otelmetric.Int64Counter {
 // rules engine returns ≥1 decision — this counter is incremented on EVERY eval
 // cycle, so metric arrival is observable even on idle cycles where no rule fires.
 // It closes the "are signals even arriving?" blind spot WITHOUT a span per idle
-// cycle. Labels are deliberately tiny — signal=metrics|traces and outcome=
-// decided|idle (4 series max). NO per-game/per-serial labels: this is a liveness
+// cycle. Labels are deliberately tiny — signal=metrics|traces|logs and outcome=
+// decided|idle (6 series max). NO per-game/per-serial labels: this is a liveness
 // pulse, not per-game attribution (that lives on the trace). An instrument-creation
 // error yields a no-op counter so the Loop always has a usable instrument and tests
 // that never wire a real meter provider still work — mirrors newLLMGatedCounter.
 func newEvaluationsCounter(mp otelmetric.MeterProvider) otelmetric.Int64Counter {
 	c, err := mp.Meter(decisionMeterName).Int64Counter(
 		"agent_evaluations_total",
-		otelmetric.WithDescription("Total agent evaluation cycles, labeled by signal (metrics|traces) and outcome (decided|idle); incremented on every cycle including idle ones so signal arrival is observable (#1053)"),
+		otelmetric.WithDescription("Total agent evaluation cycles, labeled by signal (metrics|traces|logs) and outcome (decided|idle); incremented on every cycle including idle ones so signal arrival is observable (#1053)"),
 	)
 	if err != nil {
 		c, _ = metricnoop.NewMeterProvider().Meter(decisionMeterName).Int64Counter("agent_evaluations_total")

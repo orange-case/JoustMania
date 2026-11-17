@@ -172,10 +172,10 @@ func (s *Store) applySpan(span ptrace.Span) bool {
 	for e := 0; e < events.Len(); e++ {
 		ev := events.At(e)
 		if ev.Name() == spanEventDeath && serial != "" {
-			if deathEliminates(ev.Attributes()) {
-				s.RecordElimination(serial)
+			// One read per moment id, shared with the moment log events (UC-041 BR-009).
+			if s.recordDeathMoment(momentIDOf(ev.Attributes()), serial, deathEliminates(ev.Attributes())) {
+				updated = true
 			}
-			updated = true
 		}
 	}
 

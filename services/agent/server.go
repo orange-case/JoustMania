@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 	"google.golang.org/grpc"
@@ -105,7 +106,8 @@ func (c *serverComponents) effectiveEvictInterval() time.Duration {
 // run is the agent's server orchestration loop, extracted from main() so the
 // start -> cancel -> drain path is testable (#923). It:
 //
-//  1. registers the OTLP trace + metrics receivers on a fresh gRPC server,
+//  1. registers the OTLP trace, metrics and logs receivers on a fresh gRPC server
+//     (logs: moment log events only, UC-041 A7),
 //  2. starts the health HTTP server,
 //  3. runs the eviction ticker loop (evict stale partitions + drop their loops),
 //  4. optionally fires the shadow game on the background group,
@@ -122,6 +124,7 @@ func (c *serverComponents) run(ctx context.Context) error {
 	grpcServer := grpc.NewServer()
 	ptraceotlp.RegisterGRPCServer(grpcServer, &traceReceiver{pipe: c.pipe})
 	pmetricotlp.RegisterGRPCServer(grpcServer, &metricsReceiver{pipe: c.pipe})
+	plogotlp.RegisterGRPCServer(grpcServer, &logsReceiver{pipe: c.pipe})
 
 	lis, err := net.Listen("tcp", c.listenAddr)
 	if err != nil {

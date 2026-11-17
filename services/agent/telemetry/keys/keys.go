@@ -12,7 +12,7 @@ package keys
 //
 // The root span is signal-AGNOSTIC (#1053): a metric-triggered cycle and a
 // trace-triggered cycle both emit agent.signal_received, distinguished by the
-// otlp.signal (metrics|traces) + rpc.service attributes — NOT by the span name.
+// otlp.signal (metrics|traces|logs) + rpc.service attributes — NOT by the span name.
 // Metrics are the agent's PRIMARY (~100ms-1s) trigger; the old "span_received"
 // name implied trace-only activity and misled readers into thinking metrics
 // were not wired (they are — see receiver.go ApplyMetrics -> OnEvaluate).
