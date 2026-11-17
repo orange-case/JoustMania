@@ -240,8 +240,10 @@ func TestEffect_GameEndCloseWithRealTimerNoLeak(t *testing.T) {
 		l.Tracer = tp.Tracer("test")
 		l.SetGameID(gameID)
 		l.SetContextProvider(provider)
+		// The root stays live until after the leak check (Cleanup runs after the
+		// deferred VerifyNone): a timer waiter that only exits on shutdown is a leak.
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		t.Cleanup(cancel)
 		l.SetRootContext(ctx)
 
 		// Real 20 s timer (no afterFunc seam): the game end must close it now.
