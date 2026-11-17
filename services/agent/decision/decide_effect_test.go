@@ -122,15 +122,19 @@ type errSink struct{}
 func (errSink) Apply(context.Context, Decision) error { return errors.New("write failed") }
 
 // UC: UC-040 A11 A27
+// UC: UC-101 A2 BR-003
 func TestEffectSample_OnlyForWrittenDecisions(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		sink ActionSink
 		want int
+		// wantIDs: decisions carrying decision.intervention_id. A failed write keeps
+		// the id it sent (UC-101 A2, #2665) but gets no effect sample.
+		wantIDs int
 	}{
-		{"UC-040/A11 gated no-op gets no effect sample", &gatedSink{gateOn: false}, 0},
-		{"UC-040/A27 failed write gets no effect sample", errSink{}, 0},
-		{"UC-040/main written decision gets one effect sample", &gatedSink{gateOn: true}, 1},
+		{"UC-040/A11 gated no-op gets no effect sample", &gatedSink{gateOn: false}, 0, 0},
+		{"UC-040/A27 UC-101/A2 failed write gets no effect sample but keeps its id", errSink{}, 0, 1},
+		{"UC-040/main written decision gets one effect sample", &gatedSink{gateOn: true}, 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.9, "A", 0.5, "shield"))
@@ -147,8 +151,8 @@ func TestEffectSample_OnlyForWrittenDecisions(t *testing.T) {
 					ids++
 				}
 			}
-			if ids != tc.want {
-				t.Errorf("decisions with decision.intervention_id = %d, want %d", ids, tc.want)
+			if ids != tc.wantIDs {
+				t.Errorf("decisions with decision.intervention_id = %d, want %d", ids, tc.wantIDs)
 			}
 			sched.mu.Lock()
 			scheduled := len(sched.fns)

@@ -90,10 +90,17 @@ func (s *capturingSink) Apply(_ context.Context, d Decision) error {
 	return nil
 }
 
+// decisions returns the applied decisions without their intervention id: the id
+// is fresh for every write (UC-101 BR-003, #2665), sink addressing like GameID,
+// not part of what was decided. intervention_id_uc101_test.go checks the id.
 func (s *capturingSink) decisions() []Decision {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]Decision(nil), s.got...)
+	out := append([]Decision(nil), s.got...)
+	for i := range out {
+		out[i].InterventionID = ""
+	}
+	return out
 }
 
 func decideRecordingLoop(t *testing.T, snap flags.Snapshot) (*Loop, *tracetest.SpanRecorder) {

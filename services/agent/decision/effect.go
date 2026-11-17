@@ -2,6 +2,8 @@ package decision
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"math"
 	"sort"
@@ -9,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -18,10 +19,18 @@ import (
 	"github.com/joustmania/agent/telemetry/keys"
 )
 
-// newInterventionID returns a fresh dispatch-unique id used to tie an intervention's
-// effect record to the decision that produced it (#918). A UUID v4 hex string —
-// opaque, collision-resistant across agent restarts, never compared for ordering.
-func newInterventionID() string { return uuid.NewString() }
+// newInterventionID returns a fresh dispatch-unique id: the intervention id a decision
+// is written with (UC-101 BR-003, #2665), which ties its effect record (#918) and the
+// game's intervention moment to the decision that produced it. 16 hex characters
+// (64 random bits): opaque, never compared for ordering, unique enough across agent
+// restarts for the decisions of a booth day, and exactly the length the flag service
+// serves with a value (MaxDecisionIDLength, NFR-051: a longer id would be dropped).
+// crypto/rand.Read never returns an error (Go 1.24+).
+func newInterventionID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
 
 // effect.go closes the game-path intervention-effect MEASUREMENT loop (#918). The
 // agent attributes a decision's reasoning OUTBOUND (objectives / LayerState onto the
@@ -153,10 +162,13 @@ func (l *Loop) AwaitEffects() { l.effectWG.Wait() }
 // scheduleEffectSample stamps the baseline fitness signals for a just-DISPATCHED
 // intervention and schedules a follow-up sample after the window (#918). It is called
 // from runDecision on the applied-decision path ONLY (blocked decisions never moved the
-// game, so there is nothing to measure). It returns the dispatch-unique intervention id
-// so the decision span can carry it (joining decision->effect in Jaeger), or "" when no
+// game, so there is nothing to measure). The sample's `intervention.id` is the
+// decision's own InterventionID, made before the write and already on the decision
+// span (UC-101 BR-003, #2665); only a direct caller that passes a decision without
+// one gets a fresh id here (a probe-mode noop has none and is never sampled). It returns the id used, or "" when no
 // sample was scheduled (effect measurement not wired, no baseline signals, or the
-// pending cap reached) — the caller treats "" as "no effect id to stamp".
+// pending cap reached); the loop ignores it, as the decision span already carries the
+// decision's id.
 //
 // It NEVER blocks the hot decision path: the baseline is a cheap map copy and the
 // follow-up runs in its own goroutine. Without a context provider (the re-validation
@@ -165,6 +177,12 @@ func (l *Loop) AwaitEffects() { l.effectWG.Wait() }
 func (l *Loop) scheduleEffectSample(decisionCtx context.Context, c gamecontext.GameContext, d Decision, baselineVals map[string]float64, thresholds FitnessThresholds) string {
 	// No re-validation source => cannot read the future context => nothing to measure.
 	if l.ctxProvider == nil {
+		return ""
+	}
+	if d.Intervention == InterventionNoop {
+		// A probe-mode noop wrote nothing and has no intervention id (UC-101 BR-003,
+		// #2665): there is no game effect to measure, also on the async remote
+		// landing whose rules fallback can be the Probe engine.
 		return ""
 	}
 	if len(baselineVals) == 0 {
@@ -177,7 +195,13 @@ func (l *Loop) scheduleEffectSample(decisionCtx context.Context, c gamecontext.G
 	// Bound the in-flight set so a burst of dispatches cannot launch unbounded
 	// goroutines/timers. Over the cap we skip scheduling (the dispatch itself still
 	// happens; only the measurement is dropped, best-effort by design).
-	id := newInterventionID()
+	// Reuse the id the decision was written with (UC-101 BR-003, #2665): the effect's
+	// intervention.id is the decision's decision.intervention_id and the write's
+	// decision_id. A decision without one (a direct caller) gets a fresh id.
+	id := d.InterventionID
+	if id == "" {
+		id = newInterventionID()
+	}
 	gameEnded := make(chan struct{})
 	l.pendingMu.Lock()
 	if l.pending >= maxPendingEffects {
