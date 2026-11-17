@@ -88,6 +88,15 @@ func (f *flagState) render(epoch string) (*renderedFlag, error) {
 	addGenerated(f.admin)
 	addGenerated(f.real)
 	addGenerated(f.fraction)
+	// A game or per-player value serves its write's decision_id as metadata
+	// keyed by its own generated variant, so the id belongs to whichever
+	// value resolved, and it goes with the value (flags.md §5, UC-101 BR-003,
+	// #2665). Overlays carry none.
+	addDecisionID := func(v *value) {
+		if v.DecisionID != "" {
+			out.Metadata[MetaDecisionIDPrefix+v.Variant] = v.DecisionID
+		}
+	}
 
 	var rungs []any
 	for _, gameID := range sortedKeys(f.serials) {
@@ -95,6 +104,7 @@ func (f *flagState) render(epoch string) (*renderedFlag, error) {
 		for _, serial := range sortedKeys(bySerial) {
 			v := bySerial[serial]
 			addGenerated(v)
+			addDecisionID(v)
 			cond := map[string]any{"and": []any{eq(ctxGameID, gameID), eq(ctxTargetingKey, serial)}}
 			rungs = append(rungs, cond, v.Variant)
 		}
@@ -109,6 +119,7 @@ func (f *flagState) render(epoch string) (*renderedFlag, error) {
 	for _, gameID := range sortedKeys(gameIDs) {
 		if v := f.games[gameID]; v != nil {
 			addGenerated(v)
+			addDecisionID(v)
 			rungs = append(rungs, eq(ctxGameID, gameID), v.Variant)
 		}
 		if l := f.events[gameID]; l != nil {
@@ -197,6 +208,9 @@ func sortedKeys[V any](m map[string]V) []string {
 const (
 	MetaSnapshotEpoch   = "snapshotEpoch"
 	MetaSnapshotVersion = "snapshotVersion"
+	// MetaDecisionIDPrefix + <variant> holds the decision_id of the game or
+	// per-player value rendered as that variant (#2665).
+	MetaDecisionIDPrefix = "decisionId."
 )
 
 // snapshotStamped reports whether a flag carries the snapshot stamp: every

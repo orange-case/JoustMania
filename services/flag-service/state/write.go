@@ -487,7 +487,7 @@ func (s *State) Append(req AppendRequest) (WriteResult, *fserr.Error) {
 		f.events[req.Scope.GameID] = list
 	}
 	list.Seq++
-	list.Events = append(list.Events, event{Seq: list.Seq, Payload: payload})
+	list.Events = append(list.Events, event{Seq: list.Seq, Payload: payload, DecisionID: req.DecisionID})
 	if k := s.opts.EventListLen; len(list.Events) > k {
 		list.Events = append([]event(nil), list.Events[len(list.Events)-k:]...)
 	}

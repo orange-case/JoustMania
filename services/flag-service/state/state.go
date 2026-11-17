@@ -107,6 +107,9 @@ func (v *value) generated() bool { return v.Value != nil }
 type event struct {
 	Seq     int64          `json:"seq"`
 	Payload map[string]any `json:"payload"`
+	// DecisionID is the write's decision_id, served with the entry and left
+	// out when the write had none (flags.md §5, UC-101 BR-003, #2665).
+	DecisionID string `json:"decision_id,omitempty"`
 }
 
 type eventList struct {
