@@ -102,6 +102,26 @@ func (ls *LoopSet) Retain(active map[string]struct{}) {
 	}
 }
 
+// EffectsOnGameEnd returns the game-end hook for gameID's partition (#2668): when
+// that game ends, every in-flight effect sample of its Loop is read at once
+// (Loop.CloseEffectsAtGameEnd) instead of waiting out the follow-up window. It looks
+// the Loop up without creating one: a game the agent never evaluated has no samples.
+// It only signals the samples' goroutines, so it never blocks the game-end chain.
+// A nil LoopSet yields a nil hook (chainGameEnd skips it).
+func (ls *LoopSet) EffectsOnGameEnd(gameID string) func(gamecontext.GameContext) {
+	if ls == nil {
+		return nil
+	}
+	return func(gamecontext.GameContext) {
+		ls.mu.Lock()
+		l := ls.loops[gameID]
+		ls.mu.Unlock()
+		if l != nil {
+			l.CloseEffectsAtGameEnd()
+		}
+	}
+}
+
 // Len reports the number of live Loops (including the fallback loop when
 // present). Used by tests and for observability.
 func (ls *LoopSet) Len() int {

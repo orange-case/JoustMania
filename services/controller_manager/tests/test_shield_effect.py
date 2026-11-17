@@ -186,8 +186,8 @@ class TestUC040ShieldEffect:
             (controller_manager_pb2.GAME_EFFECT_TOUGHNESS_BOOST, "toughness_boost"),
         ],
     )
-    async def test_render_span_and_blink_event_carry_the_shield_kind(self, manager, monkeypatch, effect, kind):
-        """UC-040 A16: shield.kind on the render span and its shield_blink event is full or toughness_boost."""
+    async def test_layer_span_and_blink_event_carry_the_shield_kind(self, manager, monkeypatch, effect, kind):
+        """UC-040 A16: shield.kind on the layer's span and its shield_blink event is full or toughness_boost."""
         spans = []
 
         class _Span:
@@ -201,12 +201,14 @@ class TestUC040ShieldEffect:
             def add_event(self, name, attrs=None):
                 self.events.append((name, dict(attrs or {})))
 
+            def end(self):
+                pass
+
         class _Tracer:
-            @contextlib.contextmanager
-            def start_as_current_span(self, name, context=None, kind=None):
+            def start_span(self, name, context=None, kind=None):
                 span = _Span()
                 spans.append((name, span))
-                yield span
+                return span
 
         monkeypatch.setattr("services.controller_manager.shield_effects.tracer", _Tracer())
         task = await _shield(manager, effect=effect, duration_ms=3000)

@@ -44,7 +44,10 @@ func newInterventionID() string {
 //     decision span carries as fitness.evaluated — tagged with a dispatch-unique
 //     intervention id.
 //  2. After a follow-up window (DefaultEffectWindow, env-tunable) the sampler reads the
-//     SAME signals for the SAME game again and computes the per-objective DELTA.
+//     SAME signals for the SAME game again and computes the per-objective DELTA. When
+//     the game ends inside the window, the game-end hook (LoopSet.EffectsOnGameEnd)
+//     closes every open window at once: the follow-up is read at game end and the
+//     record carries the shortened window and window_end_reason=game_ended (#2668).
 //  3. It emits an effect record attributed to the intervention id: an
 //     agent.intervention.effect span (one per intervention, #2640) AND an
 //     agent_intervention_effect_delta metric, both carrying baseline/follow-up/delta +
@@ -52,11 +55,12 @@ func newInterventionID() string {
 //
 // LEAK-FREENESS / LIFECYCLE SAFETY (#923 goleak): every scheduled follow-up runs in a
 // goroutine tracked on effectWG and bounded by rootCtx. The goroutine selects on the
-// follow-up timer AND rootCtx.Done(); on shutdown (rootCtx cancelled) or when the
-// game's partition is gone at follow-up time it emits a clearly-marked ABORTED record
-// (or, on shutdown, simply returns) — it never blocks shutdown and never leaks a timer
-// (the timer is always stopped). AwaitInflight joins effectWG alongside the #917
-// inference goroutines.
+// follow-up timer, the game end (#2668) AND rootCtx.Done(): on shutdown (rootCtx
+// cancelled) it returns without emitting; on a game end it reads the follow-up at once
+// (window_end_reason=game_ended). The record is marked ABORTED only when the game's
+// partition is gone at follow-up time or no signal is left. It never blocks shutdown
+// and never leaks a timer (the timer is stopped on shutdown and on a game end).
+// AwaitInflight joins effectWG alongside the #917 inference goroutines.
 //
 // PER-GAME ISOLATION (#845): the sampler re-reads the game's CURRENT signals through
 // the SAME ContextProvider (MuxContextProvider) the #917 async path uses, keyed by THIS
@@ -101,6 +105,12 @@ type effectSampler struct {
 	// maxPendingEffects). A scheduled sample increments it; the goroutine decrements it
 	// when it completes. Never goes negative.
 	pending int
+	// gameEnd holds, per in-flight sample id, the channel CloseEffectsAtGameEnd closes
+	// to read that sample at once (#2668). Guarded by pendingMu. An entry is removed
+	// either by CloseEffectsAtGameEnd (which then closes it, exactly once) or by the
+	// sample's goroutine when it completes (never closed then), so no channel is
+	// closed twice.
+	gameEnd map[string]chan struct{}
 	// effectDelta records agent_intervention_effect_delta. Never nil (NewLoop seeds a
 	// no-op), so the record path is always safe.
 	effectDelta otelmetric.Float64Histogram
@@ -155,8 +165,7 @@ func (l *Loop) AwaitEffects() { l.effectWG.Wait() }
 // game, so there is nothing to measure). The sample's `intervention.id` is the
 // decision's own InterventionID, made before the write and already on the decision
 // span (UC-101 BR-003, #2665); only a direct caller that passes a decision without
-// one gets a fresh id here (a probe-mode noop has none, but the Probe engine has no
-// fitness baseline, so it is never sampled). It returns the id used, or "" when no
+// one gets a fresh id here (a probe-mode noop has none and is never sampled). It returns the id used, or "" when no
 // sample was scheduled (effect measurement not wired, no baseline signals, or the
 // pending cap reached); the loop ignores it, as the decision span already carries the
 // decision's id.
@@ -170,6 +179,12 @@ func (l *Loop) scheduleEffectSample(decisionCtx context.Context, c gamecontext.G
 	if l.ctxProvider == nil {
 		return ""
 	}
+	if d.Intervention == InterventionNoop {
+		// A probe-mode noop wrote nothing and has no intervention id (UC-101 BR-003,
+		// #2665): there is no game effect to measure, also on the async remote
+		// landing whose rules fallback can be the Probe engine.
+		return ""
+	}
 	if len(baselineVals) == 0 {
 		// The cycle evaluated no fitness signals (e.g. the engine had no signals, or a
 		// Probe/Noop engine): there is no baseline to compare against, so skip — emitting
@@ -180,24 +195,29 @@ func (l *Loop) scheduleEffectSample(decisionCtx context.Context, c gamecontext.G
 	// Bound the in-flight set so a burst of dispatches cannot launch unbounded
 	// goroutines/timers. Over the cap we skip scheduling (the dispatch itself still
 	// happens; only the measurement is dropped, best-effort by design).
-	l.pendingMu.Lock()
-	if l.pending >= maxPendingEffects {
-		l.pendingMu.Unlock()
-		return ""
-	}
-	l.pending++
-	l.pendingMu.Unlock()
-
-	now := l.now
-	if now == nil {
-		now = time.Now
-	}
 	// Reuse the id the decision was written with (UC-101 BR-003, #2665): the effect's
 	// intervention.id is the decision's decision.intervention_id and the write's
 	// decision_id. A decision without one (a direct caller) gets a fresh id.
 	id := d.InterventionID
 	if id == "" {
 		id = newInterventionID()
+	}
+	gameEnded := make(chan struct{})
+	l.pendingMu.Lock()
+	if l.pending >= maxPendingEffects {
+		l.pendingMu.Unlock()
+		return ""
+	}
+	l.pending++
+	if l.gameEnd == nil {
+		l.gameEnd = make(map[string]chan struct{})
+	}
+	l.gameEnd[id] = gameEnded
+	l.pendingMu.Unlock()
+
+	now := l.now
+	if now == nil {
+		now = time.Now
 	}
 	dispatchedAt := now()
 	objective := d.ObjectiveServed
@@ -249,30 +269,105 @@ func (l *Loop) scheduleEffectSample(decisionCtx context.Context, c gamecontext.G
 	}
 	stop := after(window, func() { close(fired) })
 
+	// The game may already have ended (#2668 review): a decision validated while the
+	// game was active can be scheduled after the game-end hook ran and found no open
+	// sample. The partition's store sets game_active false BEFORE it fires the hook,
+	// so either this read sees the game ended or the later hook sees this sample's
+	// channel. An unknown game_active (nil, e.g. a fallback loop with no signal yet)
+	// is not an end.
+	if cur, ok := l.ctxProvider.Current(l.gameID); ok && gameEndedIn(cur) {
+		l.pendingMu.Lock()
+		if ch, open := l.gameEnd[id]; open {
+			delete(l.gameEnd, id)
+			close(ch)
+		}
+		l.pendingMu.Unlock()
+	}
+
+	// One goroutine, one select: whichever of the timer, the game end or shutdown
+	// wins, the sample is emitted at most once (#2668). A timer and a game end that
+	// race are both ready; select picks one and the other is ignored.
 	go func() {
 		defer l.effectWG.Done()
-		defer l.releasePending()
+		defer l.releasePending(id)
 		select {
 		case <-root.Done():
-			// Shutdown / loop dropped before the window elapsed. Stop the timer (no leak)
-			// and emit nothing: a measurement we never took is not a result. The decision
-			// itself was already audited on its own trace.
+			// Shutdown before the window elapsed. Stop the timer (no leak) and emit
+			// nothing: a measurement we never took is not a result. The decision itself
+			// was already audited on its own trace.
 			stop()
 			return
 		case <-fired:
 			l.emitEffectSample(root, sample)
+		case <-gameEnded:
+			// The game ended inside the window (#2668): read the follow-up now, over
+			// the window that actually elapsed, so the span ends with the game instead
+			// of reading frozen post-game signals up to window seconds later.
+			stop()
+			if root.Err() != nil {
+				return // shutdown wins over a game end that raced it
+			}
+			l.emitEffectSample(root, sample.closedEarly(now()))
 		}
 	}()
 	return id
 }
 
-// releasePending decrements the in-flight pending counter, floored at zero.
-func (l *Loop) releasePending() {
+// CloseEffectsAtGameEnd reads every in-flight effect sample of this loop's game at
+// once (#2668): the loop's game ended, so the window of each open sample closes now
+// (intervention.window_end_reason=game_ended, intervention.window_seconds = the time
+// since dispatch). It only signals the samples' goroutines, so it never blocks and
+// never reads the game context itself: it is safe to call from the game-end hook
+// chain. Samples scheduled after the call are not affected. It returns how many
+// samples it closed. Idempotent: a second call closes nothing.
+func (l *Loop) CloseEffectsAtGameEnd() int {
+	l.pendingMu.Lock()
+	open := l.gameEnd
+	l.gameEnd = nil
+	l.pendingMu.Unlock()
+	for _, ch := range open {
+		close(ch)
+	}
+	return len(open)
+}
+
+// gameEndedIn reports whether c says its game has ended: game_active observed and
+// false. Unknown (nil) is not an end.
+func gameEndedIn(c gamecontext.GameContext) bool {
+	return c.Session.GameActive != nil && !*c.Session.GameActive
+}
+
+// releasePending decrements the in-flight pending counter, floored at zero, and
+// forgets the sample's game-end channel (without closing it).
+func (l *Loop) releasePending(id string) {
 	l.pendingMu.Lock()
 	if l.pending > 0 {
 		l.pending--
 	}
+	delete(l.gameEnd, id)
 	l.pendingMu.Unlock()
+}
+
+// Window end reasons for intervention.window_end_reason (#2668).
+const (
+	// EffectWindowElapsed: the follow-up window ran out.
+	EffectWindowElapsed = "elapsed"
+	// EffectWindowGameEnded: the game ended inside the window and closed it early.
+	EffectWindowGameEnded = "game_ended"
+)
+
+// closedEarly returns the sample as read at game end, at time at: the window is the
+// time since dispatch, clamped to [0, configured window].
+func (s pendingEffect) closedEarly(at time.Time) pendingEffect {
+	elapsed := at.Sub(s.dispatchedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if elapsed < s.window {
+		s.window = elapsed
+	}
+	s.endReason = EffectWindowGameEnded
+	return s
 }
 
 // pendingEffect is one scheduled follow-up sample's captured state (#918): the baseline
@@ -285,7 +380,12 @@ type pendingEffect struct {
 	baseline     map[string]float64
 	thresholds   FitnessThresholds
 	dispatchedAt time.Time
-	window       time.Duration
+	// window is the window the follow-up measures: the configured window, or the time
+	// since dispatch when the game ended inside it (closedEarly, #2668).
+	window time.Duration
+	// endReason is EffectWindowGameEnded when the game's end closed the window early;
+	// empty means EffectWindowElapsed.
+	endReason string
 	// gameTraceID/gameTraceSpanID are the game-session trace ids captured at schedule
 	// time (#1133), stamped as searchable attributes on the effect span. Empty => no attr.
 	gameTraceID     string
@@ -336,6 +436,7 @@ func (l *Loop) emitEffectSample(ctx context.Context, s pendingEffect) {
 		attribute.String(AttrEffectIntervention, s.intervention),
 		attribute.String(AttrEffectObjective, s.objective),
 		attribute.Float64(AttrEffectWindowSeconds, s.window.Seconds()),
+		attribute.String(AttrEffectWindowEndReason, s.windowEndReason()),
 	}
 	if s.gameTraceID != "" {
 		attrs = append(attrs, attribute.String(AttrGameTraceID, s.gameTraceID))
@@ -379,6 +480,14 @@ func (l *Loop) emitEffectSample(ctx context.Context, s pendingEffect) {
 			attribute.String(AttrEffectSignal, key),
 		))
 	}
+}
+
+// windowEndReason is the intervention.window_end_reason value (#2668).
+func (s pendingEffect) windowEndReason() string {
+	if s.endReason == "" {
+		return EffectWindowElapsed
+	}
+	return s.endReason
 }
 
 // primaryEffectSignal is the signal each objective's fitness binds on (fitness.go):
@@ -487,23 +596,19 @@ func sortedKeys(m map[string]float64) []string {
 	return out
 }
 
-// realAfterFunc is the production follow-up scheduler: a time.Timer whose firing is
-// suppressed (and stopped) if root is cancelled first. The returned stop function stops
-// the timer (idempotent), so a shutdown-cancelled sample never leaves a timer running.
-// It is the default when no afterFunc test seam is injected.
+// realAfterFunc is the production follow-up scheduler: a time.AfterFunc timer whose
+// firing is suppressed if root is cancelled first. It starts no goroutine of its own
+// (#2668: the old waiter goroutine outlived a stopped timer until shutdown, which a
+// game-end close would have made routine). The returned stop function stops the timer
+// (idempotent); the sampler calls it on shutdown and on a game-end close, so neither
+// leaves a timer running. It is the default when no afterFunc test seam is injected.
 func realAfterFunc(root context.Context) func(d time.Duration, fn func()) func() bool {
 	return func(d time.Duration, fn func()) func() bool {
-		timer := time.NewTimer(d)
-		go func() {
-			select {
-			case <-timer.C:
+		timer := time.AfterFunc(d, func() {
+			if root.Err() == nil {
 				fn()
-			case <-root.Done():
-				// Cancelled before firing: stop the timer and do NOT call fn. The
-				// scheduling goroutine observes root.Done() on its own and returns.
-				timer.Stop()
 			}
-		}()
+		})
 		return timer.Stop
 	}
 }

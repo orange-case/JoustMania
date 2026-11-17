@@ -21,6 +21,7 @@ const (
 	AttrEffectObjective           = keys.AttrEffectObjective
 	AttrEffectSignal              = keys.AttrEffectSignal
 	AttrEffectWindowSeconds       = keys.AttrEffectWindowSeconds
+	AttrEffectWindowEndReason     = keys.AttrEffectWindowEndReason
 	AttrEnabled                   = keys.AttrEnabled
 	AttrExperimentArm             = keys.AttrExperimentArm
 	AttrExperimentArms            = keys.AttrExperimentArms

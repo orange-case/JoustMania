@@ -254,13 +254,19 @@ const (
 	AttrEffectBaseline = "intervention.fitness_baseline"
 	AttrEffectFollowUp = "intervention.fitness_followup"
 	AttrEffectDelta    = "intervention.fitness_delta"
-	// AttrEffectWindowSeconds is the follow-up window length in seconds, so a consumer
-	// knows over what interval the delta was measured.
+	// AttrEffectWindowSeconds is the window the delta was measured over, in seconds: the
+	// configured follow-up window, or the time since dispatch when the game ended inside
+	// it (#2668), so a consumer knows over what interval the delta was measured.
 	AttrEffectWindowSeconds = "intervention.window_seconds"
-	// AttrEffectAborted is true when the follow-up could NOT be measured because the
-	// game ended or was evicted before the window elapsed (#918 cancellation path): the
-	// record is emitted clearly marked, follow_up/delta are absent, and no metric is
-	// recorded for that objective.
+	// AttrEffectWindowEndReason says why the follow-up window closed (#2668): "elapsed"
+	// (the window ran out) or "game_ended" (the game ended inside it and the follow-up
+	// was read at game end).
+	AttrEffectWindowEndReason = "intervention.window_end_reason"
+	// AttrEffectAborted is true when the follow-up could NOT be measured: the game's
+	// partition was gone at follow-up time, or no signal was left (#918). A game end
+	// inside the window is not an abort: the follow-up is read at game end (#2668,
+	// AttrEffectWindowEndReason). An aborted record has no follow_up/delta and records
+	// no metric.
 	AttrEffectAborted = "intervention.effect_aborted"
 )
 

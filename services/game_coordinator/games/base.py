@@ -91,6 +91,7 @@ from services.game_coordinator.games.flag_snapshot import (  # noqa: F401  re-ex
     resolve_shield_activation,
     resolve_shield_limit,
 )
+from services.game_coordinator.games.ground_truth import GroundTruth
 from services.game_coordinator.runtime_config import GamePerformanceConfig, get_config_manager
 from services.game_coordinator.stream_writes import serialized_write
 
@@ -756,6 +757,8 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         self.game_error_published = False
         # The game root span (current when run() starts); the outcome lands on it.
         self._game_root_span: trace.Span | None = None
+        # Warning and death times per serial, recorded on the root at a normal end (UC-100 BR-006).
+        self._ground_truth = GroundTruth()
         self.gameplay_stream = None  # Phase 46: Bidirectional stream for feedback commands
         # Deaths whose PLAYER_DEATH write failed on a dying call: the next stream sends it (UC-030 BR-006, #2471).
         self._undelivered_deaths: set[str] = set()
@@ -2532,6 +2535,9 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # This is NOT protection - player can still die during this time!
         player.warning_until = game_clock.now() + WARNING_DURATION
 
+        # UC-100 BR-006: the warning's time, whatever analytics.enabled says.
+        self._ground_truth.record_warning(serial)
+
         # Analytics: Record warning event
         if player.analytics is not None:
             player.analytics.record_warning()
@@ -3199,6 +3205,8 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # UC-030 step 9: one increment per death (respawn modes count each death).
         # Aggregate {mode, game_kind} only; per-player order is the gauge above.
         metrics.player_deaths_total.labels(mode=self.get_game_name(), game_kind=self.game_kind).inc()
+        # UC-100 BR-006: the death's time, next to its player_death record.
+        self._ground_truth.record_death(serial)
 
         # Extract trace context BEFORE _kill_player_impl() which may close the span.
         # This ensures the death effect and sound are parented to the player_lifecycle
@@ -3373,6 +3381,22 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         if teardown_span is not None:
             teardown_span.add_event("game.outcome", attributes=attrs)
 
+    def _record_ground_truth(self) -> None:
+        """One ``challenge.ground_truth`` event per player on the game root (UC-100 step 6, BR-006).
+
+        Only at a normal end: none for a force-ended game (checked here) or a run that failed (the
+        only caller sits after the teardown in run()'s try, so a run that raised never gets here)
+        (UC-100 A5). Telemetry never turns a finished game into a game error: a failure to record
+        is logged and swallowed.
+        """
+        if self._game_outcome_attributes()["game.outcome"] == "force_ended":
+            return
+        try:
+            names = {serial: player.name or "" for serial, player in self.players.items()}
+            self._ground_truth.record_on(self._game_root_span, names)
+        except Exception:
+            logger.exception("Recording the ground truth failed; the game ends normally (UC-100 BR-006)")
+
     def _record_force_ended_outcome_if_unrecorded(self) -> None:
         """For run() overrides: a game force-ended before its teardown still records force_ended."""
         if self.force_ended:
@@ -3524,7 +3548,9 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 try:
                     from proto import audio_pb2
 
-                    await self.audio_client.SetVolume(audio_pb2.SetVolumeRequest(volume=self.game_volume))
+                    # game_cycle is open here: parent the RPC span to it like every in-game audio call (#2671)
+                    with self._game_cycle_attached():
+                        await self.audio_client.SetVolume(audio_pb2.SetVolumeRequest(volume=self.game_volume))
                 except Exception as e:
                     logger.warning(f"Failed to set game volume: {e}")
 
@@ -3685,6 +3711,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                         progress.shield_feedback_ended = True
                         self._record_game_outcome(teardown_span)
                         self._teardown_after_outcome()
+                        self._record_ground_truth()
                     if game_span is not None:
                         game_span.set_status(Status(StatusCode.OK))
             except Exception as e:
@@ -4001,6 +4028,22 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             self._game_cycle_span.end()
             self._game_cycle_span = None
             self.game_cycle_context = None
+
+    @contextlib.contextmanager
+    def _game_cycle_attached(self):
+        """Make ``game_cycle`` the current span context for the block (no-op while it is not open).
+
+        For an in-game audio RPC made outside ``_play_sound`` and the music loop, so its client span is
+        a child of ``game_cycle`` and not of the phase span that happens to be current (#2671).
+        """
+        if self.game_cycle_context is None:
+            yield
+            return
+        token = otel_context.attach(self.game_cycle_context)
+        try:
+            yield
+        finally:
+            otel_context.detach(token)
 
     async def _play_sound(
         self,

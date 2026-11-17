@@ -236,3 +236,18 @@ func TestInterventionID_IsSixteenHexCharacters(t *testing.T) {
 		}
 	})
 }
+
+// UC: UC-101 BR-003
+func TestInterventionID_ProbeNoopIsNeverSampled(t *testing.T) {
+	t.Run("UC-101/BR-003 a noop with a baseline (async rules fallback) schedules no sample", func(t *testing.T) {
+		provider := newFakeContextProvider()
+		const gameID = "game_2665_noop"
+		provider.set(gameID, durationContext(gameID, 60))
+		l, _, _, _ := effectLoop(t, provider, gameID)
+		noop := shieldDecision()
+		noop.Intervention = InterventionNoop
+		if id := l.schedule(noop, enduranceBaseline(), FitnessThresholds{}); id != "" {
+			t.Fatalf("noop scheduled an effect sample with id %q, want none", id)
+		}
+	})
+}
