@@ -229,12 +229,12 @@ FLAGSMITH_METRICS = {
 def _flagsmith_instrument_labels() -> dict[str, set[str]]:
     """Metric name -> the label names telemetry.go records on it."""
     src = FLAGSMITH_TELEMETRY.read_text()
-    names = dict(
-        (var, name)
+    names = {
+        var: name
         for var, name in re.findall(
             r"(?:m\.)?(\w+)(?:, err)?\s*:?=\s*meter\.\w+\(\s*\"([^\"]+)\"", src
         )
-    )
+    }
     labels: dict[str, set[str]] = {name: set() for name in names.values()}
     for field, gauge, rest in re.findall(
         r"(?:m\.(\w+)\.(?:Add|Record)\(|o\.ObserveInt64\((\w+),)([^\n]*)", src
@@ -331,19 +331,19 @@ def test_step6_every_latency_panel_reads_a_histogram():
 @pytest.mark.uc("UC-054", cond=["Post-S-3"])
 def test_flagsmith_link_state_stat_is_an_instant_query():
     """The link-state stat shows only the current state: a range query would keep every state that was 1 in the range."""
+
+    def walk(panels, found):
+        for p in panels:
+            if p.get("title") == "Flagsmith link state":
+                found.append(p)
+            walk(p.get("panels", []), found)
+
     for path in (DASHBOARDS / "platform").glob("*.json"):
         dash = json.loads(path.read_text())
         if dash["uid"] != "feature-flags":
             continue
         found = []
-
-        def walk(panels):
-            for p in panels:
-                if p.get("title") == "Flagsmith link state":
-                    found.append(p)
-                walk(p.get("panels", []))
-
-        walk(dash["panels"])
+        walk(dash["panels"], found)
         assert len(found) == 1, "expected one 'Flagsmith link state' panel"
         assert found[0]["targets"] and all(t.get("instant") is True for t in found[0]["targets"])
         return
