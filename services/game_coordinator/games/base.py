@@ -3548,7 +3548,9 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 try:
                     from proto import audio_pb2
 
-                    await self.audio_client.SetVolume(audio_pb2.SetVolumeRequest(volume=self.game_volume))
+                    # game_cycle is open here: parent the RPC span to it like every in-game audio call (#2671)
+                    with self._game_cycle_attached():
+                        await self.audio_client.SetVolume(audio_pb2.SetVolumeRequest(volume=self.game_volume))
                 except Exception as e:
                     logger.warning(f"Failed to set game volume: {e}")
 
@@ -4026,6 +4028,22 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             self._game_cycle_span.end()
             self._game_cycle_span = None
             self.game_cycle_context = None
+
+    @contextlib.contextmanager
+    def _game_cycle_attached(self):
+        """Make ``game_cycle`` the current span context for the block (no-op while it is not open).
+
+        For an in-game audio RPC made outside ``_play_sound`` and the music loop, so its client span is
+        a child of ``game_cycle`` and not of the phase span that happens to be current (#2671).
+        """
+        if self.game_cycle_context is None:
+            yield
+            return
+        token = otel_context.attach(self.game_cycle_context)
+        try:
+            yield
+        finally:
+            otel_context.detach(token)
 
     async def _play_sound(
         self,

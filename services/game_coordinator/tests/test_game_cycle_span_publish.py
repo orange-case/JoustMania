@@ -223,3 +223,31 @@ def test_retire_removes_the_series_carrying_game_cycle():
         session.clear_metrics()
 
     assert gauge.series == {}
+
+
+class _SpanEmittingAudioClient:
+    """An audio stub whose RPCs open a CLIENT span in the current context, like the gRPC instrumentation."""
+
+    async def SetVolume(self, request):  # noqa: N802 - gRPC stub name
+        from proto import audio_pb2
+        from services.game_coordinator.games import base
+
+        with base.tracer.start_as_current_span("AudioService/SetVolume", kind=trace.SpanKind.CLIENT):
+            pass
+        return audio_pb2.SetVolumeResponse(success=True)
+
+
+@pytest.mark.uc("UC-041", br=["BR-004"])
+@pytest.mark.asyncio
+async def test_post_countdown_set_volume_span_is_child_of_game_cycle(span_exporter):
+    """The ramp to game volume after the countdown parents under game_cycle, not gameplay_phase (#2671)."""
+    game = _fast_ffa_game()
+    game.audio_client = _SpanEmittingAudioClient()
+
+    await game.run()
+
+    spans = span_exporter.get_finished_spans()
+    cycle = next(s for s in spans if s.name == "game_cycle")
+    # Two SetVolume calls: the countdown level during initialization, then the game level after the countdown.
+    set_volume = max((s for s in spans if s.name == "AudioService/SetVolume"), key=lambda s: s.start_time)
+    assert set_volume.parent.span_id == cycle.context.span_id
