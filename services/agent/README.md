@@ -6,7 +6,7 @@ Adaptive-difficulty agent that turns live telemetry into intervention decisions.
 
 The Agent sits between JoustMania's **observation layer** (OpenTelemetry) and its
 **control layer** ([OpenFeature](https://openfeature.dev/) / flagd). It receives
-spans and metrics from the OTel Collector over OTLP, accumulates a rolling
+spans, metrics and moment log events from the OTel Collector over OTLP, accumulates a rolling
 `GameContext`, gates on whether the context is worth acting on, and calls stub
 decision hooks that will eventually drive feature-flag changes.
 
@@ -864,8 +864,8 @@ fitness → rollback); the game path had nothing. #918 closes the **measurement*
 fires, so idle cycles (signal arrives, nothing decided) are span-silent. To keep
 signal arrival observable without a span per idle cycle, **every** enabled eval
 cycle increments the metric `agent_evaluations_total` (`Int64Counter`), labeled
-`signal` (`metrics`|`traces`) and `outcome` (`decided`|`idle`). The labels are
-deliberately tiny (4 series max) — no per-game/per-serial dimensions. Because
+`signal` (`metrics`|`traces`|`logs`) and `outcome` (`decided`|`idle`). The labels are
+deliberately tiny (6 series max) — no per-game/per-serial dimensions. Because
 metrics are the agent's primary (~100 ms–1 s) trigger, `rate(agent_evaluations_total{signal="metrics"}[1m])`
 answers "is the agent receiving metrics?" directly, and the `outcome` split
 distinguishes "metrics arrive but trigger nothing" from "metrics aren't arriving"
@@ -885,7 +885,7 @@ are used wherever one honestly applies:
 
 | Where | Convention |
 |-------|-----------|
-| `agent.signal_received` | `rpc.system=grpc`, `rpc.service` (OTLP `TraceService`/`MetricsService`), `rpc.method=Export`; span kind `SERVER` |
+| `agent.signal_received` | `rpc.system=grpc`, `rpc.service` (OTLP `TraceService`/`MetricsService`/`LogsService`), `rpc.method=Export`; span kind `SERVER` |
 | `agent.decision` | `gen_ai.agent.name` identity (the full [GenAI agent conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/) apply once an LLM inference path exists — `gen_ai.provider.name` etc. land as a `gen_ai.*` child span in llm mode) |
 | `agent.decision` event | `feature_flag` span event (`feature_flag.key=interventions.allowed`, `feature_flag.provider.name`, `feature_flag.result.variant`) — same shape the openfeature OTel hooks emit in the Python services; provider is `"stub"` until flagd (#725) |
 | `agent.action` failures | `span.RecordError` + `error.type` + status `ERROR` |

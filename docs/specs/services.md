@@ -62,7 +62,7 @@ coordinator and the menu wait only for flagd); flagd waits for the flag service 
 | envoy | config | 80 HTTP; 9901 admin | **80** | Single entry point / reverse proxy | `services/envoy/envoy.yaml` |
 | flagd | binary v0.18.1 | 8013 RPC eval (tests and tools only, #1713), 8014 mgmt, 8015 sync (every service client), 8016 OFREP | `127.0.0.1:8015` (8013 via override) | Evaluate flags; its only source is the flag service's gRPC sync stream (no flag file mounted) | `docker-compose.yml` (`flagd`) |
 | flag-service | Go | 50064 gRPC sync (flagd only), 8070 HTTP API | 8070 via override; `/flags/` through envoy | Runtime flag state in memory over the read-only baseline files; the only writer path for runtime flags (§7) | `services/flag-service/` |
-| otel-collector | custom contrib build | 4317 / 4318 OTLP | `127.0.0.1:4317` | Receive OTLP + host metrics; export to Jaeger, VictoriaMetrics, agent (OTLP logs end in the debug exporter, no log store, #2059) (the :8889 Prometheus exporter was removed in #1449). Opt-in (`docker-compose.gateway.yml`, #2571): also OTLP/HTTP to the gateway, outbound to port 443 only, no new published port (UC-035 A7) | `services/otel-collector/config.yaml`, `services/otel-collector/config.gateway.yaml` |
+| otel-collector | custom contrib build | 4317 / 4318 OTLP | `127.0.0.1:4317` | Receive OTLP + host metrics; export to Jaeger, VictoriaMetrics, agent (OTLP logs end in the debug exporter, no log store, #2059; only moment log events also go to the agent, FR-218) (the :8889 Prometheus exporter was removed in #1449). Opt-in (`docker-compose.gateway.yml`, #2571): also OTLP/HTTP to the gateway, outbound to port 443 only, no new published port (UC-035 A7) | `services/otel-collector/config.yaml`, `services/otel-collector/config.gateway.yaml` |
 | jaeger | 2.22.0 | 16686 UI, 4317 / 4318 OTLP | no | Trace store (badger, bounded TTL; 1 GiB container limit, Go soft limit `GOMEMLIMIT=850MiB`, #2223); repo readers use the query API v3 `/jaeger/api/v3` ([telemetry.md](telemetry.md) §6.1, #2283), Grafana's Jaeger datasource serves trace links only, no dashboard panel searches Jaeger (#2311) | `services/jaeger/config.yaml`, `docker-compose.yml` |
 | victoria-metrics | v1.155.0 | 8428 | no | The only metric store (remote write, 7 d); serves the Prometheus query API to Grafana, the dashboard and the tools. The Prometheus container was removed in #1449 | `docker-compose.yml:516-544` |
 | grafana | 13.3.0 | 3000 | no | Dashboards | `services/grafana/` |
@@ -146,7 +146,7 @@ archetypes: the agent resolves and pins the parameters and passes them in `AddCo
 
 `SetColor` (with `ColorRequest` / `ColorResponse`) and the singular `AddController` (with `AddControllerRequest` / `AddControllerResponse`) were deleted in #1322 (UC-003 A5 retired): nothing called either. A test sets an LED colour through the adapter, and `AddControllers` (`count=1`, with `reserved` / `tag`) replaces the singular call. The `reserved` / `tag` semantics now live on `AddControllersRequest`. Regenerated with `make protos` and `make protos-agent`; connect-proxy forwards no `MockControllerService` RPC and the dashboard has no mock client.
 
-The agent's OTLP receiver implements the standard `opentelemetry.proto.collector.{trace,metrics}.v1` Export
+The agent's OTLP receiver implements the standard `opentelemetry.proto.collector.{trace,metrics,logs}.v1` Export
 services (`services/agent/receiver.go`); they are not JoustMania protos.
 
 ### Browser-reachable RPCs (connect-proxy)
