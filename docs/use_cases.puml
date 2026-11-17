@@ -10,6 +10,8 @@ actor "Maintainer" as maintainer
 actor "Model API" as modelapi
 actor "GitHub" as github
 actor "Flagsmith" as flagsmith
+actor "Gateway" as gateway
+actor "Observability Backend" as obsbackend
 
 rectangle "JoustMania" {
     package "Pairing & controllers" {
@@ -67,6 +69,9 @@ rectangle "JoustMania" {
     package "Talk" {
         usecase "UC-070\nPresent the Talk Demo" as UC070
     }
+    package "Orange Case" {
+        usecase "UC-100\nFind a Game Moment in Every Shape" as UC100
+    }
 }
 
 player --> UC001
@@ -120,6 +125,13 @@ agent --> UC051
 agent --> UC053
 
 presenter --> UC070
+presenter --> UC100
+player --> UC100
+UC100 --> gateway
+UC100 --> obsbackend
+UC100 ..> UC053 : <<include>>
+UC100 ..> UC010 : <<include>>
+UC100 ..> UC030 : <<include>>
 presenter --> UC035
 agent --> UC070
 player --> UC070
