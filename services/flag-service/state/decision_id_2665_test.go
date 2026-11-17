@@ -118,8 +118,12 @@ func TestDecisionID_ServedWithTheValue(t *testing.T) {
 	t.Run("UC-101/BR-003 an id over the cap is dropped, the write still applies (NFR-061)", func(t *testing.T) {
 		f := newFixture(t, fixtureOpts{k: 3})
 		f.register("game_a", "c/1", "MOCK0001")
-		long := strings.Repeat("x", MaxDecisionIDLength+1)
-		atCap := strings.Repeat("y", MaxDecisionIDLength)
+		// flags.md §5 fixes the cap at 16 characters (the agent's 16 hex characters).
+		if MaxDecisionIDLength != 16 {
+			t.Fatalf("MaxDecisionIDLength = %d, want 16 (flags.md §5, NFR-051)", MaxDecisionIDLength)
+		}
+		long := strings.Repeat("x", 17)
+		atCap := strings.Repeat("y", 16)
 		grant := f.put(WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("3"), Scope: Scope{GameID: "game_a", Serial: "MOCK0001"}, Writer: "agent", DecisionID: long})
 		if resolved, _ := f.resolve("shield_seconds", map[string]any{"gameId": "game_a", "targetingKey": "MOCK0001"}); resolved != grant.Variant {
 			t.Fatalf("grant with an over-cap id resolved %q, want its variant %q", resolved, grant.Variant)
