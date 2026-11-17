@@ -3384,12 +3384,18 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
     def _record_ground_truth(self) -> None:
         """One ``challenge.ground_truth`` event per player on the game root (UC-100 step 6, BR-006).
 
-        Only at a normal end: none for a force-ended game or a run that failed (UC-100 A5).
+        Only at a normal end: none for a force-ended game (checked here) or a run that failed (the
+        only caller sits after the teardown in run()'s try, so a run that raised never gets here)
+        (UC-100 A5). Telemetry never turns a finished game into a game error: a failure to record
+        is logged and swallowed.
         """
-        if self._run_failed or self._game_outcome_attributes()["game.outcome"] == "force_ended":
+        if self._game_outcome_attributes()["game.outcome"] == "force_ended":
             return
-        names = {serial: player.name or "" for serial, player in self.players.items()}
-        self._ground_truth.record_on(self._game_root_span, names)
+        try:
+            names = {serial: player.name or "" for serial, player in self.players.items()}
+            self._ground_truth.record_on(self._game_root_span, names)
+        except Exception:
+            logger.exception("Recording the ground truth failed; the game ends normally (UC-100 BR-006)")
 
     def _record_force_ended_outcome_if_unrecorded(self) -> None:
         """For run() overrides: a game force-ended before its teardown still records force_ended."""

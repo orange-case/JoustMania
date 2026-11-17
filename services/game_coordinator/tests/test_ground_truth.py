@@ -189,6 +189,35 @@ class TestGroundTruthAtNormalEnd:
         assert DEATHS not in truth[SERIALS[0]]
 
 
+class TestGroundTruthNeverBreaksTheGame:
+    @pytest.mark.uc("UC-100", flow="main", steps=[6], br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_a_failing_record_leaves_a_normal_end(self, tracer):
+        """Recording the ground truth raises: run() still returns and the game keeps its natural outcome."""
+        events = EventCollector()
+        game = FFAGame(
+            controller_manager_client=MockControllerManagerService(
+                num_controllers=3, death_schedule={0.3: 1, 0.6: 2}, infinite=True
+            ),
+            event_publisher=events.publish,
+            audio_client=None,
+            game_id="test_ground_truth_record_fails",
+            initial_players=[type("P", (), {"serial": s})() for s in SERIALS],
+        )
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("exporter gone")
+
+        game._ground_truth.record_on = _boom
+        with tracer.start_as_current_span("Joust Free-for-All") as root:
+            await asyncio.wait_for(game.run(), timeout=20)
+
+        assert root.attributes["game.outcome"] == "winner"
+        assert game._run_failed is False
+        assert events.get_events_of_type(GameEvent.GAME_ERROR) == []
+        assert [e for e in root.events if e.name == EVENT] == []
+
+
 class TestNoGroundTruthWithoutNormalEnd:
     @pytest.mark.uc("UC-100", flow="A5", br=["BR-006"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
