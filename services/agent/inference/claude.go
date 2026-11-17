@@ -217,32 +217,49 @@ func (c *Claude) Infer(ctx context.Context, prompt llm.Prompt) (string, error) {
 	)
 	defer span.End()
 
+	start := time.Now()
+	text, msg, err := c.call(ctx, span, prompt, s)
+	var responseModel, errType string
+	if msg != nil {
+		responseModel = string(msg.Model)
+	}
+	if err != nil {
+		errType = ErrorType(err)
+	}
+	c.recordDuration(ctx, s.Model, responseModel, errType, time.Since(start))
+	return text, err
+}
+
+// call sends one request and classifies the reply. It returns the reply message
+// whenever the API answered (also on a refusal, truncation or empty reply), so
+// Infer records the duration and token usage of every answered call.
+func (c *Claude) call(ctx context.Context, span trace.Span, prompt llm.Prompt, s Settings) (string, *anthropic.BetaMessage, error) {
 	msg, err := c.client.Beta.Messages.New(ctx, params(prompt, s))
 	if err != nil {
 		// Only the low-cardinality error.type reaches the span: vendor error bodies
 		// can echo request details, so the error text never does (#1242).
 		errType := anthropichttp.ErrorType(ctx, err)
 		fail(span, errType)
-		return "", &Error{Type: errType, Err: err}
+		return "", nil, &Error{Type: errType, Err: err}
 	}
-	c.recordResponse(span, msg)
+	c.recordResponse(ctx, span, s, msg)
 
 	switch msg.StopReason {
 	case anthropic.BetaStopReasonEndTurn, anthropic.BetaStopReasonStopSequence:
 	case anthropic.BetaStopReasonRefusal:
-		return "", stopError(span, "refusal", msg.StopReason)
+		return "", msg, stopError(span, "refusal", msg.StopReason)
 	case anthropic.BetaStopReasonMaxTokens:
-		return "", stopError(span, "max_tokens", msg.StopReason)
+		return "", msg, stopError(span, "max_tokens", msg.StopReason)
 	default:
-		return "", stopError(span, "stop_reason_"+string(msg.StopReason), msg.StopReason)
+		return "", msg, stopError(span, "stop_reason_"+string(msg.StopReason), msg.StopReason)
 	}
 
 	text := textOf(msg)
 	if strings.TrimSpace(text) == "" {
 		fail(span, "empty_reply")
-		return "", &Error{Type: "empty_reply", Err: ErrEmptyReply}
+		return "", msg, &Error{Type: "empty_reply", Err: ErrEmptyReply}
 	}
-	return text, nil
+	return text, msg, nil
 }
 
 // newClient builds the SDK client, shared with the decide claude backend:
@@ -318,7 +335,9 @@ func (c *Claude) requestAttributes(system string, s Settings) []attribute.KeyVal
 	return attrs
 }
 
-func (c *Claude) recordResponse(span trace.Span, m *anthropic.BetaMessage) {
+// recordResponse stamps the response and usage attributes on span and records
+// gen_ai.client.token.usage for the call.
+func (c *Claude) recordResponse(ctx context.Context, span trace.Span, s Settings, m *anthropic.BetaMessage) {
 	if m == nil {
 		return
 	}
@@ -333,6 +352,7 @@ func (c *Claude) recordResponse(span trace.Span, m *anthropic.BetaMessage) {
 		semconv.GenAIUsageCacheReadInputTokens(int(m.Usage.CacheReadInputTokens)),
 		semconv.GenAIUsageCacheCreationInputTokens(int(m.Usage.CacheCreationInputTokens)),
 	)
+	c.recordTokens(ctx, s.Model, string(m.Model), input, int(m.Usage.OutputTokens))
 }
 
 func stopError(span trace.Span, errType string, reason anthropic.BetaStopReason) error {
