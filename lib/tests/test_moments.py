@@ -93,6 +93,17 @@ def test_span_shape_is_a_child_span_ended_at_once_with_the_warning_window(spans)
     assert moment.end_time - moment.start_time == 500_000_000
 
 
+@pytest.mark.uc("UC-100", flow="main", steps=[4], br=["BR-001", "BR-004"])
+@pytest.mark.parametrize("shape", [MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN])
+def test_span_shapes_send_no_log_record_with_otlp_logging_on(spans, logs, shape):
+    """NFR-060 / BR-004: with OTLP logging on, the default (and the span) shape adds no log record."""
+    tracer, _ = spans
+    sent, _ = _record(shape, tracer)
+
+    assert sent == shape
+    assert logs.get_finished_logs() == ()
+
+
 @pytest.mark.uc("UC-100", flow="main", steps=[4], br=["BR-001", "BR-003"])
 def test_log_event_shape_is_an_sdk_log_record_in_the_player_span_context(spans, logs):
     tracer, exporter = spans
