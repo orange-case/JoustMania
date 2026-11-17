@@ -123,7 +123,8 @@ async def _step_until(clock, until):
         await _spin(8)
         if clock.time() >= until - 1e-9:
             return
-        clock.release_all()
+        if not clock.release_all():
+            clock.advance(until - clock.time())  # the renderer ended: nothing sleeps any more
     raise AssertionError(f"clock stuck at {clock.time()}")
 
 

@@ -10,10 +10,10 @@ import asyncio
 import contextlib
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from opentelemetry.context import Context
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import Span, SpanKind
 
 from lib.colors import Colors
 from lib.telemetry import get_tracer
@@ -36,6 +36,7 @@ from services.controller_manager.effects_base import (
     DEFAULT_HOLD_RUMBLE_MAX_INTENSITY,
     DEFAULT_SHIELD_ENDING_LEAD_S,
     HOLD_COLOR,
+    HOLD_STATE_EMPTY,
     HOLD_RAMP_MIN_INTERVAL_S,
     HOLD_RAMP_MIN_STEP,
     SHIELD_BLINK_WINDOW_S,
@@ -68,6 +69,15 @@ tracer = get_tracer(__name__)
 
 # Span attribute keys (S1192 - avoid duplicate string literals)
 CONTROLLER_SERIAL_ATTR = "controller.serial"
+SHIELD_SPAN_NAME = "controller.shield_effect"
+
+# shield.end_reason of a controller.shield_effect span (telemetry.md §3.3, #2669).
+SHIELD_END_EXPIRED = "expired"  # the layer ran its time
+SHIELD_END_REPLACED = "replaced"  # a restart of the same layer kind (not a charge extension)
+SHIELD_END_EMPTY = "empty"  # the energy gauge fell below the minimum burst
+SHIELD_END_CANCELLED = "cancelled"  # an end command for that layer, stream-close cleanup, controller gone
+SHIELD_END_DEATH = "death"  # the death effect
+SHIELD_END_GAME_END = "game_end"  # SHIELD 0 at game end, the winner rainbow
 
 
 def read_charge_cues() -> ChargeCues:
@@ -167,6 +177,8 @@ class ShieldLayer:
     blink_reported: bool = False
     ref_s: float = 0.0  # hold: the activation energy, the reference of the dimming and the rumble ramp (#2463)
     ramp_at: float = -math.inf  # hold: controller time of the last ramp write (#2463)
+    # The trace context of the command that started the layer: the parent of its span (#2669).
+    trace_context: Context | None = field(default=None, compare=False, repr=False)
 
     @property
     def toughness_boost(self) -> bool:
@@ -201,6 +213,16 @@ SHIELD_ENDING_PULSE_TASK_NAME = "shield_ending_pulse"
 HOLD_PULSE_TASK_NAME = "hold_pulse"
 _SHIELD_PULSE_TASK_NAMES = (CHARGE_PULSE_TASK_NAME, SHIELD_ENDING_PULSE_TASK_NAME, HOLD_PULSE_TASK_NAME)
 _CUE_EPSILON_S = 1e-6
+
+
+def _end_shield_span(spans: dict[str, tuple[ShieldLayer, Span]], kind: str, reason: str) -> None:
+    """End one layer's ``controller.shield_effect`` span with its ``shield_end`` event (#2669)."""
+    entry = spans.pop(kind, None)
+    if entry is None:
+        return
+    span = entry[1]
+    span.add_event("shield_end", {"shield.end_reason": reason})
+    span.end()
 
 
 class ShieldEffectsMixin:
@@ -276,8 +298,9 @@ class ShieldEffectsMixin:
                 total_s=duration_ms / 1000.0,
                 color=color if color else Colors.White.value,
                 kind=kind,
+                trace_context=trace_context,
             )
-        self._ensure_shield_renderer(serial, kind, trace_context, duration_ms)
+        self._ensure_shield_renderer(serial, kind, duration_ms)
         if newly_charged:
             # The charge rumble pattern starts with the layer, not with a re-send (UC-040 BR-021, #2094).
             await self._stop_charge_cues(serial)
@@ -287,74 +310,123 @@ class ShieldEffectsMixin:
             await self._stop_shield_pulses(serial, self._shield_ending_tasks, SHIELD_ENDING_PULSE_TASK_NAME)
             self._shield_ending_tasks[serial] = asyncio.create_task(self._shield_ending_loop(serial))
 
-    def _ensure_shield_renderer(
-        self, serial: str, kind: str, trace_context: Context | None, duration_ms: int | float = 0
-    ) -> None:
+    def _ensure_shield_renderer(self, serial: str, kind: str, duration_ms: int | float = 0) -> None:
         """Start the one renderer task of the controller, unless it runs (it picks new layers up)."""
         task = self._shield_tasks.get(serial)
         if task is None or task.done():
             self.backend.set_effect_active(serial, True)
-            self._shield_tasks[serial] = asyncio.create_task(self._shield_render_loop(serial, kind, trace_context))
+            self._shield_tasks[serial] = asyncio.create_task(self._shield_render_loop(serial))
         else:
             logger.debug(f"Shield layer {kind} (re)started on {serial} for {duration_ms}ms")
 
-    async def _shield_render_loop(self, serial: str, kind: str, trace_context: Context | None) -> None:
-        """Paint the top shield layer at 20 Hz (a charge at 10 Hz, on change) while no overlay effect owns the LED."""
+    async def _shield_render_loop(self, serial: str) -> None:
+        """Paint the top shield layer at 20 Hz (a charge at 10 Hz, on change) while no overlay effect owns the LED.
+
+        Each layer the controller shows gets its own ``controller.shield_effect`` span (#2669),
+        opened and ended by ``_sync_shield_spans`` on every tick and by ``end_shield_effect``.
+        """
         interval = 0.05
-        with tracer.start_as_current_span(
-            "controller.shield_effect", context=trace_context, kind=SpanKind.CONSUMER
-        ) as span:
-            span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
-            span.set_attribute("shield.kind", kind)
-            first = self._shield_layers.get(serial, {}).get(kind)
-            if first is not None and math.isfinite(first.total_s):
-                span.set_attribute("effect.duration_ms", int(first.total_s * 1000))
-            end_reason = "cancelled"
-            last_write = -math.inf
-            try:
-                while True:
-                    now = self._clock.time()
-                    layer = self._top_shield(serial, now)
-                    if serial in self._background_rumble and "hold" not in self._shield_layers.get(serial, {}):
-                        # The activation ran out without its end command: its rumble stops too (#2096).
-                        await self._set_background_rumble(serial, 0)
-                    else:
-                        # Before the overlay check: the ramp keeps rising under a warning flash (#2463).
-                        await self._step_hold_ramp(serial, now)
-                    if layer is None:
-                        end_reason = "expired"
-                        break
-                    elapsed = now - layer.start
-                    slow = layer.kind in _SLOW_LAYERS
+        spans: dict[str, tuple[ShieldLayer, Span]] = {}
+        self._shield_spans[serial] = spans
+        last_write = -math.inf
+        try:
+            while True:
+                now = self._clock.time()
+                layer = self._top_shield(serial, now)
+                self._sync_shield_spans(serial, spans, now)
+                if serial in self._background_rumble and "hold" not in self._shield_layers.get(serial, {}):
+                    # The activation ran out without its end command: its rumble stops too (#2096).
+                    await self._set_background_rumble(serial, 0)
+                else:
+                    # Before the overlay check: the ramp keeps rising under a warning flash (#2463).
+                    await self._step_hold_ramp(serial, now)
+                if layer is None:
+                    break
+                elapsed = now - layer.start
+                slow = layer.kind in _SLOW_LAYERS
+                if (
+                    not slow
+                    and not layer.blink_reported
+                    and elapsed >= max(0.0, layer.total_s - SHIELD_BLINK_WINDOW_S)
+                ):
+                    layer.blink_reported = True
+                    entry = spans.get(layer.kind)
+                    if entry is not None and entry[0] is layer:
+                        entry[1].add_event("shield_blink", {"shield.kind": layer.kind})
+                if not self._overlay_active(serial):
+                    frame = self._shield_layer_frame(serial, layer, now, elapsed)
                     if (
-                        not slow
-                        and not layer.blink_reported
-                        and elapsed >= max(0.0, layer.total_s - SHIELD_BLINK_WINDOW_S)
+                        slow
+                        and frame is not None
+                        and frame == self.current_colors.get(serial)
+                        and now - last_write < LED_KEEPALIVE_S
                     ):
-                        layer.blink_reported = True
-                        span.add_event("shield_blink", {"shield.kind": layer.kind})
-                    if not self._overlay_active(serial):
-                        frame = self._shield_layer_frame(serial, layer, now, elapsed)
-                        if (
-                            slow
-                            and frame is not None
-                            and frame == self.current_colors.get(serial)
-                            and now - last_write < LED_KEEPALIVE_S
-                        ):
-                            frame = None  # no visible change: skip the HID write (a 1 s keepalive stays)
-                        if frame is not None:
-                            await self._set_led_color(serial, frame)
-                            last_write = now
-                    await self._clock.sleep(CHARGE_RENDER_INTERVAL_S if slow else interval)
-            finally:
-                span.add_event("shield_end", {"shield.end_reason": end_reason})
-                if self._shield_tasks.get(serial) is asyncio.current_task():
-                    self._shield_tasks.pop(serial, None)
+                        frame = None  # no visible change: skip the HID write (a 1 s keepalive stays)
+                    if frame is not None:
+                        await self._set_led_color(serial, frame)
+                        last_write = now
+                await self._clock.sleep(CHARGE_RENDER_INTERVAL_S if slow else interval)
+        finally:
+            # Cancelled with layers left (the controller left tracking): their spans end cancelled.
+            # After a normal exit (every layer expired) none is open.
+            for kind in list(spans):
+                _end_shield_span(spans, kind, SHIELD_END_CANCELLED)
+            if self._shield_spans.get(serial) is spans:
+                del self._shield_spans[serial]
+            if self._shield_tasks.get(serial) is asyncio.current_task():
+                self._shield_tasks.pop(serial, None)
         # Expired naturally: hand the LED back, unless an overlay owns it (its
         # own finish restores the base colour then).
         self._shield_layers.pop(serial, None)
         if not self._overlay_active(serial):
             await self._finish_effect(serial, restore=True)
+
+    def _shield_layer_shown(self, serial: str, layer: ShieldLayer, now: float) -> bool:
+        """Whether a live layer shows a shield: every timed layer, the energy gauge only when not empty (#2669)."""
+        if layer.kind != "energy":
+            return True
+        energy = self._hold_energy.get(serial)
+        if energy is None:
+            return False
+        state = hold_energy_state(energy.level(now), energy.cap_s, energy.full_s, energy.min_burst_s)
+        return state != HOLD_STATE_EMPTY
+
+    def _sync_shield_spans(self, serial: str, spans: dict[str, tuple[ShieldLayer, Span]], now: float) -> None:
+        """One renderer tick of the per-layer spans (#2669).
+
+        Ends the spans of gone, replaced or emptied layers, then opens one for each shown layer
+        without a span. Synchronous, so no command runs in between. Expired layers were already
+        dropped by ``_top_shield``; a layer ended by a command had its span ended by
+        ``end_shield_effect`` before the layer left ``_shield_layers``.
+        """
+        layers = self._shield_layers.get(serial, {})
+        for kind, (layer, _span) in list(spans.items()):
+            current = layers.get(kind)
+            if current is layer:
+                if not self._shield_layer_shown(serial, layer, now):
+                    _end_shield_span(spans, kind, SHIELD_END_EMPTY)
+                continue
+            # Gone (dropped as expired), or replaced by a new layer of the same kind (a charge
+            # re-send that only extends keeps the same layer object, so it never gets here).
+            expired = current is None or layer.remaining(now) <= 0
+            _end_shield_span(spans, kind, SHIELD_END_EXPIRED if expired else SHIELD_END_REPLACED)
+        for kind, layer in layers.items():
+            if kind in spans or layer.remaining(now) <= 0 or not self._shield_layer_shown(serial, layer, now):
+                continue
+            span = tracer.start_span(SHIELD_SPAN_NAME, context=layer.trace_context, kind=SpanKind.CONSUMER)
+            span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
+            span.set_attribute("shield.kind", kind)
+            if math.isfinite(layer.total_s):
+                span.set_attribute("effect.duration_ms", int(layer.total_s * 1000))
+            spans[kind] = (layer, span)
+
+    def _end_shield_spans(self, serial: str, kinds: frozenset[str] | None, reason: str) -> None:
+        """End the spans of the given layer kinds (every kind with None) on an end command (#2669)."""
+        spans = self._shield_spans.get(serial)
+        if not spans:
+            return
+        for kind in list(spans) if kinds is None else kinds:
+            _end_shield_span(spans, kind, reason)
 
     def _shield_layer_frame(
         self, serial: str, layer: ShieldLayer, now: float, elapsed: float
@@ -382,6 +454,7 @@ class ShieldEffectsMixin:
         toughness_boost_only: bool = False,
         restore: bool = True,
         kinds: frozenset[str] | None = None,
+        reason: str = SHIELD_END_CANCELLED,
     ) -> bool:
         """End shield layers now (#1301, UC-040 A17); other effects are untouched.
 
@@ -393,6 +466,9 @@ class ShieldEffectsMixin:
         A full end (``kinds`` None: death, game end, stream close) also stops the hold and
         charge state when no layer is left, so a background level or a cue that outlived
         its layer never brings a rumble back after the death rumble (#2462, UC-040 BR-026).
+
+        ``reason`` is the ``shield.end_reason`` of the ended layers' spans (#2669): ``death``,
+        ``game_end`` or ``cancelled``.
         """
         if toughness_boost_only:
             kinds = frozenset({"toughness_boost"})
@@ -405,6 +481,8 @@ class ShieldEffectsMixin:
             ended = [layers.pop(kind, None) for kind in kinds]
             if all(layer is None for layer in ended):
                 return False
+            # Before any await: the renderer would otherwise see the layer gone and end it expired.
+            self._end_shield_spans(serial, kinds, reason)
             if "charge" in kinds:
                 await self._stop_charge_cues(serial)
             if "hold" in kinds:
@@ -414,6 +492,7 @@ class ShieldEffectsMixin:
                 self._hold_energy.pop(serial, None)
             if layers:
                 return True  # another shield layer keeps painting
+        self._end_shield_spans(serial, None, reason)
         self._shield_layers.pop(serial, None)
         await self._stop_shield_state(serial)
         task = self._shield_tasks.pop(serial, None)
@@ -455,7 +534,10 @@ class ShieldEffectsMixin:
             return
         if duration_ms <= 0:
             # SHIELD 0 ends every shield layer (game end); TOUGHNESS_BOOST 0 / SHIELD_CHARGE 0 only their own layer.
-            await self.end_shield_effect(serial, kinds=None if kind == "full" else frozenset({kind}))
+            if kind == "full":
+                await self.end_shield_effect(serial, reason=SHIELD_END_GAME_END)
+            else:
+                await self.end_shield_effect(serial, kinds=frozenset({kind}))
             return
         await self.start_shield_effect(
             serial,
@@ -504,11 +586,13 @@ class ShieldEffectsMixin:
             ref_s = max(running.ref_s, total_s)  # an older coordinator: the longest end of this activation
         else:
             ref_s = total_s
-        layer = ShieldLayer(start=now, total_s=total_s, color=HOLD_COLOR, kind="hold", ref_s=ref_s)
+        layer = ShieldLayer(
+            start=now, total_s=total_s, color=HOLD_COLOR, kind="hold", ref_s=ref_s, trace_context=trace_context
+        )
         if not newly:
             layer.ramp_at = running.ramp_at
         layers["hold"] = layer
-        self._ensure_shield_renderer(serial, "hold", trace_context, duration_ms)
+        self._ensure_shield_renderer(serial, "hold", duration_ms)
         if newly:
             # The idle pool does not recharge during an activation: its cues wait for the next SHIELD_ENERGY.
             await self._stop_hold_cues(serial)
@@ -542,8 +626,10 @@ class ShieldEffectsMixin:
         layers = self._shield_layers.setdefault(serial, {})
         if "energy" not in layers:
             color = self.base_colors.get(serial) or self.current_colors.get(serial) or HOLD_COLOR
-            layers["energy"] = ShieldLayer(start=now, total_s=math.inf, color=color, kind="energy")
-        self._ensure_shield_renderer(serial, "energy", trace_context)
+            layers["energy"] = ShieldLayer(
+                start=now, total_s=math.inf, color=color, kind="energy", trace_context=trace_context
+            )
+        self._ensure_shield_renderer(serial, "energy")
         await self._stop_hold_cues(serial)
         cue = state.cue if state is not None else controller_manager_pb2.SHIELD_HOLD_CUE_NONE
         self._hold_cue_tasks[serial] = asyncio.create_task(self._hold_cue_loop(serial, cue, "energy"))
