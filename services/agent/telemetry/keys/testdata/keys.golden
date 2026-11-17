@@ -14,6 +14,7 @@ AttrEffectInterventionID=intervention.id
 AttrEffectObjective=intervention.objective
 AttrEffectSignal=intervention.signal
 AttrEffectSignals=intervention.signals
+AttrEffectWindowEndReason=intervention.window_end_reason
 AttrEffectWindowSeconds=intervention.window_seconds
 AttrEnabled=agent.enabled
 AttrExperimentArm=experiment.arm
