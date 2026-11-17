@@ -2,7 +2,9 @@ package decision
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -178,6 +180,42 @@ func TestInterventionID_EffectSampleReusesTheWriteID(t *testing.T) {
 		}
 		if v, _ := attrValue(effects[0], AttrDecisionInterventionID); v.AsString() != sent[0] {
 			t.Errorf("effect decision.intervention_id = %q, want %q", v.AsString(), sent[0])
+		}
+	})
+}
+
+// UC: UC-101 BR-003
+func TestInterventionID_ProbeNoopGetsNoWriteID(t *testing.T) {
+	t.Run("UC-101/BR-003 a probe-mode noop writes nothing and gets no id before the write", func(t *testing.T) {
+		l, sr, _ := newTestLoop(t)
+		sink := &idSink{gateOn: true}
+		l.Actions = sink
+		l.Rules = fakeRules{out: []Decision{{Intervention: InterventionNoop, Reason: "probe"}}}
+
+		l.OnEvaluate(context.Background(), gamecontext.GameContext{SessionID: "game_1"}, testTrigger())
+
+		for _, id := range sink.sent() {
+			if id != "" {
+				t.Fatalf("noop reached the sink with id %q, want none", id)
+			}
+		}
+		for _, s := range spansByName(sr.Ended(), SpanDecision) {
+			if v, ok := attrValue(s, AttrDecisionInterventionID); ok && v.AsString() != "" {
+				t.Fatalf("noop decision.intervention_id = %q, want none (no effect sample in this loop)", v.AsString())
+			}
+		}
+	})
+}
+
+// UC: UC-101 BR-003
+func TestInterventionID_NotSerialized(t *testing.T) {
+	t.Run("UC-101/BR-003 the id never reaches a Decision's JSON (rules golden, decide wire)", func(t *testing.T) {
+		raw, err := json.Marshal(Decision{Intervention: "grant_shield", InterventionID: "id-2665"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "id-2665") {
+			t.Fatalf("Decision JSON carries the intervention id: %s", raw)
 		}
 	})
 }

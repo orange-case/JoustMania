@@ -1056,8 +1056,11 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	// UC-101 BR-003 (#2665, FR-221): the intervention id is made BEFORE the write,
 	// so the writer sends it as the flag-service decision_id and the effect sample
 	// reuses it. A group shield is one decision, one write, one id. Informational
-	// only: nothing waits for or checks it (NFR-061).
-	d.InterventionID = newInterventionID()
+	// only: nothing waits for or checks it (NFR-061). A probe-mode noop sends no
+	// flag-service write (Writer.Apply returns before any call), so it gets no id here.
+	if d.Intervention != InterventionNoop {
+		d.InterventionID = newInterventionID()
+	}
 	addressed := d
 	addressed.GameID = c.SessionID
 	addressed.GameKind = c.GameKind
@@ -1072,7 +1075,9 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 			attribute.String(AttrDecisionNotAppliedReason, NotAppliedWriteFailed),
 		}
 		// UC-101 A2: a failed write keeps the id it sent (decision span only).
-		dSpan.SetAttributes(attribute.String(AttrDecisionInterventionID, d.InterventionID))
+		if d.InterventionID != "" {
+			dSpan.SetAttributes(attribute.String(AttrDecisionInterventionID, d.InterventionID))
+		}
 		dSpan.SetAttributes(failed...)
 		aSpan.SetAttributes(failed...)
 		aSpan.RecordError(err)
@@ -1108,9 +1113,10 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	// UC-101 BR-003: every written decision carries the id it was written with,
 	// whether or not an effect sample is scheduled below. A gated no-op (above)
 	// sent nothing, so it carries none.
-	dSpan.SetAttributes(
-		attribute.Bool(AttrDecisionApplied, true),
-		attribute.String(AttrDecisionInterventionID, d.InterventionID))
+	dSpan.SetAttributes(attribute.Bool(AttrDecisionApplied, true))
+	if d.InterventionID != "" {
+		dSpan.SetAttributes(attribute.String(AttrDecisionInterventionID, d.InterventionID))
+	}
 	aSpan.SetAttributes(attribute.Bool(AttrDecisionApplied, true))
 	*applied = true
 	l.recordApplyOutcome(d.Intervention, gamecontext.ApplyOutcomeApplied)
@@ -1133,7 +1139,11 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	// thresholds from this cycle's snapshot, so baseline and follow-up sample the SAME
 	// fitness functions against the SAME thresholds. Off the hot path: a cheap map copy
 	// plus a goroutine + timer (bounded, leak-safe via effectWG + rootCtx).
-	l.scheduleEffectSample(dCtx, c, d, state.FitnessEvaluated, fitnessThresholds(snapshot.Fitness))
+	// A probe-mode noop wrote nothing and has no id of its own: when its effect is
+	// sampled, the sample's fresh id goes on the decision span, as before #2665.
+	if id := l.scheduleEffectSample(dCtx, c, d, state.FitnessEvaluated, fitnessThresholds(snapshot.Fitness)); d.InterventionID == "" && id != "" {
+		dSpan.SetAttributes(attribute.String(AttrDecisionInterventionID, id))
+	}
 }
 
 // applyAction applies d through sink and reports whether anything was written. A

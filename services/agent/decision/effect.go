@@ -144,10 +144,13 @@ func (l *Loop) AwaitEffects() { l.effectWG.Wait() }
 // scheduleEffectSample stamps the baseline fitness signals for a just-DISPATCHED
 // intervention and schedules a follow-up sample after the window (#918). It is called
 // from runDecision on the applied-decision path ONLY (blocked decisions never moved the
-// game, so there is nothing to measure). It returns the dispatch-unique intervention id
-// so the decision span can carry it (joining decision->effect in Jaeger), or "" when no
-// sample was scheduled (effect measurement not wired, no baseline signals, or the
-// pending cap reached) — the caller treats "" as "no effect id to stamp".
+// game, so there is nothing to measure). The sample's `intervention.id` is the
+// decision's own InterventionID, made before the write and already on the decision
+// span (UC-101 BR-003, #2665); only a decision without one (a probe-mode noop, which
+// writes nothing, or a direct caller) gets a fresh id here. It returns the id used, or
+// "" when no sample was scheduled (effect measurement not wired, no baseline signals,
+// or the pending cap reached); the caller stamps it on the decision span only when the
+// decision had no id of its own.
 //
 // It NEVER blocks the hot decision path: the baseline is a cheap map copy and the
 // follow-up runs in its own goroutine. Without a context provider (the re-validation
