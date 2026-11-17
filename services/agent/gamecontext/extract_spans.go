@@ -31,6 +31,12 @@ const (
 	// player.serial must not re-create or refresh a dead or evicted player, and its
 	// game.id must not re-create an evicted partition.
 	spanNameShieldCharge = "game.shield_charge"
+	// spanNameDeathWarning and spanNamePlayerDeath are the coordinator's moment spans
+	// (UC-100 BR-010, #2658): children of the player span carrying player.serial,
+	// game.id and game.kind, a warning span possibly ending after the death. Like the
+	// shield charge span, the agent takes nothing from them.
+	spanNameDeathWarning = "game.death_warning"
+	spanNamePlayerDeath  = "game.player_death"
 
 	// resourceAttrServiceName mirrors semconv service.name, used for the
 	// own-telemetry skip.
@@ -110,7 +116,11 @@ func (s *Store) ApplySpans(td ptrace.Traces) bool {
 
 // ignoredSpan reports whether a span carries nothing the agent takes in.
 func ignoredSpan(span ptrace.Span) bool {
-	return span.Name() == spanNameShieldCharge
+	switch span.Name() {
+	case spanNameShieldCharge, spanNameDeathWarning, spanNamePlayerDeath:
+		return true
+	}
+	return false
 }
 
 func (s *Store) applySpan(span ptrace.Span) bool {
