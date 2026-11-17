@@ -112,7 +112,12 @@ async def test_countdown_span_is_consumer(exporter, manager, command_context):
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-035", br=["BR-016"])
 async def test_shield_effect_span_is_consumer(exporter, manager, command_context):
-    # No shield layer is registered, so the render loop ends at once with `expired`.
-    await manager._shield_render_loop(SERIAL, "full", command_context)
+    # One span per shield layer (#2669): a 1 ms layer whose span ends `expired` on the renderer's second tick.
+    manager._shield_layers[SERIAL] = {
+        "full": se.ShieldLayer(
+            start=manager._clock.time(), total_s=0.001, color=(255, 255, 255), trace_context=command_context
+        )
+    }
+    await manager._shield_render_loop(SERIAL)
 
     _assert_consumer_child_of_command(_only_span(exporter, "controller.shield_effect"))

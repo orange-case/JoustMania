@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from opentelemetry import trace
 from opentelemetry.context import Context
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import Span, SpanKind
 
 from lib.colors import Colors
 from lib.telemetry import extract_trace_context, get_tracer
@@ -32,6 +32,8 @@ from services.controller_manager.shield_effects import (
     _SHIELD_PULSE_TASK_NAMES,
     CONTROLLER_SERIAL_ATTR,
     DEATH_RUMBLE_TASK_NAME,
+    SHIELD_END_DEATH,
+    SHIELD_END_GAME_END,
     SWELL_TASK_NAME,
     ShieldEffectsMixin,
     ShieldLayer,
@@ -207,6 +209,9 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         # base colour only changes what is restored after it (UC-040 BR-010).
         self._shield_layers: dict[str, dict[str, ShieldLayer]] = {}
         self._shield_tasks: dict[str, asyncio.Task] = {}
+        # The open controller.shield_effect span of each shown layer, per controller (#2669): kind ->
+        # (layer, span). The renderer owns the dict; end_shield_effect ends spans with its reason.
+        self._shield_spans: dict[str, dict[str, tuple[ShieldLayer, Span]]] = {}
         # One charge rumble pattern task per controller while a charge layer is held (#2094).
         self._charge_cue_tasks: dict[str, asyncio.Task] = {}
         # One "ending soon" task per controller while a full shield layer runs (#2094).
@@ -536,7 +541,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
             # The player is out from the first moment: a reconnect during the effect
             # restores off, never the game colour (UC-002 BR-008, #2471).
             self.base_colors[serial] = Colors.Black.value
-            await self.end_shield_effect(serial, restore=False)
+            await self.end_shield_effect(serial, restore=False, reason=SHIELD_END_DEATH)
 
             # Long rumble (~1 s, UC-030 step 9): clearly different from the 200 ms warning. It runs on its
             # own stop timer, so the red hold, the fade and the end of the game do not cut it short.
@@ -586,7 +591,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         """
         duration_ms = get_winner_rainbow_duration_ms()
         # The winner rainbow ends an agent shield (#1301, UC-040 A17).
-        await self.end_shield_effect(serial, restore=False)
+        await self.end_shield_effect(serial, restore=False, reason=SHIELD_END_GAME_END)
         with tracer.start_as_current_span(
             "effect_winner_rainbow", context=trace_context, kind=SpanKind.CONSUMER
         ) as span:
