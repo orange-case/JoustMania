@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
@@ -73,12 +73,31 @@ class _Backend:
         self.effect_active[serial] = active
 
 
+class _OpenSpans(SpanProcessor):
+    """The spans started and not yet ended (the in-memory exporter only sees finished ones)."""
+
+    def __init__(self):
+        self.open: set[int] = set()
+
+    def on_start(self, span, parent_context=None):
+        self.open.add(span.context.span_id)
+
+    def on_end(self, span):
+        self.open.discard(span.context.span_id)
+
+
 @pytest.fixture
-def exporter(monkeypatch):
+def open_spans():
+    return _OpenSpans()
+
+
+@pytest.fixture
+def exporter(monkeypatch, open_spans):
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
     memory = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(memory))
+    provider.add_span_processor(open_spans)
     monkeypatch.setattr(shield_module, "tracer", provider.get_tracer("test"))
     monkeypatch.setattr(shield_module, "read_charge_cues", lambda: ChargeCues(intensity=0))
     return memory
@@ -130,6 +149,10 @@ async def _step_until(clock, until):
 
 def _shield_spans(exporter):
     return [s for s in exporter.get_finished_spans() if s.name == SPAN]
+
+
+def _reasons(exporter):
+    return [(s.attributes["shield.kind"], _end_reason(s)) for s in _shield_spans(exporter)]
 
 
 def _end_reason(span):
@@ -221,3 +244,105 @@ class TestUC040ShieldSpanPerLayer:
         assert "effect.duration_ms" not in energy.attributes
         assert _end_reason(energy) == "game_end"
         assert format(energy.parent.span_id, "016x") == ENERGY_PARENT
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    async def test_hold_release_ends_the_hold_span_cancelled_and_the_gauge_runs_on(
+        self, exporter, manager, clock, open_spans
+    ):
+        """UC-040 BR-026: SHIELD_HOLD 0 ends only the hold span (cancelled); a re-grant during the hold
+        replaced the first one; the gauge keeps its span until game end."""
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _state(energy=3000))
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_HOLD, 2000, _state(energy=3000, activation=2000))
+        await _step_until(clock, START + 0.5)
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_HOLD, 2500, _state(energy=3000, activation=3000))
+        await _step_until(clock, START + 1.0)
+
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_HOLD, 0)
+        await _step_until(clock, START + 1.5)
+
+        assert _reasons(exporter) == [("hold", "replaced"), ("hold", "cancelled")]
+        assert len(open_spans.open) == 1  # the energy gauge
+        await _effect(manager, pb.GAME_EFFECT_SHIELD, 0)
+        assert _reasons(exporter)[-1] == ("energy", "game_end")
+        assert manager._shield_spans == {}
+        assert not open_spans.open
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-040", flow="A17", br=["BR-009", "BR-010"])
+    async def test_toughness_boost_end_cancels_only_its_span(self, exporter, manager, clock, open_spans):
+        """UC-040 BR-010: TOUGHNESS_BOOST 0 ends the boost span cancelled; the full shield runs on to expired."""
+        await _effect(manager, pb.GAME_EFFECT_SHIELD, 5000)
+        await _effect(manager, pb.GAME_EFFECT_TOUGHNESS_BOOST, 5000)
+        await _step_until(clock, START + 0.5)
+
+        await _effect(manager, pb.GAME_EFFECT_TOUGHNESS_BOOST, 0)
+        await _step_until(clock, START + 6.0)
+
+        assert _reasons(exporter) == [("toughness_boost", "cancelled"), ("full", "expired")]
+        assert manager._shield_spans == {}
+        assert not open_spans.open
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-040", flow="A38", br=["BR-026"])
+    async def test_an_emptied_gauge_ends_empty_and_a_refill_opens_a_new_span(
+        self, exporter, manager, clock, open_spans
+    ):
+        """UC-040 BR-026: the gauge span ends empty when the energy falls below the minimum burst; a
+        refill is a new span."""
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _state(energy=3000))
+        await _step_until(clock, START + 0.5)
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _state(energy=0))
+        await _step_until(clock, START + 1.0)
+
+        assert _reasons(exporter) == [("energy", "empty")]
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _state(energy=2000))
+        await _step_until(clock, START + 1.5)
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_ENERGY, 0)
+
+        assert _reasons(exporter) == [("energy", "empty"), ("energy", "cancelled")]
+        assert manager._shield_spans == {}
+        assert not open_spans.open
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-040", flow="A30", br=["BR-021"])
+    async def test_a_charge_resend_that_extends_keeps_one_span(self, exporter, manager, clock, open_spans):
+        """UC-040 BR-021: a charge re-send while it is held only extends it: one charge span, expired."""
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_CHARGE, 1000)
+        await _step_until(clock, START + 0.5)
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_CHARGE, 1000)
+        await _step_until(clock, START + 2.0)
+
+        assert _reasons(exporter) == [("charge", "expired")]
+        assert manager._shield_spans == {}
+        assert not open_spans.open
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    async def test_a_removed_controller_ends_every_layer_span_cancelled(self, exporter, manager, clock, open_spans):
+        """UC-040 A17: a controller removed mid-shield (renderer cancelled, not awaited) leaves no span open."""
+        await _effect(manager, pb.GAME_EFFECT_SHIELD, 5000)
+        await _effect(manager, pb.GAME_EFFECT_SHIELD_CHARGE, 5000)
+        await _step_until(clock, START + 0.5)
+
+        manager.clear_controller(SERIAL)
+        await _spin()
+
+        assert sorted(_reasons(exporter)) == [("charge", "cancelled"), ("full", "cancelled")]
+        assert manager._shield_spans == {}
+        assert not open_spans.open
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    async def test_a_failing_renderer_ends_its_spans_cancelled(self, exporter, manager, clock, open_spans, monkeypatch):
+        """UC-040 A17: a renderer that raises (HID write error) leaves no span open."""
+        await _effect(manager, pb.GAME_EFFECT_SHIELD, 5000)
+        await _step_until(clock, START + 0.2)
+        monkeypatch.setattr(manager, "_set_led_color", AsyncMock(side_effect=RuntimeError("hid")))
+
+        clock.release_all()
+        await _spin()
+
+        assert _reasons(exporter) == [("full", "cancelled")]
+        assert manager._shield_spans == {}
+        assert not open_spans.open
