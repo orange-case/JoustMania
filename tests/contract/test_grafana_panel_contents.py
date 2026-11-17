@@ -110,13 +110,13 @@ STEP6_PANELS = [
     (
         "agent",
         "agent-operations",
-        "Model Call Latency p95 (by model)",
+        "Model Call Latency p95 (by caller, model)",
         r"gen_ai_client_operation_duration_seconds_bucket",
     ),
     (
         "agent",
         "agent-operations",
-        "Tokens / min (by model, token type)",
+        "Tokens / min (by caller, model, token type)",
         r"gen_ai_client_token_usage",
     ),
     # Agent: interventions and their measured effect.

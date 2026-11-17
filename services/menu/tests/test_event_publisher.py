@@ -4,6 +4,7 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
+from opentelemetry.trace import SpanKind
 
 from services.menu.event_publisher import EventPublisher
 
@@ -109,7 +110,7 @@ class TestEventPublisherPublish:
         await publisher.subscribe("sub1")
         await publisher.publish("test_event", {})
 
-        mock_tracer.start_as_current_span.assert_called_with("menu_publish:test_event")
+        mock_tracer.start_as_current_span.assert_called_with("menu_publish:test_event", kind=SpanKind.PRODUCER)
 
     @pytest.mark.asyncio
     async def test_publish_includes_timestamp(self, publisher):
@@ -152,3 +153,31 @@ class TestEventDataIsStringified:
         event = queue.get_nowait()
         assert dict(event.data) == {"game_name": "JoustFFA", "player_count": "0", "minimum_players": "2", "ok": "True"}
         assert data["player_count"] == 0  # the caller's dict is not mutated
+
+
+class TestPublishSpanKind:
+    """UC-035 BR-016 (#2654): the publish span hands its context to subscribers in the event, so it is PRODUCER."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-035", br=["BR-016"])
+    async def test_publish_span_is_producer_and_its_context_is_in_the_event(self, mock_metrics, monkeypatch):
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        publisher = EventPublisher(provider.get_tracer("test"), mock_metrics)
+        queue = await publisher.subscribe("sub")
+
+        await publisher.publish("game_start", {"game_name": "JoustFFA"})
+
+        (span,) = exporter.get_finished_spans()
+        assert span.name == "menu_publish:game_start"
+        assert span.kind == SpanKind.PRODUCER
+        event = queue.get_nowait()
+        trace_id = format(span.context.trace_id, "032x")
+        span_id = format(span.context.span_id, "016x")
+        assert event.data["_traceparent"].startswith(f"00-{trace_id}-{span_id}-")
