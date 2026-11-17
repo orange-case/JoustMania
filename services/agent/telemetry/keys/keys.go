@@ -262,10 +262,11 @@ const (
 	// (the window ran out) or "game_ended" (the game ended inside it and the follow-up
 	// was read at game end).
 	AttrEffectWindowEndReason = "intervention.window_end_reason"
-	// AttrEffectAborted is true when the follow-up could NOT be measured because the
-	// game ended or was evicted before the window elapsed (#918 cancellation path): the
-	// record is emitted clearly marked, follow_up/delta are absent, and no metric is
-	// recorded for that objective.
+	// AttrEffectAborted is true when the follow-up could NOT be measured: the game's
+	// partition was gone at follow-up time, or no signal was left (#918). A game end
+	// inside the window is not an abort: the follow-up is read at game end (#2668,
+	// AttrEffectWindowEndReason). An aborted record has no follow_up/delta and records
+	// no metric.
 	AttrEffectAborted = "intervention.effect_aborted"
 )
 

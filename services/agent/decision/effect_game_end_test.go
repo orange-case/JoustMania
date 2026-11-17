@@ -186,11 +186,63 @@ func TestEffect_GameEndClosesWindowEarly(t *testing.T) {
 }
 
 // UC: UC-040 BR-013
+func TestEffect_ScheduledAfterGameEndClosesAtOnce(t *testing.T) {
+	t.Run("UC-040/BR-013 a sample scheduled after the game-end hook ran is read at once", func(t *testing.T) {
+		provider := newFakeContextProvider()
+		const gameID = "game_late_dispatch"
+		l, sr, _, _ := effectLoop(t, provider, gameID)
+
+		// The decision was validated while the game was active; game_active 1 -> 0
+		// then fired the hook, which found no open sample, and only then the
+		// dispatch schedules its sample. The timer never fires in this test.
+		provider.set(gameID, endedContext(gameID, 34))
+		if n := l.CloseEffectsAtGameEnd(); n != 0 {
+			t.Fatalf("hook closed %d samples before any was scheduled, want 0", n)
+		}
+		if id := l.schedule(shieldDecision(), enduranceBaseline(), defaultFit()); id == "" {
+			t.Fatal("expected a scheduled sample")
+		}
+		awaitEffectsWithin(t, l, 2*time.Second)
+
+		spans := endedEffectSpans(sr)
+		if len(spans) != 1 {
+			t.Fatalf("got %d effect spans, want 1", len(spans))
+		}
+		attrs := attrMap(spans[0].Attributes())
+		if got := attrs[AttrEffectWindowEndReason]; got != EffectWindowGameEnded {
+			t.Errorf("window_end_reason = %v, want %q", got, EffectWindowGameEnded)
+		}
+		if got := attrs[AttrEffectWindowSeconds]; got != float64Attr(0) {
+			t.Errorf("window_seconds = %v, want 0 (scheduled at game end)", got)
+		}
+	})
+
+	t.Run("UC-040/BR-013 an unknown game_active does not close the window", func(t *testing.T) {
+		provider := newFakeContextProvider()
+		const gameID = "game_unknown_active"
+		c := durationContext(gameID, 90)
+		c.Session.GameActive = nil
+		provider.set(gameID, c)
+		l, sr, _, sched := effectLoop(t, provider, gameID)
+
+		if id := l.schedule(shieldDecision(), enduranceBaseline(), defaultFit()); id == "" {
+			t.Fatal("expected a scheduled sample")
+		}
+		sched.fire()
+		l.AwaitEffects()
+		spans := endedEffectSpans(sr)
+		if len(spans) != 1 || attrMap(spans[0].Attributes())[AttrEffectWindowEndReason] != EffectWindowElapsed {
+			t.Fatalf("want one elapsed effect span, got %d", len(spans))
+		}
+	})
+}
+
+// UC: UC-040 BR-013
 func TestEffect_GameEndRacingTimerEmitsOnce(t *testing.T) {
 	t.Run("UC-040/BR-013 timer and game end together emit the sample exactly once", func(t *testing.T) {
 		provider := newFakeContextProvider()
 		const gameID = "game_race"
-		provider.set(gameID, endedContext(gameID, 34))
+		provider.set(gameID, durationContext(gameID, 90))
 		l, sr, _, sched := effectLoop(t, provider, gameID)
 
 		const rounds = 200
@@ -230,7 +282,7 @@ func TestEffect_GameEndCloseWithRealTimerNoLeak(t *testing.T) {
 
 		provider := newFakeContextProvider()
 		const gameID = "game_real_timer"
-		provider.set(gameID, endedContext(gameID, 34))
+		provider.set(gameID, durationContext(gameID, 90))
 
 		sr := tracetest.NewSpanRecorder()
 		tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
@@ -265,7 +317,7 @@ func TestEffect_ShutdownThenGameEndEmitsNothing(t *testing.T) {
 	t.Run("UC-040/BR-013 shutdown inside the window still emits nothing, a later game end too", func(t *testing.T) {
 		provider := newFakeContextProvider()
 		const gameID = "game_shutdown_end"
-		provider.set(gameID, endedContext(gameID, 34))
+		provider.set(gameID, durationContext(gameID, 90))
 		l, sr, _, _ := effectLoop(t, provider, gameID)
 		ctx, cancel := context.WithCancel(context.Background())
 		l.SetRootContext(ctx)
@@ -287,7 +339,7 @@ func TestLoopSet_EffectsOnGameEnd(t *testing.T) {
 	t.Run("UC-040/BR-013 the store's game end closes the game's open effect windows", func(t *testing.T) {
 		provider := newFakeContextProvider()
 		const gameID = "game_store_end"
-		provider.set(gameID, endedContext(gameID, 34))
+		provider.set(gameID, durationContext(gameID, 90))
 		l, sr, _, _ := effectLoop(t, provider, gameID)
 		ls := NewLoopSet(func(string) *Loop { return l })
 		ls.For(gameID)
@@ -300,6 +352,7 @@ func TestLoopSet_EffectsOnGameEnd(t *testing.T) {
 		if id := l.schedule(shieldDecision(), enduranceBaseline(), defaultFit()); id == "" {
 			t.Fatal("expected a scheduled sample")
 		}
+		provider.set(gameID, endedContext(gameID, 34))
 		store.SetGameActive(false)
 		awaitEffectsWithin(t, l, 2*time.Second)
 

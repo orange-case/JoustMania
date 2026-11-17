@@ -46,11 +46,12 @@ func newInterventionID() string { return uuid.NewString() }
 //
 // LEAK-FREENESS / LIFECYCLE SAFETY (#923 goleak): every scheduled follow-up runs in a
 // goroutine tracked on effectWG and bounded by rootCtx. The goroutine selects on the
-// follow-up timer AND rootCtx.Done(); on shutdown (rootCtx cancelled) or when the
-// game's partition is gone at follow-up time it emits a clearly-marked ABORTED record
-// (or, on shutdown, simply returns) — it never blocks shutdown and never leaks a timer
-// (the timer is always stopped). AwaitInflight joins effectWG alongside the #917
-// inference goroutines.
+// follow-up timer, the game end (#2668) AND rootCtx.Done(): on shutdown (rootCtx
+// cancelled) it returns without emitting; on a game end it reads the follow-up at once
+// (window_end_reason=game_ended). The record is marked ABORTED only when the game's
+// partition is gone at follow-up time or no signal is left. It never blocks shutdown
+// and never leaks a timer (the timer is stopped on shutdown and on a game end).
+// AwaitInflight joins effectWG alongside the #917 inference goroutines.
 //
 // PER-GAME ISOLATION (#845): the sampler re-reads the game's CURRENT signals through
 // the SAME ContextProvider (MuxContextProvider) the #917 async path uses, keyed by THIS
@@ -244,6 +245,21 @@ func (l *Loop) scheduleEffectSample(decisionCtx context.Context, c gamecontext.G
 	}
 	stop := after(window, func() { close(fired) })
 
+	// The game may already have ended (#2668 review): a decision validated while the
+	// game was active can be scheduled after the game-end hook ran and found no open
+	// sample. The partition's store sets game_active false BEFORE it fires the hook,
+	// so either this read sees the game ended or the later hook sees this sample's
+	// channel. An unknown game_active (nil, e.g. a fallback loop with no signal yet)
+	// is not an end.
+	if cur, ok := l.ctxProvider.Current(l.gameID); ok && gameEndedIn(cur) {
+		l.pendingMu.Lock()
+		if ch, open := l.gameEnd[id]; open {
+			delete(l.gameEnd, id)
+			close(ch)
+		}
+		l.pendingMu.Unlock()
+	}
+
 	// One goroutine, one select: whichever of the timer, the game end or shutdown
 	// wins, the sample is emitted at most once (#2668). A timer and a game end that
 	// race are both ready; select picks one and the other is ignored.
@@ -289,6 +305,12 @@ func (l *Loop) CloseEffectsAtGameEnd() int {
 		close(ch)
 	}
 	return len(open)
+}
+
+// gameEndedIn reports whether c says its game has ended: game_active observed and
+// false. Unknown (nil) is not an end.
+func gameEndedIn(c gamecontext.GameContext) bool {
+	return c.Session.GameActive != nil && !*c.Session.GameActive
 }
 
 // releasePending decrements the in-flight pending counter, floored at zero, and
