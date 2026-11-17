@@ -344,11 +344,7 @@ class ShieldEffectsMixin:
                     break
                 elapsed = now - layer.start
                 slow = layer.kind in _SLOW_LAYERS
-                if (
-                    not slow
-                    and not layer.blink_reported
-                    and elapsed >= max(0.0, layer.total_s - SHIELD_BLINK_WINDOW_S)
-                ):
+                if not slow and not layer.blink_reported and elapsed >= max(0.0, layer.total_s - SHIELD_BLINK_WINDOW_S):
                     layer.blink_reported = True
                     entry = spans.get(layer.kind)
                     if entry is not None and entry[0] is layer:
