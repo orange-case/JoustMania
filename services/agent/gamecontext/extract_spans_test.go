@@ -221,3 +221,71 @@ func TestApplySpans_ShieldChargeSpanIsIgnored(t *testing.T) {
 		}
 	})
 }
+
+// momentSpan is a coordinator moment span (game.death_warning, game.player_death)
+// as a child of the player span; it carries the player, the game and the kind, and
+// a warning span can end after the player's death (UC-100 BR-010).
+func momentSpan(name, serial, gameID string) ptrace.Traces {
+	td := spanWith(map[string]string{
+		"player.serial": serial,
+		"game.id":       gameID,
+		"game.kind":     "FFA",
+		"game.mode":     "FFA",
+	}, nil)
+	td.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).SetName(name)
+	return td
+}
+
+// UC: UC-100 BR-010
+func TestApplySpans_MomentSpansAreIgnored(t *testing.T) {
+	for _, name := range []string{"game.death_warning", "game.player_death"} {
+		t.Run("UC-100/BR-010 "+name+" for an unknown game creates no partition", func(t *testing.T) {
+			m := NewMultiplexer(func(string) *Store { return newTestStore() })
+			if touched := m.ApplySpans(momentSpan(name, "P1", "game-unknown")); len(touched) != 0 {
+				t.Fatalf("touched partitions = %v, want none", touched)
+			}
+			if parts := m.Partitions(); len(parts) != 0 {
+				t.Fatalf("partitions = %v, want none", parts)
+			}
+		})
+
+		t.Run("UC-100/BR-010 "+name+" does not bring a dead player back", func(t *testing.T) {
+			now := time.Unix(1000, 0)
+			s := NewStore(time.Hour, time.Hour, func() time.Time { return now })
+			s.ApplySpans(spanWith(map[string]string{"player.serial": "DEAD", "game.id": "game-9"}, nil))
+			s.SetPlayerAlive("DEAD", false)
+			before := s.Snapshot().Players["DEAD"]
+			beforeUpdate, beforeActive := before.LastUpdate, *before.Active
+			now = now.Add(30 * time.Second)
+			if s.ApplySpans(momentSpan(name, "DEAD", "game-9")) {
+				t.Fatalf("%s reported as recognized", name)
+			}
+			after := s.Snapshot().Players["DEAD"]
+			if after == nil || after.Active == nil || *after.Active != beforeActive || beforeActive {
+				t.Fatalf("%s changed the dead player: %+v", name, after)
+			}
+			if !after.LastUpdate.Equal(beforeUpdate) {
+				t.Fatalf("LastUpdate moved to %s, want %s", after.LastUpdate, beforeUpdate)
+			}
+		})
+
+		t.Run("UC-100/BR-010 "+name+" never creates a player or adopts the game", func(t *testing.T) {
+			s := newTestStore()
+			s.ApplySpans(momentSpan(name, "NEW", "game-9"))
+			snap := s.Snapshot()
+			if snap.Players["NEW"] != nil {
+				t.Fatalf("%s created the player", name)
+			}
+			if snap.SessionID != "" || snap.Session.GameMode != nil {
+				t.Fatalf("%s set identity: session %q mode %v", name, snap.SessionID, snap.Session.GameMode)
+			}
+		})
+	}
+
+	t.Run("UC-100/BR-010 game.shield_charge is still ignored", func(t *testing.T) {
+		m := NewMultiplexer(func(string) *Store { return newTestStore() })
+		if touched := m.ApplySpans(shieldChargeSpan("DEAD", "game-evicted")); len(touched) != 0 {
+			t.Fatalf("touched partitions = %v, want none", touched)
+		}
+	})
+}
