@@ -74,6 +74,16 @@
       },
       "defaultVariant": "link"
     },
+    "telemetry.moment_shape": {
+      "state": "ENABLED",
+      "variants": {
+        "span_event": "span_event",
+        "span": "span",
+        "log_event": "log_event",
+        "both": "both"
+      },
+      "defaultVariant": "span_event"
+    },
     "log_level": {
       "state": "ENABLED",
       "variants": {

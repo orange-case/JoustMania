@@ -217,7 +217,7 @@ func (m *Multiplexer) ApplySpans(td ptrace.Traces) []string {
 			for k := 0; k < spans.Len(); k++ {
 				span := spans.At(k)
 				if ignoredSpan(span) {
-					continue // never creates a partition (game.shield_charge #1837; game.death_warning, game.player_death UC-100 BR-010)
+					continue // never creates a partition (game.shield_charge #1837; game.death_warning, game.player_death UC-100 BR-010; game.intervention UC-101 BR-010)
 				}
 				gameID := spanGameIDOf(span.Attributes())
 				s := m.store(gameID)

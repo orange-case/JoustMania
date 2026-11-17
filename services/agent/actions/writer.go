@@ -269,8 +269,11 @@ func (w *Writer) write(ctx context.Context, d decision.Decision) error {
 }
 
 func (w *Writer) put(ctx context.Context, d decision.Decision, flag string, scope flagservice.Scope, value any) error {
+	// DecisionID is the decision's intervention id (UC-101 BR-003, FR-221):
+	// informational, empty for a decision without one (A3), never checked (NFR-061).
 	_, err := w.svc.Put(ctx, FlagSetInterventions, flag, flagservice.Write{
 		Value: value, Scope: scope, Writer: writerLabel, Reason: d.Intervention,
+		DecisionID: d.InterventionID,
 	})
 	return err
 }
@@ -288,7 +291,7 @@ func (w *Writer) post(ctx context.Context, d decision.Decision, flag string, pay
 	}
 	_, err := w.svc.Post(ctx, FlagSetInterventions, flag, flagservice.Event{
 		Scope: flagservice.Scope{GameID: d.GameID}, Payload: payload,
-		Writer: writerLabel, Reason: d.Intervention,
+		Writer: writerLabel, Reason: d.Intervention, DecisionID: d.InterventionID,
 	})
 	return err
 }
