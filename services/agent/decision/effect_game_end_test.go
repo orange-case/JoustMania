@@ -64,8 +64,8 @@ func awaitEffectsWithin(t *testing.T, l *Loop, d time.Duration) {
 	}
 }
 
-// effectSpans returns the ended agent.intervention.effect spans.
-func effectSpans(sr *tracetest.SpanRecorder) []sdktrace.ReadOnlySpan {
+// endedEffectSpans returns the ended agent.intervention.effect spans.
+func endedEffectSpans(sr *tracetest.SpanRecorder) []sdktrace.ReadOnlySpan {
 	var out []sdktrace.ReadOnlySpan
 	for _, s := range sr.Ended() {
 		if s.Name() == SpanInterventionEffect {
@@ -98,7 +98,7 @@ func TestEffect_GameEndClosesWindowEarly(t *testing.T) {
 		}
 		awaitEffectsWithin(t, l, 2*time.Second)
 
-		spans := effectSpans(sr)
+		spans := endedEffectSpans(sr)
 		if len(spans) != 1 {
 			t.Fatalf("got %d effect spans, want 1", len(spans))
 		}
@@ -132,7 +132,7 @@ func TestEffect_GameEndClosesWindowEarly(t *testing.T) {
 		if n := l.CloseEffectsAtGameEnd(); n != 0 {
 			t.Errorf("second CloseEffectsAtGameEnd closed %d samples, want 0", n)
 		}
-		if got := len(effectSpans(sr)); got != 1 {
+		if got := len(endedEffectSpans(sr)); got != 1 {
 			t.Errorf("got %d effect spans after the timer fired too, want exactly 1", got)
 		}
 	})
@@ -149,7 +149,7 @@ func TestEffect_GameEndClosesWindowEarly(t *testing.T) {
 		sched.fire()
 		l.AwaitEffects()
 
-		spans := effectSpans(sr)
+		spans := endedEffectSpans(sr)
 		if len(spans) != 1 {
 			t.Fatalf("got %d effect spans, want 1", len(spans))
 		}
@@ -178,7 +178,7 @@ func TestEffect_GameEndClosesWindowEarly(t *testing.T) {
 		}
 		sched.fire()
 		l.AwaitEffects()
-		spans := effectSpans(sr)
+		spans := endedEffectSpans(sr)
 		if len(spans) != 1 || attrMap(spans[0].Attributes())[AttrEffectWindowEndReason] != EffectWindowElapsed {
 			t.Fatalf("want one elapsed effect span, got %d", len(spans))
 		}
@@ -205,7 +205,7 @@ func TestEffect_GameEndRacingTimerEmitsOnce(t *testing.T) {
 			wg.Wait()
 			l.AwaitEffects()
 		}
-		if got := len(effectSpans(sr)); got != rounds {
+		if got := len(endedEffectSpans(sr)); got != rounds {
 			t.Fatalf("got %d effect spans for %d samples, want exactly one each", got, rounds)
 		}
 		l.pendingMu.Lock()
@@ -251,7 +251,7 @@ func TestEffect_GameEndCloseWithRealTimerNoLeak(t *testing.T) {
 		l.CloseEffectsAtGameEnd()
 		awaitEffectsWithin(t, l, 2*time.Second)
 
-		spans := effectSpans(sr)
+		spans := endedEffectSpans(sr)
 		if len(spans) != 1 || attrMap(spans[0].Attributes())[AttrEffectWindowEndReason] != EffectWindowGameEnded {
 			t.Fatalf("want one game_ended effect span, got %d", len(spans))
 		}
@@ -274,7 +274,7 @@ func TestEffect_ShutdownThenGameEndEmitsNothing(t *testing.T) {
 		cancel()
 		l.AwaitEffects()
 		l.CloseEffectsAtGameEnd()
-		if got := len(effectSpans(sr)); got != 0 {
+		if got := len(endedEffectSpans(sr)); got != 0 {
 			t.Fatalf("got %d effect spans after shutdown, want 0", got)
 		}
 	})
@@ -301,7 +301,7 @@ func TestLoopSet_EffectsOnGameEnd(t *testing.T) {
 		store.SetGameActive(false)
 		awaitEffectsWithin(t, l, 2*time.Second)
 
-		spans := effectSpans(sr)
+		spans := endedEffectSpans(sr)
 		if len(spans) != 1 || attrMap(spans[0].Attributes())[AttrEffectWindowEndReason] != EffectWindowGameEnded {
 			t.Fatalf("want one game_ended effect span, got %d", len(spans))
 		}
