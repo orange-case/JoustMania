@@ -36,6 +36,14 @@ const (
 	MaxSerialsPerGame = 64
 	// MaxIDLength bounds game ids, serials, experiment ids, arms and writer labels.
 	MaxIDLength = 80
+	// MaxDecisionIDLength bounds the decision_id the service keeps and serves with a
+	// value (UC-101 BR-003, flags.md §5, #2665). A longer id is dropped, never
+	// refused: the write is applied and served without an id (NFR-061), so the id
+	// can never push a game past its NFR-051 bound or a snapshot past flagd's
+	// sync message size. The agent's ids are 16 hex characters, exactly the cap:
+	// with every value and event of a 64-player game carrying one, the game stays
+	// under 64 KiB (TestNFR051_SnapshotBounded).
+	MaxDecisionIDLength = 16
 )
 
 // Options configures a State.

@@ -107,6 +107,41 @@ func TestDecisionID_ServedWithTheValue(t *testing.T) {
 		}
 	})
 
+	t.Run("UC-101/BR-003 experiment+arm values carry no id", func(t *testing.T) {
+		f := newFixture(t, fixtureOpts{})
+		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Scope: Scope{ExperimentID: "exp_1", Arm: "control"}, Writer: "agent", DecisionID: "int_arm"})
+		if got := decisionMeta(f, "sensitivity"); len(got) != 0 {
+			t.Fatalf("experiment+arm decision metadata %v, want none", got)
+		}
+	})
+
+	t.Run("UC-101/BR-003 an id over the cap is dropped, the write still applies (NFR-061)", func(t *testing.T) {
+		f := newFixture(t, fixtureOpts{k: 3})
+		f.register("game_a", "c/1", "MOCK0001")
+		long := strings.Repeat("x", MaxDecisionIDLength+1)
+		atCap := strings.Repeat("y", MaxDecisionIDLength)
+		grant := f.put(WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("3"), Scope: Scope{GameID: "game_a", Serial: "MOCK0001"}, Writer: "agent", DecisionID: long})
+		if resolved, _ := f.resolve("shield_seconds", map[string]any{"gameId": "game_a", "targetingKey": "MOCK0001"}); resolved != grant.Variant {
+			t.Fatalf("grant with an over-cap id resolved %q, want its variant %q", resolved, grant.Variant)
+		}
+		if got := decisionMeta(f, "shield_seconds"); len(got) != 0 {
+			t.Fatalf("over-cap id served as %v, want none", got)
+		}
+		for _, id := range []string{long, atCap} {
+			if _, err := f.state.Append(AppendRequest{Set: "interventions", Flag: "eliminate_player", Scope: Scope{GameID: "game_a"}, Payload: map[string]any{"serial": "MOCK0001"}, Writer: "agent", DecisionID: id}); err != nil {
+				t.Fatalf("append with a %d-char id refused: %v", len(id), err)
+			}
+		}
+		_, val := f.resolve("eliminate_player", map[string]any{"gameId": "game_a"})
+		events := val.(map[string]any)["events"].([]any)
+		if _, ok := events[0].(map[string]any)["decision_id"]; ok {
+			t.Fatalf("over-cap event id served: %v", events[0])
+		}
+		if got := events[1].(map[string]any)["decision_id"]; got != atCap {
+			t.Fatalf("event id at the cap served as %v, want it kept", got)
+		}
+	})
+
 	t.Run("UC-101/BR-003 overlay values carry no id", func(t *testing.T) {
 		f := newFixture(t, fixtureOpts{})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Writer: "test", DecisionID: "int_stack"})
