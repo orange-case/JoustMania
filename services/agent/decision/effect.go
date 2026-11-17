@@ -18,8 +18,9 @@ import (
 	"github.com/joustmania/agent/telemetry/keys"
 )
 
-// newInterventionID returns a fresh dispatch-unique id used to tie an intervention's
-// effect record to the decision that produced it (#918). A UUID v4 hex string —
+// newInterventionID returns a fresh dispatch-unique id: the intervention id a decision
+// is written with (UC-101 BR-003, #2665), which ties its effect record (#918) and the
+// game's intervention moment to the decision that produced it. A UUID v4 hex string —
 // opaque, collision-resistant across agent restarts, never compared for ordering.
 func newInterventionID() string { return uuid.NewString() }
 
@@ -179,7 +180,13 @@ func (l *Loop) scheduleEffectSample(decisionCtx context.Context, c gamecontext.G
 	if now == nil {
 		now = time.Now
 	}
-	id := newInterventionID()
+	// Reuse the id the decision was written with (UC-101 BR-003, #2665): the effect's
+	// intervention.id is the decision's decision.intervention_id and the write's
+	// decision_id. A decision without one (a direct caller) gets a fresh id.
+	id := d.InterventionID
+	if id == "" {
+		id = newInterventionID()
+	}
 	dispatchedAt := now()
 	objective := d.ObjectiveServed
 	if objective == "" {

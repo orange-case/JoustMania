@@ -97,6 +97,14 @@ type Decision struct {
 	// call so the writer can label agent_intervention_writes_total{game_kind}
 	// (#2294). Engines leave it empty.
 	GameKind string `json:",omitempty"`
+	// InterventionID is the decision's intervention id (UC-101 BR-003, FR-221,
+	// #2665): dispatchDecision creates it before the ActionSink call, the writer
+	// sends it as the flag-service decision_id, the decision span carries it as
+	// decision.intervention_id and the effect sample reuses it as intervention.id.
+	// Informational only: nothing checks it and it never blocks a write (NFR-061).
+	// Engines leave it empty; it is sink addressing, not part of what was decided,
+	// so it is not serialized.
+	InterventionID string `json:"-"`
 	// TargetSerials is the set of players of a group intervention
 	// (grant_group_shield, #2467 UC-040 A47): 2 to 6 distinct serials, sorted.
 	// Empty for every other intervention, which uses TargetSerial.
@@ -1045,6 +1053,11 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	l.recordIntervention(d.Intervention, d.TargetSerial, false)
 	// Address the write to the game this loop decided for (UC-040 BR-002,
 	// BR-011): the sink needs it so end_game can never end another game (#1310).
+	// UC-101 BR-003 (#2665, FR-221): the intervention id is made BEFORE the write,
+	// so the writer sends it as the flag-service decision_id and the effect sample
+	// reuses it. A group shield is one decision, one write, one id. Informational
+	// only: nothing waits for or checks it (NFR-061).
+	d.InterventionID = newInterventionID()
 	addressed := d
 	addressed.GameID = c.SessionID
 	addressed.GameKind = c.GameKind
@@ -1058,6 +1071,8 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 			attribute.Bool(AttrDecisionApplied, false),
 			attribute.String(AttrDecisionNotAppliedReason, NotAppliedWriteFailed),
 		}
+		// UC-101 A2: a failed write keeps the id it sent (decision span only).
+		dSpan.SetAttributes(attribute.String(AttrDecisionInterventionID, d.InterventionID))
 		dSpan.SetAttributes(failed...)
 		aSpan.SetAttributes(failed...)
 		aSpan.RecordError(err)
@@ -1090,7 +1105,12 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 		l.noteIntervention(c, d, NotedGatedOff, state.DecideBackend, l.nowOrDefault()())
 		return
 	}
-	dSpan.SetAttributes(attribute.Bool(AttrDecisionApplied, true))
+	// UC-101 BR-003: every written decision carries the id it was written with,
+	// whether or not an effect sample is scheduled below. A gated no-op (above)
+	// sent nothing, so it carries none.
+	dSpan.SetAttributes(
+		attribute.Bool(AttrDecisionApplied, true),
+		attribute.String(AttrDecisionInterventionID, d.InterventionID))
 	aSpan.SetAttributes(attribute.Bool(AttrDecisionApplied, true))
 	*applied = true
 	l.recordApplyOutcome(d.Intervention, gamecontext.ApplyOutcomeApplied)
@@ -1100,22 +1120,20 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	// Intervention-effect MEASUREMENT (#918): stamp a baseline of this game's
 	// fitness/objective signals NOW (the same fitness.evaluated quantities the decision
 	// span carries) and schedule a follow-up sample after the window to measure the
-	// delta, attributed to a dispatch-unique intervention id. This closes the game-path
+	// delta, attributed to the decision's intervention id (made before the write,
+	// UC-101 BR-003; the sample reuses it, no second id). This closes the game-path
 	// measurement loop the infra path already has (fitness->rollback). It is MEASUREMENT
 	// ONLY — it never reverts the intervention. Scheduled only for WRITTEN decisions:
 	// a blocked one, a gated no-op (interventions_enabled off) and a failed write
-	// never moved the game, so they get no sample and no id (#1728 review). The decision
-	// span is still open here, so the id lands on it. The id is stamped on this decision span so a
-	// Jaeger query joins decision->effect; "" means no sample was scheduled (effect
-	// measurement un-wired, no baseline signals this cycle, or the pending cap reached) —
-	// then the decision span simply carries no effect id. Reuses state.FitnessEvaluated,
+	// never moved the game, so they get no sample (#1728 review; a failed write still
+	// carries its id on the decision span, UC-101 A2). No sample is scheduled when effect
+	// measurement is un-wired, the cycle has no baseline signals or the pending cap is
+	// reached; the decision span carries its id either way. Reuses state.FitnessEvaluated,
 	// which OnEvaluate lifted from this cycle's engine evaluation, and the live
 	// thresholds from this cycle's snapshot, so baseline and follow-up sample the SAME
 	// fitness functions against the SAME thresholds. Off the hot path: a cheap map copy
 	// plus a goroutine + timer (bounded, leak-safe via effectWG + rootCtx).
-	if id := l.scheduleEffectSample(dCtx, c, d, state.FitnessEvaluated, fitnessThresholds(snapshot.Fitness)); id != "" {
-		dSpan.SetAttributes(attribute.String(AttrDecisionInterventionID, id))
-	}
+	l.scheduleEffectSample(dCtx, c, d, state.FitnessEvaluated, fitnessThresholds(snapshot.Fitness))
 }
 
 // applyAction applies d through sink and reports whether anything was written. A

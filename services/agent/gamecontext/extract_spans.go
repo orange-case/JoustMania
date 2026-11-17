@@ -37,6 +37,10 @@ const (
 	// shield charge span, the agent takes nothing from them.
 	spanNameDeathWarning = "game.death_warning"
 	spanNamePlayerDeath  = "game.player_death"
+	// spanNameIntervention is the intervention moment's span (UC-101 BR-010, #2665),
+	// a child of the player span like the other moments; the agent takes nothing
+	// from it (its own decisions and effect measurement are its source).
+	spanNameIntervention = "game.intervention"
 
 	// resourceAttrServiceName mirrors semconv service.name, used for the
 	// own-telemetry skip.
@@ -117,7 +121,7 @@ func (s *Store) ApplySpans(td ptrace.Traces) bool {
 // ignoredSpan reports whether a span carries nothing the agent takes in.
 func ignoredSpan(span ptrace.Span) bool {
 	switch span.Name() {
-	case spanNameShieldCharge, spanNameDeathWarning, spanNamePlayerDeath:
+	case spanNameShieldCharge, spanNameDeathWarning, spanNamePlayerDeath, spanNameIntervention:
 		return true
 	}
 	return false
