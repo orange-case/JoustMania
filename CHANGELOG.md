@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.18.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.17.0...joustmania-v0.18.0) (2026-11-17)
+
+
+### Features
+
+* **agent:** one effect span per intervention and a game summary span ([#2640](https://github.com/orange-case/JoustMania/issues/2640)) ([#2643](https://github.com/orange-case/JoustMania/issues/2643)) ([13bd653](https://github.com/orange-case/JoustMania/commit/13bd653c6d56b2436d708a9cbe6db10a1f850528))
+* **telemetry:** PRODUCER/CONSUMER kinds for message hand-off spans ([#2654](https://github.com/orange-case/JoustMania/issues/2654)) ([#2657](https://github.com/orange-case/JoustMania/issues/2657)) ([f446496](https://github.com/orange-case/JoustMania/commit/f446496082b365c931fc5368240beb7858a3e9c2))
+
+
+### Bug Fixes
+
+* **agent:** fewer spans per game trace — signal events, no evaluator spans, questions once ([#2648](https://github.com/orange-case/JoustMania/issues/2648)) ([#2656](https://github.com/orange-case/JoustMania/issues/2656)) ([b7fd4d4](https://github.com/orange-case/JoustMania/commit/b7fd4d4d8dbc2a602bc2409b600bbf4ef9a6994c))
+* **controller-manager:** warning effects as span events, not spans ([#2647](https://github.com/orange-case/JoustMania/issues/2647)) ([#2652](https://github.com/orange-case/JoustMania/issues/2652)) ([6e120dd](https://github.com/orange-case/JoustMania/commit/6e120dd9175d719fea686ccbb7625a0879f6491f))
+* **flag-service:** retry override pushes Flagsmith's edge does not see yet; name refused keys in /state ([#2639](https://github.com/orange-case/JoustMania/issues/2639)) ([#2644](https://github.com/orange-case/JoustMania/issues/2644)) ([2002888](https://github.com/orange-case/JoustMania/commit/2002888d1d59191d731815e835a93344fd54468a))
+* **telemetry:** configurable deployment.environment; game.kind real/shadow everywhere ([#2646](https://github.com/orange-case/JoustMania/issues/2646)) ([#2653](https://github.com/orange-case/JoustMania/issues/2653)) ([2bc5d89](https://github.com/orange-case/JoustMania/commit/2bc5d893fcc830004ffefbdce4d176b62bb4f4c8))
+* **telemetry:** one feature_flag.evaluation event per flag and variant per span ([#2649](https://github.com/orange-case/JoustMania/issues/2649)) ([#2651](https://github.com/orange-case/JoustMania/issues/2651)) ([495807f](https://github.com/orange-case/JoustMania/commit/495807fff55d143b0ec692d400aabe996f290684))
+
+
+### Refactoring
+
+* **agent:** extract named steps from experiment registry and loop ([#2635](https://github.com/orange-case/JoustMania/issues/2635)) ([#2636](https://github.com/orange-case/JoustMania/issues/2636)) ([1cdbb05](https://github.com/orange-case/JoustMania/commit/1cdbb05de1a9311ffdadf832af807541b4845c72))
+* **game-coordinator:** move ambient effect handlers and agent cue into intervention_effects ([#2634](https://github.com/orange-case/JoustMania/issues/2634)) ([#2638](https://github.com/orange-case/JoustMania/issues/2638)) ([ef9c5bc](https://github.com/orange-case/JoustMania/commit/ef9c5bc9097cc87a235de267a64e7a017c41eb5a))
+* **game-coordinator:** move music tempo driver into TempoMixin ([#2633](https://github.com/orange-case/JoustMania/issues/2633)) ([#2637](https://github.com/orange-case/JoustMania/issues/2637)) ([0f80684](https://github.com/orange-case/JoustMania/commit/0f80684f8fd455bb86b03e5c34d5acd2cf8ed2af))
+
+
+### Documentation
+
+* **spec:** FR-200 and FR-201 Implemented; remove stale "planned" text ([#2479](https://github.com/orange-case/JoustMania/issues/2479)) ([#2650](https://github.com/orange-case/JoustMania/issues/2650)) ([07305e0](https://github.com/orange-case/JoustMania/commit/07305e0f06ce15a02b20e7c5da8472b09e795de2))
+
+
+### Tests
+
+* **agent,flag-service:** add missing UC-040 BR-040 and UC-043 BR-008 tags ([#2645](https://github.com/orange-case/JoustMania/issues/2645)) ([358161a](https://github.com/orange-case/JoustMania/commit/358161a978955a14f8f27177e30f1ce91ee969c8))
+
 ## [0.17.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.16.0...joustmania-v0.17.0) (2026-11-16)
 
 
