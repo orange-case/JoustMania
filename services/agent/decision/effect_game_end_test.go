@@ -191,6 +191,8 @@ func TestEffect_ScheduledAfterGameEndClosesAtOnce(t *testing.T) {
 		provider := newFakeContextProvider()
 		const gameID = "game_late_dispatch"
 		l, sr, _, _ := effectLoop(t, provider, gameID)
+		clock := &fakeClock{t: time.Unix(1_700_000_000, 0)}
+		l.now = clock.now
 
 		// The decision was validated while the game was active; game_active 1 -> 0
 		// then fired the hook, which found no open sample, and only then the
