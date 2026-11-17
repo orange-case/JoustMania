@@ -27,7 +27,16 @@ Preconditions (UC-100):
 **Choose the shape for the next game.** Set the observability flag `telemetry.moment_shape` through the
 flag service ([UC-053](../use_cases/UC-053.md)). Values: `span_event` (default), `span`, `log_event`,
 `both`. The flag is a stack overlay without targeting, so a write applies to the next game
-([flags.md §10](../specs/flags.md#10-observability)).
+([flags.md §10](../specs/flags.md#10-observability)). On the case, through the envoy route of the flag service's
+HTTP API ([services.md §7.2](../specs/services.md#72-httpjson-api-resource-style)):
+
+```bash
+# set the shape for the next game (an in-memory stack overlay, like the stage scripts write)
+curl -sS -X PUT http://localhost/flags/observability/telemetry.moment_shape \
+  -H 'Content-Type: application/json' -d '{"variant": "log_event", "writer": "stage"}'
+# back to the default (clears the in-memory overlay)
+curl -sS -X DELETE http://localhost/flags/observability/telemetry.moment_shape
+```
 
 - One shape per game. The coordinator reads the flag once when the game starts. Changing it during a game
   does not affect that game; the new value applies from the next game (UC-100 A2, BR-002).
