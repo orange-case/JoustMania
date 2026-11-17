@@ -987,10 +987,12 @@ func TestFraction_RendersAFractionalElse(t *testing.T) {
 }
 
 // fillGameToTheBound registers a game with the given serials and writes the
-// widest realistic set of values and events into it; it returns the bytes the
-// game adds to the snapshot.
+// widest realistic set of values and events into it, each with a decision_id of
+// the longest length served (MaxDecisionIDLength, UC-101 BR-003, #2665); it
+// returns the bytes the game adds to the snapshot.
 func fillGameToTheBound(t *testing.T, f *fixture, gameID string, serials []string) int {
 	t.Helper()
+	id := strings.Repeat("d", MaxDecisionIDLength)
 	f.register(gameID, "c/1", serials...)
 	before, _, _ := f.state.Snapshot("")
 	for _, s := range serials {
@@ -1001,7 +1003,7 @@ func fillGameToTheBound(t *testing.T, f *fixture, gameID string, serials []strin
 			{Flag: "toughness_boost_seconds", Value: raw(`"5:2.0"`)},
 			{Flag: "soft_penalty_action", Value: raw(`"tighten:5:0.5"`)},
 		} {
-			w.Set, w.Scope = "interventions", Scope{GameID: gameID, Serial: s}
+			w.Set, w.Scope, w.DecisionID = "interventions", Scope{GameID: gameID, Serial: s}, id
 			f.put(w)
 		}
 	}
@@ -1011,12 +1013,12 @@ func fillGameToTheBound(t *testing.T, f *fixture, gameID string, serials []strin
 		{Flag: "pacing_profile", Variant: "calm"}, {Flag: "tempo_ramp", Value: raw(`"1.3:8:linear"`)},
 		{Flag: "auto_rubberband", Variant: "gentle"},
 	} {
-		w.Set, w.Scope = "interventions", Scope{GameID: gameID}
+		w.Set, w.Scope, w.DecisionID = "interventions", Scope{GameID: gameID}, id
 		f.put(w)
 	}
 	for i := 0; i < 20; i++ {
 		for _, flag := range []string{"eliminate_player", "revive_player"} {
-			if _, err := f.state.Append(AppendRequest{Set: "interventions", Flag: flag, Scope: Scope{GameID: gameID}, Payload: map[string]any{"serial": serials[i%len(serials)]}}); err != nil {
+			if _, err := f.state.Append(AppendRequest{Set: "interventions", Flag: flag, Scope: Scope{GameID: gameID}, Payload: map[string]any{"serial": serials[i%len(serials)]}, DecisionID: id}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1025,7 +1027,7 @@ func fillGameToTheBound(t *testing.T, f *fixture, gameID string, serials []strin
 			{Flag: "controller_effect", Payload: map[string]any{"serial": serials[i%len(serials)], "effect": "rumble"}},
 			{Flag: "end_game"},
 		} {
-			a.Set, a.Scope = "interventions", Scope{GameID: gameID}
+			a.Set, a.Scope, a.DecisionID = "interventions", Scope{GameID: gameID}, id
 			if _, err := f.state.Append(a); err != nil {
 				t.Fatal(err)
 			}

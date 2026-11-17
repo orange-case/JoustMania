@@ -252,7 +252,7 @@ func (s *State) Put(req WriteRequest) (WriteResult, *fserr.Error) {
 	f, scopeName, checked := plan.f, plan.scope, plan.checked
 
 	now := s.opts.Now()
-	v := &value{Writer: req.Writer, DecisionID: req.DecisionID, WrittenAt: now, Persisted: req.Persist}
+	v := &value{Writer: req.Writer, DecisionID: servedDecisionID(req.DecisionID), WrittenAt: now, Persisted: req.Persist}
 	if plan.ttl > 0 {
 		v.ExpiresAt = now.Add(plan.ttl)
 	}
@@ -487,7 +487,7 @@ func (s *State) Append(req AppendRequest) (WriteResult, *fserr.Error) {
 		f.events[req.Scope.GameID] = list
 	}
 	list.Seq++
-	list.Events = append(list.Events, event{Seq: list.Seq, Payload: payload})
+	list.Events = append(list.Events, event{Seq: list.Seq, Payload: payload, DecisionID: servedDecisionID(req.DecisionID)})
 	if k := s.opts.EventListLen; len(list.Events) > k {
 		list.Events = append([]event(nil), list.Events[len(list.Events)-k:]...)
 	}
@@ -1001,4 +1001,14 @@ func (f *flagState) place(scopeName string, sc Scope, v *value) func() {
 		}
 	}
 	return func() {}
+}
+
+// servedDecisionID returns the decision_id the service keeps and serves with a
+// value or event: the write's id, or "" when it is longer than
+// MaxDecisionIDLength (UC-101 BR-003, NFR-061: dropped, never refused, #2665).
+func servedDecisionID(id string) string {
+	if len(id) > MaxDecisionIDLength {
+		return ""
+	}
+	return id
 }
