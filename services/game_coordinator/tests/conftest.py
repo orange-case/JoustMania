@@ -106,6 +106,7 @@ class FakeInterventionGame:
         self.rubberbands: list[tuple[str, float | None]] = []
         self.sounds: list[tuple[object, int]] = []
         self.sensitivity_overrides: list[object] = []
+        self.interventions: list[tuple[str, object]] = []  # (serial, InterventionTag) per record_intervention
 
     @property
     def flag_eval_context(self):
@@ -160,6 +161,14 @@ class FakeInterventionGame:
     async def apply_auto_rubberband(self, strength, seconds=None):
         self.rubberbands.append((strength, seconds))
         return 0
+
+    def record_intervention(self, serial, *, types=None, timestamp_ns=None):  # noqa: ARG002
+        """Takes the tag from the current intervention scope, as BaseGameMode.record_intervention (#2665)."""
+        from services.game_coordinator.games.intervention_moment import take_intervention
+
+        tag = take_intervention(serial, types)
+        if tag is not None:
+            self.interventions.append((serial, tag))
 
     def grants(self, flag_key) -> list[str]:
         """Serials granted by ``flag_key``, in order."""

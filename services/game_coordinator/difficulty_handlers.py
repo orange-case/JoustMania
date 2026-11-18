@@ -218,6 +218,7 @@ async def handle_player_sensitivity_factor(ctx: InterventionContext, manager: In
         logger.info(f"player_sensitivity_factor: {serial} -> {clamped:.2f}")
         if clamped != previous:
             _record_factor_event(player, serial, "sensitivity_factor_applied", "sensitivity_factor", clamped)
+            game.record_intervention(serial)  # UC-101 BR-001: the intervention moment, a changed factor only
 
 
 async def handle_player_handicap_factor(ctx: InterventionContext, manager: InterventionManager) -> None:
@@ -263,6 +264,7 @@ async def handle_player_handicap_factor(ctx: InterventionContext, manager: Inter
         logger.info(f"player_handicap_factor: {serial} -> {clamped:.2f}")
         if clamped != previous:
             _record_factor_event(player, serial, "handicap_factor_applied", "handicap_factor", clamped)
+            game.record_intervention(serial)  # UC-101 BR-001: the intervention moment, a changed factor only
 
 
 def _reset_player_factor(ctx: InterventionContext, attr: str, neutral: float, event: str) -> None:
@@ -284,6 +286,7 @@ def _reset_player_factor(ctx: InterventionContext, attr: str, neutral: float, ev
         if previous != neutral:
             logger.info(f"{attr}: {serial} reset to {neutral:.2f}")
             _record_factor_event(player, serial, event, attr, neutral)
+            game.record_intervention(serial)  # UC-101 BR-001: a return to 1.0 is an intervention moment too
 
 
 async def handle_player_sensitivity_factor_revert(ctx: InterventionContext) -> None:

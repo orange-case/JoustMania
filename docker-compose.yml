@@ -480,6 +480,10 @@ services:
       # Game lifecycle reported to the flag service (FR-135, #1410)
       - FLAG_SERVICE_URL=http://flag-service:8070
       - FLAG_SERVICE_INSTANCE=game-coordinator  # stable across recreate (the hostname is the container id), UC-053 A10
+      # Span events kept per span (SDK default 128, oldest dropped first): the game root
+      # carries the ground truth of FR-219 and FR-222, the player span the moments
+      # (telemetry.md 3.2, #2665). Coordinator only.
+      - OTEL_SPAN_EVENT_COUNT_LIMIT=1024
     depends_on:
       flagd:
         condition: service_started

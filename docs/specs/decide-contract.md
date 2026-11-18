@@ -718,7 +718,7 @@ once after 250 ms. The game coordinator applies the result
 Since #2665 (FR-221, UC-101 BR-003, agent slice): every write carries the decision's intervention id as
 `decision_id`, created before the write (`decision/decision.go` `dispatchDecision`) and stamped on
 `agent.decision` as `decision.intervention_id`; the effect sample reuses it as `intervention.id`.
-Planned (#2665): the coordinator records it on the intervention moment of the player it applies the
+Since #2665 (coordinator slice): the coordinator records it on the intervention moment of the player it applies the
 intervention to ([telemetry.md §3.2](telemetry.md#32-game-coordinator)). The id is informational:
 nothing in this chain checks it, and it never blocks or delays a write (NFR-061). Full flag shapes and bounds:
 [flags.md § interventions](flags.md#5-interventions), [§13.1](flags.md#131-interventions-all-writes-are-game-scoped).
