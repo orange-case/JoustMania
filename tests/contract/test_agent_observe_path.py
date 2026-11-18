@@ -157,8 +157,18 @@ def test_only_the_logs_agent_pipeline_sends_logs_to_the_agent(collector):
         ("intervention", {"moment.id": "g:intervention:1"}, {}, True),
         ("death_warning", {}, {}, True),
         ("player_death", {"moment.id": "g/P1/2"}, {"orangecase.synthetic": True}, True),
-        ("player_death", {"moment.id": "g/P1/2"}, {"orangecase.synthetic": "true"}, True),
-        ("player_death", {"moment.id": "g/P1/2"}, {"orangecase.synthetic": False}, False),
+        (
+            "player_death",
+            {"moment.id": "g/P1/2"},
+            {"orangecase.synthetic": "true"},
+            True,
+        ),
+        (
+            "player_death",
+            {"moment.id": "g/P1/2"},
+            {"orangecase.synthetic": False},
+            False,
+        ),
     ],
     ids=[
         "warning-kept",

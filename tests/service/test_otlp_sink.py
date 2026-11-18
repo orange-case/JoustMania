@@ -224,7 +224,6 @@ def test_sink_tees_metrics_exports_to_another_receiver():
             sink.stop()
 
 
-
 def _kv(key, value):
     if isinstance(value, bool):
         return common_pb2.KeyValue(key=key, value=common_pb2.AnyValue(bool_value=value))
@@ -286,6 +285,7 @@ def test_sink_tees_only_moment_log_events_to_another_receiver():
     finally:
         for sink in (tee, downstream):
             sink.stop()
+
 
 def test_otlp_composition_points_every_service_at_the_sink(tmp_path):
     stack = ServiceStack(SERVICE_COMPOSITION, tmp_path)

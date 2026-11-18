@@ -137,7 +137,7 @@ class FFAGame(BaseGameMode):
         # order from the coordinator itself rather than inferring it.
         await self.event_publisher(GameEvent.PLAYER_DEATH, {"serial": serial, "alive_remaining": str(alive_count)})
 
-        # End the lifecycle span. The player_death SPAN event was already recorded by
+        # End the lifecycle span. The player_death moment was already recorded by
         # the base kill path (_kill_player); emitting another here doubled it.
         if player.span:
             player.span.set_status(Status(StatusCode.OK))

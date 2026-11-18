@@ -61,9 +61,9 @@ async def test_a_nonstop_death_as_a_log_event_reaches_the_agent(stack, headless_
         assert game_id in await wait_until_running(game_client, {game_id}, timeout=20.0)
 
         victim = serials[0]
-        assert await kill_player_verified(
-            mock_client, game_client, victim, lambda p: not p.alive, game_id=game_id
-        ), "the game stopped before the kill registered"
+        assert await kill_player_verified(mock_client, game_client, victim, lambda p: not p.alive, game_id=game_id), (
+            "the game stopped before the kill registered"
+        )
 
         def the_death(record) -> bool:
             return str(record.attributes.get("moment.id", "")).startswith(f"{game_id}/{victim}/")
