@@ -44,9 +44,44 @@ func (f *Fake) registerAdminDefaults() {
 	d.HandleFunc("GET "+APIPath+"environments/{env}/edge-identities/", func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]any{"results": []any{}, "last_evaluated_key": nil})
 	})
-	d.HandleFunc("DELETE "+APIPath+"environments/{env}/edge-identities/{uuid}/", func(w http.ResponseWriter, _ *http.Request) {
+	d.HandleFunc(methodDelete+APIPath+"environments/{env}/edge-identities/{uuid}/", func(w http.ResponseWriter, r *http.Request) {
+		f.Overrides.Forget(r.PathValue("uuid"))
 		w.WriteHeader(http.StatusNoContent)
 	})
+	f.registerOverrideRoutes()
+}
+
+// Method prefixes of ServeMux patterns.
+const (
+	methodGet    = "GET "
+	methodPost   = "POST "
+	methodPut    = "PUT "
+	methodDelete = "DELETE "
+)
+
+// registerOverrideRoutes serves the SaaS's identity override routes from
+// f.Overrides and answers the upsert by identifier the SaaS does not route
+// with Django's HTML 404 (#2682).
+func (f *Fake) registerOverrideRoutes() {
+	d := f.defaults
+	overrides := func(w http.ResponseWriter, r *http.Request) {
+		uuid, rest, _ := OverrideRoute(r.URL.Path)
+		if !f.Overrides.Serve(w, r, uuid, rest) {
+			DjangoNotFound(w, r)
+		}
+	}
+	list := APIPath + "environments/{env}/edge-identities/{uuid}/edge-featurestates/"
+	for _, m := range []string{methodGet, methodPost} {
+		d.HandleFunc(m+list+"{$}", overrides)
+	}
+	for _, m := range []string{methodGet, methodPut, methodDelete} {
+		d.HandleFunc(m+list+"{fs}/{$}", overrides)
+	}
+	upsert := APIPath + "environments/{env}/edge-identities-featurestates"
+	for _, m := range []string{methodGet, methodPost, methodPut, "PATCH ", methodDelete, "OPTIONS "} {
+		d.HandleFunc(m+upsert, DjangoNotFound)
+		d.HandleFunc(m+upsert+"/{$}", DjangoNotFound)
+	}
 }
 
 // create stores the request body (a JSON object) with a new id and answers it

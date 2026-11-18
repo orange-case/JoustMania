@@ -134,10 +134,10 @@ def test_identity_create_duplicate_override_and_delete(fake):
     assert status == 200 and fake.identities()["game:g2"]["traits"] == {"game_kind": "real"}
     fid = fake.feature_id("sensitivity")
     status, _, _ = _call(
-        fake, "PUT", base + "edge-identities-featurestates",
-        {"identifier": "game:g2", "feature": fid, "enabled": True, "feature_state_value": "2"},
+        fake, "POST", base + f"edge-identities/{created['identity_uuid']}/edge-featurestates/",
+        {"feature": fid, "enabled": True, "feature_state_value": "2"},
     )  # fmt: skip
-    assert status == 200 and fake.override("game:g2", "sensitivity") == {"enabled": True, "value": "2"}
+    assert status == 201 and fake.override("game:g2", "sensitivity") == {"enabled": True, "value": "2"}
     assert fake.audit_rows[0]["log"] == "Feature override created for feature 'sensitivity' and identity 'game:g2'"
     _, _, doc = _document(fake)
     assert [o["identifier"] for o in doc["identity_overrides"]] == ["game:g2"]
@@ -194,15 +194,53 @@ def test_admin_paths_need_the_environment_key_and_project_id(fake):
     assert fake.env_value("experiment_tick_seconds") == (False, None)
 
 
-def test_override_path_has_no_trailing_slash_and_delete_takes_a_json_body(fake):
+def _raw(fake, method, path, body=None):
+    """(status, content type, body bytes) of one Admin API call."""
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{fake.port}{path}",
+        method=method,
+        data=None if body is None else json.dumps(body).encode(),
+        headers={"Authorization": f"Api-Key {ADMIN_KEY}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status, resp.headers.get("Content-Type", ""), resp.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.headers.get("Content-Type", ""), err.read()
+
+
+@pytest.mark.uc("UC-055", flow="main", steps=[3])
+def test_override_routes_are_the_saas_routes(fake):
+    """#2682 (live SaaS, 2026-11-18): overrides go through the identity's own list and the
+    override itself; the upsert by identifier is Django's HTML 404, with or without slash."""
+    env = f"/api/v1/environments/{ENVIRONMENT_KEY}/"
     fid = fake.feature_id("sensitivity")
-    base = f"/api/v1/environments/{ENVIRONMENT_KEY}/edge-identities-featurestates"
-    put = {"identifier": "game:g4", "feature": fid, "enabled": True, "feature_state_value": "1"}
-    assert _call(fake, "PUT", base + "/", put)[0] == 404
-    assert _call(fake, "PUT", base, put)[0] == 200
-    status, _, _ = _call(fake, "DELETE", base, {"identifier": "game:g4", "feature": fid})
-    assert status == 204 and fake.override("game:g4", "sensitivity") is None
+    upsert = {"identifier": "game:g4", "feature": fid, "enabled": True, "feature_state_value": "1"}
+    for path in (env + "edge-identities-featurestates", env + "edge-identities-featurestates/"):
+        status, ctype, body = _raw(fake, "PUT", path, upsert)
+        assert status == 404 and ctype.startswith("text/html") and b"Not Found" in body
+    _, _, created = _call(fake, "POST", env + "edge-identities/", {"identifier": "game:g4"})
+    fs_list = env + f"edge-identities/{created['identity_uuid']}/edge-featurestates/"
+    status, _, answer = _call(fake, "POST", fs_list, {"feature": fid, "enabled": True, "feature_state_value": 5})
+    assert status == 201 and answer["featurestate_uuid"] and answer["identity_uuid"] == created["identity_uuid"]
+    assert answer["feature_state_value"] == 5  # typed in the API answer
+    status, _, dup = _call(fake, "POST", fs_list, {"feature": fid, "enabled": True, "feature_state_value": 6})
+    assert status == 400 and dup == ["Feature state already exists."]
+    one = fs_list + answer["featurestate_uuid"] + "/"
+    status, _, put = _call(fake, "PUT", one, {"feature": fid, "enabled": True, "feature_state_value": 10})
+    assert status == 200 and put["feature_state_value"] == 10
+    assert fake.override("game:g4", "sensitivity") == {"enabled": True, "value": 10}
+    # The edge document shows an integer override as a string.
+    _, _, doc = _document(fake)
+    [state] = next(o for o in doc["identity_overrides"] if o["identifier"] == "game:g4")["identity_features"]
+    assert state["feature_state_value"] == "10"
+    status, _, listed = _call(fake, "GET", fs_list)
+    assert status == 200 and [o["featurestate_uuid"] for o in listed] == [answer["featurestate_uuid"]]
+    assert _call(fake, "DELETE", one)[0] == 204 and fake.override("game:g4", "sensitivity") is None
     assert fake.audit_rows[0]["log"] == "Feature override deleted for feature 'sensitivity' and identity 'game:g4'"
+    status, _, gone = _call(fake, "DELETE", one)
+    assert status == 404 and gone == {"detail": "Not found."}
+    assert _call(fake, "GET", env + "edge-identities/nope/edge-featurestates/")[0] == 404
 
 
 def test_audit_needs_the_environment_filter(fake):
@@ -239,10 +277,7 @@ def test_controller_identity_traits_and_override_listing(fake):
     one = base + f"edge-identities/{created['identity_uuid']}/"
     _call(fake, "PUT", one + "update-traits/", {"trait_key": "game_id", "trait_value": "g1"})
     fid = fake.feature_id("sensitivity")
-    _call(
-        fake, "PUT", base + "edge-identities-featurestates",
-        {"identifier": "controller:MOCK0001", "feature": fid, "enabled": True, "feature_state_value": "2"},
-    )  # fmt: skip
+    _call(fake, "POST", one + "edge-featurestates/", {"feature": fid, "enabled": True, "feature_state_value": "2"})
     status, _, traits = _call(fake, "GET", one + "list-traits/")
     assert status == 200 and traits == [{"trait_key": "game_id", "trait_value": "g1"}]
     status, _, overrides = _call(fake, "GET", one + "edge-featurestates/")

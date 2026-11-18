@@ -40,6 +40,9 @@ type FeatureState struct {
 	Enabled           bool            `json:"enabled"`
 	FeatureSegment    json.RawMessage `json:"feature_segment,omitempty"`
 	FeatureStateValue json.RawMessage `json:"feature_state_value"`
+	// FeatureStateUUID addresses an identity override on the Admin API
+	// (overrides.go, #2682).
+	FeatureStateUUID string `json:"featurestate_uuid,omitempty"`
 }
 
 // IdentityOverride is one identity with its overrides (architecture note §2:

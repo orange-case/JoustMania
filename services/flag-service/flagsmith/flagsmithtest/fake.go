@@ -39,6 +39,9 @@ type Fake struct {
 	ServerKey string
 	// ProjectID is the project the default Admin routes report (42).
 	ProjectID int
+	// Overrides holds the identity overrides the default override routes
+	// serve (overrides.go, #2682).
+	Overrides *Overrides
 
 	mux          *http.ServeMux // the tests' handlers (Handle), tried first
 	defaults     *http.ServeMux // the default routes
@@ -63,7 +66,7 @@ const DefaultDocument = `{"name":"test","use_identity_overrides_in_local_eval":t
 // DefaultDocument until SetDocument.
 func New(t testing.TB) *Fake {
 	t.Helper()
-	f := &Fake{mux: http.NewServeMux(), defaults: http.NewServeMux(), ProjectID: 42, nextID: 1000, doc: []byte(DefaultDocument), events: make(chan string, 16)}
+	f := &Fake{mux: http.NewServeMux(), defaults: http.NewServeMux(), ProjectID: 42, Overrides: NewOverrides(), nextID: 1000, doc: []byte(DefaultDocument), events: make(chan string, 16)}
 	f.defaults.HandleFunc("GET "+APIPath+"environment-document/", f.document)
 	f.defaults.HandleFunc("GET /sse/", f.sse)
 	f.registerAdminDefaults()

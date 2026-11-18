@@ -180,10 +180,12 @@ func (e *outEnv) route(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodPatch && strings.HasPrefix(p, "/api/__future__/"):
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
-	case p == apiEnv+"edge-identities-featurestates" && r.Method == http.MethodDelete:
-		w.WriteHeader(http.StatusNoContent)
-	case p == apiEnv+"edge-identities-featurestates":
-		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
+	case strings.HasPrefix(p, apiEnv+"edge-identities/") && strings.Contains(p, "/edge-featurestates/"):
+		// The SaaS's override routes (#2682); the upsert by identifier is
+		// not one of them (the default 404 below).
+		if uuid, rest, ok := flagsmithtest.OverrideRoute(p); !ok || !e.fake.Overrides.Serve(w, r, uuid, rest) {
+			flagsmithtest.DjangoNotFound(w, r)
+		}
 	case p == apiEnv+"edge-identities/" && r.Method == http.MethodPost:
 		var b struct {
 			Identifier string `json:"identifier"`
@@ -193,11 +195,12 @@ func (e *outEnv) route(w http.ResponseWriter, r *http.Request) {
 	case p == apiEnv+"edge-identities/" && r.Method == http.MethodGet:
 		q := strings.Trim(r.URL.Query().Get("q"), `"`)
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{"results":[{"identity_uuid":"`+uuidOf(q)+`","identifier":"`+q+`"}]}`))
-	case strings.HasPrefix(p, apiEnv+"edge-identities/") && (strings.HasSuffix(p, "/list-traits/") || strings.HasSuffix(p, "/edge-featurestates/")) && r.Method == http.MethodGet:
+	case strings.HasPrefix(p, apiEnv+"edge-identities/") && strings.HasSuffix(p, "/list-traits/") && r.Method == http.MethodGet:
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`[]`))
 	case strings.HasPrefix(p, apiEnv+"edge-identities/") && strings.HasSuffix(p, "/update-traits/") && r.Method == http.MethodPut:
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 	case strings.HasPrefix(p, apiEnv+"edge-identities/") && r.Method == http.MethodDelete:
+		e.fake.Overrides.Forget(strings.TrimSuffix(strings.TrimPrefix(p, apiEnv+"edge-identities/"), "/"))
 		w.WriteHeader(http.StatusNoContent)
 	case p == apiEnv+"featurestates/" && r.Method == http.MethodGet:
 		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{"results":[{"id":`+r.URL.Query().Get("feature")+`0}]}`))
@@ -309,6 +312,32 @@ func (e *outEnv) bodies(method, path string) []string {
 }
 
 func (e *outEnv) count(method, path string) int { return len(e.fake.RequestsTo(method, path)) }
+
+// overrideWrites returns the override requests with method on the SaaS's
+// per-identity routes (#2682): POST on the list, PUT and DELETE on one
+// override.
+func (e *outEnv) overrideWrites(method string) []flagsmithtest.Request {
+	var out []flagsmithtest.Request
+	for _, r := range e.fake.RequestsTo(method, apiEnv+"edge-identities/") {
+		if _, rest, ok := flagsmithtest.OverrideRoute(r.Path); ok && (rest == "edge-featurestates/") == (method == http.MethodPost) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// overrideOn returns the override of key's feature on identity identifier
+// (the fake's uuidOf), raw value and whether there is one.
+func (e *outEnv) overrideOn(identifier, key string) (string, bool) {
+	o, ok := e.fake.Overrides.Get(uuidOf(identifier), e.fid(key))
+	return string(o.Value), ok
+}
+
+// oldRouteRequests counts requests to the upsert by identifier the SaaS does
+// not route (#2682).
+func (e *outEnv) oldRouteRequests() int {
+	return len(e.fake.RequestsTo("", apiEnv+"edge-identities-featurestates"))
+}
 
 func (e *outEnv) pushSpans() []sdktrace.ReadOnlySpan {
 	var out []sdktrace.ReadOnlySpan
@@ -442,7 +471,7 @@ func TestPushRate(t *testing.T) {
 		e.link.StateChanged(e.change(state.ChangeValue, "interventions", "music_tempo_override", registry.ScopeGame, sc, "", "1.25"))
 	}
 	e.drain()
-	if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 10 {
+	if n := len(e.overrideWrites(http.MethodPost)); n != 10 {
 		t.Fatalf("UC-055/BR-001 %d requests, want 10", n)
 	}
 	slept := e.clk.Slept()
@@ -648,7 +677,7 @@ func TestGameEndDeletesIdentities(t *testing.T) {
 			e.link.StateChanged(e.change(state.ChangeValue, "interventions", "music_tempo_override", registry.ScopeGame, sc, "", "1.25"))
 			e.link.StateChanged(e.ended(g1))
 			e.drain()
-			if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 0 {
+			if n := len(e.overrideWrites(http.MethodPost)) + e.oldRouteRequests(); n != 0 {
 				t.Fatalf("UC-055/A2 %d override requests for a game that ended, want 0", n)
 			}
 			for _, id := range []string{"game:g1", "game:g1:A"} {
@@ -760,15 +789,14 @@ func TestEventListShownAsLatestValue(t *testing.T) {
 	e.link.StateChanged(events(first))
 	e.link.StateChanged(events(latest))
 	e.drain()
-	puts := e.bodies(http.MethodPut, apiEnv+"edge-identities-featurestates")
+	puts := e.overrideWrites(http.MethodPost)
 	if len(puts) != 1 {
 		t.Fatalf("UC-055/BR-002 %d override requests for two appends before the send, want 1: %v", len(puts), puts)
 	}
 	var body struct {
-		Identifier string          `json:"identifier"`
-		Value      json.RawMessage `json:"feature_state_value"`
+		Value json.RawMessage `json:"feature_state_value"`
 	}
-	if err := json.Unmarshal([]byte(puts[0]), &body); err != nil {
+	if err := json.Unmarshal(puts[0].Body, &body); err != nil {
 		t.Fatal(err)
 	}
 	got := string(body.Value)
@@ -776,16 +804,19 @@ func TestEventListShownAsLatestValue(t *testing.T) {
 	if json.Unmarshal(body.Value, &s) == nil {
 		got = s
 	}
-	if body.Identifier != "game:g1" || got != latest {
-		t.Fatalf("UC-055/BR-002 override %s = %s, want game:g1 = the latest list %s", body.Identifier, got, latest)
+	if !strings.Contains(puts[0].Path, "/"+uuidOf("game:g1")+"/") || got != latest {
+		t.Fatalf("UC-055/BR-002 override %s = %s, want game:g1 = the latest list %s", puts[0].Path, got, latest)
 	}
 	e.link.StateChanged(events(`[]`))
 	e.drain()
-	if n := e.count(http.MethodDelete, apiEnv+"edge-identities-featurestates"); n != 1 {
+	if n := len(e.overrideWrites(http.MethodDelete)); n != 1 {
 		t.Fatalf("UC-055/BR-002 %d override deletes after the list emptied, want 1", n)
 	}
-	if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 1 {
-		t.Fatalf("UC-055/BR-002 %d override puts after the list emptied, want still 1 (no empty list shown)", n)
+	if n := len(e.overrideWrites(http.MethodPost)) + len(e.overrideWrites(http.MethodPut)); n != 1 {
+		t.Fatalf("UC-055/BR-002 %d override writes after the list emptied, want still 1 (no empty list shown)", n)
+	}
+	if _, ok := e.overrideOn("game:g1", "audio_cue"); ok {
+		t.Fatal("UC-055/BR-002 the override is still in Flagsmith after the list emptied")
 	}
 }
 
@@ -938,7 +969,7 @@ func TestRemovedSerialKeysForgotten(t *testing.T) {
 	e.link.Links().Offer(kb, Value{Writer: "menu"}, e.clk.Now(), 9)
 	e.link.StateChanged(e.registered(onlyA, both))
 	e.drain()
-	if n := e.count(http.MethodDelete, apiEnv+"edge-identities-featurestates"); n != 0 {
+	if n := len(e.overrideWrites(http.MethodDelete)); n != 0 {
 		t.Fatalf("UC-055/A2 %d override deletes for a removed player, want 0", n)
 	}
 	if n := e.count(http.MethodDelete, apiEnv+"edge-identities/"+uuidOf("game:g1:B")+"/"); n != 1 {
