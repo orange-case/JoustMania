@@ -150,15 +150,25 @@ def test_only_the_logs_agent_pipeline_sends_logs_to_the_agent(collector):
 @pytest.mark.parametrize(
     ("event_name", "attributes", "resource", "dropped"),
     [
-        ("death_warning", {"moment.id": "g:P1:warning:1"}, {}, False),
-        ("player_death", {"moment.id": "g:P1:death:1"}, {}, False),
+        ("death_warning", {"moment.id": "g/P1/1"}, {}, False),
+        ("player_death", {"moment.id": "g/P1/2"}, {}, False),
         ("", {}, {}, True),
         ("", {"moment.id": "g:P1:x:1"}, {}, True),
         ("intervention", {"moment.id": "g:intervention:1"}, {}, True),
         ("death_warning", {}, {}, True),
-        ("player_death", {"moment.id": "g:P1:death:1"}, {"orangecase.synthetic": True}, True),
-        ("player_death", {"moment.id": "g:P1:death:1"}, {"orangecase.synthetic": "true"}, True),
-        ("player_death", {"moment.id": "g:P1:death:1"}, {"orangecase.synthetic": False}, False),
+        ("player_death", {"moment.id": "g/P1/2"}, {"orangecase.synthetic": True}, True),
+        (
+            "player_death",
+            {"moment.id": "g/P1/2"},
+            {"orangecase.synthetic": "true"},
+            True,
+        ),
+        (
+            "player_death",
+            {"moment.id": "g/P1/2"},
+            {"orangecase.synthetic": False},
+            False,
+        ),
     ],
     ids=[
         "warning-kept",

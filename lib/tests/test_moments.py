@@ -225,3 +225,137 @@ def test_moment_logger_is_cached_per_provider(monkeypatch):
     assert moments._moment_logger() is first
     monkeypatch.setattr(otel_logging, "_logger_provider", None)
     assert moments._moment_logger() is None
+
+
+# --- #2658 slice 3: the record's own timestamp, and a moment never raises -------------
+
+
+@pytest.mark.uc("UC-100", flow="main", steps=[4, 6], br=["BR-006"])
+@pytest.mark.parametrize(
+    "shape", [MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN, MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH]
+)
+def test_timestamp_ns_stamps_every_record_kind(spans, logs, shape):
+    """One clock read (the ground truth's) is the record's own timestamp in every shape."""
+    tracer, exporter = spans
+    stamp = 1_700_000_000_123_456_789
+    with tracer.start_as_current_span("player: p0") as player_span:
+        record_moment(
+            "player_death", shape=shape, parent_span=player_span, attributes=ATTRS, tracer=tracer, timestamp_ns=stamp
+        )
+
+    player = _player_span(exporter)
+    if shape in (MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_BOTH):
+        assert [e.timestamp for e in player.events] == [stamp]
+    if shape == MOMENT_SHAPE_SPAN:
+        moment = next(s for s in exporter.get_finished_spans() if s.name == "game.player_death")
+        assert moment.start_time == moment.end_time == stamp
+    if shape in (MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH):
+        assert [r.log_record.timestamp for r in logs.get_finished_logs()] == [stamp]
+
+
+@pytest.mark.uc("UC-100", flow="main", steps=[4], br=["BR-001"])
+def test_span_shape_with_a_timestamp_ends_after_the_duration(spans):
+    tracer, exporter = spans
+    with tracer.start_as_current_span("player: p0") as player_span:
+        record_moment(
+            "death_warning",
+            shape=MOMENT_SHAPE_SPAN,
+            parent_span=player_span,
+            attributes=ATTRS,
+            duration_s=0.5,
+            tracer=tracer,
+            timestamp_ns=1_000,
+        )
+    moment = next(s for s in exporter.get_finished_spans() if s.name == "game.death_warning")
+    assert (moment.start_time, moment.end_time) == (1_000, 1_000 + 500_000_000)
+
+
+@pytest.mark.uc("UC-100", flow="main", steps=[4], br=["BR-004"])
+@pytest.mark.parametrize("shape", [MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_LOG_EVENT])
+def test_without_a_timestamp_the_sdk_clock_stamps_the_record(spans, logs, shape):
+    import time
+
+    tracer, exporter = spans
+    before = time.time_ns()
+    _record(shape, tracer)
+    after = time.time_ns()
+    if shape == MOMENT_SHAPE_SPAN_EVENT:
+        (stamp,) = [e.timestamp for e in _player_span(exporter).events]
+    else:
+        (stamp,) = [r.log_record.timestamp for r in logs.get_finished_logs()]
+    assert before <= stamp <= after
+
+
+class _BrokenProcessor:
+    """A log record processor whose export path raises on every record."""
+
+    def on_emit(self, log_record):  # noqa: ARG002
+        raise RuntimeError("log processor broken")
+
+    emit = on_emit
+
+    def shutdown(self):
+        pass
+
+    def force_flush(self, timeout_millis=30000):  # noqa: ARG002
+        return True
+
+
+@pytest.fixture
+def broken_logs(monkeypatch):
+    """OTLP logging whose provider raises, with the root LoggingHandler on the same provider.
+
+    That is ``lib.otel_logging.init_logging`` in a running service: a report through Python
+    ``logging`` would go back into the broken provider and raise again (#2658 opposer S1).
+    """
+    from opentelemetry.sdk._logs import LoggingHandler
+
+    provider = LoggerProvider()
+    provider.add_log_record_processor(_BrokenProcessor())
+    monkeypatch.setattr(otel_logging, "_logger_provider", provider)
+    monkeypatch.setattr(moments, "_failure_reported", False)
+    handler = LoggingHandler(logger_provider=provider)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        yield provider
+    finally:
+        root.removeHandler(handler)
+
+
+@pytest.mark.uc("UC-100", br=["BR-004"])
+@pytest.mark.parametrize("shape", [MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH])
+@pytest.mark.usefixtures("broken_logs")
+def test_a_broken_log_channel_never_raises_and_is_reported_once(spans, capsys, shape):
+    """NFR-060: a moment never raises into the game, and a failure is reported once per process."""
+    tracer, exporter = spans
+    first, _ = _record(shape, tracer)
+    second, _ = _record(shape, tracer)
+
+    expected = MOMENT_SHAPE_SPAN_EVENT if shape == MOMENT_SHAPE_BOTH else ""
+    assert first == second == expected
+    if shape == MOMENT_SHAPE_BOTH:
+        # The span event is sent before the log emit and is unaffected.
+        assert all(
+            [e.name for e in s.events] == ["death_warning"]
+            for s in exporter.get_finished_spans()
+            if s.name == "player: p0"
+        )
+    assert capsys.readouterr().err.count("moment could not be recorded") == 1
+
+
+@pytest.mark.uc("UC-100", br=["BR-004"])
+def test_a_broken_tracer_in_the_span_shape_never_raises(spans, monkeypatch, capsys):
+    monkeypatch.setattr(moments, "_failure_reported", False)
+    tracer, _ = spans
+
+    class _BrokenTracer:
+        def start_span(self, *args, **kwargs):  # noqa: ARG002
+            raise RuntimeError("tracer broken")
+
+    with tracer.start_as_current_span("player: p0") as player_span:
+        sent = record_moment(
+            "player_death", shape=MOMENT_SHAPE_SPAN, parent_span=player_span, attributes=ATTRS, tracer=_BrokenTracer()
+        )
+    assert sent == ""
+    assert "moment could not be recorded" in capsys.readouterr().err

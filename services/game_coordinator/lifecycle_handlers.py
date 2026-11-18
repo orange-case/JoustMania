@@ -45,7 +45,7 @@ from .interventions import (
 
 logger = logging.getLogger(__name__)
 
-# Reason recorded on the player_death span event for forced eliminations (§3 N4).
+# Reason recorded on the player_death moment for forced eliminations (§3 N4).
 ELIMINATE_REASON = "agent_intervention"
 # Eliminations are not motion deaths — record zero accel magnitude.
 ELIMINATE_ACCEL = 0.0

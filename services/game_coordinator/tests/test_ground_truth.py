@@ -275,3 +275,54 @@ class TestNoGroundTruthWithoutNormalEnd:
         game._latch_game_outcome()
         game._record_ground_truth()
         assert [e for e in game._game_root_span.events if e.name == EVENT] == []
+
+
+class TestGroundTruthEqualsTheRecordInEveryShape:
+    """#2658 slice 3: one clock read stamps the ground truth and the record (``record_moment`` ``timestamp_ns``).
+
+    No frozen clock: the moment's record and the ground truth must agree exactly in
+    every shape, the span shape's start (and the death's end) and the log record's
+    timestamp included.
+    """
+
+    @pytest.mark.uc("UC-100", flow="main", steps=[4, 6], br=["BR-006", "BR-007"])
+    @pytest.mark.parametrize("shape", ["span_event", "span", "log_event", "both"])
+    @pytest.mark.asyncio
+    async def test_ffa_truth_equals_the_record_timestamps(self, tracer, monkeypatch, shape):
+        from opentelemetry.sdk._logs import LoggerProvider
+        from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
+
+        from lib import otel_logging
+
+        logs = InMemoryLogRecordExporter()
+        provider = LoggerProvider()
+        provider.add_log_record_processor(SimpleLogRecordProcessor(logs))
+        monkeypatch.setattr(otel_logging, "_logger_provider", provider)
+        game = await _game(FFAGame, tracer)
+        game.moment_shape = shape
+        p0 = SERIALS[0]
+        span = game.players[p0].span
+
+        await game._warn_player(p0, 1.8, 1.5)
+        await game._warn_player(p0, 1.9, 1.5)
+        assert await game._kill_player(p0, 3.0) is True
+        game._latch_game_outcome()
+        game._record_ground_truth()
+        truth = _truth(game._game_root_span)[p0]
+
+        def records(name):
+            if shape in ("span_event", "both"):
+                return tuple(_stamps(span, name))
+            if shape == "span":
+                moments = [s for s in tracer.exporter.get_finished_spans() if s.name == f"game.{name}"]
+                if name == "player_death":
+                    assert all(m.start_time == m.end_time for m in moments)
+                return tuple(m.start_time for m in moments)
+            return tuple(r.log_record.timestamp for r in logs.get_finished_logs() if r.log_record.event_name == name)
+
+        assert len(truth[WARNINGS]) == 2
+        assert truth[WARNINGS] == records("death_warning")
+        assert truth[DEATHS] == records("player_death")
+        if shape == "both":
+            log_stamps = tuple(r.log_record.timestamp for r in logs.get_finished_logs())
+            assert log_stamps == truth[WARNINGS] + truth[DEATHS]

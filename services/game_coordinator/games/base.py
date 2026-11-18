@@ -710,9 +710,10 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # empty for a non-experiment game. The servicer overrides
         #     these from the owning GameSession (set by #976's spawn binding).
         self.game_kind = "real"
-        # UC-100 BR-002: the warning's moment shape, read once per game by the session
-        # (telemetry.moment_shape) and held for the game; and the per-serial moment
-        # sequence behind moment.id, kept by the game, not the Player (BR-003).
+        # UC-100 BR-002: the moment shape of every moment of the game (the warning, the
+        # death), read once per game by the session (telemetry.moment_shape) and held for
+        # the game; and the per-serial moment sequence behind moment.id, kept by the game,
+        # not the Player (BR-003).
         self.moment_shape = MOMENT_SHAPE_SPAN_EVENT
         self._moment_sequence: dict[str, int] = {}
         self.experiment_id = ""
@@ -2541,8 +2542,9 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # This is NOT protection - player can still die during this time!
         player.warning_until = game_clock.now() + WARNING_DURATION
 
-        # UC-100 BR-006: the warning's time, whatever analytics.enabled says.
-        self._ground_truth.record_warning(serial)
+        # UC-100 BR-006: the warning's time, whatever analytics.enabled says; also the
+        # timestamp of the warning's record, so both are one clock read.
+        warn_ns = self._ground_truth.record_warning(serial)
 
         # Analytics: Record warning event
         if player.analytics is not None:
@@ -2566,6 +2568,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 },
                 duration_s=WARNING_DURATION,
                 tracer=tracer,
+                timestamp_ns=warn_ns,
             )
         logger.info(f"Player {serial} triggered warning (accel: {accel_mag:.2f}, threshold: {threshold:.2f})")
 
@@ -3074,13 +3077,15 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         return True
 
     def _player_death_event_attributes(self, serial: str) -> dict:  # noqa: ARG002
-        """Mode-specific attributes for the base kill path's ``player_death`` span event.
+        """Mode-specific attributes for the base kill path's ``player_death`` moment.
 
         Called by ``_kill_player`` BEFORE ``_kill_player_impl`` (which may end the
         player span), so values describe the state *after* this death as if the
-        player were already out. The base attributes (``player.serial``,
-        ``player.name``, ``death.reason``, ``alive_remaining``, ...) win on a key
-        clash. Default: no extra attributes (#1327).
+        player were already out. They ride on every record of the moment, in every
+        shape (UC-100 BR-003). They come after the base values (``death.reason``,
+        ``alive_remaining``, ...) and override them on a key clash; only the identity
+        keys (``moment.id``, ``player.serial``, ``player.name``, ``game.id``,
+        ``game.kind``) come last and win. Default: no extra attributes (#1327).
         """
         return {}
 
@@ -3100,7 +3105,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         Called by ``_kill_player`` synchronously, with its other guards, and again
         by ``_run_kill`` after its awaits (shield charge end, explosion), right
         before the bookkeeping: a declined kill gets no ``dead_count``, ``player_alive``
-        gauge, elimination order, ``player_deaths_total``, ``player_death`` span event
+        gauge, elimination order, ``player_deaths_total``, ``player_death`` moment
         or death effect (nor an explosion, nor the end of a held shield charge, when
         declined at the first check), and
         ``_kill_player`` returns False. True means
@@ -3135,7 +3140,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             reason: What caused the death. ``"motion"`` for natural threshold
                 deaths; ``"agent_intervention"`` (#730) when the death is forced
                 by an ``eliminate_player`` agent intervention. Recorded on the
-                player_death span event so forced deaths are distinguishable from
+                player_death moment so forced deaths are distinguishable from
                 natural ones while still emitting identical spans/events/metrics.
 
         Returns:
@@ -3231,20 +3236,24 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # UC-030 step 9: one increment per death (respawn modes count each death).
         # Aggregate {mode, game_kind} only; per-player order is the gauge above.
         metrics.player_deaths_total.labels(mode=self.get_game_name(), game_kind=self.game_kind).inc()
-        # UC-100 BR-006: the death's time, next to its player_death record.
-        self._ground_truth.record_death(serial)
+        # UC-100 BR-006: the death's time, also the timestamp of its player_death record.
+        death_ns = self._ground_truth.record_death(serial)
 
         # Extract trace context BEFORE _kill_player_impl() which may close the span.
         # This ensures the death effect and sound are parented to the player_lifecycle
         # span even after the subclass impl ends it.
         trace_parent, trace_state = inject_trace_context(player.span)
 
-        # The ONE player_death span event per death, for every mode: modes
-        # add their own attributes through _player_death_event_attributes() and
-        # must not emit a second player_death from _kill_player_impl().
+        # The ONE player_death moment per death, for every mode, in the game's moment
+        # shape (UC-100 BR-007; a span event on the player span by default): modes add
+        # their own attributes through _player_death_event_attributes() and must not
+        # emit a second player_death from _kill_player_impl(). record_moment never
+        # raises, so the kill below is never half-applied.
         if player.span:
-            player.span.add_event(
+            record_moment(
                 "player_death",
+                shape=self.moment_shape,
+                parent_span=player.span,
                 attributes={
                     "accel_magnitude": accel_mag,
                     "sensitivity": self.sensitivity.name,
@@ -3254,8 +3263,10 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                     "death.reason": reason,
                     **since_shield_end,
                     **self._player_death_event_attributes(serial),
-                    **player_identity_attributes(serial, player.name),
+                    **self._moment_identity(player, serial),
                 },
+                timestamp_ns=death_ns,
+                tracer=tracer,
             )
 
         # Finalize health attributes BEFORE _kill_player_impl() which may close the span.

@@ -109,7 +109,7 @@ func TestLogsReceiver_MomentLogWakesEvaluation(t *testing.T) {
 
 	t.Run("UC-041/A7 a death_warning log event wakes no evaluation", func(t *testing.T) {
 		before := len(rules.evaluations())
-		if _, err := logs.Export(context.Background(), plogotlp.NewExportRequestFromLogs(momentLogBatch("death_warning", "PB", "game-A:PB:warning:1"))); err != nil {
+		if _, err := logs.Export(context.Background(), plogotlp.NewExportRequestFromLogs(momentLogBatch("death_warning", "PB", "game-A/PB/1"))); err != nil {
 			t.Fatalf("logs export: %v", err)
 		}
 		if got := len(rules.evaluations()); got != before {
@@ -119,7 +119,7 @@ func TestLogsReceiver_MomentLogWakesEvaluation(t *testing.T) {
 
 	t.Run("UC-041/A7 a player_death log event wakes one evaluation with signal logs", func(t *testing.T) {
 		before := len(rules.evaluations())
-		if _, err := logs.Export(context.Background(), plogotlp.NewExportRequestFromLogs(momentLogBatch("player_death", "PB", "game-A:PB:death:1"))); err != nil {
+		if _, err := logs.Export(context.Background(), plogotlp.NewExportRequestFromLogs(momentLogBatch("player_death", "PB", "game-A/PB/2"))); err != nil {
 			t.Fatalf("logs export: %v", err)
 		}
 		evals := rules.evaluations()
@@ -158,7 +158,7 @@ func TestRun_ServesOTLPLogs(t *testing.T) {
 		defer conn.Close()
 		callCtx, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer callCancel()
-		_, err = plogotlp.NewGRPCClient(conn).Export(callCtx, plogotlp.NewExportRequestFromLogs(momentLogBatch("player_death", "PB", "game-A:PB:death:1")))
+		_, err = plogotlp.NewGRPCClient(conn).Export(callCtx, plogotlp.NewExportRequestFromLogs(momentLogBatch("player_death", "PB", "game-A/PB/2")))
 		if status.Code(err) == codes.Unimplemented {
 			t.Fatalf("logs Export = Unimplemented, want the logs receiver registered")
 		}

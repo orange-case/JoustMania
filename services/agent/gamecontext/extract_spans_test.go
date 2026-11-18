@@ -238,6 +238,7 @@ func momentSpan(name, serial, gameID string) ptrace.Traces {
 }
 
 // UC: UC-100 BR-010
+// UC: UC-041 BR-008
 func TestApplySpans_MomentSpansAreIgnored(t *testing.T) {
 	for _, name := range []string{"game.death_warning", "game.player_death"} {
 		assertMomentSpanIgnored(t, "UC-100/BR-010 ", name)

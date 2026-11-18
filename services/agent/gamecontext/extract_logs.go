@@ -19,6 +19,34 @@ const (
 	attrMomentID = "moment.id"
 )
 
+// The moment observer's labels (#2658 slice 3, agent_moments_received_total{moment,
+// shape,outcome}, telemetry.md §6): the channel a moment record arrived on and what
+// the agent did with it. moment is momentDeath or momentWarning, never another name.
+const (
+	MomentShapeSpanEvent = "span_event"
+	MomentShapeLogEvent  = "log_event"
+	// MomentCounted: a new player_death applied (UC-041 BR-008, A7 step 2).
+	MomentCounted = "counted"
+	// MomentDuplicate: a player_death whose moment id was applied before (BR-009).
+	MomentDuplicate = "duplicate"
+	// MomentIgnored: a death_warning with its identity; it changes nothing (A7 step 2).
+	MomentIgnored = "ignored"
+	// MomentDropped: a log record without moment id, game id or player, or for a game
+	// the agent holds no context for (A7 step 4).
+	MomentDropped = "dropped"
+)
+
+// MomentObserver is told about every moment record the agent reads: the moment's
+// name, the shape it arrived in and the outcome. Called outside every store lock.
+type MomentObserver func(moment, shape, outcome string)
+
+// observeMoment calls obs when set.
+func observeMoment(obs MomentObserver, moment, shape, outcome string) {
+	if obs != nil {
+		obs(moment, shape, outcome)
+	}
+}
+
 // momentIDOf returns the moment.id attribute, or "" when absent.
 func momentIDOf(attrs pcommon.Map) string {
 	if v, ok := attrs.Get(attrMomentID); ok {
@@ -65,21 +93,27 @@ func (m *Multiplexer) applyMomentLog(lr plog.LogRecord) (string, bool) {
 	if name != momentDeath && name != momentWarning {
 		return "", false
 	}
+	obs := m.momentObserver()
 	attrs := lr.Attributes()
 	id := momentIDOf(attrs)
 	serial := attrString(attrs, spanAttrSerial)
 	gameID := attrString(attrs, spanAttrGameID)
 	if id == "" || serial == "" || gameID == "" {
+		observeMoment(obs, name, MomentShapeLogEvent, MomentDropped)
 		return "", false
 	}
 	if name == momentWarning {
+		observeMoment(obs, name, MomentShapeLogEvent, MomentIgnored)
 		return "", false
 	}
 	s := m.existingStore(gameID)
 	if s == nil {
+		observeMoment(obs, name, MomentShapeLogEvent, MomentDropped)
 		return "", false
 	}
-	if !s.recordDeathMoment(id, serial, deathEliminates(attrs)) {
+	outcome := s.recordDeathMoment(id, serial, deathEliminates(attrs))
+	observeMoment(obs, name, MomentShapeLogEvent, outcome)
+	if outcome != MomentCounted {
 		return "", false
 	}
 	return gameID, true

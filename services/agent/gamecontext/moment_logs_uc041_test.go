@@ -95,7 +95,7 @@ func TestApplyLogs_MomentLogEvents(t *testing.T) {
 
 	t.Run("UC-041/A7 a player_death log event adds the player to the elimination sequence", func(t *testing.T) {
 		mux, _ := liveMux(t)
-		ids := mux.ApplyLogs(deathLog("game-A", "P1", "game-A:P1:death:1", nil))
+		ids := mux.ApplyLogs(deathLog("game-A", "P1", "game-A/P1/1", nil))
 		if len(ids) != 1 || ids[0] != "game-A" {
 			t.Fatalf("touched = %v, want [game-A]", ids)
 		}
@@ -107,7 +107,7 @@ func TestApplyLogs_MomentLogEvents(t *testing.T) {
 
 	t.Run("UC-041/A7 a player_death log event with death.eliminated false is no elimination", func(t *testing.T) {
 		mux, _ := liveMux(t)
-		ids := mux.ApplyLogs(deathLog("game-A", "P1", "game-A:P1:death:1", &no))
+		ids := mux.ApplyLogs(deathLog("game-A", "P1", "game-A/P1/1", &no))
 		if len(ids) != 1 || ids[0] != "game-A" {
 			t.Fatalf("touched = %v, want [game-A] (a round loss is still read)", ids)
 		}
@@ -122,7 +122,7 @@ func TestApplyLogs_MomentLogEvents(t *testing.T) {
 		before, _ := mux.Snapshot("game-A")
 		clk.advance(time.Second)
 		ids := mux.ApplyLogs(momentLog("game-coordinator", "death_warning", map[string]string{
-			"moment.id": "game-A:P1:warning:1", "player.serial": "P1", "game.id": "game-A", "game.kind": "real",
+			"moment.id": "game-A/P1/1", "player.serial": "P1", "game.id": "game-A", "game.kind": "real",
 		}))
 		if ids != nil {
 			t.Fatalf("touched = %v, want nil", ids)
@@ -138,7 +138,7 @@ func TestApplyLogs_MomentLogEvents(t *testing.T) {
 	})
 
 	t.Run("UC-041/A7 a log event without moment id, game id or player changes nothing", func(t *testing.T) {
-		full := map[string]string{"moment.id": "game-A:P1:death:1", "player.serial": "P1", "game.id": "game-A"}
+		full := map[string]string{"moment.id": "game-A/P1/1", "player.serial": "P1", "game.id": "game-A"}
 		for _, missing := range []string{"moment.id", "player.serial", "game.id"} {
 			for _, empty := range []bool{false, true} {
 				name := fmt.Sprintf("%s absent", missing)
@@ -172,7 +172,7 @@ func TestApplyLogs_MomentLogEvents(t *testing.T) {
 	// create one (nor feed the fallback partition).
 	t.Run("UC-041/A7 a log event for a game without context changes nothing and creates no context", func(t *testing.T) {
 		mux, _ := liveMux(t)
-		if ids := mux.ApplyLogs(deathLog("game-Z", "P9", "game-Z:P9:death:1", nil)); ids != nil {
+		if ids := mux.ApplyLogs(deathLog("game-Z", "P9", "game-Z/P9/1", nil)); ids != nil {
 			t.Fatalf("touched = %v, want nil", ids)
 		}
 		requirePartitions(t, mux, 1)
@@ -200,7 +200,7 @@ func TestApplyLogs_MomentLogEvents(t *testing.T) {
 	t.Run("UC-041/A7 the agent's own log events are skipped", func(t *testing.T) {
 		mux, _ := liveMux(t)
 		mux.SetOwnService("agent")
-		ld := deathLog("game-A", "P1", "game-A:P1:death:1", nil)
+		ld := deathLog("game-A", "P1", "game-A/P1/1", nil)
 		ld.ResourceLogs().At(0).Resource().Attributes().PutStr("service.name", "agent")
 		if ids := mux.ApplyLogs(ld); ids != nil {
 			t.Fatalf("touched = %v, want nil for the agent's own telemetry", ids)
@@ -219,8 +219,8 @@ func TestMoments_CountOncePerMomentID(t *testing.T) {
 
 	t.Run("UC-041/BR-009 a span event then a log event of one moment counts once", func(t *testing.T) {
 		mux, _ := liveMux(t)
-		mux.ApplySpans(deathSpanEvent("game-A", "P1", "game-A:P1:death:1", nil))
-		if ids := mux.ApplyLogs(deathLog("game-A", "P1", "game-A:P1:death:1", nil)); ids != nil {
+		mux.ApplySpans(deathSpanEvent("game-A", "P1", "game-A/P1/1", nil))
+		if ids := mux.ApplyLogs(deathLog("game-A", "P1", "game-A/P1/1", nil)); ids != nil {
 			t.Fatalf("touched = %v, want nil: the moment was read as a span event", ids)
 		}
 		snap, _ := mux.Snapshot("game-A")
@@ -229,23 +229,24 @@ func TestMoments_CountOncePerMomentID(t *testing.T) {
 		}
 	})
 
+	// The first record does not eliminate and the second would: only a dedupe by
+	// moment.id (not the serial dedupe of the elimination sequence) keeps it out.
 	t.Run("UC-041/BR-009 a log event then a span event of one moment counts once", func(t *testing.T) {
 		mux, _ := liveMux(t)
-		mux.ApplyLogs(deathLog("game-A", "P1", "game-A:P1:death:1", nil))
-		mux.ApplySpans(deathSpanEvent("game-A", "P1", "game-A:P1:death:1", nil))
+		mux.ApplyLogs(deathLog("game-A", "P1", "game-A/P1/1", &no))
+		mux.ApplySpans(deathSpanEvent("game-A", "P1", "game-A/P1/1", &yes))
 		snap, _ := mux.Snapshot("game-A")
-		if seq := snap.Session.EliminationSequence; len(seq) != 1 || seq[0] != "P1" {
-			t.Fatalf("elimination seq = %v, want [P1]", seq)
-		}
-		if n := eliminationEvents(snap.Timeline); n != 1 {
-			t.Fatalf("elimination events = %d, want 1", n)
+		if seq := snap.Session.EliminationSequence; len(seq) != 0 {
+			t.Fatalf("elimination seq = %v, want none: the span event repeats a moment read as a log event", seq)
 		}
 	})
 
-	t.Run("UC-041/BR-009 a later moment with the same id but another verdict changes nothing", func(t *testing.T) {
+	t.Run("UC-041/BR-009 a span event then a log event with another verdict changes nothing", func(t *testing.T) {
 		mux, _ := liveMux(t)
-		mux.ApplyLogs(deathLog("game-A", "P1", "game-A:P1:death:1", &no))
-		mux.ApplySpans(deathSpanEvent("game-A", "P1", "game-A:P1:death:1", &yes))
+		mux.ApplySpans(deathSpanEvent("game-A", "P1", "game-A/P1/1", &no))
+		if ids := mux.ApplyLogs(deathLog("game-A", "P1", "game-A/P1/1", &yes)); ids != nil {
+			t.Fatalf("touched = %v, want nil: the moment was read as a span event", ids)
+		}
 		snap, _ := mux.Snapshot("game-A")
 		if seq := snap.Session.EliminationSequence; len(seq) != 0 {
 			t.Fatalf("elimination seq = %v, want none: the first record applies", seq)
@@ -254,12 +255,12 @@ func TestMoments_CountOncePerMomentID(t *testing.T) {
 
 	t.Run("UC-041/BR-009 two moments of one player both apply", func(t *testing.T) {
 		mux, _ := liveMux(t)
-		for i, id := range []string{"game-A:P1:death:1", "game-A:P1:death:2"} {
+		for i, id := range []string{"game-A/P1/1", "game-A/P1/2"} {
 			if ids := mux.ApplyLogs(deathLog("game-A", "P1", id, &no)); len(ids) != 1 {
 				t.Fatalf("moment %d: touched = %v, want [game-A]", i+1, ids)
 			}
 		}
-		if ids := mux.ApplyLogs(deathLog("game-A", "P1", "game-A:P1:death:3", &yes)); len(ids) != 1 {
+		if ids := mux.ApplyLogs(deathLog("game-A", "P1", "game-A/P1/3", &yes)); len(ids) != 1 {
 			t.Fatalf("moment 3: touched = %v, want [game-A]", ids)
 		}
 		snap, _ := mux.Snapshot("game-A")

@@ -887,7 +887,7 @@ class FightClubGame(StreamedIntroGameMode):
         return False
 
     def _player_death_event_attributes(self, serial: str) -> dict:
-        """``death.eliminated`` on the ``player_death`` span event (UC-041 BR-008, #2517).
+        """``death.eliminated`` on the ``player_death`` moment (UC-041 BR-008, #2517).
 
         False for a round loss (the loser stays in the game); true when the death
         takes a disconnected player out of the rotation, the same check

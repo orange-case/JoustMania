@@ -1,6 +1,6 @@
 """Game moments in a chosen shape (#2658, UC-100, FR-216, FR-217, NFR-060).
 
-A *moment* is one happening in a game (today: a player's warning) with one identity,
+A *moment* is one happening in a game (a player's warning or death) with one identity,
 sent in the shape the ``observability/telemetry.moment_shape`` flag chose for the game
 (telemetry.md §3.2 "Moment shapes"):
 
@@ -16,10 +16,15 @@ sent in the shape the ``observability/telemetry.moment_shape`` flag chose for th
 A shape that needs the log channel falls back to ``span_event`` in a process without
 OTLP logging (UC-100 A1). Every function here only enqueues (span processor, log
 processor): no blocking work, no flag read and no lock, so it is safe on the frame path.
+A moment never raises into the game (the kill path records the death between its
+bookkeeping and the mode's handler, #2658 slice 3): a failing log emit or moment span is
+reported once per process on stderr and then dropped silently.
 """
 
 from __future__ import annotations
 
+import contextlib
+import sys
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -44,6 +49,26 @@ _LOGGER_NAME = "joustmania.moments"
 
 # (provider, logger) for the last provider seen: get_logger once, not per moment.
 _logger_cache: tuple[Any, Any] | None = None
+
+# Whether a failed moment record was reported (once per process, NFR-060: no flood).
+_failure_reported = False
+
+
+def _report_failure_once(name: str, error: Exception) -> None:
+    """Report the first failed moment record of the process, never raising.
+
+    Written to stderr, never through Python ``logging``: in a service the root logger's
+    OTLP handler writes to the same provider that may be what failed (#2658).
+    """
+    global _failure_reported
+    if _failure_reported:
+        return
+    _failure_reported = True
+    with contextlib.suppress(Exception):  # the report must never raise into the game
+        sys.stderr.write(
+            f"lib.moments: a moment could not be recorded ({name}: {type(error).__name__}: {error}); "
+            "later failures are not reported\n"
+        )
 
 
 def effective_moment_shape(value: object) -> str:
@@ -95,12 +120,19 @@ def record_moment(
     attributes: Mapping[str, Any],
     duration_s: float = 0.0,
     tracer: trace.Tracer | None = None,
+    timestamp_ns: int | None = None,
 ) -> str:
     """Record moment ``name`` on ``parent_span`` in ``shape``; returns the shape actually sent.
 
     ``attributes`` must already carry the identity keys (``moment.id``, the player, the
     game); every record of the moment gets the same attributes. ``duration_s`` is the
-    span shape's length (the warning window for ``death_warning``).
+    span shape's length (the warning window for ``death_warning``; 0 for a death, a
+    point in time). ``timestamp_ns`` (epoch ns) is the record's own timestamp: the span
+    event's, the moment span's start, the log record's; ``None`` takes the clock now
+    (UC-100 BR-006: the ground truth passes its own read, so both are equal).
+
+    Never raises from the log emit or the moment span: on a failure the shape actually
+    sent is returned (``span_event`` for ``both``, ``""`` when nothing was sent).
     """
     attrs = dict(attributes)
     if shape not in MOMENT_SHAPES:
@@ -110,26 +142,34 @@ def record_moment(
         shape = MOMENT_SHAPE_SPAN_EVENT  # no log channel in this process (UC-100 A1)
 
     if shape == MOMENT_SHAPE_SPAN:
-        start_ns = time.time_ns()
-        span = (tracer or trace.get_tracer(__name__)).start_span(
-            f"game.{name}",
-            context=trace.set_span_in_context(parent_span),
-            attributes=attrs,
-            start_time=start_ns,
-        )
-        span.end(end_time=start_ns + int(duration_s * 1_000_000_000))
+        start_ns = timestamp_ns if timestamp_ns is not None else time.time_ns()
+        try:
+            span = (tracer or trace.get_tracer(__name__)).start_span(
+                f"game.{name}",
+                context=trace.set_span_in_context(parent_span),
+                attributes=attrs,
+                start_time=start_ns,
+            )
+            span.end(end_time=start_ns + int(duration_s * 1_000_000_000))
+        except Exception as error:  # noqa: BLE001 - a moment never raises into the game
+            _report_failure_once(name, error)
+            return ""
         return shape
 
     if shape in (MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_BOTH):
-        parent_span.add_event(name, attributes=attrs)
+        parent_span.add_event(name, attributes=attrs, timestamp=timestamp_ns)
     if moment_logger is not None:
-        moment_logger.emit(
-            timestamp=time.time_ns(),
-            context=trace.set_span_in_context(parent_span),
-            severity_number=SeverityNumber.INFO,
-            severity_text="INFO",
-            body=name,
-            attributes=attrs,
-            event_name=name,
-        )
+        try:
+            moment_logger.emit(
+                timestamp=timestamp_ns if timestamp_ns is not None else time.time_ns(),
+                context=trace.set_span_in_context(parent_span),
+                severity_number=SeverityNumber.INFO,
+                severity_text="INFO",
+                body=name,
+                attributes=attrs,
+                event_name=name,
+            )
+        except Exception as error:  # noqa: BLE001 - a moment never raises into the game
+            _report_failure_once(name, error)
+            return MOMENT_SHAPE_SPAN_EVENT if shape == MOMENT_SHAPE_BOTH else ""
     return shape
