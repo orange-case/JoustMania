@@ -12,6 +12,54 @@
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
         "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "green",
+        "name": "Agent decision: applied",
+        "step": "10s",
+        "expr": "sum by (game_kind, action, block_reason) (increase(agent_decisions_total{game_kind=\"real\", blocked=\"false\", action!=\"noop\"}[10s])) > 0",
+        "titleFormat": "agent: {{action}}",
+        "textFormat": "applied in a {{game_kind}} game",
+        "tagKeys": "action,game_kind",
+        "useValueForTime": false
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "red",
+        "name": "Agent decision: blocked",
+        "step": "10s",
+        "expr": "sum by (game_kind, action, block_reason) (increase(agent_decisions_total{game_kind=\"real\", blocked=\"true\", block_reason!=\"already_applied\"}[10s])) > 0",
+        "titleFormat": "agent blocked: {{action}}",
+        "textFormat": "{{block_reason}} ({{game_kind}} game)",
+        "tagKeys": "action,game_kind",
+        "useValueForTime": false
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": false,
+        "hide": false,
+        "iconColor": "purple",
+        "name": "Agent decision: shadow games",
+        "step": "10s",
+        "expr": "sum by (game_kind, action, block_reason) (increase(agent_decisions_total{game_kind=\"shadow\", action!=\"noop\", block_reason!=\"already_applied\"}[10s])) > 0",
+        "titleFormat": "shadow agent: {{action}}",
+        "textFormat": "{{block_reason}} (shadow game)",
+        "tagKeys": "action,game_kind",
+        "useValueForTime": false
       }
     ]
   },
@@ -1037,6 +1085,85 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "When the agent decided, in real games: one bar per scrape interval in which a decision was applied (by action) or blocked (by block_reason; already_applied left out, it is not a refusal). Noop answers are left out. The same decisions are drawn as annotations on every time series of this dashboard and of Game & Players (toggle them at the top; the shadow-game annotation is off by default). For the reasoning behind one decision, open its agent.decide trace in Jaeger at /jaeger/. Source: agent_decisions_total.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "decisions",
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "id": 37,
+      "interval": "10s",
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "legendFormat": "{{action}}",
+          "expr": "sum by (action) (increase(agent_decisions_total{game_kind=\"real\", blocked=\"false\", action!=\"noop\"}[$__interval])) > 0"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "legendFormat": "blocked: {{action}} ({{block_reason}})",
+          "expr": "sum by (action, block_reason) (increase(agent_decisions_total{game_kind=\"real\", blocked=\"true\", block_reason!=\"already_applied\"}[$__interval])) > 0"
+        }
+      ],
+      "title": "Decision Timeline (real games)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "description": "Agent decisions per minute: applied (blocked=false, dispatched) and blocked before dispatch by reason (not_allowed, battery_threshold, rate_limit, ...). already_applied is not a refusal: the decided value was already in place, so nothing was written (UC-040 A35). Source: agent_decisions_total{blocked,block_reason}.",
       "fieldConfig": {
         "defaults": {
@@ -1104,7 +1231,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "id": 17,
       "options": {
@@ -1198,7 +1325,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 43
+        "y": 51
       },
       "id": 18,
       "options": {
@@ -1283,7 +1410,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 51
+        "y": 59
       },
       "id": 19,
       "options": {
@@ -1368,7 +1495,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 51
+        "y": 59
       },
       "id": 20,
       "options": {
@@ -1453,7 +1580,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 51
+        "y": 59
       },
       "id": 21,
       "options": {
@@ -1519,7 +1646,7 @@
         "h": 6,
         "w": 6,
         "x": 0,
-        "y": 59
+        "y": 67
       },
       "id": 22,
       "options": {
@@ -1606,7 +1733,7 @@
         "h": 6,
         "w": 10,
         "x": 6,
-        "y": 59
+        "y": 67
       },
       "id": 23,
       "options": {
@@ -1677,7 +1804,7 @@
         "h": 6,
         "w": 4,
         "x": 16,
-        "y": 59
+        "y": 67
       },
       "id": 24,
       "options": {
@@ -1741,7 +1868,7 @@
         "h": 6,
         "w": 4,
         "x": 20,
-        "y": 59
+        "y": 67
       },
       "id": 36,
       "options": {
@@ -1828,7 +1955,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 73
       },
       "id": 25,
       "options": {
@@ -1863,7 +1990,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 71
+        "y": 79
       },
       "id": 26,
       "panels": [],
@@ -1927,7 +2054,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 72
+        "y": 80
       },
       "id": 27,
       "options": {
@@ -2012,7 +2139,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 72
+        "y": 80
       },
       "id": 28,
       "options": {
@@ -2047,7 +2174,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 80
+        "y": 88
       },
       "id": 29,
       "panels": [],
@@ -2110,7 +2237,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 81
+        "y": 89
       },
       "id": 30,
       "options": {
@@ -2172,7 +2299,7 @@
         "h": 7,
         "w": 6,
         "x": 12,
-        "y": 81
+        "y": 89
       },
       "id": 31,
       "options": {
@@ -2236,7 +2363,7 @@
         "h": 7,
         "w": 6,
         "x": 18,
-        "y": 81
+        "y": 89
       },
       "id": 32,
       "options": {
@@ -2273,7 +2400,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 88
+        "y": 96
       },
       "id": 33,
       "panels": [],
@@ -2336,7 +2463,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 89
+        "y": 97
       },
       "id": 34,
       "options": {
@@ -2421,7 +2548,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 89
+        "y": 97
       },
       "id": 35,
       "options": {
