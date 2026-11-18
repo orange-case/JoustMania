@@ -43,6 +43,7 @@ class MockSpan:
 
     def __init__(self, trace_id=0x4BF92F3577B34DA6A3CE929D0E0E4736, span_id=0x051581BF3CB55C13):
         self.attributes = {}
+        self.events = []
         # Non-zero trace_id by default so the #1133 correlation gauge fires; a test
         # can pass trace_id=0 to exercise the unsampled-span fallback (no gauge).
         self._span_context = MockSpanContext(trace_id, span_id)
@@ -51,7 +52,7 @@ class MockSpan:
         self.attributes[key] = value
 
     def add_event(self, name, attributes=None):
-        pass
+        self.events.append((name, attributes))
 
     def get_span_context(self):
         return self._span_context
@@ -856,9 +857,10 @@ class TestGameSessionLoop:
 
     @pytest.mark.uc("UC-035", flow="main", steps=[5])
     def test_experiment_game_parent_mode_not_ready_provider_reads_code_default_link(self):
-        """#2223 How this breaks: the coordinator does not wait for the observability
-        provider, so a game started before its first sync must get the code default
-        `link`. A provider that answers PROVIDER_NOT_READY stands in for it."""
+        """#2223 How this breaks: admission waits for the observability provider only up to
+        its deadline (UC-010 A5, #2658), so a game started while it is still not READY
+        must get the code default `link`. A provider that answers PROVIDER_NOT_READY
+        stands in for it."""
         from openfeature import api
         from openfeature.exception import ProviderNotReadyError
         from openfeature.provider.in_memory_provider import InMemoryProvider
