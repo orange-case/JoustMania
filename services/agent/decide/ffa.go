@@ -1,7 +1,6 @@
 package decide
 
 import (
-	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -131,13 +130,17 @@ type Bounds struct {
 // (the vetted range the admin UI and agent already use), each of which lies
 // inside the game-side clamp cited below; Default is the writer default from
 // services/agent/actions/writer.go; Neutral is the flag's neutral variant (a test
-// in services/agent/actions keeps all three in sync).
+// in services/agent/actions keeps all three in sync). This is the CODE DEFAULT
+// table: the flag variants are admin presets, and the live range of a game comes
+// from the operator flag decision.magnitude_bounds, whose baseline default equals
+// this table and which moves a range only inside HardMagnitudeLimits (magnitude.go,
+// #2696, UC-040 BR-045).
 //
 //	intervention               flag (variants)                         game-side clamp (services/game_coordinator)
 //	adjust_music_tempo         music_tempo_override slow..fast         SLOW/FAST_MUSIC_SPEED 1.0..1.3 (games/base.py)
 //	adjust_volume              volume_override quiet..loud             value >= 0 (interventions.py volume handler)
 //	adjust_global_sensitivity  global_sensitivity_override 0..4        SLOW_MAX/FAST_MAX index 0..4 (games/base.py)
-//	adjust_player_sensitivity  player_sensitivity_factor protect..handicap  combined factor [0.5,2.0] (base.py)
+//	adjust_player_sensitivity  player_sensitivity_factor protect..handicap  factor [0.2,2.0], combined floor 0.5 lowered only by it (base.py, #2696)
 //	adjust_global_difficulty   global_difficulty_factor easier..harder combined factor [0.5,2.0] (base.py)
 //	set_player_handicap        player_handicap_factor rein_in..big_help handicap [0.5,2.0] (base.py)
 //	grant_shield               shield_seconds short..long              none (grace_until += seconds)
@@ -157,8 +160,10 @@ var magnitudeBounds = map[string]Bounds{
 	"toughness_boost":           {Min: 3, Max: 10, Default: 5, Neutral: 0, HasNeutral: true, Unit: "seconds"},
 }
 
-// MagnitudeBounds returns the bounds of intervention's numeric Value, and false
-// when the intervention takes no numeric magnitude.
+// MagnitudeBounds returns the CODE DEFAULT bounds of intervention's numeric Value,
+// and false when the intervention takes no numeric magnitude. A decide request's
+// own ranges (the operator flag decision.magnitude_bounds, #2696) are
+// Request.Bounds.Lookup.
 func MagnitudeBounds(intervention string) (Bounds, bool) {
 	b, ok := magnitudeBounds[intervention]
 	return b, ok
@@ -180,37 +185,14 @@ func MagnitudeInterventions() []string {
 // bounds whatever a backend sent. ok is false when the intervention takes no
 // numeric magnitude.
 func ResolveMagnitude(intervention string, score float64) (value float64, ok bool) {
-	b, ok := magnitudeBounds[intervention]
-	if !ok {
-		return 0, false
-	}
-	if !finite(score) {
-		score = 0
-	}
-	score = clamp01(score)
-	v := b.Min + score*(b.Max-b.Min)
-	if b.Integer {
-		v = math.Round(v)
-	} else {
-		// Drop float noise from the normalize/resolve round trip (0.7 + 0.25*0.8
-		// is 0.8999999999999999), so Decision.Value reads like the flag variant.
-		v = math.Round(v*1e9) / 1e9
-	}
-	return v, true
+	return (*MagnitudeTable)(nil).Resolve(intervention, score)
 }
 
 // NormalizeMagnitude is the inverse of ResolveMagnitude: the normalized score of
 // value within intervention's bounds (clamped to [0,1]). ok is false when the
 // intervention takes no numeric magnitude.
 func NormalizeMagnitude(intervention string, value float64) (score float64, ok bool) {
-	b, ok := magnitudeBounds[intervention]
-	if !ok {
-		return 0, false
-	}
-	if b.Max == b.Min {
-		return 0, true
-	}
-	return clamp01((value - b.Min) / (b.Max - b.Min)), true
+	return (*MagnitudeTable)(nil).Normalize(intervention, value)
 }
 
 // FFAQuestions builds the FFA question set for st:
@@ -225,7 +207,17 @@ func NormalizeMagnitude(intervention string, value float64) (score float64, ok b
 // When allowed holds a GroupTargeted lever and at least two players are alive,
 // ffa.target also offers GroupTargetOptions after the serials, and its text gains
 // one sentence (groupTargetText). Without one the questions are unchanged.
+//
+// FFAQuestions lists the code default ranges; FFAQuestionsWith a request's own
+// MagnitudeTable (#2696).
 func FFAQuestions(st State, allowed []string) []Question {
+	return FFAQuestionsWith(st, allowed, nil)
+}
+
+// FFAQuestionsWith is FFAQuestions with the magnitude ranges of bounds (nil = the
+// code defaults), so the ffa.magnitude text names the ranges the request resolves
+// with (decide-contract.md §2.1, UC-040 BR-045).
+func FFAQuestionsWith(st State, allowed []string, bounds *MagnitudeTable) []Question {
 	interventions := interventionOptions(allowed)
 	alive := st.AliveSerials()
 	targets := append([]string{TargetNone}, alive...)
@@ -253,7 +245,7 @@ func FFAQuestions(st State, allowed []string) []Question {
 		{
 			ID:    QuestionFFAMagnitude,
 			Kind:  KindScore,
-			Text:  magnitudeText(interventions),
+			Text:  magnitudeText(interventions, bounds),
 			Range: [2]float64{0, 1},
 		},
 	}
@@ -283,17 +275,22 @@ func interventionOptions(allowed []string) []string {
 	return append([]string{OptionNoop}, rest...)
 }
 
-func magnitudeText(interventions []string) string {
+func magnitudeText(interventions []string, bounds *MagnitudeTable) string {
 	var b strings.Builder
 	b.WriteString("What value should the chosen intervention use? Answer on a 0..1 scale where " +
 		"0 = the lowest listed value and 1 = the highest; it maps linearly onto the range below " +
 		"(in the intervention's own units). Ignored for interventions not listed.")
 	for _, i := range interventions {
-		bd, ok := magnitudeBounds[i]
+		bd, ok := bounds.Lookup(i)
 		if !ok {
 			continue
 		}
-		line := "\n  " + i + ": lowest " + fmtNum(bd.Min) + ", highest " + fmtNum(bd.Max) + " " + bd.Unit
+		lo, hi := fmtNum(bd.Min), fmtNum(bd.Max)
+		if e, ok := magnitudeEnds[i]; ok {
+			lo += " (" + e.Low + ")"
+			hi += " (" + e.High + ")"
+		}
+		line := "\n  " + i + ": lowest " + lo + ", highest " + hi + ", in " + bd.Unit
 		if bd.HasNeutral {
 			line += ", neutral " + fmtNum(bd.Neutral)
 		}

@@ -214,6 +214,12 @@ type Request struct {
 	// openai request only (jev never gets it). It is outside State, so the Digest
 	// does not cover it; "" (the default) leaves the rendered prompt byte-identical.
 	OperatorBrief string `json:"operator_brief,omitempty"`
+	// Bounds are the magnitude ranges of this request (#2696, UC-040 BR-045,
+	// decide-contract.md §2.1): the code default table with the operator's
+	// decision.magnitude_bounds applied (ParseMagnitudeOverride). Every consumer of
+	// the request (the ffa.magnitude text, the answer's resolution, jev, the rules
+	// adapter) reads ranges through Bounds.Lookup; nil is the code default table.
+	Bounds *MagnitudeTable `json:"-"`
 	// Context is the raw snapshot State was built from. Only in-process backends
 	// (the rules adapter, which reasons over the full GameContext) may read it.
 	// Remote backends MUST NOT read it: State is the entire contract they get, and

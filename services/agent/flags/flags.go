@@ -816,6 +816,10 @@ type Flags struct {
 	goalWarn        sync.Once
 	goalInvalidOnce sync.Once
 	goalInvalid     otelmetric.Int64Counter
+	// magnitudeInvalid is the last set of invalid decision.magnitude_bounds entries
+	// (comma-separated), so the WARN is logged once per change (#2696).
+	magnitudeMu      sync.Mutex
+	magnitudeInvalid string
 }
 
 // New builds a Flags wrapper over the given evaluator. log may be nil, in which

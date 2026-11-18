@@ -11,11 +11,19 @@ import (
 
 	"github.com/joustmania/agent/decide"
 	"github.com/joustmania/agent/decision"
+	"github.com/joustmania/agent/flagservice/fake"
 )
 
 // boundsSource ties each entry of the decide FFA bounds table (#1225) to the
 // writer default and the interventions.json flag it was derived from, so the
 // table cannot drift from the code it documents.
+//
+// The table checked here is the CODE DEFAULT (decide.MagnitudeBounds): the
+// interventions.json variants are the admin presets it mirrors. The live range of
+// a game comes from the operator flag decision.magnitude_bounds (agent set, #2696,
+// UC-040 BR-045), whose baseline default equals this table and which can move a
+// range only inside decide.HardMagnitudeLimits (checked against the flag service's
+// registry below).
 var boundsSource = map[string]struct {
 	flag    string
 	neutral string
@@ -50,6 +58,40 @@ func TestDecideBounds_IntegerFlags(t *testing.T) {
 func toughnessBoostDefaultSeconds(directive string) float64 {
 	v, _ := strconv.ParseFloat(strings.SplitN(directive, ":", 2)[0], 64)
 	return v
+}
+
+// UC: UC-040 BR-045
+// TestDecideBounds_HardLimitsMatchTheRegistry: the agent's absolute magnitude
+// limits equal the flag service's registry range of the flag each intervention
+// writes (#2696), so an operator range the agent accepts is one the flag service
+// writes.
+func TestDecideBounds_HardLimitsMatchTheRegistry(t *testing.T) {
+	policies, err := fake.RegistryPolicies(filepath.Join("..", "..", "flag-service", "registry.yaml"), "interventions")
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	for _, iv := range decide.MagnitudeInterventions() {
+		t.Run("UC-040/BR-045 "+iv, func(t *testing.T) {
+			l, ok := decide.HardMagnitudeLimits(iv)
+			if !ok {
+				t.Fatalf("%s has no hard limit", iv)
+			}
+			p, ok := policies[boundsSource[iv].flag]
+			if !ok {
+				t.Fatalf("registry has no row for %s", boundsSource[iv].flag)
+			}
+			if p.Range == nil {
+				// toughness_boost_seconds is a pattern ("float 0.1 30", optional boost).
+				if iv != decision.InterventionToughnessBoost || l.Min != 0.1 || l.Max != 30 {
+					t.Fatalf("%s: hard %+v, registry has no range", iv, l)
+				}
+				return
+			}
+			if l.Min != p.Range[0] || l.Max != p.Range[1] || l.Integer != p.Integer {
+				t.Fatalf("%s: hard %+v, registry %v integer %v", iv, l, p.Range, p.Integer)
+			}
+		})
+	}
 }
 
 func TestDecideBounds_MatchWriterDefaultsAndFlagVariants(t *testing.T) {

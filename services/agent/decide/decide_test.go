@@ -168,8 +168,8 @@ func TestFFAQuestions_AlivePlayers(t *testing.T) {
 			}
 			for _, want := range []string{
 				"0 = the lowest listed value and 1 = the highest",
-				"adjust_music_tempo: lowest 1, highest 1.3 tempo (default 1.15)",
-				"grant_shield: lowest 3, highest 10 seconds, neutral 0 (default 5)",
+				"adjust_music_tempo: lowest 1 (slower music, everyone easier to eliminate), highest 1.3 (faster music, everyone harder to eliminate), in tempo (default 1.15)",
+				"grant_shield: lowest 3 (shortest protection), highest 10 (longest protection), in seconds, neutral 0 (default 5)",
 			} {
 				if !strings.Contains(mag.Text, want) {
 					t.Errorf("magnitude text missing %q:\n%s", want, mag.Text)
@@ -198,9 +198,9 @@ func TestFFAQuestions_EmptyAllowList(t *testing.T) {
 func TestFFAQuestions_MagnitudeTextPerIntervention(t *testing.T) {
 	qs := FFAQuestions(State{}, []string{"set_player_handicap", "adjust_global_sensitivity", "adjust_volume"})
 	for _, want := range []string{
-		"set_player_handicap: lowest 0.75, highest 1.75 factor, neutral 1 (default 1.25)",
-		"adjust_global_sensitivity: lowest 0, highest 4 level, whole numbers only (default 2)",
-		"adjust_volume: lowest 0.3, highest 1 volume (default 0.7)",
+		"set_player_handicap: lowest 0.75 (target easier to eliminate), highest 1.75 (target harder to eliminate), in factor, neutral 1 (default 1.25)",
+		"adjust_global_sensitivity: lowest 0 (everyone easier to eliminate), highest 4 (everyone harder to eliminate), in level, whole numbers only (default 2)",
+		"adjust_volume: lowest 0.3 (quieter), highest 1 (louder), in volume (default 0.7)",
 	} {
 		if !strings.Contains(qs[2].Text, want) {
 			t.Errorf("magnitude text missing %q:\n%s", want, qs[2].Text)

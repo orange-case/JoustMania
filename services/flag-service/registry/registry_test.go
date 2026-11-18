@@ -130,6 +130,10 @@ func checkBounds(t *testing.T, row mdRow, p *Policy) {
 		if strings.Contains(text, "fraction 1 to 100") && !reflect.DeepEqual(b.Fraction, []int{1, 100}) {
 			t.Errorf("%s: fraction bounds %v", row.key, b.Fraction)
 		}
+	case strings.HasPrefix(text, "range table"):
+		if p.MagnitudeLimits() == nil {
+			t.Errorf("%s: flags.md says range table, registry.magnitudeLimits has no entry", row.key)
+		}
 	case strings.HasPrefix(text, "same shape"):
 		if !b.Shape {
 			t.Errorf("%s: flags.md says same shape", row.key)

@@ -303,13 +303,13 @@ class TestPlayerSensitivityFactor:
     async def test_factor_is_clamped(self):
         game = make_game(num_players=2)
         mgr, _ = make_manager(game=game)
-        # Out-of-range factors are clamped to [0.5, 2.0].
+        # Out-of-range factors are clamped to [0.2, 2.0] (floor 0.2 since #2696).
         mgr._interventions_client = TargetingFlagClient(default=1.0, per_serial={"p1": 5.0, "p2": 0.1})
 
         await handle_player_sensitivity_factor(make_ctx("player_sensitivity_factor", 0, game), mgr)
 
         assert game.players["p1"].sensitivity_factor == pytest.approx(2.0)
-        assert game.players["p2"].sensitivity_factor == pytest.approx(0.5)
+        assert game.players["p2"].sensitivity_factor == pytest.approx(0.2)
 
     @pytest.mark.asyncio
     async def test_changed_factor_changes_effective_threshold(self):

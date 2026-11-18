@@ -303,8 +303,8 @@ const magnitudeInstructions = "If the agent intervenes now, which setting should
 // that value does; any other score question gets the bare position ladder over
 // its own text.
 func scoreLadder(q decide.Question, req decide.Request, chosen string) (string, []string) {
-	if levels := conditionedLevels(q, chosen); levels != nil {
-		return conditionedMagnitude(q, chosen, req.PromptProfile, levels)
+	if levels := conditionedLevels(req.Bounds, q, chosen); levels != nil {
+		return conditionedMagnitude(req.Bounds, q, chosen, req.PromptProfile, levels)
 	}
 	ladder := make([]string, scoreLevels)
 	var interventions []string
@@ -314,8 +314,8 @@ func scoreLadder(q decide.Question, req decide.Request, chosen string) (string, 
 	for i := range ladder {
 		var vals []string
 		for _, iv := range interventions {
-			v, _ := decide.ResolveMagnitude(iv, float64(i)/float64(scoreLevels-1))
-			bd, _ := decide.MagnitudeBounds(iv)
+			v, _ := req.Bounds.Resolve(iv, float64(i)/float64(scoreLevels-1))
+			bd, _ := req.Bounds.Lookup(iv)
 			val := iv + " " + strconv.FormatFloat(v, 'g', 3, 64) + " " + bd.Unit
 			if ends, ok := magnitudeEnds[iv]; ok && (i == 0 || i == scoreLevels-1) {
 				val += " (" + ends[i/(scoreLevels-1)] + ")"
@@ -608,8 +608,8 @@ func rankWord(rank, n int) string {
 // integer lever with a narrower range, so no two levels share a value. The
 // neutral value ("no change") is never a level: an acting round must not spend
 // an intervention on a no-op. nil without bounds.
-func magnitudeLevels(iv string) []float64 {
-	b, ok := decide.MagnitudeBounds(iv)
+func magnitudeLevels(bounds *decide.MagnitudeTable, iv string) []float64 {
+	b, ok := bounds.Lookup(iv)
 	if !ok {
 		return nil
 	}
@@ -622,7 +622,7 @@ func magnitudeLevels(iv string) []float64 {
 	}
 	out := make([]float64, 0, n)
 	for i := 0; i < n; i++ {
-		v, _ := decide.ResolveMagnitude(iv, float64(i)/float64(n-1))
+		v, _ := bounds.Resolve(iv, float64(i)/float64(n-1))
 		if b.HasNeutral && math.Abs(v-b.Neutral) < 1e-9 {
 			continue
 		}
@@ -697,9 +697,9 @@ func direction(st decide.State, target string) string {
 // strengthLevels are a two-way lever's values on side dir, weakest (nearest
 // the neutral, which is excluded) to strongest (the bound), rounded to two
 // decimals so they read like flag variants. nil for any other lever.
-func strengthLevels(iv, dir string) []float64 {
+func strengthLevels(bounds *decide.MagnitudeTable, iv, dir string) []float64 {
 	tw, ok := twoWay[iv]
-	b, bok := decide.MagnitudeBounds(iv)
+	b, bok := bounds.Lookup(iv)
 	if !ok || !bok || !b.HasNeutral {
 		return nil
 	}
@@ -718,17 +718,17 @@ func strengthLevels(iv, dir string) []float64 {
 // conditionedLevels returns the chosen intervention's levels when q is a
 // details-stage magnitude question (ffa.magnitude, or a two-way lever's
 // internal strength question), else nil.
-func conditionedLevels(q decide.Question, chosen string) []float64 {
+func conditionedLevels(bounds *decide.MagnitudeTable, q decide.Question, chosen string) []float64 {
 	if chosen == "" {
 		return nil
 	}
 	if dir := strengthDirection(q.ID); dir != "" {
-		return strengthLevels(chosen, dir)
+		return strengthLevels(bounds, chosen, dir)
 	}
 	if q.ID != decide.QuestionFFAMagnitude {
 		return nil
 	}
-	return magnitudeLevels(chosen)
+	return magnitudeLevels(bounds, chosen)
 }
 
 // interventionPhrase is "The agent will apply <iv> (<description>)", with the
@@ -744,8 +744,8 @@ func interventionPhrase(iv, profile string) string {
 // conditionedMagnitude is the details-stage magnitude question for q: the
 // chosen intervention's own levels, each saying what it does, or for a
 // two-way lever's strength question the levels of one side, weakest first.
-func conditionedMagnitude(q decide.Question, iv, profile string, levels []float64) (string, []string) {
-	b, _ := decide.MagnitudeBounds(iv)
+func conditionedMagnitude(bounds *decide.MagnitudeTable, q decide.Question, iv, profile string, levels []float64) (string, []string) {
+	b, _ := bounds.Lookup(iv)
 	if dir := strengthDirection(q.ID); dir != "" {
 		effect := "help a struggling player (make them harder to eliminate)"
 		if dir == directionReinIn {

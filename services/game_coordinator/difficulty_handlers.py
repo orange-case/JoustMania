@@ -48,6 +48,7 @@ from services.game_coordinator import game_clock
 
 from .games.base import (
     FAST_MUSIC_SPEED,
+    SENSITIVITY_FACTOR_FLOOR,
     SLOW_MUSIC_SPEED,
     parse_ramp_tempo_value,
     player_identity_attributes,
@@ -65,7 +66,8 @@ BLOCK_EXPERIMENT_OVERRIDE = "experiment_override"
 logger = logging.getLogger(__name__)
 
 # Per-player sensitivity factor clamp (mirrors base.py _compute_effective_thresholds).
-SENSITIVITY_FACTOR_MIN = 0.5
+# The per-player factor may go down to 0.2 (#2696, UC-040 BR-045): see games/base.py.
+SENSITIVITY_FACTOR_MIN = SENSITIVITY_FACTOR_FLOOR
 SENSITIVITY_FACTOR_MAX = 2.0
 SENSITIVITY_FACTOR_DEFAULT = 1.0
 
@@ -188,7 +190,7 @@ async def handle_player_sensitivity_factor(ctx: InterventionContext, manager: In
 
     Uses the manager's reusable ``resolve_player_targets`` helper to evaluate the
     flag once per active serial with ``EvaluationContext(targeting_key=serial)``.
-    Each resolved factor is clamped to [0.5, 2.0] and written to the player's
+    Each resolved factor is clamped to [0.2, 2.0] (#2696) and written to the player's
     ``sensitivity_factor`` (consumed next frame by ``_compute_effective_thresholds``).
     Players without a targeting match get the neutral default (1.0); battery-gated
     serials are skipped by the helper.

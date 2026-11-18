@@ -389,7 +389,7 @@ func decodeResponse(req decide.Request, chosen string, body []byte) (wireResult,
 		if err := json.Unmarshal(raw, &ja); err != nil {
 			return res, "invalid_output", fmt.Errorf("jev: %w: answer %q: %v", llmio.ErrMalformed, q.ID, err)
 		}
-		a, native, err := toAnswer(q, ja, chosen)
+		a, native, err := toAnswer(q, ja, chosen, req.Bounds)
 		if err != nil {
 			return res, "invalid_output", fmt.Errorf("jev: %w: answer %q: %v", decide.ErrInvalid, q.ID, err)
 		}
@@ -408,7 +408,7 @@ func decodeResponse(req decide.Request, chosen string, body []byte) (wireResult,
 // toAnswer maps one Jev answer onto q's decide.Answer. native is Jev's own
 // confidence (nil for a noul, which has none). chosen is the intervention of a
 // details-stage request ("" otherwise).
-func toAnswer(q decide.Question, ja jevAnswer, chosen string) (decide.Answer, *float64, error) {
+func toAnswer(q decide.Question, ja jevAnswer, chosen string, bounds *decide.MagnitudeTable) (decide.Answer, *float64, error) {
 	a := decide.Answer{QuestionID: q.ID}
 	switch q.Kind {
 	case decide.KindChoice:
@@ -429,7 +429,7 @@ func toAnswer(q decide.Question, ja jevAnswer, chosen string) (decide.Answer, *f
 		if ja.Type != typeScore || ja.Score == nil || ja.Confidence == nil {
 			return a, nil, fmt.Errorf("want a score answer with score and confidence, got type %q", clip(ja.Type, 32))
 		}
-		s, err := scoreToRange(*ja.Score, ja.Probabilities, q, chosen)
+		s, err := scoreToRange(*ja.Score, ja.Probabilities, q, chosen, bounds)
 		if err != nil {
 			return a, nil, err
 		}
@@ -562,8 +562,8 @@ func lowerIsGentler(i, j int) bool { return i < j }
 // nearer the lever's neutral ("no change"), so the smaller change; the lower
 // level when the lever has no neutral or both are equally near. For a
 // two-way lever's half-ladder (weakest first) that is the weaker strength.
-func nearerNeutral(iv string, levels []float64) func(i, j int) bool {
-	b, _ := decide.MagnitudeBounds(iv)
+func nearerNeutral(bounds *decide.MagnitudeTable, iv string, levels []float64) func(i, j int) bool {
+	b, _ := bounds.Lookup(iv)
 	if !b.HasNeutral {
 		return lowerIsGentler
 	}
@@ -593,14 +593,14 @@ func pickLevel(s float64, probs map[string]float64, n int, gentler func(i, j int
 // position (decide.NormalizeMagnitude), so decide.ResolveMagnitude returns
 // exactly the level's value (integer levers included). Every other score
 // question uses the evenly spaced scoreLevels ladder: lo + l/(N-1)*(hi-lo).
-func scoreToRange(s float64, probs map[string]float64, q decide.Question, chosen string) (float64, error) {
+func scoreToRange(s float64, probs map[string]float64, q decide.Question, chosen string, bounds *decide.MagnitudeTable) (float64, error) {
 	lo, hi := q.Range[0], q.Range[1]
-	if levels := conditionedLevels(q, chosen); levels != nil {
-		l, err := pickLevel(s, probs, len(levels), nearerNeutral(chosen, levels))
+	if levels := conditionedLevels(bounds, q, chosen); levels != nil {
+		l, err := pickLevel(s, probs, len(levels), nearerNeutral(bounds, chosen, levels))
 		if err != nil {
 			return 0, err
 		}
-		norm, _ := decide.NormalizeMagnitude(chosen, levels[l])
+		norm, _ := bounds.Normalize(chosen, levels[l])
 		return math.Max(lo, math.Min(hi, lo+norm*(hi-lo))), nil
 	}
 	l, err := pickLevel(s, probs, scoreLevels, lowerIsGentler)

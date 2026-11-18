@@ -289,6 +289,9 @@ func validatePolicy(p *Policy, b *baseline.Baseline) error {
 			return fmt.Errorf("a shape bound needs an object-valued default variant")
 		}
 	}
+	if err := validMagnitudeRow(p, flag); err != nil {
+		return err
+	}
 	if p.AllowsScope(ScopeFraction) {
 		if f := p.Bounds.Fraction; len(f) != 2 || f[0] < 1 || f[1] > 100 || f[0] > f[1] {
 			return fmt.Errorf("a fraction scope needs bounds.fraction [lo, hi] within 1..100")
@@ -360,6 +363,12 @@ func CheckValue(p *Policy, flag *baseline.Flag, variant string, value json.RawMe
 	// A value equal to an allowed declared variant selects that variant.
 	if name := matchVariant(p, flag, value); name != "" {
 		return &Checked{Variant: name, Value: flag.Variants[name]}, nil
+	}
+	if p.MagnitudeLimits() != nil {
+		if err := checkMagnitudeValue(p, value); err != nil {
+			return nil, err
+		}
+		return &Checked{Value: value}, nil
 	}
 	switch {
 	case p.Bounds.Range != nil:

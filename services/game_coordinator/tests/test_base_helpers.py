@@ -250,13 +250,13 @@ class TestComputeEffectiveThresholds:
 
     @pytest.mark.uc("UC-030", flow="main", steps=[5])
     def test_factor_clamped_at_minimum(self, game):
-        """Factor below 0.5 should be clamped to 0.5."""
+        """Factor below the 0.2 floor (#2696) should be clamped to 0.2."""
         from lib.types import Sensitivity
 
         game.sensitivity = Sensitivity.MEDIUM
         game.music_speed = SLOW_MUSIC_SPEED
         player_below = Player(serial="test", sensitivity_factor=0.1)
-        player_at_min = Player(serial="test", sensitivity_factor=0.5)
+        player_at_min = Player(serial="test", sensitivity_factor=0.2)
         warn_below, death_below = game._compute_effective_thresholds(player_below)
         warn_at_min, death_at_min = game._compute_effective_thresholds(player_at_min)
         assert warn_below == pytest.approx(warn_at_min, abs=1e-9)

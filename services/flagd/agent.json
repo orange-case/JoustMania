@@ -931,6 +931,22 @@
       },
       "defaultVariant": "off"
     },
+    "decision.magnitude_bounds": {
+      "state": "ENABLED",
+      "variants": {
+        "default": {
+          "adjust_music_tempo": {"min": 1.0, "max": 1.3},
+          "adjust_volume": {"min": 0.3, "max": 1.0},
+          "adjust_global_sensitivity": {"min": 0, "max": 4},
+          "adjust_player_sensitivity": {"min": 0.7, "max": 1.5},
+          "adjust_global_difficulty": {"min": 0.5, "max": 2.0},
+          "set_player_handicap": {"min": 0.75, "max": 1.75},
+          "grant_shield": {"min": 3, "max": 10},
+          "toughness_boost": {"min": 3, "max": 10}
+        }
+      },
+      "defaultVariant": "default"
+    },
     "decision.goal_in_prompt": {
       "state": "ENABLED",
       "variants": {

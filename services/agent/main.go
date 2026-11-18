@@ -844,6 +844,9 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// decision.operator_brief ("" on any read error: no brief).
 	loop.SetOperatorBriefSource(c.agentFlags.OperatorBrief)
 	loop.SetBriefLog(c.briefLog)
+	// UC-040 BR-045 (#2696): every decide request carries the game's
+	// decision.magnitude_bounds (code default ranges on any read error).
+	loop.SetMagnitudeBoundsSource(c.agentFlags.MagnitudeBounds)
 	// #2479: goal.profile in the game's flag context, for the prompt's goal lines
 	// (only under decision.goal_in_prompt).
 	loop.SetGoalSource(c.goalProfile)
