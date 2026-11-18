@@ -357,7 +357,7 @@ part is about 11 minutes.
 | 10:00 | Beat 3a: Jev's threshold strict -> held -> gate | yes, 1.5 min | |
 | 11:30 | Beat 3b: interventions_allowed ladder | yes, 1.5 min | **cut** |
 | 13:00 | Beat 4: the backup, flip to Claude | yes, 1 min | |
-| (14:00) | Beat 4b: tell the agent in words, it stays in its bounds | yes, 1.5 min | **cut** (not yet rehearsed on hardware); off the clock: play it only with 3b cut, it takes 3b's 1.5 min (then 4 runs at 11:30, 4b at 12:30 and 5 on time at 14:00) |
+| 14:00 | Beat 4b: tell the agent in words, it stays in its bounds | yes, 1.5 min | **cut** (not yet rehearsed on hardware); off the clock: play it only with 3b cut, it takes 3b's 1.5 min (then 4 runs at 11:30, 4b at 12:30 and 5 on time at 14:00) |
 | 14:00 | Beat 5: kill switch, including an in-flight discard | yes, 1 min | |
 | 15:00 | Beat 6: rollback, flip back to Jev | yes, 0.5 min | |
 | 15:30 | Beat 6b: second vendor (OpenAI-compatible) | yes, 1 min | **cut** |
