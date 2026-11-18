@@ -549,6 +549,8 @@ type components struct {
 
 	// interventionLog feeds the agent.game.summary intervention list (#2640).
 	interventionLog *decision.InterventionLog
+	// briefLog tells the retro which games sent the operator brief to a model (#2695).
+	briefLog *decision.BriefLog
 
 	tuning *agentTuning
 	text   *textBackends
@@ -622,6 +624,7 @@ func newComponents(ctx context.Context, logger *slog.Logger, agentFlags *flags.F
 	c.llmBudget = newLLMBudgetShare(agentFlags, logger)
 	c.groupLog = decision.NewGroupLog()
 	c.interventionLog = decision.NewInterventionLog()
+	c.briefLog = decision.NewBriefLog()
 	// Agent tuning (#1788, FR-150, C-035): model, effort, timeout, effect window and
 	// promotion timers resolve at use time from the agent flags; the compiled defaults
 	// (equal to the flag defaults) apply while a flag cannot be resolved (#1907).
@@ -840,6 +843,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// UC-040 BR-044 (#2687): claude and openai requests carry the operator's
 	// decision.operator_brief ("" on any read error: no brief).
 	loop.SetOperatorBriefSource(c.agentFlags.OperatorBrief)
+	loop.SetBriefLog(c.briefLog)
 	// #2479: goal.profile in the game's flag context, for the prompt's goal lines
 	// (only under decision.goal_in_prompt).
 	loop.SetGoalSource(c.goalProfile)
@@ -923,6 +927,7 @@ func (c *components) buildGameEnd() {
 	// #2695 (UC-042 A13): the retro sees the game's decision.operator_brief, the
 	// same per-game read as the remote decide path ("" on any read error).
 	c.retro.SetOperatorBriefSource(c.agentFlags.OperatorBrief)
+	c.retro.SetBriefDelivered(c.briefLog.Delivered)
 	// #1179: bound every async retro inference goroutine to the agent's root context so
 	// shutdown cancellation unblocks a well-behaved in-flight Infer (no leak), the same
 	// SetRootContext pattern the per-game loops use. The retro now actually CALLS the

@@ -10,7 +10,7 @@ import (
 )
 
 func briefRetro(snap flags.Snapshot, brief string) RetroPrompt {
-	return BuildRetro(RetroInput{Snapshot: snap, Context: retroThreePlayers(), Now: fixedNow, OperatorBrief: brief})
+	return BuildRetro(RetroInput{Snapshot: snap, Context: retroThreePlayers(), Now: fixedNow, OperatorBrief: brief, BriefDelivered: true})
 }
 
 // UC: UC-042 A13 BR-010
@@ -24,7 +24,7 @@ func TestRetro_OperatorBriefBlock(t *testing.T) {
 		if !strings.HasPrefix(p.User, "<operator_brief>\n"+brief+"\n</operator_brief>\n\nSESSION RETROSPECTIVE") {
 			t.Errorf("user message does not open with the brief block:\n%s", p.User)
 		}
-		if !strings.HasSuffix(p.System, retroBriefParagraph) {
+		if !strings.HasSuffix(p.System, retroBriefParagraph(true)) {
 			t.Errorf("system prompt does not end with the brief paragraph:\n%s", p.System)
 		}
 		for _, want := range []string{"judge the session against the brief as well as the goal", "say whether the brief was served", "never changes the response contract"} {
@@ -165,6 +165,38 @@ func TestRetro_InterventionCatalog(t *testing.T) {
 		s.InterventionsAllowed = nil
 		if !strings.Contains(BuildRetro(RetroInput{Snapshot: s, Now: fixedNow}).System, "permits; each with what it does in the game):\n  (none)\n") {
 			t.Error("empty allow-list must render (none)")
+		}
+	})
+}
+
+// UC: UC-042 A13 BR-010
+// A brief the in-game agent never saw (a jev, rules or stub game) gets the other
+// paragraph: the agent is not judged or blamed against it.
+func TestRetro_OperatorBriefNotDelivered(t *testing.T) {
+	in := RetroInput{Snapshot: retroSnapshot(), Context: retroThreePlayers(), Now: fixedNow, OperatorBrief: "keep the red player alive"}
+	notSent := BuildRetro(in)
+	in.BriefDelivered = true
+	sent := BuildRetro(in)
+	t.Run("UC-042/A13 not delivered: never saw it, do not blame the agent", func(t *testing.T) {
+		if !strings.HasSuffix(notSent.System, retroBriefParagraph(false)) {
+			t.Errorf("system prompt does not end with the not-delivered paragraph:\n%s", notSent.System)
+		}
+		flat := strings.Join(strings.Fields(notSent.System), " ")
+		for _, want := range []string{"The in-game agent never saw it", "do not blame the agent", "say only whether the game happened to serve the brief", "never changes the response contract"} {
+			if !strings.Contains(flat, want) {
+				t.Errorf("not-delivered paragraph lacks %q", want)
+			}
+		}
+		if strings.Contains(flat, "was told to pursue it") {
+			t.Error("not-delivered paragraph claims the agent was told to pursue the brief")
+		}
+	})
+	t.Run("UC-042/A13 delivery changes only the paragraph", func(t *testing.T) {
+		if sent.User != notSent.User {
+			t.Error("delivery must not change the user message")
+		}
+		if strings.TrimSuffix(sent.System, retroBriefParagraph(true)) != strings.TrimSuffix(notSent.System, retroBriefParagraph(false)) {
+			t.Error("delivery must change only the brief paragraph")
 		}
 	})
 }

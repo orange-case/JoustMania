@@ -138,6 +138,9 @@ type RetroCoordinator struct {
 	// operatorBrief is the per-game decision.operator_brief source (#2695, UC-042
 	// A13), the same one the remote decide path uses; nil = no brief block.
 	operatorBrief OperatorBriefSource
+	// briefDelivered reports whether the game's in-game model was sent the brief
+	// (BriefLog.Delivered, #2695); nil = never delivered.
+	briefDelivered func(gameID string) bool
 
 	// experimentParent resolves the long-lived agent.experiment ROOT span's SpanContext
 	// by experiment_id (#1188), reading the registry's ExperimentSpanContext accessor.
@@ -315,6 +318,12 @@ func (rc *RetroCoordinator) SetGoalLookup(f func(gameID string) *gamesummary.Goa
 // default and every older test) keeps the prompt without a brief. Set at wiring.
 func (rc *RetroCoordinator) SetOperatorBriefSource(src OperatorBriefSource) { rc.operatorBrief = src }
 
+// SetBriefDelivered injects the lookup that says whether a game's remote decide
+// requests carried the brief (main.go wires BriefLog.Delivered, #2695): the brief
+// reaches claude and openai only, so a jev, rules or stub game never saw it. nil =
+// never delivered. Set at wiring.
+func (rc *RetroCoordinator) SetBriefDelivered(f func(gameID string) bool) { rc.briefDelivered = f }
+
 // retroOperatorBrief is the game's brief ("" without a source).
 func (rc *RetroCoordinator) retroOperatorBrief(gameID string) string {
 	if rc.operatorBrief == nil {
@@ -448,7 +457,8 @@ func (rc *RetroCoordinator) OnGameEnd(c gamecontext.GameContext) {
 		Summary:  summary,
 		Now:      retroNow,
 		// #2695 (UC-042 A13): the brief of the game that ended, read in its flag context.
-		OperatorBrief: rc.retroOperatorBrief(c.SessionID),
+		OperatorBrief:  rc.retroOperatorBrief(c.SessionID),
+		BriefDelivered: rc.briefDelivered != nil && rc.briefDelivered(c.SessionID),
 	})
 
 	// Inference attribution (#1234): the wired backend's model and name, or

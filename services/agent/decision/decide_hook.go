@@ -680,6 +680,10 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 	// The operator brief (#2687, UC-040 BR-044): read per request, claude and
 	// openai only; "" (no brief, jev, rules) leaves the request byte-identical.
 	rec.req.OperatorBrief = l.operatorBriefFor(root, rec.used, c.SessionID)
+	// #2695 (UC-042 A13): the retro tells the analyst whether the in-game model saw it.
+	if rec.req.OperatorBrief != "" {
+		l.briefLog.Note(c.SessionID)
+	}
 	// The prediction ask (#2479, UC-040 A45): only with decision.predictions.ask_model
 	// and decision.predictions_enabled on (fire-time flags) and a claude or openai
 	// backend; otherwise the request stays v1.

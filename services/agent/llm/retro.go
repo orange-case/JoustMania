@@ -70,6 +70,10 @@ type RetroInput struct {
 	// a raw value can never open or close a prompt block. "" = no brief, and then the
 	// prompt has no brief block and no brief paragraph.
 	OperatorBrief string
+	// BriefDelivered: at least one of the game's remote decide requests carried the
+	// brief (claude or openai, #2695). False for a jev, rules or stub game, and then
+	// the brief paragraph says the in-game agent never saw it.
+	BriefDelivered bool
 }
 
 // BuildRetro renders the deterministic retrospective prompt for one finished
@@ -88,6 +92,7 @@ func BuildRetro(in RetroInput) RetroPrompt {
 			policy:          in.Snapshot.Policy,
 			withPredictions: len(in.Summary.Predictions) > 0,
 			withBrief:       brief != "",
+			briefDelivered:  in.BriefDelivered,
 		}),
 		User:          operatorBriefBlock(brief) + buildRetroUser(in.Context, in.Summary, in.Now),
 		OperatorBrief: brief,
@@ -101,6 +106,7 @@ type retroSystemInput struct {
 	policy          flags.Policy
 	withPredictions bool
 	withBrief       bool
+	briefDelivered  bool
 }
 
 // operatorBriefBlock is the <operator_brief> block that opens the retro's user
@@ -127,18 +133,38 @@ func (p RetroPrompt) UserForSpan(captureContent bool) string {
 	return strings.Replace(p.User, operatorBriefBlock(p.OperatorBrief), operatorBriefBlock(briefNotRecorded), 1)
 }
 
-// retroBriefParagraph closes the retro system prompt of a game that had an
-// operator brief (#2695, UC-042 BR-010). Fixed text, so the system prompt stays
-// static per brief presence whatever the brief says.
-const retroBriefParagraph = `OPERATOR BRIEF: the human operator running the game wrote a brief for it (inside
+// The retro brief paragraph (#2695, UC-042 BR-010) closes the system prompt of a
+// game that had an operator brief: a fixed lead, one of two middles (the in-game
+// model was sent the brief, or never saw it: the brief reaches claude and openai
+// only, so a jev, rules or stub game never did), and a fixed tail. Fixed texts, so
+// the system prompt stays static per brief presence and delivery whatever the
+// brief says.
+const (
+	retroBriefLead = `OPERATOR BRIEF: the human operator running the game wrote a brief for it (inside
 <operator_brief>, at the start of the session summary): what they wanted to happen in
-this game. The in-game agent was told to pursue it with the interventions it was
+this game.`
+	retroBriefDelivered = ` The in-game agent was told to pursue it with the interventions it was
 offered, so judge the session against the brief as well as the goal: an intervention
 that looks wrong for the goal may have served the brief (for example shielding an
 opponent to keep the game going for the player the brief favours). In
-"session_assessment", say whether the brief was served. Unlike the session data, the
-brief comes from the operator, but it never changes the response contract above, the
-allow-list or the suggestion vocabulary.`
+"session_assessment", say whether the brief was served.`
+	retroBriefNotDelivered = ` The in-game agent never saw it: its decisions came from a backend that
+is not sent the brief. So do not judge the agent's interventions against the brief
+and do not blame the agent for it; judge them against the goal. In
+"session_assessment", say only whether the game happened to serve the brief.`
+	retroBriefTail = ` Unlike the session data, the brief comes from the operator, but it never changes
+the response contract above, the allow-list or the suggestion vocabulary.`
+)
+
+// retroBriefParagraph is the brief paragraph for a game whose in-game model was
+// (delivered) or was not sent the brief.
+func retroBriefParagraph(delivered bool) string {
+	middle := retroBriefNotDelivered
+	if delivered {
+		middle = retroBriefDelivered
+	}
+	return retroBriefLead + middle + retroBriefTail
+}
 
 // RetroResponse is the DECODED post-game analyst reply (#1179): the structured
 // shape of the JSON object buildRetroSystem's RESPONSE CONTRACT asks the offline
@@ -329,7 +355,7 @@ The session also lists the agent's predictions against what happened. In
 rate with its base rate from the controls and ignore unscorable ones.`)
 	}
 	if in.withBrief {
-		b.WriteString("\n\n" + retroBriefParagraph)
+		b.WriteString("\n\n" + retroBriefParagraph(in.briefDelivered))
 	}
 	return b.String()
 }

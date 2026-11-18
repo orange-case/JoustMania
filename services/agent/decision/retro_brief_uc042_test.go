@@ -3,8 +3,12 @@ package decision
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/joustmania/agent/flags"
+	"github.com/joustmania/agent/llm"
 	"github.com/joustmania/agent/telemetry/keys"
 )
 
@@ -79,4 +83,86 @@ func TestRetro_OperatorBrief(t *testing.T) {
 			}
 		}
 	})
+}
+
+// UC: UC-042 A13 BR-010
+// The brief log notes a game only when a remote request carried the brief (claude
+// or openai, never jev), and the retro tells the analyst whether the in-game agent
+// saw the brief.
+func TestRetro_OperatorBriefDelivered(t *testing.T) {
+	const brief = "keep the red player alive"
+	noted := func(t *testing.T, backend string) bool {
+		t.Helper()
+		be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.9, "A", 0.5, "shield"))
+		be.name = backend
+		snap := remoteSnapshot(time.Second)
+		snap.Decision.Backend = backend
+		snap.Decision.Jev = flags.RemoteBackendConfig{Model: "jev-latest", Timeout: time.Second}
+		h := newRemoteHarness(t, snap, be)
+		h.loop.SetOperatorBriefSource(func(context.Context, string) string { return brief })
+		log := NewBriefLog()
+		h.loop.SetBriefLog(log)
+		h.run(t)
+		return log.Delivered(remoteGameID)
+	}
+	t.Run("UC-042/A13 a claude request with the brief is noted", func(t *testing.T) {
+		if !noted(t, flags.DecisionBackendClaude) {
+			t.Error("claude game not noted as brief-delivered")
+		}
+	})
+	t.Run("UC-042/A13 a jev game is not noted", func(t *testing.T) {
+		if noted(t, flags.DecisionBackendJev) {
+			t.Error("jev never gets the brief, but the game was noted")
+		}
+	})
+
+	system := func(t *testing.T, delivered func(string) bool) string {
+		t.Helper()
+		rc, _ := recordingRetro(t, retroFlagSnapshot())
+		be := &systemCapture{}
+		rc.SetBackend(be)
+		rc.SetOperatorBriefSource(func(context.Context, string) string { return brief })
+		if delivered != nil {
+			rc.SetBriefDelivered(delivered)
+		}
+		rc.OnGameEnd(endedSession())
+		rc.AwaitInflight()
+		be.mu.Lock()
+		defer be.mu.Unlock()
+		return strings.Join(strings.Fields(be.system), " ")
+	}
+	t.Run("UC-042/A13 delivered: judge whether the agent served the brief", func(t *testing.T) {
+		var asked string
+		s := system(t, func(id string) bool { asked = id; return true })
+		if asked != endedSession().SessionID {
+			t.Errorf("delivery asked for %q", asked)
+		}
+		if !strings.Contains(s, "The in-game agent was told to pursue it") || strings.Contains(s, "never saw it") {
+			t.Errorf("delivered paragraph wrong:\n%s", s)
+		}
+	})
+	t.Run("UC-042/A13 not delivered: the agent never saw it and is not blamed", func(t *testing.T) {
+		for name, d := range map[string]func(string) bool{"no lookup": nil, "not sent": func(string) bool { return false }} {
+			s := system(t, d)
+			if !strings.Contains(s, "The in-game agent never saw it") || !strings.Contains(s, "do not blame the agent") ||
+				strings.Contains(s, "was told to pursue it") {
+				t.Errorf("%s: not-delivered paragraph wrong:\n%s", name, s)
+			}
+		}
+	})
+}
+
+// systemCapture is a text backend that keeps the system prompt it was asked.
+type systemCapture struct {
+	mu     sync.Mutex
+	system string
+}
+
+func (p *systemCapture) Name() string  { return "claude" }
+func (p *systemCapture) Model() string { return "claude-test" }
+func (p *systemCapture) Infer(_ context.Context, pr llm.Prompt) (string, error) {
+	p.mu.Lock()
+	p.system = pr.System
+	p.mu.Unlock()
+	return `{"session_assessment":"ok","suggestions":[],"session_focus":"balanced"}`, nil
 }
