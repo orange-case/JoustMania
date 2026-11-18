@@ -599,7 +599,8 @@ class GameSession:
         # code-default fallback. The span does not exist yet, so the outcome is replayed onto it.
         admitted = self.game_running
         wait_record = SpanRecord()
-        await await_flag_providers_ready(wait_record)
+        if self.clients.is_connected:  # not connected: the error below comes at once, no flag matters
+            await await_flag_providers_ready(wait_record)
 
         parent_context = Context()
         if (

@@ -43,6 +43,7 @@ class MockSpan:
 
     def __init__(self, trace_id=0x4BF92F3577B34DA6A3CE929D0E0E4736, span_id=0x051581BF3CB55C13):
         self.attributes = {}
+        self.events = []
         # Non-zero trace_id by default so the #1133 correlation gauge fires; a test
         # can pass trace_id=0 to exercise the unsampled-span fallback (no gauge).
         self._span_context = MockSpanContext(trace_id, span_id)
@@ -51,7 +52,7 @@ class MockSpan:
         self.attributes[key] = value
 
     def add_event(self, name, attributes=None):
-        pass
+        self.events.append((name, attributes))
 
     def get_span_context(self):
         return self._span_context

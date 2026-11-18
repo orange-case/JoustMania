@@ -83,7 +83,7 @@ async def test_not_ready_domains_are_awaited_then_config_refreshed():
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-010", flow="A5", steps=[1], br=["BR-004"])
 async def test_admission_waits_for_the_observability_provider():
-    """UC-010 A5 / BR-004 (#2658): observability is a waited domain, so per-game telemetry flags are the served values."""
+    """UC-010 A5 / BR-004 (#2658): observability is waited on, so per-game telemetry flags are served values."""
     assert "observability" in COORDINATOR_FLAG_DOMAINS
     span = _span()
     waits = []
@@ -261,6 +261,7 @@ async def test_session_waits_for_providers_before_creating_the_game(mock_tracer_
     async def _ready(record):
         order.append(("ready", record))
         record.set_attribute("feature_flag.providers_wait_ms", 7)
+        record.add_event("feature_flag.providers_not_ready", {"feature_flag.domains": ["observability"]})
         return []
 
     mock_game = MagicMock()
@@ -277,6 +278,29 @@ async def test_session_waits_for_providers_before_creating_the_game(mock_tracer_
     assert [o[0] for o in order] == ["ready", "create"]
     # The wait finishes before the root span exists (it decides the span's parent); its outcome is replayed onto it.
     assert root_span.attributes["feature_flag.providers_wait_ms"] == 7
+    assert ("feature_flag.providers_not_ready", {"feature_flag.domains": ["observability"]}) in root_span.events
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-010", flow="A5", br=["BR-004"])
+@patch("services.game_coordinator.game_session.GameFactory")
+@patch("services.game_coordinator.game_session.tracer")
+async def test_session_does_not_wait_for_providers_when_clients_are_not_connected(mock_tracer_mod, mock_factory):
+    """UC-010 A5: without gRPC clients the game_error is immediate; no provider wait, no not-ready warning."""
+    from test_game_session import _make_session, _tracer_mock
+
+    session = _make_session()
+    session.game_running = True
+    session.clients.is_connected = False
+    mock_tracer_mod.start_as_current_span = _tracer_mock().start_as_current_span
+
+    with patch("services.game_coordinator.game_session.await_flag_providers_ready", new=AsyncMock()) as ready:
+        await session._run_game_loop_async()
+
+    ready.assert_not_awaited()
+    errors = [c for c in session.event_bus.publish.call_args_list if c[0][0] == "game_error"]
+    assert errors and "not initialized" in errors[0][0][1]["error"]
+    mock_factory.create_game.assert_not_called()
 
 
 @pytest.mark.asyncio
