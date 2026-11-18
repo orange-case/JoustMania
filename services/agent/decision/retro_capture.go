@@ -448,16 +448,15 @@ func (rc *RetroCoordinator) OnGameEnd(c gamecontext.GameContext) {
 	attrs = append(attrs, rc.outcomeAttributes(c)...)
 	attrs = append(attrs, rc.experimentAttributes(c)...)
 
-	// #1140 Slice B: the retro is post-game / async, so it stays a ROOT span (no
-	// parent — there is no inbound RPC context at game end), but it is no longer
-	// ORPHANED from the game it reflects on. When the finished session carries a
-	// valid game-coordinator trace_id (GameContext.GameTraceID, #1133), add the SAME
-	// span Link the agent.decision span uses (gameTraceLink, package-level in this
-	// package), so agent.llm.retro is navigable to the originating game trace in
-	// Jaeger. The trace_id is also stamped as a plain span attribute (mirroring
-	// runDecision) so it stays queryable as a tag on backends that don't surface Link
-	// attributes in search. An empty/invalid id yields no Link and no attribute —
-	// graceful fallback, the span is byte-identical to before.
+	// #1140 Slice B: the retro is never ORPHANED from the game it reflects on. When
+	// the finished session carries a valid game-coordinator trace_id
+	// (GameContext.GameTraceID, #1133), add the SAME span Link the agent.decision span
+	// uses (gameTraceLink, package-level in this package), so agent.llm.retro is
+	// navigable to the originating game trace in Jaeger. The trace_id is also stamped
+	// as a plain span attribute (mirroring runDecision) so it stays queryable as a tag
+	// on backends that don't surface Link attributes in search. An empty/invalid id
+	// yields no Link and no attribute. The Link is kept even when the retro is a child
+	// of the game root (retroParentCtx), so existing searches keep working.
 	startOpts := []trace.SpanStartOption{trace.WithAttributes(attrs...)}
 	startOpts = append(startOpts, gameTraceLink(c.GameTraceID, c.GameTraceSpanID)...)
 	if c.GameTraceID != "" {
@@ -465,13 +464,15 @@ func (rc *RetroCoordinator) OnGameEnd(c gamecontext.GameContext) {
 			trace.WithAttributes(attribute.String(AttrGameTraceID, c.GameTraceID)))
 	}
 
-	// #1188: for an experiment-bound game, re-parent the retro under the experiment
-	// ROOT span — the retro is "in between" games and the experiment outlives them, so
-	// it joins the experiment's trace as a child. The game Link above is RETAINED so the
-	// retro stays navigable to its originating game too. A non-experiment game / unwired
-	// lookup / torn-down experiment yields an invalid SpanContext, so retroParentCtx
-	// returns context.Background(): the pre-#1188 game-linked own-root span, unchanged.
-	parent := rc.retroParentCtx(c.ExperimentID)
+	// Parent (retroParentCtx): the experiment ROOT span for an experiment-bound game
+	// (#1188), else the game root span as a remote parent with kind CONSUMER (the retro
+	// is the one async follow-up of that game's end, so it joins the game's trace like
+	// agent.game.summary, #2640), else its own root. The game Link above is RETAINED in
+	// every case.
+	parent, underGame := rc.retroParentCtx(c)
+	if underGame {
+		startOpts = append(startOpts, trace.WithSpanKind(trace.SpanKindConsumer))
+	}
 	spanCtx, span := rc.Tracer.Start(parent, SpanLLMRetro, startOpts...)
 
 	rc.Log.Info("agent.llm.retro_captured",
@@ -832,27 +833,27 @@ func (rc *RetroCoordinator) experimentAttributes(c gamecontext.GameContext) []at
 	return out
 }
 
-// retroParentCtx returns the context the agent.llm.retro span is started from (#1188):
-// a context whose remote parent is the experiment ROOT span for an experiment-bound
-// game with a live root span, else plain context.Background() (the pre-#1188 own-root
-// behavior). It reads the SpanContext via the injected experimentParent seam and installs
-// it with gamecontext.RemoteParentFromSpanContext.
+// retroParentCtx returns the context the agent.llm.retro span is started from, in
+// the same tiers as the agent.game.summary span (gamesummary.summaryParentCtx):
+//  1. an experiment-bound game with a live experiment ROOT span: a remote child of it
+//     (#1188), read through the experimentParent seam;
+//  2. otherwise, valid game.trace_id / game.trace_span_id: a remote child of the game
+//     root span, so the post-game summary sits in the game's own trace; underGame=true
+//     tells the caller to start the span as CONSUMER;
+//  3. otherwise plain context.Background(): its own root.
 //
-// GRACEFUL FALLBACK: an empty experiment_id (non-experiment game), a nil seam (the
-// default / tests), or ok=false (the experiment has no live root span — torn down, or
-// tracer disabled) all yield context.Background(), so the retro span is byte-identical
-// to before #1188 and emission is never broken.
-func (rc *RetroCoordinator) retroParentCtx(experimentID string) context.Context {
+// GRACEFUL FALLBACK: every miss (no experiment id, nil seam, torn-down experiment,
+// empty / invalid game ids) falls to the next tier, so emission is never broken.
+func (rc *RetroCoordinator) retroParentCtx(c gamecontext.GameContext) (ctx context.Context, underGame bool) {
 	base := context.Background()
-	if experimentID == "" || rc.experimentParent == nil {
-		return base
+	if c.ExperimentID != "" && rc.experimentParent != nil {
+		if sc, ok := rc.experimentParent(c.ExperimentID); ok {
+			if ctx, ok := gamecontext.RemoteParentFromSpanContext(base, sc); ok {
+				return ctx, false
+			}
+		}
 	}
-	sc, ok := rc.experimentParent(experimentID)
-	if !ok {
-		return base
-	}
-	ctx, _ := gamecontext.RemoteParentFromSpanContext(base, sc)
-	return ctx
+	return gameRemoteParent(base, c.GameTraceID, c.GameTraceSpanID)
 }
 
 // compile-time guard: RetroCoordinator.OnGameEnd matches the store hook signature.

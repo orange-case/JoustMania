@@ -3,17 +3,19 @@ package decision
 import (
 	"testing"
 
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// #1140 Slice B: the post-game agent.llm.retro span stays a ROOT span but is no
-// longer orphaned from the game — when the finished session carries a valid game
-// trace_id (GameContext.GameTraceID, #1133) the retro span carries an OTel Link to
-// that game trace (the same gameTraceLink primitive the agent.decision span uses).
-// Absent/invalid trace_id -> no Link, no error (graceful fallback). The link
-// complements, does not replace, the game.id attribute.
+// #1140 Slice B: the post-game agent.llm.retro span is not orphaned from the game —
+// when the finished session carries a valid game trace_id (GameContext.GameTraceID,
+// #1133) the retro span carries an OTel Link to that game trace (the same
+// gameTraceLink primitive the agent.decision span uses). Absent/invalid trace_id ->
+// no Link, no error (graceful fallback). The link complements, does not replace, the
+// game.id attribute. A non-experiment game with valid game ids also makes the retro a
+// CONSUMER remote child of the game root span, so it sits in the game's trace.
 
 const retroGameSpanID = "051581bf3cb55c13" // valid 8-byte hex span id (#1157)
 
@@ -29,7 +31,7 @@ func endedSessionWithTrace(traceID string) gamecontext.GameContext {
 // TestRetroSpan_LinksToGameTrace: a valid GameTraceID yields exactly one Link on the
 // agent.llm.retro span whose target trace_id is that game trace, the link carries
 // game.trace_id as an attribute, and the span itself stamps game.trace_id as a
-// queryable tag. The retro stays a root span (no parent).
+// queryable tag. The retro is a CONSUMER child of the game root span (same trace).
 // UC: UC-070 main
 func TestRetroSpan_LinksToGameTrace(t *testing.T) {
 	const gameTrace = "4bf92f3577b34da6a3ce929d0e0e4736" // valid 16-byte hex trace id
@@ -43,10 +45,8 @@ func TestRetroSpan_LinksToGameTrace(t *testing.T) {
 	}
 	span := spans[0]
 
-	// Root span: no parent (post-game / async).
-	if span.Parent().IsValid() {
-		t.Error("agent.llm.retro must remain a root span (no parent)")
-	}
+	// A remote child of the game root span, in the game's trace, kind CONSUMER.
+	assertRetroUnderGame(t, span, gameTrace)
 
 	links := span.Links()
 	if len(links) != 1 {
@@ -130,6 +130,9 @@ func TestRetroSpan_ReparentedUnderExperiment(t *testing.T) {
 	if n := len(span.Links()); n != 1 {
 		t.Errorf("retro links = %d, want 1 (game Link retained under experiment re-parent)", n)
 	}
+	if got := span.SpanKind(); got != trace.SpanKindInternal {
+		t.Errorf("experiment-child retro kind = %v, want INTERNAL (unchanged)", got)
+	}
 
 	// A non-experiment game (seam returns ok=false) stays own-root.
 	rc2, sr2 := recordingRetro(t, retroFlagSnapshot())
@@ -162,6 +165,13 @@ func TestRetroSpan_NoLinkWhenTraceAbsent(t *testing.T) {
 	if n := len(span.Links()); n != 0 {
 		t.Errorf("agent.llm.retro links = %d, want 0 (no game trace_id)", n)
 	}
+	// Own root, kind INTERNAL: no game to join.
+	if span.Parent().IsValid() {
+		t.Error("without game ids agent.llm.retro must be its own root")
+	}
+	if got := span.SpanKind(); got != trace.SpanKindInternal {
+		t.Errorf("own-root retro kind = %v, want INTERNAL", got)
+	}
 	if _, ok := attrValue(span, AttrGameTraceID); ok {
 		t.Error("game.trace_id attribute must be absent when no game trace_id is present")
 	}
@@ -188,5 +198,50 @@ func TestRetroSpan_NoLinkWhenTraceInvalid(t *testing.T) {
 		if n := len(spans[0].Links()); n != 0 {
 			t.Errorf("GameTraceID=%q: links = %d, want 0 (invalid id yields no link)", bad, n)
 		}
+		if spans[0].Parent().IsValid() {
+			t.Errorf("GameTraceID=%q: retro must fall back to its own root", bad)
+		}
+	}
+}
+
+// TestRetroSpan_GameChildWhenExperimentGone: an experiment-bound game whose experiment
+// has no live root span (torn down) falls to the next tier, the game root span, like
+// agent.game.summary does; it does not drop to its own root.
+// UC: UC-070 main
+func TestRetroSpan_GameChildWhenExperimentGone(t *testing.T) {
+	const gameTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
+	rc, sr := recordingRetro(t, retroFlagSnapshot())
+	rc.SetExperimentParent(func(string) (trace.SpanContext, bool) { return trace.SpanContext{}, false })
+	c := endedSessionWithTrace(gameTrace)
+	c.ExperimentID = "exp_gone"
+	rc.OnGameEnd(c)
+
+	spans := spansByName(sr.Ended(), SpanLLMRetro)
+	if len(spans) != 1 {
+		t.Fatalf("agent.llm.retro spans = %d, want 1", len(spans))
+	}
+	assertRetroUnderGame(t, spans[0], gameTrace)
+}
+
+// assertRetroUnderGame checks the retro span is a remote CONSUMER child of the game
+// root span (retroGameSpanID) in the game trace gameTrace, with the game Link kept.
+func assertRetroUnderGame(t *testing.T, span sdktrace.ReadOnlySpan, gameTrace string) {
+	t.Helper()
+	wantTID, _ := trace.TraceIDFromHex(gameTrace)
+	wantSID, _ := trace.SpanIDFromHex(retroGameSpanID)
+	if got := span.SpanContext().TraceID(); got != wantTID {
+		t.Errorf("retro trace_id = %s, want the game trace %s", got, wantTID)
+	}
+	if got := span.Parent().SpanID(); got != wantSID {
+		t.Errorf("retro parent span_id = %s, want the game root %s", got, wantSID)
+	}
+	if !span.Parent().IsRemote() {
+		t.Error("retro parent must be the remote game root span context")
+	}
+	if got := span.SpanKind(); got != trace.SpanKindConsumer {
+		t.Errorf("retro kind = %v, want CONSUMER", got)
+	}
+	if n := len(span.Links()); n != 1 {
+		t.Errorf("retro links = %d, want 1 (game Link kept)", n)
 	}
 }
