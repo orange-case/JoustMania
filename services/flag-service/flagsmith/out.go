@@ -34,10 +34,13 @@ type out struct {
 	// registered (identifier -> deleted uuid), handled by Run (#2639).
 	goneMu sync.Mutex
 	gone   map[string]string
+	// overrides: the featurestate uuids of identity overrides, by identity
+	// uuid (only Run reads and writes it; overrides.go, #2682).
+	overrides map[string]*identityOverrides
 }
 
 func newOut(l *Link) *out {
-	return &out{l: l, wake: make(chan struct{}, 1), ids: newIdentityQueue(), listed: map[string]time.Time{}, gone: map[string]string{}}
+	return &out{l: l, wake: make(chan struct{}, 1), ids: newIdentityQueue(), listed: map[string]time.Time{}, gone: map[string]string{}, overrides: map[string]*identityOverrides{}}
 }
 
 func (o *out) poke() {
@@ -223,6 +226,7 @@ func (o *out) relistGone() {
 			delete(l.ids.IdentityUUID, identifier)
 		}
 		l.ids.Unlock()
+		o.forgetOverrides(uuid)
 		g, live := l.liveGameOf(identifier)
 		if !live {
 			continue

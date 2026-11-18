@@ -44,9 +44,27 @@ func (f *Fake) registerAdminDefaults() {
 	d.HandleFunc("GET "+APIPath+"environments/{env}/edge-identities/", func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]any{"results": []any{}, "last_evaluated_key": nil})
 	})
-	d.HandleFunc("DELETE "+APIPath+"environments/{env}/edge-identities/{uuid}/", func(w http.ResponseWriter, _ *http.Request) {
+	d.HandleFunc("DELETE "+APIPath+"environments/{env}/edge-identities/{uuid}/", func(w http.ResponseWriter, r *http.Request) {
+		f.Overrides.Forget(r.PathValue("uuid"))
 		w.WriteHeader(http.StatusNoContent)
 	})
+	overrides := func(w http.ResponseWriter, r *http.Request) {
+		uuid, rest, _ := OverrideRoute(r.URL.Path)
+		if !f.Overrides.Serve(w, r, uuid, rest) {
+			DjangoNotFound(w, r)
+		}
+	}
+	for _, m := range []string{"GET ", "POST "} {
+		d.HandleFunc(m+APIPath+"environments/{env}/edge-identities/{uuid}/edge-featurestates/{$}", overrides)
+	}
+	for _, m := range []string{"GET ", "PUT ", "DELETE "} {
+		d.HandleFunc(m+APIPath+"environments/{env}/edge-identities/{uuid}/edge-featurestates/{fs}/{$}", overrides)
+	}
+	// The SaaS routes no upsert by identifier (#2682).
+	for _, m := range []string{"GET ", "POST ", "PUT ", "PATCH ", "DELETE ", "OPTIONS "} {
+		d.HandleFunc(m+APIPath+"environments/{env}/edge-identities-featurestates", DjangoNotFound)
+		d.HandleFunc(m+APIPath+"environments/{env}/edge-identities-featurestates/{$}", DjangoNotFound)
+	}
 }
 
 // create stores the request body (a JSON object) with a new id and answers it

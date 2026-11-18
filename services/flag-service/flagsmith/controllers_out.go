@@ -182,6 +182,7 @@ func (o *out) controllerUUID(ctx context.Context, identifier string, create bool
 		return "", false, ctrlRefused, nil
 	}
 	l.setIdentityUUID(identifier, uuid)
+	o.freshOverrides(uuid)
 	return uuid, true, ctrlGoOn, nil
 }
 
@@ -252,6 +253,8 @@ func (o *out) clearController(ctx context.Context, op ctrlOp, identifier, uuid s
 	if err != nil || stop != ctrlGoOn {
 		return nil, stop, err
 	}
+	// The listing is complete: the owner's first values need no other (#2682).
+	o.listedOverrides(uuid, states)
 	var removed []FeatureState
 	refused := false
 	for _, fs := range states {
@@ -263,8 +266,14 @@ func (o *out) clearController(ctx context.Context, op ctrlOp, identifier, uuid s
 			return removed, ctrlAgain, nil
 		}
 		k := Key{Set: l.setOfFlag(flag), Flag: flag, Scope: identifier}
+		if fs.FeatureStateUUID == "" {
+			// Flagsmith named no featurestate_uuid: it cannot be removed.
+			refused = true
+			continue
+		}
+		// The override itself (#2682); a 404 is an override gone already.
 		_, stop, err := o.ctrlCall(ctx, k, OpDeleteOverride, func(c context.Context) (int, error) {
-			status, err := l.Client().Admin(c, http.MethodDelete, l.envPath("edge-identities-featurestates"), overrideKey{Identifier: identifier, Feature: fs.Feature.ID}, nil)
+			status, err := l.Client().Admin(c, http.MethodDelete, l.overridePath(uuid, fs.FeatureStateUUID), nil, nil)
 			return status, ignoreNotFound(err)
 		})
 		switch {
@@ -273,6 +282,7 @@ func (o *out) clearController(ctx context.Context, op ctrlOp, identifier, uuid s
 		case stop == ctrlRefused:
 			refused = true
 		default:
+			o.setOverride(uuid, fs.Feature.ID, "")
 			removed = append(removed, fs)
 		}
 	}
@@ -289,6 +299,7 @@ func overrideList(raw json.RawMessage) []FeatureState {
 		Feature           json.RawMessage `json:"feature"`
 		Enabled           bool            `json:"enabled"`
 		FeatureStateValue json.RawMessage `json:"feature_state_value"`
+		FeatureStateUUID  string          `json:"featurestate_uuid"`
 	}
 	var list []item
 	if json.Unmarshal(raw, &list) != nil {
@@ -307,7 +318,7 @@ func overrideList(raw json.RawMessage) []FeatureState {
 		if f.ID == 0 {
 			continue
 		}
-		out = append(out, FeatureState{Feature: f, Enabled: it.Enabled, FeatureStateValue: it.FeatureStateValue})
+		out = append(out, FeatureState{Feature: f, Enabled: it.Enabled, FeatureStateValue: it.FeatureStateValue, FeatureStateUUID: it.FeatureStateUUID})
 	}
 	return out
 }

@@ -26,17 +26,23 @@ func (e *outEnv) captureLog() *syncBuffer {
 	return buf
 }
 
-// overrideNotFound answers the first n override PUTs 404 (Flagsmith's JSON
-// "Not found."), the rest 200, and counts them.
+// overrideNotFound answers the first n override POSTs 404 (Flagsmith's JSON
+// "Not found.": the identity is not shown), the rest as Flagsmith does, and
+// counts them (#2682: the POST on the identity's override list).
 func (e *outEnv) overrideNotFound(n int32) *atomic.Int32 {
 	var calls atomic.Int32
-	e.setOn(http.MethodPut, apiEnv+"edge-identities-featurestates", func(w http.ResponseWriter, _ *http.Request) {
-		if calls.Add(1) <= n {
-			flagsmithtest.WriteJSON(w, http.StatusNotFound, json.RawMessage(`{"detail":"Not found."}`))
-			return
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	prev := e.hook
+	e.hook = func(w http.ResponseWriter, r *http.Request) bool {
+		if _, rest, ok := flagsmithtest.OverrideRoute(r.URL.Path); ok && rest == "edge-featurestates/" && r.Method == http.MethodPost {
+			if calls.Add(1) <= n {
+				flagsmithtest.WriteJSON(w, http.StatusNotFound, json.RawMessage(`{"detail":"Not found."}`))
+				return true
+			}
 		}
-		flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
-	})
+		return prev != nil && prev(w, r)
+	}
 	return &calls
 }
 
@@ -66,7 +72,7 @@ func TestNotFoundAfterListingRetried(t *testing.T) {
 		e.link.StateChanged(e.gameValue("g1", "1.25"))
 		e.drain()
 		if n := calls.Load(); n != 3 {
-			t.Fatalf("UC-055/A4 %d override PUTs, want 3 (two 404s retried, then accepted)", n)
+			t.Fatalf("UC-055/A4 %d override POSTs, want 3 (two 404s retried, then accepted)", n)
 		}
 		k := Key{Set: "interventions", Flag: "music_tempo_override", Scope: "game:g1"}
 		if _, ok := e.link.Links().Remote(k); !ok {
@@ -87,7 +93,7 @@ func TestNotFoundAfterListingRetried(t *testing.T) {
 		e.link.StateChanged(e.player("g1", "A", "1.5"))
 		e.drain()
 		if n := calls.Load(); n != 2 {
-			t.Fatalf("UC-055/A4 %d override PUTs, want 2 (one 404 retried)", n)
+			t.Fatalf("UC-055/A4 %d override POSTs, want 2 (one 404 retried)", n)
 		}
 		k := Key{Set: "interventions", Flag: "player_sensitivity_factor", Scope: "game:g1:A"}
 		if r, _ := e.link.Links().Refusal(k); r != "" {
@@ -109,7 +115,7 @@ func TestNotFoundPersistsRefusedAfterRetries(t *testing.T) {
 	e.link.StateChanged(e.gameValue("g1", "1.25"))
 	e.drain()
 	if n := calls.Load(); n != 4 {
-		t.Fatalf("UC-055/A4 %d override PUTs, want 4 (the push and three retries)", n)
+		t.Fatalf("UC-055/A4 %d override POSTs, want 4 (the push and three retries)", n)
 	}
 	if !sleptAll(e.clk.Slept(), 500*time.Millisecond, time.Second, 2*time.Second) {
 		t.Fatalf("UC-055/A4 slept %v, want backoffs 0.5s, 1s, 2s", e.clk.Slept())
@@ -127,7 +133,7 @@ func TestNotFoundPersistsRefusedAfterRetries(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	_ = r.stop()
 	if n := calls.Load(); n != 4 {
-		t.Fatalf("UC-055/A4 %d override PUTs after a wake, want 4", n)
+		t.Fatalf("UC-055/A4 %d override POSTs after a wake, want 4", n)
 	}
 }
 
@@ -142,7 +148,7 @@ func TestNotFoundWithoutRecentListingRefused(t *testing.T) {
 		e.link.Links().Offer(k, Value{Present: true, Variant: "jev", Value: json.RawMessage(`"jev"`)}, e.clk.Now(), 1)
 		e.drain()
 		if n := calls.Load(); n != 1 {
-			t.Fatalf("UC-055/A4 %d override PUTs, want 1 (no retry)", n)
+			t.Fatalf("UC-055/A4 %d override POSTs, want 1 (no retry)", n)
 		}
 		if r, _ := e.link.Links().Refusal(k); r != ReasonNotFound {
 			t.Fatalf("UC-055/A4 refusal %q, want not_found", r)
@@ -156,8 +162,16 @@ func TestNotFoundWithoutRecentListingRefused(t *testing.T) {
 		calls := e.overrideNotFound(1 << 20)
 		e.link.StateChanged(e.gameValue("g1", "1.25"))
 		e.drain()
-		if n := calls.Load(); n != 1 {
-			t.Fatalf("UC-055/A4 %d override PUTs, want 1 (no retry)", n)
+		// The known uuid answering 404 is forgotten and the identity found
+		// again once (a person may have deleted it, #2682); no backoff retry.
+		if n := calls.Load(); n != 2 {
+			t.Fatalf("UC-055/A4 %d override POSTs, want 2 (one fresh search, no retry)", n)
+		}
+		if n := e.count(http.MethodGet, apiEnv+"edge-identities/"); n < 1 {
+			t.Fatalf("UC-055/A4 %d identity searches, want the exact search after the 404", n)
+		}
+		if slept := e.clk.Slept(); sleptAll(slept, notFoundBackoff) {
+			t.Fatalf("UC-055/A4 slept %v, want no 404 backoff", slept)
 		}
 	})
 }
@@ -334,14 +348,14 @@ func TestNotFoundRetryDoesNotHoldOtherKeys(t *testing.T) {
 	var order []string
 	for _, r := range e.fake.Requests() {
 		switch {
-		case r.Method == http.MethodPut && strings.HasSuffix(r.Path, "edge-identities-featurestates"):
-			order = append(order, "put")
+		case r.Method == http.MethodPost && strings.HasSuffix(r.Path, "/edge-featurestates/"):
+			order = append(order, "post")
 		case r.Method == http.MethodPatch:
 			order = append(order, "patch")
 		}
 	}
-	if strings.Join(order, ",") != "put,patch,put" {
-		t.Fatalf("UC-055/A4 request order %v, want put (404), patch, put (the retry)", order)
+	if strings.Join(order, ",") != "post,patch,post" {
+		t.Fatalf("UC-055/A4 request order %v, want post (404), patch, post (the retry)", order)
 	}
 }
 

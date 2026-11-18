@@ -574,7 +574,7 @@ def test_override_not_found_after_listing_retried_and_refusal_named(stack, flag_
             "calm on the game identity after two 404s",
         )
         statuses = [r["status"] for r in fake.pushes(PACING[1]) if r["t"] >= t0]
-        assert statuses == [404, 404, 200], statuses
+        assert statuses == [404, 404, 201], statuses  # the POST on the identity's override list (#2682)
         state = fl.link(flag_service)
         assert state["refused"] == 0, state
         assert not [k for k in state.get("keys", []) if k["scope"] == f"game:{game}"], state
@@ -614,6 +614,37 @@ def test_override_not_found_after_listing_retried_and_refusal_named(stack, flag_
     finally:
         fake.clear_refusals()
         fl.end_game(flag_service, game)
+
+
+@pytest.mark.uc("UC-054", flow="A4", tc="TC-021")
+@pytest.mark.uc("UC-055", flow="main", steps=[3], br=["BR-002"], tc="TC-021")
+def test_own_integer_override_reads_back_unchanged(flag_service, settled_link):
+    """#2682: an integer game value is POSTed on the game identity's override list (never the
+    upsert route the SaaS lacks), the edge document shows it back as a string ("3"), and the
+    pull rounds take it for the pushed 3: nothing refused, out of sync or sent back; the game
+    end removes the identity with it."""
+    fake = settled_link
+    game = fl.new_game_id()
+    sens = ("interventions", "global_sensitivity_override")  # integer 0..4, game scope
+    try:
+        fl.register_game(flag_service, game, ["MOCK0031"])
+        fl.wait_for(lambda: f"game:{game}" in fake.identities(), fl.PULL_TIMEOUT, "game identity listed")
+        t0 = time.monotonic()
+        flag_service.put(*sens, value=3, scope={"game_id": game})
+        fl.wait_for(
+            lambda: (fake.override(f"game:{game}", sens[1]) or {}).get("value") == 3,
+            fl.PULL_TIMEOUT,
+            "3 on the game identity",
+        )
+        fl.wait_pulls(flag_service, 2)
+        state = fl.link(flag_service)
+        assert state["refused"] == 0 and state["out_of_sync"] == 0, state
+        writes = [(r["method"], r["status"]) for r in fake.pushes(sens[1]) if r["t"] >= t0]
+        assert writes == [("POST", 201)], writes
+        assert not fake.requests(path_contains="edge-identities-featurestates")
+    finally:
+        fl.end_game(flag_service, game)
+    fl.wait_for(lambda: f"game:{game}" not in fake.identities(), fl.PULL_TIMEOUT, "game identity removed")
 
 
 # --------------------------------------------------------------------------- NFRs

@@ -98,8 +98,22 @@ Flagsmith stores `string`, `integer` and `boolean` (`FeatureValueType`, `api/fea
 | object flags (`windows`, `goal.profile`, event lists, fraction) | string | compact JSON text |
 
 The pull hands the value to the same parser as `PUT /{set}/{flag}`: a string that names a declared variant selects
-it, anything else is a `value` checked against the bounds. A value Flagsmith shows with another type than the
-table is refused (`flagsmith_type_mismatch`, A4 of UC-054).
+it, anything else is a `value` checked against the bounds. **A document value is decoded by the registry flag's
+type, never by its JSON type** (#2682): the SaaS's edge document shows an integer identity override as a JSON string
+(a pushed `10` reads back `"10"`, verified 2026-11-18), and the typing of an integer environment value could not be
+observed, so both forms are accepted everywhere. The accepted forms, after surrounding whitespace is trimmed:
+
+| Registry bound | Accepted from the document | Not accepted (`flagsmith_type_mismatch`) |
+|---|---|---|
+| integer range | a JSON number, or a string holding one that is a whole number: `5`, `"5"`, `"5.0"` (= 5), `"2e1"` (= 20) | `"5.5"`, `5.5`, `".5"`, `"+1"`, `"NaN"`, `"Infinity"`, `""` |
+| float range | a JSON number, or a string holding one: `1.25`, `"1.25"`, `"1.50"` (= 1.5), `"2"` | `".5"`, `"1,5"`, `"NaN"`, `"+1"`, `""` |
+| declared variants whose values are booleans | `true` / `false`, or the strings `"true"` / `"false"`: the variant with that value (the default variant when it is one) | any other boolean or string that names no variant |
+| other variants, `free string`, object flags | as in the table above (unchanged) | as before |
+
+The decoded value is what every comparison of the link uses (no echo §4.4, remote against document and local, the
+value guard, the removed-controller guard, the event-list prefix, the refusal memory), so the link's own pushed `10`
+read back as `"10"` is unchanged: never a change, a conflict or a refusal. Writes stay typed (an integer is sent as a
+number). A value that does not parse as the registry type is refused (`flagsmith_type_mismatch`, A4 of UC-054).
 
 ### 2.2 Controller identities (F11, #2624)
 
@@ -118,13 +132,15 @@ value refused or guarded in one game is never held back in the next.
 
 **Settle.** Before any value of a new owner is sent or read, the link settles the controller: it finds the identity
 (the uuid it knows, else the exact search `?q="controller:<serial>"`, else it creates it), lists its overrides
-(`GET …/edge-identities/{uuid}/edge-featurestates/`), deletes every override of a registry feature on it (`DELETE
-…/edge-identities-featurestates`), then sets the traits `game_kind`, `coordinator_instance` and, last, `game_id` (best
+(`GET …/edge-identities/{uuid}/edge-featurestates/`), deletes every override of a registry feature on it by the
+`featurestate_uuid` the listing names (`DELETE …/edge-identities/{uuid}/edge-featurestates/{featurestate_uuid}/`;
+a `404` there is an override gone already, #2682), then sets the traits `game_kind`, `coordinator_instance` and, last, `game_id` (best
 effort, as on game identities; `game_id` last, so a settle cut short by a 429 or the link going down is never taken
 for a restart while the game was live). A value of the owner waits as pending until the settle ended. A refused
 removal leaves the controller unread for that game (its values are still sent), with a warning; so does a create
 that Flagsmith answers "already exists" while the search does not show the identity (never retried in a loop, which
-would hold every value push back). Exception, the **first settle of a controller in a process**: the link first reads the identity's
+would hold every value push back; without the uuid no override route works, so each of that game's values for the
+controller is refused `not_found` after one search and one create, #2682). Exception, the **first settle of a controller in a process**: the link first reads the identity's
 traits (`GET …/edge-identities/{uuid}/list-traits/`); when `game_id` names the owner, the flag service restarted while
 that game was live and nothing is removed. Traits that cannot be read (traits off in the organisation, a refusal)
 count as another game: the overrides are removed.
@@ -189,13 +205,33 @@ entity.
    requires change requests answers `409 change_requests_enabled` (A4 of UC-055). Fallback for a Flagsmith without
    `__future__` (a 404 whose body is not JSON `{"detail": …}`, latched per process):
    `GET /api/v1/environments/{env_key}/featurestates/?feature=<id>`, then `PUT …/featurestates/{id}/`.
-4. Identity scopes: values are upserted by identifier, without a uuid round trip:
-   `PUT /api/v1/environments/{env_key}/edge-identities-featurestates` (no trailing slash) with
-   `{"identifier", "feature", "enabled", "feature_state_value"}` (typed JSON value); it creates a missing identity
-   (upstream `EdgeIdentityWithIdentifierFeatureStateView`). A `404` on it for an identity the link listed or settled
-   less than 30 s before is retried up to 3 times (0.5, 1, 2 s, #2639; risk row in §10); the waiting value goes to the
-   back of the queue (a timer wakes the sender), so it never holds other keys back; any other `404` is a refusal.
-   An ended value is a `DELETE` on the same path with `{"identifier", "feature"}` (204, also when absent). A game
+4. Identity scopes: a value is the override on its identity, through the per-identity routes (#2682; the SaaS does
+   not route the upsert by identifier `…/edge-identities-featurestates`: Django's HTML 404, verified 2026-11-18):
+   - **the identity's uuid**: the one the link knows (its own listing, a settle, the start), else the exact search
+     `GET …/edge-identities/?q="<identifier>"`, else (a value to write) it creates the identity with
+     `POST …/edge-identities/` (a new identity has no override). "Already exists" while the search does not show it
+     is a `not_found` refusal of the value (no uuid, no route);
+   - **the override's `featurestate_uuid`**: cached per identity and feature (from the create answer, an identity it
+     created, a controller settle's listing), else one listing `GET …/edge-identities/{uuid}/edge-featurestates/`
+     (a plain list; it fills the cache for every feature of the identity);
+   - **write**: no override yet: `POST …/edge-identities/{uuid}/edge-featurestates/` with
+     `{"feature", "enabled": true, "feature_state_value"}` (typed JSON value; 201 names the `featurestate_uuid`); an
+     override: `PUT …/edge-featurestates/{featurestate_uuid}/` with the same body (200). A value whose override is
+     cached costs one request;
+   - **ended value**: `DELETE …/edge-featurestates/{featurestate_uuid}/` (204); a removal lists the overrides first
+     unless it knows the override (a cached "none" is not trusted: a person may have set one); no override: done,
+     no request;
+   - **Flagsmith changed meanwhile** (a person in the dashboard): a `POST` answered 400 `["Feature state already
+     exists."]` or an override answered `404` lists the overrides again and writes once more (`PUT` the listed
+     override, or `POST`); the same override answering `404` again is a refusal. A `404` on the identity's list or
+     `POST` (the identity is gone) forgets the uuid and starts over once (search, create), unless the link listed or
+     settled the identity less than 30 s before: then that `404` is retried up to 3 times (0.5, 1, 2 s, #2639; risk
+     row in §10), the waiting value at the back of the queue (a timer wakes the sender), so it never holds other
+     keys back. A removal on an identity that is gone is done.
+
+   Every request of a value is paced (`FLAGSMITH_PUSH_RATE`) and a `429` waits its `Retry-After`, then sends the
+   value again from the cached state; the whole value is one `flagservice.flagsmith.push` span (op `override` or
+   `delete_override`) and one `pushes_total` point. A game
    registration lists the game, and a shadow game's players, with `POST /api/v1/environments/{env_key}/edge-identities/`
    (`identifier`; 400 "already exists" counts as created); the game identity gets the traits `game_kind` and
    `coordinator_instance` (best effort; skipped when the organisation does not persist traits). A real game's players
@@ -212,7 +248,11 @@ entity.
    the link fetches `GET {FLAGSMITH_DOCUMENT_URL}environment-document/` (default
    `https://edge.api.flagsmith.com/api/v1/`; the Admin API stays on `FLAGSMITH_API_URL`) with the server-side key
    (`X-Environment-Key: ser.…`) and `If-Modified-Since: <last_modified>`; a `304` ends the round. The `304` is an optimisation only: Flagsmith may not move the environment `updated_at` for an edge identity override change, so while any game (real or shadow) is live the pull is unconditional (no `If-Modified-Since`), and otherwise every 10th pull is unconditional. On the SaaS, edge
-   identity overrides appear only in the edge document.
+   identity overrides appear only in the edge document, at once, and its `updated_at` does not move for them; the
+   SaaS's edge document ignores `If-Modified-Since` (always 200, no `Last-Modified`, verified 2026-11-18), so there
+   the 304 path never happens. The realtime stream announces environment (stack) changes only, never an identity
+   override change: game and player overrides a person sets arrive with the next poll (at most
+   `FLAGSMITH_POLL_SECONDS`).
 2. The document holds the environment values of every feature and, **only when the environment has
    `use_identity_overrides_in_local_eval` on** (`api/util/mappers/sdk.py`), the identity overrides. The link
    refuses to go online without it (`state=offline`, reason `identity_overrides_disabled`), because without it
@@ -280,6 +320,8 @@ pushed appends nothing).
 A change is applied only when the document value differs from `remote`. Every successful push sets `remote` to
 what was pushed, so its own change is never "new". Because variants are opaque and carry the boot epoch
 (flag-service.md §10), the link compares **values** (variant name or decoded value), never generated variant ids.
+The document value is decoded by the registry type first (§2.1): the pushed integer `10` that the edge document
+shows as `"10"` equals `remote`, so it is never "new" (#2682).
 
 ## 5. Start, restart and offline
 
@@ -442,7 +484,7 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | One document update time ahead of all later ones (Flagsmith clock skew, an environment database restore, a garbled but in-range time) would refuse every later document as `stale_document`, kill-switch changes included | the refusal ends after max(10 min, 10 x poll interval) of refusals in a row, local elapsed time; the older document is then accepted and becomes the newest, with a warning log; in that round kill switches merge without their remote value and take the more restrictive value (§4.2 step 6). Residuals, accepted by the maintainer 2026-11-15 (follow-up #2602): (a) the copy stamped with the too-new time (a cache or region still serving it) is not older, so it is accepted normally and ends the run: served at least once per max(10 min, 10 x poll interval), it keeps the run from ever reaching the threshold and the tightening stays refused as before; served less often, it makes kill switches flap: the accepted older document tightens, then the too-new copy is newer than the accepted time again and merges normally (`R != D`, `R = L` -> apply), a deliberate loosening, and the refusals start over (an operator's kill in Flagsmith takes effect, then is undone for about the threshold, repeatedly). (b) In the accepted round a kill switch whose local value is tighter than the accepted document keeps local and pushes it; when a lagging copy answers that round while Flagsmith already holds a tighter value set during the refusal run, the push overwrites that value in Flagsmith and the operator's value is lost on both sides (as in the "push overwrites a person's change" row, but the window is the whole refusal run). (c) Every non-kill-switch value in the accepted document that differs from the link's remote value while the local value still equals it applies as a change from Flagsmith (a value Flagsmith changed itself as well as a pushed one) until a newer document is read and corrects it; a pushed value is protected only while its value guard lives, and the guard can end before the threshold (the newest document showed the pushed value), as for a document without an update time |
 | A local write to a game or player slot that is empty during a document fetch is not detected by the per-slot version check for that round (game values only; stack and kill-switch slots are fully covered) | accepted; last writer wins |
 | `__future__` flag API is experimental and may change | fallback to the stable `featurestates` endpoints (§4.1 step 3); a contract test against the pinned Flagsmith version |
-| Flagsmith's edge storage (eventually consistent) may not show an identity it created moments before, so an override push right after the listing or settle could be answered `404` and refuse a correct value; seen once on stage after a restart (#2639), cause not confirmed: the upstream view creates a missing identity, and a `not_found` push reason also counts a value refused without a request (feature id unknown) | a `404` within 30 s of the link's own listing or settle is retried per key, at most 3 times (0.5, 1, 2 s, the push pacing applies; the waiting value goes to the back of the queue, no head-of-line wait), then refused. The start cleanup's delete of a game identity whose game registers while the delete is on the wire (the liveness check runs right before the request) no longer forgets the game's keys: the sender, after any push in flight, forgets the deleted uuid, lists the identity again with its traits and sends its confirmed values again; `GET /state` `keys` names every refused key with `http_status` (absent: no request was sent) and each refusal logs one WARN with flag, scope and reason, so the next occurrence tells the two causes apart (services.md §7.3) |
+| Flagsmith's edge storage (eventually consistent) may not show an identity it created moments before, so an override push right after the listing or settle could be answered `404` and refuse a correct value; seen on stage after a restart (#2639). Most likely cause, found in #2682: the link wrote overrides through `…/edge-identities-featurestates`, a route the SaaS does not have (every override push was a `404`; upstream mounts that view under a doubled `environments/environments/` prefix). Since #2682 overrides use the per-identity routes; the edge lag itself is not confirmed, so the bounded retry stays, now for a `404` on the identity's override list or `POST` only | a `404` within 30 s of the link's own listing or settle is retried per key, at most 3 times (0.5, 1, 2 s, the push pacing applies; the waiting value goes to the back of the queue, no head-of-line wait), then refused. The start cleanup's delete of a game identity whose game registers while the delete is on the wire (the liveness check runs right before the request) no longer forgets the game's keys: the sender, after any push in flight, forgets the deleted uuid, lists the identity again with its traits and sends its confirmed values again; `GET /state` `keys` names every refused key with `http_status` (absent: no request was sent) and each refusal logs one WARN with flag, scope and reason, so the next occurrence tells the two causes apart (services.md §7.3) |
 | Change requests on the environment make every push fail | A4 of UC-055, reported as out of sync; the stage environment runs without change requests |
 | A person in Flagsmith loosens an agent limit (F6) | env ceilings of C-034 still cap; Flagsmith wins a conflict (F4, #2621), so the operator in Flagsmith decides; the change is a `flagservice.write` span with writer `flagsmith` |
 | Admin API key on the Pi | a role limited to the project (Flagsmith RBAC), stored in `.env.local` (C-016), never in a flag |

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/joustmania/flag-service/baseline"
 	"github.com/joustmania/flag-service/fserr"
@@ -156,32 +158,40 @@ func Decode(p *registry.Policy, b *baseline.Flag, fv FSValue) (variant string, v
 	mismatch := func() (string, json.RawMessage, *fserr.Error) {
 		return "", nil, fserr.Unprocessable(fserr.FlagsmithTypeMismatch, "%s: a Flagsmith %s value does not fit the flag's type (architecture note §2.1)", p.Key, typeName(fv.Type))
 	}
+	// The value is decoded by the flag's own type, never by its JSON type
+	// (#2682): the edge document shows an integer override as a string
+	// ("10" for a pushed 10), so a number and a string holding it decode to
+	// the same value, and the link's own push reads back unchanged.
+	var s string
 	switch fv.Type {
 	case TypeInt:
 		if p.Bounds.Range == nil {
 			return mismatch()
 		}
-		return "", compact(fv.Value), nil
+		s = string(bytes.TrimSpace(fv.Value))
+	case TypeBool:
+		s = string(bytes.TrimSpace(fv.Value))
+		if v, ok := boolVariant(b, s); ok && p.Bounds.Range == nil && p.Bounds.Pattern == nil && !p.Bounds.FreeString && !p.Bounds.Shape {
+			return v, nil, nil
+		}
+		return mismatch()
 	case TypeUnicode:
+		if err := json.Unmarshal(fv.Value, &s); err != nil {
+			return mismatch()
+		}
+		if _, ok := b.Variants[s]; ok {
+			return s, nil, nil
+		}
 	default:
 		return mismatch()
 	}
-	var s string
-	if err := json.Unmarshal(fv.Value, &s); err != nil {
-		return mismatch()
-	}
-	if _, ok := b.Variants[s]; ok {
-		return s, nil, nil
-	}
 	switch {
 	case p.Bounds.Range != nil:
-		if p.Bounds.Integer {
+		n, ok := rangeNumber(s, p.Bounds.Integer)
+		if !ok {
 			return mismatch()
 		}
-		if _, err := strconv.ParseFloat(s, 64); err != nil || !json.Valid([]byte(s)) {
-			return mismatch()
-		}
-		return "", json.RawMessage(s), nil
+		return "", n, nil
 	case p.Bounds.Pattern != nil, p.Bounds.FreeString:
 		raw, _ := json.Marshal(s)
 		return "", raw, nil
@@ -191,8 +201,67 @@ func Decode(p *registry.Policy, b *baseline.Flag, fv FSValue) (variant string, v
 		}
 		return "", compact(json.RawMessage(s)), nil
 	}
+	if v, ok := boolVariant(b, strings.TrimSpace(s)); ok {
+		// "true" / "false" for a flag whose variants are booleans.
+		return v, nil, nil
+	}
 	raw, _ := json.Marshal(s)
 	return "", raw, nil
+}
+
+// maxExactInt bounds the integers a float64 holds exactly (2^53).
+const maxExactInt = 1 << 53
+
+// rangeNumber reads the text of a range flag's value (architecture note
+// §2.1): surrounding whitespace is ignored, then the text must be a JSON
+// number ("1.5", "-2", "1.50", "2e1"); ".5", "1,5", "NaN" and "+1" are not.
+// An integer range takes a whole number only, "5.0" as 5 ("5.5" is not
+// one); a float range keeps the text as its number.
+func rangeNumber(s string, integer bool) (json.RawMessage, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || !json.Valid([]byte(s)) || (s[0] != '-' && (s[0] < '0' || s[0] > '9')) {
+		return nil, false
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return nil, false
+	}
+	if !integer {
+		return json.RawMessage(s), true
+	}
+	if f != math.Trunc(f) || math.Abs(f) > maxExactInt {
+		return nil, false
+	}
+	return json.RawMessage(strconv.FormatInt(int64(f), 10)), true
+}
+
+// boolVariant is the declared variant whose baseline value is the boolean s
+// ("true" or "false"): the default variant when it is one, else the first by
+// name.
+func boolVariant(b *baseline.Flag, s string) (string, bool) {
+	if b == nil || (s != "true" && s != "false") {
+		return "", false
+	}
+	want := s == "true"
+	match := func(name string) bool {
+		var v bool
+		raw, ok := b.Variants[name]
+		return ok && json.Unmarshal(raw, &v) == nil && v == want && strings.TrimSpace(string(raw)) == s
+	}
+	if b.DefaultVariant != "" && match(b.DefaultVariant) {
+		return b.DefaultVariant, true
+	}
+	names := make([]string, 0, len(b.Variants))
+	for name := range b.Variants {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if match(name) {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 func typeName(t string) string {

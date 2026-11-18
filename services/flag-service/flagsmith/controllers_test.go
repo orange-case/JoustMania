@@ -27,12 +27,15 @@ type idModel struct {
 	// beforePut, when set, runs before an override PUT is answered (outside
 	// the lock).
 	beforePut func(identifier string)
+	next      int
 }
 
 type idRec struct {
 	uuid      string
 	overrides map[int]json.RawMessage
-	traits    map[string]string
+	// fs: the featurestate_uuid of each override (#2682).
+	fs     map[int]string
+	traits map[string]string
 }
 
 func newIDModel(e *outEnv) *idModel {
@@ -48,7 +51,7 @@ func (m *idModel) add(identifier string, overrides map[int]string, traits map[st
 	defer m.mu.Unlock()
 	rec := m.recLocked(identifier)
 	for f, v := range overrides {
-		rec.overrides[f] = json.RawMessage(v)
+		m.setLocked(rec, f, json.RawMessage(v))
 	}
 	for k, v := range traits {
 		rec.traits[k] = v
@@ -58,7 +61,7 @@ func (m *idModel) add(identifier string, overrides map[int]string, traits map[st
 func (m *idModel) recLocked(identifier string) *idRec {
 	rec := m.ids[identifier]
 	if rec == nil {
-		rec = &idRec{uuid: uuidOf(identifier), overrides: map[int]json.RawMessage{}, traits: map[string]string{}}
+		rec = &idRec{uuid: uuidOf(identifier), overrides: map[int]json.RawMessage{}, fs: map[int]string{}, traits: map[string]string{}}
 		m.ids[identifier] = rec
 	}
 	return rec
@@ -107,6 +110,80 @@ func (m *idModel) index(prefix string) int {
 	return -1
 }
 
+// serveOverride serves the SaaS's override routes of identity uuid (#2682):
+// GET/POST the list, GET/PUT/DELETE one override by its featurestate_uuid; a
+// POST for a feature the identity overrides already is 400. Writes log
+// "put <identifier> <feature> <value>", removals "delete <identifier> <feature>".
+func (m *idModel) serveOverride(w http.ResponseWriter, r *http.Request, uuid, rest string, body map[string]json.RawMessage, feature int) {
+	if (r.Method == http.MethodPost || r.Method == http.MethodPut) && m.beforePut != nil {
+		m.mu.Lock()
+		identifier, _ := m.byUUIDLocked(uuid)
+		m.mu.Unlock()
+		m.beforePut(identifier)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	identifier, rec := m.byUUIDLocked(uuid)
+	notFound := func() { flagsmithtest.WriteJSON(w, http.StatusNotFound, map[string]string{"detail": "Not found."}) }
+	if rec == nil {
+		notFound()
+		return
+	}
+	answer := func(f int) map[string]any {
+		return map[string]any{"feature": f, "enabled": true, "feature_state_value": rec.overrides[f], "featurestate_uuid": rec.fs[f], "identity_uuid": rec.uuid}
+	}
+	fs, item := strings.CutSuffix(strings.TrimPrefix(rest, "edge-featurestates/"), "/")
+	if !item {
+		switch r.Method {
+		case http.MethodGet:
+			out := []map[string]any{}
+			for f := range rec.overrides {
+				out = append(out, answer(f))
+			}
+			flagsmithtest.WriteJSON(w, http.StatusOK, out)
+		case http.MethodPost:
+			if _, has := rec.overrides[feature]; has {
+				flagsmithtest.WriteJSON(w, http.StatusBadRequest, []string{"Feature state already exists."})
+				return
+			}
+			m.setLocked(rec, feature, body["feature_state_value"])
+			m.log = append(m.log, fmt.Sprintf("put %s %d %s", identifier, feature, body["feature_state_value"]))
+			flagsmithtest.WriteJSON(w, http.StatusCreated, answer(feature))
+		}
+		return
+	}
+	f := 0
+	for id, u := range rec.fs {
+		if u == fs {
+			f = id
+		}
+	}
+	if f == 0 {
+		notFound()
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		flagsmithtest.WriteJSON(w, http.StatusOK, answer(f))
+	case http.MethodPut:
+		rec.overrides[f] = body["feature_state_value"]
+		m.log = append(m.log, fmt.Sprintf("put %s %d %s", identifier, f, body["feature_state_value"]))
+		flagsmithtest.WriteJSON(w, http.StatusOK, answer(f))
+	case http.MethodDelete:
+		m.log = append(m.log, fmt.Sprintf("delete %s %d", identifier, f))
+		delete(rec.overrides, f)
+		delete(rec.fs, f)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// setLocked sets an override with a new featurestate_uuid.
+func (m *idModel) setLocked(rec *idRec, feature int, value json.RawMessage) {
+	m.next++
+	rec.overrides[feature] = value
+	rec.fs[feature] = fmt.Sprintf("fs-%d", m.next)
+}
+
 func (m *idModel) serve(w http.ResponseWriter, r *http.Request) bool {
 	p := r.URL.Path
 	var body map[string]json.RawMessage
@@ -121,28 +198,13 @@ func (m *idModel) serve(w http.ResponseWriter, r *http.Request) bool {
 		_ = json.Unmarshal(body[k], &n)
 		return n
 	}
-	if p == apiEnv+"edge-identities-featurestates" {
-		identifier, feature := str("identifier"), num("feature")
-		if r.Method == http.MethodPut && m.beforePut != nil {
-			m.beforePut(identifier)
-		}
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		switch r.Method {
-		case http.MethodPut:
-			m.recLocked(identifier).overrides[feature] = body["feature_state_value"]
-			m.log = append(m.log, fmt.Sprintf("put %s %d %s", identifier, feature, body["feature_state_value"]))
-			flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
-		case http.MethodDelete:
-			m.log = append(m.log, fmt.Sprintf("delete %s %d", identifier, feature))
-			rec := m.ids[identifier]
-			if rec == nil {
-				http.NotFound(w, r)
-				return true
-			}
-			delete(rec.overrides, feature)
-			w.WriteHeader(http.StatusNoContent)
-		}
+	if strings.HasPrefix(p, apiEnv+"edge-identities-featurestates") {
+		// The SaaS routes no upsert by identifier (#2682).
+		flagsmithtest.DjangoNotFound(w, r)
+		return true
+	}
+	if uuid, rest, ok := flagsmithtest.OverrideRoute(p); ok {
+		m.serveOverride(w, r, uuid, rest, body, num("feature"))
 		return true
 	}
 	m.mu.Lock()
@@ -185,12 +247,6 @@ func (m *idModel) serve(w http.ResponseWriter, r *http.Request) bool {
 		delete(m.ids, identifier)
 		m.log = append(m.log, "delete-identity "+identifier)
 		w.WriteHeader(http.StatusNoContent)
-	case sub == "edge-featurestates/" && r.Method == http.MethodGet:
-		var out []map[string]any
-		for f, v := range rec.overrides {
-			out = append(out, map[string]any{"feature": f, "enabled": true, "feature_state_value": v, "identity_uuid": rec.uuid})
-		}
-		flagsmithtest.WriteJSON(w, http.StatusOK, out)
 	case sub == "list-traits/" && r.Method == http.MethodGet:
 		var out []map[string]any
 		for k, v := range rec.traits {
@@ -461,14 +517,14 @@ func TestControllerValueWaitsForSettle(t *testing.T) {
 	if err != nil || !did {
 		t.Fatalf("pushNext: did %v err %v", did, err)
 	}
-	if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 0 {
+	if n := len(e.overrideWrites(http.MethodPost)) + len(e.overrideWrites(http.MethodPut)); n != 0 {
 		t.Fatalf("UC-055/BR-004 %d override requests before the controller was settled, want 0", n)
 	}
 	if pending, _, _ := e.link.Links().Counts(); pending != 1 {
 		t.Fatalf("UC-055/BR-004 pending %d, want the value kept", pending)
 	}
 	e.drain()
-	if n := e.count(http.MethodPut, apiEnv+"edge-identities-featurestates"); n != 1 {
+	if n := len(e.overrideWrites(http.MethodPost)) + len(e.overrideWrites(http.MethodPut)); n != 1 {
 		t.Fatalf("UC-055/BR-004 %d override requests after the settle, want 1", n)
 	}
 }
@@ -476,7 +532,7 @@ func TestControllerValueWaitsForSettle(t *testing.T) {
 // UC: UC-055 A1
 // Flagsmith says the controller identity exists but the search does not show
 // it: the settle is given up for this game (the controller is not read back),
-// never retried in a loop, and the value is still sent by identifier.
+// never retried in a loop, and the value is refused (no uuid, no route).
 func TestControllerDuplicateCreateRefusedNotRetried(t *testing.T) {
 	e := newOutEnv(t)
 	m := newIDModel(e)
@@ -493,11 +549,18 @@ func TestControllerDuplicateCreateRefusedNotRetried(t *testing.T) {
 			creates++
 		}
 	}
-	if creates != 1 {
-		t.Fatalf("UC-055/A1 %d creates of controller:A, want 1 (no retry loop)", creates)
+	// The settle creates once, the refused value push once (#2682): no loop.
+	if creates != 2 {
+		t.Fatalf("UC-055/A1 %d creates of controller:A, want 2 (the settle and the value, no retry loop)", creates)
 	}
-	if m.index("put controller:A") < 0 {
-		t.Fatalf("UC-055/A1 the value was not sent: %v", m.events())
+	// No override route works without the uuid (#2682): the value is
+	// refused, not_found, and the link never loops on it.
+	if m.index("put controller:A") >= 0 {
+		t.Fatalf("UC-055/A1 a value reached the controller without its uuid: %v", m.events())
+	}
+	k := Key{Set: "interventions", Flag: "player_sensitivity_factor", Scope: "game:g1:A"}
+	if r, _ := e.link.Links().Refusal(k); r != ReasonNotFound {
+		t.Fatalf("UC-055/A1 refusal %q, want not_found", r)
 	}
 	if v, _ := e.link.ctrl.view(); v["A"].readable {
 		t.Fatal("UC-055/A1 controller read back although its settle was refused")

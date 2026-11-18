@@ -254,6 +254,9 @@ func (o *out) createIdentity(ctx context.Context, op identityOp) outcome {
 	case oc.ok:
 		if uuid != "" {
 			l.setIdentityUUID(op.Identifier, uuid)
+			// A new identity has no override: its first value is a POST
+			// with no listing (#2682).
+			o.freshOverrides(uuid)
 		}
 		o.markListed(op.Identifier)
 		if o.traitsOff.Load() {
@@ -298,8 +301,9 @@ func (o *out) sendTrait(ctx context.Context, op identityOp) outcome {
 // query); an identity Flagsmith does not know is success.
 func (o *out) deleteIdentity(ctx context.Context, op identityOp) outcome {
 	l := o.l
+	uuid := ""
 	oc := o.roundTrip(ctx, Key{Scope: op.Identifier}, OpDeleteIdentity, "", 1, trace.SpanContext{}, func(c context.Context) (int, error) {
-		uuid := l.identityUUID(op.Identifier)
+		uuid = l.identityUUID(op.Identifier)
 		if uuid == "" {
 			var found struct {
 				Results []struct {
@@ -331,6 +335,7 @@ func (o *out) deleteIdentity(ctx context.Context, op identityOp) outcome {
 	switch {
 	case oc.ok:
 		l.forgetIdentityUUID(op.Identifier)
+		o.forgetOverrides(uuid)
 		o.ids.Done(op)
 	case oc.err == nil && oc.wait == 0:
 		l.Logger().Warn("flagsmith: identity not removed", "identifier", op.Identifier, "reason", oc.reason)

@@ -20,15 +20,20 @@ import (
 
 // Feature ids of the flags these journeys push.
 var inoutIDs = map[string]int{
-	"decision.backend":         101,
-	"decision.min_interval_ms": 102,
-	"experiment_max_games":     103,
-	"volume_override":          104,
+	"decision.backend":            101,
+	"decision.min_interval_ms":    102,
+	"experiment_max_games":        103,
+	"volume_override":             104,
+	"global_sensitivity_override": 105,
 }
 
 const (
-	futureAPI     = "/api/__future__/environments/envkey/features/"
-	overridesPath = flagsmithtest.APIPath + "environments/envkey/edge-identities-featurestates"
+	futureAPI = "/api/__future__/environments/envkey/features/"
+	// overridesPath is the override list of an identity (#2682); one
+	// override is overridesPath + "{featurestate_uuid}/".
+	overridesPath = flagsmithtest.APIPath + "environments/envkey/edge-identities/{uuid}/edge-featurestates/"
+	// g1Overrides is overridesPath of game:g1 (uuid u-game:g1).
+	g1Overrides = flagsmithtest.APIPath + "environments/envkey/edge-identities/u-game:g1/edge-featurestates/"
 )
 
 var backendKey = flagsmith.Key{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}
@@ -60,6 +65,12 @@ func (m *fsModel) setOverride(identifier, name string, v any) {
 	}
 	m.ids[identifier][name] = v
 	m.mu.Unlock()
+	// The Admin API shows it too (the fake's uuid of identifier, #2682).
+	raw, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	m.h.fake.Overrides.Set("u-"+identifier, inoutIDs[name], raw)
 	m.publish()
 }
 
@@ -387,13 +398,13 @@ func TestRefusedKillSwitchPushThenFlagsmithWins(t *testing.T) {
 }
 
 // UC: UC-055 A4
-// A refused identity override (PUT) and a refused removal of one (DELETE)
+// A refused identity override (POST) and a refused removal of one (DELETE)
 // are sent once each, whatever the pull rounds find.
 func TestRefusedOverrideAndDeleteNotResent(t *testing.T) {
 	m := newFSModel()
 	h := inoutHarness(t, m, map[string]http.HandlerFunc{
-		"PUT " + overridesPath:    answer(http.StatusBadRequest, `{"detail":"invalid value"}`),
-		"DELETE " + overridesPath: answer(http.StatusForbidden, `{"detail":"forbidden"}`),
+		"POST " + overridesPath:             answer(http.StatusBadRequest, `{"detail":"invalid value"}`),
+		"DELETE " + overridesPath + "{fs}/": answer(http.StatusForbidden, `{"detail":"forbidden"}`),
 	}, nil)
 	h.online()
 	if _, ferr := h.st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "shadow", Serials: []string{"MOCK0001"}}); ferr != nil {
@@ -409,8 +420,8 @@ func TestRefusedOverrideAndDeleteNotResent(t *testing.T) {
 		h.roundAndSettle()
 	}
 	t.Run("UC-055/A4 a refused override is not sent again (no override in Flagsmith)", func(t *testing.T) {
-		if n := h.requests(http.MethodPut, overridesPath); n != 1 {
-			t.Fatalf("%d PUTs after 3 rounds, want 1", n)
+		if n := h.requests(http.MethodPost, g1Overrides); n != 1 {
+			t.Fatalf("%d POSTs after 3 rounds, want 1", n)
 		}
 	})
 	t.Run("UC-055/A4 a refused removal is not sent again", func(t *testing.T) {
@@ -423,7 +434,7 @@ func TestRefusedOverrideAndDeleteNotResent(t *testing.T) {
 		if _, ferr := h.st.Clear(state.ClearRequest{Set: "interventions", Flag: "volume_override", Scope: g1, Writer: "operator"}); ferr != nil {
 			t.Fatal(ferr)
 		}
-		h.waitFor("the removal refused", func() bool { return h.requests(http.MethodDelete, overridesPath) == 1 })
+		h.waitFor("the removal refused", func() bool { return h.requests(http.MethodDelete, g1Overrides) == 1 })
 		h.waitFor("the removal refusal recorded", func() bool {
 			r, _ := h.link.Links().Refusal(volumeOverrideG1)
 			return r == flagsmith.ReasonUnauthorized
@@ -431,7 +442,7 @@ func TestRefusedOverrideAndDeleteNotResent(t *testing.T) {
 		for range 3 {
 			h.roundAndSettle()
 		}
-		if n := h.requests(http.MethodDelete, overridesPath); n != 1 {
+		if n := h.requests(http.MethodDelete, g1Overrides); n != 1 {
 			t.Fatalf("%d DELETEs after 3 rounds, want 1", n)
 		}
 		if v, _ := h.local("interventions", "volume_override", "game:g1"); v.Present {
