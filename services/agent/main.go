@@ -837,6 +837,9 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// UC-040 BR-036 (#2467 PR 5): remote decide requests carry the game's
 	// decision.prompt_profile (v1 on any read error).
 	loop.SetPromptProfileSource(c.agentFlags.PromptProfile)
+	// UC-040 BR-044 (#2687): claude and openai requests carry the operator's
+	// decision.operator_brief ("" on any read error: no brief).
+	loop.SetOperatorBriefSource(c.agentFlags.OperatorBrief)
 	// #2479: goal.profile in the game's flag context, for the prompt's goal lines
 	// (only under decision.goal_in_prompt).
 	loop.SetGoalSource(c.goalProfile)

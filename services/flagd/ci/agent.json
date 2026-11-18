@@ -928,6 +928,13 @@
       },
       "defaultVariant": "v1"
     },
+    "decision.operator_brief": {
+      "state": "ENABLED",
+      "variants": {
+        "off": ""
+      },
+      "defaultVariant": "off"
+    },
     "decision.goal_in_prompt": {
       "state": "ENABLED",
       "variants": {

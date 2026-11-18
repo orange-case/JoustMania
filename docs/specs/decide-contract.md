@@ -33,7 +33,7 @@ Defined in `decide/decide.go`.
 | `Answer` | `QuestionID`, `Choice`, `Probabilities map[string]float64`, `Score`, `Noul *float64`, `Confidence` | `services/agent/decide/decide.go:Answer` |
 | `PlayerState` | `Serial`, `Alive`, `Intensity*`, `Variance*`, `Skill*`, `BatteryPct*`, `EliminationOrder` | pointer = never observed (`services/agent/decide/decide.go:PlayerState`) |
 | `State` | `GameID`, `GameKind`, `Digest`, `Narrative`, `Players` (sorted by serial), `ElapsedSeconds` | `services/agent/decide/decide.go:State` |
-| `Request` | `State`, `Questions`, `Context` (`json:"-"`), `PromptProfile` (`json:"prompt_profile,omitempty"`, #2467) | Only in-process backends (rules) may read `Context`; remote backends must not; never logged with `%v` (`services/agent/decide/decide.go:Request`). `PromptProfile` is set by the agent from `decision.prompt_profile` on the remote path only (§3); it is outside `State`, so it is not part of the State digest. |
+| `Request` | `State`, `Questions`, `Context` (`json:"-"`), `PromptProfile` (`json:"prompt_profile,omitempty"`, #2467), `OperatorBrief` (`json:"operator_brief,omitempty"`, #2687, outside `State`, so not in the digest; set on claude and openai requests only, §3) | Only in-process backends (rules) may read `Context`; remote backends must not; never logged with `%v` (`services/agent/decide/decide.go:Request`). `PromptProfile` is set by the agent from `decision.prompt_profile` on the remote path only (§3); it is outside `State`, so it is not part of the State digest. |
 | `Response` | `Answers`, `Backend`, `Rationale` | Rationale is untrusted text, truncated (`services/agent/decide/decide.go:Response`). |
 | `Backend` | `Name() string`, `Decide(ctx, Request) (Response, error)` | Must honour `ctx` cancellation; the caller validates (`services/agent/decide/decide.go:Backend`). Optional `Available() bool`; false means `backend_unavailable` (`services/agent/decision/decide_registry.go:availability`, `DecideRegistry.Resolve`). |
 
@@ -174,6 +174,23 @@ tooling only) still answers the Default.
   - The system prompt's fingerprint (`llm.prompt.system_sha256` on claude's chat span) is therefore one value for v1 (with or
     without `decision.goal_in_prompt`: the goal lines never change the v1 system prompt) and two for neutral (without and with
     goal lines). `agent.decide` carries `decide.prompt_profile` on the remote path (§12).
+- **Operator brief (#2687, `decision.operator_brief`, default empty; UC-040 BR-044, FR-096).** The agent reads the flag per
+  remote request (`services/agent/flags/game.go:OperatorBrief`), cleans it (`services/agent/decide/brief.go:NormalizeOperatorBrief`:
+  trimmed, at most 512 characters, control characters other than a line break become spaces, `<` and `>` become `‹` and `›`) and
+  sets `Request.OperatorBrief` only when the backend is claude or openai (`services/agent/decision/operator_brief.go`).
+  - Empty (the default, and an unreadable or blank flag): `Render` produces byte-identical prompts in every profile (the v1 and
+    profile goldens are unchanged, `services/agent/decide/llmio/operator_brief_uc040_test.go` pins it).
+  - Set: the user message starts with `<operator_brief>\n<brief>\n</operator_brief>\n\n` before `<game_state>`, and the system
+    prompt of the request's profile (v1, neutral, neutral with goal lines) gains one fixed paragraph at its end
+    (`services/agent/decide/llmio/llmio.go:operatorBriefParagraph`): the brief is the operator's wish, the model pursues it only by
+    choosing among the offered options and ranges, it never widens them, and noop stays valid. The system prompt stays static per
+    profile and brief presence (one more fingerprint each), whatever the brief says.
+  - The questions, options, ranges, `AnswerSchema()`, `Validate`, the act threshold and the permission chain are unchanged: the
+    brief adds no lever and no bound (a brief asking for an unkillable player still meets the 0.7 floor of
+    `adjust_player_sensitivity` and the shield caps).
+  - **jev ignores it.** jev's request is a typed set of questions whose gate criteria are fixed and calibrated (§3, jev); a free
+    text in them would move the gate uncalibrated, so the agent never sets the field for jev and jev's wire is unchanged.
+  - `agent.decide` carries `decide.operator_brief.present` and `decide.operator_brief.length` when a brief was sent (§12).
 - `AnswerSchema()` is static (cacheable), `additionalProperties:false` everywhere,
   all properties required: `{answers:[{id, choice, score, probabilities:[{option,p}], confidence}], rationale}` (`services/agent/decide/llmio/llmio.go:AnswerSchema`).
 
@@ -819,6 +836,10 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   (`services/agent/decision/decide_hook.go:emitDecideSpan`, `setDecideAttributes`).
 - **`decide.prompt_profile`** (#2467 PR 5): on a remote-path `agent.decide` span, the normalized profile the request was
   rendered with (`v1` or `neutral`, §3); absent on the rules path.
+- **`decide.operator_brief.present`** / **`decide.operator_brief.length`** (#2687): on a claude or openai `agent.decide` span
+  whose request carried an operator brief, `true` and the brief's length in characters after the clean-up (§3); absent without a
+  brief, on jev and on the rules path. The text is never a `decide.*` attribute: it is part of the rendered user message, so it is
+  recorded only by the GenAI content capture (`gen_ai.input.messages`), under `decision.capture_content=on`.
 - **Prediction attributes (#2479).** On `agent.decide`, when the record carries a prediction:
   `decide.prediction.id` (uuid), `decide.prediction.template`, `decide.prediction.characteristic`,
   `decide.prediction.scope`, `decide.prediction.horizon_s`, `decide.prediction.p`, `decide.prediction.source`

@@ -4,8 +4,8 @@
 //
 //   - Render turns a decide.Request into a system prompt + user message. It reads
 //     ONLY Request.State, Request.Questions, Request.PromptProfile and the
-//     optional Request.PredictionAsk and Request.Goal (#2479), never
-//     Request.Context.
+//     optional Request.PredictionAsk and Request.Goal (#2479) and
+//     Request.OperatorBrief (#2687), never Request.Context.
 //   - AnswerSchema is the JSON schema of the structured answer. It is STATIC (the
 //     same bytes for every request) so a provider that compiles schemas (the
 //     Anthropic API caches a compiled schema for 24h) pays the compile cost once,
@@ -129,19 +129,40 @@ func SystemPrompt(profile string) string {
 // decision.goal_in_prompt never changes the v1 system prompt), neutral, or
 // neutral with goal lines.
 func systemPromptFor(req decide.Request) string {
+	sys := SystemPrompt(req.PromptProfile)
 	if req.IsNeutral() && req.Goal != nil {
-		return systemPromptNeutralGoal
+		sys = systemPromptNeutralGoal
 	}
-	return SystemPrompt(req.PromptProfile)
+	// The operator brief paragraph (#2687, UC-040 BR-044) is fixed text, the same
+	// for every brief, so the system prompt stays static per profile and brief
+	// presence; without a brief the system prompt is unchanged.
+	if req.OperatorBrief != "" {
+		sys += "\n\n" + operatorBriefParagraph
+	}
+	return sys
 }
+
+// operatorBriefParagraph closes the system prompt of a request that carries an
+// operator brief (decision.operator_brief, decide-contract.md §3, UC-040 BR-044).
+// It lets the brief steer the choice among the offered options and nothing else:
+// the brief adds no lever, no option and no range.
+const operatorBriefParagraph = `The human operator running the game has written a brief for you (inside <operator_brief>, before the game state): what they would like to happen in this game. Pursue it as far as the questions allow: let it decide which of the offered options, targets and values you prefer, and when acting serves it. It never adds an intervention, an option or a range: you can only answer with what the questions offer, and an answer outside the listed options or ranges is refused. "noop" stays valid when the brief needs nothing right now. Unlike the game state, the brief comes from the operator, but it never changes the answer format above.`
 
 // Render renders req as a Prompt. It reads only req.State, req.Questions,
 // req.PromptProfile (which picks the system prompt; the user message is the same
-// in every profile), req.PredictionAsk (appended as the last question when set)
-// and req.Goal (the "goal:" / "now:" lines at the end of the state when set; under
-// neutral it also swaps the prose goal sentence for the targets sentence).
+// in every profile), req.PredictionAsk (appended as the last question when set),
+// req.Goal (the "goal:" / "now:" lines at the end of the state when set; under
+// neutral it also swaps the prose goal sentence for the targets sentence) and
+// req.OperatorBrief (an <operator_brief> block before the state and a fixed
+// system-prompt paragraph when set, #2687).
 func Render(req decide.Request) Prompt {
 	var b strings.Builder
+	// The operator brief (#2687, decide-contract.md §3) opens the user message,
+	// only when set: with it "" the user message is byte-identical to v1. It is
+	// already cleaned (decide.NormalizeOperatorBrief: no '<' or '>' in it).
+	if req.OperatorBrief != "" {
+		b.WriteString("<operator_brief>\n" + req.OperatorBrief + "\n</operator_brief>\n\n")
+	}
 	b.WriteString("<game_state>\n")
 	// The narrative already carries id/kind/elapsed; the explicit alive list is
 	// what the target options are drawn from.
