@@ -856,9 +856,10 @@ class TestGameSessionLoop:
 
     @pytest.mark.uc("UC-035", flow="main", steps=[5])
     def test_experiment_game_parent_mode_not_ready_provider_reads_code_default_link(self):
-        """#2223 How this breaks: the coordinator does not wait for the observability
-        provider, so a game started before its first sync must get the code default
-        `link`. A provider that answers PROVIDER_NOT_READY stands in for it."""
+        """#2223 How this breaks: admission waits for the observability provider only up to
+        its deadline (UC-010 A5, #2658), so a game started while it is still not READY
+        must get the code default `link`. A provider that answers PROVIDER_NOT_READY
+        stands in for it."""
         from openfeature import api
         from openfeature.exception import ProviderNotReadyError
         from openfeature.provider.in_memory_provider import InMemoryProvider

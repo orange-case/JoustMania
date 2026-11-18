@@ -182,7 +182,7 @@ def test_declared_shapes_are_kept_with_otlp_logging(value):
 @pytest.mark.uc("UC-100", flow="A1", br=["BR-004"])
 @pytest.mark.usefixtures("logs")
 def test_not_ready_observability_provider_reads_span_event(monkeypatch):
-    """The coordinator does not wait for ``observability``: a not-READY provider gives the default."""
+    """A provider still not READY (flagd unreachable past the admission deadline) gives the default."""
     from openfeature import api
     from openfeature.exception import ProviderNotReadyError
     from openfeature.provider.in_memory_provider import InMemoryProvider

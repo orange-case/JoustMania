@@ -137,8 +137,9 @@ Template, one row per backend and shape. Fill the backend's answer and the groun
   event, once per `moment.id` ([FR-218](../requirements.md), [UC-041](../use_cases/UC-041.md) A7).
 - **The case keeps no log store** (BR-006). A log-event round can only be checked against the ground truth on
   the game's root span, never against a copy of the log in the case.
-- **The first game after a restart may run in the default shape.** Game admission does not wait for the
-  `observability` provider, so a game started before it is ready reads `span_event` (A1). Check the root
+- **A game may run in the default shape when flagd is not reachable.** Game admission waits for the
+  `observability` provider up to 5 s, so only a flagd that does not answer within that deadline gives
+  `span_event` (A1), also right after a restart. Check the root
   span's `telemetry.moment_shape` before you count a game.
 - A `log_event` or `both` game in a process without OTLP logging runs as `span_event` and records that
   shape on the root span.

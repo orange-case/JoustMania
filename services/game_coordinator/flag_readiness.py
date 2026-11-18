@@ -27,14 +27,47 @@ from lib.feature_flags import init_flag_domain, provider_status, wait_for_provid
 
 logger = logging.getLogger(__name__)
 
-# Every flag domain the game coordinator reads during a game. ``observability``
-# is left out on purpose: lib.telemetry / lib.otel_metrics read it at process
-# start (export intervals), never per game, and their own fail-safe defaults
-# apply; it does not decide how a game plays.
-COORDINATOR_FLAG_DOMAINS: tuple[str, ...] = ("system", "controller", "game", "agent", "user", "interventions")
+# Every flag domain the game coordinator reads when a game starts. ``observability`` is
+# included (maintainer decision 2026-11-18, #2658): the coordinator reads
+# ``telemetry.moment_shape`` and ``telemetry.experiment_game_parent`` per game, so a game
+# admitted before that provider is READY would read the code default instead of the served
+# value. It shares the same deadline as the other domains.
+COORDINATOR_FLAG_DOMAINS: tuple[str, ...] = (
+    "system",
+    "controller",
+    "game",
+    "agent",
+    "user",
+    "interventions",
+    "observability",
+)
 
 # Upper bound on the admission wait (same budget as the controller manager's startup wait).
 FLAG_PROVIDER_READY_TIMEOUT_S = 5.0
+
+
+class SpanRecord:
+    """Collects the wait's span attributes and events until the game root span exists.
+
+    ``telemetry.experiment_game_parent`` decides the root span's parent, so the wait has to
+    finish before the span is created; ``replay`` copies what it recorded onto the span.
+    """
+
+    def __init__(self) -> None:
+        self._attributes: list[tuple[str, object]] = []
+        self._events: list[tuple[str, object]] = []
+
+    def set_attribute(self, key: str, value: object) -> None:
+        self._attributes.append((key, value))
+
+    def add_event(self, name: str, attributes: object = None) -> None:
+        self._events.append((name, attributes))
+
+    def replay(self, span: trace.Span) -> None:
+        for key, value in self._attributes:
+            span.set_attribute(key, value)
+        for name, attributes in self._events:
+            span.add_event(name, attributes=attributes)
 
 
 def _not_ready(domain: str) -> bool:
@@ -42,7 +75,7 @@ def _not_ready(domain: str) -> bool:
 
 
 async def await_flag_providers_ready(
-    span: trace.Span,
+    span: trace.Span | SpanRecord,
     domains: tuple[str, ...] = COORDINATOR_FLAG_DOMAINS,
     deadline_seconds: float = FLAG_PROVIDER_READY_TIMEOUT_S,
 ) -> list[str]:
@@ -59,7 +92,9 @@ async def await_flag_providers_ready(
         return []
 
 
-async def _await_flag_providers_ready(span: trace.Span, domains: tuple[str, ...], deadline_seconds: float) -> list[str]:
+async def _await_flag_providers_ready(
+    span: trace.Span | SpanRecord, domains: tuple[str, ...], deadline_seconds: float
+) -> list[str]:
     started = time.monotonic()
     for domain in domains:
         init_flag_domain(domain)

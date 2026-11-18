@@ -42,7 +42,7 @@ from lib.types import get_game_display_name
 from proto import game_coordinator_pb2
 from services.game_coordinator import metrics
 from services.game_coordinator.event_bus import EventBus
-from services.game_coordinator.flag_readiness import await_flag_providers_ready
+from services.game_coordinator.flag_readiness import SpanRecord, await_flag_providers_ready
 from services.game_coordinator.game_factory import GameFactory
 from services.game_coordinator.grpc_clients import GrpcClientManager
 
@@ -71,8 +71,8 @@ GAME_OUTCOMES = frozenset({"winner", "tie", OUTCOME_COMPLETED, OUTCOME_FORCE_END
 # game root under the agent's long-lived ``agent.experiment`` span, so one
 # experiment trace grows with every shadow game; ``link`` roots each game as its own
 # trace with a Link back to the experiment. The code default matches the flag
-# default: the game root starts before the readiness wait, and ``observability`` is
-# not waited on at all, so the first game after a restart may read the code default.
+# default: admission waits for ``observability`` (UC-010 A5), so only a flagd that is
+# not reachable within the deadline gives the game the code default.
 EXPERIMENT_GAME_PARENT_FLAG = "telemetry.experiment_game_parent"
 EXPERIMENT_GAME_PARENT_CHILD = "child"
 EXPERIMENT_GAME_PARENT_LINK = "link"
@@ -593,6 +593,14 @@ class GameSession:
         # a valid injected parent) so the real-game own-root structure is never
         # touched. The stream Link above is kept either way, unless it names the
         # experiment span itself (``link`` then carries one Link to it).
+        # UC-010 A5 / BR-004: no game reads its start flags (this parent mode, the moment
+        # shape, the game's own settings) from a provider that is not READY yet: wait
+        # (bounded, every coordinator domain incl. observability), else record the
+        # code-default fallback. The span does not exist yet, so the outcome is replayed onto it.
+        admitted = self.game_running
+        wait_record = SpanRecord()
+        await await_flag_providers_ready(wait_record)
+
         parent_context = Context()
         if (
             self.game_kind == GAME_KIND_SHADOW
@@ -628,8 +636,9 @@ class GameSession:
             game_span.set_attribute("experiment.id", self.experiment_id)
             game_span.set_attribute("experiment.arm", self.arm)
             game_span.set_attribute("player.count", len(self.players))
+            wait_record.replay(game_span)
             # UC-100 BR-002: the moment shape of every moment (warning, death), read once here and held for
-            # the game (not waited on: a not-READY provider gives span_event, A1).
+            # the game, after the admission wait (a provider still not READY at the deadline gives span_event, A1).
             moment_shape = read_moment_shape()
             game_span.set_attribute(MOMENT_SHAPE_ATTR, moment_shape)
 
@@ -671,12 +680,8 @@ class GameSession:
                     await self.clients.close()
                     return
 
-                # UC-010 A5 / BR-004: no game reads its start flags from a
-                # provider that is not READY yet: wait (bounded), else record the
-                # code-default fallback on this root span.
-                admitted = self.game_running
-                await await_flag_providers_ready(game_span)
-
+                # UC-010 A5 / BR-004: the wait ran before this span (see above); its
+                # outcome is already on the span.
                 # A force-end during the wait (game_running flipped to False) retired
                 # this session: do not create and run an orphan game behind its back.
                 if admitted and not self.game_running:
