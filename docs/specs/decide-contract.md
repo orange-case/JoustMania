@@ -191,6 +191,13 @@ tooling only) still answers the Default.
   - **jev ignores it.** jev's request is a typed set of questions whose gate criteria are fixed and calibrated (§3, jev); a free
     text in them would move the gate uncalibrated, so the agent never sets the field for jev and jev's wire is unchanged.
   - `agent.decide` carries `decide.operator_brief.present` and `decide.operator_brief.length` when a brief was sent (§12).
+  - **The post-game retro sees it too (#2695, UC-042 A13, BR-010, FR-097).** At game end the retro reads the same flag for the
+    game that ended (`services/agent/decision/retro_capture.go`, wired to the same `flags.Flags.OperatorBrief`), whatever the
+    decide backend, and `services/agent/llm/retro.go` renders the same `<operator_brief>` block at the start of its user message
+    and one of two fixed system paragraphs of its own: when one of the game's requests carried the brief (`decision/brief_log.go`), judge the game against the brief as well as the goal and say in `session_assessment`
+    whether it was served; otherwise say the in-game agent never saw it and only whether the game happened to serve it. The brief never changes the retro's response contract or allow-list. The decide prompt is not
+    changed by this. The retro's intervention catalog reads the effect texts from `decide.Catalog` (the neutral Levers text, plus
+    the `ValueEffect` text of the levers with a numeric value) and the bounds only through `decide.MagnitudeBounds`.
 - `AnswerSchema()` is static (cacheable), `additionalProperties:false` everywhere,
   all properties required: `{answers:[{id, choice, score, probabilities:[{option,p}], confidence}], rationale}` (`services/agent/decide/llmio/llmio.go:AnswerSchema`).
 
