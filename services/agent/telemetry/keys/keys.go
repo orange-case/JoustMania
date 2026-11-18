@@ -387,6 +387,13 @@ const (
 	// truncation marker. The Go SDK applies no attribute length limit and the
 	// collector does not truncate.
 	AttrLLMRetroUser = "llm.retro.user"
+	// AttrLLMRetroOperatorBriefPresent is true on an agent.llm.retro span whose game
+	// had an operator brief (decision.operator_brief, #2695, UC-042 A13); absent
+	// otherwise. AttrLLMRetroOperatorBriefLength is its length in characters after
+	// decide.NormalizeOperatorBrief. The text is in llm.retro.user only with
+	// decision.capture_content on.
+	AttrLLMRetroOperatorBriefPresent = "llm.retro.operator_brief.present"
+	AttrLLMRetroOperatorBriefLength  = "llm.retro.operator_brief.length"
 	// AttrLLMRetroBytes is len(system)+len(user): the FULL prompt size in bytes (int),
 	// unchanged by #1168 (system TEXT no longer emitted, but still counted).
 	AttrLLMRetroBytes = "llm.retro.bytes"

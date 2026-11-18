@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -17,6 +18,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 	"github.com/joustmania/agent/gamesummary"
 	"github.com/joustmania/agent/llm"
+	"github.com/joustmania/agent/telemetry/keys"
 )
 
 // retro_capture.go is the POST-GAME retrospective (#844, #1179). When a game ends
@@ -133,6 +135,9 @@ type RetroCoordinator struct {
 	predictions func(gameID string) []gamesummary.PredictionOutcome
 	// goal is the goal-attainment lookup (#2479, UC-042 A12); nil = none.
 	goal func(gameID string) *gamesummary.Goal
+	// operatorBrief is the per-game decision.operator_brief source (#2695, UC-042
+	// A13), the same one the remote decide path uses; nil = no brief block.
+	operatorBrief OperatorBriefSource
 
 	// experimentParent resolves the long-lived agent.experiment ROOT span's SpanContext
 	// by experiment_id (#1188), reading the registry's ExperimentSpanContext accessor.
@@ -304,6 +309,32 @@ func (rc *RetroCoordinator) SetGoalLookup(f func(gameID string) *gamesummary.Goa
 	rc.goal = f
 }
 
+// SetOperatorBriefSource injects the per-game operator-brief source (#2695, UC-042
+// A13): main.go wires flags.Flags.OperatorBrief, the same read the remote decide
+// path makes, so the retro sees the brief that was in force for the game. nil (the
+// default and every older test) keeps the prompt without a brief. Set at wiring.
+func (rc *RetroCoordinator) SetOperatorBriefSource(src OperatorBriefSource) { rc.operatorBrief = src }
+
+// retroOperatorBrief is the game's brief ("" without a source).
+func (rc *RetroCoordinator) retroOperatorBrief(gameID string) string {
+	if rc.operatorBrief == nil {
+		return ""
+	}
+	return rc.operatorBrief(context.Background(), gameID)
+}
+
+// retroBriefAttributes are the agent.llm.retro attributes of the game's brief:
+// none without one (#2695, telemetry.md §4.1).
+func retroBriefAttributes(brief string) []attribute.KeyValue {
+	if brief == "" {
+		return nil
+	}
+	return []attribute.KeyValue{
+		attribute.Bool(keys.AttrLLMRetroOperatorBriefPresent, true),
+		attribute.Int(keys.AttrLLMRetroOperatorBriefLength, utf8.RuneCountInString(brief)),
+	}
+}
+
 // SetRootContext injects the agent's root context (#1179). The async retro inference
 // goroutine keeps its latency-budget context derived from the retro SPAN context (to
 // preserve #1112 trace parenting), and separately bridges root.Done() -> cancel() so
@@ -416,6 +447,8 @@ func (rc *RetroCoordinator) OnGameEnd(c gamecontext.GameContext) {
 		Context:  c,
 		Summary:  summary,
 		Now:      retroNow,
+		// #2695 (UC-042 A13): the brief of the game that ended, read in its flag context.
+		OperatorBrief: rc.retroOperatorBrief(c.SessionID),
 	})
 
 	// Inference attribution (#1234): the wired backend's model and name, or
@@ -439,7 +472,10 @@ func (rc *RetroCoordinator) OnGameEnd(c gamecontext.GameContext) {
 		configured: attr.configured,
 		used:       attr.used,
 		fallback:   attr.fallback,
+		// #2695: the brief text stays in llm.retro.user only under content capture.
+		captureContent: snapshot.Decision.CaptureContent,
 	})
+	attrs = append(attrs, retroBriefAttributes(prompt.OperatorBrief)...)
 	// #1100: structured game-outcome attributes (queryable, not buried in the prompt
 	// text) and shadow-experiment correlation (id / arm / recorded fitness). All are
 	// additive and cleanly OMITTED when their signal is absent (a non-experiment game,
@@ -722,6 +758,9 @@ type retroPromptAttrs struct {
 	configured string
 	used       string
 	fallback   string
+	// captureContent is decision.capture_content: llm.retro.user keeps the operator
+	// brief's text only when it is on (#2695, RetroPrompt.UserForSpan).
+	captureContent bool
 }
 
 // retroPromptAttributes is the SOLE builder of the agent.llm.retro span attribute
@@ -749,6 +788,7 @@ type retroPromptAttrs struct {
 func retroPromptAttributes(in retroPromptAttrs) []attribute.KeyValue {
 	system := in.prompt.System
 	user := in.prompt.User
+	spanUser := in.prompt.UserForSpan(in.captureContent)
 	return []attribute.KeyValue{
 		// GenAI semantic conventions for the request the agent would have sent.
 		semconv.GenAIOperationNameChat,
@@ -770,7 +810,7 @@ func retroPromptAttributes(in retroPromptAttrs) []attribute.KeyValue {
 		// User prompt (variable, valuable) is KEPT, capped at maxUserPromptBytes. bytes
 		// still counts the full system+user size.
 		attribute.String(AttrLLMRetroSystemSHA, systemPromptSHA(system)),
-		attribute.String(AttrLLMRetroUser, capUserPrompt(user)),
+		attribute.String(AttrLLMRetroUser, capUserPrompt(spanUser)),
 		attribute.Int(AttrLLMRetroBytes, len(system)+len(user)),
 		// Inference attribution (#1234): the text backend's model and name, or
 		// "none" / no_backend_available when capture-only (the retro DIVERGENCE).

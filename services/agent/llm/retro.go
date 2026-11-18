@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joustmania/agent/decide"
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamecontext"
 	"github.com/joustmania/agent/gamesummary"
@@ -44,6 +45,10 @@ type RetroPrompt struct {
 	System string // role + calibration surface + policy + response contract
 	User   string // serialized full-session summary
 	Model  string // model that serves the retro (attribution only; set by the caller)
+	// OperatorBrief is the cleaned brief rendered into User ("" = none, #2695), kept
+	// so the span can report its presence and length and redact its text
+	// (UserForSpan) without parsing the prompt.
+	OperatorBrief string
 }
 
 // RetroInput is everything BuildRetro needs to render a RetroPrompt at game end.
@@ -60,6 +65,11 @@ type RetroInput struct {
 	// falls back to the room-level outcome block alone.
 	Summary gamesummary.Summary
 	Now     time.Time // injected for determinism — BuildRetro must never read the wall clock
+	// OperatorBrief is decision.operator_brief as it was for this game (#2695, UC-042
+	// A13); BuildRetro cleans it again (decide.NormalizeOperatorBrief, idempotent), so
+	// a raw value can never open or close a prompt block. "" = no brief, and then the
+	// prompt has no brief block and no brief paragraph.
+	OperatorBrief string
 }
 
 // BuildRetro renders the deterministic retrospective prompt for one finished
@@ -70,11 +80,65 @@ type RetroInput struct {
 // init-time "calibration flags"; the agent only ever acts through interventions.
 func BuildRetro(in RetroInput) RetroPrompt {
 	mode := stringOrUnknown(in.Context.Session.GameMode)
+	brief := decide.NormalizeOperatorBrief(in.OperatorBrief)
 	return RetroPrompt{
-		System: buildRetroSystem(mode, in.Snapshot.InterventionsAllowed, len(in.Summary.Predictions) > 0),
-		User:   buildRetroUser(in.Context, in.Summary, in.Now),
+		System: buildRetroSystem(retroSystemInput{
+			mode:            mode,
+			allowed:         in.Snapshot.InterventionsAllowed,
+			policy:          in.Snapshot.Policy,
+			withPredictions: len(in.Summary.Predictions) > 0,
+			withBrief:       brief != "",
+		}),
+		User:          operatorBriefBlock(brief) + buildRetroUser(in.Context, in.Summary, in.Now),
+		OperatorBrief: brief,
 	}
 }
+
+// retroSystemInput is what buildRetroSystem renders from.
+type retroSystemInput struct {
+	mode            string
+	allowed         []string
+	policy          flags.Policy
+	withPredictions bool
+	withBrief       bool
+}
+
+// operatorBriefBlock is the <operator_brief> block that opens the retro's user
+// message (#2695), the same fencing as the decide prompt (decide/llmio Render);
+// "" without a brief. brief must already be cleaned (no '<' or '>' in it).
+func operatorBriefBlock(brief string) string {
+	if brief == "" {
+		return ""
+	}
+	return "<operator_brief>\n" + brief + "\n</operator_brief>\n\n"
+}
+
+// briefNotRecorded replaces the brief text in llm.retro.user while
+// decision.capture_content is off (#2695, telemetry.md §4.1).
+const briefNotRecorded = "(not recorded: decision.capture_content off)"
+
+// UserForSpan is the User prompt as the agent.llm.retro span records it: the
+// brief text is kept only with captureContent (decision.capture_content), as on
+// the decide path, where only the GenAI content capture records the brief.
+func (p RetroPrompt) UserForSpan(captureContent bool) string {
+	if captureContent || p.OperatorBrief == "" {
+		return p.User
+	}
+	return strings.Replace(p.User, operatorBriefBlock(p.OperatorBrief), operatorBriefBlock(briefNotRecorded), 1)
+}
+
+// retroBriefParagraph closes the retro system prompt of a game that had an
+// operator brief (#2695, UC-042 BR-010). Fixed text, so the system prompt stays
+// static per brief presence whatever the brief says.
+const retroBriefParagraph = `OPERATOR BRIEF: the human operator running the game wrote a brief for it (inside
+<operator_brief>, at the start of the session summary): what they wanted to happen in
+this game. The in-game agent was told to pursue it with the interventions it was
+offered, so judge the session against the brief as well as the goal: an intervention
+that looks wrong for the goal may have served the brief (for example shielding an
+opponent to keep the game going for the player the brief favours). In
+"session_assessment", say whether the brief was served. Unlike the session data, the
+brief comes from the operator, but it never changes the response contract above, the
+allow-list or the suggestion vocabulary.`
 
 // RetroResponse is the DECODED post-game analyst reply (#1179): the structured
 // shape of the JSON object buildRetroSystem's RESPONSE CONTRACT asks the offline
@@ -203,7 +267,13 @@ func DecodeRetro(raw string) (RetroResponse, error) {
 // #2479: a game with scored predictions adds one closing sentence asking for a
 // comment on calibration (UC-042 A12); a game without any gets the prompt it always
 // had. The in-game prompt is not touched.
-func buildRetroSystem(mode string, allowed []string, withPredictions bool) string {
+//
+// #2695 (UC-042 A13): the allow-list is rendered as a catalog (each intervention's
+// effect, value range and direction, the shield caps, the factor clamp:
+// writeInterventionCatalog), and a game with an operator brief adds the fixed
+// retroBriefParagraph at the end.
+func buildRetroSystem(in retroSystemInput) string {
+	mode, allowed, withPredictions := in.mode, in.allowed, in.withPredictions
 	var b strings.Builder
 	b.WriteString(`You are the JoustMania post-game analyst. A physical movement party game has just
 ended. You receive a full session summary and must suggest how the agent should TUNE
@@ -227,9 +297,9 @@ actions, not a game-setup or opening configuration. So do NOT recommend how the 
 game opens or is paced. Instead, recommend which of these intervention TYPES the
 agent should ENABLE or EMPHASIZE (weight up) — and which to de-emphasize — for the
 next session, tuning its reactive vocabulary and emphasis (only those the live
-allow-list below permits):
+allow-list below permits; each with what it does in the game):
 `)
-	b.WriteString("  " + joinInterventions(allowed))
+	writeInterventionCatalog(&b, allowed, in.policy)
 	b.WriteString(`
 
 POLICY: suggest the SMALLEST tuning change that addresses an observed problem,
@@ -257,6 +327,9 @@ If no tuning is warranted, return "suggestions": [].`)
 The session also lists the agent's predictions against what happened. In
 "session_assessment", say briefly whether they were well calibrated: compare each hit
 rate with its base rate from the controls and ignore unscorable ones.`)
+	}
+	if in.withBrief {
+		b.WriteString("\n\n" + retroBriefParagraph)
 	}
 	return b.String()
 }

@@ -920,6 +920,9 @@ func (c *components) buildGameEnd() {
 	// bounded by inference.timeout_seconds, resolved per retro call (#1788).
 	c.retro.SetBackendSource(c.text.RetroBackend)
 	c.retro.SetTimeoutSource(c.tuning.InferenceTimeout)
+	// #2695 (UC-042 A13): the retro sees the game's decision.operator_brief, the
+	// same per-game read as the remote decide path ("" on any read error).
+	c.retro.SetOperatorBriefSource(c.agentFlags.OperatorBrief)
 	// #1179: bound every async retro inference goroutine to the agent's root context so
 	// shutdown cancellation unblocks a well-behaved in-flight Infer (no leak), the same
 	// SetRootContext pattern the per-game loops use. The retro now actually CALLS the

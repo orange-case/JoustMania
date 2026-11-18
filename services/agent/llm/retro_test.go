@@ -30,6 +30,8 @@ func retroSnapshot() flags.Snapshot {
 			"adjust_music_tempo", "set_pacing_profile", "adjust_player_sensitivity",
 			"grant_shield",
 		},
+		// #2695: the shield caps the retro catalog shows (the flagd defaults).
+		Policy: flags.Policy{MaxShieldsPerPlayerPerGame: 3, ShieldCooldownSeconds: 15},
 	}
 }
 
