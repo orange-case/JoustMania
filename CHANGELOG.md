@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.20.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.19.0...joustmania-v0.20.0) (2026-11-18)
+
+
+### Features
+
+* **agent:** read moment log events (FR-218) ([#2658](https://github.com/orange-case/JoustMania/issues/2658)) ([#2679](https://github.com/orange-case/JoustMania/issues/2679)) ([4f1dc37](https://github.com/orange-case/JoustMania/commit/4f1dc375c0ef194f95dffd65b17c273bef3e9365))
+* **grafana:** mark agent decisions on dashboards, add decision timeline ([#2681](https://github.com/orange-case/JoustMania/issues/2681)) ([364eb8f](https://github.com/orange-case/JoustMania/commit/364eb8fad7f050322d9a2b20f302ecd3336febe5))
+* **telemetry:** the death follows the moment shape ([#2658](https://github.com/orange-case/JoustMania/issues/2658)) ([#2683](https://github.com/orange-case/JoustMania/issues/2683)) ([d275570](https://github.com/orange-case/JoustMania/commit/d275570cfe5af292b02459113a16c18bcc695f71))
+
+
+### Bug Fixes
+
+* **flag-service:** Flagsmith overrides through the per-identity routes, document values by registry type ([#2682](https://github.com/orange-case/JoustMania/issues/2682)) ([#2685](https://github.com/orange-case/JoustMania/issues/2685)) ([7febb2d](https://github.com/orange-case/JoustMania/commit/7febb2de37b7ea49f05a2bec450e90d4d221c076))
+* **game-coordinator:** game admission also waits for the observability flags ([#2658](https://github.com/orange-case/JoustMania/issues/2658)) ([#2684](https://github.com/orange-case/JoustMania/issues/2684)) ([ea39925](https://github.com/orange-case/JoustMania/commit/ea39925474b9e32dc2a5662125623a2420602026))
+
+
+### Documentation
+
+* challenge page "Where did it go?" ([#2658](https://github.com/orange-case/JoustMania/issues/2658)) ([#2678](https://github.com/orange-case/JoustMania/issues/2678)) ([10b3d1e](https://github.com/orange-case/JoustMania/commit/10b3d1ef7543280755062bd8f700ccb95ef80c89))
+
 ## [0.19.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.18.0...joustmania-v0.19.0) (2026-11-17)
 
 
