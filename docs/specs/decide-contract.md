@@ -176,7 +176,7 @@ tooling only) still answers the Default.
     goal lines). `agent.decide` carries `decide.prompt_profile` on the remote path (§12).
 - **Operator brief (#2687, `decision.operator_brief`, default empty; UC-040 BR-044, FR-096).** The agent reads the flag per
   remote request (`services/agent/flags/game.go:OperatorBrief`), cleans it (`services/agent/decide/brief.go:NormalizeOperatorBrief`:
-  trimmed, at most 512 characters, control characters other than a line break become spaces, `<` and `>` become `‹` and `›`) and
+  trimmed, at most 512 characters, control characters other than a line break, format and line/paragraph separator characters become spaces, `<` `>` and their full-width forms `＜` `＞` become `‹` and `›`) and
   sets `Request.OperatorBrief` only when the backend is claude or openai (`services/agent/decision/operator_brief.go`).
   - Empty (the default, and an unreadable or blank flag): `Render` produces byte-identical prompts in every profile (the v1 and
     profile goldens are unchanged, `services/agent/decide/llmio/operator_brief_uc040_test.go` pins it).
