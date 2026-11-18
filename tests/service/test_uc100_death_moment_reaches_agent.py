@@ -55,8 +55,11 @@ async def _wait_until_the_agent_holds_the_game(sink, game_id: str) -> None:
     game's first spans (2 s batch), and the death is then dropped, not counted.
     ``initialization_phase`` carries ``game.id`` and ends before RUNNING. The sink
     records a request before forwarding it, and the agent applies a request before
-    answering, so one more completed forward after the span is recorded means the
-    agent has applied it (or a later request; the agent keeps the partition).
+    answering, so one more completed forward after the span is recorded almost always
+    means the agent has applied it. ``forward_ok`` is shared by the sink's handler
+    threads, so an unrelated forward finishing first can end the wait while the span's
+    own forward (milliseconds, locally) is still in flight; the kill and the log
+    batch that follow take far longer.
     """
     await sink.wait_span_async(
         "initialization_phase", {"game.id": game_id}, service=COORDINATOR, timeout=TELEMETRY_TIMEOUT_SECONDS
