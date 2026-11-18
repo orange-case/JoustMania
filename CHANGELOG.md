@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.19.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.18.0...joustmania-v0.19.0) (2026-11-17)
+
+
+### Features
+
+* **agent:** ignore moment spans ([#2658](https://github.com/orange-case/JoustMania/issues/2658)) ([#2662](https://github.com/orange-case/JoustMania/issues/2662)) ([a7512c1](https://github.com/orange-case/JoustMania/commit/a7512c116e2795e8b4975dd5178f781139c00a9c))
+* **agent:** send the intervention id with every intervention write ([#2665](https://github.com/orange-case/JoustMania/issues/2665)) ([#2676](https://github.com/orange-case/JoustMania/issues/2676)) ([98d594f](https://github.com/orange-case/JoustMania/commit/98d594f2c2941fe3c54434f4e63521971511ca6a))
+* **flag-service:** serve a write's decision_id with its value ([#2665](https://github.com/orange-case/JoustMania/issues/2665)) ([#2675](https://github.com/orange-case/JoustMania/issues/2675)) ([f1e2743](https://github.com/orange-case/JoustMania/commit/f1e2743b32fe10f956f75db7080a0f344092ce54))
+* **game-coordinator:** record the challenge ground truth at game end ([#2658](https://github.com/orange-case/JoustMania/issues/2658)) ([#2663](https://github.com/orange-case/JoustMania/issues/2663)) ([3bf4639](https://github.com/orange-case/JoustMania/commit/3bf4639f9ee37d2efba0fb0fe2f44d65c71a14ab))
+* **telemetry:** the warning moment follows telemetry.moment_shape ([#2658](https://github.com/orange-case/JoustMania/issues/2658)) ([#2664](https://github.com/orange-case/JoustMania/issues/2664)) ([3cdea3c](https://github.com/orange-case/JoustMania/commit/3cdea3cc128c3d5724cf4e893963d73186f4d48a))
+
+
+### Bug Fixes
+
+* **agent:** close effect windows at game end ([#2668](https://github.com/orange-case/JoustMania/issues/2668)) ([#2670](https://github.com/orange-case/JoustMania/issues/2670)) ([9721d48](https://github.com/orange-case/JoustMania/commit/9721d4820adb545e787f959a907f492ab316b46e))
+* **controller-manager:** one controller.shield_effect span per shield layer ([#2669](https://github.com/orange-case/JoustMania/issues/2669)) ([#2674](https://github.com/orange-case/JoustMania/issues/2674)) ([b61b5d9](https://github.com/orange-case/JoustMania/commit/b61b5d9739da26b4d4dd817900d4f32abb653f1e))
+* **game-coordinator:** parent post-countdown SetVolume under game_cycle ([#2671](https://github.com/orange-case/JoustMania/issues/2671)) ([#2677](https://github.com/orange-case/JoustMania/issues/2677)) ([18fdf0c](https://github.com/orange-case/JoustMania/commit/18fdf0c9565af3c50497dd75274f9ee22841c30d))
+* **test:** ruff C402/B023 in grafana panel contents test ([#2672](https://github.com/orange-case/JoustMania/issues/2672)) ([#2673](https://github.com/orange-case/JoustMania/issues/2673)) ([900ad09](https://github.com/orange-case/JoustMania/commit/900ad09934ad739fc409f33fd9fec2524e89dea1))
+
+
+### Documentation
+
+* **spec:** UC-101 Trace an Agent Intervention to its Effect ([#2665](https://github.com/orange-case/JoustMania/issues/2665)) ([#2666](https://github.com/orange-case/JoustMania/issues/2666)) ([3718d0e](https://github.com/orange-case/JoustMania/commit/3718d0efe17f0c08ecc7ca2b044f15f76e5b93df))
+
 ## [0.18.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.17.0...joustmania-v0.18.0) (2026-11-17)
 
 
