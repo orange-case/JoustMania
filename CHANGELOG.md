@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.20.0...joustmania-v0.21.0) (2026-11-18)
+
+
+### Features
+
+* **agent:** operator brief for the LLM decide prompt ([#2687](https://github.com/orange-case/JoustMania/issues/2687)) ([#2691](https://github.com/orange-case/JoustMania/issues/2691)) ([e19a54c](https://github.com/orange-case/JoustMania/commit/e19a54c678da2348d32bd14d080671c107c5d7a6))
+
 ## [0.20.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.19.0...joustmania-v0.20.0) (2026-11-18)
 
 
