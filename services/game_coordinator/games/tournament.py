@@ -645,7 +645,7 @@ class TournamentGame(StreamedIntroGameMode):
         The same elimination gauges and players-alive aggregate as a death
         (``dead_count``, ``game_player_alive`` 0, the elimination order), but no
         death: no explosion, no death effect, no ``game_player_deaths_total``
-        and no ``player_death`` span event. ``_finalize_match`` turns its LED off.
+        and no ``player_death`` moment. ``_finalize_match`` turns its LED off.
         """
         loser_serial = match.player2_serial if match.winner_serial == match.player1_serial else match.player1_serial
         loser = self.players[loser_serial]

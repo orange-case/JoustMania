@@ -310,7 +310,7 @@ class NonstopJoustGame(BaseGameMode):
 
         logger.info(f"Player died: {serial} (kills: {player.kills}, deaths: {player.deaths}, score: {player.score})")
 
-        # The span stays open (respawn). The player_death span event (with kills /
+        # The span stays open (respawn). The player_death moment (with kills /
         # deaths / score, via _player_death_event_attributes) was recorded by the
         # base kill path; the event-bus publish below is a separate channel.
 

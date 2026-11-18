@@ -628,7 +628,7 @@ class GameSession:
             game_span.set_attribute("experiment.id", self.experiment_id)
             game_span.set_attribute("experiment.arm", self.arm)
             game_span.set_attribute("player.count", len(self.players))
-            # UC-100 BR-002: the warning's moment shape, read once here and held for
+            # UC-100 BR-002: the moment shape of every moment (warning, death), read once here and held for
             # the game (not waited on: a not-READY provider gives span_event, A1).
             moment_shape = read_moment_shape()
             game_span.set_attribute(MOMENT_SHAPE_ATTR, moment_shape)

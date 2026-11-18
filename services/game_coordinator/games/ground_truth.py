@@ -6,8 +6,10 @@ event per player on the game root span (telemetry.md §3.2). A force-ended game 
 one whose ``run()`` raised records none (UC-100 A5).
 
 The times come from the clock the moment records use: wall-clock epoch
-nanoseconds, ``time.time_ns()``, the OpenTelemetry SDK's default timestamp of a
-span event (and of a log record). ``game_clock`` is not wall time and is not used.
+nanoseconds, ``time.time_ns()``. Each ``record_*`` returns its time, and the game
+passes it to ``record_moment`` as the record's own timestamp, so a ground-truth time
+equals its record's timestamp in every shape. ``game_clock`` is not wall time and is
+not used.
 Kept per game and serial, never on the ``Player`` object, so a recreated player
 record keeps its times.
 """
@@ -29,13 +31,17 @@ class GroundTruth:
         self._warnings: dict[str, list[int]] = {}
         self._deaths: dict[str, list[int]] = {}
 
-    def record_warning(self, serial: str) -> None:
-        """A warning of ``serial`` happens now (next to its ``death_warning`` record)."""
-        self._warnings.setdefault(serial, []).append(time_ns())
+    def record_warning(self, serial: str) -> int:
+        """A warning of ``serial`` happens now; returns its time, the ``death_warning`` record's timestamp."""
+        stamp = time_ns()
+        self._warnings.setdefault(serial, []).append(stamp)
+        return stamp
 
-    def record_death(self, serial: str) -> None:
-        """A death of ``serial`` happens now (next to its ``player_death`` record)."""
-        self._deaths.setdefault(serial, []).append(time_ns())
+    def record_death(self, serial: str) -> int:
+        """A death of ``serial`` happens now; returns its time, the ``player_death`` record's timestamp."""
+        stamp = time_ns()
+        self._deaths.setdefault(serial, []).append(stamp)
+        return stamp
 
     def event_attributes(self, serial: str, name: str = "") -> dict:
         """The ``challenge.ground_truth`` attributes of one player.
