@@ -327,7 +327,7 @@ class _BrokenProcessor:
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-100", br=["BR-004"])
+@pytest.mark.uc("UC-100", br=["BR-004"], cond=["Post-S-2", "Post-F-1"])
 @pytest.mark.uc("UC-030", flow="main", steps=[9])
 @pytest.mark.parametrize("shape", ["log_event", "both"])
 async def test_a_broken_log_channel_never_half_applies_a_kill(sdk, monkeypatch, capsys, shape):

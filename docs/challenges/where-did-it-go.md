@@ -46,6 +46,16 @@ curl -sS -X DELETE http://localhost/flags/observability/telemetry.moment_shape
 - A flag that is absent, unknown or unreadable gives `span_event`. A game started before the
   `observability` flag provider is ready also reads the default.
 
+**Check the persistence before and after the booth (UC-100 BR-007).** The shape stays for every later game,
+and over a restart of the game coordinator, until it is cleared or the flag service restarts (it is held in the
+flag service's memory). No CI test covers this; check it by hand.
+
+- Before the booth: `curl -sS http://localhost/flags/observability/telemetry.moment_shape` shows no overlay
+  (the default), and the root span of a test game shows `telemetry.moment_shape` = `span_event`.
+- After the booth: send the DELETE above, then play one game and confirm its root span shows
+  `telemetry.moment_shape` = `span_event` (its player span carries the `death_warning` and `player_death`
+  span events again). A shape that is still set shows on the root span of that next game.
+
 **Confirm the shape the game ran in.** Open the game's root span (named after the mode, for example
 `Joust Free-for-All`) in any backend and read its attribute `telemetry.moment_shape`. That value is the
 shape the game used. If it differs from the one you chose, the game is not counted (UC-100 A1).

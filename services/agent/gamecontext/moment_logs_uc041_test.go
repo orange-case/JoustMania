@@ -89,6 +89,7 @@ func requirePartitions(t *testing.T, mux *Multiplexer, want int) {
 	}
 }
 
+// UC: UC-100 BR-007 Post-F-2
 // UC: UC-041 A7
 func TestApplyLogs_MomentLogEvents(t *testing.T) {
 	no := false
