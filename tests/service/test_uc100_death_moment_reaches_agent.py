@@ -14,6 +14,7 @@ proves it. Without the slice the coordinator sends a span event, the sink forwar
 no log and the counter does not exist.
 """
 
+import asyncio
 import dataclasses
 
 import pytest
@@ -45,6 +46,29 @@ EVENT_TIMEOUT_SECONDS = 15.0
 TELEMETRY_TIMEOUT_SECONDS = 30.0
 
 
+async def _wait_until_the_agent_holds_the_game(sink, game_id: str) -> None:
+    """Wait until a span of the game has been forwarded to the agent, so it holds the game's partition.
+
+    The agent drops a moment log event for a game it holds no context for (UC-041 A7
+    step 4), and only a span or metric of the game creates that partition. The
+    log event of a kill right after RUNNING (SDK batch up to 1 s) can overtake the
+    game's first spans (2 s batch), and the death is then dropped, not counted.
+    ``initialization_phase`` carries ``game.id`` and ends before RUNNING. The sink
+    records a request before forwarding it, and the agent applies a request before
+    answering, so one more completed forward after the span is recorded means the
+    agent has applied it (or a later request; the agent keeps the partition).
+    """
+    await sink.wait_span_async(
+        "initialization_phase", {"game.id": game_id}, service=COORDINATOR, timeout=TELEMETRY_TIMEOUT_SECONDS
+    )
+    forwarded = sink.forward_ok
+    deadline = asyncio.get_running_loop().time() + TELEMETRY_TIMEOUT_SECONDS
+    while sink.forward_ok <= forwarded:
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError(f"no forward to the agent completed after {game_id}'s initialization_phase")
+        await asyncio.sleep(0.1)
+
+
 @pytest.mark.uc("UC-100", flow="main", steps=[3, 4, 5], br=["BR-001", "BR-003", "BR-007"])
 @pytest.mark.uc("UC-041", flow="A7", steps=[1, 2], br=["BR-009"])
 async def test_a_nonstop_death_as_a_log_event_reaches_the_agent(stack, headless_cleanup):
@@ -59,6 +83,7 @@ async def test_a_nonstop_death_as_a_log_event_reaches_the_agent(stack, headless_
         game_id, collector = await start_game_headless(game_client, build_start_config("NonStop", serials))
         headless_cleanup.add_game(game_id)
         assert game_id in await wait_until_running(game_client, {game_id}, timeout=20.0)
+        await _wait_until_the_agent_holds_the_game(sink, game_id)
 
         victim = serials[0]
         assert await kill_player_verified(mock_client, game_client, victim, lambda p: not p.alive, game_id=game_id), (
