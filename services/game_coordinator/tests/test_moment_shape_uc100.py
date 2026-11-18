@@ -59,7 +59,8 @@ async def _warn(game, serial="p0"):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-100", flow="A1", br=["BR-003", "BR-004"])
+@pytest.mark.nfr("NFR-060")
+@pytest.mark.uc("UC-100", flow="main", steps=[4], br=["BR-003", "BR-004"])
 async def test_default_shape_keeps_the_span_event_and_adds_the_identity_keys():
     game, _ = _game(2)
     game.players["p0"].name = "Blue Phoenix"
@@ -130,6 +131,7 @@ async def test_both_shape_sends_one_moment_id_as_span_event_and_log_event(otlp_l
 
 
 @pytest.mark.asyncio
+@pytest.mark.nfr("NFR-060")
 @pytest.mark.uc("UC-100", flow="A2", br=["BR-002"])
 async def test_flag_change_mid_game_has_no_effect(otlp_logs):
     """The game holds its shape: the warning path never reads the flag."""
@@ -165,6 +167,7 @@ async def _run_session(flag_value):
 
 
 @pytest.mark.asyncio
+@pytest.mark.nfr("NFR-060")
 @pytest.mark.uc("UC-100", flow="main", steps=[3], br=["BR-002"])
 @pytest.mark.parametrize("shape", ["span_event", "span", "log_event", "both"])
 @pytest.mark.usefixtures("otlp_logs")

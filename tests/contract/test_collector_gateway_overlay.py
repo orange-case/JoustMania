@@ -200,6 +200,104 @@ def test_gateway_pipeline_reuses_the_processors_of_its_in_case_twin(
     )
 
 
+# The processors the gateway pipelines may use: none drops, rewrites or reshapes a record
+# beyond the health-check spans and the resource attributes the in-case twin also gets.
+GATEWAY_PROCESSOR_KINDS = {"memory_limiter", "filter/grpc_health", "resource"}
+
+
+def _is_batch(name: str) -> bool:
+    return name == "batch" or name.startswith("batch/")
+
+
+@pytest.mark.uc("UC-100", flow="main", steps=[5])
+@pytest.mark.parametrize("pipeline", ["traces/gateway", "logs/gateway"])
+def test_every_moment_record_path_reaches_the_gateway_pipelines(merged, pipeline):
+    """UC-100 step 5: a moment sent as a span, a span event or a log event is in the stream the
+    gateway pipeline exports. The span and its span event travel in the OTLP trace data of
+    `traces/gateway`, the log event in `logs/gateway`; neither pipeline drops, rewrites or
+    narrows records beyond what its in-case twin does (health-check spans only), and the
+    moment-only filter of the agent (`filter/agent_moments`) is on `logs/agent` alone."""
+    processors = merged["service"]["pipelines"][pipeline]["processors"]
+    assert "filter/agent_moments" not in processors, (
+        "the moment filter would cut every other log record from the gateway copy"
+    )
+    unknown = [
+        p for p in processors if p not in GATEWAY_PROCESSOR_KINDS and not _is_batch(p)
+    ]
+    assert not unknown, (
+        f"{pipeline} runs a processor that may drop or reshape moments: {unknown}"
+    )
+    if pipeline == "logs/gateway":
+        assert not [p for p in processors if p.startswith("filter")], (
+            "every log record, so every moment log event, reaches the gateway"
+        )
+
+
+@pytest.mark.uc("UC-100", flow="main", steps=[5])
+def test_only_the_agent_pipeline_filters_moments_and_the_gateway_filter_drops_health_checks_only(
+    merged,
+):
+    """The moment filter exists once, on `logs/agent`; the one filter of `traces/gateway`
+    drops gRPC health-check spans by `rpc.service` and nothing named like a moment."""
+    pipelines = merged["service"]["pipelines"]
+    users = {
+        name
+        for name, spec in pipelines.items()
+        if "filter/agent_moments" in spec["processors"]
+    }
+    assert users == {"logs/agent"}
+    filters = [
+        p for p in pipelines["traces/gateway"]["processors"] if p.startswith("filter")
+    ]
+    assert filters == ["filter/grpc_health"]
+    conditions = merged["processors"]["filter/grpc_health"]["trace_conditions"]
+    assert conditions
+    for condition in conditions:
+        assert "rpc.service" in condition
+        for moment_word in (
+            "death_warning",
+            "player_death",
+            "game.",
+            "moment",
+            "span.name",
+        ):
+            assert moment_word not in condition, condition
+
+
+@pytest.mark.nfr("NFR-029")
+@pytest.mark.uc("UC-100", flow="A3", steps=[1])
+@pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])
+def test_an_unreachable_gateway_cannot_touch_the_in_case_pipelines_or_the_agent(
+    base, merged
+):
+    """UC-100 A3 step 1 (NFR-029): the gateway exporter and its three pipelines are separate from
+    everything that feeds Jaeger, VictoriaMetrics and the agent. A gateway pipeline names no
+    in-case exporter and no in-case pipeline names the gateway exporter, so an unreachable
+    gateway (its own retries and its own bounded, dropping queue) holds back no batch the
+    in-case exporters or the agent path send, and the agent still gets the traces, metrics and
+    moment log events through the same pipelines as without the gateway."""
+    pipelines = merged["service"]["pipelines"]
+    in_case_exporters = set(base["exporters"])
+    for name in GATEWAY_PIPELINES:
+        assert pipelines[name]["exporters"] == [EXPORTER]
+        assert not set(pipelines[name]["exporters"]) & in_case_exporters
+    for name, spec in base["service"]["pipelines"].items():
+        assert EXPORTER not in pipelines[name]["exporters"], name
+        assert pipelines[name] == spec, f"{name} changed by the gateway overlay"
+    agent_pipelines = {
+        name
+        for name, spec in base["service"]["pipelines"].items()
+        if "otlp/agent" in spec["exporters"]
+    }
+    assert {"traces", "metrics", "logs/agent"} <= agent_pipelines
+    queue = merged["exporters"][EXPORTER]["sending_queue"]
+    assert queue["enabled"] is True
+    assert not queue.get("block_on_overflow"), (
+        "a full gateway queue must drop, never wait"
+    )
+    assert merged["exporters"]["otlp/agent"] == base["exporters"]["otlp/agent"]
+
+
 @pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])
 def test_endpoint_and_token_come_from_the_environment_only(gateway):
     """C-016: the config names no host and no token, only the two environment variables."""

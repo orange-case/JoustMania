@@ -65,6 +65,7 @@ def _player_span(exporter):
     return next(s for s in exporter.get_finished_spans() if s.name == "player: p0")
 
 
+@pytest.mark.nfr("NFR-060")
 @pytest.mark.uc("UC-100", flow="main", steps=[4], br=["BR-001", "BR-004"])
 def test_span_event_shape_is_an_event_on_the_player_span(spans):
     tracer, exporter = spans
@@ -219,6 +220,7 @@ def test_moment_id_format():
 
 
 @pytest.mark.usefixtures("logs")
+@pytest.mark.nfr("NFR-060")
 def test_moment_logger_is_cached_per_provider(monkeypatch):
     """get_logger runs once per provider, not per moment (NFR-060: no per-warning setup)."""
     first = moments._moment_logger()
@@ -323,7 +325,7 @@ def broken_logs(monkeypatch):
         root.removeHandler(handler)
 
 
-@pytest.mark.uc("UC-100", br=["BR-004"])
+@pytest.mark.uc("UC-100", br=["BR-004"], cond=["Post-F-1"])
 @pytest.mark.parametrize("shape", [MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH])
 @pytest.mark.usefixtures("broken_logs")
 def test_a_broken_log_channel_never_raises_and_is_reported_once(spans, capsys, shape):
@@ -344,7 +346,7 @@ def test_a_broken_log_channel_never_raises_and_is_reported_once(spans, capsys, s
     assert capsys.readouterr().err.count("moment could not be recorded") == 1
 
 
-@pytest.mark.uc("UC-100", br=["BR-004"])
+@pytest.mark.uc("UC-100", br=["BR-004"], cond=["Post-F-1"])
 def test_a_broken_tracer_in_the_span_shape_never_raises(spans, monkeypatch, capsys):
     monkeypatch.setattr(moments, "_failure_reported", False)
     tracer, _ = spans

@@ -99,6 +99,7 @@ async def test_admission_waits_for_the_observability_provider():
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-010", flow="A5", steps=[3], br=["BR-004"])
+@pytest.mark.uc("UC-100", flow="A1", br=["BR-004"])
 async def test_observability_not_ready_at_the_deadline_is_recorded_like_any_domain():
     """UC-010 A5 step 3 (#2658): the observability wait shares the existing deadline and fallback record."""
     span = _span()

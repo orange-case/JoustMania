@@ -106,7 +106,7 @@ def _stamps(span, name) -> list[int]:
 
 
 class TestGroundTruthAtNormalEnd:
-    @pytest.mark.uc("UC-100", flow="main", steps=[6], br=["BR-006"])
+    @pytest.mark.uc("UC-100", flow="main", steps=[6], br=["BR-006"], cond=["Pre-2"])
     @pytest.mark.asyncio
     async def test_ffa_records_warnings_and_death_with_the_record_timestamps(self, tracer, monkeypatch):
         """Warned twice then dead, warned once and the winner, never warned: times = the moment records'."""
@@ -156,7 +156,7 @@ class TestGroundTruthAtNormalEnd:
         assert deaths == (clock.at(1.0), clock.at(2.0), clock.at(3.0))
         assert deaths == tuple(_stamps(game.players[serial].span, "player_death"))
 
-    @pytest.mark.uc("UC-100", flow="main", steps=[6], br=["BR-006"])
+    @pytest.mark.uc("UC-100", flow="main", steps=[6], br=["BR-006"], cond=["Pre-2"])
     @pytest.mark.asyncio
     async def test_real_ffa_run_records_ground_truth_on_the_root(self, tracer):
         """A real run() to a winner: the root gets one event per player, deaths at the player_death stamps."""
@@ -190,7 +190,7 @@ class TestGroundTruthAtNormalEnd:
 
 
 class TestGroundTruthNeverBreaksTheGame:
-    @pytest.mark.uc("UC-100", flow="main", steps=[6], br=["BR-006"])
+    @pytest.mark.uc("UC-100", flow="main", steps=[6], br=["BR-006"], cond=["Post-S-2", "Post-F-1"])
     @pytest.mark.asyncio
     async def test_a_failing_record_leaves_a_normal_end(self, tracer):
         """Recording the ground truth raises: run() still returns and the game keeps its natural outcome."""
