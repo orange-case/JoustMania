@@ -111,6 +111,17 @@ COUNTDOWN_BEEP_COUNT = 3  # Number of beeps (Red/Yellow/Green)
 SLOW_MUSIC_SPEED = 1.0  # Normal playback
 FAST_MUSIC_SPEED = 1.3  # 30% faster
 
+# Death-threshold factor clamps (UC-040 BR-045, #2696). The combined
+# sensitivity x difficulty factor divides the thresholds, so it must stay above 0:
+# it is clamped to [COMBINED_FACTOR_MIN, COMBINED_FACTOR_MAX], except that the
+# per-player sensitivity factor alone may lower the floor to its own value, down to
+# SENSITIVITY_FACTOR_FLOOR (death threshold x5). Global difficulty cannot reach
+# below COMBINED_FACTOR_MIN on its own. The flag service's registry range of
+# interventions/player_sensitivity_factor is [SENSITIVITY_FACTOR_FLOOR, 2.0].
+COMBINED_FACTOR_MIN = 0.5
+COMBINED_FACTOR_MAX = 2.0
+SENSITIVITY_FACTOR_FLOOR = 0.2
+
 # the tempo INTENSITY ramp (UC-031 step 3, BR-005). Each game owns one
 # intensity i in [0, 1] (0 = slow table / 1.0x, 1 = fast table / 1.3x) that moves
 # toward its target at a bounded rate: a full swing takes ``tempo.ramp_up_seconds``
@@ -2191,11 +2202,16 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
 
         # Apply per-player sensitivity factor combined with the live global
         # difficulty factor. Both are multiplied, then the COMBINED
-        # factor is clamped to [0.5, 2.0] for safety before dividing thresholds.
+        # factor is clamped for safety before dividing thresholds: to
+        # [COMBINED_FACTOR_MIN, COMBINED_FACTOR_MAX] = [0.5, 2.0], with the floor
+        # lowered only by a per-player factor below 0.5, to that factor and never
+        # below SENSITIVITY_FACTOR_FLOOR (0.2; #2696, UC-040 BR-045), so the
+        # threshold stays finite and global difficulty alone keeps its 0.5 floor.
         # Higher combined factor = lower threshold = easier to die. At the
         # neutral 1.0/1.0 this preserves the prior behavior exactly.
         combined_factor = player.sensitivity_factor * self.global_difficulty_factor
-        clamped_factor = max(0.5, min(2.0, combined_factor))
+        floor = max(SENSITIVITY_FACTOR_FLOOR, min(COMBINED_FACTOR_MIN, player.sensitivity_factor))
+        clamped_factor = max(floor, min(COMBINED_FACTOR_MAX, combined_factor))
         warn = base_warn / clamped_factor
         death = base_death / clamped_factor
 

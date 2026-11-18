@@ -154,7 +154,7 @@ A controller's participation in one game (`proto/game_coordinator.proto` `Player
 | team | Team index; 0 in modes without teams, -1 only in Tournament (the proto comment "-1 if no teams" on `PlayerInfo.team` is stale) | Integer | 2 | Not Null, Min: -1, Max: 7 |
 | alive | Still in the game (zombies stay alive when converted) | Boolean | 1 | Not Null |
 | score | Mode score; NonStop computes max(0, base − deaths × penalty) only at game end, so it is 0 during play; `ListGames` always reports 0 | Integer | 5 | Optional, Min: 0 |
-| sensitivity_factor | Agent per-player factor (divides thresholds) | Decimal | 4,2 | Not Null, Min: 0.5, Max: 2.0 |
+| sensitivity_factor | Agent per-player factor (divides thresholds) | Decimal | 4,2 | Not Null, Min: 0.2 (0.5 before #2696), Max: 2.0 |
 | handicap_factor | Agent handicap (multiplies thresholds) | Decimal | 4,2 | Not Null, Min: 0.5, Max: 2.0 |
 | grace_until | No-death deadline from respawn, conversion or agent shield | DateTime | - | Optional |
 | invincible_until | No-death deadline from match / round start (Tournament, Fight Club) | DateTime | - | Optional |
@@ -168,7 +168,7 @@ A controller's participation in one game (`proto/game_coordinator.proto` `Player
 | winner | Whether the player's side won the game (`winner` on the player span; false after a force-end that declared no winner, UC-020 BR-003). Champion of a Tournament / Fight Club game is the winner | Boolean | 1 | Optional |
 | smoothed_accel | EMA of acceleration magnitude in g | Decimal | 6,3 | Not Null, Min: 0 |
 
-**Constraints:** the player cannot die while `now < max(grace_until, invincible_until, hold_until)` (`hold_until` only in a hold game, #2096). In the base path (`games/base.py` `_compute_effective_thresholds`), effective thresholds are divided by `clamp(sensitivity_factor × global_difficulty_factor, 0.5, 2.0)` and multiplied by `clamp(min(max(handicap_factor, active toughness boost, rubberband_boost), soft_penalty_factor), 0.5, 2.0)`. Exception: Werewolf werewolves and Zombies zombies use a fixed role threshold table per sensitivity (`game.werewolf.thresholds`, `game.zombie.thresholds`; `werewolf.py` / `zombie.py` `_compute_effective_thresholds`), so tempo and the per-player and global factors do not apply to them. Fight Club runs its own death detection (D-G9, #1347).
+**Constraints:** the player cannot die while `now < max(grace_until, invincible_until, hold_until)` (`hold_until` only in a hold game, #2096). In the base path (`games/base.py` `_compute_effective_thresholds`), effective thresholds are divided by `clamp(sensitivity_factor × global_difficulty_factor, floor, 2.0)` with `floor` = 0.5, lowered only by a `sensitivity_factor` below 0.5 to that factor and never below 0.2 (#2696, UC-040 BR-045) and multiplied by `clamp(min(max(handicap_factor, active toughness boost, rubberband_boost), soft_penalty_factor), 0.5, 2.0)`. Exception: Werewolf werewolves and Zombies zombies use a fixed role threshold table per sensitivity (`game.werewolf.thresholds`, `game.zombie.thresholds`; `werewolf.py` / `zombie.py` `_compute_effective_thresholds`), so tempo and the per-player and global factors do not apply to them. Fight Club runs its own death detection (D-G9, #1347).
 
 ### DECIDE_PLAYER_STATE
 
@@ -191,7 +191,7 @@ A player as the decision backends see it (`decide.PlayerState`, `services/agent/
 | shielded | A grant_shield / toughness_boost was dispatched to the player in the last 10 s; a grant_shield to a shield_charged player does not count; in a hold game `shield_active` or a toughness_boost (a grant_shield there is energy, #2096) | Boolean | 1 | Not Null |
 | shield_charged | Alive player with a live entry in the agent's shield-charge ledger when the state is built (trigger mode, UC-040 A31): holds an agent charge or has just used it; never set in a hold game | Boolean | 1 | Not Null |
 | shield_limited | Alive player the agent would refuse another grant_shield for a reason other than already_charged when the state is built (#2066, UC-040 A33, A37): the per-game cap, the cooldown, or in a hold game a full pool or a used-up budget; never set together with shield_charged | Boolean | 1 | Not Null |
-| sensitivity_factor | The per-player sensitivity factor the agent last wrote to this game (`adjust_player_sensitivity`, applied-value ledger, UC-040 A35; #2066), only when not the neutral 1.0 | Decimal | 4,2 | Optional, Min: 0.7, Max: 1.5 |
+| sensitivity_factor | The per-player sensitivity factor the agent last wrote to this game (`adjust_player_sensitivity`, applied-value ledger, UC-040 A35; #2066), only when not the neutral 1.0 | Decimal | 4,2 | Optional, Min: 0.2, Max: 2.0 (the hard limits; 0.7 to 1.5 at the default `decision.magnitude_bounds`, #2696) |
 | handicap_factor | The per-player handicap factor the agent last wrote to this game (`set_player_handicap`, applied-value ledger; #2066), only when not the neutral 1.0 | Decimal | 4,2 | Optional, Min: 0.75, Max: 1.75 |
 | shield_energy_s | Hold game only (#2096, UC-040 A36): the alive player's shield energy in seconds from `game_player_shield_energy_seconds`, plus the agent's grants in flight, at most the cap | Decimal | 5,2 | Optional, Min: 0 |
 | shield_budget_remaining_s | Hold game only: shield seconds the player has left this game (`game_player_shield_budget_remaining_seconds`) | Decimal | 5,2 | Optional, Min: 0 |

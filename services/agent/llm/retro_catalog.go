@@ -15,17 +15,18 @@ import (
 	"github.com/joustmania/agent/flags"
 )
 
-// retroBounds is the retro's ONE read of an intervention's value bounds. Per-game
-// bounds (an operator flag replacing the hard-coded table) plug in here.
-func retroBounds(intervention string) (decide.Bounds, bool) {
-	return decide.MagnitudeBounds(intervention)
+// retroBounds is the retro's ONE read of an intervention's value bounds: the
+// game's ranges (decision.magnitude_bounds, the table its decide requests used,
+// #2696, UC-040 BR-045); nil bounds are the code default table.
+func retroBounds(bounds *decide.MagnitudeTable, intervention string) (decide.Bounds, bool) {
+	return bounds.Lookup(intervention)
 }
 
 // writeInterventionCatalog writes one line per allowed intervention (allow-list
 // order, duplicates and empty names dropped), then the game-side factor clamp when
 // a factor lever is allowed. An empty allow-list renders "(none)". A name outside
 // the decide catalog renders as the bare name.
-func writeInterventionCatalog(b *strings.Builder, allowed []string, policy flags.Policy) {
+func writeInterventionCatalog(b *strings.Builder, allowed []string, policy flags.Policy, bounds *decide.MagnitudeTable) {
 	seen := make(map[string]bool, len(allowed))
 	factor := false
 	n := 0
@@ -38,7 +39,7 @@ func writeInterventionCatalog(b *strings.Builder, allowed []string, policy flags
 			b.WriteString("\n")
 		}
 		n++
-		b.WriteString("  - " + catalogLine(name, policy))
+		b.WriteString("  - " + catalogLine(name, policy, bounds))
 		factor = factor || decide.FactorLever(name)
 	}
 	if n == 0 {
@@ -51,15 +52,22 @@ func writeInterventionCatalog(b *strings.Builder, allowed []string, policy flags
 }
 
 // catalogLine is one intervention's catalog entry, without the leading "  - ".
-func catalogLine(name string, policy flags.Policy) string {
+func catalogLine(name string, policy flags.Policy, bounds *decide.MagnitudeTable) string {
 	iv, ok := decide.ByName(name)
 	if !ok {
 		return name
 	}
 	var b strings.Builder
 	b.WriteString(name + " (" + leverScope(iv) + "): " + iv.Description(decide.PromptProfileNeutral))
-	if bd, ok := retroBounds(name); ok {
-		b.WriteString(" Value " + retroNum(bd.Min) + " to " + retroNum(bd.Max) + " " + bd.Unit)
+	if bd, ok := retroBounds(bounds, name); ok {
+		lo, hi := retroNum(bd.Min), retroNum(bd.Max)
+		// The range-end effects are the decide question's (#2696): one source of
+		// which end helps.
+		if e, ok := decide.MagnitudeEndEffects(name); ok {
+			lo += " (" + e.Low + ")"
+			hi += " (" + e.High + ")"
+		}
+		b.WriteString(" Value " + lo + " to " + hi + " " + bd.Unit)
 		if bd.HasNeutral {
 			b.WriteString(", neutral " + retroNum(bd.Neutral))
 		}

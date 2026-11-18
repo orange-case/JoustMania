@@ -119,9 +119,9 @@ func TestRetro_InterventionCatalog(t *testing.T) {
 
 	t.Run("UC-042/A13 allowed levers with ranges and direction", func(t *testing.T) {
 		for _, want := range []string{
-			"  - grant_shield (one player): Make one player immune to elimination for a few seconds. Value 3 to 10 seconds, neutral 0. Seconds of immunity, more helps; in a hold game",
+			"  - grant_shield (one player): Make one player immune to elimination for a few seconds. Value 3 (shortest protection) to 10 (longest protection) seconds, neutral 0. Seconds of immunity; in a hold game",
 			"Policy: at most 3 per player per game, 15 s cooldown after a player's shield ends.",
-			"  - adjust_player_sensitivity (one player): Change one player's sensitivity, making them harder or easier to eliminate. Value 0.7 to 1.5 factor, neutral 1. The player's death threshold is divided by it: below 1 helps the player, above 1 hinders.",
+			"  - adjust_player_sensitivity (one player): Change one player's sensitivity, making them harder or easier to eliminate. Value 0.7 (target harder to eliminate) to 1.5 (target easier to eliminate) factor, neutral 1. The player's death threshold is divided by it.",
 			"  - play_audio_cue (everyone): Play an audio cue or announcement. No effect on who gets eliminated.\n",
 			"  - not_a_lever\n",
 			"  " + decide.FactorClampNote,
@@ -145,13 +145,14 @@ func TestRetro_InterventionCatalog(t *testing.T) {
 			}
 		}
 	})
-	t.Run("UC-042/A13 bounds come from decide.MagnitudeBounds", func(t *testing.T) {
+	t.Run("UC-042/A13 bounds come from decide.MagnitudeBounds without the game's table", func(t *testing.T) {
 		for _, name := range decide.MagnitudeInterventions() {
 			b, _ := decide.MagnitudeBounds(name)
+			e, _ := decide.MagnitudeEndEffects(name)
 			s := retroSnapshot()
 			s.InterventionsAllowed = []string{name}
 			got := BuildRetro(RetroInput{Snapshot: s, Now: fixedNow}).System
-			if want := "Value " + retroNum(b.Min) + " to " + retroNum(b.Max) + " " + b.Unit; !strings.Contains(got, want) {
+			if want := "Value " + retroNum(b.Min) + " (" + e.Low + ") to " + retroNum(b.Max) + " (" + e.High + ") " + b.Unit; !strings.Contains(got, want) {
 				t.Errorf("%s: catalog lacks %q", name, want)
 			}
 		}

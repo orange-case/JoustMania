@@ -192,7 +192,7 @@ The agent's live intervention surface (all in the `interventions` set, game-scop
 | Parameter | Shape | Runtime target | Composition |
 |---|---|---|---|
 | `global_sensitivity_override` | state (int 0-4, −1=none) | mutates `game.sensitivity` | §4.1 — collides with human baseline |
-| `player_sensitivity_factor` | per-serial state (0.5–2.0) | `player.sensitivity_factor` | Multiplies into thresholds; agent-only, no human analogue |
+| `player_sensitivity_factor` | per-serial state (0.2–2.0, #2696) | `player.sensitivity_factor` | Multiplies into thresholds; agent-only, no human analogue |
 | `global_difficulty_factor` | state (0.5–2.0) | `game.global_difficulty_factor` | Multiplies into thresholds; agent-only |
 | `shield_seconds` | per-serial state (>0) | extends `player.grace_until` | §4.2 — adjacent to human `invincibility_seconds` |
 | `music_tempo_override` | state (float) | `game.tempo_override` | Agent-only; no human lever |
@@ -232,7 +232,7 @@ the effective level returns to the **current** baseline, not the start-of-game v
    re-propose against the new baseline on its next decision.
 4. The `player_sensitivity_factor` and `global_difficulty_factor` levers are pure
    **multiplicative deltas** in `_compute_effective_thresholds` (the combined factor
-   is clamped to [0.5, 2.0]) and do **not** touch the human-owned baseline. They are
+   is clamped to [0.5, 2.0], a floor only a per-player sensitivity factor below 0.5 lowers, to at most 0.2, #2696) and do **not** touch the human-owned baseline. They are
    the **preferred** agent levers because they compose without contention.
 
 Note: `set_baseline_sensitivity` is the game-object API for a human change. No

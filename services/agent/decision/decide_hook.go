@@ -259,12 +259,20 @@ func (rec *decideRecord) notePermission(state *LayerState, before int) {
 // applied levels (#2066) at this moment. withContext attaches the raw snapshot (for
 // the in-process rules adapter only); remote requests never carry it.
 func (l *Loop) buildDecideRequest(c gamecontext.GameContext, allowed []string, withContext bool) decide.Request {
+	return l.buildDecideRequestCtx(context.Background(), c, allowed, withContext)
+}
+
+// buildDecideRequestCtx is buildDecideRequest with the game's magnitude ranges read
+// in ctx (decision.magnitude_bounds, #2696; the remote path passes the agent.decide
+// span's context, so the flag's evaluation event lands on it).
+func (l *Loop) buildDecideRequestCtx(ctx context.Context, c gamecontext.GameContext, allowed []string, withContext bool) decide.Request {
 	charged, noShield := l.ShieldSerials(c)
 	return decideRequestWith(c, allowed, withContext, decide.Annotations{
 		Charged:        charged,
 		NoShield:       noShield,
 		ShieldInFlight: l.ShieldInFlight(),
 		Levels:         l.AppliedValues(),
+		Bounds:         l.magnitudeBoundsFor(ctx, c.SessionID),
 	})
 }
 
@@ -272,12 +280,19 @@ func (l *Loop) buildDecideRequest(c gamecontext.GameContext, allowed []string, w
 // the state gets the ranking's own shield-ledger snapshot (charged, no-shield) plus
 // the grants in flight and the applied levels at build time (#2066).
 func (l *Loop) rulesRequestBuilder(c gamecontext.GameContext, allowed []string) func(charged, noShield map[string]bool) decide.Request {
+	return l.rulesRequestBuilderCtx(context.Background(), c, allowed)
+}
+
+// rulesRequestBuilderCtx is rulesRequestBuilder with the game's magnitude ranges
+// read in ctx when the request is built (#2696).
+func (l *Loop) rulesRequestBuilderCtx(ctx context.Context, c gamecontext.GameContext, allowed []string) func(charged, noShield map[string]bool) decide.Request {
 	return func(charged, noShield map[string]bool) decide.Request {
 		return decideRequestWith(c, allowed, true, decide.Annotations{
 			Charged:        charged,
 			NoShield:       noShield,
 			ShieldInFlight: l.ShieldInFlight(),
 			Levels:         l.AppliedValues(),
+			Bounds:         l.magnitudeBoundsFor(ctx, c.SessionID),
 		})
 	}
 }
@@ -289,7 +304,7 @@ func (l *Loop) rulesRequestBuilder(c gamecontext.GameContext, allowed []string) 
 // used, so the state and the charge policy agree.
 func decideRequestWith(c gamecontext.GameContext, allowed []string, withContext bool, ann decide.Annotations) decide.Request {
 	st := decide.BuildStateWith(c, ann)
-	req := decide.Request{State: st, Questions: decide.FFAQuestions(st, allowed)}
+	req := decide.Request{State: st, Questions: decide.FFAQuestionsWith(st, allowed, ann.Bounds), Bounds: ann.Bounds}
 	if withContext {
 		cc := c
 		req.Context = &cc
@@ -317,7 +332,7 @@ func (l *Loop) rulesDecide(ctx context.Context, snapshot flags.Snapshot, rules R
 	}
 	now := l.nowOrDefault()
 	start := now()
-	out, req, resp, ranked := eng.EvaluateDecide(ctx, c, l.rulesRequestBuilder(c, l.withoutClosedGroupLever(snapshot.Policy, c, snapshot.InterventionsAllowed)))
+	out, req, resp, ranked := eng.EvaluateDecide(ctx, c, l.rulesRequestBuilderCtx(ctx, c, l.withoutClosedGroupLever(snapshot.Policy, c, snapshot.InterventionsAllowed)))
 	if !ranked {
 		return out, nil
 	}
@@ -668,7 +683,7 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 		requested: requested,
 		used:      backend.Name(),
 		model:     cfg.Model,
-		req:       l.buildDecideRequest(c, l.offeredInterventions(c, fired), false),
+		req:       l.buildDecideRequestCtx(spanCtx, c, l.offeredInterventions(c, fired), false),
 		start:     start,
 		stateAt:   c.UpdatedAt,
 	}
@@ -811,7 +826,7 @@ func (l *Loop) decideRemoteFallback(ctx context.Context, snapshot flags.Snapshot
 	}
 	var decisions []Decision
 	if eng, isDecide := rules.(decideEngine); isDecide {
-		out, req, resp, ranked := eng.EvaluateDecide(ctx, current, l.rulesRequestBuilder(current, l.withoutClosedGroupLever(snapshot.Policy, current, snapshot.InterventionsAllowed)))
+		out, req, resp, ranked := eng.EvaluateDecide(ctx, current, l.rulesRequestBuilderCtx(ctx, current, l.withoutClosedGroupLever(snapshot.Policy, current, snapshot.InterventionsAllowed)))
 		decisions = out
 		if ranked {
 			rec.req, rec.resp, rec.hasResp = req, resp, true
@@ -981,7 +996,7 @@ func mapAnswers(req decide.Request, resp decide.Response) (Decision, string, str
 		d.ReasonSynthesized = true
 	}
 	if m, ok := resp.Find(decide.QuestionFFAMagnitude); ok {
-		if v, ok := decide.ResolveMagnitude(iv.Choice, m.Score); ok {
+		if v, ok := req.Bounds.Resolve(iv.Choice, m.Score); ok {
 			d.Value = strconv.FormatFloat(v, 'g', -1, 64)
 		}
 	}
@@ -1075,6 +1090,7 @@ func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecon
 		attrs = append(attrs, attribute.String(AttrDecidePromptProfile, rec.req.PromptProfile))
 	}
 	attrs = append(attrs, operatorBriefAttributes(rec.req.OperatorBrief)...)
+	attrs = append(attrs, magnitudeBoundsAttributes(rec.req.Bounds)...)
 	if rec.req.Goal != nil {
 		attrs = append(attrs, attribute.String(keys.AttrDecideGoalProfile, rec.req.Goal.Profile),
 			attribute.String(keys.AttrDecideGoalSource, rec.req.Goal.Source))

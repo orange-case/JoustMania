@@ -87,21 +87,21 @@ func TestLocalTarget(t *testing.T) {
 }
 
 func TestMagnitudeLevels(t *testing.T) {
-	if got := magnitudeLevels("grant_shield"); !reflect.DeepEqual(got, []float64{3, 4.75, 6.5, 8.25, 10}) {
+	if got := magnitudeLevels(nil, "grant_shield"); !reflect.DeepEqual(got, []float64{3, 4.75, 6.5, 8.25, 10}) {
 		t.Errorf("grant_shield = %v", got)
 	}
-	if got := magnitudeLevels("adjust_global_sensitivity"); !reflect.DeepEqual(got, []float64{0, 1, 2, 3, 4}) {
+	if got := magnitudeLevels(nil, "adjust_global_sensitivity"); !reflect.DeepEqual(got, []float64{0, 1, 2, 3, 4}) {
 		t.Errorf("global sensitivity = %v", got)
 	}
-	if magnitudeLevels("end_game") != nil {
+	if magnitudeLevels(nil, "end_game") != nil {
 		t.Error("no bounds, no levels")
 	}
 	// I3: the neutral "no change" value is never an acting level.
-	if got := magnitudeLevels("set_player_handicap"); !reflect.DeepEqual(got, []float64{0.75, 1.25, 1.5, 1.75}) {
+	if got := magnitudeLevels(nil, "set_player_handicap"); !reflect.DeepEqual(got, []float64{0.75, 1.25, 1.5, 1.75}) {
 		t.Errorf("handicap = %v (neutral 1.0 must be excluded)", got)
 	}
 	mag := decide.Question{ID: decide.QuestionFFAMagnitude, Kind: decide.KindScore, Range: [2]float64{0, 1}}
-	instr, ladder := conditionedMagnitude(mag, "adjust_global_difficulty", "", magnitudeLevels("adjust_global_difficulty"))
+	instr, ladder := conditionedMagnitude(nil, mag, "adjust_global_difficulty", "", magnitudeLevels(nil, "adjust_global_difficulty"))
 	if !strings.HasPrefix(instr, "The agent will apply adjust_global_difficulty (") || len(ladder) != 5 {
 		t.Fatalf("%q %v", instr, ladder)
 	}
@@ -122,11 +122,11 @@ func TestStrengthLevels(t *testing.T) {
 		{"set_player_handicap", directionHelp, []float64{1.25, 1.5, 1.75}},
 		{"set_player_handicap", directionReinIn, []float64{0.92, 0.83, 0.75}},
 	} {
-		if got := strengthLevels(c.iv, c.dir); !reflect.DeepEqual(got, c.want) {
+		if got := strengthLevels(nil, c.iv, c.dir); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s %s = %v, want %v", c.iv, c.dir, got, c.want)
 		}
 	}
-	if strengthLevels("grant_shield", directionHelp) != nil {
+	if strengthLevels(nil, "grant_shield", directionHelp) != nil {
 		t.Error("one-way lever has no half-ladder")
 	}
 	q := decide.Question{ID: strengthQuestionID(directionHelp), Kind: decide.KindScore, Range: [2]float64{0, 1}}

@@ -38,7 +38,7 @@ func TestScoreToRange(t *testing.T) {
 	}
 	for _, c := range cases {
 		q := decide.Question{ID: "s", Kind: decide.KindScore, Range: c.rng}
-		got, err := scoreToRange(c.s, nil, q, "")
+		got, err := scoreToRange(c.s, nil, q, "", nil)
 		if (err == nil) != c.ok || (c.ok && math.Abs(got-c.want) > 1e-12) {
 			t.Errorf("scoreToRange(%v, %v) = %v, %v; want %v ok=%v", c.s, c.rng, got, err, c.want, c.ok)
 		}
@@ -63,7 +63,7 @@ func TestScoreToRange_Conditioned(t *testing.T) {
 		{"adjust_music_tempo", 1.2, 1.075},
 		{"adjust_player_sensitivity", 0.2, 0.7},
 	} {
-		norm, err := scoreToRange(c.s, nil, mag, c.iv)
+		norm, err := scoreToRange(c.s, nil, mag, c.iv, nil)
 		if err != nil {
 			t.Fatalf("%s %v: %v", c.iv, c.s, err)
 		}
@@ -72,7 +72,7 @@ func TestScoreToRange_Conditioned(t *testing.T) {
 			t.Errorf("%s score %v -> norm %v -> %v, want %v", c.iv, c.s, norm, v, c.value)
 		}
 	}
-	if _, err := scoreToRange(4.5, nil, mag, "grant_shield"); err == nil {
+	if _, err := scoreToRange(4.5, nil, mag, "grant_shield", nil); err == nil {
 		t.Error("score above the ladder must fail")
 	}
 }
@@ -279,7 +279,7 @@ func TestMostLikelyLevel(t *testing.T) {
 		}
 		return m
 	}
-	diff := magnitudeLevels("adjust_global_difficulty") // 0.5, 0.875, 1.25, 1.625, 2 (neutral 1)
+	diff := magnitudeLevels(nil, "adjust_global_difficulty") // 0.5, 0.875, 1.25, 1.625, 2 (neutral 1)
 	for _, c := range []struct {
 		name    string
 		probs   map[string]float64
@@ -290,8 +290,8 @@ func TestMostLikelyLevel(t *testing.T) {
 		{"argmax", levels(0.29, 0.28, 0.30, 0.10, 0.03), lowerIsGentler, 2, false},
 		{"argmax at the top", levels(0.1, 0.1, 0.1, 0.1, 0.6), lowerIsGentler, 4, false},
 		{"tie, no neutral: lower", levels(0.05, 0.10, 0.35, 0.35, 0.15), lowerIsGentler, 2, false},
-		{"tie, neutral: nearer neutral wins over lower", levels(0.4, 0.0, 0.4, 0.1, 0.1), nearerNeutral("adjust_global_difficulty", diff), 2, false},
-		{"tie, neutral: nearer neutral", levels(0.1, 0.35, 0.35, 0.1, 0.1), nearerNeutral("adjust_global_difficulty", diff), 1, false},
+		{"tie, neutral: nearer neutral wins over lower", levels(0.4, 0.0, 0.4, 0.1, 0.1), nearerNeutral(nil, "adjust_global_difficulty", diff), 2, false},
+		{"tie, neutral: nearer neutral", levels(0.1, 0.35, 0.35, 0.1, 0.1), nearerNeutral(nil, "adjust_global_difficulty", diff), 1, false},
 		{"three-way tie", levels(0.3, 0.3, 0.3, 0.1), lowerIsGentler, 0, false},
 		{"missing level", levels(0.5, 0.5), lowerIsGentler, 0, true},
 		{"extra level", levels(0.2, 0.2, 0.2, 0.2, 0.1, 0.1), lowerIsGentler, 0, true},
@@ -310,19 +310,19 @@ func TestMostLikelyLevel(t *testing.T) {
 		}
 	}
 	// A two-way half-ladder (weakest first): a tie goes to the weaker change.
-	help := strengthLevels("set_player_handicap", directionHelp) // 1.25, 1.5, 1.75
-	if got, _ := mostLikelyLevel(levels(0.1, 0.45, 0.45), 3, nearerNeutral("set_player_handicap", help)); got != 1 {
+	help := strengthLevels(nil, "set_player_handicap", directionHelp) // 1.25, 1.5, 1.75
+	if got, _ := mostLikelyLevel(levels(0.1, 0.45, 0.45), 3, nearerNeutral(nil, "set_player_handicap", help)); got != 1 {
 		t.Errorf("half-ladder tie = level %d, want 1 (1.5, the weaker)", got)
 	}
 	// Probabilities decide the level; without them the score is rounded.
 	q := decide.Question{ID: "s", Kind: decide.KindScore, Range: [2]float64{0, 1}}
-	if v, _ := scoreToRange(1.3, levels(0.29, 0.28, 0.30, 0.10, 0.03), q, ""); v != 0.5 {
+	if v, _ := scoreToRange(1.3, levels(0.29, 0.28, 0.30, 0.10, 0.03), q, "", nil); v != 0.5 {
 		t.Errorf("with probabilities = %v, want 0.5 (level 2)", v)
 	}
-	if v, _ := scoreToRange(1.3, nil, q, ""); v != 0.25 {
+	if v, _ := scoreToRange(1.3, nil, q, "", nil); v != 0.25 {
 		t.Errorf("without probabilities = %v, want 0.25 (round(1.3) = level 1)", v)
 	}
-	if _, err := scoreToRange(4.5, levels(0.2, 0.2, 0.2, 0.2, 0.2), q, ""); err == nil {
+	if _, err := scoreToRange(4.5, levels(0.2, 0.2, 0.2, 0.2, 0.2), q, "", nil); err == nil {
 		t.Error("a score outside the ladder is invalid even with probabilities")
 	}
 }

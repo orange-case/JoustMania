@@ -20,6 +20,6 @@ players:
   kind: score
   range: [0, 1]
   text: What value should the chosen intervention use? Answer on a 0..1 scale where 0 = the lowest listed value and 1 = the highest; it maps linearly onto the range below (in the intervention's own units). Ignored for interventions not listed.
-      adjust_music_tempo: lowest 1, highest 1.3 tempo (default 1.15)
-      grant_shield: lowest 3, highest 10 seconds, neutral 0 (default 5)
+      adjust_music_tempo: lowest 1 (slower music, everyone easier to eliminate), highest 1.3 (faster music, everyone harder to eliminate), in tempo (default 1.15)
+      grant_shield: lowest 3 (shortest protection), highest 10 (longest protection), in seconds, neutral 0 (default 5)
 </questions>

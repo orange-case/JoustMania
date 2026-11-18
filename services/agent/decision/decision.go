@@ -375,6 +375,12 @@ type Loop struct {
 	// operatorBrief is the decision.operator_brief source of claude and openai
 	// requests (#2687, UC-040 BR-044); nil never sets Request.OperatorBrief.
 	operatorBrief OperatorBriefSource
+	// magnitudeBounds is the decision.magnitude_bounds source of every decide
+	// request (#2696, UC-040 BR-045); nil leaves Request.Bounds nil (the code
+	// default ranges).
+	magnitudeBounds MagnitudeBoundsSource
+	// boundsLog notes each game's latest magnitude table for the retro (#2696).
+	boundsLog *BoundsLog
 	// goalSource is the goal-profile source of the prompt's goal lines (#2479);
 	// nil renders none.
 	goalSource GoalSource

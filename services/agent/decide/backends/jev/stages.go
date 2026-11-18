@@ -104,7 +104,7 @@ func splitStages(req decide.Request) stagePlan {
 	if !hasIntervention {
 		return stagePlan{first: req, stage: StageSingle}
 	}
-	p := stagePlan{first: decide.Request{State: req.State, PromptProfile: req.PromptProfile, Goal: req.Goal}, stage: StageIntervention}
+	p := stagePlan{first: decide.Request{State: req.State, PromptProfile: req.PromptProfile, Goal: req.Goal, Bounds: req.Bounds}, stage: StageIntervention}
 	for _, q := range req.Questions {
 		switch {
 		case isDetail(q):
@@ -222,7 +222,7 @@ type detailsPlan struct {
 // carried into the details request.
 func planDetails(req decide.Request, iv decide.Answer, details []decide.Question) detailsPlan {
 	st, profile := req.State, req.PromptProfile
-	p := detailsPlan{intervention: iv.Choice, ask: decide.Request{State: st, PromptProfile: profile, Goal: req.Goal}}
+	p := detailsPlan{intervention: iv.Choice, ask: decide.Request{State: st, PromptProfile: profile, Goal: req.Goal, Bounds: req.Bounds}}
 	acting := iv.Choice != decide.OptionNoop
 	playerScoped := acting && decide.PlayerTargeted(iv.Choice)
 	groupScoped := acting && decide.GroupTargeted(iv.Choice)
@@ -265,7 +265,7 @@ func planDetails(req decide.Request, iv decide.Answer, details []decide.Question
 			}
 			p.local = append(p.local, localTarget(q, iv.Choice, alive))
 		case decide.QuestionFFAMagnitude:
-			_, hasBounds := decide.MagnitudeBounds(iv.Choice)
+			_, hasBounds := req.Bounds.Lookup(iv.Choice)
 			switch {
 			case !acting || !hasBounds || noCandidate:
 				p.local = append(p.local, decide.Answer{QuestionID: q.ID, Score: q.Range[0], Confidence: iv.Confidence})

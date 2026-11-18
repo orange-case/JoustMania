@@ -33,7 +33,7 @@ Defined in `decide/decide.go`.
 | `Answer` | `QuestionID`, `Choice`, `Probabilities map[string]float64`, `Score`, `Noul *float64`, `Confidence` | `services/agent/decide/decide.go:Answer` |
 | `PlayerState` | `Serial`, `Alive`, `Intensity*`, `Variance*`, `Skill*`, `BatteryPct*`, `EliminationOrder` | pointer = never observed (`services/agent/decide/decide.go:PlayerState`) |
 | `State` | `GameID`, `GameKind`, `Digest`, `Narrative`, `Players` (sorted by serial), `ElapsedSeconds` | `services/agent/decide/decide.go:State` |
-| `Request` | `State`, `Questions`, `Context` (`json:"-"`), `PromptProfile` (`json:"prompt_profile,omitempty"`, #2467), `OperatorBrief` (`json:"operator_brief,omitempty"`, #2687, outside `State`, so not in the digest; set on claude and openai requests only, §3) | Only in-process backends (rules) may read `Context`; remote backends must not; never logged with `%v` (`services/agent/decide/decide.go:Request`). `PromptProfile` is set by the agent from `decision.prompt_profile` on the remote path only (§3); it is outside `State`, so it is not part of the State digest. |
+| `Request` | `State`, `Questions`, `Context` (`json:"-"`), `PromptProfile` (`json:"prompt_profile,omitempty"`, #2467), `OperatorBrief` (`json:"operator_brief,omitempty"`, #2687, outside `State`, so not in the digest; set on claude and openai requests only, §3), `Bounds` (`json:"-"`, #2696: the game's magnitude ranges, §2.1; nil = the code defaults) | Only in-process backends (rules) may read `Context`; remote backends must not; never logged with `%v` (`services/agent/decide/decide.go:Request`). `PromptProfile` is set by the agent from `decision.prompt_profile` on the remote path only (§3); it is outside `State`, so it is not part of the State digest. |
 | `Response` | `Answers`, `Backend`, `Rationale` | Rationale is untrusted text, truncated (`services/agent/decide/decide.go:Response`). |
 | `Backend` | `Name() string`, `Decide(ctx, Request) (Response, error)` | Must honour `ctx` cancellation; the caller validates (`services/agent/decide/decide.go:Backend`). Optional `Available() bool`; false means `backend_unavailable` (`services/agent/decision/decide_registry.go:availability`, `DecideRegistry.Resolve`). |
 
@@ -123,7 +123,46 @@ bounds ignore the magnitude and the writer uses its default.
 | `grant_shield` (s) | 3 | 10 | 5 | 0 | |
 | `toughness_boost` (s) | 3 | 10 | 5 | 0 | |
 
-Source: `services/agent/decide/ffa.go:magnitudeBounds`.
+Source: `services/agent/decide/ffa.go:magnitudeBounds` (the **code default** table).
+
+**Operator ranges (#2696, FR-098, UC-040 BR-045).** The Min and Max of a request come from the `agent` flag
+`decision.magnitude_bounds` ([flags.md §3](flags.md#3-agent)), read per decide request in the game's flag context
+(`services/agent/flags/magnitude_bounds.go:MagnitudeBounds`): an object of intervention -> `{"min": x, "max": y}`.
+Its baseline default is the table above, and an intervention it does not name keeps its row. The agent parses it
+once per request (`services/agent/decide/magnitude.go:ParseMagnitudeOverride`) into one `MagnitudeTable` and sets it
+as `Request.Bounds`; every consumer reads that table: the `ffa.magnitude` text (`FFAQuestionsWith`, so llmio renders
+the request's ranges), the answer's resolution (`mapAnswers`, `MagnitudeTable.Resolve`), the jev ladders and
+levels (`criteria.go`, `stages.go`, `wire.go`), the rules answer and the clamp of the rules decision's value into the
+range (`services/agent/decision/decide_rules.go`, `services/agent/decision/magnitude_bounds.go:clampRulesValue`), and the state's applied factors
+(`state.go`). `decide.MagnitudeBounds(iv)` stays the code default lookup. Each entry is checked against the hard
+limits, which stay in code (`decide.HardMagnitudeLimits`; equal to the `interventions` registry ranges, flags.md
+§13.1, and inside the game coordinator's clamps):
+
+| Intervention | Hard min | Hard max | Also |
+|---|---|---|---|
+| `adjust_music_tempo` | 1.0 | 1.3 | |
+| `adjust_volume` | 0.3 | 1.0 | |
+| `adjust_global_sensitivity` | 0 | 4 | whole numbers |
+| `adjust_player_sensitivity` | 0.2 | 2.0 | contains the neutral 1.0; the floor was 0.5 before #2696 (the game coordinator clamps the per-player factor to [0.2, 2.0]) |
+| `adjust_global_difficulty` | 0.5 | 2.0 | contains the neutral 1.0 |
+| `set_player_handicap` | 0.5 | 2.0 | contains the neutral 1.0 |
+| `grant_shield` (s) | 1 | 10 | |
+| `toughness_boost` (s) | 0.1 | 30 | |
+
+An entry passes when it is `{"min": number, "max": number}` (no other field), both finite, `min < max`, both
+within the hard limits and, where the table says so, whole or containing the neutral. A failing entry, or an
+unknown intervention, falls back to the code default of that intervention only (`decide.magnitude_bounds.invalid`
+names it); an unreadable flag gives the code table. The decision never fails because of it. The flag service applies
+the same checks on write (flags.md §13.2). A Default outside a narrowed range is clamped into it; Neutral and
+Integer never change.
+
+**Range ends (#2696).** Each range line of the `ffa.magnitude` text names what its two ends do, so a model can
+tell which end helps (`services/agent/decide/magnitude_ends.go:MagnitudeEndEffects`), for example
+`adjust_player_sensitivity: lowest 0.7 (target harder to eliminate), highest 1.5 (target easier to eliminate), in factor, neutral 1 (default 1.5)`.
+Helping end: low for `adjust_player_sensitivity` and `adjust_global_difficulty`; high for `set_player_handicap`,
+`adjust_global_sensitivity`, `adjust_music_tempo`, `grant_shield` and `toughness_boost`; `adjust_volume` says
+quieter / louder. They describe effects, not purposes, so the v1 and the neutral profile share them. jev's ladder end
+labels (`services/agent/decide/backends/jev/criteria.go`, §3.2) and its two-way directions agree with them (a test).
 
 The `rules` backend answers `ffa.magnitude` from its first decision's value, else from the Default above. A
 `grant_shield` from the rules carries no value when ranked; the loop stamps it with the `shield_seconds` `default`
@@ -197,7 +236,7 @@ tooling only) still answers the Default.
     and one of two fixed system paragraphs of its own: when one of the game's requests carried the brief (`decision/brief_log.go`), judge the game against the brief as well as the goal and say in `session_assessment`
     whether it was served; otherwise say the in-game agent never saw it and only whether the game happened to serve it. The brief never changes the retro's response contract or allow-list. The decide prompt is not
     changed by this. The retro's intervention catalog reads the effect texts from `decide.Catalog` (the neutral Levers text, plus
-    the `ValueEffect` text of the levers with a numeric value) and the bounds only through `decide.MagnitudeBounds`.
+    the `ValueEffect` text of the levers with a numeric value) and the bounds only through `retroBounds`, which takes the game's magnitude table (the one its decide requests used, §2.1, #2696; the code defaults without one), with the range-end effects of §2.1.
 - `AnswerSchema()` is static (cacheable), `additionalProperties:false` everywhere,
   all properties required: `{answers:[{id, choice, score, probabilities:[{option,p}], confidence}], rationale}` (`services/agent/decide/llmio/llmio.go:AnswerSchema`).
 
@@ -847,6 +886,12 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   whose request carried an operator brief, `true` and the brief's length in characters after the clean-up (§3); absent without a
   brief, on jev and on the rules path. The text is never a `decide.*` attribute: it is part of the rendered user message, so it is
   recorded only by the GenAI content capture (`gen_ai.input.messages`), under `decision.capture_content=on`.
+- **`decide.magnitude_bounds.source`** (#2696, UC-040 BR-045): on every `agent.decide` (rules and remote path), `flag` when the request's
+  magnitude ranges differ from the code default table (§2.1), else `default`; **`decide.magnitude_bounds.invalid`**: the interventions
+  whose `decision.magnitude_bounds` entry fell back to the code default, sorted and comma-separated, only when one did. On the remote
+  path the flag is read in the `agent.decide` span's context, so the OpenFeature traces hook's `feature_flag.evaluation` event for
+  `decision.magnitude_bounds` is on that span; on the rules path the flag is read before the backdated span exists, so the event is
+  on the cycle's span.
 - **Prediction attributes (#2479).** On `agent.decide`, when the record carries a prediction:
   `decide.prediction.id` (uuid), `decide.prediction.template`, `decide.prediction.characteristic`,
   `decide.prediction.scope`, `decide.prediction.horizon_s`, `decide.prediction.p`, `decide.prediction.source`

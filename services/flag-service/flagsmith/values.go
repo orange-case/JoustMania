@@ -171,7 +171,7 @@ func Decode(p *registry.Policy, b *baseline.Flag, fv FSValue) (variant string, v
 		s = string(bytes.TrimSpace(fv.Value))
 	case TypeBool:
 		s = string(bytes.TrimSpace(fv.Value))
-		if v, ok := boolVariant(b, s); ok && p.Bounds.Range == nil && p.Bounds.Pattern == nil && !p.Bounds.FreeString && !p.Bounds.Shape {
+		if v, ok := boolVariant(b, s); ok && p.Bounds.Range == nil && p.Bounds.Pattern == nil && !p.Bounds.FreeString && !p.Bounds.Shape && p.MagnitudeLimits() == nil {
 			return v, nil, nil
 		}
 		return mismatch()
@@ -195,7 +195,7 @@ func Decode(p *registry.Policy, b *baseline.Flag, fv FSValue) (variant string, v
 	case p.Bounds.Pattern != nil, p.Bounds.FreeString:
 		raw, _ := json.Marshal(s)
 		return "", raw, nil
-	case p.Bounds.Shape, p.Kind == registry.KindEvent:
+	case p.Bounds.Shape, p.Kind == registry.KindEvent, p.MagnitudeLimits() != nil:
 		if s == "" || (s[0] != '{' && s[0] != '[') || !json.Valid([]byte(s)) {
 			return mismatch()
 		}

@@ -43,6 +43,9 @@ type Annotations struct {
 	// UC-040 A35). The per-player sensitivity and handicap factors are read from it
 	// (#2066).
 	Levels map[string]string
+	// Bounds are the request's magnitude ranges (#2696, UC-040 BR-045): the
+	// Default an empty applied level stands for. nil = the code defaults.
+	Bounds *MagnitudeTable
 }
 
 // LevelKey is the Annotations.Levels key of an intervention and its target serial
@@ -53,12 +56,12 @@ func LevelKey(intervention, serial string) string { return intervention + "|" + 
 // value as a finite number, or for an empty value (the writer then writes its
 // default) the Default of the intervention's magnitude bounds; nil when absent,
 // unparsable or the neutral value.
-func levelFactor(levels map[string]string, intervention, serial string) *float64 {
+func levelFactor(levels map[string]string, intervention, serial string, bounds *MagnitudeTable) *float64 {
 	v, ok := levels[LevelKey(intervention, serial)]
 	if !ok {
 		return nil
 	}
-	b, hasBounds := MagnitudeBounds(intervention)
+	b, hasBounds := bounds.Lookup(intervention)
 	var f float64
 	if t := strings.TrimSpace(v); t == "" {
 		if !hasBounds {
@@ -141,8 +144,8 @@ func buildPlayers(c gamecontext.GameContext, ann Annotations) []PlayerState {
 		}
 		markStaleReadings(&ps, p, c)
 		if alive {
-			ps.SensitivityFactor = levelFactor(ann.Levels, "adjust_player_sensitivity", serial)
-			ps.HandicapFactor = levelFactor(ann.Levels, "set_player_handicap", serial)
+			ps.SensitivityFactor = levelFactor(ann.Levels, "adjust_player_sensitivity", serial, ann.Bounds)
+			ps.HandicapFactor = levelFactor(ann.Levels, "set_player_handicap", serial, ann.Bounds)
 		}
 		out = append(out, ps)
 	}

@@ -130,15 +130,26 @@ func grantsShieldLength(d Decision) bool {
 // describe (the first one), so the decide span and record say what is written, not
 // the 5 s bounds default (UC-040 BR-029, decide contract §4; #2395). runDecision
 // keeps a value already stamped, so the source is read once per grant.
+//
+// It then clamps each decision's value into the request's magnitude ranges
+// (clampRulesValue, #2696, UC-040 BR-045), so a range the operator narrowed holds on
+// the rules path too; at the default ranges no rules value moves.
 func (l *Loop) stampShieldSeconds(ctx context.Context, snapshot flags.Snapshot, ds []Decision, rec *decideRecord) []Decision {
-	if l.shieldSeconds == nil || len(ds) == 0 {
+	if len(ds) == 0 {
+		return ds
+	}
+	var bounds *decide.MagnitudeTable
+	if rec != nil {
+		bounds = rec.req.Bounds
+	}
+	if l.shieldSeconds == nil && bounds == nil {
 		return ds
 	}
 	out := make([]Decision, len(ds))
 	for i, d := range ds {
-		out[i] = l.withShieldSeconds(ctx, snapshot, d)
+		out[i] = clampRulesValue(bounds, l.withShieldSeconds(ctx, snapshot, d))
 	}
-	if rec != nil && rec.hasResp {
+	if rec != nil && rec.hasResp && (l.shieldSeconds != nil || out[0].Value != ds[0].Value) {
 		rec.resp = magnitudeFromDecision(rec.req, rec.resp, out[0])
 	}
 	return out
@@ -156,7 +167,7 @@ func magnitudeFromDecision(req decide.Request, resp decide.Response, d Decision)
 	if err != nil {
 		return resp
 	}
-	norm, ok := decide.NormalizeMagnitude(d.Intervention, v)
+	norm, ok := req.Bounds.Normalize(d.Intervention, v)
 	if !ok {
 		return resp
 	}

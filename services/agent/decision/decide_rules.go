@@ -122,7 +122,7 @@ func answerFromRanked(ranked []scoredCandidate, req decide.Request, known bool) 
 		case q.ID == decide.QuestionFFATarget && iv.ok && q.Kind == decide.KindChoice:
 			a = answerTarget(q, iv, eligible)
 		case q.ID == decide.QuestionFFAMagnitude && iv.ok && q.Kind == decide.KindScore:
-			a = answerMagnitude(q, iv)
+			a = answerMagnitude(q, iv, req.Bounds)
 		default:
 			a = neutralAnswer(q)
 		}
@@ -291,13 +291,13 @@ func answerTarget(q decide.Question, iv interventionPick, eligible []scoredCandi
 // sets the fast end since #2487; the other rules leave it empty), normalized over the bounds. It is
 // 0 for noop and bounds-less interventions. The rules engine has no separate
 // view on magnitude, so the confidence is the intervention's.
-func answerMagnitude(q decide.Question, iv interventionPick) decide.Answer {
+func answerMagnitude(q decide.Question, iv interventionPick, mt *decide.MagnitudeTable) decide.Answer {
 	a := decide.Answer{QuestionID: q.ID, Score: q.Range[0], Confidence: iv.answer.Confidence}
 	if iv.best == nil {
 		return a
 	}
 	name := iv.best.decision.Intervention
-	bounds, ok := decide.MagnitudeBounds(name)
+	bounds, ok := mt.Lookup(name)
 	if !ok {
 		return a
 	}
@@ -305,7 +305,7 @@ func answerMagnitude(q decide.Question, iv interventionPick) decide.Answer {
 	if v, err := strconv.ParseFloat(iv.best.decision.Value, 64); err == nil {
 		value = v
 	}
-	norm, _ := decide.NormalizeMagnitude(name, value)
+	norm, _ := mt.Normalize(name, value)
 	a.Score = q.Range[0] + norm*(q.Range[1]-q.Range[0])
 	return a
 }
