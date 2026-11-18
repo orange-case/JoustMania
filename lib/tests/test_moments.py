@@ -325,7 +325,8 @@ def broken_logs(monkeypatch):
 
 @pytest.mark.uc("UC-100", br=["BR-004"])
 @pytest.mark.parametrize("shape", [MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH])
-def test_a_broken_log_channel_never_raises_and_is_reported_once(spans, broken_logs, capsys, shape):
+@pytest.mark.usefixtures("broken_logs")
+def test_a_broken_log_channel_never_raises_and_is_reported_once(spans, capsys, shape):
     """NFR-060: a moment never raises into the game, and a failure is reported once per process."""
     tracer, exporter = spans
     first, _ = _record(shape, tracer)

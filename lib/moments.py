@@ -23,6 +23,7 @@ reported once per process on stderr and then dropped silently.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import time
 from collections.abc import Mapping
@@ -63,13 +64,11 @@ def _report_failure_once(name: str, error: Exception) -> None:
     if _failure_reported:
         return
     _failure_reported = True
-    try:
+    with contextlib.suppress(Exception):  # the report must never raise into the game
         sys.stderr.write(
             f"lib.moments: a moment could not be recorded ({name}: {type(error).__name__}: {error}); "
             "later failures are not reported\n"
         )
-    except Exception:  # noqa: BLE001, S110 - the report must never raise into the game
-        pass
 
 
 def effective_moment_shape(value: object) -> str:

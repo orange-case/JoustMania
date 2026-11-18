@@ -278,7 +278,8 @@ def test_sink_tees_only_moment_log_events_to_another_receiver():
 
         # The read side: every record is recorded, and the filters pick the one asked for.
         assert len(tee.logs(service="probe")) == 6
-        assert tee.wait_log(event_name="death_warning", attrs={"moment.id": "g/p0/2"}, timeout=1).body == "death_warning"
+        warning = tee.wait_log(event_name="death_warning", attrs={"moment.id": "g/p0/2"}, timeout=1)
+        assert warning.body == "death_warning"
         assert tee.wait_log(predicate=lambda r: not r.event_name, timeout=1).body == "Player died: p0"
         with pytest.raises(TimeoutError, match="event names seen"):
             tee.wait_log(event_name="player_death", attrs={"moment.id": "g/p0/9"}, timeout=0.3)

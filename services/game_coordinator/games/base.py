@@ -711,8 +711,9 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         #     these from the owning GameSession (set by #976's spawn binding).
         self.game_kind = "real"
         # UC-100 BR-002: the moment shape of every moment of the game (the warning, the
-        # death), read once per game by the session (telemetry.moment_shape) and held for the game; and the per-serial moment
-        # sequence behind moment.id, kept by the game, not the Player (BR-003).
+        # death), read once per game by the session (telemetry.moment_shape) and held for
+        # the game; and the per-serial moment sequence behind moment.id, kept by the game,
+        # not the Player (BR-003).
         self.moment_shape = MOMENT_SHAPE_SPAN_EVENT
         self._moment_sequence: dict[str, int] = {}
         self.experiment_id = ""
