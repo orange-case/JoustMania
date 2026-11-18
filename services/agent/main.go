@@ -551,6 +551,8 @@ type components struct {
 	interventionLog *decision.InterventionLog
 	// briefLog tells the retro which games sent the operator brief to a model (#2695).
 	briefLog *decision.BriefLog
+	// boundsLog tells the retro which magnitude ranges each game decided with (#2696).
+	boundsLog *decision.BoundsLog
 
 	tuning *agentTuning
 	text   *textBackends
@@ -625,6 +627,7 @@ func newComponents(ctx context.Context, logger *slog.Logger, agentFlags *flags.F
 	c.groupLog = decision.NewGroupLog()
 	c.interventionLog = decision.NewInterventionLog()
 	c.briefLog = decision.NewBriefLog()
+	c.boundsLog = decision.NewBoundsLog()
 	// Agent tuning (#1788, FR-150, C-035): model, effort, timeout, effect window and
 	// promotion timers resolve at use time from the agent flags; the compiled defaults
 	// (equal to the flag defaults) apply while a flag cannot be resolved (#1907).
@@ -847,6 +850,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// UC-040 BR-045 (#2696): every decide request carries the game's
 	// decision.magnitude_bounds (code default ranges on any read error).
 	loop.SetMagnitudeBoundsSource(c.agentFlags.MagnitudeBounds)
+	loop.SetBoundsLog(c.boundsLog)
 	// #2479: goal.profile in the game's flag context, for the prompt's goal lines
 	// (only under decision.goal_in_prompt).
 	loop.SetGoalSource(c.goalProfile)
@@ -931,6 +935,9 @@ func (c *components) buildGameEnd() {
 	// same per-game read as the remote decide path ("" on any read error).
 	c.retro.SetOperatorBriefSource(c.agentFlags.OperatorBrief)
 	c.retro.SetBriefDelivered(c.briefLog.Delivered)
+	// #2696: the retro's catalog shows the game's magnitude ranges: the table its
+	// decide requests used, else decision.magnitude_bounds read in its context.
+	c.retro.SetMagnitudeBoundsSource(c.retroMagnitudeBounds)
 	// #1179: bound every async retro inference goroutine to the agent's root context so
 	// shutdown cancellation unblocks a well-behaved in-flight Infer (no leak), the same
 	// SetRootContext pattern the per-game loops use. The retro now actually CALLS the

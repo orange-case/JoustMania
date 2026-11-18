@@ -3,6 +3,7 @@ package decision
 import (
 	"context"
 	"strconv"
+	"sync"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -31,12 +32,62 @@ type MagnitudeBoundsSource func(ctx context.Context, gameID string) *decide.Magn
 func (l *Loop) SetMagnitudeBoundsSource(src MagnitudeBoundsSource) { l.magnitudeBounds = src }
 
 // magnitudeBoundsFor is the request's table: the source's, nil without a source.
+// The table is noted in the bounds log, so the retro shows the same ranges.
 func (l *Loop) magnitudeBoundsFor(ctx context.Context, gameID string) *decide.MagnitudeTable {
 	if l.magnitudeBounds == nil {
 		return nil
 	}
-	return l.magnitudeBounds(ctx, gameID)
+	t := l.magnitudeBounds(ctx, gameID)
+	l.boundsLog.Note(gameID, t)
+	return t
 }
+
+// maxBoundsLogGames bounds the games BoundsLog remembers (oldest forgotten first).
+const maxBoundsLogGames = 64
+
+// BoundsLog remembers, per game, the magnitude table of its latest decide request
+// (#2696), so the post-game retro's catalog shows the ranges the game decided
+// with. Reading never forgets.
+type BoundsLog struct {
+	mu    sync.Mutex
+	last  map[string]*decide.MagnitudeTable
+	order []string
+}
+
+// NewBoundsLog builds an empty log.
+func NewBoundsLog() *BoundsLog { return &BoundsLog{last: make(map[string]*decide.MagnitudeTable)} }
+
+// Note records t as gameID's latest table.
+func (b *BoundsLog) Note(gameID string, t *decide.MagnitudeTable) {
+	if b == nil || gameID == "" || t == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, seen := b.last[gameID]; !seen {
+		b.order = append(b.order, gameID)
+		if len(b.order) > maxBoundsLogGames {
+			delete(b.last, b.order[0])
+			b.order = b.order[1:]
+		}
+	}
+	b.last[gameID] = t
+}
+
+// Last returns gameID's latest table, and false when none was noted.
+func (b *BoundsLog) Last(gameID string) (*decide.MagnitudeTable, bool) {
+	if b == nil {
+		return nil, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	t, ok := b.last[gameID]
+	return t, ok
+}
+
+// SetBoundsLog injects the log the loop notes each request's table in; nil (the
+// default) notes nothing. Set at construction, before the loop serves.
+func (l *Loop) SetBoundsLog(b *BoundsLog) { l.boundsLog = b }
 
 // magnitudeBoundsAttributes are the agent.decide attributes of a request's ranges.
 func magnitudeBoundsAttributes(t *decide.MagnitudeTable) []attribute.KeyValue {

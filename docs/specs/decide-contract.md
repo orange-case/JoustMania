@@ -236,7 +236,7 @@ tooling only) still answers the Default.
     and one of two fixed system paragraphs of its own: when one of the game's requests carried the brief (`decision/brief_log.go`), judge the game against the brief as well as the goal and say in `session_assessment`
     whether it was served; otherwise say the in-game agent never saw it and only whether the game happened to serve it. The brief never changes the retro's response contract or allow-list. The decide prompt is not
     changed by this. The retro's intervention catalog reads the effect texts from `decide.Catalog` (the neutral Levers text, plus
-    the `ValueEffect` text of the levers with a numeric value) and the bounds only through `decide.MagnitudeBounds`.
+    the `ValueEffect` text of the levers with a numeric value) and the bounds only through `retroBounds`, which takes the game's magnitude table (the one its decide requests used, §2.1, #2696; the code defaults without one), with the range-end effects of §2.1.
 - `AnswerSchema()` is static (cacheable), `additionalProperties:false` everywhere,
   all properties required: `{answers:[{id, choice, score, probabilities:[{option,p}], confidence}], rationale}` (`services/agent/decide/llmio/llmio.go:AnswerSchema`).
 

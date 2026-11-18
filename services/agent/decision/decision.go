@@ -379,6 +379,8 @@ type Loop struct {
 	// request (#2696, UC-040 BR-045); nil leaves Request.Bounds nil (the code
 	// default ranges).
 	magnitudeBounds MagnitudeBoundsSource
+	// boundsLog notes each game's latest magnitude table for the retro (#2696).
+	boundsLog *BoundsLog
 	// goalSource is the goal-profile source of the prompt's goal lines (#2479);
 	// nil renders none.
 	goalSource GoalSource

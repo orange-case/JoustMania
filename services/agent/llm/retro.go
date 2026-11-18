@@ -74,6 +74,9 @@ type RetroInput struct {
 	// brief (claude or openai, #2695). False for a jev, rules or stub game, and then
 	// the brief paragraph says the in-game agent never saw it.
 	BriefDelivered bool
+	// Bounds are the game's magnitude ranges (decision.magnitude_bounds, the table
+	// its decide requests used, #2696, UC-040 BR-045); nil = the code defaults.
+	Bounds *decide.MagnitudeTable
 }
 
 // BuildRetro renders the deterministic retrospective prompt for one finished
@@ -93,6 +96,7 @@ func BuildRetro(in RetroInput) RetroPrompt {
 			withPredictions: len(in.Summary.Predictions) > 0,
 			withBrief:       brief != "",
 			briefDelivered:  in.BriefDelivered,
+			bounds:          in.Bounds,
 		}),
 		User:          operatorBriefBlock(brief) + buildRetroUser(in.Context, in.Summary, in.Now),
 		OperatorBrief: brief,
@@ -107,6 +111,7 @@ type retroSystemInput struct {
 	withPredictions bool
 	withBrief       bool
 	briefDelivered  bool
+	bounds          *decide.MagnitudeTable
 }
 
 // operatorBriefBlock is the <operator_brief> block that opens the retro's user
@@ -325,7 +330,7 @@ agent should ENABLE or EMPHASIZE (weight up) — and which to de-emphasize — f
 next session, tuning its reactive vocabulary and emphasis (only those the live
 allow-list below permits; each with what it does in the game):
 `)
-	writeInterventionCatalog(&b, allowed, in.policy)
+	writeInterventionCatalog(&b, allowed, in.policy, in.bounds)
 	b.WriteString(`
 
 POLICY: suggest the SMALLEST tuning change that addresses an observed problem,

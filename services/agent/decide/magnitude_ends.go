@@ -8,8 +8,9 @@ package decide
 // (backends/jev/criteria.go magnitudeEnds) say the same in its own words; a test
 // keeps the directions in sync.
 //
-// The parallel retro catalog (#2697) adds a ValueEffect text per lever with the
-// same directions; the two should become one source.
+// This is the ONE source of the direction: the post-game retro catalog
+// (llm/retro_catalog.go, #2695) labels its range ends with the same texts, and the
+// catalog's ValueEffect (catalog.go) says only what the value does.
 
 // MagnitudeEnds are the effects of a lever's lowest and highest value.
 type MagnitudeEnds struct {

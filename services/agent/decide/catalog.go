@@ -65,10 +65,11 @@ type Intervention struct {
 	// neutral system prompt's Levers block, jev in its criteria. JevDescription (v1)
 	// is left untouched so the v1 prompt stays byte-identical.
 	JevDescriptionNeutral string
-	// ValueEffect says what the lever's numeric value does and which direction
-	// helps or hinders a player (#2695, UC-042 A13), for the levers in the bounds
-	// table (MagnitudeBounds); "" for the others. The post-game retro shows it next
-	// to the bounds; no decide prompt renders it yet.
+	// ValueEffect says what the lever's numeric value does (#2695, UC-042 A13), for
+	// the levers in the bounds table (MagnitudeBounds); "" for the others. The
+	// post-game retro shows it next to the bounds. Which end helps is NOT here: the
+	// one source of the direction is MagnitudeEndEffects (magnitude_ends.go, #2696),
+	// which labels both range ends in the decide question and in the retro catalog.
 	ValueEffect string
 }
 
@@ -76,7 +77,9 @@ type Intervention struct {
 // (services/game_coordinator/games/base.py _compute_effective_thresholds; the
 // table above magnitudeBounds in ffa.go), in one sentence for a prompt (#2695).
 const FactorClampNote = "The game clamps a player's combined sensitivity factor (their adjust_player_sensitivity " +
-	"factor times the adjust_global_difficulty factor; the thresholds are divided by it) to [0.5, 2.0], and " +
+	"factor times the adjust_global_difficulty factor; the thresholds are divided by it) to [0.5, 2.0], with the " +
+	"floor lowered only by a player's own adjust_player_sensitivity factor below 0.5, to that factor and never " +
+	"below 0.2 (the player factor itself is clamped to [0.2, 2.0]), and " +
 	"separately their handicap factor (set_player_handicap, raised by toughness_boost and auto_rubberband, " +
 	"lowered by soft_penalty; the thresholds are multiplied by it) to [0.5, 2.0]."
 
@@ -124,7 +127,7 @@ var Catalog = []Intervention{
 		Idempotent:            true,
 		JevDescription:        "Change the music volume. Atmosphere only: no effect on who gets eliminated.",
 		JevDescriptionNeutral: "Change the music volume. No effect on who gets eliminated.",
-		ValueEffect:           "Louder or quieter; atmosphere only.",
+		ValueEffect:           "Atmosphere only.",
 	},
 	{
 		Name:       IntvAdjustMusicTempo,
@@ -135,7 +138,7 @@ var Catalog = []Intervention{
 			"threshold (more movement tolerated, fewer eliminations); slower music lowers it (eliminations come faster).",
 		JevDescriptionNeutral: "Change the music tempo for everyone. Faster music raises everyone's death threshold (more " +
 			"movement tolerated, fewer eliminations); slower music lowers it (eliminations come faster).",
-		ValueEffect: "Higher is faster music, which helps everyone; no neutral value (clearing hands the tempo back to the game).",
+		ValueEffect: "The death thresholds follow the tempo; no neutral value (clearing hands the tempo back to the game).",
 	},
 	{
 		Name:           IntvAdjustPlayerSensitivity,
@@ -147,7 +150,7 @@ var Catalog = []Intervention{
 		JevDescription: "Change one player's sensitivity, protecting them (harder to eliminate) " +
 			"or handicapping them (easier to eliminate).",
 		JevDescriptionNeutral: "Change one player's sensitivity, making them harder or easier to eliminate.",
-		ValueEffect:           "The player's death threshold is divided by it: below 1 helps the player, above 1 hinders.",
+		ValueEffect:           "The player's death threshold is divided by it.",
 	},
 	{
 		Name:           IntvSetPlayerHandicap,
@@ -159,7 +162,7 @@ var Catalog = []Intervention{
 		JevDescription: "Help one player (harder to eliminate) or rein in one player (easier to " +
 			"eliminate), to balance a lopsided game.",
 		JevDescriptionNeutral: "Make one player harder or easier to eliminate.",
-		ValueEffect:           "The player's thresholds are multiplied by it: above 1 helps the player, below 1 hinders.",
+		ValueEffect:           "The player's thresholds are multiplied by it.",
 	},
 	{
 		Name:           IntvGrantShield,
@@ -169,7 +172,7 @@ var Catalog = []Intervention{
 		JevDescription: "Make one player immune to elimination for a few seconds. Saves a player who is about " +
 			"to be eliminated unfairly.",
 		JevDescriptionNeutral: "Make one player immune to elimination for a few seconds.",
-		ValueEffect:           "Seconds of immunity, more helps; in a hold game they are added to the player's shield energy, which protects only while the player holds the trigger.",
+		ValueEffect:           "Seconds of immunity; in a hold game they are added to the player's shield energy, which protects only while the player holds the trigger.",
 	},
 	{
 		Name:           IntvToughnessBoost,
@@ -180,7 +183,7 @@ var Catalog = []Intervention{
 			"weaker than grant_shield.",
 		JevDescriptionNeutral: "Make one player much harder, but not impossible, to eliminate for a few seconds; weaker than " +
 			"grant_shield.",
-		ValueEffect: "Seconds the boost lasts, more helps.",
+		ValueEffect: "Seconds the boost lasts.",
 	},
 	{
 		Name:           IntvSoftPenalty,
@@ -200,7 +203,7 @@ var Catalog = []Intervention{
 			"everyone much harder to eliminate, a lower level much easier; one step is a sizable jump.",
 		JevDescriptionNeutral: "Change the sensitivity level for all players at once. A higher level makes everyone much harder " +
 			"to eliminate, a lower level much easier; one step is a sizable jump.",
-		ValueEffect: "Whole levels: higher helps everyone, lower hinders everyone; no neutral value (clearing hands the level back to the admin setting).",
+		ValueEffect: "Whole levels; no neutral value (clearing hands the level back to the admin setting).",
 	},
 	{
 		Name:       IntvAdjustGlobalDifficulty,
@@ -211,7 +214,7 @@ var Catalog = []Intervention{
 			"faster (harder) or slower (easier) for everyone.",
 		JevDescriptionNeutral: "Scale the difficulty for all players at once, making eliminations come faster (harder) or " +
 			"slower (easier) for everyone.",
-		ValueEffect: "Everyone's thresholds are divided by it: above 1 hinders everyone, below 1 helps.",
+		ValueEffect: "Everyone's thresholds are divided by it.",
 	},
 	{
 		Name:       IntvSetPacingProfile,

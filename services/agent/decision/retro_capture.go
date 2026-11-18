@@ -15,6 +15,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/joustmania/agent/decide"
 	"github.com/joustmania/agent/gamecontext"
 	"github.com/joustmania/agent/gamesummary"
 	"github.com/joustmania/agent/llm"
@@ -141,6 +142,9 @@ type RetroCoordinator struct {
 	// briefDelivered reports whether the game's in-game model was sent the brief
 	// (BriefLog.Delivered, #2695); nil = never delivered.
 	briefDelivered func(gameID string) bool
+	// magnitudeBounds returns the game's magnitude ranges (#2696, UC-040 BR-045):
+	// main.go wires the table its decide requests used; nil = code defaults.
+	magnitudeBounds func(gameID string) *decide.MagnitudeTable
 
 	// experimentParent resolves the long-lived agent.experiment ROOT span's SpanContext
 	// by experiment_id (#1188), reading the registry's ExperimentSpanContext accessor.
@@ -324,6 +328,22 @@ func (rc *RetroCoordinator) SetOperatorBriefSource(src OperatorBriefSource) { rc
 // never delivered. Set at wiring.
 func (rc *RetroCoordinator) SetBriefDelivered(f func(gameID string) bool) { rc.briefDelivered = f }
 
+// SetMagnitudeBoundsSource injects the game's magnitude ranges for the retro's
+// intervention catalog (#2696): main.go wires the table the game's decide requests
+// used (BoundsLog), else the flag read in the game's context. nil = code defaults.
+// Set at wiring.
+func (rc *RetroCoordinator) SetMagnitudeBoundsSource(f func(gameID string) *decide.MagnitudeTable) {
+	rc.magnitudeBounds = f
+}
+
+// retroMagnitudeBounds is the game's magnitude table (nil without a source).
+func (rc *RetroCoordinator) retroMagnitudeBounds(gameID string) *decide.MagnitudeTable {
+	if rc.magnitudeBounds == nil {
+		return nil
+	}
+	return rc.magnitudeBounds(gameID)
+}
+
 // retroOperatorBrief is the game's brief ("" without a source).
 func (rc *RetroCoordinator) retroOperatorBrief(gameID string) string {
 	if rc.operatorBrief == nil {
@@ -459,6 +479,8 @@ func (rc *RetroCoordinator) OnGameEnd(c gamecontext.GameContext) {
 		// #2695 (UC-042 A13): the brief of the game that ended, read in its flag context.
 		OperatorBrief:  rc.retroOperatorBrief(c.SessionID),
 		BriefDelivered: rc.briefDelivered != nil && rc.briefDelivered(c.SessionID),
+		// #2696: the catalog's ranges are the game's decision.magnitude_bounds.
+		Bounds: rc.retroMagnitudeBounds(c.SessionID),
 	})
 
 	// Inference attribution (#1234): the wired backend's model and name, or
