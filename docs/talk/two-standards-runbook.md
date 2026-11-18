@@ -24,7 +24,7 @@ see [Fallback: Bluetooth down](#fallback-bluetooth-down).
 | Backend | Role on stage | How it is selected |
 |---|---|---|
 | **Jev** (TypeSafe, `jev-latest`) | The **main in-game backend**: a gated two-stage round, about 0.22-0.34 s for a "no action" round, 0.47-0.57 s for an act round | `agent-backend.sh jev` (flag `decision.backend`) |
-| **Claude** | The **backup backend** in game (one manual flip, no automatic jev -> claude chain), and the **post-game summary** (retro; the proposer belongs to the experiments act and stays off) | backup: `agent-backend.sh claude`; summary: flag `inference.backend=claude` (in the stage baseline, applied by `talk-stage.sh`; needs `ANTHROPIC_API_KEY`) |
+| **Claude** | The **backup backend** in game (one manual flip, no automatic jev -> claude chain), and the **post-game summary** (retro; the proposer belongs to the experiments act and stays off) | backup: `agent-backend.sh claude`; summary: flag `inference.backend=claude` (in the stage baseline `scripts/talk-baseline.json`, not in the flag files, which ship `stub` and fail closed; set it in Flagsmith, persisted, or with `talk-stage.sh reset`, an in-memory overlay; see [The post-game summary flag](#the-post-game-summary-flag); needs `ANTHROPIC_API_KEY`) |
 | **rules** | The **automatic floor**: any remote failure (no key, timeout, error, invalid answer, budget) falls back to rules in the same cycle; the game never waits | always; also `agent-backend.sh rules` |
 
 The hardware proof on the real power bank is the [stage test checklist](stage-test-checklist.md).
@@ -128,6 +128,25 @@ dry-run `-f` files and profiles on the rehearsal stack). With
 the flag `inference.backend=claude` but no `ANTHROPIC_API_KEY` the agent logs
 `inference.backend=claude but ANTHROPIC_API_KEY is empty` (once per change) and the summary
 stays capture-only.
+
+#### The post-game summary flag
+
+`claude` for `inference.backend` is a **stage baseline** value (`scripts/talk-baseline.json`, `checked`), not
+a flag-file default: `services/flagd/agent.json` and the CI baseline `services/flagd/ci/agent.json` both ship
+`stub`, so a Pi that is not on stage never calls Claude at game end. Two ways to get `claude` on stage:
+
+- **Flagsmith** (`FLAGSMITH_LINK=on`): set `inference.backend` to `claude` in the stage environment. The row
+  is `persist: yes` ([flags.md §13](../specs/flags.md)), so the value survives a flag-service restart and a
+  reboot, and Flagsmith wins at a restart. No script needed.
+- **`./scripts/talk-stage.sh reset`**: sets it as an in-memory stage overlay. Without the Flagsmith link a
+  flag-service restart or a reboot drops that overlay and the agent runs `stub` again (every retro span then
+  shows `inference.used=none`, `inference.fallback_reason=no_backend_available`): run `reset` after every boot.
+
+`talk-stage.sh reset` does **not** clear a persisted `inference.backend` (a Flagsmith or operator value with
+`persist`); it clears only the persisted decision backend and model. That is harmless: its stage overlay
+`claude` sits on top of the persisted value while the flag service runs, and after a restart the persisted
+value is back. So a persisted `stub` returns after a restart; a persisted `claude` keeps the summary on.
+Either way `./scripts/talk-preflight.sh` FAILs while the effective value is not `claude`.
 
 Jev needs only `JEV_API_KEY`: `decision.jev.base_url` defaults to
 `https://api.typesafe.ai/v1` and `decision.jev.model` to `latest` (`jev-latest`).
@@ -677,7 +696,7 @@ first step above prevents that; the pre-flight WARN names the persisted backend.
 | Jev never acts in beat 2 | The game is calm (gate p_yes below 0.6) | `jev.gate.p_yes` on the stage-1 chat span | Push the players to the edge / let eliminations pile up (mock: `demo_driver.py --scenario death_cascade`); if `jev-latest` changed, `backend.sh jev pinned`. Do not lower the bar on stage unless you say why |
 | `held` never appears in 3a | No open gate during the beat (calm play gives `noop`, not `held`) | `decide.outcome` on recent rows | Keep players near the threshold; narrate the evaluation event of a captured held trace |
 | Beat 8: no `agent.llm.retro` span at all | The budget was full at game end: the retro is gated before any span is created | `docker compose logs agent \| grep agent.llm.retro_gated` (`fallback_reason=llm_budget_exhausted`) | `setflag agent llm.max_requests_per_minute stage` (an env ceiling below 30 must be raised or unset first); show the summary of an earlier game or a captured trace |
-| Beat 8: `agent.llm.retro` with `inference.used=none` | `inference.fallback_reason`: `no_backend_available` = `inference.backend` not `claude` (or the key empty); `agent_disabled` = the kill switch was off when the game ended; `llm_not_eligible` = not a real game | the retro span tags; preflight `inference.backend` line | Flag: `./scripts/talk-stage.sh reset` (key missing: fix `.env.local`, recreate the agent, before the talk only). Otherwise show the summary of an earlier game |
+| Beat 8: `agent.llm.retro` with `inference.used=none` | `inference.fallback_reason`: `no_backend_available` = `inference.backend` not `claude` (or the key empty); `agent_disabled` = the kill switch was off when the game ended; `llm_not_eligible` = not a real game | the retro span tags; preflight `inference.backend` line | Flag: set `inference.backend` to `claude` in Flagsmith (persisted) or `./scripts/talk-stage.sh reset` (in memory, lost on a reboot without the Flagsmith link) (key missing: fix `.env.local`, recreate the agent, before the talk only). Otherwise show the summary of an earlier game |
 | Beat 8: `inference.used=claude` but `llm.retro.parse_ok=false` | The model call failed (timeout, HTTP error, refusal) or the reply did not decode | `llm.infer.error` / `error.type` on the span (status error); log `agent.llm.retro_failed` | Check the uplink (beat 7 option A restored?) and Anthropic credit; show the summary of an earlier game |
 | Beat 8: the summary takes too long | The retro model call is slow (default Opus, effort medium) | `llm.retro.latency_ms` from rehearsal | Show the summary of the game that ended earlier; for the next talk set the `inference.model` agent flag to a faster model through the flag service (#1788) (**verify in rehearsal**) |
 | Vendor budget / credit exhausted (HTTP 429 / 402) | Account limit | Jaeger: `fallback_reason=error`, `error.type` | Switch to the other backend (`backend.sh jev` / `claude`); the fallback itself is a talking point |
