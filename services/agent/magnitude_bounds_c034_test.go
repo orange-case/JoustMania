@@ -7,9 +7,10 @@ package main
 // drives every writer and refuses any request to the agent set;
 // agent_set_writers_guard_c034_test.go refuses any new write call site), this
 // pins the flag itself: it is in the agent set only, its registry row allows the
-// stack scope only (no experiment+arm, game or real scope an agent writer uses),
-// it is not in the experiment catalog, and no non-test agent source names it
-// except its one reader.
+// stack scope only (no experiment+arm, game or real scope an agent writer uses;
+// the experiment catalog is the game set's experiment+arm rows, so a stack-only
+// agent row cannot be in it), and no non-test agent source names it except its
+// one reader.
 
 import (
 	"io/fs"

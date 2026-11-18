@@ -17,7 +17,7 @@ intervention flags against the InterventionManager registry built in PR A:
   to the admin's CURRENT baseline (a mid-game admin change wins by invalidating
   the override).
 - ``player_sensitivity_factor``   — N1: per-serial ``targeting_key`` evaluation
-  sets each active player's ``sensitivity_factor`` (clamped 0.5-2.0); serials
+  sets each active player's ``sensitivity_factor`` (clamped 0.2-2.0, #2696); serials
   with no targeting match get the neutral default (1.0).
 - ``player_handicap_factor``      — #1107 (#1103 MVP action 1): per-serial
   ``targeting_key`` evaluation sets each active player's ``handicap_factor``
