@@ -136,16 +136,22 @@ a flag-file default: `services/flagd/agent.json` and the CI baseline `services/f
 `stub`, so a Pi that is not on stage never calls Claude at game end. Two ways to get `claude` on stage:
 
 - **Flagsmith** (`FLAGSMITH_LINK=on`): set `inference.backend` to `claude` in the stage environment. The row
-  is `persist: yes` ([flags.md §13](../specs/flags.md)), so the value survives a flag-service restart and a
+  is `persist: yes` ([flags.md §13](../specs/flags.md#13-mutable-flag-registry)), so the value survives a flag-service restart and a
   reboot, and Flagsmith wins at a restart. No script needed.
 - **`./scripts/talk-stage.sh reset`**: sets it as an in-memory stage overlay. Without the Flagsmith link a
   flag-service restart or a reboot drops that overlay and the agent runs `stub` again (every retro span then
   shows `inference.used=none`, `inference.fallback_reason=no_backend_available`): run `reset` after every boot.
 
-`talk-stage.sh reset` does **not** clear a persisted `inference.backend` (a Flagsmith or operator value with
-`persist`); it clears only the persisted decision backend and model. That is harmless: its stage overlay
-`claude` sits on top of the persisted value while the flag service runs, and after a restart the persisted
-value is back. So a persisted `stub` returns after a restart; a persisted `claude` keeps the summary on.
+`talk-stage.sh reset` does **not** clear a persisted `inference.backend`; it clears only the persisted
+decision backend and model. What that means depends on the link:
+
+- **Link off:** the stage overlay `claude` sits on top of the persisted value while the flag service runs;
+  after a restart the overlay is gone and the persisted value is back (a persisted `stub` returns, a persisted
+  `claude` keeps the summary on).
+- **Link on:** the link pushes every local change, stage overlays included, so `reset` writes `claude` into
+  Flagsmith, replacing a value set there, and it comes back after every restart ("a restart is no stage reset",
+  [flagsmith-sync.md](../architecture/flagsmith-sync.md)). To get `stub` back, change it in Flagsmith.
+
 Either way `./scripts/talk-preflight.sh` FAILs while the effective value is not `claude`.
 
 Jev needs only `JEV_API_KEY`: `decision.jev.base_url` defaults to
