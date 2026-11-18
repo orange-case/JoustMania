@@ -12,6 +12,54 @@
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
         "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "green",
+        "name": "Agent decision: applied",
+        "step": "10s",
+        "expr": "sum by (game_kind, action, block_reason) (increase(agent_decisions_total{game_kind=\"real\", blocked=\"false\", action!=\"noop\"}[10s])) > 0",
+        "titleFormat": "agent: {{action}}",
+        "textFormat": "applied in a {{game_kind}} game",
+        "tagKeys": "action,game_kind",
+        "useValueForTime": false
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "red",
+        "name": "Agent decision: blocked",
+        "step": "10s",
+        "expr": "sum by (game_kind, action, block_reason) (increase(agent_decisions_total{game_kind=\"real\", blocked=\"true\", block_reason!=\"already_applied\"}[10s])) > 0",
+        "titleFormat": "agent blocked: {{action}}",
+        "textFormat": "{{block_reason}} ({{game_kind}} game)",
+        "tagKeys": "action,game_kind",
+        "useValueForTime": false
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": false,
+        "hide": false,
+        "iconColor": "purple",
+        "name": "Agent decision: shadow games",
+        "step": "10s",
+        "expr": "sum by (game_kind, action, block_reason) (increase(agent_decisions_total{game_kind=\"shadow\", action!=\"noop\", block_reason!=\"already_applied\"}[10s])) > 0",
+        "titleFormat": "shadow agent: {{action}}",
+        "textFormat": "{{block_reason}} (shadow game)",
+        "tagKeys": "action,game_kind",
+        "useValueForTime": false
       }
     ]
   },
