@@ -369,6 +369,9 @@ type Loop struct {
 	// promptProfile is the decision.prompt_profile source of remote decide requests
 	// (#2467 PR 5, UC-040 BR-036); nil leaves Request.PromptProfile empty (v1).
 	promptProfile PromptProfileSource
+	// operatorBrief is the decision.operator_brief source of claude and openai
+	// requests (#2687, UC-040 BR-044); nil never sets Request.OperatorBrief.
+	operatorBrief OperatorBriefSource
 	// goalSource is the goal-profile source of the prompt's goal lines (#2479);
 	// nil renders none.
 	goalSource GoalSource

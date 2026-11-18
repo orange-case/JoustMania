@@ -99,6 +99,9 @@ flags:
   # experiment+arm (#2530): scripts/agent-group-ab.sh writes one value per arm; the rung never
   # matches a real game. Not in the experiment catalog (that is the game set only).
   - {set: agent, key: decision.prompt_profile, kind: overlay, scope: [stack, experiment+arm], bounds: {variants: ["v1", "neutral"]}, description: "wording of the LLM decide prompt: v1 shipped, neutral levers by effect"}
+  # decision.operator_brief (#2687, UC-040 BR-044, FR-096): operator-written free text the claude / openai
+  # decide prompt carries as an <operator_brief> block; never by the agent (C-034). It adds no lever and no bound.
+  - {set: agent, key: decision.operator_brief, kind: overlay, scope: [stack], bounds: {free_string: true}}
   - {set: agent, key: fitness.accelerate.target_session_seconds, kind: overlay, scope: [stack]}
   - {set: agent, key: verdict_min_n, kind: overlay, scope: [stack], bounds: {range: [1, 1000], integer: true}}
   - {set: agent, key: verdict_min_pairs, kind: overlay, scope: [stack], bounds: {range: [1, 1000], integer: true}}

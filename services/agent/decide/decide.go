@@ -209,6 +209,11 @@ type Request struct {
 	// (profile.go; "" and unknown values render as v1). Set on the remote path only.
 	// It is outside State, so the Digest does not cover it.
 	PromptProfile string `json:"prompt_profile,omitempty"`
+	// OperatorBrief is the cleaned decision.operator_brief (NormalizeOperatorBrief,
+	// #2687, UC-040 BR-044): the operator's free-text wish, set on a claude or
+	// openai request only (jev never gets it). It is outside State, so the Digest
+	// does not cover it; "" (the default) leaves the rendered prompt byte-identical.
+	OperatorBrief string `json:"operator_brief,omitempty"`
 	// Context is the raw snapshot State was built from. Only in-process backends
 	// (the rules adapter, which reasons over the full GameContext) may read it.
 	// Remote backends MUST NOT read it: State is the entire contract they get, and

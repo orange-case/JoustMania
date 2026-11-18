@@ -677,6 +677,9 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 	if l.promptProfile != nil {
 		rec.req.PromptProfile = decide.NormalizePromptProfile(l.promptProfile(root, c.SessionID))
 	}
+	// The operator brief (#2687, UC-040 BR-044): read per request, claude and
+	// openai only; "" (no brief, jev, rules) leaves the request byte-identical.
+	rec.req.OperatorBrief = l.operatorBriefFor(root, rec.used, c.SessionID)
 	// The prediction ask (#2479, UC-040 A45): only with decision.predictions.ask_model
 	// and decision.predictions_enabled on (fire-time flags) and a claude or openai
 	// backend; otherwise the request stays v1.
@@ -1067,6 +1070,7 @@ func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecon
 	if rec.req.PromptProfile != "" {
 		attrs = append(attrs, attribute.String(AttrDecidePromptProfile, rec.req.PromptProfile))
 	}
+	attrs = append(attrs, operatorBriefAttributes(rec.req.OperatorBrief)...)
 	if rec.req.Goal != nil {
 		attrs = append(attrs, attribute.String(keys.AttrDecideGoalProfile, rec.req.Goal.Profile),
 			attribute.String(keys.AttrDecideGoalSource, rec.req.Goal.Source))

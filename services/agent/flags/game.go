@@ -100,6 +100,27 @@ func (f *Flags) PromptProfile(ctx context.Context, gameID string) string {
 	return decide.NormalizePromptProfile(v)
 }
 
+// keyDecisionOperatorBrief is decision.operator_brief (agent set, flags.md §3, #2687).
+const keyDecisionOperatorBrief = "decision.operator_brief"
+
+// OperatorBrief reads decision.operator_brief for one game from the agent set, in
+// the game's context (GameContext), and cleans it (decide.NormalizeOperatorBrief,
+// decide-contract.md §3, UC-040 BR-044). A nil wrapper, a nil client, any
+// evaluation error or a blank value gives "" (no brief, the prompts stay
+// byte-identical); debug log only, the remote path reads it per request. Human-only
+// (C-034): the agent never writes it.
+func (f *Flags) OperatorBrief(ctx context.Context, gameID string) string {
+	if f == nil || f.client == nil {
+		return ""
+	}
+	v, err := f.client.StringValue(ctx, keyDecisionOperatorBrief, "", f.GameContext(gameID))
+	if err != nil {
+		f.log.Debug("flags decision.operator_brief unreadable, no brief", "game_id", gameID, "error", err)
+		return ""
+	}
+	return decide.NormalizeOperatorBrief(v)
+}
+
 // shieldChargeContext is the agent's evaluation context for the two shield flags: gameId
 // and the game's game_kind (real when unknown), plus experiment_id and arm for a game of
 // an experiment (#2096: shield.activation has an experiment rung since FR-162). The coordinator reads them inside grant_shield with more: the
