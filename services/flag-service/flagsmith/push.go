@@ -180,18 +180,6 @@ type futureBody struct {
 	EnvironmentDefault futureDefault `json:"environment_default"`
 }
 
-type overrideBody struct {
-	Identifier string          `json:"identifier"`
-	Feature    int             `json:"feature"`
-	Enabled    bool            `json:"enabled"`
-	Value      json.RawMessage `json:"feature_state_value"`
-}
-
-type overrideKey struct {
-	Identifier string `json:"identifier"`
-	Feature    int    `json:"feature"`
-}
-
 type stateBody struct {
 	Enabled bool            `json:"enabled"`
 	Value   json.RawMessage `json:"feature_state_value"`
@@ -222,17 +210,12 @@ func (l *Link) futurePath(featureID int) string {
 
 // send sends one key's value: a stack value (id "") to the feature's
 // environment value, any other scope to the override on identity id (a
-// value that is not present deletes the override).
+// value that is not present deletes the override; overrides.go, #2682).
 func (o *out) send(ctx context.Context, id string, v Value, fv FSValue, featureID int) (int, error) {
 	l := o.l
 	cl := l.Client()
 	if id != "" {
-		path := l.envPath("edge-identities-featurestates")
-		if !v.Present {
-			status, err := cl.Admin(ctx, http.MethodDelete, path, overrideKey{Identifier: id, Feature: featureID}, nil)
-			return status, ignoreNotFound(err)
-		}
-		return cl.Admin(ctx, http.MethodPut, path, overrideBody{Identifier: id, Feature: featureID, Enabled: true, Value: fv.Value}, nil)
+		return o.sendOverride(ctx, id, v, fv, featureID)
 	}
 	if !o.fallback.Load() {
 		status, err := cl.Admin(ctx, http.MethodPatch, l.futurePath(featureID), futureBodyOf(fv, v.Present), nil)

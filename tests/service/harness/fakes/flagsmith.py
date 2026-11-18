@@ -11,14 +11,21 @@ identities.go, document.go; the audit log is Flagsmith's, the link reads it no m
 - every change bumps the document's ``updated_at`` (RFC 3339, strictly increasing),
   its ``X-Flagsmith-Document-Updated-At`` header (a float epoch) and ``Last-Modified``
   (the ``updated_at`` second); a pull with ``If-Modified-Since`` at or after that second
-  answers 304;
+  answers 304 (the SaaS's edge document ignores it and always answers 200: the 304 here is
+  only the link's optimisation path);
+- the document shows an integer identity override as a JSON string, as the SaaS's edge
+  document does (#2682);
 - the link's pushes change that state: ``PATCH /api/__future__/environments/<key>/features/<id>/``
   (``environment_default``: enabled and ``value {type, value}``; an unknown feature 404 with a
-  JSON ``detail``), ``PUT|DELETE .../edge-identities-featurestates`` (JSON body, no trailing
-  slash; a PUT creates a missing identity), ``POST .../edge-identities/`` (a duplicate is 400
-  "already exists"), ``PUT .../edge-identities/<uuid>/update-traits/`` (a null value deletes
-  the trait), ``GET .../edge-identities/<uuid>/list-traits/`` and
-  ``GET .../edge-identities/<uuid>/edge-featurestates/`` (the controller settle, #2624),
+  JSON ``detail``), the override routes the SaaS has (#2682, verified live 2026-11-18):
+  ``GET|POST .../edge-identities/<uuid>/edge-featurestates/`` (``feature``, ``enabled``,
+  ``feature_state_value``; 201 with ``featurestate_uuid``; a feature overridden already is 400
+  ``["Feature state already exists."]``) and ``GET|PUT|DELETE .../edge-featurestates/<featurestate_uuid>/``
+  (an unknown one 404 ``{"detail": "Not found."}``); the upsert by identifier
+  ``.../edge-identities-featurestates`` the SaaS does not route answers Django's HTML 404;
+  ``POST .../edge-identities/`` (a duplicate is 400 "already exists"),
+  ``PUT .../edge-identities/<uuid>/update-traits/`` (a null value deletes the trait),
+  ``GET .../edge-identities/<uuid>/list-traits/`` (the controller settle, #2624),
   ``DELETE .../edge-identities/<uuid>/`` (with its overrides);
 - ``GET .../edge-identities/?q=``: a quoted ``"x"`` is an exact match, unquoted a prefix;
 - an Admin API write adds an audit row (newest first) with ``author: None`` (an API key) and
@@ -66,10 +73,18 @@ _ENV = re.compile(r"^/api/v1/environments/([^/]+)/$")
 _EDGE_LIST = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/$")
 _EDGE_ONE = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/$")
 _EDGE_TRAITS = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/update-traits/$")
-# A controller identity (#2624): its traits and its overrides, read by the link.
-_EDGE_SUB = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/(list-traits|edge-featurestates)/$")
-# No trailing slash: push.go sends exactly this path (and Flagsmith 404s the other form).
-_EDGE_FS = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities-featurestates$")
+# A controller identity's traits (#2624), read by the link.
+_EDGE_TRAITS_LIST = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/list-traits/$")
+# An identity's overrides (#2682): the list (GET, POST) and one override by its
+# featurestate_uuid (GET, PUT, DELETE), the only override routes the SaaS has.
+_EDGE_FS_LIST = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/edge-featurestates/$")
+_EDGE_FS_ONE = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities/([^/]+)/edge-featurestates/([^/]+)/$")
+# The upsert by identifier the SaaS does not route: Django's HTML 404, not JSON (#2682).
+_EDGE_FS_UPSERT = re.compile(r"^/api/v1/environments/([^/]+)/edge-identities-featurestates/?$")
+_DJANGO_404 = (
+    b'<!doctype html>\n<html lang="en">\n<head>\n  <title>Not Found</title>\n</head>\n<body>\n'
+    b"  <h1>Not Found</h1><p>The requested resource was not found on this server.</p>\n</body>\n</html>\n"
+)
 # Every Admin path names the environment by its client key and the project by its id.
 _ANY_ENV = re.compile(r"^/api/(?:v1|__future__)/environments/([^/]+)/")
 _ANY_PROJECT = re.compile(r"^/api/v1/projects/([^/]+)/")
@@ -163,9 +178,14 @@ class FakeFlagsmith:
                 if fake.delay > 0:
                     time.sleep(fake.delay)
                 status, payload, extra = fake._answer(self.command, self.path, dict(self.headers.items()), body)
-                data = b"" if payload is None or status == 304 else json.dumps(payload).encode()
+                if isinstance(payload, bytes):
+                    # Django's HTML answer (a path the SaaS does not route).
+                    data, ctype = payload, "text/html; charset=utf-8"
+                else:
+                    data = b"" if payload is None or status == 304 else json.dumps(payload).encode()
+                    ctype = "application/json"
                 self.send_response(status)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", ctype)
                 for name, value in extra.items():
                     self.send_header(name, value)
                 self.send_header("Content-Length", str(len(data)))
@@ -238,7 +258,7 @@ class FakeFlagsmith:
             if identity is None:
                 return None
             found = identity["overrides"].get(self._feature(feature)["id"])
-            return dict(found) if found else None
+            return {"enabled": found["enabled"], "value": found["value"]} if found else None
 
     def identities(self) -> dict[str, dict]:
         """identifier -> {"identity_uuid", "traits"} of every edge identity."""
@@ -308,9 +328,12 @@ class FakeFlagsmith:
                 if identity is None or identity["overrides"].pop(f["id"], None) is None:
                     return
                 verb = "deleted"
+            elif f["id"] in identity["overrides"]:
+                verb = "updated"
+                identity["overrides"][f["id"]].update(enabled=enabled, value=value)
             else:
-                verb = "updated" if f["id"] in identity["overrides"] else "created"
-                identity["overrides"][f["id"]] = {"enabled": enabled, "value": value}
+                verb = "created"
+                self._new_override(identity, f["id"], enabled, value)
             self._audit(f"Feature override {verb} for feature '{f['name']}' and identity '{identifier}'", author)
             self._bump()
 
@@ -378,6 +401,17 @@ class FakeFlagsmith:
             "feature_state_value": state["value"],
         }
 
+    def _override_state(self, feature: dict, state: dict) -> dict:
+        """An identity override as the edge document shows it: an integer value as a JSON
+        string ("10" for a pushed 10, verified on the SaaS 2026-11-18, #2682); floats-as-text,
+        strings, booleans and JSON text as sent."""
+        out = self._state(feature, state)
+        value = state["value"]
+        if isinstance(value, int) and not isinstance(value, bool):
+            out["feature_state_value"] = str(value)
+        out["featurestate_uuid"] = state["featurestate_uuid"]
+        return out
+
     def _document(self) -> dict:
         overrides = []
         for identifier, identity in sorted(self._identities.items()):
@@ -387,7 +421,8 @@ class FakeFlagsmith:
                         "identifier": identifier,
                         "identity_uuid": identity["identity_uuid"],
                         "identity_features": [
-                            self._state(self._feature(fid), state) for fid, state in identity["overrides"].items()
+                            self._override_state(self._feature(fid), state)
+                            for fid, state in identity["overrides"].items()
                         ],
                     }
                 )
@@ -439,8 +474,12 @@ class FakeFlagsmith:
             return 404, {"detail": "Not found."}, {}
         if (m := _FUTURE.match(path)) and method == "PATCH":
             return self._patch(int(m.group(2)), body, record)
-        if _EDGE_FS.match(path) and method in ("PUT", "DELETE"):
-            return self._override_push(method, body or {}, record)
+        if _EDGE_FS_UPSERT.match(path):
+            return 404, _DJANGO_404, {}
+        if m := _EDGE_FS_LIST.match(path):
+            return self._override_list(method, m.group(2), body, record)
+        if m := _EDGE_FS_ONE.match(path):
+            return self._override_one(method, m.group(2), m.group(3), body, record)
         if (m := _ENV.match(path)) and method == "GET":
             return (
                 200,
@@ -469,25 +508,11 @@ class FakeFlagsmith:
                         identity["traits"][body["trait_key"]] = body["trait_value"]
                     return 200, {"trait_key": body["trait_key"], "trait_value": body["trait_value"]}, {}
             return 404, {"detail": "Not found."}, {}
-        if (m := _EDGE_SUB.match(path)) and method == "GET":
-            identity = next((i for i in self._identities.values() if i["identity_uuid"] == m.group(2)), None)
+        if (m := _EDGE_TRAITS_LIST.match(path)) and method == "GET":
+            identity = self._by_uuid(m.group(2))[1]
             if identity is None:
                 return 404, {"detail": "Not found."}, {}
-            if m.group(3) == "list-traits":
-                return 200, [{"trait_key": k, "trait_value": v} for k, v in identity["traits"].items()], {}
-            return (
-                200,
-                [
-                    {
-                        "feature": fid,
-                        "enabled": state["enabled"],
-                        "feature_state_value": state["value"],
-                        "identity_uuid": identity["identity_uuid"],
-                    }
-                    for fid, state in identity["overrides"].items()
-                ],
-                {},
-            )
+            return 200, [{"trait_key": k, "trait_value": v} for k, v in identity["traits"].items()], {}
         if (m := _EDGE_ONE.match(path)) and method == "DELETE":
             for identifier, identity in list(self._identities.items()):
                 if identity["identity_uuid"] == m.group(2):
@@ -540,30 +565,78 @@ class FakeFlagsmith:
         self._bump()
         return 200, {"feature": fid, **default}, {}
 
-    def _override_push(self, method, body, record):
-        fid, identifier = body.get("feature"), body.get("identifier", "")
+    def _by_uuid(self, identity_uuid: str) -> tuple[str, dict | None]:
+        for identifier, identity in self._identities.items():
+            if identity["identity_uuid"] == identity_uuid:
+                return identifier, identity
+        return "", None
+
+    @staticmethod
+    def _override_answer(identity: dict, fid: int, state: dict) -> dict:
+        """One override as the Admin API answers it (live SaaS, 2026-11-18): typed value."""
+        return {
+            "feature_state_value": state["value"],
+            "feature": fid,
+            "multivariate_feature_state_values": [],
+            "enabled": state["enabled"],
+            "featurestate_uuid": state["featurestate_uuid"],
+            "identity_uuid": identity["identity_uuid"],
+        }
+
+    def _override_list(self, method, identity_uuid, body, record):
+        """GET / POST ``.../edge-identities/<uuid>/edge-featurestates/`` (#2682)."""
+        identifier, identity = self._by_uuid(identity_uuid)
+        if identity is None:
+            return 404, {"detail": "Not found."}, {}
+        if method == "GET":
+            return 200, [self._override_answer(identity, fid, s) for fid, s in identity["overrides"].items()], {}
+        if method != "POST":
+            return 405, {"detail": f'Method "{method}" not allowed.'}, {}
+        fid = (body or {}).get("feature")
         record["feature"] = fid
         try:
             feature = self._feature(fid)
         except KeyError:
+            return 400, {"feature": ["This field is required."]}, {}
+        if refused := self._refused(fid):
+            return refused
+        if fid in identity["overrides"]:
+            return 400, ["Feature state already exists."], {}
+        state = self._new_override(identity, fid, bool(body.get("enabled")), body.get("feature_state_value"))
+        self._audit(f"Feature override created for feature '{feature['name']}' and identity '{identifier}'", None)
+        self._bump()
+        return 201, self._override_answer(identity, fid, state), {}
+
+    def _override_one(self, method, identity_uuid, fs_uuid, body, record):
+        """GET / PUT / DELETE ``.../edge-featurestates/<featurestate_uuid>/`` (#2682)."""
+        identifier, identity = self._by_uuid(identity_uuid)
+        if identity is None:
             return 404, {"detail": "Not found."}, {}
+        fid = next((f for f, s in identity["overrides"].items() if s["featurestate_uuid"] == fs_uuid), None)
+        if fid is None:
+            return 404, {"detail": "Not found."}, {}
+        state, feature = identity["overrides"][fid], self._feature(fid)
+        if method == "GET":
+            return 200, self._override_answer(identity, fid, state), {}
+        if method not in ("PUT", "DELETE"):
+            return 405, {"detail": f'Method "{method}" not allowed.'}, {}
+        record["feature"] = fid
         if refused := self._refused(fid):
             return refused
         if method == "DELETE":
-            identity = self._identities.get(identifier)
-            if identity is None or identity["overrides"].pop(fid, None) is None:
-                return 404, {"detail": "Not found."}, {}
+            del identity["overrides"][fid]
             verb = "deleted"
         else:
-            identity = self._identity(identifier, create=True)
-            verb = "updated" if fid in identity["overrides"] else "created"
-            identity["overrides"][fid] = {
-                "enabled": bool(body.get("enabled")),
-                "value": body.get("feature_state_value"),
-            }
+            state.update(enabled=bool((body or {}).get("enabled")), value=(body or {}).get("feature_state_value"))
+            verb = "updated"
         self._audit(f"Feature override {verb} for feature '{feature['name']}' and identity '{identifier}'", None)
         self._bump()
-        return (204, None, {}) if method == "DELETE" else (200, dict(body), {})
+        return (204, None, {}) if method == "DELETE" else (200, self._override_answer(identity, fid, state), {})
+
+    def _new_override(self, identity: dict, fid: int, enabled: bool, value: object) -> dict:
+        state = {"enabled": enabled, "value": value, "featurestate_uuid": str(uuid.uuid4())}
+        identity["overrides"][fid] = state
+        return state
 
     def _create_identity(self, identifier: str):
         if identifier in self._identities:

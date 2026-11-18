@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,30 +80,44 @@ func TestIdentityOverrideBody(t *testing.T) {
 		{name: "real", set: "game", flag: "windows", scopeName: registry.ScopeReal, scope: state.Scope{GameKind: "real"}, raw: `{"min": 1}`, identifier: "real", value: `"{\"min\":1}"`},
 		{name: "fraction", set: "agent", flag: "decision.prompt_profile", scopeName: registry.ScopeFraction, scope: state.Scope{FractionPercent: &pct}, variant: "v1", raw: `"v1"`, identifier: "fraction", value: `"{\"variant\":\"v1\",\"fraction_percent\":25}"`},
 	}
-	path := apiEnv + "edge-identities-featurestates"
 	for _, c := range cases {
-		t.Run("UC-055/BR-002 "+c.name, func(t *testing.T) {
-			e := newOutEnv(t)
-			if c.game != nil {
-				e.link.StateChanged(e.registered(c.game, nil))
-			}
-			e.link.StateChanged(e.change(state.ChangeValue, c.set, c.flag, c.scopeName, c.scope, c.variant, c.raw))
-			e.drain()
-			want := fmt.Sprintf(`{"identifier":%q,"feature":%d,"enabled":true,"feature_state_value":%s}`, c.identifier, e.fid(c.flag), c.value)
-			if got := e.bodies(http.MethodPut, path); len(got) != 1 || got[0] != want {
-				t.Fatalf("UC-055/BR-002 override bodies %v, want [%s]", got, want)
-			}
-			if n := e.count(http.MethodPatch, "/api/__future__/"); n != 0 {
-				t.Fatalf("UC-055/BR-002 %d stack PATCH requests for a %s value, want 0", n, c.name)
-			}
-			// The value ends: the override is deleted.
-			e.link.StateChanged(e.change(state.ChangeCleared, c.set, c.flag, c.scopeName, c.scope, "", ""))
-			e.drain()
-			wantDel := fmt.Sprintf(`{"identifier":%q,"feature":%d}`, c.identifier, e.fid(c.flag))
-			if got := e.bodies(http.MethodDelete, path); len(got) != 1 || got[0] != wantDel {
-				t.Fatalf("UC-055/BR-002 delete bodies %v, want [%s]", got, wantDel)
-			}
-		})
+		t.Run("UC-055/BR-002 "+c.name, func(t *testing.T) { checkOverrideCase(t, c) })
+	}
+}
+
+// checkOverrideCase pushes c's value, checks the POST on the identity's
+// override list (#2682), ends the value and checks the DELETE of the override
+// itself.
+func checkOverrideCase(t *testing.T, c overrideCase) {
+	e := newOutEnv(t)
+	if c.game != nil {
+		e.link.StateChanged(e.registered(c.game, nil))
+	}
+	e.link.StateChanged(e.change(state.ChangeValue, c.set, c.flag, c.scopeName, c.scope, c.variant, c.raw))
+	e.drain()
+	path := apiEnv + "edge-identities/" + uuidOf(c.identifier) + "/edge-featurestates/"
+	want := fmt.Sprintf(`{"feature":%d,"enabled":true,"feature_state_value":%s}`, e.fid(c.flag), c.value)
+	if got := e.overrideWrites(http.MethodPost); len(got) != 1 || got[0].Path != path || string(got[0].Body) != want {
+		t.Fatalf("UC-055/BR-002 override POSTs %v, want one to %s with %s", got, path, want)
+	}
+	if v, ok := e.overrideOn(c.identifier, c.flag); !ok || v != c.value {
+		t.Fatalf("UC-055/BR-002 override on %s = %s (%v), want %s", c.identifier, v, ok, c.value)
+	}
+	if n := e.count(http.MethodPatch, "/api/__future__/"); n != 0 {
+		t.Fatalf("UC-055/BR-002 %d stack PATCH requests for a %s value, want 0", n, c.name)
+	}
+	// The value ends: the override itself is deleted, by its featurestate_uuid.
+	e.link.StateChanged(e.change(state.ChangeCleared, c.set, c.flag, c.scopeName, c.scope, "", ""))
+	e.drain()
+	del := e.overrideWrites(http.MethodDelete)
+	if len(del) != 1 || !strings.HasPrefix(del[0].Path, path+"fs-") || len(del[0].Body) != 0 {
+		t.Fatalf("UC-055/BR-002 override DELETEs %v, want one below %s", del, path)
+	}
+	if _, ok := e.overrideOn(c.identifier, c.flag); ok {
+		t.Fatalf("UC-055/BR-002 the override on %s is still there", c.identifier)
+	}
+	if n := e.oldRouteRequests(); n != 0 {
+		t.Fatalf("UC-055/BR-002 %d requests to the upsert route the SaaS does not have", n)
 	}
 }
 

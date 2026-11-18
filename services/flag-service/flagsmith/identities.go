@@ -2,10 +2,7 @@ package flagsmith
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"net/url"
-	"strings"
 	"sync"
 
 	"go.opentelemetry.io/otel/trace"
@@ -238,13 +235,12 @@ func (o *out) createIdentity(ctx context.Context, op identityOp) outcome {
 		var created struct {
 			IdentityUUID string `json:"identity_uuid"`
 		}
-		status, err := l.Client().Admin(c, http.MethodPost, l.envPath("edge-identities/"), map[string]string{"identifier": op.Identifier}, &created)
+		status, err := l.Client().Admin(c, http.MethodPost, l.envPath(edgeIdentitiesPath), map[string]string{"identifier": op.Identifier}, &created)
 		if err == nil {
 			uuid = created.IdentityUUID
 			return status, nil
 		}
-		var he *HTTPError
-		if errors.As(err, &he) && he.Status == http.StatusBadRequest && strings.Contains(strings.ToLower(string(he.Body)), "already exist") {
+		if alreadyExists(err) {
 			return status, nil
 		}
 		return status, err
@@ -254,6 +250,9 @@ func (o *out) createIdentity(ctx context.Context, op identityOp) outcome {
 	case oc.ok:
 		if uuid != "" {
 			l.setIdentityUUID(op.Identifier, uuid)
+			// A new identity has no override: its first value is a POST
+			// with no listing (#2682).
+			o.freshOverrides(uuid)
 		}
 		o.markListed(op.Identifier)
 		if o.traitsOff.Load() {
@@ -279,7 +278,7 @@ func (o *out) sendTrait(ctx context.Context, op identityOp) outcome {
 			Key   string `json:"trait_key"`
 			Value string `json:"trait_value"`
 		}{t.Key, t.Value}
-		return l.Client().Admin(c, http.MethodPut, l.envPath("edge-identities/"+url.PathEscape(op.UUID)+"/update-traits/"), body, nil)
+		return l.Client().Admin(c, http.MethodPut, l.identityPath(op.UUID)+"update-traits/", body, nil)
 	})
 	switch {
 	case oc.ok:
@@ -298,39 +297,24 @@ func (o *out) sendTrait(ctx context.Context, op identityOp) outcome {
 // query); an identity Flagsmith does not know is success.
 func (o *out) deleteIdentity(ctx context.Context, op identityOp) outcome {
 	l := o.l
+	uuid := ""
 	oc := o.roundTrip(ctx, Key{Scope: op.Identifier}, OpDeleteIdentity, "", 1, trace.SpanContext{}, func(c context.Context) (int, error) {
-		uuid := l.identityUUID(op.Identifier)
+		r := &requests{o: o}
+		uuid = l.identityUUID(op.Identifier)
 		if uuid == "" {
-			var found struct {
-				Results []struct {
-					IdentityUUID string `json:"identity_uuid"`
-					Identifier   string `json:"identifier"`
-				} `json:"results"`
-			}
-			q := url.QueryEscape(`"` + op.Identifier + `"`)
-			status, err := l.Client().Admin(c, http.MethodGet, l.envPath("edge-identities/")+"?q="+q, nil, &found)
-			if err != nil {
+			found, status, err := o.searchIdentity(c, r.admin, op.Identifier)
+			if err != nil || found == "" {
 				return status, err
 			}
-			for _, r := range found.Results {
-				if r.Identifier == op.Identifier {
-					uuid = r.IdentityUUID
-					break
-				}
-			}
-			if uuid == "" {
-				return status, nil
-			}
-			if err := o.pace(c); err != nil {
-				return 0, err
-			}
+			uuid = found
 		}
-		status, err := l.Client().Admin(c, http.MethodDelete, l.envPath("edge-identities/"+url.PathEscape(uuid)+"/"), nil, nil)
+		status, err := r.admin(c, http.MethodDelete, l.identityPath(uuid), nil, nil)
 		return status, ignoreNotFound(err)
 	})
 	switch {
 	case oc.ok:
 		l.forgetIdentityUUID(op.Identifier)
+		o.forgetOverrides(uuid)
 		o.ids.Done(op)
 	case oc.err == nil && oc.wait == 0:
 		l.Logger().Warn("flagsmith: identity not removed", "identifier", op.Identifier, "reason", oc.reason)
