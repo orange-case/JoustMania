@@ -118,6 +118,10 @@ type Store struct {
 	// self-ingestion feedback loop. Set once before serving; not mutex-guarded.
 	ownService string
 
+	// momentObs is told about every player_death span event read (#2658 slice 3);
+	// nil counts nothing. Set once before use (SetMomentObserver).
+	momentObs MomentObserver
+
 	// OnGameEnd, when non-nil, is fired EXACTLY ONCE per game when the game ends
 	// (#844 post-game retrospective), whichever end signal arrives first: the
 	// game_active 1 -> 0 datapoint, the game root span (EndGameFromRootSpan) or a
@@ -137,6 +141,13 @@ type Store struct {
 // receiving Apply* calls.
 func (s *Store) SetOwnService(name string) {
 	s.ownService = name
+}
+
+// SetMomentObserver sets the observer told about each player_death span event the
+// store reads (agent_moments_received_total, #2658 slice 3). The Multiplexer sets it
+// on every partition it creates; set before the store is used.
+func (s *Store) SetMomentObserver(obs MomentObserver) {
+	s.momentObs = obs
 }
 
 // SetTTLSources installs the LIVE eviction-TTL sources (#927): EvictStale reads
@@ -1126,20 +1137,22 @@ func (s *Store) RecordElimination(serial string) {
 const momentIDsCap = 1024
 
 // recordDeathMoment applies one player_death moment, from a span event or a log
-// event, under one lock. It returns false when a moment with this id was applied
-// before (UC-041 BR-009): the later record changes nothing. An empty id (a span
-// event from a coordinator before #2658 slice 3) always applies. A death adds the
-// player to the elimination sequence only when it eliminates (UC-041 BR-008).
-func (s *Store) recordDeathMoment(id, serial string, eliminates bool) bool {
+// event, under one lock, and returns its outcome: MomentDuplicate when a moment
+// with this id was applied before (UC-041 BR-009): the later record changes
+// nothing; else MomentCounted. An empty id (a span event from a coordinator before
+// #2658 slice 3) always applies. A death adds the player to the elimination
+// sequence only when it eliminates (UC-041 BR-008). The caller reports the outcome
+// to the moment observer after the lock is released.
+func (s *Store) recordDeathMoment(id, serial string, eliminates bool) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if id != "" && !s.moments.add(id) {
-		return false
+		return MomentDuplicate
 	}
 	if eliminates {
 		s.appendElimination(serial)
 	}
-	return true
+	return MomentCounted
 }
 
 // isEliminatedLocked reports whether serial is in the elimination sequence.

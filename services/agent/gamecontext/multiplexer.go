@@ -41,6 +41,10 @@ type Multiplexer struct {
 	// batch is never routed to any partition. Set once before serving.
 	ownService string
 
+	// momentObs is told about every moment record (agent_moments_received_total,
+	// #2658 slice 3); handed to every partition it creates. Set once before serving.
+	momentObs MomentObserver
+
 	// names is the serial -> display-name view from controller_info{serial,name}
 	// (#1295). controller-manager metrics carry no game_id, so the view is
 	// process-wide rather than per partition; it is bounded by the number of
@@ -118,6 +122,21 @@ func (m *Multiplexer) SetOwnService(name string) {
 	m.mu.Unlock()
 }
 
+// SetMomentObserver sets the observer of the moment records (#2658 slice 3): the
+// log path reports to it directly, and every partition created afterwards gets it
+// for its span path. Must be called before serving.
+func (m *Multiplexer) SetMomentObserver(obs MomentObserver) {
+	m.mu.Lock()
+	m.momentObs = obs
+	m.mu.Unlock()
+}
+
+func (m *Multiplexer) momentObserver() MomentObserver {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.momentObs
+}
+
 // store returns the Store for gameID, creating it lazily via the factory. Safe
 // for concurrent use: a read-locked fast path is followed by a write-locked
 // double-checked create.
@@ -135,6 +154,9 @@ func (m *Multiplexer) store(gameID string) *Store {
 		return s
 	}
 	s = m.newStore(gameID)
+	if m.momentObs != nil {
+		s.SetMomentObserver(m.momentObs)
+	}
 	if gameID != FallbackGameID {
 		s.setPartition(m.ended.has(gameID))
 	}

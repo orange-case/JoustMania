@@ -31,6 +31,10 @@ var digestKeys = map[string][]string{
 		"decision.backend", CapFlagKey, "policy.", "fitness.",
 	},
 	"interventions": {"*"},
+	// The death follows the moment shape since #2658 slice 3; in log_event (and in
+	// both when the log arrives first) each death wakes one more evaluation, which
+	// can shift the seeded chaos draws. Adding it changed every digest.
+	"observability": {"telemetry.moment_shape"},
 }
 
 // DigestKeysCovered reports whether set/key is part of the flag digest.

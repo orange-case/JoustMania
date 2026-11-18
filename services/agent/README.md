@@ -871,6 +871,13 @@ answers "is the agent receiving metrics?" directly, and the `outcome` split
 distinguishes "metrics arrive but trigger nothing" from "metrics aren't arriving"
 — the exact ambiguity that made the metric-driven loop look span-driven.
 
+**Moments read (#2658 slice 3, UC-041 A7, BR-009):** `agent_moments_received_total`
+(`Int64Counter`, `services/agent/moments.go`) counts every game moment record the agent reads, labeled
+`moment` (`player_death`|`death_warning`), `shape` (`span_event`|`log_event`) and `outcome`
+(`counted`|`duplicate`|`ignored`|`dropped`); 7 reachable series. It is the deterministic evidence that
+the log path delivered a moment (a NonStop respawn death changes no game context). In the `span` moment
+shape no `player_death` series moves: the agent ignores moment spans (UC-100 BR-010).
+
 **Lifecycle safety (#923 goleak):** each follow-up runs in a goroutine tracked on a
 `WaitGroup` (joined by `AwaitInflight` at shutdown) and bounded by the agent root
 context. It selects on the follow-up timer **and** `rootCtx.Done()`: on shutdown it
