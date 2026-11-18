@@ -10,14 +10,18 @@ arrived::
 
 Both ``wait_*`` block (poll a condition, never a sleep); an async test calls
 the ``*_async`` twins, which run them on a worker thread. Logs are recorded too
-(body, trace id, attributes; ``logs()``), so a test can follow a game's trace id
-from a span to its log lines.
+(body, event name, trace id, attributes; ``logs()``, ``wait_log``), so a test can
+follow a game's trace id from a span to its log lines, or wait for a moment log
+event (``wait_log(event_name="player_death", attrs={...})``).
 
 Tee: ``OtlpSink(forward_to="127.0.0.1:<port>")`` forwards every trace and
 metrics export request unchanged to another OTLP/gRPC receiver (the agent's, as
 the collector's ``otlp/agent`` exporter does in its traces and metrics
-pipelines), best effort: a failed forward is counted in ``forward_errors`` and
-never fails the service's export.
+pipelines), and of each logs export request only the moment log events, as the
+collector's ``logs/agent`` pipeline with ``filter/agent_moments`` does (C-001,
+#2658): records named ``death_warning`` or ``player_death`` that carry a
+``moment.id``; a request with none is not forwarded. Best effort: a failed
+forward is counted in ``forward_errors`` and never fails the service's export.
 """
 
 from __future__ import annotations
@@ -34,10 +38,13 @@ import grpc
 from opentelemetry.proto.collector.logs.v1 import logs_service_pb2, logs_service_pb2_grpc
 from opentelemetry.proto.collector.metrics.v1 import metrics_service_pb2, metrics_service_pb2_grpc
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2, trace_service_pb2_grpc
+from opentelemetry.proto.logs.v1 import logs_pb2
 
 DEFAULT_WAIT_SECONDS = 30.0
 POLL_INTERVAL_SECONDS = 0.1
 FORWARD_TIMEOUT_SECONDS = 2.0
+# The moment log events the collector's filter/agent_moments passes to the agent (C-001).
+AGENT_MOMENT_EVENTS = frozenset({"death_warning", "player_death"})
 
 
 # --------------------------------------------------------------------------- #
@@ -104,6 +111,7 @@ class LogRecord:
     trace_id: str  # hex, "" when the line was logged outside a span
     span_id: str  # hex
     attributes: dict[str, Any] = field(default_factory=dict)
+    event_name: str = ""  # "" for an ordinary log line; the moment's name for a moment log event
 
 
 def _any_value(value) -> Any:
@@ -165,9 +173,35 @@ def _decode_logs(request) -> list[LogRecord]:
                         trace_id=record.trace_id.hex(),
                         span_id=record.span_id.hex(),
                         attributes=_attributes(record.attributes),
+                        event_name=record.event_name,
                     )
                 )
     return records
+
+
+def _is_agent_moment(record) -> bool:
+    """A moment log event the collector exports to the agent (``filter/agent_moments``)."""
+    return record.event_name in AGENT_MOMENT_EVENTS and any(kv.key == "moment.id" for kv in record.attributes)
+
+
+def _agent_moment_logs(request) -> logs_service_pb2.ExportLogsServiceRequest | None:
+    """``request`` with only its moment log events (empty scopes and resources dropped); None when none."""
+    out = logs_service_pb2.ExportLogsServiceRequest()
+    for resource_logs in request.resource_logs:
+        scopes = []
+        for scope_logs in resource_logs.scope_logs:
+            kept = [r for r in scope_logs.log_records if _is_agent_moment(r)]
+            if kept:
+                scopes.append(
+                    logs_pb2.ScopeLogs(scope=scope_logs.scope, log_records=kept, schema_url=scope_logs.schema_url)
+                )
+        if scopes:
+            out.resource_logs.append(
+                logs_pb2.ResourceLogs(
+                    resource=resource_logs.resource, scope_logs=scopes, schema_url=resource_logs.schema_url
+                )
+            )
+    return out if out.resource_logs else None
 
 
 def _decode_points(metric) -> tuple[str, tuple[MetricPoint, ...]]:
@@ -233,7 +267,7 @@ class _LogsServicer(logs_service_pb2_grpc.LogsServiceServicer):
 # --------------------------------------------------------------------------- #
 class OtlpSink:
     def __init__(self, forward_to: str | None = None):
-        """``forward_to``: ``host:port`` of an OTLP/gRPC receiver to tee trace and metrics exports to."""
+        """``forward_to``: ``host:port`` of an OTLP/gRPC receiver to tee traces, metrics and moment logs to."""
         self.forward_to = forward_to
         self._lock = threading.Lock()
         self._spans: list[SpanRecord] = []
@@ -245,6 +279,7 @@ class OtlpSink:
         self._forward_channel: grpc.Channel | None = None
         self._forward_stub: trace_service_pb2_grpc.TraceServiceStub | None = None
         self._forward_metrics_stub: metrics_service_pb2_grpc.MetricsServiceStub | None = None
+        self._forward_logs_stub: logs_service_pb2_grpc.LogsServiceStub | None = None
         self.port: int | None = None
 
     # ------------------------------------------------------------- lifecycle
@@ -260,6 +295,7 @@ class OtlpSink:
             self._forward_channel = grpc.insecure_channel(self.forward_to)
             self._forward_stub = trace_service_pb2_grpc.TraceServiceStub(self._forward_channel)
             self._forward_metrics_stub = metrics_service_pb2_grpc.MetricsServiceStub(self._forward_channel)
+            self._forward_logs_stub = logs_service_pb2_grpc.LogsServiceStub(self._forward_channel)
         return self.port
 
     def stop(self) -> None:
@@ -271,6 +307,7 @@ class OtlpSink:
             self._forward_channel = None
             self._forward_stub = None
             self._forward_metrics_stub = None
+            self._forward_logs_stub = None
 
     @property
     def endpoint(self) -> str:
@@ -311,6 +348,11 @@ class OtlpSink:
         records = _decode_logs(request)
         with self._lock:
             self._logs.extend(records)
+        stub = self._forward_logs_stub  # read once, as in _on_traces
+        if stub is not None:
+            moments = _agent_moment_logs(request)
+            if moments is not None:
+                self._forward(stub, moments)
 
     # --------------------------------------------------------------- reading
     @property
@@ -328,14 +370,26 @@ class OtlpSink:
         with self._lock:
             return len(self._logs)
 
-    def logs(self, *, service: str | None = None, trace_id: str | None = None) -> list[LogRecord]:
-        """Recorded log records matching every given filter, oldest first."""
+    def logs(
+        self,
+        *,
+        service: str | None = None,
+        trace_id: str | None = None,
+        event_name: str | None = None,
+        attrs: Mapping[str, Any] | None = None,
+        predicate: Callable[[LogRecord], bool] | None = None,
+    ) -> list[LogRecord]:
+        """Recorded log records matching every given filter (``attrs`` is a subset match), oldest first."""
         with self._lock:
             records = list(self._logs)
         return [
             r
             for r in records
-            if (service is None or r.service == service) and (trace_id is None or r.trace_id == trace_id)
+            if (service is None or r.service == service)
+            and (trace_id is None or r.trace_id == trace_id)
+            and (event_name is None or r.event_name == event_name)
+            and _matches(r.attributes, attrs)
+            and (predicate is None or predicate(r))
         ]
 
     def spans(
@@ -448,13 +502,25 @@ class OtlpSink:
         *,
         service: str | None = None,
         trace_id: str | None = None,
+        event_name: str | None = None,
+        attrs: Mapping[str, Any] | None = None,
+        predicate: Callable[[LogRecord], bool] | None = None,
         timeout: float = DEFAULT_WAIT_SECONDS,
     ) -> LogRecord:
-        """The OLDEST log record matching the filters; ``TimeoutError`` when none arrives."""
-        found = self._poll(lambda: self.logs(service=service, trace_id=trace_id), timeout)
+        """The OLDEST log record matching the filters (see ``logs``); ``TimeoutError`` when none arrives."""
+        found = self._poll(
+            lambda: self.logs(
+                service=service, trace_id=trace_id, event_name=event_name, attrs=attrs, predicate=predicate
+            ),
+            timeout,
+        )
         if found:
             return found[0]
-        raise TimeoutError(f"no log record service={service} trace_id={trace_id} within {timeout}s")
+        seen = sorted({r.event_name for r in self.logs() if r.event_name})
+        raise TimeoutError(
+            f"no log record service={service} trace_id={trace_id} event_name={event_name} "
+            f"attrs={dict(attrs or {})} within {timeout}s; event names seen: {seen}"
+        )
 
     async def wait_log_async(self, **kwargs) -> LogRecord:
         return await asyncio.to_thread(self.wait_log, **kwargs)

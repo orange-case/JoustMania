@@ -13,9 +13,11 @@ import dataclasses
 
 import grpc
 import pytest
+from opentelemetry.proto.collector.logs.v1 import logs_service_pb2, logs_service_pb2_grpc
 from opentelemetry.proto.collector.metrics.v1 import metrics_service_pb2, metrics_service_pb2_grpc
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2, trace_service_pb2_grpc
 from opentelemetry.proto.common.v1 import common_pb2
+from opentelemetry.proto.logs.v1 import logs_pb2
 from opentelemetry.proto.metrics.v1 import metrics_pb2
 from opentelemetry.proto.resource.v1 import resource_pb2
 from opentelemetry.proto.trace.v1 import trace_pb2
@@ -221,6 +223,68 @@ def test_sink_tees_metrics_exports_to_another_receiver():
         for sink in (tee, downstream):
             sink.stop()
 
+
+
+def _kv(key, value):
+    if isinstance(value, bool):
+        return common_pb2.KeyValue(key=key, value=common_pb2.AnyValue(bool_value=value))
+    return common_pb2.KeyValue(key=key, value=common_pb2.AnyValue(string_value=value))
+
+
+def _log(body, event_name="", **attrs):
+    return logs_pb2.LogRecord(
+        body=common_pb2.AnyValue(string_value=body),
+        event_name=event_name,
+        attributes=[_kv(k.replace("_", "."), v) for k, v in attrs.items()],
+    )
+
+
+def _logs_export_request(*records) -> logs_service_pb2.ExportLogsServiceRequest:
+    resource = resource_pb2.Resource(attributes=[_kv("service.name", "probe")])
+    return logs_service_pb2.ExportLogsServiceRequest(
+        resource_logs=[logs_pb2.ResourceLogs(resource=resource, scope_logs=[logs_pb2.ScopeLogs(log_records=records)])]
+    )
+
+
+@pytest.mark.uc("UC-041", flow="A7", steps=[1])
+def test_sink_tees_only_moment_log_events_to_another_receiver():
+    """Mirror of the collector's filter/agent_moments (C-001, #2658): a moment name with a moment.id only."""
+    downstream = OtlpSink()
+    downstream.start()
+    tee = OtlpSink(forward_to=f"127.0.0.1:{downstream.port}")
+    tee.start()
+    try:
+        with grpc.insecure_channel(f"127.0.0.1:{tee.port}") as channel:
+            stub = logs_service_pb2_grpc.LogsServiceStub(channel)
+            stub.Export(_logs_export_request(_log("Player died: p0")), timeout=5)
+            stub.Export(
+                _logs_export_request(
+                    _log("Player died: p0"),
+                    _log("intervention", "intervention", moment_id="g/p0/1"),
+                    _log("death_warning", "death_warning", player_serial="p0"),
+                    _log("death_warning", "death_warning", moment_id="g/p0/2", player_serial="p0"),
+                    _log("player_death", "player_death", moment_id="g/p0/3", death_eliminated=False),
+                ),
+                timeout=5,
+            )
+        forwarded = downstream.wait_log(event_name="player_death", attrs={"moment.id": "g/p0/3"}, timeout=5)
+        assert forwarded.attributes["death.eliminated"] is False
+        assert forwarded.service == "probe"
+        assert [(r.event_name, r.attributes["moment.id"]) for r in downstream.logs()] == [
+            ("death_warning", "g/p0/2"),
+            ("player_death", "g/p0/3"),
+        ]
+        assert (tee.forward_ok, tee.forward_errors) == (1, 0), "a request without a moment is not forwarded"
+
+        # The read side: every record is recorded, and the filters pick the one asked for.
+        assert len(tee.logs(service="probe")) == 6
+        assert tee.wait_log(event_name="death_warning", attrs={"moment.id": "g/p0/2"}, timeout=1).body == "death_warning"
+        assert tee.wait_log(predicate=lambda r: not r.event_name, timeout=1).body == "Player died: p0"
+        with pytest.raises(TimeoutError, match="event names seen"):
+            tee.wait_log(event_name="player_death", attrs={"moment.id": "g/p0/9"}, timeout=0.3)
+    finally:
+        for sink in (tee, downstream):
+            sink.stop()
 
 def test_otlp_composition_points_every_service_at_the_sink(tmp_path):
     stack = ServiceStack(SERVICE_COMPOSITION, tmp_path)

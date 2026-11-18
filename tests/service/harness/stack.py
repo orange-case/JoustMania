@@ -18,8 +18,9 @@ service's OTLP exporter at it instead.
 ``Composition(..., agent=True)`` (needs ``otlp=True``; the ``AGENT``
 composition) adds the Go agent built at HEAD (``stack.agent``) and a
 scriptable fake OpenAI-compatible backend (``stack.fake_openai``): the sink tees
-the services' traces and metrics to the agent, as the collector does in compose,
-and the agent exports its own telemetry to the sink.
+the services' traces, metrics and moment log events to the agent, as the
+collector does in compose (``logs/agent``, #2658), and the agent exports its own
+telemetry to the sink.
 """
 
 from __future__ import annotations
