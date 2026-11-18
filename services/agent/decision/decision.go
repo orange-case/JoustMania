@@ -170,7 +170,8 @@ type fitnessReader interface {
 // annotate the agent.signal_received root span with rpc.* semconv attributes and
 // backdate it to the moment the Export arrived.
 type EvalTrigger struct {
-	// Signal is the OTLP signal type: "traces" or "metrics".
+	// Signal is the OTLP signal type: "traces", "metrics" or "logs" (moment log
+	// events, UC-041 A7).
 	Signal string
 	// RPCService is the full OTLP gRPC service name, e.g.
 	// "opentelemetry.proto.collector.metrics.v1.MetricsService".
@@ -528,9 +529,9 @@ func (l *Loop) recordIntervention(intervention, serial string, blocked bool) {
 
 // recordEvaluation bumps agent_evaluations_total for one eval cycle (#1053). It
 // is called on EVERY enabled cycle — idle or not — so signal arrival is queryable
-// even when no rule fires. signal is the triggering OTLP signal (metrics|traces),
+// even when no rule fires. signal is the triggering OTLP signal (metrics|traces|logs),
 // outcome is decided|idle. Labels are kept to these two low-cardinality dimensions
-// (4 series max) on purpose: no per-game/per-serial labels. The counter is never
+// (6 series max) on purpose: no per-game/per-serial labels. The counter is never
 // nil (NewLoop seeds a no-op), so this is safe from the concurrent Export-handler
 // goroutines that drive OnEvaluate.
 func (l *Loop) recordEvaluation(ctx context.Context, signal, outcome string) {
@@ -697,7 +698,7 @@ func (l *Loop) OnEvaluate(ctx context.Context, c gamecontext.GameContext, trig E
 	// Bump the per-cycle liveness counter BEFORE the lazy-trace branch so an idle
 	// cycle (no rule fired, hence no span) is still counted (#1053). outcome=idle
 	// on a zero-decision cycle, decided otherwise; signal is the OTLP signal that
-	// triggered this cycle (metrics|traces). This is what makes "metrics are
+	// triggered this cycle (metrics|traces|logs). This is what makes "metrics are
 	// arriving but nothing fires" distinguishable from "metrics aren't arriving".
 	if len(decisions) == 0 {
 		l.recordEvaluation(ctx, trig.Signal, "idle")

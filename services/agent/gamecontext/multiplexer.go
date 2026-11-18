@@ -53,36 +53,46 @@ type Multiplexer struct {
 	// an id arrive again (a game_active series resuming after a stale end, a late
 	// batch) the recreated partition starts latched and never runs the game-end
 	// chain a second time. Guarded by mu; bounded to endedGamesCap ids.
-	ended endedGames
+	ended boundedIDs
 }
 
 // endedGamesCap bounds Multiplexer.ended: far more games than can end within
 // any realistic late-delivery window, and a few KiB of memory.
 const endedGamesCap = 512
 
-// endedGames is a bounded FIFO set of ended game ids. Not concurrency-safe.
-type endedGames struct {
+// boundedIDs is a bounded FIFO set of ids: once it holds cap ids, adding a new
+// one forgets the oldest. Used for the ended game ids (Multiplexer.ended,
+// endedGamesCap) and the applied moment ids of a partition (Store.moments,
+// momentIDsCap, UC-041 BR-009). The zero value is ready once cap is set; a cap
+// of 0 keeps nothing. Not concurrency-safe.
+type boundedIDs struct {
+	cap   int
 	set   map[string]struct{}
 	order []string
 }
 
-func (e *endedGames) add(id string) {
-	if e.set == nil {
-		e.set = make(map[string]struct{})
+// add records id and reports whether it was new; a present id changes nothing.
+func (b *boundedIDs) add(id string) bool {
+	if b.set == nil {
+		b.set = make(map[string]struct{})
 	}
-	if _, ok := e.set[id]; ok {
-		return
+	if _, ok := b.set[id]; ok {
+		return false
 	}
-	if len(e.order) >= endedGamesCap {
-		delete(e.set, e.order[0])
-		e.order = e.order[1:]
+	if b.cap <= 0 {
+		return true
 	}
-	e.set[id] = struct{}{}
-	e.order = append(e.order, id)
+	if len(b.order) >= b.cap {
+		delete(b.set, b.order[0])
+		b.order = b.order[1:]
+	}
+	b.set[id] = struct{}{}
+	b.order = append(b.order, id)
+	return true
 }
 
-func (e *endedGames) has(id string) bool {
-	_, ok := e.set[id]
+func (b *boundedIDs) has(id string) bool {
+	_, ok := b.set[id]
 	return ok
 }
 
@@ -94,6 +104,7 @@ func NewMultiplexer(newStore func(gameID string) *Store) *Multiplexer {
 		stores:   make(map[string]*Store),
 		newStore: newStore,
 		names:    make(map[string]string),
+		ended:    boundedIDs{cap: endedGamesCap},
 	}
 }
 
@@ -129,6 +140,15 @@ func (m *Multiplexer) store(gameID string) *Store {
 	}
 	m.stores[gameID] = s
 	return s
+}
+
+// existingStore returns the Store for gameID, or nil when no partition exists.
+// It never creates one: the moment log events (UC-041 A7 step 4) only reach a
+// game the agent already holds a context for.
+func (m *Multiplexer) existingStore(gameID string) *Store {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.stores[gameID]
 }
 
 // ApplyMetrics walks the metric batch, routing each datapoint to its game_id

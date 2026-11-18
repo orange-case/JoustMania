@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 
@@ -18,6 +19,7 @@ import (
 const (
 	otlpTraceService   = "opentelemetry.proto.collector.trace.v1.TraceService"
 	otlpMetricsService = "opentelemetry.proto.collector.metrics.v1.MetricsService"
+	otlpLogsService    = "opentelemetry.proto.collector.logs.v1.LogsService"
 )
 
 // pipeline ties the context stores and decision loops together. On each signal
@@ -174,4 +176,26 @@ func (r *metricsReceiver) Export(ctx context.Context, req pmetricotlp.ExportRequ
 		})
 	}
 	return pmetricotlp.NewExportResponse(), nil
+}
+
+// logsReceiver implements the OTLP logs gRPC service: moment log events only
+// (UC-041 A7, FR-218). The collector forwards nothing else (filter/agent_moments)
+// and the extractor ignores any other record. A new death wakes the game's
+// evaluation with otlp.signal = logs; a warning or a moment already read does not.
+type logsReceiver struct {
+	plogotlp.UnimplementedGRPCServer
+	pipe *pipeline
+}
+
+// Export ingests a batch of log records.
+func (r *logsReceiver) Export(ctx context.Context, req plogotlp.ExportRequest) (plogotlp.ExportResponse, error) {
+	t0 := time.Now()
+	if ids := r.pipe.mux.ApplyLogs(req.Logs()); len(ids) > 0 {
+		r.pipe.signalUpdated(ctx, ids, decision.EvalTrigger{
+			Signal:     "logs",
+			RPCService: otlpLogsService,
+			T0:         t0,
+		})
+	}
+	return plogotlp.NewExportResponse(), nil
 }

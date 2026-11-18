@@ -7,6 +7,8 @@ test_collector_best_effort.py.
 
 from __future__ import annotations
 
+import re
+
 import infra_config as ic
 import pytest
 
@@ -68,3 +70,112 @@ def test_storage_exporters_are_independent_of_the_agent_exporter(
     # exporter carries none of them, so it keeps the collector defaults.
     for key in ("timeout", "retry_on_failure", "sending_queue"):
         assert key not in store, f"{storage} must not copy the agent's {key}"
+
+
+# --- Moment log events to the agent (#2658 slice 2, FR-218, UC-041 A7, BR-009) ---
+
+_MISSING = object()
+
+
+def _drops_log(
+    conditions: list[str],
+    event_name: str,
+    attributes: dict[str, object],
+    resource: dict[str, object],
+) -> bool:
+    """Evaluate the filter/agent_moments OTTL drop conditions for one log record.
+
+    Supports exactly the terms the filter uses (`log.event_name != "x"`,
+    `log.attributes["k"] == nil`, `resource.attributes["k"] == <bool|"str">`), joined
+    by `and` / `or` (`and` binds tighter); any other term fails the test.
+    """
+
+    def value(path: str) -> object:
+        if path == "log.event_name":
+            return event_name
+        m = re.fullmatch(r'(log|resource)\.attributes\["([^"]+)"\]', path)
+        assert m, f"unsupported OTTL path {path!r}"
+        source = attributes if m.group(1) == "log" else resource
+        return source.get(m.group(2), _MISSING)
+
+    def literal(text: str) -> object:
+        if text == "nil":
+            return _MISSING
+        if text in ("true", "false"):
+            return text == "true"
+        m = re.fullmatch(r'"([^"]*)"', text)
+        assert m, f"unsupported OTTL literal {text!r}"
+        return m.group(1)
+
+    def term(text: str) -> bool:
+        m = re.fullmatch(r"(\S+) (==|!=) (.+)", text.strip())
+        assert m, f"unsupported OTTL term {text!r}"
+        left, op, right = value(m.group(1)), m.group(2), literal(m.group(3).strip())
+        # OTTL: a bool never equals a string; type-strict comparison.
+        equal = type(left) is type(right) and left == right
+        return equal if op == "==" else not equal
+
+    return any(
+        any(all(term(t) for t in alt.split(" and ")) for alt in cond.split(" or "))
+        for cond in conditions
+    )
+
+
+@pytest.mark.uc("UC-041", flow="A7", steps=[1], cond=["Pre-1"])
+def test_only_the_logs_agent_pipeline_sends_logs_to_the_agent(collector):
+    """UC-041 Pre-1, A7 step 1: moment log events reach the agent through their own
+    pipeline (filter before batch); the logs pipeline keeps ending in the debug sink."""
+    pipelines = collector["service"]["pipelines"]
+    assert pipelines["logs/agent"] == {
+        "receivers": ["otlp"],
+        "processors": [
+            "memory_limiter",
+            "filter/agent_moments",
+            "batch/moments",
+            "resource",
+        ],
+        "exporters": ["otlp/agent"],
+    }
+    assert pipelines["logs"]["exporters"] == ["debug"]
+    to_agent = [
+        name
+        for name, p in pipelines.items()
+        if name.split("/")[0] == "logs" and "otlp/agent" in p["exporters"]
+    ]
+    assert to_agent == ["logs/agent"]
+    assert collector["processors"]["batch/moments"]["timeout"] == "1s"
+
+
+@pytest.mark.uc("UC-041", flow="A7", steps=[1])
+@pytest.mark.parametrize(
+    ("event_name", "attributes", "resource", "dropped"),
+    [
+        ("death_warning", {"moment.id": "g:P1:warning:1"}, {}, False),
+        ("player_death", {"moment.id": "g:P1:death:1"}, {}, False),
+        ("", {}, {}, True),
+        ("", {"moment.id": "g:P1:x:1"}, {}, True),
+        ("intervention", {"moment.id": "g:intervention:1"}, {}, True),
+        ("death_warning", {}, {}, True),
+        ("player_death", {"moment.id": "g:P1:death:1"}, {"orangecase.synthetic": True}, True),
+        ("player_death", {"moment.id": "g:P1:death:1"}, {"orangecase.synthetic": "true"}, True),
+        ("player_death", {"moment.id": "g:P1:death:1"}, {"orangecase.synthetic": False}, False),
+    ],
+    ids=[
+        "warning-kept",
+        "death-kept",
+        "ordinary-dropped",
+        "ordinary-with-id-dropped",
+        "intervention-dropped",
+        "warning-without-id-dropped",
+        "synthetic-bool-dropped",
+        "synthetic-string-dropped",
+        "not-synthetic-kept",
+    ],
+)
+def test_agent_moments_filter_passes_only_moment_log_events(
+    collector, event_name, attributes, resource, dropped
+):
+    """UC-041 A7 step 1, BR-009, C-001: the collector forwards only death_warning and
+    player_death records that carry a moment id, and never synthetic data (#2577)."""
+    conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
+    assert _drops_log(conditions, event_name, attributes, resource) is dropped
