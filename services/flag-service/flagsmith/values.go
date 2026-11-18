@@ -205,6 +205,10 @@ func Decode(p *registry.Policy, b *baseline.Flag, fv FSValue) (variant string, v
 		// "true" / "false" for a flag whose variants are booleans.
 		return v, nil, nil
 	}
+	if boolFlag(b) {
+		// "True", "1", "yes": not a boolean of the flag (§2.1).
+		return mismatch()
+	}
 	raw, _ := json.Marshal(s)
 	return "", raw, nil
 }
@@ -233,6 +237,20 @@ func rangeNumber(s string, integer bool) (json.RawMessage, bool) {
 		return nil, false
 	}
 	return json.RawMessage(strconv.FormatInt(int64(f), 10)), true
+}
+
+// boolFlag: every declared variant of the flag is a boolean.
+func boolFlag(b *baseline.Flag) bool {
+	if b == nil || len(b.Variants) == 0 {
+		return false
+	}
+	for _, raw := range b.Variants {
+		var v bool
+		if json.Unmarshal(raw, &v) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // boolVariant is the declared variant whose baseline value is the boolean s

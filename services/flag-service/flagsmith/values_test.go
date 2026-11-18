@@ -88,9 +88,16 @@ func TestEncodeDecode(t *testing.T) {
 			{"float as a number", floatRange, num("2"), `2`},
 			{"float with a trailing zero", floatRange, str("0.50"), `0.50`},
 			{"float with whitespace", floatRange, str(" 0.5\n"), `0.5`},
+			{"integer in exponent form", intRange, str("2e1"), `20`},
+			{"negative integer as text", intRange, str("-2"), `-2`},
+			{"negative integer as a number", intRange, num("-1"), `-1`},
+			{"negative float as text", floatRange, str("-0.25"), `-0.25`},
+			{"negative float as a number", floatRange, num("-1"), `-1`},
 		} {
 			_, raw, ferr := Decode(c.p, plain, c.fv)
-			if ferr != nil || !jsonEqual(raw, json.RawMessage(c.want)) {
+			// The exact bytes: the write path checks this value (an integer
+			// range refuses the text "5.0").
+			if ferr != nil || string(raw) != c.want {
 				t.Fatalf("%s: decode %s %v, want %s", c.name, raw, ferr, c.want)
 			}
 		}
@@ -113,6 +120,12 @@ func TestEncodeDecode(t *testing.T) {
 		}
 		if v, _, ferr := Decode(onOff, bools, str("false")); ferr != nil || v != "off" {
 			t.Fatalf("bool \"false\": variant %q %v, want off", v, ferr)
+		}
+		// Not a boolean of the flag: refused, never coerced (§2.1).
+		for _, s := range []string{"True", "1", "yes"} {
+			if _, _, ferr := Decode(onOff, bools, str(s)); ferr == nil || ferr.Reason != fserr.FlagsmithTypeMismatch {
+				t.Fatalf("bool %q: got %v, want flagsmith_type_mismatch", s, ferr)
+			}
 		}
 	})
 	t.Run("UC-054/A4 text that is not the flag's number stays flagsmith_type_mismatch (#2682)", func(t *testing.T) {

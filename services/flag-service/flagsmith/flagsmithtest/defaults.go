@@ -44,26 +44,43 @@ func (f *Fake) registerAdminDefaults() {
 	d.HandleFunc("GET "+APIPath+"environments/{env}/edge-identities/", func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]any{"results": []any{}, "last_evaluated_key": nil})
 	})
-	d.HandleFunc("DELETE "+APIPath+"environments/{env}/edge-identities/{uuid}/", func(w http.ResponseWriter, r *http.Request) {
+	d.HandleFunc(methodDelete+APIPath+"environments/{env}/edge-identities/{uuid}/", func(w http.ResponseWriter, r *http.Request) {
 		f.Overrides.Forget(r.PathValue("uuid"))
 		w.WriteHeader(http.StatusNoContent)
 	})
+	f.registerOverrideRoutes()
+}
+
+// Method prefixes of ServeMux patterns.
+const (
+	methodGet    = "GET "
+	methodPost   = "POST "
+	methodPut    = "PUT "
+	methodDelete = "DELETE "
+)
+
+// registerOverrideRoutes serves the SaaS's identity override routes from
+// f.Overrides and answers the upsert by identifier the SaaS does not route
+// with Django's HTML 404 (#2682).
+func (f *Fake) registerOverrideRoutes() {
+	d := f.defaults
 	overrides := func(w http.ResponseWriter, r *http.Request) {
 		uuid, rest, _ := OverrideRoute(r.URL.Path)
 		if !f.Overrides.Serve(w, r, uuid, rest) {
 			DjangoNotFound(w, r)
 		}
 	}
-	for _, m := range []string{"GET ", "POST "} {
-		d.HandleFunc(m+APIPath+"environments/{env}/edge-identities/{uuid}/edge-featurestates/{$}", overrides)
+	list := APIPath + "environments/{env}/edge-identities/{uuid}/edge-featurestates/"
+	for _, m := range []string{methodGet, methodPost} {
+		d.HandleFunc(m+list+"{$}", overrides)
 	}
-	for _, m := range []string{"GET ", "PUT ", "DELETE "} {
-		d.HandleFunc(m+APIPath+"environments/{env}/edge-identities/{uuid}/edge-featurestates/{fs}/{$}", overrides)
+	for _, m := range []string{methodGet, methodPut, methodDelete} {
+		d.HandleFunc(m+list+"{fs}/{$}", overrides)
 	}
-	// The SaaS routes no upsert by identifier (#2682).
-	for _, m := range []string{"GET ", "POST ", "PUT ", "PATCH ", "DELETE ", "OPTIONS "} {
-		d.HandleFunc(m+APIPath+"environments/{env}/edge-identities-featurestates", DjangoNotFound)
-		d.HandleFunc(m+APIPath+"environments/{env}/edge-identities-featurestates/{$}", DjangoNotFound)
+	upsert := APIPath + "environments/{env}/edge-identities-featurestates"
+	for _, m := range []string{methodGet, methodPost, methodPut, "PATCH ", methodDelete, "OPTIONS "} {
+		d.HandleFunc(m+upsert, DjangoNotFound)
+		d.HandleFunc(m+upsert+"/{$}", DjangoNotFound)
 	}
 }
 

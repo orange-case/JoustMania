@@ -3,10 +3,7 @@ package flagsmith
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
-	"net/url"
-	"strings"
 
 	"go.opentelemetry.io/otel/trace"
 )
@@ -134,16 +131,8 @@ func (o *out) controllerUUID(ctx context.Context, identifier string, create bool
 	}
 	k := Key{Scope: identifier}
 	_, stop, err = o.ctrlCall(ctx, k, OpIdentity, func(c context.Context) (int, error) {
-		var found struct {
-			Results []edgeIdentity `json:"results"`
-		}
-		q := url.QueryEscape(`"` + identifier + `"`)
-		status, err := l.Client().Admin(c, http.MethodGet, l.envPath("edge-identities/")+"?q="+q, nil, &found)
-		for _, r := range found.Results {
-			if r.Identifier == identifier {
-				uuid = r.IdentityUUID
-			}
-		}
+		found, status, err := o.searchIdentity(c, l.Client().Admin, identifier)
+		uuid = found
 		return status, err
 	})
 	if err != nil || stop != ctrlGoOn {
@@ -161,9 +150,8 @@ func (o *out) controllerUUID(ctx context.Context, identifier string, create bool
 		var created struct {
 			IdentityUUID string `json:"identity_uuid"`
 		}
-		status, err := l.Client().Admin(c, http.MethodPost, l.envPath("edge-identities/"), map[string]string{"identifier": identifier}, &created)
-		var he *HTTPError
-		if errors.As(err, &he) && he.Status == http.StatusBadRequest && strings.Contains(strings.ToLower(string(he.Body)), "already exist") {
+		status, err := l.Client().Admin(c, http.MethodPost, l.envPath(edgeIdentitiesPath), map[string]string{"identifier": identifier}, &created)
+		if alreadyExists(err) {
 			// Created meanwhile by someone else.
 			exists = true
 			return status, nil
@@ -175,12 +163,15 @@ func (o *out) controllerUUID(ctx context.Context, identifier string, create bool
 	case err != nil || stop != ctrlGoOn:
 		return "", false, stop, err
 	case exists || uuid == "":
-		// Flagsmith has it but the search did not show it (or answered no
-		// uuid): the settle is refused for this game rather than retried
-		// in a loop that would hold every value push back; the values are
-		// still sent by identifier.
+		// Flagsmith has it but the search does not show it yet (or answered
+		// no uuid): the settle is refused for this game rather than retried
+		// in a loop that would hold every value push back. It counts as a
+		// listing, so each value push searches again with the #2639 backoff
+		// (0.5, 1, 2 s) until the search shows the identity (#2682).
+		o.markListed(identifier)
 		return "", false, ctrlRefused, nil
 	}
+	o.markListed(identifier)
 	l.setIdentityUUID(identifier, uuid)
 	o.freshOverrides(uuid)
 	return uuid, true, ctrlGoOn, nil
@@ -204,7 +195,7 @@ func (o *out) controllerTraitList(ctx context.Context, identifier, uuid string) 
 	traits := map[string]any{}
 	_, stop, err := o.ctrlCall(ctx, Key{Scope: identifier}, OpIdentity, func(c context.Context) (int, error) {
 		var raw json.RawMessage
-		status, err := l.Client().Admin(c, http.MethodGet, l.envPath("edge-identities/"+url.PathEscape(uuid)+"/list-traits/"), nil, &raw)
+		status, err := l.Client().Admin(c, http.MethodGet, l.identityPath(uuid)+"list-traits/", nil, &raw)
 		if err == nil {
 			traits = traitList(raw)
 		}
@@ -244,7 +235,7 @@ func (o *out) clearController(ctx context.Context, op ctrlOp, identifier, uuid s
 	var states []FeatureState
 	_, stop, err := o.ctrlCall(ctx, Key{Scope: identifier}, OpIdentity, func(c context.Context) (int, error) {
 		var raw json.RawMessage
-		status, err := l.Client().Admin(c, http.MethodGet, l.envPath("edge-identities/"+url.PathEscape(uuid)+"/edge-featurestates/"), nil, &raw)
+		status, err := l.Client().Admin(c, http.MethodGet, l.overridesPath(uuid), nil, &raw)
 		if err == nil {
 			states = overrideList(raw)
 		}
@@ -366,7 +357,7 @@ func (o *out) controllerTraits(ctx context.Context, op ctrlOp, identifier, uuid 
 	}
 	for _, b := range bodies {
 		oc, stop, err := o.ctrlCall(ctx, Key{Scope: identifier}, OpIdentity, func(c context.Context) (int, error) {
-			return l.Client().Admin(c, http.MethodPut, l.envPath("edge-identities/"+url.PathEscape(uuid)+"/update-traits/"), b, nil)
+			return l.Client().Admin(c, http.MethodPut, l.identityPath(uuid)+"update-traits/", b, nil)
 		})
 		switch {
 		case err != nil || stop == ctrlAgain:

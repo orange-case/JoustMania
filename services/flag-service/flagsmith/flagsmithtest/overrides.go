@@ -32,6 +32,11 @@ type Override struct {
 // Overrides is a store of identity overrides by identity uuid, served like
 // the SaaS serves them. Safe for concurrent use.
 type Overrides struct {
+	// Exists, when set, tells whether an identity uuid is in Flagsmith; the
+	// override routes of any other uuid answer 404 (nil: every uuid exists).
+	// Set it before the first request.
+	Exists func(identityUUID string) bool
+
 	mu   sync.Mutex
 	next int
 	by   map[string][]*Override
@@ -120,43 +125,65 @@ func (o *Override) answer(identityUUID string) map[string]any {
 
 // Serve answers an override route of identity identityUUID; rest is the path
 // after "edge-identities/{uuid}/". It reports false when rest is no override
-// route (the caller answers it).
+// route (the caller answers it). An identity Exists rejects answers 404, as
+// the SaaS does for an unknown or deleted identity.
 func (s *Overrides) Serve(w http.ResponseWriter, r *http.Request, identityUUID, rest string) bool {
 	sub, ok := strings.CutPrefix(rest, "edge-featurestates/")
 	if !ok {
 		return false
 	}
 	fs, item := strings.CutSuffix(sub, "/")
-	if sub == "" {
-		item = false
-	} else if !item || strings.Contains(fs, "/") {
+	if sub != "" && (!item || strings.Contains(fs, "/")) {
 		return false
+	}
+	if s.Exists != nil && !s.Exists(identityUUID) {
+		writeNotFound(w)
+		return true
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !item {
-		switch r.Method {
-		case http.MethodGet:
-			out := []map[string]any{}
-			for _, o := range s.by[identityUUID] {
-				out = append(out, o.answer(identityUUID))
-			}
-			WriteJSON(w, http.StatusOK, out)
-		case http.MethodPost:
-			b, ok := decodeOverride(w, r)
-			if !ok {
-				return true
-			}
-			if s.findLocked(identityUUID, b.Feature) != nil {
-				WriteJSON(w, http.StatusBadRequest, []string{"Feature state already exists."})
-				return true
-			}
-			WriteJSON(w, http.StatusCreated, s.addLocked(identityUUID, b.Feature, b.Enabled, b.Value).answer(identityUUID))
-		default:
-			WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"detail": "Method not allowed."})
-		}
-		return true
+	if sub == "" {
+		s.serveListLocked(w, r, identityUUID)
+	} else {
+		s.serveItemLocked(w, r, identityUUID, fs)
 	}
+	return true
+}
+
+func writeNotFound(w http.ResponseWriter) {
+	WriteJSON(w, http.StatusNotFound, map[string]string{"detail": "Not found."})
+}
+
+func writeNotAllowed(w http.ResponseWriter) {
+	WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"detail": "Method not allowed."})
+}
+
+// serveListLocked answers GET and POST on the override list.
+func (s *Overrides) serveListLocked(w http.ResponseWriter, r *http.Request, identityUUID string) {
+	switch r.Method {
+	case http.MethodGet:
+		out := []map[string]any{}
+		for _, o := range s.by[identityUUID] {
+			out = append(out, o.answer(identityUUID))
+		}
+		WriteJSON(w, http.StatusOK, out)
+	case http.MethodPost:
+		b, ok := decodeOverride(w, r)
+		if !ok {
+			return
+		}
+		if s.findLocked(identityUUID, b.Feature) != nil {
+			WriteJSON(w, http.StatusBadRequest, []string{"Feature state already exists."})
+			return
+		}
+		WriteJSON(w, http.StatusCreated, s.addLocked(identityUUID, b.Feature, b.Enabled, b.Value).answer(identityUUID))
+	default:
+		writeNotAllowed(w)
+	}
+}
+
+// serveItemLocked answers GET, PUT and DELETE on one override.
+func (s *Overrides) serveItemLocked(w http.ResponseWriter, r *http.Request, identityUUID, fs string) {
 	var found *Override
 	for _, o := range s.by[identityUUID] {
 		if o.FeatureStateUUID == fs {
@@ -164,26 +191,23 @@ func (s *Overrides) Serve(w http.ResponseWriter, r *http.Request, identityUUID, 
 		}
 	}
 	if found == nil {
-		WriteJSON(w, http.StatusNotFound, map[string]string{"detail": "Not found."})
-		return true
+		writeNotFound(w)
+		return
 	}
 	switch r.Method {
 	case http.MethodGet:
 		WriteJSON(w, http.StatusOK, found.answer(identityUUID))
 	case http.MethodPut:
-		b, ok := decodeOverride(w, r)
-		if !ok {
-			return true
+		if b, ok := decodeOverride(w, r); ok {
+			found.Enabled, found.Value = b.Enabled, b.Value
+			WriteJSON(w, http.StatusOK, found.answer(identityUUID))
 		}
-		found.Enabled, found.Value = b.Enabled, b.Value
-		WriteJSON(w, http.StatusOK, found.answer(identityUUID))
 	case http.MethodDelete:
 		s.removeLocked(identityUUID, found.Feature)
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"detail": "Method not allowed."})
+		writeNotAllowed(w)
 	}
-	return true
 }
 
 type overrideBody struct {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 // Identity overrides go through the per-identity routes of the Admin API
@@ -105,9 +104,37 @@ type identityGoneError struct{ err error }
 func (e identityGoneError) Error() string { return e.err.Error() }
 func (e identityGoneError) Unwrap() error { return e.err }
 
+// Path parts of the edge identity routes.
+const (
+	edgeIdentitiesPath = "edge-identities/"
+	edgeOverridesPath  = "/edge-featurestates/"
+)
+
+// identityPath is an edge identity's path below the environment.
+func (l *Link) identityPath(uuid string) string {
+	return l.envPath(edgeIdentitiesPath + url.PathEscape(uuid) + "/")
+}
+
+// overridesPath is the override list of an edge identity.
+func (l *Link) overridesPath(uuid string) string {
+	return l.envPath(edgeIdentitiesPath + url.PathEscape(uuid) + edgeOverridesPath)
+}
+
+// overridePath is one override of an edge identity, by its featurestate_uuid.
+func (l *Link) overridePath(uuid, featurestateUUID string) string {
+	return l.overridesPath(uuid) + url.PathEscape(featurestateUUID) + "/"
+}
+
 func isNotFound(err error) bool {
 	var he *HTTPError
 	return errors.As(err, &he) && he.Status == http.StatusNotFound
+}
+
+// notShownYet is the answer for an identity Flagsmith has but does not show
+// (its create answered "already exists" while the exact search finds
+// nothing): a 404, so the caller's #2639 retry searches again.
+func notShownYet() (int, error) {
+	return http.StatusNotFound, &HTTPError{Status: http.StatusNotFound, JSONDetail: true}
 }
 
 // requests runs the Admin calls of one push: the first goes out at once (the
@@ -178,42 +205,56 @@ func (o *out) sendOverride(ctx context.Context, identifier string, v Value, fv F
 	}
 }
 
-// findIdentity finds identifier's uuid with the exact search and, when create
-// is set and the search finds none, creates the identity. "" with a nil error:
-// the identity does not exist (and create is not set).
-func (o *out) findIdentity(ctx context.Context, r *requests, identifier string, create bool) (string, int, error) {
-	l := o.l
+// searchIdentity finds identifier's uuid with the exact search (the quoted
+// query); "" when Flagsmith shows none.
+func (o *out) searchIdentity(ctx context.Context, admin func(context.Context, string, string, any, any) (int, error), identifier string) (string, int, error) {
 	var found struct {
 		Results []edgeIdentity `json:"results"`
 	}
 	q := url.QueryEscape(`"` + identifier + `"`)
-	status, err := r.admin(ctx, http.MethodGet, l.envPath("edge-identities/")+"?q="+q, nil, &found)
+	status, err := admin(ctx, http.MethodGet, o.l.envPath(edgeIdentitiesPath)+"?q="+q, nil, &found)
 	if err != nil {
 		return "", status, err
 	}
 	for _, it := range found.Results {
 		if it.Identifier == identifier && it.IdentityUUID != "" {
-			l.setIdentityUUID(identifier, it.IdentityUUID)
 			return it.IdentityUUID, status, nil
 		}
 	}
-	if !create {
+	return "", status, nil
+}
+
+// findIdentity finds identifier's uuid with the exact search and, when create
+// is set and the search finds none, creates the identity. "" with a nil error:
+// the identity does not exist (and create is not set). A create, or one
+// answered "already exists" while the search does not show the identity yet,
+// counts as a listing (markListed): a 404 right after is retried (#2639).
+func (o *out) findIdentity(ctx context.Context, r *requests, identifier string, create bool) (string, int, error) {
+	l := o.l
+	uuid, status, err := o.searchIdentity(ctx, r.admin, identifier)
+	switch {
+	case err != nil:
+		return "", status, err
+	case uuid != "":
+		l.setIdentityUUID(identifier, uuid)
+		return uuid, status, nil
+	case !create:
 		return "", status, nil
 	}
 	var created struct {
 		IdentityUUID string `json:"identity_uuid"`
 	}
-	status, err = r.admin(ctx, http.MethodPost, l.envPath("edge-identities/"), map[string]string{"identifier": identifier}, &created)
-	var he *HTTPError
+	status, err = r.admin(ctx, http.MethodPost, l.envPath(edgeIdentitiesPath), map[string]string{"identifier": identifier}, &created)
 	switch {
-	case errors.As(err, &he) && he.Status == http.StatusBadRequest && strings.Contains(strings.ToLower(string(he.Body)), "already exist"):
-		// Flagsmith has it, but the search did not show it (yet).
-		return "", status, &HTTPError{Status: http.StatusNotFound, JSONDetail: true}
+	case alreadyExists(err), err == nil && created.IdentityUUID == "":
+		// Flagsmith has it, but the search does not show it yet.
+		o.markListed(identifier)
+		status, err = notShownYet()
+		return "", status, err
 	case err != nil:
 		return "", status, err
-	case created.IdentityUUID == "":
-		return "", status, &HTTPError{Status: http.StatusNotFound, JSONDetail: true}
 	}
+	o.markListed(identifier)
 	l.setIdentityUUID(identifier, created.IdentityUUID)
 	o.freshOverrides(created.IdentityUUID)
 	return created.IdentityUUID, status, nil
@@ -223,7 +264,7 @@ func (o *out) findIdentity(ctx context.Context, r *requests, identifier string, 
 // identityGoneError.
 func (o *out) listOverrides(ctx context.Context, r *requests, uuid string) (int, error) {
 	var raw json.RawMessage
-	status, err := r.admin(ctx, http.MethodGet, o.l.envPath("edge-identities/"+url.PathEscape(uuid)+"/edge-featurestates/"), nil, &raw)
+	status, err := r.admin(ctx, http.MethodGet, o.l.overridesPath(uuid), nil, &raw)
 	if err != nil {
 		if isNotFound(err) {
 			return status, identityGoneError{err}
@@ -234,6 +275,22 @@ func (o *out) listOverrides(ctx context.Context, r *requests, uuid string) (int,
 	return status, nil
 }
 
+// currentOverride is the featurestate uuid of featureID's override on the
+// identity ("" = none), listing the overrides when it is not known. A removal
+// never trusts a cached "none": a person may have set the override since (a
+// write finds out by its POST answering "already exists").
+func (o *out) currentOverride(ctx context.Context, r *requests, uuid string, featureID int, removal bool) (string, int, error) {
+	if fs, known := o.overrideOf(uuid, featureID); known && (fs != "" || !removal) {
+		return fs, 0, nil
+	}
+	status, err := o.listOverrides(ctx, r, uuid)
+	if err != nil {
+		return "", status, err
+	}
+	fs, _ := o.overrideOf(uuid, featureID)
+	return fs, status, nil
+}
+
 // writeOverride writes or removes featureID's override on the identity uuid:
 // POST when it has none, else PUT (or DELETE) the override itself. When
 // Flagsmith's override is not the one the cache knows (a POST answered
@@ -241,76 +298,67 @@ func (o *out) listOverrides(ctx context.Context, r *requests, uuid string) (int,
 // overrides are listed again and the write is made once more; the same
 // override answering 404 again is returned as it is.
 func (o *out) writeOverride(ctx context.Context, r *requests, uuid string, v Value, fv FSValue, featureID int) (int, error) {
-	base := o.l.envPath("edge-identities/" + url.PathEscape(uuid) + "/edge-featurestates/")
-	status := 0
-	retried, listed := false, false
-	for {
-		fs, known := o.overrideOf(uuid, featureID)
-		// A removal never trusts a cached "none": a person may have set the
-		// override since (a write finds out by its POST answering "already
-		// exists").
-		if !known || (!v.Present && fs == "" && !listed) {
-			listed = true
-			var err error
-			if status, err = o.listOverrides(ctx, r, uuid); err != nil {
-				return status, err
-			}
-			fs, _ = o.overrideOf(uuid, featureID)
-		}
-		var err error
-		post := v.Present && fs == ""
-		switch {
-		case !v.Present && fs == "":
-			// No override: nothing to delete.
-			return status, nil
-		case !v.Present:
-			status, err = r.admin(ctx, http.MethodDelete, base+url.PathEscape(fs)+"/", nil, nil)
-			if err == nil {
-				o.setOverride(uuid, featureID, "")
-			}
-		case post:
-			var created struct {
-				FeatureStateUUID string `json:"featurestate_uuid"`
-			}
-			status, err = r.admin(ctx, http.MethodPost, base, overrideBody{Feature: featureID, Enabled: true, Value: fv.Value}, &created)
-			switch {
-			case err == nil && created.FeatureStateUUID != "":
-				o.setOverride(uuid, featureID, created.FeatureStateUUID)
-			case err == nil:
-				o.forgetOverrides(uuid)
-			}
-		default:
-			status, err = r.admin(ctx, http.MethodPut, base+url.PathEscape(fs)+"/", overrideBody{Feature: featureID, Enabled: true, Value: fv.Value}, nil)
-		}
-		if err == nil {
-			return status, nil
-		}
-		var he *HTTPError
-		isHTTP := errors.As(err, &he)
-		switch {
-		case post && isNotFound(err):
-			return status, identityGoneError{err}
-		case retried || !isHTTP:
-			return status, err
-		case post && he.Status == http.StatusBadRequest && strings.Contains(strings.ToLower(string(he.Body)), "already exist"):
-		case !post && he.Status == http.StatusNotFound:
-		default:
-			return status, err
-		}
-		// Flagsmith's override is not the one this process knows: list again.
-		retried, listed = true, true
-		o.forgetOverrides(uuid)
-		if lstatus, lerr := o.listOverrides(ctx, r, uuid); lerr != nil {
-			return lstatus, lerr
-		}
-		if now, _ := o.overrideOf(uuid, featureID); now == fs && fs != "" {
-			// The same override answers 404: not a stale cache.
-			return status, err
-		}
+	fs, status, err := o.currentOverride(ctx, r, uuid, featureID, !v.Present)
+	if err != nil {
+		return status, err
 	}
+	status, err = o.writeOnce(ctx, r, uuid, v, fv, featureID, fs, status)
+	if !staleOverride(v.Present && fs == "", err) {
+		return status, err
+	}
+	// Flagsmith's override is not the one this process knows: list again.
+	o.forgetOverrides(uuid)
+	if lstatus, lerr := o.listOverrides(ctx, r, uuid); lerr != nil {
+		return lstatus, lerr
+	}
+	now, _ := o.overrideOf(uuid, featureID)
+	if now == fs && fs != "" {
+		// The same override answers 404: not a stale cache.
+		return status, err
+	}
+	return o.writeOnce(ctx, r, uuid, v, fv, featureID, now, status)
 }
 
-// overridePath is the path of one override (the controller removal).
-func (l *Link) overridePath(uuid, featurestateUUID string) string {
-	return l.envPath("edge-identities/" + url.PathEscape(uuid) + "/edge-featurestates/" + url.PathEscape(featurestateUUID) + "/")
+// staleOverride: the answer says the cache does not match Flagsmith (a POST
+// answered "already exists", or the override itself answered 404).
+func staleOverride(post bool, err error) bool {
+	if post {
+		return alreadyExists(err)
+	}
+	var gone identityGoneError
+	return isNotFound(err) && !errors.As(err, &gone)
+}
+
+// writeOnce sends one write for featureID's override fs ("" = none) and keeps
+// the cache in step: DELETE (nothing to do without an override), POST (a 404:
+// the identity is gone) or PUT. status is the answer of the request before,
+// returned when nothing is sent.
+func (o *out) writeOnce(ctx context.Context, r *requests, uuid string, v Value, fv FSValue, featureID int, fs string, status int) (int, error) {
+	l := o.l
+	body := overrideBody{Feature: featureID, Enabled: true, Value: fv.Value}
+	switch {
+	case !v.Present && fs == "":
+		return status, nil
+	case !v.Present:
+		status, err := r.admin(ctx, http.MethodDelete, l.overridePath(uuid, fs), nil, nil)
+		if err == nil {
+			o.setOverride(uuid, featureID, "")
+		}
+		return status, err
+	case fs == "":
+		var created struct {
+			FeatureStateUUID string `json:"featurestate_uuid"`
+		}
+		status, err := r.admin(ctx, http.MethodPost, l.overridesPath(uuid), body, &created)
+		switch {
+		case isNotFound(err):
+			return status, identityGoneError{err}
+		case err == nil && created.FeatureStateUUID != "":
+			o.setOverride(uuid, featureID, created.FeatureStateUUID)
+		case err == nil:
+			o.forgetOverrides(uuid)
+		}
+		return status, err
+	}
+	return r.admin(ctx, http.MethodPut, l.overridePath(uuid, fs), body, nil)
 }

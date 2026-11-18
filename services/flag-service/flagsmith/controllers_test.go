@@ -532,7 +532,8 @@ func TestControllerValueWaitsForSettle(t *testing.T) {
 // UC: UC-055 A1
 // Flagsmith says the controller identity exists but the search does not show
 // it: the settle is given up for this game (the controller is not read back),
-// never retried in a loop, and the value is refused (no uuid, no route).
+// never retried in a loop; the value searches again with the #2639 backoff
+// and is refused not_found when the search never shows it (no uuid, no route).
 func TestControllerDuplicateCreateRefusedNotRetried(t *testing.T) {
 	e := newOutEnv(t)
 	m := newIDModel(e)
@@ -549,18 +550,25 @@ func TestControllerDuplicateCreateRefusedNotRetried(t *testing.T) {
 			creates++
 		}
 	}
-	// The settle creates once, the refused value push once (#2682): no loop.
-	if creates != 2 {
-		t.Fatalf("UC-055/A1 %d creates of controller:A, want 2 (the settle and the value, no retry loop)", creates)
+	// The settle creates once; the value push searches and creates again with
+	// the #2639 backoff, at most 3 retries (#2682): bounded, no loop.
+	if creates != 5 {
+		t.Fatalf("UC-055/A1 %d creates of controller:A, want 5 (the settle, the value and its 3 retries)", creates)
 	}
-	// No override route works without the uuid (#2682): the value is
-	// refused, not_found, and the link never loops on it.
+	if !sleptAll(e.clk.Slept(), notFoundBackoff, 2*notFoundBackoff, 4*notFoundBackoff) {
+		t.Fatalf("UC-055/A1 slept %v, want the 0.5, 1, 2 s backoff", e.clk.Slept())
+	}
+	// No override route works without the uuid: a search that never shows
+	// the identity refuses the value not_found, with Flagsmith's 404.
 	if m.index("put controller:A") >= 0 {
 		t.Fatalf("UC-055/A1 a value reached the controller without its uuid: %v", m.events())
 	}
 	k := Key{Set: "interventions", Flag: "player_sensitivity_factor", Scope: "game:g1:A"}
 	if r, _ := e.link.Links().Refusal(k); r != ReasonNotFound {
 		t.Fatalf("UC-055/A1 refusal %q, want not_found", r)
+	}
+	if list, _ := e.link.Links().Unsynced(MaxStateKeys); len(list) != 1 || list[0].HTTPStatus != http.StatusNotFound {
+		t.Fatalf("UC-055/A1 keys %+v, want one refused with http_status 404 (reason and status agree)", list)
 	}
 	if v, _ := e.link.ctrl.view(); v["A"].readable {
 		t.Fatal("UC-055/A1 controller read back although its settle was refused")

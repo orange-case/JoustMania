@@ -139,8 +139,9 @@ effort, as on game identities; `game_id` last, so a settle cut short by a 429 or
 for a restart while the game was live). A value of the owner waits as pending until the settle ended. A refused
 removal leaves the controller unread for that game (its values are still sent), with a warning; so does a create
 that Flagsmith answers "already exists" while the search does not show the identity (never retried in a loop, which
-would hold every value push back; without the uuid no override route works, so each of that game's values for the
-controller is refused `not_found` after one search and one create, #2682). Exception, the **first settle of a controller in a process**: the link first reads the identity's
+would hold every value push back). It counts as a listing, so each of that game's values for the controller
+searches again with the #2639 backoff (0.5, 1, 2 s) and lands once the search shows the identity; without the uuid
+no override route works, so a search that never shows it refuses the value `not_found` (#2682). Exception, the **first settle of a controller in a process**: the link first reads the identity's
 traits (`GET …/edge-identities/{uuid}/list-traits/`); when `game_id` names the owner, the flag service restarted while
 that game was live and nothing is removed. Traits that cannot be read (traits off in the organisation, a refusal)
 count as another game: the overrides are removed.
@@ -209,8 +210,10 @@ entity.
    not route the upsert by identifier `…/edge-identities-featurestates`: Django's HTML 404, verified 2026-11-18):
    - **the identity's uuid**: the one the link knows (its own listing, a settle, the start), else the exact search
      `GET …/edge-identities/?q="<identifier>"`, else (a value to write) it creates the identity with
-     `POST …/edge-identities/` (a new identity has no override). "Already exists" while the search does not show it
-     is a `not_found` refusal of the value (no uuid, no route);
+     `POST …/edge-identities/` (a new identity has no override). A create, and one answered "already exists" while
+     the exact search does not show the identity yet (the search may lag a create), count as a listing: that answer
+     is a `404` (status and reason agree), so the #2639 backoff below searches again; a search that never shows it
+     refuses the value `not_found` after the retries (no uuid, no route);
    - **the override's `featurestate_uuid`**: cached per identity and feature (from the create answer, an identity it
      created, a controller settle's listing), else one listing `GET …/edge-identities/{uuid}/edge-featurestates/`
      (a plain list; it fills the cache for every feature of the identity);
