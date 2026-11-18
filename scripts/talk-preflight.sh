@@ -489,7 +489,7 @@ except Exception:
     if [[ "${inference_flag}" == "claude" ]]; then
       pass "inference.backend flag = claude (the post-game summary backend)"
     else
-      fail "inference.backend flag = ${inference_flag:-?} (not claude): the closing summary beat shows a capture-only retro; set the flag to claude (agent-backend.sh / flag-service overlay)"
+      fail "inference.backend flag = ${inference_flag:-?} (not claude): the closing summary beat shows a capture-only retro; set inference.backend to claude in Flagsmith (persisted) or run ./scripts/talk-stage.sh reset (in memory, lost on a reboot without the Flagsmith link)"
     fi
     # Not a secret: the per-minute budget ceiling, read at agent start. The cap is
     # min(env, flag) (#1788, C-034): the env can only lower the flag, never raise it.
