@@ -34,10 +34,13 @@ HTTP API ([services.md §7.2](../specs/services.md#72-httpjson-api-resource-styl
 # set the shape for the next game (an in-memory stack overlay, like the stage scripts write)
 curl -sS -X PUT http://localhost/flags/observability/telemetry.moment_shape \
   -H 'Content-Type: application/json' -d '{"variant": "log_event", "writer": "stage"}'
-# back to the default (clears the in-memory overlay)
+# back to the default (clears the in-memory overlay): do this after the booth too
 curl -sS -X DELETE http://localhost/flags/observability/telemetry.moment_shape
 ```
 
+- Reset the shape after the booth (the DELETE above). The overlay stays in effect for every later game,
+  shadow and pattern games included, until it is cleared; in `span` the agent then takes its eliminations
+  from the elimination-order gauge alone (UC-100 step 9, BR-007).
 - One shape per game. The coordinator reads the flag once when the game starts. Changing it during a game
   does not affect that game; the new value applies from the next game (UC-100 A2, BR-002).
 - A flag that is absent, unknown or unreadable gives `span_event`. A game started before the
@@ -49,7 +52,8 @@ shape the game used. If it differs from the one you chose, the game is not count
 
 ## 3. The three shapes
 
-The warning follows the chosen shape. The death is always a span event for now (section 6).
+The warning and the death follow the chosen shape (UC-100 BR-007). The table names the warning; the death is
+the same with the name `player_death` (span `game.player_death` is a point in time: start = end = the death).
 
 | Shape | What is sent | Where it hangs in the trace | When it reaches a backend | What a backend needs to find it |
 |---|---|---|---|---|
@@ -62,7 +66,7 @@ Every record of a moment carries the same identity attributes in every shape: `m
 `player.name` (once known), `game.id` and `game.kind`. `moment.id` has the form `<game.id>/<player.serial>/<n>`
 and is unique within the game (UC-100 BR-003).
 
-`both` sends every warning twice, which doubles the volume of these moments. It exists to move a reader from
+`both` sends every warning and every death twice, which doubles the volume of these moments. It exists to move a reader from
 one shape to another, not as a booth round. A game in `both` is not counted (UC-100 A6, BR-005).
 
 ## 4. The question and how to check an answer
@@ -128,10 +132,9 @@ Template, one row per backend and shape. Fill the backend's answer and the groun
 
 ## 6. Known limits today
 
-- **The death stays a span event** whatever the shape, until slice 3 of #2658 (UC-100 BR-007). A round asks a
-  backend to correlate a warning in the chosen shape with a death sent as a span event. The agent reading
-  moments in every shape, log events included, is planned with [FR-218](../requirements.md), as an
-  alternative flow of [UC-041](../use_cases/UC-041.md).
+- **In the `span` shape the agent takes nothing from the death** (UC-100 BR-007, BR-010): its elimination order
+  comes from the elimination-order gauge alone. In the other shapes it reads the death as a span event or a log
+  event, once per `moment.id` ([FR-218](../requirements.md), [UC-041](../use_cases/UC-041.md) A7).
 - **The case keeps no log store** (BR-006). A log-event round can only be checked against the ground truth on
   the game's root span, never against a copy of the log in the case.
 - **The first game after a restart may run in the default shape.** Game admission does not wait for the
