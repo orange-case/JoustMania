@@ -123,6 +123,13 @@ STEP6_PANELS = [
     (
         "agent",
         "agent-operations",
+        "Decision Timeline (real games)",
+        r"agent_decisions_total",
+        r'game_kind="real"',
+    ),
+    (
+        "agent",
+        "agent-operations",
         "Interventions Dispatched / min (by action)",
         r"agent_interventions_applied_total",
     ),
@@ -348,3 +355,29 @@ def test_flagsmith_link_state_stat_is_an_instant_query():
         assert found[0]["targets"] and all(t.get("instant") is True for t in found[0]["targets"])
         return
     raise AssertionError("no feature-flags dashboard")
+
+
+# The dashboards that mark when the agent decided: (folder, uid).
+DECISION_ANNOTATED = [("agent", "agent-operations"), ("game", "game-players")]
+
+
+@pytest.mark.parametrize(("folder", "uid"), DECISION_ANNOTATED)
+def test_agent_decisions_are_annotated(folder: str, uid: str) -> None:
+    """Applied and blocked real-game decisions are on by default, shadow ones off."""
+    dash = next(
+        d
+        for d in (json.loads(p.read_text()) for p in (DASHBOARDS / folder).glob("*.json"))
+        if d["uid"] == uid
+    )
+    anns = {a["name"]: a for a in dash["annotations"]["list"]}
+    expected = {
+        "Agent decision: applied": True,
+        "Agent decision: blocked": True,
+        "Agent decision: shadow games": False,
+    }
+    for name, enabled in expected.items():
+        assert name in anns, f"{uid}: annotation {name!r} is missing"
+        a = anns[name]
+        assert a["datasource"]["uid"] == "prometheus"
+        assert "agent_decisions_total" in a["expr"]
+        assert a["enable"] is enabled, f"{uid}: {name!r} enable should be {enabled}"
