@@ -34,7 +34,8 @@
     "policy.shield_danger_samples": "default",
     "decision.min_gap_after_answer_ms": "default",
     "decision.operator_brief": "off",
-    "decision.magnitude_bounds": "default"
+    "decision.magnitude_bounds": "default",
+    "objectives": "balanced_focused"
   },
   "fallback": {
     "llm.eligible_game_kinds": "real_and_shadow",
