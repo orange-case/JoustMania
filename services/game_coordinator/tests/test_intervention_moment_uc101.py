@@ -248,7 +248,14 @@ def _gt(game):
 # The id is read in the resolution and lands on the moment (main 3-5)
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-101", flow="main", steps=[4, 5], br=["BR-001", "BR-002", "BR-003", "BR-004"])
+@pytest.mark.nfr("NFR-061")
+@pytest.mark.uc(
+    "UC-101",
+    flow="main",
+    steps=[4, 5],
+    br=["BR-001", "BR-002", "BR-003", "BR-004", "BR-005", "BR-008"],
+    cond=["Post-S-2"],
+)
 async def test_shield_grant_records_the_moment_with_the_served_id(sdk):
     game = _ffa(sdk)
     game.players["p1"].name = "Blue Phoenix"
@@ -325,8 +332,8 @@ def test_decision_id_of_reads_only_the_resolved_variant(variant, metadata, expec
 
 
 @pytest.mark.asyncio
+@pytest.mark.nfr("NFR-061")
 @pytest.mark.uc("UC-101", flow="A3", br=["BR-003"], cond=["Post-F-1"])
-@pytest.mark.uc("UC-101", br=["NFR-061"])
 async def test_an_unreadable_id_never_changes_the_intervention(sdk):
     game = _ffa(sdk)
     mgr, events, _ = _manager(game)
@@ -344,7 +351,8 @@ async def test_an_unreadable_id_never_changes_the_intervention(sdk):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-101", br=["NFR-061", "BR-005"], cond=["Post-F-1"])
+@pytest.mark.nfr("NFR-061")
+@pytest.mark.uc("UC-101", br=["BR-005"], cond=["Post-F-1"])
 async def test_a_failing_moment_never_turns_an_applied_lever_into_handler_error(sdk):
     game = _ffa(sdk)
     mgr, events, _ = _manager(game)
@@ -802,7 +810,7 @@ async def test_the_fake_game_and_every_lever_dispatch_open_a_scope():
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 @pytest.mark.parametrize("shape", ["span", "log_event", "both"])
-@pytest.mark.uc("UC-101", flow="main", steps=[2, 5], br=["BR-002"])
+@pytest.mark.uc("UC-101", flow="main", steps=[5], br=["BR-002"])
 @pytest.mark.uc("UC-101", flow="A1")
 async def test_the_moment_follows_the_game_shape(sdk, shape):
     game = _ffa(sdk, shape=shape)

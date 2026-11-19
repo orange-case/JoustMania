@@ -264,8 +264,34 @@ def test_only_the_agent_pipeline_filters_moments_and_the_gateway_filter_drops_he
             assert moment_word not in condition, condition
 
 
+@pytest.mark.uc("UC-101", flow="main", steps=[6], br=["BR-002"])
+def test_the_agent_decision_and_the_intervention_moment_reach_the_gateway(merged):
+    """UC-101 step 6: the agent's `agent.decision` (its trace) and the coordinator's
+    intervention moment (a span, a span event or a log event in the game's trace) both reach
+    the case collector over OTLP, and the gateway pipelines take every OTLP record of their
+    signal: the same `otlp` receiver as the in-case twin, no filter on `logs/gateway`, and on
+    `traces/gateway` only the health-check filter, which names neither the agent's spans nor
+    the intervention moment."""
+    services = ic.compose_services()
+    for service in ("agent", "game-coordinator"):
+        env = services[service]["environment"]
+        endpoint = next(e for e in env if e.startswith("OTEL_EXPORTER_OTLP_ENDPOINT="))
+        assert "otel-collector:4317" in endpoint, (service, endpoint)
+    pipelines = merged["service"]["pipelines"]
+    for name in ("traces/gateway", "logs/gateway"):
+        assert pipelines[name]["receivers"] == ["otlp"]
+        assert pipelines[name]["exporters"] == [EXPORTER]
+    assert not [
+        p for p in pipelines["logs/gateway"]["processors"] if p.startswith("filter")
+    ]
+    for condition in merged["processors"]["filter/grpc_health"]["trace_conditions"]:
+        for word in ("agent", "decision", "intervention"):
+            assert word not in condition, condition
+
+
 @pytest.mark.nfr("NFR-029")
 @pytest.mark.uc("UC-100", flow="A3", steps=[1])
+@pytest.mark.uc("UC-101", flow="A5", steps=[1])
 @pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])
 def test_an_unreachable_gateway_cannot_touch_the_in_case_pipelines_or_the_agent(
     base, merged

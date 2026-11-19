@@ -49,7 +49,7 @@ func (s *idSink) sent() []string {
 
 var errWriteRefused = errors.New("flag service refused")
 
-// UC: UC-101 3 BR-003
+// UC: UC-101 main step 3 BR-003
 func TestInterventionID_CreatedBeforeTheWriteAndSentWithIt(t *testing.T) {
 	t.Run("UC-101/BR-003 the write carries the id the decision span records", func(t *testing.T) {
 		// No context provider: no effect sample is scheduled, the id is still made.
@@ -220,7 +220,7 @@ func TestInterventionID_NotSerialized(t *testing.T) {
 	})
 }
 
-// UC: UC-101 BR-003 NFR-061
+// UC: UC-101 BR-003
 func TestInterventionID_IsSixteenHexCharacters(t *testing.T) {
 	t.Run("UC-101/BR-003 the id fits the flag service's served length (NFR-051)", func(t *testing.T) {
 		seen := map[string]bool{}

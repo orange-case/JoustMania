@@ -7,7 +7,7 @@ import (
 	"github.com/joustmania/agent/decision"
 )
 
-// UC: UC-101 3 A3 BR-003
+// UC: UC-101 main step 3 A3 A4 BR-003
 // The writer sends the decision's intervention id as the flag-service decision_id
 // on every write shape (#2665, FR-221): a game state PUT, a per-player PUT, a
 // one-shot POST and a group shield POST (one id for the whole group, UC-101 A4).

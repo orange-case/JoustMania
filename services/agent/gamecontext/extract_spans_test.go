@@ -252,7 +252,7 @@ func TestApplySpans_MomentSpansAreIgnored(t *testing.T) {
 	})
 }
 
-// UC: UC-101 BR-010
+// UC: UC-101 BR-010 Post-F-2
 // The intervention moment's span (#2665) is skipped like the other moment spans.
 func TestApplySpans_InterventionMomentSpanIsIgnored(t *testing.T) {
 	assertMomentSpanIgnored(t, "UC-101/BR-010 ", "game.intervention")

@@ -68,6 +68,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [talk/two-standards-runbook.md](talk/two-standards-runbook.md) | Run the "Two Standards Walk Into an Agent" talk (with `scripts/talk-preflight.sh`) |
 | [talk/stage-test-checklist.md](talk/stage-test-checklist.md) | Hardware test checklist for the stage Pi on the real power bank (#1465) |
 | [challenges/where-did-it-go.md](challenges/where-did-it-go.md) | Run the booth challenge "Where did it go?": set the moment shape, read the ground truth, record each backend's result (UC-100) |
+| [challenges/who-saved-them.md](challenges/who-saved-them.md) | Run the booth challenge "Who saved them?": join an agent decision to its effect on a player by the intervention id, read the intervention ground truth, record each backend's result (UC-101) |
 
 Service READMEs (`services/*/README.md`) hold code-level detail; where they disagree with the specs, the
 specs win and the [inventory](specs-inventory.md#3-service-tool-and-test-docs) records the difference.
