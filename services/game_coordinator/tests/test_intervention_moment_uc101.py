@@ -16,6 +16,8 @@ Real SDK tracer and logger providers with in-memory exporters (not the global on
 import asyncio
 import os
 import sys
+import threading
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -510,17 +512,49 @@ async def test_levels_record_each_changed_player_with_its_own_id(sdk):
     assert game.players["p1"].sensitivity_factor == 1.0
 
 
+LEVELS = [
+    ("player_sensitivity_factor", "sensitivity_factor"),
+    ("player_handicap_factor", "handicap_factor"),
+]
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("flag, attr", LEVELS)
 @pytest.mark.uc("UC-101", flow="A2", br=["BR-005"])
-async def test_a_level_that_changes_no_factor_records_nothing(sdk):
+async def test_a_level_that_changes_no_factor_records_nothing(sdk, flag, attr):
     """A new write whose clamped factor equals the current one changed nothing (A2)."""
     game = _ffa(sdk)
-    game.players["p1"].handicap_factor = 2.0
+    setattr(game.players["p1"], attr, 2.0)
     mgr, _, _ = _manager(game)
-    mgr._interventions_client.values["player_handicap_factor"] = {"p1": ("r1_1", 5.0, "ffff")}  # clamps to 2.0
-
+    client = mgr._interventions_client
+    client.values[flag] = {"p1": ("r1_1", 3.0, "ffff")}  # clamps to 2.0
+    await _evaluate(mgr)
+    client.values[flag] = {"p1": ("r1_2", 2.5, "eeee")}  # a new write, clamps to 2.0 again
     await _evaluate(mgr)
 
+    assert getattr(game.players["p1"], attr) == 2.0
+    assert _events(game.players["p1"].span) == []
+    assert _gt(game) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag, attr", LEVELS)
+@pytest.mark.uc("UC-101", flow="A2", br=["BR-005"])
+@pytest.mark.uc("UC-101", flow="A3")
+async def test_a_revert_of_a_player_already_at_neutral_records_nothing(sdk, flag, attr):
+    """A blocked apply still moves the level baseline, so the later clear reverts a player at 1.0 (A2)."""
+    game = _ffa(sdk)
+    mgr, events, _ = _manager(game, allowed="adjust_volume")  # the chain blocks the apply
+    client = mgr._interventions_client
+    client.values[flag] = {"p1": ("r1_1", 1.5, "blocked-apply")}
+    await _evaluate(mgr)
+    assert getattr(game.players["p1"], attr) == 1.0  # nothing was applied
+    assert _events(game.players["p1"].span) == []
+
+    client.values[flag] = {}  # cleared: the neutral variant, a revert of p1 (no chain)
+    await _evaluate(mgr)
+
+    assert getattr(game.players["p1"], attr) == 1.0
     assert _events(game.players["p1"].span) == []
     assert _gt(game) == []
 
@@ -674,6 +708,79 @@ async def test_the_scope_gives_one_tag_per_named_player_while_the_handler_runs()
     later = InterventionScope("grant_shield", serials=None)
     await run_with_intervention_scope(later, async_noop)
     assert later.take("p9") is None  # closed: a task the handler spawned records nothing
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-101", br=["BR-004", "BR-005"])
+async def test_a_targeted_dispatch_tags_only_its_target(sdk):
+    """A handler that records for a second player (a cascade) tags nobody but the target (defence in depth)."""
+    game = _ffa(sdk)
+    mgr, _, session = _manager(game)
+
+    async def touches_two_players(_ctx):
+        game.record_intervention("p1")
+        game.record_intervention("p2")
+
+    mgr.register_handler("shield_seconds", touches_two_players)
+    with patch("services.game_coordinator.metrics.interventions_total"):
+        await mgr._enforce_and_dispatch(SPECS["shield_seconds"], 5.0, "", "p1", session, intervention_id="t1")
+
+    assert [m["intervention.id"] for m in _events(game.players["p1"].span)] == ["t1"]
+    assert _events(game.players["p2"].span) == []
+    assert [e.serial for e in game._ground_truth._interventions] == ["p1"]
+
+
+@pytest.fixture
+def game_loop_thread():
+    """A game loop in its own thread, like GameSession's."""
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    yield loop
+    loop.call_soon_threadsafe(loop.stop)
+    thread.join(timeout=3.0)
+    loop.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-101", flow="main", steps=[5], br=["BR-001", "BR-004"])
+async def test_a_late_effect_still_records_the_moment_with_its_id_when_it_lands(sdk, game_loop_thread):
+    """The dispatcher gives up (game_loop_late) but the handler keeps running on the game loop.
+
+    The scope belongs to the handler call, not to the dispatcher's wait: the lever that
+    lands after the timeout is still tagged (BR-001: where the lever's own effect is recorded).
+    """
+    game = _ffa(sdk)
+    mgr, events, session = _manager(game)
+    late_session = replace(session, loop=game_loop_thread)
+    mgr._get_sessions = lambda: [late_session]
+    mgr._dispatch_timeout_s = 0.1
+    mgr._interventions_client.values["shield_seconds"] = {"p1": ("r1_3", 5.0, "1a7e0000000000aa")}
+    real = mgr._handlers["shield_seconds"]
+    landed = threading.Event()
+
+    async def lands_late(ctx):
+        await asyncio.sleep(0.5)  # well past the dispatch timeout
+        try:
+            return await real(ctx)
+        finally:
+            landed.set()
+
+    mgr.register_handler("shield_seconds", lands_late)
+
+    await _evaluate(mgr)
+
+    (outcome,) = _published(events, "grant_shield")
+    assert outcome["block_reason"] == "game_loop_late"
+    assert outcome["blocked"] == "false"  # outcome unknown, the effect may still apply
+    assert not landed.is_set() and _events(game.players["p1"].span) == []  # not landed yet: no moment yet
+    assert await asyncio.to_thread(landed.wait, 3.0)
+    assert game.players["p1"].grace_until > 0  # the lever landed
+    (moment,) = _events(game.players["p1"].span)
+    assert moment["intervention.type"] == "grant_shield"
+    assert moment["intervention.id"] == "1a7e0000000000aa"
+    (entry,) = _gt(game)
+    assert entry["moment.id"] == moment["moment.id"]
 
 
 @pytest.mark.asyncio
