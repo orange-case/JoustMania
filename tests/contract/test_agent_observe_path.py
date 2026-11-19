@@ -189,3 +189,30 @@ def test_agent_moments_filter_passes_only_moment_log_events(
     player_death records that carry a moment id, and never synthetic data (#2577)."""
     conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
     assert _drops_log(conditions, event_name, attributes, resource) is dropped
+
+
+@pytest.mark.uc("UC-101", br=["BR-010"], cond=["Post-F-2"])
+@pytest.mark.parametrize(
+    "intervention_id",
+    ["0f1e2d3c4b5a6978", None],
+    ids=["with-id", "without-id"],
+)
+def test_intervention_log_event_never_reaches_the_agent(collector, intervention_id):
+    """UC-101 BR-010, Post-F-2: an intervention moment sent as a log event (shape `log_event`
+    or `both`) carries a real moment id of the form `<game.id>/<serial>/<n>` and the moment's
+    identity attributes, like a warning, and still never passes `filter/agent_moments`, so the
+    agent's inputs are those of a game without the challenge. The span half (the
+    `game.intervention` span is ignored) is the Go test `TestApplySpans_InterventionMomentSpanIsIgnored`."""
+    attributes: dict[str, object] = {
+        "moment.id": "game_2665/P1/3",
+        "intervention.type": "grant_shield",
+        "player.serial": "P1",
+        "game.id": "game_2665",
+        "game.kind": "real",
+    }
+    if intervention_id is not None:
+        attributes["intervention.id"] = intervention_id
+    conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
+    assert _drops_log(conditions, "intervention", attributes, {}) is True
+    # The same record named as a warning passes: the drop is by name, not by a missing id.
+    assert _drops_log(conditions, "death_warning", attributes, {}) is False
