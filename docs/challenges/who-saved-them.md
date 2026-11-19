@@ -8,7 +8,8 @@
 
 ## 1. What the challenge shows
 
-The agent decides in its own trace: an `agent.decision` span, with its `agent.intervention.effect` child. The
+The agent decides in its own trace: an `agent.decision` span, with an `agent.intervention.effect` child when the
+effect is measured. The
 effect lands in the game's trace, on a player: a shield, a protecting sensitivity factor, a revive. The two traces
 share one key, the intervention id. The challenge asks each backend one question: "player X got an intervention:
 which agent decision gave it, and was the player still alive 10 s later?" One game is played per moment shape
@@ -33,8 +34,8 @@ Preconditions (UC-101):
 - Enough controllers are connected for a game (UC-010 preconditions).
 
 On the case, through the envoy route of the flag service's HTTP API
-([services.md §7.2](../specs/services.md#72-httpjson-api-resource-style)); write `shield.activation` while no game
-is live (a live game refuses it):
+([services.md §7.2](../specs/services.md#72-httpjson-api-resource-style)). Set `shield.activation` before the round:
+a stack write during a game applies from the next grant (the operator pad refuses it while a game is live):
 
 ```bash
 # instant shields for the booth (an in-memory stack overlay)
@@ -61,8 +62,8 @@ If it differs from the chosen shape, or is `both`, the game is not counted (A1).
 ## 3. The two sides of the join
 
 **The decision (agent trace).** Every written intervention has an `agent.decision` span with
-`decision.intervention_id`, also a write that failed. Its `agent.intervention.effect` child carries the same id as
-`intervention.id`. The flag service's `flagservice.write` span carries it as `decision.intervention_id` too
+`decision.intervention_id`, also a write that failed. When the effect is measured, its `agent.intervention.effect`
+child carries the same id as `intervention.id`. The flag service's `flagservice.write` span carries it as `decision.intervention_id` too
 ([telemetry.md](../specs/telemetry.md), FR-221).
 
 **The effect (game trace).** The coordinator records the moment `intervention` on the player, in the game's shape:
@@ -107,7 +108,7 @@ there, not from any backend and not from the agent's game summary (BR-006):
 1. The decision: the backend's `agent.decision` must carry `decision.intervention_id` equal to the entry's
    `intervention.id`.
 2. Survival (BR-007): if `challenge.first_death_at_ns` is absent, or `first_death_at_ns − applied_at_ns` is more
-   than 10 s (10e9 ns), the player survived. Otherwise the player did not. A game that ended within the 10 s
+   than 10 s (1e10 ns), the player survived. Otherwise the player did not. A game that ended within the 10 s
    without that player's death counts as survived.
 3. Compare the backend's survival answer with step 2.
 
@@ -156,7 +157,7 @@ moment is not wrong.
 - **The agent may not intervene.** The rules backend grants a shield when a player is in danger; a calm game can end
   without any intervention that saves (A6). A shadow game uses a wider allow-list and shows the other levers.
 - **No CI test plays the booth round.** Steps 8 to 10 (the question, the comparison, the three shapes side by side),
-  A1 step 2, A5, A6 and the postconditions about recorded results are the presenter's check at the booth.
+  A1 step 2, A5 step 2, A6 and the postconditions about recorded results are the presenter's check at the booth.
 - **The case keeps no log store** (UC-100 BR-006). A `log_event` round is checked only against the ground truth on
   the root span.
 - **A late effect after teardown.** An effect that lands late after the game's teardown recorded the ground truth

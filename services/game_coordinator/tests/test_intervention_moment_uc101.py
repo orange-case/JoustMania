@@ -253,7 +253,7 @@ def _gt(game):
     "UC-101",
     flow="main",
     steps=[4, 5],
-    br=["BR-001", "BR-002", "BR-003", "BR-004", "BR-005", "BR-008"],
+    br=["BR-001", "BR-002", "BR-003", "BR-004", "BR-005"],
     cond=["Post-S-2"],
 )
 async def test_shield_grant_records_the_moment_with_the_served_id(sdk):

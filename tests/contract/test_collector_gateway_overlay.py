@@ -264,7 +264,7 @@ def test_only_the_agent_pipeline_filters_moments_and_the_gateway_filter_drops_he
             assert moment_word not in condition, condition
 
 
-@pytest.mark.uc("UC-101", flow="main", steps=[6], br=["BR-002"])
+@pytest.mark.uc("UC-101", flow="main", steps=[6])
 def test_the_agent_decision_and_the_intervention_moment_reach_the_gateway(merged):
     """UC-101 step 6: the agent's `agent.decision` (its trace) and the coordinator's
     intervention moment (a span, a span event or a log event in the game's trace) both reach

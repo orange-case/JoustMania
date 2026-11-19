@@ -169,7 +169,7 @@ async def _run_session(flag_value):
 @pytest.mark.asyncio
 @pytest.mark.nfr("NFR-060")
 @pytest.mark.uc("UC-100", flow="main", steps=[3], br=["BR-002"])
-@pytest.mark.uc("UC-101", flow="main", steps=[2], br=["BR-002"])
+@pytest.mark.uc("UC-101", flow="main", steps=[2])
 @pytest.mark.parametrize("shape", ["span_event", "span", "log_event", "both"])
 @pytest.mark.usefixtures("otlp_logs")
 async def test_session_reads_the_shape_once_and_records_it_on_the_game_root(shape):
