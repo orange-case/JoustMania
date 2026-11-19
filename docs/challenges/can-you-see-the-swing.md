@@ -41,7 +41,7 @@ Preconditions (UC-102):
 | Labels | `serial` (the player's controller), `game_id` |
 | Rate | Set on every 6th controller frame of the gameplay stream: about every 100 ms at 60 Hz; exported every 100 ms |
 | Value | The raw acceleration magnitude of that frame: a sample, so the curve need not reach the `accel_magnitude` recorded on the death (BR-001) |
-| After a death | The series repeats its last value while the player is out, and is removed when the player leaves or the game ends. Only the seconds before a death show the swing |
+| After a death | The series repeats its last value until the game ends, when it is removed (in Fight Club and Tournament also while the player waits for the next fight). Only the seconds before a death show the swing |
 | Path | OTLP to the case's collector, then to the case's VictoriaMetrics and through the gateway's metrics pipeline, with the same processors (BR-002) |
 | Values per player | About 10 new values per second; about 100 in the 10 s window |
 
@@ -49,13 +49,14 @@ Preconditions (UC-102):
 
 **Pick a death (UC-102 step 4).** Open the game's trace in Jaeger (`/jaeger/`). The root span (named after the
 mode) carries `game.id`. After a normal game end it holds one `challenge.ground_truth` event per player: take a
-player with a `challenge.death_times_ns` entry, and note that time and the `player.serial`. After a force-end
+player with a `challenge.death_times_ns` entry, and note that time and the `player.serial`. The ground truth
+also lists agent eliminations: check that the player's `player_death` moment has `death.reason` = `motion`. After a force-end
 there is no ground truth: use the player's `player_death` moment instead (a span event or span on the trace,
 or a log event in the `log_event` shape). The window is the **10 s ending at the death**. If no motion death
 has 10 s of play before it, take the last 10 s of a player who was alive in them (A3).
 
 **Read the reference (step 5, BR-003).** The case's VictoriaMetrics keeps the raw samples (7 days). Export
-them for the player, game and window (times in Unix seconds):
+them for the player, game and window (times in Unix seconds: divide `challenge.death_times_ns` by 1e9):
 
 ```bash
 curl -sS -G http://localhost/victoria-metrics/api/v1/export \
@@ -66,7 +67,7 @@ curl -sS -G http://localhost/victoria-metrics/api/v1/export \
 The answer is one JSON line with a `values` and a `timestamps` array. Count how often the value changes from
 one sample to the next: that is the reference's count, about 100. Do not use a range query (`query_range`, or a
 graph): it fills every step with the last stored value and makes any series look dense. If the median time
-between changes is longer than 200 ms, or there is no series, the game is not counted (A1).
+between changes is longer than 150 ms, or there is no series, the game is not counted (A1).
 
 **Read each backend (step 5).** Open the same metric, filtered to the same `game_id` and `serial`, in the
 backend's own metric view, zoomed to the 10 s window and nothing wider. Count how often the shown value
@@ -96,7 +97,7 @@ Template, one row per backend:
 
 | Case | Why | Flow |
 |---|---|---|
-| The reference's median time between changes is over 200 ms, or there is no series | The coordinator exports at another interval (another flag variant, or flagd unreachable at its start), or the loop runs below 60 Hz | A1 |
+| The reference's median time between changes is over 150 ms, or there is no series | The coordinator exports at another interval (another flag variant, or flagd unreachable at its start), or the loop runs below 60 Hz | A1 |
 
 ## 6. Known limits
 
