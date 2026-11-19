@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.23.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.22.0...joustmania-v0.23.0) (2026-11-19)
+
+
+### Features
+
+* **agent-flags:** named variants for magnitude_bounds and operator_brief ([#2706](https://github.com/orange-case/JoustMania/issues/2706)) ([fed71fd](https://github.com/orange-case/JoustMania/commit/fed71fd2ccb5ce623446df41ac92351a664a3c60))
+* **flag-service:** agent/objectives writable by the operator ([#2704](https://github.com/orange-case/JoustMania/issues/2704)) ([f672405](https://github.com/orange-case/JoustMania/commit/f6724055826bb471ab33f0587a154a8e1a0ce40d))
+* **game-coordinator:** record the intervention moment with its id and its ground truth ([#2665](https://github.com/orange-case/JoustMania/issues/2665)) ([#2699](https://github.com/orange-case/JoustMania/issues/2699)) ([243deca](https://github.com/orange-case/JoustMania/commit/243deca69c64964727d0dc66db3f0a4d72c37f1a))
+
+
+### Documentation
+
+* **spec:** UC-101 Implemented; coverage gaps closed, "Who saved them?" sheet ([#2665](https://github.com/orange-case/JoustMania/issues/2665)) ([#2703](https://github.com/orange-case/JoustMania/issues/2703)) ([90b999a](https://github.com/orange-case/JoustMania/commit/90b999a186324b4590237ee534c4e117b1d799b2))
+* **talk:** beat 4b as rehearsed, and a Flagsmith stage sheet ([#2700](https://github.com/orange-case/JoustMania/issues/2700)) ([889cd9d](https://github.com/orange-case/JoustMania/commit/889cd9d59eca867972b9bdc598292a0ff8777134))
+
 ## [0.22.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.21.0...joustmania-v0.22.0) (2026-11-19)
 
 
