@@ -93,6 +93,12 @@ from services.game_coordinator.games.flag_snapshot import (  # noqa: F401  re-ex
     resolve_shield_limit,
 )
 from services.game_coordinator.games.ground_truth import GroundTruth
+from services.game_coordinator.games.intervention_moment import (
+    INTERVENTION_ID_ATTR,
+    INTERVENTION_MOMENT,
+    INTERVENTION_TYPE_ATTR,
+    take_intervention,
+)
 from services.game_coordinator.runtime_config import GamePerformanceConfig, get_config_manager
 from services.game_coordinator.stream_writes import serialized_write
 
@@ -2602,6 +2608,48 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             )
             await serialized_write(self.gameplay_stream, effect_cmd)
 
+    def record_intervention(
+        self, serial: str, *, types: Collection[str] | None = None, timestamp_ns: int | None = None
+    ) -> None:
+        """Record the ``intervention`` moment of ``serial`` if an agent intervention is landing on it now.
+
+        Called where a player lever records its own effect (UC-101 BR-001, BR-005). The
+        intervention comes from the scope the intervention manager runs the handler in
+        (``games/intervention_moment.py``): outside a scope, for a player the scope does not
+        name, a second time for the same player, or for another lever type (``types``) this
+        records nothing. Records the ground-truth entry (FR-222), then the moment in the
+        game's shape with ``intervention.type``, ``intervention.id`` (left out without one,
+        A3) and the moment identity (BR-002, BR-004). ``timestamp_ns`` is the apply time
+        when the caller already read it (an elimination: the death's time, BR-006).
+
+        Never raises: an applied lever stays applied whatever the moment does (NFR-061).
+        """
+        try:
+            tag = take_intervention(serial, types)
+            if tag is None:
+                return
+            entry = self._ground_truth.record_intervention(serial, tag.type, tag.id, at_ns=timestamp_ns)
+            player = self.players.get(serial)
+            if player is None or not player.span:
+                return  # no moment to send; the ground truth names none (BR-009)
+            identity = self._moment_identity(player, serial)
+            attributes: dict[str, Any] = {INTERVENTION_TYPE_ATTR: tag.type}
+            if tag.id:
+                attributes[INTERVENTION_ID_ATTR] = tag.id
+            attributes.update(identity)
+            sent = record_moment(
+                INTERVENTION_MOMENT,
+                shape=self.moment_shape,
+                parent_span=player.span,
+                attributes=attributes,
+                tracer=tracer,
+                timestamp_ns=entry.applied_at_ns,
+            )
+            if sent:
+                entry.moment_id = identity[MOMENT_ID_ATTR]
+        except Exception as e:  # noqa: BLE001 - a moment never reaches into the intervention
+            logger.debug(f"Recording the intervention moment of {serial} failed: {e}")
+
     def _moment_identity(self, player: "Player", serial: str) -> dict[str, str]:
         """Identity attributes of a new moment of ``serial`` (UC-100 BR-003, telemetry.md §3.2)."""
         sequence = self._moment_sequence.get(serial, 0) + 1
@@ -2747,6 +2795,10 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 },
             )
 
+        # UC-101 BR-005: an arming that changed nothing is no intervention moment.
+        if changed:
+            self.record_intervention(serial, types=("toughness_boost",))
+
         # Weaker perceptible feedback, only when the arming changed the window or
         # the boost (UC-040 A16, BR-009/BR-010).
         if changed:
@@ -2786,6 +2838,9 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             return False
         effective_warn, _ = self._compute_effective_thresholds(player)
         await self._warn_player(serial, 0.0, effective_warn)
+        # UC-101 BR-001: the intervention moment after the warning's death_warning moment,
+        # with its own clock read.
+        self.record_intervention(serial, types=("soft_penalty",))
         return True
 
     async def apply_soft_penalty(self, serial: str, seconds: float, factor: float | None = None) -> bool:
@@ -2835,8 +2890,11 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         new_until = game_clock.now() + seconds
         # Extend-not-shorten / tighten-not-loosen: keep whichever active window is
         # longer and whichever active factor is LOWER (stronger pressure), so
-        # repeated arming never reduces in-flight pressure.
+        # repeated arming never reduces in-flight pressure. ``changed``: the arming
+        # lengthened the window or strengthened the factor (UC-101 BR-005).
+        changed = True
         if game_clock.now() < player.soft_penalty_until:
+            changed = new_until > player.soft_penalty_until or factor < player.soft_penalty_factor
             new_until = max(new_until, player.soft_penalty_until)
             factor = min(factor, player.soft_penalty_factor)
         player.soft_penalty_until = new_until
@@ -2852,6 +2910,10 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                     **player_identity_attributes(serial, player.name),
                 },
             )
+        # UC-101 BR-001, BR-005: one intervention moment for a tighten that changed the
+        # window or the factor; the warning cue below adds no intervention moment.
+        if changed:
+            self.record_intervention(serial, types=("soft_penalty",))
 
         # Visible warning feedback so the tighten is observable to the player
         # ("you're on notice"), reusing the same warn cue as the "warn" action.
@@ -3047,6 +3109,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 return False
             # Ensure spawn grace even if the native path uses its own scheme.
             player.grace_until = max(player.grace_until, game_clock.now() + grace)
+            self.record_intervention(serial, types=("revive_player",))  # UC-101 BR-001
             logger.info(f"revive_player: {serial} revived via native respawn")
             return True
 
@@ -3065,6 +3128,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 "player_revived",
                 attributes={"spawn_grace": grace, **player_identity_attributes(serial, player.name)},
             )
+        self.record_intervention(serial, types=("revive_player",))  # UC-101 BR-001
 
         if self.gameplay_stream:
             from proto import controller_manager_pb2
@@ -3284,6 +3348,9 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 timestamp_ns=death_ns,
                 tracer=tracer,
             )
+        # An eliminate_player intervention lands as this death: its moment comes right
+        # after player_death, applied at the death's time (UC-101 BR-001, BR-006).
+        self.record_intervention(serial, types=("eliminate_player",), timestamp_ns=death_ns)
 
         # Finalize health attributes BEFORE _kill_player_impl() which may close the span.
         # Without this, dead players lose their health.total_poll_drops etc. attributes.

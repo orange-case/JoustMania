@@ -12,7 +12,7 @@ are imported under ``TYPE_CHECKING`` only, so importing this module does not pul
 in the large ``games.base`` module.
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 from openfeature.evaluation_context import EvaluationContext
@@ -89,3 +89,7 @@ class InterventionTarget(Protocol):
     async def apply_auto_rubberband(self, strength: str, seconds: float | None = None) -> int: ...
 
     async def revive_player(self, serial: str, spawn_grace: float | None = None) -> bool: ...
+
+    def record_intervention(
+        self, serial: str, *, types: Collection[str] | None = None, timestamp_ns: int | None = None
+    ) -> None: ...

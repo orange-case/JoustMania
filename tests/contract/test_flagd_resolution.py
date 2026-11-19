@@ -1883,6 +1883,49 @@ def test_snapshot_stamp_reaches_the_in_process_resolver(flagd):
             )
 
 
+@pytest.mark.uc("UC-101", flow="main", steps=[4], br=["BR-003", "BR-004"])
+def test_a_targeted_rungs_intervention_id_reaches_the_in_process_resolver(flagd):
+    """The intervention id of a per-player value is flag metadata ``decisionId.<variant>``
+    of the generated variant its rung serves (render.go ``MetaDecisionIDPrefix``, #2665).
+    The coordinator reads it from the resolved ``details.variant`` in the resolution it
+    already makes, so real flagd must pass both through its sync stream to the
+    in-process resolver for a ``gameId`` + ``targetingKey`` rung."""
+    path = flagd.file("interventions")
+    original = fh.load(path)
+    doc = json.loads(json.dumps(original))
+    flag = doc["flags"]["shield_seconds"]
+    flag["variants"]["r7_1"] = 5
+    flag["targeting"] = {
+        "if": [
+            {"and": [_eq("gameId", "game_id_2665"), _eq("targetingKey", "SER_A")]},
+            "r7_1",
+            None,
+        ]
+    }
+    flag.setdefault("metadata", {}).update({"decisionId.r7_1": "0123456789abcdef"})
+    fh.dump_in_place(path, doc)
+    ctx = EvaluationContext(
+        targeting_key="SER_A", attributes={"gameId": "game_id_2665"}
+    )
+    try:
+        with _ready_client(flagd, "interventions", resolver="in_process") as client:
+
+            def read():
+                details = client.get_float_details("shield_seconds", 0.0, ctx)
+                meta = details.flag_metadata or {}
+                return (
+                    details.variant,
+                    details.value,
+                    meta.get(f"decisionId.{details.variant}"),
+                )
+
+            assert fh.poll_until(lambda: read() == ("r7_1", 5.0, "0123456789abcdef")), (
+                f"in_process: targeted rung id through flagd: {read()}"
+            )
+    finally:
+        fh.dump_in_place(path, original)
+
+
 # --------------------------------------------------------------------------- #
 # 5. gameId / serial intervention targeting on both resolvers (#1479)
 # --------------------------------------------------------------------------- #

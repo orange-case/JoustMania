@@ -113,6 +113,8 @@ GROUP_MAX_PER_GAME = 3  # the registry's ceiling of policy.group_grant.max_per_g
 # coordinator re-checks the same bounds (fail closed).
 GROUP_MIN_SECONDS = 1.0
 GROUP_MAX_SECONDS = 10.0
+# The levers whose effect lands as a shield, a charge or energy (UC-101 BR-001).
+SHIELD_INTERVENTION_TYPES = ("grant_shield", "grant_group_shield")
 
 
 def resolve_group_max_targets(value: int) -> int:
@@ -246,6 +248,7 @@ class ShieldMixin:
                     **player_identity_attributes(serial, player.name),
                 },
             )
+        self.record_intervention(serial, types=SHIELD_INTERVENTION_TYPES)  # UC-101 BR-001
 
         # The helped cue (UC-040 BR-031), then the shield's own feedback (UC-040 A16).
         await self._send_shield_help_cue(player)
@@ -419,6 +422,8 @@ class ShieldMixin:
                                 **player_identity_attributes(player.serial, player.name),
                             },
                         )
+                # UC-101 A4: one intervention moment per shielded player, one intervention id.
+                self.record_intervention(player.serial, types=SHIELD_INTERVENTION_TYPES)
                 applied.append((player, was_protected))
         self._agent_group_grants += 1
         logger.info(
@@ -827,6 +832,7 @@ class ShieldMixin:
                         "shield.charge_expiry_s": expiry,
                     },
                 )
+        self.record_intervention(player.serial, types=SHIELD_INTERVENTION_TYPES)  # UC-101 BR-001
 
     async def _shield_charge_feedback(self, player: "Player", seconds: float, now: float) -> None:
         """The stored charge's feedback: help cue, charge layer, ``player_shield_charged`` (BR-021, BR-031)."""
@@ -1696,3 +1702,5 @@ class ShieldMixin:
                     player.span.add_event(
                         "shield_energy_full", attributes={"shield.energy_source": "agent", **identity}
                     )
+        # UC-101 BR-001; a full pool never gets here (``_shield_energy_refusal``: added > 0).
+        self.record_intervention(player.serial, types=SHIELD_INTERVENTION_TYPES)

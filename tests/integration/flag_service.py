@@ -41,7 +41,7 @@ class FlagService:
         self._overlays: list[tuple[str, str, bool]] = []
 
     @classmethod
-    def from_compose(cls, docker_compose) -> "FlagService":
+    def from_compose(cls, docker_compose) -> FlagService:
         host = docker_compose.get_service_host("flag-service", 8070)
         port = docker_compose.get_service_port("flag-service", 8070)
         return cls(f"http://{host}:{port}")
@@ -94,8 +94,11 @@ class FlagService:
         persist: bool = False,
         writer: str = WRITER,
         reason: str = "",
+        decision_id: str = "",
     ) -> dict:
-        """PUT /{set}/{flag}: exactly one of ``variant`` and ``value``."""
+        """PUT /{set}/{flag}: exactly one of ``variant`` and ``value``.
+
+        ``decision_id`` is the write's intervention id, as the agent sends it (#2665)."""
         body: dict = {"writer": writer}
         if variant is not None:
             body["variant"] = variant
@@ -109,20 +112,31 @@ class FlagService:
             body["persist"] = True
         if reason:
             body["reason"] = reason
+        if decision_id:
+            body["decision_id"] = decision_id
         result = self._ok("PUT", self._path(flag_set, flag), body)
         if not scope:
             self._overlays.append((flag_set, flag, persist))
         return result
 
     def post(
-        self, flag_set: str, flag: str, *, game_id: str, payload: dict | None = None
+        self,
+        flag_set: str,
+        flag: str,
+        *,
+        game_id: str,
+        payload: dict | None = None,
+        decision_id: str = "",
     ) -> dict:
-        """POST /{set}/{flag}: append one event to the game's event list."""
-        return self._ok(
-            "POST",
-            self._path(flag_set, flag),
-            {"scope": {"game_id": game_id}, "payload": payload or {}, "writer": WRITER},
-        )
+        """POST /{set}/{flag}: append one event to the game's event list (with ``decision_id``, #2665)."""
+        body = {
+            "scope": {"game_id": game_id},
+            "payload": payload or {},
+            "writer": WRITER,
+        }
+        if decision_id:
+            body["decision_id"] = decision_id
+        return self._ok("POST", self._path(flag_set, flag), body)
 
     def delete(self, flag_set: str, flag: str, **query) -> None:
         """DELETE /{set}/{flag}?<scope>: clear a value (no scope: the stack overlay)."""
@@ -209,10 +223,18 @@ def set_game_value(flag: str, game_id: str, value) -> dict:
     return default().put(INTERVENTIONS, flag, value=value, scope={"game_id": game_id})
 
 
-def set_player_value(flag: str, game_id: str, serial: str, value) -> dict:
-    """A per-player value in one game (levels and grants; every write is a fresh variant)."""
+def set_player_value(
+    flag: str, game_id: str, serial: str, value, *, decision_id: str = ""
+) -> dict:
+    """A per-player value in one game (levels and grants; every write is a fresh variant).
+
+    ``decision_id``: the intervention id the agent sends with the write (#2665)."""
     return default().put(
-        INTERVENTIONS, flag, value=value, scope={"game_id": game_id, "serial": serial}
+        INTERVENTIONS,
+        flag,
+        value=value,
+        scope={"game_id": game_id, "serial": serial},
+        decision_id=decision_id,
     )
 
 
@@ -221,10 +243,18 @@ def clear_game_value(flag: str, game_id: str, serial: str = "") -> None:
     default().delete(INTERVENTIONS, flag, game_id=game_id, serial=serial)
 
 
-def append_event(flag: str, game_id: str, payload: dict | None = None) -> int:
+def append_event(
+    flag: str, game_id: str, payload: dict | None = None, *, decision_id: str = ""
+) -> int:
     """Append a one-shot event to the game's event list; returns its seq (FR-137)."""
     return int(
-        default().post(INTERVENTIONS, flag, game_id=game_id, payload=payload)["seq"]
+        default().post(
+            INTERVENTIONS,
+            flag,
+            game_id=game_id,
+            payload=payload,
+            decision_id=decision_id,
+        )["seq"]
     )
 
 
