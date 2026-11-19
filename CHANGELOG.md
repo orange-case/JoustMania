@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.22.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.21.0...joustmania-v0.22.0) (2026-11-19)
+
+
+### Features
+
+* **agent:** operator flag decision.magnitude_bounds for the agent's magnitude ranges ([#2696](https://github.com/orange-case/JoustMania/issues/2696)) ([#2698](https://github.com/orange-case/JoustMania/issues/2698)) ([50501b8](https://github.com/orange-case/JoustMania/commit/50501b8148353bf43cb8999d3c3247bc22707da3))
+* **agent:** post-game summary sees the operator brief and the intervention catalog ([#2695](https://github.com/orange-case/JoustMania/issues/2695)) ([#2697](https://github.com/orange-case/JoustMania/issues/2697)) ([e3923d3](https://github.com/orange-case/JoustMania/commit/e3923d30e789a82113b6f0edc01863dd234433ce))
+
+
+### Documentation
+
+* **spec:** UC-100 Implemented; coverage gaps closed ([#2658](https://github.com/orange-case/JoustMania/issues/2658)) ([#2688](https://github.com/orange-case/JoustMania/issues/2688)) ([a5b8f8e](https://github.com/orange-case/JoustMania/commit/a5b8f8e9ed4c93acd6f4fd74ce5ad03eb867ef09))
+
+
+### Tests
+
+* **service:** wait for the agent to hold the game before the UC-100 death kill ([#2693](https://github.com/orange-case/JoustMania/issues/2693)) ([b3e0b53](https://github.com/orange-case/JoustMania/commit/b3e0b53f1d2d173e8de3712e433d5de602cec0b8))
+
 ## [0.21.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.20.0...joustmania-v0.21.0) (2026-11-18)
 
 
