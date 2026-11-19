@@ -72,6 +72,7 @@ rectangle "JoustMania" {
     package "Orange Case" {
         usecase "UC-100\nFind a Game Moment in Every Shape" as UC100
         usecase "UC-101\nTrace an Agent Intervention to its Effect" as UC101
+        usecase "UC-102\nSee a Swing at Full Density" as UC102
     }
 }
 
@@ -141,6 +142,11 @@ UC101 --> obsbackend
 UC101 ..> UC010 : <<include>>
 UC101 ..> UC040 : <<include>>
 UC101 ..> UC053 : <<include>>
+presenter --> UC102
+player --> UC102
+UC102 --> gateway
+UC102 --> obsbackend
+UC102 ..> UC010 : <<include>>
 presenter --> UC035
 agent --> UC070
 player --> UC070

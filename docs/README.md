@@ -69,6 +69,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [talk/stage-test-checklist.md](talk/stage-test-checklist.md) | Hardware test checklist for the stage Pi on the real power bank (#1465) |
 | [challenges/where-did-it-go.md](challenges/where-did-it-go.md) | Run the booth challenge "Where did it go?": set the moment shape, read the ground truth, record each backend's result (UC-100) |
 | [challenges/who-saved-them.md](challenges/who-saved-them.md) | Run the booth challenge "Who saved them?": join an agent decision to its effect on a player by the intervention id, read the intervention ground truth, record each backend's result (UC-101) |
+| [challenges/can-you-see-the-swing.md](challenges/can-you-see-the-swing.md) | Run the booth challenge "Can you see the swing?": pick a death, read the player's 100 ms motion series in the case's VictoriaMetrics, record whether each backend keeps that density (UC-102) |
 
 Service READMEs (`services/*/README.md`) hold code-level detail; where they disagree with the specs, the
 specs win and the [inventory](specs-inventory.md#3-service-tool-and-test-docs) records the difference.
