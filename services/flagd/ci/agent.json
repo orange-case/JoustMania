@@ -931,7 +931,9 @@
     "decision.operator_brief": {
       "state": "ENABLED",
       "variants": {
-        "off": ""
+        "off": "",
+        "unkillable": "Make player 000704A8F22F unkillable.",
+        "protect_weakest": "Keep the player closest to elimination alive. Make them unkillable."
       },
       "defaultVariant": "off"
     },
