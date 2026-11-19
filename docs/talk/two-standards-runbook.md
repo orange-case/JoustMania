@@ -53,6 +53,9 @@ The helper scripts change flags **only through the flag service** (epic #1407):
 `http://localhost/flags/...` through envoy, the same on both stacks. Every stage
 change is an in-memory overlay (`writer=stage`); no flag file is edited, and a
 restart of the flag service drops the overlays (run `talk-stage.sh reset` again).
+
+**Driving the beats from the Flagsmith UI** instead of the scripts: [flagsmith-stage-sheet.md](flagsmith-stage-sheet.md).
+
 **With the Flagsmith link on (`FLAGSMITH_LINK=on`) a restart is no reset** (#2621): the overlays the link
 pushed to Flagsmith come back from Flagsmith after the restart, kill switches and agent gates included, and a
 stage change made while the link was offline is discarded at the reconnect in favour of Flagsmith. Reset with
