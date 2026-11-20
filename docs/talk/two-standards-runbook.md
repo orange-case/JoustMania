@@ -54,7 +54,7 @@ The helper scripts change flags **only through the flag service** (epic #1407):
 change is an in-memory overlay (`writer=stage`); no flag file is edited, and a
 restart of the flag service drops the overlays (run `talk-stage.sh reset` again).
 
-**Driving the beats from the Flagsmith UI** instead of the scripts: [flagsmith-stage-sheet.md](flagsmith-stage-sheet.md).
+**The demo as three games** (Jev observed; Claude with the operator brief, beat 4b; Jev with the `chaos_focused` goal, then the kill switch), driven from the Flagsmith UI instead of the scripts: [flagsmith-stage-sheet.md](flagsmith-stage-sheet.md). The beats below stay the reference for each flag and for the script fallback.
 
 **With the Flagsmith link on (`FLAGSMITH_LINK=on`) a restart is no reset** (#2621): the overlays the link
 pushed to Flagsmith come back from Flagsmith after the restart, kill switches and agent gates included, and a
