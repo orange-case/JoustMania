@@ -38,6 +38,11 @@ const (
 	FlagsmithScopeReadOnly = "flagsmith_scope_read_only"
 	FlagsmithTypeMismatch  = "flagsmith_type_mismatch"
 	SlotChanged            = "slot_changed"
+
+	// FlagsmithOnly is the 403 of a write of a Flagsmith-only flag that did
+	// not come through the Flagsmith link's in-process path (#2705, flags.md
+	// §13 "Flagsmith only", UC-053 A14).
+	FlagsmithOnly = "flagsmith_only"
 )
 
 // Error is a rejected request.
@@ -57,6 +62,12 @@ func newf(status int, reason, format string, args ...any) *Error {
 // error per status class.
 func BadRequest(format string, args ...any) *Error {
 	return newf(http.StatusBadRequest, Malformed, format, args...)
+}
+
+// Forbidden is a 403: the write did not come from the one writer the flag
+// accepts (flagsmith_only, #2705).
+func Forbidden(reason, format string, args ...any) *Error {
+	return newf(http.StatusForbidden, reason, format, args...)
 }
 func NotFound(reason, format string, args ...any) *Error {
 	return newf(http.StatusNotFound, reason, format, args...)

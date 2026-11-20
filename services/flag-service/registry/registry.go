@@ -150,6 +150,51 @@ func (p *Policy) AppliesWhenPersistFails() bool {
 	return killSwitches[p.Set+"/"+p.Key]
 }
 
+// FlagsmithWriter is the writer label of the Flagsmith link's in-process
+// writes (flagsmith.WriterLabel, which equals it; a test keeps them equal).
+// The HTTP API refuses it as a writer label (400 malformed, UC-053 BR-002), so
+// a write carrying it came through the link's in-process path.
+const FlagsmithWriter = "flagsmith"
+
+// flagsmithOnly is the set of Flagsmith-only flags ("set/key", #2705, FR-226,
+// flags.md §13 "Flagsmith only"): a write of one is accepted only from the
+// Flagsmith link's in-process path (writer FlagsmithWriter) and refused over
+// HTTP with 403 flagsmith_only, whatever writer label the caller sends. It is
+// a Go set, not a registry.yaml attribute, because released flag-service
+// images parse the checkout's registry.yaml strictly and would refuse a new
+// key (#2403). flags.md §13 lists the same set; a test keeps them in sync.
+// Each one must be a stack overlay row without persist outside interventions
+// (validatePolicy); a name without a row in the loaded registry is inert.
+var flagsmithOnly = map[string]bool{
+	"agent/goal.profile": true,
+}
+
+// FlagsmithOnlyFlags returns the Flagsmith-only set as sorted "set/key" names.
+func FlagsmithOnlyFlags() []string {
+	out := make([]string, 0, len(flagsmithOnly))
+	for k := range flagsmithOnly {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// FlagsmithOnly reports whether the flag changes only from Flagsmith (the
+// link's in-process writes); false for nil (a read-only baseline flag).
+func (p *Policy) FlagsmithOnly() bool {
+	return p != nil && flagsmithOnly[id(p.Set, p.Key)]
+}
+
+// WriterAllowed is the Flagsmith-only check (#2705): nil when writer may
+// write the flag, else 403 flagsmith_only. Only the Flagsmith link's
+// in-process writes carry FlagsmithWriter (the HTTP API refuses that label).
+func (p *Policy) WriterAllowed(writer string) *fserr.Error {
+	if p.FlagsmithOnly() && writer != FlagsmithWriter {
+		return fserr.Forbidden(fserr.FlagsmithOnly, "%s/%s changes only from Flagsmith (flags.md §13, Flagsmith only); no HTTP writer may write it", p.Set, p.Key)
+	}
+	return nil
+}
+
 // RealWriteNeedsNoRealGame reports whether a real-scope write of this flag is
 // refused while a real game is registered.
 func (p *Policy) RealWriteNeedsNoRealGame() bool {
@@ -254,6 +299,9 @@ func validatePolicy(p *Policy, b *baseline.Baseline) error {
 	}
 	if p.Persist && (p.Kind != KindOverlay || !p.AllowsScope(ScopeStack)) {
 		return fmt.Errorf("persist needs kind overlay with scope stack")
+	}
+	if p.FlagsmithOnly() && (p.Set == "interventions" || p.Kind != KindOverlay || len(p.Scopes) != 1 || p.Scopes[0] != ScopeStack || p.Persist) {
+		return fmt.Errorf("a Flagsmith only row (registry.flagsmithOnly) is kind overlay, scope [stack], no persist, outside interventions")
 	}
 	if p.Kind == KindEvent {
 		if len(p.Scopes) != 1 || p.Scopes[0] != ScopeGame || p.Bounds.Payload == nil {

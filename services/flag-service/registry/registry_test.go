@@ -53,6 +53,7 @@ type mdRow struct {
 	scopes                 []string
 	persist                bool
 	realWrite              bool // the row names `real_write: no_live_real_game`
+	flagsmithOnly          bool // the row's writer column starts with **Flagsmith only** (#2705)
 }
 
 var backticked = regexp.MustCompile("`([^`]+)`")
@@ -108,8 +109,9 @@ func parseFlagsMD(t *testing.T) []mdRow {
 		for _, k := range keys {
 			rows = append(rows, mdRow{
 				set: set, key: k[1], kind: cells[1], scopes: scopes, bounds: cells[3],
-				persist:   strings.HasPrefix(cells[4], "**yes**"),
-				realWrite: strings.Contains(strings.Join(cells[5:], "|"), "`real_write: "+RealWriteNoLiveRealGame+"`"),
+				persist:       strings.HasPrefix(cells[4], "**yes**"),
+				realWrite:     strings.Contains(strings.Join(cells[5:], "|"), "`real_write: "+RealWriteNoLiveRealGame+"`"),
+				flagsmithOnly: len(cells) > 5 && strings.HasPrefix(cells[5], "**Flagsmith only**"),
 			})
 		}
 	}
@@ -198,6 +200,9 @@ func TestRegistryMatchesFlagsMD(t *testing.T) {
 			}
 			if p.RealWriteNeedsNoRealGame() != row.realWrite {
 				t.Errorf("%s: real_write %q in registry, flags.md names it: %v", row.key, p.RealWrite, row.realWrite)
+			}
+			if p.FlagsmithOnly() != row.flagsmithOnly {
+				t.Errorf("%s: Flagsmith only %v in registry.flagsmithOnly, %v in flags.md (writer column **Flagsmith only**)", row.key, p.FlagsmithOnly(), row.flagsmithOnly)
 			}
 			checkBounds(t, row, p)
 		}

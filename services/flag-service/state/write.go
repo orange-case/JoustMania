@@ -327,6 +327,9 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 	if err != nil {
 		return plan, err
 	}
+	if err := f.policy.WriterAllowed(req.Writer); err != nil {
+		return plan, err
+	}
 	p := f.policy
 	if p.Kind == registry.KindEvent {
 		return plan, fserr.BadRequest("%s is an event flag: append with POST", req.Flag)
@@ -454,6 +457,9 @@ func (s *State) Append(req AppendRequest) (WriteResult, *fserr.Error) {
 	if err != nil {
 		return res, err
 	}
+	if err := f.policy.WriterAllowed(req.Writer); err != nil {
+		return res, err
+	}
 	if f.policy.Kind != registry.KindEvent {
 		return res, fserr.BadRequest("%s is not an event flag: set it with PUT", req.Flag)
 	}
@@ -560,6 +566,9 @@ func (s *State) checkSlotVersionLocked(f *flagState, scopeName string, sc Scope,
 func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState, *fserr.Error) {
 	f, err := s.lookupLocked(req.Set, req.Flag, res)
 	if err != nil {
+		return nil, err
+	}
+	if err := f.policy.WriterAllowed(req.Writer); err != nil {
 		return nil, err
 	}
 	if err := checkIDs(req.Scope, req.Writer); err != nil {
@@ -759,7 +768,9 @@ func (s *State) ClearWriter(set, writer string) (int, *fserr.Error) {
 	// DELETE ?persist=true removes them, never a writer reset (PR #1417 review).
 	n := 0
 	for _, f := range s.flags {
-		if f.set != set {
+		// A Flagsmith-only flag changes from Flagsmith alone (#2705): an HTTP
+		// writer reset, even ?writer=flagsmith, never clears it.
+		if f.set != set || f.policy.FlagsmithOnly() {
 			continue
 		}
 		if f.stack != nil && f.stack.Writer == writer {
