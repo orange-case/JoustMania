@@ -8,7 +8,10 @@ name: CI
 #
 # Escape hatches:
 #   - push to main / merge_group / workflow_dispatch: all check jobs run (full
-#     SonarCloud coverage on push); the e2e job follows `e2e_required` below
+#     SonarCloud coverage on push); the e2e job follows `e2e_required` below.
+#     Exception: the two service-test jobs (the slowest) skip a push to main
+#     (`service_tests_run`): the merge queue already ran them on that commit, and
+#     a push to main only builds, publishes and signals the release.
 #   - `ci-full` PR label or workflow_dispatch: additionally forces ALL image builds.
 #     ci.yml does NOT trigger on `labeled` (#1527): GitHub takes required checks
 #     from the newest run of this workflow on the head SHA, so a label-only run
@@ -122,6 +125,10 @@ jobs:
       # run_all_checks: all test/lint jobs, but builds stay path-filtered (main push)
       force_full: ${{ steps.force.outputs.full }}
       run_all_checks: ${{ steps.force.outputs.checks }}
+      # service_tests_run: the two service-test jobs (the slowest, ~15 min each). They
+      # gate the merge queue, which tests exactly the commit a push to main then lands,
+      # so a push to main skips them (false); elsewhere service_tests || run_all_checks.
+      service_tests_run: ${{ steps.force.outputs.service_tests_run }}
       python_services_matrix: ${{ steps.matrices.outputs.python_services }}
       docker_build_matrix: ${{ steps.matrices.outputs.docker_build }}
       docker_extra_matrix: ${{ steps.matrices.outputs.docker_extra }}
@@ -391,6 +398,7 @@ jobs:
           E2E_PATHS: ${{ steps.f.outputs.e2e_paths }}
           NON_DOCS: ${{ steps.nondocs.outputs.non_docs }}
           INTEGRATION_DEPS: ${{ steps.f.outputs.integration_deps }}
+          SERVICE_TESTS: ${{ steps.f.outputs.service_tests }}
         run: |
           ci_full=false
           if [ -n "$PR_NUMBER" ]; then
@@ -430,6 +438,14 @@ jobs:
             echo "e2e=$e2e"
             echo "e2e_full_build=$e2e_full_build"
           } >> "$GITHUB_OUTPUT"
+          # Service tests: never on a push to main (the merge queue ran them on that very
+          # commit); otherwise when their paths changed or every check runs.
+          service_tests_run=false
+          if [ "${{ github.event_name }}" != push ] && { [ "$SERVICE_TESTS" = true ] || [ "$checks" = true ]; }; then
+            service_tests_run=true
+          fi
+          echo "service_tests_run=$service_tests_run (event=${{ github.event_name }}, service_tests=$SERVICE_TESTS, run_all_checks=$checks)"
+          echo "service_tests_run=$service_tests_run" >> "$GITHUB_OUTPUT"
 
       - name: Build dynamic matrices
         id: matrices
@@ -931,12 +947,13 @@ jobs:
   # and menu from source at HEAD as subprocesses, a fresh flag plane per stack
   # (go-built flag service + one flagd container), fake audio; the AGENT
   # composition adds the go-built agent and a fake OpenAI backend (#1600). No image build.
-  # Path-filtered on PRs, always on main (run_all_checks). tests/service/README.md.
+  # Path-filtered on PRs, always in the merge queue (run_all_checks), skipped on a push to
+  # main (the queue tested that commit; service_tests_run). tests/service/README.md.
   service-tests:
     name: Service Tests
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.service_tests == 'true' || needs.changes.outputs.run_all_checks == 'true'
+    if: needs.changes.outputs.service_tests_run == 'true'
     # ~7 min locally with the agent journeys (#1600), plus the first go builds
     # and the rust-hid build for its live flag test (#1713).
     timeout-minutes: 25
@@ -1023,7 +1040,7 @@ jobs:
     name: Flagsmith Service Tests
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.service_tests == 'true' || needs.changes.outputs.run_all_checks == 'true'
+    if: needs.changes.outputs.service_tests_run == 'true'
     # Two stacks, flag service restarts and 5 s polls: ~15 min locally (WSL), plus the
     # flag service go build; Service Tests runs in parallel, so the pipeline waits for the longer.
     timeout-minutes: 25

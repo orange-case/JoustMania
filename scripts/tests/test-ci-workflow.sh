@@ -204,6 +204,18 @@ check(
 # non-empty matrix (the matrices are full on run_all_checks). No event_name
 # restriction, no always()/success()/true, no &&.
 EXEMPT = {"changes", "sonarcloud", "docker-build-merge", "docker-build-extra-merge", "retag-skipped"}
+# The service-test jobs gate on one `changes` output, service_tests_run, which is false on a
+# push to main (the merge queue ran them on that very commit) and otherwise
+# service_tests || run_all_checks (checked on the force step below).
+SERVICE_GATED = {"service-tests", "flagsmith-service-tests"}
+for name in sorted(SERVICE_GATED):
+    check(job_if(name) == "needs.changes.outputs.service_tests_run == 'true'",
+          f"{name}: must gate exactly on service_tests_run: {job_if(name)}")
+check(jobs["changes"]["outputs"].get("service_tests_run") == "${{ steps.force.outputs.service_tests_run }}",
+      "changes: must output service_tests_run from the force step")
+_force_run = next(s for s in jobs["changes"]["steps"] if s.get("id") == "force")["run"]
+check('if [ "${{ github.event_name }}" != push ] && { [ "$SERVICE_TESTS" = true ] || [ "$checks" = true ]; }; then' in _force_run,
+      "changes/force: service_tests_run must be false on push and service_tests || run_all_checks otherwise")
 MATRIX_GATED = {"service-checks"}
 TERM = re.compile(r"needs\.changes\.outputs\.\w+ == 'true'")
 RUN_ALL = "needs.changes.outputs.run_all_checks == 'true'"
@@ -246,7 +258,7 @@ if e2e_steps:
 check("github.event_name == 'merge_group'" in job_if("integration-test"),
       "integration-test: must run in the merge queue unless docs-only (fail closed, #1583)")
 for name in jobs["ci-complete"]["needs"]:
-    if name in EXEMPT or name in E2E_GATED:
+    if name in EXEMPT or name in E2E_GATED or name in SERVICE_GATED:
         continue
     cond = job_if(name)
     check("github.event_name" not in cond, f"{name}: must not restrict github.event_name: {cond}")
