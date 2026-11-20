@@ -919,6 +919,16 @@ func TestStartStaleIdentities(t *testing.T) {
 		if err := e.s.Start(e.ctx); err != nil {
 			t.Fatal(err)
 		}
+		// The background option sync (#2709) sleeps on the same clock: let it
+		// end first, so the one-shot hook above fires at the cleanup's paced
+		// wait and not at an option request's.
+		if done := e.s.optionsDone(); done != nil {
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("option sync did not end")
+			}
+		}
 		// Nothing is deleted at start nor before the grace ends, while no game
 		// is registered yet.
 		time.Sleep(200 * time.Millisecond)
