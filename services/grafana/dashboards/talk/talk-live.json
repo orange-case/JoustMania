@@ -1,0 +1,268 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "red",
+        "name": "Player out",
+        "step": "5s",
+        "expr": "sum by (mode) (increase(game_player_deaths_total{game_kind=~\"real|primary\"}[5s])) > 0",
+        "titleFormat": "player out",
+        "textFormat": "{{mode}}",
+        "tagKeys": "",
+        "useValueForTime": false
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "green",
+        "name": "Agent intervention",
+        "step": "5s",
+        "expr": "sum by (type) (increase(game_interventions_total{blocked=\"false\"}[5s])) > 0",
+        "titleFormat": "agent: {{type}}",
+        "textFormat": "applied",
+        "tagKeys": "type",
+        "useValueForTime": false
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Acceleration of every connected real controller, one line per player name; dashed lines = warning and death thresholds of the live real game. Markers: a player is out (red), the agent applied an intervention (green). The one panel of the talk's live view, full screen on the slide.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMin": 0.8,
+            "axisSoftMax": 3.5,
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "rgba(50, 172, 45, 0.15)",
+                "value": null
+              },
+              {
+                "color": "rgba(237, 129, 40, 0.15)",
+                "value": 1.6
+              },
+              {
+                "color": "rgba(245, 54, 54, 0.2)",
+                "value": 2.5
+              }
+            ]
+          },
+          "unit": "g"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Warning"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Death"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 24,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "xAxis": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "controller_accel_magnitude * on(serial) group_left(name) topk by (serial) (1, controller_info unless on(serial) controller_backend_info{backend=\"mock\"})",
+          "legendFormat": "{{name}}",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(game_effective_warning_threshold{game_kind=~\"real|primary\"})",
+          "legendFormat": "Warning",
+          "refId": "B",
+          "instant": false,
+          "interval": "1s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(game_effective_death_threshold{game_kind=~\"real|primary\"})",
+          "legendFormat": "Death",
+          "refId": "C",
+          "instant": false,
+          "interval": "1s"
+        }
+      ],
+      "title": "",
+      "type": "timeseries",
+      "maxDataPoints": 10000
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": [
+    "talk"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-3m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Talk: Live",
+  "uid": "talk-live",
+  "version": 1,
+  "weekStart": ""
+}

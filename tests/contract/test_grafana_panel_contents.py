@@ -205,6 +205,18 @@ def test_step6_talk_dashboard_is_titled_for_the_talk():
     assert dash["title"] == "Talk: Two Standards"
 
 
+@pytest.mark.uc("UC-035", flow="main", steps=[6])
+def test_step6_talk_live_is_one_acceleration_panel_with_event_markers():
+    dash = json.loads((DASHBOARDS / "talk" / "talk-live.json").read_text())
+    assert dash["uid"] == "talk-live" and dash["title"] == "Talk: Live"
+    assert [p["id"] for p in dash["panels"]] == [1], "one panel, linked as d-solo panelId=1"
+    exprs = [t["expr"] for t in dash["panels"][0]["targets"]]
+    assert "controller_accel_magnitude" in exprs[0]
+    marks = {a["name"]: a["expr"] for a in dash["annotations"]["list"] if a.get("expr")}
+    assert "game_player_deaths_total" in marks["Player out"]
+    assert "game_interventions_total" in marks["Agent intervention"]
+
+
 @pytest.mark.uc("UC-035", flow="main", steps=[7])
 def test_step7_grafana_provisions_only_prometheus_and_jaeger_datasources():
     sources = [
