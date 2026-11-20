@@ -24,7 +24,7 @@ EXPECTED_FOLDERS = {
     "Game": {"game-players", "controller-overview"},
     "Agent": {"agent-operations"},
     "Platform": {"joustmania-service-health", "feature-flags"},
-    "Talk": {"talk"},
+    "Talk": {"talk", "talk-live"},
 }
 
 
