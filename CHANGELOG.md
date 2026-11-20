@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.23.0...joustmania-v0.24.0) (2026-11-20)
+
+
+### Features
+
+* **flag-service:** Flagsmith variant options, the operator picks a declared variant ([#2709](https://github.com/orange-case/JoustMania/issues/2709)) ([#2711](https://github.com/orange-case/JoustMania/issues/2711)) ([76a4e8c](https://github.com/orange-case/JoustMania/commit/76a4e8c8bc827e489a670ca293cb7d1053870944))
+* **flag-service:** Flagsmith-only registry rows, agent/goal.profile ([#2705](https://github.com/orange-case/JoustMania/issues/2705)) ([#2710](https://github.com/orange-case/JoustMania/issues/2710)) ([9dac746](https://github.com/orange-case/JoustMania/commit/9dac746684624c2f65e1a53df9c882faeb5cd92f))
+
 ## [0.23.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.22.0...joustmania-v0.23.0) (2026-11-19)
 
 
