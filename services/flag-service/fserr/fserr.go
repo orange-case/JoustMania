@@ -37,7 +37,10 @@ const (
 	// whose slot changed since the link read it (412, nothing written).
 	FlagsmithScopeReadOnly = "flagsmith_scope_read_only"
 	FlagsmithTypeMismatch  = "flagsmith_type_mismatch"
-	SlotChanged            = "slot_changed"
+	// FlagsmithPercentageSplit: the options of a feature are split by
+	// percentage, other than one option at 100 % (#2709, UC-054 A6).
+	FlagsmithPercentageSplit = "flagsmith_percentage_split"
+	SlotChanged              = "slot_changed"
 
 	// FlagsmithOnly is the 403 of a write of a Flagsmith-only flag that did
 	// not come through the Flagsmith link's in-process path (#2705, flags.md

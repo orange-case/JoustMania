@@ -327,6 +327,34 @@ func (p *puller) decodeState(pol *registry.Policy, scopeName string, fs FeatureS
 	if !fs.Enabled {
 		return e
 	}
+	// Variant options (#2709, §2.3): one option at 100 % is the value, any
+	// other split is refused. The refused value carries the weights, so a
+	// later pick of the same value is a change.
+	picked, ok, splitErr := pickedValue(pol, fs.MultivariateValues)
+	if splitErr != nil {
+		val := compact(fs.FeatureStateValue)
+		if len(bytes.TrimSpace(val)) == 0 {
+			val = json.RawMessage("null")
+		}
+		type weight struct {
+			Option int     `json:"option"`
+			Weight float64 `json:"weight"`
+		}
+		split := make([]weight, 0, len(fs.MultivariateValues))
+		for _, mv := range fs.MultivariateValues {
+			split = append(split, weight{mv.Option.ID, mv.PercentageAllocation})
+		}
+		raw, _ := json.Marshal(struct {
+			Split []weight        `json:"percentage_split"`
+			Value json.RawMessage `json:"value"`
+		}{split, val})
+		e.v = Value{Present: true, Value: raw}
+		e.err = splitErr
+		return e
+	}
+	if ok {
+		fs.FeatureStateValue = picked
+	}
 	fv := FSValueOf(fs.FeatureStateValue)
 	b := p.l.BaselineFlag(pol.Set, pol.Key)
 	if scopeName == registry.ScopeFraction {

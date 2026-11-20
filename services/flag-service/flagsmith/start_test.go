@@ -137,6 +137,8 @@ func newFakeAdmin(t *testing.T) *fakeAdmin {
 	a.f.Handle("POST "+p+"projects/{pid}/features/{$}", a.featureCreate)
 	a.f.Handle("GET "+p+"projects/{pid}/tags/{$}", a.tagList)
 	a.f.Handle("POST "+p+"projects/{pid}/tags/{$}", a.tagCreate)
+	// The fake's mv-options routes serve this admin's features (#2709).
+	a.f.Options.Exists = a.hasFeature
 	return a
 }
 
@@ -231,8 +233,26 @@ func (a *fakeAdmin) edgeDelete(w http.ResponseWriter, r *http.Request) {
 
 func (a *fakeAdmin) featureList(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
+	features := append([]fsFeature(nil), a.features...)
+	a.mu.Unlock()
+	for i := range features {
+		features[i].MultivariateOptions = nil
+		for _, o := range a.f.Options.Of(features[i].ID) {
+			features[i].MultivariateOptions = append(features[i].MultivariateOptions, fsOption{ID: o.ID, Type: o.Type, StringValue: o.StringValue})
+		}
+	}
+	flagsmithtest.WriteJSON(w, 200, map[string]any{"count": len(features), "next": nil, "results": features})
+}
+
+func (a *fakeAdmin) hasFeature(id int) bool {
+	a.mu.Lock()
 	defer a.mu.Unlock()
-	flagsmithtest.WriteJSON(w, 200, map[string]any{"count": len(a.features), "next": nil, "results": a.features})
+	for _, f := range a.features {
+		if f.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *fakeAdmin) featureCreate(w http.ResponseWriter, r *http.Request) {
@@ -380,6 +400,9 @@ func newStartEnvHTTP(t *testing.T, hc *http.Client) *startEnv {
 	t.Cleanup(func() {
 		cancel()
 		if done := s.cleanupDone(); done != nil {
+			<-done
+		}
+		if done := s.optionsDone(); done != nil {
 			<-done
 		}
 	})

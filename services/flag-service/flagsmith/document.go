@@ -40,6 +40,9 @@ type FeatureState struct {
 	Enabled           bool            `json:"enabled"`
 	FeatureSegment    json.RawMessage `json:"feature_segment,omitempty"`
 	FeatureStateValue json.RawMessage `json:"feature_state_value"`
+	// MultivariateValues are the option weights of the feature state
+	// (#2709, architecture note §2.3).
+	MultivariateValues []MVStateValue `json:"multivariate_feature_state_values,omitempty"`
 	// FeatureStateUUID addresses an identity override on the Admin API
 	// (overrides.go, #2682).
 	FeatureStateUUID string `json:"featurestate_uuid,omitempty"`

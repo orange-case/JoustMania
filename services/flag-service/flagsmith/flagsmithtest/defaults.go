@@ -30,8 +30,23 @@ func (f *Fake) registerAdminDefaults() {
 	})
 	d.HandleFunc("GET "+APIPath+"projects/{pid}/features/", func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
-		results := append([]map[string]any{}, f.features...)
+		results := make([]map[string]any, 0, len(f.features))
+		for _, feat := range f.features {
+			c := map[string]any{}
+			for k, v := range feat {
+				c[k] = v
+			}
+			results = append(results, c)
+		}
 		f.mu.Unlock()
+		for _, c := range results {
+			id, _ := c["id"].(int)
+			opts := f.Options.Of(id)
+			if opts == nil {
+				opts = []MVOption{}
+			}
+			c["multivariate_options"], c["type"] = opts, f.Options.FeatureType(id)
+		}
 		WriteJSON(w, http.StatusOK, map[string]any{"count": len(results), "next": nil, "previous": nil, "results": results})
 	})
 	d.HandleFunc("POST "+APIPath+"projects/{pid}/features/", func(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +64,19 @@ func (f *Fake) registerAdminDefaults() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	f.registerOverrideRoutes()
+	f.registerOptionRoutes()
+}
+
+// hasFeature reports whether id is a feature the fake created.
+func (f *Fake) hasFeature(id int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, feat := range f.features {
+		if feat["id"] == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Method prefixes of ServeMux patterns.

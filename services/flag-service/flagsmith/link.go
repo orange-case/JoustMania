@@ -117,6 +117,9 @@ type IDs struct {
 	FeatureID    map[string]int
 	TagID        map[string]int
 	IdentityUUID map[string]string
+	// Options are the multivariate options of a feature by flag key, as the
+	// start sequence left them or the last listing showed them (#2709).
+	Options map[string][]Option
 }
 
 // Status is the flagsmith object of GET /state (services.md §7.3).
@@ -204,7 +207,7 @@ func New(cfg Config, d Deps) (*Link, error) {
 		client: NewClient(cfg, d.HTTPClient),
 		links:  NewLinkState(d.Now),
 		ctrl:   newControllers(),
-		ids:    &IDs{FeatureID: map[string]int{}, TagID: map[string]int{}, IdentityUUID: map[string]string{}},
+		ids:    &IDs{FeatureID: map[string]int{}, TagID: map[string]int{}, IdentityUUID: map[string]string{}, Options: map[string][]Option{}},
 		wake:   make(chan struct{}, 1),
 		mode:   ModeOff,
 

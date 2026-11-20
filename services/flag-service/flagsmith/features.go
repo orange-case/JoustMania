@@ -213,6 +213,9 @@ type fsFeature struct {
 	ID         int    `json:"id"`
 	Name       string `json:"name"`
 	IsArchived bool   `json:"is_archived"`
+	// MultivariateOptions are the feature's options (#2709): the list
+	// names them, so the start reads no option of its own.
+	MultivariateOptions []fsOption `json:"multivariate_options,omitempty"`
 }
 
 type fsTag struct {
@@ -317,6 +320,7 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 	}
 	var tags map[string]int
 	relisted := false
+	s.optionJobs = nil
 	for _, p := range policies {
 		k := Key{Set: p.Set, Flag: p.Key, Scope: ScopeStack}
 		if lower[strings.ToLower(p.Key)] > 1 {
@@ -324,7 +328,9 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 			continue
 		}
 		if f, ok := existing[strings.ToLower(p.Key)]; ok {
-			s.useExisting(k, f)
+			if s.useExisting(k, f) {
+				s.queueOptions(k, p, f.ID, f.MultivariateOptions)
+			}
 			continue
 		}
 		if tags == nil {
@@ -340,6 +346,7 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 		switch {
 		case err == nil:
 			s.setFeatureID(k, f.ID)
+			s.queueOptions(k, p, f.ID, f.MultivariateOptions)
 		case ctx.Err() != nil:
 			return err
 		case httpStatus(err) == http.StatusBadRequest && alreadyExists(err) && !relisted:
@@ -349,7 +356,9 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 				return err
 			}
 			if f, ok := existing[strings.ToLower(p.Key)]; ok {
-				s.useExisting(k, f)
+				if s.useExisting(k, f) {
+					s.queueOptions(k, p, f.ID, f.MultivariateOptions)
+				}
 				continue
 			}
 			s.refuse(k, "feature_create_400")
@@ -369,8 +378,9 @@ func alreadyExists(err error) bool {
 
 // useExisting takes an existing feature's id, unless its name differs from
 // the key in case (Flagsmith would refuse a second one) or it is archived:
-// both refuse the key (O4, O10); the link never renames or unarchives.
-func (s *startup) useExisting(k Key, f fsFeature) {
+// both refuse the key (O4, O10); the link never renames or unarchives. It
+// reports whether the feature is used.
+func (s *startup) useExisting(k Key, f fsFeature) bool {
 	switch {
 	case f.Name != k.Flag:
 		s.refuse(k, ReasonFeatureNameCase)
@@ -378,7 +388,9 @@ func (s *startup) useExisting(k Key, f fsFeature) {
 		s.refuse(k, ReasonFeatureArchived)
 	default:
 		s.setFeatureID(k, f.ID)
+		return true
 	}
+	return false
 }
 
 // setFeatureID records k's feature id and clears a refusal an earlier,
