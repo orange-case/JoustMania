@@ -373,7 +373,8 @@ def run_step(step, ctx, extra_path=None):
 
 
 def simulate(event, e2e_paths, non_docs, ci_full=False, e2e_outcome="success",
-             integration_deps=False, override=None, collector_outcome="success", proto_pkg=False):
+             integration_deps=False, override=None, collector_outcome="success", proto_pkg=False,
+             service_tests=False):
     """Results of the e2e/build/publish/complete jobs for one event.
 
     `override` replaces `changes` outputs after the force step (e.g. an empty
@@ -387,6 +388,7 @@ def simulate(event, e2e_paths, non_docs, ci_full=False, e2e_outcome="success",
         "steps.f.outputs.e2e_paths": str(e2e_paths).lower(),
         "steps.nondocs.outputs.non_docs": str(non_docs).lower(),
         "steps.f.outputs.integration_deps": str(integration_deps).lower(),
+        "steps.f.outputs.service_tests": str(service_tests).lower(),
     }
     with tempfile.TemporaryDirectory() as bindir:
         gh = os.path.join(bindir, "gh")
@@ -451,6 +453,33 @@ def simulate(event, e2e_paths, non_docs, ci_full=False, e2e_outcome="success",
     return results
 
 
+def force_outputs(event, service_tests=False, ci_full=False):
+    """The outputs of the changes/force step alone, for one event."""
+    ctx = {
+        "github.event_name": event,
+        "github.event.pull_request.number": "42" if event == "pull_request" else "",
+        "github.event.pull_request.labels.*.name": ["ci-full"] if ci_full else [],
+        "github.token": "x",
+        "github.repository": "o/r",
+        "steps.f.outputs.e2e_paths": "false",
+        "steps.nondocs.outputs.non_docs": "true",
+        "steps.f.outputs.integration_deps": "false",
+        "steps.f.outputs.service_tests": str(service_tests).lower(),
+    }
+    with tempfile.TemporaryDirectory() as bindir:
+        gh = os.path.join(bindir, "gh")
+        with open(gh, "w") as fh:
+            fh.write("#!/bin/sh
+" + ("echo ci-full
+" if ci_full else "echo docs
+"))
+        os.chmod(gh, 0o755)
+        force = next(s for s in jobs["changes"]["steps"] if s.get("id") == "force")
+        rc, out = run_step(force, ctx, extra_path=bindir)
+    assert rc == 0, f"force step failed for {event}"
+    return out
+
+
 def e2e_steps_run(ctx):
     """Names of the integration-test steps whose `if` holds."""
     step_ctx = dict(ctx)
@@ -501,6 +530,19 @@ if "e2e_required" in jobs["changes"]["outputs"]:
             for build in ("docker-build", "docker-build-extra"):
                 check(gone[build] == "skipped", f"{label}: {build} must not run when required e2e was skipped, got {gone[build]}")
     push = simulate("push", True, True)
+    # service_tests_run (the two service-test jobs): never on a push to main, always in
+    # the merge queue and on dispatch, on a PR only when service paths changed.
+    for args, kw, want in (
+        (("push", True, True), dict(service_tests=True), "false"),
+        (("push", False, True), {}, "false"),
+        (("merge_group", False, True), {}, "true"),
+        (("workflow_dispatch", False, True), {}, "true"),
+        (("pull_request", False, True), dict(service_tests=True), "true"),
+        (("pull_request", False, True), {}, "false"),
+        (("pull_request", False, True), dict(ci_full=True), "true"),
+    ):
+        got = force_outputs(args[0], **kw).get("service_tests_run")
+        check(got == want, f"service_tests_run for {args[0]} {kw}: {got!r}, want {want!r}")
     check(push["docker-build-merge"] == "success" and push["docker-build-extra-merge"] == "success",
           f"push to main: publish must run without e2e, got {push}")
     check(push["retag-skipped"] == "success", f"push to main: retag-skipped must run without e2e, got {push}")
