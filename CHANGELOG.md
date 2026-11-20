@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.25.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.24.0...joustmania-v0.25.0) (2026-11-20)
+
+
+### Features
+
+* **talk:** Talk: Live board and ?latest= deep links to the newest agent span ([#2717](https://github.com/orange-case/JoustMania/issues/2717)) ([ccf6f6d](https://github.com/orange-case/JoustMania/commit/ccf6f6d42f3f37e8d654f7338354cc8b0353d2a8))
+
+
+### Tests
+
+* **flag-service:** wait for the option sync before the stale-identity hook ([#2714](https://github.com/orange-case/JoustMania/issues/2714)) ([c336da0](https://github.com/orange-case/JoustMania/commit/c336da07adbb5849f27fe7318236f7ef568a84a4))
+
 ## [0.24.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.23.0...joustmania-v0.24.0) (2026-11-20)
 
 
