@@ -62,7 +62,7 @@ func TestFlagsmithOnlyRefusedOverHTTP(t *testing.T) {
 	})
 }
 
-// UC: UC-054 BR-011
+// UC: UC-054 BR-012
 // The Flagsmith link's in-process path is the one writer of a Flagsmith-only
 // flag: its write and clear are accepted within the row's bounds, and a writer
 // reset over HTTP (even DELETE /agent?writer=flagsmith) leaves the value alone.
@@ -79,7 +79,7 @@ func TestFlagsmithOnlyWrittenInProcess(t *testing.T) {
 		v, _ := ov["variant"].(string)
 		return v
 	}
-	t.Run("UC-054/BR-011 the pulled write is applied with writer flagsmith", func(t *testing.T) {
+	t.Run("UC-054/BR-012 the pulled write is applied with writer flagsmith", func(t *testing.T) {
 		res, ferr := e.api.FlagsmithPut(ctx, state.WriteRequest{Set: "agent", Flag: "goal.profile", Variant: "lively_finale"})
 		if ferr != nil || res.Variant != "lively_finale" {
 			t.Fatalf("res %+v err %v", res, ferr)
@@ -91,13 +91,13 @@ func TestFlagsmithOnlyWrittenInProcess(t *testing.T) {
 			t.Fatalf("stack overlay %q, want lively_finale", got)
 		}
 	})
-	t.Run("UC-054/BR-011 the row's bounds still hold for Flagsmith", func(t *testing.T) {
+	t.Run("UC-054/BR-012 the row's bounds still hold for Flagsmith", func(t *testing.T) {
 		_, ferr := e.api.FlagsmithPut(ctx, state.WriteRequest{Set: "agent", Flag: "goal.profile", Value: []byte(`{"terms":[{"characteristic":"duration","min":60,"max":null}]}`)})
 		if ferr == nil || ferr.Reason != fserr.OutOfBounds {
 			t.Fatalf("a free terms object: %v, want 422 out_of_bounds", ferr)
 		}
 	})
-	t.Run("UC-054/BR-011 a writer reset over HTTP leaves the Flagsmith value", func(t *testing.T) {
+	t.Run("UC-054/BR-012 a writer reset over HTTP leaves the Flagsmith value", func(t *testing.T) {
 		for _, w := range []string{"flagsmith", "stage"} {
 			if status, _ := e.do("DELETE", "/agent?writer="+w, nil); status != http.StatusNoContent {
 				t.Fatalf("DELETE /agent?writer=%s: %d, want 204", w, status)
@@ -107,7 +107,7 @@ func TestFlagsmithOnlyWrittenInProcess(t *testing.T) {
 			t.Fatalf("stack overlay %q after the writer reset, want lively_finale", got)
 		}
 	})
-	t.Run("UC-054/BR-011 the pulled clear is applied", func(t *testing.T) {
+	t.Run("UC-054/BR-012 the pulled clear is applied", func(t *testing.T) {
 		if _, ferr := e.api.FlagsmithClear(ctx, state.ClearRequest{Set: "agent", Flag: "goal.profile"}); ferr != nil {
 			t.Fatal(ferr)
 		}
@@ -115,7 +115,7 @@ func TestFlagsmithOnlyWrittenInProcess(t *testing.T) {
 			t.Fatalf("stack overlay %q after the clear, want none", got)
 		}
 	})
-	t.Run("UC-054/BR-011 the reserved label is the link's", func(t *testing.T) {
+	t.Run("UC-054/BR-012 the reserved label is the link's", func(t *testing.T) {
 		if flagsmith.WriterLabel != registry.FlagsmithWriter {
 			t.Fatalf("flagsmith.WriterLabel %q, registry.FlagsmithWriter %q", flagsmith.WriterLabel, registry.FlagsmithWriter)
 		}
