@@ -84,7 +84,7 @@ def test_start_creates_missing_features(stack, flag_service):
     created = fake.created_features()
     assert len(created) == len(set(created)), "a feature was created twice"
     assert set(created) == _registry_keys(), "every registry flag (and nothing else) becomes a feature"
-    for req in fake.requests("POST", "/features/"):
+    for req in fake.feature_creations():
         body = req["body"]
         assert "initial_value" not in body, body
         assert body["default_enabled"] is False and body["type"] == "STANDARD"

@@ -19,8 +19,9 @@ import (
 //  3. check that the project has edge identities (edge_required), a read,
 //     before any project-level write;
 //  4. create the missing features and tags (FR-214);
-//  5. the final step: remember the document's identity uuids and schedule the
-//     stale game identity cleanup (start itself never deletes an identity):
+//  5. the final step: remember the document's identity uuids, start the
+//     variant option sync in the background (§2.3, #2709: the link does not
+//     wait for it) and schedule the stale game identity cleanup (start itself never deletes an identity):
 //     it runs once the first game registered (Link.GamesSeen) and
 //     StaleIdentityGrace after this success, whichever is later, and is
 //     retried every staleCleanupRetryEvery, at most staleCleanupRetries
@@ -38,6 +39,11 @@ type startup struct {
 
 	mu      sync.Mutex
 	cleanup chan struct{} // closed when the stale identity cleanup ended
+	options chan struct{} // closed when the option sync ended (#2709)
+
+	// optionJobs are the features whose options the start keeps in step
+	// once it succeeded (§2.3); only the Start goroutine touches them.
+	optionJobs []optionJob
 }
 
 // Start runs the start sequence; see the file comment.
@@ -61,6 +67,7 @@ func (s *startup) Start(ctx context.Context) error {
 		return err
 	}
 	s.rememberIdentities(doc)
+	s.scheduleOptions(ctx)
 	s.scheduleCleanup(ctx)
 	return nil
 }

@@ -174,6 +174,14 @@ type futureValue struct {
 type futureDefault struct {
 	Enabled bool        `json:"enabled"`
 	Value   futureValue `json:"value"`
+	// Variants are the option weights of a feature with options (#2709):
+	// Flagsmith wants every option of the feature, exactly once.
+	Variants []futureVariant `json:"variants,omitempty"`
+}
+
+type futureVariant struct {
+	ID     int     `json:"id"`
+	Weight float64 `json:"weight"`
 }
 
 type futureBody struct {
@@ -187,7 +195,7 @@ type stateBody struct {
 
 // futureBodyOf is the body of the stack value PATCH: the experimental flag API
 // takes the type name and the value as text (architecture note §4.1).
-func futureBodyOf(fv FSValue, enabled bool) futureBody {
+func futureBodyOf(fv FSValue, enabled bool, opts []Option) futureBody {
 	typ, text := "string", string(fv.Value)
 	switch fv.Type {
 	case TypeInt:
@@ -200,7 +208,7 @@ func futureBodyOf(fv FSValue, enabled bool) futureBody {
 			text = s
 		}
 	}
-	return futureBody{EnvironmentDefault: futureDefault{Enabled: enabled, Value: futureValue{Type: typ, Value: text}}}
+	return futureBody{EnvironmentDefault: futureDefault{Enabled: enabled, Value: futureValue{Type: typ, Value: text}, Variants: weightsFor(opts, fv, enabled)}}
 }
 
 // futurePath is the stack value endpoint, from the host root.
@@ -211,14 +219,25 @@ func (l *Link) futurePath(featureID int) string {
 // send sends one key's value: a stack value (id "") to the feature's
 // environment value, any other scope to the override on identity id (a
 // value that is not present deletes the override; overrides.go, #2682).
-func (o *out) send(ctx context.Context, id string, v Value, fv FSValue, featureID int) (int, error) {
+func (o *out) send(ctx context.Context, k Key, id string, v Value, fv FSValue, featureID int) (int, error) {
 	l := o.l
 	cl := l.Client()
 	if id != "" {
 		return o.sendOverride(ctx, id, v, fv, featureID)
 	}
 	if !o.fallback.Load() {
-		status, err := cl.Admin(ctx, http.MethodPatch, l.futurePath(featureID), futureBodyOf(fv, v.Present), nil)
+		status, err := cl.Admin(ctx, http.MethodPatch, l.futurePath(featureID), futureBodyOf(fv, v.Present, l.options(k.Flag)), nil)
+		if variantsRefused(err) {
+			// The feature's options changed since the start (a person added
+			// or removed one): list them once and send again (#2709, §2.3).
+			if lerr := o.listOptions(ctx, k.Flag, featureID); lerr != nil {
+				return status, err
+			}
+			if perr := o.pace(ctx); perr != nil {
+				return 0, perr
+			}
+			return cl.Admin(ctx, http.MethodPatch, l.futurePath(featureID), futureBodyOf(fv, v.Present, l.options(k.Flag)), nil)
+		}
 		var he *HTTPError
 		if !errors.As(err, &he) || he.Status != http.StatusNotFound || he.JSONDetail {
 			return status, err
@@ -326,7 +345,7 @@ func (o *out) pushNext(ctx context.Context) (bool, error) {
 		link = sc
 	}
 	oc := o.roundTrip(ctx, k, valueOp(k, v), v.Writer, merged, link, func(c context.Context) (int, error) {
-		return o.send(c, identifier, v, fv, featureID)
+		return o.send(c, k, identifier, v, fv, featureID)
 	})
 	if oc.status == http.StatusNotFound && !oc.ok && oc.err == nil && identifier != "" && o.listedRecently(identifier) {
 		if try, ok := l.Links().RetryNotFound(k, notFoundRetries); ok {

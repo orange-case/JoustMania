@@ -36,6 +36,8 @@ const (
 	OpDeleteIdentity = "delete_identity"
 	OpFeature        = "feature"
 	OpTag            = "tag"
+	// OpOption is a variant option created or removed at start (#2709).
+	OpOption = "option"
 )
 
 // Conflict resolutions (FR-210): Flagsmith wins every conflict since #2621.

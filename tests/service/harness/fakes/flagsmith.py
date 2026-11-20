@@ -223,8 +223,13 @@ class FakeFlagsmith:
                 if (method is None or r["method"] == method) and path_contains in r["path"]
             ]
 
+    def feature_creations(self) -> list[dict]:
+        """The POSTs that create a feature (``.../features/``), not those under a feature
+        such as ``.../features/<id>/mv-options/`` (#2709)."""
+        return [r for r in self.requests("POST", "/features/") if r["path"].split("?")[0].endswith("/features/")]
+
     def created_features(self) -> list[str]:
-        return [r["body"]["name"] for r in self.requests("POST", "/features/") if r["status"] == 201]
+        return [r["body"]["name"] for r in self.feature_creations() if r["status"] == 201]
 
     def preseed(self, features: list[tuple[str, str]]) -> None:
         """Create the features and their flag-set tags before the flag service starts, as an
