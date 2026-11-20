@@ -469,10 +469,7 @@ def force_outputs(event, service_tests=False, ci_full=False):
     with tempfile.TemporaryDirectory() as bindir:
         gh = os.path.join(bindir, "gh")
         with open(gh, "w") as fh:
-            fh.write("#!/bin/sh
-" + ("echo ci-full
-" if ci_full else "echo docs
-"))
+            fh.write("#!/bin/sh\n" + ("echo ci-full\n" if ci_full else "echo docs\n"))
         os.chmod(gh, 0o755)
         force = next(s for s in jobs["changes"]["steps"] if s.get("id") == "force")
         rc, out = run_step(force, ctx, extra_path=bindir)
