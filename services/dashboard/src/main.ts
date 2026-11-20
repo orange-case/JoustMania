@@ -37,6 +37,7 @@ import { fetchAdapters } from "./adapters.js";
 import { StageSettings } from "./components/StageSettings.js";
 import { fetchStageSettings } from "./stageSettings.js";
 import { createPoller } from "./poller.js";
+import { redirectToLatest } from "./latest.js";
 import { PageGate } from "./pageGate.js";
 import { EmbedGate, VisibilityGate } from "./visibilityGate.js";
 import { ShieldStore } from "./shield.js";
@@ -674,4 +675,5 @@ async function handleStopGame() {
 }
 
 // Start the app
-await init();
+// `/?latest=retro` and friends open the newest agent span in Jaeger instead (#2717).
+if (!(await redirectToLatest())) await init();
