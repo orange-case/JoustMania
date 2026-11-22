@@ -24,13 +24,15 @@ OLD_DECIDE_SPAN = "agent.decide"
 def go_string_const(name: str, path: Path) -> str | None:
     """A Go string const's value: a literal, or a literal + one const of the same package."""
     text = path.read_text()
-    m = re.search(rf'{name}\s*=\s*"([^"]*)"(?:\s*\+\s*(\w+))?', text)
+    m = re.search(rf'\b{name}\s*=\s*"([^"]*)"(?:\s*\+\s*(\w+))?', text)
     if not m:
         return None
     if not m.group(2):
         return m.group(1)
     for other in sorted(path.parent.glob("*.go")):
-        tail = re.search(rf'{m.group(2)}\s*=\s*"([^"]*)"', other.read_text())
+        if other.name.endswith("_test.go"):
+            continue
+        tail = re.search(rf'\b{m.group(2)}\s*=\s*"([^"]*)"', other.read_text())
         if tail:
             return m.group(1) + tail.group(1)
     raise AssertionError(f"{m.group(2)} (used by {name}) not found in {path.parent}")
