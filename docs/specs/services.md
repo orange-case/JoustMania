@@ -179,6 +179,8 @@ implement `WatchGameplayData` itself (UNIMPLEMENTED).
 
 Spec for [UC-015](../use_cases/UC-015.md). The `ProcessInput` commands (#2050 PR3; `preview_setting` #2106) and `GetMenuStatus` with `lifecycle_generation` and the `force_start` `stale` check (#2050 PR4) are implemented; the pad service that calls them is in `services/operator_pad/` (#2050 PR6) and deploys under the `operator-pad` compose profile (#2050 PR7). `GetMenuStatus` is in the generated tables ([generated/grpc-rpcs.md](generated/grpc-rpcs.md), notes in [notes/grpc-rpcs.yaml](notes/grpc-rpcs.yaml)).
 
+**The pad's display (planned, [UC-016](../use_cases/UC-016.md)).** No new RPC: the display reuses `GetMenuStatus`, polled (UC-016 BR-003). The pad service also opens the pad's raw HID node (`/dev/hidrawN` of the device `operator_pad.device` matches, usage page `0xFF60`) read-write for the frame protocol of UC-016 BR-002; the `operator-pad` compose service then needs that node too (the hidraw nodes and a cgroup rule for the hidraw major, which is dynamic: read from `/proc/devices` on the host), still unprivileged. The firmware lives in `orange-case/operator-pad` (`firmware/`, a Vial keymap for `0xcb/1337`).
+
 **`MenuService.ProcessInput` `web_command` additions** (`data` keys; no new RPC, so they are forwarded by the existing `MenuProxy`). They share one core with admin mode (`services/menu/settings_ops.py`) and use no controller serial: no LED pulse on a caller's controller, no admin session span, no roster entry for the caller.
 
 | `web_command` | `data` | Effect | Errors |

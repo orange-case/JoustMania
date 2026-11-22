@@ -446,6 +446,14 @@ Configuration of the optional `operator-pad` service ([UC-015](../use_cases/UC-0
 | `operator_pad.preview_enabled` | bool | on=true, off=false | `on` = true (UC-015 BR-017: the live preview while a layer key is held and the knob turns) | `services/operator_pad/config.py` `PadConfig.preview_enabled` | manual edit only | live (per knob step); unreadable keeps it on |
 | `operator_pad.preview_debounce_ms` | int | instant=0, fast=100, default=150, slow=300 (valid range 0 to 1000; the pad checks the range itself, no registry row, §13.5) | `default` = 150 (the wait after the last knob step before the preview speaks the value, UC-015 BR-017) | `services/operator_pad/config.py` `PadConfig.preview_debounce_ms` (`DEFAULT_PREVIEW_DEBOUNCE_MS`) | manual edit only | live (per knob step); a value outside 0 to 1000 or malformed falls back to 150 with a warning |
 
+**Planned ([UC-016](../use_cases/UC-016.md), the pad's display; issue to be filed).** Spec only: these keys are not in `services/flagd/operator.json` yet. They join the table above, with the same owner, file and reload rules, in the PR that builds the display.
+
+| Key | Type | Variants | Default | Read by | Written by | Reload |
+|---|---|---|---|---|---|---|
+| `operator_pad.display_enabled` | bool | on=true, off=false | `on` = true (off keeps the pad at UC-015 behaviour, UC-016 A1) | planned `services/operator_pad/config.py` `PadConfig` | manual edit only | live |
+| `operator_pad.display_poll_ms` | int | fast=250, default=500, slow=1000 (valid range 200 to 5000; the pad checks the range itself) | `default` = 500 (UC-016 BR-003, NFR-070) | planned `services/operator_pad/config.py` `PadConfig` | manual edit only | live |
+| `operator_pad.display_result_ms` | int | short=800, default=1500, long=3000 (valid range 300 to 10000; the pad checks the range itself) | `default` = 1500 (UC-016 BR-001: how long a result or the volume shows) | planned `services/operator_pad/config.py` `PadConfig` | manual edit only | live |
+
 The two registry rows this feature needs (`user` / `audio_volume.master` and `user` / `play_audio`) are in §13.4 since PR2 of #2050; the `operator` set itself has no registry row (§13.5).
 
 **Traceability:** FR-195, FR-197, C-035 / UC-015 / `services/flagd/operator.json`, `services/flag-service/baseline/baseline.go`, `services/operator_pad/config.py` / `services/flag-service/baseline/baseline_test.go`, `lib/tests/test_flagd_ci_drift.py`, `tests/contract/test_flagd_resolution.py`.
