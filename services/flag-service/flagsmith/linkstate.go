@@ -52,6 +52,18 @@ type entry struct {
 	// pushRefused, still shown after a local refusal replaced refused (#2639).
 	pushRefusedReason string
 	pushRefusedStatus int
+	// revertedLocal is the local value after an Offer or Reoffer equal to the
+	// remote value dropped a pending entry whose different value Next had
+	// handed out (hasReverted): that push may still be in flight, and its
+	// confirm must not mark the key in sync (revertedLocalLocked, #2611). A
+	// new pending entry keeps the mark (the push may still be in flight), and
+	// a later revert adds to it. While set it equals the remote value: a
+	// different remote value (a pull applying Flagsmith's value, or its undo)
+	// moves it along, since the push is still in flight. A confirm or remote
+	// refusal (the answer to the push in flight), a forgotten remote value or
+	// an undo to "never seen" clears it.
+	revertedLocal Value
+	hasReverted   bool
 	// gen counts changes of the remote value (SetRemote, ConfirmPushed,
 	// ForgetRemote, RestoreRemote): a pull skips a key whose gen moved while
 	// the document was in flight (a stale document vs a confirmed push).
@@ -248,9 +260,12 @@ func (s *LinkState) syncLocked(e *entry, inSync bool) {
 }
 
 // inSyncLocked records a local value equal to the remote one: nothing to
-// send, no refused value to hold back.
+// send, no refused value to hold back. Dropping a pending entry whose
+// different value Next handed out records the local value as reverted; a mark
+// kept from an earlier revert stays (its push may still be in flight).
 func (s *LinkState) inSyncLocked(k Key, e *entry) {
-	if e.pending != nil {
+	if p := e.pending; p != nil {
+		e.revertedLocal, e.hasReverted = e.remote, e.hasReverted || (p.hasSent && !p.sent.Equal(e.remote))
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}
@@ -259,6 +274,8 @@ func (s *LinkState) inSyncLocked(k Key, e *entry) {
 }
 
 func (s *LinkState) offerLocked(k Key, e *entry, v Value, at time.Time, version uint64, offline bool) bool {
+	// The reverted mark stays: the push it is about may still be in flight,
+	// and a later revert to the remote value relies on it (#2611).
 	s.syncLocked(e, false)
 	if e.pending != nil {
 		e.pending.value = v
@@ -308,8 +325,11 @@ func (s *LinkState) Retry(k Key, notBefore time.Time) {
 // now, and the pending entry goes unless a newer local value replaced it
 // meanwhile. It ends the refusal and the refused value, unless the local value
 // went back to that refused value while v was in flight (heldLocalLocked): the
-// key then stays refused and out of sync. A key forgotten meanwhile (game end)
-// is ignored.
+// key then stays refused and out of sync. Likewise, when the local value
+// changed meanwhile to a value other than v (revertedLocalLocked), the key
+// stays out of sync until a pull round reconciles it (UC-054): it sends the
+// local value or applies Flagsmith's (#2611). A key forgotten meanwhile (game
+// end) is ignored.
 func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -317,6 +337,8 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	if e == nil {
 		return
 	}
+	reverted := revertedLocalLocked(e, v)
+	e.revertedLocal, e.hasReverted = Value{}, false
 	e.remote, e.hasRemote = v, true
 	e.gen++
 	e.confirmedAt = s.now()
@@ -330,7 +352,16 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}
-	s.syncLocked(e, e.pending == nil)
+	s.syncLocked(e, e.pending == nil && !reverted)
+}
+
+// revertedLocalLocked reports whether e's local value is a reverted one
+// (hasReverted, nothing pending since) that differs from v, the value a push
+// confirm refers to: v was in flight when the local value went back to the
+// value Flagsmith held or a pull applied a newer Flagsmith value, so Flagsmith
+// now differs from the local value (#2611).
+func revertedLocalLocked(e *entry, v Value) bool {
+	return e.pending == nil && e.hasReverted && !e.revertedLocal.Equal(v)
 }
 
 // SetRemote records the value last seen in Flagsmith and returns the previous
@@ -342,13 +373,18 @@ func (s *LinkState) SetRemote(k Key, v Value) (prev Value, had bool) {
 }
 
 // SetRemoteGen is SetRemote that also returns the generation it produced,
-// for an exact RestoreRemoteGen.
+// for an exact RestoreRemoteGen. A reverted mark follows the new remote
+// value: the push it is about is still in flight, and the pull's apply
+// writes v locally (#2611).
 func (s *LinkState) SetRemoteGen(k Key, v Value) (prev Value, had bool, gen uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
 	prev, had = e.remote, e.hasRemote
 	e.remote, e.hasRemote = v, true
+	if e.hasReverted {
+		e.revertedLocal = v
+	}
 	e.gen++
 	s.syncLocked(e, e.pending == nil)
 	return prev, had, e.gen
@@ -384,11 +420,18 @@ func (s *LinkState) RestoreRemote(k Key, expect Value, prev Value, had bool) boo
 	return true
 }
 
+// restoreLocked puts prev back (or forgets the remote value when !had). A
+// reverted mark follows prev (its push is still in flight); with no remote
+// value left it goes, as in ForgetRemote (#2611).
 func (s *LinkState) restoreLocked(e *entry, prev Value, had bool) {
 	if had {
 		e.remote = prev
+		if e.hasReverted {
+			e.revertedLocal = prev
+		}
 	} else {
 		e.remote, e.hasRemote = Value{}, false
+		e.revertedLocal, e.hasReverted = Value{}, false
 	}
 	e.gen++
 }
@@ -430,6 +473,7 @@ func (s *LinkState) ForgetRemote(k Key) {
 	defer s.mu.Unlock()
 	if e := s.entries[k]; e != nil {
 		e.remote, e.hasRemote = Value{}, false
+		e.revertedLocal, e.hasReverted = Value{}, false
 		e.gen++
 	}
 }
@@ -514,6 +558,10 @@ func (s *LinkState) refuseLocked(k Key, e *entry, v Value, side Side, reason str
 	e.refused, e.side = reason, side
 	e.refusedAt, e.refusedStatus = s.now(), status
 	s.syncLocked(e, false)
+	if side == SideRemote {
+		// The answer to the push in flight: no confirm of it follows.
+		e.revertedLocal, e.hasReverted = Value{}, false
+	}
 	if side == SideRemote && e.pending != nil && e.pending.value.Equal(v) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)
@@ -743,6 +791,7 @@ func (s *LinkState) Resend(identifier string) (n int) {
 		}
 		v := e.remote
 		e.remote, e.hasRemote = Value{}, false
+		e.revertedLocal, e.hasReverted = Value{}, false // as ForgetRemote
 		e.gen++
 		s.offerLocked(k, e, v, now, 0, false)
 		n++
