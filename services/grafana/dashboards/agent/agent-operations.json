@@ -346,7 +346,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (decide_backend) (rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\.decide\"}[1m])) * 60",
+          "expr": "sum by (decide_backend) (rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])) * 60",
           "legendFormat": "{{decide_backend}}",
           "refId": "A"
         }
@@ -432,7 +432,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (decide_outcome) (rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\.decide\"}[1m])) / scalar(sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\.decide\"}[1m])))",
+          "expr": "sum by (decide_outcome) (rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])) / scalar(sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])))",
           "legendFormat": "{{decide_outcome}}",
           "refId": "A"
         }
@@ -518,7 +518,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (decide_backend, le) (rate(traces_span_metrics_duration_seconds_bucket{span_name=~\"invoke_agent joustmania-agent|agent\\.decide\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (decide_backend, le) (rate(traces_span_metrics_duration_seconds_bucket{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[5m])))",
           "legendFormat": "{{decide_backend}}",
           "refId": "A"
         }
@@ -579,7 +579,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (decide_backend, decide_outcome) (increase(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\.decide\"}[$__range]))",
+          "expr": "sum by (decide_backend, decide_outcome) (increase(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[$__range]))",
           "legendFormat": "{{decide_backend}} / {{decide_outcome}}",
           "refId": "A",
           "instant": true,
@@ -649,7 +649,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\.decide\", decide_outcome=\"fallback\"}[5m])) or vector(0)) / clamp_min(sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\.decide\"}[5m])) or vector(0), 1e-9)",
+          "expr": "(sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\", decide_outcome=\"fallback\"}[5m])) or vector(0)) / clamp_min(sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[5m])) or vector(0), 1e-9)",
           "legendFormat": "fallback",
           "refId": "A"
         }

@@ -159,7 +159,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\.decide\"}[1m])) * 60 or vector(0)",
+          "expr": "sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])) * 60 or vector(0)",
           "refId": "A",
           "legendFormat": "decisions / min"
         }
@@ -386,7 +386,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (decide_backend, decide_outcome) (rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\.decide\"}[1m])) * 60 or on() label_replace(vector(0), \"decide_backend\", \"none\", \"\", \"\")",
+          "expr": "sum by (decide_backend, decide_outcome) (rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])) * 60 or on() label_replace(vector(0), \"decide_backend\", \"none\", \"\", \"\")",
           "refId": "A",
           "legendFormat": "{{decide_backend}} \u00b7 {{decide_outcome}}"
         }
