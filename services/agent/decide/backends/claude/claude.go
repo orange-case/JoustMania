@@ -130,10 +130,6 @@ func New(cfg Config) *Backend {
 // Name implements decide.Backend.
 func (b *Backend) Name() string { return Name }
 
-// AttrUsageCacheWriteInputTokens is semantic-conventions-genai v0.1.0's name for
-// the cache-write input tokens (#2584); the Go semconv package (v1.41.0) only has
-// the older gen_ai.usage.cache_creation.input_tokens.
-const AttrUsageCacheWriteInputTokens = "gen_ai.usage.cache_write.input_tokens"
 
 // RequestSettings are the max_tokens and temperature every request of this backend
 // sends (shapeFor), for the invoke_agent span's start (#2584).
@@ -370,7 +366,7 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, c callResult, res
 			semconv.GenAIUsageCacheReadInputTokens(int(m.Usage.CacheReadInputTokens)),
 			// v0.1.0 name (#2584) and, for a transition, the Go semconv v1.41.0 name
 			// consumers read so far (removal: #2729).
-			attribute.Int(AttrUsageCacheWriteInputTokens, int(m.Usage.CacheCreationInputTokens)),
+			attribute.Int(llmio.AttrUsageCacheWriteInputTokens, int(m.Usage.CacheCreationInputTokens)),
 			semconv.GenAIUsageCacheCreationInputTokens(int(m.Usage.CacheCreationInputTokens)),
 		)
 		call := decide.CallUsage{

@@ -75,6 +75,8 @@ func (u *Usage) Add(c CallUsage) {
 	u.t.CacheReadInputTokens.add(c.CacheReadInputTokens)
 	u.t.CacheWriteInputTokens.add(c.CacheWriteInputTokens)
 	u.t.ReasoningOutputTokens.add(c.ReasoningOutputTokens)
+	// Empty reasons are skipped: an openai-compatible vendor that returns an empty
+	// finish_reason leaves the decide span's list shorter than its chat spans'.
 	for _, r := range c.FinishReasons {
 		if r != "" {
 			u.t.FinishReasons = append(u.t.FinishReasons, r)

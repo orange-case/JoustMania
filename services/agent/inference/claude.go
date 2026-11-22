@@ -34,6 +34,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/joustmania/agent/decide/llmio"
 	"github.com/joustmania/agent/internal/anthropichttp"
 	"github.com/joustmania/agent/llm"
 )
@@ -353,6 +354,9 @@ func (c *Claude) recordResponse(ctx context.Context, span trace.Span, s Settings
 		semconv.GenAIUsageInputTokens(input),
 		semconv.GenAIUsageOutputTokens(int(m.Usage.OutputTokens)),
 		semconv.GenAIUsageCacheReadInputTokens(int(m.Usage.CacheReadInputTokens)),
+		// v0.1.0 name (#2584) and, for a transition, the Go semconv v1.41.0 name
+		// (removal: #2729), like the decide chat span.
+		attribute.Int(llmio.AttrUsageCacheWriteInputTokens, int(m.Usage.CacheCreationInputTokens)),
 		semconv.GenAIUsageCacheCreationInputTokens(int(m.Usage.CacheCreationInputTokens)),
 	)
 	c.recordTokens(ctx, s.Model, string(m.Model), input, int(m.Usage.OutputTokens))

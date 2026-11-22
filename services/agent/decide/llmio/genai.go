@@ -14,6 +14,13 @@ import (
 // prompt and model text, so backends record them ONLY when content capture is
 // opted into (the spec's "opt-in" requirement level).
 
+// AttrUsageCacheWriteInputTokens is semantic-conventions-genai v0.1.0's name for
+// the input tokens written to a provider-managed cache (#2584). The Go semconv
+// package (v1.41.0) only has the older gen_ai.usage.cache_creation.input_tokens,
+// which the claude chat spans keep emitting for a transition (#2729). One const
+// for the decide span, the decide chat span and the retro / proposer chat span.
+const AttrUsageCacheWriteInputTokens = "gen_ai.usage.cache_write.input_tokens"
+
 // Part types used by the decision backends.
 const (
 	PartText      = "text"

@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/joustmania/agent/decide"
+	"github.com/joustmania/agent/decide/llmio"
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamecontext"
 	"github.com/joustmania/agent/goal"
@@ -89,11 +90,6 @@ func invokeAgentStartAttributes(model string, remote bool, settings decide.Reque
 	return attrs
 }
 
-// AttrGenAIUsageCacheWriteInputTokens is the semantic-conventions-genai v0.1.0
-// name of the cache-write input tokens (#2584). The Go semconv package (v1.41.0)
-// still has the older gen_ai.usage.cache_creation.input_tokens, which the claude
-// chat span carries; the invoke_agent span uses the pinned v0.1.0 name.
-const AttrGenAIUsageCacheWriteInputTokens = "gen_ai.usage.cache_write.input_tokens"
 
 // requestSettingsOf is the backend's request settings, zero when it reports none.
 func requestSettingsOf(b decide.Backend) decide.RequestSettings {
@@ -119,7 +115,7 @@ func usageAttributes(t decide.UsageTotals) []attribute.KeyValue {
 		attrs = append(attrs, semconv.GenAIUsageCacheReadInputTokens(t.CacheReadInputTokens.N))
 	}
 	if t.CacheWriteInputTokens.OK {
-		attrs = append(attrs, attribute.Int(AttrGenAIUsageCacheWriteInputTokens, t.CacheWriteInputTokens.N))
+		attrs = append(attrs, attribute.Int(llmio.AttrUsageCacheWriteInputTokens, t.CacheWriteInputTokens.N))
 	}
 	if t.ReasoningOutputTokens.OK {
 		attrs = append(attrs, semconv.GenAIUsageReasoningOutputTokens(t.ReasoningOutputTokens.N))
