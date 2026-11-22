@@ -244,13 +244,15 @@ creation. Deviations from v0.1.0:
 - **Rules path without a model.** The rules path records the same span name and `gen_ai.operation.name=invoke_agent`
   although no model is called (`decide.backend=rules`, no `chat {model}` child, no `gen_ai.request.model`, no
   `gen_ai.output.type`), so one query sees every decision of either path. Cost per decision (#2718) therefore filters
-  on the spans with a model (`gen_ai.request.model` present, `decide.backend` not `rules`): a rules-path span carries
-  no model and no tokens.
+  on `gen_ai.request.model` being present, not on `decide.backend`: a rules-path span carries no model and no tokens,
+  while a remote call that fell back (timeout, error, invalid answer) ends with `decide.backend=rules` but keeps its
+  model and its billed `chat {model}` child, and counts.
 - **No tool spans.** The decide backends return JSON and call no tools, so there are no `execute_tool` spans; the
   model calls are the `chat {model}` CLIENT children of the remote-path span.
-- **`gen_ai.conversation.id` is the game id.** Each decide request is a stateless single-turn prompt; the application
-  manages the game as the session its decisions belong to, and v0.1.0 (note [5]) allows an application-provided id,
-  so a backend's conversation view groups one game's decisions.
+- **`gen_ai.conversation.id` is the game id.** Each decide request is a stateless single-turn prompt and the agent
+  keeps no conversation history, so this is a grouping key rather than a conversation in the sense of v0.1.0
+  (notes [4] and [5] tie the attribute to managed history). It is kept so a backend's conversation view groups one
+  game's decisions.
 - **`gen_ai.request.model` with a per-decision model.** Note [12] says not to populate it for an agent that supports
   multiple models or dynamic selection. The backend, and with it the model, is chosen per decision by flag
   (`decision.backend`, `decision.*.model`), but each invocation calls exactly one model, so the span carries that
@@ -270,7 +272,7 @@ span-metrics panels (`span_name=~` both names; one agent emits only one name, so
 pre-flight (falls back to `agent.decide` with a WARN) and `scripts/agent_group_ab.py` (games recorded before the
 rename). The dashboard SPA reads only the new name: its Agent tab and `/?latest=decide` show decisions recorded
 after the rename only; Jaeger still holds the older ones under `agent.decide`. The old-name alternatives are removed
-in a follow-up once VictoriaMetrics (7-day retention) holds no `agent.decide` series.
+in #2729, 7 days (VictoriaMetrics retention) after the first release that contains the rename.
 
 Content capture: `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.output.messages` only when
 `decision.capture_content` is on (default off; on in `ci/`), decide backends only, 16 KiB per part

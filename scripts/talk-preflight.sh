@@ -601,7 +601,7 @@ print(len(spans), tags.get("decide.backend"), tags.get("decide.outcome"), tags.g
     elif [[ "${count}" -eq 0 ]]; then
       fail "no invoke_agent joustmania-agent (or agent.decide) spans in the last ${MINUTES} min (play a warm-up game first; the rules path only emits on cycles that decide)"
     elif [[ "${decide_op}" == "agent.decide" ]]; then
-      warn "${count} agent.decide span(s) in the last ${MINUTES} min, none named invoke_agent joustmania-agent: the agent image predates #2584 (pull the current images); newest: backend=${backend} outcome=${outcome} fallback_reason=${reason}"
+      warn "${count} agent.decide span(s) in the last ${MINUTES} min, none named invoke_agent joustmania-agent: the running agent predates #2584 (an older IMAGE_TAG or Pi pin); newest: backend=${backend} outcome=${outcome} fallback_reason=${reason}"
     else
       pass "${count} ${decide_op} span(s) in the last ${MINUTES} min; newest: backend=${backend} outcome=${outcome} fallback_reason=${reason}"
     fi
