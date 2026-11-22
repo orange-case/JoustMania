@@ -250,7 +250,7 @@ const AttrNativeConfidence = "jev.native_confidence"
 
 // Gate span attributes (#1281), on the stage-1 chat span of a gated round:
 // Jev's REAL answers. The ffa.intervention answer Decide returns (and the
-// agent.decide span's decide.answers) is synthesised from them (stages.go).
+// invoke_agent span's decide.answers) is synthesised from them (stages.go).
 const (
 	// AttrGatePYes is the gate noul's P(yes): "does the game need an
 	// intervention right now?".

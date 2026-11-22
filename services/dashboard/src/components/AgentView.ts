@@ -10,7 +10,7 @@
  *                          agent.flag_state span (UC-070 BR-005 anchor).
  *   3. Intervention      — applied and blocked tallies from VictoriaMetrics (real games first, shadow games on their own line, #2294)
  *      overlay             (`n/a` when it is unreachable).
- *   4. Decide feed       — (#1233) one row per agent.decide span from Jaeger:
+ *   4. Decide feed       — (#1233) one row per invoke_agent span from Jaeger:
  *                          backend/model, answer, confidence vs threshold,
  *                          outcome, rationale, plus a "current backend" strip so
  *                          a live decision.backend switch is visible on the next
@@ -84,7 +84,7 @@ export class AgentView {
       : null;
   }
 
-  /* ---------------- agent.decide feed (#1233) ---------------- */
+  /* ---------------- invoke_agent feed (#1233) ---------------- */
 
   get decideHasRendered(): boolean {
     return this.decideRendered;
@@ -126,7 +126,7 @@ export class AgentView {
     if (feed.rows.length === 0) {
       setHtml(
         this.decideFeedEl,
-        html`<div class="loading">No agent.decide spans found in Jaeger yet. Rows appear here as soon as the agent decides in an FFA game.</div>`,
+        html`<div class="loading">No invoke_agent spans found in Jaeger yet. Rows appear here as soon as the agent decides in an FFA game.</div>`,
       );
       return;
     }
@@ -396,7 +396,7 @@ function flagPanelHtml(flags: FlagPanel | null): SafeHtml {
     `;
 }
 
-/* ---------------- agent.decide rendering (#1233) ---------------- */
+/* ---------------- invoke_agent rendering (#1233) ---------------- */
 /*
  * Pure builders on the `html` tag (the exported render* wrappers return the string for tests):
  * every interpolation is escaped, which matters because the rationale and even the answers are model output.
@@ -582,7 +582,7 @@ export function renderDecideStrip(current: DecideCurrent | null, switched = fals
 
 function decideStripHtml(current: DecideCurrent | null, switched: boolean): SafeHtml {
   if (!current) {
-    return html`<div class="decide-strip decide-strip-empty">current backend: waiting for the first agent.decide span…</div>`;
+    return html`<div class="decide-strip decide-strip-empty">current backend: waiting for the first invoke_agent span…</div>`;
   }
   const requestedDiffers = current.requested && current.requested !== current.backend;
   const requested = requestedDiffers

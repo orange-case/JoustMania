@@ -146,7 +146,7 @@ export class FlagStateStore {
  * decided yet still shows the previous game on the decide strip, so the strip's
  * game is not enough. Otherwise it is the game the decide strip describes
  * (`decideGameId`, the UC-070 BR-005 anchor), e.g. a quiet game with no
- * agent.decide spans, whose game trace the decide poll never fetched. While
+ * invoke_agent spans, whose game trace the decide poll never fetched. While
  * decides flow for a game whose flag state is held, the decide poll's traces are
  * enough.
  */

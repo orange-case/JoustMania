@@ -6,7 +6,7 @@
         {
           "traceID": "cccc000000000003",
           "spanID": "h1",
-          "operationName": "agent.decide",
+          "operationName": "invoke_agent joustmania-agent",
           "references": [],
           "startTime": 1760000005000000,
           "duration": 900000,

@@ -1,4 +1,4 @@
-/** agent.decide feed: parsing, follow anchor, stores, query windows and the decide poll. Split out of agent.ts (#2388). */
+/** invoke_agent feed: parsing, follow anchor, stores, query windows and the decide poll. Split out of agent.ts (#2388). */
 
 import { incrementalStartMs, searchTracesSized, spanStartMs, spanTags, tagBool, tagBoolOrNull, tagNumber, tagString, parentSpanId } from "./jaeger.js";
 import type { JaegerSpan, JaegerTracesResponse, SearchSpec } from "./jaeger.js";
@@ -10,10 +10,10 @@ import { parseFlagStates } from "./agentFlags.js";
 import type { FlagPanel } from "./agentFlags.js";
 
 /* ======================================================================== */
-/* agent.decide feed (#1233, epic #1225)                                    */
+/* invoke_agent feed (#1233, epic #1225)                                    */
 /* ======================================================================== */
 /*
- * The decide contract (#1226) records every decision on an `agent.decide` span:
+ * The decide contract (#1226) records every decision on an `invoke_agent` span:
  * which backend answered (and which one the decision.backend flag requested),
  * the model, the answers + confidence, the confidence-threshold verdict, the
  * outcome and the model's one-line rationale. This feed reads the spans straight
@@ -21,11 +21,11 @@ import type { FlagPanel } from "./agentFlags.js";
  * (the same Jaeger the deep links open).
  *
  * TRACE SHAPE (services/agent/decision/decide_hook.go)
- *   rules path:  agent.signal_received ─┬─ agent.decide
+ *   rules path:  agent.signal_received ─┬─ invoke_agent
  *                                        └─ agent.decision ─ agent.action   (0..2)
- *   remote path: agent.decide ─┬─ chat {model}            (backend CLIENT span)
+ *   remote path: invoke_agent ─┬─ chat {model}            (backend CLIENT span)
  *                              └─ agent.decision ─ agent.action
- *                (agent.decide is a remote child of the game's gameplay_phase
+ *                (invoke_agent is a remote child of the game's gameplay_phase
  *                 span, so the trace is the whole per-game trace.)
  *
  * Jaeger's search returns WHOLE traces that contain a matching span, so one
@@ -36,7 +36,7 @@ import type { FlagPanel } from "./agentFlags.js";
  */
 
 /** Jaeger operation the decide feed searches for. */
-export const DECIDE_OPERATION = "agent.decide";
+export const DECIDE_OPERATION = "invoke_agent joustmania-agent";
 
 /*
  * CLOCK SKEW: the stage Pi has no RTC and venue WiFi may block NTP, so the
@@ -67,7 +67,7 @@ export const DECIDE_EXPORT_DELAY_MS = 2 * 1000;
 export const DECIDE_OVERLAP_MS = DECIDE_TIMEOUT_CEILING_MS + DECIDE_EXPORT_DELAY_MS;
 
 /**
- * Max traces per Jaeger search. Both rules and remote agent.decide spans live in
+ * Max traces per Jaeger search. Both rules and remote invoke_agent spans live in
  * the whole per-GAME trace (since #1195), and Jaeger returns whole traces, so one
  * trace already carries every decide of its game. Keep this low: it is the main
  * bound on the payload of a poll (and on Jaeger's memory, see #1191).
@@ -201,7 +201,7 @@ export function groupTargetShape(target: string): string {
   return target.split(":").slice(0, 2).join(":");
 }
 
-/** One agent.decide span, folded for the feed. */
+/** One invoke_agent span, folded for the feed. */
 export interface DecideRow {
   traceId: string;
   spanId: string;
@@ -290,7 +290,7 @@ export interface PredictionOutcomeSpan {
   unscorableReason: string;
 }
 
-/** The "current backend" strip: derived from the newest agent.decide span. */
+/** The "current backend" strip: derived from the newest invoke_agent span. */
 export interface DecideCurrent {
   tsMs: number;
   backend: string;
@@ -372,7 +372,7 @@ function isChatSpan(span: JaegerSpan, tags: Map<string, unknown>): boolean {
 }
 
 /**
- * The decide.prediction.* tags of an agent.decide span, with the outcome joined from
+ * The decide.prediction.* tags of an invoke_agent span, with the outcome joined from
  * the agent.prediction.outcome span of the same trace by prediction id. No outcome
  * span (yet) reads as pending. null when the decision carried no prediction.
  */
@@ -488,7 +488,7 @@ export function predictionStripFrom(
   return { gameId, gameKind, sources, counterfactual };
 }
 
-/** Fold one agent.decide span (with its trace neighbours) into a feed row. */
+/** Fold one invoke_agent span (with its trace neighbours) into a feed row. */
 function decideRowFrom(
   span: JaegerSpan,
   byParent: Map<string, JaegerSpan[]>,

@@ -26,7 +26,7 @@ import (
 )
 
 // decide_hook_test.go covers the #1226 wiring: the default rules path stays
-// byte-identical while gaining an agent.decide span, and decision.backend != rules
+// byte-identical while gaining an invoke_agent span, and decision.backend != rules
 // hands the decision to a (fake) remote decide.Backend on the async path.
 
 // ---- characterization: one ranking, unchanged decisions ----
@@ -163,7 +163,7 @@ func TestDefaultRulesPath_ByteIdentical(t *testing.T) {
 			}
 			totalDecided += decided
 			if n := len(spansByName(sr.Ended(), SpanDecide)); n != decided {
-				t.Fatalf("agent.decide spans = %d, want one per decided cycle (%d)", n, decided)
+				t.Fatalf("invoke_agent spans = %d, want one per decided cycle (%d)", n, decided)
 			}
 		})
 	}
@@ -191,12 +191,12 @@ func TestDefaultRulesPath_DecideSpan(t *testing.T) {
 	spans := sr.Ended()
 	ds := spansByName(spans, SpanDecide)
 	if len(ds) != 1 {
-		t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+		t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 	}
 	span := ds[0]
 	roots := spansByName(spans, SignalReceived)
 	if len(roots) != 1 || span.Parent().SpanID() != roots[0].SpanContext().SpanID() {
-		t.Fatal("agent.decide must be a child of agent.signal_received on the rules path")
+		t.Fatal("invoke_agent must be a child of agent.signal_received on the rules path")
 	}
 	for key, want := range map[string]string{
 		AttrDecideBackend:          "rules",
@@ -408,7 +408,7 @@ func (h remoteHarness) run(t *testing.T) sdktrace.ReadOnlySpan {
 	h.loop.AwaitInflight()
 	ds := spansByName(h.sr.Ended(), SpanDecide)
 	if len(ds) != 1 {
-		t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+		t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 	}
 	return ds[0]
 }
@@ -441,10 +441,10 @@ func TestRemote_ActAboveThreshold(t *testing.T) {
 	}
 	assertEvaluation(t, span, evaluationLabelPass, 0.9)
 
-	// agent.decision -> agent.action nest under agent.decide.
+	// agent.decision -> agent.action nest under invoke_agent.
 	dec := spansByName(h.sr.Ended(), SpanDecision)
 	if len(dec) != 1 || dec[0].Parent().SpanID() != span.SpanContext().SpanID() {
-		t.Fatal("agent.decision must be a child of agent.decide on the remote path")
+		t.Fatal("agent.decision must be a child of invoke_agent on the remote path")
 	}
 	if strAttr(t, dec[0], AttrDecideBackend) != "claude" {
 		t.Error("agent.decision must carry decide.backend=claude")
@@ -659,7 +659,7 @@ func TestRemote_UnknownOrUnavailableFallsBackSynchronously(t *testing.T) {
 			}
 			ds := spansByName(h.sr.Ended(), SpanDecide)
 			if len(ds) != 1 {
-				t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+				t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 			}
 			if g := strAttr(t, ds[0], AttrDecideFallbackReason); g != tc.reason {
 				t.Fatalf("fallback_reason = %q, want %q", g, tc.reason)
@@ -895,7 +895,7 @@ func fireAndMutateSnapshot(t *testing.T, be *fakeDecideBackend, snap flags.Snaps
 	h.loop.AwaitInflight()
 	ds := spansByName(h.sr.Ended(), SpanDecide)
 	if len(ds) != 1 {
-		t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+		t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 	}
 	return h, ds[0]
 }
@@ -983,7 +983,7 @@ func TestRemote_ThresholdRaisedMidFlight(t *testing.T) {
 // TestRemote_BackendChangedMidFlight: the operator switches claude -> openai
 // while a claude call is in flight. The late claude answer is discarded with
 // backend_changed (UC-040 A7), and the next cycle calls openai and its
-// agent.decide span carries the new backend (UC-044 A2, then main step 5).
+// invoke_agent span carries the new backend (UC-044 A2, then main step 5).
 // UC: UC-040 A7
 // UC: UC-044 A2
 func TestRemote_BackendChangedMidFlight(t *testing.T) {
@@ -1006,7 +1006,7 @@ func TestRemote_BackendChangedMidFlight(t *testing.T) {
 		h.loop.AwaitInflight()
 		ds := spansByName(h.sr.Ended(), SpanDecide)
 		if len(ds) != 2 {
-			t.Fatalf("agent.decide spans = %d, want 2 (the discarded call and the next cycle)", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 2 (the discarded call and the next cycle)", len(ds))
 		}
 		for key, want := range map[string]string{
 			AttrDecideBackend:          flags.DecisionBackendOpenAI,
@@ -1161,7 +1161,7 @@ func TestRemote_RealCadenceFlag(t *testing.T) {
 // TestRemote_BudgetExhaustedFallsBackToRules: with the shared per-minute budget
 // (llm.max_requests_per_minute) already spent this minute, the cycle makes no
 // remote call and charges no cadence; rules decide in the SAME cycle and the
-// agent.decide span records outcome=fallback with llm_budget_exhausted, which
+// invoke_agent span records outcome=fallback with llm_budget_exhausted, which
 // agent_llm_gated_total counts too.
 // NFR: NFR-011
 // UC: UC-040 A3
@@ -1200,7 +1200,7 @@ func TestRemote_BudgetExhaustedFallsBackToRules(t *testing.T) {
 		}
 		ds := spansByName(h.sr.Ended(), SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		for key, w := range map[string]string{
 			AttrDecideBackend:          RulesBackendName,

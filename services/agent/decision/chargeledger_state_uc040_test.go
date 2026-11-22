@@ -106,7 +106,7 @@ func TestChargeLedger_InertStateUnchanged(t *testing.T) {
 // TestChargeLedger_RulesDoNotReproposeChargedTarget: with the engine wired to the
 // loop's ledger, the rules path never proposes a grant the ledger refuses; the shield
 // goes to another R4 candidate (A41) or the slot to the next-ranked candidate, and the
-// agent.decide state marks the charged players.
+// invoke_agent state marks the charged players.
 //
 // UC: UC-040 A31 A41
 func TestChargeLedger_RulesDoNotReproposeChargedTarget(t *testing.T) {
@@ -150,12 +150,12 @@ func TestChargeLedger_RulesDoNotReproposeChargedTarget(t *testing.T) {
 		}
 		decides := spansByName(sr.Ended(), SpanDecide)
 		if len(decides) < 2 {
-			t.Fatalf("agent.decide spans = %d, want one per ranking", len(decides))
+			t.Fatalf("invoke_agent spans = %d, want one per ranking", len(decides))
 		}
 		want := decide.BuildStateWith(chargeRulesCtx(), decide.Annotations{Charged: map[string]bool{"WEAK": true, "MID": true}}).Digest
 		v, ok := attrValue(decides[len(decides)-1], AttrDecideStateDigest)
 		if !ok || v.AsString() != want {
-			t.Fatalf("agent.decide state digest = %q, want the state with WEAK and MID shield_charged (%q)", v.AsString(), want)
+			t.Fatalf("invoke_agent state digest = %q, want the state with WEAK and MID shield_charged (%q)", v.AsString(), want)
 		}
 	})
 }

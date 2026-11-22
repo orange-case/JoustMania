@@ -231,7 +231,7 @@ func TestDecideLoop_ProbeMode(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-040/A23 probe noop: no agent.decide span, decision and action spans, charges 1.0 of the budget", func(t *testing.T) {
+	t.Run("UC-040/A23 probe noop: no invoke_agent span, decision and action spans, charges 1.0 of the budget", func(t *testing.T) {
 		// A budget of 2 admits two noops and refuses the third: the noop costs
 		// more than 2/3 and at most 1.0 (the medium weight).
 		snap := flags.Snapshot{
@@ -265,7 +265,7 @@ func TestDecideLoop_ProbeMode(t *testing.T) {
 			counts[s.Name()]++
 		}
 		if counts[decision.SpanDecide] != 0 {
-			t.Fatalf("agent.decide spans = %d, want 0 (probe mode has no rules answers)", counts[decision.SpanDecide])
+			t.Fatalf("invoke_agent spans = %d, want 0 (probe mode has no rules answers)", counts[decision.SpanDecide])
 		}
 		if counts[decision.SpanDecision] < 2 || counts[decision.SpanAction] < 2 {
 			t.Fatalf("spans = %v, want an agent.decision and an agent.action span per dispatched noop", counts)

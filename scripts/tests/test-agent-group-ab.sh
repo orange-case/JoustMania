@@ -258,7 +258,7 @@ rm -f "${WORK}/old-agent"
 ok "a record without the experiment binding stops the run (exit 3), nothing in the manifest, flags restored" "$([[ ${code} == 3 && ! -s "${WORK}/o7b/manifest.jsonl" ]] && all_clear && no_arms && grep -q 'SHADOW_GAME_EXPERIMENT_ID' "${WORK}/err7b" && echo 0 || echo 1)"
 clear_all
 
-# 8. first-game verification: the arm's profile must show up on an agent.decide span of the game.
+# 8. first-game verification: the arm's profile must show up on a decide span (invoke_agent joustmania-agent, #2584) of the game.
 python3 - "${WORK}" <<'PY'
 import json, sys
 
@@ -275,7 +275,7 @@ def span(profile):
         {"key": "game.id", "value": {"stringValue": "gfix"}},
         {"key": "decide.prompt_profile", "value": {"stringValue": profile}},
     ]
-    return {"name": "agent.decide", "startTimeUnixNano": "1", "endTimeUnixNano": "2", "attributes": attrs}
+    return {"name": "invoke_agent joustmania-agent", "startTimeUnixNano": "1", "endTimeUnixNano": "2", "attributes": attrs}
 
 
 json.dump(doc("v1", "neutral"), open(sys.argv[1] + "/seen.json", "w"))
@@ -283,7 +283,7 @@ json.dump(doc("v1"), open(sys.argv[1] + "/only-v1.json", "w"))
 json.dump(doc("neutral"), open(sys.argv[1] + "/wrong.json", "w"))
 PY
 "${AB}" run --archetype slow_cascade --seeds 1 --reps 1 --traces-file "${WORK}/seen.json" --out "${WORK}/o8" >/dev/null 2>&1
-ok "verification passes when each arm's profile is on an agent.decide span" "$([[ "$(wc -l <"${WORK}/o8/manifest.jsonl")" == 2 ]] && echo 0 || echo 1)"
+ok "verification passes when each arm's profile is on an invoke_agent span" "$([[ "$(wc -l <"${WORK}/o8/manifest.jsonl")" == 2 ]] && echo 0 || echo 1)"
 clear_all
 code=0
 AB_VERIFY_TRIES=2 AB_VERIFY_WAIT=0.1 "${AB}" run --archetype slow_cascade --seeds 1 --reps 1 --traces-file "${WORK}/wrong.json" --out "${WORK}/o9" >/dev/null 2>&1 || code=$?
@@ -356,11 +356,12 @@ def attrs_raw(game, name, start, end, kv):
 S = 10**9
 T = 1_700_000_000 * S
 spans = [
-    attrs_raw("gA", "agent.decide", T, T + 100 * S, {"decide.prompt_profile": "v1"}),
+    # gA: the decide span since #2584; gB: a game recorded before the rename (agent.decide), still read.
+    attrs_raw("gA", "invoke_agent joustmania-agent", T, T + 100 * S, {"decide.prompt_profile": "v1"}),
     attrs_raw("gA", "agent.decision", T + 90 * S, T + 91 * S, {"decision.action": "grant_shield", "decision.applied": True, "decision.blocked": False}),
     attrs_raw("gB", "agent.decide", T, T + 100 * S, {"decide.prompt_profile": "neutral"}),
     attrs_raw("gB", "agent.decision", T + 80 * S, T + 81 * S, {"decision.action": "grant_group_shield", "decision.applied": True, "decision.blocked": False, "decision.group.alive": 3, "decision.group.size": 3}),
-    attrs_raw("gX", "agent.decide", T, T + 100 * S, {"decide.prompt_profile": "v1"}),
+    attrs_raw("gX", "invoke_agent joustmania-agent", T, T + 100 * S, {"decide.prompt_profile": "v1"}),
 ]
 json.dump({"result": {"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}}, open(sys.argv[1] + "/traces.json", "w"))
 PY
@@ -373,7 +374,7 @@ r = json.load(open(sys.argv[1]))
 assert r["A"]["single_applied"] == 1 and r["A"]["group_applied"] == 0, r["A"]
 assert r["B"]["group_applied"] == 1 and r["B"]["group_endgame"] == 1 and r["B"]["group_late"] == 1, r["B"]
 assert r["B"]["games"] == 1 and r["B"]["excluded"] == {"profile_mismatch:v1": 1}, r["B"]
-print("ok   report filters on decide.prompt_profile and counts group and single grants")
+print("ok   report filters on decide.prompt_profile (either decide span name, #2584) and counts group and single grants")
 PY
 
 if ((fails > 0)); then echo "${fails} test(s) failed"; exit 1; fi

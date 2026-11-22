@@ -223,7 +223,7 @@ processors:
         value: containers
         action: insert
 
-  # Keep only the agent's agent.decide spans for the span_metrics connector
+  # Keep only the agent's invoke_agent spans for the span_metrics connector
   # (#1427). The traces/span_metrics pipeline runs beside the main traces
   # pipeline, so dropping here never removes a span from Jaeger or the agent.
   # Restricting the connector to one span name of one service bounds the
@@ -231,14 +231,14 @@ processors:
   filter/agent_decide:
     error_mode: ignore
     trace_conditions:
-      - span.name != "agent.decide" or resource.attributes["service.name"] != "agent"
+      - span.name != "invoke_agent joustmania-agent" or resource.attributes["service.name"] != "agent"
 
   # Drop gRPC health-check spans (#2286): docker healthchecks and watchdog
   # probes call grpc.health.v1.Health/Check every few seconds, and on the Pi
   # they were 1362 of 1500 Jaeger spans. The probes only need the RPC to
   # answer; no service records its own span for it, so one drop here covers
   # the Python, Go and Rust instrumentation alike. Only the main traces
-  # pipeline uses it (the span_metrics pipeline keeps agent.decide only).
+  # pipeline uses it (the span_metrics pipeline keeps invoke_agent only).
   filter/grpc_health:
     error_mode: ignore
     trace_conditions:
@@ -278,9 +278,9 @@ processors:
       #   "infrastructure" for platform services (controller-manager, pairing-daemon)
 
 connectors:
-  # Decision backend x outcome as metrics, derived from the agent.decide spans
+  # Decision backend x outcome as metrics, derived from the invoke_agent spans
   # (#1427, maintainer decision 2: no agent-side counter; "traces -> metrics"
-  # is a talk beat). Fed only agent.decide spans by filter/agent_decide.
+  # is a talk beat). Fed only invoke_agent spans by filter/agent_decide.
   # Exported to VictoriaMetrics (prometheus_remote_write) as
   #   traces_span_metrics_calls_total
   #   traces_span_metrics_duration_seconds_bucket / _sum / _count
@@ -295,7 +295,7 @@ connectors:
       - name: decide.backend
       - name: decide.outcome
     # collector.instance.id changes on every collector start (a new series per
-    # restart); span.kind is always INTERNAL for agent.decide.
+    # restart); span.kind is always INTERNAL for invoke_agent.
     exclude_dimensions: [collector.instance.id, span.kind]
     histogram:
       unit: s
@@ -352,7 +352,7 @@ service:
       processors: [memory_limiter, filter/grpc_health, batch/traces, resource]
       exporters: [otlp/jaeger, otlp/agent, debug]
 
-    # agent.decide spans -> span_metrics connector (#1427). Same receiver as
+    # invoke_agent spans -> span_metrics connector (#1427). Same receiver as
     # the traces pipeline (fan-out), so the filter never affects Jaeger.
     traces/span_metrics:
       receivers: [otlp]

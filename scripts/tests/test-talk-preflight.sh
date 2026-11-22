@@ -75,7 +75,18 @@ for a in "$@"; do
         echo '{"error":{"httpCode":404,"message":"No traces found"}}'
         exit 0
       fi
-      echo '{"result":{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"agent"}}]},"scopeSpans":[{"scope":{},"spans":[{"traceId":"01","spanId":"02","name":"agent.decide","startTimeUnixNano":"1760000000200000000","attributes":[{"key":"decide.backend","value":{"stringValue":"claude"}},{"key":"decide.outcome","value":{"stringValue":"held"}}]},{"traceId":"01","spanId":"03","name":"agent.decide","startTimeUnixNano":"1760000000100000000","attributes":[{"key":"decide.backend","value":{"stringValue":"rules"}},{"key":"decide.outcome","value":{"stringValue":"fallback"}}]}]}]}]}}'
+      # The decide span is "invoke_agent joustmania-agent" (#2584, space URL-encoded);
+      # STUB_JAEGER_OLD_NAME: an agent release from before the rename (agent.decide only).
+      if [[ "${a}" == *"operationName=invoke_agent%20joustmania-agent&"* ]]; then
+        name="invoke_agent joustmania-agent"
+        [[ -n "${STUB_JAEGER_OLD_NAME:-}" ]] && { echo '{"error":{"httpCode":404,"message":"No traces found"}}'; exit 0; }
+      elif [[ "${a}" == *"operationName=agent.decide&"* && -n "${STUB_JAEGER_OLD_NAME:-}" ]]; then
+        name="agent.decide"
+      else
+        echo '{"error":{"httpCode":404,"message":"No traces found"}}'
+        exit 0
+      fi
+      echo '{"result":{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"agent"}}]},"scopeSpans":[{"scope":{},"spans":[{"traceId":"01","spanId":"02","name":"'"${name}"'","startTimeUnixNano":"1760000000200000000","attributes":[{"key":"decide.backend","value":{"stringValue":"claude"}},{"key":"decide.outcome","value":{"stringValue":"held"}}]},{"traceId":"01","spanId":"03","name":"'"${name}"'","startTimeUnixNano":"1760000000100000000","attributes":[{"key":"decide.backend","value":{"stringValue":"rules"}},{"key":"decide.outcome","value":{"stringValue":"fallback"}}]}]}]}]}}'
       exit 0 ;;
     *jaeger/api/traces*|*jaeger/api/services*)
       # The legacy query API (gone in Jaeger 2.21): the preflight must not call it.
@@ -189,7 +200,7 @@ check "jev threshold baseline" "PASS  decision.jev.act_confidence_threshold = ga
 check "jev blackhole variant present" "PASS  decision.jev.base_url = default"
 if has "stub"; then not_ok "no stub wording"; else ok "no stub wording"; fi
 check "interventions are per game" "PASS  interventions are per game: 0 value(s) in 0 live game(s)"
-check "jaeger newest span summarised" "PASS  2 agent.decide span(s) in the last"
+check "jaeger newest span summarised" "PASS  2 invoke_agent joustmania-agent span(s) in the last"
 check "jaeger newest span is the latest by start time" "newest: backend=claude outcome=held"
 if [[ -s "${WORK}/legacy-jaeger-calls" ]]; then
   not_ok "only the Jaeger v3 API is called (legacy: $(tr '\n' ' ' <"${WORK}/legacy-jaeger-calls"))"
@@ -197,7 +208,7 @@ else
   ok "only the Jaeger v3 API is called"
 fi
 STUB_BUDGET=30 STUB_JAEGER_EMPTY=1 run_preflight
-check "jaeger 404 no traces is no spans, not a failed query" "FAIL  no agent.decide spans in the last"
+check "jaeger 404 no traces is no spans, not a failed query" "FAIL  no invoke_agent joustmania-agent (or agent.decide) spans in the last"
 check "vendor variant listed" "decision.openai.model variants available: vendor"
 check "clock in sync" "PASS  clock skew 0s"
 check "stage allow-list is standard" "PASS  interventions_allowed = standard"
@@ -576,6 +587,12 @@ check "link off with a config error names the variable" "WARN  Flagsmith link of
 restart_fake --flagsmith '{"link":"off","pending":0,"out_of_sync":0,"refused":0}'
 STUB_BUDGET=30 run_preflight
 if has "Flagsmith link"; then not_ok "link off by choice: no link line"; else ok "link off by choice: no link line"; fi
+
+# --- decide span name (#2584) -----------------------------------------------
+# An agent release from before #2584 names the decide span agent.decide: the
+# pre-flight falls back to that name when invoke_agent joustmania-agent has none.
+STUB_BUDGET=30 STUB_JAEGER_OLD_NAME=1 run_preflight
+check "jaeger falls back to agent.decide for an agent from before #2584" "PASS  2 agent.decide span(s) in the last"
 
 # --- usage -----------------------------------------------------------------
 run_preflight --minutes abc

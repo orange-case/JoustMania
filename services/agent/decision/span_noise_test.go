@@ -40,7 +40,7 @@ func requireSignalEvent(t *testing.T, span sdktrace.ReadOnlySpan, signal string)
 // UC: UC-040 BR-013
 func TestSignalReceived_IsAnEventInGame(t *testing.T) {
 	for _, signal := range []string{"metrics", "traces"} {
-		t.Run("UC-040/BR-013 rules decide in a game: "+signal+" export is an event on agent.decide", func(t *testing.T) {
+		t.Run("UC-040/BR-013 rules decide in a game: "+signal+" export is an event on invoke_agent", func(t *testing.T) {
 			fx := decideFixtures()[0]
 			fx.ctx.GameKind = "real"
 			fx.ctx.GameTraceID, fx.ctx.GameTraceSpanID = hubGameTrace, hubGameSpanID
@@ -57,10 +57,10 @@ func TestSignalReceived_IsAnEventInGame(t *testing.T) {
 			}
 			ds := spansByName(spans, SpanDecide)
 			if len(ds) != 1 {
-				t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+				t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 			}
 			if p := ds[0].Parent(); p.SpanID().String() != hubGameCycleSpanID || !p.IsRemote() {
-				t.Fatalf("agent.decide parent = %v, want the remote game_cycle", p)
+				t.Fatalf("invoke_agent parent = %v, want the remote game_cycle", p)
 			}
 			requireSignalEvent(t, ds[0], signal)
 			if at := ds[0].Events()[0].Time; !at.Equal(trig.T0) {
@@ -95,7 +95,7 @@ func TestSignalReceived_IsAnEventInGame(t *testing.T) {
 			t.Fatal("want the own-root agent.signal_received span when no game ids are known")
 		}
 		if ev := spansByName(spans, SpanDecide)[0].Events(); len(ev) != 0 {
-			t.Errorf("agent.decide events = %v, want none (the span carries the trigger)", ev)
+			t.Errorf("invoke_agent events = %v, want none (the span carries the trigger)", ev)
 		}
 	})
 }
@@ -120,7 +120,7 @@ func TestDecideQuestions_OncePerGame(t *testing.T) {
 
 	ds := spansByName(sr.Ended(), SpanDecide)
 	if len(ds) != 4 {
-		t.Fatalf("agent.decide spans = %d, want 4", len(ds))
+		t.Fatalf("invoke_agent spans = %d, want 4", len(ds))
 	}
 	has := func(s sdktrace.ReadOnlySpan, key string) bool { _, ok := attrValue(s, key); return ok }
 	wantSHA := questionsSHA(strAttr(t, ds[0], AttrDecideQuestions))

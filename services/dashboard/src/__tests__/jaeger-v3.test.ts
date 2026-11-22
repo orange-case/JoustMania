@@ -18,6 +18,7 @@ import {
 } from "../jaeger.js";
 import type { JaegerTracesResponse, OtlpTracesResponse } from "../jaeger.js";
 import { parseDecideTraces, parseFlagStates } from "../agent.js";
+import { DECIDE_OPERATION } from "../agentDecide.js";
 import { parseExperimentSnapshots } from "../experiments.js";
 import { jsonResponse, toOtlp } from "./otlp.js";
 import recorded from "./fixtures/jaeger-v3-decide-trace.json";
@@ -49,10 +50,10 @@ afterEach(() => {
 
 describe("UC-035: main step 3, the v3 search URL never carries a browser-clock time (#2283)", () => {
   it("UC-035/main step 3 cold start: epoch to the fixed upper bound, service, operation, depth, attributes", () => {
-    const q = searchParams({ operation: "agent.decide", limit: 5, startMs: null, tags: { "game.id": "g1" } });
+    const q = searchParams({ operation: "invoke_agent joustmania-agent", limit: 5, startMs: null, tags: { "game.id": "g1" } });
     expect(Object.fromEntries(q)).toEqual({
       "query.serviceName": "agent",
-      "query.operationName": "agent.decide",
+      "query.operationName": "invoke_agent joustmania-agent",
       "query.searchDepth": "5",
       "query.startTimeMin": COLD_START_TIME_MIN,
       "query.startTimeMax": SEARCH_TIME_MAX,
@@ -61,15 +62,24 @@ describe("UC-035: main step 3, the v3 search URL never carries a browser-clock t
   });
 
   it("UC-035/main step 3 warm: the lower bound is the span-derived start (RFC 3339, UTC), the upper one stays fixed", () => {
-    const q = searchParams({ operation: "agent.decide", limit: 5, startMs: 1_793_139_266_961.6 });
+    const q = searchParams({ operation: "invoke_agent joustmania-agent", limit: 5, startMs: 1_793_139_266_961.6 });
     expect(q.get("query.startTimeMin")).toBe("2026-10-27T22:14:26.961Z");
     expect(q.get("query.startTimeMax")).toBe(SEARCH_TIME_MAX);
     expect(q.has("query.attributes")).toBe(false);
   });
 
+  it("UC-035/main step 3 decide search: the GenAI invoke_agent span name, its space URL-encoded (#2584)", async () => {
+    expect(DECIDE_OPERATION).toBe("invoke_agent joustmania-agent");
+    const urls = stubFetch(() => jsonResponse(200, recorded));
+    await searchTraces({ operation: DECIDE_OPERATION, limit: 5, startMs: null });
+    const url = new URL(urls[0], "http://x");
+    expect(urls[0]).not.toContain("invoke_agent joustmania-agent");
+    expect(url.searchParams.get("query.operationName")).toBe("invoke_agent joustmania-agent");
+  });
+
   it("UC-035/main step 3 searches /jaeger/api/v3/traces, never the legacy /api/traces", async () => {
     const urls = stubFetch(() => jsonResponse(200, recorded));
-    await searchTraces({ operation: "agent.decide", limit: 5, startMs: null });
+    await searchTraces({ operation: "invoke_agent joustmania-agent", limit: 5, startMs: null });
     expect(urls).toHaveLength(1);
     expect(new URL(urls[0], "http://x").pathname).toBe("/jaeger/api/v3/traces");
   });
@@ -83,7 +93,7 @@ describe("UC-035: main step 3, the recorded v3 answer folds like the legacy one 
     expect(body.data?.[0].spans.map((s) => s.operationName).sort()).toEqual([
       "Joust Free-for-All",
       "agent.action",
-      "agent.decide",
+      "invoke_agent joustmania-agent",
       "agent.decision",
       "agent.flag_state",
       "agent.signal_received",
@@ -91,7 +101,7 @@ describe("UC-035: main step 3, the recorded v3 answer folds like the legacy one 
   });
 
   it("UC-035/main step 3 maps ids, parent, times (ns strings to µs) and typed attributes", () => {
-    const [decide] = spansNamed(body, "agent.decide");
+    const [decide] = spansNamed(body, "invoke_agent joustmania-agent");
     expect(decide.spanID).toBe(RECORDED_DECIDE);
     expect(decide.traceID).toBe(RECORDED_TRACE);
     expect(decide.startTime).toBe(1_793_139_266_961_628);
@@ -149,18 +159,18 @@ describe("UC-035: main step 3, the recorded v3 answer folds like the legacy one 
 describe("UC-035: A3, no trace is data, a broken Jaeger is not (#2283)", () => {
   it("UC-035/A3 v3's 404 'No traces found' is an empty answer", async () => {
     stubFetch(() => jsonResponse(404, noTraces));
-    await expect(searchTraces({ operation: "agent.decide", limit: 5, startMs: null })).resolves.toEqual({ data: [] });
+    await expect(searchTraces({ operation: "invoke_agent joustmania-agent", limit: 5, startMs: null })).resolves.toEqual({ data: [] });
   });
 
   it("UC-035/A3 a 404 that is not Jaeger's (no route, plain text) is unavailable", async () => {
     stubFetch(() => new Response("404 page not found", { status: 404 }));
-    await expect(searchTraces({ operation: "agent.decide", limit: 5, startMs: null })).rejects.toBeInstanceOf(
+    await expect(searchTraces({ operation: "invoke_agent joustmania-agent", limit: 5, startMs: null })).rejects.toBeInstanceOf(
       JaegerUnavailableError,
     );
   });
 
   it("UC-035/A3 a v3 error answer is unavailable", async () => {
     stubFetch(() => jsonResponse(500, { error: { httpCode: 500, message: "badger: closed" } }));
-    await expect(searchTraces({ operation: "agent.decide", limit: 5, startMs: null })).rejects.toThrow(/500/);
+    await expect(searchTraces({ operation: "invoke_agent joustmania-agent", limit: 5, startMs: null })).rejects.toThrow(/500/);
   });
 });

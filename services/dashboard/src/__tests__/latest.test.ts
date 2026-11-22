@@ -19,7 +19,7 @@ const span = (traceID: string, spanID: string, operationName: string, startTime:
 const BODY: JaegerTracesResponse = {
   data: [
     { traceID: "t1", spans: [span("t1", "a1", "agent.llm.retro", 1_000), span("t1", "s1", "agent.game.summary", 900)] },
-    { traceID: "t2", spans: [span("t2", "a2", "agent.llm.retro", 5_000), span("t2", "d2", "agent.decide", 4_000)] },
+    { traceID: "t2", spans: [span("t2", "a2", "agent.llm.retro", 5_000), span("t2", "d2", "invoke_agent joustmania-agent", 4_000)] },
   ],
 };
 
@@ -31,7 +31,7 @@ describe("UC-035: latest-span deep links for the stage (#2717)", () => {
   it("maps the latest values to agent spans and ignores anything else", () => {
     expect(latestOperation("?latest=retro")).toBe("agent.llm.retro");
     expect(latestOperation("?latest=summary")).toBe("agent.game.summary");
-    expect(latestOperation("?latest=decide")).toBe("agent.decide");
+    expect(latestOperation("?latest=decide")).toBe("invoke_agent joustmania-agent");
     expect(latestOperation("?latest=toString")).toBeNull();
     expect(latestOperation("?latest=")).toBeNull();
     expect(latestOperation("")).toBeNull();

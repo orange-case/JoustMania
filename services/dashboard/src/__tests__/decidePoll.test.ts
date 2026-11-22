@@ -4,7 +4,7 @@
  * settled game's trace, asks for the live real game by game.id (shadow traces
  * cannot crowd it out, #2255) and polls nothing while the page is hidden.
  *
- * The fetch mock is a small Jaeger: it filters agent.decide spans by the
+ * The fetch mock is a small Jaeger: it filters invoke_agent spans by the
  * `query.attributes` and `query.startTimeMin` params (Jaeger v3, #2283) and returns the `limit` newest WHOLE traces.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

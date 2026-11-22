@@ -74,7 +74,7 @@ const AGENT_MAX_BACKOFF_MS = 15_000;
 const AGENT_TIMEOUT_MS = 4000;
 const ROLLOUT_EVERY_TICKS = 2;
 
-// Poll cadence for the agent.decide feed (#1233, Jaeger query). Faster than the
+// Poll cadence for the invoke_agent feed (#1233, Jaeger query). Faster than the
 // other agent panels: a live decision.backend switch must show on the very next decision,
 // and the remote cadence (decision.min_interval_ms) is 1.5-3s. Errors and slow
 // responses back off (doubling) to DECIDE_MAX_BACKOFF_MS; each request is aborted
@@ -122,7 +122,7 @@ const shadowShields = new ShieldStore();
 let shadowShieldsFor = "";
 let shadowStream: { gameId: string; abort: AbortController } | null = null;
 
-// agent.decide rows across polls; the follow poller tells it which game to describe.
+// invoke_agent rows across polls; the follow poller tells it which game to describe.
 const decideStore = new DecideStore();
 // Agent-tab span state across polls (#2059): flag states per game, rollout rows.
 const flagStore = new FlagStateStore();
@@ -183,7 +183,7 @@ async function init() {
   // Start polling the agent flag / activity / intervention telemetry (Jaeger + VM)
   startAgentPolling();
 
-  // Start polling the agent.decide spans (Jaeger)
+  // Start polling the invoke_agent spans (Jaeger)
   startDecidePolling();
   startGoalPolling();
 
@@ -447,7 +447,7 @@ function startStageSettingsPolling() {
   stagePoller.poke();
 }
 
-// Poll the agent.decide spans from Jaeger (#1233). Only while the Agent tab is
+// Poll the invoke_agent spans from Jaeger (#1233). Only while the Agent tab is
 // shown AND the page is visible; one chain at most (see poller.ts), incremental
 // query window per search lane (DecideStore), per-request timeout and backoff,
 // paced by the answer size and targeted at the live real game (#2287). Its game traces

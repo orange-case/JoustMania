@@ -7,7 +7,7 @@ fake OpenAI backend holding its answer until released.
 
 Steps 1 to 6 moved 1:1 from the full-stack
 ``tests/integration/test_decide_backend_e2e.py::test_kill_switch_discards_inflight_answer``;
-step 7 (turn the agent on again, the next cycle records ``agent.decide`` again) is new.
+step 7 (turn the agent on again, the next cycle records ``invoke_agent`` again) is new.
 """
 
 import time
@@ -112,7 +112,7 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
             outcomes = {s.attributes.get("decide.outcome") for s in decide_spans(stack, game_id)}
             assert "act" not in outcomes, outcomes
 
-            # Step 7: turn the agent on; the next cycle records agent.decide spans again.
+            # Step 7: turn the agent on; the next cycle records invoke_agent spans again.
             decided_before = {s.span_id for s in decide_spans(stack, game_id)}
             set_enabled(True)
             wait_agent_flags_served(stack, backend="openai", enabled=True, rewrite=lambda: set_enabled(True))
@@ -120,7 +120,7 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
                 lambda: any(s.span_id not in decided_before for s in decide_spans(stack, game_id)),
                 SPAN_TIMEOUT,
                 interval=0.5,
-            ), f"no agent.decide span for {game_id} after the agent was turned on again"
+            ), f"no invoke_agent span for {game_id} after the agent was turned on again"
     finally:
         await channel.close()
 
