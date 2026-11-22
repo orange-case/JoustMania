@@ -60,12 +60,16 @@ restart of the flag service drops the overlays (run `talk-stage.sh reset` again)
 pushed to Flagsmith come back from Flagsmith after the restart, kill switches and agent gates included, and a
 stage change made while the link was offline is discarded at the reconnect in favour of Flagsmith. Reset with
 `talk-stage.sh reset` while the link is online (its deletes are pushed), or change the values in Flagsmith.
-**While the link is online and Flagsmith refuses writes** (change requests on the environment, a `401`/`403`
-Admin API key, a feature missing in Flagsmith; the preflight's Flagsmith link line warns `refused`), every stage
-write to a stack value is reverted at once to Flagsmith's value (UC-055 A4, #2631), **the beat 5 stop
-(`agent-killswitch.sh off`) included**: the local stop does not hold. Then make the stop in Flagsmith too (the
-`enabled` feature, [flagsmith-stage-sheet.md](flagsmith-stage-sheet.md)), or switch the link off before the talk
-(`FLAGSMITH_LINK=off`, restart the flag service).
+**While the link is online and Flagsmith refuses writes** (change requests on the environment, or a `401`/`403`
+on writes: a key revoked after the connect, a role without write access), every stage write to a stack value is
+reverted to Flagsmith's value within a few seconds (UC-055 A4, #2631), **the beat 5 stop (`agent-killswitch.sh off`)
+included**: the local stop does not hold. A key wrong at the start keeps the link offline (nothing is reverted); a
+feature missing in Flagsmith reverts to the baseline (a stop holds, `on` does not). The preflight names this only
+after a stack write was refused, so rehearse a stop at T-1h (section 5). Then make the stop in Flagsmith too (the
+`enabled` feature, [flagsmith-stage-sheet.md](flagsmith-stage-sheet.md)), or switch the link off before the talk:
+`FLAGSMITH_LINK=off` in `.env.local`, `./scripts/setup/joustmania-compose.sh up -d flag-service` (a restart keeps
+the old env), `./scripts/flags.sh restart`, `talk-stage.sh reset`, then `agent-killswitch.sh on` (`enabled` is not
+persisted and comes back off).
 The exception is the decision backend and its model: `agent-backend.sh`
 writes them **persisted** (#1682), as the operator's choice, so they survive a flag-service restart or a reboot. A stage
 overlay over a persisted backend is temporary: a restart brings the persisted
@@ -435,7 +439,7 @@ It does **not** stop the game, does not undo interventions already written for
 the running game (they end with the game), and does **not** stop the infrastructure loop, which has
 its own flag, `rollout_enabled` (section 4): each loop has its own switch.
 With the Flagsmith link online, the stop holds only while Flagsmith accepts the write: a refused stop is
-reverted at once (see "With the Flagsmith link on" in
+reverted a few seconds later (the helper prints `off` first; see "With the Flagsmith link on" in
 [Two stacks](#two-stacks-pick-one-then-never-mix-them), #2631).
 
 ---
@@ -587,6 +591,12 @@ The infra loop is not gated by the `enabled` kill switch, only by
       the model call).
 - [ ] Back to baseline, then `./scripts/talk-preflight.sh`: no FAIL, and no
       WARN on the budget, and `inference.backend = claude` passes.
+- [ ] With the Flagsmith link online only: rehearse the stop (#2631).
+      `./scripts/agent-killswitch.sh off`, wait 5 s, then
+      `./scripts/agent-killswitch.sh status` still shows `off` and
+      `./scripts/flags.sh state` shows no `refused` key; then
+      `./scripts/agent-killswitch.sh on`. If the stop came back `on`, Flagsmith
+      refuses writes: see "With the Flagsmith link on" (section 1).
 
 ### T-5min
 
@@ -723,6 +733,7 @@ first step above prevents that; the pre-flight WARN names the persisted backend.
 | `fallback_reason=llm_not_eligible` | Game kind is not `real` (a shadow game, or eligibility flag changed) | `game.kind` on the span | Play a menu-started game; `setflag agent llm.eligible_game_kinds real_only` |
 | No new rows at all | No game running, kill switch off, or on `rules` and nothing to decide | Is a game running? `agent-killswitch.sh status` | Start a game; `agent-killswitch.sh on` |
 | Jaeger tabs / Grafana empty, Decisions panel fine | Pi clock skewed (lookback searches use the clock) | `timedatectl`; preflight clock line | Fix the clock (section 5) |
+| Flagsmith link online: `agent-killswitch.sh status` is back to `on` a few seconds after `off` | Flagsmith refuses writes (change requests, a key without write access): the refused stop is reverted (UC-055 A4, #2631) | `./scripts/flags.sh state`: `flagsmith.keys` shows `agent` / `enabled` refused, `side` `remote` | Make the stop in Flagsmith (`enabled` = `off`), or **`docker stop joustmania-agent`** |
 | `agent-killswitch.sh off` fails (it prints the fallback) | The flag service is down or unreachable, so the `enabled` overlay cannot be cleared | the helper's error lines; `./scripts/flags.sh state` | **`docker stop joustmania-agent`**: the brake without the flag service; the game keeps running without the agent. Later `docker start joustmania-agent` (the restarted agent reads `enabled` again, and a restarted flag service serves the fail-closed `off`) |
 | Agent writes refused with `409 game_not_live` right after a flag-service restart | The coordinator has not re-registered its live games yet | `./scripts/flags.sh state` (`live_games`) | Wait: the coordinator sees the new epoch within about 2 s (full reconcile every 15 s) |
 | Flag flipped, nothing changed | flagd lost its sync stream to the flag service (writes then fail with `503 no_sync_stream`) | `talk-preflight.sh` "flag service" section; `./scripts/flags.sh state` (`sync_streams`) | `./scripts/flags.sh restart` (flag service, then flagd; about 5 s), then `talk-stage.sh reset` |

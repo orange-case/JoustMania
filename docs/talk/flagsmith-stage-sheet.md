@@ -49,7 +49,9 @@ Run these on the Pi while the link is online, so its deletes and values are push
 
 Beat 4 is the one to rehearse from Flagsmith: the kill switch must stop the agent within seconds. If the
 realtime stream is not there, use `./scripts/agent-killswitch.sh off` on stage and show the value in Flagsmith
-afterwards.
+afterwards. That fallback needs a Flagsmith that accepts writes: with change requests or a key without write access
+the local stop is reverted a few seconds later (#2631); then set `enabled` in Flagsmith, or stop the agent
+container (`docker stop joustmania-agent`).
 
 ## Optional: the operator brief (runbook beat 4b)
 
