@@ -90,7 +90,6 @@ func invokeAgentStartAttributes(model string, remote bool, settings decide.Reque
 	return attrs
 }
 
-
 // requestSettingsOf is the backend's request settings, zero when it reports none.
 func requestSettingsOf(b decide.Backend) decide.RequestSettings {
 	if r, ok := b.(decide.RequestSettingsReporter); ok {

@@ -130,7 +130,6 @@ func New(cfg Config) *Backend {
 // Name implements decide.Backend.
 func (b *Backend) Name() string { return Name }
 
-
 // RequestSettings are the max_tokens and temperature every request of this backend
 // sends (shapeFor), for the invoke_agent span's start (#2584).
 func (b *Backend) RequestSettings() decide.RequestSettings {
