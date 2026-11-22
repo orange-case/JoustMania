@@ -238,7 +238,7 @@ func (a *fakeAdmin) featureList(w http.ResponseWriter, _ *http.Request) {
 	for i := range features {
 		features[i].MultivariateOptions = nil
 		for _, o := range a.f.Options.Of(features[i].ID) {
-			features[i].MultivariateOptions = append(features[i].MultivariateOptions, fsOption{ID: o.ID, Type: o.Type, StringValue: o.StringValue})
+			features[i].MultivariateOptions = append(features[i].MultivariateOptions, fsOption{ID: o.ID, Key: o.Key, Type: o.Type, StringValue: o.StringValue})
 		}
 	}
 	flagsmithtest.WriteJSON(w, 200, map[string]any{"count": len(features), "next": nil, "results": features})

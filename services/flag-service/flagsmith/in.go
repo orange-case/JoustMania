@@ -374,7 +374,13 @@ func (p *puller) decodeState(pol *registry.Policy, scopeName string, fs FeatureS
 		return e
 	}
 	if ok {
-		fs.FeatureStateValue = picked
+		// The picked option is a declared variant by its title (#2713); one
+		// that is none is read as its value, checked like any value.
+		if v := p.l.pickedVariant(pol, picked); v != "" {
+			fs.FeatureStateValue, _ = json.Marshal(v)
+		} else {
+			fs.FeatureStateValue = picked.Option.Value
+		}
 	}
 	fv := FSValueOf(fs.FeatureStateValue)
 	b := p.l.BaselineFlag(pol.Set, pol.Key)

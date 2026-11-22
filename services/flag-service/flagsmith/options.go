@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/joustmania/flag-service/baseline"
 	"github.com/joustmania/flag-service/fserr"
@@ -18,32 +19,158 @@ import (
 // BR-005): a synced feature whose flag offers two or more declared variants
 // shows them as Flagsmith multivariate options; the operator picks one by
 // setting it to 100 %. The stack applies exactly one value: any other split is
-// refused.
+// refused. Since #2713 an option's title (key) is the variant name and its
+// value the variant's value as text, so the operator sees what it does.
 
 // percentSplitReason is the health text of a refused percentage split.
 const percentSplitReason = "percentage splits are not applied by JoustMania; set one option to 100 % or every option to 0 %"
 
-// Option is one multivariate option of a feature: its id and, for a text
-// option, its value (Text false: an integer or boolean option, or none).
+// optionValueLimit is Flagsmith's default FEATURE_VALUE_LIMIT (characters of
+// an option's string_value); a longer variant value is shown as its name.
+const optionValueLimit = 20000
+
+// Option is one multivariate option of a feature: its id, the offered variant
+// it is ("" none, §2.3), its title (key) and, for a text option, its value
+// (Text false: an integer or boolean option, or none).
 type Option struct {
-	ID    int
-	Value string
-	Text  bool
+	ID      int
+	Variant string
+	Key     string
+	Value   string
+	Text    bool
 }
 
 // fsOption is a multivariate option as the Admin API names it (the feature
 // list's multivariate_options and the mv-options routes).
 type fsOption struct {
 	ID          int     `json:"id"`
+	Key         *string `json:"key"`
 	Type        string  `json:"type"`
 	StringValue *string `json:"string_value"`
 }
 
+func (o fsOption) key() string {
+	if o.Key == nil {
+		return ""
+	}
+	return *o.Key
+}
+
 func (o fsOption) option() Option {
 	if o.Type != TypeUnicode || o.StringValue == nil {
-		return Option{ID: o.ID}
+		return Option{ID: o.ID, Key: o.key()}
 	}
-	return Option{ID: o.ID, Value: *o.StringValue, Text: true}
+	return Option{ID: o.ID, Key: o.key(), Value: *o.StringValue, Text: true}
+}
+
+// OptionText is the value of a variant's option (#2713, §2.3): the variant's
+// value as Flagsmith text (§2.1 without the name shortcut: a string itself,
+// an object or array compact JSON, a number or boolean its JSON text); the
+// name when the value cannot be encoded or is longer than optionValueLimit.
+func OptionText(p *registry.Policy, b *baseline.Flag, name string) string {
+	if b == nil {
+		return name
+	}
+	fv, err := Encode(p, b, Value{Present: true, Value: b.Variants[name]})
+	if err != nil {
+		return name
+	}
+	text := string(fv.Value)
+	if fv.Type == TypeUnicode && json.Unmarshal(fv.Value, &text) != nil {
+		return name
+	}
+	if utf8.RuneCountInString(text) > optionValueLimit {
+		return name
+	}
+	return text
+}
+
+// optionMatcher tells which offered variant an option is (§2.3): (1) its key
+// names one; with no key, (3) its value is a variant name (an option of #2711)
+// or (4) its value is the text of exactly one offered variant. Rule (2), the
+// option ids the link recorded, is the pull's (pickedVariant).
+type optionMatcher struct {
+	offered []string
+	is      map[string]bool
+	text    map[string]string
+	byText  map[string]string // "" when two variants share the text
+}
+
+func newOptionMatcher(p *registry.Policy, b *baseline.Flag) *optionMatcher {
+	m := &optionMatcher{offered: OfferedVariants(p, b), is: map[string]bool{}, text: map[string]string{}, byText: map[string]string{}}
+	for _, n := range m.offered {
+		m.is[n] = true
+		t := OptionText(p, b, n)
+		m.text[n] = t
+		if _, dup := m.byText[normText(t)]; dup {
+			m.byText[normText(t)] = ""
+		} else {
+			m.byText[normText(t)] = n
+		}
+	}
+	return m
+}
+
+// normText is a JSON object or array in canonical form (keys sorted, no
+// spaces), so a value Flagsmith or a person re-spaced or re-ordered matches.
+func normText(s string) string {
+	t := strings.TrimSpace(s)
+	if t == "" || (t[0] != '{' && t[0] != '[') {
+		return s
+	}
+	var v any
+	if json.Unmarshal([]byte(t), &v) != nil {
+		return s
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return s
+	}
+	return string(out)
+}
+
+// byKey is rule 1.
+func (m *optionMatcher) byKey(key string) string {
+	if m.is[key] {
+		return key
+	}
+	return ""
+}
+
+// byValue is rules 3 and 4, for an option without a key.
+func (m *optionMatcher) byValue(o Option) string {
+	if o.Key != "" || !o.Text {
+		return ""
+	}
+	if m.is[o.Value] {
+		return o.Value
+	}
+	return m.byText[normText(o.Value)]
+}
+
+// variant is the variant an option is by rules 1, 3 and 4.
+func (m *optionMatcher) variant(o Option) string {
+	if o.Key != "" {
+		return m.byKey(o.Key)
+	}
+	return m.byValue(o)
+}
+
+// knownOptions maps the options Flagsmith named to the variants they are.
+func (l *Link) knownOptions(p *registry.Policy, have []fsOption) []Option {
+	var m *optionMatcher
+	if p != nil {
+		m = newOptionMatcher(p, l.BaselineFlag(p.Set, p.Key))
+	}
+	opts := make([]Option, 0, len(have))
+	for _, fo := range have {
+		o := fo.option()
+		if m != nil {
+			o.Variant = m.variant(o)
+		}
+		opts = append(opts, o)
+	}
+	return opts
 }
 
 // OfferedVariants are the variant names a feature shows as options: the
@@ -101,11 +228,7 @@ type optionJob struct {
 // feature (the weight writes use them at once) and queues the feature for
 // the option sync that runs once the start succeeded.
 func (s *startup) queueOptions(k Key, p *registry.Policy, featureID int, have []fsOption) {
-	opts := make([]Option, 0, len(have))
-	for _, o := range have {
-		opts = append(opts, o.option())
-	}
-	s.l.setOptions(k.Flag, opts)
+	s.l.setOptions(k.Flag, s.l.knownOptions(p, have))
 	s.optionJobs = append(s.optionJobs, optionJob{k: k, p: p, featureID: featureID, have: have})
 }
 
@@ -139,25 +262,37 @@ func (s *startup) optionsDone() <-chan struct{} {
 }
 
 // syncOptions makes the options of k's feature equal to its offered variants
-// (§2.3): a missing one is created at 0 % in every environment, one that
-// names no offered variant (a dropped variant, a person's, a non-text option,
-// a duplicate) is removed. A failed call is logged and counted; only a cancel
-// is returned.
+// (§2.3): each option is matched to a variant by key first, then by value; one
+// that is no offered variant (a dropped variant, a person's, a duplicate) is
+// removed, a matched one whose key, type or value differs is updated in place
+// (PUT keeps its id, so its weights and a running pick stay: the migration of
+// the #2711 options, #2713), a missing one is created at 0 % in every
+// environment. Deletes go first, then updates, then creates, so a key is free
+// before it is set. A failed call is logged and counted; only a cancel is
+// returned.
 func (s *startup) syncOptions(ctx context.Context, k Key, p *registry.Policy, featureID int, have []fsOption) error {
-	want := OfferedVariants(p, s.l.BaselineFlag(p.Set, p.Key))
-	offered := map[string]bool{}
-	for _, n := range want {
-		offered[n] = true
+	m := newOptionMatcher(p, s.l.BaselineFlag(p.Set, p.Key))
+	matched := make([]string, len(have))
+	taken := map[string]bool{}
+	for i, o := range have { // rule 1: by key
+		if v := m.byKey(o.key()); v != "" && !taken[v] {
+			matched[i], taken[v] = v, true
+		}
 	}
-	kept := map[string]bool{}
+	for i, o := range have { // rules 3 and 4: a keyless option by value
+		if v := m.byValue(o.option()); matched[i] == "" && v != "" && !taken[v] {
+			matched[i], taken[v] = v, true
+		}
+	}
+	body := func(name string) map[string]any {
+		return map[string]any{"feature": featureID, "key": name, "type": TypeUnicode, "string_value": m.text[name], "default_percentage_allocation": 0}
+	}
 	var final []Option
-	for _, o := range have {
-		opt := o.option()
-		if opt.Text && offered[opt.Value] && !kept[opt.Value] {
-			kept[opt.Value] = true
-			final = append(final, opt)
+	for i, o := range have {
+		if matched[i] != "" {
 			continue
 		}
+		opt := o.option()
 		err := s.optionCall(ctx, k, http.MethodDelete, s.l.optionsPath(featureID, strconv.Itoa(o.ID)+"/"), nil, nil)
 		switch {
 		case ctx.Err() != nil:
@@ -167,24 +302,39 @@ func (s *startup) syncOptions(ctx context.Context, k Key, p *registry.Policy, fe
 			final = append(final, opt) // still there: a weight write names it
 		}
 	}
-	for _, name := range want {
-		if kept[name] {
+	for i, o := range have {
+		name := matched[i]
+		if name == "" {
 			continue
 		}
-		body := map[string]any{"feature": featureID, "type": TypeUnicode, "string_value": name, "default_percentage_allocation": 0}
+		opt := o.option()
+		opt.Variant = name
+		if o.key() != name || !opt.Text || opt.Value != m.text[name] {
+			err := s.optionCall(ctx, k, http.MethodPut, s.l.optionsPath(featureID, strconv.Itoa(o.ID)+"/"), body(name), nil)
+			switch {
+			case ctx.Err() != nil:
+				return ctx.Err()
+			case err != nil:
+				s.warnOption(k, "update", name, err)
+			default:
+				opt = Option{ID: o.ID, Variant: name, Key: name, Value: m.text[name], Text: true}
+			}
+		}
+		final = append(final, opt)
+	}
+	for _, name := range m.offered {
+		if taken[name] {
+			continue
+		}
 		var created fsOption
-		err := s.optionCall(ctx, k, http.MethodPost, s.l.optionsPath(featureID, ""), body, &created)
+		err := s.optionCall(ctx, k, http.MethodPost, s.l.optionsPath(featureID, ""), body(name), &created)
 		switch {
 		case ctx.Err() != nil:
 			return ctx.Err()
 		case err != nil:
 			s.warnOption(k, "create", name, err)
 		default:
-			opt := created.option()
-			if !opt.Text {
-				opt = Option{ID: created.ID, Value: name, Text: true}
-			}
-			final = append(final, opt)
+			final = append(final, Option{ID: created.ID, Variant: name, Key: name, Value: m.text[name], Text: true})
 		}
 	}
 	s.l.setOptions(k.Flag, final)
@@ -212,7 +362,7 @@ func (s *startup) warnOption(k Key, op, value string, err error) {
 
 // listOptions reads a feature's options again (a weight write Flagsmith
 // refused because they changed since the start).
-func (o *out) listOptions(ctx context.Context, flag string, featureID int) error {
+func (o *out) listOptions(ctx context.Context, k Key, featureID int) error {
 	if err := o.pace(ctx); err != nil {
 		return err
 	}
@@ -230,11 +380,7 @@ func (o *out) listOptions(ctx context.Context, flag string, featureID int) error
 		}
 		list = paged.Results
 	}
-	opts := make([]Option, 0, len(list))
-	for _, fo := range list {
-		opts = append(opts, fo.option())
-	}
-	o.l.setOptions(flag, opts)
+	o.l.setOptions(k.Flag, o.l.knownOptions(o.l.Policy(k.Set, k.Flag), list))
 	return nil
 }
 
@@ -250,7 +396,7 @@ func variantsRefused(err error) bool {
 }
 
 // weightsFor are the option weights of a stack value (§2.3): 100 on the
-// first text option whose value is the value sent while the overlay is on, 0
+// first option that is the variant sent (by name) while the overlay is on, 0
 // on every other option.
 func weightsFor(opts []Option, fv FSValue, enabled bool) []futureVariant {
 	if len(opts) == 0 {
@@ -261,7 +407,7 @@ func weightsFor(opts []Option, fv FSValue, enabled bool) []futureVariant {
 	out := make([]futureVariant, 0, len(opts))
 	for _, o := range opts {
 		w := 0.0
-		if picked && o.Text && o.Value == s {
+		if picked && o.Variant != "" && o.Variant == s {
 			w, picked = 100, false
 		}
 		out = append(out, futureVariant{ID: o.ID, Weight: w})
@@ -275,30 +421,57 @@ type MVStateValue struct {
 	Option struct {
 		ID    int             `json:"id"`
 		Value json.RawMessage `json:"value"`
+		// Key is the option's title (Flagsmith #7698; absent in older
+		// documents): the variant name since #2713.
+		Key *string `json:"key"`
 	} `json:"multivariate_feature_option"`
 	PercentageAllocation float64 `json:"percentage_allocation"`
 }
 
-// pickedValue reads a feature state's weights (§2.3): none or all 0 -> the
-// feature state's value (ok false); exactly one option at 100 and the others
-// 0 -> that option's value; anything else is a percentage split (refused).
-func pickedValue(pol *registry.Policy, mv []MVStateValue) (json.RawMessage, bool, *fserr.Error) {
-	var picked json.RawMessage
+// pickedValue reads a feature state's weights (§2.3): none or all 0 -> no
+// pick (ok false); exactly one option at 100 and the others 0 -> that option;
+// anything else is a percentage split (refused).
+func pickedValue(pol *registry.Policy, mv []MVStateValue) (MVStateValue, bool, *fserr.Error) {
+	var picked MVStateValue
 	found, split := false, false
 	for _, v := range mv {
 		switch {
 		case v.PercentageAllocation == 0:
 		case v.PercentageAllocation == 100 && !found:
-			picked, found = v.Option.Value, true
+			picked, found = v, true
 		default:
 			split = true
 		}
 	}
 	if split {
-		return nil, false, fserr.Unprocessable(fserr.FlagsmithPercentageSplit, "%s: %s", pol.Key, percentSplitReason)
+		return MVStateValue{}, false, fserr.Unprocessable(fserr.FlagsmithPercentageSplit, "%s: %s", pol.Key, percentSplitReason)
 	}
-	if !found || len(bytes.TrimSpace(picked)) == 0 {
-		return nil, false, nil
+	if !found || len(bytes.TrimSpace(picked.Option.Value)) == 0 {
+		return MVStateValue{}, false, nil
 	}
 	return picked, true, nil
+}
+
+// pickedVariant is the offered variant a picked option is (§2.3, #2713):
+// (1) its key, (2) the variant the link recorded for its id, (3, 4) with no
+// key, its value; "" when none matches (the value is then read as any value).
+func (l *Link) pickedVariant(pol *registry.Policy, mv MVStateValue) string {
+	m := newOptionMatcher(pol, l.BaselineFlag(pol.Set, pol.Key))
+	o := Option{ID: mv.Option.ID}
+	if mv.Option.Key != nil {
+		o.Key = *mv.Option.Key
+	}
+	if v := m.byKey(o.Key); v != "" {
+		return v
+	}
+	for _, known := range l.options(pol.Key) {
+		if known.ID == o.ID && m.is[known.Variant] {
+			return known.Variant
+		}
+	}
+	var s string
+	if json.Unmarshal(mv.Option.Value, &s) == nil {
+		o.Value, o.Text = s, true
+	}
+	return m.byValue(o)
 }

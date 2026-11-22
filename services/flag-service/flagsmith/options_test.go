@@ -111,7 +111,7 @@ func TestStackPushWeightsOptions(t *testing.T) {
 		for _, name := range []string{"rules", "claude", "openai", "jev"} {
 			o := h.fake.Options.Add(fid, name)
 			if name != "jev" {
-				known = append(known, flagsmith.Option{ID: o.ID, Value: name, Text: true})
+				known = append(known, flagsmith.Option{ID: o.ID, Variant: name, Value: name, Text: true})
 			}
 		}
 		// The start saw three options; a person added jev since.
@@ -186,6 +186,122 @@ func TestStackPushWeightsOptions(t *testing.T) {
 			if v.Weight != 0 {
 				t.Fatalf("UC-055/BR-005 weights %v after the clear, want all 0", d.Variants)
 			}
+		}
+	})
+}
+
+// objectivesState is a feature state of objectives whose options are titled
+// with the variant name and carry its value (#2713, §2.3); key false leaves
+// the title out (a document without it).
+func objectivesState(picked string, key bool, value string) map[string]any {
+	s := fsState("objectives", true, "balanced_focused")
+	s["feature"] = map[string]any{"id": 2, "name": "objectives", "type": "MULTIVARIATE"}
+	var k any
+	if key {
+		k = picked
+	}
+	s["multivariate_feature_state_values"] = []map[string]any{
+		{"id": 301, "multivariate_feature_option": map[string]any{"id": 31, "value": `{"endurance":0.7,"balanced":0.1,"accelerate":0.1,"chaos":0.1}`, "key": "endurance_focused"}, "percentage_allocation": 0},
+		{"id": 302, "multivariate_feature_option": map[string]any{"id": 32, "value": value, "key": k}, "percentage_allocation": 100},
+	}
+	return s
+}
+
+// UC: UC-054 A6 BR-012
+func TestPullMapsPickedOptionToVariant(t *testing.T) {
+	chaos := `{"endurance":0.1,"balanced":0.1,"accelerate":0.1,"chaos":0.7}`
+	pick := func(t *testing.T, before func(h *harness), st map[string]any) flagsmith.Value {
+		t.Helper()
+		h := newHarness(t, harnessOpts{before: before})
+		h.online()
+		h.setDoc([]map[string]any{st})
+		h.round()
+		v, _ := h.local("agent", "objectives", flagsmith.ScopeStack)
+		return v
+	}
+	t.Run("UC-054/A6 BR-012 #2713 the option at 100 % is the variant its title names", func(t *testing.T) {
+		if v := pick(t, nil, objectivesState("chaos_focused", true, chaos)); v.Variant != "chaos_focused" {
+			t.Fatalf("local %+v, want chaos_focused", v)
+		}
+	})
+	t.Run("UC-054/A6 BR-012 #2713 the title wins over a value that is another variant's", func(t *testing.T) {
+		mixed := `{"endurance":0.25,"balanced":0.25,"accelerate":0.25,"chaos":0.25}`
+		if v := pick(t, nil, objectivesState("chaos_focused", true, mixed)); v.Variant != "chaos_focused" {
+			t.Fatalf("local %+v, want chaos_focused by its title", v)
+		}
+	})
+	t.Run("UC-054/A6 BR-012 #2713 without a title the value names the variant", func(t *testing.T) {
+		if v := pick(t, nil, objectivesState("chaos_focused", false, `{"chaos": 0.7, "endurance": 0.1, "balanced": 0.1, "accelerate": 0.1}`)); v.Variant != "chaos_focused" {
+			t.Fatalf("local %+v, want chaos_focused by its value", v)
+		}
+	})
+	t.Run("UC-054/A6 BR-012 #2713 without a title an option of #2711 (value = name) still picks", func(t *testing.T) {
+		if v := pick(t, nil, objectivesState("chaos_focused", false, "chaos_focused")); v.Variant != "chaos_focused" {
+			t.Fatalf("local %+v, want chaos_focused", v)
+		}
+	})
+	t.Run("UC-054/A6 BR-012 #2713 without a title an option the link recorded is its variant by id", func(t *testing.T) {
+		v := pick(t, func(h *harness) {
+			ids := h.link.IDs()
+			ids.Lock()
+			ids.Options["objectives"] = []flagsmith.Option{{ID: 32, Variant: "mixed", Key: "mixed", Value: "x", Text: true}}
+			ids.Unlock()
+		}, objectivesState("mixed", false, "a value Flagsmith shows differently"))
+		if v.Variant != "mixed" {
+			t.Fatalf("local %+v, want mixed by the option id", v)
+		}
+	})
+	t.Run("UC-054/A6 BR-012 #2713 an option that is no declared variant is refused by the bounds", func(t *testing.T) {
+		h := newHarness(t, harnessOpts{})
+		h.online()
+		h.setDoc([]map[string]any{objectivesState("not_a_variant", true, `{"chaos":1}`)})
+		h.round()
+		if v, _ := h.local("agent", "objectives", flagsmith.ScopeStack); v.Present {
+			t.Fatalf("an undeclared option was applied: %+v", v)
+		}
+		if st := h.link.Status(); st.Refused != 1 {
+			t.Fatalf("refused %d, want 1", st.Refused)
+		}
+	})
+}
+
+// UC: UC-055 BR-005
+func TestStackPushWeightsTitledOptions(t *testing.T) {
+	var fid int
+	var chaos flagsmithtest.MVOption
+	h := newHarness(t, harnessOpts{realOut: true, before: func(h *harness) {
+		h.fake.ServeFlagAPI()
+		fid = h.fake.AddFeature("objectives")
+		mixed := h.fake.Options.AddKeyed(fid, "mixed", `{"endurance":0.25,"balanced":0.25,"accelerate":0.25,"chaos":0.25}`)
+		chaos = h.fake.Options.AddKeyed(fid, "chaos_focused", `{"endurance":0.1,"balanced":0.1,"accelerate":0.1,"chaos":0.7}`)
+		ids := h.link.IDs()
+		ids.Lock()
+		ids.FeatureID["objectives"] = fid
+		ids.Options["objectives"] = []flagsmith.Option{
+			{ID: mixed.ID, Variant: "mixed", Key: "mixed", Value: *mixed.StringValue, Text: true},
+			{ID: chaos.ID, Variant: "chaos_focused", Key: "chaos_focused", Value: *chaos.StringValue, Text: true},
+		}
+		ids.Unlock()
+	}})
+	h.online()
+	h.put(state.WriteRequest{Set: "agent", Flag: "objectives", Variant: "chaos_focused"})
+	h.waitFor("the pick in Flagsmith", func() bool {
+		d, ok := h.fake.Options.Default(fid)
+		return ok && d.Enabled
+	})
+	t.Run("UC-055/BR-005 #2713 the running variant's titled option is at 100 %, by id", func(t *testing.T) {
+		d, _ := h.fake.Options.Default(fid)
+		for _, v := range d.Variants {
+			want := 0.0
+			if v.ID == chaos.ID {
+				want = 100
+			}
+			if v.Weight != want {
+				t.Fatalf("weights %v, want option %d (chaos_focused) at 100", d.Variants, chaos.ID)
+			}
+		}
+		if len(d.Variants) != 2 {
+			t.Fatalf("weights %v, want both options", d.Variants)
 		}
 	})
 }
