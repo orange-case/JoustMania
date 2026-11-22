@@ -283,6 +283,10 @@ func gateAttributes(resp decide.Response) []attribute.KeyValue {
 func (b *Backend) finish(ctx context.Context, span trace.Span, start time.Time, res *wireResult, errType string) {
 	duration := time.Since(start)
 	mc := chathttp.Call{Provider: ProviderName, RequestModel: b.cfg.Model, Host: b.host, Port: b.port}
+	// The invoke_agent span sums this call (#2584): one per HTTP call of the
+	// two-stage round, with the usage set on the chat span below (if any).
+	var call decide.CallUsage
+	defer func() { decide.RecordCall(ctx, call) }()
 	if res != nil {
 		mc.ResponseModel = res.Model
 		if res.Model != "" {
@@ -296,6 +300,8 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, start time.Time, 
 				semconv.GenAIUsageInputTokens(u.InputTokens),
 				semconv.GenAIUsageOutputTokens(u.OutputTokens),
 			)
+			call.InputTokens = decide.Tokens(u.InputTokens)
+			call.OutputTokens = decide.Tokens(u.OutputTokens)
 			metrics.RecordTokens(ctx, mc, u.InputTokens, u.OutputTokens)
 		}
 		if b.cfg.CaptureContent && res.Text != "" {

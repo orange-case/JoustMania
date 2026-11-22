@@ -52,10 +52,6 @@ import (
 // constant — distinct from the in-game llmModeValue.
 const retroModeValue = "retro"
 
-// genAIOutputTypeJSON is gen_ai.output.type=json: the RESPONSE CONTRACT asks for a
-// single JSON object.
-var genAIOutputTypeJSON = semconv.GenAIOutputTypeKey.String("json")
-
 // DefaultRetroTimeout bounds one retro inference call when SetTimeout was not
 // called. A retro is off the game's hot path, so the budget is generous; it still
 // guarantees a hung call cannot leak its goroutine or pin the span open.
@@ -799,9 +795,8 @@ type retroPromptAttrs struct {
 // set (#844), mirroring llmPromptAttributes. Every emission routes through it so
 // the schema is complete and consistent on every emission:
 //
-//   - gen_ai.operation.name = "chat"        (semconv)
-//   - gen_ai.request.model  = <model flag>  (semconv)
-//   - gen_ai.output.type    = "json"        (semconv key; JSON per RESPONSE CONTRACT)
+//   - no gen_ai.* operation attributes (#2584): the retro span is not a model call;
+//     the call is the backend's own `chat {model}` CLIENT child, which carries them
 //   - agent.mode            = "retro"
 //   - agent.objectives      = sorted "k=v" weights (summarizeObjectives)
 //   - interventions.allowed = the allow-list summary (allowedSummary)
@@ -822,10 +817,6 @@ func retroPromptAttributes(in retroPromptAttrs) []attribute.KeyValue {
 	user := in.prompt.User
 	spanUser := in.prompt.UserForSpan(in.captureContent)
 	return []attribute.KeyValue{
-		// GenAI semantic conventions for the request the agent would have sent.
-		semconv.GenAIOperationNameChat,
-		semconv.GenAIRequestModel(in.prompt.Model),
-		genAIOutputTypeJSON,
 		// Agent attribution (same vocabulary as the decision span).
 		attribute.String(AttrMode, retroModeValue),
 		attribute.String(AttrGameKind, in.gameKind),
