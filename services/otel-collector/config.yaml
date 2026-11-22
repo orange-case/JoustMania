@@ -223,15 +223,17 @@ processors:
         value: containers
         action: insert
 
-  # Keep only the agent's invoke_agent spans for the span_metrics connector
-  # (#1427). The traces/span_metrics pipeline runs beside the main traces
+  # Keep only the agent's decide spans for the span_metrics connector (#1427):
+  # "invoke_agent joustmania-agent" since #2584, and agent.decide from agent
+  # images built before it (transition; removed once VictoriaMetrics holds no
+  # agent.decide series). The traces/span_metrics pipeline runs beside the main traces
   # pipeline, so dropping here never removes a span from Jaeger or the agent.
   # Restricting the connector to one span name of one service bounds the
   # series count: backend (4) x outcome (6) x status code (3).
   filter/agent_decide:
     error_mode: ignore
     trace_conditions:
-      - span.name != "invoke_agent joustmania-agent" or resource.attributes["service.name"] != "agent"
+      - (span.name != "invoke_agent joustmania-agent" and span.name != "agent.decide") or resource.attributes["service.name"] != "agent"
 
   # Drop gRPC health-check spans (#2286): docker healthchecks and watchdog
   # probes call grpc.health.v1.Health/Check every few seconds, and on the Pi

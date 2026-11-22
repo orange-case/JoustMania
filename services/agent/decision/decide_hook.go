@@ -58,7 +58,28 @@ import (
 // agent.decision -> agent.action spans. On the rules path it is a sibling of the
 // agent.decision spans under agent.signal_received, so the existing trace shape is
 // unchanged.
-const SpanDecide = "invoke_agent joustmania-agent"
+const SpanDecide = "invoke_agent " + AgentName
+
+// invokeAgentStartAttributes are the GenAI attributes the convention wants at span
+// creation time (sampling-relevant: gen_ai.operation.name, gen_ai.agent.name and,
+// when known, gen_ai.request.model), on both paths (#2584). gen_ai.output.type=json
+// is set on the remote path only: its request asks the backend for JSON, while the
+// rules path sends no request at all.
+func invokeAgentStartAttributes(model string, remote bool) []attribute.KeyValue {
+	// gen_ai.operation.name is Required; also on the rules path, where no model is
+	// called (a documented deviation, telemetry.md §4.2).
+	attrs := []attribute.KeyValue{
+		semconv.GenAIOperationNameInvokeAgent,
+		semconv.GenAIAgentName(AgentName),
+	}
+	if model != "" {
+		attrs = append(attrs, semconv.GenAIRequestModel(model))
+	}
+	if remote {
+		attrs = append(attrs, semconv.GenAIOutputTypeJSON)
+	}
+	return attrs
+}
 
 // invoke_agent span attributes without a GenAI semconv name (#1226).
 const (
@@ -677,6 +698,7 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 	opts := []trace.SpanStartOption{
 		trace.WithTimestamp(start),
 		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(invokeAgentStartAttributes(cfg.Model, true)...),
 	}
 	opts = append(opts, fireCycleLink(fireSC)...)
 	spanCtx, span := l.Tracer.Start(parent, SpanDecide, opts...)
@@ -1022,7 +1044,8 @@ func truncateRationale(s string) string {
 func (l *Loop) emitDecideSpan(parent context.Context, rec *decideRecord, c gamecontext.GameContext) {
 	_, span := l.Tracer.Start(parent, SpanDecide,
 		trace.WithTimestamp(rec.start),
-		trace.WithSpanKind(trace.SpanKindInternal))
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(invokeAgentStartAttributes(rec.model, false)...))
 	l.registerPrediction(span, rec)
 	l.setDecideAttributes(span, rec, c)
 	span.End(trace.WithTimestamp(rec.end))
@@ -1041,10 +1064,8 @@ func (l *Loop) endDecideSpan(span trace.Span, rec *decideRecord, c gamecontext.G
 // setDecideAttributes stamps the invoke_agent schema onto span.
 func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecontext.GameContext) {
 	attrs := []attribute.KeyValue{
-		// Required by the GenAI invoke_agent span (#2584); also on the rules path,
-		// where no model is called (a documented deviation, telemetry.md §4.2).
-		semconv.GenAIOperationNameInvokeAgent,
-		semconv.GenAIAgentName(AgentName),
+		// gen_ai.operation.name and gen_ai.agent.name are set at span start
+		// (invokeAgentStartAttributes, #2584).
 		// The game is the "conversation" the agent's decisions belong to.
 		semconv.GenAIConversationID(c.SessionID),
 		attribute.String(AttrGameID, c.SessionID),

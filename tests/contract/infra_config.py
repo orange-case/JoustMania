@@ -15,6 +15,34 @@ ENVOY_FILE = REPO_ROOT / "services" / "envoy" / "envoy.yaml"
 COLLECTOR_FILE = REPO_ROOT / "services" / "otel-collector" / "config.yaml"
 
 
+DECISION_DIR = REPO_ROOT / "services" / "agent" / "decision"
+# The decide span's name before #2584; the collector filter, Grafana, the talk
+# pre-flight and agent_group_ab still accept it for the transition.
+OLD_DECIDE_SPAN = "agent.decide"
+
+
+def go_string_const(name: str, path: Path) -> str | None:
+    """A Go string const's value: a literal, or a literal + one const of the same package."""
+    text = path.read_text()
+    m = re.search(rf'{name}\s*=\s*"([^"]*)"(?:\s*\+\s*(\w+))?', text)
+    if not m:
+        return None
+    if not m.group(2):
+        return m.group(1)
+    for other in sorted(path.parent.glob("*.go")):
+        tail = re.search(rf'{m.group(2)}\s*=\s*"([^"]*)"', other.read_text())
+        if tail:
+            return m.group(1) + tail.group(1)
+    raise AssertionError(f"{m.group(2)} (used by {name}) not found in {path.parent}")
+
+
+def decide_span_name() -> str:
+    """decision.SpanDecide ("invoke_agent " + AgentName since #2584)."""
+    value = go_string_const("SpanDecide", DECISION_DIR / "decide_hook.go")
+    assert value, "SpanDecide not found in decide_hook.go"
+    return value
+
+
 def load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text())
 

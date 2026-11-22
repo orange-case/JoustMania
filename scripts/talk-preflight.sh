@@ -563,13 +563,14 @@ else
     t_min="$(python3 -c 'import sys,datetime as d; print(d.datetime.fromtimestamp(int(sys.argv[1]), d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "${start_s}")"
     t_max="$(python3 -c 'import sys,datetime as d; print(d.datetime.fromtimestamp(int(sys.argv[1]), d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$((end_s + 60))")"
     # The decide span is the GenAI "invoke_agent joustmania-agent" (#2584; the
-    # space URL-encoded). An agent release from before #2584 still names it
-    # agent.decide, so that name is searched when the new one has no spans.
+    # space URL-encoded). An agent image from before #2584 still names it
+    # agent.decide, so that name is searched (and reported as WARN) when the new
+    # one has no spans.
     count=0
     for decide_op in "invoke_agent joustmania-agent" "agent.decide"; do
-    decide_q="${decide_op// /%20}"
-    traces="$(curl -s --max-time 15 "${BASE_URL}/jaeger/api/v3/traces?query.serviceName=agent&query.operationName=${decide_q}&query.startTimeMin=${t_min}&query.startTimeMax=${t_max}&query.searchDepth=5" 2>/dev/null)" || traces=""
-    summary="$(python3 -c '
+      decide_q="${decide_op// /%20}"
+      traces="$(curl -s --max-time 15 "${BASE_URL}/jaeger/api/v3/traces?query.serviceName=agent&query.operationName=${decide_q}&query.startTimeMin=${t_min}&query.startTimeMax=${t_max}&query.searchDepth=5" 2>/dev/null)" || traces=""
+      summary="$(python3 -c '
 import json, sys
 try:
     body = json.load(sys.stdin)
@@ -592,13 +593,15 @@ last = max(spans, key=lambda s: int(s.get("startTimeUnixNano") or 0))
 tags = {a["key"]: next(iter((a.get("value") or {}).values()), None) for a in last.get("attributes") or []}
 print(len(spans), tags.get("decide.backend"), tags.get("decide.outcome"), tags.get("decide.fallback_reason") or "-")
 ' "${decide_op}" <<<"${traces}")"
-    read -r count backend outcome reason <<<"${summary}"
-    if [[ "${count}" == "ERR" || -z "${count}" || "${count}" -ne 0 ]]; then break; fi
+      read -r count backend outcome reason <<<"${summary}"
+      if [[ "${count}" == "ERR" || -z "${count}" || "${count}" -ne 0 ]]; then break; fi
     done
     if [[ "${count}" == "ERR" || -z "${count}" ]]; then
       fail "${decide_op} query failed (Jaeger slow or not answering)"
     elif [[ "${count}" -eq 0 ]]; then
       fail "no invoke_agent joustmania-agent (or agent.decide) spans in the last ${MINUTES} min (play a warm-up game first; the rules path only emits on cycles that decide)"
+    elif [[ "${decide_op}" == "agent.decide" ]]; then
+      warn "${count} agent.decide span(s) in the last ${MINUTES} min, none named invoke_agent joustmania-agent: the agent image predates #2584 (pull the current images); newest: backend=${backend} outcome=${outcome} fallback_reason=${reason}"
     else
       pass "${count} ${decide_op} span(s) in the last ${MINUTES} min; newest: backend=${backend} outcome=${outcome} fallback_reason=${reason}"
     fi

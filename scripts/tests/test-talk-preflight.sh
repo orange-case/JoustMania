@@ -590,9 +590,11 @@ if has "Flagsmith link"; then not_ok "link off by choice: no link line"; else ok
 
 # --- decide span name (#2584) -----------------------------------------------
 # An agent release from before #2584 names the decide span agent.decide: the
-# pre-flight falls back to that name when invoke_agent joustmania-agent has none.
+# pre-flight falls back to that name when invoke_agent joustmania-agent has none
+# and reports it as a WARN (old agent image), never a PASS.
 STUB_BUDGET=30 STUB_JAEGER_OLD_NAME=1 run_preflight
-check "jaeger falls back to agent.decide for an agent from before #2584" "PASS  2 agent.decide span(s) in the last"
+check "jaeger falls back to agent.decide for an agent from before #2584, as a WARN" "WARN  2 agent.decide span(s) in the last"
+if has "PASS  2 agent.decide"; then not_ok "the agent.decide fallback is not a PASS"; else ok "the agent.decide fallback is not a PASS"; fi
 
 # --- usage -----------------------------------------------------------------
 run_preflight --minutes abc

@@ -87,7 +87,12 @@ def test_spanmetrics_only_sees_agent_decide_spans(collector):
     processors = pipelines["traces/span_metrics"]["processors"]
     assert "filter/agent_decide" in processors
     (condition,) = collector["processors"]["filter/agent_decide"]["trace_conditions"]
-    assert f'span.name != "{_go_const("SpanDecide")}"' in condition
+    # Both names during the transition (#2584): a stack on older agent images
+    # still emits agent.decide, and its series must keep flowing.
+    assert (
+        f'(span.name != "{ic.decide_span_name()}" and span.name != "{ic.OLD_DECIDE_SPAN}")'
+        in condition
+    ), condition
     assert 'resource.attributes["service.name"] != "agent"' in condition
     # The filter must not sit in the main traces pipeline (it would drop spans from Jaeger).
     assert "filter/agent_decide" not in pipelines["traces"]["processors"]
