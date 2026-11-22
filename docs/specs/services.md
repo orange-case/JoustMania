@@ -653,7 +653,7 @@ not depend on the link.
 
 **Consumers:** `scripts/talk-preflight.sh` WARNs while the link is `on` and not `online`; while it is `online` it
 WARNs when `refused > 0` or `out_of_sync > pending` (keys stuck on a refusal, not pushes in flight; the line names the
-three counts, #2592), with no PASS line then; when `keys` holds a key with `scope` `stack` and `side` `remote`, the line adds
+three counts, #2592), with no PASS line then; when `keys` holds a key with `scope` `stack`, `side` `remote` and `http_status` 409, 401 or 403, the line adds
 that a refused stack value, a stop included, is reverted at once (#2631); the preflight never FAILs on the link. Grafana **Flags / OpenFeature**,
 row "Flagsmith link" (telemetry.md §10.4). `talk-stage.sh reset` needs no change while online (its deletes are pushed
 like any write); a reset made while offline is discarded at the reconnect in favour of the Flagsmith values (#2621).
