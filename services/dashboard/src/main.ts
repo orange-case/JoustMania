@@ -38,6 +38,7 @@ import { StageSettings } from "./components/StageSettings.js";
 import { fetchStageSettings } from "./stageSettings.js";
 import { createPoller } from "./poller.js";
 import { redirectToLatest } from "./latest.js";
+import { isStageView, startStageView } from "./stageView.js";
 import { PageGate } from "./pageGate.js";
 import { EmbedGate, VisibilityGate } from "./visibilityGate.js";
 import { ShieldStore } from "./shield.js";
@@ -675,5 +676,7 @@ async function handleStopGame() {
 }
 
 // Start the app
-// `/?latest=retro` and friends open the newest agent span in Jaeger instead (#2717).
-if (!(await redirectToLatest())) await init();
+// `/?view=stage` is the talk's full-screen stage view (UC-035 A8, #2721); `/?latest=retro` and
+// friends open the newest agent span in Jaeger instead (#2717).
+if (isStageView(window.location.search)) await startStageView();
+else if (!(await redirectToLatest())) await init();
