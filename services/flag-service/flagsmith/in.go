@@ -71,7 +71,8 @@ type puller struct {
 	// kept); deleted on any other outcome and when the document changes.
 	refused  map[Key]refusal
 	deferred map[Key]*deferral
-	// reverting holds the refused stack value a round reverts (UC-055 A4).
+	// reverting holds the refused stack value a write in progress reverts
+	// (UC-055 A4); it is set and cleared around that one write (#2631 N1).
 	reverting map[Key]Value
 	// forceFull: the next pull is unconditional.
 	forceFull bool
@@ -857,7 +858,6 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 				// A refusal is reported as one (state, span, metric), not
 				// as a conflict.
 				dec.resolution = ""
-				p.reverting[k] = le.v
 			}
 			if de.err != nil {
 				// Flagsmith's value is refused here: the offline change
@@ -907,7 +907,14 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 		p.accepted(k)
 	case actApply:
 		rc.stats.changes++
+		// The refused value is marked only for this write (#2631 N1): a revert
+		// skipped by the write budget or refused here leaves no mark behind
+		// for a later, ordinary Flagsmith change to hold.
+		if revert {
+			p.reverting[k] = le.v
+		}
 		p.apply(rc, k, pol, de, le)
+		delete(p.reverting, k)
 	}
 }
 
