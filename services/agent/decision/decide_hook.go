@@ -271,7 +271,7 @@ func (l *Loop) SetDecideRegistry(r *DecideRegistry) { l.decideBackends = r }
 type decideRecord struct {
 	// trig is the OTLP Export that triggered this decide when the cycle has no
 	// agent.signal_received span (in a game, #2648): emitted as an event on the span.
-	trig           *EvalTrigger
+	trig *EvalTrigger
 	// usage sums the model calls of a remote invocation (#2584); nil on the rules
 	// path, so its span carries no usage.
 	usage          *decide.Usage
