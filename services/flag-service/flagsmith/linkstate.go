@@ -55,8 +55,11 @@ type entry struct {
 	// revertedLocal is the local value after an Offer or Reoffer equal to the
 	// remote value dropped a pending entry whose different value Next had
 	// handed out (hasReverted): that push may still be in flight, and its
-	// confirm must not mark the key in sync (revertedLocalLocked, #2611).
-	// While set with nothing pending it equals the remote value.
+	// confirm must not mark the key in sync (revertedLocalLocked, #2611). A
+	// new pending entry keeps the mark (the push may still be in flight), and
+	// a later revert adds to it. While set it equals the remote value; a
+	// different remote value, a confirm or remote refusal (the answer to the
+	// push in flight) or a forgotten remote value clears it.
 	revertedLocal Value
 	hasReverted   bool
 	// gen counts changes of the remote value (SetRemote, ConfirmPushed,
@@ -256,10 +259,11 @@ func (s *LinkState) syncLocked(e *entry, inSync bool) {
 
 // inSyncLocked records a local value equal to the remote one: nothing to
 // send, no refused value to hold back. Dropping a pending entry whose
-// different value Next handed out records the local value as reverted.
+// different value Next handed out records the local value as reverted; a mark
+// kept from an earlier revert stays (its push may still be in flight).
 func (s *LinkState) inSyncLocked(k Key, e *entry) {
 	if p := e.pending; p != nil {
-		e.revertedLocal, e.hasReverted = e.remote, p.hasSent && !p.sent.Equal(e.remote)
+		e.revertedLocal, e.hasReverted = e.remote, e.hasReverted || (p.hasSent && !p.sent.Equal(e.remote))
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}
@@ -268,8 +272,9 @@ func (s *LinkState) inSyncLocked(k Key, e *entry) {
 }
 
 func (s *LinkState) offerLocked(k Key, e *entry, v Value, at time.Time, version uint64, offline bool) bool {
+	// The reverted mark stays: the push it is about may still be in flight,
+	// and a later revert to the remote value relies on it (#2611).
 	s.syncLocked(e, false)
-	e.revertedLocal, e.hasReverted = Value{}, false
 	if e.pending != nil {
 		e.pending.value = v
 		e.pending.merged++
@@ -318,10 +323,11 @@ func (s *LinkState) Retry(k Key, notBefore time.Time) {
 // now, and the pending entry goes unless a newer local value replaced it
 // meanwhile. It ends the refusal and the refused value, unless the local value
 // went back to that refused value while v was in flight (heldLocalLocked): the
-// key then stays refused and out of sync. Likewise, when the local value went
-// back to the remote value while v was in flight (revertedLocalLocked), the
-// key stays out of sync: the next pull round sends the local value (#2611). A
-// key forgotten meanwhile (game end) is ignored.
+// key then stays refused and out of sync. Likewise, when the local value
+// changed meanwhile to a value other than v (revertedLocalLocked), the key
+// stays out of sync until a pull round reconciles it (UC-054): it sends the
+// local value or applies Flagsmith's (#2611). A key forgotten meanwhile (game
+// end) is ignored.
 func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -349,8 +355,9 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 
 // revertedLocalLocked reports whether e's local value is a reverted one
 // (hasReverted, nothing pending since) that differs from v, the value a push
-// confirm refers to: v was in flight when the operator went back to the value
-// Flagsmith held, so Flagsmith now differs from the local value (#2611).
+// confirm refers to: v was in flight when the local value went back to the
+// value Flagsmith held or a pull applied a newer Flagsmith value, so Flagsmith
+// now differs from the local value (#2611).
 func revertedLocalLocked(e *entry, v Value) bool {
 	return e.pending == nil && e.hasReverted && !e.revertedLocal.Equal(v)
 }
@@ -774,6 +781,7 @@ func (s *LinkState) Resend(identifier string) (n int) {
 		}
 		v := e.remote
 		e.remote, e.hasRemote = Value{}, false
+		e.revertedLocal, e.hasReverted = Value{}, false // as ForgetRemote
 		e.gen++
 		s.offerLocked(k, e, v, now, 0, false)
 		n++
