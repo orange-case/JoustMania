@@ -30,7 +30,7 @@ func (r *startAttrRecorder) OnStart(_ context.Context, s sdktrace.ReadWriteSpan)
 	}
 	r.attrs[s.Name()] = append(r.attrs[s.Name()], m)
 }
-func (r *startAttrRecorder) OnEnd(sdktrace.ReadOnlySpan)       {}
+func (r *startAttrRecorder) OnEnd(sdktrace.ReadOnlySpan)      {}
 func (r *startAttrRecorder) Shutdown(context.Context) error   { return nil }
 func (r *startAttrRecorder) ForceFlush(context.Context) error { return nil }
 

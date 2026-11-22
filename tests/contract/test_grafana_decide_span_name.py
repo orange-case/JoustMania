@@ -62,4 +62,6 @@ def test_span_metrics_expr_matches_both_decide_span_names(dashboard, expr):
     want = both_names_selector()
     for selector in selectors:
         assert selector == want, f"{dashboard}: {selector!r}, want {want!r} in {expr}"
-    assert f'span_name="{ic.OLD_DECIDE_SPAN}"' not in expr, f"{dashboard}: old name only: {expr}"
+    assert f'span_name="{ic.OLD_DECIDE_SPAN}"' not in expr, (
+        f"{dashboard}: old name only: {expr}"
+    )

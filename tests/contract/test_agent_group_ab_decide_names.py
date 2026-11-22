@@ -62,7 +62,10 @@ def test_verify_game_accepts_either_name(tmp_path, name):
                                     "startTimeUnixNano": "1",
                                     "endTimeUnixNano": "2",
                                     "attributes": [
-                                        {"key": "game.id", "value": {"stringValue": "g1"}},
+                                        {
+                                            "key": "game.id",
+                                            "value": {"stringValue": "g1"},
+                                        },
                                         {
                                             "key": "decide.prompt_profile",
                                             "value": {"stringValue": "neutral"},
