@@ -25,7 +25,7 @@ The totals (the number of names, of names without a consumer and of names never 
 | `controller_accel_y` | gauge | `serial` | controller-manager | yes | (none) |  |
 | `controller_accel_z` | gauge | `serial` | controller-manager | yes | (none) |  |
 | `controller_adapter_info` | gauge | `serial`, `adapter` | controller-manager | yes | dashboard, grafana |  |
-| `controller_backend_info` | gauge | `serial`, `backend` | controller-manager | yes | grafana |  |
+| `controller_backend_info` | gauge | `serial`, `backend` | controller-manager | yes | dashboard, grafana |  |
 | `controller_battery_check_duration_seconds` | histogram | (none) | controller-manager | yes | (none) |  |
 | `controller_battery_checks_total` | counter | (none) | controller-manager | yes | (none) |  |
 | `controller_battery_level` | gauge | `serial` | controller-manager | yes | agent, grafana |  |
@@ -48,7 +48,7 @@ The totals (the number of names, of names without a consumer and of names never 
 | `controller_discovery_checks_total` | counter | (none) | controller-manager | yes | (none) |  |
 | `controller_discovery_full_enumerate_total` | counter | (none) | controller-manager | yes | (none) |  |
 | `controller_identify_requests_total` | counter | `outcome` | controller-manager | yes | (none) |  |
-| `controller_info` | gauge | `serial`, `name` | controller-manager | yes | agent, grafana |  |
+| `controller_info` | gauge | `serial`, `name` | controller-manager | yes | agent, dashboard, grafana |  |
 | `controller_input_lag_seconds` | histogram | `serial` | controller-manager | yes | grafana | #1376; game streams only |
 | `controller_led_batch_updates_total` | counter | (none) | controller-manager | yes | (none) |  |
 | `controller_led_controllers_updated_per_batch` | histogram | (none) | controller-manager | yes | (none) |  |
