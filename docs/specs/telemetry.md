@@ -225,10 +225,10 @@ The game coordinator's event bus (§5) injects the current span's context into e
 
 | Span | `gen_ai.*` usage |
 |---|---|
-| `chat {model}` (decide) | `gen_ai.operation.name=chat`, `gen_ai.provider.name` (`anthropic`; openai-compatible: derived from the base URL host; `jev`), `gen_ai.request.model`, `gen_ai.request.max_tokens`, `gen_ai.output.type=json`, `gen_ai.request.temperature`, `gen_ai.request.reasoning.level`, `gen_ai.response.id` / `.model` / `.finish_reasons`, `gen_ai.usage.input_tokens` / `.output_tokens` / cache / reasoning tokens, `error.type` |
+| `chat {model}` (decide) | `gen_ai.operation.name=chat`, `gen_ai.provider.name` (`anthropic`; openai-compatible: derived from the base URL host; `jev`), `gen_ai.request.model`, `gen_ai.request.max_tokens`, `gen_ai.output.type=json`, `gen_ai.request.temperature`, `gen_ai.request.reasoning.level`, `gen_ai.response.id` / `.model` / `.finish_reasons` (`error` for a call without a response; jev reports none, so its calls carry `stop` for a decoded answer and `error` otherwise, #2584), `gen_ai.usage.input_tokens` / `.output_tokens` / `.cache_read.input_tokens` / `.reasoning.output_tokens`; claude also `gen_ai.usage.cache_write.input_tokens` (v0.1.0) and, for a transition, the same value as `gen_ai.usage.cache_creation.input_tokens` (Go semconv v1.41.0; removal with #2729), `error.type` |
 | `chat {model}` (jev) | `gen_ai.provider.name=jev`, request / response model, usage tokens, `gen_ai.response.id` from the `x-typesafe-request-id` header, plus `jev.native_confidence` (JSON map of Jev's native confidences, PR #1261) and `jev.stage` = `intervention` / `details` / `single` (one span per HTTP call of the two-stage round, PR #1265); a gated stage-1 span adds `jev.gate.p_yes` (the gate noul's P(yes)), `jev.stage1.choice` and `jev.stage1.distribution` (Jev's real pick and JSON distribution over the interventions, noop excluded; the `ffa.intervention` answer in `decide.answers` is synthesised from them, #1281) |
-| `chat {model}` (retro / proposer) | same minus `gen_ai.output.type`; no content capture; no client metrics |
-| `invoke_agent joustmania-agent` | `gen_ai.operation.name=invoke_agent` (#2584), `gen_ai.agent.name=joustmania-agent` (both set at span start, with `gen_ai.request.model` when known), `gen_ai.conversation.id=<game id>`, `gen_ai.request.model` (the model of the backend that decides this invocation; absent on the rules path), `gen_ai.output.type=json` (remote path only: its request asks for JSON); remote path, from span start: `gen_ai.request.max_tokens` and `gen_ai.request.temperature` of the chosen backend (claude, openai; jev sets neither); remote path, at span end, the totals of the invocation's model calls (the `chat {model}` children, two for a jev two-stage round, #2584): `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_write.input_tokens`, `gen_ai.usage.reasoning.output_tokens`, and `gen_ai.response.finish_reasons` (the distinct reasons of all calls, in call order; `error` for a call that got no response). A total is set only when at least one call reported that count (never 0 for unknown); a call that failed or reported nothing adds nothing but its finish reason. The calls of a decision that fell back (timeout, error, invalid answer; UC-040 A2) still count: they were made and billed. The rules path has none of these; event `gen_ai.evaluation.result` (`gen_ai.evaluation.name=act_confidence_threshold`, score value, label `pass` / `fail`, explanation naming the effective threshold and its flag). Kind INTERNAL; name `{gen_ai.operation.name} {gen_ai.agent.name}`; the same name and operation on the remote and the rules path. The internal span defines no `gen_ai.provider.name`; it is on the `chat {model}` children. |
+| `chat {model}` (retro / proposer) | same minus `gen_ai.output.type`; the retro's call also `gen_ai.conversation.id=<game id>` (#2584; the proposer's has none); no content capture; no client metrics |
+| `invoke_agent joustmania-agent` | `gen_ai.operation.name=invoke_agent` (#2584), `gen_ai.agent.name=joustmania-agent` (both set at span start, with `gen_ai.request.model` when known), `gen_ai.conversation.id=<game id>`, `gen_ai.request.model` (the model of the backend that decides this invocation; absent on the rules path), `gen_ai.output.type=json` (remote path only: its request asks for JSON); remote path, from span start: `gen_ai.request.max_tokens` and `gen_ai.request.temperature` of the chosen backend (claude, openai; jev sets neither); remote path, at span end, the totals of the invocation's model calls (the `chat {model}` children, two for a jev two-stage round, #2584): `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_write.input_tokens`, `gen_ai.usage.reasoning.output_tokens`, and `gen_ai.response.finish_reasons` (every call's reasons concatenated in call order, one entry per generation, no de-duplication, v0.1.0 note [13]; `error` for a call that got no response). A total is set only when at least one call reported that count (never 0 for unknown); a call without a response adds only its `error`. Tokens survive a fallback (UC-040 A2) whenever the model answered: an invalid answer, a refusal, a `max_tokens` cut-off, or a jev round whose first stage answered before the second failed; those calls were made and billed. A timeout or a transport error has no response, so it adds no tokens. The rules path has none of these; event `gen_ai.evaluation.result` (`gen_ai.evaluation.name=act_confidence_threshold`, score value, label `pass` / `fail`, explanation naming the effective threshold and its flag). Kind INTERNAL; name `{gen_ai.operation.name} {gen_ai.agent.name}`; the same name and operation on the remote and the rules path. The internal span defines no `gen_ai.provider.name`; it is on the `chat {model}` children. |
 | `agent.llm.retro` | none since #2584: the span is not a model call, so it carries no `gen_ai.operation.name`, `gen_ai.request.model` or `gen_ai.output.type`; the model is in `inference.configured`, and the call is its `chat {model}` CLIENT child |
 
 **Pinned conventions (#2584).** The GenAI rows follow `open-telemetry/semantic-conventions-genai` **v0.1.0**
@@ -257,14 +257,26 @@ creation. Deviations from v0.1.0:
   multiple models or dynamic selection. The backend, and with it the model, is chosen per decision by flag
   (`decision.backend`, `decision.*.model`), but each invocation calls exactly one model, so the span carries that
   invocation's model (from its start) and the rules path carries none.
-- **Cache-write tokens.** The decide span uses v0.1.0's `gen_ai.usage.cache_write.input_tokens`; the claude
-  `chat {model}` span still carries the older `gen_ai.usage.cache_creation.input_tokens` of the Go semconv package
-  (v1.41.0), so the decide span's cache-write total is the sum of the claude calls' `cache_creation` values. Like
-  `cache_read`, it is included in `gen_ai.usage.input_tokens` (v0.1.0 note [50]).
+- **Cache-write tokens on the chat span under two names.** The claude `chat {model}` span carries v0.1.0's
+  `gen_ai.usage.cache_write.input_tokens` and, for consumers that read it so far, the same value as the Go semconv
+  package's (v1.41.0) `gen_ai.usage.cache_creation.input_tokens`; the old name goes with the other transition
+  alternatives (#2729). The decide span carries only `cache_write`.
 
-The usage totals on the decide span repeat the per-call values of its `chat {model}` children, so a query that
-sums `gen_ai.usage.*` over every span counts a remote decision twice: sum either the decide spans (cost per
-decision, #2718) or the chat spans.
+v0.1.0's invoke_agent table lists only `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`; the cache and
+reasoning totals are registry attributes added on top.
+
+**Spend (#2718).** The decide span's totals cover the decide calls only; the retro's and the proposer's model calls
+are only on their own `chat {model}` spans (told apart by the instrumentation scope and the parent span: under
+`agent.llm.retro`, or the proposer). The totals repeat the per-call values of the decide span's `chat {model}`
+children, so count one or the other, never both: a backend that rolls child usage up into the agent span, or a
+query that sums `gen_ai.usage.*` over every span, counts a remote decision twice. In every backend's mapping the
+cache read and cache write tokens are included in `gen_ai.usage.input_tokens` (claude adds them to its
+`input_tokens`; openai's `prompt_tokens` already contains the cached ones) and the reasoning tokens in
+`gen_ai.usage.output_tokens` (claude's `output_tokens` include thinking, openai's `completion_tokens` include
+reasoning); jev reports input and output only. So price the cached share at the cache rate and the rest of
+`input_tokens` at the input rate, and never add `cache_*` or `reasoning` on top. The response model and the provider
+(`gen_ai.response.model`, `gen_ai.provider.name`) are on the chat children, not on the decide span: price by those.
+Per game, the decide spans and the retro's chat span share `gen_ai.conversation.id=<game id>`.
 
 The span name contains a space; Jaeger query strings URL-encode it (an exception to this spec's dot-notation rule,
 §8).

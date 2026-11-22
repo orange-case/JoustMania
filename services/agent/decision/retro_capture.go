@@ -625,6 +625,9 @@ func (rc *RetroCoordinator) runRetroInfer(ctx context.Context, span trace.Span, 
 		System: prompt.System,
 		User:   prompt.User,
 		Model:  prompt.Model,
+		// The game: its chat span carries gen_ai.conversation.id like the decide
+		// span does, so a per-game view includes the retro's spend (#2584).
+		ConversationID: sessionID,
 	})
 	latencyMs := now().Sub(start).Milliseconds()
 
@@ -716,7 +719,7 @@ func (rc *RetroCoordinator) failRetro(span trace.Span, sessionID string, latency
 }
 
 // retroAttribution is the inference attribution for one retro capture: the
-// configured model (gen_ai.request.model / inference.configured), the backend that
+// configured model (inference.configured), the backend that
 // serves (inference.used), any degradation reason, and the backend to call.
 type retroAttribution struct {
 	configured string

@@ -77,8 +77,9 @@ Every decided cycle has an **`agent.decide`** span with `decide.backend`,
 the `gen_ai.*` attributes. (The `agent.mode` / `agent.model` /
 `inference.*` attributes on `agent.decision` were removed with the legacy
 mode/model path in #1234.) The post-game **`agent.llm.retro`** span carries
-`gen_ai.request.model` and `inference.used` (`claude`, or `none` when the retro
-is capture-only). See act (c) below.
+`inference.configured` (the model) and `inference.used` (`claude`, or `none` when
+the retro is capture-only); its model call is the `chat {model}` child with the
+`gen_ai.*` attributes (#2584). See act (c) below.
 
 **`game.id` is the universal join key (#1095):** it appears on *every* agent
 span — `signal_received`, `decision`, `action`, `llm.retro`, and

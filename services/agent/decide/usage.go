@@ -47,7 +47,8 @@ type CallUsage struct {
 }
 
 // UsageTotals are an invocation's totals. A Count is OK when at least one call
-// reported it. FinishReasons are the distinct reasons in call order.
+// reported it. FinishReasons are every call's reasons concatenated in call order,
+// one entry per generation (v0.1.0 note [13]: positional, no de-duplication).
 type UsageTotals struct {
 	Calls                 int
 	InputTokens           Count
@@ -75,7 +76,7 @@ func (u *Usage) Add(c CallUsage) {
 	u.t.CacheWriteInputTokens.add(c.CacheWriteInputTokens)
 	u.t.ReasoningOutputTokens.add(c.ReasoningOutputTokens)
 	for _, r := range c.FinishReasons {
-		if r != "" && !containsString(u.t.FinishReasons, r) {
+		if r != "" {
 			u.t.FinishReasons = append(u.t.FinishReasons, r)
 		}
 	}
@@ -88,15 +89,6 @@ func (u *Usage) Totals() UsageTotals {
 	t := u.t
 	t.FinishReasons = append([]string(nil), u.t.FinishReasons...)
 	return t
-}
-
-func containsString(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 type usageKey struct{}

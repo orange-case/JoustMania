@@ -3,11 +3,14 @@ package decision
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/joustmania/agent/decide"
+	"github.com/joustmania/agent/decide/backends/claude"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -59,7 +62,7 @@ var usageKeys = []string{
 func TestInvokeAgentSpan_SummedUsage(t *testing.T) {
 	answer := ffaAnswer("grant_shield", 0.9, "A", 0.5, "shield")
 
-	t.Run("UC-040/main two calls are summed, finish reasons distinct in call order", func(t *testing.T) {
+	t.Run("UC-040/main two calls are summed, finish reasons positional in call order", func(t *testing.T) {
 		be := &usageBackend{answer: answer, calls: []decide.CallUsage{
 			{
 				InputTokens: decide.Tokens(100), OutputTokens: decide.Tokens(20),
@@ -86,8 +89,9 @@ func TestInvokeAgentSpan_SummedUsage(t *testing.T) {
 			}
 		}
 		v, _ := attrValue(span, "gen_ai.response.finish_reasons")
-		if got := v.AsStringSlice(); !reflect.DeepEqual(got, []string{"stop", "length"}) {
-			t.Errorf("gen_ai.response.finish_reasons = %v, want [stop length]", got)
+		// One entry per generation, no de-duplication (v0.1.0 note [13]).
+		if got := v.AsStringSlice(); !reflect.DeepEqual(got, []string{"stop", "length", "stop"}) {
+			t.Errorf("gen_ai.response.finish_reasons = %v, want [stop length stop]", got)
 		}
 	})
 
@@ -203,4 +207,37 @@ func TestInvokeAgentSpan_RequestSettingsAtStart(t *testing.T) {
 			}
 		}
 	})
+}
+
+// UC: UC-040 A2
+//
+// #2584: a remote call that times out (a real claude backend against a server
+// that hangs) has no response: the fallback span carries no tokens and the
+// finish reason "error".
+func TestInvokeAgentSpan_TimeoutHasNoTokens(t *testing.T) {
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-hang:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(func() { close(hang); srv.Close() })
+	be := claude.New(claude.Config{
+		APIKey: "sk-test", BaseURL: srv.URL, Model: "claude-haiku-4-5",
+		Timeout: 5 * time.Second, HTTPClient: srv.Client(),
+	})
+	span := newRemoteHarness(t, remoteSnapshot(100*time.Millisecond), be).run(t)
+	if got := strAttr(t, span, AttrDecideOutcome); got != DecideOutcomeFallback {
+		t.Fatalf("decide.outcome = %q, want fallback", got)
+	}
+	for _, key := range usageKeys[:5] {
+		if v, ok := attrValue(span, key); ok {
+			t.Errorf("%s = %v on a timeout, want absent (no response)", key, v.Emit())
+		}
+	}
+	v, _ := attrValue(span, "gen_ai.response.finish_reasons")
+	if got := v.AsStringSlice(); !reflect.DeepEqual(got, []string{"error"}) {
+		t.Errorf("gen_ai.response.finish_reasons = %v, want [error]", got)
+	}
 }

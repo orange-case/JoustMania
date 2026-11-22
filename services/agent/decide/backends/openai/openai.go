@@ -541,6 +541,12 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, c callResult, res
 				llmio.OutputMessage(c.text, c.reasoning, rationale, finishReason(r.Choices[0].FinishReason))))
 		}
 	}
+	if c.resp == nil {
+		// Transport or status failure: no response, so the generation ended in
+		// error (v0.1.0 note [13]), on the chat span and in the decide totals.
+		span.SetAttributes(semconv.GenAIResponseFinishReasons(llmio.FinishError))
+		call.FinishReasons = []string{llmio.FinishError}
+	}
 	if c.errType != "" {
 		span.SetAttributes(semconv.ErrorTypeKey.String(c.errType))
 		span.SetStatus(codes.Error, c.errType)

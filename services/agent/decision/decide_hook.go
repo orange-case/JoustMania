@@ -104,7 +104,7 @@ func requestSettingsOf(b decide.Backend) decide.RequestSettings {
 }
 
 // usageAttributes are an invocation's summed usage (#2584): one attribute per
-// count at least one call reported, the distinct finish reasons in call order.
+// count at least one call reported, every call's finish reasons in call order.
 // Nothing when no call reported anything (a rules decision, or a remote call that
 // failed before any response).
 func usageAttributes(t decide.UsageTotals) []attribute.KeyValue {

@@ -312,6 +312,16 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, start time.Time, 
 			span.SetAttributes(llmio.OutputContentAttribute(llmio.OutputMessage(res.Text, nil, "", finish)))
 		}
 	}
+	// Jev reports no finish reason. The call's reason is derived like its captured
+	// output message's: "stop" for a decoded answer, "error" for no response or an
+	// answer that failed to decode (v0.1.0 note [13]); on the chat span and in the
+	// decide totals (#2584).
+	reason := llmio.FinishStop
+	if res == nil || errType != "" {
+		reason = llmio.FinishError
+	}
+	span.SetAttributes(semconv.GenAIResponseFinishReasons(reason))
+	call.FinishReasons = []string{reason}
 	if errType != "" {
 		span.SetAttributes(semconv.ErrorTypeKey.String(errType))
 		span.SetStatus(codes.Error, errType)
