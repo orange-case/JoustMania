@@ -93,10 +93,10 @@ describe("UC-035: main step 3, the recorded v3 answer folds like the legacy one 
     expect(body.data?.[0].spans.map((s) => s.operationName).sort()).toEqual([
       "Joust Free-for-All",
       "agent.action",
-      "invoke_agent joustmania-agent",
       "agent.decision",
       "agent.flag_state",
       "agent.signal_received",
+      "invoke_agent joustmania-agent",
     ]);
   });
 
