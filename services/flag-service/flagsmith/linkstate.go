@@ -57,9 +57,11 @@ type entry struct {
 	// handed out (hasReverted): that push may still be in flight, and its
 	// confirm must not mark the key in sync (revertedLocalLocked, #2611). A
 	// new pending entry keeps the mark (the push may still be in flight), and
-	// a later revert adds to it. While set it equals the remote value; a
-	// different remote value, a confirm or remote refusal (the answer to the
-	// push in flight) or a forgotten remote value clears it.
+	// a later revert adds to it. While set it equals the remote value: a
+	// different remote value (a pull applying Flagsmith's value, or its undo)
+	// moves it along, since the push is still in flight. A confirm or remote
+	// refusal (the answer to the push in flight), a forgotten remote value or
+	// an undo to "never seen" clears it.
 	revertedLocal Value
 	hasReverted   bool
 	// gen counts changes of the remote value (SetRemote, ConfirmPushed,
@@ -371,15 +373,17 @@ func (s *LinkState) SetRemote(k Key, v Value) (prev Value, had bool) {
 }
 
 // SetRemoteGen is SetRemote that also returns the generation it produced,
-// for an exact RestoreRemoteGen.
+// for an exact RestoreRemoteGen. A reverted mark follows the new remote
+// value: the push it is about is still in flight, and the pull's apply
+// writes v locally (#2611).
 func (s *LinkState) SetRemoteGen(k Key, v Value) (prev Value, had bool, gen uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
 	prev, had = e.remote, e.hasRemote
 	e.remote, e.hasRemote = v, true
-	if !v.Equal(e.revertedLocal) {
-		e.revertedLocal, e.hasReverted = Value{}, false
+	if e.hasReverted {
+		e.revertedLocal = v
 	}
 	e.gen++
 	s.syncLocked(e, e.pending == nil)
@@ -416,12 +420,18 @@ func (s *LinkState) RestoreRemote(k Key, expect Value, prev Value, had bool) boo
 	return true
 }
 
+// restoreLocked puts prev back (or forgets the remote value when !had). A
+// reverted mark follows prev (its push is still in flight); with no remote
+// value left it goes, as in ForgetRemote (#2611).
 func (s *LinkState) restoreLocked(e *entry, prev Value, had bool) {
-	e.revertedLocal, e.hasReverted = Value{}, false
 	if had {
 		e.remote = prev
+		if e.hasReverted {
+			e.revertedLocal = prev
+		}
 	} else {
 		e.remote, e.hasRemote = Value{}, false
+		e.revertedLocal, e.hasReverted = Value{}, false
 	}
 	e.gen++
 }

@@ -77,6 +77,38 @@ func TestLinkState(t *testing.T) {
 			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 0: the stack runs 1, Flagsmith holds 2", p, oos, r)
 		}
 	})
+	t.Run("UC-055/BR-001 back to the remote value, then a pull applies a newer Flagsmith value while one is in flight: its confirm keeps the key out of sync (#2611)", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`1`))
+		s.Offer(stack, val(`2`), t0, 1)
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "2" {
+			t.Fatalf("setup: in flight %s ok %v, want 2", v.Value, ok)
+		}
+		s.Offer(stack, val(`1`), t0, 2) // back to 1 while 2 is in flight
+		s.SetRemoteGen(stack, val(`5`)) // a pull round applies Flagsmith's 5
+		s.Offer(stack, val(`5`), t0, 3) // the apply's local write
+		s.ConfirmPushed(stack, val(`2`))
+		if p, oos, r := s.Counts(); p != 0 || oos != 1 || r != 0 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 0: the stack runs 5, Flagsmith holds 2", p, oos, r)
+		}
+	})
+	t.Run("UC-055/BR-001 back to the remote value, then a pull's apply fails and is undone while one is in flight: its confirm keeps the key out of sync (#2611)", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`1`))
+		s.Offer(stack, val(`2`), t0, 1)
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "2" {
+			t.Fatalf("setup: in flight %s ok %v, want 2", v.Value, ok)
+		}
+		s.Offer(stack, val(`1`), t0, 2) // back to 1 while 2 is in flight
+		prev, had, gen := s.SetRemoteGen(stack, val(`5`))
+		if !s.RestoreRemoteGen(stack, gen, prev, had) { // the apply's local write failed
+			t.Fatal("setup: the restore was refused")
+		}
+		s.ConfirmPushed(stack, val(`2`))
+		if p, oos, r := s.Counts(); p != 0 || oos != 1 || r != 0 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 0: the stack runs 1, Flagsmith holds 2", p, oos, r)
+		}
+	})
 	t.Run("UC-054/BR-005 an offer equal to the remote value drops the pending entry and is in sync", func(t *testing.T) {
 		s := NewLinkState(nil)
 		s.SetRemote(stack, val(`{"a":1,"b":2}`))
