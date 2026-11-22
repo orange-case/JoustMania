@@ -564,6 +564,11 @@ restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"ou
 STUB_BUDGET=30 run_preflight
 check "a stack key Flagsmith refused: the stop sentence" "${stop_sentence}"
 check "a stack key Flagsmith refused: one link WARN with the counts" "WARN  Flagsmith link online, out of sync: 1 refused, 1 out of sync, 0 pending"
+# UC: UC-055 A4 (#2631): a stack key refused unsent (feature missing, no http_status): a stop holds, no stop sentence.
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1,"keys":[{"flag_set":"agent","flag":"enabled","scope":"stack","in_sync":false,"pending":false,"reason":"not_found","side":"remote"}]}'
+STUB_BUDGET=30 run_preflight
+check "a stack key refused unsent warns" "WARN  Flagsmith link online, out of sync: 1 refused"
+if has "a stop (agent-killswitch.sh off) included"; then not_ok "a stack key refused unsent (not_found): no stop sentence"; else ok "a stack key refused unsent (not_found): no stop sentence"; fi
 restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1,"keys":[{"flag_set":"interventions","flag":"pacing_profile","scope":"game:g42","in_sync":false,"pending":false,"reason":"not_found","side":"remote","http_status":404}]}'
 STUB_BUDGET=30 run_preflight
 check "a game key Flagsmith refused warns" "WARN  Flagsmith link online, out of sync: 1 refused"

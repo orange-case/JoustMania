@@ -64,9 +64,9 @@ stage change made while the link was offline is discarded at the reconnect in fa
 on writes: a key revoked after the connect, a role without write access), every stage write to a stack value is
 reverted to Flagsmith's value within a few seconds (UC-055 A4, #2631), **the beat 5 stop (`agent-killswitch.sh off`)
 included**: the local stop does not hold. A key wrong at the start keeps the link offline (nothing is reverted); a
-feature missing in Flagsmith reverts to the baseline (a stop holds, `on` does not). The preflight names this only
-after a stack write was refused, so rehearse a stop at T-1h (section 5). Then make the stop in Flagsmith too (the
-`enabled` feature, [flagsmith-stage-sheet.md](flagsmith-stage-sheet.md)), or switch the link off before the talk:
+feature missing in Flagsmith reverts to the baseline (a stop holds, `on` does not). The preflight names this only after
+Flagsmith refused a stack write (`409`, `401`, `403`), so rehearse a stop at T-1h (section 5). Then make the stop in
+Flagsmith too (the `enabled` feature, [flagsmith-stage-sheet.md](flagsmith-stage-sheet.md)), or switch the link off before the talk:
 `FLAGSMITH_LINK=off` in `.env.local`, `./scripts/setup/joustmania-compose.sh up -d flag-service` (a restart keeps
 the old env), `./scripts/flags.sh restart`, `talk-stage.sh reset`, then `agent-killswitch.sh on` (`enabled` is not
 persisted and comes back off).
@@ -594,7 +594,8 @@ The infra loop is not gated by the `enabled` kill switch, only by
 - [ ] With the Flagsmith link online only: rehearse the stop (#2631).
       `./scripts/agent-killswitch.sh off`, wait 5 s, then
       `./scripts/agent-killswitch.sh status` still shows `off` and
-      `./scripts/flags.sh state` shows no `refused` key; then
+      `./scripts/flags.sh state` shows no `agent` / `enabled` key refused
+      (side `remote`); then
       `./scripts/agent-killswitch.sh on`. If the stop came back `on`, Flagsmith
       refuses writes: see "With the Flagsmith link on" (section 1).
 

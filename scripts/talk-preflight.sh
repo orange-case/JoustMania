@@ -220,11 +220,14 @@ if isinstance(link, dict):
         refused, out_of_sync, pending = count("refused"), count("out_of_sync"), count("pending")
         warned = False
         # Stuck keys only (#2592): out_of_sync up to pending is pushes in flight.
-        # A stack value Flagsmith refused (scope stack, side remote) is reverted
-        # at once, a stop included (UC-055 A4, #2631); other refusals are not.
+        # A stack value Flagsmith refused while online (scope stack, side remote,
+        # http_status 409/401/403) is reverted at once, a stop included (UC-055 A4,
+        # #2631); other refusals are not (an unsent refusal such as not_found has
+        # no http_status: a stop holds there).
         keys = link.get("keys") if isinstance(link.get("keys"), list) else []
         stack_refused = [f"{k.get('flag_set')}/{k.get('flag')}" for k in keys
-                         if isinstance(k, dict) and k.get("scope") == "stack" and k.get("side") == "remote"]
+                         if isinstance(k, dict) and k.get("scope") == "stack" and k.get("side") == "remote"
+                         and k.get("http_status") in (409, 401, 403)]
         if refused > 0 or out_of_sync > pending:
             line = (f"WARN  Flagsmith link online, out of sync: {refused} refused, {out_of_sync} out of sync, "
                     f"{pending} pending: Flagsmith refused values the stack keeps (scripts/flags.sh state; Grafana "
