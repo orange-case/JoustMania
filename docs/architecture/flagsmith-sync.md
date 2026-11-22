@@ -1,8 +1,8 @@
 # Flagsmith link: hosted Flagsmith as a writer and audit view of the flag service
 
-> Architecture note. Status: **implemented** (epic #2587, sub-issues #2588 to #2592; controller identities #2624; variant options #2709; UC-054 and UC-055 Tested against a fake Flagsmith, the live SaaS check is a Known gap on both). Written 2026-11-15 against `main` and the Flagsmith API
+> Architecture note. Status: **implemented** (epic #2587, sub-issues #2588 to #2592; controller identities #2624; variant options #2709; reference values #2623; UC-054 and UC-055 Tested against a fake Flagsmith, the live SaaS check is a Known gap on both). Written 2026-11-15 against `main` and the Flagsmith API
 > source at v2.269 (`Flagsmith/flagsmith`, `api/`). Spec rows: [UC-054](../use_cases/UC-054.md),
-> [UC-055](../use_cases/UC-055.md), FR-206 to FR-215, NFR-057, NFR-058, C-036, C-037, the C-008 amendment
+> [UC-055](../use_cases/UC-055.md), FR-206 to FR-215, FR-226, FR-227, NFR-057, NFR-058, C-036, C-037, the C-008 amendment
 > ([requirements](../requirements.md)); [services.md §7.3](../specs/services.md#73-flagsmith-link-implemented-2588-to-2592-uc-054-uc-055),
 > [flags.md §13.6](../specs/flags.md#136-flagsmith-link-implemented-2588-to-2592-uc-054-uc-055),
 > [telemetry.md §10.4](../specs/telemetry.md#104-flagsmith-link-implemented-2588-to-2592-uc-054-uc-055).
@@ -61,6 +61,7 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | F9 | **Non-stack scopes are identities.** Game, experiment-arm, `real` and fraction values are identity overrides on identities named after the scope (§4.2); a real game's player values live on the controller's own identity (F11). | recommendation; player part amended by F11 |
 | F11 | **One identity per controller.** A Move controller is the Flagsmith identity `controller:<serial>`, kept across games, with the traits `game_id`, `game_kind`, `coordinator_instance` of the game it plays in; a real game's player values are overrides on it, removed when the controller leaves the game. A shadow game's players keep `game:<gameId>:<serial>` (§2.2). | decided by the maintainer, 2026-11-16 (#2624) |
 | F10 | **Off by default.** `FLAGSMITH_LINK=off` in every stack; CI and the dry-run stacks never call the SaaS; the stage stack opts in through `.env.local`. | recommendation |
+| F13 | **Flagsmith shows the whole configuration.** Every synced feature without a stack overlay carries the registry baseline default as its value under `enabled=false` (the **reference value**), written by the start sequence where it differs (§5.2); toggle off still means "baseline applies", toggle on "this value is the stack overlay". The reference is always the flag-file default, also for a persisted admin setting, which is a stack overlay and shown with the toggle on (§5.2). | decided by the maintainer 2026-11-16 (#2623); admin-setting rule: implementer's choice, documented in §5.2 |
 | F12 | **Declared variants are options, a pick is one variant.** A synced feature whose flag has declared variants shows them as Flagsmith multivariate options, so the operator picks one instead of typing its name; the stack applies exactly one declared variant stack-wide: one option at 100 % is the pick, any other percentage split is refused (§2.3). Flagsmith never buckets identities for JoustMania. | decided by the maintainer (#2709) |
 
 ## 2. Flagsmith model and the mapping
@@ -71,7 +72,7 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | registry flag `<set>/<key>` | one **feature** named `<key>`, tagged `<set>`, description = registry `description` | keys are unique across sets (flag-service.md §5.2); one tag per flag set, created on demand |
 | declared variants of a registry flag (two or more) | the feature's **multivariate options**, one per variant, value = the variant name (§2.3, #2709) | options are project-level (every environment of the project sees them), created with 0 % in every environment; the weights are per environment |
 | stack overlay (in memory or persisted) | the feature's **environment value**: `enabled=true`, value = §4.1 | |
-| no stack overlay | `enabled=false`, value = the baseline default (shown for reference) | `enabled=false` never means "flag off"; it means "baseline applies" |
+| no stack overlay | `enabled=false`, value = the baseline default (the **reference value**, F13) | `enabled=false` never means "flag off"; it means "baseline applies". Written when an overlay is cleared (§4.1 step 3) and, for every synced feature whose value differs, by the start sequence (§5.2, #2623) |
 | game value | override on identity `game:<gameId>` | identity traits `game_kind`, `coordinator_instance` (best effort) |
 | player value in a real game (any kind but `shadow`) | override on identity `controller:<serial>`, the controller's own identity (F11, §2.2) | traits `game_id`, `game_kind`, `coordinator_instance` of the controller's current game (cleared when it leaves); the identity is never deleted |
 | player value in a shadow game | override on identity `game:<gameId>:<serial>` | no traits; deleted at game end, so a shadow player never touches a real controller |
@@ -390,7 +391,7 @@ shows as `"10"` equals `remote`, so it is never "new" (#2682).
 | Situation | Behaviour |
 |---|---|
 | Start, link off | nothing changes against today |
-| Start, Flagsmith reachable | serve baseline + admin settings at once (FR-130); in the background: resolve ids, create missing features and tags (FR-214), then the start reconcile applies what Flagsmith holds (§5.1: Flagsmith wins), then poll |
+| Start, Flagsmith reachable | serve baseline + admin settings at once (FR-130); in the background: resolve ids, create missing features and tags (FR-214), write the reference values that differ (§5.2, FR-227), then the start reconcile applies what Flagsmith holds (§5.1: Flagsmith wins), then poll |
 | Start, Flagsmith unreachable | `state=offline`; the stack runs baseline + admin settings; retries with backoff 1, 2, 4 … 60 s; stack-scope changes made before the first connect are discarded at it (UC-054 A2, A3) |
 | Link drops while running | `state=offline`; writes keep working and fill `pending`, the case plays on them; on reconnect: full pull, reconcile (§6: Flagsmith is the source of truth, stack-scope changes made while not connected are discarded, never sent), then drain what is left of `pending` (game and player values, stack changes made online that the outage cut) |
 | Restart while offline | `pending` and Flagsmith-only values are gone until Flagsmith is reached (F5, UC-054 BR-007) |
@@ -405,8 +406,8 @@ case-insensitively; an existing feature is never re-tagged or re-described. A pr
 offline with that reason, because game and player overrides are edge identities and core identities are not
 supported.
 
-**Feature creation** never sends `initial_value` (the new feature gets Flagsmith's default and the registry value is
-pushed afterwards like any value), because an initial value would change what every other environment of the project
+**Feature creation** never sends `initial_value` (the new feature gets Flagsmith's default, `enabled=false` with no
+value; the start then writes its reference value, §5.2, and a stack overlay is pushed afterwards like any value), because an initial value would change what every other environment of the project
 serves. A feature whose name differs only in case from the registry key is refused (`feature_name_case`), an archived
 one too (`feature_archived`), both with a warning; the link never renames or unarchives a feature. A create that fails
 three times (5xx or timeout) is refused (`feature_create_failed`) and the start continues with the other features;
@@ -444,6 +445,57 @@ The identity uuids of the start document are remembered in the start's final ste
 succeeded, so a failed start leaves nothing half done. Consequence (§10): an in-memory write the link pushed
 before a restart (a stage script, an agent's game-scoped write) is in force again after the restart; a restart is
 no stage reset while Flagsmith is reachable.
+
+### 5.2 Reference values (F13, #2623)
+
+**Why:** in the Flagsmith UI on stage every feature without a stack overlay looked blank (toggle off, no value): the
+link wrote the baseline default only when an overlay was cleared. The maintainer wants Flagsmith to show the whole
+configuration of the case (2026-11-16).
+
+**When.** A step of the start sequence (§5.0), after features and tags, before the final step. It runs before the
+start reconcile and before the sender sends anything, so no other write of the link races it; the link is `starting`
+meanwhile.
+
+**Which features.** The step pulls the environment document once more (in full, after the features were created) and
+looks at the environment value of every usable synced feature (a registry row with a feature id that the start did
+not refuse), in registry order:
+
+| Environment value in the document | Request |
+|---|---|
+| `enabled=true` (a stack value Flagsmith holds) | none: the start reconcile applies it (§5.1) |
+| `enabled=false`, value = the reference value, every option weight 0 % | none (idempotent) |
+| `enabled=false`, any other value (none, an old baseline default, a value a person typed with the toggle off), or an option weight above 0 % | `PATCH /api/__future__/environments/{env_key}/features/{feature_id}/` with `enabled: false`, the reference value and 0 % on every option the feature list named: the body of a cleared overlay (§4.1 step 3) |
+| feature absent from the document | written when the start created it (the document may not show a new feature yet; Flagsmith created it disabled with no value), else none |
+
+The **reference value** is the baseline default of the flag (its `defaultVariant`), encoded as in §2.1, the same value
+a cleared overlay sends. It is compared as text (a string's content, a number's digits, `true` / `false`), so an integer
+reference that the document shows as `"10"` (§2.1, #2682) is equal and not written again. Segment overrides are not
+looked at (§4.2 step 10). A baseline that changes in a new release changes the reference: it is written at the first
+start of that release; later starts write nothing and cost one document pull.
+
+**Admin settings (`persist: yes`): the reference is the baseline default, never the persisted local value.** A
+persisted admin setting is a stack overlay (§2), shown with the toggle on: the start reconcile sends it when Flagsmith
+holds no value (§5.1, §6 row "absent"), so after the start Flagsmith shows it on with its value. Reasons: toggle off
+means "baseline applies", and turning the feature off in Flagsmith clears the setting and brings back exactly the
+flag-file default, so the value under the off toggle must be that default; and the rule reads no local state, so the
+reference never depends on what the stack holds at that moment (an in-memory change made before the first connect is
+discarded at it, §6). Cost: a persisted admin setting whose feature is off in Flagsmith and whose reference differs is
+written twice at that start (the reference, then its overlay).
+
+**Not a change.** The pull reads `enabled=false` as no value whatever the value is (§4.2, §2.3), so a reference write
+never changes what the link reads from the document: it is never a change from Flagsmith, a conflict, an out-of-sync
+key or a refusal, and no pull applies anything because of it. It does not touch `remote`, `pending`, `in_sync`,
+`refused` or the feature health, and it never changes a feature whose toggle is on. A reference written as `enabled=false`
+also never touches another environment (no `initial_value`, §5.0) and no identity override.
+
+**Pacing and failures.** The writes share the start's pacing (`FLAGSMITH_PUSH_RATE`, `429` waits its `Retry-After`,
+a 5xx or timeout is tried 3 times). Each write is a push span and a `pushes_total` point with op `reference`. A write
+Flagsmith refuses (a `409` of change requests, weights naming options a person changed since the feature list, any
+other error) is logged (WARN `flagsmith reference not written`) and the start goes on; the next start tries again. A
+Flagsmith without the `__future__` API (§4.1 step 3) gets no reference values: the first such answer ends the step
+with an INFO log. Only a cancel ends the start. Cost: the first start after the upgrade writes every synced feature
+whose toggle is off (about 130 writes with the CI baseline, about 27 s at 5/s, before the link goes online); later
+starts write only references a release changed.
 
 ## 6. Conflicts (FR-210, UC-054 BR-005)
 
@@ -552,6 +604,8 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | The v1 fallback (a Flagsmith without `__future__`) sends no weights: an option a person set to 100 % stays and the next pull reads it, not the value the link pushed | the SaaS has `__future__`; to set a value on such a host, set the option weights back to 0 % (#2709) |
 | Variant options, their weights in the edge document and the `variants` of the `__future__` write are checked against the Flagsmith source (`api/features/multivariate/`, `api/features/future/`, `api/util/mappers/engine.py`, main of 2026-11) and the fake, not against the live SaaS (#2709) | Known gap of UC-054 and UC-055 (maintainer decision D1); a refused write is reported per key (UC-055 A4), a misread document refuses (unhealthy), neither changes the stack silently |
 | While online, Flagsmith refuses every stack write (change requests on the environment, `409`; a `401`/`403` on writes: a key revoked after the connect, a role without write access): each such stack write is reverted at once to Flagsmith's value (UC-055 A4, #2621), a kill switch turned off on stage (agent stop) included; the stop is in force only until Flagsmith's answer and the pull it wakes (a few seconds), then the agent runs again. A key wrong at the start keeps the link offline: nothing is reverted, the local stop holds. A missing feature reverts a stack value to the baseline: a stop (`off`, a clear) holds there, `on` is refused and reverted to `off`. When Flagsmith's own value is refused here, the revert is refused too and the local value stays, out of sync | accepted by the maintainer (#2631: documented, no code change): the refusal is reported (`refused` in `GET /state`, the push span and metric); the preflight names the stop only once Flagsmith refused a stack write with `409`, `401` or `403`, so a T-1h rehearsal stop with the link online checks it. With change requests or no write access, a stop must also be made in Flagsmith, or the link switched off (`FLAGSMITH_LINK=off` in `.env.local`, recreate the flag service, `flags.sh restart`, `talk-stage.sh reset`, `agent-killswitch.sh on`). The stage environment runs without change requests and with a write-capable Admin API key. A real preflight probe for change requests and write access is a follow-up. Game and player values are not reverted: they stay in force, out of sync |
+| A person turns a feature's toggle on (or types a value with the toggle off) between the start's document pull and that feature's reference write (§5.2): the write turns it off again | accepted, as "last writer wins" above; the window is the reference step, about 27 s at the first start after the upgrade (every feature written) and none on a later start without a baseline change. The value turned off is not applied (the start reconcile reads the document after the write) and the person sets it again |
+| The first start after the upgrade writes about 130 reference values before the link goes online (§5.2), so a stack-scope change made locally in those seconds counts as made before the first connect and is discarded (§6) | accepted (#2623): once per release that changes many baselines; the step runs before the reconcile so that no reference write can race a push of a stack value |
 | A person in Flagsmith loosens an agent limit (F6) | env ceilings of C-034 still cap; Flagsmith wins a conflict (F4, #2621), so the operator in Flagsmith decides; the change is a `flagservice.write` span with writer `flagsmith` |
 | Admin API key on the Pi | a role limited to the project (Flagsmith RBAC), stored in `.env.local` (C-016), never in a flag |
 

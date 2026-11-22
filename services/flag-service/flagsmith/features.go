@@ -320,7 +320,7 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 	}
 	var tags map[string]int
 	relisted := false
-	s.optionJobs = nil
+	s.optionJobs, s.referenceJobs = nil, nil
 	for _, p := range policies {
 		k := Key{Set: p.Set, Flag: p.Key, Scope: ScopeStack}
 		if lower[strings.ToLower(p.Key)] > 1 {
@@ -329,7 +329,7 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 		}
 		if f, ok := existing[strings.ToLower(p.Key)]; ok {
 			if s.useExisting(k, f) {
-				s.queueOptions(k, p, f.ID, f.MultivariateOptions)
+				s.queueFeature(k, p, f, false)
 			}
 			continue
 		}
@@ -346,7 +346,7 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 		switch {
 		case err == nil:
 			s.setFeatureID(k, f.ID)
-			s.queueOptions(k, p, f.ID, f.MultivariateOptions)
+			s.queueFeature(k, p, f, true)
 		case ctx.Err() != nil:
 			return err
 		case httpStatus(err) == http.StatusBadRequest && alreadyExists(err) && !relisted:
@@ -357,7 +357,7 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 			}
 			if f, ok := existing[strings.ToLower(p.Key)]; ok {
 				if s.useExisting(k, f) {
-					s.queueOptions(k, p, f.ID, f.MultivariateOptions)
+					s.queueFeature(k, p, f, false)
 				}
 				continue
 			}
@@ -369,6 +369,13 @@ func (s *startup) ensureFeatures(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// queueFeature queues a usable feature for the option sync (§2.3) and the
+// reference step (§5.2); created: the start created it.
+func (s *startup) queueFeature(k Key, p *registry.Policy, f fsFeature, created bool) {
+	s.queueOptions(k, p, f.ID, f.MultivariateOptions)
+	s.referenceJobs = append(s.referenceJobs, referenceJob{k: k, featureID: f.ID, created: created})
 }
 
 func alreadyExists(err error) bool {

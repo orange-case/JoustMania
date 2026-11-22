@@ -19,7 +19,11 @@ import (
 //  3. check that the project has edge identities (edge_required), a read,
 //     before any project-level write;
 //  4. create the missing features and tags (FR-214);
-//  5. the final step: remember the document's identity uuids, start the
+//  5. write the reference values (FR-227, §5.2, #2623): one more full
+//     document pull, then every usable feature whose toggle is off and
+//     whose value is not its baseline default gets it (enabled=false). It
+//     runs before the start reconcile, so no push of a stack value races it;
+//  6. the final step: remember the document's identity uuids, start the
 //     variant option sync in the background (§2.3, #2709: the link does not
 //     wait for it) and schedule the stale game identity cleanup (start itself never deletes an identity):
 //     it runs once the first game registered (Link.GamesSeen) and
@@ -44,6 +48,9 @@ type startup struct {
 	// optionJobs are the features whose options the start keeps in step
 	// once it succeeded (§2.3); only the Start goroutine touches them.
 	optionJobs []optionJob
+	// referenceJobs are the features of the reference step (§5.2, #2623);
+	// only the Start goroutine touches them.
+	referenceJobs []referenceJob
 }
 
 // Start runs the start sequence; see the file comment.
@@ -59,6 +66,9 @@ func (s *startup) Start(ctx context.Context) error {
 		return err
 	}
 	if err := s.ensureFeatures(ctx); err != nil {
+		return err
+	}
+	if err := s.writeReferences(ctx, s.referenceJobs); err != nil {
 		return err
 	}
 	// A cancel during the last Admin call may still have answered: the final
