@@ -60,6 +60,12 @@ restart of the flag service drops the overlays (run `talk-stage.sh reset` again)
 pushed to Flagsmith come back from Flagsmith after the restart, kill switches and agent gates included, and a
 stage change made while the link was offline is discarded at the reconnect in favour of Flagsmith. Reset with
 `talk-stage.sh reset` while the link is online (its deletes are pushed), or change the values in Flagsmith.
+**While the link is online and Flagsmith refuses writes** (change requests on the environment, a `401`/`403`
+Admin API key, a feature missing in Flagsmith; the preflight's Flagsmith link line warns `refused`), every stage
+write to a stack value is reverted at once to Flagsmith's value (UC-055 A4, #2631), **the beat 5 stop
+(`agent-killswitch.sh off`) included**: the local stop does not hold. Then make the stop in Flagsmith too (the
+`enabled` feature, [flagsmith-stage-sheet.md](flagsmith-stage-sheet.md)), or switch the link off before the talk
+(`FLAGSMITH_LINK=off`, restart the flag service).
 The exception is the decision backend and its model: `agent-backend.sh`
 writes them **persisted** (#1682), as the operator's choice, so they survive a flag-service restart or a reboot. A stage
 overlay over a persisted backend is temporary: a restart brings the persisted
@@ -428,6 +434,9 @@ acting, and post-game model calls stop too (a retro is capture-only with
 It does **not** stop the game, does not undo interventions already written for
 the running game (they end with the game), and does **not** stop the infrastructure loop, which has
 its own flag, `rollout_enabled` (section 4): each loop has its own switch.
+With the Flagsmith link online, the stop holds only while Flagsmith accepts the write: a refused stop is
+reverted at once (see "With the Flagsmith link on" in
+[Two stacks](#two-stacks-pick-one-then-never-mix-them), #2631).
 
 ---
 

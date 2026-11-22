@@ -222,8 +222,9 @@ if isinstance(link, dict):
         # Stuck keys only (#2592): out_of_sync up to pending is pushes in flight.
         if refused > 0 or out_of_sync > pending:
             print(f"WARN  Flagsmith link online, out of sync: {refused} refused, {out_of_sync} out of sync, "
-                  f"{pending} pending: Flagsmith refused values the stack keeps (scripts/flags.sh state; Grafana "
-                  "Flags / OpenFeature, row Flagsmith link)")
+                  f"{pending} pending: Flagsmith refuses writes; a refused stack value is reverted at once, "
+                  "a stop (agent-killswitch.sh off) included: make a stop in Flagsmith too, or switch the link off "
+                  "(scripts/flags.sh state; Grafana Flags / OpenFeature, row Flagsmith link; #2631)")
             warned = True
         if not warned:
             print(f"PASS  Flagsmith link online (environment {link.get('environment', '?')})")

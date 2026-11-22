@@ -550,6 +550,8 @@ check "restart_rule degraded: the link passes" "PASS  Flagsmith link online (env
 restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1}'
 STUB_BUDGET=30 run_preflight
 check "online with a refused value warns with the counts" "WARN  Flagsmith link online, out of sync: 1 refused, 1 out of sync, 0 pending"
+# UC: UC-055 A4 (#2631): a stop made on stage is reverted too while Flagsmith refuses writes.
+check "online with a refused value says the stop must go to Flagsmith" "a stop (agent-killswitch.sh off) included: make a stop in Flagsmith too, or switch the link off"
 if has "PASS  Flagsmith link online"; then not_ok "refused: no link PASS line"; else ok "refused: no link PASS line"; fi
 if [[ "${RC}" -eq 0 ]]; then ok "a refused WARN exits 0"; else not_ok "a refused WARN exits 0 (rc=${RC})"; fi
 restart_fake --flagsmith '{"link":"online","environment":"stage","pending":1,"out_of_sync":3,"refused":0}'
