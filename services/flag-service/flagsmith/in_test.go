@@ -275,13 +275,24 @@ func (h *harness) ended(name string) []sdktrace.ReadOnlySpan {
 
 func (h *harness) pulls() int { return len(h.ended(flagsmith.SpanPull)) }
 
-// round advances the clock 2 s (past a first deferral) and runs one pull.
+// round advances the clock 2 s (past a first deferral) and runs one pull. It
+// waits for a pull that started after the advance and the wake, so it saw both
+// and every local write before them. Counting ended pulls is not enough: a
+// pull the link woke itself for (a refused stack push asks for one, push.go)
+// may still run and end after the count and before the woken pull (#2686).
 func (h *harness) round() {
 	h.t.Helper()
-	n := h.pulls()
 	h.clock.Advance(2 * time.Second)
-	h.link.Wake()
-	h.waitFor("a pull round", func() bool { return h.pulls() > n })
+	since := time.Now()
+	h.link.Wake() // a wake already queued starts a pull after since too
+	h.waitFor("a pull round", func() bool {
+		for _, s := range h.ended(flagsmith.SpanPull) {
+			if !s.StartTime().Before(since) {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // setDoc sets the document, updated one minute before now.
