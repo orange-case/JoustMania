@@ -52,6 +52,13 @@ type entry struct {
 	// pushRefused, still shown after a local refusal replaced refused (#2639).
 	pushRefusedReason string
 	pushRefusedStatus int
+	// revertedLocal is the local value after an Offer or Reoffer equal to the
+	// remote value dropped a pending entry whose different value Next had
+	// handed out (hasReverted): that push may still be in flight, and its
+	// confirm must not mark the key in sync (revertedLocalLocked, #2611).
+	// While set with nothing pending it equals the remote value.
+	revertedLocal Value
+	hasReverted   bool
 	// gen counts changes of the remote value (SetRemote, ConfirmPushed,
 	// ForgetRemote, RestoreRemote): a pull skips a key whose gen moved while
 	// the document was in flight (a stale document vs a confirmed push).
@@ -248,9 +255,11 @@ func (s *LinkState) syncLocked(e *entry, inSync bool) {
 }
 
 // inSyncLocked records a local value equal to the remote one: nothing to
-// send, no refused value to hold back.
+// send, no refused value to hold back. Dropping a pending entry whose
+// different value Next handed out records the local value as reverted.
 func (s *LinkState) inSyncLocked(k Key, e *entry) {
-	if e.pending != nil {
+	if p := e.pending; p != nil {
+		e.revertedLocal, e.hasReverted = e.remote, p.hasSent && !p.sent.Equal(e.remote)
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}
@@ -260,6 +269,7 @@ func (s *LinkState) inSyncLocked(k Key, e *entry) {
 
 func (s *LinkState) offerLocked(k Key, e *entry, v Value, at time.Time, version uint64, offline bool) bool {
 	s.syncLocked(e, false)
+	e.revertedLocal, e.hasReverted = Value{}, false
 	if e.pending != nil {
 		e.pending.value = v
 		e.pending.merged++
@@ -308,8 +318,10 @@ func (s *LinkState) Retry(k Key, notBefore time.Time) {
 // now, and the pending entry goes unless a newer local value replaced it
 // meanwhile. It ends the refusal and the refused value, unless the local value
 // went back to that refused value while v was in flight (heldLocalLocked): the
-// key then stays refused and out of sync. A key forgotten meanwhile (game end)
-// is ignored.
+// key then stays refused and out of sync. Likewise, when the local value went
+// back to the remote value while v was in flight (revertedLocalLocked), the
+// key stays out of sync: the next pull round sends the local value (#2611). A
+// key forgotten meanwhile (game end) is ignored.
 func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -317,6 +329,8 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	if e == nil {
 		return
 	}
+	reverted := revertedLocalLocked(e, v)
+	e.revertedLocal, e.hasReverted = Value{}, false
 	e.remote, e.hasRemote = v, true
 	e.gen++
 	e.confirmedAt = s.now()
@@ -330,7 +344,15 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}
-	s.syncLocked(e, e.pending == nil)
+	s.syncLocked(e, e.pending == nil && !reverted)
+}
+
+// revertedLocalLocked reports whether e's local value is a reverted one
+// (hasReverted, nothing pending since) that differs from v, the value a push
+// confirm refers to: v was in flight when the operator went back to the value
+// Flagsmith held, so Flagsmith now differs from the local value (#2611).
+func revertedLocalLocked(e *entry, v Value) bool {
+	return e.pending == nil && e.hasReverted && !e.revertedLocal.Equal(v)
 }
 
 // SetRemote records the value last seen in Flagsmith and returns the previous
@@ -349,6 +371,9 @@ func (s *LinkState) SetRemoteGen(k Key, v Value) (prev Value, had bool, gen uint
 	e := s.entryLocked(k)
 	prev, had = e.remote, e.hasRemote
 	e.remote, e.hasRemote = v, true
+	if !v.Equal(e.revertedLocal) {
+		e.revertedLocal, e.hasReverted = Value{}, false
+	}
 	e.gen++
 	s.syncLocked(e, e.pending == nil)
 	return prev, had, e.gen
@@ -385,6 +410,7 @@ func (s *LinkState) RestoreRemote(k Key, expect Value, prev Value, had bool) boo
 }
 
 func (s *LinkState) restoreLocked(e *entry, prev Value, had bool) {
+	e.revertedLocal, e.hasReverted = Value{}, false
 	if had {
 		e.remote = prev
 	} else {
@@ -430,6 +456,7 @@ func (s *LinkState) ForgetRemote(k Key) {
 	defer s.mu.Unlock()
 	if e := s.entries[k]; e != nil {
 		e.remote, e.hasRemote = Value{}, false
+		e.revertedLocal, e.hasReverted = Value{}, false
 		e.gen++
 	}
 }
@@ -514,6 +541,10 @@ func (s *LinkState) refuseLocked(k Key, e *entry, v Value, side Side, reason str
 	e.refused, e.side = reason, side
 	e.refusedAt, e.refusedStatus = s.now(), status
 	s.syncLocked(e, false)
+	if side == SideRemote {
+		// The answer to the push in flight: no confirm of it follows.
+		e.revertedLocal, e.hasReverted = Value{}, false
+	}
 	if side == SideRemote && e.pending != nil && e.pending.value.Equal(v) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)

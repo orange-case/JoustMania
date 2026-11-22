@@ -233,6 +233,52 @@ func TestPullRoundPushWakesSender(t *testing.T) {
 	})
 }
 
+// UC: UC-055 main step 5
+// A push of 900 is in flight when the operator goes back to 700, the value
+// Flagsmith holds (not refused, so not held): the confirm of 900 leaves the
+// key out of sync in /state until the next pull round sends 700 (#2611).
+func TestConfirmAfterRevertStaysOutOfSync(t *testing.T) {
+	m := newFSModel()
+	m.values["decision.min_interval_ms"] = 700
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	path := futureAPI + strconv.Itoa(inoutIDs["decision.min_interval_ms"]) + "/"
+	handler, calls := pushedBack(m, "decision.min_interval_ms", 900, 700, entered, release)
+	h := inoutHarness(t, m, map[string]http.HandlerFunc{"PATCH " + path: handler}, func(h *harness) {
+		h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("700")})
+	})
+	h.online()
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("900")})
+	<-entered // 900 in flight
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("700")})
+	close(release) // Flagsmith stores 900; the stack runs 700, nothing pending
+	h.waitFor("900 confirmed", func() bool {
+		r, ok := h.link.Links().Remote(minIntervalKey)
+		return ok && string(r.Value) == "900"
+	})
+	t.Run("UC-055/main step 5 the confirm of the older push keeps the reverted key out of sync", func(t *testing.T) {
+		if st := h.link.Status(); st.Pending != 0 || st.OutOfSync != 1 || st.Refused != 0 {
+			t.Fatalf("/state pending %d out_of_sync %d refused %d, want 0 1 0: the stack runs 700, Flagsmith holds 900",
+				st.Pending, st.OutOfSync, st.Refused)
+		}
+		if list, _ := h.link.Links().Unsynced(flagsmith.MaxStateKeys); len(list) != 1 || list[0].Flag != "decision.min_interval_ms" || list[0].InSync {
+			t.Fatalf("/state keys %+v, want decision.min_interval_ms out of sync", list)
+		}
+		if n := calls(); n != 1 {
+			t.Fatalf("%d PATCHes, want 1 (700 waits for the pull round)", n)
+		}
+	})
+	h.round()
+	t.Run("UC-055/main step 5 the next pull round sends the local value and the key is in sync", func(t *testing.T) {
+		h.waitWithin(sendWithin, "the local 700 confirmed in Flagsmith", func() bool {
+			r, ok := h.link.Links().Remote(minIntervalKey)
+			return ok && string(r.Value) == "700"
+		})
+		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 0 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 0 0", p, oos, r)
+		}
+	})
+}
+
 // UC: UC-054 A2
 // A kill-switch conflict (Flagsmith looser than the local value) takes the
 // Flagsmith value like any flag since #2621: nothing is pushed back.

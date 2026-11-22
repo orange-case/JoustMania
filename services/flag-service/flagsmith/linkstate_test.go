@@ -40,6 +40,28 @@ func TestLinkState(t *testing.T) {
 			t.Fatalf("counts pending %d out of sync %d, want 0 0", p, oos)
 		}
 	})
+	t.Run("UC-055/BR-001 back to the remote value while a newer one is in flight: its confirm keeps the key out of sync (#2611)", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`1`))
+		s.Offer(stack, val(`2`), t0, 1)
+		if _, v, _, _, ok := s.Next(); !ok || string(v.Value) != "2" {
+			t.Fatalf("setup: in flight %s ok %v, want 2", v.Value, ok)
+		}
+		s.Offer(stack, val(`1`), t0, 2) // the operator goes back to 1, not held
+		s.Offer(stack, val(`1`), t0, 3) // a re-save keeps it reverted
+		s.ConfirmPushed(stack, val(`2`))
+		if p, oos, r := s.Counts(); p != 0 || oos != 1 || r != 0 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 0: the stack runs 1, Flagsmith holds 2", p, oos, r)
+		}
+		if !s.Reoffer(stack, val(`1`), t0, 4) {
+			t.Fatal("the next pull round did not queue the local 1")
+		}
+		s.Next()
+		s.ConfirmPushed(stack, val(`1`))
+		if p, oos, _ := s.Counts(); p != 0 || oos != 0 {
+			t.Fatalf("pending %d out_of_sync %d after the local 1 is confirmed, want 0 0", p, oos)
+		}
+	})
 	t.Run("UC-054/BR-005 an offer equal to the remote value drops the pending entry and is in sync", func(t *testing.T) {
 		s := NewLinkState(nil)
 		s.SetRemote(stack, val(`{"a":1,"b":2}`))
