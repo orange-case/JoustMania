@@ -71,6 +71,11 @@ type entry struct {
 	confirmedAt time.Time
 	// outSince: when the key last went out of sync (GET /state keys, #2639).
 	outSince time.Time
+	// offered is the snapshot version of the latest local change (OfferFrom).
+	// A pull round reads the local state before its fetch, so a write can land
+	// before it acts: what it does on a local value read before offered is
+	// stale (ReofferRead, ClearRefusalRead, SetInSyncRead).
+	offered uint64
 	// refusedAt and refusedStatus: when the last refusal was recorded and the
 	// HTTP status Flagsmith answered it with (0: refused without a request).
 	refusedAt     time.Time
@@ -209,6 +214,7 @@ func (s *LinkState) OfferFrom(k Key, v Value, at time.Time, version uint64, offl
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
+	e.offered = max(e.offered, version)
 	if e.hasRemote && e.remote.Equal(v) {
 		s.inSyncLocked(k, e)
 		return false
@@ -235,10 +241,18 @@ func (s *LinkState) OfferFrom(k Key, v Value, at time.Time, version uint64, offl
 // a newer value already, or the value is in flight). It reports whether it
 // queued v.
 func (s *LinkState) Reoffer(k Key, v Value, at time.Time, version uint64) (queued bool) {
+	return s.ReofferRead(k, v, at, version, version)
+}
+
+// ReofferRead is Reoffer for a value read in the local snapshot of version
+// read: it does nothing when a local change came after that snapshot (stale).
+func (s *LinkState) ReofferRead(k Key, v Value, at time.Time, version, read uint64) (queued bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
 	switch {
+	case read < e.offered:
+		return false
 	case e.hasRemote && e.remote.Equal(v):
 		s.inSyncLocked(k, e)
 		return false
@@ -365,8 +379,9 @@ func revertedLocalLocked(e *entry, v Value) bool {
 }
 
 // SetRemote records the value last seen in Flagsmith and returns the previous
-// one (had: one was known). The key is in sync when nothing is pending (the
-// pull applies the value; a refusal of that write sets it out of sync again).
+// one (had: one was known). The key is in sync when nothing is pending and no
+// different refused value is held (the pull applies the value; a refusal of
+// that write sets it out of sync again).
 func (s *LinkState) SetRemote(k Key, v Value) (prev Value, had bool) {
 	prev, had, _ = s.SetRemoteGen(k, v)
 	return prev, had
@@ -381,13 +396,37 @@ func (s *LinkState) SetRemoteGen(k Key, v Value) (prev Value, had bool, gen uint
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
 	prev, had = e.remote, e.hasRemote
+	s.setRemoteLocked(e, v)
+	return prev, had, e.gen
+}
+
+func (s *LinkState) setRemoteLocked(e *entry, v Value) {
 	e.remote, e.hasRemote = v, true
 	if e.hasReverted {
 		e.revertedLocal = v
 	}
 	e.gen++
-	s.syncLocked(e, e.pending == nil)
-	return prev, had, e.gen
+	// A held refused value is the local value: it differs from v.
+	s.syncLocked(e, e.pending == nil && !heldLocalLocked(e, v))
+}
+
+// SetRemoteRead is SetRemote for a pull round that writes nothing locally
+// (adopt, keep local) and judged the local value of snapshot read. After a
+// later local change it records v only and keeps the reverted mark: a key in
+// sync with the old remote value is out of sync with a different v.
+func (s *LinkState) SetRemoteRead(k Key, v Value, read uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entryLocked(k)
+	if read >= e.offered {
+		s.setRemoteLocked(e, v)
+		return
+	}
+	if e.inSync && (!e.hasRemote || !e.remote.Equal(v)) {
+		s.syncLocked(e, false)
+	}
+	e.remote, e.hasRemote = v, true
+	e.gen++
 }
 
 // RestoreRemoteGen puts prev back (or forgets the remote value when !had),
@@ -575,6 +614,28 @@ func (s *LinkState) ClearRefusal(k Key) {
 	if e := s.entries[k]; e != nil {
 		e.refused, e.side = "", ""
 		e.pushRefused, e.hasPushRefused = Value{}, false
+	}
+}
+
+// ClearRefusalRead is ClearRefusal for a pull round that found the local
+// value of snapshot read equal to Flagsmith's: a local change after that
+// snapshot (a re-save of the refused value) keeps the refusal.
+func (s *LinkState) ClearRefusalRead(k Key, read uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil && read >= e.offered {
+		e.refused, e.side = "", ""
+		e.pushRefused, e.hasPushRefused = Value{}, false
+	}
+}
+
+// SetInSyncRead marks k in sync for a pull round that found the local value
+// of snapshot read equal to Flagsmith's, unless a local change came after it.
+func (s *LinkState) SetInSyncRead(k Key, read uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil && read >= e.offered {
+		s.syncLocked(e, true)
 	}
 }
 

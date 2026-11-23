@@ -456,6 +456,8 @@ type roundCtx struct {
 	writes   int
 	deferred bool
 	stats    roundStats
+	// read is the snapshot version of the local state the round read.
+	read uint64
 
 	// queued: the round queued at least one local value to send (offer);
 	// the round wakes the out side once at its end (#2608).
@@ -484,7 +486,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	// during it by the generation and a push guard (a stale document).
 	var changes []state.Change
 	if st := l.State(); st != nil {
-		changes, _ = st.Changes()
+		changes, rc.read = st.Changes()
 	}
 	local, games := localSnapshot(changes)
 	rc.games = games
@@ -1005,7 +1007,7 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 	}
 	switch dec.action {
 	case actNone:
-		l.links.SetInSync(k, true)
+		l.links.SetInSyncRead(k, rc.read)
 		p.accepted(k)
 	case actSkip:
 	case actPush:
@@ -1014,12 +1016,12 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 		}
 		p.accepted(k)
 	case actAdopt:
-		l.links.SetRemote(k, de.v)
+		l.links.SetRemoteRead(k, de.v, rc.read)
 		p.offer(rc, k, le)
-		l.links.ClearRefusal(k)
+		l.links.ClearRefusalRead(k, rc.read)
 		p.accepted(k)
 	case actKeepLocal:
-		l.links.SetRemote(k, de.v)
+		l.links.SetRemoteRead(k, de.v, rc.read)
 		if p.offer(rc, k, le) {
 			rc.stats.pushed++
 		}
@@ -1079,7 +1081,9 @@ func (p *puller) offer(rc *roundCtx, k Key, le localEntry) bool {
 	if le.slot != 0 && p.slotVersion(k, le.v) != le.slot {
 		return false
 	}
-	if !p.l.links.Reoffer(k, le.v, rc.now, le.version) {
+	// The slot check above and ReofferRead hold no common lock; read closes
+	// the gap between them.
+	if !p.l.links.ReofferRead(k, le.v, rc.now, le.version, rc.read) {
 		return false
 	}
 	rc.queued = true
