@@ -673,9 +673,17 @@ parent → child):
 
 ```
 agent.signal_received          one per triggering OTLP Export (backdated to arrival); only without game ids, in a game it is an event on invoke_agent joustmania-agent (#2648)
+  ├─ invoke_agent joustmania-agent   the decide span; rules path: sibling of agent.decision
   └─ agent.decision          one per Decision the rules engine returns
        └─ agent.action       one per decision, wrapping the ActionSink call
+
+remote path:
+invoke_agent joustmania-agent
+  ├─ chat {model}            one per model call (CLIENT)
+  └─ agent.decision ─ agent.action
 ```
+
+In a game the decide span and `agent.decision` are remote children of `game_cycle` (telemetry.md §4.1).
 
 The root span is **signal-agnostic** (#1053): a metric-triggered cycle and a
 trace-triggered cycle both emit `agent.signal_received`, distinguished only by
@@ -886,12 +894,15 @@ Measurement is best-effort and never on the hot decision path.
 ### Semantic conventions
 
 OTel semantic conventions ([semconv v1.34.0](https://pkg.go.dev/go.opentelemetry.io/otel/semconv/v1.34.0))
-are used wherever one honestly applies:
+are used wherever one honestly applies; the GenAI spans follow
+`open-telemetry/semantic-conventions-genai` v0.1.0 (`docs/specs/telemetry.md` §4.2):
 
 | Where | Convention |
 |-------|-----------|
 | `agent.signal_received` | `rpc.system=grpc`, `rpc.service` (OTLP `TraceService`/`MetricsService`/`LogsService`), `rpc.method=Export`; span kind `SERVER` |
-| `agent.decision` | `gen_ai.agent.name` identity (the full [GenAI agent conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/) apply once an LLM inference path exists — `gen_ai.provider.name` etc. land as a `gen_ai.*` child span in llm mode) |
+| `invoke_agent joustmania-agent` | GenAI *Invoke agent internal span*, GenAI semconv v0.1.0; deviations in telemetry.md §4.2 |
+| `chat {model}` | GenAI inference client span (`gen_ai.provider.name`, model, usage tokens; telemetry.md §4.2) |
+| `agent.decision` | `gen_ai.agent.name` identity |
 | `agent.decision` event | `feature_flag` span event (`feature_flag.key=interventions.allowed`, `feature_flag.provider.name`, `feature_flag.result.variant`) — same shape the openfeature OTel hooks emit in the Python services; provider is `"stub"` until flagd (#725) |
 | `agent.action` failures | `span.RecordError` + `error.type` + status `ERROR` |
 

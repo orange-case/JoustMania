@@ -30,11 +30,12 @@ neutrally? We enable the capability and measure; no rule fires a group shield (U
   The agent image must include #2530 (the record check above).
 - The LLM budget is global. Cap the cost with `llm.max_requests_per_minute=stage` before the run.
 - The stack's agent container is stopped for the run (it would decide in the game too) and started again on exit.
-- **Verification.** After the first game of each arm the script checks that an `invoke_agent joustmania-agent` span of that game
-  carries the arm's `decide.prompt_profile` (arm A's `v1` is also the flag default, so only the first B game proves
-  the arm value resolves). If not, it stops: the throwaway agent saw nothing (the collector sends spans to
-  the `agent` network alias, which the one-off container does not have). Retry with `--use-aliases`; then the
-  throwaway agent observes every game, real ones included, so keep the guard in mind. `--no-verify` skips the check.
+- **Verification.** After the first game of each arm the script checks that a decide span of that game
+  (`invoke_agent joustmania-agent`, or `agent.decide` before #2584) carries the arm's `decide.prompt_profile` (arm A's
+  `v1` is also the flag default, so only the first B game proves the arm value resolves). If not, it stops: the
+  throwaway agent saw nothing (the collector sends spans to the `agent` network alias, which the one-off container does
+  not have). Retry with `--use-aliases`; then the throwaway agent observes every game, real ones included, so keep the
+  guard in mind. `--no-verify` skips the check.
 - **Early decide cycles.** Under `shadow_only` a game whose kind the agent does not know yet makes no remote call. A game
   already known as shadow whose experiment id is not yet known is eligible and renders `v1`; the report excludes it
   (`profile_mismatch`), so the arms stay uncontaminated.
@@ -66,11 +67,12 @@ Games run A,B then B,A per seed (arm A `decision.prompt_profile=v1`, arm B `neut
 implemented either.
 
 The report counts only games whose remote `invoke_agent joustmania-agent` spans (`agent.decide` for games recorded
-before #2584) carry the arm's `decide.prompt_profile`
-(others are listed as excluded) and prints per arm: group grants (applied, blocked by reason), when they happened
-(alive players at the group, last third of the game, measured against the wall clock around the game, which includes
-the container's start-up of a few seconds), single grants, the outcomes, and the applied groups per seed with B minus A
-(the games are seed-matched). A repeated refusal emits no span and is not counted in `agent_group_interventions_total` either; repeats are only in `agent_decisions_total{action=grant_group_shield}`, so the blocked counts of the report are first refusals.
+before #2584) carry the arm's `decide.prompt_profile` (others are listed as excluded) and prints per arm: group grants
+(applied, blocked by reason), when they happened (alive players at the group, last third of the game, measured against
+the wall clock around the game, which includes the container's start-up of a few seconds), single grants, the
+outcomes, and the applied groups per seed with B minus A (the games are seed-matched). A repeated refusal emits no
+span and is not counted in `agent_group_interventions_total` either; repeats are only in
+`agent_decisions_total{action=grant_group_shield}`, so the blocked counts of the report are first refusals.
 
 ## Pre-registration (fix before running)
 

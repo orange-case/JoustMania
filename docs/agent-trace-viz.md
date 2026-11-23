@@ -74,7 +74,8 @@ chose and why"). Verified keys/values from live span data:
 Every decided cycle has an **`invoke_agent joustmania-agent`** span with `decide.backend`,
 `decide.backend.requested`, `decide.fallback_reason`, `decide.confidence` and
 `decide.outcome`; a remote backend's call is its `chat {model}` child span with
-the `gen_ai.*` attributes. (The `agent.mode` / `agent.model` /
+the `gen_ai.*` attributes. Since #2731 the decide span also carries the invocation's
+totals (the sum of its `chat {model}` children): count one or the other, not both. (The `agent.mode` / `agent.model` /
 `inference.*` attributes on `agent.decision` were removed with the legacy
 mode/model path in #1234.) The post-game **`agent.llm.retro`** span carries
 `inference.configured` (the model) and `inference.used` (`claude`, or `none` when
@@ -137,7 +138,7 @@ http://localhost/jaeger/search?service=agent&operation=invoke_agent%20joustmania
 ```
 
 Manual: **Service** `agent` · **Operation** `invoke_agent joustmania-agent` · **Tags**
-`{"decide.backend":"claude"}`. Expand one and its `chat {model}` child to read
+`{"decide.backend":"claude"}` (operation `agent.decide` for decisions recorded before #2584). Expand one and its `chat {model}` child to read
 the model, tokens, confidence and rationale. To narrate a fallback, filter
 `{"decide.backend.requested":"claude","decide.backend":"rules"}` and read
 `decide.fallback_reason` (`timeout`, `llm_not_eligible`, ...).
