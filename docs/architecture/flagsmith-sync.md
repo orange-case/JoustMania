@@ -524,7 +524,9 @@ value an operator staged there can be found again.
 **Pacing and failures** (maintainer decision 2026-11-23). Every request of the step (the document read, each re-read
 and each write) goes through the start's pacing (`FLAGSMITH_PUSH_RATE`, `429` waits its `Retry-After`, a 5xx or
 timeout is tried 3 times); for a write, each such retry starts with a new re-read (above). The writes of one feature
-are one push span and one `pushes_total` point with op `reference`.
+are one push span and one `pushes_total` point with op `reference`. They carry the result of the last write sent, or
+`ok` when a re-read after a failed write shows the feature already at the reference (Flagsmith applied a write that
+timed out).
 - The document read, or a re-read, fails transiently (no answer, timeout, 5xx, a `429` left after the retries): the
   start fails and is retried with backoff (every step is idempotent). A `4xx` on the document read is logged once
   (WARN `flagsmith reference not written`) and the process writes no reference.

@@ -1,6 +1,7 @@
 package flagsmith
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -8,6 +9,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
 )
@@ -46,6 +50,50 @@ func (e *startEnv) offFeatures(names ...string) {
 // referenceLogLines counts the log lines of the reference step.
 func referenceLogLines(logs string) int {
 	return strings.Count(logs, `msg="flagsmith reference`)
+}
+
+// countingPatch answers every reference write of feature 1 with answer and
+// returns the number of writes so far.
+func countingPatch(f *flagsmithtest.Fake, answer func(w http.ResponseWriter, n int)) func() int {
+	var mu sync.Mutex
+	n := 0
+	f.Handle("PATCH /api/__future__/environments/{env}/features/1/{$}", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		n++
+		k := n
+		mu.Unlock()
+		answer(w, k)
+	})
+	return func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return n
+	}
+}
+
+// referencePushResults is the pushes_total sum of op reference by result.
+func referencePushResults(t *testing.T, reader *sdkmetric.ManualReader) map[string]int64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, md := range sm.Metrics {
+			sum, ok := md.Data.(metricdata.Sum[int64])
+			if !ok || md.Name != MetricPushes {
+				continue
+			}
+			for _, dp := range sum.DataPoints {
+				if op, _ := dp.Attributes.Value("op"); op.AsString() == OpReference && dp.Value > 0 {
+					r, _ := dp.Attributes.Value("result")
+					out[r.AsString()] += dp.Value
+				}
+			}
+		}
+	}
+	return out
 }
 
 const reReadPath = flagsmithtest.APIPath + "environments/envkey123/featurestates/"
@@ -173,6 +221,100 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 		}
 		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 2 {
 			t.Fatalf("%d re-reads, want 2 (one before the write, one after the 429)", n)
+		}
+	})
+	t.Run("UC-054/A3 FR-227 a kill switch turned on during a 5xx backoff is read again and not written", func(t *testing.T) {
+		e := newStartEnv(t)
+		f := e.admin.f
+		f.ServeFlagAPI()
+		e.offFeatures("experiment_max_games")
+		patches := countingPatch(f, func(w http.ResponseWriter, _ int) {
+			// A person turns the kill switch on while the write waits its backoff.
+			f.Options.SetDefault(1, flagDefault(true, "integer", "20"))
+			flagsmithtest.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"detail": "unavailable"})
+		})
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatalf("start %v, want it to go on", err)
+		}
+		if n := patches(); n != 1 {
+			t.Fatalf("experiment_max_games written %d times, want 1 (no second write after the re-read shows it on)", n)
+		}
+		if got, enabled, _ := storedDefault(t, f, 1); !enabled || got != "20" {
+			t.Fatalf("experiment_max_games enabled=%v %q, want the person's enabled=true 20 untouched", enabled, got)
+		}
+		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 2 {
+			t.Fatalf("%d re-reads, want 2 (one before the write, one after the 503)", n)
+		}
+	})
+	t.Run("UC-054/A3 FR-227 a write that always answers 5xx is sent 3 times, each after a re-read, then one WARN", func(t *testing.T) {
+		e := newStartEnv(t)
+		f := e.admin.f
+		f.ServeFlagAPI()
+		e.offFeatures("experiment_max_games")
+		patches := countingPatch(f, func(w http.ResponseWriter, _ int) {
+			flagsmithtest.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"detail": "unavailable"})
+		})
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatalf("start %v, want it to go on past the failed write", err)
+		}
+		if n := patches(); n != 3 {
+			t.Fatalf("experiment_max_games written %d times, want 3 (transientAttempts)", n)
+		}
+		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 3 {
+			t.Fatalf("%d re-reads, want 3 (one before each write)", n)
+		}
+		logs := e.logs.String()
+		if n := referenceLogLines(logs); n != 1 || !strings.Contains(logs, `level=WARN msg="flagsmith reference not written" flag_set=agent flag=experiment_max_games`) {
+			t.Fatalf("log %q, want one WARN naming experiment_max_games", logs)
+		}
+	})
+	t.Run("UC-054/A3 FR-227 a write that always answers 429 is sent 4 times, each after a re-read", func(t *testing.T) {
+		e := newStartEnv(t)
+		f := e.admin.f
+		f.ServeFlagAPI()
+		e.offFeatures("experiment_max_games")
+		patches := countingPatch(f, func(w http.ResponseWriter, _ int) {
+			w.Header().Set("Retry-After", "1")
+			flagsmithtest.WriteJSON(w, http.StatusTooManyRequests, map[string]any{"detail": "throttled"})
+		})
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatalf("start %v, want it to go on past the failed write", err)
+		}
+		if n := patches(); n != 4 {
+			t.Fatalf("experiment_max_games written %d times, want 4 (1 + maxRateLimitRetries)", n)
+		}
+		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 4 {
+			t.Fatalf("%d re-reads, want 4 (one before each write)", n)
+		}
+	})
+	t.Run("UC-054/A3 FR-227 a failed write that Flagsmith applied ends the push ok", func(t *testing.T) {
+		e := newStartEnv(t)
+		reader := sdkmetric.NewManualReader()
+		m, err := NewMetrics(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("t"), e.l.Mode, e.l.links.Counts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.l.metrics = m
+		f := e.admin.f
+		f.ServeFlagAPI()
+		e.offFeatures("decision.backend")
+		patches := countingPatch(f, func(w http.ResponseWriter, _ int) {
+			// The write lands, but its answer is lost: a 504 from a proxy.
+			f.Options.SetDefault(1, flagDefault(false, "string", "rules"))
+			flagsmithtest.WriteJSON(w, http.StatusGatewayTimeout, map[string]any{"detail": "timeout"})
+		})
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if n := patches(); n != 1 {
+			t.Fatalf("decision.backend written %d times, want 1 (the re-read shows the reference)", n)
+		}
+		got := referencePushResults(t, reader)
+		if len(got) != 1 || got[ResultOK] != 1 {
+			t.Fatalf("reference pushes by result %v, want one ok", got)
+		}
+		if n := referenceLogLines(e.logs.String()); n != 0 {
+			t.Fatalf("log %q, want no reference line", e.logs.String())
 		}
 	})
 	t.Run("UC-054/A3 FR-227 a re-read listing only another feature's state is a failed re-read: one WARN, no write", func(t *testing.T) {

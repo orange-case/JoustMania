@@ -226,8 +226,8 @@ func environmentDefault(items []listedState, now time.Time) (FeatureState, bool)
 	return fs, true
 }
 
-// ReasonStateNotListed: the re-read listed no environment default for the
-// feature (an unknown answer, or a filter Flagsmith ignored). Flagsmith keeps
+// ReasonStateNotListed is the reason of a re-read that listed no environment
+// default for the feature (an unknown answer, or a filter Flagsmith ignored). Flagsmith keeps
 // one for every feature of the environment, so the state is unknown and the
 // feature is not written (§5.2).
 const ReasonStateNotListed = "state_not_listed"
@@ -289,6 +289,12 @@ func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue
 			return s.referenceFailed(ctx, j, rerr, false)
 		}
 		if !needsReference(cur, true, false, fv) {
+			if !cur.Enabled {
+				// Off and at the reference: Flagsmith applied the failed
+				// write (a timed-out PATCH), so the push ends ok. Turned on
+				// meanwhile: the result of the last write sent stays.
+				werr = nil
+			}
 			end()
 			return false, nil // turned on meanwhile, or the reference already
 		}
