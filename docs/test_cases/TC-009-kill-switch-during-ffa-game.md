@@ -29,7 +29,7 @@
 | 4    | Turn the agent off        | Operator sets `enabled` off; flagd serves it while the call is held                                 | `enabled` = `off`                          | [UC-045](../use_cases/UC-045.md)    |
 | 5    | Verify discarded          | The late answer lands: `decide.outcome=discarded`, `decide.discarded_reason=kill_switch`; no `act` outcome, nothing written, no `agent_intervention` | - | [UC-040](../use_cases/UC-040.md) |
 | 6    | Verify the agent is quiet | The agent records an `agent.disabled` span for the game instead of a decision                       | -                                          | [UC-045](../use_cases/UC-045.md)    |
-| 7    | Turn the agent on         | Operator sets `enabled` on; the next cycle records `agent.decide` spans again                       | `enabled` = `on`                           | [UC-045](../use_cases/UC-045.md)    |
+| 7    | Turn the agent on         | Operator sets `enabled` on; the next cycle records `invoke_agent joustmania-agent` spans again                       | `enabled` = `on`                           | [UC-045](../use_cases/UC-045.md)    |
 
 ## Validation
 
@@ -45,6 +45,6 @@
 
 **Tier:** T2 service (`tests/service/`, `make test-service`): the `AGENT` composition of [TC-008](TC-008-remote-backend-confidence-routing.md) (#1600), on a stack of its own (`enabled` is global).
 
-- `tests/service/test_tc009_kill_switch.py::test_kill_switch_discards_inflight_answer` implements steps 1 to 7 (it waits for the `agent.disabled` span for the game before releasing the held answer; step 7 waits for a new `agent.decide` span for the game after `enabled` is on again). Moved from the e2e-agent shard (#1600).
+- `tests/service/test_tc009_kill_switch.py::test_kill_switch_discards_inflight_answer` implements steps 1 to 7 (it waits for the `agent.disabled` span for the game before releasing the held answer; step 7 waits for a new `invoke_agent joustmania-agent` span for the game after `enabled` is on again). Moved from the e2e-agent shard (#1600).
 - Validation 2 (UC-045 A1) has no end-to-end test: `lib/tests/test_shipped_safety_defaults.py::test_agent_interventions_disabled_by_default` only reads the shipped flag defaults (#1424).
 - Gaps (unit-tested only since #1395; #1363 is closed): Validation 2 is not asserted end to end; aborting running experiments on the next tick (UC-045 step 5) and the capture-only retro after the switch (UC-045 step 6) are covered by Go unit tests only (#1362).

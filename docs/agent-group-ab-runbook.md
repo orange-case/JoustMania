@@ -30,7 +30,7 @@ neutrally? We enable the capability and measure; no rule fires a group shield (U
   The agent image must include #2530 (the record check above).
 - The LLM budget is global. Cap the cost with `llm.max_requests_per_minute=stage` before the run.
 - The stack's agent container is stopped for the run (it would decide in the game too) and started again on exit.
-- **Verification.** After the first game of each arm the script checks that an `agent.decide` span of that game
+- **Verification.** After the first game of each arm the script checks that an `invoke_agent joustmania-agent` span of that game
   carries the arm's `decide.prompt_profile` (arm A's `v1` is also the flag default, so only the first B game proves
   the arm value resolves). If not, it stops: the throwaway agent saw nothing (the collector sends spans to
   the `agent` network alias, which the one-off container does not have). Retry with `--use-aliases`; then the
@@ -65,7 +65,8 @@ Games run A,B then B,A per seed (arm A `decision.prompt_profile=v1`, arm B `neut
 (`statue_finale`, `drift_finale`, `jittery_finale`) are not shipped; a third arm (v1 without the lever) is not
 implemented either.
 
-The report counts only games whose remote `agent.decide` spans carry the arm's `decide.prompt_profile`
+The report counts only games whose remote `invoke_agent joustmania-agent` spans (`agent.decide` for games recorded
+before #2584) carry the arm's `decide.prompt_profile`
 (others are listed as excluded) and prints per arm: group grants (applied, blocked by reason), when they happened
 (alive players at the group, last third of the game, measured against the wall clock around the game, which includes
 the container's start-up of a few seconds), single grants, the outcomes, and the applied groups per seed with B minus A

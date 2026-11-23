@@ -25,16 +25,16 @@
 |------|-----------------------------|-----------------------------------------------------------------------------------------------------|----------------------------------------------|-------------------------------------|
 | 1    | Switch the backend          | Operator sets `decision.backend` to `openai` with the fake's model and base URL; flagd serves it    | `openai`, model `fake-decider`                  | [UC-044](../use_cases/UC-044.md)    |
 | 2    | Confident answer            | A `JoustFFA` game starts; the fake answers `adjust_global_difficulty` at high confidence            | confidence 0.95                              | [UC-040](../use_cases/UC-040.md)    |
-| 3    | Verify act                  | `agent.decide` has `decide.outcome=act`, `decide.backend=openai`, a `chat {model}` child span; the coordinator publishes an unblocked `agent_intervention` | - | [UC-020](../use_cases/UC-020.md) |
+| 3    | Verify act                  | `invoke_agent joustmania-agent` has `decide.outcome=act`, `decide.backend=openai`, a `chat {model}` child span; the coordinator publishes an unblocked `agent_intervention` | - | [UC-020](../use_cases/UC-020.md) |
 | 4    | Low-confidence answer       | In the next game the fake answers the same intervention at low confidence                           | confidence 0.3                               | [UC-040](../use_cases/UC-040.md)    |
 | 5    | Verify held                 | `decide.outcome=held`; no `agent.decision`, nothing written, no `agent_intervention`                | -                                            | -                                   |
 | 6    | Broken answer               | In the next game the fake answers text that is not valid JSON                                       | `garbage`                                    | [UC-040](../use_cases/UC-040.md)    |
 | 7    | Verify rules fallback       | `decide.outcome=fallback`, `decide.fallback_reason=invalid_answer`, and the rules engine decides     | -                                            | -                                   |
-| 8    | Switch back to rules        | Operator sets `decision.backend` to `rules`; the next `agent.decide` span shows `decide.backend=rules` | `rules`                                   | [UC-044](../use_cases/UC-044.md)    |
+| 8    | Switch back to rules        | Operator sets `decision.backend` to `rules`; the next `invoke_agent joustmania-agent` span shows `decide.backend=rules` | `rules`                                   | [UC-044](../use_cases/UC-044.md)    |
 
 ## Validation
 
-1. **Every decision is attributed**: each `agent.decide` span of the journey carries `decide.backend.requested` equal to the flag value of its game.
+1. **Every decision is attributed**: each `invoke_agent joustmania-agent` span of the journey carries `decide.backend.requested` equal to the flag value of its game.
 2. **Only the confident answer took effect**: exactly one unblocked `agent_intervention` across the three games, in the game of step 2.
 
 ## Postconditions
