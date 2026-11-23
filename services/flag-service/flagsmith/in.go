@@ -56,6 +56,8 @@ const (
 	// restore, a garbled but in-range value) cannot wedge the in side.
 	staleAcceptMin   = 10 * time.Minute
 	staleAcceptPolls = 10
+	// maxAbandoned is how many given-up newest times are remembered (#2602).
+	maxAbandoned = 8
 	// ReasonStaleDocument is the pull reason of a document older than one
 	// this process already read (a cache or region serving an older copy):
 	// the round is skipped (telemetry.md §10.4).
@@ -102,6 +104,10 @@ type puller struct {
 	// time.Now carries a monotonic reading, so this is elapsed time).
 	staleRun   bool
 	staleSince time.Time
+	// abandoned are the newest times given up when an older document was
+	// accepted (the last maxAbandoned, #2602): a document stamped exactly one
+	// of them is the too-new copy again and is refused as stale.
+	abandoned []time.Time
 }
 
 // remoteMark is one key's remote state as LinkState holds it.
@@ -504,7 +510,16 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	// cache or region): applying it could revert a push it predates, so the
 	// round is skipped, Last-Modified kept and the next pull is in full.
 	// After max(10 min, 10 polls) of refusals in a row (local elapsed time)
-	// the document is accepted: the newest time itself may be wrong.
+	// the document is accepted: the newest time itself may be wrong. The
+	// newest time it gave up is abandoned: a copy stamped with it is refused
+	// from then on, never accepted by the timeout and outside any run, so it
+	// cannot undo the accepted document (#2602).
+	if rc.hasUpd && p.isAbandoned(rc.updated) {
+		p.forceFull = true
+		l.NotePull(rc.now, "")
+		reason = ReasonStaleDocument
+		return rc.stats, nil
+	}
 	if rc.hasUpd && rc.updated.Before(p.newest) {
 		if !p.staleRun {
 			p.staleRun, p.staleSince = true, rc.now
@@ -521,8 +536,13 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 			"updated_at", rc.updated.UTC().Format(time.RFC3339Nano),
 			"newest", p.newest.UTC().Format(time.RFC3339Nano),
 			"refused_for", refusing.String())
+		p.abandon(p.newest)
 	}
-	p.staleRun = false
+	// Only a strictly newer document ends a run: the newest copy served again
+	// (a cache still holding the too-new time) is applied but does not (#2602).
+	if !rc.hasUpd || !rc.updated.Equal(p.newest) {
+		p.staleRun = false
+	}
 	if rc.hasUpd {
 		p.newest = rc.updated
 	}
@@ -775,6 +795,28 @@ func (p *puller) staleAcceptAfter() time.Duration {
 		interval = DefaultPoll
 	}
 	return max(staleAcceptMin, staleAcceptPolls*interval)
+}
+
+// isAbandoned: t is a newest time given up when an older document was
+// accepted (#2602).
+func (p *puller) isAbandoned(t time.Time) bool {
+	for _, a := range p.abandoned {
+		if a.Equal(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// abandon remembers a given-up newest time, the last maxAbandoned of them.
+func (p *puller) abandon(t time.Time) {
+	if t.IsZero() || p.isAbandoned(t) {
+		return
+	}
+	p.abandoned = append(p.abandoned, t)
+	if len(p.abandoned) > maxAbandoned {
+		p.abandoned = p.abandoned[1:]
+	}
 }
 
 // reconcileKey merges and acts on one key.
