@@ -73,6 +73,9 @@ rectangle "JoustMania" {
         usecase "UC-100\nFind a Game Moment in Every Shape" as UC100
         usecase "UC-101\nTrace an Agent Intervention to its Effect" as UC101
         usecase "UC-102\nSee a Swing at Full Density" as UC102
+        usecase "UC-103\nFind How Deep a Backend Shows a Trace" as UC103
+        usecase "UC-104\nGenerate the Game Dashboard with a Backend's Assistant" as UC104
+        usecase "UC-105\nFind What the Game Master Cost" as UC105
     }
 }
 
@@ -147,6 +150,25 @@ player --> UC102
 UC102 --> gateway
 UC102 --> obsbackend
 UC102 ..> UC010 : <<include>>
+presenter --> UC103
+player --> UC103
+UC103 --> gateway
+UC103 --> obsbackend
+UC103 ..> UC010 : <<include>>
+UC103 ..> UC053 : <<include>>
+presenter --> UC104
+player --> UC104
+UC104 --> gateway
+UC104 --> obsbackend
+UC104 ..> UC010 : <<include>>
+presenter --> UC105
+player --> UC105
+agent --> UC105
+UC105 --> modelapi
+UC105 --> gateway
+UC105 --> obsbackend
+UC105 ..> UC010 : <<include>>
+UC105 ..> UC044 : <<include>>
 presenter --> UC035
 agent --> UC070
 player --> UC070
