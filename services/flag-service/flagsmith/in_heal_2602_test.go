@@ -2,10 +2,12 @@ package flagsmith_test
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/joustmania/flag-service/flagsmith"
+	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
 	"github.com/joustmania/flag-service/state"
 )
 
@@ -270,5 +272,91 @@ func TestHealAbandonsEveryTooNewTime(t *testing.T) {
 	}
 	if got := enabledVariant(h); got != "off" {
 		t.Fatalf("UC-054/BR-005 agent/enabled = %q: the earlier too-new copy undid the kill (flap)", got)
+	}
+}
+
+// UC: UC-054 BR-005
+// Residual (architecture note §10, maintainer decision on #2732): T1 < T2 both
+// too new, but T1 is only ever refused (read after T2, older than it), so the
+// heal abandons only T2. Refused times cannot be abandoned: during a run they
+// are mostly Flagsmith's genuine changes. A T1 copy after the heal is applied
+// once; it then is the newest, the current document opens a run again, and
+// the next heal abandons T1 for good.
+func TestRefusedTooNewTimeComesBackOnce(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	t1 := tooNew.Add(-24 * time.Hour)
+	serveT1 := func() {
+		h.fake.SetDocument(document(t1, []map[string]any{fsState("enabled", true, "on")}), "")
+	}
+	serveTooNew(h)
+	h.round()
+	serveT1()
+	h.round()
+	wantStaleRefusal(t, h, "the earlier too-new copy refused")
+	serveCurrent(h)
+	h.round()
+	h.clock.Advance(10 * time.Hour)
+	h.round()
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("setup: agent/enabled = %q after the first heal, want off", got)
+	}
+	h.clock.Advance(time.Hour)
+	serveT1()
+	h.round()
+	if got := enabledVariant(h); got != "on" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %q: the documented residual changed (the refused T1 copy is expected back once)", got)
+	}
+	serveCurrent(h)
+	h.round()
+	wantStaleRefusal(t, h, "the current document after the T1 copy")
+	h.clock.Advance(10 * time.Hour)
+	h.round()
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %q after the second heal, want off", got)
+	}
+	h.clock.Advance(time.Hour)
+	serveT1()
+	h.round()
+	if a := h.lastPull(); a[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
+		t.Fatalf("UC-054/BR-005 pull span %v: the T1 copy was accepted again after the second heal, want stale_document", a)
+	}
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %q: the T1 copy undid the kill a second time", got)
+	}
+}
+
+// UC: UC-054 BR-005
+// The header-only copy of the newest document carries the same update time as
+// a float epoch, 46 ns before the body time: it is the same time, not an older
+// document, so it is applied and opens no run (#2732 delta review finding C).
+func TestHeaderCopyOfNewestNotOlder(t *testing.T) {
+	var mu sync.Mutex
+	headerOnly, backend := false, "claude"
+	h := newHarness(t, harnessOpts{docURL: func(f *flagsmithtest.Fake) string {
+		f.Handle("GET /mix/environment-document/", func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			hdr, bv := headerOnly, backend
+			mu.Unlock()
+			doc := document(time.Date(2026, 11, 15, 12, 0, 0, 123457000, time.UTC), []map[string]any{fsState("decision.backend", true, bv)})
+			if hdr {
+				delete(doc, "updated_at")
+				w.Header().Set("X-Flagsmith-Document-Updated-At", "1794744000.123457")
+			}
+			flagsmithtest.WriteJSON(w, http.StatusOK, doc)
+		})
+		return f.Server.URL + "/mix/"
+	}})
+	h.online()
+	h.round()
+	mu.Lock()
+	headerOnly, backend = true, "openai"
+	mu.Unlock()
+	h.round()
+	if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
+		t.Fatalf("UC-054/main step 2 pull span %v: the header copy of the newest document was refused as older", a)
+	}
+	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
+		t.Fatalf("UC-054/main step 2 decision.backend = %+v, want openai from the header copy", v)
 	}
 }

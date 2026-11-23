@@ -116,9 +116,11 @@ type puller struct {
 	// accepted (the last maxAbandoned, #2602): a document stamped exactly one
 	// of them is the too-new copy again and is refused as stale.
 	abandoned []time.Time
-	// read are the distinct newest times this process read, the last
-	// maxAbandoned: a heal abandons every one after the accepted time, so an
-	// earlier too-new copy cannot undo it either (#2602).
+	// read are the distinct newest times this process read, the latest
+	// maxAbandoned (ascending): a heal abandons every one after the accepted
+	// time, so an earlier too-new copy cannot undo it either (#2602). Refused
+	// times are not kept: during a run they are mostly Flagsmith's genuine
+	// changes, which a heal must not abandon.
 	read []time.Time
 }
 
@@ -569,12 +571,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 		p.staleRun, p.sameRead = false, 0
 	}
 	if rc.hasUpd {
-		if !sameTime(rc.updated, p.newest) {
-			p.read = append(p.read, rc.updated)
-			if len(p.read) > maxAbandoned {
-				p.read = p.read[1:]
-			}
-		}
+		p.noteRead(rc.updated)
 		p.newest = rc.updated
 	}
 	p.health.setEnvironment(doc.Name)
@@ -848,6 +845,23 @@ func (p *puller) isAbandoned(t time.Time) bool {
 // is a float epoch, a few hundred ns off the body time of the same document.
 func sameTime(a, b time.Time) bool {
 	return a.Round(time.Microsecond).Equal(b.Round(time.Microsecond))
+}
+
+// noteRead records a newest time read in read, kept ascending and distinct;
+// beyond maxAbandoned the earliest is dropped (#2602).
+func (p *puller) noteRead(t time.Time) {
+	i := sort.Search(len(p.read), func(i int) bool {
+		return !p.read[i].Round(time.Microsecond).Before(t.Round(time.Microsecond))
+	})
+	if i < len(p.read) && sameTime(p.read[i], t) {
+		return
+	}
+	p.read = append(p.read, time.Time{})
+	copy(p.read[i+1:], p.read[i:])
+	p.read[i] = t
+	if len(p.read) > maxAbandoned {
+		p.read = p.read[1:]
+	}
 }
 
 // abandonAfter gives up, at a heal that accepts a document stamped accepted,
