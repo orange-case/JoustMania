@@ -76,6 +76,9 @@ type entry struct {
 	// before it acts: what it does on a local value read before offered is
 	// stale (ReofferRead, ClearRefusalRead, SetInSyncRead).
 	offered uint64
+	// reverting: a pull round's revert of the refused value is being written
+	// (BeginRevert).
+	reverting bool
 	// refusedAt and refusedStatus: when the last refusal was recorded and the
 	// HTTP status Flagsmith answered it with (0: refused without a request).
 	refusedAt     time.Time
@@ -161,13 +164,24 @@ func (s *LinkState) DropOffline(k Key, version uint64) {
 	}
 }
 
-// HoldRefused keeps v as k's refused local value (UC-055 A4) after a pull
-// round reverted it to Flagsmith's value: a re-save of v is not sent again.
-func (s *LinkState) HoldRefused(k Key, v Value) {
+// BeginRevert marks a pull round's write that reverts k's refused value to
+// Flagsmith's (UC-055 A4) until EndRevert: the write's own local value, equal
+// to the remote one, keeps the refused value held, so a re-save of it during
+// the write is not sent again. A different local value still ends the hold.
+func (s *LinkState) BeginRevert(k Key) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e := s.entries[k]; e != nil {
-		e.pushRefused, e.hasPushRefused = v, true
+		e.reverting = true
+	}
+}
+
+// EndRevert ends BeginRevert's mark, whatever became of the write.
+func (s *LinkState) EndRevert(k Key) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil {
+		e.reverting = false
 	}
 }
 
@@ -274,7 +288,7 @@ func (s *LinkState) syncLocked(e *entry, inSync bool) {
 }
 
 // inSyncLocked records a local value equal to the remote one: nothing to
-// send, no refused value to hold back. Dropping a pending entry whose
+// send, no refused value to hold back (except during a revert). Dropping a pending entry whose
 // different value Next handed out records the local value as reverted; a mark
 // kept from an earlier revert stays (its push may still be in flight).
 func (s *LinkState) inSyncLocked(k Key, e *entry) {
@@ -283,7 +297,9 @@ func (s *LinkState) inSyncLocked(k Key, e *entry) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}
-	e.pushRefused, e.hasPushRefused = Value{}, false
+	if !e.reverting {
+		e.pushRefused, e.hasPushRefused = Value{}, false
+	}
 	s.syncLocked(e, true)
 }
 

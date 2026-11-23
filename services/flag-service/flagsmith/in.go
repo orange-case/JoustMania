@@ -1033,8 +1033,12 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 		// for a later, ordinary Flagsmith change to hold.
 		if revert {
 			p.reverting[k] = le.v
+			l.links.BeginRevert(k)
 		}
 		p.apply(rc, k, pol, de, le)
+		if revert {
+			l.links.EndRevert(k)
+		}
 		delete(p.reverting, k)
 	}
 }
@@ -1217,15 +1221,21 @@ func (p *puller) result(rc *roundCtx, k Key, d, lv Value, u undo, res state.Writ
 			l.Logger().Warn("flagsmith change applied in memory only: the state file could not be written", "flag", k.Flag)
 		}
 		rc.stats.applied++
-		if rv, ok := p.reverting[k]; ok {
-			// A refused stack value reverted (UC-055 A4): the refusal stays
-			// reported and the value held, so a re-save is not sent again.
-			delete(p.reverting, k)
-			l.links.HoldRefused(k, rv)
-		} else {
-			l.links.ClearRefusal(k)
+		// A local write after this one (its snapshot version) keeps the state
+		// it left.
+		read := res.SnapshotVersion
+		if read == 0 {
+			read = math.MaxUint64
 		}
-		l.links.SetInSync(k, true)
+		if _, ok := p.reverting[k]; ok {
+			// A refused stack value reverted (UC-055 A4): the refusal stays
+			// reported and the value held (BeginRevert), so a re-save is not
+			// sent again.
+			delete(p.reverting, k)
+		} else {
+			l.links.ClearRefusalRead(k, read)
+		}
+		l.links.SetInSyncRead(k, read)
 		p.accepted(k)
 		if rc.hasUpd {
 			l.Metrics().RecordChangeDelay(rc.ctx, rc.trigger, max(0, rc.now.Sub(rc.updated)))

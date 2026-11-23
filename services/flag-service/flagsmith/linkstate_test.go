@@ -375,6 +375,20 @@ func TestLinkStateRefusedValue(t *testing.T) {
 			t.Fatalf("out_of_sync %d refused %d, want 0 0: a round that read the latest change acts", oos, r)
 		}
 	})
+	t.Run("UC-055/A4 a revert holds the refused value only while it is written", func(t *testing.T) {
+		s := refused(t, stack)
+		s.BeginRevert(stack)
+		s.Offer(stack, val(`0`), t0, 2) // the revert's own write of Flagsmith's 0
+		s.Offer(stack, val(`1`), t0, 3) // a re-save of the refused 1 during it
+		if _, _, _, _, ok := s.Next(); ok {
+			t.Fatal("the re-saved refused 1 was queued during the revert")
+		}
+		s.EndRevert(stack)
+		s.Offer(stack, val(`0`), t0, 4) // later back to Flagsmith's 0: the hold ends
+		if _, ok := s.PushRefused(stack); ok {
+			t.Fatal("the refused value is still held after the revert ended")
+		}
+	})
 	t.Run("UC-055/main step 5 back to Flagsmith's value while a pull round adopts the older local value: out of sync", func(t *testing.T) {
 		s := NewLinkState(nil)
 		s.SetRemote(stack, val(`0`))
