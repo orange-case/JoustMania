@@ -1,6 +1,7 @@
 package flagsmith_test
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -97,8 +98,8 @@ func TestAbandonedCopyRefusedAfterHeal(t *testing.T) {
 // Probe 3, "re-push in the heal round" (5 replaced by 20): an agent-limiting
 // kill switch at stage (30), an operator sets conservative (3) in Flagsmith
 // while the refusal run lasts, and a lagging copy that still shows stage
-// answers the heal round. Since #2621
-// that round merges with the remote value, so it changes nothing and queues no
+// answers the heal round. Since #2621 that round merges with the remote value,
+// so where the local value equals it the round changes nothing and queues no
 // push over the operator's conservative, which applies with the next document.
 func TestHealRoundDoesNotPushOverFlagsmith(t *testing.T) {
 	const flag = "llm.max_requests_per_minute"
@@ -111,7 +112,9 @@ func TestHealRoundDoesNotPushOverFlagsmith(t *testing.T) {
 	}})
 	h.online()
 	h.round()
-	pendingBefore := h.link.Links().HasPending(key)
+	if h.link.Links().HasPending(key) {
+		t.Fatalf("setup: %s pending before the refusal run, want in sync", flag)
+	}
 	start := h.clock.Now()
 	h.fake.SetDocument(document(start, []map[string]any{fsState(flag, true, "conservative")}), "")
 	h.round()
@@ -124,12 +127,103 @@ func TestHealRoundDoesNotPushOverFlagsmith(t *testing.T) {
 	if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
 		t.Fatalf("setup: pull span %v, want the lagging copy accepted by the heal", a)
 	}
-	if got := h.link.Links().HasPending(key); got && !pendingBefore {
+	if h.link.Links().HasPending(key) {
 		t.Fatalf("UC-054/BR-005 the heal round queued stage for Flagsmith over the operator's conservative")
 	}
 	h.fake.SetDocument(document(start, []map[string]any{fsState(flag, true, "conservative")}), "")
 	h.round()
 	if v, _ := h.local("agent", flag, flagsmith.ScopeStack); v.Variant != "conservative" {
 		t.Fatalf("UC-054/main step 2 %s = %+v after the heal, want the operator's conservative", flag, v)
+	}
+}
+
+// UC: UC-054 BR-005
+// The newest time is genuine (an operator's kill, stamped T) and a lagging
+// cache answers now and then with an older copy (enabled on): the correct
+// copy read on two full pulls in a row ends each run, so the lagging copy is
+// never accepted by the timeout and T is never abandoned (#2602, opposer
+// finding of #2732: two lagging hits 10 h apart must not undo the kill).
+func TestGenuineNewestEndsRunOnRepeatedReads(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	genuine := h.clock.Now()
+	serveKill := func() {
+		// With its Last-Modified: a conditional pull would be a 304, no read.
+		h.fake.SetDocument(document(genuine, []map[string]any{fsState("enabled", true, "off")}), genuine.UTC().Format(http.TimeFormat))
+	}
+	serveLagging := func() {
+		h.fake.SetDocument(document(genuine.Add(-time.Hour), []map[string]any{fsState("enabled", true, "on")}), "")
+	}
+	serveKill()
+	h.round()
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("setup: agent/enabled = %q, want off", got)
+	}
+	for i := range 3 {
+		serveLagging()
+		h.round()
+		wantRefusedLagging(t, h, i)
+		serveKill()
+		h.round()
+		h.round()
+		h.clock.Advance(6 * time.Hour)
+	}
+	serveKill()
+	h.round()
+	if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
+		t.Fatalf("UC-054/BR-005 pull span %v: the genuine newest document was refused (abandoned)", a)
+	}
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %q at the end, want off", got)
+	}
+}
+
+func wantRefusedLagging(t *testing.T, h *harness, i int) {
+	t.Helper()
+	if a := h.lastPull(); a[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
+		t.Fatalf("UC-054/BR-005 lagging hit %d, %v: pull span %v, want stale_document (the run should have ended with the genuine reads)", i+1, time.Duration(i)*6*time.Hour, a)
+	}
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %q after lagging hit %d: the lagging copy undid the kill", got, i+1)
+	}
+}
+
+// UC: UC-054 BR-005
+// An abandoned copy read while a later run is open is refused and neither
+// ends nor restarts that run: the run's older document is accepted once the
+// run has lasted 10 h.
+func TestAbandonedCopyInsideRunKeepsRun(t *testing.T) {
+	h := staleWedge(t)
+	h.round()
+	h.clock.Advance(10 * time.Hour)
+	h.round() // the heal: 2100 abandoned, the current document is the newest
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("setup: agent/enabled = %q, want off after the heal", got)
+	}
+	accepted := h.clock.Now()
+	// A second skewed time ahead of the accepted one opens a new run.
+	h.fake.SetDocument(document(accepted.Add(24*time.Hour), []map[string]any{fsState("enabled", true, "off")}), "")
+	h.round()
+	h.fake.SetDocument(document(accepted.Add(time.Minute), []map[string]any{fsState("enabled", true, "on")}), "")
+	h.round()
+	wantStaleOn := func(when string) {
+		t.Helper()
+		if a := h.lastPull(); a[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
+			t.Fatalf("UC-054/BR-005 %s: pull span %v, want stale_document", when, a)
+		}
+	}
+	wantStaleOn("run opened")
+	h.clock.Advance(6 * time.Hour)
+	serveTooNew(h)
+	h.round()
+	wantStaleOn("the abandoned copy inside the run")
+	h.fake.SetDocument(document(accepted.Add(time.Minute), []map[string]any{fsState("enabled", true, "on")}), "")
+	h.clock.Advance(4 * time.Hour)
+	h.round()
+	if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
+		t.Fatalf("UC-054/BR-005 pull span %v after 10 h: the abandoned copy inside the run restarted it", a)
+	}
+	if got := enabledVariant(h); got != "on" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %q, want on (the run's document accepted)", got)
 	}
 }

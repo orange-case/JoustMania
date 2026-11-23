@@ -58,6 +58,9 @@ const (
 	staleAcceptPolls = 10
 	// maxAbandoned is how many given-up newest times are remembered (#2602).
 	maxAbandoned = 8
+	// sameToEnd: documents stamped exactly the newest time, read on this
+	// many full pulls in a row, end a run of stale_document refusals (#2602).
+	sameToEnd = 2
 	// ReasonStaleDocument is the pull reason of a document older than one
 	// this process already read (a cache or region serving an older copy):
 	// the round is skipped (telemetry.md §10.4).
@@ -104,6 +107,11 @@ type puller struct {
 	// time.Now carries a monotonic reading, so this is elapsed time).
 	staleRun   bool
 	staleSince time.Time
+	// sameRead counts the documents stamped exactly the newest time read in
+	// a row during a run (#2602): sameToEnd of them end it, so a genuine
+	// newest document ends the run and a too-new copy served now and then
+	// between refusals does not.
+	sameRead int
 	// abandoned are the newest times given up when an older document was
 	// accepted (the last maxAbandoned, #2602): a document stamped exactly one
 	// of them is the too-new copy again and is refused as stale.
@@ -512,9 +520,10 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 	// After max(10 min, 10 polls) of refusals in a row (local elapsed time)
 	// the document is accepted: the newest time itself may be wrong. The
 	// newest time it gave up is abandoned: a copy stamped with it is refused
-	// from then on, never accepted by the timeout and outside any run, so it
-	// cannot undo the accepted document (#2602).
+	// from then on, never accepted by the timeout, so it cannot undo the
+	// accepted document (#2602). It neither starts nor ends a run.
 	if rc.hasUpd && p.isAbandoned(rc.updated) {
+		p.sameRead = 0
 		p.forceFull = true
 		l.NotePull(rc.now, "")
 		reason = ReasonStaleDocument
@@ -524,6 +533,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 		if !p.staleRun {
 			p.staleRun, p.staleSince = true, rc.now
 		}
+		p.sameRead = 0
 		refusing := rc.now.Sub(p.staleSince)
 		if refusing < p.staleAcceptAfter() {
 			p.forceFull = true
@@ -532,16 +542,27 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 			return rc.stats, nil
 		}
 
+		p.abandon(p.newest)
 		l.Logger().Warn("flagsmith stale document accepted",
 			"updated_at", rc.updated.UTC().Format(time.RFC3339Nano),
 			"newest", p.newest.UTC().Format(time.RFC3339Nano),
-			"refused_for", refusing.String())
-		p.abandon(p.newest)
+			"refused_for", refusing.String(),
+			"abandoned", len(p.abandoned))
 	}
-	// Only a strictly newer document ends a run: the newest copy served again
-	// (a cache still holding the too-new time) is applied but does not (#2602).
-	if !rc.hasUpd || !rc.updated.Equal(p.newest) {
-		p.staleRun = false
+	// A run ends with a strictly newer document, a document without an update
+	// time, or the newest time read on sameToEnd full pulls in a row: a copy
+	// stamped with the newest time served now and then between refusals (a
+	// cache still holding a too-new time) is applied but does not end it
+	// (#2602).
+	switch {
+	case !p.staleRun:
+	case rc.hasUpd && sameTime(rc.updated, p.newest):
+		p.sameRead++
+		if p.sameRead >= sameToEnd {
+			p.staleRun, p.sameRead = false, 0
+		}
+	default:
+		p.staleRun, p.sameRead = false, 0
 	}
 	if rc.hasUpd {
 		p.newest = rc.updated
@@ -584,6 +605,11 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 		}
 	default:
 		l.NotePull(rc.now, lm)
+	}
+	if p.staleRun {
+		// Every pull of a run is in full (#2602): a 304 is no read, so the
+		// newest document read in a row must come with a body.
+		p.forceFull = true
 	}
 	result = ResultOK
 	if rc.stats.applied > 0 {
@@ -801,11 +827,17 @@ func (p *puller) staleAcceptAfter() time.Duration {
 // accepted (#2602).
 func (p *puller) isAbandoned(t time.Time) bool {
 	for _, a := range p.abandoned {
-		if a.Equal(t) {
+		if sameTime(a, t) {
 			return true
 		}
 	}
 	return false
+}
+
+// sameTime compares two update times to the microsecond: the header fallback
+// is a float epoch, a few hundred ns off the body time of the same document.
+func sameTime(a, b time.Time) bool {
+	return a.Round(time.Microsecond).Equal(b.Round(time.Microsecond))
 }
 
 // abandon remembers a given-up newest time, the last maxAbandoned of them.
