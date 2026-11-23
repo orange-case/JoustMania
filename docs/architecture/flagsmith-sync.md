@@ -362,7 +362,8 @@ entity.
    one (nothing written, the next pull in full), without starting or ending a run and never accepted by the
    timeout; any other time is judged as above. Update times are compared to the microsecond (the header time is
    a float epoch). So the too-new copy cannot undo the accepted values, and kill
-   switches no longer flap between the two copies (#2602).
+   switches no longer flap between the two copies (#2602; one exception, a too-new time that was only ever
+   refused, is §10 residual (a)).
 7. **Every pulled write is conditional**: it carries the version of the local slot as read, empty slots included, so a
    local write that lands between the read and the apply wins (the pulled write is refused as stale, and the next round
    sees the conflict). Event appends (§4.3) are the one unconditional write.

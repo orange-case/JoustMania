@@ -360,3 +360,44 @@ func TestHeaderCopyOfNewestNotOlder(t *testing.T) {
 		t.Fatalf("UC-054/main step 2 decision.backend = %+v, want openai from the header copy", v)
 	}
 }
+
+// UC: UC-054 BR-005
+// More newest times read than the 8 kept: the earliest are dropped, so the
+// too-new times, the latest, stay and the heal abandons all of them (#2732
+// delta review: a list that dropped its latest entry would lose T1 here).
+func TestHealKeepsTooNewTimesBeyondCap(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	// Eight newer times, each read as the newest and all before the current
+	// document (stamped at the clock, which every round moves 2 s on).
+	base := h.clock.Now()
+	for i := range 8 {
+		h.fake.SetDocument(document(base.Add(time.Duration(i)*time.Second), []map[string]any{fsState("enabled", true, "off")}), "")
+		h.round()
+	}
+	t1 := tooNew.Add(-24 * time.Hour)
+	serveT1 := func() {
+		h.fake.SetDocument(document(t1, []map[string]any{fsState("enabled", true, "on")}), "")
+	}
+	serveT1()
+	h.round()
+	serveTooNew(h)
+	h.round()
+	serveCurrent(h)
+	h.round()
+	wantStaleRefusal(t, h, "first refusal")
+	h.clock.Advance(10 * time.Hour)
+	h.round()
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("setup: agent/enabled = %q after the heal, want off", got)
+	}
+	h.clock.Advance(time.Hour)
+	serveT1()
+	h.round()
+	if a := h.lastPull(); a[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
+		t.Fatalf("UC-054/BR-005 pull span %v: T1, read as the newest after 8 other times, was not abandoned, want stale_document", a)
+	}
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %q: the T1 copy undid the kill", got)
+	}
+}
