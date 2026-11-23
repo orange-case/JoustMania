@@ -9,9 +9,6 @@ import (
 )
 
 // UC: UC-042 main
-//
-// #2584: the retro's model call carries the game as its conversation id, so the
-// backend's chat span (gen_ai.conversation.id) joins the game's per-game spend.
 func TestRetroCapture_PromptCarriesTheGameAsConversation(t *testing.T) {
 	var mu sync.Mutex
 	var got []llm.Prompt

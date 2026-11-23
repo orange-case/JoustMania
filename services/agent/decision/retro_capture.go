@@ -625,8 +625,7 @@ func (rc *RetroCoordinator) runRetroInfer(ctx context.Context, span trace.Span, 
 		System: prompt.System,
 		User:   prompt.User,
 		Model:  prompt.Model,
-		// The game: its chat span carries gen_ai.conversation.id like the decide
-		// span does, so a per-game view includes the retro's spend (#2584).
+		// So the per-game spend includes the retro.
 		ConversationID: sessionID,
 	})
 	latencyMs := now().Sub(start).Milliseconds()
@@ -798,8 +797,7 @@ type retroPromptAttrs struct {
 // set (#844), mirroring llmPromptAttributes. Every emission routes through it so
 // the schema is complete and consistent on every emission:
 //
-//   - no gen_ai.* operation attributes (#2584): the retro span is not a model call;
-//     the call is the backend's own `chat {model}` CLIENT child, which carries them
+//   - no gen_ai.* attributes: the model call is the backend's `chat {model}` child
 //   - agent.mode            = "retro"
 //   - agent.objectives      = sorted "k=v" weights (summarizeObjectives)
 //   - interventions.allowed = the allow-list summary (allowedSummary)

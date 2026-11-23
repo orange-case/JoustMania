@@ -10,10 +10,6 @@ import (
 )
 
 // UC: UC-040 main
-//
-// #2584: the claude call reports its usage to the invocation's accumulator (the
-// values on its chat span; cache creation as cache write), and the backend's
-// request settings are the ones it sends.
 func TestUsage_ClaudeRecordsTheCall(t *testing.T) {
 	api := newFakeAPI(t, 200, message("end_turn", textBlock(answerJSON)), 0)
 	b := api.backend("claude-haiku-4-5", false)
@@ -59,10 +55,7 @@ func TestUsage_ClaudeFailedCallAddsOnlyItsFinishReason(t *testing.T) {
 }
 
 // UC: UC-040 A2
-//
-// #2584: a call the model answered keeps its tokens although the decision falls
-// back (refusal, max_tokens cut-off); a timeout has no response, so no tokens and
-// finish reason "error".
+// A refusal or max_tokens cut-off keeps its tokens; a timeout has none.
 func TestUsage_ClaudeAnsweredFailuresKeepTokens(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

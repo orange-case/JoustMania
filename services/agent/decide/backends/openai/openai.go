@@ -211,8 +211,7 @@ func New(cfg Config) *Backend {
 // Name implements decide.Backend.
 func (b *Backend) Name() string { return Name }
 
-// RequestSettings are the max_tokens and temperature every request of this backend
-// sends (shapeFor), for the invoke_agent span's start (#2584).
+// RequestSettings are the settings every request of this backend sends.
 func (b *Backend) RequestSettings() decide.RequestSettings {
 	shape := shapeFor(b.provider, b.cfg.Model, b.cfg.ReasoningEffort)
 	return decide.RequestSettings{MaxTokens: MaxTokens, Temperature: shape.temperature}
@@ -492,8 +491,7 @@ type callResult struct {
 func (b *Backend) finish(ctx context.Context, span trace.Span, c callResult, resp *decide.Response) {
 	duration := time.Since(c.start)
 	mc := chathttp.Call{Provider: b.provider, RequestModel: b.cfg.Model, Host: b.host, Port: b.port}
-	// The invoke_agent span sums this call (#2584): the values set on the chat span
-	// below, nothing for a call that got no response.
+	// Recorded on every exit, also for a call that got no response.
 	var call decide.CallUsage
 	defer func() { decide.RecordCall(ctx, call) }()
 	if r := c.resp; r != nil {
@@ -542,8 +540,7 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, c callResult, res
 		}
 	}
 	if c.resp == nil {
-		// Transport or status failure: no response, so the generation ended in
-		// error (v0.1.0 note [13]), on the chat span and in the decide totals.
+		// No response (transport or status failure): the generation ended in error.
 		span.SetAttributes(semconv.GenAIResponseFinishReasons(llmio.FinishError))
 		call.FinishReasons = []string{llmio.FinishError}
 	}

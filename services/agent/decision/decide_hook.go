@@ -79,8 +79,6 @@ func invokeAgentStartAttributes(model string, remote bool, settings decide.Reque
 	if remote {
 		attrs = append(attrs, semconv.GenAIOutputTypeJSON)
 	}
-	// Request settings the chosen backend sends on every call (#2584): known before
-	// the call, so from the span's start; absent when the backend sets none (jev).
 	if settings.MaxTokens > 0 {
 		attrs = append(attrs, semconv.GenAIRequestMaxTokens(settings.MaxTokens))
 	}
@@ -98,10 +96,7 @@ func requestSettingsOf(b decide.Backend) decide.RequestSettings {
 	return decide.RequestSettings{}
 }
 
-// usageAttributes are an invocation's summed usage (#2584): one attribute per
-// count at least one call reported, every call's finish reasons in call order.
-// Nothing when no call reported anything (a rules decision, or a remote call that
-// failed before any response).
+// usageAttributes omits any count no call reported.
 func usageAttributes(t decide.UsageTotals) []attribute.KeyValue {
 	var attrs []attribute.KeyValue
 	if t.InputTokens.OK {
@@ -267,8 +262,7 @@ type decideRecord struct {
 	// trig is the OTLP Export that triggered this decide when the cycle has no
 	// agent.signal_received span (in a game, #2648): emitted as an event on the span.
 	trig *EvalTrigger
-	// usage sums the model calls of a remote invocation (#2584); nil on the rules
-	// path, so its span carries no usage.
+	// usage is nil on the rules path, so its span carries no usage.
 	usage          *decide.Usage
 	requested      string
 	used           string
@@ -793,8 +787,7 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 		l.countPredictionDropped(root, rec)
 	}()
 
-	// Each model call of this invocation adds its usage here (#2584), also the calls
-	// of a decision that then falls back: they were made and billed.
+	// Calls of a decision that then falls back still count: they were billed.
 	rec.usage = &decide.Usage{}
 	callCtx, cancel := context.WithTimeout(decide.WithUsage(spanCtx, rec.usage), timeout)
 	resp, err := backend.Decide(callCtx, rec.req)

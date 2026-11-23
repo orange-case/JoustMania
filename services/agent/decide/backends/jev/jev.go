@@ -283,8 +283,7 @@ func gateAttributes(resp decide.Response) []attribute.KeyValue {
 func (b *Backend) finish(ctx context.Context, span trace.Span, start time.Time, res *wireResult, errType string) {
 	duration := time.Since(start)
 	mc := chathttp.Call{Provider: ProviderName, RequestModel: b.cfg.Model, Host: b.host, Port: b.port}
-	// The invoke_agent span sums this call (#2584): one per HTTP call of the
-	// two-stage round, with the usage set on the chat span below (if any).
+	// One record per HTTP call of the two-stage round, on every exit.
 	var call decide.CallUsage
 	defer func() { decide.RecordCall(ctx, call) }()
 	if res != nil {
@@ -312,10 +311,7 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, start time.Time, 
 			span.SetAttributes(llmio.OutputContentAttribute(llmio.OutputMessage(res.Text, nil, "", finish)))
 		}
 	}
-	// Jev reports no finish reason. The call's reason is derived like its captured
-	// output message's: "stop" for a decoded answer, "error" for no response or an
-	// answer that failed to decode (v0.1.0 note [13]); on the chat span and in the
-	// decide totals (#2584).
+	// Jev reports no finish reason: "error" for no response or an undecodable answer.
 	reason := llmio.FinishStop
 	if res == nil || errType != "" {
 		reason = llmio.FinishError

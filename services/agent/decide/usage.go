@@ -5,20 +5,11 @@ import (
 	"sync"
 )
 
-// Usage of one decide invocation (#2584): the GenAI agent span
-// (`invoke_agent joustmania-agent`, telemetry.md §4.2) carries the totals of the
-// model calls the invocation made. A backend reports each call's usage with
-// RecordCall at the point where it stamps that call's own `chat {model}` span, so
-// the totals equal the sum of the chat spans, including the calls of a decision
-// that then fell back (timeout, error, invalid answer): those calls were made and
-// billed.
-//
-// The accumulator rides the call's context (WithUsage), so it is per invocation:
-// two games deciding at once each have their own, and Decide's signature stays as
-// it is. It is safe for concurrent use.
+// Usage totals for the invoke_agent span (telemetry.md §4.2, #2584) are the sum of
+// the invocation's chat spans, including calls of a decision that then fell back:
+// they were billed. The accumulator rides the context, so it is per invocation.
 
-// Count is a token count a call reported. OK is false when the call reported no
-// such value, so a missing value is never summed as 0.
+// Count is a reported token count; OK false means unreported, never summed as 0.
 type Count struct {
 	N  int
 	OK bool
@@ -41,14 +32,11 @@ type CallUsage struct {
 	CacheReadInputTokens  Count
 	CacheWriteInputTokens Count
 	ReasoningOutputTokens Count
-	// FinishReasons of the call's choices, in order ("error" for a call that got
-	// no response, as on its chat span). Empty when the call reported none.
+	// FinishReasons in choice order; "error" for a call that got no response.
 	FinishReasons []string
 }
 
-// UsageTotals are an invocation's totals. A Count is OK when at least one call
-// reported it. FinishReasons are every call's reasons concatenated in call order,
-// one entry per generation (v0.1.0 note [13]: positional, no de-duplication).
+// UsageTotals are an invocation's totals; FinishReasons are positional, never de-duplicated.
 type UsageTotals struct {
 	Calls                 int
 	InputTokens           Count
@@ -59,7 +47,7 @@ type UsageTotals struct {
 	FinishReasons         []string
 }
 
-// Usage accumulates the calls of one invocation.
+// Usage accumulates the calls of one invocation; safe for concurrent use.
 type Usage struct {
 	mu sync.Mutex
 	t  UsageTotals
@@ -75,8 +63,7 @@ func (u *Usage) Add(c CallUsage) {
 	u.t.CacheReadInputTokens.add(c.CacheReadInputTokens)
 	u.t.CacheWriteInputTokens.add(c.CacheWriteInputTokens)
 	u.t.ReasoningOutputTokens.add(c.ReasoningOutputTokens)
-	// Empty reasons are skipped: an openai-compatible vendor that returns an empty
-	// finish_reason leaves the decide span's list shorter than its chat spans'.
+	// Skip empty reasons (some openai-compatible vendors send them).
 	for _, r := range c.FinishReasons {
 		if r != "" {
 			u.t.FinishReasons = append(u.t.FinishReasons, r)
@@ -100,24 +87,20 @@ func WithUsage(ctx context.Context, u *Usage) context.Context {
 	return context.WithValue(ctx, usageKey{}, u)
 }
 
-// RecordCall adds one model call's usage to the invocation's accumulator in ctx.
-// A no-op without one (a backend called outside the decide hook, e.g. in tests).
+// RecordCall adds one call's usage to the accumulator in ctx; a no-op without one.
 func RecordCall(ctx context.Context, c CallUsage) {
 	if u, ok := ctx.Value(usageKey{}).(*Usage); ok && u != nil {
 		u.Add(c)
 	}
 }
 
-// RequestSettings are a backend's request settings that the invoke_agent span
-// carries from its start (gen_ai.request.max_tokens, gen_ai.request.temperature).
-// MaxTokens 0 and a nil Temperature mean the backend does not set them.
+// RequestSettings are a backend's request settings; 0 / nil means not set.
 type RequestSettings struct {
 	MaxTokens   int
 	Temperature *float64
 }
 
-// RequestSettingsReporter is implemented by a backend whose request settings are
-// known before the call (claude, openai). Jev sets neither.
+// RequestSettingsReporter is implemented by backends whose settings are known before the call.
 type RequestSettingsReporter interface {
 	RequestSettings() RequestSettings
 }

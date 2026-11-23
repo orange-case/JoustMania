@@ -28,9 +28,7 @@ type Prompt struct {
 	System string
 	User   string
 	Model  string
-	// ConversationID is the game the call belongs to (attribution only, #2584):
-	// the backend's chat span carries it as gen_ai.conversation.id, so a per-game
-	// view includes the retro's spend. "" for calls outside a game (the proposer).
+	// ConversationID is the game the call belongs to (gen_ai.conversation.id); "" outside a game.
 	ConversationID string
 }
 

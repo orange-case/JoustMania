@@ -6,9 +6,6 @@ import (
 )
 
 // UC: UC-042 main
-//
-// #2584: the proposer works across games, so its model call carries no
-// conversation id (its chat span has no gen_ai.conversation.id).
 func TestProposeOnce_PromptHasNoConversationID(t *testing.T) {
 	backend := &capturingBackend{}
 	p, _, _, _ := proposerWithRecorder(t, backend)

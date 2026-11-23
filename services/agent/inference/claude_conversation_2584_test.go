@@ -8,10 +8,6 @@ import (
 )
 
 // UC: UC-042 main
-//
-// #2584: the chat span carries gen_ai.conversation.id only when the prompt names
-// a game, and the cache-write tokens under the v0.1.0 name beside the Go semconv
-// v1.41.0 one.
 func TestClaude_ConversationIDAndCacheWrite(t *testing.T) {
 	for _, tc := range []struct {
 		name, id string

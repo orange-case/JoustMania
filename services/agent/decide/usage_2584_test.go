@@ -8,10 +8,6 @@ import (
 )
 
 // UC: UC-040 main
-//
-// #2584: the per-invocation usage accumulator sums only reported counts, keeps
-// every call's finish reasons in call order, is safe for concurrent calls, and is
-// a no-op without an accumulator in the context.
 func TestUsage_Accumulates(t *testing.T) {
 	t.Run("UC-040/main sums reported counts only", func(t *testing.T) {
 		u := &Usage{}
@@ -24,7 +20,7 @@ func TestUsage_Accumulates(t *testing.T) {
 		if got.CacheReadInputTokens.OK || got.CacheWriteInputTokens.OK || got.ReasoningOutputTokens.OK {
 			t.Errorf("unreported counts must stay unset: %+v", got)
 		}
-		// Positional, one entry per generation (v0.1.0 note [13]); "" is skipped.
+		// Positional, no de-duplication; "" is skipped.
 		if !reflect.DeepEqual(got.FinishReasons, []string{"stop", "error", "stop"}) {
 			t.Errorf("finish reasons = %v, want [stop error stop]", got.FinishReasons)
 		}

@@ -312,8 +312,7 @@ func TestRetroCapture_SchemaComplete(t *testing.T) {
 			t.Errorf("attr %s = %q (present=%v), want %q", key, v.AsString(), ok, expected)
 		}
 	}
-	// UC-042 / #2584: the retro span is not a model call, so it carries no gen_ai
-	// operation attributes (the call is the backend's chat {model} child).
+	// UC-042: the retro span is not a model call (its chat {model} child is).
 	for _, key := range []string{"gen_ai.operation.name", "gen_ai.request.model", "gen_ai.output.type"} {
 		if v, ok := attrValue(span, key); ok {
 			t.Errorf("%s = %q on the retro span, want absent (#2584)", key, v.Emit())

@@ -14,8 +14,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-// usageBackend is a remote backend whose Decide reports one CallUsage per model
-// call it "makes" (like jev's two-stage round), then answers or fails.
+// usageBackend reports one CallUsage per simulated model call, then answers or fails.
 type usageBackend struct {
 	calls    []decide.CallUsage
 	answer   func(decide.Request) (decide.Response, error)
@@ -31,7 +30,6 @@ func (b *usageBackend) Decide(ctx context.Context, req decide.Request) (decide.R
 	return b.answer(req)
 }
 
-// settingsBackend adds the optional RequestSettingsReporter.
 type settingsBackend struct{ usageBackend }
 
 func (b *settingsBackend) RequestSettings() decide.RequestSettings { return *b.settings }
@@ -54,11 +52,6 @@ var usageKeys = []string{
 // UC: UC-040 main
 // UC: UC-040 A2
 // UC: UC-040 A1
-//
-// #2584: the invoke_agent span carries the summed usage of the invocation's model
-// calls (semantic-conventions-genai v0.1.0 names), set at span end; a total only
-// when at least one call reported it; the calls of a decision that fell back
-// still count; the rules path has none.
 func TestInvokeAgentSpan_SummedUsage(t *testing.T) {
 	answer := ffaAnswer("grant_shield", 0.9, "A", 0.5, "shield")
 
@@ -89,7 +82,7 @@ func TestInvokeAgentSpan_SummedUsage(t *testing.T) {
 			}
 		}
 		v, _ := attrValue(span, "gen_ai.response.finish_reasons")
-		// One entry per generation, no de-duplication (v0.1.0 note [13]).
+		// Positional, no de-duplication.
 		if got := v.AsStringSlice(); !reflect.DeepEqual(got, []string{"stop", "length", "stop"}) {
 			t.Errorf("gen_ai.response.finish_reasons = %v, want [stop length stop]", got)
 		}
@@ -170,10 +163,6 @@ func TestInvokeAgentSpan_SummedUsage(t *testing.T) {
 }
 
 // UC: UC-040 main
-//
-// #2584: gen_ai.request.max_tokens and gen_ai.request.temperature of the chosen
-// backend are on the invoke_agent span from its start; absent when the backend
-// sets none.
 func TestInvokeAgentSpan_RequestSettingsAtStart(t *testing.T) {
 	answer := ffaAnswer("grant_shield", 0.9, "A", 0.5, "shield")
 	zero := 0.0
@@ -210,10 +199,6 @@ func TestInvokeAgentSpan_RequestSettingsAtStart(t *testing.T) {
 }
 
 // UC: UC-040 A2
-//
-// #2584: a remote call that times out (a real claude backend against a server
-// that hangs) has no response: the fallback span carries no tokens and the
-// finish reason "error".
 func TestInvokeAgentSpan_TimeoutHasNoTokens(t *testing.T) {
 	hang := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

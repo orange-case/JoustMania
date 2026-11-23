@@ -11,10 +11,6 @@ import (
 )
 
 // UC: UC-040 A13
-//
-// #2584: each HTTP call of the two-stage round reports its usage to the
-// invocation's accumulator, so the invoke_agent span's totals equal the sum of
-// the two chat spans.
 func TestUsage_TwoStageRoundSumsBothCalls(t *testing.T) {
 	api := newScriptedAPI(t, ok(loadFixture(t, fxIntervention)), ok(loadFixture(t, fxGateDetails)))
 	usage := &decide.Usage{}
@@ -53,9 +49,6 @@ func TestUsage_TwoStageRoundSumsBothCalls(t *testing.T) {
 }
 
 // UC: UC-040 A2
-//
-// #2584: Jev reports no finish reason; a call without a response is "error" on
-// the chat span and in the totals, an answered call "stop".
 func TestUsage_JevFinishReasons(t *testing.T) {
 	t.Run("UC-040/A2 status failure", func(t *testing.T) {
 		api := newScriptedAPI(t, fakeReply{status: 500, body: []byte(`{"detail":"boom"}`)})

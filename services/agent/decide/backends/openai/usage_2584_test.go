@@ -9,10 +9,6 @@ import (
 )
 
 // UC: UC-040 main
-//
-// #2584: the openai call reports its usage to the invocation's accumulator (the
-// values on its chat span), and the backend's request settings are the ones it
-// sends.
 func TestUsage_OpenAIRecordsTheCall(t *testing.T) {
 	api := newFakeAPI(t, fixed(200, completion("stop", answerJSON, nil)))
 	b := api.backend("gpt-4.1-mini", false)
@@ -44,9 +40,7 @@ func TestUsage_OpenAIRecordsTheCall(t *testing.T) {
 }
 
 // UC: UC-040 main
-//
-// #2584: the json_schema -> json_object retry is two calls: the refused first
-// (no response: "error", no tokens) and the answered second, summed in order.
+// The refused json_schema call counts as "error" with no tokens.
 func TestUsage_OpenAIJSONObjectRetrySumsBothCalls(t *testing.T) {
 	api := newFakeAPI(t, func(body map[string]any) reply {
 		if body["response_format"].(map[string]any)["type"] == "json_schema" {
@@ -68,9 +62,6 @@ func TestUsage_OpenAIJSONObjectRetrySumsBothCalls(t *testing.T) {
 }
 
 // UC: UC-040 A2
-//
-// #2584: a status failure has no response: "error" on the chat span and in the
-// totals, no tokens.
 func TestUsage_OpenAIStatusFailureIsError(t *testing.T) {
 	api := newFakeAPI(t, fixed(500, []byte(`{"error":{"message":"boom"}}`)))
 	usage := &decide.Usage{}
