@@ -77,8 +77,10 @@ type entry struct {
 	// stale (ReofferRead, ClearRefusalRead, SetInSyncRead).
 	offered uint64
 	// reverting: a pull round's revert of the refused value is being written
-	// (BeginRevert).
-	reverting bool
+	// (BeginRevert); revertEcho is the version of the latest local save of the
+	// remote value meanwhile.
+	reverting  bool
+	revertEcho uint64
 	// refusedAt and refusedStatus: when the last refusal was recorded and the
 	// HTTP status Flagsmith answered it with (0: refused without a request).
 	refusedAt     time.Time
@@ -172,17 +174,25 @@ func (s *LinkState) BeginRevert(k Key) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e := s.entries[k]; e != nil {
-		e.reverting = true
+		e.reverting, e.revertEcho = true, 0
 	}
 }
 
-// EndRevert ends BeginRevert's mark, whatever became of the write.
-func (s *LinkState) EndRevert(k Key) {
+// EndRevert ends BeginRevert's mark. wrote is the snapshot version of the
+// revert's write (0: not written). When the latest local change during the
+// mark was another save of Flagsmith's value (not written, or after the
+// write), that save ends the hold.
+func (s *LinkState) EndRevert(k Key, wrote uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if e := s.entries[k]; e != nil {
-		e.reverting = false
+	e := s.entries[k]
+	if e == nil {
+		return
 	}
+	if e.revertEcho != 0 && e.revertEcho == e.offered && (wrote == 0 || e.revertEcho > wrote) {
+		endPushRefusalLocked(e)
+	}
+	e.reverting, e.revertEcho = false, 0
 }
 
 // PushRefused returns the local value Flagsmith last refused for k.
@@ -230,6 +240,9 @@ func (s *LinkState) OfferFrom(k Key, v Value, at time.Time, version uint64, offl
 	e := s.entryLocked(k)
 	e.offered = max(e.offered, version)
 	if e.hasRemote && e.remote.Equal(v) {
+		if e.reverting {
+			e.revertEcho = version
+		}
 		s.inSyncLocked(k, e)
 		return false
 	}
@@ -288,7 +301,8 @@ func (s *LinkState) syncLocked(e *entry, inSync bool) {
 }
 
 // inSyncLocked records a local value equal to the remote one: nothing to
-// send, no refused value to hold back (except during a revert). Dropping a pending entry whose
+// send, no refused value to hold back and no push refusal left (except during
+// a revert). Dropping a pending entry whose
 // different value Next handed out records the local value as reverted; a mark
 // kept from an earlier revert stays (its push may still be in flight).
 func (s *LinkState) inSyncLocked(k Key, e *entry) {
@@ -298,9 +312,16 @@ func (s *LinkState) inSyncLocked(k Key, e *entry) {
 		s.dropFromQueueLocked(k)
 	}
 	if !e.reverting {
-		e.pushRefused, e.hasPushRefused = Value{}, false
+		endPushRefusalLocked(e)
 	}
 	s.syncLocked(e, true)
+}
+
+func endPushRefusalLocked(e *entry) {
+	e.pushRefused, e.hasPushRefused = Value{}, false
+	if e.side == SideRemote {
+		e.refused, e.side = "", ""
+	}
 }
 
 func (s *LinkState) offerLocked(k Key, e *entry, v Value, at time.Time, version uint64, offline bool) bool {

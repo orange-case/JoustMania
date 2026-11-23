@@ -79,6 +79,9 @@ type puller struct {
 	// reverting holds the refused stack value a write in progress reverts
 	// (UC-055 A4); it is set and cleared around that one write (#2631 N1).
 	reverting map[Key]Value
+	// revertWrote is the snapshot version of that write once it succeeded
+	// (0: not written), for EndRevert.
+	revertWrote uint64
 	// forceFull: the next pull is unconditional.
 	forceFull bool
 	docHash   [32]byte
@@ -1033,11 +1036,12 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 		// for a later, ordinary Flagsmith change to hold.
 		if revert {
 			p.reverting[k] = le.v
+			p.revertWrote = 0
 			l.links.BeginRevert(k)
 		}
 		p.apply(rc, k, pol, de, le)
 		if revert {
-			l.links.EndRevert(k)
+			l.links.EndRevert(k, p.revertWrote)
 		}
 		delete(p.reverting, k)
 	}
@@ -1232,6 +1236,7 @@ func (p *puller) result(rc *roundCtx, k Key, d, lv Value, u undo, res state.Writ
 			// reported and the value held (BeginRevert), so a re-save is not
 			// sent again.
 			delete(p.reverting, k)
+			p.revertWrote = read
 		} else {
 			l.links.ClearRefusalRead(k, read)
 		}
