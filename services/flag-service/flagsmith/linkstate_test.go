@@ -349,6 +349,47 @@ func TestLinkStateRefusedValue(t *testing.T) {
 			t.Fatal("the next pull round queued the refused 1 again")
 		}
 	})
+	t.Run("UC-055/A4 back to the refused value while a pull round holds the older local value: the round does not queue it", func(t *testing.T) {
+		s := heldWithInFlight(t)
+		s.Offer(stack, val(`1`), t0, 3) // the operator goes back to the refused 1
+		if s.Reoffer(stack, val(`2`), t0, 2) {
+			t.Fatal("a pull round queued the 2 it read before the local change to 1")
+		}
+		s.ConfirmPushed(stack, val(`2`))
+		if p, oos, r := s.Counts(); p != 0 || oos != 1 || r != 1 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 1: the stack runs the refused 1, Flagsmith holds 2", p, oos, r)
+		}
+	})
+	t.Run("UC-055/A4 back to the refused value while a pull round finds the older local value in Flagsmith: the refusal stays", func(t *testing.T) {
+		s := heldWithInFlight(t)
+		s.Offer(stack, val(`1`), t0, 3) // the operator goes back to the refused 1
+		s.SetRemote(stack, val(`2`))    // the round read local 2 (snapshot 2) and Flagsmith shows 2
+		s.ClearRefusalRead(stack, 2)
+		s.SetInSyncRead(stack, 2)
+		if p, oos, r := s.Counts(); p != 0 || oos != 1 || r != 1 {
+			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 1: the stale round must not end the refusal of the local 1", p, oos, r)
+		}
+		s.ClearRefusalRead(stack, 3)
+		s.SetInSyncRead(stack, 3)
+		if _, oos, r := s.Counts(); oos != 0 || r != 0 {
+			t.Fatalf("out_of_sync %d refused %d, want 0 0: a round that read the latest change acts", oos, r)
+		}
+	})
+	t.Run("UC-055/main step 5 back to Flagsmith's value while a pull round adopts the older local value: out of sync", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		s.Offer(stack, val(`1`), t0, 1)
+		s.Next()                        // 1 in flight
+		s.Offer(stack, val(`0`), t0, 2) // the operator goes back to Flagsmith's 0
+		s.SetRemoteRead(stack, val(`1`), 1)
+		if _, oos, _ := s.Counts(); oos != 1 {
+			t.Fatalf("out_of_sync %d after the stale adopt, want 1: the stack runs 0, Flagsmith shows 1", oos)
+		}
+		s.ConfirmPushed(stack, val(`1`))
+		if p, oos, _ := s.Counts(); p != 0 || oos != 1 {
+			t.Fatalf("pending %d out_of_sync %d after the confirm, want 0 1", p, oos)
+		}
+	})
 	t.Run("UC-055/A4 back to the refused value while a newer one is in flight: its refusal keeps the held value", func(t *testing.T) {
 		s := heldWithInFlight(t)
 		s.Offer(stack, val(`1`), t0, 3) // the operator goes back to the refused 1
