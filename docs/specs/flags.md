@@ -766,6 +766,8 @@ without a registry row are never features. A new row is created in Flagsmith at 
 service (FR-214). A Flagsmith-only row (§13, #2705) is a feature like every row, and Flagsmith is the one place
 its value can be changed at runtime (FR-226).
 
+**Variant options** (UC-054 BR-012, UC-055 BR-005; [architecture note §2.3](../architecture/flagsmith-sync.md)). A row with two or more offered variants (its `bounds.variants`, else every declared variant; never an event list) shows them as the feature's multivariate options, one per variant: the option's title (`key`) is the variant name and its value the variant's value as text (`objectives` → `chaos_focused` = `{"endurance":0.1,"balanced":0.1,"accelerate":0.1,"chaos":0.7}`, `decision.operator_brief` → `unkillable` = the brief; #2713). One option at 100 % picks that declared variant stack-wide (by its title, so the stack runs the declared variant, not a copy of its value); the bounds of the row are unchanged: an option whose title names no declared variant (a title renamed in Flagsmith) is matched by its value, and an option at 100 % that is still no declared variant is read as its value and checked like any value. A value edited in Flagsmith while the option keeps its title is shown, not applied, and written back at the next start. A Flagsmith without option titles gets the options of #2709 (value = the variant name).
+
 **What Flagsmith may set** (UC-054 BR-003): a `stack` value of any row (an `overlay`), a `game` or `game+serial`
 value of a row whose scope allows it, and an `event` for a live game (one payload, checked like the agent's).
 `experiment+arm`, `real` and `fraction` values are shown in Flagsmith and refused when changed there

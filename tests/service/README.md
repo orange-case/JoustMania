@@ -57,8 +57,8 @@ Proof: `test_otlp_sink.py` (a game's root span and `player_disconnected` reach t
 Compositions (`harness/stack.py`): `GAME` = controller-manager + game-coordinator, `LOBBY` = `GAME` + menu,
 `AGENT` = `LOBBY` with `otlp=True` plus the agent and the fake OpenAI backend (#1600). In `AGENT` the sink
 tees the services' traces and metrics to the agent (the collector's role) and the agent exports its own
-spans and metrics back to the sink (Jaeger's role): read `agent.decide` & co. with
-`stack.otlp_sink.spans("agent.decide", {"game.id": game_id}, service="agent")`. Shared journey steps
+spans and metrics back to the sink (Jaeger's role): read `invoke_agent joustmania-agent` & co. with
+`stack.otlp_sink.spans("invoke_agent joustmania-agent", {"game.id": game_id}, service="agent")`. Shared journey steps
 (agent flags, menu-started FFA game, decide-span helpers): `agent_flow.py`. Agent journeys run on
 `fresh_stack`: `enabled`, `interventions_allowed` and the agent's LLM budget are global.
 

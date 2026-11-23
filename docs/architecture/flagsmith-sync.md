@@ -62,7 +62,7 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | F11 | **One identity per controller.** A Move controller is the Flagsmith identity `controller:<serial>`, kept across games, with the traits `game_id`, `game_kind`, `coordinator_instance` of the game it plays in; a real game's player values are overrides on it, removed when the controller leaves the game. A shadow game's players keep `game:<gameId>:<serial>` (§2.2). | decided by the maintainer, 2026-11-16 (#2624) |
 | F10 | **Off by default.** `FLAGSMITH_LINK=off` in every stack; CI and the dry-run stacks never call the SaaS; the stage stack opts in through `.env.local`. | recommendation |
 | F13 | **Flagsmith shows the whole configuration.** Every synced feature without a stack overlay carries the registry baseline default as its value under `enabled=false` (the **reference value**), written by the start sequence where it differs (§5.2); toggle off still means "baseline applies", toggle on "this value is the stack overlay". The reference is always the flag-file default, also for a persisted admin setting, which is a stack overlay and shown with the toggle on (§5.2). | decided by the maintainer 2026-11-16 (#2623); admin-setting rule, re-read before each write, failure handling and staged values decided by the maintainer 2026-11-23 (§5.2) |
-| F12 | **Declared variants are options, a pick is one variant.** A synced feature whose flag has declared variants shows them as Flagsmith multivariate options, so the operator picks one instead of typing its name; the stack applies exactly one declared variant stack-wide: one option at 100 % is the pick, any other percentage split is refused (§2.3). Flagsmith never buckets identities for JoustMania. | decided by the maintainer (#2709) |
+| F12 | **Declared variants are options, a pick is one variant.** A synced feature whose flag has declared variants shows them as Flagsmith multivariate options, so the operator picks one instead of typing its name; the stack applies exactly one declared variant stack-wide: one option at 100 % is the pick, any other percentage split is refused (§2.3). Flagsmith never buckets identities for JoustMania. Each option's title (`key`) is the variant name and its value the variant's own value, so the operator sees what a variant does (#2713). | decided by the maintainer (#2709, #2713) |
 
 ## 2. Flagsmith model and the mapping
 
@@ -70,7 +70,7 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 |---|---|---|
 | stack (stage, CI, dry run) | one **environment** of one project `joustmania` | each stack has its own environment and keys, so CI never touches the stage values |
 | registry flag `<set>/<key>` | one **feature** named `<key>`, tagged `<set>`, description = registry `description` | keys are unique across sets (flag-service.md §5.2); one tag per flag set, created on demand |
-| declared variants of a registry flag (two or more) | the feature's **multivariate options**, one per variant, value = the variant name (§2.3, #2709) | options are project-level (every environment of the project sees them), created with 0 % in every environment; the weights are per environment |
+| declared variants of a registry flag (two or more) | the feature's **multivariate options**, one per variant: title (`key`) = the variant name, value = the variant's value as text (§2.3, #2709, #2713) | options are project-level (every environment of the project sees them), created with 0 % in every environment; the weights are per environment |
 | stack overlay (in memory or persisted) | the feature's **environment value**: `enabled=true`, value = §4.1 | |
 | no stack overlay | `enabled=false`, value = the baseline default (the **reference value**, F13) | `enabled=false` never means "flag off"; it means "baseline applies". Written when an overlay is cleared (§4.1 step 3) and, for every synced feature whose value differs, by the start sequence (§5.2, #2623) |
 | game value | override on identity `game:<gameId>` | identity traits `game_kind`, `coordinator_instance` (best effort) |
@@ -179,7 +179,39 @@ before any value push, so:
 ### 2.3 Variant options (F12, #2709)
 
 **Why:** on stage the operator expected a list of choices for `decision.backend` and found one text value; the
-variant names (`jev`, `standard`, `chaos_focused`, …) lived only in the flag files.
+variant names (`jev`, `standard`, `chaos_focused`, …) lived only in the flag files. Since #2713 an option also shows
+what its variant does: `objectives` → `chaos_focused` carries `{"endurance":0.1,"balanced":0.1,"accelerate":0.1,"chaos":0.7}`,
+`decision.operator_brief` → `unkillable` the whole brief.
+
+**An option** (#2713) is `{"key": <variant name>, "type": "unicode", "string_value": <text>}`. The text is the
+variant's value in the form of §2.1 without the name shortcut: a string is itself (`""` for `off`), an object or
+array compact JSON, a number or boolean its JSON text (`60`, `true`). Flagsmith keeps the `key` per feature
+(unique, a slug of letters, digits, `_` and `-`, at most 255 characters, `control` reserved; every declared variant
+name fits, `api/features/multivariate/models.py`) and the value up to `FEATURE_VALUE_LIMIT` characters (default
+20 000; the longest declared variant value is 369 characters today). A text longer than 20 000 characters is replaced
+by the variant name, so such an option still works, by its key. The Flagsmith UI shows the key as the option's title
+and the value as text; JSON is not pretty-printed.
+
+**Which option is which variant.** Everywhere (the start's sync, the weights of a push, the pick of a pull) an option
+is the variant of the first rule that matches: (1) its `key` names an offered variant; (2) its id is one the link
+recorded for a variant (pull only: the start's listing and creations, kept by a later listing); (3) with no `key`, or
+a `key` that names no offered variant (a title a person renamed), its value is a variant name (an option of #2711);
+(4) likewise, its value equals the text of exactly one offered variant. Rules 3 and 4 apply only to the options rule 1
+left over: every key is matched first, so a renamed option never takes a variant another option holds by its key (that
+renamed option is deleted, not updated into a key that is taken). An option none of these match is no variant. On a
+Flagsmith without option keys (below) rule 3 is tried before rule 2, the read order of #2711, so an option whose value
+a person set to another variant's name is that variant.
+
+A value a person edits in Flagsmith while the option keeps its `key` is shown, never applied: the key picks the
+declared variant and the stack runs that variant's own value; the next start writes the variant's value back.
+
+**A Flagsmith without option keys** (before Flagsmith #7698; #2713, maintainer decision D1). The start tells from the
+feature list it already reads, once per start and before any option write, whether the options carry the `key` field
+at all: when any option lacks the field, the link writes the #2711 shape for the rest of that start (no `key`, value =
+the variant name; an option is updated only when its value is not the name, never for the key alone) and reads with
+the #2711 order above. A `key` of `null` is no sign of this: an option of #2711 on a current Flagsmith has
+`"key": null` and is updated. A project with no option at all decides from the answer of the first create (no `key`
+field, or `null` after one was sent); the options created before that answer keep their text until the next start.
 
 **Which features.** A registry row whose flag has two or more **offered variants**: the row's `bounds.variants` when it
 lists them (only names the baseline declares), else every variant the baseline declares, in the baseline's order.
@@ -193,13 +225,29 @@ fetches (`multivariate_options`, no extra read) and keeps them in step with the 
 
 | Case | Request |
 |---|---|
-| an offered variant has no option (value = its name, type `unicode`) | `POST /api/v1/projects/{project}/features/{feature}/mv-options/` with `{"feature", "type": "unicode", "string_value": <name>, "default_percentage_allocation": 0}`: 0 % in every environment, so no environment of the project changes what it serves |
-| an option names no offered variant (a variant the baseline dropped, one a person added, a non-text option, a duplicate) | `DELETE …/mv-options/{id}/` |
+| an offered variant has no option | `POST /api/v1/projects/{project}/features/{feature}/mv-options/` with `{"feature", "key": <name>, "type": "unicode", "string_value": <text>, "default_percentage_allocation": 0}`: 0 % in every environment, so no environment of the project changes what it serves |
+| an option is an offered variant but its `key`, type or value differs (an option of #2711 with the name as value and no key, a variant whose value changed in its flag file) | `PUT …/mv-options/{id}/` with the same body (Flagsmith's update validates `feature` and `default_percentage_allocation`, so the body is complete): the option keeps its id, so its weights in every environment, a running 100 % pick included, stay (#2713). Each update is audited and makes Flagsmith rebuild the document of every environment of the project (about 422 updates at the migration); it also sets the option's `default_percentage_allocation` to 0, which only matters for an environment created later. An update answered `404` (the option was deleted after the listing) drops the option and creates the variant in the same pass |
+| an option is no offered variant, or a second option of one (a variant the baseline dropped, one a person added, a duplicate) | `DELETE …/mv-options/{id}/` |
+
+Options are matched by `key` first, so a person's option that holds a variant's key keeps it and a keyless
+duplicate of the same variant is deleted; deletes are sent before updates and updates before creates (an order of the
+requests only: every option is matched before the first request). **Migration of the #2711 options:** none beyond this; the first start after the upgrade updates
+each option in place (rule 3 matches it), about 422 PUTs with the CI baseline (85 s at 5/s, in the background like the
+creates), and a pick at 100 % keeps applying throughout: before the update the option's value is the name, after it
+the key is.
 
 The options of a synced feature belong to the link: they are made equal to the offered variants at every start (a new
 release that adds or drops a variant changes them at its first start); between starts they are not changed. A failed
-create or delete is logged (WARN `flagsmith option not synced`), counted as a push (op `option`) and leaves the
-feature's value sync as it is; the next start tries again. The sync runs **in the background once the start
+create, update or delete is logged (WARN `flagsmith option not synced`, naming the option's key or id, never its value),
+counted as a push (op `option`) and leaves the feature's value sync as it is; the next start tries again (an update or
+delete answered `404` is handled, above, and counted `ok`). An answer `403` or `405` to a write or to a retry's
+listing (the key may not change options: update needs the same permission as create and delete) stops every
+option write of the pass with one WARN `flagsmith options not synced`; the options stay as they are and keep working
+by the rules above. Three transient errors in a row (a 5xx, a timeout, no answer; each request already tried 3 times)
+end the pass with one WARN; the pass is then retried like the stale identity cleanup (§5.1): every 60 s, at most 10
+times, cancelled with the link, each retry listing the options of the features not yet done again
+(`GET …/mv-options/`). A cancelled start leaves the options it did not reach; the update keeps the ids, so the next
+start updates the rest. The sync runs **in the background once the start
 succeeded** (like the stale identity cleanup, §5.1): the link goes online, reconciles and pulls without waiting for it;
 until a feature's options are created its weight writes name the options the feature list showed (Flagsmith's
 refusal of a stale list is answered by one listing, below). Cost: one request per missing or stale option, paced at
@@ -213,21 +261,29 @@ every option (121 of the 134 registry rows have two or more offered variants, 42
 | Weights in the document (`multivariate_feature_state_values[].percentage_allocation`) | Value read |
 |---|---|
 | none, or all 0 % | the feature's value, as before (§2.1); typing the variant name keeps working |
-| exactly one option at 100 %, the others 0 % | that option's value: the picked variant (a value that names no declared variant is checked like any value) |
+| exactly one option at 100 %, the others 0 % | the variant that option is (rules above, the document's `multivariate_feature_option.key` first); an option that is no variant: its value, checked like any value |
 | anything else (50/50, one option at 30 %, …) | refused: `422 flagsmith_percentage_split` (UC-054 A4), the feature is marked unhealthy "percentage splits are not applied by JoustMania", nothing is written |
 
 `enabled=false` stays "baseline applies" whatever the weights. The edge environment document carries the weights per
 feature state (`api/util/mappers/engine.py` `map_mv_fs_value_to_engine`: `percentage_allocation`, the option's
-`id` and `value`).
+`id`, `value` and, since Flagsmith #7698 of 2026-06, `key`). A document without `key` (rules 2 to 4) reads the same.
+Identity overrides carry a snapshot of the option (`id`, `value`, `key`) that an update does not rewrite; rule 1, 2 or
+3 still maps such a snapshot to the same variant. v2 feature versioning changes nothing here: an option update is
+project-level and keeps the id, a create adds its weight to the live version, and the `__future__` write
+(`_write_variants`) creates any weight row that is missing.
 
 **Pushing.** A stack value sent through `__future__` (§4.1 step 3) carries the weights of every option of the feature:
-100 % on the option whose value is the value sent (the variant name) when the overlay is on, 0 % on every other
+100 % on the option that is the variant sent (by the rules above; ids as before, #2713 changes no weight) when the overlay is on, 0 % on every other
 option; a cleared overlay or a value no option names sends all 0 %. So Flagsmith shows the running choice, and the
 pull reads the link's own push back as the same value (§4.4). Flagsmith refuses weights that do not name every option
 of the feature exactly once (400 `Must include all feature's variants.`, `Variant not found`, `Feature is not
 multivariate.`: a person added or deleted an option since the start): the link lists the options once
-(`GET …/mv-options/`) and sends again; a second refusal refuses the value (UC-055 A4). The v1 fallback (§4.1 step 3)
-and identity overrides send no weights.
+(`GET …/mv-options/`) and sends again; a second refusal refuses the value (UC-055 A4). The listing keeps the variant
+the link recorded for an option id when the rules give none (keyless options with equal values, such as
+`tempo.ramp_down_seconds` `original` and `default`, both 1.5), and a changed id → variant pair makes the next pull
+unconditional, so a pick the document already shows is read again. A listing whose request predates the sync's last
+create can miss that option until one more refusal and listing. The v1 fallback (§4.1 step 3) and identity overrides
+send no weights.
 
 ## 3. The link's state (in memory)
 
@@ -342,14 +398,29 @@ entity.
    epoch after 1970 or lies beyond year 9999 counts as none, so a garbled value cannot block every later document.
    The refusal is bounded: one update time ahead of all later ones (Flagsmith's clock skewed forward and corrected, an
    environment database restore, a garbled but in-range time) would otherwise refuse every document, kill-switch
-   changes included, until a restart. Once older documents have been refused in a row for max(10 min, 10 x the
+   changes included, until a restart. Once a **run** of older-document refusals has lasted max(10 min, 10 x the
    poll interval), measured as local elapsed time (the monotonic clock, never a wall-clock comparison, so a local
    clock at 1970 plays no part), the next older document is accepted and its update time becomes the newest; the
-   link logs a warning `flagsmith stale document accepted`. Any document accepted in between ends the run of
-   refusals; errors and unchanged (`304`) pulls in between do not end it (they return before the update-time
-   check), so after an outage longer than the threshold the first older document is accepted at once and applied
-   like any document, kill switches included (#2621). The generation snapshot and the value guard above still apply
-   to every key in that round.
+   link logs a warning `flagsmith stale document accepted` (with `updated_at`, `newest`, `refused_for` and the
+   number of abandoned times kept). The first refusal starts the run, and every pull of a run is in full (no
+   `If-Modified-Since`). The run ends with a document **strictly newer** than the newest one, with a document
+   without an update time, or when the document stamped exactly the newest time is read on **2 full pulls in a
+   row**: then the newest time is what Flagsmith serves, and a lagging copy that answers now and then is refused
+   again from the start. A copy stamped exactly the newest time read once between refusals (a cache or region still
+   serving a too-new copy now and then) is applied as usual but does not end the run, so it can no longer keep the
+   run from reaching the threshold (#2602). Errors and unchanged (`304`) pulls in between do not end the run either
+   (they return before the update-time check), so after an outage longer than the threshold the first older
+   document is accepted at once and applied like any document, kill switches included (#2621). The generation
+   snapshot and the value guard above still apply to every key in that round. When the older document is accepted,
+   the link gives up the newest time and every other newest time it read that is after the accepted one (the link
+   keeps the last 8 distinct newest times it read; a skewed clock may have stamped several changes). These are
+   **abandoned times** (the last 8 are kept). From then on a
+   document stamped exactly an abandoned time is that copy again and is refused as `stale_document` like an older
+   one (nothing written, the next pull in full), without starting or ending a run and never accepted by the
+   timeout; any other time is judged as above. Update times are compared to the microsecond (the header time is
+   a float epoch). So the too-new copy cannot undo the accepted values, and kill
+   switches no longer flap between the two copies (#2602; one exception, a too-new time that was only ever
+   refused, is §10 residual (a)).
 7. **Every pulled write is conditional**: it carries the version of the local slot as read, empty slots included, so a
    local write that lands between the read and the apply wins (the pulled write is refused as stale, and the next round
    sees the conflict). Event appends (§4.3) are the one unconditional write.
@@ -642,13 +713,13 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | A controller's overrides belong to a game that ended while the flag service was down, and the controller joins a new game | the settle of a new owner removes them unless the `game_id` trait names that owner (§2.2); with traits off in the organisation every first settle removes, so a restart while a game is live loses that game's controller overrides |
 | A document that lags behind a controller's removal hands the former game's override to the new owner | a removed value is skipped for that controller key until the document shows another value, at most max(10 min, 10 polls) (§2.2); a person who sets exactly the removed value again for the new game waits that long |
 | A stale environment document (cached, or older than a push) would revert a confirmed push | keys whose state changed during the round are skipped, and the value guard skips a key whose document value still equals a value its confirmed push replaced (§4.2 step 6); a document whose update time is older than the newest one read is skipped whole (`stale_document`, server time only; §4.2 step 6); pulled writes are conditional on the local slot (§4.2) |
-| One document update time ahead of all later ones (Flagsmith clock skew, an environment database restore, a garbled but in-range time) would refuse every later document as `stale_document`, kill-switch changes included | the refusal ends after max(10 min, 10 x poll interval) of refusals in a row, local elapsed time; the older document is then accepted and becomes the newest, with a warning log; in that round kill switches merge without their remote value and take the more restrictive value (§4.2 step 6). Residuals, accepted by the maintainer 2026-11-15 (follow-up #2602): (a) the copy stamped with the too-new time (a cache or region still serving it) is not older, so it is accepted normally and ends the run: served at least once per max(10 min, 10 x poll interval), it keeps the run from ever reaching the threshold and the tightening stays refused as before; served less often, it makes kill switches flap: the accepted older document tightens, then the too-new copy is newer than the accepted time again and merges normally (`R != D`, `R = L` -> apply), a deliberate loosening, and the refusals start over (an operator's kill in Flagsmith takes effect, then is undone for about the threshold, repeatedly). (b) In the accepted round a kill switch whose local value is tighter than the accepted document keeps local and pushes it; when a lagging copy answers that round while Flagsmith already holds a tighter value set during the refusal run, the push overwrites that value in Flagsmith and the operator's value is lost on both sides (as in the "push overwrites a person's change" row, but the window is the whole refusal run). (c) Every non-kill-switch value in the accepted document that differs from the link's remote value while the local value still equals it applies as a change from Flagsmith (a value Flagsmith changed itself as well as a pushed one) until a newer document is read and corrects it; a pushed value is protected only while its value guard lives, and the guard can end before the threshold (the newest document showed the pushed value), as for a document without an update time |
+| One document update time ahead of all later ones (Flagsmith clock skew, an environment database restore, a garbled but in-range time) would refuse every later document as `stale_document`, kill-switch changes included | the refusal ends after max(10 min, 10 x poll interval) of refusals in a row, local elapsed time; the older document is then accepted and becomes the newest, with a warning log, and is applied like any document, kill switches included (F4, #2621; §4.2 step 6). The too-new copy (a cache or region still serving it) does not end the run when it is read only now and then (the run ends with a strictly newer document, a document without an update time, or the newest time read on 2 full pulls in a row), and after the accepted document it cannot undo it: a document stamped exactly an abandoned time is refused as `stale_document` (#2602). The accepted round merges with the remote value like any round, so where the local value equals the remote value a lagging copy that still shows it changes nothing and pushes nothing (the "heal round re-push" of the #2596 review is gone since #2621); a local change still pending is pushed as in any round. Residuals: (a) only times that were read as the newest are abandoned (the last 8 distinct ones read, and the last 8 abandoned times, are kept): a too-new time that was only ever refused (a skewed clock stamped T1 < T2, and the T1 copy arrived after T2) comes back once after the heal and undoes a kill for one run, then it is the newest and the next heal abandons it; refused times are not abandoned because during a run they are mostly Flagsmith's genuine changes (maintainer decision on #2732); a skewed clock that stamped more than 8 too-new times can likewise bring a copy back, once per refusal run; (b) the too-new copy served on 2 full pulls in a row ends the run like a genuine newest document, so a cache serving it most of the time still delays the heal; (c) a genuine newest time is abandoned only if a run reaches the threshold without the newest document read twice in a row, for example when a lagging cache answers every other pull; a genuine change stamped exactly an abandoned time is then refused until a later change; (d) the newest and abandoned times live in memory only: after a restart the first document read becomes the newest, so a cache that serves the too-new copy first starts the cycle again (at most one kill-switch flap per restart); (e) a cache serving a copy without an update time now and then ends every run, as before #2602; (f) every non-kill-switch value in the accepted document that differs from the link's remote value while the local value still equals it applies as a change from Flagsmith (a value Flagsmith changed itself as well as a pushed one) until a newer document is read and corrects it; a pushed value is protected only while its value guard lives, and the guard can end before the threshold (the newest document showed the pushed value), as for a document without an update time |
 | A local write to a game or player slot that is empty during a document fetch is not detected by the per-slot version check for that round (game values only; stack and kill-switch slots are fully covered) | accepted; last writer wins |
 | `__future__` flag API is experimental and may change | fallback to the stable `featurestates` endpoints (§4.1 step 3); a contract test against the pinned Flagsmith version |
 | Flagsmith's edge storage (eventually consistent) may not show an identity it created moments before, so an override push right after the listing or settle could be answered `404` and refuse a correct value; seen on stage after a restart (#2639). Most likely cause, found in #2682: the link wrote overrides through `…/edge-identities-featurestates`, a route the SaaS does not have (every override push was a `404`; upstream mounts that view under a doubled `environments/environments/` prefix). Since #2682 overrides use the per-identity routes; the edge lag itself is not confirmed, so the bounded retry stays, now for a `404` on the identity's override list or `POST` only | a `404` within 30 s of the link's own listing or settle is retried per key, at most 3 times (0.5, 1, 2 s, the push pacing applies; the waiting value goes to the back of the queue, no head-of-line wait), then refused. The start cleanup's delete of a game identity whose game registers while the delete is on the wire (the liveness check runs right before the request) no longer forgets the game's keys: the sender, after any push in flight, forgets the deleted uuid, lists the identity again with its traits and sends its confirmed values again; `GET /state` `keys` names every refused key with `http_status` (absent: no request was sent) and each refusal logs one WARN with flag, scope and reason, so the next occurrence tells the two causes apart (services.md §7.3) |
-| Variant options are project-level (§2.3): every stack's environment of the project sees the same options, so two stacks running releases with different variants of a flag change them back and forth at each of their starts | options are created at 0 % in every environment, so no environment changes what it serves; a stack whose weights name an option another stack deleted sends again after one listing (§2.3); accepted (#2709) |
+| Variant options are project-level (§2.3): every stack's environment of the project sees the same options and option values, so two stacks running releases with different variants of a flag, or different values of one variant, change them back and forth at each of their starts (#2713: the value shown is the one of the stack that started last). A release before #2713 started against the same project deletes every titled option whose value is not the variant name, its weights in every environment with it (a pick made in the Flagsmith UI is lost), and creates it again without a title; the next #2713 start updates it again | options are created at 0 % in every environment, so no environment changes what it serves; the key decides the pick, so each stack runs its own declared variant whatever value another stack wrote last, and an update keeps the option id and its weights; a pick the stack pushed survives a pre-#2713 start through the feature value; a stack whose weights name an option another stack deleted sends again after one listing (§2.3). Upgrade every stack linked to the project together. Accepted (#2709; #2713 maintainer decision D3) |
 | The v1 fallback (a Flagsmith without `__future__`) sends no weights: an option a person set to 100 % stays and the next pull reads it, not the value the link pushed | the SaaS has `__future__`; to set a value on such a host, set the option weights back to 0 % (#2709) |
-| Variant options, their weights in the edge document and the `variants` of the `__future__` write are checked against the Flagsmith source (`api/features/multivariate/`, `api/features/future/`, `api/util/mappers/engine.py`, main of 2026-11) and the fake, not against the live SaaS (#2709) | Known gap of UC-054 and UC-055 (maintainer decision D1); a refused write is reported per key (UC-055 A4), a misread document refuses (unhealthy), neither changes the stack silently |
+| Variant options, their weights in the edge document and the `variants` of the `__future__` write are checked against the Flagsmith source (`api/features/multivariate/`, `api/features/future/`, `api/util/mappers/engine.py`, main of 2026-11) and the fake, not against the live SaaS (#2709). Also unchecked on the SaaS (#2713, maintainer decision D4): that the feature list's `multivariate_options[]` carries the `key` field (`null` for an option of #2711) rather than omitting it; that the edge document carries the option `key`, and that identity overrides made before the upgrade keep the old option value after an update; that an update (`PUT`) with the stage Admin key answers 200 with `key`, keeps the id and a 100 % weight, and that the second start sends no update; that an update of a deleted option is a JSON `404`; whether webhooks or audit integrations of the stage project fire once per option update (about 422 at the first start); that the SaaS `FEATURE_VALUE_LIMIT` keeps the 369-character brief unchanged, and how the UI shows the title and a JSON value | Known gap of UC-054 and UC-055 (maintainer decision D1 of #2709, D4 of #2713); a Flagsmith without option keys falls back to the #2711 shape (§2.3); a refused write is reported per key (UC-055 A4), a misread document refuses (unhealthy), neither changes the stack silently |
 | While online, Flagsmith refuses every stack write (change requests on the environment, `409`; a `401`/`403` on writes: a key revoked after the connect, a role without write access): each such stack write is reverted at once to Flagsmith's value (UC-055 A4, #2621), a kill switch turned off on stage (agent stop) included; the stop is in force only until Flagsmith's answer and the pull it wakes (a few seconds), then the agent runs again. A key wrong at the start keeps the link offline: nothing is reverted, the local stop holds. A missing feature reverts a stack value to the baseline: a stop (`off`, a clear) holds there, `on` is refused and reverted to `off`. When Flagsmith's own value is refused here, the revert is refused too and the local value stays, out of sync | accepted by the maintainer (#2631: documented, no code change): the refusal is reported (`refused` in `GET /state`, the push span and metric); the preflight names the stop only once Flagsmith refused a stack write with `409`, `401` or `403`, so a T-1h rehearsal stop with the link online checks it. With change requests or no write access, a stop must also be made in Flagsmith, or the link switched off (`FLAGSMITH_LINK=off` in `.env.local`, recreate the flag service, `flags.sh restart`, `talk-stage.sh reset`, `agent-killswitch.sh on`). The stage environment runs without change requests and with a write-capable Admin API key. A real preflight probe for change requests and write access is a follow-up. Game and player values are not reverted: they stay in force, out of sync |
 | A person or an API key turns a feature's toggle on (a kill switch included) right before that feature's reference write (§5.2): the write turns it off again | the step re-reads each feature from the Admin API right before writing it and skips a feature that is on (maintainer decision 2026-11-23), and re-reads it again before every retry of the write (after a `429`, a 5xx or timeout, or an options relist), so the window is the one request between a re-read and its write, not the whole step or a retry wait, and an edge document that lags no longer widens it. Within that window: accepted, as "last writer wins" above; the value turned off is not applied (the start reconcile reads the document after the write) and the person sets it again. The window opens at any start where some feature needs a write: a value typed under an off toggle triggers one at the next start, not only a baseline change |
 | The first start after the upgrade re-reads and writes about 130 reference values before the link goes online (§5.2), so a stack-scope change made locally in those seconds (a kill switch tightened on stage included) counts as made before the first connect and is discarded (§6; services.md §7.3 Offline, UC-054 A2) | accepted by the maintainer 2026-11-23 (#2623): once per release that changes many baselines; the step runs inside the start, before the reconcile, so that no reference write can race a push of a stack value |

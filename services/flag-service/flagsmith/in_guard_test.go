@@ -664,11 +664,13 @@ func TestStaleRefusalEndsAfterTimeout(t *testing.T) {
 			t.Fatalf("UC-054/BR-005 agent/enabled = %+v after exactly 10 h of refusals, want off", v)
 		}
 	})
-	t.Run("UC-054/BR-005 a document accepted in between restarts the count", func(t *testing.T) {
+	t.Run("UC-054/BR-005 a strictly newer document in between restarts the count", func(t *testing.T) {
+		// Only a document newer than the newest ends the run (#2602): the
+		// too-new copy itself served again does not (in_heal_2602_test.go).
 		h := staleWedge(t)
 		h.round()
 		wantStaleRefusal(t, h, "first refusal")
-		h.fake.SetDocument(document(time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), []map[string]any{fsState("enabled", true, "on")}), "")
+		h.fake.SetDocument(document(time.Date(2100, 1, 1, 0, 0, 1, 0, time.UTC), []map[string]any{fsState("enabled", true, "on")}), "")
 		h.clock.Advance(5 * time.Hour)
 		h.round()
 		h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off")}), "")

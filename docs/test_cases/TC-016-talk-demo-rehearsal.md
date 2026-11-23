@@ -23,7 +23,7 @@
 
 | Step | Name                    | Description                                                                                          | Test Data                                   | Use Case                            |
 |------|-------------------------|------------------------------------------------------------------------------------------------------|---------------------------------------------|-------------------------------------|
-| 1    | Observe on rules        | Presenter shows the dashboard Agent tab and an `agent.decide` span with `decide.backend=rules`        | `http://localhost/`                         | [UC-035](../use_cases/UC-035.md)    |
+| 1    | Observe on rules        | Presenter shows the dashboard Agent tab and an `invoke_agent joustmania-agent` span with `decide.backend=rules`        | `http://localhost/`                         | [UC-035](../use_cases/UC-035.md)    |
 | 2    | Switch to Jev           | Presenter switches the backend; calm play yields `noop`, a collapsing game yields `act`               | `scripts/agent-backend.sh jev`              | [UC-044](../use_cases/UC-044.md)    |
 | 3    | Tighten the threshold   | Presenter sets the strict Jev threshold; answers below it are `held`                                  | `scripts/agent-backend.sh jev-threshold strict` (0.95) | [UC-040](../use_cases/UC-040.md) |
 | 4    | Permissions beat        | Presenter drops the allow-list to `none` for 12 s; no new decide rows appear, then the baseline returns | `scripts/talk-stage.sh permissions none 12` | [UC-070](../use_cases/UC-070.md) |

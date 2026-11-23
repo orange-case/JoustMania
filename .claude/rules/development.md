@@ -12,7 +12,7 @@ Exact contracts live in `docs/specs/` (services, flags, telemetry, decide contra
 ## Metrics and spans
 - Import from `lib.otel_metrics` (NOT `prometheus_client` directly)
 - Naming: prefix with service (`game_`, `controller_`, `menu_`, `audio_`, `agent_`), counters end `_total`, histograms end `_seconds`/`_bytes`
-- New spans: dot notation (`controller.discover`, `agent.decide`); existing snake_case spans and other known violations are listed in `docs/specs/telemetry.md` §8: do not copy them
+- New spans: dot notation (`controller.discover`, `agent.decision`); existing snake_case spans and other known violations are listed in `docs/specs/telemetry.md` §8: do not copy them. GenAI semconv spans keep the convention's names (`invoke_agent joustmania-agent`, `chat {model}`, §8)
 - A new metric, span or attribute needs its row in `docs/specs/telemetry.md` first
 
 ## Adding a Game Mode
