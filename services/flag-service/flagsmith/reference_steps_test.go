@@ -3,6 +3,7 @@ package flagsmith
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -49,6 +50,27 @@ func referenceLogLines(logs string) int {
 
 const reReadPath = flagsmithtest.APIPath + "environments/envkey123/featurestates/"
 
+// serveListing answers a re-read with the given items as a paged v1 listing.
+func serveListing(w http.ResponseWriter, items ...map[string]any) {
+	if items == nil {
+		items = []map[string]any{}
+	}
+	flagsmithtest.WriteJSON(w, http.StatusOK, map[string]any{"count": len(items), "next": nil, "previous": nil, "results": items})
+}
+
+// offState is a feature's environment default with its toggle off and no
+// value, as the v1 listing shows it.
+func offState(feature int) map[string]any {
+	return map[string]any{"id": 100000 + feature, "feature": feature, "enabled": false, "feature_state_value": nil,
+		"identity": nil, "feature_segment": nil, "live_from": "2026-01-01T00:00:00Z", "multivariate_feature_state_values": []any{}}
+}
+
+// queriedFeature is the ?feature= id of a re-read.
+func queriedFeature(r *http.Request) int {
+	id, _ := strconv.Atoi(r.URL.Query().Get("feature"))
+	return id
+}
+
 // UC: UC-054 A3
 func TestReferenceStepPacing(t *testing.T) {
 	t.Run("UC-054/A3 FR-227 every re-read and write is paced at PUSH_RATE and a 429 waits its Retry-After", func(t *testing.T) {
@@ -63,9 +85,9 @@ func TestReferenceStepPacing(t *testing.T) {
 			defer mu.Unlock()
 			at = append(at, e.clock.Now())
 		}
-		f.Handle("GET /api/v1/environments/{env}/featurestates/{$}", func(w http.ResponseWriter, _ *http.Request) {
+		f.Handle("GET /api/v1/environments/{env}/featurestates/{$}", func(w http.ResponseWriter, r *http.Request) {
 			stamp()
-			flagsmithtest.WriteJSON(w, http.StatusOK, map[string]any{"results": []any{}})
+			serveListing(w, offState(queriedFeature(r)))
 		})
 		f.Handle("PATCH /api/__future__/environments/{env}/features/{fid}/{$}", func(w http.ResponseWriter, _ *http.Request) {
 			stamp()
@@ -85,9 +107,9 @@ func TestReferenceStepPacing(t *testing.T) {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		// re-read 1, PATCH 1 (429), PATCH 1 again, then re-read and PATCH for 2 and 3.
-		if len(at) != 7 {
-			t.Fatalf("%d reference requests, want 7 (the 429 retried once)", len(at))
+		// re-read 1, PATCH 1 (429), re-read 1 again, PATCH 1 again, then re-read and PATCH for 2 and 3.
+		if len(at) != 8 {
+			t.Fatalf("%d reference requests, want 8 (the 429 retried once, after a re-read)", len(at))
 		}
 		interval := time.Second / DefaultPushRate
 		for i := 1; i < len(at); i++ {
@@ -96,7 +118,7 @@ func TestReferenceStepPacing(t *testing.T) {
 			}
 		}
 		if gap := at[2].Sub(at[1]); gap < 4*time.Second {
-			t.Fatalf("the retry of the 429 came %v after it, want its Retry-After of 4 s", gap)
+			t.Fatalf("the re-read after the 429 came %v after it, want its Retry-After of 4 s", gap)
 		}
 	})
 }
@@ -120,6 +142,87 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 		}
 		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 1 {
 			t.Fatalf("%d re-reads, want 1", n)
+		}
+	})
+	t.Run("UC-054/A3 FR-227 a kill switch turned on during a 429 wait is read again and not written", func(t *testing.T) {
+		e := newStartEnv(t)
+		f := e.admin.f
+		f.ServeFlagAPI()
+		e.offFeatures("experiment_max_games")
+		var mu sync.Mutex
+		patches := 0
+		f.Handle("PATCH /api/__future__/environments/{env}/features/1/{$}", func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			patches++
+			mu.Unlock()
+			// A person turns the kill switch on while the write waits its Retry-After.
+			f.Options.SetDefault(1, flagDefault(true, "integer", "20"))
+			w.Header().Set("Retry-After", "4")
+			flagsmithtest.WriteJSON(w, http.StatusTooManyRequests, map[string]any{"detail": "throttled"})
+		})
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if patches != 1 {
+			t.Fatalf("experiment_max_games written %d times, want 1 (no second write after the re-read shows it on)", patches)
+		}
+		if got, enabled, _ := storedDefault(t, f, 1); !enabled || got != "20" {
+			t.Fatalf("experiment_max_games enabled=%v %q, want the person's enabled=true 20 untouched", enabled, got)
+		}
+		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 2 {
+			t.Fatalf("%d re-reads, want 2 (one before the write, one after the 429)", n)
+		}
+	})
+	t.Run("UC-054/A3 FR-227 a re-read listing only another feature's state is a failed re-read: one WARN, no write", func(t *testing.T) {
+		e := newStartEnv(t)
+		f := e.admin.f
+		f.ServeFlagAPI()
+		e.offFeatures("decision.backend", "experiment_tick_seconds")
+		f.Handle("GET /api/v1/environments/{env}/featurestates/{$}", func(w http.ResponseWriter, r *http.Request) {
+			if queriedFeature(r) == 1 {
+				serveListing(w, offState(999)) // the ?feature= filter ignored
+				return
+			}
+			serveListing(w, offState(queriedFeature(r)))
+		})
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatalf("start %v, want it to go on past the failed re-read", err)
+		}
+		if n := referencePatches(f)[1]; n != 0 {
+			t.Fatalf("decision.backend written %d times, want never (its state is unknown)", n)
+		}
+		if got, enabled, _ := storedDefault(t, f, 2); enabled || got != "default" {
+			t.Fatalf("experiment_tick_seconds %q enabled=%v, want its reference written after the skip", got, enabled)
+		}
+		logs := e.logs.String()
+		if n := referenceLogLines(logs); n != 1 || !strings.Contains(logs, `level=WARN msg="flagsmith reference not written" flag_set=agent flag=decision.backend reason=state_not_listed`) {
+			t.Fatalf("log %q, want one WARN naming decision.backend with reason state_not_listed", logs)
+		}
+	})
+	t.Run("UC-054/A3 FR-227 a re-read listing no environment default is a failed re-read: one WARN, no write", func(t *testing.T) {
+		e := newStartEnv(t)
+		f := e.admin.f
+		f.ServeFlagAPI()
+		e.offFeatures("decision.backend")
+		f.Handle("GET /api/v1/environments/{env}/featurestates/{$}", func(w http.ResponseWriter, r *http.Request) {
+			identity := offState(queriedFeature(r))
+			identity["identity"] = 9 // an identity override only
+			serveListing(w, identity)
+		})
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatalf("start %v, want it to go on past the failed re-read", err)
+		}
+		if n := len(f.RequestsTo(http.MethodPatch, "/api/__future__/")); n != 0 {
+			t.Fatalf("%d writes, want 0", n)
+		}
+		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 1 {
+			t.Fatalf("%d re-reads, want 1 (not retried: no transient failure)", n)
+		}
+		logs := e.logs.String()
+		if n := referenceLogLines(logs); n != 1 || !strings.Contains(logs, "reason=state_not_listed") {
+			t.Fatalf("log %q, want one WARN with reason state_not_listed", logs)
 		}
 	})
 	t.Run("UC-054/A3 FR-227 a kill switch value overwritten under the off toggle is logged at INFO with its old value", func(t *testing.T) {
@@ -174,9 +277,9 @@ func TestReferenceVariantsRefused(t *testing.T) {
 		f.Options.Add(1, "on")
 		f.Options.Add(1, "off")
 		var once sync.Once
-		f.Handle("GET /api/v1/environments/{env}/featurestates/{$}", func(w http.ResponseWriter, _ *http.Request) {
+		f.Handle("GET /api/v1/environments/{env}/featurestates/{$}", func(w http.ResponseWriter, r *http.Request) {
 			once.Do(func() { f.Options.Add(1, "added by a person") }) // after the feature list
-			flagsmithtest.WriteJSON(w, http.StatusOK, map[string]any{"results": []any{}})
+			serveListing(w, offState(queriedFeature(r)))
 		})
 		if err := e.s.Start(e.ctx); err != nil {
 			t.Fatal(err)
@@ -186,6 +289,9 @@ func TestReferenceVariantsRefused(t *testing.T) {
 		}
 		if n := len(f.RequestsTo(http.MethodGet, flagsmithtest.APIPath+"projects/42/features/1/mv-options/")); n != 1 {
 			t.Fatalf("%d option listings, want 1", n)
+		}
+		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 2 {
+			t.Fatalf("%d re-reads, want 2 (one before each write)", n)
 		}
 		got, enabled, variants := storedDefault(t, f, 1)
 		if enabled || got != "off" || len(variants) != 3 {
@@ -277,6 +383,41 @@ func TestReferenceDocumentReadFailure(t *testing.T) {
 		}
 		if n := referenceLogLines(e.logs.String()); n != 1 || !strings.Contains(e.logs.String(), "this process writes no reference value") {
 			t.Fatalf("log %q, want one WARN that no reference is written", e.logs.String())
+		}
+	})
+}
+
+// UC: UC-054 A3
+func TestReferenceReReadFailure(t *testing.T) {
+	t.Run("UC-054/A3 FR-227 a transient re-read failure fails the start, nothing is written, and the re-run writes", func(t *testing.T) {
+		e := newStartEnv(t)
+		f := e.admin.f
+		f.ServeFlagAPI()
+		e.offFeatures("decision.backend")
+		var mu sync.Mutex
+		n := 0
+		f.Handle("GET /api/v1/environments/{env}/featurestates/{$}", func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			n++
+			failing := n <= transientAttempts // every attempt of the first start's re-read
+			mu.Unlock()
+			if failing {
+				flagsmithtest.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"detail": "unavailable"})
+				return
+			}
+			serveListing(w, offState(queriedFeature(r)))
+		})
+		if err := e.s.Start(e.ctx); err == nil {
+			t.Fatal("start succeeded, want it to fail on a 503 re-read (retried with backoff)")
+		}
+		if n := referencePatches(f)[1]; n != 0 {
+			t.Fatalf("decision.backend written %d times after a failed re-read, want 0", n)
+		}
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if got, enabled, _ := storedDefault(t, f, 1); enabled || got != "rules" {
+			t.Fatalf("decision.backend %q enabled=%v after the re-run, want the reference rules", got, enabled)
 		}
 	})
 }

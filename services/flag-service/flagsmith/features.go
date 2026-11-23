@@ -86,6 +86,17 @@ func (p *adminPacer) call(ctx context.Context, method, path string, body, out an
 	return p.do(ctx, transient, ready, func() (int, error) { return p.l.client.Admin(ctx, method, path, body, out) })
 }
 
+// once makes one paced Admin request with no retry at all (no 429 and no
+// transient retry): the reference write, which reads the feature again before
+// every next try (writeReference, §5.2, #2623).
+func (p *adminPacer) once(ctx context.Context, method, path string, body, out any) error {
+	if err := p.wait(ctx); err != nil {
+		return err
+	}
+	_, err := p.l.client.Admin(ctx, method, path, body, out)
+	return err
+}
+
 // do is call for any request: send makes it once and returns its status.
 // The reference step paces its environment document read with it (#2623).
 func (p *adminPacer) do(ctx context.Context, transient bool, ready func() bool, send func() (int, error)) (status int, skipped bool, err error) {

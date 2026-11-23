@@ -474,10 +474,15 @@ paged or plain answer). Only the environment default counts (`identity` and `fea
 one per feature: its listing keeps the latest live version per feature, segment and identity
 (`get_environment_flags_queryset` in `api/features/versioning/versioning_service.py`, v2 versioning included); should
 several come back, the newest live one is used (`live_from` not after now, then the latest `live_from`, then the
-highest id). When that state is now `enabled=true`, or already shows the reference value with 0 % weights, the feature
-is not written; when Flagsmith lists none, it is written. So a toggle turned on in Flagsmith (a kill switch included)
-is never turned off by the step unless it is turned on in the one request between this re-read and the write. The
-re-read is no push: no push span, no `pushes_total` point (op `reference` counts the writes only); a failed re-read is
+highest id). Only items whose `feature` is the feature's id count, so a listing that ignored the filter never decides
+on another feature's state. When that state is now `enabled=true`, or already shows the reference value with 0 %
+weights, the feature is not written. When no environment default of the feature is listed (Flagsmith keeps one for
+every feature of the environment, so the answer is unexpected), the re-read has failed: the feature is not written and
+one WARN `flagsmith reference not written` with reason `state_not_listed` names it; this is no transient failure, so
+the step goes on. The write itself is sent once, never retried as is: after a `429` (wait its `Retry-After`, at most 3
+times), a 5xx or timeout (1 s backoff, 3 writes in all) or an options relist (below), the feature is re-read and decided
+again before the next write. So a toggle turned on in Flagsmith (a kill switch included) is never turned off by the
+step unless it is turned on in the one request between a re-read and its write. The re-read is no push: no push span, no `pushes_total` point (op `reference` counts the writes only); a failed re-read is
 handled as listed under "Pacing and failures" below. Then:
 `PATCH /api/__future__/environments/{env_key}/features/{feature_id}/` with `enabled: false`, the reference value and
 0 % on every option the feature list named: the body of a cleared overlay (§4.1 step 3).
@@ -518,7 +523,8 @@ value an operator staged there can be found again.
 
 **Pacing and failures** (maintainer decision 2026-11-23). Every request of the step (the document read, each re-read
 and each write) goes through the start's pacing (`FLAGSMITH_PUSH_RATE`, `429` waits its `Retry-After`, a 5xx or
-timeout is tried 3 times). Each write is a push span and a `pushes_total` point with op `reference`.
+timeout is tried 3 times); for a write, each such retry starts with a new re-read (above). The writes of one feature
+are one push span and one `pushes_total` point with op `reference`.
 - The document read, or a re-read, fails transiently (no answer, timeout, 5xx, a `429` left after the retries): the
   start fails and is retried with backoff (every step is idempotent). A `4xx` on the document read is logged once
   (WARN `flagsmith reference not written`) and the process writes no reference.
@@ -527,8 +533,8 @@ timeout is tried 3 times). Each write is a push span and a `pushes_total` point 
   written` for a plain `404` of the write (§4.1 step 3: such a host gets no reference values), else WARN `flagsmith
   reference values not written`. The next start tries again.
 - Weights refused because a person changed the feature's options since the feature list (`400` naming the variants):
-  the options are listed once and the write sent again, as the sender does (§2.3); a second refusal is logged for that
-  feature.
+  the options are listed once, the feature is re-read and the write sent again, as the sender does (§2.3); a second
+  refusal is logged for that feature.
 - Any other refusal is logged for its feature (WARN `flagsmith reference not written`) and the step goes on.
 
 Cost: the first start after the upgrade re-reads and writes every synced feature whose toggle is off (about 130
@@ -642,7 +648,7 @@ Flagsmith-set values. Rejected by the maintainer (F5): C-030 stays as is.
 | The v1 fallback (a Flagsmith without `__future__`) sends no weights: an option a person set to 100 % stays and the next pull reads it, not the value the link pushed | the SaaS has `__future__`; to set a value on such a host, set the option weights back to 0 % (#2709) |
 | Variant options, their weights in the edge document and the `variants` of the `__future__` write are checked against the Flagsmith source (`api/features/multivariate/`, `api/features/future/`, `api/util/mappers/engine.py`, main of 2026-11) and the fake, not against the live SaaS (#2709) | Known gap of UC-054 and UC-055 (maintainer decision D1); a refused write is reported per key (UC-055 A4), a misread document refuses (unhealthy), neither changes the stack silently |
 | While online, Flagsmith refuses every stack write (change requests on the environment, `409`; a `401`/`403` on writes: a key revoked after the connect, a role without write access): each such stack write is reverted at once to Flagsmith's value (UC-055 A4, #2621), a kill switch turned off on stage (agent stop) included; the stop is in force only until Flagsmith's answer and the pull it wakes (a few seconds), then the agent runs again. A key wrong at the start keeps the link offline: nothing is reverted, the local stop holds. A missing feature reverts a stack value to the baseline: a stop (`off`, a clear) holds there, `on` is refused and reverted to `off`. When Flagsmith's own value is refused here, the revert is refused too and the local value stays, out of sync | accepted by the maintainer (#2631: documented, no code change): the refusal is reported (`refused` in `GET /state`, the push span and metric); the preflight names the stop only once Flagsmith refused a stack write with `409`, `401` or `403`, so a T-1h rehearsal stop with the link online checks it. With change requests or no write access, a stop must also be made in Flagsmith, or the link switched off (`FLAGSMITH_LINK=off` in `.env.local`, recreate the flag service, `flags.sh restart`, `talk-stage.sh reset`, `agent-killswitch.sh on`). The stage environment runs without change requests and with a write-capable Admin API key. A real preflight probe for change requests and write access is a follow-up. Game and player values are not reverted: they stay in force, out of sync |
-| A person or an API key turns a feature's toggle on (a kill switch included) right before that feature's reference write (§5.2): the write turns it off again | the step re-reads each feature from the Admin API right before writing it and skips a feature that is on (maintainer decision 2026-11-23), so the window is the one request between that re-read and the write, not the whole step, and an edge document that lags no longer widens it. Within that window: accepted, as "last writer wins" above; the value turned off is not applied (the start reconcile reads the document after the write) and the person sets it again. The window opens at any start where some feature needs a write: a value typed under an off toggle triggers one at the next start, not only a baseline change |
+| A person or an API key turns a feature's toggle on (a kill switch included) right before that feature's reference write (§5.2): the write turns it off again | the step re-reads each feature from the Admin API right before writing it and skips a feature that is on (maintainer decision 2026-11-23), and re-reads it again before every retry of the write (after a `429`, a 5xx or timeout, or an options relist), so the window is the one request between a re-read and its write, not the whole step or a retry wait, and an edge document that lags no longer widens it. Within that window: accepted, as "last writer wins" above; the value turned off is not applied (the start reconcile reads the document after the write) and the person sets it again. The window opens at any start where some feature needs a write: a value typed under an off toggle triggers one at the next start, not only a baseline change |
 | The first start after the upgrade re-reads and writes about 130 reference values before the link goes online (§5.2), so a stack-scope change made locally in those seconds (a kill switch tightened on stage included) counts as made before the first connect and is discarded (§6; services.md §7.3 Offline, UC-054 A2) | accepted by the maintainer 2026-11-23 (#2623): once per release that changes many baselines; the step runs inside the start, before the reconcile, so that no reference write can race a push of a stack value |
 | On an environment with v2 feature versioning every reference write is a new version of the feature: the first start after the upgrade adds about 130 versions to the features' history | accepted (#2623): once per changed reference; later starts write none |
 | Terraform, the Flagsmith MCP server or another API key that manages feature values (`enabled=false` with its own value) sees the references as drift, and the step overwrites its value under an off toggle at each start | accepted (#2623): a value under an off toggle is not in force (§5.2, staged values); manage such features with the toggle on, or exclude the values from the drift check |

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Reference values (FR-227, architecture note §5.2, F13, #2623): every synced
@@ -28,7 +30,9 @@ import (
 // a reference; right before each write the feature's environment state is
 // read again from the Admin API (§5.2, decision 2026-11-23), so a toggle a
 // person or an API key turned on meanwhile (a kill switch included) is never
-// turned off: the window is that one request, not the whole step.
+// turned off: the window is the one request between a re-read and its
+// write. The write itself is never retried as is: after a 429, a transient
+// failure or an options relist the feature is read again first.
 
 // referenceJob is one usable synced feature of the start.
 type referenceJob struct {
@@ -152,6 +156,7 @@ func fsText(raw json.RawMessage) string {
 // GET environments/{key}/featurestates/?feature=<id>.
 type listedState struct {
 	ID             int             `json:"id"`
+	Feature        json.RawMessage `json:"feature"`
 	Enabled        bool            `json:"enabled"`
 	Identity       json.RawMessage `json:"identity"`
 	FeatureSegment json.RawMessage `json:"feature_segment"`
@@ -160,6 +165,34 @@ type listedState struct {
 	Weights        []struct {
 		PercentageAllocation float64 `json:"percentage_allocation"`
 	} `json:"multivariate_feature_state_values"`
+}
+
+// featureID is the item's feature id: the listing names it by id; an
+// object with an id is read too. 0 when it names none.
+func (it listedState) featureID() int {
+	var id int
+	if json.Unmarshal(it.Feature, &id) == nil {
+		return id
+	}
+	var obj struct {
+		ID int `json:"id"`
+	}
+	if json.Unmarshal(it.Feature, &obj) == nil {
+		return obj.ID
+	}
+	return 0
+}
+
+// ofFeature keeps the items of the feature featureID, so a listing that
+// ignored the ?feature= filter never decides on another feature's state.
+func ofFeature(items []listedState, featureID int) []listedState {
+	var kept []listedState
+	for _, it := range items {
+		if it.featureID() == featureID {
+			kept = append(kept, it)
+		}
+	}
+	return kept
 }
 
 // environmentDefault picks the feature's environment default from a
@@ -193,63 +226,125 @@ func environmentDefault(items []listedState, now time.Time) (FeatureState, bool)
 	return fs, true
 }
 
+// ReasonStateNotListed: the re-read listed no environment default for the
+// feature (an unknown answer, or a filter Flagsmith ignored). Flagsmith keeps
+// one for every feature of the environment, so the state is unknown and the
+// feature is not written (§5.2).
+const ReasonStateNotListed = "state_not_listed"
+
 // readState reads the feature's environment state again right before its
-// write (paced like every Admin call of the start). ok false: Flagsmith
-// lists none, so nothing is on.
-func (s *startup) readState(ctx context.Context, featureID int) (FeatureState, bool, error) {
+// write (paced like every Admin call of the start). A listing without the
+// feature's environment default is a failed re-read (ReasonStateNotListed),
+// not a transient one.
+func (s *startup) readState(ctx context.Context, featureID int) (FeatureState, error) {
 	var raw json.RawMessage
 	if _, _, err := s.pace.call(ctx, http.MethodGet, s.l.envPath("featurestates/")+"?feature="+strconv.Itoa(featureID), nil, &raw, true, nil); err != nil {
-		return FeatureState{}, false, err
+		return FeatureState{}, err
 	}
-	fs, ok := environmentDefault(listedItems[listedState](raw), s.l.Now())
-	return fs, ok, nil
+	fs, ok := environmentDefault(ofFeature(listedItems[listedState](raw), featureID), s.l.Now())
+	if !ok {
+		return FeatureState{}, ReasonError{Reason: ReasonStateNotListed}
+	}
+	return fs, nil
 }
 
 // writeReference re-reads one feature and, when its toggle is still off and
 // it still does not show the reference value, sends the reference: enabled
 // false, the reference value, 0 % on every option (the body of a cleared
-// overlay, §4.1 step 3). A refusal of the option weights lists the options
-// once and sends again (as the out side does, §2.3). stop is true when a
-// refusal holds for the whole environment; err ends the start.
+// overlay, §4.1 step 3). The write is sent once, with no retry of its own:
+// a 429 waits its Retry-After (at most maxRateLimitRetries times), a 5xx or
+// a request without an answer waits transientBackoff (transientAttempts
+// writes in all), and a refusal of the option weights lists the options
+// once (as the out side does, §2.3); after each of these the feature is read
+// again before the next write, so a toggle turned on meanwhile (a kill
+// switch included) is never turned off: the window is the one request
+// between a re-read and its write. All writes of the feature are one push
+// span. stop is true when a refusal holds for the whole environment; err
+// ends the start.
 func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue) (stop bool, err error) {
-	cur, listed, err := s.readState(ctx, j.featureID)
-	if err != nil {
-		return s.referenceFailed(ctx, j, err, false)
-	}
-	if listed && !needsReference(cur, true, false, fv) {
-		return false, nil // turned on meanwhile, or the reference already
-	}
-	sctx, span := s.pushSpan(ctx, j.k, OpReference)
-	err = s.patchReference(sctx, j, fv)
-	if variantsRefused(err) && ctx.Err() == nil {
-		// The feature's options changed since the feature list (a person
-		// added or removed one): list them once and send again (#2709).
-		if lerr := s.relistOptions(sctx, j.k.Flag, j.featureID); lerr == nil {
-			err = s.patchReference(sctx, j, fv)
+	var (
+		sctx                   = ctx
+		span                   trace.Span
+		werr                   error
+		rateRetries, transient int
+		relisted               bool
+	)
+	end := func() {
+		if span == nil {
+			return
+		}
+		switch {
+		case werr == nil:
+			s.endPush(sctx, span, OpReference, ResultOK, "")
+		case httpStatus(werr) >= 400 && httpStatus(werr) < 500:
+			s.endPush(sctx, span, OpReference, ResultRejected, Reason(werr))
+		default:
+			s.endPush(sctx, span, OpReference, ResultError, Reason(werr))
 		}
 	}
-	switch {
-	case err == nil:
-		s.endPush(sctx, span, OpReference, ResultOK, "")
-	case httpStatus(err) >= 400 && httpStatus(err) < 500:
-		s.endPush(sctx, span, OpReference, ResultRejected, Reason(err))
-	default:
-		s.endPush(sctx, span, OpReference, ResultError, Reason(err))
+	for {
+		cur, rerr := s.readState(ctx, j.featureID)
+		if rerr != nil {
+			end()
+			return s.referenceFailed(ctx, j, rerr, false)
+		}
+		if !needsReference(cur, true, false, fv) {
+			end()
+			return false, nil // turned on meanwhile, or the reference already
+		}
+		if span == nil {
+			sctx, span = s.pushSpan(ctx, j.k, OpReference)
+		}
+		werr = s.patchReference(sctx, j, fv)
+		if werr == nil {
+			end()
+			if old := fsText(cur.FeatureStateValue); isKillKey(j.k) && old != "" && old != fsText(fv.Value) {
+				// A kill switch value staged under the off toggle is not in
+				// force; the start resets it (decision 2026-11-23, stage sheet).
+				s.l.Logger().Info("flagsmith reference overwrote a kill switch value", "flag_set", j.k.Set, "flag", j.k.Flag, "old_value", old)
+			}
+			return false, nil
+		}
+		if ctx.Err() != nil {
+			end()
+			return false, ctx.Err()
+		}
+		var wait time.Duration
+		var he *HTTPError
+		switch {
+		case errors.As(werr, &he) && he.Status == http.StatusTooManyRequests && rateRetries < maxRateLimitRetries:
+			rateRetries++
+			wait = he.RetryAfter
+			if wait <= 0 {
+				wait = time.Second
+			}
+		case variantsRefused(werr) && !relisted:
+			// The feature's options changed since the feature list (a person
+			// added or removed one): list them once, read again, send again (#2709).
+			relisted = true
+			if lerr := s.relistOptions(sctx, j.k.Flag, j.featureID); lerr != nil {
+				end()
+				return s.referenceFailed(ctx, j, werr, true)
+			}
+			continue
+		case isTransient(werr) && transient+1 < transientAttempts:
+			transient++
+			wait = transientBackoff
+		default:
+			end()
+			return s.referenceFailed(ctx, j, werr, true)
+		}
+		if serr := s.l.Sleep(ctx, wait); serr != nil {
+			end()
+			return false, serr
+		}
 	}
-	if err != nil {
-		return s.referenceFailed(ctx, j, err, true)
-	}
-	if old := fsText(cur.FeatureStateValue); listed && isKillKey(j.k) && old != "" && old != fsText(fv.Value) {
-		// A kill switch value staged under the off toggle is not in force;
-		// the start resets it (decision 2026-11-23, stage sheet).
-		s.l.Logger().Info("flagsmith reference overwrote a kill switch value", "flag_set", j.k.Set, "flag", j.k.Flag, "old_value", old)
-	}
-	return false, nil
 }
 
+// patchReference sends the reference write once (adminPacer.once): its
+// retries are writeReference's, each after a re-read.
 func (s *startup) patchReference(ctx context.Context, j referenceJob, fv FSValue) error {
-	_, _, err := s.pace.call(ctx, http.MethodPatch, s.l.futurePath(j.featureID), futureBodyOf(fv, false, s.l.options(j.k.Flag)), nil, true, nil)
-	return err
+	return s.pace.once(ctx, http.MethodPatch, s.l.futurePath(j.featureID), futureBodyOf(fv, false, s.l.options(j.k.Flag)), nil)
 }
 
 // relistOptions lists the feature's options again with the out side's
