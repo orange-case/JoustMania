@@ -38,6 +38,8 @@ const (
 	OpTag            = "tag"
 	// OpOption is a variant option created or removed at start (#2709).
 	OpOption = "option"
+	// OpReference is a reference value written at start (#2623).
+	OpReference = "reference"
 )
 
 // Conflict resolutions (FR-210): Flagsmith wins every conflict since #2621.

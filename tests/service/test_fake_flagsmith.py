@@ -183,6 +183,35 @@ def test_reset_values_keeps_features_and_drops_the_rest(fake):
     assert len(fake.features) == 3
 
 
+def _patch_default(fake, feature, enabled, typ, value):
+    fid = fake.feature_id(feature)
+    body = {"environment_default": {"enabled": enabled, "value": {"type": typ, "value": value}}}
+    return _call(fake, "PATCH", f"/api/__future__/environments/{ENVIRONMENT_KEY}/features/{fid}/", body)
+
+
+def test_reset_values_keeps_the_reference_value(fake):
+    """The last value PATCHed with enabled false (the link's reference value, #2623) survives
+    a reset, so the next start of the flag service finds it in place and writes none."""
+    _patch_default(fake, "experiment_tick_seconds", False, "string", "default")
+    _patch_default(fake, "experiment_tick_seconds", True, "integer", "12")
+    fake.reset_values()
+    assert fake.env_value("experiment_tick_seconds") == (False, "default")
+
+
+def test_feature_state_listing_shows_the_patch_state(fake):
+    """GET .../featurestates/?feature=<id> (the reference step's re-read, #2623)."""
+    _patch_default(fake, "experiment_tick_seconds", True, "integer", "12")
+    fid = fake.feature_id("experiment_tick_seconds")
+    base = f"/api/v1/environments/{ENVIRONMENT_KEY}/featurestates/"
+    status, _, listed = _call(fake, "GET", base + f"?feature={fid}")
+    assert status == 200 and len(listed["results"]) == 1, listed
+    state = listed["results"][0]
+    got = (state["enabled"], state["feature_state_value"], state["identity"], state["feature_segment"])
+    assert got == (True, 12, None, None), state
+    assert _call(fake, "GET", base + "?feature=999999")[2]["results"] == []
+    assert len(fake.pushes("experiment_tick_seconds")) == 1, "a re-read is no push"
+
+
 def test_admin_paths_need_the_environment_key_and_project_id(fake):
     fid = fake.feature_id("experiment_tick_seconds")
     body = {"environment_default": {"enabled": True, "value": {"type": "integer", "value": "3"}}}

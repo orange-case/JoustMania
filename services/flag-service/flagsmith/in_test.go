@@ -121,6 +121,9 @@ type harnessOpts struct {
 	// realStart keeps the link's real start sequence and out side (restart
 	// rule journeys); otherwise UseInSideOnly replaces them.
 	realStart bool
+	// persisted writes admin settings into the state file before the flag
+	// service starts (an earlier process's), so they load at boot.
+	persisted func(*state.State)
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -136,7 +139,17 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	st, _, err := state.New(base, reg, state.Options{Epoch: "e1", Served: base.Order, StateFile: filepath.Join(t.TempDir(), "state.json"), Logger: logger})
+	stateFile := filepath.Join(t.TempDir(), "state.json")
+	if o.persisted != nil {
+		earlier, _, err := state.New(base, reg, state.Options{Epoch: "e0", Served: base.Order, StateFile: stateFile, Logger: logger})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sub, _ := earlier.Subscribe("") // an open sync stream, so the writes are accepted
+		o.persisted(earlier)
+		sub.Close()
+	}
+	st, _, err := state.New(base, reg, state.Options{Epoch: "e1", Served: base.Order, StateFile: stateFile, Logger: logger})
 	if err != nil {
 		t.Fatal(err)
 	}
