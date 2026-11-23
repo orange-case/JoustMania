@@ -375,6 +375,21 @@ func TestLinkStateRefusedValue(t *testing.T) {
 			t.Fatalf("out_of_sync %d refused %d, want 0 0: a round that read the latest change acts", oos, r)
 		}
 	})
+	t.Run("UC-055/main step 5 back to Flagsmith's value while a pull round adopts the older local value: out of sync", func(t *testing.T) {
+		s := NewLinkState(nil)
+		s.SetRemote(stack, val(`0`))
+		s.Offer(stack, val(`1`), t0, 1)
+		s.Next()                        // 1 in flight
+		s.Offer(stack, val(`0`), t0, 2) // the operator goes back to Flagsmith's 0
+		s.SetRemoteRead(stack, val(`1`), 1)
+		if _, oos, _ := s.Counts(); oos != 1 {
+			t.Fatalf("out_of_sync %d after the stale adopt, want 1: the stack runs 0, Flagsmith shows 1", oos)
+		}
+		s.ConfirmPushed(stack, val(`1`))
+		if p, oos, _ := s.Counts(); p != 0 || oos != 1 {
+			t.Fatalf("pending %d out_of_sync %d after the confirm, want 0 1", p, oos)
+		}
+	})
 	t.Run("UC-055/A4 back to the refused value while a newer one is in flight: its refusal keeps the held value", func(t *testing.T) {
 		s := heldWithInFlight(t)
 		s.Offer(stack, val(`1`), t0, 3) // the operator goes back to the refused 1

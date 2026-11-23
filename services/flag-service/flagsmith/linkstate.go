@@ -396,6 +396,11 @@ func (s *LinkState) SetRemoteGen(k Key, v Value) (prev Value, had bool, gen uint
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
 	prev, had = e.remote, e.hasRemote
+	s.setRemoteLocked(e, v)
+	return prev, had, e.gen
+}
+
+func (s *LinkState) setRemoteLocked(e *entry, v Value) {
 	e.remote, e.hasRemote = v, true
 	if e.hasReverted {
 		e.revertedLocal = v
@@ -403,7 +408,25 @@ func (s *LinkState) SetRemoteGen(k Key, v Value) (prev Value, had bool, gen uint
 	e.gen++
 	// A held refused value is the local value: it differs from v.
 	s.syncLocked(e, e.pending == nil && !heldLocalLocked(e, v))
-	return prev, had, e.gen
+}
+
+// SetRemoteRead is SetRemote for a pull round that writes nothing locally
+// (adopt, keep local) and judged the local value of snapshot read. After a
+// later local change it records v only and keeps the reverted mark: a key in
+// sync with the old remote value is out of sync with a different v.
+func (s *LinkState) SetRemoteRead(k Key, v Value, read uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entryLocked(k)
+	if read >= e.offered {
+		s.setRemoteLocked(e, v)
+		return
+	}
+	if e.inSync && !(e.hasRemote && e.remote.Equal(v)) {
+		s.syncLocked(e, false)
+	}
+	e.remote, e.hasRemote = v, true
+	e.gen++
 }
 
 // RestoreRemoteGen puts prev back (or forgets the remote value when !had),
@@ -611,11 +634,9 @@ func (s *LinkState) ClearRefusalRead(k Key, read uint64) {
 func (s *LinkState) SetInSyncRead(k Key, read uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.entryLocked(k)
-	if read < e.offered {
-		return
+	if e := s.entries[k]; e != nil && read >= e.offered {
+		s.syncLocked(e, true)
 	}
-	s.syncLocked(e, true)
 }
 
 // ClearLocalRefusal forgets k's last refusal only when the flag service made

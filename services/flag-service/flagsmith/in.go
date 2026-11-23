@@ -1016,12 +1016,12 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 		}
 		p.accepted(k)
 	case actAdopt:
-		l.links.SetRemote(k, de.v)
+		l.links.SetRemoteRead(k, de.v, rc.read)
 		p.offer(rc, k, le)
 		l.links.ClearRefusalRead(k, rc.read)
 		p.accepted(k)
 	case actKeepLocal:
-		l.links.SetRemote(k, de.v)
+		l.links.SetRemoteRead(k, de.v, rc.read)
 		if p.offer(rc, k, le) {
 			rc.stats.pushed++
 		}
