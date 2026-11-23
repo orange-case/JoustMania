@@ -230,7 +230,7 @@ func (o *out) send(ctx context.Context, k Key, id string, v Value, fv FSValue, f
 		if variantsRefused(err) {
 			// The feature's options changed since the start (a person added
 			// or removed one): list them once and send again (#2709, §2.3).
-			if lerr := o.listOptions(ctx, k.Flag, featureID); lerr != nil {
+			if lerr := o.listOptions(ctx, k, featureID); lerr != nil {
 				return status, err
 			}
 			if perr := o.pace(ctx); perr != nil {

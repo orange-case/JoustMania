@@ -3,7 +3,9 @@ package flagsmithtest
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"sync"
@@ -15,11 +17,14 @@ import (
 // makes the feature MULTIVARIATE, deleting the last makes it STANDARD; the
 // flag API's environment_default.variants must name every option of the
 // feature exactly once, with weights between 0 and 100 summing to at most 100.
+// An option's key (Flagsmith #7698, #2713) is optional, a slug, unique per
+// feature and never "control"; an update (PUT) keeps the option's id.
 
 // MVOption is one multivariate option.
 type MVOption struct {
 	ID                          int     `json:"id"`
 	Feature                     int     `json:"feature"`
+	Key                         *string `json:"key"`
 	Type                        string  `json:"type"`
 	StringValue                 *string `json:"string_value"`
 	IntegerValue                *int    `json:"integer_value"`
@@ -49,6 +54,114 @@ type MVOptions struct {
 	// Exists reports whether a feature id is a feature of the project (nil:
 	// every id is). The fake sets it to its own feature list.
 	Exists func(id int) bool
+	// dropKeysOn: a Flagsmith before #7698 (DropKeys).
+	dropKeysOn bool
+	// nullKeysOn: keys are never stored but answered as null (NullKeys).
+	nullKeysOn bool
+	// script: the statuses the next option requests of a method answer
+	// (Script); onWrite runs before every option write (OnWrite).
+	script  map[string][]int
+	onWrite func(method string)
+}
+
+// Script makes the next option requests (POST, PUT, DELETE on mv-options, and
+// GET of a feature's listing) of method answer these statuses instead of
+// being served, one per request.
+func (o *MVOptions) Script(method string, statuses ...int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.script == nil {
+		o.script = map[string][]int{}
+	}
+	o.script[method] = append(o.script[method], statuses...)
+}
+
+// OnWrite runs f before every option write is served (scripted or not).
+func (o *MVOptions) OnWrite(f func(method string)) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.onWrite = f
+}
+
+// scripted runs the write hook (not for a GET) and answers a scripted status;
+// true: answered.
+func (o *MVOptions) scripted(w http.ResponseWriter, method string) bool {
+	o.mu.Lock()
+	hook := o.onWrite
+	if method == http.MethodGet {
+		hook = nil
+	}
+	st := 0
+	if q := o.script[method]; len(q) > 0 {
+		st, o.script[method] = q[0], q[1:]
+	}
+	o.mu.Unlock()
+	if hook != nil {
+		hook(method)
+	}
+	if st == 0 {
+		return false
+	}
+	WriteJSON(w, st, map[string]any{"detail": fmt.Sprintf("scripted %d", st)})
+	return true
+}
+
+// DropKeys makes the fake a Flagsmith before #7698: an option has no key
+// field at all (never stored, never answered; #2713).
+func (o *MVOptions) DropKeys() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.dropKeysOn = true
+}
+
+// NullKeys makes the fake a Flagsmith that answers the key field but keeps no
+// key: a key sent is dropped and every option answers "key": null (#2713,
+// the first create's answer of a project without options).
+func (o *MVOptions) NullKeys() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.nullKeysOn = true
+}
+
+// Wire returns a feature's options as the Admin API answers them (the
+// feature list's multivariate_options, the mv-options routes): without the
+// key field when DropKeys is set.
+func (o *MVOptions) Wire(feature int) []map[string]any {
+	drop := o.dropKeys()
+	out := []map[string]any{}
+	for _, opt := range o.Of(feature) {
+		out = append(out, wire(opt, drop))
+	}
+	return out
+}
+
+func wire(opt MVOption, dropKey bool) map[string]any {
+	raw, _ := json.Marshal(opt)
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	if dropKey {
+		delete(m, "key")
+	}
+	return m
+}
+
+func (o *MVOptions) dropKeys() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.dropKeysOn
+}
+
+// Remove deletes an option as a person would (no request).
+func (o *MVOptions) Remove(feature, id int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	opts := o.byFeature[feature]
+	for i, opt := range opts {
+		if opt.ID == id {
+			o.byFeature[feature] = append(opts[:i:i], opts[i+1:]...)
+			return
+		}
+	}
 }
 
 // NewMVOptions returns an empty store.
@@ -64,6 +177,26 @@ func (o *MVOptions) Add(feature int, value string) MVOption {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.addLocked(MVOption{Feature: feature, Type: "unicode", StringValue: &value})
+}
+
+// AddKeyed stores a text option with a key (title) on a feature.
+func (o *MVOptions) AddKeyed(feature int, key, value string) MVOption {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.addLocked(MVOption{Feature: feature, Key: &key, Type: "unicode", StringValue: &value})
+}
+
+// Keys returns the keys of a feature's options in creation order ("" none).
+func (o *MVOptions) Keys(feature int) []string {
+	var out []string
+	for _, opt := range o.Of(feature) {
+		k := ""
+		if opt.Key != nil {
+			k = *opt.Key
+		}
+		out = append(out, k)
+	}
+	return out
 }
 
 func (o *MVOptions) addLocked(opt MVOption) MVOption {
@@ -124,6 +257,7 @@ func (f *Fake) registerOptionRoutes() {
 	d.HandleFunc(methodGet+base+"{$}", f.listOptions)
 	d.HandleFunc(methodPost+base+"{$}", f.createOption)
 	d.HandleFunc(methodDelete+base+"{id}/{$}", f.deleteOption)
+	d.HandleFunc("PUT "+base+"{id}/{$}", f.updateOption)
 }
 
 func featureOf(w http.ResponseWriter, r *http.Request, o *MVOptions) (int, bool) {
@@ -137,19 +271,16 @@ func featureOf(w http.ResponseWriter, r *http.Request, o *MVOptions) (int, bool)
 
 func (f *Fake) listOptions(w http.ResponseWriter, r *http.Request) {
 	id, ok := featureOf(w, r, f.Options)
-	if !ok {
+	if !ok || f.Options.scripted(w, http.MethodGet) {
 		return
 	}
-	opts := f.Options.Of(id)
-	if opts == nil {
-		opts = []MVOption{}
-	}
+	opts := f.Options.Wire(id)
 	WriteJSON(w, http.StatusOK, map[string]any{"count": len(opts), "next": nil, "previous": nil, "results": opts})
 }
 
 func (f *Fake) createOption(w http.ResponseWriter, r *http.Request) {
 	id, ok := featureOf(w, r, f.Options)
-	if !ok {
+	if !ok || f.Options.scripted(w, http.MethodPost) {
 		return
 	}
 	var body MVOption
@@ -168,12 +299,80 @@ func (f *Fake) createOption(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]any{"default_percentage_allocation": "Invalid percentage allocation"})
 		return
 	}
-	WriteJSON(w, http.StatusCreated, o.addLocked(body))
+	if o.dropKeysOn || o.nullKeysOn {
+		body.Key = nil // an unknown field to a Flagsmith before #7698
+	}
+	if msg := o.keyErrorLocked(id, 0, body.Key); msg != "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]any{"key": []string{msg}})
+		return
+	}
+	WriteJSON(w, http.StatusCreated, wire(o.addLocked(body), o.dropKeysOn))
+}
+
+var slug = regexp.MustCompile(`^[-a-zA-Z0-9_]+$`)
+
+// keyErrorLocked is the key validation of MultivariateFeatureOptionSerializer
+// (validate_slug, max 255, "control" reserved, unique per feature).
+func (o *MVOptions) keyErrorLocked(feature, self int, key *string) string {
+	if key == nil {
+		return ""
+	}
+	switch {
+	case !slug.MatchString(*key) || len(*key) > 255:
+		return "Enter a valid \u201cslug\u201d consisting of letters, numbers, underscores or hyphens."
+	case *key == "control":
+		return `"control" is a reserved variant key.`
+	}
+	for _, sib := range o.byFeature[feature] {
+		if sib.ID != self && sib.Key != nil && *sib.Key == *key {
+			return "Multivariate option with this key already exists for the feature."
+		}
+	}
+	return ""
+}
+
+// updateOption is PUT .../mv-options/{id}/: the serializer's validate reads
+// feature and default_percentage_allocation, so a body without them is a 500
+// on Flagsmith; the fake answers 400. The id and the environments' weights stay.
+func (f *Fake) updateOption(w http.ResponseWriter, r *http.Request) {
+	id, ok := featureOf(w, r, f.Options)
+	if !ok || f.Options.scripted(w, http.MethodPut) {
+		return
+	}
+	optID, _ := strconv.Atoi(r.PathValue("id"))
+	var raw map[string]json.RawMessage
+	var body MVOption
+	b, _ := io.ReadAll(r.Body)
+	if json.Unmarshal(b, &raw) != nil || json.Unmarshal(b, &body) != nil || raw["feature"] == nil || raw["default_percentage_allocation"] == nil || body.Feature != id {
+		WriteJSON(w, http.StatusBadRequest, map[string]any{"detail": "feature and default_percentage_allocation are required"})
+		return
+	}
+	o := f.Options
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	opts := o.byFeature[id]
+	for i, opt := range opts {
+		if opt.ID != optID {
+			continue
+		}
+		if o.dropKeysOn || o.nullKeysOn {
+			body.Key = nil
+		}
+		if msg := o.keyErrorLocked(id, optID, body.Key); msg != "" {
+			WriteJSON(w, http.StatusBadRequest, map[string]any{"key": []string{msg}})
+			return
+		}
+		body.ID = optID
+		opts[i] = body
+		WriteJSON(w, http.StatusOK, wire(body, o.dropKeysOn))
+		return
+	}
+	WriteJSON(w, http.StatusNotFound, map[string]any{"detail": "Not found."})
 }
 
 func (f *Fake) deleteOption(w http.ResponseWriter, r *http.Request) {
 	id, ok := featureOf(w, r, f.Options)
-	if !ok {
+	if !ok || f.Options.scripted(w, http.MethodDelete) {
 		return
 	}
 	optID, _ := strconv.Atoi(r.PathValue("id"))
