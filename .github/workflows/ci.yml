@@ -802,8 +802,17 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
-          go test -v -race ./...
+          go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
           go vet ./...
+          # Sonar resolves profile paths repo-relative, not by Go import path.
+          sed -i 's|^github.com/joustmania/flag-service/|services/flag-service/|' coverage.out
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-flag-service
+          path: services/flag-service/coverage.out
+          retention-days: 1
 
       - name: gofmt (#2527)
         run: scripts/ci/check-gofmt.sh
@@ -1153,7 +1162,7 @@ jobs:
   sonarcloud:
     name: SonarCloud Analysis
     runs-on: ubuntu-latest
-    needs: [changes, service-checks, lib-tests]
+    needs: [changes, service-checks, lib-tests, flag-service-tests]
     # Skip on forks that don't have SONAR_TOKEN configured, and in the merge
     # queue (#1555): informational only, and each queue ref would become a
     # SonarCloud branch.
@@ -1197,6 +1206,10 @@ jobs:
             echo "SONAR_COVERAGE_PATHS=" >> "$GITHUB_ENV"
           fi
 
+          GO_COVERAGE_FILES=$(find coverage-reports -name "coverage.out" -type f 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+          echo "Go coverage files: ${GO_COVERAGE_FILES:-none}"
+          echo "SONAR_GO_COVERAGE_PATHS=$GO_COVERAGE_FILES" >> "$GITHUB_ENV"
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
         env:
@@ -1205,6 +1218,7 @@ jobs:
         with:
           args: >
             -Dsonar.python.coverage.reportPaths=${{ env.SONAR_COVERAGE_PATHS }}
+            -Dsonar.go.coverage.reportPaths=${{ env.SONAR_GO_COVERAGE_PATHS }}
 
   # Validate proto files and Python package dependencies (merged jobs — both
   # use the same ci-proto image; one Make invocation builds it once)
