@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/joustmania/flag-service/baseline"
@@ -124,10 +125,23 @@ func TestStartUpdatesOptionsInPlace(t *testing.T) {
 	// keyless duplicate of the same variant.
 	stale := opts.AddKeyed(2, "jev", "old jev value")
 	dup := opts.Add(2, "jev")
+	// What the link knows of objectives when the first update is sent: the
+	// options the feature list named, recorded at queue time.
+	var mu sync.Mutex
+	var atFirstPut []Option
+	seen := false
+	opts.OnWrite(func(method string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if method == http.MethodPut && !seen {
+			seen, atFirstPut = true, e.l.options("objectives")
+		}
+	})
 	if err := e.s.Start(e.ctx); err != nil {
 		t.Fatal(err)
 	}
 	<-e.s.optionsDone()
+	opts.OnWrite(nil)
 
 	t.Run("UC-055/BR-005 #2713 the #2711 options are rewritten in place: same ids, titled, the variant's value", func(t *testing.T) {
 		got := opts.Of(1)
@@ -158,6 +172,19 @@ func TestStartUpdatesOptionsInPlace(t *testing.T) {
 		}
 		if len(jev) != 1 || jev[0].ID != stale.ID || *jev[0].StringValue != "jev" {
 			t.Fatalf("jev options %+v, want option %d updated to the value jev", jev, stale.ID)
+		}
+	})
+	t.Run("UC-055/BR-005 #2713 before the option sync runs the link knows the variant of every #2711 option (a push meanwhile weights them)", func(t *testing.T) {
+		mu.Lock()
+		got := atFirstPut
+		mu.Unlock()
+		if len(got) != len(legacy) {
+			t.Fatalf("UC-055/BR-005 %d options known at the first update, want %d: %+v", len(got), len(legacy), got)
+		}
+		for _, o := range got {
+			if o.Variant == "" || legacy[o.Variant] != o.ID {
+				t.Fatalf("UC-055/BR-005 known option %+v at the first update, want its variant, ids %v", o, legacy)
+			}
 		}
 	})
 	t.Run("UC-055/BR-005 #2713 the link knows each option's variant for its weight writes", func(t *testing.T) {

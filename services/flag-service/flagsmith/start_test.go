@@ -20,6 +20,8 @@ import (
 	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
 	"github.com/joustmania/flag-service/registry"
 	"github.com/joustmania/flag-service/state"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // --- fixtures ---------------------------------------------------------------
@@ -354,6 +356,7 @@ type startEnv struct {
 	reg   *registry.Registry
 	logs  *syncBuffer
 	ctx   context.Context
+	spans *tracetest.SpanRecorder
 }
 
 type syncBuffer struct {
@@ -396,7 +399,9 @@ func newStartEnvHTTP(t *testing.T, hc *http.Client) *startEnv {
 	clk := newStartClock()
 	logs := &syncBuffer{}
 	cfg := testConfig(a.f)
-	l, err := New(cfg, Deps{State: st, Logger: slog.New(slog.NewTextHandler(logs, nil)), Now: clk.Now, Sleep: clk.Sleep, HTTPClient: hc})
+	spans := tracetest.NewSpanRecorder()
+	tracer := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)).Tracer("t")
+	l, err := New(cfg, Deps{State: st, Logger: slog.New(slog.NewTextHandler(logs, nil)), Tracer: tracer, Now: clk.Now, Sleep: clk.Sleep, HTTPClient: hc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +416,7 @@ func newStartEnvHTTP(t *testing.T, hc *http.Client) *startEnv {
 			<-done
 		}
 	})
-	return &startEnv{l: l, s: s, admin: a, clock: clk, st: st, reg: reg, logs: logs, ctx: ctx}
+	return &startEnv{l: l, s: s, admin: a, clock: clk, st: st, reg: reg, logs: logs, ctx: ctx, spans: spans}
 }
 
 // waitStatus polls Status until one snapshot satisfies ok.

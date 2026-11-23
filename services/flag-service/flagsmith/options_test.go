@@ -374,6 +374,38 @@ func TestRelistKeepsRecordedVariant(t *testing.T) {
 			}
 		}
 	})
+	t.Run("UC-055/BR-005 #2713 a recorded variant another option now holds by its title is not kept: that option gets 0 %", func(t *testing.T) {
+		var fid, untitled, titled int
+		h := newHarness(t, harnessOpts{realOut: true, before: func(h *harness) {
+			h.fake.ServeFlagAPI()
+			fid = h.fake.AddFeature("tempo.ramp_down_seconds")
+			// The link recorded the untitled option (listed first) as
+			// original; a person since added an option titled original.
+			untitled = h.fake.Options.Add(fid, "1.5").ID
+			titled = h.fake.Options.AddKeyed(fid, "original", "1.5").ID
+			l := h.link.IDs()
+			l.Lock()
+			l.FeatureID["tempo.ramp_down_seconds"] = fid
+			l.Options["tempo.ramp_down_seconds"] = []flagsmith.Option{{ID: untitled, Variant: "original", Value: "1.5", Text: true}}
+			l.Unlock()
+		}})
+		h.online()
+		h.put(state.WriteRequest{Set: "game", Flag: "tempo.ramp_down_seconds", Variant: "original"})
+		h.waitFor("the pick in Flagsmith", func() bool {
+			d, ok := h.fake.Options.Default(fid)
+			return ok && d.Enabled
+		})
+		d, _ := h.fake.Options.Default(fid)
+		for _, v := range d.Variants {
+			want := 0.0
+			if v.ID == titled {
+				want = 100
+			}
+			if v.Weight != want {
+				t.Fatalf("UC-055/BR-005 weights %v, want the titled option %d at 100 and the untitled %d at 0", d.Variants, titled, untitled)
+			}
+		}
+	})
 }
 
 // tempoState is a feature state of tempo.ramp_down_seconds whose two options

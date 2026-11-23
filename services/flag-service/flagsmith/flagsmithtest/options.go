@@ -56,14 +56,17 @@ type MVOptions struct {
 	Exists func(id int) bool
 	// dropKeysOn: a Flagsmith before #7698 (DropKeys).
 	dropKeysOn bool
-	// script: the statuses the next option writes of a method answer
+	// nullKeysOn: keys are never stored but answered as null (NullKeys).
+	nullKeysOn bool
+	// script: the statuses the next option requests of a method answer
 	// (Script); onWrite runs before every option write (OnWrite).
 	script  map[string][]int
 	onWrite func(method string)
 }
 
-// Script makes the next option writes (POST, PUT, DELETE on mv-options) of
-// method answer these statuses instead of being served, one per request.
+// Script makes the next option requests (POST, PUT, DELETE on mv-options, and
+// GET of a feature's listing) of method answer these statuses instead of
+// being served, one per request.
 func (o *MVOptions) Script(method string, statuses ...int) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -80,10 +83,14 @@ func (o *MVOptions) OnWrite(f func(method string)) {
 	o.onWrite = f
 }
 
-// scripted runs the write hook and answers a scripted status; true: answered.
+// scripted runs the write hook (not for a GET) and answers a scripted status;
+// true: answered.
 func (o *MVOptions) scripted(w http.ResponseWriter, method string) bool {
 	o.mu.Lock()
 	hook := o.onWrite
+	if method == http.MethodGet {
+		hook = nil
+	}
 	st := 0
 	if q := o.script[method]; len(q) > 0 {
 		st, o.script[method] = q[0], q[1:]
@@ -105,6 +112,15 @@ func (o *MVOptions) DropKeys() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.dropKeysOn = true
+}
+
+// NullKeys makes the fake a Flagsmith that answers the key field but keeps no
+// key: a key sent is dropped and every option answers "key": null (#2713,
+// the first create's answer of a project without options).
+func (o *MVOptions) NullKeys() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.nullKeysOn = true
 }
 
 // Wire returns a feature's options as the Admin API answers them (the
@@ -255,7 +271,7 @@ func featureOf(w http.ResponseWriter, r *http.Request, o *MVOptions) (int, bool)
 
 func (f *Fake) listOptions(w http.ResponseWriter, r *http.Request) {
 	id, ok := featureOf(w, r, f.Options)
-	if !ok {
+	if !ok || f.Options.scripted(w, http.MethodGet) {
 		return
 	}
 	opts := f.Options.Wire(id)
@@ -283,7 +299,7 @@ func (f *Fake) createOption(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]any{"default_percentage_allocation": "Invalid percentage allocation"})
 		return
 	}
-	if o.dropKeysOn {
+	if o.dropKeysOn || o.nullKeysOn {
 		body.Key = nil // an unknown field to a Flagsmith before #7698
 	}
 	if msg := o.keyErrorLocked(id, 0, body.Key); msg != "" {
@@ -339,7 +355,7 @@ func (f *Fake) updateOption(w http.ResponseWriter, r *http.Request) {
 		if opt.ID != optID {
 			continue
 		}
-		if o.dropKeysOn {
+		if o.dropKeysOn || o.nullKeysOn {
 			body.Key = nil
 		}
 		if msg := o.keyErrorLocked(id, optID, body.Key); msg != "" {

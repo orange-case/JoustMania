@@ -239,8 +239,9 @@ the key is.
 The options of a synced feature belong to the link: they are made equal to the offered variants at every start (a new
 release that adds or drops a variant changes them at its first start); between starts they are not changed. A failed
 create, update or delete is logged (WARN `flagsmith option not synced`, naming the option's key or id, never its value),
-counted as a push (op `option`) and leaves the feature's value sync as it is; the next start tries again. An answer
-`403` or `405` (the key may not change options: update needs the same permission as create and delete) stops every
+counted as a push (op `option`) and leaves the feature's value sync as it is; the next start tries again (an update or
+delete answered `404` is handled, above, and counted `ok`). An answer `403` or `405` to a write or to a retry's
+listing (the key may not change options: update needs the same permission as create and delete) stops every
 option write of the pass with one WARN `flagsmith options not synced`; the options stay as they are and keep working
 by the rules above. Three transient errors in a row (a 5xx, a timeout, no answer; each request already tried 3 times)
 end the pass with one WARN; the pass is then retried like the stale identity cleanup (§5.1): every 60 s, at most 10

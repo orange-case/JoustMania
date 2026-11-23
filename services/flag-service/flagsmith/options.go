@@ -405,7 +405,9 @@ func (s *startup) optionPass(ctx context.Context, run *optionRun, jobs []optionJ
 			case ctx.Err() != nil:
 				return nil, ctx.Err()
 			case err != nil:
-				s.warnOption(j.k, "list", "", err)
+				if !refusedAll(err) { // a 403 or 405 is endPass's one WARN
+					s.warnOption(j.k, "list", "", err)
+				}
 				if run.note(err) {
 					return s.endPass(run, append(retry, jobs[i:]...)), nil
 				}
@@ -621,12 +623,15 @@ func optionLabel(o Option) string {
 	return "id " + strconv.Itoa(o.ID)
 }
 
-// optionCall is one paced option request inside a push span (op option).
+// optionCall is one paced option request inside a push span (op option). A
+// delete or update answered 404 is handled (the option is gone; an update's
+// variant is created again) and counted ok.
 func (s *startup) optionCall(ctx context.Context, k Key, method, path string, body, out any) error {
 	sctx, span := s.pushSpan(ctx, k, OpOption)
 	_, _, err := s.pace.call(sctx, method, path, body, out, true, nil)
+	gone := (method == http.MethodDelete || method == http.MethodPut) && httpStatus(err) == http.StatusNotFound
 	switch {
-	case err == nil, method == http.MethodDelete && httpStatus(err) == http.StatusNotFound:
+	case err == nil, gone:
 		s.endPush(sctx, span, OpOption, ResultOK, "")
 	case httpStatus(err) >= 400 && httpStatus(err) < 500:
 		s.endPush(sctx, span, OpOption, ResultRejected, Reason(err))

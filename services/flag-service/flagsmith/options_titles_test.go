@@ -210,6 +210,29 @@ func TestStartOptionsKeylessFlagsmith(t *testing.T) {
 			t.Fatalf("UC-055/BR-005 third start: %d updates, want none", n)
 		}
 	})
+	t.Run("UC-055/BR-005 #2713 a project without options whose first create answers the key as null has no option keys", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.admin.f.Options.NullKeys()
+		e.admin.features = []fsFeature{{ID: 1, Name: "objectives"}}
+		startOptions(t, e)
+		if !e.l.optionsKeyless.Load() {
+			t.Fatal("UC-055/BR-005 a key sent and answered null was not taken for a Flagsmith without option keys")
+		}
+		keyed := 0
+		for _, r := range e.admin.f.RequestsTo(http.MethodPost, flagsmithtest.APIPath+"projects/") {
+			if strings.Contains(r.Path, "/mv-options/") && strings.Contains(string(r.Body), `"key"`) {
+				keyed++
+			}
+		}
+		if keyed != 1 {
+			t.Fatalf("UC-055/BR-005 %d creates sent a key, want only the first", keyed)
+		}
+		// Only the first create (of whichever feature came first) carried the
+		// variant's text; every later one is the #2711 shape.
+		if got, want := e.admin.f.Options.Values(1), names(e, "agent", "objectives"); len(got) != len(want) || !reflect.DeepEqual(got[1:], want[1:]) {
+			t.Fatalf("UC-055/BR-005 objectives values %v, want the names %v after the first", got, want)
+		}
+	})
 }
 
 // UC: UC-055 BR-005
@@ -251,6 +274,34 @@ func TestStartOptionsWriteRefused(t *testing.T) {
 			}
 		})
 	}
+	t.Run("UC-055/BR-005 #2713 a retry's listing answered 403 stops the pass with one WARN", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.admin.features = []fsFeature{{ID: 1, Name: "objectives"}}
+		legacyOptions(e, 1, "agent", "objectives")
+		e.admin.f.Options.Script(http.MethodPut, transientRun()...)
+		e.admin.f.Options.Script(http.MethodGet, http.StatusForbidden)
+		startOptions(t, e)
+		logs := e.logs.String()
+		if strings.Contains(logs, "op=list") {
+			t.Fatalf("UC-055/BR-005 the refused listing was logged as a failed option call:\n%s", logs)
+		}
+		if n := strings.Count(logs, "Flagsmith refused an option write"); n != 1 {
+			t.Fatalf("UC-055/BR-005 %d stop WARNs, want one:\n%s", n, logs)
+		}
+		if n := e.sleepsOf(optionRetryEvery); n != 1 {
+			t.Fatalf("UC-055/BR-005 %d retry waits, want only the one before the refused listing", n)
+		}
+	})
+}
+
+// transientRun is one run of transient errors: optionTransientRun option
+// calls failing after all their attempts.
+func transientRun() []int {
+	var out []int
+	for i := 0; i < optionTransientRun*transientAttempts; i++ {
+		out = append(out, http.StatusServiceUnavailable)
+	}
+	return out
 }
 
 // UC: UC-055 BR-005
@@ -281,6 +332,64 @@ func TestStartOptionsUpdateNotFound(t *testing.T) {
 			if o.ID == obj["mixed"] {
 				t.Fatalf("UC-055/BR-005 the link kept the deleted option %d", o.ID)
 			}
+		}
+	})
+	t.Run("UC-055/BR-005 #2713 the update answered 404 is handled and counted ok, like a delete's 404", func(t *testing.T) {
+		n := 0
+		for _, s := range e.spans.Ended() {
+			if s.Name() != SpanPush || spanAttr(s, AttrOp) != OpOption {
+				continue
+			}
+			n++
+			if r := spanAttr(s, AttrResult); r != ResultOK {
+				t.Fatalf("UC-055/BR-005 an option call counted %s (%s), want every one ok", r, spanAttr(s, AttrReason))
+			}
+		}
+		if n == 0 {
+			t.Fatal("UC-055/BR-005 no option push span")
+		}
+	})
+}
+
+// UC: UC-055 BR-005
+func TestStartOptionsRetryLimits(t *testing.T) {
+	t.Run("UC-055/BR-005 #2713 a feature whose option call failed without a run of errors is retried", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.admin.features = []fsFeature{{ID: 1, Name: "objectives"}}
+		obj := legacyOptions(e, 1, "agent", "objectives")
+		// One update fails after all its attempts; the next succeed.
+		for i := 0; i < transientAttempts; i++ {
+			e.admin.f.Options.Script(http.MethodPut, http.StatusServiceUnavailable)
+		}
+		startOptions(t, e)
+		if strings.Contains(e.logs.String(), "transient errors in a row") {
+			t.Fatalf("UC-055/BR-005 one failed call aborted the pass:\n%s", e.logs.String())
+		}
+		if n := e.sleepsOf(optionRetryEvery); n != 1 {
+			t.Fatalf("UC-055/BR-005 %d retry waits, want one", n)
+		}
+		for _, o := range e.admin.f.Options.Of(1) {
+			if o.Key == nil || obj[*o.Key] != o.ID {
+				t.Fatalf("UC-055/BR-005 objectives titles %v after the retry, ids %v", keysOf(e.admin.f.Options.Of(1)), obj)
+			}
+		}
+	})
+	t.Run("UC-055/BR-005 #2713 an option sync failing every time stops after 10 retries with one WARN", func(t *testing.T) {
+		e := newStartEnv(t)
+		e.admin.features = []fsFeature{{ID: 1, Name: "objectives"}}
+		legacyOptions(e, 1, "agent", "objectives")
+		for i := 0; i <= optionRetries; i++ {
+			e.admin.f.Options.Script(http.MethodPut, transientRun()...)
+		}
+		startOptions(t, e)
+		if n := e.sleepsOf(optionRetryEvery); n != optionRetries {
+			t.Fatalf("UC-055/BR-005 %d retry waits, want %d", n, optionRetries)
+		}
+		if n := strings.Count(e.logs.String(), "the option sync failed after its retries"); n != 1 {
+			t.Fatalf("UC-055/BR-005 %d final WARNs, want one:\n%s", n, e.logs.String())
+		}
+		if n := optionRequestsTo(e.admin.f, http.MethodPut, 1); n != (optionRetries+1)*optionTransientRun*transientAttempts {
+			t.Fatalf("UC-055/BR-005 %d update attempts, want %d (one pass and %d retries)", n, (optionRetries+1)*optionTransientRun*transientAttempts, optionRetries)
 		}
 	})
 }
