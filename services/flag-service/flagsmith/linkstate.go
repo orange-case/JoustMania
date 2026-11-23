@@ -422,7 +422,7 @@ func (s *LinkState) SetRemoteRead(k Key, v Value, read uint64) {
 		s.setRemoteLocked(e, v)
 		return
 	}
-	if e.inSync && !(e.hasRemote && e.remote.Equal(v)) {
+	if e.inSync && (!e.hasRemote || !e.remote.Equal(v)) {
 		s.syncLocked(e, false)
 	}
 	e.remote, e.hasRemote = v, true
