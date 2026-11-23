@@ -28,6 +28,8 @@ type Prompt struct {
 	System string
 	User   string
 	Model  string
+	// ConversationID is the game the call belongs to (gen_ai.conversation.id); "" outside a game.
+	ConversationID string
 }
 
 // unknown is the literal rendered for any never-observed (nil) signal.

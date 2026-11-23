@@ -34,6 +34,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/joustmania/agent/decide/llmio"
 	"github.com/joustmania/agent/internal/anthropichttp"
 	"github.com/joustmania/agent/llm"
 )
@@ -213,7 +214,7 @@ func (c *Claude) Infer(ctx context.Context, prompt llm.Prompt) (string, error) {
 
 	ctx, span := otel.Tracer(instrumentationName).Start(ctx, "chat "+s.Model,
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(c.requestAttributes(prompt.System, s)...),
+		trace.WithAttributes(c.requestAttributes(prompt.System, prompt.ConversationID, s)...),
 	)
 	defer span.End()
 
@@ -319,7 +320,7 @@ func params(p llm.Prompt, s Settings) anthropic.BetaMessageNewParams {
 	return params
 }
 
-func (c *Claude) requestAttributes(system string, s Settings) []attribute.KeyValue {
+func (c *Claude) requestAttributes(system, conversationID string, s Settings) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		semconv.GenAIOperationNameChat,
 		semconv.GenAIProviderNameAnthropic,
@@ -331,6 +332,9 @@ func (c *Claude) requestAttributes(system string, s Settings) []attribute.KeyVal
 	}
 	if e := effort(s); e != "" {
 		attrs = append(attrs, anthropichttp.AttrRequestReasoningLevel.String(e))
+	}
+	if conversationID != "" {
+		attrs = append(attrs, semconv.GenAIConversationID(conversationID))
 	}
 	return attrs
 }
@@ -350,6 +354,8 @@ func (c *Claude) recordResponse(ctx context.Context, span trace.Span, s Settings
 		semconv.GenAIUsageInputTokens(input),
 		semconv.GenAIUsageOutputTokens(int(m.Usage.OutputTokens)),
 		semconv.GenAIUsageCacheReadInputTokens(int(m.Usage.CacheReadInputTokens)),
+		// v0.1.0 name plus the old semconv name for a transition (removal: #2729).
+		attribute.Int(llmio.AttrUsageCacheWriteInputTokens, int(m.Usage.CacheCreationInputTokens)),
 		semconv.GenAIUsageCacheCreationInputTokens(int(m.Usage.CacheCreationInputTokens)),
 	)
 	c.recordTokens(ctx, s.Model, string(m.Model), input, int(m.Usage.OutputTokens))

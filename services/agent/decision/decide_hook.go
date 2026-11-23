@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/joustmania/agent/decide"
+	"github.com/joustmania/agent/decide/llmio"
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamecontext"
 	"github.com/joustmania/agent/goal"
@@ -65,7 +66,7 @@ const SpanDecide = "invoke_agent " + AgentName
 // when known, gen_ai.request.model), on both paths (#2584). gen_ai.output.type=json
 // is set on the remote path only: its request asks the backend for JSON, while the
 // rules path sends no request at all.
-func invokeAgentStartAttributes(model string, remote bool) []attribute.KeyValue {
+func invokeAgentStartAttributes(model string, remote bool, settings decide.RequestSettings) []attribute.KeyValue {
 	// gen_ai.operation.name is Required; also on the rules path, where no model is
 	// called (a documented deviation, telemetry.md §4.2).
 	attrs := []attribute.KeyValue{
@@ -77,6 +78,44 @@ func invokeAgentStartAttributes(model string, remote bool) []attribute.KeyValue 
 	}
 	if remote {
 		attrs = append(attrs, semconv.GenAIOutputTypeJSON)
+	}
+	if settings.MaxTokens > 0 {
+		attrs = append(attrs, semconv.GenAIRequestMaxTokens(settings.MaxTokens))
+	}
+	if settings.Temperature != nil {
+		attrs = append(attrs, semconv.GenAIRequestTemperature(*settings.Temperature))
+	}
+	return attrs
+}
+
+// requestSettingsOf is the backend's request settings, zero when it reports none.
+func requestSettingsOf(b decide.Backend) decide.RequestSettings {
+	if r, ok := b.(decide.RequestSettingsReporter); ok {
+		return r.RequestSettings()
+	}
+	return decide.RequestSettings{}
+}
+
+// usageAttributes omits any count no call reported.
+func usageAttributes(t decide.UsageTotals) []attribute.KeyValue {
+	var attrs []attribute.KeyValue
+	if t.InputTokens.OK {
+		attrs = append(attrs, semconv.GenAIUsageInputTokens(t.InputTokens.N))
+	}
+	if t.OutputTokens.OK {
+		attrs = append(attrs, semconv.GenAIUsageOutputTokens(t.OutputTokens.N))
+	}
+	if t.CacheReadInputTokens.OK {
+		attrs = append(attrs, semconv.GenAIUsageCacheReadInputTokens(t.CacheReadInputTokens.N))
+	}
+	if t.CacheWriteInputTokens.OK {
+		attrs = append(attrs, attribute.Int(llmio.AttrUsageCacheWriteInputTokens, t.CacheWriteInputTokens.N))
+	}
+	if t.ReasoningOutputTokens.OK {
+		attrs = append(attrs, semconv.GenAIUsageReasoningOutputTokens(t.ReasoningOutputTokens.N))
+	}
+	if len(t.FinishReasons) > 0 {
+		attrs = append(attrs, semconv.GenAIResponseFinishReasons(t.FinishReasons...))
 	}
 	return attrs
 }
@@ -222,7 +261,9 @@ func (l *Loop) SetDecideRegistry(r *DecideRegistry) { l.decideBackends = r }
 type decideRecord struct {
 	// trig is the OTLP Export that triggered this decide when the cycle has no
 	// agent.signal_received span (in a game, #2648): emitted as an event on the span.
-	trig           *EvalTrigger
+	trig *EvalTrigger
+	// usage is nil on the rules path, so its span carries no usage.
+	usage          *decide.Usage
 	requested      string
 	used           string
 	fallbackReason string
@@ -698,7 +739,7 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 	opts := []trace.SpanStartOption{
 		trace.WithTimestamp(start),
 		trace.WithSpanKind(trace.SpanKindInternal),
-		trace.WithAttributes(invokeAgentStartAttributes(cfg.Model, true)...),
+		trace.WithAttributes(invokeAgentStartAttributes(cfg.Model, true, requestSettingsOf(backend))...),
 	}
 	opts = append(opts, fireCycleLink(fireSC)...)
 	spanCtx, span := l.Tracer.Start(parent, SpanDecide, opts...)
@@ -746,7 +787,9 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 		l.countPredictionDropped(root, rec)
 	}()
 
-	callCtx, cancel := context.WithTimeout(spanCtx, timeout)
+	// Calls of a decision that then falls back still count: they were billed.
+	rec.usage = &decide.Usage{}
+	callCtx, cancel := context.WithTimeout(decide.WithUsage(spanCtx, rec.usage), timeout)
 	resp, err := backend.Decide(callCtx, rec.req)
 	timedOut := err != nil && (errors.Is(err, context.DeadlineExceeded) || callCtx.Err() == context.DeadlineExceeded)
 	cancel()
@@ -1045,7 +1088,7 @@ func (l *Loop) emitDecideSpan(parent context.Context, rec *decideRecord, c gamec
 	_, span := l.Tracer.Start(parent, SpanDecide,
 		trace.WithTimestamp(rec.start),
 		trace.WithSpanKind(trace.SpanKindInternal),
-		trace.WithAttributes(invokeAgentStartAttributes(rec.model, false)...))
+		trace.WithAttributes(invokeAgentStartAttributes(rec.model, false, decide.RequestSettings{})...))
 	l.registerPrediction(span, rec)
 	l.setDecideAttributes(span, rec, c)
 	span.End(trace.WithTimestamp(rec.end))
@@ -1092,6 +1135,9 @@ func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecon
 	}
 	if rec.model != "" {
 		attrs = append(attrs, semconv.GenAIRequestModel(rec.model))
+	}
+	if rec.usage != nil {
+		attrs = append(attrs, usageAttributes(rec.usage.Totals())...)
 	}
 	if rec.hasResp {
 		attrs = append(attrs,

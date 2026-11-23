@@ -130,6 +130,12 @@ func New(cfg Config) *Backend {
 // Name implements decide.Backend.
 func (b *Backend) Name() string { return Name }
 
+// RequestSettings are the settings every request of this backend sends.
+func (b *Backend) RequestSettings() decide.RequestSettings {
+	shape := shapeFor(b.cfg.Model)
+	return decide.RequestSettings{MaxTokens: int(shape.maxTokensOf()), Temperature: shape.temperature}
+}
+
 // Model is the configured model id (trimmed; empty when unset).
 func (b *Backend) Model() string { return b.cfg.Model }
 
@@ -356,11 +362,22 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, c callResult, res
 			semconv.GenAIUsageInputTokens(input),
 			semconv.GenAIUsageOutputTokens(int(m.Usage.OutputTokens)),
 			semconv.GenAIUsageCacheReadInputTokens(int(m.Usage.CacheReadInputTokens)),
+			// v0.1.0 name plus the old semconv name for a transition (removal: #2729).
+			attribute.Int(llmio.AttrUsageCacheWriteInputTokens, int(m.Usage.CacheCreationInputTokens)),
 			semconv.GenAIUsageCacheCreationInputTokens(int(m.Usage.CacheCreationInputTokens)),
 		)
+		call := decide.CallUsage{
+			InputTokens:           decide.Tokens(input),
+			OutputTokens:          decide.Tokens(int(m.Usage.OutputTokens)),
+			CacheReadInputTokens:  decide.Tokens(int(m.Usage.CacheReadInputTokens)),
+			CacheWriteInputTokens: decide.Tokens(int(m.Usage.CacheCreationInputTokens)),
+			FinishReasons:         []string{string(m.StopReason)},
+		}
 		if r := m.Usage.OutputTokensDetails.ThinkingTokens; r > 0 {
 			span.SetAttributes(semconv.GenAIUsageReasoningOutputTokens(int(r)))
+			call.ReasoningOutputTokens = decide.Tokens(int(r))
 		}
+		decide.RecordCall(ctx, call)
 		if b.cfg.CaptureContent {
 			rationale := ""
 			if resp != nil {
@@ -374,6 +391,7 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, c callResult, res
 	if c.msg == nil {
 		// Transport failure: no response, so the generation ended in error.
 		span.SetAttributes(semconv.GenAIResponseFinishReasons(llmio.FinishError))
+		decide.RecordCall(ctx, decide.CallUsage{FinishReasons: []string{llmio.FinishError}})
 	}
 	if c.errType != "" {
 		span.SetAttributes(semconv.ErrorTypeKey.String(c.errType))

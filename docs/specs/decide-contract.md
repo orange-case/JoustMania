@@ -872,7 +872,7 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   `decide.fallback_reason`, `decide.state.digest`, `decide.questions_sha` (short hash of the questions JSON, #2648), `decide.latency_ms`, `decide.outcome`. Conditional: `decide.act_confidence_threshold` (the EFFECTIVE
   threshold, §5) and `decide.act_confidence_threshold.source` (`jev` = `decision.jev.act_confidence_threshold`,
   `global` = `decision.act_confidence_threshold`; #1287), both only when routed,
-  `gen_ai.request.model` and `gen_ai.output.type=json` (remote path), `decide.answers`, `decide.confidence`, `decide.confidence.min`,
+  `gen_ai.request.model`, `gen_ai.output.type=json`, `gen_ai.request.max_tokens` and `gen_ai.request.temperature` (claude and openai only; jev sets neither) and, at span end, the summed `gen_ai.usage.*` tokens and `gen_ai.response.finish_reasons` of the invocation's model calls (remote path; [telemetry.md §4.2](telemetry.md#42-genai-semantic-conventions), #2584), `decide.answers`, `decide.confidence`, `decide.confidence.min`,
   `decide.rationale`, `decide.invalid_reason`, `decide.discarded_reason`, `error.type`, `decide.blocked` and
   `decide.block_reason` (§6; #1295). `decide.questions` (the same JSON on every decide) rides only the first `invoke_agent joustmania-agent` of a game with a given `decide.questions_sha` (#2648). A group decision's `agent.decision` carries `decision.group.size`, `decision.group.alive` (#2467 PR 6),
   `decision.group.targets` and, on a ledger refusal, `decision.group.refused_serial` (#2467 PR 4; telemetry.md §4).
