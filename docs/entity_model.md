@@ -326,11 +326,11 @@ own state file and restored at the next start.
 
 ### DECISION_CYCLE
 
-One agent decision cycle for a game: one evaluation, recorded on one `agent.decide` span (`services/agent/decision/decision.go`, `decide_hook.go`; contract in [decide-contract.md](specs/decide-contract.md)). A cycle has no id of its own; its natural identifier is the span. It emits 0 to 2 DECISIONs (the rules path, UC-040 A1; a remote backend gives one answer, hence at most one decision).
+One agent decision cycle for a game: one evaluation, recorded on one `invoke_agent joustmania-agent` span (`services/agent/decision/decision.go`, `decide_hook.go`; contract in [decide-contract.md](specs/decide-contract.md)). A cycle has no id of its own; its natural identifier is the span. It emits 0 to 2 DECISIONs (the rules path, UC-040 A1; a remote backend gives one answer, hence at most one decision).
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
-| decide_span_id | Span id of the cycle's `agent.decide` span (no agent-assigned id exists) | String | 16 | Primary Key, Format: 16 hex characters |
+| decide_span_id | Span id of the cycle's `invoke_agent joustmania-agent` span (no agent-assigned id exists) | String | 16 | Primary Key, Format: 16 hex characters |
 | game_id | Game decided for | String | 17 | Not Null, Foreign Key (GAME_SESSION.game_id) |
 | backend_requested | `decision.backend` at fire time (`decide.backend.requested`); empty counts as `rules`, an unknown name is kept verbatim and decided by rules with `fallback_reason=unknown_backend` | String | 20 | Not Null, Values: rules, claude, openai, jev, or an unknown name |
 | backend | Backend that actually decided | String | 10 | Not Null, Values: rules, claude, openai, jev |
@@ -345,8 +345,8 @@ One agent decision cycle for a game: one evaluation, recorded on one `agent.deci
 | latency_ms | Decide latency | Integer | 6 | Not Null, Min: 0 |
 
 **Constraints:**
-- Cardinality: at most one evaluation per second per game on the rules path. A cycle in which the rules ranking emitted nothing records no `agent.decide` span (UC-040 A1), except a configuration fallback (`unknown_backend`, `backend_unavailable`, `async_not_wired`), which records one throttled span per reason (UC-040 A3).
-- The answer fields (`outcome`, `confidence`, ...) describe the cycle. `decide.blocked` / `decide.block_reason` on the `agent.decide` span mirror the cycle's first DECISION only.
+- Cardinality: at most one evaluation per second per game on the rules path. A cycle in which the rules ranking emitted nothing records no `invoke_agent joustmania-agent` span (UC-040 A1), except a configuration fallback (`unknown_backend`, `backend_unavailable`, `async_not_wired`), which records one throttled span per reason (UC-040 A3).
+- The answer fields (`outcome`, `confidence`, ...) describe the cycle. `decide.blocked` / `decide.block_reason` on the `invoke_agent joustmania-agent` span mirror the cycle's first DECISION only.
 
 ### DECISION
 

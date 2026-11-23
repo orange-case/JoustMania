@@ -122,7 +122,7 @@ grace.
 Decision spans are independently attributable per game. The root
 `agent.signal_received` span carries both `session.id` and the `game.id` alias
 (`session.id` **is** the real `game_id` since PR A's early adoption); the
-decision / `agent.disabled` / `agent.decide` spans carry `game.kind` and
+decision / `agent.disabled` / `invoke_agent joustmania-agent` spans carry `game.kind` and
 `game.id`. So a Jaeger query by `game.id` is
 symmetrical with the coordinator's own `game.id`-tagged spans, and two concurrent
 games' traces never blur together.
@@ -672,10 +672,18 @@ Every evaluation that produces decisions emits one trace (hierarchy always
 parent → child):
 
 ```
-agent.signal_received          one per triggering OTLP Export (backdated to arrival); only without game ids, in a game it is an event on agent.decide (#2648)
+agent.signal_received          one per triggering OTLP Export (backdated to arrival); only without game ids, in a game it is an event on invoke_agent joustmania-agent (#2648)
+  ├─ invoke_agent joustmania-agent   the decide span; rules path: sibling of agent.decision
   └─ agent.decision          one per Decision the rules engine returns
        └─ agent.action       one per decision, wrapping the ActionSink call
+
+remote path:
+invoke_agent joustmania-agent
+  ├─ chat {model}            one per model call (CLIENT)
+  └─ agent.decision ─ agent.action
 ```
+
+In a game the decide span (and, on the rules path, `agent.decision`) is a remote child of `game_cycle` (telemetry.md §4.1).
 
 The root span is **signal-agnostic** (#1053): a metric-triggered cycle and a
 trace-triggered cycle both emit `agent.signal_received`, distinguished only by
@@ -725,7 +733,7 @@ decision in the cycle):
 The attribution attaches where the rules and remote decide paths converge
 (`decisionAttributes`, fed by the shared `LayerState`). The full decide record
 (requested backend, fallback reason, answers, confidence, outcome) is on the
-`agent.decide` span. #1234 removed `agent.mode`, `agent.model`,
+`invoke_agent joustmania-agent` span. #1234 removed `agent.mode`, `agent.model`,
 `agent.prompt_variant` and `inference.*` from this span.
 
 #### Kill-switch trace (`agent.disabled`)
@@ -740,7 +748,7 @@ so a disabled agent under heavy signal load does not flood the trace backend.
 
 The in-game LLM prompt capture (`agent.llm.prompt`, #739) and the async
 `agent.llm.apply` / `agent.llm.infer` spans were retired with the legacy
-`mode=llm` path in #1234; remote decisions are recorded on `agent.decide`.
+`mode=llm` path in #1234; remote decisions are recorded on `invoke_agent joustmania-agent`.
 
 #### Post-game retrospective capture (M4, #844)
 
@@ -761,9 +769,7 @@ The span carries the full retro prompt plus attribution (single builder
 
 | Attribute | Value |
 |-----------|-------|
-| `gen_ai.operation.name` | `"chat"` |
-| `gen_ai.request.model` | the text backend's model (`""` when capture-only) |
-| `gen_ai.output.type` | `"json"` |
+| `gen_ai.*` | none since #2584: the model call is the `chat {model}` child |
 | `agent.mode` | `"retro"` |
 | `agent.objectives` | sorted `k=v` weights |
 | `interventions.allowed` | the allow-list summary |
@@ -888,12 +894,15 @@ Measurement is best-effort and never on the hot decision path.
 ### Semantic conventions
 
 OTel semantic conventions ([semconv v1.34.0](https://pkg.go.dev/go.opentelemetry.io/otel/semconv/v1.34.0))
-are used wherever one honestly applies:
+are used wherever one honestly applies; the GenAI spans follow
+`open-telemetry/semantic-conventions-genai` v0.1.0 (`docs/specs/telemetry.md` §4.2):
 
 | Where | Convention |
 |-------|-----------|
 | `agent.signal_received` | `rpc.system=grpc`, `rpc.service` (OTLP `TraceService`/`MetricsService`/`LogsService`), `rpc.method=Export`; span kind `SERVER` |
-| `agent.decision` | `gen_ai.agent.name` identity (the full [GenAI agent conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/) apply once an LLM inference path exists — `gen_ai.provider.name` etc. land as a `gen_ai.*` child span in llm mode) |
+| `invoke_agent joustmania-agent` | GenAI *Invoke agent internal span*, GenAI semconv v0.1.0; deviations in telemetry.md §4.2 |
+| `chat {model}` | GenAI inference client span (`gen_ai.provider.name`, model, usage tokens; telemetry.md §4.2) |
+| `agent.decision` | `gen_ai.agent.name` identity |
 | `agent.decision` event | `feature_flag` span event (`feature_flag.key=interventions.allowed`, `feature_flag.provider.name`, `feature_flag.result.variant`) — same shape the openfeature OTel hooks emit in the Python services; provider is `"stub"` until flagd (#725) |
 | `agent.action` failures | `span.RecordError` + `error.type` + status `ERROR` |
 
@@ -1046,7 +1055,7 @@ devcontainer that already exports `ANTHROPIC_API_KEY` hands it to the agent, and
 
 A backend without its key, model or base URL resolves to `backend_unavailable`
 and the decision falls back to rules (`decide.fallback_reason` on the
-`agent.decide` span), as do timeouts (`decision.<backend>.timeout_ms`), errors and
+`invoke_agent joustmania-agent` span), as do timeouts (`decision.<backend>.timeout_ms`), errors and
 invalid answers. Keys are never flags and never land on spans; backend errors are
 recorded only as `error.type`. Wiring: `decide_backends.go`.
 
