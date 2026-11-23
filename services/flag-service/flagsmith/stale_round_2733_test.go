@@ -69,6 +69,14 @@ func blockedPatch(entered chan<- struct{}, release <-chan struct{}, statuses ...
 	}
 }
 
+// releaseAll closes release once, at the latest at cleanup: a test that fails
+// with a PATCH still held must not keep the fake server from closing.
+func releaseAll(t *testing.T, release chan struct{}) func() {
+	once := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(once)
+	return once
+}
+
 func (h *harness) putDuring(req state.WriteRequest, errp *error) func() {
 	req.Writer = "operator"
 	return func() {
@@ -95,6 +103,7 @@ func TestRoundDoesNotActOnLocalValueChangedDuringFetch(t *testing.T) {
 		"PATCH " + backendPath: blockedPatch(entered, release),
 		docPath:                doc.handler,
 	}, nil)
+	confirm := releaseAll(t, release)
 	h.online()
 	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "openai"})
 	<-entered // openai in flight
@@ -109,7 +118,7 @@ func TestRoundDoesNotActOnLocalValueChangedDuringFetch(t *testing.T) {
 			t.Fatalf("pending %d out_of_sync %d, want 0 1: the stack runs claude, Flagsmith shows openai", p, oos)
 		}
 	})
-	close(release)
+	confirm()
 	h.waitFor("the openai push ended", func() bool { return len(h.ended(flagsmith.SpanPush)) == 1 })
 	t.Run("UC-055/main step 5 the confirm of the older push keeps the key out of sync", func(t *testing.T) {
 		if p, oos, _ := h.link.Links().Counts(); p != 0 || oos != 1 {
@@ -139,6 +148,7 @@ func TestRoundKeepsRefusalOfValueResavedDuringFetch(t *testing.T) {
 		"PATCH " + backendPath: blockedPatch(entered, release, http.StatusConflict),
 		docPath:                doc.handler,
 	}, nil)
+	releaseAll(t, release)
 	h.online()
 	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"})
 	<-entered // jev in flight
@@ -187,7 +197,7 @@ func TestRoundDoesNotMarkInSyncAfterChangeDuringFetch(t *testing.T) {
 	}, func(h *harness) {
 		h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("700")})
 	})
-	t.Cleanup(func() { close(release) })
+	releaseAll(t, release)
 	h.online()
 	h.roundAndSettle()
 	var putErr error
