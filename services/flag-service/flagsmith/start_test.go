@@ -111,6 +111,7 @@ type fakeAdmin struct {
 	attempts   map[string]int
 	posts      []map[string]any
 	tagPosts   []map[string]any
+	afterList  func() // runs once the feature list was written (#2713)
 	deletes    []string
 	nextID     int
 }
@@ -234,14 +235,18 @@ func (a *fakeAdmin) edgeDelete(w http.ResponseWriter, r *http.Request) {
 func (a *fakeAdmin) featureList(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
 	features := append([]fsFeature(nil), a.features...)
+	after := a.afterList
 	a.mu.Unlock()
-	for i := range features {
-		features[i].MultivariateOptions = nil
-		for _, o := range a.f.Options.Of(features[i].ID) {
-			features[i].MultivariateOptions = append(features[i].MultivariateOptions, fsOption{ID: o.ID, Key: o.Key, Type: o.Type, StringValue: o.StringValue})
-		}
+	if after != nil {
+		defer after()
 	}
-	flagsmithtest.WriteJSON(w, 200, map[string]any{"count": len(features), "next": nil, "results": features})
+	// The options as the Admin API answers them (without the key field on a
+	// Flagsmith before #7698, #2713).
+	results := make([]map[string]any, 0, len(features))
+	for _, f := range features {
+		results = append(results, map[string]any{"id": f.ID, "name": f.Name, "is_archived": f.IsArchived, "multivariate_options": a.f.Options.Wire(f.ID)})
+	}
+	flagsmithtest.WriteJSON(w, 200, map[string]any{"count": len(features), "next": nil, "results": results})
 }
 
 func (a *fakeAdmin) hasFeature(id int) bool {

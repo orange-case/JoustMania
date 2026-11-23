@@ -240,6 +240,11 @@ func TestPullMapsPickedOptionToVariant(t *testing.T) {
 			t.Fatalf("local %+v, want chaos_focused", v)
 		}
 	})
+	t.Run("UC-054/A6 BR-012 #2713 a title renamed in Flagsmith names no variant: the value does", func(t *testing.T) {
+		if v := pick(t, nil, objectivesState("chaos", true, chaos)); v.Variant != "chaos_focused" {
+			t.Fatalf("UC-054/A6 local %+v, want chaos_focused by the value of the renamed option", v)
+		}
+	})
 	t.Run("UC-054/A6 BR-012 #2713 without a title an option the link recorded is its variant by id", func(t *testing.T) {
 		v := pick(t, func(h *harness) {
 			ids := h.link.IDs()
@@ -268,11 +273,11 @@ func TestPullMapsPickedOptionToVariant(t *testing.T) {
 // UC: UC-055 BR-005
 func TestStackPushWeightsTitledOptions(t *testing.T) {
 	var fid int
-	var chaos flagsmithtest.MVOption
+	var chaos, mixed flagsmithtest.MVOption
 	h := newHarness(t, harnessOpts{realOut: true, before: func(h *harness) {
 		h.fake.ServeFlagAPI()
 		fid = h.fake.AddFeature("objectives")
-		mixed := h.fake.Options.AddKeyed(fid, "mixed", `{"endurance":0.25,"balanced":0.25,"accelerate":0.25,"chaos":0.25}`)
+		mixed = h.fake.Options.AddKeyed(fid, "mixed", `{"endurance":0.25,"balanced":0.25,"accelerate":0.25,"chaos":0.25}`)
 		chaos = h.fake.Options.AddKeyed(fid, "chaos_focused", `{"endurance":0.1,"balanced":0.1,"accelerate":0.1,"chaos":0.7}`)
 		ids := h.link.IDs()
 		ids.Lock()
@@ -302,6 +307,117 @@ func TestStackPushWeightsTitledOptions(t *testing.T) {
 		}
 		if len(d.Variants) != 2 {
 			t.Fatalf("weights %v, want both options", d.Variants)
+		}
+	})
+	t.Run("UC-054/A6 #2713 the pushed pick read back from a document without titles, valued with the JSON, is no change", func(t *testing.T) {
+		patch := "/api/__future__/environments/envkey/features/"
+		patches := h.requests(http.MethodPatch, patch)
+		st := fsState("objectives", true, "chaos_focused")
+		st["feature"] = map[string]any{"id": fid, "name": "objectives", "type": "MULTIVARIATE"}
+		st["multivariate_feature_state_values"] = []map[string]any{
+			{"id": 401, "multivariate_feature_option": map[string]any{"id": mixed.ID, "value": *mixed.StringValue}, "percentage_allocation": 0},
+			{"id": 402, "multivariate_feature_option": map[string]any{"id": chaos.ID, "value": *chaos.StringValue}, "percentage_allocation": 100},
+		}
+		h.setDoc([]map[string]any{st})
+		h.roundAndSettle()
+		if n := h.requests(http.MethodPatch, patch); n != patches {
+			t.Fatalf("UC-054/A6 %d PATCHes after the echo, want none", n-patches)
+		}
+		if v, _ := h.local("agent", "objectives", flagsmith.ScopeStack); v.Variant != "chaos_focused" || v.Writer != "operator" {
+			t.Fatalf("UC-054/A6 local %+v, want the operator's chaos_focused (no write from Flagsmith)", v)
+		}
+	})
+}
+
+// UC: UC-055 BR-005
+func TestRelistKeepsRecordedVariant(t *testing.T) {
+	var fid int
+	ids := map[string]int{}
+	h := newHarness(t, harnessOpts{realOut: true, before: func(h *harness) {
+		h.fake.ServeFlagAPI()
+		fid = h.fake.AddFeature("tempo.ramp_down_seconds")
+		// Options without titles whose values tie (original and default are
+		// both 1.5): only the ids the link recorded tell them apart. A person
+		// added slow since the start.
+		var known []flagsmith.Option
+		for _, c := range []struct{ name, value string }{{"ci", "0.1"}, {"original", "1.5"}, {"default", "1.5"}, {"slow", "3.0"}} {
+			o := h.fake.Options.Add(fid, c.value)
+			ids[c.name] = o.ID
+			if c.name != "slow" {
+				known = append(known, flagsmith.Option{ID: o.ID, Variant: c.name, Value: c.value, Text: true})
+			}
+		}
+		l := h.link.IDs()
+		l.Lock()
+		l.FeatureID["tempo.ramp_down_seconds"] = fid
+		l.Options["tempo.ramp_down_seconds"] = known
+		l.Unlock()
+	}})
+	h.online()
+	h.put(state.WriteRequest{Set: "game", Flag: "tempo.ramp_down_seconds", Variant: "default"})
+	h.waitFor("the pick in Flagsmith", func() bool {
+		d, ok := h.fake.Options.Default(fid)
+		return ok && d.Enabled
+	})
+	t.Run("UC-055/BR-005 #2713 a listing keeps the variant recorded for an option id the rules cannot tell", func(t *testing.T) {
+		if n := h.requests(http.MethodGet, flagsmithtest.APIPath+"projects/"); n != 1 {
+			t.Fatalf("UC-055/BR-005 %d option listings, want 1", n)
+		}
+		d, _ := h.fake.Options.Default(fid)
+		for _, v := range d.Variants {
+			want := 0.0
+			if v.ID == ids["default"] {
+				want = 100
+			}
+			if v.Weight != want {
+				t.Fatalf("UC-055/BR-005 weights %v, want option %d (default) at 100", d.Variants, ids["default"])
+			}
+		}
+	})
+}
+
+// tempoState is a feature state of tempo.ramp_down_seconds whose two options
+// carry the same value 1.5 without a title (#2711 options of original and
+// default on a Flagsmith that re-valued them); option 42, default's, is at
+// 100 %.
+func tempoState() map[string]any {
+	s := fsState("tempo.ramp_down_seconds", true, "ci")
+	s["feature"] = map[string]any{"id": 3, "name": "tempo.ramp_down_seconds", "type": "MULTIVARIATE"}
+	s["multivariate_feature_state_values"] = []map[string]any{
+		{"id": 501, "multivariate_feature_option": map[string]any{"id": 41, "value": "1.5", "key": nil}, "percentage_allocation": 0},
+		{"id": 502, "multivariate_feature_option": map[string]any{"id": 42, "value": "1.5", "key": nil}, "percentage_allocation": 100},
+	}
+	return s
+}
+
+// UC: UC-054 A6
+func TestPullDuplicateOptionText(t *testing.T) {
+	read := func(t *testing.T, before func(h *harness)) flagsmith.Value {
+		t.Helper()
+		h := newHarness(t, harnessOpts{before: before})
+		h.online()
+		h.setDoc([]map[string]any{tempoState()})
+		h.round()
+		v, _ := h.local("game", "tempo.ramp_down_seconds", flagsmith.ScopeStack)
+		return v
+	}
+	t.Run("UC-054/A6 #2713 characterization: untitled options with equal values and no recorded id are no option variant, the value 1.5 applies", func(t *testing.T) {
+		// The option is not read as default: its value 1.5 is written, which
+		// the state names after the first variant holding it (original).
+		v := read(t, nil)
+		if !v.Present || v.Variant != "original" || string(v.Value) != "1.5" {
+			t.Fatalf("UC-054/A6 local %+v (%s), want the value 1.5 (original), not the option's default", v, v.Value)
+		}
+	})
+	t.Run("UC-054/A6 #2713 with the ids recorded the pick is the variant of its id", func(t *testing.T) {
+		v := read(t, func(h *harness) {
+			l := h.link.IDs()
+			l.Lock()
+			l.Options["tempo.ramp_down_seconds"] = []flagsmith.Option{{ID: 41, Variant: "original"}, {ID: 42, Variant: "default"}}
+			l.Unlock()
+		})
+		if v.Variant != "default" {
+			t.Fatalf("UC-054/A6 local %+v, want default by its option id", v)
 		}
 	})
 }

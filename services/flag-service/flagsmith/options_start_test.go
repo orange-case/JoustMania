@@ -184,6 +184,25 @@ func TestOptionText(t *testing.T) {
 			}
 		}
 	})
+	t.Run("UC-055/BR-005 #2713 an integer, a boolean and a float variant as their JSON text", func(t *testing.T) {
+		pi := &registry.Policy{Set: "agent", Key: "i"}
+		pi.Bounds.Range, pi.Bounds.Integer = []float64{0, 1000}, true
+		bi := &baseline.Flag{Variants: map[string]json.RawMessage{"one_min": json.RawMessage(`60`), "two_min": json.RawMessage(`120`)}, DefaultVariant: "one_min"}
+		pf := &registry.Policy{Set: "game", Key: "f"}
+		pf.Bounds.Range = []float64{0.1, 10}
+		bf := &baseline.Flag{Variants: map[string]json.RawMessage{"slow": json.RawMessage(`3.0`), "ci": json.RawMessage(`0.1`)}, DefaultVariant: "ci"}
+		pb := &registry.Policy{Set: "agent", Key: "b"}
+		bb := &baseline.Flag{Variants: map[string]json.RawMessage{"on": json.RawMessage(`true`), "off": json.RawMessage(`false`)}, DefaultVariant: "off"}
+		for _, c := range []struct {
+			p             *registry.Policy
+			b             *baseline.Flag
+			variant, want string
+		}{{pi, bi, "one_min", "60"}, {pf, bf, "slow", "3.0"}, {pb, bb, "on", "true"}} {
+			if got := OptionText(c.p, c.b, c.variant); got != c.want {
+				t.Fatalf("UC-055/BR-005 %s/%s: %q, want %q", c.p.Key, c.variant, got, c.want)
+			}
+		}
+	})
 	t.Run("UC-055/BR-005 #2713 a value longer than Flagsmith's 20000 characters is shown as the name", func(t *testing.T) {
 		long, _ := json.Marshal(strings.Repeat("é", optionValueLimit+1))
 		fits, _ := json.Marshal(strings.Repeat("é", optionValueLimit))
