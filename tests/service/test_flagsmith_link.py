@@ -8,7 +8,8 @@ off, as every compose file does. No preseed here: the first start creates the fe
 author) and a person's changes as a user's; since #2621 a restart reads no authors.
 
 - start: the link resolves the environment and creates every registry flag that is not a
-  feature yet (FR-214, BR-002, never an ``initial_value``);
+  feature yet (FR-214, BR-002, never an ``initial_value``); every feature without a stack value
+  then shows its baseline default under an off toggle (FR-227), written once: a restart writes none;
 - offline start: an unreachable Flagsmith never stops the flag service (BR-007);
 - restart, Flagsmith wins (BR-006, FR-215): every value Flagsmith holds comes back,
   whoever wrote it: the link's own push, a person's value, an admin setting an API key set
@@ -35,8 +36,9 @@ pytestmark = pytest.mark.tier("service")
 
 SERVICE_COMPOSITION = Composition(("controller-manager", "game-coordinator"), fake_flagsmith=True)
 
-# The first start creates ~130 features and their tags at FLAGSMITH_PUSH_RATE (5/s).
-FIRST_START_SECONDS = 90.0
+# The first start creates ~130 features and their tags, then re-reads each and writes its
+# reference value (FR-227, #2623): ~400 Admin requests at FLAGSMITH_PUSH_RATE (5/s), ~80 s.
+FIRST_START_SECONDS = 150.0
 RESTART_SECONDS = fl.RESTART_SECONDS
 
 CAPTURE = ("agent", "decision.capture_content")
@@ -89,6 +91,23 @@ def test_start_creates_missing_features(stack, flag_service):
         assert "initial_value" not in body, body
         assert body["default_enabled"] is False and body["type"] == "STANDARD"
         assert body.get("tags"), f"{body['name']} has no flag-set tag"
+
+
+@pytest.mark.uc("UC-054", flow="A3", br=["BR-002"], tc="TC-022")
+def test_start_writes_reference_values_once(stack, flag_service, settled_link):
+    fake = settled_link
+    default = flag_service.get(*TICK)["baseline_default"]
+    # Step 1: after the first start a feature without a stack value shows its baseline default
+    # (the variant name) under an off toggle; the flag service applies nothing of it.
+    assert fake.env_value(TICK[1]) == (False, default)
+    assert fl.overlay(flag_service, *TICK) == {}
+    # Step 2: a restart finds every reference in place: it writes none and is online in time.
+    restarted = _restart(stack, flag_service, link="online")
+    fl.wait_pulls(flag_service, 1)
+    written = [r for r in fake.requests("PATCH", "/api/__future__/") if r["t"] >= restarted]
+    assert written == [], f"{len(written)} reference values written at a restart, want 0"
+    assert fake.env_value(TICK[1]) == (False, default)
+    assert fl.overlay(flag_service, *TICK) == {}
 
 
 @pytest.mark.uc("UC-054", flow="A3", br=["BR-007"], tc="TC-022")

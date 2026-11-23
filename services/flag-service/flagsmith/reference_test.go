@@ -158,6 +158,7 @@ func TestStartWritesReferenceValues(t *testing.T) {
 	})
 	t.Run("UC-054/A3 FR-227 a baseline changed by a new release is written at the next start", func(t *testing.T) {
 		f.SetDocument(testDocument([]map[string]any{fstate("decision.backend", false, "claude")}, nil), "")
+		f.Options.SetDefault(1, flagDefault(false, "string", "claude")) // the old release's reference
 		before := referencePatches(f)[1]
 		if err := e.s.Start(e.ctx); err != nil {
 			t.Fatal(err)
@@ -214,7 +215,7 @@ func TestReferenceStepFailures(t *testing.T) {
 		f := e.admin.f
 		f.ServeFlagAPI()
 		f.Handle("PATCH /api/__future__/environments/{env}/features/1/{$}", func(w http.ResponseWriter, _ *http.Request) {
-			flagsmithtest.WriteJSON(w, http.StatusConflict, map[string]any{"detail": "change_requests_enabled"})
+			flagsmithtest.WriteJSON(w, http.StatusBadRequest, map[string]any{"environment_default": map[string]any{"value": []string{"invalid"}}})
 		})
 		e.admin.features = []fsFeature{{ID: 1, Name: "decision.backend"}, {ID: 2, Name: "experiment_tick_seconds"}}
 		f.SetDocument(testDocument([]map[string]any{fstate("decision.backend", false, nil), fstate("experiment_tick_seconds", false, nil)}, nil), "")

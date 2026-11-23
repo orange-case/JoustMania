@@ -83,6 +83,12 @@ func (p *adminPacer) wait(ctx context.Context) error {
 // when not nil, is asked right before each request: false skips it (skipped
 // true, no request).
 func (p *adminPacer) call(ctx context.Context, method, path string, body, out any, transient bool, ready func() bool) (status int, skipped bool, err error) {
+	return p.do(ctx, transient, ready, func() (int, error) { return p.l.client.Admin(ctx, method, path, body, out) })
+}
+
+// do is call for any request: send makes it once and returns its status.
+// The reference step paces its environment document read with it (#2623).
+func (p *adminPacer) do(ctx context.Context, transient bool, ready func() bool, send func() (int, error)) (status int, skipped bool, err error) {
 	rateRetries, attempts := 0, 0
 	for {
 		if err := p.wait(ctx); err != nil {
@@ -91,7 +97,7 @@ func (p *adminPacer) call(ctx context.Context, method, path string, body, out an
 		if ready != nil && !ready() {
 			return 0, true, nil
 		}
-		status, err = p.l.client.Admin(ctx, method, path, body, out)
+		status, err = send()
 		if err == nil || ctx.Err() != nil {
 			return status, false, err
 		}

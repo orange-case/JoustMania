@@ -20,9 +20,12 @@ import (
 //     before any project-level write;
 //  4. create the missing features and tags (FR-214);
 //  5. write the reference values (FR-227, §5.2, #2623): one more full
-//     document pull, then every usable feature whose toggle is off and
-//     whose value is not its baseline default gets it (enabled=false). It
-//     runs before the start reconcile, so no push of a stack value races it;
+//     document pull decides; every usable feature whose toggle is off and
+//     whose value is not its baseline default is read again from the Admin
+//     API right before it gets it (enabled=false), so a toggle turned on
+//     meanwhile is never turned off. A transient read failure fails the
+//     start. It runs before the start reconcile, so no push of a stack value
+//     races it;
 //  6. the final step: remember the document's identity uuids, start the
 //     variant option sync in the background (§2.3, #2709: the link does not
 //     wait for it) and schedule the stale game identity cleanup (start itself never deletes an identity):

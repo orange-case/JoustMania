@@ -2,10 +2,12 @@ package flagsmith_test
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/joustmania/flag-service/flagsmith"
+	"github.com/joustmania/flag-service/state"
 )
 
 // Reference values end to end (FR-227, architecture note §5.2, #2623): the
@@ -83,6 +85,52 @@ func TestReferenceValuesThroughTheLink(t *testing.T) {
 		}
 		if n := h.counter(flagsmith.MetricPushes, "op", flagsmith.OpReference); n != 2 {
 			t.Fatalf("%d reference pushes counted, want 2 (one per feature written)", n)
+		}
+	})
+}
+
+// The reference step runs before the start reconcile (maintainer decisions
+// D1 and D3, 2026-11-23): a persisted admin setting whose feature is off in
+// Flagsmith gets the baseline reference first, then the reconcile sends the
+// persisted value with the toggle on; the reference never ends up over it.
+//
+// UC: UC-054 A3 BR-006
+func TestReferenceBeforeTheStartReconcile(t *testing.T) {
+	var backend int
+	h := newHarness(t, harnessOpts{
+		realStart: true,
+		doc:       document(time.Date(2026, 11, 15, 11, 59, 0, 0, time.UTC), []map[string]any{fsState("decision.backend", false, nil)}),
+		// Loaded at boot from an earlier process's state file (a Put before
+		// Run would be discarded as a pre-connect change, UC-054 A2).
+		persisted: func(st *state.State) {
+			if _, ferr := st.Put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "claude", Writer: "operator", Persist: true}); ferr != nil {
+				t.Fatal(ferr)
+			}
+		},
+		before: func(hh *harness) {
+			hh.fake.ServeFlagAPI()
+			backend = hh.fake.AddFeature("decision.backend")
+			for _, p := range hh.st.Registry().Policies() {
+				if p.Key != "decision.backend" {
+					hh.fake.AddFeature(p.Key)
+				}
+			}
+		},
+	})
+	h.online()
+	t.Run("UC-054/A3 BR-006 FR-227 a persisted admin setting whose feature is off ends up on in Flagsmith with the persisted value", func(t *testing.T) {
+		h.waitFor("the reference and the reconcile push answered", func() bool {
+			p, _, _ := h.link.Links().Counts()
+			return p == 0 && h.counter(flagsmith.MetricPushes, "op", flagsmith.OpReference) == 1 &&
+				len(h.fake.RequestsTo(http.MethodPatch, "/api/__future__/")) >= 2
+		})
+		d, ok := h.fake.Options.Default(backend)
+		var v struct {
+			Value string `json:"value"`
+		}
+		_ = json.Unmarshal(d.Value, &v)
+		if !ok || !d.Enabled || v.Value != "claude" {
+			t.Fatalf("decision.backend in Flagsmith enabled=%v %q, want enabled=true claude (the reconcile's push after the reference)", d.Enabled, v.Value)
 		}
 	})
 }
