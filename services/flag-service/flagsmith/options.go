@@ -47,6 +47,26 @@ type fsOption struct {
 	Key         *string `json:"key"`
 	Type        string  `json:"type"`
 	StringValue *string `json:"string_value"`
+	// hasKey: the answer carried the key field at all (Flagsmith #7698). A
+	// null key is an option without a title on a Flagsmith that has titles.
+	hasKey bool
+}
+
+// UnmarshalJSON decodes an option and notes whether its key field is present
+// (§2.3, a Flagsmith without option keys).
+func (o *fsOption) UnmarshalJSON(b []byte) error {
+	type plain fsOption
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return err
+	}
+	_, p.hasKey = fields["key"]
+	*o = fsOption(p)
+	return nil
 }
 
 func (o fsOption) key() string {
@@ -86,9 +106,10 @@ func OptionText(p *registry.Policy, b *baseline.Flag, name string) string {
 }
 
 // optionMatcher tells which offered variant an option is (§2.3): (1) its key
-// names one; with no key, (3) its value is a variant name (an option of #2711)
-// or (4) its value is the text of exactly one offered variant. Rule (2), the
-// option ids the link recorded, is the pull's (pickedVariant).
+// names one; with no key, or a key that names none, (3) its value is a variant
+// name (an option of #2711) or (4) its value is the text of exactly one
+// offered variant. Rule (2), the option ids the link recorded, is the pull's
+// (pickedVariant).
 type optionMatcher struct {
 	offered []string
 	is      map[string]bool
@@ -137,9 +158,10 @@ func (m *optionMatcher) byKey(key string) string {
 	return ""
 }
 
-// byValue is rules 3 and 4, for an option without a key.
+// byValue is rules 3 and 4, for an option whose key names no offered variant
+// (none, or a title a person renamed).
 func (m *optionMatcher) byValue(o Option) string {
-	if o.Key != "" || !o.Text {
+	if m.is[o.Key] || !o.Text {
 		return ""
 	}
 	if m.is[o.Value] {
@@ -148,27 +170,39 @@ func (m *optionMatcher) byValue(o Option) string {
 	return m.byText[normText(o.Value)]
 }
 
-// variant is the variant an option is by rules 1, 3 and 4.
-func (m *optionMatcher) variant(o Option) string {
-	if o.Key != "" {
-		return m.byKey(o.Key)
+// match is rules 1, 3 and 4 over a feature's options, one option per variant:
+// every key first, then the options left over by value, so an option renamed
+// in Flagsmith never takes a variant another option holds by its key.
+func (m *optionMatcher) match(opts []Option) []string {
+	out := make([]string, len(opts))
+	taken := map[string]bool{}
+	for i, o := range opts {
+		if v := m.byKey(o.Key); v != "" && !taken[v] {
+			out[i], taken[v] = v, true
+		}
 	}
-	return m.byValue(o)
+	for i, o := range opts {
+		if out[i] != "" {
+			continue
+		}
+		if v := m.byValue(o); v != "" && !taken[v] {
+			out[i], taken[v] = v, true
+		}
+	}
+	return out
 }
 
 // knownOptions maps the options Flagsmith named to the variants they are.
 func (l *Link) knownOptions(p *registry.Policy, have []fsOption) []Option {
-	var m *optionMatcher
-	if p != nil {
-		m = newOptionMatcher(p, l.BaselineFlag(p.Set, p.Key))
-	}
 	opts := make([]Option, 0, len(have))
 	for _, fo := range have {
-		o := fo.option()
-		if m != nil {
-			o.Variant = m.variant(o)
-		}
-		opts = append(opts, o)
+		opts = append(opts, fo.option())
+	}
+	if p == nil {
+		return opts
+	}
+	for i, v := range newOptionMatcher(p, l.BaselineFlag(p.Set, p.Key)).match(opts) {
+		opts[i].Variant = v
 	}
 	return opts
 }
@@ -202,11 +236,32 @@ func (l *Link) optionsPath(featureID int, rest string) string {
 	return "projects/" + strconv.Itoa(l.cfg.ProjectID) + "/features/" + strconv.Itoa(featureID) + "/mv-options/" + rest
 }
 
-// setOptions records a feature's options.
+// setOptions records a feature's options. A changed id -> variant pair makes
+// the next pull unconditional (§2.3): the document may already show a pick of
+// that option, which a 304 or an unchanged digest would never read again.
 func (l *Link) setOptions(flag string, opts []Option) {
 	l.ids.Lock()
-	defer l.ids.Unlock()
+	old := l.ids.Options[flag]
 	l.ids.Options[flag] = opts
+	l.ids.Unlock()
+	if variantsChanged(old, opts) {
+		l.fullPull.Store(true)
+	}
+}
+
+// variantsChanged: an option of now is another variant than in old (a new
+// option counts when it is a variant).
+func variantsChanged(old, now []Option) bool {
+	was := make(map[int]string, len(old))
+	for _, o := range old {
+		was[o.ID] = o.Variant
+	}
+	for _, o := range now {
+		if was[o.ID] != o.Variant {
+			return true
+		}
+	}
+	return false
 }
 
 // options returns a feature's options as last known.
@@ -239,18 +294,174 @@ func (s *startup) queueOptions(k Key, p *registry.Policy, featureID int, have []
 func (s *startup) scheduleOptions(ctx context.Context) {
 	jobs := s.optionJobs
 	s.optionJobs = nil
+	run := newOptionRun(jobs)
+	s.l.optionsKeyless.Store(run.keyless)
 	done := make(chan struct{})
 	s.mu.Lock()
 	s.options = done
 	s.mu.Unlock()
 	go func() {
 		defer close(done)
-		for _, j := range jobs {
-			if s.syncOptions(ctx, j.k, j.p, j.featureID, j.have) != nil {
-				return
+		s.runOptions(ctx, run, jobs)
+	}()
+}
+
+// Option sync limits (§2.3, #2713 decision D2): a pass ends after
+// optionTransientRun transient errors in a row and is retried like the stale
+// identity cleanup.
+const (
+	optionTransientRun = 3
+	optionRetries      = staleCleanupRetries
+	optionRetryEvery   = staleCleanupRetryEvery
+)
+
+// optionRun is the option sync of one start: whether Flagsmith has option keys
+// (decided once, §2.3) and the state of the current pass.
+type optionRun struct {
+	// keyless: write the #2711 shape (no key, value = the variant name).
+	keyless bool
+	// decided: keyless is known (from the feature list, else the first
+	// create's answer).
+	decided bool
+
+	// Per pass: stopped after a 403 or 405, aborted after a run of
+	// transient errors; transient counts the errors in a row, failed notes
+	// one in the current feature.
+	stopped, aborted bool
+	transient        int
+	failed           bool
+}
+
+// newOptionRun decides from the feature list, before any write, whether the
+// options carry the key field: one option without it means a Flagsmith
+// without option keys. A null key is an option of #2711, not a sign of it.
+func newOptionRun(jobs []optionJob) *optionRun {
+	r := &optionRun{}
+	for _, j := range jobs {
+		for _, o := range j.have {
+			r.decided = true
+			if !o.hasKey {
+				r.keyless = true
 			}
 		}
-	}()
+	}
+	return r
+}
+
+// note counts one option call's result; true ends the pass.
+func (r *optionRun) note(err error) bool {
+	st := httpStatus(err)
+	switch {
+	case err == nil:
+		r.transient = 0
+	case st == http.StatusForbidden || st == http.StatusMethodNotAllowed:
+		r.stopped = true
+	case isTransient(err) || st == 0:
+		r.transient++
+		r.failed = true
+		r.aborted = r.transient >= optionTransientRun
+	default:
+		r.transient = 0
+	}
+	return r.stopped || r.aborted
+}
+
+// refusedAll: err stops every option write of the pass (logged once).
+func refusedAll(err error) bool {
+	st := httpStatus(err)
+	return st == http.StatusForbidden || st == http.StatusMethodNotAllowed
+}
+
+// runOptions runs option passes until every feature is in step, the pass was
+// stopped, the link is cancelled or the retries are used up.
+func (s *startup) runOptions(ctx context.Context, run *optionRun, jobs []optionJob) {
+	for retry := 0; ; retry++ {
+		left, err := s.optionPass(ctx, run, jobs, retry > 0)
+		if err != nil || len(left) == 0 {
+			return
+		}
+		if retry == optionRetries {
+			s.l.Logger().Warn("flagsmith options not synced", "detail", "the option sync failed after its retries", "retries", optionRetries, "features", len(left))
+			return
+		}
+		if s.l.Sleep(ctx, optionRetryEvery) != nil {
+			return
+		}
+		jobs = left
+	}
+}
+
+// optionPass syncs the options of jobs (relist: read each feature's options
+// again first, a retry) and returns the features to retry. Only a cancel is
+// returned as an error.
+func (s *startup) optionPass(ctx context.Context, run *optionRun, jobs []optionJob, relist bool) ([]optionJob, error) {
+	run.stopped, run.aborted, run.transient = false, false, 0
+	var retry []optionJob
+	for i, j := range jobs {
+		run.failed = false
+		if relist {
+			have, err := s.readOptions(ctx, j.featureID)
+			switch {
+			case ctx.Err() != nil:
+				return nil, ctx.Err()
+			case err != nil:
+				s.warnOption(j.k, "list", "", err)
+				if run.note(err) {
+					return s.endPass(run, append(retry, jobs[i:]...)), nil
+				}
+				if run.failed {
+					retry = append(retry, j)
+				}
+				continue
+			}
+			j.have = have
+		}
+		if err := s.syncOptions(ctx, run, j.k, j.p, j.featureID, j.have); err != nil {
+			return nil, err
+		}
+		if run.stopped || run.aborted {
+			return s.endPass(run, append(retry, jobs[i:]...)), nil
+		}
+		if run.failed {
+			retry = append(retry, j)
+		}
+	}
+	return retry, nil
+}
+
+// endPass logs the one WARN of a stopped or aborted pass; a stopped pass is
+// not retried (the next start tries again).
+func (s *startup) endPass(run *optionRun, left []optionJob) []optionJob {
+	if run.stopped {
+		s.l.Logger().Warn("flagsmith options not synced", "detail", "Flagsmith refused an option write (403 or 405); no option is changed until the next start")
+		return nil
+	}
+	s.l.Logger().Warn("flagsmith options not synced", "detail", "transient errors in a row; the option sync is retried", "errors", optionTransientRun, "retry_in", optionRetryEvery.String(), "features", len(left))
+	return left
+}
+
+// readOptions lists a feature's options (a retried pass).
+func (s *startup) readOptions(ctx context.Context, featureID int) ([]fsOption, error) {
+	var raw json.RawMessage
+	if _, _, err := s.pace.call(ctx, http.MethodGet, s.l.optionsPath(featureID, ""), nil, &raw, true, nil); err != nil {
+		return nil, err
+	}
+	return parseOptions(raw)
+}
+
+// parseOptions reads an mv-options listing (a JSON array or a DRF page).
+func parseOptions(raw json.RawMessage) ([]fsOption, error) {
+	var list []fsOption
+	if err := json.Unmarshal(raw, &list); err != nil {
+		var paged struct {
+			Results []fsOption `json:"results"`
+		}
+		if err := json.Unmarshal(raw, &paged); err != nil {
+			return nil, ReasonError{Reason: "malformed_response"}
+		}
+		list = paged.Results
+	}
+	return list, nil
 }
 
 // optionsDone is closed when the scheduled option sync ended (nil before
@@ -266,79 +477,148 @@ func (s *startup) optionsDone() <-chan struct{} {
 // that is no offered variant (a dropped variant, a person's, a duplicate) is
 // removed, a matched one whose key, type or value differs is updated in place
 // (PUT keeps its id, so its weights and a running pick stay: the migration of
-// the #2711 options, #2713), a missing one is created at 0 % in every
-// environment. Deletes go first, then updates, then creates, so a key is free
-// before it is set. A failed call is logged and counted; only a cancel is
-// returned.
-func (s *startup) syncOptions(ctx context.Context, k Key, p *registry.Policy, featureID int, have []fsOption) error {
+// the #2711 options, #2713; one deleted meanwhile, 404, is created again), a
+// missing one is created at 0 % in every environment. Deletes go first, then
+// updates, then creates. A failed call is logged and counted (run); a 403 or
+// 405 stops the pass and a run of transient errors aborts it, the options
+// known so far recorded. Only a cancel is returned.
+func (s *startup) syncOptions(ctx context.Context, run *optionRun, k Key, p *registry.Policy, featureID int, have []fsOption) error {
 	m := newOptionMatcher(p, s.l.BaselineFlag(p.Set, p.Key))
-	matched := make([]string, len(have))
+	cur := make([]Option, len(have)) // the options as Flagsmith has them now
+	for i, o := range have {
+		cur[i] = o.option()
+	}
+	matched := m.match(cur)
 	taken := map[string]bool{}
-	for i, o := range have { // rule 1: by key
-		if v := m.byKey(o.key()); v != "" && !taken[v] {
-			matched[i], taken[v] = v, true
+	for i, v := range matched {
+		cur[i].Variant = v
+		if v != "" {
+			taken[v] = true
 		}
 	}
-	for i, o := range have { // rules 3 and 4: a keyless option by value
-		if v := m.byValue(o.option()); matched[i] == "" && v != "" && !taken[v] {
-			matched[i], taken[v] = v, true
+	gone := make([]bool, len(cur))
+	var created []Option
+	// want is the key and text of a variant's option: the #2711 shape on a
+	// Flagsmith without option keys.
+	want := func(name string) (string, string) {
+		if run.keyless {
+			return "", name
 		}
+		return name, m.text[name]
 	}
 	body := func(name string) map[string]any {
-		return map[string]any{"feature": featureID, "key": name, "type": TypeUnicode, "string_value": m.text[name], "default_percentage_allocation": 0}
+		key, text := want(name)
+		b := map[string]any{"feature": featureID, "type": TypeUnicode, "string_value": text, "default_percentage_allocation": 0}
+		if key != "" {
+			b["key"] = key
+		}
+		return b
 	}
-	var final []Option
-	for i, o := range have {
+	finish := func() error {
+		final := make([]Option, 0, len(cur)+len(created))
+		for i, o := range cur {
+			if !gone[i] {
+				final = append(final, o) // still there: a weight write names it
+			}
+		}
+		s.l.setOptions(k.Flag, append(final, created...))
+		return nil
+	}
+	path := func(id int) string { return s.l.optionsPath(featureID, strconv.Itoa(id)+"/") }
+
+	for i, o := range cur {
 		if matched[i] != "" {
 			continue
 		}
-		opt := o.option()
-		err := s.optionCall(ctx, k, http.MethodDelete, s.l.optionsPath(featureID, strconv.Itoa(o.ID)+"/"), nil, nil)
-		switch {
-		case ctx.Err() != nil:
+		err := s.optionCall(ctx, k, http.MethodDelete, path(o.ID), nil, nil)
+		if ctx.Err() != nil {
 			return ctx.Err()
-		case err != nil && httpStatus(err) != http.StatusNotFound:
-			s.warnOption(k, "delete", opt.Value, err)
-			final = append(final, opt) // still there: a weight write names it
+		}
+		if err == nil || httpStatus(err) == http.StatusNotFound {
+			gone[i], err = true, nil
+		} else if !refusedAll(err) {
+			s.warnOption(k, "delete", optionLabel(o), err)
+		}
+		if run.note(err) {
+			return finish()
 		}
 	}
-	for i, o := range have {
+	for i, o := range cur {
 		name := matched[i]
 		if name == "" {
 			continue
 		}
-		opt := o.option()
-		opt.Variant = name
-		if o.key() != name || !opt.Text || opt.Value != m.text[name] {
-			err := s.optionCall(ctx, k, http.MethodPut, s.l.optionsPath(featureID, strconv.Itoa(o.ID)+"/"), body(name), nil)
-			switch {
-			case ctx.Err() != nil:
-				return ctx.Err()
-			case err != nil:
-				s.warnOption(k, "update", name, err)
-			default:
-				opt = Option{ID: o.ID, Variant: name, Key: name, Value: m.text[name], Text: true}
-			}
+		key, text := want(name)
+		if o.Text && o.Value == text && (run.keyless || o.Key == key) {
+			continue // in step; on a Flagsmith without keys never updated for the key alone
 		}
-		final = append(final, opt)
+		err := s.optionCall(ctx, k, http.MethodPut, path(o.ID), body(name), nil)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		switch {
+		case err == nil:
+			cur[i] = Option{ID: o.ID, Variant: name, Key: key, Value: text, Text: true}
+		case httpStatus(err) == http.StatusNotFound:
+			// Deleted since the listing: created below in this pass.
+			gone[i], taken[name], err = true, false, nil
+		case !refusedAll(err):
+			s.warnOption(k, "update", name, err)
+		}
+		if run.note(err) {
+			return finish()
+		}
 	}
 	for _, name := range m.offered {
 		if taken[name] {
 			continue
 		}
-		var created fsOption
-		err := s.optionCall(ctx, k, http.MethodPost, s.l.optionsPath(featureID, ""), body(name), &created)
-		switch {
-		case ctx.Err() != nil:
+		b := body(name)
+		_, sentKey := b["key"]
+		var c fsOption
+		err := s.optionCall(ctx, k, http.MethodPost, s.l.optionsPath(featureID, ""), b, &c)
+		if ctx.Err() != nil {
 			return ctx.Err()
-		case err != nil:
+		}
+		switch {
+		case err == nil:
+			key, text := want(name)
+			if !run.decided {
+				s.decideKeyless(run, c, sentKey)
+				if run.keyless {
+					key = ""
+				}
+			}
+			created = append(created, Option{ID: c.ID, Variant: name, Key: key, Value: text, Text: true})
+		case !refusedAll(err):
 			s.warnOption(k, "create", name, err)
-		default:
-			final = append(final, Option{ID: created.ID, Variant: name, Key: name, Value: m.text[name], Text: true})
+		}
+		if run.note(err) {
+			return finish()
 		}
 	}
-	s.l.setOptions(k.Flag, final)
-	return nil
+	return finish()
+}
+
+// decideKeyless decides from the first create's answer, when the feature list
+// showed no option at all, whether Flagsmith has option keys: no key field, or
+// null after one was sent, means it has none (§2.3, #2713 decision D1).
+func (s *startup) decideKeyless(run *optionRun, c fsOption, sentKey bool) {
+	run.decided = true
+	if !c.hasKey || (sentKey && c.Key == nil) {
+		run.keyless = true
+		s.l.optionsKeyless.Store(true)
+		s.l.Logger().Warn("flagsmith options without keys", "detail", "this Flagsmith keeps no option key; options are written as in #2709 (value = the variant name)")
+	}
+}
+
+// optionLabel names an option in a log line: its key, else its id (never its
+// value, which can be 20 000 characters).
+func optionLabel(o Option) string {
+	if o.Key != "" {
+		return o.Key
+	}
+	return "id " + strconv.Itoa(o.ID)
 }
 
 // optionCall is one paced option request inside a push span (op option).
@@ -356,12 +636,16 @@ func (s *startup) optionCall(ctx context.Context, k Key, method, path string, bo
 	return err
 }
 
-func (s *startup) warnOption(k Key, op, value string, err error) {
-	s.l.Logger().Warn("flagsmith option not synced", "flag_set", k.Set, "flag", k.Flag, "op", op, "option", value, "reason", Reason(err))
+// warnOption logs a failed option call; option is the variant name or the
+// option's key or id (optionLabel), never its value.
+func (s *startup) warnOption(k Key, op, option string, err error) {
+	s.l.Logger().Warn("flagsmith option not synced", "flag_set", k.Set, "flag", k.Flag, "op", op, "option", option, "reason", Reason(err))
 }
 
 // listOptions reads a feature's options again (a weight write Flagsmith
-// refused because they changed since the start).
+// refused because they changed since the start). An option the rules make no
+// variant keeps the variant the link recorded for its id (rule 2: keyless
+// options with equal values).
 func (o *out) listOptions(ctx context.Context, k Key, featureID int) error {
 	if err := o.pace(ctx); err != nil {
 		return err
@@ -370,18 +654,35 @@ func (o *out) listOptions(ctx context.Context, k Key, featureID int) error {
 	if _, err := o.l.Client().Admin(ctx, http.MethodGet, o.l.optionsPath(featureID, ""), nil, &raw); err != nil {
 		return err
 	}
-	var list []fsOption
-	if err := json.Unmarshal(raw, &list); err != nil {
-		var paged struct {
-			Results []fsOption `json:"results"`
-		}
-		if err := json.Unmarshal(raw, &paged); err != nil {
-			return ReasonError{Reason: "malformed_response"}
-		}
-		list = paged.Results
+	list, err := parseOptions(raw)
+	if err != nil {
+		return err
 	}
-	o.l.setOptions(k.Flag, o.l.knownOptions(o.l.Policy(k.Set, k.Flag), list))
+	o.l.setOptions(k.Flag, keepRecorded(o.l.knownOptions(o.l.Policy(k.Set, k.Flag), list), o.l.options(k.Flag)))
 	return nil
+}
+
+// keepRecorded gives an option of opts with no variant the variant prev
+// recorded for its id, unless another option already is that variant.
+func keepRecorded(opts, prev []Option) []Option {
+	taken := map[string]bool{}
+	for _, o := range opts {
+		if o.Variant != "" {
+			taken[o.Variant] = true
+		}
+	}
+	for i := range opts {
+		if opts[i].Variant != "" {
+			continue
+		}
+		for _, p := range prev {
+			if p.ID == opts[i].ID && p.Variant != "" && !taken[p.Variant] {
+				opts[i].Variant, taken[p.Variant] = p.Variant, true
+				break
+			}
+		}
+	}
+	return opts
 }
 
 // variantsRefused: Flagsmith refused the weights of a write because they do
@@ -454,7 +755,9 @@ func pickedValue(pol *registry.Policy, mv []MVStateValue) (MVStateValue, bool, *
 
 // pickedVariant is the offered variant a picked option is (§2.3, #2713):
 // (1) its key, (2) the variant the link recorded for its id, (3, 4) with no
-// key, its value; "" when none matches (the value is then read as any value).
+// key or one that names no offered variant, its value; "" when none matches
+// (the value is then read as any value). On a Flagsmith without option keys
+// rule 3 goes before rule 2, the read order of #2711.
 func (l *Link) pickedVariant(pol *registry.Policy, mv MVStateValue) string {
 	m := newOptionMatcher(pol, l.BaselineFlag(pol.Set, pol.Key))
 	o := Option{ID: mv.Option.ID}
@@ -464,14 +767,17 @@ func (l *Link) pickedVariant(pol *registry.Policy, mv MVStateValue) string {
 	if v := m.byKey(o.Key); v != "" {
 		return v
 	}
+	var s string
+	if json.Unmarshal(mv.Option.Value, &s) == nil {
+		o.Value, o.Text = s, true
+	}
+	if l.optionsKeyless.Load() && o.Text && m.is[o.Value] {
+		return o.Value
+	}
 	for _, known := range l.options(pol.Key) {
 		if known.ID == o.ID && m.is[known.Variant] {
 			return known.Variant
 		}
-	}
-	var s string
-	if json.Unmarshal(mv.Option.Value, &s) == nil {
-		o.Value, o.Text = s, true
 	}
 	return m.byValue(o)
 }

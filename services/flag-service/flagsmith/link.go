@@ -172,6 +172,9 @@ type Link struct {
 	// fullPull: the next pull is unconditional (a refused stack value must be
 	// reverted although the document did not change, UC-055 A4, #2621).
 	fullPull atomic.Bool
+	// optionsKeyless: this Flagsmith keeps no option key (architecture note
+	// §2.3, #2713): options are written and read as in #2709.
+	optionsKeyless atomic.Bool
 
 	gamesSeenOnce sync.Once
 	gamesSeen     chan struct{}
