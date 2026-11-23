@@ -683,7 +683,7 @@ invoke_agent joustmania-agent
   └─ agent.decision ─ agent.action
 ```
 
-In a game the decide span and `agent.decision` are remote children of `game_cycle` (telemetry.md §4.1).
+In a game the decide span (and, on the rules path, `agent.decision`) is a remote child of `game_cycle` (telemetry.md §4.1).
 
 The root span is **signal-agnostic** (#1053): a metric-triggered cycle and a
 trace-triggered cycle both emit `agent.signal_received`, distinguished only by
