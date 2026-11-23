@@ -62,7 +62,7 @@ def _claude_chats(stack, span):
 async def test_claude_high_confidence_acts(fresh_stack):
     """Claude, confidence 0.95 -> decide.outcome=act: the call reaches the fake on /v1/messages with
     the agent's key and the claude model, the intervention is written and applied by the coordinator,
-    and the agent.decide span names claude as the backend that decided."""
+    and the invoke_agent span names claude as the backend that decided."""
     stack = fresh_stack
     stack.fake_claude.script(decide_mode="valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE)
     _configure(stack)
@@ -90,7 +90,7 @@ async def test_claude_high_confidence_acts(fresh_stack):
             assert tags.get("decide.fallback_reason", "") == "", tags
             assert abs(float(tags.get("decide.confidence")) - HIGH_CONFIDENCE) < 1e-9, tags
             assert _claude_chats(stack, span), (
-                f"no claude chat span under agent.decide: {[s.name for s in children(stack, span)]}"
+                f"no claude chat span under invoke_agent: {[s.name for s in children(stack, span)]}"
             )
             assert children(stack, span, "agent.decision"), "the act must route through agent.decision"
     finally:

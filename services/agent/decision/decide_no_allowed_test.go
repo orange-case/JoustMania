@@ -81,7 +81,7 @@ func TestRemote_NoInterventionsAllowed(t *testing.T) {
 				t.Fatalf("backend calls = %d, want 0", n)
 			}
 			if n := len(spansByName(h.sr.Ended(), SpanDecide)); n != 0 {
-				t.Fatalf("agent.decide spans = %d, want 0 (no span per skipped cycle, not a fallback)", n)
+				t.Fatalf("invoke_agent spans = %d, want 0 (no span per skipped cycle, not a fallback)", n)
 			}
 			if n := len(spansByName(h.sr.Ended(), SpanDecision)); n != 0 {
 				t.Fatalf("agent.decision spans = %d, want 0 (rules must not run)", n)

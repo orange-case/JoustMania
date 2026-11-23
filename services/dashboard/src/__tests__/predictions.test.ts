@@ -20,7 +20,7 @@ function trace(
 ): JaegerTracesResponse {
   const body = structuredClone(actFixture) as unknown as JaegerTracesResponse;
   const t = body.data![0];
-  const decide = t.spans.find((s) => s.operationName === "agent.decide")!;
+  const decide = t.spans.find((s) => s.operationName === "invoke_agent joustmania-agent")!;
   decide.tags!.push(...decideTags);
   outcomes.forEach((o, i) => {
     t.spans.push({

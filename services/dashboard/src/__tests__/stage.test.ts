@@ -23,6 +23,7 @@ import {
 import type { PromAnswer, StageSnapshot } from "../stage.js";
 import { actionIcon, isStageView, renderStage, spreadLabels, valueAt } from "../stageView.js";
 import type { JaegerTracesResponse } from "../jaeger.js";
+import { DECIDE_OPERATION } from "../agentDecide.js";
 
 const matrix = (series: { metric: Record<string, string>; values: [number, string][] }[]): PromAnswer => ({
   status: "success",
@@ -97,7 +98,7 @@ describe("UC-035/A8 step 2: the stage view reads the OTel stores (BR-017)", () =
     const decide = (id: string, kind: string, start: number) => ({
       traceID: "t1",
       spanID: id,
-      operationName: "agent.decide",
+      operationName: DECIDE_OPERATION,
       startTime: start,
       duration: 100,
       tags: [

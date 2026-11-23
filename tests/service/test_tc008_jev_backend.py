@@ -64,7 +64,7 @@ def _jev_chats(stack, span):
 
 async def _act_round(stack, confidence: float) -> None:
     """Script the fake at ``confidence`` and assert the whole act journey: the key and model on the
-    wire, the two-stage round, the applied intervention and the agent.decide span (backend jev,
+    wire, the two-stage round, the applied intervention and the invoke_agent span (backend jev,
     jev's own act threshold)."""
     stack.fake_jev.script("valid", intervention=SCRIPTED_INTERVENTION, confidence=confidence)
     _configure(stack)
@@ -97,7 +97,7 @@ async def _act_round(stack, confidence: float) -> None:
             assert abs(float(tags.get("decide.act_confidence_threshold")) - JEV_THRESHOLD) < 1e-9, tags
             assert tags.get("decide.act_confidence_threshold.source") == "jev", tags
             assert _jev_chats(stack, span), (
-                f"no jev chat span under agent.decide: {[s.name for s in children(stack, span)]}"
+                f"no jev chat span under invoke_agent: {[s.name for s in children(stack, span)]}"
             )
             assert children(stack, span, "agent.decision"), "the act must route through agent.decision"
     finally:
@@ -112,7 +112,7 @@ async def _act_round(stack, confidence: float) -> None:
 async def test_jev_high_confidence_acts(fresh_stack):
     """Jev, gate p_yes 0.95 -> decide.outcome=act: the two-stage round reaches the fake with the
     agent's key and the jev model, the intervention is written and applied by the coordinator,
-    and the agent.decide span names jev as the backend that decided."""
+    and the invoke_agent span names jev as the backend that decided."""
     await _act_round(fresh_stack, HIGH_CONFIDENCE)
 
 

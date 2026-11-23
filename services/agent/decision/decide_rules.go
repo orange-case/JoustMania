@@ -377,7 +377,7 @@ func optionSet(q decide.Question) map[string]bool {
 // engine's top candidate, i.e. the decision Evaluate emits, even when the
 // allow-list (which shaped req) or the alive-player list would have excluded it.
 // The permission chain applies the allow-list afterwards and its verdict rides
-// agent.decide as decide.blocked. Only the in-loop rules path uses it; a remote
+// invoke_agent as decide.blocked. Only the in-loop rules path uses it; a remote
 // backend and RulesBackend.Decide keep the caller's options. The question slices
 // are copied, never mutated in place.
 func emissionRequest(req decide.Request, ranked []scoredCandidate) decide.Request {

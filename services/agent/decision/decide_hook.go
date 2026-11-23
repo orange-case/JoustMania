@@ -32,7 +32,7 @@ import (
 //     ObjectiveRules.EvaluateDecide is Evaluate plus the decide answers from the
 //     SAME ranking (one rankLocked call, one chaos RNG draw per evaluation), so the
 //     emitted decisions are byte-for-byte unchanged. The answers ride an
-//     agent.decide span; like every other span on the sync path it is emitted only
+//     invoke_agent span; like every other span on the sync path it is emitted only
 //     on a cycle that produces decisions (idle cycles stay span-free).
 //   - anything else: the remote backend OWNS the decision. The call runs off the
 //     loop on the existing async machinery (inflight CAS, inferWG, rootCtx,
@@ -41,13 +41,16 @@ import (
 //     it. An error, timeout or invalid response (decide.Validate) falls back to the
 //     rules engine for the CURRENT context, recorded as decide.fallback_reason.
 //
-// Every remote call (and every rules decision) is recorded on one agent.decide
+// Every remote call (and every rules decision) is recorded on one invoke_agent
 // span: OTel GenAI semantic conventions where a name exists
-// (gen_ai.agent.name, gen_ai.conversation.id, gen_ai.request.model, error.type,
-// and a gen_ai.evaluation.result event for the confidence-threshold judgement),
-// decide.* attributes for the rest.
+// (gen_ai.operation.name, gen_ai.agent.name, gen_ai.conversation.id,
+// gen_ai.request.model, error.type, and a gen_ai.evaluation.result event for the
+// confidence-threshold judgement), decide.* attributes for the rest.
 
-// SpanDecide is the per-decision decide-contract span (#1226). On the remote path
+// SpanDecide is the per-decision decide-contract span (#1226), named after the
+// GenAI semconv (semantic-conventions-genai v0.1.0) "Invoke agent internal span":
+// `{gen_ai.operation.name} {gen_ai.agent.name}` = "invoke_agent joustmania-agent",
+// kind INTERNAL, on both paths (#2584; it was agent.decide before). On the remote path
 // it is the root of the async trace (a remote child of the game's game_cycle span
 // when known, else gameplay_phase / the game root, UC-040 BR-013; Linked to the fire
 // cycle) and wraps the backend call — the
@@ -55,9 +58,30 @@ import (
 // agent.decision -> agent.action spans. On the rules path it is a sibling of the
 // agent.decision spans under agent.signal_received, so the existing trace shape is
 // unchanged.
-const SpanDecide = "agent.decide"
+const SpanDecide = "invoke_agent " + AgentName
 
-// agent.decide span attributes without a GenAI semconv name (#1226).
+// invokeAgentStartAttributes are the GenAI attributes the convention wants at span
+// creation time (sampling-relevant: gen_ai.operation.name, gen_ai.agent.name and,
+// when known, gen_ai.request.model), on both paths (#2584). gen_ai.output.type=json
+// is set on the remote path only: its request asks the backend for JSON, while the
+// rules path sends no request at all.
+func invokeAgentStartAttributes(model string, remote bool) []attribute.KeyValue {
+	// gen_ai.operation.name is Required; also on the rules path, where no model is
+	// called (a documented deviation, telemetry.md §4.2).
+	attrs := []attribute.KeyValue{
+		semconv.GenAIOperationNameInvokeAgent,
+		semconv.GenAIAgentName(AgentName),
+	}
+	if model != "" {
+		attrs = append(attrs, semconv.GenAIRequestModel(model))
+	}
+	if remote {
+		attrs = append(attrs, semconv.GenAIOutputTypeJSON)
+	}
+	return attrs
+}
+
+// invoke_agent span attributes without a GenAI semconv name (#1226).
 const (
 	// AttrDecideBackend is the backend that produced the answers ("rules" after a
 	// fallback).
@@ -74,7 +98,7 @@ const (
 	// questions (id, kind, options, range; the prose text is omitted) and answers.
 	AttrDecideQuestions = "decide.questions"
 	// AttrDecideQuestionsSHA is the short SHA-256 of the decide.questions JSON, on
-	// every agent.decide span. The JSON itself rides only the first decide of a game
+	// every invoke_agent span. The JSON itself rides only the first decide of a game
 	// carrying that hash (#2648): it is the same ~500 bytes on every decide.
 	AttrDecideQuestionsSHA = "decide.questions_sha"
 	AttrDecideAnswers      = "decide.answers"
@@ -140,7 +164,7 @@ const (
 	DecideOutcomeDiscarded = "discarded"
 )
 
-// Evaluation recorded as a gen_ai.evaluation.result event on agent.decide.
+// Evaluation recorded as a gen_ai.evaluation.result event on invoke_agent.
 const (
 	evaluationEventName    = "gen_ai.evaluation.result"
 	evaluationActThreshold = "act_confidence_threshold"
@@ -194,7 +218,7 @@ func (l *Loop) SetGoalSource(src GoalSource) { l.goalSource = src }
 // rules with unknown_backend. Set at construction, before the loop serves.
 func (l *Loop) SetDecideRegistry(r *DecideRegistry) { l.decideBackends = r }
 
-// decideRecord is everything the agent.decide span reports for one decision.
+// decideRecord is everything the invoke_agent span reports for one decision.
 type decideRecord struct {
 	// trig is the OTLP Export that triggered this decide when the cycle has no
 	// agent.signal_received span (in a game, #2648): emitted as an event on the span.
@@ -263,7 +287,7 @@ func (l *Loop) buildDecideRequest(c gamecontext.GameContext, allowed []string, w
 }
 
 // buildDecideRequestCtx is buildDecideRequest with the game's magnitude ranges read
-// in ctx (decision.magnitude_bounds, #2696; the remote path passes the agent.decide
+// in ctx (decision.magnitude_bounds, #2696; the remote path passes the invoke_agent
 // span's context, so the flag's evaluation event lands on it).
 func (l *Loop) buildDecideRequestCtx(ctx context.Context, c gamecontext.GameContext, allowed []string, withContext bool) decide.Request {
 	charged, noShield := l.ShieldSerials(c)
@@ -321,7 +345,7 @@ func requestedBackend(snapshot flags.Snapshot) string {
 }
 
 // rulesDecide runs the rules engine through the decide hook: the decisions are
-// exactly Evaluate's, and the agent.decide record (nil on a throttled or
+// exactly Evaluate's, and the invoke_agent record (nil on a throttled or
 // span-less evaluation) carries the answers from the same ranking. requested and
 // fallbackReason describe why rules decided (requested=rules, reason "" on the
 // default path).
@@ -464,7 +488,7 @@ func (l *Loop) noteMisconfigured(c gamecontext.GameContext, requested, reason st
 
 // emitQuietFallback records a configuration fallback (isConfigFallback) on which
 // the rules engine emitted nothing (UC-040 A3, decide contract §7): an
-// agent.decide span with outcome=fallback and the fallback reason, under its own
+// invoke_agent span with outcome=fallback and the fallback reason, under its own
 // agent.signal_received root like a decided cycle's. A decided cycle already
 // carries that span; without this a quiet cycle left no trace, so for example a
 // missing API key was invisible until a rule fired. Throttled per reason to one
@@ -651,7 +675,7 @@ const (
 // runDecideRemote is the fired goroutine: call the backend under its timeout,
 // validate, re-read the LIVE flags, then route the answer (act / held / noop /
 // invalid) or fall back to rules for the CURRENT context. Everything is recorded
-// on one agent.decide span.
+// on one invoke_agent span.
 //
 // Every safety gate is evaluated against the flags as they are when the answer
 // LANDS, not when the call fired: the enabled kill switch, decision.backend, the
@@ -674,6 +698,7 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 	opts := []trace.SpanStartOption{
 		trace.WithTimestamp(start),
 		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(invokeAgentStartAttributes(cfg.Model, true)...),
 	}
 	opts = append(opts, fireCycleLink(fireSC)...)
 	spanCtx, span := l.Tracer.Start(parent, SpanDecide, opts...)
@@ -1014,18 +1039,19 @@ func truncateRationale(s string) string {
 	return string(r[:maxRationaleRunes]) + "..."
 }
 
-// emitDecideSpan emits a recorded rules-path agent.decide span under parent (the
+// emitDecideSpan emits a recorded rules-path invoke_agent span under parent (the
 // cycle's agent.signal_received), backdated to the ranking it reports.
 func (l *Loop) emitDecideSpan(parent context.Context, rec *decideRecord, c gamecontext.GameContext) {
 	_, span := l.Tracer.Start(parent, SpanDecide,
 		trace.WithTimestamp(rec.start),
-		trace.WithSpanKind(trace.SpanKindInternal))
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(invokeAgentStartAttributes(rec.model, false)...))
 	l.registerPrediction(span, rec)
 	l.setDecideAttributes(span, rec, c)
 	span.End(trace.WithTimestamp(rec.end))
 }
 
-// endDecideSpan finishes the remote-path agent.decide span.
+// endDecideSpan finishes the remote-path invoke_agent span.
 func (l *Loop) endDecideSpan(span trace.Span, rec *decideRecord, c gamecontext.GameContext) {
 	if rec.end.IsZero() {
 		rec.end = l.nowOrDefault()()
@@ -1035,10 +1061,11 @@ func (l *Loop) endDecideSpan(span trace.Span, rec *decideRecord, c gamecontext.G
 	span.End()
 }
 
-// setDecideAttributes stamps the agent.decide schema onto span.
+// setDecideAttributes stamps the invoke_agent schema onto span.
 func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecontext.GameContext) {
 	attrs := []attribute.KeyValue{
-		semconv.GenAIAgentName(AgentName),
+		// gen_ai.operation.name and gen_ai.agent.name are set at span start
+		// (invokeAgentStartAttributes, #2584).
 		// The game is the "conversation" the agent's decisions belong to.
 		semconv.GenAIConversationID(c.SessionID),
 		attribute.String(AttrGameID, c.SessionID),

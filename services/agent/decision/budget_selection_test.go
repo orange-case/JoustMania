@@ -365,11 +365,11 @@ func TestRateLimitedRepeatIsNotReEmitted(t *testing.T) {
 		}
 		decides := spansByName(sr.Ended(), SpanDecide)
 		if len(decides) != 3 {
-			t.Fatalf("agent.decide spans = %d, want one per cycle (3)", len(decides))
+			t.Fatalf("invoke_agent spans = %d, want one per cycle (3)", len(decides))
 		}
 		for i, s := range decides {
 			if v, ok := attrValue(s, AttrDecideBlockReason); !ok || v.AsString() != string(ReasonRateLimit) {
-				t.Fatalf("agent.decide #%d block_reason = %v (present %v), want rate_limit", i, v.AsString(), ok)
+				t.Fatalf("invoke_agent #%d block_reason = %v (present %v), want rate_limit", i, v.AsString(), ok)
 			}
 		}
 		if n := len(spansByName(sr.Ended(), SpanDecision)); n != 1 {

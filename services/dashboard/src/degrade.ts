@@ -22,7 +22,7 @@ import type { AgentView as AgentViewData, FlagPanel, InterventionOverlay } from 
 
 export const AGENT_JAEGER_DOWN = "Could not reach Jaeger for agent telemetry.";
 export const EXPERIMENTS_JAEGER_DOWN = "Could not reach Jaeger for experiment telemetry.";
-export const DECIDE_JAEGER_DOWN = "Could not reach Jaeger for agent.decide spans.";
+export const DECIDE_JAEGER_DOWN = "Could not reach Jaeger for invoke_agent spans.";
 
 /** No-data hints (Jaeger up, no matching spans yet). */
 export const FLAG_STATE_NO_DATA =

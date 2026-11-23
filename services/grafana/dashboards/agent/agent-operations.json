@@ -63,7 +63,7 @@
       }
     ]
   },
-  "description": "What the agent decides and what reaches the game: decision cycles, decide backend x outcome (spanmetrics from agent.decide spans), remote-backend GenAI metrics, interventions from the agent and the coordinator side, measured effect, shadow games and agent process health. Agent and game metrics carry no job filter; only the process panels match the job, with or without the namespace prefix. Replaces Agent Operations — Fleet and Interventions (#1427).",
+  "description": "What the agent decides and what reaches the game: decision cycles, decide backend x outcome (spanmetrics from the invoke_agent joustmania-agent spans, agent.decide before #2584), remote-backend GenAI metrics, interventions from the agent and the coordinator side, measured effect, shadow games and agent process health. Agent and game metrics carry no job filter; only the process panels match the job, with or without the namespace prefix. Replaces Agent Operations — Fleet and Interventions (#1427).",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -273,7 +273,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "agent.decide spans per minute by the backend that produced the answers (decide.backend: rules, jev, claude, openai; rules after a fallback). Derived in the OTel collector by the spanmetrics connector from the agent.decide spans (traces_span_metrics_calls_total, services/otel-collector/config.yaml): the agent has no counter for this. A decision.backend flag flip shows here within a minute.",
+      "description": "invoke_agent joustmania-agent spans (agent.decide before #2584) per minute by the backend that produced the answers (decide.backend: rules, jev, claude, openai; rules after a fallback). Derived in the OTel collector by the spanmetrics connector from the invoke_agent spans (traces_span_metrics_calls_total, services/otel-collector/config.yaml): the agent has no counter for this. A decision.backend flag flip shows here within a minute.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -317,7 +317,7 @@
             ]
           },
           "unit": "none",
-          "noValue": "no agent.decide spans"
+          "noValue": "no invoke_agent spans"
         },
         "overrides": []
       },
@@ -346,7 +346,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (decide_backend) (rate(traces_span_metrics_calls_total{span_name=\"agent.decide\"}[1m])) * 60",
+          "expr": "sum by (decide_backend) (rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])) * 60",
           "legendFormat": "{{decide_backend}}",
           "refId": "A"
         }
@@ -359,7 +359,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Share of agent.decide spans by decide.outcome: act (routed to the permission chain), noop (the backend chose no action), held (a valid answer below the act confidence threshold), fallback (the requested backend could not decide; rules did), invalid (inconsistent answers) and discarded (the answer no longer fit the game when it landed). Each series is its share of all agent.decide spans over the last minute (computed in PromQL, so the stack sums to 100%). Source: traces_span_metrics_calls_total (spanmetrics connector).",
+      "description": "Share of invoke_agent spans by decide.outcome: act (routed to the permission chain), noop (the backend chose no action), held (a valid answer below the act confidence threshold), fallback (the requested backend could not decide; rules did), invalid (inconsistent answers) and discarded (the answer no longer fit the game when it landed). Each series is its share of all invoke_agent spans over the last minute (computed in PromQL, so the stack sums to 100%). Source: traces_span_metrics_calls_total (spanmetrics connector).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -403,7 +403,7 @@
             ]
           },
           "unit": "percentunit",
-          "noValue": "no agent.decide spans"
+          "noValue": "no invoke_agent spans"
         },
         "overrides": []
       },
@@ -432,7 +432,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (decide_outcome) (rate(traces_span_metrics_calls_total{span_name=\"agent.decide\"}[1m])) / scalar(sum(rate(traces_span_metrics_calls_total{span_name=\"agent.decide\"}[1m])))",
+          "expr": "sum by (decide_outcome) (rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])) / scalar(sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])))",
           "legendFormat": "{{decide_outcome}}",
           "refId": "A"
         }
@@ -445,7 +445,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "p95 duration of the agent.decide span by backend: the backend call for a remote backend, the ranking time for rules. From the spanmetrics duration histogram (explicit buckets 5 ms to 32 s, services/otel-collector/config.yaml).",
+      "description": "p95 duration of the invoke_agent span by backend: the backend call for a remote backend, the ranking time for rules. From the spanmetrics duration histogram (explicit buckets 5 ms to 32 s, services/otel-collector/config.yaml).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -489,7 +489,7 @@
             ]
           },
           "unit": "s",
-          "noValue": "no agent.decide spans"
+          "noValue": "no invoke_agent spans"
         },
         "overrides": []
       },
@@ -518,7 +518,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (decide_backend, le) (rate(traces_span_metrics_duration_seconds_bucket{span_name=\"agent.decide\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (decide_backend, le) (rate(traces_span_metrics_duration_seconds_bucket{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[5m])))",
           "legendFormat": "{{decide_backend}}",
           "refId": "A"
         }
@@ -531,7 +531,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "agent.decide spans in the selected time range by backend and outcome (increase of traces_span_metrics_calls_total).",
+      "description": "invoke_agent spans in the selected time range by backend and outcome (increase of traces_span_metrics_calls_total).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -579,7 +579,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (decide_backend, decide_outcome) (increase(traces_span_metrics_calls_total{span_name=\"agent.decide\"}[$__range]))",
+          "expr": "sum by (decide_backend, decide_outcome) (increase(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[$__range]))",
           "legendFormat": "{{decide_backend}} / {{decide_outcome}}",
           "refId": "A",
           "instant": true,
@@ -594,7 +594,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Share of agent.decide spans in the last 5 minutes whose requested backend could not decide, so rules did (decide.outcome=fallback): an unreachable or misconfigured remote backend. 0 while decision.backend=rules.",
+      "description": "Share of invoke_agent spans in the last 5 minutes whose requested backend could not decide, so rules did (decide.outcome=fallback): an unreachable or misconfigured remote backend. 0 while decision.backend=rules.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -649,7 +649,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(sum(rate(traces_span_metrics_calls_total{span_name=\"agent.decide\", decide_outcome=\"fallback\"}[5m])) or vector(0)) / clamp_min(sum(rate(traces_span_metrics_calls_total{span_name=\"agent.decide\"}[5m])) or vector(0), 1e-9)",
+          "expr": "(sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\", decide_outcome=\"fallback\"}[5m])) or vector(0)) / clamp_min(sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[5m])) or vector(0), 1e-9)",
           "legendFormat": "fallback",
           "refId": "A"
         }
@@ -1085,7 +1085,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "When the agent decided, in real games: one bar per scrape interval in which a decision was applied (by action) or blocked (by block_reason; already_applied left out, it is not a refusal). Noop answers are left out. The same decisions are drawn as annotations on every time series of this dashboard and of Game & Players (toggle them at the top; the shadow-game annotation is off by default). For the reasoning behind one decision, open its agent.decide trace in Jaeger at /jaeger/. Source: agent_decisions_total.",
+      "description": "When the agent decided, in real games: one bar per scrape interval in which a decision was applied (by action) or blocked (by block_reason; already_applied left out, it is not a refusal). Noop answers are left out. The same decisions are drawn as annotations on every time series of this dashboard and of Game & Players (toggle them at the top; the shadow-game annotation is off by default). For the reasoning behind one decision, open its invoke_agent trace in Jaeger at /jaeger/. Source: agent_decisions_total.",
       "fieldConfig": {
         "defaults": {
           "color": {

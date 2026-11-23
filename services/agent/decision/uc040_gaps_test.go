@@ -44,7 +44,7 @@ func TestRemote_AnswerLandingAfterShutdownIsDropped(t *testing.T) {
 
 		ds := spansByName(h.sr.Ended(), SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		assertDiscarded(t, h, ds[0], decideDiscardShutdown)
 		if g := strAttr(t, ds[0], AttrDecideFallbackReason); g != "" {
@@ -79,7 +79,7 @@ func TestRemote_ConfigurationFallbackRunsBeforeTheAllowList(t *testing.T) {
 
 			ds := spansByName(h.sr.Ended(), SpanDecide)
 			if len(ds) != 1 {
-				t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+				t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 			}
 			if g := strAttr(t, ds[0], AttrDecideFallbackReason); g != tc.reason {
 				t.Fatalf("fallback_reason = %q, want %q (not the allow-list gate)", g, tc.reason)

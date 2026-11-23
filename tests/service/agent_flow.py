@@ -211,7 +211,7 @@ def agent_spans(stack, operation: str, game_id: str) -> list[SpanRecord]:
 
 
 def decide_spans(stack, game_id: str) -> list[SpanRecord]:
-    return agent_spans(stack, "agent.decide", game_id)
+    return agent_spans(stack, "invoke_agent joustmania-agent", game_id)
 
 
 def trace_of(stack, span: SpanRecord) -> list[SpanRecord]:
@@ -242,7 +242,7 @@ def _decide_tags(span: SpanRecord) -> dict:
 async def wait_decide_span(
     stack, game_id: str, predicate: Callable[[dict], bool], what: str, within: float = SPAN_TIMEOUT
 ) -> SpanRecord:
-    """The first agent.decide span for ``game_id`` whose attributes satisfy ``predicate``."""
+    """The first invoke_agent span for ``game_id`` whose attributes satisfy ``predicate``."""
     found: list[SpanRecord] = []
 
     def check() -> bool:
@@ -251,5 +251,5 @@ async def wait_decide_span(
 
     if not await async_poll_until(check, within, interval=0.5):
         seen = [_decide_tags(s) for s in decide_spans(stack, game_id)]
-        raise AssertionError(f"no agent.decide span for {game_id} with {what} within {within}s; saw: {seen}")
+        raise AssertionError(f"no invoke_agent span for {game_id} with {what} within {within}s; saw: {seen}")
     return found[0]

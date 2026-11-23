@@ -1,9 +1,9 @@
 """Decide backend x outcome metrics come from the collector's spanmetrics connector (#1427).
 
 Maintainer decision 2 on #1427: the agent has no decide counter; the OTel
-collector derives `traces_span_metrics_*` from the agent's `agent.decide`
+collector derives `traces_span_metrics_*` from the agent's `invoke_agent`
 spans. These static checks keep the pieces in step: the custom collector build
-includes the connector, the config feeds it only agent.decide spans, its
+includes the connector, the config feeds it only invoke_agent spans, its
 dimensions are the span attributes the agent sets, and its metrics reach
 VictoriaMetrics, where the Agent Decisions & Interventions dashboard reads them.
 """
@@ -37,7 +37,7 @@ def test_collector_build_includes_the_spanmetrics_connector():
 
 @pytest.mark.uc("UC-035", flow="main", steps=[3])
 def test_spanmetrics_dimensions_are_the_decide_span_attributes(collector):
-    """UC-035 step 3: the connector groups by the attributes the agent sets on agent.decide."""
+    """UC-035 step 3: the connector groups by the attributes the agent sets on invoke_agent."""
     connector = collector["connectors"]["span_metrics"]
     dims = [d["name"] for d in connector["dimensions"]]
     assert dims == [_go_const("AttrDecideBackend"), _go_const("AttrDecideOutcome")]
@@ -52,7 +52,7 @@ def test_spanmetrics_dimensions_are_the_decide_span_attributes(collector):
 
 @pytest.mark.uc("UC-035", flow="main", steps=[3], br=["BR-004"])
 def test_spanmetrics_decide_histogram_buckets_span_5ms_to_32s(collector):
-    """UC-035 BR-004: the agent.decide duration histogram uses explicit 5 ms to 32 s buckets."""
+    """UC-035 BR-004: the invoke_agent duration histogram uses explicit 5 ms to 32 s buckets."""
     buckets = collector["connectors"]["span_metrics"]["histogram"]["explicit"][
         "buckets"
     ]
@@ -76,7 +76,7 @@ def test_spanmetrics_decide_histogram_buckets_span_5ms_to_32s(collector):
 
 
 def test_spanmetrics_only_sees_agent_decide_spans(collector):
-    """Bounded cardinality: a dedicated traces pipeline filters to agent.decide of service agent."""
+    """Bounded cardinality: a dedicated traces pipeline filters to invoke_agent of service agent."""
     pipelines = collector["service"]["pipelines"]
     feeding = [
         name
@@ -87,7 +87,12 @@ def test_spanmetrics_only_sees_agent_decide_spans(collector):
     processors = pipelines["traces/span_metrics"]["processors"]
     assert "filter/agent_decide" in processors
     (condition,) = collector["processors"]["filter/agent_decide"]["trace_conditions"]
-    assert f'span.name != "{_go_const("SpanDecide")}"' in condition
+    # Both names during the transition (#2584): a stack on older agent images
+    # still emits agent.decide, and its series must keep flowing.
+    assert (
+        f'(span.name != "{ic.decide_span_name()}" and span.name != "{ic.OLD_DECIDE_SPAN}")'
+        in condition
+    ), condition
     assert 'resource.attributes["service.name"] != "agent"' in condition
     # The filter must not sit in the main traces pipeline (it would drop spans from Jaeger).
     assert "filter/agent_decide" not in pipelines["traces"]["processors"]

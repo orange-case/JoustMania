@@ -437,11 +437,11 @@ const (
 // SpanPredictionOutcome is one scored decision prediction or base-rate control
 // (#2479, UC-040 A44, BR-034; services/agent/prediction). It is a remote child of
 // the game's game_cycle / gameplay_phase / root span, starts when the prediction
-// was registered and ends when it was scored, and links to the agent.decide span
+// was registered and ends when it was scored, and links to the invoke_agent span
 // that carried the prediction (link.kind=prediction).
 const SpanPredictionOutcome = "agent.prediction.outcome"
 
-// LinkKindPrediction labels the agent.prediction.outcome -> agent.decide link.
+// LinkKindPrediction labels the agent.prediction.outcome -> invoke_agent link.
 const LinkKindPrediction = "prediction"
 
 // Attributes of agent.prediction.outcome (#2479).
@@ -456,7 +456,7 @@ const (
 	AttrPredictionSource         = "prediction.source"
 	AttrPredictionRule           = "prediction.rule"
 	// AttrPredictionBackend is the backend whose decision carried the prediction
-	// ("none" for a control); the same key as agent.decide's decide.backend.
+	// ("none" for a control); the same key as invoke_agent's decide.backend.
 	AttrPredictionBackend = "decide.backend"
 	// AttrPredictionActed is true when the decision passed the permission chain and
 	// its write was applied; false for held, blocked, gated-off and discarded
@@ -485,7 +485,7 @@ const (
 	AttrPredictionTiming = "prediction.timing"
 )
 
-// agent.decide attributes of the decision's prediction (#2479), present when the
+// invoke_agent attributes of the decision's prediction (#2479), present when the
 // decision carried one and it was registered.
 const (
 	AttrDecidePredictionID             = "decide.prediction.id"
@@ -501,7 +501,7 @@ const (
 	AttrDecidePredictionMerged = "decide.prediction.merged"
 	// AttrDecidePredictionDroppedReason is why a model-stated prediction was
 	// dropped (missing, bad_option, bad_confidence, no_target, inconsistent; UC-040
-	// A45). Set on the accepted remote answer's agent.decide span only.
+	// A45). Set on the accepted remote answer's invoke_agent span only.
 	AttrDecidePredictionDroppedReason = "decide.prediction.dropped_reason"
 	// AttrDecideGoalProfile is the goal profile whose "goal:" / "now:" lines were
 	// rendered into the request (#2479, decide-contract.md §14.4); absent when none

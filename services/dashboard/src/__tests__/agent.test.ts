@@ -5,7 +5,7 @@
  * serve them as Jaeger v3 OTLP answers through ./otlp.ts toOtlp (#2283):
  *   jaeger-flag-state-games   two game traces (a real game, then a newer shadow
  *                             game): game_cycle -> agent.flag_state, and
- *                             agent.signal_received -> agent.decide + agent.decision
+ *                             agent.signal_received -> invoke_agent + agent.decision
  *                             (one blocked, one allowed)
  *   jaeger-rollout-*          one-span agent.infrastructure.decision traces
  */

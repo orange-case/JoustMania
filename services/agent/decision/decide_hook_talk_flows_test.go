@@ -259,7 +259,7 @@ func TestTalk_SecondVendorBeat(t *testing.T) {
 		}
 		ds := spansByName(h.sr.Ended(), SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		assertSpanAttrs(t, "openai unavailable", ds[0], map[string]string{
 			AttrDecideBackend: "rules", AttrDecideBackendRequested: flags.DecisionBackendOpenAI,
@@ -301,7 +301,7 @@ func TestTalk_AnswerLandsBeforeKillSwitch(t *testing.T) {
 			h.loop.AwaitInflight()
 		}
 		if n := len(spansByName(h.sr.Ended(), SpanDecide)); n != 1 {
-			t.Fatalf("agent.decide rows = %d while off, want only the landed one (no discarded row)", n)
+			t.Fatalf("invoke_agent rows = %d while off, want only the landed one (no discarded row)", n)
 		}
 		if claude.callCount() != 1 || len(h.sink.decisions()) != 1 {
 			t.Fatalf("calls=%d applied=%d while off, want 1 and 1", claude.callCount(), len(h.sink.decisions()))
@@ -319,7 +319,7 @@ func TestTalk_AnswerLandsBeforeKillSwitch(t *testing.T) {
 
 // UC: UC-070 main Post-S-1
 func TestTalk_EveryBeatShowsItsObservable(t *testing.T) {
-	t.Run("UC-070/Post-S-1 steps 1-7 in one run, each with its agent.decide row", func(t *testing.T) {
+	t.Run("UC-070/Post-S-1 steps 1-7 in one run, each with its invoke_agent row", func(t *testing.T) {
 		jev := newScriptedBackend(flags.DecisionBackendJev, actShield)
 		claude := newScriptedBackend(flags.DecisionBackendClaude, claudeAct)
 		snap := talkJevSnapshot(time.Second)

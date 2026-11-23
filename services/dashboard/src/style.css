@@ -57,7 +57,7 @@
   --quality-good-text: #ffffff;
   --quality-poor-text: #ffffff;
 
-  /* agent.decide backends and accents */
+  /* invoke_agent backends and accents */
   --decide-rules: #1d5fa8;
   --decide-claude: #a34505;
   --decide-openai: #1b7a55;
@@ -1292,7 +1292,7 @@ a {
   color: var(--text-secondary);
 }
 
-/* ===== agent.decide feed (#1233) ===== */
+/* ===== invoke_agent feed (#1233) ===== */
 /* Projector-first: larger type than the rest of the tab, strong colour coding. */
 
 .decide-panel {

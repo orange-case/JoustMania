@@ -75,7 +75,7 @@ func TestRemote_SameCycleFallbackObservableWhenRulesQuiet(t *testing.T) {
 
 			ds := spansByName(h.sr.Ended(), SpanDecide)
 			if len(ds) != 1 {
-				t.Fatalf("agent.decide spans = %d, want 1 (throttled to one per window)", len(ds))
+				t.Fatalf("invoke_agent spans = %d, want 1 (throttled to one per window)", len(ds))
 			}
 			if g := strAttr(t, ds[0], AttrDecideOutcome); g != DecideOutcomeFallback {
 				t.Fatalf("outcome = %q, want fallback", g)
@@ -100,7 +100,7 @@ func TestRemote_SameCycleFallbackObservableWhenRulesQuiet(t *testing.T) {
 			advance(h.clock, 5*time.Second)
 			h.loop.OnEvaluate(context.Background(), quietContext(), testTrigger())
 			if n := len(spansByName(h.sr.Ended(), SpanDecide)); n != 2 {
-				t.Fatalf("agent.decide spans after the window = %d, want 2", n)
+				t.Fatalf("invoke_agent spans after the window = %d, want 2", n)
 			}
 			if n := logs.count("level=WARN msg=agent.decide.backend_misconfigured"); n != 1 {
 				t.Fatalf("misconfigured warnings = %d, want still 1 (no new transition)", n)
@@ -110,7 +110,7 @@ func TestRemote_SameCycleFallbackObservableWhenRulesQuiet(t *testing.T) {
 }
 
 // The decided-cycle fallback span (rules emitted a decision) is unchanged and not
-// throttled: every decided cycle still carries its own agent.decide span.
+// throttled: every decided cycle still carries its own invoke_agent span.
 // UC: UC-040 A3
 func TestRemote_SameCycleFallbackDecidedCycleUnthrottled(t *testing.T) {
 	h, reader, _ := quietFallbackHarness(t, nil)
@@ -122,7 +122,7 @@ func TestRemote_SameCycleFallbackDecidedCycleUnthrottled(t *testing.T) {
 		advance(h.clock, 2*time.Second)
 	}
 	if n := len(spansByName(h.sr.Ended(), SpanDecide)); n != 2 {
-		t.Fatalf("agent.decide spans = %d, want 2 (one per decided cycle)", n)
+		t.Fatalf("invoke_agent spans = %d, want 2 (one per decided cycle)", n)
 	}
 	if g := gatedByReason(t, reader)[DecideFallbackUnknownBackend]; g != 2 {
 		t.Fatalf("agent_llm_gated_total{reason=unknown_backend} = %d, want 2", g)
@@ -160,7 +160,7 @@ func TestRemote_QuietGateFallbackIsCounterOnly(t *testing.T) {
 			advance(h.clock, 6*time.Second)
 		}
 		if n := len(spansByName(h.sr.Ended(), SpanDecide)); n != 0 {
-			t.Fatalf("agent.decide spans = %d, want 0", n)
+			t.Fatalf("invoke_agent spans = %d, want 0", n)
 		}
 		if g := gatedByReason(t, reader)[FallbackNotEligible]; g != 3 {
 			t.Fatalf("gated[%s] = %d, want 3", FallbackNotEligible, g)
@@ -188,7 +188,7 @@ func TestRemote_QuietConfigFallbackPerReasonAndTransitions(t *testing.T) {
 
 	ds := spansByName(h.sr.Ended(), SpanDecide)
 	if len(ds) != 2 {
-		t.Fatalf("agent.decide spans = %d, want 2 (one per reason inside one window)", len(ds))
+		t.Fatalf("invoke_agent spans = %d, want 2 (one per reason inside one window)", len(ds))
 	}
 	if a, b := strAttr(t, ds[0], AttrDecideFallbackReason), strAttr(t, ds[1], AttrDecideFallbackReason); a != DecideFallbackUnavailable || b != DecideFallbackNotWired {
 		t.Fatalf("reasons = %q, %q; want backend_unavailable, async_not_wired", a, b)
