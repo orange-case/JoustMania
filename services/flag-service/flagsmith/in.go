@@ -1081,6 +1081,8 @@ func (p *puller) offer(rc *roundCtx, k Key, le localEntry) bool {
 	if le.slot != 0 && p.slotVersion(k, le.v) != le.slot {
 		return false
 	}
+	// The slot check above and ReofferRead hold no common lock; read closes
+	// the gap between them.
 	if !p.l.links.ReofferRead(k, le.v, rc.now, le.version, rc.read) {
 		return false
 	}
