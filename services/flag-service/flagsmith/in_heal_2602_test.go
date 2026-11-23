@@ -217,6 +217,17 @@ func TestAbandonedCopyInsideRunKeepsRun(t *testing.T) {
 	serveTooNew(h)
 	h.round()
 	wantStaleOn("the abandoned copy inside the run")
+	// The newest copy, the abandoned copy, the newest copy: not two reads of
+	// the newest time in a row, so the run stays open.
+	serveNewest := func() {
+		h.fake.SetDocument(document(accepted.Add(24*time.Hour), []map[string]any{fsState("enabled", true, "off")}), "")
+		h.round()
+	}
+	serveNewest()
+	serveTooNew(h)
+	h.round()
+	wantStaleOn("the abandoned copy between two newest reads")
+	serveNewest()
 	h.fake.SetDocument(document(accepted.Add(time.Minute), []map[string]any{fsState("enabled", true, "on")}), "")
 	h.clock.Advance(4 * time.Hour)
 	h.round()
@@ -225,5 +236,39 @@ func TestAbandonedCopyInsideRunKeepsRun(t *testing.T) {
 	}
 	if got := enabledVariant(h); got != "on" {
 		t.Fatalf("UC-054/BR-005 agent/enabled = %q, want on (the run's document accepted)", got)
+	}
+}
+
+// UC: UC-054 BR-005
+// Two too-new times T1 < T2 read before the heal (the skewed clock stamped
+// two changes): the heal abandons both, so a lagging copy stamped T1 cannot
+// undo the kill either (#2732 review finding 1).
+func TestHealAbandonsEveryTooNewTime(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	t1 := tooNew.Add(-24 * time.Hour)
+	serveT1 := func() {
+		h.fake.SetDocument(document(t1, []map[string]any{fsState("enabled", true, "on")}), "")
+	}
+	serveT1()
+	h.round()
+	serveTooNew(h)
+	h.round()
+	serveCurrent(h)
+	h.round()
+	wantStaleRefusal(t, h, "first refusal")
+	h.clock.Advance(10 * time.Hour)
+	h.round()
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("setup: agent/enabled = %q after the heal, want off", got)
+	}
+	h.clock.Advance(time.Hour)
+	serveT1()
+	h.round()
+	if a := h.lastPull(); a[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
+		t.Fatalf("UC-054/BR-005 pull span %v: the earlier too-new copy was accepted after the heal, want stale_document", a)
+	}
+	if got := enabledVariant(h); got != "off" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %q: the earlier too-new copy undid the kill (flap)", got)
 	}
 }

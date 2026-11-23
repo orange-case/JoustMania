@@ -116,6 +116,10 @@ type puller struct {
 	// accepted (the last maxAbandoned, #2602): a document stamped exactly one
 	// of them is the too-new copy again and is refused as stale.
 	abandoned []time.Time
+	// read are the distinct newest times this process read, the last
+	// maxAbandoned: a heal abandons every one after the accepted time, so an
+	// earlier too-new copy cannot undo it either (#2602).
+	read []time.Time
 }
 
 // remoteMark is one key's remote state as LinkState holds it.
@@ -529,7 +533,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 		reason = ReasonStaleDocument
 		return rc.stats, nil
 	}
-	if rc.hasUpd && rc.updated.Before(p.newest) {
+	if rc.hasUpd && rc.updated.Round(time.Microsecond).Before(p.newest.Round(time.Microsecond)) {
 		if !p.staleRun {
 			p.staleRun, p.staleSince = true, rc.now
 		}
@@ -542,7 +546,7 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 			return rc.stats, nil
 		}
 
-		p.abandon(p.newest)
+		p.abandonAfter(rc.updated)
 		l.Logger().Warn("flagsmith stale document accepted",
 			"updated_at", rc.updated.UTC().Format(time.RFC3339Nano),
 			"newest", p.newest.UTC().Format(time.RFC3339Nano),
@@ -565,6 +569,12 @@ func (p *puller) round(ctx context.Context, trigger string, full bool) (roundSta
 		p.staleRun, p.sameRead = false, 0
 	}
 	if rc.hasUpd {
+		if !sameTime(rc.updated, p.newest) {
+			p.read = append(p.read, rc.updated)
+			if len(p.read) > maxAbandoned {
+				p.read = p.read[1:]
+			}
+		}
 		p.newest = rc.updated
 	}
 	p.health.setEnvironment(doc.Name)
@@ -838,6 +848,21 @@ func (p *puller) isAbandoned(t time.Time) bool {
 // is a float epoch, a few hundred ns off the body time of the same document.
 func sameTime(a, b time.Time) bool {
 	return a.Round(time.Microsecond).Equal(b.Round(time.Microsecond))
+}
+
+// abandonAfter gives up, at a heal that accepts a document stamped accepted,
+// the newest time and every newest time read after accepted (#2602).
+func (p *puller) abandonAfter(accepted time.Time) {
+	p.abandon(p.newest)
+	kept := p.read[:0]
+	for _, t := range p.read {
+		if t.Round(time.Microsecond).After(accepted.Round(time.Microsecond)) {
+			p.abandon(t)
+			continue
+		}
+		kept = append(kept, t)
+	}
+	p.read = kept
 }
 
 // abandon remembers a given-up newest time, the last maxAbandoned of them.
