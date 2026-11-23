@@ -97,7 +97,7 @@ var predictionOutcomes = map[string]bool{
 }
 
 // registerPrediction registers rec's prediction with the book, linked to span,
-// and records the returned id on rec for the agent.decide attributes.
+// and records the returned id on rec for the invoke_agent attributes.
 func (l *Loop) registerPrediction(span trace.Span, rec *decideRecord) {
 	if l.predictions == nil || rec.predictionsOff || rec.prediction == nil || rec.predictionCtx == nil ||
 		!predictionOutcomes[rec.outcome] {

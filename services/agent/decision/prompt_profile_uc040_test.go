@@ -12,7 +12,7 @@ import (
 // UC: UC-040 BR-036
 // prompt_profile_uc040_test.go: a remote decide request carries the game's
 // decision.prompt_profile, which changes neither the state nor the questions, and
-// agent.decide records it (#2467 PR 5, decide-contract.md §3, §12).
+// invoke_agent records it (#2467 PR 5, decide-contract.md §3, §12).
 
 func TestRemote_PromptProfileOnTheRequest(t *testing.T) {
 	run := func(t *testing.T, src PromptProfileSource) (decide.Request, string, bool) {

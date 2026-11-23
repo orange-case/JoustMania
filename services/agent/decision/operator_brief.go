@@ -13,7 +13,7 @@ import (
 // FR-096): decision.operator_brief, the operator's free-text wish, rendered into
 // the claude and openai prompts only. It adds no lever, no option and no bound.
 const (
-	// AttrDecideOperatorBriefPresent is true on a remote agent.decide span whose
+	// AttrDecideOperatorBriefPresent is true on a remote invoke_agent span whose
 	// request carried an operator brief; absent otherwise.
 	AttrDecideOperatorBriefPresent = "decide.operator_brief.present"
 	// AttrDecideOperatorBriefLength is that brief's length in characters (runes),
@@ -43,7 +43,7 @@ func (l *Loop) operatorBriefFor(ctx context.Context, backend, gameID string) str
 	return l.operatorBrief(ctx, gameID)
 }
 
-// operatorBriefAttributes are the agent.decide attributes of a request's brief:
+// operatorBriefAttributes are the invoke_agent attributes of a request's brief:
 // none without one.
 func operatorBriefAttributes(brief string) []attribute.KeyValue {
 	if brief == "" {

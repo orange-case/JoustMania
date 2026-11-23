@@ -45,7 +45,7 @@ func (p oneGameProvider) Current(string) (gamecontext.GameContext, bool) { retur
 // TestRun_WaitsForInflightDecideBeforeReturning: main flushes the agent's spans in
 // the deferred shutdownTracing, which runs only after run() returns. run() must
 // therefore not return while a remote decide call is in flight, and the call's
-// agent.decide span must have ended (discarded as shutdown) by the time it does.
+// invoke_agent span must have ended (discarded as shutdown) by the time it does.
 // UC: UC-040 A29
 func TestRun_WaitsForInflightDecideBeforeReturning(t *testing.T) {
 	t.Run("UC-040/A29 the agent waits for in-flight calls before it flushes its spans", func(t *testing.T) {
@@ -121,7 +121,7 @@ func TestRun_WaitsForInflightDecideBeforeReturning(t *testing.T) {
 		case <-time.After(300 * time.Millisecond):
 		}
 		if n := len(decideSpans(sr)); n != 0 {
-			t.Fatalf("agent.decide spans ended before the call finished = %d, want 0", n)
+			t.Fatalf("invoke_agent spans ended before the call finished = %d, want 0", n)
 		}
 
 		close(be.release)
@@ -132,7 +132,7 @@ func TestRun_WaitsForInflightDecideBeforeReturning(t *testing.T) {
 		}
 		ds := decideSpans(sr)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans when run() returned = %d, want 1 (ready for the flush)", len(ds))
+			t.Fatalf("invoke_agent spans when run() returned = %d, want 1 (ready for the flush)", len(ds))
 		}
 		reason := ""
 		for _, kv := range ds[0].Attributes() {

@@ -267,7 +267,7 @@ func TestOnEvaluate_BlockedReasonAttribution(t *testing.T) {
 
 // TestRulesPath_BatteryThresholdOnDecideSpan: a decision whose target is below
 // policy.battery_threshold is blocked on both spans (UC-040 A10): agent.decision
-// carries decision.block_reason=battery_threshold, and the cycle's agent.decide
+// carries decision.block_reason=battery_threshold, and the cycle's invoke_agent
 // keeps outcome=act with decide.blocked=true / decide.block_reason=battery_threshold.
 // UC: UC-040 A10
 func TestRulesPath_BatteryThresholdOnDecideSpan(t *testing.T) {
@@ -310,7 +310,7 @@ func TestRulesPath_BatteryThresholdOnDecideSpan(t *testing.T) {
 		}
 		ds := spansByName(spans, SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		if got := strAttr(t, ds[0], AttrDecideOutcome); got != DecideOutcomeAct {
 			t.Errorf("decide.outcome = %q, want act (blocking does not change the outcome)", got)

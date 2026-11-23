@@ -107,7 +107,7 @@ func TestRemote_BackendCapFallsBackToRules(t *testing.T) {
 		}
 		ds := spansByName(h.sr.Ended(), SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		for key, w := range map[string]string{
 			AttrDecideBackend:          RulesBackendName,

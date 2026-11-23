@@ -861,20 +861,20 @@ not know (UC-040 BR-007, #1301).
 
 Full names in [telemetry.md](telemetry.md#4-agent). Summary:
 
-- `agent.decide` (INTERNAL). Rules path: sibling of `agent.decision` under
+- `invoke_agent joustmania-agent` (INTERNAL; the GenAI *Invoke agent internal span*, semantic-conventions-genai v0.1.0, with its deviations in [telemetry.md §4.2](telemetry.md#42-genai-semantic-conventions); `agent.decide` before #2584). Rules path: sibling of `agent.decision` under
   the cycle's parent (`game_cycle` in a game, else `agent.signal_received`; #2648), only when the cycle produced decisions; ended after the cycle's decisions ran
   (backdated to the ranking) so it can carry their permission verdict. Remote path: async
   root parented on the game's `game_cycle` span (fallback `gameplay_phase`, then the game root; UC-040 BR-013), linked to the fire-cycle
   `agent.signal_received` (`link.kind=fire_cycle`) only without game ids (in a game the trigger is the `agent.signal_received` event on the span, #2648); parent of the backend's
   `chat {model}` CLIENT span and of the resulting `agent.decision`.
-  Always: `gen_ai.agent.name=joustmania-agent`, `gen_ai.conversation.id=<game id>`,
+  Always: `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name=joustmania-agent` (both from span start), `gen_ai.conversation.id=<game id>`,
   `game.id`, `session.id`, `game.kind`, `decide.backend`, `decide.backend.requested`,
   `decide.fallback_reason`, `decide.state.digest`, `decide.questions_sha` (short hash of the questions JSON, #2648), `decide.latency_ms`, `decide.outcome`. Conditional: `decide.act_confidence_threshold` (the EFFECTIVE
   threshold, §5) and `decide.act_confidence_threshold.source` (`jev` = `decision.jev.act_confidence_threshold`,
   `global` = `decision.act_confidence_threshold`; #1287), both only when routed,
-  `gen_ai.request.model`, `decide.answers`, `decide.confidence`, `decide.confidence.min`,
+  `gen_ai.request.model`, `gen_ai.output.type=json`, `gen_ai.request.max_tokens` and `gen_ai.request.temperature` (claude and openai only; jev sets neither) and, at span end, the summed `gen_ai.usage.*` tokens and `gen_ai.response.finish_reasons` of the invocation's model calls (remote path; [telemetry.md §4.2](telemetry.md#42-genai-semantic-conventions), #2584), `decide.answers`, `decide.confidence`, `decide.confidence.min`,
   `decide.rationale`, `decide.invalid_reason`, `decide.discarded_reason`, `error.type`, `decide.blocked` and
-  `decide.block_reason` (§6; #1295). `decide.questions` (the same JSON on every decide) rides only the first `agent.decide` of a game with a given `decide.questions_sha` (#2648). A group decision's `agent.decision` carries `decision.group.size`, `decision.group.alive` (#2467 PR 6),
+  `decide.block_reason` (§6; #1295). `decide.questions` (the same JSON on every decide) rides only the first `invoke_agent joustmania-agent` of a game with a given `decide.questions_sha` (#2648). A group decision's `agent.decision` carries `decision.group.size`, `decision.group.alive` (#2467 PR 6),
   `decision.group.targets` and, on a ledger refusal, `decision.group.refused_serial` (#2467 PR 4; telemetry.md §4).
   Event `gen_ai.evaluation.result` (`gen_ai.evaluation.name=act_confidence_threshold`,
   score value, label `pass`/`fail`, explanation `confidence 0.720 >= threshold 0.600

@@ -10,7 +10,7 @@ the wiring that only the full stack has:
 - agent -> flag service -> flagd -> coordinator (the decision takes effect);
 - agent -> otel-collector -> Jaeger, read back through envoy the way the
   dashboard's Agent tab reads it (Jaeger query API v3, ``GET /jaeger/api/v3/traces
-  ?query.serviceName=agent&query.operationName=agent.decide&query.searchDepth=5``, #2283,
+  ?query.serviceName=agent&query.operationName=invoke_agent%20joustmania-agent&query.searchDepth=5``, #2283,
   ``services/dashboard/src/agentDecide.ts``
   ``decideSearches`` / ``searchParams`` in ``jaeger.ts``; UC-035 step 3, decision feed only);
 - the game's trace in Jaeger: the root span named after the mode, its phases,
@@ -75,10 +75,10 @@ _envoy_jaeger_api = ""
 GAME_ROOT_SPAN = "Joust Free-for-All"  # the mode's display name
 GAME_PHASES = ("initialization_phase", "gameplay_phase", "game_cycle", "teardown_phase")
 # Agent spans that must name the game (validation 1); game.kind where the spec puts it.
-AGENT_SPANS_WITH_GAME_ID = ("agent.decide", "agent.decision")
-AGENT_SPANS_WITH_GAME_KIND = ("agent.decide", "agent.decision")
+AGENT_SPANS_WITH_GAME_ID = ("invoke_agent joustmania-agent", "agent.decision")
+AGENT_SPANS_WITH_GAME_KIND = ("invoke_agent joustmania-agent", "agent.decision")
 # The Agent tab's decide query (agentDecide.ts DECIDE_OPERATION, DECIDE_TRACE_LIMIT).
-DECIDE_QUERY = {"service": "agent", "operation": "agent.decide", "limit": 5}
+DECIDE_QUERY = {"service": "agent", "operation": "invoke_agent joustmania-agent", "limit": 5}
 
 # Interventions on, rules backend, the allow-list that lets the rules engine's
 # in-game levers through on both sides (services/flagd/ci/agent.json).
@@ -305,7 +305,7 @@ def _decide_rows(traces: list[dict], game_id: str) -> list[dict]:
         for span in spans:
             tags = _tags(span)
             if (
-                span["operationName"] != "agent.decide"
+                span["operationName"] != "invoke_agent joustmania-agent"
                 or tags.get("game.id") != game_id
             ):
                 continue
@@ -384,7 +384,7 @@ def _game_trace_problems(
             f"player spans for {player_serials}, expected one each for {sorted(serials)}"
         )
 
-    # UC-040 BR-013: the rules-path agent.decide is a remote child of the coordinator's
+    # UC-040 BR-013: the rules-path invoke_agent is a remote child of the coordinator's
     # game_cycle (#2648: no agent.signal_received span in the game trace) ...
     decide = by_id.get(row["span_id"])
     cycle = by_id.get(_parent_id(decide)) if decide else None
@@ -511,7 +511,7 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
         game_id = ""
 
         # Step 8 (data): the Agent tab's Jaeger query, through envoy, holds a rules
-        # agent.decide row for G1 whose sibling decision is the applied intervention.
+        # invoke_agent row for G1 whose sibling decision is the applied intervention.
         rows: list[dict] = []
         found: list[dict] = []
 
@@ -525,7 +525,7 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
             return bool(found)
 
         assert await async_poll_until(_row_for_applied, JAEGER_TIMEOUT), (
-            f"Step 8: the Agent tab query {DECIDE_QUERY} returned no agent.decide row for {game_id_done} "
+            f"Step 8: the Agent tab query {DECIDE_QUERY} returned no invoke_agent row for {game_id_done} "
             f"with an unblocked decision in {sorted(applied)}: rows {rows}"
         )
         row = found[0]
@@ -540,7 +540,7 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
         )
 
         # Step 8 (Jaeger): G1's whole trace: root span, phases and player spans
-        # (UC-035 step 5); agent.decide -> remote game_cycle,
+        # (UC-035 step 5); invoke_agent -> remote game_cycle,
         # and the decisions' Link to the game root (UC-040 BR-013); every agent span
         # names G1 and kind real (validation 1).
         problems: list[str] = []

@@ -17,7 +17,7 @@ import type { JaegerTracesResponse } from "./jaeger.js";
 export const LATEST_OPERATIONS: Readonly<Record<string, string>> = {
   summary: "agent.game.summary",
   retro: "agent.llm.retro",
-  decide: "agent.decide",
+  decide: "invoke_agent joustmania-agent",
 };
 
 /** Traces searched: the newest few, enough for one matching span per game. */

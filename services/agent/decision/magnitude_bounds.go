@@ -15,7 +15,7 @@ import (
 // decide request and carried on Request.Bounds so every consumer uses one table.
 const (
 	// AttrDecideMagnitudeBoundsSource is "flag" when the request's ranges differ
-	// from the code default table, else "default"; on every agent.decide.
+	// from the code default table, else "default"; on every invoke_agent span.
 	AttrDecideMagnitudeBoundsSource = "decide.magnitude_bounds.source"
 	// AttrDecideMagnitudeBoundsInvalid names the interventions whose flag entry
 	// fell back to the code default (sorted, comma-separated); only when one did.
@@ -89,7 +89,7 @@ func (b *BoundsLog) Last(gameID string) (*decide.MagnitudeTable, bool) {
 // default) notes nothing. Set at construction, before the loop serves.
 func (l *Loop) SetBoundsLog(b *BoundsLog) { l.boundsLog = b }
 
-// magnitudeBoundsAttributes are the agent.decide attributes of a request's ranges.
+// magnitudeBoundsAttributes are the invoke_agent attributes of a request's ranges.
 func magnitudeBoundsAttributes(t *decide.MagnitudeTable) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{attribute.String(AttrDecideMagnitudeBoundsSource, t.Source())}
 	if s := t.InvalidString(); s != "" {

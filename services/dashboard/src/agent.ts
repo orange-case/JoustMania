@@ -3,14 +3,14 @@
  * Agent data source (issue #792; spans since #2059).
  *
  * The "Agent" tab is the demo's observability focus screen: it shows what the
- * in-game agent is doing live: the decisions it evaluates (agent.decide), the
+ * in-game agent is doing live: the decisions it evaluates (invoke_agent), the
  * effective flag values it resolved, its activity (blocked decisions, rollouts)
  * and the interventions it applied vs blocked.
  *
  * SOURCES (UC-035 step 3, docs/specs/telemetry.md §6.1)
  * ------------------------------------------------------
  *   Jaeger (./jaeger.ts), every query without a browser-clock time:
- *     agent.decide          decision feed + strip (the decide poll, game traces)
+ *     invoke_agent          decision feed + strip (the decide poll, game traces)
  *     agent.decision        blocked activity rows: the decide poll's traces
  *                           already hold them (LinkedDecision), no extra query
  *     agent.flag_state      flag panel: also in the decide poll's game traces;

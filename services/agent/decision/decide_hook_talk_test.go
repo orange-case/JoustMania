@@ -26,14 +26,14 @@ func talkJevSnapshot(jevTimeout time.Duration) flags.Snapshot {
 }
 
 // talkCycle fires one cycle, waits for the remote call to land and returns the
-// newest agent.decide span.
+// newest invoke_agent span.
 func talkCycle(t *testing.T, h remoteHarness) sdktrace.ReadOnlySpan {
 	t.Helper()
 	h.loop.OnEvaluate(context.Background(), remoteContext(), testTrigger())
 	h.loop.AwaitInflight()
 	ds := spansByName(h.sr.Ended(), SpanDecide)
 	if len(ds) == 0 {
-		t.Fatal("no agent.decide span")
+		t.Fatal("no invoke_agent span")
 	}
 	return ds[len(ds)-1]
 }
@@ -225,7 +225,7 @@ func TestTalk_DegradeBeatOnJev(t *testing.T) {
 		}
 		ds := spansByName(h.sr.Ended(), SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		for key, want := range map[string]string{
 			AttrDecideBackend:          "rules",

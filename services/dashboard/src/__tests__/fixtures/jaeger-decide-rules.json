@@ -19,7 +19,7 @@
         {
           "traceID": "aaaa000000000001",
           "spanID": "r1",
-          "operationName": "agent.decide",
+          "operationName": "invoke_agent joustmania-agent",
           "references": [
             {
               "refType": "CHILD_OF",

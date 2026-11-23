@@ -14,6 +14,9 @@ import (
 // prompt and model text, so backends record them ONLY when content capture is
 // opted into (the spec's "opt-in" requirement level).
 
+// AttrUsageCacheWriteInputTokens is the v0.1.0 cache-write name, missing from Go semconv v1.41.0.
+const AttrUsageCacheWriteInputTokens = "gen_ai.usage.cache_write.input_tokens"
+
 // Part types used by the decision backends.
 const (
 	PartText      = "text"

@@ -38,7 +38,7 @@
 #   3. stops the stack's agent container (it would decide in the one-shot game too; marker
 #      DIR/agent-was-running);
 #   4. runs the seed-matched games A,B,B,A per seed (reps 2); each game's replay record must carry
-#      the experiment id and arm; the first game of each arm is verified: its agent.decide spans must
+#      the experiment id and arm; the first game of each arm is verified: its invoke_agent spans must
 #      carry the arm's profile, or the run stops;
 #   5. on exit, error, SIGINT or SIGTERM: restores each flag (same writer, remaining TTL) only
 #      when its overlay is still the group-ab one, clears the arm values, removes group-ab-*
@@ -47,7 +47,7 @@
 # SIGKILL skips the trap: run `restore --out DIR` (flags, arm values, containers, agent).
 # Each finished game appends one line to DIR/manifest.jsonl.
 #
-# report: per arm, from Jaeger, only games whose remote agent.decide spans carry the arm's
+# report: per arm, from Jaeger, only games whose remote invoke_agent spans carry the arm's
 # decide.prompt_profile: group and single grants, timing in the game, outcomes, paired by seed.
 #
 # The llm budget is global: run only with no real game live. Design and cost:
@@ -270,12 +270,12 @@ verify_first_game() {
   for ((i = 0; i < ${AB_VERIFY_TRIES:-8}; i++)); do
     real_guard || return $?
     if tool verify-game --game-id "${gid}" --profile "${profile}" "${VERIFY_ARGS[@]}"; then
-      echo "verified: ${gid} has remote agent.decide spans with prompt_profile=${profile}"
+      echo "verified: ${gid} has remote invoke_agent spans with prompt_profile=${profile}"
       return 0
     fi
     sleep "${AB_VERIFY_WAIT:-3}"
   done
-  echo "agent-group-ab: the first ${arm} game (${gid}) has no remote agent.decide span with prompt_profile=${profile}." >&2
+  echo "agent-group-ab: the first ${arm} game (${gid}) has no remote invoke_agent span with prompt_profile=${profile}." >&2
   echo "  The throwaway agent saw nothing (the collector sends spans to the 'agent' network alias), or no" >&2
   echo "  remote backend answered. Retry with --use-aliases (then the throwaway agent observes EVERY game," >&2
   echo "  real ones too: the real-game guard polls /games every 3 s), or check the backend. --no-verify skips this." >&2

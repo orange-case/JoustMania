@@ -255,7 +255,8 @@ func TestDecide_HappyPath(t *testing.T) {
 		"gen_ai.usage.input_tokens":                int64(900), // 800 + 100 cache read
 		"gen_ai.usage.output_tokens":               int64(150),
 		"gen_ai.usage.cache_read.input_tokens":     int64(100),
-		"gen_ai.usage.cache_creation.input_tokens": int64(0),
+		"gen_ai.usage.cache_creation.input_tokens": int64(0), // Go semconv v1.41.0 name, kept for a transition (#2584, #2729)
+		"gen_ai.usage.cache_write.input_tokens":    int64(0), // semantic-conventions-genai v0.1.0 name (#2584)
 		"server.address":                           "127.0.0.1",
 	}
 	for k, v := range want {

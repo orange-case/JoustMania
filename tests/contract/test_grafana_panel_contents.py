@@ -104,7 +104,8 @@ STEP6_PANELS = [
         r"traces_span_metrics_calls_total",
         r"decide_backend",
         r"decide_outcome",
-        r"agent\.decide",
+        # The decide span since #2584; agent.decide kept for the series before the rename.
+        r'span_name=~"invoke_agent joustmania-agent\|agent\\\\\.decide"',
     ),
     # Agent: remote-model latency and usage.
     (

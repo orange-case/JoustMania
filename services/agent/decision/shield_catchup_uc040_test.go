@@ -373,7 +373,7 @@ func TestShieldSeconds_RulesMagnitudeReportsTheStampedLength(t *testing.T) {
 		}
 		spans := spansByName(sr.Ended(), SpanDecide)
 		if len(spans) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(spans))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(spans))
 		}
 		var as []decide.Answer
 		if err := json.Unmarshal([]byte(strAttr(t, spans[0], AttrDecideAnswers)), &as); err != nil {

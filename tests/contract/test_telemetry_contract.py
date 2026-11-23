@@ -61,7 +61,7 @@ EXTERNAL_METRICS = {
     "go_": "Go runtime of VictoriaMetrics / flagd self-metrics",
     "vm_": "VictoriaMetrics self-metrics",
     "system_": "OTel collector hostmetrics receiver (services/otel-collector/config.yaml)",
-    "traces_span_metrics_": "OTel collector spanmetrics connector over agent.decide spans "
+    "traces_span_metrics_": "OTel collector spanmetrics connector over invoke_agent spans "
     "(services/otel-collector/config.yaml; test_collector_spanmetrics.py)",
     "feature_flag_evaluation_": "standard OpenFeature OTel metrics hook: go-sdk-contrib "
     "hooks/open-telemetry in the agent (flags/otelhooks.go), the same names from "

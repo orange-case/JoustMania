@@ -9,7 +9,7 @@ The host restricts the agent from the controller in the lobby (standard ->
 ambient -> none, the TC-006 steps 1 to 3 seam: mock button -> menu admin handler
 -> flag service admin value -> flagd), then a JoustFFA game starts. Step 5
 (UC-040 A14): the agent's cycles for that game send no request to the fake and
-record no ``agent.decide`` span, while its call gate proves it is evaluating the
+record no ``invoke_agent`` span, while its call gate proves it is evaluating the
 game (``agent_llm_gated_total{reason=no_interventions_allowed}`` grows).
 
 It also carries UC-013 main step 5: the agent's next decision uses the host's write (no call), and the
@@ -134,7 +134,7 @@ async def _restrict_from_controller(stack, mock_client, host: str) -> None:
 @pytest.mark.usefixtures("flag_service")
 async def test_agent_makes_no_remote_call_after_host_restricts_it(fresh_stack):
     """With interventions_allowed=none set by the host from the controller, the agent
-    sends no request to the remote backend and records no agent.decide span for the game."""
+    sends no request to the remote backend and records no invoke_agent span for the game."""
     stack = fresh_stack
     fake = stack.fake_openai
     fake.script("valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE)
@@ -161,14 +161,14 @@ async def test_agent_makes_no_remote_call_after_host_restricts_it(fresh_stack):
             )
             gated_at_start = _gated_count(stack)
 
-            # Step 5: over the window, no request and no agent.decide span for the game.
+            # Step 5: over the window, no request and no invoke_agent span for the game.
             def violation() -> bool:
                 return bool(fake.requests(game_id)) or bool(decide_spans(stack, game_id))
 
             assert not await async_poll_until(violation, NO_CALL_WINDOW_SECONDS), (
                 f"the agent called the backend or decided for {game_id} under {FLAG}=none: "
                 f"requests {fake.requests(game_id)}, "
-                f"agent.decide {[s.attributes for s in decide_spans(stack, game_id)]}"
+                f"invoke_agent {[s.attributes for s in decide_spans(stack, game_id)]}"
             )
             # The window covered live cycles: the gate kept skipping, it was not idle.
             assert _gated_count(stack) > gated_at_start, (

@@ -95,8 +95,8 @@ type LayerState struct {
 	// (#1226): "rules", or the remote backend's name. Empty when the decide hook
 	// did not run (engines without the decide seam), so their spans are unchanged.
 	DecideBackend string
-	// DecideStateDigest is the decide.state.digest of the rules cycle's agent.decide
-	// span (#2648). In a game the rules-path agent.decide and agent.decision spans are
+	// DecideStateDigest is the decide.state.digest of the rules cycle's invoke_agent
+	// span (#2648). In a game the rules-path invoke_agent and agent.decision spans are
 	// siblings under game_cycle, no longer under a per-cycle agent.signal_received
 	// span; the shared digest is what tells which decisions belong to which decide.
 	DecideStateDigest string

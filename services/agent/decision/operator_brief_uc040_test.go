@@ -13,7 +13,7 @@ import (
 // UC: UC-040 BR-044
 // operator_brief_uc040_test.go: a claude or openai decide request carries the
 // operator's decision.operator_brief, jev never does, the brief changes neither the
-// state nor the questions, and agent.decide records only its presence and length
+// state nor the questions, and invoke_agent records only its presence and length
 // (#2687, decide-contract.md §3, §12).
 
 func TestRemote_OperatorBrief(t *testing.T) {

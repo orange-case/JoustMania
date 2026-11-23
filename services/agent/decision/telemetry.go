@@ -4,7 +4,7 @@ package decision
 // remote decide answer lands it is re-validated against the CURRENT game context
 // (fetched fresh at landing, NOT the fire-time snapshot — the game may have moved
 // on while the call was in flight). An answer that fails a check is dropped and the
-// reason rides agent.decide as decide.discarded_reason.
+// reason rides invoke_agent as decide.discarded_reason.
 const (
 	// DiscardStaleContext: the partition that fired the inference no longer exists
 	// at apply time (the game ended past grace and was evicted, or never reappeared)

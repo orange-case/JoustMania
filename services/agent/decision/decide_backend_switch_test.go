@@ -11,7 +11,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-// newDecideSpans returns the agent.decide spans ended since the first `seen`.
+// newDecideSpans returns the invoke_agent spans ended since the first `seen`.
 func newDecideSpans(h remoteHarness, seen int) ([]sdktrace.ReadOnlySpan, int) {
 	all := spansByName(h.sr.Ended(), SpanDecide)
 	return all[seen:], len(all)
@@ -19,7 +19,7 @@ func newDecideSpans(h remoteHarness, seen int) ([]sdktrace.ReadOnlySpan, int) {
 
 // UC-044 main steps 4-5: the decision backend is read from the flags every
 // cycle, never cached, so a flip of decision.backend applies to the next
-// decision without a restart, and the agent.decide span names the new value.
+// decision without a restart, and the invoke_agent span names the new value.
 //
 // UC: UC-044 main Post-S-1
 func TestRemote_BackendSwitchAppliesNextCycle(t *testing.T) {
@@ -38,7 +38,7 @@ func TestRemote_BackendSwitchAppliesNextCycle(t *testing.T) {
 		h.loop.AwaitInflight()
 		spans, seen := newDecideSpans(h, 0)
 		if len(spans) != 1 {
-			t.Fatalf("cycle 1: agent.decide spans = %d, want 1", len(spans))
+			t.Fatalf("cycle 1: invoke_agent spans = %d, want 1", len(spans))
 		}
 		if got := strAttr(t, spans[0], AttrDecideBackend); got != "rules" {
 			t.Fatalf("cycle 1: decide.backend = %q, want rules", got)
@@ -58,7 +58,7 @@ func TestRemote_BackendSwitchAppliesNextCycle(t *testing.T) {
 		h.loop.AwaitInflight()
 		spans, seen = newDecideSpans(h, seen)
 		if len(spans) != 1 {
-			t.Fatalf("cycle 2: agent.decide spans = %d, want 1", len(spans))
+			t.Fatalf("cycle 2: invoke_agent spans = %d, want 1", len(spans))
 		}
 		if n := be.callCount(); n != 1 {
 			t.Fatalf("cycle 2: remote calls = %d, want 1 after the flip", n)
@@ -83,7 +83,7 @@ func TestRemote_BackendSwitchAppliesNextCycle(t *testing.T) {
 		}
 		spans, _ = newDecideSpans(h, seen)
 		if len(spans) != 1 {
-			t.Fatalf("cycle 3: agent.decide spans = %d, want 1 (rules decides again)", len(spans))
+			t.Fatalf("cycle 3: invoke_agent spans = %d, want 1 (rules decides again)", len(spans))
 		}
 		for _, s := range spans {
 			if got := strAttr(t, s, AttrDecideBackendRequested); got != "rules" {
@@ -145,7 +145,7 @@ func TestRemote_ModelOnlyFlipKeepsInflightAnswer(t *testing.T) {
 		h.loop.AwaitInflight()
 		ds := spansByName(h.sr.Ended(), SpanDecide)
 		if len(ds) != 2 {
-			t.Fatalf("agent.decide spans = %d, want 2", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 2", len(ds))
 		}
 		if got := strAttr(t, ds[1], "gen_ai.request.model"); got != newModel {
 			t.Errorf("next call gen_ai.request.model = %q, want %q", got, newModel)

@@ -216,7 +216,7 @@ describe("UC-035: A3 a telemetry backend is down (dashboard side)", () => {
     const el = stubDom();
     const view = agentView();
     onDecidePollFailed(view);
-    expect(el("dfeed").innerHTML).toContain("Could not reach Jaeger for agent.decide spans.");
+    expect(el("dfeed").innerHTML).toContain("Could not reach Jaeger for invoke_agent spans.");
     expect(view.decideHasRendered).toBe(true);
   });
 

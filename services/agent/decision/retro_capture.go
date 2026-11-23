@@ -52,10 +52,6 @@ import (
 // constant — distinct from the in-game llmModeValue.
 const retroModeValue = "retro"
 
-// genAIOutputTypeJSON is gen_ai.output.type=json: the RESPONSE CONTRACT asks for a
-// single JSON object.
-var genAIOutputTypeJSON = semconv.GenAIOutputTypeKey.String("json")
-
 // DefaultRetroTimeout bounds one retro inference call when SetTimeout was not
 // called. A retro is off the game's hot path, so the budget is generous; it still
 // guarantees a hung call cannot leak its goroutine or pin the span open.
@@ -629,6 +625,8 @@ func (rc *RetroCoordinator) runRetroInfer(ctx context.Context, span trace.Span, 
 		System: prompt.System,
 		User:   prompt.User,
 		Model:  prompt.Model,
+		// So the per-game spend includes the retro.
+		ConversationID: sessionID,
 	})
 	latencyMs := now().Sub(start).Milliseconds()
 
@@ -720,7 +718,7 @@ func (rc *RetroCoordinator) failRetro(span trace.Span, sessionID string, latency
 }
 
 // retroAttribution is the inference attribution for one retro capture: the
-// configured model (gen_ai.request.model / inference.configured), the backend that
+// configured model (inference.configured), the backend that
 // serves (inference.used), any degradation reason, and the backend to call.
 type retroAttribution struct {
 	configured string
@@ -799,9 +797,7 @@ type retroPromptAttrs struct {
 // set (#844), mirroring llmPromptAttributes. Every emission routes through it so
 // the schema is complete and consistent on every emission:
 //
-//   - gen_ai.operation.name = "chat"        (semconv)
-//   - gen_ai.request.model  = <model flag>  (semconv)
-//   - gen_ai.output.type    = "json"        (semconv key; JSON per RESPONSE CONTRACT)
+//   - no gen_ai.* attributes: the model call is the backend's `chat {model}` child
 //   - agent.mode            = "retro"
 //   - agent.objectives      = sorted "k=v" weights (summarizeObjectives)
 //   - interventions.allowed = the allow-list summary (allowedSummary)
@@ -822,10 +818,6 @@ func retroPromptAttributes(in retroPromptAttrs) []attribute.KeyValue {
 	user := in.prompt.User
 	spanUser := in.prompt.UserForSpan(in.captureContent)
 	return []attribute.KeyValue{
-		// GenAI semantic conventions for the request the agent would have sent.
-		semconv.GenAIOperationNameChat,
-		semconv.GenAIRequestModel(in.prompt.Model),
-		genAIOutputTypeJSON,
 		// Agent attribution (same vocabulary as the decision span).
 		attribute.String(AttrMode, retroModeValue),
 		attribute.String(AttrGameKind, in.gameKind),

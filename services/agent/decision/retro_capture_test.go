@@ -295,9 +295,6 @@ func TestRetroCapture_SchemaComplete(t *testing.T) {
 
 	span := spansByName(sr.Ended(), SpanLLMRetro)[0]
 	wantStr := map[string]string{
-		"gen_ai.operation.name":  "chat",
-		"gen_ai.request.model":   "", // no backend wired: no model
-		"gen_ai.output.type":     "json",
 		AttrMode:                 "retro",
 		AttrGameKind:             "real",
 		AttrObjectives:           "chaos=0.3,endurance=0.7",
@@ -313,6 +310,12 @@ func TestRetroCapture_SchemaComplete(t *testing.T) {
 	for key, expected := range wantStr {
 		if v, ok := attrValue(span, key); !ok || v.AsString() != expected {
 			t.Errorf("attr %s = %q (present=%v), want %q", key, v.AsString(), ok, expected)
+		}
+	}
+	// UC-042: the retro span is not a model call (its chat {model} child is).
+	for _, key := range []string{"gen_ai.operation.name", "gen_ai.request.model", "gen_ai.output.type"} {
+		if v, ok := attrValue(span, key); ok {
+			t.Errorf("%s = %q on the retro span, want absent (#2584)", key, v.Emit())
 		}
 	}
 	// Explicit divergence guard: never "rules" on a retro span.
@@ -440,7 +443,6 @@ func TestRetroCapture_BackendAttribution(t *testing.T) {
 
 	span := spansByName(sr.Ended(), SpanLLMRetro)[0]
 	want := map[string]string{
-		"gen_ai.request.model":  configured,
 		AttrInferenceConfigured: configured,
 		AttrInferenceUsed:       "claude",
 		AttrInferenceFallback:   "",
@@ -568,7 +570,6 @@ func TestRetroCapture_StubDefaultCaptureOnly(t *testing.T) {
 
 	span := spansByName(sr.Ended(), SpanLLMRetro)[0]
 	want := map[string]string{
-		"gen_ai.request.model":  "",
 		AttrInferenceConfigured: "",
 		AttrInferenceUsed:       DefaultInference,
 		AttrInferenceFallback:   FallbackNoBackend,

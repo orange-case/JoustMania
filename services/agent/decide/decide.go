@@ -246,7 +246,7 @@ type Request struct {
 // GoalLines are the rendered goal lines of a request: Goal is the profile's
 // target bands ("long_running_game duration>=180s ..."), Now the measured values
 // ("duration=95s activity=0.42 ..."), both without their "goal: " / "now: "
-// prefix. Profile is the profile name (decide.goal.profile on agent.decide),
+// prefix. Profile is the profile name (decide.goal.profile on invoke_agent),
 // Source named or from_objectives (decide.goal.source).
 type GoalLines struct {
 	Profile string `json:"profile"`

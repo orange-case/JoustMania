@@ -305,7 +305,7 @@ func TestRemote_StaleAnswersDiscardedAndCounted(t *testing.T) {
 		h, reader := stateCase(t, 2*time.Second, 3*time.Second)
 		ds := spansByName(h.sr.Ended(), SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		assertDiscarded(t, h, ds[0], DiscardStateTooOld)
 		if got := discardedByReason(t, reader); got[DiscardStateTooOld] != 1 || len(got) != 1 {
