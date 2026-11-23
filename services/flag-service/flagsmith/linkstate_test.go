@@ -363,7 +363,7 @@ func TestLinkStateRefusedValue(t *testing.T) {
 	t.Run("UC-055/A4 back to the refused value while a pull round finds the older local value in Flagsmith: the refusal stays", func(t *testing.T) {
 		s := heldWithInFlight(t)
 		s.Offer(stack, val(`1`), t0, 3) // the operator goes back to the refused 1
-		s.SetRemote(stack, val(`2`))     // the round read local 2 (snapshot 2) and Flagsmith shows 2
+		s.SetRemote(stack, val(`2`))    // the round read local 2 (snapshot 2) and Flagsmith shows 2
 		s.ClearRefusalRead(stack, 2)
 		s.SetInSyncRead(stack, 2)
 		if p, oos, r := s.Counts(); p != 0 || oos != 1 || r != 1 {
