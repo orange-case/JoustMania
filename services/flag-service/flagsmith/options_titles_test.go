@@ -378,18 +378,20 @@ func TestStartOptionsRetryLimits(t *testing.T) {
 		e := newStartEnv(t)
 		e.admin.features = []fsFeature{{ID: 1, Name: "objectives"}}
 		legacyOptions(e, 1, "agent", "objectives")
-		for i := 0; i <= optionRetries; i++ {
+		// The spec's cap (§2.3 "at most 10 times"), not optionRetries, so a changed cap fails.
+		const retries = 10
+		for i := 0; i <= retries; i++ {
 			e.admin.f.Options.Script(http.MethodPut, transientRun()...)
 		}
 		startOptions(t, e)
-		if n := e.sleepsOf(optionRetryEvery); n != optionRetries {
-			t.Fatalf("UC-055/BR-005 %d retry waits, want %d", n, optionRetries)
+		if n := e.sleepsOf(optionRetryEvery); n != retries {
+			t.Fatalf("UC-055/BR-005 %d retry waits, want %d", n, retries)
 		}
 		if n := strings.Count(e.logs.String(), "the option sync failed after its retries"); n != 1 {
 			t.Fatalf("UC-055/BR-005 %d final WARNs, want one:\n%s", n, e.logs.String())
 		}
-		if n := optionRequestsTo(e.admin.f, http.MethodPut, 1); n != (optionRetries+1)*optionTransientRun*transientAttempts {
-			t.Fatalf("UC-055/BR-005 %d update attempts, want %d (one pass and %d retries)", n, (optionRetries+1)*optionTransientRun*transientAttempts, optionRetries)
+		if n := optionRequestsTo(e.admin.f, http.MethodPut, 1); n != (retries+1)*optionTransientRun*transientAttempts {
+			t.Fatalf("UC-055/BR-005 %d update attempts, want %d (one pass and %d retries)", n, (retries+1)*optionTransientRun*transientAttempts, retries)
 		}
 	})
 }

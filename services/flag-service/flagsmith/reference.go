@@ -328,7 +328,7 @@ func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue
 			// The feature's options changed since the feature list (a person
 			// added or removed one): list them once, read again, send again (#2709).
 			relisted = true
-			if lerr := s.relistOptions(sctx, j.k.Flag, j.featureID); lerr != nil {
+			if lerr := s.relistOptions(sctx, j.k, j.featureID); lerr != nil {
 				end()
 				return s.referenceFailed(ctx, j, werr, true)
 			}
@@ -355,11 +355,11 @@ func (s *startup) patchReference(ctx context.Context, j referenceJob, fv FSValue
 
 // relistOptions lists the feature's options again with the out side's
 // listOptions (the out side does not run during Start), paced by the start.
-func (s *startup) relistOptions(ctx context.Context, flag string, featureID int) error {
+func (s *startup) relistOptions(ctx context.Context, k Key, featureID int) error {
 	if err := s.pace.wait(ctx); err != nil {
 		return err
 	}
-	return (&out{l: s.l}).listOptions(ctx, flag, featureID)
+	return (&out{l: s.l}).listOptions(ctx, k, featureID)
 }
 
 // referenceFailed handles a failed re-read (write false) or write: a cancel
