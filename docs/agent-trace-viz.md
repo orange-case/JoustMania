@@ -47,7 +47,7 @@ action**. A blocked decision still emits `signal_received → decision`; the
 
 **Since #2648** a game trace has no `agent.signal_received` span (one per Export was
 noise): the Export is the event `agent.signal_received` (`otlp.signal`, `rpc.*`) on the
-cycle's `agent.decide` / `agent.disabled` span, and `agent.decide` / `agent.decision`
+cycle's `invoke_agent joustmania-agent` / `agent.disabled` span, and `invoke_agent joustmania-agent` / `agent.decision`
 are direct children of `game_cycle`. Without game ids the span below still exists.
 
 `agent.signal_received` is the single entry span (SERVER kind, own-root only without game ids) for both trigger kinds (an OTLP
@@ -65,20 +65,22 @@ chose and why"). Verified keys/values from live span data:
 | What did it decide? | `decision.action`, `decision.reason` | `grant_shield` / `shield a struggling player (skill 0.62) while the field shrinks` |
 | Was it allowed to act? | `decision.blocked`, `decision.block_reason` | `true` / `not_allowed` |
 | Which goal was it serving? | `decision.objective_served` | `balanced` |
-| Which backend actually ran? | `decide.backend` (and, on the sibling `agent.decide` span, `decide.backend.requested`, `decide.fallback_reason`) | `rules` / `claude` / `llm_not_eligible` |
+| Which backend actually ran? | `decide.backend` (and, on the sibling `invoke_agent joustmania-agent` span, `decide.backend.requested`, `decide.fallback_reason`) | `rules` / `claude` / `llm_not_eligible` |
 | What were the flags in effect? | `agent.enabled`, `agent.objectives`, `interventions.allowed`, `policy.*` | `true` / `accelerate=0.1,balanced=0.7,…` / `none` |
 | Did the move pass fitness? | `fitness.evaluated` (JSON array of `metric=value`) | `["balanced.skill_gap=0.318…","balanced.spike_survival_ratio=1",…]` |
 | **Which game is this?** (#1095 join) | `game.id` (alias `session.id`), `game.kind` | `game_8c812a3d9063` / `shadow` |
 
 **Backend attribution** is the "is a model actually driving this?" question.
-Every decided cycle has an **`agent.decide`** span with `decide.backend`,
+Every decided cycle has an **`invoke_agent joustmania-agent`** span with `decide.backend`,
 `decide.backend.requested`, `decide.fallback_reason`, `decide.confidence` and
 `decide.outcome`; a remote backend's call is its `chat {model}` child span with
-the `gen_ai.*` attributes. (The `agent.mode` / `agent.model` /
+the `gen_ai.*` attributes. Since #2731 the decide span also carries the invocation's
+totals (the sum of its `chat {model}` children): count one or the other, not both. (The `agent.mode` / `agent.model` /
 `inference.*` attributes on `agent.decision` were removed with the legacy
 mode/model path in #1234.) The post-game **`agent.llm.retro`** span carries
-`gen_ai.request.model` and `inference.used` (`claude`, or `none` when the retro
-is capture-only). See act (c) below.
+`inference.configured` (the model) and `inference.used` (`claude`, or `none` when
+the retro is capture-only); its model call is the `chat {model}` child with the
+`gen_ai.*` attributes (#2584). See act (c) below.
 
 **`game.id` is the universal join key (#1095):** it appears on *every* agent
 span — `signal_received`, `decision`, `action`, `llm.retro`, and
@@ -132,11 +134,11 @@ in the dropdown. Until then, the operation field will be empty — keep this as 
 Decisions a remote backend made:
 
 ```
-http://localhost/jaeger/search?service=agent&operation=agent.decide&lookback=2d&limit=20&tags=%7B%22decide.backend%22%3A%22claude%22%7D
+http://localhost/jaeger/search?service=agent&operation=invoke_agent%20joustmania-agent&lookback=2d&limit=20&tags=%7B%22decide.backend%22%3A%22claude%22%7D
 ```
 
-Manual: **Service** `agent` · **Operation** `agent.decide` · **Tags**
-`{"decide.backend":"claude"}`. Expand one and its `chat {model}` child to read
+Manual: **Service** `agent` · **Operation** `invoke_agent joustmania-agent` · **Tags**
+`{"decide.backend":"claude"}` (operation `agent.decide` for decisions recorded before #2584). Expand one and its `chat {model}` child to read
 the model, tokens, confidence and rationale. To narrate a fallback, filter
 `{"decide.backend.requested":"claude","decide.backend":"rules"}` and read
 `decide.fallback_reason` (`timeout`, `llm_not_eligible`, ...).

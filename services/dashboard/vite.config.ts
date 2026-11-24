@@ -30,7 +30,7 @@ export default defineConfig({
         target: 'http://localhost:80',
         changeOrigin: false,
       },
-      // Proxy Jaeger HTTP API queries (agent.decide feed, #1233) through envoy,
+      // Proxy Jaeger HTTP API queries (invoke_agent feed, #1233) through envoy,
       // which routes /jaeger/* to the Jaeger query service. Dev-only, as above.
       '/jaeger': {
         target: 'http://localhost:80',

@@ -230,7 +230,7 @@ func (o *out) send(ctx context.Context, k Key, id string, v Value, fv FSValue, f
 		if variantsRefused(err) {
 			// The feature's options changed since the start (a person added
 			// or removed one): list them once and send again (#2709, §2.3).
-			if lerr := o.listOptions(ctx, k.Flag, featureID); lerr != nil {
+			if lerr := o.listOptions(ctx, k, featureID); lerr != nil {
 				return status, err
 			}
 			if perr := o.pace(ctx); perr != nil {
@@ -280,17 +280,27 @@ func firstID(raw json.RawMessage) (int, bool) {
 	type item struct {
 		ID int `json:"id"`
 	}
+	items := listedItems[item](raw)
+	if len(items) == 0 {
+		return 0, false
+	}
+	return items[0].ID, true
+}
+
+// listedItems are the items of a list answer, paged ({"results": [...]}) or
+// plain ([...]); none when it is neither.
+func listedItems[T any](raw json.RawMessage) []T {
 	var paged struct {
-		Results []item `json:"results"`
+		Results []T `json:"results"`
 	}
 	if json.Unmarshal(raw, &paged) == nil && len(paged.Results) > 0 {
-		return paged.Results[0].ID, true
+		return paged.Results
 	}
-	var plain []item
-	if json.Unmarshal(raw, &plain) == nil && len(plain) > 0 {
-		return plain[0].ID, true
+	var plain []T
+	if json.Unmarshal(raw, &plain) == nil {
+		return plain
 	}
-	return 0, false
+	return nil
 }
 
 // ignoreNotFound turns the 404 of a DELETE into success: what it should

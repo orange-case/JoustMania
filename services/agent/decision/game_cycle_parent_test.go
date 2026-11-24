@@ -118,7 +118,7 @@ func TestInGameRemoteParent_GameCycleFirst(t *testing.T) {
 // UC: UC-040 main BR-013
 // UC: UC-035 main step 5
 func TestRemote_DecideLandsUnderGameCycle(t *testing.T) {
-	t.Run("UC-040/BR-013 async agent.decide is a remote child of game_cycle", func(t *testing.T) {
+	t.Run("UC-040/BR-013 async invoke_agent is a remote child of game_cycle", func(t *testing.T) {
 		be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.95, "A", 0.5, "shield"))
 		h := newRemoteHarness(t, remoteSnapshot(time.Second), be)
 		c := remoteContext()
@@ -134,17 +134,17 @@ func TestRemote_DecideLandsUnderGameCycle(t *testing.T) {
 			t.Fatalf("decide=%d anchors=%d, want 1 decide and no anchor span (#2648)", len(ds), len(anchors))
 		}
 		if p := ds[0].Parent(); p.TraceID().String() != hubGameTrace || p.SpanID().String() != hubGameCycleSpanID || !p.IsRemote() {
-			t.Fatalf("agent.decide parent = %v, want remote game_cycle %s", p, hubGameCycleSpanID)
+			t.Fatalf("invoke_agent parent = %v, want remote game_cycle %s", p, hubGameCycleSpanID)
 		}
 		// The trigger rides the span as an event, not as a Link to an anchor span.
 		if len(ds[0].Links()) != 0 {
 			t.Fatalf("links = %+v, want none: the trigger is an event (#2648)", ds[0].Links())
 		}
 		requireSignalEvent(t, ds[0], "metrics")
-		// The landing's decision nests under the agent.decide span.
+		// The landing's decision nests under the invoke_agent span.
 		decisions := spansByName(spans, SpanDecision)
 		if len(decisions) != 1 || decisions[0].Parent().SpanID() != ds[0].SpanContext().SpanID() {
-			t.Fatalf("agent.decision must be a child of the async agent.decide")
+			t.Fatalf("agent.decision must be a child of the async invoke_agent")
 		}
 	})
 }

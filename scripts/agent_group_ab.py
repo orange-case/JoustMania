@@ -10,14 +10,15 @@ Stdlib only. Subcommands:
                                 value:<json>; "-" for an empty writer or no expiry)
   admin-variant                 stdin: GET /{set}/{flag}; the persisted admin variant, or "-"
   ttl-left EPOCH                seconds until EPOCH (0 when past)
-  verify-game ...               exit 0 when the game has a remote agent.decide span with the profile
+  verify-game ...               exit 0 when the game has a remote decide span with the profile
   manifest-line ...             one JSON line for the run manifest; exit 3 when the record is not
                                 bound to --expect-experiment / --expect-arm (#2530)
   report --manifest M (--jaeger-url U | --traces-file F) [--json]
                                 per arm: group and single grants, their timing in the
                                 game, and the outcomes
 
-The report keeps a game only when its remote ``agent.decide`` spans carry the arm's
+The report keeps a game only when its remote decide spans (``invoke_agent joustmania-agent``,
+``agent.decide`` before #2584) carry the arm's
 ``decide.prompt_profile``: a game without a remote decide, or with another profile, is
 listed as excluded and never counted. It describes; it judges nothing (the success
 criterion is pre-registered in docs/agent-group-ab-runbook.md).
@@ -121,6 +122,11 @@ def flatten_spans(doc: dict) -> list[dict]:
     return out
 
 
+# The decide span (#2584: the GenAI invoke_agent span). Games recorded by an agent
+# from before #2584 carry the old name, so both are read.
+DECIDE_SPANS = ("invoke_agent joustmania-agent", "agent.decide")
+
+
 def fetch_spans(base: str, operation: str, game_id: str) -> list[dict]:
     """Spans of one operation for one game from Jaeger's query API v3."""
     params = {
@@ -141,6 +147,11 @@ def fetch_spans(base: str, operation: str, game_id: str) -> list[dict]:
         raise
 
 
+def fetch_decide_spans(base: str, game_id: str) -> list[dict]:
+    """The game's decide spans under either name (DECIDE_SPANS)."""
+    return [s for op in DECIDE_SPANS for s in fetch_spans(base, op, game_id)]
+
+
 # ---------------------------------------------------------------- the report
 
 
@@ -151,7 +162,7 @@ def analyse_game(entry: dict, spans: list[dict]) -> dict:
     profiles = {
         s["attrs"].get("decide.prompt_profile")
         for s in mine
-        if s["name"] == "agent.decide" and s["attrs"].get("decide.prompt_profile")
+        if s["name"] in DECIDE_SPANS and s["attrs"].get("decide.prompt_profile")
     }
     if not profiles:
         return {"excluded": "no_remote_decide"}
@@ -286,9 +297,9 @@ def report(
             if all_spans is not None:
                 spans = all_spans
             else:
-                spans = fetch_spans(
-                    jaeger_url or "", "agent.decide", e["game_id"]
-                ) + fetch_spans(jaeger_url or "", "agent.decision", e["game_id"])
+                spans = fetch_decide_spans(jaeger_url or "", e["game_id"]) + fetch_spans(
+                    jaeger_url or "", "agent.decision", e["game_id"]
+                )
             analysed.append(analyse_game(e, spans))
         s = summarise_arm(arms[arm], analysed)
         s["profile"] = arms[arm][0]["profile"]
@@ -330,16 +341,16 @@ def report(
 def verify_game(
     jaeger_url: str | None, traces_file: str | None, game_id: str, profile: str
 ) -> int:
-    """0 when a remote agent.decide span of the game carries the profile (the agent saw the game)."""
+    """0 when a remote decide span of the game carries the profile (the agent saw the game)."""
     if traces_file:
         with open(traces_file) as fh:
             spans = flatten_spans(json.load(fh))
     else:
-        spans = fetch_spans(jaeger_url or "", "agent.decide", game_id)
+        spans = fetch_decide_spans(jaeger_url or "", game_id)
     seen = {
         s["attrs"].get("decide.prompt_profile")
         for s in spans
-        if s["name"] == "agent.decide" and s["attrs"].get("game.id") == game_id
+        if s["name"] in DECIDE_SPANS and s["attrs"].get("game.id") == game_id
     }
     return 0 if profile in seen else 1
 

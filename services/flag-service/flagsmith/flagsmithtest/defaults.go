@@ -65,6 +65,7 @@ func (f *Fake) registerAdminDefaults() {
 	})
 	f.registerOverrideRoutes()
 	f.registerOptionRoutes()
+	f.registerFeatureStateRoutes()
 }
 
 // hasFeature reports whether id is a feature the fake created.

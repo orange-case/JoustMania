@@ -80,7 +80,7 @@ The `ffa.intervention` answer `Decide` returns is **synthesised**
 
 It is deliberately **not** the factorised `p_yes * q_i`, which would split the
 acting mass over the interventions again. The synthesised distribution is what
-`decide.answers` on `agent.decide` shows; **Jev's real answers** are on the
+`decide.answers` on `invoke_agent joustmania-agent` shows; **Jev's real answers** are on the
 stage-1 chat span: `jev.gate.p_yes`, `jev.stage1.choice` and
 `jev.stage1.distribution` (JSON, noop excluded). The rationale names both, e.g.
 `jev: adjust_player_sensitivity (gate p_yes=0.70; adjust_player_sensitivity p=0.38 among interventions) on MOCK0003 (p=0.89)`.
@@ -335,7 +335,7 @@ tokens only.
   back to `rules` with `fallback_reason=backend_unavailable`. If Jev is configured but
   unreachable, slow, or returns an invalid answer, the result also comes from
   `rules`, with fallback reason `timeout`, `error` or `invalid_answer`. The game
-  never stalls, and the `agent.decide` span shows why.
+  never stalls, and the `invoke_agent joustmania-agent` span shows why.
 - To switch away live, flip the backend with `scripts/agent-backend.sh`.
   `scripts/agent-backend.sh jev pinned` pins `jev-1.13.0`.
 

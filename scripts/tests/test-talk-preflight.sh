@@ -75,7 +75,18 @@ for a in "$@"; do
         echo '{"error":{"httpCode":404,"message":"No traces found"}}'
         exit 0
       fi
-      echo '{"result":{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"agent"}}]},"scopeSpans":[{"scope":{},"spans":[{"traceId":"01","spanId":"02","name":"agent.decide","startTimeUnixNano":"1760000000200000000","attributes":[{"key":"decide.backend","value":{"stringValue":"claude"}},{"key":"decide.outcome","value":{"stringValue":"held"}}]},{"traceId":"01","spanId":"03","name":"agent.decide","startTimeUnixNano":"1760000000100000000","attributes":[{"key":"decide.backend","value":{"stringValue":"rules"}},{"key":"decide.outcome","value":{"stringValue":"fallback"}}]}]}]}]}}'
+      # The decide span is "invoke_agent joustmania-agent" (#2584, space URL-encoded);
+      # STUB_JAEGER_OLD_NAME: an agent release from before the rename (agent.decide only).
+      if [[ "${a}" == *"operationName=invoke_agent%20joustmania-agent&"* ]]; then
+        name="invoke_agent joustmania-agent"
+        [[ -n "${STUB_JAEGER_OLD_NAME:-}" ]] && { echo '{"error":{"httpCode":404,"message":"No traces found"}}'; exit 0; }
+      elif [[ "${a}" == *"operationName=agent.decide&"* && -n "${STUB_JAEGER_OLD_NAME:-}" ]]; then
+        name="agent.decide"
+      else
+        echo '{"error":{"httpCode":404,"message":"No traces found"}}'
+        exit 0
+      fi
+      echo '{"result":{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"agent"}}]},"scopeSpans":[{"scope":{},"spans":[{"traceId":"01","spanId":"02","name":"'"${name}"'","startTimeUnixNano":"1760000000200000000","attributes":[{"key":"decide.backend","value":{"stringValue":"claude"}},{"key":"decide.outcome","value":{"stringValue":"held"}}]},{"traceId":"01","spanId":"03","name":"'"${name}"'","startTimeUnixNano":"1760000000100000000","attributes":[{"key":"decide.backend","value":{"stringValue":"rules"}},{"key":"decide.outcome","value":{"stringValue":"fallback"}}]}]}]}]}}'
       exit 0 ;;
     *jaeger/api/traces*|*jaeger/api/services*)
       # The legacy query API (gone in Jaeger 2.21): the preflight must not call it.
@@ -189,7 +200,7 @@ check "jev threshold baseline" "PASS  decision.jev.act_confidence_threshold = ga
 check "jev blackhole variant present" "PASS  decision.jev.base_url = default"
 if has "stub"; then not_ok "no stub wording"; else ok "no stub wording"; fi
 check "interventions are per game" "PASS  interventions are per game: 0 value(s) in 0 live game(s)"
-check "jaeger newest span summarised" "PASS  2 agent.decide span(s) in the last"
+check "jaeger newest span summarised" "PASS  2 invoke_agent joustmania-agent span(s) in the last"
 check "jaeger newest span is the latest by start time" "newest: backend=claude outcome=held"
 if [[ -s "${WORK}/legacy-jaeger-calls" ]]; then
   not_ok "only the Jaeger v3 API is called (legacy: $(tr '\n' ' ' <"${WORK}/legacy-jaeger-calls"))"
@@ -197,7 +208,7 @@ else
   ok "only the Jaeger v3 API is called"
 fi
 STUB_BUDGET=30 STUB_JAEGER_EMPTY=1 run_preflight
-check "jaeger 404 no traces is no spans, not a failed query" "FAIL  no agent.decide spans in the last"
+check "jaeger 404 no traces is no spans, not a failed query" "FAIL  no invoke_agent joustmania-agent (or agent.decide) spans in the last"
 check "vendor variant listed" "decision.openai.model variants available: vendor"
 check "clock in sync" "PASS  clock skew 0s"
 check "stage allow-list is standard" "PASS  interventions_allowed = standard"
@@ -550,11 +561,33 @@ check "restart_rule degraded: the link passes" "PASS  Flagsmith link online (env
 restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1}'
 STUB_BUDGET=30 run_preflight
 check "online with a refused value warns with the counts" "WARN  Flagsmith link online, out of sync: 1 refused, 1 out of sync, 0 pending"
+# UC: UC-055 A4 (#2631): no refused stack key in keys: no stop sentence.
+if has "a stop (agent-killswitch.sh off) included"; then not_ok "refused without keys: no stop sentence"; else ok "refused without keys: no stop sentence"; fi
 if has "PASS  Flagsmith link online"; then not_ok "refused: no link PASS line"; else ok "refused: no link PASS line"; fi
 if [[ "${RC}" -eq 0 ]]; then ok "a refused WARN exits 0"; else not_ok "a refused WARN exits 0 (rc=${RC})"; fi
 restart_fake --flagsmith '{"link":"online","environment":"stage","pending":1,"out_of_sync":3,"refused":0}'
 STUB_BUDGET=30 run_preflight
 check "online with stuck keys (out of sync above pending) warns" "WARN  Flagsmith link online, out of sync: 0 refused, 3 out of sync, 1 pending"
+if has "a stop (agent-killswitch.sh off) included"; then not_ok "stuck keys, none refused: no stop sentence"; else ok "stuck keys, none refused: no stop sentence"; fi
+# UC: UC-055 A4 (#2631): a stack value Flagsmith refused is reverted at once, a stop made on stage included.
+stop_sentence="Flagsmith refuses stack writes (agent/enabled): a refused stack value is reverted at once, a stop (agent-killswitch.sh off) included: make the stop in Flagsmith too, or switch the link off"
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1,"keys":[{"flag_set":"agent","flag":"enabled","scope":"stack","in_sync":false,"pending":false,"reason":"http_409","side":"remote","http_status":409}]}'
+STUB_BUDGET=30 run_preflight
+check "a stack key Flagsmith refused: the stop sentence" "${stop_sentence}"
+check "a stack key Flagsmith refused: one link WARN with the counts" "WARN  Flagsmith link online, out of sync: 1 refused, 1 out of sync, 0 pending"
+# UC: UC-055 A4 (#2631): a stack key refused unsent (feature missing, no http_status): a stop holds, no stop sentence.
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1,"keys":[{"flag_set":"agent","flag":"enabled","scope":"stack","in_sync":false,"pending":false,"reason":"not_found","side":"remote"}]}'
+STUB_BUDGET=30 run_preflight
+check "a stack key refused unsent warns" "WARN  Flagsmith link online, out of sync: 1 refused"
+if has "a stop (agent-killswitch.sh off) included"; then not_ok "a stack key refused unsent (not_found): no stop sentence"; else ok "a stack key refused unsent (not_found): no stop sentence"; fi
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1,"keys":[{"flag_set":"interventions","flag":"pacing_profile","scope":"game:g42","in_sync":false,"pending":false,"reason":"not_found","side":"remote","http_status":404}]}'
+STUB_BUDGET=30 run_preflight
+check "a game key Flagsmith refused warns" "WARN  Flagsmith link online, out of sync: 1 refused"
+if has "a stop (agent-killswitch.sh off) included"; then not_ok "a game key refused: no stop sentence"; else ok "a game key refused: no stop sentence"; fi
+restart_fake --flagsmith '{"link":"online","environment":"stage","pending":0,"out_of_sync":1,"refused":1,"keys":[{"flag_set":"agent","flag":"decision.backend","scope":"stack","in_sync":false,"pending":false,"reason":"invalid_value","side":"local"}]}'
+STUB_BUDGET=30 run_preflight
+check "a stack key refused here warns" "WARN  Flagsmith link online, out of sync: 1 refused"
+if has "a stop (agent-killswitch.sh off) included"; then not_ok "a stack key refused here (side local): no stop sentence"; else ok "a stack key refused here (side local): no stop sentence"; fi
 restart_fake --flagsmith '{"link":"online","environment":"stage","pending":2,"out_of_sync":2,"refused":0}'
 STUB_BUDGET=30 run_preflight
 check "online with pushes in flight only passes" "PASS  Flagsmith link online (environment stage)"
@@ -576,6 +609,14 @@ check "link off with a config error names the variable" "WARN  Flagsmith link of
 restart_fake --flagsmith '{"link":"off","pending":0,"out_of_sync":0,"refused":0}'
 STUB_BUDGET=30 run_preflight
 if has "Flagsmith link"; then not_ok "link off by choice: no link line"; else ok "link off by choice: no link line"; fi
+
+# --- decide span name (#2584) -----------------------------------------------
+# An agent release from before #2584 names the decide span agent.decide: the
+# pre-flight falls back to that name when invoke_agent joustmania-agent has none
+# and reports it as a WARN (old agent image), never a PASS.
+STUB_BUDGET=30 STUB_JAEGER_OLD_NAME=1 run_preflight
+check "jaeger falls back to agent.decide for an agent from before #2584, as a WARN" "WARN  2 agent.decide span(s) in the last"
+if has "PASS  2 agent.decide"; then not_ok "the agent.decide fallback is not a PASS"; else ok "the agent.decide fallback is not a PASS"; fi
 
 # --- usage -----------------------------------------------------------------
 run_preflight --minutes abc

@@ -113,7 +113,7 @@
         {
           "traceID": "ffff000000000006",
           "spanID": "R1",
-          "operationName": "agent.decide",
+          "operationName": "invoke_agent joustmania-agent",
           "references": [
             {
               "refType": "CHILD_OF",
@@ -223,7 +223,7 @@
         {
           "traceID": "ffff000000000006",
           "spanID": "D1",
-          "operationName": "agent.decide",
+          "operationName": "invoke_agent joustmania-agent",
           "references": [
             {
               "refType": "CHILD_OF",
@@ -378,7 +378,7 @@
         {
           "traceID": "ffff000000000006",
           "spanID": "D2",
-          "operationName": "agent.decide",
+          "operationName": "invoke_agent joustmania-agent",
           "references": [
             {
               "refType": "CHILD_OF",

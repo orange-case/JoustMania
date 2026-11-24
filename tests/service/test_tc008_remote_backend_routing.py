@@ -76,7 +76,7 @@ def _configure(stack, backend: str, **kwargs) -> None:
 @pytest.mark.usefixtures("flag_service")
 async def test_rules_backend_default_unchanged(fresh_stack):
     """decision.backend=rules (TC-008 step 8): the rules engine decides, recorded on an
-    agent.decide span (backend=rules, requested=rules, no fallback) that is a SIBLING of
+    invoke_agent span (backend=rules, requested=rules, no fallback) that is a SIBLING of
     the rules agent.decision (same parent, same decide.state.digest; #2648: no
     agent.signal_received span in the game trace); the fake is never called."""
     stack = fresh_stack
@@ -107,11 +107,14 @@ async def test_rules_backend_default_unchanged(fresh_stack):
             assert tags.get("decide.outcome") == "act", tags
             # The coordinator's "primary" label is normalised to "real" (#1249).
             assert tags.get("game.kind") == "real", tags
-            # Sync rules path shape (#2648): agent.decide and its agent.decision are
+            # GenAI invoke_agent span on the rules path too (#2584, no model called).
+            assert span.name == "invoke_agent joustmania-agent", span.name
+            assert tags.get("gen_ai.operation.name") == "invoke_agent", tags
+            # Sync rules path shape (#2648): invoke_agent and its agent.decision are
             # siblings (one parent, the coordinator's game_cycle, which may still be
             # open so it is not looked up), paired by decide.state.digest; the Export
             # is an event on the decide, not a span; no backend chat span.
-            assert span.parent_span_id, "agent.decide has no parent on the rules path"
+            assert span.parent_span_id, "invoke_agent has no parent on the rules path"
             digest = tags.get("decide.state.digest")
             assert digest, tags
             siblings = [
@@ -124,7 +127,7 @@ async def test_rules_backend_default_unchanged(fresh_stack):
             assert siblings, "no sibling agent.decision with the decide's state digest"
             assert [e for e in span.events if e.name == "agent.signal_received"], span.events
             assert not [s for s in trace_of(stack, span) if s.name == "agent.signal_received"]
-            assert not children(stack, span), "the rules agent.decide span must have no children"
+            assert not children(stack, span), "the rules invoke_agent span must have no children"
             assert stack.fake_openai.requests(game_id) == [], "the rules backend must never call the remote backend"
     finally:
         await mock_channel.close()
@@ -140,7 +143,7 @@ async def test_rules_backend_default_unchanged(fresh_stack):
 async def test_openai_high_confidence_acts(fresh_stack):
     """High confidence -> decide.outcome=act (TC-008 steps 1 to 3): the agent writes the
     scripted intervention for the game through the flag service and the coordinator
-    applies it; the agent.decide span carries the passing gen_ai.evaluation.result and
+    applies it; the invoke_agent span carries the passing gen_ai.evaluation.result and
     parents the chat span and the dispatched agent.decision."""
     stack = fresh_stack
     stack.fake_openai.script(
@@ -191,6 +194,7 @@ async def test_openai_high_confidence_acts(fresh_stack):
             assert tags.get("decide.backend.requested") == "openai", tags
             assert tags.get("decide.fallback_reason", "") == "", tags
             assert tags.get("gen_ai.request.model") == FAKE_MODEL, tags
+            assert tags.get("gen_ai.operation.name") == "invoke_agent", tags  # #2584
             # Eligible under the shipped llm.eligible_game_kinds=real (#1249).
             assert tags.get("game.kind") == "real", tags
             assert abs(float(tags.get("decide.confidence")) - HIGH_CONFIDENCE) < 1e-9, tags
@@ -203,7 +207,7 @@ async def test_openai_high_confidence_acts(fresh_stack):
             assert evaluations[0].get("gen_ai.evaluation.score.label") == "pass", evaluations
 
             chats = children(stack, span, CHAT_SPAN)
-            assert chats, f"no '{CHAT_SPAN}' child under agent.decide: {[s.name for s in children(stack, span)]}"
+            assert chats, f"no '{CHAT_SPAN}' child under invoke_agent: {[s.name for s in children(stack, span)]}"
             chat_tags = chats[0].attributes
             assert chat_tags.get("gen_ai.provider.name") == "openai", chat_tags
             assert chat_tags.get("gen_ai.operation.name") == "chat", chat_tags
@@ -305,7 +309,7 @@ async def test_openai_garbage_falls_back_to_rules(fresh_stack):
 @pytest.mark.usefixtures("flag_service")
 async def test_selected_backend_missing_key_or_model_is_unavailable(fresh_stack, backend, kwargs):
     """A remote backend selected without its key or model (UC-044 A1, TC-008 step 1 variant):
-    the agent never calls out; the cycle's agent.decide span is a rules fallback with
+    the agent never calls out; the cycle's invoke_agent span is a rules fallback with
     decide.fallback_reason=backend_unavailable (decide.backend=rules, requested=<backend>),
     counted in agent_llm_gated_total{reason=backend_unavailable}, and nothing is applied
     from a remote answer (no chat span, no unblocked agent_intervention)."""

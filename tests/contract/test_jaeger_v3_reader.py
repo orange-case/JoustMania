@@ -73,10 +73,10 @@ def test_search_url_start_time_narrows_the_window():
 @pytest.mark.uc("UC-035", flow="main")
 def test_recorded_answer_reads_like_the_legacy_shape():
     with _answer(200, _fixture("jaeger-v3-decide-trace.json")):
-        traces = jaeger_v3.find_traces("http://h/jaeger/api", "agent", "agent.decide")
+        traces = jaeger_v3.find_traces("http://h/jaeger/api", "agent", "invoke_agent joustmania-agent")
     assert [t["traceID"] for t in traces] == [TRACE_ID]
     spans = {s["operationName"]: s for s in traces[0]["spans"]}
-    decide = spans["agent.decide"]
+    decide = spans["invoke_agent joustmania-agent"]
     assert decide["spanID"] == "c66f7c2a844e006d"
     assert decide["startTime"] == 1_793_139_266_961_628
     assert decide["duration"] == 206
@@ -104,7 +104,7 @@ def test_recorded_answer_reads_like_the_legacy_shape():
         name: processes[s["processID"]]["serviceName"] for name, s in spans.items()
     }
     assert services["Joust Free-for-All"] == "game-coordinator-service"
-    assert services["agent.decide"] == "agent"
+    assert services["invoke_agent joustmania-agent"] == "agent"
     events = spans["agent.flag_state"]["logs"]
     assert events[0]["fields"][0] == {
         "key": "event",

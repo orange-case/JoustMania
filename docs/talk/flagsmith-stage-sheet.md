@@ -16,6 +16,9 @@ link is on (`FLAGSMITH_LINK=on`, the stage `.env.local`). How the link works:
 - **The toggle:** enabled with a value means "this value runs". **Disabled means the baseline applies, not
   "flag off"**: switching `enabled` (the kill switch) off in Flagsmith brings back its baseline, which is `off`,
   but for most flags it means "back to the file default". When the baseline is what you want, prefer typing the value.
+- **A value under an off toggle is not in force.** Each disabled feature shows its file default as its value
+  (FR-227); a value you type there while the toggle is off does nothing, and the flag service resets it to the file
+  default at its next start. Stage a value by switching the toggle on.
 - **How fast:** at once when the realtime stream announces the change (the stage `.env.local` sets
   `FLAGSMITH_REALTIME_URL`), otherwise with the next pull, at most `FLAGSMITH_POLL_SECONDS` (30 s). **Measure it
   in rehearsal**; if a flip takes longer than a few seconds on the venue network, use the script for that beat.
@@ -49,7 +52,9 @@ Run these on the Pi while the link is online, so its deletes and values are push
 
 Beat 4 is the one to rehearse from Flagsmith: the kill switch must stop the agent within seconds. If the
 realtime stream is not there, use `./scripts/agent-killswitch.sh off` on stage and show the value in Flagsmith
-afterwards.
+afterwards. That fallback needs a Flagsmith that accepts writes: with change requests or a key without write access
+the local stop is reverted a few seconds later (#2631); then set `enabled` in Flagsmith, or stop the agent
+container (`docker stop joustmania-agent`).
 
 ## Optional: the operator brief (runbook beat 4b)
 

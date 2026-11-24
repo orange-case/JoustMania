@@ -103,7 +103,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "OTel: agent.decide spans per minute, derived in the OTel collector by the span-metrics connector (traces_span_metrics_calls_total); the agent has no counter for it.",
+      "description": "OTel: invoke_agent joustmania-agent spans (agent.decide before #2584) per minute, derived in the OTel collector by the span-metrics connector (traces_span_metrics_calls_total); the agent has no counter for it.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -159,7 +159,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(traces_span_metrics_calls_total{span_name=\"agent.decide\"}[1m])) * 60 or vector(0)",
+          "expr": "sum(rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])) * 60 or vector(0)",
           "refId": "A",
           "legendFormat": "decisions / min"
         }
@@ -310,7 +310,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "OTel: decisions per minute by decide.backend and decide.outcome (span metrics over agent.decide). A decision.backend flag flip shows here within a minute.",
+      "description": "OTel: decisions per minute by decide.backend and decide.outcome (span metrics over invoke_agent joustmania-agent, agent.decide before #2584). A decision.backend flag flip shows here within a minute.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -386,7 +386,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (decide_backend, decide_outcome) (rate(traces_span_metrics_calls_total{span_name=\"agent.decide\"}[1m])) * 60 or on() label_replace(vector(0), \"decide_backend\", \"none\", \"\", \"\")",
+          "expr": "sum by (decide_backend, decide_outcome) (rate(traces_span_metrics_calls_total{span_name=~\"invoke_agent joustmania-agent|agent\\\\.decide\"}[1m])) * 60 or on() label_replace(vector(0), \"decide_backend\", \"none\", \"\", \"\")",
           "refId": "A",
           "legendFormat": "{{decide_backend}} \u00b7 {{decide_outcome}}"
         }

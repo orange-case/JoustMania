@@ -151,7 +151,7 @@
         {
           "traceID": "fa0000000000aa01",
           "spanID": "dc01",
-          "operationName": "agent.decide",
+          "operationName": "invoke_agent joustmania-agent",
           "references": [
             {
               "refType": "CHILD_OF",
@@ -433,7 +433,7 @@
         {
           "traceID": "fa0000000000aa02",
           "spanID": "dc02",
-          "operationName": "agent.decide",
+          "operationName": "invoke_agent joustmania-agent",
           "references": [
             {
               "refType": "CHILD_OF",

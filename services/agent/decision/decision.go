@@ -205,7 +205,7 @@ type Loop struct {
 	// mu guards the log-throttle state and lastLayer below.
 	mu      sync.Mutex
 	lastLog time.Time
-	// lastQuietFallback throttles, per fallback reason, the agent.decide span of a
+	// lastQuietFallback throttles, per fallback reason, the invoke_agent span of a
 	// configuration fallback on which the rules emitted nothing (emitQuietFallback).
 	// Its own timestamps, so the evaluate log line does not use up the window and
 	// one reason does not hide another. Lazily allocated; guarded by mu.
@@ -273,7 +273,7 @@ type Loop struct {
 	// llmGated counts gated remote decide cycles (agent_llm_gated_total{reason=...}). Defaults
 	// to a no-op so a Loop built without metrics wiring still works.
 	llmGated otelmetric.Int64Counter
-	// decideDiscarded counts remote agent.decide records that carry a
+	// decideDiscarded counts remote invoke_agent records that carry a
 	// decide.discarded_reason (agent_decide_discarded_total{reason}, #2123).
 	// Defaults to the global meter provider's counter.
 	decideDiscarded otelmetric.Int64Counter
@@ -393,7 +393,7 @@ type Loop struct {
 	// flagState is this partition's agent.flag_state digest (#2059, flag_state.go).
 	flagState flagStateTracker
 	// questionsSeen holds the (game, sha) pairs whose decide.questions JSON was already
-	// written on an agent.decide span (#2648), guarded by questionsMu.
+	// written on an invoke_agent span (#2648), guarded by questionsMu.
 	questionsMu   sync.Mutex
 	questionsSeen map[string]struct{}
 	// applied is this game's applied-value ledger (UC-040 A35, BR-023,
@@ -735,7 +735,7 @@ func (l *Loop) OnEvaluate(ctx context.Context, c gamecontext.GameContext, trig E
 	defer endCycle()
 
 	// #1226: the decide-contract record of this cycle's rules ranking (the answers
-	// from the SAME ranking that produced these decisions), as an agent.decide
+	// from the SAME ranking that produced these decisions), as an invoke_agent
 	// sibling of the agent.decision spans. Nil when the engine has no decide seam.
 	// #1295: the span is emitted AFTER the decisions ran (it is backdated to the
 	// ranking, so the timeline is unchanged) so it can report what the permission
@@ -826,7 +826,7 @@ func (l *Loop) startSignalReceivedSpan(ctx context.Context, c gamecontext.GameCo
 }
 
 // startCycle opens the scope the cycle's agent spans hang under. In a game whose
-// trace ids the agent knows, the spans (agent.decide, agent.decision, agent.disabled)
+// trace ids the agent knows, the spans (invoke_agent, agent.decision, agent.disabled)
 // are direct remote children of the game's game_cycle (#2648): no agent.signal_received
 // span is added to the game trace, one per OTLP Export is noise there, and the trigger
 // rides the spans as an agent.signal_received event (signalEvent). The returned trigger
@@ -863,7 +863,7 @@ func signalEvent(span trace.Span, trig *EvalTrigger) {
 // for the cycle (rules), so a pattern registration or flag flip between two
 // look-ups cannot mix engines inside one cycle. decision.backend selects it (#1226):
 // rules (the default) runs the rules engine through rulesDecide, which returns
-// Evaluate's decisions unchanged plus the agent.decide record from the same
+// Evaluate's decisions unchanged plus the invoke_agent record from the same
 // ranking; any other value hands the decision to that remote backend
 // (decideRemote, see decide_hook.go), which falls back to rules when it cannot
 // decide. The legacy mode=llm path (#739/#741/#847/#917/#1207) was retired in #1234.
@@ -1399,7 +1399,7 @@ func gameRemoteParent(ctx context.Context, gameTraceID, gameTraceSpanID string) 
 
 // inGameRemoteParent re-parents the agent's IN-GAME decision chain (#1325, refining
 // #1195/#1187; UC-040 BR-013). It is the target-swap entry point: the in-game cycle
-// root (agent.signal_received) and the async remote agent.decide landing parent under
+// root (agent.signal_received) and the async remote invoke_agent landing parent under
 // the coordinator's game_cycle span — the running game cycle — so a reader sees
 // interventions nested where they actually occurred.
 //
@@ -1442,7 +1442,7 @@ func GameTraceLink(gameTraceID, gameTraceSpanID string) []trace.SpanStartOption 
 
 // attrLinkKind labels a span Link with what the link points at, so a reader who lands
 // on the link target knows WHY it is there. #1140 (Slice A) stamps it
-// linkKindFireCycle on the async agent.decide root's Link so a reader of the async
+// linkKindFireCycle on the async invoke_agent root's Link so a reader of the async
 // trace knows the link navigates back to the originating fire cycle's
 // agent.signal_received trace. Defined locally here (not in telemetry.go) to keep the
 // new attribute owned by Slice A.
@@ -1454,7 +1454,7 @@ const (
 
 // fireCycleLink builds the #1140 (Slice A) trace-continuity span option: when the
 // captured fire-cycle SpanContext is valid, it returns a single trace.WithLinks option
-// whose Link targets that SpanContext — so the async agent.decide root (its own
+// whose Link targets that SpanContext — so the async invoke_agent root (its own
 // root by the non-blocking design) LINKs back
 // to the fire cycle's originating agent.signal_received trace and are navigable in
 // Jaeger as one logical decision. The Link carries link.kind=fire_cycle plus the fire

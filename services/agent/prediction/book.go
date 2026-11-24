@@ -80,7 +80,7 @@ type Registration struct {
 	// Acted: the decision passed the permission chain and its write was applied.
 	// false keeps it as a counterfactual (held, blocked, gated off, discarded).
 	Acted bool
-	// DecideSpan is the agent.decide span the outcome span links to.
+	// DecideSpan is the invoke_agent span the outcome span links to.
 	DecideSpan trace.SpanContext
 	// Context is the game's context at decision time (the baseline source).
 	Context gamecontext.GameContext

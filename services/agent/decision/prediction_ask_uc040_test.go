@@ -18,7 +18,7 @@ import (
 // (#2479, UC-040 A45, BR-034): the ask is set only with
 // decision.predictions.ask_model on and a claude or openai backend, a valid
 // model prediction is registered with Source model instead of the lever default,
-// and a dropped one registers nothing, is reported on agent.decide and counted.
+// and a dropped one registers nothing, is reported on invoke_agent and counted.
 
 // parsedAnswer answers grant_shield on A through llmio.Parse, plus prediction
 // (a raw answers entry, "" for none).
@@ -136,7 +136,7 @@ func TestPredictionAsk_ModelPredictionRegisters(t *testing.T) {
 			h.loop.SetPredictionBook(b)
 			span := h.run(t)
 			if strAttr(t, span, keys.AttrDecidePredictionSource) != decide.SourceModel {
-				t.Fatal("agent.decide must report the model's prediction")
+				t.Fatal("invoke_agent must report the model's prediction")
 			}
 			if _, ok := attrValue(span, keys.AttrDecidePredictionDroppedReason); ok {
 				t.Fatal("nothing was dropped")
@@ -156,7 +156,7 @@ func TestPredictionAsk_ModelPredictionRegisters(t *testing.T) {
 // UC: UC-040 A45 BR-034
 // TestPredictionAsk_DroppedNeverBlocks: a dropped model prediction leaves the
 // decision acting exactly as without it, registers nothing (no lever default),
-// and is reported on agent.decide and in agent_prediction_dropped_total.
+// and is reported on invoke_agent and in agent_prediction_dropped_total.
 func TestPredictionAsk_DroppedNeverBlocks(t *testing.T) {
 	for _, tc := range []struct {
 		name, backend, entry, reason string

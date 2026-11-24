@@ -113,7 +113,7 @@ func TestShieldLimits_RemoteAlwaysGrantsShield(t *testing.T) {
 			h.loop.AwaitInflight()
 			ds := spansByName(h.sr.Ended(), SpanDecide)
 			if len(ds) != before+1 {
-				t.Fatalf("cycle %d: agent.decide spans = %d, want %d", i, len(ds), before+1)
+				t.Fatalf("cycle %d: invoke_agent spans = %d, want %d", i, len(ds), before+1)
 			}
 			last = ""
 			if v, ok := attrValue(ds[len(ds)-1], AttrDecideBlockReason); ok {

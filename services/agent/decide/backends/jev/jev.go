@@ -250,7 +250,7 @@ const AttrNativeConfidence = "jev.native_confidence"
 
 // Gate span attributes (#1281), on the stage-1 chat span of a gated round:
 // Jev's REAL answers. The ffa.intervention answer Decide returns (and the
-// agent.decide span's decide.answers) is synthesised from them (stages.go).
+// invoke_agent span's decide.answers) is synthesised from them (stages.go).
 const (
 	// AttrGatePYes is the gate noul's P(yes): "does the game need an
 	// intervention right now?".
@@ -283,6 +283,9 @@ func gateAttributes(resp decide.Response) []attribute.KeyValue {
 func (b *Backend) finish(ctx context.Context, span trace.Span, start time.Time, res *wireResult, errType string) {
 	duration := time.Since(start)
 	mc := chathttp.Call{Provider: ProviderName, RequestModel: b.cfg.Model, Host: b.host, Port: b.port}
+	// One record per HTTP call of the two-stage round, on every exit.
+	var call decide.CallUsage
+	defer func() { decide.RecordCall(ctx, call) }()
 	if res != nil {
 		mc.ResponseModel = res.Model
 		if res.Model != "" {
@@ -296,6 +299,8 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, start time.Time, 
 				semconv.GenAIUsageInputTokens(u.InputTokens),
 				semconv.GenAIUsageOutputTokens(u.OutputTokens),
 			)
+			call.InputTokens = decide.Tokens(u.InputTokens)
+			call.OutputTokens = decide.Tokens(u.OutputTokens)
 			metrics.RecordTokens(ctx, mc, u.InputTokens, u.OutputTokens)
 		}
 		if b.cfg.CaptureContent && res.Text != "" {
@@ -306,6 +311,13 @@ func (b *Backend) finish(ctx context.Context, span trace.Span, start time.Time, 
 			span.SetAttributes(llmio.OutputContentAttribute(llmio.OutputMessage(res.Text, nil, "", finish)))
 		}
 	}
+	// Jev reports no finish reason: "error" for no response or an undecodable answer.
+	reason := llmio.FinishStop
+	if res == nil || errType != "" {
+		reason = llmio.FinishError
+	}
+	span.SetAttributes(semconv.GenAIResponseFinishReasons(reason))
+	call.FinishReasons = []string{reason}
 	if errType != "" {
 		span.SetAttributes(semconv.ErrorTypeKey.String(errType))
 		span.SetStatus(codes.Error, errType)

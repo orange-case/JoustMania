@@ -14,7 +14,7 @@ import (
 )
 
 // decide_target_test.go covers #1295: decision spans name the targeted player
-// (player.serial + player.name), and the rules-path agent.decide answers describe
+// (player.serial + player.name), and the rules-path invoke_agent answers describe
 // the decision Evaluate actually emitted, with the permission verdict on
 // decide.blocked / decide.block_reason.
 
@@ -77,7 +77,7 @@ func TestRulesPath_DecideMatchesEmittedDecision(t *testing.T) {
 
 		ds := spansByName(spans, SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		as := answersOf(t, ds[0])
 		if got := as[decide.QuestionFFAIntervention].Choice; got != action {
@@ -100,7 +100,7 @@ func TestRulesPath_DecideMatchesEmittedDecision(t *testing.T) {
 		spans := runBalancedCycle(t, allInterventions(), nil)
 		ds := spansByName(spans, SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		dec := firstDecisionSpan(t, spans)
 		as := answersOf(t, ds[0])

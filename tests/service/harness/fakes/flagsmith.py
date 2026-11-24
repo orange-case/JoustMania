@@ -27,6 +27,11 @@ identities.go, document.go; the audit log is Flagsmith's, the link reads it no m
   ``PUT .../edge-identities/<uuid>/update-traits/`` (a null value deletes the trait),
   ``GET .../edge-identities/<uuid>/list-traits/`` (the controller settle, #2624),
   ``DELETE .../edge-identities/<uuid>/`` (with its overrides);
+- ``GET .../featurestates/?feature=<id>``: the feature's environment value as the v1 listing
+  shows it (one paged result, identity and feature_segment null), the reference step's re-read
+  right before each write (#2623);
+- the last value PATCHed with ``enabled: false`` per feature is the feature's reference value
+  (the baseline default, #2623); ``reset_values`` keeps it, so a restart writes no reference;
 - ``GET .../edge-identities/?q=``: a quoted ``"x"`` is an exact match, unquoted a prefix;
 - an Admin API write adds an audit row (newest first) with ``author: None`` (an API key) and
   the log text Flagsmith writes; ``person_sets`` / ``person_overrides`` change the state
@@ -89,6 +94,7 @@ _DJANGO_404 = (
 _ANY_ENV = re.compile(r"^/api/(?:v1|__future__)/environments/([^/]+)/")
 _ANY_PROJECT = re.compile(r"^/api/v1/projects/([^/]+)/")
 _FUTURE = re.compile(r"^/api/__future__/environments/([^/]+)/features/(\d+)/$")
+_FEATURE_STATES = re.compile(r"^/api/v1/environments/([^/]+)/featurestates/$")
 _PROJECT = re.compile(r"^/api/v1/projects/(\d+)/(features|tags|audit)/$")
 
 
@@ -136,6 +142,8 @@ class FakeFlagsmith:
         self.tags: list[dict] = []
         # feature id -> {"enabled": bool, "value": object}
         self._env: dict[int, dict] = {}
+        # feature id -> the last value PATCHed with enabled false (its reference value, #2623)
+        self._references: dict[int, object] = {}
         # identifier -> {"identity_uuid", "traits": {k: v}, "overrides": {feature id: {"enabled", "value"}}}
         self._identities: dict[str, dict] = {}
 
@@ -352,10 +360,12 @@ class FakeFlagsmith:
 
     def reset_values(self) -> None:
         """Back to a fresh environment: every value off, no identities, overrides, audit rows,
-        refusals, health posts or knobs; the features and tags stay."""
+        refusals, health posts or knobs; the features and tags stay, and so do the reference
+        values the link wrote (the last value PATCHed with enabled false, else none, #2623), so
+        a restart after a reset writes no reference value."""
         with self._lock:
-            for state in self._env.values():
-                state["enabled"], state["value"] = False, None
+            for fid, state in self._env.items():
+                state["enabled"], state["value"] = False, self._references.get(fid)
             self._identities.clear()
             self.audit_rows = []
             self._refusals = []
@@ -479,6 +489,8 @@ class FakeFlagsmith:
             return 404, {"detail": "Not found."}, {}
         if (m := _FUTURE.match(path)) and method == "PATCH":
             return self._patch(int(m.group(2)), body, record)
+        if _FEATURE_STATES.match(path) and method == "GET":
+            return self._feature_states(query)
         if _EDGE_FS_UPSERT.match(path):
             return 404, _DJANGO_404, {}
         if m := _EDGE_FS_LIST.match(path):
@@ -566,9 +578,36 @@ class FakeFlagsmith:
             return refused
         default = body["environment_default"]
         self._env[fid] = {"enabled": bool(default["enabled"]), "value": _typed(default["value"])}
+        if not default["enabled"]:
+            self._references[fid] = self._env[fid]["value"]
         self._audit(f"Flag state updated for feature: {feature['name']}", None)
         self._bump()
         return 200, {"feature": fid, **default}, {}
+
+    def _feature_states(self, query):
+        """GET ``.../featurestates/?feature=<id>``: the environment value of one feature, as the
+        v1 listing shows it (the reference step's re-read, #2623); the PATCH state."""
+        results = []
+        fid = None
+        raw = query.get("feature", [""])[0]
+        if raw.isdigit() and any(f["id"] == int(raw) for f in self.features):
+            fid = int(raw)
+        if fid is not None:
+            state = self._env[fid]
+            results.append(
+                {
+                    "id": 100000 + fid,
+                    "feature": fid,
+                    "environment": ENVIRONMENT_ID,
+                    "enabled": state["enabled"],
+                    "feature_state_value": state["value"],
+                    "identity": None,
+                    "feature_segment": None,
+                    "live_from": _iso(self._updated),
+                    "multivariate_feature_state_values": [],
+                }
+            )
+        return 200, {"count": len(results), "next": None, "previous": None, "results": results}, {}
 
     def _by_uuid(self, identity_uuid: str) -> tuple[str, dict | None]:
         for identifier, identity in self._identities.items():

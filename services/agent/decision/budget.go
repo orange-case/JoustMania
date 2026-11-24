@@ -107,7 +107,7 @@ func (l *Loop) repeatRefusal(d Decision, now time.Time) bool {
 
 // recordRepeatRefusal records a repeated rate_limit (A21) or already_charged (A31)
 // refusal without spans, warning or timeline entry: the outcome stays in the cycle's
-// LayerState (so agent.decide still reports decide.blocked) and in
+// LayerState (so invoke_agent still reports decide.blocked) and in
 // agent_decisions_total, and a debug line names the repeat.
 func (l *Loop) recordRepeatRefusal(ctx context.Context, gameKind string, d Decision, cost float64, state *LayerState, reason BlockReason) {
 	state.recordBlocked(d, reason, cost)

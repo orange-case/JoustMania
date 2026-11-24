@@ -167,7 +167,7 @@ labels (`services/agent/decide/backends/jev/criteria.go`, §3.2) and its two-way
 The `rules` backend answers `ffa.magnitude` from its first decision's value, else from the Default above. A
 `grant_shield` from the rules carries no value when ranked; the loop stamps it with the `shield_seconds` `default`
 variant before the permission chain (UC-040 BR-029) and sets the record's `ffa.magnitude` answer to that stamped
-length, so `decide.answers` on the `agent.decide` span reports the seconds that are written, not 5 (#2395;
+length, so `decide.answers` on the `invoke_agent joustmania-agent` span reports the seconds that are written, not 5 (#2395;
 `services/agent/decision/chargeledger.go:stampShieldSeconds`). The in-process `RulesBackend.Decide` (tests and
 tooling only) still answers the Default.
 
@@ -212,7 +212,7 @@ tooling only) still answers the Default.
     gains `state.goal` and the goal sentence in both gate criteria (§14.4, #2498).
   - The system prompt's fingerprint (`llm.prompt.system_sha256` on claude's chat span) is therefore one value for v1 (with or
     without `decision.goal_in_prompt`: the goal lines never change the v1 system prompt) and two for neutral (without and with
-    goal lines). `agent.decide` carries `decide.prompt_profile` on the remote path (§12).
+    goal lines). `invoke_agent joustmania-agent` carries `decide.prompt_profile` on the remote path (§12).
 - **Operator brief (#2687, `decision.operator_brief`, default empty; UC-040 BR-044, FR-096).** The agent reads the flag per
   remote request (`services/agent/flags/game.go:OperatorBrief`), cleans it (`services/agent/decide/brief.go:NormalizeOperatorBrief`:
   trimmed, at most 512 characters, control characters other than a line break, format and line/paragraph separator characters become spaces, `<` `>` and their full-width forms `＜` `＞` become `‹` and `›`) and
@@ -229,7 +229,7 @@ tooling only) still answers the Default.
     `adjust_player_sensitivity` and the shield caps).
   - **jev ignores it.** jev's request is a typed set of questions whose gate criteria are fixed and calibrated (§3, jev); a free
     text in them would move the gate uncalibrated, so the agent never sets the field for jev and jev's wire is unchanged.
-  - `agent.decide` carries `decide.operator_brief.present` and `decide.operator_brief.length` when a brief was sent (§12).
+  - `invoke_agent joustmania-agent` carries `decide.operator_brief.present` and `decide.operator_brief.length` when a brief was sent (§12).
   - **The post-game retro sees it too (#2695, UC-042 A13, BR-010, FR-097).** At game end the retro reads the same flag for the
     game that ended (`services/agent/decision/retro_capture.go`, wired to the same `flags.Flags.OperatorBrief`), whatever the
     decide backend, and `services/agent/llm/retro.go` renders the same `<operator_brief>` block at the start of its user message
@@ -311,7 +311,7 @@ Consequences:
   details call.
 - **Full option coverage**: every option of the caller's question is in the distribution.
 - Deliberately **not** the factorised `p_yes × q_i`, which would split the acting mass again.
-- `decide.answers` on `agent.decide` shows the synthesised distribution; Jev's **real** answers are on the
+- `decide.answers` on `invoke_agent joustmania-agent` shows the synthesised distribution; Jev's **real** answers are on the
   stage-1 chat span: `jev.gate.p_yes`, `jev.stage1.choice`, `jev.stage1.distribution` (JSON over the
   interventions, no noop).
 - The gate applies when `ffa.intervention` offers `noop` and at least one intervention; otherwise stage 1 asks
@@ -417,7 +417,7 @@ Order on landing (`services/agent/decision/decide_hook.go:Loop.runDecideRemote`,
    unset `UpdatedAt` never discards). A low-confidence answer after the game ended is therefore `held`, not
    `discarded`.
 
-Every remote `agent.decide` span that carries a `decide.discarded_reason` (steps 1 to 3, and the shutdown discard
+Every remote `invoke_agent joustmania-agent` span that carries a `decide.discarded_reason` (steps 1 to 3, and the shutdown discard
 of §9) is also counted in `agent_decide_discarded_total{reason}` (#2123).
 
 ### 4.5 Permission chain (both paths)
@@ -432,7 +432,7 @@ of §9) is also counted in `agent_decide_discarded_total{reason}` (#2123).
 
 3. Already applied (#2046; UC-040 A35, BR-023; `decision/appliedledger.go`), check-only: it reserves nothing, so its refusal cannot leak a reservation of a later step. Only when the loop's suppression is on (`Loop.SetSuppressReapplied(true)`, wired in `main.go`; off in a hand-built loop such as the rules golden) and only for a state or level intervention (the `state` and `level` kinds of flags.md §13.1, the static set `decision.IdempotentInterventions`, pinned against `registry.yaml` by `actions/idempotent_uc040_test.go`). A grant or an event is never suppressed. The per-game applied-value ledger is keyed `intervention|target serial` and holds the normalised value of the last write the agent made (`applied=true`): the decision's `Value` parsed as a float when it parses as a finite number, else the trimmed string (so `"0.8"` and `"0.80"` match; an empty value matches only an empty value, since the writer's default is a constant). The decision is blocked `already_applied` when the entry matches and is younger than 30 s (a constant, C-035), and its target is still in the game context's players (an entry for an absent serial is dropped). While a write to the key is in flight the entry never matches and is left out of the rules snapshot (a different value may land last); a failed write deletes the entry, as do two writes to one key in flight at once (they may finish in either order); a gated write (A11) leaves it unchanged; an expired entry is written again, which re-asserts a value the flag service lost (a restart, UC-053 A9 / A13). A new flag-service boot epoch does not clear the ledger: the writer drops the write result, so the 30 s TTL is the bound. The block charges no budget and does not end rank-order admission. The first suppression per recorded value emits the spans, an info log `agent.decision_already_applied` (not the `agent.decision_blocked` warning) and a timeline entry "already in place"; repeats only count in `agent_decisions_total` and log `agent.decision_already_applied_repeat` at debug level. The rules engine drops an already-applied candidate after ranking (`applyAppliedPolicy` on the ranked list, one ledger snapshot per ranking), so the rules may rank an intervention on another key instead, possibly a stronger one (a `grant_shield` for the same player, which step 4 and BR-022 still bound). In rank order it keeps at most one candidate per state or level key: an already-applied candidate, though not emitted, and a kept one both claim their key, so a lower-ranked candidate with another value for that key is dropped (UC-040 BR-042, #2487; R1 1.3 and R5 1.0 on the tempo no longer alternate every cycle). The decide state carries the applied per-player factors (`sensitivity_factor`, `handicap_factor`, §1.2; #2066).
 4. The shield ledger (`decision/chargeledger.go` `reserveShield`; targeted `grant_shield` only). One per-game ledger by serial holds the trigger-mode charge (A31), the shield count and the end of the last shield (A33). One check returns exactly one of `already_charged`, `shield_cap_reached`, `shield_cooldown` or a reservation, in that order, so a refusal never leaves a reservation behind; the one reservation is kept only when the write is applied and is released by the caller's deferred finish on every other path (a rate-limit block, a gated write, a failed write). The check-only already-applied step (3) goes ahead of this step, so it cannot leak a reservation either.
-   - `already_charged` (#1837 PR-4a; UC-040 A31 step 1): at most one agent charge per player per window, in trigger mode only. Trigger mode means `game.mode` is `FFA`, the game is real and `shield.activation` resolves to `trigger`, read per targeted `grant_shield` from the `game` set (`services/agent/flags/game.go:ShieldCharge`) with `gameId` and `game_kind=real`, no `targetingKey` and no `game_mode`. The coordinator's grant read carries the game's transaction context as well (UC-040 BR-018, #1970), but targeting on these flags may reference only `gameId` and `game_kind` (flags.md §4) and the agent reads them only for a real game, so both resolve the same value. A `grant_shield` whose target holds an entry in the loop's charge ledger is blocked before the rate limit: it charges no budget, writes nothing and measures no effect. The window is `min(shield.charge_expiry_seconds, 20 s)` (20 s when the expiry is 0) plus 2 s for the write to reach the coordinator, so at most 22 s. The check reserves the entry; it is kept only when the write is applied (`applied=true`) and released by a rate-limit block, a gated write (UC-040 A11) or a failed write (A27). Every entry, a reserved one too, ends with its window, so a lost release blocks at most 22 s. The first refusal per entry gets the full spans, the `agent.decision_blocked` warning and a timeline entry; repeats only count in `agent_decisions_total` and log `agent.decision_already_charged_repeat` at debug level (as the `rate_limit` repeats below). On the remote path an answer that lands for such a target is blocked the same way and `agent.decide` carries `decide.blocked` / `decide.block_reason=already_charged`. Fail open: any other mode, a shadow game, an unknown mode or an unreadable `game` set (not READY) means no block; an unreadable set logs `agent.shield_charge_mode_unreadable` at most once per 30 s. The ledger is the agent's own record (no shield-state gauge, in memory only, lost on an agent restart), so it also refuses a grant after the player activated, which the coordinator would accept (UC-040 A31, BR-020), by design. The coordinator stays authoritative. The ledger also feeds the decide state (`shield_charged`, §1.2) and the rules engine, which drops a `grant_shield` candidate to a `shield_charged` target before ranking (`applyChargePolicy`, like the battery policy; the rules path takes one ledger snapshot per ranking and hands the same snapshot to the state it builds). An activation, an expiry or a death does not shorten the window: it is a pacing rule (#1870).
+   - `already_charged` (#1837 PR-4a; UC-040 A31 step 1): at most one agent charge per player per window, in trigger mode only. Trigger mode means `game.mode` is `FFA`, the game is real and `shield.activation` resolves to `trigger`, read per targeted `grant_shield` from the `game` set (`services/agent/flags/game.go:ShieldCharge`) with `gameId` and `game_kind=real`, no `targetingKey` and no `game_mode`. The coordinator's grant read carries the game's transaction context as well (UC-040 BR-018, #1970), but targeting on these flags may reference only `gameId` and `game_kind` (flags.md §4) and the agent reads them only for a real game, so both resolve the same value. A `grant_shield` whose target holds an entry in the loop's charge ledger is blocked before the rate limit: it charges no budget, writes nothing and measures no effect. The window is `min(shield.charge_expiry_seconds, 20 s)` (20 s when the expiry is 0) plus 2 s for the write to reach the coordinator, so at most 22 s. The check reserves the entry; it is kept only when the write is applied (`applied=true`) and released by a rate-limit block, a gated write (UC-040 A11) or a failed write (A27). Every entry, a reserved one too, ends with its window, so a lost release blocks at most 22 s. The first refusal per entry gets the full spans, the `agent.decision_blocked` warning and a timeline entry; repeats only count in `agent_decisions_total` and log `agent.decision_already_charged_repeat` at debug level (as the `rate_limit` repeats below). On the remote path an answer that lands for such a target is blocked the same way and `invoke_agent joustmania-agent` carries `decide.blocked` / `decide.block_reason=already_charged`. Fail open: any other mode, a shadow game, an unknown mode or an unreadable `game` set (not READY) means no block; an unreadable set logs `agent.shield_charge_mode_unreadable` at most once per 30 s. The ledger is the agent's own record (no shield-state gauge, in memory only, lost on an agent restart), so it also refuses a grant after the player activated, which the coordinator would accept (UC-040 A31, BR-020), by design. The coordinator stays authoritative. The ledger also feeds the decide state (`shield_charged`, §1.2) and the rules engine, which drops a `grant_shield` candidate to a `shield_charged` target before ranking (`applyChargePolicy`, like the battery policy; the rules path takes one ledger snapshot per ranking and hands the same snapshot to the state it builds). An activation, an expiry or a death does not shorten the window: it is a pacing rule (#1870).
    - `shield_cap_reached` and `shield_cooldown` (#2044; UC-040 A33, BR-022), in every mode and game kind, from the live `policy.max_shields_per_player_per_game` (default 3, 0 = unlimited) and `policy.shield_cooldown_seconds` (default 15, 0 = off) of the cycle's snapshot (a read error or a negative value gives the default; flags.md §3). The cap counts the player's written `grant_shield`s in this game plus the ones in flight, so concurrent cycles cannot both take the last slot. The cooldown refuses while now is before the last shield's end plus the cooldown; the end is write time + granted seconds (the decision's value; a grant without one is stamped before this step with the `shield_seconds` `default` variant, 5 when unreadable, UC-040 BR-029, #2395) + the same 2 s margin, in trigger mode too (the cooldown runs from the grant, BR-022). While a cooldown is set, a grant still in flight for the player also refuses `shield_cooldown`: it has no end yet. The count is an upper bound of the coordinator's (BR-022): it also counts a write the coordinator refused or kept. 0/0 refuses nothing (the zero `Policy` of a hand-built snapshot, so the rules golden is unchanged). Repeats are quiet as for `already_charged`: the first refusal per reason since the last reservation or write is emitted in full, later ones only count in `agent_decisions_total` and log `agent.decision_shield_cap_reached_repeat` / `agent.decision_shield_cooldown_repeat` at debug level. The rules engine's no-shield filter (`applyChargePolicy`) is fed with the charged players plus the capped and cooling-down ones (`Loop.ShieldSerials`, one snapshot per ranking), so R4 does not propose a refused shield. R4's target is the weakest of the alive players with the fewest agent shields in this game (`Loop.ShieldGrants`: written plus in flight, the same per-game ledger; catch-up, UC-040 A41, BR-030, #2395), so the rules path's `ffa.target` answer and its decisions shield every alive player once before any twice; the decide state marks the charged ones `shield_charged` and the capped and cooling-down ones `shield_limited` (§1.2; #2066).
    - Hold games (#2096; UC-040 A37 step 1), in a game whose `game_shield_activation_mode` gauge says `hold` only, after the allow-list and battery and before the cap and cooldown: `already_charged` does not apply and `shield.activation` is not read from flagd (a hold game is latched, so a mid-game flip to `trigger` gives no charge window); `shield_budget_exhausted` when the player's budget remaining is below the minimum burst, then `shield_pool_full` when energy plus the seconds of this player's grants in flight is at least the full level `min(cap, budget remaining)` minus 0.5 s (a constant, C-035). The full level is the coordinator's (A37), but the margin is deliberately stricter than the coordinator's refusal, which needs less than 0.05 s of room: the agent also refuses a grant that could add 0.05 to 0.5 s, which the coordinator would accept (the safe direction: fewer shields, never a grant the coordinator refuses for a stale view). For a player whose shield is active only the pool check is skipped (the energy gauge over-reads a draining pool); the budget check stays (a draining budget only falls, so refusing early is safe). Both fail open when the gauges are missing (an agent restart, a collector outage): the coordinator stays authoritative and refunds its own refusal. In a game that is not latched to hold the trigger/instant read stays per grant from flagd, as the coordinator's. Like `already_charged`, the first refusal per entry gets the full spans, the warning and a timeline entry, repeats log `agent.decision_shield_pool_full_repeat` / `agent.decision_shield_budget_exhausted_repeat` at debug. `Loop.ShieldSerials(c)` adds such players to `noShield`, so `applyChargePolicy` drops their R4 candidates (`decision/chargeledger.go` `holdPoolOf`, `decide.HoldShieldRefusal`; tests `decision/chargeledger_hold_uc040_test.go`).
    - Group shields (#2467 PR 4; UC-040 A47, A48; `services/agent/decision/group.go:reserveGroup`): one lock checks the game's group count (written plus in flight; `group_cap_reached` at `max_per_game`), then every target with the single grant's checks in the same order (hold pool and budget, trigger-mode charge with the game's window, cap, cooldown), and reserves every target plus one group slot under one generation, or nothing; a refusal names the first refused target (`decision.group.refused_serial`). The length is stamped like a single grant's (BR-029). Written, each target counts as one shield (cap, cooldown, catch-up, `shield_limited`); not written, everything is released. The count is in memory per game; the coordinator's per-game backstop stays authoritative.
@@ -451,11 +451,11 @@ Budget-aware admission (#1326, UC-040 A20/A21, BR-014/BR-015; `decision/budget.g
 - A `rate_limit` refusal is emitted in full (`agent.decision` + `agent.action`, warning, timeline) once per
   budget state per (intervention, target); the state changes when an intervention is admitted or one leaves
   the 60 s window. Repeats in between only count in `agent_decisions_total` and log
-  `agent.decision_rate_limit_repeat` at debug level. `agent.decide` still reports `decide.blocked`. The
+  `agent.decision_rate_limit_repeat` at debug level. `invoke_agent joustmania-agent` still reports `decide.blocked`. The
   dashboard's blocked tallies read `agent_decisions_total` for that reason (`services/dashboard/src/agentOverlay.ts`).
 
 Blocked decisions are recorded on the `agent.decision` span
-(`decision.blocked=true`, `decision.block_reason`) and never applied. The `agent.decide` span of the same
+(`decision.blocked=true`, `decision.block_reason`) and never applied. The `invoke_agent joustmania-agent` span of the same
 decision repeats the verdict as `decide.blocked` / `decide.block_reason` (§6, #1295).
 
 ## 5. Confidence and routing
@@ -496,13 +496,13 @@ decision repeats the verdict as `decide.blocked` / `decide.block_reason` (§6, #
 
 ## 6. Outcomes
 
-`decide.outcome` on the `agent.decide` span (`services/agent/decision/decide_hook.go:AttrDecideOutcome`):
+`decide.outcome` on the `invoke_agent joustmania-agent` span (`services/agent/decision/decide_hook.go:AttrDecideOutcome`):
 
 | Outcome | Meaning |
 |---|---|
 | `act` | Routed to the permission chain (which may still block: `decide.blocked`, and the `agent.decision` span). Also the rules-path outcome when the rules emitted a decision. |
 | `held` | Valid intervention answer below the threshold. No action. |
-| `noop` | Backend chose `noop`. No action. Not seen on the rules path: a rules cycle whose ranking emitted no decision records no `agent.decide` span at all (`OnEvaluate` returns before any span); the rules record still sets `noop` for that case defensively, so a `noop` choice never reads `act` (#1295). |
+| `noop` | Backend chose `noop`. No action. Not seen on the rules path: a rules cycle whose ranking emitted no decision records no `invoke_agent joustmania-agent` span at all (`OnEvaluate` returns before any span); the rules record still sets `noop` for that case defensively, so a `noop` choice never reads `act` (#1295). |
 | `invalid` | Cross-question inconsistency (4.3). No action, no fallback. |
 | `fallback` | The requested backend could not decide; rules did. |
 | `discarded` | A valid answer was dropped when it landed; see `decide.discarded_reason`. |
@@ -519,7 +519,7 @@ So a rules decision blocked by the allow-list reads `outcome=act`, `decide.block
 `services/agent/decision/decide_hook.go:DecideDiscardBackendChanged`).
 
 Outcomes are recorded **only as span attributes** (the dashboard Agent tab reads them from Jaeger,
-`services/dashboard/src/agentDecide.ts:parseDecideTraces`). One exception: since #2123 every remote `agent.decide` record that carries
+`services/dashboard/src/agentDecide.ts:parseDecideTraces`). One exception: since #2123 every remote `invoke_agent joustmania-agent` record that carries
 a `decide.discarded_reason` is counted in `agent_decide_discarded_total{reason}`
 (`services/agent/decision/metrics.go:newDecideDiscardedCounter`), so dropped answers show without Jaeger.
 
@@ -529,7 +529,7 @@ A decision record that is not a `noop` and carries a prediction registers it wit
 record, the rules fallback record (outcome `fallback`), and every remote record whose outcome is `act` (including a decision blocked by the permission chain, A10, or dropped by the actuation gate, A11) or `held` (A5, which ends at step 9) after `mapAnswers`, or `discarded` only for `target_gone`, `target_stale` and `state_too_old` (A7, step 10; a `stale_context`, `game_ended`, `backend_changed`, `kill_switch` or `shutdown` discard registers nothing, and neither does a game that ended or a stale context). Noops carry no prediction in
 v1 (maintainer decision 2026-10-31; no restraint calibration). The prediction is stamped `acted` = the permission chain passed
 and the intervention was applied; a held, blocked or discarded one is kept as a counterfactual (`acted=false`) and reported
-apart. An identical (backend, source, rule or lever, template, target, `acted`) prediction that is still pending is counted `merged` (`decide.prediction.merged=true` on `agent.decide`, `agent_prediction_merged_total`) and not
+apart. An identical (backend, source, rule or lever, template, target, `acted`) prediction that is still pending is counted `merged` (`decide.prediction.merged=true` on `invoke_agent joustmania-agent`, `agent_prediction_merged_total`) and not
 registered again. A remote record's prediction is the backend's own when it stated one (a model prediction, §4.1, overrides
 the lever default of §14.2); when the ask was sent and the model answered `none` or its prediction was dropped there is none
 (UC-040 A45: no lever default is substituted); otherwise it is the lever default of the mapped decision
@@ -554,13 +554,13 @@ allow-list, the budgets or the writer (UC-040 BR-034). Details: §14.3.
 There is no separate `rate_limited` reason: HTTP 429 is `error`, with
 `error.type="429"` on the `chat {model}` span.
 
-The reason is recorded as `decide.fallback_reason` with `decide.outcome=fallback` on the `agent.decide`
+The reason is recorded as `decide.fallback_reason` with `decide.outcome=fallback` on the `invoke_agent joustmania-agent`
 span. Every same-cycle fallback is counted in `agent_llm_gated_total{reason}` on every cycle, decided or
 not (`unknown_backend`, `backend_unavailable` and `async_not_wired` since #1377). When the rules emit no decision
 in that cycle (#1350, `services/agent/decision/decision.go:OnEvaluate`, `services/agent/decision/decide_hook.go:emitQuietFallback`):
 
 - the three **configuration** fallbacks (`unknown_backend`, `backend_unavailable`, `async_not_wired`;
-  `services/agent/decision/decide_hook.go:isConfigFallback`) still emit an `agent.decide` span (`decide.outcome=fallback`,
+  `services/agent/decision/decide_hook.go:isConfigFallback`) still emit an `invoke_agent joustmania-agent` span (`decide.outcome=fallback`,
   `decide.fallback_reason`, `decide.backend=rules`) under its own `agent.signal_received` root (without game ids; in a game directly under `game_cycle`, #2648), throttled per
   reason to one per `decision.throttle_seconds` window;
 - `llm_not_eligible` and `llm_budget_exhausted` stay counter-only, so quiet shadow games do not flood Jaeger;
@@ -568,7 +568,7 @@ in that cycle (#1350, `services/agent/decision/decision.go:OnEvaluate`, `service
   `reason`) when a game enters a configuration fallback or its reason changes, INFO (`state=cleared`,
   `previous_reason`) when it clears.
 
-A decided cycle gets its `agent.decide` span every time, unthrottled.
+A decided cycle gets its `invoke_agent joustmania-agent` span every time, unthrottled.
 
 **Not fallbacks** (rules stay quiet that cycle, no decision): the per-game cadence
 gate (`decision.min_interval_ms` from the previous call's start and `decision.min_gap_after_answer_ms` from its end,
@@ -597,7 +597,7 @@ empty ids and `noop` dropped), so the `none` variant (`""`) and the `probe` vari
 | Gap `decision.min_gap_after_answer_ms` | not started (`lastDecideEnded` is set only when a call ends) |
 | Global budget `llm.max_requests_per_minute` | not charged |
 | Rules engine | not run: nothing it emits could pass the allow-list; not a fallback |
-| `agent.decide` span | none (the cycle runs at 10 to 60 Hz; a span per cycle would be noise) |
+| `invoke_agent joustmania-agent` span | none (the cycle runs at 10 to 60 Hz; a span per cycle would be noise) |
 | Metric | `agent_llm_gated_total{reason=no_interventions_allowed}` per gated cycle |
 | Log | debug `agent.decide.no_interventions_allowed` only when the game enters (`skipping=true`) or leaves (`skipping=false`) the state, with `experiment_filtered=true` when the allow-list offered an intervention and only the experiment-flag filter (UC-040 A40 step 5) emptied it (#2251); a cycle on the rules backend counts as leaving |
 
@@ -664,7 +664,7 @@ always-true `remoteDecideAdmitted` seam that stood in for the length gate was re
 
 The first two rows predate PR #1257 and exceeded the then-default 2500 ms timeout. Since PR #1257 the Claude
 default is 5000 ms, which warm calls fit (resolved discrepancy D-K6); cold calls can still exceed it.
-No p50 / p95 from production `agent.decide` spans has been published yet (#1231).
+No p50 / p95 from production `invoke_agent joustmania-agent` spans has been published yet (#1231).
 
 ## 9. Kill switch, gates and live changes mid-flight
 
@@ -746,7 +746,7 @@ decisions fall back to rules (§7). Keep keys out of the tracked `.env`: export 
   allow them; both also let shadow games use remote decide calls and retros.
 - On models that accept it (Opus 5.5, Opus 5, Sonnet 5.5, Fable 5.1) the client sends `fallbacks: "default"`
   (beta `server-side-fallback-2026-07-01`), so a policy refusal is re-run on a fallback model inside the same call.
-- Telemetry: every model call is one GenAI-semconv `chat {model}` CLIENT span (§12), nested under `agent.decide`
+- Telemetry: every model call is one GenAI-semconv `chat {model}` CLIENT span (§12), nested under `invoke_agent joustmania-agent`
   or `agent.llm.retro`, with W3C `traceparent` injected. Failures record only a low-cardinality `error.type`;
   vendor error text never reaches a span (#1242).
 
@@ -861,38 +861,38 @@ not know (UC-040 BR-007, #1301).
 
 Full names in [telemetry.md](telemetry.md#4-agent). Summary:
 
-- `agent.decide` (INTERNAL). Rules path: sibling of `agent.decision` under
+- `invoke_agent joustmania-agent` (INTERNAL; the GenAI *Invoke agent internal span*, semantic-conventions-genai v0.1.0, with its deviations in [telemetry.md §4.2](telemetry.md#42-genai-semantic-conventions); `agent.decide` before #2584). Rules path: sibling of `agent.decision` under
   the cycle's parent (`game_cycle` in a game, else `agent.signal_received`; #2648), only when the cycle produced decisions; ended after the cycle's decisions ran
   (backdated to the ranking) so it can carry their permission verdict. Remote path: async
   root parented on the game's `game_cycle` span (fallback `gameplay_phase`, then the game root; UC-040 BR-013), linked to the fire-cycle
   `agent.signal_received` (`link.kind=fire_cycle`) only without game ids (in a game the trigger is the `agent.signal_received` event on the span, #2648); parent of the backend's
   `chat {model}` CLIENT span and of the resulting `agent.decision`.
-  Always: `gen_ai.agent.name=joustmania-agent`, `gen_ai.conversation.id=<game id>`,
+  Always: `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name=joustmania-agent` (both from span start), `gen_ai.conversation.id=<game id>`,
   `game.id`, `session.id`, `game.kind`, `decide.backend`, `decide.backend.requested`,
   `decide.fallback_reason`, `decide.state.digest`, `decide.questions_sha` (short hash of the questions JSON, #2648), `decide.latency_ms`, `decide.outcome`. Conditional: `decide.act_confidence_threshold` (the EFFECTIVE
   threshold, §5) and `decide.act_confidence_threshold.source` (`jev` = `decision.jev.act_confidence_threshold`,
   `global` = `decision.act_confidence_threshold`; #1287), both only when routed,
-  `gen_ai.request.model`, `decide.answers`, `decide.confidence`, `decide.confidence.min`,
+  `gen_ai.request.model`, `gen_ai.output.type=json`, `gen_ai.request.max_tokens` and `gen_ai.request.temperature` (claude and openai only; jev sets neither) and, at span end, the summed `gen_ai.usage.*` tokens and `gen_ai.response.finish_reasons` of the invocation's model calls (remote path; [telemetry.md §4.2](telemetry.md#42-genai-semantic-conventions), #2584), `decide.answers`, `decide.confidence`, `decide.confidence.min`,
   `decide.rationale`, `decide.invalid_reason`, `decide.discarded_reason`, `error.type`, `decide.blocked` and
-  `decide.block_reason` (§6; #1295). `decide.questions` (the same JSON on every decide) rides only the first `agent.decide` of a game with a given `decide.questions_sha` (#2648). A group decision's `agent.decision` carries `decision.group.size`, `decision.group.alive` (#2467 PR 6),
+  `decide.block_reason` (§6; #1295). `decide.questions` (the same JSON on every decide) rides only the first `invoke_agent joustmania-agent` of a game with a given `decide.questions_sha` (#2648). A group decision's `agent.decision` carries `decision.group.size`, `decision.group.alive` (#2467 PR 6),
   `decision.group.targets` and, on a ledger refusal, `decision.group.refused_serial` (#2467 PR 4; telemetry.md §4).
   Event `gen_ai.evaluation.result` (`gen_ai.evaluation.name=act_confidence_threshold`,
   score value, label `pass`/`fail`, explanation `confidence 0.720 >= threshold 0.600
   (decision.jev.act_confidence_threshold)` naming the flag the threshold came from) when routed
   (`services/agent/decision/decide_hook.go:emitDecideSpan`, `setDecideAttributes`).
-- **`decide.prompt_profile`** (#2467 PR 5): on a remote-path `agent.decide` span, the normalized profile the request was
+- **`decide.prompt_profile`** (#2467 PR 5): on a remote-path `invoke_agent joustmania-agent` span, the normalized profile the request was
   rendered with (`v1` or `neutral`, §3); absent on the rules path.
-- **`decide.operator_brief.present`** / **`decide.operator_brief.length`** (#2687): on a claude or openai `agent.decide` span
+- **`decide.operator_brief.present`** / **`decide.operator_brief.length`** (#2687): on a claude or openai `invoke_agent joustmania-agent` span
   whose request carried an operator brief, `true` and the brief's length in characters after the clean-up (§3); absent without a
   brief, on jev and on the rules path. The text is never a `decide.*` attribute: it is part of the rendered user message, so it is
   recorded only by the GenAI content capture (`gen_ai.input.messages`), under `decision.capture_content=on`.
-- **`decide.magnitude_bounds.source`** (#2696, UC-040 BR-045): on every `agent.decide` (rules and remote path), `flag` when the request's
+- **`decide.magnitude_bounds.source`** (#2696, UC-040 BR-045): on every `invoke_agent joustmania-agent` (rules and remote path), `flag` when the request's
   magnitude ranges differ from the code default table (§2.1), else `default`; **`decide.magnitude_bounds.invalid`**: the interventions
   whose `decision.magnitude_bounds` entry fell back to the code default, sorted and comma-separated, only when one did. On the remote
-  path the flag is read in the `agent.decide` span's context, so the OpenFeature traces hook's `feature_flag.evaluation` event for
+  path the flag is read in the `invoke_agent joustmania-agent` span's context, so the OpenFeature traces hook's `feature_flag.evaluation` event for
   `decision.magnitude_bounds` is on that span; on the rules path the flag is read before the backdated span exists, so the event is
   on the cycle's span.
-- **Prediction attributes (#2479).** On `agent.decide`, when the record carries a prediction:
+- **Prediction attributes (#2479).** On `invoke_agent joustmania-agent`, when the record carries a prediction:
   `decide.prediction.id` (uuid), `decide.prediction.template`, `decide.prediction.characteristic`,
   `decide.prediction.scope`, `decide.prediction.horizon_s`, `decide.prediction.p`, `decide.prediction.source`
   (`rules`, `lever_default`, `model`) and `decide.prediction.rule` (rules `R1`..`R9`, `R4d`, or the lever name);

@@ -349,7 +349,7 @@ func TestChargeLedger_DecideSpanReportsAlreadyCharged(t *testing.T) {
 		h.loop.AwaitInflight()
 		ds := spansByName(h.sr.Ended(), SpanDecide)
 		if len(ds) != 1 {
-			t.Fatalf("agent.decide spans = %d, want 1", len(ds))
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		if v, ok := attrValue(ds[0], AttrDecideBlocked); !ok || !v.AsBool() {
 			t.Fatal("decide.blocked must be true")

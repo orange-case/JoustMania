@@ -154,7 +154,7 @@
         "traceId": "6941c034ab0b93c2af2e439d02580244",
         "spanId": "c66f7c2a844e006d",
         "parentSpanId": "13ece9df0f50770b",
-        "name": "agent.decide",
+        "name": "invoke_agent joustmania-agent",
         "kind": 1,
         "startTimeUnixNano": "1793139266961628980",
         "endTimeUnixNano": "1793139266961834721",

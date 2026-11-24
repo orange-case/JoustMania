@@ -121,6 +121,9 @@ type harnessOpts struct {
 	// realStart keeps the link's real start sequence and out side (restart
 	// rule journeys); otherwise UseInSideOnly replaces them.
 	realStart bool
+	// persisted writes admin settings into the state file before the flag
+	// service starts (an earlier process's), so they load at boot.
+	persisted func(*state.State)
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -136,7 +139,17 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	st, _, err := state.New(base, reg, state.Options{Epoch: "e1", Served: base.Order, StateFile: filepath.Join(t.TempDir(), "state.json"), Logger: logger})
+	stateFile := filepath.Join(t.TempDir(), "state.json")
+	if o.persisted != nil {
+		earlier, _, err := state.New(base, reg, state.Options{Epoch: "e0", Served: base.Order, StateFile: stateFile, Logger: logger})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sub, _ := earlier.Subscribe("") // an open sync stream, so the writes are accepted
+		o.persisted(earlier)
+		sub.Close()
+	}
+	st, _, err := state.New(base, reg, state.Options{Epoch: "e1", Served: base.Order, StateFile: stateFile, Logger: logger})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,13 +288,24 @@ func (h *harness) ended(name string) []sdktrace.ReadOnlySpan {
 
 func (h *harness) pulls() int { return len(h.ended(flagsmith.SpanPull)) }
 
-// round advances the clock 2 s (past a first deferral) and runs one pull.
+// round advances the clock 2 s (past a first deferral) and runs one pull. It
+// waits for a pull that started after the advance and the wake, so it saw both
+// and every local write before them. Counting ended pulls is not enough: a
+// pull the link woke itself for (a refused stack push asks for one, push.go)
+// may still run and end after the count and before the woken pull (#2686).
 func (h *harness) round() {
 	h.t.Helper()
-	n := h.pulls()
 	h.clock.Advance(2 * time.Second)
-	h.link.Wake()
-	h.waitFor("a pull round", func() bool { return h.pulls() > n })
+	since := time.Now()
+	h.link.Wake() // a wake already queued starts a pull after since too
+	h.waitFor("a pull round", func() bool {
+		for _, s := range h.ended(flagsmith.SpanPull) {
+			if !s.StartTime().Before(since) {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // setDoc sets the document, updated one minute before now.

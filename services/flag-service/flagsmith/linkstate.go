@@ -52,6 +52,18 @@ type entry struct {
 	// pushRefused, still shown after a local refusal replaced refused (#2639).
 	pushRefusedReason string
 	pushRefusedStatus int
+	// revertedLocal is the local value after an Offer or Reoffer equal to the
+	// remote value dropped a pending entry whose different value Next had
+	// handed out (hasReverted): that push may still be in flight, and its
+	// confirm must not mark the key in sync (revertedLocalLocked, #2611). A
+	// new pending entry keeps the mark (the push may still be in flight), and
+	// a later revert adds to it. While set it equals the remote value: a
+	// different remote value (a pull applying Flagsmith's value, or its undo)
+	// moves it along, since the push is still in flight. A confirm or remote
+	// refusal (the answer to the push in flight), a forgotten remote value or
+	// an undo to "never seen" clears it.
+	revertedLocal Value
+	hasReverted   bool
 	// gen counts changes of the remote value (SetRemote, ConfirmPushed,
 	// ForgetRemote, RestoreRemote): a pull skips a key whose gen moved while
 	// the document was in flight (a stale document vs a confirmed push).
@@ -59,6 +71,16 @@ type entry struct {
 	confirmedAt time.Time
 	// outSince: when the key last went out of sync (GET /state keys, #2639).
 	outSince time.Time
+	// offered is the snapshot version of the latest local change (OfferFrom).
+	// A pull round reads the local state before its fetch, so a write can land
+	// before it acts: what it does on a local value read before offered is
+	// stale (ReofferRead, ClearRefusalRead, SetInSyncRead).
+	offered uint64
+	// reverting: a pull round's revert of the refused value is being written
+	// (BeginRevert); revertEcho is the version of the latest local save of the
+	// remote value meanwhile.
+	reverting  bool
+	revertEcho uint64
 	// refusedAt and refusedStatus: when the last refusal was recorded and the
 	// HTTP status Flagsmith answered it with (0: refused without a request).
 	refusedAt     time.Time
@@ -144,14 +166,33 @@ func (s *LinkState) DropOffline(k Key, version uint64) {
 	}
 }
 
-// HoldRefused keeps v as k's refused local value (UC-055 A4) after a pull
-// round reverted it to Flagsmith's value: a re-save of v is not sent again.
-func (s *LinkState) HoldRefused(k Key, v Value) {
+// BeginRevert marks a pull round's write that reverts k's refused value to
+// Flagsmith's (UC-055 A4) until EndRevert: the write's own local value, equal
+// to the remote one, keeps the refused value held, so a re-save of it during
+// the write is not sent again. A different local value still ends the hold.
+func (s *LinkState) BeginRevert(k Key) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e := s.entries[k]; e != nil {
-		e.pushRefused, e.hasPushRefused = v, true
+		e.reverting, e.revertEcho = true, 0
 	}
+}
+
+// EndRevert ends BeginRevert's mark. wrote is the snapshot version of the
+// revert's write (0: not written). When the latest local change during the
+// mark was another save of Flagsmith's value (not written, or after the
+// write), that save ends the hold.
+func (s *LinkState) EndRevert(k Key, wrote uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entries[k]
+	if e == nil {
+		return
+	}
+	if e.revertEcho != 0 && e.revertEcho == e.offered && (wrote == 0 || e.revertEcho > wrote) {
+		endPushRefusalLocked(e)
+	}
+	e.reverting, e.revertEcho = false, 0
 }
 
 // PushRefused returns the local value Flagsmith last refused for k.
@@ -197,7 +238,11 @@ func (s *LinkState) OfferFrom(k Key, v Value, at time.Time, version uint64, offl
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
+	e.offered = max(e.offered, version)
 	if e.hasRemote && e.remote.Equal(v) {
+		if e.reverting {
+			e.revertEcho = version
+		}
 		s.inSyncLocked(k, e)
 		return false
 	}
@@ -223,10 +268,18 @@ func (s *LinkState) OfferFrom(k Key, v Value, at time.Time, version uint64, offl
 // a newer value already, or the value is in flight). It reports whether it
 // queued v.
 func (s *LinkState) Reoffer(k Key, v Value, at time.Time, version uint64) (queued bool) {
+	return s.ReofferRead(k, v, at, version, version)
+}
+
+// ReofferRead is Reoffer for a value read in the local snapshot of version
+// read: it does nothing when a local change came after that snapshot (stale).
+func (s *LinkState) ReofferRead(k Key, v Value, at time.Time, version, read uint64) (queued bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
 	switch {
+	case read < e.offered:
+		return false
 	case e.hasRemote && e.remote.Equal(v):
 		s.inSyncLocked(k, e)
 		return false
@@ -248,17 +301,32 @@ func (s *LinkState) syncLocked(e *entry, inSync bool) {
 }
 
 // inSyncLocked records a local value equal to the remote one: nothing to
-// send, no refused value to hold back.
+// send, no refused value to hold back and no push refusal left (except during
+// a revert). Dropping a pending entry whose
+// different value Next handed out records the local value as reverted; a mark
+// kept from an earlier revert stays (its push may still be in flight).
 func (s *LinkState) inSyncLocked(k Key, e *entry) {
-	if e.pending != nil {
+	if p := e.pending; p != nil {
+		e.revertedLocal, e.hasReverted = e.remote, e.hasReverted || (p.hasSent && !p.sent.Equal(e.remote))
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}
-	e.pushRefused, e.hasPushRefused = Value{}, false
+	if !e.reverting {
+		endPushRefusalLocked(e)
+	}
 	s.syncLocked(e, true)
 }
 
+func endPushRefusalLocked(e *entry) {
+	e.pushRefused, e.hasPushRefused = Value{}, false
+	if e.side == SideRemote {
+		e.refused, e.side = "", ""
+	}
+}
+
 func (s *LinkState) offerLocked(k Key, e *entry, v Value, at time.Time, version uint64, offline bool) bool {
+	// The reverted mark stays: the push it is about may still be in flight,
+	// and a later revert to the remote value relies on it (#2611).
 	s.syncLocked(e, false)
 	if e.pending != nil {
 		e.pending.value = v
@@ -308,8 +376,11 @@ func (s *LinkState) Retry(k Key, notBefore time.Time) {
 // now, and the pending entry goes unless a newer local value replaced it
 // meanwhile. It ends the refusal and the refused value, unless the local value
 // went back to that refused value while v was in flight (heldLocalLocked): the
-// key then stays refused and out of sync. A key forgotten meanwhile (game end)
-// is ignored.
+// key then stays refused and out of sync. Likewise, when the local value
+// changed meanwhile to a value other than v (revertedLocalLocked), the key
+// stays out of sync until a pull round reconciles it (UC-054): it sends the
+// local value or applies Flagsmith's (#2611). A key forgotten meanwhile (game
+// end) is ignored.
 func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -317,6 +388,8 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 	if e == nil {
 		return
 	}
+	reverted := revertedLocalLocked(e, v)
+	e.revertedLocal, e.hasReverted = Value{}, false
 	e.remote, e.hasRemote = v, true
 	e.gen++
 	e.confirmedAt = s.now()
@@ -330,28 +403,67 @@ func (s *LinkState) ConfirmPushed(k Key, v Value) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)
 	}
-	s.syncLocked(e, e.pending == nil)
+	s.syncLocked(e, e.pending == nil && !reverted)
+}
+
+// revertedLocalLocked reports whether e's local value is a reverted one
+// (hasReverted, nothing pending since) that differs from v, the value a push
+// confirm refers to: v was in flight when the local value went back to the
+// value Flagsmith held or a pull applied a newer Flagsmith value, so Flagsmith
+// now differs from the local value (#2611).
+func revertedLocalLocked(e *entry, v Value) bool {
+	return e.pending == nil && e.hasReverted && !e.revertedLocal.Equal(v)
 }
 
 // SetRemote records the value last seen in Flagsmith and returns the previous
-// one (had: one was known). The key is in sync when nothing is pending (the
-// pull applies the value; a refusal of that write sets it out of sync again).
+// one (had: one was known). The key is in sync when nothing is pending and no
+// different refused value is held (the pull applies the value; a refusal of
+// that write sets it out of sync again).
 func (s *LinkState) SetRemote(k Key, v Value) (prev Value, had bool) {
 	prev, had, _ = s.SetRemoteGen(k, v)
 	return prev, had
 }
 
 // SetRemoteGen is SetRemote that also returns the generation it produced,
-// for an exact RestoreRemoteGen.
+// for an exact RestoreRemoteGen. A reverted mark follows the new remote
+// value: the push it is about is still in flight, and the pull's apply
+// writes v locally (#2611).
 func (s *LinkState) SetRemoteGen(k Key, v Value) (prev Value, had bool, gen uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entryLocked(k)
 	prev, had = e.remote, e.hasRemote
+	s.setRemoteLocked(e, v)
+	return prev, had, e.gen
+}
+
+func (s *LinkState) setRemoteLocked(e *entry, v Value) {
+	e.remote, e.hasRemote = v, true
+	if e.hasReverted {
+		e.revertedLocal = v
+	}
+	e.gen++
+	// A held refused value is the local value: it differs from v.
+	s.syncLocked(e, e.pending == nil && !heldLocalLocked(e, v))
+}
+
+// SetRemoteRead is SetRemote for a pull round that writes nothing locally
+// (adopt, keep local) and judged the local value of snapshot read. After a
+// later local change it records v only and keeps the reverted mark: a key in
+// sync with the old remote value is out of sync with a different v.
+func (s *LinkState) SetRemoteRead(k Key, v Value, read uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entryLocked(k)
+	if read >= e.offered {
+		s.setRemoteLocked(e, v)
+		return
+	}
+	if e.inSync && (!e.hasRemote || !e.remote.Equal(v)) {
+		s.syncLocked(e, false)
+	}
 	e.remote, e.hasRemote = v, true
 	e.gen++
-	s.syncLocked(e, e.pending == nil)
-	return prev, had, e.gen
 }
 
 // RestoreRemoteGen puts prev back (or forgets the remote value when !had),
@@ -384,11 +496,18 @@ func (s *LinkState) RestoreRemote(k Key, expect Value, prev Value, had bool) boo
 	return true
 }
 
+// restoreLocked puts prev back (or forgets the remote value when !had). A
+// reverted mark follows prev (its push is still in flight); with no remote
+// value left it goes, as in ForgetRemote (#2611).
 func (s *LinkState) restoreLocked(e *entry, prev Value, had bool) {
 	if had {
 		e.remote = prev
+		if e.hasReverted {
+			e.revertedLocal = prev
+		}
 	} else {
 		e.remote, e.hasRemote = Value{}, false
+		e.revertedLocal, e.hasReverted = Value{}, false
 	}
 	e.gen++
 }
@@ -430,6 +549,7 @@ func (s *LinkState) ForgetRemote(k Key) {
 	defer s.mu.Unlock()
 	if e := s.entries[k]; e != nil {
 		e.remote, e.hasRemote = Value{}, false
+		e.revertedLocal, e.hasReverted = Value{}, false
 		e.gen++
 	}
 }
@@ -514,6 +634,10 @@ func (s *LinkState) refuseLocked(k Key, e *entry, v Value, side Side, reason str
 	e.refused, e.side = reason, side
 	e.refusedAt, e.refusedStatus = s.now(), status
 	s.syncLocked(e, false)
+	if side == SideRemote {
+		// The answer to the push in flight: no confirm of it follows.
+		e.revertedLocal, e.hasReverted = Value{}, false
+	}
 	if side == SideRemote && e.pending != nil && e.pending.value.Equal(v) {
 		e.pending = nil
 		s.dropFromQueueLocked(k)
@@ -527,6 +651,28 @@ func (s *LinkState) ClearRefusal(k Key) {
 	if e := s.entries[k]; e != nil {
 		e.refused, e.side = "", ""
 		e.pushRefused, e.hasPushRefused = Value{}, false
+	}
+}
+
+// ClearRefusalRead is ClearRefusal for a pull round that found the local
+// value of snapshot read equal to Flagsmith's: a local change after that
+// snapshot (a re-save of the refused value) keeps the refusal.
+func (s *LinkState) ClearRefusalRead(k Key, read uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil && read >= e.offered {
+		e.refused, e.side = "", ""
+		e.pushRefused, e.hasPushRefused = Value{}, false
+	}
+}
+
+// SetInSyncRead marks k in sync for a pull round that found the local value
+// of snapshot read equal to Flagsmith's, unless a local change came after it.
+func (s *LinkState) SetInSyncRead(k Key, read uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[k]; e != nil && read >= e.offered {
+		s.syncLocked(e, true)
 	}
 }
 
@@ -743,6 +889,7 @@ func (s *LinkState) Resend(identifier string) (n int) {
 		}
 		v := e.remote
 		e.remote, e.hasRemote = Value{}, false
+		e.revertedLocal, e.hasReverted = Value{}, false // as ForgetRemote
 		e.gen++
 		s.offerLocked(k, e, v, now, 0, false)
 		n++

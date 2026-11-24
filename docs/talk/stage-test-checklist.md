@@ -154,7 +154,7 @@ first readings at the start and the rest every 10 minutes.
 
 **Dashboard.** `http://PI/` shows the controller cards with battery and connection quality, and the Agent tab with
 decisions and writes. **Grafana** is at `http://PI/grafana/` (dashboards from `services/grafana/dashboards/`): use the
-game loop and controller panels for lag and frame health. **Jaeger** (`http://PI/jaeger/`) has the `agent.decide` and game
+game loop and controller panels for lag and frame health. **Jaeger** (`http://PI/jaeger/`) has the `invoke_agent joustmania-agent` and game
 spans (Jaeger service `game-coordinator-service` for the game spans). **VictoriaMetrics** (Prometheus query API) is at `http://PI/victoria-metrics/`: the query UI at
 `http://PI/victoria-metrics/vmui/` or the API from the Pi:
 

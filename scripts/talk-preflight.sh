@@ -37,7 +37,8 @@
 #      flag's value, capped by the AGENT_LLM_MAX_REQUESTS_PER_MINUTE ceiling, #1788)
 #   4b. the agent's audio cue (defaultAudioCue in services/agent/actions/writer.go)
 #      resolves to a file in the RUNNING audio container (UC-070 BR-004)
-#   5. Jaeger reachable and holding agent.decide spans from the last N minutes
+#   5. Jaeger reachable and holding invoke_agent joustmania-agent spans (the
+#      decide span, #2584; agent.decide before) from the last N minutes
 #   6. the dashboard reachable through envoy
 #   7. the clock: local time vs the HTTP Date header of a reachable host
 #   8. real PS Move controllers: at least TALK_MIN_CONTROLLERS non-mock
@@ -220,10 +221,23 @@ if isinstance(link, dict):
         refused, out_of_sync, pending = count("refused"), count("out_of_sync"), count("pending")
         warned = False
         # Stuck keys only (#2592): out_of_sync up to pending is pushes in flight.
+        # A stack value Flagsmith refused while online (scope stack, side remote,
+        # http_status 409/401/403) is reverted at once, a stop included (UC-055 A4,
+        # #2631); other refusals are not (an unsent refusal such as not_found has
+        # no http_status: a stop holds there).
+        keys = link.get("keys") if isinstance(link.get("keys"), list) else []
+        stack_refused = [f"{k.get('flag_set')}/{k.get('flag')}" for k in keys
+                         if isinstance(k, dict) and k.get("scope") == "stack" and k.get("side") == "remote"
+                         and k.get("http_status") in (409, 401, 403)]
         if refused > 0 or out_of_sync > pending:
-            print(f"WARN  Flagsmith link online, out of sync: {refused} refused, {out_of_sync} out of sync, "
-                  f"{pending} pending: Flagsmith refused values the stack keeps (scripts/flags.sh state; Grafana "
-                  "Flags / OpenFeature, row Flagsmith link)")
+            line = (f"WARN  Flagsmith link online, out of sync: {refused} refused, {out_of_sync} out of sync, "
+                    f"{pending} pending: Flagsmith refused values the stack keeps (scripts/flags.sh state; Grafana "
+                    "Flags / OpenFeature, row Flagsmith link)")
+            if stack_refused:
+                line += (f"; Flagsmith refuses stack writes ({', '.join(stack_refused[:3])}): a refused stack value "
+                         "is reverted at once, a stop (agent-killswitch.sh off) included: make the stop in Flagsmith "
+                         "too, or switch the link off (two-standards-runbook.md, #2631)")
+            print(line)
             warned = True
         if not warned:
             print(f"PASS  Flagsmith link online (environment {link.get('environment', '?')})")
@@ -561,8 +575,15 @@ else
     # python3, not GNU `date -d` (macOS has BSD date)
     t_min="$(python3 -c 'import sys,datetime as d; print(d.datetime.fromtimestamp(int(sys.argv[1]), d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "${start_s}")"
     t_max="$(python3 -c 'import sys,datetime as d; print(d.datetime.fromtimestamp(int(sys.argv[1]), d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$((end_s + 60))")"
-    traces="$(curl -s --max-time 15 "${BASE_URL}/jaeger/api/v3/traces?query.serviceName=agent&query.operationName=agent.decide&query.startTimeMin=${t_min}&query.startTimeMax=${t_max}&query.searchDepth=5" 2>/dev/null)" || traces=""
-    summary="$(python3 -c '
+    # The decide span is the GenAI "invoke_agent joustmania-agent" (#2584; the
+    # space URL-encoded). An agent image from before #2584 still names it
+    # agent.decide, so that name is searched (and reported as WARN) when the new
+    # one has no spans.
+    count=0
+    for decide_op in "invoke_agent joustmania-agent" "agent.decide"; do
+      decide_q="${decide_op// /%20}"
+      traces="$(curl -s --max-time 15 "${BASE_URL}/jaeger/api/v3/traces?query.serviceName=agent&query.operationName=${decide_q}&query.startTimeMin=${t_min}&query.startTimeMax=${t_max}&query.searchDepth=5" 2>/dev/null)" || traces=""
+      summary="$(python3 -c '
 import json, sys
 try:
     body = json.load(sys.stdin)
@@ -577,21 +598,25 @@ spans = [
     for rs in result.get("resourceSpans") or []
     for ss in rs.get("scopeSpans") or []
     for s in ss.get("spans") or []
-    if s.get("name") == "agent.decide"
+    if s.get("name") == sys.argv[1]
 ]
 if not spans:
     print("0"); sys.exit(0)
 last = max(spans, key=lambda s: int(s.get("startTimeUnixNano") or 0))
 tags = {a["key"]: next(iter((a.get("value") or {}).values()), None) for a in last.get("attributes") or []}
 print(len(spans), tags.get("decide.backend"), tags.get("decide.outcome"), tags.get("decide.fallback_reason") or "-")
-' <<<"${traces}")"
-    read -r count backend outcome reason <<<"${summary}"
+' "${decide_op}" <<<"${traces}")"
+      read -r count backend outcome reason <<<"${summary}"
+      if [[ "${count}" == "ERR" || -z "${count}" || "${count}" -ne 0 ]]; then break; fi
+    done
     if [[ "${count}" == "ERR" || -z "${count}" ]]; then
-      fail "agent.decide query failed (Jaeger slow or not answering)"
+      fail "${decide_op} query failed (Jaeger slow or not answering)"
     elif [[ "${count}" -eq 0 ]]; then
-      fail "no agent.decide spans in the last ${MINUTES} min (play a warm-up game first; the rules path only emits on cycles that decide)"
+      fail "no invoke_agent joustmania-agent (or agent.decide) spans in the last ${MINUTES} min (play a warm-up game first; the rules path only emits on cycles that decide)"
+    elif [[ "${decide_op}" == "agent.decide" ]]; then
+      warn "${count} agent.decide span(s) in the last ${MINUTES} min, none named invoke_agent joustmania-agent: the running agent predates #2584 (an older IMAGE_TAG or Pi pin); newest: backend=${backend} outcome=${outcome} fallback_reason=${reason}"
     else
-      pass "${count} agent.decide span(s) in the last ${MINUTES} min; newest: backend=${backend} outcome=${outcome} fallback_reason=${reason}"
+      pass "${count} ${decide_op} span(s) in the last ${MINUTES} min; newest: backend=${backend} outcome=${outcome} fallback_reason=${reason}"
     fi
   else
     fail "Jaeger API not reachable at ${BASE_URL}/jaeger/api/v3/services"

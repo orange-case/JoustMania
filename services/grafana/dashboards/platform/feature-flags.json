@@ -2514,7 +2514,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "flagservice_flagsmith_pushes_total by op (value, override, delete_override, identity, delete_identity, feature, tag) and result (FR-207, FR-211).",
+      "description": "flagservice_flagsmith_pushes_total by op (value, override, delete_override, identity, delete_identity, feature, tag, option, reference) and result (FR-207, FR-211).",
       "fieldConfig": {
         "defaults": {
           "color": {

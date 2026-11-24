@@ -27,7 +27,7 @@ func testGoalProfile() goal.Profile {
 }
 
 // goalRun is one remote decide cycle with a goal source wired: the request, the
-// agent.decide span and the decisions dispatched to the sink.
+// invoke_agent span and the decisions dispatched to the sink.
 type goalRun struct {
 	req        decide.Request
 	span       sdktrace.ReadOnlySpan

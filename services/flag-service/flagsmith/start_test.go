@@ -20,6 +20,8 @@ import (
 	"github.com/joustmania/flag-service/flagsmith/flagsmithtest"
 	"github.com/joustmania/flag-service/registry"
 	"github.com/joustmania/flag-service/state"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // --- fixtures ---------------------------------------------------------------
@@ -111,6 +113,7 @@ type fakeAdmin struct {
 	attempts   map[string]int
 	posts      []map[string]any
 	tagPosts   []map[string]any
+	afterList  func() // runs once the feature list was written (#2713)
 	deletes    []string
 	nextID     int
 }
@@ -234,14 +237,18 @@ func (a *fakeAdmin) edgeDelete(w http.ResponseWriter, r *http.Request) {
 func (a *fakeAdmin) featureList(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
 	features := append([]fsFeature(nil), a.features...)
+	after := a.afterList
 	a.mu.Unlock()
-	for i := range features {
-		features[i].MultivariateOptions = nil
-		for _, o := range a.f.Options.Of(features[i].ID) {
-			features[i].MultivariateOptions = append(features[i].MultivariateOptions, fsOption{ID: o.ID, Type: o.Type, StringValue: o.StringValue})
-		}
+	if after != nil {
+		defer after()
 	}
-	flagsmithtest.WriteJSON(w, 200, map[string]any{"count": len(features), "next": nil, "results": features})
+	// The options as the Admin API answers them (without the key field on a
+	// Flagsmith before #7698, #2713).
+	results := make([]map[string]any, 0, len(features))
+	for _, f := range features {
+		results = append(results, map[string]any{"id": f.ID, "name": f.Name, "is_archived": f.IsArchived, "multivariate_options": a.f.Options.Wire(f.ID)})
+	}
+	flagsmithtest.WriteJSON(w, 200, map[string]any{"count": len(features), "next": nil, "results": results})
 }
 
 func (a *fakeAdmin) hasFeature(id int) bool {
@@ -349,6 +356,7 @@ type startEnv struct {
 	reg   *registry.Registry
 	logs  *syncBuffer
 	ctx   context.Context
+	spans *tracetest.SpanRecorder
 }
 
 type syncBuffer struct {
@@ -391,7 +399,9 @@ func newStartEnvHTTP(t *testing.T, hc *http.Client) *startEnv {
 	clk := newStartClock()
 	logs := &syncBuffer{}
 	cfg := testConfig(a.f)
-	l, err := New(cfg, Deps{State: st, Logger: slog.New(slog.NewTextHandler(logs, nil)), Now: clk.Now, Sleep: clk.Sleep, HTTPClient: hc})
+	spans := tracetest.NewSpanRecorder()
+	tracer := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)).Tracer("t")
+	l, err := New(cfg, Deps{State: st, Logger: slog.New(slog.NewTextHandler(logs, nil)), Tracer: tracer, Now: clk.Now, Sleep: clk.Sleep, HTTPClient: hc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +416,7 @@ func newStartEnvHTTP(t *testing.T, hc *http.Client) *startEnv {
 			<-done
 		}
 	})
-	return &startEnv{l: l, s: s, admin: a, clock: clk, st: st, reg: reg, logs: logs, ctx: ctx}
+	return &startEnv{l: l, s: s, admin: a, clock: clk, st: st, reg: reg, logs: logs, ctx: ctx, spans: spans}
 }
 
 // waitStatus polls Status until one snapshot satisfies ok.

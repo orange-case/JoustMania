@@ -1,13 +1,13 @@
 /**
- * Unit tests for the agent.decide feed (#1233): Jaeger search JSON (fromOtlp shape) ->
+ * Unit tests for the invoke_agent feed (#1233): Jaeger search JSON (fromOtlp shape) ->
  * DecideRow folding, the current-backend strip, threshold-bar maths, and the
  * escaping of span-derived (untrusted, model-written) text.
  *
  * Fixtures in ./fixtures are shaped like Jaeger's HTTP API response and follow
  * the span shape in services/agent/decision/decide_hook.go:
- *   rules       agent.signal_received -> { agent.decide, agent.decision x2 }
- *   remote-act  gameplay_phase -> agent.decide -> { chat {model}, agent.decision }
- *   held        agent.decide (model only on the chat child) below threshold
+ *   rules       agent.signal_received -> { invoke_agent, agent.decision x2 }
+ *   remote-act  gameplay_phase -> invoke_agent -> { chat {model}, agent.decision }
+ *   held        invoke_agent (model only on the chat child) below threshold
  *   fallback    claude timed out, rules answered
  *   discarded   act answer dropped (game_ended), truncated answers, hostile rationale
  */
