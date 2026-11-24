@@ -483,8 +483,8 @@ def test_encoder_jitter_on_the_push_does_not_block_the_mute():
     """M7: a raw event short of a step while pressed is no step: the short press still mutes."""
     pad = PagesPad(Timings(knob_events_per_step=4))
     pad.at(0).press("KNOB_PRESS")
-    pad.at(10).turn("B")
-    assert pad.at(100).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=100)]
+    pad.at(200).turn("B")  # past the push-jitter window, so the event is counted
+    assert pad.at(300).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=300)]
 
 
 @pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[4])

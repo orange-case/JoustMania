@@ -151,3 +151,23 @@ def test_tcp_check_shares_the_budget_so_a_later_address_is_still_tried(monkeypat
     assert tcp_check("example.test", 443, 3.0)
     assert [a for a, _ in tried] == ["192.0.2.1", "192.0.2.2", "192.0.2.3"]
     assert clock[0] <= 3.0 and tried[-1][1] > 0
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-010"])
+def test_tcp_check_lookup_that_used_the_whole_budget_is_down_with_no_connect(monkeypatch):
+    clock = [0.0]
+    tried = []
+
+    def lookup(*_a, **_k):
+        clock[0] += 3.0
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", 443))]
+
+    def connect(address, _timeout):
+        tried.append(address)
+        return contextlib.nullcontext()
+
+    monkeypatch.setattr(internet.socket, "getaddrinfo", lookup)
+    monkeypatch.setattr(internet.socket, "create_connection", connect)
+    monkeypatch.setattr(internet, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    assert not tcp_check("example.test", 443, 3.0)
+    assert tried == []
