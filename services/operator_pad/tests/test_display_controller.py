@@ -9,6 +9,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from lib.setting_ladders import MODE_LADDER, SHIELD_KNOB_LADDER
 from proto import menu_pb2
 from services.operator_pad.actions import Actions
 from services.operator_pad.config import DEFAULT_KEYMAP, Timings, parse_keymap
@@ -144,6 +145,17 @@ async def test_new_layer_step_replaces_result():
     await pad.key(K5, PRESS)
     await pad.turn(UP)
     assert pad.screen()[0] == "TEAMS"
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-007"], steps=[5])
+@pytest.mark.parametrize(("key", "options"), [(183, len(MODE_LADDER)), (191, len(SHIELD_KNOB_LADDER))])
+async def test_a_full_turn_of_the_mode_or_shield_wheel_sends_nothing_and_shows_no_result(key, options):
+    pad = Pad()
+    await pad.key(key, PRESS)
+    await pad.turn(UP, options)
+    await pad.key(key, RELEASE)
+    assert pad.sent() == []
+    assert pad.screen()[0] == "JOUSTMANIA LOBBY"
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[4])

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, create_autospec, patch
 import grpc
 import pytest
 
-from lib.setting_ladders import BACKENDS, preview_value
+from lib.setting_ladders import BACKENDS, MODE_LADDER, preview_value
 from lib.types import Sound
 from proto import game_coordinator_pb2, menu_pb2
 from services.operator_pad import actions as actions_module
@@ -333,6 +333,16 @@ async def test_a_full_turn_of_the_backend_wheel_sends_nothing_and_plays_nothing(
     cues.limit.assert_not_awaited()
     cues.refusal.assert_not_awaited()
     cues.failure.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-015", flow="A7", br=["BR-005"])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+@pytest.mark.parametrize("turns", [1, -1, 2])
+async def test_a_full_turn_of_the_mode_wheel_sends_nothing_and_plays_nothing(actions, menu, cues, turns):
+    gesture = Gesture(LAYER, "K1", steps=turns * len(MODE_LADDER))
+    assert await actions.dispatch(gesture, status(selection=MODE_LADDER[1])) == ("step_setting", "noop")
+    menu.ProcessInput.assert_not_awaited()
+    cues.limit.assert_not_awaited()
 
 
 @pytest.mark.uc("UC-015", flow="A7", br=["BR-004", "BR-005"])
