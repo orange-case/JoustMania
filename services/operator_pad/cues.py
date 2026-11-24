@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 
 from lib import voice_prompts
 from lib.types import Sound
@@ -67,6 +68,15 @@ class CuePlayer:
         self._sequences: set[asyncio.Task] = set()  # multi-clip cues playing in the background
         self._announce_task: asyncio.Task | None = None  # the latest announcement; a new one replaces it
         self._failure_task: asyncio.Task | None = None  # at most one failure cue at a time
+        # UC-016 BR-005: while this says the display link is up, the pad's own voice lines are left out.
+        self.screen_up: Callable[[], bool] | None = None
+
+    def screen_shows(self) -> bool:
+        """UC-016 BR-005: the screen shows what the pad would say (never raises; False without a screen)."""
+        try:
+            return self.screen_up is not None and bool(self.screen_up())
+        except Exception:
+            return False
 
     async def play(self, sound: Sound, volume: float = SOUND_VOLUME, group: str = "") -> float:
         """One clip; its length in seconds as the audio service reports it, 0 when unknown or failed."""
@@ -87,10 +97,14 @@ class CuePlayer:
         return await self.play(sound, VOICE_VOLUME, group)
 
     async def refusal(self) -> None:
+        if self.screen_shows():
+            return
         await self.voice(REFUSAL_CUE)
 
     async def limit(self, up: bool = True) -> None:
         """ "Maximum" (up) or "Minimum" (down), skipped within LIMIT_CUE_MIN_GAP_SECONDS of the last one."""
+        if self.screen_shows():
+            return
         now = self._clock()
         if self._last_limit_cue is not None and now - self._last_limit_cue < LIMIT_CUE_MIN_GAP_SECONDS:
             logger.debug("Limit cue skipped: played less than the minimum gap ago")
@@ -99,10 +113,12 @@ class CuePlayer:
         await self.voice(LIMIT_CUES[up])
 
     async def cancel(self) -> None:
+        if self.screen_shows():
+            return
         await self.voice(CANCEL_CUE)
 
     async def unknown_key(self) -> None:
-        await self.play(UNKNOWN_KEY_CUE)
+        await self.play(UNKNOWN_KEY_CUE)  # a sound, not a voice line: it stays with a screen (UC-016 BR-005)
 
     async def failure(self) -> None:
         """The menu cannot be reached: two loud beeps, then "No connection" (BR-009), in the background.
@@ -120,6 +136,8 @@ class CuePlayer:
         # The announcement clip still playing stops (in the background), but the lock word plays with no
         # group, so a later preview hold (which stops `pad_announce`, BR-017) can never cut it.
         self._start(self.stop_group(ANNOUNCE_GROUP))
+        if self.screen_shows():
+            return  # UC-016 BR-005: line 8 shows LOCKED
         await self.voice(LOCK_VOICES[locked])
 
     async def announce(self, label: Sound, value: Sound) -> None:
@@ -130,6 +148,9 @@ class CuePlayer:
         """
         if self._announce_task is not None:
             self._announce_task.cancel()
+        if self.screen_shows():
+            self._announce_task = None  # UC-016 BR-005: the status screen shows the value
+            return
         self._announce_task = self._start(self._announce_sequence(label, value))
 
     async def stop_group(self, group: str) -> None:
@@ -181,6 +202,8 @@ class CuePlayer:
         await self._sleep(FAILURE_CUE_GAP_SECONDS)
         beep_seconds = await self.play(FAILURE_CUE)
         await self._sleep(max(beep_seconds, FAILURE_CUE_GAP_SECONDS))  # the words start after the beeps
+        if self.screen_shows():
+            return  # UC-016 BR-005: the beeps stay, the screen shows NO CONNECTION
         await self.voice(NO_CONNECTION_CUE)
 
     async def _announce_sequence(self, label: Sound, value: Sound) -> None:

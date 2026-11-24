@@ -3,8 +3,8 @@
 # systemd unit's ExecStop and the Pi helper scripts; run it by hand the same way:
 #   ./scripts/setup/joustmania-compose.sh up -d agent
 #
-# - Compose files: docker-compose.yml, named with -f, plus the gateway overlay
-#   when it is configured (below); never anything else. A bare
+# - Compose files: docker-compose.yml, named with -f, plus the pad's hidraw
+#   overlay and the gateway overlay when they apply (below); never anything else. A bare
 #   `docker compose` also auto-loads docker-compose.override.yml, the dev/test
 #   file that publishes the mock control port (50062) and the gRPC ports on all
 #   interfaces, i.e. to the venue network (#1319).
@@ -27,6 +27,10 @@
 #   one that interpolates: with a value compose reads as empty (`"" # note`,
 #   `${UNSET}`) it would refuse the overlay and the whole stack would not
 #   start. In every other case the overlay is left out and one line says so.
+# - Pad display (UC-016): docker-compose.operator-pad-hidraw.yml (the
+#   operator-pad cgroup rule for the hidraw major) is added, with HIDRAW_MAJOR
+#   exported, only when the host's /proc/devices or a valid HIDRAW_MAJOR
+#   gives the major (below).
 # Never prints the env files or their values. Never run `config` without
 # `--services`/`--images`/`-q` where output is logged; it prints interpolated
 # secrets.
@@ -78,6 +82,39 @@ compose_env_value() {
     done
     return 0
 }
+
+# Operator pad display (UC-016, services.md §3.1): the hidraw char major is
+# dynamic, so its cgroup rule lives in an overlay that is added only with a
+# known major: the host's /proc/devices, else a configured HIDRAW_MAJOR (shell,
+# .env.local, .env) that is a plain number other than 13 (the evdev rule; a
+# duplicate rule makes compose refuse the whole stack). A configured value
+# that differs from the host's gets one stderr line and the host's wins. No
+# major (macOS, no hidraw driver loaded yet): no overlay, the display link
+# stays down (UC-016 A1). Never a guessed major: a wrong one grants other devices.
+# JOUSTMANIA_PROC_DEVICES is a test seam (scripts/tests), not a tunable (C-035).
+HIDRAW_OVERLAY=docker-compose.operator-pad-hidraw.yml
+host_hidraw_major="$(awk '$2 == "hidraw" { print $1; exit }' "${JOUSTMANIA_PROC_DEVICES:-/proc/devices}" 2>/dev/null || true)"
+configured_hidraw_major="$(compose_env_value HIDRAW_MAJOR)"
+hidraw_major=""
+if [[ -n "$host_hidraw_major" ]]; then
+    if [[ -n "$configured_hidraw_major" && "$configured_hidraw_major" != "$host_hidraw_major" ]]; then
+        echo "joustmania-compose: HIDRAW_MAJOR=$configured_hidraw_major is not this host's hidraw major; using $host_hidraw_major (UC-016)" >&2
+    fi
+    hidraw_major="$host_hidraw_major"
+elif [[ -n "$configured_hidraw_major" ]]; then
+    if [[ "$configured_hidraw_major" =~ ^[1-9][0-9]*$ && "$configured_hidraw_major" != 13 ]]; then
+        hidraw_major="$configured_hidraw_major"
+    else
+        echo "joustmania-compose: HIDRAW_MAJOR=$configured_hidraw_major is not a hidraw major; pad display off (UC-016 A1)" >&2
+    fi
+fi
+if [[ -n "$hidraw_major" ]]; then
+    export HIDRAW_MAJOR="$hidraw_major"
+    if [[ -f "$HIDRAW_OVERLAY" && " $* " != *" $HIDRAW_OVERLAY "* ]]; then
+        COMPOSE_FILES+=(-f "$HIDRAW_OVERLAY")
+    fi
+fi
+unset host_hidraw_major configured_hidraw_major hidraw_major
 
 GATEWAY_OVERLAY=docker-compose.gateway.yml
 if [[ -f "$GATEWAY_OVERLAY" && " $* " != *" $GATEWAY_OVERLAY "* ]]; then

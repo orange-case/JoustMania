@@ -137,6 +137,15 @@ echo -e "  → ${GREEN}Bluetooth configured${NC}"
 # Step 4: Done (pairing daemon runs as a Docker container)
 echo "[4/4] Pairing daemon runs via Docker Compose (no host install needed)"
 
+# Operator pad display (UC-016): the pad's hidraw nodes for the input group, which
+# the operator-pad container joins. A Pi set up before this rule needs this once.
+echo ""
+echo "Installing the operator pad udev rule..."
+sudo install -m 0644 "$SCRIPT_DIR/99-joustmania-operator-pad.rules" /etc/udev/rules.d/99-joustmania-operator-pad.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=hidraw
+echo -e "  → ${GREEN}Operator pad udev rule installed${NC}"
+
 # Configure audio - set all devices to max volume
 echo ""
 echo "Configuring audio..."

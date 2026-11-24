@@ -79,6 +79,8 @@ expect "docker-compose.yml" "$ALWAYS contract contract-flagd service compose yam
 expect "docker-compose.lite.yml" "$ALWAYS compose yaml-dupkeys"
 # gateway overlay (#2571): tests/contract reads it, the compose gate renders it
 expect "docker-compose.gateway.yml" "$ALWAYS contract compose yaml-dupkeys"
+# the pad's hidraw overlay (UC-016): tests/contract renders it with real compose
+expect "docker-compose.operator-pad-hidraw.yml" "$ALWAYS contract compose yaml-dupkeys"
 expect "services/otel-collector/config.gateway.yaml" "$ALWAYS contract yaml-dupkeys"
 # voice catalog (#2107): the catalog, the generated assets and the generator
 expect "services/audio/voice/lines.yaml" "$ALWAYS py:audio voice-check contract yaml-dupkeys"

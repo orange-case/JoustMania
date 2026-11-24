@@ -171,7 +171,7 @@ classify() {  # map one changed path to gates; each case mirrors a ci.yml filter
   esac
   # telemetry (telemetry-contract)
   case "$f" in
-    services/*|lib/*|proto/*|tests/contract/*|tests/integration/setup_guard.py|docker-compose.yml|docker-compose.gateway.yml|docs/specs/*|scripts/*|tools/*|Makefile)
+    services/*|lib/*|proto/*|tests/contract/*|tests/integration/setup_guard.py|docker-compose.yml|docker-compose.gateway.yml|docker-compose.operator-pad-hidraw.yml|docs/specs/*|scripts/*|tools/*|Makefile)
       selected[contract]=1 ;;
   esac
   # flagd_contract (flagd-contract)
@@ -317,7 +317,9 @@ gate_cmd() {  # print the shell command for a gate
 'docker-compose.yml docker-compose.override.yml docker-compose.ci.yml docker-compose.dry-run.yml' \
 'docker-compose.lite.yml' 'docker-compose.yml docker-compose.gateway.yml'; do \
 a=(); for f in \$c; do a+=(-f \"\$f\"); done; echo \"compose: \$c\"; \
-docker compose \"\${a[@]}\" --profile agent --profile dashboard config -q; done" ;;
+docker compose \"\${a[@]}\" --profile agent --profile dashboard config -q; done; \
+echo 'compose: docker-compose.yml docker-compose.operator-pad-hidraw.yml'; \
+HIDRAW_MAJOR=240 docker compose -f docker-compose.yml -f docker-compose.operator-pad-hidraw.yml --profile operator-pad config -q" ;;
     yaml-dupkeys)
       echo "uv run --no-project --with pyyaml python3 scripts/ci/yaml-dupkeys.py ${!changed_yaml[*]}" ;;
   esac

@@ -13,6 +13,7 @@ export interface ProcessInputRequest {
 export interface ProcessInputResponse {
   success?: boolean;
   error?: string;
+  value?: string; // operator pad commands: the committed value (services.md §3.1); the dashboard ignores it
 }
 
 // List game modes request

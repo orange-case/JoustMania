@@ -186,7 +186,9 @@ async def test_a_setting_that_cannot_be_read_is_left_out_not_guessed(servicer, f
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", steps=[4, 5], br=["BR-018", "BR-017"])
-async def test_a_partial_map_is_read_again_within_the_refresh_window(servicer, flags):
+@pytest.mark.uc("UC-016", flow="main", br=["BR-003"])
+async def test_a_partial_map_is_read_again_only_after_the_refresh_window(servicer, flags):
+    """An unknown value is read again, but at most once per 2 s: the pad's display polls every 500 ms."""
     use_clients(servicer, dict(GAME_FLAGS))
     operator_set(flags, "sensitivity", "not_a_variant")  # unreadable: left out of the map
     await servicer.GetMenuStatus(menu_pb2.GetMenuStatusRequest(), None)
@@ -195,7 +197,10 @@ async def test_a_partial_map_is_read_again_within_the_refresh_window(servicer, f
     assert "sensitivity" not in servicer.settings_ops.operator_settings
 
     await servicer.GetMenuStatus(menu_pb2.GetMenuStatusRequest(), None)  # well within 2 s
+    assert servicer.settings_ops.operator_refresh_task is first  # no flag-service read at every poll
 
+    servicer.settings_ops._operator_read_at -= settings_ops.OPERATOR_REFRESH_SECONDS  # the window has passed
+    await servicer.GetMenuStatus(menu_pb2.GetMenuStatusRequest(), None)
     assert servicer.settings_ops.operator_refresh_task is not first  # a new read, not a trusted partial map
 
 
