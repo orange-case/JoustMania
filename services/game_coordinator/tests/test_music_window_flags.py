@@ -29,6 +29,7 @@ sys.path.insert(0, str(test_dir))
 
 from conftest import EventCollector
 
+from services.game_coordinator import game_clock
 from services.game_coordinator.games.base import (
     END_MAX_MUSIC_FAST_TIME,
     END_MAX_MUSIC_SLOW_TIME,
@@ -52,6 +53,16 @@ def _make_ffa():
         event_publisher=EventCollector().publish,
         sensitivity=2,
     )
+
+
+@pytest.fixture
+def frozen_game_clock(monkeypatch):
+    """Game time stands still, so ``_get_music_change_time() - now`` is exactly the drawn delay (#2655).
+
+    0.0 keeps the subtraction exact; a running clock (dilated 10x by default) let
+    the gap between two ``now()`` reads exceed any fixed slack under load.
+    """
+    monkeypatch.setattr(game_clock, "now", lambda: 0.0)
 
 
 def _default_flag_dict() -> dict:
@@ -148,6 +159,7 @@ def test_valid_custom_windows_resolve():
 
 
 @pytest.mark.uc("UC-031", flow="main", steps=[3])
+@pytest.mark.usefixtures("frozen_game_clock")
 def test_default_instance_reproduces_scheduling_ranges():
     """With default windows, _get_music_change_time stays within constant ranges."""
     game = _make_ffa()
@@ -157,8 +169,6 @@ def test_default_instance_reproduces_scheduling_ranges():
     game.players = {"a": object(), "b": object()}
     game.dead_count = 0
 
-    from services.game_coordinator import game_clock
-
     # speed_up=True -> slow windows; speed_up=False -> fast windows.
     for speed_up, lo, hi in (
         (True, MIN_MUSIC_SLOW_TIME, MAX_MUSIC_SLOW_TIME),
@@ -166,20 +176,16 @@ def test_default_instance_reproduces_scheduling_ranges():
     ):
         game.speed_up = speed_up
         for _ in range(200):
-            now = game_clock.now()
-            delay = game._get_music_change_time() - now
-            assert lo - 0.001 <= delay <= hi + 0.001
+            assert lo <= game._get_music_change_time() - game_clock.now() <= hi
 
 
-@pytest.mark.real_game_time
 @pytest.mark.uc("UC-031", flow="main", steps=[3])
+@pytest.mark.usefixtures("frozen_game_clock")
 def test_end_game_windows_used_when_all_dead():
     """game_percent=1.0 -> end-game windows bound the delay."""
     game = _make_ffa()
     game.players = {"a": object(), "b": object(), "c": object()}
     game.dead_count = len(game.players)  # forces game_percent -> 1.0
-
-    import time as _time
 
     for speed_up, lo, hi in (
         (True, END_MIN_MUSIC_SLOW_TIME, END_MAX_MUSIC_SLOW_TIME),
@@ -187,9 +193,7 @@ def test_end_game_windows_used_when_all_dead():
     ):
         game.speed_up = speed_up
         for _ in range(200):
-            now = _time.time()
-            delay = game._get_music_change_time() - now
-            assert lo - 0.001 <= delay <= hi + 0.001
+            assert lo <= game._get_music_change_time() - game_clock.now() <= hi
 
 
 # ========================================================================
@@ -229,14 +233,13 @@ def test_malformed_flag_instance_falls_back():
 
 
 @pytest.mark.real_game_time
+@pytest.mark.usefixtures("frozen_game_clock")
 def test_f6_atomic_swap_seam():
     """F6 swaps self.music_windows atomically; the loop picks up the new windows."""
     game = _make_ffa()
     game.players = {"a": object(), "b": object()}
     game.dead_count = 0
     game.speed_up = False  # fast windows
-
-    import time as _time
 
     # Swap to the frantic-ish profile (longer fast windows).
     frantic = MusicWindows(
@@ -252,8 +255,7 @@ def test_f6_atomic_swap_seam():
     game.music_windows = frantic  # the atomic single-store swap F6 uses
 
     for _ in range(200):
-        delay = game._get_music_change_time() - _time.time()
-        assert 6 - 0.001 <= delay <= 11 + 0.001
+        assert 6 <= game._get_music_change_time() - game_clock.now() <= 11
 
 
 # ========================================================================

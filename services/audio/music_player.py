@@ -264,7 +264,9 @@ def _set_song_pattern(song_array: Array, pattern: str) -> None:
     song_array.value = pattern.encode("utf-8")
 
 
-def _linux_audio_loop(song_array: Array, ratio: Value, volume: Value, stop_proc: Value, generation: Value):
+def _linux_audio_loop(
+    song_array: Array, ratio: Value, volume: Value, stop_proc: Value, generation: Value, playback_failed=None
+):
     """
     Linux audio playback loop using ALSA with real-time resampling.
 
@@ -276,7 +278,12 @@ def _linux_audio_loop(song_array: Array, ratio: Value, volume: Value, stop_proc:
         volume: Shared Value for volume (0.0 to 1.0)
         stop_proc: Shared Value to control playback (0=play, 1=stop)
         generation: Shared Value incremented on each start(), used to detect stale playback
+        playback_failed: alsa_config's shared failure flag, so the parent's card watcher sees failures here
     """
+    if playback_failed is not None:
+        from services.audio.alsa_config import adopt_playback_failed_flag
+
+        adopt_playback_failed_flag(playback_failed)
     period = 1024 * 4
     period_bytes = period * 2 * 2  # Two channels, two bytes per sample
 
@@ -380,7 +387,16 @@ class MusicPlayer:
         if self._process and self._process.is_alive():
             self._process.terminate()
             self._process.join(timeout=1.0)
-        args = (self._song_array, self._ratio, self._volume, self._stop_proc, self._generation)
+        from services.audio.alsa_config import playback_failed_flag
+
+        args = (
+            self._song_array,
+            self._ratio,
+            self._volume,
+            self._stop_proc,
+            self._generation,
+            playback_failed_flag(),
+        )
         self._process = Process(target=_linux_audio_loop, args=args, daemon=True)
         self._process.start()
 
