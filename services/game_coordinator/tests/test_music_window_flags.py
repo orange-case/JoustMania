@@ -159,7 +159,8 @@ def test_valid_custom_windows_resolve():
 
 
 @pytest.mark.uc("UC-031", flow="main", steps=[3])
-def test_default_instance_reproduces_scheduling_ranges(frozen_game_clock):
+@pytest.mark.usefixtures("frozen_game_clock")
+def test_default_instance_reproduces_scheduling_ranges():
     """With default windows, _get_music_change_time stays within constant ranges."""
     game = _make_ffa()
     assert game.music_windows == MusicWindows.defaults()
@@ -179,7 +180,8 @@ def test_default_instance_reproduces_scheduling_ranges(frozen_game_clock):
 
 
 @pytest.mark.uc("UC-031", flow="main", steps=[3])
-def test_end_game_windows_used_when_all_dead(frozen_game_clock):
+@pytest.mark.usefixtures("frozen_game_clock")
+def test_end_game_windows_used_when_all_dead():
     """game_percent=1.0 -> end-game windows bound the delay."""
     game = _make_ffa()
     game.players = {"a": object(), "b": object(), "c": object()}
@@ -231,7 +233,8 @@ def test_malformed_flag_instance_falls_back():
 
 
 @pytest.mark.real_game_time
-def test_f6_atomic_swap_seam(frozen_game_clock):
+@pytest.mark.usefixtures("frozen_game_clock")
+def test_f6_atomic_swap_seam():
     """F6 swaps self.music_windows atomically; the loop picks up the new windows."""
     game = _make_ffa()
     game.players = {"a": object(), "b": object()}
