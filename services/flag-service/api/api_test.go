@@ -36,6 +36,7 @@ type env struct {
 	reader *sdkmetric.ManualReader
 	links  *telemetry.Links
 	api    *API
+	reg    *registry.Registry
 }
 
 func newEnv(t *testing.T, stream bool) *env {
@@ -80,7 +81,7 @@ func newEnvRegistry(t *testing.T, stream bool, regYAML string) *env {
 	a := &API{State: st, Metrics: metrics, Tracer: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)).Tracer("t"), Links: links}
 	srv := httptest.NewServer(a.Handler())
 	t.Cleanup(srv.Close)
-	return &env{t: t, srv: srv, st: st, spans: spans, reader: reader, links: links, api: a}
+	return &env{t: t, srv: srv, st: st, spans: spans, reader: reader, links: links, api: a, reg: reg}
 }
 
 func (e *env) do(method, path string, body any) (int, map[string]any) {
@@ -473,10 +474,12 @@ func TestIfWriterDelete(t *testing.T) {
 			t.Fatalf("real overlay writer = %v, want operator", w)
 		}
 	})
-	t.Run("UC-043/A18 if_writer outside scope real is 400 malformed", func(t *testing.T) {
+	t.Run("UC-043/A18 if_writer outside scope real and the in-memory stack overlay is 400 malformed", func(t *testing.T) {
 		e := setup(t, "operator")
-		if s, b := e.do("DELETE", path+"?if_writer=promotion", nil); s != 400 || b["error"] != "malformed" {
-			t.Fatalf("%d %v, want 400 malformed", s, b)
+		for _, q := range []string{"?persist=true&if_writer=promotion", "?experiment_id=x&arm=A&if_writer=promotion"} {
+			if s, b := e.do("DELETE", path+q, nil); s != 400 || b["error"] != "malformed" {
+				t.Fatalf("%s: %d %v, want 400 malformed", q, s, b)
+			}
 		}
 	})
 	t.Run("UC-043/A18 with unless_real_game: 409 real_game_live first, then 412 once no real game runs", func(t *testing.T) {

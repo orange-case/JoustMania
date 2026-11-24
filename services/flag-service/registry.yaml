@@ -55,10 +55,10 @@ flags:
   # The goal (flags.md §13.2): operator-written, a declared variant only (never a free
   # weighting), stack-wide, not persisted, so a restart returns to the file's goal.
   - {set: agent, key: objectives, kind: overlay, scope: [stack], bounds: {variants: [endurance_focused, balanced_focused, accelerate_focused, chaos_focused, mixed]}}
-  # The goal profile (#2705, flags.md §13 "Flagsmith only"): written only by the Flagsmith
-  # link's in-process path, refused over HTTP (403 flagsmith_only), so never by the agent
-  # (C-034). The marker is registry.flagsmithOnly (Go, not a yaml attribute: released images
-  # parse this file strictly, #2403). Declared variants only, stack-wide, not persisted.
+  # The goal profile (flags.md §13 "Writer list"): writers flagsmith (the link's in-process
+  # path) and menu (the operator pad); any other HTTP label is 403 writer_not_allowed. The
+  # list is registry.writerLists (Go, not a yaml attribute: released images parse this file
+  # strictly, #2403). Declared variants only, stack-wide, not persisted.
   - {set: agent, key: goal.profile, kind: overlay, scope: [stack]}
   - {set: agent, key: interventions_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: experiments_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
