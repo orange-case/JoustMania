@@ -105,7 +105,7 @@ def build_menu(servicer) -> None:
         metrics=metrics,
         callbacks=servicer,
         agent_memory_writer=servicer.agent_memory_writer,
-        get_agent_client=lambda: servicer.agent_settings_client,
+        lifecycle_live=lambda: servicer._lifecycle_live(),
     )
 
     # Admin mode handler

@@ -422,7 +422,7 @@ class SettingsOps:
         metrics,
         callbacks=None,
         agent_memory_writer: FlagServiceWriter | None = None,
-        get_agent_client: Callable[[], Any] | None = None,
+        lifecycle_live: Callable[[], bool] | None = None,
     ):
         self._get_state_manager = get_state_manager
         self.controller_channel = controller_channel
@@ -432,14 +432,16 @@ class SettingsOps:
         # UC-015 BR-001: the `agent` keys whose rows take no persist (`enabled`, the write gate, the in-memory
         # agent rows) have their own writer, with no persist field.
         self.agent_memory_writer = agent_memory_writer
-        # The in-process `agent` client GetMenuStatus reads: a `set_backend` `from` is checked against it.
-        self._get_agent_client = get_agent_client
+        # The game lifecycle is live: the lobby-only goal is re-checked under the settings lock.
+        self._lifecycle_live = lifecycle_live or (lambda: False)
         # Serializes the agent rows' and the backend's read-then-write (decision D15).
         self._settings_lock = asyncio.Lock()
         # GetMenuStatus.agent_operator_brief_variant from the background read; None = unknown.
         self.brief_variant: str | None = None
         # The flag service lists `menu` among goal.profile's writers (background read): advertise the goal keys.
         self.goal_writable = False
+        # The flag service serves writer lists (background read), so its `if_writer` works in scope stack.
+        self.overlay_clear_supported = False
         # UC-015 BR-002 / BR-003: the level a resume restores; lost on a menu restart.
         self.saved_agent_level: str | None = None
         # The write gate the stop found (`off` when unreadable); the resume restores it. None = not remembered.
@@ -741,9 +743,10 @@ class SettingsOps:
                 values[option] = target
         return values, agent
 
-    def _read_agent_rows(self) -> tuple[dict[str, str], str | None, bool]:
+    def _read_agent_rows(self) -> tuple[dict[str, str], str | None, bool, bool]:
         """One read of the `agent` set for the agent rows: their reset targets (an unknown one left out), the
-        brief in force (None = unknown) and whether goal.profile's writers include `menu`. Blocking."""
+        brief in force (None = unknown), whether goal.profile's writers include `menu`, and whether the flag
+        service has writer lists at all (an older one refuses `if_writer` in scope stack). Blocking."""
         writer = self.agent_memory_writer or self.state_manager.agent_settings_writer
         try:
             views = writer.get_set_view()
@@ -751,7 +754,7 @@ class SettingsOps:
             logger.warning(f"Reading the agent set failed: {e}")
             views = None
         if not isinstance(views, dict):
-            return {}, None, False
+            return {}, None, False, False
         targets = {}
         for option in AGENT_ROW_LADDERS:
             target = row_reset_target(option, views.get(option))
@@ -761,7 +764,11 @@ class SettingsOps:
         goal_policy = (views.get(GOAL_OPTION) or {}).get("policy") or {}
         writers = goal_policy.get("writers") if isinstance(goal_policy, dict) else None
         goal_writable = isinstance(writers, list) and WRITER_LABEL in writers
-        return targets, (row_in_force(BRIEF_OPTION, brief) if brief else None), goal_writable
+        clears_own = any(
+            isinstance(view, dict) and isinstance(view.get("policy"), dict) and "writers" in view["policy"]
+            for view in views.values()
+        )
+        return targets, (row_in_force(BRIEF_OPTION, brief) if brief else None), goal_writable, clears_own
 
     async def refresh_operator_settings(self) -> None:
         """Re-read the operator's values for GetMenuStatus (BR-018); an unreadable one is left out (unknown)."""
@@ -770,10 +777,11 @@ class SettingsOps:
         self._operator_read_at = time.monotonic()
         values = await asyncio.to_thread(self._read_all_operators)
         defaults, agent = await asyncio.to_thread(self._read_setting_defaults)
-        row_targets, brief, goal_writable = await asyncio.to_thread(self._read_agent_rows)
+        row_targets, brief, goal_writable, clears_own = await asyncio.to_thread(self._read_agent_rows)
         if generation == self._operator_generation:
             self.operator_settings = values  # else a commit landed during the read: its value stands
         self.goal_writable = goal_writable
+        self.overlay_clear_supported = clears_own
         if defaults_generation == self._defaults_generation:
             # Only when no agent command overlapped the read: a stop that landed meanwhile must keep its memory.
             self.setting_defaults = {**defaults, **row_targets}
@@ -783,9 +791,12 @@ class SettingsOps:
     def pad_commands(self) -> list[str]:
         """GetMenuStatus.pad_commands: the commands, guard keys and agent-row options this menu takes."""
         commands = list(PAD_CAPABILITIES)
-        for option, names in AGENT_ROW_CAPABILITIES.items():
-            if option != GOAL_OPTION or self.goal_writable:
-                commands.extend(names)
+        for option, (step_name, reset_name) in AGENT_ROW_CAPABILITIES.items():
+            if option == GOAL_OPTION and not self.goal_writable:
+                continue
+            commands.append(step_name)
+            if option not in RESET_OWN_OVERLAY_OPTIONS or self.overlay_clear_supported:
+                commands.append(reset_name)
         return commands
 
     @staticmethod
@@ -891,6 +902,8 @@ class SettingsOps:
         if from_value is None and option in FROM_REQUIRED_OPTIONS:
             return Result(None, None, BAD_OPTION)
         async with self._settings_lock:
+            if option in LOBBY_ONLY_OPTIONS and self._lifecycle_live():
+                return Result(None, None, GAME_ACTIVE)  # a game started while the command waited for the lock
             view = await asyncio.to_thread(self._row_view, option)
             if view is None:
                 return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
@@ -919,6 +932,8 @@ class SettingsOps:
         if not expect or (from_value is None and option in FROM_REQUIRED_OPTIONS):
             return Result(None, None, BAD_OPTION)
         async with self._settings_lock:
+            if option in RESET_LOBBY_ONLY_OPTIONS and self._lifecycle_live():
+                return Result(None, None, GAME_ACTIVE)
             view = await asyncio.to_thread(self._row_view, option)
             target = row_reset_target(option, view)
             if view is None or target is None:
@@ -1159,32 +1174,24 @@ class SettingsOps:
         """Write ``decision.backend`` (persisted); ``bad_option``, ``stale`` or ``flag_service_unavailable`` on error.
 
         ``from_backend`` (UC-016 BR-014, D12): the backend the pad's edit started from; ``stale``, nothing
-        written, when the backend in force (the in-process read the status serves) differs. Optional (D16).
+        written, when the backend the flag service serves differs. Optional (D16).
         """
         if backend not in DECISION_BACKENDS or (from_backend is not None and from_backend not in DECISION_BACKENDS):
             return Result(None, None, BAD_OPTION)
         async with self._settings_lock:
             if from_backend is not None:
-                in_force = self._backend_in_force()
-                if in_force != from_backend:
-                    return Result(in_force, None, STALE)
+                # The flag service, not flagd: flagd's sync lag could let a backend changed under the hold pass.
+                view = await asyncio.to_thread(self._default_view, DECISION_BACKEND_FLAG)
+                if view is None:
+                    return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
+                if view.get("effective_default") != from_backend:
+                    return Result(view.get("effective_default"), None, STALE)
             writer = self.state_manager.agent_settings_writer
             if not await asyncio.to_thread(self._write, writer, DECISION_BACKEND_FLAG, backend):
                 return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
             # A persisted write drops a stack overlay, which moves the reset target.
             self._defaults_changed(DECISION_BACKEND_FLAG)
             return Result(from_backend, backend)
-
-    def _backend_in_force(self) -> str | None:
-        """``decision.backend`` from the in-process client (GetMenuStatus.agent_backend); None when unresolved."""
-        try:
-            client = self._get_agent_client() if self._get_agent_client else self.state_manager.agent_settings_client
-            details = client.get_string_details(DECISION_BACKEND_FLAG, "")
-        except Exception as e:
-            logger.warning(f"Reading {DECISION_BACKEND_FLAG} failed: {e}")
-            return None
-        variant = getattr(details, "variant", None)
-        return variant if isinstance(variant, str) and variant else None
 
     # --- Feedback ---------------------------------------------------------------------------
 
