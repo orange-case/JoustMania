@@ -330,3 +330,23 @@ async def test_a_tap_shows_the_label_and_the_value_read(code, fields, expected):
     assert pad.sent() == []
     pad.clock.now += 1.6
     assert pad.screen()[0] == "JOUSTMANIA LOBBY"
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[6])
+async def test_volume_prediction_clamps_a_batch_still_in_flight_on_its_own():
+    """At `max` with +2 still being committed (nothing will change), a -1 turn shows LOUD, not MAX."""
+    pad = Pad()
+    pad.model.note_status(lobby(audio_volume_master="max"), pad.model.read_token())
+    gate = asyncio.Event()
+
+    async def at_limit(*_args, **_kwargs):
+        await gate.wait()
+        return menu_pb2.ProcessInputResponse(success=False, error="at_limit")
+
+    pad.menu.ProcessInput.side_effect = at_limit
+    await pad.turn(UP, 2)
+    await asyncio.sleep(0.01)  # the +2 batch leaves and waits for the menu
+    await pad.turn(DOWN, 1)
+    assert pad.screen()[2] == "LOUD"
+    gate.set()
+    await asyncio.wait_for(pad.actions.drain(), 2.0)

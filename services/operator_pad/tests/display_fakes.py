@@ -46,7 +46,8 @@ class FakeHandle:
 
     def transact(self, data: bytes, timeout: float) -> bytes:
         backend = self.backend
-        backend.block.wait()  # a write stuck in the kernel
+        if not backend.block.wait(5.0):  # a write stuck in the kernel, until its USB timeout
+            raise OSError(errno.ETIMEDOUT, "Connection timed out")
         if backend.fail_writes:
             raise OSError(errno.ENODEV, "No such device")
         self.reports.append(data)
