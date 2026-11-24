@@ -12,6 +12,7 @@ from services.operator_pad.gestures import (
     LAYER,
     LAYER_STEP,
     LOCK,
+    PAGE_STEP,
     PRESS,
     RELEASE,
     REPEAT,
@@ -425,3 +426,119 @@ def test_preview_key_is_the_used_single_layer_key():
     assert pad.machine.preview_key() == "K3"
     pad.at(100).release("K3")
     assert pad.machine.preview_key() is None
+
+
+# --- UC-016 BR-008: the knob with the pages ---------------------------------------------------------
+
+
+class PagesPad(Pad):
+    """A pad whose display link shows the pages (``feed(..., pages=True)``)."""
+
+    def __init__(self, timings: Timings = TIMINGS, pages: bool = True) -> None:
+        super().__init__(timings)
+        self.pages = pages
+
+    def ev(self, name: str, value: int) -> list[Gesture]:
+        got = self.machine.feed(KeyEvent(name, value, self.now), self.timings, pages=self.pages)
+        self.out.extend(got)
+        return got
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[2])
+def test_turn_alone_is_a_page_step_not_volume():
+    pad = PagesPad()
+    assert pad.turn("B") == [Gesture(PAGE_STEP, KNOB, steps=1)]
+    assert pad.turn("A") == [Gesture(PAGE_STEP, KNOB, steps=-1)]
+    assert KNOB_TURN not in [g.kind for g in pad.out]
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[2])
+def test_a_slow_detent_by_detent_turn_still_pages():
+    """m2: page steps have no pause reset (the volume's 250 ms would eat a slow turn)."""
+    pad = PagesPad(Timings(knob_events_per_step=2))
+    for t in (0, 1000, 2000, 3000):
+        pad.at(t).turn("B")
+    assert [g.kind for g in pad.out] == [PAGE_STEP, PAGE_STEP]
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[3, 4])
+def test_press_and_turn_is_volume_and_its_release_mutes_nothing():
+    pad = PagesPad()
+    assert pad.at(0).press("KNOB_PRESS") == []  # no mute at the press
+    assert pad.at(50).turn("B") == [Gesture(KNOB_TURN, KNOB, steps=1)]
+    assert pad.at(100).release("KNOB_PRESS") == []
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[4])
+def test_short_press_mutes_at_release_and_a_long_press_does_nothing():
+    pad = PagesPad()
+    pad.at(0).press("KNOB_PRESS")
+    assert pad.at(400).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=400)]
+    pad.at(1000).press("KNOB_PRESS")
+    assert pad.at(1401).release("KNOB_PRESS") == []
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[4])
+def test_encoder_jitter_on_the_push_does_not_block_the_mute():
+    """M7: a raw event short of a step while pressed is no step: the short press still mutes."""
+    pad = PagesPad(Timings(knob_events_per_step=4))
+    pad.at(0).press("KNOB_PRESS")
+    pad.at(10).turn("B")
+    assert pad.at(100).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=100)]
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[4])
+def test_knob_binding_is_cleared_at_the_next_press_and_by_reset():
+    pad = PagesPad()
+    pad.at(0).press("KNOB_PRESS")
+    pad.at(10).turn("B")  # a volume step: this press mutes nothing
+    pad.machine.reset()
+    pad.at(20).press("KNOB_PRESS")
+    assert pad.at(30).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=10)]
+    pad.at(40).press("KNOB_PRESS")
+    pad.at(50).turn("B")
+    pad.at(60).release("KNOB_PRESS")
+    pad.at(70).press("KNOB_PRESS")  # a new press starts unturned
+    assert pad.at(80).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=10)]
+    pad.at(100).press("KNOB_PRESS")
+    pad.machine.reset()  # device gone mid-press: no release, no mute
+    assert pad.at(110).release("KNOB_PRESS") == []
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[3])
+def test_a_press_bound_to_pages_drops_a_half_volume_step():
+    pad = PagesPad(Timings(knob_events_per_step=2))
+    pad.at(0).press("KNOB_PRESS")
+    pad.at(10).turn("B")
+    pad.at(20).release("KNOB_PRESS")
+    pad.at(30).press("KNOB_PRESS")
+    assert pad.at(40).turn("B") == []  # the half step before the press is gone
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"])
+def test_locked_pad_scrolls_pages_but_blocks_volume_and_mute():
+    pad = PagesPad()
+    pad.machine.locked = True
+    assert pad.turn("B") == [Gesture(PAGE_STEP, KNOB, steps=1)]
+    pad.at(0).press("KNOB_PRESS")
+    assert pad.at(10).turn("B") == []
+    assert pad.at(50).release("KNOB_PRESS") == []
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"])
+def test_turn_with_k4_or_k8_down_does_nothing_and_a_layer_key_keeps_its_layer():
+    pad = PagesPad()
+    pad.press("K4")
+    assert pad.turn("B") == []
+    pad.release("K4")
+    pad.at(5000).press("K2")
+    assert pad.turn("B") == [Gesture(LAYER_STEP, "K2", steps=1)]
+
+
+@pytest.mark.uc("UC-016", flow="A1", br=["BR-008"])
+def test_without_pages_the_knob_is_unchanged():
+    """M8: `pages=False` (and omitting it) is UC-015: turn = volume, mute at the press."""
+    for pad in (PagesPad(pages=False), Pad()):
+        assert pad.turn("B") == [Gesture(KNOB_TURN, KNOB, steps=1)]
+        assert pad.at(1000).press("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB)]
+        assert pad.at(1100).release("KNOB_PRESS") == []

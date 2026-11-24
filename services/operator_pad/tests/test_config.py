@@ -158,6 +158,17 @@ def test_preview_flags_default_on_and_150_and_survive_an_unreadable_client():
         ("display_result_ms", "operator_pad.display_result_ms", 3000, 3000),
         ("display_result_ms", "operator_pad.display_result_ms", 299, 1500),
         ("display_result_ms", "operator_pad.display_result_ms", 10001, 1500),
+        ("display_autopage_ms", "operator_pad.display_autopage_ms", 0, 0),  # BR-009 `off`
+        ("display_autopage_ms", "operator_pad.display_autopage_ms", 3000, 3000),
+        ("display_autopage_ms", "operator_pad.display_autopage_ms", 999, 5000),
+        ("display_autopage_ms", "operator_pad.display_autopage_ms", 60001, 5000),
+        ("display_autopage_ms", "operator_pad.display_autopage_ms", False, 5000),
+        ("display_home_ms", "operator_pad.display_home_ms", 30000, 30000),
+        ("display_home_ms", "operator_pad.display_home_ms", 1999, 10000),
+        ("display_home_ms", "operator_pad.display_home_ms", 0, 10000),
+        ("internet_check_ms", "operator_pad.internet_check_ms", 60000, 60000),
+        ("internet_check_ms", "operator_pad.internet_check_ms", 4999, 30000),
+        ("internet_check_ms", "operator_pad.internet_check_ms", 300001, 30000),
     ],
 )
 def test_display_flags_defaults_ranges_malformed(method, key, value, expected):
@@ -165,6 +176,64 @@ def test_display_flags_defaults_ranges_malformed(method, key, value, expected):
     client.get_integer_value.return_value = value
     assert getattr(PadConfig(client), method)() == expected
     assert client.get_integer_value.call_args.args[0] == key
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-010"])
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("google.com:443", ("google.com", 443)),
+        ("1.1.1.1:443", ("1.1.1.1", 443)),
+        ("[2606:4700::1111]:443", ("2606:4700::1111", 443)),
+        ("", None),
+        (" ", None),
+    ],
+)
+def test_internet_target_parses_host_port_and_off(raw, expected):
+    assert config_module.parse_target(raw) == expected
+    assert PadConfig(_client({"operator_pad.internet_check_target": raw})).internet_check_target() == expected
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-010"])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "google.com",
+        "google.com:0",
+        "google.com:65536",
+        ":443",
+        "2606:4700::1111:443",
+        "[]:443",
+        "[x]:443",
+        "a b:443",
+        "host:44a",
+        "[::1]",
+    ],
+)
+def test_malformed_internet_target_keeps_the_last_good_value(raw):
+    values = {"operator_pad.internet_check_target": ""}
+    config = PadConfig(_client(values))
+    assert config.internet_check_target() is None  # `off` read once
+    values["operator_pad.internet_check_target"] = raw
+    with pytest.raises(ValueError):
+        config_module.parse_target(raw)
+    assert config.internet_check_target() is None  # malformed: still off
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-010"])
+def test_a_failed_target_read_keeps_off_and_the_default_only_before_the_first_good_read():
+    client = create_autospec(OpenFeatureClient, instance=True)
+    client.get_string_value.side_effect = RuntimeError("flagd down")
+    assert PadConfig(client).internet_check_target() == ("google.com", 443)
+    client = create_autospec(OpenFeatureClient, instance=True)
+    client.get_string_value.side_effect = lambda _key, _default: ""
+    config = PadConfig(client)
+    assert config.internet_check_target() is None
+    client.get_string_value.side_effect = RuntimeError("flagd down")
+    assert config.internet_check_target() is None
+    # The OpenFeature client answers the default it is given when it cannot resolve: the last good value.
+    client.get_string_value.side_effect = lambda _key, default: default
+    assert config.internet_check_target() is None
 
 
 @pytest.mark.uc("UC-016", cond=["Pre-3"])

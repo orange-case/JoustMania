@@ -1,7 +1,8 @@
 """The screens of the pad's OLED (UC-016 BR-001): 8 lines of 21 characters, line 1 inverted.
 
 Pure: no I/O. The pad service composes every screen; the firmware only draws lines (BR-002).
-A value the status does not tell shows as ``?``, never a guess.
+A value the status does not tell shows as ``?``, never a guess. The pages of protocol 2 and
+higher (BR-006, BR-007) are composed in `render.py` from the shared tables here.
 """
 
 from __future__ import annotations
@@ -18,18 +19,36 @@ WIDTH = 21
 LINES = 8
 UNKNOWN = "?"
 
-Line = tuple[str, bool]  # (21 ASCII characters, inverted)
+# BR-002 line attributes (bit 0 from protocol 1, bits 1-2 from 2, bit 3 from 3).
+INVERTED, LARGE, UNDERLINE, MEDIUM = 0x01, 0x02, 0x04, 0x08
+
+# BR-002, BR-006 glyph bytes (protocol 2: 0x7F-0x84, protocol 3: 0x85).
+BAR_FULL, BAR_EMPTY = "\x7f", "\x80"
+ICON_INTERNET, ICON_AGENT, ICON_INSTRUCTIONS, ICON_LOCK = "\x81", "\x82", "\x83", "\x84"
+GLYPH_LAST = 0x85
+
+Line = tuple[str, int]  # (21 characters, attributes); attributes 1 / True = inverted (protocol 1)
 
 
-def fit(text: str) -> str:
-    """BR-002: ASCII 0x20 to 0x7E only (anything else is ``?``), cut and space-padded to 21 characters."""
-    clean = "".join(c if 0x20 <= ord(c) <= 0x7E else "?" for c in text)
-    return clean[:WIDTH].ljust(WIDTH)
+def clean(text: str) -> str:
+    """Data strings (names, tags) in printable ASCII only: anything else is ``?`` (glyph bytes included)."""
+    return "".join(c if 0x20 <= ord(c) <= 0x7E else "?" for c in text)
+
+
+def fit(text: str, width: int = WIDTH, glyphs: bool = False) -> str:
+    """BR-002: ASCII 0x20 to 0x7E (with ``glyphs`` also 0x7F to 0x85), anything else ``?``; cut and padded."""
+    last = GLYPH_LAST if glyphs else 0x7E
+    text = "".join(c if 0x20 <= ord(c) <= last else "?" for c in text)
+    return text[:width].ljust(width)
 
 
 @dataclass(frozen=True)
 class Screen:
     lines: tuple[Line, ...]
+    # Protocol 3: the marker bar (row, rungs, filled, marker or None, labels), sent after the lines.
+    bar: tuple | None = None
+    # Protocol 4: the wheel, three (text, now) slots (above, selected, below), sent after the lines.
+    wheel: tuple | None = None
 
     @staticmethod
     def of(texts: Sequence[str], title: bool = True) -> Screen:
@@ -55,6 +74,33 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
     "game_instructions": {"on": "ON", "off": "OFF"},
     "force_all_start": {"on": "ON", "off": "OFF"},
 }
+
+# BR-006 mode table: the full name (`pretty_name` in capitals without a leading `JOUST `, at most 14
+# characters) wherever the pad names a mode, the short name (at most 5) only in the status bar.
+MODE_NAMES: dict[str, tuple[str, str]] = {
+    "JoustFFA": ("FREE-FOR-ALL", "FFA"),
+    "JoustTeams": ("TEAMS", "TEAMS"),
+    "JoustRandomTeams": ("RANDOM TEAMS", "RTEAM"),
+    "Traitor": ("TRAITORS", "TRAIT"),
+    "Werewolf": ("WEREWOLF", "WOLF"),
+    "Zombies": ("ZOMBIES", "ZOMBI"),
+    "Swapper": ("SWAPPER", "SWAP"),
+    "FightClub": ("FIGHT CLUB", "FIGHT"),
+    "Tournament": ("TOURNAMENT", "TOURN"),
+    "NonStop": ("NON STOP JOUST", "NSTOP"),
+}
+
+
+def mode_name(selection: str | None, short_name: bool = False) -> str:
+    """A mode's full (or short) name; a mode the table does not list is its name in capitals."""
+    if not selection:
+        return UNKNOWN
+    names = MODE_NAMES.get(selection)
+    if names is None:
+        name = clean(selection.upper())
+        return name[:5] if short_name else name[:14]
+    return names[1] if short_name else names[0]
+
 
 # The setting screen's title per layer option (BR-001).
 SETTING_LABELS = {
@@ -92,7 +138,9 @@ def short(option: str, value: str | None) -> str:
     """A value in its BR-001 short form; anything not in the table in capitals; unknown is ``?``."""
     if not value:
         return UNKNOWN
-    return SHORT_FORMS.get(option, {}).get(value, value.upper())
+    if option == "current_game":
+        return mode_name(value)
+    return SHORT_FORMS.get(option, {}).get(value, clean(value.upper()))
 
 
 def result_word(result: str, up: bool = True) -> str:
@@ -113,7 +161,7 @@ def version_text(version: str | None) -> str:
 
     `latest`, `main` or a sha (IMAGE_TAG overrides for dev and dry runs) are not releases.
     """
-    match = _RELEASE_TAG.fullmatch(version or "")
+    match = _RELEASE_TAG.fullmatch(clean(version or ""))
     if match is None or match.group(1) == "0.0.0-dev":
         return "DEV"
     return f"V{match.group(1)}"
@@ -193,7 +241,7 @@ def status_screen(status, *, connection_ok: bool, locked: bool, version: str | N
     return Screen.of(
         [
             f"JOUSTMANIA {state}",
-            status.selection.upper() if status.selection else UNKNOWN,
+            mode_name(status.selection),
             f"READY {status.ready_count}/{status.connected_count}",
             agent,
             f"BACKEND {short('decision.backend', status.agent_backend)}",

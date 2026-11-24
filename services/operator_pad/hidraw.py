@@ -19,12 +19,15 @@ from pathlib import Path
 from typing import Protocol
 
 from services.operator_pad.device import DENIED_USB_IDS
-from services.operator_pad.screens import Screen
+from services.operator_pad.screens import MEDIUM, Screen
 
 CMD = 0x50  # not a VIA or Vial command id
-OP_HELLO, OP_LINE, OP_SHOW = 0x00, 0x01, 0x02
+OP_HELLO, OP_LINE, OP_SHOW, OP_BAR, OP_WHEEL = 0x00, 0x01, 0x02, 0x03, 0x04
 ERROR = 0xFF
 PROTOCOL_VERSION = 1  # the lowest version the link accepts; later ones keep the v1 ops
+NO_MARKER = 0xFF
+WHEEL_NOW = 0x01
+BAR_LABEL_BYTES = 26
 REPORT_SIZE = 32
 READ_SIZE = 64
 SYSFS_HIDRAW = Path("/sys/class/hidraw")
@@ -37,13 +40,39 @@ class ProtocolError(Exception):
     """The firmware answered with an error, or not with protocol version 1."""
 
 
+class FeatureRefusedError(ProtocolError):
+    """The firmware refused a bar or wheel op (`FF`): the caller drops to a lower layout, the link stays."""
+
+    def __init__(self, op: int) -> None:
+        super().__init__(f"op {op:#04x} refused")
+        self.op = op
+
+
 def report(op: int, *payload: int) -> bytes:
     data = bytes((CMD, op, *payload))
     return data.ljust(REPORT_SIZE, b"\x00")
 
 
-def line_report(index: int, text: str, inverted: bool) -> bytes:
-    return report(OP_LINE, index, 1 if inverted else 0, *text.encode("ascii", "replace"))
+def encode(text: str) -> bytes:
+    """One byte per character: the glyph bytes up to 0x87 pass, anything else is ``?``."""
+    return bytes(ord(c) if 0x20 <= ord(c) <= 0x87 else 0x3F for c in text)
+
+
+def line_report(index: int, text: str, attrs: int) -> bytes:
+    """A line op; a medium line (attribute bit 3) addresses medium row (index - 1) // 2 (BR-002)."""
+    attrs = int(attrs)
+    if attrs & MEDIUM:
+        index = (index - 1) // 2
+    return report(OP_LINE, index, attrs, *encode(text))
+
+
+def bar_report(row: int, rungs: int, filled: int, marker: int | None, labels) -> bytes:
+    text = encode("|".join(labels))[:BAR_LABEL_BYTES]
+    return report(OP_BAR, row, rungs, filled, NO_MARKER if marker is None else marker, *text)
+
+
+def wheel_report(slot: int, text: str, now: bool) -> bytes:
+    return report(OP_WHEEL, slot, WHEEL_NOW if now else 0, *encode(text[:21].ljust(21)))
 
 
 def show_report(seq: int) -> bytes:
@@ -161,10 +190,23 @@ def _check(handle: Handle, data: bytes, timeout: float) -> None:
         raise ProtocolError(f"op {data[1]:#04x} refused")
 
 
+def _check_feature(handle: Handle, data: bytes, timeout: float) -> None:
+    if handle.transact(data, timeout)[2] == ERROR:
+        raise FeatureRefusedError(data[1])
+
+
 def send_frame(handle: Handle, screen: Screen, seq: int, timeout: float) -> None:
-    """The 8 lines and a show, in one call: the firmware draws only on show (BR-002)."""
-    for index, (text, inverted) in enumerate(screen.lines):
-        _check(handle, line_report(index, text, inverted), timeout)
+    """The 8 lines, the bar or wheel, then a show, in one call: the firmware draws only on show (BR-002).
+
+    The bar and the wheel go after the lines: writing a line they cover removes them.
+    """
+    for index, (text, attrs) in enumerate(screen.lines):
+        _check(handle, line_report(index, text, attrs), timeout)
+    if screen.bar is not None:
+        _check_feature(handle, bar_report(*screen.bar), timeout)
+    if screen.wheel is not None:
+        for slot, (text, now) in enumerate(screen.wheel):
+            _check_feature(handle, wheel_report(slot, text, now), timeout)
     _check(handle, show_report(seq), timeout)
 
 
