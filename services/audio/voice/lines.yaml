@@ -190,6 +190,11 @@ areas:
     - {id: status_cancelled, sound: MENU_VOX_STATUS_CANCELLED, text: "Cancelled.", say: "Canceled."}
     - {id: status_no_connection, sound: MENU_VOX_STATUS_NO_CONNECTION, text: "No connection."}
 
+    # Agent page (#2747, UC-016 BR-012, BR-016)
+    - {id: agent_watching, sound: MENU_VOX_AGENT_WATCHING, text: "Watching."}
+    - {id: interventions_on, sound: MENU_VOX_INTERVENTIONS_ON, text: "Interventions on."}
+    - {id: interventions_off, sound: MENU_VOX_INTERVENTIONS_OFF, text: "Interventions off."}
+
   # Game announcers: only the lines a game mode plays (audit for #2147). Commander
   # and Fight Club play no voice line, so they have no area here.
   Joust:
