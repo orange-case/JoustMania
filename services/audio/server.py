@@ -45,7 +45,7 @@ async def serve():
     alsa_card_setting = os.getenv("ALSA_CARD", "auto")
     if alsa_card_setting == "auto":
         # alsa-lib reads ALSA_CARD too and would look up a card named "auto" (#2715).
-        os.environ.pop("ALSA_CARD", None)
+        os.environ.pop("ALSA_CARD", "auto")
     configure_alsa_device(alsa_card_setting)
 
     # Initialize OTEL (get_tracer triggers TracerProvider setup for trace export)
