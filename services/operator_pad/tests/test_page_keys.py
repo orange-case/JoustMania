@@ -416,6 +416,17 @@ async def test_a_reset_tap_shows_the_default(menu, cues):
     menu.ProcessInput.assert_not_awaited()
 
 
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+@pytest.mark.parametrize(("locked", "clean"), [(False, False), (True, False)], ids=["unclean", "locked"])
+async def test_an_unclean_or_locked_k5_hold_of_a_stopped_agent_stops_at_the_hold_time(actions, menu, locked, clean):
+    off = st(agent_enabled=False)
+    gesture = Gesture(AGENT_HOLD, "K5", held_ms=1000, locked=locked, clean=clean)
+    assert await actions.dispatch(gesture, None, off) == ("agent_switch", "ok")
+    assert sent(menu) == [{"command": "agent_switch", "direction": "stop"}]
+    await actions.dispatch(Gesture(HOLD, "K5", held_ms=1500, locked=locked, clean=clean), off, off)
+    assert len(sent(menu)) == 1  # the release does nothing more
+
+
 # --- gestures (BR-011, BR-014, BR-015) ---------------------------------------------------------------
 
 T = Timings()  # tap 400, reset 1000, K5 1000, K8 1500, lock 3000
