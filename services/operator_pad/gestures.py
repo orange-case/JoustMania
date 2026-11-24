@@ -10,7 +10,8 @@ Rules:
 - K1, K2, K3, K5, K6 and K7 are layer keys (K6: the shield mode, BR-018; its tap is unchanged):
   a knob turn while one of them is the only key down counts toward that layer and marks the key
   used, so its release commits the layer (``layer``) instead of a tap or hold;
-- the knob turns are raw events (a smooth knob sends about 25 per turn): ``knob_events_per_step``
+- the knob turns are raw events (one per detent on the rev 5 pad, about 25 per turn on a smooth
+  knob): ``knob_events_per_step``
   events in one direction make one step, per layer key or, with no layer key, for the volume; a
   change of direction restarts the count, and the remainder is dropped on the layer key's release,
   after a pause of ``KNOB_PAUSE_MS`` in turning (the volume commit pause) and on ``reset()``;

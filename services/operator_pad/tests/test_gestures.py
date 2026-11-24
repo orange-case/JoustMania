@@ -542,3 +542,15 @@ def test_without_pages_the_knob_is_unchanged():
         assert pad.turn("B") == [Gesture(KNOB_TURN, KNOB, steps=1)]
         assert pad.at(1000).press("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB)]
         assert pad.at(1100).release("KNOB_PRESS") == []
+
+
+@pytest.mark.uc("UC-015", flow="main", br=["BR-005"], steps=[8])
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"])
+def test_default_timings_one_detent_is_one_step():
+    """The rev 5 pad's detented knob: one raw event per detent makes one volume, page or layer step."""
+    pad = PagesPad(Timings(), pages=False)
+    assert pad.turn("B") == [Gesture(KNOB_TURN, KNOB, steps=1)]
+    pages = PagesPad(Timings())
+    assert pages.turn("A") == [Gesture(PAGE_STEP, KNOB, steps=-1)]
+    pages.at(1000).press("K2")
+    assert pages.turn("B") == [Gesture(LAYER_STEP, "K2", steps=1)]

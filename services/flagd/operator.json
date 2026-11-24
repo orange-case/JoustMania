@@ -50,11 +50,12 @@
     "operator_pad.knob_events_per_step": {
       "state": "ENABLED",
       "variants": {
+        "detent": 1,
         "fine": 2,
         "default": 4,
         "coarse": 6
       },
-      "defaultVariant": "default"
+      "defaultVariant": "detent"
     },
     "operator_pad.preview_enabled": {
       "state": "ENABLED",

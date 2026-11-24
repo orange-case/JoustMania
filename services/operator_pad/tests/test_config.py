@@ -104,11 +104,18 @@ def test_knob_events_per_step_in_range_is_used(value):
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005"], steps=[8])
 @pytest.mark.parametrize("value", [0, -3, 13, 100, True, "4", 2.5])
-def test_knob_events_per_step_outside_1_to_12_or_malformed_falls_back_to_4_with_a_warning(value):
+def test_knob_events_per_step_outside_1_to_12_or_malformed_falls_back_to_1_with_a_warning(value):
     with patch.object(config_module, "logger") as log:
         config = PadConfig(_client({"operator_pad.knob_events_per_step": value}))
-        assert config.knob_events_per_step() == 4
+        assert config.knob_events_per_step() == 1
     log.warning.assert_called_once()
+
+
+@pytest.mark.uc("UC-015", flow="main", br=["BR-005"], steps=[8])
+def test_knob_events_per_step_defaults_to_one_per_detent():
+    """The rev 5 pad's detented knob sends one raw event per detent (#2742)."""
+    assert PadConfig(_client({})).knob_events_per_step() == 1
+    assert Timings().knob_events_per_step == 1
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005", "BR-007"])
