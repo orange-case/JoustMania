@@ -28,6 +28,7 @@ rectangle "JoustMania" {
         usecase "UC-013\nStop the Agent from the Controller" as UC013
         usecase "UC-014\nForce-Start a Game" as UC014
         usecase "UC-015\nOperate the Game with the Operator Pad" as UC015
+        usecase "UC-016\nSee the Game State on the Operator Pad" as UC016
     }
     package "Playing" {
         usecase "UC-020\nPlay Joust Free-for-All" as UC020
@@ -101,6 +102,7 @@ host --> UC012
 host --> UC013
 host --> UC014
 host --> UC015
+host --> UC016
 host --> UC053
 host --> UC061
 
@@ -205,6 +207,7 @@ UC015 ..> UC013 : <<include>>
 UC015 ..> UC014 : <<include>>
 UC015 ..> UC027 : <<include>>
 UC015 ..> UC053 : <<include>>
+UC016 ..> UC015 : <<extend>>
 operator --> UC054
 presenter --> UC054
 UC054 --> flagsmith
