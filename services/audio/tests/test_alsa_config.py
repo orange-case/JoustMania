@@ -168,6 +168,8 @@ class TestGetDetectedCard:
 
 
 import asyncio
+import multiprocessing
+import os
 
 import pytest
 
@@ -176,12 +178,19 @@ from services.audio.alsa_config import (
     CARD_CHANGE_EXIT_CODE,
     preferred_card,
     read_proc_cards,
+    read_sysfs_cards,
     should_restart_for_card_change,
     watch_card_changes,
 )
 
 HDMI = (0, "[vc4hdmi0       ]: vc4-hdmi - vc4-hdmi-0")
 USB = (2, "[Audio          ]: USB-Audio - USB Audio")
+
+
+@pytest.fixture(autouse=True)
+def _no_host_sysfs(tmp_path, monkeypatch):
+    """Keep the host's /sys/class/sound out of the USB rule; tests that need sysfs patch it again."""
+    monkeypatch.setattr(alsa_config, "SYSFS_SOUND_PATH", str(tmp_path / "no-sysfs"))
 
 
 @pytest.mark.uc("UC-031", flow="A6", br=["BR-008"])
@@ -229,8 +238,8 @@ def _run_watcher(cards, *, is_busy=lambda: False, failed=False, max_polls=6):
         )
 
     with (
-        patch.object(alsa_config, "read_proc_cards", new=fake_cards),
-        patch.object(alsa_config, "_playback_failed", failed),
+        patch.object(alsa_config, "read_cards", new=fake_cards),
+        patch.object(alsa_config, "playback_failed", new=lambda: failed),
     ):
         asyncio.run(go())
     return calls
@@ -272,6 +281,120 @@ class TestWatcher:
         async def go():
             await asyncio.wait_for(watch_card_changes(0, lambda: calls.append(1), interval_s=0, max_polls=6), timeout=5)
 
-        with patch.object(alsa_config, "read_proc_cards", new=lambda: next(seq)):
+        with patch.object(alsa_config, "read_cards", new=lambda: next(seq)):
             asyncio.run(go())
         assert calls == []
+
+
+def _fake_sysfs(root, cards):
+    """Build /sys/class/sound-like entries: card<N>/id and a device link into a USB or platform path."""
+    devices = root / "devices"
+    sound = root / "class" / "sound"
+    sound.mkdir(parents=True)
+    for idx, card_id, usb in cards:
+        dev = devices / ("usb1/1-1/1-1.3/1-1.3:1.0" if usb else f"platform/soc/hdmi{idx}")
+        dev.mkdir(parents=True)
+        card = sound / f"card{idx}"
+        card.mkdir()
+        (card / "id").write_text(card_id + "\n")
+        os.symlink(dev, card / "device")
+    (sound / "controlC0").mkdir()  # not a card entry
+    (sound / "timer").mkdir()
+    return sound
+
+
+@pytest.mark.uc("UC-031", flow="A6", br=["BR-008"])
+class TestSysfsCards:
+    """#2715: Docker masks /proc/asound, so the watcher reads the cards from sysfs."""
+
+    def test_read_sysfs_cards_marks_usb_by_bus(self, tmp_path):
+        sound = _fake_sysfs(tmp_path, [(0, "vc4hdmi0", False), (2, "Audio", True)])
+        cards = read_sysfs_cards(str(sound))
+        assert [i for i, _ in cards] == [0, 2]
+        assert preferred_card(cards) == 2
+        assert read_sysfs_cards(str(tmp_path / "missing")) == []
+
+    def test_watcher_finds_hotplugged_usb_card_with_proc_masked(self, tmp_path):
+        sound = _fake_sysfs(tmp_path, [(0, "vc4hdmi0", False), (2, "Audio", True)])
+        calls = []
+
+        async def go():
+            await asyncio.wait_for(watch_card_changes(0, lambda: calls.append(1), interval_s=0, max_polls=4), timeout=5)
+
+        with (
+            patch.object(alsa_config, "SYSFS_SOUND_PATH", str(sound)),
+            patch.object(alsa_config, "PROC_CARDS_PATH", str(tmp_path / "masked")),
+        ):
+            asyncio.run(go())
+        assert calls == [1]
+
+    def test_proc_cards_fallback_when_sysfs_empty(self, tmp_path):
+        proc = tmp_path / "cards"
+        proc.write_text(" 0 [vc4hdmi0       ]: vc4-hdmi - vc4-hdmi-0\n")
+        with (
+            patch.object(alsa_config, "SYSFS_SOUND_PATH", str(tmp_path / "nosys")),
+            patch.object(alsa_config, "PROC_CARDS_PATH", str(proc)),
+        ):
+            assert [i for i, _ in alsa_config.read_cards()] == [0]
+
+    def test_start_rule_counts_usb_bus_card_as_usb(self, tmp_path):
+        # Start-up and watcher must prefer the same card, or a USB card without "USB" in its name restarts forever.
+        sound = _fake_sysfs(tmp_path, [(0, "vc4hdmi0", False), (2, "Speaker", True)])
+        with (
+            patch.object(alsa_config, "SYSFS_SOUND_PATH", str(sound)),
+            patch("alsaaudio.card_name", side_effect=lambda i: ("vc4-hdmi-0", "") if i == 0 else ("Speaker", "")),
+        ):
+            assert _pick_best_card([0, 2])[0] == 2
+            assert preferred_card(read_sysfs_cards(str(sound))) == 2
+
+    def test_start_and_watcher_ignore_usb_in_name_of_non_usb_bus_card(self, tmp_path):
+        # The reverse disagreement: "USB" in the start-up short name but the card is not on a USB bus.
+        sound = _fake_sysfs(tmp_path, [(0, "vc4hdmi0", False), (1, "USBish", False)])
+        with (
+            patch.object(alsa_config, "SYSFS_SOUND_PATH", str(sound)),
+            patch("alsaaudio.card_name", side_effect=lambda i: ("vc4-hdmi-0", "") if i == 0 else ("USB-ish", "")),
+        ):
+            assert _pick_best_card([0, 1])[0] == 0
+            assert preferred_card(alsa_config.read_cards()) == 0
+            assert not should_restart_for_card_change(0, alsa_config.read_cards(), failed=False)
+
+
+def _fail_in_music_process(flag):
+    """Child-process stand-in: adopts the flag passed at spawn, then fails like _open_pcm."""
+    alsa_config.adopt_playback_failed_flag(flag)
+    alsa_config.note_playback_failure()
+
+
+@pytest.mark.uc("UC-031", flow="A6", br=["BR-008"])
+class TestPlaybackFailureAcrossProcesses:
+    """#2715: music plays in a subprocess; its failure must reach the watcher in the parent."""
+
+    def test_failure_in_child_process_is_seen_by_parent(self):
+        p = multiprocessing.Process(target=_fail_in_music_process, args=(alsa_config.playback_failed_flag(),))
+        p.start()
+        p.join(timeout=30)
+        assert p.exitcode == 0
+        assert alsa_config.playback_failed()
+
+    def test_no_failure_reads_false(self):
+        assert not alsa_config.playback_failed()
+
+
+@pytest.mark.uc("UC-031", flow="A6", br=["BR-008"])
+class TestTakeAlsaCardSetting:
+    """#2715: alsa-lib must not see ALSA_CARD=auto (it looks up a card named "auto")."""
+
+    def test_auto_is_returned_and_removed(self, monkeypatch):
+        monkeypatch.setenv("ALSA_CARD", "auto")
+        assert alsa_config.take_alsa_card_setting() == "auto"
+        assert "ALSA_CARD" not in os.environ
+
+    def test_unset_defaults_to_auto(self, monkeypatch):
+        monkeypatch.delenv("ALSA_CARD", raising=False)
+        assert alsa_config.take_alsa_card_setting() == "auto"
+        assert "ALSA_CARD" not in os.environ
+
+    def test_explicit_number_is_kept(self, monkeypatch):
+        monkeypatch.setenv("ALSA_CARD", "1")
+        assert alsa_config.take_alsa_card_setting() == "1"
+        assert os.environ["ALSA_CARD"] == "1"
