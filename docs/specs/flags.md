@@ -450,9 +450,9 @@ Configuration of the optional `operator-pad` service ([UC-015](../use_cases/UC-0
 
 | Key | Type | Variants | Default | Read by | Written by | Reload |
 |---|---|---|---|---|---|---|
-| `operator_pad.display_enabled` | bool | on=true, off=false | `on` = true (off keeps the pad at UC-015 behaviour, UC-016 A1) | planned `services/operator_pad/config.py` `PadConfig` | manual edit only | live |
-| `operator_pad.display_poll_ms` | int | fast=250, default=500, slow=1000 (valid range 200 to 5000; the pad checks the range itself) | `default` = 500 (UC-016 BR-003, NFR-070) | planned `services/operator_pad/config.py` `PadConfig` | manual edit only | live |
-| `operator_pad.display_result_ms` | int | short=800, default=1500, long=3000 (valid range 300 to 10000; the pad checks the range itself) | `default` = 1500 (UC-016 BR-001: how long a result or the volume shows) | planned `services/operator_pad/config.py` `PadConfig` | manual edit only | live |
+| `operator_pad.display_enabled` | bool | on=true, off=false | `on` = true (off keeps the pad at UC-015 behaviour, UC-016 A1) | planned `services/operator_pad/config.py` `PadConfig` | manual edit only | live; unreadable keeps it on |
+| `operator_pad.display_poll_ms` | int | fast=250, default=500, slow=1000 (valid range 200 to 5000; the pad checks the range itself) | `default` = 500 (UC-016 BR-003, NFR-070) | planned `services/operator_pad/config.py` `PadConfig` | manual edit only | live; a value outside 200 to 5000 or malformed falls back to 500 with a warning |
+| `operator_pad.display_result_ms` | int | short=800, default=1500, long=3000 (valid range 300 to 10000; the pad checks the range itself) | `default` = 1500 (UC-016 BR-001: how long a result, a tap or the volume shows) | planned `services/operator_pad/config.py` `PadConfig` | manual edit only | live; a value outside 300 to 10000 or malformed falls back to 1500 with a warning |
 
 The two registry rows this feature needs (`user` / `audio_volume.master` and `user` / `play_audio`) are in §13.4 since PR2 of #2050; the `operator` set itself has no registry row (§13.5).
 
