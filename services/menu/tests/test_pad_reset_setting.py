@@ -242,7 +242,7 @@ async def test_an_unreadable_setting_fails_closed(servicer, flags, option):
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", br=["BR-013"])
 async def test_a_reset_never_answers_success_with_an_empty_value(servicer, monkeypatch):
-    async def empty(_option, _expect):
+    async def empty(_option, _expect, _from=None):
         return Result(None, "")
 
     monkeypatch.setattr(servicer.settings_ops, "reset_setting", empty)
@@ -499,6 +499,7 @@ async def test_status_lists_the_pad_commands_this_menu_understands(servicer):
     reply = await status(servicer)
     assert list(reply.pad_commands) == [
         "reset_setting",
+        "reset_setting.from",
         "interventions_switch",
         "agent_switch.only_if_stopped",
         "step_setting.from",
@@ -544,3 +545,51 @@ async def test_from_on_another_option_is_a_bad_option(servicer, flags):
     reply = await pad(servicer, "step_setting", option="num_teams", direction="up", **{"from": "two"})
     assert (reply.success, reply.error) == (False, "bad_option")
     assert flags.puts == []
+
+
+# --- reset_setting agent_level from=<level> (BR-014) ------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A3", br=["BR-013", "BR-014"])
+async def test_level_reset_whose_level_dropped_under_the_hold_is_stale(servicer, flags):
+    """Shown full -> standard (a lowering, no confirmation); the level is ambient by the commit: a raise. Refused."""
+    operator_set(flags, LEVEL, "ambient")
+
+    reply = await pad(servicer, "reset_setting", option="agent_level", expect="standard", **{"from": "full"})
+
+    assert (reply.success, reply.error) == (False, "stale")
+    assert (flags.deletes, flags.puts) == ([], [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A3", br=["BR-013", "BR-014"])
+async def test_stopped_agent_level_reset_from_another_saved_level_is_stale(servicer, flags):
+    flags.values[ENABLED] = "off"
+    servicer.settings_ops.saved_agent_level = "ambient"
+
+    reply = await pad(servicer, "reset_setting", option="agent_level", expect="standard", **{"from": "full"})
+
+    assert (reply.success, reply.error) == (False, "stale")
+    assert servicer.settings_ops.saved_agent_level == "ambient"
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
+@pytest.mark.parametrize(("enabled", "saved", "base"), [("on", None, "full"), ("off", "full", "full")])
+async def test_level_reset_from_the_level_it_replaces_commits(servicer, flags, enabled, saved, base):
+    operator_set(flags, LEVEL, "full")
+    flags.values[ENABLED] = enabled
+    servicer.settings_ops.saved_agent_level = saved
+
+    reply = await pad(servicer, "reset_setting", option="agent_level", expect="standard", **{"from": base})
+
+    assert (reply.success, reply.value) == (True, "standard")
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", br=["BR-013"])
+async def test_reset_from_on_another_option_is_a_bad_option(servicer, flags):
+    reply = await pad(servicer, "reset_setting", option="num_teams", expect="automatic", **{"from": "three"})
+    assert (reply.success, reply.error) == (False, "bad_option")
+    assert flags.deletes == []
