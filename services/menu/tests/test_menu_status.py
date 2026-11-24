@@ -140,6 +140,7 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         audio_volume_master="quiet",
         agent_enabled_state="on",
         agent_interventions_enabled_state="off",
+        pad_commands=["reset_setting", "interventions_switch", "agent_switch.only_if_stopped", "step_setting.from"],
     )
     # Never the HTTP flag writer (0.5 s per flag): in-process clients and menu memory only.
     for writer in (
