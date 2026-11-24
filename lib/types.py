@@ -349,6 +349,10 @@ class Sound(StrEnum):
     MENU_VOX_STATUS_MINIMUM = "status_minimum"
     MENU_VOX_STATUS_CANCELLED = "status_cancelled"
     MENU_VOX_STATUS_NO_CONNECTION = "status_no_connection"
+    # Agent page (#2747, UC-016 BR-012, BR-016).
+    MENU_VOX_AGENT_WATCHING = "agent_watching"
+    MENU_VOX_INTERVENTIONS_ON = "interventions_on"
+    MENU_VOX_INTERVENTIONS_OFF = "interventions_off"
 
     # Agent kill-switch (#819) voice announcements. Reuse existing on/off and
     # numbered admin vox assets so no new audio is required; the LED color is the
