@@ -517,6 +517,7 @@ async def test_status_lists_the_pad_commands_this_menu_understands(servicer):
                 "decision.operator_brief",
             )
             for command in ("step_setting", "reset_setting")
+            if command == "step_setting" or option == "inference.backend"
         ],
     ]
 

@@ -158,7 +158,7 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
             "step_setting.from",
             "set_backend.from",
             "reset_setting.from:decision.backend",
-            # The goal's keys only once the flag service lists `menu` among its writers (none read yet).
+            # Goal keys and in-memory resets only once the flag service shows writer lists (none read yet).
             *[
                 f"{command}:{option}"
                 for option in (
@@ -169,6 +169,7 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
                     "decision.operator_brief",
                 )
                 for command in ("step_setting", "reset_setting")
+                if command == "step_setting" or option == "inference.backend"
             ],
         ],
     )

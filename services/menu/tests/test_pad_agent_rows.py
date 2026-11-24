@@ -327,11 +327,14 @@ async def test_setting_defaults_report_each_rows_reset_target(servicer, flags):
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", br=["BR-011", "BR-012"])
 @pytest.mark.parametrize(
-    ("writers", "goal_listed"), [(["flagsmith", "menu"], True), (["flagsmith"], False), (None, False)]
+    ("writers", "goal_listed", "clears_own"),
+    [(["flagsmith", "menu"], True, True), (["flagsmith"], False, True), (None, False, False)],
 )
 async def test_pad_commands_list_the_goal_only_when_the_flag_service_lets_the_menu_write_it(
-    servicer, flags, writers, goal_listed
+    servicer, flags, writers, goal_listed, clears_own
 ):
+    """Without writer lists (an older flag service) `if_writer` in scope stack is a 400: the in-memory rows'
+    resets are not advertised, so the pad plays the refusal cue instead of a failure."""
     flags.goal_writers = writers
     await servicer.settings_ops.refresh_operator_settings()
 
@@ -340,8 +343,9 @@ async def test_pad_commands_list_the_goal_only_when_the_flag_service_lets_the_me
     assert "set_backend.from" in commands
     for option in ROWS:
         listed = goal_listed if option == GOAL else True
+        resettable = listed and (clears_own or option == RETRO)
         assert (f"step_setting:{option}" in commands) is listed, option
-        assert (f"reset_setting:{option}" in commands) is listed, option
+        assert (f"reset_setting:{option}" in commands) is resettable, option
 
 
 @pytest.mark.asyncio
@@ -687,7 +691,7 @@ async def test_a_failed_reset_is_flag_service_unavailable(servicer, flags):
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", br=["BR-014"])
 async def test_set_backend_from_the_backend_in_force_writes(servicer, flags):
-    servicer.agent_settings_client = agent_client(flags, **{"decision.backend": ("claude", "claude")})
+    flags.admin["decision.backend"] = {"variant": "claude", "writer": "menu"}
     reply = await pad(servicer, "set_backend", backend="openai", **{"from": "claude"})
     assert (reply.success, reply.error, reply.value) == (True, "", "openai")
     assert flags.admin["decision.backend"]["variant"] == "openai"
@@ -697,8 +701,9 @@ async def test_set_backend_from_the_backend_in_force_writes(servicer, flags):
 @pytest.mark.uc("UC-016", flow="A3", br=["BR-014"])
 async def test_set_backend_from_a_backend_no_longer_in_force_is_stale(servicer, flags):
     """The pad judged claude -> openai paid to paid (no confirmation); the backend went to rules under the
-    hold, so the switch would be an unconfirmed free-to-paid raise: refused, nothing written."""
-    servicer.agent_settings_client = agent_client(flags, **{"decision.backend": ("rules", "rules")})
+    hold, so the switch would be an unconfirmed free-to-paid raise: refused, nothing written. The in-process
+    flagd client still serves claude (its sync lag): the check reads the flag service."""
+    servicer.agent_settings_client = agent_client(flags, **{"decision.backend": ("claude", "claude")})
 
     reply = await pad(servicer, "set_backend", backend="openai", **{"from": "claude"})
 
@@ -709,10 +714,10 @@ async def test_set_backend_from_a_backend_no_longer_in_force_is_stale(servicer, 
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A3", br=["BR-014"])
-async def test_set_backend_from_an_unresolved_backend_is_stale(servicer, flags):
-    servicer.agent_settings_client = in_process_client({})
+async def test_set_backend_from_an_unreadable_backend_writes_nothing(servicer, flags):
+    flags.down = True
     reply = await pad(servicer, "set_backend", backend="claude", **{"from": "rules"})
-    assert (reply.success, reply.error) == (False, "stale")
+    assert (reply.success, reply.error) == (False, "flag_service_unavailable")
     assert flags.writes() == []
 
 
@@ -729,9 +734,9 @@ async def test_set_backend_from_outside_the_backends_is_bad_option(servicer, fla
 @pytest.mark.uc("UC-016", br=["BR-014"])
 async def test_set_backend_without_from_switches_as_before(servicer, flags):
     """D16: the dashboard, the admin controller, voice and older pads send no `from`."""
-    servicer.agent_settings_client = agent_client(flags, **{"decision.backend": ("rules", "rules")})
     reply = await pad(servicer, "set_backend", backend="claude")
     assert (reply.success, reply.value) == (True, "claude")
+    assert flags.admin["decision.backend"]["variant"] == "claude"
 
 
 # --- No unconfirmed raise at the menu boundary (UC-016 BR-014) ---------------------------------------------
@@ -811,3 +816,18 @@ async def test_a_rate_written_as_a_float_is_its_integer_rung(servicer, flags):
 
     assert (reply.success, reply.value) == (True, "20")
     assert settings_ops.canonical_value(RATE, flags.view(RATE), 8.0) == "8"
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A4", br=["BR-011"])
+@pytest.mark.uc("UC-015", flow="A1")
+async def test_a_goal_command_that_waited_for_the_lock_while_a_game_started_is_refused(servicer, flags):
+    """The servicer's lobby check ran before the lock; the game started while the command waited."""
+    flags.set_stack(GOAL, "quick_game", "menu")
+    live_lifecycle(servicer)
+
+    step_result = await servicer.settings_ops.step_setting(GOAL, "up", 1)
+    reset_result = await servicer.settings_ops.reset_setting(GOAL, "from_objectives")
+
+    assert (step_result.error, reset_result.error) == ("game_active", "game_active")
+    assert flags.writes() == []
