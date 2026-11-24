@@ -18,8 +18,8 @@ visible under `/dev/snd` on the host.
 - Compose passes `/dev/snd` through (`devices: /dev/snd:/dev/snd`) and adds the host `audio` group by number
   (`group_add: "29"` in `docker-compose.yml`). If your host `audio` group has another GID (`getent group audio`), change it.
   `docker-compose.lite.yml` runs the container `privileged` instead.
-- `ALSA_CARD` defaults to `auto` (compose). At start-up `services/audio/alsa_config.py` lists the cards, prefers the first one
-  whose name contains "USB" and otherwise takes the first card (on a Pi often an HDMI card, so set `ALSA_CARD` when the
+- `ALSA_CARD` defaults to `auto` (compose). At start-up `services/audio/alsa_config.py` lists the cards, prefers the first USB
+  card (on a USB bus in `/sys/class/sound`, or "USB" in its name) and otherwise takes the first card (on a Pi often an HDMI card, so set `ALSA_CARD` when the
   speakers are on the jack). It retries up to 3 times, one second apart, because `/dev/snd` can fill late, and falls
   back to card 0.
 - The service then rewrites `/etc/asound.conf` with that card: a `dmix` software mixer (44.1 kHz, 2 channels) as the
@@ -44,7 +44,7 @@ visible under `/dev/snd` on the host.
 2. Wrong output (for example the Pi 4 jack while no USB card is present, so an HDMI card was picked): set `ALSA_CARD` to the number from
    `aplay -l` and restart the audio container.
 3. "Permission denied" on `/dev/snd/*`: the `group_add` GID does not match the host `audio` group.
-4. Cards that appear after the container started (USB hot-plug): the audio service notices within about 10 s (2 polls of 5 s; it waits for the lobby if a game runs), logs "ALSA card change" and exits with code 75; the restart policy brings it back on the new card (UC-031 BR-008). With an explicit `ALSA_CARD` restart the container by hand.
+4. Cards that appear after the container started (USB hot-plug): the audio service watches `/sys/class/sound` (Docker masks `/proc/asound` in the unprivileged container, #2715) and notices within about 10 s (2 polls of 5 s; it waits for the lobby if a game runs), logs "ALSA card change" and exits with code 75; the restart policy brings it back on the new card (UC-031 BR-008). With an explicit `ALSA_CARD` restart the container by hand.
 5. Check `play_audio` is on and the volume flags are not zero.
 6. Choppy music during tempo changes is CPU load from resampling; check `docker stats` on a loaded Pi.
 7. Custom music and sounds, formats and limits: see UC-031 BR-003 and services.md.

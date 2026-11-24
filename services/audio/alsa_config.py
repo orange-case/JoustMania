@@ -5,6 +5,9 @@ and stores the detected card number for fallback PCM device names.
 """
 
 import logging
+import multiprocessing
+import os
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -103,7 +106,8 @@ def _pick_best_card(indexes: list[int]) -> tuple[int, str]:
         cards.append((idx, name))
 
     for idx, name in cards:
-        if "USB" in name.upper():
+        # Same rule as the card watcher (read_sysfs_cards), or it would restart the service forever.
+        if "USB" in name.upper() or is_usb_card(idx):
             logger.info("Detected ALSA cards: %s — preferring USB card %d (%s)", cards, idx, name)
             return idx, name
 
@@ -165,21 +169,74 @@ def _write_asound_conf(card_number: int) -> None:
 # --- Card-change watcher (UC-031 A6, BR-008, #2198) ---------------------------------------
 
 PROC_CARDS_PATH = "/proc/asound/cards"
+SYSFS_SOUND_PATH = "/sys/class/sound"
 CARD_CHANGE_EXIT_CODE = 75  # EX_TEMPFAIL: the compose restart policy restarts the container
 CARD_WATCH_INTERVAL_S = 5.0
 CARD_STABLE_POLLS = 2  # a change must persist this many polls in a row
 
-_playback_failed: bool = False
+# Shared memory, not a module global: music plays in a subprocess (forkserver on 3.14), and its
+# failures must reach the watcher in the parent. MusicPlayer passes this to the child (#2715).
+_playback_failed = multiprocessing.Value("b", 0, lock=False)
+
+
+def playback_failed_flag():
+    """The shared failure flag, to hand to a playback subprocess."""
+    return _playback_failed
+
+
+def adopt_playback_failed_flag(flag) -> None:
+    """In a playback subprocess: make note_playback_failure() write the parent's flag."""
+    global _playback_failed
+    _playback_failed = flag
 
 
 def note_playback_failure() -> None:
     """Record that opening or writing the output device failed (read by the card watcher)."""
-    global _playback_failed
-    _playback_failed = True
+    _playback_failed.value = 1
 
 
 def playback_failed() -> bool:
-    return _playback_failed
+    return bool(_playback_failed.value)
+
+
+def _is_usb_device(card_dir: str) -> bool:
+    return "/usb" in os.path.realpath(os.path.join(card_dir, "device"))
+
+
+def is_usb_card(idx: int) -> bool:
+    """True when sysfs places card idx on a USB bus."""
+    return _is_usb_device(os.path.join(SYSFS_SOUND_PATH, f"card{idx}"))
+
+
+def read_sysfs_cards(root: str | None = None) -> list[tuple[int, str]]:
+    """List (index, description) of the present cards from /sys/class/sound/card<N>.
+
+    Docker masks /proc/asound in an unprivileged container, sysfs stays readable. A card on a USB bus
+    gets "USB" in its description so preferred_card treats it like _pick_best_card does.
+    """
+    root = root or SYSFS_SOUND_PATH
+    try:
+        entries = os.listdir(root)
+    except OSError:
+        return []
+    cards = []
+    for entry in entries:
+        m = re.fullmatch(r"card(\d+)", entry)
+        if not m:
+            continue
+        card_dir = os.path.join(root, entry)
+        try:
+            with open(os.path.join(card_dir, "id")) as f:
+                card_id = f.read().strip()
+        except OSError:
+            card_id = "unknown"
+        cards.append((int(m.group(1)), f"{card_id} (USB)" if _is_usb_device(card_dir) else card_id))
+    return sorted(cards)
+
+
+def read_cards() -> list[tuple[int, str]]:
+    """The present cards: sysfs, or /proc/asound/cards when sysfs lists none."""
+    return read_sysfs_cards(SYSFS_SOUND_PATH) or read_proc_cards(PROC_CARDS_PATH)
 
 
 def read_proc_cards(path: str = PROC_CARDS_PATH) -> list[tuple[int, str]]:
@@ -237,7 +294,7 @@ async def watch_card_changes(
     is_busy=lambda: False,
     max_polls: int | None = None,
 ) -> None:
-    """Poll /proc/asound/cards; log one WARN and call on_change() when a restart is due.
+    """Poll the card list (read_cards); log one WARN and call on_change() when a restart is due.
 
     Keeps only counters and flags between polls (nothing grows per poll). A change must be seen on
     CARD_STABLE_POLLS polls in a row (a flapping card resets the count), and while is_busy() (
@@ -252,8 +309,8 @@ async def watch_card_changes(
     while max_polls is None or polls < max_polls:
         polls += 1
         await asyncio.sleep(interval_s)
-        cards = read_proc_cards()
-        failed = _playback_failed
+        cards = read_cards()
+        failed = playback_failed()
         if not should_restart_for_card_change(configured, cards, failed):
             seen = 0
             deferred_logged = False

@@ -743,6 +743,21 @@ class TestProcessRespawn:
             player._ensure_process_alive()
             assert player._process is None
 
+    @pytest.mark.uc("UC-031", flow="A6", br=["BR-008"])
+    def test_audio_process_gets_shared_playback_failed_flag(self):
+        """#2715: the music process must write the watcher's flag, not its own module copy."""
+        from services.audio import alsa_config
+
+        with (
+            patch("services.audio.music_player.HAS_ALSA", True),
+            patch("services.audio.music_player.Process") as mock_process_cls,
+        ):
+            from services.audio.music_player import MusicPlayer
+
+            MusicPlayer(name="test-flag")
+            args = mock_process_cls.call_args.kwargs["args"]
+            assert args[-1] is alsa_config.playback_failed_flag()
+
     def test_respawn_terminates_zombie_process(self):
         """_spawn_audio_process terminates an existing alive process before spawning."""
         with (
