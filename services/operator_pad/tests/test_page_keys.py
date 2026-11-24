@@ -882,7 +882,7 @@ def test_a_level_reset_that_raises_asks_for_the_confirmation():
     m, clock = model()
     _down(m, "K4", "AGENT", int(clock.now * 1000) - 1100, st(agent_level="ambient"))
     lines = [text.rstrip() for text, _ in m.current(clock.now).lines]
-    assert lines[0].endswith("CONFIRM?") and "PRESS TO CONFIRM" in lines[5]
+    assert lines[0].endswith("PRESS KNOB") and "PRESS TO CONFIRM" in lines[5]
     m.confirm_state("K4", True)
     assert "RELEASE TO RESET" in m.current(clock.now).lines[5][0]
 
@@ -918,7 +918,7 @@ def test_the_interventions_switch_is_a_two_state_edit_that_asks_for_the_confirma
         version, page_keys.INTERVENTIONS, status, 1, lobby_only=False, bottom=(" " * 21, 0), plan=plan
     )
     texts = [text.rstrip() for text, _ in shown.lines]
-    assert texts[0].endswith("CONFIRM?")
+    assert texts[0].endswith("PRESS KNOB")
     assert texts[1].endswith("OFF") and texts[3].endswith("ON")
 
 

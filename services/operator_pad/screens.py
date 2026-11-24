@@ -309,7 +309,7 @@ def volume_screen(variant: str | None, *, limit: str | None = None) -> Screen:
 
 # --- page keys (UC-016 BR-013, BR-015, BR-016: protocol 1's 8-line layout) ---------------------
 
-RESET_Q, CONFIRM_Q = "RESET?", "CONFIRM?"
+RESET_Q, PRESS_KNOB, CONFIRMED = "RESET?", "PRESS KNOB", "CONFIRMED"
 RELEASE_TO_RESET, PRESS_TO_CONFIRM = "RELEASE TO RESET", "PRESS TO CONFIRM"
 TRANSITION_TEXT = "AGENT IS K5"
 

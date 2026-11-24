@@ -268,8 +268,9 @@ class DeviceManager:
         from services.operator_pad.hidraw import usb_device  # hidraw imports this module
 
         self._usb = {d.path: usb_device(self._sysfs_root / Path(d.path).name / "device") for d in devices}
-        # BR-011: with the node identities unresolved, more than one pad means no page binding.
-        self._controller.pad_devices = len({usb for usb in self._usb.values() if usb is not None}) or 1
+        # BR-011: an unresolved node may be another pad; more than one possible pad means no page binding.
+        resolved = {usb for usb in self._usb.values() if usb is not None}
+        self._controller.pad_devices = len(resolved) + sum(usb is None for usb in self._usb.values())
         self._warned.clear()
         self._controller.attached(keymap)
         metrics.device_attached.set(1)

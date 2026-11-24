@@ -42,6 +42,9 @@ LIMIT_CUES = voice_prompts.LIMIT_VOICES  # "Maximum" stepping up, "Minimum" step
 CANCEL_CUE = voice_prompts.CANCELLED_VOICE
 NO_CONNECTION_CUE = voice_prompts.NO_CONNECTION_VOICE
 UNKNOWN_KEY_CUE = Sound.SFX_EXPLOSION_22
+# UC-016 BR-014: a raise waits for the knob press / the press was taken. Sounds, so they stay with a screen.
+ATTENTION_CUE = Sound.SFX_JOIN
+CONFIRMED_CUE = Sound.SFX_SHIELD_UP
 FAILURE_CUE = Sound.SFX_BEEP_LOUD
 FAILURE_CUE_GAP_SECONDS = 0.3
 # UC-015 BR-009: the limit cue plays at most once per this gap, so a burst of `at_limit` refusals
@@ -119,6 +122,12 @@ class CuePlayer:
 
     async def unknown_key(self) -> None:
         await self.play(UNKNOWN_KEY_CUE)  # a sound, not a voice line: it stays with a screen (UC-016 BR-005)
+
+    async def attention(self) -> None:
+        await self.play(ATTENTION_CUE)
+
+    async def confirmed(self) -> None:
+        await self.play(CONFIRMED_CUE)
 
     async def failure(self) -> None:
         """The menu cannot be reached: two loud beeps, then "No connection" (BR-009), in the background.
