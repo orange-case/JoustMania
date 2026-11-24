@@ -88,6 +88,12 @@ ROW_LABELS = {
     page_keys.INTERVENTIONS: "AGENT",
     "agent_level": "LEVEL",
     "decision.backend": "BACKEND",
+    "goal.profile": "GOAL",
+    "policy.max_interventions_per_minute": "RATE",
+    "policy.group_grant.enabled": "GROUP",
+    "inference.backend": "RETRO AI",
+    "inference.effort": "EFFORT",
+    "decision.operator_brief": "BRIEF",
 }
 
 
@@ -113,10 +119,15 @@ def test_each_row_key_binds_the_setting_its_row_shows(page):
         ("START", "K3", False),  # empty row
         ("AGENT", "K2", False),  # the interventions switch has no reset
         ("AGENT", "K4", True),
-        ("AGENT", "K6", False),  # GOAL, read-only
-        ("INTERV", "K3", False),  # RATE, read-only
-        ("RETRO", "K1", False),
+        ("AGENT", "K6", True),  # GOAL, settable from iteration 4
+        ("AGENT", "K7", True),
+        ("INTERV", "K3", True),  # RATE
+        ("INTERV", "K7", True),  # GROUP
+        ("RETRO", "K1", True),
+        ("RETRO", "K4", True),
+        ("RETRO", "K7", True),
         ("SYSTEM", "K6", False),
+        ("SYSTEM", "K2", False),
     ],
 )
 def test_read_only_empty_and_resetless_rows_have_no_key(page, key, active):

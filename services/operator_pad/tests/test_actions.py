@@ -50,6 +50,11 @@ def status(**kw) -> menu_pb2.GetMenuStatusResponse:
     return menu_pb2.GetMenuStatusResponse(**base)
 
 
+def backend_status(backend: str) -> menu_pb2.GetMenuStatusResponse:
+    """A menu that guards `set_backend` with `from` (UC-016 BR-014, D12)."""
+    return status(agent_backend=backend, pad_commands=[*status().pad_commands, "set_backend.from"])
+
+
 def reply(success=True, error="", value=""):
     return menu_pb2.ProcessInputResponse(success=success, error=error, value=value)
 
@@ -338,8 +343,9 @@ async def test_k8_tap_refused_by_the_menu_plays_the_refusal_cue(actions, menu, c
     ],
 )
 async def test_backend_layer_steps_wrap(actions, menu, cues, current, steps, target):
-    await actions.dispatch(Gesture(LAYER, "K1", steps=steps), status(agent_backend=current), None, on("INTERV", "K1"))
-    assert sent(menu) == [{"command": "set_backend", "backend": target}]
+    st = backend_status(current)
+    await actions.dispatch(Gesture(LAYER, "K1", steps=steps, confirmed=True), st, st, on("INTERV", "K1"))
+    assert sent(menu) == [{"command": "set_backend", "backend": target, "from": current}]
     cues.limit.assert_not_awaited()
 
 
@@ -352,9 +358,8 @@ async def test_a_full_turn_of_the_backend_wheel_sends_nothing_and_plays_nothing(
 ):
     """n % len == 0 is a no-op: no `set_backend`, no cue, never `at_limit`, with the display link up or down."""
     actions = Actions(menu, coordinator, cues, sleep=sleep, display=MagicMock(link_up=link_up))
-    result = await actions.dispatch(
-        Gesture(LAYER, "K1", steps=steps), status(agent_backend=current), None, on("INTERV", "K1")
-    )
+    st = backend_status(current)
+    result = await actions.dispatch(Gesture(LAYER, "K1", steps=steps), st, st, on("INTERV", "K1"))
     assert result == ("set_backend", "noop")
     menu.ProcessInput.assert_not_awaited()
     cues.limit.assert_not_awaited()
@@ -382,16 +387,16 @@ async def test_backend_preview_equals_commit(menu, coordinator, cues, sleep, cur
     for steps in [n for n in range(-reach, reach + 1) if n != 0]:
         actions = Actions(menu, coordinator, cues, sleep=sleep)
         menu.ProcessInput.reset_mock()
-        preview = preview_value("decision.backend", status(agent_backend=current), steps)
-        result = await actions.dispatch(
-            Gesture(LAYER, "K1", steps=steps), status(agent_backend=current), None, on("INTERV", "K1")
-        )
+        st = backend_status(current)
+        preview = preview_value("decision.backend", st, steps)
+        result = await actions.dispatch(Gesture(LAYER, "K1", steps=steps, confirmed=True), st, st, on("INTERV", "K1"))
         assert not preview.at_limit, (current, steps)
         if preview.value == current:
             assert result == ("set_backend", "noop"), (current, steps)
             assert sent(menu) == []
         else:
-            assert sent(menu) == [{"command": "set_backend", "backend": preview.value}], (current, steps)
+            expected = {"command": "set_backend", "backend": preview.value, "from": current}
+            assert sent(menu) == [expected], (current, steps)
     cues.limit.assert_not_awaited()
 
 

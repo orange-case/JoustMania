@@ -211,15 +211,15 @@ def test_planned_fields_show_values_only_as_non_empty_strings():
                 "agent_saved_level",
             )
         },
-        agent_goal_profile="balanced",
+        agent_goal_profile="balanced_contest",
         agent_max_interventions_per_minute="6",
         agent_group_grant_state="on",
         inference_backend="claude",
         inference_effort="high",
-        agent_operator_brief_state="off",
+        agent_operator_brief_variant="off",
     )
     assert page_rows(3, known, CTX, 3)[2] == ("GOAL", "BALANCED")
-    assert page_rows(4, known, CTX, 3)[1:] == [("RATE", "6/MIN"), ("GROUP", "ON")]
+    assert page_rows(4, known, CTX, 3)[1:] == [("RATE", "6/MIN"), ("GROUP", "ON")]  # off the ladder: shown as is
     assert page_rows(5, known, CTX, 3) == [("RETRO AI", "CLAUDE"), ("EFFORT", "HIGH"), ("BRIEF", "OFF")]
     zeros = SimpleNamespace(
         **{
@@ -227,7 +227,7 @@ def test_planned_fields_show_values_only_as_non_empty_strings():
             "agent_max_interventions_per_minute": 0,
             "agent_group_grant_state": False,
             "agent_goal_profile": "",
-            "agent_operator_brief_state": "maybe",
+            "agent_operator_brief_variant": None,
         }
     )
     assert page_rows(4, zeros, CTX, 3)[1:] == [("RATE", "?"), ("GROUP", "?")]

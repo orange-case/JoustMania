@@ -21,6 +21,7 @@ from lib.setting_ladders import (
     WRAPPING,
     preview_value,
 )
+from services.operator_pad import row_ladders
 from services.operator_pad.pages import NET_OK, SHIELD_WORDS, PageContext, page_rows, value_text
 from services.operator_pad.pages import PAGES as PAGE_NAMES
 from services.operator_pad.screens import (
@@ -44,6 +45,7 @@ from services.operator_pad.screens import (
     SETTING_LABELS,
     UNDERLINE,
     UNKNOWN,
+    V2_SHORT_FORMS,
     WIDTH,
     Line,
     Screen,
@@ -70,6 +72,8 @@ LADDER_BARS: dict[str, tuple[list[str], tuple[str, ...]]] = {
     "sensitivity": (KNOB_LADDERS["sensitivity"], ("AUTO", "0", "1", "2", "3", "4")),
     "num_teams": (KNOB_LADDERS["num_teams"], ("AUTO", "2", "3", "4", "5", "6")),
     "audio_volume.master": (VOLUME_LADDER, ("MUTE", "", "", "", "MAX")),
+    row_ladders.RATE: (row_ladders.LADDERS[row_ladders.RATE], tuple(row_ladders.LADDERS[row_ladders.RATE])),
+    row_ladders.EFFORT: (row_ladders.LADDERS[row_ladders.EFFORT], ("LOW", "", "", "", "MAX")),
 }
 
 # BR-007 wheels: the options in ladder order and their full names. Only `WRAPPING` options wrap;
@@ -79,7 +83,10 @@ WHEEL_LADDERS: dict[str, list[str]] = {
     "decision.backend": BACKENDS,
     "shield.activation": SHIELD_KNOB_LADDER,
     "agent_level": AGENT_POLICY_LEVELS,
+    row_ladders.GOAL: row_ladders.LADDERS[row_ladders.GOAL],
+    row_ladders.BRIEF: row_ladders.LADDERS[row_ladders.BRIEF],
 }
+WHEELS_THAT_WRAP = WRAPPING | row_ladders.WRAPPING
 
 
 def wheel_name(option: str, value: str) -> str:
@@ -202,7 +209,11 @@ def _rows_screen(
     refused: bool = False,
 ) -> Screen:
     """BR-007 NOW and NEW rows; NEW is empty when refused (A4)."""
-    rows = [("NOW", value_text(option, now, version)), ("NEW", "" if refused else value_text(option, new, version))]
+    width = MEDIUM_WIDTH if version >= 3 else LARGE_WIDTH
+    rows = [
+        ("NOW", _now_new(option, now, version, width)),
+        ("NEW", "" if refused else _now_new(option, new, version, width)),
+    ]
     if version < 3 and len(hint) > LARGE_WIDTH:
         if refused and " " in hint:
             first, rest = hint.split(" ", 1)  # BR-007: `NOT` / `POSSIBLE` over rows 2 and 3
@@ -214,6 +225,15 @@ def _rows_screen(
     return Screen(tuple(_frame(version, title, right, rows, bottom)))
 
 
+def _now_new(option: str, value: str | None, version: int, width: int) -> str:
+    """A NOW or NEW value; the protocol 2 form where the full one leaves no room for the label."""
+    text = value_text(option, value, version)
+    short_forms = V2_SHORT_FORMS.get(option, {})
+    if len(text) > width - len("NOW ") and value in short_forms:
+        return short_forms[value]
+    return text
+
+
 def _wheel_screen(title: str, right: str, option: str, now: str | None, new: str, bottom: Line) -> Screen:
     """Protocol 4: lines 1-5 empty, line 6 the divider, then the three wheel slots around NEW.
 
@@ -221,7 +241,7 @@ def _wheel_screen(title: str, right: str, option: str, now: str | None, new: str
     """
     ladder = WHEEL_LADDERS[option]
     i = ladder.index(new)
-    if option in WRAPPING:
+    if option in WHEELS_THAT_WRAP:
         entries = [ladder[(i + d) % len(ladder)] for d in (-1, 0, 1)]
     else:
         entries = [ladder[i + d] if 0 <= i + d < len(ladder) else None for d in (-1, 0, 1)]
@@ -257,7 +277,8 @@ def setting_screen(
     if refused or (lobby_only and press_status is not None and press_status.lifecycle_live):
         return _rows_screen(version, title, EDIT, option, now, None, NOT_POSSIBLE, bottom, refused=True)
     new = plan.new if plan is not None else preview_value(option, press_status, net_steps).value
-    limit = (MAXIMUM if net_steps > 0 else MINIMUM) if _at_end(option, press_status, net_steps) else None
+    at_end = _at_end(option, press_status, net_steps) or (plan is not None and plan.at_end)
+    limit = (MAXIMUM if net_steps > 0 else MINIMUM) if at_end else None
     raises = plan is not None and plan.raises
     awaiting = raises and not confirmed
     right = PRESS_KNOB if awaiting else (CONFIRMED if raises else (limit or EDIT))
