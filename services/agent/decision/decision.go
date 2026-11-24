@@ -907,6 +907,8 @@ func (l *Loop) runDecision(ctx context.Context, snapshot flags.Snapshot, c gamec
 	cost := interventionCost(d.Intervention)
 	perm := l.evaluatePermission(ctx, snapshot, c, d, now, cost, state)
 	reason, blocked := perm.reason, perm.blocked
+	// UC-040 A53: released after the write ended, so its time is recorded first.
+	defer perm.cooldown.release()
 	// UC-040 A31 step 1, A33: a shield reserved by the permission chain is kept only
 	// when the write is applied; every other way out of this function, a later
 	// refusal in the chain included, releases it.
@@ -1222,6 +1224,9 @@ type permission struct {
 	// repeatCooldown marks a lever_cooldown refusal that repeats an earlier one since
 	// the lever's last write (quiet, UC-040 A53).
 	repeatCooldown bool
+	// cooldown is the lever hold of a decision that passed step 3a (UC-040 A53), nil
+	// otherwise; the caller releases it when the decision finishes.
+	cooldown *cooldownHold
 	// repeatExperimentFlag marks an experiment_flag block of a lever already
 	// blocked on the same flag in this game (quiet, UC-040 A40 step 6).
 	repeatExperimentFlag bool
@@ -1276,7 +1281,10 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 	}
 	// 3a. Lever cooldown (UC-040 A53, BR-046): a game-wide lever changes at most once
 	// per effect window. Check-only and before the rate limit, like step 3.
-	if cooling, first := l.leverCooling(d, now); cooling {
+	// A lever that passes stays held until the decision finishes (the caller releases
+	// cooldown), so a concurrent decision for it is refused as cooling.
+	cooling, first, cooldown := l.leverCooling(d, now)
+	if cooling {
 		return permission{reason: ReasonLeverCooldown, blocked: true, repeatCooldown: !first}
 	}
 	// 4. Shield ledger (UC-040 A31 step 1, BR-020; A33, BR-022): a targeted
@@ -1288,13 +1296,13 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 		// A group reserves every target and a group slot, all or nothing (A47, A48).
 		res, refused, serial, firstRefusal := l.reserveGroupShield(ctx, snapshot, c, d, now)
 		if refused != "" {
-			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal, refusedSerial: serial}
+			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal, refusedSerial: serial, cooldown: cooldown}
 		}
 		shield = res
 	} else {
 		res, refused, firstRefusal := l.reserveShield(ctx, snapshot, c, d, now)
 		if refused != "" {
-			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal}
+			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal, cooldown: cooldown}
 		}
 		shield = res
 	}
@@ -1305,9 +1313,9 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 	// admitOrHold charges the budget on admit and may set the cycle's hold. A
 	// block returns the shield reservation, and the caller's finish releases it.
 	if !l.admitOrHold(snapshot, d, now, cost, state) {
-		return permission{reason: ReasonRateLimit, blocked: true, shield: shield}
+		return permission{reason: ReasonRateLimit, blocked: true, shield: shield, cooldown: cooldown}
 	}
-	return permission{shield: shield}
+	return permission{shield: shield, cooldown: cooldown}
 }
 
 // batteryBlocks reports whether a player-targeted decision must be blocked

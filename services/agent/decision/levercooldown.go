@@ -19,27 +19,43 @@ var cooldownLevers = decide.Set(func(iv decide.Intervention) bool { return iv.Co
 // cooldownNames are cooldownLevers, sorted.
 var cooldownNames = decide.Names(func(iv decide.Intervention) bool { return iv.Cooldown })
 
-// leverCooling is step 3a of the permission chain: whether d's lever is cooling, and
-// whether this is the first refusal since its last write. A same-value repeat never
-// gets here (step 3 blocks it first). Only while suppression is on, as the ledger is.
-func (l *Loop) leverCooling(d Decision, now time.Time) (cooling, first bool) {
-	if !l.suppressReapplied || !cooldownLevers[d.Intervention] {
-		return false, false
+// cooldownKeys are the ledger keys of cooldownNames (all game-wide).
+var cooldownKeys = func() []string {
+	keys := make([]string, len(cooldownNames))
+	for i, name := range cooldownNames {
+		keys[i] = decide.LevelKey(name, "")
 	}
-	return l.applied.cooling(appliedKey(d), now, l.effectWindow())
+	return keys
+}()
+
+// leverCooling is step 3a of the permission chain: whether d's lever is cooling,
+// and whether this is the first refusal since its last write. A decision that
+// passes holds the lever until the caller releases the hold. Only while suppression
+// is on, as the ledger is.
+func (l *Loop) leverCooling(d Decision, now time.Time) (cooling, first bool, hold *cooldownHold) {
+	if !l.suppressReapplied || !cooldownLevers[d.Intervention] {
+		return false, false, nil
+	}
+	return l.applied.cooling(appliedKey(d), normalisedValue(d.Value), now, l.effectWindow())
+}
+
+// CoolingValues is the rules engine's view of the cooldown (A53 step 5), taken once
+// per ranking: ledger key -> cooling lever. nil when none or while suppression is off.
+func (l *Loop) CoolingValues() map[string]coolingLever {
+	if !l.suppressReapplied {
+		return nil
+	}
+	return l.applied.coolingView(cooldownKeys, l.nowOrDefault()(), l.effectWindow())
 }
 
 // CoolingLevers returns the cooldown levers step 3a would refuse a new value for at
 // now (the decide state's lever_cooldown, A53 step 4), sorted; nil when none or
 // while suppression is off.
 func (l *Loop) CoolingLevers() []string {
-	if !l.suppressReapplied {
-		return nil
-	}
-	now, window := l.nowOrDefault()(), l.effectWindow()
+	view := l.CoolingValues()
 	var out []string
-	for _, name := range cooldownNames {
-		if l.applied.isCooling(decide.LevelKey(name, ""), now, window) {
+	for i, name := range cooldownNames {
+		if _, ok := view[cooldownKeys[i]]; ok {
 			out = append(out, name)
 		}
 	}
