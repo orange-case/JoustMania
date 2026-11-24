@@ -245,6 +245,7 @@ jobs:
               - 'docker-compose.yml'
               - 'docker-compose.ci.yml'  # CI overlay env vars (env-var coverage contract, #1535)
               - 'docker-compose.gateway.yml'  # gateway overlay wiring (tests/contract, #2571)
+              - 'docker-compose.operator-pad-hidraw.yml'  # the pad's hidraw rule (tests/contract, UC-016)
               - 'docs/specs/**'
               - 'scripts/**'
               - 'tools/**'

@@ -6,6 +6,7 @@ A value the status does not tell shows as ``?``, never a guess.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -104,11 +105,18 @@ def result_word(result: str, up: bool = True) -> str:
 # --- status screen ----------------------------------------------------------------------------
 
 
+_RELEASE_TAG = re.compile(r"[vV]?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)")
+
+
 def version_text(version: str | None) -> str:
-    """FR-241: ``V`` and the release tag (one ``V`` for a tag that has its own), ``DEV`` without one."""
-    if not version or version in ("dev", "0.0.0-dev"):
+    """FR-241: ``V`` and the release tag (one ``V`` for a tag that has its own), else ``DEV``.
+
+    `latest`, `main` or a sha (IMAGE_TAG overrides for dev and dry runs) are not releases.
+    """
+    match = _RELEASE_TAG.fullmatch(version or "")
+    if match is None or match.group(1) == "0.0.0-dev":
         return "DEV"
-    return f"V{version[1:]}" if version[0] in "vV" else f"V{version}"
+    return f"V{match.group(1)}"
 
 
 def _knob_value(status, option: str, effective: str | None) -> str:

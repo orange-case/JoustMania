@@ -595,12 +595,12 @@ services:
   # The pad's display (UC-016): the host's /dev bound read-only and NOT
   # recursively at /run/host-dev (no /dev/shm, /dev/pts, /dev/mqueue with it;
   # Compose v2.24+ for `bind.recursive`), so the hidraw node of the pad's raw
-  # HID interface is reachable whatever its number; the second cgroup rule
-  # allows the hidraw major, which is dynamic: joustmania-compose.sh exports
-  # HIDRAW_MAJOR from the host's /proc/devices. The fallback 13 repeats the
-  # evdev rule and grants nothing new (the display link then stays down,
-  # UC-016 A1). The major is fixed when the container is created: a hidraw
-  # driver loaded later needs a recreate. The udev rule
+  # HID interface is reachable whatever its number. The cgroup rule for the
+  # hidraw major, which is dynamic, is NOT here: it is in
+  # docker-compose.operator-pad-hidraw.yml, which joustmania-compose.sh adds
+  # only when it knows the host's hidraw major (never a guessed one: a wrong
+  # major grants other devices). Without it the display link stays down
+  # (UC-016 A1) and the keys work. The udev rule
   # scripts/setup/99-joustmania-operator-pad.rules gives the input group the
   # pad's hidraw nodes (cb00:1337 only).
   operator-pad:
@@ -621,7 +621,6 @@ services:
           recursive: disabled
     device_cgroup_rules:
       - "c 13:* rw"
-      - "c ${HIDRAW_MAJOR:-13}:* rw"
     group_add:
       - "${INPUT_GID:-996}"
     environment:

@@ -129,8 +129,15 @@ def test_status_screen_keeps_values_with_no_connection():
         (None, False, "DEV"),
         ("dev", False, "DEV"),
         ("0.0.0-dev", False, "DEV"),
-        ("a" * 40, False, "V" + "a" * 20),
         ("v0.14.0", False, "V0.14.0"),  # one V
+        ("V1.2.3-rc.1", False, "V1.2.3-rc.1"),
+        # Not a release: the IMAGE_TAG overrides for dev and dry runs, a commit sha.
+        ("latest", False, "DEV"),
+        ("main", False, "DEV"),
+        ("a" * 40, False, "DEV"),
+        ("", False, "DEV"),
+        ("1.2", False, "DEV"),
+        ("v", False, "DEV"),
     ],
 )
 def test_status_screen_last_line_locked_or_version(version, locked, line):

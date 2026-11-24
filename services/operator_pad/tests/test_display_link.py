@@ -70,6 +70,7 @@ class Link:
     async def close(self) -> None:
         self.stop.set()
         self.backend.block.set()
+        self.backend.open_block.set()
         await asyncio.wait_for(self.task, 3.0)
 
 
@@ -242,6 +243,45 @@ async def test_hung_write_never_blocks_the_loop_and_close_runs_on_the_worker_thr
     await pad.until(lambda: pad.backend.closed, seconds=4.0)
     assert pad.backend.closed[0].closed_on.startswith("pad-display")
     assert pad.backend.closed[0].closed_on != threading.current_thread().name
+
+
+@pytest.mark.uc("UC-016", flow="A1", br=["BR-002"])
+async def test_an_open_that_returns_after_its_timeout_is_closed_on_the_worker_thread(link):
+    backend = FakeBackend()
+    backend.open_block.clear()  # the open hangs past its deadline (reply 0.2 s + margin 0.5 s)
+    pad = link(backend=backend)
+    await pad.until(lambda: backend.opening == 1)
+    await asyncio.sleep(1.0)  # the link gave up on it
+    assert backend.handles == [] and not pad.model.link_up
+    backend.open_block.set()
+    await pad.until(lambda: bool(backend.handles) and backend.handles[0] in backend.closed, seconds=3.0)
+    late = backend.handles[0]
+    assert late.closed_on.startswith("pad-display") and late.reports == []
+    await pad.until(lambda: pad.model.link_up)  # the next rescan opens a fresh handle
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-001", "BR-002"])
+async def test_a_change_made_while_the_screen_is_computed_is_drawn_without_the_heartbeat(link):
+    """`dirty` is cleared before `current()`: a hook firing right after it still wakes the loop."""
+    pad = link(config=pad_config(poll_ms=60_000), heartbeat=30.0)
+    await pad.until(lambda: len(pad.backend.lines()) >= 8)
+    real = pad.model.current
+    fired = []
+
+    def current_then_a_hook(now):
+        screen = real(now)
+        if not fired:
+            fired.append(now)
+            pad.model.note_status(lobby(ready_count=2), pad.model.read_token())
+        return screen
+
+    pad.model.current = current_then_a_hook
+    pad.model.dirty.set()
+    try:
+        await pad.until(lambda: "READY 2/2" in pad.backend.last_frame(), seconds=1.5)
+    finally:
+        pad.stop.set()
+        pad.model.dirty.set()  # the loop sleeps until the 30 s heartbeat otherwise
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-002"])

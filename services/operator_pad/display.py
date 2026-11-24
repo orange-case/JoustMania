@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import functools
 import logging
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -342,6 +343,30 @@ class PadDisplay:
         """Queued on the worker thread, behind a call still stuck there: never closed under it."""
         self._executor.submit(_close_quietly, handle)
 
+    async def _open(self, deadline: float, path: str) -> hidraw.Handle:
+        """The backend's open; a handle it returns after the caller gave up is closed on the worker."""
+        lock = threading.Lock()
+        state: dict[str, object] = {}
+
+        def open_or_close() -> hidraw.Handle | None:
+            handle = self._backend.open(path)
+            with lock:
+                if state.get("abandoned"):
+                    _close_quietly(handle)
+                    return None
+                state["handle"] = handle
+            return handle
+
+        try:
+            return await self._io(deadline, open_or_close)
+        except BaseException:
+            with lock:
+                state["abandoned"] = True
+                late = state.pop("handle", None)
+            if late is not None:  # opened just as the wait ended: its result is lost here
+                self._close(late)
+            raise
+
     async def run(self, stop: asyncio.Event) -> None:
         poll = asyncio.create_task(self._poll(stop))
         try:
@@ -377,7 +402,7 @@ class PadDisplay:
             self._warn_once(f"No raw HID node of {ids[0]}:{ids[1]} found: pad display off")
             return None
         io_timeout = self._reply_timeout + IO_MARGIN_SECONDS
-        handle = await self._io(io_timeout, self._backend.open, path)
+        handle = await self._open(io_timeout, path)
         try:
             await self._io(io_timeout, handle.drain)
             version = await self._io(io_timeout, hidraw.hello, handle, self._reply_timeout)

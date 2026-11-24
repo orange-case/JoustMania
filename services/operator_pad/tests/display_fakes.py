@@ -66,11 +66,16 @@ class FakeBackend:
         self.fail_writes = False
         self.block = threading.Event()
         self.block.set()
+        self.open_block = threading.Event()  # cleared: an open hangs (a busy USB bus), bounded
+        self.open_block.set()
+        self.opening = 0
         self.handles: list[FakeHandle] = []
         self.closed: list[FakeHandle] = []
         self.all_reports: list[bytes] = []
 
     def open(self, path: str) -> FakeHandle:
+        self.opening += 1
+        self.open_block.wait(5.0)
         handle = FakeHandle(self, path)
         self.handles.append(handle)
         return handle

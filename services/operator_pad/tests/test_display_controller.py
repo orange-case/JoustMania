@@ -224,6 +224,21 @@ async def test_volume_turns_show_the_level_and_the_menu_value_rebases():
     assert pad.screen()[2] == "LOUD"
 
 
+@pytest.mark.uc("UC-016", flow="main", br=["BR-001", "BR-003"], steps=[6])
+async def test_a_status_read_started_before_a_volume_commit_never_rebases_the_volume():
+    """A poll that started before the commit ended carries the old level: the screen keeps the commit's."""
+    pad = Pad()
+    pad.model.note_status(lobby(audio_volume_master="normal"), pad.model.read_token())
+    token = pad.model.read_token()  # the poll's read leaves
+    ticket = pad.model.volume_commit_start(("steps", 1))
+    pad.model.volume_commit_end(ticket, "ok", "loud")
+    pad.model.note_status(lobby(audio_volume_master="normal"), token)  # ...and answers after the commit
+    pad.model.volume_turn(0)
+    assert pad.screen()[:3] == ["VOLUME", "", "LOUD"]
+    pad.model.note_status(lobby(audio_volume_master="normal"), pad.model.read_token())  # a later read does
+    assert pad.screen()[2] == "NORM"
+
+
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[6])
 async def test_volume_prediction_clamps_each_committed_batch():
     """At `max`: +2 writes nothing (at_limit), then -1 commits `loud`: the screen says LOUD, not MAX."""

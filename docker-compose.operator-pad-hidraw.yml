@@ -1,0 +1,18 @@
+# The operator pad's display (UC-016, services.md §3.1): the cgroup rule for
+# the host's hidraw char major, which the kernel assigns at boot.
+#
+# scripts/setup/joustmania-compose.sh adds this file only when it knows the
+# major (the host's /proc/devices, else a valid HIDRAW_MAJOR) and exports
+# HIDRAW_MAJOR for it. There is no fallback: a wrong major would grant the
+# container other devices (1 is /dev/mem), so compose refuses to render this
+# file without the variable. Without the file the pad works and its display
+# link stays down (UC-016 A1). The major is fixed when the container is
+# created: a hidraw driver loaded later needs a recreate.
+#
+#   HIDRAW_MAJOR=240 docker compose -f docker-compose.yml \
+#     -f docker-compose.operator-pad-hidraw.yml --profile operator-pad up -d operator-pad
+services:
+  operator-pad:
+    # Appended by compose to the base list (the evdev rule `c 13:* rw`).
+    device_cgroup_rules:
+      - "c ${HIDRAW_MAJOR:?set HIDRAW_MAJOR to the host's hidraw major (/proc/devices)}:* rw"

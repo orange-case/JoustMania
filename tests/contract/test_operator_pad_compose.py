@@ -3,21 +3,27 @@
 Static checks over the compose files: ``docker-compose.yml`` starts ``operator-pad`` only
 under its ``operator-pad`` profile, never privileged, with two host mounts (``/dev/input``
 read-only, and for the display of UC-016 the host's ``/dev`` read-only and not recursive at
-``/run/host-dev``), the evdev cgroup rule (char major 13, so a pad plugged in later works) and
-the hidraw one (``HIDRAW_MAJOR``, computed by ``joustmania-compose.sh``), the host's input group
-through ``INPUT_GID`` and no ``/run/udev``. No other service
+``/run/host-dev``), the evdev cgroup rule (char major 13, so a pad plugged in later works), the
+host's input group through ``INPUT_GID`` and no ``/run/udev``. The hidraw rule (``HIDRAW_MAJOR``)
+is only in ``docker-compose.operator-pad-hidraw.yml``, which ``joustmania-compose.sh`` adds with a
+known major; real compose renders both ways without a duplicate rule. No other service
 waits for it, so a stack without the profile behaves as before (FR-195). The lite stack has
 no optional services and no pad. Hardware behaviour (grab, LEDs) needs a Pi (#2050 PR8).
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import shutil
+import subprocess
 
 import infra_config as ic
 import pytest
 
 PAD = "operator-pad"
+HIDRAW_OVERLAY = "docker-compose.operator-pad-hidraw.yml"
 OVERLAYS = [
     "docker-compose.override.yml",
     "docker-compose.dev.yml",
@@ -84,18 +90,103 @@ def test_pad_mounts_dev_input_and_host_dev_read_only_not_recursive():
 
 @pytest.mark.uc("UC-015", cond=["Pre-1"])
 @pytest.mark.uc("UC-016", cond=["Pre-2"])
-def test_pad_cgroup_rules_evdev_and_hidraw_only():
-    # The fallback 13 repeats the evdev rule: it grants nothing new (UC-016 A1, the link stays down).
-    assert _pad().get("device_cgroup_rules") == [
-        "c 13:* rw",
-        "c ${HIDRAW_MAJOR:-13}:* rw",
-    ]
+def test_pad_cgroup_rules_evdev_in_the_base_hidraw_only_in_its_overlay():
+    # No hidraw fallback in the base file: a wrong major grants other devices (UC-016 A1: link down).
+    assert _pad().get("device_cgroup_rules") == ["c 13:* rw"]
+    overlay = ic.load_yaml(ic.REPO_ROOT / HIDRAW_OVERLAY)["services"]
+    assert overlay == {
+        PAD: {"device_cgroup_rules": [overlay[PAD]["device_cgroup_rules"][0]]}
+    }
+    rule = overlay[PAD]["device_cgroup_rules"][0]
+    assert re.fullmatch(r"c \$\{HIDRAW_MAJOR:\?[^}]*\}:\* rw", rule), rule
+
+
+def _render_pad(files: list[str], hidraw_major: str | None) -> tuple[list[str], str]:
+    """The pad's cgroup rules as real compose renders them, and compose's stderr."""
+    env = {k: v for k, v in os.environ.items() if k != "HIDRAW_MAJOR"}
+    if hidraw_major is not None:
+        env["HIDRAW_MAJOR"] = hidraw_major
+    args = ["docker", "compose", "--project-directory", str(ic.REPO_ROOT)]
+    for name in files:
+        args += ["-f", str(ic.REPO_ROOT / name)]
+    done = subprocess.run(
+        [*args, "--profile", PAD, "config", "--format", "json"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=ic.REPO_ROOT,
+        env=env,
+        timeout=60,
+    )
+    # `config -q` exits 0 on some errors (Compose v5): the exit status and stderr both count.
+    assert done.returncode == 0, done.stderr
+    assert "error" not in done.stderr.lower() and "equal" not in done.stderr.lower(), (
+        done.stderr
+    )
+    rules = json.loads(done.stdout)["services"][PAD].get("device_cgroup_rules", [])
+    return rules, done.stderr
+
+
+def _compose_cli() -> bool:
+    if not shutil.which("docker"):
+        return False
+    return (
+        subprocess.run(
+            ["docker", "compose", "version"], capture_output=True, check=False
+        ).returncode
+        == 0
+    )
+
+
+@pytest.mark.uc("UC-016", flow="A1", cond=["Pre-2"])
+@pytest.mark.skipif(
+    not _compose_cli(), reason="needs the docker compose CLI (no daemon)"
+)
+def test_compose_renders_unique_pad_cgroup_rules_with_and_without_the_hidraw_overlay():
+    rules, _ = _render_pad(["docker-compose.yml"], None)
+    assert rules == ["c 13:* rw"]
+    rules, _ = _render_pad(["docker-compose.yml", HIDRAW_OVERLAY], "240")
+    assert rules == ["c 13:* rw", "c 240:* rw"]
+    assert len(set(rules)) == len(rules)
+
+
+@pytest.mark.uc("UC-016", flow="A1", cond=["Pre-2"])
+@pytest.mark.skipif(
+    not _compose_cli(), reason="needs the docker compose CLI (no daemon)"
+)
+def test_hidraw_overlay_refuses_to_render_without_a_major():
+    done = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--project-directory",
+            str(ic.REPO_ROOT),
+            "-f",
+            str(ic.REPO_ROOT / "docker-compose.yml"),
+            "-f",
+            str(ic.REPO_ROOT / HIDRAW_OVERLAY),
+            "--profile",
+            PAD,
+            "config",
+            "-q",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=ic.REPO_ROOT,
+        env={k: v for k, v in os.environ.items() if k != "HIDRAW_MAJOR"},
+        timeout=60,
+    )
+    assert done.returncode != 0 or "HIDRAW_MAJOR" in done.stderr, (
+        "no fallback major (UC-016 A1)"
+    )
 
 
 @pytest.mark.uc("UC-016", cond=["Pre-2"])
 def test_hidraw_major_is_documented_and_computed_by_the_pi_wrapper():
     wrapper = (ic.REPO_ROOT / "scripts/setup/joustmania-compose.sh").read_text()
     assert "/proc/devices" in wrapper and "export HIDRAW_MAJOR" in wrapper
+    assert HIDRAW_OVERLAY in wrapper
     assert "HIDRAW_MAJOR" in (ic.REPO_ROOT / ".env.example").read_text()
     flags = (ic.REPO_ROOT / "docs/specs/flags.md").read_text()
     section = flags.split("### 15.2", 1)[1]
