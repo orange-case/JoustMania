@@ -148,7 +148,12 @@ only when every image compose resolves there is on the Pi; `--status` shows both
 drop-in is honoured too. Set the whole comma-separated list in one place: a unit drop-in `Environment=` wins over
 `.env.local`, and a profile missing from the winning list is off. The start script removes the container of a profile that is off (python-hid, operator-pad), so
 switching a profile off takes effect at the next start. The operator pad ([UC-015](use_cases/UC-015.md)) reads `/dev/input`
-as the host's `input` group: set `INPUT_GID` in `.env.local` when `getent group input` is not 996.
+as the host's `input` group: set `INPUT_GID` in `.env.local` when `getent group input` is not 996. Its display
+([UC-016](use_cases/UC-016.md)) opens the pad's raw HID node: `scripts/setup/setup_runtime.sh` installs the udev rule
+`scripts/setup/99-joustmania-operator-pad.rules` (the pad's hidraw nodes for the `input` group); on a Pi set up before
+#2741 install it once by hand (`sudo install -m 0644 scripts/setup/99-joustmania-operator-pad.rules /etc/udev/rules.d/`,
+`sudo udevadm control --reload-rules`, `sudo udevadm trigger --subsystem-match=hidraw`). `joustmania-compose.sh` sets
+`HIDRAW_MAJOR` from `/proc/devices`; with the Vial app open on the same host the display goes off and on.
 
 The stage Pi sets `DEPLOYMENT_ENVIRONMENT=production` in `.env.local` (#2646): it becomes the OTel resource attribute
 `deployment.environment` on every service and the collector, which the gateway export (#2571) filters on. Unset, it
@@ -414,8 +419,9 @@ checklists below are the code side.
 
 `controller-manager`, `python-hid`, `rust-hid` and `pairing-daemon` run `privileged` for USB/HID and
 Bluetooth access; `pairing-daemon` also uses the host network (raw HCI). `audio` is unprivileged and gets the
-sound devices. `operator-pad` (opt-in profile) is unprivileged: a read-only `/dev/input` mount, the cgroup
-rule `c 13:* rw` and the host's `input` group (`INPUT_GID`). Details and the reasons: [services.md](specs/services.md#mode-to-config-message-privileges-libraries-and-proto-files).
+sound devices. `operator-pad` (opt-in profile) is unprivileged: a read-only `/dev/input` mount, the host's `/dev`
+read-only and not recursive at `/run/host-dev` (the display's hidraw node), the cgroup rules `c 13:* rw` and
+`c ${HIDRAW_MAJOR:-13}:* rw` and the host's `input` group (`INPUT_GID`). Details and the reasons: [services.md](specs/services.md#mode-to-config-message-privileges-libraries-and-proto-files).
 Without hardware, `docker-compose.ci.yml` removes the audio devices and moves the hardware services behind
 the `hardware` profile.
 
