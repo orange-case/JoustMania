@@ -57,10 +57,10 @@ def build_menu(servicer) -> None:
     # served by the flag service (#1412): the kill switch is a persisted admin
     # setting (PUT /agent/interventions_allowed {"persist": true}, FR-019, D10).
     servicer.agent_settings_writer = FlagServiceWriter("agent")
-    # The operator pad's kill switch and write gate (#2050, #2093, UC-015 BR-001): agent/enabled and
-    # agent/interventions_enabled have no persist in the registry (a persisted write is 400) and
-    # must not survive a restart (UC-045 step 7).
-    servicer.agent_enabled_writer = FlagServiceWriter("agent", persist=False)
+    # The operator pad's in-memory agent writes (#2050, #2093, UC-015 BR-001, UC-016 BR-012): agent/enabled,
+    # agent/interventions_enabled and the in-memory agent rows have no persist in the registry (a persisted
+    # write is 400) and must not survive a restart (UC-045 step 7).
+    servicer.agent_memory_writer = FlagServiceWriter("agent", persist=False)
 
     # OpenFeature clients for reading settings
     servicer.game_settings_client = get_flag_client("game")
@@ -104,7 +104,8 @@ def build_menu(servicer) -> None:
         controller_channel=servicer.controller_channel,
         metrics=metrics,
         callbacks=servicer,
-        agent_enabled_writer=servicer.agent_enabled_writer,
+        agent_memory_writer=servicer.agent_memory_writer,
+        get_agent_client=lambda: servicer.agent_settings_client,
     )
 
     # Admin mode handler

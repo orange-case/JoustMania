@@ -1042,7 +1042,7 @@ def test_the_kill_switch_writer_never_persists():
 
     menu = make_real_servicer(writer_factory=factory)
     assert (("agent",), {"persist": False}) in calls
-    assert menu.settings_ops.agent_enabled_writer is menu.agent_enabled_writer
+    assert menu.settings_ops.agent_memory_writer is menu.agent_memory_writer
     assert menu.admin_handler.settings_ops is menu.settings_ops
 
 

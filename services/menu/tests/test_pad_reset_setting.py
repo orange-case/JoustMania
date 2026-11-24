@@ -169,11 +169,13 @@ async def test_reset_with_a_different_expect_is_stale_and_clears_nothing(service
     [
         "audio_volume.master",
         "current_game",
-        "goal.profile",
         "enabled",
         "interventions_enabled",
         "interventions_allowed",
-        "policy.max_interventions_per_minute",
+        # D9: the group shield's other keys stay with scripts and Flagsmith.
+        "policy.group_grant.max_per_game",
+        "policy.group_grant.real_games",
+        "inference.model",
         "",
     ],
 )
@@ -503,6 +505,19 @@ async def test_status_lists_the_pad_commands_this_menu_understands(servicer):
         "interventions_switch",
         "agent_switch.only_if_stopped",
         "step_setting.from",
+        "set_backend.from",
+        "reset_setting.from:decision.backend",
+        *[
+            f"{command}:{option}"
+            for option in (
+                "policy.max_interventions_per_minute",
+                "policy.group_grant.enabled",
+                "inference.backend",
+                "inference.effort",
+                "decision.operator_brief",
+            )
+            for command in ("step_setting", "reset_setting")
+        ],
     ]
 
 
