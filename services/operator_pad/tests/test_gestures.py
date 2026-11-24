@@ -465,8 +465,8 @@ def test_a_slow_detent_by_detent_turn_still_pages():
 def test_press_and_turn_is_volume_and_its_release_mutes_nothing():
     pad = PagesPad()
     assert pad.at(0).press("KNOB_PRESS") == []  # no mute at the press
-    assert pad.at(50).turn("B") == [Gesture(KNOB_TURN, KNOB, steps=1)]
-    assert pad.at(100).release("KNOB_PRESS") == []
+    assert pad.at(200).turn("B") == [Gesture(KNOB_TURN, KNOB, steps=1)]
+    assert pad.at(300).release("KNOB_PRESS") == []
 
 
 @pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[4])
@@ -488,31 +488,52 @@ def test_encoder_jitter_on_the_push_does_not_block_the_mute():
 
 
 @pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[4])
+def test_one_stray_event_on_the_push_mutes_at_one_event_per_step():
+    """A raw event inside the push-jitter window is dropped, even when one event is a whole step."""
+    pad = PagesPad()
+    pad.at(0).press("KNOB_PRESS")
+    assert pad.at(140).turn("B") == []  # inside the 150 ms window
+    assert pad.at(200).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=200)]
+    assert KNOB_TURN not in [g.kind for g in pad.out]
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[3, 4])
+@pytest.mark.parametrize("per_step", [1, 4])
+def test_a_turn_after_the_push_jitter_window_is_volume_and_mutes_nothing(per_step):
+    pad = PagesPad(Timings(knob_events_per_step=per_step))
+    pad.at(0).press("KNOB_PRESS")
+    for k in range(per_step):
+        pad.at(150 + k).turn("B")
+    assert pad.at(300).release("KNOB_PRESS") == []
+    assert [g for g in pad.out if g.kind == KNOB_TURN] == [Gesture(KNOB_TURN, KNOB, steps=1)]
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[4])
 def test_knob_binding_is_cleared_at_the_next_press_and_by_reset():
     pad = PagesPad()
     pad.at(0).press("KNOB_PRESS")
-    pad.at(10).turn("B")  # a volume step: this press mutes nothing
+    pad.at(200).turn("B")  # a volume step: this press mutes nothing
     pad.machine.reset()
-    pad.at(20).press("KNOB_PRESS")
-    assert pad.at(30).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=10)]
-    pad.at(40).press("KNOB_PRESS")
-    pad.at(50).turn("B")
-    pad.at(60).release("KNOB_PRESS")
-    pad.at(70).press("KNOB_PRESS")  # a new press starts unturned
-    assert pad.at(80).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=10)]
-    pad.at(100).press("KNOB_PRESS")
+    pad.at(220).press("KNOB_PRESS")
+    assert pad.at(230).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=10)]
+    pad.at(240).press("KNOB_PRESS")
+    pad.at(400).turn("B")
+    assert pad.at(410).release("KNOB_PRESS") == []
+    pad.at(420).press("KNOB_PRESS")  # a new press starts unturned
+    assert pad.at(430).release("KNOB_PRESS") == [Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=10)]
+    pad.at(450).press("KNOB_PRESS")
     pad.machine.reset()  # device gone mid-press: no release, no mute
-    assert pad.at(110).release("KNOB_PRESS") == []
+    assert pad.at(460).release("KNOB_PRESS") == []
 
 
 @pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[3])
 def test_a_press_bound_to_pages_drops_a_half_volume_step():
     pad = PagesPad(Timings(knob_events_per_step=2))
     pad.at(0).press("KNOB_PRESS")
-    pad.at(10).turn("B")
-    pad.at(20).release("KNOB_PRESS")
-    pad.at(30).press("KNOB_PRESS")
-    assert pad.at(40).turn("B") == []  # the half step before the press is gone
+    pad.at(200).turn("B")
+    pad.at(220).release("KNOB_PRESS")
+    pad.at(230).press("KNOB_PRESS")
+    assert pad.at(400).turn("B") == []  # the half step before the press is gone
 
 
 @pytest.mark.uc("UC-016", flow="A5", br=["BR-008"])

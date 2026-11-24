@@ -1,9 +1,11 @@
 """The internet check (UC-016 BR-010, FR-256): a TCP connect on its own thread, one at a time. Bounded waits."""
 
 import asyncio
+import contextlib
 import socket
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -127,3 +129,25 @@ def test_tcp_check_failed_lookup_is_down_and_ipv4_is_tried_first(monkeypatch):
     monkeypatch.setattr(internet.socket, "getaddrinfo", lookup)
     assert not tcp_check("example.test", 443, 1.0)
     assert families == [socket.AF_INET, 0]
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-010"])
+def test_tcp_check_shares_the_budget_so_a_later_address_is_still_tried(monkeypatch):
+    """Several A records, the first ones dead: the whole check stays within the budget the caller waits."""
+    clock = [0.0]
+    tried = []
+    addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (f"192.0.2.{k}", 443)) for k in (1, 2, 3)]
+
+    def connect(address, timeout):
+        tried.append((address[0], timeout))
+        if address[0] != "192.0.2.3":
+            clock[0] += timeout  # a dead address uses its whole timeout
+            raise TimeoutError
+        return contextlib.nullcontext()
+
+    monkeypatch.setattr(internet.socket, "getaddrinfo", lambda *_a, **_k: addresses)
+    monkeypatch.setattr(internet.socket, "create_connection", connect)
+    monkeypatch.setattr(internet, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    assert tcp_check("example.test", 443, 3.0)
+    assert [a for a, _ in tried] == ["192.0.2.1", "192.0.2.2", "192.0.2.3"]
+    assert clock[0] <= 3.0 and tried[-1][1] > 0

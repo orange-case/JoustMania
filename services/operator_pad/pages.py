@@ -181,15 +181,15 @@ class Pager:
         self.shown_at = now
 
     def tick(self, now: float, idle: bool, autopage_s: float, home_s: float) -> bool:
-        """Apply the due return to `HOME` and auto-page; True when the page changed."""
+        """Apply the due return to `HOME` and auto-page while idle; True when the page changed."""
+        if not idle:
+            return False  # never move the page under a held key or a screen over it
         changed = False
         if self._home_armed and self._last_input is not None and now - self._last_input >= home_s:
             self._home_armed = False
             if self.page != HOME or not self.cycling:
                 self.page, self.cycling, self.shown_at = HOME, True, now
                 changed = True
-        if not idle:
-            return changed
         if self.cycling and autopage_s > 0 and now - self.shown_at >= autopage_s:
             self.page = (self.page + 1) % len(PAGES)
             self.shown_at = now
@@ -198,9 +198,11 @@ class Pager:
 
     def next_wake(self, idle: bool, autopage_s: float, home_s: float) -> float | None:
         """When `tick` next has something to do, or None."""
+        if not idle:
+            return None
         deadlines = []
         if self._home_armed and self._last_input is not None:
             deadlines.append(self._last_input + home_s)
-        if idle and self.cycling and autopage_s > 0:
+        if self.cycling and autopage_s > 0:
             deadlines.append(self.shown_at + autopage_s)
         return min(deadlines) if deadlines else None

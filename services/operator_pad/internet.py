@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import logging
 import socket
+import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 
@@ -27,7 +28,12 @@ WAIT_MARGIN_SECONDS = 1.0  # a check not done by then counts as down (a slow loo
 
 
 def tcp_check(host: str, port: int, timeout: float = CONNECT_TIMEOUT_SECONDS) -> bool:
-    """True when a TCP connect to host:port succeeds; IPv4 first, so a slow IPv6 failure never dominates."""
+    """True when a TCP connect to host:port succeeds within ``timeout`` in all; IPv4 first.
+
+    The addresses share what is left of the budget, so with several A records a dead first one never
+    uses it all: each later address still gets its turn before the caller's wait gives up.
+    """
+    deadline = time.monotonic() + timeout
     try:
         infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
     except OSError:
@@ -35,9 +41,12 @@ def tcp_check(host: str, port: int, timeout: float = CONNECT_TIMEOUT_SECONDS) ->
             infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
         except OSError:
             return False
-    for *_, address in infos:
+    for k, (*_, address) in enumerate(infos):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
         try:
-            with socket.create_connection(address[:2], timeout=timeout):
+            with socket.create_connection(address[:2], timeout=remaining / (len(infos) - k)):
                 return True
         except OSError:
             continue

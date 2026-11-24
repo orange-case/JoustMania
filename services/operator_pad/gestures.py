@@ -31,7 +31,8 @@ With the pages (``feed(..., pages=True)``: the display link is up with protocol 
 UC-016 BR-008) the knob with no key down changes: a turn alone is a ``page_step`` (counted like a
 volume step but with no pause reset, so a slow turn pages too; also while locked), a turn while
 the knob is pressed is the volume, and the mute fires at the release of a knob press held up to
-``tap_ms`` without a completed volume step. The binding is made at the knob press.
+``tap_ms`` without a completed volume step. The binding is made at the knob press; raw turn events
+in the first ``KNOB_PUSH_JITTER_MS`` after it are dropped (the encoder jitters on the push).
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ KNOB = "KNOB"
 PRESS, RELEASE, REPEAT = 1, 0, 2
 
 KNOB_PAUSE_MS = 250  # BR-005: a pause this long in turning drops the volume remainder
+KNOB_PUSH_JITTER_MS = 150  # UC-016 BR-008: raw turns this soon after a knob press are the push, not a turn
 
 TAP = "tap"
 HOLD = "hold"
@@ -237,6 +239,8 @@ class GestureMachine:
             return [Gesture(PAGE_STEP, KNOB, steps=step)] if step else []
         if self.locked:
             return []
+        if self._knob_pages and t_ms - self._knob_pressed_ms < KNOB_PUSH_JITTER_MS:
+            return []  # one stray detent of the push would be a whole step at one event per step
         previous_ms, self._last_volume_turn_ms = self._last_volume_turn_ms, t_ms
         if previous_ms is None or t_ms - previous_ms >= KNOB_PAUSE_MS:
             self._volume_events = (0, 0)  # the volume commit pause: a half step never writes

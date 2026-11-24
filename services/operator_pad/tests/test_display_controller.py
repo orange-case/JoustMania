@@ -404,6 +404,7 @@ async def test_knob_turn_with_pages_shows_next_page_and_sends_nothing():
 async def test_press_and_turn_sets_volume_and_short_press_mutes_at_release():
     pad = paged()
     await pad.key(KNOB_PRESS, PRESS)
+    pad.t += 200  # past the push jitter
     await pad.turn(UP)
     await pad.key(KNOB_PRESS, RELEASE)
     await asyncio.wait_for(pad.actions.drain(), 2.0)

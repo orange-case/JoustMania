@@ -58,6 +58,19 @@ def test_home_return_with_autopage_off_shows_home_and_stays():
     assert not pager.tick(100.0, True, 0.0, HOME_S) and pager.page == HOME
 
 
+@pytest.mark.uc("UC-016", flow="A6", br=["BR-009"], steps=[3])
+def test_home_return_waits_for_keys_up():
+    """A key held past display_home_ms never changes the page under it: the return comes when idle again."""
+    pager = Pager(0.0)
+    pager.input(0.0)
+    pager.step(2, 0.0)
+    assert not pager.tick(10.0, False, AUTO, HOME_S) and pager.page == 2
+    assert not pager.tick(25.0, False, AUTO, HOME_S) and pager.page == 2
+    assert pager.next_wake(False, AUTO, HOME_S) is None
+    assert pager.next_wake(True, AUTO, HOME_S) == 10.0  # due: applies at the next idle tick
+    assert pager.tick(25.5, True, AUTO, HOME_S) and pager.page == HOME and pager.cycling
+
+
 @pytest.mark.uc("UC-016", flow="A6", br=["BR-009"])
 def test_no_home_return_without_input_since_link_up_and_none_at_home_while_cycling():
     pager = Pager(0.0)
@@ -146,6 +159,23 @@ def test_model_volume_marker_is_the_level_when_the_turn_began():
     m.model.volume_turn(2)
     screen = m.model.current(m.now)
     assert screen.bar[2:4] == (5, 2)  # NEW `max` filled, marker on `normal`
+
+
+@pytest.mark.uc("UC-016", flow="A6", br=["BR-009"], steps=[1])
+def test_model_page_under_a_long_result_shows_for_a_full_period_after_it():
+    """A late result (pending 6 s + result) outlasts the period: the page does not advance as it comes back."""
+    m = Model()
+    m.model.note_input(True)
+    m.model.note_input(False)
+    m.model.pending("SENSITIVITY")
+    m.now += 6.0
+    m.model.result("SENSITIVITY", "FAST")
+    m.now += m.config.display_result_ms() / 1000
+    assert m.title().startswith("HOME")
+    m.now += 4.9
+    assert m.title().startswith("HOME")
+    m.now += 0.1
+    assert m.title().startswith("GAME")
 
 
 @pytest.mark.uc("UC-016", flow="A6", br=["BR-009"])

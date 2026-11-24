@@ -408,6 +408,7 @@ def _check_limits(version: int, screen) -> None:
         assert screen.bar is None
 
 
+@pytest.mark.uc("UC-016", flow="main", br=["BR-007"])
 def test_ladders_assumed_by_the_bars():
     """The rung labels match the ladders the preview steps (drift guard)."""
     assert render.LADDER_BARS["sensitivity"][0][1:] == SENSITIVITY_LADDER
