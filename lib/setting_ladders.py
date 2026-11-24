@@ -6,7 +6,8 @@ from `GetMenuStatus` plus the knob steps (the live preview, #2106) is the value 
 `step_setting` commits on release. The menu steps the flag ladders (sensitivity, teams,
 instructions, volume) through `FlagServiceWriter.step_variant`, which reads the variant order
 from the flag service; these ladders are that order, and a menu test pins them to the flag
-files (`services/flagd/*.json`).
+files (`services/flagd/*.json`). The agent rows (`AGENT_ROW_LADDERS`, UC-016 BR-012) are stepped by the
+menu from the value in force, in their canonical format, and never restart outside their ladder.
 
 Pure module: no I/O, no service imports.
 """
@@ -54,14 +55,48 @@ AGENT_RESUME_FALLBACK_LEVEL = "ambient"
 
 # UC-044 decision backends, in knob order (UC-015 BR-004; wraps, `WRAPPING`).
 BACKENDS: list[str] = ["rules", "claude", "openai", "jev"]
+# UC-016 BR-014 (D12): the backends that call a paid remote API; `rules` is free.
+PAID_BACKENDS: frozenset[str] = frozenset({"claude", "openai", "jev"})
 
-# Options of the menu's `step_setting` whose ladder is a flag's variants (`step_variant`).
+# UC-016 BR-012 (iteration 4): the agent rows the pad edits. Each ladder is in the option's canonical
+# format (services.md §3.1), the one the status, `from`, `expect`, `setting_defaults` and `value` use,
+# never the flag file's declared order.
+GOAL_OPTION = "goal.profile"
+RATE_OPTION = "policy.max_interventions_per_minute"
+GROUP_OPTION = "policy.group_grant.enabled"
+RETRO_BACKEND_OPTION = "inference.backend"
+EFFORT_OPTION = "inference.effort"
+BRIEF_OPTION = "decision.operator_brief"
+GOAL_LADDER: list[str] = ["from_objectives", "long_running_game", "lively_finale", "balanced_contest", "quick_game"]
+# The rate by value, as integer decimals; `RATE_VARIANTS` names the declared variant of each rung.
+RATE_LADDER: list[str] = ["1", "2", "4", "8", "20"]
+RATE_VARIANTS: dict[str, str] = {"1": "conservative", "2": "default", "4": "aggressive", "8": "lively", "20": "frenzy"}
+RETRO_BACKEND_LADDER: list[str] = ["stub", "claude"]
+EFFORT_LADDER: list[str] = ["low", "medium", "high", "xhigh", "max"]
+BRIEF_LADDER: list[str] = ["off", "unkillable", "protect_weakest"]
+# A brief text equal to no preset byte for byte (a script's or Flagsmith's free text): never stepped or cleared.
+BRIEF_CUSTOM = "custom"
+AGENT_ROW_LADDERS: dict[str, list[str]] = {
+    GOAL_OPTION: GOAL_LADDER,
+    RATE_OPTION: RATE_LADDER,
+    GROUP_OPTION: ON_OFF_LADDER,
+    RETRO_BACKEND_OPTION: RETRO_BACKEND_LADDER,
+    EFFORT_OPTION: EFFORT_LADDER,
+    BRIEF_OPTION: BRIEF_LADDER,
+}
+# A value in force off these ladders is refused, never moved to the first rung (D4, D11).
+AGENT_ROW_OPTIONS = frozenset(AGENT_ROW_LADDERS)
+# UC-016 BR-014 (D3): a step up these ladders raises what the agent may do or spend.
+RAISE_LADDER_OPTIONS: frozenset[str] = frozenset({RATE_OPTION, GROUP_OPTION, RETRO_BACKEND_OPTION, EFFORT_OPTION})
+
+# Options of the menu's `step_setting` whose ladder is a flag's variants (`step_variant`), and the agent rows.
 FLAG_LADDERS: dict[str, list[str]] = {
     "sensitivity": SENSITIVITY_LADDER,
     "num_teams": TEAMS_LADDER,
     "force_all_start": ON_OFF_LADDER,
     "game_instructions": ON_OFF_LADDER,
     "audio_volume.master": VOLUME_LADDER,
+    **AGENT_ROW_LADDERS,
 }
 
 # The persisted pad settings with an `automatic` rung (UC-015 BR-018, generalised by #2222): their knob
@@ -83,7 +118,30 @@ AUTOMATIC_OPTIONS = frozenset(KNOB_LADDERS)
 # back), with or without the pad's display. Named one by one, never a default: the agent level and the
 # saved-level ladder stay clamped (a kill switch that wraps from `none` to `full` is unsafe), and so do
 # the sensitivity, the teams, the volume and the toggles.
-WRAPPING: frozenset[str] = frozenset({"current_game", "decision.backend", SHIELD_OPTION})
+WRAPPING: frozenset[str] = frozenset({"current_game", "decision.backend", SHIELD_OPTION, GOAL_OPTION})
+
+
+def is_raise(option: str, old: str | None, new: str | None) -> bool | None:
+    """UC-016 BR-014: whether changing ``option`` from ``old`` to ``new`` raises what the agent may do or spend.
+
+    None when it cannot be judged (a value unknown or off the ladder): the caller refuses, never confirms blind.
+    Options that are never a raise (the goal, the brief, the game settings) answer False.
+    """
+    if option == "decision.backend":
+        if new not in BACKENDS:
+            return None
+        if new not in PAID_BACKENDS:
+            return False
+        return None if old not in BACKENDS else old not in PAID_BACKENDS
+    if option == "agent_level":
+        ladder = AGENT_POLICY_LEVELS
+    elif option in RAISE_LADDER_OPTIONS:
+        ladder = AGENT_ROW_LADDERS[option]
+    else:
+        return False
+    if old not in ladder or new not in ladder:
+        return None
+    return ladder.index(new) > ladder.index(old)
 
 
 def knob_start(option: str, operator: str | None, effective: str | None) -> str | None:
@@ -177,6 +235,12 @@ class _Status(Protocol):
     agent_backend: str
     shield_activation: str
     operator_settings: Mapping[str, str]
+    agent_goal_profile: str
+    agent_max_interventions_per_minute: str
+    agent_group_grant_state: str
+    inference_backend: str
+    inference_effort: str
+    agent_operator_brief_variant: str
 
 
 @dataclass(frozen=True)
@@ -196,6 +260,16 @@ UNKNOWN = Preview(None)
 
 # Options `preview_value` knows: the `step_setting` options plus the backend (`set_backend`).
 PREVIEW_OPTIONS = frozenset({*FLAG_LADDERS, "current_game", "agent_level", "decision.backend", SHIELD_OPTION})
+
+# The status field (services.md §3.1, fields 22 to 27) each agent row reads, in its canonical format.
+AGENT_ROW_STATUS_FIELDS: dict[str, str] = {
+    GOAL_OPTION: "agent_goal_profile",
+    RATE_OPTION: "agent_max_interventions_per_minute",
+    GROUP_OPTION: "agent_group_grant_state",
+    RETRO_BACKEND_OPTION: "inference_backend",
+    EFFORT_OPTION: "inference_effort",
+    BRIEF_OPTION: "agent_operator_brief_variant",
+}
 
 
 def _flag_variant(option: str, status: _Status) -> str | None:
@@ -232,6 +306,12 @@ def preview_value(option: str, status: _Status | None, net_steps: int) -> Previe
         if start is None:
             return UNKNOWN  # the menu could not read whether the operator set it
         new, at_limit = step_ladder(option, ladder, start, net_steps)
+        return Preview(new, at_limit)
+    if option in AGENT_ROW_OPTIONS:
+        current = getattr(status, AGENT_ROW_STATUS_FIELDS[option], "")
+        if current not in AGENT_ROW_LADDERS[option]:
+            return UNKNOWN  # unknown, `custom` or off the ladder: the menu refuses the step (bad_option)
+        new, at_limit = step_ladder(option, AGENT_ROW_LADDERS[option], current, net_steps)
         return Preview(new, at_limit)
     if option in FLAG_LADDERS:
         current = _flag_variant(option, status)

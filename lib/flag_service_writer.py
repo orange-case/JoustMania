@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_URL = "http://flag-service:8070"
 REQUEST_TIMEOUT_SECONDS = 0.5
 WRITER_LABEL = "menu"
+HTTP_OK = 200
+HTTP_NO_CONTENT = 204
+HTTP_FORBIDDEN = 403
+HTTP_PRECONDITION_FAILED = 412
+# No HTTP answer to go by: unreachable, or a write or clear whose outcome a re-read could not settle.
+STATUS_UNKNOWN = 0
 
 # transport(method, url, body) -> (status, parsed JSON body or {}); injectable for tests.
 Transport = Callable[[str, str, dict | None], tuple[int, dict]]
@@ -159,8 +165,26 @@ class FlagServiceWriter:
         """One read of the flag's state: ``variants``, ``variant_values``, ``effective_default``."""
         return self._view(flag_key)
 
+    def get_set_view(self) -> dict[str, dict] | None:
+        """One read of the whole set (``GET /{flagSetId}``): flag key -> its view, or None when unreadable."""
+        url = f"{self.base_url}/{urllib.parse.quote(self.flag_set, safe='')}"
+        try:
+            status, body = self._transport("GET", url, None)
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError, http.client.HTTPException) as e:
+            logger.error(f"Flag service unreachable reading {self.flag_set}: {e}")
+            return None
+        if status != HTTP_OK or not isinstance(body.get("flags"), list):
+            logger.warning(f"Flag service: GET {self.flag_set} -> {status} {body.get('error', '')}")
+            return None
+        return {view["flag"]: view for view in body["flags"] if isinstance(view, dict) and "flag" in view}
+
     def update_default_variant(self, flag_key: str, variant_name: str) -> bool:
         """Set the flag to ``variant_name`` (persisted admin setting). True on success."""
+        return self.write_variant(flag_key, variant_name) == HTTP_OK
+
+    def write_variant(self, flag_key: str, variant_name: str) -> int:
+        """`update_default_variant` with the outcome as an HTTP status: 200 applied, the refusal's status
+        (403: a writer the row does not allow), or ``STATUS_UNKNOWN`` (unreachable, no clear answer)."""
         body = {"variant": variant_name, "writer": self.writer}
         if self.persist:
             body["persist"] = True
@@ -170,23 +194,54 @@ class FlagServiceWriter:
             # A timeout, a malformed answer or a broken response leaves the outcome unknown: the
             # flag service may have applied the write. Settle it with one re-read (UC-013 A3).
             if _is_timeout(e) or isinstance(e, ValueError | http.client.HTTPException):
-                return self._confirm_after_timeout(flag_key, variant_name, e)
+                return HTTP_OK if self._confirm_after_timeout(flag_key, variant_name, e) else STATUS_UNKNOWN
             logger.critical(
                 f"Flag service unreachable: admin setting {self.flag_set}/{flag_key}={variant_name} NOT applied: {e}"
             )
-            return False
-        if status != 200:
+            return STATUS_UNKNOWN
+        if status != HTTP_OK:
             logger.error(
                 f"Flag service refused {self.flag_set}/{flag_key}={variant_name}: "
                 f"HTTP {status} {resp.get('error', '')}: {resp.get('detail', '')}"
             )
-            return False
+            return status or STATUS_UNKNOWN
         if self.persist and not resp.get("persisted", False):
             # Applied in memory, but the state file write failed: it will not
             # survive a flag-service restart (flagservice_admin_persist_errors_total).
             logger.error(f"Admin setting {self.flag_set}/{flag_key}={variant_name} applied but NOT persisted")
         logger.info(f"Updated flag '{self.flag_set}/{flag_key}' -> '{variant_name}' via the flag service")
-        return True
+        return HTTP_OK
+
+    def clear_overlay(self, flag_key: str) -> int:
+        """Clear the flag's stack overlay only when this writer wrote it (``DELETE ?writer=&if_writer=``, no persist).
+
+        The HTTP status: 204 (cleared, or no overlay), 412 (another writer's overlay: nothing cleared),
+        403 (the row does not allow this writer), another refusal, or ``STATUS_UNKNOWN``. A DELETE
+        without a clear answer is settled with one re-read: no overlay of this writer left = 204.
+        Never retried.
+        """
+        label = urllib.parse.quote(self.writer, safe="")
+        url = f"{self._flag_url(flag_key)}?writer={label}&if_writer={label}"
+        try:
+            status, resp = self._transport("DELETE", url, None)
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError, http.client.HTTPException) as e:
+            if _is_timeout(e) or isinstance(e, ValueError | http.client.HTTPException):
+                view = self._view(flag_key)
+                stack = view.get("stack_overlay") if view is not None else None
+                if view is not None and not (isinstance(stack, dict) and stack.get("writer") == self.writer):
+                    logger.warning(f"Flag service gave no clear answer clearing {self.flag_set}/{flag_key}: {e}")
+                    return HTTP_NO_CONTENT
+            logger.critical(f"Flag service: the overlay of {self.flag_set}/{flag_key} NOT cleared: {e}")
+            return STATUS_UNKNOWN
+        if status not in (HTTP_OK, HTTP_NO_CONTENT):
+            log = logger.info if status == HTTP_PRECONDITION_FAILED else logger.error
+            log(
+                f"Flag service did not clear the overlay of {self.flag_set}/{flag_key}: "
+                f"HTTP {status} {resp.get('error', '')}: {resp.get('detail', '')}"
+            )
+            return status or STATUS_UNKNOWN
+        logger.info(f"Cleared the {self.writer} overlay of '{self.flag_set}/{flag_key}' via the flag service")
+        return HTTP_NO_CONTENT
 
     def clear_persisted(self, flag_key: str) -> bool:
         """Clear the flag's persisted admin value (``DELETE ?persist=true``), so the lower layers apply again.
