@@ -59,7 +59,7 @@ def rs(values: dict | None = None, defaults: dict | None = None, commands=COMMAN
 
 
 def on(option: str, role: str = "edit") -> page_keys.Binding:
-    page, edit_key, reset_key = ROWS[option] if option in ROWS else ("INTERV", "K1", "K2")  # the decision backend
+    page, edit_key, reset_key = ROWS.get(option, ("INTERV", "K1", "K2"))  # else the decision backend
     return page_keys.binding(edit_key if role == "edit" else reset_key, PAGES.index(page))
 
 
@@ -113,6 +113,14 @@ def test_the_ladders_are_the_spec_ladders_and_the_flag_files_variants():
         assert set(row_ladders.LADDERS[option]) == set(flags[option]["variants"]), option
         assert flags[option]["defaultVariant"] == BASELINES[option], option
     assert flags[RATE]["variants"][flags[RATE]["defaultVariant"]] == int(BASELINES[RATE])
+    assert row_ladders.STATUS_FIELDS == {  # services.md §3.1 fields 22 to 27 (27 redefined by #2755)
+        GOAL: "agent_goal_profile",
+        RATE: "agent_max_interventions_per_minute",
+        GROUP: "agent_group_grant_state",
+        RETRO_BACKEND: "inference_backend",
+        EFFORT: "inference_effort",
+        BRIEF: "agent_operator_brief_variant",
+    }
 
 
 # --- rows and keys (BR-011, BR-012) -------------------------------------------------------------------
@@ -296,6 +304,30 @@ async def test_backend_raise_needs_set_backend_from_and_other_edits_go_without_i
     assert data == [{"command": "set_backend", "backend": "openai"}]
 
 
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-011", "BR-014"])
+async def test_backend_raise_is_refused_when_either_read_lacks_set_backend_from():
+    old = [c for c in COMMANDS if c != "set_backend.from"]
+    press_old = rs(agent_backend="rules", commands=old)
+    assert page_keys.edit_plan(on("decision.backend").spec, press_old, 1).refused  # the screen: NOT POSSIBLE
+    refused = screen(3, "decision.backend", None, 1, agent_backend="rules", commands=old)
+    assert NOT_POSSIBLE.split()[-1] in " ".join(rows(refused))
+    release = rs(commands=old)
+    result, data, _ = await edit("decision.backend", 1, rs(agent_backend="rules"), release=release, confirmed=True)
+    assert (result, data) == (("set_backend", "refused"), [])
+
+
+@pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
+@pytest.mark.parametrize("option", [*SIX, "decision.backend"])
+async def test_a_reset_without_a_press_read_is_refused(option):
+    """The raise is judged from the press read; the release's read never stands in for it."""
+    ladder = row_ladders.LADDERS.get(option, ["rules", "claude"])
+    release = rs({option: ladder[-1]} if option in ROWS else None, agent_backend="claude")
+    actions, menu, _ = make()
+    gesture = Gesture(RESET, "K", held_ms=1200, confirmed=True)
+    result = await actions.dispatch(gesture, release, None, on(option, "reset"))
+    assert result == ("reset_setting", "refused") and sent(menu) == []
+
+
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-014"])
 async def test_backend_edit_without_a_press_read_or_from_an_unknown_backend_is_refused():
     actions, menu, _ = make()
@@ -457,6 +489,8 @@ def test_page_rows_show_the_new_values_per_protocol(version, expected):
     assert page_rows(PAGES.index("AGENT"), status, PageContext(), version)[2][1] == expected["AGENT"]
     assert [v for _, v in page_rows(PAGES.index("INTERV"), status, PageContext(), version)[1:]] == expected["INTERV"]
     assert [v for _, v in page_rows(PAGES.index("RETRO"), status, PageContext(), version)] == expected["RETRO"]
+    baseline = [v for _, v in page_rows(PAGES.index("RETRO"), rs(), PageContext(), version)]
+    assert baseline == ["STUB", "MED", "OFF"]
     custom = rs({BRIEF: "custom", GOAL: "from_objectives"})
     assert page_rows(PAGES.index("RETRO"), custom, PageContext(), version)[2][1] == "CUSTOM"
     assert page_rows(PAGES.index("AGENT"), custom, PageContext(), version)[2][1] == "FROM OBJ"
