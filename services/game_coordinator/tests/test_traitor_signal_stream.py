@@ -246,6 +246,10 @@ async def test_frames_from_the_traitor_signal_never_reach_warmup_or_game_loop():
         real_publish = game.event_publisher
 
         async def publish(event_type, data):
+            if event_type == "traitor_signal_start":
+                # Hold the signal until the drain had frames to discard: the frame
+                # rate against the signal ticks depends on scheduling (#2655).
+                await _wait_for(lambda: client.streams[0].seq > 60)
             if event_type == "traitor_signal_end":
                 marks["signal_end_seq"] = client.streams[0].seq
             await real_publish(event_type, data)

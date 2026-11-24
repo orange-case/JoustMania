@@ -156,6 +156,9 @@ async def test_spikes_from_the_intro_never_reach_warmup_or_game_loop():
             stream = client.streams[0]
             stream.spike_serials = list(game.human_serials)
             stream.spiking = True
+            # Hold the intro until the drain had frames to discard: the frame rate
+            # against the intro ticks depends on scheduling (#2655).
+            await _wait_for(lambda: client.streams[0].seq > 20)
         if event_type == "zombie_intro_end":
             client.streams[0].spiking = False
             marks["intro_end_seq"] = client.streams[0].seq
