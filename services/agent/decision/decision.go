@@ -907,6 +907,8 @@ func (l *Loop) runDecision(ctx context.Context, snapshot flags.Snapshot, c gamec
 	cost := interventionCost(d.Intervention)
 	perm := l.evaluatePermission(ctx, snapshot, c, d, now, cost, state)
 	reason, blocked := perm.reason, perm.blocked
+	// UC-040 A53: released after the write ended, so its time is recorded first.
+	defer perm.cooldown.release()
 	// UC-040 A31 step 1, A33: a shield reserved by the permission chain is kept only
 	// when the write is applied; every other way out of this function, a later
 	// refusal in the chain included, releases it.
@@ -981,7 +983,8 @@ func (l *Loop) runDecision(ctx context.Context, snapshot flags.Snapshot, c gamec
 // earlier refusal, to be counted without a span, warning or timeline entry.
 // Checked in order: UC-040 A21 (budget unchanged since the refusal), A40 step 6
 // (same experiment flag already blocked this lever in this game), A35 (the same
-// value already suppressed against this entry), A31 step 1 / A33 (the shield
+// value already suppressed against this entry), A53 (the lever already refused
+// since its last write), A31 step 1 / A33 (the shield
 // ledger already refused a grant with this reason).
 func (l *Loop) repeatRefusalReason(perm permission, d Decision, now time.Time) (BlockReason, bool) {
 	switch {
@@ -991,6 +994,8 @@ func (l *Loop) repeatRefusalReason(perm permission, d Decision, now time.Time) (
 		return ReasonExperimentFlag, true
 	case perm.repeatApplied:
 		return ReasonAlreadyApplied, true
+	case perm.repeatCooldown:
+		return ReasonLeverCooldown, true
 	case perm.repeatShield:
 		return perm.reason, true
 	}
@@ -1040,6 +1045,14 @@ func (l *Loop) recordBlockedDecision(d Decision, reason BlockReason, cost float6
 	// Feed the BLOCKED outcome into this game's #916 rolling narrative timeline
 	// (#945): blocked interventions are recorded, never silently dropped.
 	l.recordIntervention(d.Intervention, d.TargetSerial, true)
+	if reason == ReasonLeverCooldown {
+		// UC-040 A53: an expected pacing refusal, info rather than the warning.
+		l.Log.Info("agent.decision_lever_cooldown",
+			"intervention", d.Intervention,
+			"decision_reason", d.Reason,
+			"window_s", l.effectWindow().Seconds())
+		return
+	}
 	l.Log.Warn("agent.decision_blocked",
 		"blocked", true,
 		"reason", string(reason),
@@ -1208,6 +1221,12 @@ type permission struct {
 	// repeatApplied marks an already_applied suppression that repeats an earlier one
 	// against the same entry (quiet, UC-040 A35).
 	repeatApplied bool
+	// repeatCooldown marks a lever_cooldown refusal that repeats an earlier one since
+	// the lever's last write (quiet, UC-040 A53).
+	repeatCooldown bool
+	// cooldown is the lever hold of a decision that passed step 3a (UC-040 A53), nil
+	// otherwise; the caller releases it when the decision finishes.
+	cooldown *cooldownHold
 	// repeatExperimentFlag marks an experiment_flag block of a lever already
 	// blocked on the same flag in this game (quiet, UC-040 A40 step 6).
 	repeatExperimentFlag bool
@@ -1216,7 +1235,7 @@ type permission struct {
 // evaluatePermission runs the permission chain over one decision in order:
 // allow-list gate (#727), battery threshold, the experiment-flag check (UC-040
 // A40), the already-applied check (UC-040
-// A35), the shield ledger (UC-040 A31, A33), then the weighted rate limit (#728). It returns the verdict. The
+// A35), the lever cooldown (UC-040 A53), the shield ledger (UC-040 A31, A33), then the weighted rate limit (#728). It returns the verdict. The
 // rate limit is charged ONLY when the decision passes the allow-list and
 // battery gates AND fits the budget — so the budget is spent on decisions the
 // agent actually dispatches, the unification chosen over #726's
@@ -1260,6 +1279,14 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 	if match, first := l.alreadyApplied(c, d, now); match {
 		return permission{reason: ReasonAlreadyApplied, blocked: true, repeatApplied: !first}
 	}
+	// 3a. Lever cooldown (UC-040 A53, BR-046): a game-wide lever changes at most once
+	// per effect window. Check-only and before the rate limit, like step 3.
+	// A lever that passes stays held until the decision finishes (the caller releases
+	// cooldown), so a concurrent decision for it is refused as cooling.
+	cooling, first, cooldown := l.leverCooling(d, now)
+	if cooling {
+		return permission{reason: ReasonLeverCooldown, blocked: true, repeatCooldown: !first}
+	}
 	// 4. Shield ledger (UC-040 A31 step 1, BR-020; A33, BR-022): a targeted
 	// grant_shield is refused already_charged (trigger mode), shield_cap_reached or
 	// shield_cooldown, else reserved. Before the rate limit, so a refusal charges no
@@ -1269,13 +1296,13 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 		// A group reserves every target and a group slot, all or nothing (A47, A48).
 		res, refused, serial, firstRefusal := l.reserveGroupShield(ctx, snapshot, c, d, now)
 		if refused != "" {
-			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal, refusedSerial: serial}
+			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal, refusedSerial: serial, cooldown: cooldown}
 		}
 		shield = res
 	} else {
 		res, refused, firstRefusal := l.reserveShield(ctx, snapshot, c, d, now)
 		if refused != "" {
-			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal}
+			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal, cooldown: cooldown}
 		}
 		shield = res
 	}
@@ -1286,9 +1313,9 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 	// admitOrHold charges the budget on admit and may set the cycle's hold. A
 	// block returns the shield reservation, and the caller's finish releases it.
 	if !l.admitOrHold(snapshot, d, now, cost, state) {
-		return permission{reason: ReasonRateLimit, blocked: true, shield: shield}
+		return permission{reason: ReasonRateLimit, blocked: true, shield: shield, cooldown: cooldown}
 	}
-	return permission{shield: shield}
+	return permission{shield: shield, cooldown: cooldown}
 }
 
 // batteryBlocks reports whether a player-targeted decision must be blocked

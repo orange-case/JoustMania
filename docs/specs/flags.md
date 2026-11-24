@@ -449,7 +449,7 @@ Configuration of the optional `operator-pad` service ([UC-015](../use_cases/UC-0
 | `operator_pad.display_poll_ms` | int | fast=250, default=500, slow=1000 (valid range 200 to 5000; the pad checks the range itself, no registry row, §13.5) | `default` = 500 (UC-016 BR-003, NFR-070) | `services/operator_pad/config.py` `PadConfig.display_poll_ms` (`DEFAULT_DISPLAY_POLL_MS`) | manual edit only | live (per poll); a value outside 200 to 5000 or malformed falls back to 500 with a warning, once per value |
 | `operator_pad.display_result_ms` | int | short=800, default=1500, long=3000 (valid range 300 to 10000; the pad checks the range itself, no registry row, §13.5) | `default` = 1500 (UC-016 BR-001: how long a result, a tap or the volume shows) | `services/operator_pad/config.py` `PadConfig.display_result_ms` (`DEFAULT_DISPLAY_RESULT_MS`) | manual edit only | live (per screen); a value outside 300 to 10000 or malformed falls back to 1500 with a warning, once per value |
 
-**Planned ([UC-016](../use_cases/UC-016.md), the pad's display; the paging and internet check keys, #2742).** Spec only: these keys are not in `services/flagd/operator.json` yet. They join the table above, with the same owner, file and reload rules, in the PR that builds the display.
+**Planned ([UC-016](../use_cases/UC-016.md) iteration 2, the pad's pages and internet check; #2742).** Spec only: these keys are not in `services/flagd/operator.json` yet. They join the table above, with the same owner, file and reload rules, in the PR that builds the pages.
 
 | Key | Type | Variants | Default | Read by | Written by | Reload |
 |---|---|---|---|---|---|---|

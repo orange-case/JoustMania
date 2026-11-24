@@ -888,6 +888,8 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// The rules engine skips a state or level candidate whose value the loop
 	// already applied (UC-040 A35 step 4), so it does not take a slot every second.
 	rules.SetAppliedSource(loop.AppliedValues)
+	// ...and a new value for a cooling game-wide lever (UC-040 A53 step 5).
+	rules.SetCoolingSource(loop.CoolingValues)
 	// UC-040 A40, BR-028 (#1975): in a game of an experiment, either arm, a lever
 	// of the flag under test is not written.
 	loop.SetExperimentFlagSource(c.experimentFlags.FlagFor)

@@ -56,6 +56,9 @@ type Intervention struct {
 	// Difficulty: changes difficulty or movement demand; arms the variance
 	// cooldown when dispatched.
 	Difficulty bool
+	// Cooldown: a game-wide lever that changes at most once per effect window
+	// (UC-040 A53, BR-046).
+	Cooldown bool
 	// JevDescription is the lever's effect as the jev backend describes it to
 	// the model (from the retired FFA impact model of llm/prompt.go, #1102).
 	JevDescription string
@@ -125,6 +128,7 @@ var Catalog = []Intervention{
 		Name:                  IntvAdjustVolume,
 		Weight:                0.5,
 		Idempotent:            true,
+		Cooldown:              true,
 		JevDescription:        "Change the music volume. Atmosphere only: no effect on who gets eliminated.",
 		JevDescriptionNeutral: "Change the music volume. No effect on who gets eliminated.",
 		ValueEffect:           "Atmosphere only.",
@@ -133,6 +137,7 @@ var Catalog = []Intervention{
 		Name:       IntvAdjustMusicTempo,
 		Weight:     1,
 		Idempotent: true,
+		Cooldown:   true,
 		Difficulty: true,
 		JevDescription: "Change the music tempo for everyone. Faster music raises everyone's death " +
 			"threshold (more movement tolerated, fewer eliminations); slower music lowers it (eliminations come faster).",
@@ -198,6 +203,7 @@ var Catalog = []Intervention{
 		Name:       IntvAdjustGlobalSensitivity,
 		Weight:     2,
 		Idempotent: true,
+		Cooldown:   true,
 		Difficulty: true,
 		JevDescription: "Change the sensitivity level for all players at once. A higher level makes " +
 			"everyone much harder to eliminate, a lower level much easier; one step is a sizable jump.",
@@ -209,6 +215,7 @@ var Catalog = []Intervention{
 		Name:       IntvAdjustGlobalDifficulty,
 		Weight:     1,
 		Idempotent: true,
+		Cooldown:   true,
 		Difficulty: true,
 		JevDescription: "Scale the difficulty for all players at once, making eliminations come " +
 			"faster (harder) or slower (easier) for everyone.",
@@ -220,6 +227,7 @@ var Catalog = []Intervention{
 		Name:       IntvSetPacingProfile,
 		Weight:     1,
 		Idempotent: true,
+		Cooldown:   true,
 		Difficulty: true,
 		JevDescription: "Switch the session's pacing profile (how the music tempo evolves over the round), " +
 			"speeding up or slowing down eliminations for everyone.",

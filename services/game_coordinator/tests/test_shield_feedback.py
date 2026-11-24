@@ -8,7 +8,9 @@ grant (no LED stream, no task), play the shield sound and publish
 
 import asyncio
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, create_autospec, patch
 
 import pytest
@@ -28,6 +30,8 @@ from services.game_coordinator.games.ffa import FFAGame
 
 SHIELD = controller_manager_pb2.GAME_EFFECT_SHIELD
 TOUGHNESS_BOOST = controller_manager_pb2.GAME_EFFECT_TOUGHNESS_BOOST
+GAME_NOW = 1_000.0
+WALL_NOW = 5_000.0
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +39,17 @@ def _no_shield_limits():
     """Shield limits off (#2044, UC-040 BR-022): these tests are not about the cap or the cooldown."""
     with patch.object(BaseGameMode, "_shield_limits", return_value=(0, 0)):
         yield
+
+
+@pytest.fixture
+def frozen_clocks(monkeypatch):
+    """Game and wall clock stand still, so durations and ``until_ms`` are exact (#2655).
+
+    ``to_wall`` reads ``time.time()`` through the ``game_clock`` module; only that
+    reference is frozen, the asyncio loop keeps its real clock.
+    """
+    monkeypatch.setattr(game_clock, "now", lambda: GAME_NOW)
+    monkeypatch.setattr(game_clock, "time", SimpleNamespace(time=lambda: WALL_NOW, monotonic=time.monotonic))
 
 
 class RecordingStream:
@@ -82,40 +97,40 @@ class TestUC040ShieldFeedback:
     """UC-040 A16: one effect, the shield sound and a player_shielded event per grant."""
 
     @pytest.mark.asyncio
-    @pytest.mark.real_game_time  # until_ms is wall-clock ms, grace_until is game time
     @pytest.mark.uc("UC-040", flow="A16", br=["BR-007", "BR-008"])
     @pytest.mark.uc("UC-031", flow="main", steps=[4])
-    async def test_grant_sends_shield_effect_sound_and_event(self, game):
+    async def test_grant_sends_shield_effect_sound_and_event(self, game, frozen_clocks):
         """UC-040 A16: grant_shield -> GAME_EFFECT_SHIELD for the duration, shield_up, player_shielded."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             assert await game.grant_shield("p1", 5.0) is True
 
         [(serial, effect, duration_ms)] = game.gameplay_stream.effects()
         assert (serial, effect) == ("p1", SHIELD)
-        assert 4900 <= duration_ms <= 5000
+        assert duration_ms == 5000
         play.assert_awaited_once_with(Sound.SFX_SHIELD_UP, priority=2, volume=1.0)
         [event] = _shielded_events(game)
         assert event["serial"] == "p1"
         assert event["kind"] == "full"
-        assert int(event["until_ms"]) == pytest.approx(game.players["p1"].grace_until * 1000, abs=50)
+        assert game.players["p1"].grace_until == GAME_NOW + 5.0
+        assert event["until_ms"] == str(int((WALL_NOW + 5.0) * 1000))  # wall clock, not game time
         assert "p1" in game._shield_feedback_until
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A16", br=["BR-009"])
-    async def test_toughness_boost_sends_weaker_variant_at_half_volume(self, game):
+    async def test_toughness_boost_sends_weaker_variant_at_half_volume(self, game, frozen_clocks):
         """UC-040 BR-009: toughness_boost -> GAME_EFFECT_TOUGHNESS_BOOST and shield_up at 0.5."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             assert await game.grant_toughness_boost("p2", 5.0) is True
 
         [(serial, effect, duration_ms)] = game.gameplay_stream.effects()
         assert (serial, effect) == ("p2", TOUGHNESS_BOOST)
-        assert 4900 <= duration_ms <= 5000
+        assert duration_ms == 5000
         play.assert_awaited_once_with(Sound.SFX_SHIELD_UP, priority=2, volume=0.5)
         assert _shielded_events(game)[0]["kind"] == "toughness_boost"
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
-    async def test_extending_restarts_the_effect_with_the_new_remaining_time(self, game):
+    async def test_extending_restarts_the_effect_with_the_new_remaining_time(self, game, frozen_clocks):
         """UC-040 BR-010: a longer grant re-sends the effect for the new remaining protection."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             await game.grant_shield("p1", 3.0)
@@ -123,8 +138,7 @@ class TestUC040ShieldFeedback:
 
         effects = game.gameplay_stream.effects()
         assert [e[1] for e in effects] == [SHIELD, SHIELD]
-        assert effects[1][2] > effects[0][2]
-        assert 7900 <= effects[1][2] <= 8000
+        assert [e[2] for e in effects] == [3000, 8000]
         assert play.await_count == 1  # the extension restarts the LED silently
 
     @pytest.mark.asyncio

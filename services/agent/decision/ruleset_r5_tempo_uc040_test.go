@@ -49,7 +49,8 @@ func TestR5SlowsTheTempo(t *testing.T) {
 	t.Run("UC-040/A52 BR-041 R1 then R5 both write; a same-value R5 repeat is already_applied", func(t *testing.T) {
 		l, sink, clock, _ := appliedLoop(t, tempoDecision("1.3"))
 		expectOutcome(t, runCycle(l, budgetCtx()), "adjust_music_tempo/:dispatched")
-		*clock = clock.Add(time.Second)
+		// R5's change waits out the lever cooldown of R1's write (A53, BR-046).
+		*clock = clock.Add(DefaultEffectWindow)
 		l.Rules = fakeRules{out: []Decision{tempoDecision(accelerateTempo)}}
 		expectOutcome(t, runCycle(l, budgetCtx()), "adjust_music_tempo/:dispatched")
 		*clock = clock.Add(time.Second)
