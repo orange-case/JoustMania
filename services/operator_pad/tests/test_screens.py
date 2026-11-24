@@ -55,7 +55,7 @@ def test_status_screen_lines():
 
     assert lines(screen) == [
         "JOUSTMANIA LOBBY",
-        "JOUSTFFA",
+        "FREE-FOR-ALL",  # BR-006 mode table: the full name wherever the pad names a mode
         "READY 3/5",
         "AGENT ON STANDARD",
         "BACKEND CLAUDE",
@@ -138,6 +138,7 @@ def test_status_screen_keeps_values_with_no_connection():
         ("", False, "DEV"),
         ("1.2", False, "DEV"),
         ("v", False, "DEV"),
+        ("build-1.2.3x", False, "DEV"),  # the whole tag must be a release, not just contain one
     ],
 )
 def test_status_screen_last_line_locked_or_version(version, locked, line):

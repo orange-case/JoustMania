@@ -27,7 +27,7 @@ DEFAULT_TAP_MS = 400
 DEFAULT_HOLD_AGENT_MS = 1000
 DEFAULT_HOLD_END_MS = 1500
 DEFAULT_HOLD_LOCK_MS = 3000
-DEFAULT_KNOB_EVENTS_PER_STEP = 4
+DEFAULT_KNOB_EVENTS_PER_STEP = 1  # the rev 5 pad's detented knob: one raw event per detent (measured)
 KNOB_EVENTS_PER_STEP_RANGE = (1, 12)
 DEFAULT_PREVIEW_DEBOUNCE_MS = 150  # BR-017: wait after the last knob step before the preview speaks
 PREVIEW_DEBOUNCE_MS_RANGE = (0, 1000)
@@ -35,6 +35,13 @@ DEFAULT_DISPLAY_POLL_MS = 500  # UC-016 BR-003: the status poll while the displa
 DISPLAY_POLL_MS_RANGE = (200, 5000)
 DEFAULT_DISPLAY_RESULT_MS = 1500  # UC-016 BR-001: how long a result or the volume screen shows
 DISPLAY_RESULT_MS_RANGE = (300, 10000)
+DEFAULT_DISPLAY_AUTOPAGE_MS = 5000  # UC-016 BR-009: the pages turn on their own; 0 = off
+DISPLAY_AUTOPAGE_MS_RANGE = (1000, 60000)
+DEFAULT_DISPLAY_HOME_MS = 10000  # UC-016 BR-009: back to HOME after the last input
+DISPLAY_HOME_MS_RANGE = (2000, 120000)
+DEFAULT_INTERNET_CHECK_TARGET = "google.com:443"  # UC-016 BR-010; "" = off
+DEFAULT_INTERNET_CHECK_MS = 30000
+INTERNET_CHECK_MS_RANGE = (5000, 300000)
 DEFAULT_KEYMAP = (
     "K1=F13,K2=F14,K3=F18,K4=F19,K5=F20,K6=F21,K7=F22,K8=F23,KNOB_PRESS=F15,KNOB_TURN_A=F16,KNOB_TURN_B=F17"
 )
@@ -74,6 +81,31 @@ def parse_keymap(raw: str) -> dict[int, str] | None:
     return mapping
 
 
+_PORT_RE = re.compile(r"^[0-9]{1,5}$")
+
+
+def parse_target(raw: str) -> tuple[str, int] | None:
+    """``host:port`` or ``[v6]:port`` -> (host, port); "" -> None (off); malformed -> ValueError.
+
+    A host with a ``:`` outside brackets is malformed (an IPv6 address needs them).
+    """
+    raw = raw.strip()
+    if not raw:
+        return None
+    host, sep, port = raw.rpartition(":")
+    if not sep or not _PORT_RE.match(port) or not 1 <= int(port) <= 65535:
+        raise ValueError(raw)
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+        if not host or ":" not in host:
+            raise ValueError(raw)
+    elif not host or ":" in host or "[" in host or "]" in host:
+        raise ValueError(raw)
+    if any(c.isspace() for c in host) or not host.isascii():
+        raise ValueError(raw)
+    return host, int(port)
+
+
 def parse_device(raw: str) -> tuple[str, str] | None:
     """``cb00:1337`` -> ("cb00", "1337"); "" (variant ``unset``) or malformed -> None (match nothing)."""
     match = _DEVICE_RE.match(raw.strip())
@@ -99,6 +131,7 @@ class PadConfig:
     def __init__(self, client) -> None:
         self._client = client
         self._warned: dict[str, str] = {}  # key -> the last warning, so a bad value warns once per change
+        self._target_raw = DEFAULT_INTERNET_CHECK_TARGET  # the last good `internet_check_target`
 
     def _int(self, key: str, default: int) -> int:
         try:
@@ -175,6 +208,52 @@ class PadConfig:
     def display_result_ms(self) -> int:
         """`operator_pad.display_result_ms` (UC-016 BR-001); the default outside 300 to 10000 or malformed."""
         return self._ranged_int("operator_pad.display_result_ms", DEFAULT_DISPLAY_RESULT_MS, DISPLAY_RESULT_MS_RANGE)
+
+    def display_autopage_ms(self) -> int:
+        """`operator_pad.display_autopage_ms` (UC-016 BR-009): 0 (off) or 1000 to 60000, else the default."""
+        key, default = "operator_pad.display_autopage_ms", DEFAULT_DISPLAY_AUTOPAGE_MS
+        try:
+            value = self._client.get_integer_value(key, default)
+        except Exception as e:
+            self._warn_once(key, f"Reading {key} failed, using {default}: {e}")
+            return default
+        low, high = DISPLAY_AUTOPAGE_MS_RANGE
+        if isinstance(value, bool) or not isinstance(value, int) or not (value == 0 or low <= value <= high):
+            self._warn_once(
+                key, f"Malformed or out of range {key}={value!r} (valid 0 or {low} to {high}), using {default}"
+            )
+            return default
+        self._warned.pop(key, None)
+        return value
+
+    def display_home_ms(self) -> int:
+        """`operator_pad.display_home_ms` (UC-016 BR-009); the default outside 2000 to 120000 or malformed."""
+        return self._ranged_int("operator_pad.display_home_ms", DEFAULT_DISPLAY_HOME_MS, DISPLAY_HOME_MS_RANGE)
+
+    def internet_check_ms(self) -> int:
+        """`operator_pad.internet_check_ms` (UC-016 BR-010); the default outside 5000 to 300000 or malformed."""
+        return self._ranged_int("operator_pad.internet_check_ms", DEFAULT_INTERNET_CHECK_MS, INTERNET_CHECK_MS_RANGE)
+
+    def internet_check_target(self) -> tuple[str, int] | None:
+        """`operator_pad.internet_check_target` (UC-016 BR-010): (host, port), None when `off`.
+
+        A failed read or a malformed value keeps the last good value (the default only before the
+        first good read), so a flaky read never switches an `off` check back on.
+        """
+        key = "operator_pad.internet_check_target"
+        try:
+            raw = self._client.get_string_value(key, self._target_raw)
+        except Exception as e:
+            self._warn_once(key, f"Reading {key} failed, keeping {self._target_raw!r}: {e}")
+            raw = self._target_raw
+        try:
+            target = parse_target(raw) if isinstance(raw, str) else parse_target(self._target_raw)
+        except ValueError:
+            self._warn_once(key, f"Malformed {key}={raw!r}, keeping {self._target_raw!r}")
+            return parse_target(self._target_raw)
+        if isinstance(raw, str):
+            self._target_raw = raw
+        return target
 
     def _ranged_int(self, key: str, default: int, valid: tuple[int, int]) -> int:
         """An int flag read at every use; a bad value warns once per value, not at every read."""

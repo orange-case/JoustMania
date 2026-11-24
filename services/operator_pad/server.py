@@ -33,6 +33,7 @@ from services.operator_pad.controller import PadController
 from services.operator_pad.cues import CuePlayer
 from services.operator_pad.device import DeviceManager
 from services.operator_pad.display import DisplayModel, PadDisplay
+from services.operator_pad.internet import InternetCheck
 from services.operator_pad.preview import Previewer
 from services.operator_pad.state import MenuStatusReader
 
@@ -90,13 +91,15 @@ async def serve() -> None:
 
     logger.info("Operator pad service started")
     display_task = asyncio.create_task(display.run(stop))
+    internet_task = asyncio.create_task(InternetCheck(config, display_model).run(stop))  # UC-016 BR-010
     try:
         await devices.run(stop)
     finally:
         logger.info("Shutting down operator pad service")
-        display_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await display_task
+        for task in (display_task, internet_task):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
         metrics_task.cancel()
         await actions.drain()
         previewer.cancel()

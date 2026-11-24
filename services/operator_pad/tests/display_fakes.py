@@ -53,6 +53,8 @@ class FakeHandle:
         self.reports.append(data)
         backend.all_reports.append(data)
         status = backend.version if data[1] == hidraw.OP_HELLO else 0
+        if data[1] in backend.refuse:
+            status = hidraw.ERROR  # a firmware without the op (BR-002: `50 <op> FF`)
         return bytes((hidraw.CMD, data[1], status)).ljust(32, b"\x00")
 
     def close(self) -> None:
@@ -61,8 +63,9 @@ class FakeHandle:
 
 
 class FakeBackend:
-    def __init__(self, version: int = 1) -> None:
+    def __init__(self, version: int = 1, refuse: tuple[int, ...] = ()) -> None:
         self.version = version
+        self.refuse = set(refuse)
         self.fail_writes = False
         self.block = threading.Event()
         self.block.set()
@@ -87,11 +90,23 @@ class FakeBackend:
         return [r for r in self.all_reports if r[1] == hidraw.OP_LINE]
 
     def last_frame(self) -> list[str]:
-        """The text of the last 8 line reports sent."""
-        return [r[4:25].decode("ascii").rstrip() for r in self.lines()[-8:]]
+        """The text of the last 8 line reports sent (glyph bytes as latin-1 characters)."""
+        return [r[4:25].decode("latin-1").rstrip() for r in self.lines()[-8:]]
+
+    def ops(self) -> list[int]:
+        return [r[1] for r in self.all_reports]
 
 
-def pad_config(enabled: bool = True, display: bool = True, poll_ms: int = 200, result_ms: int = 300):
+def pad_config(
+    enabled: bool = True,
+    display: bool = True,
+    poll_ms: int = 200,
+    result_ms: int = 300,
+    autopage_ms: int = 5000,
+    home_ms: int = 10000,
+    target: tuple[str, int] | None = ("google.com", 443),
+    check_ms: int = 30000,
+):
     config = create_autospec(PadConfig, instance=True)
     config.enabled.return_value = enabled
     config.display_enabled.return_value = display
@@ -99,4 +114,8 @@ def pad_config(enabled: bool = True, display: bool = True, poll_ms: int = 200, r
     config.display_result_ms.return_value = result_ms
     config.device.return_value = ("cb00", "1337")
     config.preview_enabled.return_value = False
+    config.display_autopage_ms.return_value = autopage_ms
+    config.display_home_ms.return_value = home_ms
+    config.internet_check_target.return_value = target
+    config.internet_check_ms.return_value = check_ms
     return config
