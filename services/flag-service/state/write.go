@@ -314,7 +314,7 @@ type putPlan struct {
 // checkPutLocked runs every precondition of a Put in this order (the first
 // failure answers; TestPreconditionMatrix_Put pins each pair):
 //
-//	lookup 404/422 > kind 400 > variant|value 400 > ids 400 > scope fit 400 >
+//	lookup 404/422 > ids 400 > writer list 403 > kind 400 > variant|value 400 > scope fit 400 >
 //	ttl 400 > if_writer_in shape 400 > persist 400 > live (served, game,
 //	serial, real game) 409/422 > value 422 > fraction 422 > stream 503 >
 //	if_writer_in 412 > if_slot_version 412 (in process only)
@@ -328,6 +328,10 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 	if err != nil {
 		return plan, err
 	}
+	// An over-long label is 400 before the writer list judges it.
+	if err := checkIDs(req.Scope, req.Writer); err != nil {
+		return plan, err
+	}
 	if err := f.policy.WriterAllowed(req.Writer); err != nil {
 		return plan, err
 	}
@@ -337,9 +341,6 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 	}
 	if (req.Variant == "") == (req.Value == nil) {
 		return plan, fserr.BadRequest("exactly one of variant and value")
-	}
-	if err := checkIDs(req.Scope, req.Writer); err != nil {
-		return plan, err
 	}
 	scopeName := res.ScopeKey
 	if err := checkScopeFit(f, scopeName); err != nil {
@@ -458,14 +459,14 @@ func (s *State) Append(req AppendRequest) (WriteResult, *fserr.Error) {
 	if err != nil {
 		return res, err
 	}
+	if err := checkIDs(req.Scope, req.Writer); err != nil {
+		return res, err
+	}
 	if err := f.policy.WriterAllowed(req.Writer); err != nil {
 		return res, err
 	}
 	if f.policy.Kind != registry.KindEvent {
 		return res, fserr.BadRequest("%s is not an event flag: set it with PUT", req.Flag)
-	}
-	if err := checkIDs(req.Scope, req.Writer); err != nil {
-		return res, err
 	}
 	if res.ScopeKey != registry.ScopeGame {
 		return res, fserr.BadRequest("an event is appended in a game scope (scope.game_id only)")
@@ -554,7 +555,7 @@ func (s *State) checkSlotVersionLocked(f *flagState, scopeName string, sc Scope,
 // checkClearLocked runs every precondition of a Clear in this order (the first
 // failure answers; TestPreconditionMatrix_Clear pins each pair):
 //
-//	lookup 404/422 > ids 400 > scope fit 400 > served 409 > stream 503 > persist 400 >
+//	lookup 404/422 > ids 400 > writer list 403 > scope fit 400 > served 409 > stream 503 > persist 400 >
 //	if_writer shape 400 > stack_all 400 > guarded revert 409 > if_writer 412 >
 //	if_slot_version 412 (in process only)
 //
@@ -569,10 +570,10 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 	if err != nil {
 		return nil, err
 	}
-	if err := f.policy.WriterAllowed(req.Writer); err != nil {
+	if err := checkIDs(req.Scope, req.Writer); err != nil {
 		return nil, err
 	}
-	if err := checkIDs(req.Scope, req.Writer); err != nil {
+	if err := f.policy.WriterAllowed(req.Writer); err != nil {
 		return nil, err
 	}
 	scopeName := res.ScopeKey

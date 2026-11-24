@@ -83,6 +83,22 @@ func TestWriterListRefusedOverHTTP(t *testing.T) {
 			}
 		}
 	})
+	t.Run("UC-053/A14 an over-long writer label is 400 malformed before the writer list", func(t *testing.T) {
+		long := strings.Repeat("w", state.MaxIDLength+1)
+		for _, c := range []struct {
+			method, path string
+			body         any
+		}{
+			{"PUT", "/agent/goal.profile", map[string]any{"variant": "quick_game", "writer": long}},
+			{"POST", "/agent/goal.profile", map[string]any{"scope": map[string]any{"game_id": "g"}, "payload": map[string]any{}, "writer": long}},
+			{"DELETE", "/agent/goal.profile?writer=" + long, nil},
+		} {
+			status, body := e.do(c.method, c.path, c.body)
+			if status != http.StatusBadRequest || body["error"] != fserr.Malformed {
+				t.Fatalf("%s: %d %v, want 400 malformed", c.method, status, body)
+			}
+		}
+	})
 	t.Run("UC-053/A14 nothing changed", func(t *testing.T) {
 		if e.st.Version() != before {
 			t.Fatalf("version moved %d -> %d: a refused write changed state", before, e.st.Version())
