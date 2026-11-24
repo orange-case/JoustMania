@@ -446,7 +446,7 @@ Configuration of the optional `operator-pad` service ([UC-015](../use_cases/UC-0
 | `operator_pad.preview_enabled` | bool | on=true, off=false | `on` = true (UC-015 BR-017: the live preview while a layer key is held and the knob turns) | `services/operator_pad/config.py` `PadConfig.preview_enabled` | manual edit only | live (per knob step); unreadable keeps it on |
 | `operator_pad.preview_debounce_ms` | int | instant=0, fast=100, default=150, slow=300 (valid range 0 to 1000; the pad checks the range itself, no registry row, §13.5) | `default` = 150 (the wait after the last knob step before the preview speaks the value, UC-015 BR-017) | `services/operator_pad/config.py` `PadConfig.preview_debounce_ms` (`DEFAULT_PREVIEW_DEBOUNCE_MS`) | manual edit only | live (per knob step); a value outside 0 to 1000 or malformed falls back to 150 with a warning |
 
-**Planned ([UC-016](../use_cases/UC-016.md), the pad's display; issue to be filed).** Spec only: these keys are not in `services/flagd/operator.json` yet. They join the table above, with the same owner, file and reload rules, in the PR that builds the display.
+**Planned ([UC-016](../use_cases/UC-016.md), the pad's display; #2741).** Spec only: these keys are not in `services/flagd/operator.json` yet. They join the table above, with the same owner, file and reload rules, in the PR that builds the display.
 
 | Key | Type | Variants | Default | Read by | Written by | Reload |
 |---|---|---|---|---|---|---|
