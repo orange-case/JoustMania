@@ -70,6 +70,10 @@ type ObjectiveRules struct {
 	// nothing.
 	appliedSource func() map[string]string
 
+	// coolingSource is the loop's lever-cooldown view (UC-040 A53 step 5,
+	// Loop.CoolingValues): read once per ranking. nil filters nothing.
+	coolingSource func() map[string]coolingLever
+
 	// grantSource is the loop's shield-grant view (UC-040 A41, BR-030,
 	// Loop.ShieldGrants): read once per ranking, R4 keeps the candidate with the
 	// fewest agent shields this game. nil (every older test) counts 0 for everyone,
@@ -90,6 +94,14 @@ func (r *ObjectiveRules) SetShieldGrantSource(src func() map[string]int) {
 func (r *ObjectiveRules) SetAppliedSource(src func() map[string]string) {
 	r.mu.Lock()
 	r.appliedSource = src
+	r.mu.Unlock()
+}
+
+// SetCoolingSource installs the lever-cooldown view (Loop.CoolingValues). It is
+// called under the engine lock, so it must not call back into the engine.
+func (r *ObjectiveRules) SetCoolingSource(src func() map[string]coolingLever) {
+	r.mu.Lock()
+	r.coolingSource = src
 	r.mu.Unlock()
 }
 
@@ -333,6 +345,9 @@ func (r *ObjectiveRules) rankLocked(c gamecontext.GameContext, now time.Time, no
 		applied = r.appliedSource()
 	}
 	ranked = applyAppliedPolicy(ranked, applied, c)
+	if r.coolingSource != nil {
+		ranked = applyCoolingPolicy(ranked, r.coolingSource())
+	}
 	var grants map[string]int
 	if r.grantSource != nil {
 		grants = r.grantSource()
@@ -432,6 +447,28 @@ func applyAppliedPolicy(ranked []scoredCandidate, applied map[string]string, c g
 		}
 		claimed[key] = true
 		if v, ok := applied[key]; ok && present(c, d.TargetSerial) && v == normalisedValue(d.Value) {
+			continue
+		}
+		kept = append(kept, sc)
+	}
+	return kept
+}
+
+// applyCoolingPolicy is the rules' lever-cooldown filter (UC-040 A53 step 5,
+// BR-046; #2641): it drops a candidate for a cooling lever, as permission step 3a
+// would refuse it, unless it re-asserts the lever's last written value. Like the
+// applied filter it runs after that one (which keeps one candidate per key), so a
+// refused lever takes no emission slot and no difficulty candidate re-arms the
+// variance cooldown. nil or empty cooling keeps every candidate.
+func applyCoolingPolicy(ranked []scoredCandidate, cooling map[string]coolingLever) []scoredCandidate {
+	if len(cooling) == 0 {
+		return ranked
+	}
+	kept := ranked[:0]
+	for _, sc := range ranked {
+		d := sc.decision
+		if cl, ok := cooling[appliedKey(d)]; ok && cooldownLevers[d.Intervention] &&
+			!(cl.reassert && cl.value == normalisedValue(d.Value)) {
 			continue
 		}
 		kept = append(kept, sc)

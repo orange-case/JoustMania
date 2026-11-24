@@ -74,6 +74,15 @@ type appliedLedger struct {
 	// overlapped marks a key that had two writes in flight at once since its in-flight
 	// count was last 0: neither write may record its value.
 	overlapped map[string]bool
+	// written is the last applied write per key, for the lever cooldown (UC-040
+	// A53). It outlives the value's TTL: the effect window may be longer.
+	written map[string]leverWrite
+	// reserved counts the decisions that passed the lever cooldown and have not
+	// finished yet: a concurrent decision for the key sees the lever as cooling.
+	reserved map[string]int
+	// cooldownReported: the first lever_cooldown refusal since the key's last write
+	// was emitted in full; later ones are quiet repeats.
+	cooldownReported map[string]bool
 }
 
 // present reports whether serial is still in the game (a game-wide key always is).
@@ -153,6 +162,104 @@ func (al *appliedLedger) end(f *appliedFlight, wrote bool, err error, now time.T
 		}
 		al.entries[f.key] = appliedEntry{serial: f.serial, value: f.value, at: now}
 	}
+	if wrote && err == nil {
+		if al.written == nil {
+			al.written = make(map[string]leverWrite)
+			al.cooldownReported = make(map[string]bool)
+		}
+		al.written[f.key] = leverWrite{at: now, value: f.value, known: !overlapped}
+		delete(al.cooldownReported, f.key)
+	}
+}
+
+// leverWrite is the last applied write to a cooldown lever. known is false when
+// two writes overlapped: either value may have landed last.
+type leverWrite struct {
+	at    time.Time
+	value string
+	known bool
+}
+
+// busy reports a write to key in flight or a decision holding its cooldown.
+// Caller holds al.mu.
+func (al *appliedLedger) busy(key string) bool {
+	return al.inflight[key] > 0 || al.reserved[key] > 0
+}
+
+// cooling reports whether value for key is refused at now: a write to the key is in
+// flight, another decision holds it, or its last applied write is younger than
+// window and wrote another value. Re-asserting the last written value is never
+// refused (BR-046). first is true for the first refusal since that write. A key
+// that is not cooling is held until hold.release, so two concurrent decisions
+// cannot both write inside one window.
+func (al *appliedLedger) cooling(key, value string, now time.Time, window time.Duration) (cooling, first bool, hold *cooldownHold) {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	if !al.busy(key) {
+		w, ok := al.written[key]
+		if !ok || !now.Before(w.at.Add(window)) || w.known && w.value == value {
+			if al.reserved == nil {
+				al.reserved = make(map[string]int)
+			}
+			al.reserved[key]++
+			return false, false, &cooldownHold{ledger: al, key: key}
+		}
+	}
+	if al.cooldownReported == nil {
+		al.cooldownReported = make(map[string]bool)
+	}
+	first = !al.cooldownReported[key]
+	al.cooldownReported[key] = true
+	return true, first, nil
+}
+
+// cooldownHold is a decision's hold on a lever that passed the cooldown. A nil
+// hold does nothing; release is idempotent.
+type cooldownHold struct {
+	ledger *appliedLedger
+	key    string
+	once   sync.Once
+}
+
+func (h *cooldownHold) release() {
+	if h == nil {
+		return
+	}
+	h.once.Do(func() {
+		al := h.ledger
+		al.mu.Lock()
+		defer al.mu.Unlock()
+		if al.reserved[h.key]--; al.reserved[h.key] <= 0 {
+			delete(al.reserved, h.key)
+		}
+	})
+}
+
+// coolingLever is the rules' view of one cooling key: reassert is set when its
+// last written value is known and may be written again (BR-046).
+type coolingLever struct {
+	value    string
+	reassert bool
+}
+
+// coolingView returns the cooling keys among keys at now, nil when none. It marks
+// no refusal and takes only the ledger's own mutex.
+func (al *appliedLedger) coolingView(keys []string, now time.Time, window time.Duration) map[string]coolingLever {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	var out map[string]coolingLever
+	for _, key := range keys {
+		w, ok := al.written[key]
+		busy := al.busy(key)
+		if !busy && (!ok || !now.Before(w.at.Add(window))) {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]coolingLever)
+		}
+		out[key] = coolingLever{value: w.value, reassert: !busy && w.known}
+	}
+	return out
 }
 
 // values returns the live (unexpired) entries at now as key -> normalised value, nil

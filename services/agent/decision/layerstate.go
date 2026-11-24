@@ -39,6 +39,9 @@ const (
 	// last wrote for the same intervention and target in this game; nothing is
 	// written (UC-040 A35, BR-023). Not a refusal by a gate: the value is in place.
 	ReasonAlreadyApplied BlockReason = "already_applied"
+	// ReasonLeverCooldown: a game-wide lever would change again within the effect
+	// window of the agent's last write to it (UC-040 A53, BR-046; #2641).
+	ReasonLeverCooldown BlockReason = "lever_cooldown"
 	// ReasonExperimentFlag: the game belongs to an experiment (either arm) and the
 	// intervention is a lever of the experiment's flag (UC-040 A40, BR-028; #1975).
 	ReasonExperimentFlag BlockReason = "experiment_flag"
