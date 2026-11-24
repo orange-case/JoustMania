@@ -592,6 +592,17 @@ services:
   # group. INPUT_GID is host identity (C-035): the input group's GID differs
   # per host (996 on the stage Pi; `getent group input` shows it). No
   # /run/udev: evdev does not need it. Serves no port, so no healthcheck.
+  # The pad's display (UC-016): the host's /dev bound read-only and NOT
+  # recursively at /run/host-dev (no /dev/shm, /dev/pts, /dev/mqueue with it;
+  # Compose v2.24+ for `bind.recursive`), so the hidraw node of the pad's raw
+  # HID interface is reachable whatever its number; the second cgroup rule
+  # allows the hidraw major, which is dynamic: joustmania-compose.sh exports
+  # HIDRAW_MAJOR from the host's /proc/devices. The fallback 13 repeats the
+  # evdev rule and grants nothing new (the display link then stays down,
+  # UC-016 A1). The major is fixed when the container is created: a hidraw
+  # driver loaded later needs a recreate. The udev rule
+  # scripts/setup/99-joustmania-operator-pad.rules gives the input group the
+  # pad's hidraw nodes (cb00:1337 only).
   operator-pad:
     profiles:
       - operator-pad
@@ -602,8 +613,15 @@ services:
     container_name: joustmania-operator-pad
     volumes:
       - /dev/input:/dev/input:ro
+      - type: bind
+        source: /dev
+        target: /run/host-dev
+        read_only: true
+        bind:
+          recursive: disabled
     device_cgroup_rules:
       - "c 13:* rw"
+      - "c ${HIDRAW_MAJOR:-13}:* rw"
     group_add:
       - "${INPUT_GID:-996}"
     environment:

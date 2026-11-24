@@ -27,6 +27,8 @@
 #   one that interpolates: with a value compose reads as empty (`"" # note`,
 #   `${UNSET}`) it would refuse the overlay and the whole stack would not
 #   start. In every other case the overlay is left out and one line says so.
+# - Pad display (UC-016): HIDRAW_MAJOR is exported from the host's
+#   /proc/devices for the operator-pad cgroup rule (below).
 # Never prints the env files or their values. Never run `config` without
 # `--services`/`--images`/`-q` where output is logged; it prints interpolated
 # secrets.
@@ -78,6 +80,23 @@ compose_env_value() {
     done
     return 0
 }
+
+# Operator pad display (UC-016, services.md §3.1): the hidraw char major is
+# dynamic, so the operator-pad cgroup rule takes it from the host's
+# /proc/devices. A different HIDRAW_MAJOR (shell, .env.local, .env) gets one
+# stderr line and the host's value wins. No hidraw driver (macOS, a kernel
+# without it loaded yet) exports nothing: compose's fallback grants nothing new.
+# JOUSTMANIA_PROC_DEVICES is a test seam (scripts/tests), not a tunable (C-035).
+host_hidraw_major="$(awk '$2 == "hidraw" { print $1; exit }' "${JOUSTMANIA_PROC_DEVICES:-/proc/devices}" 2>/dev/null || true)"
+if [[ -n "$host_hidraw_major" ]]; then
+    configured_hidraw_major="$(compose_env_value HIDRAW_MAJOR)"
+    if [[ -n "$configured_hidraw_major" && "$configured_hidraw_major" != "$host_hidraw_major" ]]; then
+        echo "joustmania-compose: HIDRAW_MAJOR=$configured_hidraw_major is not this host's hidraw major; using $host_hidraw_major (UC-016)" >&2
+    fi
+    export HIDRAW_MAJOR="$host_hidraw_major"
+    unset configured_hidraw_major
+fi
+unset host_hidraw_major
 
 GATEWAY_OVERLAY=docker-compose.gateway.yml
 if [[ -f "$GATEWAY_OVERLAY" && " $* " != *" $GATEWAY_OVERLAY "* ]]; then
