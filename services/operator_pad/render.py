@@ -38,6 +38,7 @@ from services.operator_pad.screens import (
     MINIMUM,
     NO_CONNECTION,
     NOT_POSSIBLE,
+    NOW_NEW_FORMS,
     PRESS_KNOB,
     PRESS_TO_CONFIRM,
     RELEASE_TO_RESET,
@@ -45,7 +46,6 @@ from services.operator_pad.screens import (
     SETTING_LABELS,
     UNDERLINE,
     UNKNOWN,
-    V2_SHORT_FORMS,
     WIDTH,
     Line,
     Screen,
@@ -225,9 +225,9 @@ def _rows_screen(
 
 
 def _now_new(option: str, value: str | None, version: int, width: int) -> str:
-    """A NOW or NEW value; the protocol 2 form where the full one leaves no room for the label."""
+    """A NOW or NEW value; its 6-character form where the full one leaves no room for the label."""
     text = value_text(option, value, version)
-    short_forms = V2_SHORT_FORMS.get(option, {})
+    short_forms = NOW_NEW_FORMS.get(option, {})
     if len(text) > width - len("NOW ") and value in short_forms:
         return short_forms[value]
     return text

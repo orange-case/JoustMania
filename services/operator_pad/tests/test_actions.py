@@ -303,7 +303,7 @@ async def test_lobby_only_gestures_are_refused_by_the_pad_while_a_game_is_live(a
 @pytest.mark.uc("UC-015", flow="A1", br=["BR-004"])
 @pytest.mark.uc("UC-016", br=["BR-011"])
 async def test_agent_level_volume_and_backend_are_not_refused_while_a_game_is_live(actions, menu):
-    live = status(lifecycle_live=True)
+    live = status(lifecycle_live=True, pad_commands=[*status().pad_commands, "set_backend.from"])
     await actions.dispatch(Gesture(LAYER, "K3", steps=-1), live, live, on("AGENT", "K3"))
     await actions.dispatch(Gesture(LAYER, "K1", steps=1), live, live, on("INTERV", "K1"))
     await actions.dispatch(Gesture(LAYER, "K3", steps=1), live, live, on("HOME", "K3"))

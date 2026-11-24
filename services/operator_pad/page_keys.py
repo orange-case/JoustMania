@@ -7,6 +7,7 @@ do (BR-014: a confirmation first) and whether it is refused because a value is u
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 
 from lib import setting_ladders
@@ -21,6 +22,7 @@ from lib.setting_ladders import (
     GOAL_OPTION,
     GROUP_OPTION,
     ON_OFF_LADDER,
+    PAID_BACKENDS,
     RATE_OPTION,
     RETRO_BACKEND_OPTION,
     Preview,
@@ -177,8 +179,8 @@ def _backend_edit_plan(status, steps: int) -> Plan:
         return Plan(None, None, refused=True)
     new, _ = setting_ladders.step_ladder("decision.backend", BACKENDS, now, steps)
     raises = bool(setting_ladders.is_raise("decision.backend", now, new))
-    if raises and SET_BACKEND_FROM not in pad_commands(status):
-        return Plan(now, new, raises=True, refused=True)
+    if new != now and new in PAID_BACKENDS and SET_BACKEND_FROM not in pad_commands(status):
+        return Plan(now, new, raises=raises, refused=True)  # no paid target unguarded, raise or not
     return Plan(now, new, raises=raises)
 
 
@@ -224,6 +226,13 @@ def default_of(option: str, status) -> str | None:
 
 def reset_plan(spec: RowSpec, status) -> Plan:
     """Every reset with an unknown NEW is refused; on a raise row NEW above NOW is a raise, never assumed lower."""
+    plan = _reset_plan(spec, status)
+    if spec.lobby_only and status is not None and status.lifecycle_live:
+        return dataclasses.replace(plan, raises=False, refused=True)  # A4, as the edit screen
+    return plan
+
+
+def _reset_plan(spec: RowSpec, status) -> Plan:
     option = spec.option
     new = default_of(option, status)
     if option in AGENT_ROW_OPTIONS:
@@ -238,8 +247,8 @@ def reset_plan(spec: RowSpec, status) -> Plan:
         if now not in BACKENDS or new not in BACKENDS:
             return Plan(now or None, new, refused=True)
         raises = bool(setting_ladders.is_raise(option, now, new))
-        if raises and RESET_BACKEND_FROM not in pad_commands(status):
-            return Plan(now, new, raises=True, refused=True)
+        if new in PAID_BACKENDS and RESET_BACKEND_FROM not in pad_commands(status):
+            return Plan(now, new, raises=raises, refused=True)  # no paid target unguarded, raise or not
         return Plan(now, new, raises=raises)
     if option != "agent_level":
         return Plan(row_preview(option, status, 0).value, new, refused=new is None)

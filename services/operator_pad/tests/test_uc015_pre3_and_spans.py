@@ -30,6 +30,7 @@ def lobby_status() -> menu_pb2.GetMenuStatusResponse:
         agent_level="standard",
         agent_backend="claude",  # one step up is no raise (UC-016 BR-014, D12)
         audio_volume_master="normal",
+        pad_commands=["set_backend.from"],  # a paid target needs the guard (UC-016 BR-014)
     )
 
 

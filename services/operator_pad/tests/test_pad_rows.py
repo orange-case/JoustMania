@@ -2,6 +2,7 @@
 group, retro AI, effort, brief, and the decision backend's free-to-paid raise (D12)."""
 
 import itertools
+from types import SimpleNamespace
 from unittest.mock import MagicMock, create_autospec
 
 import pytest
@@ -23,7 +24,7 @@ from services.operator_pad import page_keys, render
 from services.operator_pad.actions import Actions
 from services.operator_pad.cues import CuePlayer
 from services.operator_pad.gestures import LAYER, LAYER_STEP, RESET, TAP, Gesture
-from services.operator_pad.pages import PAGES, PageContext, page_rows
+from services.operator_pad.pages import PAGES, PageContext, agent_row_value, page_rows
 from services.operator_pad.screens import CONFIRMED, INVERTED, NOT_POSSIBLE, PRESS_KNOB, WIDTH
 from services.operator_pad.tests.fakes import MenuStubSpec
 from services.operator_pad.tests.test_page_keys import ALL_COMMANDS, DEFAULTS
@@ -258,13 +259,33 @@ async def test_backend_target_and_raise_come_from_the_press_read_and_from_is_alw
 
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-011", "BR-014"])
-async def test_backend_raise_needs_set_backend_from_and_other_edits_go_without_it():
+async def test_without_set_backend_from_only_a_switch_to_rules_is_sent():
+    """Hardening: without the guard any paid target is refused, raise or not; `rules` still goes."""
     old = [c for c in COMMANDS if c != "set_backend.from"]
-    result, data, cues = await edit("decision.backend", 1, rs(agent_backend="rules", commands=old), confirmed=True)
+    for backend, steps in (("rules", 1), ("claude", 1), ("openai", -1)):
+        press = rs(agent_backend=backend, commands=old)
+        result, data, cues = await edit("decision.backend", steps, press, confirmed=True)
+        assert (result, data) == (("set_backend", "refused"), []), backend
+        cues.refusal.assert_awaited_once()
+        assert page_keys.edit_plan(on("decision.backend").spec, press, steps).refused  # NOT POSSIBLE on screen
+    result, data, _ = await edit("decision.backend", -1, rs(agent_backend="claude", commands=old))
+    assert data == [{"command": "set_backend", "backend": "rules"}]
+    # The press menu listed it, the release menu does not: a paid target is refused too.
+    result, data, _ = await edit("decision.backend", 1, rs(agent_backend="claude"), release=rs(commands=old))
     assert (result, data) == (("set_backend", "refused"), [])
-    cues.refusal.assert_awaited_once()
-    result, data, _ = await edit("decision.backend", 1, rs(agent_backend="claude", commands=old))
-    assert data == [{"command": "set_backend", "backend": "openai"}]
+
+
+@pytest.mark.uc("UC-016", flow="A8", br=["BR-011", "BR-014"])
+async def test_without_the_backend_reset_guard_a_paid_default_is_refused_raise_or_not():
+    binding = page_keys.binding("K2", PAGES.index("INTERV"))
+    old = [c for c in COMMANDS if c != "reset_setting.from:decision.backend"]
+    press = rs(agent_backend="jev", defaults={**DEFAULTS, "decision.backend": "claude"}, commands=old)
+    assert page_keys.reset_plan(binding.spec, press).refused
+    result, data, _ = await reset(None, press, confirmed=True, binding=binding)
+    assert (result, data) == (("reset_setting", "refused"), [])
+    guarded = rs(agent_backend="jev", defaults={**DEFAULTS, "decision.backend": "claude"})
+    result, data, _ = await reset(None, guarded, release=rs(commands=old), confirmed=True, binding=binding)
+    assert (result, data) == (("reset_setting", "refused"), [])
 
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-011", "BR-014"])
@@ -573,3 +594,73 @@ def test_each_new_rows_reset_screen(version, option):
     unknown = page_keys.reset_plan(on(option, "reset").spec, rs({option: ladder[0]}, defaults=DEFAULTS))
     s = render.reset_screen(version, option, unknown, False, BOTTOM)
     assert rows(s)[1].endswith("?") and "NOT POSS" in rows(s)[2] and PRESS_KNOB not in title(s)
+
+
+# --- review of #2758 ----------------------------------------------------------------------------------
+
+
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-007", "BR-012"])
+@pytest.mark.parametrize("option", SIX)
+async def test_a_tap_on_a_known_value_is_silent_and_only_an_unknown_one_plays_the_refusal(option):
+    """D7: the agent rows have no voice lines, so a known value is shown, never answered with a refusal."""
+    for role, known, unknown in (
+        ("edit", rs(), rs({option: MISSING})),
+        ("reset", rs(), rs(defaults=DEFAULTS)),
+    ):
+        actions, _, cues = make()
+        await actions.dispatch(Gesture(TAP, "K"), known, None, on(option, role))
+        cues.refusal.assert_not_awaited()
+        cues.announce.assert_not_awaited()
+        await actions.dispatch(Gesture(TAP, "K"), unknown, None, on(option, role))
+        cues.refusal.assert_awaited_once()
+
+
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-007"])
+@pytest.mark.parametrize(
+    ("option", "forms"),
+    [
+        (GOAL, ["OBJ", "LONG", "FINALE", "BAL", "SHORT"]),
+        (BRIEF, ["OFF", "UNKILL", "PROTEC"]),
+    ],
+)
+def test_protocol_2_now_and_new_rows_show_every_goal_and_brief_distinct_and_uncut(option, forms):
+    shown = []
+    for value in AGENT_ROW_LADDERS[option]:
+        now_row, new_row, _ = rows(screen(2, option, value, 0))
+        assert now_row == "NOW" + value_of(now_row).rjust(7) and new_row.startswith("NEW")
+        shown.append(value_of(now_row))
+    assert shown == forms
+    assert value_of(rows(screen(2, BRIEF, "custom", 0))[0]) == "CUSTOM"
+    # Protocol 3 keeps the full word where it fits beside the label.
+    assert value_of(rows(screen(3, GOAL, "balanced_contest", 0))[0]) == "BALANCED"
+
+
+def value_of(row: str) -> str:
+    return row[3:].strip()
+
+
+@pytest.mark.uc("UC-016", flow="A4", br=["BR-007", "BR-011", "BR-013"])
+@pytest.mark.parametrize("version", [2, 3, 4])
+@pytest.mark.parametrize(("page", "key"), [("AGENT", "K7"), ("HOME", "K7"), ("GAME", "K7"), ("START", "K2")])
+def test_a_lobby_only_reset_screen_while_live_is_not_possible(version, page, key):
+    binding = page_keys.binding(key, PAGES.index(page))
+    assert binding.spec.lobby_only
+    plan = page_keys.reset_plan(binding.spec, rs({GOAL: "quick_game"}, lifecycle_live=True))
+    assert plan.refused and not plan.raises
+    s = render.reset_screen(version, binding.spec.option, plan, False, BOTTOM)
+    assert "NOT POSS" in " ".join(rows(s)) and "RELEASE" not in " ".join(rows(s))
+    assert not page_keys.reset_plan(binding.spec, rs({GOAL: "quick_game"})).refused
+
+
+@pytest.mark.uc("UC-016", br=["BR-006"])
+def test_the_agent_row_status_fields_are_the_protos_string_fields_and_a_missing_one_is_unknown():
+    fields = menu_pb2.GetMenuStatusResponse.DESCRIPTOR.fields_by_name
+    numbers = {}
+    for name in AGENT_ROW_STATUS_FIELDS.values():
+        assert name in fields, name
+        assert fields[name].type == fields[name].TYPE_STRING, name
+        numbers[name] = fields[name].number
+    assert sorted(numbers.values()) == [22, 23, 24, 25, 26, 27]
+    for option in SIX:
+        assert agent_row_value(option, SimpleNamespace()) is None
+        assert agent_row_value(option, rs({option: MISSING})) is None

@@ -96,6 +96,17 @@ V2_SHORT_FORMS: dict[str, dict[str, str]] = {
     setting_ladders.GOAL_OPTION: {"lively_finale": "FINALE"},
     setting_ladders.BRIEF_OPTION: {"protect_weakest": "PROTECT"},
 }
+# BR-007: NOW and NEW rows leave 6 characters beside the label on protocol 2 (and fit these on protocol 3).
+NOW_NEW_FORMS: dict[str, dict[str, str]] = {
+    setting_ladders.GOAL_OPTION: {
+        "from_objectives": "OBJ",
+        "long_running_game": "LONG",
+        "lively_finale": "FINALE",
+        "balanced_contest": "BAL",
+        "quick_game": "SHORT",
+    },
+    setting_ladders.BRIEF_OPTION: {"unkillable": "UNKILL", "protect_weakest": "PROTEC"},
+}
 
 # BR-006 mode table: the full name (`pretty_name` in capitals without a leading `JOUST `, at most 14
 # characters) wherever the pad names a mode, the short name (at most 5) only in the status bar.

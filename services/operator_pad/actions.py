@@ -21,6 +21,7 @@ from collections.abc import Awaitable, Callable
 from opentelemetry import trace
 
 from lib import setting_ladders, voice_prompts
+from lib.setting_ladders import PAID_BACKENDS
 from lib.telemetry import get_tracer
 from proto import game_coordinator_pb2, menu_pb2
 from services.operator_pad import cues, metrics, page_keys
@@ -360,8 +361,9 @@ class Actions:
             await self._cues.announce(label, None)
             return
         if voice is None:
-            await self._cues.refusal()
-            return
+            if value is None or option not in setting_ladders.AGENT_ROW_OPTIONS:
+                await self._cues.refusal()
+            return  # D7: the agent rows have no voice lines; a known value is the screen's alone
         await self._cues.announce(label, voice)  # in the background (BR-009)
 
     async def _agent_tap(self, status) -> tuple[str, str]:
@@ -545,7 +547,7 @@ class Actions:
         base = plan.now if level or row else None
         if spec.edit == BACKEND:
             guarded = RESET_BACKEND_FROM in pad_commands(status)
-            if plan.raises and not guarded:
+            if plan.new in PAID_BACKENDS and not guarded:
                 return await self._refuse(RESET_COMMAND)  # a backend moved under the hold would go unseen
             base = plan.now if guarded else None
         return RESET_COMMAND, await self._reset_send(spec.option, plan.new, base, plan.raises, gesture.confirmed)
@@ -567,7 +569,7 @@ class Actions:
         if plan.new == plan.now:
             return action, NOOP  # a full turn of the wheel: nothing sent, no cue
         guarded = SET_BACKEND_FROM in pad_commands(status)
-        if plan.raises and not guarded:
+        if plan.new in PAID_BACKENDS and not guarded:
             return await self._refuse(action)
         return action, await self._set_backend(plan.new, plan.now if guarded else None, plan.raises, confirmed)
 

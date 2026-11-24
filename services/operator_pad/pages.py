@@ -151,10 +151,9 @@ def _row_value(option: str, status, version: int) -> str:
 
 
 def agent_row_value(option: str, status) -> str | None:
-    """The value in force of an agent row as the menu reports it; None while empty (unknown)."""
-    if status is None:
-        return None
-    return getattr(status, setting_ladders.AGENT_ROW_STATUS_FIELDS[option]) or None
+    """The value in force of an agent row as the menu reports it; None while empty or missing (unknown)."""
+    value = getattr(status, setting_ladders.AGENT_ROW_STATUS_FIELDS[option], "") if status is not None else ""
+    return value if isinstance(value, str) and value else None
 
 
 class Pager:
