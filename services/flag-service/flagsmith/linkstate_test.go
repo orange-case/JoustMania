@@ -2,6 +2,7 @@ package flagsmith
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 )
@@ -373,6 +374,76 @@ func TestLinkStateRefusedValue(t *testing.T) {
 		s.SetInSyncRead(stack, 3)
 		if _, oos, r := s.Counts(); oos != 0 || r != 0 {
 			t.Fatalf("out_of_sync %d refused %d, want 0 0: a round that read the latest change acts", oos, r)
+		}
+	})
+	t.Run("UC-055/A4 back to Flagsmith's value ends the push refusal", func(t *testing.T) {
+		s := refused(t, stack)
+		s.Offer(stack, val(`0`), t0, 2) // the operator saves Flagsmith's 0
+		if r, side := s.Refusal(stack); r != "" || side != "" {
+			t.Fatalf("refusal %q %q, want none: the stack runs Flagsmith's value", r, side)
+		}
+		if _, _, r := s.Counts(); r != 0 {
+			t.Fatalf("refused %d, want 0", r)
+		}
+		s = refused(t, stack)
+		s.Refuse(stack, SideLocal, "slot_changed")
+		s.Offer(stack, val(`0`), t0, 2)
+		if r, side := s.Refusal(stack); r != "slot_changed" || side != SideLocal {
+			t.Fatalf("refusal %q %q, want the local refusal kept (the pull round ends it)", r, side)
+		}
+	})
+	t.Run("UC-055/A4 a revert holds the refused value only while it is written", func(t *testing.T) {
+		s := refused(t, stack)
+		s.BeginRevert(stack)
+		s.Offer(stack, val(`0`), t0, 2) // the revert's own write of Flagsmith's 0
+		s.Offer(stack, val(`1`), t0, 3) // a re-save of the refused 1 during it
+		if _, _, _, _, ok := s.Next(); ok {
+			t.Fatal("the re-saved refused 1 was queued during the revert")
+		}
+		s.EndRevert(stack, 2)
+		if _, ok := s.PushRefused(stack); !ok {
+			t.Fatal("the revert ended the hold of the refused value")
+		}
+		s.Offer(stack, val(`0`), t0, 4) // later back to Flagsmith's 0: the hold ends
+		if _, ok := s.PushRefused(stack); ok {
+			t.Fatal("the refused value is still held after the revert ended")
+		}
+	})
+	t.Run("UC-055/A4 an operator save of Flagsmith's value during a revert ends the hold", func(t *testing.T) {
+		// The revert's write fails (the save changed the slot): not written.
+		s := refused(t, stack)
+		s.BeginRevert(stack)
+		s.Offer(stack, val(`0`), t0, 2)
+		s.EndRevert(stack, 0)
+		if _, _, r := s.Counts(); r != 0 {
+			t.Fatalf("refused %d after a failed revert and a save of Flagsmith's 0, want 0", r)
+		}
+		// The save comes after the revert's write.
+		s = refused(t, stack)
+		s.BeginRevert(stack)
+		s.Offer(stack, val(`0`), t0, 2) // the revert's own write
+		s.Offer(stack, val(`0`), t0, 3) // the operator's save
+		s.EndRevert(stack, 2)
+		if _, _, r := s.Counts(); r != 0 {
+			t.Fatalf("refused %d after a save of Flagsmith's 0 following the revert, want 0", r)
+		}
+		// A re-save of the refused value is the latest change: the hold stays.
+		s = refused(t, stack)
+		s.BeginRevert(stack)
+		s.Offer(stack, val(`0`), t0, 2) // the revert's own write
+		s.Offer(stack, val(`0`), t0, 3) // the operator's save of Flagsmith's 0
+		s.Offer(stack, val(`1`), t0, 4) // then the refused 1 again
+		s.EndRevert(stack, 2)
+		if _, ok := s.PushRefused(stack); !ok {
+			t.Fatal("a re-save of the refused value after the revert ended the hold")
+		}
+		// Written with an unknown version: the hold stays.
+		s = refused(t, stack)
+		s.BeginRevert(stack)
+		s.Offer(stack, val(`0`), t0, 2)
+		s.EndRevert(stack, math.MaxUint64)
+		if _, ok := s.PushRefused(stack); !ok {
+			t.Fatal("a revert written with an unknown version ended the hold")
 		}
 	})
 	t.Run("UC-055/main step 5 back to Flagsmith's value while a pull round adopts the older local value: out of sync", func(t *testing.T) {
