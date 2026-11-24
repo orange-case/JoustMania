@@ -188,3 +188,92 @@ async def test_resume_never_brings_back_more_than_the_stop_left(servicer, flags)
     assert flags.values[LEVEL] == "standard"
     assert flags.values[GATE] == "off"
     assert flags.values[ENABLED] == "on"
+
+
+# --- a stale stop memory never raises the agent (review of #2753) --------------------------------
+
+
+async def stop_then_bring_back_outside_and_kill(menu, flags) -> None:
+    """Stop at full with the gate open; then, outside the menu, the agent comes back at ambient with
+    the gate closed and is killed again by `agent-killswitch.sh off` (enabled off, level untouched)."""
+    flags.values[LEVEL] = "full"
+    flags.values[GATE] = "on"
+    await pad(menu, "agent_switch", direction="stop")
+    flags.values[LEVEL] = "ambient"
+    flags.values[ENABLED] = "on"
+    flags.values[GATE] = "off"
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+@pytest.mark.uc("UC-015", br=["BR-003"])
+async def test_a_stop_memory_the_menu_saw_the_agent_leave_is_forgotten(servicer, flags):
+    await stop_then_bring_back_outside_and_kill(servicer, flags)
+    await servicer.settings_ops.refresh_operator_settings()  # the pad's status poll sees it running
+    flags.values[ENABLED] = "off"
+    flags.puts.clear()
+
+    reply = await pad(servicer, "agent_switch", direction="resume", only_if_stopped=1)
+
+    assert (reply.success, reply.error) == (True, "ok")
+    # Nothing remembered: ambient, the gate as it stands (UC-015 BR-003).
+    assert flags.written() == [("agent", "interventions_allowed", "ambient"), ("agent", "enabled", "on")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+@pytest.mark.uc("UC-015", br=["BR-003"])
+async def test_a_resume_from_a_stale_stop_memory_only_lowers(servicer, flags):
+    """The menu never saw the agent run in between: the memory is capped by the live level and gate."""
+    await stop_then_bring_back_outside_and_kill(servicer, flags)
+    flags.values[ENABLED] = "off"
+    flags.puts.clear()
+
+    await pad(servicer, "agent_switch", direction="resume", only_if_stopped=1)
+
+    assert flags.written() == [
+        ("agent", "interventions_allowed", "ambient"),
+        ("agent", "interventions_enabled", "off"),
+        ("agent", "enabled", "on"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-015", br=["BR-003"])
+@pytest.mark.parametrize(
+    "observe",
+    [
+        lambda menu: menu.settings_ops.refresh_operator_settings(),
+        lambda menu: pad(menu, "interventions_switch", state="off"),
+        lambda menu: pad(menu, "step_setting", option="agent_level", direction="up"),
+        lambda menu: pad(menu, "agent_switch", direction="resume"),
+        lambda menu: pad(menu, "reset_setting", option="agent_level", expect="standard"),
+    ],
+    ids=["status-read", "interventions-switch", "level-step", "unguarded-resume", "level-reset"],
+)
+async def test_every_menu_read_of_a_running_agent_forgets_the_stop_memory(servicer, flags, observe):
+    await stop_then_bring_back_outside_and_kill(servicer, flags)
+
+    await observe(servicer)
+
+    assert (servicer.settings_ops.saved_agent_level, servicer.settings_ops.saved_agent_gate) == (None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-015", br=["BR-002", "BR-003"])
+async def test_a_stop_at_a_level_it_cannot_save_forgets_the_older_memory(servicer, flags):
+    servicer.settings_ops.saved_agent_level = "full"
+    flags.values[LEVEL] = "probe"
+
+    await pad(servicer, "agent_switch", direction="stop")
+
+    assert servicer.settings_ops.saved_agent_level is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-015", flow="A3", br=["BR-003", "BR-010"])
+async def test_an_unguarded_resume_with_enabled_unreadable_fails_closed(servicer, flags):
+    flags.failing_get = {ENABLED}
+    reply = await pad(servicer, "agent_switch", direction="resume")
+    assert (reply.success, reply.error) == (False, "flag_service_unavailable")
+    assert flags.puts == []

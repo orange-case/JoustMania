@@ -247,7 +247,53 @@ async def test_a_reset_never_answers_success_with_an_empty_value(servicer, monke
 
     monkeypatch.setattr(servicer.settings_ops, "reset_setting", empty)
     reply = await pad(servicer, "reset_setting", option="game_instructions")
-    assert (reply.success, reply.value) == (False, "")
+    assert (reply.success, reply.error, reply.value) == (False, "flag_service_unavailable", "")
+    assert failure_cues(servicer) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", br=["BR-013"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        {"command": "agent_switch", "direction": "stop"},
+        {"command": "agent_switch", "direction": "resume"},
+        {"command": "step_setting", "option": "agent_level", "direction": "down"},
+        {"command": "reset_setting", "option": "agent_level", "expect": "standard"},
+        {"command": "interventions_switch", "state": "off"},
+    ],
+    ids=["stop", "resume", "level-step", "level-reset", "interventions-switch"],
+)
+async def test_an_agent_command_makes_the_level_default_unknown(servicer, command):
+    servicer.settings_ops.setting_defaults = {"agent_level": "standard", "game_instructions": "off"}
+
+    await pad(servicer, **command)
+
+    assert servicer.settings_ops.setting_defaults == {"game_instructions": "off"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", br=["BR-013"])
+@pytest.mark.parametrize(
+    ("command", "option"),
+    [
+        ({"command": "set_backend", "backend": "claude"}, "decision.backend"),
+        ({"command": "step_setting", "option": "game_instructions", "direction": "up"}, "game_instructions"),
+        ({"command": "step_setting", "option": "force_all_start", "direction": "up"}, "force_all_start"),
+    ],
+)
+async def test_a_persisted_write_makes_its_default_unknown(servicer, command, option):
+    """A persisted write drops a stack overlay (flags.md §13), so the reset target may move."""
+    ops = servicer.settings_ops
+    ops.setting_defaults = {"decision.backend": "rules", "game_instructions": "off", "force_all_start": "off"}
+    generation = ops._defaults_generation
+
+    reply = await pad(servicer, **command)
+
+    assert reply.success
+    assert option not in ops.setting_defaults
+    assert len(ops.setting_defaults) == 2
+    assert ops._defaults_generation > generation
 
 
 # --- agent_level (D2: by the agent's state, under the agent lock) ----------------------------------
