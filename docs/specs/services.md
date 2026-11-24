@@ -215,6 +215,19 @@ Error codes (a refusal is `success=false` and the code in `error`; no state chan
 
 The pad's display ([UC-016](../use_cases/UC-016.md)) reads these fields for its status screen and, with protocol 2 or higher, its pages (UC-016 BR-006, #2742; the knob scrolls them, the K8 tap stays reserved). The proto fields are additive.
 
+**Planned status fields (UC-016 BR-006, #2742).** The pages show six agent values `GetMenuStatus` does not report yet. Each is a new string field, read like `agent_backend` from the menu's in-process client of the `agent` set; empty = unknown (not resolvable, or a menu older than the field), which the pad shows as `?`:
+
+| Field | Meaning |
+|---|---|
+| `agent_goal_profile` | the variant name of `agent/goal.profile` (Flagsmith-only, FR-226) |
+| `agent_max_interventions_per_minute` | the resolved value of `policy.max_interventions_per_minute`, as a decimal |
+| `agent_group_grant_state` | `on` / `off` for `policy.group_grant.enabled` |
+| `inference_backend` | the variant name of `inference.backend` |
+| `inference_effort` | the variant name of `inference.effort` |
+| `agent_operator_brief_state` | `on` when `decision.operator_brief` is a non-empty string, `off` when empty; the text itself is not reported |
+
+The internet check of UC-016 BR-010 needs no RPC: the pad service makes an outbound TCP connect from its own container (the default bridge network of the `operator-pad` compose service), unprivileged.
+
 **Traceability:** FR-190 to FR-195, FR-198, FR-199 / UC-015 / `services/menu/servicer.py`, `services/menu/settings_ops.py`, `lib/flag_service_writer.py`, `proto/menu.proto`, `services/connect-proxy/main.go` / `services/menu/tests/test_pad_commands.py`, `services/menu/tests/test_menu_status.py`, `lib/tests/test_flag_service_writer.py`, `services/connect-proxy/forwarding_test.go` (`TestProxyGetMenuStatus`).
 
 ## 4. Key messages
