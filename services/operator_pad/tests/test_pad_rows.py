@@ -2,46 +2,43 @@
 group, retro AI, effort, brief, and the decision backend's free-to-paid raise (D12)."""
 
 import itertools
-import json
-from pathlib import Path
 from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
+from lib.setting_ladders import (
+    AGENT_ROW_LADDERS,
+    AGENT_ROW_OPTIONS,
+    AGENT_ROW_STATUS_FIELDS,
+    RAISE_LADDER_OPTIONS,
+)
+from lib.setting_ladders import BRIEF_OPTION as BRIEF
+from lib.setting_ladders import EFFORT_OPTION as EFFORT
+from lib.setting_ladders import GOAL_OPTION as GOAL
+from lib.setting_ladders import GROUP_OPTION as GROUP
+from lib.setting_ladders import RATE_OPTION as RATE
+from lib.setting_ladders import RETRO_BACKEND_OPTION as RETRO_BACKEND
 from proto import menu_pb2
-from services.operator_pad import page_keys, render, row_ladders
+from services.operator_pad import page_keys, render
 from services.operator_pad.actions import Actions
 from services.operator_pad.cues import CuePlayer
 from services.operator_pad.gestures import LAYER, LAYER_STEP, RESET, TAP, Gesture
 from services.operator_pad.pages import PAGES, PageContext, page_rows
-from services.operator_pad.row_ladders import BRIEF, EFFORT, GOAL, GROUP, RATE, RETRO_BACKEND
 from services.operator_pad.screens import CONFIRMED, INVERTED, NOT_POSSIBLE, PRESS_KNOB, WIDTH
 from services.operator_pad.tests.fakes import MenuStubSpec
 from services.operator_pad.tests.test_page_keys import ALL_COMMANDS, DEFAULTS
 
-REPO = Path(__file__).resolve().parents[3]
 ROWS = {GOAL: ("AGENT", "K6", "K7"), RATE: ("INTERV", "K3", "K4"), GROUP: ("INTERV", "K6", "K7")}
 ROWS |= {RETRO_BACKEND: ("RETRO", "K1", "K2"), EFFORT: ("RETRO", "K3", "K4"), BRIEF: ("RETRO", "K6", "K7")}
 SIX = tuple(ROWS)
 ROW_COMMANDS = [f"{kind}:{option}" for option in SIX for kind in ("step_setting", "reset_setting")]
-COMMANDS = [*ALL_COMMANDS, "set_backend.from", *ROW_COMMANDS]
+COMMANDS = [*ALL_COMMANDS, "set_backend.from", "reset_setting.from:decision.backend", *ROW_COMMANDS]
 BASELINES = {GOAL: "from_objectives", RATE: "2", GROUP: "off", RETRO_BACKEND: "stub", EFFORT: "medium", BRIEF: "off"}
 MISSING = object()
 
 
-class RowStatus:
-    """A `GetMenuStatusResponse` with the status fields 22 to 27, which the menu's proto adds."""
-
-    def __init__(self, message, planned: dict) -> None:
-        self._message = message
-        self.__dict__.update(planned)
-
-    def __getattr__(self, name):
-        return getattr(self._message, name)
-
-
-def rs(values: dict | None = None, defaults: dict | None = None, commands=COMMANDS, **kw) -> RowStatus:
-    """``values``: option -> value in force (MISSING: the menu does not report it)."""
+def rs(values: dict | None = None, defaults: dict | None = None, commands=COMMANDS, **kw):
+    """``values``: option -> value in force (MISSING: the menu does not report it, an empty field)."""
     now = {**BASELINES, **(values or {})}
     base = {
         "lifecycle_live": False,
@@ -53,9 +50,9 @@ def rs(values: dict | None = None, defaults: dict | None = None, commands=COMMAN
         "pad_commands": commands,
         "setting_defaults": {**DEFAULTS, **BASELINES} if defaults is None else defaults,
     }
+    base.update({AGENT_ROW_STATUS_FIELDS[o]: ("" if v is MISSING else v) for o, v in now.items()})
     base.update(kw)
-    planned = {row_ladders.STATUS_FIELDS[o]: ("" if v is MISSING else v) for o, v in now.items()}
-    return RowStatus(menu_pb2.GetMenuStatusResponse(**base), planned)
+    return menu_pb2.GetMenuStatusResponse(**base)
 
 
 def on(option: str, role: str = "edit") -> page_keys.Binding:
@@ -89,40 +86,6 @@ async def reset(option, press, release=None, confirmed=False, binding=None):
     return result, sent(menu), cues
 
 
-# --- ladders (pad-local until the menu's lib/setting_ladders.py has them) -----------------------------
-
-
-@pytest.mark.uc("UC-016", br=["BR-007", "BR-012"])
-def test_the_ladders_are_the_spec_ladders_and_the_flag_files_variants():
-    """services.md §3.1 iteration 4: the explicit ladders, never the flag file's declared order."""
-    assert row_ladders.LADDERS == {
-        GOAL: ["from_objectives", "long_running_game", "lively_finale", "balanced_contest", "quick_game"],
-        RATE: ["1", "2", "4", "8", "20"],
-        GROUP: ["off", "on"],
-        RETRO_BACKEND: ["stub", "claude"],
-        EFFORT: ["low", "medium", "high", "xhigh", "max"],
-        BRIEF: ["off", "unkillable", "protect_weakest"],
-    }
-    assert {GOAL} == row_ladders.WRAPPING
-    assert {RATE, GROUP, RETRO_BACKEND, EFFORT} == row_ladders.RAISES_UP
-    flags = json.loads((REPO / "services/flagd/agent.json").read_text())["flags"]
-    rate = flags[RATE]["variants"]
-    assert rate == row_ladders.RATE_VARIANTS
-    assert row_ladders.LADDERS[RATE] == [str(v) for v in sorted(rate.values())]
-    for option in (GOAL, GROUP, RETRO_BACKEND, EFFORT, BRIEF):
-        assert set(row_ladders.LADDERS[option]) == set(flags[option]["variants"]), option
-        assert flags[option]["defaultVariant"] == BASELINES[option], option
-    assert flags[RATE]["variants"][flags[RATE]["defaultVariant"]] == int(BASELINES[RATE])
-    assert row_ladders.STATUS_FIELDS == {  # services.md §3.1 fields 22 to 27 (27 redefined by #2755)
-        GOAL: "agent_goal_profile",
-        RATE: "agent_max_interventions_per_minute",
-        GROUP: "agent_group_grant_state",
-        RETRO_BACKEND: "inference_backend",
-        EFFORT: "inference_effort",
-        BRIEF: "agent_operator_brief_variant",
-    }
-
-
 # --- rows and keys (BR-011, BR-012) -------------------------------------------------------------------
 
 
@@ -138,7 +101,7 @@ def test_each_new_row_has_an_edit_and_a_reset_and_only_the_goal_is_lobby_only(op
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-012", "BR-014"])
 @pytest.mark.parametrize("option", SIX)
 async def test_an_edit_sends_one_step_with_from_in_the_canonical_format(option):
-    ladder = row_ladders.LADDERS[option]
+    ladder = AGENT_ROW_LADDERS[option]
     now = ladder[-1]
     result, data, _ = await edit(option, -1, rs({option: now}))
     assert result == ("step_setting", "ok")
@@ -146,9 +109,9 @@ async def test_an_edit_sends_one_step_with_from_in_the_canonical_format(option):
 
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
-@pytest.mark.parametrize("option", sorted(row_ladders.RAISES_UP))
+@pytest.mark.parametrize("option", sorted(RAISE_LADDER_OPTIONS))
 async def test_a_raise_up_the_ladder_waits_for_the_confirmation(option):
-    now = row_ladders.LADDERS[option][0]
+    now = AGENT_ROW_LADDERS[option][0]
     result, data, cues = await edit(option, 1, rs({option: now}))
     assert (result, data) == (("step_setting", "cancelled"), [])
     cues.cancel.assert_awaited_once()
@@ -159,7 +122,7 @@ async def test_a_raise_up_the_ladder_waits_for_the_confirmation(option):
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-012", "BR-014"])
 @pytest.mark.parametrize("option", [GOAL, BRIEF])
 async def test_the_goal_and_the_brief_are_no_raise(option):
-    result, data, _ = await edit(option, 1, rs({option: row_ladders.LADDERS[option][0]}))
+    result, data, _ = await edit(option, 1, rs({option: AGENT_ROW_LADDERS[option][0]}))
     assert result == ("step_setting", "ok") and data[0]["direction"] == "up"
 
 
@@ -179,7 +142,7 @@ async def test_the_goal_is_lobby_only_and_the_other_rows_are_live():
     assert (await edit(GOAL, 1, live))[:2] == (("step_setting", "refused"), [])
     assert (await reset(GOAL, rs({GOAL: "quick_game"}, lifecycle_live=True)))[:2] == (("reset_setting", "refused"), [])
     for option in SIX[1:]:
-        result, data, _ = await edit(option, -1, rs({option: row_ladders.LADDERS[option][-1]}, lifecycle_live=True))
+        result, data, _ = await edit(option, -1, rs({option: AGENT_ROW_LADDERS[option][-1]}, lifecycle_live=True))
         assert result == ("step_setting", "ok"), option
 
 
@@ -232,9 +195,9 @@ async def test_a_custom_brief_reset_is_sent_as_the_menus_no_op_with_expect_and_f
 
 
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
-@pytest.mark.parametrize("option", sorted(row_ladders.RAISES_UP))
+@pytest.mark.parametrize("option", sorted(RAISE_LADDER_OPTIONS))
 async def test_a_reset_above_now_is_a_raise_and_below_it_is_sent_with_expect_and_from(option):
-    ladder = row_ladders.LADDERS[option]
+    ladder = AGENT_ROW_LADDERS[option]
     low, high = ladder[0], ladder[-1]
     up = rs({option: low}, defaults={**DEFAULTS, option: high})
     assert (await reset(option, up))[:2] == (("reset_setting", "cancelled"), [])
@@ -245,10 +208,10 @@ async def test_a_reset_above_now_is_a_raise_and_below_it_is_sent_with_expect_and
 
 
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
-@pytest.mark.parametrize("option", sorted(row_ladders.RAISES_UP))
+@pytest.mark.parametrize("option", sorted(RAISE_LADDER_OPTIONS))
 async def test_a_reset_to_an_off_ladder_value_of_a_raise_row_is_refused(option):
     """A script's overlay (a rate of 50) has no rung: the raise cannot be judged."""
-    press = rs({option: row_ladders.LADDERS[option][0]}, defaults={**DEFAULTS, option: "50"})
+    press = rs({option: AGENT_ROW_LADDERS[option][0]}, defaults={**DEFAULTS, option: "50"})
     assert (await reset(option, press, confirmed=True))[:2] == (("reset_setting", "refused"), [])
 
 
@@ -258,7 +221,7 @@ async def test_a_reset_to_an_off_ladder_value_of_a_raise_row_is_refused(option):
 @pytest.mark.uc("UC-016", br=["BR-011"])
 @pytest.mark.parametrize("option", SIX)
 async def test_a_row_is_enabled_per_option_by_pad_commands(option):
-    now = row_ladders.LADDERS[option][-1]
+    now = AGENT_ROW_LADDERS[option][-1]
     without_step = rs({option: now}, commands=[c for c in COMMANDS if c != f"step_setting:{option}"])
     result, data, cues = await edit(option, -1, without_step)
     assert (result, data) == (("step_setting", "refused"), [])
@@ -320,7 +283,7 @@ async def test_backend_raise_is_refused_when_either_read_lacks_set_backend_from(
 @pytest.mark.parametrize("option", [*SIX, "decision.backend"])
 async def test_a_reset_without_a_press_read_is_refused(option):
     """The raise is judged from the press read; the release's read never stands in for it."""
-    ladder = row_ladders.LADDERS.get(option, ["rules", "claude"])
+    ladder = AGENT_ROW_LADDERS.get(option, ["rules", "claude"])
     release = rs({option: ladder[-1]} if option in ROWS else None, agent_backend="claude")
     actions, menu, _ = make()
     gesture = Gesture(RESET, "K", held_ms=1200, confirmed=True)
@@ -345,9 +308,32 @@ async def test_backend_reset_to_a_paid_default_from_rules_is_a_raise():
     press = rs(agent_backend="rules", defaults={**DEFAULTS, "decision.backend": "claude"})
     assert (await reset(None, press, binding=binding))[:2] == (("reset_setting", "cancelled"), [])
     _, data, _ = await reset(None, press, confirmed=True, binding=binding)
-    assert data == [{"command": "reset_setting", "option": "decision.backend", "expect": "claude"}]
+    assert data == [{"command": "reset_setting", "option": "decision.backend", "expect": "claude", "from": "rules"}]
     _, data, _ = await reset(None, rs(agent_backend="jev"), binding=binding)  # paid to `rules`: no raise
+    assert data == [{"command": "reset_setting", "option": "decision.backend", "expect": "rules", "from": "jev"}]
+
+
+@pytest.mark.uc("UC-016", flow="A8", br=["BR-011", "BR-013", "BR-014"])
+async def test_backend_reset_carries_from_only_with_its_capability_and_a_raise_needs_it():
+    """A backend written under the hold is caught by `from`; without the guard a raising reset is refused."""
+    binding = page_keys.binding("K2", PAGES.index("INTERV"))
+    old = [c for c in COMMANDS if c != "reset_setting.from:decision.backend"]
+    raising = rs(agent_backend="rules", defaults={**DEFAULTS, "decision.backend": "claude"}, commands=old)
+    assert page_keys.reset_plan(binding.spec, raising).refused  # the reset screen: NOT POSSIBLE
+    result, data, cues = await reset(None, raising, confirmed=True, binding=binding)
+    assert (result, data) == (("reset_setting", "refused"), [])
+    cues.refusal.assert_awaited_once()
+    # The press menu listed it, the release menu does not: still refused.
+    guarded = rs(agent_backend="rules", defaults={**DEFAULTS, "decision.backend": "claude"})
+    result, data, _ = await reset(None, guarded, release=rs(commands=old), confirmed=True, binding=binding)
+    assert (result, data) == (("reset_setting", "refused"), [])
+    # No raise: sent without `from` when the menu does not list it.
+    _, data, _ = await reset(None, rs(agent_backend="jev", commands=old), binding=binding)
     assert data == [{"command": "reset_setting", "option": "decision.backend", "expect": "rules"}]
+    # The press read `claude` with a `claude` default (no raise); `from` lets the menu refuse a `rules` written since.
+    press = rs(agent_backend="claude", defaults={**DEFAULTS, "decision.backend": "claude"})
+    _, data, _ = await reset(None, press, release=rs(agent_backend="rules"), binding=binding)
+    assert data == [{"command": "reset_setting", "option": "decision.backend", "expect": "claude", "from": "claude"}]
 
 
 # --- the sweep: no unconfirmed raise is sendable ------------------------------------------------------
@@ -356,12 +342,14 @@ async def test_backend_reset_to_a_paid_default_from_rules_is_a_raise():
 def _raising(data: dict) -> bool:
     """Whether a command sent raises what the agent may do or spend, judged from the command alone."""
     option = data.get("option")
-    if data["command"] == "step_setting" and option in row_ladders.RAISES_UP:
+    if data["command"] == "step_setting" and option in RAISE_LADDER_OPTIONS:
         return data["direction"] == "up"
     if data["command"] == "set_backend":
         return data.get("from", "rules") == "rules" and data["backend"] != "rules"
-    if data["command"] == "reset_setting" and option in row_ladders.RAISES_UP:
-        ladder = row_ladders.LADDERS[option]
+    if data["command"] == "reset_setting" and option == "decision.backend":
+        return data.get("from", "rules") == "rules" and data["expect"] != "rules"
+    if data["command"] == "reset_setting" and option in RAISE_LADDER_OPTIONS:
+        ladder = AGENT_ROW_LADDERS[option]
         return (
             data["expect"] not in ladder
             or data["from"] not in ladder
@@ -381,7 +369,7 @@ async def test_sweep_no_unconfirmed_raise_is_sent_from_any_new_row():
         return sent(menu)
 
     for option in SIX:
-        ladder = row_ladders.LADDERS[option]
+        ladder = AGENT_ROW_LADDERS[option]
         values = [*ladder, MISSING, "50", "custom"]
         for now in values:
             press = rs({option: now})
@@ -402,16 +390,28 @@ async def test_sweep_no_unconfirmed_raise_is_sent_from_any_new_row():
             data = await run(gesture, rs(agent_backend=release), rs(agent_backend=backend), backend_row)
             assert not any(map(_raising, data)), (backend, release, steps, data)
             assert all(d["from"] == backend for d in data)
+    reset_row = page_keys.binding("K2", PAGES.index("INTERV"))
+    backends = ["rules", "claude", "openai", "jev", ""]
+    no_guard = [c for c in COMMANDS if c != "reset_setting.from:decision.backend"]
+    for backend, default, release, commands in itertools.product(backends, backends, backends, (COMMANDS, no_guard)):
+        defaults = {**DEFAULTS, "decision.backend": default} if default else {**DEFAULTS}
+        defaults = {k: v for k, v in defaults.items() if v}
+        press = rs(agent_backend=backend, defaults=defaults, commands=commands)
+        gesture = Gesture(RESET, "K2", held_ms=1200)
+        data = await run(gesture, rs(agent_backend=release, defaults=defaults, commands=commands), press, reset_row)
+        assert not any(_raising({"from": backend, **d}) for d in data), (backend, default, release, data)
+        assert all(d.get("from", backend) == backend for d in data)
+        assert all("from" in d for d in data) is (commands is COMMANDS) or not data
 
 
 # --- the confirmation UX on the new rows (A9) ---------------------------------------------------------
 
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
-@pytest.mark.parametrize("option", sorted(row_ladders.RAISES_UP))
+@pytest.mark.parametrize("option", sorted(RAISE_LADDER_OPTIONS))
 async def test_a_raising_step_on_a_new_row_plays_the_attention_cue_and_shows_the_raise(option):
     actions, _, cues = make()
-    press = rs({option: row_ladders.LADDERS[option][0]})
+    press = rs({option: AGENT_ROW_LADDERS[option][0]})
     await actions.dispatch(Gesture(LAYER_STEP, "K", steps=1), press, press, on(option))
     cues.attention.assert_awaited_once()
     hook = actions._display.layer_step.call_args.args
@@ -419,10 +419,10 @@ async def test_a_raising_step_on_a_new_row_plays_the_attention_cue_and_shows_the
 
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
-@pytest.mark.parametrize("option", sorted(row_ladders.RAISES_UP))
+@pytest.mark.parametrize("option", sorted(RAISE_LADDER_OPTIONS))
 async def test_a_raising_reset_on_a_new_row_plays_the_attention_cue_at_the_reset_stage(option):
     actions, _, cues = make()
-    ladder = row_ladders.LADDERS[option]
+    ladder = AGENT_ROW_LADDERS[option]
     await actions.reset_stage(
         "K", on(option, "reset"), rs({option: ladder[0]}, defaults={**DEFAULTS, option: ladder[-1]})
     )
@@ -443,6 +443,11 @@ async def test_a_tap_shows_the_rows_value_and_a_reset_tap_its_default():
     actions._display.result.assert_called_with("EFFORT", "XHI")
     await actions.dispatch(Gesture(TAP, "K"), rs(), None, on(BRIEF, "reset"))
     actions._display.result.assert_called_with("BRIEF", "DEFAULT OFF")
+    # A value off the ladder shows as it is, never `?`.
+    await actions.dispatch(Gesture(TAP, "K"), rs({BRIEF: "custom"}), None, on(BRIEF))
+    actions._display.result.assert_called_with("BRIEF", "CUSTOM")
+    await actions.dispatch(Gesture(TAP, "K"), rs({RATE: "50"}), None, on(RATE))
+    actions._display.result.assert_called_with("RATE", "50/MIN")
 
 
 # --- screens on protocols 2 to 4 (BR-006, BR-007) -----------------------------------------------------
@@ -451,7 +456,7 @@ BOTTOM = (" " * WIDTH, 0)
 
 
 def screen(version, option, now, steps, confirmed=False, **status_kw):
-    press = rs({option: now} if option in row_ladders.OPTIONS else None, **status_kw)
+    press = rs({option: now} if option in AGENT_ROW_OPTIONS else None, **status_kw)
     plan = page_keys.edit_plan(on(option).spec, press, steps)
     return render.setting_screen(
         version, option, press, steps, lobby_only=False, bottom=BOTTOM, plan=plan, confirmed=confirmed
@@ -558,12 +563,12 @@ def test_raises_on_bars_and_wheels_show_press_knob_and_refusals_not_possible(ver
 @pytest.mark.parametrize("version", [2, 3, 4])
 @pytest.mark.parametrize("option", SIX)
 def test_each_new_rows_reset_screen(version, option):
-    ladder = row_ladders.LADDERS[option]
+    ladder = AGENT_ROW_LADDERS[option]
     press = rs({option: ladder[0]}, defaults={**DEFAULTS, option: ladder[-1]})
     plan = page_keys.reset_plan(on(option, "reset").spec, press)
     s = render.reset_screen(version, option, plan, False, BOTTOM)
     assert s.bar is None and s.wheel is None
-    assert title(s).endswith(PRESS_KNOB if option in row_ladders.RAISES_UP else "RESET?")
+    assert title(s).endswith(PRESS_KNOB if option in RAISE_LADDER_OPTIONS else "RESET?")
     assert rows(s)[0].startswith("NOW") and rows(s)[1].startswith("NEW")
     unknown = page_keys.reset_plan(on(option, "reset").spec, rs({option: ladder[0]}, defaults=DEFAULTS))
     s = render.reset_screen(version, option, unknown, False, BOTTOM)

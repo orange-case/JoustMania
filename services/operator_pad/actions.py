@@ -23,7 +23,7 @@ from opentelemetry import trace
 from lib import setting_ladders, voice_prompts
 from lib.telemetry import get_tracer
 from proto import game_coordinator_pb2, menu_pb2
-from services.operator_pad import cues, metrics, page_keys, row_ladders
+from services.operator_pad import cues, metrics, page_keys
 from services.operator_pad.config import K5, K8
 from services.operator_pad.gestures import (
     AGENT_HOLD,
@@ -40,7 +40,15 @@ from services.operator_pad.gestures import (
     TRANSITION,
     Gesture,
 )
-from services.operator_pad.page_keys import BACKEND, EDIT, INTERVENTIONS, SET_BACKEND_FROM, SWITCH, Binding
+from services.operator_pad.page_keys import (
+    BACKEND,
+    EDIT,
+    INTERVENTIONS,
+    RESET_BACKEND_FROM,
+    SET_BACKEND_FROM,
+    SWITCH,
+    Binding,
+)
 from services.operator_pad.preview import Previewer, value_voice
 from services.operator_pad.screens import SETTING_LABELS, TRANSITION_TEXT, agent_text, result_word, short
 from services.operator_pad.state import AGENT_OFF, AGENT_UNKNOWN, AGENT_WATCH, agent_state, is_known, pad_commands
@@ -78,7 +86,7 @@ SWITCH_COMMAND = "interventions_switch"
 RESET_FROM = "reset_setting.from"  # the menu refuses a level reset whose level moved under the hold
 STEP_FROM = "step_setting.from"  # the same for a level step
 # The edits whose screen and release follow a `page_keys.Plan` (NOW, NEW, raise, refusal).
-PLANNED_EDITS = frozenset({"agent_level", INTERVENTIONS, "decision.backend", *row_ladders.OPTIONS})
+PLANNED_EDITS = frozenset({"agent_level", INTERVENTIONS, "decision.backend", *setting_ladders.AGENT_ROW_OPTIONS})
 
 VOLUME_VARIANTS = setting_ladders.VOLUME_LADDER
 MUTE = "mute"
@@ -460,7 +468,7 @@ class Actions:
             return await self._refuse(action)  # BR-014: judged from the press read, never confirmed blind
         if spec.edit == BACKEND:
             return await self._backend_edit(action, spec, steps, status, press_status, gesture.confirmed)
-        if spec.option in row_ladders.OPTIONS:
+        if spec.option in setting_ladders.AGENT_ROW_OPTIONS:
             return await self._row_edit(action, spec, steps, status, press_status, gesture.confirmed)
         if spec.edit == SWITCH:
             if SWITCH_COMMAND not in pad_commands(status):
@@ -524,7 +532,7 @@ class Actions:
         if spec.lobby_only and status.lifecycle_live:
             return await self._refuse(RESET_COMMAND)
         level = spec.option == "agent_level"
-        row = spec.option in row_ladders.OPTIONS
+        row = spec.option in setting_ladders.AGENT_ROW_OPTIONS
         if level and RESET_FROM not in pad_commands(status):
             return await self._refuse(RESET_COMMAND)  # BR-014: the base must be checked
         if row and page_keys.reset_command(spec.option) not in pad_commands(status):
@@ -535,6 +543,11 @@ class Actions:
         if plan.refused:
             return await self._refuse(RESET_COMMAND)
         base = plan.now if level or row else None
+        if spec.edit == BACKEND:
+            guarded = RESET_BACKEND_FROM in pad_commands(status)
+            if plan.raises and not guarded:
+                return await self._refuse(RESET_COMMAND)  # a backend moved under the hold would go unseen
+            base = plan.now if guarded else None
         return RESET_COMMAND, await self._reset_send(spec.option, plan.new, base, plan.raises, gesture.confirmed)
 
     async def _reset_send(self, option: str, expect: str, from_value: str | None, raises: bool, confirmed: bool) -> str:
@@ -575,7 +588,7 @@ class Actions:
         if plan.refused:
             return await self._refuse(action)
         if plan.new == plan.now:
-            if option in row_ladders.WRAPPING:
+            if option in setting_ladders.WRAPPING:
                 return action, NOOP
             await self._cues.limit(steps > 0)
             return action, AT_LIMIT

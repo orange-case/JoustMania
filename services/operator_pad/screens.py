@@ -13,7 +13,6 @@ from dataclasses import dataclass
 
 from lib import setting_ladders
 from lib.setting_ladders import AUTOMATIC, KNOB_LADDERS, VOLUME_LADDER, preview_value
-from services.operator_pad import row_ladders
 from services.operator_pad.state import AGENT_OFF, AGENT_UNKNOWN, AGENT_WATCH, agent_state
 
 WIDTH = 21
@@ -75,28 +74,27 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
     "game_instructions": {"on": "ON", "off": "OFF"},
     "force_all_start": {"on": "ON", "off": "OFF"},
     "interventions": {"on": "ON", "off": "OFF"},
-    row_ladders.GOAL: {
+    setting_ladders.GOAL_OPTION: {
         "from_objectives": "FROM OBJ",
         "long_running_game": "LONG GAME",
         "lively_finale": "LIVELY FINALE",
         "balanced_contest": "BALANCED",
         "quick_game": "SHORT GAME",
     },
-    row_ladders.RATE: {v: f"{v}/MIN" for v in row_ladders.LADDERS[row_ladders.RATE]},
-    row_ladders.GROUP: {"on": "ON", "off": "OFF"},
-    row_ladders.RETRO_BACKEND: {"stub": "STUB", "claude": "CLAUDE"},
-    row_ladders.EFFORT: {"low": "LOW", "medium": "MED", "high": "HIGH", "xhigh": "XHI", "max": "MAX"},
-    row_ladders.BRIEF: {
+    setting_ladders.GROUP_OPTION: {"on": "ON", "off": "OFF"},
+    setting_ladders.RETRO_BACKEND_OPTION: {"stub": "STUB", "claude": "CLAUDE"},
+    setting_ladders.EFFORT_OPTION: {"low": "LOW", "medium": "MED", "high": "HIGH", "xhigh": "XHI", "max": "MAX"},
+    setting_ladders.BRIEF_OPTION: {
         "off": "OFF",
         "unkillable": "UNKILLABLE",
         "protect_weakest": "PROTECT WEAK",
-        row_ladders.CUSTOM_BRIEF: "CUSTOM",
+        setting_ladders.BRIEF_CUSTOM: "CUSTOM",
     },
 }
 # BR-006: protocol 2's 10-character rows.
 V2_SHORT_FORMS: dict[str, dict[str, str]] = {
-    row_ladders.GOAL: {"lively_finale": "FINALE"},
-    row_ladders.BRIEF: {"protect_weakest": "PROTECT"},
+    setting_ladders.GOAL_OPTION: {"lively_finale": "FINALE"},
+    setting_ladders.BRIEF_OPTION: {"protect_weakest": "PROTECT"},
 }
 
 # BR-006 mode table: the full name (`pretty_name` in capitals without a leading `JOUST `, at most 14
@@ -138,12 +136,12 @@ SETTING_LABELS = {
     "audio_volume.master": "VOLUME",
     "force_all_start": "FORCE ALL",
     "interventions": "INTERVENTIONS",
-    row_ladders.GOAL: "GOAL",
-    row_ladders.RATE: "RATE",
-    row_ladders.GROUP: "GROUP",
-    row_ladders.RETRO_BACKEND: "RETRO AI",
-    row_ladders.EFFORT: "EFFORT",
-    row_ladders.BRIEF: "BRIEF",
+    setting_ladders.GOAL_OPTION: "GOAL",
+    setting_ladders.RATE_OPTION: "RATE",
+    setting_ladders.GROUP_OPTION: "GROUP",
+    setting_ladders.RETRO_BACKEND_OPTION: "RETRO AI",
+    setting_ladders.EFFORT_OPTION: "EFFORT",
+    setting_ladders.BRIEF_OPTION: "BRIEF",
 }
 
 # UC-015 BR-009 words for a command that ended without a commit (UC-016 A3).
@@ -172,6 +170,8 @@ def short(option: str, value: str | None) -> str:
         return UNKNOWN
     if option == "current_game":
         return mode_name(value)
+    if option == setting_ladders.RATE_OPTION and value.isascii() and value.isdigit():
+        return f"{value}/MIN"  # also a rate off the ladder (a script's 50)
     return SHORT_FORMS.get(option, {}).get(value, clean(value.upper()))
 
 

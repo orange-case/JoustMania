@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from lib import setting_ladders
 from lib.setting_ladders import AGENT_POLICY_LEVELS, AUTOMATIC, SENSITIVITY_LADDER, VOLUME_LADDER
-from services.operator_pad import row_ladders
 from services.operator_pad.screens import (
     BAR_EMPTY,
     BAR_FULL,
@@ -54,7 +54,7 @@ def value_text(option: str, value: str | None, version: int) -> str:
         return bar(AGENT_POLICY_LEVELS.index(value) + 1, len(AGENT_POLICY_LEVELS))
     if option == "shield.activation" and version >= 3 and value in SHIELD_WORDS:
         return SHIELD_WORDS[value]
-    if option == row_ladders.RATE:
+    if option == setting_ladders.RATE_OPTION:
         return _rate(value)
     if version < 3 and value in V2_SHORT_FORMS.get(option, {}):
         return V2_SHORT_FORMS[option][value]
@@ -129,25 +129,32 @@ def page_rows(page: int, status, ctx: PageContext, version: int) -> list[tuple[s
             ("AGENT", agent.split(" ")[0]),  # ON, WATCH, OFF or ?
             # BR-006: the level also while the agent is stopped; `?` only when the level itself is unknown.
             ("LEVEL", value_text("agent_level", level if level in AGENT_POLICY_LEVELS else None, version)),
-            ("GOAL", _row_value(row_ladders.GOAL, status, version)),
+            ("GOAL", _row_value(setting_ladders.GOAL_OPTION, status, version)),
         ]
     if name == "INTERV":
         return [
             (label("BACKEND", "AI"), UNKNOWN if unknown else short("decision.backend", status.agent_backend)),
-            ("RATE", _row_value(row_ladders.RATE, status, version)),
-            ("GROUP", _row_value(row_ladders.GROUP, status, version)),
+            ("RATE", _row_value(setting_ladders.RATE_OPTION, status, version)),
+            ("GROUP", _row_value(setting_ladders.GROUP_OPTION, status, version)),
         ]
     # RETRO
     return [
-        (label("RETRO AI", "RETRO"), _row_value(row_ladders.RETRO_BACKEND, status, version)),
-        (label("EFFORT", "EFF"), _row_value(row_ladders.EFFORT, status, version)),
-        ("BRIEF", _row_value(row_ladders.BRIEF, status, version)),
+        (label("RETRO AI", "RETRO"), _row_value(setting_ladders.RETRO_BACKEND_OPTION, status, version)),
+        (label("EFFORT", "EFF"), _row_value(setting_ladders.EFFORT_OPTION, status, version)),
+        ("BRIEF", _row_value(setting_ladders.BRIEF_OPTION, status, version)),
     ]
 
 
 def _row_value(option: str, status, version: int) -> str:
     """A row of iteration 4 from status fields 22 to 27: `?` until the menu reports it (never a zero default)."""
-    return value_text(option, row_ladders.status_value(option, status), version)
+    return value_text(option, agent_row_value(option, status), version)
+
+
+def agent_row_value(option: str, status) -> str | None:
+    """The value in force of an agent row as the menu reports it; None while empty (unknown)."""
+    if status is None:
+        return None
+    return getattr(status, setting_ladders.AGENT_ROW_STATUS_FIELDS[option]) or None
 
 
 class Pager:
