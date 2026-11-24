@@ -799,3 +799,15 @@ async def test_backend_reset_from_outside_the_backends_is_bad_option(servicer, f
     reply = await pad(servicer, "reset_setting", option="decision.backend", expect="rules", **{"from": given})
     assert (reply.success, reply.error) == (False, "bad_option")
     assert flags.requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", br=["BR-012", "BR-014"])
+async def test_a_rate_written_as_a_float_is_its_integer_rung(servicer, flags):
+    """`8.0` from a script is the rung `8`: canonical everywhere, so `from=8` holds and the step moves on."""
+    flags.set_stack(RATE, "o4", "flags.sh", value=8.0)
+
+    reply = await step(servicer, RATE, **{"from": "8"})
+
+    assert (reply.success, reply.value) == (True, "20")
+    assert settings_ops.canonical_value(RATE, flags.view(RATE), 8.0) == "8"
