@@ -71,7 +71,8 @@ def lobby(menu) -> None:
 @pytest.mark.parametrize(
     ("start", "direction", "steps", "new", "voice"),
     [
-        ("automatic", "up", 1, "hold", Sound.MENU_VOX_SHIELD_HOLD),  # no operator value: from the effective trigger
+        # No operator value: from `automatic` (UC-016 BR-007), not from the effective trigger.
+        ("automatic", "up", 1, "instant", Sound.MENU_VOX_SHIELD_INSTANT),
         ("instant", "up", 1, "trigger", Sound.MENU_VOX_SHIELD_TRIGGER),
         ("trigger", "up", 1, "hold", Sound.MENU_VOX_SHIELD_HOLD),
         ("automatic", "up", 3, "hold", Sound.MENU_VOX_SHIELD_HOLD),
@@ -103,7 +104,7 @@ def test_each_shield_mode_has_its_own_colour():
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", steps=[9], br=["BR-018", "BR-005"])
-@pytest.mark.parametrize(("start", "steps"), [("instant", 1), ("trigger", 2), ("hold", 3), ("hold", 9)])
+@pytest.mark.parametrize(("start", "steps"), [("instant", 1), ("trigger", 2), ("hold", 3), ("hold", 7)])
 async def test_shield_step_to_automatic_clears_the_persisted_value(servicer, flags, start, steps):
     lobby(servicer)
     operator_set(flags, start)
@@ -158,15 +159,57 @@ async def test_shield_step_is_refused_while_a_game_is_live(servicer, flags):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="A7", steps=[9], br=["BR-018", "BR-005"])
-@pytest.mark.parametrize(("start", "direction"), [("hold", "up")])
-async def test_shield_step_at_the_end_writes_nothing_and_shows_nothing(servicer, flags, start, direction):
+@pytest.mark.uc("UC-016", br=["BR-007"])
+@pytest.mark.parametrize(
+    ("start", "direction", "steps", "new"),
+    [
+        ("hold", "up", 1, "automatic"),  # past the last option to the first: a clear
+        ("hold", "up", 5, "automatic"),  # n = len + 1
+        ("automatic", "down", 1, "hold"),  # back past the first to the last
+        ("instant", "down", 2, "hold"),
+    ],
+)
+async def test_shield_step_wraps_at_both_ends(servicer, flags, start, direction, steps, new):
     lobby(servicer)
     operator_set(flags, start)
-    reply = await pad(servicer, "step_setting", option=SHIELD, direction=direction, steps=1)
+    reply = await pad(servicer, "step_setting", option=SHIELD, direction=direction, steps=steps)
 
-    assert (reply.success, reply.error) == (False, "at_limit")
+    assert (reply.success, reply.error, reply.value) == (True, "", new)
+    assert flags.admin.get(("game", SHIELD), "automatic") == new
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-015", flow="A7", steps=[9], br=["BR-018", "BR-005"])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+@pytest.mark.parametrize(
+    ("start", "direction", "steps"),
+    [("hold", "up", 4), ("hold", "down", 4), ("automatic", "up", 8), ("instant", "down", 12)],
+)
+async def test_a_full_turn_of_the_shield_wheel_writes_nothing_and_shows_nothing(
+    servicer, flags, start, direction, steps
+):
+    """n % len == 0 is a no-op: nothing written, no voice, no pulse, never `at_limit`."""
+    lobby(servicer)
+    operator_set(flags, start)
+    reply = await pad(servicer, "step_setting", option=SHIELD, direction=direction, steps=steps)
+
+    assert (reply.success, reply.error, reply.value) == (True, "ok", start)
     assert flags.puts == [] and flags.deletes == []
+    servicer.state_manager.audio.play_voice.assert_not_awaited()
     assert _pulses(servicer) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-015", flow="main", steps=[9], br=["BR-018"])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+async def test_with_no_operator_value_the_shield_knob_starts_at_automatic_not_the_effective_mode(servicer, flags):
+    """A promotion made `hold` effective; the operator set nothing: the first click up is `instant`."""
+    lobby(servicer)
+    flags.values[("game", SHIELD)] = "hold"
+    reply = await pad(servicer, "step_setting", option=SHIELD, direction="up", steps=1)
+
+    assert (reply.success, reply.error, reply.value) == (True, "", "instant")
+    assert flags.written() == [("game", SHIELD, "instant")]
 
 
 @pytest.mark.asyncio

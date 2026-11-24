@@ -36,8 +36,8 @@ from lib.setting_ladders import (
     KNOB_LADDERS,
     SENSITIVITY_LADDER,
     SHIELD_KNOB_LADDER,
-    clamp_step,
     knob_start,
+    step_ladder,
 )
 from lib.types import Sound
 from lib.voice_prompts import (  # re-exported: admin mode imports the voice tables from here
@@ -130,12 +130,12 @@ def agent_level_next(current: str | None, forward: bool = True) -> str:
     ``none``, the benign fail-safe. ``None`` (an unreadable level) also maps to ``none``, but
     only the restrict uses it: the callers refuse an escalation from an unreadable level (UC-013 A5).
     """
-    return clamp_step(AGENT_POLICY_LEVELS, current, 1 if forward else -1)[0]
+    return step_ladder("agent_level", AGENT_POLICY_LEVELS, current, 1 if forward else -1)[0]
 
 
-def _ladder_step(ladder: list[str], current: str | None, forward: bool, steps: int) -> str:
-    """``steps`` clamped moves along ``ladder``; a value outside it starts at the first move's result."""
-    new, _at_limit = clamp_step(ladder, current, steps if forward else -steps)
+def _ladder_step(option: str, ladder: list[str], current: str | None, forward: bool, steps: int) -> str:
+    """``steps`` moves along ``ladder``, wrapped or clamped per `WRAPPING`; outside it the first move lands on it."""
+    new, _at_limit = step_ladder(option, ladder, current, steps if forward else -steps)
     return new
 
 
@@ -355,9 +355,10 @@ class SettingsOps:
     # --- step_setting (UC-015 steps 4, 5, 8, A7, A8, BR-004, BR-005) --------------------------
 
     async def step_setting(self, option: str, direction: str, steps: int) -> Result:
-        """Step ``option`` by ``steps`` in ``direction`` with one write, stopping at the ends.
+        """Step ``option`` by ``steps`` in ``direction`` with one write, stopping at the ends or wrapping (`WRAPPING`).
 
-        Errors: ``bad_option``, ``at_limit`` (nothing written), ``flag_service_unavailable``.
+        Errors: ``bad_option``, ``at_limit`` (nothing written; clamped options only), ``flag_service_unavailable``.
+        ``ok``: a wrapping option's net steps come back to the start, a no-op (nothing written, no cue).
         The caller checks the lobby-only refusal (``game_active``) first.
         """
         spec = STEP_OPTIONS.get(option)
@@ -383,15 +384,15 @@ class SettingsOps:
         return Result(step.old, step.new)
 
     async def _step_game_mode(self, forward: bool, steps: int) -> Result:
-        """The mode step of UC-011 steps 2-5 over the selectable modes, clamped (no wrap)."""
+        """The mode step of UC-011 steps 2-5 over the selectable modes, wrapping (UC-015 BR-005)."""
         options = list(self.callbacks.get_game_options()) if self.callbacks is not None else []
         manager = self.state_manager
         current = manager.current_game_mode.name if manager is not None else None
         if not options:
             return Result(current, None, BAD_OPTION)
-        new = _ladder_step(options, current, forward, steps)
+        new = _ladder_step("current_game", options, current, forward, steps)
         if new == current:
-            return Result(current, current, AT_LIMIT)
+            return Result(current, current, OK)  # a full turn of the wheel: nothing to select
         if not await self.callbacks.select_game_mode(new, source="operator_pad"):
             return Result(current, None, BAD_OPTION)
         return Result(current, new)
@@ -407,13 +408,13 @@ class SettingsOps:
             # BR-002 "stopped": enabled off or level none; only the saved level moves (BR-003).
             if enabled != "on" or level == "none":
                 old = self.saved_agent_level or AGENT_RESUME_FALLBACK_LEVEL
-                new = _ladder_step(AGENT_SAVED_LEVELS, old, forward, steps)
+                new = _ladder_step("agent_level", AGENT_SAVED_LEVELS, old, forward, steps)
                 if new == old:
                     return Result(old, old, AT_LIMIT)
                 self.saved_agent_level = new
                 return Result(old, new)
 
-            new = _ladder_step(AGENT_POLICY_LEVELS, level, forward, steps)
+            new = _ladder_step("agent_level", AGENT_POLICY_LEVELS, level, forward, steps)
             if new == level:
                 return Result(level, level, AT_LIMIT)
             writer = self.state_manager.agent_settings_writer
@@ -487,9 +488,11 @@ class SettingsOps:
         old = knob_start(option, operator, effective)  # the operator value, else where the setting stands
         if writer is None or old is None:
             return Result(None, None, FLAG_SERVICE_UNAVAILABLE)  # fail closed: the knob's start is unknown
-        new, at_limit = clamp_step(KNOB_LADDERS[option], old, steps if forward else -steps)
+        new, at_limit = step_ladder(option, KNOB_LADDERS[option], old, steps if forward else -steps)
         if at_limit:
             return Result(old, old, AT_LIMIT)
+        if new == old:
+            return Result(old, old, OK)  # a wrapping ladder turned full circle: nothing written, no cue
         self._operator_generation += 1  # a background read already in flight must not put the old value back
         if new == AUTOMATIC:
             ok = await asyncio.to_thread(self._clear, writer, option)

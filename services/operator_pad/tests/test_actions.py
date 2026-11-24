@@ -1,7 +1,7 @@
 """Gestures to commands (UC-015 steps 1 to 8, A1, A3, A5 to A7, BR-002 to BR-012), autospec'd stubs."""
 
 import asyncio
-from unittest.mock import create_autospec, patch
+from unittest.mock import MagicMock, create_autospec, patch
 
 import grpc
 import pytest
@@ -300,38 +300,60 @@ async def test_k6_tap_toggles_instructions(actions, menu, instructions, directio
 
 
 @pytest.mark.uc("UC-015", flow="A7", br=["BR-004", "BR-005"])
+@pytest.mark.uc("UC-016", br=["BR-007"])
 @pytest.mark.parametrize(
     ("current", "steps", "target"),
-    [("claude", 1, "openai"), ("rules", 5, "jev"), ("openai", -1, "claude"), ("claude", -9, "rules")],
+    [
+        ("claude", 1, "openai"),
+        ("jev", 1, "rules"),  # past the last to the first ...
+        ("rules", -1, "jev"),  # ... and back past the first to the last
+        ("rules", 5, "claude"),  # n = len + 1: one past
+        ("openai", -1, "claude"),
+        ("claude", -9, "rules"),
+    ],
 )
-async def test_backend_layer_steps_clamped(actions, menu, current, steps, target):
+async def test_backend_layer_steps_wrap(actions, menu, cues, current, steps, target):
     await actions.dispatch(Gesture(LAYER, "K7", steps=steps), status(agent_backend=current))
     assert sent(menu) == [{"command": "set_backend", "backend": target}]
+    cues.limit.assert_not_awaited()
 
 
-@pytest.mark.uc("UC-015", flow="A7", br=["BR-004", "BR-009"])
-@pytest.mark.parametrize(("current", "steps"), [("jev", 1), ("rules", -2)])
-async def test_backend_already_at_the_end_is_at_limit_and_sends_nothing(actions, menu, cues, current, steps):
+@pytest.mark.uc("UC-015", flow="A7", br=["BR-004", "BR-005", "BR-009"])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+@pytest.mark.parametrize("link_up", [False, True])
+@pytest.mark.parametrize(("current", "steps"), [("jev", 4), ("rules", -4), ("claude", 8), ("openai", -12)])
+async def test_a_full_turn_of_the_backend_wheel_sends_nothing_and_plays_nothing(
+    menu, coordinator, cues, sleep, link_up, current, steps
+):
+    """n % len == 0 is a no-op: no `set_backend`, no cue, never `at_limit`, with the display link up or down."""
+    actions = Actions(menu, coordinator, cues, sleep=sleep, display=MagicMock(link_up=link_up))
     result = await actions.dispatch(Gesture(LAYER, "K7", steps=steps), status(agent_backend=current))
-    assert result == ("set_backend", "at_limit")
+    assert result == ("set_backend", "noop")
     menu.ProcessInput.assert_not_awaited()
-    cues.limit.assert_awaited_once_with(steps > 0)  # "Maximum" up, "Minimum" down (#2106)
+    cues.limit.assert_not_awaited()
+    cues.refusal.assert_not_awaited()
+    cues.failure.assert_not_awaited()
 
 
 @pytest.mark.uc("UC-015", flow="A7", br=["BR-004", "BR-005"])
+@pytest.mark.uc("UC-016", br=["BR-007"])
 @pytest.mark.parametrize("current", BACKENDS)
 async def test_backend_preview_equals_commit(menu, coordinator, cues, sleep, current):
-    """#2106: the backend a K7 release commits is the shared ladder's preview, for every start and step."""
-    for steps in [n for n in range(-6, 7) if n != 0]:
+    """#2106: the backend a K7 release commits is the shared ladder's preview, for every start and every
+    step up to 3 x len; a preview back at the start is the no-op, nothing sent."""
+    reach = 3 * len(BACKENDS)
+    for steps in [n for n in range(-reach, reach + 1) if n != 0]:
         actions = Actions(menu, coordinator, cues, sleep=sleep)
         menu.ProcessInput.reset_mock()
         preview = preview_value("decision.backend", status(agent_backend=current), steps)
         result = await actions.dispatch(Gesture(LAYER, "K7", steps=steps), status(agent_backend=current))
-        if preview.at_limit:
-            assert result == ("set_backend", "at_limit"), (current, steps)
+        assert not preview.at_limit, (current, steps)
+        if preview.value == current:
+            assert result == ("set_backend", "noop"), (current, steps)
             assert sent(menu) == []
         else:
             assert sent(menu) == [{"command": "set_backend", "backend": preview.value}], (current, steps)
+    cues.limit.assert_not_awaited()
 
 
 # --- agent switch (step 6, A6, BR-002, BR-003) ----------------------------------------------

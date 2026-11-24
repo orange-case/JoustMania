@@ -370,20 +370,41 @@ async def test_step_setting_bool_up_means_on(servicer, flags):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005"])
-async def test_step_setting_mode_selects_without_wrapping(servicer, flags):
+@pytest.mark.uc("UC-016", br=["BR-007"])
+async def test_step_setting_mode_wraps_at_both_ends(servicer, flags):
+    size = len(GAME_MODES)
     reply = await pad(servicer, "step_setting", option="current_game", direction="up", steps=2)
     assert reply.success
     assert servicer.current_selection.name == GAME_MODES[2]
     assert flags.written()[-1] == ("user", "current_game", GAME_MODES[2])
 
-    flags.puts.clear()
-    reply = await pad(servicer, "step_setting", option="current_game", direction="down", steps=9)
-    assert reply.success
-    assert servicer.current_selection.name == GAME_MODES[0]
+    reply = await pad(servicer, "step_setting", option="current_game", direction="down", steps=3)
+    assert (reply.success, reply.error, reply.value) == (True, "", GAME_MODES[-1])  # back past the first
 
-    reply = await pad(servicer, "step_setting", option="current_game", direction="down")
-    assert (reply.success, reply.error) == (False, "at_limit")
-    assert servicer.current_selection.name == GAME_MODES[0]
+    reply = await pad(servicer, "step_setting", option="current_game", direction="up")
+    assert (reply.success, reply.value) == (True, GAME_MODES[0])  # past the last to the first
+
+    reply = await pad(servicer, "step_setting", option="current_game", direction="up", steps=size + 1)
+    assert (reply.success, reply.value) == (True, GAME_MODES[1])  # n = len + 1: one past
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-015", flow="A7", br=["BR-005", "BR-015"])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+@pytest.mark.parametrize(("direction", "turns"), [("up", 1), ("down", 1), ("up", 3)])
+async def test_a_full_turn_of_the_mode_wheel_is_a_no_op(servicer, flags, direction, turns):
+    """n % len == 0: nothing selected or written, no voice, no pulse, and never `at_limit`."""
+    servicer.state_manager.controller_states = {"dim": ControllerState.CONNECTED}
+    start = servicer.current_selection.name
+    reply = await pad(
+        servicer, "step_setting", option="current_game", direction=direction, steps=turns * len(GAME_MODES)
+    )
+
+    assert (reply.success, reply.error, reply.value) == (True, "ok", start)
+    assert servicer.current_selection.name == start
+    assert flags.puts == []
+    servicer.state_manager.audio.play_game_mode_voice.assert_not_awaited()
+    servicer.state_manager.led.send_game_effect.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -714,6 +735,32 @@ async def test_ladder_steps_the_level_clamped(servicer, flags):
 
 
 @pytest.mark.asyncio
+@pytest.mark.uc("UC-015", flow="A7", br=["BR-002", "BR-003", "BR-004"])
+@pytest.mark.parametrize(
+    ("enabled", "level", "saved", "direction", "steps", "error", "live", "saved_after"),
+    [
+        # Kill-switch safety: never wraps (none -> full would escalate). The live level stops at none ...
+        ("on", "ambient", None, "down", 4, "", "none", "ambient"),
+        # ... a stopped agent's saved level stops at full going up and at ambient going down.
+        ("off", "standard", "full", "up", 1, "at_limit", "standard", "full"),
+        ("off", "standard", "full", "up", 3, "at_limit", "standard", "full"),
+        ("off", "standard", "ambient", "down", 3, "at_limit", "standard", "ambient"),
+    ],
+)
+async def test_agent_level_and_saved_level_never_wrap(
+    servicer, flags, enabled, level, saved, direction, steps, error, live, saved_after
+):
+    flags.values[("agent", "enabled")] = enabled
+    flags.values[("agent", "interventions_allowed")] = level
+    servicer.settings_ops.saved_agent_level = saved
+    reply = await pad(servicer, "step_setting", option="agent_level", direction=direction, steps=steps)
+
+    assert reply.error == error
+    assert flags.values[("agent", "interventions_allowed")] == live
+    assert servicer.settings_ops.saved_agent_level == saved_after
+
+
+@pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-003", "BR-004"])
 async def test_ladder_while_stopped_changes_only_the_saved_level(servicer, flags):
     await pad(servicer, "agent_switch", direction="stop")
@@ -863,16 +910,6 @@ async def test_pad_mode_change_voices_the_final_mode_and_pulses_every_lobby_cont
     # After the pulse each controller shows the new mode's lobby colour (UC-011 step 6, BR-005).
     servicer.state_manager.led.set_connected_color.assert_awaited_once_with("dim", final)
     servicer.state_manager.led.set_ready_color.assert_awaited_once_with("ready", final)
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A7", br=["BR-015"])
-async def test_pad_mode_step_at_the_limit_gives_no_voice_and_no_pulse(servicer):
-    servicer.state_manager.controller_states = {"dim": ControllerState.CONNECTED}
-    reply = await pad(servicer, "step_setting", option="current_game", direction="down")
-    assert (reply.success, reply.error) == (False, "at_limit")
-    servicer.state_manager.audio.play_game_mode_voice.assert_not_awaited()
-    servicer.state_manager.led.send_game_effect.assert_not_awaited()
 
 
 # --- preview_setting: the K1 LED preview (#2106, UC-015 BR-017, services.md §3.1) ------------

@@ -47,6 +47,119 @@ def test_clamp_step_restart_outside_lands_on_the_first_rung(steps):
     assert clamp_step(LADDER, "x", steps, restart_outside=True) == ("a", False)
 
 
+# --- Wrap (UC-015 BR-005, A7; UC-016 BR-007) ---------------------------------------------------
+
+
+@pytest.mark.uc("UC-015", br=["BR-005"], flow="A7")
+@pytest.mark.uc("UC-016", br=["BR-007"])
+@pytest.mark.parametrize(
+    ("current", "steps", "expected"),
+    [
+        ("b", 1, "c"),
+        ("d", 1, "a"),  # past the last option to the first ...
+        ("a", -1, "d"),  # ... and back past the first to the last
+        ("b", 4, "b"),  # n = len: a full turn, the no-op
+        ("b", -4, "b"),  # n = -len
+        ("b", 5, "c"),  # n = len + 1: one past
+        ("b", -5, "a"),
+        ("a", 12, "a"),  # 3 x len
+        ("b", 0, "b"),
+        ("x", 1, "a"),  # outside: the first move lands on the first option ...
+        ("x", 3, "c"),  # ... and the rest go on from there
+        ("x", -2, "d"),
+        (None, 5, "a"),
+    ],
+)
+def test_wrap_step(current, steps, expected):
+    assert setting_ladders.wrap_step(LADDER, current, steps) == expected
+
+
+@pytest.mark.uc("UC-015", br=["BR-004", "BR-005"], flow="A7")
+@pytest.mark.uc("UC-016", br=["BR-007"])
+def test_wrapping_is_an_explicit_set_of_three_options():
+    """Named one by one, never a default: the kill-switch ladder (agent level) must never wrap."""
+    assert {"current_game", "decision.backend", "shield.activation"} == setting_ladders.WRAPPING
+
+
+# Every preview option: its ladder, a status at a given start, and whether it wraps.
+def _status_at(option: str, start: str) -> menu_pb2.GetMenuStatusResponse:
+    # Effective sensitivity and teams off their ladders, so an `automatic` start is the automatic rung.
+    status = menu_pb2.GetMenuStatusResponse(sensitivity=7, num_teams=0, agent_enabled_state="on")
+    if option == "current_game":
+        status.selection = start
+    elif option == "decision.backend":
+        status.agent_backend = start
+    elif option == "agent_level":
+        status.agent_level = start
+    elif option == "agent_saved_level":
+        status.agent_level, status.agent_saved_level = "none", start
+    elif option in setting_ladders.KNOB_LADDERS:
+        status.operator_settings[option] = start
+        if option == "shield.activation":
+            status.shield_activation = "trigger"
+    elif option == "audio_volume.master":
+        status.audio_volume_master = start
+    elif option == "game_instructions":
+        status.instructions = start == "on"
+    elif option == "force_all_start":
+        status.force_all_start = start == "on"
+    return status
+
+
+LADDERS = {
+    "current_game": setting_ladders.MODE_LADDER,
+    "decision.backend": setting_ladders.BACKENDS,
+    "shield.activation": setting_ladders.SHIELD_KNOB_LADDER,
+    "sensitivity": setting_ladders.KNOB_LADDERS["sensitivity"],
+    "num_teams": setting_ladders.KNOB_LADDERS["num_teams"],
+    "audio_volume.master": setting_ladders.VOLUME_LADDER,
+    "game_instructions": setting_ladders.ON_OFF_LADDER,
+    "force_all_start": setting_ladders.ON_OFF_LADDER,
+    "agent_level": setting_ladders.AGENT_POLICY_LEVELS,
+    "agent_saved_level": setting_ladders.AGENT_SAVED_LEVELS,  # a stopped agent: only the saved level moves
+}
+
+
+@pytest.mark.uc("UC-015", br=["BR-003", "BR-004", "BR-005", "BR-018"], flow="A7")
+@pytest.mark.uc("UC-016", br=["BR-007"])
+@pytest.mark.parametrize("option", sorted(LADDERS))
+def test_preview_wraps_only_the_wrapping_options(option):
+    """Every start, every n up to 3 x len: wrapping options land on (i + n) % len and never report a
+    limit (a multiple of len is the no-op); every other option clamps, with `at_limit` at its ends."""
+    ladder = LADDERS[option]
+    preview_option = "agent_level" if option == "agent_saved_level" else option
+    size = len(ladder)
+    for i, start in enumerate(ladder):
+        if option == "agent_level" and start == "none":
+            continue  # a level of none is a stopped agent: the saved ladder (agent_saved_level)
+        status = _status_at(option, start)
+        for n in range(-3 * size, 3 * size + 1):
+            preview = preview_value(preview_option, status, n)
+            case = f"{option} from {start} by {n}"
+            if option in setting_ladders.WRAPPING:
+                assert preview == Preview(ladder[(i + n) % size]), case
+            else:
+                target = min(max(i + n, 0), size - 1)
+                assert preview == Preview(ladder[target], at_limit=n != 0 and target == i), case
+
+
+@pytest.mark.uc("UC-015", br=["BR-002", "BR-003", "BR-004"], flow="A7")
+@pytest.mark.parametrize(
+    ("level", "saved", "steps", "expected"),
+    [
+        ("none", "ambient", -1, Preview("ambient", at_limit=True)),  # the saved ladder's bottom is ambient
+        ("none", "full", 1, Preview("full", at_limit=True)),  # ... and its top full: never wraps to ambient
+        ("full", "", 1, Preview("full", at_limit=True)),  # a running agent at full stays at full
+        ("ambient", "", -2, Preview("none")),  # down past none stops at none, never wraps to full
+        ("ambient", "", -3, Preview("none")),
+    ],
+)
+def test_agent_level_and_saved_level_stay_clamped_at_both_ends(level, saved, steps, expected):
+    """Kill-switch safety: the agent level never wraps (none -> full would be an escalation)."""
+    status = menu_pb2.GetMenuStatusResponse(agent_level=level, agent_enabled_state="on", agent_saved_level=saved)
+    assert preview_value("agent_level", status, steps) == expected
+
+
 def _value_order(flag_set: str, key: str) -> list[str]:
     variants = json.loads((FLAGD_DIR / f"{flag_set}.json").read_text())["flags"][key]["variants"]
     return sorted(variants, key=lambda name: variants[name])
@@ -124,16 +237,19 @@ def test_shield_knob_ladder_is_automatic_then_the_flag_files_variants():
         assert "automatic" not in variants  # `automatic` is the absence of an operator value
 
 
-@pytest.mark.uc("UC-015", br=["BR-018", "BR-017"], flow="A7", steps=[9])
+@pytest.mark.uc("UC-015", br=["BR-018", "BR-017", "BR-005"], flow="A7", steps=[9])
+@pytest.mark.uc("UC-016", br=["BR-007"])
 @pytest.mark.parametrize(
     ("operator", "effective", "steps", "expected"),
     [
-        ("automatic", "trigger", 1, Preview("hold")),  # no operator value: the knob starts at the effective rung ...
-        ("automatic", "hold", 3, Preview("hold", at_limit=True)),
-        ("automatic", "trigger", -1, Preview("instant")),
-        ("automatic", "trigger", -2, Preview("automatic")),  # ... and automatic is below the lowest value
-        ("automatic", "trigger", 0, Preview("trigger")),  # a net of zero commits nothing
-        ("automatic", "", 1, Preview("instant")),  # effective unresolvable: starts at automatic
+        # UC-016 BR-007: no operator value starts at automatic (the wheel's AUTO), not the effective rung ...
+        ("automatic", "trigger", 1, Preview("instant")),
+        ("automatic", "hold", 3, Preview("hold")),
+        ("automatic", "trigger", -1, Preview("hold")),  # ... and the ladder wraps
+        ("automatic", "trigger", -2, Preview("trigger")),
+        ("automatic", "trigger", 0, Preview("automatic")),  # a net of zero commits nothing
+        ("automatic", "", 1, Preview("instant")),
+        ("automatic", "hold", 0, Preview("automatic")),  # NOW on AUTO, not on the effective hold
         ("instant", "instant", 1, Preview("trigger")),
         (
             "instant",
@@ -142,7 +258,8 @@ def test_shield_knob_ladder_is_automatic_then_the_flag_files_variants():
             Preview("automatic"),
         ),  # an operator value wins over the effective one (a stage overlay)
         ("hold", "hold", -3, Preview("automatic")),
-        ("hold", "hold", 1, Preview("hold", at_limit=True)),
+        ("hold", "hold", 1, Preview("automatic")),  # wraps past the top, never at_limit
+        ("hold", "hold", 4, Preview("hold")),  # a full turn: the no-op
         ("trigger", "trigger", 5, Preview("hold")),
         ("", "trigger", 1, setting_ladders.UNKNOWN),  # operator value unknown: silent, never a guess
     ],

@@ -176,19 +176,22 @@ def test_setting_screen_without_a_press_status_shows_question_marks():
     assert (screen.text(3), screen.text(5), screen.text(6)) == ("NOW ?", "NEW ?", "")
 
 
-@pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[4])
+@pytest.mark.uc("UC-016", flow="main", br=["BR-001", "BR-007"], steps=[4])
 @pytest.mark.parametrize(
     ("option", "steps", "word"),
     [
         ("sensitivity", 2, "MAXIMUM"),  # 3 -> 4 -> past the end
         ("sensitivity", 1, "RELEASE TO SET"),
         ("decision.backend", -1, "RELEASE TO SET"),  # claude -> rules
-        ("decision.backend", -2, "MINIMUM"),
-        ("shield.activation", 5, "MAXIMUM"),
+        # BR-007: the wrapping options never show a limit word, a full turn included.
+        ("decision.backend", -2, "RELEASE TO SET"),
+        ("decision.backend", 4, "RELEASE TO SET"),
+        ("shield.activation", 5, "RELEASE TO SET"),
+        ("current_game", -10, "RELEASE TO SET"),
     ],
 )
 def test_setting_screen_limit_words(option, steps, word):
-    """BR-001: `MAXIMUM` / `MINIMUM` once the net steps reach past the end of the range."""
+    """BR-001: `MAXIMUM` / `MINIMUM` once the net steps reach past the end of a clamped range."""
     assert setting_screen(option, status(), steps, lobby_only=False).text(8) == word
 
 
