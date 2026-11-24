@@ -100,6 +100,7 @@ class PadController:
         self._known_seen = False
         self._unknown_warned = False
         self._agent_timer: asyncio.Task | None = None
+        self._stage_timers: dict[str, asyncio.Task] = {}  # reset key -> its reset-stage cue timer
         self._agent_tasks: set[asyncio.Task] = set()
         self.pad_devices = 1  # distinct USB devices of the attached pad nodes (set by the device layer)
 
@@ -137,6 +138,9 @@ class PadController:
         self._show("reset_hold")
 
     def _forget_holds(self) -> None:
+        for task in self._stage_timers.values():
+            task.cancel()
+        self._stage_timers.clear()
         self._press_reads.clear()
         self._bindings.clear()
         self._sources.clear()
@@ -222,6 +226,9 @@ class PadController:
             self._key_down(name, t_ms, timings, binding)
         if name in KEYS and value == RELEASE:
             self._show("key_up", name)
+            timer = self._stage_timers.pop(name, None)
+            if timer is not None:
+                timer.cancel()
             if name == K5:
                 self._cancel_agent_timer()
         self._show("hold_key", self.machine.preview_key())
@@ -236,6 +243,17 @@ class PadController:
         self._show("key_down", name, t_ms, timings, None if binding == REFUSED_BINDING else binding, None)
         if name == K5:
             self._start_agent_timer(t_ms, timings.hold_agent_ms)
+        elif binding not in (None, REFUSED_BINDING) and binding.role == page_keys.RESET_ROLE and binding.active:
+            self._stage_timers[name] = asyncio.create_task(
+                self._reset_stage(name, t_ms + timings.hold_reset_ms, binding)
+            )
+
+    async def _reset_stage(self, key: str, due_ms: int, binding) -> None:
+        """Display and cue only: the attention cue when a reset that raises reaches its stage (BR-014)."""
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._sleep(max(0, due_ms - self._clock_ms()) / 1000)
+            if self.machine.down(key) and not self.machine.locked:
+                await self._actions.reset_stage(key, binding, await self._read_of(self._press_reads.get(key)))
 
     async def finish(self, event: Accepted) -> None:
         """The async half: the status reads, then the commands of the gestures `accept` found."""

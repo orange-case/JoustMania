@@ -17,6 +17,7 @@ from services.operator_pad.gestures import (
     CONFIRM,
     HOLD,
     LAYER,
+    LAYER_STEP,
     LOCK,
     PRESS,
     RELEASE,
@@ -449,3 +450,123 @@ async def test_a_knob_turn_on_another_pad_never_steps_this_pads_key():
     await rig.key("KNOB_TURN_B", PRESS, 10, source="pad-b")
     await rig.key("K3", RELEASE, 100, source="pad-a")
     assert rig.gestures()[-1] == Gesture(TAP, "K3", held_ms=100)
+
+
+# --- the confirmation, visible and audible (maintainer bench feedback) ---------------------------------
+
+from services.operator_pad import render, screens  # noqa: E402
+
+BOTTOM = (" " * 21, 0)
+RAISE_LEVEL = page_keys.Plan("ambient", "standard", raises=True)
+
+
+def _edit(version, confirmed=False, blink_on=True, option="agent_level", plan=RAISE_LEVEL):
+    return render.setting_screen(
+        version, option, st(), 1, lobby_only=False, bottom=BOTTOM, plan=plan, confirmed=confirmed, blink_on=blink_on
+    )
+
+
+def _reset(version, confirmed=False, blink_on=True):
+    return render.reset_screen(version, "agent_level", RAISE_LEVEL, confirmed, BOTTOM, blink_on)
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-007", "BR-014"])
+@pytest.mark.parametrize("version", [2, 3, 4])
+@pytest.mark.parametrize("make", [_edit, _reset], ids=["edit", "reset"])
+def test_a_raise_awaiting_its_press_blinks_press_knob_in_the_title_bar(version, make):
+    on_half, off_half = make(version), make(version, blink_on=False)
+    assert on_half.lines[0][0].rstrip().endswith("PRESS KNOB")
+    assert on_half.lines[0][1] & screens.INVERTED
+    assert not off_half.lines[0][1] & screens.INVERTED
+    assert off_half.lines[0][0] == on_half.lines[0][0]
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-007", "BR-014"])
+@pytest.mark.parametrize("version", [2, 3, 4])
+def test_the_two_state_switch_blinks_too(version):
+    status = st(agent_interventions_enabled_state="off")
+    plan = page_keys.edit_plan(page_keys.ROWS["AGENT"][0], status, 1)
+    shown = _edit(version, blink_on=False, option=page_keys.INTERVENTIONS, plan=plan)
+    assert shown.lines[0][0].rstrip().endswith("PRESS KNOB") and not shown.lines[0][1] & screens.INVERTED
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-007", "BR-014"])
+@pytest.mark.parametrize("version", [2, 3, 4])
+def test_after_the_press_the_title_says_confirmed_steadily(version):
+    for make, hint in ((_edit, "RELEASE"), (_reset, "RELEASE")):
+        shown = make(version, confirmed=True, blink_on=False)
+        assert shown.lines[0][0].rstrip().endswith("CONFIRMED")
+        assert shown.lines[0][1] & screens.INVERTED  # steady: never the off half
+        if make is _reset or version == 2:
+            assert hint in shown.lines[5][0]
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
+def test_the_blink_is_a_display_timer_that_ends_with_the_key():
+    m, clock = model(version=4)
+    t0 = int(clock.now * 1000)
+    m.key_down("K4", t0 - 1100, Timings(), on("AGENT", "K4"), st(agent_level="ambient"))
+    first = m.current(clock.now).lines[0][1]
+    assert m.next_change(clock.now) == pytest.approx(clock.now + 0.5)
+    clock.now += 0.5
+    second = m.current(clock.now).lines[0][1]
+    assert bool(first & screens.INVERTED) != bool(second & screens.INVERTED)
+    m.key_up("K4")
+    m.current(clock.now)
+    assert m.next_change(clock.now) is None or m.next_change(clock.now) > clock.now + 0.5
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
+async def test_one_attention_cue_when_a_raise_starts_waiting_and_a_confirm_cue_on_the_press(actions, cues):
+    status = st(agent_level="none", agent_enabled=True)
+    row = on("AGENT", "K3")
+    await actions.dispatch(Gesture(LAYER_STEP, "K3", steps=1), None, status, row)
+    await actions.dispatch(Gesture(LAYER_STEP, "K3", steps=2), None, status, row)
+    assert cues.attention.await_count == 1  # not per step
+    await actions.dispatch(Gesture(CONFIRM, "K3", steps=2), None, status, row)
+    cues.confirmed.assert_awaited_once()
+    await actions.dispatch(Gesture(LAYER_STEP, "K3", steps=3), None, status, row)
+    assert cues.attention.await_count == 2  # the step cleared the confirmation: waiting again
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
+async def test_no_cue_for_a_change_that_is_no_raise(actions, cues):
+    status = st(agent_level="full")
+    row = on("AGENT", "K3")
+    await actions.dispatch(Gesture(LAYER_STEP, "K3", steps=-1), None, status, row)
+    await actions.dispatch(Gesture(CONFIRM, "K3", steps=-1), None, status, row)
+    cues.attention.assert_not_awaited()
+    cues.confirmed.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
+async def test_a_reset_that_raises_cues_at_its_reset_stage_only_while_held():
+    rig = Rig()
+    clock = [0]
+    rig.pad._clock_ms = lambda: clock[0]
+
+    async def now(_seconds):
+        return None
+
+    rig.pad._sleep = now
+    rig.reader.fetch.return_value = st(agent_level="ambient")
+    display = MagicMock(display_usb=None, pages_active=True)
+    display.bind_page.return_value = (PAGES.index("AGENT"), False)
+    rig.pad._display = display
+    await rig.key("K4", PRESS, 0)
+    await settle()
+    rig.actions.reset_stage.assert_awaited_once()
+    assert rig.actions.reset_stage.await_args.args[0] == "K4"
+    await rig.key("K4", RELEASE, 1200)
+    await rig.key("K4", PRESS, 2000)
+    await rig.key("K4", RELEASE, 2100)  # released before its stage: the timer is gone
+    await settle()
+    assert rig.actions.reset_stage.await_count == 1
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
+async def test_the_reset_stage_cue_plays_for_a_raise(actions, cues):
+    await actions.reset_stage("K4", on("AGENT", "K4"), st(agent_level="ambient"))
+    cues.attention.assert_awaited_once()
+    await actions.dispatch(Gesture(CONFIRM, "K4"), None, st(agent_level="ambient"), on("AGENT", "K4"))
+    cues.confirmed.assert_awaited_once()

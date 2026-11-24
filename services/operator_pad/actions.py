@@ -159,6 +159,7 @@ class Actions:
         self._display = display  # UC-016 DisplayModel, or None (no display)
         self._tap_screen: tuple[str, str] | None = None  # (label, text) a tap showed (UC-016 BR-007)
         self._agent_stopped = False  # UC-016 A10: this K5 hold already sent its stop at the hold time
+        self._awaiting: dict[str, bool] = {}  # key -> its raise waits for the knob press (the attention cue)
 
     # --- entry points ---------------------------------------------------------------------
 
@@ -176,11 +177,16 @@ class Actions:
         binding = row_binding(gesture.key, binding)
         if gesture.kind == LAYER_STEP:
             # BR-017: a preview only, from the status read at the press; nothing is sent (BR-005).
-            self._preview_step(gesture, press_status, binding)
+            plan = self._preview_step(gesture, press_status, binding)
+            await self._note_awaiting(gesture.key, plan is not None and plan.raises and not plan.refused)
             return "preview", "pending"
         if gesture.kind == CONFIRM:
             self._show("confirm_state", gesture.key, True)  # UC-016 A9: the screen only
+            if self._awaiting.get(gesture.key):
+                self._awaiting[gesture.key] = False
+                await self._cues.confirmed()
             return "confirm", "pending"
+        self._awaiting.pop(gesture.key, None)
         preview_refused = False
         if gesture.kind == LAYER:
             preview_refused = self._previewer is not None and self._previewer.refused(gesture.key)
@@ -234,9 +240,22 @@ class Actions:
             return 0
         return gesture.steps
 
-    def _preview_step(self, gesture: Gesture, press_status, binding: Binding | None) -> None:
-        if binding is None or not binding.active or binding.role != EDIT:
+    async def _note_awaiting(self, key: str, awaiting: bool) -> None:
+        """UC-016 BR-014: one attention cue when the held key's change becomes a raise waiting for the knob."""
+        was, self._awaiting[key] = self._awaiting.get(key, False), awaiting
+        if awaiting and not was:
+            await self._cues.attention()
+
+    async def reset_stage(self, key: str, binding: Binding | None, press_status) -> None:
+        """A reset key reached its reset stage (the controller's timer): the attention cue for a raise."""
+        if binding is None or not binding.active or binding.role == EDIT:
             return
+        plan = page_keys.reset_plan(binding.spec, press_status)
+        await self._note_awaiting(key, plan.raises and not plan.refused)
+
+    def _preview_step(self, gesture: Gesture, press_status, binding: Binding | None):
+        if binding is None or not binding.active or binding.role != EDIT:
+            return None
         spec = binding.spec
         plan = None
         if spec.option in ("agent_level", INTERVENTIONS):
@@ -244,9 +263,9 @@ class Actions:
         self._show("confirm_state", gesture.key, False)  # A9: a later step clears the confirmation
         # UC-016 step 4: the setting screen, whatever `operator_pad.preview_enabled` says.
         self._show("layer_step", gesture.key, spec.option, press_status, gesture.steps, spec.lobby_only, plan)
-        if self._previewer is None or spec.option in (INTERVENTIONS, VOLUME_OPTION):
-            return  # no value voices for these (D6)
-        self._previewer.step(gesture.key, spec.option, press_status, gesture.steps, spec.lobby_only)
+        if self._previewer is not None and spec.option not in (INTERVENTIONS, VOLUME_OPTION):  # no value voice (D6)
+            self._previewer.step(gesture.key, spec.option, press_status, gesture.steps, spec.lobby_only)
+        return plan
 
     def cancel_pending(self) -> None:
         """Device gone: a volume turn not yet committed is dropped, not sent later (BR-010)."""
