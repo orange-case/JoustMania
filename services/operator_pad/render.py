@@ -3,8 +3,8 @@
 Pure: no I/O. A frame is a title bar (line 0, inverted), three rows (protocol 3 or higher: medium
 rows of 16 characters; protocol 2: large lines of 10) with the divider under the last, and the
 status bar (line 7). A ladder setting is a marker bar (protocol 3 or higher), a wheel setting a
-wheel (protocol 4), anything else NOW and NEW rows. Every bar and wheel is within the firmware's
-limits for every input (BR-002), so the pad never has to refuse one.
+wheel (protocol 4; the agent level's does not wrap), anything else NOW and NEW rows. Every bar
+and wheel is within the firmware's limits for every input (BR-002), so the pad never has to refuse one.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from lib.setting_ladders import (
     MODE_LADDER,
     SHIELD_KNOB_LADDER,
     VOLUME_LADDER,
+    WRAPPING,
     preview_value,
 )
 from services.operator_pad.pages import NET_OK, SHIELD_WORDS, PageContext, page_rows, value_text
@@ -57,15 +58,16 @@ V2_HINTS = {RELEASE_TO_SET: "RELEASE"}  # protocol 2 rows hold 10 characters
 LADDER_BARS: dict[str, tuple[list[str], tuple[str, ...]]] = {
     "sensitivity": (KNOB_LADDERS["sensitivity"], ("AUTO", "0", "1", "2", "3", "4")),
     "num_teams": (KNOB_LADDERS["num_teams"], ("AUTO", "2", "3", "4", "5", "6")),
-    "agent_level": (AGENT_POLICY_LEVELS, ("NONE", "AMB", "STD", "FULL")),
     "audio_volume.master": (VOLUME_LADDER, ("MUTE", "", "", "", "MAX")),
 }
 
-# BR-007 wheels: the options in ladder order and their full names.
+# BR-007 wheels: the options in ladder order and their full names. Only `WRAPPING` options wrap;
+# the agent level stays clamped (the kill switch: never `none` to `full` in one step).
 WHEEL_LADDERS: dict[str, list[str]] = {
     "current_game": MODE_LADDER,
     "decision.backend": BACKENDS,
     "shield.activation": SHIELD_KNOB_LADDER,
+    "agent_level": AGENT_POLICY_LEVELS,
 }
 
 
@@ -188,14 +190,20 @@ def _rows_screen(
     return Screen(tuple(_frame(version, title, right, rows, bottom)))
 
 
-def _wheel_screen(title: str, option: str, now: str | None, new: str, bottom: Line) -> Screen:
-    """Protocol 4: lines 1-5 empty, line 6 the divider, then the three wheel slots around NEW."""
+def _wheel_screen(title: str, right: str, option: str, now: str | None, new: str, bottom: Line) -> Screen:
+    """Protocol 4: lines 1-5 empty, line 6 the divider, then the three wheel slots around NEW.
+
+    A wheel that does not wrap leaves the slot past either end empty (the firmware draws nothing).
+    """
     ladder = WHEEL_LADDERS[option]
     i = ladder.index(new)
-    entries = [ladder[(i + d) % len(ladder)] for d in (-1, 0, 1)]
-    wheel = tuple((wheel_name(option, entry), entry == now) for entry in entries)
+    if option in WRAPPING:
+        entries = [ladder[(i + d) % len(ladder)] for d in (-1, 0, 1)]
+    else:
+        entries = [ladder[i + d] if 0 <= i + d < len(ladder) else None for d in (-1, 0, 1)]
+    wheel = tuple(("", False) if entry is None else (wheel_name(option, entry), entry == now) for entry in entries)
     lines: list[Line] = [(fit(""), 0)] * LINES
-    lines[0] = (fit(lr(title, EDIT, WIDTH, min_label=WIDTH)), INVERTED)
+    lines[0] = (fit(lr(title, right, WIDTH, min_label=WIDTH)), INVERTED)
     lines[6] = (fit(""), UNDERLINE)
     lines[7] = bottom
     return Screen(tuple(lines), wheel=wheel)
@@ -214,7 +222,7 @@ def setting_screen(
     if version >= 3 and option in LADDER_BARS:
         return _bar_screen(title, limit or EDIT, RELEASE_TO_SET, _bar_args(option, now, new), bottom)
     if version >= 4 and option in WHEEL_LADDERS and new in WHEEL_LADDERS[option]:
-        return _wheel_screen(title, option, now, new, bottom)
+        return _wheel_screen(title, limit or EDIT, option, now, new, bottom)
     return _rows_screen(version, title, EDIT, option, now, new, limit or RELEASE_TO_SET, bottom)
 
 

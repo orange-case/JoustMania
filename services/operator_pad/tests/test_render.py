@@ -13,6 +13,7 @@ from lib.setting_ladders import (
     SHIELD_KNOB_LADDER,
     TEAMS_LADDER,
     VOLUME_LADDER,
+    WRAPPING,
 )
 from lib.types import Games
 from proto import menu_pb2
@@ -244,8 +245,6 @@ def test_v3_ladder_edit_is_a_marker_bar_after_the_lines():
     assert all(screen.lines[i] == (" " * WIDTH, 0) for i in (1, 2, 3, 4, 6))
     top = render.setting_screen(3, "sensitivity", st, 5, lobby_only=True, bottom=bottom())
     assert top.lines[0][0].rstrip().endswith("MAXIMUM") and top.bar[2] == 6
-    agent = render.setting_screen(3, "agent_level", st, 1, lobby_only=False, bottom=bottom())
-    assert agent.bar == (0, 4, 4, 2, ("NONE", "AMB", "STD", "FULL"))
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-007"], steps=[6])
@@ -283,6 +282,45 @@ def test_v4_shield_wheel_starts_at_auto_without_operator_value_and_backend_wraps
         4, "decision.backend", status(agent_backend="rules"), -1, lobby_only=False, bottom=bottom()
     )
     assert backend.wheel == (("OPENAI", False), ("JEV", False), ("RULES", True))
+
+
+def agent_wheel(net: int):
+    screen = render.setting_screen(4, "agent_level", status(), net, lobby_only=False, bottom=bottom())
+    return screen.lines[0][0].rstrip(), screen.wheel, screen.bar
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-007"], steps=[4])
+def test_v4_agent_level_wheel_does_not_wrap_and_leaves_the_slot_past_an_end_empty():
+    """Kill switch: NONE and FULL are never neighbours; a turn past an end keeps MAXIMUM / MINIMUM."""
+    title, wheel, bar_ = agent_wheel(0)  # NOW `standard`
+    assert wheel == (("AMBIENT", False), ("STANDARD", True), ("FULL", False)) and bar_ is None
+    assert title == "AGENT LEVEL" + " " * 6 + "EDIT"
+    assert agent_wheel(1) == (
+        "AGENT LEVEL" + " " * 6 + "EDIT",
+        (("STANDARD", True), ("FULL", False), ("", False)),
+        None,
+    )
+    title, wheel, _ = agent_wheel(2)
+    assert wheel == (("STANDARD", True), ("FULL", False), ("", False)) and title.endswith("MAXIMUM")
+    assert agent_wheel(-2)[1] == (("", False), ("NONE", False), ("AMBIENT", False))
+    title, wheel, _ = agent_wheel(-3)
+    assert wheel == (("", False), ("NONE", False), ("AMBIENT", False)) and title.endswith("MINIMUM")
+    for net in range(-6, 7):
+        names = [text for text, _ in agent_wheel(net)[1]]
+        assert names not in (["FULL", "NONE", "AMBIENT"], ["STANDARD", "FULL", "NONE"])  # never wrapped
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-007"], steps=[4])
+def test_v3_agent_level_is_now_and_new_rows():
+    screen = render.setting_screen(3, "agent_level", status(), 1, lobby_only=False, bottom=bottom())
+    assert screen.wheel is None and screen.bar is None
+    assert [screen.lines[i][0][:16].rstrip() for i in (1, 3, 5)] == [
+        render.lr("NOW", bar(3, 4), 16),
+        render.lr("NEW", bar(4, 4), 16),
+        "RELEASE TO SET",
+    ]
+    top = render.setting_screen(3, "agent_level", status(), 2, lobby_only=False, bottom=bottom())
+    assert top.lines[5][0].rstrip() == "MAXIMUM"
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-007"], steps=[4])
@@ -403,7 +441,9 @@ def _check_limits(version: int, screen) -> None:
     if screen.wheel is not None:
         assert version >= 4 and len(screen.wheel) == 3
         for slot, (text, now) in enumerate(screen.wheel):
-            assert isinstance(now, bool) and 0 < len(text) <= (16 if slot == 1 else 21)
+            # An empty slot (all spaces, flags 0) only past an end of a wheel that does not wrap.
+            assert isinstance(now, bool) and len(text) <= (16 if slot == 1 else 21)
+            assert text or (slot != 1 and not now)
             assert all(0x20 <= ord(c) <= 0x7E for c in text)
         assert screen.bar is None
 
@@ -413,6 +453,7 @@ def test_ladders_assumed_by_the_bars():
     """The rung labels match the ladders the preview steps (drift guard)."""
     assert render.LADDER_BARS["sensitivity"][0][1:] == SENSITIVITY_LADDER
     assert render.LADDER_BARS["num_teams"][0][1:] == TEAMS_LADDER
-    assert render.LADDER_BARS["agent_level"][0] == AGENT_POLICY_LEVELS
+    assert render.WHEEL_LADDERS["agent_level"] == AGENT_POLICY_LEVELS and "agent_level" not in render.LADDER_BARS
+    assert "agent_level" not in WRAPPING
     assert render.WHEEL_LADDERS["decision.backend"] == BACKENDS
     assert render.WHEEL_LADDERS["shield.activation"] == SHIELD_KNOB_LADDER
