@@ -213,6 +213,10 @@ class Actions:
         if self._previewer is not None and (unless_key is None or unless_key != self._previewer.hold_key):
             self._previewer.end_hold(commit_steps)
 
+    def begin_agent_hold(self, gesture: Gesture, press_status) -> None:
+        """K5 reached its hold time: settle at once whether this hold stops, before its release is handled."""
+        self._agent_stopped = self._agent_hold_stops(gesture, press_status)
+
     def push_lock_led(self, locked: bool) -> None:
         """UC-016 BR-011: the Scroll Lock LED shows the pad's lock state (at every attach)."""
         if self._set_lock_led is not None:

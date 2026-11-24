@@ -351,3 +351,101 @@ def test_the_reset_screen_takes_the_press_read_when_it_arrives():
     assert "?" in m.current(clock.now).lines[1][0]
     m.press_status("K4", st(agent_level="full"))
     assert "\x7f" * 4 in m.current(clock.now).lines[1][0]  # NOW: the full bar of FULL
+
+
+# --- delta review: the stop never waits, a lane never wedges ---------------------------------------
+
+
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_the_k5_stop_goes_out_while_the_press_read_is_still_out():
+    """The press's finish may sit behind a 5 s command on the K5 lane: the stop must not wait for it."""
+    rig = Rig()
+    gate = asyncio.Event()
+
+    async def fetch():
+        await gate.wait()
+        return st()
+
+    rig.reader.fetch.side_effect = fetch
+    press = asyncio.create_task(rig.key("K5", PRESS, 0))
+    await settle()
+    await asyncio.wait_for(rig.pad.agent_due(1000), 1.0)
+    (call,) = rig.actions.dispatch.await_args_list
+    assert call.args[0].kind == AGENT_HOLD and call.args[2] is None  # unknown press read: the stop
+    gate.set()
+    await press
+
+
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_an_accept_that_fails_never_leaves_a_press_read_pending():
+    rig = Rig()
+    feed = rig.pad.machine.feed
+
+    def broken(*_args, **_kwargs):
+        rig.pad.machine.feed = feed
+        raise RuntimeError("bug")
+
+    rig.pad.machine.feed = broken
+    with pytest.raises(RuntimeError):
+        rig.pad.accept(CODE["K1"], PRESS, 0)
+    assert "K1" not in rig.pad._press_reads
+    await asyncio.wait_for(rig.key("K1", RELEASE, 100), 1.0)
+
+
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_a_release_whose_press_read_never_comes_gives_up_after_its_deadline(monkeypatch):
+    from services.operator_pad import controller as controller_module
+
+    monkeypatch.setattr(controller_module, "PRESS_READ_WAIT_SECONDS", 0.05)
+    rig = Rig()
+    rig.pad.accept(CODE["K1"], PRESS, 0)  # its finish never runs
+    await asyncio.wait_for(rig.key("K1", RELEASE, 100), 1.0)
+    assert rig.gestures()[0].kind == TAP
+
+
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_cancelling_a_finish_that_waits_for_its_press_read_cancels_it():
+    """Teardown: the lane worker must stop, not swallow the cancel and go on."""
+    rig = Rig()
+    rig.pad.accept(CODE["K1"], PRESS, 0)
+    release = rig.pad.accept(CODE["K1"], RELEASE, 100)
+    task = asyncio.create_task(rig.pad.finish(release))
+    await settle()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    rig.actions.dispatch.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_the_stop_at_the_hold_time_is_settled_before_the_release_is_handled():
+    """A release handled before the stop task ran sends no second stop and no cancel."""
+    menu = create_autospec(MenuStubSpec, instance=True)
+    gate = asyncio.Event()
+
+    async def process(*_args, **_kwargs):
+        await gate.wait()
+        return menu_pb2.ProcessInputResponse(success=True)
+
+    menu.ProcessInput.side_effect = process
+    cues = create_autospec(CuePlayer, instance=True)
+    rig = Rig()
+    rig.pad._actions = real = Actions(menu, None, cues)
+    await rig.key("K5", PRESS, 0)
+    due = asyncio.create_task(rig.pad.agent_due(1000))
+    await asyncio.sleep(0)  # agent_due ran; its stop task has not started yet
+    assert real._agent_stopped
+    await rig.key("K5", RELEASE, 1500)
+    gate.set()
+    await due
+    assert [dict(c.args[0].data)["direction"] for c in menu.ProcessInput.await_args_list] == ["stop"]
+    cues.cancel.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-011", "BR-014"])
+async def test_a_knob_turn_on_another_pad_never_steps_this_pads_key():
+    rig = Rig()
+    await rig.key("K3", PRESS, 0, source="pad-a")
+    await rig.key("KNOB_TURN_B", PRESS, 10, source="pad-b")
+    await rig.key("K3", RELEASE, 100, source="pad-a")
+    assert rig.gestures()[-1] == Gesture(TAP, "K3", held_ms=100)
