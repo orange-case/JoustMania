@@ -118,6 +118,10 @@ async def test_frames_from_the_intro_never_reach_warmup_or_game_loop():
     real_publish = game.event_publisher
 
     async def publish(event_type, data):
+        if event_type == "werewolf_intro_start":
+            # Hold the intro until the drain had frames to discard: the frame rate
+            # against the intro ticks depends on scheduling (#2655).
+            await _wait_for(lambda: client.streams[0].seq > 20)
         if event_type == "werewolf_intro_end":
             marks["intro_end_seq"] = client.streams[0].seq
         await real_publish(event_type, data)

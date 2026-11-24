@@ -165,6 +165,9 @@ async def test_spikes_from_the_intro_never_reach_warmup_or_game_loop():
 
     async def intro():
         client.streams[0].spiking = True
+        # Hold the intro until the drain had frames to discard: the frame rate
+        # against the intro ticks depends on scheduling (#2655).
+        await _wait_for(lambda: client.streams[0].seq > 20)
         await real_intro()
         client.streams[0].spiking = False
         marks["intro_end_seq"] = client.streams[0].seq
