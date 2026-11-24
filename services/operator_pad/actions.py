@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -31,6 +32,7 @@ from services.operator_pad.gestures import (
     Gesture,
 )
 from services.operator_pad.preview import Previewer
+from services.operator_pad.screens import SETTING_LABELS, result_word, short, tap_value
 from services.operator_pad.state import ENABLED_STATES, is_known, is_stopped
 
 logger = logging.getLogger(__name__)
@@ -75,6 +77,17 @@ BACKENDS = setting_ladders.BACKENDS
 VOLUME_VARIANTS = setting_ladders.VOLUME_LADDER
 MUTE = "mute"
 UNMUTE_DEFAULT = "max"
+VOLUME_OPTION = "audio_volume.master"
+
+# UC-016 BR-001 result labels of the commands that are not a layer setting (D5).
+COMMAND_LABELS = {"start_game": "START", "force_end": "END GAME", "force_start": "FORCE START", "agent_switch": "AGENT"}
+# BR-001 tap screen labels.
+TAP_LABELS = {"sensitivity": "SENSITIVITY", "agent_level": "AGENT", "num_teams": "TEAMS", "decision.backend": "BACKEND"}
+# A cancel shows under the label of the key's layer or hold (K4: by the state at the press).
+CANCEL_LABELS = {K1: "GAME", K2: "SENSITIVITY", K3: "AGENT", K5: "TEAMS", K6: "SHIELD MODE", K7: "BACKEND", K8: "LOCK"}
+# The last command sent in this task and the value the menu reports as committed (UC-016 BR-001).
+# A context variable, so a volume commit running in its own task never mixes into a key's result.
+_SENT: contextvars.ContextVar[tuple[dict[str, str], str] | None] = contextvars.ContextVar("pad_sent", default=None)
 
 
 def result_label(error: str) -> str:
@@ -95,6 +108,7 @@ class Actions:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         set_lock_led: Callable[[bool], None] | None = None,
         previewer: Previewer | None = None,
+        display=None,
     ) -> None:
         self._menu = menu_stub
         self._coordinator = coordinator_stub
@@ -106,6 +120,8 @@ class Actions:
         self._volume_task: asyncio.Task | None = None  # waiting out the pause; cancelled by a new turn
         self._volume_sends: set[asyncio.Task] = set()  # past the pause: never cancelled mid-command
         self._pre_mute_variant: str | None = None
+        self._display = display  # UC-016 DisplayModel, or None (no display)
+        self._status_for_tap = None  # the status a tap announced from (UC-016 BR-001 tap screen)
 
     # --- entry points ---------------------------------------------------------------------
 
@@ -128,12 +144,21 @@ class Actions:
             preview_refused = self._previewer is not None and self._previewer.refused(gesture.key)
             # The preview never plays on over the commit's voice line.
             self.end_preview(commit_steps=self._release_commit_steps(gesture, status))
-        with tracer.start_as_current_span("operator_pad.gesture") as span:
-            span.set_attribute("pad.key", gesture.key)
-            span.set_attribute("pad.gesture", gesture.kind)
-            action, result = await self._run(gesture, status, press_status, span, preview_refused)
-            self._record(span, action, result)
+        pending = self._pending_label(gesture, status)
+        if pending is not None:
+            self._show("pending", pending)  # the label while the command runs (up to its deadline)
+        token = _SENT.set(None)
+        self._status_for_tap = None
+        try:
+            with tracer.start_as_current_span("operator_pad.gesture") as span:
+                span.set_attribute("pad.key", gesture.key)
+                span.set_attribute("pad.gesture", gesture.kind)
+                action, result = await self._run(gesture, status, press_status, span, preview_refused)
+                self._record(span, action, result)
+            self._show_result(gesture, press_status, action, result, _SENT.get())
             return action, result
+        finally:
+            _SENT.reset(token)
 
     def end_preview(self, unless_key: str | None = None, commit_steps: int = 0) -> None:
         """End the live preview (BR-017) unless ``unless_key`` is the key whose hold it previews.
@@ -155,7 +180,11 @@ class Actions:
 
     def _preview_step(self, gesture: Gesture, press_status) -> None:
         option = PREVIEW_OPTIONS.get(gesture.key)
-        if self._previewer is None or option is None:
+        if option is None:
+            return
+        # UC-016 step 4: the setting screen, whatever `operator_pad.preview_enabled` says.
+        self._show("layer_step", gesture.key, option, press_status, gesture.steps, option in LOBBY_ONLY_OPTIONS)
+        if self._previewer is None:
             return
         self._previewer.step(gesture.key, option, press_status, gesture.steps, option in LOBBY_ONLY_OPTIONS)
 
@@ -163,6 +192,7 @@ class Actions:
         """Device gone: a volume turn not yet committed is dropped, not sent later (BR-010)."""
         self.end_preview()
         self._volume_steps = 0
+        self._show("volume_dropped")
         if self._volume_task is not None:
             self._volume_task.cancel()
             self._volume_task = None
@@ -221,6 +251,7 @@ class Actions:
                 return "step_setting", REFUSED
             direction = "down" if status.instructions else "up"
             return "step_setting", await self._step("game_instructions", direction, 1)
+        self._status_for_tap = status
         await self._announce(key, status)
         return "announce", OK
 
@@ -328,6 +359,7 @@ class Actions:
 
     def _queue_volume_step(self, step: int) -> None:
         self._volume_steps += step
+        self._show("volume_turn", self._volume_steps)  # UC-016 step 6
         if self._volume_task is not None:
             self._volume_task.cancel()
         self._volume_task = asyncio.create_task(self._commit_volume_after_pause())
@@ -348,7 +380,10 @@ class Actions:
             if steps == 0:
                 result = NOOP
             else:
-                result = await self._step("audio_volume.master", "up" if steps > 0 else "down", abs(steps))
+                ticket = self._volume_display_start(("steps", steps))
+                _SENT.set(None)
+                result = await self._step(VOLUME_OPTION, "up" if steps > 0 else "down", abs(steps))
+                self._volume_display_end(ticket, result)
                 if result == OK:
                     self._pre_mute_variant = None  # a turn after a mute is the new level
             self._record(span, "step_setting", result)
@@ -362,24 +397,124 @@ class Actions:
         if current == MUTE:
             target = self._pre_mute_variant or UNMUTE_DEFAULT
             steps = VOLUME_VARIANTS.index(target) if target in VOLUME_VARIANTS else len(VOLUME_VARIANTS) - 1
-            result = await self._step("audio_volume.master", "up", steps)
+            ticket = self._volume_display_start(("set", target))
+            result = await self._step(VOLUME_OPTION, "up", steps)
+            self._volume_display_end(ticket, result)
             if result == OK:
                 self._pre_mute_variant = None
             return "unmute", result
         # An unreadable variant ("") steps down past the end, which stops at `mute` (A7).
         known = current in VOLUME_VARIANTS
         steps = VOLUME_VARIANTS.index(current) if known else len(VOLUME_VARIANTS)
-        result = await self._step("audio_volume.master", "down", steps)
+        ticket = self._volume_display_start(("set", MUTE))
+        result = await self._step(VOLUME_OPTION, "down", steps)
+        self._volume_display_end(ticket, result)
         if result == OK:
             self._pre_mute_variant = current if known else None
         return "mute", result
 
+    def _volume_display_start(self, change: tuple[str, object]) -> int:
+        if self._display is None:
+            return 0
+        try:
+            return self._display.volume_commit_start(change)
+        except Exception as e:
+            logger.debug(f"Pad display hook volume_commit_start failed: {e!r}")
+            return 0
+
+    def _volume_display_end(self, ticket: int, result: str) -> None:
+        sent = _SENT.get()
+        self._show("volume_commit_end", ticket, result, sent[1] if sent else "")
+        if result not in (OK, AT_LIMIT):
+            self._show("result", "VOLUME", result_word(result))  # A3 for the volume and the mute
+
     # --- sending --------------------------------------------------------------------------
 
     async def _step(self, option: str, direction: str, steps: int) -> str:
-        return await self._send(
-            {"command": "step_setting", "option": option, "direction": direction, "steps": str(steps)}
-        )
+        data = {"command": "step_setting", "option": option, "direction": direction, "steps": str(steps)}
+        if option == VOLUME_OPTION and self._link_up():
+            data["cue"] = "none"  # UC-016 BR-004: the screen shows the level, no step sound
+        return await self._send(data)
+
+    # --- display (UC-016) -------------------------------------------------------------------
+
+    def _link_up(self) -> bool:
+        try:
+            return self._display is not None and bool(self._display.link_up)
+        except Exception:
+            return False
+
+    def _show(self, hook: str, *args) -> None:
+        """A display hook: synchronous, and never raises into the key path (UC-016 FR-240)."""
+        if self._display is None:
+            return
+        try:
+            getattr(self._display, hook)(*args)
+        except Exception as e:
+            logger.debug(f"Pad display hook {hook} failed: {e!r}")
+
+    @staticmethod
+    def _pending_label(gesture: Gesture, status) -> str | None:
+        """The label of a command this gesture sends, shown until its result (None: sends nothing)."""
+        if status is None:
+            return None
+        if gesture.kind == LAYER and gesture.steps != 0 and gesture.key in PREVIEW_OPTIONS:
+            return SETTING_LABELS[PREVIEW_OPTIONS[gesture.key]]
+        if gesture.kind == HOLD and gesture.key == K3:
+            return COMMAND_LABELS["agent_switch"]
+        if gesture.kind == HOLD and gesture.key == K4:
+            return COMMAND_LABELS["force_end" if status.lifecycle_live else "force_start"]
+        if gesture.kind == TAP and not status.lifecycle_live:
+            if gesture.key == K1:
+                return COMMAND_LABELS["start_game"]
+            if gesture.key == K6:
+                return SETTING_LABELS["game_instructions"]
+        return None
+
+    def _show_result(self, gesture: Gesture, press_status, action: str, result: str, sent) -> None:
+        """UC-016 step 5, A3: the result screen with the committed value or the UC-015 BR-009 word."""
+        if action == "announce" and gesture.kind == TAP and gesture.key in ANNOUNCE_OPTIONS:
+            # BR-001 tap screen: the label and the value read, shown like a result.
+            option = ANNOUNCE_OPTIONS[gesture.key]
+            text = tap_value(option, self._status_for_tap) if result == OK else result_word(result)
+            self._show("result", TAP_LABELS[option], text)
+            return
+        label = self._result_label(gesture, press_status, action)
+        if label is None or result in (NOOP, "pending") or (gesture.kind == KNOB_PRESS_GESTURE and result == OK):
+            self._show("clear_pending")  # a mute shows on the volume screen; nothing else to show
+            return
+        data, value = sent if sent else ({}, "")
+        if result == OK:
+            text = self._committed_text(action, data, value)
+        else:
+            up = data.get("direction") != "down" if data else gesture.steps >= 0
+            text = result_word(result, up=up)
+        self._show("result", label, text)
+
+    @staticmethod
+    def _result_label(gesture: Gesture, press_status, action: str) -> str | None:
+        if gesture.kind == CANCEL:
+            if gesture.key == K4:
+                live = press_status is not None and press_status.lifecycle_live
+                return COMMAND_LABELS["force_end" if live else "force_start"]
+            return CANCEL_LABELS.get(gesture.key)
+        if gesture.kind == KNOB_PRESS_GESTURE:
+            return "VOLUME"
+        if action in COMMAND_LABELS:
+            return COMMAND_LABELS[action]
+        if gesture.kind == TAP and gesture.key == K6:
+            return SETTING_LABELS["game_instructions"]
+        if gesture.kind == LAYER and gesture.key in PREVIEW_OPTIONS:
+            return SETTING_LABELS[PREVIEW_OPTIONS[gesture.key]]
+        return None  # announce, lock, a key with no command
+
+    @staticmethod
+    def _committed_text(action: str, data: dict[str, str], value: str) -> str:
+        """The value the menu reports as committed, never the pad's own prediction; `OK` without one (BR-001)."""
+        if not value:
+            return "OK"  # a command that names no value, or a menu older than `ProcessInputResponse.value`
+        option = "decision.backend" if action == "set_backend" else data.get("option", "")
+        return short(option, value)
 
     async def _send(self, data: dict[str, str], deadline_seconds: float = COMMAND_TIMEOUT_SECONDS) -> str:
         """One `ProcessInput` web command; the result label. Never retried (BR-010)."""
@@ -392,6 +527,7 @@ class Actions:
             await self._cues.failure()
             return MENU_UNAVAILABLE
         error = response.error if not response.success else (response.error or OK)
+        _SENT.set((data, response.value if response.success else ""))
         await self._cue_for(error, up=data.get("direction") != "down")
         return result_label(error)
 

@@ -29,12 +29,14 @@ class PadController:
         actions: Actions,
         cue_player: CuePlayer,
         machine: GestureMachine | None = None,
+        display=None,
     ) -> None:
         self._config = config
         self._reader = reader
         self._actions = actions
         self._cues = cue_player
         self.machine = machine or GestureMachine()
+        self._display = display  # UC-016 DisplayModel, or None (no display)
         self._keymap: dict[int, str] = {}
         self._press_status: dict[str, object] = {}
         self._known_seen = False
@@ -52,6 +54,7 @@ class PadController:
         self._press_status.clear()
         self._actions.cancel_pending()
         self._cues.cancel_all()  # no announcement plays on after an unplug
+        self._show("reset_hold")
 
     def events_dropped(self) -> None:
         """The kernel dropped input events (SYN_DROPPED, A4 step 2): a release may be lost, reset the gestures."""
@@ -59,6 +62,16 @@ class PadController:
         self.machine.reset()
         self._press_status.clear()
         self._actions.end_preview()
+        self._show("reset_hold")
+
+    def _show(self, hook: str, *args) -> None:
+        """A display hook: synchronous, and never raises into the key path (UC-016 FR-240)."""
+        if self._display is None:
+            return
+        try:
+            getattr(self._display, hook)(*args)
+        except Exception as e:
+            logger.debug(f"Pad display hook {hook} failed: {e!r}")
 
     async def on_code(self, code: int, value: int, t_ms: int) -> None:
         name = self._keymap.get(code)
@@ -72,11 +85,16 @@ class PadController:
             return
         status = None
         if name in _STATUS_KEYS and value in (PRESS, RELEASE):
+            token = self._token()
             status = await self._reader.fetch()  # fresh at every press and release, never cached
+            self._show("note_status", status, token)  # the screen only; commands keep their own reads
             if value == PRESS:
                 self._press_status[name] = status
         press_status = self._press_status.pop(name, None) if value == RELEASE else None
         gestures = self.machine.feed(KeyEvent(name, value, t_ms), self._config.timings())
+        # Before any command is awaited: a release ends the setting screen at once (UC-016 BR-001).
+        self._show("hold_key", self.machine.preview_key())
+        self._show("set_locked", self.machine.locked)
         for gesture in gestures:
             if gesture.kind == LAYER_STEP:
                 # BR-017: the preview starts from the status read at the press, peeked (the release pops it).
@@ -85,6 +103,12 @@ class PadController:
             await self._actions.dispatch(gesture, status, press_status)
         # A chord or a lost key ends the hold without a layer release: the preview stops too.
         self._actions.end_preview(unless_key=self.machine.preview_key())
+
+    def _token(self) -> int | None:
+        try:
+            return self._display.read_token() if self._display is not None else None
+        except Exception:
+            return None
 
     async def _unknown(self, code: int, value: int) -> None:
         """A4 step 3: ignored and counted; a pad that sends only unknown codes gets one warning and one cue."""
