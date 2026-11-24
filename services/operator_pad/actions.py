@@ -75,6 +75,8 @@ NOOP = "noop"
 # UC-016 BR-011 "Menu too old": the commands a menu must list in `pad_commands` before the pad sends them.
 RESET_COMMAND = "reset_setting"
 SWITCH_COMMAND = "interventions_switch"
+RESET_FROM = "reset_setting.from"  # the menu refuses a level reset whose level moved under the hold
+STEP_FROM = "step_setting.from"  # the same for a level step
 
 BACKENDS = setting_ladders.BACKENDS
 VOLUME_VARIANTS = setting_ladders.VOLUME_LADDER
@@ -263,7 +265,7 @@ class Actions:
     async def _run(self, gesture: Gesture, status, press_status, binding, span, preview_refused) -> tuple[str, str]:
         kind, key = gesture.kind, gesture.key
         if kind == CANCEL:
-            if binding is not None and not binding.active:
+            if binding is not None and not binding.active and not gesture.stage:
                 return "none", NOOP  # UC-016 BR-011: a row without that key is silent
             await self._cues.cancel()
             return "cancel", CANCELLED
@@ -432,11 +434,12 @@ class Actions:
             return action, REFUSED
         if spec.edit == BACKEND:
             return action, await self._backend(steps, status)
-        seen = press_status if press_status is not None else status
+        if (spec.edit == SWITCH or spec.option == "agent_level") and press_status is None:
+            return await self._refuse(action)  # BR-014: never confirmed blind
         if spec.edit == SWITCH:
             if SWITCH_COMMAND not in pad_commands(status):
                 return await self._refuse(action)  # BR-011 "Menu too old"
-            plan = page_keys.edit_plan(spec, seen, steps)
+            plan = page_keys.edit_plan(spec, press_status, steps)
             if plan.refused:
                 return await self._refuse(action)
             if plan.new is None or plan.new == plan.now:
@@ -444,9 +447,12 @@ class Actions:
             return action, await self._interventions_switch(plan.new, gesture.confirmed)
         option = spec.option
         if option == "agent_level":
-            plan = page_keys.edit_plan(spec, seen, steps)
-            if plan.refused:
+            plan = page_keys.edit_plan(spec, press_status, steps)
+            if plan.refused or STEP_FROM not in pad_commands(status):
                 return await self._refuse(action)
+            if plan.new == plan.now:
+                await self._cues.limit(steps > 0)  # clamped at the end: nothing to send
+                return action, AT_LIMIT
             return action, await self._level_step(steps, plan.now, plan.raises, gesture.confirmed)
         if option in setting_ladders.WRAPPING:
             # UC-016 BR-007: a whole turn of the wheel sends nothing; the menu's `ok` no-op stays the
@@ -491,17 +497,25 @@ class Actions:
             return await self._refuse(RESET_COMMAND)  # BR-011 "Menu too old"
         if spec.lobby_only and status.lifecycle_live:
             return await self._refuse(RESET_COMMAND)
+        level = spec.option == "agent_level"
+        if level and (press_status is None or RESET_FROM not in pad_commands(status)):
+            return await self._refuse(RESET_COMMAND)  # BR-014: the base must be known and checked
         plan = page_keys.reset_plan(spec, press_status if press_status is not None else status)
         if plan.refused:
             return await self._refuse(RESET_COMMAND)
-        return RESET_COMMAND, await self._reset_send(spec.option, plan.new, plan.raises, gesture.confirmed)
+        base = plan.now if level else None
+        return RESET_COMMAND, await self._reset_send(spec.option, plan.new, base, plan.raises, gesture.confirmed)
 
-    async def _reset_send(self, option: str, expect: str | None, raises: bool, confirmed: bool) -> str:
+    async def _reset_send(
+        self, option: str, expect: str | None, from_level: str | None, raises: bool, confirmed: bool
+    ) -> str:
         if raises and not confirmed:
             return await self._unconfirmed()
         data = {"command": RESET_COMMAND, "option": option}
         if expect is not None:
             data["expect"] = expect
+        if from_level is not None:
+            data["from"] = from_level
         return await self._send(data, expect_value=True)
 
     async def _backend(self, steps: int, status) -> tuple[str, str]:

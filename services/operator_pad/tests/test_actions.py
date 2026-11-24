@@ -40,6 +40,7 @@ def status(**kw) -> menu_pb2.GetMenuStatusResponse:
         "num_teams": 2,
         "instructions": False,
         "audio_volume_master": "normal",
+        "pad_commands": ["reset_setting", "reset_setting.from", "interventions_switch", "step_setting.from"],
     }
     base.update(kw)
     # A resolved kill switch unless the test says otherwise (services.md §3.1, #2101).

@@ -159,16 +159,18 @@ class DisplayModel:
                     self._prev_page = self._acked_page
                 self._acked_page, self._acked_at = self._drawn_page, now
 
-    def bind_page(self) -> tuple[int, bool] | str:
+    def bind_page(self, at: float | None = None) -> tuple[int, bool] | str:
         """UC-016 BR-011 "Which row": (page, fallback) for a row key pressed now, or REFUSED.
 
         The page the firmware acknowledged once it was on screen PAGE_SETTLE_SECONDS (a younger one:
         the page before it); while the screen may still show a frame (up to NO_HOST_SECONDS after the
-        last ack) without a fresh link, refused; else the fallback page of BR-016.
+        last ack) without a fresh link, refused; else the fallback page of BR-016. ``at``: the key event's
+        time (the same monotonic basis), not when the event is processed.
         """
         try:
-            now = self._clock()
-            if self.pages_active and self._acked_page is not None:
+            now = self._clock() if at is None else at
+            fresh = self._last_ack is not None and now - self._last_ack < LINK_FRESH_SECONDS
+            if fresh and (self._protocol or 0) >= 2 and self._acked_page is not None:
                 if now - self._acked_at >= PAGE_SETTLE_SECONDS:
                     return self._acked_page, False
                 return self._prev_page, False
@@ -257,6 +259,14 @@ class DisplayModel:
         """UC-016 BR-011: a key went down at ``t_ms`` (the gesture clock) with its timing snapshot."""
         self._keys[key] = _Held(key, t_ms, timings, binding, press_status)
         self.dirty.set()
+
+    @_quiet
+    def press_status(self, key: str, status) -> None:
+        """The status read at the key's press, once it is there (the reset screen's NOW and NEW)."""
+        held = self._keys.get(key)
+        if held is not None:
+            held.press_status = status
+            self.dirty.set()
 
     @_quiet
     def key_up(self, key: str) -> None:

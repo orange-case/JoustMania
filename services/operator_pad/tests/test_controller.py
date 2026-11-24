@@ -233,7 +233,7 @@ async def test_a_layer_step_gets_the_press_status_peeked_and_the_release_still_p
         (Gesture(LAYER_STEP, "K1", steps=2), None, at_press, FALLBACK_K1),
         (Gesture(LAYER, "K1", steps=2, held_ms=300), at_release, at_press, FALLBACK_K1),
     ]
-    assert pad._press_status == {}
+    assert pad._press_reads == {}
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017", "BR-009"], steps=[5])

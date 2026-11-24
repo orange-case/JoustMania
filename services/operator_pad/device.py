@@ -268,6 +268,8 @@ class DeviceManager:
         from services.operator_pad.hidraw import usb_device  # hidraw imports this module
 
         self._usb = {d.path: usb_device(self._sysfs_root / Path(d.path).name / "device") for d in devices}
+        # BR-011: with the node identities unresolved, more than one pad means no page binding.
+        self._controller.pad_devices = len({usb for usb in self._usb.values() if usb is not None}) or 1
         self._warned.clear()
         self._controller.attached(keymap)
         metrics.device_attached.set(1)
@@ -293,14 +295,14 @@ class DeviceManager:
     async def read_until_gone(self) -> None:
         """Feed key events of every grabbed node to the controller until a node fails.
 
-        In arrival order, except K5's (UC-016 A10): those go to the controller at once on a task of
-        their own, never queued behind a command the previous key is still waiting for.
+        Each event is accepted (timed, the gesture settled) as it arrives, in arrival order, SYN_DROPPED
+        included; what is left (status reads, commands) runs on an ordered lane: K5 on a lane of its
+        own (UC-016 A10), never behind a command another key is still waiting for.
         """
         queue: asyncio.Queue = asyncio.Queue()
-        lane: asyncio.Queue = asyncio.Queue()
+        lanes: tuple[asyncio.Queue, asyncio.Queue] = (asyncio.Queue(), asyncio.Queue())
         gone = object()
         dropped = object()
-        priority: set[asyncio.Task] = set()
 
         async def pump(device: InputDevice) -> None:
             # Any end of the read loop (unplug, a binding error, a normal end) is the device gone (A4).
@@ -319,37 +321,40 @@ class DeviceManager:
             finally:
                 queue.put_nowait(gone)
 
-        async def work() -> None:
+        async def work(lane: asyncio.Queue) -> None:
             while True:
-                item = await lane.get()
+                accepted = await lane.get()
                 try:
-                    if item is dropped:
-                        self._controller.events_dropped()
-                    else:
-                        await self._controller.on_code(*item[:3], source=item[3])
+                    await self._controller.finish(accepted)
                 except Exception as e:  # one bad event never stops the lane
-                    logger.warning(f"Pad event {item!r} failed: {e!r}")
+                    logger.warning(f"Pad event {accepted!r} failed: {e!r}")
                 finally:
                     lane.task_done()
 
         pumps = [asyncio.create_task(pump(device)) for device in self._devices]
-        worker = asyncio.create_task(work())
+        workers = [asyncio.create_task(work(lane)) for lane in lanes]
         try:
             while True:
                 item = await queue.get()
                 if item is gone:
-                    await lane.join()
+                    for lane in lanes:
+                        await lane.join()
                     return
-                if item is not dropped and self._controller.is_priority(item[0]) is True:
-                    task = asyncio.create_task(self._controller.on_code(*item[:3], source=item[3]))
-                    priority.add(task)
-                    task.add_done_callback(priority.discard)
+                if item is dropped:
+                    self._controller.events_dropped()
                     continue
-                lane.put_nowait(item)
+                code, value, t_ms, usb = item
+                try:
+                    accepted = self._controller.accept(code, value, t_ms, source=usb)
+                except Exception as e:
+                    logger.warning(f"Pad event {item!r} failed: {e!r}")
+                    continue
+                if accepted is not None:
+                    lanes[0 if self._controller.is_priority(code) is True else 1].put_nowait(accepted)
         finally:
-            for task in (*pumps, worker, *priority):
+            for task in (*pumps, *workers):
                 task.cancel()
-            for task in (*pumps, worker, *priority):
+            for task in (*pumps, *workers):
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
 

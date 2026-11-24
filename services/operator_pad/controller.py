@@ -1,33 +1,42 @@
 """Glue between the device and the action layer: key codes -> gestures -> commands (UC-015, UC-016).
 
-One instance per service. The device layer calls `attached` / `on_code` / `detached`; K5's events
-may come in on their own task (UC-016 A10: never queued behind a command), so the K5 hold time is
-watched by a timer task of its own and its stop never waits for another command.
+One instance per service. Each event goes through two halves:
 
-A row key binds at its press, before anything is awaited (UC-016 BR-011 "Which row"): the binding
-first, then the paging stops (`note_input`), then the status read. The binding is kept for the
-whole hold and passed with every gesture of that key.
+- `accept` (synchronous, called by the device layer as the event arrives, in arrival order): the
+  row binding at the event's time, the paging stop, the gesture machine, the K5 hold timer. Nothing
+  awaits here, so a release is timed and a K5 hold settled before any status read (UC-016 A10).
+- `finish` (async, on the device's ordered lanes, K5 on a lane of its own, UC-016 A10): the status
+  reads and the commands.
+
+`on_code` runs both (tests, and any caller without lanes).
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from services.operator_pad import metrics, page_keys
 from services.operator_pad.actions import Actions
-from services.operator_pad.config import K5, KEYS, KNOB_PRESS, PadConfig
+from services.operator_pad.config import K5, KEYS, KNOB_PRESS, PadConfig, Timings
 from services.operator_pad.cues import CuePlayer
 from services.operator_pad.gestures import (
     AGENT_HOLD,
+    CANCEL,
     CONFIRM,
+    HOLD,
     LAYER_STEP,
+    LOCK,
     PAGE_STEP,
     PRESS,
     RELEASE,
+    TRANSITION,
+    Gesture,
     GestureMachine,
     KeyEvent,
 )
@@ -38,10 +47,26 @@ logger = logging.getLogger(__name__)
 # Keys whose press and release read a fresh `GetMenuStatus` (the knob turns do not need one).
 _STATUS_KEYS = frozenset(KEYS) | {KNOB_PRESS}
 REFUSED_BINDING = "refused"  # UC-016 BR-011: a row key pressed while the link is uncertain
+# Fixed-key functions a refused binding still does (they act on no row): the lock, the transition cue.
+_ROWLESS = (LOCK, TRANSITION)
 
 
 def monotonic_ms() -> int:
     return time.monotonic_ns() // 1_000_000
+
+
+@dataclass
+class Accepted:
+    """One event after `accept`: what `finish` still has to read and send."""
+
+    name: str
+    value: int
+    t_ms: int
+    gestures: list[Gesture]
+    binding: object = None
+    press_read: asyncio.Future | None = None  # this press's status read, or the release's press read
+    read: bool = False
+    unknown_code: int | None = None
 
 
 class PadController:
@@ -65,12 +90,15 @@ class PadController:
         self._clock_ms = clock_ms
         self._sleep = sleep
         self._keymap: dict[int, str] = {}
-        self._press_status: dict[str, object] = {}
+        self._press_reads: dict[str, asyncio.Future] = {}
         self._bindings: dict[str, object] = {}
+        self._sources: dict[str, str | None] = {}
+        self._knob_ignored = False
         self._known_seen = False
         self._unknown_warned = False
         self._agent_timer: asyncio.Task | None = None
         self._agent_tasks: set[asyncio.Task] = set()
+        self.pad_devices = 1  # distinct USB devices of the attached pad nodes (set by the device layer)
 
     def is_priority(self, code: int) -> bool:
         """UC-016 A10: K5's events are handled at once, never behind a command still in flight."""
@@ -85,23 +113,31 @@ class PadController:
 
     def detached(self) -> None:
         """Device gone (A4 step 2): every gesture in progress is dropped, nothing is sent later."""
-        self._drop_holds()
+        self.machine.reset()
+        self._forget_holds()
+        self._cancel_agent_timer()
         self._actions.cancel_pending()
         self._cues.cancel_all()  # no announcement plays on after an unplug
         self._show("reset_hold")
 
     def events_dropped(self) -> None:
-        """The kernel dropped input events (SYN_DROPPED, A4 step 2): a release may be lost, reset the gestures."""
-        logger.warning("Pad input events dropped (SYN_DROPPED): gestures in progress reset")
-        self._drop_holds()
+        """SYN_DROPPED (A4 step 2): a release may be lost; the gestures reset, but a K5 hold stays stop-only."""
+        logger.warning("Pad input events dropped (SYN_DROPPED): gestures in progress reset, K5 kept stop-only")
+        self.machine.dropped()
+        k5 = self.machine.down(K5)
+        kept = {K5: self._press_reads[K5]} if k5 and K5 in self._press_reads else {}
+        self._forget_holds()
+        self._press_reads.update(kept)
+        if not k5:
+            self._cancel_agent_timer()
         self._actions.end_preview()
         self._show("reset_hold")
 
-    def _drop_holds(self) -> None:
-        self.machine.reset()
-        self._press_status.clear()
+    def _forget_holds(self) -> None:
+        self._press_reads.clear()
         self._bindings.clear()
-        self._cancel_agent_timer()
+        self._sources.clear()
+        self._knob_ignored = False
 
     async def drain(self) -> None:
         """Wait for the K5 commands in flight (tests, shutdown)."""
@@ -117,8 +153,8 @@ class PadController:
         except Exception as e:
             logger.debug(f"Pad display hook {hook} failed: {e!r}")
 
-    def _bind(self, key: str, source: str | None):
-        """UC-016 BR-011 "Which row" / BR-016: the row of the page shown, refused, or the fallback page."""
+    def _bind(self, key: str, source: str | None, t_ms: int):
+        """UC-016 BR-011 "Which row" / BR-016: the row of the page shown at ``t_ms``, refused, or the fallback."""
         if key not in page_keys.ROW_KEYS:
             return None
         fallback = page_keys.binding(key, page_keys.FALLBACK_PAGE, fallback=True)
@@ -127,9 +163,12 @@ class PadController:
             return fallback
         try:
             usb = display.display_usb
-            if source is not None and usb is not None and source != usb:
-                return fallback  # another pad's keys: no page binds them
-            bound = display.bind_page()
+            if source is not None and usb is not None:
+                if source != usb:
+                    return fallback  # another pad's keys: no page binds them
+            elif self.pad_devices > 1:
+                return fallback  # several pads and no way to tell which one has the screen
+            bound = display.bind_page(t_ms / 1000)
         except Exception as e:
             logger.debug(f"Pad page binding failed: {e!r}")
             return fallback
@@ -138,66 +177,117 @@ class PadController:
         page, is_fallback = bound
         return page_keys.binding(key, page, fallback=is_fallback)
 
-    async def on_code(self, code: int, value: int, t_ms: int, source: str | None = None) -> None:
+    def _knob_foreign(self, source: str | None) -> bool:
+        """A knob press from another pad than the held keys' never acts on them."""
+        return source is not None and any(s is not None and s != source for s in self._sources.values())
+
+    # --- the two halves ------------------------------------------------------------------------
+
+    def accept(self, code: int, value: int, t_ms: int, source: str | None = None) -> Accepted | None:
+        """The synchronous half, at the event's arrival; None when nothing is left to do."""
         name = self._keymap.get(code)
         if name is None:
-            await self._unknown(code, value)
-            return
+            return Accepted("", value, t_ms, [], unknown_code=code)
         self._known_seen = True
         if not self._config.enabled():
             # `operator_pad.enabled` off: the pad does nothing; gestures in progress are dropped.
             self.detached()
-            return
+            return None
+        if name == KNOB_PRESS:
+            if value == PRESS and self._knob_foreign(source):
+                self._knob_ignored = True
+                return None
+            if value == RELEASE and self._knob_ignored:
+                self._knob_ignored = False
+                return None
         timings = self._config.timings()
         if value == PRESS and name in KEYS:
-            self._bindings[name] = self._bind(name, source)
-            self._show("note_input", True)  # the page stays from here on, before any await (BR-011)
-        status = None
-        if name in _STATUS_KEYS and value in (PRESS, RELEASE):
-            token = self._token()
-            status = await self._reader.fetch()  # fresh at every press and release, never cached
-            self._show("note_status", status, token)  # the screen only; commands keep their own reads
-            if value == PRESS:
-                self._press_status[name] = status
+            self._bindings[name] = self._bind(name, source, t_ms)
+            self._sources[name] = source
+            self._show("note_input", True)  # the page stays from here on, before any read (BR-011)
+        read = name in _STATUS_KEYS and value in (PRESS, RELEASE)
+        press_read = None
+        if read and value == PRESS:
+            press_read = self._press_reads[name] = asyncio.get_running_loop().create_future()
         if value == RELEASE:
-            press_status = self._press_status.pop(name, None)
+            press_read = self._press_reads.pop(name, None)
             binding = self._bindings.pop(name, None)
+            self._sources.pop(name, None)
         else:
-            press_status = None
             binding = self._bindings.get(name)
         gestures = self.machine.feed(KeyEvent(name, value, t_ms), timings, pages=self._pages_active())
         if name in KEYS and value == PRESS and self.machine.press_ms(name) == t_ms:
-            self._show("key_down", name, t_ms, timings, None if binding == REFUSED_BINDING else binding, status)
-            if binding == REFUSED_BINDING:
-                await self._cues.refusal()  # the link is uncertain: the key sends nothing
-            if name == K5:
-                self._start_agent_timer(t_ms, timings.hold_agent_ms)
+            self._key_down(name, t_ms, timings, binding)
         if name in KEYS and value == RELEASE:
             self._show("key_up", name)
             if name == K5:
                 self._cancel_agent_timer()
-        # Before any command is awaited: a release ends the setting screen at once (UC-016 BR-001).
         self._show("hold_key", self.machine.preview_key())
         self._show("set_locked", self.machine.locked)
         self._show("note_input", self.machine.keys_down())  # UC-016 BR-009
-        for gesture in gestures:
+        return Accepted(name, value, t_ms, gestures, binding, press_read, read)
+
+    def _key_down(self, name: str, t_ms: int, timings: Timings, binding) -> None:
+        self._show("key_down", name, t_ms, timings, None if binding == REFUSED_BINDING else binding, None)
+        if name == K5:
+            self._start_agent_timer(t_ms, timings.hold_agent_ms)
+
+    async def finish(self, event: Accepted) -> None:
+        """The async half: the status reads, then the commands of the gestures `accept` found."""
+        if event.unknown_code is not None:
+            await self._unknown(event.unknown_code, event.value)
+            return
+        name, value = event.name, event.value
+        status = None
+        if event.read:
+            token = self._token()
+            status = await self._reader.fetch()  # fresh at every press and release, never cached
+            self._show("note_status", status, token)  # the screen only; commands keep their own reads
+            if value == PRESS and event.press_read is not None and not event.press_read.done():
+                event.press_read.set_result(status)
+                self._show("press_status", name, status)
+        press_status = await self._read_of(event.press_read) if value == RELEASE else None
+        if value == PRESS and event.binding == REFUSED_BINDING:
+            await self._cues.refusal()  # the link is uncertain: the key sends nothing
+        for gesture in event.gestures:
             if gesture.kind == PAGE_STEP:
                 self._show("page_step", gesture.steps)  # UC-016 BR-008: the screen only, no command, no cue
                 continue
-            key_binding = binding if gesture.key == name else self._bindings.get(gesture.key)
+            key_binding = event.binding if gesture.key == name else self._bindings.get(gesture.key)
             if key_binding == REFUSED_BINDING:
-                continue
+                if gesture.kind not in _ROWLESS and not (gesture.kind == CANCEL and gesture.stage):
+                    continue
+                key_binding = None
             if gesture.kind in (LAYER_STEP, CONFIRM):
                 # BR-017: the preview starts from the status read at the press, peeked (the release pops it).
-                await self._actions.dispatch(gesture, None, self._press_status.get(gesture.key), key_binding)
+                peek = await self._read_of(self._press_reads.get(gesture.key))
+                await self._actions.dispatch(gesture, None, peek, key_binding)
                 continue
-            if gesture.kind == AGENT_HOLD:
-                gesture_press = press_status if gesture.key == name else self._press_status.get(gesture.key)
-                await self._actions.dispatch(gesture, status, gesture_press, None)
+            if gesture.key == K5 and gesture.kind in (AGENT_HOLD, HOLD):
+                await self._actions.dispatch(self._stop_only_in_flight(gesture), status, press_status, None)
                 continue
             await self._actions.dispatch(gesture, status, press_status, key_binding)
         # A chord or a lost key ends the hold without an edit release: the preview stops too.
         self._actions.end_preview(unless_key=self.machine.preview_key())
+
+    async def on_code(self, code: int, value: int, t_ms: int, source: str | None = None) -> None:
+        event = self.accept(code, value, t_ms, source)
+        if event is not None:
+            await self.finish(event)
+
+    @staticmethod
+    async def _read_of(future: asyncio.Future | None):
+        if future is None:
+            return None
+        with contextlib.suppress(asyncio.CancelledError):
+            return await asyncio.shield(future)
+        return None
+
+    def _stop_only_in_flight(self, gesture: Gesture) -> Gesture:
+        """While a K5 stop is still in flight, a K5 hold is stop-only (never a resume over it)."""
+        if self._agent_tasks and gesture.clean:
+            return dataclasses.replace(gesture, clean=False)
+        return gesture
 
     # --- K5: the stop at the hold time (UC-016 A10) ----------------------------------------------
 
@@ -218,10 +308,14 @@ class PadController:
     async def agent_due(self, t_ms: int) -> None:
         """K5 held to its hold time: the stop goes out at once, in its own task (never behind a command)."""
         for gesture in self.machine.due(t_ms):
-            task = asyncio.create_task(self._actions.dispatch(gesture, None, self._press_status.get(K5), None))
+            gesture = self._stop_only_in_flight(gesture)
+            task = asyncio.create_task(self._agent_dispatch(gesture, self._press_reads.get(K5)))
             self._agent_tasks.add(task)
             task.add_done_callback(self._agent_tasks.discard)
             await asyncio.shield(task)
+
+    async def _agent_dispatch(self, gesture: Gesture, press_read) -> None:
+        await self._actions.dispatch(gesture, None, await self._read_of(press_read), None)
 
     def _pages_active(self) -> bool:
         """UC-016 BR-008: the knob scrolls pages; any failure reads as no pages (UC-015 knob, FR-240)."""

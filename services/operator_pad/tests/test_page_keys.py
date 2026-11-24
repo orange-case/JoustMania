@@ -37,7 +37,13 @@ from services.operator_pad.state import MenuStatusReader
 from services.operator_pad.tests.display_fakes import pad_config
 from services.operator_pad.tests.fakes import CoordinatorStubSpec, MenuStubSpec
 
-ALL_COMMANDS = ["reset_setting", "interventions_switch", "agent_switch.only_if_stopped", "step_setting.from"]
+ALL_COMMANDS = [
+    "reset_setting",
+    "reset_setting.from",
+    "interventions_switch",
+    "agent_switch.only_if_stopped",
+    "step_setting.from",
+]
 DEFAULTS = {
     "agent_level": "standard",
     "game_instructions": "off",
@@ -339,7 +345,7 @@ def test_only_the_gated_builders_send_a_raise():
         (on("HOME", "K7"), st(), {"option": "sensitivity", "expect": "automatic"}),
         (on("GAME", "K7"), st(), {"option": "game_instructions", "expect": "off"}),
         (on("INTERV", "K2"), st(lifecycle_live=True), {"option": "decision.backend", "expect": "rules"}),
-        (on("AGENT", "K4"), st(agent_level="full"), {"option": "agent_level", "expect": "standard"}),
+        (on("AGENT", "K4"), st(agent_level="full"), {"option": "agent_level", "expect": "standard", "from": "full"}),
     ],
 )
 async def test_a_reset_sends_reset_setting_with_the_value_it_showed(actions, menu, binding, status, expected):
@@ -355,7 +361,9 @@ async def test_a_level_reset_above_the_level_needs_the_confirmation(actions, men
         "cancelled",
     )
     await actions.dispatch(Gesture(RESET, "K4", confirmed=True), status, status, on("AGENT", "K4"))
-    assert sent(menu) == [{"command": "reset_setting", "option": "agent_level", "expect": "standard"}]
+    assert sent(menu) == [
+        {"command": "reset_setting", "option": "agent_level", "expect": "standard", "from": "ambient"}
+    ]
 
 
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
@@ -704,7 +712,7 @@ async def test_the_paging_stops_before_the_press_status_read():
 
     rig.reader.fetch.side_effect = fetch
     await rig.key("K6", PRESS, 0)
-    assert order[:2] == [("note_input", True), ("fetch",)]
+    assert ("note_input", True) in order[: order.index(("fetch",))]
 
 
 @pytest.mark.uc("UC-016", br=["BR-011"])

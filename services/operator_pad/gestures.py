@@ -94,6 +94,7 @@ class Gesture:
     locked: bool = False  # agent_hold / hold of K5: the pad was locked; lock: the new state
     confirmed: bool = False  # layer / reset: the value released was confirmed with the knob (A9)
     clean: bool = True  # agent_hold / hold of K5: no other key, knob press or lock during the hold
+    stage: str = ""  # cancel: "lock" in the guard band after hold_lock_ms (a K4 cue on every row)
 
 
 class GestureMachine:
@@ -124,6 +125,18 @@ class GestureMachine:
         self.__init__()
         self.locked = locked
 
+    def dropped(self) -> None:
+        """Input events were lost (SYN_DROPPED): like `reset`, but a K5 hold in progress stays, stop-only.
+
+        The stop at the hold time must not depend on events that may never come (UC-016 A10); a lost
+        K5 release ends the hold through the 30 s expiry.
+        """
+        k5 = (self._down.get(K5), self._seen.get(K5), self._snap.get(K5), self._k5_fired)
+        self.reset()
+        if k5[0] is not None:
+            self._down[K5], self._seen[K5], self._snap[K5], self._k5_fired = k5
+            self._k5_clean = False
+
     def keys_down(self) -> bool:
         return bool(self._down) or self._knob_down
 
@@ -147,7 +160,7 @@ class GestureMachine:
         """``pages``: the display link shows the pages (UC-016 BR-008); False is the knob of UC-015."""
         out = self._expire(event.t_ms, keep=event.name)
         if event.value == REPEAT:
-            if event.name in self._down:
+            if event.name in self._seen:
                 self._seen[event.name] = event.t_ms
             return out
         if event.name in KEYS:
@@ -180,6 +193,10 @@ class GestureMachine:
     def _expire(self, t_ms: int, keep: str) -> list[Gesture]:
         """BR-011: a key with no event for STALE_KEY_MS is up; nothing fires for it (a K5 threshold already did)."""
         for key in [k for k, seen in self._seen.items() if k != keep and t_ms - seen >= STALE_KEY_MS]:
+            if key == KNOB_PRESS:
+                del self._seen[key]
+                self._knob_down = self._knob_pages = False
+                continue
             self._drop(key)
         if not self._down:
             self._clear_chord_when_idle()
@@ -261,7 +278,7 @@ class GestureMachine:
         if key != K4 or confirmed or held < snap.hold_lock_ms:
             return [Gesture(RESET, key, held_ms=held, confirmed=confirmed)]
         if held < snap.hold_lock_ms + GUARD_MS:
-            return [Gesture(CANCEL, key, held_ms=held)]
+            return [Gesture(CANCEL, key, held_ms=held, stage="lock")]
         self.locked = True
         self._confirmed.clear()
         return [Gesture(LOCK, key, held_ms=held, locked=True)]
@@ -323,6 +340,7 @@ class GestureMachine:
         self._knob_pages = False
         self._knob_turned = False
         self._knob_down = True
+        self._seen[KNOB_PRESS] = t_ms  # a lost knob release expires like a key's (BR-011)
         if K5 in self._down:
             self._k5_clean = False  # a knob press never blocks the K5 stop; it only makes the hold unclean
         if self._chord or self.locked:
@@ -359,6 +377,7 @@ class GestureMachine:
         if not self._knob_down:
             return []
         self._knob_down = False
+        self._seen.pop(KNOB_PRESS, None)
         bound, self._knob_pages = self._knob_pages, False
         out: list[Gesture] = []
         if bound and not self._knob_turned and not self._chord and not self.locked and timings is not None:
