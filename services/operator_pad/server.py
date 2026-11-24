@@ -4,9 +4,11 @@ Operator pad service for JoustMania (UC-015, #2050).
 Reads a USB macro pad through evdev (exclusive grab, hotplug) and turns key gestures into menu
 commands and force-end. It serves no gRPC port: it is a client of the menu, the game coordinator
 and the audio service, and writes no flag itself. Optional: a stack without it is unchanged.
+It also drives the pad's OLED over its raw HID interface (UC-016), independent of the evdev attach.
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -30,6 +32,7 @@ from services.operator_pad.config import FLAG_DOMAIN, PadConfig
 from services.operator_pad.controller import PadController
 from services.operator_pad.cues import CuePlayer
 from services.operator_pad.device import DeviceManager
+from services.operator_pad.display import DisplayModel, PadDisplay
 from services.operator_pad.preview import Previewer
 from services.operator_pad.state import MenuStatusReader
 
@@ -60,6 +63,10 @@ async def serve() -> None:
     cue_player = CuePlayer(audio_pb2_grpc.AudioServiceStub(audio_channel))
     previewer = Previewer(cue_player, config, menu_stub=menu_stub)
     devices: DeviceManager | None = None
+    # UC-016: the display model is fed by the key path and the poll; FR-241 shows this release's tag.
+    display_model = DisplayModel(config, version=os.getenv("SERVICE_VERSION"))
+    display = PadDisplay(config, display_model, MenuStatusReader(menu_stub, log_failures=False))
+    cue_player.screen_up = lambda: display_model.link_up  # BR-005: no pad voice lines while the screen works
 
     def set_lock_led(on: bool) -> None:
         if devices is not None:
@@ -71,8 +78,9 @@ async def serve() -> None:
         cue_player,
         set_lock_led=set_lock_led,
         previewer=previewer,
+        display=display_model,
     )
-    controller = PadController(config, MenuStatusReader(menu_stub), actions, cue_player)
+    controller = PadController(config, MenuStatusReader(menu_stub), actions, cue_player, display=display_model)
     devices = DeviceManager(config, controller)
 
     stop = asyncio.Event()
@@ -81,10 +89,14 @@ async def serve() -> None:
         loop.add_signal_handler(sig, stop.set)
 
     logger.info("Operator pad service started")
+    display_task = asyncio.create_task(display.run(stop))
     try:
         await devices.run(stop)
     finally:
         logger.info("Shutting down operator pad service")
+        display_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await display_task
         metrics_task.cancel()
         await actions.drain()
         previewer.cancel()

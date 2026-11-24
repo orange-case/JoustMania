@@ -286,8 +286,17 @@ class Previewer:
         if label is not None:
             self._label_task = self._spawn(self._play_label(label))
 
+    def _quiet(self) -> bool:
+        """UC-016 BR-005: the display link is up, so the preview speaks nothing (its LED cues stay)."""
+        try:
+            return self._cues.screen_shows() is True  # exactly True: a test double never silences it
+        except Exception:
+            return False
+
     async def _play_label(self, label: Sound) -> None:
         started = self._clock()
+        if self._quiet():
+            return  # UC-016 BR-005: the setting screen names the setting
         seconds = await self._cues.voice(label, PREVIEW_GROUP)
         self._label_done_at = started + seconds
 
@@ -313,6 +322,8 @@ class Previewer:
             metrics.previews_total.labels(result=SUPPRESSED).inc()
             return
         self._last_spoken = pending.value
+        if self._quiet():
+            return  # UC-016 BR-005: the setting screen shows the value; the LED pulse above still ran
         metrics.previews_total.labels(result=SPOKEN).inc()
         await self._cues.voice(pending.sound, PREVIEW_GROUP)
 

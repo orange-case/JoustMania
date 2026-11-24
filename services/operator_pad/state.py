@@ -47,13 +47,18 @@ def is_stopped(status: menu_pb2.GetMenuStatusResponse) -> bool:
 
 
 class MenuStatusReader:
-    def __init__(self, menu_stub, timeout: float = STATUS_TIMEOUT_SECONDS) -> None:
+    def __init__(self, menu_stub, timeout: float = STATUS_TIMEOUT_SECONDS, log_failures: bool = True) -> None:
         self._stub = menu_stub
         self._timeout = timeout
+        # The display's poll logs only when the connection state changes (UC-016 A2), not every read.
+        self._log_failures = log_failures
 
     async def fetch(self) -> menu_pb2.GetMenuStatusResponse | None:
         try:
             return await self._stub.GetMenuStatus(menu_pb2.GetMenuStatusRequest(), timeout=self._timeout)
         except Exception as e:  # grpc.aio.AioRpcError, timeouts, a closed channel
-            logger.warning(f"GetMenuStatus failed: {e}")
+            if self._log_failures:
+                logger.warning(f"GetMenuStatus failed: {e}")
+            else:
+                logger.debug(f"GetMenuStatus failed: {e}")
             return None

@@ -141,3 +141,53 @@ def test_preview_flags_default_on_and_150_and_survive_an_unreadable_client():
     client.get_boolean_value.side_effect = RuntimeError("no provider")
     assert PadConfig(client).preview_enabled() is True
     assert PadConfig(client).preview_debounce_ms() == 150
+
+
+# --- UC-016: the display flags (flags.md §10a) ------------------------------------------------------
+
+
+@pytest.mark.uc("UC-016", cond=["Pre-3"])
+@pytest.mark.parametrize(
+    ("method", "key", "value", "expected"),
+    [
+        ("display_poll_ms", "operator_pad.display_poll_ms", 250, 250),
+        ("display_poll_ms", "operator_pad.display_poll_ms", 199, 500),
+        ("display_poll_ms", "operator_pad.display_poll_ms", 5001, 500),
+        ("display_poll_ms", "operator_pad.display_poll_ms", True, 500),
+        ("display_poll_ms", "operator_pad.display_poll_ms", "fast", 500),
+        ("display_result_ms", "operator_pad.display_result_ms", 3000, 3000),
+        ("display_result_ms", "operator_pad.display_result_ms", 299, 1500),
+        ("display_result_ms", "operator_pad.display_result_ms", 10001, 1500),
+    ],
+)
+def test_display_flags_defaults_ranges_malformed(method, key, value, expected):
+    client = create_autospec(OpenFeatureClient, instance=True)
+    client.get_integer_value.return_value = value
+    assert getattr(PadConfig(client), method)() == expected
+    assert client.get_integer_value.call_args.args[0] == key
+
+
+@pytest.mark.uc("UC-016", cond=["Pre-3"])
+def test_a_bad_display_flag_warns_once_per_value_not_per_read():
+    client = create_autospec(OpenFeatureClient, instance=True)
+    config = PadConfig(client)
+    with patch.object(config_module.logger, "warning") as warning:
+        client.get_integer_value.return_value = 9
+        for _ in range(5):
+            config.display_poll_ms()
+        client.get_integer_value.return_value = 8
+        config.display_poll_ms()
+    assert warning.call_count == 2
+
+
+@pytest.mark.uc("UC-016", flow="A1", cond=["Pre-3"])
+@pytest.mark.parametrize(
+    ("value", "raises", "expected"), [(True, False, True), (False, False, False), (None, True, True)]
+)
+def test_display_enabled_default_on_and_unreadable_keeps_it_on(value, raises, expected):
+    client = create_autospec(OpenFeatureClient, instance=True)
+    if raises:
+        client.get_boolean_value.side_effect = RuntimeError("flagd down")
+    else:
+        client.get_boolean_value.return_value = value
+    assert PadConfig(client).display_enabled() is expected

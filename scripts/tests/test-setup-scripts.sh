@@ -90,6 +90,10 @@ if ! [[ -n "${u}" && -n "${i}" && -n "${l}" && -n "${t}" && "${u}" -lt "${i}" &&
   fail "fresh: step order wrong (update=${u} install=${i} log-defaults=${l} bluetooth=${t})"
 fi
 grep -q 'curl\|usermod' "${CALLS}" && fail "fresh: Docker is installed, yet curl/usermod ran"
+# UC-016: the operator pad's hidraw udev rule is installed and applied
+grep -q 'sudo install -m 0644 .*/scripts/setup/99-joustmania-operator-pad.rules /etc/udev/rules.d/99-joustmania-operator-pad.rules' "${CALLS}" ||
+  fail "fresh: operator pad udev rule not installed"
+grep -q 'sudo udevadm trigger --subsystem-match=hidraw' "${CALLS}" || fail "fresh: udev not triggered for hidraw"
 
 # --- rerun on the result: nothing changes
 cp "${d}/config.txt" "${d}/config.before"

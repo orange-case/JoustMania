@@ -80,6 +80,32 @@
         "default": "K1=F13,K2=F14,K3=F18,K4=F19,K5=F20,K6=F21,K7=F22,K8=F23,KNOB_PRESS=F15,KNOB_TURN_A=F16,KNOB_TURN_B=F17"
       },
       "defaultVariant": "default"
+    },
+    "operator_pad.display_enabled": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "on"
+    },
+    "operator_pad.display_poll_ms": {
+      "state": "ENABLED",
+      "variants": {
+        "fast": 250,
+        "default": 500,
+        "slow": 1000
+      },
+      "defaultVariant": "default"
+    },
+    "operator_pad.display_result_ms": {
+      "state": "ENABLED",
+      "variants": {
+        "short": 800,
+        "default": 1500,
+        "long": 3000
+      },
+      "defaultVariant": "default"
     }
   }
 }

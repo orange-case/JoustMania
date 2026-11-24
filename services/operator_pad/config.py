@@ -31,6 +31,10 @@ DEFAULT_KNOB_EVENTS_PER_STEP = 4
 KNOB_EVENTS_PER_STEP_RANGE = (1, 12)
 DEFAULT_PREVIEW_DEBOUNCE_MS = 150  # BR-017: wait after the last knob step before the preview speaks
 PREVIEW_DEBOUNCE_MS_RANGE = (0, 1000)
+DEFAULT_DISPLAY_POLL_MS = 500  # UC-016 BR-003: the status poll while the display link is up
+DISPLAY_POLL_MS_RANGE = (200, 5000)
+DEFAULT_DISPLAY_RESULT_MS = 1500  # UC-016 BR-001: how long a result or the volume screen shows
+DISPLAY_RESULT_MS_RANGE = (300, 10000)
 DEFAULT_KEYMAP = (
     "K1=F13,K2=F14,K3=F18,K4=F19,K5=F20,K6=F21,K7=F22,K8=F23,KNOB_PRESS=F15,KNOB_TURN_A=F16,KNOB_TURN_B=F17"
 )
@@ -94,6 +98,7 @@ class PadConfig:
 
     def __init__(self, client) -> None:
         self._client = client
+        self._warned: dict[str, str] = {}  # key -> the last warning, so a bad value warns once per change
 
     def _int(self, key: str, default: int) -> int:
         try:
@@ -154,6 +159,41 @@ class PadConfig:
             logger.warning(f"Malformed or out of range {key}={value!r} (valid {low} to {high}), using {default}")
             return default
         return value
+
+    def display_enabled(self) -> bool:
+        """`operator_pad.display_enabled` (UC-016 Pre-3, A1); unreadable keeps the display on (it writes nothing)."""
+        try:
+            return bool(self._client.get_boolean_value("operator_pad.display_enabled", True))
+        except Exception as e:
+            self._warn_once("operator_pad.display_enabled", f"Reading operator_pad.display_enabled failed: {e}")
+            return True
+
+    def display_poll_ms(self) -> int:
+        """`operator_pad.display_poll_ms` (UC-016 BR-003); the default outside 200 to 5000 or malformed."""
+        return self._ranged_int("operator_pad.display_poll_ms", DEFAULT_DISPLAY_POLL_MS, DISPLAY_POLL_MS_RANGE)
+
+    def display_result_ms(self) -> int:
+        """`operator_pad.display_result_ms` (UC-016 BR-001); the default outside 300 to 10000 or malformed."""
+        return self._ranged_int("operator_pad.display_result_ms", DEFAULT_DISPLAY_RESULT_MS, DISPLAY_RESULT_MS_RANGE)
+
+    def _ranged_int(self, key: str, default: int, valid: tuple[int, int]) -> int:
+        """An int flag read at every use; a bad value warns once per value, not at every read."""
+        low, high = valid
+        try:
+            value = self._client.get_integer_value(key, default)
+        except Exception as e:
+            self._warn_once(key, f"Reading {key} failed, using {default}: {e}")
+            return default
+        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            self._warn_once(key, f"Malformed or out of range {key}={value!r} (valid {low} to {high}), using {default}")
+            return default
+        self._warned.pop(key, None)
+        return value
+
+    def _warn_once(self, key: str, message: str) -> None:
+        if self._warned.get(key) != message:
+            self._warned[key] = message
+            logger.warning(message)
 
     def device(self) -> tuple[str, str] | None:
         raw = self._str("operator_pad.device", DEFAULT_DEVICE)

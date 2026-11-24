@@ -1042,3 +1042,56 @@ async def test_mode_step_succeeds_when_only_the_persisted_write_fails(servicer, 
     assert servicer.state_manager.current_game_mode.name == GAME_MODES[1]
     assert len(flags.puts) == 1  # not retried
     assert failure_cues(servicer) == 0  # not a failure for the host
+
+
+# --- UC-016: the pad's screen (BR-001 committed value, BR-004 silent volume) -----------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="main", br=["BR-004"], steps=[6])
+async def test_volume_step_with_cue_none_plays_no_sound(servicer, flags):
+    """BR-004: with the pad's screen up the pad sends `cue=none`; the volume is written, no step sound."""
+    flags.values[("user", "audio_volume.master")] = "normal"
+
+    reply = await pad(servicer, "step_setting", option="audio_volume.master", direction="up", cue="none")
+
+    assert (reply.success, reply.error, reply.value) == (True, "", "loud")
+    assert flags.written() == [("user", "audio_volume.master", "loud")]
+    servicer.state_manager.audio.play_sound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="main", br=["BR-004"])
+@pytest.mark.parametrize(
+    ("option", "cue"),
+    [("sensitivity", "none"), ("agent_level", "none"), ("audio_volume.master", "loud")],
+)
+async def test_cue_on_another_option_or_value_is_refused(servicer, flags, option, cue):
+    """BR-004: `cue=none` silences only the volume step sound; anything else is `bad_option`, nothing written."""
+    reply = await pad(servicer, "step_setting", option=option, direction="up", cue=cue)
+
+    assert (reply.success, reply.error, reply.value) == (False, "bad_option", "")
+    assert flags.written() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[5])
+async def test_cue_none_never_silences_another_option_voice(servicer):
+    """BR-004 scope: a step without `cue` still plays its voice line (the menu's own cue is unchanged)."""
+    reply = await pad(servicer, "step_setting", option="sensitivity", direction="up")
+
+    assert (reply.success, reply.value) == (True, "fast")
+    servicer.state_manager.audio.play_voice.assert_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[5])
+async def test_pad_commands_report_the_committed_value(servicer):
+    """BR-001: `ProcessInputResponse.value` names what a step or a backend write committed, nothing else."""
+    backend = await pad(servicer, "set_backend", backend="claude")
+    stop = await pad(servicer, "agent_switch", direction="stop")
+    limit = await pad(servicer, "step_setting", option="audio_volume.master", direction="up")  # already max
+
+    assert (backend.success, backend.value) == (True, "claude")
+    assert (stop.success, stop.value) == (True, "")  # agent_switch names no value (services.md §3.1)
+    assert (limit.success, limit.error, limit.value) == (False, "at_limit", "")

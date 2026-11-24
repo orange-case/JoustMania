@@ -1,0 +1,6 @@
+# JoustMania operator pad display (UC-016, services.md §3.1): the pad's hidraw
+# nodes (0xCB 1337, the Vial pad of operator_pad.device) for the input group,
+# which the operator-pad container joins (INPUT_GID). Every other hidraw node,
+# the PS Move controllers' included, stays root-only.
+# Installed by scripts/setup/setup_runtime.sh into /etc/udev/rules.d/.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="cb00", ATTRS{idProduct}=="1337", MODE="0660", GROUP="input"

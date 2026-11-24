@@ -34,6 +34,18 @@ class MockGrpcContext:
 
 
 @pytest.fixture(autouse=True)
+def _clear_playback_failed():
+    """The playback-failure flag is process-wide shared memory (#2715): start and leave every test with 0."""
+    from services.audio import alsa_config
+
+    own = alsa_config.playback_failed_flag()
+    own.value = 0
+    yield
+    alsa_config.adopt_playback_failed_flag(own)
+    own.value = 0
+
+
+@pytest.fixture(autouse=True)
 def _no_real_flagd_provider(monkeypatch):
     """Keep a real FlagdProvider out of the unit tests (#2226).
 
