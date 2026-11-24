@@ -587,6 +587,13 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         else:
             result = await self.settings_ops.set_backend(data.get("backend", ""))
         error = result.error or ""
+        # UC-016 BR-001: the committed value of a step, a backend write, a reset or the interventions switch.
+        named = command in ("step_setting", "set_backend", "reset_setting", "interventions_switch")
+        value = (result.new or "") if error in ("", OK) and named else ""
+        if error in ("", OK) and not value and command in ("reset_setting", "interventions_switch"):
+            # A pad cannot tell an empty-valued success from an older menu's unknown-command success.
+            logger.error(f"Pad command {command} succeeded without a value")
+            error = FLAG_SERVICE_UNAVAILABLE
         if error and error != OK:
             span.set_attribute("error", error)
             logger.warning(f"Pad command {command} refused: {error}")
@@ -594,14 +601,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             # UC-015 A3: fail closed, never queued or retried; the host hears two loud beeps.
             await self.settings_ops.play_failure_cue()
         success = error in ("", OK)
-        # UC-016 BR-001: the committed value of a step, a backend write, a reset or the interventions switch.
-        named = command in ("step_setting", "set_backend", "reset_setting", "interventions_switch")
-        value = (result.new or "") if success and named else ""
-        if success and not value and command in ("reset_setting", "interventions_switch"):
-            # A pad cannot tell an empty-valued success from an older menu's unknown-command success.
-            logger.error(f"Pad command {command} succeeded without a value")
-            return False, FLAG_SERVICE_UNAVAILABLE, ""
-        return success, error, value
+        return success, error, value if success else ""
 
     async def _pad_agent_switch(self, data: dict) -> Result:
         """agent_switch; the guard ``only_if_stopped=1`` refuses a resume of an agent not fully stopped (stale)."""
