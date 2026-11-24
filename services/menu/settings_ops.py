@@ -211,7 +211,13 @@ RESETTABLE_OPTIONS = frozenset(RESET_AUTOMATIC_OPTIONS) | frozenset(RESET_DEFAUL
 RESET_LOBBY_ONLY_OPTIONS = RESETTABLE_OPTIONS - {"agent_level", "decision.backend"}
 INTERVENTIONS_SWITCH_STATES = ("on", "off")
 # GetMenuStatus.pad_commands: what a pad may send this menu (an older menu answers unknown commands with success).
-PAD_CAPABILITIES = ("reset_setting", "interventions_switch", "agent_switch.only_if_stopped", "step_setting.from")
+PAD_CAPABILITIES = (
+    "reset_setting",
+    "reset_setting.from",
+    "interventions_switch",
+    "agent_switch.only_if_stopped",
+    "step_setting.from",
+)
 
 
 def _layer_variant(view: dict, layer: str) -> str | None:
@@ -734,13 +740,14 @@ class SettingsOps:
 
     # --- reset_setting (UC-016 A8, BR-013) ----------------------------------------------------
 
-    async def reset_setting(self, option: str, expect: str | None) -> Result:
+    async def reset_setting(self, option: str, expect: str | None, from_level: str | None = None) -> Result:
         """Clear the operator's persisted value so the layer below applies; ``new`` is what is now in force.
 
         ``ok``: nothing to clear (no operator value, or one masked by a stack overlay), nothing written.
-        ``stale``: ``expect`` differs from the recomputed target. The caller checks ``game_active`` first.
+        ``stale``: ``expect`` differs from the recomputed target, or ``from_level`` (agent_level only) from the
+        level the reset replaces. The caller checks ``game_active`` first.
         """
-        if option not in RESETTABLE_OPTIONS:
+        if option not in RESETTABLE_OPTIONS or (from_level is not None and option != "agent_level"):
             return Result(None, None, BAD_OPTION)
         if option in RESET_AUTOMATIC_OPTIONS:
             return await self._reset_automatic(option, expect)
@@ -748,7 +755,7 @@ class SettingsOps:
             if not expect:
                 return Result(None, None, BAD_OPTION)
             async with self._agent_change():
-                return await self._reset_agent_level(expect)
+                return await self._reset_agent_level(expect, from_level)
         view = await asyncio.to_thread(self._default_view, option)
         target = reset_target(option, view, None)
         if target is None:
@@ -767,7 +774,7 @@ class SettingsOps:
             return Result(operator, None, FLAG_SERVICE_UNAVAILABLE)
         return Result(operator, target)
 
-    async def _reset_agent_level(self, expect: str) -> Result:
+    async def _reset_agent_level(self, expect: str, from_level: str | None = None) -> Result:
         view = await asyncio.to_thread(self._default_view, "agent_level")
         enabled = await asyncio.to_thread(self._agent_enabled)
         target = reset_target("agent_level", view, enabled)
@@ -778,7 +785,12 @@ class SettingsOps:
         if expect != target:
             return Result(None, None, STALE)
         level = view.get("effective_default")
-        if enabled != "on" or level == "none":
+        stopped = enabled != "on" or level == "none"
+        base = (self.saved_agent_level or AGENT_RESUME_FALLBACK_LEVEL) if stopped else level
+        if from_level is not None and from_level != base:
+            # The level dropped (or rose) under the hold: what the pad judged a lowering may now be a raise.
+            return Result(None, None, STALE)
+        if stopped:
             # Stopped: only the saved level moves, so a reset never resumes (UC-015 BR-003).
             old = self.saved_agent_level or AGENT_RESUME_FALLBACK_LEVEL
             if old == target:

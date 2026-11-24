@@ -621,7 +621,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             return Result(None, None, BAD_OPTION)
         if option in RESET_LOBBY_ONLY_OPTIONS and self._lifecycle_live():
             return Result(None, None, GAME_ACTIVE)
-        result = await self.settings_ops.reset_setting(option, data.get("expect") or None)
+        result = await self.settings_ops.reset_setting(option, data.get("expect") or None, data.get("from"))
         if result.error is None:
             await self.settings_ops.announce(option, result.new)
         return result
