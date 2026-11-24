@@ -70,7 +70,7 @@ ANNOUNCE_OPTIONS = {K2: "sensitivity", K3: "agent_level", K5: "num_teams", K7: "
 LOBBY_ONLY_OPTIONS = frozenset({"current_game", "sensitivity", "num_teams", "game_instructions", "shield.activation"})
 # The setting each layer key previews while the knob turns (BR-017): the layer options plus the backend.
 PREVIEW_OPTIONS = {**LAYER_OPTIONS, K7: "decision.backend"}
-# UC-044 decision backends in knob order (BR-004; clamped, no wrap) and the `user/audio_volume.master`
+# UC-044 decision backends in knob order (BR-004; wrapping, `WRAPPING`) and the `user/audio_volume.master`
 # variants low to high (flags.md §9; `mute` is the pad's mute, BR-006): lib/setting_ladders.py, the
 # ladders the menu commits along (#2106).
 BACKENDS = setting_ladders.BACKENDS
@@ -349,10 +349,13 @@ class Actions:
             logger.warning(f"Unknown decision backend {status.agent_backend!r}: nothing to step from")
             await self._cues.refusal()
             return "set_backend", REFUSED
-        target, at_limit = setting_ladders.clamp_step(BACKENDS, status.agent_backend, steps)
+        # BR-005, UC-016 BR-007: the backend wraps (`WRAPPING`), so it never reaches a limit cue.
+        target, at_limit = setting_ladders.step_ladder("decision.backend", BACKENDS, status.agent_backend, steps)
         if at_limit:
-            await self._cues.limit(steps > 0)  # A7: already at the end
+            await self._cues.limit(steps > 0)
             return "set_backend", AT_LIMIT
+        if target == status.agent_backend:
+            return "set_backend", NOOP  # a full turn of the wheel: nothing sent, no cue
         return "set_backend", await self._send({"command": "set_backend", "backend": target})
 
     # --- volume and mute (step 8, BR-005, BR-006) ----------------------------------------

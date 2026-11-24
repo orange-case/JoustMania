@@ -87,11 +87,16 @@ async def test_k6_release_while_a_game_is_live_is_refused_and_sends_nothing(acti
     cues.refusal.assert_awaited_once()
 
 
-@pytest.mark.uc("UC-015", flow="A7", br=["BR-018", "BR-009"], steps=[9])
-async def test_k6_at_the_end_of_the_ladder_plays_the_limit_cue(actions, menu, cues):
-    menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=False, error="at_limit")
-    await actions.dispatch(Gesture(LAYER, "K6", steps=1), status(operator_settings={SHIELD: "hold"}))
-    cues.limit.assert_awaited_once_with(True)
+@pytest.mark.uc("UC-015", flow="A7", br=["BR-018", "BR-009", "BR-005"], steps=[9])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+async def test_k6_full_turn_the_menu_answers_ok_and_the_pad_plays_no_cue(actions, menu, cues):
+    """The menu's no-op (`ok`, the unchanged value) for a net that is a multiple of the ladder: no cue."""
+    menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=True, error="ok", value="hold")
+    result = await actions.dispatch(Gesture(LAYER, "K6", steps=4), status(operator_settings={SHIELD: "hold"}))
+    assert result == ("step_setting", "ok")
+    cues.limit.assert_not_awaited()
+    cues.refusal.assert_not_awaited()
+    cues.failure.assert_not_awaited()
 
 
 # --- Live preview per step (BR-017) ---------------------------------------------------------
@@ -121,13 +126,14 @@ async def test_k6_preview_speaks_the_label_then_each_mode_per_step_and_pulses_it
     ]
 
 
-@pytest.mark.uc("UC-015", flow="A7", br=["BR-018", "BR-017"], steps=[9])
-async def test_k6_preview_past_the_end_says_maximum_and_sends_no_pulse():
+@pytest.mark.uc("UC-015", flow="A7", br=["BR-018", "BR-017", "BR-005"], steps=[9])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+async def test_k6_preview_past_the_end_wraps_to_automatic_and_never_says_maximum():
     rig = Rig()
     step_shield(rig, 1, start="hold")
     await rig.time.advance(1.0)
-    assert rig.files() == [Sound.MENU_VOX_LABEL_SHIELD_MODE.value, Sound.MENU_VOX_STATUS_MAXIMUM.value]
-    rig.menu.ProcessInput.assert_not_awaited()
+    assert rig.files() == [Sound.MENU_VOX_LABEL_SHIELD_MODE.value, VOICES["automatic"]]
+    assert rig.mode_previews() == [{"command": "preview_setting", "option": SHIELD, "mode": "automatic"}]
 
 
 @pytest.mark.uc("UC-015", flow="A1", br=["BR-018", "BR-017"], steps=[9])

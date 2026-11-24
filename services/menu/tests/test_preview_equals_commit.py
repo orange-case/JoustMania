@@ -2,7 +2,8 @@
 
 The pad computes the value a knob release commits from `GetMenuStatus` plus the net steps
 (`lib.setting_ladders.preview_value`); the menu commits it with `SettingsOps.step_setting`.
-This test runs both for every start value, every net step count in -12..12 and every option,
+This test runs both for every start value, every net step count up to 3 x the ladder's length
+(at least -12..12) and every option, the wrap of UC-016 BR-007 included,
 on a real MenuServicer whose flag service is a fake loaded from the real flag files
 (`services/flagd/*.json`), so the ladders are pinned to the variants the flag service serves.
 The status comes from the menu's own `GetMenuStatus`, read from the same fake.
@@ -22,7 +23,7 @@ from lib.flag_service_writer import FlagServiceWriter
 from lib.setting_ladders import preview_value
 from lib.types import Games
 from proto import menu_pb2
-from services.menu.settings_ops import AT_LIMIT
+from services.menu.settings_ops import AT_LIMIT, OK
 from services.menu.tests.servicer_harness import (
     cancel_background_tasks,
     default_returning_flag_client,
@@ -30,7 +31,6 @@ from services.menu.tests.servicer_harness import (
 )
 
 FLAGD_DIR = Path(__file__).resolve().parents[3] / "services" / "flagd"
-STEPS = [n for n in range(-12, 13) if n != 0]
 KEYS = {
     "game": ["sensitivity", "num_teams", "force_all_start", "shield.activation"],
     "user": ["game_instructions", "audio_volume.master", "current_game"],
@@ -136,13 +136,29 @@ def reset(flags: FlagFileService, menu) -> None:
 
 
 async def assert_preview_equals_commit(menu, option: str, steps: int, committed) -> None:
+    """The pad's prediction and the menu's commit agree: value, limit, and the wrap's no-op (UC-016 BR-007).
+
+    The contract between the two containers (UC-015 BR-017): an image where the pad wraps and the
+    menu clamps (or the other way round) fails here.
+    """
     status = await menu.GetMenuStatus(menu_pb2.GetMenuStatusRequest(), None)
     preview = preview_value(option, status, steps)
+    start = preview_value(option, status, 0).value
     result = await menu.settings_ops.step_setting(option, "up" if steps > 0 else "down", abs(steps))
     case = f"{option} from {result.old!r} by {steps}"
-    assert result.error in (None, AT_LIMIT), case
+    assert result.error in (None, AT_LIMIT, OK), case
     assert preview.at_limit == (result.error == AT_LIMIT), case
+    # A wrapping option's full turn: the preview lands on the start and the menu answers `ok`, writing nothing.
+    assert (preview.value == start and not preview.at_limit) == (result.error == OK), case
+    if option in setting_ladders.WRAPPING:
+        assert result.error != AT_LIMIT, case
     assert preview.value == result.new == committed(), case
+
+
+def wheel_steps(size: int) -> list[int]:
+    """Every net step count up to 3 x the ladder's length, at least -12..12 (one knob turn is about 6 steps)."""
+    reach = max(12, 3 * size)
+    return [n for n in range(-reach, reach + 1) if n != 0]
 
 
 FLAG_OPTIONS = {
@@ -161,18 +177,19 @@ async def test_flag_ladders_preview_equals_commit(menu, flags, option):
     key = FLAG_OPTIONS[option]
     assert set(VARIANTS[key]) == set(setting_ladders.FLAG_LADDERS[option]), "ladder differs from the flag file"
     for start in VARIANTS[key]:
-        for steps in STEPS:
+        for steps in wheel_steps(len(VARIANTS[key])):
             reset(flags, menu)
             flags.values[key] = start
             await assert_preview_equals_commit(menu, option, steps, lambda: flags.values[key])
 
 
 @pytest.mark.uc("UC-015", br=["BR-004", "BR-005"], flow="A7")
+@pytest.mark.uc("UC-016", br=["BR-007"])
 @pytest.mark.asyncio
 async def test_mode_ladder_preview_equals_commit(menu, flags):
     assert menu.get_game_options() == setting_ladders.MODE_LADDER
     for start in setting_ladders.MODE_LADDER:
-        for steps in STEPS:
+        for steps in wheel_steps(len(setting_ladders.MODE_LADDER)):
             reset(flags, menu)
             await menu.select_game_mode(start, source="test")
             await assert_preview_equals_commit(menu, "current_game", steps, lambda: menu.current_selection.name)
@@ -197,7 +214,7 @@ async def test_agent_level_preview_equals_commit(menu, flags, enabled, level, sa
             return live
         return menu.settings_ops.saved_agent_level or setting_ladders.AGENT_RESUME_FALLBACK_LEVEL
 
-    for steps in STEPS:
+    for steps in wheel_steps(len(setting_ladders.AGENT_POLICY_LEVELS)):
         reset(flags, menu)
         flags.values[("agent", "enabled")] = enabled
         flags.values[("agent", "interventions_allowed")] = level
@@ -206,20 +223,25 @@ async def test_agent_level_preview_equals_commit(menu, flags, enabled, level, sa
 
 
 @pytest.mark.uc("UC-015", br=["BR-018", "BR-005"], flow="A7", steps=[9])
+@pytest.mark.uc("UC-016", br=["BR-007"])
 @pytest.mark.asyncio
 async def test_shield_knob_preview_equals_commit(menu, flags):
-    """BR-018: from every operator value (`automatic` = none) and every net step, preview == commit."""
+    """BR-018: from every operator value (`automatic` = none, at every effective mode) and every net step,
+    preview == commit; the ladder wraps and with no operator value it starts at `automatic`."""
     key = ("game", "shield.activation")
     assert set(VARIANTS[key]) == set(setting_ladders.SHIELD_ACTIVATION_LADDER), "ladder differs from the flag file"
 
     def committed():
         return flags.admin.get(key, setting_ladders.SHIELD_AUTOMATIC)
 
-    for start in setting_ladders.SHIELD_KNOB_LADDER:
-        for steps in STEPS:
+    starts = [*((None, effective) for effective in setting_ladders.SHIELD_ACTIVATION_LADDER)]
+    starts += [(operator, operator) for operator in setting_ladders.SHIELD_ACTIVATION_LADDER]
+    for operator, effective in starts:
+        for steps in wheel_steps(len(setting_ladders.SHIELD_KNOB_LADDER)):
             reset(flags, menu)
-            if start != setting_ladders.SHIELD_AUTOMATIC:
-                flags.values[key] = flags.admin[key] = start
+            flags.values[key] = effective  # no operator value: a flag-file default or a promotion
+            if operator is not None:
+                flags.admin[key] = operator
             await menu.settings_ops.refresh_operator_settings()  # what GetMenuStatus serves (background read)
             await assert_preview_equals_commit(menu, "shield.activation", steps, committed)
 
@@ -250,7 +272,7 @@ async def test_automatic_knob_preview_equals_commit(menu, flags, option):
         return flags.admin.get(key, setting_ladders.AUTOMATIC)
 
     for start in setting_ladders.KNOB_LADDERS[option]:
-        for steps in STEPS:
+        for steps in wheel_steps(len(setting_ladders.KNOB_LADDERS[option])):
             reset(flags, menu)
             if start != setting_ladders.AUTOMATIC:
                 flags.values[key] = flags.admin[key] = start

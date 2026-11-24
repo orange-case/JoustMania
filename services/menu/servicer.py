@@ -580,7 +580,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         return success, error, (result.new or "") if success and named else ""
 
     async def _pad_step_setting(self, data: dict) -> Result:
-        """step_setting: lobby-only refusal (UC-015 A1), then one clamped write (A7, BR-005)."""
+        """step_setting: lobby-only refusal (UC-015 A1), then one clamped or wrapped write (A7, BR-005)."""
         option = data.get("option", "")
         try:
             steps = int(data.get("steps", "1") or "1")

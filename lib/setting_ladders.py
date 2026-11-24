@@ -1,6 +1,7 @@
 """Setting ladders shared by the menu and the operator pad (UC-015 BR-004, BR-005, A7; #2106).
 
-One ordering and one clamping for every setting the pad steps, so the value the pad computes
+One ordering and one stepping rule (clamped, or wrapping for `WRAPPING`) for every setting the pad
+steps, so the value the pad computes
 from `GetMenuStatus` plus the knob steps (the live preview, #2106) is the value the menu's
 `step_setting` commits on release. The menu steps the flag ladders (sensitivity, teams,
 instructions, volume) through `FlagServiceWriter.step_variant`, which reads the variant order
@@ -38,7 +39,7 @@ VOLUME_LADDER: list[str] = ["mute", "quiet", "normal", "loud", "max"]
 # `game/shield.activation` variants (UC-015 BR-018, #2215): the shield activation modes (flags.md §4).
 SHIELD_ACTIVATION_LADDER: list[str] = ["instant", "trigger", "hold"]
 # The pad's K6 knob ladder (BR-018): `automatic` (no operator value: the flag file's default or an
-# agent promotion applies) first, then the modes; clamped, never wraps. Committing `automatic` clears
+# agent promotion applies) first, then the modes; wraps (`WRAPPING`). Committing `automatic` clears
 # the persisted operator value, any other rung writes it.
 AUTOMATIC = "automatic"
 SHIELD_AUTOMATIC = AUTOMATIC
@@ -51,7 +52,7 @@ AGENT_SAVED_LEVELS: list[str] = AGENT_POLICY_LEVELS[1:]
 # UC-015 BR-003: the resume level when no level is saved (never "full").
 AGENT_RESUME_FALLBACK_LEVEL = "ambient"
 
-# UC-044 decision backends, in knob order (UC-015 BR-004; clamped, no wrap).
+# UC-044 decision backends, in knob order (UC-015 BR-004; wraps, `WRAPPING`).
 BACKENDS: list[str] = ["rules", "claude", "openai", "jev"]
 
 # Options of the menu's `step_setting` whose ladder is a flag's variants (`step_variant`).
@@ -64,11 +65,12 @@ FLAG_LADDERS: dict[str, list[str]] = {
 }
 
 # The persisted pad settings with an `automatic` rung (UC-015 BR-018, generalised by #2222): their knob
-# ladder is `automatic` followed by the value ladder, clamped, never wrapping. Committing `automatic`
-# clears the persisted operator value (the flag file's default or an agent promotion applies again), any
-# other rung writes it, and the knob starts at the operator's value, or at the effective value's rung
-# when there is none (`knob_start`). Left out on purpose (the two-state toggles and the volume have no
-# meaningful "no operator value"): force_all_start, game_instructions, audio_volume.master.
+# ladder is `automatic` followed by the value ladder (clamped, except the shield mode, `WRAPPING`).
+# Committing `automatic` clears the persisted operator value (the flag file's default or an agent
+# promotion applies again), any other rung writes it, and the knob starts at the operator's value, or
+# when there is none at the effective value's rung (the shield mode: at `automatic`; `knob_start`).
+# Left out on purpose (the two-state toggles and the volume have no meaningful "no operator value"):
+# force_all_start, game_instructions, audio_volume.master.
 SHIELD_OPTION = "shield.activation"
 KNOB_LADDERS: dict[str, list[str]] = {
     "sensitivity": [AUTOMATIC, *SENSITIVITY_LADDER],
@@ -77,19 +79,26 @@ KNOB_LADDERS: dict[str, list[str]] = {
 }
 AUTOMATIC_OPTIONS = frozenset(KNOB_LADDERS)
 
+# UC-015 BR-005, UC-016 BR-007: the options whose ladder wraps (past the last option to the first and
+# back), with or without the pad's display. Named one by one, never a default: the agent level and the
+# saved-level ladder stay clamped (a kill switch that wraps from `none` to `full` is unsafe), and so do
+# the sensitivity, the teams, the volume and the toggles.
+WRAPPING: frozenset[str] = frozenset({"current_game", "decision.backend", SHIELD_OPTION})
+
 
 def knob_start(option: str, operator: str | None, effective: str | None) -> str | None:
     """The rung the knob starts at (BR-018): the operator's value, else the effective value's rung.
 
     With no operator value (`automatic`) the knob starts where the setting stands now, so "up" means
     more; `automatic` is then the bottom rung, reached by turning down past the lowest value. An
-    effective value outside the value ladder starts at `automatic`. None = the operator value is
-    unknown (never guessed). Shared by the menu's commit and the pad's preview.
+    effective value outside the value ladder starts at `automatic`. The shield mode (a wheel of kinds,
+    not a scale; UC-016 BR-007) starts at `automatic` whenever there is no operator value. None = the
+    operator value is unknown (never guessed). Shared by the menu's commit and the pad's preview.
     """
     ladder = KNOB_LADDERS[option]
     if operator not in ladder:
         return None
-    if operator == AUTOMATIC and effective in ladder:
+    if operator == AUTOMATIC and effective in ladder and option != SHIELD_OPTION:
         return effective
     return operator
 
@@ -124,6 +133,32 @@ def clamp_step(ladder: list[str], current: str | None, steps: int, *, restart_ou
     return new, new == current
 
 
+def wrap_step(ladder: list[str], current: str | None, steps: int) -> str | None:
+    """``steps`` moves along ``ladder``, wrapping at both ends; never a limit.
+
+    A net that is a multiple of ``len(ladder)`` lands on ``current``: the caller's no-op (nothing
+    written, no cue). A current value outside the ladder (or None): the first move lands on
+    ``ladder[0]`` and the remaining moves go on from there, as `clamp_step` without ``restart_outside``.
+    """
+    if steps == 0:
+        return current
+    if current not in ladder:
+        return ladder[(steps - 1 if steps > 0 else steps + 1) % len(ladder)]
+    return ladder[(ladder.index(current) + steps) % len(ladder)]
+
+
+def step_ladder(
+    option: str, ladder: list[str], current: str | None, steps: int, *, restart_outside: bool = False
+) -> tuple:
+    """(new, at_limit) for ``option``: `wrap_step` for `WRAPPING`, else `clamp_step` (A7).
+
+    A wrapping option never reports ``at_limit``; ``new == current`` without ``at_limit`` is a no-op.
+    """
+    if option in WRAPPING:
+        return wrap_step(ladder, current, steps), False
+    return clamp_step(ladder, current, steps, restart_outside=restart_outside)
+
+
 # --- Preview: the value a release would commit ------------------------------------------------
 
 
@@ -149,7 +184,8 @@ class Preview:
     """The variant a commit of the net steps would write, and whether it stops at a limit (A7).
 
     ``value`` is None when the status does not say where the step starts (unknown, never guessed).
-    ``at_limit`` matches the menu's ``at_limit`` error: nothing would be written.
+    ``at_limit`` matches the menu's ``at_limit`` error: nothing would be written. A wrapping option whose
+    net steps come back to the start has ``value`` = the start and no ``at_limit``: the menu's no-op.
     """
 
     value: str | None
@@ -182,8 +218,8 @@ def _flag_variant(option: str, status: _Status) -> str | None:
 def preview_value(option: str, status: _Status | None, net_steps: int) -> Preview:
     """The value a release of ``net_steps`` on ``option`` commits, from the status read at the press.
 
-    The same ladder and clamping as the menu's `step_setting` and the pad's backend step, so the
-    preview and the commit agree for every start and every step count (a menu test checks all).
+    The same ladder and stepping (`step_ladder`) as the menu's `step_setting` and the pad's backend
+    step, so the preview and the commit agree for every start and every step count (a menu test checks all).
     Lobby-only refusals (A1) and failed writes are the caller's: this only computes the target.
     """
     if status is None or option not in PREVIEW_OPTIONS:
@@ -195,23 +231,23 @@ def preview_value(option: str, status: _Status | None, net_steps: int) -> Previe
         start = knob_start(option, status.operator_settings.get(option, ""), effective)
         if start is None:
             return UNKNOWN  # the menu could not read whether the operator set it
-        new, at_limit = clamp_step(ladder, start, net_steps)
+        new, at_limit = step_ladder(option, ladder, start, net_steps)
         return Preview(new, at_limit)
     if option in FLAG_LADDERS:
         current = _flag_variant(option, status)
         if current is None:
             return UNKNOWN
-        new, at_limit = clamp_step(FLAG_LADDERS[option], current, net_steps, restart_outside=True)
+        new, at_limit = step_ladder(option, FLAG_LADDERS[option], current, net_steps, restart_outside=True)
         return Preview(new, at_limit)
     if option == "current_game":
         if not status.selection:
             return UNKNOWN
-        new, at_limit = clamp_step(MODE_LADDER, status.selection, net_steps)
+        new, at_limit = step_ladder(option, MODE_LADDER, status.selection, net_steps)
         return Preview(new, at_limit)
     if option == "decision.backend":
         if status.agent_backend not in BACKENDS:
             return UNKNOWN  # the pad refuses a step from an unknown backend
-        new, at_limit = clamp_step(BACKENDS, status.agent_backend, net_steps)
+        new, at_limit = step_ladder(option, BACKENDS, status.agent_backend, net_steps)
         return Preview(new, at_limit)
     # agent_level: UC-015 BR-002 / BR-003, as the menu's `_step_agent_level`.
     level, enabled = status.agent_level, status.agent_enabled_state
@@ -220,7 +256,7 @@ def preview_value(option: str, status: _Status | None, net_steps: int) -> Previe
     if enabled != "on" or level == "none":
         # Stopped: only the saved level moves, along the saved ladder.
         saved = status.agent_saved_level or AGENT_RESUME_FALLBACK_LEVEL
-        new, at_limit = clamp_step(AGENT_SAVED_LEVELS, saved, net_steps)
+        new, at_limit = step_ladder(option, AGENT_SAVED_LEVELS, saved, net_steps)
         return Preview(new, at_limit)
-    new, at_limit = clamp_step(AGENT_POLICY_LEVELS, level, net_steps)
+    new, at_limit = step_ladder(option, AGENT_POLICY_LEVELS, level, net_steps)
     return Preview(new, at_limit)
