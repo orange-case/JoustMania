@@ -77,7 +77,7 @@ def test_v3_home_page_frame():
     assert screen.lines[0] == ("HOME" + " " * 14 + "1/7", INVERTED)
     assert [screen.lines[i][1] for i in (1, 3, 5)] == [MEDIUM, MEDIUM, MEDIUM | UNDERLINE]  # divider under row 3
     assert [screen.lines[i][0][:16] for i in (1, 3, 5)] == [
-        "MODE FREE-FOR-AL",  # the full name, cut to fit 16 characters with the label
+        "    FREE-FOR-ALL",  # MODE and the full name do not fit 16 characters: the value alone
         "VOLUME     " + bar(4, 5),
         "SENS       " + bar(4, 5),  # sensitivity 3 of 0 to 4
     ]
@@ -137,17 +137,39 @@ def test_every_row_fits_and_keeps_a_space_between_label_and_value(version, page)
             rows = page_rows(page, st, ctx, version)
             assert 1 <= len(rows) <= 3
             for label, value in rows:
-                text = render.lr(label, value, width)
-                assert len(text) <= width
-                if label and value:
-                    assert any(
-                        text[-k:] == value[:k]
-                        and text[-k - 1] == " "
-                        and label.startswith(text[: -k - 1].rstrip())
-                        and text[: -k - 1].rstrip()
-                        for k in range(1, len(value) + 1)
-                        if k < len(text)
-                    ), (label, value, text)
+                text = render.page_row(label, value, width)
+                assert len(text) == width or not value
+                if label and value and len(label) + 1 + len(value) <= width:
+                    assert text.startswith(label + " ") and text.endswith(value), (label, value, text)
+                elif value:
+                    assert text == value[:width].rjust(width), (label, value, text)
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-006"])
+@pytest.mark.parametrize(
+    ("label", "value", "width", "expected"),
+    [
+        ("MODE", "FREE-FOR-ALL", 16, "    FREE-FOR-ALL"),  # 4 + 1 + 12 > 16: the value alone, never cut
+        ("MODE", "TEAMS", 16, "MODE       TEAMS"),
+        ("MODE", "NON STOP JOUST", 16, "  NON STOP JOUST"),
+        ("VERSION", "V1.22.3-RC.1-HOTFIX", 16, "V1.22.3-RC.1-HOT"),  # longer than the row: cut
+        ("MODE", "TEAMS", 10, "MODE TEAMS"),  # protocol 2: exactly 10
+        ("SHLD", "TRIGGER", 10, "   TRIGGER"),
+        ("V", "1.22.3-RC.1", 10, "1.22.3-RC."),
+        ("FORCE ALL", "", 16, "FORCE ALL"),
+    ],
+)
+def test_page_row_shows_the_value_alone_when_label_and_value_do_not_fit(label, value, width, expected):
+    assert render.page_row(label, value, width) == expected
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-006"])
+def test_v2_home_and_system_rows_follow_the_row_rule():
+    ctx = PageContext(version="v1.22.3-rc.1", internet=NET_OK)
+    home = texts(render.page_screen(2, 0, status(selection="JoustTeams"), ctx, connection_ok=True))
+    assert home[1][:10] == "MODE TEAMS"
+    system = texts(render.page_screen(2, 6, status(), ctx, connection_ok=True))
+    assert system[1][:10] == "1.22.3-rc."  # V and the version do not fit 10: the value alone, cut to the row
 
 
 @pytest.mark.uc("UC-016", flow="A5", br=["BR-006"])

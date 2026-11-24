@@ -92,6 +92,18 @@ def lr(label: str, value: str, width: int, min_label: int = 4) -> str:
     return label + " " * (width - len(label) - len(value)) + value
 
 
+def page_row(label: str, value: str, width: int) -> str:
+    """A page row (BR-006): label left and value right when both fit with a space, else the value alone.
+
+    The value is cut only when it is longer than the row by itself.
+    """
+    if not value:
+        return label[:width]
+    if label and len(label) + 1 + len(value) <= width:
+        return label + value.rjust(width - len(label))
+    return value[:width].rjust(width)
+
+
 def _centre(text: str, width: int) -> str:
     return text[:width].center(width)
 
@@ -113,16 +125,16 @@ def status_line(status, ctx: PageContext, connection_ok: bool) -> Line:
     return fit(left + right.rjust(WIDTH - len(left)), glyphs=True), 0
 
 
-def _frame(version: int, title: str, right: str, rows: list[tuple[str, str]], bottom: Line) -> list[Line]:
+def _frame(version: int, title: str, right: str, rows: list[tuple[str, str]], bottom: Line, row=lr) -> list[Line]:
     lines: list[Line] = [(fit(""), 0)] * LINES
     lines[0] = (fit(lr(title, right, WIDTH, min_label=WIDTH)), INVERTED)
     for r in range(3):
         label, value = rows[r] if r < len(rows) else ("", "")
         divider = UNDERLINE if r == 2 else 0  # BR-006: the divider above the status bar
         if version >= 3:
-            lines[1 + 2 * r] = (fit(lr(label, value, MEDIUM_WIDTH), glyphs=True), MEDIUM | divider)
+            lines[1 + 2 * r] = (fit(row(label, value, MEDIUM_WIDTH), glyphs=True), MEDIUM | divider)
         else:
-            lines[1 + 2 * r] = (fit(lr(label, value, LARGE_WIDTH), glyphs=True), LARGE | divider)
+            lines[1 + 2 * r] = (fit(row(label, value, LARGE_WIDTH), glyphs=True), LARGE | divider)
     lines[7] = bottom
     return lines
 
@@ -131,9 +143,8 @@ def page_screen(version: int, page: int, status, ctx: PageContext, connection_ok
     """BR-006: a page in the frame, its place `n/7` top right."""
     rows = page_rows(page, status, ctx, version)
     title = PAGE_NAMES[page]
-    return Screen(
-        tuple(_frame(version, title, f"{page + 1}/{len(PAGE_NAMES)}", rows, status_line(status, ctx, connection_ok)))
-    )
+    place = f"{page + 1}/{len(PAGE_NAMES)}"
+    return Screen(tuple(_frame(version, title, place, rows, status_line(status, ctx, connection_ok), row=page_row)))
 
 
 def _bar_screen(title: str, right: str, hint: str, bar: tuple, bottom: Line) -> Screen:
