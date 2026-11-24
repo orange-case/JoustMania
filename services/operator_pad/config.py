@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,12 @@ DEFAULT_TAP_MS = 400
 DEFAULT_HOLD_AGENT_MS = 1000
 DEFAULT_HOLD_END_MS = 1500
 DEFAULT_HOLD_LOCK_MS = 3000
+DEFAULT_HOLD_RESET_MS = 1000  # UC-016 BR-013: the reset keys K2, K4, K7
+# UC-016 BR-011, BR-014, BR-015: fixed times, not flags (flags.md §10a).
+GUARD_MS = 150  # a release this soon after a stage boundary does nothing (the cancel cue)
+CONFIRM_WINDOW_MS = 1500  # hold_lock_ms - hold_reset_ms at least this: read the reset screen, press the knob
+CONFIRM_STABLE_MS = 250  # a confirmation press counts only when the value stood this long before it
+STALE_KEY_MS = 30000  # a key with no event for this long counts as up (its release was lost)
 DEFAULT_KNOB_EVENTS_PER_STEP = 1  # the rev 5 pad's detented knob: one raw event per detent (measured)
 KNOB_EVENTS_PER_STEP_RANGE = (1, 12)
 DEFAULT_PREVIEW_DEBOUNCE_MS = 150  # BR-017: wait after the last knob step before the preview speaks
@@ -116,13 +122,22 @@ def parse_device(raw: str) -> tuple[str, str] | None:
 
 @dataclass(frozen=True)
 class Timings:
-    """Gesture timings in ms (UC-015 BR-007, BR-011)."""
+    """Gesture timings in ms (UC-015 BR-007; UC-016 BR-011, BR-015), one snapshot per key press."""
 
     tap_ms: int = DEFAULT_TAP_MS
-    hold_ms: dict[str, int] = field(
-        default_factory=lambda: {K3: DEFAULT_HOLD_AGENT_MS, K4: DEFAULT_HOLD_END_MS, K8: DEFAULT_HOLD_LOCK_MS}
-    )
+    hold_agent_ms: int = DEFAULT_HOLD_AGENT_MS  # K5
+    hold_end_ms: int = DEFAULT_HOLD_END_MS  # K8
+    hold_lock_ms: int = DEFAULT_HOLD_LOCK_MS  # K4 lock; also the end of the K8 window
+    hold_reset_ms: int = DEFAULT_HOLD_RESET_MS  # K2, K4, K7
     knob_events_per_step: int = DEFAULT_KNOB_EVENTS_PER_STEP  # BR-005: raw knob events per step
+
+    def valid(self) -> bool:
+        """The timing rules of flags.md §10a."""
+        return (
+            all(hold > self.tap_ms for hold in (self.hold_reset_ms, self.hold_agent_ms, self.hold_end_ms))
+            and self.hold_lock_ms - self.hold_reset_ms >= CONFIRM_WINDOW_MS
+            and self.hold_end_ms + GUARD_MS < self.hold_lock_ms
+        )
 
 
 class PadConfig:
@@ -291,21 +306,23 @@ class PadConfig:
         return parsed
 
     def timings(self) -> Timings:
-        """The timings in force; the defaults when a hold time is not above the tap limit (BR-007)."""
+        """The timings in force; all the defaults (one warning per set of values) when a rule fails."""
         knob = self.knob_events_per_step()
         timings = Timings(
             knob_events_per_step=knob,
             tap_ms=self._int("operator_pad.tap_ms", DEFAULT_TAP_MS),
-            hold_ms={
-                K3: self._int("operator_pad.hold_agent_ms", DEFAULT_HOLD_AGENT_MS),
-                K4: self._int("operator_pad.hold_end_ms", DEFAULT_HOLD_END_MS),
-                K8: self._int("operator_pad.hold_lock_ms", DEFAULT_HOLD_LOCK_MS),
-            },
+            hold_agent_ms=self._int("operator_pad.hold_agent_ms", DEFAULT_HOLD_AGENT_MS),
+            hold_end_ms=self._int("operator_pad.hold_end_ms", DEFAULT_HOLD_END_MS),
+            hold_lock_ms=self._int("operator_pad.hold_lock_ms", DEFAULT_HOLD_LOCK_MS),
+            hold_reset_ms=self._int("operator_pad.hold_reset_ms", DEFAULT_HOLD_RESET_MS),
         )
-        if any(hold <= timings.tap_ms for hold in timings.hold_ms.values()):
-            logger.warning(
-                f"operator_pad timings invalid (tap_ms={timings.tap_ms}, hold={timings.hold_ms}): "
-                "every hold must be longer than the tap limit; using the default timings"
+        if not timings.valid():
+            self._warn_once(
+                "operator_pad.timings",
+                f"operator_pad timings invalid ({timings}): every hold above the tap limit, "
+                f"hold_lock_ms - hold_reset_ms >= {CONFIRM_WINDOW_MS}, hold_end_ms + {GUARD_MS} < hold_lock_ms; "
+                "using the default timings",
             )
             return Timings(knob_events_per_step=knob)
+        self._warned.pop("operator_pad.timings", None)
         return timings

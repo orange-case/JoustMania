@@ -9,7 +9,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from lib.setting_ladders import MODE_LADDER, SHIELD_KNOB_LADDER
+from lib.setting_ladders import MODE_LADDER
 from proto import menu_pb2
 from services.operator_pad.actions import Actions
 from services.operator_pad.config import DEFAULT_KEYMAP, Timings, parse_keymap
@@ -22,7 +22,7 @@ from services.operator_pad.tests.display_fakes import pad_config
 from services.operator_pad.tests.fakes import CoordinatorStubSpec, MenuStubSpec
 
 KEYMAP = parse_keymap(DEFAULT_KEYMAP)
-K2, K4, K5, K8 = 184, 189, 190, 193  # F14, F19, F20, F23 (DEFAULT_KEYMAP)
+K1, K2, K3, K4, K5, K6, K7, K8 = 183, 184, 188, 189, 190, 191, 192, 193  # F13..F23 (DEFAULT_KEYMAP)
 KNOB_PRESS, DOWN, UP = 185, 186, 187  # F15, F16 (turn A), F17 (turn B)
 
 
@@ -70,7 +70,7 @@ class Pad:
         )
         self.controller = PadController(self.config, self.reader, self.actions, self.cues, display=self.model)
         self.controller.attached(KEYMAP)
-        self.t = 0
+        self.t = int(self.clock.now * 1000)  # the gesture clock and the screen's share one basis
 
     async def key(self, code: int, value: int, dt: int = 10) -> None:
         self.t += dt
@@ -96,7 +96,7 @@ async def _no_wait(_seconds: float) -> None:
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[4])
 async def test_layer_step_shows_setting_screen_with_preview_disabled():
     pad = Pad()
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
     assert pad.screen()[:5] == ["SENSITIVITY", "", "NOW 2", "", "NEW 3"]
     await pad.turn(UP)
@@ -106,9 +106,9 @@ async def test_layer_step_shows_setting_screen_with_preview_disabled():
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[5])
 async def test_release_shows_result_then_status_after_result_ms():
     pad = Pad(result_ms=1500)
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
-    await pad.key(K2, RELEASE)
+    await pad.key(K6, RELEASE)
     assert pad.screen()[:3] == ["SENSITIVITY", "", "3"]  # the value the menu reports, not the prediction
     pad.clock.now += 1.4
     assert pad.screen()[0] == "SENSITIVITY"
@@ -120,35 +120,35 @@ async def test_release_shows_result_then_status_after_result_ms():
 async def test_result_with_no_value_shows_ok_never_the_prediction():
     pad = Pad()
     pad.menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=True)  # an older menu
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
-    await pad.key(K2, RELEASE)
+    await pad.key(K6, RELEASE)
     assert pad.screen()[:3] == ["SENSITIVITY", "", "OK"]
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"])
-async def test_a_k4_hold_shows_its_result_like_every_command():
+async def test_a_k8_hold_shows_its_result_like_every_command():
     pad = Pad()
     pad.menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=True)  # force_start names no value
-    await pad.key(K4, PRESS)
-    await pad.key(K4, RELEASE, dt=1600)
+    await pad.key(K8, PRESS)
+    await pad.key(K8, RELEASE, dt=1700)
     assert pad.screen()[:3] == ["FORCE START", "", "OK"]
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[4, 5])
 async def test_new_layer_step_replaces_result():
     pad = Pad()
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
-    await pad.key(K2, RELEASE)
+    await pad.key(K6, RELEASE)
     assert pad.screen()[2] == "3"
-    await pad.key(K5, PRESS)
+    await pad.key(K1, PRESS)
     await pad.turn(UP)
-    assert pad.screen()[0] == "TEAMS"
+    assert pad.screen()[0] == "GAME"
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-007"], steps=[5])
-@pytest.mark.parametrize(("key", "options"), [(183, len(MODE_LADDER)), (191, len(SHIELD_KNOB_LADDER))])
+@pytest.mark.parametrize(("key", "options"), [(183, len(MODE_LADDER))])
 async def test_a_full_turn_of_the_mode_or_shield_wheel_sends_nothing_and_shows_no_result(key, options):
     pad = Pad()
     await pad.key(key, PRESS)
@@ -161,11 +161,11 @@ async def test_a_full_turn_of_the_mode_or_shield_wheel_sends_nothing_and_shows_n
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[4])
 async def test_a_later_hold_with_only_a_knob_press_never_shows_the_old_values():
     pad = Pad()
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
-    await pad.key(K2, RELEASE)
+    await pad.key(K6, RELEASE)
     pad.clock.now += 5
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.key(KNOB_PRESS, PRESS)  # bound to the layer: no step
     assert pad.screen()[0] == "JOUSTMANIA LOBBY"
 
@@ -174,9 +174,9 @@ async def test_a_later_hold_with_only_a_knob_press_never_shows_the_old_values():
 async def test_refusal_shows_not_possible():
     pad = Pad()
     pad.menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=False, error="game_active")
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
-    await pad.key(K2, RELEASE)
+    await pad.key(K6, RELEASE)
     assert pad.screen()[:3] == ["SENSITIVITY", "", "NOT POSSIBLE"]
 
 
@@ -184,10 +184,10 @@ async def test_refusal_shows_not_possible():
 async def test_lobby_only_layer_while_live_shows_not_possible_then_refuses():
     pad = Pad()
     pad.reader.fetch.return_value = lobby(lifecycle_live=True)
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
     assert pad.screen()[7] == "NOT POSSIBLE"
-    await pad.key(K2, RELEASE)
+    await pad.key(K6, RELEASE)
     assert pad.screen()[2] == "NOT POSSIBLE"
     assert pad.sent() == []
 
@@ -202,9 +202,9 @@ async def test_release_ends_the_setting_screen_before_the_command_returns():
         return menu_pb2.ProcessInputResponse(success=True, value="fast")
 
     pad.menu.ProcessInput.side_effect = slow
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
-    release = asyncio.create_task(pad.controller.on_code(K2, RELEASE, pad.t + 10))
+    release = asyncio.create_task(pad.controller.on_code(K6, RELEASE, pad.t + 10))
     await asyncio.sleep(0.01)
     assert pad.screen()[:3] == ["SENSITIVITY", "", ""]  # the label while the command runs, no NOW/NEW
     gate.set()
@@ -219,16 +219,16 @@ async def test_commands_use_press_and_release_reads_not_the_poll():
     pad = Pad()
     pad.model.note_status(lobby(lifecycle_live=True, lifecycle_generation=9), pad.model.read_token())
     pad.reader.fetch.return_value = lobby(lifecycle_generation=4)
-    await pad.key(K4, PRESS)
-    await pad.key(K4, RELEASE, dt=1600)
+    await pad.key(K8, PRESS)
+    await pad.key(K8, RELEASE, dt=1700)
     assert pad.sent() == [{"command": "force_start", "expected_generation": "4"}]
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[6])
 async def test_volume_turns_show_the_level_and_the_menu_value_rebases():
     pad = Pad()
-    await pad.key(K2, PRESS)  # a key read: the screen's volume starts at `normal`
-    await pad.key(K2, RELEASE)
+    await pad.key(K6, PRESS)  # a key read: the screen's volume starts at `normal`
+    await pad.key(K6, RELEASE)
     await pad.turn(UP)
     assert pad.screen()[:3] == ["VOLUME", "", "LOUD"]
     pad.menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=True, value="loud")
@@ -314,24 +314,24 @@ async def test_a_display_hook_that_raises_never_stops_a_key():
 
     for hook in ("note_status", "hold_key", "set_locked", "layer_step", "pending", "result", "volume_turn"):
         setattr(pad.model, hook, boom)
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
-    await pad.key(K2, RELEASE)
+    await pad.key(K6, RELEASE)
     assert pad.sent() == [{"command": "step_setting", "option": "sensitivity", "direction": "up", "steps": "1"}]
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"])
 async def test_lock_shows_locked_on_the_status_screen():
     pad = Pad()
-    await pad.key(K8, PRESS)
-    await pad.key(K8, RELEASE, dt=3100)
+    await pad.key(K4, PRESS)
+    await pad.key(K4, RELEASE, dt=3200)
     assert pad.screen()[7] == "LOCKED"
 
 
 @pytest.mark.uc("UC-016", flow="A1", br=["BR-002"])
 async def test_detach_drops_the_setting_screen():
     pad = Pad()
-    await pad.key(K2, PRESS)
+    await pad.key(K6, PRESS)
     await pad.turn(UP)
     pad.controller.detached()
     assert pad.screen()[0] == "JOUSTMANIA LOBBY"
@@ -341,10 +341,11 @@ async def test_detach_drops_the_setting_screen():
 @pytest.mark.parametrize(
     ("code", "fields", "expected"),
     [
-        (K2, {}, ["SENSITIVITY", "", "2"]),
-        (K5, {"operator_settings": {"num_teams": "automatic"}}, ["TEAMS", "", "AUTO"]),
-        (188, {"agent_enabled_state": "unknown"}, ["AGENT", "", "?"]),  # K3 = F18
-        (192, {"agent_backend": "jev"}, ["BACKEND", "", "JEV"]),  # K7 = F22
+        (K6, {}, ["SENSITIVITY", "", "2"]),
+        (K6, {"operator_settings": {"sensitivity": "automatic"}}, ["SENSITIVITY", "", "AUTO"]),
+        (K5, {"agent_enabled_state": "unknown"}, ["AGENT", "", "?"]),
+        (K3, {}, ["VOLUME", "", "NORM"]),
+        (K7, {}, ["SENSITIVITY", "", "DEFAULT AUTO"]),
     ],
 )
 async def test_a_tap_shows_the_label_and_the_value_read(code, fields, expected):
@@ -449,8 +450,9 @@ async def test_a_held_key_pauses_auto_paging():
     pad = paged()
     await pad.key(K4, PRESS)
     pad.clock.now += 6.0
-    assert pad.screen()[0].startswith("HOME")
-    await pad.key(K4, RELEASE)  # a K4 tap (gesture time): no command, no screen of its own
+    assert pad.screen()[0].startswith("PAD")  # the K4 lock stage over the page, which stays
+    assert pad.model._pager.page == 0
+    await pad.key(K4, RELEASE, dt=6000)  # the lock: no result screen of its own
     pad.clock.now += 4.9
     assert pad.screen()[0].startswith("HOME")  # a full period from the release
     pad.clock.now += 0.1

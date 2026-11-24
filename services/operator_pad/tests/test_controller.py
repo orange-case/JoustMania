@@ -8,6 +8,7 @@ import pytest
 from lib.types import Sound
 from proto import menu_pb2
 from services.operator_pad import controller as controller_module
+from services.operator_pad import page_keys
 from services.operator_pad.actions import Actions
 from services.operator_pad.config import DEFAULT_KEYMAP, PadConfig, Timings, parse_keymap
 from services.operator_pad.controller import PadController
@@ -17,7 +18,8 @@ from services.operator_pad.state import MenuStatusReader
 from services.operator_pad.tests.fakes import AudioStubSpec, CoordinatorStubSpec, MenuStubSpec
 
 KEYMAP = parse_keymap(DEFAULT_KEYMAP)
-F13, F19, F16 = 183, 189, 186  # K1, K4, knob turn A
+F13, F19, F16, F23 = 183, 189, 186, 193  # K1, K4, knob turn A, K8
+FALLBACK_K1 = page_keys.binding("K1", page_keys.FALLBACK_PAGE, fallback=True)
 UNKNOWN = 115  # KEY_VOLUMEUP of a stock encoder
 
 
@@ -36,16 +38,16 @@ def parts():
 
 
 @pytest.mark.uc("UC-015", flow="A5", br=["BR-011"], steps=[7])
-async def test_k4_reads_a_fresh_status_at_press_and_release_and_passes_both(parts):
+async def test_k8_reads_a_fresh_status_at_press_and_release_and_passes_both(parts):
     pad, _, reader, actions, _ = parts
     at_press = menu_pb2.GetMenuStatusResponse(lifecycle_generation=2)
     at_release = menu_pb2.GetMenuStatusResponse(lifecycle_generation=4)
     reader.fetch.side_effect = [at_press, at_release]
-    await pad.on_code(F19, PRESS, 0)
-    await pad.on_code(F19, REPEAT, 500)
-    await pad.on_code(F19, RELEASE, 1600)
+    await pad.on_code(F23, PRESS, 0)
+    await pad.on_code(F23, REPEAT, 500)
+    await pad.on_code(F23, RELEASE, 1700)
     assert reader.fetch.await_count == 2
-    actions.dispatch.assert_awaited_once_with(Gesture(HOLD, "K4", held_ms=1600), at_release, at_press)
+    actions.dispatch.assert_awaited_once_with(Gesture(HOLD, "K8", held_ms=1700), at_release, at_press, None)
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005"], steps=[8])
@@ -134,7 +136,7 @@ def real_pad():
     return pad, actions, menu
 
 
-F17, F14 = 187, 184  # knob turn B, K2
+F17, F21 = 187, 191  # knob turn B, K6 (HOME row 3 without a screen: the sensitivity)
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005"], steps=[8])
@@ -156,11 +158,11 @@ async def test_25_raw_events_at_n4_write_the_volume_with_steps_6(real_pad):
 @pytest.mark.uc("UC-015", flow="main", br=["BR-004", "BR-005"], steps=[5])
 async def test_25_raw_events_at_n4_write_a_layer_setting_with_steps_6(real_pad):
     pad, actions, menu = real_pad
-    await pad.on_code(F14, PRESS, 0)
+    await pad.on_code(F21, PRESS, 0)
     for i in range(25):
         await pad.on_code(F17, PRESS, 10 + i * 10)
         await pad.on_code(F17, RELEASE, 11 + i * 10)
-    await pad.on_code(F14, RELEASE, 400)
+    await pad.on_code(F21, RELEASE, 400)
     await actions.drain()
     (call,) = menu.ProcessInput.await_args_list
     assert dict(call.args[0].data) == {
@@ -192,22 +194,26 @@ async def test_a_hanging_announcement_never_holds_up_the_next_key():
     config.timings.return_value = Timings(knob_events_per_step=1)
     reader = create_autospec(MenuStatusReader, instance=True)
     reader.fetch.return_value = menu_pb2.GetMenuStatusResponse(
-        sensitivity=2, num_teams=3, agent_enabled_state="on", agent_interventions_enabled_state="on"
+        sensitivity=2,
+        agent_enabled=True,
+        agent_level="standard",
+        agent_enabled_state="on",
+        agent_interventions_enabled_state="on",
     )
     pad = PadController(config, reader, actions, cue_player)
     pad.attached(KEYMAP)
     code = {name: c for c, name in KEYMAP.items()}
 
-    for t, key in ((0, "K2"), (100, "K5")):
+    for t, key in ((0, "K6"), (100, "K5")):
         await asyncio.wait_for(pad.on_code(code[key], PRESS, t), 0.2)
         await asyncio.wait_for(pad.on_code(code[key], RELEASE, t + 50), 0.2)  # the tap: would block if awaited
         await asyncio.sleep(0)
     # Both labels were asked for while the first one still hangs.
-    assert requested == [Sound.MENU_VOX_LABEL_SENSITIVITY.value, Sound.MENU_VOX_LABEL_TEAMS.value]
+    assert requested == [Sound.MENU_VOX_LABEL_SENSITIVITY.value, Sound.MENU_VOX_LABEL_AGENT.value]
     release_audio.set()
     await cue_player.drain()
     # The latest announcement wins: the first one was cancelled, only the second value plays.
-    assert requested[2:] == [Sound.MENU_VOX_ADMINOP_3.value]
+    assert requested[2:] == [Sound.MENU_VOX_ADMINOP_2.value]
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017"], steps=[5])
@@ -217,15 +223,15 @@ async def test_a_layer_step_gets_the_press_status_peeked_and_the_release_still_p
     at_release = menu_pb2.GetMenuStatusResponse(num_teams=3)
     reader.fetch.side_effect = [at_press, at_release]
     code = {name: c for c, name in KEYMAP.items()}
-    await pad.on_code(code["K5"], PRESS, 0)
+    await pad.on_code(code["K1"], PRESS, 0)
     await pad.on_code(F17, PRESS, 10)
     await pad.on_code(F17, PRESS, 20)
-    await pad.on_code(code["K5"], RELEASE, 300)
+    await pad.on_code(code["K1"], RELEASE, 300)
     assert reader.fetch.await_count == 2  # the knob turns read no status
     assert [c.args for c in actions.dispatch.await_args_list] == [
-        (Gesture(LAYER_STEP, "K5", steps=1), None, at_press),
-        (Gesture(LAYER_STEP, "K5", steps=2), None, at_press),
-        (Gesture(LAYER, "K5", steps=2, held_ms=300), at_release, at_press),
+        (Gesture(LAYER_STEP, "K1", steps=1), None, at_press, FALLBACK_K1),
+        (Gesture(LAYER_STEP, "K1", steps=2), None, at_press, FALLBACK_K1),
+        (Gesture(LAYER, "K1", steps=2, held_ms=300), at_release, at_press, FALLBACK_K1),
     ]
     assert pad._press_status == {}
 
@@ -254,16 +260,16 @@ async def test_a_hanging_preview_never_holds_up_the_next_knob_event():
     menu = create_autospec(MenuStubSpec, instance=True)
     actions = Actions(menu, create_autospec(CoordinatorStubSpec, instance=True), cue_player, previewer=previewer)
     reader = create_autospec(MenuStatusReader, instance=True)
-    reader.fetch.return_value = menu_pb2.GetMenuStatusResponse(num_teams=2, operator_settings={"num_teams": "two"})
+    reader.fetch.return_value = menu_pb2.GetMenuStatusResponse(sensitivity=1, operator_settings={"sensitivity": "slow"})
     pad = PadController(config, reader, actions, cue_player)
     pad.attached(KEYMAP)
     code = {name: c for c, name in KEYMAP.items()}
 
-    await asyncio.wait_for(pad.on_code(code["K5"], PRESS, 0), 0.2)
+    await asyncio.wait_for(pad.on_code(code["K6"], PRESS, 0), 0.2)
     for i in range(4):
         await asyncio.wait_for(pad.on_code(F17, PRESS, 10 + i * 10), 0.2)  # would block if a clip were awaited
         await asyncio.sleep(0)
-    assert requested == [Sound.MENU_VOX_LABEL_TEAMS.value]  # the value waits for the hanging label
+    assert requested == [Sound.MENU_VOX_LABEL_SENSITIVITY.value]  # the value waits for the hanging label
     menu.ProcessInput.assert_not_awaited()
     previewer.cancel()
     release_audio.set()

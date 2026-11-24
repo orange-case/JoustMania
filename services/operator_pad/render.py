@@ -22,6 +22,7 @@ from lib.setting_ladders import (
 from services.operator_pad.pages import NET_OK, SHIELD_WORDS, PageContext, page_rows, value_text
 from services.operator_pad.pages import PAGES as PAGE_NAMES
 from services.operator_pad.screens import (
+    CONFIRM_Q,
     ICON_AGENT,
     ICON_INSTRUCTIONS,
     ICON_INTERNET,
@@ -34,6 +35,9 @@ from services.operator_pad.screens import (
     MINIMUM,
     NO_CONNECTION,
     NOT_POSSIBLE,
+    PRESS_TO_CONFIRM,
+    RELEASE_TO_RESET,
+    RESET_Q,
     SETTING_LABELS,
     UNDERLINE,
     UNKNOWN,
@@ -52,7 +56,11 @@ MAX_VERSION = 4  # BR-002: a version above 4 is used as 4
 MEDIUM_WIDTH, LARGE_WIDTH = 16, 10
 EDIT, MUTED = "EDIT", "MUTED"
 RELEASE_TO_SET = "RELEASE TO SET"
-V2_HINTS = {RELEASE_TO_SET: "RELEASE"}  # protocol 2 rows hold 10 characters
+V2_HINTS = {
+    RELEASE_TO_SET: "RELEASE",
+    RELEASE_TO_RESET: "RELEASE",
+    PRESS_TO_CONFIRM: "PRESS KNOB",
+}  # protocol 2 rows hold 10 characters
 
 # BR-007 marker bars: the ladder (one rung per value) and the rung labels (at most 26 bytes joined).
 LADDER_BARS: dict[str, tuple[list[str], tuple[str, ...]]] = {
@@ -120,19 +128,29 @@ def status_line(status, ctx: PageContext, connection_ok: bool) -> Line:
         mode = mode_name(status.selection, short_name=True)
         ready = f"{status.ready_count}/{status.connected_count}"
         agent_state = agent_text(status)
-        agent = ICON_AGENT if agent_state.startswith("ON") else (UNKNOWN if agent_state == UNKNOWN else " ")
+        agent = ICON_AGENT if agent_state.startswith(("ON", "WATCH")) else (UNKNOWN if agent_state == UNKNOWN else " ")
         instructions = ICON_INSTRUCTIONS if status.instructions else " "
     left = f"{ICON_INTERNET if ctx.internet == NET_OK else ' '} {mode} {ready}"
     right = f"{agent}{instructions} {ICON_LOCK if ctx.locked else ' '}"
     return fit(left + right.rjust(WIDTH - len(left)), glyphs=True), 0
 
 
-def _frame(version: int, title: str, right: str, rows: list[tuple[str, str]], bottom: Line, row=lr) -> list[Line]:
+def _frame(
+    version: int,
+    title: str,
+    right: str,
+    rows: list[tuple[str, str]],
+    bottom: Line,
+    row=lr,
+    highlight: int | None = None,
+) -> list[Line]:
     lines: list[Line] = [(fit(""), 0)] * LINES
-    lines[0] = (fit(lr(title, right, WIDTH, min_label=WIDTH)), INVERTED)
+    lines[0] = (fit(lr(title, right, WIDTH, min_label=WIDTH - len(right) - 1)), INVERTED)
     for r in range(3):
         label, value = rows[r] if r < len(rows) else ("", "")
         divider = UNDERLINE if r == 2 else 0  # BR-006: the divider above the status bar
+        if r == highlight:
+            divider |= INVERTED  # UC-016 BR-006: the row of the key held
         if version >= 3:
             lines[1 + 2 * r] = (fit(row(label, value, MEDIUM_WIDTH), glyphs=True), MEDIUM | divider)
         else:
@@ -141,18 +159,21 @@ def _frame(version: int, title: str, right: str, rows: list[tuple[str, str]], bo
     return lines
 
 
-def page_screen(version: int, page: int, status, ctx: PageContext, connection_ok: bool) -> Screen:
-    """BR-006: a page in the frame, its place `n/7` top right."""
+def page_screen(
+    version: int, page: int, status, ctx: PageContext, connection_ok: bool, highlight: int | None = None
+) -> Screen:
+    """BR-006: a page in the frame, its place `n/7` top right; ``highlight`` the row of a held key."""
     rows = page_rows(page, status, ctx, version)
     title = PAGE_NAMES[page]
     place = f"{page + 1}/{len(PAGE_NAMES)}"
-    return Screen(tuple(_frame(version, title, place, rows, status_line(status, ctx, connection_ok), row=page_row)))
+    bottom = status_line(status, ctx, connection_ok)
+    return Screen(tuple(_frame(version, title, place, rows, bottom, row=page_row, highlight=highlight)))
 
 
 def _bar_screen(title: str, right: str, hint: str, bar: tuple, bottom: Line) -> Screen:
     """Protocol 3: the marker bar at bar row 0 over rows 1 and 2, the hint in row 3 over the divider."""
     lines: list[Line] = [(fit(""), 0)] * LINES
-    lines[0] = (fit(lr(title, right, WIDTH, min_label=WIDTH)), INVERTED)
+    lines[0] = (fit(lr(title, right, WIDTH, min_label=WIDTH - len(right) - 1)), INVERTED)
     lines[5] = (fit(hint), MEDIUM | UNDERLINE)
     lines[7] = bottom
     return Screen(tuple(lines), bar=bar)
@@ -203,27 +224,66 @@ def _wheel_screen(title: str, right: str, option: str, now: str | None, new: str
         entries = [ladder[i + d] if 0 <= i + d < len(ladder) else None for d in (-1, 0, 1)]
     wheel = tuple(("", False) if entry is None else (wheel_name(option, entry), entry == now) for entry in entries)
     lines: list[Line] = [(fit(""), 0)] * LINES
-    lines[0] = (fit(lr(title, right, WIDTH, min_label=WIDTH)), INVERTED)
+    lines[0] = (fit(lr(title, right, WIDTH, min_label=WIDTH - len(right) - 1)), INVERTED)
     lines[6] = (fit(""), UNDERLINE)
     lines[7] = bottom
     return Screen(tuple(lines), wheel=wheel)
 
 
 def setting_screen(
-    version: int, option: str, press_status, net_steps: int, *, lobby_only: bool, bottom: Line
+    version: int,
+    option: str,
+    press_status,
+    net_steps: int,
+    *,
+    lobby_only: bool,
+    bottom: Line,
+    plan=None,
+    confirmed: bool = False,
 ) -> Screen:
-    """BR-007: a layer setting being changed: marker bar, wheel or NOW and NEW rows, by protocol."""
+    """BR-007: a setting being changed: marker bar, wheel or NOW and NEW rows, by protocol.
+
+    ``plan`` (UC-016 BR-014, `page_keys.Plan`): NOW and NEW of a page key; refused shows `NOT
+    POSSIBLE`, an unconfirmed raise `CONFIRM?` and `PRESS TO CONFIRM`.
+    """
     title = SETTING_LABELS.get(option, clean(option.upper()))
-    now = preview_value(option, press_status, 0).value
-    if lobby_only and press_status is not None and press_status.lifecycle_live:
+    now = plan.now if plan is not None else preview_value(option, press_status, 0).value
+    refused = plan is not None and plan.refused
+    if refused or (lobby_only and press_status is not None and press_status.lifecycle_live):
         return _rows_screen(version, title, EDIT, option, now, None, NOT_POSSIBLE, bottom, refused=True)
-    new = preview_value(option, press_status, net_steps).value
+    new = plan.new if plan is not None else preview_value(option, press_status, net_steps).value
     limit = (MAXIMUM if net_steps > 0 else MINIMUM) if _at_end(option, press_status, net_steps) else None
+    awaiting = plan is not None and plan.raises and not confirmed
+    right = CONFIRM_Q if awaiting else (limit or EDIT)
     if version >= 3 and option in LADDER_BARS:
-        return _bar_screen(title, limit or EDIT, RELEASE_TO_SET, _bar_args(option, now, new), bottom)
+        hint = PRESS_TO_CONFIRM if awaiting else RELEASE_TO_SET
+        return _bar_screen(title, right, hint, _bar_args(option, now, new), bottom)
     if version >= 4 and option in WHEEL_LADDERS and new in WHEEL_LADDERS[option]:
-        return _wheel_screen(title, limit or EDIT, option, now, new, bottom)
-    return _rows_screen(version, title, EDIT, option, now, new, limit or RELEASE_TO_SET, bottom)
+        return _wheel_screen(title, right, option, now, new, bottom)
+    hint = PRESS_TO_CONFIRM if awaiting else (limit or RELEASE_TO_SET)
+    return _rows_screen(version, title, CONFIRM_Q if awaiting else EDIT, option, now, new, hint, bottom)
+
+
+def reset_screen(version: int, option: str, plan, confirmed: bool, bottom: Line) -> Screen:
+    """UC-016 BR-007 reset: `RESET?` (`CONFIRM?` while a raise waits), NOW and the default, the hint."""
+    title = SETTING_LABELS.get(option, clean(option.upper()))
+    awaiting = plan.raises and not confirmed and not plan.refused
+    hint = NOT_POSSIBLE if plan.refused else (PRESS_TO_CONFIRM if awaiting else RELEASE_TO_RESET)
+    if version < 3 and plan.refused:
+        hint = "NOT POSS."  # 10 characters; NEW stays, so no `NOT` / `POSSIBLE` split
+    return _rows_screen(version, title, CONFIRM_Q if awaiting else RESET_Q, option, plan.now, plan.new, hint, bottom)
+
+
+def lock_screen(version: int, locked: bool, bottom: Line) -> Screen:
+    """UC-016 BR-015: the K4 hold past `operator_pad.hold_lock_ms`; ``locked`` is the state now."""
+    word = "UNLOCK" if locked else "LOCK"
+    lines: list[Line] = [(fit(""), 0)] * LINES
+    lines[0] = (fit(lr("PAD", f"{word}?", WIDTH, min_label=WIDTH)), INVERTED)
+    width, size = (MEDIUM_WIDTH, MEDIUM) if version >= 3 else (LARGE_WIDTH, LARGE)
+    lines[3] = (fit(_centre(f"{word}?", width)), size)
+    lines[6] = (fit(_centre(f"RELEASE TO {word}", WIDTH)), UNDERLINE)  # small font: 17 characters
+    lines[7] = bottom
+    return Screen(tuple(lines))
 
 
 def volume_screen(version: int, now: str | None, new: str | None, limit: str | None, bottom: Line) -> Screen:

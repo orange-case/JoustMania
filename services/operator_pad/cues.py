@@ -140,7 +140,7 @@ class CuePlayer:
             return  # UC-016 BR-005: line 8 shows LOCKED
         await self.voice(LOCK_VOICES[locked])
 
-    async def announce(self, label: Sound, value: Sound) -> None:
+    async def announce(self, label: Sound | None, value: Sound | None) -> None:
         """BR-011: the label, then the value once the label has ended, in the background.
 
         The latest announcement wins: it cancels the previous one (whose value then never plays) and
@@ -206,8 +206,11 @@ class CuePlayer:
             return  # UC-016 BR-005: the beeps stay, the screen shows NO CONNECTION
         await self.voice(NO_CONNECTION_CUE)
 
-    async def _announce_sequence(self, label: Sound, value: Sound) -> None:
-        label_seconds = await self.voice(label, ANNOUNCE_GROUP)
-        if label_seconds > 0:
-            await self._sleep(label_seconds)
-        await self.voice(value, ANNOUNCE_GROUP)
+    async def _announce_sequence(self, label: Sound | None, value: Sound | None) -> None:
+        """Either may be None (UC-016 BR-016: the volume has no value line, `FORCE ALL` no label)."""
+        if label is not None:
+            label_seconds = await self.voice(label, ANNOUNCE_GROUP)
+            if label_seconds > 0 and value is not None:
+                await self._sleep(label_seconds)
+        if value is not None:
+            await self.voice(value, ANNOUNCE_GROUP)

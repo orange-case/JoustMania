@@ -10,9 +10,11 @@ from opentelemetry import trace
 
 from proto import game_coordinator_pb2, menu_pb2
 from services.operator_pad import actions as actions_module
+from services.operator_pad import page_keys
 from services.operator_pad.actions import Actions
 from services.operator_pad.cues import CuePlayer
-from services.operator_pad.gestures import HOLD, KNOB, KNOB_PRESS_GESTURE, LAYER, TAP, Gesture
+from services.operator_pad.gestures import AGENT_HOLD, HOLD, KNOB, KNOB_PRESS_GESTURE, LAYER, TAP, Gesture
+from services.operator_pad.pages import PAGES
 from services.operator_pad.tests.fakes import CoordinatorStubSpec, MenuStubSpec
 
 PAD_DIR = Path(actions_module.__file__).parent
@@ -72,17 +74,17 @@ def test_the_pad_service_holds_no_flag_writer():
 @pytest.mark.parametrize(
     ("gesture", "expected"),
     [
-        (Gesture(TAP, "K1"), "start_game"),
-        (Gesture(TAP, "K6"), "step_setting"),
-        (Gesture(LAYER, "K2", steps=1), "step_setting"),
-        (Gesture(LAYER, "K7", steps=1), "set_backend"),
-        (Gesture(HOLD, "K3"), "agent_switch"),
+        (Gesture(TAP, "K8"), "start_game"),
+        (Gesture(LAYER, "K6", steps=1), "step_setting"),
+        (Gesture(LAYER, "K3", steps=1), "step_setting"),
+        (Gesture(LAYER, "K1", steps=1, held_ms=1), "set_backend"),
+        (Gesture(AGENT_HOLD, "K5"), "agent_switch"),
         (Gesture(KNOB_PRESS_GESTURE, KNOB), "step_setting"),
     ],
 )
 async def test_every_setting_gesture_goes_to_the_menu_process_input(actions, menu, coordinator, gesture, expected):
     menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=True)
-    await actions.dispatch(gesture, lobby_status(), lobby_status())
+    await actions.dispatch(gesture, lobby_status(), lobby_status(), binding_for(gesture))
     assert [dict(c.args[0].data)["command"] for c in menu.ProcessInput.await_args_list] == [expected]
     assert all(c.args[0].input_type == "web_command" for c in menu.ProcessInput.await_args_list)
     coordinator.ForceEndGame.assert_not_awaited()
@@ -92,19 +94,19 @@ async def test_every_setting_gesture_goes_to_the_menu_process_input(actions, men
 @pytest.mark.parametrize(
     "gesture",
     [
-        Gesture(TAP, "K1"),
-        Gesture(TAP, "K6"),
-        Gesture(LAYER, "K5", steps=1),
-        Gesture(LAYER, "K7", steps=1),
-        Gesture(HOLD, "K3"),
-        Gesture(HOLD, "K4"),
+        Gesture(TAP, "K8"),
+        Gesture(LAYER, "K6", steps=1),
+        Gesture(LAYER, "K3", steps=1),
+        Gesture(LAYER, "K1", steps=1, held_ms=1),
+        Gesture(AGENT_HOLD, "K5"),
+        Gesture(HOLD, "K8"),
         Gesture(KNOB_PRESS_GESTURE, KNOB),
     ],
 )
 async def test_menu_not_running_fails_closed_and_is_not_retried(actions, menu, coordinator, cues, gesture):
     """The menu answers UNAVAILABLE: one attempt, the failure cue, nothing queued, no other service called."""
     menu.ProcessInput.side_effect = unavailable()
-    _, result = await actions.dispatch(gesture, lobby_status(), lobby_status())
+    _, result = await actions.dispatch(gesture, lobby_status(), lobby_status(), binding_for(gesture))
     assert result == "menu_unavailable"
     assert menu.ProcessInput.await_count == 1
     cues.failure.assert_awaited_once()
@@ -123,7 +125,7 @@ async def test_an_unreachable_menu_marks_the_gesture_span_as_an_error(actions, m
     menu.ProcessInput.side_effect = unavailable()
     tracer, span = recording_tracer()
     with patch.object(actions_module, "tracer", tracer):
-        await actions.dispatch(Gesture(LAYER, "K2", steps=1), lobby_status())
+        await actions.dispatch(Gesture(LAYER, "K6", steps=1), lobby_status())
 
     tracer.start_as_current_span.assert_called_once_with("operator_pad.gesture")
     span.set_attribute.assert_any_call("pad.result", "menu_unavailable")
@@ -136,7 +138,14 @@ async def test_a_refused_write_records_its_result_on_the_gesture_span(actions, m
     menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=False, error="flag_service_unavailable")
     tracer, span = recording_tracer()
     with patch.object(actions_module, "tracer", tracer):
-        await actions.dispatch(Gesture(LAYER, "K2", steps=1), lobby_status())
+        await actions.dispatch(Gesture(LAYER, "K6", steps=1), lobby_status())
 
     span.set_attribute.assert_any_call("pad.result", "flag_service_unavailable")
     span.set_attribute.assert_any_call("pad.action", "step_setting")
+
+
+def binding_for(gesture):
+    """`held_ms=1` marks the backend row (INTERV K1) in the tables above; else the fallback page."""
+    if gesture.key == "K1" and gesture.held_ms == 1:
+        return page_keys.binding("K1", PAGES.index("INTERV"))
+    return None

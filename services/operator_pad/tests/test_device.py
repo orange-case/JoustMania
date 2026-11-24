@@ -351,3 +351,32 @@ async def test_no_keymap_node_warns_once_and_again_after_a_successful_attach(tmp
     caplog.clear()
     assert not await manager.attach()
     assert len([w for w in _warnings(caplog) if "keymap key" in w]) == 1
+
+
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_k5_events_are_never_queued_behind_a_command_in_flight(tmp_path):
+    """A10 step 1: a K5 press reaches the controller while the previous key still waits for the menu."""
+    make_sysfs(tmp_path, {"event3": PAD})
+    events = [FakeEvent(183, 1, 1.0), FakeEvent(183, 0, 1.1), FakeEvent(190, 1, 1.2), FakeEvent(186, 1, 1.3)]
+    dev = FakeDevice("/dev/input/event3", events=events)
+    manager, _, controller = _manager(tmp_path, FakeBackend({dev.path: dev}), clock=FakeClock([1, 2, 3, 4]))
+    gate = asyncio.Event()
+    seen: list[int] = []
+
+    async def on_code(code, value, *_args, **_kwargs):
+        seen.append(code)
+        if (code, value) == (183, 0):
+            await gate.wait()  # the K1 release's command, waiting for the menu
+
+    controller.on_code.side_effect = on_code
+    controller.is_priority.side_effect = lambda code: code == 190
+    assert await manager.attach()
+    reader = asyncio.create_task(manager.read_until_gone())
+    for _ in range(100):
+        if 190 in seen:
+            break
+        await asyncio.sleep(0.005)
+    assert seen == [183, 183, 190]  # K5 at once; the knob turn after it still waits its turn
+    gate.set()
+    await asyncio.wait_for(reader, timeout=2)
+    assert seen == [183, 183, 190, 186]

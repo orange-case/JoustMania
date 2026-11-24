@@ -131,7 +131,7 @@ def page_rows(page: int, status, ctx: PageContext, version: int) -> list[tuple[s
         agent = agent_text(status)
         level = None if unknown else status.agent_level
         return [
-            ("AGENT", "ON" if agent.startswith("ON") else agent),
+            ("AGENT", agent.split(" ")[0]),  # ON, WATCH, OFF or ?
             # BR-006: the level also while the agent is stopped; `?` only when the level itself is unknown.
             ("LEVEL", value_text("agent_level", level if level in AGENT_POLICY_LEVELS else None, version)),
             ("GOAL", clean((_planned(status, "agent_goal_profile") or UNKNOWN).upper())),
