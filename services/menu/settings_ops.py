@@ -468,10 +468,15 @@ class SettingsOps:
             return False
 
     def schedule_operator_refresh(self) -> None:
-        """GetMenuStatus: refresh the cached operator values in the background when one is unknown or old."""
+        """GetMenuStatus: refresh the cached operator values in the background when they are old.
+
+        At most one read per OPERATOR_REFRESH_SECONDS, also while a value is unknown: the pad's display
+        polls GetMenuStatus every 500 ms (UC-016 BR-003), and an unreadable flag must not turn every
+        poll into three flag-service reads.
+        """
         running = self.operator_refresh_task is not None and not self.operator_refresh_task.done()
         fresh = time.monotonic() - self._operator_read_at < OPERATOR_REFRESH_SECONDS
-        if running or (fresh and len(self.operator_settings) == len(KNOB_LADDERS)):
+        if running or fresh:
             return
         self.operator_refresh_task = asyncio.create_task(self.refresh_operator_settings())
 
@@ -567,8 +572,10 @@ class SettingsOps:
 
     # --- Feedback ---------------------------------------------------------------------------
 
-    async def announce(self, option: str, variant: str | None) -> None:  # noqa: C901 - one branch per option voice; split later
+    async def announce(self, option: str, variant: str | None, quiet: bool = False) -> None:  # noqa: C901 - one branch per option voice; split later
         """The voice line for a new value (UC-012 voices, UC-015 step 4, 5, 8). Best effort.
+
+        ``quiet``: no volume step sound (UC-016 BR-004, the pad shows the level); every other option ignores it.
 
         A new mode also pulses its colour on every lobby controller (UC-015 BR-015), and so does a
         new shield mode (BR-018).
@@ -602,7 +609,8 @@ class SettingsOps:
                 if voice is not None:
                     await audio.play_voice(voice)
             elif option == "audio_volume.master":
-                await audio.play_sound(VOLUME_STEP_SOUND)
+                if not quiet:
+                    await audio.play_sound(VOLUME_STEP_SOUND)
             elif option == SHIELD_ACTIVATION_FLAG:
                 await self.show_shield_mode_on_lobby(variant)
                 voice = SHIELD_ACTIVATION_VOICES.get(variant)

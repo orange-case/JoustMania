@@ -63,6 +63,10 @@ message ProcessInputRequest {
 message ProcessInputResponse {
   bool success = 1;
   string error = 2;
+  // Operator pad step_setting / set_backend (services.md §3.1): the value the menu committed, as a variant,
+  // mode or backend name ("fast", "automatic", "JoustFFA", "claude"); empty on an error and for every other
+  // input. The pad's result screen shows it (UC-016 BR-001).
+  string value = 3;
 }
 
 message ListGameModesRequest {}

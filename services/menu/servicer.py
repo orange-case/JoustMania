@@ -377,10 +377,10 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             data = dict(request.data)
 
             if input_type == "web_command" and data.get("command", "") in self.PAD_COMMANDS:
-                success, error = await self._handle_pad_command(data, span)
+                success, error, value = await self._handle_pad_command(data, span)
                 status = "ok" if success else "error"
                 metrics.grpc_requests_total.labels(method="ProcessInput", status=status).inc()
-                return menu_pb2.ProcessInputResponse(success=success, error=error)
+                return menu_pb2.ProcessInputResponse(success=success, error=error, value=value)
             rejection = None
             if input_type == "button_press":
                 rejection = await self._handle_button_input(data, span)
@@ -546,8 +546,12 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
     # Operator pad commands (#2050, UC-015, services.md §3.1): no serial, no LEDs, error codes.
     PAD_COMMANDS = frozenset({"force_start", "step_setting", "preview_setting", "agent_switch", "set_backend"})
 
-    async def _handle_pad_command(self, data: dict, span) -> tuple[bool, str]:
-        """Run one pad command; (success, error code). A failed write plays the failure cue (BR-009)."""
+    async def _handle_pad_command(self, data: dict, span) -> tuple[bool, str, str]:
+        """Run one pad command; (success, error code, committed value). A failed write plays the failure cue (BR-009).
+
+        The value (services.md §3.1 `ProcessInputResponse.value`): what a `step_setting` or `set_backend`
+        committed, for the pad's result screen (UC-016 BR-001); empty for every other command and on an error.
+        """
         command = data.get("command", "")
         span.set_attribute("command", command)
         if command == "force_start":
@@ -570,7 +574,10 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         if is_failure(error):
             # UC-015 A3: fail closed, never queued or retried; the host hears two loud beeps.
             await self.settings_ops.play_failure_cue()
-        return error in ("", OK), error
+        success = error in ("", OK)
+        # UC-016 BR-001: the committed value of a step or a backend write; the other commands name none.
+        named = command in ("step_setting", "set_backend")
+        return success, error, (result.new or "") if success and named else ""
 
     async def _pad_step_setting(self, data: dict) -> Result:
         """step_setting: lobby-only refusal (UC-015 A1), then one clamped write (A7, BR-005)."""
@@ -579,11 +586,15 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             steps = int(data.get("steps", "1") or "1")
         except ValueError:
             return Result(None, None, BAD_OPTION)
+        # UC-016 BR-004: `cue=none` drops only the volume's step sound (the pad's screen shows the level).
+        cue = data.get("cue")
+        if cue is not None and (cue != "none" or option != "audio_volume.master"):
+            return Result(None, None, BAD_OPTION)
         if option in LOBBY_ONLY_OPTIONS and self._lifecycle_live():
             return Result(None, None, GAME_ACTIVE)
         result = await self.settings_ops.step_setting(option, data.get("direction", ""), steps)
         if result.error is None:
-            await self.settings_ops.announce(option, result.new)
+            await self.settings_ops.announce(option, result.new, quiet=cue == "none")
         return result
 
     async def _pad_preview_setting(self, data: dict) -> Result:
