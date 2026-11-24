@@ -758,6 +758,48 @@ class TestProcessRespawn:
             args = mock_process_cls.call_args.kwargs["args"]
             assert args[-1] is alsa_config.playback_failed_flag()
 
+    @pytest.mark.uc("UC-031", flow="A6", br=["BR-008"])
+    def test_music_loop_open_failure_sets_the_flag_passed_at_spawn(self):
+        """#2715: under forkserver the child's module flag is private; the loop must write the flag it was given."""
+        from multiprocessing import Array, Value
+
+        from services.audio import alsa_config, music_player
+
+        class _StopLoop(BaseException):
+            pass
+
+        def fake_sleep(seconds):
+            if seconds == 0.5:  # the loop's back-off after "Audio loop error"
+                raise _StopLoop
+
+        given = Value("b", 0, lock=False)  # not the module's own flag, as in a forkserver child
+        song = Array("c", 4096)
+        song.value = b"Menu/*.ogg"
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(44100)
+            w.writeframes(b"\0" * 16384)
+        own = alsa_config.playback_failed_flag()
+        try:
+            with (
+                patch.object(music_player, "_load_song_from_pattern", return_value=buf.getvalue()),
+                patch.object(music_player, "_get_fallback_devices", return_value=["default"]),
+                patch.object(music_player, "_try_set_process_priority"),
+                patch.object(music_player, "alsaaudio", create=True) as alsa,
+                patch.object(music_player.time, "sleep", side_effect=fake_sleep),
+            ):
+                alsa.PCM.side_effect = OSError("Unknown error 524")
+                with pytest.raises(_StopLoop):
+                    music_player._linux_audio_loop(
+                        song, Value("d", 1.0), Value("d", 0.7), Value("i", 0), Value("i", 0), given
+                    )
+        finally:
+            alsa_config.adopt_playback_failed_flag(own)
+        assert given.value == 1
+        assert own.value == 0
+
     def test_respawn_terminates_zombie_process(self):
         """_spawn_audio_process terminates an existing alive process before spawning."""
         with (

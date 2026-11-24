@@ -40,12 +40,9 @@ async def serve():
     logger.info("Starting JoustMania Audio service...")
 
     # Auto-detect ALSA card and write /etc/asound.conf before opening any audio device
-    from services.audio.alsa_config import configure_alsa_device
+    from services.audio.alsa_config import configure_alsa_device, take_alsa_card_setting
 
-    alsa_card_setting = os.getenv("ALSA_CARD", "auto")
-    if alsa_card_setting == "auto":
-        # alsa-lib reads ALSA_CARD too and would look up a card named "auto" (#2715).
-        os.environ.pop("ALSA_CARD", "auto")
+    alsa_card_setting = take_alsa_card_setting()
     configure_alsa_device(alsa_card_setting)
 
     # Initialize OTEL (get_tracer triggers TracerProvider setup for trace export)

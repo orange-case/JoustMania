@@ -59,6 +59,17 @@ def get_detected_card() -> int:
     return _detected_card
 
 
+def take_alsa_card_setting() -> str:
+    """Read ALSA_CARD (default "auto"); "auto" is removed from the environment afterwards.
+
+    alsa-lib reads ALSA_CARD too and would look up a card named "auto" (#2715). A number stays.
+    """
+    setting = os.getenv("ALSA_CARD", "auto")
+    if setting == "auto":
+        os.environ.pop("ALSA_CARD", "auto")
+    return setting
+
+
 def configure_alsa_device(card: str = "auto") -> None:
     """Detect the ALSA card and write /etc/asound.conf.
 
@@ -106,8 +117,8 @@ def _pick_best_card(indexes: list[int]) -> tuple[int, str]:
         cards.append((idx, name))
 
     for idx, name in cards:
-        # Same rule as the card watcher (read_sysfs_cards), or it would restart the service forever.
-        if "USB" in name.upper() or is_usb_card(idx):
+        # Same rule as the card watcher (preferred_card), or it would restart the service every lobby.
+        if card_is_usb(idx, name):
             logger.info("Detected ALSA cards: %s — preferring USB card %d (%s)", cards, idx, name)
             return idx, name
 
@@ -203,16 +214,19 @@ def _is_usb_device(card_dir: str) -> bool:
     return "/usb" in os.path.realpath(os.path.join(card_dir, "device"))
 
 
-def is_usb_card(idx: int) -> bool:
-    """True when sysfs places card idx on a USB bus."""
-    return _is_usb_device(os.path.join(SYSFS_SOUND_PATH, f"card{idx}"))
+def card_is_usb(idx: int, name: str) -> bool:
+    """The one USB rule for start-up and watcher: the sysfs bus when sysfs lists the card, else "USB" in name."""
+    card_dir = os.path.join(SYSFS_SOUND_PATH, f"card{idx}")
+    if os.path.isdir(card_dir):
+        return _is_usb_device(card_dir)
+    return "USB" in name.upper()
 
 
 def read_sysfs_cards(root: str | None = None) -> list[tuple[int, str]]:
     """List (index, description) of the present cards from /sys/class/sound/card<N>.
 
-    Docker masks /proc/asound in an unprivileged container, sysfs stays readable. A card on a USB bus
-    gets "USB" in its description so preferred_card treats it like _pick_best_card does.
+    Docker masks /proc/asound in an unprivileged container, sysfs stays readable. The "(USB)" tag is for
+    the log and for preferred_card's name fallback when root is not SYSFS_SOUND_PATH.
     """
     root = root or SYSFS_SOUND_PATH
     try:
@@ -242,8 +256,8 @@ def read_cards() -> list[tuple[int, str]]:
 def read_proc_cards(path: str = PROC_CARDS_PATH) -> list[tuple[int, str]]:
     """List (index, description) of the present cards from /proc/asound/cards.
 
-    The description is the driver line, e.g. "USB-Audio - USB Audio", so "USB" matches
-    the same way as in _pick_best_card. An unreadable file gives an empty list.
+    The description is the driver line, e.g. "USB-Audio - USB Audio", for card_is_usb's name fallback.
+    An unreadable file gives an empty list.
     """
     try:
         with open(path) as f:
@@ -262,7 +276,7 @@ def read_proc_cards(path: str = PROC_CARDS_PATH) -> list[tuple[int, str]]:
 def preferred_card(cards: list[tuple[int, str]]) -> int | None:
     """The card the auto rule picks: first USB card, else the first card."""
     for idx, name in cards:
-        if "USB" in name.upper():
+        if card_is_usb(idx, name):
             return idx
     return cards[0][0] if cards else None
 

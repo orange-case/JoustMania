@@ -187,6 +187,12 @@ HDMI = (0, "[vc4hdmi0       ]: vc4-hdmi - vc4-hdmi-0")
 USB = (2, "[Audio          ]: USB-Audio - USB Audio")
 
 
+@pytest.fixture(autouse=True)
+def _no_host_sysfs(tmp_path, monkeypatch):
+    """Keep the host's /sys/class/sound out of the USB rule; tests that need sysfs patch it again."""
+    monkeypatch.setattr(alsa_config, "SYSFS_SOUND_PATH", str(tmp_path / "no-sysfs"))
+
+
 @pytest.mark.uc("UC-031", flow="A6", br=["BR-008"])
 class TestCardChangeDecision:
     def test_usb_appeared_restarts(self):
@@ -341,9 +347,20 @@ class TestSysfsCards:
             assert _pick_best_card([0, 2])[0] == 2
             assert preferred_card(read_sysfs_cards(str(sound))) == 2
 
+    def test_start_and_watcher_ignore_usb_in_name_of_non_usb_bus_card(self, tmp_path):
+        # The reverse disagreement: "USB" in the start-up short name but the card is not on a USB bus.
+        sound = _fake_sysfs(tmp_path, [(0, "vc4hdmi0", False), (1, "USBish", False)])
+        with (
+            patch.object(alsa_config, "SYSFS_SOUND_PATH", str(sound)),
+            patch("alsaaudio.card_name", side_effect=lambda i: ("vc4-hdmi-0", "") if i == 0 else ("USB-ish", "")),
+        ):
+            assert _pick_best_card([0, 1])[0] == 0
+            assert preferred_card(alsa_config.read_cards()) == 0
+            assert not should_restart_for_card_change(0, alsa_config.read_cards(), failed=False)
+
 
 def _fail_in_music_process(flag):
-    """Child-process stand-in for the music loop: adopts the inherited flag, then fails like _open_pcm."""
+    """Child-process stand-in: adopts the flag passed at spawn, then fails like _open_pcm."""
     alsa_config.adopt_playback_failed_flag(flag)
     alsa_config.note_playback_failure()
 
@@ -369,3 +386,23 @@ class TestPlaybackFailureAcrossProcesses:
 
     def test_no_failure_reads_false(self):
         assert not alsa_config.playback_failed()
+
+
+@pytest.mark.uc("UC-031", flow="A6", br=["BR-008"])
+class TestTakeAlsaCardSetting:
+    """#2715: alsa-lib must not see ALSA_CARD=auto (it looks up a card named "auto")."""
+
+    def test_auto_is_returned_and_removed(self, monkeypatch):
+        monkeypatch.setenv("ALSA_CARD", "auto")
+        assert alsa_config.take_alsa_card_setting() == "auto"
+        assert "ALSA_CARD" not in os.environ
+
+    def test_unset_defaults_to_auto(self, monkeypatch):
+        monkeypatch.delenv("ALSA_CARD", raising=False)
+        assert alsa_config.take_alsa_card_setting() == "auto"
+        assert "ALSA_CARD" not in os.environ
+
+    def test_explicit_number_is_kept(self, monkeypatch):
+        monkeypatch.setenv("ALSA_CARD", "1")
+        assert alsa_config.take_alsa_card_setting() == "1"
+        assert os.environ["ALSA_CARD"] == "1"
