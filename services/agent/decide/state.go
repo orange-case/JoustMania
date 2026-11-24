@@ -43,6 +43,9 @@ type Annotations struct {
 	// UC-040 A35). The per-player sensitivity and handicap factors are read from it
 	// (#2066).
 	Levels map[string]string
+	// Cooling are the game-wide levers the agent would refuse a new value for now
+	// (lever_cooldown, UC-040 A53), sorted.
+	Cooling []string
 	// Bounds are the request's magnitude ranges (#2696, UC-040 BR-045): the
 	// Default an empty applied level stands for. nil = the code defaults.
 	Bounds *MagnitudeTable
@@ -92,6 +95,7 @@ func BuildStateWith(c gamecontext.GameContext, ann Annotations) State {
 		GameKind:       c.GameKind,
 		Players:        buildPlayers(c, ann),
 		ElapsedSeconds: elapsedSeconds(c),
+		LeverCooldown:  ann.Cooling,
 	}
 	applyHoldState(&st, c, ann)
 	st.MostHeadroom, st.Struggling = applyDangerSignals(st.Players, c.Session.DeathThreshold)
@@ -203,6 +207,9 @@ func renderNarrative(c gamecontext.GameContext, st State) string {
 		b.WriteString(" struggling=" + st.Struggling)
 	}
 	b.WriteString(holdSessionNarrative(st))
+	if len(st.LeverCooldown) > 0 {
+		b.WriteString(" lever_cooldown=" + strings.Join(st.LeverCooldown, ","))
+	}
 	b.WriteString("\n")
 
 	b.WriteString("players:\n")
@@ -254,6 +261,10 @@ func digest(st State) string {
 	b.WriteString("game_id=" + strconv.Quote(st.GameID) + "\n")
 	b.WriteString("game_kind=" + strconv.Quote(st.GameKind) + "\n")
 	b.WriteString("elapsed_s=" + strconv.FormatFloat(st.ElapsedSeconds, 'g', -1, 64) + "\n")
+	// #2641: written only when set, so a state without a cooling lever keeps its digest.
+	if len(st.LeverCooldown) > 0 {
+		b.WriteString("lever_cooldown=" + strconv.Quote(strings.Join(st.LeverCooldown, ",")) + "\n")
+	}
 	for _, p := range st.Players {
 		b.WriteString("player=" + strconv.Quote(p.Serial) +
 			" alive=" + strconv.FormatBool(p.Alive) +

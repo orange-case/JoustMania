@@ -185,6 +185,9 @@ type State struct {
 	// Struggling is the alive player with the strictly highest current
 	// intensity when their danger is elevated or near_threshold, else "".
 	Struggling string `json:"struggling,omitempty"`
+	// LeverCooldown names the game-wide levers the agent would refuse a new value
+	// for now: written less than the effect window ago (UC-040 A53, BR-046), sorted.
+	LeverCooldown []string `json:"lever_cooldown,omitempty"`
 
 	// Hold mode only (#2096; decide-contract.md §1.2): ShieldActivation is "hold"
 	// and the latched hold values come from the game_shield_hold_setting gauge.

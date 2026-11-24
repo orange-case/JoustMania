@@ -981,7 +981,8 @@ func (l *Loop) runDecision(ctx context.Context, snapshot flags.Snapshot, c gamec
 // earlier refusal, to be counted without a span, warning or timeline entry.
 // Checked in order: UC-040 A21 (budget unchanged since the refusal), A40 step 6
 // (same experiment flag already blocked this lever in this game), A35 (the same
-// value already suppressed against this entry), A31 step 1 / A33 (the shield
+// value already suppressed against this entry), A53 (the lever already refused
+// since its last write), A31 step 1 / A33 (the shield
 // ledger already refused a grant with this reason).
 func (l *Loop) repeatRefusalReason(perm permission, d Decision, now time.Time) (BlockReason, bool) {
 	switch {
@@ -991,6 +992,8 @@ func (l *Loop) repeatRefusalReason(perm permission, d Decision, now time.Time) (
 		return ReasonExperimentFlag, true
 	case perm.repeatApplied:
 		return ReasonAlreadyApplied, true
+	case perm.repeatCooldown:
+		return ReasonLeverCooldown, true
 	case perm.repeatShield:
 		return perm.reason, true
 	}
@@ -1040,6 +1043,14 @@ func (l *Loop) recordBlockedDecision(d Decision, reason BlockReason, cost float6
 	// Feed the BLOCKED outcome into this game's #916 rolling narrative timeline
 	// (#945): blocked interventions are recorded, never silently dropped.
 	l.recordIntervention(d.Intervention, d.TargetSerial, true)
+	if reason == ReasonLeverCooldown {
+		// UC-040 A53: an expected pacing refusal, info rather than the warning.
+		l.Log.Info("agent.decision_lever_cooldown",
+			"intervention", d.Intervention,
+			"decision_reason", d.Reason,
+			"window_s", l.effectWindow().Seconds())
+		return
+	}
 	l.Log.Warn("agent.decision_blocked",
 		"blocked", true,
 		"reason", string(reason),
@@ -1208,6 +1219,9 @@ type permission struct {
 	// repeatApplied marks an already_applied suppression that repeats an earlier one
 	// against the same entry (quiet, UC-040 A35).
 	repeatApplied bool
+	// repeatCooldown marks a lever_cooldown refusal that repeats an earlier one since
+	// the lever's last write (quiet, UC-040 A53).
+	repeatCooldown bool
 	// repeatExperimentFlag marks an experiment_flag block of a lever already
 	// blocked on the same flag in this game (quiet, UC-040 A40 step 6).
 	repeatExperimentFlag bool
@@ -1216,7 +1230,7 @@ type permission struct {
 // evaluatePermission runs the permission chain over one decision in order:
 // allow-list gate (#727), battery threshold, the experiment-flag check (UC-040
 // A40), the already-applied check (UC-040
-// A35), the shield ledger (UC-040 A31, A33), then the weighted rate limit (#728). It returns the verdict. The
+// A35), the lever cooldown (UC-040 A53), the shield ledger (UC-040 A31, A33), then the weighted rate limit (#728). It returns the verdict. The
 // rate limit is charged ONLY when the decision passes the allow-list and
 // battery gates AND fits the budget — so the budget is spent on decisions the
 // agent actually dispatches, the unification chosen over #726's
@@ -1259,6 +1273,11 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 	// admission.
 	if match, first := l.alreadyApplied(c, d, now); match {
 		return permission{reason: ReasonAlreadyApplied, blocked: true, repeatApplied: !first}
+	}
+	// 3a. Lever cooldown (UC-040 A53, BR-046): a game-wide lever changes at most once
+	// per effect window. Check-only and before the rate limit, like step 3.
+	if cooling, first := l.leverCooling(d, now); cooling {
+		return permission{reason: ReasonLeverCooldown, blocked: true, repeatCooldown: !first}
 	}
 	// 4. Shield ledger (UC-040 A31 step 1, BR-020; A33, BR-022): a targeted
 	// grant_shield is refused already_charged (trigger mode), shield_cap_reached or

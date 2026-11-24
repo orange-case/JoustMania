@@ -74,6 +74,12 @@ type appliedLedger struct {
 	// overlapped marks a key that had two writes in flight at once since its in-flight
 	// count was last 0: neither write may record its value.
 	overlapped map[string]bool
+	// written is the time of the last applied write per key, for the lever cooldown
+	// (UC-040 A53). It outlives the value's TTL: the effect window may be longer.
+	written map[string]time.Time
+	// cooldownReported: the first lever_cooldown refusal since the key's last write
+	// was emitted in full; later ones are quiet repeats.
+	cooldownReported map[string]bool
 }
 
 // present reports whether serial is still in the game (a game-wide key always is).
@@ -153,6 +159,42 @@ func (al *appliedLedger) end(f *appliedFlight, wrote bool, err error, now time.T
 		}
 		al.entries[f.key] = appliedEntry{serial: f.serial, value: f.value, at: now}
 	}
+	if wrote && err == nil {
+		if al.written == nil {
+			al.written = make(map[string]time.Time)
+			al.cooldownReported = make(map[string]bool)
+		}
+		al.written[f.key] = now
+		delete(al.cooldownReported, f.key)
+	}
+}
+
+// cooling reports whether key is in its cooldown at now: a write to it is in flight,
+// or its last applied write is younger than window. first is true for the first
+// refusal since that write.
+func (al *appliedLedger) cooling(key string, now time.Time, window time.Duration) (cooling, first bool) {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	if al.inflight[key] == 0 {
+		at, ok := al.written[key]
+		if !ok || !now.Before(at.Add(window)) {
+			return false, false
+		}
+	}
+	if al.cooldownReported == nil {
+		al.cooldownReported = make(map[string]bool)
+	}
+	first = !al.cooldownReported[key]
+	al.cooldownReported[key] = true
+	return true, first
+}
+
+// isCooling is cooling without marking a refusal.
+func (al *appliedLedger) isCooling(key string, now time.Time, window time.Duration) bool {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	at, ok := al.written[key]
+	return al.inflight[key] > 0 || ok && now.Before(at.Add(window))
 }
 
 // values returns the live (unexpired) entries at now as key -> normalised value, nil

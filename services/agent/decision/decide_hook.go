@@ -337,6 +337,7 @@ func (l *Loop) buildDecideRequestCtx(ctx context.Context, c gamecontext.GameCont
 		NoShield:       noShield,
 		ShieldInFlight: l.ShieldInFlight(),
 		Levels:         l.AppliedValues(),
+		Cooling:        l.CoolingLevers(),
 		Bounds:         l.magnitudeBoundsFor(ctx, c.SessionID),
 	})
 }
@@ -357,6 +358,7 @@ func (l *Loop) rulesRequestBuilderCtx(ctx context.Context, c gamecontext.GameCon
 			NoShield:       noShield,
 			ShieldInFlight: l.ShieldInFlight(),
 			Levels:         l.AppliedValues(),
+			Cooling:        l.CoolingLevers(),
 			Bounds:         l.magnitudeBoundsFor(ctx, c.SessionID),
 		})
 	}
