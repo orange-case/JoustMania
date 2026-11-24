@@ -365,15 +365,7 @@ def _fail_in_music_process(flag):
     alsa_config.note_playback_failure()
 
 
-@pytest.fixture
-def _clear_playback_failed():
-    alsa_config.playback_failed_flag().value = 0
-    yield
-    alsa_config.playback_failed_flag().value = 0
-
-
 @pytest.mark.uc("UC-031", flow="A6", br=["BR-008"])
-@pytest.mark.usefixtures("_clear_playback_failed")
 class TestPlaybackFailureAcrossProcesses:
     """#2715: music plays in a subprocess; its failure must reach the watcher in the parent."""
 
