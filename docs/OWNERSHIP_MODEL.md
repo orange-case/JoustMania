@@ -74,7 +74,14 @@ the agent has three narrow, gated writes beyond the `interventions` set.
    values of `game` / `user` flags (and of the `agent` keys
    `interventions_allowed` and `decision.backend`), plus, for the operator pad's
    stop and resume, the in-memory `agent` overlays `enabled` and
-   `interventions_enabled` (UC-015 BR-001 to BR-003; human writes, so C-034 holds); the agent writes game-scoped `interventions` values,
+   `interventions_enabled` (UC-015 BR-001 to BR-003; human writes, so C-034 holds). Planned
+   (#2755, UC-016 BR-012): for the pad's agent and retro rows the menu also writes the in-memory
+   `agent` overlays `goal.profile`, `policy.max_interventions_per_minute`,
+   `policy.group_grant.enabled`, `inference.effort` and `decision.operator_brief`, and the
+   persisted `inference.backend`, and clears them on a reset; human writes too. `goal.profile`
+   carries a writer list (`flagsmith`, `menu`, flags.md §13): the flag service refuses its other
+   writer labels, but a label is self-declared (D11), so the agent stays out of the `agent` set
+   by the C-034 source guard test, not by the list. The agent writes game-scoped `interventions` values,
    `rollout/current_controller_count`, and the experiment-arm and `real` overlays
    of `game` flags. The flag service holds each kind of value separately per flag
    (baseline, persisted admin value, stack overlays, `real` overlay, experiment
@@ -95,7 +102,7 @@ periods). Sections 4–5 define those compositions precisely.
 | `interventions` | Agent | Agent ActionSink → `writer.go` (game-scoped values and events) | Coordinator `InterventionManager`, live | One game: dropped when the game ends |
 | `rollout` | Operator (human) for the ladder; agent for `current_controller_count` | Agent `actions/rollout_writer.go` (gated by `rollout_enabled`, `remediation_allowed`); operator via `scripts/flags.sh` | Controller manager rollout router, agent infra loop | In memory until the flag service restarts |
 | `operator` | Operator (human) | None at runtime: a reviewed edit of `services/flagd/operator.json` and a restart of the flag service (read-only baseline, flags.md §13.5; #2050) | `services/operator_pad` (#2100; deployed under the `operator-pad` compose profile) | Per-deployment |
-| `agent` | Operator (human) | Operator / stage scripts (`scripts/flags.sh`, `agent-killswitch.sh`, `talk-stage.sh`: in-memory overlays; `agent-backend.sh`: backend and model persisted, #1682) **and** menu admin mode → `FlagServiceWriter` (`interventions_allowed` only, persisted, #819) **and** the operator pad commands through the menu (#2050: `interventions_allowed` and `decision.backend` persisted, `enabled` in memory only; UC-015 BR-001) | Agent + coordinator policy gates | Baseline per deployment; overlays until restart |
+| `agent` | Operator (human) | Operator / stage scripts (`scripts/flags.sh`, `agent-killswitch.sh`, `talk-stage.sh`: in-memory overlays; `agent-backend.sh`: backend and model persisted, #1682) **and** menu admin mode → `FlagServiceWriter` (`interventions_allowed` only, persisted, #819) **and** the operator pad commands through the menu (#2050: `interventions_allowed` and `decision.backend` persisted, `enabled` in memory only; UC-015 BR-001; planned, #2755: the pad's `GOAL`, `RATE`, `GROUP`, `EFFORT`, `BRIEF` rows in memory and `RETRO AI` persisted, UC-016 BR-012) | Agent + coordinator policy gates | Baseline per deployment; overlays until restart |
 
 The `agent` set holds the agent's own governor — `enabled`, `decision.backend`, `objectives`,
 `interventions_allowed`, and the `policy.*` budgets. As of #819, **menu admin mode
