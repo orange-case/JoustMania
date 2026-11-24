@@ -337,6 +337,12 @@ class Actions:
             if not preview_refused:  # BR-017: one "Not possible" per hold
                 await self._cues.refusal()
             return "step_setting", REFUSED
+        if option in setting_ladders.WRAPPING:
+            # UC-016 BR-007: a whole turn of the wheel sends nothing; the menu's `ok` no-op stays the
+            # backstop for a start the pad cannot read.
+            start = setting_ladders.preview_value(option, status, 0).value
+            if start is not None and setting_ladders.preview_value(option, status, steps).value == start:
+                return "step_setting", NOOP
         return "step_setting", await self._step(option, "up" if steps > 0 else "down", abs(steps))
 
     async def _backend(self, steps: int, status) -> tuple[str, str]:
@@ -349,11 +355,8 @@ class Actions:
             logger.warning(f"Unknown decision backend {status.agent_backend!r}: nothing to step from")
             await self._cues.refusal()
             return "set_backend", REFUSED
-        # BR-005, UC-016 BR-007: the backend wraps (`WRAPPING`), so it never reaches a limit cue.
-        target, at_limit = setting_ladders.step_ladder("decision.backend", BACKENDS, status.agent_backend, steps)
-        if at_limit:
-            await self._cues.limit(steps > 0)
-            return "set_backend", AT_LIMIT
+        # BR-005, UC-016 BR-007: the backend wraps (`WRAPPING`), so it never reaches a limit.
+        target, _ = setting_ladders.step_ladder("decision.backend", BACKENDS, status.agent_backend, steps)
         if target == status.agent_backend:
             return "set_backend", NOOP  # a full turn of the wheel: nothing sent, no cue
         return "set_backend", await self._send({"command": "set_backend", "backend": target})

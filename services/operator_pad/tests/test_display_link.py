@@ -14,7 +14,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from proto import menu_pb2
-from services.operator_pad import hidraw
+from services.operator_pad import hidraw, screens
 from services.operator_pad.display import DisplayModel, PadDisplay
 from services.operator_pad.screens import Screen
 from services.operator_pad.state import MenuStatusReader
@@ -99,12 +99,17 @@ async def test_hello_v1_brings_link_up_and_draws_status(link):
     assert frame[0] == "JOUSTMANIA LOBBY" and frame[7] == "V0.14.0"
 
 
-@pytest.mark.uc("UC-016", flow="main", br=["BR-002"], steps=[1])
-async def test_a_later_protocol_version_brings_the_link_up_with_the_v1_screens(link):
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-002", "BR-006"], steps=[1])
+async def test_hello_v2_shows_home_page_in_large_rows(link):
+    """UC-016 A5: protocol 2 gets the HOME page, its rows large lines with the divider under the last."""
     pad = link(backend=FakeBackend(version=2))
     await pad.until(lambda: pad.model.link_up and len(pad.backend.lines()) >= 8)
     assert pad.display.protocol_version == 2
-    assert pad.backend.last_frame()[0].startswith("JOUSTMANIA")
+    frame = pad.backend.lines()[-8:]
+    assert frame[0][4:25].decode("latin-1").startswith("HOME") and frame[0][3] == screens.INVERTED
+    assert [r[3] for r in frame[1:7:2]] == [screens.LARGE, screens.LARGE, screens.LARGE | screens.UNDERLINE]
+    assert [r[2] for r in frame[1:7:2]] == [1, 3, 5]  # large lines keep their line number
+    assert hidraw.OP_BAR not in pad.backend.ops() and hidraw.OP_WHEEL not in pad.backend.ops()
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-002"])
@@ -342,3 +347,102 @@ def test_hidraw_handle_times_out_without_a_reply_and_an_error_reply_raises():
 def test_screen_equality_drives_redraws():
     assert Screen.of(["A"]) == Screen.of(["A"])
     assert Screen.of(["A"]) != Screen.of(["B"])
+
+
+# --- protocol 3 and 4 on the wire (UC-016 BR-002, BR-006, BR-007) -------------------------------------
+
+
+def _frames(reports: list[bytes]) -> list[list[bytes]]:
+    """The frames sent: each starts at its title line (line 0) and ends at its show, or where a refusal cut it."""
+    frames, current = [], []
+    for r in reports:
+        if r[1] == hidraw.OP_HELLO:
+            continue
+        if r[1] == hidraw.OP_LINE and r[2] == 0 and not r[3] & screens.MEDIUM and current:
+            frames.append(current)  # a frame the pad refused: no show
+            current = []
+        current.append(r)
+        if r[1] == hidraw.OP_SHOW:
+            frames.append(current)
+            current = []
+    return [f for f in frames if len(f) > 1]
+
+
+def _hold_layer(model: DisplayModel, option: str, net: int, key: str = "K2") -> None:
+    model.hold_key(key)
+    model.layer_step(key, option, lobby(sensitivity=2, operator_settings={"sensitivity": "medium"}), net, True)
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-002", "BR-006"], steps=[1])
+async def test_hello_v3_sends_medium_rows_by_row_index_with_glyph_bytes(link):
+    pad = link(backend=FakeBackend(version=3), statuses=None)
+    pad.reader.fetch.return_value = lobby(audio_volume_master="loud", instructions=True)
+    await pad.until(lambda: any(b"VOLUME" in r and 0x7F in r for r in pad.backend.lines()))
+    frame = _frames(pad.backend.all_reports)[-1]
+    rows = [r for r in frame if r[1] == hidraw.OP_LINE and r[3] & screens.MEDIUM]
+    assert [(r[2], r[3]) for r in rows] == [(0, 8), (1, 8), (2, 8 | screens.UNDERLINE)]  # row index, not line
+    assert rows[1][4:20] == b"VOLUME     " + bytes((0x7F,) * 4 + (0x80,))  # glyph bytes, not `?`
+    status_line = next(r for r in frame if r[1] == hidraw.OP_LINE and r[2] == 7)
+    assert status_line[4] == 0x81 or status_line[4] == 0x20
+    assert 0x83 in status_line  # instructions icon
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-002", "BR-007"], steps=[4])
+async def test_v3_ladder_edit_sends_the_bar_after_the_lines_then_show(link):
+    pad = link(backend=FakeBackend(version=3))
+    await pad.until(lambda: pad.model.link_up)
+    _hold_layer(pad.model, "sensitivity", 1)
+    await pad.until(lambda: hidraw.OP_BAR in pad.backend.ops())
+    frame = next(f for f in _frames(pad.backend.all_reports) if any(r[1] == hidraw.OP_BAR for r in f))
+    assert [r[1] for r in frame] == [hidraw.OP_LINE] * 8 + [hidraw.OP_BAR, hidraw.OP_SHOW]
+    bar = frame[8]
+    assert bar[2:6] == bytes((0, 6, 5, 3)) and bar[6:20].rstrip(b"\x00") == b"AUTO|0|1|2|3|4"
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-002", "BR-007"], steps=[4])
+async def test_v4_wheel_sends_three_slots_after_the_lines(link):
+    pad = link(backend=FakeBackend(version=4))
+    await pad.until(lambda: pad.model.link_up)
+    _hold_layer(pad.model, "current_game", 1, key="K1")
+    await pad.until(lambda: hidraw.OP_WHEEL in pad.backend.ops())
+    frame = next(f for f in _frames(pad.backend.all_reports) if any(r[1] == hidraw.OP_WHEEL for r in f))
+    assert [r[1] for r in frame] == [hidraw.OP_LINE] * 8 + [hidraw.OP_WHEEL] * 3 + [hidraw.OP_SHOW]
+    slots = frame[8:11]
+    assert [(r[2], r[3]) for r in slots] == [(0, 1), (1, 0), (2, 0)]  # NOW (FREE-FOR-ALL) above, flagged
+    assert slots[1][4:25].rstrip() == b"TEAMS"
+
+
+@pytest.mark.uc("UC-016", flow="A1", br=["BR-002"])
+@pytest.mark.parametrize(("version", "refused", "drawn"), [(3, hidraw.OP_BAR, 2), (4, hidraw.OP_WHEEL, 3)])
+async def test_a_refused_bar_or_wheel_lowers_the_layout_and_keeps_the_link(link, version, refused, drawn):
+    """B3: `FF` to a bar or wheel is not a link failure: the next layout down, the same handle."""
+    pad = link(backend=FakeBackend(version=version, refuse=(refused,)))
+    await pad.until(lambda: pad.model.link_up)
+    option, key = ("sensitivity", "K2") if refused == hidraw.OP_BAR else ("current_game", "K1")
+    _hold_layer(pad.model, option, 1, key=key)
+    await pad.until(lambda: pad.model._layout == drawn)
+    shows = pad.backend.shows()
+    await pad.until(lambda: pad.backend.shows() >= shows + 2)
+    assert len(pad.backend.handles) == 1 and pad.model.link_up
+    last = _frames(pad.backend.all_reports)[-1]
+    assert refused not in [r[1] for r in last]
+    assert any(b"NOW" in r for r in last if r[1] == hidraw.OP_LINE)
+
+
+@pytest.mark.uc("UC-016", flow="A6", br=["BR-009"], steps=[1])
+async def test_auto_paging_wakes_the_render_loop_by_itself(link):
+    config = pad_config(autopage_ms=1000)
+    pad = link(backend=FakeBackend(version=3), config=config, heartbeat=5.0)
+    await pad.until(lambda: any(r[4:8] == b"HOME" for r in pad.backend.lines()))
+    await pad.until(lambda: any(r[4:8] == b"GAME" for r in pad.backend.lines()), seconds=3.0)
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-002"])
+def test_line_report_encodes_glyphs_and_medium_rows():
+    report = hidraw.line_report(5, "AB\x7f\x85\x86\x88é", screens.MEDIUM | screens.UNDERLINE)
+    assert report[:4] == bytes((hidraw.CMD, hidraw.OP_LINE, 2, 0x0C))
+    assert report[4:11] == b"AB\x7f\x85\x86??"
+    assert hidraw.line_report(0, "X", True)[2:4] == bytes((0, 1))  # protocol 1: inverted, line number kept
+    assert (
+        hidraw.bar_report(0, 5, 2, None, ("MUTE", "", "", "", "MAX"))[2:17] == bytes((0, 5, 2, 0xFF)) + b"MUTE||||MAX"
+    )
