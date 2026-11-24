@@ -55,6 +55,7 @@ WAKE_MIN_SECONDS = 0.005  # a due page deadline never wakes the render loop in a
 PAGE_SETTLE_SECONDS = 0.4  # UC-016 BR-011: a key binds to a page only after it was on screen this long
 NO_HOST_SECONDS = 3.0  # BR-002: the firmware shows NO HOST this long after the last frame
 REFUSED = "refused"  # `bind_page`: the link is uncertain, the row keys are refused
+BLINK_SECONDS = 0.5  # UC-016 BR-014: the title bar of a raise awaiting its knob press, each half
 
 
 def _quiet(method):
@@ -138,6 +139,7 @@ class DisplayModel:
         self._acked_at = 0.0
         self._prev_page = HOME
         self._last_pages_ack: float | None = None
+        self._blink_since: float | None = None  # a raise awaits its confirmation since (BR-014)
         self.display_usb: str | None = None  # the USB device of the display link (BR-011: only its keys bind)
 
     # --- link state -------------------------------------------------------------------------
@@ -448,7 +450,9 @@ class DisplayModel:
             return "highlight", held
         return None
 
-    def _stage_screen(self, stage: tuple[str, _Held], version: int, bottom: Line | None) -> Screen | None:
+    def _stage_screen(
+        self, stage: tuple[str, _Held], version: int, bottom: Line | None, now: float = 0.0
+    ) -> Screen | None:
         kind, held = stage
         if kind == "lock":
             return (
@@ -462,7 +466,10 @@ class DisplayModel:
                 label = screens.SETTING_LABELS.get(spec.option, spec.option.upper())
                 hint = screens.reset_hint(plan.refused, awaiting)
                 return screens.reset_screen(label, spec.option, plan.now, plan.new, hint)
-            return render.reset_screen(version, spec.option, plan, held.confirmed, bottom)
+            awaiting = plan.raises and not plan.refused and not held.confirmed
+            return render.reset_screen(
+                version, spec.option, plan, held.confirmed, bottom, self._blink_on(now, awaiting)
+            )
         return None  # the highlight is drawn on the page
 
     def _idle(self, now: float) -> bool:
@@ -484,6 +491,9 @@ class DisplayModel:
                 due = (held.t_ms + stage_ms) / 1000
                 if due > now:
                     times.append(due)
+        if self._blink_since is not None:
+            halves = int((now - self._blink_since) / BLINK_SECONDS) + 1
+            times.append(self._blink_since + halves * BLINK_SECONDS)
         if (self._layout or 0) >= 2:
             wake = self._pager.next_wake(self._idle(now), *self._page_times())
             if wake is not None:
@@ -520,6 +530,15 @@ class DisplayModel:
             self._status, connection_ok=self._connection_ok, locked=self._locked, version=self._version
         )
 
+    def _blink_on(self, now: float, awaiting: bool) -> bool:
+        """The inverted half of the blink; a display-only timer that ends with the screen (BR-014)."""
+        if not awaiting:
+            self._blink_since = None
+            return True
+        if self._blink_since is None:
+            self._blink_since = now
+        return int((now - self._blink_since) / BLINK_SECONDS) % 2 == 0
+
     def _current_frame(self, now: float, version: int) -> Screen:
         if self._overlay is not None and now >= self._overlay_until:
             self._overlay = None
@@ -530,6 +549,8 @@ class DisplayModel:
         bottom = render.status_line(self._status, ctx, self._connection_ok)
         layer = self._layer
         if layer is not None and self._layer_held():
+            plan, confirmed = layer.plan, self._confirmed(layer.key)
+            awaiting = plan is not None and plan.raises and not plan.refused and not confirmed
             return render.setting_screen(
                 version,
                 layer.option,
@@ -537,15 +558,18 @@ class DisplayModel:
                 layer.net,
                 lobby_only=layer.lobby_only,
                 bottom=bottom,
-                plan=layer.plan,
-                confirmed=self._confirmed(layer.key),
+                plan=plan,
+                confirmed=confirmed,
+                blink_on=self._blink_on(now, awaiting),
             )
         stage = self._hold_stage(now)
+        if stage is None or stage[0] != "reset":
+            self._blink_since = None
         if stage is not None and stage[0] == "highlight":
             highlight = stage[1].binding.row if stage[1].binding.page == self._pager.page else None
             return render.page_screen(version, self._pager.page, self._status, ctx, self._connection_ok, highlight)
         if stage is not None:
-            return self._stage_screen(stage, version, bottom)
+            return self._stage_screen(stage, version, bottom, now)
         if self._overlay is not None:
             if self._overlay[0] == "volume":
                 new = self._predict(self._vol_pending)
