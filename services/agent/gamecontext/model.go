@@ -231,26 +231,22 @@ type GameContext struct {
 	ExperimentID string
 	Arm          string
 	// GameTraceID is the hex trace_id of the coordinator's root game span for this
-	// session (#1133, Phase 2 of #1088). Source: the game_trace_id datapoint label on
-	// the dedicated game_trace_correlation gauge the coordinator emits while the game
-	// span is live. The agent has no parent trace context (it consumes game state only
-	// as metrics), so this id is what lets the decision loop add an OTel span LINK from
-	// agent.decision to the originating game trace — navigable in Jaeger, not merely a
-	// shared game.id attribute (Phase 1). Empty when not yet observed or the game span
-	// was unsampled; an empty value means "no link" (graceful fallback, no error).
+	// session (#1133). Source (UC-041 BR-004): the trace context of the agent-only
+	// game.start log record or, when that was lost, of any game.phase.start of the
+	// game (same trace). It lets the decision loop parent its in-game spans in the
+	// game trace and Link agent.decision to it. Empty when not yet observed or the
+	// game span was unsampled: no parent, no Link (graceful fallback, no error).
 	GameTraceID string
 	// GameTraceSpanID is the hex span_id of the coordinator's root game span for
-	// this session (#1157, follow-up to #1133). Source: the game_trace_span_id
-	// datapoint label on the same game_trace_correlation gauge. Carried alongside
-	// GameTraceID so the decision/retro Link references the actual game-start span
-	// (Jaeger highlights it via uiFind) rather than an all-zero span id under the
-	// trace. Empty when not yet observed or the game span was unsampled; an empty
+	// this session (#1157). Source: the trace context of game.start only. Carried
+	// alongside GameTraceID so the decision/retro Link references the actual
+	// game-start span. Empty when game.start was lost or unsampled; an empty
 	// trace_id OR span_id means "no link" (graceful fallback, no error).
 	GameTraceSpanID string
 	// GameplayPhaseSpanID is the hex span_id of the coordinator's gameplay_phase
-	// sub-span for this session (#1195, refines #1187). Source: the
-	// gameplay_phase_span_id datapoint label on the same game_trace_correlation
-	// gauge. gameplay_phase is the STABLE active-play window WITHIN the game trace;
+	// sub-span for this session (#1195, refines #1187). Source: the trace context
+	// of its game.phase.start log record. gameplay_phase is the STABLE active-play
+	// window WITHIN the game trace;
 	// the agent re-parents its in-game decision chain (signal_received -> decision
 	// -> action) under THIS span instead of the game root, so a reader sees
 	// interventions nested where they actually occurred. Same trace as GameTraceID.
@@ -260,7 +256,7 @@ type GameContext struct {
 	GameplayPhaseSpanID string
 	// GameCycleSpanID is the hex span_id of the coordinator's game_cycle span (a
 	// child of gameplay_phase) for this session (#1325, UC-041 BR-004). Source: the
-	// game_cycle_span_id label on the same game_trace_correlation gauge. It is the
+	// trace context of its game.phase.start log record. It is the
 	// PREFERRED remote parent of the in-game agent spans (UC-040 BR-013); when empty
 	// (not yet open, unsampled, or a mode without game_cycle) the parent falls back to
 	// GameplayPhaseSpanID, then GameTraceSpanID, then own root.

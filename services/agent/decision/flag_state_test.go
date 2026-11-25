@@ -226,8 +226,8 @@ func TestFlagState_EventsStillReachTheCallersSpan(t *testing.T) {
 	}
 }
 
-// The partition's first cycle can run before the game_trace_correlation ids arrive
-// (a trace Export opens it first): that span is its own root, and the span is emitted
+// The partition's first cycle can run before the game.start / game.phase.start
+// records give the game's trace ids: that span is its own root, and the span is emitted
 // again, under game_cycle, once the parent is known, even with an unchanged snapshot.
 // UC: UC-040 BR-013
 func TestFlagState_ReEmittedOnceTheGameParentIsKnown(t *testing.T) {

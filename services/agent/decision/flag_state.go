@@ -65,8 +65,8 @@ func (t *flagStateTracker) claim(digest uint64) (string, bool) {
 // flagStateDigest hashes the whole effective snapshot plus the partition's game mode
 // and kind, and whether the in-game parent is known. Every Snapshot field is a value,
 // slice or map (fmt prints maps sorted), so equal snapshots render equal. The parent
-// bit re-emits the span once the game_trace_correlation ids arrive after the
-// partition's first cycle (a trace Export can open the partition first), so the
+// bit re-emits the span once the game's trace ids arrive (game.start /
+// game.phase.start log records) after the partition's first cycle, so the
 // game trace gets its agent.flag_state even when the snapshot never changes.
 func flagStateDigest(snapshot flags.Snapshot, gameMode, gameKind string, inGameParent bool) uint64 {
 	h := fnv.New64a()

@@ -21,14 +21,6 @@ const (
 	metricGameMode       = "game_current_mode"           // live (coordinator emits game_current_mode; #848)
 	metricPeakAccel      = "game_player_peak_accel"      // live (whole-game aggregate + game_id carrier)
 
-	// Trace-correlation signal (#1133, Phase 2 of #1088). A dedicated low-rate
-	// per-game gauge (value always 1 while the game span is live) whose payload is its
-	// labels: game_id + the game span's hex game_trace_id. The agent reads game_trace_id
-	// here so the decision loop can add an OTel span LINK from agent.decision to the
-	// originating game trace — the agent otherwise has no parent context (it consumes
-	// game state only as metrics). Falls back gracefully (no link) when absent/unsampled.
-	metricTraceCorrelation = "game_trace_correlation"
-
 	// Game-speed / threshold reference frame (#1082). All three are SESSION-level
 	// gauges (no serial label, one series per game_id + game_kind): game_music_tempo is
 	// the applied game speed (1.0=slow..~1.3=fast); the effective thresholds are the
@@ -76,25 +68,6 @@ const (
 	attrMode     = "mode"
 	attrGameID   = "game_id"
 	attrGameKind = "game_kind"
-	// attrGameTraceID is the coordinator root game-span trace_id carried on the
-	// dedicated game_trace_correlation signal (#1133). Hex string; empty when the
-	// game span was unsampled.
-	attrGameTraceID = "game_trace_id"
-	// attrGameTraceSpanID is the coordinator root game-span span_id carried on the
-	// same game_trace_correlation signal (#1157). Hex string; empty when the game
-	// span was unsampled.
-	attrGameTraceSpanID = "game_trace_span_id"
-	// attrGameplayPhaseSpanID is the coordinator gameplay_phase sub-span span_id
-	// carried on the same game_trace_correlation signal (#1195). Hex string; empty
-	// until the gameplay_phase span opens (or unsampled). The agent re-parents its
-	// in-game decision chain under THIS span instead of the game root (#1187) when
-	// present, falling back to attrGameTraceSpanID otherwise. Same trace as
-	// game_trace_id.
-	attrGameplayPhaseSpanID = "gameplay_phase_span_id"
-	// attrGameCycleSpanID is the coordinator game_cycle span_id carried on the same
-	// game_trace_correlation signal (#1325). Hex string; empty until game_cycle opens
-	// (or unsampled / a mode without it). The preferred in-game parent (UC-040 BR-013).
-	attrGameCycleSpanID = "game_cycle_span_id"
 	// Experiment attribution (#975, epic #982): finer-grained labels WITHIN a
 	// shadow game. Carried on the LOW-RATE lifecycle metrics (game_active,
 	// game_active_players, game_duration_seconds) the same way game_kind is —
@@ -124,22 +97,6 @@ type gameLabels struct {
 	// a cohort is reconstructed by grouping partitions that share an ExperimentID.
 	ExperimentID string
 	Arm          string
-	// GameTraceID carries the coordinator's root game-span trace_id (#1133) when the
-	// signal is the dedicated game_trace_correlation gauge — empty on every other
-	// signal. Like ExperimentID/Arm it is partition ENRICHMENT, not a routing key.
-	GameTraceID string
-	// GameTraceSpanID carries the coordinator's root game-span span_id (#1157),
-	// likewise only on the game_trace_correlation gauge and likewise enrichment.
-	GameTraceSpanID string
-	// GameplayPhaseSpanID carries the coordinator's gameplay_phase sub-span span_id
-	// (#1195), likewise only on the game_trace_correlation gauge and likewise
-	// enrichment. The agent re-parents its in-game decision chain under this span
-	// (a refinement of the #1187 game-root parenting); empty -> fall back to
-	// GameTraceSpanID. Same trace as GameTraceID.
-	GameplayPhaseSpanID string
-	// GameCycleSpanID carries the coordinator's game_cycle span_id (#1325), likewise
-	// only on the game_trace_correlation gauge and likewise enrichment.
-	GameCycleSpanID string
 }
 
 // gameIDOf reads the game_id datapoint label; empty when absent.
@@ -177,49 +134,13 @@ func armOf(attrs pcommon.Map) string {
 	return ""
 }
 
-// gameTraceIDOf reads the game_trace_id datapoint label (#1133); empty when absent.
-func gameTraceIDOf(attrs pcommon.Map) string {
-	if v, ok := attrs.Get(attrGameTraceID); ok {
-		return v.AsString()
-	}
-	return ""
-}
-
-// gameTraceSpanIDOf reads the game_trace_span_id datapoint label (#1157); empty when absent.
-func gameTraceSpanIDOf(attrs pcommon.Map) string {
-	if v, ok := attrs.Get(attrGameTraceSpanID); ok {
-		return v.AsString()
-	}
-	return ""
-}
-
-// gameplayPhaseSpanIDOf reads the gameplay_phase_span_id datapoint label (#1195); empty when absent.
-func gameplayPhaseSpanIDOf(attrs pcommon.Map) string {
-	if v, ok := attrs.Get(attrGameplayPhaseSpanID); ok {
-		return v.AsString()
-	}
-	return ""
-}
-
-// gameCycleSpanIDOf reads the game_cycle_span_id datapoint label (#1325); empty when absent.
-func gameCycleSpanIDOf(attrs pcommon.Map) string {
-	if v, ok := attrs.Get(attrGameCycleSpanID); ok {
-		return v.AsString()
-	}
-	return ""
-}
-
 // metricGameLabels resolves the game identity labels on a metric datapoint.
 func metricGameLabels(attrs pcommon.Map) gameLabels {
 	return gameLabels{
-		GameID:              gameIDOf(attrs),
-		GameKind:            gameKindOf(attrs),
-		ExperimentID:        experimentIDOf(attrs),
-		Arm:                 armOf(attrs),
-		GameTraceID:         gameTraceIDOf(attrs),
-		GameTraceSpanID:     gameTraceSpanIDOf(attrs),
-		GameplayPhaseSpanID: gameplayPhaseSpanIDOf(attrs),
-		GameCycleSpanID:     gameCycleSpanIDOf(attrs),
+		GameID:       gameIDOf(attrs),
+		GameKind:     gameKindOf(attrs),
+		ExperimentID: experimentIDOf(attrs),
+		Arm:          armOf(attrs),
 	}
 }
 
@@ -430,13 +351,6 @@ func (s *Store) applyDataPoint(name string, dp pmetric.NumberDataPoint) bool {
 		s.SetGameActive(v == 1)
 		s.adoptGame(labels)
 		return true
-	case metricTraceCorrelation:
-		// Dedicated trace-correlation signal (#1133): value is always 1; the payload is
-		// the labels (game_id + game_trace_id). Route through adoptGame so the
-		// game_trace_id enriches the same partition the multiplexer selected on game_id;
-		// SetGameTraceID ignores an empty id, so a malformed datapoint is a safe no-op.
-		s.adoptGame(labels)
-		return labels.GameTraceID != "" || labels.GameID != ""
 	case metricGameMode:
 		// game_current_mode carries mode + game_id + game_kind (FR-041): one series
 		// per live game, so the Multiplexer routes it to that game's partition.
@@ -490,8 +404,4 @@ func (s *Store) adoptGame(labels gameLabels) {
 	s.SetGameKind(labels.GameKind)
 	s.SetExperimentID(labels.ExperimentID)
 	s.SetArm(labels.Arm)
-	s.SetGameTraceID(labels.GameTraceID)                 // #1133: empty on all but game_trace_correlation
-	s.SetGameTraceSpanID(labels.GameTraceSpanID)         // #1157: ditto
-	s.SetGameplayPhaseSpanID(labels.GameplayPhaseSpanID) // #1195: ditto
-	s.SetGameCycleSpanID(labels.GameCycleSpanID)         // #1325: ditto
 }
