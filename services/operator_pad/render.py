@@ -9,6 +9,8 @@ and wheel is within the firmware's limits for every input (BR-002), so the pad n
 
 from __future__ import annotations
 
+import dataclasses
+
 from lib.setting_ladders import (
     AGENT_POLICY_LEVELS,
     BACKENDS,
@@ -22,7 +24,7 @@ from lib.setting_ladders import (
 from services.operator_pad.pages import NET_OK, SHIELD_WORDS, PageContext, page_rows, value_text
 from services.operator_pad.pages import PAGES as PAGE_NAMES
 from services.operator_pad.screens import (
-    CONFIRM_Q,
+    CONFIRMED,
     ICON_AGENT,
     ICON_INSTRUCTIONS,
     ICON_INTERNET,
@@ -35,6 +37,7 @@ from services.operator_pad.screens import (
     MINIMUM,
     NO_CONNECTION,
     NOT_POSSIBLE,
+    PRESS_KNOB,
     PRESS_TO_CONFIRM,
     RELEASE_TO_RESET,
     RESET_Q,
@@ -240,11 +243,13 @@ def setting_screen(
     bottom: Line,
     plan=None,
     confirmed: bool = False,
+    blink_on: bool = True,
 ) -> Screen:
     """BR-007: a setting being changed: marker bar, wheel or NOW and NEW rows, by protocol.
 
     ``plan`` (UC-016 BR-014, `page_keys.Plan`): NOW and NEW of a page key; refused shows `NOT
-    POSSIBLE`, an unconfirmed raise `CONFIRM?` and `PRESS TO CONFIRM`.
+    POSSIBLE`; an unconfirmed raise `PRESS KNOB` in a blinking title bar (``blink_on``: its inverted
+    half) and, on rows, `PRESS TO CONFIRM`; a confirmed one `CONFIRMED`.
     """
     title = SETTING_LABELS.get(option, clean(option.upper()))
     now = plan.now if plan is not None else preview_value(option, press_status, 0).value
@@ -253,25 +258,39 @@ def setting_screen(
         return _rows_screen(version, title, EDIT, option, now, None, NOT_POSSIBLE, bottom, refused=True)
     new = plan.new if plan is not None else preview_value(option, press_status, net_steps).value
     limit = (MAXIMUM if net_steps > 0 else MINIMUM) if _at_end(option, press_status, net_steps) else None
-    awaiting = plan is not None and plan.raises and not confirmed
-    right = CONFIRM_Q if awaiting else (limit or EDIT)
+    raises = plan is not None and plan.raises
+    awaiting = raises and not confirmed
+    right = PRESS_KNOB if awaiting else (CONFIRMED if raises else (limit or EDIT))
     if version >= 3 and option in LADDER_BARS:
         hint = PRESS_TO_CONFIRM if awaiting else RELEASE_TO_SET
-        return _bar_screen(title, right, hint, _bar_args(option, now, new), bottom)
-    if version >= 4 and option in WHEEL_LADDERS and new in WHEEL_LADDERS[option]:
-        return _wheel_screen(title, right, option, now, new, bottom)
-    hint = PRESS_TO_CONFIRM if awaiting else (limit or RELEASE_TO_SET)
-    return _rows_screen(version, title, CONFIRM_Q if awaiting else EDIT, option, now, new, hint, bottom)
+        screen = _bar_screen(title, right, hint, _bar_args(option, now, new), bottom)
+    elif version >= 4 and option in WHEEL_LADDERS and new in WHEEL_LADDERS[option]:
+        screen = _wheel_screen(title, right, option, now, new, bottom)
+    else:
+        hint = PRESS_TO_CONFIRM if awaiting else (RELEASE_TO_SET if raises else (limit or RELEASE_TO_SET))
+        screen = _rows_screen(version, title, right if raises else EDIT, option, now, new, hint, bottom)
+    return _blink(screen, awaiting and not blink_on)
 
 
-def reset_screen(version: int, option: str, plan, confirmed: bool, bottom: Line) -> Screen:
-    """UC-016 BR-007 reset: `RESET?` (`CONFIRM?` while a raise waits), NOW and the default, the hint."""
+def reset_screen(version: int, option: str, plan, confirmed: bool, bottom: Line, blink_on: bool = True) -> Screen:
+    """UC-016 BR-007 reset: `RESET?`, NOW and the default, the hint; a raise as on the setting screen."""
     title = SETTING_LABELS.get(option, clean(option.upper()))
-    awaiting = plan.raises and not confirmed and not plan.refused
+    raises = plan.raises and not plan.refused
+    awaiting = raises and not confirmed
     hint = NOT_POSSIBLE if plan.refused else (PRESS_TO_CONFIRM if awaiting else RELEASE_TO_RESET)
     if version < 3 and plan.refused:
         hint = "NOT POSS."  # 10 characters; NEW stays, so no `NOT` / `POSSIBLE` split
-    return _rows_screen(version, title, CONFIRM_Q if awaiting else RESET_Q, option, plan.now, plan.new, hint, bottom)
+    right = PRESS_KNOB if awaiting else (CONFIRMED if raises else RESET_Q)
+    screen = _rows_screen(version, title, right, option, plan.now, plan.new, hint, bottom)
+    return _blink(screen, awaiting and not blink_on)
+
+
+def _blink(screen: Screen, off: bool) -> Screen:
+    """UC-016 BR-014: the off half of the blinking title bar is drawn normal, not inverted."""
+    if not off:
+        return screen
+    text, attrs = screen.lines[0]
+    return dataclasses.replace(screen, lines=((text, attrs & ~INVERTED), *screen.lines[1:]))
 
 
 def lock_screen(version: int, locked: bool, bottom: Line) -> Screen:

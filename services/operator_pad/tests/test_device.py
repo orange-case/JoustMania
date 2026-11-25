@@ -425,3 +425,13 @@ async def test_syn_dropped_is_ordered_with_the_k5_events(tmp_path):
     await asyncio.wait_for(manager.read_until_gone(), timeout=2)
     names = [c[0] for c in controller.mock_calls if c[0] in ("accept", "events_dropped")]
     assert names == ["accept", "events_dropped", "accept"]
+
+
+@pytest.mark.uc("UC-016", br=["BR-011", "BR-016"])
+async def test_unresolved_pad_nodes_count_as_possible_extra_pads(tmp_path):
+    """Two nodes whose USB device sysfs cannot tell: possibly two pads, so no page binding."""
+    make_sysfs(tmp_path, {"event3": PAD, "event4": PAD})
+    devices = {f"/dev/input/event{n}": FakeDevice(f"/dev/input/event{n}") for n in (3, 4)}
+    manager, _, controller = _manager(tmp_path, FakeBackend(devices))
+    assert await manager.attach()
+    assert controller.pad_devices == 2
