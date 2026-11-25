@@ -54,9 +54,9 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Build, run, test and debug; compose and image workflow |
 | [hardware-setup-guide.md](hardware-setup-guide.md) (includes the 25-controller setup) | Set up a Pi 5 with many controllers |
 | [UC-010](use_cases/UC-010.md), [UC-012](use_cases/UC-012.md) | Lobby and admin button maps (BR-005 in each) |
-| [CONTROLLER_CONNECTIVITY.md](CONTROLLER_CONNECTIVITY.md) | Troubleshoot Bluetooth (stale) |
+| [CONTROLLER_CONNECTIVITY.md](CONTROLLER_CONNECTIVITY.md) | Troubleshoot Bluetooth |
 | [AUDIO.md](AUDIO.md) | Audio hardware and ALSA setup |
-| [observability-quickstart.md](observability-quickstart.md) | Performance tooling (stale metric names) |
+| [observability-quickstart.md](observability-quickstart.md) | Performance tooling |
 | [CANARY_RUNBOOK.md](CANARY_RUNBOOK.md) | Manual backend canary |
 | [architecture/flag-service.md](architecture/flag-service.md) | Flag service: one gRPC sync source for flagd partitioned by flagSetId, `PUT /{flagSetId}/{flagName}` writes, mutable-flag registry, persisted admin settings, migration plan (epic #1407) |
 | [architecture/stack.md](architecture/stack.md) | AIUP stack file: layers mapped to our repo skills (`/implement`, `/pytest-test`, `/go-test`, `/integration-test`, `/coverage-check`), markers, commands, mapping of the aiup-core 3.x commands (#2079) |
@@ -80,7 +80,6 @@ Kept for the reasoning; they do not describe the current system.
 
 | Document | Topic |
 |---|---|
-| [design/agent-experiment-cohorts.md](design/agent-experiment-cohorts.md) | Experiment cohorts design |
 | [research/722-intervention-surface.md](research/722-intervention-surface.md) | Intervention vocabulary |
 | [research/774-shadow-games.md](research/774-shadow-games.md) | Shadow games |
 | [research/844-post-game-retro.md](research/844-post-game-retro.md) | Post-game retro |
