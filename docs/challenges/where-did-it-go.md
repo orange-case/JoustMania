@@ -40,7 +40,8 @@ curl -sS -X DELETE http://localhost/flags/observability/telemetry.moment_shape
 
 - Reset the shape after the booth (the DELETE above). The overlay stays in effect for every later game,
   shadow and pattern games included, until it is cleared; in `span` the agent then takes its eliminations
-  from the elimination-order gauge alone (UC-100 step 9, BR-007).
+  from the elimination-order gauge alone (UC-100 step 9, BR-007; planned, #2783: from the log copy of each
+  death the coordinator then sends the agent in every game, UC-100 BR-012).
 - One shape per game. The coordinator reads the flag once when the game starts. Changing it during a game
   does not affect that game; the new value applies from the next game (UC-100 A2, BR-002).
 - A flag that is absent, unknown or unreadable gives `span_event`. A game started before the
@@ -143,7 +144,8 @@ Template, one row per backend and shape. Fill the backend's answer and the groun
 ## 6. Known limits today
 
 - **In the `span` shape the agent takes nothing from the death** (UC-100 BR-007, BR-010): its elimination order
-  comes from the elimination-order gauge alone. In the other shapes it reads the death as a span event or a log
+  comes from the elimination-order gauge alone (planned, #2783: the coordinator sends the agent a log copy of
+  each death in every game, which no backend gets, so the agent reads the death from that copy). In the other shapes it reads the death as a span event or a log
   event, once per `moment.id` ([FR-218](../requirements.md), [UC-041](../use_cases/UC-041.md) A7).
 - **The case keeps no log store** (BR-006). A log-event round can only be checked against the ground truth on
   the game's root span, never against a copy of the log in the case.
