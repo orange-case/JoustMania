@@ -7,8 +7,6 @@ test_collector_best_effort.py.
 
 from __future__ import annotations
 
-import re
-
 import infra_config as ic
 import pytest
 
@@ -73,52 +71,6 @@ def test_storage_exporters_are_independent_of_the_agent_exporter(
 
 
 # --- Moment log events to the agent (#2658 slice 2, FR-218, UC-041 A7, BR-009) ---
-
-_MISSING = object()
-
-
-def _drops_log(
-    conditions: list[str],
-    event_name: str,
-    attributes: dict[str, object],
-    resource: dict[str, object],
-) -> bool:
-    """Evaluate the filter/agent_moments OTTL drop conditions for one log record.
-
-    Supports exactly the terms the filter uses (`log.event_name != "x"`,
-    `log.attributes["k"] == nil`, `resource.attributes["k"] == <bool|"str">`), joined
-    by `and` / `or` (`and` binds tighter); any other term fails the test.
-    """
-
-    def value(path: str) -> object:
-        if path == "log.event_name":
-            return event_name
-        m = re.fullmatch(r'(log|resource)\.attributes\["([^"]+)"\]', path)
-        assert m, f"unsupported OTTL path {path!r}"
-        source = attributes if m.group(1) == "log" else resource
-        return source.get(m.group(2), _MISSING)
-
-    def literal(text: str) -> object:
-        if text == "nil":
-            return _MISSING
-        if text in ("true", "false"):
-            return text == "true"
-        m = re.fullmatch(r'"([^"]*)"', text)
-        assert m, f"unsupported OTTL literal {text!r}"
-        return m.group(1)
-
-    def term(text: str) -> bool:
-        m = re.fullmatch(r"(\S+) (==|!=) (.+)", text.strip())
-        assert m, f"unsupported OTTL term {text!r}"
-        left, op, right = value(m.group(1)), m.group(2), literal(m.group(3).strip())
-        # OTTL: a bool never equals a string; type-strict comparison.
-        equal = type(left) is type(right) and left == right
-        return equal if op == "==" else not equal
-
-    return any(
-        any(all(term(t) for t in alt.split(" and ")) for alt in cond.split(" or "))
-        for cond in conditions
-    )
 
 
 @pytest.mark.uc("UC-041", flow="A7", steps=[1], cond=["Pre-1"])
@@ -188,7 +140,7 @@ def test_agent_moments_filter_passes_only_moment_log_events(
     """UC-041 A7 step 1, BR-009, C-001: the collector forwards only death_warning and
     player_death records that carry a moment id, and never synthetic data (#2577)."""
     conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
-    assert _drops_log(conditions, event_name, attributes, resource) is dropped
+    assert ic.drops_log(conditions, event_name, attributes, resource) is dropped
 
 
 @pytest.mark.uc("UC-101", br=["BR-010"], cond=["Post-F-2"])
@@ -213,6 +165,56 @@ def test_intervention_log_event_never_reaches_the_agent(collector, intervention_
     if intervention_id is not None:
         attributes["intervention.id"] = intervention_id
     conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
-    assert _drops_log(conditions, "intervention", attributes, {}) is True
+    assert ic.drops_log(conditions, "intervention", attributes, {}) is True
     # The same record named as a warning passes: the drop is by name, not by a missing id.
-    assert _drops_log(conditions, "death_warning", attributes, {}) is False
+    assert ic.drops_log(conditions, "death_warning", attributes, {}) is False
+
+
+# --- Agent-only lifecycle log events (#2722, FR-250, UC-100 BR-012, UC-041 A8) ---
+
+_AGENT = {"orangecase.audience": "agent"}
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"])
+@pytest.mark.uc("UC-041", flow="A8", steps=[1])
+@pytest.mark.parametrize(
+    ("event_name", "attributes", "resource", "dropped"),
+    [
+        ("game.start", {"game.id": "g", **_AGENT}, {}, False),
+        ("game.end", {"game.id": "g", **_AGENT}, {}, False),
+        ("game.start", {"game.id": "g"}, {}, True),
+        ("game.end", {"game.id": "g"}, {}, True),
+        ("game.start", {"orangecase.audience": "gateway"}, {}, True),
+        ("game.start", _AGENT, {"orangecase.synthetic": True}, True),
+        ("game.end", _AGENT, {"orangecase.synthetic": "true"}, True),
+        ("player_death", {"moment.id": "g/P1/2", **_AGENT}, {}, False),
+        ("death_warning", {"moment.id": "g/P1/1", **_AGENT}, {}, False),
+        ("player_death", _AGENT, {}, True),
+        ("", _AGENT, {}, True),
+        ("game.round", _AGENT, {}, True),
+        ("intervention", {"moment.id": "g/P1/3", **_AGENT}, {}, True),
+    ],
+    ids=[
+        "marked-start-kept",
+        "marked-end-kept",
+        "unmarked-start-dropped",
+        "unmarked-end-dropped",
+        "other-audience-dropped",
+        "synthetic-bool-start-dropped",
+        "synthetic-string-end-dropped",
+        "marked-death-copy-kept",
+        "marked-warning-copy-kept",
+        "marked-death-without-id-dropped",
+        "marked-ordinary-dropped",
+        "marked-other-name-dropped",
+        "marked-intervention-dropped",
+    ],
+)
+def test_agent_moments_filter_passes_lifecycle_records_only_when_marked(
+    collector, event_name, attributes, resource, dropped
+):
+    """UC-041 A8 step 1, UC-100 BR-012: `game.start` and `game.end` reach the agent only
+    with `orangecase.audience` = `agent`; a marked moment copy passes like a moment log
+    event; the marker lets no other record through and synthetic data stays out (#2577)."""
+    conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
+    assert ic.drops_log(conditions, event_name, attributes, resource) is dropped

@@ -29,6 +29,8 @@ GATEWAY_PIPELINES = {
     "metrics/gateway": "metrics",
     "logs/gateway": "logs",
 }
+# The overlay's one processor: drops the records meant for the agent only (#2722).
+AGENT_ONLY = "filter/gateway_agent_only"
 HOST_VAR = "ORANGECASE_GATEWAY_HOST"
 TOKEN_VAR = "ORANGECASE_GATEWAY_TOKEN"
 MIB = 1024 * 1024
@@ -101,8 +103,10 @@ def test_merge_helper_replaces_lists_and_merges_maps():
 
 @pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])
 def test_overlay_adds_one_exporter_and_three_pipelines_and_nothing_else(overlay):
-    """BR-015: the overlay holds exactly the gateway exporter and the three gateway pipelines."""
-    assert set(overlay) == {"exporters", "service"}
+    """BR-015: the overlay holds exactly the gateway exporter, the three gateway pipelines and
+    the filter of agent-only records (UC-100 BR-012)."""
+    assert set(overlay) == {"processors", "exporters", "service"}
+    assert set(overlay["processors"]) == {AGENT_ONLY}
     assert set(overlay["exporters"]) == {EXPORTER}
     assert set(overlay["service"]) == {"pipelines"}
     assert set(overlay["service"]["pipelines"]) == set(GATEWAY_PIPELINES)
@@ -122,8 +126,11 @@ def test_overlay_overwrites_no_value_of_the_base_config(base, overlay):
 def test_in_case_configuration_is_unchanged_by_the_merge(base, merged):
     """A7 step 3: every receiver, processor, connector, exporter, extension and pipeline of
     config.yaml is the same after the merge."""
-    for section in ("receivers", "processors", "connectors", "extensions"):
+    for section in ("receivers", "connectors", "extensions"):
         assert merged[section] == base[section], section
+    for name, cfg in base["processors"].items():
+        assert merged["processors"][name] == cfg, name
+    assert set(merged["processors"]) == set(base["processors"]) | {AGENT_ONLY}
     for name, cfg in base["exporters"].items():
         assert merged["exporters"][name] == cfg, name
     for name, pipeline in base["service"]["pipelines"].items():
@@ -190,9 +197,14 @@ def test_gateway_pipeline_reuses_the_processors_of_its_in_case_twin(
     merged, pipeline, twin
 ):
     """The gateway gets the same data as the in-case backend: same processors, in the same
-    order, memory limiter first and a batch processor of its own between it and the exporter."""
+    order, memory limiter first and a batch processor of its own between it and the exporter.
+    `logs/gateway` adds only the agent-only filter, before its batch (UC-100 BR-012)."""
     pipelines = merged["service"]["pipelines"]
     processors = pipelines[pipeline]["processors"]
+    if pipeline == "logs/gateway":
+        assert processors.index(AGENT_ONLY) < processors.index("batch")
+        processors = [p for p in processors if p != AGENT_ONLY]
+    assert AGENT_ONLY not in processors
     assert processors == pipelines[twin]["processors"]
     assert processors[0] == "memory_limiter"
     assert [p for p in processors if p.split("/")[0] == "batch"], (
@@ -201,8 +213,14 @@ def test_gateway_pipeline_reuses_the_processors_of_its_in_case_twin(
 
 
 # The processors the gateway pipelines may use: none drops, rewrites or reshapes a record
-# beyond the health-check spans and the resource attributes the in-case twin also gets.
-GATEWAY_PROCESSOR_KINDS = {"memory_limiter", "filter/grpc_health", "resource"}
+# beyond the health-check spans and the resource attributes the in-case twin also gets, and
+# the records meant for the agent only (UC-100 BR-012), which are never a backend's moment.
+GATEWAY_PROCESSOR_KINDS = {
+    "memory_limiter",
+    "filter/grpc_health",
+    AGENT_ONLY,
+    "resource",
+}
 
 
 def _is_batch(name: str) -> bool:
@@ -215,7 +233,8 @@ def test_every_moment_record_path_reaches_the_gateway_pipelines(merged, pipeline
     """UC-100 step 5: a moment sent as a span, a span event or a log event is in the stream the
     gateway pipeline exports. The span and its span event travel in the OTLP trace data of
     `traces/gateway`, the log event in `logs/gateway`; neither pipeline drops, rewrites or
-    narrows records beyond what its in-case twin does (health-check spans only), and the
+    narrows records beyond what its in-case twin does (health-check spans only; on
+    `logs/gateway` also the records marked for the agent only, BR-012), and the
     moment-only filter of the agent (`filter/agent_moments`) is on `logs/agent` alone."""
     processors = merged["service"]["pipelines"][pipeline]["processors"]
     assert "filter/agent_moments" not in processors, (
@@ -228,8 +247,8 @@ def test_every_moment_record_path_reaches_the_gateway_pipelines(merged, pipeline
         f"{pipeline} runs a processor that may drop or reshape moments: {unknown}"
     )
     if pipeline == "logs/gateway":
-        assert not [p for p in processors if p.startswith("filter")], (
-            "every log record, so every moment log event, reaches the gateway"
+        assert [p for p in processors if p.startswith("filter")] == [AGENT_ONLY], (
+            "every unmarked log record, so every moment log event, reaches the gateway"
         )
 
 
@@ -269,9 +288,9 @@ def test_the_agent_decision_and_the_intervention_moment_reach_the_gateway(merged
     """UC-101 step 6: the agent's `agent.decision` (its trace) and the coordinator's
     intervention moment (a span, a span event or a log event in the game's trace) both reach
     the case collector over OTLP, and the gateway pipelines take every OTLP record of their
-    signal: the same `otlp` receiver as the in-case twin, no filter on `logs/gateway`, and on
-    `traces/gateway` only the health-check filter, which names neither the agent's spans nor
-    the intervention moment."""
+    signal: the same `otlp` receiver as the in-case twin, on `logs/gateway` only the filter of
+    records marked for the agent only (UC-100 BR-012), and on `traces/gateway` only the
+    health-check filter, which names neither the agent's spans nor the intervention moment."""
     services = ic.compose_services()
     for service in ("agent", "game-coordinator"):
         env = services[service]["environment"]
@@ -281,12 +300,81 @@ def test_the_agent_decision_and_the_intervention_moment_reach_the_gateway(merged
     for name in ("traces/gateway", "logs/gateway"):
         assert pipelines[name]["receivers"] == ["otlp"]
         assert pipelines[name]["exporters"] == [EXPORTER]
-    assert not [
+    assert [
         p for p in pipelines["logs/gateway"]["processors"] if p.startswith("filter")
-    ]
+    ] == [AGENT_ONLY]
+    attributes = {"moment.id": "g/P1/3", "intervention.type": "grant_shield"}
+    conditions = merged["processors"][AGENT_ONLY]["log_conditions"]
+    assert ic.drops_log(conditions, "intervention", attributes, {}) is False
     for condition in merged["processors"]["filter/grpc_health"]["trace_conditions"]:
         for word in ("agent", "decision", "intervention"):
             assert word not in condition, condition
+
+
+_AGENT = {"orangecase.audience": "agent"}
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"])
+@pytest.mark.uc("UC-041", flow="A8", steps=[1])
+@pytest.mark.parametrize(
+    ("event_name", "attributes", "resource", "dropped"),
+    [
+        ("game.start", {"game.id": "g", **_AGENT}, {}, True),
+        ("game.end", {"game.id": "g", **_AGENT}, {}, True),
+        ("player_death", {"moment.id": "g/P1/2", **_AGENT}, {}, True),
+        ("death_warning", {"moment.id": "g/P1/1", **_AGENT}, {}, True),
+        ("", _AGENT, {}, True),
+        ("player_death", {"moment.id": "g/P1/2"}, {}, False),
+        ("death_warning", {"moment.id": "g/P1/1"}, {}, False),
+        ("game.start", {"game.id": "g"}, {}, False),
+        ("", {}, {}, False),
+        ("", {"orangecase.audience": "gateway"}, {}, False),
+        ("", {}, _AGENT, False),
+        (
+            "player_death",
+            {"moment.id": "g/P1/2"},
+            {"orangecase.synthetic": True},
+            False,
+        ),
+    ],
+    ids=[
+        "marked-start-dropped",
+        "marked-end-dropped",
+        "marked-death-copy-dropped",
+        "marked-warning-copy-dropped",
+        "marked-ordinary-dropped",
+        "moment-death-kept",
+        "moment-warning-kept",
+        "unmarked-start-kept",
+        "ordinary-kept",
+        "other-audience-kept",
+        "marker-on-resource-only-kept",
+        "synthetic-moment-kept",
+    ],
+)
+def test_logs_gateway_drops_exactly_the_records_marked_for_the_agent(
+    merged, event_name, attributes, resource, dropped
+):
+    """UC-100 BR-012, UC-041 A8 step 1: a record with `orangecase.audience` = `agent` never
+    reaches `logs/gateway`; every unmarked record, moment log events and ordinary logs alike,
+    still does. The decision is on the record's own attributes (a filter never sees the span),
+    so a marker elsewhere changes nothing."""
+    assert AGENT_ONLY in merged["service"]["pipelines"]["logs/gateway"]["processors"]
+    conditions = merged["processors"][AGENT_ONLY]["log_conditions"]
+    assert ic.drops_log(conditions, event_name, attributes, resource) is dropped
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"])
+def test_only_logs_gateway_drops_the_records_marked_for_the_agent(merged):
+    """BR-012: the agent-only filter is on `logs/gateway` alone, so `logs/agent` and the
+    in-case `logs` pipeline still take the marked records."""
+    users = {
+        name
+        for name, spec in merged["service"]["pipelines"].items()
+        if AGENT_ONLY in spec["processors"]
+    }
+    assert users == {"logs/gateway"}
+    assert merged["processors"][AGENT_ONLY]["error_mode"] == "ignore"
 
 
 @pytest.mark.nfr("NFR-029")

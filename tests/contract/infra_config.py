@@ -145,3 +145,51 @@ def compose_container_ports(service: str) -> set[int]:
     for text in texts:
         ports |= {int(p) for p in _PORT_IN_TEXT_RE.findall(text)}
     return ports
+
+
+_MISSING = object()
+
+
+def drops_log(
+    conditions: list[str],
+    event_name: str,
+    attributes: dict[str, object],
+    resource: dict[str, object],
+) -> bool:
+    """Evaluate a log filter's OTTL drop conditions for one log record.
+
+    Supports exactly the terms the filters use (`log.event_name != "x"`,
+    `log.attributes["k"] == nil` or `== "str"`, `resource.attributes["k"] ==
+    <bool|"str">`, each also with `!=`), joined by `and` / `or` (`and` binds
+    tighter); any other term fails the test.
+    """
+
+    def value(path: str) -> object:
+        if path == "log.event_name":
+            return event_name
+        m = re.fullmatch(r'(log|resource)\.attributes\["([^"]+)"\]', path)
+        assert m, f"unsupported OTTL path {path!r}"
+        source = attributes if m.group(1) == "log" else resource
+        return source.get(m.group(2), _MISSING)
+
+    def literal(text: str) -> object:
+        if text == "nil":
+            return _MISSING
+        if text in ("true", "false"):
+            return text == "true"
+        m = re.fullmatch(r'"([^"]*)"', text)
+        assert m, f"unsupported OTTL literal {text!r}"
+        return m.group(1)
+
+    def term(text: str) -> bool:
+        m = re.fullmatch(r"(\S+) (==|!=) (.+)", text.strip())
+        assert m, f"unsupported OTTL term {text!r}"
+        left, op, right = value(m.group(1)), m.group(2), literal(m.group(3).strip())
+        # OTTL: a bool never equals a string; type-strict comparison.
+        equal = type(left) is type(right) and left == right
+        return equal if op == "==" else not equal
+
+    return any(
+        any(all(term(t) for t in alt.split(" and ")) for alt in cond.split(" or "))
+        for cond in conditions
+    )
