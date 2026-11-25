@@ -6,8 +6,8 @@ cannot be sent now is dropped with a cue, never queued or retried (BR-010).
 
 A row key acts on the row it bound to at its press (`page_keys.Binding`); without one (no screen)
 on the fallback page `HOME` (UC-016 BR-016). A raise of the agent (BR-014) is sent only through
-`_level_step`, `_reset_send` and `_interventions_switch`, which take the confirmation and refuse
-an unconfirmed raise with an explicit check.
+`_level_step`, `_row_step`, `_set_backend`, `_reset_send` and `_interventions_switch`, which take
+the confirmation and refuse an unconfirmed raise with an explicit check.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from collections.abc import Awaitable, Callable
 from opentelemetry import trace
 
 from lib import setting_ladders, voice_prompts
+from lib.setting_ladders import PAID_BACKENDS
 from lib.telemetry import get_tracer
 from proto import game_coordinator_pb2, menu_pb2
 from services.operator_pad import cues, metrics, page_keys
@@ -40,7 +41,15 @@ from services.operator_pad.gestures import (
     TRANSITION,
     Gesture,
 )
-from services.operator_pad.page_keys import BACKEND, EDIT, INTERVENTIONS, SWITCH, Binding
+from services.operator_pad.page_keys import (
+    BACKEND,
+    EDIT,
+    INTERVENTIONS,
+    RESET_BACKEND_FROM,
+    SET_BACKEND_FROM,
+    SWITCH,
+    Binding,
+)
 from services.operator_pad.preview import Previewer, value_voice
 from services.operator_pad.screens import SETTING_LABELS, TRANSITION_TEXT, agent_text, result_word, short
 from services.operator_pad.state import AGENT_OFF, AGENT_UNKNOWN, AGENT_WATCH, agent_state, is_known, pad_commands
@@ -77,8 +86,9 @@ RESET_COMMAND = "reset_setting"
 SWITCH_COMMAND = "interventions_switch"
 RESET_FROM = "reset_setting.from"  # the menu refuses a level reset whose level moved under the hold
 STEP_FROM = "step_setting.from"  # the same for a level step
+# The edits whose screen and release follow a `page_keys.Plan` (NOW, NEW, raise, refusal).
+PLANNED_EDITS = frozenset({"agent_level", INTERVENTIONS, "decision.backend", *setting_ladders.AGENT_ROW_OPTIONS})
 
-BACKENDS = setting_ladders.BACKENDS
 VOLUME_VARIANTS = setting_ladders.VOLUME_LADDER
 MUTE = "mute"
 UNMUTE_DEFAULT = "max"
@@ -258,7 +268,7 @@ class Actions:
             return None
         spec = binding.spec
         plan = None
-        if spec.option in ("agent_level", INTERVENTIONS):
+        if spec.option in PLANNED_EDITS:
             plan = page_keys.edit_plan(spec, press_status, gesture.steps)
         self._show("confirm_state", gesture.key, False)  # A9: a later step clears the confirmation
         # UC-016 step 4: the setting screen, whatever `operator_pad.preview_enabled` says.
@@ -351,8 +361,9 @@ class Actions:
             await self._cues.announce(label, None)
             return
         if voice is None:
-            await self._cues.refusal()
-            return
+            if value is None or option not in setting_ladders.AGENT_ROW_OPTIONS:
+                await self._cues.refusal()
+            return  # D7: the agent rows have no voice lines; a known value is the screen's alone
         await self._cues.announce(label, voice)  # in the background (BR-009)
 
     async def _agent_tap(self, status) -> tuple[str, str]:
@@ -455,10 +466,12 @@ class Actions:
             if not preview_refused:  # BR-017: one "Not possible" per hold
                 await self._cues.refusal()
             return action, REFUSED
+        if spec.option in PLANNED_EDITS and press_status is None:
+            return await self._refuse(action)  # BR-014: judged from the press read, never confirmed blind
         if spec.edit == BACKEND:
-            return action, await self._backend(steps, status)
-        if (spec.edit == SWITCH or spec.option == "agent_level") and press_status is None:
-            return await self._refuse(action)  # BR-014: never confirmed blind
+            return await self._backend_edit(action, spec, steps, status, press_status, gesture.confirmed)
+        if spec.option in setting_ladders.AGENT_ROW_OPTIONS:
+            return await self._row_edit(action, spec, steps, status, press_status, gesture.confirmed)
         if spec.edit == SWITCH:
             if SWITCH_COMMAND not in pad_commands(status):
                 return await self._refuse(action)  # BR-011 "Menu too old"
@@ -521,36 +534,79 @@ class Actions:
         if spec.lobby_only and status.lifecycle_live:
             return await self._refuse(RESET_COMMAND)
         level = spec.option == "agent_level"
-        if level and (press_status is None or RESET_FROM not in pad_commands(status)):
-            return await self._refuse(RESET_COMMAND)  # BR-014: the base must be known and checked
+        row = spec.option in setting_ladders.AGENT_ROW_OPTIONS
+        if level and RESET_FROM not in pad_commands(status):
+            return await self._refuse(RESET_COMMAND)  # BR-014: the base must be checked
+        if row and page_keys.reset_command(spec.option) not in pad_commands(status):
+            return await self._refuse(RESET_COMMAND)
+        if (level or row or spec.edit == BACKEND) and press_status is None:
+            return await self._refuse(RESET_COMMAND)  # BR-014: the raise is judged from the press read
         plan = page_keys.reset_plan(spec, press_status if press_status is not None else status)
         if plan.refused:
             return await self._refuse(RESET_COMMAND)
-        base = plan.now if level else None
+        base = plan.now if level or row else None
+        if spec.edit == BACKEND:
+            guarded = RESET_BACKEND_FROM in pad_commands(status)
+            if plan.new in PAID_BACKENDS and not guarded:
+                return await self._refuse(RESET_COMMAND)  # a backend moved under the hold would go unseen
+            base = plan.now if guarded else None
         return RESET_COMMAND, await self._reset_send(spec.option, plan.new, base, plan.raises, gesture.confirmed)
 
-    async def _reset_send(
-        self, option: str, expect: str | None, from_level: str | None, raises: bool, confirmed: bool
-    ) -> str:
+    async def _reset_send(self, option: str, expect: str, from_value: str | None, raises: bool, confirmed: bool) -> str:
         if raises and not confirmed:
             return await self._unconfirmed()
-        data = {"command": RESET_COMMAND, "option": option}
-        if expect is not None:
-            data["expect"] = expect
-        if from_level is not None:
-            data["from"] = from_level
+        data = {"command": RESET_COMMAND, "option": option, "expect": expect}
+        if from_value is not None:
+            data["from"] = from_value
         return await self._send(data, expect_value=True)
 
-    async def _backend(self, steps: int, status) -> tuple[str, str]:
-        if status.agent_backend not in BACKENDS:
-            logger.warning(f"Unknown decision backend {status.agent_backend!r}: nothing to step from")
-            await self._cues.refusal()
-            return REFUSED
-        # BR-005, UC-016 BR-007: the backend wraps (`WRAPPING`), so it never reaches a limit.
-        target, _ = setting_ladders.step_ladder("decision.backend", BACKENDS, status.agent_backend, steps)
-        if target == status.agent_backend:
-            return NOOP  # a full turn of the wheel: nothing sent, no cue
-        return await self._send({"command": "set_backend", "backend": target})
+    async def _backend_edit(self, action, spec, steps: int, status, press_status, confirmed: bool) -> tuple[str, str]:
+        # The press read, never the release's: a backend changed under the hold must not turn a
+        # paid-to-paid switch into an unconfirmed free-to-paid one (the menu's `from` catches it).
+        plan = page_keys.edit_plan(spec, press_status, steps)
+        if plan.refused:
+            return await self._refuse(action)
+        if plan.new == plan.now:
+            return action, NOOP  # a full turn of the wheel: nothing sent, no cue
+        guarded = SET_BACKEND_FROM in pad_commands(status)
+        if plan.new in PAID_BACKENDS and not guarded:
+            return await self._refuse(action)
+        return action, await self._set_backend(plan.new, plan.now if guarded else None, plan.raises, confirmed)
+
+    async def _set_backend(self, backend: str, from_backend: str | None, raises: bool, confirmed: bool) -> str:
+        if raises and not confirmed:
+            return await self._unconfirmed()
+        data = {"command": "set_backend", "backend": backend}
+        if from_backend is not None:
+            data["from"] = from_backend
+        return await self._send(data)
+
+    async def _row_edit(self, action, spec, steps: int, status, press_status, confirmed: bool) -> tuple[str, str]:
+        """BR-012 iteration 4: one `step_setting` with `from`, enabled per option by `pad_commands`."""
+        option = spec.option
+        if page_keys.step_command(option) not in pad_commands(status):
+            return await self._refuse(action)
+        plan = page_keys.edit_plan(spec, press_status, steps)
+        if plan.refused:
+            return await self._refuse(action)
+        if plan.new == plan.now:
+            if option in setting_ladders.WRAPPING:
+                return action, NOOP
+            await self._cues.limit(steps > 0)
+            return action, AT_LIMIT
+        return action, await self._row_step(option, steps, plan.now, plan.raises, confirmed)
+
+    async def _row_step(self, option: str, steps: int, from_value: str, raises: bool, confirmed: bool) -> str:
+        if raises and not confirmed:
+            return await self._unconfirmed()
+        data = {
+            "command": "step_setting",
+            "option": option,
+            "direction": "up" if steps > 0 else "down",
+            "steps": str(abs(steps)),
+            "from": from_value,
+        }
+        return await self._send(data, expect_value=True)
 
     # --- volume and mute (step 8, BR-005, BR-006) ----------------------------------------
 
