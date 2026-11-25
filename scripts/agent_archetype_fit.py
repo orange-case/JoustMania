@@ -355,7 +355,9 @@ def rewrite(text: str, changes: dict[str, dict]) -> str:
         body = text[head:end]
         for key, value in new.items():
             body, n = re.subn(
-                rf'("{re.escape(key)}":\s*)-?[0-9][0-9.eE+-]*', rf"\g<1>{_num(value)}", body
+                rf'("{re.escape(key)}":\s*)-?[0-9][0-9.eE+-]*',
+                rf"\g<1>{_num(value)}",
+                body,
             )
             if n != 1:
                 raise InputError(f"{name}.{key}: found {n} times in the flag file")
@@ -394,7 +396,9 @@ def render(rep) -> str:
         f"real games: {rep['real_games']}, eligible {rep['eligible']}, excluded {rep['excluded']}",
     ]
     if rep["status"] == "insufficient_games":
-        lines.append(f"need at least {3 * BAND_MIN} eligible real games; nothing proposed")
+        lines.append(
+            f"need at least {3 * BAND_MIN} eligible real games; nothing proposed"
+        )
         return "\n".join(lines)
     for b, v in rep["bands"].items():
         lines.append(f"band {b}: " + ", ".join(f"{k} {v[k]}" for k in v))
@@ -413,11 +417,21 @@ def render(rep) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--dataset", required=True, help="realism dataset (agent-shadow-realism.sh --save)")
-    ap.add_argument("--experiments", required=True, help="copy of the agent's experiments directory")
-    ap.add_argument("--journal", help="copy of calibration/real_games.jsonl (real games from it)")
+    ap.add_argument(
+        "--dataset",
+        required=True,
+        help="realism dataset (agent-shadow-realism.sh --save)",
+    )
+    ap.add_argument(
+        "--experiments", required=True, help="copy of the agent's experiments directory"
+    )
+    ap.add_argument(
+        "--journal", help="copy of calibration/real_games.jsonl (real games from it)"
+    )
     ap.add_argument("--flags", default="services/flagd/agent.json")
-    ap.add_argument("--write", action="append", default=[], help="flagd file to rewrite in place")
+    ap.add_argument(
+        "--write", action="append", default=[], help="flagd file to rewrite in place"
+    )
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     try:
