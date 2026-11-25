@@ -74,23 +74,16 @@ type failingSink struct{}
 
 func (failingSink) Apply(context.Context, Decision) error { return errors.New("flag service refused") }
 
-// UC: UC-035 5
-// agent.flag_state carries the live write gate, so a re-emit shows it flipping (#2093).
+// UC: UC-035 3
+// The flag state carries the live write gate, so the panel shows it flipping (#2093).
 func TestFlagState_CarriesInterventionsEnabled(t *testing.T) {
-	l, sr, fl := newTestLoop(t)
+	l, b, fl := boardLoop(t)
 	c := modeCtx("game_fs2093", "FFA")
-	l.OnEvaluate(context.Background(), c, testTrigger())
-	fl.snap.InterventionsEnabled = true
-	l.OnEvaluate(context.Background(), c, testTrigger())
-
-	spans := flagStateSpans(sr)
-	if len(spans) != 2 {
-		t.Fatalf("agent.flag_state = %d, want 2 (the gate flip is a change)", len(spans))
-	}
-	for i, want := range []bool{false, true} {
-		v, ok := attrValue(spans[i], AttrInterventionsEnabled)
-		if !ok || v.AsBool() != want {
-			t.Errorf("span %d %s = %v (present %v), want %v", i, AttrInterventionsEnabled, v.Emit(), ok, want)
+	for _, want := range []bool{false, true} {
+		fl.snap.InterventionsEnabled = want
+		l.OnEvaluate(context.Background(), c, testTrigger())
+		if got := b.List(); len(got) != 1 || got[0].InterventionsEnabled != want {
+			t.Errorf("interventions_enabled = %+v, want %v", got, want)
 		}
 	}
 }

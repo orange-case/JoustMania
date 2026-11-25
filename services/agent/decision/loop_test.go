@@ -1,4 +1,4 @@
-package decision
+﻿package decision
 
 import (
 	"context"
@@ -94,22 +94,10 @@ func attrValue(span sdktrace.ReadOnlySpan, key string) (attribute.Value, bool) {
 func TestOnEvaluate_NoDecisionsNoSpans(t *testing.T) {
 	l, sr, _ := newTestLoop(t)
 	l.OnEvaluate(context.Background(), gamecontext.GameContext{}, testTrigger())
-	// The partition's one agent.flag_state (#2059) is not part of the decision trace.
-	if n := len(decisionTraceSpans(sr.Ended())); n != 0 {
+	// No flag-state span either: the flag panel reads the FlagBoard (UC-035 step 3).
+	if n := len(sr.Ended()); n != 0 {
 		t.Fatalf("spans = %d, want 0 (no decision, no trace)", n)
 	}
-}
-
-// decisionTraceSpans drops the agent.flag_state span (#2059), which the first cycle
-// of every partition emits next to the lazy decision trace.
-func decisionTraceSpans(spans []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
-	var out []sdktrace.ReadOnlySpan
-	for _, s := range spans {
-		if s.Name() != SpanFlagState {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 func TestOnEvaluate_EmitsFullHierarchy(t *testing.T) {
@@ -122,7 +110,7 @@ func TestOnEvaluate_EmitsFullHierarchy(t *testing.T) {
 
 	l.OnEvaluate(context.Background(), gamecontext.GameContext{SessionID: "session-1"}, trig)
 
-	ended := decisionTraceSpans(sr.Ended())
+	ended := sr.Ended()
 	if len(ended) != 3 {
 		t.Fatalf("spans = %d, want 3", len(ended))
 	}
@@ -254,7 +242,7 @@ func TestOnEvaluate_BlockedDecisionRecordedNotApplied(t *testing.T) {
 	if got := sink.calls.Load(); got != 0 {
 		t.Fatalf("sink calls = %d, want 0 (blocked action must not apply)", got)
 	}
-	ended := decisionTraceSpans(sr.Ended())
+	ended := sr.Ended()
 	if len(ended) != 3 {
 		t.Fatalf("spans = %d, want 3 (blocked actions are recorded, not dropped)", len(ended))
 	}
@@ -386,7 +374,7 @@ func TestSetThrottle_HonorsConfiguredInterval(t *testing.T) {
 		t.Fatalf("first eval: disabled spans = %d, want 1", got)
 	}
 
-	// Within the 10s window, further evals are throttled — no new span.
+	// Within the 10s window, further evals are throttled â€” no new span.
 	clock = clock.Add(9 * time.Second)
 	l.OnEvaluate(context.Background(), gamecontext.GameContext{}, testTrigger())
 	if got := disabledSpans(); got != 1 {
@@ -405,7 +393,7 @@ func TestSetThrottle_HonorsConfiguredInterval(t *testing.T) {
 // decision.throttle_seconds source (the shared LifecycleHolder.DecisionThrottle in
 // production) is read by shouldLog() EVERY cycle, so changing the source's value
 // mid-session changes the agent.disabled span cadence with NO restart. Driven
-// deterministically with the injected clock and a settable source — no live flagd,
+// deterministically with the injected clock and a settable source â€” no live flagd,
 // no real time, no network: the throttle value is flipped between evaluations
 // exactly as the OpenFeature config-change handler would after a flag change.
 // UC: UC-040 A28
@@ -427,7 +415,7 @@ func TestThrottleSource_HotReloadsMidSession(t *testing.T) {
 		t.Fatalf("first eval: disabled spans = %d, want 1", got)
 	}
 
-	// At +5s, under the 10s window, throttled — no new span.
+	// At +5s, under the 10s window, throttled â€” no new span.
 	clock = clock.Add(5 * time.Second)
 	l.OnEvaluate(context.Background(), gamecontext.GameContext{}, testTrigger())
 	if got := disabledSpans(); got != 1 {
@@ -436,7 +424,7 @@ func TestThrottleSource_HotReloadsMidSession(t *testing.T) {
 
 	// Config-change: shorten the throttle to 2s mid-session (the source now returns
 	// the new value, exactly as a config-change Reload would). The SAME +5s elapsed
-	// since the last emit now EXCEEDS the live 2s window, so the next eval fires —
+	// since the last emit now EXCEEDS the live 2s window, so the next eval fires â€”
 	// proving the new value took effect with no restart.
 	throttle = 2 * time.Second
 	l.OnEvaluate(context.Background(), gamecontext.GameContext{}, testTrigger())

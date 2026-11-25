@@ -2,70 +2,28 @@ package experiment
 
 import (
 	"context"
-	"strconv"
-	"strings"
+	"fmt"
 	"testing"
-	"unicode/utf8"
-
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/joustmania/agent/experiment/journal"
 	"github.com/joustmania/agent/patterngame"
-	"github.com/joustmania/agent/telemetry/keys"
 )
 
-// progress_test.go covers experiment.progress (#2059, docs/specs/telemetry.md §4.1):
-// a registry snapshot per state change and per heartbeat, its own root with a Link to
-// agent.experiment, numbers equal to the journal summary.
+// progress_test.go covers the progress snapshot behind GET /experiments/state: one
+// recorded per state change, numbers equal to the journal summary, the live ones
+// plus the newest finished ones held, and no span.
 
-func progressSpans(sr *tracetest.SpanRecorder) []sdktrace.ReadOnlySpan {
-	var out []sdktrace.ReadOnlySpan
-	for _, s := range sr.Ended() {
-		if s.Name() == SpanExperimentProgress {
-			out = append(out, s)
-		}
-	}
-	return out
+// progressLog records every snapshot r records, in order.
+func progressLog(r *Registry) *[]ProgressSnapshot {
+	var log []ProgressSnapshot
+	r.onProgress = func(s ProgressSnapshot) { log = append(log, s) }
+	return &log
 }
 
-func progressTriggers(sr *tracetest.SpanRecorder) []string {
-	var out []string
-	for _, s := range progressSpans(sr) {
-		v, _ := rootSpanAttr(s, AttrExperimentProgressTrigger)
-		out = append(out, v)
-	}
-	return out
-}
-
-// armEvent is one experiment.arm event's numbers.
-type armEvent struct {
-	assigned, samples int64
-	mean              float64
-}
-
-func armEvents(t *testing.T, s sdktrace.ReadOnlySpan) map[string]armEvent {
-	t.Helper()
-	out := map[string]armEvent{}
-	for _, ev := range s.Events() {
-		if ev.Name != EventExperimentArm {
-			continue
-		}
-		var arm string
-		var a armEvent
-		for _, kv := range ev.Attributes {
-			switch string(kv.Key) {
-			case keys.AttrExperimentArm:
-				arm = kv.Value.AsString()
-			case AttrExperimentArmAssigned:
-				a.assigned = kv.Value.AsInt64()
-			case AttrExperimentArmSamples:
-				a.samples = kv.Value.AsInt64()
-			case AttrExperimentArmMeanFitness:
-				a.mean = kv.Value.AsFloat64()
-			}
-		}
-		out[arm] = a
+func triggersOf(log []ProgressSnapshot) []string {
+	out := make([]string, 0, len(log))
+	for _, s := range log {
+		out = append(out, s.Trigger)
 	}
 	return out
 }
@@ -82,10 +40,16 @@ func equalTriggers(got, want []string) bool {
 	return true
 }
 
+func progressRegistry(t *testing.T, cfg RegistryConfig) (*Registry, *[]ProgressSnapshot) {
+	t.Helper()
+	r, _ := rootSpanRegistry(t, cfg)
+	return r, progressLog(r)
+}
+
 // UC: UC-035 4
-func TestProgress_EmittedOnEveryStateChange(t *testing.T) {
+func TestProgress_RecordedOnEveryStateChange(t *testing.T) {
 	spawner := &fakeSpawner{}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
 		MaxShadowGames: 2,
 	})
@@ -108,102 +72,55 @@ func TestProgress_EmittedOnEveryStateChange(t *testing.T) {
 		ProgressTriggerGameConcluded, ProgressTriggerGameReleased,
 		ProgressTriggerTerminal,
 	}
-	if got := progressTriggers(sr); !equalTriggers(got, want) {
+	if got := triggersOf(*log); !equalTriggers(got, want) {
 		t.Fatalf("UC-035/4 triggers = %v, want %v", got, want)
 	}
-	last := progressSpans(sr)[len(want)-1]
-	if v, _ := rootSpanAttr(last, AttrExperimentEndReason); v != "operator stop" {
-		t.Errorf("experiment.end_reason = %q, want %q", v, "operator stop")
+	last := (*log)[len(want)-1]
+	if last.EndReason != "operator stop" || last.Status != string(StatusAborted) {
+		t.Errorf("terminal snapshot = %q / %q, want aborted / operator stop", last.Status, last.EndReason)
 	}
-	if v, _ := rootSpanAttr(last, keys.AttrExperimentStatus); v != string(StatusAborted) {
-		t.Errorf("experiment.status = %q, want %q", v, StatusAborted)
-	}
-	for _, s := range progressSpans(sr)[:len(want)-1] {
-		if _, ok := rootSpanAttr(s, AttrExperimentEndReason); ok {
-			t.Errorf("%s snapshot carries experiment.end_reason; terminal only", s.Name())
+	for _, s := range (*log)[:len(want)-1] {
+		if s.EndReason != "" {
+			t.Errorf("%s snapshot carries end_reason %q; terminal only", s.Trigger, s.EndReason)
 		}
+	}
+	if held := r.Progress(); len(held) != 1 || held[0].Trigger != ProgressTriggerTerminal {
+		t.Errorf("held = %+v, want the terminal snapshot only", held)
 	}
 }
 
 // UC: UC-035 4
-func TestProgress_AttributeSet(t *testing.T) {
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+func TestProgress_Fields(t *testing.T) {
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: &fakeSpawner{}, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
 		MaxShadowGames: 2,
 	})
 	id := startedExperiment(t, r)
-	spans := progressSpans(sr)
-	if len(spans) != 1 {
-		t.Fatalf("experiment.progress = %d, want 1", len(spans))
+	if len(*log) != 1 {
+		t.Fatalf("snapshots = %d, want 1", len(*log))
 	}
+	s := (*log)[0]
 	in := sampleIntent()
-	want := map[string]string{
-		keys.AttrExperimentID:         id,
-		keys.AttrExperimentStatus:     string(StatusRunning),
-		keys.AttrExperimentFlagKey:    in.FlagKey,
-		keys.AttrExperimentObjective:  in.Objective,
-		keys.AttrExperimentTargetN:    strconv.Itoa(r.entries[id].journal.Intent().TargetNPerArm), // reconciled up to min-N
-		keys.AttrExperimentArms:       ArmExperimental + "," + ArmControl,
-		AttrExperimentProgressTrigger: ProgressTriggerStarted,
-		keys.AttrExperimentThesis:     in.Hypothesis,
-		AttrExperimentValue:           "0.5",
+	expCtx, _ := r.ExperimentSpanContext(id)
+	if s.ID != id || s.Status != string(StatusRunning) || s.FlagKey != in.FlagKey || s.Objective != in.Objective ||
+		s.Thesis != in.Hypothesis || s.TargetN != r.entries[id].journal.Intent().TargetNPerArm {
+		t.Errorf("snapshot = %+v, want the intent's fields", s)
 	}
-	got := map[string]string{}
-	for _, kv := range spans[0].Attributes() {
-		got[string(kv.Key)] = kv.Value.Emit()
+	if fmt.Sprint(s.ExperimentalValue) != "0.5" {
+		t.Errorf("experimental_value = %v, want 0.5", s.ExperimentalValue)
 	}
-	if len(got) != len(want) {
-		t.Errorf("attributes = %v, want exactly %v (no verdict yet)", got, want)
+	if s.Verdict != nil || s.Recommendation != nil {
+		t.Errorf("verdict / recommendation = %v / %v, want none yet", s.Verdict, s.Recommendation)
 	}
-	for k, w := range want {
-		if got[k] != w {
-			t.Errorf("%s = %q, want %q", k, got[k], w)
-		}
+	if s.TraceID == "" || s.TraceID != expCtx.TraceID().String() {
+		t.Errorf("trace_id = %q, want the agent.experiment trace %s", s.TraceID, expCtx.TraceID())
 	}
-	arms := armEvents(t, spans[0])
-	if len(arms) != 2 {
-		t.Fatalf("experiment.arm events = %v, want one per arm", arms)
+	if len(s.Arms) != 2 || s.Arms[0].Arm != ArmExperimental || s.Arms[1].Arm != ArmControl {
+		t.Errorf("arms = %+v, want experimental then control", s.Arms)
 	}
-}
-
-// UC: UC-035 4
-func TestProgress_OwnRootLinkedToTheExperimentSpan(t *testing.T) {
-	r, sr := rootSpanRegistry(t, RegistryConfig{
-		Spawner: &fakeSpawner{}, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
-		MaxShadowGames: 2,
-	})
-	id := startedExperiment(t, r)
-	expCtx, ok := r.ExperimentSpanContext(id)
-	if !ok {
-		t.Fatal("no agent.experiment span context")
+	if s.UpdatedAtMs == 0 {
+		t.Error("updated_at_ms is unset")
 	}
-	r.ProgressHeartbeat()
-	_ = r.Abort(context.Background(), id, "done") // terminal: the span ends first
-
-	spans := progressSpans(sr)
-	if len(spans) != 3 {
-		t.Fatalf("experiment.progress = %d, want 3 (started, heartbeat, terminal)", len(spans))
-	}
-	for _, s := range spans {
-		if s.Parent().IsValid() {
-			t.Errorf("%v: parent %s, want its own root", progressTriggersOf(s), s.Parent().SpanID())
-		}
-		if s.SpanContext().TraceID() == expCtx.TraceID() {
-			t.Errorf("%v: in the agent.experiment trace, want its own trace", progressTriggersOf(s))
-		}
-		links := s.Links()
-		if len(links) != 1 || links[0].SpanContext.SpanID() != expCtx.SpanID() || links[0].SpanContext.TraceID() != expCtx.TraceID() {
-			t.Fatalf("%v: links = %v, want one Link to agent.experiment", progressTriggersOf(s), links)
-		}
-		if len(links[0].Attributes) != 1 || string(links[0].Attributes[0].Key) != "link.kind" || links[0].Attributes[0].Value.AsString() != "experiment" {
-			t.Errorf("link attributes = %v, want link.kind=experiment", links[0].Attributes)
-		}
-	}
-}
-
-func progressTriggersOf(s sdktrace.ReadOnlySpan) string {
-	v, _ := rootSpanAttr(s, AttrExperimentProgressTrigger)
-	return v
 }
 
 // The snapshot's per-arm numbers equal the journal summary after every fold, and a
@@ -211,65 +128,60 @@ func progressTriggersOf(s sdktrace.ReadOnlySpan) string {
 // UC: UC-035 4
 func TestProgress_NumbersEqualTheJournalSummary(t *testing.T) {
 	spawner := &fakeSpawner{}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
 		MaxShadowGames: 2,
 	})
 	id := startedExperiment(t, r)
-	fitness := []float64{0.2, 0.6, 0.5, 0.9}
-	for i, f := range fitness {
+	for i, f := range []float64{0.2, 0.6, 0.5, 0.9} {
 		r.AllocateAndSpawn(context.Background())
 		g := spawner.calls[len(spawner.calls)-1]
 		if _, err := r.ConcludeGame(context.Background(), g.gameID, f, 60); err != nil {
 			t.Fatal(err)
 		}
-		spans := progressSpans(sr)
-		last := spans[len(spans)-1]
-		if trig := progressTriggersOf(last); trig != ProgressTriggerGameConcluded {
-			t.Fatalf("round %d: last trigger = %q, want game_concluded", i, trig)
+		last := (*log)[len(*log)-1]
+		if last.Trigger != ProgressTriggerGameConcluded {
+			t.Fatalf("round %d: last trigger = %q, want game_concluded", i, last.Trigger)
 		}
 		summary := r.entries[id].journal.Summary()
-		got := armEvents(t, last)
-		for arm, st := range summary.Arms {
-			a := got[arm]
-			if a.samples != int64(st.Count) || a.mean != st.Mean {
-				t.Fatalf("round %d arm %s: span samples=%d mean=%v, journal count=%d mean=%v",
-					i, arm, a.samples, a.mean, st.Count, st.Mean)
-			}
-		}
-		inFlight := map[string]int64{}
+		inFlight := map[string]int{}
 		for gid, arm := range r.entries[id].games {
 			if !isReservation(gid) {
 				inFlight[arm]++
 			}
 		}
-		for arm, a := range got {
-			if a.assigned != inFlight[arm] {
-				t.Fatalf("round %d arm %s: assigned=%d, in flight=%d", i, arm, a.assigned, inFlight[arm])
+		for _, a := range last.Arms {
+			st := summary.Arms[a.Arm]
+			if st != nil && (a.Samples != st.Count || a.MeanFitness != st.Mean) {
+				t.Fatalf("round %d arm %s: samples=%d mean=%v, journal count=%d mean=%v",
+					i, a.Arm, a.Samples, a.MeanFitness, st.Count, st.Mean)
+			}
+			if a.InFlight != inFlight[a.Arm] {
+				t.Fatalf("round %d arm %s: in_flight=%d, want %d", i, a.Arm, a.InFlight, inFlight[a.Arm])
 			}
 		}
 	}
 }
 
-// A game the registry does not know (never bound, so never folded) leaves no snapshot.
+// A game the registry does not know (never bound, so never folded) records nothing.
 // UC: UC-035 4
-func TestProgress_UnfoldedGameEmitsNothing(t *testing.T) {
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+func TestProgress_UnfoldedGameRecordsNothing(t *testing.T) {
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: &fakeSpawner{}, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
 		MaxShadowGames: 2,
 	})
 	startedExperiment(t, r)
-	before := len(progressSpans(sr))
+	before := len(*log)
 	if _, err := r.ConcludeGame(context.Background(), "not-ours", 0.9, 60); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(progressSpans(sr)); n != before {
-		t.Fatalf("experiment.progress after an unknown game = %d, want %d", n, before)
+	if n := len(*log); n != before {
+		t.Fatalf("snapshots after an unknown game = %d, want %d", n, before)
 	}
 }
 
 // UC: UC-035 4
-func TestProgress_RehydrateEmitsExactlyOnce(t *testing.T) {
+func TestProgress_RehydrateRecordsExactlyOnce(t *testing.T) {
 	root := t.TempDir()
 	r1, _ := rootSpanRegistry(t, RegistryConfig{
 		Root: root, Spawner: &fakeSpawner{}, Verdict: fakeVerdict{concludeAtN: 1000},
@@ -277,7 +189,7 @@ func TestProgress_RehydrateEmitsExactlyOnce(t *testing.T) {
 	})
 	id := startedExperiment(t, r1)
 
-	r2, sr2 := rootSpanRegistry(t, RegistryConfig{
+	r2, log := progressRegistry(t, RegistryConfig{
 		Root: root, Spawner: &fakeSpawner{}, Verdict: fakeVerdict{concludeAtN: 1000},
 		Targeting: &fakeTargeting{}, MaxShadowGames: 2,
 	})
@@ -287,55 +199,21 @@ func TestProgress_RehydrateEmitsExactlyOnce(t *testing.T) {
 	if err := r2.Rehydrate([]string{id}); err != nil { // a known id is left alone
 		t.Fatal(err)
 	}
-	if got := progressTriggers(sr2); !equalTriggers(got, []string{ProgressTriggerRehydrate}) {
+	if got := triggersOf(*log); !equalTriggers(got, []string{ProgressTriggerRehydrate}) {
 		t.Fatalf("triggers after rehydrate = %v, want [rehydrate]", got)
 	}
 	expCtx, _ := r2.ExperimentSpanContext(id)
-	if l := progressSpans(sr2)[0].Links(); len(l) != 1 || l[0].SpanContext.SpanID() != expCtx.SpanID() {
-		t.Errorf("rehydrate snapshot links = %v, want the fresh agent.experiment span", l)
+	if (*log)[0].TraceID != expCtx.TraceID().String() {
+		t.Errorf("rehydrate trace_id = %q, want the fresh agent.experiment trace", (*log)[0].TraceID)
 	}
 }
 
-// UC: UC-035 4
-func TestProgress_HeartbeatCoversLiveExperimentsOnly(t *testing.T) {
-	r, sr := rootSpanRegistry(t, RegistryConfig{
-		Spawner: &fakeSpawner{}, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
-		MaxShadowGames: 4,
-	})
-	live := startedExperiment(t, r)
-	in := sampleIntent()
-	in.FlagKey = "other_flag"
-	done, err := r.Declare(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Start(context.Background(), done); err != nil {
-		t.Fatal(err)
-	}
-	_ = r.Abort(context.Background(), done, "stop")
-	before := len(progressSpans(sr))
-
-	r.ProgressHeartbeat()
-	spans := progressSpans(sr)[before:]
-	if len(spans) != 1 {
-		t.Fatalf("heartbeat snapshots = %d, want 1 (the live experiment)", len(spans))
-	}
-	if v, _ := rootSpanAttr(spans[0], keys.AttrExperimentID); v != live {
-		t.Errorf("heartbeat experiment.id = %q, want %q", v, live)
-	}
-	if progressTriggersOf(spans[0]) != ProgressTriggerHeartbeat {
-		t.Errorf("trigger = %q, want heartbeat", progressTriggersOf(spans[0]))
-	}
-	var nilRegistry *Registry
-	nilRegistry.ProgressHeartbeat() // nil-safe
-}
-
-// The concluded and promoting transitions each emit a snapshot, and the
+// The concluded and promoting transitions each record a snapshot, and the
 // game_concluded snapshot already carries the interim verdict of that game.
 // UC: UC-035 4
 func TestProgress_ConcludedAndPromotingSnapshots(t *testing.T) {
 	spawner := &fakeSpawner{}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: fakeVerdict{outcome: CohortOutcomePromote, concludeAtN: 1},
 		Targeting: &fakeTargeting{}, MaxShadowGames: 2,
 	})
@@ -350,26 +228,25 @@ func TestProgress_ConcludedAndPromotingSnapshots(t *testing.T) {
 		ProgressTriggerGameConcluded, ProgressTriggerConcluded, ProgressTriggerPromoting,
 		ProgressTriggerTerminal,
 	}
-	if got := progressTriggers(sr); !equalTriggers(got, want) {
+	if got := triggersOf(*log); !equalTriggers(got, want) {
 		t.Fatalf("UC-035/4 triggers = %v, want %v", got, want)
 	}
-	spans := progressSpans(sr)
 	for i, wantStatus := range map[int]Status{4: StatusConcluded, 5: StatusPromoting} {
-		if v, _ := rootSpanAttr(spans[i], keys.AttrExperimentStatus); v != string(wantStatus) {
-			t.Errorf("%s snapshot experiment.status = %q, want %q", progressTriggersOf(spans[i]), v, wantStatus)
+		if got := (*log)[i].Status; got != string(wantStatus) {
+			t.Errorf("%s snapshot status = %q, want %q", (*log)[i].Trigger, got, wantStatus)
 		}
 	}
-	if v, _ := rootSpanAttr(spans[3], keys.AttrVerdictOutcome); v != CohortOutcomePromote {
-		t.Errorf("game_concluded verdict.outcome = %q, want %q (the verdict of this game)", v, CohortOutcomePromote)
+	if v := (*log)[3].Verdict; v == nil || v.Outcome != CohortOutcomePromote {
+		t.Errorf("game_concluded verdict = %+v, want %q (the verdict of this game)", v, CohortOutcomePromote)
 	}
 }
 
-// verdict.* on a game_concluded snapshot is the interim verdict computed from that
+// The verdict on a game_concluded snapshot is the interim verdict computed from that
 // game, never the previous game's.
 // UC: UC-035 4
 func TestProgress_GameConcludedVerdictDoesNotLag(t *testing.T) {
 	spawner := &fakeSpawner{}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: fakeVerdict{concludeAtN: 1000, alwaysReport: true},
 		Targeting: &fakeTargeting{}, MaxShadowGames: 2,
 	})
@@ -378,13 +255,12 @@ func TestProgress_GameConcludedVerdictDoesNotLag(t *testing.T) {
 	if _, err := r.ConcludeGame(context.Background(), spawner.calls[0].gameID, 0.4, 60); err != nil {
 		t.Fatal(err)
 	}
-	spans := progressSpans(sr)
-	last := spans[len(spans)-1]
-	if progressTriggersOf(last) != ProgressTriggerGameConcluded {
-		t.Fatalf("last trigger = %q, want game_concluded", progressTriggersOf(last))
+	last := (*log)[len(*log)-1]
+	if last.Trigger != ProgressTriggerGameConcluded {
+		t.Fatalf("last trigger = %q, want game_concluded", last.Trigger)
 	}
-	if v, ok := rootSpanAttr(last, keys.AttrVerdictOutcome); !ok || v != OutcomeInconclusive {
-		t.Fatalf("first game_concluded verdict.outcome = %q (set %v), want %q", v, ok, OutcomeInconclusive)
+	if last.Verdict == nil || last.Verdict.Outcome != OutcomeInconclusive {
+		t.Fatalf("first game_concluded verdict = %+v, want %q", last.Verdict, OutcomeInconclusive)
 	}
 }
 
@@ -399,12 +275,12 @@ func (v abortingVerdict) Evaluate(journal.Summary) (journal.Verdict, bool) {
 }
 
 // An experiment torn down between the fold and the game_concluded snapshot has
-// already emitted its terminal snapshot: no game_concluded follows it.
+// already recorded its terminal snapshot: no game_concluded follows it.
 // UC: UC-035 4
-func TestProgress_TornDownDuringConcludeEmitsNoGameConcluded(t *testing.T) {
+func TestProgress_TornDownDuringConcludeRecordsNoGameConcluded(t *testing.T) {
 	spawner := &fakeSpawner{}
 	var reg *Registry
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: abortingVerdict{r: &reg},
 		Targeting: &fakeTargeting{}, MaxShadowGames: 2,
 	})
@@ -419,26 +295,26 @@ func TestProgress_TornDownDuringConcludeEmitsNoGameConcluded(t *testing.T) {
 		ProgressTriggerGameAssigned, ProgressTriggerGameAssigned,
 		ProgressTriggerTerminal,
 	}
-	if got := progressTriggers(sr); !equalTriggers(got, want) {
+	if got := triggersOf(*log); !equalTriggers(got, want) {
 		t.Fatalf("UC-035/4 triggers = %v, want %v (no game_concluded after terminal)", got, want)
 	}
 }
 
 // A pattern experiment whose pin cannot be restored is discarded on rehydrate: it
-// emits only its terminal snapshot, never a rehydrate snapshot with status running.
+// records only its terminal snapshot, never a rehydrate snapshot with status running.
 // UC: UC-046 BR-015
-func TestProgress_LostPinRehydrateEmitsOnlyTerminal(t *testing.T) {
+func TestProgress_LostPinRehydrateRecordsOnlyTerminal(t *testing.T) {
 	root := t.TempDir()
 	r1 := newTestRegistry(t, RegistryConfig{Root: root, MaxShadowGames: 2, Spawner: &fakeSpawner{}})
 	id := startedExperiment(t, r1)
 	r1.AllocateAndSpawn(context.Background()) // a game assigned with no pin
 
-	r2, sr2 := rootSpanRegistry(t, RegistryConfig{Root: root, MaxShadowGames: 2, Spawner: &patternSpawner{},
+	r2, log := progressRegistry(t, RegistryConfig{Root: root, MaxShadowGames: 2, Spawner: &patternSpawner{},
 		Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "a")}}})
 	if err := r2.Rehydrate([]string{id}); err != nil {
 		t.Fatal(err)
 	}
-	if got := progressTriggers(sr2); !equalTriggers(got, []string{ProgressTriggerTerminal}) {
+	if got := triggersOf(*log); !equalTriggers(got, []string{ProgressTriggerTerminal}) {
 		t.Fatalf("UC-046/BR-015 triggers after a lost-pin rehydrate = %v, want [terminal]", got)
 	}
 }
@@ -458,12 +334,11 @@ func (h *hookSpawner) Spawn(ctx context.Context, experimentID, arm string, seed 
 	return h.fakeSpawner.Spawn(ctx, experimentID, arm, seed)
 }
 
-// experiment.arm_stats.assigned counts bound in-flight games only: a pending spawn
-// reservation is not a game yet.
+// in_flight counts bound games only: a pending spawn reservation is not a game yet.
 // UC: UC-035 4
-func TestProgress_AssignedExcludesSpawnReservations(t *testing.T) {
+func TestProgress_InFlightExcludesSpawnReservations(t *testing.T) {
 	spawner := &hookSpawner{}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
 		MaxShadowGames: 2,
 	})
@@ -476,35 +351,33 @@ func TestProgress_AssignedExcludesSpawnReservations(t *testing.T) {
 				reserved++
 			}
 		}
+		r.emitProgressLocked(r.entries[id], "probe", "", r.entries[id].spanCtx)
 		r.mu.Unlock()
-		r.ProgressHeartbeat()
 	}
 	r.AllocateAndSpawn(context.Background())
 	if reserved == 0 {
 		t.Fatal("no spawn reservation pending inside Spawn; the test does not cover the exclusion")
 	}
-	var hb []sdktrace.ReadOnlySpan
-	for _, s := range progressSpans(sr) {
-		if progressTriggersOf(s) == ProgressTriggerHeartbeat {
-			hb = append(hb, s)
+	for _, s := range *log {
+		if s.Trigger != "probe" {
+			continue
 		}
-	}
-	if len(hb) != 1 {
-		t.Fatalf("heartbeat snapshots = %d, want 1", len(hb))
-	}
-	for arm, a := range armEvents(t, hb[0]) {
-		if a.assigned != 0 {
-			t.Errorf("arm %s assigned = %d with only reservations pending, want 0", arm, a.assigned)
+		for _, a := range s.Arms {
+			if a.InFlight != 0 {
+				t.Errorf("arm %s in_flight = %d with only reservations pending, want 0", a.Arm, a.InFlight)
+			}
 		}
+		return
 	}
+	t.Fatal("no probe snapshot")
 }
 
 // The concluded snapshot carries the FINAL verdict (#2042), not the last interim
-// one: a give-up conclusion with no interim verdict still reports verdict.outcome.
+// one: a give-up conclusion with no interim verdict still reports the outcome.
 // UC: UC-035 4
 func TestProgress_ConcludedSnapshotCarriesFinalVerdict(t *testing.T) {
 	spawner := &fakeSpawner{}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: fakeVerdict{concludeAtN: 1000},
 		Targeting: &fakeTargeting{}, MaxShadowGames: 2, MaxGamesPerExperiment: 1,
 	})
@@ -513,86 +386,72 @@ func TestProgress_ConcludedSnapshotCarriesFinalVerdict(t *testing.T) {
 	if _, err := r.ConcludeGame(context.Background(), spawner.calls[0].gameID, 0.4, 60); err != nil {
 		t.Fatal(err)
 	}
-	var gameConcluded, concluded int = -1, -1
-	spans := progressSpans(sr)
-	for i, s := range spans {
-		switch progressTriggersOf(s) {
+	var gameConcluded, concluded *ProgressSnapshot
+	for i := range *log {
+		switch (*log)[i].Trigger {
 		case ProgressTriggerGameConcluded:
-			gameConcluded = i
+			gameConcluded = &(*log)[i]
 		case ProgressTriggerConcluded:
-			concluded = i
+			concluded = &(*log)[i]
 		}
 	}
-	if gameConcluded < 0 || concluded < 0 {
-		t.Fatalf("triggers = %v, want game_concluded and concluded", progressTriggers(sr))
+	if gameConcluded == nil || concluded == nil {
+		t.Fatalf("triggers = %v, want game_concluded and concluded", triggersOf(*log))
 	}
-	if _, ok := rootSpanAttr(spans[gameConcluded], keys.AttrVerdictOutcome); ok {
+	if gameConcluded.Verdict != nil {
 		t.Fatalf("game_concluded carries a verdict, want none (no interim verdict)")
 	}
-	if v, ok := rootSpanAttr(spans[concluded], keys.AttrVerdictOutcome); !ok || v != OutcomeInconclusive {
-		t.Fatalf("concluded verdict.outcome = %q (set %v), want final %q", v, ok, OutcomeInconclusive)
+	if concluded.Verdict == nil || concluded.Verdict.Outcome != OutcomeInconclusive {
+		t.Fatalf("concluded verdict = %+v, want final %q", concluded.Verdict, OutcomeInconclusive)
 	}
 }
 
-func TestCapSpanText(t *testing.T) {
-	if got := capSpanText("short"); got != "short" {
-		t.Fatalf("short text changed: %q", got)
+// Every live experiment is held, finished ones only the newest MaxFinishedProgress.
+// UC: UC-035 4
+func TestProgress_HoldsLiveAndTheNewestFinished(t *testing.T) {
+	r := newTestRegistry(t, RegistryConfig{Spawner: &fakeSpawner{}, MaxShadowGames: 2})
+	now := int64(0)
+	r.mu.Lock()
+	for i := 0; i < MaxFinishedProgress+3; i++ {
+		now++
+		id := fmt.Sprintf("exp_done_%02d", i)
+		r.progress = mapWith(r.progress, ProgressSnapshot{ID: id, Status: string(StatusDone), UpdatedAtMs: now})
+		r.pruneProgressLocked()
 	}
-	long := strings.Repeat("a", 600)
-	got := capSpanText(long)
-	if len(got) != maxSpanTextLen || !strings.HasSuffix(got, "...") {
-		t.Fatalf("ascii cap: len=%d", len(got))
+	r.progress = mapWith(r.progress, ProgressSnapshot{ID: "exp_live", Status: string(StatusRunning), UpdatedAtMs: 0})
+	r.pruneProgressLocked()
+	r.mu.Unlock()
+
+	held := r.Progress()
+	if len(held) != MaxFinishedProgress+1 {
+		t.Fatalf("held = %d, want %d finished plus the live one", len(held), MaxFinishedProgress)
 	}
-	// multi-byte runes straddling the cut stay valid UTF-8
-	multi := capSpanText(strings.Repeat("\u00e4", 400))
-	if len(multi) > maxSpanTextLen || !utf8.ValidString(multi) || !strings.HasSuffix(multi, "...") {
-		t.Fatalf("utf8 cap: len=%d valid=%v", len(multi), utf8.ValidString(multi))
+	if held[0].ID != fmt.Sprintf("exp_done_%02d", MaxFinishedProgress+2) || held[len(held)-1].ID != "exp_live" {
+		t.Errorf("order %s..%s, want newest first", held[0].ID, held[len(held)-1].ID)
+	}
+	var nilRegistry *Registry
+	if len(nilRegistry.Progress()) != 0 {
+		t.Error("a nil registry holds nothing")
 	}
 }
 
-func TestProgress_ThesisAndValueCapped(t *testing.T) {
-	r, sr := rootSpanRegistry(t, RegistryConfig{
-		Spawner: &fakeSpawner{}, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
-		MaxShadowGames: 2,
-	})
-	in := sampleIntent()
-	in.Hypothesis = strings.Repeat("h", 2000)
-	in.ExperimentalValue = strings.Repeat("v", 2000)
-	id, err := r.Declare(in)
-	if err != nil {
-		t.Fatalf("declare: %v", err)
+func mapWith(m map[string]ProgressSnapshot, s ProgressSnapshot) map[string]ProgressSnapshot {
+	if m == nil {
+		m = map[string]ProgressSnapshot{}
 	}
-	if err := r.Start(context.Background(), id); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	spans := progressSpans(sr)
-	if len(spans) == 0 {
-		t.Fatal("no experiment.progress span")
-	}
-	seen := 0
-	for _, kv := range spans[0].Attributes() {
-		k := string(kv.Key)
-		if k == keys.AttrExperimentThesis || k == AttrExperimentValue {
-			seen++
-			if v := kv.Value.AsString(); len(v) != maxSpanTextLen || !strings.HasSuffix(v, "...") {
-				t.Errorf("%s: len=%d, want %d ending in ...", k, len(v), maxSpanTextLen)
-			}
-		}
-	}
-	if seen != 2 {
-		t.Fatalf("saw %d capped attrs, want 2", seen)
-	}
+	m[s.ID] = s
+	return m
 }
 
 // A promotion refused because another writer owns the real overlay (UC-043 A19,
-// #2276) puts the winning value on the experiment's snapshots as a recommendation.
+// #2276) puts the winning value on the experiment's snapshot as a recommendation.
 // UC: UC-043 A19
 func TestProgress_RefusedPromotionCarriesRecommendation(t *testing.T) {
 	spawner := &fakeSpawner{}
 	promoter := &fakePromoter{result: PromotionResult{
 		Outcome: PromotionDiscarded, Reason: "real_overlay_owned_by_another_writer owner=operator", ForeignOwner: "operator",
 	}}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: fakeVerdict{outcome: CohortOutcomePromote, concludeAtN: 1},
 		Targeting: &fakeTargeting{}, MaxShadowGames: 2, Promoter: promoter,
 	})
@@ -601,63 +460,23 @@ func TestProgress_RefusedPromotionCarriesRecommendation(t *testing.T) {
 	if _, err := r.ConcludeGame(context.Background(), spawner.calls[0].gameID, 0.9, 60); err != nil {
 		t.Fatal(err)
 	}
-	spans := progressSpans(sr)
-	last := spans[len(spans)-1]
-	for key, want := range map[string]string{
-		AttrExperimentRecommendationFlag:  "death_grace_period_seconds",
-		AttrExperimentRecommendationValue: "0.5",
-		AttrExperimentRecommendationOwner: "operator",
-	} {
-		if got, _ := rootSpanAttr(last, key); got != want {
-			t.Errorf("terminal snapshot %s = %q, want %q", key, got, want)
-		}
+	last := (*log)[len(*log)-1]
+	want := ProgressRecommendation{Flag: "death_grace_period_seconds", Value: "0.5", Owner: "operator"}
+	if last.Recommendation == nil || *last.Recommendation != want {
+		t.Errorf("terminal recommendation = %+v, want %+v", last.Recommendation, want)
 	}
-	if _, ok := rootSpanAttr(spans[0], AttrExperimentRecommendationOwner); ok {
+	if (*log)[0].Recommendation != nil {
 		t.Error("started snapshot carries a recommendation")
 	}
 }
 
-// The recommendation value is capped like the thesis and experimental value.
+// A deferred write refused after the experiment ended (RecordPromotion) records a
+// fresh snapshot with the recommendation; a plain later outcome records none.
 // UC: UC-043 A19
-func TestProgress_RecommendationValueCapped(t *testing.T) {
-	spawner := &fakeSpawner{}
-	promoter := &fakePromoter{result: PromotionResult{
-		Outcome: PromotionDiscarded, Reason: "real_overlay_owned_by_another_writer owner=operator", ForeignOwner: "operator",
-	}}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
-		Spawner: spawner, Verdict: fakeVerdict{outcome: CohortOutcomePromote, concludeAtN: 1},
-		Targeting: &fakeTargeting{}, MaxShadowGames: 2, Promoter: promoter,
-	})
-	in := sampleIntent()
-	in.ExperimentalValue = strings.Repeat("v", 2000)
-	id, err := r.Declare(in)
-	if err != nil {
-		t.Fatalf("declare: %v", err)
-	}
-	if err := r.Start(context.Background(), id); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	r.AllocateAndSpawn(context.Background())
-	if _, err := r.ConcludeGame(context.Background(), spawner.calls[0].gameID, 0.9, 60); err != nil {
-		t.Fatal(err)
-	}
-	spans := progressSpans(sr)
-	got, ok := rootSpanAttr(spans[len(spans)-1], AttrExperimentRecommendationValue)
-	if !ok {
-		t.Fatal("terminal snapshot carries no recommendation value")
-	}
-	if len(got) != maxSpanTextLen || !strings.HasSuffix(got, "...") {
-		t.Errorf("recommendation value len=%d suffix=%q, want %d bytes ending in ...", len(got), got[max(0, len(got)-3):], maxSpanTextLen)
-	}
-}
-
-// A deferred write refused after the experiment ended (RecordPromotion) emits a
-// fresh snapshot with the recommendation; a plain later outcome emits none.
-// UC: UC-043 A19
-func TestProgress_DeferredRefusalEmitsRecommendationSnapshot(t *testing.T) {
+func TestProgress_DeferredRefusalRecordsRecommendationSnapshot(t *testing.T) {
 	spawner := &fakeSpawner{}
 	promoter := &fakePromoter{result: PromotionResult{Outcome: PromotionDiscarded, Reason: "deferred"}}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: fakeVerdict{outcome: CohortOutcomePromote, concludeAtN: 1},
 		Targeting: &fakeTargeting{}, MaxShadowGames: 2, Promoter: promoter,
 	})
@@ -666,37 +485,32 @@ func TestProgress_DeferredRefusalEmitsRecommendationSnapshot(t *testing.T) {
 	if _, err := r.ConcludeGame(context.Background(), spawner.calls[0].gameID, 0.9, 60); err != nil {
 		t.Fatal(err)
 	}
-	before := len(progressSpans(sr))
+	before := len(*log)
 	r.RecordPromotion(id, PromotionResult{Outcome: PromotionDiscarded, Reason: "other"})
-	if n := len(progressSpans(sr)); n != before {
-		t.Fatalf("a plain later outcome emitted %d snapshots", n-before)
+	if n := len(*log); n != before {
+		t.Fatalf("a plain later outcome recorded %d snapshots", n-before)
 	}
 	r.RecordPromotion(id, PromotionResult{Outcome: PromotionDiscarded, Reason: "real_overlay_owned_by_another_writer owner=script", ForeignOwner: "script"})
-	spans := progressSpans(sr)
-	if len(spans) != before+1 {
-		t.Fatalf("snapshots = %d, want %d", len(spans), before+1)
+	if len(*log) != before+1 {
+		t.Fatalf("snapshots = %d, want %d", len(*log), before+1)
 	}
-	last := spans[len(spans)-1]
-	if got, _ := rootSpanAttr(last, AttrExperimentProgressTrigger); got != ProgressTriggerRecommendation {
-		t.Errorf("trigger = %q", got)
+	last := (*log)[len(*log)-1]
+	if last.Trigger != ProgressTriggerRecommendation || last.Recommendation == nil || last.Recommendation.Owner != "script" {
+		t.Errorf("snapshot = %+v, want a recommendation by script", last)
 	}
-	if got, _ := rootSpanAttr(last, AttrExperimentRecommendationOwner); got != "script" {
-		t.Errorf("owner = %q, want script", got)
+	// The dashboard's end line must survive the snapshot becoming the newest.
+	if want := (*log)[before-1].EndReason; last.EndReason != want || want == "" {
+		t.Errorf("recommendation end_reason = %q, want %q", last.EndReason, want)
 	}
-	// The dashboard reason line must survive the snapshot becoming the newest.
-	want, _ := rootSpanAttr(spans[before-1], AttrExperimentEndReason)
-	if got, ok := rootSpanAttr(last, AttrExperimentEndReason); !ok || got != want || got == "" {
-		t.Errorf("recommendation end_reason = %q (set %v), want %q", got, ok, want)
-	}
-	if got, _ := rootSpanAttr(last, keys.AttrExperimentStatus); got != string(StatusDiscarded) {
-		t.Errorf("status = %q, want discarded", got)
+	if last.Status != string(StatusDiscarded) {
+		t.Errorf("status = %q, want discarded", last.Status)
 	}
 }
 
 // After a restart a done experiment is not in memory: its deferred refusal still
-// emits a recommendation snapshot, built from the journal, with the end reason.
+// records a recommendation snapshot, built from the journal, with the end reason.
 // UC: UC-043 A19
-func TestProgress_DeferredRefusalAfterRestartEmitsSnapshot(t *testing.T) {
+func TestProgress_DeferredRefusalAfterRestartRecordsSnapshot(t *testing.T) {
 	root := t.TempDir()
 	spawner := &fakeSpawner{}
 	r1, _ := rootSpanRegistry(t, RegistryConfig{
@@ -710,26 +524,23 @@ func TestProgress_DeferredRefusalAfterRestartEmitsSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r2, sr2 := rootSpanRegistry(t, RegistryConfig{Root: root, Spawner: &fakeSpawner{}, MaxShadowGames: 2})
+	r2, log := progressRegistry(t, RegistryConfig{Root: root, Spawner: &fakeSpawner{}, MaxShadowGames: 2})
 	if err := r2.Rehydrate([]string{id}); err != nil {
 		t.Fatal(err)
 	}
 	r2.RecordPromotion(id, PromotionResult{Outcome: PromotionDiscarded, Reason: "real_overlay_owned_by_another_writer owner=script", ForeignOwner: "script"})
-	spans := progressSpans(sr2)
-	if len(spans) != 1 {
-		t.Fatalf("snapshots after restart = %d, want 1", len(spans))
+	if len(*log) != 1 {
+		t.Fatalf("snapshots after restart = %d, want 1", len(*log))
 	}
-	if got, _ := rootSpanAttr(spans[0], AttrExperimentProgressTrigger); got != ProgressTriggerRecommendation {
-		t.Errorf("trigger = %q", got)
+	s := (*log)[0]
+	if s.Trigger != ProgressTriggerRecommendation || s.Recommendation == nil || s.Recommendation.Owner != "script" {
+		t.Errorf("snapshot = %+v, want a recommendation by script", s)
 	}
-	if got, _ := rootSpanAttr(spans[0], AttrExperimentRecommendationOwner); got != "script" {
-		t.Errorf("owner = %q, want script", got)
+	if s.EndReason == "" || s.Status != string(StatusDiscarded) {
+		t.Errorf("end_reason / status = %q / %q, want the teardown reason and discarded", s.EndReason, s.Status)
 	}
-	if got, ok := rootSpanAttr(spans[0], AttrExperimentEndReason); !ok || got == "" {
-		t.Errorf("end_reason = %q (set %v), want the teardown reason", got, ok)
-	}
-	if got, _ := rootSpanAttr(spans[0], keys.AttrExperimentStatus); got != string(StatusDiscarded) {
-		t.Errorf("status = %q, want discarded", got)
+	if held := r2.Progress(); len(held) != 1 || held[0].ID != id {
+		t.Errorf("held = %+v, want the recommendation snapshot", held)
 	}
 }
 

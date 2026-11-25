@@ -1,42 +1,40 @@
 /**
- * Agent tab data from spans (#2059; UC-035 step 3, UC-040 A21, UC-070 BR-005).
+ * Agent tab data (UC-035 step 3, UC-040 A21, UC-070 BR-005): the decide feed and the
+ * flag panel from the agent's GET /experiments/state, rollout rows from Jaeger.
  *
  * Fixtures are in the folds' input shape (the legacy /api/traces JSON); fetch stubs
- * serve them as Jaeger v3 OTLP answers through ./otlp.ts toOtlp (#2283):
+ * serve them as OTLP answers through ./otlp.ts:
  *   jaeger-flag-state-games   two game traces (a real game, then a newer shadow
- *                             game): game_cycle -> agent.flag_state, and
- *                             agent.signal_received -> invoke_agent + agent.decision
- *                             (one blocked, one allowed)
+ *                             game): agent.signal_received -> invoke_agent +
+ *                             agent.decision (one blocked, one allowed)
  *   jaeger-rollout-*          one-span agent.infrastructure.decision traces
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AgentUnavailableError,
   BLOCKED_UNAVAILABLE,
   DecideStore,
-  FLAG_STATE_FALLBACK_LIMIT,
   FlagStateStore,
   ROLLOUT_ACTIONS,
   ROLLOUT_OVERLAP_MS,
   RolloutStore,
   activityFeed,
   blockedRowsFrom,
-  pollDecides,
-  fetchFlagStates,
+  fetchAgentState,
   fetchInterventionCounts,
   fetchRollouts,
-  needsFlagStateFallback,
+  flagPanelFromState,
+  parseAgentState,
   parseAppliedCounts,
   APPLIED_UNAVAILABLE,
   parseBlockedCounts,
-  parseDecideTraces,
-  parseFlagStates,
   rolloutRowFrom,
 } from "../agent.js";
-import type { JaegerTracesResponse, VmQueryResponse } from "../agent.js";
+import type { FlagStateJson, JaegerTracesResponse, VmQueryResponse } from "../agent.js";
 import { WRITE_GATE_OFF_HINT, renderFlagPanel } from "../components/AgentView.js";
 import { FLAG_STATE_NO_DATA } from "../degrade.js";
 import { COLD_START_TIME_MIN, SEARCH_TIME_MAX } from "../jaeger.js";
-import { toOtlp } from "./otlp.js";
+import { agentStateBody, toOtlp } from "./otlp.js";
 import gamesFixture from "./fixtures/jaeger-flag-state-games.json";
 import expandFixture from "./fixtures/jaeger-rollout-expand.json";
 import rollbackFixture from "./fixtures/jaeger-rollout-rollback.json";
@@ -46,6 +44,33 @@ const expand = expandFixture as unknown as JaegerTracesResponse;
 const rollback = rollbackFixture as unknown as JaegerTracesResponse;
 
 const T0_MS = 1_760_000_000_000;
+
+/** A real game's flag state as the agent sends it, and a newer shadow game's. */
+const FLAG_REAL: FlagStateJson = {
+  game_id: "game_real000001",
+  game_kind: "real",
+  game_mode: "JoustFFA",
+  trace_id: "0af7651916cd43dd8448eb211c80319c",
+  updated_at_ms: T0_MS,
+  enabled: true,
+  objectives: "engagement=1.00",
+  interventions_allowed: "grant_shield,end_game",
+  interventions_enabled: true,
+  battery_threshold: 20,
+  max_interventions_per_minute: 6,
+  decision_backend: "claude",
+  act_confidence_threshold: 0.7,
+  experiments_enabled: true,
+  llm_eligible_game_kinds: ["real", "shadow"],
+};
+const FLAG_SHADOW: FlagStateJson = {
+  ...FLAG_REAL,
+  game_id: "game_shadow00001",
+  game_kind: "shadow",
+  updated_at_ms: T0_MS + 60_000,
+  enabled: false,
+};
+const flagStates = () => [FLAG_REAL, FLAG_SHADOW].map(flagPanelFromState);
 
 function vm(result: { metric: Record<string, string>; value: [number, string] }[]): VmQueryResponse {
   return { status: "success", data: { resultType: "vector", result } };
@@ -74,14 +99,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("UC-035: main step 3, flag panel from agent.flag_state", () => {
-  it("UC-035/main step 3 folds the flag set of an agent.flag_state span, booleans included", () => {
-    const states = parseFlagStates(games);
-    const real = states.find((s) => s.gameId === "game_real000001");
+describe("UC-035: main step 3, flag panel from the agent's state", () => {
+  it("UC-035/main step 3 folds a game's flag state, booleans and lists included", () => {
+    const [real, shadow] = flagStates();
     expect(real).toMatchObject({
+      tsMs: T0_MS,
+      traceId: FLAG_REAL.trace_id,
       gameKind: "real",
       gameMode: "JoustFFA",
-      trigger: "game_start",
       decisionBackend: "claude",
       actThreshold: 0.7,
       batteryThreshold: "20",
@@ -89,25 +114,30 @@ describe("UC-035: main step 3, flag panel from agent.flag_state", () => {
       enabled: true,
       objectives: "engagement=1.00",
       interventionsAllowed: "grant_shield,end_game",
+      interventionsEnabled: true,
+      experimentsEnabled: true,
+      eligibleGameKinds: "real,shadow",
     });
-    expect(states.find((s) => s.gameId === "game_shadow00001")?.enabled).toBe(false);
+    expect(shadow.enabled).toBe(false);
   });
 
-  it("UC-035/main step 3 the decide poll's game traces carry the flag states (no extra request)", () => {
-    const feed = parseDecideTraces(games);
-    expect(feed.flagStates?.map((s) => s.gameId).sort()).toEqual(["game_real000001", "game_shadow00001"]);
+  it("UC-035/main step 3 a missing field reads — (null), never off", () => {
+    const panel = flagPanelFromState({ game_id: "g" });
+    expect(panel).toMatchObject({ enabled: null, interventionsEnabled: null, experimentsEnabled: null, actThreshold: null, eligibleGameKinds: "" });
   });
 
-  it("UC-035/main step 3 the panel shows the kill switch, objectives and allow-list, and no variance window", () => {
-    const html = renderFlagPanel(parseFlagStates(games)[0]);
+  it("UC-035/main step 3 the panel shows the kill switch, objectives and allow-list, and links the game trace", () => {
+    const html = renderFlagPanel(flagStates()[0]);
     expect(html).toContain("agent enabled (kill switch)");
     expect(html).toContain("interventions allowed");
     expect(html).toContain("objectives");
+    expect(html).toContain(`/jaeger/trace/${FLAG_REAL.trace_id}`);
     expect(html).not.toContain("variance window");
+    expect(renderFlagPanel({ ...flagStates()[0], traceId: "" })).not.toContain("/jaeger/trace/");
   });
 
   it("UC-035/main step 3 enabled=on with interventions_enabled=off shows the write-gate hint (#2093)", () => {
-    const base = parseFlagStates(games)[0];
+    const base = flagStates()[0];
     const off = renderFlagPanel({ ...base, enabled: true, interventionsEnabled: false });
     expect(off).toContain("interventions enabled (write gate)");
     expect(off).toContain(WRITE_GATE_OFF_HINT);
@@ -120,143 +150,80 @@ describe("UC-035: main step 3, flag panel from agent.flag_state", () => {
     }
   });
 
-  it("UC-035/main step 3 interventions.enabled is read from the agent.flag_state span (#2093)", () => {
-    const body = structuredClone(games);
-    for (const trace of body.data ?? []) {
-      for (const span of trace.spans) {
-        if (span.operationName === "agent.flag_state") {
-          span.tags?.push({ key: "interventions.enabled", type: "bool", value: false });
-        }
-      }
-    }
-    expect(parseFlagStates(body).every((s) => s.interventionsEnabled === false)).toBe(true);
-    expect(parseFlagStates(games).every((s) => s.interventionsEnabled === null)).toBe(true);
+  it("UC-035/A3 no flag state yet is a hint, not an error", () => {
+    const html = renderFlagPanel(null);
+    expect(html).toContain(FLAG_STATE_NO_DATA);
+    expect(html).not.toMatch(/Could not reach/);
+  });
+});
+
+describe("UC-035: main step 3, the agent's state endpoint", () => {
+  it("UC-035/main step 3 one GET /experiments/state carries decides, flags and experiments", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2031-01-01T00:00:00Z")); // a browser clock far off the agent's
+    const urls = stubFetch(() =>
+      json(agentStateBody(games, { flags: [FLAG_REAL], experiments: [{ id: "exp_1", status: "running" }] })),
+    );
+    const state = await fetchAgentState();
+    expect(urls).toEqual(["/experiments/state"]);
+    expect(state.flags.map((f) => f.gameId)).toEqual(["game_real000001"]);
+    expect(state.experiments.map((e) => e.experimentId)).toEqual(["exp_1"]);
+    const store = new DecideStore();
+    store.load(state.decides);
+    expect(store.size).toBeGreaterThan(0);
   });
 
-  it("UC-035/A3 no agent.flag_state span (an agent image before #2059) is a hint, not an error", () => {
-    const html = renderFlagPanel(null);
-    expect(html).toContain("No agent.flag_state spans in Jaeger yet");
-    expect(html).toContain(FLAG_STATE_NO_DATA.slice(0, 40));
-    expect(html).not.toMatch(/Could not reach/);
+  it("UC-035/A3 the agent down (envoy's 503, a transport error, no JSON) is AgentUnavailableError", async () => {
+    stubFetch(() => new Response("no healthy upstream", { status: 503 }));
+    await expect(fetchAgentState()).rejects.toBeInstanceOf(AgentUnavailableError);
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("network"))));
+    await expect(fetchAgentState()).rejects.toBeInstanceOf(AgentUnavailableError);
+    stubFetch(() => new Response("<html>", { status: 200 }));
+    await expect(fetchAgentState()).rejects.toBeInstanceOf(AgentUnavailableError);
+  });
+
+  it("UC-035/A3 an empty answer is data: no rows, no flags, no experiments", () => {
+    const state = parseAgentState({ decides: { resourceSpans: [] }, flags: [], experiments: [] });
+    expect(state).toEqual({ decides: { data: [] }, flags: [], experiments: [] });
+    expect(parseAgentState(null)).toEqual({ decides: { data: [] }, flags: [], experiments: [] });
   });
 });
 
 describe("UC-070: BR-005 the flag panel follows the stage game", () => {
   it("UC-070/BR-005 a newer shadow game's flag state never replaces the real game's", () => {
     const store = new FlagStateStore();
-    store.merge(parseFlagStates(games));
-    // The shadow game's flag state is newer, but no follow state / a real game live.
+    store.replace(flagStates());
     expect(store.current()?.gameId).toBe("game_real000001");
     expect(store.current({ realGameLive: true, followGameId: "" })?.gameId).toBe("game_real000001");
   });
 
   it("UC-070/BR-005 with no real game live the followed shadow game's flags show", () => {
     const store = new FlagStateStore();
-    store.merge(parseFlagStates(games));
+    store.replace(flagStates());
     expect(store.current({ realGameLive: false, followGameId: "game_shadow00001" })?.gameId).toBe(
       "game_shadow00001",
     );
   });
 
-  it("UC-070/BR-005 a newer flag state of the same game replaces the older one", () => {
+  it("UC-070/BR-005 a new real game the agent has not evaluated yet: the hint, never the old game's flags", () => {
     const store = new FlagStateStore();
-    const [first] = parseFlagStates(games).filter((s) => s.gameId === "game_real000001");
-    store.merge([
-      { ...first, tsMs: first.tsMs + 5000, startUs: first.startUs + 5_000_000, spanId: "later", trigger: "changed", enabled: false },
-    ]);
-    store.merge([first]);
-    expect(store.current()).toMatchObject({ spanId: "later", trigger: "changed", enabled: false });
-  });
-
-  it("UC-070/BR-005 a flag state later in the same ms replaces the older one, whatever the span ids", () => {
-    const store = new FlagStateStore();
-    const [first] = parseFlagStates(games).filter((s) => s.gameId === "game_real000001");
-    const older = { ...first, startUs: first.startUs + 100, spanId: "zzzz", trigger: "game_start" };
-    const newer = { ...first, startUs: first.startUs + 400, spanId: "aaaa", trigger: "changed" };
-    expect(older.tsMs).toBe(newer.tsMs);
-    store.merge([newer]);
-    store.merge([older]);
-    expect(store.current()).toMatchObject({ spanId: "aaaa", trigger: "changed" });
-  });
-
-  it("UC-070/BR-005 a new real game that has not decided yet: fallback search, never the old game's flags", () => {
-    const store = new FlagStateStore();
-    store.merge(parseFlagStates(games)); // game_real000001 (decided) + a newer shadow game
-    // Game 2 is live and quiet: the decide strip still shows game 1.
+    store.replace(flagStates());
     const follow = { realGameLive: true, followGameId: "", primaryGameId: "game_real000002" };
-    expect(needsFlagStateFallback(store, "game_real000001", follow)).toBe(true);
     expect(store.current(follow)).toBeNull();
     // Even with shadow_policy=allow, a live real game never shows a shadow game's flags.
     const shadowOnly = new FlagStateStore();
-    shadowOnly.merge(parseFlagStates(games).filter((s) => s.gameKind === "shadow"));
+    shadowOnly.replace(flagStates().filter((s) => s.gameKind === "shadow"));
     expect(shadowOnly.current({ realGameLive: true, followGameId: "" })).toBeNull();
-    // Game 2's flag state arrives (the fallback search found it).
-    const [first] = parseFlagStates(games).filter((s) => s.gameId === "game_real000001");
-    store.merge([{ ...first, gameId: "game_real000002", spanId: "g2" }]);
-    expect(needsFlagStateFallback(store, "game_real000001", follow)).toBe(false);
+    // The next answer carries game 2's flag state.
+    store.replace([...flagStates(), flagPanelFromState({ ...FLAG_REAL, game_id: "game_real000002" })]);
     expect(store.current(follow)?.gameId).toBe("game_real000002");
-  });
-
-  it("UC-035/main step 3 the fallback search runs only when the strip's game has no flag state", () => {
-    const store = new FlagStateStore();
-    expect(needsFlagStateFallback(store, null)).toBe(true);
-    store.merge(parseFlagStates(games));
-    expect(needsFlagStateFallback(store, "game_real000001")).toBe(false);
-    expect(needsFlagStateFallback(store, "game_other")).toBe(true);
-    expect(needsFlagStateFallback(store, null)).toBe(true);
-  });
-
-  it("UC-035/main step 3 the fallback search asks for agent.flag_state, limit 2, without a browser-clock time", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2031-01-01T00:00:00Z")); // a browser clock far off the agent's
-    const urls = stubFetch(() => json(toOtlp(games)));
-    const states = await fetchFlagStates();
-    expect(states.length).toBe(2);
-    const params = new URL(urls[0], "http://x").searchParams;
-    expect(params.get("query.serviceName")).toBe("agent");
-    expect(params.get("query.operationName")).toBe("agent.flag_state");
-    expect(params.get("query.searchDepth")).toBe(String(FLAG_STATE_FALLBACK_LIMIT));
-    expect(params.get("query.startTimeMin")).toBe(COLD_START_TIME_MIN);
-    expect(params.get("query.startTimeMax")).toBe(SEARCH_TIME_MAX);
-  });
-});
-
-describe("UC-070: BR-005 the flag-state search and store keep the live real game", () => {
-  const live = { realGameLive: true, followGameId: "", primaryGameId: "game_real000002" };
-
-  it("UC-035/main step 3 while a real game is live the fallback search filters by its game.id", async () => {
-    const urls = stubFetch(() => json(toOtlp(games)));
-    await fetchFlagStates(undefined, live);
-    await fetchFlagStates(undefined, { realGameLive: false, followGameId: "game_shadow00001", primaryGameId: "game_real000002" });
-    const [withGame, without] = urls.map((u) => new URL(u, "http://x").searchParams);
-    expect(JSON.parse(withGame.get("query.attributes") ?? "null")).toEqual({ "game.id": "game_real000002" });
-    expect(withGame.get("query.operationName")).toBe("agent.flag_state");
-    expect(without.has("query.attributes")).toBe(false);
-  });
-
-  it("UC-070/BR-005 newer shadow games never evict the live primary game's flag state", () => {
-    const store = new FlagStateStore(2);
-    const [real] = parseFlagStates(games).filter((s) => s.gameId === "game_real000001");
-    store.merge([{ ...real, gameId: "game_real000002", spanId: "primary" }], live);
-    const shadows = [1, 2, 3].map((i) => ({
-      ...real,
-      gameId: `game_shadow0000${i}`,
-      gameKind: "shadow",
-      spanId: `s${i}`,
-      startUs: real.startUs + i * 1_000_000,
-      tsMs: real.tsMs + i * 1000,
-    }));
-    store.merge(shadows, live);
-    expect(store.size).toBe(2);
-    expect(store.current(live)?.spanId).toBe("primary");
-    expect(store.has("game_shadow00003")).toBe(true);
   });
 });
 
 describe("UC-035: main step 3, activity feed (blocked decisions + rollout)", () => {
-  it("UC-035/main step 3 blocked rows come from the decide poll's agent.decision spans", () => {
+  it("UC-035/main step 3 blocked rows come from the agent.decision spans of the agent's answer", () => {
     const store = new DecideStore();
-    store.merge(parseDecideTraces(games).rows);
+    store.load(games);
     const rows = blockedRowsFrom(store.feed().rows);
     expect(rows.map((r) => [r.sessionId, r.action, r.reason, r.target])).toEqual([
       ["game_shadow00001", "grant_shield", "not_allowed", "Ana"],
@@ -310,32 +277,13 @@ describe("UC-035: main step 3, activity feed (blocked decisions + rollout)", () 
 
   it("UC-035/main step 3 the feed merges both, newest first", () => {
     const decide = new DecideStore();
-    decide.merge(parseDecideTraces(games).rows);
+    decide.load(games);
     const rollouts = new RolloutStore();
     rollouts.merge("expand", expand);
     const feed = activityFeed(blockedRowsFrom(decide.feed().rows), rollouts.list());
     expect(feed.map((r) => r.kind)).toEqual(["rollout", "blocked", "blocked"]);
   });
 });
-
-describe("UC-035: main step 3, no browser clock in a Jaeger request", () => {
-  it("UC-035/main step 3 the decide search sends neither the browser's now nor an end", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2031-01-01T00:00:00Z"));
-    const browserDay = new Date().toISOString().slice(0, 10);
-    const urls = stubFetch(() => json(toOtlp(games)));
-    const store = new DecideStore();
-    await pollDecides(store, 0);
-    await pollDecides(store, 0);
-    expect(new URL(urls[0], "http://x").searchParams.get("query.startTimeMin")).toBe(COLD_START_TIME_MIN);
-    for (const u of urls) {
-      const params = new URL(u, "http://x").searchParams;
-      expect(params.get("query.startTimeMin")).not.toContain(browserDay);
-      expect(params.get("query.startTimeMax")).toBe(SEARCH_TIME_MAX);
-    }
-  });
-});
-
 describe("UC-035: main step 3, parseAppliedCounts", () => {
   it("sums result series across namespaced jobs", () => {
     const out = parseAppliedCounts(

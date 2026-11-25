@@ -1,16 +1,15 @@
 /**
  * Agent View Component (issue #792).
  *
- * The demo's agent focus screen. Panels fed from the agent's live telemetry
- * (see ../agent.ts; spans from Jaeger since #2059):
+ * The demo's agent focus screen. Panels fed from the agent's live state (see
+ * ../agent.ts: GET /experiments/state; rollout rows from Jaeger):
  *
  *   1. Activity feed     — blocked agent.decision spans and rollout rows
  *                          (agent.infrastructure.decision).
- *   2. Flag panel        — the followed game's effective flag set, from its newest
- *                          agent.flag_state span (UC-070 BR-005 anchor).
+ *   2. Flag panel        — the followed game's effective flag set (UC-070 BR-005 anchor).
  *   3. Intervention      — applied and blocked tallies from VictoriaMetrics (real games first, shadow games on their own line, #2294)
  *      overlay             (`n/a` when it is unreachable).
- *   4. Decide feed       — (#1233) one row per invoke_agent span from Jaeger:
+ *   4. Decide feed       — (#1233) one row per invoke_agent span the agent holds:
  *                          backend/model, answer, confidence vs threshold,
  *                          outcome, rationale, plus a "current backend" strip so
  *                          a live decision.backend switch is visible on the next
@@ -351,8 +350,8 @@ function onOff(v: boolean | null): string {
 }
 
 /**
- * The flag panel (#2059): the followed game's newest agent.flag_state. Pure and
- * exported for tests. A missing span is the no-data hint, never an error.
+ * The flag panel: the followed game's effective flags from the agent's state.
+ * Pure and exported for tests. No flag state yet is the no-data hint, never an error.
  */
 export function renderFlagPanel(flags: FlagPanel | null): string {
   return flagPanelHtml(flags).toString();
@@ -389,9 +388,12 @@ function flagPanelHtml(flags: FlagPanel | null): SafeHtml {
       ${gateHint}
       <div class="agent-flags-grid">${body}</div>
       <div class="agent-flags-note">
-        Effective flags of ${renderGameBadge(flags.gameId, flags.gameKind)} from its newest
-        <a href="${jaegerTraceUrl(flags.traceId, flags.spanId)}" target="_blank" rel="noreferrer"><code>agent.flag_state</code></a>
-        span (${flags.trigger || "?"}, ${formatTime(flags.tsMs)}).
+        Effective flags of ${renderGameBadge(flags.gameId, flags.gameKind)} as the agent evaluated them at
+        ${formatTime(flags.tsMs)}${
+          flags.traceId
+            ? html` (<a href="/jaeger/trace/${encodeURIComponent(flags.traceId)}" target="_blank" rel="noreferrer">game trace</a>)`
+            : ""
+        }.
       </div>
     `;
 }
@@ -656,12 +658,7 @@ export function renderDecideRow(row: DecideRow, isNew = false): string {
 
 function predictionHtml(p: DecidePrediction | null): SafeHtml {
   if (!p) return html``;
-  const reason =
-    p.outcome === "unscorable" && p.unscorableReason
-      ? html` title="${p.unscorableReason}"`
-      : p.outcome === "unknown"
-        ? html` title="no outcome span was fetched before the query window moved on"`
-        : "";
+  const reason = p.outcome === "unscorable" && p.unscorableReason ? html` title="${p.unscorableReason}"` : "";
   return html`<div class="decide-prediction decide-prediction-${p.outcome}"><span class="decide-prediction-label">expects:</span> ${predictionText(p)} <span class="decide-arrow">→</span> <span class="decide-prediction-outcome"${reason}>${p.outcome}</span>${
     p.merged ? html` <span class="decide-strip-dim" title="an identical prediction was already pending">(same as pending)</span>` : ""
   }</div>`;

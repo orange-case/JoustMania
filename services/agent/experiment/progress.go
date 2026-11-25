@@ -1,54 +1,19 @@
 package experiment
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
-	"unicode/utf8"
 
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/joustmania/agent/telemetry/keys"
 )
 
-// experiment.progress (#2059, docs/specs/telemetry.md §4.1): a registry snapshot of
-// one experiment as a one-span trace. The agent.experiment root is stored by Jaeger
-// only when it ends (teardown), so a reader cannot follow a live experiment there.
-// experiment.progress is its OWN root with a Link to the agent.experiment span
-// context, emitted under r.mu after every state change and on a heartbeat.
+// The progress snapshot of one experiment, recorded under r.mu after every state
+// change and served by GET /experiments/state (docs/specs/services.md §5): the
+// dashboard's Experiments tab. Not a span: the agent holds the newest snapshot of
+// every live experiment and of the newest MaxFinishedProgress finished ones.
 const (
-	// SpanExperimentProgress is the span name.
-	SpanExperimentProgress = "experiment.progress"
-	// EventExperimentArm is the per-arm span event; it carries
-	// keys.AttrExperimentArm plus the AttrExperimentArm* values (the three
-	// prediction ones are the report-only arm calibration, calibration.go).
-	EventExperimentArm = "experiment.arm"
-	// AttrExperimentProgressTrigger is one of the ProgressTrigger* values.
-	AttrExperimentProgressTrigger = "experiment.progress.trigger"
-	// AttrExperimentEndReason is the teardown reason, on the terminal snapshot only.
-	AttrExperimentEndReason = "experiment.end_reason"
-	// AttrExperimentValue is the experimental arm's flag value as JSON (#2291); the
-	// control arm resolves the flag's current value.
-	AttrExperimentValue = "experiment.experimental_value"
-	// AttrExperimentArmAssigned is a point-in-time count of the games bound to the arm
-	// and still in flight (not concluded, not released; a spawn reservation does not
-	// count). Not cumulative: 0 on the terminal snapshot, teardown clears the in-flight
-	// map. The arm_stats namespace keeps experiment.arm a plain attribute, never also a
-	// prefix (OTel attribute naming).
-	AttrExperimentArmAssigned = "experiment.arm_stats.assigned"
-	// AttrExperimentArmSamples / AttrExperimentArmMeanFitness are the journal
-	// summary's per-arm count and mean: only games the journal folded count.
-	AttrExperimentArmSamples     = "experiment.arm_stats.samples"
-	AttrExperimentArmMeanFitness = "experiment.arm_stats.mean_fitness"
-
-	// attrLinkKind / linkKindExperiment label the Link to agent.experiment.
-	attrLinkKind       = "link.kind"
-	linkKindExperiment = "experiment"
-
 	ProgressTriggerStarted       = "started"
 	ProgressTriggerGameAssigned  = "game_assigned"
 	ProgressTriggerGameConcluded = "game_concluded"
@@ -57,83 +22,116 @@ const (
 	ProgressTriggerPromoting     = "promoting"
 	ProgressTriggerTerminal      = "terminal"
 	ProgressTriggerRehydrate     = "rehydrate"
-	ProgressTriggerHeartbeat     = "heartbeat"
 	// ProgressTriggerRecommendation: a deferred promotion was refused after the
 	// experiment ended (UC-043 A19, #2276); the snapshot carries the recommendation.
 	ProgressTriggerRecommendation = "recommendation"
 
-	// AttrExperimentRecommendationFlag / Value / Owner: the winning value as a
-	// recommendation when the promotion was refused because another writer owns the
-	// real overlay (UC-043 A19, #2276). Value is the JSON encoding of the value.
-	AttrExperimentRecommendationFlag  = "experiment.recommendation.flag"
-	AttrExperimentRecommendationValue = "experiment.recommendation.value"
-	AttrExperimentRecommendationOwner = "experiment.recommendation.owner"
-
-	// ProgressHeartbeatInterval is how often every live experiment re-emits its
-	// snapshot, so an idle experiment stays visible.
-	ProgressHeartbeatInterval = 60 * time.Second
+	// MaxFinishedProgress bounds the finished experiments kept (newest first).
+	MaxFinishedProgress = 10
 )
 
-// emitProgressLocked emits one experiment.progress for e. link is the agent.experiment
-// span context to Link to (teardown passes the one it captured before ending the
-// span); an invalid one adds no Link. endReason is set on the terminal snapshot only.
-// Nil-tracer-safe. Assumes r.mu is held.
+// ProgressSnapshot is one experiment as the registry last recorded it.
+type ProgressSnapshot struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	FlagKey   string `json:"flag_key"`
+	Objective string `json:"objective"`
+	TargetN   int    `json:"target_n"`
+	Thesis    string `json:"thesis"`
+	// ExperimentalValue is the experimental arm's flag value; the control arm
+	// resolves the flag's current value.
+	ExperimentalValue any              `json:"experimental_value"`
+	Verdict           *ProgressVerdict `json:"verdict"`
+	// EndReason is the teardown reason, set once the experiment ended.
+	EndReason string `json:"end_reason"`
+	// Recommendation is set once a promotion was refused because another writer owns
+	// the real overlay (UC-043 A19, #2276).
+	Recommendation *ProgressRecommendation `json:"recommendation"`
+	Arms           []ProgressArm           `json:"arms"`
+	// Trigger is the state change that recorded the snapshot (ProgressTrigger*).
+	Trigger string `json:"trigger"`
+	// UpdatedAtMs is when it was recorded, epoch ms on the agent's clock.
+	UpdatedAtMs int64 `json:"updated_at_ms"`
+	// TraceID is the agent.experiment trace (the Jaeger drill-down), "" without one.
+	TraceID string `json:"trace_id"`
+}
+
+// ProgressVerdict is the journal summary's verdict, interim while the experiment runs.
+type ProgressVerdict struct {
+	Outcome     string  `json:"outcome"`
+	Delta       float64 `json:"delta"`
+	Significant bool    `json:"significant"`
+}
+
+// ProgressRecommendation is the winning value whose promotion was refused.
+type ProgressRecommendation struct {
+	Flag string `json:"flag"`
+	// Value is the JSON encoding of the value.
+	Value string `json:"value"`
+	// Owner is the real overlay's writer, "unknown" when unreadable.
+	Owner string `json:"owner"`
+}
+
+// ProgressArm is one arm of a snapshot.
+type ProgressArm struct {
+	Arm string `json:"arm"`
+	// InFlight counts the games bound to the arm and still running (point in time;
+	// 0 once the experiment ended, teardown clears them). A spawn reservation does
+	// not count.
+	InFlight int `json:"in_flight"`
+	// Samples / MeanFitness are the journal summary's per-arm count and mean.
+	Samples     int     `json:"samples"`
+	MeanFitness float64 `json:"mean_fitness"`
+	// The report-only shadow calibration (UC-043 A21, calibration.go); the mean
+	// Brier score only once a prediction is scored (0 would read as perfect).
+	PredictionsScored int      `json:"predictions_scored"`
+	PredictionHits    int      `json:"prediction_hits"`
+	PredictionBrier   *float64 `json:"prediction_brier"`
+}
+
+// emitProgressLocked records the progress snapshot of e. link is the agent.experiment
+// span context (teardown passes the one it captured before ending the span).
+// endReason is kept once set. Assumes r.mu is held.
 func (r *Registry) emitProgressLocked(e *entry, trigger, endReason string, link trace.SpanContext) {
-	if r.tracer == nil || e == nil || e.journal == nil {
+	if e == nil || e.journal == nil {
 		return
 	}
 	intent := e.journal.Intent()
 	summary := e.journal.Summary()
-	attrs := []attribute.KeyValue{
-		attribute.String(keys.AttrExperimentID, e.id),
-		attribute.String(keys.AttrExperimentStatus, string(e.status)),
-		attribute.String(keys.AttrExperimentFlagKey, intent.FlagKey),
-		attribute.String(keys.AttrExperimentObjective, intent.Objective),
-		attribute.Int(keys.AttrExperimentTargetN, intent.TargetNPerArm),
-		attribute.String(keys.AttrExperimentArms, strings.Join(e.arms, ",")),
-		attribute.String(AttrExperimentProgressTrigger, trigger),
+	snap := ProgressSnapshot{
+		ID:                e.id,
+		Status:            string(e.status),
+		FlagKey:           intent.FlagKey,
+		Objective:         intent.Objective,
+		TargetN:           intent.TargetNPerArm,
+		Thesis:            intent.Hypothesis,
+		ExperimentalValue: intent.ExperimentalValue,
+		EndReason:         endReason,
+		Arms:              make([]ProgressArm, 0, len(e.arms)),
+		Trigger:           trigger,
+		UpdatedAtMs:       time.Now().UnixMilli(), // not r.clock: tests count its calls as journal stamps
 	}
-	// #2291: what is tested, for the dashboard's experiment card. The thesis and the
-	// experimental arm's value are on every snapshot (the dashboard keeps the newest
-	// span); each is omitted when empty.
-	if intent.Hypothesis != "" {
-		attrs = append(attrs, attribute.String(keys.AttrExperimentThesis, capSpanText(intent.Hypothesis)))
+	if link.IsValid() {
+		snap.TraceID = link.TraceID().String()
 	}
-	if intent.ExperimentalValue != nil {
-		if raw, err := json.Marshal(intent.ExperimentalValue); err == nil {
-			attrs = append(attrs, attribute.String(AttrExperimentValue, capSpanText(string(raw))))
+	if held, ok := r.progress[e.id]; ok {
+		if snap.EndReason == "" {
+			snap.EndReason = held.EndReason
+		}
+		if snap.TraceID == "" {
+			snap.TraceID = held.TraceID
 		}
 	}
 	if v := summary.Verdict; v != nil {
-		attrs = append(attrs,
-			attribute.String(keys.AttrVerdictOutcome, v.Outcome),
-			attribute.Float64(keys.AttrVerdictDelta, v.Delta),
-			attribute.Bool(keys.AttrVerdictSignificant, v.Significant),
-		)
-	}
-	if trigger == ProgressTriggerTerminal || (trigger == ProgressTriggerRecommendation && endReason != "") {
-		attrs = append(attrs, attribute.String(AttrExperimentEndReason, endReason))
+		snap.Verdict = &ProgressVerdict{Outcome: v.Outcome, Delta: v.Delta, Significant: v.Significant}
 	}
 	if e.recommendOwner != "" {
 		value, err := json.Marshal(intent.ExperimentalValue)
 		if err != nil {
 			value = []byte(fmt.Sprint(intent.ExperimentalValue))
 		}
-		attrs = append(attrs,
-			attribute.String(AttrExperimentRecommendationFlag, intent.FlagKey),
-			attribute.String(AttrExperimentRecommendationValue, capSpanText(string(value))),
-			attribute.String(AttrExperimentRecommendationOwner, e.recommendOwner),
-		)
+		snap.Recommendation = &ProgressRecommendation{Flag: intent.FlagKey, Value: string(value), Owner: e.recommendOwner}
 	}
-	opts := []trace.SpanStartOption{trace.WithNewRoot(), trace.WithAttributes(attrs...)}
-	if link.IsValid() {
-		opts = append(opts, trace.WithLinks(trace.Link{
-			SpanContext: link,
-			Attributes:  []attribute.KeyValue{attribute.String(attrLinkKind, linkKindExperiment)},
-		}))
-	}
-	_, span := r.tracer.Start(context.Background(), SpanExperimentProgress, opts...)
-
 	inFlight := make(map[string]int, len(e.arms))
 	for gameID, arm := range e.games {
 		if !isReservation(gameID) {
@@ -141,67 +139,65 @@ func (r *Registry) emitProgressLocked(e *entry, trigger, endReason string, link 
 		}
 	}
 	for _, arm := range e.arms {
-		var samples int
-		var mean float64
+		a := ProgressArm{Arm: arm, InFlight: inFlight[arm]}
 		if st := summary.Arms[arm]; st != nil {
-			samples, mean = st.Count, st.Mean
+			a.Samples, a.MeanFitness = st.Count, st.Mean
 		}
-		armAttrs := []attribute.KeyValue{
-			attribute.String(keys.AttrExperimentArm, arm),
-			attribute.Int(AttrExperimentArmAssigned, inFlight[arm]),
-			attribute.Int(AttrExperimentArmSamples, samples),
-			attribute.Float64(AttrExperimentArmMeanFitness, mean),
-		}
-		// UC-043 A21 (#2498): report-only shadow calibration, in memory. The mean
-		// Brier score only once a prediction is scored (0 would read as perfect).
 		cal := e.calibration[arm]
-		armAttrs = append(armAttrs,
-			attribute.Int(AttrExperimentArmPredictionsScored, cal.Scored),
-			attribute.Int(AttrExperimentArmPredictionHits, cal.Hits))
+		a.PredictionsScored, a.PredictionHits = cal.Scored, cal.Hits
 		if cal.Scored > 0 {
-			armAttrs = append(armAttrs, attribute.Float64(AttrExperimentArmPredictionBrier, cal.Brier()))
+			brier := cal.Brier()
+			a.PredictionBrier = &brier
 		}
-		span.AddEvent(EventExperimentArm, trace.WithAttributes(armAttrs...))
+		snap.Arms = append(snap.Arms, a)
 	}
-	span.End()
+	if r.progress == nil {
+		r.progress = map[string]ProgressSnapshot{}
+	}
+	r.progress[e.id] = snap
+	r.pruneProgressLocked()
+	if r.onProgress != nil {
+		r.onProgress(snap)
+	}
 }
 
-// ProgressHeartbeat emits an experiment.progress heartbeat for every non-terminal
-// experiment, in id order. The experiment loop calls it every
-// ProgressHeartbeatInterval.
-func (r *Registry) ProgressHeartbeat() {
-	if r == nil {
+// pruneProgressLocked drops all but the newest MaxFinishedProgress finished snapshots.
+func (r *Registry) pruneProgressLocked() {
+	var finished []ProgressSnapshot
+	for _, s := range r.progress {
+		if Status(s.Status).IsTerminal() {
+			finished = append(finished, s)
+		}
+	}
+	if len(finished) <= MaxFinishedProgress {
 		return
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	ids := make([]string, 0, len(r.entries))
-	for id, e := range r.entries {
-		if !e.status.IsTerminal() {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		e := r.entries[id]
-		r.emitProgressLocked(e, ProgressTriggerHeartbeat, "", e.spanCtx)
+	sortNewestFirst(finished)
+	for _, s := range finished[MaxFinishedProgress:] {
+		delete(r.progress, s.ID)
 	}
 }
 
-// maxSpanTextLen caps free-text span attributes at 512 bytes: experiment.thesis,
-// experiment.experimental_value and experiment.recommendation.value (#2291, #2276).
-const maxSpanTextLen = 512
+// Progress returns the held snapshots, newest first. Read-only; nil-safe.
+func (r *Registry) Progress() []ProgressSnapshot {
+	if r == nil {
+		return []ProgressSnapshot{}
+	}
+	r.mu.Lock()
+	out := make([]ProgressSnapshot, 0, len(r.progress))
+	for _, s := range r.progress {
+		out = append(out, s)
+	}
+	r.mu.Unlock()
+	sortNewestFirst(out)
+	return out
+}
 
-// capSpanText cuts s to maxSpanTextLen bytes on a rune boundary and appends "..." when
-// it cut, so the result stays valid UTF-8 and at most maxSpanTextLen bytes. It is the
-// one cap helper for every free-text attribute of experiment.progress.
-func capSpanText(s string) string {
-	if len(s) <= maxSpanTextLen {
-		return s
-	}
-	cut := maxSpanTextLen - len("...")
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "..."
+func sortNewestFirst(s []ProgressSnapshot) {
+	sort.Slice(s, func(i, j int) bool {
+		if s[i].UpdatedAtMs != s[j].UpdatedAtMs {
+			return s[i].UpdatedAtMs > s[j].UpdatedAtMs
+		}
+		return s[i].ID < s[j].ID
+	})
 }

@@ -14,7 +14,7 @@ Built with TypeScript and Vite, served in production by [static-web-server](http
 - **Game controls** -- mode selector dropdown, start/stop buttons
 - **Game event log** -- recent events (game start, player deaths, winner) in the status bar
 - **Embedded observability** -- tabbed Grafana dashboard and Jaeger trace views via iframes
-- **Agent decisions** -- the Agent tab polls Jaeger's query API v3 (`/jaeger/api/v3/traces?query.serviceName=agent&query.operationName=invoke_agent%20joustmania-agent`, #2283) every 1.5s and shows one row per `invoke_agent joustmania-agent` span (decisions recorded before #2584 are under `agent.decide` and not shown): backend (requested vs used), model, answer, confidence against the act threshold, outcome, rationale and a trace link, plus a current-backend strip
+- **Agent decisions** -- the Agent tab polls the agent's read-only `GET /experiments/state` (through envoy, like the `/experiments` dossier) every 1.5s and shows one row per `invoke_agent joustmania-agent` span the agent holds; the Experiments tab reads the same answer every 5s (decisions recorded before #2584 are under `agent.decide` and not shown): backend (requested vs used), model, answer, confidence against the act threshold, outcome, rationale and a trace link, plus a current-backend strip
 
 ## Configuration
 
@@ -53,9 +53,9 @@ services/dashboard/
     ├── controllerStream.ts / stream.ts   # Reconnecting controller / game-event streams
     ├── poller.ts / pageGate.ts           # Single-chain pollers (backoff) and tab / page-visibility gate
     ├── jaeger.ts / vm.ts                 # Jaeger and VictoriaMetrics readers (no browser clock)
-    ├── agent.ts          # invoke_agent / flag_state / rollout spans and intervention counts
-    ├── agentDecide.ts    # Decision feed: invoke_agent spans, follow anchor, decide poll
-    ├── experiments.ts    # experiment.progress snapshots (ExperimentStore)
+    ├── agent.ts          # Agent tab sources: agent state, rollout spans, intervention counts
+    ├── agentDecide.ts    # Decision feed: invoke_agent spans, follow anchor, DecideStore
+    ├── experiments.ts    # experiment progress snapshots (ExperimentStore)
     ├── follow.ts         # Followed game (real, else live shadow)
     ├── degrade.ts        # Per-source degraded-state messages
     ├── adapters.ts / stageSettings.ts    # Adapter badges and stage settings strip (VictoriaMetrics)

@@ -265,9 +265,6 @@ type experimentLoop struct {
 	// newTicker builds run()'s refill ticker. nil ⇒ a time.Ticker; tests inject a
 	// fake so the first-tick cap and the re-arm are observable without real sleeps.
 	newTicker func(d time.Duration) loopTicker
-	// newHeartbeat builds run()'s experiment.progress heartbeat ticker (#2059,
-	// experiment.ProgressHeartbeatInterval). nil ⇒ a time.Ticker; tests inject a fake.
-	newHeartbeat func(d time.Duration) loopTicker
 
 	// graceMu guards the set of pending completed-grace timers so run() can stop
 	// them on shutdown (no goroutine/timer leak past teardown).
@@ -596,14 +593,6 @@ func (e *experimentLoop) run(ctx context.Context) {
 	}
 	ticker := newTicker(interval)
 	defer ticker.Stop()
-	// #2059: every live experiment re-emits its experiment.progress snapshot on a
-	// fixed cadence, independent of the refill tick, so an idle one stays visible.
-	newHeartbeat := e.newHeartbeat
-	if newHeartbeat == nil {
-		newHeartbeat = func(d time.Duration) loopTicker { return timeTicker{time.NewTicker(d)} }
-	}
-	heartbeat := newHeartbeat(experiment.ProgressHeartbeatInterval)
-	defer heartbeat.Stop()
 	// UC-043 A17 step 3: drain the deferred hold-key writes and reverts.
 	var drain <-chan time.Time
 	if e.deferred != nil {
@@ -613,8 +602,6 @@ func (e *experimentLoop) run(ctx context.Context) {
 	}
 	for {
 		select {
-		case <-heartbeat.Chan():
-			e.registry.ProgressHeartbeat()
 		case <-drain:
 			e.drainDeferred(ctx)
 		case <-ctx.Done():

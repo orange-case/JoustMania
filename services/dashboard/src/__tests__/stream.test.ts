@@ -197,26 +197,26 @@ describe("UC-035: A3 a telemetry backend is down (dashboard side)", () => {
     expect(el("flags").innerHTML).toContain("Could not reach Jaeger for agent telemetry.");
   });
 
-  it("UC-035/A3 an experiments panel that never rendered says Jaeger is unreachable", () => {
+  it("UC-035/A3 an experiments panel that never rendered says the agent is unreachable", () => {
     const el = stubDom();
     onExperimentsPollFailed(new ExperimentsView("grid", "fresh"));
-    expect(el("grid").innerHTML).toContain("Could not reach Jaeger for experiment telemetry.");
+    expect(el("grid").innerHTML).toContain("Could not reach the agent for its experiments (/experiments/state).");
   });
 
-  it("UC-035/A3 Jaeger up without spans shows the no-data hints, not an error", () => {
+  it("UC-035/A3 an agent with nothing recorded yet shows the no-data hints, not an error", () => {
     const el = stubDom();
     agentView().render(emptyView as never);
     new ExperimentsView("grid", "fresh").render([]);
-    expect(el("flags").innerHTML).toContain("No agent.flag_state spans in Jaeger yet");
-    expect(el("grid").innerHTML).toContain("No experiment.progress spans in Jaeger yet");
+    expect(el("flags").innerHTML).toContain("No flag state yet.");
+    expect(el("grid").innerHTML).toContain("No experiments yet.");
     expect(el("flags").innerHTML + el("grid").innerHTML).not.toContain("Could not reach");
   });
 
-  it("UC-035/A3 a decide strip that never rendered says Jaeger is unreachable", () => {
+  it("UC-035/A3 a decide strip that never rendered says the agent is unreachable", () => {
     const el = stubDom();
     const view = agentView();
     onDecidePollFailed(view);
-    expect(el("dfeed").innerHTML).toContain("Could not reach Jaeger for invoke_agent spans.");
+    expect(el("dfeed").innerHTML).toContain("Could not reach the agent for its decisions (/experiments/state).");
     expect(view.decideHasRendered).toBe(true);
   });
 
@@ -261,26 +261,18 @@ describe("UC-035: A3 a telemetry backend is down (dashboard side)", () => {
     expect(html).toContain('agent-stat-blocked">3<');
   });
 
-  /** One Agent poll: counts fulfilled, flag-state search rejected (Jaeger down). */
+  /** One Agent poll: counts fulfilled, rollout search rejected (Jaeger down). */
   async function pollWithFlagsDown(view: AgentView, overlay: InterventionOverlay | null) {
     const settled = (await Promise.allSettled([
       Promise.resolve(counts),
       Promise.reject(new Error("Jaeger unreachable")),
-      Promise.resolve(),
     ])) as AgentPollResults;
-    const result = settleAgentPoll(
-      settled,
-      overlay,
-      () => {
-        throw new Error("a failed search merges nothing");
-      },
-      { flags: true, rollouts: true },
-    );
+    const result = settleAgentPoll(settled, overlay, true);
     paintAgentPanels(view, result.overlay, result.jaegerOk ?? false, () => ({ feed: [], flags: null }));
     return result;
   }
 
-  it("UC-035/A3 flag search down, counts up: overlay renders, Jaeger panels name Jaeger, no no-data hint", async () => {
+  it("UC-035/A3 rollout search down, counts up: overlay renders, Jaeger panels name Jaeger, no no-data hint", async () => {
     const el = stubDom();
     const view = agentView();
     const result = await pollWithFlagsDown(view, null);
@@ -296,7 +288,7 @@ describe("UC-035: A3 a telemetry backend is down (dashboard side)", () => {
     expect(el("overlay").innerHTML).toContain("agent-stat-applied");
   });
 
-  it("UC-035/A3 flag search down after a good render: Jaeger panels go stale, the overlay updates", async () => {
+  it("UC-035/A3 rollout search down after a good render: Jaeger panels go stale, the overlay updates", async () => {
     vi.useFakeTimers();
     const el = stubDom();
     const view = agentView();
@@ -319,14 +311,10 @@ describe("UC-035: A3 a telemetry backend is down (dashboard side)", () => {
     vi.advanceTimersByTime(20_000);
     await pollWithFlagsDown(view, emptyView.overlay);
 
-    // Next tick: flag store is filled and no rollout is due, both legs skipped
-    // (resolved placeholders) while Jaeger is still down.
-    const skipped = (await Promise.allSettled([
-      Promise.resolve(counts),
-      Promise.resolve([]),
-      Promise.resolve(),
-    ])) as AgentPollResults;
-    const result = settleAgentPoll(skipped, counts, () => {}, { flags: false, rollouts: false });
+    // Next tick: no rollout is due, the Jaeger leg is skipped (a resolved
+    // placeholder) while Jaeger is still down.
+    const skipped = (await Promise.allSettled([Promise.resolve(counts), Promise.resolve()])) as AgentPollResults;
+    const result = settleAgentPoll(skipped, counts, false);
     expect(result.jaegerOk).toBeNull();
     const jaegerOk = result.jaegerOk ?? false; // main.ts: ?? previous agentJaegerOk (false)
     paintAgentPanels(view, result.overlay, jaegerOk, () => ({ feed: [], flags: null }));

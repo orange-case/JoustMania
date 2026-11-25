@@ -56,3 +56,8 @@ export function toOtlp(body: unknown): OtlpTracesResponse {
 export function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
+
+/** The agent's GET /experiments/state answer with `body`'s spans as its decides. */
+export function agentStateBody(body: unknown, rest: { flags?: unknown[]; experiments?: unknown[] } = {}): unknown {
+  return { decides: toOtlp(body).result, flags: rest.flags ?? [], experiments: rest.experiments ?? [] };
+}

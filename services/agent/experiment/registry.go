@@ -347,6 +347,11 @@ type Registry struct {
 
 	mu      sync.Mutex
 	entries map[string]*entry
+	// progress is the newest snapshot per experiment for GET /experiments/state
+	// (progress.go): every live one plus the newest finished ones.
+	progress map[string]ProgressSnapshot
+	// onProgress, when set (tests), sees every recorded snapshot in order.
+	onProgress func(ProgressSnapshot)
 	// rrCursor is the cross-experiment round-robin cursor for fair capacity
 	// allocation: AllocateAndSpawn rotates the start of the live-experiment scan so
 	// no single experiment is always served first (equal-share, no starvation).

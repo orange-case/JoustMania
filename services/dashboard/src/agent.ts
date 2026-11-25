@@ -1,31 +1,23 @@
-
 /**
- * Agent data source (issue #792; spans since #2059).
+ * Agent data source (issue #792).
  *
  * The "Agent" tab is the demo's observability focus screen: it shows what the
  * in-game agent is doing live: the decisions it evaluates (invoke_agent), the
  * effective flag values it resolved, its activity (blocked decisions, rollouts)
  * and the interventions it applied vs blocked.
  *
- * SOURCES (UC-035 step 3, docs/specs/telemetry.md §6.1)
- * ------------------------------------------------------
- *   Jaeger (./jaeger.ts), every query without a browser-clock time:
- *     invoke_agent          decision feed + strip (the decide poll, game traces)
- *     agent.decision        blocked activity rows: the decide poll's traces
- *                           already hold them (LinkedDecision), no extra query
- *     agent.flag_state      flag panel: also in the decide poll's game traces;
- *                           its own small search (FLAG_STATE_FALLBACK_LIMIT) only
- *                           when the decide poll brought none newer
- *     agent.infrastructure.decision  rollout rows, one tag search per
- *                           remediation.action (ROLLOUT_ACTIONS)
+ * SOURCES (UC-035 step 3, docs/specs/services.md §5)
+ * ----------------------------------------------------
+ *   The agent, GET /experiments/state (./agentState.ts), one small answer:
+ *     decides               decision feed + strip, the blocked activity rows
+ *                           (LinkedDecision), the prediction strip and the goal
+ *     flags                 flag panel: each game's effective flags
+ *   Jaeger (./jaeger.ts), only the rollout rows: agent.infrastructure.decision,
+ *     one tag search per remediation.action (ROLLOUT_ACTIONS); every row links
+ *     its trace in Jaeger.
  *   VictoriaMetrics: the applied write counter and the blocked tallies (UC-040
- *   A21); `n/a` when it is down (no fallback: a fold over a few traces is not a
- *   10-minute window).
- *
- * An agent image older than #2059 emits no agent.flag_state: the flag panel then
- * shows a hint, never an error (degrade.ts).
+ *   A21); `n/a` when it is down.
  */
-
 import type { DecisionFeedRow } from "./agentActivity.js";
 import type { FlagPanel } from "./agentFlags.js";
 import type { InterventionOverlay } from "./agentOverlay.js";
@@ -36,8 +28,8 @@ export * from "./agentAnchor.js";
 export * from "./agentDecide.js";
 export * from "./agentFlags.js";
 export * from "./agentGoal.js";
-export * from "./agentGoalPoll.js";
 export * from "./agentOverlay.js";
+export * from "./agentState.js";
 export type { VmQueryResponse } from "./vm.js";
 export type { JaegerSpan, JaegerTag, JaegerTrace, JaegerTracesResponse, JaegerReference } from "./jaeger.js";
 

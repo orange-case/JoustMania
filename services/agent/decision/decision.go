@@ -390,8 +390,8 @@ type Loop struct {
 	// the ledger use DefaultShieldSeconds.
 	shieldSeconds ShieldSecondsSource
 
-	// flagState is this partition's agent.flag_state digest (#2059, flag_state.go).
-	flagState flagStateTracker
+	// flagBoard receives this partition's effective flag set every cycle (flag_state.go).
+	flagBoard *FlagBoard
 	// questionsSeen holds the (game, sha) pairs whose decide.questions JSON was already
 	// written on an invoke_agent span (#2648), guarded by questionsMu.
 	questionsMu   sync.Mutex
@@ -639,11 +639,9 @@ func (l *Loop) OnEvaluate(ctx context.Context, c gamecontext.GameContext, trig E
 		now = time.Now
 	}
 
-	// #2059: the snapshot is resolved with the flag-evaluation events buffered, and
-	// agent.flag_state is emitted on the partition's first cycle or a changed snapshot,
-	// BEFORE the kill-switch short-circuit so enabled=false is visible too.
-	snapshot, flagEvents := l.evaluateFlags(ctx)
-	l.emitFlagState(ctx, snapshot, c, flagEvents)
+	// Recorded BEFORE the kill-switch short-circuit so enabled=false is visible too.
+	snapshot := l.Flags.Evaluate(ctx)
+	l.recordFlagState(snapshot, c, now())
 	state := newLayerState(snapshot)
 	// Existence layer: enabled=false short-circuits before any rules evaluation.
 	// This is the safe default when flagd is unreachable. The disabled state is

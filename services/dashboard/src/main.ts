@@ -13,7 +13,7 @@ import { UNPAIR_NOTICE_EVENT } from "./unpair.js";
 import { GameStatus } from "./components/GameStatus.js";
 import { Controls } from "./components/Controls.js";
 import { ExperimentsView } from "./components/ExperimentsView.js";
-import { ExperimentStore, pollExperiments } from "./experiments.js";
+import { ExperimentStore } from "./experiments.js";
 import { AgentView } from "./components/AgentView.js";
 import {
   DecideStore,
@@ -21,16 +21,9 @@ import {
   RolloutStore,
   activityFeed,
   blockedRowsFrom,
-  fetchFlagStates,
+  fetchAgentState,
   fetchInterventionCounts,
   fetchRollouts,
-  needsFlagStateFallback,
-  createDecideRun,
-  createGoalRun,
-  GOAL_POLL_MS,
-  DECIDE_SEARCH_TIMEOUT_MS,
-  FlagFallbackPacer,
-  flagFallbackKey,
 } from "./agent.js";
 import type { FlagPanel, InterventionOverlay } from "./agent.js";
 import { fetchAdapters } from "./adapters.js";
@@ -61,28 +54,27 @@ import type { GameplayData } from "./gen/controller_manager_pb.js";
 // answers, and it runs only while its tab is shown and the page is visible. The
 // Jaeger searches never carry a browser-clock time (jaeger.ts, CLOCK SKEW).
 
-// Experiments tab (#2059: experiment.progress in Jaeger). Experiment state moves
-// on the order of games.
+// Experiments tab: the agent's GET /experiments/state. Experiment state moves on
+// the order of games.
 const EXPERIMENTS_POLL_MS = 5000;
 const EXPERIMENTS_MAX_BACKOFF_MS = 15_000;
 const EXPERIMENTS_TIMEOUT_MS = 4000;
 
-// Agent tab, everything but the decide feed: VictoriaMetrics counts and, from
-// Jaeger, the flag-state fallback search (only when the decide poll brought no
-// flag state for its game) and the rollout searches (every ROLLOUT_EVERY_TICKS).
+// Agent tab, everything but the agent's state: VictoriaMetrics counts and the
+// rollout searches in Jaeger (every ROLLOUT_EVERY_TICKS).
 const AGENT_POLL_MS = 5000;
 const AGENT_MAX_BACKOFF_MS = 15_000;
 const AGENT_TIMEOUT_MS = 4000;
 const ROLLOUT_EVERY_TICKS = 2;
 
-// Poll cadence for the invoke_agent feed (#1233, Jaeger query). Faster than the
-// other agent panels: a live decision.backend switch must show on the very next decision,
-// and the remote cadence (decision.min_interval_ms) is 1.5-3s. Errors and slow
-// responses back off (doubling) to DECIDE_MAX_BACKOFF_MS; each request is aborted
-// after DECIDE_TIMEOUT_MS so a struggling Jaeger is not piled onto.
+// The decide feed, strip and flag panel from the agent's GET /experiments/state
+// (#1233). Faster than the other agent panels: a live decision.backend switch must
+// show on the very next decision, and the remote cadence (decision.min_interval_ms)
+// is 1.5-3s. One small answer per poll; errors and slow answers back off (doubling)
+// to DECIDE_MAX_BACKOFF_MS.
 const DECIDE_POLL_MS = 1500;
 const DECIDE_MAX_BACKOFF_MS = 10_000;
-const DECIDE_TIMEOUT_MS = 2 * DECIDE_SEARCH_TIMEOUT_MS + 1000;
+const DECIDE_TIMEOUT_MS = 4000;
 
 // Poll cadence for the followed game (UC-070 BR-005, #1316): ListGames +
 // GetGameState on the game coordinator, two small unary calls. Decides whether
@@ -123,16 +115,16 @@ const shadowShields = new ShieldStore();
 let shadowShieldsFor = "";
 let shadowStream: { gameId: string; abort: AbortController } | null = null;
 
-// invoke_agent rows across polls; the follow poller tells it which game to describe.
+// invoke_agent rows of the agent's last answer; the follow poller tells it which game to describe.
 const decideStore = new DecideStore();
-// Agent-tab span state across polls (#2059): flag states per game, rollout rows.
+// Flag states per game (agent state), rollout rows (Jaeger).
 const flagStore = new FlagStateStore();
 const rolloutStore = new RolloutStore();
 // The VictoriaMetrics half of the overlay; null until the agent poller ran once.
 let interventionCounts: InterventionOverlay | null = null;
 /** False while the last Agent poll's Jaeger leg failed (UC-035 A3 step 2). */
 let agentJaegerOk = true;
-// Newest experiment.progress snapshot per experiment.
+// The agent's progress snapshot per experiment.
 const experimentStore = new ExperimentStore();
 
 // Components
@@ -178,15 +170,14 @@ async function init() {
   startAdapterPolling();
   startStageSettingsPolling();
 
-  // Start polling the experiment.progress spans (Jaeger)
+  // Start polling the experiments (agent state)
   startExperimentsPolling();
 
-  // Start polling the agent flag / activity / intervention telemetry (Jaeger + VM)
+  // Start polling the rollout rows (Jaeger) and intervention counts (VM)
   startAgentPolling();
 
-  // Start polling the invoke_agent spans (Jaeger)
+  // Start polling the decide feed and the flags (agent state)
   startDecidePolling();
-  startGoalPolling();
 
   // Start following the live game (real, else the newest live shadow game)
   startFollowPolling();
@@ -195,7 +186,6 @@ async function init() {
 }
 
 let decidePoller: Poller | null = null;
-let goalPoller: Poller | null = null;
 let agentPoller: Poller | null = null;
 let experimentsPoller: Poller | null = null;
 let adapterPoller: Poller | null = null;
@@ -207,7 +197,7 @@ const pageGate = new PageGate(
   document,
   globalThis,
   (document.querySelector(".tab-btn.active") as HTMLElement | null)?.dataset.tab ?? "",
-  () => [decidePoller, goalPoller, agentPoller, experimentsPoller, adapterPoller, stagePoller, followPoller],
+  () => [decidePoller, agentPoller, experimentsPoller, adapterPoller, stagePoller, followPoller],
 );
 
 // Background load (UC-035 BR-012, #2290): the gameplay stream pauses on a hidden
@@ -325,8 +315,7 @@ function startGameEventStream() {
   return keepGameEventStreamOpen(() => gameClient.streamGameEvents({}), handleGameEvent, undefined, () => shields.clear());
 }
 
-// Poll the experiment.progress spans (#2059): cold start without `start`, then
-// incremental from the newest snapshot held (ExperimentStore).
+// Poll the agent's experiment progress (GET /experiments/state).
 function startExperimentsPolling() {
   experimentsPoller = createPoller({
     baseMs: EXPERIMENTS_POLL_MS,
@@ -334,11 +323,12 @@ function startExperimentsPolling() {
     timeoutMs: EXPERIMENTS_TIMEOUT_MS,
     isActive: () => tabActive("experiments"),
     run: async (signal) => {
-      experimentsView.render(await pollExperiments(experimentStore, signal));
+      experimentStore.replace((await fetchAgentState(signal)).experiments);
+      experimentsView.render(experimentStore.list());
     },
     onError: (error) => {
       console.error("Experiments poll error:", error);
-      // Keep what is on screen (flagged stale), else say Jaeger is unreachable.
+      // Keep what is on screen (flagged stale), else say the agent is unreachable.
       onExperimentsPollFailed(experimentsView);
     },
   });
@@ -362,12 +352,10 @@ function renderAgentPanels() {
   }));
 }
 
-// Poll the Agent tab's other panels (#2059): VictoriaMetrics counts (never fail),
-// the agent.flag_state fallback search and the rollout searches (Jaeger; a
-// failure keeps the last render, flagged stale).
+// Poll the Agent tab's other panels: VictoriaMetrics counts (never fail) and the
+// rollout searches (Jaeger; a failure keeps the last render, flagged stale).
 function startAgentPolling() {
   let tick = 0;
-  const flagFallbackPacer = new FlagFallbackPacer();
   agentPoller = createPoller({
     baseMs: AGENT_POLL_MS,
     maxMs: AGENT_MAX_BACKOFF_MS,
@@ -375,25 +363,14 @@ function startAgentPolling() {
     isActive: () => tabActive("agent"),
     run: async (signal) => {
       const rolloutDue = tick % ROLLOUT_EVERY_TICKS === 0;
-      const decideGameId = decideStore.feed().current?.gameId ?? null;
-      // Paced (#2287): the same game's fallback search repeats at most every 30 s.
-      const flagsNeeded =
-        needsFlagStateFallback(flagStore, decideGameId, decideStore.followState) &&
-        flagFallbackPacer.take(flagFallbackKey(decideGameId, decideStore.followState));
-      // Settled, not all: the VictoriaMetrics counts render even when a Jaeger
-      // leg fails (UC-035 A3 step 2); the Jaeger failure still marks the poll failed.
+      // Settled, not all: the VictoriaMetrics counts render even when Jaeger
+      // fails (UC-035 A3 step 2); the Jaeger failure still marks the poll failed.
       const settled = await Promise.allSettled([
         fetchInterventionCounts(signal),
-        flagsNeeded ? fetchFlagStates(signal, decideStore.followState) : Promise.resolve([] as FlagPanel[]),
         rolloutDue ? fetchRollouts(rolloutStore, signal) : Promise.resolve(),
       ]);
       tick += 1;
-      // A failed fallback search is retried on the next poll, not after the pace.
-      if (flagsNeeded && settled[1].status === "rejected") flagFallbackPacer.forget();
-      const result = settleAgentPoll(settled, interventionCounts, (states) =>
-        flagStore.merge(states, decideStore.followState),
-        { flags: flagsNeeded, rollouts: rolloutDue },
-      );
+      const result = settleAgentPoll(settled, interventionCounts, rolloutDue);
       interventionCounts = result.overlay;
       agentJaegerOk = result.jaegerOk ?? agentJaegerOk;
       renderAgentPanels();
@@ -448,11 +425,10 @@ function startStageSettingsPolling() {
   stagePoller.poke();
 }
 
-// Poll the invoke_agent spans from Jaeger (#1233). Only while the Agent tab is
-// shown AND the page is visible; one chain at most (see poller.ts), incremental
-// query window per search lane (DecideStore), per-request timeout and backoff,
-// paced by the answer size and targeted at the live real game (#2287). Its game traces
-// also carry the blocked agent.decision and agent.flag_state spans (#2059).
+// Poll the agent's state (GET /experiments/state) for the decide feed, the strip,
+// the blocked activity rows, the prediction and goal strips and the flag panel.
+// Only while the Agent tab is shown AND the page is visible; one chain at most
+// (see poller.ts), per-request timeout and backoff.
 function startDecidePolling() {
   const store = decideStore;
   decidePoller = createPoller({
@@ -460,34 +436,21 @@ function startDecidePolling() {
     maxMs: DECIDE_MAX_BACKOFF_MS,
     timeoutMs: DECIDE_TIMEOUT_MS,
     isActive: () => tabActive("agent"),
-    run: createDecideRun(store, (polled) => {
-      for (const error of polled.laneErrors) console.warn("Decide lane failed (feed kept):", error);
-      flagStore.merge(polled.flagStates, store.followState);
+    run: async (signal) => {
+      const state = await fetchAgentState(signal);
+      store.load(state.decides);
+      flagStore.replace(state.flags);
       agentView.renderDecide(store.feed());
       renderAgentPanels();
-    }),
+    },
     onError: (error) => {
-      console.error("Decide feed poll error:", error);
+      console.error("Agent state poll error:", error);
       onDecidePollFailed(agentView);
     },
   });
 
   setInterval(() => agentView.updateDecideFreshness(), 1000);
   decidePoller.poke();
-}
-
-// The goal strip (#2498): the followed game's goal profile and attainment come from the
-// agent.game.summary span, which is not in the decide traces; a slow poller of its own.
-function startGoalPolling() {
-  goalPoller = createPoller({
-    baseMs: GOAL_POLL_MS,
-    maxMs: 60_000,
-    timeoutMs: DECIDE_TIMEOUT_MS,
-    isActive: () => tabActive("agent"),
-    run: createGoalRun(decideStore, () => agentView.renderDecide(decideStore.feed())),
-    onError: (error) => console.warn("Goal summary poll failed (strip kept):", error),
-  });
-  goalPoller.poke();
 }
 
 // The controller tiles: everything but the players of live shadow games, plus
