@@ -316,6 +316,7 @@ class GameSession:
         # idempotent and catches a game that never reached its own cleanup.
         self._remove_game_mode()
         metrics.clear_game_state_gauges(self.game_kind, self.game_id)
+        metrics.clear_elimination_order([p.serial for p in self.players], self.game_id)
 
         if self.game_trace_id:
             with suppress(KeyError, ValueError):

@@ -426,7 +426,7 @@ the session retired, its game-thread teardown writes none of its per-game series
 before the loop's teardown; `games_completed_total` is still counted. Retire (natural-end sweep and force-end alike)
 sets `game_active` and `game_active_players` to 0 itself and removes the session's series three metric export
 intervals later (`metrics_export_interval_ms`, so about 3 s), without blocking, because the `game_active` 1 → 0
-datapoint is the agent's fastest game-end signal (the root span and the 60 s stale backstop are later, §4.4). Game-state series (`GAME_STATE_GAUGES`) that the game loop writes after
+datapoint is the agent's fastest game-end signal (the root span and the 60 s stale backstop are later, §4.4). `game_player_elimination_order` is removed with them, by the same delayed retire (`metrics.clear_elimination_order` for the session's roster), never by the game's own teardown: it is the agent's only death channel (UC-041 BR-008, BR-009), so a kill just before the end (a draw, a force-end, `winner_rainbow_duration_ms` 0) is still exported (#2786). Game-state series (`GAME_STATE_GAUGES`) that the game loop writes after
 retire, for example after a force-end whose join timed out, are removed by the game's own `run()` cleanup when the
 loop ends.
 
