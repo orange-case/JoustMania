@@ -140,8 +140,8 @@ processors:
   # so the SECOND hop of the agent observe path (collector → otlp/agent) flushes
   # sooner. Combined with the lower controller-manager BSP flush (per-service
   # observability flag), this cuts the agent's observe latency. Smaller,
-  # sooner trace batches also lower
-  # the collector's peak heap held by the traces pipeline (synergy with the
+  # sooner trace batches also lower the collector's peak heap held by the
+  # traces pipeline (synergy with the
   # #1167/#1173 memory work — the memory_limiter envelope is untouched). The
   # logs pipeline keeps the shared `batch` (5s) unchanged.
   batch/traces:

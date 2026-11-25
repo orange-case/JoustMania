@@ -746,6 +746,23 @@ class TestRouteControllers:
             method="targeted",
         )
 
+    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
+    @pytest.mark.uc("UC-002", flow="main", steps=[3])
+    def test_targeting_match_on_retired_unstable_falls_back_to_first_real_adapter(self, mock_metrics):
+        """A leftover per-serial `unstable` targeting rule names no loaded adapter: route to the first non-mock one."""
+        mock_adapter = _make_adapter("mock", serials=["AA:AA"])
+        rust = _make_adapter("rust", serials=["AA:AA"])
+        python = _make_adapter("python", serials=["AA:AA"])
+        mux = MultiplexerBackend(adapters=[mock_adapter, rust, python])
+
+        mock_client = autospec_flag_client()
+        mock_client.get_string_details.return_value = _details("unstable", "TARGETING_MATCH")
+        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
+            assert mux._resolve_adapter_for_serial("AA:AA") == (None, "default")
+            assert mux.get_connected_controllers() == ["AA:AA"]
+
+        assert mux._serial_to_adapter["AA:AA"] is rust
+
 
 class TestIndependentDiscovery:
     """Tests for the independent discovery model where all adapters discover."""

@@ -101,6 +101,8 @@ every set is cut over, not part of any one set's cutover (re-review N3).
 
 ## 3. Today: the writer and reader inventory
 
+Historical inventory (pre-migration). #2784 removed W2, W7 and R1 with the rollout and canary, and `tests/service/test_rollout_plumbing.py`.
+
 Every writer below does a read-modify-write **in place** (truncate and write; temp+rename fails with
 EBUSY on the bind mount). Locks are per process or per writer instance; there is no cross-process lock.
 
