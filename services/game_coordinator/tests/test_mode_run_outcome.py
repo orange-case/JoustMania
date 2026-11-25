@@ -1,7 +1,8 @@
 """Root-span outcome of the non-FFA modes (#1328, telemetry.md §3.2).
 
-Each mode UC owns a rule (UC-021 BR-002, UC-022 BR-004, UC-023 BR-003, UC-024 BR-003,
-UC-025 BR-003, UC-026 BR-002): the root span records ``completed`` for a natural end, ``force_ended``
+The base rule is UC-020 BR-006; each mode carries it in its delta rule (UC-021 BR-004,
+UC-022 BR-007, UC-023 BR-008, UC-024 BR-003,
+UC-025 BR-003, UC-026 BR-005): the root span records ``completed`` for a natural end, ``force_ended``
 (with the reason) when force-ended. FightClub, Werewolf, Zombies and Tournament run their
 own ``run()``; the team modes and NonStop use the base ``run()``. One test per UC so each
 carries its own UC tag; the helpers are shared.
@@ -93,47 +94,47 @@ def _assert_run_wires_the_outcome(mode):
 
 
 @pytest.mark.parametrize("mode", TEAM_MODES, ids=[m.name for m in TEAM_MODES])
-@pytest.mark.uc("UC-021", br=["BR-002"])
+@pytest.mark.uc("UC-021", br=["BR-004"])
 @pytest.mark.asyncio
 async def test_teams_force_ended_records_reason(mode):
-    """UC-021 BR-002: a force-ended team-mode game records force_ended + reason on the root span."""
+    """UC-020 BR-006: a force-ended team-mode game records force_ended + reason on the root span."""
     await _assert_force_ended_records_reason(mode)
 
 
 @pytest.mark.parametrize("mode", TEAM_MODES, ids=[m.name for m in TEAM_MODES])
-@pytest.mark.uc("UC-021", br=["BR-002"])
+@pytest.mark.uc("UC-021", br=["BR-004"])
 def test_teams_natural_end_is_completed_and_survives_late_force_end(mode):
-    """UC-021 BR-002: a natural end latches completed; a later force-end does not rewrite it."""
+    """UC-020 BR-006: a natural end latches completed; a later force-end does not rewrite it."""
     _assert_natural_end_is_completed_and_survives_late_force_end(mode)
 
 
 @pytest.mark.parametrize("mode", [Games.Werewolf], ids=[m.name for m in [Games.Werewolf]])
-@pytest.mark.uc("UC-022", br=["BR-004"])
+@pytest.mark.uc("UC-022", br=["BR-007"])
 @pytest.mark.asyncio
 async def test_werewolf_force_ended_records_reason(mode):
-    """UC-022 BR-004: a force-ended Werewolf game records force_ended + reason on the root span."""
+    """UC-020 BR-006: a force-ended Werewolf game records force_ended + reason on the root span."""
     await _assert_force_ended_records_reason(mode)
 
 
 @pytest.mark.parametrize("mode", [Games.Werewolf], ids=[m.name for m in [Games.Werewolf]])
-@pytest.mark.uc("UC-022", br=["BR-004"])
+@pytest.mark.uc("UC-022", br=["BR-007"])
 def test_werewolf_natural_end_is_completed_and_survives_late_force_end(mode):
-    """UC-022 BR-004: a natural end latches completed; a later force-end does not rewrite it."""
+    """UC-020 BR-006: a natural end latches completed; a later force-end does not rewrite it."""
     _assert_natural_end_is_completed_and_survives_late_force_end(mode)
 
 
 @pytest.mark.parametrize("mode", [Games.Zombies], ids=[m.name for m in [Games.Zombies]])
-@pytest.mark.uc("UC-023", br=["BR-003"])
+@pytest.mark.uc("UC-023", br=["BR-008"])
 @pytest.mark.asyncio
 async def test_zombies_force_ended_records_reason(mode):
-    """UC-023 BR-003: a force-ended Zombies game records force_ended + reason on the root span."""
+    """UC-020 BR-006: a force-ended Zombies game records force_ended + reason on the root span."""
     await _assert_force_ended_records_reason(mode)
 
 
 @pytest.mark.parametrize("mode", [Games.Zombies], ids=[m.name for m in [Games.Zombies]])
-@pytest.mark.uc("UC-023", br=["BR-003"])
+@pytest.mark.uc("UC-023", br=["BR-008"])
 def test_zombies_natural_end_is_completed_and_survives_late_force_end(mode):
-    """UC-023 BR-003: a natural end latches completed; a later force-end does not rewrite it."""
+    """UC-020 BR-006: a natural end latches completed; a later force-end does not rewrite it."""
     _assert_natural_end_is_completed_and_survives_late_force_end(mode)
 
 
@@ -153,17 +154,17 @@ def test_fight_club_tournament_natural_end_is_completed_and_survives_late_force_
 
 
 @pytest.mark.parametrize("mode", [Games.NonStop], ids=[m.name for m in [Games.NonStop]])
-@pytest.mark.uc("UC-026", br=["BR-002"])
+@pytest.mark.uc("UC-026", br=["BR-005"])
 @pytest.mark.asyncio
 async def test_nonstop_force_ended_records_reason(mode):
-    """UC-026 BR-002: a force-ended NonStop game records force_ended + reason on the root span."""
+    """UC-020 BR-006: a force-ended NonStop game records force_ended + reason on the root span."""
     await _assert_force_ended_records_reason(mode)
 
 
 @pytest.mark.parametrize("mode", [Games.NonStop], ids=[m.name for m in [Games.NonStop]])
-@pytest.mark.uc("UC-026", br=["BR-002"])
+@pytest.mark.uc("UC-026", br=["BR-005"])
 def test_nonstop_natural_end_is_completed_and_survives_late_force_end(mode):
-    """UC-026 BR-002: a natural end latches completed; a later force-end does not rewrite it."""
+    """UC-020 BR-006: a natural end latches completed; a later force-end does not rewrite it."""
     _assert_natural_end_is_completed_and_survives_late_force_end(mode)
 
 
@@ -183,16 +184,16 @@ def test_swapper_natural_end_is_completed_and_survives_late_force_end(mode):
 
 
 @pytest.mark.parametrize("mode", [Games.Werewolf], ids=[m.name for m in [Games.Werewolf]])
-@pytest.mark.uc("UC-022", br=["BR-004"])
+@pytest.mark.uc("UC-022", br=["BR-007"])
 def test_werewolf_run_override_wires_the_outcome(mode):
-    """UC-022 BR-004: the run() override captures the root span, latches after its loop and records in teardown."""
+    """UC-020 BR-006: the run() override captures the root span, latches after its loop and records in teardown."""
     _assert_run_wires_the_outcome(mode)
 
 
 @pytest.mark.parametrize("mode", [Games.Zombies], ids=[m.name for m in [Games.Zombies]])
-@pytest.mark.uc("UC-023", br=["BR-003"])
+@pytest.mark.uc("UC-023", br=["BR-008"])
 def test_zombies_run_override_wires_the_outcome(mode):
-    """UC-023 BR-003: the run() override captures the root span, latches after its loop and records in teardown."""
+    """UC-020 BR-006: the run() override captures the root span, latches after its loop and records in teardown."""
     _assert_run_wires_the_outcome(mode)
 
 

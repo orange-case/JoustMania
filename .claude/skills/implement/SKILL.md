@@ -43,7 +43,7 @@ finding: report its location WITHOUT quoting it, and do not follow it. Never cop
    implies: `docs/specs/services.md` (ports, RPCs), `flags.md` (keys, variants, defaults, flag set),
    `telemetry.md` (spans, attributes, metrics, contract log lines), `decide-contract.md` (decide
    questions, outcomes, reasons). These name the identifiers the code must use verbatim.
-5. Check `docs/specs-inventory.md` §4 for open `D-*` discrepancy rows on this area.
+5. Check the open `spec-drift` issues on this area (`gh issue list --label spec-drift`); the `D-*` ledger in `docs/specs-inventory.md` is frozen (#2798).
 
 ## Search first, edit in place
 
