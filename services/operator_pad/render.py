@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 
+from lib import setting_ladders
 from lib.setting_ladders import (
     AGENT_POLICY_LEVELS,
     BACKENDS,
@@ -37,6 +38,7 @@ from services.operator_pad.screens import (
     MINIMUM,
     NO_CONNECTION,
     NOT_POSSIBLE,
+    NOW_NEW_FORMS,
     PRESS_KNOB,
     PRESS_TO_CONFIRM,
     RELEASE_TO_RESET,
@@ -70,6 +72,8 @@ LADDER_BARS: dict[str, tuple[list[str], tuple[str, ...]]] = {
     "sensitivity": (KNOB_LADDERS["sensitivity"], ("AUTO", "0", "1", "2", "3", "4")),
     "num_teams": (KNOB_LADDERS["num_teams"], ("AUTO", "2", "3", "4", "5", "6")),
     "audio_volume.master": (VOLUME_LADDER, ("MUTE", "", "", "", "MAX")),
+    setting_ladders.RATE_OPTION: (setting_ladders.RATE_LADDER, tuple(setting_ladders.RATE_LADDER)),
+    setting_ladders.EFFORT_OPTION: (setting_ladders.EFFORT_LADDER, ("LOW", "", "", "", "MAX")),
 }
 
 # BR-007 wheels: the options in ladder order and their full names. Only `WRAPPING` options wrap;
@@ -79,6 +83,9 @@ WHEEL_LADDERS: dict[str, list[str]] = {
     "decision.backend": BACKENDS,
     "shield.activation": SHIELD_KNOB_LADDER,
     "agent_level": AGENT_POLICY_LEVELS,
+    setting_ladders.GOAL_OPTION: setting_ladders.GOAL_LADDER,
+    setting_ladders.RETRO_BACKEND_OPTION: setting_ladders.RETRO_BACKEND_LADDER,
+    setting_ladders.BRIEF_OPTION: setting_ladders.BRIEF_LADDER,
 }
 
 
@@ -202,7 +209,11 @@ def _rows_screen(
     refused: bool = False,
 ) -> Screen:
     """BR-007 NOW and NEW rows; NEW is empty when refused (A4)."""
-    rows = [("NOW", value_text(option, now, version)), ("NEW", "" if refused else value_text(option, new, version))]
+    width = MEDIUM_WIDTH if version >= 3 else LARGE_WIDTH
+    rows = [
+        ("NOW", _now_new(option, now, version, width)),
+        ("NEW", "" if refused else _now_new(option, new, version, width)),
+    ]
     if version < 3 and len(hint) > LARGE_WIDTH:
         if refused and " " in hint:
             first, rest = hint.split(" ", 1)  # BR-007: `NOT` / `POSSIBLE` over rows 2 and 3
@@ -212,6 +223,15 @@ def _rows_screen(
             hint = V2_HINTS.get(hint, hint)
     rows.append((hint, ""))
     return Screen(tuple(_frame(version, title, right, rows, bottom)))
+
+
+def _now_new(option: str, value: str | None, version: int, width: int) -> str:
+    """A NOW or NEW value; its 6-character form where the full one leaves no room for the label."""
+    text = value_text(option, value, version)
+    short_forms = NOW_NEW_FORMS.get(option, {})
+    if len(text) > width - len("NOW ") and value in short_forms:
+        return short_forms[value]
+    return text
 
 
 def _wheel_screen(title: str, right: str, option: str, now: str | None, new: str, bottom: Line) -> Screen:
