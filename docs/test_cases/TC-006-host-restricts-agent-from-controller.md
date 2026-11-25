@@ -15,7 +15,7 @@
 
 ## Preconditions
 
-- The agent built at HEAD runs next to the game services (service tier `AGENT` composition, `tests/service/harness`, #1600), agent `enabled` and `interventions_enabled` on, `interventions_allowed` = `standard`, `decision.backend` = `openai` against the fake OpenAI server (`tests/integration/fake_openai`) scripted to answer `adjust_global_difficulty` at high confidence.
+- The agent built at HEAD runs next to the game services (service tier `AGENT_CLAUDE_DECIDE` composition, `tests/service/harness`, #1600), agent `enabled` and `interventions_enabled` on, `interventions_allowed` = `standard`, `decision.backend` = `claude` against the fake Claude (`tests/service/harness/fakes/claude.py`) scripted to answer `adjust_global_difficulty` at high confidence.
 - Mock controllers `MOCK0001` (host) … `MOCK0004` connected; a `JoustFFA` game runs with `MOCK0002` … `MOCK0004`.
 
 ## Flow
@@ -42,7 +42,7 @@
 
 ## Automation
 
-**Tier:** T2 service for steps 1 to 7 (`tests/service/`, `make test-service`): menu, game coordinator and controller manager (mock controllers) from source at HEAD, flag service and one flagd, fake audio (`LOBBY` composition for steps 1 to 4; `AGENT` composition for steps 5 to 7: plus the agent built at HEAD, the harness `OtlpSink` and the fake OpenAI server).
+**Tier:** T2 service for steps 1 to 7 (`tests/service/`, `make test-service`): menu, game coordinator and controller manager (mock controllers) from source at HEAD, flag service and one flagd, fake audio (`LOBBY` composition for steps 1 to 4; `AGENT_CLAUDE_DECIDE` composition for steps 5 to 7: plus the agent built at HEAD, the harness `OtlpSink` and the fake Claude).
 
 - Precondition difference: the service test runs the `LOBBY` composition with 4 controllers, no game and no agent (the "outside the game" host).
 - `tests/service/test_tc006_agent_ladder.py::test_host_walks_the_agent_ladder_from_the_controller` covers steps 1 to 4 and Validation 2 (#1598): admin combo, three Move presses to `agent_control`, then the whole ladder with Select (`none` to `full`) and back with Start, asserting after every press the persisted admin value of `interventions_allowed`, the per-level voice on the fake audio service (`adminop_off`, `adminop_1` to `adminop_3`) and, at the end, the value flagd serves. It presses past both ends (Start at `none`, Select at `full`) and asserts the value does not wrap (#1340, clamped since #1373), and starts from `probe` to cover UC-013 A1 (jump to `none`).

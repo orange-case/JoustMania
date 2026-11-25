@@ -369,3 +369,54 @@ def test_restart_ignores_the_marker_of_the_previous_start(tmp_path):
         assert time.monotonic() - began >= BOOT_DELAY_SECONDS
     finally:
         proc.stop(grace=2)
+
+
+def test_fake_claude_decide_answer_is_built_from_the_prompt_and_hold_waits_for_release():
+    """The decide answer comes from the rendered prompt's questions; ``hold`` answers only after release()."""
+    import threading
+    import urllib.request
+
+    from tests.service.harness.fakes.claude import API_KEY, DECIDE_MARKER, FakeClaude
+
+    prompt = (
+        'game: id=g1\n- id: ffa.intervention\n  kind: choice\n  options: ["noop", "adjust_volume"]\n'
+        "- id: ffa.magnitude\n  kind: number\n  range: [0.3, 1.0]"
+    )
+    body = json.dumps(
+        {
+            "model": "m",
+            "system": [{"type": "text", "text": DECIDE_MARKER}],
+            "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+        }
+    ).encode()
+    fake = FakeClaude()
+    fake.start()
+
+    def post() -> dict:
+        req = urllib.request.Request(
+            f"{fake.base_url}/v1/messages",
+            data=body,
+            headers={"x-api-key": API_KEY, "content-type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+
+    try:
+        fake.script(decide_mode="valid", intervention="adjust_volume", confidence=0.9, magnitude=0.5)
+        answer = json.loads(post()["content"][0]["text"])
+        assert [a["choice"] for a in answer["answers"]][0] == "adjust_volume"
+        record = fake.requests("decide")[0]
+        assert (record["game_id"], record["intervention"], record["held"]) == ("g1", "adjust_volume", False)
+
+        fake.script(decide_mode="hold", hold_max_seconds=20)
+        done = threading.Thread(target=post)
+        done.start()
+        deadline = time.monotonic() + 5
+        while not any(r["held"] for r in fake.requests("decide")) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert any(r["held"] for r in fake.requests("decide")) and done.is_alive()
+        fake.release()
+        done.join(5)
+        assert not done.is_alive() and not any(r["held"] for r in fake.requests("decide"))
+    finally:
+        fake.stop()

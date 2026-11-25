@@ -16,7 +16,8 @@ each call by its system prompt, answers with a canned text (a real Messages API
 A ``decide`` answer is BUILT FROM THE REQUEST (``decide_answer.build_answer``), so every
 choice is an option the agent offered; ``decide_mode="garbage"`` answers 200 with non-JSON
 text; ``decide_mode="hold"`` answers like ``valid`` but only after ``release()`` (or
-``hold_max_seconds``, default ``HOLD_MAX_SECONDS``), so a test can flip a flag while the agent's call is provably in flight.
+``hold_max_seconds``, default ``HOLD_MAX_SECONDS``), so a test can flip a flag while the
+agent's call is provably in flight.
 Each ``decide`` record carries the game id and question ids parsed from the prompt.
 
 An in-process threaded server (stdlib only, instance state): nothing is shared
@@ -49,8 +50,13 @@ class FakeClaude:
         self.port = free_port()
         self._lock = threading.Lock()
         self._replies: dict[str, str] = {"retro": "{}", "proposal": "{}"}
-        self._decide: dict = {"mode": "valid", "intervention": "adjust_volume", "confidence": 0.95, "magnitude": 0.5,
-                                 "hold_max_seconds": HOLD_MAX_SECONDS}
+        self._decide: dict = {
+            "mode": "valid",
+            "intervention": "adjust_volume",
+            "confidence": 0.95,
+            "magnitude": 0.5,
+            "hold_max_seconds": HOLD_MAX_SECONDS,
+        }
         self._requests: list[dict] = []
         self._release = threading.Event()
         self._server: ThreadingHTTPServer | None = None

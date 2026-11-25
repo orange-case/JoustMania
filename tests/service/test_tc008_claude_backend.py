@@ -12,9 +12,9 @@ import pytest
 
 from tests.integration.helpers import GameEventCollector, async_poll_until, get_game_client
 from tests.service.agent_flow import (
-    CLAUDE_MODEL,
     ACT_THRESHOLD,
     APPLY_TIMEOUT,
+    CLAUDE_MODEL,
     EXPECTED_VALUE,
     FIRST_CALL_TIMEOUT,
     HIGH_CONFIDENCE,
@@ -71,7 +71,10 @@ async def test_claude_high_confidence_acts(fresh_stack):
     and the invoke_agent span names claude as the backend that decided."""
     stack = fresh_stack
     stack.fake_claude.script(
-        decide_mode="valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE, magnitude=SCRIPTED_MAGNITUDE
+        decide_mode="valid",
+        intervention=SCRIPTED_INTERVENTION,
+        confidence=HIGH_CONFIDENCE,
+        magnitude=SCRIPTED_MAGNITUDE,
     )
     _configure(stack)
 
@@ -105,7 +108,10 @@ async def test_claude_high_confidence_acts(fresh_stack):
                     for c in stack.fake_audio.calls_of("SetVolume")
                 ),
                 SPAN_TIMEOUT,
-            ), f"no SetVolume({EXPECTED_VALUE}) at the audio service: {[c.request for c in stack.fake_audio.calls_of('SetVolume')]}"
+            ), (
+                f"no SetVolume({EXPECTED_VALUE}) at the audio service: "
+                f"{[c.request for c in stack.fake_audio.calls_of('SetVolume')]}"
+            )
 
             span = await wait_decide_span(
                 stack, game_id, lambda t: t.get("decide.outcome") == "act", "decide.outcome=act", within=SPAN_TIMEOUT
