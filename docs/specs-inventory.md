@@ -1,5 +1,12 @@
 # Specs inventory
 
+> **Frozen snapshot, 2026-11-25 (#2798).** This file is no longer maintained: do not add or edit rows,
+> and do not cite a `D-*` id in new text. New drift between spec and code is a GitHub issue with the
+> [`spec-drift`](https://github.com/orange-case/JoustMania/issues?q=label%3Aspec-drift) label, and spec
+> text cites that issue. The open rows still cited by the spec at the freeze moved to issues: D-B3 → #1741,
+> D-P2 → #2836, D-T6 → #2837, D-T8 → #2838. Any other open row here is history until someone files it as a
+> `spec-drift` issue. Existing `D-*` mentions in the spec and tests stay as history and resolve to the rows below.
+
 > Snapshot of every Markdown document on `main` @ 2d162b33 (2026-10-16) when the AIUP spec tree was
 > introduced (epic #1260), updated for PRs #1256, #1257, #1259, #1261 and #1265 (merged the same day, `main` @ 81c9ecea), for the spec consistency pass on `main` @ 2fdfbfd1 (PRs #1266, #1282, #1284, #1286, #1288), and for the AIUP compliance audit consistency pass on `main` @ 84c3ba15 (2026-10-16, epic #1369; PRs #1291 to #1315, #1324, #1308; new rows D-T10 to D-T12, D-A15 to D-A19, D-M10 to D-M14, D-G12 to D-G20, D-C8, D-AU3 for the bugs filed by the audit): what it covers, whether it is still true, and where its content now lives.
 > Followed by the **discrepancies found** between docs and code. Index: [README.md](README.md).
