@@ -4,8 +4,10 @@ The key path (`PadController.on_code`, `Actions`) only calls the model's synchro
 set fields and wake the link, and never raise. Every hidraw call runs on the display's own worker
 thread, so a hung or failing write never delays or drops a key event (FR-240, A1).
 
-Only one screen per service: with several pads attached, the first raw node of the matching
-device gets the screen. The link takes the raw HID node from whoever else holds it only by
+With protocol 2 or higher the model shows the pages of BR-006 (`pages.py`, `render.py`); the
+knob scrolls them while `pages_active` (BR-008). Only one screen per service: with several pads
+attached, the first raw node of the matching device gets the screen, and the knob of any of them
+scrolls it. The link takes the raw HID node from whoever else holds it only by
 sharing it (every opener gets every report): with the Vial app open on the same host the
 display goes off and on as their replies cross.
 """
@@ -24,9 +26,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lib.setting_ladders import VOLUME_LADDER, clamp_step
-from services.operator_pad import hidraw
+from services.operator_pad import hidraw, render
 from services.operator_pad.config import PadConfig
 from services.operator_pad.device import RESCAN_SECONDS
+from services.operator_pad.pages import NET_UNKNOWN, PageContext, Pager
 from services.operator_pad.screens import (
     LINES,
     MAXIMUM,
@@ -47,6 +50,7 @@ REPLY_TIMEOUT_SECONDS = 0.25  # per report; the firmware answers within a USB po
 IO_MARGIN_SECONDS = 0.5
 PENDING_SECONDS = 6.0  # a command's label until its result: longer than its deadline (actions.py)
 VOLUME = "audio_volume.master"
+WAKE_MIN_SECONDS = 0.005  # a due page deadline never wakes the render loop in a busy loop
 
 
 def _quiet(method):
@@ -99,6 +103,17 @@ class DisplayModel:
         self._vol_pending = 0
         self._vol_limit: str | None = None
         self._vol_epoch = 0  # goes up when a volume commit ends; a read from before it never re-bases
+        self._vol_now: str | None = None  # BR-007: the level when the volume turn began (the marker)
+        # Protocol 2 and higher (BR-006 to BR-010).
+        self._protocol: int | None = None  # the hello's version (above 4 used as 4); None: link down
+        self._layout: int | None = None  # the version drawn: lower after the pad refused a bar or wheel
+        self._pager = Pager(clock())
+        self._keys_down = False
+        self._page_epoch = 0  # goes up with every page step; a volume overlay from before it stays hidden
+        self._vol_page_epoch = 0
+        self._internet = NET_UNKNOWN
+        self._down_since: float | None = None
+        self.internet_wake = asyncio.Event()  # set on link-up: the internet check runs at once (BR-010)
 
     # --- link state -------------------------------------------------------------------------
 
@@ -115,6 +130,45 @@ class DisplayModel:
 
     def link_down(self) -> None:
         self._last_ack = None
+
+    @property
+    def protocol(self) -> int | None:
+        return self._protocol
+
+    @property
+    def pages_active(self) -> bool:
+        """BR-008: the knob scrolls the pages (link up with protocol 2 or higher)."""
+        try:
+            return self.link_up and (self._protocol or 0) >= 2
+        except Exception:
+            return False
+
+    @property
+    def internet(self) -> str:
+        return self._internet
+
+    def set_protocol(self, version: int | None) -> None:
+        """The hello's version at link-up (`HOME` shows, BR-006), None when the link goes down."""
+        now = self._clock()
+        if version is None:
+            if self._protocol is not None:
+                self._down_since = now
+            self._protocol = self._layout = None
+            return
+        self._protocol = self._layout = min(version, render.MAX_VERSION)
+        self._pager.reset(now)
+        # BR-010: a short flap keeps the internet state; a longer outage starts from `?`.
+        if self._down_since is not None and now - self._down_since > self._config.internet_check_ms() / 1000:
+            self._internet = NET_UNKNOWN
+        self._down_since = None
+        self.internet_wake.set()
+        self.dirty.set()
+
+    def layout_refused(self, op: int) -> None:
+        """BR-002: the pad answered `FF` to a wheel (draw protocol 3) or a bar (protocol 2) for this link."""
+        if self._layout is not None:
+            self._layout = min(self._layout, 3 if op == hidraw.OP_WHEEL else 2)
+        self.dirty.set()
 
     # --- hooks (key path and poll) ----------------------------------------------------------
 
@@ -175,13 +229,39 @@ class DisplayModel:
         self._layer = None
         self._overlay = None
         self._vol_pending = 0
+        self._keys_down = False
         self.dirty.set()
+
+    @_quiet
+    def page_step(self, steps: int) -> None:
+        """BR-008: a knob step with the pages: the next or previous page; ends a result, tap or volume screen."""
+        self._overlay = None
+        self._page_epoch += 1
+        self._pager.step(steps, self._clock())
+        self.dirty.set()
+
+    @_quiet
+    def note_input(self, keys_down: bool) -> None:
+        """BR-009: any key or knob event; auto-paging pauses while a key or the knob press is down."""
+        self._pager.input(self._clock())
+        if keys_down != self._keys_down:
+            self._keys_down = keys_down
+            self.dirty.set()
+
+    @_quiet
+    def note_internet(self, state: str) -> None:
+        """BR-010: the last internet check (`ok`, `down`, `off`); a change redraws."""
+        if state != self._internet:
+            self._internet = state
+            self.dirty.set()
 
     # --- volume -----------------------------------------------------------------------------
 
     @_quiet
     def volume_turn(self, pending_steps: int) -> None:
         """A knob turn with no layer key: the variant the turns not yet committed would land on."""
+        self._mark_volume_start(self._clock())
+        self._vol_page_epoch = self._page_epoch
         self._vol_pending = pending_steps
         self._vol_limit = None
         if pending_steps:
@@ -198,6 +278,9 @@ class DisplayModel:
     def volume_commit_start(self, change: tuple[str, object]) -> int:
         """A volume commit leaves: ``("steps", n)`` or ``("set", variant)``; a ticket for its end."""
         try:
+            if change[0] == "set":
+                self._mark_volume_start(self._clock())
+                self._vol_page_epoch = self._page_epoch
             self._vol_ticket += 1
             self._vol_inflight[self._vol_ticket] = change
             if change[0] == "steps":
@@ -223,7 +306,8 @@ class DisplayModel:
             )
         elif result == "at_limit" and change is not None:
             self._vol_base = self._apply(self._vol_base, change)
-            if change[0] == "steps":
+            # A page step since this turn keeps the page (BR-008): no volume screen over it.
+            if change[0] == "steps" and self._vol_page_epoch == self._page_epoch:
                 self._vol_limit = MAXIMUM if change[1] > 0 else MINIMUM
                 self._show_overlay(("volume",), self._config.display_result_ms() / 1000)
         elif result != "ok":
@@ -244,6 +328,12 @@ class DisplayModel:
             variant = self._apply(variant, change)
         return self._apply(variant, ("steps", pending)) if pending else variant
 
+    def _mark_volume_start(self, now: float) -> None:
+        """BR-007: a volume interaction starts while no volume screen shows; its level is the marker."""
+        showing = self._overlay is not None and self._overlay[0] == "volume" and now < self._overlay_until
+        if not showing:
+            self._vol_now = self._predict(0)
+
     # --- rendering --------------------------------------------------------------------------
 
     def _show_overlay(self, overlay: tuple, seconds: float) -> None:
@@ -251,14 +341,35 @@ class DisplayModel:
         self._overlay_until = self._clock() + seconds
         self.dirty.set()
 
+    def _layer_held(self) -> bool:
+        return self._layer is not None and self._hold == self._layer.key
+
+    def _idle(self, now: float) -> bool:
+        """BR-009: no key or knob press down and no setting, result, tap or volume screen."""
+        overlay = self._overlay is not None and now < self._overlay_until
+        return not self._keys_down and not overlay and not self._layer_held()
+
+    def _page_times(self) -> tuple[float, float]:
+        return self._config.display_autopage_ms() / 1000, self._config.display_home_ms() / 1000
+
     def next_change(self, now: float) -> float | None:
-        """When the screen changes by itself (an overlay expires), or None."""
+        """When the screen changes by itself (an overlay expires, a page turns), or None."""
+        times = []
         if self._overlay is not None and self._overlay_until > now:
-            return self._overlay_until
-        return None
+            times.append(self._overlay_until)
+        if (self._layout or 0) >= 2:
+            wake = self._pager.next_wake(self._idle(now), *self._page_times())
+            if wake is not None:
+                times.append(max(wake, now + WAKE_MIN_SECONDS))
+        return min(times) if times else None
 
     def current(self, now: float) -> Screen:
-        """BR-001: the setting screen while its layer key is held, else an overlay, else the status."""
+        """BR-001: the setting screen while its layer key is held, else an overlay, else the status.
+
+        With protocol 2 or higher the same choice in the frame of BR-006, the status being the page.
+        """
+        if (self._layout or 0) >= 2:
+            return self._current_frame(now, self._layout)
         layer = self._layer
         if layer is not None and self._hold == layer.key:
             return setting_screen(layer.option, layer.press_status, layer.net, lobby_only=layer.lobby_only)
@@ -271,6 +382,25 @@ class DisplayModel:
         return status_screen(
             self._status, connection_ok=self._connection_ok, locked=self._locked, version=self._version
         )
+
+    def _current_frame(self, now: float, version: int) -> Screen:
+        if self._overlay is not None and now >= self._overlay_until:
+            self._overlay = None
+            self._pager.shown(now)  # the page under it comes back for a full period
+        self._pager.tick(now, self._idle(now), *self._page_times())
+        ctx = PageContext(locked=self._locked, internet=self._internet, version=self._version)
+        bottom = render.status_line(self._status, ctx, self._connection_ok)
+        layer = self._layer
+        if layer is not None and self._layer_held():
+            return render.setting_screen(
+                version, layer.option, layer.press_status, layer.net, lobby_only=layer.lobby_only, bottom=bottom
+            )
+        if self._overlay is not None:
+            if self._overlay[0] == "volume":
+                new = self._predict(self._vol_pending)
+                return render.volume_screen(version, self._vol_now, new, self._vol_limit, bottom)
+            return render.result_screen(version, self._overlay[1], self._overlay[2], bottom)
+        return render.page_screen(version, self._pager.page, self._status, ctx, self._connection_ok)
 
 
 async def _wait(event: asyncio.Event, seconds: float) -> None:
@@ -380,6 +510,7 @@ class PadDisplay:
                     self._warn_once(f"Pad display link down: {e!r}; retrying at the device rescan interval")
                 finally:
                     self.model.link_down()
+                    self.model.set_protocol(None)
                     self.protocol_version = None
                     if handle is not None:
                         self._close(handle)
@@ -413,14 +544,15 @@ class PadDisplay:
             self._warn_once(f"Pad firmware on {path} answers display protocol {version}: pad display off")
             self._close(handle)
             return None
-        # A later protocol keeps the v1 ops: the v1 screens are drawn; the version is kept for a later layout.
+        # BR-002: each feature only when the hello reports its version (the model draws by it).
         self.protocol_version = version
+        self.model.set_protocol(version)
         self._warned.clear()
         logger.info(f"Pad display link up on {path} (protocol {version})")
         return handle
 
     async def _serve(self, handle: hidraw.Handle, stop: asyncio.Event) -> None:
-        frame_timeout = (LINES + 1) * self._reply_timeout + IO_MARGIN_SECONDS  # 8 lines and a show
+        frame_timeout = (LINES + 4) * self._reply_timeout + IO_MARGIN_SECONDS  # 8 lines, a bar or 3 slots, a show
         show_timeout = self._reply_timeout + IO_MARGIN_SECONDS
         model = self.model
         last: Screen | None = None  # after every hello: a full redraw
@@ -431,7 +563,14 @@ class PadDisplay:
             screen = model.current(self._clock())
             if screen != last:
                 seq = (seq + 1) & 0xFF
-                await self._io(frame_timeout, hidraw.send_frame, handle, screen, seq, self._reply_timeout)
+                try:
+                    await self._io(frame_timeout, hidraw.send_frame, handle, screen, seq, self._reply_timeout)
+                except hidraw.FeatureRefusedError as e:
+                    # BR-002: a refused bar or wheel never drops the link: a lower layout for this link.
+                    self._warn_once(f"Pad refused display op {e.op:#04x}: drawing a lower layout on this link")
+                    model.layout_refused(e.op)
+                    last = None
+                    continue
                 last, last_show = screen, self._clock()
                 model.acknowledged()
             elif self._clock() - last_show >= self._heartbeat:
