@@ -116,7 +116,7 @@ const (
 	// (#1907) are comma-separated STRING flags read with StringValue, not list flags,
 	// so the flagd list-flag trap (a top-level JSON list read via get_object_value
 	// TYPE_MISMATCHes) does not apply; the declarer parses the string.
-	keyExperimentsEnabled = "experiments_enabled"
+	keyExperimentsEnabled          = "experiments_enabled"
 	keyExperimentDynamicEnabled    = "experiment_dynamic_enabled"
 	keyExperimentTickSeconds       = "experiment_tick_seconds"
 	keyExperimentDynamicMaxConcur  = "experiment_dynamic_max_concurrent"

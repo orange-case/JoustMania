@@ -42,11 +42,11 @@ const queueSize = 16
 // failure is fail-soft: it logs a WARN and counts, and never reaches the game or
 // the decide path.
 type Recorder struct {
-	journal     *Journal
-	failures    otelmetric.Int64Counter
-	log         *slog.Logger
-	now         func() time.Time
-	queue       chan Record
+	journal  *Journal
+	failures otelmetric.Int64Counter
+	log      *slog.Logger
+	now      func() time.Time
+	queue    chan Record
 
 	// mu guards closed and every send on queue, so no send races Close's close.
 	mu     sync.Mutex
@@ -61,12 +61,12 @@ func NewRecorder(j *Journal, mp otelmetric.MeterProvider, log *slog.Logger) *Rec
 		log = slog.Default()
 	}
 	return &Recorder{
-		journal:     j,
-		failures:    NewFailureCounter(mp),
-		log:         log,
-		now:         time.Now,
-		queue:       make(chan Record, queueSize),
-		done:        make(chan struct{}),
+		journal:  j,
+		failures: NewFailureCounter(mp),
+		log:      log,
+		now:      time.Now,
+		queue:    make(chan Record, queueSize),
+		done:     make(chan struct{}),
 	}
 }
 

@@ -223,14 +223,14 @@ Parsed by `services/agent/goal/profile.go:Parse`. Each variant is an object with
 `from_objectives` is the sentinel `{"from_objectives": true}`, without terms: the profile is derived from the active `objectives` variant (decide-contract §14.4). A value that fails any rule
 falls back to `from_objectives` (WARN once, and a metric). A contract test checks every variant in both `agent.json` files (`services/flagd/`, `ci/`). The flag is human-owned and never written by the agent (C-034); at runtime only Flagsmith may select another declared profile (Flagsmith only, §13, #2705).
 
-### 3.3 Calibration flags (planned, UC-047, #1055)
+### 3.3 Calibration flags (removed, UC-047, #2813)
 
-`calibration.test_session` is in both `agent.json` files (`services/flagd/`, `ci/`) since #1055 PR 1, read by the game journal at each real game end (UC-047 BR-009; unreadable = recorded `null`, treated as test); `calibration.every_n_games` is not in `agent.json` yet. The implementation adds both to the mutable-flag registry (§13.2): kind overlay, scope stack, bounds declared variants (no free value, so N is never below 32), persist no, writer the operator (`scripts/agent-calibrate.sh test-session on|off` for `calibration.test_session`; a plain stack overlay for `calibration.every_n_games`), never the agent (C-034). Until then neither can be written at runtime.
+The automatic recalibration of #1055 is replaced by an offline fit (UC-047, #2813), so it has no flags. `calibration.test_session` was removed from both `agent.json` files and from the game journal; `calibration.every_n_games` was never added. A calibration changes only the `experiment.mock_archetype` variants (§3.1) through a reviewed pull request.
 
 | Key | Type | Variants | Default | Targeting | Read by | Written by | Reload | Status |
 |---|---|---|---|---|---|---|---|---|
-| `calibration.every_n_games` | int | off=0, 50, default=100, 200 | `default` = 100 | N | agent: at each real game end, to decide whether a calibration starts (UC-047 step 2, BR-001; `off` disables only the automatic calibration) | operator only; never the agent (C-034, C-022) | live (use time) | Open (#1055, FR-204) |
-| `calibration.test_session` | bool | on=true, off=false | `off` = false | N | agent: at each real game end; a game that ends while it is on is ineligible for calibration (UC-047 BR-003) | operator only; never the agent (C-034, C-022); not persisted | live (use time) | In Progress (#1055, FR-204): in `agent.json`, read by the journal (`flags.CalibrationTestSession`); registry entry and operator script Open |
+| `calibration.every_n_games` | int | off=0, 50, default=100, 200 | `default` = 100 | N | nobody | nobody | n/a | Rejected (#2813): no automatic calibration |
+| `calibration.test_session` | bool | on=true, off=false | `off` = false | N | nobody | nobody | n/a | Removed (#2813): the operator picks the window instead (UC-047 BR-002) |
 
 ## 4. `game`
 

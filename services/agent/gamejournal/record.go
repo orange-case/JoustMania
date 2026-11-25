@@ -58,8 +58,8 @@ type Record struct {
 	Mode            string    `json:"mode"`
 	EndedAt         time.Time `json:"ended_at"`
 	DurationSeconds *float64  `json:"duration_seconds"`
-	Eliminations int      `json:"eliminations"`
-	Players      []Player `json:"players"`
+	Eliminations    int       `json:"eliminations"`
+	Players         []Player  `json:"players"`
 	// HistoryTruncated is true when a player's 1 s history ring was full and
 	// started after the game start, so activity and change cover only the last
 	// gamecontext.PlayerHistoryCap seconds. The per-player means never truncate.
