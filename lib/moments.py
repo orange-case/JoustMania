@@ -13,6 +13,12 @@ sent in the shape the ``observability/telemetry.moment_shape`` flag chose for th
   ``log_level`` flag never drops it;
 - ``both``: ``span_event`` and ``log_event`` with the same attributes (one ``moment.id``).
 
+With ``observability/telemetry.agent_log_events`` on for the game (#2722, UC-100 BR-012),
+the agent also gets its own log records on the same logger, each marked
+``orangecase.audience`` = ``agent`` so the collector keeps them from the gateway: a log
+copy of a moment the shape sends as a span event or a span (``agent_copy``), and the
+game's ``game.start`` / ``game.end`` (``emit_agent_event``).
+
 A shape that needs the log channel falls back to ``span_event`` in a process without
 OTLP logging (UC-100 A1). Every function here only enqueues (span processor, log
 processor): no blocking work, no flag read and no lock, so it is safe on the frame path.
@@ -45,6 +51,13 @@ _LOG_SHAPES = frozenset({MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH})
 # Root span attribute carrying the shape in effect for the game (UC-100 step 3).
 MOMENT_SHAPE_ATTR = "telemetry.moment_shape"
 MOMENT_ID_ATTR = "moment.id"
+
+AGENT_LOG_EVENTS_FLAG = "telemetry.agent_log_events"
+AGENT_LOG_EVENTS_ATTR = "telemetry.agent_log_events"
+AUDIENCE_ATTR = "orangecase.audience"
+AUDIENCE_AGENT = "agent"
+# In the log shapes the moment's own log event already reaches the agent.
+_AGENT_COPY_SHAPES = frozenset({MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN})
 _LOGGER_NAME = "joustmania.moments"
 
 # (provider, logger) for the last provider seen: get_logger once, not per moment.
@@ -94,6 +107,18 @@ def read_moment_shape() -> str:
     return effective_moment_shape(read_string_flag("observability", MOMENT_SHAPE_FLAG, MOMENT_SHAPE_SPAN_EVENT))
 
 
+def read_agent_log_events() -> bool:
+    """Read ``telemetry.agent_log_events`` once (per game): whether the agent gets its own log events.
+
+    Fail-closed: anything but ``True`` is off, and so is a process without OTLP logging
+    (it could send none of them).
+    """
+    from lib.feature_flags import read_bool_flag  # lazy: lib.feature_flags pulls in the metrics libs
+
+    on = read_bool_flag("observability", AGENT_LOG_EVENTS_FLAG, False) is True
+    return on and otel_logging.get_logger_provider() is not None
+
+
 def moment_id(game_id: str, serial: str, sequence: int) -> str:
     """``moment.id``: ``<game.id>/<player.serial>/<n>``, ``n`` counting from 1 per serial per game."""
     return f"{game_id}/{serial}/{sequence}"
@@ -121,6 +146,7 @@ def record_moment(
     duration_s: float = 0.0,
     tracer: trace.Tracer | None = None,
     timestamp_ns: int | None = None,
+    agent_copy: bool = False,
 ) -> str:
     """Record moment ``name`` on ``parent_span`` in ``shape``; returns the shape actually sent.
 
@@ -130,6 +156,8 @@ def record_moment(
     point in time). ``timestamp_ns`` (epoch ns) is the record's own timestamp: the span
     event's, the moment span's start, the log record's; ``None`` takes the clock now
     (UC-100 BR-006: the ground truth passes its own read, so both are equal).
+    ``agent_copy``: in the ``span_event`` and ``span`` shapes also emit the log event the
+    ``log_event`` shape would send, marked for the agent (it does not change the return).
 
     Never raises from the log emit or the moment span: on a failure the shape actually
     sent is returned (``span_event`` for ``both``, ``""`` when nothing was sent).
@@ -137,20 +165,28 @@ def record_moment(
     attrs = dict(attributes)
     if shape not in MOMENT_SHAPES:
         shape = MOMENT_SHAPE_SPAN_EVENT
-    moment_logger = _moment_logger() if shape in _LOG_SHAPES else None
+    moment_logger = _moment_logger() if shape in _LOG_SHAPES or agent_copy else None
     if shape in _LOG_SHAPES and moment_logger is None:
         shape = MOMENT_SHAPE_SPAN_EVENT  # no log channel in this process (UC-100 A1)
+    if timestamp_ns is None and (shape == MOMENT_SHAPE_SPAN or moment_logger is not None):
+        timestamp_ns = time.time_ns()  # one clock read: the copy carries the moment's time
 
+    sent = _record_primary(name, shape, parent_span, attrs, duration_s, tracer, timestamp_ns, moment_logger)
+    if agent_copy and shape in _AGENT_COPY_SHAPES and moment_logger is not None:
+        _emit(moment_logger, name, parent_span, {**attrs, AUDIENCE_ATTR: AUDIENCE_AGENT}, timestamp_ns)
+    return sent
+
+
+def _record_primary(name, shape, parent_span, attrs, duration_s, tracer, timestamp_ns, moment_logger) -> str:
     if shape == MOMENT_SHAPE_SPAN:
-        start_ns = timestamp_ns if timestamp_ns is not None else time.time_ns()
         try:
             span = (tracer or trace.get_tracer(__name__)).start_span(
                 f"game.{name}",
                 context=trace.set_span_in_context(parent_span),
                 attributes=attrs,
-                start_time=start_ns,
+                start_time=timestamp_ns,
             )
-            span.end(end_time=start_ns + int(duration_s * 1_000_000_000))
+            span.end(end_time=timestamp_ns + int(duration_s * 1_000_000_000))
         except Exception as error:  # noqa: BLE001 - a moment never raises into the game
             _report_failure_once(name, error)
             return ""
@@ -158,18 +194,39 @@ def record_moment(
 
     if shape in (MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_BOTH):
         parent_span.add_event(name, attributes=attrs, timestamp=timestamp_ns)
-    if moment_logger is not None:
-        try:
-            moment_logger.emit(
-                timestamp=timestamp_ns if timestamp_ns is not None else time.time_ns(),
-                context=trace.set_span_in_context(parent_span),
-                severity_number=SeverityNumber.INFO,
-                severity_text="INFO",
-                body=name,
-                attributes=attrs,
-                event_name=name,
-            )
-        except Exception as error:  # noqa: BLE001 - a moment never raises into the game
-            _report_failure_once(name, error)
-            return MOMENT_SHAPE_SPAN_EVENT if shape == MOMENT_SHAPE_BOTH else ""
+    if shape in _LOG_SHAPES and not _emit(moment_logger, name, parent_span, attrs, timestamp_ns):
+        return MOMENT_SHAPE_SPAN_EVENT if shape == MOMENT_SHAPE_BOTH else ""
     return shape
+
+
+def _emit(moment_logger, name: str, span: trace.Span, attrs: Mapping[str, Any], timestamp_ns: int | None) -> bool:
+    """Emit one INFO log record ``name`` in ``span``'s context; False (reported once) on a failure."""
+    try:
+        moment_logger.emit(
+            timestamp=timestamp_ns if timestamp_ns is not None else time.time_ns(),
+            context=trace.set_span_in_context(span),
+            severity_number=SeverityNumber.INFO,
+            severity_text="INFO",
+            body=name,
+            attributes=attrs,
+            event_name=name,
+        )
+    except Exception as error:  # noqa: BLE001 - a record never raises into the game
+        _report_failure_once(name, error)
+        return False
+    return True
+
+
+def emit_agent_event(name: str, *, span: trace.Span, attributes: Mapping[str, Any]) -> bool:
+    """Emit log event ``name`` for the agent only, in ``span``'s context; never raises.
+
+    False when nothing was sent (no OTLP logging in this process, or a failed emit).
+    """
+    try:
+        moment_logger = _moment_logger()
+    except Exception as error:  # noqa: BLE001 - runs in the session's end path
+        _report_failure_once(name, error)
+        return False
+    if moment_logger is None:
+        return False
+    return _emit(moment_logger, name, span, {**attributes, AUDIENCE_ATTR: AUDIENCE_AGENT}, None)
