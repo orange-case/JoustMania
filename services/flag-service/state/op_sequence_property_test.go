@@ -331,11 +331,8 @@ func (r *propRun) applyClear() (string, bool, bool, bump) {
 	if r.rng.IntN(10) < 3 && (chaos || req.Scope.Name() == registry.ScopeReal) {
 		req.IfWriter = pick(r.rng, propWriters[:3])
 	}
-	if r.rng.IntN(10) < 2 {
-		req.UnlessRealGame = true
-	}
-	desc := fmt.Sprintf("Clear %s/%s scope=%+v persist=%v if_writer=%q unless_real_game=%v",
-		req.Set, req.Flag, req.Scope, req.Persist, req.IfWriter, req.UnlessRealGame)
+	desc := fmt.Sprintf("Clear %s/%s scope=%+v persist=%v if_writer=%q",
+		req.Set, req.Flag, req.Scope, req.Persist, req.IfWriter)
 	res, err := r.st.Clear(req)
 	if err != nil {
 		return desc + " -> " + err.Reason, true, false, bumpNo

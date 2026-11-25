@@ -18,11 +18,8 @@ test, not a statistical one:
 - A ``promote`` verdict needs two pairs (a paired SD) and only one archetype has a trigger
   policy, so the agent's own promotion cannot be reached on a stack in bounded time. The
   second test covers the stack half of A17 step 3 instead: while a real game is
-  registered, the ``real`` write a promotion makes is refused ``409 real_game_live``
-  (the agent maps that to ``deferred``) and no real overlay is served; after the game
-  ends the same write is accepted (dry run). The agent's decision itself (probe, queue,
-  outcome ``deferred``) is covered by ``services/agent/deferred_wiring_uc043_test.go`` and
-  ``services/agent/promote/deferred_uc043_test.go``.
+  registered, the ``real`` write a promotion makes is accepted (dry run, #2810). The
+  agent's side is ``services/agent/promote/hold_key_uc043_test.go``.
 """
 
 import re
@@ -188,10 +185,11 @@ def test_hold_experiment_runs_both_arms_and_the_experimental_arm_latches_hold(ho
 
 
 @pytest.mark.uc("UC-043", flow="A17", steps=[3])
-def test_real_write_of_a_hold_key_waits_while_a_real_game_is_registered(hold_stack):
-    """A17 step 3 (stack half): the promotion's ``real`` write is refused while a real game is
-    registered and no real overlay is served; once the game ends the write is accepted."""
-    stack, client = hold_stack
+def test_real_write_of_a_hold_key_lands_while_a_real_game_is_registered(hold_stack):
+    """A17 step 3 (stack half): the promotion's ``real`` write is accepted while a real game is
+    registered; the game latched its values at its start (UC-040 BR-027, #2810). Dry run: nothing
+    is written on the shared stack."""
+    _, client = hold_stack
     game_id = f"uc043-a17-real-{uuid.uuid4().hex[:8]}"
     path = f"/game/{HOLD_FLAG}"
     write = {"variant": HOLD_VALUE, "scope": {"game_kind": "real"}, "writer": "uc043-a17-promotion"}
@@ -202,23 +200,7 @@ def test_real_write_of_a_hold_key_waits_while_a_real_game_is_registered(hold_sta
     )
     assert status == 200, (status, body)
     try:
-        status, body = client.request("PUT", path, write)
-        assert status == 409 and body.get("error") == "real_game_live", (status, body)
         status, body = client.request("PUT", f"{path}?dry_run=true", write)
-        assert status == 409 and body.get("error") == "real_game_live", (status, body)
-        with flagd_probe_client(stack, "game") as probe:
-            real_ctx = EvaluationContext(attributes={"game_kind": "real"})
-            # A fresh provider may not have synced yet: wait until it serves a real value, not the default.
-            assert poll_until(
-                lambda: probe.get_string_value(HOLD_FLAG, "<probe-default>", real_ctx) != "<probe-default>",
-                timeout=DECLARE_TIMEOUT,
-            ), "flagd probe never synced"
-            real = probe.get_string_value(HOLD_FLAG, "<probe-default>", real_ctx)
-        assert real == BASELINE_VALUE, f"a real overlay was served while the real game ran: {real}"
+        assert status // 100 == 2, (status, body)
     finally:
         client.request("DELETE", f"/games/{game_id}")
-
-    # Game over: the same write passes the guard (dry run: nothing is written).
-    assert poll_until(
-        lambda: client.request("PUT", f"{path}?dry_run=true", write)[0] // 100 == 2, timeout=10.0, interval=0.5
-    ), client.request("PUT", f"{path}?dry_run=true", write)

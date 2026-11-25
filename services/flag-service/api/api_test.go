@@ -376,45 +376,32 @@ func TestDryRunEndpoint(t *testing.T) {
 	})
 }
 
+// A real write and its revert land while a real game runs: the game latched its
+// values at its start (UC-040 BR-027, #2810).
+//
 // UC: UC-043 A17
-func TestGuardedRealDelete(t *testing.T) {
+func TestRealWriteDuringLiveRealGame(t *testing.T) {
 	const path = "/game/shield.energy_max_seconds"
 	setup := func(t *testing.T) *env {
 		e := newEnv(t, true)
-		if s, b := e.do("PUT", path, map[string]any{"value": 4, "scope": map[string]any{"game_kind": "real"}, "writer": "promotion"}); s != 200 {
-			t.Fatalf("real write: %d %v", s, b)
-		}
 		if s, _ := e.do("PUT", "/games/g-real", map[string]any{"coordinator_instance": "c1", "game_kind": "real"}); s != 200 {
 			t.Fatalf("register: %d", s)
 		}
+		if s, b := e.do("PUT", path, map[string]any{"value": 4, "scope": map[string]any{"game_kind": "real"}, "writer": "promotion"}); s != 200 {
+			t.Fatalf("real write while a real game is registered: %d %v, want 200", s, b)
+		}
 		return e
 	}
-	t.Run("UC-043/A17 DELETE ?unless_real_game=true is 409 real_game_live while a real game is registered", func(t *testing.T) {
+	t.Run("UC-043/A17 a real PUT and DELETE of a hold key are 200 and 204 while a real game is registered", func(t *testing.T) {
 		e := setup(t)
-		if s, b := e.do("DELETE", path+"?game_kind=real&writer=promotion&unless_real_game=true", nil); s != 409 || b["error"] != "real_game_live" {
-			t.Fatalf("%d %v, want 409 real_game_live", s, b)
-		}
-		if e.writes("rejected", "real_game_live") != 1 {
-			t.Fatalf("the refusal is not counted as rejected/real_game_live")
-		}
-	})
-	t.Run("UC-043/A17 a plain DELETE (the kill switch) is 204 while a real game is registered", func(t *testing.T) {
-		e := setup(t)
-		if s, b := e.do("DELETE", path+"?game_kind=real&writer=promotion", nil); s != 204 {
+		if s, b := e.do("DELETE", path+"?game_kind=real&writer=promotion&if_writer=promotion", nil); s != 204 {
 			t.Fatalf("%d %v, want 204", s, b)
 		}
 	})
-	t.Run("UC-043/A17 the guarded DELETE is 204 once the real game ended", func(t *testing.T) {
+	t.Run("UC-043/A17 a leftover unless_real_game from an older agent is ignored", func(t *testing.T) {
 		e := setup(t)
-		e.do("DELETE", "/games/g-real", nil)
 		if s, b := e.do("DELETE", path+"?game_kind=real&writer=promotion&unless_real_game=true", nil); s != 204 {
 			t.Fatalf("%d %v, want 204", s, b)
-		}
-	})
-	t.Run("UC-043/A17 a non-boolean unless_real_game is 400 malformed", func(t *testing.T) {
-		e := setup(t)
-		if s, b := e.do("DELETE", path+"?game_kind=real&unless_real_game=yes-please", nil); s != 400 || b["error"] != "malformed" {
-			t.Fatalf("%d %v, want 400 malformed", s, b)
 		}
 	})
 }
@@ -481,20 +468,6 @@ func TestIfWriterDelete(t *testing.T) {
 			}
 		}
 	})
-	t.Run("UC-043/A18 with unless_real_game: 409 real_game_live first, then 412 once no real game runs", func(t *testing.T) {
-		e := setup(t, "operator")
-		if s, _ := e.do("PUT", "/games/g-real", map[string]any{"coordinator_instance": "c1", "game_kind": "real"}); s != 200 {
-			t.Fatalf("register: %d", s)
-		}
-		q := path + "?game_kind=real&unless_real_game=true&if_writer=promotion"
-		if s, b := e.do("DELETE", q, nil); s != 409 || b["error"] != "real_game_live" {
-			t.Fatalf("%d %v, want 409 real_game_live", s, b)
-		}
-		e.do("DELETE", "/games/g-real", nil)
-		if s, b := e.do("DELETE", q, nil); s != 412 || b["error"] != "writer_mismatch" {
-			t.Fatalf("%d %v, want 412 writer_mismatch", s, b)
-		}
-	})
 }
 
 // UC: UC-043 A19
@@ -556,20 +529,6 @@ func TestIfWriterInPut(t *testing.T) {
 			t.Fatalf("repeated: %d %v, want 400 malformed", s, b)
 		}
 	})
-	t.Run("UC-043/A19 409 real_game_live takes precedence over 412", func(t *testing.T) {
-		e := newEnv(t, true)
-		put(e, "", 4, "operator")
-		if s, _ := e.do("PUT", "/games/g-real", map[string]any{"coordinator_instance": "c1", "game_kind": "real"}); s != 200 {
-			t.Fatalf("register: %d", s)
-		}
-		if s, b := put(e, "?if_writer_in=promotion,", 5, "promotion"); s != 409 || b["error"] != "real_game_live" {
-			t.Fatalf("%d %v, want 409 real_game_live", s, b)
-		}
-		e.do("DELETE", "/games/g-real", nil)
-		if s, b := put(e, "?if_writer_in=promotion,", 5, "promotion"); s != 412 || b["error"] != "writer_mismatch" {
-			t.Fatalf("%d %v, want 412 writer_mismatch", s, b)
-		}
-	})
 }
 
 // The read endpoints serve a row's optional description inside its policy, for
@@ -621,7 +580,6 @@ func TestStrictBooleanQueryParams(t *testing.T) {
 		{"PUT", "dry_run", ""},
 		{"DELETE", "persist", ""},
 		{"DELETE", "fraction", ""},
-		{"DELETE", "unless_real_game", "game_kind=real&"},
 	}
 	for _, c := range cases {
 		for _, v := range bad {

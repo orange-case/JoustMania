@@ -29,9 +29,8 @@ func (pr *Promoter) journalRewatch(experimentID string, res Result) {
 		return
 	}
 	sink(experimentID, experiment.PromotionResult{
-		Outcome:       string(res.Outcome),
-		Reason:        RewatchReasonPrefix + res.Reason,
-		RevertPending: res.RevertPending,
+		Outcome: string(res.Outcome),
+		Reason:  RewatchReasonPrefix + res.Reason,
 	})
 }
 

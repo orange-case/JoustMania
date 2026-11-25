@@ -75,34 +75,23 @@ func TestUC043_A18_CompareAndDeleteRevert(t *testing.T) {
 		}
 	})
 
-	for _, guarded := range []bool{false, true} {
-		name := "plain"
-		if guarded {
-			name = "guarded (unless_real_game)"
+	t.Run("UC-043/A18 the revert leaves an overlay another writer set after the read and is dropped", func(t *testing.T) {
+		svc := newPromotionService(t)
+		if err := writerForTest(t, svc, t.TempDir()).SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
+			t.Fatal(err)
 		}
-		t.Run("UC-043/A18 the "+name+" revert leaves an overlay another writer set after the read and is dropped", func(t *testing.T) {
-			svc := newPromotionService(t)
-			if err := writerForTest(t, svc, t.TempDir()).SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
-				t.Fatal(err)
-			}
-			w := racingWriter(t, svc, "operator")
-			var err error
-			if guarded {
-				err = w.RevertRealDefaultUnlessRealGame(ctx, promotedFlag)
-			} else {
-				err = w.RevertRealDefault(ctx, promotedFlag)
-			}
-			if !errors.Is(err, ErrSupersededByAnotherWriter) {
-				t.Fatalf("a writer_mismatch must drop the revert as superseded, not fail it: %v", err)
-			}
-			if got := realOverlayWriterOf(t, svc); got != "operator" {
-				t.Fatalf("real overlay writer = %q after the revert, want operator (left in place)", got)
-			}
-			if _, ok := w.PersistedRevertTimes()[promotedFlag]; !ok {
-				t.Error("the cooldown was not stamped")
-			}
-		})
-	}
+		w := racingWriter(t, svc, "operator")
+		err := w.RevertRealDefault(ctx, promotedFlag)
+		if !errors.Is(err, ErrSupersededByAnotherWriter) {
+			t.Fatalf("a writer_mismatch must drop the revert as superseded, not fail it: %v", err)
+		}
+		if got := realOverlayWriterOf(t, svc); got != "operator" {
+			t.Fatalf("real overlay writer = %q after the revert, want operator (left in place)", got)
+		}
+		if _, ok := w.PersistedRevertTimes()[promotedFlag]; !ok {
+			t.Error("the cooldown was not stamped")
+		}
+	})
 
 	t.Run("UC-043/A18 the kill switch never removes an overlay another writer set after its read", func(t *testing.T) {
 		svc := newPromotionService(t)

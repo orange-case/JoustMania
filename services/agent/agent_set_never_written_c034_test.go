@@ -45,8 +45,6 @@ import (
 	"github.com/joustmania/agent/flagservice"
 	"github.com/joustmania/agent/flagservice/fake"
 	"github.com/joustmania/agent/promote"
-
-	"gopkg.in/yaml.v3"
 )
 
 // c034Request is one raw request the recording flag service saw.
@@ -341,14 +339,6 @@ var c034WriterRows = []c034Row{
 					t.Errorf("revert real default %q: %v", key, err)
 				}
 			}
-			// The guarded watch revert (#2236): same set, key and scope as the plain one.
-			var guarded promote.GuardedRealDefaultReverter = realDef
-			if err := realDef.SetRealDefault(ctx, "sensitivity", 3); err != nil {
-				t.Errorf("set real default: %v", err)
-			}
-			if err := guarded.RevertRealDefaultUnlessRealGame(ctx, "sensitivity"); err != nil {
-				t.Errorf("guarded revert: %v", err)
-			}
 			// The kill switch (UC-043 A1, #1704): list the promotion overlays and revert them.
 			pr := promote.NewPromoter(nil, nil, realDef, nil, realDef, promote.RepoRef{}, nil, testLogger())
 			if got := pr.RevertOnKillSwitch(ctx); len(got) == 0 || got[0].Outcome != promote.OutcomeReverted {
@@ -561,33 +551,6 @@ func TestC034_HoldKeysCeilings(t *testing.T) {
 	sort.Strings(want)
 	if !slices.Equal(widened, want) {
 		t.Fatalf("UC-043/A17 the agent-writable shield keys are %v, want exactly %v (C-034)", widened, want)
-	}
-	// Every one of them carries the flag service's real-write guard (409 real_game_live
-	// while a real game is registered, #2216), so no real write lands mid-game.
-	rawRegistry, err := os.ReadFile(filepath.Join("..", "flag-service", "registry.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc struct {
-		Flags []struct {
-			Set       string `yaml:"set"`
-			Key       string `yaml:"key"`
-			RealWrite string `yaml:"real_write"`
-		} `yaml:"flags"`
-	}
-	if err := yaml.Unmarshal(rawRegistry, &doc); err != nil {
-		t.Fatal(err)
-	}
-	guarded := map[string]bool{}
-	for _, f := range doc.Flags {
-		if f.Set == experiment.GameFlagSet && f.RealWrite == "no_live_real_game" {
-			guarded[f.Key] = true
-		}
-	}
-	for _, key := range want {
-		if !guarded[key] {
-			t.Errorf("UC-043/A17 %s has no real_write: no_live_real_game in registry.yaml", key)
-		}
 	}
 	writes := func(value any) []flagservice.Write {
 		return []flagservice.Write{

@@ -16,8 +16,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/joustmania/agent/experiment"
 )
 
 func substrateEvidence(objective string) Evidence {
@@ -81,31 +79,14 @@ func TestUC043_A23_SubstrateBar(t *testing.T) {
 			t.Fatal("an empty objective wrote the real default")
 		}
 	})
-	t.Run("UC-043/A23 T3 a below-bar hold key is discarded, never queued", func(t *testing.T) {
-		rig := newDeferredRig(t, nil) // the rig's bar holds balanced only
+	t.Run("UC-043/A23 T3 a below-bar hold key is discarded, never written", func(t *testing.T) {
+		p, realDef, _ := barPromoter(t, map[string]bool{"balanced": true}, nil)
 		ev := holdEvidence()
 		ev.Objective = "endurance"
-		res := rig.p.Promote(context.Background(), holdProposal("exp-t3"), promoteVerdict, autoOn, ev)
+		res := p.Promote(context.Background(), holdProposal("exp-t3"), promoteVerdict, autoOn, ev)
 		wantSubstrateRefusal(t, res.Outcome, res.Reason, "endurance")
-		if got := rig.p.PendingFlags(); len(got) != 0 {
-			t.Fatalf("pending = %v, want none", got)
-		}
-	})
-	t.Run("UC-043/A23 T4 writeTracked refuses a queued write below the bar (backstop)", func(t *testing.T) {
-		rig := newDeferredRig(t, nil)
-		ev := holdEvidence()
-		ev.Objective = "endurance"
-		rig.p.mu.Lock()
-		rig.p.pending = map[string]*deferredWrite{holdKey: {proposal: holdProposal("exp-t4"), evidence: ev, queuedAt: rig.p.clock()}}
-		rig.p.mu.Unlock()
-		rig.probe.set(false)
-		rig.p.DrainDeferred(context.Background(), fixed(autoOn))
-		if len(rig.realDef.calls) != 0 {
-			t.Fatalf("SetRealDefault calls = %d, want 0", len(rig.realDef.calls))
-		}
-		got := rig.journal.all()
-		if len(got) != 1 || !strings.HasPrefix(got[0], "exp-t4|discarded|"+ReasonSubstrateNotValidated+" objective=endurance") {
-			t.Fatalf("journal = %v, want one discarded substrate_not_validated", got)
+		if len(realDef.calls) != 0 {
+			t.Fatal("a below-bar hold key wrote the real default")
 		}
 	})
 	t.Run("UC-043/A23 the bar is set once", func(t *testing.T) {
@@ -189,18 +170,6 @@ func TestUC043_A23_RevertsNeverGated(t *testing.T) {
 		got := p.RevertOnKillSwitch(context.Background())
 		if len(got) != 1 || got[0].Outcome != OutcomeReverted || rev.calls != 1 {
 			t.Fatalf("kill switch = %+v reverts %d, want one reverted", got, rev.calls)
-		}
-	})
-	t.Run("UC-043/A23 G2 a deferred revert runs under a closed bar", func(t *testing.T) {
-		probe := &fakeProbe{live: false}
-		journal := &journalRecorder{}
-		p, _, rev := barPromoter(t, nil, nil)
-		p.SetRealGameProbe(probe.probe)
-		p.SetRewatchJournal(journal.sink)
-		p.RestoreDeferredReverts(context.Background(), []experiment.RestoredRevert{{ExperimentID: "exp-g2", FlagKey: holdKey, Value: 20.0}})
-		p.DrainDeferred(context.Background(), fixed(autoOn))
-		if rev.calls != 1 {
-			t.Fatalf("revert calls = %d, want 1 (journal %v)", rev.calls, journal.all())
 		}
 	})
 }
@@ -305,9 +274,9 @@ func TestUC043_A23_SingleRealDefaultWriteSite(t *testing.T) {
 			t.Fatalf("SetRealDefault references = %v, want %v", refs["SetRealDefault"], want)
 		}
 	})
-	t.Run("UC-043/A23 writeTracked is called only by promoteAutonomous and drainWrites", func(t *testing.T) {
+	t.Run("UC-043/A23 writeTracked is called only by promoteAutonomous", func(t *testing.T) {
 		got := append([]string(nil), refs["writeTracked"]...)
-		want := []string{"actions.go:promoteAutonomous", "deferred.go:drainWrites"}
+		want := []string{"actions.go:promoteAutonomous"}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("writeTracked references = %v, want %v", got, want)
 		}
