@@ -798,7 +798,11 @@ func (s *Store) SetGameActive(active bool) {
 		}
 		s.speedTrack.reset()
 		s.history.append(TimelineEvent{At: s.now(), Kind: EventPhase, Detail: "start"})
+		// Clamped to the start, so the timeline stays oldest-first.
 		for _, e := range keptEvents {
+			if e.At.Before(s.ctx.Session.StartedAt) {
+				e.At = s.ctx.Session.StartedAt
+			}
 			s.history.append(e)
 		}
 	case prev && !active:
@@ -938,13 +942,14 @@ func (s *Store) holdForLog() {
 }
 
 // setFromLog records the game kind (normalised) and mode a log record carries.
-// Empty values are ignored; it touches no update time, so a log record never
-// looks like a live signal (UC-041 BR-010).
+// The kind only fills an unknown one: a log record opens a context, it never
+// changes one (UC-041 A7 step 2). Empty values are ignored; it touches no update
+// time, so a log record never looks like a live signal (BR-010).
 func (s *Store) setFromLog(kind, mode string) {
 	kind = NormalizeGameKind(kind)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if kind != "" {
+	if kind != "" && s.ctx.GameKind == "" {
 		s.ctx.GameKind = kind
 	}
 	if mode != "" {

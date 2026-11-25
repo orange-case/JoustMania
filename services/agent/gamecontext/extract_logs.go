@@ -159,9 +159,7 @@ func (m *Multiplexer) applyGameEnd(lr plog.LogRecord) {
 	if gameID == "" || !forAgent(attrs) {
 		return
 	}
-	s := m.openFromLog(gameID)
-	s.setFromLog(attrString(attrs, spanAttrGameKind), "")
-	s.EndGameFromEvent(recordTime(lr))
+	m.openFromLog(gameID).EndGameFromEvent(recordTime(lr))
 }
 
 // forAgent reports whether a record carries the agent-only marker (UC-100 BR-012).

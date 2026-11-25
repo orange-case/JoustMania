@@ -70,6 +70,54 @@ func TestApplyLogs_MomentOpensUnknownGame(t *testing.T) {
 		if n := eliminationEvents(snap.Timeline); n != 1 {
 			t.Fatalf("elimination events = %d, want 1", n)
 		}
+		for i, e := range snap.Timeline {
+			if e.At.Before(snap.Session.StartedAt) || (i > 0 && e.At.Before(snap.Timeline[i-1].At)) {
+				t.Fatalf("timeline %v not oldest-first from the start %v", snap.Timeline, snap.Session.StartedAt)
+			}
+		}
+	})
+
+	t.Run("UC-041/A7 a moment log event never changes a known game kind", func(t *testing.T) {
+		clk := &muxClock{t: time.Unix(4000, 0)}
+		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
+		mux.ApplyLogs(deathLog("game-B", "P1", "game-B/P1/1", nil))
+		mux.ApplyLogs(momentLog("game-coordinator", "death_warning", map[string]string{
+			"moment.id": "game-B/P2/1", "player.serial": "P2", "game.id": "game-B", "game.kind": "shadow",
+		}))
+		mux.ApplyLogs(lifecycleLog("game.start", "game-B", "shadow", "Joust", time.Time{}))
+		if snap, _ := mux.Snapshot("game-B"); snap.GameKind != GameKindReal {
+			t.Fatalf("GameKind = %q, want real from the record that opened the context", snap.GameKind)
+		}
+	})
+
+	t.Run("UC-041/A8 game.end reads only game.id", func(t *testing.T) {
+		clk := &muxClock{t: time.Unix(4000, 0)}
+		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
+		mux.ApplyLogs(lifecycleLog("game.end", "game-B", "real", "", clk.now()))
+		if snap, _ := mux.Snapshot("game-B"); snap.GameKind != "" {
+			t.Fatalf("GameKind = %q, want none from game.end", snap.GameKind)
+		}
+	})
+
+	t.Run("UC-041/A5 the fallback partition's first game drops the deaths read before it", func(t *testing.T) {
+		clk := &muxClock{t: time.Unix(4000, 0)}
+		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
+		mux.ApplySpans(deathSpanEvent(FallbackGameID, "P1", "", nil))
+		if snap, _ := mux.Snapshot(FallbackGameID); len(snap.Session.EliminationSequence) != 1 {
+			t.Fatalf("setup: elimination seq = %v, want [P1]", snap.Session.EliminationSequence)
+		}
+		clk.advance(time.Second)
+		mux.ApplyMetrics(gameActiveFor(FallbackGameID, 1))
+		snap, _ := mux.Snapshot(FallbackGameID)
+		if snap.SessionID != "session-1" {
+			t.Fatalf("SessionID = %q, want session-1", snap.SessionID)
+		}
+		if seq := snap.Session.EliminationSequence; len(seq) != 0 {
+			t.Fatalf("elimination seq = %v, want none in session-1", seq)
+		}
+		if n := eliminationEvents(snap.Timeline); n != 0 {
+			t.Fatalf("elimination events = %d, want 0 in session-1", n)
+		}
 	})
 
 	t.Run("UC-041/A7 a legacy primary kind opens the context as real, an unknown kind fails closed", func(t *testing.T) {
