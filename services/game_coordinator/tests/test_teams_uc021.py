@@ -338,9 +338,9 @@ class TestMainSteps3To5:
         assert Sound.VOX_CONGRATULATIONS not in played
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-021", br=["BR-002"])
+    @pytest.mark.uc("UC-021", br=["BR-004"])
     async def test_natural_team_end_through_run_latches_completed(self, fast_config):
-        """UC-021 BR-002: a natural end through the base run() records game.outcome completed on the root span."""
+        """UC-020 BR-006, UC-021 BR-004: a natural end through the base run() records completed on the root span."""
         cm = RecordingControllerManager(num_controllers=4, death_schedule={1.0: 1, 1.1: 3}, max_duration=10.0)
         game, _events = _teams_game(cm=cm, audio=create_autospec(RecordingAudio, instance=True), game_id="uc021_br2")
         root = create_autospec(trace.Span, instance=True)
@@ -457,7 +457,7 @@ TEAM_MODES = pytest.mark.parametrize("game_cls", [SimpleTeamsGame, RandomTeamsGa
 
 
 class TestBR003ForceEndNoWinner:
-    """UC-021 BR-003 (#2003): only a latched result is announced; a force-end before it declares none."""
+    """UC-020 BR-007 (#2003): only a latched result is announced; a force-end before it declares none."""
 
     @staticmethod
     async def _running_game(game_cls, events_hook=None):
@@ -524,7 +524,7 @@ class TestBR003ForceEndNoWinner:
         assert "reason" not in ended[0]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-021", br=["BR-003"])
+    @pytest.mark.uc("UC-021", br=["BR-004"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     @TEAM_MODES
     async def test_force_end_while_running_declares_no_winner(self, fast_config, game_cls):
@@ -539,7 +539,7 @@ class TestBR003ForceEndNoWinner:
         self._assert_no_winner(game, events, "force_ended", "operator")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-021", br=["BR-003"])
+    @pytest.mark.uc("UC-021", br=["BR-004"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     @TEAM_MODES
     async def test_force_end_after_the_decision_keeps_the_winner(self, fast_config, game_cls):
@@ -556,7 +556,7 @@ class TestBR003ForceEndNoWinner:
         self._assert_winner(game, events, team, winners)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-021", br=["BR-003"])
+    @pytest.mark.uc("UC-021", br=["BR-004"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     @TEAM_MODES
     async def test_same_tick_force_end_during_the_win_publish_keeps_the_winner(self, fast_config, game_cls):
@@ -579,7 +579,7 @@ class TestBR003ForceEndNoWinner:
         self._assert_winner(game, events, team, winners)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-021", br=["BR-003"])
+    @pytest.mark.uc("UC-021", br=["BR-004"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     @TEAM_MODES
     async def test_same_tick_force_end_before_the_win_check_declares_no_winner(self, fast_config, game_cls):
@@ -597,7 +597,7 @@ class TestBR003ForceEndNoWinner:
         self._assert_no_winner(game, events, "force_ended", "operator")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-021", br=["BR-003"])
+    @pytest.mark.uc("UC-021", br=["BR-004"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     @TEAM_MODES
     async def test_force_end_between_the_force_end_check_and_the_latch_declares_no_winner(self, fast_config, game_cls):
@@ -619,7 +619,7 @@ class TestBR003ForceEndNoWinner:
         self._assert_no_winner(game, events, "force_ended", "operator")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-021", br=["BR-003"])
+    @pytest.mark.uc("UC-021", br=["BR-004"])
     @TEAM_MODES
     async def test_force_ended_outcome_overrides_a_latched_team(self, fast_config, game_cls):
         """Defence in depth: a force_ended outcome declares no winner even when a team is latched."""
@@ -634,7 +634,7 @@ class TestBR003ForceEndNoWinner:
         self._assert_no_winner(game, events, "force_ended", "operator")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-021", br=["BR-003"])
+    @pytest.mark.uc("UC-021", br=["BR-004"])
     @TEAM_MODES
     async def test_stream_end_before_a_decision_declares_no_winner(self, fast_config, game_cls):
         """A gameplay stream that ends before any result: winning_team none, outcome completed, no effects."""

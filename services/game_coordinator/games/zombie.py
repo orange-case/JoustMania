@@ -165,7 +165,7 @@ class ZombieGame(StreamedIntroGameMode):
             rng_seed=rng_seed,
         )
 
-        # The side that won, latched once in _check_win_condition (UC-023 BR-003).
+        # The side that won, latched once in _check_win_condition (UC-020 BR-007).
         # None = no winner (force-ended before a win, or the stream ended without one).
         self._winner_side: str | None = None
 
@@ -599,7 +599,7 @@ class ZombieGame(StreamedIntroGameMode):
         return not self.players[serial].alive
 
     def _kill_records_elimination_order(self, serial: str) -> bool:  # noqa: ARG002
-        """No Zombies death is an elimination (UC-023 BR-007, UC-041 BR-008, #2524).
+        """No Zombies death is an elimination (UC-020 BR-008, UC-023 BR-008, UC-041 BR-008, #2524).
 
         A converted human keeps playing as a zombie, a killed zombie respawns, and a
         disconnect goes through the same kill path (UC-023 step 3).
@@ -607,7 +607,7 @@ class ZombieGame(StreamedIntroGameMode):
         return False
 
     def _player_death_event_attributes(self, serial: str) -> dict:  # noqa: ARG002
-        """``death.eliminated`` false on every Zombies ``player_death`` (UC-023 BR-007, #2524)."""
+        """``death.eliminated`` false on every Zombies ``player_death`` (UC-023 BR-008, #2524)."""
         return {"death.eliminated": False}
 
     def _mark_alive_in_metrics(self, serial: str) -> None:
@@ -630,7 +630,7 @@ class ZombieGame(StreamedIntroGameMode):
         Respawn a dead zombie now: the timer path and the native revive path (#1342).
 
         Refused (returns False) once the winner is latched or the game stopped
-        running (UC-023 BR-003/BR-004), for an unknown serial, a human, or a zombie
+        running (UC-020 BR-007, UC-023 BR-004), for an unknown serial, a human, or a zombie
         that is already alive. All state changes happen BEFORE the first await, so
         a racing revive or timer sees ``alive`` and refuses (exactly one respawn).
 
@@ -701,7 +701,7 @@ class ZombieGame(StreamedIntroGameMode):
             self.timer_task.cancel()
 
         # The winner was latched when the win condition fired. A force-end declares
-        # no winner (UC-023 BR-003); a stream end without a win has none either.
+        # no winner (UC-020 BR-007); a stream end without a win has none either.
         force_ended = self.game_outcome() == "force_ended"
         winner_side = None if force_ended else self._winner_side
         winner = winner_side or "none"

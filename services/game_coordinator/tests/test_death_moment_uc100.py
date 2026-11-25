@@ -228,7 +228,7 @@ async def test_nonstop_respawn_death_log_carries_its_extras(sdk):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", flow="main", steps=[4], br=["BR-003", "BR-007"])
-@pytest.mark.uc("UC-023", flow="main", steps=[3], br=["BR-007"])
+@pytest.mark.uc("UC-023", flow="main", steps=[3], br=["BR-008"])
 async def test_zombies_conversion_log_says_not_eliminated(sdk):
     game = await _zombies(6)
     _with_sdk_spans(game, sdk, "log_event")
