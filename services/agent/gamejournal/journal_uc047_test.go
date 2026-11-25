@@ -117,14 +117,14 @@ func fileLines(t *testing.T, path string) []map[string]any {
 
 func near(p *float64, want float64) bool { return p != nil && math.Abs(*p-want) < 1e-9 }
 
-// UC: UC-047 main step 1 BR-009 BR-002 BR-003 BR-006
+// UC: UC-047 main step 1 BR-009
 func TestRecorder_RealGameEndWritesOneRecord(t *testing.T) {
 	root := t.TempDir()
 	j, _, err := Open(root, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := NewRecorder(j, func(context.Context) (bool, bool) { return true, true }, nil, nil)
+	r := NewRecorder(j, nil, nil)
 	g := endedGame("game_1", gamecontext.GameKindReal)
 	runRecorder(t, r, g, g) // the same game twice is journaled once
 
@@ -132,11 +132,14 @@ func TestRecorder_RealGameEndWritesOneRecord(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("journal has %d lines, want 1", len(lines))
 	}
-	for _, key := range []string{"schema_version", "game_id", "mode", "ended_at", "duration_seconds", "test_session",
+	for _, key := range []string{"schema_version", "game_id", "mode", "ended_at", "duration_seconds",
 		"eliminations", "players", "history_truncated", "metrics"} {
 		if _, ok := lines[0][key]; !ok {
 			t.Errorf("record has no %q field: %v", key, lines[0])
 		}
+	}
+	if _, ok := lines[0]["test_session"]; ok {
+		t.Errorf("record has a test_session field (the operator picks the window instead): %v", lines[0])
 	}
 	if strings.Contains(fmt.Sprint(lines[0]), "serial") {
 		t.Errorf("C-009: a record must not name a serial: %v", lines[0])
@@ -145,9 +148,6 @@ func TestRecorder_RealGameEndWritesOneRecord(t *testing.T) {
 	rec := j.Records()[0]
 	if rec.GameID != "game_1" || rec.Mode != "JoustFFA" || !rec.EndedAt.Equal(gameEnd) || !near(rec.DurationSeconds, 20) {
 		t.Errorf("identity fields = %+v", rec)
-	}
-	if rec.TestSession == nil || !*rec.TestSession {
-		t.Errorf("test_session = %v, want true", rec.TestSession)
 	}
 	if rec.Eliminations != 1 || len(rec.Players) != 3 || rec.HistoryTruncated {
 		t.Fatalf("eliminations=%d players=%d truncated=%v", rec.Eliminations, len(rec.Players), rec.HistoryTruncated)
@@ -179,23 +179,13 @@ func TestRecorder_RealGameEndWritesOneRecord(t *testing.T) {
 	}
 }
 
-// UC: UC-047 BR-003
-func TestRecorder_UnreadableTestSessionIsNull(t *testing.T) {
-	j, _, _ := Open(t.TempDir(), 0)
-	r := NewRecorder(j, func(context.Context) (bool, bool) { return false, false }, nil, nil)
-	runRecorder(t, r, endedGame("game_1", gamecontext.GameKindReal))
-	if got := j.Records(); len(got) != 1 || got[0].TestSession != nil {
-		t.Fatalf("records = %+v, want one with test_session null", got)
-	}
-}
-
 // UC: UC-047 main step 1 BR-009
 func TestRecorder_ShadowGameWritesNone(t *testing.T) {
 	for _, kind := range []string{gamecontext.GameKindShadow, ""} {
 		t.Run(fmt.Sprintf("UC-047/BR-009 kind %q is not journaled", kind), func(t *testing.T) {
 			root := t.TempDir()
 			j, _, _ := Open(root, 0)
-			r := NewRecorder(j, nil, nil, nil)
+			r := NewRecorder(j, nil, nil)
 			runRecorder(t, r, endedGame("game_shadow", kind))
 			if n := len(j.Records()); n != 0 {
 				t.Fatalf("journal holds %d records, want 0", n)
@@ -209,7 +199,7 @@ func TestRecorder_ShadowGameWritesNone(t *testing.T) {
 		j, _, _ := Open(t.TempDir(), 0)
 		g := endedGame("game_live", gamecontext.GameKindReal)
 		g.Session.GameActive = bp(true)
-		runRecorder(t, NewRecorder(j, nil, nil, nil), g)
+		runRecorder(t, NewRecorder(j, nil, nil), g)
 		if n := len(j.Records()); n != 0 {
 			t.Fatalf("journal holds %d records, want 0", n)
 		}
@@ -221,7 +211,7 @@ func TestJournal_RotatesAtMax(t *testing.T) {
 	root := t.TempDir()
 	j, _, _ := Open(root, 3)
 	for i := 1; i <= 5; i++ {
-		if err := j.Append(BuildRecord(endedGame(fmt.Sprintf("game_%d", i), gamecontext.GameKindReal), nil, gameEnd)); err != nil {
+		if err := j.Append(BuildRecord(endedGame(fmt.Sprintf("game_%d", i), gamecontext.GameKindReal), gameEnd)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -261,7 +251,7 @@ func TestRecorder_WriteErrorIsFailSoft(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, Dir), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		r := NewRecorder(j, nil, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), nil)
+		r := NewRecorder(j, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), nil)
 		runRecorder(t, r, endedGame("game_1", gamecontext.GameKindReal), endedGame("game_2", gamecontext.GameKindReal))
 		if got := failureCount(t, reader, ReasonWrite); got != 2 {
 			t.Fatalf("%s{reason=write} = %d, want 2", MetricWriteFailures, got)
@@ -274,7 +264,7 @@ func TestRecorder_WriteErrorIsFailSoft(t *testing.T) {
 	t.Run("UC-047/BR-009 a full queue drops the record without blocking", func(t *testing.T) {
 		reader := sdkmetric.NewManualReader()
 		j, _, _ := Open(t.TempDir(), 0)
-		r := NewRecorder(j, nil, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), nil)
+		r := NewRecorder(j, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), nil)
 		done := make(chan struct{})
 		go func() { // no writer runs: OnGameEnd must still return
 			for i := 0; i < queueSize+2; i++ {
@@ -294,7 +284,7 @@ func TestRecorder_WriteErrorIsFailSoft(t *testing.T) {
 	t.Run("UC-047/BR-009 an unreadable file is never replaced", func(t *testing.T) {
 		root := t.TempDir()
 		j0, _, _ := Open(root, 0)
-		if err := j0.Append(BuildRecord(endedGame("game_old", gamecontext.GameKindReal), nil, gameEnd)); err != nil {
+		if err := j0.Append(BuildRecord(endedGame("game_old", gamecontext.GameKindReal), gameEnd)); err != nil {
 			t.Fatal(err)
 		}
 		before, _ := os.ReadFile(j0.Path())
@@ -305,7 +295,7 @@ func TestRecorder_WriteErrorIsFailSoft(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Open with a read error %v must report it", readErr)
 			}
-			if err := j.Append(BuildRecord(endedGame("game_new", gamecontext.GameKindReal), nil, gameEnd)); err == nil {
+			if err := j.Append(BuildRecord(endedGame("game_new", gamecontext.GameKindReal), gameEnd)); err == nil {
 				t.Fatalf("Append after a read error %v must refuse", readErr)
 			}
 			if after, _ := os.ReadFile(j0.Path()); string(after) != string(before) {
@@ -316,7 +306,7 @@ func TestRecorder_WriteErrorIsFailSoft(t *testing.T) {
 	t.Run("UC-047/BR-009 a newer schema_version is never dropped", func(t *testing.T) {
 		root := t.TempDir()
 		j0, _, _ := Open(root, 0)
-		_ = j0.Append(BuildRecord(endedGame("game_v1", gamecontext.GameKindReal), nil, gameEnd))
+		_ = j0.Append(BuildRecord(endedGame("game_v1", gamecontext.GameKindReal), gameEnd))
 		f, _ := os.OpenFile(j0.Path(), os.O_APPEND|os.O_WRONLY, 0o644)
 		_, _ = f.WriteString("{\"schema_version\":2,\"game_id\":\"game_v2\"}\n")
 		_ = f.Close()
@@ -325,7 +315,7 @@ func TestRecorder_WriteErrorIsFailSoft(t *testing.T) {
 		if err == nil {
 			t.Fatal("Open of a newer schema must report it")
 		}
-		if err := j.Append(BuildRecord(endedGame("game_new", gamecontext.GameKindReal), nil, gameEnd)); err == nil {
+		if err := j.Append(BuildRecord(endedGame("game_new", gamecontext.GameKindReal), gameEnd)); err == nil {
 			t.Fatal("Append over a newer schema must refuse")
 		}
 		if after, _ := os.ReadFile(j0.Path()); string(after) != string(before) {
@@ -335,7 +325,7 @@ func TestRecorder_WriteErrorIsFailSoft(t *testing.T) {
 	t.Run("UC-047/BR-009 invalid lines are skipped on load", func(t *testing.T) {
 		root := t.TempDir()
 		j, _, _ := Open(root, 0)
-		_ = j.Append(BuildRecord(endedGame("game_ok", gamecontext.GameKindReal), nil, gameEnd))
+		_ = j.Append(BuildRecord(endedGame("game_ok", gamecontext.GameKindReal), gameEnd))
 		f, _ := os.OpenFile(j.Path(), os.O_APPEND|os.O_WRONLY, 0o644)
 		_, _ = f.WriteString("{torn\n{\"schema_version\":0,\"game_id\":\"x\"}\n")
 		_ = f.Close()
@@ -350,7 +340,7 @@ func TestRecorder_WriteErrorIsFailSoft(t *testing.T) {
 func TestJournal_AtomicWrite(t *testing.T) {
 	root := t.TempDir()
 	j, _, _ := Open(root, 0)
-	if err := j.Append(BuildRecord(endedGame("game_1", gamecontext.GameKindReal), nil, gameEnd)); err != nil {
+	if err := j.Append(BuildRecord(endedGame("game_1", gamecontext.GameKindReal), gameEnd)); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(j.Path())
@@ -365,7 +355,7 @@ func TestJournal_AtomicWrite(t *testing.T) {
 		renamedFrom = oldpath
 		return errors.New("injected rename failure")
 	}
-	if err := j.Append(BuildRecord(endedGame("game_2", gamecontext.GameKindReal), nil, gameEnd)); err == nil {
+	if err := j.Append(BuildRecord(endedGame("game_2", gamecontext.GameKindReal), gameEnd)); err == nil {
 		t.Fatal("Append must report the failed rename")
 	}
 	if filepath.Dir(renamedFrom) != filepath.Dir(j.Path()) {
@@ -382,7 +372,7 @@ func TestJournal_AtomicWrite(t *testing.T) {
 
 	// The next write succeeds and carries the record the failed one kept in memory.
 	j.rename = os.Rename
-	if err := j.Append(BuildRecord(endedGame("game_3", gamecontext.GameKindReal), nil, gameEnd)); err != nil {
+	if err := j.Append(BuildRecord(endedGame("game_3", gamecontext.GameKindReal), gameEnd)); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(fileLines(t, j.Path())); n != 3 {
@@ -402,12 +392,12 @@ func TestBuildRecord_HistoryTruncatedAndMissingThreshold(t *testing.T) {
 	for len(a.History) < gamecontext.PlayerHistoryCap {
 		a.History = append(a.History, a.History[len(a.History)-1])
 	}
-	if rec := BuildRecord(g, nil, gameEnd); !rec.HistoryTruncated {
+	if rec := BuildRecord(g, gameEnd); !rec.HistoryTruncated {
 		t.Error("history_truncated = false for a full ring that starts after the game start")
 	}
 	g = endedGame("game_nothreshold", gamecontext.GameKindReal)
 	g.Session.DeathThreshold = nil
-	if rec := BuildRecord(g, nil, gameEnd); rec.Metrics.Activity != nil || rec.Metrics.Change != nil {
+	if rec := BuildRecord(g, gameEnd); rec.Metrics.Activity != nil || rec.Metrics.Change != nil {
 		t.Errorf("activity/change without a threshold = %v/%v, want null", rec.Metrics.Activity, rec.Metrics.Change)
 	}
 }
@@ -416,7 +406,7 @@ func TestBuildRecord_HistoryTruncatedAndMissingThreshold(t *testing.T) {
 func TestRecorder_CloseDrainsAndCountsLateGames(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	j, _, _ := Open(t.TempDir(), 0)
-	r := NewRecorder(j, nil, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), nil)
+	r := NewRecorder(j, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), nil)
 	// Queue before the writer starts: Close must still write them.
 	for i := 0; i < 3; i++ {
 		r.OnGameEnd(endedGame(fmt.Sprintf("game_%d", i), gamecontext.GameKindReal))
@@ -445,7 +435,7 @@ func TestRecorder_CloseDrainsAndCountsLateGames(t *testing.T) {
 func TestRecorder_CloseTimeoutCountsQueued(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	j, _, _ := Open(t.TempDir(), 0)
-	r := NewRecorder(j, nil, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), nil)
+	r := NewRecorder(j, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), nil)
 	r.OnGameEnd(endedGame("game_1", gamecontext.GameKindReal))
 	r.OnGameEnd(endedGame("game_2", gamecontext.GameKindReal))
 	// No writer runs: the wait gives up and the queued records count shutdown.

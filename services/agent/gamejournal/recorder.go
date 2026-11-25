@@ -43,7 +43,6 @@ const queueSize = 16
 // the decide path.
 type Recorder struct {
 	journal     *Journal
-	testSession func(context.Context) (on, known bool)
 	failures    otelmetric.Int64Counter
 	log         *slog.Logger
 	now         func() time.Time
@@ -56,15 +55,13 @@ type Recorder struct {
 	done chan struct{}
 }
 
-// NewRecorder builds a recorder over j. testSession reads calibration.test_session
-// at use time; nil records the mark as unknown. mp may be nil (no-op metrics).
-func NewRecorder(j *Journal, testSession func(context.Context) (bool, bool), mp otelmetric.MeterProvider, log *slog.Logger) *Recorder {
+// NewRecorder builds a recorder over j. mp may be nil (no-op metrics).
+func NewRecorder(j *Journal, mp otelmetric.MeterProvider, log *slog.Logger) *Recorder {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Recorder{
 		journal:     j,
-		testSession: testSession,
 		failures:    NewFailureCounter(mp),
 		log:         log,
 		now:         time.Now,
@@ -101,13 +98,7 @@ func (r *Recorder) OnGameEnd(gc gamecontext.GameContext) {
 	if gc.Session.GameActive != nil && *gc.Session.GameActive {
 		return
 	}
-	var mark *bool
-	if r.testSession != nil {
-		if on, known := r.testSession(context.Background()); known {
-			mark = &on
-		}
-	}
-	rec := BuildRecord(gc, mark, r.now())
+	rec := BuildRecord(gc, r.now())
 	reason := ""
 	r.mu.Lock()
 	if r.closed {

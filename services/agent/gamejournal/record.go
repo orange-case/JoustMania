@@ -1,12 +1,10 @@
 // Package gamejournal is the agent's calibration journal (#1055, UC-047 step 1,
 // BR-009): one small record per real game end, kept on the device's
-// agent-experiments volume, so a later calibration reads its eligibility inputs
-// (BR-002) and holdout metrics (BR-006) from the device itself. VictoriaMetrics
-// keeps only 7 days on the Pi, shorter than the window N = 100 eligible games
-// needs (maintainer decision 2026-11-01).
+// agent-experiments volume. It outlives the metrics store's retention, so the
+// offline archetype fit (scripts/agent_archetype_fit.py) can read real games
+// from a copy of it.
 //
-// This package only collects. It runs no fit, decides no eligibility and serves
-// no endpoint; those belong to the later UC-047 work.
+// This package only collects. It runs no fit and decides no eligibility.
 //
 // No player identity (C-009): a record holds per-player numbers but never a
 // serial, so nothing in it ties a value to a controller across games.
@@ -60,9 +58,6 @@ type Record struct {
 	Mode            string    `json:"mode"`
 	EndedAt         time.Time `json:"ended_at"`
 	DurationSeconds *float64  `json:"duration_seconds"`
-	// TestSession is calibration.test_session at the game end; null when the flag
-	// could not be read (UC-047 BR-003: such a game is never treated as non-test).
-	TestSession  *bool    `json:"test_session"`
 	Eliminations int      `json:"eliminations"`
 	Players      []Player `json:"players"`
 	// HistoryTruncated is true when a player's 1 s history ring was full and
@@ -72,17 +67,15 @@ type Record struct {
 	Metrics          Metrics `json:"metrics"`
 }
 
-// BuildRecord turns a game-end snapshot into its journal record. testSession is
-// the calibration.test_session value read at the end (nil = unreadable); now is
-// the fallback end time when the snapshot's timeline holds no "end" event.
-func BuildRecord(gc gamecontext.GameContext, testSession *bool, now time.Time) Record {
+// BuildRecord turns a game-end snapshot into its journal record; now is the
+// fallback end time when the snapshot's timeline holds no "end" event.
+func BuildRecord(gc gamecontext.GameContext, now time.Time) Record {
 	end := endTime(gc, now)
 	rec := Record{
 		SchemaVersion:   SchemaVersion,
 		GameID:          gc.SessionID,
 		EndedAt:         end.UTC(),
 		DurationSeconds: copyFloat(gc.Session.DurationSeconds),
-		TestSession:     testSession,
 		Eliminations:    len(gc.Session.EliminationSequence),
 	}
 	if gc.Session.GameMode != nil {
