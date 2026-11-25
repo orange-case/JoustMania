@@ -314,7 +314,7 @@ class Sound(StrEnum):
     MENU_VOX_SENSITIVITY_LOW = "low"
     MENU_VOX_SENSITIVITY_ULTRA_LOW = "ultra_low"
 
-    # Number and on / off voices (in Menu/vox/; named after the retired admin options, #2819)
+    # Number and on / off voices (in Menu/vox/); the pad reuses them for values
     MENU_VOX_ADMINOP_2 = "adminop_2"
     MENU_VOX_ADMINOP_3 = "adminop_3"
     MENU_VOX_ADMINOP_4 = "adminop_4"

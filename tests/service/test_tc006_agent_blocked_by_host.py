@@ -7,8 +7,7 @@ the OtlpSink and the fake OpenAI backend scripted to act at high confidence.
 
 The host restricts the agent with the pad in the lobby (standard -> ambient ->
 none, the TC-006 steps 1 to 3 seam: pad command -> menu -> flag service admin
-value -> flagd; the controller admin mode is gone since #2819), then a JoustFFA
-game starts. Step 5 (UC-040 A14): the agent's cycles for that game send no
+value -> flagd), then a JoustFFA game starts. Step 5 (UC-040 A14): the agent's cycles for that game send no
 request to the fake and record no ``invoke_agent`` span, while its call gate
 proves it is evaluating the game (``agent_llm_gated_total{reason=no_interventions_allowed}`` grows).
 

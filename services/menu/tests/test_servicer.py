@@ -216,7 +216,6 @@ class TestMenuServicerControllerCallbacks:
 
         assert real_servicer.connected_controllers == {"s2", "s3"}
         assert real_servicer.ready_controllers == set()
-        assert "s1" not in real_servicer.state_manager.button_states
 
     @pytest.mark.asyncio
     async def test_update_battery_is_tracked(self, real_servicer):
@@ -235,7 +234,6 @@ class TestMenuServicerControllerCallbacks:
 
         assert real_servicer.connected_controllers == set()
         assert real_servicer.ready_controllers == set()
-        assert real_servicer.state_manager.button_states == {}
         assert real_servicer.state_manager.battery_levels == {}
 
 
@@ -251,7 +249,7 @@ class TestMenuServicerOnButton:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", br=["BR-005"])
     async def test_four_face_buttons_are_ordinary_buttons(self, real_servicer):
-        """#2819: the four face buttons together no longer enter an admin mode; the controller stays CONNECTED."""
+        """The four face buttons together have no lobby action; the controller stays CONNECTED (UC-010 BR-005)."""
         real_servicer.state = menu_pb2.MenuState.RUNNING
         await _connect(real_servicer, "host", "other")
         real_servicer.led.send_game_effect.reset_mock()

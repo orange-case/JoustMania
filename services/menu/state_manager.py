@@ -68,9 +68,6 @@ class StateManager:
         # Battery level tracking (0-5 scale, updated from button events)
         self.battery_levels: dict[str, int] = {}
 
-        # Button state tracking (for combo detection)
-        self.button_states: dict[str, dict[str, bool]] = {}
-
         # Handlers for each state
         self._handlers: dict[ControllerState, ControllerHandler] = {}
 
@@ -139,21 +136,6 @@ class StateManager:
         # Track controller as connected
         if serial not in self.connected_controllers:
             await self.on_controller_connected(serial)
-
-        # Update button state
-        if serial not in self.button_states:
-            self.button_states[serial] = {
-                "trigger": False,
-                "move": False,
-                "cross": False,
-                "circle": False,
-                "square": False,
-                "triangle": False,
-                "ps": False,
-                "select": False,
-                "start": False,
-            }
-        self.button_states[serial][button] = is_press
 
         if not is_press:
             return
@@ -237,7 +219,6 @@ class StateManager:
 
         # Clean up state (removing from controller_states also removes from computed properties)
         self.controller_states.pop(serial, None)
-        self.button_states.pop(serial, None)
         self.battery_levels.pop(serial, None)
 
         logger.info(f"Controller {serial} disconnected")
@@ -252,7 +233,6 @@ class StateManager:
         """
         count = len(self.controller_states)
         self.controller_states.clear()
-        self.button_states.clear()
         self.battery_levels.clear()
         metrics.player_ready.clear()
         logger.info(f"Stream reconnected: cleared {count} controller(s) for re-population")
@@ -264,7 +244,6 @@ class StateManager:
         """
         for serial in self.controller_states:
             self.controller_states[serial] = ControllerState.CONNECTED
-        self.button_states.clear()
         metrics.player_ready.clear()
 
     def update_battery(self, serial: str, battery: int) -> None:
@@ -355,7 +334,6 @@ class StateManager:
 
         # Clear all state (controller_states is the single source of truth)
         self.controller_states.clear()
-        self.button_states.clear()
 
         # Clear all player ready metrics
         metrics.player_ready.clear()

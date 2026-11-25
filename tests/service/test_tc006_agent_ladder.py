@@ -3,8 +3,8 @@
 LOBBY composition on a fresh flag plane: real menu, game coordinator and
 controller manager (mock backend) from source at HEAD, flag service + flagd;
 audio is FakeAudio, so the per-level voice feedback is asserted on the recorded
-PlaySound calls. Since #2819 the host's surface is the pad's ``step_setting``
-``agent_level`` (UC-015 BR-004, BR-019), not the removed controller admin mode.
+PlaySound calls. The host's surface is the pad's ``step_setting``
+``agent_level`` (UC-015 BR-004, BR-019).
 
 The seam under test is the one the menu's unit tests cannot reach: pad command ->
 menu -> flag service (persisted admin value of ``interventions_allowed``, UC-053

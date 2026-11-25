@@ -87,7 +87,7 @@ message GetMenuStatusResponse {
   string selection = 4;             // Games enum name of the selected mode
   int32 ready_count = 5;
   int32 connected_count = 6;
-  reserved 7;                       // admin_serial: controller admin mode removed (#2819)
+  reserved 7;
   reserved "admin_serial";
   bool agent_enabled = 8;           // agent/enabled (the kill switch)
   string agent_level = 9;           // agent/interventions_allowed variant name

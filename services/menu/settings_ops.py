@@ -1,4 +1,4 @@
-"""Settings core of the operator pad commands (#2050, UC-015; the controller admin mode is gone, #2819).
+"""Settings core of the operator pad commands (#2050, UC-015).
 
 The pad's ``ProcessInput`` commands (services.md §3.1) land here: the force-start
 roster with ghost pruning (UC-014), the clamped setting step, the agent level

@@ -1,9 +1,8 @@
 """TC-005 on the service tier (T2): the host tunes the game with the operator pad and force-starts.
 
-Moved from tests/integration/test_admin_flow.py (#1562); since #2819 the host's
-commands are the pad's ``ProcessInput`` commands (UC-015), not the removed
-controller admin mode. LOBBY composition: real menu, game coordinator and
-controller manager (mock backend) from source at HEAD on a fresh flag plane
+The host's commands are the pad's ``ProcessInput`` commands (UC-015). LOBBY
+composition: real menu, game coordinator and controller manager (mock backend)
+from source at HEAD on a fresh flag plane
 (flag service + flagd); audio is FakeAudio, so the UC-011 mode announcement is
 asserted on the recorded PlaySound calls.
 

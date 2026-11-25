@@ -2,8 +2,7 @@
 
 Moved from tests/integration/test_admin_flow.py (#1562). LOBBY composition on a
 fresh flag plane: the host's write goes pad command -> menu -> flag service
-(persisted admin value; the controller admin mode is gone since #2819),
-the presenter's goes through the real stage scripts (``scripts/agent-backend.sh``,
+(persisted admin value), the presenter's goes through the real stage scripts (``scripts/agent-backend.sh``,
 ``scripts/talk-stage.sh``) pointed at this stack's flag service, and flagd
 serves both. The stage reset clears only the stage's overlays.
 

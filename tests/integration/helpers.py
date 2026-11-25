@@ -735,7 +735,7 @@ class MenuEventCollector:
 
 
 # =============================================================================
-# Operator pad commands (UC-015; the controller admin mode is gone, #2819)
+# Operator pad commands (UC-015)
 # =============================================================================
 
 # The mock adapter starts every LED white, so a lobby-colour check excludes it.
