@@ -9,7 +9,7 @@ The Menu Service manages the game selection menu and lobby experience. It handle
 - Game mode selection (JoustFFA, JoustTeams, Tournament, Werewolf, NonstopJoust)
 - Controller lobby state (connected/ready detection)
 - LED feedback based on game mode and player ready state
-- Admin mode for in-game configuration
+- The operator pad's commands (`ProcessInput`, UC-015): settings, agent level, force start
 - Event streaming for UI updates
 
 ## Quick Reference
@@ -88,7 +88,7 @@ rpc StreamMenuEvents(StreamMenuEventsRequest) returns (stream MenuEvent);
 
 Controllers receive LED feedback based on their state and the selected game mode.
 
-> **Full Reference:** See [UC-010](../../docs/use_cases/UC-010.md) and [UC-012](../../docs/use_cases/UC-012.md) for the LED states including admin mode.
+> **Full Reference:** See [UC-010](../../docs/use_cases/UC-010.md) and [UC-011](../../docs/use_cases/UC-011.md) for the lobby LED states.
 
 ### Game Mode Colors
 
@@ -106,7 +106,6 @@ Controllers receive LED feedback based on their state and the selected game mode
 |-------|--------------|------------|
 | Connected (not ready) | Dim game color (fixed 30%, `DIM_FACTOR`) | Trigger → Ready |
 | Ready | Bright game color (100% brightness) | Move → Connected |
-| Admin Mode | White (see full reference for details) | PS or timeout → Connected |
 
 ### Auto-Start
 
@@ -158,13 +157,8 @@ stateDiagram-v2
     Connected --> Ready: Trigger pressed
     Ready --> Connected: Move button pressed\n(purposeful un-ready)
 
-    Connected --> Admin: All 4 face buttons\nheld simultaneously
-    Ready --> Admin: All 4 face buttons\nheld simultaneously
-    Admin --> Connected: PS button\nor 60s timeout
-
     Connected --> Disconnected: GetControllers sync\ndetects missing
     Ready --> Disconnected: GetControllers sync\ndetects missing
-    Admin --> Disconnected: GetControllers sync\ndetects missing
 
     note right of Connected
         LED: Dim game color
@@ -174,11 +168,6 @@ stateDiagram-v2
     note right of Ready
         LED: Bright game color
         (100% brightness)
-    end note
-
-    note right of Admin
-        LED: White
-        (persistent)
     end note
 ```
 
@@ -198,7 +187,6 @@ flowchart TD
         direction TB
         CS_Connected["Connected (not ready)<br/>Dim color (fixed 30%)"]
         CS_Ready["Ready (trigger pressed)<br/>Full brightness (100%)"]
-        CS_Admin["Admin Mode<br/>⚪ White (255,255,255)"]
     end
 
     GameModes --> CS_Connected
@@ -225,23 +213,20 @@ flowchart TD
     CheckTrigger -->|No| CheckMove
 
     CheckMove{Move button<br/>pressed?} -->|Yes, is ready| UnReady[Remove from ready set<br/>Set dim game color]
-    CheckMove -->|No| CheckAdminCombo
+    CheckMove -->|No| Stream2
     UnReady --> Stream
 
     MarkReady --> SyncControllers[Sync with GetControllers<br/>Remove disconnected]
 
     SyncControllers --> CheckAllReady{All connected<br/>are ready?}
 
-    CheckAllReady -->|No| CheckAdminCombo
+    CheckAllReady -->|No| Stream2
     CheckAllReady -->|Yes| CheckMinPlayers{≥2 players?}
 
-    CheckMinPlayers -->|No| CheckAdminCombo
+    CheckMinPlayers -->|No| Stream2
     CheckMinPlayers -->|Yes| StartGame[🎮 Start Game!<br/>State → GAME_STARTING<br/>(no game_requested: only a force start publishes it)]
 
-    CheckAdminCombo{All 4 face<br/>buttons held?} -->|Yes| EnterAdmin[Enter Admin Mode<br/>White LED]
-    CheckAdminCombo -->|No| Stream
-
-    EnterAdmin --> Stream
+    Stream2([Next event]) --> Stream
     StartGame --> StopMonitor[Stop button monitor]
     StopMonitor --> WaitEnd([Wait for game_ended event])
     WaitEnd --> ResetLobby[Reset lobby state<br/>Clear ready controllers<br/>Restart button monitor]
@@ -286,48 +271,14 @@ sequenceDiagram
     Note over Menu: RUNNING state
 ```
 
-## Admin Mode
+## Host settings (operator pad)
 
-Enter admin mode by pressing all 4 face buttons (Cross + Circle + Square + Triangle) simultaneously.
-
-### Controls
-
-| Button | Action |
-|--------|--------|
-| Move | Cycle through settings (sensitivity, num_teams, force_all_start, agent_control) |
-| Select | Increase current setting value |
-| Start | Decrease current setting value |
-| Cross | Cycle game mode |
-| Circle | Cycle sensitivity (5 levels, Ultra Slow to Ultra Fast) |
-| Triangle | Show battery levels on all controllers |
-| Square | Toggle instruction display |
-| Trigger | Hold 3s = force start game |
-| PS | Exit admin mode |
-
-> **Controller-cycled surface (issue #815):** Only `sensitivity`, `num_teams`,
-> and `force_all_start` are cycled via Move. The per-mode tunables
-> `random_assignment`, `nonstop.time_limit_seconds`, `invincibility_seconds`,
-> `fight_club.min_rounds`, and `werewolf.reveal_time_seconds` remain flags of
-> the `game` set, read from the baseline `services/flagd/game.json` (a reviewed
-> baseline edit plus `scripts/flags.sh restart` changes them; at runtime only the
-> agent's experiment arms and promotion overlays touch them); they are no longer
-> cycled on the controller. See [Ownership Model §3.1](../../docs/OWNERSHIP_MODEL.md#31-controller-cycled-admin-surface-issue-815).
-
-### Timeout
-
-Admin mode exits automatically 60 seconds after entry (the timer is not extended by button presses). Every exit (PS, timeout) returns the controller to CONNECTED, so it is no longer ready.
-
-### Admin Mode LED Feedback
-
-| Action | LED Response |
-|--------|--------------|
-| Enter admin mode | White flash 3x, then persistent white |
-| Cycle option (Move) | Option color 1s (blue=sensitivity, turquoise=teams, orange=force_all, purple=agent_control), then white |
-| Change sensitivity | Blue/Turquoise/Green/Orange/Red pulse (ultra slow to ultra fast) |
-| Show battery | Green/Yellow/Red per controller (2s) |
-| Toggle instructions | Green/Red pulse (on/off) |
-| Change team count | White flash N times |
-| Change force_all_start | Green/Red (true/false) |
+The controller admin mode (four face buttons, UC-012 and UC-013) is gone since #2819. The host changes
+the settings, the mode and the agent level, and force-starts, with the operator pad (UC-015, UC-016),
+whose commands arrive as `ProcessInput` `web_command`s (`services/menu/settings_ops.py`); the
+flag-service scripts, the web and Flagsmith change the same flags. Only `sensitivity`, `num_teams`,
+`force_all_start`, `game_instructions`, the mode and the shield mode are settable from the pad; the
+per-mode tunables stay baseline-only ([Ownership Model §3.1](../../docs/OWNERSHIP_MODEL.md#31-device-settable-flags-issue-815)).
 
 ## Configuration
 
@@ -340,7 +291,7 @@ Admin mode exits automatically 60 seconds after entry (the timer is not extended
 | `CONTROLLER_MANAGER_PORT` | `50052` | Controller manager port |
 | `FLAGD_HOST` | `flagd` | flagd service hostname |
 | `FLAGD_PORT` | `8015` | flagd gRPC port |
-| `FLAG_SERVICE_URL` | `http://flag-service:8070` | Flag service HTTP API; admin settings are written here with `persist: true` (`lib/flag_service_writer.py`) |
+| `FLAG_SERVICE_URL` | `http://flag-service:8070` | Flag service HTTP API; the pad's settings are written here with `persist: true` (`lib/flag_service_writer.py`) |
 | `GAME_COORDINATOR_HOST` | `game-coordinator` | Game coordinator hostname |
 | `GAME_COORDINATOR_PORT` | `50053` | Game coordinator port |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OpenTelemetry endpoint |

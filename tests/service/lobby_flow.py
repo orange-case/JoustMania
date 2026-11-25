@@ -7,7 +7,7 @@ BEFORE the mock controllers are added (``start_lobby``).
 
 from proto import menu_pb2
 from tests.integration.helpers import (
-    ADMIN_WHITE,
+    MOCK_START_WHITE,
     GameEventCollector,
     async_poll_until,
     get_menu_client,
@@ -43,14 +43,14 @@ async def start_lobby(stack, count: int = 4, game_mode: str = "JoustFFA") -> lis
     manager publishes connect events on its next discovery tick (up to 1 s
     later): controllers added first could connect before the restart and be
     lost. Returns the serials once each shows its dim lobby colour (white does
-    not count: the mock adapter starts every LED white, the same colour as admin).
+    not count: the mock adapter starts every LED white, the colour of a controller the menu has not registered yet).
     """
     menu_client, menu_channel = await get_menu_client(stack)
     mock_client, mock_channel = await get_mock_client(stack)
     try:
         await restart_menu_and_select(menu_client, game_mode)
         serials = await setup_mock_controllers(stack, count=count)
-        await wait_for_lobby_colors(mock_client, serials, timeout=LOBBY_TIMEOUT_SECONDS, exclude=ADMIN_WHITE)
+        await wait_for_lobby_colors(mock_client, serials, timeout=LOBBY_TIMEOUT_SECONDS, exclude=MOCK_START_WHITE)
         return serials
     finally:
         for channel in (menu_channel, mock_channel):

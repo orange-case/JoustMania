@@ -31,7 +31,7 @@
 #
 # run:
 #   1. refuses to start when a real game is live, real_games is not off, a persisted
-#      interventions_allowed=none (the admin kill switch) would be lifted, DIR/snapshot.tsv exists
+#      interventions_allowed=none (the host's kill switch) would be lifted, DIR/snapshot.tsv exists
 #      (a killed run) or a touched flag already carries a group-ab overlay;
 #   2. snapshots the stack overlay of the five global flags it writes, with writer and expiry
 #      (DIR/snapshot.tsv), then writes the two arm values of decision.prompt_profile;
