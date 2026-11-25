@@ -330,7 +330,7 @@ def test_every_python_metric_has_a_named_consumer(python_metrics):
                 stale.append(f"{name}: {rel} (a spec is not a reader)")
                 continue
             if not path.is_file() or not re.search(
-                rf"\b{name}\b", path.read_text(errors="ignore")
+                rf"\b{name}(?:_bucket|_sum|_count)?\b", path.read_text(errors="ignore")
             ):
                 stale.append(f"{name}: {rel}")
     assert not unread, (

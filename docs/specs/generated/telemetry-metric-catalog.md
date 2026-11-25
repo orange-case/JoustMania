@@ -30,6 +30,7 @@ The totals (the number of names, of names without a consumer and of names never 
 | `controller_input_lag_seconds` | histogram | `serial` | controller-manager | yes | grafana | #1376; game streams only |
 | `controller_poll_drops_total` | counter | `serial` | controller-manager | yes | grafana |  |
 | `controller_poll_errors_total` | counter | `serial` | controller-manager | yes | grafana |  |
+| `controller_poll_loop_lateness_seconds` | histogram | (none) | controller-manager | yes | (none) | reader: docs/talk/stage-test-checklist.md |
 | `controller_polling_mode` | gauge | (none) | controller-manager | yes | grafana |  |
 | `controller_polling_target_hz` | gauge | (none) | controller-manager | yes | grafana |  |
 | `controller_reconnect_total` | counter | `serial` | controller-manager | yes | grafana |  |
