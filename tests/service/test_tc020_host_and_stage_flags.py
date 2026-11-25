@@ -1,9 +1,8 @@
 """TC-020 on the service tier (T2): host and stage change flags at runtime.
 
-Moved from tests/integration/test_admin_flow.py (#1562), assertions unchanged.
-LOBBY composition on a fresh flag plane: the host's admin write goes mock
-button -> controller manager -> menu -> flag service (persisted admin value),
-the presenter's goes through the real stage scripts (``scripts/agent-backend.sh``,
+Moved from tests/integration/test_admin_flow.py (#1562). LOBBY composition on a
+fresh flag plane: the host's write goes pad command -> menu -> flag service
+(persisted admin value), the presenter's goes through the real stage scripts (``scripts/agent-backend.sh``,
 ``scripts/talk-stage.sh``) pointed at this stack's flag service, and flagd
 serves both. The stage reset clears only the stage's overlays.
 
@@ -18,16 +17,13 @@ import subprocess
 import pytest
 from openfeature.evaluation_context import EvaluationContext
 
-from proto import controller_manager_mock_pb2
 from tests.integration.flag_service import default as flag_service_default
 from tests.integration.flag_service import variant_value
 from tests.integration.helpers import (
     async_poll_until,
-    enter_admin_mode,
-    exit_admin_mode,
     flagd_probe_client,
-    get_mock_client,
-    press_admin_button,
+    get_menu_client,
+    pad_command,
 )
 from tests.service.harness import LOBBY
 from tests.service.lobby_flow import start_lobby
@@ -40,8 +36,6 @@ GAME = "game"
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PERSIST_TIMEOUT_SECONDS = 5.0
 SCRIPT_TIMEOUT_SECONDS = 60
-
-_Button = controller_manager_mock_pb2.ButtonRequest.Button
 
 
 def _default_variant(flag_set: str, flag_key: str) -> str:
@@ -61,7 +55,7 @@ def _persisted_admin_value(flag_set: str, flag_key: str) -> dict | None:
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-053", flow="A2", br=["BR-004"], tc="TC-020")
 @pytest.mark.uc("UC-053", flow="A1", tc="TC-020")
-@pytest.mark.uc("UC-012", flow="A1", tc="TC-020")
+@pytest.mark.uc("UC-015", flow="main", steps=[5], tc="TC-020")
 @pytest.mark.uc("UC-044", flow="main", tc="TC-020")
 async def test_host_and_stage_change_flags_at_runtime(fresh_stack, flag_service):
     """The host's admin setting and the presenter's stage overlay coexist; the
@@ -80,24 +74,22 @@ async def test_host_and_stage_change_flags_at_runtime(fresh_stack, flag_service)
             timeout=SCRIPT_TIMEOUT_SECONDS,
         ).stdout
 
-    mock_client, mock_channel = await get_mock_client(stack)
+    menu_client, menu_channel = await get_menu_client(stack)
     try:
         # Precondition: the menu runs with connected mock controllers (menu
         # restarted and mode selected before they are added; see start_lobby).
-        serials = await start_lobby(stack, count=4)
-        host = serials[0]
+        await start_lobby(stack, count=4)
         baseline = _default_variant(GAME, "sensitivity")
 
-        # Step 1: the host cycles sensitivity in admin mode (a persisted admin value).
-        await enter_admin_mode(mock_client, host)
-        await press_admin_button(mock_client, host, _Button.CIRCLE)
+        # Step 1: the host steps sensitivity with the pad (a persisted admin value).
+        reply = await pad_command(menu_client, "step_setting", option="sensitivity", direction="up", steps=1)
+        assert reply.success, f"sensitivity step refused: {reply.error}"
         assert await async_poll_until(
             lambda: _default_variant(GAME, "sensitivity") != baseline,
             timeout=PERSIST_TIMEOUT_SECONDS,
         )
         host_variant = _default_variant(GAME, "sensitivity")
         assert host_variant != baseline
-        await exit_admin_mode(mock_client, host)
         assert (_persisted_admin_value(GAME, "sensitivity") or {}).get("variant") == host_variant
 
         # Step 2: the presenter flips the decision backend with the stage script.
@@ -128,4 +120,4 @@ async def test_host_and_stage_change_flags_at_runtime(fresh_stack, flag_service)
     finally:
         flag_service_default().request("DELETE", "/agent?writer=stage")
         flag_service_default().request("DELETE", "/agent/decision.backend?persist=true")
-        await mock_channel.close()
+        await menu_channel.close()

@@ -134,17 +134,16 @@ the inventory until then.
 ### Status vocabularies
 
 Requirements use the AIUP requirement statuses (`Open`, `In Progress`, `Implemented`, `Verified`,
-`Deferred`, `Rejected`); use cases use the use-case statuses, which map as follows: `Draft` / `Review` /
-`Approved` = requirement `Open` or `In Progress`, `Implemented` = `Implemented`, `Tested` / `Done` =
-`Verified`, `Obsolete` = `Rejected`. UC `Tested` = every main-scenario and alternative-flow step has a
+`Deferred`, `Rejected`); use cases use the use-case statuses (`Draft`, `Review`, `Approved`, `Implemented`, `Tested`, `Done`,
+`Obsolete`). An FR's progress status is computed by the spec lint from its use cases (see
+[CI spec gate](#ci-spec-gate)); the column in `requirements.md` must match it. UC `Tested` = every main-scenario and alternative-flow step has a
 tagged test (see the `/coverage-check` skill, added by #1289) and no blocking `Known gap` line is open. A stated `Known gap` on a precondition, a postcondition, an NFR or a clause that only an e2e or hardware run can assert does not block `Tested`; a `Known gap` on a main step, an alternative flow or a BR does. (maintainer rule, #1725). A use case's status is never above the weakest FR on its
 `Requirements:` line; FRs that only a planned flow needs go on a separate `Planned:` line with their
 issue number, so the use case can be `Implemented` while they stay `Open`. The flows themselves go under a
 `## Planned extensions` section (IDs kept, issue and status Open); they do not count toward `Tested` until they
-move back under `## Alternative Flows` with their code. Conversely, an FR's status is
-derived from its use cases: it is `Verified` only when every use case that lists it under `Requirements:` is
-`Tested`, otherwise at most `Implemented`. NFRs and constraints are exempt from both rules: NFRs are measured separately, constraints are verified by
-review and the technical specs; only FRs derive their status from their use cases.
+move back under `## Alternative Flows` with their code. NFRs and constraints
+are exempt from both rules: NFRs are measured separately, constraints are verified by review and the
+technical specs.
 
 When a flow or business rule leaves a use case, keep its ID: a flow that moved to another use case is
 titled `(moved)`, one that no longer exists `(retired)`. Its trigger says where it went (or why it

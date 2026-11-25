@@ -53,8 +53,8 @@ The tests are the journeys; search for `tc="TC-NNN"` to find every tagged test.
 | TC-002 | FFA game to a winner on mock controllers | `tests/integration/test_tc002_ffa_game.py` |
 | TC-003 | Player disconnects during an FFA game | `tests/service/test_tc003_ffa_player_disconnects.py` |
 | TC-004 | Operator stops an FFA game | `tests/service/test_tc004_operator_stops_ffa_game.py` |
-| TC-005 | Host tunes the game in admin mode and force-starts | `tests/service/test_tc005_admin_journey.py` |
-| TC-006 | Host restricts the agent from the controller | `tests/service/test_tc006_agent_ladder.py`, `tests/service/test_tc006_agent_blocked_by_host.py` |
+| TC-005 | Host tunes the game with the operator pad and force-starts | `tests/service/test_tc005_host_journey.py` |
+| TC-006 | Host restricts the agent with the operator pad | `tests/service/test_tc006_agent_ladder.py`, `tests/service/test_tc006_agent_blocked_by_host.py` |
 | TC-007 | Agent intervenes in an FFA game on rules | `tests/integration/test_tc007_closed_loop_full_stack.py`, `tests/service/test_tc007_rules_intervention_applied.py` |
 | TC-008 | Switch to a remote backend and route by confidence | `tests/service/test_tc008_remote_backend_routing.py`, `test_tc008_jev_backend.py`, `test_tc008_claude_backend.py` |
 | TC-009 | Kill switch during an FFA game | `tests/service/test_tc009_kill_switch.py` |

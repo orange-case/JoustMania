@@ -44,9 +44,12 @@ async def test_kill_switch_mid_flight_discards(flag_service, ...):
 
 - A test whose purpose is a pre- or postcondition uses `cond=["Pre-1"]` / `["Post-F-1"]` instead of
   `flow=` (see `/pytest-test`); never `flow="main"` for it.
-- A journey that chains several use cases (a `docs/test_cases/TC-XXX-*.md` from the aiup-core `test-case`
-  skill) carries one `uc` marker per use-case flow it exercises, each with `tc="TC-XXX"`, and comments
-  `# Step <n>: <name>` per row of the TC Flow table.
+- A journey that chains several use cases carries one `uc` marker per use-case flow it exercises, each
+  with `tc="TC-XXX"`, and a `# Step <n>: <name>` comment per step. TC documents
+  (`docs/test_cases/TC-XXX-*.md`) exist only for manual or hardware journeys (#2799): an automated
+  journey is the test itself, so do not write a new TC document for it. Take a new id from the index in
+  `docs/test_cases/README.md` (the next free number, retired ids included) and add it to its
+  "Automated journeys" table.
 - Module name: extend the existing `test_<area>_flow.py` / `test_<area>_e2e.py` that covers the area;
   a new module only for a new area.
 
@@ -56,7 +59,7 @@ async def test_kill_switch_mid_flight_discards(flag_service, ...):
   `coordinator_idle` (autouse) and `ensure_game_stopped` / `headless_cleanup` keep games from leaking.
 - **Helpers** (`tests/integration/helpers.py`): `setup_mock_controllers`, `get_mock_controller_serials`,
   `start_game_via_menu`, `start_game_headless`, `mark_controllers_ready`, `kill_player_verified`,
-  `GameEventCollector`, `force_end_game_by_id`, admin-mode helpers, `verify_*_colors`,
+  `GameEventCollector`, `force_end_game_by_id`, `pad_command` (operator pad commands), `verify_*_colors`,
   `poll_until` / `async_poll_until`, `flagd_probe_client`; flag-service helpers in
   `tests/integration/flag_service.py` (`set_game_value`, `set_player_value`, `append_event`,
   `wait_game_registered`).

@@ -43,7 +43,6 @@ from services.menu.handlers.base import ControllerState
 from services.menu.state_manager import StateManager
 from services.menu.tests.servicer_harness import default_returning_flag_client
 from services.menu.utils import AudioHelper, LedController
-from services.menu.utils.led import GAME_MODE_COLORS
 
 
 class MockGrpcContext:
@@ -217,7 +216,6 @@ class TestMenuServicerControllerCallbacks:
 
         assert real_servicer.connected_controllers == {"s2", "s3"}
         assert real_servicer.ready_controllers == set()
-        assert "s1" not in real_servicer.state_manager.button_states
 
     @pytest.mark.asyncio
     async def test_update_battery_is_tracked(self, real_servicer):
@@ -236,12 +234,11 @@ class TestMenuServicerControllerCallbacks:
 
         assert real_servicer.connected_controllers == set()
         assert real_servicer.ready_controllers == set()
-        assert real_servicer.state_manager.button_states == {}
         assert real_servicer.state_manager.battery_levels == {}
 
 
 class TestMenuServicerOnButton:
-    """on_button: idle activity, admin combo detection and dispatch."""
+    """on_button: idle activity and dispatch."""
 
     @pytest.mark.asyncio
     async def test_any_button_resets_idle_activity(self, real_servicer):
@@ -250,52 +247,20 @@ class TestMenuServicerOnButton:
         real_servicer.idle_monitor.reset_activity.assert_called()
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-012", flow="main", steps=[1, 2])
-    async def test_four_face_buttons_enter_admin_mode(self, real_servicer):
-        """UC-012 steps 1-2: Cross+Circle+Square+Triangle switches the controller to ADMIN.
-
-        The admin enter effect is sent and the 60 s timeout task is started.
-        """
-        from proto import controller_manager_pb2
-
-        real_servicer.state = menu_pb2.MenuState.RUNNING  # Pre-1
+    @pytest.mark.uc("UC-010", br=["BR-005"])
+    async def test_four_face_buttons_are_ordinary_buttons(self, real_servicer):
+        """The four face buttons together have no lobby action; the controller stays CONNECTED (UC-010 BR-005)."""
+        real_servicer.state = menu_pb2.MenuState.RUNNING
         await _connect(real_servicer, "host", "other")
+        real_servicer.led.send_game_effect.reset_mock()
         for button in ("cross", "circle", "square", "triangle"):
             await real_servicer.on_button("host", button, True)
 
-        assert real_servicer.state_manager.controller_states["host"] == ControllerState.ADMIN
-        assert real_servicer.state_manager.controller_states["other"] == ControllerState.CONNECTED
-        assert real_servicer.admin_handler.is_admin_controller("host")
-        real_servicer.led.send_game_effect.assert_any_await(
-            "host", controller_manager_pb2.GAME_EFFECT_ADMIN_ENTER, color=None, duration_ms=0, speed=0
-        )
-        assert real_servicer.admin_handler._timeout_task is not None
-        assert not real_servicer.admin_handler._timeout_task.done()
-
-    @pytest.mark.asyncio
-    @pytest.mark.uc("UC-012", flow="main", steps=[1])
-    async def test_partial_combo_stays_connected(self, real_servicer):
-        """UC-012 step 1: three face buttons are not the combo; the controller stays CONNECTED."""
-        real_servicer.state = menu_pb2.MenuState.RUNNING  # Pre-1, so only the partial combo keeps it out
-        await _connect(real_servicer, "host")
-        for button in ("cross", "circle", "square"):
-            await real_servicer.on_button("host", button, True)
-
-        assert real_servicer.state_manager.controller_states["host"] == ControllerState.CONNECTED
-        assert not real_servicer.admin_handler.active
-
-    @pytest.mark.asyncio
-    async def test_face_button_release_rearms_combo(self, real_servicer):
-        """Releasing a face button clears combo_shown so the next full combo is seen again."""
-        real_servicer.state = menu_pb2.MenuState.RUNNING  # Pre-1
-        await _connect(real_servicer, "host")
-        for button in ("cross", "circle", "square", "triangle"):
-            await real_servicer.on_button("host", button, True)
-        assert real_servicer.admin_handler.combo_shown is True
-
-        await real_servicer.on_button("host", "cross", False)
-
-        assert real_servicer.admin_handler.combo_shown is False
+        assert real_servicer.state_manager.controller_states == {
+            "host": ControllerState.CONNECTED,
+            "other": ControllerState.CONNECTED,
+        }
+        real_servicer.led.send_game_effect.assert_not_awaited()
 
 
 class TestMenuServicerStartStopMenu:
@@ -390,22 +355,18 @@ class TestMenuServicerStartStopMenu:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A11")
-    async def test_stop_menu_releases_admin_lock_and_unreadies_controllers(self, real_servicer):
-        """StopMenu puts every controller back to CONNECTED and calls abandon_session to release the admin lock."""
+    async def test_stop_menu_unreadies_controllers(self, real_servicer):
+        """StopMenu puts every controller back to CONNECTED."""
         real_servicer.state = menu_pb2.MenuState.RUNNING
-        await _connect(real_servicer, "s1", "s2")
-        await _enter_admin(real_servicer, "s1")
-        assert real_servicer.admin_handler.active is True
-        handler = real_servicer.admin_handler
+        await _connect(real_servicer, "s1", "s2", "s3")
+        await _ready_up(real_servicer, "s1")
 
-        with patch.object(handler, "abandon_session", autospec=True, side_effect=handler.abandon_session) as abandon:
-            await real_servicer.StopMenu(menu_pb2.StopMenuRequest(), MagicMock())
+        await real_servicer.StopMenu(menu_pb2.StopMenuRequest(), MagicMock())
 
-        abandon.assert_called_once()
-        assert handler.active is False
         assert real_servicer.state_manager.controller_states == {
             "s1": ControllerState.CONNECTED,
             "s2": ControllerState.CONNECTED,
+            "s3": ControllerState.CONNECTED,
         }
 
     @pytest.mark.asyncio
@@ -448,7 +409,7 @@ class TestMenuServicerStartStopMenu:
         """#2175: StartMenu shows every kept controller dim in the restored mode's lobby colour."""
         await real_servicer.StartMenu(menu_pb2.StartMenuRequest(), MagicMock())
         await _connect(real_servicer, "s1", "s2")
-        await _enter_admin(real_servicer, "s1")
+        await _ready_up(real_servicer, "s1")
         await real_servicer.StopMenu(menu_pb2.StopMenuRequest(), MagicMock())
         real_servicer.user_prefs_client.get_string_value.side_effect = lambda key, default, *_a, **_k: (
             "Tournament" if key == "current_game" else default
@@ -777,9 +738,9 @@ class TestMenuServicerReadyUpStart:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="main", steps=[4], br=["BR-002"])
-    @pytest.mark.parametrize("blocking_state", [ControllerState.IDLE, ControllerState.ADMIN])
-    async def test_idle_or_admin_controller_blocks_auto_start(self, real_servicer, blocking_state):
-        """UC-010 BR-002: an IDLE or ADMIN controller counts as connected but not ready."""
+    @pytest.mark.parametrize("blocking_state", [ControllerState.IDLE])
+    async def test_idle_controller_blocks_auto_start(self, real_servicer, blocking_state):
+        """UC-010 BR-002: an IDLE controller counts as connected but not ready."""
         real_servicer.state = menu_pb2.MenuState.RUNNING
         await _connect(real_servicer, "s1", "s2")
         real_servicer.state_manager.controller_states["blocker"] = blocking_state
@@ -893,15 +854,13 @@ class TestMenuServicerForceStartShortRoster:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-014", flow="A3", steps=[1, 2])
-    async def test_force_start_with_only_host_publishes_cancelled(self, real_servicer):
-        """force_all_start off and nobody else ready: roster = host only -> game_start_cancelled, lobby back."""
+    async def test_force_start_with_one_ready_publishes_cancelled(self, real_servicer):
+        """force_all_start off and one controller ready: a roster of one -> game_start_cancelled, lobby back."""
         from proto import controller_manager_pb2, controller_manager_pb2_grpc
 
         real_servicer.state = menu_pb2.MenuState.RUNNING
         await _connect(real_servicer, "host", "s2")
-        for button in ("cross", "circle", "square", "triangle"):
-            await real_servicer.on_button("host", button, True)
-        assert real_servicer.admin_handler.is_admin_controller("host")
+        await _ready_up(real_servicer, "s2")
 
         live_stub = create_autospec(controller_manager_pb2_grpc.ControllerManagerServiceStub, instance=True)
         live_stub.GetConnectedControllers = AsyncMock(
@@ -912,7 +871,7 @@ class TestMenuServicerForceStartShortRoster:
             patch.object(controller_manager_pb2_grpc, "ControllerManagerServiceStub", return_value=live_stub),
             patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as stream,
         ):
-            await real_servicer.admin_handler.handle_force_start("host")
+            await _pad_force_start(real_servicer)
             await _await_lifecycle(real_servicer)
 
         published = [event for event, _data in _published(real_servicer)]
@@ -921,9 +880,9 @@ class TestMenuServicerForceStartShortRoster:
         assert published.index("game_requested") < published.index("game_start_cancelled")
         assert real_servicer.state == menu_pb2.MenuState.RUNNING
         stream.assert_not_awaited()
-        # Back in the lobby: the host is CONNECTED again with the lobby colour.
-        assert real_servicer.state_manager.controller_states["host"] == ControllerState.CONNECTED
-        real_servicer.led.set_connected_color.assert_any_await("host", Games.JoustFFA.name)
+        # Back in the lobby: the forced player is CONNECTED again with the lobby colour.
+        assert real_servicer.state_manager.controller_states["s2"] == ControllerState.CONNECTED
+        real_servicer.led.set_connected_color.assert_any_await("s2", Games.JoustFFA.name)
 
 
 # Per-mode minimum players (UC-010 BR-001, #1862), pinned so a changed minimum fails a test.
@@ -941,13 +900,17 @@ _MODE_MINIMUMS = [
 ]
 
 
-async def _enter_admin(servicer, serial: str) -> None:
-    """Hold Cross, Circle, Square and Triangle (UC-012), then release them."""
-    for button in ("cross", "circle", "square", "triangle"):
-        await servicer.on_button(serial, button, True)
-    for button in ("cross", "circle", "square", "triangle"):
-        await servicer.on_button(serial, button, False)
-    assert servicer.admin_handler.is_admin_controller(serial)
+async def _pad_force_start(servicer) -> menu_pb2.ProcessInputResponse:
+    """The operator pad's force start (UC-014, UC-015 step 7)."""
+    request = menu_pb2.ProcessInputRequest(input_type="web_command", data={"command": "force_start"})
+    return await servicer.ProcessInput(request, MagicMock())
+
+
+def _force_all_start_on(_domain: str):
+    """Flag clients that serve force_all_start=on and every other flag at its default."""
+    client = default_returning_flag_client(_domain)
+    client.get_boolean_value.side_effect = lambda key, default, *_a, **_k: True if key == "force_all_start" else default
+    return client
 
 
 def _select(servicer, mode: Games) -> None:
@@ -1024,16 +987,15 @@ class TestModeMinimumPlayers:
     @pytest.mark.uc("UC-014", flow="A3", steps=[1, 2], br=["BR-002"])
     @pytest.mark.uc("UC-022", cond=["Pre-1"])
     async def test_force_start_skips_ready_check_but_not_minimum(self, real_servicer):
-        """UC-014 BR-002: a forced Traitor roster of three is cancelled; with four it starts though
-        the host is not READY."""
+        """UC-014 BR-002: a forced Traitor roster of three is cancelled; with force_all_start on, four start
+        though one is not READY."""
         from lib.types import Sound
         from proto import controller_manager_pb2_grpc
 
         real_servicer.state = menu_pb2.MenuState.RUNNING
         _select(real_servicer, Games.Traitor)
         await _connect(real_servicer, "host", "s2", "s3", "s4")
-        await _enter_admin(real_servicer, "host")
-        await _ready_up(real_servicer, "s2", "s3")
+        await _ready_up(real_servicer, "host", "s2", "s3")
 
         live_stub = create_autospec(controller_manager_pb2_grpc.ControllerManagerServiceStub, instance=True)
         live_stub.GetConnectedControllers = AsyncMock(
@@ -1046,7 +1008,7 @@ class TestModeMinimumPlayers:
             patch.object(controller_manager_pb2_grpc, "ControllerManagerServiceStub", return_value=live_stub),
             patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as stream,
         ):
-            await real_servicer.admin_handler.handle_force_start("host")
+            await _pad_force_start(real_servicer)
             await _await_lifecycle(real_servicer)
 
         stream.assert_not_awaited()
@@ -1054,16 +1016,15 @@ class TestModeMinimumPlayers:
         real_servicer.audio.play_voice.assert_awaited_with(Sound.MENU_VOX_NOT_ENOUGH_PLAYERS)
         assert real_servicer.state == menu_pb2.MenuState.RUNNING
 
-        # Four in the roster: the host (admin) is not READY, the force-start still starts the game.
-        await _enter_admin(real_servicer, "host")
+        # Four in the roster: "host" is not READY, the force-start with force_all_start on still starts the game.
         await _ready_up(real_servicer, "s2", "s3", "s4")
         assert real_servicer._game_lifecycle_task.done()
         with (
-            patch("lib.feature_flags.get_flag_client", side_effect=default_returning_flag_client),
+            patch("lib.feature_flags.get_flag_client", side_effect=_force_all_start_on),
             patch.object(controller_manager_pb2_grpc, "ControllerManagerServiceStub", return_value=live_stub),
             patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as second_stream,
         ):
-            await real_servicer.admin_handler.handle_force_start("host")
+            await _pad_force_start(real_servicer)
             await _await_lifecycle(real_servicer)
 
         assert _started_roster(second_stream) == ["host", "s2", "s3", "s4"]
@@ -1198,12 +1159,12 @@ class TestStartWhileGameActive:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
     @pytest.mark.uc("UC-014", flow="A4")
-    async def test_admin_force_start_mid_game_is_refused(self, real_servicer):
-        """Admin force-start callback mid-game."""
+    async def test_force_start_mid_game_is_refused(self, real_servicer):
+        """A force-start that reaches the start path mid-game."""
         release = asyncio.Event()
         task, stream = await self._live_game(real_servicer, release)
-        await real_servicer.start_game("s1", source="admin_force_start", controllers=["s1", "s2"])
-        await self._assert_refused(real_servicer, task, stream, "admin_force_start", release)
+        await real_servicer.start_game("s1", source="operator_pad", controllers=["s1", "s2"])
+        await self._assert_refused(real_servicer, task, stream, "operator_pad", release)
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
@@ -1233,9 +1194,9 @@ class TestStartWhileGameActive:
             assert task is not None
             assert not task.done()
             assert real_servicer.state == menu_pb2.MenuState.RUNNING
-            await real_servicer.start_game("s2", source="admin_force_start", controllers=["s1", "s2"])
+            await real_servicer.start_game("s2", source="operator_pad", controllers=["s1", "s2"])
             assert real_servicer._game_lifecycle_task is task
-            assert self._rejection("admin_force_start") in _published(real_servicer)
+            assert self._rejection("operator_pad") in _published(real_servicer)
             assert not self._beeped(real_servicer)
             await task
         stream.assert_awaited_once()
@@ -1389,8 +1350,8 @@ class TestStartWhileGameActive:
             assert not new_task.done()
             assert ("game_start_cancelled", {}) not in _published(real_servicer)
             # The new game still blocks a second start.
-            await real_servicer.start_game("s2", source="admin_force_start", controllers=["s1", "s2"])
-            assert self._rejection("admin_force_start") in _published(real_servicer)
+            await real_servicer.start_game("s2", source="operator_pad", controllers=["s1", "s2"])
+            assert self._rejection("operator_pad") in _published(real_servicer)
             new_release.set()
             await new_task
         assert not new_task.cancelled()
@@ -2883,8 +2844,12 @@ class TestSelectionPathsShareSelectGameMode:
     """#1285: every game-mode selection path goes through MenuServicer.select_game_mode."""
 
     @staticmethod
-    async def _admin_cross(servicer):
-        await servicer.admin_handler.handle_game_mode("host")
+    async def _pad_step(servicer):
+        request = menu_pb2.ProcessInputRequest(
+            input_type="web_command",
+            data={"command": "step_setting", "option": "current_game", "direction": "up", "steps": "1"},
+        )
+        await servicer.ProcessInput(request, MagicMock())
 
     @staticmethod
     async def _lobby_select(servicer):
@@ -2916,7 +2881,7 @@ class TestSelectionPathsShareSelectGameMode:
     @pytest.mark.parametrize(
         ("path", "source"),
         [
-            ("_admin_cross", "admin"),
+            ("_pad_step", "operator_pad"),
             ("_lobby_select", "controller"),
             ("_process_input_select", "button_input"),
             ("_web_select", "web"),
@@ -2928,35 +2893,33 @@ class TestSelectionPathsShareSelectGameMode:
         select_spy = AsyncMock(wraps=real_servicer.select_game_mode)
 
         with patch.object(real_servicer, "select_game_mode", select_spy):
-            # The state manager and admin handler hold the bound method from __init__.
+            # The state manager holds the bound method from __init__.
             real_servicer.state_manager._select_game_mode = select_spy
             await getattr(self, path)(real_servicer)
 
         select_spy.assert_awaited_once()
-        assert select_spy.await_args.kwargs.get("source", "admin") == source
+        assert select_spy.await_args.kwargs.get("source", "operator_pad") == source
         assert real_servicer.current_selection == Games.JoustTeams
         assert real_servicer.state_manager.current_game_mode == Games.JoustTeams
         real_servicer.user_prefs_writer.update_default_variant.assert_called_once_with("current_game", "JoustTeams")
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-011", flow="main", steps=[4, 5])
-    async def test_admin_cross_persists_and_publishes_both_events(self, real_servicer):
-        """Admin Cross through the real servicer: persisted, selection_changed and game_selection_changed."""
-        await self._admin_cross(real_servicer)
+    async def test_pad_step_persists_and_publishes_selection_changed(self, real_servicer):
+        """The pad's mode step through the real servicer: persisted and selection_changed (step 5)."""
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        await self._pad_step(real_servicer)
 
         published = _published(real_servicer)
-        assert ("selection_changed", {"game_name": "JoustTeams", "source": "admin"}) in published
-        assert (
-            "game_selection_changed",
-            {"game_name": "JoustTeams", "source": "admin_mode", "serial": "host"},
-        ) in published
+        assert ("selection_changed", {"game_name": "JoustTeams", "source": "operator_pad"}) in published
+        assert [name for name, _ in published if name == "game_selection_changed"] == []
         real_servicer.user_prefs_writer.update_default_variant.assert_called_once_with("current_game", "JoustTeams")
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-011", flow="main", steps=[6], br=["BR-005"])
-    async def test_admin_cross_repaints_the_other_lobby_leds_in_the_new_mode(self, real_servicer):
-        """UC-011 step 6, BR-005 (#2105): Cross changes the mode and every CONNECTED controller takes
-        the new mode's dim colour at once; the host's own controller only gets the pulse.
+    async def test_pad_step_repaints_the_lobby_leds_in_the_new_mode(self, real_servicer):
+        """UC-011 step 6, BR-005 (#2105): the pad changes the mode and every CONNECTED controller takes
+        the new mode's dim colour at once, after the mode pulse (step 3).
         """
         real_servicer.state = menu_pb2.MenuState.RUNNING
         await _connect(real_servicer, "s1", "s2", "s3")
@@ -2964,15 +2927,14 @@ class TestSelectionPathsShareSelectGameMode:
         assert led.set_connected_color.await_count == 3  # lobby colours were set on connect
         led.reset_mock()
 
-        await self._admin_cross(real_servicer)
+        await self._pad_step(real_servicer)
 
         assert real_servicer.current_selection == Games.JoustTeams
         assert sorted(c.args for c in led.set_connected_color.await_args_list) == [
             (s, Games.JoustTeams.name) for s in ("s1", "s2", "s3")
         ]
         led.set_ready_color.assert_not_awaited()
-        led.send_game_effect.assert_awaited_once()
-        assert led.send_game_effect.await_args.args[0] == "host"
+        assert sorted(c.args[0] for c in led.send_game_effect.await_args_list) == ["s1", "s2", "s3"]
         assert {real_servicer.state_manager.get_controller_state(s) for s in ("s1", "s2", "s3")} == {
             ControllerState.CONNECTED
         }
@@ -3010,27 +2972,12 @@ class TestSelectionPathsShareSelectGameMode:
         led.set_connected_color.assert_awaited_once_with("s2", Games.JoustTeams.name)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-011", flow="main", steps=[3])
-    async def test_admin_cross_pulses_host_and_plays_the_mode_voice_line(self, real_servicer):
-        """UC-011 step 3: Cross pulses the host's controller and plays the selected mode's voice line."""
-        await self._admin_cross(real_servicer)
-
-        real_servicer.audio.play_game_mode_voice.assert_awaited_once_with(Games.JoustTeams.name)
-        real_servicer.state_manager.led.send_game_effect.assert_awaited_once_with(
-            "host",
-            controller_manager_pb2.GAME_EFFECT_PULSE,
-            color=GAME_MODE_COLORS[Games.JoustTeams.name],
-            duration_ms=600,
-            speed=6,
-        )
-
-    @pytest.mark.asyncio
     @pytest.mark.uc("UC-011", flow="main")  # Post-F-1: the previous selection stays
     async def test_select_unknown_mode_changes_nothing(self, real_servicer):
         real_servicer.current_selection = Games.Tournament
         real_servicer.state_manager.set_game_mode(Games.Tournament)
 
-        await real_servicer.select_game_mode("NotAMode", source="admin")
+        await real_servicer.select_game_mode("NotAMode", source="operator_pad")
 
         assert real_servicer.current_selection == Games.Tournament
         assert real_servicer.state_manager.current_game_mode == Games.Tournament
