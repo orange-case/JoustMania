@@ -66,14 +66,6 @@
       },
       "defaultVariant": "none"
     },
-    "telemetry.experiment_game_parent": {
-      "state": "ENABLED",
-      "variants": {
-        "child": "child",
-        "link": "link"
-      },
-      "defaultVariant": "link"
-    },
     "telemetry.moment_shape": {
       "state": "ENABLED",
       "variants": {

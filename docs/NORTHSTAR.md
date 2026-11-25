@@ -9,8 +9,8 @@ factory runs without workers on the floor.
 ## The loop: Observe → Experiment → Promote
 
 - **Observe.** The agent only ever sees the game through OpenTelemetry (spans,
-  metrics and the log events of game moments; planned, #2722: also of the
-  game's start and end), never by reading code.
+  metrics, the log events of game moments and those of the game's start
+  and end), never by reading code.
 - **Experiment.** Any persistent change it considers is tested in shadow games
   with mock controllers, so real players never touch an untested variant.
 - **Promote.** Whatever survives is promoted by flipping an OpenFeature flag,
@@ -52,7 +52,7 @@ Then we measure whether it finds the move on its own, in shadow experiments wher
 These are what make this a northstar rather than a feature list:
 
 - **OTel only.** The agent's view of the game is spans, metrics and the log
-  events of game moments (planned, #2722: and of the game's start and end), nothing else,
+  events of game moments and of the game's start and end, nothing else,
   except `StreamGameEvents` (lifecycle of the agent's own shadow games) and
   `ListGames` / `ListMockControllers` (controller hygiene), the named exceptions
   under "No control plane" below.

@@ -1,17 +1,16 @@
 package decision
 
 import (
-	"context"
 	"math"
 	"strconv"
 
 	"github.com/joustmania/agent/decide"
 )
 
-// decide_rules.go is the `rules` decision backend of epic #1225: an adapter that
-// answers the decide contract's FFA questions from the ObjectiveRules engine. It
-// is the default backend and the floor every other backend falls back to, so it
-// never returns an error.
+// decide_rules.go is the `rules` decision backend of epic #1225: it answers the
+// decide contract's FFA questions from the ObjectiveRules engine's ranking
+// (ObjectiveRules.EvaluateDecide). It is the default backend and the floor every
+// other backend falls back to, so it never returns an error.
 //
 // It lives in package decision (not in decide or a decide/rules subpackage)
 // because it needs the engine's unexported candidate scores, and because PR B's
@@ -30,7 +29,7 @@ import (
 // first and rejected: two strong competing interventions split the mass and the
 // rules declined to act although either one clearly beat doing nothing.
 
-// RulesBackendName is the rules backend's Name() and its decision.backend flag
+// RulesBackendName is the rules backend's name and its decision.backend flag
 // value.
 const RulesBackendName = "rules"
 
@@ -41,74 +40,10 @@ const RulesBackendName = "rules"
 // uniform and the rules engine could never clear a confidence threshold.
 const rulesSoftmaxTemperature = minScore
 
-// RulesBackend adapts ObjectiveRules to decide.Backend.
-type RulesBackend struct {
-	engine *ObjectiveRules
-}
-
-// NewRulesBackend wraps engine. Tests inject a seeded engine (newObjectiveRules
-// with a fixed rng and clock) to keep the chaos rule deterministic.
-func NewRulesBackend(engine *ObjectiveRules) *RulesBackend {
-	return &RulesBackend{engine: engine}
-}
-
-// Name implements decide.Backend.
-func (b *RulesBackend) Name() string { return RulesBackendName }
-
-// Decide implements decide.Backend. It ranks the candidates for req.Context
-// exactly as Evaluate does (same rules, policy filters, scoring and ordering)
-// and answers with the best candidate whose intervention and target are among
-// the offered options — Evaluate's first decision whenever the allow-list
-// offers it. Unlike Evaluate it is not throttled by evalInterval, answers one
-// decision rather than up to maxDecisionsPerEval, and records no engine state
-// (lastEval, lastFitness, lastDifficultyAt): it decides, it does not act. It
-// does draw the chaos roll from the engine's rng.
-//
-// It never returns an error. A missing Context (or engine) yields noop with
-// confidence 0; a question it does not know gets a neutral answer with
-// confidence 0, so the Response always validates against a valid Request.
-func (b *RulesBackend) Decide(_ context.Context, req decide.Request) (decide.Response, error) {
-	var ranked []scoredCandidate
-	known := req.Context != nil && b.engine != nil
-	if known {
-		b.engine.mu.Lock()
-		// Same no-shield set as EvaluateDecide: the ledger's charged, capped and
-		// cooling-down players, plus the charged and limited players the request's
-		// state shows.
-		_, noShield := b.engine.shieldLocked(*req.Context)
-		for serial := range chargedFromState(req.State) {
-			if noShield == nil {
-				noShield = map[string]bool{}
-			}
-			noShield[serial] = true
-		}
-		ranked, _, _ = b.engine.rankLocked(*req.Context, b.engine.now(), noShield)
-		b.engine.mu.Unlock()
-	}
-	return answerFromRanked(ranked, req, known), nil
-}
-
-// chargedFromState is the no-shield snapshot the request's state was built with
-// (#1870, #2066): the charged and the limited players, so the rules backend ranks
-// on the same view the state shows.
-func chargedFromState(st decide.State) map[string]bool {
-	var out map[string]bool
-	for _, p := range st.Players {
-		if p.ShieldCharged || p.ShieldLimited {
-			if out == nil {
-				out = map[string]bool{}
-			}
-			out[p.Serial] = true
-		}
-	}
-	return out
-}
-
 // answerFromRanked answers req's questions from an already-ranked candidate list.
-// It is shared by RulesBackend.Decide and ObjectiveRules.EvaluateDecide, so the
-// decide answers and the emitted decisions can come from ONE ranking (#1226).
-// known=false (no context or engine) zeroes every confidence.
-func answerFromRanked(ranked []scoredCandidate, req decide.Request, known bool) decide.Response {
+// ObjectiveRules.EvaluateDecide uses it, so the decide answers and the emitted
+// decisions come from ONE ranking (#1226).
+func answerFromRanked(ranked []scoredCandidate, req decide.Request) decide.Response {
 	qs := indexQuestions(req.Questions)
 	eligible := filterEligible(ranked, qs)
 
@@ -126,12 +61,9 @@ func answerFromRanked(ranked []scoredCandidate, req decide.Request, known bool) 
 		default:
 			a = neutralAnswer(q)
 		}
-		if !known {
-			a.Confidence = 0
-		}
 		resp.Answers = append(resp.Answers, a)
 	}
-	if known && iv.ok && iv.best != nil {
+	if iv.ok && iv.best != nil {
 		resp.Prediction = rulesPrediction(*iv.best, req.State)
 	}
 	return resp
@@ -378,7 +310,7 @@ func optionSet(q decide.Question) map[string]bool {
 // allow-list (which shaped req) or the alive-player list would have excluded it.
 // The permission chain applies the allow-list afterwards and its verdict rides
 // invoke_agent as decide.blocked. Only the in-loop rules path uses it; a remote
-// backend and RulesBackend.Decide keep the caller's options. The question slices
+// backend keeps the caller's options. The question slices
 // are copied, never mutated in place.
 func emissionRequest(req decide.Request, ranked []scoredCandidate) decide.Request {
 	if len(ranked) == 0 {
