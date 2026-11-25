@@ -17,9 +17,9 @@ import (
 
 // experiment.progress (#2059, docs/specs/telemetry.md §4.1): a registry snapshot of
 // one experiment as a one-span trace. The agent.experiment root is stored by Jaeger
-// only when it ends (teardown), so a reader cannot follow a live experiment there. experiment.progress is its OWN root with a
-// Link to the agent.experiment span context, emitted under r.mu after every state
-// change and on a heartbeat.
+// only when it ends (teardown), so a reader cannot follow a live experiment there.
+// experiment.progress is its OWN root with a Link to the agent.experiment span
+// context, emitted under r.mu after every state change and on a heartbeat.
 const (
 	// SpanExperimentProgress is the span name.
 	SpanExperimentProgress = "experiment.progress"

@@ -48,8 +48,7 @@ FLAG_PROVIDER_READY_TIMEOUT_S = 5.0
 class SpanRecord:
     """Collects the wait's span attributes and events until the game root span exists.
 
-    The wait finishes before the game root span is created (the moment shape is read
-    once for the game), so ``replay`` copies what it recorded onto the span.
+    ``replay`` copies what it recorded onto the root span once that span exists.
     """
 
     def __init__(self) -> None:
