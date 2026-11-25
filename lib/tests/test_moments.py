@@ -470,3 +470,28 @@ def test_read_agent_log_events_is_off_without_otlp_logging(monkeypatch):
     monkeypatch.setattr("lib.feature_flags.read_bool_flag", lambda *a, **k: True)  # noqa: ARG005
 
     assert moments.read_agent_log_events() is False
+
+
+@pytest.mark.uc("UC-100", flow="A6", br=["BR-003", "BR-012"])
+def test_both_shape_without_a_timestamp_stamps_event_and_log_with_one_clock_read(spans, logs):
+    tracer, exporter = spans
+    _record(MOMENT_SHAPE_BOTH, tracer)
+
+    (event,) = _player_span(exporter).events
+    (record,) = [r.log_record for r in logs.get_finished_logs()]
+    assert event.timestamp == record.timestamp
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"], cond=["Post-F-1"])
+@pytest.mark.usefixtures("logs")
+def test_emit_agent_event_never_raises_when_getting_the_logger_fails(spans, monkeypatch, capsys):
+    monkeypatch.setattr(moments, "_failure_reported", False)
+
+    def _broken():
+        raise RuntimeError("provider broken")
+
+    monkeypatch.setattr(moments, "_moment_logger", _broken)
+    tracer, _ = spans
+    with tracer.start_as_current_span("game") as root:
+        assert moments.emit_agent_event("game.end", span=root, attributes={}) is False
+    assert "moment could not be recorded" in capsys.readouterr().err

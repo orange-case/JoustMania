@@ -9,7 +9,7 @@ log copy of each warning and death; every such record carries ``orangecase.audie
 Real SDK tracer and logger providers with in-memory exporters (not the global ones).
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, create_autospec, patch
 
 import pytest
 from opentelemetry.sdk._logs import LoggerProvider
@@ -20,6 +20,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from lib import otel_logging
 from services.game_coordinator.games import base
+from services.game_coordinator.games.ffa import FFAGame
 from services.game_coordinator.tests.test_death_detection_uc030 import _game
 from services.game_coordinator.tests.test_game_session import _make_session
 
@@ -71,10 +72,10 @@ class _FlagReads:
         return default
 
 
-async def _run_session(sdk, reads, run=None):
+async def _run_session(sdk, reads, run=None, build_error=None):
     session = _make_session()
-    game = MagicMock()
-    game.run = AsyncMock(side_effect=run)
+    game = create_autospec(FFAGame, instance=True)
+    game.run.side_effect = run
     game.get_game_name.return_value = "FFA"
     with (
         patch("services.game_coordinator.game_session.tracer", sdk.tracer),
@@ -83,6 +84,7 @@ async def _run_session(sdk, reads, run=None):
         patch("lib.feature_flags.read_bool_flag", reads.boolean),
     ):
         factory.create_game.return_value = game
+        factory.create_game.side_effect = build_error
         await session._run_game_loop_async()
     (root,) = [s for s in sdk.spans.get_finished_spans() if s.parent is None]
     return session, root, game
@@ -180,6 +182,15 @@ async def test_without_otlp_logging_the_flag_reads_off_and_nothing_is_sent(sdk, 
     assert sdk.records() == []
 
 
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-041", flow="A8", steps=[4])
+async def test_a_game_never_built_sends_no_agent_record(sdk):
+    """game.end only pairs with a sent game.start."""
+    await _run_session(sdk, _FlagReads(agent_log_events=True), build_error=ValueError("unknown mode"))
+
+    assert sdk.records() == []
+
+
 # --- the moments: a marked copy in the span shapes only -----------------------------------
 
 
@@ -200,13 +211,13 @@ async def _warn(game, serial="p0"):
     await game._warn_player(serial, warn + 0.1, warn)
 
 
-def _moment_attrs(sdk, span, name, shape):
-    """The moment's attributes as its own record in ``shape`` carries them."""
+def _moment(sdk, span, name, shape):
+    """The moment's attributes and time as its own record in ``shape`` carries them."""
     if shape == "span":
         (moment,) = [s for s in sdk.spans.get_finished_spans() if s.name == f"game.{name}"]
-        return dict(moment.attributes)
+        return dict(moment.attributes), moment.start_time
     (event,) = [e for e in span.events if e.name == name]
-    return dict(event.attributes)
+    return dict(event.attributes), event.timestamp
 
 
 @pytest.mark.asyncio
@@ -222,9 +233,10 @@ async def test_span_shapes_send_a_marked_log_copy_of_the_warning_and_the_death(s
 
     for name in ("death_warning", "player_death"):
         (copy,) = sdk.records(name)
-        expected = _moment_attrs(sdk, span, name, shape)
+        expected, moment_time = _moment(sdk, span, name, shape)
         assert dict(copy.attributes) == {**expected, **AUDIENCE}
         assert copy.attributes["moment.id"] == expected["moment.id"]
+        assert copy.timestamp == moment_time
         assert (copy.trace_id, copy.span_id) == (span.get_span_context().trace_id, span.get_span_context().span_id)
 
 

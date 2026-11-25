@@ -222,7 +222,11 @@ def emit_agent_event(name: str, *, span: trace.Span, attributes: Mapping[str, An
 
     False when nothing was sent (no OTLP logging in this process, or a failed emit).
     """
-    moment_logger = _moment_logger()
+    try:
+        moment_logger = _moment_logger()
+    except Exception as error:  # noqa: BLE001 - runs in the session's end path
+        _report_failure_once(name, error)
+        return False
     if moment_logger is None:
         return False
     return _emit(moment_logger, name, span, {**attributes, AUDIENCE_ATTR: AUDIENCE_AGENT}, None)
