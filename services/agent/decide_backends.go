@@ -10,7 +10,6 @@ import (
 	"github.com/joustmania/agent/decide"
 	"github.com/joustmania/agent/decide/backends/claude"
 	"github.com/joustmania/agent/decide/backends/jev"
-	"github.com/joustmania/agent/decide/backends/openai"
 	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/internal/anthropichttp"
@@ -26,13 +25,13 @@ import (
 //   - API keys are read ONCE at startup (decideBackendEnvFromOS) and closed over.
 //     They are env secrets, never flags, and never recorded on a span.
 //     UC: UC-044 BR-001 (a key set or changed later needs a restart), C-016.
-//   - openai and jev share one *http.Client with claude, so TLS connections are
+//   - jev shares one *http.Client with claude, so TLS connections are
 //     pooled across the per-cycle backend values. Decide's ctx deadline (the
 //     decision.<backend>.timeout_ms flag) is the real budget; the client timeout
 //     is only a backstop.
 //   - A backend without its key returns nil (backend_unavailable -> rules)
 //     without building anything.
-//   - An openai, jev or claude base URL that is not key-safe (keysafe.BaseURL: https, or
+//   - A jev or claude base URL that is not key-safe (keysafe.BaseURL: https, or
 //     plain http only to a loopback host) returns nil the same way, so nothing is
 //     sent and the key never travels in clear text. It is a url.Parse, no I/O.
 //     UC: UC-044 BR-003, C-016 (#1814).
@@ -40,17 +39,15 @@ import (
 //     response, which the backends turn into an error -> rules fallback), so an
 //     endpoint cannot forward the key to another host or downgrade it to http.
 //   - claude.New builds an Anthropic SDK client (~16 allocs / 3.5 KB per call,
-//     vs 3 allocs for openai.New / jev.New), so claude backends are cached per
+//     vs 3 allocs for jev.New), so claude backends are cached per
 //     claude.Config (model, timeout, capture, base URL; the key and client are
 //     fixed). The base URL is the decision.claude.base_url flag (#1900). A flag flip is a new Config, hence a new backend on the next cycle;
-//     the cache is bounded so flag churn cannot grow it. openai/jev are cheap
-//     enough to build per cycle (openai carries its json_schema downgrade across
-//     instances in a package-level map).
+//     the cache is bounded so flag churn cannot grow it. jev is cheap enough to
+//     build per cycle.
 
 // decideBackendEnv holds the remote backends' API keys, read once at startup.
 type decideBackendEnv struct {
 	AnthropicAPIKey string // ANTHROPIC_API_KEY (claude)
-	OpenAIAPIKey    string // DECISION_OPENAI_API_KEY (openai)
 	JevAPIKey       string // JEV_API_KEY (jev)
 }
 
@@ -58,7 +55,6 @@ type decideBackendEnv struct {
 func decideBackendEnvFromOS() decideBackendEnv {
 	return decideBackendEnv{
 		AnthropicAPIKey: strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")),
-		OpenAIAPIKey:    strings.TrimSpace(os.Getenv("DECISION_OPENAI_API_KEY")),
 		JevAPIKey:       strings.TrimSpace(os.Getenv("JEV_API_KEY")),
 	}
 }
@@ -74,7 +70,7 @@ func newDecideHTTPClient() *http.Client {
 }
 
 // newDecideRegistry builds the decision-backend registry main.go hands to every
-// per-game loop: claude, openai and jev, each falling back to rules
+// per-game loop: claude and jev, each falling back to rules
 // (backend_unavailable) when its key, model or base URL is missing.
 func newDecideRegistry(env decideBackendEnv, client *http.Client) *decision.DecideRegistry {
 	reg := decision.NewDecideRegistry()
@@ -98,23 +94,6 @@ func newDecideRegistry(env decideBackendEnv, client *http.Client) *decision.Deci
 			Timeout:        d.Claude.Timeout,
 			HTTPClient:     client,
 			CaptureContent: d.CaptureContent,
-		})
-	})
-	reg.Register(flags.DecisionBackendOpenAI, func(d flags.DecisionBackend) decide.Backend {
-		if env.OpenAIAPIKey == "" {
-			return nil
-		}
-		if _, ok := keysafe.BaseURL(d.OpenAI.BaseURL); !ok {
-			return nil
-		}
-		return openai.New(openai.Config{
-			APIKey:          env.OpenAIAPIKey,
-			BaseURL:         d.OpenAI.BaseURL,
-			Model:           d.OpenAI.Model,
-			Timeout:         d.OpenAI.Timeout,
-			HTTPClient:      client,
-			CaptureContent:  d.CaptureContent,
-			ReasoningEffort: d.OpenAI.ReasoningEffort,
 		})
 	})
 	// Jev needs only JEV_API_KEY: an empty base URL or model falls back to the jev

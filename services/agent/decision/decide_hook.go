@@ -608,7 +608,7 @@ func (l *Loop) noteNoInterventions(c gamecontext.GameContext, skipping, experime
 // decision.min_gap_after_answer_ms from the previous call's end), and the GLOBAL
 // per-minute budget
 // llm.max_requests_per_minute shared with the post-game retro (the spend bound),
-// tightened for claude and openai by their own decision.<backend>.
+// tightened for claude by its own decision.<backend>.
 // max_requests_per_minute cap (#2519).
 // Cadence and budget are charged only on admission, and only after the caller
 // won the inflight claim. It returns "" when admitted.
@@ -760,21 +760,21 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 	if l.promptProfile != nil {
 		rec.req.PromptProfile = decide.NormalizePromptProfile(l.promptProfile(root, c.SessionID))
 	}
-	// The operator brief (#2687, UC-040 BR-044): read per request, claude and
-	// openai only; "" (no brief, jev, rules) leaves the request byte-identical.
+	// The operator brief (#2687, UC-040 BR-044): read per request, claude
+	// only; "" (no brief, jev, rules) leaves the request byte-identical.
 	rec.req.OperatorBrief = l.operatorBriefFor(root, rec.used, c.SessionID)
 	// #2695 (UC-042 A13): the retro tells the analyst whether the in-game model saw it.
 	if rec.req.OperatorBrief != "" {
 		l.briefLog.Note(c.SessionID)
 	}
 	// The prediction ask (#2479, UC-040 A45): only with decision.predictions.ask_model
-	// and decision.predictions_enabled on (fire-time flags) and a claude or openai
+	// and decision.predictions_enabled on (fire-time flags) and a claude
 	// backend; otherwise the request stays v1.
 	if askModelPrediction(fired, rec.used) {
 		rec.req.PredictionAsk = decide.PredictionQuestion(rec.req.State)
 	}
 	// The goal lines (#2479, decide-contract.md §14.4): only under
-	// decision.goal_in_prompt, and only for claude, openai or jev (jev's goal state
+	// decision.goal_in_prompt, and only for claude or jev (jev's goal state
 	// and gate criterion, #2498); otherwise the request stays byte-identical.
 	rec.req.Goal = l.goalLines(root, fired, rec.used, c)
 	// Fire-time threshold: only a placeholder for spans that end before landing

@@ -243,41 +243,6 @@ func TestTalk_ClaudeTimeoutPatientBeat(t *testing.T) {
 	})
 }
 
-// UC: UC-070 A6
-func TestTalk_SecondVendorBeat(t *testing.T) {
-	t.Run("UC-070/A6 openai without a model or key: openai -> rules backend_unavailable, then back to jev", func(t *testing.T) {
-		openai := newScriptedBackend(flags.DecisionBackendOpenAI, claudeAct)
-		openai.available = false // shipped `unset` model or no DECISION_OPENAI_API_KEY
-		jev := newScriptedBackend(flags.DecisionBackendJev, actShield)
-		snap := talkJevSnapshot(time.Second)
-		snap.Decision.Backend = flags.DecisionBackendOpenAI
-		h := talkHarness(t, snap, openai, jev)
-
-		state := h.loop.OnEvaluate(context.Background(), remoteContext(), testTrigger())
-		if len(state.Outcomes) == 0 {
-			t.Fatal("rules must decide in the same cycle when openai is unavailable")
-		}
-		ds := spansByName(h.sr.Ended(), SpanDecide)
-		if len(ds) != 1 {
-			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
-		}
-		assertSpanAttrs(t, "openai unavailable", ds[0], map[string]string{
-			AttrDecideBackend: "rules", AttrDecideBackendRequested: flags.DecisionBackendOpenAI,
-			AttrDecideFallbackReason: DecideFallbackUnavailable, AttrDecideOutcome: DecideOutcomeFallback,
-		})
-		if openai.callCount() != 0 {
-			t.Fatalf("openai calls = %d, want 0", openai.callCount())
-		}
-
-		// A6 step 2: agent-backend.sh jev.
-		h.flags.mutate(func(s *flags.Snapshot) { s.Decision.Backend = flags.DecisionBackendJev })
-		back := nextTalkCycle(t, h)
-		assertSpanAttrs(t, "back to jev", back, map[string]string{
-			AttrDecideBackend: flags.DecisionBackendJev, AttrDecideOutcome: DecideOutcomeAct,
-		})
-	})
-}
-
 // UC: UC-070 A10
 func TestTalk_AnswerLandsBeforeKillSwitch(t *testing.T) {
 	t.Run("UC-070/A10 the landed answer keeps its outcome; no later cycle decides until on", func(t *testing.T) {

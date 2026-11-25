@@ -62,10 +62,8 @@ func TestNewHTTPClient_RefusesCrossHostRedirect(t *testing.T) {
 }
 
 // sdkImportPaths are the SDK modules whose NewClient must be built here only.
-// The agent module has no OpenAI SDK; the path is listed so adding one is caught.
 var sdkImportPaths = map[string]bool{
 	"github.com/anthropics/anthropic-sdk-go": true,
-	"github.com/openai/openai-go":            true,
 }
 
 // rawClientCalls returns one message per raw SDK client construction in src:
