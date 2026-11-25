@@ -42,6 +42,9 @@ LIMIT_CUES = voice_prompts.LIMIT_VOICES  # "Maximum" stepping up, "Minimum" step
 CANCEL_CUE = voice_prompts.CANCELLED_VOICE
 NO_CONNECTION_CUE = voice_prompts.NO_CONNECTION_VOICE
 UNKNOWN_KEY_CUE = Sound.SFX_EXPLOSION_22
+# UC-016 BR-014: a raise waits for the knob press / the press was taken. Sounds, so they stay with a screen.
+ATTENTION_CUE = Sound.SFX_JOIN
+CONFIRMED_CUE = Sound.SFX_SHIELD_UP
 FAILURE_CUE = Sound.SFX_BEEP_LOUD
 FAILURE_CUE_GAP_SECONDS = 0.3
 # UC-015 BR-009: the limit cue plays at most once per this gap, so a burst of `at_limit` refusals
@@ -120,6 +123,12 @@ class CuePlayer:
     async def unknown_key(self) -> None:
         await self.play(UNKNOWN_KEY_CUE)  # a sound, not a voice line: it stays with a screen (UC-016 BR-005)
 
+    async def attention(self) -> None:
+        await self.play(ATTENTION_CUE)
+
+    async def confirmed(self) -> None:
+        await self.play(CONFIRMED_CUE)
+
     async def failure(self) -> None:
         """The menu cannot be reached: two loud beeps, then "No connection" (BR-009), in the background.
 
@@ -140,7 +149,7 @@ class CuePlayer:
             return  # UC-016 BR-005: line 8 shows LOCKED
         await self.voice(LOCK_VOICES[locked])
 
-    async def announce(self, label: Sound, value: Sound) -> None:
+    async def announce(self, label: Sound | None, value: Sound | None) -> None:
         """BR-011: the label, then the value once the label has ended, in the background.
 
         The latest announcement wins: it cancels the previous one (whose value then never plays) and
@@ -206,8 +215,11 @@ class CuePlayer:
             return  # UC-016 BR-005: the beeps stay, the screen shows NO CONNECTION
         await self.voice(NO_CONNECTION_CUE)
 
-    async def _announce_sequence(self, label: Sound, value: Sound) -> None:
-        label_seconds = await self.voice(label, ANNOUNCE_GROUP)
-        if label_seconds > 0:
-            await self._sleep(label_seconds)
-        await self.voice(value, ANNOUNCE_GROUP)
+    async def _announce_sequence(self, label: Sound | None, value: Sound | None) -> None:
+        """Either may be None (UC-016 BR-016: the volume has no value line, `FORCE ALL` no label)."""
+        if label is not None:
+            label_seconds = await self.voice(label, ANNOUNCE_GROUP)
+            if label_seconds > 0 and value is not None:
+                await self._sleep(label_seconds)
+        if value is not None:
+            await self.voice(value, ANNOUNCE_GROUP)

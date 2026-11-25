@@ -6,6 +6,7 @@ MenuServicer over the fake flag service of test_pad_commands.
 
 import pytest
 
+from lib.types import Sound
 from services.menu.tests import test_pad_commands
 from services.menu.tests.test_pad_commands import failure_cues, pad
 
@@ -188,6 +189,30 @@ async def test_resume_never_brings_back_more_than_the_stop_left(servicer, flags)
     assert flags.values[LEVEL] == "standard"
     assert flags.values[GATE] == "off"
     assert flags.values[ENABLED] == "on"
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", br=["BR-012"])
+@pytest.mark.uc("UC-031", br=["BR-007"])
+@pytest.mark.parametrize(
+    ("state", "voice"), [("on", Sound.MENU_VOX_INTERVENTIONS_ON), ("off", Sound.MENU_VOX_INTERVENTIONS_OFF)]
+)
+async def test_switch_says_interventions_on_or_off(servicer, flags, state, voice):
+    flags.values[GATE] = "off" if state == "on" else "on"
+
+    await pad(servicer, "interventions_switch", state=state)
+
+    servicer.state_manager.audio.play_voice.assert_awaited_once_with(voice)
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", br=["BR-012"])
+async def test_a_refused_switch_says_nothing(servicer, flags):
+    flags.values[ENABLED] = "off"
+
+    await pad(servicer, "interventions_switch", state="on")
+
+    servicer.state_manager.audio.play_voice.assert_not_awaited()
 
 
 # --- a stale stop memory never raises the agent (review of #2753) --------------------------------

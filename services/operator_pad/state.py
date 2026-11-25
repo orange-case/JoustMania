@@ -46,6 +46,33 @@ def is_stopped(status: menu_pb2.GetMenuStatusResponse) -> bool:
     )
 
 
+AGENT_ON, AGENT_WATCH, AGENT_OFF, AGENT_UNKNOWN = "on", "watch", "off", "unknown"
+
+
+def agent_state(status: menu_pb2.GetMenuStatusResponse | None) -> str:
+    """UC-016 BR-011: `off` fully stopped (`enabled` off or level `none`, the stop's no-op test),
+    `watch` only the write gate closed, `on`, or `unknown` by BR-001 status line 3's rule."""
+    if (
+        status is None
+        or status.agent_enabled_state not in ENABLED_STATES
+        or status.agent_interventions_enabled_state not in ENABLED_STATES
+    ):
+        return AGENT_UNKNOWN
+    if not status.agent_enabled or status.agent_level == "none":
+        return AGENT_OFF
+    if status.agent_level not in AGENT_LEVELS:
+        return AGENT_UNKNOWN
+    return AGENT_WATCH if status.agent_interventions_enabled_state == "off" else AGENT_ON
+
+
+def pad_commands(status) -> frozenset[str]:
+    """services.md §3.1 `pad_commands`: what this menu understands (empty for an older menu)."""
+    try:
+        return frozenset(status.pad_commands) if status is not None else frozenset()
+    except AttributeError:
+        return frozenset()
+
+
 class MenuStatusReader:
     def __init__(self, menu_stub, timeout: float = STATUS_TIMEOUT_SECONDS, log_failures: bool = True) -> None:
         self._stub = menu_stub

@@ -174,7 +174,8 @@ async def test_events_are_fed_in_order_and_unplug_detaches(tmp_path):
     manager, _, controller = _manager(tmp_path, FakeBackend({dev.path: dev}), clock=FakeClock([5000, 5200]))
     assert await manager.attach()
     await asyncio.wait_for(manager.read_until_gone(), timeout=2)
-    assert [c.args for c in controller.on_code.await_args_list] == [(183, 1, 5000), (183, 0, 5200)]
+    assert [c.args for c in controller.accept.call_args_list] == [(183, 1, 5000), (183, 0, 5200)]
+    assert controller.finish.await_count == 2
     manager.detach()
     controller.detached.assert_called_once()
     assert dev.closed and not dev.grabbed
@@ -221,7 +222,7 @@ async def test_events_are_timed_by_the_monotonic_clock_not_the_realtime_evdev_ti
     manager, _, controller = _manager(tmp_path, FakeBackend({dev.path: dev}), clock=FakeClock([7000, 7100]))
     assert await manager.attach()
     await asyncio.wait_for(manager.read_until_gone(), timeout=2)
-    assert [c.args for c in controller.on_code.await_args_list] == [(189, 1, 7000), (189, 0, 7100)]
+    assert [c.args for c in controller.accept.call_args_list] == [(189, 1, 7000), (189, 0, 7100)]
 
 
 def test_default_clock_is_monotonic():
@@ -237,8 +238,8 @@ async def test_syn_dropped_resets_the_gestures_in_order(tmp_path):
     manager, _, controller = _manager(tmp_path, FakeBackend({dev.path: dev}), clock=FakeClock([1, 2]))
     assert await manager.attach()
     await asyncio.wait_for(manager.read_until_gone(), timeout=2)
-    names = [c[0] for c in controller.mock_calls if c[0] in ("on_code", "events_dropped")]
-    assert names == ["on_code", "events_dropped", "on_code"]
+    names = [c[0] for c in controller.mock_calls if c[0] in ("accept", "events_dropped")]
+    assert names == ["accept", "events_dropped", "accept"]
 
 
 @pytest.mark.uc("UC-015", flow="A4")
@@ -351,3 +352,86 @@ async def test_no_keymap_node_warns_once_and_again_after_a_successful_attach(tmp
     caplog.clear()
     assert not await manager.attach()
     assert len([w for w in _warnings(caplog) if "keymap key" in w]) == 1
+
+
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_k5_events_are_never_queued_behind_a_command_in_flight(tmp_path):
+    """A10 step 1: a K5 press reaches the controller while the previous key still waits for the menu."""
+    make_sysfs(tmp_path, {"event3": PAD})
+    events = [FakeEvent(183, 1, 1.0), FakeEvent(183, 0, 1.1), FakeEvent(190, 1, 1.2), FakeEvent(186, 1, 1.3)]
+    dev = FakeDevice("/dev/input/event3", events=events)
+    manager, _, controller = _manager(tmp_path, FakeBackend({dev.path: dev}), clock=FakeClock([1, 2, 3, 4]))
+    gate = asyncio.Event()
+    seen: list[int] = []
+
+    async def finish(accepted):
+        code, value = accepted
+        seen.append(code)
+        if (code, value) == (183, 0):
+            await gate.wait()  # the K1 release's command, waiting for the menu
+
+    controller.accept.side_effect = lambda code, value, *_args, **_kwargs: (code, value)
+    controller.finish.side_effect = finish
+    controller.is_priority.side_effect = lambda code: code == 190
+    assert await manager.attach()
+    reader = asyncio.create_task(manager.read_until_gone())
+    for _ in range(100):
+        if 190 in seen:
+            break
+        await asyncio.sleep(0.005)
+    assert seen == [183, 183, 190]  # K5 at once; the knob turn after it still waits its turn
+    gate.set()
+    await asyncio.wait_for(reader, timeout=2)
+    assert seen == [183, 183, 190, 186]
+
+
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_k5_events_finish_in_order_on_their_own_lane(tmp_path):
+    """MAJOR 3: a K5 release never overtakes its press (one ordered K5 lane, not a task per event)."""
+    make_sysfs(tmp_path, {"event3": PAD})
+    events = [FakeEvent(190, 1, 1.0), FakeEvent(190, 0, 1.1)]
+    dev = FakeDevice("/dev/input/event3", events=events)
+    manager, _, controller = _manager(tmp_path, FakeBackend({dev.path: dev}), clock=FakeClock([1, 2]))
+    gate = asyncio.Event()
+    seen: list[tuple[int, int]] = []
+
+    async def finish(accepted):
+        seen.append(accepted)
+        if accepted == (190, 1):
+            await gate.wait()  # the press's status read, slow
+
+    controller.accept.side_effect = lambda code, value, *_args, **_kwargs: (code, value)
+    controller.finish.side_effect = finish
+    controller.is_priority.side_effect = lambda code: code == 190
+    assert await manager.attach()
+    reader = asyncio.create_task(manager.read_until_gone())
+    for _ in range(20):
+        await asyncio.sleep(0.005)
+    assert seen == [(190, 1)]
+    gate.set()
+    await asyncio.wait_for(reader, timeout=2)
+    assert seen == [(190, 1), (190, 0)]
+
+
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_syn_dropped_is_ordered_with_the_k5_events(tmp_path):
+    """BLOCKER 1: SYN_DROPPED is applied at arrival, between the K5 events around it."""
+    make_sysfs(tmp_path, {"event3": PAD})
+    events = [FakeEvent(190, 1, 1.0), FakeEvent(device_module.SYN_DROPPED, 0, 1.1, type_=0), FakeEvent(190, 0, 1.2)]
+    dev = FakeDevice("/dev/input/event3", events=events)
+    manager, _, controller = _manager(tmp_path, FakeBackend({dev.path: dev}), clock=FakeClock([1, 2]))
+    controller.is_priority.side_effect = lambda code: code == 190
+    assert await manager.attach()
+    await asyncio.wait_for(manager.read_until_gone(), timeout=2)
+    names = [c[0] for c in controller.mock_calls if c[0] in ("accept", "events_dropped")]
+    assert names == ["accept", "events_dropped", "accept"]
+
+
+@pytest.mark.uc("UC-016", br=["BR-011", "BR-016"])
+async def test_unresolved_pad_nodes_count_as_possible_extra_pads(tmp_path):
+    """Two nodes whose USB device sysfs cannot tell: possibly two pads, so no page binding."""
+    make_sysfs(tmp_path, {"event3": PAD, "event4": PAD})
+    devices = {f"/dev/input/event{n}": FakeDevice(f"/dev/input/event{n}") for n in (3, 4)}
+    manager, _, controller = _manager(tmp_path, FakeBackend(devices))
+    assert await manager.attach()
+    assert controller.pad_devices == 2

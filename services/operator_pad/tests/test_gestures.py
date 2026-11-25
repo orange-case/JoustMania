@@ -4,6 +4,7 @@ import pytest
 
 from services.operator_pad.config import Timings
 from services.operator_pad.gestures import (
+    AGENT_HOLD,
     CANCEL,
     HOLD,
     KNOB,
@@ -22,7 +23,7 @@ from services.operator_pad.gestures import (
     KeyEvent,
 )
 
-TIMINGS = Timings(knob_events_per_step=1)  # tap 400 ms; hold K3 1000, K4 1500, K8 3000; one event = one step
+TIMINGS = Timings(knob_events_per_step=1)  # tap 400; K5 1000, K8 1500, K4 lock 3000, reset 1000; 1 event = 1 step
 
 
 class Pad:
@@ -66,16 +67,19 @@ def test_tap_within_tap_limit():
     assert pad.at(400).release("K1") == [Gesture(TAP, "K1", held_ms=400)]
 
 
-@pytest.mark.uc("UC-015", flow="main", br=["BR-007", "BR-011"], steps=[6, 7])
-@pytest.mark.parametrize(("key", "hold_ms"), [("K3", 1000), ("K4", 1500)])
-def test_hold_from_the_keys_hold_time(key, hold_ms):
+@pytest.mark.uc("UC-015", flow="main", br=["BR-007", "BR-011"], steps=[7])
+@pytest.mark.uc("UC-016", br=["BR-011"])
+def test_k8_hold_from_its_hold_time_after_the_guard_band():
     pad = Pad()
-    pad.at(0).press(key)
-    assert pad.at(hold_ms).release(key) == [Gesture(HOLD, key, held_ms=hold_ms)]
+    pad.at(0).press("K8")
+    assert pad.at(1650).release("K8") == [Gesture(HOLD, "K8", held_ms=1650)]
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-007"])
-@pytest.mark.parametrize(("key", "release_at"), [("K3", 401), ("K3", 999), ("K4", 1499), ("K1", 401), ("K6", 2000)])
+@pytest.mark.parametrize(
+    ("key", "release_at"),
+    [("K5", 401), ("K5", 999), ("K8", 1499), ("K8", 1649), ("K1", 401), ("K6", 999), ("K2", 1149)],
+)
 def test_release_between_tap_limit_and_hold_time_cancels(key, release_at):
     pad = Pad()
     pad.at(0).press(key)
@@ -84,21 +88,21 @@ def test_release_between_tap_limit_and_hold_time_cancels(key, release_at):
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-007"])
 def test_timings_come_from_the_caller():
-    pad = Pad(Timings(tap_ms=100, hold_ms={"K3": 300, "K4": 500, "K8": 900}))
+    pad = Pad(Timings(tap_ms=100, hold_agent_ms=300, hold_end_ms=500, hold_lock_ms=2000, hold_reset_ms=200))
     pad.at(0).press("K1")
     assert pad.at(150).release("K1")[0].kind == CANCEL
-    pad.at(1000).press("K3")
-    assert pad.at(1300).release("K3")[0].kind == HOLD
+    pad.at(1000).press("K8")
+    assert pad.at(1700).release("K8")[0].kind == HOLD
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005", "BR-007"], steps=[4, 5])
 def test_knob_turn_in_a_layer_marks_the_key_used_and_commits_on_release():
     pad = Pad()
-    pad.at(0).press("K2")
+    pad.at(0).press("K6")
     assert [g.kind for g in pad.turn("B")] == [LAYER_STEP]  # a preview step only: nothing commits (BR-017)
     pad.turn("B")
     pad.turn("A")
-    assert pad.at(100).release("K2") == [Gesture(LAYER, "K2", steps=1, held_ms=100)]
+    assert pad.at(100).release("K6") == [Gesture(LAYER, "K6", steps=1, held_ms=100)]
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-007"], steps=[4])
@@ -114,10 +118,10 @@ def test_k1_with_a_turn_does_not_start_a_game():
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005"], steps=[5])
 def test_layer_turns_that_net_to_zero_commit_zero_steps():
     pad = Pad()
-    pad.at(0).press("K5")
+    pad.at(0).press("K3")
     pad.turn("B")
     pad.turn("A")
-    assert pad.at(300).release("K5") == [Gesture(LAYER, "K5", steps=0, held_ms=300)]
+    assert pad.at(300).release("K3") == [Gesture(LAYER, "K3", steps=0, held_ms=300)]
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-006"], steps=[8])
@@ -149,14 +153,14 @@ def test_knob_press_in_a_layer_is_bound_on_press_even_when_the_layer_key_goes_up
 def test_chord_blocks_every_key_until_all_keys_are_up():
     pad = Pad()
     pad.at(0).press("K2")
-    pad.at(10).press("K5")
+    pad.at(10).press("K7")
     pad.turn("B")
     assert pad.press("KNOB_PRESS") == []
     pad.release("KNOB_PRESS")
     assert pad.at(100).release("K2") == []
     pad.at(110).press("K6")  # K5 still down: still a chord
     assert pad.at(120).release("K6") == []
-    assert pad.at(1500).release("K5") == []
+    assert pad.at(1500).release("K7") == []
     assert pad.out == []
     # all keys up: the next tap works again
     pad.at(2000).press("K2")
@@ -164,47 +168,57 @@ def test_chord_blocks_every_key_until_all_keys_are_up():
 
 
 @pytest.mark.uc("UC-015", flow="A6", br=["BR-011"])
-def test_k8_hold_locks_and_only_the_k3_hold_and_the_unlock_pass():
+@pytest.mark.uc("UC-016", br=["BR-011", "BR-015"])
+def test_k4_hold_locks_and_only_the_k5_hold_and_the_unlock_pass():
     pad = Pad()
-    pad.at(0).press("K8")
-    assert pad.at(3000).release("K8") == [Gesture(LOCK, "K8", held_ms=3000, locked=True)]
+    pad.at(0).press("K4")
+    assert pad.at(3150).release("K4") == [Gesture(LOCK, "K4", held_ms=3150, locked=True)]
     assert pad.machine.locked
     pad.at(4000).press("K1")
     assert pad.at(4100).release("K1") == []
     assert pad.turn("B") == []
     assert pad.press("KNOB_PRESS") == []
     pad.release("KNOB_PRESS")
-    pad.at(5000).press("K2")
+    pad.at(5000).press("K6")
     pad.turn("B")
-    assert pad.at(5100).release("K2") == []
-    pad.at(6000).press("K3")
-    assert pad.at(6100).release("K3") == []  # tap: nothing while locked
-    pad.at(7000).press("K3")
-    assert pad.at(8000).release("K3") == [Gesture(HOLD, "K3", held_ms=1000, locked=True)]
+    assert pad.at(5100).release("K6") == []
+    pad.at(6000).press("K5")
+    assert pad.at(6100).release("K5") == []  # tap: nothing while locked
+    pad.at(7000).press("K8")
+    assert pad.at(8700).release("K8") == []  # no force-end while locked
     pad.at(9000).press("K4")
-    assert pad.at(11000).release("K4") == []
-    pad.at(12000).press("K8")
-    assert pad.at(15000).release("K8") == [Gesture(LOCK, "K8", held_ms=3000, locked=False)]
+    assert pad.at(10500).release("K4") == []  # no reset stage while locked
+    pad.at(12000).press("K5")
+    assert pad.at(13000).release("K5") == [
+        Gesture(AGENT_HOLD, "K5", held_ms=1000, locked=True, clean=False),
+        Gesture(HOLD, "K5", held_ms=1000, locked=True, clean=False),
+    ]
+    pad.at(14000).press("K4")
+    assert pad.at(17150).release("K4") == [Gesture(LOCK, "K4", held_ms=3150, locked=False)]
     assert not pad.machine.locked
 
 
-@pytest.mark.uc("UC-015", flow="A6", br=["BR-011"])
-def test_k8_tap_is_reserved_and_a_short_hold_does_not_lock():
+@pytest.mark.uc("UC-015", flow="main", br=["BR-011"], steps=[1, 7])
+@pytest.mark.uc("UC-016", br=["BR-011"])
+def test_k8_tap_starts_its_hold_window_ends_at_the_lock_time_and_never_locks():
+    """O11: the old 3 s lock grip on K8 cancels; it never force-ends or locks."""
     pad = Pad()
     pad.at(0).press("K8")
     assert pad.at(100).release("K8") == [Gesture(TAP, "K8", held_ms=100)]
     pad.at(200).press("K8")
-    assert pad.at(2000).release("K8")[0].kind == CANCEL
+    assert pad.at(3199).release("K8")[0].kind == HOLD
+    pad.at(4000).press("K8")
+    assert pad.at(7000).release("K8") == [Gesture(CANCEL, "K8", held_ms=3000)]
     assert not pad.machine.locked
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-007"])
 def test_auto_repeat_is_ignored():
     pad = Pad()
-    pad.at(0).press("K4")
+    pad.at(0).press("K8")
     for t in range(500, 1500, 33):
-        assert pad.at(t).ev("K4", REPEAT) == []
-    assert pad.at(1600).release("K4") == [Gesture(HOLD, "K4", held_ms=1600)]
+        assert pad.at(t).ev("K8", REPEAT) == []
+    assert pad.at(1700).release("K8") == [Gesture(HOLD, "K8", held_ms=1700)]
     assert pad.ev("K2", REPEAT) == []
 
 
@@ -249,9 +263,9 @@ def test_disconnect_mid_hold_resets_the_gesture():
 @pytest.mark.uc("UC-015", flow="main", br=["BR-007"])
 def test_knob_turn_while_a_non_layer_key_is_down_does_nothing():
     pad = Pad()
-    pad.at(0).press("K4")
+    pad.at(0).press("K8")
     assert pad.turn("B") == []
-    assert pad.at(1500).release("K4") == [Gesture(HOLD, "K4", held_ms=1500)]
+    assert pad.at(1700).release("K8") == [Gesture(HOLD, "K8", held_ms=1700)]
 
 
 # --- smooth knob: events per step (BR-004, BR-005) ----------------------------------------------
@@ -294,26 +308,26 @@ def test_the_volume_remainder_is_dropped_after_the_commit_pause():
 @pytest.mark.uc("UC-015", flow="main", br=["BR-004", "BR-005"], steps=[5])
 def test_a_layer_counts_net_steps_from_events_and_drops_the_remainder_on_release():
     pad = Pad(N4)
-    pad.at(0).press("K2")
+    pad.at(0).press("K6")
     for i in range(25):
         pad.at(10 + i * 10).turn("B")
-    assert pad.at(400).release("K2") == [Gesture(LAYER, "K2", steps=6, held_ms=400)]
-    pad.at(500).press("K2")
+    assert pad.at(400).release("K6") == [Gesture(LAYER, "K6", steps=6, held_ms=400)]
+    pad.at(500).press("K6")
     for i in range(3):
         pad.at(510 + i * 10).turn("B")
-    assert pad.at(600).release("K2") == [Gesture(LAYER, "K2", steps=0, held_ms=100)]  # nothing carried over
+    assert pad.at(600).release("K6") == [Gesture(LAYER, "K6", steps=0, held_ms=100)]  # nothing carried over
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-004", "BR-005"], steps=[5])
 def test_a_direction_change_resets_the_layer_accumulator():
     pad = Pad(N4)
-    pad.at(0).press("K2")
+    pad.at(0).press("K6")
     for _ in range(3):
         pad.turn("B")
     for _ in range(3):
         pad.turn("A")
     pad.turn("A")
-    assert pad.at(100).release("K2") == [Gesture(LAYER, "K2", steps=-1, held_ms=100)]
+    assert pad.at(100).release("K6") == [Gesture(LAYER, "K6", steps=-1, held_ms=100)]
 
 
 @pytest.mark.uc("UC-015", flow="A4", br=["BR-005"], steps=[8])
@@ -327,24 +341,24 @@ def test_reset_drops_the_volume_remainder():
 @pytest.mark.uc("UC-015", flow="A4", br=["BR-005"], steps=[5])
 def test_reset_drops_the_layer_remainder():
     pad = Pad(N4)
-    pad.at(0).press("K2")
+    pad.at(0).press("K6")
     for _ in range(3):
         pad.turn("B")
     pad.machine.reset()
-    pad.at(10).press("K2")
+    pad.at(10).press("K6")
     pad.turn("B")
-    assert pad.at(50).release("K2") == [Gesture(LAYER, "K2", steps=0, held_ms=40)]
+    assert pad.at(50).release("K6") == [Gesture(LAYER, "K6", steps=0, held_ms=40)]
 
 
 @pytest.mark.uc("UC-015", flow="A4", br=["BR-005", "BR-007"], steps=[5])
 def test_a_repress_of_a_down_layer_key_drops_its_remainder():
     pad = Pad(N4)
-    pad.at(0).press("K2")
+    pad.at(0).press("K6")
     for _ in range(3):
         pad.turn("B")
-    pad.at(10).press("K2")  # the release was lost
+    pad.at(10).press("K6")  # the release was lost
     pad.turn("B")
-    assert pad.at(50).release("K2") == [Gesture(LAYER, "K2", steps=0, held_ms=40)]
+    assert pad.at(50).release("K6") == [Gesture(LAYER, "K6", steps=0, held_ms=40)]
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005", "BR-006"], steps=[8])
@@ -360,9 +374,9 @@ def test_a_knob_press_mute_drops_the_volume_remainder():
 def test_a_short_layer_interaction_drops_the_volume_remainder():
     pad = Pad(N4)
     assert _volume_steps(pad, "B", 3) == []
-    pad.at(30).press("K2")
+    pad.at(30).press("K6")
     pad.turn("B")
-    pad.at(60).release("K2")
+    pad.at(60).release("K6")
     assert _volume_steps(pad, "B", 1, t0=80) == []  # 80 ms after the last volume turn: no pause, still dropped
 
 
@@ -372,19 +386,19 @@ def test_a_short_layer_interaction_drops_the_volume_remainder():
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005", "BR-017"], steps=[5])
 def test_each_completed_layer_step_emits_the_running_net_total():
     pad = Pad(N4)
-    pad.at(0).press("K2")
+    pad.at(0).press("K6")
     got = []
     for _ in range(8):
         got += pad.turn("B")
     for _ in range(4):  # a direction change restarts the count: one step back after 4 events
         got += pad.turn("A")
     assert got == [
-        Gesture(LAYER_STEP, "K2", steps=1),
-        Gesture(LAYER_STEP, "K2", steps=2),
-        Gesture(LAYER_STEP, "K2", steps=1),
+        Gesture(LAYER_STEP, "K6", steps=1),
+        Gesture(LAYER_STEP, "K6", steps=2),
+        Gesture(LAYER_STEP, "K6", steps=1),
     ]
-    release = pad.at(300).release("K2")
-    assert release == [Gesture(LAYER, "K2", steps=1, held_ms=300)]  # the release commits the last preview total
+    release = pad.at(300).release("K6")
+    assert release == [Gesture(LAYER, "K6", steps=1, held_ms=300)]  # the release commits the last preview total
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-005", "BR-017"], steps=[5])
@@ -400,19 +414,19 @@ def test_a_partial_step_emits_no_layer_step():
 @pytest.mark.uc("UC-015", flow="main", br=["BR-007", "BR-017"], steps=[5])
 def test_no_layer_step_in_a_chord_while_locked_or_with_a_non_layer_key():
     pad = Pad()
-    pad.at(0).press("K2")
-    pad.at(10).press("K5")
+    pad.at(0).press("K6")
+    pad.at(10).press("K7")
     assert pad.turn("B") == []  # chord
     assert pad.machine.preview_key() is None
-    pad.release("K2")
-    pad.release("K5")
+    pad.release("K6")
+    pad.release("K7")
     for key in ("K4", "K8"):
         pad.press(key)
         assert pad.turn("B") == []
         pad.release(key)
-    pad.at(5000).press("K8")
-    pad.at(8100).release("K8")  # locked
-    pad.press("K2")
+    pad.at(5000).press("K4")
+    pad.at(8200).release("K4")  # locked
+    pad.press("K6")
     assert pad.turn("B") == []
     assert pad.machine.preview_key() is None
 
@@ -552,8 +566,8 @@ def test_turn_with_k4_or_k8_down_does_nothing_and_a_layer_key_keeps_its_layer():
     pad.press("K4")
     assert pad.turn("B") == []
     pad.release("K4")
-    pad.at(5000).press("K2")
-    assert pad.turn("B") == [Gesture(LAYER_STEP, "K2", steps=1)]
+    pad.at(5000).press("K6")
+    assert pad.turn("B") == [Gesture(LAYER_STEP, "K6", steps=1)]
 
 
 @pytest.mark.uc("UC-016", flow="A1", br=["BR-008"])
@@ -573,5 +587,5 @@ def test_default_timings_one_detent_is_one_step():
     assert pad.turn("B") == [Gesture(KNOB_TURN, KNOB, steps=1)]
     pages = PagesPad(Timings())
     assert pages.turn("A") == [Gesture(PAGE_STEP, KNOB, steps=-1)]
-    pages.at(1000).press("K2")
-    assert pages.turn("B") == [Gesture(LAYER_STEP, "K2", steps=1)]
+    pages.at(1000).press("K6")
+    assert pages.turn("B") == [Gesture(LAYER_STEP, "K6", steps=1)]

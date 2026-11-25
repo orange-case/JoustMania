@@ -8,6 +8,16 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from services.operator_pad import page_keys
+from services.operator_pad.pages import PAGES
+
+# UC-016 BR-012: the shield mode is GAME row 2 (K3); sensitivity HOME row 3 (K6), teams GAME row 1 (K1).
+SHIELD_ROW = page_keys.binding("K3", PAGES.index("GAME"))
+ROWS = {
+    "sensitivity": page_keys.binding("K6", PAGES.index("HOME")),
+    "num_teams": page_keys.binding("K1", PAGES.index("GAME")),
+}
+
 from lib.setting_ladders import SHIELD_KNOB_LADDER
 from lib.types import Sound
 from proto import game_coordinator_pb2, menu_pb2
@@ -73,14 +83,19 @@ def test_k6_tap_without_a_turn_is_still_the_instructions_tap():
 @pytest.mark.uc("UC-015", flow="main", br=["BR-018", "BR-005"], steps=[9])
 @pytest.mark.parametrize(("steps", "direction", "count"), [(1, "up", "1"), (2, "up", "2"), (-1, "down", "1")])
 async def test_k6_release_commits_one_shield_step_setting(actions, menu, steps, direction, count):
-    await actions.dispatch(Gesture(LAYER, "K6", steps=steps), status(operator_settings={SHIELD: "trigger"}))
+    await actions.dispatch(
+        Gesture(LAYER, "K3", steps=steps), status(operator_settings={SHIELD: "trigger"}), None, SHIELD_ROW
+    )
     assert sent(menu) == [{"command": "step_setting", "option": SHIELD, "direction": direction, "steps": count}]
 
 
 @pytest.mark.uc("UC-015", flow="A1", br=["BR-018", "BR-009"], steps=[9])
 async def test_k6_release_while_a_game_is_live_is_refused_and_sends_nothing(actions, menu, cues):
     _action, result = await actions.dispatch(
-        Gesture(LAYER, "K6", steps=1), status(lifecycle_live=True, operator_settings={SHIELD: "instant"})
+        Gesture(LAYER, "K3", steps=1),
+        status(lifecycle_live=True, operator_settings={SHIELD: "instant"}),
+        None,
+        SHIELD_ROW,
     )
     assert result == "refused"
     menu.ProcessInput.assert_not_awaited()
@@ -91,7 +106,9 @@ async def test_k6_release_while_a_game_is_live_is_refused_and_sends_nothing(acti
 @pytest.mark.uc("UC-016", br=["BR-007"])
 @pytest.mark.parametrize(("start", "steps"), [("hold", 4), ("automatic", -8), ("instant", 12)])
 async def test_k6_full_turn_sends_nothing_and_plays_no_cue(actions, menu, cues, start, steps):
-    result = await actions.dispatch(Gesture(LAYER, "K6", steps=steps), status(operator_settings={SHIELD: start}))
+    result = await actions.dispatch(
+        Gesture(LAYER, "K3", steps=steps), status(operator_settings={SHIELD: start}), None, SHIELD_ROW
+    )
     assert result == ("step_setting", "noop")
     menu.ProcessInput.assert_not_awaited()
     cues.limit.assert_not_awaited()
@@ -104,7 +121,9 @@ async def test_k6_full_turn_sends_nothing_and_plays_no_cue(actions, menu, cues, 
 async def test_k6_full_turn_from_an_unread_start_is_left_to_the_menus_no_op(actions, menu, cues):
     """Without the operator value the pad cannot tell a full turn; the menu answers `ok` and the unchanged value."""
     menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=True, error="ok", value="hold")
-    result = await actions.dispatch(Gesture(LAYER, "K6", steps=4), status(operator_settings={SHIELD: ""}))
+    result = await actions.dispatch(
+        Gesture(LAYER, "K3", steps=4), status(operator_settings={SHIELD: ""}), None, SHIELD_ROW
+    )
     assert result == ("step_setting", "ok")
     assert sent(menu) == [{"command": "step_setting", "option": SHIELD, "direction": "up", "steps": "4"}]
     cues.limit.assert_not_awaited()
@@ -229,7 +248,9 @@ async def test_preview_down_to_automatic_speaks_the_shared_automatic_line(key, o
 @pytest.mark.uc("UC-015", flow="main", br=["BR-018", "BR-005"], steps=[4, 5])
 @pytest.mark.parametrize(("key", "option"), [("K2", "sensitivity"), ("K5", "num_teams")])
 async def test_release_to_automatic_sends_one_step_setting(actions, menu, key, option):
-    await actions.dispatch(Gesture(LAYER, key, steps=-9), status(operator_settings={option: "slow"}))
+    await actions.dispatch(
+        Gesture(LAYER, key, steps=-9), status(operator_settings={option: "slow"}), None, ROWS[option]
+    )
     assert sent(menu) == [{"command": "step_setting", "option": option, "direction": "down", "steps": "9"}]
 
 

@@ -54,7 +54,12 @@ def test_timings_are_read_at_use_time_with_defaults_for_bad_values():
     config = PadConfig(_client(values))
     timings = config.timings()
     assert timings.tap_ms == 250
-    assert timings.hold_ms == {"K3": 1000, "K4": 1500, "K8": 3000}
+    assert (timings.hold_agent_ms, timings.hold_end_ms, timings.hold_lock_ms, timings.hold_reset_ms) == (
+        1000,
+        1500,
+        3000,
+        1000,
+    )
     values["operator_pad.tap_ms"] = 300
     assert config.timings().tap_ms == 300
 

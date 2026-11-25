@@ -47,6 +47,7 @@ from lib.voice_prompts import (  # re-exported: admin mode imports the voice tab
     AUTOMATIC_VOICE,
     FORCE_ALL_START_VOICES,
     INSTRUCTIONS_VOICES,
+    INTERVENTIONS_VOICES,
     NUM_TEAMS_VOICES,
     SENSITIVITY_VOICES,
     SHIELD_ACTIVATION_VOICES,
@@ -880,6 +881,10 @@ class SettingsOps:
             elif option == SHIELD_ACTIVATION_FLAG:
                 await self.show_shield_mode_on_lobby(variant)
                 voice = SHIELD_ACTIVATION_VOICES.get(variant)
+                if voice is not None:
+                    await audio.play_voice(voice)
+            elif option == "interventions_switch":
+                voice = INTERVENTIONS_VOICES.get(variant)  # UC-016 BR-012, UC-031 BR-007
                 if voice is not None:
                     await audio.play_voice(voice)
             elif option == "agent_switch":

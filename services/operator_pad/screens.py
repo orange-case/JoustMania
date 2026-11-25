@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from lib import setting_ladders
 from lib.setting_ladders import AUTOMATIC, KNOB_LADDERS, VOLUME_LADDER, preview_value
-from services.operator_pad.state import AGENT_LEVELS, ENABLED_STATES, is_stopped
+from services.operator_pad.state import AGENT_OFF, AGENT_UNKNOWN, AGENT_WATCH, agent_state
 
 WIDTH = 21
 LINES = 8
@@ -73,6 +73,7 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
     "decision.backend": {"rules": "RULES", "claude": "CLAUDE", "openai": "OPENAI", "jev": "JEV"},
     "game_instructions": {"on": "ON", "off": "OFF"},
     "force_all_start": {"on": "ON", "off": "OFF"},
+    "interventions": {"on": "ON", "off": "OFF"},
 }
 
 # BR-006 mode table: the full name (`pretty_name` in capitals without a leading `JOUST `, at most 14
@@ -112,6 +113,8 @@ SETTING_LABELS = {
     "decision.backend": "BACKEND",
     "game_instructions": "INSTRUCTIONS",
     "audio_volume.master": "VOLUME",
+    "force_all_start": "FORCE ALL",
+    "interventions": "INTERVENTIONS",
 }
 
 # UC-015 BR-009 words for a command that ended without a commit (UC-016 A3).
@@ -175,18 +178,14 @@ def _knob_value(status, option: str, effective: str | None) -> str:
 
 
 def agent_text(status) -> str:
-    """``OFF`` when UC-015 BR-002 counts the agent as stopped, ``?`` by BR-013's unknown rules, else the level."""
-    if (
-        status is None
-        or status.agent_enabled_state not in ENABLED_STATES
-        or status.agent_interventions_enabled_state not in ENABLED_STATES
-    ):
+    """UC-016 BR-011 agent states: ``OFF``, ``WATCH`` / ``ON`` and the level, ``?`` by BR-013's unknown rules."""
+    state = agent_state(status)
+    if state == AGENT_UNKNOWN:
         return UNKNOWN
-    if is_stopped(status):
+    if state == AGENT_OFF:
         return "OFF"
-    if status.agent_level not in AGENT_LEVELS:
-        return UNKNOWN
-    return f"ON {short('agent_level', status.agent_level)}"
+    word = "WATCH" if state == AGENT_WATCH else "ON"
+    return f"{word} {short('agent_level', status.agent_level)}"
 
 
 def tap_value(option: str, status) -> str:
@@ -273,16 +272,24 @@ def _at_end(option: str, press_status, net_steps: int) -> bool:
     return new.value is not None and (new.at_limit or new.value == before.value)
 
 
-def setting_screen(option: str, press_status, net_steps: int, *, lobby_only: bool) -> Screen:
-    """BR-001 setting screen: NOW from the press read, NEW the value the release would commit."""
+def setting_screen(
+    option: str, press_status, net_steps: int, *, lobby_only: bool, plan=None, confirmed: bool = False
+) -> Screen:
+    """BR-001 setting screen: NOW from the press read, NEW the value the release would commit.
+
+    ``plan`` (UC-016 BR-014, `page_keys.Plan`): NOW and NEW of a page key, refused or a raise to confirm.
+    """
     label = SETTING_LABELS.get(option, option.upper())
-    now = short(option, preview_value(option, press_status, 0).value)
-    if lobby_only and press_status is not None and press_status.lifecycle_live:
+    now_value = plan.now if plan is not None else preview_value(option, press_status, 0).value
+    now = short(option, now_value)
+    if (lobby_only and press_status is not None and press_status.lifecycle_live) or (plan is not None and plan.refused):
         # A4: no new value; the release is refused.
         return Screen.of([label, "", f"NOW {now}", "", "", "", "", NOT_POSSIBLE])
-    new_value = preview_value(option, press_status, net_steps).value
+    new_value = plan.new if plan is not None else preview_value(option, press_status, net_steps).value
     last = "RELEASE TO SET"
-    if _at_end(option, press_status, net_steps):
+    if plan is not None and plan.raises and not confirmed:
+        last = PRESS_TO_CONFIRM
+    elif _at_end(option, press_status, net_steps):
         last = MAXIMUM if net_steps > 0 else MINIMUM
     return Screen.of(
         [label, "", f"NOW {now}", "", f"NEW {short(option, new_value)}", _ladder_line(option, new_value), "", last]
@@ -298,6 +305,27 @@ def volume_screen(variant: str | None, *, limit: str | None = None) -> Screen:
     bar = " ".join("###" if i <= index else "..." for i in range(len(VOLUME_LADDER)))
     last = "MUTED" if variant == "mute" else limit or ""
     return Screen.of(["VOLUME", "", short("audio_volume.master", variant), "", bar, "", "", last])
+
+
+# --- page keys (UC-016 BR-013, BR-015, BR-016: protocol 1's 8-line layout) ---------------------
+
+RESET_Q, PRESS_KNOB, CONFIRMED = "RESET?", "PRESS KNOB", "CONFIRMED"
+RELEASE_TO_RESET, PRESS_TO_CONFIRM = "RELEASE TO RESET", "PRESS TO CONFIRM"
+TRANSITION_TEXT = "AGENT IS K5"
+
+
+def reset_hint(refused: bool, awaiting: bool) -> str:
+    return NOT_POSSIBLE if refused else (PRESS_TO_CONFIRM if awaiting else RELEASE_TO_RESET)
+
+
+def reset_screen(label: str, option: str, now: str | None, new: str | None, hint: str) -> Screen:
+    return Screen.of([label, "", f"NOW {short(option, now)}", "", f"NEW {short(option, new)}", "", "", hint])
+
+
+def lock_screen(locked: bool) -> Screen:
+    """BR-015: the K4 hold past `operator_pad.hold_lock_ms`; ``locked`` is the state now (it unlocks)."""
+    word = "UNLOCK" if locked else "LOCK"
+    return Screen.of(["PAD", "", f"{word}?", "", "", "", "", f"RELEASE TO {word}"])
 
 
 def result_screen(label: str, text: str) -> Screen:

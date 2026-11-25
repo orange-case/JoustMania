@@ -161,37 +161,23 @@ The stage Pi sets `DEPLOYMENT_ENVIRONMENT=production` in `.env.local` (#2646): i
 `deployment.environment` on every service and the collector, which the gateway export (#2571) filters on. Unset, it
 is `development` (local and CI). Recreate the stack after changing it.
 
-Operator pad keys on stage (short form; the full table and rules are in [UC-015](use_cases/UC-015.md) BR-016 and BR-011).
-"Knob" means: hold the key, turn the knob, release the key to commit.
-
-| F key | Pad key | Tap | Hold | Knob |
-|---|---|---|---|---|
-| F13 | K1 | start a game (lobby) | | choose the mode (voice + colour pulse on the lobby controllers) |
-| F14 | K2 | announce sensitivity | | sensitivity (lobby) |
-| F18 | K3 | announce agent status | 1 s: stop / resume the agent | intervention level |
-| F19 | K4 | | 1.5 s: force-end (game) / force-start (lobby) | |
-| F20 | K5 | announce teams | | number of teams (lobby) |
-| F21 | K6 | toggle spoken instructions (lobby) | | |
-| F22 | K7 | announce backend | | decision backend |
-| F23 | K8 | reserved | 3 s: lock / unlock the pad | |
-| F15 | knob press | mute / unmute | | |
-| F16 / F17 | knob left / right | volume down / up (no key held) | | |
-
-Planned (#2747, not built yet; [UC-016](use_cases/UC-016.md) BR-011 to BR-016): the page keys replace the table above,
-screen or not. The keys follow the screen rows (row 1 K1 / K2, row 2 K3 / K4, row 3 K6 / K7; without a screen the
-`HOME` rows: mode, volume, sensitivity); the F keys stay.
+Operator pad keys on stage (short form; the full rules are in [UC-016](use_cases/UC-016.md) BR-011 to BR-016,
+the F keys in [UC-015](use_cases/UC-015.md) BR-016). The keys follow the screen rows (row 1 K1 / K2, row 2 K3 / K4,
+row 3 K6 / K7); without a screen they act on the `HOME` rows: mode, volume, sensitivity. "Knob" means: hold the
+key, turn the knob, release the key to commit.
 
 | Pad key | Tap | Hold | Knob |
 |---|---|---|---|
 | K1, K3, K6 | show the row's value | | change the row's setting (a raise of the agent: press the knob before release) |
-| K2, K4, K7 | show the row's default | 1 s: reset the row to its default | |
+| K2, K4, K7 | show the row's default | 1 s: reset the row to its default | (press: confirm a raise) |
 | K4 | | 3 s: lock / unlock the pad | |
 | K5 | show the agent's state | 1 s: stop the agent (fires while held, whatever else is down) / resume a stopped one (on release) | |
 | K8 | start a game (lobby) | 1.5 s to 3 s: force-end (game) / force-start (lobby); 3 s or more: cancelled | |
 | knob | press: mute / unmute | | turn alone: next page (volume without pages); press and turn: volume |
 
-Old grips during the change-over: K3 held 1 s without a turn no longer stops the agent (a distinct cue, the screen
-says `AGENT IS K5`); K8 held 3 s no longer locks (cancelled); K4 held 1.5 s is the row 2 reset, no longer the end.
+Old grips during the change-over (the first layout of UC-015): K3 held 1 s without a turn no longer stops the
+agent (the unknown-key sound, the screen says `AGENT IS K5`); K8 held 3 s no longer locks (cancelled); K4 held
+1.5 s is the row 2 reset, no longer the end; K1 tapped no longer starts a game (K8 does).
 
 Cut-off runs (power loss, ssh hang-up) and manual recovery:
 
