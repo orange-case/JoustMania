@@ -314,7 +314,7 @@ in #2729, 7 days (VictoriaMetrics retention) after the first release that contai
 Content capture: `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.output.messages` only when
 `decision.capture_content` is on (default off; on in `ci/`), decide backends only, 16 KiB per part
 (`services/agent/decide/llmio/genai.go`). Not gated: the retro span always carries the capped prompt in
-`llm.retro.user`, and the system prompt is logged once per SHA (`agent.llm.system_prompt`) (D-T8); the once-per-SHA seen-sets (this and `agent.llm.retro_response`) are LRU-capped at 1024 fingerprints each, so an evicted SHA is logged again if it recurs (#2324).
+`llm.retro.user`, and the system prompt is logged once per SHA (`agent.llm.system_prompt`) (#2838); the once-per-SHA seen-sets (this and `agent.llm.retro_response`) are LRU-capped at 1024 fingerprints each, so an evicted SHA is logged again if it recurs (#2324).
 
 Metrics `gen_ai.client.operation.duration` (s) and `gen_ai.client.token.usage` come from the decide backends
 (claude, openai, jev; semconv advisory buckets) and from the offline proposer / retro backend
@@ -517,7 +517,7 @@ Every Go `Span*` / `Attr*` constant value must appear in this spec as its exact 
 undocumented one, and `docs/specs/notes/spec-refs-baseline.json` lists the ones still open (growth needs the
 `spec-baseline-growth` label, #1280).
 
-Known violations on `main` (do not copy them; fix opportunistically, D-T6): gauge `active_controllers_total`;
+Known violations on `main` (do not copy them; fix opportunistically, #2837): gauge `active_controllers_total`;
 `games_*`, `bluetooth_*`, `event_bus_*`, `psmove_*` and `grpc_requests_total` / `grpc_request_duration_seconds`
 without a service prefix; `bluetooth_device_last_seen_timestamp` without a unit suffix; gauges `menu_idle_controllers_count`
 and `menu_sentinel_controllers_count`, whose `_count` suffix collides with the histogram `_count` series; histograms
