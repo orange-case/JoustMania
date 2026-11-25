@@ -8,93 +8,48 @@ The totals (the number of names, of names without a consumer and of names never 
 
 | Metric | Type | Labels | Defined in | Emitted | Consumers | Notes |
 |---|---|---|---|---|---|---|
-| `active_controllers_total` | gauge | (none) | controller-manager | yes | (none) |  |
-| `audio_channel_saturation_total` | counter | (none) | audio | yes | (none) |  |
-| `audio_channels_active` | gauge | (none) | audio | yes | (none) |  |
-| `audio_music_playing` | gauge | (none) | audio | yes | (none) |  |
-| `audio_music_tempo` | gauge | (none) | audio | yes | (none) |  |
-| `audio_playback_errors_total` | counter | (none) | audio | yes | (none) |  |
-| `audio_sounds_played_total` | counter | `result` | audio | yes | (none) |  |
+| `active_controllers_total` | gauge | (none) | controller-manager | yes | (none) | reader: docs/CANARY_RUNBOOK.md |
+| `audio_sounds_played_total` | counter | `result` | audio | yes | (none) | reader: docs/talk/two-standards-runbook.md |
 | `bluetooth_adapter_connections` | gauge | `hci_adapter` | pairing-daemon | yes | grafana |  |
-| `bluetooth_adapter_count` | gauge | (none) | controller-manager | yes | (none) |  |
 | `bluetooth_device_connected` | gauge | `serial`, `hci_adapter` | pairing-daemon | yes | grafana |  |
-| `bluetooth_device_last_seen_timestamp` | gauge | `serial`, `hci_adapter` | pairing-daemon | yes | (none) |  |
 | `bluetooth_device_rssi_dbm` | gauge | `serial`, `hci_adapter` | pairing-daemon | yes | grafana |  |
 | `controller_accel_magnitude` | gauge | `serial` | controller-manager | yes | grafana |  |
-| `controller_accel_x` | gauge | `serial` | controller-manager | yes | (none) |  |
-| `controller_accel_y` | gauge | `serial` | controller-manager | yes | (none) |  |
-| `controller_accel_z` | gauge | `serial` | controller-manager | yes | (none) |  |
 | `controller_adapter_info` | gauge | `serial`, `adapter` | controller-manager | yes | dashboard, grafana |  |
 | `controller_backend_info` | gauge | `serial`, `backend` | controller-manager | yes | dashboard, grafana |  |
-| `controller_battery_check_duration_seconds` | histogram | (none) | controller-manager | yes | (none) |  |
-| `controller_battery_checks_total` | counter | (none) | controller-manager | yes | (none) |  |
 | `controller_battery_level` | gauge | `serial` | controller-manager | yes | agent, grafana |  |
 | `controller_battery_pct` | gauge | `serial` | controller-manager | yes | agent |  |
-| `controller_bluetooth_dropped_events_ratio` | gauge | `serial` | controller-manager | yes | (none) |  |
-| `controller_bluetooth_dropped_events_ratio_window` | gauge | (none) | controller-manager | yes | (none) |  |
-| `controller_bluetooth_event_gap_seconds` | histogram | (none) | controller-manager | yes | (none) |  |
-| `controller_bluetooth_movement_update_hz` | gauge | `serial` | controller-manager | yes | (none) |  |
 | `controller_bluetooth_report_gap_max_seconds` | gauge | `serial` | controller-manager | yes | grafana |  |
 | `controller_bluetooth_report_gap_p95_seconds` | gauge | `serial` | controller-manager | yes | grafana |  |
 | `controller_button_events_total` | counter | `serial`, `button`, `action` | controller-manager | yes | grafana |  |
-| `controller_color_b` | gauge | `serial` | controller-manager | yes | (none) |  |
-| `controller_color_g` | gauge | `serial` | controller-manager | yes | (none) |  |
 | `controller_color_hex` | gauge | `serial` | controller-manager | yes | grafana |  |
-| `controller_color_r` | gauge | `serial` | controller-manager | yes | (none) |  |
 | `controller_connected` | gauge | `serial` | controller-manager | yes | agent, grafana |  |
 | `controller_connection_quality` | gauge | `serial` | controller-manager | yes | grafana |  |
 | `controller_disconnect_total` | counter | `serial` | controller-manager | yes | grafana |  |
-| `controller_discovery_check_duration_seconds` | histogram | (none) | controller-manager | yes | (none) |  |
-| `controller_discovery_checks_total` | counter | (none) | controller-manager | yes | (none) |  |
-| `controller_discovery_full_enumerate_total` | counter | (none) | controller-manager | yes | (none) |  |
-| `controller_identify_requests_total` | counter | `outcome` | controller-manager | yes | (none) |  |
+| `controller_discovery_full_enumerate_total` | counter | (none) | controller-manager | yes | (none) | reader: docs/CANARY_RUNBOOK.md |
 | `controller_info` | gauge | `serial`, `name` | controller-manager | yes | agent, dashboard, grafana |  |
 | `controller_input_lag_seconds` | histogram | `serial` | controller-manager | yes | grafana | #1376; game streams only |
-| `controller_led_batch_updates_total` | counter | (none) | controller-manager | yes | (none) |  |
-| `controller_led_controllers_updated_per_batch` | histogram | (none) | controller-manager | yes | (none) |  |
-| `controller_poll_batch_duration_seconds` | histogram | (none) | controller-manager | yes | (none) |  |
-| `controller_poll_batch_size` | histogram | (none) | controller-manager | yes | (none) |  |
 | `controller_poll_drops_total` | counter | `serial` | controller-manager | yes | grafana |  |
 | `controller_poll_errors_total` | counter | `serial` | controller-manager | yes | grafana |  |
-| `controller_poll_loop_lateness_seconds` | histogram | (none) | controller-manager | yes | (none) |  |
 | `controller_polling_mode` | gauge | (none) | controller-manager | yes | grafana |  |
 | `controller_polling_target_hz` | gauge | (none) | controller-manager | yes | grafana |  |
 | `controller_reconnect_total` | counter | `serial` | controller-manager | yes | grafana |  |
-| `controller_routing_decisions_total` | counter | `serial`, `adapter`, `method` | controller-manager | yes | (none) |  |
-| `controller_state_update_hz` | gauge | `serial` | controller-manager | yes | (none) |  |
-| `controller_stream_commands_total` | counter | `command_type` | controller-manager | yes | (none) |  |
-| `controller_stream_current_frequency_hz` | gauge | (none) | controller-manager | yes | (none) |  |
-| `controller_stream_frame_overruns_total` | counter | (none) | controller-manager | yes | (none) |  |
-| `controller_stream_frequency_changes_total` | counter | (none) | controller-manager | yes | (none) |  |
-| `controller_stream_updates_total` | counter | `stream_type` | controller-manager | yes | (none) |  |
-| `controller_streamed_per_frame` | histogram | (none) | controller-manager | yes | (none) |  |
+| `controller_routing_decisions_total` | counter | `serial`, `adapter`, `method` | controller-manager | yes | (none) | reader: docs/CANARY_RUNBOOK.md, docs/test_cases/TC-015-canary-by-hand.md, docs/use_cases/UC-052.md |
+| `controller_state_update_hz` | gauge | `serial` | controller-manager | yes | (none) | reader: docs/CANARY_RUNBOOK.md |
+| `controller_stream_frame_overruns_total` | counter | (none) | controller-manager | yes | (none) | reader: docs/talk/stage-test-checklist.md |
 | `controller_streams_active` | gauge | (none) | controller-manager | yes | grafana |  |
-| `event_bus_active_subscribers` | gauge | (none) | game-coordinator | yes | (none) |  |
-| `event_bus_publish_drops_total` | counter | `event_type` | game-coordinator | yes | (none) |  |
-| `event_bus_publish_errors_total` | counter | `event_type` | game-coordinator | yes | (none) |  |
 | `flag_eval_errors_total` | counter | `flag_key`, `reason` | lib (`lib/flag_eval_visibility.py`) | yes | grafana |  |
 | `game_accel_distribution` | histogram | `game_mode` | game-coordinator | yes | grafana |  |
 | `game_active` | gauge | `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent, grafana |  |
-| `game_active_controllers` | gauge | (none) | game-coordinator | yes | (none) |  |
 | `game_active_players` | gauge | `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent, grafana |  |
 | `game_actual_update_frequency_hz` | gauge | `game_kind`, `game_id` | game-coordinator | yes | grafana |  |
 | `game_analytics_samples_total` | counter | `game_mode` | game-coordinator | yes | grafana |  |
-| `game_config_changes_total` | counter | `parameter` | game-coordinator | yes | (none) |  |
 | `game_current_mode` | gauge | `mode`, `game_kind`, `game_id` | game-coordinator | yes | agent, grafana, scripts | #1379; 1 while the game is live, removed at retire |
 | `game_current_update_frequency_hz` | gauge | (none) | game-coordinator | yes | grafana | process-wide: the configured `game_loop.update_frequency_hz`, the same for every game; the per-game measured rate is `game_actual_update_frequency_hz` |
 | `game_duration_seconds` | gauge | `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent, grafana, scripts, tools |  |
 | `game_effective_death_threshold` | gauge | `game_kind`, `game_id` | game-coordinator | yes | agent, grafana, scripts |  |
 | `game_effective_warning_threshold` | gauge | `game_kind`, `game_id` | game-coordinator | yes | agent, grafana |  |
-| `game_filter_updates_total` | counter | `game_mode` | game-coordinator | yes | (none) |  |
-| `game_filtered_controllers` | gauge | (none) | game-coordinator | yes | (none) |  |
 | `game_flag_configuration_changes_total` | counter | (none) | game-coordinator | yes | grafana |  |
-| `game_flag_service_calls_total` | counter | `call` (register\|end\|reconcile), `result` (ok\|error\|timeout) | game-coordinator | yes | (none) | `call` = `register`, `end`, `reconcile`; `result` = `ok`, `error`, `timeout`. Recorded when `FLAG_SERVICE_URL` is set; FR-135, #1410 |
-| `game_gameplay_stream_reconnects_total` | counter | `game_mode` | game-coordinator | yes | (none) |  |
-| `game_group_shield_refused_total` | counter | `mode`, `game_kind`, `reason` | game-coordinator | yes | (none) |  |
-| `game_intervention_deferral_age_seconds` | gauge | (none) | game-coordinator | yes | (none) |  |
-| `game_intervention_deferrals_total` | counter | (none) | game-coordinator | yes | (none) |  |
 | `game_intervention_dispatch_failures_total` | counter | `type`, `reason` | game-coordinator | yes | grafana |  |
-| `game_intervention_event_gaps_total` | counter | `flag` | game-coordinator | yes | (none) | event-list reader on; FR-137, #1410 |
 | `game_interventions_total` | counter | `type`, `objective`, `blocked`, `block_reason` | game-coordinator | yes | grafana, tools |  |
 | `game_loop_frame_consistency_percent` | gauge | `game_kind`, `game_id` | game-coordinator | yes | grafana | #1471; one series per live game, removed when it ends and at retire |
 | `game_loop_frames_dropped_total` | counter | `mode` | game-coordinator | yes | grafana |  |
@@ -121,50 +76,16 @@ The totals (the number of names, of names without a consumer and of names never 
 | `game_shadow_games_blocked_total` | counter | (none) | game-coordinator | yes | grafana |  |
 | `game_shadow_games_preempted_total` | counter | (none) | game-coordinator | yes | grafana |  |
 | `game_shield_activation_mode` | gauge | `mode`, `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent |  |
-| `game_shield_hold_activations_total` | counter | `mode`, `game_kind`, `outcome` | game-coordinator | yes | (none) |  |
 | `game_shield_hold_setting` | gauge | `setting`, `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent |  |
 | `game_trace_correlation` | gauge | `game_kind`, `game_id`, `game_trace_id`, `game_trace_span_id`, `gameplay_phase_span_id`, `game_cycle_span_id` | game-coordinator | yes | agent |  |
 | `games_completed_total` | counter | `mode`, `game_kind`, `outcome` (winner\|tie\|completed\|force_ended\|error) | game-coordinator | yes | grafana | `outcome` = `winner`, `tie`, `completed`, `force_ended`, or `error` when the session published `game_error`; #1427 |
 | `games_started_total` | counter | `mode`, `game_kind` | game-coordinator | yes | grafana |  |
 | `grpc_client_errors_total` | counter | `service`, `method`, `code` | lib (`lib/grpc_metrics.py`) | yes | grafana | #1426; mid-stream errors and the HID adapters counted, a cancel by the caller is not; the Go agent and connect-proxy are not covered (telemetry.md §6) |
 | `grpc_client_request_duration_seconds` | histogram | `service`, `method` | lib (`lib/grpc_metrics.py`) | yes | grafana | #1426; a stream is timed once, at its end |
-| `grpc_request_duration_seconds` | histogram | `method` | audio, controller-manager, game-coordinator, menu | emitted by menu; defined but never recorded in audio, controller-manager, game-coordinator | (none) |  |
-| `grpc_requests_total` | counter | `method`, `status` | audio, controller-manager, game-coordinator, menu | emitted by menu; defined but never recorded in audio, controller-manager, game-coordinator | (none) |  |
-| `menu_audio_rpc_failures_total` | counter | `rpc`, `reason` | menu | yes | (none) |  |
-| `menu_button_dispatch_seconds` | histogram | `event_type` | menu | yes | (none) |  |
-| `menu_button_event_errors_total` | counter | `event_type` | menu | yes | (none) |  |
-| `menu_button_frames_processed_total` | counter | (none) | menu | yes | (none) |  |
-| `menu_button_presses_total` | counter | `button`, `action` | menu | yes | (none) |  |
-| `menu_force_start_reconcile_failed_total` | counter | (none) | menu | yes | (none) |  |
-| `menu_game_event_stream_reconnects_total` | counter | (none) | menu | yes | (none) |  |
-| `menu_ghost_controllers_pruned_total` | counter | (none) | menu | yes | (none) |  |
-| `menu_idle_controllers_count` | gauge | (none) | menu | yes | (none) |  |
-| `menu_idle_mode_active` | gauge | (none) | menu | yes | (none) |  |
-| `menu_idle_mode_entries_total` | counter | (none) | menu | yes | (none) |  |
-| `menu_idle_mode_wake_total` | counter | (none) | menu | yes | (none) |  |
-| `menu_player_ready` | gauge | `serial` | menu | yes | (none) |  |
-| `menu_sentinel_controllers_count` | gauge | (none) | menu | yes | (none) |  |
-| `menu_stream_connections_active` | gauge | (none) | menu | yes | (none) |  |
-| `menu_stream_disconnections_total` | counter | (none) | menu | yes | (none) |  |
-| `menu_stream_events_published_total` | counter | `event_type` | menu | yes | (none) |  |
-| `menu_stream_publish_drops_total` | counter | `event_type` | menu | yes | (none) |  |
-| `operator_pad_device_attached` | gauge | (none) | operator-pad | yes | (none) |  |
-| `operator_pad_gestures_total` | counter | `action`, `result` | operator-pad | yes | (none) |  |
-| `operator_pad_grab_failures_total` | counter | `reason` | operator-pad | yes | (none) |  |
-| `operator_pad_previews_total` | counter | `result` (spoken\|replaced\|suppressed\|limit\|refused\|unknown) | operator-pad | yes | (none) |  |
-| `operator_pad_unknown_keys_total` | counter | (none) | operator-pad | yes | (none) |  |
+| `menu_button_dispatch_seconds` | histogram | `event_type` | menu | yes | (none) | reader: tests/service/test_uc002_button_stream_reconnect.py |
 | `pairing_bluetooth_adapter_hci_errors_total` | counter | `hci_adapter`, `direction` | pairing-daemon | yes | grafana |  |
 | `pairing_bluetooth_adapter_info` | gauge | `hci_adapter`, `address`, `manufacturer`, `manufacturer_id`, `hci_version`, `bus`, `usb_id`, `onboard` | pairing-daemon | yes | grafana |  |
 | `pairing_bluetooth_link_role_info` | gauge | `serial`, `hci_adapter`, `role` | pairing-daemon | yes | grafana |  |
-| `pairing_control_bind_unbound_addresses` | gauge | (none) | pairing-daemon | yes | (none) |  |
 | `process_cpu_seconds_total` | counter | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon, python-hid | yes (each service) | grafana |  |
 | `process_resident_memory_bytes` | gauge | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon, python-hid | yes (each service) | grafana |  |
 | `process_threads` | gauge | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon, python-hid | yes (each service) | grafana |  |
-| `psmove_pairing_adapter_device_count_at_selection` | gauge | `adapter` | pairing-daemon | yes | (none) |  |
-| `psmove_pairing_adapter_selected_total` | counter | `adapter` | pairing-daemon | yes | (none) |  |
-| `psmove_pairing_attempts_total` | counter | (none) | pairing-daemon | yes | (none) |  |
-| `psmove_pairing_duration_seconds` | histogram | (none) | pairing-daemon | yes | (none) |  |
-| `psmove_pairing_failed_total` | counter | (none) | pairing-daemon | yes | (none) |  |
-| `psmove_pairing_polls_total` | counter | (none) | pairing-daemon | yes | (none) |  |
-| `psmove_pairing_success_total` | counter | (none) | pairing-daemon | yes | (none) |  |
-| `psmove_pairing_usb_controllers` | gauge | (none) | pairing-daemon | yes | (none) |  |

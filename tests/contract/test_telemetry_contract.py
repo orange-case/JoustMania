@@ -301,7 +301,7 @@ def test_python_metric_definitions_are_recorded(python_metrics):
     )
 
 
-_READER_NOTE = re.compile(r"reader:\s*([^;]+)")
+_READER_NOTE = re.compile(r"\breader:\s*([^;]+)")
 
 
 def test_every_python_metric_has_a_named_consumer(python_metrics):
@@ -323,7 +323,7 @@ def test_every_python_metric_has_a_named_consumer(python_metrics):
             continue
         for rel in (p.strip() for p in match.group(1).split(",")):
             path = ti.REPO_ROOT / rel
-            if not path.is_file() or not re.search(rf"{name}", path.read_text(errors="ignore")):
+            if not path.is_file() or not re.search(rf"\b{name}\b", path.read_text(errors="ignore")):
                 stale.append(f"{name}: {rel}")
     assert not unread, (
         f"Metrics nothing reads (delete them, or name the reader as `reader: <path>` in {notes_path.name}): {unread}"
