@@ -153,15 +153,14 @@ def test_binary_cache_prunes_per_binary(tmp_path):
     assert sorted(p.name for p in tmp_path.iterdir()) == ["agent-a", "flag-service-a"]
 
 
-def test_agent_composition_wires_sink_agent_and_fake(tmp_path):
-    """No start: the sink tees to the agent's port, and the fake OpenAI URL lands in the baseline variant."""
+def test_agent_composition_wires_sink_and_agent(tmp_path):
+    """No start: the sink tees to the agent's port; no decide fake runs without its composition."""
     stack = ServiceStack(AGENT, tmp_path)
-    assert stack.otlp_sink is not None and stack.fake_openai is not None
+    assert stack.otlp_sink is not None and stack.agent_port is not None
     assert stack.otlp_sink.forward_to == f"127.0.0.1:{stack.agent_port}"
-    assert stack.flag_plane.variant_values == {
-        ("agent", "decision.openai.base_url", "fake"): f"http://127.0.0.1:{stack.fake_openai.port}/v1"
-    }
-    assert ServiceStack(LOBBY, tmp_path).fake_openai is None
+    assert stack.fake_claude is None and stack.fake_jev is None
+    assert stack.flag_plane.variant_values == {}
+    assert ServiceStack(LOBBY, tmp_path).agent_port is None
     with pytest.raises(ValueError, match="otlp=True"):
         Composition(("controller-manager", "game-coordinator"), agent=True)
 
@@ -239,14 +238,14 @@ def test_fake_claude_stack_keeps_the_dynamic_declarer_off_game_flags_by_flag(tmp
 
 
 def test_flag_plane_rewrites_only_declared_variants(tmp_path):
-    variant = ("agent", "decision.openai.base_url", "fake")
-    plane = FlagPlane(tmp_path / "a", variant_values={variant: "http://127.0.0.1:9/v1"})
+    variant = ("agent", "decision.claude.base_url", "fake")
+    plane = FlagPlane(tmp_path / "a", variant_values={variant: "http://127.0.0.1:9"})
     fh.copy_ci_flag_dir(plane.flag_dir)
     plane._rewrite_variants()
     flags = json.loads((plane.flag_dir / "agent.json").read_text())["flags"]
-    assert flags["decision.openai.base_url"]["variants"]["fake"] == "http://127.0.0.1:9/v1"
+    assert flags["decision.claude.base_url"]["variants"]["fake"] == "http://127.0.0.1:9"
 
-    unknown = FlagPlane(tmp_path / "b", variant_values={("agent", "decision.openai.base_url", "nope"): "x"})
+    unknown = FlagPlane(tmp_path / "b", variant_values={("agent", "decision.claude.base_url", "nope"): "x"})
     fh.copy_ci_flag_dir(unknown.flag_dir)
     with pytest.raises(KeyError, match="no variant 'nope'"):
         unknown._rewrite_variants()

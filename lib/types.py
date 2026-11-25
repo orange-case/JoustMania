@@ -336,7 +336,6 @@ class Sound(StrEnum):
     MENU_VOX_PAD_UNLOCKED = "pad_unlocked"
     MENU_VOX_BACKEND_RULES = "backend_rules"
     MENU_VOX_BACKEND_CLAUDE = "backend_claude"
-    MENU_VOX_BACKEND_OPENAI = "backend_openai"
     MENU_VOX_BACKEND_JEV = "backend_jev"
     # Shield mode layer (#2215, UC-015 BR-018).
     MENU_VOX_LABEL_SHIELD_MODE = "label_shield_mode"

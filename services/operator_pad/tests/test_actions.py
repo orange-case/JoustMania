@@ -334,12 +334,11 @@ async def test_k8_tap_refused_by_the_menu_plays_the_refusal_cue(actions, menu, c
 @pytest.mark.parametrize(
     ("current", "steps", "target"),
     [
-        ("claude", 1, "openai"),
+        ("claude", 1, "jev"),
         ("jev", 1, "rules"),  # past the last to the first ...
         ("rules", -1, "jev"),  # ... and back past the first to the last
-        ("rules", 5, "claude"),  # n = len + 1: one past
-        ("openai", -1, "claude"),
-        ("claude", -9, "rules"),
+        ("rules", 4, "claude"),  # n = len + 1: one past
+        ("claude", -8, "jev"),
     ],
 )
 async def test_backend_layer_steps_wrap(actions, menu, cues, current, steps, target):
@@ -349,10 +348,23 @@ async def test_backend_layer_steps_wrap(actions, menu, cues, current, steps, tar
     cues.limit.assert_not_awaited()
 
 
+@pytest.mark.uc("UC-015", flow="A7", br=["BR-004", "BR-005"])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+@pytest.mark.parametrize("steps", [1, -1, 2, -2])
+@pytest.mark.parametrize("backend", ["openai", "mystery"])
+async def test_retired_openai_backend_is_refused_like_any_unknown_value(actions, menu, cues, backend, steps):
+    """A persisted `openai` (older release) is off the ladder: refused, nothing sent, no crash."""
+    st = backend_status(backend)
+    result = await actions.dispatch(Gesture(LAYER, "K1", steps=steps, confirmed=True), st, st, on("INTERV", "K1"))
+    assert result == ("set_backend", "refused")
+    assert sent(menu) == []
+    cues.refusal.assert_awaited_once()
+
+
 @pytest.mark.uc("UC-015", flow="A7", br=["BR-004", "BR-005", "BR-009"])
 @pytest.mark.uc("UC-016", br=["BR-007"])
 @pytest.mark.parametrize("link_up", [False, True])
-@pytest.mark.parametrize(("current", "steps"), [("jev", 4), ("rules", -4), ("claude", 8), ("openai", -12)])
+@pytest.mark.parametrize(("current", "steps"), [("jev", 3), ("rules", -3), ("claude", 6), ("jev", -12)])
 async def test_a_full_turn_of_the_backend_wheel_sends_nothing_and_plays_nothing(
     menu, coordinator, cues, sleep, link_up, current, steps
 ):
@@ -620,7 +632,6 @@ async def test_volume_row_tap_without_a_screen_says_volume_alone(actions, cues):
     [
         ("rules", Sound.MENU_VOX_BACKEND_RULES),
         ("claude", Sound.MENU_VOX_BACKEND_CLAUDE),
-        ("openai", Sound.MENU_VOX_BACKEND_OPENAI),
         ("jev", Sound.MENU_VOX_BACKEND_JEV),
     ],
 )

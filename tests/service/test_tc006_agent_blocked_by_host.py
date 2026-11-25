@@ -1,9 +1,9 @@
 """TC-006 step 5 on the service tier (T2): the permission the host set from the controller blocks the agent (#1600).
 
-AGENT composition on ``fresh_stack`` (the ladder writes the GLOBAL
+AGENT_CLAUDE_DECIDE composition on ``fresh_stack`` (the ladder writes the GLOBAL
 ``interventions_allowed``): real menu, game coordinator and controller manager
 from source at HEAD, the Go agent built at HEAD, a fresh flag plane, FakeAudio,
-the OtlpSink and the fake OpenAI backend scripted to act at high confidence.
+the OtlpSink and the fake Claude decide backend scripted to act at high confidence.
 
 The host restricts the agent from the controller in the lobby (standard ->
 ambient -> none, the TC-006 steps 1 to 3 seam: mock button -> menu admin handler
@@ -49,10 +49,11 @@ from tests.service.agent_flow import (
     HIGH_CONFIDENCE,
     SCRIPTED_INTERVENTION,
     configure_agent,
+    decide_calls,
     decide_spans,
     wait_agent_flags_served,
 )
-from tests.service.harness import AGENT as AGENT_COMPOSITION
+from tests.service.harness import AGENT_CLAUDE_DECIDE as AGENT_COMPOSITION
 from tests.service.lobby_flow import ready_up_until_started, start_lobby, wait_running
 
 pytestmark = pytest.mark.tier("service")
@@ -136,11 +137,14 @@ async def test_agent_makes_no_remote_call_after_host_restricts_it(fresh_stack):
     """With interventions_allowed=none set by the host from the controller, the agent
     sends no request to the remote backend and records no invoke_agent span for the game."""
     stack = fresh_stack
-    fake = stack.fake_openai
-    fake.script("valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE)
-    configure_agent(backend="openai", allowed=START_LEVEL)
+    fake = stack.fake_claude
+    fake.script(decide_mode="valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE)
+    configure_agent(backend="claude", allowed=START_LEVEL, claude_fake=True)
     wait_agent_flags_served(
-        stack, backend="openai", enabled=True, rewrite=lambda: configure_agent(backend="openai", allowed=START_LEVEL)
+        stack,
+        backend="claude",
+        enabled=True,
+        rewrite=lambda: configure_agent(backend="claude", allowed=START_LEVEL, claude_fake=True),
     )
 
     game_client, game_channel = await get_game_client(stack)
@@ -163,11 +167,11 @@ async def test_agent_makes_no_remote_call_after_host_restricts_it(fresh_stack):
 
             # Step 5: over the window, no request and no invoke_agent span for the game.
             def violation() -> bool:
-                return bool(fake.requests(game_id)) or bool(decide_spans(stack, game_id))
+                return bool(decide_calls(stack, game_id)) or bool(decide_spans(stack, game_id))
 
             assert not await async_poll_until(violation, NO_CALL_WINDOW_SECONDS), (
                 f"the agent called the backend or decided for {game_id} under {FLAG}=none: "
-                f"requests {fake.requests(game_id)}, "
+                f"requests {decide_calls(stack, game_id)}, "
                 f"invoke_agent {[s.attributes for s in decide_spans(stack, game_id)]}"
             )
             # The window covered live cycles: the gate kept skipping, it was not idle.

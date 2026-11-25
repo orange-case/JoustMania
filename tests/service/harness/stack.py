@@ -17,7 +17,7 @@ service's OTLP exporter at it instead.
 
 ``Composition(..., agent=True)`` (needs ``otlp=True``; the ``AGENT``
 composition) adds the Go agent built at HEAD (``stack.agent``) and a
-scriptable fake OpenAI-compatible backend (``stack.fake_openai``): the sink tees
+optional fake decide backends (``fake_claude_decide``, ``fake_jev``): the sink tees
 the services' traces, metrics and moment log events to the agent, as the
 collector does in compose (``logs/agent``, #2658), and the agent exports its own
 telemetry to the sink.
@@ -38,8 +38,6 @@ from .fakes.flagsmith import FakeFlagsmith, registry_features
 from .fakes.github import FakeGitHub
 from .fakes.jev import API_KEY as FAKE_JEV_API_KEY
 from .fakes.jev import FakeJev
-from .fakes.openai import API_KEY as FAKE_OPENAI_API_KEY
-from .fakes.openai import FakeOpenAI
 from .fakes.otlp import OtlpSink
 from .flag_plane import FLAG_SERVICE_SRC, FlagPlane
 from .processes import PyService, ServiceStartError, free_port
@@ -57,9 +55,6 @@ AUDIO_PORT = 50056
 OTLP_GRPC_PORT = 4317  # otel-collector's OTLP/gRPC port in compose
 FLAG_SERVICE_HTTP_PORT = 8070
 AGENT_OTLP_PORT = 4317  # the agent's OTLP/gRPC receiver in compose
-FAKE_OPENAI_PORT = 8080  # the fake OpenAI server (tests/integration/fake_openai)
-# The ci/agent.json variant of decision.openai.base_url the agent is pointed at the fake with.
-FAKE_OPENAI_VARIANT = ("agent", "decision.openai.base_url", "fake")
 # Same for the Jev decide backend (#1404): the ci/agent.json `fake` variant of decision.jev.base_url.
 FAKE_JEV_VARIANT = ("agent", "decision.jev.base_url", "fake")
 # And the Claude decide backend (#1900): the `fake` variant of decision.claude.base_url (no /v1).
@@ -79,7 +74,7 @@ class Composition:
     env: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     # Telemetry on, exported to an in-process OtlpSink (``stack.otlp_sink``).
     otlp: bool = False
-    # The Go agent (``stack.agent``) plus a fake OpenAI backend (``stack.fake_openai``).
+    # The Go agent (``stack.agent``).
     agent: bool = False
     # Also a fake Claude (``stack.fake_claude``) the agent's retro and proposer text backend is
     # pointed at (the inference.backend=claude overlay + AGENT_INFERENCE_BASE_URL; needs ``agent``).
@@ -143,7 +138,7 @@ READY_LOG_MARKERS = {"menu": "Menu auto-started"}
 GAME = Composition(("controller-manager", "game-coordinator"))
 # Plus the menu: lobby, ready state, menu-started games, admin writes.
 LOBBY = Composition(("controller-manager", "game-coordinator", "menu"))
-# Plus the agent at HEAD observing over OTLP and a fake OpenAI backend: in-game decisions.
+# Plus the agent at HEAD observing over OTLP: in-game decisions (rules; a remote backend has no key here).
 AGENT = Composition(("controller-manager", "game-coordinator", "menu"), otlp=True, agent=True)
 # Plus a fake Claude behind the agent's retro and proposer text backend (TC-010).
 AGENT_CLAUDE = Composition(("controller-manager", "game-coordinator", "menu"), otlp=True, agent=True, fake_claude=True)
@@ -159,7 +154,6 @@ class ServiceStack:
     def __init__(self, composition: Composition, workdir: Path):
         self.composition = composition
         self.workdir = workdir
-        self.fake_openai: FakeOpenAI | None = FakeOpenAI(workdir) if composition.agent else None
         self.fake_claude: FakeClaude | None = (
             FakeClaude() if composition.fake_claude or composition.fake_claude_decide else None
         )
@@ -169,7 +163,7 @@ class ServiceStack:
         # Picked up front: the sink tees to it, and the agent must not be found by a stale address.
         self.agent_port: int | None = free_port() if composition.agent else None
         self.agent: AgentProcess | None = None
-        variant_values = {FAKE_OPENAI_VARIANT: self.fake_openai.base_url} if self.fake_openai else {}
+        variant_values: dict[tuple[str, str, str], object] = {}
         if composition.fake_claude_decide:
             variant_values[FAKE_CLAUDE_DECIDE_VARIANT] = self.fake_claude.base_url
         if self.fake_jev is not None:
@@ -213,8 +207,6 @@ class ServiceStack:
         return self
 
     def _start(self) -> None:
-        if self.fake_openai is not None:
-            self._ports[("fake-openai", FAKE_OPENAI_PORT)] = self.fake_openai.start()
         if self.fake_claude is not None:
             self.fake_claude.start()
         if self.fake_jev is not None:
@@ -257,7 +249,6 @@ class ServiceStack:
                 otlp_endpoint=self.otlp_sink.endpoint,
                 coordinator_port=ports["game-coordinator"],
                 mock_control_port=mock_port,
-                openai_api_key=FAKE_OPENAI_API_KEY,
                 extra_env={
                     **self._inference_env(),
                     **self._claude_decide_env(),
@@ -417,8 +408,6 @@ class ServiceStack:
         if self.otlp_sink is not None:
             self.otlp_sink.stop()
         self.flag_plane.stop()
-        if self.fake_openai is not None:
-            self.fake_openai.stop()
         if self.fake_claude is not None:
             self.fake_claude.stop()
         if self.fake_jev is not None:
@@ -433,8 +422,6 @@ class ServiceStack:
         parts = [s.log_tail() for s in self.services.values()]
         if self.agent is not None:
             parts.append(self.agent.log_tail())
-        if self.fake_openai is not None:
-            parts.append(self.fake_openai.log_tail())
         if self.fake_claude is not None:
             parts.append(self.fake_claude.log_tail())
         if self.fake_jev is not None:

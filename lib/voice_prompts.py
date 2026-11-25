@@ -75,7 +75,6 @@ AUTOMATIC_VOICE = Sound.MENU_VOX_SHIELD_AUTOMATIC
 BACKEND_VOICES: dict[str, Sound] = {
     "rules": Sound.MENU_VOX_BACKEND_RULES,
     "claude": Sound.MENU_VOX_BACKEND_CLAUDE,
-    "openai": Sound.MENU_VOX_BACKEND_OPENAI,
     "jev": Sound.MENU_VOX_BACKEND_JEV,
 }
 # UC-015 BR-009 (#2106): the pad's status words.
