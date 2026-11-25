@@ -9,15 +9,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from lib import setting_ladders
 from lib.setting_ladders import AGENT_POLICY_LEVELS, AUTOMATIC, SENSITIVITY_LADDER, VOLUME_LADDER
 from services.operator_pad.screens import (
     BAR_EMPTY,
     BAR_FULL,
     UNKNOWN,
+    V2_SHORT_FORMS,
     _flag_variant,
     _knob_value,
     agent_text,
-    clean,
     mode_name,
     short,
     version_text,
@@ -53,17 +54,11 @@ def value_text(option: str, value: str | None, version: int) -> str:
         return bar(AGENT_POLICY_LEVELS.index(value) + 1, len(AGENT_POLICY_LEVELS))
     if option == "shield.activation" and version >= 3 and value in SHIELD_WORDS:
         return SHIELD_WORDS[value]
+    if option == setting_ladders.RATE_OPTION:
+        return _rate(value)
+    if version < 3 and value in V2_SHORT_FORMS.get(option, {}):
+        return V2_SHORT_FORMS[option][value]
     return short(option, value)
-
-
-def _planned(status, field: str) -> str | None:
-    """A planned status field (services.md §3.1): a non-empty string, else unknown (never a zero default)."""
-    value = getattr(status, field, None)
-    return value if isinstance(value, str) and value else None
-
-
-def _on_off(value: str | None) -> str:
-    return {"on": "ON", "off": "OFF"}.get(value or "", UNKNOWN)
 
 
 def _rate(value: str | None) -> str:
@@ -134,20 +129,35 @@ def page_rows(page: int, status, ctx: PageContext, version: int) -> list[tuple[s
             ("AGENT", agent.split(" ")[0]),  # ON, WATCH, OFF or ?
             # BR-006: the level also while the agent is stopped; `?` only when the level itself is unknown.
             ("LEVEL", value_text("agent_level", level if level in AGENT_POLICY_LEVELS else None, version)),
-            ("GOAL", clean((_planned(status, "agent_goal_profile") or UNKNOWN).upper())),
+            ("GOAL", _row_value(setting_ladders.GOAL_OPTION, status, version)),
         ]
     if name == "INTERV":
         return [
             (label("BACKEND", "AI"), UNKNOWN if unknown else short("decision.backend", status.agent_backend)),
-            ("RATE", _rate(_planned(status, "agent_max_interventions_per_minute"))),
-            ("GROUP", _on_off(_planned(status, "agent_group_grant_state"))),
+            ("RATE", _row_value(setting_ladders.RATE_OPTION, status, version)),
+            ("GROUP", _row_value(setting_ladders.GROUP_OPTION, status, version)),
         ]
     # RETRO
     return [
-        (label("RETRO AI", "RETRO"), clean((_planned(status, "inference_backend") or UNKNOWN).upper())),
-        (label("EFFORT", "EFF"), clean((_planned(status, "inference_effort") or UNKNOWN).upper())),
-        ("BRIEF", _on_off(_planned(status, "agent_operator_brief_state"))),
+        (label("RETRO AI", "RETRO"), _row_value(setting_ladders.RETRO_BACKEND_OPTION, status, version)),
+        (label("EFFORT", "EFF"), _row_value(setting_ladders.EFFORT_OPTION, status, version)),
+        ("BRIEF", _row_value(setting_ladders.BRIEF_OPTION, status, version)),
     ]
+
+
+def _row_value(option: str, status, version: int) -> str:
+    """A row of iteration 4 from status fields 22 to 27: `?` until the menu reports it (never a zero default)."""
+    return value_text(option, agent_row_value(option, status), version)
+
+
+def agent_row_value(option: str, status) -> str | None:
+    """The value in force of an agent row as the menu reports it; None while empty or missing (unknown)."""
+    value = getattr(status, setting_ladders.AGENT_ROW_STATUS_FIELDS[option], "") if status is not None else ""
+    if not isinstance(value, str) or not value:
+        return None
+    if option == setting_ladders.GOAL_OPTION and value not in setting_ladders.GOAL_LADDER:
+        return None  # only the five declared variants mean anything on the pad
+    return value
 
 
 class Pager:
