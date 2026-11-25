@@ -85,7 +85,7 @@ func TestMomentObserver_Outcomes(t *testing.T) {
 		requireCalls(t, rec.take(), momentCall{"death_warning", "log_event", "ignored"})
 	})
 
-	t.Run("UC-041/A7 a log event without identity, or for an unknown game, is dropped", func(t *testing.T) {
+	t.Run("UC-041/A7 a log event without identity is dropped, one for an unknown game is counted", func(t *testing.T) {
 		mux, rec := observedMux(t)
 		mux.ApplyLogs(momentLog("game-coordinator", "death_warning", map[string]string{
 			"player.serial": "P1", "game.id": "game-A",
@@ -97,7 +97,7 @@ func TestMomentObserver_Outcomes(t *testing.T) {
 		requireCalls(t, rec.take(),
 			momentCall{"death_warning", "log_event", "dropped"},
 			momentCall{"player_death", "log_event", "dropped"},
-			momentCall{"player_death", "log_event", "dropped"},
+			momentCall{"player_death", "log_event", "counted"},
 		)
 	})
 

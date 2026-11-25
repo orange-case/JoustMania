@@ -43,6 +43,9 @@ type Store struct {
 	// latchEnds is set by the Multiplexer for a game_id partition (not the
 	// fallback, where unlabeled games share one store and a 0 -> 1 is a new game).
 	latchEnds bool
+	// logHeldUntil keeps a partition a log record opened from being dropped
+	// (UC-041 BR-010); zero for every other partition.
+	logHeldUntil time.Time
 
 	// durationAdvancedAt is when game_duration_seconds last CHANGED value (#1305).
 	// The coordinator's observable gauge is re-exported every interval even when
@@ -124,8 +127,9 @@ type Store struct {
 
 	// OnGameEnd, when non-nil, is fired EXACTLY ONCE per game when the game ends
 	// (#844 post-game retrospective), whichever end signal arrives first: the
-	// game_active 1 -> 0 datapoint, the game root span (EndGameFromRootSpan) or a
-	// stale game_active series (EvictStale) (#1494). It gets a pre-reset GameContext
+	// game_active 1 -> 0 datapoint, the game root span (EndGameFromRootSpan), the
+	// game.end log event (EndGameFromEvent, UC-041 A8) or a stale game_active series
+	// (EvictStale) (#1494). It gets a pre-reset GameContext
 	// snapshot — the EliminationSequence and SessionID are still intact. Set once
 	// before serving; nil disables the hook (behavior-neutral). It is invoked
 	// AFTER the store mutex is released (never under s.mu) so the callback may read
@@ -748,9 +752,29 @@ func (s *Store) SetGameActive(active bool) {
 
 	switch {
 	case !prev && active:
+		// The first game of a game_id partition keeps the deaths read before its
+		// game_active 1: a log record can open the partition first (UC-041 BR-010),
+		// and the moment ids it applied stay applied (BR-009).
+		var kept []string
+		var keptHistory map[string]*playerHistory
+		var keptEvents []TimelineEvent
+		if s.latchEnds && s.sessionSeq == 0 {
+			kept = s.ctx.Session.EliminationSequence
+			keptHistory = make(map[string]*playerHistory, len(kept))
+			for _, serial := range kept {
+				if h := s.playerHistory[serial]; h != nil {
+					keptHistory[serial] = h
+				}
+			}
+			for _, e := range s.history.events() {
+				if e.Kind == EventElimination {
+					keptEvents = append(keptEvents, e)
+				}
+			}
+		}
 		s.sessionSeq++
 		s.ctx.SessionID = fmt.Sprintf("session-%d", s.sessionSeq)
-		s.ctx.Session.EliminationSequence = nil
+		s.ctx.Session.EliminationSequence = kept
 		s.ctx.Session.InterventionCounts = nil
 		s.ctx.Session.DurationSeconds = nil
 		s.ctx.Session.StartedAt = s.now()
@@ -769,8 +793,14 @@ func (s *Store) SetGameActive(active bool) {
 		// to-back restart cannot carry the previous game's trend (#1082), mirroring
 		// the #916 narrative reset.
 		s.playerHistory = make(map[string]*playerHistory)
+		for serial, h := range keptHistory {
+			s.playerHistory[serial] = h
+		}
 		s.speedTrack.reset()
 		s.history.append(TimelineEvent{At: s.now(), Kind: EventPhase, Detail: "start"})
+		for _, e := range keptEvents {
+			s.history.append(e)
+		}
 	case prev && !active:
 		endSnapshot = s.endGameLocked(s.now(), EndReasonZero)
 	}
@@ -863,25 +893,63 @@ func (s *Store) fireGameEnd(snap *GameContext) {
 // [StartedAt, now]. A game that already ended (or was never seen active) is left
 // alone, and the partition is latched so a late game_active=1 cannot restart it.
 func (s *Store) EndGameFromRootSpan(spanEnd time.Time) {
+	s.endGameAt(spanEnd, EndReasonRootSpan)
+}
+
+// EndGameFromEvent is the game.end log event's end (UC-041 A8): as
+// EndGameFromRootSpan, with the record's time and EndReasonEndEvent.
+func (s *Store) EndGameFromEvent(at time.Time) {
+	s.endGameAt(at, EndReasonEndEvent)
+}
+
+// endGameAt latches the partition and ends its active game at gameEnd, clamped
+// to [StartedAt, now] (zero means now).
+func (s *Store) endGameAt(gameEnd time.Time, reason string) {
 	var endSnapshot *GameContext
 
 	s.mu.Lock()
 	s.endLatched = true
 	if s.gameActiveLocked() {
 		now := s.now()
-		gameEnd := spanEnd
 		switch {
 		case gameEnd.IsZero() || gameEnd.After(now):
 			gameEnd = now
 		case gameEnd.Before(s.ctx.Session.StartedAt):
 			gameEnd = s.ctx.Session.StartedAt
 		}
-		endSnapshot = s.endGameLocked(gameEnd, EndReasonRootSpan)
+		endSnapshot = s.endGameLocked(gameEnd, reason)
 		s.touchSession()
 	}
 	s.mu.Unlock()
 
 	s.fireGameEnd(endSnapshot)
+}
+
+// logHoldFor is how long a partition a log record opened is kept from eviction
+// (UC-041 BR-010): fixed, not a flag.
+const logHoldFor = 60 * time.Second
+
+// holdForLog starts the BR-010 hold. The Multiplexer calls it before it
+// publishes the partition, so no eviction tick sees it unheld.
+func (s *Store) holdForLog() {
+	s.mu.Lock()
+	s.logHeldUntil = s.now().Add(logHoldFor)
+	s.mu.Unlock()
+}
+
+// setFromLog records the game kind (normalised) and mode a log record carries.
+// Empty values are ignored; it touches no update time, so a log record never
+// looks like a live signal (UC-041 BR-010).
+func (s *Store) setFromLog(kind, mode string) {
+	kind = NormalizeGameKind(kind)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if kind != "" {
+		s.ctx.GameKind = kind
+	}
+	if mode != "" {
+		s.ctx.Session.GameMode = ptr(mode)
+	}
 }
 
 // SetGameKind records the game kind ("real"/"shadow") from the game_kind
@@ -1256,7 +1324,8 @@ func (s *Store) snapshotLocked() GameContext {
 // Multiplexer (#845 PR B) uses this — AFTER calling EvictStale, which TTL-evicts
 // stale players and resets an expired session — to decide a non-fallback
 // partition can be dropped entirely. A partition that still has fresh players, an
-// active game, or an unexpired grace window is NOT drained and is retained.
+// active game, an unexpired grace window or a log hold (UC-041 BR-010) is NOT
+// drained and is retained.
 func (s *Store) isDrained() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1269,7 +1338,7 @@ func (s *Store) isDrained() bool {
 	if s.gameActiveLocked() {
 		return false // game still active
 	}
-	return true
+	return !s.now().Before(s.logHeldUntil)
 }
 
 // EvictStale removes players that are disconnected-marked or silent past the TTL

@@ -169,16 +169,14 @@ func TestApplyLogs_MomentLogEvents(t *testing.T) {
 		}
 	})
 
-	// Catches existingStore -> store: a death for a game without context must not
-	// create one (nor feed the fallback partition).
-	t.Run("UC-041/A7 a log event for a game without context changes nothing and creates no context", func(t *testing.T) {
+	t.Run("UC-041/A7 a log event for a game without context opens its own context, never the fallback", func(t *testing.T) {
 		mux, _ := liveMux(t)
-		if ids := mux.ApplyLogs(deathLog("game-Z", "P9", "game-Z/P9/1", nil)); ids != nil {
-			t.Fatalf("touched = %v, want nil", ids)
+		if ids := mux.ApplyLogs(deathLog("game-Z", "P9", "game-Z/P9/1", nil)); len(ids) != 1 || ids[0] != "game-Z" {
+			t.Fatalf("touched = %v, want [game-Z]", ids)
 		}
-		requirePartitions(t, mux, 1)
-		if _, ok := mux.Snapshot("game-Z"); ok {
-			t.Fatal("game-Z partition was created by a log event")
+		requirePartitions(t, mux, 2)
+		if _, ok := mux.Snapshot(FallbackGameID); ok {
+			t.Fatal("the log event fed the fallback partition")
 		}
 	})
 
