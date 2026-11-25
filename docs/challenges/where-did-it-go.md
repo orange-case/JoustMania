@@ -1,7 +1,7 @@
 # Booth challenge: "Where did it go?"
 
 > Guide for a presenter or an outside reader. It restates [UC-100](../use_cases/UC-100.md) and
-> [telemetry.md §3.2](../specs/telemetry.md#32-game-coordinator); if they differ, the spec wins.
+> [telemetry.md appendix A](../specs/telemetry.md#appendix-a-booth-profile); if they differ, the spec wins.
 > Part of epic #2569 (booth challenges), issue #2658.
 
 ## 1. What the challenge shows
@@ -25,8 +25,8 @@ Preconditions (UC-100):
 - Enough controllers are connected for a game (UC-010 preconditions).
 
 **Choose the shape for the next game.** Set the observability flag `telemetry.moment_shape` through the
-flag service ([UC-053](../use_cases/UC-053.md)). Values: `span_event` (default), `span`, `log_event`,
-`both`. The flag is a stack overlay without targeting, so a write applies to the next game
+flag service ([UC-053](../use_cases/UC-053.md)). Values: `span_event` (default), `span`, `log_event`
+(`both` was retired by #2786 and now runs as `span_event`, UC-100 A6). The flag is a stack overlay without targeting, so a write applies to the next game
 ([flags.md §10](../specs/flags.md#10-observability)). On the case, through the envoy route of the flag service's
 HTTP API ([services.md §7.2](../specs/services.md#72-httpjson-api-resource-style)):
 
@@ -70,14 +70,10 @@ the same with the name `player_death` (span `game.player_death` is a point in ti
 | `span_event` (default) | Span event `death_warning` on the player span | On the player span | With the player span. In Free-for-All, Teams, Traitor and Swapper (and for the Tournament loser) the player span ends at the death, so the event arrives then. In NonStop, Fight Club and Zombies it arrives at game end | Span events on a span, searchable by name and by `moment.id` |
 | `span` | Span `game.death_warning`, start at the warning, end = start + the warning window, ended at once | Child of the player span | At once (the trace exporter batches for 2 s) | Search of spans by name and attributes, and the parent link to the player span |
 | `log_event` | Log record with `event_name` `death_warning`, severity INFO, the moment's attributes as log attributes, carrying the player span's trace and span id | Not a span: linked to the player span by trace id and span id | Up to about 6 s (SDK batch up to 1 s plus the collector's 5 s logs batch) | A log store that accepts OTLP logs, searchable by event name and `moment.id`, and a way to jump from the log to the trace |
-| `both` | `span_event` and `log_event` of one moment, same `moment.id` | As the two shapes | As the two shapes | Not a booth round |
 
 Every record of a moment carries the same identity attributes in every shape: `moment.id`, `player.serial`,
 `player.name` (once known), `game.id` and `game.kind`. `moment.id` has the form `<game.id>/<player.serial>/<n>`
 and is unique within the game (UC-100 BR-003).
-
-`both` sends every warning and every death twice, which doubles the volume of these moments. It exists to move a reader from
-one shape to another, not as a booth round. A game in `both` is not counted (UC-100 A6, BR-005).
 
 ## 4. The question and how to check an answer
 
@@ -138,27 +134,27 @@ Template, one row per backend and shape. Fill the backend's answer and the groun
 | The root span's `telemetry.moment_shape` differs from the chosen shape | The game ran in the default shape (flag absent, unknown, unreadable, or no log channel in the process) | A1 |
 | No eliminated player had a warning before the death | There is no question to ask: record the round as without a question | A4 |
 | The game was force-ended or the coordinator stopped before the end | No ground truth is recorded for it | A5 |
-| The shape was `both` | Not a booth round | A6 |
 
 ## 6. Known limits today
 
-- **In the `span` shape the agent takes nothing from the death** (UC-100 BR-007, BR-010): its elimination order
-  comes from the elimination-order gauge alone. In the other shapes it reads the death as a span event or a log
-  event, once per `moment.id` ([FR-218](../requirements.md), [UC-041](../use_cases/UC-041.md) A7).
+- **The shape never changes what the agent sees** (UC-100 BR-007, BR-010): in every shape its elimination order
+  comes from the elimination-order gauge alone, and it reads no moment ([UC-041](../use_cases/UC-041.md) BR-009,
+  #2786). The shapes and the ground truth are the booth profile of
+  [telemetry.md appendix A](../specs/telemetry.md#appendix-a-booth-profile).
 - **The case keeps no log store** (BR-006). A log-event round can only be checked against the ground truth on
   the game's root span, never against a copy of the log in the case.
 - **A game may run in the default shape when flagd is not reachable.** Game admission waits for the
   `observability` provider up to 5 s, so only a flagd that does not answer within that deadline gives
   `span_event` (A1), also right after a restart. Check the root
   span's `telemetry.moment_shape` before you count a game.
-- A `log_event` or `both` game in a process without OTLP logging runs as `span_event` and records that
+- A `log_event` game in a process without OTLP logging runs as `span_event` and records that
   shape on the root span.
 
 ## 7. References
 
 - [UC-100](../use_cases/UC-100.md) Find a Game Moment in Every Shape
 - FR-216 to FR-219 and NFR-060 in [requirements.md](../requirements.md)
-- [telemetry.md §3.2](../specs/telemetry.md#32-game-coordinator) (moment shapes, ground truth)
+- [telemetry.md appendix A](../specs/telemetry.md#appendix-a-booth-profile) (booth profile: moment shapes, ground truth)
 - [flags.md §10](../specs/flags.md#10-observability) (`telemetry.moment_shape`)
 - [glossary](../glossary.md): booth challenge, moment, moment shape, gateway, backend (observability)
 - Issue #2658, epic #2569
