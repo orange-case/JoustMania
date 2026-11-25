@@ -118,8 +118,8 @@ class TeamsGameBase(BaseGameMode):
         # Team tracking
         self.team_colors = TEAM_COLORS[:num_teams]
 
-        # The result, latched once in the step that decides it (UC-021 BR-003,
-        # UC-022 BR-005). ``_latched_team`` None with ``_win_latched`` is a tie;
+        # The result, latched once in the step that decides it (UC-020 BR-007,
+        # UC-021 BR-004, UC-022 BR-007). ``_latched_team`` None with ``_win_latched`` is a tie;
         # nothing latched (force-end, stream end) means no winner.
         self._win_latched = False
         self._latched_team: int | None = None
@@ -346,7 +346,7 @@ class TeamsGameBase(BaseGameMode):
 
         Synchronous, no await: called in the step that decides the result and
         before its event is published, so a force-end that lands afterwards (same
-        tick, the publish, the hold, the rainbow) keeps it (UC-021 BR-003).
+        tick, the publish, the hold, the rainbow) keeps it (UC-020 BR-007).
 
         The outcome is latched first: a force_end() from outside the game
         can land between the caller's ``force_ended`` check and this call. When the
@@ -367,7 +367,7 @@ class TeamsGameBase(BaseGameMode):
         """
         Check if a team has won.
 
-        The result is latched once (UC-021 BR-003): later calls do not republish
+        The result is latched once (UC-020 BR-007): later calls do not republish
         it, and a force-ended game latches and publishes none.
 
         Returns:
@@ -589,7 +589,7 @@ class TeamsGameBase(BaseGameMode):
         logger.info("Ending game...")
         self.state = self.state.__class__.ENDING
 
-        # Only the latched result counts (UC-021 BR-003): a force-end before it, or a
+        # Only the latched result counts (UC-020 BR-007): a force-end before it, or a
         # stream end without one, declares no winner and shows no winner effects.
         force_ended = self.game_outcome() == "force_ended"
         winning_team_num = None if force_ended else self._latched_team

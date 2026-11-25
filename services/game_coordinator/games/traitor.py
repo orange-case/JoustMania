@@ -367,7 +367,7 @@ class TraitorGame(TeamsGameBase):
         A player's effective team is their secret_team (which equals their
         visible team for non-traitors).
 
-        The result is latched once (UC-022 BR-005): later calls do not republish
+        The result is latched once (UC-020 BR-007): later calls do not republish
         it, and a force-ended game latches and publishes none.
 
         Returns:
@@ -392,7 +392,7 @@ class TraitorGame(TeamsGameBase):
         if len(alive_teams) > 1:
             return False
 
-        # Latched before publishing, so a force-end landing afterwards keeps it (UC-022 BR-005)
+        # Latched before publishing, so a force-end landing afterwards keeps it (UC-020 BR-007)
         winning_team = alive_teams[0] if alive_teams else None
         if not self._latch_team_result(winning_team):
             return False
@@ -507,7 +507,7 @@ class TraitorGame(TeamsGameBase):
         logger.info("Ending Traitor game...")
         self.state = self.state.__class__.ENDING
 
-        # Only the latched result counts (UC-022 BR-005): a force-end before it, or a
+        # Only the latched result counts (UC-020 BR-007): a force-end before it, or a
         # stream end without one, declares no winner and shows no winner effects.
         force_ended = self.game_outcome() == "force_ended"
         winning_team = None if force_ended else self._latched_team
