@@ -9,6 +9,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from lib.setting_ladders import MODE_LADDER, SHIELD_KNOB_LADDER
 from proto import menu_pb2
 from services.operator_pad.actions import Actions
 from services.operator_pad.config import DEFAULT_KEYMAP, Timings, parse_keymap
@@ -144,6 +145,17 @@ async def test_new_layer_step_replaces_result():
     await pad.key(K5, PRESS)
     await pad.turn(UP)
     assert pad.screen()[0] == "TEAMS"
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-007"], steps=[5])
+@pytest.mark.parametrize(("key", "options"), [(183, len(MODE_LADDER)), (191, len(SHIELD_KNOB_LADDER))])
+async def test_a_full_turn_of_the_mode_or_shield_wheel_sends_nothing_and_shows_no_result(key, options):
+    pad = Pad()
+    await pad.key(key, PRESS)
+    await pad.turn(UP, options)
+    await pad.key(key, RELEASE)
+    assert pad.sent() == []
+    assert pad.screen()[0] == "JOUSTMANIA LOBBY"
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[4])
@@ -365,3 +377,81 @@ async def test_volume_prediction_clamps_a_batch_still_in_flight_on_its_own():
     assert pad.screen()[2] == "LOUD"
     gate.set()
     await asyncio.wait_for(pad.actions.drain(), 2.0)
+
+
+# --- UC-016 A5, BR-008: the knob with the pages -------------------------------------------------------
+
+
+def paged(version: int = 3, link_up: bool = True) -> Pad:
+    pad = Pad(link_up=link_up)
+    pad.model.set_protocol(version)
+    return pad
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008"], steps=[2])
+async def test_knob_turn_with_pages_shows_next_page_and_sends_nothing():
+    pad = paged()
+    assert pad.screen()[0].startswith("HOME")
+    await pad.turn(UP)
+    assert pad.screen()[0].startswith("GAME")
+    await pad.turn(DOWN, 2)
+    assert pad.screen()[0].startswith("SYSTEM")
+    await asyncio.wait_for(pad.actions.drain(), 2.0)
+    assert pad.sent() == [] and pad.cues.mock_calls == []
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-008", "BR-004"], steps=[3, 4])
+async def test_press_and_turn_sets_volume_and_short_press_mutes_at_release():
+    pad = paged()
+    await pad.key(KNOB_PRESS, PRESS)
+    pad.t += 200  # past the push jitter
+    await pad.turn(UP)
+    await pad.key(KNOB_PRESS, RELEASE)
+    await asyncio.wait_for(pad.actions.drain(), 2.0)
+    assert pad.sent() == [
+        {"command": "step_setting", "option": "audio_volume.master", "direction": "up", "steps": "1", "cue": "none"}
+    ]
+    await pad.key(KNOB_PRESS, PRESS)
+    assert len(pad.sent()) == 1  # no mute at the press
+    await pad.key(KNOB_PRESS, RELEASE)
+    assert pad.sent()[-1]["direction"] == "down"  # the mute: `normal` down to `mute`
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-008"], steps=[6])
+@pytest.mark.parametrize(("version", "link_up"), [(1, True), (3, False)])
+async def test_without_pages_the_knob_is_volume_and_mutes_at_press(version, link_up):
+    """M8 / FR-240: protocol 1 with the link up, or the link down, keeps UC-015's knob."""
+    pad = paged(version, link_up)
+    await pad.turn(UP)
+    await asyncio.wait_for(pad.actions.drain(), 2.0)
+    assert [d["option"] for d in pad.sent()] == ["audio_volume.master"]
+    await pad.key(KNOB_PRESS, PRESS)
+    assert len(pad.sent()) == 2
+
+
+@pytest.mark.uc("UC-016", flow="A1", br=["BR-008"])
+async def test_a_raising_pages_check_falls_back_to_the_volume_knob():
+    pad = paged()
+
+    class Broken(DisplayModel):
+        @property
+        def pages_active(self):
+            raise RuntimeError("display bug")
+
+    pad.model.__class__ = Broken
+    await pad.turn(UP)
+    await asyncio.wait_for(pad.actions.drain(), 2.0)
+    assert [d["option"] for d in pad.sent()] == ["audio_volume.master"]
+
+
+@pytest.mark.uc("UC-016", flow="A6", br=["BR-009"])
+async def test_a_held_key_pauses_auto_paging():
+    pad = paged()
+    await pad.key(K4, PRESS)
+    pad.clock.now += 6.0
+    assert pad.screen()[0].startswith("HOME")
+    await pad.key(K4, RELEASE)  # a K4 tap (gesture time): no command, no screen of its own
+    pad.clock.now += 4.9
+    assert pad.screen()[0].startswith("HOME")  # a full period from the release
+    pad.clock.now += 0.1
+    assert pad.screen()[0].startswith("GAME")

@@ -10,7 +10,8 @@ Rules:
 - K1, K2, K3, K5, K6 and K7 are layer keys (K6: the shield mode, BR-018; its tap is unchanged):
   a knob turn while one of them is the only key down counts toward that layer and marks the key
   used, so its release commits the layer (``layer``) instead of a tap or hold;
-- the knob turns are raw events (a smooth knob sends about 25 per turn): ``knob_events_per_step``
+- the knob turns are raw events (one per detent on the rev 5 pad, about 25 per turn on a smooth
+  knob): ``knob_events_per_step``
   events in one direction make one step, per layer key or, with no layer key, for the volume; a
   change of direction restarts the count, and the remainder is dropped on the layer key's release,
   after a pause of ``KNOB_PAUSE_MS`` in turning (the volume commit pause) and on ``reset()``;
@@ -25,6 +26,13 @@ Rules:
 - auto-repeat (value 2) and a release without a press are ignored; a second press of a key
   already down (its release was lost) re-arms that key: its timing restarts and its layer
   turns are dropped; ``reset()`` (device gone, events dropped) drops every gesture in progress.
+
+With the pages (``feed(..., pages=True)``: the display link is up with protocol 2 or higher,
+UC-016 BR-008) the knob with no key down changes: a turn alone is a ``page_step`` (counted like a
+volume step but with no pause reset, so a slow turn pages too; also while locked), a turn while
+the knob is pressed is the volume, and the mute fires at the release of a knob press held up to
+``tap_ms`` without a completed volume step. The binding is made at the knob press; raw turn events
+in the first ``KNOB_PUSH_JITTER_MS`` after it are dropped (the encoder jitters on the push).
 """
 
 from __future__ import annotations
@@ -52,6 +60,7 @@ KNOB = "KNOB"
 PRESS, RELEASE, REPEAT = 1, 0, 2
 
 KNOB_PAUSE_MS = 250  # BR-005: a pause this long in turning drops the volume remainder
+KNOB_PUSH_JITTER_MS = 150  # UC-016 BR-008: raw turns this soon after a knob press are the push, not a turn
 
 TAP = "tap"
 HOLD = "hold"
@@ -61,6 +70,7 @@ LAYER_STEP = "layer_step"  # BR-017: a completed step of a held layer key (previ
 KNOB_TURN = "knob_turn"
 KNOB_PRESS_GESTURE = "knob_press"
 LOCK = "lock"
+PAGE_STEP = "page_step"  # UC-016 BR-008: a knob step with the pages; never a command
 
 
 @dataclass(frozen=True)
@@ -92,6 +102,11 @@ class GestureMachine:
         self._last_volume_turn_ms: int | None = None
         self._chord = False
         self._knob_down = False
+        # UC-016 BR-008: the knob press bound to the pages, when it went down, whether it made a volume step.
+        self._knob_pages = False
+        self._knob_pressed_ms = 0
+        self._knob_turned = False
+        self._page_events: tuple[int, int] = (0, 0)
 
     def reset(self) -> None:
         """Device gone (UC-015 A4 step 2): every gesture in progress is dropped; the lock stays."""
@@ -103,6 +118,9 @@ class GestureMachine:
         self._last_volume_turn_ms = None
         self._chord = False
         self._knob_down = False
+        self._knob_pages = False
+        self._knob_turned = False
+        self._page_events = (0, 0)
 
     def keys_down(self) -> bool:
         return bool(self._down) or self._knob_down
@@ -114,7 +132,8 @@ class GestureMachine:
         key = self._single_layer_key()
         return key if key is not None and key in self._used else None
 
-    def feed(self, event: KeyEvent, timings: Timings) -> list[Gesture]:
+    def feed(self, event: KeyEvent, timings: Timings, pages: bool = False) -> list[Gesture]:
+        """``pages``: the display link shows the pages (UC-016 BR-008); False is UC-015 unchanged."""
         if event.value == REPEAT:
             return []
         if event.name in KEYS:
@@ -124,11 +143,11 @@ class GestureMachine:
         if event.name in (KNOB_TURN_A, KNOB_TURN_B):
             if event.value != PRESS:
                 return []  # one detent = one press; its release carries nothing
-            return self._knob_turn(-1 if event.name == KNOB_TURN_A else 1, event.t_ms, timings)
+            return self._knob_turn(-1 if event.name == KNOB_TURN_A else 1, event.t_ms, timings, pages)
         if event.name == KNOB_PRESS:
             if event.value == PRESS:
-                return self._knob_press()
-            return self._knob_release()
+                return self._knob_press(event.t_ms, pages)
+            return self._knob_release(event.t_ms, timings)
         return []
 
     # --- keys ---------------------------------------------------------------------------
@@ -198,10 +217,10 @@ class GestureMachine:
             return (direction, 0), direction
         return (direction, count), 0
 
-    def _knob_turn(self, direction: int, t_ms: int, timings: Timings) -> list[Gesture]:
-        if self._chord or self.locked:
+    def _knob_turn(self, direction: int, t_ms: int, timings: Timings, pages: bool = False) -> list[Gesture]:
+        if self._chord:
             return []
-        layer = self._single_layer_key()
+        layer = None if self.locked else self._single_layer_key()
         if layer is not None:
             self._volume_events = (0, 0)  # a layer interaction ends any volume turn in progress
             self._used.add(layer)
@@ -212,16 +231,31 @@ class GestureMachine:
                 return [Gesture(LAYER_STEP, layer, steps=self._layer_steps[layer])]
             return []
         if self._down:
-            return []  # a turn while K4 or K8 is down does nothing
+            return []  # a turn while K4 or K8 is down does nothing (also with the pages)
+        if pages and not self._knob_down:
+            # UC-016 BR-008: a turn alone scrolls the pages, also while locked; no pause reset, so a
+            # slow detent-by-detent turn still pages.
+            self._page_events, step = self._count(self._page_events, direction, timings.knob_events_per_step)
+            return [Gesture(PAGE_STEP, KNOB, steps=step)] if step else []
+        if self.locked:
+            return []
+        if self._knob_pages and t_ms - self._knob_pressed_ms < KNOB_PUSH_JITTER_MS:
+            return []  # one stray detent of the push would be a whole step at one event per step
         previous_ms, self._last_volume_turn_ms = self._last_volume_turn_ms, t_ms
         if previous_ms is None or t_ms - previous_ms >= KNOB_PAUSE_MS:
             self._volume_events = (0, 0)  # the volume commit pause: a half step never writes
         self._volume_events, step = self._count(self._volume_events, direction, timings.knob_events_per_step)
+        if step and self._knob_pages:
+            self._knob_turned = (
+                True  # a completed step, not a raw event: encoder jitter on a push never blocks the mute
+            )
         return [Gesture(KNOB_TURN, KNOB, steps=step)] if step else []
 
-    def _knob_press(self) -> list[Gesture]:
+    def _knob_press(self, t_ms: int = 0, pages: bool = False) -> list[Gesture]:
         if self._knob_down:
             return []
+        self._knob_pages = False
+        self._knob_turned = False
         if self._chord or self.locked:
             self._knob_down = True
             return []
@@ -238,14 +272,25 @@ class GestureMachine:
             return []
         self._knob_down = True
         self._volume_events = (0, 0)  # the mute wins over a turn not yet a step
+        if pages:
+            # UC-016 BR-008: bound to the pages at the press; the mute waits for a short release.
+            self._knob_pages = True
+            self._knob_pressed_ms = t_ms
+            return []
         return [Gesture(KNOB_PRESS_GESTURE, KNOB)]
 
-    def _knob_release(self) -> list[Gesture]:
+    def _knob_release(self, t_ms: int = 0, timings: Timings | None = None) -> list[Gesture]:
         if not self._knob_down:
             return []
         self._knob_down = False
+        bound, self._knob_pages = self._knob_pages, False
+        out: list[Gesture] = []
+        if bound and not self._knob_turned and not self._chord and not self.locked and timings is not None:
+            held = max(0, t_ms - self._knob_pressed_ms)
+            if held <= timings.tap_ms:
+                out.append(Gesture(KNOB_PRESS_GESTURE, KNOB, held_ms=held))
         self._clear_chord_when_idle()
-        return []
+        return out
 
     def _clear_chord_when_idle(self) -> None:
         if not self.keys_down():
