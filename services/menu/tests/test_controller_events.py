@@ -126,7 +126,7 @@ class TestControllerEventLoopDispatch:
 
         await event_loop_instance._dispatch_event(event)
 
-        # UC-012 BR-007: the controller event timestamp (ms) is passed on as the event time (s)
+        # UC-010 BR-016: the controller event timestamp (ms) is passed on as the event time (s)
         mock_callbacks.on_button.assert_called_once_with("serial1", "trigger", True, 1_700_000_000.4)
 
     @pytest.mark.asyncio

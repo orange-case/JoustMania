@@ -124,8 +124,8 @@ See [Mock Environment Guide](services/controller_manager/MOCK_ENVIRONMENT.md) fo
 | [Operator pad](docs/use_cases/UC-015.md) | USB macro pad as a menu remote (UC-015) |
 | [Development](docs/DEVELOPMENT.md) | Building, running, debugging |
 | [Contributing](docs/CONTRIBUTING.md) | Code style, PR workflow |
-| [Ready up and admin mode](docs/use_cases/UC-010.md) | Button map (UC-010 BR-005, UC-012 BR-005), admin mode |
-| [LED states](docs/specs/services.md#led-states-controller-feedback) | Lobby, game and admin LED colours and effects |
+| [Ready up](docs/use_cases/UC-010.md) and the [operator pad](docs/use_cases/UC-015.md) | Lobby button map (UC-010 BR-005), pad keys (UC-015 BR-011, BR-016) |
+| [LED states](docs/specs/services.md#led-states-controller-feedback) | Lobby and game LED colours and effects |
 | [Observability](docs/observability-quickstart.md) | Tracing, metrics, dashboards |
 
 ## Services

@@ -104,7 +104,7 @@ Agent intervention writes gated by LIVE interventions_enabled flag (#1213; defau
 No restart. The agent's next cycle runs the rules engine instead of emitting
 `agent.disabled`. This is the same mechanism documented in
 [feature-flags.md → Edit Flag Values](feature-flags.md#3-edit-flag-values); the
-menu's admin mode writes its settings through the same API.
+menu writes the operator pad's settings through the same API.
 
 ### Step 3 — Open the permission surface
 
