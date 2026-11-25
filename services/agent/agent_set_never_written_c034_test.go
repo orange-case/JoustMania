@@ -561,8 +561,12 @@ func TestC034_HoldKeysCeilings(t *testing.T) {
 	for key, ceiling := range c034HoldKeyCeilings {
 		t.Run("UC-043/A17 "+key, func(t *testing.T) {
 			p := policies[key]
-			if !slices.Equal(p.Scopes, []string{"stack", "experiment+arm", "real"}) {
-				t.Fatalf("%s scopes %v, want [stack experiment+arm real]", key, p.Scopes)
+			want := []string{"stack", "experiment+arm", "real"}
+			if key == experiment.HoldActivationKey {
+				want = want[:2] // read per grant, so never written for real games
+			}
+			if !slices.Equal(p.Scopes, want) {
+				t.Fatalf("%s scopes %v, want %v", key, p.Scopes, want)
 			}
 			if ceiling == nil {
 				return

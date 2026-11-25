@@ -80,6 +80,11 @@ func (pr *Promoter) promotePR(ctx context.Context, p experiment.Proposal, ev Evi
 	}
 }
 
+// ReasonNotRealPromotable discards an autonomous promotion of shield.activation:
+// instant and trigger games read it per grant, so a real write could change a
+// running game; it has no real scope (UC-043 A17, flags.md §13).
+const ReasonNotRealPromotable = "not_real_promotable"
+
 // promoteAutonomous applies the validated change to the REAL default, watches real
 // games, and reverts on degradation (#936: "autonomous — apply, watch, revert per
 // M7-7"). This is the consequential real-player-affecting path, so it is the most
@@ -102,6 +107,11 @@ func (pr *Promoter) promotePR(ctx context.Context, p experiment.Proposal, ev Evi
 //     Watcher is wired — checked BEFORE the real-default write, so nothing is ever
 //     written without a connected safety net.
 func (pr *Promoter) promoteAutonomous(ctx context.Context, p experiment.Proposal, cfg Config, ev Evidence, res *Result) {
+	if p.FlagKey == experiment.HoldActivationKey {
+		res.Outcome = OutcomeDiscarded
+		res.Reason = ReasonNotRealPromotable
+		return
+	}
 	if !cfg.Enabled {
 		res.Outcome = OutcomeDiscarded
 		res.Reason = "autonomous requested but agent disabled (kill-switch); real default not changed"
@@ -123,8 +133,7 @@ func (pr *Promoter) promoteAutonomous(ctx context.Context, p experiment.Proposal
 
 	// SUBSTRATE VALIDITY BAR (UC-043 A23, #2541): only an objective an operator
 	// attested as validated for the running release may change a real default.
-	// Checked before the cooldown and the hold-key deferral, so a below-bar hold
-	// key is never queued; writeTracked checks it again as the backstop.
+	// Checked before the cooldown; writeTracked checks it again as the backstop.
 	if err := pr.substrateRefusal(ev.Objective); err != nil {
 		res.Outcome = OutcomeDiscarded
 		res.Reason = err.Error()

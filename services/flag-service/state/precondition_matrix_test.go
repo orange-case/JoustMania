@@ -98,7 +98,7 @@ func TestPreconditionMatrix_Put(t *testing.T) {
 		{name: "game not live", put: &WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "gx"}}, status: 409, reason: fserr.GameNotLive},
 		{name: "game not live beats an invalid value", put: &WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("99"), Scope: Scope{GameID: "gx"}}, status: 409, reason: fserr.GameNotLive},
 		{name: "serial not in game", setup: func(t *testing.T, f *fixture) { f.register("g1", "c1", "S1") }, put: &WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("5"), Scope: Scope{GameID: "g1", Serial: "S9"}}, status: 422, reason: fserr.SerialNotInGame},
-		{name: "a live real game does not block a real write (#2810)", setup: liveReal, put: &guardPut},
+		{name: "a live real game does not block a real write", setup: liveReal, put: &guardPut},
 		{name: "shadow game does not block", setup: func(t *testing.T, f *fixture) { f.registerKind("g-s", "shadow") }, put: &guardPut},
 		{name: "invalid value", put: withReq(stackPut, func(r *WriteRequest) { r.Variant = "nope" }), status: 422, reason: fserr.OutOfBounds},
 		{name: "value out of range", put: withReq(guardPut, func(r *WriteRequest) { r.Value = raw("999") }), status: 422, reason: fserr.OutOfBounds},

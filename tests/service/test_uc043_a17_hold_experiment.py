@@ -18,7 +18,7 @@ test, not a statistical one:
 - A ``promote`` verdict needs two pairs (a paired SD) and only one archetype has a trigger
   policy, so the agent's own promotion cannot be reached on a stack in bounded time. The
   second test covers the stack half of A17 step 3 instead: while a real game is
-  registered, the ``real`` write a promotion makes is accepted (dry run, #2810). The
+  registered, the ``real`` write of a hold sub-parameter is accepted (dry run). The
   agent's side is ``services/agent/promote/hold_key_uc043_test.go``.
 """
 
@@ -186,13 +186,13 @@ def test_hold_experiment_runs_both_arms_and_the_experimental_arm_latches_hold(ho
 
 @pytest.mark.uc("UC-043", flow="A17", steps=[3])
 def test_real_write_of_a_hold_key_lands_while_a_real_game_is_registered(hold_stack):
-    """A17 step 3 (stack half): the promotion's ``real`` write is accepted while a real game is
-    registered; the game latched its values at its start (UC-040 BR-027, #2810). Dry run: nothing
-    is written on the shared stack."""
+    """A17 step 3 (stack half): a hold sub-parameter's ``real`` write is accepted while a real
+    game is registered, because the game latched its values at its start (UC-040 BR-027);
+    ``shield.activation`` has no ``real`` scope. Dry run: nothing is written on the shared stack."""
     _, client = hold_stack
     game_id = f"uc043-a17-real-{uuid.uuid4().hex[:8]}"
-    path = f"/game/{HOLD_FLAG}"
-    write = {"variant": HOLD_VALUE, "scope": {"game_kind": "real"}, "writer": "uc043-a17-promotion"}
+    path = "/game/shield.energy_budget_seconds"
+    write = {"value": 20, "scope": {"game_kind": "real"}, "writer": "uc043-a17-promotion"}
 
     # A real game (another coordinator instance, so the stack's reconcile never drops it).
     status, body = client.request(

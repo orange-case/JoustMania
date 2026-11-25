@@ -377,7 +377,7 @@ func TestDryRunEndpoint(t *testing.T) {
 }
 
 // A real write and its revert land while a real game runs: the game latched its
-// values at its start (UC-040 BR-027, #2810).
+// values at its start (UC-040 BR-027).
 //
 // UC: UC-043 A17
 func TestRealWriteDuringLiveRealGame(t *testing.T) {

@@ -453,7 +453,7 @@ func TestOperatorSetIsReadOnlyBaseline(t *testing.T) {
 
 // UC: UC-043 A17
 func TestRealScopeIsLatched(t *testing.T) {
-	t.Run("UC-043/A17 every flag promotable in scope real is latched at game start (#2810)", func(t *testing.T) {
+	t.Run("UC-043/A17 every flag promotable in scope real is latched at game start", func(t *testing.T) {
 		for _, dir := range []string{"", "ci"} {
 			real := map[string]bool{}
 			for _, p := range loadReal(t, dir).Policies() {
@@ -468,6 +468,27 @@ func TestRealScopeIsLatched(t *testing.T) {
 			for key := range latchedAtGameStart {
 				if !real[key] {
 					t.Errorf("flagd/%s: latchedAtGameStart lists %s, which has no scope real", dir, key)
+				}
+			}
+		}
+	})
+}
+
+// shield.activation is read at each grant in instant and trigger games
+// (UC-040 BR-019), so it is neither latched nor writable in scope real.
+//
+// UC: UC-043 A17
+// UC: UC-040 BR-019
+func TestShieldActivationIsReadPerGrant(t *testing.T) {
+	t.Run("UC-043/A17 shield.activation is not latched and has no scope real", func(t *testing.T) {
+		const key = "game/shield.activation"
+		if _, listed := latchedAtGameStart[key]; listed {
+			t.Errorf("latchedAtGameStart lists %s, which instant and trigger games read per grant", key)
+		}
+		for _, dir := range []string{"", "ci"} {
+			for _, p := range loadReal(t, dir).Policies() {
+				if id(p.Set, p.Key) == key && p.AllowsScope(ScopeReal) {
+					t.Errorf("flagd/%s: %s allows scope real", dir, key)
 				}
 			}
 		}

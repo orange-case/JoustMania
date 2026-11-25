@@ -427,7 +427,7 @@ func gameIDs(games []gameView) []string {
 // promotion event with outcome `reverted` (the kill switch or the watch undid the
 // real default) reads "reverted"; its status stays `done` (#1869). A `done`
 // experiment whose last promotion event is `discarded` reads "discarded" (a journal
-// from before #2810 whose deferred write was dropped). `promoting` is
+// from an older agent whose deferred write was dropped). `promoting` is
 // the live step while a promotion runs (the registry journals it right after
 // `concluded`, UC-043 step 8), so it reads empty until a terminal status lands
 // (#1869). `concluded` keeps the verdict label: it is journaled and left behind

@@ -4,11 +4,11 @@ import (
 	"testing"
 )
 
-// realRegistry widens two hold keys to scope real (as registry.yaml does since
-// FR-162) next to sensitivity.
+// realRegistry mirrors registry.yaml: a hold sub-parameter and sensitivity in
+// scope real, shield.activation without it.
 const realRegistry = `
 flags:
-  - {set: game, key: shield.activation, kind: overlay, scope: [stack, experiment+arm, real], bounds: {variants: [instant, trigger, hold]}, description: "test row"}
+  - {set: game, key: shield.activation, kind: overlay, scope: [stack, experiment+arm], bounds: {variants: [instant, trigger, hold]}, description: "test row"}
   - {set: game, key: shield.energy_budget_seconds, kind: overlay, scope: [stack, experiment+arm, real], bounds: {range: [3, 30]}, description: "test row"}
   - {set: game, key: sensitivity, kind: overlay, scope: [stack, experiment+arm, real], description: "test row"}
 `
@@ -27,7 +27,7 @@ func (f *fixture) registerKind(id, kind string) {
 }
 
 // The game latches every real-scoped key at its start (UC-040 BR-027), so a real
-// write and its revert land at once, live real game or not (#2810).
+// write and its revert land at once, live real game or not.
 //
 // UC: UC-043 A17
 func TestRealWriteDuringLiveRealGame(t *testing.T) {
@@ -35,7 +35,6 @@ func TestRealWriteDuringLiveRealGame(t *testing.T) {
 		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		f.registerKind("g-real", "real")
 		f.put(budgetReal("20"))
-		f.put(WriteRequest{Set: "game", Flag: "shield.activation", Variant: "hold", Scope: realScope, Writer: "promotion"})
 		if _, val := f.resolve("shield.energy_budget_seconds", map[string]any{"game_kind": "real"}); val != float64(20) {
 			t.Fatalf("real default = %v, want 20", val)
 		}

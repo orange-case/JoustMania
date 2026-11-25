@@ -1963,6 +1963,27 @@ func (r *Registry) flushLaterPromotionsLocked(e *entry) {
 	e.laterPromotions = nil
 }
 
+// warnLegacyRevertLocked logs one WARN for a done experiment whose last promotion
+// event is a hold-key revert an older agent queued (revert_pending): nothing runs
+// it now, so its real overlay stays until the kill switch or a manual DELETE
+// clears it (UC-043 A15 step 3). Assumes r.mu is held.
+func (r *Registry) warnLegacyRevertLocked(id string, jrnl *journal.Journal) {
+	events, err := jrnl.Events()
+	if err != nil {
+		return
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind != journal.KindPromotion || events[i].Promotion == nil {
+			continue
+		}
+		if events[i].Promotion.RevertPending {
+			r.log.Warn("experiment: a queued revert from an older agent was not run; clear the real overlay with the kill switch or a DELETE (UC-043 A15)",
+				"experiment_id", id, "flag", jrnl.Intent().FlagKey)
+		}
+		return
+	}
+}
+
 // RecordPromotion journals a later outcome of an experiment's promotion (UC-043
 // A1, #1704: the kill switch reverted its autonomous real default). It appends a
 // promotion event whatever the experiment's status is, and never changes that
@@ -2193,6 +2214,7 @@ func (r *Registry) Rehydrate(ids []string) error {
 			st = StatusRunning
 		}
 		if st.IsTerminal() {
+			r.warnLegacyRevertLocked(id, jrnl)
 			continue
 		}
 		e := &entry{

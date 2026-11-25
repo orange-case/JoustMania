@@ -132,6 +132,9 @@ type Promotion struct {
 	Outcome   string `json:"outcome"`
 	Reason    string `json:"reason,omitempty"`
 	Reference string `json:"reference,omitempty"`
+	// RevertPending is read only: an older agent set it on a hold-key revert it
+	// queued until no real game ran. Rehydrate warns about one left unrun.
+	RevertPending bool `json:"revert_pending,omitempty"`
 	// ForeignOwner is set on a discarded promotion the flag service refused because
 	// another writer owns the real overlay (412 writer_mismatch, UC-043 A19, #2276):
 	// the writer label ("unknown" when it could not be read). It marks the winning

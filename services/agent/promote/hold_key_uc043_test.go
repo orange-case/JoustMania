@@ -7,8 +7,8 @@ import (
 	"github.com/joustmania/agent/experiment"
 )
 
-// A hold key is written and reverted at once: the game latches it at its start
-// (UC-040 BR-027), so a real write never reaches a running game (#2810).
+// A hold sub-parameter is written and reverted at once: the game latches it at
+// its start (UC-040 BR-027), so a real write never reaches a running game.
 
 const holdKey = "shield.energy_budget_seconds"
 
@@ -36,6 +36,18 @@ func TestHoldKeyPromotion_WritesAndRevertsAtOnce(t *testing.T) {
 		}
 		if len(realDef.calls) != 1 {
 			t.Fatalf("SetRealDefault calls = %d, want 1", len(realDef.calls))
+		}
+	})
+	t.Run("UC-043/A17 shield.activation is never written to real games", func(t *testing.T) {
+		realDef := &recordingRealDefault{}
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, fakeWatcher{}, &recordingReverter{})
+		prop := experiment.Proposal{FlagKey: experiment.HoldActivationKey, ExperimentID: "exp-h3", ExperimentalValue: experiment.HoldValue}
+		res := p.Promote(context.Background(), prop, promoteVerdict, autoOn, holdEvidence())
+		if res.Outcome != OutcomeDiscarded || res.Reason != ReasonNotRealPromotable {
+			t.Fatalf("outcome = %q (%s), want discarded (%s)", res.Outcome, res.Reason, ReasonNotRealPromotable)
+		}
+		if len(realDef.calls) != 0 {
+			t.Fatalf("SetRealDefault calls = %d, want 0", len(realDef.calls))
 		}
 	})
 	t.Run("UC-043/A17 a degraded hold-key promotion is reverted at once", func(t *testing.T) {
