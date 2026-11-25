@@ -3,7 +3,8 @@
 Every experiment verdict ([UC-043](use_cases/UC-043.md)) is computed on **shadow games**: mock
 controllers driven by synthetic archetypes. Whether a verdict means anything for real players
 depends on whether shadow play resembles real play and whether shadow fitness moves the way real
-fitness moves. This runbook covers two procedures:
+fitness moves. This runbook covers two procedures, plus how to attest the result (section 3) and
+how to refit the archetypes when the realism is off (section 4, UC-047):
 
 1. **Realism characterization** (UC-043 A22): `scripts/agent-shadow-realism.sh`, read-only,
    compares real and shadow games over a time window.
@@ -209,3 +210,52 @@ upgrade puts every objective below the bar again until you attest it for the new
 
 A blocked promotion is journaled `discarded` with the reason
 `substrate_not_validated objective=<objective>`; the experiment ends `discarded` (UC-043 A4).
+
+## 4. Refitting the archetypes offline (UC-047, #2813)
+
+When section 1 finds shadow play divergent, refit the archetypes. The fit is a script over data
+that already exists; it starts no game and writes nothing but the flag files you name. The result
+is a pull request a human reviews; git history is the rollback (a revert pull request).
+
+**Collect** (laptop, SSH tunnel as in section 1). Pick a window with real play and with an
+experiment's shadow games; leave known test sessions out of it.
+
+```bash
+scripts/agent-shadow-realism.sh --start EPOCH --end EPOCH --mode FFA \
+  --vm-url http://localhost:18080/victoria-metrics --no-jaeger --save ds.json
+# the experiment journals label each shadow game with its archetype
+ssh joustmania@192.168.1.9 'cd ~/JoustMania && rm -rf /tmp/experiments &&
+  docker compose cp agent:/var/lib/joustmania/agent/experiments /tmp/experiments'
+scp -r joustmania@192.168.1.9:/tmp/experiments .
+# optional, for a window longer than the metrics store keeps (UC-047 A13)
+cp experiments/calibration/real_games.jsonl .
+```
+
+**Fit** (in a branch of a checkout):
+
+```bash
+python3 scripts/agent_archetype_fit.py --dataset ds.json --experiments experiments [--journal real_games.jsonl]
+```
+
+It prints the eligible and excluded real games (UC-047 BR-002), the median intensity, movement
+variance and elimination pace per band, the shadow games it skipped (BR-010) and per archetype the
+ratios and every changed value. Exit 3 means fewer than 24 eligible real games (A10): use a longer
+window or the journal. An archetype with fewer than 4 usable control-arm shadow games keeps its
+parameters (A11); run an experiment on the current flag files first.
+
+**Propose.** Write both flag files and open the pull request with the report in its body:
+
+```bash
+python3 scripts/agent_archetype_fit.py --dataset ds.json --experiments experiments \
+  --write services/flagd/agent.json --write services/flagd/ci/agent.json > fit-report.txt
+git switch -c calibrate/archetypes-<date> && git add services/flagd/agent.json services/flagd/ci/agent.json
+git commit -m "feat(agent): refit shadow archetypes from real games (UC-047)"
+git push -u origin HEAD
+gh pr create --title "feat(agent): refit shadow archetypes from real games (UC-047)" --body-file fit-report.txt
+```
+
+The reviewer checks the ratios against the realism report and the notes (`clamped:<metric>`,
+`ratio_undefined:<metric>`, A12). After the merge the parameters reach the Pi with the next release
+(the flag files are mounted from the pinned checkout). Run section 1 again on new shadow games to
+see whether the realism improved; if it got worse, revert the pull request (A15). A changed
+archetype also changes the attested substrate: attest again (section 3) on the new release.

@@ -1,13 +1,11 @@
 package main
 
 import (
-	"context"
 	"log/slog"
 	"time"
 
 	otelmetric "go.opentelemetry.io/otel/metric"
 
-	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamejournal"
 )
 
@@ -16,18 +14,14 @@ import (
 // joins it with Close (server.go). It never
 // fails the agent: an unreadable journal file is logged and counted (reason
 // load), and the recorder then counts every refused write instead of replacing
-// the file. agentFlags may be nil (the test-session mark is then unknown).
+// the file.
 // gameJournalCloseTimeout bounds the shutdown wait for the journal writer: one
 // rewrite of the bounded file takes well under a second, even on a Pi SD card.
 const gameJournalCloseTimeout = 3 * time.Second
 
-func newGameJournal(root string, agentFlags *flags.Flags, mp otelmetric.MeterProvider, log *slog.Logger) *gamejournal.Recorder {
+func newGameJournal(root string, mp otelmetric.MeterProvider, log *slog.Logger) *gamejournal.Recorder {
 	j, rep, err := gamejournal.Open(root, gamejournal.DefaultMaxGames)
-	var testSession func(context.Context) (bool, bool)
-	if agentFlags != nil {
-		testSession = agentFlags.CalibrationTestSession
-	}
-	rec := gamejournal.NewRecorder(j, testSession, mp, log)
+	rec := gamejournal.NewRecorder(j, mp, log)
 	switch {
 	case err != nil:
 		rec.CountFailure(gamejournal.ReasonLoad)
