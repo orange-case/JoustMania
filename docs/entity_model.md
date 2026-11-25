@@ -577,7 +577,7 @@ The agent's view of one game, built from the OTLP metrics and spans the collecto
 | experiment_id | Experiment attribution of a shadow game (partition enrichment, not a routing key) | String | 50 | Optional, Foreign Key (EXPERIMENT.experiment_id) |
 | arm | Arm of that game | String | 12 | Optional, Values: experimental, control |
 | end_reason | Which signal ended the game: the `game_active` 1 to 0 datapoint (`zero`), the game root span before any 0 (`root_span`), the agent-only `game.end` log event before either (`end_event`, planned #2722), or `game_active` silent for 60 s (`stale`, the agent's telemetry for the game broke: experiments, retro, summary and proposer skip it). Empty while the game runs; set in the game-end snapshot (UC-041 A4, #1494) | String | 9 | Optional, Values: zero, root_span, stale |
-| game_trace_id | Trace id of the coordinator's root game span, from the `game_trace_correlation` gauge or, planned #2766, the trace context of the agent-only `game.start` / `game.phase.start` log records (UC-041 BR-004) | String | 32 | Optional, Format: 32 hex |
+| game_trace_id | Trace id of the coordinator's root game span, from the `game_trace_correlation` gauge or, since #2766, the trace context of the agent-only `game.start` / `game.phase.start` log records (UC-041 BR-004) | String | 32 | Optional, Format: 32 hex |
 | game_trace_span_id | Span id of the game root | String | 16 | Optional, Format: 16 hex |
 | gameplay_phase_span_id | Span id of `gameplay_phase`, first fallback parent of the in-game agent spans | String | 16 | Optional, Format: 16 hex |
 | game_cycle_span_id | Span id of `game_cycle`, preferred remote parent of the in-game agent spans | String | 16 | Optional, Format: 16 hex |
