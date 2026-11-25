@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.25.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.24.0...joustmania-v0.25.0) (2026-11-25)
+
+
+### Features
+
+* **agent:** game trace ids from agent log event trace context ([#2766](https://github.com/orange-case/JoustMania/issues/2766)) ([#2779](https://github.com/orange-case/JoustMania/issues/2779)) ([59e191d](https://github.com/orange-case/JoustMania/commit/59e191d6c2dbfc171bf58452928da6d8f1982677))
+* **agent:** log events open and hold a game's context ([#2722](https://github.com/orange-case/JoustMania/issues/2722)) ([#2772](https://github.com/orange-case/JoustMania/issues/2772)) ([56bae33](https://github.com/orange-case/JoustMania/commit/56bae332572f8b3f5b651dfe21c53257f50faf92))
+* **agent:** name the decide span invoke_agent per GenAI semconv v0.1.0 ([#2584](https://github.com/orange-case/JoustMania/issues/2584) PR 1/3) ([#2726](https://github.com/orange-case/JoustMania/issues/2726)) ([67be833](https://github.com/orange-case/JoustMania/commit/67be8330848472ea4b5df98944baf37c9cf6ad17))
+* **agent:** sum GenAI usage and request settings on the invoke_agent span ([#2584](https://github.com/orange-case/JoustMania/issues/2584) PR 2/3) ([#2731](https://github.com/orange-case/JoustMania/issues/2731)) ([3a243c8](https://github.com/orange-case/JoustMania/commit/3a243c8bfb74e4d3fa64d727e6b82a9b7609c4de))
+* **audio:** "Watching" and "Interventions on/off" voice lines ([#2747](https://github.com/orange-case/JoustMania/issues/2747)) ([#2752](https://github.com/orange-case/JoustMania/issues/2752)) ([5b338f4](https://github.com/orange-case/JoustMania/commit/5b338f48872da192ce484a2992c298a9143388e3))
+* **collector:** pass marked game.phase.start to the agent ([#2766](https://github.com/orange-case/JoustMania/issues/2766)) ([#2778](https://github.com/orange-case/JoustMania/issues/2778)) ([2c571e1](https://github.com/orange-case/JoustMania/commit/2c571e1c658c308b04c0cfb9c4c1b65ca881dd1c))
+* **collector:** route agent-only log events ([#2722](https://github.com/orange-case/JoustMania/issues/2722)) ([#2767](https://github.com/orange-case/JoustMania/issues/2767)) ([ff7aef2](https://github.com/orange-case/JoustMania/commit/ff7aef2ce3c27c57c731dc63bddd6077d2279a72))
+* **coordinator:** game.phase.start agent log events carry span ids ([#2766](https://github.com/orange-case/JoustMania/issues/2766)) ([#2777](https://github.com/orange-case/JoustMania/issues/2777)) ([b5a7b0a](https://github.com/orange-case/JoustMania/commit/b5a7b0ae26633ae0b07a5468ceaa01ca93314a85))
+* **dashboard:** /?view=stage, the talk's full-screen stage view ([#2727](https://github.com/orange-case/JoustMania/issues/2727)) ([4dc58e3](https://github.com/orange-case/JoustMania/commit/4dc58e3a9f4c98ecb4363ad15ac476253ad38bf5))
+* **flag-service:** compare-and-delete if_writer on the in-memory stack overlay ([#2755](https://github.com/orange-case/JoustMania/issues/2755)) ([#2757](https://github.com/orange-case/JoustMania/issues/2757)) ([40c9686](https://github.com/orange-case/JoustMania/commit/40c9686ac457ba1de61e8ae146c63158329b3102))
+* **flag-service:** Flagsmith options titled with the variant name, valued with the variant's value ([#2713](https://github.com/orange-case/JoustMania/issues/2713)) ([#2725](https://github.com/orange-case/JoustMania/issues/2725)) ([0f40f51](https://github.com/orange-case/JoustMania/commit/0f40f51344aa8320a0fcbbe238f7f23b3eb01989))
+* **flag-service:** Flagsmith shows the baseline as every feature's reference value ([#2623](https://github.com/orange-case/JoustMania/issues/2623)) ([#2724](https://github.com/orange-case/JoustMania/issues/2724)) ([8f9da91](https://github.com/orange-case/JoustMania/commit/8f9da91588a3b64b4b7fb32457d64b11227f0b7d))
+* **game-coordinator:** agent-only log events behind telemetry.agent_log_events ([#2722](https://github.com/orange-case/JoustMania/issues/2722)) ([#2776](https://github.com/orange-case/JoustMania/issues/2776)) ([c0ced47](https://github.com/orange-case/JoustMania/commit/c0ced47bed4e885789d5b1965667b51fee8be6e6))
+* **menu:** reset_setting, interventions_switch, setting_defaults ([#2747](https://github.com/orange-case/JoustMania/issues/2747)) ([#2753](https://github.com/orange-case/JoustMania/issues/2753)) ([b52896b](https://github.com/orange-case/JoustMania/commit/b52896bc5c6829e2bc746c9839c3ac7b75868756))
+* **menu:** status fields 22-27 and pad commands for goal, rate, group, retro ([#2755](https://github.com/orange-case/JoustMania/issues/2755)) ([#2759](https://github.com/orange-case/JoustMania/issues/2759)) ([18cec6f](https://github.com/orange-case/JoustMania/commit/18cec6f03dc97a0b9eb9359677d01382b19914f2))
+* **menu:** wrap the pad's enum settings ([#2742](https://github.com/orange-case/JoustMania/issues/2742)) ([#2749](https://github.com/orange-case/JoustMania/issues/2749)) ([af9a0a3](https://github.com/orange-case/JoustMania/commit/af9a0a3111975bceb235683a2cc4fb79c5a01656))
+* **operator-pad:** goal, rate, group and retro rows settable ([#2755](https://github.com/orange-case/JoustMania/issues/2755)) ([#2758](https://github.com/orange-case/JoustMania/issues/2758)) ([458bee9](https://github.com/orange-case/JoustMania/commit/458bee927d9a5ab88814373b4d3e3d214df7e138))
+* **operator-pad:** page keys ([#2747](https://github.com/orange-case/JoustMania/issues/2747)) ([#2754](https://github.com/orange-case/JoustMania/issues/2754)) ([949f114](https://github.com/orange-case/JoustMania/commit/949f1142b88b1e30ebbfa4496a2aa3e1b597a26a))
+* **operator-pad:** pages, wheel and knob scrolling on the pad's screen ([#2742](https://github.com/orange-case/JoustMania/issues/2742)) ([#2750](https://github.com/orange-case/JoustMania/issues/2750)) ([ac066e7](https://github.com/orange-case/JoustMania/commit/ac066e7715e6c02a7c48c9ef1be13fe119d29021))
+* **operator-pad:** status and setting screens on the pad's OLED ([#2741](https://github.com/orange-case/JoustMania/issues/2741)) ([#2748](https://github.com/orange-case/JoustMania/issues/2748)) ([fb65730](https://github.com/orange-case/JoustMania/commit/fb65730e1b3e1c5e5f4598cb2495781877d8fc0d))
+* **talk:** Talk: Live board and ?latest= deep links to the newest agent span ([#2717](https://github.com/orange-case/JoustMania/issues/2717)) ([ccf6f6d](https://github.com/orange-case/JoustMania/commit/ccf6f6d42f3f37e8d654f7338354cc8b0353d2a8))
+
+
+### Bug Fixes
+
+* **agent:** cool down a game-wide lever for one effect window ([#2641](https://github.com/orange-case/JoustMania/issues/2641)) ([#2746](https://github.com/orange-case/JoustMania/issues/2746)) ([34294cc](https://github.com/orange-case/JoustMania/commit/34294cc15065cfa88485c9a9d87e35c421cc9393))
+* **audio:** pick up a USB speaker hot-plugged after start ([#2715](https://github.com/orange-case/JoustMania/issues/2715)) ([#2744](https://github.com/orange-case/JoustMania/issues/2744)) ([5712af0](https://github.com/orange-case/JoustMania/commit/5712af0f9168f249885a0d587e89b209d8fb9bec))
+* **flag-service:** a pulled write's outcome never overrides a later local write ([#2739](https://github.com/orange-case/JoustMania/issues/2739)) ([#2740](https://github.com/orange-case/JoustMania/issues/2740)) ([011b8d9](https://github.com/orange-case/JoustMania/commit/011b8d941278926874692e26ef4c3128dc2ee44d))
+* **flag-service:** keep a key out of sync after a confirm that raced a local revert ([#2611](https://github.com/orange-case/JoustMania/issues/2611)) ([#2719](https://github.com/orange-case/JoustMania/issues/2719)) ([66c2327](https://github.com/orange-case/JoustMania/commit/66c2327221d48580df8ce08277fd6d7c66a898bf))
+* **flag-service:** no stale revert mark; document refused stops ([#2631](https://github.com/orange-case/JoustMania/issues/2631)) ([#2723](https://github.com/orange-case/JoustMania/issues/2723)) ([1bd15d4](https://github.com/orange-case/JoustMania/commit/1bd15d4f3dc425a06b7ce8c05c1e6b849f988acb))
+* **flag-service:** pull round never acts on a local value read before a newer change ([#2733](https://github.com/orange-case/JoustMania/issues/2733)) ([#2735](https://github.com/orange-case/JoustMania/issues/2735)) ([70fde69](https://github.com/orange-case/JoustMania/commit/70fde69f146af40fe4219a816cedca085c6ede8c))
+* **flag-service:** the too-new Flagsmith copy no longer blocks or undoes the stale-document heal ([#2602](https://github.com/orange-case/JoustMania/issues/2602)) ([#2732](https://github.com/orange-case/JoustMania/issues/2732)) ([ae487d0](https://github.com/orange-case/JoustMania/commit/ae487d07cca98b08cfcdc8f25e9ddcf3b2232e63))
+* **rust-hid:** bump url to 2.5.9 for RUSTSEC-2026-0592 ([#2730](https://github.com/orange-case/JoustMania/issues/2730)) ([2085f55](https://github.com/orange-case/JoustMania/commit/2085f55e2972ad6a8b9a661553d7eacfdbc7be2d))
+
+
+### Documentation
+
+* name the decide span invoke_agent in the prose ([#2584](https://github.com/orange-case/JoustMania/issues/2584) PR 3/3) ([#2734](https://github.com/orange-case/JoustMania/issues/2734)) ([c2f1888](https://github.com/orange-case/JoustMania/commit/c2f1888c675960d5707faa16f5b27cfa6d1d1ab6))
+* **spec:** agent-only log events and log-opened game context ([#2722](https://github.com/orange-case/JoustMania/issues/2722)) ([#2762](https://github.com/orange-case/JoustMania/issues/2762)) ([3143d66](https://github.com/orange-case/JoustMania/commit/3143d66b322c5ee71c1b90fec0b5b00562cd7ddf))
+* **spec:** every pad row settable — goal, rate, group, retro ([#2755](https://github.com/orange-case/JoustMania/issues/2755)) ([#2756](https://github.com/orange-case/JoustMania/issues/2756)) ([7f7f393](https://github.com/orange-case/JoustMania/commit/7f7f3933b001d7f4fc7524028f282d702423c58d))
+* **spec:** game trace ids from agent log event trace context ([#2766](https://github.com/orange-case/JoustMania/issues/2766)) ([#2775](https://github.com/orange-case/JoustMania/issues/2775)) ([1860106](https://github.com/orange-case/JoustMania/commit/18601067761546dc60f9c3eca4e21c2926592202))
+* **spec:** the retro and proposer model calls record GenAI client metrics ([#2738](https://github.com/orange-case/JoustMania/issues/2738)) ([5898b3f](https://github.com/orange-case/JoustMania/commit/5898b3f47e8f2f1ea36ea8c76d301a433994aebb))
+* **spec:** UC-016 operator pad display, phase 2 ([#2728](https://github.com/orange-case/JoustMania/issues/2728)) ([97eadd3](https://github.com/orange-case/JoustMania/commit/97eadd3c4630c4a108d47fdcd96789be386f9479))
+* **spec:** UC-016 page keys, edit and reset per row ([#2747](https://github.com/orange-case/JoustMania/issues/2747)) ([#2751](https://github.com/orange-case/JoustMania/issues/2751)) ([b31ff4b](https://github.com/orange-case/JoustMania/commit/b31ff4bd97d0ea7625d1c71337c105e0b9fee31c))
+* **spec:** UC-016 pages, knob scrolling and auto-paging ([#2742](https://github.com/orange-case/JoustMania/issues/2742)) ([#2743](https://github.com/orange-case/JoustMania/issues/2743)) ([8a77299](https://github.com/orange-case/JoustMania/commit/8a772996b08c5159d40bec2332f214f737d8bc8d))
+* **spec:** use cases for the span-depth, AI dashboard and AI cost booth challenges ([#2574](https://github.com/orange-case/JoustMania/issues/2574), [#2585](https://github.com/orange-case/JoustMania/issues/2585), [#2718](https://github.com/orange-case/JoustMania/issues/2718)) ([#2736](https://github.com/orange-case/JoustMania/issues/2736)) ([1fe90a6](https://github.com/orange-case/JoustMania/commit/1fe90a6daca6d6cf717ffe912b918c1ba068b891))
+
+
+### Tests
+
+* **flag-service:** wait for a pull that started after the round's wake ([#2686](https://github.com/orange-case/JoustMania/issues/2686)) ([#2720](https://github.com/orange-case/JoustMania/issues/2720)) ([a7b2be2](https://github.com/orange-case/JoustMania/commit/a7b2be200d05ac5f20b88b820d3da9c4ed5701b5))
+* **flag-service:** wait for the option sync before the stale-identity hook ([#2714](https://github.com/orange-case/JoustMania/issues/2714)) ([c336da0](https://github.com/orange-case/JoustMania/commit/c336da07adbb5849f27fe7318236f7ef568a84a4))
+* **game-coordinator:** make timing-sensitive tests independent of load ([#2655](https://github.com/orange-case/JoustMania/issues/2655)) ([#2745](https://github.com/orange-case/JoustMania/issues/2745)) ([55334ec](https://github.com/orange-case/JoustMania/commit/55334ece44c45a1dbee5445767845a028bef4724))
+
 ## [0.24.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.23.0...joustmania-v0.24.0) (2026-11-20)
 
 

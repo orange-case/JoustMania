@@ -388,9 +388,8 @@ func (r *Runner) startAndCapture(
 	cfg := buildStartConfig(spec, serials)
 	// Spawn-traceparent propagation (#1182, epic #1181): for an experiment-bound
 	// shadow spawn carrying a valid experiment SpanContext, inject it as the
-	// OUTGOING traceparent. The coordinator makes its game-lifecycle span a CHILD
-	// of the experiment span only under telemetry.experiment_game_parent=child;
-	// under the default link it starts its own trace with a Link (#2223). A real game / unbound shadow game (invalid
+	// OUTGOING traceparent. The coordinator starts the game's own trace with a
+	// Link to the experiment span (#2223). A real game / unbound shadow game (invalid
 	// SpanContext) injects nothing and stays own-rooted.
 	ctx = injectExperimentTraceparent(ctx, spec.ExperimentSpanContext)
 	stream, err := cl.coord.StreamGameEvents(ctx, &gcpb.StreamEventsRequest{StartConfig: cfg})

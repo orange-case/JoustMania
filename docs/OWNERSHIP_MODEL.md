@@ -9,8 +9,8 @@ The code fixes #815 (admin surface), #816 (sensitivity), #817 (grace/shield),
 this document describes the current state, verified against the code. Where the two ever
 disagree, treat it as a bug in one of them and fix both in the same PR.
 
-The normative rules for the invalidation of agent overrides (formerly section 5)
-and the human-visibility contract (formerly section 6.1) live in the flag
+The normative rules for the invalidation of agent overrides
+and the human-visibility contract live in the flag
 catalog, [flags.md section 14](specs/flags.md#14-ownership-composition-invalidation-and-visibility).
 The section numbers below are kept stable because code comments cite them.
 
@@ -207,12 +207,12 @@ The agent's live intervention surface (all in the `interventions` set, game-scop
 | `volume_override` | state (float) | audio volume | Agent-only at runtime; human owns the `user` set baseline volumes |
 | `eliminate_player` / `revive_player` / `audio_cue` / `controller_effect` / `end_game` | one-shot event (per-game event list) | one-shot through native paths | Agent-only; no persisted state |
 
-## 4. Composition Rules (#816 / #817, shipped)
+## 4. Composition Rules
 
 These are the only two parameters both actors touch. Each gets a defined,
 implementable composition rule.
 
-### 4.1 Sensitivity (`#816`, shipped)
+### 4.1 Sensitivity
 
 **Runtime state.** The game keeps two layers
 ([`base.py`](../services/game_coordinator/games/base.py), "Sensitivity arbitration"):
@@ -247,7 +247,7 @@ coordinator code path outside it currently pushes a mid-game flag edit into it, 
 in practice the baseline is the lobby value frozen at game start.
 
 
-### 4.2 Grace / Invincibility / Shield (`#817`, shipped)
+### 4.2 Grace / Invincibility / Shield
 
 There are **three** distinct grace mechanisms, and they must not be conflated:
 
@@ -291,7 +291,7 @@ agent may re-propose afterwards. The sensitivity implementation is described in
 section 4.1.
 
 
-## 6. Visibility & Kill-Switch Contract (#818 / #819, shipped)
+## 6. Visibility & Kill-Switch Contract
 
 The model above needs a human feedback loop and an on-device control. Both have
 shipped, #818 gives the human a signal when the agent acts, and #819 gives the

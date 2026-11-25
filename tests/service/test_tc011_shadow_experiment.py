@@ -266,8 +266,7 @@ async def test_no_real_game_ran_with_the_experiment(experiment_stack):
 
 @pytest.mark.uc("UC-043", flow="main", steps=[4], tc="TC-011")
 def test_shadow_game_is_its_own_trace_linked_to_the_experiment(experiment_stack):
-    """#2223: with telemetry.experiment_game_parent at its default (`link`) a shadow game
-    roots its own trace and carries a Link `link.kind=experiment` to the experiment span.
+    """#2223: a shadow game roots its own trace and carries a Link `link.kind=experiment` to the experiment span.
 
     The agent.experiment span is exported when the experiment ends, so this runs after
     the teardown test above (the module's tests run in order).

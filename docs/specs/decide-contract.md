@@ -3,7 +3,7 @@
 > Technical spec. Part of the [spec tree](../README.md). Realises FR-044 to FR-054
 > in [requirements.md](../requirements.md) and [UC-040](../use_cases/UC-040.md),
 > [UC-044](../use_cases/UC-044.md), [UC-045](../use_cases/UC-045.md).
-> State: `main` @ 84c3ba15 (2026-10-16, includes PRs #1257, #1261, #1265, #1284, #1286 (the Jev gate and most-likely-level magnitude of #1281), #1288 (per-backend act threshold), #1297 (#1295 decision target), #1303 (#1298 no-interventions gate), #1306 (#1299), #1312 (#1301 feedback), #1315 (#1310/#1313) and #1308 (#1258 pattern games)). Code references use `file:Symbol` where practical, because line numbers rot. Planned or in-flight items carry their issue / PR number and are marked **Planned** / **In flight**.
+> Code references use `file:Symbol` where practical, because line numbers rot. Planned or in-flight items carry their issue / PR number and are marked **Planned** / **In flight**.
 > **References.** Write a code reference as a full repo path: `path/file.go:Symbol` (survives edits) or `path/file.go:123` (allowed, but it drifts and a growing count warns in CI). `make spec-refs-check` fails on a missing file, an out-of-range line, a missing symbol or a path that is not a full repo path (#1280). <!-- spec-refs: ignore -->
 
 The agent answers "should I intervene in this game, how, and on whom" through one
@@ -170,8 +170,7 @@ The `rules` backend answers `ffa.magnitude` from its first decision's value, els
 `grant_shield` from the rules carries no value when ranked; the loop stamps it with the `shield_seconds` `default`
 variant before the permission chain (UC-040 BR-029) and sets the record's `ffa.magnitude` answer to that stamped
 length, so `decide.answers` on the `invoke_agent joustmania-agent` span reports the seconds that are written, not 5 (#2395;
-`services/agent/decision/chargeledger.go:stampShieldSeconds`). The in-process `RulesBackend.Decide` (tests and
-tooling only) still answers the Default.
+`services/agent/decision/chargeledger.go:stampShieldSeconds`).
 
 ## 3. Wire format for remote backends
 
@@ -475,7 +474,7 @@ decision repeats the verdict as `decide.blocked` / `decide.block_reason` (§6, #
   allow-listed interventions and alive players **plus** every intervention and target the engine ranked
   (`services/agent/decision/decide_rules.go:emissionRequest`), so `decide.questions` on a rules span can list an intervention
   the allow-list does not hold; the permission chain (§4.5) applies the allow-list afterwards and its verdict
-  is `decide.blocked`. A remote backend's request, and `RulesBackend.Decide`, keep the allow-listed options.
+  is `decide.blocked`. A remote backend's request keeps the allow-listed options.
   Only telemetry changed: the emitted decisions and their outcomes are pinned by
   `decision/testdata/rules_path_golden.json`. Because the softmax runs over the widened options, the rules-path
   `decide.confidence` (1 − p(noop) for the chosen intervention) is computed over the engine's own ranked
@@ -969,7 +968,7 @@ left is never a hit. Hard bounds of the characteristics are in §14.4.
 
 | Characteristic | Definition | Signal | Scopes |
 |---|---|---|---|
-| `duration` | Game seconds elapsed, and whether the game ended (end reason zero or `root_span`, planned #2722 also `end_event`; a stale end is no data) | `Session.DurationSeconds`, the game-end consumer | game |
+| `duration` | Game seconds elapsed, and whether the game ended (end reason zero, `root_span` or `end_event`; a stale end is no data) | `Session.DurationSeconds`, the game-end consumer | game |
 | `activity` | Mean of (movement intensity / death threshold) over the window's movement samples (at least half of the window's distinct seconds must have a sample), for the players alive when it is measured; normalised, so tempo changes do not move the scale | `History`, `SpeedTrack.DeathThreshold`, `Session.DeathThreshold` | field, target |
 | `change` | Swing of field `activity`: max minus min of the 5 s sub-window means inside the window | the same buckets | field |
 | `elimination_pace` | Eliminations observed in (t, t+w], per minute; predictions use the count. Not scored in a respawn mode (NonStop, Zombies, Swapper, Fight Club: a death keeps the player in the game; UC-040 BR-043) | `Timeline` elimination events (agent receipt time), `EliminationSequence` length as fallback; `Session.GameMode` | game |
@@ -994,7 +993,7 @@ Six closed templates with a closed set of horizons (so calibration stays compara
 | `elimination` | `elimination_pace` >= 1 | Hit: early. Miss: none at t+h. Unscorable: the game ended first without one | 15, 30, 60 |
 | `activity_rises` | `activity` (field or target) | Hit: after > before x 1.05. Miss: otherwise. Unscorable: coverage too low, target died, game ended first | 10, 15 |
 | `closeness_rises` | `closeness` | Hit: after-spread < before-spread x 0.95 | 15 |
-| `game_ends` | `duration` | Hit: the game ends (zero or `root_span`, planned #2722 also `end_event`) by t+h, early. Miss: still running at t+h. Unscorable: stale end | 30, 60, 120 |
+| `game_ends` | `duration` | Hit: the game ends (zero, `root_span` or `end_event`) by t+h, early. Miss: still running at t+h. Unscorable: stale end | 30, 60, 120 |
 
 Unscorable is never counted as a hit or a miss; it carries a reason (`game_ended`, `data_missing`, `stale_end`,
 `overflow`, `no_target`, `target_not_alive`, `respawn_mode`). In a respawn mode (`Session.GameMode` is NonStop, Zombies,

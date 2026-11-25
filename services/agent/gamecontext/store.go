@@ -958,6 +958,29 @@ func (s *Store) setFromLog(kind, mode string) {
 	}
 }
 
+// logTraceIDs are the game trace ids one log record carries; empty ones are unset.
+type logTraceIDs struct{ trace, root, phase, cycle string }
+
+// setTraceFromLog fills the same fields as the game_trace_correlation labels, an
+// empty id keeping the previous one. Like setFromLog it touches no update time.
+func (s *Store) setTraceFromLog(ids logTraceIDs) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, f := range []struct {
+		dst *string
+		v   string
+	}{
+		{&s.ctx.GameTraceID, ids.trace},
+		{&s.ctx.GameTraceSpanID, ids.root},
+		{&s.ctx.GameplayPhaseSpanID, ids.phase},
+		{&s.ctx.GameCycleSpanID, ids.cycle},
+	} {
+		if f.v != "" {
+			*f.dst = f.v
+		}
+	}
+}
+
 // SetGameKind records the game kind ("real"/"shadow") from the game_kind
 // datapoint label or the game.kind span attribute (#845). The kind is normalised
 // (NormalizeGameKind: telemetry "primary" -> "real", #1249) so GameContext.GameKind

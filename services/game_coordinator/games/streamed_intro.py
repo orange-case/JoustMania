@@ -107,7 +107,8 @@ class StreamedIntroGameMode(BaseGameMode):
 
         Returns False when the run skips the teardown (force-ended).
         """
-        with self._run_tracer().start_as_current_span("gameplay_phase"):
+        with self._run_tracer().start_as_current_span("gameplay_phase") as gameplay_span:
+            self._send_phase_start(gameplay_span, "gameplay_phase")
             await self._game_loop()
         return True
 

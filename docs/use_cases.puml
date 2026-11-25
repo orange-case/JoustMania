@@ -53,7 +53,7 @@ rectangle "JoustMania" {
         usecase "UC-044\nSwitch the Decision Backend Live" as UC044
         usecase "UC-045\nStop the Agent with Flags" as UC045
         usecase "UC-046\nRun Repeatable Pattern-Driven Shadow Games" as UC046
-        usecase "UC-047\nRecalibrate the Shadow Players from Real Games" as UC047
+        usecase "UC-047\nCalibrate the Shadow Players Offline from Real Games" as UC047
     }
     package "Infrastructure" {
         usecase "UC-050\nRoll Out a Controller Backend Progressively\n(parked)" as UC050
