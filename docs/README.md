@@ -44,7 +44,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [specs/telemetry.md](specs/telemetry.md) | Span names, attributes, metrics, game events, log lines others depend on |
 | [specs/decide-contract.md](specs/decide-contract.md) | The decision backend contract: questions, validation, confidence, outcomes, fallbacks |
 | [specs/generated/](specs/generated/) | Tables generated from the code by `make specs` (Python metric catalog, gRPC RPC tables, flag sets, `ci/` flag diffs; totals are not committed, `make specs-counts` prints them, #2152); never hand-edited, hand-written notes live in [specs/notes/](specs/notes/) |
-| [specs-inventory.md](specs-inventory.md) | Every older doc's status and the **discrepancies found** between docs and code |
+| [specs-inventory.md](specs-inventory.md) | Frozen snapshot (2026-11-25, #2798): every older doc's status and the historic `D-*` discrepancy ledger; new drift is a `spec-drift` issue |
 
 ## 5. How to: guides and runbooks
 
@@ -71,7 +71,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [challenges/can-you-see-the-swing.md](challenges/can-you-see-the-swing.md) | Run the booth challenge "Can you see the swing?": pick a death, read the player's 100 ms motion series in the case's VictoriaMetrics, record whether each backend keeps that density (UC-102) |
 
 Service READMEs (`services/*/README.md`) hold code-level detail; where they disagree with the specs, the
-specs win and the [inventory](specs-inventory.md#3-service-tool-and-test-docs) records the difference.
+specs win and the difference is tracked as a `spec-drift` issue (#2798).
 
 ## 6. Why it is like this: research and design history
 

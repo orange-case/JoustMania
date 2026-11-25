@@ -122,14 +122,17 @@ are where docs drifted from code in the past.
 The spec PR can precede the code PR (useful for review of intent), but a code PR
 that changes behaviour without a spec change is incomplete.
 
-**Fixing a logged discrepancy.** A `D-*` row in
-[specs-inventory.md](specs-inventory.md#4-discrepancies-found) is either a `stale doc` (the doc is
-wrong: fix or banner it) or a `bug` / `likely bug` (the code is wrong). A PR that fixes a bug row marks
-it `Resolved by #N`, updates the status of the affected requirement, and rewrites any use-case or spec
-text that still describes the buggy behaviour (e.g. UC-040 A11 for D-A9).
+**Spec drift.** When spec and code disagree and you do not fix it in the same PR, open a GitHub issue
+with the `spec-drift` label (`gh issue create --label spec-drift`) that names the spec text, the code
+and whether the doc or the code is wrong; spec text that describes the gap cites the issue (`#N`).
+A PR that fixes the code closes the issue (`close #N` in its merge notes), updates the status of the
+affected requirement, and rewrites any use-case or spec text that still describes the buggy behaviour.
+A doc that is wrong is fixed or bannered. The `D-*` ledger in
+[specs-inventory.md](specs-inventory.md) is a frozen snapshot (2026-11-25, #2798): do not add rows or
+cite new `D-*` ids; existing mentions stay as history.
 
-**Hotfixes** may merge code first; the spec follow-up PR lands within 3 days and the gap is logged in
-the inventory until then.
+**Hotfixes** may merge code first; the spec follow-up PR lands within 3 days and the gap is tracked as a
+`spec-drift` issue until then.
 
 ### Status vocabularies
 
@@ -206,8 +209,8 @@ The `Spec Gate` job in `ci.yml` (#1263, required through `CI Complete`) has two 
    `*.test.ts(x)`, `*.spec.ts(x)`), `*.md`, dependency manifests/locks and
    Dockerfiles do not count; Grafana dashboards and collector
    config do, since `docs/specs/telemetry.md` documents them): the PR must also change
-   `docs/requirements.md`, `docs/use_cases/**`, `docs/use_cases.puml`, `docs/specs/**`,
-   `docs/specs-inventory.md` or `docs/entity_model.md`. A change to
+   `docs/requirements.md`, `docs/use_cases/**`, `docs/use_cases.puml`, `docs/specs/**`
+   or `docs/entity_model.md` (not the frozen `docs/specs-inventory.md`, #2798). A change to
    the baseline flag files `services/flagd/*.json` must touch `docs/specs/flags.md`, a change to
    `proto/*.proto` must touch `docs/specs/services.md`. Exempt: PRs with the
    `no-spec-change` label; Renovate, Dependabot and release-please PRs (the bot
@@ -259,8 +262,9 @@ commit (an empty one is fine) after adding the label instead.
   the code paths (`file:line` or file) and the tests that exercise them.
 - **Planned work** carries its issue number in the row (`#1229`) and stays
   `Open` until merged. Never write a plan as shipped.
-- **Discrepancies** between docs and code go to
-  [specs-inventory.md](specs-inventory.md#4-discrepancies-found) until fixed.
+- **Discrepancies** between docs and code become a `spec-drift` issue until fixed
+  (see [Spec drift](#spec-driven-development-aiup)); the `D-*` ledger in
+  [specs-inventory.md](specs-inventory.md) is frozen.
 
 ## Development Workflow
 
