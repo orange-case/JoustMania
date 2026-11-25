@@ -129,7 +129,7 @@ def page_rows(page: int, status, ctx: PageContext, version: int) -> list[tuple[s
             ("AGENT", agent.split(" ")[0]),  # ON, WATCH, OFF or ?
             # BR-006: the level also while the agent is stopped; `?` only when the level itself is unknown.
             ("LEVEL", value_text("agent_level", level if level in AGENT_POLICY_LEVELS else None, version)),
-            ("GOAL", _row_value(setting_ladders.OBJECTIVES_OPTION, status, version)),
+            ("GOAL", _row_value(setting_ladders.GOAL_OPTION, status, version)),
         ]
     if name == "INTERV":
         return [
@@ -155,7 +155,7 @@ def agent_row_value(option: str, status) -> str | None:
     value = getattr(status, setting_ladders.AGENT_ROW_STATUS_FIELDS[option], "") if status is not None else ""
     if not isinstance(value, str) or not value:
         return None
-    if option == setting_ladders.OBJECTIVES_OPTION and value not in setting_ladders.OBJECTIVES_LADDER:
+    if option == setting_ladders.GOAL_OPTION and value not in setting_ladders.GOAL_LADDER:
         return None  # only the five declared variants mean anything on the pad
     return value
 

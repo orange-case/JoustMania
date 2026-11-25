@@ -15,8 +15,8 @@ from lib.setting_ladders import (
 )
 from lib.setting_ladders import BRIEF_OPTION as BRIEF
 from lib.setting_ladders import EFFORT_OPTION as EFFORT
+from lib.setting_ladders import GOAL_OPTION as GOAL
 from lib.setting_ladders import GROUP_OPTION as GROUP
-from lib.setting_ladders import OBJECTIVES_OPTION as GOAL
 from lib.setting_ladders import RATE_OPTION as RATE
 from lib.setting_ladders import RETRO_BACKEND_OPTION as RETRO_BACKEND
 from proto import menu_pb2
@@ -53,23 +53,7 @@ def rs(values: dict | None = None, defaults: dict | None = None, commands=COMMAN
     }
     base.update({AGENT_ROW_STATUS_FIELDS[o]: ("" if v is MISSING else v) for o, v in now.items()})
     base.update(kw)
-    if OBJECTIVES_FIELD in PROTO_FIELDS:
-        return menu_pb2.GetMenuStatusResponse(**base)
-    return _ObjectivesStatus(base.pop(OBJECTIVES_FIELD), menu_pb2.GetMenuStatusResponse(**base))
-
-
-# TEMPORARY until the menu's proto (#2759) renames field 22 to `agent_objectives`.
-OBJECTIVES_FIELD = AGENT_ROW_STATUS_FIELDS[GOAL]
-PROTO_FIELDS = menu_pb2.GetMenuStatusResponse.DESCRIPTOR.fields_by_name
-
-
-class _ObjectivesStatus:
-    def __init__(self, objectives: str, status) -> None:
-        self.agent_objectives = objectives
-        self._status = status
-
-    def __getattr__(self, name):
-        return getattr(self._status, name)
+    return menu_pb2.GetMenuStatusResponse(**base)
 
 
 def on(option: str, role: str = "edit") -> page_keys.Binding:
@@ -703,7 +687,6 @@ def test_a_lobby_only_reset_screen_while_live_is_not_possible(version, page, key
 
 
 @pytest.mark.uc("UC-016", br=["BR-006"])
-@pytest.mark.xfail(OBJECTIVES_FIELD not in PROTO_FIELDS, reason="TEMPORARY: field 22 arrives with #2759", strict=True)
 def test_the_agent_row_status_fields_are_the_protos_string_fields_and_a_missing_one_is_unknown():
     fields = menu_pb2.GetMenuStatusResponse.DESCRIPTOR.fields_by_name
     numbers = {}

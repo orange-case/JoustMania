@@ -74,7 +74,7 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
     "game_instructions": {"on": "ON", "off": "OFF"},
     "force_all_start": {"on": "ON", "off": "OFF"},
     "interventions": {"on": "ON", "off": "OFF"},
-    setting_ladders.OBJECTIVES_OPTION: {
+    setting_ladders.GOAL_OPTION: {
         "endurance_focused": "ENDURANCE",
         "balanced_focused": "BALANCED",
         "accelerate_focused": "ACCELERATE",
@@ -97,7 +97,7 @@ V2_SHORT_FORMS: dict[str, dict[str, str]] = {
 }
 # BR-007: NOW and NEW rows leave 6 characters beside the label on protocol 2 (and fit these on protocol 3).
 NOW_NEW_FORMS: dict[str, dict[str, str]] = {
-    setting_ladders.OBJECTIVES_OPTION: {
+    setting_ladders.GOAL_OPTION: {
         "endurance_focused": "ENDUR",
         "balanced_focused": "BAL",
         "accelerate_focused": "ACCEL",
@@ -146,7 +146,7 @@ SETTING_LABELS = {
     "audio_volume.master": "VOLUME",
     "force_all_start": "FORCE ALL",
     "interventions": "INTERVENTIONS",
-    setting_ladders.OBJECTIVES_OPTION: "GOAL",
+    setting_ladders.GOAL_OPTION: "GOAL",
     setting_ladders.RATE_OPTION: "RATE",
     setting_ladders.GROUP_OPTION: "GROUP",
     setting_ladders.RETRO_BACKEND_OPTION: "RETRO AI",

@@ -19,8 +19,8 @@ from lib.setting_ladders import (
     BACKENDS,
     BRIEF_OPTION,
     EFFORT_OPTION,
+    GOAL_OPTION,
     GROUP_OPTION,
-    OBJECTIVES_OPTION,
     ON_OFF_LADDER,
     PAID_BACKENDS,
     RATE_OPTION,
@@ -88,7 +88,7 @@ ROWS: dict[str, tuple[RowSpec | None, RowSpec | None, RowSpec | None]] = {
     "AGENT": (
         _row(INTERVENTIONS, edit=SWITCH, lobby_only=False),
         _row("agent_level", reset=DEFAULT, lobby_only=False),
-        _row(OBJECTIVES_OPTION, reset=DEFAULT),
+        _row(GOAL_OPTION, reset=DEFAULT),
     ),
     "INTERV": (
         _row("decision.backend", edit=BACKEND, reset=DEFAULT, lobby_only=False),
