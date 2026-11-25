@@ -124,12 +124,13 @@ else:
 
 # CI Complete's check step: fails on failure OR cancelled, exits 1, nothing
 # softens it (`|| true`, success(), always(), a 'skipped' check). The second
-# run step (#1583, required e2e) is checked below.
+# run step (#1583, required e2e) and the service tier step (#2770) are checked below.
 E2E_STEP = "Check required e2e ran"
+TIER_STEP = "Check required service tiers ran"
 complete_runs = [
-    str(s.get("run", "")) for s in jobs["ci-complete"]["steps"] if s.get("run") and s.get("name") != E2E_STEP
+    str(s.get("run", "")) for s in jobs["ci-complete"]["steps"] if s.get("run") and s.get("name") not in (E2E_STEP, TIER_STEP)
 ]
-check(len(complete_runs) == 1, "ci-complete: exactly one generic check step (plus the e2e step)")
+check(len(complete_runs) == 1, "ci-complete: exactly one generic check step (plus the e2e and service tier steps)")
 lines = [ln.strip() for ln in (complete_runs[0] if complete_runs else "").splitlines() if ln.strip()]
 for required in (
     "FAILED=\"${{ contains(needs.*.result, 'failure') }}\"",
@@ -210,6 +211,15 @@ EXEMPT = {"changes", "sonarcloud", "docker-build-merge", "docker-build-extra-mer
 # (service_tests unless exactly 'false', #2770), workflow_dispatch and ci-full only
 # (#2768; checked on the force step below and simulated).
 SERVICE_GATED = {"service-tests", "flagsmith-service-tests"}
+# #2770: CI Complete fails closed in the queue unless service_tests is exactly 'false'.
+_st_step = next((st for st in jobs["ci-complete"]["steps"] if st.get("name") == "Check required service tiers ran"), None)
+check(_st_step is not None, "ci-complete: must have 'Check required service tiers ran' (#2770)")
+if _st_step:
+    _run = _st_step.get("run", "")
+    check('"$SERVICE_TESTS" != "false"' in _run and '"$EVENT_NAME" == "merge_group"' in _run,
+          "ci-complete: service tier check must apply in merge_group unless service_tests is exactly 'false'")
+    check("needs.service-tests.result" in str(_st_step.get("env")) and "needs.flagsmith-service-tests.result" in str(_st_step.get("env")),
+          "ci-complete: service tier check must read both tier results")
 for name in sorted(SERVICE_GATED):
     check(job_if(name) == "needs.changes.outputs.service_tests_run == 'true'",
           f"{name}: must gate exactly on service_tests_run: {job_if(name)}")
@@ -403,6 +413,7 @@ def simulate(event, e2e_paths, non_docs, ci_full=False, e2e_outcome="success",
         if "steps.force.outputs" in value:
             ctx[f"needs.changes.outputs.{key}"] = interpolate(value, {f"steps.force.outputs.{k}": v for k, v in out.items()})
     ctx["needs.changes.outputs.non_docs"] = str(non_docs).lower()
+    ctx["needs.changes.outputs.service_tests"] = str(service_tests).lower()
     ctx.update({
         "needs.changes.result": "success",
         "needs.changes.outputs.docker_build_matrix": '["menu"]',
@@ -504,6 +515,14 @@ for path in ("lib/**", "proto/**", "pyproject.toml", "uv.lock", "services/__init
              "tests/integration/jaeger_v3.py", "tests/integration/flag_service.py", "docker-compose.yml", "Makefile",
              "scripts/ci/docker-pull-retry.sh", "scripts/ci/apt-install.sh", ".github/workflows/ci.yml"):
     check(path in service_path_list, f"changes/f: service_tests must cover {path}")
+
+# #2770: CI Complete fails closed when the queue skips the tiers the filter asked for.
+for st, want in ((True, "failure"), ("", "failure"), ("unknown", "failure"), (False, "success")):
+    r = simulate("merge_group", False, True, service_tests=st, override={"service_tests_run": "false"})
+    check(r["ci-complete"] == want,
+          f"merge_group, service_tests={st!r}, tiers skipped: CI Complete must be {want}, got {r['ci-complete']}")
+r = simulate("pull_request", False, True, service_tests=True)
+check(r["ci-complete"] == "success", f"pull_request: skipped tiers must not fail CI Complete, got {r['ci-complete']}")
 
 SCENARIOS = [
     # (label, event, e2e_paths, non_docs, ci_full, expect_e2e)
