@@ -84,6 +84,7 @@ WHEEL_LADDERS: dict[str, list[str]] = {
     "shield.activation": SHIELD_KNOB_LADDER,
     "agent_level": AGENT_POLICY_LEVELS,
     setting_ladders.GOAL_OPTION: setting_ladders.GOAL_LADDER,
+    setting_ladders.RETRO_BACKEND_OPTION: setting_ladders.RETRO_BACKEND_LADDER,
     setting_ladders.BRIEF_OPTION: setting_ladders.BRIEF_LADDER,
 }
 

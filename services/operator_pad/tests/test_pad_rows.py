@@ -581,12 +581,12 @@ def test_the_objectives_wheel_wraps_and_the_brief_wheel_has_empty_ends_on_protoc
 
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-007", "BR-012"])
 @pytest.mark.parametrize("version", [2, 3, 4])
-@pytest.mark.parametrize(("option", "now", "new"), [(GROUP, "off", "ON"), (RETRO_BACKEND, "stub", "CLAUDE")])
+@pytest.mark.parametrize(("option", "now", "new"), [(GROUP, "off", "ON")])
 def test_two_state_rows_are_now_and_new_rows_on_every_protocol_and_their_raise_blinks(version, option, now, new):
     s = screen(version, option, now, 1)
     assert s.bar is None and s.wheel is None
     assert title(s).endswith(PRESS_KNOB) and rows(s)[1].endswith(new)
-    assert title(s).startswith("GROUP" if option == GROUP else "RETRO AI")
+    assert title(s).startswith("GROUP")
     off = render.setting_screen(
         version,
         option,
@@ -599,8 +599,48 @@ def test_two_state_rows_are_now_and_new_rows_on_every_protocol_and_their_raise_b
     )
     assert not off.lines[0][1] & INVERTED and s.lines[0][1] & INVERTED
     assert title(screen(version, option, now, 1, confirmed=True)).endswith(CONFIRMED)
-    top = screen(version, option, "on" if option == GROUP else "claude", 1)
+    top = screen(version, option, "on", 1)
     assert "MAXIMUM" in rows(top)[2] or title(top).endswith("MAXIMUM")
+
+
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-007", "BR-012", "BR-014"])
+def test_the_retro_backend_is_a_non_wrapping_wheel_on_protocol_4_whose_raise_blinks():
+    s = screen(4, RETRO_BACKEND, "stub", 1)
+    assert s.wheel == (("STUB", True), ("CLAUDE", False), ("", False)) and s.bar is None
+    assert title(s).startswith("RETRO AI") and title(s).endswith(PRESS_KNOB) and s.lines[0][1] & INVERTED
+    press = rs({RETRO_BACKEND: "stub"})
+    off = render.setting_screen(
+        4,
+        RETRO_BACKEND,
+        press,
+        1,
+        lobby_only=False,
+        bottom=BOTTOM,
+        plan=page_keys.edit_plan(on(RETRO_BACKEND).spec, press, 1),
+        blink_on=False,
+    )
+    assert off.wheel == s.wheel and not off.lines[0][1] & INVERTED
+    assert title(screen(4, RETRO_BACKEND, "stub", 1, confirmed=True)).endswith(CONFIRMED)
+    top = screen(4, RETRO_BACKEND, "claude", 1)
+    assert top.wheel == (("STUB", False), ("CLAUDE", True), ("", False)) and title(top).endswith("MAXIMUM")
+    bottom = screen(4, RETRO_BACKEND, "stub", -1)
+    assert bottom.wheel == (("", False), ("STUB", True), ("CLAUDE", False)) and title(bottom).endswith("MINIMUM")
+    down = screen(4, RETRO_BACKEND, "claude", -1)
+    assert down.wheel == (("", False), ("STUB", False), ("CLAUDE", True)) and title(down).endswith("EDIT")
+    for version in (2, 3):
+        s = screen(version, RETRO_BACKEND, "stub", 1)
+        assert s.wheel is None and s.bar is None
+        assert title(s).endswith(PRESS_KNOB) and rows(s)[0].endswith("STUB") and rows(s)[1].endswith("CLAUDE")
+        assert title(screen(version, RETRO_BACKEND, "claude", 1)).endswith("EDIT")
+        assert "MAXIMUM" in rows(screen(version, RETRO_BACKEND, "claude", 1))[2]
+
+
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-007"])
+@pytest.mark.parametrize(("now", "steps"), [("claude", 1), ("claude", 3), ("stub", -1)])
+async def test_a_retro_backend_step_past_either_end_sends_nothing_and_never_wraps(now, steps):
+    result, data, cues = await edit(RETRO_BACKEND, steps, rs({RETRO_BACKEND: now}), confirmed=True)
+    assert (result, data) == (("step_setting", "at_limit"), [])
+    cues.limit.assert_awaited_once_with(steps > 0)
 
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
