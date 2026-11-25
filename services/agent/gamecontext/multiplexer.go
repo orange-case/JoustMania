@@ -141,6 +141,19 @@ func (m *Multiplexer) momentObserver() MomentObserver {
 // for concurrent use: a read-locked fast path is followed by a write-locked
 // double-checked create.
 func (m *Multiplexer) store(gameID string) *Store {
+	return m.storeWith(gameID, nil)
+}
+
+// openFromLog returns the Store for a log record's gameID, creating it held
+// (UC-041 A7 step 5, A8, BR-010) when it does not exist. Never the fallback:
+// the caller has checked gameID is set.
+func (m *Multiplexer) openFromLog(gameID string) *Store {
+	return m.storeWith(gameID, (*Store).holdForLog)
+}
+
+// storeWith is store; onCreate, when set, runs on a new partition before it is
+// published.
+func (m *Multiplexer) storeWith(gameID string, onCreate func(*Store)) *Store {
 	m.mu.RLock()
 	s := m.stores[gameID]
 	m.mu.RUnlock()
@@ -160,17 +173,11 @@ func (m *Multiplexer) store(gameID string) *Store {
 	if gameID != FallbackGameID {
 		s.setPartition(m.ended.has(gameID))
 	}
+	if onCreate != nil {
+		onCreate(s)
+	}
 	m.stores[gameID] = s
 	return s
-}
-
-// existingStore returns the Store for gameID, or nil when no partition exists.
-// It never creates one: the moment log events (UC-041 A7 step 4) only reach a
-// game the agent already holds a context for.
-func (m *Multiplexer) existingStore(gameID string) *Store {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.stores[gameID]
 }
 
 // ApplyMetrics walks the metric batch, routing each datapoint to its game_id
