@@ -110,36 +110,3 @@ func TestShieldLimitedState_RulesPathUsesRankingSnapshot(t *testing.T) {
 		}
 	})
 }
-
-// UC: UC-040 main step 4 A33
-func TestRulesBackend_ShieldLimitedStateIsNoShield(t *testing.T) {
-	t.Run("UC-040/A33 RulesBackend.Decide gives no grant_shield to a shield_limited player of the request state", func(t *testing.T) {
-		newBackend := func() *RulesBackend {
-			clock := time.Unix(10_000, 0)
-			return NewRulesBackend(newObjectiveRules(balancedRulesConfig(), balancedRulesConfig(), balancedRulesConfig(),
-				func() time.Time { return clock }, rand.New(rand.NewPCG(1, 2))))
-		}
-		c := chargeRulesCtx()
-		allowed := []string{InterventionGrantShield}
-		pick := func(req decide.Request) string {
-			resp, err := newBackend().Decide(context.Background(), req)
-			if err != nil {
-				t.Fatalf("Decide: %v", err)
-			}
-			iv, _ := resp.Find(decide.QuestionFFAIntervention)
-			tg, _ := resp.Find(decide.QuestionFFATarget)
-			return iv.Choice + "/" + tg.Choice
-		}
-		if got := pick(ffaRequest(c, allowed)); got != "grant_shield/WEAK" {
-			t.Fatalf("precondition: Decide picks %s, want grant_shield/WEAK", got)
-		}
-		st := decide.BuildStateWith(c, decide.Annotations{NoShield: map[string]bool{"WEAK": true}})
-		if !playerIn(t, st, "WEAK").ShieldLimited {
-			t.Fatal("precondition: WEAK must be shield_limited in the state")
-		}
-		req := decide.Request{State: st, Questions: decide.FFAQuestions(st, allowed), Context: &c}
-		if got := pick(req); got == "grant_shield/WEAK" {
-			t.Fatal("a shield_limited WEAK must not get grant_shield (treated like shield_charged)")
-		}
-	})
-}

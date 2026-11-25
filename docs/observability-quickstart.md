@@ -299,7 +299,7 @@ nothing received the alerts. Watch the Grafana dashboards and the dashboard SPA 
 **Fix:**
 1. Check services are running: `docker ps`
 2. Check game is started (not just menu)
-3. Verify gRPC connection: `grpcurl -plaintext localhost:50051 list`
+3. Verify gRPC connection: `grpcurl -plaintext localhost:50053 list`
 
 ---
 
