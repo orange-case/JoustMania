@@ -72,6 +72,9 @@ class FakeFlagService:
         self.down = False
         # Persisted admin values (GET `admin_value`; DELETE ?persist=true clears one, UC-015 BR-018).
         self.admin: dict[tuple[str, str], str] = {}
+        # In-memory overlays (GET `stack_overlay` / `real_overlay`); a test keeps `values` consistent with them.
+        self.stack: dict[tuple[str, str], str] = {}
+        self.real: dict[tuple[str, str], str] = {}
         self.deletes: list[tuple[str, str, str]] = []
 
     def __call__(self, method, url, body):
@@ -88,9 +91,15 @@ class FakeFlagService:
                 "variants": list(variants),
                 "variant_values": dict(variants),
                 "effective_default": self.values[(flag_set, key)],
+                "baseline_default": _default,
             }
-            if (flag_set, key) in self.admin:
-                view["admin_value"] = {"variant": self.admin[(flag_set, key)]}
+            for layer, values in (
+                ("admin_value", self.admin),
+                ("stack_overlay", self.stack),
+                ("real_overlay", self.real),
+            ):
+                if (flag_set, key) in values:
+                    view[layer] = {"variant": values[(flag_set, key)]}
             return 200, view
         if method == "DELETE":
             self.deletes.append((flag_set, key, query))
@@ -98,7 +107,9 @@ class FakeFlagService:
                 return 503, {"error": "no_sync_stream"}
             if query == "persist=true":
                 self.admin.pop((flag_set, key), None)
-                self.values[(flag_set, key)] = _default
+                self.values[(flag_set, key)] = (
+                    self.stack.get((flag_set, key)) or self.real.get((flag_set, key)) or _default
+                )
             return 204, {}
         self.puts.append((flag_set, key, dict(body)))
         if (flag_set, key) in self.failing:
@@ -570,6 +581,7 @@ async def test_stop_when_already_stopped_is_a_no_op(servicer, flags, level, enab
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-003"], cond=["Post-S-1"])
 async def test_resume_restores_the_saved_level_then_enables(servicer, flags):
+    flags.values[("agent", "interventions_enabled")] = "on"
     await pad(servicer, "agent_switch", direction="stop")
     flags.puts.clear()
 
@@ -587,7 +599,10 @@ async def test_resume_restores_the_saved_level_then_enables(servicer, flags):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-003"])
-async def test_resume_keeps_a_level_set_after_the_kill(servicer, flags):
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+async def test_resume_restores_the_saved_level_over_a_level_raised_after_the_kill(servicer, flags):
+    """#2747 "resume as before the stop": never more than the stop left, also when the level was raised."""
+    flags.values[("agent", "interventions_enabled")] = "on"
     await pad(servicer, "agent_switch", direction="stop")
     flags.values[("agent", "interventions_allowed")] = "full"  # an admin raised it after the kill
     flags.puts.clear()
@@ -595,24 +610,24 @@ async def test_resume_keeps_a_level_set_after_the_kill(servicer, flags):
     reply = await pad(servicer, "agent_switch", direction="resume")
 
     assert reply.success
-    assert flags.written() == [("agent", "interventions_enabled", "on"), ("agent", "enabled", "on")]
+    assert flags.written() == [
+        ("agent", "interventions_allowed", "standard"),
+        ("agent", "interventions_enabled", "on"),
+        ("agent", "enabled", "on"),
+    ]
 
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-003"])
 async def test_resume_without_a_saved_level_falls_back_to_ambient(servicer, flags):
-    """A menu restart loses the saved level: the resume level is ambient, never full."""
+    """A menu restart loses the saved level and gate: the level is ambient, never full; the gate stays."""
     flags.values[("agent", "interventions_allowed")] = "none"
     flags.values[("agent", "enabled")] = "off"
 
     reply = await pad(servicer, "agent_switch", direction="resume")
 
     assert reply.success
-    assert flags.written() == [
-        ("agent", "interventions_allowed", "ambient"),
-        ("agent", "interventions_enabled", "on"),
-        ("agent", "enabled", "on"),
-    ]
+    assert flags.written() == [("agent", "interventions_allowed", "ambient"), ("agent", "enabled", "on")]
 
 
 @pytest.mark.asyncio
@@ -763,6 +778,7 @@ async def test_agent_level_and_saved_level_never_wrap(
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-003", "BR-004"])
 async def test_ladder_while_stopped_changes_only_the_saved_level(servicer, flags):
+    flags.values[("agent", "interventions_enabled")] = "on"
     await pad(servicer, "agent_switch", direction="stop")
     flags.puts.clear()
 
@@ -792,6 +808,7 @@ async def test_ladder_while_stopped_never_saves_none(servicer, flags):
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", br=["BR-002", "BR-003", "BR-004"])
 async def test_ladder_step_down_to_none_saves_the_level_it_left(servicer, flags):
+    flags.values[("agent", "interventions_enabled")] = "on"
     reply = await pad(servicer, "step_setting", option="agent_level", direction="down", steps=5)
     assert reply.success
     assert flags.written() == [("agent", "interventions_allowed", "none")]

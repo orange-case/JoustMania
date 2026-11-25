@@ -140,6 +140,8 @@ var menuStatus = &menupb.GetMenuStatusResponse{
 	AgentInterventionsEnabledState: "off",
 	ShieldActivation:               "hold",
 	OperatorSettings:               map[string]string{"sensitivity": "fast", "num_teams": "automatic", "shield.activation": "hold"},
+	SettingDefaults:                map[string]string{"agent_level": "standard", "decision.backend": "rules"},
+	PadCommands:                    []string{"reset_setting", "interventions_switch", "agent_switch.only_if_stopped", "step_setting.from"},
 }
 
 func (f *fakeMenu) GetMenuStatus(_ context.Context, r *menupb.GetMenuStatusRequest) (*menupb.GetMenuStatusResponse, error) {

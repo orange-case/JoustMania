@@ -23,9 +23,13 @@ from services.menu.settings_ops import (
     AGENT_WRITE_GATE_FLAG,
     BAD_OPTION,
     DECISION_BACKEND_FLAG,
+    FLAG_SERVICE_UNAVAILABLE,
     GAME_ACTIVE,
     LOBBY_ONLY_OPTIONS,
     OK,
+    PAD_CAPABILITIES,
+    RESET_LOBBY_ONLY_OPTIONS,
+    RESETTABLE_OPTIONS,
     SHIELD_ACTIVATION_FLAG,
     STALE,
     Result,
@@ -455,6 +459,8 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             audio_volume_master=_variant(user.get_float_details("audio_volume.master", 1.0)),
             shield_activation=_variant(game.get_string_details(SHIELD_ACTIVATION_FLAG, "")),
             operator_settings=dict(self.settings_ops.operator_settings),
+            setting_defaults=dict(self.settings_ops.setting_defaults),
+            pad_commands=list(PAD_CAPABILITIES),
         )
 
     async def ListGameModes(self, _request, _context):
@@ -544,7 +550,17 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         return None
 
     # Operator pad commands (#2050, UC-015, services.md §3.1): no serial, no LEDs, error codes.
-    PAD_COMMANDS = frozenset({"force_start", "step_setting", "preview_setting", "agent_switch", "set_backend"})
+    PAD_COMMANDS = frozenset(
+        {
+            "force_start",
+            "step_setting",
+            "preview_setting",
+            "agent_switch",
+            "set_backend",
+            "reset_setting",
+            "interventions_switch",
+        }
+    )
 
     async def _handle_pad_command(self, data: dict, span) -> tuple[bool, str, str]:
         """Run one pad command; (success, error code, committed value). A failed write plays the failure cue (BR-009).
@@ -561,13 +577,21 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         elif command == "preview_setting":
             result = await self._pad_preview_setting(data)
         elif command == "agent_switch":
-            direction = data.get("direction", "")
-            result = await self.settings_ops.agent_switch(direction)
-            if result.error == OK:
-                await self.settings_ops.announce("agent_switch", direction)
+            result = await self._pad_agent_switch(data)
+        elif command == "reset_setting":
+            result = await self._pad_reset_setting(data)
+        elif command == "interventions_switch":
+            result = await self.settings_ops.interventions_switch(data.get("state", ""))
         else:
             result = await self.settings_ops.set_backend(data.get("backend", ""))
         error = result.error or ""
+        # UC-016 BR-001: the committed value of a step, a backend write, a reset or the interventions switch.
+        named = command in ("step_setting", "set_backend", "reset_setting", "interventions_switch")
+        value = (result.new or "") if error in ("", OK) and named else ""
+        if error in ("", OK) and not value and command in ("reset_setting", "interventions_switch"):
+            # A pad cannot tell an empty-valued success from an older menu's unknown-command success.
+            logger.error(f"Pad command {command} succeeded without a value")
+            error = FLAG_SERVICE_UNAVAILABLE
         if error and error != OK:
             span.set_attribute("error", error)
             logger.warning(f"Pad command {command} refused: {error}")
@@ -575,9 +599,30 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             # UC-015 A3: fail closed, never queued or retried; the host hears two loud beeps.
             await self.settings_ops.play_failure_cue()
         success = error in ("", OK)
-        # UC-016 BR-001: the committed value of a step or a backend write; the other commands name none.
-        named = command in ("step_setting", "set_backend")
-        return success, error, (result.new or "") if success and named else ""
+        return success, error, value if success else ""
+
+    async def _pad_agent_switch(self, data: dict) -> Result:
+        """agent_switch; the guard ``only_if_stopped=1`` refuses a resume of an agent not fully stopped (stale)."""
+        direction = data.get("direction", "")
+        guard = data.get("only_if_stopped")
+        if guard is not None and guard != "1":
+            return Result(None, None, BAD_OPTION)
+        result = await self.settings_ops.agent_switch(direction, only_if_stopped=guard == "1")
+        if result.error == OK:
+            await self.settings_ops.announce("agent_switch", direction)
+        return result
+
+    async def _pad_reset_setting(self, data: dict) -> Result:
+        """reset_setting: lobby-only refusal for all but agent_level and decision.backend, then one clear."""
+        option = data.get("option", "")
+        if option not in RESETTABLE_OPTIONS:
+            return Result(None, None, BAD_OPTION)
+        if option in RESET_LOBBY_ONLY_OPTIONS and self._lifecycle_live():
+            return Result(None, None, GAME_ACTIVE)
+        result = await self.settings_ops.reset_setting(option, data.get("expect") or None, data.get("from"))
+        if result.error is None:
+            await self.settings_ops.announce(option, result.new)
+        return result
 
     async def _pad_step_setting(self, data: dict) -> Result:
         """step_setting: lobby-only refusal (UC-015 A1), then one clamped or wrapped write (A7, BR-005)."""
@@ -592,7 +637,9 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             return Result(None, None, BAD_OPTION)
         if option in LOBBY_ONLY_OPTIONS and self._lifecycle_live():
             return Result(None, None, GAME_ACTIVE)
-        result = await self.settings_ops.step_setting(option, data.get("direction", ""), steps)
+        result = await self.settings_ops.step_setting(
+            option, data.get("direction", ""), steps, from_level=data.get("from")
+        )
         if result.error is None:
             await self.settings_ops.announce(option, result.new, quiet=cue == "none")
         return result
