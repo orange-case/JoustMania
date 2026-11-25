@@ -19,7 +19,7 @@ Every call has a short deadline (0.5 s) and fails closed: a failed write returns
 False / None and is logged; nothing is retried. A write that times out has an
 unknown outcome (the flag service may apply it after the deadline, #2095): the
 writer re-reads the flag once, with the same deadline, and reports the write as
-applied only when the flag service now serves the written variant (UC-013 A3). The API is blocking: async
+applied only when the flag service now serves the written variant (UC-015 BR-019). The API is blocking: async
 callers run it through ``asyncio.to_thread``.
 """
 
@@ -152,7 +152,7 @@ class FlagServiceWriter:
             status, body = self._transport("GET", self._flag_url(flag_key), None)
         except (urllib.error.URLError, OSError, TimeoutError, ValueError, http.client.HTTPException) as e:
             # Any failed read is "unreadable" (None), so a caller's fail-closed path always runs
-            # (UC-013 A5): a malformed body (ValueError) or a broken response counts too.
+            # (UC-015 A3): a malformed body (ValueError) or a broken response counts too.
             logger.error(f"Flag service unreachable reading {self.flag_set}/{flag_key}: {e}")
             return None
         if status != 200:
@@ -186,7 +186,7 @@ class FlagServiceWriter:
             status, resp = self._transport("PUT", self._flag_url(flag_key), body)
         except (urllib.error.URLError, OSError, TimeoutError, ValueError, http.client.HTTPException) as e:
             # A timeout, a malformed answer or a broken response leaves the outcome unknown: the
-            # flag service may have applied the write. Settle it with one re-read (UC-013 A3).
+            # flag service may have applied the write. Settle it with one re-read (UC-015 BR-019).
             if _is_timeout(e) or isinstance(e, ValueError | http.client.HTTPException):
                 return self._confirm_after_timeout(flag_key, variant_name, e)
             logger.critical(
@@ -270,7 +270,7 @@ class FlagServiceWriter:
         True only when the flag service serves ``variant_name``.
 
         The flag service applies a write before it answers, under the same lock its reads take,
-        so a read sent after the PUT normally sees the PUT's outcome (UC-013 A3, #2095).
+        so a read sent after the PUT normally sees the PUT's outcome (UC-015 BR-019, #2095).
         """
         name = f"{self.flag_set}/{flag_key}={variant_name}"
         view = self._view(flag_key)

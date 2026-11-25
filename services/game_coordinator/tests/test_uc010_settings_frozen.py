@@ -1,4 +1,4 @@
-"""UC-012 BR-001: a running game keeps the settings it started with.
+"""UC-010 BR-015 (formerly UC-012 BR-001): a running game keeps the settings it started with.
 
 The menu reads ``sensitivity`` once, at game start, and sends it in the
 StartGameConfig. An admin change while the game runs (the flag now serves
@@ -39,7 +39,7 @@ def _flags_with_admin_change(sensitivity: int):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-012", br=["BR-001"])
+@pytest.mark.uc("UC-010", br=["BR-015"])
 async def test_running_game_keeps_its_start_sensitivity(fast_config):  # noqa: F811, ARG001
     """Started at slow; the admin switches to ultra_fast while it runs; the game stays at slow to its end."""
     events = EventCollector()

@@ -1,21 +1,18 @@
-"""TC-006 on the service tier (T2): the host restricts the agent from the controller (steps 1 to 4).
+"""TC-006 on the service tier (T2): the host restricts the agent with the operator pad (steps 1 to 4).
 
 LOBBY composition on a fresh flag plane: real menu, game coordinator and
 controller manager (mock backend) from source at HEAD, flag service + flagd;
 audio is FakeAudio, so the per-level voice feedback is asserted on the recorded
-PlaySound calls.
+PlaySound calls. The host's surface is the pad's ``step_setting``
+``agent_level`` (UC-015 BR-004, BR-019).
 
-The seam under test is the one the menu's unit tests cannot reach: mock button ->
-controller manager -> menu admin handler -> flag service (persisted admin value
-of ``interventions_allowed``, UC-053 A2) -> flagd. The journey walks the whole
-ladder none, ambient, standard, full and back, and presses past both ends to
-assert it does not wrap (the #1340 regression, clamped since #1373).
+The seam under test is the one the menu's unit tests cannot reach: pad command ->
+menu -> flag service (persisted admin value of ``interventions_allowed``, UC-053
+A2) -> flagd. The journey leaves an off-ladder level, resumes, walks the ladder up
+and down and steps past the top to assert it does not wrap (the #1340 regression,
+clamped since #1373).
 
-Stated gap (TC-006 step 5, S7 of #1422): the agent being blocked by the
-permission needs the agent composition. Steps 6 and 7 are covered in
-test_tc006_agent_blocked_by_host.py. No LED colour feedback is
-asserted (UC-013 step 4 colours, incl. the 800 ms red pulse, too short to read through
-GetColor without a sleep); only the voice is checked.
+Steps 6 and 7 are covered in test_tc006_agent_blocked_by_host.py.
 
 The ladder writes the GLOBAL ``interventions_allowed``, so the test runs on
 ``fresh_stack``: a stack of its own, nothing leaks to another test.
@@ -24,18 +21,13 @@ The ladder writes the GLOBAL ``interventions_allowed``, so the test runs on
 import pytest
 from openfeature.evaluation_context import EvaluationContext
 
-from lib.colors import Colors
-from proto import controller_manager_mock_pb2
 from tests.integration.flag_service import default as flag_service_default
 from tests.integration.flag_service import variant_value
 from tests.integration.helpers import (
     async_poll_until,
-    enter_admin_mode,
     flagd_probe_client,
-    get_controller_color,
-    get_mock_client,
-    press_admin_button,
-    select_admin_option,
+    get_menu_client,
+    pad_command,
 )
 from tests.service.harness import LOBBY
 from tests.service.lobby_flow import start_lobby
@@ -48,15 +40,11 @@ AGENT = "agent"
 FLAG = "interventions_allowed"
 START_MODE = "JoustFFA"
 PERSIST_TIMEOUT_SECONDS = 5.0
-# The voice follows the persisted write through the pulse RPC and PlaySound; under load
-# (parallel gates) that chain can take well over 5 s (#1643).
+# The voice follows the persisted write; under load (parallel gates) PlaySound can take well over 5 s (#1643).
 VOICE_TIMEOUT_SECONDS = 15.0
 
-# The voice the menu asks the audio service for per level
-# (services/menu/handlers/admin.py level_voices, lib/types.py Sound.MENU_VOX_ADMINOP_*).
+# The voice the menu asks the audio service for per level (lib/voice_prompts.py AGENT_LEVEL_VOICES).
 LEVEL_VOICE = {"none": "adminop_off", "ambient": "adminop_1", "standard": "adminop_2", "full": "adminop_3"}
-
-_Button = controller_manager_mock_pb2.ButtonRequest.Button
 
 
 def _effective_variant() -> str:
@@ -68,12 +56,13 @@ def _persisted_admin_variant() -> str | None:
     return admin.get("variant") if admin else None
 
 
-async def _press_and_expect(stack, mock_client, host: str, button, expected: str) -> None:
-    """Press ``button`` in admin mode and assert the persisted level and the voice feedback."""
+async def _step_and_expect(stack, menu_client, direction: str, expected: str) -> None:
+    """One pad ladder step; assert the persisted level and the voice feedback."""
     stack.fake_audio.clear()
-    await press_admin_button(mock_client, host, button)
+    reply = await pad_command(menu_client, "step_setting", option="agent_level", direction=direction, steps=1)
+    assert reply.success and reply.value == expected, f"step {direction}: {reply.error!r} {reply.value!r}"
     assert await async_poll_until(lambda: _persisted_admin_variant() == expected, timeout=PERSIST_TIMEOUT_SECONDS), (
-        f"after {_Button.Name(button)}: persisted {FLAG} is {_persisted_admin_variant()!r}, expected {expected!r}"
+        f"after {direction}: persisted {FLAG} is {_persisted_admin_variant()!r}, expected {expected!r}"
     )
     assert _effective_variant() == expected
     voice = LEVEL_VOICE[expected]
@@ -93,53 +82,42 @@ async def _flagd_serves(stack, variant: str) -> bool:
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-012", flow="main", steps=[1, 2], tc="TC-006")
-@pytest.mark.uc("UC-012", flow="A6", tc="TC-006")
-@pytest.mark.uc("UC-013", flow="main", steps=[1, 2, 3], tc="TC-006")
-@pytest.mark.uc("UC-013", flow="A1", tc="TC-006")
-@pytest.mark.uc("UC-013", cond=["Pre-1"], tc="TC-006")
+@pytest.mark.uc("UC-015", flow="main", steps=[5], br=["BR-003", "BR-004", "BR-019"], tc="TC-006")
+@pytest.mark.uc("UC-015", flow="A7", tc="TC-006")
 @pytest.mark.uc("UC-053", flow="A2", tc="TC-006")
 @pytest.mark.usefixtures("flag_service")  # binds the flag-service client to this stack
-async def test_host_walks_the_agent_ladder_from_the_controller(fresh_stack):
-    """The host enters admin mode, selects agent_control and walks the ladder
-    up and down; the presses past both ends clamp (TC-006 steps 1 to 4)."""
+async def test_host_walks_the_agent_ladder_from_the_pad(fresh_stack):
+    """The host leaves an off-ladder level, resumes and walks the ladder up and down with the pad;
+    a step past the top is refused at_limit (TC-006 steps 1 to 4)."""
     stack = fresh_stack
-    mock_client, mock_channel = await get_mock_client(stack)
+    menu_client, menu_channel = await get_menu_client(stack)
     try:
-        serials = await start_lobby(stack, count=4, game_mode=START_MODE)
-        host = serials[0]
-
-        # UC-013 A1: a value off the ladder (probe) jumps to none on Start.
+        await start_lobby(stack, count=2, game_mode=START_MODE)
+        # A running agent (the CI baseline has it off) at a level off the ladder.
+        flag_service_default().put(AGENT, "enabled", variant="on")
         flag_service_default().put(AGENT, FLAG, variant="probe")
         assert await async_poll_until(lambda: _effective_variant() == "probe", timeout=PERSIST_TIMEOUT_SECONDS)
 
-        # Step 1 (UC-012 steps 1, 2): the combo enters admin mode.
-        await enter_admin_mode(mock_client, host)
+        # BR-019: the first step from an off-ladder level lands on none, which stops the agent (BR-002).
+        await _step_and_expect(stack, menu_client, "down", "none")
 
-        # Step 2 (UC-013 step 1): three Move presses select agent_control (index 0 -> 3).
-        # The LED colour confirms the selection (#1845).
-        await select_admin_option(
-            lambda: press_admin_button(mock_client, host, _Button.MOVE),
-            lambda: get_controller_color(mock_client, host),
-            Colors.Purple.value,
-        )
+        # BR-003: the resume of a stopped agent with no saved level brings it back at ambient.
+        reply = await pad_command(menu_client, "agent_switch", direction="resume")
+        assert reply.success, f"resume refused: {reply.error}"
+        assert await async_poll_until(lambda: _effective_variant() == "ambient", timeout=PERSIST_TIMEOUT_SECONDS)
 
-        # A1: Start at probe lands on none.
-        await _press_and_expect(stack, mock_client, host, _Button.START, "none")
-        # Clamp at the bottom: Start at none stays none (the #1340 wrap would give full).
-        await _press_and_expect(stack, mock_client, host, _Button.START, "none")
+        for level in ("standard", "full"):
+            await _step_and_expect(stack, menu_client, "up", level)
+        # A7: past the top nothing is written (the #1340 wrap would give none).
+        reply = await pad_command(menu_client, "step_setting", option="agent_level", direction="up", steps=1)
+        assert (reply.success, reply.error) == (False, "at_limit")
+        assert _persisted_admin_variant() == "full"
 
-        # Escalate up the whole ladder with Select, then past the top.
-        for level in ("ambient", "standard", "full"):
-            await _press_and_expect(stack, mock_client, host, _Button.SELECT, level)
-        await _press_and_expect(stack, mock_client, host, _Button.SELECT, "full")
-
-        # Step 3: restrict twice from standard (full -> standard -> ambient -> none).
         for level in ("standard", "ambient", "none"):
-            await _press_and_expect(stack, mock_client, host, _Button.START, level)
+            await _step_and_expect(stack, menu_client, "down", level)
 
         # Step 4 / validation 2: flagd serves none; the admin value is persisted.
         assert await _flagd_serves(stack, "none"), "flagd did not serve interventions_allowed=none"
         assert _persisted_admin_variant() == "none"
     finally:
-        await mock_channel.close()
+        await menu_channel.close()

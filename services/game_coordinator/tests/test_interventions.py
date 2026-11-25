@@ -307,7 +307,7 @@ async def test_state_flag_revert_to_none_not_dispatched():
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-040", flow="A22", br=["BR-004"])
-@pytest.mark.uc("UC-013", br=["BR-002"])
+@pytest.mark.uc("UC-040", br=["BR-004"])
 @pytest.mark.uc("UC-045", flow="A2")
 async def test_allowed_membership_blocks():
     mgr, events = make_manager(
@@ -323,7 +323,7 @@ async def test_allowed_membership_blocks():
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-013", br=["BR-002"])
+@pytest.mark.uc("UC-040", br=["BR-004"])
 async def test_allowed_membership_permits_listed_type():
     """The same chain lets a type through when interventions_allowed names it."""
     mgr, events = make_manager(
@@ -338,7 +338,7 @@ async def test_allowed_membership_permits_listed_type():
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-013", cond=["Post-S-1"])
+@pytest.mark.uc("UC-040", br=["BR-005"])
 async def test_none_allow_list_rejects_every_intervention():
     """The `none` variant is the empty string: the coordinator rejects each intervention as not_allowed."""
     mgr, events = make_manager(

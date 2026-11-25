@@ -672,7 +672,7 @@ class GameLifecycleMixin:
             game_kind=GAME_KIND_REAL,
         )
 
-        # UC-012 BR-001: settings are read once here, at game start; the running game keeps them.
+        # UC-010 BR-015: settings are read once here, at game start; the running game keeps them.
         sensitivity = self.game_settings_client.get_integer_value("sensitivity", 2)
 
         # Build base config with the game mode's name. The menu is the REAL game

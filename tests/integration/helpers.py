@@ -649,9 +649,9 @@ class MenuEventCollector:
     """Collects menu events from StreamMenuEvents for the whole test duration.
 
     Mirror of GameEventCollector for the Menu service's server-stream RPC
-    (StreamMenuEvents -> stream MenuEvent). Menu admin flows (force start, game
-    selection) publish their outcomes here, so a collector started before the
-    button presses captures them without racing the stream.
+    (StreamMenuEvents -> stream MenuEvent). The menu publishes the outcome of a
+    force start or a game selection here, so a collector started before the
+    command captures it without racing the stream.
 
     MenuEvent has the same shape the collector relies on: ``event_type`` (str)
     and ``data`` (map<string,string>). There is no game_id on menu events, so
@@ -659,9 +659,9 @@ class MenuEventCollector:
 
     Usage:
         async with MenuEventCollector(menu_client) as collector:
-            # ... drive admin buttons ...
+            # ... send pad commands ...
             evt = await collector.wait_for_event("game_requested", timeout=10)
-            assert evt.data["source"] == "admin_force_start"
+            assert evt.data["source"] == "operator_pad"
     """
 
     def __init__(self, menu_client):
@@ -735,173 +735,18 @@ class MenuEventCollector:
 
 
 # =============================================================================
-# Admin-mode button helpers (#823)
-#
-# Admin mode is driven entirely by mock SimulateButton presses. The combo is
-# detected INCREMENTALLY in the menu (servicer.on_button): each face-button
-# press updates the per-serial button_state, and entry fires on the press that
-# completes Cross+Circle+Square+Triangle. So the combo helper presses the four
-# face buttons WITHOUT releasing them (the 4th press triggers entry), then the
-# caller releases all four so the ``combo_shown`` latch resets for re-entry.
-# In-admin button actions are debounced 300ms (admin.py), so press/release
-# cycles must leave >=~0.35s between presses of the same button.
+# Operator pad commands (UC-015)
 # =============================================================================
 
-# Buttons used to enter admin mode (all four held simultaneously).
-_ADMIN_COMBO_BUTTONS = (
-    controller_manager_mock_pb2.ButtonRequest.Button.CROSS,
-    controller_manager_mock_pb2.ButtonRequest.Button.CIRCLE,
-    controller_manager_mock_pb2.ButtonRequest.Button.SQUARE,
-    controller_manager_mock_pb2.ButtonRequest.Button.TRIANGLE,
-)
-
-# Admin-mode white LED (GAME_EFFECT_ADMIN_ENTER settles to Colors.White).
-ADMIN_WHITE = (255, 255, 255)
-
-# In-admin button debounce is 300ms; leave margin between same-button presses.
-ADMIN_DEBOUNCE_GAP = 0.4
+# The mock adapter starts every LED white, so a lobby-colour check excludes it.
+MOCK_START_WHITE = (255, 255, 255)
 
 
-async def _set_button(mock_client, serial: str, button, pressed: bool):
-    """Set a single mock button's pressed state (no auto-release)."""
-    await mock_client.SimulateButton(
-        controller_manager_mock_pb2.ButtonRequest(
-            serial=serial, button=button, pressed=pressed
-        )
-    )
-
-
-async def press_admin_combo(mock_client, serial: str, buttons=None):
-    """Press the admin entry combo by holding face buttons incrementally.
-
-    Presses Cross, Circle, Square, Triangle in sequence WITHOUT releasing
-    (the menu detects the combo on the 4th press), then releases all four so
-    the ``combo_shown`` latch resets and admin mode can be re-entered later.
-
-    Args:
-        mock_client: Mock controller service gRPC client.
-        serial: Controller serial number.
-        buttons: Optional subset of the four face buttons to press. Used by the
-            partial-combo negative test (press 3 -> must NOT enter admin).
-    """
-    combo = buttons if buttons is not None else _ADMIN_COMBO_BUTTONS
-    for button in combo:
-        await _set_button(mock_client, serial, button, True)
-        await asyncio.sleep(0.05)
-    # Release all face buttons so the combo_shown latch clears for re-entry.
-    for button in _ADMIN_COMBO_BUTTONS:
-        await _set_button(mock_client, serial, button, False)
-        await asyncio.sleep(0.02)
-
-
-async def enter_admin_mode(mock_client, serial: str, timeout: float = 5.0):
-    """Press the admin combo and poll until the controller LED is admin-white.
-
-    GAME_EFFECT_ADMIN_ENTER plays a brief white flash then holds white, so the
-    LED is polled with a deadline rather than read once (a single read can land
-    in the flash's dark phase).
-
-    Raises:
-        AssertionError: if the LED never settles to white within ``timeout``.
-    """
-    await press_admin_combo(mock_client, serial)
-    deadline = time.time() + timeout
-    last = None
-    while time.time() < deadline:
-        last = await get_controller_color(mock_client, serial)
-        if last == ADMIN_WHITE:
-            return
-        await asyncio.sleep(0.1)
-    raise AssertionError(
-        f"{serial} did not enter admin mode (LED never reached {ADMIN_WHITE}, last={last})"
-    )
-
-
-async def press_admin_button(
-    mock_client, serial: str, button, gap: float = ADMIN_DEBOUNCE_GAP
-):
-    """Press-and-release a single button while in admin mode, honoring debounce.
-
-    Leaves ``gap`` (>= the 300ms admin debounce) before AND after so successive
-    calls to the SAME button are each processed.
-    """
-    await _set_button(mock_client, serial, button, True)
-    await asyncio.sleep(0.05)
-    await _set_button(mock_client, serial, button, False)
-    await asyncio.sleep(gap)
-
-
-async def select_admin_option(
-    press_move,
-    read_color,
-    target_color: tuple[int, int, int],
-    *,
-    max_presses: int = 8,
-    settle_seconds: float = 1.0,
-) -> int:
-    """Press Move until the admin option colour ``target_color`` shows (#1845).
-
-    The menu debounces admin buttons by their PROCESSING time (300 ms), so a
-    stalled menu loop can compress two presses into one and drop the second;
-    a fixed number of Move presses then leaves a different option selected and
-    the next Start/Select edits that option. Each press shows the option's
-    colour for ~1 s, so the colour is the observable selection. Wrapping past
-    the last option is harmless: the colour comes round again.
-
-    Args:
-        press_move: async callable that presses and releases Move (with its gap).
-        read_color: async callable returning the host LED colour.
-        target_color: the LED colour of the option to select.
-
-    Returns:
-        The number of presses it took.
-
-    Raises:
-        AssertionError: if the colour never showed within ``max_presses``.
-    """
-    last = None
-
-    async def shown() -> bool:
-        nonlocal last
-        last = await read_color()
-        return last == target_color
-
-    for presses in range(1, max_presses + 1):
-        await press_move()
-        if await async_poll_until(shown, timeout=settle_seconds, interval=0.1):
-            return presses
-    raise AssertionError(
-        f"admin option colour {target_color} never showed in {max_presses} Move presses (last={last})"
-    )
-
-
-async def exit_admin_mode(mock_client, serial: str):
-    """Exit admin mode via the PS button (press + release)."""
-    await press_admin_button(
-        mock_client, serial, controller_manager_mock_pb2.ButtonRequest.Button.PS
-    )
-
-
-async def hold_trigger_for_force_start(
-    mock_client, serial: str, hold_seconds: float = 1.5
-):
-    """Hold the trigger long enough to force-start the game, then release.
-
-    The menu force-start threshold defaults to 3s but CI sets
-    ADMIN_FORCE_START_SECONDS=0.6, so a 1.5s hold clears it with margin.
-    """
-    await _set_button(
-        mock_client,
-        serial,
-        controller_manager_mock_pb2.ButtonRequest.Button.TRIGGER,
-        True,
-    )
-    await asyncio.sleep(hold_seconds)
-    await _set_button(
-        mock_client,
-        serial,
-        controller_manager_mock_pb2.ButtonRequest.Button.TRIGGER,
-        False,
+async def pad_command(menu_client, command: str, **fields):
+    """Send one operator pad command (``ProcessInput`` ``web_command``, services.md §3.1) as the pad does."""
+    data = {"command": command, **{key: str(value) for key, value in fields.items()}}
+    return await menu_client.ProcessInput(
+        menu_pb2.ProcessInputRequest(input_type="web_command", data=data)
     )
 
 
@@ -1341,8 +1186,7 @@ async def reset_all_controllers(mock_client, serials: list[str]):
         mock_client: Mock controller service gRPC client
         serials: List of controller serial numbers to reset
     """
-    # The Menu's StateManager resets on game end, but we can force
-    # a state reset by reconnecting or using admin mode
+    # The Menu's StateManager resets on game end
     pass  # Controllers reset automatically when game ends
 
 
@@ -1541,8 +1385,8 @@ async def wait_for_lobby_colors(
         timeout: Maximum time to wait in seconds
         poll_interval: Time between polls in seconds
         exclude: A colour that does not count as a lobby colour, e.g.
-            ``ADMIN_WHITE``: the mock adapter starts every LED white
-            (services/controller_manager/multiplexer/mock_adapter.py), so an admin-white check would pass
+            ``MOCK_START_WHITE``: the mock adapter starts every LED white
+            (services/controller_manager/multiplexer/mock_adapter.py), so a white check would pass
             before the menu has registered the controller.
 
     Raises:

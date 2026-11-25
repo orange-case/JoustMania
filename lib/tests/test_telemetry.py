@@ -77,13 +77,11 @@ class TestSpanAttr:
 
     def test_constants_exist(self):
         assert isinstance(SpanAttr.CONTROLLER_SERIAL, str)
-        assert isinstance(SpanAttr.ADMIN_OPTION, str)
         assert isinstance(SpanAttr.VALIDATION_RESULT, str)
         assert isinstance(SpanAttr.VALIDATION_REASON, str)
 
     def test_constants_are_dotted_names(self):
         assert "." in SpanAttr.CONTROLLER_SERIAL
-        assert "." in SpanAttr.ADMIN_OPTION
 
 
 class TestInjectTraceContext:
