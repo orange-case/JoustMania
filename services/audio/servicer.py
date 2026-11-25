@@ -88,7 +88,6 @@ class SoundChannel:
                             self._play_full_volume(file_path, file_info.duration, playing)
                     except Exception as e:
                         logger.warning(f"Playback error on channel {self.channel_id}: {e}")
-                        metrics.audio_playback_errors_total.inc()
                         alsa_config.note_playback_failure()
                     finally:
                         playing.clear()
@@ -260,11 +259,6 @@ class AudioManager:
         logger.info(f"AudioManager left silent mode: {self.MAX_CHANNELS} channels and music player initialized")
         return True
 
-    def _update_channel_gauge(self):
-        """Update the active channels gauge."""
-        active = sum(1 for c in self.channels if c.is_playing)
-        metrics.audio_channels_active.set(active)
-
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         """Set the event loop for async operations (call from async context)."""
         self.event_loop = loop
@@ -348,14 +342,12 @@ class AudioManager:
                         f"Playing sound: {file_path} (channel={channel.channel_id}, volume={adjusted_volume:.2f})"
                     )
                     metrics.audio_sounds_played_total.labels(result="success").inc()
-                    self._update_channel_gauge()
                     return True
                 metrics.audio_sounds_played_total.labels(result="error").inc()
                 return False
 
             logger.warning(f"No available channel for sound: {file_path}")
             metrics.audio_sounds_played_total.labels(result="no_channel").inc()
-            metrics.audio_channel_saturation_total.inc()
             return False
 
         except Exception as e:
@@ -385,7 +377,6 @@ class AudioManager:
         with self._channels_lock:
             stopped = self._stop_channels(group)
         if stopped:
-            self._update_channel_gauge()
             logger.info(f"Stopped {stopped} playing sound effect(s)" + (f" of group {group!r}" if group else ""))
         return stopped
 
@@ -442,8 +433,6 @@ class AudioManager:
                 track_id = self.music_player.start()
                 self.current_music_file = full_pattern
 
-                metrics.audio_music_playing.set(1)
-                metrics.audio_music_tempo.set(tempo)
                 logger.info(f"Playing music: {file_pattern} (track_id={track_id}, tempo={tempo})")
                 return track_id
 
@@ -468,8 +457,6 @@ class AudioManager:
                 if not track_id or current_track == track_id:
                     self.music_player.stop()
                     self.current_music_file = None
-                    metrics.audio_music_playing.set(0)
-                    metrics.audio_music_tempo.set(0)
                     logger.info(f"Stopped music track: {current_track}")
                     return True
 
@@ -510,7 +497,6 @@ class AudioManager:
                 self.event_loop,
             )
 
-            metrics.audio_music_tempo.set(new_tempo)
             logger.debug(f"Tempo transition started: {self.music_player.ratio:.2f} -> {new_tempo:.2f}")
             return True
 

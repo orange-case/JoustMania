@@ -350,27 +350,11 @@ Admin mode exits automatically 60 seconds after entry (the timer is not extended
 
 Metrics are pushed over OTLP to the collector (no `/metrics` endpoint); names are listed in [docs/specs/telemetry.md §6](../../docs/specs/telemetry.md#6-metrics).
 
-### gRPC Metrics
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `grpc_requests_total` | Counter | method, status | Total gRPC requests |
-| `grpc_request_duration_seconds` | Histogram | method | Request duration |
-
 ### Button Monitoring Metrics
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `menu_button_frames_processed_total` | Counter | - | Button-stream events dispatched (connect, disconnect, button) |
-| `menu_button_presses_total` | Counter | button, action | Button presses received (`action` = `press`) |
 | `menu_button_dispatch_seconds` | Histogram | event_type | Time to dispatch one button-stream event |
-
-### Stream Metrics
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `menu_stream_connections_active` | Gauge | - | Active StreamMenuEvents connections |
-| `menu_stream_events_published_total` | Counter | event_type | Events published to subscribers |
 
 ### System Metrics
 

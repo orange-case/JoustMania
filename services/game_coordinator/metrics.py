@@ -135,37 +135,6 @@ shadow_games_preempted_total = Counter(
     "Total shadow games force-ended (preempted) when a real game started",
 )
 
-# Flag service game lifecycle (FR-135): register / end / reconcile calls
-# by result (ok, error, timeout). An error or timeout triggers a reconcile.
-flag_service_calls_total = Counter(
-    "game_flag_service_calls_total",
-    "Game lifecycle calls to the flag service by call and result",
-    ["call", "result"],
-)
-
-# Event-list reader (FR-137): an event list read whose oldest event is
-# newer than the last applied seq + 1, i.e. more than K events arrived between
-# two reads (architecture note §6).
-intervention_event_gaps_total = Counter(
-    "game_intervention_event_gaps_total",
-    "Event-list reads that skipped events (more than K between two reads)",
-    ["flag"],
-)
-
-# Cross-set consistency gate (UC-053 A9): an intervention is deferred
-# while the coordinator's allow-list (agent set) is older than its interventions
-# set. The counter counts deferral episodes (a few ms each in steady state); the
-# gauge is the age of the current one (0 when none), so a stuck agent stream
-# shows as a growing age instead of silently stopped interventions.
-intervention_deferrals_total = Counter(
-    "game_intervention_deferrals_total",
-    "Intervention deferral episodes: the allow-list held lagged the interventions set held",
-)
-intervention_deferral_age_seconds = Gauge(
-    "game_intervention_deferral_age_seconds",
-    "Age of the current intervention deferral episode in seconds (0 when none)",
-)
-
 # Player metrics
 active_players = Gauge(
     "game_active_players",
@@ -213,24 +182,6 @@ def reset_players_alive_if_owner(game_id: str) -> bool:
 # nothing to remove them. Per-game, per-player death order is
 # game_player_elimination_order{serial,game_id} (a gauge cleared at game end).
 player_deaths_total = Counter("game_player_deaths_total", "Total player deaths", ["mode", "game_kind"])
-
-# Hold-mode shield activations (UC-030 A7, UC-040 A39): one per ended
-# activation. outcome = released / empty / budget_exhausted / death / game_end.
-shield_hold_activations_total = Counter(
-    "game_shield_hold_activations_total",
-    "Hold-mode shield activations by outcome",
-    ["mode", "game_kind", "outcome"],
-)
-
-# Group shields the coordinator refused as a whole (UC-040 A48, BR-033, #2467): one per
-# refused group_shield event. reason = the suffix of the group_refused:<reason> block
-# reason (disabled, real_game, bad_set, target_gone, game_ending, cap_reached,
-# low_battery, or a per-target shield reason such as shield_cap_reached).
-group_shield_refused_total = Counter(
-    "game_group_shield_refused_total",
-    "Group shields refused as a whole, by reason",
-    ["mode", "game_kind", "reason"],
-)
 
 # Hold-mode shield state for the agent (UC-040 A36, A37; UC-042 BR-007). Set at
 # every hold transition and with the 2 s energy keyframe, removed at game end.
@@ -287,16 +238,6 @@ process_cpu_seconds_total = Counter("process_cpu_seconds_total", "Total user and
 process_resident_memory_bytes = Gauge("process_resident_memory_bytes", "Resident memory size in bytes")
 
 process_threads = Gauge("process_threads", "Number of active threads")
-
-# gRPC metrics
-grpc_requests_total = Counter("grpc_requests_total", "Total gRPC requests received", ["method", "status"])
-
-grpc_request_duration_seconds = Histogram(
-    "grpc_request_duration_seconds",
-    "gRPC request duration",
-    ["method"],
-    buckets=[0.001, 0.005, 0.010, 0.025, 0.050, 0.100, 0.250, 0.500, 1.0],
-)
 
 # Game-state gauges (FR-041). One series per live game, labelled
 # (game_kind, game_id), so a concurrent real game and shadow game never overwrite
@@ -366,12 +307,6 @@ GAME_STATE_GAUGES = (
     game_loop_jitter_ms,
 )
 
-config_changes_total = Counter(
-    "game_config_changes_total",
-    "Total number of configuration changes",
-    ["parameter"],  # 'update_frequency_hz', 'poll_drop_threshold', etc.
-)
-
 # Feature flag metrics (Phase 44). Evaluations are counted by the standard OpenFeature
 # OTel metrics hook (feature_flag_evaluation_*_total, lib/openfeature_otel_hooks.py),
 # which replaced the subset counter game_flag_evaluations_total.
@@ -395,24 +330,6 @@ game_loop_frames_dropped_total = Counter(
     "game_loop_frames_dropped_total",
     "Total number of frames that exceeded 2x the target frame time",
     ["mode"],
-)
-
-# Adaptive controller filtering metrics (Phase 45)
-filtered_controllers = Gauge("game_filtered_controllers", "Number of controllers currently filtered out (dead players)")
-
-filter_updates_total = Counter(
-    "game_filter_updates_total",
-    "Total number of controller filter updates sent",
-    ["game_mode"],  # Track per game mode
-)
-
-active_controllers = Gauge("game_active_controllers", "Number of controllers currently being monitored (alive players)")
-
-# Stream reconnection metrics
-gameplay_stream_reconnects_total = Counter(
-    "game_gameplay_stream_reconnects_total",
-    "Total gameplay stream reconnection attempts",
-    ["game_mode"],
 )
 
 # Controller analytics metrics (Phase XX - Analytics)
@@ -625,22 +542,4 @@ intervention_dispatch_failures_total = Counter(
     "game_intervention_dispatch_failures_total",
     "Intervention side effects not applied because the owning game's event loop was unavailable",
     ["type", "reason"],
-)
-
-# EventBus stream health metrics
-event_bus_publish_drops_total = Counter(
-    "event_bus_publish_drops_total",
-    "Total events dropped due to full subscriber queues",
-    ["event_type"],
-)
-
-event_bus_active_subscribers = Gauge(
-    "event_bus_active_subscribers",
-    "Number of active EventBus subscribers",
-)
-
-event_bus_publish_errors_total = Counter(
-    "event_bus_publish_errors_total",
-    "Total errors during event publishing",
-    ["event_type"],
 )

@@ -20,16 +20,6 @@ from .adapter_manager import AdapterManager
 from .bluez_records import RecordOutcome, write_device_record
 from .bluez_reload import BluezReloader, PendingRecord
 from .config import get_adapter_routing_default, get_poll_interval, is_debug
-from .metrics import (
-    pairing_adapter_device_count,
-    pairing_adapter_selected_total,
-    pairing_attempts_total,
-    pairing_duration_seconds,
-    pairing_failed_total,
-    pairing_polls_total,
-    pairing_success_total,
-    pairing_usb_controllers,
-)
 from .pairing_backend import HidapiBackend, PairingBackend, RustServiceBackend
 from .registrations import DEFAULT_BLUETOOTH_DIR, RemovalResult, normalize_address, remove_controller_registrations
 from .usb_led import UsbLedCue
@@ -223,7 +213,6 @@ class USBPairing:
                 )
 
                 duration = time.time() - start_time
-                pairing_duration_seconds.observe(duration)
                 span.set_attribute("pair.result", result.success)
                 span.set_attribute("pair.duration_seconds", duration)
                 span.set_attribute("pair.already_paired", result.already_paired)
@@ -241,8 +230,6 @@ class USBPairing:
                 return result.success
 
             except Exception as e:
-                duration = time.time() - start_time
-                pairing_duration_seconds.observe(duration)
                 logger.error(f"Exception during pairing: {e}", exc_info=is_debug())
                 span.record_exception(e)
                 span.set_status(Status(StatusCode.ERROR, str(e)))
@@ -319,7 +306,6 @@ class USBPairing:
             else:
                 logger.info(f"Found unpaired USB controller: {serial}")
             span.set_attribute("skipped", False)
-            pairing_attempts_total.inc()
 
             async with self._pairing_lock:
                 return await self._pair_to_least_loaded(device_path, serial, product_id, span)
@@ -349,7 +335,6 @@ class USBPairing:
         if not adapter:
             logger.error("No Bluetooth adapters available for pairing")
             self.led_cue.failed(device_path, serial)
-            pairing_failed_total.inc()
             span.record_exception(PairingError("No Bluetooth adapters available"))
             span.set_status(Status(StatusCode.ERROR, "No adapters available"))
             return False
@@ -361,14 +346,11 @@ class USBPairing:
         span.set_attribute(_ATTR_ADAPTER_ADDRESS, adapter.address)
         span.set_attribute("adapter.device_count", adapter.device_count)
         span.set_attribute("adapter.hci", adapter.hci)
-        pairing_adapter_selected_total.labels(adapter=adapter.address).inc()
-        pairing_adapter_device_count.labels(adapter=adapter.address).set(adapter.device_count)
 
         # Pair controller to selected adapter via backend
         if not await self.pair_controller(device_path, serial, adapter.address):
             logger.error(f"PAIRING FAILED: Controller {serial} could not be paired")
             self.led_cue.failed(device_path, serial)
-            pairing_failed_total.inc()
             span.record_exception(PairingError(f"Controller {serial} pairing failed"))
             span.set_status(Status(StatusCode.ERROR, "Pairing failed"))
             return False
@@ -414,7 +396,6 @@ class USBPairing:
             f"PAIRING SUCCESS: Controller {serial} paired to adapter {adapter.address} - unplug USB and press PS button"
         )
 
-        pairing_success_total.inc()
         span.set_status(Status(StatusCode.OK))
         return True
 
@@ -483,7 +464,6 @@ class USBPairing:
     async def poll(self) -> None:
         """Perform one USB polling cycle."""
         self.poll_count += 1
-        pairing_polls_total.inc()
         logger.debug(f"Poll #{self.poll_count}")
 
         with self.tracer.start_as_current_span("poll_cycle") as span:
@@ -515,12 +495,8 @@ class USBPairing:
 
     async def _pair_usb_controllers(self, backend: PairingBackend, span) -> None:
         """Enumerate the controllers on USB and pair each one."""
-        # Reset gauge before enumeration (prevents stale value if backend raises)
-        pairing_usb_controllers.set(0)
-
         # Get USB controllers using resolved backend
         controllers = await backend.get_usb_controllers()
-        pairing_usb_controllers.set(len(controllers))
         self._usb_paths = {a: c.device_path for c in controllers if (a := normalize_address(c.serial))}
         # An unpaired controller is paired again once it left USB, or came back under
         # another device path between two polls (UC-005 A8)

@@ -210,12 +210,10 @@ async def test_subscriber_on_closed_loop_is_dropped_not_fatal():
     assert outcome["error"] is None
     assert bus.subscriber_count == 2
 
-    with patch("services.game_coordinator.metrics.event_bus_publish_errors_total") as errors_total:
-        await bus.publish("event1", {})
+    await bus.publish("event1", {})
 
     assert list(bus._subscribers) == ["live"]
     assert live_queue.get_nowait().event_type == "event1"
-    errors_total.labels.assert_called_once_with(event_type="event1")
 
 
 class _MockSpan:
@@ -306,18 +304,16 @@ async def test_a_half_full_queue_drops_the_energy_event_on_its_own_loop_but_neve
     """UC-035 BR-008: `player_shield_energy` is dropped in `_deliver` once the queue is half full; deaths are not."""
     bus = EventBus()
     queue = await bus.subscribe("dashboard", max_queue_size=10)
-    with patch("services.game_coordinator.event_bus.metrics.event_bus_publish_drops_total") as drops:
-        await _publish_from_game_thread(bus, [GameEvent.PLAYER_SHIELD_ENERGY] * 3)
-        assert queue.qsize() == 3  # below half: delivered
+    await _publish_from_game_thread(bus, [GameEvent.PLAYER_SHIELD_ENERGY] * 3)
+    assert queue.qsize() == 3  # below half: delivered
 
-        await _publish_from_game_thread(
-            bus,
-            [GameEvent.PLAYER_DEATH, GameEvent.PLAYER_DEATH, GameEvent.PLAYER_SHIELD_ENERGY, GameEvent.PLAYER_DEATH],
-        )
+    await _publish_from_game_thread(
+        bus,
+        [GameEvent.PLAYER_DEATH, GameEvent.PLAYER_DEATH, GameEvent.PLAYER_SHIELD_ENERGY, GameEvent.PLAYER_DEATH],
+    )
 
     delivered = [queue.get_nowait().event_type for _ in range(queue.qsize())]
     assert delivered == ["player_shield_energy"] * 3 + ["player_death"] * 3
-    drops.labels.assert_called_once_with(event_type="player_shield_energy")
 
 
 @pytest.mark.uc("UC-035", br=["BR-008"])

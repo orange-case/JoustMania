@@ -21,7 +21,6 @@ from .config import get_bt_monitor_interval
 from .metrics import (
     bluetooth_adapter_connections,
     bluetooth_device_connected,
-    bluetooth_device_last_seen,
     bluetooth_device_rssi_dbm,
     pairing_bluetooth_adapter_hci_errors_total,
     pairing_bluetooth_adapter_info,
@@ -177,7 +176,6 @@ class BluetoothMonitor:
 
                     # Update metrics (normalized serial matches controller manager)
                     bluetooth_device_connected.labels(serial=serial, hci_adapter=hci).set(1)
-                    bluetooth_device_last_seen.labels(serial=serial, hci_adapter=hci).set(ts)
                     self._export_role(serial, hci, roles[bt_address])
 
                     if rssi is not None:

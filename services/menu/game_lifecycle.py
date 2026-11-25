@@ -20,7 +20,6 @@ from lib.feature_flags import GAME_KIND_REAL, set_game_transaction_context
 from lib.telemetry import get_tracer
 from lib.types import GameEvent, Games, Sound
 from proto import menu_pb2
-from services.menu import metrics
 
 logger = logging.getLogger("services.menu.servicer")
 
@@ -348,7 +347,6 @@ class GameLifecycleMixin:
         with tracer.start_as_current_span("stop_button_monitor"):
             await self.stop_button_monitor()
 
-        metrics.player_ready.clear()
         logger.info("Button monitor and lobby music stopped for game start")
 
         if not stopped_before and self.state == menu_pb2.MenuState.STOPPED:
@@ -504,7 +502,6 @@ class GameLifecycleMixin:
         if attempt == 0:
             return stub.StreamGameEvents(request, metadata=metadata)
 
-        metrics.game_event_stream_reconnects_total.inc()
         logger.warning(f"Reconnecting game event stream (attempt {attempt}/{max_attempts})")
         subscribe_request = game_coordinator_pb2.StreamEventsRequest()
         return stub.StreamGameEvents(subscribe_request, metadata=metadata)

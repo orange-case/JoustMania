@@ -1,7 +1,7 @@
 """Unit tests for StateManager."""
 
 import threading
-from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
 
@@ -130,8 +130,7 @@ class TestStateManagerTransition:
     """Test state transitions."""
 
     @pytest.mark.asyncio
-    @patch("services.menu.state_manager.metrics")
-    async def test_transition_to_ready(self, mock_metrics, state_manager):
+    async def test_transition_to_ready(self, state_manager):
         """Transitioning to READY should update ready_controllers."""
         state_manager.controller_states["serial1"] = ControllerState.CONNECTED
 
@@ -195,9 +194,8 @@ class TestStateManagerHelpers:
         assert state_manager.current_game_mode == Games.Werewolf
 
     @pytest.mark.asyncio
-    @patch("services.menu.state_manager.metrics")
     @pytest.mark.uc("UC-010", flow="main", steps=[8])
-    async def test_reset(self, mock_metrics, state_manager):
+    async def test_reset(self, state_manager):
         """reset should clear ready state and re-register controllers."""
         # Set up state via controller_states (single source of truth)
         state_manager.controller_states = {"s1": ControllerState.READY, "s2": ControllerState.CONNECTED}

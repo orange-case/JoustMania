@@ -177,16 +177,6 @@ class TestPollCadenceIsolation:
 
 @pytest.mark.nfr("NFR-002")
 class TestLoopLateness:
-    @pytest.mark.asyncio
-    async def test_poll_lateness_is_observed(self):
-        backend = SlowBackend()
-        loop = _make_loop(backend)
-        with patch("services.controller_manager.discovery_loop.metrics") as metrics:
-            await _run_for(loop, 0.3)
-        observed = [c.args[0] for c in metrics.poll_loop_lateness_seconds.observe.call_args_list]
-        assert len(observed) > 10
-        assert all(value >= 0.0 for value in observed)
-
     def test_event_gap_excludes_loop_stall(self):
         """A 60 ms gap that spans 40 ms of loop stall is a 20 ms link gap."""
         loop = _make_loop(SlowBackend())

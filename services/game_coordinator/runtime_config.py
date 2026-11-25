@@ -268,7 +268,6 @@ class RuntimeConfigManager:
                 if new_hz != old_hz:
                     logger.info(f"Config updated: update_frequency_hz {old_hz} -> {new_hz} Hz")
                     changes["update_frequency_hz"] = new_hz
-                    metrics.config_changes_total.labels(parameter="update_frequency_hz").inc()
 
                 # === Controller domain flags ===
 
@@ -281,7 +280,6 @@ class RuntimeConfigManager:
                     if new_threshold != old_threshold:
                         logger.info(f"Config updated: poll_drop_threshold {old_threshold} -> {new_threshold}")
                         changes["poll_drop_threshold"] = new_threshold
-                        metrics.config_changes_total.labels(parameter="poll_drop_threshold").inc()
 
                 # Update current config gauges
                 metrics.current_update_frequency_hz.set(
@@ -299,7 +297,6 @@ class RuntimeConfigManager:
                     if new_phase != old_phase:
                         logger.info(f"Config updated: countdown_phase_duration_ms {old_phase} -> {new_phase} ms")
                         changes["countdown_phase_duration_ms"] = new_phase
-                        metrics.config_changes_total.labels(parameter="countdown_phase_duration_ms").inc()
 
                     # Winner rainbow duration
                     old_rainbow = self.config.winner_rainbow_duration_ms
@@ -309,7 +306,6 @@ class RuntimeConfigManager:
                     if new_rainbow != old_rainbow:
                         logger.info(f"Config updated: winner_rainbow_duration_ms {old_rainbow} -> {new_rainbow} ms")
                         changes["winner_rainbow_duration_ms"] = new_rainbow
-                        metrics.config_changes_total.labels(parameter="winner_rainbow_duration_ms").inc()
 
                 # === Agent domain flags (#766 F4: perception.*) ===
                 #
@@ -322,7 +318,7 @@ class RuntimeConfigManager:
                 # read once at game init (see _read_ema_weight_at_init) and frozen
                 # for the life of the game (#722 §5 variance-baseline caveat).
                 if self.agent_client:
-                    analytics_changes = self._refresh_perception_flags(metrics)
+                    analytics_changes = self._refresh_perception_flags()
 
             except Exception as e:
                 # Don't crash on flag evaluation failure, just log and keep defaults
@@ -333,7 +329,7 @@ class RuntimeConfigManager:
                         changes["analytics"] = replace(self.config.analytics, **analytics_changes)
                     self.config = replace(self.config, **changes)
 
-    def _refresh_perception_flags(self, metrics) -> dict:
+    def _refresh_perception_flags(self) -> dict:
         """Read zone-boundary and playstyle thresholds from the agent domain.
 
         Each value validates to a positive number; on malformed/invalid values
@@ -364,7 +360,6 @@ class RuntimeConfigManager:
                 if value != getattr(analytics, attr):
                     logger.info(f"Config updated: analytics.{attr} -> {value}")
                     changes[attr] = value
-                    metrics.config_changes_total.labels(parameter=attr).inc()
         else:
             logger.warning(f"Ignoring perception zone flags (not strictly increasing): {new_zones}; keeping defaults")
 
@@ -384,7 +379,6 @@ class RuntimeConfigManager:
             if value != current:
                 logger.info(f"Config updated: analytics.{attr} -> {value}")
                 changes[attr] = value
-                metrics.config_changes_total.labels(parameter=attr).inc()
         return changes
 
     @staticmethod

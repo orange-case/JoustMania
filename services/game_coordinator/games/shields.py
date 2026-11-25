@@ -297,7 +297,7 @@ class ShieldMixin:
         )
 
     def _refuse_group(self, reason: str, serial: str | None = None, detail: str = "") -> None:
-        """Count, log and raise a whole-group refusal (UC-040 A48); nothing is applied."""
+        """Log and raise a whole-group refusal (UC-040 A48); nothing is applied."""
         from services.game_coordinator.intervention_errors import InterventionNotApplied
 
         logger.info(
@@ -305,10 +305,6 @@ class ShieldMixin:
             + (f" (serial {serial})" if serial else "")
             + (f": {detail}" if detail else "")
         )
-        with contextlib.suppress(Exception):
-            metrics.group_shield_refused_total.labels(
-                mode=self.get_game_name(), game_kind=self.game_kind, reason=reason
-            ).inc()
         player = self.players.get(serial) if serial else None
         if player is not None and player.span:
             with contextlib.suppress(Exception):
@@ -1364,10 +1360,6 @@ class ShieldMixin:
                 span.set_attribute("shield.end_grace_s", end_grace)
                 span.end()
         player.hold_min_burst_applied = False
-        with contextlib.suppress(Exception):
-            metrics.shield_hold_activations_total.labels(
-                mode=self.get_game_name(), game_kind=self.game_kind, outcome=outcome
-            ).inc()
         if (
             hold is not None
             and not player.hold_budget_exhausted_noted

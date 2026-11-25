@@ -44,8 +44,6 @@ def mock_callbacks():
 def mock_metrics():
     """Create mock metrics."""
     metrics = MagicMock()
-    metrics.button_presses_total = MagicMock()
-    metrics.button_presses_total.labels = MagicMock(return_value=MagicMock())
     return metrics
 
 
@@ -769,8 +767,6 @@ class TestForceStartLiveRosterReconcile:
         roster = handler.callbacks.start_game.await_args.args[2]
         assert "ghost" not in roster
         assert set(roster) == real
-        # One ghost pruned -> the metric was incremented.
-        handler.metrics.ghost_controllers_pruned_total.inc.assert_called()
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-014", flow="A2")
@@ -804,8 +800,6 @@ class TestForceStartLiveRosterReconcile:
         handler.callbacks.start_game.assert_awaited_once()
         roster = handler.callbacks.start_game.await_args.args[2]
         assert set(roster) == real | {"ghost"}
-        # The degraded-reconcile counter is incremented so the dashboard sees it.
-        handler.metrics.force_start_reconcile_failed_total.inc.assert_called_once()
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-014", flow="main", steps=[4], br=["BR-001"])
@@ -2172,8 +2166,7 @@ class TestSingleAdminSession:
         try:
             await self._press_combo(servicer, "A")
 
-            with patch("services.menu.servicer.metrics"):
-                response = await MenuServicer.StopMenu(servicer, MagicMock(), MagicMock())
+            response = await MenuServicer.StopMenu(servicer, MagicMock(), MagicMock())
 
             assert response.success is True
             assert admin_handler.active is False

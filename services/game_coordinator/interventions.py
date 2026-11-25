@@ -1257,9 +1257,6 @@ class InterventionManager:
                 f"{spec.flag_key}: game {session.game_id}: events {last_seq + 1}..{fresh[0][0] - 1} "
                 "fell out of the event list before they were read (more than K between two reads)"
             )
-            from services.game_coordinator import metrics
-
-            metrics.intervention_event_gaps_total.labels(flag=spec.flag_key).inc()
         for _, payload, decision_id in fresh:
             payload_str = _event_payload_string(spec, payload)
             if spec.payload_required and not payload_str.strip(" :"):
@@ -1957,17 +1954,13 @@ class InterventionManager:
         allow: "tuple[str, int] | None",
         reason: str = "",
     ) -> None:
-        """Record a deferral: counts the episode, sets the age gauge, warns
-        (rate limited) once it lasts longer than DEFERRAL_WARN_AFTER_S and keeps
-        a re-check scheduled so a stuck deferral stays visible without changes."""
-        from services.game_coordinator import metrics
-
+        """Record a deferral: warns (rate limited) once it lasts longer than
+        DEFERRAL_WARN_AFTER_S and keeps a re-check scheduled so a stuck deferral
+        stays visible without changes."""
         now = self._time_fn()
         if self._deferral_since is None:
             self._deferral_since = now
-            metrics.intervention_deferrals_total.inc()
         age = now - self._deferral_since
-        metrics.intervention_deferral_age_seconds.set(age)
         detail = reason or f"allow-list snapshot {allow} is older than interventions snapshot {held}"
         if age > DEFERRAL_WARN_AFTER_S and (
             self._deferral_last_warned is None or now - self._deferral_last_warned >= DEFERRAL_WARN_INTERVAL_S
@@ -1984,11 +1977,8 @@ class InterventionManager:
     def _end_deferral(self) -> None:
         if self._deferral_since is None:
             return
-        from services.game_coordinator import metrics
-
         self._deferral_since = None
         self._deferral_last_warned = None
-        metrics.intervention_deferral_age_seconds.set(0)
         if self._deferral_recheck is not None:
             self._deferral_recheck.cancel()
             self._deferral_recheck = None

@@ -7,7 +7,6 @@ from collections.abc import Callable, Coroutine
 from lib.controller_constants import ButtonTrackingKey
 from lib.flag_service_writer import FlagServiceWriter
 from lib.types import Games
-from services.menu import metrics
 from services.menu.handlers.base import ControllerHandler, ControllerState
 from services.menu.utils import AudioHelper, LedController
 
@@ -204,13 +203,6 @@ class StateManager:
         # Update state
         self.controller_states[serial] = new_state
 
-        # Emit metrics for ready state changes
-        if new_state == ControllerState.READY:
-            metrics.player_ready.labels(serial=serial).set(1)
-        elif old_state == ControllerState.READY:
-            # Only set to 0 if transitioning FROM ready
-            metrics.player_ready.labels(serial=serial).set(0)
-
         # Call enter handler
         new_handler = self._handlers.get(new_state)
         if new_handler:
@@ -247,10 +239,6 @@ class StateManager:
         if handler:
             await handler.on_exit(serial)
 
-        # Clear ready metric if player was ready
-        if state == ControllerState.READY:
-            metrics.player_ready.labels(serial=serial).set(0)
-
         # Clean up state (removing from controller_states also removes from computed properties)
         self.controller_states.pop(serial, None)
         self.button_states.pop(serial, None)
@@ -271,7 +259,6 @@ class StateManager:
         self.controller_states.clear()
         self.button_states.clear()
         self.battery_levels.clear()
-        metrics.player_ready.clear()
         logger.info(f"Stream reconnected: cleared {count} controller(s) for re-population")
 
     def return_all_to_connected(self) -> None:
@@ -282,7 +269,6 @@ class StateManager:
         for serial in self.controller_states:
             self.controller_states[serial] = ControllerState.CONNECTED
         self.button_states.clear()
-        metrics.player_ready.clear()
 
     def update_battery(self, serial: str, battery: int) -> None:
         """
@@ -376,9 +362,6 @@ class StateManager:
         # Clear all state (controller_states is the single source of truth)
         self.controller_states.clear()
         self.button_states.clear()
-
-        # Clear all player ready metrics
-        metrics.player_ready.clear()
 
         # Reset ready handler's game start flag (Issue #230)
         ready_handler = self._handlers.get(ControllerState.READY)

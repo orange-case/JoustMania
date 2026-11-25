@@ -198,10 +198,9 @@ class TestIdleMonitorEnterIdle:
     """Test entering idle mode."""
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
     @pytest.mark.uc("UC-010", flow="A2")
     @pytest.mark.uc("UC-002", flow="A3")
-    async def test_enter_idle_transitions_controllers(self, mock_metrics, idle_monitor, mock_state_manager):
+    async def test_enter_idle_transitions_controllers(self, idle_monitor, mock_state_manager):
         """Entering idle should transition CONNECTED controllers to IDLE."""
         mock_state_manager.controller_states = {
             "s1": ControllerState.CONNECTED,
@@ -217,9 +216,8 @@ class TestIdleMonitorEnterIdle:
         assert mock_state_manager.transition_to.await_count == 3
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
     @pytest.mark.uc("UC-010", flow="A2")
-    async def test_enter_idle_skips_ready_admin(self, mock_metrics, idle_monitor, mock_state_manager):
+    async def test_enter_idle_skips_ready_admin(self, idle_monitor, mock_state_manager):
         """Entering idle should NOT transition READY or ADMIN controllers."""
         mock_state_manager.controller_states = {
             "s1": ControllerState.CONNECTED,
@@ -234,8 +232,7 @@ class TestIdleMonitorEnterIdle:
         mock_state_manager.transition_to.assert_awaited_once_with("s1", ControllerState.IDLE)
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_enter_idle_no_connected(self, mock_metrics, idle_monitor, mock_state_manager):
+    async def test_enter_idle_no_connected(self, idle_monitor, mock_state_manager):
         """Entering idle with no CONNECTED controllers should be a no-op."""
         mock_state_manager.controller_states = {
             "s1": ControllerState.READY,
@@ -247,10 +244,9 @@ class TestIdleMonitorEnterIdle:
         mock_state_manager.transition_to.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
     @pytest.mark.uc("UC-010", flow="A2", steps=[1])
     @pytest.mark.uc("UC-002", flow="A3")
-    async def test_enter_idle_selects_sentinels(self, mock_metrics, idle_monitor, mock_state_manager):
+    async def test_enter_idle_selects_sentinels(self, idle_monitor, mock_state_manager):
         """UC-010 A2 step 1: up to sentinel.count (2) controllers are picked as sentinels, highest battery first."""
         mock_state_manager.controller_states = {
             "s1": ControllerState.CONNECTED,
@@ -269,9 +265,8 @@ class TestIdleMonitorWakeAll:
     """Test waking all controllers from idle."""
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
     @pytest.mark.uc("UC-010", flow="A2", steps=[2])
-    async def test_wake_all_transitions_idle_to_connected(self, mock_metrics, idle_monitor, mock_state_manager):
+    async def test_wake_all_transitions_idle_to_connected(self, idle_monitor, mock_state_manager):
         """wake_all should transition all IDLE controllers to CONNECTED."""
         idle_monitor._idle_active = True
         mock_state_manager.controller_states = {
@@ -287,8 +282,7 @@ class TestIdleMonitorWakeAll:
         assert mock_state_manager.transition_to.await_count == 2
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_wake_all_resets_timer(self, mock_metrics, idle_monitor, mock_state_manager):
+    async def test_wake_all_resets_timer(self, idle_monitor, mock_state_manager):
         """wake_all should reset the activity timer."""
         idle_monitor._idle_active = True
         mock_state_manager.controller_states = {"s1": ControllerState.IDLE}
@@ -309,8 +303,7 @@ class TestIdleMonitorWakeAll:
         mock_state_manager.transition_to.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_wake_all_clears_sentinels(self, mock_metrics, idle_monitor, mock_state_manager):
+    async def test_wake_all_clears_sentinels(self, idle_monitor, mock_state_manager):
         """wake_all should clear sentinel list."""
         idle_monitor._idle_active = True
         idle_monitor._sentinel_serials = ["s1", "s2"]
@@ -325,8 +318,7 @@ class TestIdleMonitorStartStop:
     """Test start/stop lifecycle."""
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_start(self, mock_metrics, idle_monitor):
+    async def test_start(self, idle_monitor):
         """start should create the monitor task."""
         idle_monitor.start()
 
@@ -338,8 +330,7 @@ class TestIdleMonitorStartStop:
         await asyncio.sleep(0)  # Let cancellation propagate
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_stop(self, mock_metrics, idle_monitor):
+    async def test_stop(self, idle_monitor):
         """stop should cancel the monitor task."""
         idle_monitor.start()
         idle_monitor.stop()
@@ -348,14 +339,12 @@ class TestIdleMonitorStartStop:
         assert idle_monitor._monitor_task is None
         assert not idle_monitor.is_idle_active
 
-    @patch("services.menu.idle_monitor.metrics")
-    def test_stop_without_start(self, mock_metrics, idle_monitor):
+    def test_stop_without_start(self, idle_monitor):
         """stop without start should not raise."""
         idle_monitor.stop()
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_double_start(self, mock_metrics, idle_monitor):
+    async def test_double_start(self, idle_monitor):
         """Starting twice should not create duplicate tasks."""
         idle_monitor.start()
         task1 = idle_monitor._monitor_task
@@ -392,8 +381,7 @@ class TestIdleMonitorLoopTimeout:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A2", steps=[1])
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_loop_enters_idle_at_timeout_not_before(self, mock_metrics, mock_state_manager):
+    async def test_loop_enters_idle_at_timeout_not_before(self, mock_state_manager):
         clock = {"now": 1000.0}
         timeout_minutes = 2
         real_sleep = asyncio.sleep
@@ -438,8 +426,7 @@ class TestLobbyIdleTimeout:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-002", flow="A3", steps=[1])
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_timeout_turns_connected_controllers_idle_and_dark(self, _mock_metrics, real_servicer):
+    async def test_timeout_turns_connected_controllers_idle_and_dark(self, real_servicer):
         """Real StateManager and IdleHandler: the timeout drives every connected controller to IDLE, LED off."""
         clock = {"now": 1000.0}
         timeout_minutes = 3
@@ -482,8 +469,7 @@ class TestIdleMonitorSentinelRotation:
     """Test sentinel rotation."""
 
     @pytest.mark.asyncio
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_rotation_selects_new_sentinels(self, mock_metrics, idle_monitor, mock_state_manager):
+    async def test_rotation_selects_new_sentinels(self, idle_monitor, mock_state_manager):
         """Rotation should select different controllers when possible."""
         import time as _time
 
@@ -567,8 +553,7 @@ class TestIdleWakeConsumesPress:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A2", steps=[2])
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_trigger_on_idle_controller_wakes_all_and_is_consumed(self, mock_metrics):
+    async def test_trigger_on_idle_controller_wakes_all_and_is_consumed(self):
         """A trigger press on an idle controller wakes every idle controller; it does not ready that controller."""
         from unittest.mock import create_autospec
 

@@ -393,11 +393,10 @@ class TestUC004IdentifyControllerRpc:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-004", steps=[3, 4, 6], cond=["Post-S-2"])
     async def test_connected_lobby_controller_is_identified(self, servicer):
-        """UC-004 main: started, white flash + rumble, colour restored, metric counted."""
+        """UC-004 main: started, white flash + rumble, colour restored."""
         backend = servicer.backend
-        with patch("services.controller_manager.servicer.metrics.controller_identify_requests_total") as counter:
-            response = await _rpc(servicer)
-            await _drain(servicer)
+        response = await _rpc(servicer)
+        await _drain(servicer)
 
         assert response.success is True
         assert response.outcome == "started"
@@ -405,8 +404,6 @@ class TestUC004IdentifyControllerRpc:
         assert WHITE in backend.history
         assert backend.rumble[0] == (SERIAL, IDENTIFY_RUMBLE_INTENSITY)
         assert backend.colors[SERIAL] == LOBBY
-        counter.labels.assert_called_once_with(outcome="started")
-        counter.labels.return_value.inc.assert_called_once()
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-004", steps=[4], cond=["Post-S-2"])
@@ -430,15 +427,13 @@ class TestUC004IdentifyControllerRpc:
     @pytest.mark.uc("UC-004", flow="A1", cond=["Post-F-1"])
     async def test_unknown_serial_is_not_connected(self, servicer):
         """UC-004 A1: an unknown serial is refused; nothing is written."""
-        with patch("services.controller_manager.servicer.metrics.controller_identify_requests_total") as counter:
-            response = await _rpc(servicer, serial="UNKNOWN99")
+        response = await _rpc(servicer, serial="UNKNOWN99")
 
         assert response.success is False
         assert response.outcome == "not_connected"
         assert response.error
         assert servicer.backend.history == []
         assert servicer.backend.rumble == []
-        counter.labels.assert_called_once_with(outcome="not_connected")
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-004", flow="A1", cond=["Pre-1"])

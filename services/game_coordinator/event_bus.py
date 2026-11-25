@@ -50,7 +50,6 @@ from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from proto import game_coordinator_pb2
-from services.game_coordinator import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +119,6 @@ class EventBus:
         owner_loop = asyncio.get_running_loop()
         with self._event_lock:
             self._subscribers[subscriber_id] = (event_queue, owner_loop)
-            metrics.event_bus_active_subscribers.set(len(self._subscribers))
         logger.info(f"New event subscriber: {subscriber_id}")
         return event_queue
 
@@ -137,7 +135,6 @@ class EventBus:
         with self._event_lock:
             if subscriber_id in self._subscribers:
                 del self._subscribers[subscriber_id]
-                metrics.event_bus_active_subscribers.set(len(self._subscribers))
                 logger.info(f"Event subscriber removed: {subscriber_id}")
                 return True
         return False
@@ -202,7 +199,6 @@ class EventBus:
             except RuntimeError as e:
                 # The subscriber's loop is closed: nobody can read that queue
                 # again, so drop the subscriber instead of failing every publish.
-                metrics.event_bus_publish_errors_total.labels(event_type=event_type).inc()
                 logger.warning(f"Subscriber {sub_id} loop is closed ({e}); removing it")
                 self._discard_subscriber(sub_id, event_queue)
 
@@ -214,17 +210,14 @@ class EventBus:
             and event_queue.maxsize > 0
             and event_queue.qsize() * DROPPABLE_QUEUE_SHARE_DIVISOR >= event_queue.maxsize
         ):
-            metrics.event_bus_publish_drops_total.labels(event_type=event_type).inc()
             logger.debug(f"Subscriber {sub_id} queue a quarter full, dropping {event_type}")
             return
         try:
             event_queue.put_nowait(event)
             logger.debug(f"Published {event_type} to subscriber {sub_id}")
         except asyncio.QueueFull:
-            metrics.event_bus_publish_drops_total.labels(event_type=event_type).inc()
             logger.warning(f"Subscriber {sub_id} queue full, skipping event")
         except Exception as e:
-            metrics.event_bus_publish_errors_total.labels(event_type=event_type).inc()
             logger.error(f"Error publishing to subscriber {sub_id}: {e}")
 
     def _discard_subscriber(self, sub_id: str, event_queue: asyncio.Queue) -> None:
@@ -233,4 +226,3 @@ class EventBus:
             entry = self._subscribers.get(sub_id)
             if entry is not None and entry[0] is event_queue:
                 del self._subscribers[sub_id]
-                metrics.event_bus_active_subscribers.set(len(self._subscribers))
