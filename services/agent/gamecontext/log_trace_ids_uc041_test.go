@@ -86,6 +86,9 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 		if len(snap.Players) != 0 || (snap.Session.GameActive != nil && *snap.Session.GameActive) {
 			t.Fatal("game.start added a player or set the game active")
 		}
+		if !snap.UpdatedAt.IsZero() {
+			t.Fatalf("UpdatedAt = %v, want zero: a log record is never a live signal (BR-010)", snap.UpdatedAt)
+		}
 	})
 
 	t.Run("UC-041/A8 a sampled game.phase.start sets the gameplay_phase and game_cycle span ids", func(t *testing.T) {
@@ -101,6 +104,23 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 		snap, _ := mux.Snapshot("game-B")
 		if len(snap.Players) != 0 || (snap.Session.GameActive != nil && *snap.Session.GameActive) {
 			t.Fatal("game.phase.start added a player or set the game active")
+		}
+		if !snap.UpdatedAt.IsZero() {
+			t.Fatalf("UpdatedAt = %v, want zero: a log record is never a live signal (BR-010)", snap.UpdatedAt)
+		}
+	})
+
+	t.Run("UC-041/BR-010 a context opened by game.phase.start is held for 60 s", func(t *testing.T) {
+		clk := &muxClock{t: time.Unix(4000, 0)}
+		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
+
+		clk.advance(logHoldFor - time.Second)
+		if removed := mux.EvictStale(); len(removed) != 0 {
+			t.Fatalf("removed %v within the hold", removed)
+		}
+		if got := traceIDsOf(t, mux, "game-B"); got.cycle != logCycleHex {
+			t.Fatalf("cycle id = %q after the hold, want %q", got.cycle, logCycleHex)
 		}
 	})
 
