@@ -777,7 +777,8 @@ func (s *Store) SetGameActive(active bool) {
 		s.ctx.Session.EliminationSequence = kept
 		s.ctx.Session.InterventionCounts = nil
 		s.ctx.Session.DurationSeconds = nil
-		s.ctx.Session.StartedAt = s.now()
+		start := s.now() // one read, so the kept eliminations sort after the start event
+		s.ctx.Session.StartedAt = start
 		s.durationAdvancedAt = time.Time{}
 		s.elapsedHighWater = 0
 		s.elimOrder = make(map[string]int)
@@ -797,11 +798,11 @@ func (s *Store) SetGameActive(active bool) {
 			s.playerHistory[serial] = h
 		}
 		s.speedTrack.reset()
-		s.history.append(TimelineEvent{At: s.now(), Kind: EventPhase, Detail: "start"})
+		s.history.append(TimelineEvent{At: start, Kind: EventPhase, Detail: "start"})
 		// Clamped to the start, so the timeline stays oldest-first.
 		for _, e := range keptEvents {
-			if e.At.Before(s.ctx.Session.StartedAt) {
-				e.At = s.ctx.Session.StartedAt
+			if e.At.Before(start) {
+				e.At = start
 			}
 			s.history.append(e)
 		}
@@ -942,7 +943,7 @@ func (s *Store) holdForLog() {
 }
 
 // setFromLog records the game kind (normalised) and mode a log record carries.
-// The kind only fills an unknown one: a log record opens a context, it never
+// Kind and mode only fill unknown ones: a log record opens a context, it never
 // changes one (UC-041 A7 step 2). Empty values are ignored; it touches no update
 // time, so a log record never looks like a live signal (BR-010).
 func (s *Store) setFromLog(kind, mode string) {
@@ -952,7 +953,7 @@ func (s *Store) setFromLog(kind, mode string) {
 	if kind != "" && s.ctx.GameKind == "" {
 		s.ctx.GameKind = kind
 	}
-	if mode != "" {
+	if mode != "" && s.ctx.Session.GameMode == nil {
 		s.ctx.Session.GameMode = ptr(mode)
 	}
 }

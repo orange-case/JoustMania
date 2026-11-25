@@ -365,3 +365,43 @@ func TestApplyLogs_LogOpenRacesEviction(t *testing.T) {
 		wg.Wait()
 	})
 }
+
+// UC: UC-041 BR-010
+func TestApplyLogs_KeptDeathsAfterStart(t *testing.T) {
+	t.Run("UC-041/BR-010 with a clock that ticks on every read the start event stays first", func(t *testing.T) {
+		var mu sync.Mutex
+		tick := time.Unix(4000, 0)
+		now := func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			tick = tick.Add(time.Microsecond)
+			return tick
+		}
+		mux := NewMultiplexer(func(string) *Store { return NewStore(5*time.Second, 15*time.Second, now) })
+		mux.ApplyLogs(deathLog("game-B", "P1", "game-B/P1/1", nil))
+		mux.ApplyMetrics(gameActiveFor("game-B", 1))
+		snap, _ := mux.Snapshot("game-B")
+		tl := snap.Timeline
+		if len(tl) != 2 || tl[0].Kind != EventPhase || tl[0].Detail != "start" {
+			t.Fatalf("timeline = %v, want the start event first, then the elimination", tl)
+		}
+		for _, e := range tl {
+			if e.At.Before(tl[0].At) {
+				t.Fatalf("event %v before the start %v", e, tl[0].At)
+			}
+		}
+	})
+}
+
+// UC: UC-041 A8
+func TestApplyLogs_GameStartKeepsKnownMode(t *testing.T) {
+	t.Run("UC-041/A8 a game.start never changes a known mode", func(t *testing.T) {
+		clk := &muxClock{t: time.Unix(4000, 0)}
+		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
+		mux.ApplyLogs(lifecycleLog("game.start", "game-B", "real", "Joust", time.Time{}))
+		mux.ApplyLogs(lifecycleLog("game.start", "game-B", "real", "NonStop", time.Time{}))
+		if snap, _ := mux.Snapshot("game-B"); snap.Session.GameMode == nil || *snap.Session.GameMode != "Joust" {
+			t.Fatalf("GameMode = %v, want Joust", snap.Session.GameMode)
+		}
+	})
+}
