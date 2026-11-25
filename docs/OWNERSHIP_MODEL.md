@@ -76,12 +76,10 @@ the agent has three narrow, gated writes beyond the `interventions` set.
    stop and resume, the in-memory `agent` overlays `enabled` and
    `interventions_enabled` (UC-015 BR-001 to BR-003; human writes, so C-034 holds). Planned
    (#2755, UC-016 BR-012): for the pad's agent and retro rows the menu also writes the in-memory
-   `agent` overlays `goal.profile`, `policy.max_interventions_per_minute`,
+   `agent` overlays `objectives`, `policy.max_interventions_per_minute`,
    `policy.group_grant.enabled`, `inference.effort` and `decision.operator_brief`, and the
-   persisted `inference.backend`, and clears its own values on a reset (never a script's or Flagsmith's); human writes too. `goal.profile`
-   carries a writer list (`flagsmith`, `menu`, flags.md §13): the flag service refuses its other
-   writer labels, but a label is self-declared (D11), so the agent stays out of the `agent` set
-   by the C-034 source guard test, not by the list. The agent writes game-scoped `interventions` values,
+   persisted `inference.backend`, and clears its own values on a reset (never a script's or Flagsmith's); human writes too.
+   `goal.profile` stays Flagsmith-only (FR-226). The agent writes game-scoped `interventions` values,
    `rollout/current_controller_count`, and the experiment-arm and `real` overlays
    of `game` flags. The flag service holds each kind of value separately per flag
    (baseline, persisted admin value, stack overlays, `real` overlay, experiment
