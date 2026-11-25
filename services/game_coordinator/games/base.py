@@ -43,7 +43,7 @@ from lib.feature_flags import (
     read_string_flag,  # noqa: F401  games/shields.py reads it as base.read_string_flag (tests patch it here)
     set_game_transaction_context,
 )
-from lib.moments import MOMENT_ID_ATTR, MOMENT_SHAPE_SPAN_EVENT, moment_id, record_moment
+from lib.moments import MOMENT_ID_ATTR, MOMENT_SHAPE_SPAN_EVENT, emit_agent_event, moment_id, record_moment
 from lib.telemetry import inject_trace_context
 from lib.types import GameEvent, Sensitivity, Sound
 from services.game_coordinator import game_clock, metrics
@@ -3621,6 +3621,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             gameplay_span_ctx = gameplay_span.get_span_context()
             if gameplay_span_ctx.span_id != 0:
                 self.on_gameplay_phase_open(trace.format_span_id(gameplay_span_ctx.span_id))
+            self._send_phase_start(gameplay_span, "gameplay_phase")
 
             # Create "players" parent span (collapsible group in Jaeger)
             self._players_span = tracer.start_span(
@@ -3644,6 +3645,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             game_cycle_span_ctx = self._game_cycle_span.get_span_context()
             if game_cycle_span_ctx.span_id != 0:
                 self.on_game_cycle_open(trace.format_span_id(game_cycle_span_ctx.span_id))
+            self._send_phase_start(self._game_cycle_span, "game_cycle")
 
             # Create player lifecycle spans under "players" parent
             self._create_player_spans(players_ctx)
@@ -3850,6 +3852,16 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 await self._stop_feedback_and_force_end(force_ended, progress)
                 await self._cleanup_after_run()
                 logger.info(f"{self.get_game_name()} game finished: {self.game_id}")
+
+    def _send_phase_start(self, span: trace.Span, phase_span: str) -> None:
+        """Agent-only ``game.phase.start`` in ``span``'s context: the record's span id is the phase's id."""
+        if not self.agent_log_events or not span.get_span_context().trace_flags.sampled:
+            return
+        emit_agent_event(
+            "game.phase.start",
+            span=span,
+            attributes={"game.id": self.game_id, "game.kind": self.game_kind, "game.phase.span": phase_span},
+        )
 
     def _run_tracer(self) -> trace.Tracer:
         """The tracer of run()'s own spans (teardown_phase)."""
