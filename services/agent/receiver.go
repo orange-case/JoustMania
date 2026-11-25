@@ -179,7 +179,8 @@ func (r *metricsReceiver) Export(ctx context.Context, req pmetricotlp.ExportRequ
 }
 
 // logsReceiver implements the OTLP logs gRPC service: moment log events and the
-// agent-only game.start / game.end log events (UC-041 A7, A8, FR-218, FR-251). The
+// agent-only game.start / game.phase.start / game.end log events (UC-041 A7, A8,
+// FR-218, FR-251, FR-252). The
 // collector forwards nothing else (filter/agent_moments) and the extractor ignores
 // any other record. A new death wakes the game's evaluation with otlp.signal =
 // logs; the gate still needs live players, so log records alone never evaluate
