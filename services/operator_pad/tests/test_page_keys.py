@@ -88,7 +88,7 @@ ROW_LABELS = {
     page_keys.INTERVENTIONS: "AGENT",
     "agent_level": "LEVEL",
     "decision.backend": "BACKEND",
-    "goal.profile": "GOAL",
+    "objectives": "GOAL",
     "policy.max_interventions_per_minute": "RATE",
     "policy.group_grant.enabled": "GROUP",
     "inference.backend": "RETRO AI",

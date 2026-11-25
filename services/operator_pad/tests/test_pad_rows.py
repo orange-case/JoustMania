@@ -1,4 +1,4 @@
-"""The rows iteration 4 makes settable (UC-016 BR-006, BR-007, BR-011 to BR-014; services.md §3.1): goal, rate,
+"""The rows iteration 4 makes settable (UC-016 BR-006, BR-007, BR-011 to BR-014; services.md §3.1): objectives, rate,
 group, retro AI, effort, brief, and the decision backend's free-to-paid raise (D12)."""
 
 import itertools
@@ -15,8 +15,8 @@ from lib.setting_ladders import (
 )
 from lib.setting_ladders import BRIEF_OPTION as BRIEF
 from lib.setting_ladders import EFFORT_OPTION as EFFORT
-from lib.setting_ladders import GOAL_OPTION as GOAL
 from lib.setting_ladders import GROUP_OPTION as GROUP
+from lib.setting_ladders import OBJECTIVES_OPTION as GOAL
 from lib.setting_ladders import RATE_OPTION as RATE
 from lib.setting_ladders import RETRO_BACKEND_OPTION as RETRO_BACKEND
 from proto import menu_pb2
@@ -34,7 +34,7 @@ ROWS |= {RETRO_BACKEND: ("RETRO", "K1", "K2"), EFFORT: ("RETRO", "K3", "K4"), BR
 SIX = tuple(ROWS)
 ROW_COMMANDS = [f"{kind}:{option}" for option in SIX for kind in ("step_setting", "reset_setting")]
 COMMANDS = [*ALL_COMMANDS, "set_backend.from", "reset_setting.from:decision.backend", *ROW_COMMANDS]
-BASELINES = {GOAL: "from_objectives", RATE: "2", GROUP: "off", RETRO_BACKEND: "stub", EFFORT: "medium", BRIEF: "off"}
+BASELINES = {GOAL: "balanced_focused", RATE: "2", GROUP: "off", RETRO_BACKEND: "stub", EFFORT: "medium", BRIEF: "off"}
 MISSING = object()
 
 
@@ -53,7 +53,23 @@ def rs(values: dict | None = None, defaults: dict | None = None, commands=COMMAN
     }
     base.update({AGENT_ROW_STATUS_FIELDS[o]: ("" if v is MISSING else v) for o, v in now.items()})
     base.update(kw)
-    return menu_pb2.GetMenuStatusResponse(**base)
+    if OBJECTIVES_FIELD in PROTO_FIELDS:
+        return menu_pb2.GetMenuStatusResponse(**base)
+    return _ObjectivesStatus(base.pop(OBJECTIVES_FIELD), menu_pb2.GetMenuStatusResponse(**base))
+
+
+# TEMPORARY until the menu's proto (#2759) renames field 22 to `agent_objectives`.
+OBJECTIVES_FIELD = AGENT_ROW_STATUS_FIELDS[GOAL]
+PROTO_FIELDS = menu_pb2.GetMenuStatusResponse.DESCRIPTOR.fields_by_name
+
+
+class _ObjectivesStatus:
+    def __init__(self, objectives: str, status) -> None:
+        self.agent_objectives = objectives
+        self._status = status
+
+    def __getattr__(self, name):
+        return getattr(self._status, name)
 
 
 def on(option: str, role: str = "edit") -> page_keys.Binding:
@@ -92,7 +108,7 @@ async def reset(option, press, release=None, confirmed=False, binding=None):
 
 @pytest.mark.uc("UC-016", br=["BR-011", "BR-012"])
 @pytest.mark.parametrize("option", SIX)
-def test_each_new_row_has_an_edit_and_a_reset_and_only_the_goal_is_lobby_only(option):
+def test_each_new_row_has_an_edit_and_a_reset_and_only_the_objectives_are_lobby_only(option):
     for role in ("edit", "reset"):
         binding = on(option, role)
         assert binding.active and binding.spec.option == option
@@ -122,13 +138,13 @@ async def test_a_raise_up_the_ladder_waits_for_the_confirmation(option):
 
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-012", "BR-014"])
 @pytest.mark.parametrize("option", [GOAL, BRIEF])
-async def test_the_goal_and_the_brief_are_no_raise(option):
+async def test_the_objectives_and_the_brief_are_no_raise(option):
     result, data, _ = await edit(option, 1, rs({option: AGENT_ROW_LADDERS[option][0]}))
     assert result == ("step_setting", "ok") and data[0]["direction"] == "up"
 
 
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-007"])
-async def test_a_whole_turn_of_the_goal_wheel_sends_nothing_and_the_brief_stops_at_its_end():
+async def test_a_whole_turn_of_the_objectives_wheel_sends_nothing_and_the_brief_stops_at_its_end():
     result, data, cues = await edit(GOAL, 5, rs())
     assert (result, data) == (("step_setting", "noop"), [])
     cues.limit.assert_not_awaited()
@@ -138,10 +154,10 @@ async def test_a_whole_turn_of_the_goal_wheel_sends_nothing_and_the_brief_stops_
 
 
 @pytest.mark.uc("UC-016", flow="A4", br=["BR-011"])
-async def test_the_goal_is_lobby_only_and_the_other_rows_are_live():
+async def test_the_objectives_are_lobby_only_and_the_other_rows_are_live():
     live = rs(lifecycle_live=True)
     assert (await edit(GOAL, 1, live))[:2] == (("step_setting", "refused"), [])
-    assert (await reset(GOAL, rs({GOAL: "quick_game"}, lifecycle_live=True)))[:2] == (("reset_setting", "refused"), [])
+    assert (await reset(GOAL, rs({GOAL: "mixed"}, lifecycle_live=True)))[:2] == (("reset_setting", "refused"), [])
     for option in SIX[1:]:
         result, data, _ = await edit(option, -1, rs({option: AGENT_ROW_LADDERS[option][-1]}, lifecycle_live=True))
         assert result == ("step_setting", "ok"), option
@@ -237,6 +253,40 @@ async def test_a_row_is_enabled_per_option_by_pad_commands(option):
     # The release's menu counts too: a capability lost during the hold refuses.
     result, data, _ = await edit(option, -1, rs({option: now}), release=without_step)
     assert (result, data) == (("step_setting", "refused"), [])
+
+
+# --- the GOAL row sets `objectives` (D17) -------------------------------------------------------------
+
+
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-011", "BR-012", "BR-013"])
+async def test_the_goal_row_steps_and_resets_objectives_unconfirmed_and_only_with_its_own_capability():
+    assert GOAL == "objectives" and AGENT_ROW_LADDERS[GOAL] == [
+        "endurance_focused",
+        "balanced_focused",
+        "accelerate_focused",
+        "chaos_focused",
+        "mixed",
+    ]
+    result, data, _ = await edit(GOAL, 1, rs({GOAL: "mixed"}))
+    assert result == ("step_setting", "ok")
+    assert data == [{"command": "step_setting", "option": GOAL, "direction": "up", "steps": "1", "from": "mixed"}]
+    result, data, _ = await reset(GOAL, rs({GOAL: "chaos_focused"}))
+    assert result == ("reset_setting", "ok")
+    assert data == [{"command": "reset_setting", "option": GOAL, "expect": "balanced_focused", "from": "chaos_focused"}]
+    profile_only = [c for c in COMMANDS if not c.endswith(f":{GOAL}")]
+    profile_only += ["step_setting:goal.profile", "reset_setting:goal.profile"]
+    assert (await edit(GOAL, 1, rs(commands=profile_only)))[:2] == (("step_setting", "refused"), [])
+    assert (await reset(GOAL, rs({GOAL: "mixed"}, commands=profile_only)))[:2] == (("reset_setting", "refused"), [])
+
+
+@pytest.mark.uc("UC-016", flow="A5", br=["BR-006", "BR-012", "BR-013"])
+@pytest.mark.parametrize("value", ["from_objectives", "lively_finale", "CHAOS", "chaos"])
+async def test_an_undeclared_objectives_value_shows_question_mark_and_its_keys_send_nothing(value):
+    status = rs({GOAL: value})
+    for version in (2, 3, 4):
+        assert page_rows(PAGES.index("AGENT"), status, PageContext(), version)[2] == ("GOAL", "?")
+    assert (await edit(GOAL, 1, status, confirmed=True))[:2] == (("step_setting", "refused"), [])
+    assert (await reset(GOAL, status, confirmed=True))[:2] == (("reset_setting", "refused"), [])
 
 
 # --- the decision backend, D12 ------------------------------------------------------------------------
@@ -496,15 +546,15 @@ def rows(s) -> list[str]:
 @pytest.mark.parametrize(
     ("version", "expected"),
     [
-        (2, {"AGENT": "FINALE", "INTERV": ["8/MIN", "ON"], "RETRO": ["CLAUDE", "XHI", "PROTECT"]}),
-        (3, {"AGENT": "LIVELY FINALE", "INTERV": ["8/MIN", "ON"], "RETRO": ["CLAUDE", "XHI", "PROTECT WEAK"]}),
-        (4, {"AGENT": "LIVELY FINALE", "INTERV": ["8/MIN", "ON"], "RETRO": ["CLAUDE", "XHI", "PROTECT WEAK"]}),
+        (2, {"AGENT": "ACCELERATE", "INTERV": ["8/MIN", "ON"], "RETRO": ["CLAUDE", "XHI", "PROTECT"]}),
+        (3, {"AGENT": "ACCELERATE", "INTERV": ["8/MIN", "ON"], "RETRO": ["CLAUDE", "XHI", "PROTECT WEAK"]}),
+        (4, {"AGENT": "ACCELERATE", "INTERV": ["8/MIN", "ON"], "RETRO": ["CLAUDE", "XHI", "PROTECT WEAK"]}),
     ],
 )
 def test_page_rows_show_the_new_values_per_protocol(version, expected):
     status = rs(
         {
-            GOAL: "lively_finale",
+            GOAL: "accelerate_focused",
             RATE: "8",
             GROUP: "on",
             RETRO_BACKEND: "claude",
@@ -517,9 +567,9 @@ def test_page_rows_show_the_new_values_per_protocol(version, expected):
     assert [v for _, v in page_rows(PAGES.index("RETRO"), status, PageContext(), version)] == expected["RETRO"]
     baseline = [v for _, v in page_rows(PAGES.index("RETRO"), rs(), PageContext(), version)]
     assert baseline == ["STUB", "MED", "OFF"]
-    custom = rs({BRIEF: "custom", GOAL: "from_objectives"})
+    custom = rs({BRIEF: "custom", GOAL: "endurance_focused"})
     assert page_rows(PAGES.index("RETRO"), custom, PageContext(), version)[2][1] == "CUSTOM"
-    assert page_rows(PAGES.index("AGENT"), custom, PageContext(), version)[2][1] == "FROM OBJ"
+    assert page_rows(PAGES.index("AGENT"), custom, PageContext(), version)[2][1] == "ENDURANCE"
 
 
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-007"])
@@ -534,15 +584,15 @@ def test_rate_and_effort_are_marker_bars_from_protocol_3_and_rows_on_protocol_2(
 
 
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-007"])
-def test_the_goal_wheel_wraps_and_the_brief_wheel_has_empty_ends_on_protocol_4():
-    s = screen(4, GOAL, "quick_game", 1)
-    assert s.wheel == (("SHORT GAME", True), ("FROM OBJ", False), ("LONG GAME", False))
+def test_the_objectives_wheel_wraps_and_the_brief_wheel_has_empty_ends_on_protocol_4():
+    s = screen(4, GOAL, "mixed", 1)
+    assert s.wheel == (("MIXED", True), ("ENDURANCE", False), ("BALANCED", False))
     assert title(s).endswith("EDIT")
     s = screen(4, BRIEF, "off", -1)
     assert s.wheel == (("", False), ("OFF", True), ("UNKILLABLE", False)) and title(s).endswith("MINIMUM")
     for version in (2, 3):
-        s = screen(version, GOAL, "from_objectives", 2)
-        assert s.wheel is None and rows(s)[1].endswith("FINALE")
+        s = screen(version, GOAL, "endurance_focused", 2)
+        assert s.wheel is None and rows(s)[1].endswith("ACCEL" if version == 2 else "ACCELERATE")
 
 
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-007", "BR-012"])
@@ -619,11 +669,11 @@ async def test_a_tap_on_a_known_value_is_silent_and_only_an_unknown_one_plays_th
 @pytest.mark.parametrize(
     ("option", "forms"),
     [
-        (GOAL, ["OBJ", "LONG", "FINALE", "BAL", "SHORT"]),
+        (GOAL, ["ENDUR", "BAL", "ACCEL", "CHAOS", "MIXED"]),
         (BRIEF, ["OFF", "UNKILL", "PROTEC"]),
     ],
 )
-def test_protocol_2_now_and_new_rows_show_every_goal_and_brief_distinct_and_uncut(option, forms):
+def test_protocol_2_now_and_new_rows_show_every_objective_and_brief_distinct_and_uncut(option, forms):
     shown = []
     for value in AGENT_ROW_LADDERS[option]:
         now_row, new_row, _ = rows(screen(2, option, value, 0))
@@ -632,7 +682,7 @@ def test_protocol_2_now_and_new_rows_show_every_goal_and_brief_distinct_and_uncu
     assert shown == forms
     assert value_of(rows(screen(2, BRIEF, "custom", 0))[0]) == "CUSTOM"
     # Protocol 3 keeps the full word where it fits beside the label.
-    assert value_of(rows(screen(3, GOAL, "balanced_contest", 0))[0]) == "BALANCED"
+    assert value_of(rows(screen(3, GOAL, "balanced_focused", 0))[0]) == "BALANCED"
 
 
 def value_of(row: str) -> str:
@@ -645,14 +695,15 @@ def value_of(row: str) -> str:
 def test_a_lobby_only_reset_screen_while_live_is_not_possible(version, page, key):
     binding = page_keys.binding(key, PAGES.index(page))
     assert binding.spec.lobby_only
-    plan = page_keys.reset_plan(binding.spec, rs({GOAL: "quick_game"}, lifecycle_live=True))
+    plan = page_keys.reset_plan(binding.spec, rs({GOAL: "chaos_focused"}, lifecycle_live=True))
     assert plan.refused and not plan.raises
     s = render.reset_screen(version, binding.spec.option, plan, False, BOTTOM)
     assert "NOT POSS" in " ".join(rows(s)) and "RELEASE" not in " ".join(rows(s))
-    assert not page_keys.reset_plan(binding.spec, rs({GOAL: "quick_game"})).refused
+    assert not page_keys.reset_plan(binding.spec, rs({GOAL: "chaos_focused"})).refused
 
 
 @pytest.mark.uc("UC-016", br=["BR-006"])
+@pytest.mark.xfail(OBJECTIVES_FIELD not in PROTO_FIELDS, reason="TEMPORARY: field 22 arrives with #2759", strict=True)
 def test_the_agent_row_status_fields_are_the_protos_string_fields_and_a_missing_one_is_unknown():
     fields = menu_pb2.GetMenuStatusResponse.DESCRIPTOR.fields_by_name
     numbers = {}

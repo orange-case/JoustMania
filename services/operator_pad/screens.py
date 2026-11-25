@@ -74,12 +74,12 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
     "game_instructions": {"on": "ON", "off": "OFF"},
     "force_all_start": {"on": "ON", "off": "OFF"},
     "interventions": {"on": "ON", "off": "OFF"},
-    setting_ladders.GOAL_OPTION: {
-        "from_objectives": "FROM OBJ",
-        "long_running_game": "LONG GAME",
-        "lively_finale": "LIVELY FINALE",
-        "balanced_contest": "BALANCED",
-        "quick_game": "SHORT GAME",
+    setting_ladders.OBJECTIVES_OPTION: {
+        "endurance_focused": "ENDURANCE",
+        "balanced_focused": "BALANCED",
+        "accelerate_focused": "ACCELERATE",
+        "chaos_focused": "CHAOS",
+        "mixed": "MIXED",
     },
     setting_ladders.GROUP_OPTION: {"on": "ON", "off": "OFF"},
     setting_ladders.RETRO_BACKEND_OPTION: {"stub": "STUB", "claude": "CLAUDE"},
@@ -93,17 +93,16 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
 }
 # BR-006: protocol 2's 10-character rows.
 V2_SHORT_FORMS: dict[str, dict[str, str]] = {
-    setting_ladders.GOAL_OPTION: {"lively_finale": "FINALE"},
     setting_ladders.BRIEF_OPTION: {"protect_weakest": "PROTECT"},
 }
 # BR-007: NOW and NEW rows leave 6 characters beside the label on protocol 2 (and fit these on protocol 3).
 NOW_NEW_FORMS: dict[str, dict[str, str]] = {
-    setting_ladders.GOAL_OPTION: {
-        "from_objectives": "OBJ",
-        "long_running_game": "LONG",
-        "lively_finale": "FINALE",
-        "balanced_contest": "BAL",
-        "quick_game": "SHORT",
+    setting_ladders.OBJECTIVES_OPTION: {
+        "endurance_focused": "ENDUR",
+        "balanced_focused": "BAL",
+        "accelerate_focused": "ACCEL",
+        "chaos_focused": "CHAOS",
+        "mixed": "MIXED",
     },
     setting_ladders.BRIEF_OPTION: {"unkillable": "UNKILL", "protect_weakest": "PROTEC"},
 }
@@ -147,7 +146,7 @@ SETTING_LABELS = {
     "audio_volume.master": "VOLUME",
     "force_all_start": "FORCE ALL",
     "interventions": "INTERVENTIONS",
-    setting_ladders.GOAL_OPTION: "GOAL",
+    setting_ladders.OBJECTIVES_OPTION: "GOAL",
     setting_ladders.RATE_OPTION: "RATE",
     setting_ladders.GROUP_OPTION: "GROUP",
     setting_ladders.RETRO_BACKEND_OPTION: "RETRO AI",

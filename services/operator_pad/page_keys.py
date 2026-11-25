@@ -19,8 +19,8 @@ from lib.setting_ladders import (
     BACKENDS,
     BRIEF_OPTION,
     EFFORT_OPTION,
-    GOAL_OPTION,
     GROUP_OPTION,
+    OBJECTIVES_OPTION,
     ON_OFF_LADDER,
     PAID_BACKENDS,
     RATE_OPTION,
@@ -88,7 +88,7 @@ ROWS: dict[str, tuple[RowSpec | None, RowSpec | None, RowSpec | None]] = {
     "AGENT": (
         _row(INTERVENTIONS, edit=SWITCH, lobby_only=False),
         _row("agent_level", reset=DEFAULT, lobby_only=False),
-        _row(GOAL_OPTION, reset=DEFAULT),
+        _row(OBJECTIVES_OPTION, reset=DEFAULT),
     ),
     "INTERV": (
         _row("decision.backend", edit=BACKEND, reset=DEFAULT, lobby_only=False),
@@ -239,7 +239,7 @@ def _reset_plan(spec: RowSpec, status) -> Plan:
         now = agent_row_value(option, status)
         if now is None or new is None or reset_command(option) not in pad_commands(status):
             return Plan(now, new, refused=True)
-        # The goal and the brief are never a raise (a brief `CUSTOM` resets to itself: the menu's no-op).
+        # The objectives and the brief are never a raise (a brief `CUSTOM` resets to itself: the menu's no-op).
         raises = setting_ladders.is_raise(option, now, new)
         return Plan(now, new, raises=bool(raises), refused=raises is None)
     if option == "decision.backend":

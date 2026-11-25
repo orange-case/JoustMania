@@ -211,7 +211,7 @@ def test_planned_fields_show_values_only_as_non_empty_strings():
                 "agent_saved_level",
             )
         },
-        agent_goal_profile="balanced_contest",
+        agent_objectives="balanced_focused",
         agent_max_interventions_per_minute="6",
         agent_group_grant_state="on",
         inference_backend="claude",
@@ -226,7 +226,7 @@ def test_planned_fields_show_values_only_as_non_empty_strings():
             **vars(known),
             "agent_max_interventions_per_minute": 0,
             "agent_group_grant_state": False,
-            "agent_goal_profile": "",
+            "agent_objectives": "",
             "agent_operator_brief_variant": None,
         }
     )
