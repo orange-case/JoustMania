@@ -501,7 +501,7 @@ for path in ("docker-compose*.yml", "**/Dockerfile*", "tests/integration/**", "s
     check(path in e2e_path_list, f"changes/f: e2e_paths must cover {path}")
 # #2770: the queue skips the tiers off these paths, so the filter must cover what they read.
 service_path_list = yaml.safe_load(e2e_filter).get("service_tests") or []
-for path in ("lib/**", "proto/**", "pyproject.toml", "uv.lock", "services/flag-service/**", "services/agent/**",
+for path in ("lib/**", "proto/**", "pyproject.toml", "uv.lock", "services/__init__.py", "services/flag-service/**", "services/agent/**",
              "services/rust-hid/**", "tests/service/**", "tests/integration/__init__.py", "tests/integration/helpers.py",
              "tests/integration/jaeger_v3.py", "tests/integration/flag_service.py", "docker-compose.yml", "Makefile",
              "scripts/ci/docker-pull-retry.sh", "scripts/ci/apt-install.sh", ".github/workflows/ci.yml"):

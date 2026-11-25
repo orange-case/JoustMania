@@ -280,6 +280,7 @@ jobs:
               - 'proto/**'
               - 'pyproject.toml'
               - 'uv.lock'
+              - 'services/__init__.py'  # package init of every services.<svc> import
               - 'services/flagd/**'
               - 'services/flag-service/**'
               - 'services/game_coordinator/**'
