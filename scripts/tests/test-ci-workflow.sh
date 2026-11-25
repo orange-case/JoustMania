@@ -204,9 +204,8 @@ check(
 # non-empty matrix (the matrices are full on run_all_checks). No event_name
 # restriction, no always()/success()/true, no &&.
 EXEMPT = {"changes", "sonarcloud", "docker-build-merge", "docker-build-extra-merge", "retag-skipped"}
-# The service-test jobs gate on one `changes` output, service_tests_run, which is false on a
-# push to main (the merge queue ran them on that very commit) and otherwise
-# service_tests || run_all_checks (checked on the force step below).
+# The service-test jobs gate on one `changes` output, service_tests_run: merge_group,
+# workflow_dispatch and ci-full only (#2768; simulated below).
 SERVICE_GATED = {"service-tests", "flagsmith-service-tests"}
 for name in sorted(SERVICE_GATED):
     check(job_if(name) == "needs.changes.outputs.service_tests_run == 'true'",
@@ -214,8 +213,7 @@ for name in sorted(SERVICE_GATED):
 check(jobs["changes"]["outputs"].get("service_tests_run") == "${{ steps.force.outputs.service_tests_run }}",
       "changes: must output service_tests_run from the force step")
 _force_run = next(s for s in jobs["changes"]["steps"] if s.get("id") == "force")["run"]
-check('if [ "${{ github.event_name }}" != push ] && { [ "$SERVICE_TESTS" = true ] || [ "$checks" = true ]; }; then' in _force_run,
-      "changes/force: service_tests_run must be false on push and service_tests || run_all_checks otherwise")
+check("service_tests_run=true" in _force_run, "changes/force: must set service_tests_run")
 MATRIX_GATED = {"service-checks"}
 TERM = re.compile(r"needs\.changes\.outputs\.\w+ == 'true'")
 RUN_ALL = "needs.changes.outputs.run_all_checks == 'true'"
@@ -528,13 +526,13 @@ if "e2e_required" in jobs["changes"]["outputs"]:
                 check(gone[build] == "skipped", f"{label}: {build} must not run when required e2e was skipped, got {gone[build]}")
     push = simulate("push", True, True)
     # service_tests_run (the two service-test jobs): never on a push to main, always in
-    # the merge queue and on dispatch, on a PR only when service paths changed.
+    # the merge queue and on dispatch, on a PR only with ci-full (#2768).
     for args, kw, want in (
         (("push", True, True), dict(service_tests=True), "false"),
         (("push", False, True), {}, "false"),
         (("merge_group", False, True), {}, "true"),
         (("workflow_dispatch", False, True), {}, "true"),
-        (("pull_request", False, True), dict(service_tests=True), "true"),
+        (("pull_request", False, True), dict(service_tests=True), "false"),
         (("pull_request", False, True), {}, "false"),
         (("pull_request", False, True), dict(ci_full=True), "true"),
     ):

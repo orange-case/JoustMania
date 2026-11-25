@@ -71,9 +71,11 @@ unexplained deviation as a finding.
    `unset COMPOSE DOCKER; PATH=<repo>/scripts/tests/lib/fail-docker:$PATH FLAG_SERVICE_URL=http://127.0.0.1:9 bash scripts/tests/test-X.sh`.
    A mutation of a service-tier test runs `make test-service SERVICE_TESTS=<file>`.
 5. **CI.** `gh pr checks <PR>` once (no watching). Local `make pr-gates` no longer runs the service tier for product
-   paths: when the diff touches the CI `service_tests` paths (lib, proto, coordinator, menu, controller_manager,
-   flagd, flag-service, `tests/service`, ...), "Service Tests" must be `pass`, not skipped or pending, before
-   "ready". A Service Tests failure that passes on rerun is a finding (flake or race), not infrastructure. SonarCloud is non-blocking. Collector `exited (1)` /
+   paths, and PR CI does not either (#2768): the merge queue is the only gate for "Service Tests" and "Flagsmith
+   Service Tests", so skipped is expected on a PR. When the diff touches the CI `service_tests` paths (lib, proto,
+   coordinator, menu, controller_manager, flagd, flag-service, `tests/service`, ...) in a risky way, ask for the
+   `ci-full` label and require "Service Tests" = `pass` before "ready"; a tier failure otherwise costs a queue run
+   and a re-arm. A Service Tests failure that passes on rerun is a finding (flake or race), not infrastructure. SonarCloud is non-blocking. Collector `exited (1)` /
    `unknown type: "span_metrics"`, the fast-path stale-prebuilt-images guard and `blob not found` are
    infrastructure: name them as such (advice: `ci-full` label or rerun), not as PR defects.
 6. **Conflicts.** `git merge-tree --write-tree origin/main refs/review/<PR>` for conflicts with main; skim

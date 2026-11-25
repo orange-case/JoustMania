@@ -13,9 +13,9 @@
 # Except for the service tier, the mapping mirrors the `changes` job's path
 # filters in .github/workflows/ci.yml (each case below names its filter); keep
 # those in step. The service tier (T2, minutes, flaky under load) is
-# deliberately a SUBSET of the CI filter: PR CI "Service Tests" runs the full
-# tier for the CI filter's paths, and the merge queue always runs it. Do not
-# widen the local lists back to the CI filter.
+# deliberately a SUBSET of the CI filter: the merge queue runs the full tier
+# (a PR only with `ci-full`, #2768). Do not widen the local lists back to the
+# CI filter.
 # grafana-json, compose and yaml-dupkeys are local-only extras.
 #
 # Service tier, two lanes:

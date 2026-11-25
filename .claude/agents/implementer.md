@@ -125,8 +125,8 @@ service-tier file), `uv run --package <member> [--extra <x>] pytest ...`, `go te
 `cargo test|clippy` with `in services/<svc>`, `scripts/tests/test-*.sh`; the dashboard only via
 `gates SERVICE=dashboard`. No `cd`, `&&`, pipes, redirects or `$`; Go `vet && test` is two `run` lines.
 `make pr-gates` runs the service tier locally only for harness / stack changes or the edited `test_*.py` files:
-for product paths the full-tier evidence is PR CI "Service Tests" = pass, so never report a local PASS as tier
-coverage and name that in the report.
+for product paths the full tier runs only in the merge queue, or on the PR with the `ci-full` label (#2768), so
+never report a local PASS as tier coverage and name that in the report.
 Call it as a foreground Agent call (not `run_in_background`): that call is the wait; never run the same
 command yourself in parallel. gate-runner stays in the foreground (never `run_in_background` for gates:
 the script detaches the run and gate-runner loops on `PENDING`) and hands back only when the run has
