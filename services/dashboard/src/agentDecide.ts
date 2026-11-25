@@ -4,7 +4,7 @@ import { spanStartMs, spanTags, tagBool, tagBoolOrNull, tagNumber, tagString, pa
 import type { JaegerSpan, JaegerTracesResponse } from "./jaeger.js";
 import { GoalStore, parseGoalSummaries } from "./agentGoal.js";
 import type { GameGoal } from "./agentGoal.js";
-import { pickAnchor } from "./agentAnchor.js";
+import { isShadowGame, pickAnchor } from "./agentAnchor.js";
 import type { DecideFollow } from "./agentAnchor.js";
 
 /* ======================================================================== */
@@ -35,7 +35,7 @@ export const DECIDE_OPERATION = "invoke_agent joustmania-agent";
 /** Max decide rows kept (newest first): the agent keeps 30 per game-kind class (real and shadow). */
 const MAX_DECIDE_ROWS = 60;
 
-/** Max prediction outcome spans kept for the per-game strip (a game scores a few dozen). */
+/** Max prediction outcome spans kept per class (shadow, other) for the per-game strip, as the agent sends them. */
 const MAX_OUTCOMES = 400;
 
 /** The rules path's per-cycle parent span (decide + decisions are its children). */
@@ -602,14 +602,21 @@ export class DecideStore {
     this.rows = [...rows].sort(newestFirst).slice(0, this.max).map((r) => this.withHeldOutcome(r));
   }
 
-  /** Merge outcome spans (keyed by prediction id, newest kept, bounded). */
+  /**
+   * Merge outcome spans (keyed by prediction id, newest kept), bounded per class like
+   * the agent (shadow, everything else), so a shadow burst never pushes out the stage
+   * game's strip.
+   */
   mergeOutcomes(outcomes: PredictionOutcomeSpan[]): void {
     for (const o of outcomes) this.outcomes.set(o.id, o);
-    if (this.outcomes.size > MAX_OUTCOMES) {
-      const keep = [...this.outcomes.values()].sort((a, b) => b.tsMs - a.tsMs).slice(0, MAX_OUTCOMES);
-      this.outcomes.clear();
-      for (const o of keep) this.outcomes.set(o.id, o);
-    }
+    if (this.outcomes.size <= MAX_OUTCOMES) return;
+    const newest = [...this.outcomes.values()].sort((a, b) => b.tsMs - a.tsMs);
+    const keep = [
+      ...newest.filter((o) => isShadowGame(o.gameKind)).slice(0, MAX_OUTCOMES),
+      ...newest.filter((o) => !isShadowGame(o.gameKind)).slice(0, MAX_OUTCOMES),
+    ];
+    this.outcomes.clear();
+    for (const o of keep) this.outcomes.set(o.id, o);
   }
 
   /** The followed game's goal (#2498), null until its summary arrived. */

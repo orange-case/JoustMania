@@ -57,25 +57,34 @@ interface AgentPanelsCapable extends StaleCapable {
 }
 
 /**
- * Paint the Agent tab's feed, flag panel and overlay. `jaegerOk` is false while
- * the last Agent poll's Jaeger leg (the rollout searches) failed: the
- * overlay still renders, the Jaeger-fed panels keep their last data and go
- * stale, or name Jaeger when they never rendered (UC-035 A3 step 2).
+ * The source the feed and flag panel miss, null when both deliver: the agent's state
+ * (blocked rows, flags) first, else Jaeger (rollout rows).
+ */
+export function agentPanelsDown(agentStateOk: boolean, jaegerOk: boolean): string | null {
+  if (!agentStateOk) return DECIDE_AGENT_DOWN;
+  return jaegerOk ? null : AGENT_JAEGER_DOWN;
+}
+
+/**
+ * Paint the Agent tab's feed, flag panel and overlay. `down` (agentPanelsDown) names
+ * the source that failed on its last poll: the overlay still renders, the feed and
+ * flag panel keep their last data and go stale, or name the source when they never
+ * rendered (UC-035 A3 step 2).
  */
 export function paintAgentPanels(
   view: AgentPanelsCapable,
   overlay: InterventionOverlay | null,
-  jaegerOk: boolean,
-  jaegerPanels: () => Pick<AgentViewData, "feed" | "flags">,
+  down: string | null,
+  panels: () => Pick<AgentViewData, "feed" | "flags">,
 ): void {
-  if (jaegerOk) {
-    if (overlay !== null) view.render({ ...jaegerPanels(), overlay });
+  if (down === null) {
+    if (overlay !== null) view.render({ ...panels(), overlay });
     return;
   }
   if (overlay !== null) view.renderOverlay(overlay);
   if (view.rendered) view.markStale();
-  else if (overlay !== null) view.setJaegerError(AGENT_JAEGER_DOWN);
-  else view.setError(AGENT_JAEGER_DOWN);
+  else if (overlay !== null) view.setJaegerError(down);
+  else view.setError(down);
 }
 
 export type AgentPollResults = [PromiseSettledResult<InterventionOverlay>, PromiseSettledResult<unknown>];

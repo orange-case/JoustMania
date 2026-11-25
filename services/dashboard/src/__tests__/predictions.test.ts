@@ -238,5 +238,16 @@ describe("UC-040 A44 BR-034: hit rate against the control base rate per game", (
     expect(strip?.gameId).toBe(game);
     expect(strip?.sources).toHaveLength(1);
     expect(strip?.sources[0]).toMatchObject({ source: "rules", hits: 1, misses: 0, hitRate: 1, baseRate: 0 });
+
+    // UC-035/3: more newer shadow outcomes than the bound never push out the stage game's.
+    const shadow = Array.from({ length: 450 }, (_, i) => ({
+      ...feed.outcomes![0],
+      id: `sh-${i}`,
+      gameId: "game_shadow",
+      gameKind: "shadow",
+      tsMs: feed.outcomes![0].tsMs + 1000 + i,
+    }));
+    store.mergeOutcomes(shadow);
+    expect(store.feed().predictionStrip?.sources[0]).toMatchObject({ source: "rules", hits: 1 });
   });
 });

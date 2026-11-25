@@ -77,8 +77,10 @@ func (r *recentSpans) OnEnd(s sdktrace.ReadOnlySpan) {
 	}
 	key := s.Name() + "|" + spanClass(s)
 	ring := append(r.rings[key], s)
+	// Reslicing keeps at most about 2*limit spans reachable: append reallocates
+	// (copying only the kept tail) once the front-trimmed capacity runs out.
 	if len(ring) > limit {
-		ring = append([]sdktrace.ReadOnlySpan(nil), ring[len(ring)-limit:]...)
+		ring = ring[len(ring)-limit:]
 	}
 	r.rings[key] = ring
 }

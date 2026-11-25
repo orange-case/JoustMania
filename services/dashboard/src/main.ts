@@ -37,6 +37,7 @@ import { EmbedGate, VisibilityGate } from "./visibilityGate.js";
 import { ShieldStore } from "./shield.js";
 import { reduceGameEvent } from "./gameEvents.js";
 import {
+  agentPanelsDown,
   onAgentPollFailed,
   onDecidePollFailed,
   onExperimentsPollFailed,
@@ -124,6 +125,8 @@ const rolloutStore = new RolloutStore();
 let interventionCounts: InterventionOverlay | null = null;
 /** False while the last Agent poll's Jaeger leg failed (UC-035 A3 step 2). */
 let agentJaegerOk = true;
+/** False while the last poll of the agent's state failed (UC-035 A3 step 2). */
+let agentStateOk = true;
 // The agent's progress snapshot per experiment.
 const experimentStore = new ExperimentStore();
 
@@ -346,7 +349,7 @@ function currentFlags(): FlagPanel | null {
 // Render the activity feed, flag panel and overlay from the stores.
 // While the Agent poll's Jaeger leg fails only the overlay renders (UC-035 A3).
 function renderAgentPanels() {
-  paintAgentPanels(agentView, interventionCounts, agentJaegerOk, () => ({
+  paintAgentPanels(agentView, interventionCounts, agentPanelsDown(agentStateOk, agentJaegerOk), () => ({
     feed: activityFeed(blockedRowsFrom(decideStore.feed().rows), rolloutStore.list()),
     flags: currentFlags(),
   }));
@@ -440,12 +443,15 @@ function startDecidePolling() {
       const state = await fetchAgentState(signal);
       store.load(state.decides);
       flagStore.replace(state.flags);
+      agentStateOk = true;
       agentView.renderDecide(store.feed());
       renderAgentPanels();
     },
     onError: (error) => {
       console.error("Agent state poll error:", error);
+      agentStateOk = false;
       onDecidePollFailed(agentView);
+      renderAgentPanels();
     },
   });
 

@@ -35,7 +35,8 @@ type FlagState struct {
 	LLMEligibleGameKinds   []string `json:"llm_eligible_game_kinds"`
 }
 
-// MaxFlagStates bounds the games a FlagBoard keeps (the newest by cycle time).
+// MaxFlagStates bounds the games a FlagBoard keeps per class, shadow and every
+// other kind (the newest by cycle time), so shadow games never evict the stage game.
 const MaxFlagStates = 20
 
 // FlagBoard holds the newest FlagState per game partition, shared by every Loop.
@@ -55,17 +56,23 @@ func (b *FlagBoard) record(s FlagState) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.byGame[s.GameID] = s
-	if len(b.byGame) <= MaxFlagStates {
-		return
-	}
-	oldest := ""
+	shadow := isShadowKind(s.GameKind)
+	n, oldest := 0, ""
 	for id, held := range b.byGame {
+		if isShadowKind(held.GameKind) != shadow {
+			continue
+		}
+		n++
 		if oldest == "" || held.UpdatedAtMs < b.byGame[oldest].UpdatedAtMs {
 			oldest = id
 		}
 	}
-	delete(b.byGame, oldest)
+	if n > MaxFlagStates {
+		delete(b.byGame, oldest)
+	}
 }
+
+func isShadowKind(kind string) bool { return kind == gamecontext.GameKindShadow }
 
 // List returns the held flag states, newest first.
 func (b *FlagBoard) List() []FlagState {

@@ -111,6 +111,17 @@ func TestFlagBoard_KeepsTheNewestGames(t *testing.T) {
 	if got[0].GameID != fmt.Sprintf("game_%02d", MaxFlagStates+2) || got[len(got)-1].GameID != "game_03" {
 		t.Errorf("kept %s..%s, want the newest %d games newest first", got[0].GameID, got[len(got)-1].GameID, MaxFlagStates)
 	}
+	t.Run("UC-035/3 newer shadow games never evict the stage game", func(t *testing.T) {
+		b := NewFlagBoard()
+		b.record(FlagState{GameID: "game_stage", GameKind: gamecontext.GameKindReal, UpdatedAtMs: 1})
+		for i := 0; i < MaxFlagStates+5; i++ {
+			b.record(FlagState{GameID: fmt.Sprintf("game_sh%02d", i), GameKind: gamecontext.GameKindShadow, UpdatedAtMs: int64(100 + i)})
+		}
+		got := b.List()
+		if len(got) != MaxFlagStates+1 || got[len(got)-1].GameID != "game_stage" {
+			t.Fatalf("held %d games, oldest %s; want %d shadow plus the stage game", len(got), got[len(got)-1].GameID, MaxFlagStates)
+		}
+	})
 	var nilBoard *FlagBoard
 	nilBoard.record(FlagState{GameID: "x"}) // nil-safe
 	if len(nilBoard.List()) != 0 {
