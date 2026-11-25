@@ -167,3 +167,55 @@ func TestRun_ServesOTLPLogs(t *testing.T) {
 		}
 	})
 }
+
+// UC: UC-041 BR-010
+func TestLogsReceiver_LogOpenedContextNeverEvaluates(t *testing.T) {
+	t.Run("UC-041/BR-010 game.start and a death of an unknown game open its context and wake no evaluation", func(t *testing.T) {
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		clock := time.Unix(5000, 0)
+		mux := gamecontext.NewMultiplexer(func(string) *gamecontext.Store {
+			return gamecontext.NewStore(time.Hour, time.Hour, func() time.Time { return clock })
+		})
+		rules := &recordingRules{}
+		loops := decision.NewLoopSet(func(string) *decision.Loop {
+			l := decision.NewLoop(staticFlags{flags.Snapshot{
+				Enabled:              true,
+				InterventionsAllowed: []string{"grant_shield"},
+				Policy:               flags.Policy{MaxInterventionsPerMinute: 100},
+			}}, logger)
+			l.Rules = rules
+			return l
+		})
+		pipe := newPipeline(mux, loops, time.Hour)
+		pipe.now = func() time.Time { return clock }
+		logs := &logsReceiver{pipe: pipe}
+
+		ld := plog.NewLogs()
+		rl := ld.ResourceLogs().AppendEmpty()
+		rl.Resource().Attributes().PutStr("service.name", "game-coordinator")
+		records := rl.ScopeLogs().AppendEmpty().LogRecords()
+		start := records.AppendEmpty()
+		start.SetEventName("game.start")
+		start.Attributes().PutStr("game.id", "game-B")
+		start.Attributes().PutStr("game.kind", "real")
+		start.Attributes().PutStr("game.mode", "Joust")
+		start.Attributes().PutStr("orangecase.audience", "agent")
+		death := records.AppendEmpty()
+		death.SetEventName("player_death")
+		death.Attributes().PutStr("moment.id", "game-B/PB/1")
+		death.Attributes().PutStr("player.serial", "PB")
+		death.Attributes().PutStr("game.id", "game-B")
+		death.Attributes().PutStr("game.kind", "real")
+		death.Attributes().PutStr("orangecase.audience", "agent")
+		if _, err := logs.Export(context.Background(), plogotlp.NewExportRequestFromLogs(ld)); err != nil {
+			t.Fatalf("logs export: %v", err)
+		}
+		if got := len(rules.evaluations()); got != 0 {
+			t.Fatalf("evaluations = %d, want 0 on log records alone", got)
+		}
+		snap, ok := mux.Snapshot("game-B")
+		if !ok || snap.GameKind != gamecontext.GameKindReal || len(snap.Session.EliminationSequence) != 1 {
+			t.Fatalf("game-B context = %v (kind %q, seq %v), want opened with the death", ok, snap.GameKind, snap.Session.EliminationSequence)
+		}
+	})
+}

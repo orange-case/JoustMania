@@ -2,8 +2,8 @@
 #
 # Loaded as a second --config after config.yaml (see docker-compose.gateway.yml).
 # The collector merges the two files key by key: maps are merged, lists are
-# replaced. So this file only ADDS map keys (one exporter, three pipelines) and
-# never restates a list of config.yaml. The in-case pipelines (Jaeger,
+# replaced. So this file only ADDS map keys (one processor, one exporter, three
+# pipelines) and never restates a list of config.yaml. The in-case pipelines (Jaeger,
 # VictoriaMetrics, agent) stay as they are, and the case keeps working without
 # an uplink. tests/contract/test_collector_gateway_overlay.py checks the merge.
 #
@@ -23,6 +23,14 @@
 #                                The exporter adds /v1/traces, /v1/metrics,
 #                                /v1/logs.
 #   ORANGECASE_GATEWAY_TOKEN     bearer token (a secret: environment only, C-016)
+
+processors:
+  # Records meant for the agent only (#2722, UC-100 BR-012) never leave the
+  # case. The marker is on the record because a filter never sees its span.
+  filter/gateway_agent_only:
+    error_mode: ignore
+    log_conditions:
+      - log.attributes["orangecase.audience"] == "agent"
 
 exporters:
   # Degrade, never stall (C-004, NFR-029): bounded retry and a queue bounded in
@@ -65,7 +73,8 @@ service:
     # and scraped infrastructure metrics and the span metrics stay in the case.
     # Each pipeline reuses the processors of its in-case twin, so the gateway
     # receives the same data (health-check spans dropped, same resource
-    # attributes). Its own batch processor decouples it from the in-case twin.
+    # attributes); logs/gateway also drops the agent-only records. Its own
+    # batch processor decouples it from the in-case twin.
     traces/gateway:
       receivers: [otlp]
       processors: [memory_limiter, filter/grpc_health, batch/traces, resource]
@@ -76,5 +85,5 @@ service:
       exporters: [otlp_http/gateway]
     logs/gateway:
       receivers: [otlp]
-      processors: [memory_limiter, batch, resource]
+      processors: [memory_limiter, filter/gateway_agent_only, batch, resource]
       exporters: [otlp_http/gateway]
