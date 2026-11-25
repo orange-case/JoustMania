@@ -84,6 +84,14 @@
       },
       "defaultVariant": "span_event"
     },
+    "telemetry.agent_log_events": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
     "log_level": {
       "state": "ENABLED",
       "variants": {
