@@ -8,7 +8,9 @@ make test-service                 # all of tests/service (needs uv, go, docker)
 make test-service TEST=tc018      # -k filter
 ```
 
-CI: the `service-tests` job (path-filtered on PRs, always on main, part of `ci-complete`).
+CI: the `service-tests` and `flagsmith-service-tests` jobs (sharded, #2769), part of `ci-complete`. They run in the
+merge queue (their only gate), on `workflow_dispatch` and on a PR with the `ci-full` label; a plain PR and a push to
+`main` skip them (#2768).
 
 ## What a stack is
 

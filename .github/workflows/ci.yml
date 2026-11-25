@@ -129,7 +129,7 @@ jobs:
       # run_all_checks: all test/lint jobs, but builds stay path-filtered (main push)
       force_full: ${{ steps.force.outputs.full }}
       run_all_checks: ${{ steps.force.outputs.checks }}
-      # service_tests_run: the two service-test jobs (the slowest, ~15-18 min). They
+      # service_tests_run: the two service-test jobs (the slowest, sharded since #2769). They
       # gate the merge queue, which tests exactly the commit a push to main then lands,
       # so a push to main skips them (false). A plain PR skips them too (#2768);
       # workflow_dispatch and ci-full opt in.
