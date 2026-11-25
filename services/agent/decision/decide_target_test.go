@@ -308,7 +308,7 @@ func TestEmissionRequest_WidensWithoutMutating(t *testing.T) {
 		if !tgtOpts["GONE"] || !tgtOpts[decide.TargetNone] {
 			t.Errorf("target options = %v", wide.Questions[1].Options)
 		}
-		resp := answerFromRanked(ranked, wide, true)
+		resp := answerFromRanked(ranked, wide)
 		if iv, _ := resp.Find(decide.QuestionFFAIntervention); iv.Choice != InterventionGrantShield {
 			t.Errorf("choice = %q, want the top ranked grant_shield", iv.Choice)
 		}

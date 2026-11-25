@@ -284,7 +284,7 @@ func (r *ObjectiveRules) evaluate(c gamecontext.GameContext, build func(charged,
 	// interventions and targets, so the allow-list (applied afterwards by the
 	// permission chain) cannot filter the answers into a different choice.
 	req := emissionRequest(build(charged, noShield), ranked)
-	return out, req, answerFromRanked(ranked, req, true), true
+	return out, req, answerFromRanked(ranked, req), true
 }
 
 // RecordActed arms the variance cooldown for a decision some OTHER backend made
