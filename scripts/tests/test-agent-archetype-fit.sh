@@ -19,6 +19,28 @@ ok() { # ok <name> <exit code of the condition>
   if [[ "$2" == 0 ]]; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi
 }
 
+# The shipped flag file plus two edge archetypes (middle band): top_edge's top slot reaches
+# exactly 10 at its clamped ratio, zero_floor's bottom slot is exactly 0; each field rounded
+# alone would put a slot 0.0001 outside the bounds.
+REAL_FLAGS="${FLAGS}"
+FLAGS="${WORK}/flags.json"
+python3 - "${REAL_FLAGS}" "${FLAGS}" <<'PY'
+import sys
+src, dst = sys.argv[1:]
+text = open(src).read().replace("\r\n", "\n")
+def variant(name, players, base, d_base):
+    keys = {"players": players, "stream_rate_hz": 30, "base": base, "drift": 0.0, "amp": 0.1,
+            "period_s": 3.0, "phase": 0.0, "burst_h": 0.0, "burst_period_s": 0.0,
+            "d_base": d_base, "d_drift": 0.0, "d_amp": 0.0, "d_phase": 0.25}
+    body = ",\n".join(f'          "{k}": {v}' for k, v in keys.items())
+    return f'        "{name}": {{\n{body}\n        }},\n'
+anchor = '        "burst_holder": {'
+assert text.count(anchor) == 1
+text = text.replace(anchor, variant("top_edge", 7, 2.405, 0.073)
+                    + variant("zero_floor", 4, 0.3, -0.1) + anchor)
+open(dst, "w").write(text)
+PY
+
 # fixture <dir> <eligible real games>
 fixture() {
   python3 - "$1" "$2" "${FLAGS}" <<'PY'
@@ -62,14 +84,17 @@ def shadow(name, i, inten, var, pace, arm="control"):
     ev("game_assigned", game_id=gid, arm=arm, pattern={"archetype": name})
 
 stale = dict(arch["slow_cascade"], amp=0.2)
-names = ["calm_long", "quick_cascade", "slow_cascade", "jittery_novices"]
-params = [arch["calm_long"], arch["quick_cascade"], stale, arch["jittery_novices"]]
+names = ["calm_long", "quick_cascade", "slow_cascade", "jittery_novices", "top_edge", "zero_floor"]
+params = [arch["calm_long"], arch["quick_cascade"], stale, arch["jittery_novices"],
+          arch["top_edge"], arch["zero_floor"]]
 ev("pattern_pinned", pattern={"archetypes": names,
                               "params_json": [json.dumps(p, sort_keys=True) for p in params]})
 for i in range(4):
     shadow("calm_long", i, 1.0, 0.01, 0.5)
     shadow("quick_cascade", i, 0.1, 0.04, 2.015)
     shadow("slow_cascade", i, 1.0, 0.01, 0.5)
+    shadow("top_edge", i, 0.1, 0.09, 3.0)
+    shadow("zero_floor", i, 0.52, 0.09, 3.0)
 shadow("jittery_novices", 0, 1.0, 0.01, 0.5, arm="experimental")
 add("s_oneshot", "shadow", "FFA", 30.0, 1.0, [(1.0, 0.01)] * 4)
 
@@ -106,6 +131,10 @@ check "BR-005 calm_long: low band, base x1.5, amp x sqrt(4), a zero drift stays 
   'by["calm_long"]["band"] == "low" and by["calm_long"]["params"]["base"] == 1.5 and by["calm_long"]["params"]["amp"] == 0.3 and by["calm_long"]["params"]["drift"] == 0.0 and by["calm_long"]["params"]["d_phase"] == 0.25'
 check "A12 quick_cascade: intensity ratio 20 is clamped so every slot stays within 10" \
   'by["quick_cascade"]["params"]["base"] == 10.0 and "clamped:intensity" in by["quick_cascade"]["notes"] and by["quick_cascade"]["params"]["drift"] == 0.06 and by["quick_cascade"]["params"]["d_drift"] == 0.09'
+check "A12 top_edge (d_base != 0): clamped on the top slot, stepped down until the rounded slots fit" \
+  'by["top_edge"]["params"]["base"] == 8.4585 and by["top_edge"]["params"]["d_base"] == 0.2567 and by["top_edge"]["notes"] == ["clamped:intensity", "rounded:intensity"] and 8.4585 + 6 * 0.2567 <= 10'
+check "A12 zero_floor: the rounded bottom slot stays at or above 0" \
+  'by["zero_floor"]["params"]["base"] == 0.6922 and by["zero_floor"]["params"]["d_base"] == -0.2307 and 0.6922 + 3 * -0.2307 >= 0 and by["zero_floor"]["notes"] == ["rounded:intensity"]'
 check "BR-010 shadow games: changed params, experimental arm and unlabelled are left out" \
   'rep["shadow_skipped"] == {"experimental_arm": 1, "params_changed": 4, "unlabelled": 1}'
 check "A11 an archetype without 4 usable shadow games keeps its parameters" \
@@ -148,6 +177,14 @@ python3 "${TOOL}" --dataset "${WORK}/b/ds.json" --experiments "${WORK}/b/exp" --
 ok "A10 fewer than 24 eligible real games exit 3" "$([[ ${rc} == 3 ]]; echo $?)"
 cmp -s "${FLAGS}" "${WORK}/b.json"
 ok "A10 nothing is written" $?
+
+cp "${REAL_FLAGS}" "${WORK}/lacking.json"
+cp "${FLAGS}" "${WORK}/first.json"
+rc=0; run --write "${WORK}/lacking.json" >/dev/null 2>&1 || rc=$?
+ok "A14 a --write file without a fitted variant exits 2" "$([[ ${rc} == 2 ]]; echo $?)"
+rc=0; run --write "${WORK}/first.json" --write "${WORK}/lacking.json" >/dev/null 2>&1 || rc=$?
+cmp -s "${FLAGS}" "${WORK}/first.json" && cmp -s "${REAL_FLAGS}" "${WORK}/lacking.json"; same=$?
+ok "A14 a failing second --write leaves the first file unchanged" "$([[ ${rc} == 2 && ${same} == 0 ]]; echo $?)"
 
 rc=0
 python3 "${TOOL}" --dataset "${WORK}/missing.json" --experiments "${WORK}/a/exp" --flags "${FLAGS}" \

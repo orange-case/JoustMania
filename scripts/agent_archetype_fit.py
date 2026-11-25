@@ -36,6 +36,7 @@ DOMINANCE = 10.0
 BAND_MIN = 8
 MIN_SHADOW_GAMES = 4
 ROUND = 4
+ROUND_STEPS = 100  # ratio steps of 0.01 %, at most 1 % below the clamp
 
 BAND_OF = {
     "calm_long": "low",
@@ -265,11 +266,36 @@ def fit_archetype(name, params, band_games, shadow_games) -> dict:
         if r > limit:
             out["notes"].append(f"clamped:{metric}")
             r = limit
+        # Fields round independently, so a slot at a bound can round past it.
+        for step in range(ROUND_STEPS):
+            trial = {
+                k: round(params[k] * r, ROUND) if params[k] else params[k]
+                for k in keys
+            }
+            if valid({**new, **trial}):
+                break
+            r *= 1 - 1e-4
+        else:
+            out["notes"].append(f"unrepresentable:{metric}")
+            out["ratios"][metric] = 1.0
+            continue
+        if step:
+            out["notes"].append(f"rounded:{metric}")
         out["ratios"][metric] = round(r, ROUND)
-        for k in keys:
-            new[k] = round(params[k] * r, ROUND) if params[k] else params[k]
+        new.update(trial)
     out["params"] = new
     return out
+
+
+def valid(p: dict) -> bool:
+    """The numeric bounds of UC-046 BR-003, per slot."""
+    n = int(p.get("players", 1))
+    slots = _slots(p["base"], p["d_base"], n) + _slots(p["amp"], p["d_amp"], n)
+    return (
+        all(0 <= v <= 10 for v in slots)
+        and all(0 <= p[k] <= 10 for k in ("base", "amp", "burst_h"))
+        and all(-1 <= p[k] <= 1 for k in ("drift", "d_base", "d_drift", "d_amp"))
+    )
 
 
 def propose(real, shadow, labels, archetypes) -> dict:
@@ -365,7 +391,8 @@ def rewrite(text: str, changes: dict[str, dict]) -> str:
     return text
 
 
-def write_flags(path, rep):
+def write_flags(paths, rep):
+    """Rewrite every file or none: all new texts are built before the first write."""
     changes = {}
     for a in rep["archetypes"]:
         if a["status"] != "fitted":
@@ -373,18 +400,22 @@ def write_flags(path, rep):
         changed = {k: v for k, v in a["params"].items() if v != a["old"].get(k)}
         if changed:
             changes[a["archetype"]] = changed
-    p = Path(path)
-    try:
-        raw = p.read_bytes().decode()
-    except OSError as e:
-        raise InputError(f"{path}: {e}") from e
-    crlf = "\r\n" in raw
-    text = rewrite(raw.replace("\r\n", "\n"), changes)
-    variants = json.loads(text)["flags"][FLAG]["variants"]
-    for a in rep["archetypes"]:
-        if variants[a["archetype"]] != a["params"]:
-            raise InputError(f"{path}: {a['archetype']} did not round-trip")
-    p.write_bytes((text.replace("\n", "\r\n") if crlf else text).encode())
+    outs = []
+    for path in paths:
+        p = Path(path)
+        try:
+            raw = p.read_bytes().decode()
+            crlf = "\r\n" in raw
+            text = rewrite(raw.replace("\r\n", "\n"), changes)
+            variants = json.loads(text)["flags"][FLAG]["variants"]
+            ok = all(variants[a["archetype"]] == a["params"] for a in rep["archetypes"])
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            raise InputError(f"{path}: {e!r}") from e
+        if not ok:
+            raise InputError(f"{path}: the variants did not round-trip")
+        outs.append((p, text.replace("\n", "\r\n") if crlf else text))
+    for p, text in outs:
+        p.write_bytes(text.encode())
 
 
 # ------------------------------------------------------------------ report
@@ -441,9 +472,8 @@ def main(argv=None) -> int:
         rep = propose(real, ds["shadow"], shadow_labels(a.experiments), archetypes)
         for arch in rep["archetypes"]:
             arch["old"] = archetypes[arch["archetype"]]
-        if rep["status"] == "proposal":
-            for path in a.write:
-                write_flags(path, rep)
+        if rep["status"] == "proposal" and a.write:
+            write_flags(a.write, rep)
     except InputError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

@@ -26,11 +26,12 @@ const SchemaVersion = 1
 // Player is one player of a journaled game: whole-game numbers only, no serial.
 type Player struct {
 	// MeanMovementVariance is the mean of the player's 1 s movement-variance
-	// samples over the game (BR-002 "moved" and "dominates"); nil without one.
+	// samples over the game; nil without one.
 	MeanMovementVariance *float64 `json:"mean_movement_variance"`
 	VarianceSamples      int      `json:"variance_samples"`
 	// LastMovementVariance is the last variance sample (frozen at elimination),
-	// the value A22's movement_variance reads (last_over_time).
+	// the value A22's movement_variance reads (last_over_time) and the offline
+	// fit's BR-002 "moved" and "dominates" checks use.
 	LastMovementVariance *float64 `json:"last_movement_variance"`
 	// MeanIntensity is the mean of the player's 1 s intensity samples (A22 intensity).
 	MeanIntensity    *float64 `json:"mean_intensity"`
@@ -38,7 +39,7 @@ type Player struct {
 	Eliminated       bool     `json:"eliminated"`
 }
 
-// Metrics are the BR-006 fit metrics, measured per game. A metric the agent
+// Metrics are the realism metrics, measured per game. A metric the agent
 // cannot measure from its game context is null: near_death_rate always (the
 // agent does not ingest the coordinator's near-death counter), activity and
 // change without a death threshold or with fewer than two sampled players.
