@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any
 
 from lib.colors import Colors
 from lib.flag_service_writer import (
-    HTTP_FORBIDDEN,
     HTTP_NO_CONTENT,
     HTTP_OK,
     HTTP_PRECONDITION_FAILED,
@@ -239,8 +238,6 @@ RESET_DEFAULT_OPTIONS: dict[str, tuple[str, str]] = {
     "decision.backend": ("agent_settings_writer", DECISION_BACKEND_FLAG),
     RETRO_BACKEND_OPTION: ("agent_settings_writer", RETRO_BACKEND_OPTION),
 }
-# D14: a reset of these clears the menu's own stack overlay only (`clear_overlay`), never another writer's.
-RESET_OWN_OVERLAY_OPTIONS = AGENT_MEMORY_ROWS
 # Explicit allowlists, not derived from STEP_OPTIONS: the volume, the mode and the agent's other keys never reset.
 RESETTABLE_OPTIONS = frozenset(
     {
@@ -273,8 +270,7 @@ PAD_CAPABILITIES = (
     "set_backend.from",
     "reset_setting.from:decision.backend",
 )
-# Per-option strings (`step_setting:<option>`, `reset_setting:<option>`); the goal's only while the
-# flag service lists `menu` among the row's writers (`pad_commands`).
+# Per-option strings (`step_setting:<option>`, `reset_setting:<option>`).
 AGENT_ROW_CAPABILITIES = {option: (f"step_setting:{option}", f"reset_setting:{option}") for option in AGENT_ROW_LADDERS}
 
 
@@ -438,10 +434,6 @@ class SettingsOps:
         self._settings_lock = asyncio.Lock()
         # GetMenuStatus.agent_operator_brief_variant from the background read; None = unknown.
         self.brief_variant: str | None = None
-        # The flag service lists `menu` among goal.profile's writers (background read): advertise the goal keys.
-        self.goal_writable = False
-        # The flag service serves writer lists (background read), so its `if_writer` works in scope stack.
-        self.overlay_clear_supported = False
         # UC-015 BR-002 / BR-003: the level a resume restores; lost on a menu restart.
         self.saved_agent_level: str | None = None
         # The write gate the stop found (`off` when unreadable); the resume restores it. None = not remembered.
@@ -743,10 +735,9 @@ class SettingsOps:
                 values[option] = target
         return values, agent
 
-    def _read_agent_rows(self) -> tuple[dict[str, str], str | None, bool, bool]:
-        """One read of the `agent` set for the agent rows: their reset targets (an unknown one left out), the
-        brief in force (None = unknown), whether goal.profile's writers include `menu`, and whether the flag
-        service has writer lists at all (an older one refuses `if_writer` in scope stack). Blocking."""
+    def _read_agent_rows(self) -> tuple[dict[str, str], str | None]:
+        """One read of the `agent` set for the agent rows: their reset targets (an unknown one left out) and
+        the brief in force (None = unknown). Blocking."""
         writer = self.agent_memory_writer or self.state_manager.agent_settings_writer
         try:
             views = writer.get_set_view()
@@ -754,21 +745,14 @@ class SettingsOps:
             logger.warning(f"Reading the agent set failed: {e}")
             views = None
         if not isinstance(views, dict):
-            return {}, None, False, False
+            return {}, None
         targets = {}
         for option in AGENT_ROW_LADDERS:
             target = row_reset_target(option, views.get(option))
             if target is not None:
                 targets[option] = target
         brief = views.get(BRIEF_OPTION)
-        goal_policy = (views.get(GOAL_OPTION) or {}).get("policy") or {}
-        writers = goal_policy.get("writers") if isinstance(goal_policy, dict) else None
-        goal_writable = isinstance(writers, list) and WRITER_LABEL in writers
-        clears_own = any(
-            isinstance(view, dict) and isinstance(view.get("policy"), dict) and "writers" in view["policy"]
-            for view in views.values()
-        )
-        return targets, (row_in_force(BRIEF_OPTION, brief) if brief else None), goal_writable, clears_own
+        return targets, (row_in_force(BRIEF_OPTION, brief) if brief else None)
 
     async def refresh_operator_settings(self) -> None:
         """Re-read the operator's values for GetMenuStatus (BR-018); an unreadable one is left out (unknown)."""
@@ -777,11 +761,9 @@ class SettingsOps:
         self._operator_read_at = time.monotonic()
         values = await asyncio.to_thread(self._read_all_operators)
         defaults, agent = await asyncio.to_thread(self._read_setting_defaults)
-        row_targets, brief, goal_writable, clears_own = await asyncio.to_thread(self._read_agent_rows)
+        row_targets, brief = await asyncio.to_thread(self._read_agent_rows)
         if generation == self._operator_generation:
             self.operator_settings = values  # else a commit landed during the read: its value stands
-        self.goal_writable = goal_writable
-        self.overlay_clear_supported = clears_own
         if defaults_generation == self._defaults_generation:
             # Only when no agent command overlapped the read: a stop that landed meanwhile must keep its memory.
             self.setting_defaults = {**defaults, **row_targets}
@@ -790,14 +772,7 @@ class SettingsOps:
 
     def pad_commands(self) -> list[str]:
         """GetMenuStatus.pad_commands: the commands, guard keys and agent-row options this menu takes."""
-        commands = list(PAD_CAPABILITIES)
-        for option, (step_name, reset_name) in AGENT_ROW_CAPABILITIES.items():
-            if option == GOAL_OPTION and not self.goal_writable:
-                continue
-            commands.append(step_name)
-            if option not in RESET_OWN_OVERLAY_OPTIONS or self.overlay_clear_supported:
-                commands.append(reset_name)
-        return commands
+        return [*PAD_CAPABILITIES, *(name for names in AGENT_ROW_CAPABILITIES.values() for name in names)]
 
     @staticmethod
     def _clear(writer, key: str) -> bool:
@@ -862,17 +837,9 @@ class SettingsOps:
             return None
         return view if isinstance(view, dict) else None
 
-    def _write_row(self, option: str, new: str) -> int:
-        """One write of an agent row's rung (the rate by its declared variant); the HTTP status. Blocking."""
-        writer = self._row_writer(option)
-        if writer is None:
-            return STATUS_UNKNOWN
-        variant = RATE_VARIANTS[new] if option == RATE_OPTION else new
-        try:
-            return int(writer.write_variant(option, variant))
-        except Exception as e:
-            logger.error(f"Write {option}={variant} failed: {e}")
-            return STATUS_UNKNOWN
+    def _write_row(self, option: str, new: str) -> bool:
+        """One write of an agent row's rung (the rate by its declared variant). Blocking."""
+        return self._write(self._row_writer(option), option, RATE_VARIANTS[new] if option == RATE_OPTION else new)
 
     def _clear_row_overlay(self, option: str) -> int:
         try:
@@ -918,12 +885,10 @@ class SettingsOps:
             if at_limit:
                 return Result(current, current, AT_LIMIT)
             if new == current:
-                return Result(current, current, OK)  # the goal's wheel turned full circle: nothing written
-            status = await asyncio.to_thread(self._write_row, option, new)
-            if status == HTTP_FORBIDDEN:
-                return Result(current, None, BAD_OPTION)  # the row's writers do not include the menu
-            self._row_committed(option, new if status == HTTP_OK else None)
-            if status != HTTP_OK:
+                return Result(current, current, OK)  # a wrapping wheel turned full circle: nothing written
+            ok = await asyncio.to_thread(self._write_row, option, new)
+            self._row_committed(option, new if ok else None)
+            if not ok:
                 return Result(current, None, FLAG_SERVICE_UNAVAILABLE)
             return Result(current, new)
 
@@ -957,8 +922,6 @@ class SettingsOps:
             status = await asyncio.to_thread(self._clear_row_overlay, option)
             if status == HTTP_PRECONDITION_FAILED:
                 return Result(current, None, STALE)  # another writer replaced the menu's overlay under the reset
-            if status == HTTP_FORBIDDEN:
-                return Result(current, None, BAD_OPTION)
             self._row_committed(option, target if status in (HTTP_OK, HTTP_NO_CONTENT) else None)
             if status not in (HTTP_OK, HTTP_NO_CONTENT):
                 return Result(current, None, FLAG_SERVICE_UNAVAILABLE)

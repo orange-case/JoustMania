@@ -140,7 +140,7 @@ var menuStatus = &menupb.GetMenuStatusResponse{
 	AgentInterventionsEnabledState: "off",
 	ShieldActivation:               "hold",
 	OperatorSettings:               map[string]string{"sensitivity": "fast", "num_teams": "automatic", "shield.activation": "hold"},
-	AgentGoalProfile:               "quick_game",
+	AgentObjectives:                "chaos_focused",
 	AgentMaxInterventionsPerMinute: "8",
 	AgentGroupGrantState:           "on",
 	InferenceBackend:               "claude",

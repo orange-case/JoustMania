@@ -510,6 +510,7 @@ async def test_status_lists_the_pad_commands_this_menu_understands(servicer):
         *[
             f"{command}:{option}"
             for option in (
+                "objectives",
                 "policy.max_interventions_per_minute",
                 "policy.group_grant.enabled",
                 "inference.backend",
@@ -517,7 +518,6 @@ async def test_status_lists_the_pad_commands_this_menu_understands(servicer):
                 "decision.operator_brief",
             )
             for command in ("step_setting", "reset_setting")
-            if command == "step_setting" or option == "inference.backend"
         ],
     ]
 

@@ -61,13 +61,14 @@ PAID_BACKENDS: frozenset[str] = frozenset({"claude", "openai", "jev"})
 # UC-016 BR-012 (iteration 4): the agent rows the pad edits. Each ladder is in the option's canonical
 # format (services.md §3.1), the one the status, `from`, `expect`, `setting_defaults` and `value` use,
 # never the flag file's declared order.
-GOAL_OPTION = "goal.profile"
+# The pad's GOAL row edits `objectives` (D17); `goal.profile` follows it by default and stays Flagsmith-only.
+GOAL_OPTION = "objectives"
 RATE_OPTION = "policy.max_interventions_per_minute"
 GROUP_OPTION = "policy.group_grant.enabled"
 RETRO_BACKEND_OPTION = "inference.backend"
 EFFORT_OPTION = "inference.effort"
 BRIEF_OPTION = "decision.operator_brief"
-GOAL_LADDER: list[str] = ["from_objectives", "long_running_game", "lively_finale", "balanced_contest", "quick_game"]
+GOAL_LADDER: list[str] = ["endurance_focused", "balanced_focused", "accelerate_focused", "chaos_focused", "mixed"]
 # The rate by value, as integer decimals; `RATE_VARIANTS` names the declared variant of each rung.
 RATE_LADDER: list[str] = ["1", "2", "4", "8", "20"]
 RATE_VARIANTS: dict[str, str] = {"1": "conservative", "2": "default", "4": "aggressive", "8": "lively", "20": "frenzy"}
@@ -235,7 +236,7 @@ class _Status(Protocol):
     agent_backend: str
     shield_activation: str
     operator_settings: Mapping[str, str]
-    agent_goal_profile: str
+    agent_objectives: str
     agent_max_interventions_per_minute: str
     agent_group_grant_state: str
     inference_backend: str
@@ -263,7 +264,7 @@ PREVIEW_OPTIONS = frozenset({*FLAG_LADDERS, "current_game", "agent_level", "deci
 
 # The status field (services.md §3.1, fields 22 to 27) each agent row reads, in its canonical format.
 AGENT_ROW_STATUS_FIELDS: dict[str, str] = {
-    GOAL_OPTION: "agent_goal_profile",
+    GOAL_OPTION: "agent_objectives",
     RATE_OPTION: "agent_max_interventions_per_minute",
     GROUP_OPTION: "agent_group_grant_state",
     RETRO_BACKEND_OPTION: "inference_backend",

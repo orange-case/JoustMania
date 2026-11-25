@@ -14,6 +14,7 @@ from lib.setting_ladders import (
     AUTOMATIC,
     AUTOMATIC_OPTIONS,
     EFFORT_OPTION,
+    GOAL_LADDER,
     GOAL_OPTION,
     GROUP_OPTION,
     RATE_OPTION,
@@ -85,6 +86,12 @@ def _resolved_variant(read) -> str:
         logger.warning(f"Reading an agent row failed: {e}")
         return ""
     return details.variant if _resolved(details) else ""
+
+
+def _objectives(agent) -> str:
+    """`objectives` as one of its declared variants, empty (unknown) otherwise."""
+    variant = _resolved_variant(lambda: agent.get_object_details(GOAL_OPTION, {}))
+    return variant if variant in GOAL_LADDER else ""
 
 
 def _two_state(read) -> str:
@@ -507,7 +514,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             audio_volume_master=_variant(user.get_float_details("audio_volume.master", 1.0)),
             shield_activation=_variant(game.get_string_details(SHIELD_ACTIVATION_FLAG, "")),
             operator_settings=dict(self.settings_ops.operator_settings),
-            agent_goal_profile=_resolved_variant(lambda: agent.get_object_details(GOAL_OPTION, {})),
+            agent_objectives=_objectives(agent),
             agent_max_interventions_per_minute=_rate_text(agent),
             agent_group_grant_state=_two_state(lambda: agent.get_boolean_details(GROUP_OPTION, False)),
             inference_backend=_resolved_variant(lambda: agent.get_string_details(RETRO_BACKEND_OPTION, "")),

@@ -107,7 +107,7 @@ message GetMenuStatusResponse {
   map<string, string> operator_settings = 21;
   // The agent rows of the pad's pages (UC-016 BR-006, BR-012; #2742, #2755); empty = unknown. Each in its
   // canonical format (services.md §3.1), the one `from`, `expect`, setting_defaults and the committed value use.
-  string agent_goal_profile = 22;                  // agent/goal.profile variant name (base value, empty context)
+  string agent_objectives = 22;                    // agent/objectives variant name (base value, empty context)
   string agent_max_interventions_per_minute = 23;  // policy.max_interventions_per_minute as an integer decimal
   string agent_group_grant_state = 24;             // policy.group_grant.enabled: "on" or "off"
   string inference_backend = 25;                   // inference.backend variant name
