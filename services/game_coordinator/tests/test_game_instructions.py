@@ -1,6 +1,6 @@
 """UC-020 A5: spoken game instructions before the countdown (#1550).
 
-When the host switched ``game_instructions`` on (UC-012 A3, FR-014), the mode's
+When the host switched ``game_instructions`` on (UC-015 BR-011, FR-014), the mode's
 instruction clip plays and the countdown waits until it has finished. Off, the
 main scenario runs unchanged. The other modes' clips: test_game_instructions_modes.py (#2151).
 """
@@ -100,7 +100,7 @@ class TestUC020InstructionsOn:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-020", flow="A5", steps=[1, 2, 4])
-    @pytest.mark.uc("UC-012", flow="A3", steps=[2])
+    @pytest.mark.uc("UC-020", flow="A5")
     async def test_ffa_plays_clip_and_countdown_waits_for_it(self, fast_config, monkeypatch):  # noqa: F811
         """A5: the FFA clip plays first and the music and the countdown start only after it finished."""
         monkeypatch.setattr(BaseGameMode, "_INSTRUCTIONS_WAIT_SCALE", 1.0)  # the full clip length, on game time

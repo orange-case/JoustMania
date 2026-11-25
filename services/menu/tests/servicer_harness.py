@@ -63,7 +63,6 @@ async def cancel_background_tasks(servicer) -> None:
     """Cancel the background tasks the real code may have scheduled."""
     for task in (
         servicer._game_lifecycle_task,
-        servicer.admin_handler._timeout_task,
         servicer.settings_ops.operator_refresh_task,
     ):
         if task is not None and not task.done():

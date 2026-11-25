@@ -72,7 +72,7 @@ class TestMenuServicerBasic:
         assert menu_servicer.get_menu_state() == menu_pb2.MenuState.RUNNING
 
     def test_get_game_options(self, menu_servicer):
-        """get_game_options is populated from GAME_MODES so admin Cross cycling
+        """get_game_options is populated from GAME_MODES so the pad's mode step
         works (#1030) — it is no longer the always-empty stub."""
         options = menu_servicer.get_game_options()
         assert isinstance(options, list)

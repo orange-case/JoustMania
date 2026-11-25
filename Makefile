@@ -225,7 +225,7 @@ voice-sample:
 # Spec references (#1280): every `path:line` / `path:Symbol` in docs/specs/*.md
 # must name a full repo path that exists (line in range, symbol present); Go
 # Span*/Attr* values must appear in telemetry.md. `make spec-refs` rewrites the
-# ATTR baseline (growth needs the spec-baseline-growth label).
+# ATTR baseline (it only shrinks: growth fails, #2799).
 # `scripts/spec_refs.py --suggest` prints path:Symbol for every path:line ref.
 SPEC_REFS = python3 scripts/spec_refs.py
 

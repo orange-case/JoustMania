@@ -923,7 +923,7 @@ class TestZombieEndGame:
 
 
 class TestZombieForceEndWinner:
-    """A force-end declares no winner; a winner latched earlier is kept (UC-023 BR-003, #1343)."""
+    """A force-end declares no winner; a winner latched earlier is kept (UC-020 BR-007, #1343)."""
 
     @pytest_asyncio.fixture
     async def setup(self):
@@ -968,7 +968,7 @@ class TestZombieForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-023", br=["BR-003"])
+    @pytest.mark.uc("UC-023", br=["BR-008"])
     async def test_force_end_while_running_declares_no_winner(self, setup):
         game, events = setup
         game.force_end("operator")
@@ -989,7 +989,7 @@ class TestZombieForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-023", br=["BR-003"])
+    @pytest.mark.uc("UC-023", br=["BR-008"])
     @pytest.mark.parametrize("side", ["zombies", "humans"])
     async def test_force_end_after_win_keeps_the_winner(self, setup, side):
         game, events = setup
@@ -1013,7 +1013,7 @@ class TestZombieForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-023", br=["BR-003"])
+    @pytest.mark.uc("UC-023", br=["BR-008"])
     @pytest.mark.parametrize("side", ["zombies", "humans"])
     async def test_force_end_during_the_winner_publish_keeps_the_winner(self, setup, side):
         """#1988: a force-end landing while zombie_winner is published keeps that winner."""
@@ -1043,7 +1043,7 @@ class TestZombieForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-023", br=["BR-003"])
+    @pytest.mark.uc("UC-023", br=["BR-008"])
     @pytest.mark.parametrize("side", ["zombies", "humans"])
     async def test_force_end_racing_the_outcome_latch_publishes_no_winner(self, setup, side):
         """#1988: a force-end landing right before the outcome latch wins the race: no winner anywhere."""
@@ -1071,7 +1071,7 @@ class TestZombieForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-023", br=["BR-003"])
+    @pytest.mark.uc("UC-023", br=["BR-008"])
     @pytest.mark.parametrize("side", ["zombies", "humans"])
     async def test_force_end_before_the_win_check_publishes_no_winner(self, setup, side):
         """#1988: a force-end that lands first declares no winner, even with the win condition met."""
@@ -1094,7 +1094,7 @@ class TestZombieForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-023", br=["BR-003", "BR-005"])
+    @pytest.mark.uc("UC-023", br=["BR-008", "BR-005"])
     async def test_win_is_latched_and_published_once(self, setup):
         game, events = setup
         self._convert_all_humans(game)
@@ -1107,7 +1107,7 @@ class TestZombieForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-023", br=["BR-003"])
+    @pytest.mark.uc("UC-023", br=["BR-008"])
     async def test_stream_end_without_a_win_declares_no_winner(self, setup):
         game, events = setup
         game._latch_game_outcome()  # the loop returned (stream closed), no win
@@ -1403,7 +1403,7 @@ class TestZombieLedAfterKill:
         assert await game.revive_player(human) is False
         assert _writes_for(game.gameplay_stream, human) == []
 
-    @pytest.mark.uc("UC-023", flow="main", steps=[4], br=["BR-003", "BR-004"])
+    @pytest.mark.uc("UC-023", flow="main", steps=[4], br=["BR-008", "BR-004"])
     @pytest.mark.parametrize("decided", ["winner_latched", "not_running"])
     @pytest.mark.asyncio
     async def test_respawn_and_revive_refused_once_decided(self, game, decided):
@@ -1445,7 +1445,7 @@ class TestZombieLedAfterKill:
 
         assert _writes_for(stream, zombie) == [GREY, FLASH]
 
-    @pytest.mark.uc("UC-023", flow="main", steps=[3], br=["BR-003"])
+    @pytest.mark.uc("UC-023", flow="main", steps=[3], br=["BR-008"])
     @pytest.mark.asyncio
     async def test_eliminate_during_conversion_sleep_with_win_latched_sends_no_death_after_grey(
         self, game, monkeypatch

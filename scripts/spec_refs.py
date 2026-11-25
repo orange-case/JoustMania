@@ -14,8 +14,8 @@ Checks (docs/specs/*.md; generated/ and notes/ are skipped):
   ATTR_UNDOCUMENTED  a Go Span*/Attr* constant value that no spec mentions
                      (exact string; `ns.*` never documents a key)
 REF_* findings are never baselined. ATTR_UNDOCUMENTED findings may sit in
-docs/specs/notes/spec-refs-baseline.json; a new baseline fingerprint needs the
-`spec-baseline-growth` label (PR context only), and stale entries fail ("prune me").
+docs/specs/notes/spec-refs-baseline.json; the baseline only shrinks: a new
+fingerprint versus --base fails (#2799), and stale entries fail ("prune me").
 Line refs may not grow versus --base (warning, with suggestions).
 
 Ignore an example with `<!-- spec-refs: ignore -->` on its line; fenced code
@@ -40,7 +40,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SPECS = REPO_ROOT / "docs" / "specs"
 BASELINE = SPECS / "notes" / "spec-refs-baseline.json"
-GROWTH_LABEL = "spec-baseline-growth"
 
 sys.path.insert(0, str(REPO_ROOT / "tests" / "contract"))
 import telemetry_inventory as ti
@@ -326,31 +325,6 @@ def base_line_refs(base: str) -> Counter | None:
     return counts
 
 
-def labels() -> set[str]:
-    env = os.environ.get("PR_LABELS")
-    if env is not None:
-        return {s for s in env.split(",") if s}
-    number = os.environ.get("PR_NUMBER")
-    if not number:
-        return set()
-    res = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "view",
-            number,
-            "--json",
-            "labels",
-            "--jq",
-            '[.labels[].name] | join(",")',
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return {s for s in res.stdout.strip().split(",") if s}
-
-
 def growth_report(refs: list[Ref], base: str) -> tuple[list[str], list[str]]:
     """(warnings about new line refs, errors about baseline growth)."""
     warnings, errors = [], []
@@ -372,22 +346,18 @@ def growth_report(refs: list[Ref], base: str) -> tuple[list[str], list[str]]:
                 f"::warning title=Spec line refs grew::path:line refs grew by {grown} "
                 f"versus {base}; prefer path:Symbol:\n" + "\n".join(lines)
             )
-    # Baseline growth is a PR-only check: the merge queue has no PR number or
-    # labels (the PR passed it with its label already).
-    if not (os.environ.get("PR_NUMBER") or "PR_LABELS" in os.environ):
-        return warnings, errors
+    # The baseline only shrinks (#2799: no label accepts growth any more).
     rel = BASELINE.relative_to(REPO_ROOT).as_posix()
     old = load_baseline_text(_git("show", f"{base}:{rel}"))
     if old or _git("cat-file", "-e", f"{base}:{rel}") is not None:
         head = load_baseline_text(_read(BASELINE) if BASELINE.exists() else None)
         added = sorted(head.keys() - old.keys())
-        if added and GROWTH_LABEL not in labels():
+        if added:
             names = ", ".join(repr(head[fp]["value"]) for fp in added)
             errors.append(
                 f"::error title=Spec refs baseline grew::{BASELINE.name} gained "
                 f"{len(added)} entr{'y' if len(added) == 1 else 'ies'} ({names}). "
-                f"Document the new names in docs/specs/telemetry.md, or add the "
-                f"'{GROWTH_LABEL}' label."
+                f"Document the new names in docs/specs/telemetry.md."
             )
     return warnings, errors
 

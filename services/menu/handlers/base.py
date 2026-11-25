@@ -37,7 +37,7 @@ class ButtonDebouncer:
             button: Button name
             interval: Optional override for debounce interval
             event_time: When the press happened (seconds, controller-manager clock). Debouncing on the
-                event time keeps a stalled menu loop from merging two distinct presses (UC-012 BR-007);
+                event time keeps a stalled menu loop from merging two distinct presses (UC-010 BR-016);
                 falls back to the processing time when the event carries none.
 
         Returns:
@@ -76,7 +76,6 @@ class ControllerState(Enum):
 
     CONNECTED = "connected"  # Connected but not ready (dim LED)
     READY = "ready"  # Ready to play (bright LED)
-    ADMIN = "admin"  # In admin mode (white LED)
     IDLE = "idle"  # Idle mode (LED off to save battery)
 
 

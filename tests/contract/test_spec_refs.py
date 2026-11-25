@@ -199,39 +199,35 @@ def test_moving_a_ref_between_spec_files_is_not_growth(tmp_repo):
     assert sr.growth_report(sr.scan_specs(), "HEAD")[0] == []
 
 
-def test_baseline_growth_needs_the_label(tmp_repo, monkeypatch):
+def test_baseline_growth_always_fails(tmp_repo, monkeypatch):
+    """#2799: no label accepts growth; PR and merge-queue runs fail alike."""
     sr.BASELINE.write_text(json.dumps({"version": 1, "findings": []}))
     _commit_base(tmp_repo)
     _go_const(tmp_repo, "a.b")
     sr.BASELINE.write_text(sr.render_baseline(sr.check_attrs()))
-    monkeypatch.setenv("PR_LABELS", "")
-    assert len(sr.growth_report([], "HEAD")[1]) == 1
+    monkeypatch.delenv("PR_NUMBER", raising=False)
     monkeypatch.setenv("PR_LABELS", "x,spec-baseline-growth")
-    assert sr.growth_report([], "HEAD")[1] == []
+    [err] = sr.growth_report([], "HEAD")[1]
+    assert "'a.b'" in err
+    assert "label" not in err
 
 
-def test_baseline_growth_is_by_fingerprint_not_count(tmp_repo, monkeypatch):
+def test_baseline_growth_is_by_fingerprint_not_count(tmp_repo):
     _go_const(tmp_repo, "a.b")
     sr.BASELINE.write_text(sr.render_baseline(sr.check_attrs()))
     _commit_base(tmp_repo)
     # one entry swapped for another: same count, a new fingerprint
     _go_const(tmp_repo, "c.d")
     sr.BASELINE.write_text(sr.render_baseline(sr.check_attrs()))
-    monkeypatch.setenv("PR_LABELS", "")
     [err] = sr.growth_report([], "HEAD")[1]
     assert "'c.d'" in err
-    monkeypatch.setenv("PR_LABELS", "spec-baseline-growth")
-    assert sr.growth_report([], "HEAD")[1] == []
 
 
-def test_baseline_growth_is_skipped_without_pr_context(tmp_repo, monkeypatch):
-    """merge_group has neither PR_NUMBER nor PR_LABELS: the PR already passed."""
-    sr.BASELINE.write_text(json.dumps({"version": 1, "findings": []}))
-    _commit_base(tmp_repo)
+def test_baseline_shrink_passes(tmp_repo):
     _go_const(tmp_repo, "a.b")
     sr.BASELINE.write_text(sr.render_baseline(sr.check_attrs()))
-    monkeypatch.delenv("PR_LABELS", raising=False)
-    monkeypatch.setenv("PR_NUMBER", "")
+    _commit_base(tmp_repo)
+    sr.BASELINE.write_text(json.dumps({"version": 1, "findings": []}))
     assert sr.growth_report([], "HEAD")[1] == []
 
 

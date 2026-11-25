@@ -89,10 +89,10 @@ A controller's state in the menu lobby (`services/menu/handlers/base.py:68-75`, 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
 | serial | Controller in the lobby | String | 17 | Primary Key, Foreign Key (CONTROLLER.serial) |
-| state | Lobby state; a disconnected controller is removed, not stored | String | 10 | Not Null, Values: CONNECTED, READY, ADMIN, IDLE |
+| state | Lobby state; a disconnected controller is removed, not stored | String | 10 | Not Null, Values: CONNECTED, READY, IDLE |
 | is_sentinel | Breathing LED while the lobby is idle | Boolean | 1 | Not Null |
 
-**Constraints:** auto start when ready count ≥ 2 and ready count = connected count (IDLE and ADMIN count as connected, not ready). Exactly one controller can be in ADMIN.
+**Constraints:** auto start when ready count ≥ 2 and ready count = connected count (IDLE counts as connected, not ready). The ADMIN state is gone with the controller admin mode (#2819).
 
 ### GAME_MODE
 

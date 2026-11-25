@@ -110,8 +110,8 @@ pull the network and show the rules fallback. See [UC-070](use_cases/UC-070.md).
    [use cases](use_cases.puml) and [technical specs](specs/) before or with the
    code that implements it. See [CONTRIBUTING.md](CONTRIBUTING.md#spec-driven-development-aiup).
 2. **The spec states what the code does.** Plans carry an issue number and an
-   `Open` status. Disagreements between docs and code are logged in
-   [specs-inventory.md](specs-inventory.md#4-discrepancies-found) and fixed in code
+   `Open` status. Disagreements between docs and code are tracked as `spec-drift`
+   issues (#2798) and fixed in code
    or spec, never papered over.
 3. **Everything observable, everything reversible.** New behaviour ships with
    spans or metrics ([telemetry spec](specs/telemetry.md)) and, where it is

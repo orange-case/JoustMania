@@ -1697,7 +1697,7 @@ class InterventionManager:
         The rate-limit reservation happens last among the cheap checks so a
         blocked intervention never consumes budget.
 
-        UC-013 BR-002: the coordinator-side allow-list check (the agent has its own
+        UC-040 BR-004: the coordinator-side allow-list check (the agent has its own
         in the permission chain). UC-040 BR-004: the coordinator's half of the
         double enforcement, plus the global backstop.
         """

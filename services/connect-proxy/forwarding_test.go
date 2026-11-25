@@ -126,7 +126,6 @@ var menuStatus = &menupb.GetMenuStatusResponse{
 	Selection:                      "Werewolf",
 	ReadyCount:                     2,
 	ConnectedCount:                 3,
-	AdminSerial:                    "adm",
 	AgentEnabled:                   true,
 	AgentLevel:                     "standard",
 	AgentSavedLevel:                "full",

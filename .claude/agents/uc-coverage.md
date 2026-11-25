@@ -31,7 +31,10 @@ Mode `work in progress`: same matrix, open units phrased as remaining work in sp
 ## Step 1: read the specification
 
 - Use case: Glob `docs/use_cases/UC-XXX*.md`. Test case: Glob `docs/test_cases/TC-XXX*.md`.
-  Missing file → stop and say so. Never audit against a spec reconstructed from code.
+  Missing file → stop and say so, except for a retired automated journey (#2799): TC documents exist only
+  for manual or hardware journeys, so a `TC-XXX` listed under "Automated journeys" in
+  `docs/test_cases/README.md` has none. Then read the tests tagged `tc="TC-XXX"` (Grep, see Step 2) and
+  audit the use-case flows their `uc` markers name. Never audit against a spec reconstructed from code.
 - Read it completely before any code. Read exactly the `FR-*`, `NFR-*`, `C-*` rows its `**Requirements:**`
   line links in `docs/requirements.md` (Grep each id), not the whole catalog.
 - Read the `docs/specs/*` section the spec names when a step depends on an identifier (flag, span, outcome).
@@ -48,7 +51,7 @@ Mode `work in progress`: same matrix, open units phrased as remaining work in sp
 | `Post-F-n` | `### Failure Postconditions` bullet n | leave that state when the flow fails | assert it in at least one failure-flow test |
 | `NFR-XXX` / `C-XXX` | linked on `**Requirements:**` | honour the limit | assert it where a test can observe it; `n/a` for system-wide properties |
 
-For a `TC-XXX`: one unit per Flow-table row, each Validation item, each Postcondition.
+For a `TC-XXX` with a document: one unit per Flow-table row, each Validation item, each Postcondition. For a retired automated journey: one unit per use-case flow named by its tagged tests' `uc` markers, checked against that use case.
 
 `n/a` only when the spec makes the unit vacuous (pure actor intent, a precondition that is only a link to
 another document, a BR that only points elsewhere); give the reason. "Hard to test" is not `n/a`.
