@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 STATUS_TIMEOUT_SECONDS = 0.5
 
 
-# UC-013 / UC-015 BR-004 ladder; an empty variant is a flag the menu could not resolve.
+# UC-015 BR-004 / BR-019 ladder; an empty variant is a flag the menu could not resolve.
 # `probe` and `shadow_experimental` are off the ladder, so they read as unknown (BR-013, fail closed).
 AGENT_LEVELS = frozenset({"none", "ambient", "standard", "full"})
 

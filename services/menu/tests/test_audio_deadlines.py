@@ -116,7 +116,7 @@ async def test_a_hung_voice_line_does_not_hold_the_next_button_event(hung_audio,
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-010", flow="main", br=["BR-013"])
 async def test_a_voice_line_that_hits_its_deadline_is_counted_as_timeout(hung_audio, failures):
-    await hung_audio.play_voice(Sound.MENU_VOX_ADMIN_NOT_SAVED)
+    await hung_audio.play_voice(Sound.MENU_VOX_LABEL_AGENT)
     await asyncio.wait_for(asyncio.gather(*hung_audio._sound_tasks), timeout=1.0)
 
     assert ("PlaySound", FAST_DEADLINE) in _HungAudioStub.calls
@@ -171,7 +171,7 @@ async def test_a_failing_sound_is_counted_as_error(failures):
     stub.PlaySound = AsyncMock(side_effect=RuntimeError("audio down"))
     with patch("proto.audio_pb2_grpc.AudioServiceStub", return_value=stub):
         helper = AudioHelper(MagicMock())
-        await helper.play_voice(Sound.MENU_VOX_ADMIN_NOT_SAVED)
+        await helper.play_voice(Sound.MENU_VOX_LABEL_AGENT)
         await asyncio.gather(*helper._sound_tasks)
 
     failures.labels.assert_called_once_with(rpc="PlaySound", reason="error")
@@ -201,7 +201,7 @@ async def test_the_live_roster_lookup_has_a_deadline(monkeypatch):
 
     ops = SettingsOps(get_state_manager=lambda: None, controller_channel=MagicMock(), metrics=MagicMock())
     with patch("proto.controller_manager_pb2_grpc.ControllerManagerServiceStub", HungControllerManager):
-        roster = await asyncio.wait_for(ops.prune_ghosts(["s1", "s2"], None, MagicMock()), timeout=1.0)
+        roster = await asyncio.wait_for(ops.prune_ghosts(["s1", "s2"], MagicMock()), timeout=1.0)
 
     assert roster == ["s1", "s2"]
     assert seen == [FAST_DEADLINE]
