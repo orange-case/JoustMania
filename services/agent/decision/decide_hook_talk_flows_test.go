@@ -15,9 +15,8 @@ import (
 
 // decide_hook_talk_flows_test.go drives the talk demo (UC-070) beats that
 // decide_hook_talk_test.go leaves open: the switch to Jev (step 2), Jev down at
-// the venue (A2), Claude timing out (A3), the second vendor (A6), the answer
-// that lands before the kill switch (A10), and every beat's observable in one
-// run (Post-S-1).
+// the venue (A2), Claude timing out (A3), the answer that lands before the kill
+// switch (A10), and every beat's observable in one run (Post-S-1).
 
 // scriptedBackend is a decide.Backend whose answer the test swaps between beats.
 // A blocking answer waits for the call context or release.

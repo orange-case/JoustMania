@@ -54,13 +54,9 @@ type Response struct {
 	Header http.Header
 }
 
-// PostResponse sends body as a JSON POST to url with the given extra headers,
-// injects W3C traceparent from ctx (the caller's chat span) via the global
-// propagator, as inference/claude.go does, and reads at most maxBody bytes of
-// the response. It returns the status, body and headers of any HTTP response
-// (2xx or not); err is set only for transport failures and an oversized body
-// (ErrTooLarge). Status and Header are set whenever an HTTP response arrived, even when err is
-// ErrTooLarge or a body read error.
+// PostResponse POSTs JSON with traceparent from ctx and reads at most maxBody bytes.
+// Any HTTP status is a Response, not an error; Status and Header are set even when
+// err is ErrTooLarge or a body read error.
 func PostResponse(ctx context.Context, client *http.Client, url string, header http.Header, body []byte, maxBody int64) (Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
