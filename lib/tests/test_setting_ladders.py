@@ -78,7 +78,7 @@ def test_wrap_step(current, steps, expected):
 @pytest.mark.uc("UC-016", br=["BR-007"])
 def test_wrapping_is_an_explicit_set_of_options():
     """Named one by one, never a default: the kill-switch ladder (agent level) and the raise rows must never wrap."""
-    assert {"current_game", "decision.backend", "shield.activation", "goal.profile"} == setting_ladders.WRAPPING
+    assert {"current_game", "decision.backend", "shield.activation", "objectives"} == setting_ladders.WRAPPING
 
 
 # Every preview option: its ladder, a status at a given start, and whether it wraps.
@@ -322,7 +322,7 @@ def test_the_automatic_rung_has_one_shared_voice_line():
 def test_agent_row_ladders_are_explicit_and_cover_the_flag_files_variants():
     """Explicit ladders, never the flag file's declared order: up means more (a higher rate, on, claude)."""
     assert setting_ladders.AGENT_ROW_LADDERS == {
-        "goal.profile": ["from_objectives", "long_running_game", "lively_finale", "balanced_contest", "quick_game"],
+        "objectives": ["endurance_focused", "balanced_focused", "accelerate_focused", "chaos_focused", "mixed"],
         "policy.max_interventions_per_minute": ["1", "2", "4", "8", "20"],
         "policy.group_grant.enabled": ["off", "on"],
         "inference.backend": ["stub", "claude"],
@@ -338,6 +338,8 @@ def test_agent_row_ladders_are_explicit_and_cover_the_flag_files_variants():
     for option in setting_ladders.AGENT_ROW_LADDERS.keys() - {"policy.max_interventions_per_minute"}:
         assert set(flags[option]["variants"]) == set(setting_ladders.AGENT_ROW_LADDERS[option]), option
     assert flags["decision.operator_brief"]["variants"]["off"] == ""
+    # The GOAL wheel is `objectives` in the flag's declared order.
+    assert list(flags["objectives"]["variants"]) == setting_ladders.AGENT_ROW_LADDERS["objectives"]
 
 
 @pytest.mark.uc("UC-016", br=["BR-012", "BR-014"])
@@ -373,7 +375,7 @@ def test_agent_row_preview_from_an_unknown_or_off_ladder_value_is_unknown(option
         ("decision.backend", "openai", "rules", False),
         ("decision.backend", "", "claude", None),  # unknown NOW with a paid NEW: refused
         ("decision.backend", "", "rules", False),
-        ("goal.profile", "from_objectives", "quick_game", False),
+        ("objectives", "balanced_focused", "chaos_focused", False),
         ("decision.operator_brief", "off", "unkillable", False),
     ],
 )

@@ -1,9 +1,8 @@
-"""The pad's agent rows on the menu side: goal, rate, group, retro backend, effort, brief (#2755).
+"""The pad's agent rows on the menu side: goal (`objectives`), rate, group, retro backend, effort, brief (#2755).
 
 UC-016 BR-006, BR-012 to BR-014, A3, A8; services.md §3.1 iteration 4. A real MenuServicer whose writers are
 real ``FlagServiceWriter``s over a fake flag service that keeps the layers of each `agent` row (stack overlay
-with its writer, persisted admin value), the goal's writer list (`policy.writers`, flags.md §13), the
-compare-and-delete ``if_writer`` and the 403 of a writer the row does not allow. The values come from the
+with its writer, persisted admin value) and the compare-and-delete ``if_writer``. The values come from the
 real flag file (`services/flagd/agent.json`).
 """
 
@@ -39,10 +38,10 @@ RAISE_ROWS = sorted(setting_ladders.RAISE_LADDER_OPTIONS)
 IN_MEMORY_ROWS = [GOAL, RATE, GROUP, EFFORT, BRIEF]
 UNKILLABLE_TEXT = AGENT_FLAGS[BRIEF]["variants"]["unkillable"]
 # One rung below and one rung above the baseline of each row, in canonical format (the from / expect / value).
-LOW_HIGH = {GOAL: ("lively_finale", "quick_game"), RATE: ("1", "8"), GROUP: ("off", "on"), RETRO: ("stub", "claude")}
-LOW_HIGH |= {EFFORT: ("low", "high"), BRIEF: ("off", "unkillable")}
+LOW_HIGH = {GOAL: ("endurance_focused", "accelerate_focused"), RATE: ("1", "8"), GROUP: ("off", "on")}
+LOW_HIGH |= {RETRO: ("stub", "claude"), EFFORT: ("low", "high"), BRIEF: ("off", "unkillable")}
 # What a reset puts back once the menu's own value is gone (services.md §3.1).
-BASELINE = {GOAL: "from_objectives", RATE: "2", GROUP: "off", RETRO: "stub", EFFORT: "medium", BRIEF: "off"}
+BASELINE = {GOAL: "balanced_focused", RATE: "2", GROUP: "off", RETRO: "stub", EFFORT: "medium", BRIEF: "off"}
 
 
 class AgentRowService:
@@ -51,7 +50,6 @@ class AgentRowService:
     def __init__(self):
         self.stack: dict[str, dict] = {}
         self.admin: dict[str, dict] = {}
-        self.goal_writers: list[str] | None = ["flagsmith", "menu"]
         self.requests: list[tuple[str, str, dict | None]] = []
         self.failing: set[str] = set()
         self.down = False
@@ -70,8 +68,6 @@ class AgentRowService:
             "baseline_default": AGENT_FLAGS[key]["defaultVariant"],
             "policy": {"flag_set": "agent", "flag": key, "kind": "overlay", "persist": key in PERSISTED},
         }
-        if key == GOAL and self.goal_writers is not None:
-            view["policy"]["writers"] = list(self.goal_writers)
         for name, layers in (("stack_overlay", self.stack), ("admin_value", self.admin)):
             if key in layers:
                 layer = dict(layers[key])
@@ -105,9 +101,6 @@ class AgentRowService:
             return 200, self.view(key)
         params = dict(urllib.parse.parse_qsl(query))
         writer = (body or {}).get("writer") if method == "PUT" else params.get("writer", "")
-        if key == GOAL and writer not in (self.goal_writers or ["flagsmith"]):
-            error = "flagsmith_only" if self.goal_writers is None else "writer_not_allowed"
-            return 403, {"error": error}
         if key in self.failing:
             return 503, {"error": "no_sync_stream"}
         if method == "PUT":
@@ -222,7 +215,7 @@ def test_the_agent_row_tables_are_explicit():
         "shield.activation",
         "game_instructions",
         "force_all_start",
-        "goal.profile",
+        "objectives",
     } == settings_ops.RESET_LOBBY_ONLY_OPTIONS
     assert settings_ops.LOBBY_ONLY_OPTIONS & set(ROWS) == {GOAL}
     # BR-014: `from` is required exactly where a change can raise what the agent may do or spend.
@@ -237,7 +230,7 @@ def test_the_agent_row_tables_are_explicit():
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", br=["BR-006"])
 async def test_status_reports_the_agent_rows_in_their_canonical_format(servicer, flags):
-    flags.set_stack(GOAL, "quick_game", "flagsmith")
+    flags.set_stack(GOAL, "chaos_focused", "flagsmith")
     flags.set_stack(RATE, "lively", "talk-stage")
     flags.set_stack(GROUP, "on", "group-ab")
     flags.admin[RETRO] = {"variant": "claude", "writer": "menu"}
@@ -248,7 +241,7 @@ async def test_status_reports_the_agent_rows_in_their_canonical_format(servicer,
     reply = await status(servicer, flags)
 
     rows = [getattr(reply, field) for field in setting_ladders.AGENT_ROW_STATUS_FIELDS.values()]
-    assert rows == ["quick_game", "8", "on", "claude", "xhigh", "protect_weakest"]
+    assert rows == ["chaos_focused", "8", "on", "claude", "xhigh", "protect_weakest"]
 
 
 @pytest.mark.asyncio
@@ -305,7 +298,7 @@ async def test_status_brief_is_unknown_until_read_and_when_the_read_fails(servic
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", br=["BR-013"])
 async def test_setting_defaults_report_each_rows_reset_target(servicer, flags):
-    flags.set_stack(GOAL, "quick_game", "menu")  # the menu's: the reset clears it
+    flags.set_stack(GOAL, "chaos_focused", "menu")  # the menu's: the reset clears it
     flags.set_stack(RATE, "aggressive", "talk-stage")  # a stage script's: it stays (D14)
     flags.set_stack(BRIEF, "o3", "menu", value="free text")  # never the menu's to clear (D13)
     flags.admin[RETRO] = {"variant": "claude", "writer": "menu"}  # persisted: cleared like decision.backend
@@ -315,7 +308,7 @@ async def test_setting_defaults_report_each_rows_reset_target(servicer, flags):
 
     defaults = servicer.settings_ops.setting_defaults
     assert {key: defaults[key] for key in ROWS} == {
-        GOAL: "from_objectives",
+        GOAL: "balanced_focused",
         RATE: "4",
         GROUP: "off",
         RETRO: "stub",
@@ -326,36 +319,28 @@ async def test_setting_defaults_report_each_rows_reset_target(servicer, flags):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", br=["BR-011", "BR-012"])
-@pytest.mark.parametrize(
-    ("writers", "goal_listed", "clears_own"),
-    [(["flagsmith", "menu"], True, True), (["flagsmith"], False, True), (None, False, False)],
-)
-async def test_pad_commands_list_the_goal_only_when_the_flag_service_lets_the_menu_write_it(
-    servicer, flags, writers, goal_listed, clears_own
-):
-    """Without writer lists (an older flag service) `if_writer` in scope stack is a 400: the in-memory rows'
-    resets are not advertised, so the pad plays the refusal cue instead of a failure."""
-    flags.goal_writers = writers
+@pytest.mark.parametrize("down", [False, True])
+async def test_pad_commands_list_every_rows_step_and_reset(servicer, flags, down):
+    """Never gated on the background read: `goal.profile` is no option (Flagsmith-only), `objectives` is."""
+    flags.down = down
     await servicer.settings_ops.refresh_operator_settings()
 
     commands = list((await status(servicer, flags)).pad_commands)
 
     assert "set_backend.from" in commands
     for option in ROWS:
-        listed = goal_listed if option == GOAL else True
-        resettable = listed and (clears_own or option == RETRO)
-        assert (f"step_setting:{option}" in commands) is listed, option
-        assert (f"reset_setting:{option}" in commands) is resettable, option
+        assert f"step_setting:{option}" in commands, option
+        assert f"reset_setting:{option}" in commands, option
+    assert not [command for command in commands if "goal.profile" in command]
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-016", br=["BR-011"])
-async def test_pad_commands_drop_the_goal_when_the_read_fails(servicer, flags):
-    await servicer.settings_ops.refresh_operator_settings()
-    assert "step_setting:goal.profile" in (await status(servicer, flags)).pad_commands
-    flags.down = True
-    await servicer.settings_ops.refresh_operator_settings()
-    assert "step_setting:goal.profile" not in (await status(servicer, flags)).pad_commands
+@pytest.mark.uc("UC-016", br=["BR-012"])
+@pytest.mark.parametrize("command", ["step_setting", "reset_setting"])
+async def test_goal_profile_is_no_pad_option(servicer, flags, command):
+    reply = await pad(servicer, command, option="goal.profile", direction="up", steps=1, expect="quick_game")
+    assert (reply.success, reply.error) == (False, "bad_option")
+    assert flags.requests == []
 
 
 # --- step_setting -----------------------------------------------------------------------------------
@@ -386,21 +371,21 @@ async def test_step_writes_the_next_rung_through_the_rows_writer(servicer, flags
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", br=["BR-012", "BR-007"])
 async def test_goal_wraps_and_the_others_stop_at_their_ends(servicer, flags):
-    flags.set_stack(GOAL, "quick_game", "menu")
+    flags.set_stack(GOAL, "mixed", "menu")
     reply = await step(servicer, GOAL)
-    assert (reply.success, reply.value) == (True, "from_objectives")
+    assert (reply.success, reply.value) == (True, "endurance_focused")
 
     flags.set_stack(RATE, "frenzy", "menu")
     reply = await step(servicer, RATE, **{"from": "20"})
     assert (reply.success, reply.error) == (False, "at_limit")
-    assert [body["variant"] for _m, _u, body in flags.writes()] == ["from_objectives"]
+    assert [body["variant"] for _m, _u, body in flags.writes()] == ["endurance_focused"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", br=["BR-012"])
 async def test_a_whole_turn_of_the_goal_is_a_no_op(servicer, flags):
     reply = await step(servicer, GOAL, steps=len(setting_ladders.GOAL_LADDER))
-    assert (reply.success, reply.error, reply.value) == (True, "ok", "from_objectives")
+    assert (reply.success, reply.error, reply.value) == (True, "ok", "balanced_focused")
     assert flags.writes() == []
 
 
@@ -433,26 +418,11 @@ async def test_the_goal_is_lobby_only_and_the_other_rows_are_live(servicer, flag
     live_lifecycle(servicer)
 
     goal = await step(servicer, GOAL)
-    goal_reset = await pad(servicer, "reset_setting", option=GOAL, expect="from_objectives")
+    goal_reset = await pad(servicer, "reset_setting", option=GOAL, expect="balanced_focused")
     others = [await step(servicer, option, **{"from": canonical(flags, option)}) for option in ROWS[1:]]
 
     assert (goal.error, goal_reset.error) == ("game_active", "game_active")
     assert [reply.success for reply in others] == [True] * 5
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-016", flow="A3", br=["BR-012"])
-@pytest.mark.parametrize("writers", [None, ["flagsmith"]])
-async def test_a_403_is_bad_option_not_a_failed_write(servicer, flags, writers):
-    """A flag-service image without the writer list (`flagsmith_only`), or a list without `menu`."""
-    flags.goal_writers = writers
-
-    step_reply = await step(servicer, GOAL)
-    flags.set_stack(GOAL, "quick_game", "menu")
-    reset_reply = await pad(servicer, "reset_setting", option=GOAL, expect="from_objectives")
-
-    assert (step_reply.error, reset_reply.error) == ("bad_option", "bad_option")
-    assert failure_cues(servicer) == 0
 
 
 @pytest.mark.asyncio
@@ -553,7 +523,7 @@ async def test_reset_clears_only_the_menus_own_overlay(servicer, flags, option):
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
 @pytest.mark.parametrize("option", IN_MEMORY_ROWS)
 async def test_reset_leaves_another_writers_value_alone(servicer, flags, option):
-    """D14: `talk-stage.sh`'s rate, `agent-group-ab.sh`'s group shield or Flagsmith's goal stay; a no-op `ok`."""
+    """D14: `talk-stage.sh`'s rate or goal, `agent-group-ab.sh`'s group shield or Flagsmith's value stay: no-op `ok`."""
     _low, high = LOW_HIGH[option]
     flags.set_stack(option, setting_ladders.RATE_VARIANTS.get(high, high), "talk-stage")
 
@@ -823,11 +793,11 @@ async def test_a_rate_written_as_a_float_is_its_integer_rung(servicer, flags):
 @pytest.mark.uc("UC-015", flow="A1")
 async def test_a_goal_command_that_waited_for_the_lock_while_a_game_started_is_refused(servicer, flags):
     """The servicer's lobby check ran before the lock; the game started while the command waited."""
-    flags.set_stack(GOAL, "quick_game", "menu")
+    flags.set_stack(GOAL, "chaos_focused", "menu")
     live_lifecycle(servicer)
 
     step_result = await servicer.settings_ops.step_setting(GOAL, "up", 1)
-    reset_result = await servicer.settings_ops.reset_setting(GOAL, "from_objectives")
+    reset_result = await servicer.settings_ops.reset_setting(GOAL, "balanced_focused")
 
     assert (step_result.error, reset_result.error) == ("game_active", "game_active")
     assert flags.writes() == []
