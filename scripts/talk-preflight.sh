@@ -438,7 +438,7 @@ if missing_threshold:
 else:
     print("PASS  decision.jev.act_confidence_threshold has the strict and gate variants")
 if "patient" not in flags.get("decision.claude.timeout_ms", {}).get("variants", {}):
-    print("WARN  decision.claude.timeout_ms has no patient variant: the Claude timeout recovery (UC-070 A3) "
+    print("WARN  decision.claude.timeout_ms has no patient variant: the Claude timeout recovery (UC-070 BR-003) "
           "cannot be flipped")
 
 # The optional second vendor (beat 6b) needs a model and a base URL variant the presenter adds.

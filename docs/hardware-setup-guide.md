@@ -539,9 +539,10 @@ sudo scripts/setup/install_hotspot.sh          # asks for the password twice
 The setup checks the Pi first and changes nothing when a check fails; with
 ufw or firewalld it prints the allow rules (re-run with
 `--firewall-rules-added` after adding them). It then brings the hotspot up for
-a short self-test while the cable stays in: join it from a phone to check the
-password. The fallback is armed only when the self-test passes, so re-run a
-refused setup until it passes. With a Wi-Fi client up on `wlan0`, re-run with
+20 s as a self-test while the cable stays in: join it from a phone during
+those 20 s to check the password. The fallback is armed only when the
+self-test passes. A refused re-run with the cable on a Pi that was already
+armed disarms it, so re-run until it passes. With a Wi-Fi client up on `wlan0`, re-run with
 `--pause-wifi-client`; when your SSH session runs over `wlan0`, use the cable
 LAN.
 

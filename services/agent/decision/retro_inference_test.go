@@ -319,7 +319,7 @@ func TestRetro_CaptureOnlyWhenNoBackend(t *testing.T) {
 	}
 	span := spans[0]
 	if v, ok := attrValue(span, AttrInferenceUsed); !ok || v.AsString() != DefaultInference {
-		t.Errorf("inference.used = %q (present=%v), want %q (UC-070 A5 step 2)", v.AsString(), ok, DefaultInference)
+		t.Errorf("inference.used = %q (present=%v), want %q (UC-042 A2)", v.AsString(), ok, DefaultInference)
 	}
 	if v, ok := attrValue(span, AttrInferenceFallback); !ok || v.AsString() != FallbackNoBackend {
 		t.Errorf("fallback_reason = %q (present=%v), want %q", v.AsString(), ok, FallbackNoBackend)

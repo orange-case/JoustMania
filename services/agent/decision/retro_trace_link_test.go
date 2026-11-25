@@ -33,6 +33,7 @@ func endedSessionWithTrace(traceID string) gamecontext.GameContext {
 // game.trace_id as an attribute, and the span itself stamps game.trace_id as a
 // queryable tag. The retro is a CONSUMER child of the game root span (same trace).
 // UC: UC-042 main
+// UC: UC-070 main step 3
 func TestRetroSpan_LinksToGameTrace(t *testing.T) {
 	const gameTrace = "4bf92f3577b34da6a3ce929d0e0e4736" // valid 16-byte hex trace id
 
