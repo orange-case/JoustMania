@@ -5,9 +5,7 @@
 // the two in step.
 //
 // There are no writer roles (architecture note D11): a write is validated
-// only against this registry, the game scope and the sync stream. A row's
-// writer list (writerLists) checks the self-declared writer label; it stops an
-// accidental writer, not one that claims an allowed label.
+// only against this registry, the game scope and the sync stream.
 package registry
 
 import (
@@ -120,9 +118,6 @@ type Policy struct {
 	// Required on a row that allows ScopeExperiment: the agent's experiment
 	// proposer shows it to the model next to the key, variants and range.
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
-	// Writers is the row's writer list, filled from writerLists at Parse;
-	// empty = any writer.
-	Writers []string `yaml:"-" json:"writers,omitempty"`
 }
 
 // killSwitches is the set of kill-switch flags ("set/key"): a persisted write
@@ -161,59 +156,43 @@ func (p *Policy) AppliesWhenPersistFails() bool {
 // a write carrying it came through the link's in-process path.
 const FlagsmithWriter = "flagsmith"
 
-// writerLists is the per-row writer list ("set/key" -> writer labels, flags.md
-// §13 "Writer list"): a write of such a row is accepted only from a writer in
-// its list. It is a Go table, not a registry.yaml attribute, because released
-// flag-service images parse the checkout's registry.yaml strictly and would
-// refuse a new key (#2403); a test keeps it in sync with flags.md. Each row
-// must be a stack overlay without persist outside interventions
+// flagsmithOnly is the set of Flagsmith-only flags ("set/key", #2705, FR-226,
+// flags.md §13 "Flagsmith only"): a write of one is accepted only from the
+// Flagsmith link's in-process path (writer FlagsmithWriter) and refused over
+// HTTP with 403 flagsmith_only, whatever writer label the caller sends. It is
+// a Go set, not a registry.yaml attribute, because released flag-service
+// images parse the checkout's registry.yaml strictly and would refuse a new
+// key (#2403). flags.md §13 lists the same set; a test keeps them in sync.
+// Each one must be a stack overlay row without persist outside interventions
 // (validatePolicy); a name without a row in the loaded registry is inert.
-var writerLists = map[string][]string{
-	"agent/goal.profile": {FlagsmithWriter, "menu"},
+var flagsmithOnly = map[string]bool{
+	"agent/goal.profile": true,
 }
 
-// WriterLists returns a copy of the writer-list table.
-func WriterLists() map[string][]string {
-	out := make(map[string][]string, len(writerLists))
-	for k, v := range writerLists {
-		out[k] = append([]string(nil), v...)
+// FlagsmithOnlyFlags returns the Flagsmith-only set as sorted "set/key" names.
+func FlagsmithOnlyFlags() []string {
+	out := make([]string, 0, len(flagsmithOnly))
+	for k := range flagsmithOnly {
+		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }
 
-// HasWriterList reports whether the row restricts its writers; false for nil
-// (a read-only baseline flag).
-func (p *Policy) HasWriterList() bool {
-	return p != nil && len(p.Writers) > 0
-}
-
-// FlagsmithOnly reports whether the row's writer list is exactly [flagsmith].
+// FlagsmithOnly reports whether the flag changes only from Flagsmith (the
+// link's in-process writes); false for nil (a read-only baseline flag).
 func (p *Policy) FlagsmithOnly() bool {
-	return p.HasWriterList() && len(p.Writers) == 1 && p.Writers[0] == FlagsmithWriter
+	return p != nil && flagsmithOnly[id(p.Set, p.Key)]
 }
 
-// WriterAllowed is the writer-list check: nil when writer may write the flag,
-// else 403 flagsmith_only for the list [flagsmith] and 403 writer_not_allowed
-// for any other list. The HTTP API refuses the label FlagsmithWriter before
-// this check, so only the Flagsmith link's in-process writes carry it.
+// WriterAllowed is the Flagsmith-only check (#2705): nil when writer may
+// write the flag, else 403 flagsmith_only. Only the Flagsmith link's
+// in-process writes carry FlagsmithWriter (the HTTP API refuses that label).
 func (p *Policy) WriterAllowed(writer string) *fserr.Error {
-	if !p.HasWriterList() || contains(p.Writers, writer) {
-		return nil
+	if p.FlagsmithOnly() && writer != FlagsmithWriter {
+		return fserr.Forbidden(fserr.FlagsmithOnly, "%s/%s changes only from Flagsmith (flags.md §13, Flagsmith only); no HTTP writer may write it", p.Set, p.Key)
 	}
-	if p.FlagsmithOnly() {
-		return fserr.Forbidden(fserr.FlagsmithOnly, "%s/%s changes only from Flagsmith (flags.md §13, writer list [flagsmith]); no HTTP writer may write it", p.Set, p.Key)
-	}
-	return fserr.Forbidden(fserr.WriterNotAllowed, "%s/%s is written only by %s (flags.md §13, writer list); writer %q is not one of them", p.Set, p.Key, strings.Join(p.Writers, ", "), writer)
-}
-
-// ClearedByWriterReset reports whether DELETE /{set}?writer=writer may clear
-// this row's overlays. The HTTP API never acts as the Flagsmith link, so a
-// reset labelled flagsmith skips every row with a list.
-func (p *Policy) ClearedByWriterReset(writer string) bool {
-	if !p.HasWriterList() {
-		return true
-	}
-	return writer != FlagsmithWriter && contains(p.Writers, writer)
+	return nil
 }
 
 // RealWriteNeedsNoRealGame reports whether a real-scope write of this flag is
@@ -280,10 +259,6 @@ func Parse(raw []byte, b *baseline.Baseline) (*Registry, error) {
 	}
 	r := &Registry{policies: map[string]*Policy{}}
 	for _, p := range doc.Flags {
-		p.Writers = append([]string(nil), writerLists[id(p.Set, p.Key)]...)
-		if len(p.Writers) == 0 {
-			p.Writers = nil
-		}
 		if err := validatePolicy(p, b); err != nil {
 			return nil, fmt.Errorf("registry: %s/%s: %w", p.Set, p.Key, err)
 		}
@@ -325,13 +300,8 @@ func validatePolicy(p *Policy, b *baseline.Baseline) error {
 	if p.Persist && (p.Kind != KindOverlay || !p.AllowsScope(ScopeStack)) {
 		return fmt.Errorf("persist needs kind overlay with scope stack")
 	}
-	if p.HasWriterList() && (p.Set == "interventions" || p.Kind != KindOverlay || len(p.Scopes) != 1 || p.Scopes[0] != ScopeStack || p.Persist) {
-		return fmt.Errorf("a row with a writer list (registry.writerLists) is kind overlay, scope [stack], no persist, outside interventions")
-	}
-	for i, w := range p.Writers {
-		if w == "" || contains(p.Writers[:i], w) {
-			return fmt.Errorf("writer list %q has an empty or repeated label", p.Writers)
-		}
+	if p.FlagsmithOnly() && (p.Set == "interventions" || p.Kind != KindOverlay || len(p.Scopes) != 1 || p.Scopes[0] != ScopeStack || p.Persist) {
+		return fmt.Errorf("a Flagsmith only row (registry.flagsmithOnly) is kind overlay, scope [stack], no persist, outside interventions")
 	}
 	if p.Kind == KindEvent {
 		if len(p.Scopes) != 1 || p.Scopes[0] != ScopeGame || p.Bounds.Payload == nil {

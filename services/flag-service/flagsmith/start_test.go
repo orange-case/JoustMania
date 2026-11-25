@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -587,13 +586,6 @@ func TestStartCreatesFeatures(t *testing.T) {
 			}
 		}
 		e.admin.mu.Unlock()
-		// A writer-list row (flags.md §13) is a feature like every row.
-		for name := range registry.WriterLists() {
-			_, key, _ := strings.Cut(name, "/")
-			if !slices.Contains(posts, key) {
-				t.Fatalf("writer-list row %s was not created as a feature (created %v)", name, posts)
-			}
-		}
 		ids := e.l.IDs()
 		ids.Lock()
 		defer ids.Unlock()

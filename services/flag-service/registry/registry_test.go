@@ -52,8 +52,8 @@ type mdRow struct {
 	set, key, kind, bounds string
 	scopes                 []string
 	persist                bool
-	realWrite              bool     // the row names `real_write: no_live_real_game`
-	writers                []string // the row's writer list: its writer cell starts with **Flagsmith only** or **Writers: a, b**
+	realWrite              bool // the row names `real_write: no_live_real_game`
+	flagsmithOnly          bool // the row's writer column starts with **Flagsmith only** (#2705)
 }
 
 var backticked = regexp.MustCompile("`([^`]+)`")
@@ -109,38 +109,13 @@ func parseFlagsMD(t *testing.T) []mdRow {
 		for _, k := range keys {
 			rows = append(rows, mdRow{
 				set: set, key: k[1], kind: cells[1], scopes: scopes, bounds: cells[3],
-				persist:   strings.HasPrefix(cells[4], "**yes**"),
-				realWrite: strings.Contains(strings.Join(cells[5:], "|"), "`real_write: "+RealWriteNoLiveRealGame+"`"),
-				writers:   writersCell(cells),
+				persist:       strings.HasPrefix(cells[4], "**yes**"),
+				realWrite:     strings.Contains(strings.Join(cells[5:], "|"), "`real_write: "+RealWriteNoLiveRealGame+"`"),
+				flagsmithOnly: len(cells) > 5 && strings.HasPrefix(cells[5], "**Flagsmith only**"),
 			})
 		}
 	}
 	return rows
-}
-
-// writersCell parses the writer list marker at the start of a §13 row's writer
-// cell: **Flagsmith only** is [flagsmith], **Writers: a, b** is [a b], none is nil.
-func writersCell(cells []string) []string {
-	if len(cells) <= 5 {
-		return nil
-	}
-	cell := cells[5]
-	if strings.HasPrefix(cell, "**Flagsmith only**") {
-		return []string{FlagsmithWriter}
-	}
-	rest, ok := strings.CutPrefix(cell, "**Writers: ")
-	if !ok {
-		return nil
-	}
-	list, _, ok := strings.Cut(rest, "**")
-	if !ok {
-		return nil
-	}
-	out := strings.Split(list, ",")
-	for i := range out {
-		out[i] = strings.TrimSpace(out[i])
-	}
-	return out
 }
 
 var rangeRe = regexp.MustCompile(`^(int )?(-?[0-9.]+) to (-?[0-9.]+)$`)
@@ -226,8 +201,8 @@ func TestRegistryMatchesFlagsMD(t *testing.T) {
 			if p.RealWriteNeedsNoRealGame() != row.realWrite {
 				t.Errorf("%s: real_write %q in registry, flags.md names it: %v", row.key, p.RealWrite, row.realWrite)
 			}
-			if !reflect.DeepEqual(p.Writers, row.writers) {
-				t.Errorf("%s: writer list %q in registry.writerLists, %q in flags.md (writer cell **Flagsmith only** / **Writers: ...**)", row.key, p.Writers, row.writers)
+			if p.FlagsmithOnly() != row.flagsmithOnly {
+				t.Errorf("%s: Flagsmith only %v in registry.flagsmithOnly, %v in flags.md (writer column **Flagsmith only**)", row.key, p.FlagsmithOnly(), row.flagsmithOnly)
 			}
 			checkBounds(t, row, p)
 		}
