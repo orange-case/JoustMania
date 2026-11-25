@@ -1,6 +1,6 @@
 # Telemetry
 
-> Technical spec. Part of the [spec tree](../README.md). State: `main` @ 2b8d979c (2026-10-16, includes PRs #1256, #1257, #1259, #1261, #1265, #1297, #1303, #1307, #1309, #1312, #1315, #1324, #1308 (#1258 pattern games), #1332 (#1325 span parents), #1378 (validator spans removed), #1351 (#1326 budget), #1333 (#1327 one `player_death` event), #1375 (rollout dry run), #1376 (deaths counter, input lag), #1377 (quiet-cycle fallbacks) , #1387 (`audio.silent`), #1370 (`game.outcome`), #1379 (game-state gauge labels), #1392 (telemetry contract test), #1397 (infra tests), #1418 (per-player entry pruning) and #1421 (cross-game window)). The metric catalog (§6.2) and the span-event inventory were generated from the code at 84c3ba15 by script; remaining `file:line` references were re-based to 84c3ba15 and then to 2b8d979c.
+> Technical spec. Part of the [spec tree](../README.md).
 > Telemetry is the agent's only view of the game (C-001), so span names, attribute keys, metric names and the
 > log lines below are a **contract**: the agent, the dashboard SPA, Grafana and integration tests match
 > on them. Change a name here first.
@@ -562,8 +562,6 @@ again or an archetype is skipped (UC-046 BR-015); a rerun after a real game pree
 The experiment's conclusion (`outcome` event) reports the timeout count and rate per arm and whether one arm timed out
 clearly more often (UC-046 BR-013), followed by the `agent_ended` count and rate per arm when any game ended that way;
 both rates are over the arm's pattern games that ended with a sample (`winner`, `tie`, `timeout`, `agent_ended`).
-
-**Planned (#1055, UC-047, Open):** a calibrated archetype adds `pattern.calibration_id` (the evidence record id; empty for flag-file parameters) to `experiment.pattern_pinned` (one value per pinned name, same order as `pattern.archetypes`), `experiment.pattern_game` and `experiment.pattern_game_ended`, and to the same journal events; `pattern.params_digest` stays the digest of the parameters the game ran. A calibration validation game is a one-shot `agent.shadow_game.run` with `pattern.calibration_id`; its group is in the evidence record. No new metric or span; the calibration outcome is the evidence record (services.md, agent).
 
 **Liveness check (BR-008):** the runner asks the agent's telemetry multiplexer at the game's start, once per
 second while it runs and at its end whether another partition reports `game_active` with an update in the last

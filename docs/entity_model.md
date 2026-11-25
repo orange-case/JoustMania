@@ -7,7 +7,7 @@
 > files and the agent's experiment journal. "Primary Key" therefore means the natural identifier.
 > Source of each entity is given in its description. Entities and attributes that exist only in service memory
 > say so ("In-memory, lost on restart"); everything else is a protobuf message, a flag value or a journal
-> record. State: `main` @ a74d0d77 (agent-cluster `/spec-review` of 2026-10-20, #1679; flag service delivered by #1417).
+> record.
 
 ## Entity Relationship Diagram
 
@@ -258,7 +258,7 @@ A named value of a flag.
 
 ### MUTABLE_FLAG_POLICY
 
-Delivered by #1417 (epic #1407, UC-053, FR-132). One row of the flag service's mutable-flag registry
+Realises UC-053, FR-132. One row of the flag service's mutable-flag registry
 (`services/flag-service/registry.yaml`, [flags.md §13](specs/flags.md#13-mutable-flag-registry)): a flag that may change at
 runtime, within which bounds, and whether a write may persist it. In-memory once loaded at start, lost on restart (the
 file is the source). A flag without a policy is read-only baseline. There are no writer roles (local game, architecture note D11).
@@ -278,7 +278,7 @@ file is the source). A flag without a policy is read-only baseline. There are no
 
 ### GAME_SCOPE
 
-Delivered by #1417 (FR-135). The flag service's record of one live game (`services/flag-service/state/games.go`), registered by the game coordinator
+Realises FR-135. The flag service's record of one live game (`services/flag-service/state/games.go`), registered by the game coordinator
 at admission and dropped at the game's end, by a reconcile call of its coordinator instance, or after the
 maximum game age (1 h) since it was last seen (registered or reconciled, #2217). In-memory, lost on restart.
 
@@ -298,7 +298,7 @@ maximum game age (1 h) since it was last seen (registered or reconciled, #2217).
 
 ### FLAG_OVERLAY
 
-Delivered by #1417 (FR-134, FR-136 to FR-138). One runtime value the flag service holds on top of the baseline, in memory
+Realises FR-134, FR-136 to FR-138. One runtime value the flag service holds on top of the baseline, in memory
 (C-030, lost on restart); a stack overlay written with `"persist": true` (registry `persist`) is also written to the service's
 own state file and restored at the next start.
 
