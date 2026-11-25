@@ -66,7 +66,7 @@ def _helper_uuid() -> str:
     return match.group(1)
 
 
-@pytest.mark.uc("UC-061", br=["BR-003"])
+@pytest.mark.uc("UC-061", flow="main", steps=[3])  # stage-host.md SH-13
 def test_profile_is_a_5ghz_access_point_on_wlan0_that_never_autoconnects():
     profile = _ini(TEMPLATE)
     assert profile["connection"]["id"] == "joustmania-hotspot"
@@ -81,7 +81,7 @@ def test_profile_is_a_5ghz_access_point_on_wlan0_that_never_autoconnects():
     assert profile["wifi"]["powersave"] == "2"
 
 
-@pytest.mark.uc("UC-061", br=["BR-004", "BR-005"])
+@pytest.mark.uc("UC-061", flow="main", steps=[3])  # stage-host.md SH-13
 def test_profile_is_wpa2_psk_ccmp_only_with_pmf_explicit_and_no_password():
     sec = _ini(TEMPLATE)["wifi-security"]
     assert sec["key-mgmt"] == "wpa-psk"
@@ -94,7 +94,7 @@ def test_profile_is_wpa2_psk_ccmp_only_with_pmf_explicit_and_no_password():
     assert sec["psk"] == "@PSK@"
 
 
-@pytest.mark.uc("UC-061", br=["BR-002"])
+@pytest.mark.uc("UC-061", flow="main", steps=[3])  # stage-host.md SH-13
 def test_profile_shares_10_42_0_1_without_a_default_route_or_ipv6():
     profile = _ini(TEMPLATE)
     assert profile["ipv4"]["method"] == "shared"
@@ -103,7 +103,7 @@ def test_profile_shares_10_42_0_1_without_a_default_route_or_ipv6():
     assert profile["ipv6"]["method"] == "disabled"
 
 
-@pytest.mark.uc("UC-061", br=["BR-003"])
+@pytest.mark.uc("UC-061", flow="main", steps=[3])  # stage-host.md SH-13
 def test_helper_allows_only_non_dfs_5ghz_channels_and_defaults_to_one():
     text = HELPER.read_text()
     default = re.search(r"\bC_CHANNEL=(\d+)", text)
@@ -115,7 +115,7 @@ def test_helper_allows_only_non_dfs_5ghz_channels_and_defaults_to_one():
     assert set(allowed.group(1).split("|")) == NON_DFS_5GHZ
 
 
-@pytest.mark.uc("UC-061", flow="A6", br=["BR-006"])
+@pytest.mark.uc("UC-061", flow="main", steps=[1])  # stage-host.md SH-11, SH-15
 def test_unit_has_no_start_limit_a_bounded_start_and_runs_the_root_owned_copy():
     unit = _ini(UNIT)
     assert unit["Unit"]["StartLimitIntervalSec"] == "0"
@@ -126,7 +126,7 @@ def test_unit_has_no_start_limit_a_bounded_start_and_runs_the_root_owned_copy():
     assert "NetworkManager.service" in unit["Unit"]["After"]
 
 
-@pytest.mark.uc("UC-061", flow="main", br=["BR-006"])
+@pytest.mark.uc("UC-061", flow="main", steps=[1])  # stage-host.md SH-15
 def test_unit_is_started_only_by_the_timer_and_the_hook_never_by_a_boot_target():
     # A oneshot WantedBy=multi-user.target would hold boot until the check ends
     # (minutes while it waits); the timer's OnBootSec starts the first check
@@ -135,14 +135,14 @@ def test_unit_is_started_only_by_the_timer_and_the_hook_never_by_a_boot_target()
     assert _ini(TIMER)["Install"]["WantedBy"] == "timers.target"
 
 
-@pytest.mark.uc("UC-061", br=["BR-006"])
+@pytest.mark.uc("UC-061", flow="main", steps=[1])  # stage-host.md SH-15
 def test_hotspot_and_game_units_never_reference_each_other():
     assert "joustmania.service" not in _code(UNIT)
     assert "joustmania.service" not in _code(TIMER)
     assert "hotspot" not in _code(GAME_UNIT)
 
 
-@pytest.mark.uc("UC-061", flow="A7")
+@pytest.mark.uc("UC-061", flow="main", steps=[1])  # stage-host.md SH-11
 def test_timer_rechecks_every_60s_from_boot():
     timer = _ini(TIMER)["Timer"]
     assert timer["OnUnitActiveSec"] == "60s"
@@ -150,14 +150,14 @@ def test_timer_rechecks_every_60s_from_boot():
     assert _ini(TIMER)["Install"]["WantedBy"] == "timers.target"
 
 
-@pytest.mark.uc("UC-061", flow="A6")
+@pytest.mark.uc("UC-061", flow="main", steps=[1])  # stage-host.md SH-11
 def test_dispatcher_hook_only_starts_never_restarts():
     code = _code(HOOK)
     assert "systemctl start --no-block joustmania-hotspot.service" in code
     assert "restart" not in code
 
 
-@pytest.mark.uc("UC-061", flow="A6", br=["BR-006"])
+@pytest.mark.uc("UC-061", flow="main", steps=[1])  # stage-host.md SH-11, SH-15
 def test_units_verify_when_systemd_analyze_is_available(tmp_path):
     if shutil.which("systemd-analyze") is None:
         pytest.skip("systemd-analyze not installed")
@@ -178,7 +178,7 @@ def test_units_verify_when_systemd_analyze_is_available(tmp_path):
     assert not problems, "\n".join(problems)
 
 
-@pytest.mark.uc("UC-061", br=["BR-004"])
+@pytest.mark.uc("UC-061", flow="main", steps=[3])  # stage-host.md SH-13
 def test_no_tracked_keyfile_holds_a_password():
     tracked = subprocess.run(
         ["git", "-C", str(ic.REPO_ROOT), "ls-files", "*.nmconnection*"],
@@ -281,7 +281,7 @@ def _assert_round_trip(parsed) -> None:
         assert uuid == _helper_uuid()
 
 
-@pytest.mark.uc("UC-061", br=["BR-004"])
+@pytest.mark.uc("UC-061", flow="main", steps=[3])  # stage-host.md SH-13
 def test_render_round_trips_hostile_passwords_through_glib_gkeyfile(tmp_path):
     """GLib's own parser, the one NetworkManager uses. CI installs python3-gi for the
     Telemetry Contract job, so there a missing GLib is a failure, not a skip."""
@@ -307,7 +307,7 @@ def test_render_round_trips_hostile_passwords_through_glib_gkeyfile(tmp_path):
     _assert_round_trip(parsed)
 
 
-@pytest.mark.uc("UC-061", br=["BR-004"])
+@pytest.mark.uc("UC-061", flow="main", steps=[3])  # stage-host.md SH-13
 def test_render_round_trips_hostile_passwords_through_gkeyfile_rules(tmp_path):
     """The same round trip with a GKeyFile-rules reader, so it runs without GLib too."""
     rendered = _rendered_hostile(tmp_path)
@@ -324,7 +324,7 @@ def test_render_round_trips_hostile_passwords_through_gkeyfile_rules(tmp_path):
     )
 
 
-@pytest.mark.uc("UC-061", br=["BR-004"])
+@pytest.mark.uc("UC-061", flow="main", steps=[3])  # stage-host.md SH-13
 @pytest.mark.parametrize(
     "password",
     [

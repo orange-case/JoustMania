@@ -118,9 +118,9 @@ var (
 	}
 )
 
-// UC: UC-070 main
+// UC: UC-040 A13
 func TestTalk_SwitchToJevBeat(t *testing.T) {
-	t.Run("UC-070/main step 2 agent-backend jev: calm play is noop, a near-death game acts", func(t *testing.T) {
+	t.Run("UC-040/A13 agent-backend jev: calm play is noop, a near-death game acts", func(t *testing.T) {
 		jev := newScriptedBackend(flags.DecisionBackendJev, calmNoop)
 		snap := talkJevSnapshot(time.Second)
 		snap.Decision.Backend = flags.DecisionBackendRules
@@ -155,9 +155,9 @@ func TestTalk_SwitchToJevBeat(t *testing.T) {
 	})
 }
 
-// UC: UC-070 A2
+// UC: UC-040 A2 A5
 func TestTalk_JevDownThresholdBeatOnClaude(t *testing.T) {
-	t.Run("UC-070/A2 jev down: rules decide, then the threshold beat runs on claude's global threshold", func(t *testing.T) {
+	t.Run("UC-040/A2 jev down: rules decide, then the threshold beat runs on claude's global threshold", func(t *testing.T) {
 		jev := newScriptedBackend(flags.DecisionBackendJev, networkErr)
 		claude := newScriptedBackend(flags.DecisionBackendClaude, claudeAct)
 		h := talkHarness(t, talkJevSnapshot(time.Second), jev, claude)
@@ -197,7 +197,7 @@ func TestTalk_JevDownThresholdBeatOnClaude(t *testing.T) {
 	})
 }
 
-// UC: UC-070 A3 BR-002
+// UC: UC-040 A2 A6
 func TestTalk_ClaudeTimeoutPatientBeat(t *testing.T) {
 	claudeSnap := func(timeout time.Duration) flags.Snapshot {
 		s := talkJevSnapshot(time.Second)
@@ -206,7 +206,7 @@ func TestTalk_ClaudeTimeoutPatientBeat(t *testing.T) {
 		return s
 	}
 
-	t.Run("UC-070/A3 a claude timeout falls back; the patient timeout lets the next call land", func(t *testing.T) {
+	t.Run("UC-040/A2 a claude timeout falls back; the patient timeout lets the next call land", func(t *testing.T) {
 		release := make(chan struct{})
 		claude := newScriptedBackend(flags.DecisionBackendClaude, claudeAct)
 		claude.blockUntil(release, claudeAct)
@@ -234,7 +234,7 @@ func TestTalk_ClaudeTimeoutPatientBeat(t *testing.T) {
 		})
 	})
 
-	t.Run("UC-070/A3 a call that still times out after the kill switch is discarded, not a fallback", func(t *testing.T) {
+	t.Run("UC-040/A6 a call that still times out after the kill switch is discarded, not a fallback", func(t *testing.T) {
 		be := newFakeDecideBackend(claudeAct)
 		h, span := fireAndMutateSnapshot(t, be, claudeSnap(20*time.Millisecond), 20*time.Millisecond, func(h remoteHarness) {
 			h.flags.mutate(func(s *flags.Snapshot) { s.Enabled = false })
@@ -278,9 +278,9 @@ func TestTalk_SecondVendorBeat(t *testing.T) {
 	})
 }
 
-// UC: UC-070 A10
+// UC: UC-040 A28
 func TestTalk_AnswerLandsBeforeKillSwitch(t *testing.T) {
-	t.Run("UC-070/A10 the landed answer keeps its outcome; no later cycle decides until on", func(t *testing.T) {
+	t.Run("UC-040/A28 the landed answer keeps its outcome; no later cycle decides until on", func(t *testing.T) {
 		claude := newScriptedBackend(flags.DecisionBackendClaude, claudeAct)
 		snap := talkJevSnapshot(time.Second)
 		snap.Decision.Backend = flags.DecisionBackendClaude
@@ -319,7 +319,7 @@ func TestTalk_AnswerLandsBeforeKillSwitch(t *testing.T) {
 
 // UC: UC-070 main Post-S-1
 func TestTalk_EveryBeatShowsItsObservable(t *testing.T) {
-	t.Run("UC-070/Post-S-1 steps 1-7 in one run, each with its invoke_agent row", func(t *testing.T) {
+	t.Run("UC-070/Post-S-1 the beats in one run, each with its invoke_agent row", func(t *testing.T) {
 		jev := newScriptedBackend(flags.DecisionBackendJev, actShield)
 		claude := newScriptedBackend(flags.DecisionBackendClaude, claudeAct)
 		snap := talkJevSnapshot(time.Second)

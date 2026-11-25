@@ -22,7 +22,6 @@ import (
 
 // TestRetro_TransportErrorSetsSpanError: a backend whose Infer errors sets Error status
 // (description = error type) on the retro span, and the error text appears nowhere on it.
-// UC: UC-070 A5
 // UC: UC-042 A9
 func TestRetro_TransportErrorSetsSpanError(t *testing.T) {
 	resetRetroResponseRef()

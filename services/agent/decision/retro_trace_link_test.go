@@ -32,7 +32,7 @@ func endedSessionWithTrace(traceID string) gamecontext.GameContext {
 // agent.llm.retro span whose target trace_id is that game trace, the link carries
 // game.trace_id as an attribute, and the span itself stamps game.trace_id as a
 // queryable tag. The retro is a CONSUMER child of the game root span (same trace).
-// UC: UC-070 main
+// UC: UC-042 main
 func TestRetroSpan_LinksToGameTrace(t *testing.T) {
 	const gameTrace = "4bf92f3577b34da6a3ce929d0e0e4736" // valid 16-byte hex trace id
 
@@ -207,7 +207,7 @@ func TestRetroSpan_NoLinkWhenTraceInvalid(t *testing.T) {
 // TestRetroSpan_GameChildWhenExperimentGone: an experiment-bound game whose experiment
 // has no live root span (torn down) falls to the next tier, the game root span, like
 // agent.game.summary does; it does not drop to its own root.
-// UC: UC-070 main
+// UC: UC-042 main
 func TestRetroSpan_GameChildWhenExperimentGone(t *testing.T) {
 	const gameTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
 	rc, sr := recordingRetro(t, retroFlagSnapshot())

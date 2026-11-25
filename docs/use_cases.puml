@@ -229,4 +229,15 @@ note bottom of UC050
   code kept, not audited
 end note
 
+note bottom of UC061
+  UC-060 and UC-061 keep their goal and the flows of
+  FR-180, FR-182 and FR-184; the host-OS detail is the
+  ops spec docs/specs/stage-host.md (#2785)
+end note
+
+note bottom of UC070
+  The beats live in the talk runbook
+  (docs/talk/two-standards-runbook.md §3, #2785)
+end note
+
 @enduml

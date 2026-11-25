@@ -137,7 +137,6 @@ func slotsLeft(b *llmBudget, now time.Time, limit int) int {
 // no agent.llm.retro span, only agent_llm_gated_total{reason=llm_budget_exhausted}
 // and the agent.llm.retro_gated log.
 // UC: UC-042 A2 BR-001
-// UC: UC-070 A4
 // NFR: NFR-011
 func TestRetroCapture_DrawsFromGlobalBudget(t *testing.T) {
 	be := &countingText{}
@@ -428,7 +427,7 @@ func TestRetroCapture_SkipsEmptySession(t *testing.T) {
 
 // TestRetroCapture_BackendAttribution (#1234): with a text backend wired, the retro
 // span and log report the backend's model and name and carry NO fallback reason.
-// UC: UC-070 main
+// UC: UC-042 main
 func TestRetroCapture_BackendAttribution(t *testing.T) {
 	const configured = "claude-test"
 	rc, sr := recordingRetro(t, retroFlagSnapshot())
@@ -586,7 +585,6 @@ func TestRetroCapture_StubDefaultCaptureOnly(t *testing.T) {
 // capture-only: no model call, no budget slot, and the skip reason on the span.
 // UC: UC-042 A8
 // UC: UC-045 main BR-002
-// UC: UC-070 A5
 func TestRetroCapture_KillSwitchOffNoCallNoCharge(t *testing.T) {
 	be := &countingText{}
 	rc, sr, budget, now := budgetedRetro(t, 2, be)

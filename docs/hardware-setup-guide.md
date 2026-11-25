@@ -522,11 +522,11 @@ powered hub.
 
 At a venue without a wired network the Pi opens its own password-protected
 5 GHz Wi-Fi hotspot, so the Host can open the dashboard, Jaeger and Grafana
-([UC-061](use_cases/UC-061.md)). It is a fallback only: it comes up when the
-uplink (eth0) has had no connection for about 20 s (60 s while eth0 is still
-connecting, and never in the first 45 s after boot) and goes down again 15 s
-after the cable is back. There is no internet over it: the game runs in
-convention play mode (the agent on the rules backend).
+([UC-061](use_cases/UC-061.md)). It is a fallback only, with no internet over
+it: the game runs in convention play mode (the agent on the rules backend).
+The exact behaviour (delays, states, setup checks, password handling, the ACT
+LED cue) is specified in [specs/stage-host.md](specs/stage-host.md) §6; this
+section is the how-to.
 
 ### Set it up (at home, with the cable in)
 
@@ -536,28 +536,19 @@ sudo scripts/setup/install_hotspot.sh          # asks for the password twice
 # options: --ssid "JoustMania" --channel 36|40|44|48 --uplink eth0 --psk-file FILE --pause-wifi-client
 ```
 
-The setup checks the Pi first and changes nothing when a check fails: the
-Wi-Fi country (set and kept for the next boot), the 5 GHz channel allowed for
-an access point, `dnsmasq-base` (installed when missing), no other DNS or DHCP
-server, and ufw or firewalld (it prints the exact allow rules; re-run with
-`--firewall-rules-added` after adding them). Then it brings the hotspot up for
-20 s as a self-test while the cable stays in: join it from a phone during those
-20 s to check the password. Only when the self-test passes is the fallback armed
-(`enabled=yes` in `/etc/joustmania/hotspot.conf`); a refused or interrupted
-setup leaves `enabled=no`. That includes a re-run with the cable on a Pi that
-was already armed: a refused re-run disarms it, so re-run until it passes.
-With a Wi-Fi client up on `wlan0` the self-test refuses (it needs the radio):
-re-run with `--pause-wifi-client` (or answer `y` to the prompt) and the setup
-disconnects that Wi-Fi connection for the self-test and reconnects the same one
-afterwards, also when the self-test fails. It refuses when your SSH session
-itself runs over `wlan0`; use the cable LAN then.
-A re-run over the hotspot itself never disarms it and keeps the old profile
-when it is refused or your session drops.
+The setup checks the Pi first and changes nothing when a check fails; with
+ufw or firewalld it prints the allow rules (re-run with
+`--firewall-rules-added` after adding them). It then brings the hotspot up for
+a short self-test while the cable stays in: join it from a phone to check the
+password. The fallback is armed only when the self-test passes, so re-run a
+refused setup until it passes. With a Wi-Fi client up on `wlan0`, re-run with
+`--pause-wifi-client`; when your SSH session runs over `wlan0`, use the cable
+LAN.
 
 The password: 8 to 63 characters, printable ASCII, no space and no backslash.
-It is stored only in the root-owned NetworkManager profile. Re-run the setup to
-change it, the SSID or the channel; over the hotspot itself your session drops
-and you rejoin with the new password (a channel change needs the cable in).
+Re-run the setup to change it, the SSID or the channel; over the hotspot itself
+your session drops and you rejoin with the new password (a channel change needs
+the cable in).
 
 Undo: `sudo scripts/setup/install_hotspot.sh --remove` (or
 `sudo /usr/local/lib/joustmania/joustmania-hotspot remove` from any checkout).
@@ -577,9 +568,8 @@ After an upgrade that changes the hotspot files, `joustmania-upgrade` says
    profile before the show.
 
 About 8 devices can join; the hotspot is for the Host and crew, not the
-audience. It uses 5 GHz only, so it does not share the controllers' 2.4 GHz
-air; check the controllers' report gaps with the hotspot on during the on-Pi
-check (#2088, NFR-008).
+audience. The on-Pi check list is in [specs/stage-host.md](specs/stage-host.md)
+§6 (#2088).
 
 ---
 
