@@ -625,7 +625,7 @@ class TestTraitorEndGameImpl:
         game.start_time = game_clock.now()
         game.state = GameState.RUNNING
         game.running = True
-        assert await game._check_win_condition()  # latches the result (UC-022 BR-005)
+        assert await game._check_win_condition()  # latches the result (UC-020 BR-007)
         game.running = False
 
         await game._end_game_impl()
@@ -665,7 +665,7 @@ class TestTraitorEndGameImpl:
         game.start_time = game_clock.now() - 45
         game.state = GameState.RUNNING
         game.running = True
-        assert await game._check_win_condition()  # latches the result (UC-022 BR-005)
+        assert await game._check_win_condition()  # latches the result (UC-020 BR-007)
         game.running = False
 
         await game._end_game_impl()
@@ -702,7 +702,7 @@ class TestTraitorEndGameImpl:
         game.start_time = game_clock.now()
         game.state = GameState.RUNNING
         game.running = True
-        assert await game._check_win_condition()  # latches the result (UC-022 BR-005)
+        assert await game._check_win_condition()  # latches the result (UC-020 BR-007)
         game.running = False
 
         await game._end_game_impl()
@@ -956,7 +956,7 @@ class TestUC022PostF1:
 
 
 class TestTraitorBR005ForceEndNoWinner:
-    """UC-022 BR-005 (#2003): only a latched result is announced; a force-end before it declares none."""
+    """UC-020 BR-007 (#2003): only a latched result is announced; a force-end before it declares none."""
 
     @pytest.fixture
     def fast_rainbow(self):
@@ -1034,7 +1034,7 @@ class TestTraitorBR005ForceEndNoWinner:
         assert "reason" not in ended[0]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-022", br=["BR-005"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     async def test_force_end_while_running_declares_no_winner(self, fast_rainbow):
         """A force-end before any result: no traitor_winner, rainbow, voice or wait; game_ended none + reason."""
@@ -1048,7 +1048,7 @@ class TestTraitorBR005ForceEndNoWinner:
         self._assert_no_winner(game, events, "force_ended", "operator")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-022", br=["BR-005"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     async def test_force_end_after_the_decision_keeps_the_winner(self, fast_rainbow):
         """A force-end during the hold after a win keeps the winner, its effects and outcome completed."""
@@ -1063,7 +1063,7 @@ class TestTraitorBR005ForceEndNoWinner:
         self._assert_winner(game, events, 0, winners)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-022", br=["BR-005"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     async def test_same_tick_force_end_during_the_win_publish_keeps_the_winner(self, fast_rainbow):
         """Same tick, decision first: a force-end landing while traitor_winner is published keeps the winner."""
@@ -1084,7 +1084,7 @@ class TestTraitorBR005ForceEndNoWinner:
         self._assert_winner(game, events, 0, winners)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-022", br=["BR-005"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     async def test_same_tick_force_end_before_the_win_check_declares_no_winner(self, fast_rainbow):
         """Same tick, force-end first: the lethal kill's win check then latches and publishes nothing."""
@@ -1101,7 +1101,7 @@ class TestTraitorBR005ForceEndNoWinner:
         self._assert_no_winner(game, events, "force_ended", "operator")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-022", br=["BR-005"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
     async def test_force_end_between_the_force_end_check_and_the_latch_declares_no_winner(self, fast_rainbow):
         """A cross-thread force-end lands after the win check's force_ended check, before the latch."""
@@ -1122,7 +1122,7 @@ class TestTraitorBR005ForceEndNoWinner:
         self._assert_no_winner(game, events, "force_ended", "operator")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-022", br=["BR-005"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     async def test_force_ended_outcome_overrides_a_latched_team(self, fast_rainbow):
         """Defence in depth: a force_ended outcome declares no winner even when a team is latched."""
         game, events = await self._running_game()
@@ -1136,7 +1136,7 @@ class TestTraitorBR005ForceEndNoWinner:
         self._assert_no_winner(game, events, "force_ended", "operator")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-022", br=["BR-005"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     async def test_stream_end_before_a_decision_declares_no_winner(self, fast_rainbow):
         """A gameplay stream that ends before any result: winning_team none, outcome completed, no effects."""
         game, events = await self._running_game()

@@ -44,9 +44,12 @@ async def test_kill_switch_mid_flight_discards(flag_service, ...):
 
 - A test whose purpose is a pre- or postcondition uses `cond=["Pre-1"]` / `["Post-F-1"]` instead of
   `flow=` (see `/pytest-test`); never `flow="main"` for it.
-- A journey that chains several use cases (a `docs/test_cases/TC-XXX-*.md` from the aiup-core `test-case`
-  skill) carries one `uc` marker per use-case flow it exercises, each with `tc="TC-XXX"`, and comments
-  `# Step <n>: <name>` per row of the TC Flow table.
+- A journey that chains several use cases carries one `uc` marker per use-case flow it exercises, each
+  with `tc="TC-XXX"`, and a `# Step <n>: <name>` comment per step. TC documents
+  (`docs/test_cases/TC-XXX-*.md`) exist only for manual or hardware journeys (#2799): an automated
+  journey is the test itself, so do not write a new TC document for it. Take a new id from the index in
+  `docs/test_cases/README.md` (the next free number, retired ids included) and add it to its
+  "Automated journeys" table.
 - Module name: extend the existing `test_<area>_flow.py` / `test_<area>_e2e.py` that covers the area;
   a new module only for a new area.
 

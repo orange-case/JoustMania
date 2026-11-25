@@ -290,7 +290,7 @@ Game event types actually published are listed in [UC-020](../use_cases/UC-020.m
 | `/` | dashboard | yes | SPA | `services/envoy/envoy.yaml:121-123` |
 | `/` | connect-proxy, only when `/app/static` exists in its container (not mounted in the stock compose files) | no (envoy sends `/` to the dashboard) | Static dashboard files (`http.FileServer`) | `services/connect-proxy/main.go` (`main`, "Serve static files for dashboard") |
 | `/joustmania/*` | connect-proxy | yes (3600 s timeout) | Connect RPCs | `services/envoy/envoy.yaml:37-39` |
-| `/canary/{python,rust}`, `/canary/rollback`, `/canary/status` | connect-proxy | **no** (falls through to the dashboard, D-B3) | Manual backend canary via `bluetooth_backend` (python only with the python adapter loaded, else 409, UC-052 A3) | `services/connect-proxy/canary.go:13-16` |
+| `/canary/{python,rust}`, `/canary/rollback`, `/canary/status` | connect-proxy | **no** (falls through to the dashboard, #1741) | Manual backend canary via `bluetooth_backend` (python only with the python adapter loaded, else 409, UC-052 A3) | `services/connect-proxy/canary.go:13-16` |
 | `/experiments`, `/experiments/{id}` | agent :13134 | yes | Experiment dossier (JSON / HTML) | `services/agent/dossier.go` (`handleList`, mux registration) |
 | `/healthz` | agent :13134 | no | Liveness | `services/agent/server.go:startHealthServer` |
 | `/health` | connect-proxy; envoy direct 200 | yes | Liveness | `services/connect-proxy/main.go:main` |

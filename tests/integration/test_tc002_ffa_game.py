@@ -1,5 +1,5 @@
 """
-TC-002: FFA game to a winner on mock controllers (docs/test_cases/TC-002-ffa-mock-game-to-winner.md).
+TC-002: FFA game to a winner on mock controllers (journey document retired by #2799; this test is the journey).
 
 One journey through the real stack on four unreserved mock controllers: the
 menu lobby, the web ``select_game`` command, ready-up, an FFA game played to a
