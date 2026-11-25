@@ -79,8 +79,7 @@
       "variants": {
         "span_event": "span_event",
         "span": "span",
-        "log_event": "log_event",
-        "both": "both"
+        "log_event": "log_event"
       },
       "defaultVariant": "span_event"
     },

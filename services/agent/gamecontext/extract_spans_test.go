@@ -77,13 +77,13 @@ func TestApplySpans_GameKindAttrAloneIsRecognized(t *testing.T) {
 	}
 }
 
-// UC: UC-041 main BR-001
-func TestApplySpans_DeathEventAppendsElimination(t *testing.T) {
+// UC: UC-041 BR-009
+func TestApplySpans_DeathEventIsNoElimination(t *testing.T) {
 	s := newTestStore()
 	td := spanWith(map[string]string{"player.serial": "A"}, []string{"player_death"})
 	s.ApplySpans(td)
-	if seq := s.Snapshot().Session.EliminationSequence; len(seq) != 1 || seq[0] != "A" {
-		t.Fatalf("elimination seq = %v, want [A]", seq)
+	if seq := s.Snapshot().Session.EliminationSequence; len(seq) != 0 {
+		t.Fatalf("elimination seq = %v, want none: the gauge is the only elimination source", seq)
 	}
 }
 
@@ -92,7 +92,7 @@ func TestApplySpans_DedupeAgainstMetricPath(t *testing.T) {
 	s := newTestStore()
 	// Metric-path elimination first.
 	s.ApplyMetrics(metricsWith(metricEliminationOrder, 1, serial("A")))
-	// Span confirmation for same serial must not double-append.
+	// A player_death span event adds nothing next to it.
 	s.ApplySpans(spanWith(map[string]string{"player.serial": "A"}, []string{"player_death"}))
 	if seq := s.Snapshot().Session.EliminationSequence; len(seq) != 1 {
 		t.Fatalf("elimination seq = %v, want 1 (deduped)", seq)
@@ -223,11 +223,12 @@ func TestApplySpans_ShieldChargeSpanIsIgnored(t *testing.T) {
 }
 
 // momentSpan is a coordinator moment span (game.death_warning, game.player_death,
-// game.intervention)
-// as a child of the player span; it carries the player, the game and the kind, and
-// a warning span can end after the player's death (UC-100 BR-010).
+// game.intervention) as a child of the player span; like every moment record it
+// carries moment.id, the player, the game and the kind, and a warning span can
+// end after the player's death (UC-100 BR-010).
 func momentSpan(name, serial, gameID string) ptrace.Traces {
 	td := spanWith(map[string]string{
+		"moment.id":     gameID + "/" + serial + "/1",
 		"player.serial": serial,
 		"game.id":       gameID,
 		"game.kind":     "FFA",
@@ -240,7 +241,8 @@ func momentSpan(name, serial, gameID string) ptrace.Traces {
 // UC: UC-100 BR-010 Post-F-2
 // UC: UC-041 BR-008
 func TestApplySpans_MomentSpansAreIgnored(t *testing.T) {
-	for _, name := range []string{"game.death_warning", "game.player_death"} {
+	// The rule is the moment.id attribute, not a list of names: a new moment needs no agent change.
+	for _, name := range []string{"game.death_warning", "game.player_death", "game.some_new_moment"} {
 		assertMomentSpanIgnored(t, "UC-100/BR-010 ", name)
 	}
 

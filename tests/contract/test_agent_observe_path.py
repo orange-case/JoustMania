@@ -70,20 +70,22 @@ def test_storage_exporters_are_independent_of_the_agent_exporter(
         assert key not in store, f"{storage} must not copy the agent's {key}"
 
 
-# --- Moment log events to the agent (#2658 slice 2, FR-218, UC-041 A7, BR-009) ---
+# --- The agent's log events (#2722, FR-250, UC-100 BR-012, UC-041 A8, BR-009) ---
+
+_AGENT = {"orangecase.audience": "agent"}
 
 
-@pytest.mark.uc("UC-041", flow="A7", steps=[1], cond=["Pre-1"])
+@pytest.mark.uc("UC-041", flow="A8", steps=[1], cond=["Pre-1"])
 def test_only_the_logs_agent_pipeline_sends_logs_to_the_agent(collector):
-    """UC-041 Pre-1, A7 step 1: moment log events reach the agent through their own
+    """UC-041 Pre-1, A8 step 1: the agent's log events reach it through their own
     pipeline (filter before batch); the logs pipeline keeps ending in the debug sink."""
     pipelines = collector["service"]["pipelines"]
     assert pipelines["logs/agent"] == {
         "receivers": ["otlp"],
         "processors": [
             "memory_limiter",
-            "filter/agent_moments",
-            "batch/moments",
+            "filter/agent_events",
+            "batch/agent_events",
             "resource",
         ],
         "exporters": ["otlp/agent"],
@@ -95,84 +97,28 @@ def test_only_the_logs_agent_pipeline_sends_logs_to_the_agent(collector):
         if name.split("/")[0] == "logs" and "otlp/agent" in p["exporters"]
     ]
     assert to_agent == ["logs/agent"]
-    assert collector["processors"]["batch/moments"]["timeout"] == "1s"
+    assert collector["processors"]["batch/agent_events"]["timeout"] == "1s"
 
 
-@pytest.mark.uc("UC-041", flow="A7", steps=[1])
-@pytest.mark.parametrize(
-    ("event_name", "attributes", "resource", "dropped"),
-    [
-        ("death_warning", {"moment.id": "g/P1/1"}, {}, False),
-        ("player_death", {"moment.id": "g/P1/2"}, {}, False),
-        ("", {}, {}, True),
-        ("", {"moment.id": "g:P1:x:1"}, {}, True),
-        ("intervention", {"moment.id": "g:intervention:1"}, {}, True),
-        ("death_warning", {}, {}, True),
-        ("player_death", {"moment.id": "g/P1/2"}, {"orangecase.synthetic": True}, True),
-        (
-            "player_death",
-            {"moment.id": "g/P1/2"},
-            {"orangecase.synthetic": "true"},
-            True,
-        ),
-        (
-            "player_death",
-            {"moment.id": "g/P1/2"},
-            {"orangecase.synthetic": False},
-            False,
-        ),
-    ],
-    ids=[
-        "warning-kept",
-        "death-kept",
-        "ordinary-dropped",
-        "ordinary-with-id-dropped",
-        "intervention-dropped",
-        "warning-without-id-dropped",
-        "synthetic-bool-dropped",
-        "synthetic-string-dropped",
-        "not-synthetic-kept",
-    ],
-)
-def test_agent_moments_filter_passes_only_moment_log_events(
-    collector, event_name, attributes, resource, dropped
-):
-    """UC-041 A7 step 1, BR-009, C-001: the collector forwards only death_warning and
-    player_death records that carry a moment id, and never synthetic data (#2577)."""
-    conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
-    assert ic.drops_log(conditions, event_name, attributes, resource) is dropped
-
-
+@pytest.mark.uc("UC-041", br=["BR-009"])
 @pytest.mark.uc("UC-101", br=["BR-010"], cond=["Post-F-2"])
+@pytest.mark.parametrize("marked", [False, True], ids=["unmarked", "marked"])
 @pytest.mark.parametrize(
-    "intervention_id",
-    ["0f1e2d3c4b5a6978", None],
-    ids=["with-id", "without-id"],
+    "event_name", ["death_warning", "player_death", "intervention"]
 )
-def test_intervention_log_event_never_reaches_the_agent(collector, intervention_id):
-    """UC-101 BR-010, Post-F-2: an intervention moment sent as a log event (shape `log_event`
-    or `both`) carries a real moment id of the form `<game.id>/<serial>/<n>` and the moment's
-    identity attributes, like a warning, and still never passes `filter/agent_moments`, so the
-    agent's inputs are those of a game without the challenge. The span half (the
-    `game.intervention` span is ignored) is the Go test `TestApplySpans_InterventionMomentSpanIsIgnored`."""
+def test_no_moment_log_event_reaches_the_agent(collector, event_name, marked):
+    """UC-041 BR-009, C-001: the agent reads deaths from the elimination-order gauge, so no
+    moment log event passes, in any shape and with or without the agent marker; the
+    agent's inputs are those of a game without the challenge (UC-101 Post-F-2)."""
     attributes: dict[str, object] = {
-        "moment.id": "game_2665/P1/3",
-        "intervention.type": "grant_shield",
+        "moment.id": "game_2786/P1/3",
         "player.serial": "P1",
-        "game.id": "game_2665",
+        "game.id": "game_2786",
         "game.kind": "real",
+        **(_AGENT if marked else {}),
     }
-    if intervention_id is not None:
-        attributes["intervention.id"] = intervention_id
-    conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
-    assert ic.drops_log(conditions, "intervention", attributes, {}) is True
-    # The same record named as a warning passes: the drop is by name, not by a missing id.
-    assert ic.drops_log(conditions, "death_warning", attributes, {}) is False
-
-
-# --- Agent-only lifecycle log events (#2722, FR-250, UC-100 BR-012, UC-041 A8) ---
-
-_AGENT = {"orangecase.audience": "agent"}
+    conditions = collector["processors"]["filter/agent_events"]["log_conditions"]
+    assert ic.drops_log(conditions, event_name, attributes, {}) is True
 
 
 @pytest.mark.uc("UC-100", br=["BR-012"])
@@ -187,12 +133,10 @@ _AGENT = {"orangecase.audience": "agent"}
         ("game.start", {"orangecase.audience": "gateway"}, {}, True),
         ("game.start", _AGENT, {"orangecase.synthetic": True}, True),
         ("game.end", _AGENT, {"orangecase.synthetic": "true"}, True),
-        ("player_death", {"moment.id": "g/P1/2", **_AGENT}, {}, False),
-        ("death_warning", {"moment.id": "g/P1/1", **_AGENT}, {}, False),
-        ("player_death", _AGENT, {}, True),
+        ("game.start", _AGENT, {"orangecase.synthetic": False}, False),
         ("", _AGENT, {}, True),
+        ("", {}, {}, True),
         ("game.round", _AGENT, {}, True),
-        ("intervention", {"moment.id": "g/P1/3", **_AGENT}, {}, True),
     ],
     ids=[
         "marked-start-kept",
@@ -202,21 +146,19 @@ _AGENT = {"orangecase.audience": "agent"}
         "other-audience-dropped",
         "synthetic-bool-start-dropped",
         "synthetic-string-end-dropped",
-        "marked-death-copy-kept",
-        "marked-warning-copy-kept",
-        "marked-death-without-id-dropped",
+        "not-synthetic-kept",
         "marked-ordinary-dropped",
+        "ordinary-dropped",
         "marked-other-name-dropped",
-        "marked-intervention-dropped",
     ],
 )
-def test_agent_moments_filter_passes_lifecycle_records_only_when_marked(
+def test_agent_events_filter_passes_lifecycle_records_only_when_marked(
     collector, event_name, attributes, resource, dropped
 ):
-    """UC-041 A8 step 1, UC-100 BR-012: `game.start` and `game.end` reach the agent only
-    with `orangecase.audience` = `agent`; a marked moment copy passes like a moment log
-    event; the marker lets no other record through and synthetic data stays out (#2577)."""
-    conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
+    """UC-041 A8 step 1, UC-100 BR-012, C-001: `game.start` and `game.end` reach the agent
+    only with `orangecase.audience` = `agent`; the marker lets no other record through and
+    synthetic data stays out (#2577)."""
+    conditions = collector["processors"]["filter/agent_events"]["log_conditions"]
     assert ic.drops_log(conditions, event_name, attributes, resource) is dropped
 
 
@@ -230,9 +172,9 @@ def test_agent_moments_filter_passes_lifecycle_records_only_when_marked(
     ],
     ids=["marked-kept", "unmarked-dropped", "synthetic-dropped"],
 )
-def test_agent_moments_filter_passes_phase_start_only_when_marked(
+def test_agent_events_filter_passes_phase_start_only_when_marked(
     collector, attributes, resource, dropped
 ):
     """UC-041 BR-004: `game.phase.start` carries the span ids to the agent, marked like `game.start`."""
-    conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
+    conditions = collector["processors"]["filter/agent_events"]["log_conditions"]
     assert ic.drops_log(conditions, "game.phase.start", attributes, resource) is dropped

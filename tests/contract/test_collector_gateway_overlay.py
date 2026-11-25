@@ -235,10 +235,10 @@ def test_every_moment_record_path_reaches_the_gateway_pipelines(merged, pipeline
     `traces/gateway`, the log event in `logs/gateway`; neither pipeline drops, rewrites or
     narrows records beyond what its in-case twin does (health-check spans only; on
     `logs/gateway` also the records marked for the agent only, BR-012), and the
-    moment-only filter of the agent (`filter/agent_moments`) is on `logs/agent` alone."""
+    agent-only filter of the agent (`filter/agent_events`) is on `logs/agent` alone."""
     processors = merged["service"]["pipelines"][pipeline]["processors"]
-    assert "filter/agent_moments" not in processors, (
-        "the moment filter would cut every other log record from the gateway copy"
+    assert "filter/agent_events" not in processors, (
+        "the agent filter would cut every other log record from the gateway copy"
     )
     unknown = [
         p for p in processors if p not in GATEWAY_PROCESSOR_KINDS and not _is_batch(p)
@@ -256,13 +256,13 @@ def test_every_moment_record_path_reaches_the_gateway_pipelines(merged, pipeline
 def test_only_the_agent_pipeline_filters_moments_and_the_gateway_filter_drops_health_checks_only(
     merged,
 ):
-    """The moment filter exists once, on `logs/agent`; the one filter of `traces/gateway`
+    """The agent filter exists once, on `logs/agent`; the one filter of `traces/gateway`
     drops gRPC health-check spans by `rpc.service` and nothing named like a moment."""
     pipelines = merged["service"]["pipelines"]
     users = {
         name
         for name, spec in pipelines.items()
-        if "filter/agent_moments" in spec["processors"]
+        if "filter/agent_events" in spec["processors"]
     }
     assert users == {"logs/agent"}
     filters = [
@@ -389,7 +389,7 @@ def test_an_unreachable_gateway_cannot_touch_the_in_case_pipelines_or_the_agent(
     in-case exporter and no in-case pipeline names the gateway exporter, so an unreachable
     gateway (its own retries and its own bounded, dropping queue) holds back no batch the
     in-case exporters or the agent path send, and the agent still gets the traces, metrics and
-    moment log events through the same pipelines as without the gateway."""
+    its log events through the same pipelines as without the gateway."""
     pipelines = merged["service"]["pipelines"]
     in_case_exporters = set(base["exporters"])
     for name in GATEWAY_PIPELINES:

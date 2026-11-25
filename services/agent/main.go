@@ -1174,8 +1174,6 @@ func (c *components) buildPipeline(listenAddr, healthAddr string) *serverCompone
 	staleEnds := newGameEndStaleCounter(globalMeterProvider())
 	c.mux = gamecontext.NewMultiplexer(c.newStore(staleEnds))
 	c.mux.SetOwnService(c.ownService)
-	// #2658 slice 3: every moment record read, by moment, shape and outcome.
-	c.mux.SetMomentObserver(countMoments(newMomentsReceivedCounter(globalMeterProvider())))
 	// #2096 (UC-043 A17): the shield reads of a shadow arm game resolve its arm.
 	c.agentFlags.SetGameAttrs(gameAttrsFrom(c.mux))
 	// UC-046 A8: a pattern game is non-exact when any other game is live.

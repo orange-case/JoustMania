@@ -6,7 +6,7 @@ Adaptive-difficulty agent that turns live telemetry into intervention decisions.
 
 The Agent sits between JoustMania's **observation layer** (OpenTelemetry) and its
 **control layer** ([OpenFeature](https://openfeature.dev/) / flagd). It receives
-spans, metrics and moment log events from the OTel Collector over OTLP, accumulates a rolling
+spans, metrics and its own lifecycle log events from the OTel Collector over OTLP, accumulates a rolling
 `GameContext`, gates on whether the context is worth acting on, and calls stub
 decision hooks that will eventually drive feature-flag changes.
 
@@ -26,8 +26,8 @@ driven by metrics.
 
 **Spans are late by design.** `player_lifecycle` spans only flush at game end,
 and even then sit behind the ~10 s trace batch window. They are used for
-**audit/confirmation** and the elimination order. A span batch still wakes the
-evaluation and adds span-derived state (elimination order, `game.mode`,
+**audit/confirmation**. A span batch still wakes the
+evaluation and adds span-derived state (`game.mode`,
 `game.kind`, experiment id/arm) that decisions may read, so that state lags the
 game (UC-041 BR-001).
 
@@ -877,12 +877,11 @@ answers "is the agent receiving metrics?" directly, and the `outcome` split
 distinguishes "metrics arrive but trigger nothing" from "metrics aren't arriving"
 — the exact ambiguity that made the metric-driven loop look span-driven.
 
-**Moments read (#2658 slice 3, UC-041 A7, BR-009):** `agent_moments_received_total`
-(`Int64Counter`, `services/agent/moments.go`) counts every game moment record the agent reads, labeled
-`moment` (`player_death`|`death_warning`), `shape` (`span_event`|`log_event`) and `outcome`
-(`counted`|`duplicate`|`ignored`|`dropped`); 7 reachable series. It is the deterministic evidence that
-the log path delivered a moment (a NonStop respawn death changes no game context). In the `span` moment
-shape no `player_death` series moves: the agent ignores moment spans (UC-100 BR-010).
+**Deaths (UC-041 BR-008, BR-009):** the agent learns of an elimination only from
+`game_player_elimination_order`, which the coordinator sets in every moment shape and only for a
+death that takes the player out. It reads no booth moment record: a span carrying `moment.id` is
+skipped like `game.shield_charge`, and the `player_death` span event and moment log events change
+nothing (telemetry.md appendix A).
 
 **Lifecycle safety (#923 goleak):** each follow-up runs in a goroutine tracked on a
 `WaitGroup` (joined by `AwaitInflight` at shutdown) and bounded by the agent root
