@@ -8,7 +8,7 @@ the first. Off, nothing is sent.
 Real SDK tracer and logger providers with in-memory exporters (not the global ones).
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from opentelemetry.sdk._logs import LoggerProvider
@@ -19,7 +19,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.sdk.trace.sampling import ALWAYS_OFF
 
 from lib import otel_logging
-from services.game_coordinator.games import base
+from services.game_coordinator.games import base, fight_club
+from services.game_coordinator.games.fight_club import FightClubGame
 from services.game_coordinator.games.zombie import ZombieGame
 from services.game_coordinator.tests.conftest import EventCollector, MockControllerManagerService
 from services.game_coordinator.tests.test_game_cycle_span_publish import _fast_ffa_game
@@ -121,13 +122,44 @@ async def test_mode_without_game_cycle_sends_only_gameplay_phase(sdk):
         initial_players=[type("P", (), {"serial": f"mock_controller_{i}"})() for i in range(3)],
     )
     game.agent_log_events = True
-    game._game_loop = AsyncMock()
 
-    with patch.object(game, "_run_tracer", return_value=sdk.tracer):
+    with (
+        patch.object(ZombieGame, "_game_loop", autospec=True),
+        patch.object(game, "_run_tracer", return_value=sdk.tracer),
+    ):
         await game._run_streamed_gameplay()
 
     (record,) = sdk.records()
     gameplay = sdk.span("gameplay_phase")
     assert record.attributes["game.phase.span"] == "gameplay_phase"
     assert record.attributes["game.id"] == "zombie_phase_start"
+    assert (record.trace_id, record.span_id) == (gameplay.context.trace_id, gameplay.context.span_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
+async def test_fight_club_sends_only_gameplay_phase(sdk, monkeypatch):
+    game = FightClubGame(
+        controller_manager_client=MockControllerManagerService(num_controllers=3),
+        event_publisher=EventCollector().publish,
+        audio_client=None,
+        game_id="fight_club_phase_start",
+        initial_players=[type("P", (), {"serial": f"mock_controller_{i}"})() for i in range(3)],
+    )
+    game.agent_log_events = True
+    game.running = True
+    # Fight Club opens gameplay_phase on its module tracer, not _run_tracer().
+    monkeypatch.setattr(fight_club, "tracer", sdk.tracer)
+
+    with (
+        patch.object(FightClubGame, "_handle_warmup_disconnects", autospec=True, return_value=False),
+        patch.object(FightClubGame, "_start_round", autospec=True),
+        patch.object(FightClubGame, "_game_loop", autospec=True),
+    ):
+        assert await game._run_streamed_gameplay() is True
+
+    (record,) = sdk.records()
+    gameplay = sdk.span("gameplay_phase")
+    assert record.attributes["game.phase.span"] == "gameplay_phase"
+    assert record.attributes["game.id"] == "fight_club_phase_start"
     assert (record.trace_id, record.span_id) == (gameplay.context.trace_id, gameplay.context.span_id)
