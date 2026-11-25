@@ -119,6 +119,7 @@ func TestArmCalibration_EmptyArmHasNoBrier(t *testing.T) {
 		}
 	}
 }
+
 // recordingVerdict records every Summary it is asked about and promotes once
 // every arm has n samples.
 type recordingVerdict struct {

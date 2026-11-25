@@ -563,10 +563,10 @@ type components struct {
 	predictions     *prediction.Book
 	experimentFlags *experimentFlagLookup
 	// flagBoard holds every partition's effective flag set for GET /experiments/state.
-	flagBoard *decision.FlagBoard
-	loops     *decision.LoopSet
-	infraStore      *infracontext.Store
-	infraLoop       *decision.InfraLoop
+	flagBoard  *decision.FlagBoard
+	loops      *decision.LoopSet
+	infraStore *infracontext.Store
+	infraLoop  *decision.InfraLoop
 
 	retro     *decision.RetroCoordinator
 	summaries *gamesummary.Coordinator

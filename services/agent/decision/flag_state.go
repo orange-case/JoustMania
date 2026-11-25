@@ -22,17 +22,17 @@ type FlagState struct {
 	// game_trace_correlation ids arrived.
 	TraceID string `json:"trace_id"`
 	// UpdatedAtMs is the cycle's time, epoch ms on the agent's clock.
-	UpdatedAtMs             int64    `json:"updated_at_ms"`
-	Enabled                 bool     `json:"enabled"`
-	Objectives              string   `json:"objectives"`
-	InterventionsAllowed    string   `json:"interventions_allowed"`
-	InterventionsEnabled    bool     `json:"interventions_enabled"`
-	BatteryThreshold        int      `json:"battery_threshold"`
-	MaxInterventionsPerMin  int      `json:"max_interventions_per_minute"`
-	DecisionBackend         string   `json:"decision_backend"`
-	ActConfidenceThreshold  float64  `json:"act_confidence_threshold"`
-	ExperimentsEnabled      bool     `json:"experiments_enabled"`
-	LLMEligibleGameKinds    []string `json:"llm_eligible_game_kinds"`
+	UpdatedAtMs            int64    `json:"updated_at_ms"`
+	Enabled                bool     `json:"enabled"`
+	Objectives             string   `json:"objectives"`
+	InterventionsAllowed   string   `json:"interventions_allowed"`
+	InterventionsEnabled   bool     `json:"interventions_enabled"`
+	BatteryThreshold       int      `json:"battery_threshold"`
+	MaxInterventionsPerMin int      `json:"max_interventions_per_minute"`
+	DecisionBackend        string   `json:"decision_backend"`
+	ActConfidenceThreshold float64  `json:"act_confidence_threshold"`
+	ExperimentsEnabled     bool     `json:"experiments_enabled"`
+	LLMEligibleGameKinds   []string `json:"llm_eligible_game_kinds"`
 }
 
 // MaxFlagStates bounds the games a FlagBoard keeps (the newest by cycle time).
