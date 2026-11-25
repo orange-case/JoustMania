@@ -12,6 +12,11 @@ name: CI
 #     Exception: the two service-test jobs (the slowest) skip a push to main
 #     (`service_tests_run`): the merge queue already ran them on that commit, and
 #     a push to main only builds, publishes and signals the release.
+#   - Service tiers and the e2e job on a PR (#2768): not run. The merge queue is
+#     their only gate (it tests the merged tree anyway), so CI Complete, and so
+#     queue entry, never waits for them. workflow_dispatch or `ci-full` runs them
+#     early. A failure costs one queue run plus a re-arm (0 of the 20 queue runs
+#     before #2768 failed in a tier).
 #   - `ci-full` PR label or workflow_dispatch: additionally forces ALL image builds.
 #     ci.yml does NOT trigger on `labeled` (#1527): GitHub takes required checks
 #     from the newest run of this workflow on the head SHA, so a label-only run
@@ -21,10 +26,18 @@ name: CI
 #
 # Merge queue (#1555): `merge_group` runs test the queued commit (main plus the
 # PRs ahead of it) like a main push: every check job runs (run_all_checks),
-# including the e2e job and service-tests, while image builds stay
-# path-filtered against merge_group.base_sha and build amd64 only without
-# pushing (as on a PR). SonarCloud and retag-skipped do not run in the queue.
-# "CI Complete" reports on the merge-group head, which is the required check.
+# except the e2e job and the two service-test jobs (path-filtered, below), while
+# image builds stay path-filtered against merge_group.base_sha and build amd64
+# only without pushing (as on a PR). SonarCloud and retag-skipped do not run in
+# the queue. "CI Complete" reports on the merge-group head, which is the
+# required check.
+#
+# The two service-test jobs (#2770) run in the queue only when the entry's diff
+# matches the `service_tests` filter: exactly 'false' skips them, an empty or
+# unknown output runs them. Safe for the same reason as the e2e skip below
+# (this entry's diff only, grouping strategy ALLGREEN); revisit both together.
+# A filter gap lets a change merge without the tiers, so the filter must cover
+# everything the tiers read (harness imports, the jobs' scripts).
 #
 # The full-stack e2e job (#1583) runs only where `changes.e2e_required` is true:
 #   merge_group                       unless the queued group is docs-only
@@ -43,8 +56,8 @@ name: CI
 #                                     ALLGREEN (e.g. HEADGREEN), revisit this
 #                                     skip.
 #   workflow_dispatch                 always
-#   pull_request                      with `ci-full`, or a non-docs diff touching
-#                                     a risky path (`e2e_paths` filter)
+#   pull_request                      only with `ci-full` (#2768: the queue is
+#                                     the e2e gate; no path trigger)
 #   push to main                      never: the queue already ran them on this
 #                                     exact commit; builds/publish/retag no
 #                                     longer wait for integration-test there
@@ -111,8 +124,7 @@ jobs:
       connect_proxy_tests: ${{ steps.f.outputs.connect_proxy_tests }}
       non_docs: ${{ steps.nondocs.outputs.non_docs }}
       # #1583: run the e2e job (merge_group unless the whole group is
-      # docs-only, workflow_dispatch, ci-full, or a non-docs PR touching an
-      # `e2e_paths` file)
+      # docs-only, workflow_dispatch, ci-full; no PR path trigger since #2768)
       e2e_required: ${{ steps.force.outputs.e2e }}
       # #1583: e2e builds EVERY stack image at HEAD (full path) instead of
       # pulling :latest and overlaying source (fast path). True on merge_group
@@ -125,9 +137,11 @@ jobs:
       # run_all_checks: all test/lint jobs, but builds stay path-filtered (main push)
       force_full: ${{ steps.force.outputs.full }}
       run_all_checks: ${{ steps.force.outputs.checks }}
-      # service_tests_run: the two service-test jobs (the slowest, ~15 min each). They
+      # service_tests_run: the two service-test jobs (the slowest, ~7-9 min per shard). They
       # gate the merge queue, which tests exactly the commit a push to main then lands,
-      # so a push to main skips them (false); elsewhere service_tests || run_all_checks.
+      # so a push to main skips them (false). A plain PR skips them too (#2768);
+      # workflow_dispatch and ci-full opt in; merge_group: service_tests only, unless
+      # exactly 'false' (#2770).
       service_tests_run: ${{ steps.force.outputs.service_tests_run }}
       python_services_matrix: ${{ steps.matrices.outputs.python_services }}
       docker_build_matrix: ${{ steps.matrices.outputs.docker_build }}
@@ -271,6 +285,7 @@ jobs:
               - 'proto/**'
               - 'pyproject.toml'
               - 'uv.lock'
+              - 'services/__init__.py'  # package init of every services.<svc> import
               - 'services/flagd/**'
               - 'services/flag-service/**'
               - 'services/game_coordinator/**'
@@ -283,10 +298,14 @@ jobs:
               - 'tests/contract/flagd_harness.py'
               - 'tests/contract/flagd_rpc_retry.py'  # imported by the service-tier probes (#2184)
               - 'tests/contract/infra_config.py'
+              - 'tests/integration/__init__.py'
               - 'tests/integration/helpers.py'
+              - 'tests/integration/jaeger_v3.py'  # imported by helpers.py
               - 'tests/integration/flag_service.py'
               - 'docker-compose.yml'
               - 'Makefile'
+              - 'scripts/ci/docker-pull-retry.sh'
+              - 'scripts/ci/apt-install.sh'
               - '.github/workflows/ci.yml'
             # #1491: dashboard tsc + vitest and connect-proxy vet + test, run
             # without waiting for integration-test (the image builds that also
@@ -337,19 +356,6 @@ jobs:
               - 'services/dashboard/**'
             otel_collector:
               - 'images/otel-collector/**'
-            # #1583: risky for the full stack, so a PR touching them runs the
-            # e2e before the queue does: compose files, any image
-            # definition, the e2e suite itself (conftest, helpers), and the
-            # collector / envoy config the stack mounts.
-            e2e_paths:
-              - 'docker-compose*.yml'
-              - '**/Dockerfile*'
-              - 'tests/integration/**'
-              - 'services/otel-collector/**'
-              - 'images/otel-collector/**'
-              - 'services/envoy/**'
-              - 'services/flagd/**'
-              - '.github/workflows/ci.yml'
             integration_deps:
               # root pyproject.toml is a deps-fingerprint input
               # (scripts/ci/deps-fingerprint.sh), so it must force fresh images
@@ -396,7 +402,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PAYLOAD_CI_FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci-full') }}
-          E2E_PATHS: ${{ steps.f.outputs.e2e_paths }}
           NON_DOCS: ${{ steps.nondocs.outputs.non_docs }}
           INTEGRATION_DEPS: ${{ steps.f.outputs.integration_deps }}
           SERVICE_TESTS: ${{ steps.f.outputs.service_tests }}
@@ -413,8 +418,8 @@ jobs:
           full="${{ github.event_name == 'workflow_dispatch' }}"
           # merge_group gates main exactly like a push to main (#1555)
           checks="${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'merge_group' }}"
-          # #1583: the e2e job gates the merge queue; on PRs only with ci-full or
-          # a non-docs diff touching a risky path; never on a push to main.
+          # #1583: the e2e job gates the merge queue; on PRs only with ci-full (#2768);
+          # never on a push to main.
           # Merge queue: skipped only for a docs-only group (NON_DOCS exactly
           # 'false'; empty/unknown fails closed to running e2e). base_sha is
           # the parent of the group commit, so the diff is this entry's PR
@@ -425,9 +430,6 @@ jobs:
             e2e=true
           fi
           if [ "$ci_full" = true ]; then full=true; checks=true; e2e=true; fi
-          if [ "${{ github.event_name }}" = pull_request ] && [ "$E2E_PATHS" = true ] && [ "$NON_DOCS" = true ]; then
-            e2e=true
-          fi
           # e2e full path (every image built at HEAD): merge_group and dispatch
           # always; elsewhere with ci-full or a deps change (fast path otherwise).
           e2e_full_build="${{ github.event_name == 'merge_group' }}"
@@ -439,11 +441,15 @@ jobs:
             echo "e2e=$e2e"
             echo "e2e_full_build=$e2e_full_build"
           } >> "$GITHUB_OUTPUT"
-          # Service tests: never on a push to main (the merge queue ran them on that very
-          # commit); otherwise when their paths changed or every check runs.
+          # Service tests: the merge queue gates them (#2768); a PR runs them only with ci-full
+          # or dispatch, a push to main never (the queue ran them on that very commit).
           service_tests_run=false
-          if [ "${{ github.event_name }}" != push ] && { [ "$SERVICE_TESTS" = true ] || [ "$checks" = true ]; }; then
+          if [ "${{ github.event_name }}" = merge_group ] || [ "${{ github.event_name }}" = workflow_dispatch ] || [ "$ci_full" = true ]; then
             service_tests_run=true
+          fi
+          # #2770: in the queue only on this entry's service_tests paths (ALLGREEN, as e2e).
+          if [ "${{ github.event_name }}" = merge_group ] && [ "$SERVICE_TESTS" = false ]; then
+            service_tests_run=false
           fi
           echo "service_tests_run=$service_tests_run (event=${{ github.event_name }}, service_tests=$SERVICE_TESTS, run_all_checks=$checks)"
           echo "service_tests_run=$service_tests_run" >> "$GITHUB_OUTPUT"
@@ -965,15 +971,30 @@ jobs:
   # and menu from source at HEAD as subprocesses, a fresh flag plane per stack
   # (go-built flag service + one flagd container), fake audio; the AGENT
   # composition adds the go-built agent and a fake OpenAI backend (#1600). No image build.
-  # Path-filtered on PRs, always in the merge queue (run_all_checks), skipped on a push to
-  # main (the queue tested that commit; service_tests_run). tests/service/README.md.
+  # Merge queue (the gate, path-filtered #2770), dispatch and ci-full only: skipped on a plain
+  # PR (#2768) and on a push to main (the queue tested that commit); service_tests_run.
+  # tests/service/README.md.
+  # Two shards on separate runners (#2769): `agents` runs AGENT_SHARD_FILES, `rest` the rest
+  # of the tier minus those and the Flagsmith files, so a new test file lands in `rest`.
   service-tests:
-    name: Service Tests
+    name: Service Tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: [changes]
     if: needs.changes.outputs.service_tests_run == 'true'
-    # ~7 min locally with the agent journeys (#1600), plus the first go builds
-    # and the rust-hid build for its live flag test (#1713).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [agents, rest]
+    env:
+      # The slowest agent journeys, ~7 min of the ~14 min serial run (#2769).
+      AGENT_SHARD_FILES: >-
+        tests/service/test_agent_flag_live.py
+        tests/service/test_tc011_shadow_experiment.py
+        tests/service/test_tc008_remote_backend_routing.py
+        tests/service/test_tc012_pattern_game_replay.py
+        tests/service/test_tc006_agent_blocked_by_host.py
+    # ~7 min per shard, plus the first go builds and the rust-hid build for its
+    # live flag test (#1713).
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1029,20 +1050,26 @@ jobs:
         run: |
           set +e -o pipefail
           log="$RUNNER_TEMP/service-tests.log"
-          # The Flagsmith link journeys run in their own job (flagsmith-service-tests, #2592).
-          make test-service PYTEST_EXTRA="--durations=15 --ignore=tests/service/test_flagsmith_link.py --ignore=tests/service/test_flagsmith_sync.py" 2>&1 | tee "$log"
+          if [ "${{ matrix.shard }}" = agents ]; then
+            make test-service SERVICE_TESTS="$AGENT_SHARD_FILES" PYTEST_EXTRA="--durations=15" 2>&1 | tee "$log"
+          else
+            # The Flagsmith link journeys run in their own job (flagsmith-service-tests, #2592).
+            ignores="--ignore=tests/service/test_flagsmith_link.py --ignore=tests/service/test_flagsmith_sync.py"
+            for f in $AGENT_SHARD_FILES; do ignores="$ignores --ignore=$f"; done
+            make test-service PYTEST_EXTRA="--durations=15 $ignores" 2>&1 | tee "$log"
+          fi
           status=$?
           echo "make test-service exit=$status"
           if [ "$status" -ne 0 ]; then
             if grep -qE '^(FAILED|ERROR) ' "$log"; then
               grep -E '^(FAILED|ERROR) ' "$log" | while IFS= read -r line; do
-                echo "::error title=Service Tests (exit $status)::$line"
+                echo "::error title=Service Tests ${{ matrix.shard }} (exit $status)::$line"
               done
             else
-              echo "::error title=Service Tests (exit $status)::no FAILED/ERROR line; see the log tail"
+              echo "::error title=Service Tests ${{ matrix.shard }} (exit $status)::no FAILED/ERROR line; see the log tail"
             fi
             {
-              echo "### Service Tests failed (exit $status)"
+              echo "### Service Tests (${{ matrix.shard }}) failed (exit $status)"
               echo '```'
               grep -E '^(FAILED|ERROR) |^=+ .*in [0-9.]+s' "$log" || tail -n 40 "$log"
               echo '```'
@@ -1053,14 +1080,28 @@ jobs:
   # The Flagsmith link journeys (UC-054, UC-055, TC-021, TC-022, #2592): the service tier's
   # flag service and coordinator against the in-process fake Flagsmith. Their own job, in
   # parallel with service-tests (which --ignores them), so Service Tests time is unchanged;
-  # same filter (service_tests), required through CI Complete.
+  # same gate (service_tests_run), required through CI Complete.
+  # Three shards (#2769): the sync file alone took ~11 min, so it is split by two
+  # complementary -k expressions; nothing can be lost or run twice.
   flagsmith-service-tests:
-    name: Flagsmith Service Tests
+    name: Flagsmith Service Tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: [changes]
     if: needs.changes.outputs.service_tests_run == 'true'
-    # Two stacks, flag service restarts and 5 s polls: ~15 min locally (WSL), plus the
-    # flag service go build; Service Tests runs in parallel, so the pipeline waits for the longer.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: link
+            tests: tests/service/test_flagsmith_link.py
+            select: ''
+          - shard: sync-a
+            tests: tests/service/test_flagsmith_sync.py
+            select: conflict or refus
+          - shard: sync-b
+            tests: tests/service/test_flagsmith_sync.py
+            select: not (conflict or refus)
+    # Flag service restarts and 5 s polls: ~6-7 min per shard, plus the flag service go build.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1081,22 +1122,24 @@ jobs:
       # #1612: the failing tests as annotations and in the job summary, as Service Tests.
       - name: Run Flagsmith link journeys
         shell: bash
+        env:
+          SELECT: ${{ matrix.select }}
         run: |
           set +e -o pipefail
           log="$RUNNER_TEMP/flagsmith-service-tests.log"
-          make test-service SERVICE_TESTS="tests/service/test_flagsmith_link.py tests/service/test_flagsmith_sync.py" PYTEST_EXTRA="--durations=15" 2>&1 | tee "$log"
+          make test-service SERVICE_TESTS="${{ matrix.tests }}" PYTEST_EXTRA="--durations=15" TEST="$SELECT" 2>&1 | tee "$log"
           status=$?
           echo "make test-service exit=$status"
           if [ "$status" -ne 0 ]; then
             if grep -qE '^(FAILED|ERROR) ' "$log"; then
               grep -E '^(FAILED|ERROR) ' "$log" | while IFS= read -r line; do
-                echo "::error title=Flagsmith Service Tests (exit $status)::$line"
+                echo "::error title=Flagsmith Service Tests ${{ matrix.shard }} (exit $status)::$line"
               done
             else
-              echo "::error title=Flagsmith Service Tests (exit $status)::no FAILED/ERROR line; see the log tail"
+              echo "::error title=Flagsmith Service Tests ${{ matrix.shard }} (exit $status)::no FAILED/ERROR line; see the log tail"
             fi
             {
-              echo "### Flagsmith Service Tests failed (exit $status)"
+              echo "### Flagsmith Service Tests (${{ matrix.shard }}) failed (exit $status)"
               echo '```'
               grep -E '^(FAILED|ERROR) |^=+ .*in [0-9.]+s' "$log" || tail -n 40 "$log"
               echo '```'
@@ -1434,8 +1477,7 @@ jobs:
       # #1780: prebuilt collector for this content hash; empty = build locally.
       OTEL_COLLECTOR_TAG: ${{ needs.collector-image.outputs.tag }}
     # #1583: runs only when e2e_required (merge_group, workflow_dispatch,
-    # `ci-full`, or a non-docs PR touching a risky path; docs-only PRs still
-    # skip it, #1422). Skipped on a push to main: the queue ran it on that
+    # `ci-full`; no PR path trigger since #2768). Skipped on a push to main: the queue ran it on that
     # commit. ci-complete accepts a skip unless e2e_required was true.
     # The queue skips it only when this entry's diff is docs-only (non_docs
     # exactly 'false'); safe under the ALLGREEN grouping strategy, revisit if
@@ -1631,7 +1673,7 @@ jobs:
     runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     needs: [changes, integration-test]
     # #1583: wait for the e2e job only where it runs (merge_group,
-    # dispatch, ci-full / risky PRs); a skipped e2e job (push to main, plain PR)
+    # dispatch, ci-full PRs); a skipped e2e job (push to main, plain PR)
     # does not hold the build back. A required e2e job must have succeeded.
     if: >-
       needs.changes.outputs.docker_build_matrix != '[]' &&
@@ -2097,7 +2139,7 @@ jobs:
           echo "✅ All CI checks passed (skipped jobs are OK)"
 
       # #1583: a skipped e2e job is OK only where it was not required; in the
-      # merge queue (and with ci-full / risky paths) it must have succeeded.
+      # merge queue (and with ci-full) it must have succeeded.
       # Fails closed: merge_group requires e2e unless non_docs is exactly
       # 'false' (docs-only group; empty counts as required), and an
       # e2e_required that is neither 'true' nor 'false' (empty/broken output)
@@ -2121,4 +2163,22 @@ jobs:
             echo "✅ Required e2e passed"
           else
             echo "✅ e2e not required (result: $E2E_RESULT)"
+          fi
+      - name: Check required service tiers ran
+        # Fail closed in the queue (#2770): the tiers may be skipped only when the entry's
+        # service_tests filter says exactly 'false'.
+        env:
+          SERVICE_TESTS: ${{ needs.changes.outputs.service_tests }}
+          ST_RESULT: ${{ needs.service-tests.result }}
+          FS_RESULT: ${{ needs.flagsmith-service-tests.result }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "merge_group" && "$SERVICE_TESTS" != "false" ]]; then
+            if [[ "$ST_RESULT" != "success" || "$FS_RESULT" != "success" ]]; then
+              echo "❌ service tiers required in the queue (service_tests='$SERVICE_TESTS') but service-tests is '$ST_RESULT', flagsmith-service-tests '$FS_RESULT'"
+              exit 1
+            fi
+            echo "✅ Required service tiers passed"
+          else
+            echo "✅ service tiers not required (event=$EVENT_NAME, service_tests='$SERVICE_TESTS')"
           fi

@@ -361,3 +361,137 @@ def test_a_broken_tracer_in_the_span_shape_never_raises(spans, monkeypatch, caps
         )
     assert sent == ""
     assert "moment could not be recorded" in capsys.readouterr().err
+
+
+# --- Agent log events (#2722, UC-100 BR-012, UC-041 A8) ---------------------------------
+
+
+def _record_with_copy(shape, tracer, name="death_warning"):
+    with tracer.start_as_current_span("player: p0") as player_span:
+        sent = moments.record_moment(
+            name, shape=shape, parent_span=player_span, attributes=ATTRS, tracer=tracer, agent_copy=True
+        )
+    return sent, player_span
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"])
+@pytest.mark.uc("UC-041", flow="A8", steps=[3])
+@pytest.mark.parametrize("shape", [MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN])
+def test_agent_copy_in_the_span_shapes_is_the_log_event_plus_the_audience(spans, logs, shape):
+    tracer, _ = spans
+    sent, player_span = _record_with_copy(shape, tracer)
+
+    assert sent == shape
+    (record,) = [r.log_record for r in logs.get_finished_logs()]
+    assert record.event_name == "death_warning"
+    assert record.body == "death_warning"
+    assert record.severity_number == SeverityNumber.INFO
+    assert dict(record.attributes) == {**ATTRS, "orangecase.audience": "agent"}
+    assert record.trace_id == player_span.get_span_context().trace_id
+    assert record.span_id == player_span.get_span_context().span_id
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"])
+@pytest.mark.parametrize("shape", [MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH])
+def test_no_agent_copy_when_the_shape_already_sends_the_log_event(spans, logs, shape):
+    tracer, _ = spans
+    _record_with_copy(shape, tracer)
+
+    (record,) = [r.log_record for r in logs.get_finished_logs()]
+    assert dict(record.attributes) == ATTRS
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"])
+@pytest.mark.parametrize("shape", [MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN])
+def test_without_otlp_logging_no_agent_copy_and_no_error(spans, monkeypatch, shape):
+    monkeypatch.setattr(otel_logging, "_logger_provider", None)
+    tracer, _ = spans
+    sent, _ = _record_with_copy(shape, tracer)
+
+    assert sent == shape
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"], cond=["Post-F-1"])
+@pytest.mark.parametrize("shape", [MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN])
+@pytest.mark.usefixtures("broken_logs")
+def test_a_broken_agent_copy_never_raises_and_keeps_the_moment(spans, capsys, shape):
+    tracer, _ = spans
+    first, _ = _record_with_copy(shape, tracer)
+    second, _ = _record_with_copy(shape, tracer)
+
+    assert first == second == shape
+    assert capsys.readouterr().err.count("moment could not be recorded") == 1
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"])
+@pytest.mark.uc("UC-041", flow="A8", steps=[2])
+def test_emit_agent_event_marks_the_record_in_the_span_context(spans, logs):
+    tracer, _ = spans
+    with tracer.start_as_current_span("game") as root:
+        sent = moments.emit_agent_event("game.start", span=root, attributes={"game.id": "g1"})
+
+    assert sent is True
+    (record,) = [r.log_record for r in logs.get_finished_logs()]
+    assert record.event_name == "game.start"
+    assert dict(record.attributes) == {"game.id": "g1", "orangecase.audience": "agent"}
+    assert (record.trace_id, record.span_id) == (root.get_span_context().trace_id, root.get_span_context().span_id)
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"], cond=["Post-F-1"])
+@pytest.mark.usefixtures("broken_logs")
+def test_emit_agent_event_without_otlp_logging_or_with_a_broken_channel_never_raises(spans, monkeypatch, capsys):
+    tracer, _ = spans
+    with tracer.start_as_current_span("game") as root:
+        assert moments.emit_agent_event("game.end", span=root, attributes={}) is False
+        monkeypatch.setattr(otel_logging, "_logger_provider", None)
+        assert moments.emit_agent_event("game.end", span=root, attributes={}) is False
+    assert capsys.readouterr().err.count("moment could not be recorded") == 1
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"])
+@pytest.mark.parametrize(("value", "expected"), [(True, True), (False, False), ("true", False), (None, False)])
+@pytest.mark.usefixtures("logs")
+def test_read_agent_log_events_reads_the_observability_flag(monkeypatch, value, expected):
+    calls = []
+
+    def _read(domain, key, default, game_id=None):  # noqa: ARG001
+        calls.append((domain, key, default))
+        return value
+
+    monkeypatch.setattr("lib.feature_flags.read_bool_flag", _read)
+
+    assert moments.read_agent_log_events() is expected
+    assert calls == [("observability", "telemetry.agent_log_events", False)]
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"])
+def test_read_agent_log_events_is_off_without_otlp_logging(monkeypatch):
+    monkeypatch.setattr(otel_logging, "_logger_provider", None)
+    monkeypatch.setattr("lib.feature_flags.read_bool_flag", lambda *a, **k: True)  # noqa: ARG005
+
+    assert moments.read_agent_log_events() is False
+
+
+@pytest.mark.uc("UC-100", flow="A6", br=["BR-003", "BR-012"])
+def test_both_shape_without_a_timestamp_stamps_event_and_log_with_one_clock_read(spans, logs):
+    tracer, exporter = spans
+    _record(MOMENT_SHAPE_BOTH, tracer)
+
+    (event,) = _player_span(exporter).events
+    (record,) = [r.log_record for r in logs.get_finished_logs()]
+    assert event.timestamp == record.timestamp
+
+
+@pytest.mark.uc("UC-100", br=["BR-012"], cond=["Post-F-1"])
+@pytest.mark.usefixtures("logs")
+def test_emit_agent_event_never_raises_when_getting_the_logger_fails(spans, monkeypatch, capsys):
+    monkeypatch.setattr(moments, "_failure_reported", False)
+
+    def _broken():
+        raise RuntimeError("provider broken")
+
+    monkeypatch.setattr(moments, "_moment_logger", _broken)
+    tracer, _ = spans
+    with tracer.start_as_current_span("game") as root:
+        assert moments.emit_agent_event("game.end", span=root, attributes={}) is False
+    assert "moment could not be recorded" in capsys.readouterr().err

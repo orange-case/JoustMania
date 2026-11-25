@@ -20,10 +20,16 @@ func TestFlagDigestCoversTheMomentShape(t *testing.T) {
 		}
 	})
 
+	t.Run("UC-046/BR-011 observability/telemetry.agent_log_events is covered", func(t *testing.T) {
+		if !DigestKeysCovered("observability", "telemetry.agent_log_events") {
+			t.Fatal("observability/telemetry.agent_log_events not covered (#2722)")
+		}
+	})
+
 	t.Run("UC-046/BR-011 a moment shape change changes the digest", func(t *testing.T) {
 		values := map[string]map[string]any{
 			"game":          {"sensitivity": 2.0},
-			"observability": {"telemetry.moment_shape": "span_event", "log_level": "info"},
+			"observability": {"telemetry.moment_shape": "span_event", "telemetry.agent_log_events": false, "log_level": "info"},
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			set := strings.TrimPrefix(req.Header.Get("Flagd-Selector"), "flagSetId=")
@@ -43,6 +49,11 @@ func TestFlagDigestCoversTheMomentShape(t *testing.T) {
 		values["observability"]["telemetry.moment_shape"] = "log_event"
 		if ResolvedFlagDigest(context.Background(), srv.Client(), srv.URL, evalCtx) == before {
 			t.Error("a telemetry.moment_shape change did not change the digest")
+		}
+		mid := ResolvedFlagDigest(context.Background(), srv.Client(), srv.URL, evalCtx)
+		values["observability"]["telemetry.agent_log_events"] = true
+		if ResolvedFlagDigest(context.Background(), srv.Client(), srv.URL, evalCtx) == mid {
+			t.Error("a telemetry.agent_log_events change did not change the digest")
 		}
 	})
 }

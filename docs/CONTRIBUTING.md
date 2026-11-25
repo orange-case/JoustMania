@@ -330,9 +330,8 @@ gates the merge queue rather than every PR push:
 
 | Event | e2e |
 |---|---|
-| PR push | skipped (lint, unit, contract, service tier and builds still run) |
+| PR push | skipped, whatever the diff touches (#2768; lint, unit, contract and builds still run; the service tiers wait for the queue too) |
 | PR with the `ci-full` label | run |
-| PR whose non-docs diff touches `docker-compose*.yml`, any `Dockerfile*`, `tests/integration/**`, `services/otel-collector/**`, `images/otel-collector/**`, `services/envoy/**`, `services/flagd/**` or `.github/workflows/ci.yml` | run |
 | `merge_group` (merge queue) | always run, with every stack image built at HEAD (no `:latest` fast path); `CI Complete` fails unless it succeeds |
 | push to `main` | skipped: the queue already tested that commit; images build and publish without waiting for them |
 | `workflow_dispatch` | run |
@@ -399,9 +398,11 @@ The service tier (T2, `make test-service`) is deliberately a subset locally:
 | only `tests/service/**/test_*.py` (existing files) | those files (`service-touched`: `make test-service SERVICE_TESTS="<files>"`) |
 | anything else (lib, other service code, agent, rust-hid, `Makefile`, `ci.yml`) | none; the summary prints a note |
 
-PR CI "Service Tests" runs the full tier for the CI path filter (it can be path-skipped on a PR that touches
-none of them) and the merge queue always runs it. A local PASS is therefore not tier coverage for product paths;
-reviewers require "Service Tests" = pass when those paths changed.
+The two service tiers ("Service Tests", "Flagsmith Service Tests") do not run on a plain PR (#2768): the merge
+queue is their only gate, so `CI Complete` and queue entry never wait ~18 min for them. To run them on a PR
+before arming, add the `ci-full` label (it also builds every image) or dispatch CI on the branch. A tier failure
+otherwise first shows in the queue and costs one ~18 min queue run plus a re-arm. A local PASS is not tier
+coverage for product paths; for a risky service-tier change, run them early with `ci-full`.
 
 ```bash
 make pr-gates                           # auto-detect

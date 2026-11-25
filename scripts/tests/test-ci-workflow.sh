@@ -8,7 +8,7 @@
 #          concurrency per merge-group ref, every main-gating check runs in the
 #          queue, CI Complete reports there, and nothing is published from it.
 #   #1583: the e2e job runs only where `changes.e2e_required` says so
-#          (merge_group, workflow_dispatch, ci-full, risky paths); a push to
+#          (merge_group, workflow_dispatch, ci-full; no PR path trigger, #2768); a push to
 #          main builds and publishes without them. Checked by simulating the
 #          `changes/force` step and evaluating the job `if:`s per scenario.
 #
@@ -32,6 +32,8 @@
 #          only for an entry whose own diff touches proto_pkg (simulated).
 #   #2592: the Flagsmith link journeys run once, in flagsmith-service-tests (the
 #          service_tests filter, needed by CI Complete); Service Tests ignores them.
+#   #2769: both tier jobs are sharded by matrix; the shards cover each module once
+#          (a module split across shards only by complementary -k expressions).
 #
 # Needs python3 + PyYAML (as scripts/ci/check-retag-source.sh).
 #   ./scripts/tests/test-ci-workflow.sh [path/to/ci.yml]
@@ -122,12 +124,13 @@ else:
 
 # CI Complete's check step: fails on failure OR cancelled, exits 1, nothing
 # softens it (`|| true`, success(), always(), a 'skipped' check). The second
-# run step (#1583, required e2e) is checked below.
+# run step (#1583, required e2e) and the service tier step (#2770) are checked below.
 E2E_STEP = "Check required e2e ran"
+TIER_STEP = "Check required service tiers ran"
 complete_runs = [
-    str(s.get("run", "")) for s in jobs["ci-complete"]["steps"] if s.get("run") and s.get("name") != E2E_STEP
+    str(s.get("run", "")) for s in jobs["ci-complete"]["steps"] if s.get("run") and s.get("name") not in (E2E_STEP, TIER_STEP)
 ]
-check(len(complete_runs) == 1, "ci-complete: exactly one generic check step (plus the e2e step)")
+check(len(complete_runs) == 1, "ci-complete: exactly one generic check step (plus the e2e and service tier steps)")
 lines = [ln.strip() for ln in (complete_runs[0] if complete_runs else "").splitlines() if ln.strip()]
 for required in (
     "FAILED=\"${{ contains(needs.*.result, 'failure') }}\"",
@@ -204,18 +207,26 @@ check(
 # non-empty matrix (the matrices are full on run_all_checks). No event_name
 # restriction, no always()/success()/true, no &&.
 EXEMPT = {"changes", "sonarcloud", "docker-build-merge", "docker-build-extra-merge", "retag-skipped"}
-# The service-test jobs gate on one `changes` output, service_tests_run, which is false on a
-# push to main (the merge queue ran them on that very commit) and otherwise
-# service_tests || run_all_checks (checked on the force step below).
+# The service-test jobs gate on one `changes` output, service_tests_run: merge_group
+# (service_tests unless exactly 'false', #2770), workflow_dispatch and ci-full only
+# (#2768; checked on the force step below and simulated).
 SERVICE_GATED = {"service-tests", "flagsmith-service-tests"}
+# #2770: CI Complete fails closed in the queue unless service_tests is exactly 'false'.
+_st_step = next((st for st in jobs["ci-complete"]["steps"] if st.get("name") == "Check required service tiers ran"), None)
+check(_st_step is not None, "ci-complete: must have 'Check required service tiers ran' (#2770)")
+if _st_step:
+    _run = _st_step.get("run", "")
+    check('"$SERVICE_TESTS" != "false"' in _run and '"$EVENT_NAME" == "merge_group"' in _run,
+          "ci-complete: service tier check must apply in merge_group unless service_tests is exactly 'false'")
+    check("needs.service-tests.result" in str(_st_step.get("env")) and "needs.flagsmith-service-tests.result" in str(_st_step.get("env")),
+          "ci-complete: service tier check must read both tier results")
 for name in sorted(SERVICE_GATED):
     check(job_if(name) == "needs.changes.outputs.service_tests_run == 'true'",
           f"{name}: must gate exactly on service_tests_run: {job_if(name)}")
 check(jobs["changes"]["outputs"].get("service_tests_run") == "${{ steps.force.outputs.service_tests_run }}",
       "changes: must output service_tests_run from the force step")
 _force_run = next(s for s in jobs["changes"]["steps"] if s.get("id") == "force")["run"]
-check('if [ "${{ github.event_name }}" != push ] && { [ "$SERVICE_TESTS" = true ] || [ "$checks" = true ]; }; then' in _force_run,
-      "changes/force: service_tests_run must be false on push and service_tests || run_all_checks otherwise")
+check("service_tests_run=true" in _force_run, "changes/force: must set service_tests_run")
 MATRIX_GATED = {"service-checks"}
 TERM = re.compile(r"needs\.changes\.outputs\.\w+ == 'true'")
 RUN_ALL = "needs.changes.outputs.run_all_checks == 'true'"
@@ -402,6 +413,7 @@ def simulate(event, e2e_paths, non_docs, ci_full=False, e2e_outcome="success",
         if "steps.force.outputs" in value:
             ctx[f"needs.changes.outputs.{key}"] = interpolate(value, {f"steps.force.outputs.{k}": v for k, v in out.items()})
     ctx["needs.changes.outputs.non_docs"] = str(non_docs).lower()
+    ctx["needs.changes.outputs.service_tests"] = str(service_tests).lower()
     ctx.update({
         "needs.changes.result": "success",
         "needs.changes.outputs.docker_build_matrix": '["menu"]',
@@ -428,7 +440,8 @@ def simulate(event, e2e_paths, non_docs, ci_full=False, e2e_outcome="success",
 
     run_job("collector-image", collector_outcome)
     run_job("integration-test", e2e_outcome)
-    for name in ("docker-build", "docker-build-extra", "docker-build-merge", "docker-build-extra-merge", "retag-skipped"):
+    for name in ("docker-build", "docker-build-extra", "docker-build-merge", "docker-build-extra-merge", "retag-skipped",
+                 "service-tests", "flagsmith-service-tests"):
         run_job(name)
     needs = {n: {"result": results.get(n, "success")} for n in jobs["ci-complete"]["needs"]}
     for n, v in needs.items():
@@ -493,15 +506,28 @@ def e2e_steps_run(ctx):
 AGENT_STUB_STEP = "Validate agent Go stubs"
 check("e2e_required" in jobs["changes"]["outputs"], "changes: must output e2e_required (#1583)")
 e2e_filter = next(s for s in jobs["changes"]["steps"] if s.get("id") == "f")["with"]["filters"]
-e2e_path_list = yaml.safe_load(e2e_filter).get("e2e_paths") or []
-for path in ("docker-compose*.yml", "**/Dockerfile*", "tests/integration/**", "services/otel-collector/**", "services/envoy/**",
-             "services/flagd/**", ".github/workflows/ci.yml"):
-    check(path in e2e_path_list, f"changes/f: e2e_paths must cover {path}")
+# #2768: no PR path trigger for e2e any more; the queue is its gate.
+check("e2e_paths" not in (yaml.safe_load(e2e_filter) or {}), "changes/f: e2e_paths is gone (#2768)")
+# #2770: the queue skips the tiers off these paths, so the filter must cover what they read.
+service_path_list = yaml.safe_load(e2e_filter).get("service_tests") or []
+for path in ("lib/**", "proto/**", "pyproject.toml", "uv.lock", "services/__init__.py", "services/flag-service/**", "services/agent/**",
+             "services/rust-hid/**", "tests/service/**", "tests/integration/__init__.py", "tests/integration/helpers.py",
+             "tests/integration/jaeger_v3.py", "tests/integration/flag_service.py", "docker-compose.yml", "Makefile",
+             "scripts/ci/docker-pull-retry.sh", "scripts/ci/apt-install.sh", ".github/workflows/ci.yml"):
+    check(path in service_path_list, f"changes/f: service_tests must cover {path}")
+
+# #2770: CI Complete fails closed when the queue skips the tiers the filter asked for.
+for st, want in ((True, "failure"), ("", "failure"), ("unknown", "failure"), (False, "success")):
+    r = simulate("merge_group", False, True, service_tests=st, override={"service_tests_run": "false"})
+    check(r["ci-complete"] == want,
+          f"merge_group, service_tests={st!r}, tiers skipped: CI Complete must be {want}, got {r['ci-complete']}")
+r = simulate("pull_request", False, True, service_tests=True)
+check(r["ci-complete"] == "success", f"pull_request: skipped tiers must not fail CI Complete, got {r['ci-complete']}")
 
 SCENARIOS = [
     # (label, event, e2e_paths, non_docs, ci_full, expect_e2e)
     ("PR, plain code change", "pull_request", False, True, False, False),
-    ("PR, risky path", "pull_request", True, True, False, True),
+    ("PR touching compose/Dockerfiles (#2768: queue only)", "pull_request", True, True, False, False),
     ("PR, ci-full label", "pull_request", False, True, True, True),
     ("PR, docs-only under a risky path", "pull_request", True, False, False, False),
     ("merge_group", "merge_group", False, True, False, True),
@@ -527,14 +553,18 @@ if "e2e_required" in jobs["changes"]["outputs"]:
             for build in ("docker-build", "docker-build-extra"):
                 check(gone[build] == "skipped", f"{label}: {build} must not run when required e2e was skipped, got {gone[build]}")
     push = simulate("push", True, True)
-    # service_tests_run (the two service-test jobs): never on a push to main, always in
-    # the merge queue and on dispatch, on a PR only when service paths changed.
+    # service_tests_run (the two service-test jobs): never on a push to main, always on
+    # dispatch, on a PR only with ci-full (#2768), in the merge queue only when service
+    # paths changed (#2770); there an empty/unknown filter output fails closed to running them.
     for args, kw, want in (
         (("push", True, True), dict(service_tests=True), "false"),
         (("push", False, True), {}, "false"),
-        (("merge_group", False, True), {}, "true"),
+        (("merge_group", False, True), {}, "false"),
+        (("merge_group", False, True), dict(service_tests=True), "true"),
+        (("merge_group", False, True), dict(service_tests=""), "true"),
+        (("merge_group", False, True), dict(service_tests="unknown"), "true"),
         (("workflow_dispatch", False, True), {}, "true"),
-        (("pull_request", False, True), dict(service_tests=True), "true"),
+        (("pull_request", False, True), dict(service_tests=True), "false"),
         (("pull_request", False, True), {}, "false"),
         (("pull_request", False, True), dict(ci_full=True), "true"),
     ):
@@ -544,6 +574,16 @@ if "e2e_required" in jobs["changes"]["outputs"]:
           f"push to main: publish must run without e2e, got {push}")
     check(push["retag-skipped"] == "success", f"push to main: retag-skipped must run without e2e, got {push}")
     check("integration-test" not in jobs["retag-skipped"]["needs"], "retag-skipped: must not need integration-test")
+    # #2770: a queue entry off the service_tests paths (code or docs-only) skips both
+    # tiers and CI Complete still passes; on those paths they run.
+    for non_docs in (True, False):
+        mq_skip = simulate("merge_group", False, non_docs)
+        for name in ("service-tests", "flagsmith-service-tests"):
+            check(mq_skip[name] == "skipped", f"merge_group non_docs={non_docs}: {name} must skip off its paths, got {mq_skip[name]}")
+        check(mq_skip["ci-complete"] == "success", f"merge_group non_docs={non_docs}: CI Complete must pass without the tiers, got {mq_skip}")
+    mq_svc = simulate("merge_group", False, True, service_tests=True)
+    for name in ("service-tests", "flagsmith-service-tests"):
+        check(mq_svc[name] == "success", f"merge_group service_tests: {name} must run, got {mq_svc[name]}")
     mq = simulate("merge_group", False, True)
     for name in ("docker-build-merge", "docker-build-extra-merge", "retag-skipped"):
         check(mq[name] == "skipped", f"merge_group: {name} must not run, got {mq[name]}")
@@ -593,8 +633,10 @@ if "e2e_required" in jobs["changes"]["outputs"]:
         ("merge_group", dict(event="merge_group", e2e_paths=False, non_docs=True), True),
         ("workflow_dispatch", dict(event="workflow_dispatch", e2e_paths=False, non_docs=True), True),
         ("PR, ci-full label", dict(event="pull_request", e2e_paths=False, non_docs=True, ci_full=True), True),
-        ("PR, risky path", dict(event="pull_request", e2e_paths=True, non_docs=True), False),
-        ("PR, risky path + deps", dict(event="pull_request", e2e_paths=True, non_docs=True, integration_deps=True), True),
+        # No event reaches the fast path since #2768; forced here while its steps exist.
+        ("PR, e2e forced", dict(event="pull_request", e2e_paths=False, non_docs=True, override={"e2e_required": "true"}), False),
+        ("PR, e2e forced + deps", dict(event="pull_request", e2e_paths=False, non_docs=True, integration_deps=True,
+                                       override={"e2e_required": "true"}), True),
         ("merge_group, empty e2e_full_build", dict(event="merge_group", e2e_paths=False, non_docs=True,
                                                    override={"e2e_full_build": ""}), True),
     ]
@@ -638,14 +680,14 @@ if "e2e_required" in jobs["changes"]["outputs"]:
     check("matrix." not in yaml.safe_dump(it), "integration-test: no matrix.* reference (name, env, steps)")
     check("E2E_SHARD" not in open(sys.argv[1]).read(), "ci.yml: E2E_SHARD is gone (#1422 S13)")
 
-    # (#1254) A risky-path PR on the fast path still builds the agent at HEAD before the tests.
+    # (#1254) The fast path still builds the agent at HEAD before the tests.
     AGENT_STEPS = ("Resolve agent image ref (fast path)", "Build agent at HEAD (fast path)")
-    steps = simulate("pull_request", True, True)["e2e_steps"]
+    steps = simulate("pull_request", False, True, override={"e2e_required": "true"})["e2e_steps"]
     for name in AGENT_STEPS:
-        check(name in steps, f"PR, risky path: {name!r} must run (#1254), ran {steps}")
+        check(name in steps, f"fast path: {name!r} must run (#1254), ran {steps}")
     if all(n in steps for n in AGENT_STEPS) and FAST in steps:
         check(steps.index("Build agent at HEAD (fast path)") < steps.index(FAST),
-              "PR, risky path: the agent must be built before the fast e2e run")
+              "fast path: the agent must be built before the fast e2e run")
 
     # (#1780) Prebuilt collector: same gate as the e2e job, so it is never
     # skipped by it and it never runs where they do not.
@@ -658,7 +700,7 @@ if "e2e_required" in jobs["changes"]["outputs"]:
     for outcome in ("failure", "cancelled"):
         for label, kwargs in (
             ("merge_group", dict(event="merge_group", e2e_paths=False, non_docs=True)),
-            ("PR, risky path", dict(event="pull_request", e2e_paths=True, non_docs=True)),
+            ("PR, ci-full", dict(event="pull_request", e2e_paths=False, non_docs=True, ci_full=True)),
         ):
             r = simulate(collector_outcome=outcome, **kwargs)
             check(r["integration-test"] == "success",
@@ -671,7 +713,8 @@ if "e2e_required" in jobs["changes"]["outputs"]:
           "ci-complete: must not need collector-image; it is best effort (#1780)")
     for label, kwargs, want in (
         ("merge_group", dict(event="merge_group", e2e_paths=False, non_docs=True), "success"),
-        ("PR, risky path", dict(event="pull_request", e2e_paths=True, non_docs=True), "success"),
+        ("PR, ci-full", dict(event="pull_request", e2e_paths=False, non_docs=True, ci_full=True), "success"),
+        ("PR, plain code change", dict(event="pull_request", e2e_paths=False, non_docs=True), "skipped"),
         ("PR, docs only", dict(event="pull_request", e2e_paths=False, non_docs=False), "skipped"),
     ):
         r = simulate(**kwargs)
@@ -800,8 +843,26 @@ FLAGSMITH_MODULES = ("tests/service/test_flagsmith_link.py", "tests/service/test
 check("flagsmith-service-tests" in jobs, "flagsmith-service-tests: job missing (#2592)")
 check(job_if("flagsmith-service-tests") == job_if("service-tests"),
       f"flagsmith-service-tests: must use the service-tests filter: {job_if('flagsmith-service-tests')}")
-check('SERVICE_TESTS="' + " ".join(FLAGSMITH_MODULES) + '"' in _run_of("flagsmith-service-tests"),
-      "flagsmith-service-tests: must run exactly the Flagsmith link modules")
+# #2769: matrix shards; per module either one unfiltered shard or a `-k X` / `-k not (X)` pair.
+_fs_shards = jobs.get("flagsmith-service-tests", {}).get("strategy", {}).get("matrix", {}).get("include", [])
+_fs_by_mod = {}
+for _sh in _fs_shards:
+    for _m in str(_sh.get("tests", "")).split():
+        _fs_by_mod.setdefault(_m, []).append(str(_sh.get("select") or ""))
+check(set(_fs_by_mod) == set(FLAGSMITH_MODULES),
+      f"flagsmith-service-tests: shards must run exactly the Flagsmith link modules: {sorted(_fs_by_mod)}")
+for _m, _sel in _fs_by_mod.items():
+    _ok = _sel == [""] or (len(_sel) == 2 and any(a and b == f"not ({a})" for a in _sel for b in _sel))
+    check(_ok, f"flagsmith-service-tests: {_m} must run once or split by complementary -k: {_sel}")
+check('SERVICE_TESTS="${{ matrix.tests }}"' in _run_of("flagsmith-service-tests")
+      and 'TEST="$SELECT"' in _run_of("flagsmith-service-tests"),
+      "flagsmith-service-tests: must run matrix.tests with the matrix -k selection")
+_st = jobs.get("service-tests", {})
+check(_st.get("strategy", {}).get("matrix", {}).get("shard") == ["agents", "rest"]
+      and _st.get("env", {}).get("AGENT_SHARD_FILES")
+      and 'SERVICE_TESTS="$AGENT_SHARD_FILES"' in _run_of("service-tests")
+      and 'for f in $AGENT_SHARD_FILES; do ignores="$ignores --ignore=$f"; done' in _run_of("service-tests"),
+      "service-tests: the rest shard must --ignore exactly AGENT_SHARD_FILES (#2769)")
 check(all(f"--ignore={m}" in _run_of("service-tests") for m in FLAGSMITH_MODULES),
       "service-tests: must --ignore the Flagsmith link modules (they run in flagsmith-service-tests)")
 check(jobs.get("flagsmith-service-tests", {}).get("timeout-minutes"),
