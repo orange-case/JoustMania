@@ -36,6 +36,11 @@ FLAGS = {
         "interventions_enabled": ("off", False),
         "interventions_allowed": ("standard", "a,b"),
         "decision.backend": ("claude", "claude"),
+        "objectives": ("chaos_focused", {"endurance": 0.1, "balanced": 0.1, "accelerate": 0.1, "chaos": 0.7}),
+        "policy.max_interventions_per_minute": ("lively", 8),
+        "policy.group_grant.enabled": ("on", True),
+        "inference.backend": ("claude", "claude"),
+        "inference.effort": ("xhigh", "xhigh"),
     },
 }
 
@@ -56,7 +61,7 @@ def in_process_client(values: dict[str, tuple[str, object]]):
             flag_key=key, value=default, variant=None, reason=Reason.ERROR, error_code=ErrorCode.FLAG_NOT_FOUND
         )
 
-    for getter in ("boolean", "string", "integer", "float"):
+    for getter in ("boolean", "string", "integer", "float", "object"):
         getattr(client, f"get_{getter}_value").side_effect = value
         getattr(client, f"get_{getter}_details").side_effect = details
     return client
@@ -140,12 +145,31 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         audio_volume_master="quiet",
         agent_enabled_state="on",
         agent_interventions_enabled_state="off",
+        agent_objectives="chaos_focused",
+        agent_max_interventions_per_minute="8",
+        agent_group_grant_state="on",
+        inference_backend="claude",
+        inference_effort="xhigh",
         pad_commands=[
             "reset_setting",
             "reset_setting.from",
             "interventions_switch",
             "agent_switch.only_if_stopped",
             "step_setting.from",
+            "set_backend.from",
+            "reset_setting.from:decision.backend",
+            *[
+                f"{command}:{option}"
+                for option in (
+                    "objectives",
+                    "policy.max_interventions_per_minute",
+                    "policy.group_grant.enabled",
+                    "inference.backend",
+                    "inference.effort",
+                    "decision.operator_brief",
+                )
+                for command in ("step_setting", "reset_setting")
+            ],
         ],
     )
     # Never the HTTP flag writer (0.5 s per flag): in-process clients and menu memory only.
@@ -153,9 +177,18 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         menu.game_settings_writer,
         menu.user_prefs_writer,
         menu.agent_settings_writer,
-        menu.agent_enabled_writer,
+        menu.agent_memory_writer,
     ):
         assert writer.mock_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", br=["BR-006"])
+@pytest.mark.parametrize("variant", ["custom_weights", "from_objectives", ""])
+async def test_objectives_off_the_five_declared_variants_is_unknown(menu, variant):
+    menu.agent_settings_client = in_process_client({**FLAGS["agent"], "objectives": (variant, {"chaos": 1.0})})
+
+    assert (await status(menu)).agent_objectives == ""
 
 
 @pytest.mark.asyncio
@@ -168,6 +201,10 @@ async def test_status_empty_values_when_nothing_is_set_or_resolvable(menu):
 
     assert (reply.admin_serial, reply.agent_saved_level) == ("", "")
     assert (reply.agent_level, reply.agent_backend, reply.audio_volume_master) == ("", "", "")
+    # The agent rows (fields 22 to 27): empty = unknown, never a guessed default.
+    rows = (reply.agent_objectives, reply.agent_max_interventions_per_minute, reply.agent_group_grant_state)
+    assert rows == ("", "", "")
+    assert (reply.inference_backend, reply.inference_effort, reply.agent_operator_brief_variant) == ("", "", "")
     # The kill switch fails closed: unreadable reads as off, and says it is unknown (#2101).
     assert reply.agent_enabled is False
     assert reply.agent_enabled_state == "unknown"

@@ -10,7 +10,17 @@ from openfeature.flag_evaluation import Reason
 from openfeature.provider.no_op_provider import PASSED_IN_DEFAULT
 from opentelemetry import trace
 
-from lib.setting_ladders import AUTOMATIC, AUTOMATIC_OPTIONS, SHIELD_KNOB_LADDER
+from lib.setting_ladders import (
+    AUTOMATIC,
+    AUTOMATIC_OPTIONS,
+    EFFORT_OPTION,
+    GOAL_LADDER,
+    GOAL_OPTION,
+    GROUP_OPTION,
+    RATE_OPTION,
+    RETRO_BACKEND_OPTION,
+    SHIELD_KNOB_LADDER,
+)
 from lib.types import Games
 from proto import menu_pb2, menu_pb2_grpc
 from services.menu import metrics
@@ -27,7 +37,6 @@ from services.menu.settings_ops import (
     GAME_ACTIVE,
     LOBBY_ONLY_OPTIONS,
     OK,
-    PAD_CAPABILITIES,
     RESET_LOBBY_ONLY_OPTIONS,
     RESETTABLE_OPTIONS,
     SHIELD_ACTIVATION_FLAG,
@@ -60,6 +69,52 @@ def _enabled_state(details) -> str:
     if not details.variant or details.variant == PASSED_IN_DEFAULT:
         return "unknown"
     return "on" if details.value is True else "off"
+
+
+def _resolved(details) -> bool:
+    """The evaluation came from a resolved flag (the rule of `_enabled_state`)."""
+    if details.error_code is not None or details.reason == Reason.ERROR:
+        return False
+    return isinstance(details.variant, str) and details.variant not in ("", PASSED_IN_DEFAULT)
+
+
+def _resolved_variant(read) -> str:
+    """An agent row's variant name from the in-process client, empty (unknown) when unresolved."""
+    try:
+        details = read()
+    except Exception as e:
+        logger.warning(f"Reading an agent row failed: {e}")
+        return ""
+    return details.variant if _resolved(details) else ""
+
+
+def _objectives(agent) -> str:
+    """`objectives` as one of its declared variants, empty (unknown) otherwise."""
+    variant = _resolved_variant(lambda: agent.get_object_details(GOAL_OPTION, {}))
+    return variant if variant in GOAL_LADDER else ""
+
+
+def _two_state(read) -> str:
+    """`on` / `off` of a resolved on/off agent row, empty (unknown) otherwise."""
+    try:
+        state = _enabled_state(read())
+    except Exception as e:
+        logger.warning(f"Reading an agent row failed: {e}")
+        return ""
+    return state if state in ("on", "off") else ""
+
+
+def _rate_text(agent) -> str:
+    """policy.max_interventions_per_minute as an integer decimal (`8`, never `8.0`), empty when unknown."""
+    try:
+        details = agent.get_integer_details(RATE_OPTION, 0)
+    except Exception as e:
+        logger.warning(f"Reading {RATE_OPTION} failed: {e}")
+        return ""
+    value = details.value
+    if not _resolved(details) or isinstance(value, bool) or not isinstance(value, int | float) or value != int(value):
+        return ""
+    return str(int(value))
 
 
 class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
@@ -459,8 +514,14 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             audio_volume_master=_variant(user.get_float_details("audio_volume.master", 1.0)),
             shield_activation=_variant(game.get_string_details(SHIELD_ACTIVATION_FLAG, "")),
             operator_settings=dict(self.settings_ops.operator_settings),
+            agent_objectives=_objectives(agent),
+            agent_max_interventions_per_minute=_rate_text(agent),
+            agent_group_grant_state=_two_state(lambda: agent.get_boolean_details(GROUP_OPTION, False)),
+            inference_backend=_resolved_variant(lambda: agent.get_string_details(RETRO_BACKEND_OPTION, "")),
+            inference_effort=_resolved_variant(lambda: agent.get_string_details(EFFORT_OPTION, "")),
+            agent_operator_brief_variant=self.settings_ops.brief_variant or "",
             setting_defaults=dict(self.settings_ops.setting_defaults),
-            pad_commands=list(PAD_CAPABILITIES),
+            pad_commands=self.settings_ops.pad_commands(),
         )
 
     async def ListGameModes(self, _request, _context):
@@ -585,7 +646,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             if result.error is None:
                 await self.settings_ops.announce("interventions_switch", result.new)
         else:
-            result = await self.settings_ops.set_backend(data.get("backend", ""))
+            result = await self.settings_ops.set_backend(data.get("backend", ""), data.get("from"))
         error = result.error or ""
         # UC-016 BR-001: the committed value of a step, a backend write, a reset or the interventions switch.
         named = command in ("step_setting", "set_backend", "reset_setting", "interventions_switch")
@@ -640,7 +701,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         if option in LOBBY_ONLY_OPTIONS and self._lifecycle_live():
             return Result(None, None, GAME_ACTIVE)
         result = await self.settings_ops.step_setting(
-            option, data.get("direction", ""), steps, from_level=data.get("from")
+            option, data.get("direction", ""), steps, from_value=data.get("from")
         )
         if result.error is None:
             await self.settings_ops.announce(option, result.new, quiet=cue == "none")

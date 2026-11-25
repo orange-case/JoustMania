@@ -436,3 +436,77 @@ def test_clear_persisted_with_the_flag_service_down_fails():
 
     w = FlagServiceWriter("game", "http://fs:8070", transport=transport)
     assert w.clear_persisted("shield.activation") is False
+
+
+# --- The agent rows' clear_overlay and the set view (UC-016 BR-012, BR-013, #2755) ---
+
+
+@pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
+@pytest.mark.parametrize(("status", "expected"), [(204, 204), (200, 204), (412, 412), (503, 503)])
+def test_clear_overlay_is_one_compare_and_delete_of_the_menus_own_overlay(status, expected):
+    """D14: `DELETE ?writer=menu&if_writer=menu`, no persist: the flag service clears the stack overlay only when
+    the menu wrote it (412 otherwise)."""
+    calls = []
+
+    def transport(method, url, body):
+        calls.append((method, url, body))
+        return status, {}
+
+    w = FlagServiceWriter("agent", "http://fs:8070", persist=False, transport=transport)
+    assert w.clear_overlay("objectives") == expected
+    assert calls == [("DELETE", "http://fs:8070/agent/objectives?writer=menu&if_writer=menu", None)]
+
+
+@pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
+@pytest.mark.parametrize(
+    ("stack_after", "expected"),
+    [
+        (None, 204),
+        ({"variant": "chaos_focused", "writer": "talk-stage"}, 204),
+        ({"variant": "chaos_focused", "writer": "menu"}, 0),
+    ],
+)
+def test_clear_overlay_without_a_clear_answer_is_settled_by_a_re_read(stack_after, expected):
+    def transport(method, _url, _body):
+        if method == "DELETE":
+            raise TimeoutError("timed out")
+        view = {"variants": ["balanced_focused", "chaos_focused"], "effective_default": "balanced_focused"}
+        if stack_after is not None:
+            view["stack_overlay"] = stack_after
+        return 200, view
+
+    w = FlagServiceWriter("agent", "http://fs:8070", persist=False, transport=transport)
+    assert w.clear_overlay("objectives") == expected
+
+
+@pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
+def test_clear_overlay_with_the_flag_service_down_is_unknown():
+    def transport(_method, _url, _body):
+        raise urllib.error.URLError("refused")
+
+    w = FlagServiceWriter("agent", "http://fs:8070", persist=False, transport=transport)
+    assert w.clear_overlay("objectives") == 0
+
+
+@pytest.mark.uc("UC-016", br=["BR-013"])
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ((200, {"flag_set": "agent", "flags": [{"flag": "a", "variants": []}, {"flag": "b"}]}), {"a", "b"}),
+        ((200, {"flag_set": "agent"}), None),
+        ((503, {"error": "no_sync_stream"}), None),
+        (urllib.error.URLError("refused"), None),
+    ],
+)
+def test_get_set_view_is_one_read_of_the_set(answer, expected):
+    calls = []
+
+    def transport(method, url, body):
+        calls.append((method, url, body))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    views = FlagServiceWriter("agent", "http://fs:8070", transport=transport).get_set_view()
+    assert (set(views) if views is not None else None) == expected
+    assert calls == [("GET", "http://fs:8070/agent", None)]

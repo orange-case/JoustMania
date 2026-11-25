@@ -34,7 +34,13 @@ FLAGD_DIR = Path(__file__).resolve().parents[3] / "services" / "flagd"
 KEYS = {
     "game": ["sensitivity", "num_teams", "force_all_start", "shield.activation"],
     "user": ["game_instructions", "audio_volume.master", "current_game"],
-    "agent": ["interventions_allowed", "enabled", "interventions_enabled", "decision.backend"],
+    "agent": [
+        "interventions_allowed",
+        "enabled",
+        "interventions_enabled",
+        "decision.backend",
+        *setting_ladders.AGENT_ROW_LADDERS,
+    ],
 }
 
 
@@ -60,19 +66,26 @@ class FlagFileService:
         self.values: dict[tuple[str, str], str] = {}
         self.admin: dict[tuple[str, str], str] = {}  # persisted admin values (the shield knob reads them)
 
+    def view(self, flag_set: str, key: str) -> dict:
+        variants = VARIANTS[(flag_set, key)]
+        view = {
+            "flag": key,
+            "variants": list(variants),
+            "variant_values": variants,
+            "effective_default": self.values[(flag_set, key)],
+            "baseline_default": DEFAULTS[(flag_set, key)],
+        }
+        if (flag_set, key) in self.admin:
+            view["admin_value"] = {"variant": self.admin[(flag_set, key)]}
+        return view
+
     def __call__(self, method, url, body):
         path, _, query = url.partition("?")
+        if method == "GET" and path.endswith("/agent"):
+            return 200, {"flag_set": "agent", "flags": [self.view("agent", key) for key in KEYS["agent"]]}
         flag_set, key = path.split("/")[-2:]
-        variants = VARIANTS[(flag_set, key)]
         if method == "GET":
-            view = {
-                "variants": list(variants),
-                "variant_values": variants,
-                "effective_default": self.values[(flag_set, key)],
-            }
-            if (flag_set, key) in self.admin:
-                view["admin_value"] = {"variant": self.admin[(flag_set, key)]}
-            return 200, view
+            return 200, self.view(flag_set, key)
         if method == "DELETE":
             assert query == "persist=true"
             self.admin.pop((flag_set, key), None)
@@ -95,7 +108,7 @@ def in_process_client(flags: FlagFileService, flag_set: str):
     def value(key, _default, *_args, **_kwargs):
         return details(key, _default).value
 
-    for getter in ("boolean", "string", "integer", "float"):
+    for getter in ("boolean", "string", "integer", "float", "object"):
         getattr(client, f"get_{getter}_value").side_effect = value
         getattr(client, f"get_{getter}_details").side_effect = details
     return client
@@ -144,7 +157,10 @@ async def assert_preview_equals_commit(menu, option: str, steps: int, committed)
     status = await menu.GetMenuStatus(menu_pb2.GetMenuStatusRequest(), None)
     preview = preview_value(option, status, steps)
     start = preview_value(option, status, 0).value
-    result = await menu.settings_ops.step_setting(option, "up" if steps > 0 else "down", abs(steps))
+    # The pad sends the agent rows with `from`, the value it previewed from (UC-016 BR-014).
+    from_value = start if option in setting_ladders.AGENT_ROW_OPTIONS else None
+    direction = "up" if steps > 0 else "down"
+    result = await menu.settings_ops.step_setting(option, direction, abs(steps), from_value=from_value)
     case = f"{option} from {result.old!r} by {steps}"
     assert result.error in (None, AT_LIMIT, OK), case
     assert preview.at_limit == (result.error == AT_LIMIT), case
@@ -244,6 +260,40 @@ async def test_shield_knob_preview_equals_commit(menu, flags):
                 flags.admin[key] = operator
             await menu.settings_ops.refresh_operator_settings()  # what GetMenuStatus serves (background read)
             await assert_preview_equals_commit(menu, "shield.activation", steps, committed)
+
+
+def row_canonical(flags: FlagFileService, option: str) -> str:
+    """The agent row's committed value in canonical format, from the fake's served variant."""
+    variant = flags.values[("agent", option)]
+    if option == setting_ladders.RATE_OPTION:
+        return str(VARIANTS[("agent", option)][variant])
+    return variant
+
+
+@pytest.mark.uc("UC-016", br=["BR-007", "BR-012", "BR-014"], flow="A7")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("option", sorted(setting_ladders.AGENT_ROW_LADDERS))
+async def test_agent_row_preview_equals_commit(menu, flags, option):
+    """#2755: from every rung and every net step, the pad's preview (status fields 22 to 27) is the menu's
+    commit; the goal wraps, the others clamp."""
+    key = ("agent", option)
+    ladder = setting_ladders.AGENT_ROW_LADDERS[option]
+    if option == setting_ladders.RATE_OPTION:
+        # By value, not the declared order; each rung names its declared variant.
+        assert {str(value) for value in VARIANTS[key].values()} == set(ladder), "ladder differs from the flag file"
+        assert {VARIANTS[key][name]: name for name in VARIANTS[key]} == {
+            int(rung): name for rung, name in setting_ladders.RATE_VARIANTS.items()
+        }
+        starts = [setting_ladders.RATE_VARIANTS[rung] for rung in ladder]
+    else:
+        assert set(VARIANTS[key]) == set(ladder), "ladder differs from the flag file"
+        starts = ladder
+    for start in starts:
+        for steps in wheel_steps(len(ladder)):
+            reset(flags, menu)
+            flags.values[key] = start
+            await menu.settings_ops.refresh_operator_settings()  # the brief's status field is the background read
+            await assert_preview_equals_commit(menu, option, steps, lambda: row_canonical(flags, option))
 
 
 @pytest.mark.uc("UC-015", br=["BR-004"])

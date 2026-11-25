@@ -140,8 +140,14 @@ var menuStatus = &menupb.GetMenuStatusResponse{
 	AgentInterventionsEnabledState: "off",
 	ShieldActivation:               "hold",
 	OperatorSettings:               map[string]string{"sensitivity": "fast", "num_teams": "automatic", "shield.activation": "hold"},
-	SettingDefaults:                map[string]string{"agent_level": "standard", "decision.backend": "rules"},
-	PadCommands:                    []string{"reset_setting", "interventions_switch", "agent_switch.only_if_stopped", "step_setting.from"},
+	AgentObjectives:                "chaos_focused",
+	AgentMaxInterventionsPerMinute: "8",
+	AgentGroupGrantState:           "on",
+	InferenceBackend:               "claude",
+	InferenceEffort:                "xhigh",
+	AgentOperatorBriefVariant:      "custom",
+	SettingDefaults:                map[string]string{"agent_level": "standard", "decision.backend": "rules", "policy.max_interventions_per_minute": "2"},
+	PadCommands:                    []string{"reset_setting", "interventions_switch", "agent_switch.only_if_stopped", "step_setting.from", "set_backend.from", "reset_setting.from:decision.backend", "step_setting:inference.effort"},
 }
 
 func (f *fakeMenu) GetMenuStatus(_ context.Context, r *menupb.GetMenuStatusRequest) (*menupb.GetMenuStatusResponse, error) {
