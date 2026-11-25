@@ -26,10 +26,18 @@ name: CI
 #
 # Merge queue (#1555): `merge_group` runs test the queued commit (main plus the
 # PRs ahead of it) like a main push: every check job runs (run_all_checks),
-# including the e2e job and service-tests, while image builds stay
-# path-filtered against merge_group.base_sha and build amd64 only without
-# pushing (as on a PR). SonarCloud and retag-skipped do not run in the queue.
-# "CI Complete" reports on the merge-group head, which is the required check.
+# except the e2e job and the two service-test jobs (path-filtered, below), while
+# image builds stay path-filtered against merge_group.base_sha and build amd64
+# only without pushing (as on a PR). SonarCloud and retag-skipped do not run in
+# the queue. "CI Complete" reports on the merge-group head, which is the
+# required check.
+#
+# The two service-test jobs (#2770) run in the queue only when the entry's diff
+# matches the `service_tests` filter: exactly 'false' skips them, an empty or
+# unknown output runs them. Safe for the same reason as the e2e skip below
+# (this entry's diff only, grouping strategy ALLGREEN); revisit both together.
+# A filter gap lets a change merge without the tiers, so the filter must cover
+# everything the tiers read (harness imports, the jobs' scripts).
 #
 # The full-stack e2e job (#1583) runs only where `changes.e2e_required` is true:
 #   merge_group                       unless the queued group is docs-only
@@ -129,10 +137,11 @@ jobs:
       # run_all_checks: all test/lint jobs, but builds stay path-filtered (main push)
       force_full: ${{ steps.force.outputs.full }}
       run_all_checks: ${{ steps.force.outputs.checks }}
-      # service_tests_run: the two service-test jobs (the slowest, sharded since #2769). They
+      # service_tests_run: the two service-test jobs (the slowest, ~7-9 min per shard). They
       # gate the merge queue, which tests exactly the commit a push to main then lands,
       # so a push to main skips them (false). A plain PR skips them too (#2768);
-      # workflow_dispatch and ci-full opt in.
+      # workflow_dispatch and ci-full opt in; merge_group: service_tests only, unless
+      # exactly 'false' (#2770).
       service_tests_run: ${{ steps.force.outputs.service_tests_run }}
       python_services_matrix: ${{ steps.matrices.outputs.python_services }}
       docker_build_matrix: ${{ steps.matrices.outputs.docker_build }}
@@ -276,6 +285,7 @@ jobs:
               - 'proto/**'
               - 'pyproject.toml'
               - 'uv.lock'
+              - 'services/__init__.py'  # package init of every services.<svc> import
               - 'services/flagd/**'
               - 'services/flag-service/**'
               - 'services/game_coordinator/**'
@@ -288,10 +298,14 @@ jobs:
               - 'tests/contract/flagd_harness.py'
               - 'tests/contract/flagd_rpc_retry.py'  # imported by the service-tier probes (#2184)
               - 'tests/contract/infra_config.py'
+              - 'tests/integration/__init__.py'
               - 'tests/integration/helpers.py'
+              - 'tests/integration/jaeger_v3.py'  # imported by helpers.py
               - 'tests/integration/flag_service.py'
               - 'docker-compose.yml'
               - 'Makefile'
+              - 'scripts/ci/docker-pull-retry.sh'
+              - 'scripts/ci/apt-install.sh'
               - '.github/workflows/ci.yml'
             # #1491: dashboard tsc + vitest and connect-proxy vet + test, run
             # without waiting for integration-test (the image builds that also
@@ -432,6 +446,10 @@ jobs:
           service_tests_run=false
           if [ "${{ github.event_name }}" = merge_group ] || [ "${{ github.event_name }}" = workflow_dispatch ] || [ "$ci_full" = true ]; then
             service_tests_run=true
+          fi
+          # #2770: in the queue only on this entry's service_tests paths (ALLGREEN, as e2e).
+          if [ "${{ github.event_name }}" = merge_group ] && [ "$SERVICE_TESTS" = false ]; then
+            service_tests_run=false
           fi
           echo "service_tests_run=$service_tests_run (event=${{ github.event_name }}, service_tests=$SERVICE_TESTS, run_all_checks=$checks)"
           echo "service_tests_run=$service_tests_run" >> "$GITHUB_OUTPUT"
@@ -953,8 +971,9 @@ jobs:
   # and menu from source at HEAD as subprocesses, a fresh flag plane per stack
   # (go-built flag service + one flagd container), fake audio; the AGENT
   # composition adds the go-built agent and a fake OpenAI backend (#1600). No image build.
-  # Merge queue (the gate), dispatch and ci-full only: skipped on a plain PR (#2768) and on a
-  # push to main (the queue tested that commit); service_tests_run. tests/service/README.md.
+  # Merge queue (the gate, path-filtered #2770), dispatch and ci-full only: skipped on a plain
+  # PR (#2768) and on a push to main (the queue tested that commit); service_tests_run.
+  # tests/service/README.md.
   # Two shards on separate runners (#2769): `agents` runs AGENT_SHARD_FILES, `rest` the rest
   # of the tier minus those and the Flagsmith files, so a new test file lands in `rest`.
   service-tests:
@@ -2144,4 +2163,22 @@ jobs:
             echo "✅ Required e2e passed"
           else
             echo "✅ e2e not required (result: $E2E_RESULT)"
+          fi
+      - name: Check required service tiers ran
+        # Fail closed in the queue (#2770): the tiers may be skipped only when the entry's
+        # service_tests filter says exactly 'false'.
+        env:
+          SERVICE_TESTS: ${{ needs.changes.outputs.service_tests }}
+          ST_RESULT: ${{ needs.service-tests.result }}
+          FS_RESULT: ${{ needs.flagsmith-service-tests.result }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "merge_group" && "$SERVICE_TESTS" != "false" ]]; then
+            if [[ "$ST_RESULT" != "success" || "$FS_RESULT" != "success" ]]; then
+              echo "❌ service tiers required in the queue (service_tests='$SERVICE_TESTS') but service-tests is '$ST_RESULT', flagsmith-service-tests '$FS_RESULT'"
+              exit 1
+            fi
+            echo "✅ Required service tiers passed"
+          else
+            echo "✅ service tiers not required (event=$EVENT_NAME, service_tests='$SERVICE_TESTS')"
           fi

@@ -9,8 +9,8 @@ make test-service TEST=tc018      # -k filter
 ```
 
 CI: the `service-tests` and `flagsmith-service-tests` jobs (sharded, #2769), part of `ci-complete`. They run in the
-merge queue (their only gate), on `workflow_dispatch` and on a PR with the `ci-full` label; a plain PR and a push to
-`main` skip them (#2768).
+merge queue (their only gate) when the entry touches their paths (the `service_tests` filter, #2770), on
+`workflow_dispatch` and on a PR with the `ci-full` label; a plain PR and a push to `main` skip them (#2768).
 
 ## What a stack is
 

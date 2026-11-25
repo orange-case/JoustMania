@@ -732,6 +732,8 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # the game; and the per-serial moment sequence behind moment.id, kept by the game,
         # not the Player (BR-003).
         self.moment_shape = MOMENT_SHAPE_SPAN_EVENT
+        # UC-100 BR-012: telemetry.agent_log_events, read with the shape and held likewise.
+        self.agent_log_events = False
         self._moment_sequence: dict[str, int] = {}
         self.experiment_id = ""
         self.arm = ""
@@ -2591,6 +2593,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 duration_s=WARNING_DURATION,
                 tracer=tracer,
                 timestamp_ns=warn_ns,
+                agent_copy=self.agent_log_events,
             )
         logger.info(f"Player {serial} triggered warning (accel: {accel_mag:.2f}, threshold: {threshold:.2f})")
 
@@ -3347,6 +3350,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 },
                 timestamp_ns=death_ns,
                 tracer=tracer,
+                agent_copy=self.agent_log_events,
             )
         # An eliminate_player intervention lands as this death: its moment comes right
         # after player_death, applied at the death's time (UC-101 BR-001, BR-006).
