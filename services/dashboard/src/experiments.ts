@@ -5,10 +5,10 @@
  * state change (started, game assigned / concluded / released, concluded,
  * promoting, terminal, rehydrate) and as a 60 s heartbeat per live experiment
  * (docs/specs/telemetry.md §4.1). Each span is its OWN one-span trace (never a
- * child of `agent.experiment`, whose trace holds every shadow game when
- * `telemetry.experiment_game_parent=child`, #2223), so a search stays small. Each carries the registry snapshot: status, flag, verdict once
- * there is one, the end reason on `terminal`, and one `experiment.arm` event per
- * arm with `experiment.arm_stats.assigned` (games in flight), `.samples` and
+ * child of `agent.experiment`), so a search stays small. Each carries the
+ * registry snapshot: status, flag, verdict once there is one, the end reason
+ * on `terminal`, and one `experiment.arm` event per arm with
+ * `experiment.arm_stats.assigned` (games in flight), `.samples` and
  * `.mean_fitness` (the journal summary).
  *
  * The view keeps the NEWEST snapshot per `experiment.id` across polls

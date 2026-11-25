@@ -39,8 +39,8 @@ curl -sS -X DELETE http://localhost/flags/observability/telemetry.moment_shape
 ```
 
 - Reset the shape after the booth (the DELETE above). The overlay stays in effect for every later game,
-  shadow and pattern games included, until it is cleared; in `span` the agent then takes its eliminations
-  from the elimination-order gauge alone (UC-100 step 9, BR-007).
+  shadow and pattern games included, until it is cleared. The shape never changes the agent's eliminations:
+  they come from the elimination-order gauge in every shape (UC-100 BR-007, UC-041 BR-009).
 - One shape per game. The coordinator reads the flag once when the game starts. Changing it during a game
   does not affect that game; the new value applies from the next game (UC-100 A2, BR-002).
 - A flag that is absent, unknown or unreadable gives `span_event`. A game started before the

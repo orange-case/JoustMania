@@ -228,8 +228,6 @@ flags:
   # The logging group of the env-to-flag migration (flags.md §15, #1788): operator-written, read by every service.
   - {set: observability, key: log_level, kind: overlay, scope: [stack]}
   - {set: observability, key: debug, kind: overlay, scope: [stack]}
-  # The trace shape of experiment shadow games (#2223): own root + Link (link) or child of agent.experiment (child).
-  - {set: observability, key: telemetry.experiment_game_parent, kind: overlay, scope: [stack]}
   # The shape of the booth moments (#2658, UC-100; telemetry.md appendix A): span_event (default), span or log_event.
   - {set: observability, key: telemetry.moment_shape, kind: overlay, scope: [stack]}
   # Agent-only log events (#2722, UC-100 BR-012): game.start, game.phase.start, game.end, marked for the agent.
