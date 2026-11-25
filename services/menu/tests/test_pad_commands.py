@@ -208,11 +208,12 @@ async def test_pad_key_set_and_persist_bodies(servicer, flags):
     assert all(body["writer"] == "menu" for _set, _key, body in flags.puts)
 
 
-# --- force_start (step 7, A1, A2, BR-008) ------------------------------------------------------
+# --- force_start (step 7, A1, BR-008; UC-014) ------------------------------------------------------
 
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-008"])
+@pytest.mark.uc("UC-014", flow="main", steps=[2, 3, 5])
 async def test_force_start_starts_with_the_ready_roster_and_no_host_serial(servicer):
     servicer.state_manager.controller_states = {
         "a": ControllerState.READY,
@@ -245,6 +246,7 @@ async def test_force_start_reports_a_refused_start(servicer):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-008"])
+@pytest.mark.uc("UC-014", flow="main", steps=[4], br=["BR-001"])
 async def test_force_start_prunes_ghosts_and_keeps_no_serial(servicer):
     servicer.state_manager.controller_states = {"a": ControllerState.READY, "ghost": ControllerState.READY}
     with live_roster({"a"}), patch.object(servicer, "_run_game_lifecycle", autospec=True) as lifecycle:
@@ -255,31 +257,8 @@ async def test_force_start_prunes_ghosts_and_keeps_no_serial(servicer):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A2", br=["BR-008"])
-async def test_force_start_closes_an_open_admin_session_without_adding_the_admin(servicer):
-    admin = servicer.admin_handler
-    admin.active = True
-    admin.controller_serial = "adm"
-    span = create_autospec(trace.Span, instance=True)
-    admin.session_span = span
-    servicer.state_manager.controller_states = {
-        "a": ControllerState.READY,
-        "b": ControllerState.READY,
-        "adm": ControllerState.ADMIN,
-    }
-    with live_roster({"a", "b", "adm"}), patch.object(servicer, "_run_game_lifecycle", autospec=True) as lifecycle:
-        reply = await pad(servicer, "force_start")
-        await servicer._game_lifecycle_task
-
-    assert reply.success
-    assert not admin.is_active
-    span.set_attribute.assert_any_call("operator_pad_start", True)
-    span.end.assert_called_once()
-    assert "adm" not in lifecycle.await_args.args[2]
-
-
-@pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="A1", br=["BR-012"])
+@pytest.mark.uc("UC-014", flow="A4")
 async def test_force_start_refuses_while_a_game_is_live(servicer):
     live = live_lifecycle(servicer)
     servicer.state_manager.controller_states = {"a": ControllerState.READY, "b": ControllerState.READY}
@@ -295,6 +274,7 @@ async def test_force_start_refuses_while_a_game_is_live(servicer):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="A1", br=["BR-012"])
+@pytest.mark.uc("UC-014", flow="A4")
 async def test_force_start_refuses_when_a_start_wins_during_the_roster_lookup(servicer):
     """A start that becomes live while the live roster is queried wins: no second start."""
     servicer.state_manager.controller_states = {"a": ControllerState.READY, "b": ControllerState.READY}
@@ -530,7 +510,7 @@ def stale_flagd(menu, level: str) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="A3", br=["BR-002"])
-@pytest.mark.uc("UC-013", flow="A3")
+@pytest.mark.uc("UC-015", br=["BR-019"])
 async def test_stop_with_a_timed_out_level_write_that_landed_reports_ok(servicer, flags):
     """Truthful result (#2095): the level PUT times out but lands; the re-read confirms it, so no partial."""
     flags.slow_put = {("agent", "interventions_allowed")}
@@ -543,7 +523,7 @@ async def test_stop_with_a_timed_out_level_write_that_landed_reports_ok(servicer
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", br=["BR-002", "BR-004"])
-@pytest.mark.uc("UC-013", flow="A3", br=["BR-003"])
+@pytest.mark.uc("UC-015", br=["BR-019"])
 async def test_ladder_steps_from_the_flag_service_not_from_stale_flagd(servicer, flags):
     """A down step whose PUT timed out but landed, then another: the second steps from the landed level."""
     stale_flagd(servicer, "full")
@@ -851,18 +831,10 @@ async def test_stop_with_the_switch_unreadable_still_writes_both_keys(servicer, 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="A7", br=["BR-005"])
 async def test_ladder_caps_a_huge_step_count(servicer, flags):
-    """``steps`` is unbounded input: the ladder moves at most once per rung, then clamps."""
-    real_next = settings_ops.agent_level_next
-    calls = []
-
-    def counting_next(current, forward=True):
-        calls.append(current)
-        if len(calls) > len(settings_ops.AGENT_POLICY_LEVELS):
-            raise AssertionError("ladder looped past its length")
-        return real_next(current, forward)
-
-    with patch.object(settings_ops, "agent_level_next", side_effect=counting_next):
-        reply = await pad(servicer, "step_setting", option="agent_level", direction="up", steps=10**9)
+    """``steps`` is unbounded input: the ladder clamps at the top in one write."""
+    reply = await asyncio.wait_for(
+        pad(servicer, "step_setting", option="agent_level", direction="up", steps=10**9), timeout=1.0
+    )
 
     assert (reply.success, reply.error) == (True, "")
     assert flags.written() == [("agent", "interventions_allowed", "full")]
@@ -908,12 +880,11 @@ def _pulses(menu) -> list[tuple]:
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", steps=[4], br=["BR-015", "BR-005"])
-@pytest.mark.uc("UC-011", flow="A4")
+@pytest.mark.uc("UC-011", flow="main", steps=[1, 2, 3])
 async def test_pad_mode_change_voices_the_final_mode_and_pulses_every_lobby_controller(servicer):
     servicer.state_manager.controller_states = {
         "dim": ControllerState.CONNECTED,
         "ready": ControllerState.READY,
-        "admin": ControllerState.ADMIN,
         "idle": ControllerState.IDLE,
     }
     reply = await pad(servicer, "step_setting", option="current_game", direction="up", steps=3)
@@ -938,7 +909,6 @@ async def test_preview_setting_pulses_lobby_controllers_and_writes_nothing(servi
     servicer.state_manager.controller_states = {
         "dim": ControllerState.CONNECTED,
         "ready": ControllerState.READY,
-        "admin": ControllerState.ADMIN,
         "idle": ControllerState.IDLE,
     }
     before = servicer.current_selection
@@ -1043,10 +1013,9 @@ def test_the_kill_switch_writer_never_persists():
     menu = make_real_servicer(writer_factory=factory)
     assert (("agent",), {"persist": False}) in calls
     assert menu.settings_ops.agent_memory_writer is menu.agent_memory_writer
-    assert menu.admin_handler.settings_ops is menu.settings_ops
 
 
-# --- Coverage of the audit of 2026-10-27 (#2050): step 8, A2, A3 ------------------------------------
+# --- Coverage of the audit of 2026-10-27 (#2050): step 8, A3 ------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1061,26 +1030,6 @@ async def test_volume_step_plays_the_volume_step_sound(servicer, flags):
     assert flags.written() == [("user", "audio_volume.master", "loud")]
     servicer.state_manager.audio.play_sound.assert_awaited_with(settings_ops.VOLUME_STEP_SOUND)
     servicer.state_manager.audio.play_voice.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A2")
-async def test_step_setting_while_admin_mode_is_open_writes_and_leaves_the_session_open(servicer, flags):
-    """A2: the last write wins and no lock is taken; only a force_start closes the admin session."""
-    admin = servicer.admin_handler
-    admin.active = True
-    admin.controller_serial = "adm"
-    span = create_autospec(trace.Span, instance=True)
-    admin.session_span = span
-
-    flags.values[("game", "sensitivity")] = flags.admin[("game", "sensitivity")] = "medium"
-    reply = await pad(servicer, "step_setting", option="sensitivity", direction="up")
-
-    assert (reply.success, reply.error) == (True, "")
-    assert flags.written() == [("game", "sensitivity", "fast")]
-    assert admin.is_active
-    assert admin.controller_serial == "adm"
-    span.end.assert_not_called()
 
 
 @pytest.mark.asyncio

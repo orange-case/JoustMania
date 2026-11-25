@@ -136,7 +136,7 @@ READY_LOG_MARKERS = {"menu": "Menu auto-started"}
 
 # Coordinator on mock controllers: headless games, interventions, flag service lifecycle.
 GAME = Composition(("controller-manager", "game-coordinator"))
-# Plus the menu: lobby, ready state, menu-started games, admin writes.
+# Plus the menu: lobby, ready state, menu-started games, pad setting writes.
 LOBBY = Composition(("controller-manager", "game-coordinator", "menu"))
 # Plus the agent at HEAD observing over OTLP: in-game decisions (rules; a remote backend has no key here).
 AGENT = Composition(("controller-manager", "game-coordinator", "menu"), otlp=True, agent=True)

@@ -1,4 +1,4 @@
-"""Voice prompts shared by the menu and the operator pad (UC-011, UC-012, UC-013, UC-015 BR-009, BR-011; #2106).
+"""Voice prompts shared by the menu and the operator pad (UC-011, UC-015 BR-009, BR-011, BR-019; #2106).
 
 One table per setting from its value to the `Sound` id the audio service resolves to a voice
 line of the selected `menu_voice` (UC-031). The menu voices its commits from here and the pad
@@ -44,7 +44,7 @@ AGENT_SWITCH_VOICES: dict[str, Sound] = {
     "stop": Sound.MENU_VOX_ADMINOP_OFF,
     "resume": Sound.MENU_VOX_ADMINOP_ON,
 }
-# UC-012: the on / off voices of `force_all_start` and `game_instructions`.
+# UC-015 step 5: the on / off voices of `force_all_start` and `game_instructions`.
 FORCE_ALL_START_VOICES: dict[bool, Sound] = {True: Sound.MENU_VOX_ADMINOP_TRUE, False: Sound.MENU_VOX_ADMINOP_FALSE}
 INSTRUCTIONS_VOICES: dict[bool, Sound] = {True: Sound.MENU_VOX_INSTRUCTIONS_ON, False: Sound.MENU_VOX_INSTRUCTIONS_OFF}
 # UC-015 A6, BR-009: the pad's lock directions, distinct from the agent stop / resume lines (#2106).
