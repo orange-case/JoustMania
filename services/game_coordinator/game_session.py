@@ -35,7 +35,13 @@ from opentelemetry import trace
 from opentelemetry.context import Context
 
 from lib.feature_flags import eval_game_kind, read_string_flag, set_game_session_kind_context
-from lib.moments import MOMENT_SHAPE_ATTR, read_moment_shape
+from lib.moments import (
+    AGENT_LOG_EVENTS_ATTR,
+    MOMENT_SHAPE_ATTR,
+    emit_agent_event,
+    read_agent_log_events,
+    read_moment_shape,
+)
 from lib.otel_metrics import get_export_interval_ms
 from lib.telemetry import get_tracer
 from lib.types import get_game_display_name
@@ -642,6 +648,8 @@ class GameSession:
             # the game, after the admission wait (a provider still not READY at the deadline gives span_event, A1).
             moment_shape = read_moment_shape()
             game_span.set_attribute(MOMENT_SHAPE_ATTR, moment_shape)
+            agent_log_events = read_agent_log_events()
+            game_span.set_attribute(AGENT_LOG_EVENTS_ATTR, agent_log_events)
 
             # Trace-correlation signal: capture THIS game span's trace_id and
             # publish it as the game_trace_correlation gauge so the agent can read it
@@ -669,6 +677,8 @@ class GameSession:
             # built); both feed games_completed_total{outcome}.
             game = None
             session_outcome: str | None = None
+            # game.end pairs with a sent game.start, so the agent never sees an end without a start.
+            agent_game_started = False
             try:
                 # Check if gRPC clients are available
                 if not self.clients.is_connected:
@@ -719,6 +729,7 @@ class GameSession:
                 # FR-041).
                 game.game_kind = self.game_kind
                 game.moment_shape = moment_shape
+                game.agent_log_events = agent_log_events
                 # Thread experiment attribution onto the game so its in-loop
                 # set_game_transaction_context carries it for flag evaluation.
                 game.experiment_id = self.experiment_id
@@ -750,7 +761,20 @@ class GameSession:
                     session_outcome = OUTCOME_FORCE_ENDED
                     await self.clients.close()
                     return
-                self.publish_game_mode(game.get_game_name())
+                game_mode = game.get_game_name()
+                self.publish_game_mode(game_mode)
+                if agent_log_events:
+                    # After the build: game.mode is the built mode's name, as on the spans.
+                    agent_game_started = emit_agent_event(
+                        "game.start",
+                        span=game_span,
+                        attributes={
+                            "game.id": self.game_id,
+                            "game.kind": self.game_kind,
+                            "game.mode": game_mode,
+                            "game.name": self.game_name,
+                        },
+                    )
                 duration_ticker = asyncio.create_task(self._publish_duration_while_running())
                 try:
                     await game.run()
@@ -784,6 +808,13 @@ class GameSession:
                     # one — otherwise it would occupy a concurrency slot
                     # forever (#775 natural-end retirement relies on this).
                     self.game_state = game_coordinator_pb2.GameState.ENDED
+
+                if agent_game_started:
+                    emit_agent_event(
+                        "game.end",
+                        span=game_span,
+                        attributes={"game.id": self.game_id, "game.kind": self.game_kind},
+                    )
 
                 # Report the end now, not at the next start's sweep or the next
                 # reconcile (UC-053 step 7). Outside _state_lock.
