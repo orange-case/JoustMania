@@ -73,6 +73,9 @@ and the files together. `scripts/tools/gen-voice.sh --only <id> --dry-run` shows
   (`loudness.target_lufs`), encoded with ffmpeg `+bitexact` so an unchanged input never changes the committed bytes.
 - Licences: the generated files are CC BY-SA 4.0 like the other audio assets (C-017); the voice models and their
   sources are listed in `services/audio/assets/audio_credits.txt`.
+- Agent page (#2747, UC-016 BR-012, BR-016): `agent_watching` ("Watching.", the pad's K5 tap of a `WATCH` agent without
+  a screen) and `interventions_on` / `interventions_off` ("Interventions on." / "Interventions off.", the menu's line for
+  `interventions_switch`).
 - Admin cues (#1746): `admin_not_saved` ("Not saved.", a failed admin write, UC-012 A5 / UC-013 A3) and `admin_agent` ("Agent.", the agent overlay cue, UC-012 BR-006) are catalog lines like any other; the LED cue stays primary and the voice only reinforces it.
 - Scope: every voice line the code plays (Menu, Joust, Zombie), the #2106 pad lines and the mode instructions of the
   FR-014 backlog (#2151). A new voice line is a catalog line; there are no recordings to fall back on. The recordings no

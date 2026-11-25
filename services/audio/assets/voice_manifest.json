@@ -367,6 +367,14 @@
    "lufs": -20.37,
    "text_sha256": "fba3f9498fc2d099d5239889e3c3a3a6baf0e4c4556c6fd426d59cad63b43d4f"
   },
+  "Menu/vox/gen_female/agent_watching.ogg": {
+   "line": "Menu/agent_watching",
+   "input_sha256": "a9798ec1a9c9fe65d4384ab5d2f7de0bf5e9b7708490e02edb63f1de9cafb2fc",
+   "text_sha256": "8ddfd524dbb7790b6cec861eeb133617e5a3a1163be27e5bbb4f0316848eb538",
+   "sha256": "b569267792aa37cb7a62badba6ff86ec681c69713ffe778d20d8bc7e211f5fc2",
+   "duration_s": 0.771,
+   "lufs": -20.52
+  },
   "Menu/vox/gen_female/backend_claude.ogg": {
    "line": "Menu/backend_claude",
    "input_sha256": "43f71268fd6f5f21f4ee0397df757f16aa12abd4adffcac976271cbdbd7eef35",
@@ -422,6 +430,22 @@
    "duration_s": 1.207,
    "lufs": -20.41,
    "text_sha256": "39fb24b2e5577358ab82f7997acdbb06a336b4b00b74c11d0cadedf441b39762"
+  },
+  "Menu/vox/gen_female/interventions_off.ogg": {
+   "line": "Menu/interventions_off",
+   "input_sha256": "c1ff65cfbc87856bdf8e678a9d5f8f6a7731cfa65a816f68ed7521a91bc2bec9",
+   "text_sha256": "8cc84bf1ad4c20c7b6b06be097ebb72eaa2fc2161acc44c42dd6527c0a3454ed",
+   "sha256": "dfb9a34055e7c39fb98d6d01648da32738a246377b615769bb656fea4b1812a9",
+   "duration_s": 1.247,
+   "lufs": -20.45
+  },
+  "Menu/vox/gen_female/interventions_on.ogg": {
+   "line": "Menu/interventions_on",
+   "input_sha256": "d7f6c7068b4b6980f0f9e72b50e27299124c03d085db12095ec94440ce897aa6",
+   "text_sha256": "2c5e5cf475f2bd6aeaf65b4b3605a5d11df70f7fc4f456a1dd4b4351c6bc8df8",
+   "sha256": "77a86c5eb898e8aec5f3c7ab91be077c7d683800610a498c1420501e3ac69bbc",
+   "duration_s": 1.257,
+   "lufs": -20.44
   },
   "Menu/vox/gen_female/label_agent.ogg": {
    "line": "Menu/label_agent",
@@ -855,6 +879,14 @@
    "lufs": -20.45,
    "text_sha256": "fba3f9498fc2d099d5239889e3c3a3a6baf0e4c4556c6fd426d59cad63b43d4f"
   },
+  "Menu/vox/gen_male/agent_watching.ogg": {
+   "line": "Menu/agent_watching",
+   "input_sha256": "96c587481c1bc0937a579194865565d54a95558c9c56d169d7d02ae85ee7e0ba",
+   "text_sha256": "8ddfd524dbb7790b6cec861eeb133617e5a3a1163be27e5bbb4f0316848eb538",
+   "sha256": "1b1b24c04288c1f7d752e3f49ecae43f08070643f7810dbfb3df2d85e1dd5921",
+   "duration_s": 0.569,
+   "lufs": -20.5
+  },
   "Menu/vox/gen_male/backend_claude.ogg": {
    "line": "Menu/backend_claude",
    "input_sha256": "78f4a97ef7ce1b4665c8049581d1b829078502f9809e45c0fcf1e7cff5fb6ebc",
@@ -910,6 +942,22 @@
    "duration_s": 1.119,
    "lufs": -20.53,
    "text_sha256": "39fb24b2e5577358ab82f7997acdbb06a336b4b00b74c11d0cadedf441b39762"
+  },
+  "Menu/vox/gen_male/interventions_off.ogg": {
+   "line": "Menu/interventions_off",
+   "input_sha256": "16b9636d41ed260c410a075f9c54d8ad9704ddc44c03e6c9bcb849f6286707b4",
+   "text_sha256": "8cc84bf1ad4c20c7b6b06be097ebb72eaa2fc2161acc44c42dd6527c0a3454ed",
+   "sha256": "1227b1fa64221d303f5ad5765a58765a35d50884c1aac09e67ebdcd9e6cd7ea1",
+   "duration_s": 1.207,
+   "lufs": -20.5
+  },
+  "Menu/vox/gen_male/interventions_on.ogg": {
+   "line": "Menu/interventions_on",
+   "input_sha256": "ceffe38af55a951938d4ff5b20dd629364380406bad2ba017e7b36bb3e01b876",
+   "text_sha256": "2c5e5cf475f2bd6aeaf65b4b3605a5d11df70f7fc4f456a1dd4b4351c6bc8df8",
+   "sha256": "808933b514b53744caa89ea6e7d0156b1865cf399eccec7a3736d0ceb1f97506",
+   "duration_s": 1.262,
+   "lufs": -20.45
   },
   "Menu/vox/gen_male/label_agent.ogg": {
    "line": "Menu/label_agent",
