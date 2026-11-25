@@ -72,7 +72,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [challenges/can-you-see-the-swing.md](challenges/can-you-see-the-swing.md) | Run the booth challenge "Can you see the swing?": pick a death, read the player's 100 ms motion series in the case's VictoriaMetrics, record whether each backend keeps that density (UC-102) |
 
 Service READMEs (`services/*/README.md`) hold code-level detail; where they disagree with the specs, the
-specs win and the [inventory](specs-inventory.md#3-service-tool-and-test-docs) records the difference.
+specs win and the difference is tracked as a `spec-drift` issue (#2798).
 
 ## 6. Why it is like this: research and design history
 
