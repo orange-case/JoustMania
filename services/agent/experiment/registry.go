@@ -1963,11 +1963,10 @@ func (r *Registry) flushLaterPromotionsLocked(e *entry) {
 	e.laterPromotions = nil
 }
 
-// warnLegacyRevertLocked logs one WARN for a done experiment whose last promotion
-// event is a hold-key revert an older agent queued (revert_pending): nothing runs
-// it now, so its real overlay stays until the kill switch or a manual DELETE
-// clears it (UC-043 A15 step 3). Assumes r.mu is held.
-func (r *Registry) warnLegacyRevertLocked(id string, jrnl *journal.Journal) {
+// warnLegacyRevert logs one WARN when the experiment's last promotion event is a
+// hold-key revert an older agent queued (revert_pending): nothing runs it now
+// (UC-043 A15 step 3). Reads only the journal, so r.mu may or may not be held.
+func (r *Registry) warnLegacyRevert(id string, jrnl *journal.Journal) {
 	events, err := jrnl.Events()
 	if err != nil {
 		return
@@ -1977,7 +1976,7 @@ func (r *Registry) warnLegacyRevertLocked(id string, jrnl *journal.Journal) {
 			continue
 		}
 		if events[i].Promotion.RevertPending {
-			r.log.Warn("experiment: a queued revert from an older agent was not run; clear the real overlay with the kill switch or a DELETE (UC-043 A15)",
+			r.log.Warn("experiment: a queued revert from an older agent was not run; check the flag on the flag service (GET /{flagSetId}/{flagName}): a real overlay of a hold sub-parameter is cleared by the kill switch, and shield.activation has no real scope any more, so its value comes from the stack overlay (UC-043 A15)",
 				"experiment_id", id, "flag", jrnl.Intent().FlagKey)
 		}
 		return
@@ -2214,7 +2213,7 @@ func (r *Registry) Rehydrate(ids []string) error {
 			st = StatusRunning
 		}
 		if st.IsTerminal() {
-			r.warnLegacyRevertLocked(id, jrnl)
+			r.warnLegacyRevert(id, jrnl)
 			continue
 		}
 		e := &entry{
@@ -2278,6 +2277,7 @@ func (r *Registry) finishRestored(id string) {
 
 	ctx := context.Background()
 	if res, ok := r.journaledPromotion(id, jrnl); ok {
+		r.warnLegacyRevert(id, jrnl)
 		final := StatusDiscarded
 		if promotionActed(res) {
 			final = StatusDone

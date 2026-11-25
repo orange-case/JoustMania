@@ -270,3 +270,17 @@ func TestRehydrateWarnsAboutLegacyQueuedRevert(t *testing.T) {
 		}
 	})
 }
+
+// UC: UC-043 A15
+func TestFinishRestoredWarnsAboutLegacyQueuedRevert(t *testing.T) {
+	t.Run("UC-043/A15 a promoting experiment whose promotion event has revert_pending logs one WARN", func(t *testing.T) {
+		h := crashAt(t, crashStage{promoting: true, promotion: &PromotionResult{Outcome: PromotionApplied, Reason: "revert deferred", RevertPending: true}})
+		h.rehydrate(t)
+		if n := strings.Count(h.logs.String(), "queued revert from an older agent was not run"); n != 1 {
+			t.Fatalf("WARNs = %d, want 1:\n%s", n, h.logs.String())
+		}
+		if st, _ := h.r.Status(h.id); st != StatusDone {
+			t.Fatalf("status = %q, want %q", st, StatusDone)
+		}
+	})
+}
