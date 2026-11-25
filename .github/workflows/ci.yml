@@ -372,8 +372,7 @@ jobs:
 
       # #1422: `non_docs` is true when the PR changes ANY file outside the
       # docs-only set below. It gates Integration Tests, so a PR touching only
-      # docs/** (incl. docs/test_cases), Markdown anywhere, or the spec-lint
-      # baseline skips the ~10-16 min docker-compose suite. Written as a
+      # docs/** (incl. docs/test_cases) or Markdown anywhere skips the ~10-16 min docker-compose suite. Written as a
       # negation ("everything except docs") rather than a list of code paths,
       # so a new code directory runs integration by default. Separate step
       # because `predicate-quantifier: every` applies to every filter in a
@@ -389,7 +388,6 @@ jobs:
               - '**'
               - '!docs/**'
               - '!**/*.md'
-              - '!scripts/aiup/spec-lint-baseline.json'
 
       # #1527: the PR labels are read LIVE, not from the event payload. Adding
       # `ci-full` re-runs this run (ci-full-label.yml), and a re-run keeps the
@@ -897,7 +895,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      pull-requests: read  # spec-refs-gate.sh reads the PR labels live
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -919,13 +916,10 @@ jobs:
       - name: Spec references resolve (spec-refs-gate.sh)
         # Every path:line / path:Symbol in docs/specs names a full repo path that
         # exists; Go Span*/Attr* values appear in telemetry.md (#1280). Line-ref
-        # growth warns; baseline growth needs the spec-baseline-growth label.
+        # growth warns; baseline growth fails (no label accepts it, #2799).
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: scripts/ci/spec-refs-gate.sh
 
       - name: Install GLib for the GKeyFile round trip (UC-061 BR-004)
@@ -1162,11 +1156,8 @@ jobs:
   # Spec gate (#1263, AIUP). Two independent steps:
   #  1. Spec lint (scripts/aiup/spec-lint-gate.sh): the AI Unified Process
   #     spec_lint.py (vendored under scripts/aiup/, see its NOTICE) checks docs/
-  #     across files. Every ERROR fails (checked without the baseline, so errors
-  #     cannot be baselined); every WARN not in the committed baseline
-  #     (scripts/aiup/spec-lint-baseline.json) fails, so existing warning debt is
-  #     reported but only NEW warnings block; on PRs the baseline may not grow
-  #     versus the base branch unless the `spec-baseline-growth` label is set.
+  #     across files. Every ERROR and every WARN fails (--strict, no baseline,
+  #     #2799); INFO findings are reported only.
   #  2. Spec touched: a PR changing services/**, lib/** or proto/** must change
   #     the spec, or carry the `no-spec-change` label, or be a bot / agent-
   #     promoter PR. Adding/removing either label re-runs this job via
@@ -1186,13 +1177,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Spec lint (AIUP spec_lint.py; errors always fail, new warnings fail)
+      - name: Spec lint (AIUP spec_lint.py; errors and warnings fail)
         if: needs.changes.outputs.specs == 'true' || needs.changes.outputs.run_all_checks == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: scripts/aiup/spec-lint-gate.sh
 
       - name: Spec touched (no-spec-change label or bot/agent PR to skip)

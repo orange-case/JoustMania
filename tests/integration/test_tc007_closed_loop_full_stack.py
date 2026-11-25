@@ -1,6 +1,6 @@
 """TC-007 on the full stack (T3): the closed agent loop through the real otel-collector (#1422 S8, #1404).
 
-docs/test_cases/TC-007-agent-intervenes-in-ffa-game.md. The service tier
+The TC-007 journey document was retired by #2799; this test is the journey. The service tier
 (``tests/service/test_tc007_rules_intervention_applied.py``) already proves the
 rules decision is written and applied, with a harness sink in place of the
 collector. This journey runs the SHIPPED images under docker compose and covers

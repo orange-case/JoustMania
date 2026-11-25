@@ -130,7 +130,7 @@ _Verified against main f38f076d, 2026-10-23._
   non-git-cwd test case, and make "skip" mean a provable `is-ancestor`.
 - **Spec Gate.** `scripts/aiup/check-spec-touched.sh` fails any `services/**`, `lib/**`, `proto/**` diff, even a
   dead-code deletion, without the `no-spec-change` label AND the body line `Spec changes: none: <reason>`. The
-  lint exits non-zero on any NEW warning (a RULE_NUMBERING gap clears when the PR holding the missing BR merges,
+  lint exits non-zero on any warning, there is no baseline (#2799) (a RULE_NUMBERING gap clears when the PR holding the missing BR merges,
   or on rebase). A copied PR body keeps the old `Spec changes:` line: read it against the diff.
 - **Parallel PR id collisions.** Two open PRs can both take the next free `D-*` row or A-/BR- id: grep the open PR
   diffs (`gh pr list --state open --search "UC-0xx"`), not only main, before accepting a new id.

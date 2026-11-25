@@ -514,8 +514,8 @@ Rules (from `.claude/rules/development.md`): metric names prefixed with the serv
 span names in dot notation for new spans, attributes namespaced as in §2.1.
 Every Go `Span*` / `Attr*` constant value must appear in this spec as its exact string (a `ns.*` mention or a
 `.suffix` shorthand does not document a key, so write the full key); `make spec-refs-check` fails on a new
-undocumented one, and `docs/specs/notes/spec-refs-baseline.json` lists the ones still open (growth needs the
-`spec-baseline-growth` label, #1280).
+undocumented one, and `docs/specs/notes/spec-refs-baseline.json` lists the ones still open (it only shrinks:
+a new entry fails, #1280, #2799).
 
 Known violations on `main` (do not copy them; fix opportunistically, D-T6): gauge `active_controllers_total`;
 `games_*`, `bluetooth_*`, `event_bus_*`, `psmove_*` and `grpc_requests_total` / `grpc_request_duration_seconds`
