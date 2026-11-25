@@ -50,11 +50,12 @@
     "operator_pad.knob_events_per_step": {
       "state": "ENABLED",
       "variants": {
+        "detent": 1,
         "fine": 2,
         "default": 4,
         "coarse": 6
       },
-      "defaultVariant": "default"
+      "defaultVariant": "detent"
     },
     "operator_pad.preview_enabled": {
       "state": "ENABLED",
@@ -104,6 +105,43 @@
         "short": 800,
         "default": 1500,
         "long": 3000
+      },
+      "defaultVariant": "default"
+    },
+    "operator_pad.display_autopage_ms": {
+      "state": "ENABLED",
+      "variants": {
+        "off": 0,
+        "slow": 8000,
+        "default": 5000,
+        "fast": 3000
+      },
+      "defaultVariant": "default"
+    },
+    "operator_pad.display_home_ms": {
+      "state": "ENABLED",
+      "variants": {
+        "short": 5000,
+        "default": 10000,
+        "long": 30000
+      },
+      "defaultVariant": "default"
+    },
+    "operator_pad.internet_check_target": {
+      "state": "ENABLED",
+      "variants": {
+        "default": "google.com:443",
+        "cloudflare": "1.1.1.1:443",
+        "off": ""
+      },
+      "defaultVariant": "default"
+    },
+    "operator_pad.internet_check_ms": {
+      "state": "ENABLED",
+      "variants": {
+        "fast": 10000,
+        "default": 30000,
+        "slow": 60000
       },
       "defaultVariant": "default"
     }

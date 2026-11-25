@@ -89,11 +89,24 @@ async def test_k6_release_while_a_game_is_live_is_refused_and_sends_nothing(acti
 
 @pytest.mark.uc("UC-015", flow="A7", br=["BR-018", "BR-009", "BR-005"], steps=[9])
 @pytest.mark.uc("UC-016", br=["BR-007"])
-async def test_k6_full_turn_the_menu_answers_ok_and_the_pad_plays_no_cue(actions, menu, cues):
-    """The menu's no-op (`ok`, the unchanged value) for a net that is a multiple of the ladder: no cue."""
+@pytest.mark.parametrize(("start", "steps"), [("hold", 4), ("automatic", -8), ("instant", 12)])
+async def test_k6_full_turn_sends_nothing_and_plays_no_cue(actions, menu, cues, start, steps):
+    result = await actions.dispatch(Gesture(LAYER, "K6", steps=steps), status(operator_settings={SHIELD: start}))
+    assert result == ("step_setting", "noop")
+    menu.ProcessInput.assert_not_awaited()
+    cues.limit.assert_not_awaited()
+    cues.refusal.assert_not_awaited()
+    cues.failure.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-015", flow="A7", br=["BR-018", "BR-009", "BR-005"], steps=[9])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+async def test_k6_full_turn_from_an_unread_start_is_left_to_the_menus_no_op(actions, menu, cues):
+    """Without the operator value the pad cannot tell a full turn; the menu answers `ok` and the unchanged value."""
     menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=True, error="ok", value="hold")
-    result = await actions.dispatch(Gesture(LAYER, "K6", steps=4), status(operator_settings={SHIELD: "hold"}))
+    result = await actions.dispatch(Gesture(LAYER, "K6", steps=4), status(operator_settings={SHIELD: ""}))
     assert result == ("step_setting", "ok")
+    assert sent(menu) == [{"command": "step_setting", "option": SHIELD, "direction": "up", "steps": "4"}]
     cues.limit.assert_not_awaited()
     cues.refusal.assert_not_awaited()
     cues.failure.assert_not_awaited()
@@ -124,6 +137,22 @@ async def test_k6_preview_speaks_the_label_then_each_mode_per_step_and_pulses_it
         {"command": "preview_setting", "option": SHIELD, "mode": "trigger"},
         {"command": "preview_setting", "option": SHIELD, "mode": "hold"},
     ]
+
+
+@pytest.mark.uc("UC-015", flow="main", br=["BR-018", "BR-017"], steps=[9])
+@pytest.mark.uc("UC-016", br=["BR-007"])
+async def test_k6_without_an_operator_value_starts_at_auto_not_the_effective_mode():
+    rig = Rig()
+    rig.step(
+        1,
+        status=menu_pb2.GetMenuStatusResponse(operator_settings={SHIELD: "automatic"}, shield_activation="trigger"),
+        key="K6",
+        option=SHIELD,
+        lobby_only=True,
+    )
+    await rig.time.advance(1.0)
+    assert rig.files() == [Sound.MENU_VOX_LABEL_SHIELD_MODE.value, VOICES["instant"]]
+    assert rig.mode_previews() == [{"command": "preview_setting", "option": SHIELD, "mode": "instant"}]
 
 
 @pytest.mark.uc("UC-015", flow="A7", br=["BR-018", "BR-017", "BR-005"], steps=[9])

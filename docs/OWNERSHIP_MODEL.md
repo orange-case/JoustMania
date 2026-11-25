@@ -186,7 +186,7 @@ reaches the flag service only through menu commands (`ProcessInput` `force_start
 switch does not survive a restart), `decision.backend` (persisted) and the `user` flag `audio_volume.master`. Pad and
 controller admin mode race on the same keys: the last write wins, no lock. The agent still never writes the `agent`
 set; the "menu writes one agent key" statements of §1 and UC-013 BR-001 describe the admin-mode path.
-Planned (#2747, [UC-016](use_cases/UC-016.md) BR-012, BR-013): two more menu commands, no new key: `reset_setting` clears
+Since #2747 ([UC-016](use_cases/UC-016.md) BR-012, BR-013; the pad's keys that send them are planned): two more menu commands, no new key: `reset_setting` clears
 the operator's persisted value of a key the pad already writes (the `automatic` clear generalised), and
 `interventions_switch` writes the in-memory `interventions_enabled` the resume already writes. The `policy.*` budgets stay
 off the pad (not persistable, operator overlays only).

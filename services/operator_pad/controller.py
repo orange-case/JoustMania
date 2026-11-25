@@ -12,7 +12,7 @@ from services.operator_pad import metrics
 from services.operator_pad.actions import Actions
 from services.operator_pad.config import KEYS, KNOB_PRESS, PadConfig
 from services.operator_pad.cues import CuePlayer
-from services.operator_pad.gestures import LAYER_STEP, PRESS, RELEASE, GestureMachine, KeyEvent
+from services.operator_pad.gestures import LAYER_STEP, PAGE_STEP, PRESS, RELEASE, GestureMachine, KeyEvent
 from services.operator_pad.state import MenuStatusReader
 
 logger = logging.getLogger(__name__)
@@ -91,11 +91,15 @@ class PadController:
             if value == PRESS:
                 self._press_status[name] = status
         press_status = self._press_status.pop(name, None) if value == RELEASE else None
-        gestures = self.machine.feed(KeyEvent(name, value, t_ms), self._config.timings())
+        gestures = self.machine.feed(KeyEvent(name, value, t_ms), self._config.timings(), pages=self._pages_active())
         # Before any command is awaited: a release ends the setting screen at once (UC-016 BR-001).
         self._show("hold_key", self.machine.preview_key())
         self._show("set_locked", self.machine.locked)
+        self._show("note_input", self.machine.keys_down())  # UC-016 BR-009
         for gesture in gestures:
+            if gesture.kind == PAGE_STEP:
+                self._show("page_step", gesture.steps)  # UC-016 BR-008: the screen only, no command, no cue
+                continue
             if gesture.kind == LAYER_STEP:
                 # BR-017: the preview starts from the status read at the press, peeked (the release pops it).
                 await self._actions.dispatch(gesture, None, self._press_status.get(gesture.key))
@@ -103,6 +107,13 @@ class PadController:
             await self._actions.dispatch(gesture, status, press_status)
         # A chord or a lost key ends the hold without a layer release: the preview stops too.
         self._actions.end_preview(unless_key=self.machine.preview_key())
+
+    def _pages_active(self) -> bool:
+        """UC-016 BR-008: the knob scrolls pages; any failure reads as no pages (UC-015 knob, FR-240)."""
+        try:
+            return self._display is not None and self._display.pages_active is True
+        except Exception:
+            return False
 
     def _token(self) -> int | None:
         try:
