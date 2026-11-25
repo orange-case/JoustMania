@@ -62,7 +62,7 @@ var propFlags = []propFlag{
 	{"game", "shield.energy_budget_seconds", nil, []string{"5", "20", "31"}, []Scope{stackSc, realPSc, exp1Sc}},
 	{"game", "death_grace_period_seconds", nil, []string{"0", "2.5", "6"}, []Scope{realPSc, exp1Sc, exp2Sc}},
 	{"agent", "interventions_allowed", []string{"none", "probe", "ambient", "bogus"}, []string{`""`, `"noop"`}, []Scope{stackSc}},
-	{"agent", "decision.openai.model", []string{"unset"}, []string{`"gpt-x"`, `"gpt-y"`, "3"}, []Scope{stackSc}},
+	{"agent", "decision.operator_brief", []string{"off"}, []string{`"brief-x"`, `"brief-y"`, "3"}, []Scope{stackSc}},
 }
 
 var (
@@ -105,7 +105,18 @@ func TestOpSequenceProperties(t *testing.T) {
 	if err != nil {
 		t.Fatalf("baseline: %v", err)
 	}
-	reg, err := registry.LoadFile(repoPath(t, "registry.yaml"), base)
+	// No shipped persistable free string remains, so the test makes
+	// decision.operator_brief one to keep the persisted o-variant covered.
+	src, err := os.ReadFile(repoPath(t, "registry.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := "key: decision.operator_brief, kind: overlay, scope: [stack],"
+	if !bytes.Contains(src, []byte(row)) {
+		t.Fatalf("registry.yaml has no %q row", row)
+	}
+	src = bytes.Replace(src, []byte(row), []byte(row+" persist: true,"), 1)
+	reg, err := registry.Parse(src, base)
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}

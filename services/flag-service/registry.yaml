@@ -64,27 +64,22 @@ flags:
   - {set: agent, key: experiments_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: experiment_dynamic_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: rollout_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
-  - {set: agent, key: decision.backend, kind: overlay, scope: [stack], persist: true, bounds: {variants: [rules, claude, openai, jev]}}
+  - {set: agent, key: decision.backend, kind: overlay, scope: [stack], persist: true, bounds: {variants: [rules, claude, jev]}}
   - {set: agent, key: decision.act_confidence_threshold, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.jev.act_confidence_threshold, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.capture_content, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: decision.claude.model, kind: overlay, scope: [stack], persist: true}
-  - {set: agent, key: decision.openai.reasoning_effort, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.jev.model, kind: overlay, scope: [stack], persist: true}
-  - {set: agent, key: decision.openai.model, kind: overlay, scope: [stack], persist: true, bounds: {free_string: true}}
   # Credential-bearing URL: declared variants only, so no runtime write can send
   # the API key to an arbitrary host (the API is unauthenticated, D11).
   - {set: agent, key: decision.claude.base_url, kind: overlay, scope: [stack]}
-  - {set: agent, key: decision.openai.base_url, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.min_interval_ms, kind: overlay, scope: [stack], bounds: {range: [100, 60000], integer: true}}
   # The per-game gap after an answer (#2123): operator-written (#2518), never by the agent (C-034).
   - {set: agent, key: decision.min_gap_after_answer_ms, kind: overlay, scope: [stack]}
-  - {set: agent, key: decision.openai.timeout_ms, kind: overlay, scope: [stack], bounds: {range: [100, 60000], integer: true}}
   - {set: agent, key: llm.max_requests_per_minute, kind: overlay, scope: [stack]}
-  # The paid backends' own decide caps (#2519): tighten-only, operator-written,
+  # The paid backend's own decide cap (#2519): tighten-only, operator-written,
   # never by the agent (C-034); declared variants only.
   - {set: agent, key: decision.claude.max_requests_per_minute, kind: overlay, scope: [stack]}
-  - {set: agent, key: decision.openai.max_requests_per_minute, kind: overlay, scope: [stack]}
   - {set: agent, key: llm.eligible_game_kinds, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.claude.timeout_ms, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.jev.timeout_ms, kind: overlay, scope: [stack]}
@@ -107,7 +102,7 @@ flags:
   # experiment+arm (#2530): scripts/agent-group-ab.sh writes one value per arm; the rung never
   # matches a real game. Not in the experiment catalog (that is the game set only).
   - {set: agent, key: decision.prompt_profile, kind: overlay, scope: [stack, experiment+arm], bounds: {variants: ["v1", "neutral"]}, description: "wording of the LLM decide prompt: v1 shipped, neutral levers by effect"}
-  # decision.operator_brief (#2687, UC-040 BR-044, FR-096): operator-written free text the claude / openai
+  # decision.operator_brief (#2687, UC-040 BR-044, FR-096): operator-written free text the claude
   # decide prompt carries as an <operator_brief> block; never by the agent (C-034). It adds no lever and no bound.
   - {set: agent, key: decision.operator_brief, kind: overlay, scope: [stack], bounds: {free_string: true}}
   # decision.magnitude_bounds (#2696, UC-040 BR-045, FR-098): the ranges the agent may choose its magnitudes
