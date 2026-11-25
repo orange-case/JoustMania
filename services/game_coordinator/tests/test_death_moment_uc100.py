@@ -63,6 +63,10 @@ class _Sdk:
     def death_logs(self) -> list:
         return [r.log_record for r in self.logs.get_finished_logs() if r.log_record.event_name == DEATH]
 
+    def backend_death_logs(self) -> list:
+        """Death records the backends get: all but the agent-only copy (#2783: sent in every game)."""
+        return [r for r in self.death_logs() if r.attributes.get("orangecase.audience") != "agent"]
+
     def death_spans(self) -> list:
         return [s for s in self.spans.get_finished_spans() if s.name == f"game.{DEATH}"]
 
@@ -115,7 +119,7 @@ async def test_default_shape_keeps_the_span_event_and_adds_the_identity(sdk):
     assert (death["player.serial"], death["player.name"]) == ("p0", "Blue Phoenix")
     assert (death["game.id"], death["game.kind"]) == ("test_uc030", "real")
     assert death["death.reason"] == "motion"
-    assert sdk.death_logs() == [] and sdk.death_spans() == []
+    assert sdk.backend_death_logs() == [] and sdk.death_spans() == []
 
 
 @pytest.mark.asyncio
@@ -133,7 +137,7 @@ async def test_span_shape_sends_a_point_in_time_game_player_death_span(sdk):
     assert moment.context.trace_id == span.get_span_context().trace_id
     assert set(moment.attributes) == TODAY | IDENTITY
     assert moment.attributes["moment.id"] == "test_uc030/p0/1"
-    assert sdk.death_logs() == []
+    assert sdk.backend_death_logs() == []
 
 
 @pytest.mark.asyncio

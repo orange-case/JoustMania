@@ -13,11 +13,11 @@ sent in the shape the ``observability/telemetry.moment_shape`` flag chose for th
   ``log_level`` flag never drops it;
 - ``both``: ``span_event`` and ``log_event`` with the same attributes (one ``moment.id``).
 
-With ``observability/telemetry.agent_log_events`` on for the game (#2722, UC-100 BR-012),
-the agent also gets its own log records on the same logger, each marked
-``orangecase.audience`` = ``agent`` so the collector keeps them from the gateway: a log
-copy of a moment the shape sends as a span event or a span (``agent_copy``), and the
-game's ``game.start`` / ``game.end`` (``emit_agent_event``).
+The agent also gets its own log records on the same logger (#2722, #2783, UC-100 BR-012),
+each marked ``orangecase.audience`` = ``agent`` so the collector keeps them from the
+gateway: a log copy of a moment the shape sends as a span event or a span
+(``agent_copy``), and the game's ``game.start`` / ``game.phase.start`` / ``game.end``
+(``emit_agent_event``).
 
 A shape that needs the log channel falls back to ``span_event`` in a process without
 OTLP logging (UC-100 A1). Every function here only enqueues (span processor, log
@@ -52,8 +52,6 @@ _LOG_SHAPES = frozenset({MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH})
 MOMENT_SHAPE_ATTR = "telemetry.moment_shape"
 MOMENT_ID_ATTR = "moment.id"
 
-AGENT_LOG_EVENTS_FLAG = "telemetry.agent_log_events"
-AGENT_LOG_EVENTS_ATTR = "telemetry.agent_log_events"
 AUDIENCE_ATTR = "orangecase.audience"
 AUDIENCE_AGENT = "agent"
 # In the log shapes the moment's own log event already reaches the agent.
@@ -105,18 +103,6 @@ def read_moment_shape() -> str:
     from lib.feature_flags import read_string_flag  # lazy: lib.feature_flags pulls in the metrics libs
 
     return effective_moment_shape(read_string_flag("observability", MOMENT_SHAPE_FLAG, MOMENT_SHAPE_SPAN_EVENT))
-
-
-def read_agent_log_events() -> bool:
-    """Read ``telemetry.agent_log_events`` once (per game): whether the agent gets its own log events.
-
-    Fail-closed: anything but ``True`` is off, and so is a process without OTLP logging
-    (it could send none of them).
-    """
-    from lib.feature_flags import read_bool_flag  # lazy: lib.feature_flags pulls in the metrics libs
-
-    on = read_bool_flag("observability", AGENT_LOG_EVENTS_FLAG, False) is True
-    return on and otel_logging.get_logger_provider() is not None
 
 
 def moment_id(game_id: str, serial: str, sequence: int) -> str:

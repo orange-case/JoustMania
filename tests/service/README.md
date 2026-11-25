@@ -39,7 +39,7 @@ exporters to `stack.otlp_sink` (`harness/fakes/otlp.py`), which records spans an
 ```python
 span = await stack.otlp_sink.wait_span_async(None, {"game.id": game_id}, event="player_disconnected")
 root = await stack.otlp_sink.wait_span_async("Joust Free-for-All", {"game.id": game_id}, root=True)
-point = await stack.otlp_sink.wait_metric_async("game_trace_correlation", {"game_id": game_id})
+point = await stack.otlp_sink.wait_metric_async("game_active", {"game_id": game_id})
 ```
 
 - A span arrives when it ENDS, after the BatchSpanProcessor delay (`otel_bsp_schedule_delay_millis`,

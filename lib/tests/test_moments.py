@@ -448,30 +448,6 @@ def test_emit_agent_event_without_otlp_logging_or_with_a_broken_channel_never_ra
     assert capsys.readouterr().err.count("moment could not be recorded") == 1
 
 
-@pytest.mark.uc("UC-100", br=["BR-012"])
-@pytest.mark.parametrize(("value", "expected"), [(True, True), (False, False), ("true", False), (None, False)])
-@pytest.mark.usefixtures("logs")
-def test_read_agent_log_events_reads_the_observability_flag(monkeypatch, value, expected):
-    calls = []
-
-    def _read(domain, key, default, game_id=None):  # noqa: ARG001
-        calls.append((domain, key, default))
-        return value
-
-    monkeypatch.setattr("lib.feature_flags.read_bool_flag", _read)
-
-    assert moments.read_agent_log_events() is expected
-    assert calls == [("observability", "telemetry.agent_log_events", False)]
-
-
-@pytest.mark.uc("UC-100", br=["BR-012"])
-def test_read_agent_log_events_is_off_without_otlp_logging(monkeypatch):
-    monkeypatch.setattr(otel_logging, "_logger_provider", None)
-    monkeypatch.setattr("lib.feature_flags.read_bool_flag", lambda *a, **k: True)  # noqa: ARG005
-
-    assert moments.read_agent_log_events() is False
-
-
 @pytest.mark.uc("UC-100", flow="A6", br=["BR-003", "BR-012"])
 def test_both_shape_without_a_timestamp_stamps_event_and_log_with_one_clock_read(spans, logs):
     tracer, exporter = spans

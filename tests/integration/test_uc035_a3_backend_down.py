@@ -9,7 +9,7 @@ the ``agent_down`` fixture stops it and restarts it at teardown, so the test
 holds either way. A headless mock game then runs and ends, and what the
 collector delivered is read back from the backends' own query APIs:
 
-- VictoriaMetrics holds ``game_trace_correlation{game_id=...}`` for the live game;
+- VictoriaMetrics holds ``game_active{game_id=...}`` for the live game;
 - Jaeger holds the game's root span, found by ``game.id``;
 - the collector container is still running;
 - the root span is findable by its trace id with its spans, the place an operator
@@ -83,8 +83,8 @@ def _container_running(docker_compose, service: str) -> bool:
     return state == "true"
 
 
-def _correlation_series(game_id: str) -> list:
-    query = urllib.parse.quote(f'game_trace_correlation{{game_id="{game_id}"}}')
+def _game_active_series(game_id: str) -> list:
+    query = urllib.parse.quote(f'game_active{{game_id="{game_id}"}}')
     return _get_json(f"{VICTORIA_METRICS_API}/query?query={query}")["data"]["result"]
 
 
@@ -165,14 +165,12 @@ async def test_agent_down_collector_still_delivers_to_jaeger_and_victoria_metric
         )
         headless_cleanup.add_game(game_id)
 
-        # Metrics: the live game's correlation series reaches VictoriaMetrics.
+        # Metrics: the live game's game_active series reaches VictoriaMetrics.
         assert await async_poll_until(
-            lambda: _nonempty(_correlation_series, game_id),
+            lambda: _nonempty(_game_active_series, game_id),
             timeout=BACKEND_TIMEOUT_SECONDS,
             interval=1.0,
-        ), (
-            f"VictoriaMetrics has no game_trace_correlation for {game_id} while the agent is down"
-        )
+        ), f"VictoriaMetrics has no game_active for {game_id} while the agent is down"
 
         # Post-F-1: the loop runs at its configured (NFR-003) rate while the agent is down.
         assert await async_poll_until(

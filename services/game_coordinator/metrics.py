@@ -44,62 +44,6 @@ current_game_mode = Gauge(
     ["mode", "game_kind", "game_id"],
 )
 
-# Trace-correlation signal (Phase 2 of #1088). A dedicated, low-rate
-# per-game gauge whose VALUE is always 1 while the game's root span is live; its
-# payload is the labels. It carries the game span's hex trace_id as game_trace_id
-# alongside game_id so the agent — which consumes game state only as METRICS (no
-# parent trace context) — can read the originating game trace_id during ingest and
-# add an OTel span LINK from agent.decision to that trace (navigable in Jaeger),
-# not merely a shared game.id attribute (Phase 1).
-#
-# Why a dedicated signal and not an exemplar (the OTLP-native alternative the issue
-# asked us to evaluate FIRST): the coordinator's gauges go through
-# lib.otel_metrics, which uses the OTel SDK's create_observable_gauge + a flush-time
-# callback yielding metrics.Observation(value, labels). Observable gauges expose NO
-# API to attach exemplars (exemplars are auto-sampled by the SDK for sum/histogram
-# aggregations from the active span at record time — there is no active span at the
-# async callback flush, and the Observation API takes no exemplar). So the exemplar
-# path is not feasible end-to-end in this stack; this dedicated attribute-carrying
-# signal is the documented Approach B.
-#
-# It also carries the root span's hex span_id as game_trace_span_id so the
-# agent's Link references the actual game-start span (Jaeger highlights it via
-# uiFind) rather than an all-zero span id under that trace.
-#
-# It ADDITIONALLY carries the hex span_id of the gameplay_phase sub-span as
-# gameplay_phase_span_id. gameplay_phase is the STABLE span covering the
-# whole active-play window WITHIN the game trace; the agent re-parents its in-game
-# decision chain (signal_received -> decision -> action) under THIS span instead of
-# the game root, so a reader sees interventions nested where they actually
-# occurred. Same trace as game_trace_span_id (game_trace_id is identical), so it is
-# a strict refinement: the agent falls back to game_trace_span_id (game root) when
-# this is empty (gameplay_phase not yet open / unsampled). The gamesummary hub-link
-# and the retro/experiment Links deliberately KEEP targeting game_trace_span_id
-# (the root) — only the in-game decision chain retargets to gameplay_phase.
-#
-# Since #1325 it ALSO carries the hex span_id of the game_cycle span (a child of
-# gameplay_phase, sibling of players) as game_cycle_span_id. The agent parents its
-# in-game spans under game_cycle when this is set, falling back to
-# gameplay_phase_span_id, then game_trace_span_id (UC-040 BR-013, UC-041 BR-004).
-#
-# Cardinality: game_trace_id / game_trace_span_id / gameplay_phase_span_id /
-# game_cycle_span_id are each 1:1 with game_id (one of each span per game), so they
-# multiply NO series beyond the already-unbounded game_id. Like the other per-game
-# gauges it is SET to 1 inside the live game span and REMOVED at retire (clear_metrics,
-# #1018) so the series does not accumulate.
-game_trace_correlation = Gauge(
-    "game_trace_correlation",
-    "Correlation marker tying a live game_id to its root span trace_id (always 1 while live)",
-    [
-        "game_kind",
-        "game_id",
-        "game_trace_id",
-        "game_trace_span_id",
-        "gameplay_phase_span_id",
-        "game_cycle_span_id",
-    ],
-)
-
 game_duration_seconds = Gauge(
     "game_duration_seconds",
     "Duration of current game in seconds",

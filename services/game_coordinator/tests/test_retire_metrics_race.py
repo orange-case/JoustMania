@@ -43,7 +43,6 @@ SESSION_GAUGES = (
     metrics.active_players,
     metrics.game_duration_seconds,
     metrics.current_game_mode,
-    metrics.game_trace_correlation,
 )
 LOOP_HEALTH_GAUGES = (
     metrics.game_loop_jitter_ms,
@@ -116,7 +115,6 @@ def _game_that_retires_before_teardown(session: GameSession):
     async def run():
         session.on_event_state_sync(GameEvent.GAME_STARTED)
         session._set_duration_gauge()  # the live ticker has written at least once
-        session.publish_gameplay_phase_span_id("00f067aa0ba902b7")
         # The game published its ending event (event-sync sets ENDED), and the
         # natural-end sweep retires the session before the loop's finally ran.
         session.on_event_state_sync(GameEvent.GAME_ENDED)
@@ -308,17 +306,14 @@ class TestRetireExportsTheEnd:
         """Between retire's zeroing and the removal, session writes stay no-ops:
         game_active is not set back to 1 and no other series is re-created."""
         session = _make_session()
-        session.game_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
-        session.game_trace_span_id = "051581bf3cb55c13"
         session.clear_metrics()
         assert _value_for(metrics.active_game, GAME_ID) == 0  # removal still pending
 
         session._set_duration_gauge()
-        session._set_gauges_unless_retired(session._set_trace_correlation)
         session.publish_game_mode("FFA")
 
         assert _value_for(metrics.active_game, GAME_ID) == 0
-        for gauge in (metrics.game_duration_seconds, metrics.current_game_mode, metrics.game_trace_correlation):
+        for gauge in (metrics.game_duration_seconds, metrics.current_game_mode):
             assert _series_for(gauge, GAME_ID) == [], gauge.name
         delayed_removal.fire_all()
         for gauge in SESSION_GAUGES:
@@ -337,16 +332,11 @@ class TestWritesAfterRetire:
     def test_session_writes_after_retire_are_dropped(self, live_gauges):
         """Each per-game write path of the session is a no-op once retired (#1311)."""
         session = _make_session()
-        session.game_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
-        session.game_trace_span_id = "051581bf3cb55c13"
         session.clear_metrics()
 
         session._set_duration_gauge()
         session._set_gauges_unless_retired(session._zero_lifecycle_gauges)
-        session._set_gauges_unless_retired(session._set_trace_correlation)
         session.publish_game_mode("FFA")
-        session.publish_gameplay_phase_span_id("00f067aa0ba902b7")
-        session.publish_game_cycle_span_id("00f067aa0ba902b8")
 
         for gauge in SESSION_GAUGES:
             assert _series_for(gauge, GAME_ID) == [], gauge.name

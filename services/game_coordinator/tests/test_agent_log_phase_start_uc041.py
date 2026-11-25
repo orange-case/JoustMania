@@ -1,9 +1,8 @@
-"""UC-041 A8 / BR-004 (#2766): ``game.phase.start`` carries the phase span ids to the agent.
+"""UC-041 A8 / BR-004 (#2766, #2783): ``game.phase.start`` carries the phase span ids to the agent.
 
-With ``telemetry.agent_log_events`` on, the game sends one agent-only ``game.phase.start``
-when ``gameplay_phase`` opens and one when ``game_cycle`` opens, each in that span's
-context and only when that span is sampled. A mode without ``game_cycle`` sends only
-the first. Off, nothing is sent.
+Every game sends one agent-only ``game.phase.start`` when ``gameplay_phase`` opens and
+one when ``game_cycle`` opens, each in that span's context and only when that span is
+sampled. A mode without ``game_cycle`` sends only the first.
 
 Real SDK tracer and logger providers with in-memory exporters (not the global ones).
 """
@@ -64,17 +63,16 @@ def unsampled_sdk(monkeypatch):
     return _install(monkeypatch, ALWAYS_OFF)
 
 
-def _ffa(agent_log_events):
+def _ffa():
     game = _fast_ffa_game()
     game.game_kind = "shadow"
-    game.agent_log_events = agent_log_events
     return game
 
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
-async def test_flag_on_sends_one_phase_start_per_phase_span_in_its_context(sdk):
-    game = _ffa(agent_log_events=True)
+async def test_every_game_sends_one_phase_start_per_phase_span_in_its_context(sdk):
+    game = _ffa()
 
     await game.run()
 
@@ -94,18 +92,8 @@ async def test_flag_on_sends_one_phase_start_per_phase_span_in_its_context(sdk):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
-async def test_flag_off_sends_no_phase_start(sdk):
-    game = _ffa(agent_log_events=False)
-
-    await game.run()
-
-    assert sdk.records(None) == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
 async def test_unsampled_phase_spans_send_no_phase_start(unsampled_sdk):
-    game = _ffa(agent_log_events=True)
+    game = _ffa()
 
     await game.run()
 
@@ -121,7 +109,6 @@ async def test_mode_without_game_cycle_sends_only_gameplay_phase(sdk):
         game_id="zombie_phase_start",
         initial_players=[type("P", (), {"serial": f"mock_controller_{i}"})() for i in range(3)],
     )
-    game.agent_log_events = True
 
     with (
         patch.object(ZombieGame, "_game_loop", autospec=True),
@@ -146,7 +133,6 @@ async def test_fight_club_sends_only_gameplay_phase(sdk, monkeypatch):
         game_id="fight_club_phase_start",
         initial_players=[type("P", (), {"serial": f"mock_controller_{i}"})() for i in range(3)],
     )
-    game.agent_log_events = True
     game.running = True
     # Fight Club opens gameplay_phase on its module tracer, not _run_tracer().
     monkeypatch.setattr(fight_club, "tracer", sdk.tracer)

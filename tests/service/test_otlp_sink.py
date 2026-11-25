@@ -5,8 +5,9 @@ at the stack's in-process ``OtlpSink``. A three-player JoustFFA game runs
 headless; once its game loop runs one controller is removed (UC-030 A5), then
 the game is force-ended. The sink must receive the game's root span (the
 game-session span, named after the mode, own trace) and the removed player's
-span carrying the ``player_disconnected`` event, plus the coordinator's
-trace-correlation gauge. A unit-level check covers the tee to a second receiver.
+span carrying the ``player_disconnected`` event, plus the game's ``game_active``
+series and the agent-only ``game.start`` record in the root's trace. A unit-level
+check covers the tee to a second receiver.
 """
 
 import dataclasses
@@ -118,12 +119,16 @@ async def test_game_root_span_and_player_disconnected_reach_the_sink(stack, head
     assert root.attributes["game.outcome"] == "force_ended"
     assert player_span.trace_id == root.trace_id, "the player span belongs to the game's trace"
 
-    # Metrics flow too, and the trace-correlation gauge carries the live root span's
-    # trace id (the is_valid branch that a disabled SDK never runs).
-    correlation = await sink.wait_metric_async(
-        "game_trace_correlation", {"game_id": game_id}, service=COORDINATOR, timeout=SPAN_TIMEOUT_SECONDS
+    # Metrics flow too, and the agent-only game.start carries the live root span's
+    # trace id (#2783: the agent's only source of it; a disabled SDK never sends it).
+    await sink.wait_metric_async("game_active", {"game_id": game_id}, service=COORDINATOR, timeout=SPAN_TIMEOUT_SECONDS)
+    start = await sink.wait_log_async(
+        service=COORDINATOR,
+        event_name="game.start",
+        attrs={"game.id": game_id, "orangecase.audience": "agent"},
+        timeout=SPAN_TIMEOUT_SECONDS,
     )
-    assert correlation.attributes["game_trace_id"] == root.trace_id
+    assert (start.trace_id, start.span_id) == (root.trace_id, root.span_id)
 
 
 CHILD_SPAN_ID = bytes(range(9, 17))

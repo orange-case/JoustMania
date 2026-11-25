@@ -123,7 +123,6 @@ The totals (the number of names, of names without a consumer and of names never 
 | `game_shield_activation_mode` | gauge | `mode`, `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent |  |
 | `game_shield_hold_activations_total` | counter | `mode`, `game_kind`, `outcome` | game-coordinator | yes | (none) |  |
 | `game_shield_hold_setting` | gauge | `setting`, `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent |  |
-| `game_trace_correlation` | gauge | `game_kind`, `game_id`, `game_trace_id`, `game_trace_span_id`, `gameplay_phase_span_id`, `game_cycle_span_id` | game-coordinator | yes | agent |  |
 | `games_completed_total` | counter | `mode`, `game_kind`, `outcome` (winner\|tie\|completed\|force_ended\|error) | game-coordinator | yes | grafana | `outcome` = `winner`, `tie`, `completed`, `force_ended`, or `error` when the session published `game_error`; #1427 |
 | `games_started_total` | counter | `mode`, `game_kind` | game-coordinator | yes | grafana |  |
 | `grpc_client_errors_total` | counter | `service`, `method`, `code` | lib (`lib/grpc_metrics.py`) | yes | grafana | #1426; mid-stream errors and the HID adapters counted, a cancel by the caller is not; the Go agent and connect-proxy are not covered (telemetry.md §6) |

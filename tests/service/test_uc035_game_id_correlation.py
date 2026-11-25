@@ -80,9 +80,9 @@ async def test_game_id_correlates_spans_metrics_and_logs(stack, headless_cleanup
 
     # Metrics: the coordinator's series for this game carry the same id.
     point = await sink.wait_metric_async(
-        "game_trace_correlation", {"game_id": game_id}, service=COORDINATOR, timeout=SPAN_TIMEOUT_SECONDS
+        "game_active", {"game_id": game_id}, service=COORDINATOR, timeout=SPAN_TIMEOUT_SECONDS
     )
-    assert point.attributes["game_trace_id"] == root.trace_id
+    assert point.attributes["game_id"] == game_id
 
     # Logs: lines logged during the game carry the root span's trace id.
     line = await sink.wait_log_async(service=COORDINATOR, trace_id=root.trace_id, timeout=SPAN_TIMEOUT_SECONDS)

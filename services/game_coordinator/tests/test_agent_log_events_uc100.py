@@ -1,10 +1,9 @@
-"""UC-100 BR-012 / UC-041 A8 (#2722): the coordinator's agent-only log events.
+"""UC-100 BR-012 / UC-041 A8 (#2722, #2783): the coordinator's agent-only log events.
 
-``telemetry.agent_log_events`` is read once per game next to the moment shape, recorded
-on the game root and held for the game. On, the coordinator sends ``game.start`` and
-``game.end`` in the root span's context and, in the ``span_event`` and ``span`` shapes, a
-log copy of each warning and death; every such record carries ``orangecase.audience`` =
-``agent``. Off (the default), nothing new is sent.
+Every game sends ``game.start`` and ``game.end`` in the root span's context and, in the
+``span_event`` and ``span`` shapes, a log copy of each warning and death; every such
+record carries ``orangecase.audience`` = ``agent``. No flag gates them (#2783); a process
+without OTLP logging sends none.
 
 Real SDK tracer and logger providers with in-memory exporters (not the global ones).
 """
@@ -25,7 +24,7 @@ from services.game_coordinator.tests.test_death_detection_uc030 import _game
 from services.game_coordinator.tests.test_game_session import _make_session
 
 AUDIENCE = {"orangecase.audience": "agent"}
-SHAPES = ["span_event", "span", "log_event", "both"]
+RETIRED_FLAG = "telemetry.agent_log_events"
 
 
 class _Sdk:
@@ -52,31 +51,27 @@ def sdk(monkeypatch):
 
 
 class _FlagReads:
-    """Stands in for the flag readers: answers the two per-game flags, counts their reads."""
+    """Stands in for the flag readers: answers the moment shape, records every key read."""
 
-    def __init__(self, shape="span_event", agent_log_events=False):
+    def __init__(self, shape="span_event"):
         self.shape = shape
-        self.agent_log_events = agent_log_events
-        self.reads = {"telemetry.moment_shape": 0, "telemetry.agent_log_events": 0}
+        self.keys: list[str] = []
 
     def string(self, domain, key, default, game_id=None):  # noqa: ARG002
-        if key == "telemetry.moment_shape":
-            self.reads[key] += 1
-            return self.shape
-        return default
+        self.keys.append(key)
+        return self.shape if key == "telemetry.moment_shape" else default
 
     def boolean(self, domain, key, default, game_id=None):  # noqa: ARG002
-        if key == "telemetry.agent_log_events":
-            self.reads[key] += 1
-            return self.agent_log_events
+        self.keys.append(key)
         return default
 
 
-async def _run_session(sdk, reads, run=None, build_error=None):
+async def _run_session(sdk, reads=None, run=None, build_error=None):
     session = _make_session()
     game = create_autospec(FFAGame, instance=True)
     game.run.side_effect = run
     game.get_game_name.return_value = "FFA"
+    reads = reads or _FlagReads()
     with (
         patch("services.game_coordinator.game_session.tracer", sdk.tracer),
         patch("services.game_coordinator.game_session.GameFactory") as factory,
@@ -90,35 +85,26 @@ async def _run_session(sdk, reads, run=None, build_error=None):
     return session, root, game
 
 
-# --- the session: one read per game, recorded on the root, held for the game ----------
+# --- the session: no flag, no root attribute, start and end in every game -----------------
 
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", flow="main", steps=[3], br=["BR-002", "BR-012"])
-@pytest.mark.parametrize("value", [True, False])
-async def test_session_reads_the_flag_once_and_records_it_on_the_game_root(sdk, value):
-    reads = _FlagReads(agent_log_events=value)
+async def test_session_reads_no_agent_log_events_flag_and_records_none_on_the_root(sdk):
+    reads = _FlagReads()
 
-    _, root, game = await _run_session(sdk, reads)
+    _, root, _ = await _run_session(sdk, reads)
 
-    assert reads.reads == {"telemetry.moment_shape": 1, "telemetry.agent_log_events": 1}
-    assert root.attributes["telemetry.agent_log_events"] is value
-    assert game.agent_log_events is value
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-100", br=["BR-012"])
-async def test_flag_off_sends_no_new_record(sdk):
-    await _run_session(sdk, _FlagReads(agent_log_events=False))
-
-    assert sdk.records() == []
+    assert RETIRED_FLAG not in reads.keys
+    assert reads.keys.count("telemetry.moment_shape") == 1
+    assert RETIRED_FLAG not in root.attributes
 
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", br=["BR-012"])
 @pytest.mark.uc("UC-041", flow="A8", steps=[1, 2, 4])
-async def test_flag_on_sends_game_start_and_game_end_in_the_root_context(sdk):
-    session, root, _ = await _run_session(sdk, _FlagReads(agent_log_events=True))
+async def test_every_game_sends_game_start_and_game_end_in_the_root_context(sdk):
+    session, root, _ = await _run_session(sdk)
 
     (start,) = sdk.records("game.start")
     (end,) = sdk.records("game.end")
@@ -141,7 +127,7 @@ async def test_game_end_is_sent_once_also_when_the_game_fails(sdk):
     def _boom():
         raise RuntimeError("mode failed")
 
-    await _run_session(sdk, _FlagReads(agent_log_events=True), run=_boom)
+    await _run_session(sdk, run=_boom)
 
     assert len(sdk.records("game.start")) == 1
     assert len(sdk.records("game.end")) == 1
@@ -165,20 +151,20 @@ async def test_game_end_is_sent_once_when_the_game_is_force_ended(sdk):
         return holder["session"]
 
     with patch(f"{__name__}._make_session", _capture):
-        await _run_session(sdk, _FlagReads(agent_log_events=True), run=_force_ended)
+        await _run_session(sdk, run=_force_ended)
 
     assert len(sdk.records("game.end")) == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", flow="A1", br=["BR-012"])
-async def test_without_otlp_logging_the_flag_reads_off_and_nothing_is_sent(sdk, monkeypatch):
+async def test_without_otlp_logging_nothing_is_sent_and_the_game_runs(sdk, monkeypatch):
     monkeypatch.setattr(otel_logging, "_logger_provider", None)
 
-    _, root, game = await _run_session(sdk, _FlagReads(agent_log_events=True))
+    _, root, game = await _run_session(sdk)
 
-    assert root.attributes["telemetry.agent_log_events"] is False
-    assert game.agent_log_events is False
+    assert RETIRED_FLAG not in root.attributes
+    game.run.assert_awaited_once()
     assert sdk.records() == []
 
 
@@ -186,7 +172,7 @@ async def test_without_otlp_logging_the_flag_reads_off_and_nothing_is_sent(sdk, 
 @pytest.mark.uc("UC-041", flow="A8", steps=[4])
 async def test_a_game_never_built_sends_no_agent_record(sdk):
     """game.end only pairs with a sent game.start."""
-    await _run_session(sdk, _FlagReads(agent_log_events=True), build_error=ValueError("unknown mode"))
+    await _run_session(sdk, build_error=ValueError("unknown mode"))
 
     assert sdk.records() == []
 
@@ -194,11 +180,10 @@ async def test_a_game_never_built_sends_no_agent_record(sdk):
 # --- the moments: a marked copy in the span shapes only -----------------------------------
 
 
-def _ffa(sdk, shape, agent_log_events):
+def _ffa(sdk, shape):
     game, _ = _game(3)
     game._play_sound = AsyncMock()
     game.moment_shape = shape
-    game.agent_log_events = agent_log_events
     for serial, player in game.players.items():
         player.span = sdk.tracer.start_span("player_lifecycle", attributes={"player.serial": serial})
     return game
@@ -225,7 +210,7 @@ def _moment(sdk, span, name, shape):
 @pytest.mark.uc("UC-041", flow="A8", steps=[3])
 @pytest.mark.parametrize("shape", ["span_event", "span"])
 async def test_span_shapes_send_a_marked_log_copy_of_the_warning_and_the_death(sdk, shape):
-    game = _ffa(sdk, shape, agent_log_events=True)
+    game = _ffa(sdk, shape)
     span = game.players["p0"].span
 
     await _warn(game)
@@ -244,7 +229,7 @@ async def test_span_shapes_send_a_marked_log_copy_of_the_warning_and_the_death(s
 @pytest.mark.uc("UC-100", br=["BR-012"])
 @pytest.mark.parametrize("shape", ["log_event", "both"])
 async def test_log_shapes_send_no_copy(sdk, shape):
-    game = _ffa(sdk, shape, agent_log_events=True)
+    game = _ffa(sdk, shape)
 
     await _warn(game)
     assert await game._kill_player("p0", 3.0) is True
@@ -256,10 +241,11 @@ async def test_log_shapes_send_no_copy(sdk, shape):
 
 @pytest.mark.asyncio
 @pytest.mark.nfr("NFR-060")
-@pytest.mark.uc("UC-100", br=["BR-012"])
+@pytest.mark.uc("UC-100", flow="A1", br=["BR-012"])
 @pytest.mark.parametrize("shape", ["span_event", "span"])
-async def test_flag_off_sends_no_moment_copy(sdk, shape):
-    game = _ffa(sdk, shape, agent_log_events=False)
+async def test_without_otlp_logging_no_moment_copy_and_the_death_still_lands(sdk, monkeypatch, shape):
+    monkeypatch.setattr(otel_logging, "_logger_provider", None)
+    game = _ffa(sdk, shape)
 
     await _warn(game)
     assert await game._kill_player("p0", 3.0) is True
@@ -267,7 +253,7 @@ async def test_flag_off_sends_no_moment_copy(sdk, shape):
     assert sdk.records() == []
 
 
-def test_a_new_game_holds_the_flag_off():
+def test_a_new_game_has_no_agent_log_events_switch():
     game, _ = _game(2)
 
-    assert game.agent_log_events is False
+    assert not hasattr(game, "agent_log_events")

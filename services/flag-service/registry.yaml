@@ -232,5 +232,3 @@ flags:
   - {set: observability, key: telemetry.experiment_game_parent, kind: overlay, scope: [stack]}
   # The shape of the death_warning moment (#2658, UC-100): span_event (default), span, log_event or both.
   - {set: observability, key: telemetry.moment_shape, kind: overlay, scope: [stack]}
-  # Agent-only log events (#2722, UC-100 BR-012): game.start/game.end and moment copies, marked for the agent.
-  - {set: observability, key: telemetry.agent_log_events, kind: overlay, scope: [stack]}
