@@ -81,8 +81,7 @@ func skipStaleGameEnd(fn func(gamecontext.GameContext)) func(gamecontext.GameCon
 // last the calibration journal (UC-047 step 1, BR-009, #1055). A stale end
 // (UC-041 A4) is counted and reaches the prediction book (which scores its
 // pending predictions stale_end) and the experiment hook, which releases its slot
-// itself, but never the retro, the summary, the proposer or the journal (a game
-// the agent did not journal is ineligible for calibration, UC-047 BR-003). nil
+// itself, but never the retro, the summary, the proposer or the journal. nil
 // consumers are skipped.
 func buildGameEndChain(
 	staleEnds otelmetric.Int64Counter,

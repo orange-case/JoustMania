@@ -27,7 +27,7 @@ const (
 
 // Journal is the bounded, durable list of journaled games. It is rewritten in
 // full on every append with a durable atomic write (temporary file, fsync,
-// rename, fsync of the directory; UC-047 BR-008 b), so a reader or a restart
+// rename, fsync of the directory; UC-047 BR-009), so a reader or a restart
 // sees the previous file or the new one, never a torn one. Safe for concurrent use.
 type Journal struct {
 	mu      sync.Mutex
@@ -162,7 +162,7 @@ func (j *Journal) writeLocked() error {
 
 // writeFileAtomic writes data to path durably: a temporary file in the same
 // directory, fsync, rename over path, then fsync of the directory so the rename
-// itself survives a power loss (UC-047 BR-008 b). On any error the temporary file
+// itself survives a power loss (UC-047 BR-009). On any error the temporary file
 // is removed and path keeps its previous content.
 func writeFileAtomic(path string, data []byte, rename func(string, string) error) error {
 	dir := filepath.Dir(path)

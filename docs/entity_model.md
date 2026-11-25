@@ -7,7 +7,7 @@
 > files and the agent's experiment journal. "Primary Key" therefore means the natural identifier.
 > Source of each entity is given in its description. Entities and attributes that exist only in service memory
 > say so ("In-memory, lost on restart"); everything else is a protobuf message, a flag value or a journal
-> record. State: `main` @ a74d0d77 (agent-cluster `/spec-review` of 2026-10-20, #1679; flag service delivered by #1417).
+> record.
 
 ## Entity Relationship Diagram
 
@@ -260,7 +260,7 @@ A named value of a flag.
 
 ### MUTABLE_FLAG_POLICY
 
-Delivered by #1417 (epic #1407, UC-053, FR-132). One row of the flag service's mutable-flag registry
+Realises UC-053, FR-132. One row of the flag service's mutable-flag registry
 (`services/flag-service/registry.yaml`, [flags.md §13](specs/flags.md#13-mutable-flag-registry)): a flag that may change at
 runtime, within which bounds, and whether a write may persist it. In-memory once loaded at start, lost on restart (the
 file is the source). A flag without a policy is read-only baseline. There are no writer roles (local game, architecture note D11).
@@ -280,7 +280,7 @@ file is the source). A flag without a policy is read-only baseline. There are no
 
 ### GAME_SCOPE
 
-Delivered by #1417 (FR-135). The flag service's record of one live game (`services/flag-service/state/games.go`), registered by the game coordinator
+Realises FR-135. The flag service's record of one live game (`services/flag-service/state/games.go`), registered by the game coordinator
 at admission and dropped at the game's end, by a reconcile call of its coordinator instance, or after the
 maximum game age (1 h) since it was last seen (registered or reconciled, #2217). In-memory, lost on restart.
 
@@ -300,7 +300,7 @@ maximum game age (1 h) since it was last seen (registered or reconciled, #2217).
 
 ### FLAG_OVERLAY
 
-Delivered by #1417 (FR-134, FR-136 to FR-138). One runtime value the flag service holds on top of the baseline, in memory
+Realises FR-134, FR-136 to FR-138. One runtime value the flag service holds on top of the baseline, in memory
 (C-030, lost on restart); a stack overlay written with `"persist": true` (registry `persist`) is also written to the service's
 own state file and restored at the next start.
 
@@ -556,7 +556,7 @@ The archetype an experiment's pair runs, pinned in the experiment journal (`patt
 
 ### TRACE_CORRELATION
 
-The identifiers that tie a game's telemetry together (`services/game_coordinator/metrics.py:89-100` `game_trace_correlation`; [telemetry.md](specs/telemetry.md)).
+The identifiers that tie a game's telemetry together (`services/game_coordinator/metrics.py:89-100` `game_trace_correlation`; [telemetry.md](specs/telemetry.md)). Planned, #2783 (FR-253): the gauge is retired, so this entity is no longer published; the ids then reach the agent only as the trace context of the agent-only `game.start` and `game.phase.start` log records, and the agent keeps them in AGENT_GAME_CONTEXT.
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
@@ -577,10 +577,10 @@ The agent's view of one game, built from the OTLP metrics and spans the collecto
 | experiment_id | Experiment attribution of a shadow game (partition enrichment, not a routing key) | String | 50 | Optional, Foreign Key (EXPERIMENT.experiment_id) |
 | arm | Arm of that game | String | 12 | Optional, Values: experimental, control |
 | end_reason | Which signal ended the game: the `game_active` 1 to 0 datapoint (`zero`), the game root span before any 0 (`root_span`), the agent-only `game.end` log event before either (`end_event`, UC-041 A8), or `game_active` silent for 60 s (`stale`, the agent's telemetry for the game broke: experiments, retro, summary and proposer skip it). Empty while the game runs; set in the game-end snapshot (UC-041 A4, #1494) | String | 9 | Optional, Values: zero, root_span, end_event, stale |
-| game_trace_id | Trace id of the coordinator's root game span, from the `game_trace_correlation` gauge or, since #2766, the trace context of the agent-only `game.start` / `game.phase.start` log records (UC-041 BR-004) | String | 32 | Optional, Format: 32 hex |
-| game_trace_span_id | Span id of the game root | String | 16 | Optional, Format: 16 hex |
-| gameplay_phase_span_id | Span id of `gameplay_phase`, first fallback parent of the in-game agent spans | String | 16 | Optional, Format: 16 hex |
-| game_cycle_span_id | Span id of `game_cycle`, preferred remote parent of the in-game agent spans | String | 16 | Optional, Format: 16 hex |
+| game_trace_id | Trace id of the coordinator's root game span, from the `game_trace_correlation` gauge or, since #2766, the trace context of the agent-only `game.start` / `game.phase.start` log records (UC-041 BR-004; planned, #2783: from `game.start` or, when it was lost, any `game.phase.start` of the game, which carries the same trace id) | String | 32 | Optional, Format: 32 hex |
+| game_trace_span_id | Span id of the game root, from the gauge label or the `game.start` record (planned, #2783: the `game.start` record only) | String | 16 | Optional, Format: 16 hex |
+| gameplay_phase_span_id | Span id of `gameplay_phase`, first fallback parent of the in-game agent spans, from the gauge label or the `game.phase.start` record of that span (planned, #2783: the record only) | String | 16 | Optional, Format: 16 hex |
+| game_cycle_span_id | Span id of `game_cycle`, preferred remote parent of the in-game agent spans, from the gauge label or the `game.phase.start` record of that span (planned, #2783: the record only) | String | 16 | Optional, Format: 16 hex |
 | session | Per-game signals: duration, start time, active player count, elimination sequence, per-type intervention tally (dispatched / blocked / applied / gated off, unbounded per game; see GAME_SUMMARY), game active flag, mode, music tempo, effective death and warning thresholds | String | 4000 | Not Null, structure `SessionSignals` |
 | players | Per-controller signals by serial: movement intensity, variance, peak and aggregate variance, battery, skill, alive, a bounded movement history | String | 4000 | Not Null, map serial to `PlayerSignals` |
 | waiting | Serials of players evicted for silence while the game is active (a Fight Club / Tournament player waiting for its fight), sorted; each remembered with its skill, peak accel and aggregate variance and restored into `players` (as waiting, no alive state) in the game-end snapshot (UC-041 BR-007, UC-040 A49, #2513) | String | 4000 | Optional, Max entries: 64 |
