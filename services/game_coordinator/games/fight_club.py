@@ -1030,7 +1030,8 @@ class FightClubGame(StreamedIntroGameMode):
             await self._start_round()
 
         # Game loop (gameplay stream already started before intro)
-        with tracer.start_as_current_span("gameplay_phase"):
+        with tracer.start_as_current_span("gameplay_phase") as gameplay_span:
+            self._send_phase_start(gameplay_span, "gameplay_phase")
             if ended_before_round_one:
                 await self._hold_win_display()
             else:
