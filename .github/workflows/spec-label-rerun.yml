@@ -1,6 +1,6 @@
 name: Spec label re-run
 
-# #1263: adding or removing the `no-spec-change` (or `spec-baseline-growth`)
+# #1263: adding or removing the `no-spec-change` label
 # label must flip the Spec Gate without a new push. ci.yml does not trigger on label events
 # (#1527: a newer label-only CI run would hide "CI Complete" and block the PR), so this workflow re-runs only the Spec Gate
 # job of the latest real CI run for the PR head; GitHub re-runs its dependents
@@ -21,7 +21,7 @@ permissions:
 jobs:
   rerun-spec-gate:
     name: Re-run Spec Gate
-    if: github.event.label.name == 'no-spec-change' || github.event.label.name == 'spec-baseline-growth'
+    if: github.event.label.name == 'no-spec-change'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # A newer label event for the same PR supersedes this one (the re-run reads
@@ -31,13 +31,12 @@ jobs:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      - name: Re-run the Spec Gate (and Telemetry Contract) job of the latest CI run
+      - name: Re-run the Spec Gate job of the latest CI run
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          LABEL: ${{ github.event.label.name }}
         run: |
           set -euo pipefail
           run_id=$(gh run list --workflow ci.yml --commit "$HEAD_SHA" --event pull_request \
@@ -65,15 +64,13 @@ jobs:
               exit 0
             fi
           fi
-          # spec-baseline-growth also gates the spec-refs baseline (#1280), checked
-          # in the Telemetry Contract job.
           jobs=$(gh run view "$run_id" --json jobs \
-                  --jq '.jobs[] | select((.name == "Spec Gate" or (.name == "Telemetry Contract" and env.LABEL == "spec-baseline-growth")) and .conclusion != "skipped") | .databaseId') || {
+                  --jq '.jobs[] | select(.name == "Spec Gate" and .conclusion != "skipped") | .databaseId') || {
             echo "::warning::Could not read the jobs of CI run $run_id; re-add the label to retry."
             exit 0
           }
           if [ -z "$jobs" ]; then
-            echo "CI run $run_id has no Spec Gate / Telemetry Contract job that ran (no spec/code change); nothing to re-run."
+            echo "CI run $run_id has no Spec Gate job that ran (no spec/code change); nothing to re-run."
             exit 0
           fi
           # A push while waiting gives the new head its own run, which reads the

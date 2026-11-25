@@ -157,7 +157,7 @@ class WerewolfGame(StreamedIntroGameMode):
         self.werewolf_fraction = self.mode_flags.werewolf_fraction
 
         # The result, latched once in _check_win_condition together with the outcome
-        # (UC-022 BR-004): "humans" / "werewolves" / "tie". None = no
+        # (UC-020 BR-007): "humans" / "werewolves" / "tie". None = no
         # result (force-ended before a win, or the stream ended without one).
         self._winner_side: str | None = None
 
@@ -466,7 +466,7 @@ class WerewolfGame(StreamedIntroGameMode):
         return False
 
     def _latch_win(self, side: str) -> bool:
-        """Latch the outcome, then the result, before the publish awaits (UC-022 BR-004, #2009).
+        """Latch the outcome, then the result, before the publish awaits (UC-020 BR-007, #2009).
 
         The outcome latches first: a force-end that won the race declares no winner
         (False, nothing latched), one landing during the publish keeps this result.
@@ -518,7 +518,7 @@ class WerewolfGame(StreamedIntroGameMode):
             self.reveal_task.cancel()
 
         # The result was latched with the outcome when the win condition fired. A
-        # force-end declares no winner (UC-022 BR-004); a stream end
+        # force-end declares no winner (UC-020 BR-007); a stream end
         # without a win has none either.
         force_ended = self.game_outcome() == "force_ended"
         winner_side = None if force_ended else self._winner_side

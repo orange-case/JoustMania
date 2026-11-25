@@ -152,7 +152,7 @@ async def test_fight_club_force_end_before_the_rounds_ends_every_player_span(exp
 
 
 @pytest.mark.uc("UC-030", br=["BR-007"])
-@pytest.mark.uc("UC-022", br=["BR-004"])
+@pytest.mark.uc("UC-022", br=["BR-007"])
 @pytest.mark.parametrize("phase", WOLF_ZOMBIE_PHASES)
 @pytest.mark.asyncio
 async def test_werewolf_force_end_before_the_game_loop_ends_every_player_span(exporter, caplog, phase):
@@ -160,7 +160,7 @@ async def test_werewolf_force_end_before_the_game_loop_ends_every_player_span(ex
 
 
 @pytest.mark.uc("UC-030", br=["BR-007"])
-@pytest.mark.uc("UC-023", br=["BR-003"])
+@pytest.mark.uc("UC-023", br=["BR-008"])
 @pytest.mark.parametrize("phase", WOLF_ZOMBIE_PHASES)
 @pytest.mark.asyncio
 async def test_zombies_force_end_before_the_game_loop_ends_every_player_span(exporter, caplog, phase):

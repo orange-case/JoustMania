@@ -137,17 +137,16 @@ cite new `D-*` ids; existing mentions stay as history.
 ### Status vocabularies
 
 Requirements use the AIUP requirement statuses (`Open`, `In Progress`, `Implemented`, `Verified`,
-`Deferred`, `Rejected`); use cases use the use-case statuses, which map as follows: `Draft` / `Review` /
-`Approved` = requirement `Open` or `In Progress`, `Implemented` = `Implemented`, `Tested` / `Done` =
-`Verified`, `Obsolete` = `Rejected`. UC `Tested` = every main-scenario and alternative-flow step has a
+`Deferred`, `Rejected`); use cases use the use-case statuses (`Draft`, `Review`, `Approved`, `Implemented`, `Tested`, `Done`,
+`Obsolete`). An FR's progress status is computed by the spec lint from its use cases (see
+[CI spec gate](#ci-spec-gate)); the column in `requirements.md` must match it. UC `Tested` = every main-scenario and alternative-flow step has a
 tagged test (see the `/coverage-check` skill, added by #1289) and no blocking `Known gap` line is open. A stated `Known gap` on a precondition, a postcondition, an NFR or a clause that only an e2e or hardware run can assert does not block `Tested`; a `Known gap` on a main step, an alternative flow or a BR does. (maintainer rule, #1725). A use case's status is never above the weakest FR on its
 `Requirements:` line; FRs that only a planned flow needs go on a separate `Planned:` line with their
 issue number, so the use case can be `Implemented` while they stay `Open`. The flows themselves go under a
 `## Planned extensions` section (IDs kept, issue and status Open); they do not count toward `Tested` until they
-move back under `## Alternative Flows` with their code. Conversely, an FR's status is
-derived from its use cases: it is `Verified` only when every use case that lists it under `Requirements:` is
-`Tested`, otherwise at most `Implemented`. NFRs and constraints are exempt from both rules: NFRs are measured separately, constraints are verified by
-review and the technical specs; only FRs derive their status from their use cases.
+move back under `## Alternative Flows` with their code. NFRs and constraints
+are exempt from both rules: NFRs are measured separately, constraints are verified by review and the
+technical specs.
 
 When a flow or business rule leaves a use case, keep its ID: a flow that moved to another use case is
 titled `(moved)`, one that no longer exists `(retired)`. Its trigger says where it went (or why it
@@ -185,25 +184,26 @@ The `Spec Gate` job in `ci.yml` (#1263, required through `CI Complete`) has two 
    count as covered for `FR_UNCOVERED` without feeding the derived status checked by
    `REQ_STATUS_DRIFT`; and `REQ_STATUS_DRIFT` checks FRs only, since NFRs are
    measured separately and constraints are verified by review and the technical specs). `scripts/aiup/spec-lint-gate.sh` runs it over `docs/`:
-   - **Every error fails**: `DUPLICATE_ID`, `SPEC_MISSING`, `NOT_IN_DIAGRAM`,
-     `DANGLING_REF`, and use case files the AIUP format cannot parse. Errors are
-     checked without the baseline, so they cannot be baselined.
-   - **New warnings fail** (`REQ_STATUS_DRIFT`, `FLOW_TERMINATION`, `WEAK_WORD`, ...).
-     The existing ones are accepted in `scripts/aiup/spec-lint-baseline.json`.
-   - **The baseline only shrinks**: on a PR it may not have more entries than on
-     `main`, unless the PR carries the `spec-baseline-growth` label (a deliberate,
-     reviewed acceptance of new warnings).
+   - **Every error and every warning fails** (#2799): errors such as `DUPLICATE_ID`,
+     `SPEC_MISSING`, `NOT_IN_DIAGRAM`, `DANGLING_REF` and use case files the AIUP
+     format cannot parse, and warnings such as `REQ_STATUS_DRIFT`, `FLOW_TERMINATION`
+     and `WEAK_WORD`. The gate runs the linter with `--strict --no-baseline`: there is
+     no baseline file and no label that accepts a finding. `INFO` findings are reported
+     only.
+   - **FR status is computed by the linter.** It derives each FR's status from the
+     use cases on whose `Requirements:` line it appears: `Verified` when every active
+     one is `Tested` (or `Done`), `Implemented` when every one is at least
+     `Implemented`, `In Progress` when some are, else `Open`. The Status column in
+     `requirements.md` stays for readers; a value that differs from the derived one is
+     `REQ_STATUS_DRIFT` and fails, and the message names the value to write. Scope
+     decisions (`Rejected`, `Deferred`, `Obsolete`) and NFR / constraint statuses are
+     kept by hand.
 
    Run the same gate locally before pushing a docs change:
 
    ```bash
-   scripts/aiup/spec-lint-gate.sh            # errors + new warnings
-   BASE_REF=main PR_LABELS= scripts/aiup/spec-lint-gate.sh   # + baseline growth
+   scripts/aiup/spec-lint-gate.sh
    ```
-
-   Fixing a baselined finding is reported as `INFO BASELINE_STALE` (not a failure);
-   refresh the baseline in the same PR so it shrinks:
-   `python3 scripts/aiup/spec-review/scripts/spec_lint.py --docs docs --baseline scripts/aiup/spec-lint-baseline.json --update-baseline`.
 2. **Spec touched** (pull requests changing `services/**`, `lib/**` or `proto/**`;
    tests (`tests/`, `testutil/`, `mocks/`, `conftest.py`, `*_test.*`, `test_*.py`,
    `*.test.ts(x)`, `*.spec.ts(x)`), `*.md`, dependency manifests/locks and
@@ -218,8 +218,9 @@ The `Spec Gate` job in `ci.yml` (#1263, required through `CI Complete`) has two 
    login and account type); and the agent's experiment-promoter PRs (branch
    `agent/experiment-*` in this repository, title `Flag experiment: ...`).
 
-Adding or removing `no-spec-change` or `spec-baseline-growth` re-runs the Spec Gate
-(and, for `spec-baseline-growth`, the Telemetry Contract job) automatically (`spec-label-rerun.yml`).
+Adding or removing `no-spec-change` re-runs the Spec Gate automatically
+(`spec-label-rerun.yml`). The former `spec-baseline-growth` label is no longer read by any
+gate (#2799).
 
 ### Spec references
 
@@ -227,7 +228,7 @@ Adding or removing `no-spec-change` or `spec-baseline-growth` re-runs the Spec G
 
 - the path must be a full repo path (`services/agent/decide/state.go:digest`, never `state.go:digest`) to an existing file; the line must be within the file; the symbol (each dotted part) must occur as a word somewhere in the file (a word search, not a declaration check). These fail every PR, including code-only ones that delete or rename what a spec cites. Fix the spec line; `scripts/spec_refs.py --suggest` prints a ready `path:Symbol` for every line ref, and the error for an out-of-range line names one.
 - prefer `path:Symbol`: it survives edits. New `path:line` refs are allowed but a growth in their total versus the base branch raises a `::warning` with suggestions.
-- every Go `Span*` / `Attr*` constant value must appear in `telemetry.md` as its exact key. Undocumented ones sit in `docs/specs/notes/spec-refs-baseline.json`; the baseline may only grow with the `spec-baseline-growth` label, and a stale entry (now documented or gone) fails: run `make spec-refs` to prune it.
+- every Go `Span*` / `Attr*` constant value must appear in `telemetry.md` as its exact key. Undocumented ones sit in `docs/specs/notes/spec-refs-baseline.json`; the baseline only shrinks (a new entry fails, no label accepts it, #2799), and a stale entry (now documented or gone) fails: run `make spec-refs` to prune it.
 - an example that is not a real reference: put `<!-- spec-refs: ignore -->` on its line.
 - drift (#1918): `make spec-refs-report` (`scripts/spec_refs.py --report`) lists broken refs and line refs whose cited lines changed after the spec line was last edited. The weekly `spec-refs-drift.yml` workflow runs it and opens or updates ONE issue titled `Spec reference drift report` (label `documentation`); it never gates a PR.
 

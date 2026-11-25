@@ -45,4 +45,4 @@
 ## Automation
 
 - **Manual** (needs the Jev and Claude backends). Script-level tests run in `make lint`: `scripts/tests/test-talk-stage.sh` (UC-070 A7, A8, stage baseline), `scripts/tests/test-agent-backend.sh` (UC-044 steps 1 and 2, A3), `scripts/tests/test-talk-preflight.sh` (step 9).
-- Steps 3 and 6 on a faked backend are covered by [TC-008](TC-008-remote-backend-confidence-routing.md) and [TC-009](TC-009-kill-switch-during-ffa-game.md). The script tests run in the CI Script Tests job (#1389).
+- Steps 3 and 6 on a faked backend are covered by the service-tier journeys TC-008 (`tests/service/test_tc008_*.py`) and TC-009 (`tests/service/test_tc009_kill_switch.py`). The script tests run in the CI Script Tests job (#1389).
