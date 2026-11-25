@@ -170,8 +170,7 @@ The `rules` backend answers `ffa.magnitude` from its first decision's value, els
 `grant_shield` from the rules carries no value when ranked; the loop stamps it with the `shield_seconds` `default`
 variant before the permission chain (UC-040 BR-029) and sets the record's `ffa.magnitude` answer to that stamped
 length, so `decide.answers` on the `invoke_agent joustmania-agent` span reports the seconds that are written, not 5 (#2395;
-`services/agent/decision/chargeledger.go:stampShieldSeconds`). The in-process `RulesBackend.Decide` (tests and
-tooling only) still answers the Default.
+`services/agent/decision/chargeledger.go:stampShieldSeconds`).
 
 ## 3. Wire format for remote backends
 
@@ -475,7 +474,7 @@ decision repeats the verdict as `decide.blocked` / `decide.block_reason` (§6, #
   allow-listed interventions and alive players **plus** every intervention and target the engine ranked
   (`services/agent/decision/decide_rules.go:emissionRequest`), so `decide.questions` on a rules span can list an intervention
   the allow-list does not hold; the permission chain (§4.5) applies the allow-list afterwards and its verdict
-  is `decide.blocked`. A remote backend's request, and `RulesBackend.Decide`, keep the allow-listed options.
+  is `decide.blocked`. A remote backend's request keeps the allow-listed options.
   Only telemetry changed: the emitted decisions and their outcomes are pinned by
   `decision/testdata/rules_path_golden.json`. Because the softmax runs over the widened options, the rules-path
   `decide.confidence` (1 − p(noop) for the chosen intervention) is computed over the engine's own ranked

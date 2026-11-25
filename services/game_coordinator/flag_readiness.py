@@ -29,9 +29,8 @@ logger = logging.getLogger(__name__)
 
 # Every flag domain the game coordinator reads when a game starts. ``observability`` is
 # included (maintainer decision 2026-11-18, #2658): the coordinator reads
-# ``telemetry.moment_shape`` and ``telemetry.experiment_game_parent`` per game, so a game
-# admitted before that provider is READY would read the code default instead of the served
-# value. It shares the same deadline as the other domains.
+# ``telemetry.moment_shape`` per game, so a game admitted before that provider is READY
+# would read the code default instead of the served value. It shares the same deadline as the other domains.
 COORDINATOR_FLAG_DOMAINS: tuple[str, ...] = (
     "system",
     "controller",
@@ -49,8 +48,8 @@ FLAG_PROVIDER_READY_TIMEOUT_S = 5.0
 class SpanRecord:
     """Collects the wait's span attributes and events until the game root span exists.
 
-    ``telemetry.experiment_game_parent`` decides the root span's parent, so the wait has to
-    finish before the span is created; ``replay`` copies what it recorded onto the span.
+    The wait finishes before the game root span is created (the moment shape is read
+    once for the game), so ``replay`` copies what it recorded onto the span.
     """
 
     def __init__(self) -> None:

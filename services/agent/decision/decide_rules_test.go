@@ -3,7 +3,6 @@ package decision
 import (
 	"context"
 	"math"
-	"reflect"
 	"sort"
 	"testing"
 	"time"
@@ -26,6 +25,18 @@ func allInterventions() []string {
 func ffaRequest(c gamecontext.GameContext, allowed []string) decide.Request {
 	st := decide.BuildState(c)
 	return decide.Request{State: st, Questions: decide.FFAQuestions(st, allowed), Context: &c}
+}
+
+// rulesDecide answers req on the in-loop rules path (EvaluateDecide) of engine and
+// returns the request it answered (options widened, #1295) with the response.
+func rulesDecide(t *testing.T, engine *ObjectiveRules, req decide.Request) (decide.Request, decide.Response) {
+	t.Helper()
+	_, wide, resp, ranked := engine.EvaluateDecide(context.Background(), *req.Context,
+		func(_, _ map[string]bool) decide.Request { return req })
+	if !ranked {
+		t.Fatal("EvaluateDecide was throttled")
+	}
+	return wide, resp
 }
 
 // decideFixture is one characterization scenario: a config and a context.
@@ -103,21 +114,16 @@ func decideFixtures() []decideFixture {
 	}
 }
 
-// TestRulesBackend_MatchesEvaluate is the characterization test: on the same
-// context and an identically seeded engine, the adapter picks the intervention
+// TestRulesPath_MatchesEvaluate is the characterization test: on the same
+// context and an identically seeded engine, the answers pick the intervention
 // and target that ObjectiveRules.Evaluate emits first (noop when it emits none).
-func TestRulesBackend_MatchesEvaluate(t *testing.T) {
+func TestRulesPath_MatchesEvaluate(t *testing.T) {
 	for _, fx := range decideFixtures() {
 		t.Run(fx.name, func(t *testing.T) {
 			clock := time.Unix(10_000, 0)
 			want := newTestEngine(fx.cfg, &clock).Evaluate(context.Background(), fx.ctx)
 
-			b := NewRulesBackend(newTestEngine(fx.cfg, &clock))
-			req := ffaRequest(fx.ctx, allInterventions())
-			resp, err := b.Decide(context.Background(), req)
-			if err != nil {
-				t.Fatalf("Decide error: %v", err)
-			}
+			req, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
 			if err := decide.Validate(req, resp); err != nil {
 				t.Fatalf("response does not validate: %v", err)
 			}
@@ -133,7 +139,7 @@ func TestRulesBackend_MatchesEvaluate(t *testing.T) {
 				wantTgt = targetOption(want[0].TargetSerial)
 			}
 			if iv.Choice != wantIV || tgt.Choice != wantTgt {
-				t.Fatalf("adapter picked %s -> %s, Evaluate picked %s -> %s (all: %+v)",
+				t.Fatalf("answers picked %s -> %s, Evaluate picked %s -> %s (all: %+v)",
 					iv.Choice, tgt.Choice, wantIV, wantTgt, want)
 			}
 			t.Logf("%s -> %s (confidence %.4f, target confidence %.4f)", iv.Choice, tgt.Choice, iv.Confidence, tgt.Confidence)
@@ -147,16 +153,16 @@ func TestRulesBackend_MatchesEvaluate(t *testing.T) {
 	}
 }
 
-// TestRulesBackend_ProbabilitiesAreSoftmaxOfScores checks the probability and
+// TestRulesPath_ProbabilitiesAreSoftmaxOfScores checks the probability and
 // confidence math against the engine's own ranked scores.
-func TestRulesBackend_ProbabilitiesAreSoftmaxOfScores(t *testing.T) {
+func TestRulesPath_ProbabilitiesAreSoftmaxOfScores(t *testing.T) {
 	for _, fx := range decideFixtures() {
 		t.Run(fx.name, func(t *testing.T) {
 			clock := time.Unix(10_000, 0)
 			twin := newTestEngine(fx.cfg, &clock)
 			ranked, _, _ := twin.rankLocked(fx.ctx, clock, nil)
 
-			resp, _ := NewRulesBackend(newTestEngine(fx.cfg, &clock)).Decide(context.Background(), ffaRequest(fx.ctx, allInterventions()))
+			_, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
 			iv, _ := resp.Find(decide.QuestionFFAIntervention)
 
 			// Best score per intervention, noop at minScore.
@@ -198,10 +204,10 @@ func TestRulesBackend_ProbabilitiesAreSoftmaxOfScores(t *testing.T) {
 	}
 }
 
-func TestRulesBackend_NoCandidatesIsConfidentNoop(t *testing.T) {
+func TestRulesPath_NoCandidatesIsConfidentNoop(t *testing.T) {
 	fx := decideFixtures()[5]
 	clock := time.Unix(10_000, 0)
-	resp, _ := NewRulesBackend(newTestEngine(fx.cfg, &clock)).Decide(context.Background(), ffaRequest(fx.ctx, allInterventions()))
+	_, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
 	iv, _ := resp.Find(decide.QuestionFFAIntervention)
 	tgt, _ := resp.Find(decide.QuestionFFATarget)
 	mag, _ := resp.Find(decide.QuestionFFAMagnitude)
@@ -216,10 +222,10 @@ func TestRulesBackend_NoCandidatesIsConfidentNoop(t *testing.T) {
 	}
 }
 
-func TestRulesBackend_EnduranceDetails(t *testing.T) {
+func TestRulesPath_EnduranceDetails(t *testing.T) {
 	fx := decideFixtures()[0]
 	clock := time.Unix(10_000, 0)
-	resp, _ := NewRulesBackend(newTestEngine(fx.cfg, &clock)).Decide(context.Background(), ffaRequest(fx.ctx, allInterventions()))
+	_, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
 	iv, _ := resp.Find(decide.QuestionFFAIntervention)
 	tgt, _ := resp.Find(decide.QuestionFFATarget)
 	mag, _ := resp.Find(decide.QuestionFFAMagnitude)
@@ -240,10 +246,10 @@ func TestRulesBackend_EnduranceDetails(t *testing.T) {
 	}
 }
 
-func TestRulesBackend_ChaosTargetIsConditional(t *testing.T) {
+func TestRulesPath_ChaosTargetIsConditional(t *testing.T) {
 	fx := decideFixtures()[4]
 	clock := time.Unix(10_000, 0)
-	resp, _ := NewRulesBackend(newTestEngine(fx.cfg, &clock)).Decide(context.Background(), ffaRequest(fx.ctx, allInterventions()))
+	_, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
 	iv, _ := resp.Find(decide.QuestionFFAIntervention)
 	tgt, _ := resp.Find(decide.QuestionFFATarget)
 	if iv.Choice != InterventionSendControllerEffect {
@@ -258,107 +264,45 @@ func TestRulesBackend_ChaosTargetIsConditional(t *testing.T) {
 	}
 }
 
-// TestRulesBackend_AllowListFilters: when the allow-list does not offer
-// Evaluate's top pick, the adapter answers with the best candidate it can
-// express (Evaluate's runner-up here) instead of an invalid option.
-func TestRulesBackend_AllowListFilters(t *testing.T) {
+// TestRulesPath_AnswersTheEmittedDecisionPastTheAllowList: the rules-path answers
+// name the decision the engine emits even when the allow-list does not offer it;
+// the options are widened (#1295) and the permission chain blocks it afterwards.
+func TestRulesPath_AnswersTheEmittedDecisionPastTheAllowList(t *testing.T) {
 	fx := decideFixtures()[0]
 	clock := time.Unix(10_000, 0)
 	want := newTestEngine(fx.cfg, &clock).Evaluate(context.Background(), fx.ctx)
-	if len(want) < 2 || want[0].Intervention != InterventionAdjustMusicTempo {
+	if len(want) == 0 || want[0].Intervention != InterventionAdjustMusicTempo {
 		t.Fatalf("fixture changed: %+v", want)
 	}
-
-	allowed := []string{InterventionPlayAudioCue, InterventionGrantShield}
-	req := ffaRequest(fx.ctx, allowed)
-	resp, _ := NewRulesBackend(newTestEngine(fx.cfg, &clock)).Decide(context.Background(), req)
+	req, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock),
+		ffaRequest(fx.ctx, []string{InterventionPlayAudioCue, InterventionGrantShield}))
 	if err := decide.Validate(req, resp); err != nil {
 		t.Fatalf("invalid: %v", err)
 	}
-	iv, _ := resp.Find(decide.QuestionFFAIntervention)
-	if iv.Choice != want[1].Intervention {
-		t.Fatalf("choice = %s, want Evaluate's runner-up %s", iv.Choice, want[1].Intervention)
-	}
-
-	// Nothing allowed: noop.
-	req = ffaRequest(fx.ctx, nil)
-	resp, _ = NewRulesBackend(newTestEngine(fx.cfg, &clock)).Decide(context.Background(), req)
-	if iv, _ := resp.Find(decide.QuestionFFAIntervention); iv.Choice != decide.OptionNoop {
-		t.Fatalf("empty allow-list: choice = %s, want noop", iv.Choice)
+	if iv, _ := resp.Find(decide.QuestionFFAIntervention); iv.Choice != want[0].Intervention {
+		t.Fatalf("choice = %s, want the emitted %s", iv.Choice, want[0].Intervention)
 	}
 }
 
-func TestRulesBackend_NeverErrors(t *testing.T) {
-	clock := time.Unix(10_000, 0)
+// TestRulesPath_UnknownQuestionsAreNeutral: questions the rules have no view on
+// get a neutral, valid answer at confidence 0.
+func TestRulesPath_UnknownQuestionsAreNeutral(t *testing.T) {
 	fx := decideFixtures()[0]
-
-	// No Context: noop at confidence 0, still valid.
-	st := decide.BuildState(fx.ctx)
-	req := decide.Request{State: st, Questions: decide.FFAQuestions(st, allInterventions())}
-	resp, err := NewRulesBackend(newTestEngine(fx.cfg, &clock)).Decide(context.Background(), req)
-	if err != nil {
-		t.Fatalf("nil context: %v", err)
-	}
-	if err := decide.Validate(req, resp); err != nil {
-		t.Fatalf("nil context: invalid: %v", err)
-	}
-	for _, a := range resp.Answers {
-		if a.Confidence != 0 {
-			t.Errorf("nil context: %s confidence %v, want 0", a.QuestionID, a.Confidence)
-		}
-	}
-	if iv, _ := resp.Find(decide.QuestionFFAIntervention); iv.Choice != decide.OptionNoop {
-		t.Errorf("nil context: choice %s, want noop", iv.Choice)
-	}
-
-	// Nil engine behaves like a missing context.
-	if _, err := NewRulesBackend(nil).Decide(context.Background(), ffaRequest(fx.ctx, nil)); err != nil {
-		t.Fatalf("nil engine: %v", err)
-	}
-
-	// Questions the adapter does not know get a neutral, valid answer.
-	req = ffaRequest(fx.ctx, allInterventions())
+	clock := time.Unix(10_000, 0)
+	req := ffaRequest(fx.ctx, allInterventions())
 	req.Questions = append(req.Questions,
 		decide.Question{ID: "ffa.mood", Kind: decide.KindChoice, Options: []string{"calm", "wild", "odd"}},
 		decide.Question{ID: "ffa.volume", Kind: decide.KindScore, Range: [2]float64{2, 5}},
 	)
-	resp, err = NewRulesBackend(newTestEngine(fx.cfg, &clock)).Decide(context.Background(), req)
-	if err != nil {
-		t.Fatalf("extra questions: %v", err)
-	}
+	req, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), req)
 	if err := decide.Validate(req, resp); err != nil {
-		t.Fatalf("extra questions: invalid: %v", err)
+		t.Fatalf("invalid: %v", err)
 	}
 	if a, _ := resp.Find("ffa.mood"); a.Choice != "calm" || a.Confidence != 0 {
 		t.Errorf("unknown choice answer = %+v", a)
 	}
 	if a, _ := resp.Find("ffa.volume"); a.Score != 2 || a.Confidence != 0 {
 		t.Errorf("unknown score answer = %+v", a)
-	}
-}
-
-// TestRulesBackend_RecordsNoEngineState: deciding is not acting, so the adapter
-// must not throttle or arm the variance cooldown for a later Evaluate.
-func TestRulesBackend_RecordsNoEngineState(t *testing.T) {
-	fx := decideFixtures()[0]
-	clock := time.Unix(10_000, 0)
-	engine := newTestEngine(fx.cfg, &clock)
-	sentinel := FitnessEvaluation{Results: map[string]FitnessResult{"sentinel": {}}}
-	engine.lastFitness = sentinel
-	b := NewRulesBackend(engine)
-	for i := 0; i < 3; i++ {
-		if _, err := b.Decide(context.Background(), ffaRequest(fx.ctx, allInterventions())); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !engine.lastEval.IsZero() || !engine.lastDifficultyAt.IsZero() {
-		t.Fatalf("adapter touched engine state: lastEval=%v lastDifficultyAt=%v", engine.lastEval, engine.lastDifficultyAt)
-	}
-	if !reflect.DeepEqual(engine.LastFitness(), sentinel) {
-		t.Fatalf("adapter overwrote lastFitness: %+v", engine.LastFitness())
-	}
-	if out := engine.Evaluate(context.Background(), fx.ctx); len(out) == 0 {
-		t.Fatal("Evaluate throttled after adapter calls")
 	}
 }
 
@@ -442,19 +386,16 @@ func TestRulesAnswer_ExactMinScoreTie(t *testing.T) {
 	}
 }
 
-// TestRulesBackend_NoulIsNeutral: the rules adapter has no view on a noul
-// question (#1229): it answers an even 0.5 at confidence 0, and the response
-// still validates.
+// TestRulesPath_NoulIsNeutral: the rules have no view on a noul question
+// (#1229): they answer an even 0.5 at confidence 0, and the response still
+// validates.
 // UC: UC-040 A12
-func TestRulesBackend_NoulIsNeutral(t *testing.T) {
+func TestRulesPath_NoulIsNeutral(t *testing.T) {
 	fx := decideFixtures()[0]
 	clock := time.Unix(10_000, 0)
 	req := ffaRequest(fx.ctx, allInterventions())
 	req.Questions = append(req.Questions, decide.Question{ID: "close", Kind: decide.KindNoul, Text: "Is the game close?"})
-	resp, err := NewRulesBackend(newTestEngine(fx.cfg, &clock)).Decide(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	req, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), req)
 	a, ok := resp.Find("close")
 	if !ok || a.Noul == nil || *a.Noul != 0.5 || a.Confidence != 0 {
 		t.Errorf("noul answer = %+v", a)
