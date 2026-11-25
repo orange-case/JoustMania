@@ -34,7 +34,8 @@ var digestKeys = map[string][]string{
 	// The death follows the moment shape since #2658 slice 3; in log_event (and in
 	// both when the log arrives first) each death wakes one more evaluation, which
 	// can shift the seeded chaos draws. Adding it changed every digest.
-	"observability": {"telemetry.moment_shape"},
+	// telemetry.agent_log_events (#2722) sends the agent extra log events with the same effect.
+	"observability": {"telemetry.moment_shape", "telemetry.agent_log_events"},
 }
 
 // DigestKeysCovered reports whether set/key is part of the flag digest.

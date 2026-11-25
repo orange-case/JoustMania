@@ -255,11 +255,16 @@ processors:
   # moment identity, and synthetic data (#2577: orangecase.synthetic on the
   # resource, a bool or the string "true"). C-001: the services' ordinary log
   # lines never reach the agent.
+  # #2722 (UC-100 BR-012, UC-041 A8): game.start / game.end pass too, only when
+  # marked orangecase.audience = "agent". The conditions are OR'ed drops, so
+  # after the first one only the four names are left: a moment needs its id, a
+  # lifecycle record its marker.
   filter/agent_moments:
     error_mode: ignore
     log_conditions:
-      - log.event_name != "death_warning" and log.event_name != "player_death"
-      - log.attributes["moment.id"] == nil
+      - log.event_name != "death_warning" and log.event_name != "player_death" and log.event_name != "game.start" and log.event_name != "game.end"
+      - log.attributes["moment.id"] == nil and log.event_name != "game.start" and log.event_name != "game.end"
+      - log.attributes["orangecase.audience"] != "agent" and log.event_name != "death_warning" and log.event_name != "player_death"
       - resource.attributes["orangecase.synthetic"] == true or resource.attributes["orangecase.synthetic"] == "true"
 
   # Batch for the moment logs to the agent: a death reaches it about 2 s after
