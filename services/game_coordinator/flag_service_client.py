@@ -40,7 +40,6 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-
 logger = logging.getLogger(__name__)
 
 # Bounded registration await before the game is RUNNING (FR-135, NFR-052).

@@ -2686,7 +2686,6 @@ class TestRunGameLifecycleMidStartFailure:
 
     async def _run(self, servicer):
         """Call the real lifecycle steps (_run_game_lifecycle_steps) bound to the fake servicer."""
-        from unittest.mock import patch
 
         from services.menu.servicer import MenuServicer
 

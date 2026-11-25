@@ -23,8 +23,7 @@ def mock_tracer():
 @pytest.fixture
 def mock_metrics():
     """Create mock metrics."""
-    metrics = MagicMock()
-    return metrics
+    return MagicMock()
 
 
 @pytest.fixture

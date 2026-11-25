@@ -43,8 +43,7 @@ def mock_callbacks():
 @pytest.fixture
 def mock_metrics():
     """Create mock metrics."""
-    metrics = MagicMock()
-    return metrics
+    return MagicMock()
 
 
 SENSITIVITY_VALUES = {"ultra_slow": 0, "slow": 1, "medium": 2, "fast": 3, "ultra_fast": 4}

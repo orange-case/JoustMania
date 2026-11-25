@@ -1111,9 +1111,7 @@ class TestReviewFindings1476(_PairingFlowEnv):
             ("org.freedesktop.DBus.Error.UnknownObject", "unknown_object"),
         ],
     )
-    async def test_trust_outcome_is_a_span_attribute(
-        self, usb_pairing, env, mock_tracer, error_name, expected
-    ):
+    async def test_trust_outcome_is_a_span_attribute(self, usb_pairing, env, mock_tracer, error_name, expected):
         if error_name:
             self.fail_trust(error_name)
         with self._mode("never"):

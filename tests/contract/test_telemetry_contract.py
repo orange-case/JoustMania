@@ -310,7 +310,9 @@ def test_every_python_metric_has_a_named_consumer(python_metrics):
     A scanned consumer (Grafana, SPA, agent, scripts, tools) or a ``reader:`` note in
     docs/specs/notes/telemetry-metric-catalog.yaml naming files that still contain the name.
     """
-    notes_path = ti.REPO_ROOT / "docs" / "specs" / "notes" / "telemetry-metric-catalog.yaml"
+    notes_path = (
+        ti.REPO_ROOT / "docs" / "specs" / "notes" / "telemetry-metric-catalog.yaml"
+    )
     notes = yaml.safe_load(notes_path.read_text()) or {}
     consumers = ti.python_metric_consumers(set(python_metrics))
     unread, stale = [], []
@@ -323,12 +325,16 @@ def test_every_python_metric_has_a_named_consumer(python_metrics):
             continue
         for rel in (p.strip() for p in match.group(1).split(",")):
             path = ti.REPO_ROOT / rel
-            if not path.is_file() or not re.search(rf"\b{name}\b", path.read_text(errors="ignore")):
+            if not path.is_file() or not re.search(
+                rf"\b{name}\b", path.read_text(errors="ignore")
+            ):
                 stale.append(f"{name}: {rel}")
     assert not unread, (
         f"Metrics nothing reads (delete them, or name the reader as `reader: <path>` in {notes_path.name}): {unread}"
     )
-    assert not stale, f"`reader:` paths that are gone or no longer name the metric: {stale}"
+    assert not stale, (
+        f"`reader:` paths that are gone or no longer name the metric: {stale}"
+    )
 
 
 # docs/specs/telemetry.md §6.2 and its counts are generated from python_metrics and
