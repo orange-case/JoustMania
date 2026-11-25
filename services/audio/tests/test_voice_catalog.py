@@ -14,6 +14,7 @@ import miniaudio
 import pytest
 import yaml
 
+from lib import voice_prompts
 from lib.types import Sound
 from services.audio.sound_catalog import build_sound_registry
 
@@ -156,3 +157,20 @@ def test_deleted_recordings_stay_deleted_and_unreferenced():
             if "tests" not in parts:
                 offenders += [f"{path.relative_to(ROOT)}: {n}" for n in sorted(profile_needles) if n in text]
     assert not offenders, f"deleted recordings are still named: {offenders}"
+
+
+@pytest.mark.uc("UC-016", br=["BR-012", "BR-016"])
+def test_agent_page_lines_are_menu_lines_behind_their_prompts(catalog):
+    """#2747 (D3): the pad's "Watching" and the menu's interventions switch lines."""
+    menu = {line["id"]: line for line in catalog["areas"]["Menu"]}
+    expected = {
+        voice_prompts.AGENT_WATCHING_VOICE: "Watching.",
+        voice_prompts.INTERVENTIONS_VOICES["on"]: "Interventions on.",
+        voice_prompts.INTERVENTIONS_VOICES["off"]: "Interventions off.",
+    }
+    assert set(voice_prompts.INTERVENTIONS_VOICES) == {"on", "off"}
+    for sound, text in expected.items():
+        line = menu.get(sound.value)
+        assert line is not None, f"{sound.name}: no Menu line {sound.value!r}"
+        assert line["sound"] == sound.name
+        assert line["text"] == text

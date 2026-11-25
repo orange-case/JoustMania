@@ -32,6 +32,8 @@
 #          only for an entry whose own diff touches proto_pkg (simulated).
 #   #2592: the Flagsmith link journeys run once, in flagsmith-service-tests (the
 #          service_tests filter, needed by CI Complete); Service Tests ignores them.
+#   #2769: both tier jobs are sharded by matrix; the shards cover each module once
+#          (a module split across shards only by complementary -k expressions).
 #
 # Needs python3 + PyYAML (as scripts/ci/check-retag-source.sh).
 #   ./scripts/tests/test-ci-workflow.sh [path/to/ci.yml]
@@ -800,8 +802,26 @@ FLAGSMITH_MODULES = ("tests/service/test_flagsmith_link.py", "tests/service/test
 check("flagsmith-service-tests" in jobs, "flagsmith-service-tests: job missing (#2592)")
 check(job_if("flagsmith-service-tests") == job_if("service-tests"),
       f"flagsmith-service-tests: must use the service-tests filter: {job_if('flagsmith-service-tests')}")
-check('SERVICE_TESTS="' + " ".join(FLAGSMITH_MODULES) + '"' in _run_of("flagsmith-service-tests"),
-      "flagsmith-service-tests: must run exactly the Flagsmith link modules")
+# #2769: matrix shards; per module either one unfiltered shard or a `-k X` / `-k not (X)` pair.
+_fs_shards = jobs.get("flagsmith-service-tests", {}).get("strategy", {}).get("matrix", {}).get("include", [])
+_fs_by_mod = {}
+for _sh in _fs_shards:
+    for _m in str(_sh.get("tests", "")).split():
+        _fs_by_mod.setdefault(_m, []).append(str(_sh.get("select") or ""))
+check(set(_fs_by_mod) == set(FLAGSMITH_MODULES),
+      f"flagsmith-service-tests: shards must run exactly the Flagsmith link modules: {sorted(_fs_by_mod)}")
+for _m, _sel in _fs_by_mod.items():
+    _ok = _sel == [""] or (len(_sel) == 2 and any(a and b == f"not ({a})" for a in _sel for b in _sel))
+    check(_ok, f"flagsmith-service-tests: {_m} must run once or split by complementary -k: {_sel}")
+check('SERVICE_TESTS="${{ matrix.tests }}"' in _run_of("flagsmith-service-tests")
+      and 'TEST="$SELECT"' in _run_of("flagsmith-service-tests"),
+      "flagsmith-service-tests: must run matrix.tests with the matrix -k selection")
+_st = jobs.get("service-tests", {})
+check(_st.get("strategy", {}).get("matrix", {}).get("shard") == ["agents", "rest"]
+      and _st.get("env", {}).get("AGENT_SHARD_FILES")
+      and 'SERVICE_TESTS="$AGENT_SHARD_FILES"' in _run_of("service-tests")
+      and 'for f in $AGENT_SHARD_FILES; do ignores="$ignores --ignore=$f"; done' in _run_of("service-tests"),
+      "service-tests: the rest shard must --ignore exactly AGENT_SHARD_FILES (#2769)")
 check(all(f"--ignore={m}" in _run_of("service-tests") for m in FLAGSMITH_MODULES),
       "service-tests: must --ignore the Flagsmith link modules (they run in flagsmith-service-tests)")
 check(jobs.get("flagsmith-service-tests", {}).get("timeout-minutes"),

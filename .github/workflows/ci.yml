@@ -967,13 +967,27 @@ jobs:
   # composition adds the go-built agent and a fake OpenAI backend (#1600). No image build.
   # Path-filtered on PRs, always in the merge queue (run_all_checks), skipped on a push to
   # main (the queue tested that commit; service_tests_run). tests/service/README.md.
+  # Two shards on separate runners (#2769): `agents` runs AGENT_SHARD_FILES, `rest` the rest
+  # of the tier minus those and the Flagsmith files, so a new test file lands in `rest`.
   service-tests:
-    name: Service Tests
+    name: Service Tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: [changes]
     if: needs.changes.outputs.service_tests_run == 'true'
-    # ~7 min locally with the agent journeys (#1600), plus the first go builds
-    # and the rust-hid build for its live flag test (#1713).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [agents, rest]
+    env:
+      # The slowest agent journeys, ~7 min of the ~14 min serial run (#2769).
+      AGENT_SHARD_FILES: >-
+        tests/service/test_agent_flag_live.py
+        tests/service/test_tc011_shadow_experiment.py
+        tests/service/test_tc008_remote_backend_routing.py
+        tests/service/test_tc012_pattern_game_replay.py
+        tests/service/test_tc006_agent_blocked_by_host.py
+    # ~7 min per shard, plus the first go builds and the rust-hid build for its
+    # live flag test (#1713).
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1029,20 +1043,26 @@ jobs:
         run: |
           set +e -o pipefail
           log="$RUNNER_TEMP/service-tests.log"
-          # The Flagsmith link journeys run in their own job (flagsmith-service-tests, #2592).
-          make test-service PYTEST_EXTRA="--durations=15 --ignore=tests/service/test_flagsmith_link.py --ignore=tests/service/test_flagsmith_sync.py" 2>&1 | tee "$log"
+          if [ "${{ matrix.shard }}" = agents ]; then
+            make test-service SERVICE_TESTS="$AGENT_SHARD_FILES" PYTEST_EXTRA="--durations=15" 2>&1 | tee "$log"
+          else
+            # The Flagsmith link journeys run in their own job (flagsmith-service-tests, #2592).
+            ignores="--ignore=tests/service/test_flagsmith_link.py --ignore=tests/service/test_flagsmith_sync.py"
+            for f in $AGENT_SHARD_FILES; do ignores="$ignores --ignore=$f"; done
+            make test-service PYTEST_EXTRA="--durations=15 $ignores" 2>&1 | tee "$log"
+          fi
           status=$?
           echo "make test-service exit=$status"
           if [ "$status" -ne 0 ]; then
             if grep -qE '^(FAILED|ERROR) ' "$log"; then
               grep -E '^(FAILED|ERROR) ' "$log" | while IFS= read -r line; do
-                echo "::error title=Service Tests (exit $status)::$line"
+                echo "::error title=Service Tests ${{ matrix.shard }} (exit $status)::$line"
               done
             else
-              echo "::error title=Service Tests (exit $status)::no FAILED/ERROR line; see the log tail"
+              echo "::error title=Service Tests ${{ matrix.shard }} (exit $status)::no FAILED/ERROR line; see the log tail"
             fi
             {
-              echo "### Service Tests failed (exit $status)"
+              echo "### Service Tests (${{ matrix.shard }}) failed (exit $status)"
               echo '```'
               grep -E '^(FAILED|ERROR) |^=+ .*in [0-9.]+s' "$log" || tail -n 40 "$log"
               echo '```'
@@ -1054,13 +1074,27 @@ jobs:
   # flag service and coordinator against the in-process fake Flagsmith. Their own job, in
   # parallel with service-tests (which --ignores them), so Service Tests time is unchanged;
   # same filter (service_tests), required through CI Complete.
+  # Three shards (#2769): the sync file alone took ~11 min, so it is split by two
+  # complementary -k expressions; nothing can be lost or run twice.
   flagsmith-service-tests:
-    name: Flagsmith Service Tests
+    name: Flagsmith Service Tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: [changes]
     if: needs.changes.outputs.service_tests_run == 'true'
-    # Two stacks, flag service restarts and 5 s polls: ~15 min locally (WSL), plus the
-    # flag service go build; Service Tests runs in parallel, so the pipeline waits for the longer.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: link
+            tests: tests/service/test_flagsmith_link.py
+            select: ''
+          - shard: sync-a
+            tests: tests/service/test_flagsmith_sync.py
+            select: conflict or refus
+          - shard: sync-b
+            tests: tests/service/test_flagsmith_sync.py
+            select: not (conflict or refus)
+    # Flag service restarts and 5 s polls: ~6-7 min per shard, plus the flag service go build.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1081,22 +1115,24 @@ jobs:
       # #1612: the failing tests as annotations and in the job summary, as Service Tests.
       - name: Run Flagsmith link journeys
         shell: bash
+        env:
+          SELECT: ${{ matrix.select }}
         run: |
           set +e -o pipefail
           log="$RUNNER_TEMP/flagsmith-service-tests.log"
-          make test-service SERVICE_TESTS="tests/service/test_flagsmith_link.py tests/service/test_flagsmith_sync.py" PYTEST_EXTRA="--durations=15" 2>&1 | tee "$log"
+          make test-service SERVICE_TESTS="${{ matrix.tests }}" PYTEST_EXTRA="--durations=15" TEST="$SELECT" 2>&1 | tee "$log"
           status=$?
           echo "make test-service exit=$status"
           if [ "$status" -ne 0 ]; then
             if grep -qE '^(FAILED|ERROR) ' "$log"; then
               grep -E '^(FAILED|ERROR) ' "$log" | while IFS= read -r line; do
-                echo "::error title=Flagsmith Service Tests (exit $status)::$line"
+                echo "::error title=Flagsmith Service Tests ${{ matrix.shard }} (exit $status)::$line"
               done
             else
-              echo "::error title=Flagsmith Service Tests (exit $status)::no FAILED/ERROR line; see the log tail"
+              echo "::error title=Flagsmith Service Tests ${{ matrix.shard }} (exit $status)::no FAILED/ERROR line; see the log tail"
             fi
             {
-              echo "### Flagsmith Service Tests failed (exit $status)"
+              echo "### Flagsmith Service Tests (${{ matrix.shard }}) failed (exit $status)"
               echo '```'
               grep -E '^(FAILED|ERROR) |^=+ .*in [0-9.]+s' "$log" || tail -n 40 "$log"
               echo '```'
