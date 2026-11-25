@@ -116,10 +116,9 @@ def test_refusals_and_outage_fail_closed(svc, caplog):
     assert "NOT applied" in caplog.text
 
 
-@pytest.mark.uc("UC-013", flow="A3")
-@pytest.mark.uc("UC-013", cond=["Post-F-1"])
+@pytest.mark.uc("UC-015", flow="A3")
 def test_unreachable_flag_service_leaves_the_agent_policy_unchanged_and_logs_critical(svc, caplog):
-    """UC-013 Post-F-1: the PUT fails, the stored value is untouched, the failure is CRITICAL."""
+    """UC-015 A3: the PUT fails, the stored value is untouched, the failure is CRITICAL."""
     w = FlagServiceWriter("agent", "http://fs:8070", transport=svc)
     svc.down = True
 
@@ -136,7 +135,7 @@ def test_unreachable_flag_service_leaves_the_agent_policy_unchanged_and_logs_cri
 
 
 @pytest.mark.uc("UC-053", flow="A2")
-@pytest.mark.uc("UC-013", flow="A4")
+@pytest.mark.uc("UC-015", br=["BR-019"])
 def test_unpersisted_write_is_logged(svc, caplog):
     svc.persist_ok = False
     w = FlagServiceWriter("game", "http://fs:8070", transport=svc)
@@ -144,8 +143,7 @@ def test_unpersisted_write_is_logged(svc, caplog):
     assert "NOT persisted" in caplog.text
 
 
-@pytest.mark.uc("UC-012", flow="A5")
-@pytest.mark.uc("UC-013", flow="A3")
+@pytest.mark.uc("UC-015", flow="A3")
 def test_admin_write_failures_log_error_and_critical_on_outage(svc, caplog):
     """A refused write logs an ERROR, an unreachable flag service a CRITICAL; an applied but
     unpersisted write logs an ERROR and still counts as applied."""
@@ -166,7 +164,7 @@ def test_admin_write_failures_log_error_and_critical_on_outage(svc, caplog):
     assert [(r.levelname, "NOT applied" in r.getMessage()) for r in caplog.records] == [("CRITICAL", True)]
 
 
-@pytest.mark.uc("UC-012", cond=["Post-F-1"])
+@pytest.mark.uc("UC-015", flow="A3")
 def test_refused_or_unreachable_write_leaves_the_setting_unchanged(svc):
     """Failure postcondition: after a refused write or an outage the flag service still serves the old value."""
     w = FlagServiceWriter("game", "http://fs:8070", transport=svc)
@@ -348,11 +346,11 @@ class _SlowPutService(FakeService):
         return super().__call__(method, url, body)
 
 
-@pytest.mark.uc("UC-013", flow="A3", br=["BR-003"])
+@pytest.mark.uc("UC-015", br=["BR-019"])
 @pytest.mark.uc("UC-053", flow="A8")
 @pytest.mark.parametrize("as_url_error", [False, True])
 def test_timed_out_put_that_applied_counts_as_applied_after_a_reread(caplog, as_url_error):
-    """UC-013 A3: a timeout is an unknown outcome; the re-read shows the write landed, so it is reported applied."""
+    """UC-015 BR-019: a timeout is an unknown outcome; the re-read shows the write landed, so it is reported applied."""
     svc = _SlowPutService(applies=True, as_url_error=as_url_error)
     writer = FlagServiceWriter("agent", "http://fs:8070", transport=svc)
     with caplog.at_level(logging.INFO, logger="lib.flag_service_writer"):
@@ -362,10 +360,10 @@ def test_timed_out_put_that_applied_counts_as_applied_after_a_reread(caplog, as_
     assert any("timed out" in r.getMessage() and "applied" in r.getMessage() for r in caplog.records)
 
 
-@pytest.mark.uc("UC-013", flow="A3")
+@pytest.mark.uc("UC-015", br=["BR-019"])
 @pytest.mark.uc("UC-053", flow="A8")
 def test_timed_out_put_that_did_not_apply_is_reported_not_applied(caplog):
-    """UC-013 A3: the re-read serves another level, so the write is reported as not applied (critical)."""
+    """UC-015 BR-019: the re-read serves another level, so the write is reported as not applied (critical)."""
     svc = _SlowPutService(applies=False)
     writer = FlagServiceWriter("agent", "http://fs:8070", transport=svc)
     with caplog.at_level(logging.CRITICAL, logger="lib.flag_service_writer"):
@@ -374,10 +372,10 @@ def test_timed_out_put_that_did_not_apply_is_reported_not_applied(caplog):
     assert any(r.levelname == "CRITICAL" and "NOT applied" in r.getMessage() for r in caplog.records)
 
 
-@pytest.mark.uc("UC-013", flow="A3")
+@pytest.mark.uc("UC-015", br=["BR-019"])
 @pytest.mark.uc("UC-053", flow="A8")
 def test_timed_out_put_with_a_failed_reread_is_reported_unknown_not_as_applied(caplog):
-    """UC-013 A3: neither answer arrived: report a failure, and say the outcome is unknown, never "NOT applied"."""
+    """UC-015 BR-019: neither answer arrived: report a failure, and say the outcome is unknown, never "NOT applied"."""
     svc = _SlowPutService(applies=True, reread_down=True)
     writer = FlagServiceWriter("agent", "http://fs:8070", transport=svc)
     with caplog.at_level(logging.CRITICAL, logger="lib.flag_service_writer"):

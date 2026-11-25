@@ -339,6 +339,6 @@ class ControllerEventLoop:
                 return
 
             logger.debug(f"Button event: {serial} {button_name}={'PRESS' if is_press else 'RELEASE'}")
-            # Debounce on when the press happened (controller-manager stamp, ms), not when we get to it (UC-012 BR-007).
+            # Debounce on when the press happened (controller-manager stamp, ms), not when we get to it (UC-010 BR-016).
             event_time = event.timestamp / 1000 if event.timestamp > 0 else None
             await self._callbacks.on_button(serial, button_name, is_press, event_time)

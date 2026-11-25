@@ -3,14 +3,14 @@
 ## Overview
 
 **ID:** TC-020  
-**Goal:** The host changes a setting from a controller and the presenter changes the decision backend with a stage script, both take effect at once through the flag service, and the stage reset clears only the stage's changes.  
+**Goal:** The host changes a setting with the operator pad and the presenter changes the decision backend with a stage script, both take effect at once through the flag service, and the stage reset clears only the stage's changes.  
 **Priority:** High  
 **Status:** Automated  
-**Use cases:** [UC-012](../use_cases/UC-012.md) A1; [UC-053](../use_cases/UC-053.md) A1, A2; [UC-044](../use_cases/UC-044.md) main
+**Use cases:** [UC-015](../use_cases/UC-015.md) main step 5; [UC-053](../use_cases/UC-053.md) A1, A2; [UC-044](../use_cases/UC-044.md) main
 
 ## Roles
 
-- Host (uses the admin combo on one controller)
+- Host (uses the operator pad; the test sends its `ProcessInput` `step_setting`)
 - Presenter (runs `scripts/agent-backend.sh` and `scripts/talk-stage.sh`)
 
 ## Preconditions
@@ -21,7 +21,7 @@
 
 | Step | Name                        | Description                                                                                         | Test Data                                  | Use Case                            |
 |------|-----------------------------|-----------------------------------------------------------------------------------------------------|--------------------------------------------|-------------------------------------|
-| 1    | Host changes sensitivity    | Host enters admin mode and presses Circle; the menu persists the next `sensitivity` level            | `MOCK0001`, Circle                         | [UC-012](../use_cases/UC-012.md)    |
+| 1    | Host changes sensitivity    | Host steps sensitivity one up with the pad; the menu persists the next `sensitivity` level            | `step_setting sensitivity up 1`            | [UC-015](../use_cases/UC-015.md)    |
 | 2    | Presenter flips the backend | Presenter runs `agent-backend.sh jev`; a stack overlay with writer `stage`                           | `decision.backend` = `jev`                 | [UC-044](../use_cases/UC-044.md)    |
 | 3    | Verify both served          | flagd serves the host's level and `jev`                                                               | -                                          | [UC-053](../use_cases/UC-053.md)    |
 | 4    | Stage reset                 | Presenter runs `talk-stage.sh reset`: the stage overlays are cleared and the stage baseline applied; the host's setting stays | `decision.backend` = `rules` | [UC-053](../use_cases/UC-053.md)    |

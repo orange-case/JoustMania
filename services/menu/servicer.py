@@ -130,9 +130,8 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         """Initialize menu service."""
         self.state = menu_pb2.MenuState.STOPPED
         self.current_selection: Games = Games.JoustFFA
-        # Selectable game modes, exposed to the admin handler so controller Cross
-        # cycling and the dashboard share one source of truth (#1030). GAME_MODES
-        # already excludes unimplemented/meta modes.
+        # Selectable game modes: the pad's mode step and the dashboard share one source of truth (#1030).
+        # GAME_MODES already excludes unimplemented/meta modes.
         self.game_options: list[str] = list(GAME_MODES)
 
         build_menu(self)
@@ -178,24 +177,26 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         """
         return 2 * self._lifecycle_starts - (1 if self._lifecycle_live() else 0)
 
-    # AdminModeCallbacks protocol implementation
+    # Callbacks of SettingsOps (the pad's mode step and force start)
 
     def set_menu_state(self, state) -> None:
-        """Set the menu state (AdminModeCallbacks)."""
+        """Set the menu state."""
         self.state = state
 
     def get_game_options(self) -> list[str]:
-        """Get list of available game options (AdminModeCallbacks)."""
+        """Get list of available game options."""
         return list(self.game_options)
 
-    async def select_game_mode(self, game_name: str, *, source: str = "admin", serial: str | None = None) -> bool:
-        """Select a game mode by name (AdminModeCallbacks, StateManager callback).
+    async def select_game_mode(
+        self, game_name: str, *, source: str = "operator_pad", serial: str | None = None
+    ) -> bool:
+        """Select a game mode by name (SettingsOps and StateManager callback).
 
-        The single selection path (#1272, #1285): admin Cross, lobby SELECT,
+        The single selection path (#1272, #1285): the operator pad, lobby SELECT,
         ``ProcessInput`` select and the web ``select_game`` / ``start_game``
         commands all land in the SAME state the coordinator start path reads
         (#1030): the servicer's ``current_selection``, the state_manager's game
-        mode (the value the admin handler displays), the lobby colour of every
+        mode, the lobby colour of every
         CONNECTED / READY controller (UC-011 BR-005), a ``selection_changed``
         event and the ``current_game`` default persisted to flagd.
 
@@ -218,11 +219,9 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         return True
 
     async def start_game(self, serial: str, source: str, controllers: list[str] | None = None) -> bool:
-        """Start a coordinator game (AdminModeCallbacks); False when the start is refused.
+        """Start a coordinator game through the ready/web start path (#1029); False when refused.
 
-        Lets the admin force-start path launch the selected mode through the same
-        coordinator start path the ready/web flow uses (#1029), optionally with an
-        explicit controller roster (admin force-start honors force_all_start).
+        ``controllers`` is an explicit roster (a force start honours force_all_start).
         """
         return await self._start_game(serial, source=source, controllers=controllers)
 
@@ -256,40 +255,6 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         """Handle button event (ControllerEventCallbacks)."""
         # Reset idle timer on any button activity
         self.idle_monitor.reset_activity()
-
-        # Check for admin mode combo (all 4 face buttons pressed)
-        button_state = self.state_manager.button_states.get(serial, {})
-        if is_press and button in ["cross", "circle", "square", "triangle"]:
-            preview_state = dict(button_state)
-            preview_state[button] = True
-            if self.admin_handler.check_combo_from_state(preview_state):
-                if self.state != menu_pb2.MenuState.RUNNING:
-                    # UC-012 Pre-1: admin mode only from a RUNNING menu (the button
-                    # stream already runs before StartMenu and after StopMenu).
-                    logger.info(f"Admin combo from {serial} ignored: menu is not running")
-                    await self.state_manager.handle_button_event(serial, button, is_press, event_time)
-                    return
-                self.admin_handler.release_stale_session()
-                if self.admin_handler.is_held_by_other(serial):
-                    # UC-012 BR-004: only one admin at a time. Ignore the
-                    # combo and handle the press as an ordinary button.
-                    logger.info(
-                        f"Admin combo from {serial} ignored: admin mode already active on "
-                        f"{self.admin_handler.controller_serial}"
-                    )
-                    await self.state_manager.handle_button_event(serial, button, is_press, event_time)
-                    return
-                if not self.admin_handler.combo_shown:
-                    self.admin_handler.combo_shown = True
-                    from services.menu.handlers.base import ControllerState
-
-                    await self.state_manager.transition_to(serial, ControllerState.ADMIN)
-                await self.state_manager.handle_button_event(serial, button, is_press, event_time)
-                return
-
-        # Reset admin combo flag when any face button released
-        if not is_press and button in ["cross", "circle", "square", "triangle"]:
-            self.admin_handler.combo_shown = False
 
         await self.state_manager.handle_button_event(serial, button, is_press, event_time)
 
@@ -392,8 +357,6 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             # subset of the controllers auto start after the next StartMenu (BR-001, step 4).
             self._clear_ready_state()
             self.state_manager.return_all_to_connected()
-            # UC-012 BR-004: no controller is in ADMIN any more, so release the single-admin lock.
-            self.admin_handler.abandon_session()
 
             await self.event_publisher.publish("menu_stopped", {})
 
@@ -466,7 +429,6 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             selection=self.current_selection.name,
             ready_count=self.ready_controller_count,
             connected_count=len(self.connected_controllers),
-            admin_serial=(self.admin_handler.admin_controller or "") if self.admin_handler.is_active else "",
             agent_enabled=enabled_state == "on",
             agent_enabled_state=enabled_state,
             agent_interventions_enabled_state=_enabled_state(agent.get_boolean_details(AGENT_WRITE_GATE_FLAG, False)),
@@ -561,7 +523,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         elif command == "select_game":
             game_name = data.get("game_name", "")
             if await self.select_game_mode(game_name, source="web"):
-                # UC-011 A1 continues at step 5: both selection events, like admin Cross.
+                # UC-011 A1 continues at step 5: both selection events.
                 selected_name = Games.from_name(game_name).name
                 await self.event_publisher.publish(
                     "game_selection_changed", {"game_name": selected_name, "source": "web"}
@@ -703,7 +665,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         return Result(None, mode.name)
 
     async def _pad_force_start(self, data: dict, span) -> Result:
-        """force_start: UC-014 steps 3-5 with the live roster and no host serial (UC-015 BR-008, A2).
+        """force_start: UC-014 steps 3-5 with the live roster (UC-015 BR-008).
 
         A non-empty ``expected_generation`` that differs from ``lifecycle_generation`` (or is not an
         integer) is refused with ``stale`` before anything changes, and again after the roster lookup
@@ -714,10 +676,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             return Result(None, None, STALE)
         if self._lifecycle_live():
             return Result(None, None, GAME_ACTIVE)
-        if self.admin_handler.is_active:
-            # A2: close the admin session (lock and span) before the start; its serial joins no roster.
-            self.admin_handler.abandon_session("operator_pad_start")
-        controllers = await self.settings_ops.force_start_roster(None, span)
+        controllers = await self.settings_ops.force_start_roster(span)
         if self._lifecycle_live():
             # A start won the race during the roster lookup (ready auto start, another caller).
             return Result(None, None, GAME_ACTIVE)

@@ -118,10 +118,7 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         "a": ControllerState.READY,
         "b": ControllerState.READY,
         "c": ControllerState.CONNECTED,
-        "adm": ControllerState.ADMIN,
     }
-    menu.admin_handler.active = True
-    menu.admin_handler.controller_serial = "adm"
     menu.settings_ops.saved_agent_level = "full"
 
     reply = await status(menu)
@@ -132,8 +129,7 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         lifecycle_generation=0,
         selection="Werewolf",
         ready_count=2,
-        connected_count=4,
-        admin_serial="adm",
+        connected_count=3,
         agent_enabled=True,
         agent_level="standard",
         agent_saved_level="full",
@@ -199,7 +195,7 @@ async def test_status_empty_values_when_nothing_is_set_or_resolvable(menu):
 
     reply = await status(menu)
 
-    assert (reply.admin_serial, reply.agent_saved_level) == ("", "")
+    assert reply.agent_saved_level == ""
     assert (reply.agent_level, reply.agent_backend, reply.audio_volume_master) == ("", "", "")
     # The agent rows (fields 22 to 27): empty = unknown, never a guessed default.
     rows = (reply.agent_objectives, reply.agent_max_interventions_per_minute, reply.agent_group_grant_state)
@@ -377,8 +373,6 @@ async def test_generation_goes_up_on_the_reset_menu_restore(menu):
 @pytest.mark.uc("UC-015", flow="A5", br=["BR-012"])
 async def test_force_start_refuses_a_stale_generation(menu):
     menu.state_manager.controller_states = {"a": ControllerState.READY, "b": ControllerState.READY}
-    menu.admin_handler.active = True
-    menu.admin_handler.controller_serial = "adm"
     state_before = menu.state
     with live_roster({"a", "b"}), patch.object(menu, "_run_game_lifecycle", autospec=True) as lifecycle:
         reply = await force_start(menu, expected_generation=2)
@@ -387,8 +381,7 @@ async def test_force_start_refuses_a_stale_generation(menu):
     lifecycle.assert_not_called()
     assert menu._game_lifecycle_task is None
     assert menu.state == state_before
-    # Nothing changed: the admin session stays open and no game was requested.
-    assert menu.admin_handler.is_active
+    # Nothing changed: no game was requested.
     assert "game_requested" not in [c.args[0] for c in menu.event_publisher.publish.await_args_list]
 
 

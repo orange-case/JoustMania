@@ -199,7 +199,6 @@ class TestStateManagerHelpers:
         """reset should clear ready state and re-register controllers."""
         # Set up state via controller_states (single source of truth)
         state_manager.controller_states = {"s1": ControllerState.READY, "s2": ControllerState.CONNECTED}
-        state_manager.button_states = {"s1": {"trigger": True}}
 
         re_registered = await state_manager.reset()
 
@@ -211,5 +210,3 @@ class TestStateManagerHelpers:
         assert state_manager.controller_states == {"s1": ControllerState.CONNECTED, "s2": ControllerState.CONNECTED}
         # Ready controllers should be cleared
         assert state_manager.ready_controllers == set()
-        # Button states should be cleared
-        assert state_manager.button_states == {}

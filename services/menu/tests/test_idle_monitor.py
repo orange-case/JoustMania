@@ -217,12 +217,11 @@ class TestIdleMonitorEnterIdle:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A2")
-    async def test_enter_idle_skips_ready_admin(self, idle_monitor, mock_state_manager):
-        """Entering idle should NOT transition READY or ADMIN controllers."""
+    async def test_enter_idle_skips_ready(self, idle_monitor, mock_state_manager):
+        """Entering idle should NOT transition READY controllers."""
         mock_state_manager.controller_states = {
             "s1": ControllerState.CONNECTED,
             "s2": ControllerState.READY,
-            "s3": ControllerState.ADMIN,
         }
         mock_state_manager.battery_levels = {"s1": 3}
 

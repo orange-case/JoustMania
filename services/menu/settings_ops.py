@@ -1,15 +1,9 @@
-"""Settings core shared by the controller admin mode and the operator pad commands (#2050, UC-015).
+"""Settings core of the operator pad commands (#2050, UC-015).
 
-Admin mode (UC-012, UC-013, UC-014) and the pad's ``ProcessInput`` commands
-(services.md §3.1) change the same settings. This module holds what both need
-and nothing that is tied to a controller: the force-start roster with ghost
-pruning, the clamped setting step, the agent level ladder, the kill switch and
-resume of UC-015 BR-002 / BR-003, the backend write, and the voice tables.
-
-``AdminModeHandler`` keeps its LEDs, its admin session span and its wrapping
-``cycle_variant`` steps, and delegates the rest here. The pad commands pass no
-serial: no LED pulse, no roster entry for the caller, an error code instead of
-a log line.
+The pad's ``ProcessInput`` commands (services.md §3.1) land here: the force-start
+roster with ghost pruning (UC-014), the clamped setting step, the agent level
+ladder, the kill switch and resume of UC-015 BR-002 / BR-003, the backend write,
+and the voice tables. A refusal is an error code, not a log line.
 
 Flag-service calls are blocking with a 0.5 s deadline and fail closed; they run
 through ``asyncio.to_thread`` and are never retried or queued (UC-015 BR-010).
@@ -60,7 +54,7 @@ from lib.setting_ladders import (
     step_ladder,
 )
 from lib.types import Sound
-from lib.voice_prompts import (  # re-exported: admin mode imports the voice tables from here
+from lib.voice_prompts import (
     AGENT_LEVEL_VOICES,
     AGENT_SWITCH_VOICES,
     AUTOMATIC_VOICE,
@@ -82,7 +76,7 @@ logger = logging.getLogger(__name__)
 
 # --- Agent set keys -------------------------------------------------------------------------
 
-# UC-013 BR-001: the only agent key admin mode writes (persisted).
+# UC-015 BR-019: the agent level, written persisted.
 AGENT_POLICY_FLAG = "interventions_allowed"
 # UC-015 BR-001: the pad also writes the kill switch and the write gate (in memory only) and the backend (persisted).
 AGENT_ENABLED_FLAG = "enabled"
@@ -92,7 +86,7 @@ DECISION_BACKEND_FLAG = "decision.backend"
 # UC-015 BR-018 (#2215): the shield mode the pad's K6 layer steps; a persisted admin value of the `game` set.
 SHIELD_ACTIVATION_FLAG = "shield.activation"
 
-# Ladders (UC-013, UC-015 BR-004): one source with the pad's preview, lib/setting_ladders.py (#2106).
+# Ladders (UC-015 BR-004, BR-019): one source with the pad's preview, lib/setting_ladders.py (#2106).
 DECISION_BACKENDS = tuple(BACKENDS)
 
 # --- Error codes (UC-015 BR-012, services.md §3.1) ------------------------------------------
@@ -142,26 +136,13 @@ def variant_to_value(option_name: str, variant_name: str) -> int | float | bool:
     return _VARIANT_VALUES.get(option_name, {}).get(variant_name, 0)
 
 
-def agent_level_next(current: str | None, forward: bool = True) -> str:
-    """The next level along AGENT_POLICY_LEVELS, clamped at both ends (UC-013).
-
-    The ladder never wraps: restrict at ``none`` stays ``none`` (a kill switch that
-    escalates to ``full`` when pressed while off is unsafe) and escalate at ``full``
-    stays ``full``. A current value outside the ladder (``probe``, UC-013 A1) collapses to
-    ``none``, the benign fail-safe. ``None`` (an unreadable level) also maps to ``none``, but
-    only the restrict uses it: the callers refuse an escalation from an unreadable level (UC-013 A5).
-    """
-    return step_ladder("agent_level", AGENT_POLICY_LEVELS, current, 1 if forward else -1)[0]
-
-
 def _ladder_step(option: str, ladder: list[str], current: str | None, forward: bool, steps: int) -> str:
     """``steps`` moves along ``ladder``, wrapped or clamped per `WRAPPING`; outside it the first move lands on it."""
     new, _at_limit = step_ladder(option, ladder, current, steps if forward else -steps)
     return new
 
 
-# UC-015 BR-015: the mode pulse on every lobby controller, the pulse admin mode shows on its own
-# controller (UC-011 step 3, ``AdminModeHandler.handle_game_mode``).
+# UC-015 BR-015: the mode pulse on every lobby controller.
 MODE_PULSE_MS = 600
 MODE_PULSE_SPEED = 6
 # UC-015 BR-018 (#2215): `automatic` (the operator value cleared) shows as a double white flash, a pattern
@@ -170,15 +151,6 @@ AUTOMATIC_FLASH_MS = 150
 AUTOMATIC_FLASH_GAP_SECONDS = 0.3
 # The menu re-reads which settings the operator set at most this often (GetMenuStatus, BR-018, #2222).
 OPERATOR_REFRESH_SECONDS = 2.0
-# UC-012: one pulse colour per sensitivity level (0 Ultra Slow .. 4 Ultra Fast), used by every admin path.
-SENSITIVITY_COLORS = [Colors.Blue, Colors.Turquoise, Colors.Green, Colors.Orange, Colors.Red]
-# Admin agent-policy pulse: red = off (panic), escalating warmth toward full (#819).
-AGENT_LEVEL_COLORS = {
-    "none": Colors.Red,
-    "ambient": Colors.Turquoise,
-    "standard": Colors.Orange,
-    "full": Colors.Green,
-}
 # UC-015 BR-018 (#2215): the colour of each shield mode's pulse on the lobby controllers (the BR-015 pulse).
 SHIELD_MODE_COLORS: dict[str, tuple[int, int, int]] = {
     "instant": Colors.White.value,
@@ -423,7 +395,7 @@ class SettingsOps:
         self._get_state_manager = get_state_manager
         self.controller_channel = controller_channel
         self.metrics = metrics
-        # AdminModeCallbacks: get_game_options and select_game_mode for the mode step.
+        # The servicer: get_game_options and select_game_mode for the mode step.
         self.callbacks = callbacks
         # UC-015 BR-001: the `agent` keys whose rows take no persist (`enabled`, the write gate, the in-memory
         # agent rows) have their own writer, with no persist field.
@@ -483,13 +455,12 @@ class SettingsOps:
 
     # --- Force-start roster (UC-014 steps 3-4, UC-015 BR-008) -------------------------------
 
-    async def prune_ghosts(self, controllers: list[str], admin_serial: str | None, span) -> list[str]:
+    async def prune_ghosts(self, controllers: list[str], span) -> list[str]:
         """Drop ghost controllers from ``controllers`` using the controller manager's live roster.
 
         Queries ``GetConnectedControllers`` (#1153) and removes any serial the backend no
         longer reports (the #551 ghost window). Fail-soft: on any RPC error, or with no
-        channel, the list is returned unchanged so a force-start is never blocked. The admin
-        serial, when there is one, is kept even if the live roster omits it; the pad has none.
+        channel, the list is returned unchanged so a force-start is never blocked.
         """
         if self.controller_channel is None or not controllers:
             return controllers
@@ -515,16 +486,12 @@ class SettingsOps:
 
         span.set_attribute("force_start.roster_reconciled", True)
         span.set_attribute("force_start.ghosts_pruned", len(ghosts))
-
-        if admin_serial and admin_serial not in pruned:
-            pruned.append(admin_serial)
         return pruned
 
-    async def force_start_roster(self, admin_serial: str | None, span) -> list[str]:
+    async def force_start_roster(self, span) -> list[str]:
         """The roster of a force-start: all connected with force_all_start, else the ready ones.
 
-        UC-012 BR-001: force_all_start is read now, at the force start. The admin serial is
-        added to a ready roster and survives ghost pruning; ``None`` (the pad) adds nobody.
+        UC-014 step 3: force_all_start is read now, at the force start.
         """
         from lib.feature_flags import get_flag_client
 
@@ -537,16 +504,14 @@ class SettingsOps:
             controllers = list(manager.connected_controllers)
         else:
             controllers = list(manager.ready_controllers)
-        if admin_serial and not force_all and admin_serial not in controllers:
-            controllers.append(admin_serial)
-        return await self.prune_ghosts(controllers, admin_serial, span)
+        return await self.prune_ghosts(controllers, span)
 
     # --- Agent level reads ---------------------------------------------------------------
 
     def current_agent_level(self) -> str | None:
         """The agent level the flag service serves (``effective_default``), None when it cannot be read.
 
-        UC-013 BR-003 (#2095): never the in-process flagd value. The flag service applies a
+        UC-015 BR-019 (#2095): never the in-process flagd value. The flag service applies a
         write before it answers, while flagd catches up only within NFR-050, so a step read
         from flagd right after a write (or after a write that timed out but landed) steps
         from the old level again. Blocking (one flag-service read): run via to_thread.
@@ -1156,7 +1121,7 @@ class SettingsOps:
     # --- Feedback ---------------------------------------------------------------------------
 
     async def announce(self, option: str, variant: str | None, quiet: bool = False) -> None:  # noqa: C901 - one branch per option voice; split later
-        """The voice line for a new value (UC-012 voices, UC-015 step 4, 5, 8). Best effort.
+        """The voice line for a new value (UC-015 step 4, 5, 8). Best effort.
 
         ``quiet``: no volume step sound (UC-016 BR-004, the pad shows the level); every other option ignores it.
 
@@ -1214,7 +1179,7 @@ class SettingsOps:
         """UC-015 BR-015: a short pulse of the mode's colour on every CONNECTED or READY controller.
 
         The controller manager restores each controller's base colour (its dim / bright lobby
-        colour) when the pulse ends; the admin controller and IDLE controllers are left alone.
+        colour) when the pulse ends; IDLE controllers are left alone.
         """
         await self._pulse_lobby(GAME_MODE_COLORS.get(game_mode, DEFAULT_COLOR))
 
@@ -1239,8 +1204,8 @@ class SettingsOps:
         await self._effect_lobby(controller_manager_pb2.GAME_EFFECT_PULSE, color, MODE_PULSE_MS, MODE_PULSE_SPEED)
 
     async def _effect_lobby(self, effect: int, color: tuple[int, int, int], duration_ms: int, speed: int = 0) -> None:
-        """One game effect on every CONNECTED or READY controller (not admin, not IDLE)."""
-        # Imported here: services.menu.handlers imports this module (admin mode).
+        """One game effect on every CONNECTED or READY controller (not IDLE)."""
+        # Imported here to keep the handlers package out of this module's import time.
         from services.menu.handlers.base import ControllerState
 
         manager = self.state_manager

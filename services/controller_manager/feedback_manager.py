@@ -613,18 +613,6 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
             effect_type=controller_manager_pb2.GAME_EFFECT_COUNTDOWN,
         )
 
-    async def _effect_admin_enter(self, serial: str, **_kwargs) -> None:
-        """White flash, then persistent white."""
-        self.base_colors[serial] = Colors.White.value
-        await self.play_effect_with_restore(serial, "flash", Colors.White.value, 600, 5, Colors.White.value)
-
-    async def _effect_admin_exit(self, serial: str, restore_color: tuple | None, **_kwargs) -> None:
-        """Restore to base color (instant)."""
-        async with self.effect_lock:
-            self.active_effects.pop(serial, None)
-        if restore_color:
-            await self.set_controller_color(serial, restore_color)
-
     async def _effect_low_battery(self, serial: str, restore_color: tuple | None, **_kwargs) -> None:
         """Red flash 2x warning, as an effect task so the command reader does not wait for it (#2540)."""
 
@@ -790,8 +778,6 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
             controller_manager_pb2.GAME_EFFECT_PLAYER_RESPAWN: self._effect_player_respawn,
             controller_manager_pb2.GAME_EFFECT_WINNER_RAINBOW: self._effect_winner_rainbow,
             controller_manager_pb2.GAME_EFFECT_COUNTDOWN: self._effect_countdown,
-            controller_manager_pb2.GAME_EFFECT_ADMIN_ENTER: self._effect_admin_enter,
-            controller_manager_pb2.GAME_EFFECT_ADMIN_EXIT: self._effect_admin_exit,
             controller_manager_pb2.GAME_EFFECT_LOW_BATTERY: self._effect_low_battery,
             controller_manager_pb2.GAME_EFFECT_FORCE_START_CHARGE: self._effect_force_start_charge,
             controller_manager_pb2.GAME_EFFECT_SHOW_BATTERY: self._effect_show_battery,
