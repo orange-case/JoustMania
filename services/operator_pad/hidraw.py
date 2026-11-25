@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import errno
 import os
+import re
 import select
 import time
 from pathlib import Path
@@ -92,6 +93,21 @@ class Backend(Protocol):
 def _node_number(node: Path) -> int:
     digits = node.name.removeprefix("hidraw")
     return int(digits) if digits.isdigit() else 1 << 30
+
+
+_USB_DEVICE = re.compile(r"^\d+-[\d.]+$")  # a USB device in sysfs (`1-1.2`); its interfaces are `1-1.2:1.0`
+
+
+def usb_device(sysfs_device: Path) -> str | None:
+    """The USB device a hidraw or input node's sysfs ``device`` link sits under, or None (UC-016 BR-011)."""
+    try:
+        resolved = sysfs_device.resolve(strict=True)
+    except OSError:
+        return None
+    for part in (resolved, *resolved.parents):
+        if _USB_DEVICE.match(part.name):
+            return str(part)
+    return None
 
 
 def _matches(node: Path, hid_id: str) -> bool:

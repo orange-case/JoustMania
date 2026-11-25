@@ -1,6 +1,7 @@
-"""UC-015 main steps 2 and 3: the pad's K1 tap starts a game through the menu (#2050 PR8).
+"""UC-015 main steps 2 and 3: the pad's game-key tap starts a game through the menu (#2050 PR8).
 
-The pad service sends `ProcessInput` `start_game` for a K1 tap (UC-015 step 2); these tests send
+The pad service sends `ProcessInput` `start_game` for the game-key tap (UC-015 step 2; K8 since the page keys
+of #2747, K1 in the first layout, hence the file name); these tests send
 that exact command to the real menu on mock controllers and check step 3: the game starts as in
 UC-010 step 5 onwards, announced by the countdown (`game_starting`, then RUNNING).
 

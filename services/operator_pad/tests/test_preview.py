@@ -4,19 +4,21 @@ A fake clock and sleep drive the debounce; the audio stub records every clip wit
 """
 
 import asyncio
-from unittest.mock import create_autospec, patch
+from unittest.mock import MagicMock, create_autospec, patch
 
 import pytest
 
 from lib.setting_ladders import MODE_LADDER
 from lib.types import Sound
 from proto import audio_pb2, menu_pb2
+from services.operator_pad import page_keys
 from services.operator_pad import preview as preview_module
 from services.operator_pad.actions import Actions
 from services.operator_pad.config import DEFAULT_KEYMAP, PadConfig, Timings, parse_keymap
 from services.operator_pad.controller import PadController
 from services.operator_pad.cues import ANNOUNCE_GROUP, CuePlayer
 from services.operator_pad.gestures import LAYER, PRESS, RELEASE, Gesture
+from services.operator_pad.pages import PAGES
 from services.operator_pad.preview import PREVIEW_GROUP, Previewer
 from services.operator_pad.state import MenuStatusReader
 from services.operator_pad.tests.fakes import AudioStubSpec, CoordinatorStubSpec, MenuStubSpec
@@ -283,17 +285,17 @@ async def test_no_command_is_sent_before_the_release_and_the_release_stops_the_p
     rig.config.timings.return_value = Timings(knob_events_per_step=1)
     reader = create_autospec(MenuStatusReader, instance=True)
     reader.fetch.return_value = menu_pb2.GetMenuStatusResponse(num_teams=2, operator_settings={"num_teams": "two"})
-    pad = PadController(rig.config, reader, actions, rig.cues)
+    pad = PadController(rig.config, reader, actions, rig.cues, display=game_page())
     pad.attached(KEYMAP)
 
-    await pad.on_code(CODE["K5"], PRESS, 0)
+    await pad.on_code(CODE["K1"], PRESS, 0)
     for i in range(3):
         await pad.on_code(CODE["KNOB_TURN_B"], PRESS, 10 + i * 10)
         await pad.on_code(CODE["KNOB_TURN_B"], RELEASE, 11 + i * 10)
         await rig.time.advance(0.6)
     menu.ProcessInput.assert_not_awaited()
     assert rig.files() == [TEAMS, NUMBER[3], NUMBER[4], NUMBER[5]]
-    await pad.on_code(CODE["K5"], RELEASE, 2000)
+    await pad.on_code(CODE["K1"], RELEASE, 2000)
     await settle()
     (call,) = menu.ProcessInput.await_args_list
     assert dict(call.args[0].data) == {
@@ -319,10 +321,10 @@ async def test_a_chord_ends_the_preview():
     rig.config.timings.return_value = Timings(knob_events_per_step=1)
     reader = create_autospec(MenuStatusReader, instance=True)
     reader.fetch.return_value = menu_pb2.GetMenuStatusResponse(num_teams=2, operator_settings={"num_teams": "two"})
-    pad = PadController(rig.config, reader, actions, rig.cues)
+    pad = PadController(rig.config, reader, actions, rig.cues, display=game_page())
     pad.attached(KEYMAP)
 
-    await pad.on_code(CODE["K5"], PRESS, 0)
+    await pad.on_code(CODE["K1"], PRESS, 0)
     await pad.on_code(CODE["KNOB_TURN_B"], PRESS, 10)
     await rig.time.advance(0.05)
     await pad.on_code(CODE["K2"], PRESS, 100)  # a chord: the hold commits nothing, the preview stops
@@ -395,14 +397,16 @@ async def test_a_refused_hold_says_not_possible_once_including_the_release():
     reader.fetch.return_value = menu_pb2.GetMenuStatusResponse(
         num_teams=2, operator_settings={"num_teams": "two"}, lifecycle_live=True
     )
-    pad = PadController(rig.config, reader, actions, rig.cues)
+    pad = PadController(rig.config, reader, actions, rig.cues, display=game_page())
     pad.attached(KEYMAP)
 
-    await pad.on_code(CODE["K5"], PRESS, 0)
+    await pad.on_code(CODE["K1"], PRESS, 0)
     for i in range(2):
         await pad.on_code(CODE["KNOB_TURN_B"], PRESS, 10 + i * 10)
         await rig.time.advance(0.6)
-    _, result = await actions.dispatch(Gesture(LAYER, "K5", steps=2, held_ms=900), reader.fetch.return_value)
+    _, result = await actions.dispatch(
+        Gesture(LAYER, "K1", steps=2, held_ms=900), reader.fetch.return_value, None, GAME_K1
+    )
     await settle()
     assert result == "refused"
     assert rig.files() == [Sound.MENU_VOX_STATUS_NOT_POSSIBLE.value]
@@ -680,3 +684,13 @@ async def test_no_pulse_reaches_the_menu_after_a_committing_release():
     menu.answer.set()
     await rig.previewer.drain()
     assert menu.sent == [MODE_LADDER[1]]
+
+
+GAME_K1 = page_keys.binding("K1", PAGES.index("GAME"))  # UC-016 BR-012: the teams
+
+
+def game_page():
+    """A display whose screen shows `GAME` (UC-016 BR-011): K1 binds the teams row."""
+    display = MagicMock(display_usb=None, pages_active=False)
+    display.bind_page.return_value = (PAGES.index("GAME"), False)
+    return display

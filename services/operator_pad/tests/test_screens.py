@@ -82,7 +82,7 @@ def test_status_screen_state_is_game_while_the_lifecycle_is_live_and_agent_off_w
 @pytest.mark.parametrize(
     ("fields", "line"),
     [
-        ({"agent_interventions_enabled_state": "off"}, "AGENT OFF"),  # BR-002: the write gate closed
+        ({"agent_interventions_enabled_state": "off"}, "AGENT WATCH STANDARD"),  # UC-016 BR-011: only the gate closed
         ({"agent_level": "none"}, "AGENT OFF"),
         ({"agent_enabled": False, "agent_enabled_state": "off", "agent_level": ""}, "AGENT OFF"),
         ({"agent_interventions_enabled_state": "unknown"}, "AGENT ?"),  # BR-013

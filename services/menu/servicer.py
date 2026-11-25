@@ -582,6 +582,8 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             result = await self._pad_reset_setting(data)
         elif command == "interventions_switch":
             result = await self.settings_ops.interventions_switch(data.get("state", ""))
+            if result.error is None:
+                await self.settings_ops.announce("interventions_switch", result.new)
         else:
             result = await self.settings_ops.set_backend(data.get("backend", ""))
         error = result.error or ""
