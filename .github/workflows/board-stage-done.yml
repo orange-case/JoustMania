@@ -1,0 +1,78 @@
+name: Board stage done
+
+# #2760: the org project "JoustMania pipeline" (orange-case project 2) groups by
+# its own "Stage" field. The project's built-in workflow sets only "Status" on
+# close, so finished items stayed in Backlog / Implementation / In review. This
+# sets Stage to Done for the closed issue or PR's item on that project.
+# pull_request_target: no checkout, nothing from the PR runs; it only needs the
+# node id. GITHUB_TOKEN cannot write org projects, so it mints a token from the
+# release App, which needs "Organization projects: read and write".
+
+on:
+  issues:
+    types: [closed]
+  pull_request_target:
+    types: [closed]
+
+permissions: {}
+
+concurrency:
+  group: board-stage-${{ github.event.issue.node_id || github.event.pull_request.node_id }}
+
+jobs:
+  stage-done:
+    name: Stage to Done
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HAS_RELEASE_APP: ${{ vars.RELEASE_APP_ID != '' && secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+    steps:
+      - name: Mint App token
+        id: app-token
+        if: env.HAS_RELEASE_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-organization-projects: write
+
+      - name: Set Stage to Done
+        if: steps.app-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NODE_ID: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}
+          OWNER: ${{ github.repository_owner }}
+          PROJECT_NUMBER: "2"
+        run: |
+          set -euo pipefail
+          # One line per matching project item: item id, project id, field id, Done option id.
+          rows=$(gh api graphql -f id="$NODE_ID" -f query='
+            query($id: ID!) {
+              node(id: $id) {
+                ... on Issue { projectItems(first: 20) { nodes { ...item } } }
+                ... on PullRequest { projectItems(first: 20) { nodes { ...item } } }
+              }
+            }
+            fragment item on ProjectV2Item {
+              id
+              project {
+                id number owner { ... on Organization { login } }
+                field(name: "Stage") { ... on ProjectV2SingleSelectField { id options { id name } } }
+              }
+            }' --jq ".data.node.projectItems.nodes[]
+                  | select(.project.number == ${PROJECT_NUMBER} and .project.owner.login == \"${OWNER}\")
+                  | [.id, .project.id, .project.field.id, (.project.field.options[] | select(.name == \"Done\") | .id)]
+                  | @tsv")
+          if [ -z "$rows" ]; then
+            echo "Not on project ${PROJECT_NUMBER}; nothing to do."
+            exit 0
+          fi
+          while IFS=$'\t' read -r item project field option; do
+            gh api graphql -f project="$project" -f item="$item" -f field="$field" -f option="$option" -f query='
+              mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+                updateProjectV2ItemFieldValue(input: {projectId: $project, itemId: $item, fieldId: $field,
+                                                      value: {singleSelectOptionId: $option}}) { projectV2Item { id } }
+              }' > /dev/null
+            echo "Stage set to Done on item $item"
+          done <<< "$rows"
