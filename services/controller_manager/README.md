@@ -97,6 +97,7 @@ grpcurl -plaintext -d '{"serial": "CTRL001", "effect": 2, "color": {"r": 255, "g
 
 Metrics are pushed over OTLP (no `/metrics` endpoint; the prometheus_client server on :8000 was
 removed in #1447). The full list is in [docs/specs/telemetry.md §6](../../docs/specs/telemetry.md#6-metrics).
+Poll-loop health: `controller_poll_loop_lateness_seconds` (how late each 100 Hz poll started).
 
 ## Backend Interfaces
 

@@ -27,7 +27,7 @@ BUTTON_TYPE_NAMES = {
     controller_manager_pb2.BUTTON_START: "start",
 }
 
-# Low-cardinality labels for the button_event_errors_total metric
+# Low-cardinality event_type labels (dispatch histogram, logs)
 _EVENT_TYPE_NAMES = {
     controller_manager_pb2.EVENT_CONNECT: "connect",
     controller_manager_pb2.EVENT_DISCONNECT: "disconnect",

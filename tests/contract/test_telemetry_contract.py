@@ -325,6 +325,10 @@ def test_every_python_metric_has_a_named_consumer(python_metrics):
             continue
         for rel in (p.strip() for p in match.group(1).split(",")):
             path = ti.REPO_ROOT / rel
+            if rel.startswith("docs/specs/"):
+                # The notes, the generated catalog and telemetry.md name every metric.
+                stale.append(f"{name}: {rel} (a spec is not a reader)")
+                continue
             if not path.is_file() or not re.search(
                 rf"\b{name}\b", path.read_text(errors="ignore")
             ):

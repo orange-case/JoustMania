@@ -148,6 +148,15 @@ discovery_full_enumerate_total = Counter(
     "Full discovery enumerations (with HID/psmove scanning)",
 )
 
+# How late each poll started relative to its 100 Hz schedule (#1447). The poll
+# loop runs nothing but the poll, so lateness here is event-loop contention
+# (gRPC streams, effects, health emission), not discovery or LED work.
+poll_loop_lateness_seconds = Histogram(
+    "controller_poll_loop_lateness_seconds",
+    "How late each controller-manager poll started after its scheduled time",
+    buckets=[0.0005, 0.001, 0.002, 0.005, 0.010, 0.020, 0.050, 0.100, 0.250],
+)
+
 # Fixed interval polling metrics
 polling_mode = Gauge(
     "controller_polling_mode",

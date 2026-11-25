@@ -364,6 +364,10 @@ class DiscoveryLoop:
         next_poll_time = time.monotonic()
         while self.running:
             try:
+                # Lateness of this poll against its schedule: event-loop
+                # contention only, now that nothing else runs in this loop.
+                metrics.poll_loop_lateness_seconds.observe(max(0.0, time.monotonic() - next_poll_time))
+
                 await self._update_controller_states()
 
                 # Fixed interval sleep - precise timing using monotonic clock
@@ -1175,8 +1179,7 @@ class DiscoveryLoop:
 
             logger.info(f"Started tracking controller {serial} ({name})")
 
-            # Cache metric label children for this serial (Issue #542)
-            # Avoids 5× _validate_labels + _make_key per poll cycle per controller
+            # Cache the label child per serial: no label lookup per poll (#542)
             self._record(serial).accel_gauges = {
                 "magnitude": metrics.controller_accel_magnitude.labels(serial=serial),
             }
