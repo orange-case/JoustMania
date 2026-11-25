@@ -229,8 +229,8 @@ enum GameEffect {
   GAME_EFFECT_PLAYER_RESPAWN = 3;   // White during spawn protection
   GAME_EFFECT_WINNER_RAINBOW = 4;   // Rainbow 3s, restore to base color
   GAME_EFFECT_COUNTDOWN = 5;        // Full countdown: Red→Yellow→Green (duration_ms per phase, default 750ms), restore to base
-  GAME_EFFECT_ADMIN_ENTER = 6;      // White flash 3x, then persistent white
-  GAME_EFFECT_ADMIN_EXIT = 7;       // Restore to base color
+  reserved 6, 7;  // GAME_EFFECT_ADMIN_ENTER / _EXIT: controller admin mode removed (#2819)
+  reserved "GAME_EFFECT_ADMIN_ENTER", "GAME_EFFECT_ADMIN_EXIT";
   GAME_EFFECT_LOW_BATTERY = 8;      // Red flash 2x warning
   GAME_EFFECT_FORCE_START_CHARGE = 9;  // Fade white→dim over 2s (force start countdown)
   GAME_EFFECT_SHOW_BATTERY = 10;    // Show battery level on ALL controllers (green/orange/red based on level)

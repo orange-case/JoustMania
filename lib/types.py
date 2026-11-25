@@ -314,7 +314,7 @@ class Sound(StrEnum):
     MENU_VOX_SENSITIVITY_LOW = "low"
     MENU_VOX_SENSITIVITY_ULTRA_LOW = "ultra_low"
 
-    # Admin option voice announcements (in Menu/vox/)
+    # Number and on / off voices (in Menu/vox/; named after the retired admin options, #2819)
     MENU_VOX_ADMINOP_2 = "adminop_2"
     MENU_VOX_ADMINOP_3 = "adminop_3"
     MENU_VOX_ADMINOP_4 = "adminop_4"
@@ -354,17 +354,10 @@ class Sound(StrEnum):
     MENU_VOX_INTERVENTIONS_ON = "interventions_on"
     MENU_VOX_INTERVENTIONS_OFF = "interventions_off"
 
-    # Agent kill-switch (#819) voice announcements. Reuse existing on/off and
-    # numbered admin vox assets so no new audio is required; the LED color is the
-    # primary, unambiguous feedback. "none" announces off (agent disabled / panic
-    # off); the permissive levels announce a numbered level.
+    # Agent level voices (#819): "none" announces off, the permissive levels a number.
     MENU_VOX_ADMINOP_ON = "adminop_on"
     MENU_VOX_ADMINOP_OFF = "adminop_off"
     MENU_VOX_ADMINOP_1 = "adminop_1"
-
-    # Admin cues that reinforce an LED cue (#1746): write failed, agent overlay.
-    MENU_VOX_ADMIN_NOT_SAVED = "admin_not_saved"
-    MENU_VOX_ADMIN_AGENT = "admin_agent"
 
 
 class GameEvent(StrEnum):

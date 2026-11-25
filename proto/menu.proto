@@ -50,7 +50,7 @@ message StopMenuResponse {
 message StreamMenuEventsRequest {}
 
 message MenuEvent {
-  string event_type = 1;  // "selection_changed", "game_requested", "admin_action"
+  string event_type = 1;  // "selection_changed", "game_requested"
   map<string, string> data = 2;  // Event-specific data
   int64 timestamp = 3;  // Unix timestamp in milliseconds
 }
@@ -87,7 +87,8 @@ message GetMenuStatusResponse {
   string selection = 4;             // Games enum name of the selected mode
   int32 ready_count = 5;
   int32 connected_count = 6;
-  string admin_serial = 7;          // controller in admin mode, empty when none
+  reserved 7;                       // admin_serial: controller admin mode removed (#2819)
+  reserved "admin_serial";
   bool agent_enabled = 8;           // agent/enabled (the kill switch)
   string agent_level = 9;           // agent/interventions_allowed variant name
   string agent_saved_level = 10;    // level a resume restores, empty when none saved

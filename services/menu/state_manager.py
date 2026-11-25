@@ -4,7 +4,6 @@ import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 
-from lib.controller_constants import ButtonTrackingKey
 from lib.flag_service_writer import FlagServiceWriter
 from lib.types import Games
 from services.menu import metrics
@@ -88,12 +87,6 @@ class StateManager:
         """Controller serials in READY state (computed from controller_states)."""
         return {serial for serial, state in self.controller_states.items() if state == ControllerState.READY}
 
-    def _abandon_admin_session(self) -> None:
-        """UC-012 BR-004: release the admin session (single-admin lock) when state is cleared wholesale."""
-        admin_handler = self._handlers.get(ControllerState.ADMIN)
-        if admin_handler is not None and hasattr(admin_handler, "abandon_session"):
-            admin_handler.abandon_session()
-
     def register_handler(self, handler: ControllerHandler) -> None:
         """
         Register a handler for a controller state.
@@ -162,18 +155,9 @@ class StateManager:
             }
         self.button_states[serial][button] = is_press
 
-        # Handle release events - forward trigger releases in admin mode
         if not is_press:
-            if button == ButtonTrackingKey.TRIGGER:
-                state = self.get_controller_state(serial)
-                if state == ControllerState.ADMIN:
-                    handler = self._handlers.get(state)
-                    if handler and hasattr(handler, "handle_trigger_release"):
-                        await handler.handle_trigger_release(serial)
             return
 
-        # Dispatch to appropriate handler
-        # Note: Admin mode is handled externally by AdminModeHandler
         state = self.get_controller_state(serial)
         handler = self._handlers.get(state)
         if handler:
@@ -267,7 +251,6 @@ class StateManager:
         Clear state so these events re-populate cleanly without ghosts.
         """
         count = len(self.controller_states)
-        self._abandon_admin_session()
         self.controller_states.clear()
         self.button_states.clear()
         self.battery_levels.clear()
@@ -329,7 +312,7 @@ class StateManager:
 
         Args:
             game_mode: Games enum value to select
-            source: Who made the selection (e.g. "controller", "admin", "web")
+            source: Who made the selection (e.g. "controller", "operator_pad", "web")
             serial: Controller serial that made the selection, if any
         """
         if self._select_game_mode is not None:
@@ -346,7 +329,7 @@ class StateManager:
 
     async def show_lobby_colors(self) -> None:
         """UC-011 step 6, BR-005: the current mode's lobby colour on every CONNECTED (dim) and READY
-        (bright) controller; ADMIN and IDLE controllers keep theirs. Best effort per controller."""
+        (bright) controller; IDLE controllers keep theirs. Best effort per controller."""
         mode = self.current_game_mode.name
         for serial, state in list(self.controller_states.items()):
             try:
@@ -369,9 +352,6 @@ class StateManager:
         """
         # Remember which controllers were connected before clearing
         serials = list(self.controller_states.keys())
-
-        # Clearing state skips on_exit, so release the admin session explicitly.
-        self._abandon_admin_session()
 
         # Clear all state (controller_states is the single source of truth)
         self.controller_states.clear()

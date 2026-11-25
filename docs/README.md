@@ -27,7 +27,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | Area | Use cases |
 |---|---|
 | Pairing and controllers | [UC-001](use_cases/UC-001.md) pair over USB, [UC-002](use_cases/UC-002.md) connect and join, [UC-003](use_cases/UC-003.md) mock controllers, [UC-004](use_cases/UC-004.md) identify a controller |
-| Lobby and admin | [UC-010](use_cases/UC-010.md) ready up and start, [UC-011](use_cases/UC-011.md) select mode, [UC-012](use_cases/UC-012.md) admin settings, [UC-013](use_cases/UC-013.md) agent kill switch on the controller, [UC-014](use_cases/UC-014.md) force start |
+| Lobby and menu | [UC-010](use_cases/UC-010.md) ready up and start, [UC-011](use_cases/UC-011.md) select mode, [UC-014](use_cases/UC-014.md) force start, [UC-015](use_cases/UC-015.md) operator pad; Obsolete since #2819: [UC-012](use_cases/UC-012.md) admin settings, [UC-013](use_cases/UC-013.md) agent kill switch on the controller |
 | Playing | [UC-020](use_cases/UC-020.md) FFA, [UC-021](use_cases/UC-021.md) teams, [UC-022](use_cases/UC-022.md) hidden roles, [UC-023](use_cases/UC-023.md) zombies, [UC-024](use_cases/UC-024.md) swapper, [UC-025](use_cases/UC-025.md) 1v1, [UC-026](use_cases/UC-026.md) non-stop, [UC-027](use_cases/UC-027.md) force end, [UC-030](use_cases/UC-030.md) death detection, [UC-031](use_cases/UC-031.md) audio |
 | Observability | [UC-035](use_cases/UC-035.md) observe the system |
 | Agent | [UC-040](use_cases/UC-040.md) decide an intervention, [UC-041](use_cases/UC-041.md) observe a game, [UC-042](use_cases/UC-042.md) retro and proposals, [UC-043](use_cases/UC-043.md) shadow experiments and promotion, [UC-044](use_cases/UC-044.md) switch backend live, [UC-045](use_cases/UC-045.md) kill switch, [UC-046](use_cases/UC-046.md) repeatable pattern-driven shadow games (#1258), [UC-047](use_cases/UC-047.md) recalibrate the shadow players from real games (draft, #1055) |
@@ -53,7 +53,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Set up, follow the spec-first workflow, pass CI |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Build, run, test and debug; compose and image workflow |
 | [hardware-setup-guide.md](hardware-setup-guide.md) (includes the 25-controller setup) | Set up a Pi 5 with many controllers |
-| [UC-010](use_cases/UC-010.md), [UC-012](use_cases/UC-012.md) | Lobby and admin button maps (BR-005 in each) |
+| [UC-010](use_cases/UC-010.md), [UC-015](use_cases/UC-015.md) | Lobby button map (UC-010 BR-005) and operator pad keys (UC-015 BR-011, BR-016) |
 | [CONTROLLER_CONNECTIVITY.md](CONTROLLER_CONNECTIVITY.md) | Troubleshoot Bluetooth (stale) |
 | [AUDIO.md](AUDIO.md) | Audio hardware and ALSA setup |
 | [observability-quickstart.md](observability-quickstart.md) | Performance tooling (stale metric names) |

@@ -137,7 +137,7 @@ ad-hoc write. Then turn the variant on the way `scripts/agent-dryrun-enable.sh` 
 
 **Real side.** Run real games at each value: at least 8 games per value, the same player count
 (4) and mode (FFA), and the same players across all three values in one session. Set the value
-between blocks of games as the host (pad or admin mode: `sensitivity` is a persisted admin value),
+between blocks of games as the host (the operator pad: `sensitivity` is a persisted admin value),
 never mid-game. Interleave the blocks (baseline, good, bad, baseline, ...) so warm-up and fatigue
 do not line up with one value. Endurance fitness of a real game is `min(1, duration /
 fitness.endurance.min_session_seconds)`. Take `duration` per game from
