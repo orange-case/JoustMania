@@ -269,8 +269,7 @@ def fit_archetype(name, params, band_games, shadow_games) -> dict:
         # Fields round independently, so a slot at a bound can round past it.
         for step in range(ROUND_STEPS):
             trial = {
-                k: round(params[k] * r, ROUND) if params[k] else params[k]
-                for k in keys
+                k: round(params[k] * r, ROUND) if params[k] else params[k] for k in keys
             }
             if valid({**new, **trial}):
                 break
