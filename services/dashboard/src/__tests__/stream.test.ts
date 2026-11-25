@@ -266,7 +266,6 @@ describe("UC-035: A3 a telemetry backend is down (dashboard side)", () => {
     const settled = (await Promise.allSettled([
       Promise.resolve(counts),
       Promise.reject(new Error("Jaeger unreachable")),
-      Promise.resolve(),
     ])) as AgentPollResults;
     const result = settleAgentPoll(
       settled,
@@ -274,7 +273,7 @@ describe("UC-035: A3 a telemetry backend is down (dashboard side)", () => {
       () => {
         throw new Error("a failed search merges nothing");
       },
-      { flags: true, rollouts: true },
+      { flags: true },
     );
     paintAgentPanels(view, result.overlay, result.jaegerOk ?? false, () => ({ feed: [], flags: null }));
     return result;
@@ -319,14 +318,13 @@ describe("UC-035: A3 a telemetry backend is down (dashboard side)", () => {
     vi.advanceTimersByTime(20_000);
     await pollWithFlagsDown(view, emptyView.overlay);
 
-    // Next tick: flag store is filled and no rollout is due, both legs skipped
-    // (resolved placeholders) while Jaeger is still down.
+    // Next tick: the flag store is filled, the flag leg is skipped (a resolved
+    // placeholder) while Jaeger is still down.
     const skipped = (await Promise.allSettled([
       Promise.resolve(counts),
       Promise.resolve([]),
-      Promise.resolve(),
     ])) as AgentPollResults;
-    const result = settleAgentPoll(skipped, counts, () => {}, { flags: false, rollouts: false });
+    const result = settleAgentPoll(skipped, counts, () => {}, { flags: false });
     expect(result.jaegerOk).toBeNull();
     const jaegerOk = result.jaegerOk ?? false; // main.ts: ?? previous agentJaegerOk (false)
     paintAgentPanels(view, result.overlay, jaegerOk, () => ({ feed: [], flags: null }));

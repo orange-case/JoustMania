@@ -59,22 +59,6 @@ def test_agent_interventions_disabled_by_default(prefix):
     )
 
 
-@pytest.mark.uc("UC-051", flow="A1", br=["BR-002"])
-@pytest.mark.parametrize("prefix", FLAG_FILE_VARIANTS, ids=["base", "ci"])
-def test_remediation_allowed_flag_is_resolvable_shape(prefix):
-    """The ``remediation_allowed`` gate the agent's RemediationReader reads from
-    rollout.json exists with both boolean variants and ships OFF (fail-closed):
-    the agent only auto-rolls-back when an operator explicitly flips it on.
-    """
-    rel = f"{prefix}rollout.json"
-    flag = _flags(rel)["remediation_allowed"]
-    assert set(flag["variants"]) == {"on", "off"}, (
-        f"remediation_allowed variants drifted in {rel}: {sorted(flag['variants'])}"
-    )
-    assert flag["variants"]["on"] is True and flag["variants"]["off"] is False
-    assert flag["defaultVariant"] == "off", f"remediation_allowed in {rel} must ship default OFF (fail-closed)"
-
-
 def _const(src: str, name: str) -> str | None:
     """Value of a top-level ``name = "value"`` string constant (Go or Python)."""
     match = re.search(rf'^\s*{name}\s*=\s*"([^"]*)"', src, re.MULTILINE)

@@ -63,7 +63,6 @@ flags:
   - {set: agent, key: interventions_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: experiments_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: experiment_dynamic_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
-  - {set: agent, key: rollout_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: decision.backend, kind: overlay, scope: [stack], persist: true, bounds: {variants: [rules, claude, openai, jev]}}
   - {set: agent, key: decision.act_confidence_threshold, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.jev.act_confidence_threshold, kind: overlay, scope: [stack]}
@@ -208,7 +207,7 @@ flags:
   # agent shield longer, so the agent never writes it (C-034).
   - {set: game, key: shield.end_grace_seconds, kind: overlay, scope: [stack], bounds: {range: [0, 2]}}
 
-  # --- user, controller, rollout (flags.md §13.4) ------------------------------
+  # --- user, controller (flags.md §13.4) --------------------------------------
   - {set: user, key: current_game, kind: overlay, scope: [stack], persist: true}
   - {set: user, key: game_instructions, kind: overlay, scope: [stack], persist: true, bounds: {variants: ["on", "off"]}}
   - {set: user, key: audio_volume.master, kind: overlay, scope: [stack], persist: true, bounds: {variants: [mute, quiet, normal, loud, max]}}
@@ -216,10 +215,6 @@ flags:
   - {set: controller, key: bluetooth_backend, kind: overlay, scope: [stack, fraction], bounds: {fraction: [1, 100]}}
   # rust-hid's per-controller output rate cap (#2125, UC-002 BR-005): tunable on stage.
   - {set: controller, key: rust_hid.output_rate_hz, kind: overlay, scope: [stack], persist: true, bounds: {variants: [slow, normal, fast, max]}}
-  - {set: rollout, key: current_controller_count, kind: overlay, scope: [stack], bounds: {variants: [none, one, three, six, all]}}
-  - {set: rollout, key: target_backend, kind: overlay, scope: [stack]}
-  - {set: rollout, key: strategy, kind: overlay, scope: [stack]}
-  - {set: rollout, key: remediation_allowed, kind: overlay, scope: [stack]}
 
   # --- observability (flags.md §13.5) ------------------------------------------
   # The propagation probe: read by no service, written by the integration tests

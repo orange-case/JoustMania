@@ -96,7 +96,7 @@ def _get_bsp_schedule_delay_ms(service_name: str) -> int:
     The agent observes ``controller.bluetooth_health`` spans 8-16s late because
     the BatchSpanProcessor's default flush (~5s) compounds with the collector
     traces batch. This makes the flush delay a flagd flag with PER-SERVICE
-    TARGETING so controller-manager can flush faster (lower rollout-health
+    TARGETING so controller-manager can flush faster (lower Bluetooth-health
     observe latency) while other services keep the conservative default.
 
     READ-ONCE-AT-INIT: the SDK fixes schedule_delay at BatchSpanProcessor

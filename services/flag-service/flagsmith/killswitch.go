@@ -12,8 +12,6 @@ var killSwitches = map[string]bool{
 	"agent/experiment_proposer_enabled":             true,
 	"agent/interventions_enabled":                   true,
 	"agent/experiments_enabled":                     true,
-	"agent/rollout_enabled":                         true,
-	"rollout/remediation_allowed":                   true,
 	"agent/code_improvement.mode":                   true,
 	"agent/code_improvement.target":                 true,
 	"agent/code_improvement.min_interval_seconds":   true,

@@ -78,7 +78,7 @@ services:
       - "50064"  # flagd.sync.v1 gRPC (flagd only)
       - "8070"   # HTTP/JSON write/read API + /healthz
     environment:
-      - FLAG_SERVICE_SETS=system,observability,interventions,rollout,agent,game,user,controller,operator
+      - FLAG_SERVICE_SETS=system,observability,interventions,agent,game,user,controller,operator
       - FLAG_SERVICE_BASELINE_DIR=/etc/flagd
       # The registry comes from the same checkout as the baseline (mounted below):
       # the image copy would reject a renamed flag (#1838).
@@ -310,7 +310,7 @@ services:
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
       - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       - SERVICE_VERSION=${IMAGE_TAG:-dev}
-      # Rust HID service for canary controller I/O backend
+      # Rust HID service: the default controller I/O backend (#1371)
       - RUST_HID_HOST=rust-hid
       - RUST_HID_PORT=50058
       # Python HID service: opt-in backend (python-hid profile, #1371)
@@ -741,9 +741,6 @@ services:
       - CONTROLLER_MANAGER_SERVICE=controller-manager:50052
       - GAME_COORDINATOR_SERVICE=game-coordinator:50053
       - MENU_SERVICE=menu:50054
-      # Canary endpoints write the controller set through the flag
-      # service (#1420); the proxy mounts no flag file.
-      - FLAG_SERVICE_URL=http://flag-service:8070
       # Pairing daemon control API (UC-005 unpair); the daemon runs on the host network
       - PAIRING_DAEMON_URL=http://host.docker.internal:8002
       # Extra host names the dashboard is reached by (comma-separated), besides IP
@@ -796,7 +793,7 @@ services:
       - AGENT_HEALTH_ADDR=:13134
       # OpenFeature control layer. FLAGD_PORT is left to the binary's default on
       # purpose: since #1713 the agent uses the flagd in-process resolver on the sync
-      # port 8015 (selectors flagSetId=agent / rollout); an older pinned image
+      # port 8015 (selectors flagSetId=agent / game); an older pinned image
       # (IMAGE_TAG in .env) still defaults to its RPC port 8013.
       - FLAGD_HOST=flagd
       # Action sink (#730/#1213, #1411): when the LIVE `interventions_enabled` flag
@@ -804,17 +801,6 @@ services:
       # to the flag service (PUT/POST /interventions/<flag>). The gate is read per
       # Apply, fail-closed off, so a flagd outage never writes. No restart needed.
       - FLAG_SERVICE_URL=http://flag-service:8070
-      # Progressive rollout expansion (#734/#1213): when the LIVE `rollout_enabled`
-      # flag (agent.json) is on the agent advances the Bluetooth backend rollout
-      # controller-by-controller with PUT /rollout/current_controller_count on the
-      # flag service (#1411). The gate is read per SetControllerCount, fail-closed
-      # off → the loop decides and spans expansions but does not apply them
-      # (dry-run), and a flagd outage stays dry-run. Flip the flag, no restart.
-      # Auto-remediation / rollback (#736): on fitness failure during an active
-      # rollout the agent rolls current_controller_count back to "none", gated on
-      # the remediation_allowed flag (rollout set, evaluated through flagd).
-      # After a rollback, re-expansion is suppressed for the cooldown below.
-      - AGENT_ROLLOUT_COOLDOWN_SECONDS=${AGENT_ROLLOUT_COOLDOWN_SECONDS:-30}
       # ---- Proposer / retro text backend (#1234) ----
       # The OFFLINE LLM seams (shadow-experiment proposer, post-game retro), NOT
       # in-game decisions (those are the decision.backend flag below). Default =

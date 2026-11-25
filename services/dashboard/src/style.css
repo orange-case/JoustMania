@@ -1092,10 +1092,6 @@ a {
   border-left-color: var(--accent-primary);
 }
 
-.agent-feed-rollout {
-  border-left-color: var(--accent-info);
-}
-
 .agent-feed-time {
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
@@ -1115,11 +1111,6 @@ a {
 .agent-badge-blocked {
   background: rgba(var(--danger-rgb), 0.2);
   color: var(--accent-primary);
-}
-
-.agent-badge-rollout {
-  background: rgba(var(--info-rgb), 0.2);
-  color: var(--accent-info);
 }
 
 .agent-feed-signal {

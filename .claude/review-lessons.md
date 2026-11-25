@@ -43,7 +43,7 @@ _Verified against main f38f076d, 2026-10-23._
   mocked, or with the fix reverted? Typical vacuous shapes: the test hand-writes what the producer would write; a
   frozen clock plus a 0 s timer; a poll window longer than the reconcile period; asserting the client sees
   `CancelledError` (grpc raises it whatever the server does); a probe that never reaches the code (a MOCK serial
-  skips targeting and rollout); a per-backend redirect test where the encode fails before the network. Add a
+  skips targeting); a per-backend redirect test where the encode fails before the network. Add a
   positive control (a hit count) where the negative case is "nothing happened".
 - **Overlapping safeguards mask each other** (#1351): the hold mutation survived because the reserve refused the
   same decision. Test each mechanism with an input the other one does not touch.

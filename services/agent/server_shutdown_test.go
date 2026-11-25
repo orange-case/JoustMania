@@ -13,7 +13,6 @@ import (
 
 	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/gamecontext"
-	"github.com/joustmania/agent/infracontext"
 )
 
 // server_shutdown_test.go verifies the agent's graceful-shutdown path (#923): run()
@@ -87,7 +86,7 @@ func freePort(t *testing.T) string {
 
 // newShutdownComponents builds a serverComponents wired with the real runtime
 // pieces whose goroutine lifecycle the shutdown test exercises: a multiplexer, a
-// LoopSet, an infra store and a pipeline. It deliberately omits flagd/OTEL — those providers spawn background
+// LoopSet and a pipeline. It deliberately omits flagd/OTEL — those providers spawn background
 // transport goroutines outside this package's control, and run() does not own them
 // (main() does, via deferred shutdowns), so they are not part of the run() drain
 // contract this test asserts.
@@ -100,8 +99,7 @@ func newShutdownComponents(t *testing.T) *serverComponents {
 	loops := decision.NewLoopSet(func(string) *decision.Loop {
 		return decision.NewLoop(nil, logger)
 	})
-	infraStore := infracontext.NewStore(time.Hour, nil)
-	pipe := newPipeline(mux, loops, time.Hour).withInfra(infraStore, nil)
+	pipe := newPipeline(mux, loops, time.Hour)
 
 	return &serverComponents{
 		listenAddr:    freePort(t),
@@ -208,8 +206,7 @@ func TestRun_ShutdownCancelsContextBoundWork(t *testing.T) {
 	loops := decision.NewLoopSet(func(string) *decision.Loop {
 		return decision.NewLoop(nil, logger)
 	})
-	infraStore := infracontext.NewStore(time.Hour, nil)
-	pipe := newPipeline(mux, loops, time.Hour).withInfra(infraStore, nil)
+	pipe := newPipeline(mux, loops, time.Hour)
 
 	c := &serverComponents{
 		listenAddr:    freePort(t),

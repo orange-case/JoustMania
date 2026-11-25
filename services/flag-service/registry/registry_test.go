@@ -80,7 +80,7 @@ func parseFlagsMD(t *testing.T) []mdRow {
 		if strings.HasPrefix(line, "### 13.") {
 			section = ""
 			// A heading naming one set ("### 13.2 `agent`") sets it; a heading
-			// naming several ("### 13.4 `user`, `controller`, `rollout`") means
+			// naming several ("### 13.4 `user`, `controller`") means
 			// the table carries a Set column.
 			if m := backticked.FindAllStringSubmatch(line, -1); len(m) == 1 {
 				section = m[0][1]

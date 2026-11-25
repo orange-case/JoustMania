@@ -270,7 +270,7 @@ class TestRustIsTheDefaultBackend:
 
         routing = flags["bluetooth_backend"]
         assert routing["variants"][routing["defaultVariant"]] == "rust"
-        assert set(routing["variants"].values()) == {"python", "rust", "unstable"}
+        assert set(routing["variants"].values()) == {"python", "rust"}
 
 
 def _client_returning(details):

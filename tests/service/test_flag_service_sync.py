@@ -38,7 +38,6 @@ FLAG_SETS = (
     "user",
     "agent",
     "interventions",
-    "rollout",
     "operator",
 )
 PROBE_SET, PROBE_FLAG = "observability", "flagservice.propagation_probe"

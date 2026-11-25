@@ -28,7 +28,7 @@ The section numbers below are kept stable because code comments cite them.
   file `/var/lib/flag-service/admin.json`.
 - **Agent** decides *how to nudge the experience while the game runs*: bounded
   overrides, factors, and shields. It writes them to the `interventions` flag set
-  through the flag service, scoped to one game (the gated tier-2 and rollout writes
+  through the flag service, scoped to one game (the gated tier-2 writes
   are listed under the invariants below)
   ([`services/agent/actions/writer.go`](../services/agent/actions/writer.go)); the
   game coordinator's `InterventionManager`
@@ -65,11 +65,6 @@ the agent has three narrow, gated writes beyond the `interventions` set.
      in memory and lasts until the flag service restarts; the durable path is the
      promotion PR. The stock stack passes none of these env gates (D-A6), so this
      write is off by default.
-
-   The agent also writes `rollout/current_controller_count` (through
-   `actions/rollout_writer.go`) for the infrastructure rollout, gated by
-   `rollout_enabled` and `remediation_allowed` (FR-071, FR-072). That flag is
-   infrastructure state, not a human game setting.
 2. **The write surfaces are disjoint by scope.** The menu writes persisted admin
    values of `game` / `user` flags (and of the `agent` keys
    `interventions_allowed` and `decision.backend`), plus, for the operator pad's
@@ -79,8 +74,8 @@ the agent has three narrow, gated writes beyond the `interventions` set.
    `agent` overlays `objectives`, `policy.max_interventions_per_minute`,
    `policy.group_grant.enabled`, `inference.effort` and `decision.operator_brief`, and the
    persisted `inference.backend`, and clears its own values on a reset (never a script's or Flagsmith's); human writes too.
-   `goal.profile` stays Flagsmith-only (FR-226). The agent writes game-scoped `interventions` values,
-   `rollout/current_controller_count`, and the experiment-arm and `real` overlays
+   `goal.profile` stays Flagsmith-only (FR-226). The agent writes game-scoped `interventions` values
+   and the experiment-arm and `real` overlays
    of `game` flags. The flag service holds each kind of value separately per flag
    (baseline, persisted admin value, stack overlays, `real` overlay, experiment
    arms, game-scoped values) and serialises every write, so an agent write can no
@@ -98,7 +93,6 @@ periods). Sections 4–5 define those compositions precisely.
 | `game` | Human admin | Menu admin mode → `FlagServiceWriter` (persisted admin values); agent: experiment arms (shadow only), gated `real` promotion overlay (§1) | Menu builds `StartGameConfig` at start; coordinator freezes at init | Baseline per deployment; admin values persist across restarts; agent overlays in memory |
 | `user` | Human admin | Menu admin mode → `FlagServiceWriter` (persisted admin values); operator pad through the menu: `audio_volume.master` (#2050, `step_setting`) | Menu / audio (volumes, voice, instructions) | Per-deployment |
 | `interventions` | Agent | Agent ActionSink → `writer.go` (game-scoped values and events) | Coordinator `InterventionManager`, live | One game: dropped when the game ends |
-| `rollout` | Operator (human) for the ladder; agent for `current_controller_count` | Agent `actions/rollout_writer.go` (gated by `rollout_enabled`, `remediation_allowed`); operator via `scripts/flags.sh` | Controller manager rollout router, agent infra loop | In memory until the flag service restarts |
 | `operator` | Operator (human) | None at runtime: a reviewed edit of `services/flagd/operator.json` and a restart of the flag service (read-only baseline, flags.md §13.5; #2050) | `services/operator_pad` (#2100; deployed under the `operator-pad` compose profile) | Per-deployment |
 | `agent` | Operator (human) | Operator / stage scripts (`scripts/flags.sh`, `agent-killswitch.sh`, `talk-stage.sh`: in-memory overlays; `agent-backend.sh`: backend and model persisted, #1682) **and** menu admin mode → `FlagServiceWriter` (`interventions_allowed` only, persisted, #819) **and** the operator pad commands through the menu (#2050: `interventions_allowed` and `decision.backend` persisted, `enabled` in memory only; UC-015 BR-001; planned, #2755: the pad's `GOAL`, `RATE`, `GROUP`, `EFFORT`, `BRIEF` rows in memory and `RETRO AI` persisted, UC-016 BR-012) | Agent + coordinator policy gates | Baseline per deployment; overlays until restart |
 
@@ -108,14 +102,14 @@ may write the single `interventions_allowed` key** (the on-device kill-switch);
 other `agent` keys change through operator overlays (only those in the registry)
 or a reviewed baseline edit. The **agent process never writes the `agent` set** —
 that invariant is unchanged (menu writes `game` / `user` admin values and the one
-agent-policy key; the agent writes `interventions`, `rollout/current_controller_count`
+agent-policy key; the agent writes `interventions`
 and the gated `game` writes of §1). The human owns agent policy; the agent cannot
 persist its own governor (§1, §6.2).
 
 > **How the agent-never-writes-the-`agent`-set invariant is enforced.** No service
 > mounts the flag directory writable any more; only the flag service mounts it, read-only.
 > The agent's flag-service client writes fixed flag sets: interventions to
-> `interventions`, the rollout count to `rollout`, experiment arms and promotion to
+> `interventions`, experiment arms and promotion to
 > `game` ([`services/agent/experiment/gate.go`](../services/agent/experiment/gate.go)
 > rejects a proposal naming another set, `non_game_target`, and the promotion
 > writer's set is always `game`, #1293). The flag service has no roles or tokens

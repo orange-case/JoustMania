@@ -35,8 +35,8 @@ has a tagged test. A test case alone never makes a requirement Verified.
 
 ## Scope
 
-Free-for-All is the current focus: TC-001 to TC-016 are FFA journeys or mode-independent (agent, rollout,
-canary, talk); TC-018 to TC-020 cover the flag service (UC-053, epic #1407); TC-021 and TC-022 its Flagsmith link (UC-054, UC-055, epic #2587). The other game modes (UC-021 to UC-026) are covered by one journey, TC-017, which plays each
+Free-for-All is the current focus: TC-001 to TC-016 are FFA journeys or mode-independent (agent,
+talk; TC-014 and TC-015 are retired); TC-018 to TC-020 cover the flag service (UC-053, epic #1407); TC-021 and TC-022 its Flagsmith link (UC-054, UC-055, epic #2587). The other game modes (UC-021 to UC-026) are covered by one journey, TC-017, which plays each
 mode to its result (#1361); the per-mode detail is in the unit tests.
 
 ## Index
@@ -56,8 +56,8 @@ mode to its result (#1361); the per-mode detail is in the unit tests.
 | [TC-011](TC-011-shadow-experiment-to-verdict.md) | Shadow experiment runs to a verdict | UC-043, UC-046, UC-003, UC-041, UC-040 | High | Automated | T2: `tests/service/test_tc011_shadow_experiment.py` (inconclusive verdict), `test_tc011_promotion.py` (promote verdict, issue on a GitHub stub); preemption: `test_tc013_real_game_preempts_shadow.py` |
 | [TC-012](TC-012-pattern-game-replay.md) | Replay a pattern-driven game exactly | UC-046, UC-003, UC-030 | Medium | Automated | `tests/service/test_tc012_pattern_game_replay.py`; script test in CI (#1389) |
 | [TC-013](TC-013-shadow-game-alongside-real-game.md) | Shadow game alongside a real FFA game | UC-010, UC-003, UC-020, UC-040, UC-027, UC-043 | High | Automated | `test_tc013_shadow_game_alongside_real_game`; T2: `test_tc013_end_game_one_shadow.py`, `test_tc013_real_game_preempts_shadow.py` (agent side of the preemption) |
-| [TC-014](TC-014-progressive-rollout-and-rollback.md) | Progressive rollout with automatic rollback | UC-050, UC-051, UC-045, UC-041 | High | Draft | Manual (real controllers); mock support + e2e #1390 |
-| [TC-015](TC-015-canary-by-hand.md) | Canary a backend by hand | UC-052, UC-035 | Medium | Draft | Manual; contract tests for routes; `/canary/*` handler tests (#1388) |
+| TC-014 | Progressive rollout with automatic rollback (retired with UC-050 and UC-051, #2784; id kept, not reused) | - | - | Retired | - |
+| TC-015 | Canary a backend by hand (retired with UC-052, #2784; id kept, not reused) | - | - | Retired | - |
 | [TC-016](TC-016-talk-demo-rehearsal.md) | Talk demo rehearsal | UC-070, UC-044, UC-045, UC-040, UC-042, UC-035 | Medium | Draft | Manual; script tests in CI (#1389) |
 | [TC-017](TC-017-non-ffa-modes-round-backlog.md) | One round of every non-FFA mode | UC-021 to UC-026 | Low | Automated | T2: `tests/service/test_tc017_parallel_mode_lifecycle.py` (winner event per mode, #1361); lobby restore not asserted |
 | [TC-018](TC-018-agent-intervention-through-flag-service.md) | Agent intervention through the flag service | UC-053, UC-040 | Critical | Automated | T2: `test_tc018_flag_service_eliminations::test_two_eliminations_through_the_flag_service`; failed read: unit test |

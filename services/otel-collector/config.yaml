@@ -139,8 +139,8 @@ processors:
   # Traces batch processor (#828): a shorter timeout than the shared `batch`
   # so the SECOND hop of the agent observe path (collector → otlp/agent) flushes
   # sooner. Combined with the lower controller-manager BSP flush (per-service
-  # observability flag), this cuts the controller.bluetooth_health observe
-  # latency the rollout loop reacts to. Smaller, sooner trace batches also lower
+  # observability flag), this cuts the agent's observe latency. Smaller,
+  # sooner trace batches also lower
   # the collector's peak heap held by the traces pipeline (synergy with the
   # #1167/#1173 memory work — the memory_limiter envelope is untouched). The
   # logs pipeline keeps the shared `batch` (5s) unchanged.

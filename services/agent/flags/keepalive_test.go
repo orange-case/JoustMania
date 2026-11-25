@@ -45,7 +45,7 @@ func TestSyncKeepalive_WithinFlagdPingPolicy(t *testing.T) {
 // and flagd drops the stream.
 func TestFlagdProviderOptions_CarryKeepaliveOverride(t *testing.T) {
 	t.Run("UC-045/A3 provider options carry the sync dial-option override", func(t *testing.T) {
-		for _, set := range []string{Domain, RolloutDomain} {
+		for _, set := range []string{Domain, GameDomain} {
 			cfg, err := flagd.NewProviderConfiguration(
 				flagdProviderOptions(ProviderConfig{Host: "flagd", Port: 8015}, set, time.Second))
 			if err != nil {
