@@ -473,10 +473,12 @@ func TestIfWriterDelete(t *testing.T) {
 			t.Fatalf("real overlay writer = %v, want operator", w)
 		}
 	})
-	t.Run("UC-043/A18 if_writer outside scope real is 400 malformed", func(t *testing.T) {
+	t.Run("UC-043/A18 if_writer outside scope real and the in-memory stack overlay is 400 malformed", func(t *testing.T) {
 		e := setup(t, "operator")
-		if s, b := e.do("DELETE", path+"?if_writer=promotion", nil); s != 400 || b["error"] != "malformed" {
-			t.Fatalf("%d %v, want 400 malformed", s, b)
+		for _, q := range []string{"?persist=true&if_writer=promotion", "?experiment_id=x&arm=A&if_writer=promotion"} {
+			if s, b := e.do("DELETE", path+q, nil); s != 400 || b["error"] != "malformed" {
+				t.Fatalf("%s: %d %v, want 400 malformed", q, s, b)
+			}
 		}
 	})
 	t.Run("UC-043/A18 with unless_real_game: 409 real_game_live first, then 412 once no real game runs", func(t *testing.T) {

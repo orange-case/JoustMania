@@ -105,12 +105,23 @@ message GetMenuStatusResponse {
   // value as a variant name, or "automatic" when none is set (the flag file's default applies). A missing key =
   // unknown (not read yet or unreadable). UC-015 BR-018, #2222.
   map<string, string> operator_settings = 21;
-  // 22-27 reserved for the planned status fields of #2742 (services.md §3.1); add them at these numbers.
+  // The agent rows of the pad's pages (UC-016 BR-006, BR-012; #2742, #2755); empty = unknown. Each in its
+  // canonical format (services.md §3.1), the one `from`, `expect`, setting_defaults and the committed value use.
+  string agent_objectives = 22;                    // agent/objectives variant name (base value, empty context)
+  string agent_max_interventions_per_minute = 23;  // policy.max_interventions_per_minute as an integer decimal
+  string agent_group_grant_state = 24;             // policy.group_grant.enabled: "on" or "off"
+  string inference_backend = 25;                   // inference.backend variant name
+  string inference_effort = 26;                    // inference.effort variant name
+  // decision.operator_brief: "off" (empty), the preset whose text equals it byte for byte, else "custom";
+  // never the text. From the background flag-service read.
+  string agent_operator_brief_variant = 27;
   // Per resettable option without an "automatic" rung (game_instructions, force_all_start, agent_level,
-  // decision.backend): the variant a reset_setting would put in force (a stopped agent's level: save). A missing
-  // key = unknown, never "". From the background flag-service read, never read in the call. UC-016 BR-013, #2747.
+  // decision.backend, and the agent rows of fields 22 to 27 by option name): what a reset_setting would put in
+  // force (a stopped agent's level: save). A missing key = unknown, never "". From the background flag-service
+  // read, never read in the call. UC-016 BR-013, #2747, #2755.
   map<string, string> setting_defaults = 28;
   // Pad commands and guard keys this menu understands ("reset_setting", "interventions_switch",
-  // "agent_switch.only_if_stopped", "step_setting.from"); empty = a menu older than the field. #2747.
+  // "agent_switch.only_if_stopped", "step_setting.from", "set_backend.from", "step_setting:<option>",
+  // "reset_setting:<option>"); empty = a menu older than the field. #2747, #2755.
   repeated string pad_commands = 29;
 }

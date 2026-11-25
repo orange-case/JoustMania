@@ -166,8 +166,12 @@ func TestPreconditionMatrix_Clear(t *testing.T) {
 		{name: "no sync stream", opts: fixtureOpts{noStream: true}, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams"}), status: 503, reason: fserr.NoSyncStream},
 		{name: "no sync stream beats persist-fit", opts: fixtureOpts{noStream: true}, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, Persist: true}), status: 503, reason: fserr.NoSyncStream},
 		{name: "persist outside the stack scope", clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, Persist: true}), status: 400, reason: fserr.Malformed},
-		{name: "if_writer outside real", clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu"}), status: 400, reason: fserr.Malformed},
-		{name: "if_writer outside real beats a live game", setup: liveReal, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu", UnlessRealGame: true}), status: 400, reason: fserr.Malformed},
+		{name: "if_writer with persist", clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu", Persist: true}), status: 400, reason: fserr.Malformed},
+		{name: "if_writer with persist beats a live game", setup: liveReal, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu", Persist: true, UnlessRealGame: true}), status: 400, reason: fserr.Malformed},
+		{name: "if_writer in scope experiment+arm", clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: expSc, IfWriter: "menu"}), status: 400, reason: fserr.Malformed},
+		{name: "if_writer mismatch on the stack overlay", setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "stage"}), status: 412, reason: fserr.WriterMismatch},
+		{name: "if_writer match on the stack overlay", setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu"}), cleared: 1},
+		{name: "if_writer on the stack with no overlay is an idempotent success", clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu"})},
 		{name: "guarded revert, real game live", setup: liveReal, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, UnlessRealGame: true}), status: 409, reason: fserr.RealGameLive},
 		{name: "guarded revert beats if_writer mismatch", setup: func(t *testing.T, f *fixture) {
 			f.put(guardPut)

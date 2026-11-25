@@ -108,9 +108,9 @@ type ClearRequest struct {
 	// non-shadow game is registered. The kill switch never sets it.
 	UnlessRealGame bool
 	// IfWriter is the opt-in compare-and-delete precondition (?if_writer=,
-	// #1877), like If-Match: in scope real only, the overlay is cleared only
-	// when its writer label equals IfWriter, else 412 writer_mismatch and
-	// nothing changes. "" = no precondition. It is not the informational
+	// #1877), like If-Match: in scope real or the in-memory stack overlay
+	// (without Persist), the overlay is cleared only when its writer label
+	// equals IfWriter, else 412 writer_mismatch and nothing changes. "" = no precondition. It is not the informational
 	// Writer label, which is never checked (D11).
 	IfWriter string
 	// IfSlotVersion: as WriteRequest.IfSlotVersion (in process only).
@@ -587,8 +587,8 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 	if req.Persist && scopeName != registry.ScopeStack {
 		return nil, fserr.BadRequest("persist=true clears a stack-wide admin value only")
 	}
-	if req.IfWriter != "" && scopeName != registry.ScopeReal {
-		return nil, fserr.BadRequest("if_writer applies to the real overlay only (game_kind=real)")
+	if req.IfWriter != "" && scopeName != registry.ScopeReal && (scopeName != registry.ScopeStack || req.Persist || req.StackAll) {
+		return nil, fserr.BadRequest("if_writer applies to the real overlay (game_kind=real) or the in-memory stack overlay (no persist) only")
 	}
 	if req.StackAll && (scopeName != registry.ScopeStack || req.Persist) {
 		return nil, fserr.BadRequest("stack_all clears the stack scope, without persist")
@@ -601,8 +601,14 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 			return nil, err
 		}
 	}
-	if req.IfWriter != "" && f.real != nil && f.real.Writer != req.IfWriter {
-		return nil, fserr.PreconditionFailed(fserr.WriterMismatch, "the real overlay of %s was written by %q, not %q; nothing cleared", f.key, f.real.Writer, req.IfWriter)
+	if req.IfWriter != "" {
+		cur, layer := f.real, "real"
+		if scopeName == registry.ScopeStack {
+			cur, layer = f.stack, "stack"
+		}
+		if cur != nil && cur.Writer != req.IfWriter {
+			return nil, fserr.PreconditionFailed(fserr.WriterMismatch, "the %s overlay of %s was written by %q, not %q; nothing cleared", layer, f.key, cur.Writer, req.IfWriter)
+		}
 	}
 	if err := s.checkSlotVersionLocked(f, scopeName, req.Scope, req.IfSlotVersion); err != nil {
 		return nil, err

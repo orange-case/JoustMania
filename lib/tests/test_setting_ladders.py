@@ -76,9 +76,9 @@ def test_wrap_step(current, steps, expected):
 
 @pytest.mark.uc("UC-015", br=["BR-004", "BR-005"], flow="A7")
 @pytest.mark.uc("UC-016", br=["BR-007"])
-def test_wrapping_is_an_explicit_set_of_three_options():
-    """Named one by one, never a default: the kill-switch ladder (agent level) must never wrap."""
-    assert {"current_game", "decision.backend", "shield.activation"} == setting_ladders.WRAPPING
+def test_wrapping_is_an_explicit_set_of_options():
+    """Named one by one, never a default: the kill-switch ladder (agent level) and the raise rows must never wrap."""
+    assert {"current_game", "decision.backend", "shield.activation", "objectives"} == setting_ladders.WRAPPING
 
 
 # Every preview option: its ladder, a status at a given start, and whether it wraps.
@@ -103,6 +103,8 @@ def _status_at(option: str, start: str) -> menu_pb2.GetMenuStatusResponse:
         status.instructions = start == "on"
     elif option == "force_all_start":
         status.force_all_start = start == "on"
+    elif option in setting_ladders.AGENT_ROW_STATUS_FIELDS:
+        setattr(status, setting_ladders.AGENT_ROW_STATUS_FIELDS[option], start)
     return status
 
 
@@ -117,6 +119,7 @@ LADDERS = {
     "force_all_start": setting_ladders.ON_OFF_LADDER,
     "agent_level": setting_ladders.AGENT_POLICY_LEVELS,
     "agent_saved_level": setting_ladders.AGENT_SAVED_LEVELS,  # a stopped agent: only the saved level moves
+    **setting_ladders.AGENT_ROW_LADDERS,
 }
 
 
@@ -218,7 +221,9 @@ def test_agent_level_preview_of_a_stopped_agent_moves_the_saved_level():
 def test_pad_words_name_every_backend_and_every_preview_option():
     """#2106: K7 says the backend by name; every setting the pad announces or previews has a label."""
     assert list(voice_prompts.BACKEND_VOICES) == setting_ladders.BACKENDS
-    assert setting_ladders.PREVIEW_OPTIONS - {"force_all_start"} <= set(voice_prompts.LABEL_VOICES)
+    # The agent rows have no voice lines (#2755, D7): the pad shows them only.
+    spoken = setting_ladders.PREVIEW_OPTIONS - {"force_all_start"} - setting_ladders.AGENT_ROW_OPTIONS
+    assert spoken <= set(voice_prompts.LABEL_VOICES)
     assert voice_prompts.LIMIT_VOICES[True] != voice_prompts.LIMIT_VOICES[False]
     assert set(voice_prompts.LOCK_VOICES.values()).isdisjoint(voice_prompts.AGENT_SWITCH_VOICES.values())
 
@@ -308,3 +313,82 @@ def test_automatic_knob_preview_per_step(option, operator, steps, expected):
 @pytest.mark.uc("UC-015", br=["BR-018", "BR-011"], steps=[4, 5])
 def test_the_automatic_rung_has_one_shared_voice_line():
     assert voice_prompts.SHIELD_ACTIVATION_VOICES["automatic"] == voice_prompts.AUTOMATIC_VOICE
+
+
+# --- The agent rows (UC-016 BR-012 to BR-014, #2755) ---------------------------------------------
+
+
+@pytest.mark.uc("UC-016", br=["BR-012"])
+def test_agent_row_ladders_are_explicit_and_cover_the_flag_files_variants():
+    """Explicit ladders, never the flag file's declared order: up means more (a higher rate, on, claude)."""
+    assert setting_ladders.AGENT_ROW_LADDERS == {
+        "objectives": ["endurance_focused", "balanced_focused", "accelerate_focused", "chaos_focused", "mixed"],
+        "policy.max_interventions_per_minute": ["1", "2", "4", "8", "20"],
+        "policy.group_grant.enabled": ["off", "on"],
+        "inference.backend": ["stub", "claude"],
+        "inference.effort": ["low", "medium", "high", "xhigh", "max"],
+        "decision.operator_brief": ["off", "unkillable", "protect_weakest"],
+    }
+    flags = json.loads((FLAGD_DIR / "agent.json").read_text())["flags"]
+    rate = flags["policy.max_interventions_per_minute"]["variants"]
+    assert {name: rate[name] for name in setting_ladders.RATE_VARIANTS.values()} == {
+        name: int(rung) for rung, name in setting_ladders.RATE_VARIANTS.items()
+    }
+    assert set(setting_ladders.RATE_VARIANTS) == set(setting_ladders.RATE_LADDER) and len(rate) == 5
+    for option in setting_ladders.AGENT_ROW_LADDERS.keys() - {"policy.max_interventions_per_minute"}:
+        assert set(flags[option]["variants"]) == set(setting_ladders.AGENT_ROW_LADDERS[option]), option
+    assert flags["decision.operator_brief"]["variants"]["off"] == ""
+    # The GOAL wheel is `objectives` in the flag's declared order.
+    assert list(flags["objectives"]["variants"]) == setting_ladders.AGENT_ROW_LADDERS["objectives"]
+
+
+@pytest.mark.uc("UC-016", br=["BR-012", "BR-014"])
+@pytest.mark.parametrize("option", sorted(setting_ladders.AGENT_ROW_LADDERS))
+@pytest.mark.parametrize("value", ["", "50", "custom", "lively", "8.0", "?"])
+def test_agent_row_preview_from_an_unknown_or_off_ladder_value_is_unknown(option, value):
+    """D4, D11: never moved to the first rung; an empty field (unknown), a fixture's rate of 50 or a free
+    brief text (`custom`) previews nothing, as the menu refuses the step."""
+    status = _status_at(option, value)
+    for steps in (-6, -1, 1, 6):
+        assert preview_value(option, status, steps) == Preview(None)
+
+
+@pytest.mark.uc("UC-016", br=["BR-014"])
+@pytest.mark.parametrize(
+    ("option", "old", "new", "expected"),
+    [
+        ("policy.max_interventions_per_minute", "2", "8", True),
+        ("policy.max_interventions_per_minute", "8", "2", False),
+        ("policy.max_interventions_per_minute", "50", "2", None),  # off the ladder: never judged
+        ("policy.group_grant.enabled", "off", "on", True),
+        ("policy.group_grant.enabled", "on", "off", False),
+        ("inference.backend", "stub", "claude", True),
+        ("inference.backend", "claude", "stub", False),
+        ("inference.effort", "medium", "high", True),
+        ("inference.effort", "max", "low", False),
+        ("inference.effort", "", "low", None),
+        ("agent_level", "ambient", "full", True),
+        ("agent_level", "full", "none", False),
+        ("decision.backend", "rules", "claude", True),  # free to paid (D12)
+        ("decision.backend", "rules", "jev", True),
+        ("decision.backend", "claude", "openai", False),  # paid to paid
+        ("decision.backend", "openai", "rules", False),
+        ("decision.backend", "", "claude", None),  # unknown NOW with a paid NEW: refused
+        ("decision.backend", "", "rules", False),
+        ("objectives", "balanced_focused", "chaos_focused", False),
+        ("decision.operator_brief", "off", "unkillable", False),
+    ],
+)
+def test_is_raise(option, old, new, expected):
+    assert setting_ladders.is_raise(option, old, new) is expected
+
+
+@pytest.mark.uc("UC-016", br=["BR-014"])
+def test_paid_backends_are_every_backend_but_rules():
+    assert set(setting_ladders.BACKENDS) - {"rules"} == setting_ladders.PAID_BACKENDS
+    assert {
+        "policy.max_interventions_per_minute",
+        "policy.group_grant.enabled",
+        "inference.backend",
+        "inference.effort",
+    } == setting_ladders.RAISE_LADDER_OPTIONS
