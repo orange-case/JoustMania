@@ -556,7 +556,7 @@ The archetype an experiment's pair runs, pinned in the experiment journal (`patt
 
 ### TRACE_CORRELATION
 
-The identifiers that tie a game's telemetry together (`services/game_coordinator/metrics.py:89-100` `game_trace_correlation`; [telemetry.md](specs/telemetry.md)). Since #2783 the agent does not read it: the ids reach the agent only as the trace context of the agent-only `game.start` and `game.phase.start` log records, and the agent keeps them in AGENT_GAME_CONTEXT. Planned, #2783 (FR-253): the gauge is retired, so this entity is no longer published.
+The identifiers that tie a game's telemetry together ([telemetry.md](specs/telemetry.md) §2.2). Since #2783 (FR-253) the coordinator publishes no `game_trace_correlation` gauge: the ids reach the agent only as the trace context of the agent-only `game.start` and `game.phase.start` log records, and the agent keeps them in AGENT_GAME_CONTEXT.
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
