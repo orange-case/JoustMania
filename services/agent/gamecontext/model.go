@@ -246,10 +246,10 @@ type GameContext struct {
 	// GameplayPhaseSpanID is the hex span_id of the coordinator's gameplay_phase
 	// sub-span for this session (#1195, refines #1187). Source: the trace context
 	// of its game.phase.start log record. gameplay_phase is the STABLE active-play
-	// window WITHIN the game trace;
-	// the agent re-parents its in-game decision chain (signal_received -> decision
-	// -> action) under THIS span instead of the game root, so a reader sees
-	// interventions nested where they actually occurred. Same trace as GameTraceID.
+	// window WITHIN the game trace; the agent re-parents its in-game decision chain
+	// (signal_received -> decision -> action) under THIS span instead of the game
+	// root, so a reader sees interventions nested where they actually occurred.
+	// Same trace as GameTraceID.
 	// Two-tier fallback: when empty (gameplay_phase not yet open / unsampled) the
 	// re-parent uses GameTraceSpanID (the game root, #1187 behavior); when that is
 	// also empty the span stays own-root. Never breaks span emission.

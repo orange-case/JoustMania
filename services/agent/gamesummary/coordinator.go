@@ -240,7 +240,7 @@ func (c *Coordinator) OnGameEnd(gc gamecontext.GameContext) {
 	// game-session trace (the hub) via the SHARED gamecontext.TraceLink primitive — the
 	// same Link logic retro + decision + experiment.* carry (decision.GameTraceLink
 	// delegates to it) — so "show me everything for game X" lists the summary among the
-	// spokes. The ids come from the OnGameEnd GameContext (#1133 correlation gauge).
+	// spokes. The ids come from the OnGameEnd GameContext (game.start log record, UC-041 BR-004).
 	// nil-safe: empty/invalid ids => no Link, no error.
 	startOpts := gamecontext.TraceLink(gc.GameTraceID, gc.GameTraceSpanID, attrGameTraceID, attrGameTraceSpanID)
 	// #1188: re-parent the summary under the experiment ROOT span for an
