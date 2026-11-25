@@ -93,7 +93,6 @@ class TestLobbyState:
         assert LobbyState.FLASH.value == "flash"
         assert LobbyState.CONNECTED.value == "connected"
         assert LobbyState.READY.value == "ready"
-        assert LobbyState.ADMIN.value == "admin"
 
 
 class TestButtonTrackingToState:

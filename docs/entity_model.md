@@ -87,10 +87,10 @@ A controller's state in the menu lobby (`services/menu/handlers/base.py:68-75`, 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
 | serial | Controller in the lobby | String | 17 | Primary Key, Foreign Key (CONTROLLER.serial) |
-| state | Lobby state; a disconnected controller is removed, not stored | String | 10 | Not Null, Values: CONNECTED, READY, ADMIN, IDLE |
+| state | Lobby state; a disconnected controller is removed, not stored | String | 10 | Not Null, Values: CONNECTED, READY, IDLE |
 | is_sentinel | Breathing LED while the lobby is idle | Boolean | 1 | Not Null |
 
-**Constraints:** auto start when ready count ≥ 2 and ready count = connected count (IDLE and ADMIN count as connected, not ready). Exactly one controller can be in ADMIN.
+**Constraints:** auto start when ready count ≥ 2 and ready count = connected count (IDLE counts as connected, not ready). The ADMIN state is gone with the controller admin mode (#2819).
 
 ### GAME_MODE
 
@@ -532,7 +532,7 @@ The archetype an experiment's pair runs, pinned in the experiment journal (`patt
 
 ### TRACE_CORRELATION
 
-The identifiers that tie a game's telemetry together (`services/game_coordinator/metrics.py:89-100` `game_trace_correlation`; [telemetry.md](specs/telemetry.md)).
+The identifiers that tie a game's telemetry together (`services/game_coordinator/metrics.py:89-100` `game_trace_correlation`; [telemetry.md](specs/telemetry.md)). Planned, #2783 (FR-253): the gauge is retired, so this entity is no longer published; the ids then reach the agent only as the trace context of the agent-only `game.start` and `game.phase.start` log records, and the agent keeps them in AGENT_GAME_CONTEXT.
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
@@ -553,10 +553,10 @@ The agent's view of one game, built from the OTLP metrics and spans the collecto
 | experiment_id | Experiment attribution of a shadow game (partition enrichment, not a routing key) | String | 50 | Optional, Foreign Key (EXPERIMENT.experiment_id) |
 | arm | Arm of that game | String | 12 | Optional, Values: experimental, control |
 | end_reason | Which signal ended the game: the `game_active` 1 to 0 datapoint (`zero`), the game root span before any 0 (`root_span`), the agent-only `game.end` log event before either (`end_event`, UC-041 A8), or `game_active` silent for 60 s (`stale`, the agent's telemetry for the game broke: experiments, retro, summary and proposer skip it). Empty while the game runs; set in the game-end snapshot (UC-041 A4, #1494) | String | 9 | Optional, Values: zero, root_span, end_event, stale |
-| game_trace_id | Trace id of the coordinator's root game span, from the `game_trace_correlation` gauge or, since #2766, the trace context of the agent-only `game.start` / `game.phase.start` log records (UC-041 BR-004) | String | 32 | Optional, Format: 32 hex |
-| game_trace_span_id | Span id of the game root | String | 16 | Optional, Format: 16 hex |
-| gameplay_phase_span_id | Span id of `gameplay_phase`, first fallback parent of the in-game agent spans | String | 16 | Optional, Format: 16 hex |
-| game_cycle_span_id | Span id of `game_cycle`, preferred remote parent of the in-game agent spans | String | 16 | Optional, Format: 16 hex |
+| game_trace_id | Trace id of the coordinator's root game span, from the `game_trace_correlation` gauge or, since #2766, the trace context of the agent-only `game.start` / `game.phase.start` log records (UC-041 BR-004; planned, #2783: from `game.start` or, when it was lost, any `game.phase.start` of the game, which carries the same trace id) | String | 32 | Optional, Format: 32 hex |
+| game_trace_span_id | Span id of the game root, from the gauge label or the `game.start` record (planned, #2783: the `game.start` record only) | String | 16 | Optional, Format: 16 hex |
+| gameplay_phase_span_id | Span id of `gameplay_phase`, first fallback parent of the in-game agent spans, from the gauge label or the `game.phase.start` record of that span (planned, #2783: the record only) | String | 16 | Optional, Format: 16 hex |
+| game_cycle_span_id | Span id of `game_cycle`, preferred remote parent of the in-game agent spans, from the gauge label or the `game.phase.start` record of that span (planned, #2783: the record only) | String | 16 | Optional, Format: 16 hex |
 | session | Per-game signals: duration, start time, active player count, elimination sequence, per-type intervention tally (dispatched / blocked / applied / gated off, unbounded per game; see GAME_SUMMARY), game active flag, mode, music tempo, effective death and warning thresholds | String | 4000 | Not Null, structure `SessionSignals` |
 | players | Per-controller signals by serial: movement intensity, variance, peak and aggregate variance, battery, skill, alive, a bounded movement history | String | 4000 | Not Null, map serial to `PlayerSignals` |
 | waiting | Serials of players evicted for silence while the game is active (a Fight Club / Tournament player waiting for its fight), sorted; each remembered with its skill, peak accel and aggregate variance and restored into `players` (as waiting, no alive state) in the game-end snapshot (UC-041 BR-007, UC-040 A49, #2513) | String | 4000 | Optional, Max entries: 64 |

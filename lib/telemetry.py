@@ -82,9 +82,6 @@ class SpanAttr:
     # Controller attributes
     CONTROLLER_SERIAL = "controller.serial"
 
-    # Admin mode attributes
-    ADMIN_OPTION = "admin.option"
-
     # Validation attributes
     VALIDATION_RESULT = "validation.result"
     VALIDATION_REASON = "validation.reason"
