@@ -337,37 +337,6 @@ async def test_observability_flags_are_read_after_the_admission_wait(mock_tracer
     assert order == ["wait", "moment_shape"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-010", flow="A5", steps=[1], br=["BR-004"])
-@patch("services.game_coordinator.game_session.GameFactory")
-@patch("services.game_coordinator.game_session.tracer")
-async def test_experiment_parent_mode_is_read_after_the_admission_wait(mock_tracer_mod, mock_factory):
-    """UC-010 A5 step 1 (#2658): telemetry.experiment_game_parent (read before the root span) follows the wait."""
-    from test_game_session import GAME_KIND_SHADOW, MockSpanContext, _make_session, _tracer_mock
-
-    order = []
-    session = _make_session(game_kind=GAME_KIND_SHADOW, experiment_id="exp-1", arm="experimental")
-    session.experiment_parent_span_context = MockSpanContext(trace_id=0x99AA, span_id=0x1122)
-    mock_tracer_mod.start_as_current_span = _tracer_mock().start_as_current_span
-    mock_factory.create_game.return_value = MagicMock(run=AsyncMock())
-
-    async def _ready(_record):
-        order.append("wait")
-        return []
-
-    def _mode():
-        order.append("parent_mode")
-        return "link"
-
-    with (
-        patch("services.game_coordinator.game_session.await_flag_providers_ready", side_effect=_ready),
-        patch("services.game_coordinator.game_session.experiment_game_parent_mode", side_effect=_mode),
-    ):
-        await session._run_game_loop_async()
-
-    assert order == ["wait", "parent_mode"]
-
-
 @pytest.mark.uc("UC-010", flow="A5", steps=[2], br=["BR-004"])
 def test_refresh_runtime_config_rereads_existing_manager():
     """UC-010 A5 step 2: an existing runtime-config manager re-reads its flags; none yet -> created."""

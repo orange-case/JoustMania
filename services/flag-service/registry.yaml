@@ -228,7 +228,5 @@ flags:
   # The logging group of the env-to-flag migration (flags.md §15, #1788): operator-written, read by every service.
   - {set: observability, key: log_level, kind: overlay, scope: [stack]}
   - {set: observability, key: debug, kind: overlay, scope: [stack]}
-  # The trace shape of experiment shadow games (#2223): own root + Link (link) or child of agent.experiment (child).
-  - {set: observability, key: telemetry.experiment_game_parent, kind: overlay, scope: [stack]}
   # The shape of the death_warning moment (#2658, UC-100): span_event (default), span, log_event or both.
   - {set: observability, key: telemetry.moment_shape, kind: overlay, scope: [stack]}

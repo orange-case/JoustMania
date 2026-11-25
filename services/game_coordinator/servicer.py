@@ -587,8 +587,7 @@ class GameCoordinatorServicer(game_coordinator_pb2_grpc.GameCoordinatorServiceSe
             # extracts it (lib/grpc_tracing.py). We capture the INJECTED context
             # itself (the agent.experiment span), not the coordinator's own SERVER
             # span the interceptor starts under it when grpc_rpc_spans is on, as
-            # the experiment target of a shadow + experiment-bound game: its Link
-            # (``link``) or its parent (``child``), telemetry.experiment_game_parent.
+            # the target of a shadow + experiment-bound game's experiment Link.
             # The strict shadow+experiment gate in GameSession keeps a
             # real game own-rooted.
             experiment_parent_span_context = injected_parent_span_context(parent_span)

@@ -34,7 +34,7 @@ from contextlib import suppress
 from opentelemetry import trace
 from opentelemetry.context import Context
 
-from lib.feature_flags import eval_game_kind, read_string_flag, set_game_session_kind_context
+from lib.feature_flags import eval_game_kind, set_game_session_kind_context
 from lib.moments import MOMENT_SHAPE_ATTR, emit_agent_event, read_moment_shape
 from lib.otel_metrics import get_export_interval_ms
 from lib.telemetry import get_tracer
@@ -65,23 +65,6 @@ OUTCOME_COMPLETED = "completed"
 OUTCOME_FORCE_ENDED = "force_ended"
 OUTCOME_ERROR = "error"
 GAME_OUTCOMES = frozenset({"winner", "tie", OUTCOME_COMPLETED, OUTCOME_FORCE_ENDED, OUTCOME_ERROR})
-
-
-# Trace shape of an experiment shadow game (flags.md §10). ``child`` nests the
-# game root under the agent's long-lived ``agent.experiment`` span, so one
-# experiment trace grows with every shadow game; ``link`` roots each game as its own
-# trace with a Link back to the experiment. The code default matches the flag
-# default: admission waits for ``observability`` (UC-010 A5), so only a flagd that is
-# not reachable within the deadline gives the game the code default.
-EXPERIMENT_GAME_PARENT_FLAG = "telemetry.experiment_game_parent"
-EXPERIMENT_GAME_PARENT_CHILD = "child"
-EXPERIMENT_GAME_PARENT_LINK = "link"
-
-
-def experiment_game_parent_mode() -> str:
-    """Read ``telemetry.experiment_game_parent``; anything but ``child`` is ``link``."""
-    value = read_string_flag("observability", "telemetry.experiment_game_parent", EXPERIMENT_GAME_PARENT_LINK)
-    return EXPERIMENT_GAME_PARENT_CHILD if value == EXPERIMENT_GAME_PARENT_CHILD else EXPERIMENT_GAME_PARENT_LINK
 
 
 def completed_game_outcome(game) -> str:
@@ -470,23 +453,11 @@ class GameSession:
         if self.stream_span_context is not None and self.stream_span_context.trace_id != 0:
             links.append(trace.Link(self.stream_span_context))
 
-        # Choose the game-span PARENT context.
-        #
-        # A real (primary) game — and any shadow game NOT bound to an experiment —
-        # is rooted as its OWN trace: we pass an explicit empty
-        # Context so neither the inbound stream span nor any ambient span parents
-        # it. The inbound call stays navigable via the Link above.
-        #
-        # A SHADOW + experiment-bound game whose spawn carried the agent's
-        # experiment traceparent follows telemetry.experiment_game_parent,
-        # read once here: ``link`` (default) keeps it its own trace and adds a Link
-        # ``link.kind=experiment`` to the experiment span, so a trace holds one game;
-        # ``child`` makes it a CHILD of that span, nesting every shadow game
-        # in the experiment trace. The gate is STRICT (shadow AND experiment_id AND
-        # a valid injected parent) so the real-game own-root structure is never
-        # touched. The stream Link above is kept either way, unless it names the
-        # experiment span itself (``link`` then carries one Link to it).
-        # UC-010 A5 / BR-004: no game reads its start flags (this parent mode, the moment
+        # Every game is rooted as its OWN trace (explicit empty Context), so a trace
+        # holds one game. A SHADOW + experiment-bound game whose spawn carried the
+        # agent's experiment traceparent adds a Link ``link.kind=experiment`` to that
+        # span instead of becoming its child.
+        # UC-010 A5 / BR-004: no game reads its start flags (the moment
         # shape, the game's own settings) from a provider that is not READY yet: wait
         # (bounded, every coordinator domain incl. observability), else record the
         # code-default fallback. The span does not exist yet, so the outcome is replayed onto it.
@@ -502,18 +473,13 @@ class GameSession:
             and self.experiment_parent_span_context is not None
             and self.experiment_parent_span_context.trace_id != 0
         ):
-            if experiment_game_parent_mode() == EXPERIMENT_GAME_PARENT_CHILD:
-                parent_context = trace.set_span_in_context(trace.NonRecordingSpan(self.experiment_parent_span_context))
-            else:
-                # One Link per target: without grpc_rpc_spans the stream span IS the
-                # injected experiment context, so its plain Link is replaced, not doubled.
-                exp = self.experiment_parent_span_context
-                links = [
-                    link
-                    for link in links
-                    if (link.context.trace_id, link.context.span_id) != (exp.trace_id, exp.span_id)
-                ]
-                links.append(trace.Link(exp, {"link.kind": "experiment"}))
+            # One Link per target: without grpc_rpc_spans the stream span IS the
+            # injected experiment context, so its plain Link is replaced, not doubled.
+            exp = self.experiment_parent_span_context
+            links = [
+                link for link in links if (link.context.trace_id, link.context.span_id) != (exp.trace_id, exp.span_id)
+            ]
+            links.append(trace.Link(exp, {"link.kind": "experiment"}))
 
         with tracer.start_as_current_span(
             game_span_name,
