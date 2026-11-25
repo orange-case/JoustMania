@@ -7,7 +7,7 @@
 > files and the agent's experiment journal. "Primary Key" therefore means the natural identifier.
 > Source of each entity is given in its description. Entities and attributes that exist only in service memory
 > say so ("In-memory, lost on restart"); everything else is a protobuf message, a flag value or a journal
-> record. State: `main` @ a74d0d77 (agent-cluster `/spec-review` of 2026-10-20, #1679; flag service delivered by #1417).
+> record.
 
 ## Entity Relationship Diagram
 
@@ -135,7 +135,7 @@ One running or finished game in the game coordinator (`services/game_coordinator
 | start_time | Start timestamp (ms) | DateTime | - | Not Null |
 
 **Constraints:**
-- The agent's own record of why it considers a game over (`zero`, `root_span`, `stale`; planned #2722: `end_event`) is not a session attribute; it is `AGENT_GAME_CONTEXT.end_reason`.
+- The agent's own record of why it considers a game over (`zero`, `root_span`, `end_event`, `stale`) is not a session attribute; it is `AGENT_GAME_CONTEXT.end_reason`.
 - One `game_kind` vocabulary (#2646, formerly two, see #1249). The coordinator emits `real` for the menu-started game and `shadow` otherwise, the same as the flag context and the agent (`game_session.py` `_eval_game_kind`). The agent still normalises a legacy `primary` to `real` at ingest (`services/agent/gamecontext/gamekind.go`). An empty or unknown kind is **not** real.
 - Only `GAME_ORIGIN_MENU` may claim the primary slot; at most one primary session; at most `max_concurrent_games` sessions and `max_shadow_games` shadows; `experiment_id`, `arm` and `rng_seed` are honoured only for shadow sessions.
 - Session state transitions (`services/game_coordinator/game_session.py`): created as `STARTING` → `RUNNING` on `game_started` (which base modes publish before the countdown, D-G4) → `ENDED` on any game-ending event, a force end or an error. A `STARTING` session can go straight to `ENDED`; a start that fails or is cancelled after admission ends it this way and retires it at once, without a `game_ended` event (UC-010 A7, #1791). The proto values `IDLE` and `ENDING` are never set on a session (`game_session.py` assigns only `STARTING`, `RUNNING` and `ENDED`): `IDLE` is the servicer's answer when no (primary) session exists (`services/game_coordinator/servicer.py` `game_state`, `GetGameState`), and `ENDING` is a defined value that no producer sets at session level. Consumers are written to tolerate it: the dashboard treats a primary game in `ENDING` as still on stage (`services/dashboard/src/follow.ts` `REAL_LIVE_STATES`), the pairing daemon counts it as busy (`bluez_reload.py` `BUSY_GAME_STATES`), and a shadow game in `ENDING` is not followed. The mode-level `ending` phase (next bullet) is what the `game.state` span attribute reports.
@@ -260,7 +260,7 @@ A named value of a flag.
 
 ### MUTABLE_FLAG_POLICY
 
-Delivered by #1417 (epic #1407, UC-053, FR-132). One row of the flag service's mutable-flag registry
+Realises UC-053, FR-132. One row of the flag service's mutable-flag registry
 (`services/flag-service/registry.yaml`, [flags.md §13](specs/flags.md#13-mutable-flag-registry)): a flag that may change at
 runtime, within which bounds, and whether a write may persist it. In-memory once loaded at start, lost on restart (the
 file is the source). A flag without a policy is read-only baseline. There are no writer roles (local game, architecture note D11).
@@ -280,7 +280,7 @@ file is the source). A flag without a policy is read-only baseline. There are no
 
 ### GAME_SCOPE
 
-Delivered by #1417 (FR-135). The flag service's record of one live game (`services/flag-service/state/games.go`), registered by the game coordinator
+Realises FR-135. The flag service's record of one live game (`services/flag-service/state/games.go`), registered by the game coordinator
 at admission and dropped at the game's end, by a reconcile call of its coordinator instance, or after the
 maximum game age (1 h) since it was last seen (registered or reconciled, #2217). In-memory, lost on restart.
 
@@ -300,7 +300,7 @@ maximum game age (1 h) since it was last seen (registered or reconciled, #2217).
 
 ### FLAG_OVERLAY
 
-Delivered by #1417 (FR-134, FR-136 to FR-138). One runtime value the flag service holds on top of the baseline, in memory
+Realises FR-134, FR-136 to FR-138. One runtime value the flag service holds on top of the baseline, in memory
 (C-030, lost on restart); a stack overlay written with `"persist": true` (registry `persist`) is also written to the service's
 own state file and restored at the next start.
 
@@ -576,8 +576,8 @@ The agent's view of one game, built from the OTLP metrics and spans the collecto
 | game_kind | Kind in the flag vocabulary, normalised at ingest (a legacy `primary` becomes `real`; empty and unknown stay as they are and never count as real) | String | 10 | Optional, Values: real, shadow, empty / unknown (never real) |
 | experiment_id | Experiment attribution of a shadow game (partition enrichment, not a routing key) | String | 50 | Optional, Foreign Key (EXPERIMENT.experiment_id) |
 | arm | Arm of that game | String | 12 | Optional, Values: experimental, control |
-| end_reason | Which signal ended the game: the `game_active` 1 to 0 datapoint (`zero`), the game root span before any 0 (`root_span`), the agent-only `game.end` log event before either (`end_event`, planned #2722), or `game_active` silent for 60 s (`stale`, the agent's telemetry for the game broke: experiments, retro, summary and proposer skip it). Empty while the game runs; set in the game-end snapshot (UC-041 A4, #1494) | String | 9 | Optional, Values: zero, root_span, stale |
-| game_trace_id | Trace id of the coordinator's root game span, from the `game_trace_correlation` gauge or, planned #2766, the trace context of the agent-only `game.start` / `game.phase.start` log records (UC-041 BR-004) | String | 32 | Optional, Format: 32 hex |
+| end_reason | Which signal ended the game: the `game_active` 1 to 0 datapoint (`zero`), the game root span before any 0 (`root_span`), the agent-only `game.end` log event before either (`end_event`, UC-041 A8), or `game_active` silent for 60 s (`stale`, the agent's telemetry for the game broke: experiments, retro, summary and proposer skip it). Empty while the game runs; set in the game-end snapshot (UC-041 A4, #1494) | String | 9 | Optional, Values: zero, root_span, end_event, stale |
+| game_trace_id | Trace id of the coordinator's root game span, from the `game_trace_correlation` gauge or, since #2766, the trace context of the agent-only `game.start` / `game.phase.start` log records (UC-041 BR-004) | String | 32 | Optional, Format: 32 hex |
 | game_trace_span_id | Span id of the game root | String | 16 | Optional, Format: 16 hex |
 | gameplay_phase_span_id | Span id of `gameplay_phase`, first fallback parent of the in-game agent spans | String | 16 | Optional, Format: 16 hex |
 | game_cycle_span_id | Span id of `game_cycle`, preferred remote parent of the in-game agent spans | String | 16 | Optional, Format: 16 hex |
@@ -592,7 +592,7 @@ The agent's view of one game, built from the OTLP metrics and spans the collecto
 - Process-wide, outside any one context: the serial-to-display-name view from `controller_info{serial,name}` (controller metrics carry no game id; used to name targeted players on decision spans) and a FIFO set of the ids of the last 512 ended games (`endedGamesCap`), so a late datapoint for an ended game id does not run its game-end chain a second time. Both are in-memory and lost on restart.
 - A context belongs to one game; per-controller values in it never outlive the game (see GAME_AGGREGATE).
 - Exception: the fallback context for signals without a game id is ONE shared partition (empty key), never evicted and without an ended-id latch; signals of concurrent unlabeled games mix there, and no intervention is written for it (UC-041 A5, FR-041).
-- The end time per end reason: `zero` is the agent's receive time of the 0 datapoint, `stale` the receive time of the last `game_active` datapoint, `root_span` the root span's end time, `end_event` (planned #2722) the `game.end` record's timestamp (else its observed timestamp, else its arrival), kept between the game's start and now like the root span (UC-041 BR-005, A8).
+- The end time per end reason: `zero` is the agent's receive time of the 0 datapoint, `stale` the receive time of the last `game_active` datapoint, `root_span` the root span's end time, `end_event` the `game.end` record's timestamp (else its observed timestamp, else its arrival), kept between the game's start and now like the root span (UC-041 BR-005, A8).
 
 ### GAME_SUMMARY
 

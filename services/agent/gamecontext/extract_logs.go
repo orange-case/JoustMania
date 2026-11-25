@@ -24,10 +24,14 @@ const (
 // The agent's own lifecycle log events (#2722, FR-250, UC-041 A8): sent by the
 // coordinator only to the agent, marked attrAudience = audienceAgent.
 const (
-	logEventGameStart = "game.start"
-	logEventGameEnd   = "game.end"
-	attrAudience      = "orangecase.audience"
-	audienceAgent     = "agent"
+	logEventGameStart  = "game.start"
+	logEventGameEnd    = "game.end"
+	logEventPhaseStart = "game.phase.start"
+	attrAudience       = "orangecase.audience"
+	audienceAgent      = "agent"
+	attrPhaseSpan      = "game.phase.span"
+	phaseGameplay      = "gameplay_phase"
+	phaseGameCycle     = "game_cycle"
 )
 
 // The moment observer's labels (#2658 slice 3, agent_moments_received_total{moment,
@@ -66,7 +70,7 @@ func momentIDOf(attrs pcommon.Map) string {
 }
 
 // ApplyLogs walks a log batch and applies each moment log event (UC-041 A7) and
-// each game.start / game.end log event (A8) to its game's partition, opening a
+// each game.start / game.phase.start / game.end log event (A8) to its game's partition, opening a
 // held one for an unknown game (BR-010), never the fallback. It returns the
 // deduped set of game ids whose context a new player_death moment changed. It
 // skips the agent's own resources and every other record.
@@ -102,6 +106,8 @@ func (m *Multiplexer) applyLog(lr plog.LogRecord) (string, bool) {
 		m.applyGameStart(lr)
 	case logEventGameEnd:
 		m.applyGameEnd(lr)
+	case logEventPhaseStart:
+		m.applyPhaseStart(lr)
 	}
 	return "", false
 }
@@ -146,7 +152,44 @@ func (m *Multiplexer) applyGameStart(lr plog.LogRecord) {
 	if gameID == "" || !forAgent(attrs) {
 		return
 	}
-	m.openFromLog(gameID).setFromLog(attrString(attrs, spanAttrGameKind), attrString(attrs, spanAttrGameMode))
+	s := m.openFromLog(gameID)
+	s.setFromLog(attrString(attrs, spanAttrGameKind), attrString(attrs, spanAttrGameMode))
+	if traceID, spanID, ok := sampledContext(lr); ok {
+		s.setTraceFromLog(logTraceIDs{trace: traceID, root: spanID})
+	}
+}
+
+// applyPhaseStart opens and holds the game's partition like game.start and takes
+// the opened span's id from the record's trace context (UC-041 A8 step 5, BR-004).
+func (m *Multiplexer) applyPhaseStart(lr plog.LogRecord) {
+	attrs := lr.Attributes()
+	gameID := attrString(attrs, spanAttrGameID)
+	if gameID == "" || !forAgent(attrs) {
+		return
+	}
+	s := m.openFromLog(gameID)
+	s.setFromLog(attrString(attrs, spanAttrGameKind), "")
+	_, spanID, ok := sampledContext(lr)
+	if !ok {
+		return
+	}
+	switch attrString(attrs, attrPhaseSpan) {
+	case phaseGameplay:
+		s.setTraceFromLog(logTraceIDs{phase: spanID})
+	case phaseGameCycle:
+		s.setTraceFromLog(logTraceIDs{cycle: spanID})
+	}
+}
+
+// sampledContext returns the record's trace and span id in the gauge labels' hex
+// form, ok only for a valid, sampled context: an unsampled span is never exported,
+// so parenting on it would dangle.
+func sampledContext(lr plog.LogRecord) (traceID, spanID string, ok bool) {
+	tid, sid := lr.TraceID(), lr.SpanID()
+	if tid.IsEmpty() || sid.IsEmpty() || !lr.Flags().IsSampled() {
+		return "", "", false
+	}
+	return tid.String(), sid.String(), true
 }
 
 // applyGameEnd ends the game through the single end transition with

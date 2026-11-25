@@ -30,7 +30,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | Lobby and admin | [UC-010](use_cases/UC-010.md) ready up and start, [UC-011](use_cases/UC-011.md) select mode, [UC-012](use_cases/UC-012.md) admin settings, [UC-013](use_cases/UC-013.md) agent kill switch on the controller, [UC-014](use_cases/UC-014.md) force start |
 | Playing | [UC-020](use_cases/UC-020.md) FFA, [UC-021](use_cases/UC-021.md) teams, [UC-022](use_cases/UC-022.md) hidden roles, [UC-023](use_cases/UC-023.md) zombies, [UC-024](use_cases/UC-024.md) swapper, [UC-025](use_cases/UC-025.md) 1v1, [UC-026](use_cases/UC-026.md) non-stop, [UC-027](use_cases/UC-027.md) force end, [UC-030](use_cases/UC-030.md) death detection, [UC-031](use_cases/UC-031.md) audio |
 | Observability | [UC-035](use_cases/UC-035.md) observe the system |
-| Agent | [UC-040](use_cases/UC-040.md) decide an intervention, [UC-041](use_cases/UC-041.md) observe a game, [UC-042](use_cases/UC-042.md) retro and proposals, [UC-043](use_cases/UC-043.md) shadow experiments and promotion, [UC-044](use_cases/UC-044.md) switch backend live, [UC-045](use_cases/UC-045.md) kill switch, [UC-046](use_cases/UC-046.md) repeatable pattern-driven shadow games (#1258), [UC-047](use_cases/UC-047.md) recalibrate the shadow players from real games (draft, #1055) |
+| Agent | [UC-040](use_cases/UC-040.md) decide an intervention, [UC-041](use_cases/UC-041.md) observe a game, [UC-042](use_cases/UC-042.md) retro and proposals, [UC-043](use_cases/UC-043.md) shadow experiments and promotion, [UC-044](use_cases/UC-044.md) switch backend live, [UC-045](use_cases/UC-045.md) kill switch, [UC-046](use_cases/UC-046.md) repeatable pattern-driven shadow games (#1258), [UC-047](use_cases/UC-047.md) calibrate the shadow players offline from real games (#2813) |
 | Infrastructure | [UC-050](use_cases/UC-050.md) progressive rollout, [UC-051](use_cases/UC-051.md) automatic rollback, [UC-052](use_cases/UC-052.md) manual canary (all three parked since 2026-10-19) |
 | Operations | [UC-060](use_cases/UC-060.md) operate the stage Pi (planned, #2027), [UC-061](use_cases/UC-061.md) reach the stage Pi over its own hotspot (#2099) |
 | Talk | [UC-070](use_cases/UC-070.md) present the demo |
@@ -54,9 +54,9 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Build, run, test and debug; compose and image workflow |
 | [hardware-setup-guide.md](hardware-setup-guide.md) (includes the 25-controller setup) | Set up a Pi 5 with many controllers |
 | [UC-010](use_cases/UC-010.md), [UC-012](use_cases/UC-012.md) | Lobby and admin button maps (BR-005 in each) |
-| [CONTROLLER_CONNECTIVITY.md](CONTROLLER_CONNECTIVITY.md) | Troubleshoot Bluetooth (stale) |
+| [CONTROLLER_CONNECTIVITY.md](CONTROLLER_CONNECTIVITY.md) | Troubleshoot Bluetooth |
 | [AUDIO.md](AUDIO.md) | Audio hardware and ALSA setup |
-| [observability-quickstart.md](observability-quickstart.md) | Performance tooling (stale metric names) |
+| [observability-quickstart.md](observability-quickstart.md) | Performance tooling |
 | [CANARY_RUNBOOK.md](CANARY_RUNBOOK.md) | Manual backend canary |
 | [architecture/flag-service.md](architecture/flag-service.md) | Flag service: one gRPC sync source for flagd partitioned by flagSetId, `PUT /{flagSetId}/{flagName}` writes, mutable-flag registry, persisted admin settings, migration plan (epic #1407) |
 | [architecture/stack.md](architecture/stack.md) | AIUP stack file: layers mapped to our repo skills (`/implement`, `/pytest-test`, `/go-test`, `/integration-test`, `/coverage-check`), markers, commands, mapping of the aiup-core 3.x commands (#2079) |
@@ -80,7 +80,6 @@ Kept for the reasoning; they do not describe the current system.
 
 | Document | Topic |
 |---|---|
-| [design/agent-experiment-cohorts.md](design/agent-experiment-cohorts.md) | Experiment cohorts design |
 | [research/722-intervention-surface.md](research/722-intervention-surface.md) | Intervention vocabulary |
 | [research/774-shadow-games.md](research/774-shadow-games.md) | Shadow games |
 | [research/844-post-game-retro.md](research/844-post-game-retro.md) | Post-game retro |
