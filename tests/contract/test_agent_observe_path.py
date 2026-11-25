@@ -218,3 +218,21 @@ def test_agent_moments_filter_passes_lifecycle_records_only_when_marked(
     event; the marker lets no other record through and synthetic data stays out (#2577)."""
     conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
     assert ic.drops_log(conditions, event_name, attributes, resource) is dropped
+
+
+@pytest.mark.uc("UC-041", flow="A8", steps=[5], br=["BR-004"])
+@pytest.mark.parametrize(
+    ("attributes", "resource", "dropped"),
+    [
+        ({"game.id": "g", "game.phase.span": "game_cycle", **_AGENT}, {}, False),
+        ({"game.id": "g", "game.phase.span": "gameplay_phase"}, {}, True),
+        (_AGENT, {"orangecase.synthetic": True}, True),
+    ],
+    ids=["marked-kept", "unmarked-dropped", "synthetic-dropped"],
+)
+def test_agent_moments_filter_passes_phase_start_only_when_marked(
+    collector, attributes, resource, dropped
+):
+    """UC-041 BR-004: `game.phase.start` carries the span ids to the agent, marked like `game.start`."""
+    conditions = collector["processors"]["filter/agent_moments"]["log_conditions"]
+    assert ic.drops_log(conditions, "game.phase.start", attributes, resource) is dropped
