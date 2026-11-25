@@ -12,11 +12,11 @@ name: CI
 #     Exception: the two service-test jobs (the slowest) skip a push to main
 #     (`service_tests_run`): the merge queue already ran them on that commit, and
 #     a push to main only builds, publishes and signals the release.
-#   - Service tiers on a PR (#2768): not run. The merge queue is their only gate
-#     (it tests the merged tree anyway), so CI Complete, and so queue entry, never
-#     waits ~18 min for them. workflow_dispatch or `ci-full` runs them early. A tier
-#     failure costs one queue run plus a re-arm (0 of the 20 queue runs before
-#     #2768 failed in a tier).
+#   - Service tiers and the e2e job on a PR (#2768): not run. The merge queue is
+#     their only gate (it tests the merged tree anyway), so CI Complete, and so
+#     queue entry, never waits for them. workflow_dispatch or `ci-full` runs them
+#     early. A failure costs one queue run plus a re-arm (0 of the 20 queue runs
+#     before #2768 failed in a tier).
 #   - `ci-full` PR label or workflow_dispatch: additionally forces ALL image builds.
 #     ci.yml does NOT trigger on `labeled` (#1527): GitHub takes required checks
 #     from the newest run of this workflow on the head SHA, so a label-only run
@@ -48,8 +48,8 @@ name: CI
 #                                     ALLGREEN (e.g. HEADGREEN), revisit this
 #                                     skip.
 #   workflow_dispatch                 always
-#   pull_request                      with `ci-full`, or a non-docs diff touching
-#                                     a risky path (`e2e_paths` filter)
+#   pull_request                      only with `ci-full` (#2768: the queue is
+#                                     the e2e gate; no path trigger)
 #   push to main                      never: the queue already ran them on this
 #                                     exact commit; builds/publish/retag no
 #                                     longer wait for integration-test there
@@ -116,8 +116,7 @@ jobs:
       connect_proxy_tests: ${{ steps.f.outputs.connect_proxy_tests }}
       non_docs: ${{ steps.nondocs.outputs.non_docs }}
       # #1583: run the e2e job (merge_group unless the whole group is
-      # docs-only, workflow_dispatch, ci-full, or a non-docs PR touching an
-      # `e2e_paths` file)
+      # docs-only, workflow_dispatch, ci-full; no PR path trigger since #2768)
       e2e_required: ${{ steps.force.outputs.e2e }}
       # #1583: e2e builds EVERY stack image at HEAD (full path) instead of
       # pulling :latest and overlaying source (fast path). True on merge_group
@@ -343,19 +342,6 @@ jobs:
               - 'services/dashboard/**'
             otel_collector:
               - 'images/otel-collector/**'
-            # #1583: risky for the full stack, so a PR touching them runs the
-            # e2e before the queue does: compose files, any image
-            # definition, the e2e suite itself (conftest, helpers), and the
-            # collector / envoy config the stack mounts.
-            e2e_paths:
-              - 'docker-compose*.yml'
-              - '**/Dockerfile*'
-              - 'tests/integration/**'
-              - 'services/otel-collector/**'
-              - 'images/otel-collector/**'
-              - 'services/envoy/**'
-              - 'services/flagd/**'
-              - '.github/workflows/ci.yml'
             integration_deps:
               # root pyproject.toml is a deps-fingerprint input
               # (scripts/ci/deps-fingerprint.sh), so it must force fresh images
@@ -402,7 +388,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PAYLOAD_CI_FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci-full') }}
-          E2E_PATHS: ${{ steps.f.outputs.e2e_paths }}
           NON_DOCS: ${{ steps.nondocs.outputs.non_docs }}
           INTEGRATION_DEPS: ${{ steps.f.outputs.integration_deps }}
           SERVICE_TESTS: ${{ steps.f.outputs.service_tests }}
@@ -419,8 +404,8 @@ jobs:
           full="${{ github.event_name == 'workflow_dispatch' }}"
           # merge_group gates main exactly like a push to main (#1555)
           checks="${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'merge_group' }}"
-          # #1583: the e2e job gates the merge queue; on PRs only with ci-full or
-          # a non-docs diff touching a risky path; never on a push to main.
+          # #1583: the e2e job gates the merge queue; on PRs only with ci-full (#2768);
+          # never on a push to main.
           # Merge queue: skipped only for a docs-only group (NON_DOCS exactly
           # 'false'; empty/unknown fails closed to running e2e). base_sha is
           # the parent of the group commit, so the diff is this entry's PR
@@ -431,9 +416,6 @@ jobs:
             e2e=true
           fi
           if [ "$ci_full" = true ]; then full=true; checks=true; e2e=true; fi
-          if [ "${{ github.event_name }}" = pull_request ] && [ "$E2E_PATHS" = true ] && [ "$NON_DOCS" = true ]; then
-            e2e=true
-          fi
           # e2e full path (every image built at HEAD): merge_group and dispatch
           # always; elsewhere with ci-full or a deps change (fast path otherwise).
           e2e_full_build="${{ github.event_name == 'merge_group' }}"
@@ -1440,8 +1422,7 @@ jobs:
       # #1780: prebuilt collector for this content hash; empty = build locally.
       OTEL_COLLECTOR_TAG: ${{ needs.collector-image.outputs.tag }}
     # #1583: runs only when e2e_required (merge_group, workflow_dispatch,
-    # `ci-full`, or a non-docs PR touching a risky path; docs-only PRs still
-    # skip it, #1422). Skipped on a push to main: the queue ran it on that
+    # `ci-full`; no PR path trigger since #2768). Skipped on a push to main: the queue ran it on that
     # commit. ci-complete accepts a skip unless e2e_required was true.
     # The queue skips it only when this entry's diff is docs-only (non_docs
     # exactly 'false'); safe under the ALLGREEN grouping strategy, revisit if
@@ -1637,7 +1618,7 @@ jobs:
     runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     needs: [changes, integration-test]
     # #1583: wait for the e2e job only where it runs (merge_group,
-    # dispatch, ci-full / risky PRs); a skipped e2e job (push to main, plain PR)
+    # dispatch, ci-full PRs); a skipped e2e job (push to main, plain PR)
     # does not hold the build back. A required e2e job must have succeeded.
     if: >-
       needs.changes.outputs.docker_build_matrix != '[]' &&
@@ -2103,7 +2084,7 @@ jobs:
           echo "✅ All CI checks passed (skipped jobs are OK)"
 
       # #1583: a skipped e2e job is OK only where it was not required; in the
-      # merge queue (and with ci-full / risky paths) it must have succeeded.
+      # merge queue (and with ci-full) it must have succeeded.
       # Fails closed: merge_group requires e2e unless non_docs is exactly
       # 'false' (docs-only group; empty counts as required), and an
       # e2e_required that is neither 'true' nor 'false' (empty/broken output)

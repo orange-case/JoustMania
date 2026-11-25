@@ -8,7 +8,7 @@
 #          concurrency per merge-group ref, every main-gating check runs in the
 #          queue, CI Complete reports there, and nothing is published from it.
 #   #1583: the e2e job runs only where `changes.e2e_required` says so
-#          (merge_group, workflow_dispatch, ci-full, risky paths); a push to
+#          (merge_group, workflow_dispatch, ci-full; no PR path trigger, #2768); a push to
 #          main builds and publishes without them. Checked by simulating the
 #          `changes/force` step and evaluating the job `if:`s per scenario.
 #
@@ -491,15 +491,13 @@ def e2e_steps_run(ctx):
 AGENT_STUB_STEP = "Validate agent Go stubs"
 check("e2e_required" in jobs["changes"]["outputs"], "changes: must output e2e_required (#1583)")
 e2e_filter = next(s for s in jobs["changes"]["steps"] if s.get("id") == "f")["with"]["filters"]
-e2e_path_list = yaml.safe_load(e2e_filter).get("e2e_paths") or []
-for path in ("docker-compose*.yml", "**/Dockerfile*", "tests/integration/**", "services/otel-collector/**", "services/envoy/**",
-             "services/flagd/**", ".github/workflows/ci.yml"):
-    check(path in e2e_path_list, f"changes/f: e2e_paths must cover {path}")
+# #2768: no PR path trigger for e2e any more; the queue is its gate.
+check("e2e_paths" not in (yaml.safe_load(e2e_filter) or {}), "changes/f: e2e_paths is gone (#2768)")
 
 SCENARIOS = [
     # (label, event, e2e_paths, non_docs, ci_full, expect_e2e)
     ("PR, plain code change", "pull_request", False, True, False, False),
-    ("PR, risky path", "pull_request", True, True, False, True),
+    ("PR touching compose/Dockerfiles (#2768: queue only)", "pull_request", True, True, False, False),
     ("PR, ci-full label", "pull_request", False, True, True, True),
     ("PR, docs-only under a risky path", "pull_request", True, False, False, False),
     ("merge_group", "merge_group", False, True, False, True),
@@ -591,8 +589,10 @@ if "e2e_required" in jobs["changes"]["outputs"]:
         ("merge_group", dict(event="merge_group", e2e_paths=False, non_docs=True), True),
         ("workflow_dispatch", dict(event="workflow_dispatch", e2e_paths=False, non_docs=True), True),
         ("PR, ci-full label", dict(event="pull_request", e2e_paths=False, non_docs=True, ci_full=True), True),
-        ("PR, risky path", dict(event="pull_request", e2e_paths=True, non_docs=True), False),
-        ("PR, risky path + deps", dict(event="pull_request", e2e_paths=True, non_docs=True, integration_deps=True), True),
+        # No event reaches the fast path since #2768; forced here while its steps exist.
+        ("PR, e2e forced", dict(event="pull_request", e2e_paths=False, non_docs=True, override={"e2e_required": "true"}), False),
+        ("PR, e2e forced + deps", dict(event="pull_request", e2e_paths=False, non_docs=True, integration_deps=True,
+                                       override={"e2e_required": "true"}), True),
         ("merge_group, empty e2e_full_build", dict(event="merge_group", e2e_paths=False, non_docs=True,
                                                    override={"e2e_full_build": ""}), True),
     ]
@@ -636,14 +636,14 @@ if "e2e_required" in jobs["changes"]["outputs"]:
     check("matrix." not in yaml.safe_dump(it), "integration-test: no matrix.* reference (name, env, steps)")
     check("E2E_SHARD" not in open(sys.argv[1]).read(), "ci.yml: E2E_SHARD is gone (#1422 S13)")
 
-    # (#1254) A risky-path PR on the fast path still builds the agent at HEAD before the tests.
+    # (#1254) The fast path still builds the agent at HEAD before the tests.
     AGENT_STEPS = ("Resolve agent image ref (fast path)", "Build agent at HEAD (fast path)")
-    steps = simulate("pull_request", True, True)["e2e_steps"]
+    steps = simulate("pull_request", False, True, override={"e2e_required": "true"})["e2e_steps"]
     for name in AGENT_STEPS:
-        check(name in steps, f"PR, risky path: {name!r} must run (#1254), ran {steps}")
+        check(name in steps, f"fast path: {name!r} must run (#1254), ran {steps}")
     if all(n in steps for n in AGENT_STEPS) and FAST in steps:
         check(steps.index("Build agent at HEAD (fast path)") < steps.index(FAST),
-              "PR, risky path: the agent must be built before the fast e2e run")
+              "fast path: the agent must be built before the fast e2e run")
 
     # (#1780) Prebuilt collector: same gate as the e2e job, so it is never
     # skipped by it and it never runs where they do not.
@@ -656,7 +656,7 @@ if "e2e_required" in jobs["changes"]["outputs"]:
     for outcome in ("failure", "cancelled"):
         for label, kwargs in (
             ("merge_group", dict(event="merge_group", e2e_paths=False, non_docs=True)),
-            ("PR, risky path", dict(event="pull_request", e2e_paths=True, non_docs=True)),
+            ("PR, ci-full", dict(event="pull_request", e2e_paths=False, non_docs=True, ci_full=True)),
         ):
             r = simulate(collector_outcome=outcome, **kwargs)
             check(r["integration-test"] == "success",
@@ -669,7 +669,8 @@ if "e2e_required" in jobs["changes"]["outputs"]:
           "ci-complete: must not need collector-image; it is best effort (#1780)")
     for label, kwargs, want in (
         ("merge_group", dict(event="merge_group", e2e_paths=False, non_docs=True), "success"),
-        ("PR, risky path", dict(event="pull_request", e2e_paths=True, non_docs=True), "success"),
+        ("PR, ci-full", dict(event="pull_request", e2e_paths=False, non_docs=True, ci_full=True), "success"),
+        ("PR, plain code change", dict(event="pull_request", e2e_paths=False, non_docs=True), "skipped"),
         ("PR, docs only", dict(event="pull_request", e2e_paths=False, non_docs=False), "skipped"),
     ):
         r = simulate(**kwargs)
