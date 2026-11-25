@@ -83,6 +83,13 @@ NOT_POSSIBLE_VOICE = Sound.MENU_VOX_STATUS_NOT_POSSIBLE  # a refusal
 LIMIT_VOICES: dict[bool, Sound] = {True: Sound.MENU_VOX_STATUS_MAXIMUM, False: Sound.MENU_VOX_STATUS_MINIMUM}  # by "up"
 CANCELLED_VOICE = Sound.MENU_VOX_STATUS_CANCELLED
 NO_CONNECTION_VOICE = Sound.MENU_VOX_STATUS_NO_CONNECTION  # the menu cannot be reached
+# UC-016 BR-016: the K5 tap without a screen for an agent whose only closed key is the write gate.
+AGENT_WATCHING_VOICE = Sound.MENU_VOX_AGENT_WATCHING
+# UC-016 BR-012 (D3): the menu's line for `interventions_switch`, by its `state`.
+INTERVENTIONS_VOICES: dict[str, Sound] = {
+    "on": Sound.MENU_VOX_INTERVENTIONS_ON,
+    "off": Sound.MENU_VOX_INTERVENTIONS_OFF,
+}
 
 # UC-011 step 3: the voice line of each mode (keys are `Games` member names).
 GAME_MODE_VOICE: dict[str, Sound] = {
