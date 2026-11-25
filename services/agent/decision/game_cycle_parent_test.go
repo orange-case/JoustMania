@@ -269,3 +269,38 @@ func TestEffectSpans_EachChildOfItsOwnDecision(t *testing.T) {
 		}
 	})
 }
+
+// A lost game.start leaves the root span id unknown while a game.phase.start still
+// gives the trace id (UC-041 BR-004): the decision is still a child of game_cycle,
+// without the Link to the game root and without game.trace_span_id.
+// UC: UC-040 BR-013
+// UC: UC-041 BR-004
+func TestDecision_WithoutRootSpanIDParentsOnGameCycle(t *testing.T) {
+	t.Run("UC-040/BR-013 no root span id: child of game_cycle, no Link, no game.trace_span_id", func(t *testing.T) {
+		c := gameCycleCtx("game_gc09")
+		c.GameTraceSpanID = ""
+		l, sr, _ := meteredTestLoop(t)
+		l.Rules = fakeRules{out: []Decision{{Intervention: "noop", Reason: "x"}}}
+		l.Actions = &fakeSink{}
+
+		l.OnEvaluate(context.Background(), c, EvalTrigger{Signal: "metrics", T0: time.Now(), RPCService: "svc"})
+
+		decisions := spansByName(sr.Ended(), SpanDecision)
+		if len(decisions) != 1 {
+			t.Fatalf("decision spans = %d, want 1", len(decisions))
+		}
+		parent := decisions[0].Parent()
+		if !parent.IsRemote() || parent.SpanID().String() != hubGameCycleSpanID || parent.TraceID().String() != hubGameTrace {
+			t.Fatalf("parent = %s/%s (remote=%v), want remote game_cycle %s", parent.TraceID(), parent.SpanID(), parent.IsRemote(), hubGameCycleSpanID)
+		}
+		if links := decisions[0].Links(); len(links) != 0 {
+			t.Fatalf("decision links = %+v, want none without the root span id", links)
+		}
+		if v, ok := attrValue(decisions[0], AttrGameTraceSpanID); ok {
+			t.Fatalf("%s = %q, want absent", AttrGameTraceSpanID, v.AsString())
+		}
+		if v, ok := attrValue(decisions[0], AttrGameTraceID); !ok || v.AsString() != hubGameTrace {
+			t.Fatalf("%s = %q (ok=%v), want %s", AttrGameTraceID, v.AsString(), ok, hubGameTrace)
+		}
+	})
+}

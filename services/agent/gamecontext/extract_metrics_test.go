@@ -247,84 +247,23 @@ func TestApplyMetrics_MovementVarianceAggregateRetained(t *testing.T) {
 	}
 }
 
-// TestApplyMetrics_AdoptsGameTraceID verifies the #1133/#1157 trace-correlation
-// signal: game_trace_correlation carries game_id + game_trace_id + game_trace_span_id
-// and adopts all into the context so the decision loop can link agent.decision to the
-// originating game's root span.
-func TestApplyMetrics_AdoptsGameTraceID(t *testing.T) {
-	s := newTestStore()
-	const tid = "4bf92f3577b34da6a3ce929d0e0e4736"
-	const sid = "051581bf3cb55c13"
-	const gpSid = "00f067aa0ba902b7"
-	if !s.ApplyMetrics(metricsWith(metricTraceCorrelation, 1, map[string]string{
-		attrGameID:              "game-99",
-		attrGameKind:            "real",
-		attrGameTraceID:         tid,
-		attrGameTraceSpanID:     sid,
-		attrGameplayPhaseSpanID: gpSid,
-	})) {
-		t.Fatal("game_trace_correlation carrying game_trace_id must apply")
-	}
-	snap := s.Snapshot()
-	if snap.SessionID != "game-99" {
-		t.Fatalf("SessionID = %q, want game-99 (adopted from game_id)", snap.SessionID)
-	}
-	if snap.GameTraceID != tid {
-		t.Fatalf("GameTraceID = %q, want %q", snap.GameTraceID, tid)
-	}
-	if snap.GameTraceSpanID != sid {
-		t.Fatalf("GameTraceSpanID = %q, want %q", snap.GameTraceSpanID, sid)
-	}
-	if snap.GameplayPhaseSpanID != gpSid {
-		t.Fatalf("GameplayPhaseSpanID = %q, want %q (#1195)", snap.GameplayPhaseSpanID, gpSid)
-	}
-}
-
-// TestApplyMetrics_GameplayPhaseSpanIDAbsentLeavesEmpty verifies the #1195 two-tier
-// fallback INPUT: a correlation datapoint with the root span_id but NO
-// gameplay_phase_span_id (e.g. before the gameplay_phase span opens) leaves
-// GameplayPhaseSpanID empty while still adopting the root id — so the agent keeps
-// parenting under the game root until gameplay_phase publishes its id.
-func TestApplyMetrics_GameplayPhaseSpanIDAbsentLeavesEmpty(t *testing.T) {
-	s := newTestStore()
-	const tid = "4bf92f3577b34da6a3ce929d0e0e4736"
-	const sid = "051581bf3cb55c13"
-	if !s.ApplyMetrics(metricsWith(metricTraceCorrelation, 1, map[string]string{
-		attrGameID:          "game-101",
-		attrGameTraceID:     tid,
-		attrGameTraceSpanID: sid,
-	})) {
-		t.Fatal("correlation datapoint must apply")
-	}
-	snap := s.Snapshot()
-	if snap.GameTraceSpanID != sid {
-		t.Fatalf("GameTraceSpanID = %q, want %q (root still adopted)", snap.GameTraceSpanID, sid)
-	}
-	if snap.GameplayPhaseSpanID != "" {
-		t.Fatalf("GameplayPhaseSpanID = %q, want empty (no label -> fall back to root)", snap.GameplayPhaseSpanID)
-	}
-}
-
-// TestApplyMetrics_TraceCorrelationWithoutTraceIDIsSafe documents the fallback:
-// a correlation datapoint missing game_trace_id/game_trace_span_id still routes its
-// game_id but leaves both empty (no link will be added) — no error.
-func TestApplyMetrics_TraceCorrelationWithoutTraceIDIsSafe(t *testing.T) {
-	s := newTestStore()
-	if !s.ApplyMetrics(metricsWith(metricTraceCorrelation, 1, map[string]string{
-		attrGameID: "game-100",
-	})) {
-		t.Fatal("correlation datapoint with only game_id must still contribute it")
-	}
-	snap := s.Snapshot()
-	if snap.SessionID != "game-100" {
-		t.Fatalf("SessionID = %q, want game-100", snap.SessionID)
-	}
-	if snap.GameTraceID != "" {
-		t.Fatalf("GameTraceID = %q, want empty (no game_trace_id label)", snap.GameTraceID)
-	}
-	if snap.GameTraceSpanID != "" {
-		t.Fatalf("GameTraceSpanID = %q, want empty (no game_trace_span_id label)", snap.GameTraceSpanID)
-	}
+// UC: UC-041 BR-004
+func TestApplyMetrics_RetiredTraceCorrelationGaugeSetsNoIDs(t *testing.T) {
+	t.Run("UC-041/BR-004 a game_trace_correlation datapoint gives no trace ids", func(t *testing.T) {
+		s := newTestStore()
+		s.ApplyMetrics(metricsWith("game_trace_correlation", 1, map[string]string{
+			attrGameID:               "game-99",
+			"game_trace_id":          "4bf92f3577b34da6a3ce929d0e0e4736",
+			"game_trace_span_id":     "051581bf3cb55c13",
+			"gameplay_phase_span_id": "00f067aa0ba902b7",
+			"game_cycle_span_id":     "1a2b3c4d5e6f7081",
+		}))
+		snap := s.Snapshot()
+		if snap.GameTraceID != "" || snap.GameTraceSpanID != "" || snap.GameplayPhaseSpanID != "" || snap.GameCycleSpanID != "" {
+			t.Fatalf("ids = (%q, %q, %q, %q), want none: the ids come only from log records",
+				snap.GameTraceID, snap.GameTraceSpanID, snap.GameplayPhaseSpanID, snap.GameCycleSpanID)
+		}
+	})
 }
 
 func TestApplyMetrics_MissingSerialSkipped(t *testing.T) {
@@ -541,36 +480,4 @@ func TestApplyMetrics_SpeedAndThreshold(t *testing.T) {
 	if s2.Snapshot().Session.MusicTempo != nil {
 		t.Error("tempo v==0 must not be recorded")
 	}
-}
-
-// UC: UC-041 BR-004
-func TestApplyMetrics_AdoptsGameCycleSpanID(t *testing.T) {
-	const tid = "4bf92f3577b34da6a3ce929d0e0e4736"
-	t.Run("UC-041/BR-004 game_cycle_span_id label is adopted", func(t *testing.T) {
-		s := newTestStore()
-		if !s.ApplyMetrics(metricsWith(metricTraceCorrelation, 1, map[string]string{
-			attrGameID:              "game-cyc",
-			attrGameTraceID:         tid,
-			attrGameTraceSpanID:     "051581bf3cb55c13",
-			attrGameplayPhaseSpanID: "00f067aa0ba902b7",
-			attrGameCycleSpanID:     "1a2b3c4d5e6f7081",
-		})) {
-			t.Fatal("correlation datapoint must apply")
-		}
-		if got := s.Snapshot().GameCycleSpanID; got != "1a2b3c4d5e6f7081" {
-			t.Fatalf("GameCycleSpanID = %q, want 1a2b3c4d5e6f7081", got)
-		}
-	})
-	t.Run("UC-041/BR-004 a datapoint without the label keeps the known id", func(t *testing.T) {
-		s := newTestStore()
-		s.ApplyMetrics(metricsWith(metricTraceCorrelation, 1, map[string]string{
-			attrGameID: "game-cyc", attrGameTraceID: tid, attrGameCycleSpanID: "1a2b3c4d5e6f7081",
-		}))
-		s.ApplyMetrics(metricsWith(metricTraceCorrelation, 1, map[string]string{
-			attrGameID: "game-cyc", attrGameTraceID: tid,
-		}))
-		if got := s.Snapshot().GameCycleSpanID; got != "1a2b3c4d5e6f7081" {
-			t.Fatalf("GameCycleSpanID = %q, want the earlier id kept", got)
-		}
-	})
 }

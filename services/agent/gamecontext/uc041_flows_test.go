@@ -133,15 +133,6 @@ func TestMux_LostBatchRestoredByNextExport(t *testing.T) {
 // UC: UC-041 A6
 func TestMux_LostBatchLeavesNoTraceAndIsRestored(t *testing.T) {
 	const interval = 100 * time.Millisecond
-	const tid = "4bf92f3577b34da6a3ce929d0e0e4736"
-	const sid = "051581bf3cb55c13"
-	correlation := func() pmetric.Metrics {
-		md := pmetric.NewMetrics()
-		addGauge(md, metricTraceCorrelation, 1, map[string]string{
-			attrGameID: "game-A", attrGameTraceID: tid, attrGameTraceSpanID: sid,
-		})
-		return md
-	}
 
 	t.Run("UC-041/A6 the agent counts nothing: a lost batch creates no partition and no game end", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(9000, 0)}
@@ -158,19 +149,15 @@ func TestMux_LostBatchLeavesNoTraceAndIsRestored(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-041/A6 a lost game_trace_correlation is restored by the next export", func(t *testing.T) {
+	t.Run("UC-041/A6 a lost game.start is not restored: a phase record gives only the trace id", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(9000, 0)}
 		mux := newEndMux(clk, &endRecorder{})
 		mux.ApplyMetrics(gameActiveFor("game-A", 1))
-		snap, _ := mux.Snapshot("game-A")
-		if snap.GameTraceID != "" {
-			t.Fatalf("GameTraceID = %q before any correlation datapoint, want empty", snap.GameTraceID)
-		}
 		clk.advance(interval)
-		mux.ApplyMetrics(correlation())
-		snap, _ = mux.Snapshot("game-A")
-		if snap.GameTraceID != tid || snap.GameTraceSpanID != sid {
-			t.Fatalf("trace ids = (%q, %q), want (%q, %q) from the re-export", snap.GameTraceID, snap.GameTraceSpanID, tid, sid)
+		mux.ApplyMetrics(gameActiveFor("game-A", 1)) // re-exported gauges bring no trace ids
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-A", "game_cycle"), logTraceHex, logCycleHex, true))
+		if got, want := traceIDsOf(t, mux, "game-A"), (traceIDs{trace: logTraceHex, cycle: logCycleHex}); got != want {
+			t.Fatalf("ids = %+v, want %+v (root span id stays unknown)", got, want)
 		}
 	})
 

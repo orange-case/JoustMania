@@ -959,13 +959,19 @@ func (s *Store) setFromLog(kind, mode string) {
 }
 
 // logTraceIDs are the game trace ids one log record carries; empty ones are unset.
-type logTraceIDs struct{ trace, root, phase, cycle string }
+// phaseTrace is a game.phase.start's trace id: same game trace, so it only fills a
+// trace id a lost game.start left unknown.
+type logTraceIDs struct{ trace, root, phase, cycle, phaseTrace string }
 
-// setTraceFromLog fills the same fields as the game_trace_correlation labels, an
-// empty id keeping the previous one. Like setFromLog it touches no update time.
+// setTraceFromLog fills the game's trace ids, the only source of them (UC-041
+// BR-004), an empty id keeping the previous one. Like setFromLog it touches no
+// update time.
 func (s *Store) setTraceFromLog(ids logTraceIDs) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.ctx.GameTraceID == "" {
+		s.ctx.GameTraceID = ids.phaseTrace
+	}
 	for _, f := range []struct {
 		dst *string
 		v   string
@@ -1008,70 +1014,6 @@ func (s *Store) SetExperimentID(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ctx.ExperimentID = id
-	s.touchSession()
-}
-
-// SetGameTraceID records the coordinator's root game-span trace_id (#1133) from
-// the game_trace_id label on the game_trace_correlation signal. An empty id is
-// ignored so an unlabeled signal never clobbers a previously observed trace id —
-// exactly like SetGameKind. The decision loop reads this to add a span Link from
-// agent.decision to the originating game trace; it is validated there, so an
-// invalid value stored here simply yields no Link (graceful fallback).
-func (s *Store) SetGameTraceID(id string) {
-	if id == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ctx.GameTraceID = id
-	s.touchSession()
-}
-
-// SetGameTraceSpanID records the coordinator's root game-span span_id (#1157) from
-// the game_trace_span_id label on the game_trace_correlation signal. Mirrors
-// SetGameTraceID exactly: an empty id is ignored so an unlabeled signal never
-// clobbers a previously observed span id. The decision/retro loop reads this to
-// set the SpanID on its game-trace Link so Jaeger highlights the actual game-start
-// span; an empty value there simply yields no Link (graceful fallback).
-func (s *Store) SetGameTraceSpanID(id string) {
-	if id == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ctx.GameTraceSpanID = id
-	s.touchSession()
-}
-
-// SetGameplayPhaseSpanID records the coordinator's gameplay_phase sub-span span_id
-// (#1195, refines #1187) from the gameplay_phase_span_id label on the
-// game_trace_correlation signal. Mirrors SetGameTraceSpanID exactly: an empty id is
-// ignored so an unlabeled signal (or a not-yet-open gameplay_phase span) never
-// clobbers a previously observed id — the agent then keeps re-parenting under the
-// game root via GameTraceSpanID. The decision/async loops read this to re-parent the
-// in-game decision chain under gameplay_phase, with two-tier fallback to the game
-// root; an empty value there simply keeps the #1187 behavior (graceful fallback).
-func (s *Store) SetGameplayPhaseSpanID(id string) {
-	if id == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ctx.GameplayPhaseSpanID = id
-	s.touchSession()
-}
-
-// SetGameCycleSpanID records the coordinator's game_cycle span_id (#1325, UC-041
-// BR-004) from the game_cycle_span_id label on the game_trace_correlation signal.
-// Mirrors SetGameplayPhaseSpanID: an empty id is ignored so an unlabeled signal (or a
-// not-yet-open game_cycle) never clobbers a previously observed id.
-func (s *Store) SetGameCycleSpanID(id string) {
-	if id == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ctx.GameCycleSpanID = id
 	s.touchSession()
 }
 
