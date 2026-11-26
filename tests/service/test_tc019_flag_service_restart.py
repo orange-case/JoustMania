@@ -244,6 +244,9 @@ async def _await_running(game_client, game_id: str) -> None:
 def _serve_full_permission(stack, flag_service) -> None:
     for flag_key in ("policy.max_interventions_per_minute", "policy.coordinator_backstop_per_minute"):
         flag_service.put("agent", flag_key, value=RATE_LIMIT_BUDGET)
+    flag_service.put(
+        "agent", "enabled", variant="on"
+    )  # in memory, so lost with the restart; the coordinator applies nothing while the agent is stopped (UC-040 BR-004)
     flag_service.put("agent", "interventions_allowed", variant="full")
     expected = variant_value("agent", "interventions_allowed", "full")
     with flagd_probe_client(stack, "agent") as agent_flags:
