@@ -179,7 +179,7 @@ class TestGroundTruthAtNormalEnd:
         player_spans = {
             s.attributes["player.serial"]: s
             for s in tracer.exporter.get_finished_spans()
-            if s.name.startswith("player") and "player.serial" in (s.attributes or {})
+            if (s.name == "game.player" or s.name.startswith("player: ")) and "player.serial" in (s.attributes or {})
         }
         for serial in SERIALS[1:]:
             (death,) = truth[serial][DEATHS]
