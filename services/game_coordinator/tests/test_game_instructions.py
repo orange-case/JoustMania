@@ -425,7 +425,9 @@ class TestUC020InstructionsCue:
         pulses = _pulses(cm.stream)
         assert sorted(p.serial for p in pulses) == sorted(game.players)
         for pulse in pulses:
-            assert (pulse.color.r, pulse.color.g, pulse.color.b) == tuple(game.players[pulse.serial].color)
+            pulse_rgb = (pulse.color.r, pulse.color.g, pulse.color.b)
+            player_rgb = tuple(game.players[pulse.serial].color)
+            assert pulse_rgb == player_rgb
             assert pulse.duration_ms == int(CLIP_SECONDS * 1000)
             assert pulse.speed == 1
         # The countdown runs on the same stream, after the cue.
