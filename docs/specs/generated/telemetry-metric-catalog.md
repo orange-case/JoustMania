@@ -8,7 +8,6 @@ The totals (the number of names, of names without a consumer and of names never 
 
 | Metric | Type | Labels | Defined in | Emitted | Consumers | Notes |
 |---|---|---|---|---|---|---|
-| `active_controllers_total` | gauge | (none) | controller-manager | yes | (none) | reader: docs/CANARY_RUNBOOK.md |
 | `audio_sounds_played_total` | counter | `result` | audio | yes | (none) | reader: docs/talk/two-standards-runbook.md |
 | `bluetooth_adapter_connections` | gauge | `hci_adapter` | pairing-daemon | yes | grafana |  |
 | `bluetooth_device_connected` | gauge | `serial`, `hci_adapter` | pairing-daemon | yes | grafana |  |
@@ -25,7 +24,6 @@ The totals (the number of names, of names without a consumer and of names never 
 | `controller_connected` | gauge | `serial` | controller-manager | yes | agent, grafana |  |
 | `controller_connection_quality` | gauge | `serial` | controller-manager | yes | grafana |  |
 | `controller_disconnect_total` | counter | `serial` | controller-manager | yes | grafana |  |
-| `controller_discovery_full_enumerate_total` | counter | (none) | controller-manager | yes | (none) | reader: docs/CANARY_RUNBOOK.md |
 | `controller_info` | gauge | `serial`, `name` | controller-manager | yes | agent, dashboard, grafana |  |
 | `controller_input_lag_seconds` | histogram | `serial` | controller-manager | yes | grafana | #1376; game streams only |
 | `controller_poll_drops_total` | counter | `serial` | controller-manager | yes | grafana |  |
@@ -34,8 +32,6 @@ The totals (the number of names, of names without a consumer and of names never 
 | `controller_polling_mode` | gauge | (none) | controller-manager | yes | grafana |  |
 | `controller_polling_target_hz` | gauge | (none) | controller-manager | yes | grafana |  |
 | `controller_reconnect_total` | counter | `serial` | controller-manager | yes | grafana |  |
-| `controller_routing_decisions_total` | counter | `serial`, `adapter`, `method` | controller-manager | yes | (none) | reader: docs/CANARY_RUNBOOK.md, docs/test_cases/TC-015-canary-by-hand.md, docs/use_cases/UC-052.md |
-| `controller_state_update_hz` | gauge | `serial` | controller-manager | yes | (none) | reader: docs/CANARY_RUNBOOK.md |
 | `controller_stream_frame_overruns_total` | counter | (none) | controller-manager | yes | (none) | reader: docs/talk/stage-test-checklist.md |
 | `controller_streams_active` | gauge | (none) | controller-manager | yes | grafana |  |
 | `flag_eval_errors_total` | counter | `flag_key`, `reason` | lib (`lib/flag_eval_visibility.py`) | yes | grafana |  |
