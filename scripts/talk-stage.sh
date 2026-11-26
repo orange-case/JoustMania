@@ -39,15 +39,14 @@
 #   FLAG_SERVICE_URL    the flag service (default http://localhost/flags, the envoy route)
 #   TALK_BASELINE_FILE  baseline (default scripts/talk-baseline.json)
 #
-# Every change is an in-memory stack overlay with writer=stage (epic #1407): the
-# flag files never change, the stage never writes a persisted value, and the
-# flag service pushes the change to flagd at once. A flag-service restart drops
-# the stage overlays: run `reset` again. The decision backend and model are the
-# exception on the operator side: ./scripts/agent-backend.sh persists them
-# (C-018, #1682), so a stage overlay over a persisted remote backend is
-# temporary and a restart or reboot brings the persisted backend back. `reset`
-# therefore also deletes those persisted values (DELETE ...?persist=true): the
-# flags return to the flag-file baseline (rules in the shipped files).
+# Every change is a stack write with writer=stage (epic #1407): the flag files
+# never change and the flag service pushes the change to flagd at once. On a row
+# without persist it lives in memory, and a flag-service restart drops it: run
+# `reset` again. On a persist row (interventions_allowed, decision.backend and
+# its models, inference.backend) the row has one stack value, persisted, so the
+# stage write replaces the operator's value and survives a restart (#2803).
+# `reset` also deletes the persisted decision backend and model (#1682): the
+# flags return to the flag-file baseline before the stage baseline applies.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,9 +81,11 @@ fs = FlagService.from_env()
 fallback = baseline.get("fallback", {})
 
 
-def set_variant(key, variant, effective, changes, problems):
-    """Stage overlay (in memory, writer=stage, never a persisted write: re-review N4)."""
+def set_variant(key, variant, effective, changes, problems, persist_rows=frozenset()):
+    """Stage write (writer=stage). A persist row keeps it across restarts (#2803), so it is written only on a change."""
     current = effective.get(key, (None, None))[0]
+    if key in persist_rows and current == variant:
+        return
     try:
         fs.set_variant(SET, key, variant, writer=WRITER)
     except FlagServiceError as err:
@@ -149,14 +150,14 @@ try:
         sys.exit(0)
 
     if mode == "reset":
-        # Drop whatever a beat left behind (every stage overlay) and the persisted
-        # decision backend and model (#1682: a stage overlay over a persisted
-        # remote backend would not survive a restart), then apply the stage
-        # baseline again. The host's other persisted admin settings (e.g.
-        # interventions_allowed from the menu) are not touched: a stage overlay
-        # sits on top of them.
+        # Drop whatever a beat left behind (every in-memory stage overlay) and the
+        # persisted decision backend and model (#1682), then apply the stage
+        # baseline again. A persist row has one stack value (#2803): it is
+        # written only where it differs, and then replaces the host's value.
         fs.clear_writer(SET, WRITER)
-        for view in fs.flag_set(SET)["flags"]:
+        views = fs.flag_set(SET)["flags"]
+        persist_rows = frozenset(v["flag"] for v in views if (v.get("policy") or {}).get("persist"))
+        for view in views:
             persisted = view.get("admin_value") or {}
             if view["flag"] in PERSISTED_BACKEND_KEYS and persisted:
                 fs.clear(SET, view["flag"], persist=True)
@@ -165,7 +166,7 @@ try:
         changes, problems = [], []
         for section in ("checked", "reset_also"):
             for key, variant in baseline[section].items():
-                set_variant(key, variant, effective, changes, problems)
+                set_variant(key, variant, effective, changes, problems, persist_rows)
         for line in changes:
             print(f"reset  {line}")
         for line in problems:

@@ -118,6 +118,10 @@ async def test_host_and_stage_change_flags_at_runtime(fresh_stack, flag_service)
         assert backend["effective_default"] == stage_backend, backend
         assert _default_variant(GAME, "sensitivity") == host_variant
     finally:
-        flag_service_default().request("DELETE", "/agent?writer=stage")
-        flag_service_default().request("DELETE", "/agent/decision.backend?persist=true")
+        fs = flag_service_default()
+        fs.request("DELETE", "/agent?writer=stage")
+        # A persist row keeps a stage write across restarts (#2803): clear each one the stage wrote.
+        for flag_view in fs.get("agent")["flags"]:
+            if (flag_view.get("admin_value") or {}).get("writer") == "stage":
+                fs.request("DELETE", f"/agent/{flag_view['flag']}")
         await menu_channel.close()

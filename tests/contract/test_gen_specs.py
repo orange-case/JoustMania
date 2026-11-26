@@ -368,7 +368,7 @@ def test_flag_catalog_renders_file_registry_and_notes(tmp_repo):
     ]
     assert rows[0] == (
         "| `a` | bool | `on`=true, `off`=false | `off` = false | yes | "
-        "overlay, stack; any declared variant; persistable | live | game-coordinator, menu | "
+        "overlay, stack; any declared variant; persisted | live | game-coordinator, menu | "
         "the switch |"
     )
     # The note has one home: a registry description is not shown. Mixed numbers are floats.

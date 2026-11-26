@@ -84,13 +84,15 @@ func TestIfWriterClear(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-043/A18 if_writer with persist or stack_all is 400 malformed", func(t *testing.T) {
+	t.Run("UC-016/BR-013 if_writer with persist compares the persisted value of a persist row", func(t *testing.T) {
 		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
-		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Writer: "promotion"})
-		_, err := f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", IfWriter: "promotion", Persist: true})
-		wantReason(t, err, http.StatusBadRequest, fserr.Malformed)
-		_, err = f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", IfWriter: "promotion", StackAll: true})
-		wantReason(t, err, http.StatusBadRequest, fserr.Malformed)
+		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Writer: "stage"})
+		_, err := f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", IfWriter: "menu", Persist: true})
+		wantReason(t, err, http.StatusPreconditionFailed, fserr.WriterMismatch)
+		res, err := f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", IfWriter: "stage", Persist: true})
+		if err != nil || res.Cleared != 1 {
+			t.Fatalf("cleared %d, err %v; want 1, nil", res.Cleared, err)
+		}
 	})
 
 	t.Run("UC-016/BR-013 if_writer on the in-memory stack overlay compares its writer (D14)", func(t *testing.T) {

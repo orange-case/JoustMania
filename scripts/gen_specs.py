@@ -555,7 +555,7 @@ def _write_cell(row: dict | None) -> str:
         _bounds(row.get("bounds") or {}),
     ]
     if row.get("persist"):
-        parts.append("persistable")
+        parts.append("persisted")
     return _cell("; ".join(parts))
 
 

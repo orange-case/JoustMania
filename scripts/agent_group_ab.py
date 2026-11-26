@@ -64,8 +64,9 @@ def _epoch(stamp: str | None) -> str:
 
 
 def overlay(view: dict) -> str:
-    """The stack overlay as spec, writer and expiry (tab separated)."""
-    ov = view.get("stack_overlay")
+    """The stack value as spec, writer and expiry (tab separated): the in-memory overlay, or the
+    persisted value of a persist row, which has no other stack value (#2803)."""
+    ov = view.get("stack_overlay") or view.get("admin_value")
     if not ov:
         return "none\t-\t-"
     spec = (

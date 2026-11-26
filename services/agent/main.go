@@ -1012,7 +1012,6 @@ func (c *components) buildExperimentStack() {
 		c.summaries.SetExperimentParent(reg.ExperimentSpanContext)
 		c.proposalSink.Set(expLoop.proposalSink())
 		installExperimentFlags(c.experimentFlags, reg)
-		wireArmCalibration(c.predictions, reg)
 	}
 }
 

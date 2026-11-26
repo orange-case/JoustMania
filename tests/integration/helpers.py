@@ -2277,8 +2277,8 @@ SUITE_RATE_LIMIT_BUDGET = 50
 
 def set_interventions_allowed(variant: str) -> None:
     """Set the agent-set ``interventions_allowed`` flag to a named variant
-    (``none`` / ``ambient`` / ``standard`` / ``full``). An in-memory overlay on
-    the flag service, cleared by the ``flag_service`` fixture at teardown. ``enabled`` goes on first:
+    (``none`` / ``ambient`` / ``standard`` / ``full``). A persisted value on
+    the flag service (a persist row, #2803), cleared by the ``flag_service`` fixture at teardown. ``enabled`` goes on first:
     the coordinator applies nothing while the agent is stopped (UC-040 BR-004); the write gate
     stays off, so a running agent still writes nothing."""
     flag_service_default().put("agent", "enabled", variant="on")
