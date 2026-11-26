@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Self-contained tests for scripts/agent-dryrun-enable.sh (FR-090, #1907): `on`
-# sets the experiment_seed flag to its windows_frantic variant BEFORE the
-# `enabled` and `experiments_enabled` gates, `off` clears all three, and
-# `status` shows them.
+# Self-contained tests for scripts/agent-dryrun-enable.sh (FR-090): `on` sets the
+# explicit candidate (experiment_dynamic_candidates = windows_frantic) and
+# experiment_dynamic_enabled BEFORE the `enabled` and `experiments_enabled` gates,
+# `off` clears all four, and `status` shows them.
 #
 # Runs the helper against scripts/tests/fake_flag_service.py serving
 # services/flagd/ci/agent.json with the REAL registry (epic #1407): the helper
@@ -11,7 +11,6 @@
 # Runs as part of `make lint` (needs only bash + python3), or directly:
 #   ./scripts/tests/test-agent-dryrun-enable.sh
 #
-# UC: UC-070 BR-007
 # UC: UC-043 A16
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
@@ -61,32 +60,36 @@ check() { # check <name> <flag> <want>
 # Line number of the first request matching a regex in the fake's request log.
 line_of() { { grep -n -m1 -E "$1" "${FAKE_FLAG_LOG}" || true; } | cut -d: -f1; }
 
-check "baseline: experiment_seed is off" experiment_seed off
-expect "status shows experiment_seed" 0 "experiment_seed = off" -- status
+check "baseline: candidates are all" experiment_dynamic_candidates all
+expect "status shows the candidates" 0 "experiment_dynamic_candidates = all" -- status
 expect "status shows decision.backend" 0 "decision.backend = " -- status
 
-# --- on: the seed, then the gates ----------------------------------------------
-expect "on reports the seed" 0 "experiment_seed -> windows_frantic" -- on
-check "on sets experiment_seed to windows_frantic" experiment_seed windows_frantic
+# --- on: the candidate, then the gates ------------------------------------------
+expect "on reports the candidate" 0 "experiment_dynamic_candidates -> windows_frantic" -- on
+check "on sets the candidate windows_frantic" experiment_dynamic_candidates windows_frantic
+check "on sets experiment_dynamic_enabled on" experiment_dynamic_enabled on
 check "on sets enabled on" enabled on
 check "on sets experiments_enabled on" experiments_enabled on
-seed_line="$(line_of '^PUT /agent/experiment_seed ')"
+cand_line="$(line_of '^PUT /agent/experiment_dynamic_candidates ')"
+dyn_line="$(line_of '^PUT /agent/experiment_dynamic_enabled ')"
 enabled_line="$(line_of '^PUT /agent/enabled ')"
 gate_line="$(line_of '^PUT /agent/experiments_enabled ')"
-if [[ -n "${seed_line}" && -n "${enabled_line}" && -n "${gate_line}" &&
-  "${seed_line}" -lt "${enabled_line}" && "${seed_line}" -lt "${gate_line}" ]]; then
-  ok "on writes the seed before enabled and experiments_enabled"
+if [[ -n "${cand_line}" && -n "${dyn_line}" && -n "${enabled_line}" && -n "${gate_line}" &&
+  "${cand_line}" -lt "${enabled_line}" && "${cand_line}" -lt "${gate_line}" &&
+  "${dyn_line}" -lt "${enabled_line}" && "${dyn_line}" -lt "${gate_line}" ]]; then
+  ok "on writes the candidate and the declarer gate before enabled and experiments_enabled"
 else
-  not_ok "on writes the seed before the gates (seed=${seed_line} enabled=${enabled_line} experiments_enabled=${gate_line})"
+  not_ok "on writes the candidate before the gates (candidate=${cand_line} dynamic=${dyn_line} enabled=${enabled_line} experiments_enabled=${gate_line})"
 fi
-expect "status shows the seed variant" 0 "experiment_seed = windows_frantic" -- status
+expect "status shows the candidate variant" 0 "experiment_dynamic_candidates = windows_frantic" -- status
 
-# --- off: all three back to the baseline -----------------------------------------
-expect "off reports the seed baseline" 0 "experiment_seed -> off (baseline)" -- off
-check "off clears experiment_seed" experiment_seed off
+# --- off: all four back to the baseline -----------------------------------------
+expect "off reports the candidate baseline" 0 "experiment_dynamic_candidates -> all (baseline)" -- off
+check "off clears the candidate" experiment_dynamic_candidates all
+check "off clears experiment_dynamic_enabled" experiment_dynamic_enabled off
 check "off clears enabled" enabled off
 check "off clears experiments_enabled" experiments_enabled off
-if grep -q "^DELETE /agent/experiment_seed" "${FAKE_FLAG_LOG}"; then ok "off is a flag-service DELETE of the seed"; else not_ok "off is a flag-service DELETE of the seed"; fi
+if grep -q "^DELETE /agent/experiment_dynamic_candidates" "${FAKE_FLAG_LOG}"; then ok "off is a flag-service DELETE of the candidate"; else not_ok "off is a flag-service DELETE of the candidate"; fi
 
 # --- the baseline file is never written -------------------------------------------
 if cmp -s "${SHIPPED}" "${FAKE_AGENT_FLAGS}"; then ok "the baseline file is unchanged"; else not_ok "the baseline file is unchanged"; fi

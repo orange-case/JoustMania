@@ -23,19 +23,18 @@ import (
 // verdict live-cap reconfigure in experiment/{registry,verdict}_test.go.
 
 // liveConfig is a goroutine-safe settable ExperimentConfig for the configOverride seam.
-// The experiment_seed flag is a separate flag, so it is held apart from the rest
-// (seed) and merged into every config whose Seed is unset: a test that sets the
-// gates keeps the loop's seed, as a flag flip of another key would.
+// The dynamic declarer settings are held apart (candidates) and merged into every
+// config: a test that sets the gates keeps them, as a flag flip of another key would.
 type liveConfig struct {
-	mu   sync.Mutex
-	cfg  flags.ExperimentConfig
-	seed any
+	mu         sync.Mutex
+	cfg        flags.ExperimentConfig
+	candidates string
 }
 
-// setSeed sets the resolved experiment_seed object (#1907); nil = unresolved.
-func (l *liveConfig) setSeed(seed any) {
+// setCandidates turns the dynamic declarer on with these candidates ("" = off).
+func (l *liveConfig) setCandidates(c string) {
 	l.mu.Lock()
-	l.seed = seed
+	l.candidates = c
 	l.mu.Unlock()
 }
 
@@ -49,9 +48,8 @@ func (l *liveConfig) get(context.Context) flags.ExperimentConfig {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	cfg := l.cfg
-	if cfg.Seed == nil {
-		cfg.Seed = l.seed
-	}
+	cfg.DynamicEnabled = l.candidates != ""
+	cfg.DynamicCandidates = l.candidates
 	return cfg
 }
 
@@ -61,9 +59,9 @@ func (l *liveConfig) get(context.Context) flags.ExperimentConfig {
 func loopForConfigTest(t *testing.T, maxShadow int) (*experimentLoop, *recordingSpawner, *liveConfig) {
 	t.Helper()
 	log := testLogger()
-	gamePath := newGameFileForLoop(t)
+	svc := gameServiceForDeclarer(t)
 	spawner := &recordingSpawner{}
-	writer := experiment.NewWriter(gamePath, log)
+	writer := experiment.NewWriter(svc, log)
 	gate := experiment.NewGate(writer, nil, log)
 	targeting := experiment.NewGateTargetingWriter(gate, writer)
 	reg := experiment.NewRegistry(experiment.RegistryConfig{
@@ -85,18 +83,17 @@ func loopForConfigTest(t *testing.T, maxShadow int) (*experimentLoop, *recording
 		configOverride: lc.get,
 		// Kill-switch ON via the seam so experiments_enabled is the variable under test.
 		enabledOverride: func(context.Context) bool { return true },
+		dynamic:         newDynamicDeclarer(svc, nil),
 	}
-	lc.setSeed(testSeed("nonstop.respawn_seconds", 6.0, 50))
+	lc.setCandidates("sensitivity")
 	return loop, spawner, lc
 }
 
 // TestExperimentsEnabled_OffOnOff is the startup-gate-inversion AC (#1044): the loop
-// is always running, but a runtime off->on flip STARTS it (rehydrate+seed+allocate)
+// is always running, but a runtime off->on flip STARTS it (rehydrate+declare+allocate)
 // and an on->off flip STOPS it cleanly (AbortAll strips targeting + frees capacity),
-// all with no restart and no in-flight corruption. The off->on->off->on cycle pins
-// the #1051 / #1907 seed latch: a re-enable with the seed left on does NOT
-// re-declare it, but a full `agent-dryrun-enable.sh off` (gates off, then the
-// seed cleared to `off` while the gates are still off) followed by `on` does.
+// all with no restart and no in-flight corruption. A re-enable declares
+// again: the dynamic declarer keeps no memory of what it declared (BR-012).
 // UC: UC-043 A1
 func TestExperimentsEnabled_OffOnOff(t *testing.T) {
 	loop, spawner, lc := loopForConfigTest(t, 8)
@@ -105,7 +102,7 @@ func TestExperimentsEnabled_OffOnOff(t *testing.T) {
 	// OFF (default): an allocate tick does nothing — no bootstrap, no live experiment.
 	loop.allocateIfEnabled(ctx)
 	if loop.startedOnce {
-		t.Fatal("disabled loop ran its rehydrate+seed bootstrap; must defer until enabled")
+		t.Fatal("disabled loop ran its rehydrate bootstrap; must defer until enabled")
 	}
 	if got := loop.registry.LiveCount(); got != 0 {
 		t.Fatalf("disabled loop declared work: LiveCount=%d, want 0", got)
@@ -114,14 +111,14 @@ func TestExperimentsEnabled_OffOnOff(t *testing.T) {
 		t.Fatalf("disabled loop spawned shadow games: %d, want 0", len(recs))
 	}
 
-	// Flip ON: the off->on flip must START the loop — bootstrap the seed + allocate.
+	// Flip ON: the off->on flip must START the loop — bootstrap + declare + allocate.
 	lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
 	loop.allocateIfEnabled(ctx)
 	if !loop.startedOnce {
-		t.Fatal("off->on flip did not run the deferred rehydrate+seed bootstrap")
+		t.Fatal("off->on flip did not run the deferred rehydrate bootstrap")
 	}
 	if got := loop.registry.LiveCount(); got != 1 {
-		t.Fatalf("off->on flip did not declare+start the seed experiment: LiveCount=%d, want 1", got)
+		t.Fatalf("off->on flip did not declare+start an experiment: LiveCount=%d, want 1", got)
 	}
 	if recs := spawner.drain(); len(recs) == 0 {
 		t.Fatal("off->on flip did not spawn any shadow game")
@@ -139,13 +136,7 @@ func TestExperimentsEnabled_OffOnOff(t *testing.T) {
 	}
 	spawner.drain() // discard spawns from the first enable; we measure only the re-enable below.
 
-	// Flip ON again — the off->on->off->on RE-ENABLE (#1051). The seed value was
-	// latched on the FIRST enable, so it is NOT re-declared here: the seed
-	// experiment is now terminal (aborted by the on->off teardown) and
-	// maybeDeclareSeed skips the latched value (#1907). A re-enable resumes via
-	// rehydrate (no non-terminal experiment survives the abort) + the dynamic
-	// declarer (unwired in this test). So no fresh seed experiment appears and
-	// nothing spawns.
+	// Flip ON again: the bootstrap stays one-shot, and the declarer declares anew.
 	if !loop.startedOnce {
 		t.Fatal("startedOnce must stay latched across off->on->off->on (one-shot bootstrap)")
 	}
@@ -154,28 +145,11 @@ func TestExperimentsEnabled_OffOnOff(t *testing.T) {
 	if !loop.startedOnce {
 		t.Fatal("re-enable cleared startedOnce; the rehydrate bootstrap must remain one-shot")
 	}
-	if got := loop.registry.LiveCount(); got != 0 {
-		t.Fatalf("re-enable RE-DECLARED a latched seed value: LiveCount=%d, want 0 (#1051, #1907)", got)
-	}
-	if recs := spawner.drain(); len(recs) != 0 {
-		t.Fatalf("re-enable spawned shadow games off the one-shot seed: %d, want 0 (#1051)", len(recs))
-	}
-
-	// `agent-dryrun-enable.sh off`: the gates go off first, then the seed is
-	// cleared; the loop sees `off` on a DISABLED tick. Then `on`: the seed is set
-	// again before the gates, and the same value is declared again (#1907).
-	lc.set(flags.ExperimentConfig{Enabled: false})
-	loop.allocateIfEnabled(ctx)
-	lc.setSeed(map[string]any{})
-	loop.allocateIfEnabled(ctx)
-	lc.setSeed(testSeed("nonstop.respawn_seconds", 6.0, 50))
-	lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
-	loop.allocateIfEnabled(ctx)
 	if got := loop.registry.LiveCount(); got != 1 {
-		t.Fatalf("off (seed cleared while disabled) -> on did not re-declare the seed: LiveCount=%d, want 1 (#1907)", got)
+		t.Fatalf("re-enable did not declare again: LiveCount=%d, want 1 (BR-012)", got)
 	}
 	if recs := spawner.drain(); len(recs) == 0 {
-		t.Fatal("re-declared seed spawned no shadow game")
+		t.Fatal("re-declared experiment spawned no shadow game")
 	}
 }
 

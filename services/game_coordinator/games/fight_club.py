@@ -744,7 +744,7 @@ class FightClubGame(StreamedIntroGameMode):
         elif self._connected_count() < 2:
             self._end_game_now()
 
-    async def _kill_player_impl(self, serial: str, accel_mag: float):
+    async def _kill_player_impl(self, serial: str, accel_mag: float):  # noqa: ARG002
         """
         Handle player death in a fight.
 
@@ -813,11 +813,11 @@ class FightClubGame(StreamedIntroGameMode):
             # through the kill path (this kill is in flight; A4 step 5).
             self._finishing_round_loss.add(loser_serial)
         try:
-            await self._finish_round(loser_serial, winner_serial, accel_mag)
+            await self._finish_round(loser_serial, winner_serial)
         finally:
             self._finishing_round_loss.discard(loser_serial)
 
-    async def _finish_round(self, loser_serial: str, winner_serial: str, accel_mag: float) -> None:
+    async def _finish_round(self, loser_serial: str, winner_serial: str) -> None:
         """Announce a decided round, then end the game or start the next round after the pause."""
         winner = self.players[winner_serial]
         loser = self.players[loser_serial]
@@ -839,16 +839,6 @@ class FightClubGame(StreamedIntroGameMode):
 
         # Play victory sound for round
         await self._play_sound(Sound.SFX_BEEP, priority=1)
-
-        if loser.span:
-            loser.span.add_event(
-                "round_lost",
-                attributes={
-                    "accel_magnitude": accel_mag,
-                    "round": self.round_number,
-                    "winner": winner_serial,
-                },
-            )
 
         await self.event_publisher(
             "round_end",
@@ -891,9 +881,14 @@ class FightClubGame(StreamedIntroGameMode):
 
         False for a round loss (the loser stays in the game); true when the death
         takes a disconnected player out of the rotation, the same check
-        ``_kill_player_impl`` makes right after this event.
+        ``_kill_player_impl`` makes right after this event. A death that decides a
+        round also carries the ``round`` and its ``winner``.
         """
-        return {"death.eliminated": serial in self._disconnected}
+        attributes: dict = {"death.eliminated": serial in self._disconnected}
+        if self._fights_current_round(serial):
+            attributes["round"] = self.round_number
+            attributes["winner"] = self.current_fighter if serial == self.current_defender else self.current_defender
+        return attributes
 
     def _sends_death_effect(self, serial: str) -> bool:  # noqa: ARG002
         """No base death effect: a Fight Club loser stays in the game (D-G32, #1342 class).
