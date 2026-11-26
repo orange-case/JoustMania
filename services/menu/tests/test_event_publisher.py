@@ -100,7 +100,7 @@ class TestEventPublisherPublish:
         await publisher.subscribe("sub1")
         await publisher.publish("test_event", {})
 
-        mock_tracer.start_as_current_span.assert_called_with("menu_publish:test_event", kind=SpanKind.PRODUCER)
+        mock_tracer.start_as_current_span.assert_called_with("menu.event.publish", kind=SpanKind.PRODUCER)
 
     @pytest.mark.asyncio
     async def test_publish_includes_timestamp(self, publisher):
@@ -165,7 +165,7 @@ class TestPublishSpanKind:
         await publisher.publish("game_start", {"game_name": "JoustFFA"})
 
         (span,) = exporter.get_finished_spans()
-        assert span.name == "menu_publish:game_start"
+        assert span.name == "menu.event.publish"
         assert span.kind == SpanKind.PRODUCER
         event = queue.get_nowait()
         trace_id = format(span.context.trace_id, "032x")

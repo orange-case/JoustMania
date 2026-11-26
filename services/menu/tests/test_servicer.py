@@ -1476,7 +1476,7 @@ class TestLobbyRestoreBounded:
         provider.add_span_processor(SimpleSpanProcessor(exporter))
 
         async def _go():
-            with provider.get_tracer("t").start_as_current_span("restart_lobby_music"):
+            with provider.get_tracer("t").start_as_current_span("menu.lobby_music.restart"):
                 await _bounded_restore_step("lobby music", step_run)
 
         return _go, exporter
