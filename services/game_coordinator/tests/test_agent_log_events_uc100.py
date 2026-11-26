@@ -1,9 +1,9 @@
 """UC-100 BR-012 / UC-041 A8 (#2722, #2783): the coordinator's agent-only log events.
 
-Every game sends ``game.start`` and ``game.end`` in the root span's context and, in the
-``span_event`` and ``span`` shapes, a log copy of each warning and death; every such
-record carries ``orangecase.audience`` = ``agent``. No flag gates them (#2783); a process
-without OTLP logging sends none.
+Every game sends ``game.start`` and ``game.end`` in the root span's context, each carrying
+``orangecase.audience`` = ``agent``; no flag gates them (#2783) and a process without OTLP
+logging sends none. No moment is copied to the agent in any shape (it reads deaths from the
+elimination-order gauge, UC-041 BR-009).
 
 Real SDK tracer and logger providers with in-memory exporters (not the global ones).
 """
@@ -25,6 +25,7 @@ from services.game_coordinator.tests.test_game_session import _make_session
 
 AUDIENCE = {"orangecase.audience": "agent"}
 RETIRED_FLAG = "telemetry.agent_log_events"
+SHAPES = ["span_event", "span", "log_event"]
 
 
 class _Sdk:
@@ -177,7 +178,7 @@ async def test_a_game_never_built_sends_no_agent_record(sdk):
     assert sdk.records() == []
 
 
-# --- the moments: a marked copy in the span shapes only -----------------------------------
+# --- the moments: never copied to the agent ----------------------------------------------
 
 
 def _ffa(sdk, shape):
@@ -196,54 +197,28 @@ async def _warn(game, serial="p0"):
     await game._warn_player(serial, warn + 0.1, warn)
 
 
-def _moment(sdk, span, name, shape):
-    """The moment's attributes and time as its own record in ``shape`` carries them."""
-    if shape == "span":
-        (moment,) = [s for s in sdk.spans.get_finished_spans() if s.name == f"game.{name}"]
-        return dict(moment.attributes), moment.start_time
-    (event,) = [e for e in span.events if e.name == name]
-    return dict(event.attributes), event.timestamp
-
-
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", br=["BR-012"])
-@pytest.mark.uc("UC-041", flow="A8", steps=[3])
-@pytest.mark.parametrize("shape", ["span_event", "span"])
-async def test_span_shapes_send_a_marked_log_copy_of_the_warning_and_the_death(sdk, shape):
-    game = _ffa(sdk, shape)
-    span = game.players["p0"].span
-
-    await _warn(game)
-    assert await game._kill_player("p0", 3.0) is True
-
-    for name in ("death_warning", "player_death"):
-        (copy,) = sdk.records(name)
-        expected, moment_time = _moment(sdk, span, name, shape)
-        assert dict(copy.attributes) == {**expected, **AUDIENCE}
-        assert copy.attributes["moment.id"] == expected["moment.id"]
-        assert copy.timestamp == moment_time
-        assert (copy.trace_id, copy.span_id) == (span.get_span_context().trace_id, span.get_span_context().span_id)
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-100", br=["BR-012"])
-@pytest.mark.parametrize("shape", ["log_event", "both"])
-async def test_log_shapes_send_no_copy(sdk, shape):
+@pytest.mark.uc("UC-041", br=["BR-009"])
+@pytest.mark.parametrize("shape", SHAPES)
+async def test_no_moment_is_copied_to_the_agent(sdk, shape):
+    """The warning and the death go out only in the game's shape, never marked."""
     game = _ffa(sdk, shape)
 
     await _warn(game)
     assert await game._kill_player("p0", 3.0) is True
 
     for name in ("death_warning", "player_death"):
-        (record,) = sdk.records(name)
-        assert "orangecase.audience" not in record.attributes
+        records = sdk.records(name)
+        assert len(records) == (1 if shape == "log_event" else 0)
+        assert all("orangecase.audience" not in r.attributes for r in records)
 
 
 @pytest.mark.asyncio
 @pytest.mark.nfr("NFR-060")
 @pytest.mark.uc("UC-100", flow="A1", br=["BR-012"])
 @pytest.mark.parametrize("shape", ["span_event", "span"])
-async def test_without_otlp_logging_no_moment_copy_and_the_death_still_lands(sdk, monkeypatch, shape):
+async def test_without_otlp_logging_the_death_still_lands(sdk, monkeypatch, shape):
     monkeypatch.setattr(otel_logging, "_logger_provider", None)
     game = _ffa(sdk, shape)
 
@@ -261,7 +236,7 @@ def test_a_new_game_has_no_agent_log_events_switch():
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
-async def test_game_start_is_flushed_and_game_end_and_moment_copies_are_not(sdk):
+async def test_game_start_is_flushed_and_game_end_and_moments_are_not(sdk):
     flushed: list[str] = []
     with patch.object(moments, "_flush_in_background", flushed.append):
         await _run_session(sdk)

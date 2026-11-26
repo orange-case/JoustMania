@@ -44,12 +44,6 @@ const (
 	ScopeFraction   = "fraction"
 )
 
-// RealWriteNoLiveRealGame is the registry attribute (real_write) that makes the
-// flag service refuse a write in scope real while a registered game has kind
-// real (409 real_game_live, flags.md §13, #2096): a promotion never changes a
-// value a running real game reads.
-const RealWriteNoLiveRealGame = "no_live_real_game"
-
 var validKinds = map[string]bool{KindState: true, KindLevel: true, KindGrant: true, KindEvent: true, KindOverlay: true}
 var validScopes = map[string]bool{
 	ScopeStack: true, ScopeGame: true, ScopeGameSerial: true, ScopeExperiment: true, ScopeReal: true, ScopeFraction: true,
@@ -111,9 +105,6 @@ type Policy struct {
 	Scopes  []string `yaml:"scope" json:"scope"`
 	Bounds  Bounds   `yaml:"bounds" json:"bounds"`
 	Persist bool     `yaml:"persist" json:"persist"`
-	// RealWrite restricts writes in scope real: "" (none) or
-	// RealWriteNoLiveRealGame.
-	RealWrite string `yaml:"real_write,omitempty" json:"real_write,omitempty"`
 	// Description says in one line, in game terms, what the flag does (#2345).
 	// Required on a row that allows ScopeExperiment: the agent's experiment
 	// proposer shows it to the model next to the key, variants and range.
@@ -193,12 +184,6 @@ func (p *Policy) WriterAllowed(writer string) *fserr.Error {
 		return fserr.Forbidden(fserr.FlagsmithOnly, "%s/%s changes only from Flagsmith (flags.md §13, Flagsmith only); no HTTP writer may write it", p.Set, p.Key)
 	}
 	return nil
-}
-
-// RealWriteNeedsNoRealGame reports whether a real-scope write of this flag is
-// refused while a real game is registered.
-func (p *Policy) RealWriteNeedsNoRealGame() bool {
-	return p.RealWrite == RealWriteNoLiveRealGame
 }
 
 // AllowsScope reports whether scope is one of the policy's scopes.
@@ -286,16 +271,8 @@ func validatePolicy(p *Policy, b *baseline.Baseline) error {
 			return fmt.Errorf("unknown scope %q", s)
 		}
 	}
-	// real_write is checked for its value only, not against the scopes: a row
-	// may carry it before its scope is widened to real (the guard is then inert).
-	if p.RealWrite != "" && p.RealWrite != RealWriteNoLiveRealGame {
-		return fmt.Errorf("unknown real_write %q (allowed: %s)", p.RealWrite, RealWriteNoLiveRealGame)
-	}
 	if err := validDescription(p); err != nil {
 		return err
-	}
-	if p.RealWrite != "" && p.Kind != KindOverlay {
-		return fmt.Errorf("real_write needs kind overlay")
 	}
 	if p.Persist && (p.Kind != KindOverlay || !p.AllowsScope(ScopeStack)) {
 		return fmt.Errorf("persist needs kind overlay with scope stack")

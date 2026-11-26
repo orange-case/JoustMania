@@ -277,6 +277,7 @@ class GameSession:
         # idempotent and catches a game that never reached its own cleanup.
         self._remove_game_mode()
         metrics.clear_game_state_gauges(self.game_kind, self.game_id)
+        metrics.clear_elimination_order([p.serial for p in self.players], self.game_id)
 
     def _set_gauges_unless_retired(self, write: Callable[[], None]) -> None:
         """Run ``write`` (per-game gauge writes) unless this session is retired (#1311)."""

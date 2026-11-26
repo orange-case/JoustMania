@@ -276,7 +276,7 @@ class TestConnectedHandler:
 
         await handler.handle_button("serial1", "select")
 
-        select_cb.assert_awaited_once_with(expected.name, source="controller", serial="serial1")
+        select_cb.assert_awaited_once_with(expected.name, source="controller", serial="serial1", announce=True)
         manager.user_prefs_writer.update_default_variant.assert_not_called()
 
     @pytest.mark.asyncio

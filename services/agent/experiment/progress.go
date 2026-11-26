@@ -58,9 +58,6 @@ const (
 	ProgressTriggerTerminal      = "terminal"
 	ProgressTriggerRehydrate     = "rehydrate"
 	ProgressTriggerHeartbeat     = "heartbeat"
-	// ProgressTriggerRecommendation: a deferred promotion was refused after the
-	// experiment ended (UC-043 A19, #2276); the snapshot carries the recommendation.
-	ProgressTriggerRecommendation = "recommendation"
 
 	// AttrExperimentRecommendationFlag / Value / Owner: the winning value as a
 	// recommendation when the promotion was refused because another writer owns the
@@ -111,7 +108,7 @@ func (r *Registry) emitProgressLocked(e *entry, trigger, endReason string, link 
 			attribute.Bool(keys.AttrVerdictSignificant, v.Significant),
 		)
 	}
-	if trigger == ProgressTriggerTerminal || (trigger == ProgressTriggerRecommendation && endReason != "") {
+	if trigger == ProgressTriggerTerminal {
 		attrs = append(attrs, attribute.String(AttrExperimentEndReason, endReason))
 	}
 	if e.recommendOwner != "" {

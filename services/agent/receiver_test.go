@@ -357,8 +357,8 @@ func (r *recordingRules) evaluations() []gamecontext.GameContext {
 
 // TestReceiver_MetricsAndSpansFeedTheLiveContext (UC-041 BR-001): metrics make the
 // game live and trigger an evaluation; a span batch in a live game also wakes the
-// evaluation and adds the elimination order it reads; a span that arrives after the
-// game ended still lands in the elimination order but triggers no evaluation.
+// evaluation; the elimination order comes from the gauge on the metric path
+// (BR-008), and a span that arrives after the game ended triggers no evaluation.
 // UC: UC-041 BR-001
 func TestReceiver_MetricsAndSpansFeedTheLiveContext(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -406,7 +406,7 @@ func TestReceiver_MetricsAndSpansFeedTheLiveContext(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-041/BR-001 a span batch in a live game adds the elimination order the next evaluation reads", func(t *testing.T) {
+	t.Run("UC-041/BR-001 a span batch in a live game wakes the evaluation, the gauge adds the elimination", func(t *testing.T) {
 		before := len(rules.evaluations())
 		if _, err := traces.Export(context.Background(), ptraceotlp.NewExportRequestFromTraces(deathSpan("PB"))); err != nil {
 			t.Fatalf("trace export: %v", err)
@@ -415,8 +415,17 @@ func TestReceiver_MetricsAndSpansFeedTheLiveContext(t *testing.T) {
 		if len(evals) != before+1 {
 			t.Fatalf("evaluations after the span batch = %d, want %d (a span batch wakes the evaluation)", len(evals), before+1)
 		}
+		if seq := evals[len(evals)-1].Session.EliminationSequence; len(seq) != 0 {
+			t.Fatalf("evaluated elimination order = %v, want none from a player_death span event (BR-009)", seq)
+		}
+		md := pmetric.NewMetrics()
+		metricGauge(md, "game_player_elimination_order", 1, map[string]string{"game_id": "game-A", "serial": "PB"})
+		if _, err := metrics.Export(context.Background(), pmetricotlp.NewExportRequestFromMetrics(md)); err != nil {
+			t.Fatalf("metrics export: %v", err)
+		}
+		evals = rules.evaluations()
 		if seq := evals[len(evals)-1].Session.EliminationSequence; len(seq) != 1 || seq[0] != "PB" {
-			t.Fatalf("evaluated elimination order = %v, want [PB] from the span", seq)
+			t.Fatalf("evaluated elimination order = %v, want [PB] from the gauge", seq)
 		}
 	})
 
@@ -436,8 +445,8 @@ func TestReceiver_MetricsAndSpansFeedTheLiveContext(t *testing.T) {
 		if !ok {
 			t.Fatal("game-A partition must still hold the ended game")
 		}
-		if seq := snap.Session.EliminationSequence; len(seq) != 2 || seq[0] != "PB" || seq[1] != "PA" {
-			t.Fatalf("elimination order = %v, want [PB PA] with the late span", seq)
+		if seq := snap.Session.EliminationSequence; len(seq) != 1 || seq[0] != "PB" {
+			t.Fatalf("elimination order = %v, want [PB]: the late span adds no elimination", seq)
 		}
 		if got := len(rules.evaluations()); got != before {
 			t.Fatalf("late span triggered %d evaluation(s) of the ended game, want none", got-before)

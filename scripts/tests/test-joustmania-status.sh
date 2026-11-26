@@ -27,7 +27,8 @@
 #    started, the state (never `starting`) is written to led.request; a game
 #    service running whose health check is still starting is degraded (#2135)
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-joustmania-status.sh
-# UC: UC-060 BR-005 A1 A4 A5 BR-006; UC-002 A7; UC-061 main A10 BR-007 BR-011
+# UC: UC-060 main step 4; UC-002 A7
+# Spec: docs/specs/stage-host.md SH-2 SH-3 SH-4 SH-7 SH-8 SH-12 SH-15
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 

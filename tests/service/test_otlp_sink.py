@@ -250,10 +250,9 @@ def _logs_export_request(*records) -> logs_service_pb2.ExportLogsServiceRequest:
     )
 
 
-@pytest.mark.uc("UC-041", flow="A7", steps=[1])
-def test_sink_tees_only_moment_log_events_to_another_receiver():
-    """Mirror of the collector's filter/agent_moments (C-001, #2658): a moment name with a moment.id, or a
-    game record marked for the agent (UC-041 BR-004)."""
+@pytest.mark.uc("UC-041", flow="A8", steps=[1], br=["BR-009"])
+def test_sink_tees_only_the_agent_log_events_to_another_receiver():
+    """Mirror of the collector's filter/agent_events (C-001, #2722): a lifecycle name with the agent marker only."""
     downstream = OtlpSink()
     downstream.start()
     tee = OtlpSink(forward_to=f"127.0.0.1:{downstream.port}")
@@ -268,25 +267,20 @@ def test_sink_tees_only_moment_log_events_to_another_receiver():
                     _log("intervention", "intervention", moment_id="g/p0/1"),
                     _log("death_warning", "death_warning", player_serial="p0"),
                     _log("death_warning", "death_warning", moment_id="g/p0/2", player_serial="p0"),
-                    _log("player_death", "player_death", moment_id="g/p0/3", death_eliminated=False),
+                    _log("player_death", "player_death", moment_id="g/p0/3", orangecase_audience="agent"),
                     _log("game.start", "game.start", game_id="g"),
-                    _log("game.phase.start", "game.phase.start", game_id="g", orangecase_audience="agent"),
+                    _log("game.start", "game.start", game_id="g", orangecase_audience="agent"),
+                    _log("game.end", "game.end", game_id="g", orangecase_audience="agent"),
                 ),
                 timeout=5,
             )
-        forwarded = downstream.wait_log(event_name="player_death", attrs={"moment.id": "g/p0/3"}, timeout=5)
-        assert forwarded.attributes["death.eliminated"] is False
+        forwarded = downstream.wait_log(event_name="game.end", attrs={"game.id": "g"}, timeout=5)
         assert forwarded.service == "probe"
-        downstream.wait_log(event_name="game.phase.start", timeout=5)
-        assert [(r.event_name, r.attributes.get("moment.id")) for r in downstream.logs()] == [
-            ("death_warning", "g/p0/2"),
-            ("player_death", "g/p0/3"),
-            ("game.phase.start", None),
-        ]
-        assert (tee.forward_ok, tee.forward_errors) == (1, 0), "a request without a moment is not forwarded"
+        assert [r.event_name for r in downstream.logs()] == ["game.start", "game.end"]
+        assert (tee.forward_ok, tee.forward_errors) == (1, 0), "a request without an agent event is not forwarded"
 
         # The read side: every record is recorded, and the filters pick the one asked for.
-        assert len(tee.logs(service="probe")) == 8
+        assert len(tee.logs(service="probe")) == 9
         warning = tee.wait_log(event_name="death_warning", attrs={"moment.id": "g/p0/2"}, timeout=1)
         assert warning.body == "death_warning"
         assert tee.wait_log(predicate=lambda r: not r.event_name, timeout=1).body == "Player died: p0"

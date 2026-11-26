@@ -130,14 +130,8 @@ class ConnectedHandler:
         if self._state_manager is None:
             return
 
-        # Cycle to next playable game mode and apply it through the same path as
-        # admin Cross / web select (servicer selection + state manager + persisted
-        # current_game + selection_changed event). #1272: this used to call a
-        # non-existent ``state_manager.settings`` and crash the button stream.
+        # One step up the pad's mode wheel, through the single selection path with the same feedback.
         next_mode = get_next_game_mode(self._state_manager.current_game_mode, forward=True)
-        await self._state_manager.select_game_mode(next_mode, source="controller", serial=serial)
-
-        # Play voice announcement
-        await self._state_manager.audio.play_game_mode_voice(next_mode.name)
+        await self._state_manager.select_game_mode(next_mode, source="controller", serial=serial, announce=True)
 
         logger.info(f"Controller {serial} select button -> game mode: {next_mode.name}")

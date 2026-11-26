@@ -2582,7 +2582,6 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 duration_s=WARNING_DURATION,
                 tracer=tracer,
                 timestamp_ns=warn_ns,
-                agent_copy=True,
             )
         logger.info(f"Player {serial} triggered warning (accel: {accel_mag:.2f}, threshold: {threshold:.2f})")
 
@@ -3339,7 +3338,6 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 },
                 timestamp_ns=death_ns,
                 tracer=tracer,
-                agent_copy=True,
             )
         # An eliminate_player intervention lands as this death: its moment comes right
         # after player_death, applied at the death's time (UC-101 BR-001, BR-006).

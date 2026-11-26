@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -93,41 +92,6 @@ func TestUC043_A19_PromotionWritePrecondition(t *testing.T) {
 		}
 		if _, cooling := p.cooldownRemaining(promotedFlag); cooling {
 			t.Fatal("a refused promotion started the post-revert cooldown")
-		}
-		if len(p.PendingFlags()) != 0 {
-			t.Fatalf("pending = %v, want nothing queued", p.PendingFlags())
-		}
-	})
-}
-
-// UC: UC-043 A19
-// UC: UC-043 A17
-func TestUC043_A19_DeferredWriteMeetsAnotherWriter(t *testing.T) {
-	t.Run("UC-043/A19 a waiting write that meets writer_mismatch is dropped, journaled discarded", func(t *testing.T) {
-		rig := newDeferredRig(t, nil)
-		if res := rig.promote(t, holdProposal("exp-w")); res.Outcome != OutcomeDeferred {
-			t.Fatalf("outcome = %q, want deferred", res.Outcome)
-		}
-		rig.realDef.err = fmt.Errorf("promote game/%s: %w", holdKey, &foreignOverlayError{Owner: "operator"})
-		rig.probe.set(false)
-		var seen []experiment.PromotionResult
-		rig.p.SetRewatchJournal(func(id string, res experiment.PromotionResult) {
-			seen = append(seen, res)
-			rig.journal.sink(id, res)
-		})
-		rig.p.DrainDeferred(context.Background(), fixed(autoOn))
-		if len(seen) != 1 || seen[0].ForeignOwner != "operator" {
-			t.Fatalf("journaled results = %+v, want one with ForeignOwner operator (#2276)", seen)
-		}
-		if got := rig.journal.all(); len(got) != 1 || got[0] != "exp-w|discarded|"+ReasonRealOverlayForeign+" owner=operator" {
-			t.Fatalf("journal = %v, want one discarded %s", got, ReasonRealOverlayForeign)
-		}
-		if len(rig.p.PendingFlags()) != 0 {
-			t.Fatalf("pending = %v, want the entry dropped", rig.p.PendingFlags())
-		}
-		rig.p.DrainDeferred(context.Background(), fixed(autoOn))
-		if len(rig.realDef.calls) != 1 {
-			t.Fatalf("SetRealDefault calls = %d, want 1 (no retry)", len(rig.realDef.calls))
 		}
 	})
 }

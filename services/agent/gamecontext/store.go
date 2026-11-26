@@ -78,16 +78,12 @@ type Store struct {
 	// reset on a new session and on grace exit.
 	speedTrack speedTrack
 
-	// elimOrder is the preferred elimination source (serial -> order index),
-	// fed by game_player_elimination_order{serial,game_id}. The player_death span
-	// event is the fallback. game_player_deaths_total is an aggregate
-	// {mode,game_kind} counter with no serial, so it is not an elimination source.
+	// elimOrder is the only elimination source (serial -> order index), fed by
+	// game_player_elimination_order{serial,game_id} (UC-041 BR-008). The coordinator
+	// sets it in every moment shape and only for a death that takes the player out.
+	// game_player_deaths_total is an aggregate {mode,game_kind} counter with no
+	// serial, so it is not an elimination source.
 	elimOrder map[string]int
-	// moments holds the ids of the moments this partition applied, so a moment
-	// sent as a span event and a log event (shape both) counts once (UC-041
-	// BR-009). At most momentIDsCap ids; never reset, it dies with the partition.
-	// Guarded by mu.
-	moments boundedIDs
 	// disconnected marks serials whose connection dropped, for eviction.
 	disconnected map[string]bool
 	// retained holds the whole-game aggregates of the players evicted for silence
@@ -121,10 +117,6 @@ type Store struct {
 	// self-ingestion feedback loop. Set once before serving; not mutex-guarded.
 	ownService string
 
-	// momentObs is told about every player_death span event read (#2658 slice 3);
-	// nil counts nothing. Set once before use (SetMomentObserver).
-	momentObs MomentObserver
-
 	// OnGameEnd, when non-nil, is fired EXACTLY ONCE per game when the game ends
 	// (#844 post-game retrospective), whichever end signal arrives first: the
 	// game_active 1 -> 0 datapoint, the game root span (EndGameFromRootSpan), the
@@ -145,13 +137,6 @@ type Store struct {
 // receiving Apply* calls.
 func (s *Store) SetOwnService(name string) {
 	s.ownService = name
-}
-
-// SetMomentObserver sets the observer told about each player_death span event the
-// store reads (agent_moments_received_total, #2658 slice 3). The Multiplexer sets it
-// on every partition it creates; set before the store is used.
-func (s *Store) SetMomentObserver(obs MomentObserver) {
-	s.momentObs = obs
 }
 
 // SetTTLSources installs the LIVE eviction-TTL sources (#927): EvictStale reads
@@ -205,7 +190,6 @@ func NewStore(playerTTL, sessionGrace time.Duration, now func() time.Time) *Stor
 		history:       newTimeline(),
 		playerHistory: make(map[string]*playerHistory),
 		elimOrder:     make(map[string]int),
-		moments:       boundedIDs{cap: momentIDsCap},
 		disconnected:  make(map[string]bool),
 		retained:      make(map[string]retainedPlayer),
 		playerTTL:     playerTTL,
@@ -1041,35 +1025,24 @@ func (s *Store) AdoptSessionID(id string) {
 	s.touchSession()
 }
 
-// SetEliminationOrder is the preferred elimination source
-// (game_player_elimination_order{serial,game_id}). It records the order and
-// rebuilds EliminationSequence sorted by order.
+// SetEliminationOrder is the only elimination source
+// (game_player_elimination_order{serial,game_id}, UC-041 BR-008). It records the
+// order and rebuilds EliminationSequence sorted by order. The gauge is re-exported
+// every interval, so only the first datapoint of a serial freezes its whole-game
+// sums and narrates the elimination (#916), with the reported 1-based order.
 func (s *Store) SetEliminationOrder(serial string, order int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, inOrderMap := s.elimOrder[serial]
+	_, seen := s.elimOrder[serial]
 	s.elimOrder[serial] = order
-	// Narrate each serial's elimination exactly ONCE — but across BOTH dedupe
-	// stores. This preferred source dedupes on the elimOrder map (inOrderMap); the
-	// death/span fallback path (appendElimination) narrates through
-	// EliminationSequence membership. The two never cross-check, so without the
-	// sequence guard below a serial the death/span path already narrated would get
-	// a SECOND elimination line here (#916). Both sources are live: the
-	// coordinator emits game_player_elimination_order next to the player_death
-	// span event, so either can arrive first. The reverse order is safe: once this
-	// method rebuilds EliminationSequence below, a later appendElimination finds the
-	// serial present and returns early. Record with the reported 1-based order so
-	// the narrative matches the rebuilt sequence.
-	alreadyNarrated := inOrderMap
-	if !alreadyNarrated {
-		for _, existing := range s.ctx.Session.EliminationSequence {
-			if existing == serial {
-				alreadyNarrated = true // the death/span path already narrated it
-				break
-			}
+	if !seen {
+		// Stop the player's whole-game sums here (#1055, UC-047 BR-009).
+		h := s.playerHistory[serial]
+		if h == nil {
+			h = &playerHistory{}
+			s.playerHistory[serial] = h
 		}
-	}
-	if !alreadyNarrated {
+		h.freeze()
 		s.history.append(TimelineEvent{
 			At:     s.now(),
 			Kind:   EventElimination,
@@ -1163,37 +1136,6 @@ func (s *Store) AppendInterventionInPlace(intervention, serial string) {
 	})
 }
 
-// RecordElimination is the span-event confirmation path; it appends the serial
-// with the same dedupe as the deaths fallback.
-func (s *Store) RecordElimination(serial string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.appendElimination(serial)
-}
-
-// momentIDsCap bounds Store.moments (UC-041 BR-009): far more moments than one
-// game produces within any late-delivery window, a few KiB per partition.
-const momentIDsCap = 1024
-
-// recordDeathMoment applies one player_death moment, from a span event or a log
-// event, under one lock, and returns its outcome: MomentDuplicate when a moment
-// with this id was applied before (UC-041 BR-009): the later record changes
-// nothing; else MomentCounted. An empty id (a span event from a coordinator before
-// #2658 slice 3) always applies. A death adds the player to the elimination
-// sequence only when it eliminates (UC-041 BR-008). The caller reports the outcome
-// to the moment observer after the lock is released.
-func (s *Store) recordDeathMoment(id, serial string, eliminates bool) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if id != "" && !s.moments.add(id) {
-		return MomentDuplicate
-	}
-	if eliminates {
-		s.appendElimination(serial)
-	}
-	return MomentCounted
-}
-
 // isEliminatedLocked reports whether serial is in the elimination sequence.
 // Caller holds s.mu.
 func (s *Store) isEliminatedLocked(serial string) bool {
@@ -1203,33 +1145,6 @@ func (s *Store) isEliminatedLocked(serial string) bool {
 		}
 	}
 	return false
-}
-
-// appendElimination appends serial to the elimination sequence unless already
-// present. Caller holds s.mu.
-func (s *Store) appendElimination(serial string) {
-	for _, existing := range s.ctx.Session.EliminationSequence {
-		if existing == serial {
-			return
-		}
-	}
-	s.ctx.Session.EliminationSequence = append(s.ctx.Session.EliminationSequence, serial)
-	// Stop the player's whole-game sums here (#1055, UC-047 BR-009).
-	h := s.playerHistory[serial]
-	if h == nil {
-		h = &playerHistory{}
-		s.playerHistory[serial] = h
-	}
-	h.freeze()
-	s.touchSession()
-	// Record the elimination in the rolling narrative with its 1-based order (#916),
-	// so the timeline carries WHEN each player dropped out, not just the final order.
-	s.history.append(TimelineEvent{
-		At:     s.now(),
-		Kind:   EventElimination,
-		Serial: serial,
-		Order:  len(s.ctx.Session.EliminationSequence),
-	})
 }
 
 // Snapshot returns a deep-enough copy of the context: a fresh Players map with

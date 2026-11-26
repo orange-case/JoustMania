@@ -54,7 +54,7 @@ func withTrace(t *testing.T, ld plog.Logs, traceHex, spanHex string, sampled boo
 
 // phaseStartLog is an agent-only game.phase.start record of gameID for span.
 func phaseStartLog(gameID, span string) plog.Logs {
-	return momentLog("game-coordinator", "game.phase.start", map[string]string{
+	return logEvent("game-coordinator", "game.phase.start", map[string]string{
 		"game.id": gameID, "game.kind": "real", "game.phase.span": span, "orangecase.audience": "agent",
 	})
 }
@@ -147,8 +147,8 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 
 	t.Run("UC-041/A8 an unmarked game.start or game.phase.start is ignored", func(t *testing.T) {
 		mux := newMux()
-		mux.ApplyLogs(withTrace(t, momentLog("game-coordinator", "game.start", map[string]string{"game.id": "game-B"}), logTraceHex, logRootHex, true))
-		mux.ApplyLogs(withTrace(t, momentLog("game-coordinator", "game.phase.start", map[string]string{
+		mux.ApplyLogs(withTrace(t, logEvent("game-coordinator", "game.start", map[string]string{"game.id": "game-B"}), logTraceHex, logRootHex, true))
+		mux.ApplyLogs(withTrace(t, logEvent("game-coordinator", "game.phase.start", map[string]string{
 			"game.id": "game-B", "game.phase.span": "gameplay_phase",
 		}), logTraceHex, logPhaseHex, true))
 		if _, ok := mux.Snapshot("game-B"); ok {

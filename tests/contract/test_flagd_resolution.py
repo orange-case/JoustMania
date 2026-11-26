@@ -811,7 +811,8 @@ SHIELD_TARGETING_VARS = {
     "shield.charge_expiry_seconds": {"gameId", "game_kind"},
 }
 # The eight hold keys of FR-162 (UC-043 A17): the only shield keys in the experiment
-# catalog. The agent's hold gate reads their effective default as what real games and
+# catalog. All but shield.activation also have scope real (it is read per grant, so it
+# is never promoted, #2810). The agent's hold gate reads their effective default as what real games and
 # shadow games outside an arm resolve, which holds only while they have no baseline
 # targeting.
 HOLD_KEYS = {
@@ -1281,10 +1282,10 @@ def test_handler_read_checks_report_a_violation():
 @pytest.mark.uc("UC-043", flow="A17", steps=[1])
 @pytest.mark.uc("UC-040", br=["BR-019", "BR-027"])
 def test_hold_keys_are_the_only_shield_keys_in_the_experiment_catalog():
-    """Static (FR-162, C-034): exactly the eight hold keys have the experiment+arm and
-    real scopes, each is declared experiment_rung applies with experiment_id and arm in
-    its handler targeting; charge_expiry and the #2094 cue flags stay stack-only with no
-    rung."""
+    """Static (FR-162, C-034): exactly the eight hold keys have the experiment+arm
+    scope, all but shield.activation also real; each is declared experiment_rung applies
+    with experiment_id and arm in its handler targeting; charge_expiry and the #2094 cue
+    flags stay stack-only with no rung."""
     registry = handler_flag_reads()
     writer_flags = ic.load_yaml(FLAG_SERVICE_REGISTRY)["flags"]
     shield_rows = {
@@ -1295,7 +1296,10 @@ def test_hold_keys_are_the_only_shield_keys_in_the_experiment_catalog():
     widened = {k for k, scope in shield_rows.items() if "experiment+arm" in scope}
     assert widened == HOLD_KEYS
     for key in HOLD_KEYS:
-        assert shield_rows[key] == {"stack", "experiment+arm", "real"}, key
+        want = {"stack", "experiment+arm"}
+        if key != "shield.activation":
+            want.add("real")
+        assert shield_rows[key] == want, key
         entry = registry[("game", key)]
         assert entry.get("experiment_rung") == "applies", key
         assert {"gameId", "experiment_id", "arm"} <= set(entry["targeting"]), key
@@ -1448,7 +1452,7 @@ _FRENZY_VARIANTS_2518 = {
 }
 
 
-@pytest.mark.uc("UC-070", flow="A4", br=["BR-003"])
+@pytest.mark.uc("UC-070", br=["BR-003"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_budget_variants_2518_are_integers_and_defaults_unchanged(flag_dir):
     """Static: both flag files declare the new integer variants; the default stays."""
@@ -1471,7 +1475,7 @@ def test_budget_variants_2518_are_integers_and_defaults_unchanged(flag_dir):
         )
 
 
-@pytest.mark.uc("UC-070", flow="A4", br=["BR-003"])
+@pytest.mark.uc("UC-070", br=["BR-003"])
 @pytest.mark.parametrize("tier", ["interactive", "frenzy"])
 @pytest.mark.parametrize("resolver", ["rpc", "in_process"])
 def test_budget_variants_2518_resolve_as_overlay(flagd, resolver, tier):
