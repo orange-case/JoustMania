@@ -13,8 +13,8 @@ import (
 )
 
 // ruleset_charge_uc040_test.go covers applyChargePolicy (UC-048 A4; #1870): the rules
-// engine drops a grant_shield candidate whose target the loop's charge ledger holds;
-// another player's R4 candidate may then be the one kept (decide-contract §15.2, #2395).
+// engine drops a grant_shield candidate whose target holds a charge;
+// another player's R4 candidate may then be the one kept (A41, #2395).
 
 // chargeRulesCtx is a real FFA game in which R4 shields WEAK (the weakest while the field
 // shrinks) and R3 reins in STRONG (skill gap above the threshold).
@@ -25,7 +25,7 @@ func chargeRulesCtx() gamecontext.GameContext {
 		"STRONG": {skill: fptr(0.9), active: true},
 	})
 	c.GameKind = gamecontext.GameKindReal
-	mode := shieldTriggerGameMode
+	mode := "FFA"
 	c.Session.GameMode = &mode
 	return c
 }

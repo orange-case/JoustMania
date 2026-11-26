@@ -312,7 +312,7 @@ func (rec *decideRecord) notePermission(state *LayerState, before int) {
 	rec.applied = slices.Contains(state.appliedOutcomes, before)
 }
 
-// buildDecideRequest builds the FFA decide request for c with the shield-ledger
+// buildDecideRequest builds the FFA decide request for c with the shield-gate
 // view (one ShieldSerials snapshot: charged and no-shield, #1870, #2066) and the
 // applied levels (#2066) at this moment. withContext attaches the raw snapshot (for
 // the in-process rules adapter only); remote requests never carry it.
@@ -326,18 +326,17 @@ func (l *Loop) buildDecideRequest(c gamecontext.GameContext, allowed []string, w
 func (l *Loop) buildDecideRequestCtx(ctx context.Context, c gamecontext.GameContext, allowed []string, withContext bool) decide.Request {
 	charged, noShield := l.ShieldSerials(c)
 	return decideRequestWith(c, allowed, withContext, decide.Annotations{
-		Charged:        charged,
-		NoShield:       noShield,
-		ShieldInFlight: l.ShieldInFlight(),
-		Levels:         l.AppliedValues(),
-		Cooling:        l.CoolingLevers(),
-		Bounds:         l.magnitudeBoundsFor(ctx, c.SessionID),
+		Charged:  charged,
+		NoShield: noShield,
+		Levels:   l.AppliedValues(),
+		Cooling:  l.CoolingLevers(),
+		Bounds:   l.magnitudeBoundsFor(ctx, c.SessionID),
 	})
 }
 
 // rulesRequestBuilder is the rules path's lazy request builder for EvaluateDecide:
-// the state gets the ranking's own shield-ledger snapshot (charged, no-shield) plus
-// the grants in flight and the applied levels at build time (#2066).
+// the state gets the ranking's own shield-gate snapshot (charged, no-shield) plus
+// the applied levels at build time (#2066).
 func (l *Loop) rulesRequestBuilder(c gamecontext.GameContext, allowed []string) func(charged, noShield map[string]bool) decide.Request {
 	return l.rulesRequestBuilderCtx(context.Background(), c, allowed)
 }
@@ -347,21 +346,20 @@ func (l *Loop) rulesRequestBuilder(c gamecontext.GameContext, allowed []string) 
 func (l *Loop) rulesRequestBuilderCtx(ctx context.Context, c gamecontext.GameContext, allowed []string) func(charged, noShield map[string]bool) decide.Request {
 	return func(charged, noShield map[string]bool) decide.Request {
 		return decideRequestWith(c, allowed, true, decide.Annotations{
-			Charged:        charged,
-			NoShield:       noShield,
-			ShieldInFlight: l.ShieldInFlight(),
-			Levels:         l.AppliedValues(),
-			Cooling:        l.CoolingLevers(),
-			Bounds:         l.magnitudeBoundsFor(ctx, c.SessionID),
+			Charged:  charged,
+			NoShield: noShield,
+			Levels:   l.AppliedValues(),
+			Cooling:  l.CoolingLevers(),
+			Bounds:   l.magnitudeBoundsFor(ctx, c.SessionID),
 		})
 	}
 }
 
 // decideRequestWith builds the FFA decide request for c whose state marks the
 // charged players shield_charged, the other no-shield players shield_limited, the
-// applied per-player levels and, in a hold game, adds the grants in flight to the
-// players' energy (#2096, #2066). The rules path passes the snapshot its ranking
-// used, so the state and the charge policy agree.
+// applied per-player levels and, in a hold game, the players' energy (#2096,
+// #2066). The rules path passes the view its ranking used, so the state and the
+// charge policy agree.
 func decideRequestWith(c gamecontext.GameContext, allowed []string, withContext bool, ann decide.Annotations) decide.Request {
 	st := decide.BuildStateWith(c, ann)
 	req := decide.Request{State: st, Questions: decide.FFAQuestionsWith(st, allowed, ann.Bounds), Bounds: ann.Bounds}

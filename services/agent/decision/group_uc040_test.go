@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"sync"
 	"testing"
 	"time"
 
@@ -95,12 +94,12 @@ func TestGroupLever_OfferedOnlyWhileTheGateIsOpen(t *testing.T) {
 		})
 	}
 	t.Run("UC-048/A13 BR-014 the game's group count reached: not offered", func(t *testing.T) {
-		l, _, clock, _ := budgetLoop(t, 100)
+		l, _, _, _ := budgetLoop(t, 100)
 		snap := groupSnapshot(groupPolicy())
 		snap.InterventionsAllowed = allowed
 		c := groupCtx("shadow", "A", "B", "C")
-		var st LayerState
-		l.runDecision(context.Background(), snap, c, groupDecision("A", "B", "C"), *clock, &st)
+		one := 1
+		c.Session.ShieldGroupGrants = &one // the coordinator applied the game's one group
 		if slices.Contains(l.offeredInterventions(c, snap), InterventionGrantGroupShield) {
 			t.Fatal("a game at max_per_game must not be offered another group")
 		}
@@ -184,49 +183,35 @@ func TestGroupLever_PermissionChainIsAllOrNothing(t *testing.T) {
 		if used := l.limiter.used(); used != 1 {
 			t.Fatalf("budget used = %v, want 1 (one group costs one medium unit)", used)
 		}
-		// Each target counts as one agent shield (UC-048 BR-007): a later single grant sees it.
-		if g := l.ShieldGrants(); g["A"] != 1 || g["B"] != 1 || g["C"] != 1 {
-			t.Fatalf("shield grants = %v, want one per target", g)
-		}
 	})
 	t.Run("UC-048/A14 BR-014 one capped target refuses the group and reserves nothing", func(t *testing.T) {
 		l, sink, clock, _ := budgetLoop(t, 100)
 		p := groupPolicy()
 		p.MaxShieldsPerPlayerPerGame = 1
 		snap := groupSnapshot(p)
-		c := groupCtx("shadow", "A", "B", "C")
+		c := withGate(groupCtx("shadow", "A", "B", "C"), "B", gamecontext.ShieldGate{Grants: 1})
 		var st LayerState
-		l.runDecision(ctx, snap, c, Decision{Intervention: InterventionGrantShield, TargetSerial: "B", Objectives: balancedFocused()}, *clock, &st)
-		*clock = clock.Add(time.Minute)
-		st = LayerState{}
 		l.runDecision(ctx, snap, c, groupDecision("A", "B", "C"), *clock, &st)
 		if got := outcomeSummary(st); !equalStrings(got, []string{"grant_group_shield/:shield_cap_reached"}) {
 			t.Fatalf("outcomes = %v, want shield_cap_reached", got)
 		}
-		if n := len(sink.decisions()); n != 1 {
-			t.Fatalf("writes = %d, want only the single grant", n)
-		}
-		if g := l.ShieldGrants(); g["A"] != 0 || g["C"] != 0 || g["B"] != 1 {
-			t.Fatalf("shield grants = %v, want nothing reserved for A or C", g)
-		}
-		if l.charges.groupCount() != 0 {
-			t.Fatal("a refused group must not hold a group slot")
+		if n := len(sink.decisions()); n != 0 {
+			t.Fatalf("writes = %d, want none", n)
 		}
 	})
 	t.Run("UC-048/A14 BR-014 max_per_game: the second group is refused group_cap_reached", func(t *testing.T) {
 		l, sink, clock, _ := budgetLoop(t, 100)
 		snap := groupSnapshot(groupPolicy())
 		c := groupCtx("shadow", "A", "B", "C")
+		one := 1
+		c.Session.ShieldGroupGrants = &one
 		var st LayerState
-		l.runDecision(ctx, snap, c, groupDecision("A", "B", "C"), *clock, &st)
-		*clock = clock.Add(time.Minute)
-		st = LayerState{}
 		l.runDecision(ctx, snap, c, groupDecision("A", "B"), *clock, &st)
 		if got := outcomeSummary(st); !equalStrings(got, []string{"grant_group_shield/:group_cap_reached"}) {
 			t.Fatalf("outcomes = %v, want group_cap_reached", got)
 		}
-		if n := len(sink.decisions()); n != 1 {
-			t.Fatalf("writes = %d, want 1", n)
+		if n := len(sink.decisions()); n != 0 {
+			t.Fatalf("writes = %d, want none", n)
 		}
 	})
 	for _, tc := range []struct {
@@ -291,41 +276,6 @@ func TestGroupLever_PermissionChainIsAllOrNothing(t *testing.T) {
 	})
 }
 
-// UC: UC-048 A14 BR-014 BR-007
-func TestGroupLever_ReserveRacesASingleGrantForTheLastSlot(t *testing.T) {
-	// Run with -race: a group and a single grant to one of its targets race for
-	// that target's last cap slot. Exactly one wins; the group never half-applies.
-	for i := 0; i < 200; i++ {
-		var cl chargeLedger
-		lim := shieldLimits{maxShields: 1}
-		req := shieldRequest{limits: lim, seconds: 5 * time.Second}
-		now := time.Unix(1, 0)
-		var wg sync.WaitGroup
-		var group *groupReservation
-		var single *chargeReservation
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			group, _, _ = cl.reserveGroup([]string{"A", "B"}, now, []shieldRequest{req, req}, 1)
-		}()
-		go func() {
-			defer wg.Done()
-			single, _ = cl.reserve("B", now, req)
-		}()
-		wg.Wait()
-		if (group == nil) == (single == nil) {
-			t.Fatalf("run %d: group=%v single=%v, want exactly one reservation", i, group != nil, single != nil)
-		}
-		grants := cl.grants()
-		if group != nil && (grants["A"] != 1 || grants["B"] != 1) {
-			t.Fatalf("run %d: group reserved %v, want A and B", i, grants)
-		}
-		if single != nil && grants["A"] != 0 {
-			t.Fatalf("run %d: refused group left A reserved: %v", i, grants)
-		}
-	}
-}
-
 // UC: UC-048 A14 BR-014
 func TestGroupLever_RemoteLanding(t *testing.T) {
 	groupRemoteSnapshot := func() flags.Snapshot {
@@ -363,45 +313,5 @@ func TestGroupLever_RemoteLanding(t *testing.T) {
 		if got := h.sink.decisions(); len(got) != 0 {
 			t.Fatalf("writes = %+v, want none once the gate closed", got)
 		}
-	})
-}
-
-// UC: UC-048 A14 BR-014 BR-007
-// A group reserved by the ledger is released, every target and the group slot, on
-// every way out that does not write it (groupReservation.finish).
-func TestGroupLever_UnwrittenGroupIsReleased(t *testing.T) {
-	ctx := context.Background()
-	assertReleased := func(t *testing.T, l *Loop) {
-		t.Helper()
-		if g := l.ShieldGrants(); len(g) != 0 {
-			t.Fatalf("shield grants = %v, want none: no target received a shield", g)
-		}
-		if n := l.charges.groupCount(); n != 0 {
-			t.Fatalf("group count = %d, want 0", n)
-		}
-	}
-	t.Run("UC-048/A14 BR-014 a rate_limit refusal after the ledger releases the group", func(t *testing.T) {
-		l, sink, clock, _ := budgetLoop(t, 100)
-		p := groupPolicy()
-		p.MaxInterventionsPerMinute = 0 // the group (cost 1) never fits
-		var st LayerState
-		l.runDecision(ctx, groupSnapshot(p), groupCtx("shadow", "A", "B", "C"), groupDecision("A", "B", "C"), *clock, &st)
-		if got := outcomeSummary(st); !equalStrings(got, []string{"grant_group_shield/:rate_limit"}) {
-			t.Fatalf("outcomes = %v, want rate_limit", got)
-		}
-		if len(sink.decisions()) != 0 {
-			t.Fatal("a rate-limited group must not be written")
-		}
-		assertReleased(t, l)
-	})
-	t.Run("UC-048/A14 BR-014 a failed write (UC-040 A27) releases the group", func(t *testing.T) {
-		l, _, clock, _ := budgetLoop(t, 100)
-		l.Actions = errSink{}
-		var st LayerState
-		l.runDecision(ctx, groupSnapshot(groupPolicy()), groupCtx("shadow", "A", "B", "C"), groupDecision("A", "B", "C"), *clock, &st)
-		if got := outcomeSummary(st); !equalStrings(got, []string{"grant_group_shield/:dispatched"}) {
-			t.Fatalf("outcomes = %v, want dispatched (the write then failed)", got)
-		}
-		assertReleased(t, l)
 	})
 }

@@ -121,8 +121,7 @@ func TestLiveFlip_GameDomainShieldActivation(t *testing.T) {
 	waitGameDomainServes(t)
 	ctx := context.Background()
 	read := func() bool {
-		trigger, _ := p.flags.ShieldCharge(ctx, "live-game")
-		return trigger
+		return gameTrigger(ctx, p.flags, "live-game")
 	}
 
 	t.Run("UC-048/A4 shield.activation read instant, flipped to trigger and back", func(t *testing.T) {
@@ -344,8 +343,7 @@ func TestLiveFlip_FlagdRestartMidRun(t *testing.T) {
 	ctx := context.Background()
 	read := func() bool { return p.flags.Evaluate(ctx).Enabled }
 	readTrigger := func() bool {
-		trigger, _ := p.flags.ShieldCharge(ctx, "live-game")
-		return trigger
+		return gameTrigger(ctx, p.flags, "live-game")
 	}
 
 	t.Run("UC-045/A3 UC-045/main UC-048/A4 flagd restart: fail closed, reconnect, later flips seen", func(t *testing.T) {
