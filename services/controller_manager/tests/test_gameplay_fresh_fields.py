@@ -20,8 +20,9 @@ from services.controller_manager.backend import ControllerBackend
 SERIAL = "AA:BB:CC:DD:EE:01"
 
 # GameplayData fields that do not come from the controller's state or info: the serial is the
-# key, rssi is fixed at 0 (D-C5), health and connection_quality are drained per frame elsewhere.
-NOT_FROM_STATE = {"serial", "rssi", "health", "connection_quality"}
+# key, rssi is fixed at 0 (D-C5), health and connection_quality are drained per frame elsewhere,
+# bt_adapter is sent on game streams only (UC-002 BR-009, tested below).
+NOT_FROM_STATE = {"serial", "rssi", "health", "connection_quality", "bt_adapter"}
 
 
 @pytest.fixture
@@ -122,3 +123,16 @@ def test_every_stateful_field_is_covered():
     fields = {f.name for f in controller_manager_pb2.GameplayData.DESCRIPTOR.fields}
 
     assert fields - NOT_FROM_STATE == {c[0] for c in CASES}
+
+
+@pytest.mark.uc("UC-002", br=["BR-009"])
+def test_bt_adapter_is_sent_on_game_streams_only(servicer):
+    """UC-002 BR-009: the registered HCI adapter rides on game-stream frames; an observer frame leaves it empty."""
+    _info(servicer)[ControllerInfoKey.BT_ADAPTER] = "hci1"
+    servicer._game_stream_serials["game"] = {SERIAL}
+
+    (game_frame,) = servicer._build_gameplay_update({SERIAL}, "game").controllers
+    (observer_frame,) = servicer._build_gameplay_update(None, "dashboard").controllers
+
+    assert game_frame.bt_adapter == "hci1"
+    assert observer_frame.bt_adapter == ""

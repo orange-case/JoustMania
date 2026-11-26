@@ -48,7 +48,7 @@ from collections.abc import Awaitable, Callable
 from opentelemetry import trace
 
 from lib.telemetry import get_tracer
-from lib.types import GameEvent, Games
+from lib.types import NO_GAME_IN_PROGRESS, GameEvent, Games
 from proto import game_coordinator_pb2, game_coordinator_pb2_grpc
 from services.game_coordinator import metrics
 from services.game_coordinator.difficulty_handlers import register_difficulty_handlers
@@ -840,11 +840,11 @@ class GameCoordinatorServicer(game_coordinator_pb2_grpc.GameCoordinatorServiceSe
         # Counted only once the game thread started (telemetry.md): a start that
         # fails after admission is not a started game. No await since
         # start_thread(), so a cancel can not land between the two.
-        # games_started_total is a CUMULATIVE counter: it deliberately does
+        # game_started_total is a CUMULATIVE counter: it deliberately does
         # NOT carry experiment_id/arm (a label on a cumulative counter is one
         # permanent series per experiment, forever). Per-experiment counts
         # come from the game span's experiment.id/arm attributes.
-        metrics.games_started_total.labels(
+        metrics.game_started_total.labels(
             mode=session.game_name,
             game_kind=game_kind,
         ).inc()
@@ -879,7 +879,7 @@ class GameCoordinatorServicer(game_coordinator_pb2_grpc.GameCoordinatorServiceSe
         # UC-027 BR-001: a given id never falls back to the primary; only "" targets the primary game.
         session = self._resolve_session(game_id)
         if session is None:
-            return False, (f"Unknown game_id: {game_id}" if game_id else "No game in progress")
+            return False, (f"Unknown game_id: {game_id}" if game_id else NO_GAME_IN_PROGRESS)
 
         # UC-027 A4 / BR-003: one end per session, shared with a preemption or
         # another force end under way; it completes even if this caller is

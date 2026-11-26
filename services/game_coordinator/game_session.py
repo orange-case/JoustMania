@@ -38,7 +38,7 @@ from lib.feature_flags import eval_game_kind, set_game_session_kind_context
 from lib.moments import MOMENT_SHAPE_ATTR, emit_agent_event, read_moment_shape
 from lib.otel_metrics import get_export_interval_ms
 from lib.telemetry import get_tracer
-from lib.types import get_game_display_name
+from lib.types import NO_GAME_IN_PROGRESS, get_game_display_name
 from proto import game_coordinator_pb2
 from services.game_coordinator import metrics
 from services.game_coordinator.event_bus import EventBus
@@ -56,7 +56,7 @@ GAME_KIND_REAL = "real"
 GAME_KIND_PRIMARY = GAME_KIND_REAL
 GAME_KIND_SHADOW = "shadow"
 
-# games_completed_total{outcome} values: the game.outcome span attribute values
+# game_completed_total{outcome} values: the game.outcome span attribute values
 # (UC-020 BR-003) plus "error" for a session that published game_error
 # (no gRPC clients, mode creation failed, game.run() raised). An unknown game
 # outcome is recorded as "completed", so the label never grows past these five
@@ -68,7 +68,7 @@ GAME_OUTCOMES = frozenset({"winner", "tie", OUTCOME_COMPLETED, OUTCOME_FORCE_END
 
 
 def completed_game_outcome(game) -> str:
-    """The ``outcome`` label for ``games_completed_total`` (#1427).
+    """The ``outcome`` label for ``game_completed_total`` (#1427).
 
     The game's own outcome (``game.outcome`` on its root span). A game that
     reports something unexpected, or whose outcome cannot be read, counts as
@@ -505,7 +505,7 @@ class GameSession:
 
             # The built game (None until GameFactory created it) and the outcome the
             # session decides itself (error, or force_ended before the game was
-            # built); both feed games_completed_total{outcome}.
+            # built); both feed game_completed_total{outcome}.
             game = None
             session_outcome: str | None = None
             # game.end pairs with a sent game.start, so the agent never sees an end without a start.
@@ -664,12 +664,12 @@ class GameSession:
                     # next game started leaves that game's count alone.
                     metrics.reset_players_alive_if_owner(self.game_id)
                 if self.game_name:
-                    # games_completed_total is a CUMULATIVE counter: it deliberately
+                    # game_completed_total is a CUMULATIVE counter: it deliberately
                     # does NOT carry experiment_id/arm (a label on a cumulative
                     # counter is one permanent series per experiment, forever).
                     # Per-experiment counts come from the span attributes.
                     # outcome is one of the five GAME_OUTCOMES.
-                    metrics.games_completed_total.labels(
+                    metrics.game_completed_total.labels(
                         mode=self.game_name,
                         game_kind=self.game_kind,
                         outcome=session_outcome or completed_game_outcome(game),
@@ -713,7 +713,7 @@ class GameSession:
                 game_coordinator_pb2.GameState.STARTING,
                 game_coordinator_pb2.GameState.RUNNING,
             ]:
-                return False, "No game in progress"
+                return False, NO_GAME_IN_PROGRESS
             if self._force_ending:
                 return False, "Game is already ending"
 

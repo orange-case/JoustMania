@@ -32,5 +32,5 @@ def test_streamed_intro_flow_is_exactly_the_intro_first_modes(mode):
     is_streamed = issubclass(cls, StreamedIntroGameMode)
     assert is_streamed == (mode in STREAMED_INTRO_MODES)
     if is_streamed:
-        assert cls.RUN_SPAN_NAME.endswith("_game")
+        assert cls.RUN_SPAN_NAME.startswith("game.run.")
         assert cls.RUN_SPAN_NAME != StreamedIntroGameMode.RUN_SPAN_NAME

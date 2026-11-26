@@ -509,6 +509,7 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
                 health=health,
                 connection_quality=self._connection_quality_msg(serial) if current_filter is None else None,
                 trigger_pressed=trigger_pressed,
+                bt_adapter=info.get(ControllerInfoKey.BT_ADAPTER, "") if game_stream else "",
             )
             gameplay_data.append(gd)
 

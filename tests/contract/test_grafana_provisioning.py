@@ -166,7 +166,7 @@ def _histogram_buckets(metric: str) -> set[float]:
 
 @pytest.mark.uc("UC-035", flow="main", steps=[6])
 def test_movement_zone_pie_uses_fixed_histogram_buckets():
-    """#1471 item 3: the pie edges are game_accel_distribution buckets, not perception.zone_* flags."""
+    """#1471 item 3: the pie edges are game_accel_magnitude_g buckets, not perception.zone_* flags."""
     panel = next(
         p
         for p in _game_players()["panels"]
@@ -177,7 +177,7 @@ def test_movement_zone_pie_uses_fixed_histogram_buckets():
         for t in panel["targets"]
         for le in re.findall(r'le="([0-9.]+)"', t["expr"])
     }
-    assert edges and edges <= _histogram_buckets("game_accel_distribution"), edges
+    assert edges and edges <= _histogram_buckets("game_accel_magnitude_g"), edges
     assert "fixed" in panel["description"], panel["description"]
     assert "perception.zone_" in panel["description"], (
         "say that the pie does not follow the perception.zone_* flags"

@@ -847,7 +847,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (mode, game_kind) (increase(games_started_total{game_kind=~\"$game_kind\"}[5m]))",
+          "expr": "sum by (mode, game_kind) (increase(game_started_total{game_kind=~\"$game_kind\"}[5m]))",
           "refId": "A",
           "legendFormat": "{{mode}} ({{game_kind}})"
         }
@@ -915,7 +915,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (mode) (increase(games_started_total{game_kind=~\"$game_kind\"}[$__range]))",
+          "expr": "sum by (mode) (increase(game_started_total{game_kind=~\"$game_kind\"}[$__range]))",
           "refId": "A",
           "legendFormat": "{{mode}}"
         }
@@ -1059,12 +1059,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (outcome) (increase(games_completed_total{game_kind=~\"$game_kind\"}[$__range]))",
+          "expr": "sum by (outcome) (increase(game_completed_total{game_kind=~\"$game_kind\"}[$__range]))",
           "refId": "A",
           "legendFormat": "{{outcome}}"
         }
       ],
-      "description": "Completed games by outcome over the time range: winner and tie (JoustFFA's natural end), completed (a natural end of a mode that does not classify it yet), force_ended (ForceEndGame, preemption by a real game), error (the session published game_error: no gRPC clients, mode creation failed, or the game loop raised). The game.outcome span attribute, as the outcome label of games_completed_total (UC-020 BR-003, #1427)."
+      "description": "Completed games by outcome over the time range: winner and tie (JoustFFA's natural end), completed (a natural end of a mode that does not classify it yet), force_ended (ForceEndGame, preemption by a real game), error (the session published game_error: no gRPC clients, mode creation failed, or the game loop raised). The game.outcome span attribute, as the outcome label of game_completed_total (UC-020 BR-003, #1427)."
     },
     {
       "type": "timeseries",
@@ -1337,15 +1337,15 @@
               },
               {
                 "color": "yellow",
-                "value": 5
+                "value": 0.005
               },
               {
                 "color": "red",
-                "value": 10
+                "value": 0.01
               }
             ]
           },
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -1379,12 +1379,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max by (game_id) (game_loop_jitter_ms{game_kind=~\"$game_kind\"})",
+          "expr": "max by (game_id) (game_loop_jitter_seconds{game_kind=~\"$game_kind\"})",
           "refId": "A",
           "legendFormat": "{{game_id}}"
         }
       ],
-      "description": "Standard deviation of the last 60 frame times of each live game of the selected kind, in milliseconds (game_loop_jitter_ms, one series per game_id, removed when the game ends)."
+      "description": "Standard deviation of the last 60 frame times of each live game of the selected kind, in seconds (game_loop_jitter_seconds, one series per game_id, removed when the game ends)."
     },
     {
       "datasource": {
@@ -1463,7 +1463,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Latest frame-time standard deviation (ms) per live game of the selected kind (instant query joined to game_active == 1, because the 5-minute lookback would otherwise keep an ended game's series for up to 5 minutes).",
+      "description": "Latest frame-time standard deviation (seconds) per live game of the selected kind (instant query joined to game_active == 1, because the 5-minute lookback would otherwise keep an ended game's series for up to 5 minutes).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1479,15 +1479,15 @@
               },
               {
                 "color": "yellow",
-                "value": 5
+                "value": 0.005
               },
               {
                 "color": "red",
-                "value": 10
+                "value": 0.01
               }
             ]
           },
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -1518,7 +1518,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max by (game_id) (game_loop_jitter_ms{game_kind=~\"$game_kind\"}) and on(game_id) max by(game_id)(game_active{game_kind=~\"$game_kind\"}) == 1",
+          "expr": "max by (game_id) (game_loop_jitter_seconds{game_kind=~\"$game_kind\"}) and on(game_id) max by(game_id)(game_active{game_kind=~\"$game_kind\"}) == 1",
           "refId": "A",
           "legendFormat": "{{game_id}}",
           "instant": true,
@@ -2196,7 +2196,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(game_accel_distribution_bucket{le=\"1.1\"}[$__range]))",
+          "expr": "sum(increase(game_accel_magnitude_g_bucket{le=\"1.1\"}[$__range]))",
           "legendFormat": "Still (<1.1g)",
           "refId": "A"
         },
@@ -2205,7 +2205,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(game_accel_distribution_bucket{le=\"1.5\"}[$__range])) - sum(increase(game_accel_distribution_bucket{le=\"1.1\"}[$__range]))",
+          "expr": "sum(increase(game_accel_magnitude_g_bucket{le=\"1.5\"}[$__range])) - sum(increase(game_accel_magnitude_g_bucket{le=\"1.1\"}[$__range]))",
           "legendFormat": "Active (1.1-1.5g)",
           "refId": "B"
         },
@@ -2214,7 +2214,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(game_accel_distribution_bucket{le=\"2\"}[$__range])) - sum(increase(game_accel_distribution_bucket{le=\"1.5\"}[$__range]))",
+          "expr": "sum(increase(game_accel_magnitude_g_bucket{le=\"2\"}[$__range])) - sum(increase(game_accel_magnitude_g_bucket{le=\"1.5\"}[$__range]))",
           "legendFormat": "Warning (1.5-2.0g)",
           "refId": "C"
         },
@@ -2223,14 +2223,14 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(game_accel_distribution_bucket{le=\"+Inf\"}[$__range])) - sum(increase(game_accel_distribution_bucket{le=\"2\"}[$__range]))",
+          "expr": "sum(increase(game_accel_magnitude_g_bucket{le=\"+Inf\"}[$__range])) - sum(increase(game_accel_magnitude_g_bucket{le=\"2\"}[$__range]))",
           "legendFormat": "Danger (>2.0g)",
           "refId": "D"
         }
       ],
       "title": "Movement Zone Distribution (time range)",
       "type": "piechart",
-      "description": "Share of acceleration samples per movement zone over the time range, all modes. The edges are fixed game_accel_distribution histogram buckets (1.1, 1.5 and 2.0 g, the default zone edges): they do not follow the perception.zone_* flags, whose twitchy and relaxed variants move a game's own zones (game_player_movement_zone) but not these buckets."
+      "description": "Share of acceleration samples per movement zone over the time range, all modes. The edges are fixed game_accel_magnitude_g histogram buckets (1.1, 1.5 and 2.0 g, the default zone edges): they do not follow the perception.zone_* flags, whose twitchy and relaxed variants move a game's own zones (game_player_movement_zone) but not these buckets."
     },
     {
       "datasource": {
@@ -3014,7 +3014,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(games_started_total, game_kind)",
+        "definition": "label_values(game_started_total, game_kind)",
         "description": "game_kind of the per-game panels: real = the menu game, shadow = headless agent games. `primary` is the pre-#2646 label of the real game: it lists until the old series leave VictoriaMetrics (7 d retention after the release with #2646).",
         "hide": 0,
         "includeAll": true,
@@ -3024,7 +3024,7 @@
         "name": "game_kind",
         "options": [],
         "query": {
-          "query": "label_values(games_started_total, game_kind)",
+          "query": "label_values(game_started_total, game_kind)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,

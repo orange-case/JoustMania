@@ -6,7 +6,7 @@ Provides hierarchical span management (team → player) and team-based win condi
 
 Subclasses:
 - SimpleTeamsGame (Teams): Round-robin team assignment
-- RandomTeamsGame (Random Teams): Random team assignment with team_formation_phase
+- RandomTeamsGame (Random Teams): Random team assignment with game.phase.team_formation
 """
 
 import logging
@@ -155,7 +155,7 @@ class TeamsGameBase(BaseGameMode):
         # Using trace.use_span() to register team spans with SDK for export
         for team_num, team in self.teams.items():
             team_span = tracer.start_span(
-                "team_lifecycle",  # Consistent name for all teams (OpenTelemetry best practice)
+                "game.team",  # Consistent name for all teams (OpenTelemetry best practice)
                 context=game_context,
                 attributes={
                     "team.number": team_num,

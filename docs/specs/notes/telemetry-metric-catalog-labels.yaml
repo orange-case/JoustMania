@@ -1,4 +1,4 @@
 # Bounded label-value lists, rendered next to the label in the Labels column.
 # metric -> {label: values}. A label that is not on the metric fails generation.
-games_completed_total:
+game_completed_total:
   outcome: winner|tie|completed|force_ended|error

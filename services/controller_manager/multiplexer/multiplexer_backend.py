@@ -334,6 +334,11 @@ class MultiplexerBackend(ControllerBackend):
         adapter = self._serial_to_adapter.get(serial)
         return adapter.adapter_type if adapter else "unknown"
 
+    def get_bt_adapter(self, serial: str) -> str:
+        """HCI adapter name of a tracked serial ("hci0"); empty for mock, USB or unknown."""
+        adapter = self._serial_to_adapter.get(serial)
+        return (adapter.get_adapter_for_serial(serial) or "") if adapter else ""
+
     def take_led_failures(self, serial: str) -> int:
         """Return and clear the failed LED writes counted for a serial (lock-free, as the dict pop was)."""
         return self._led_failures.pop(serial, 0)

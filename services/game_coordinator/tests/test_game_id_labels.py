@@ -204,7 +204,7 @@ GAME_STATE_GAUGES = (
     metrics.effective_death_threshold,
     metrics.actual_update_frequency_hz,
     metrics.game_loop_frame_consistency_percent,
-    metrics.game_loop_jitter_ms,
+    metrics.game_loop_jitter_seconds,
 )
 
 
@@ -276,7 +276,7 @@ class TestGameStateGaugesPerGame:
             labels = {"game_kind": game.game_kind, "game_id": game.game_id}
             metrics.actual_update_frequency_hz.labels(**labels).set(30)
             metrics.game_loop_frame_consistency_percent.labels(**labels).set(98.0)
-            metrics.game_loop_jitter_ms.labels(**labels).set(1.5)
+            metrics.game_loop_jitter_seconds.labels(**labels).set(1.5)
 
         # The shadow ends first: its series go, the real game's stay.
         metrics.clear_session_player_analytics(list(shadow.players), game_id="game_shadow", game_kind="shadow")

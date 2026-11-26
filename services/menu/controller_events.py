@@ -156,7 +156,7 @@ class ControllerEventLoop:
         """Main event loop with reconnection logic."""
         # Detach from any inherited span context to prevent stale span
         # references when this task is created inside _restart_lobby's
-        # restart_button_monitor span block.
+        # menu.button_monitor.restart span block.
         token = otel_context.attach(otel_context.Context())
         retry_delay = 1.0
         max_retry_delay = 30.0

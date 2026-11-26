@@ -210,6 +210,11 @@ class Sensitivity(Enum):
     ULTRA_FAST = 4  # Least sensitive, loosest thresholds
 
 
+# The coordinator's ForceEndGame / end answer with no game to end (UC-027 A2). The operator pad
+# reads this exact text as a stuck menu lifecycle (UC-015 A11), so it is shared, not repeated.
+NO_GAME_IN_PROGRESS = "No game in progress"
+
+
 class Sound(StrEnum):
     """
     Sound names for the audio service.

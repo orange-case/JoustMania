@@ -32,6 +32,7 @@ from proto import controller_manager_pb2
 from services.game_coordinator import game_clock
 from services.game_coordinator.games import nonstop_joust as nonstop_mod
 from services.game_coordinator.games.base import GameState
+from services.game_coordinator.games.game_loop import MassDisconnectError
 from services.game_coordinator.games.nonstop_joust import (
     RESPAWN_DURATION,
     NonstopJoustGame,
@@ -1786,6 +1787,22 @@ class TestNonstopDisconnects:
 
         self._assert_disconnect_death(game, log, serial)
         assert aggregate.call_args_list[-1].args[0] == len(game.players) - 1
+
+    @pytest.mark.uc("UC-026", flow="A2")
+    @pytest.mark.uc("UC-002", br=["BR-009"])
+    @pytest.mark.asyncio
+    async def test_every_player_dropping_in_one_frame_aborts_without_a_death(self):
+        """UC-002 BR-009 in NonStop's own loop: a mass disconnect raises before any death, so no ranking is decided."""
+        game, log = await self._game()
+        frame = controller_manager_pb2.GameplayDataUpdate()
+        for serial in game.players:
+            frame.disconnects.add(serial=serial)
+
+        with pytest.raises(MassDisconnectError, match=r"3 of 3"):
+            await self._run_loop(game, _FiniteFrameCall(frames=5, frame=frame))
+
+        assert all(p.alive for p in game.players.values())
+        assert log.events.get_events_of_type("player_death") == []
 
     @pytest.mark.uc("UC-026", flow="A2")
     @pytest.mark.asyncio

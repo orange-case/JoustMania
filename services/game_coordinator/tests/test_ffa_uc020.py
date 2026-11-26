@@ -313,8 +313,10 @@ class TestUC020FreeForAll:
         assert game.gameplay_stream.effects(controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH) == ["p0"]
         assert not events.get_events_of_type(GameEvent.GAME_WINNER)
 
-        # p1 disconnects: one left, the win check runs at once (step 6).
-        game_over = await game._process_gameplay_update(_frame(disconnects=("p1",)))
+        # p1 disconnects after the mass-disconnect window (UC-002 BR-009): one left, win check at once (step 6).
+        later = game_clock.now() + game._MASS_DISCONNECT_WINDOW_S + 1.0
+        with patch.object(game_clock, "now", return_value=later):
+            game_over = await game._process_gameplay_update(_frame(disconnects=("p1",)))
 
         assert game_over is True
         assert events.get_events_of_type(GameEvent.GAME_WINNER) == [{"serial": "p2"}]

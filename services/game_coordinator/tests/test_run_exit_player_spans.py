@@ -208,7 +208,7 @@ async def test_an_error_in_the_warmup_ends_every_player_span(exporter, caplog, m
     assert all(s.status.status_code == StatusCode.ERROR for s in _player_spans(exporter))
     names = {s.name for s in exporter.get_finished_spans()}
     if mode in BASE_RUN_MODES:
-        assert {"players", "game_cycle"} <= names, "the grouping spans end with the player spans"
+        assert {"game.players", "game_cycle"} <= names, "the grouping spans end with the player spans"
 
 
 @pytest.mark.uc("UC-030", br=["BR-007"])
@@ -227,8 +227,8 @@ async def test_an_error_in_the_countdown_ends_the_countdown_and_grouping_spans(e
 
     _assert_every_player_span_ended_once(exporter, caplog, "error", None)
     finished = [s.name for s in exporter.get_finished_spans()]
-    assert finished.count("countdown_phase") == len(SERIALS)
-    assert {"players", "game_cycle"} <= set(finished)
+    assert finished.count("game.phase.countdown") == len(SERIALS)
+    assert {"game.players", "game_cycle"} <= set(finished)
 
 
 @pytest.mark.uc("UC-030", br=["BR-007"])
@@ -275,7 +275,7 @@ async def test_a_failing_span_end_keeps_the_run_error_and_clears_the_analytics(e
 
     clear_analytics.assert_called_once()
     assert "Ending the open player spans failed" in caplog.text
-    assert {"players", "game_cycle"} <= {s.name for s in exporter.get_finished_spans()}
+    assert {"game.players", "game_cycle"} <= {s.name for s in exporter.get_finished_spans()}
 
 
 @pytest.mark.uc("UC-030", br=["BR-007"])
@@ -379,7 +379,7 @@ async def test_the_mode_game_span_is_error_with_the_exception_on_a_run_error_and
     with pytest.raises(RuntimeError, match="warm-up failed"):
         await asyncio.wait_for(failing.run(), timeout=20)
 
-    (failed_span,) = [s for s in exporter.get_finished_spans() if s.name == "fight_club_game"]
+    (failed_span,) = [s for s in exporter.get_finished_spans() if s.name == "game.run.fight_club"]
     assert failed_span.status.status_code == StatusCode.ERROR
     assert "warm-up failed" in (failed_span.status.description or "")
     exception_events = [e for e in failed_span.events if e.name == "exception"]
@@ -395,7 +395,7 @@ async def test_the_mode_game_span_is_error_with_the_exception_on_a_run_error_and
     natural._game_loop = instant_loop
     await asyncio.wait_for(natural.run(), timeout=20)
 
-    (ok_span,) = [s for s in exporter.get_finished_spans() if s.name == "fight_club_game"]
+    (ok_span,) = [s for s in exporter.get_finished_spans() if s.name == "game.run.fight_club"]
     assert ok_span.status.status_code == StatusCode.OK
     assert [e for e in ok_span.events if e.name == "exception"] == []
 

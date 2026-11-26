@@ -1256,7 +1256,8 @@ class TestStartWhileGameActive:
         release = asyncio.Event()
         task, stream = await self._live_game(real_servicer, release)
         lookup = self._game_state(real_servicer, game_coordinator_pb2.GameState.Value(state_name))
-        await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), MagicMock())
+        reply = await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), MagicMock())
+        assert (reply.success, reply.error) == (False, "game_active")  # UC-015 A11: the pad refuses
         lookup.assert_awaited_once()
         await real_servicer.start_game("s1", source="web", controllers=["s1", "s2"])
         await self._assert_refused(real_servicer, task, stream, "web", release)
@@ -1269,7 +1270,8 @@ class TestStartWhileGameActive:
         release = asyncio.Event()
         task, stream = await self._live_game(real_servicer, release)
         self._game_state(real_servicer, error=RuntimeError("coordinator unreachable"))
-        await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), MagicMock())
+        reply = await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), MagicMock())
+        assert (reply.success, reply.error) == (False, "game_active")
         assert real_servicer._game_lifecycle_task is task
         assert not task.done()
         release.set()
@@ -1288,7 +1290,8 @@ class TestStartWhileGameActive:
         task, _stream = await self._live_game(real_servicer, never)
         real_servicer.controller_events.start.reset_mock()
         lookup = self._game_state(real_servicer, game_coordinator_pb2.GameState.ENDED)
-        await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), MagicMock())
+        reply = await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), MagicMock())
+        assert (reply.success, reply.error) == (True, "")
         lookup.assert_awaited_once()
         assert task.cancelled()
         assert real_servicer._game_lifecycle_task is None
@@ -1423,7 +1426,8 @@ class TestStartWhileGameActive:
         await asyncio.wait_for(in_reset.wait(), timeout=2)
         assert real_servicer._lobby_restarting is True
 
-        await real_servicer.ProcessInput(request, MagicMock())
+        second = await real_servicer.ProcessInput(request, MagicMock())
+        assert (second.success, second.error) == (False, "stale")
 
         reset_gate.set()
         await first
@@ -1431,6 +1435,86 @@ class TestStartWhileGameActive:
         assert manager.connected_controllers == {"s1", "s2"}
         assert real_servicer._game_lifecycle_task is None
         assert real_servicer._lobby_restarting is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
+    async def test_second_reset_menu_while_the_stuck_task_unwinds_is_stale(self, real_servicer):
+        """A reset_menu before the first recovery reaches its restore starts no second recovery."""
+        from proto import game_coordinator_pb2
+
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        unwinding = asyncio.Event()
+        unwind_gate = asyncio.Event()
+
+        async def _stuck():
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                unwinding.set()
+                await unwind_gate.wait()
+                raise
+
+        real_servicer._game_lifecycle_task = asyncio.create_task(_stuck())
+        await asyncio.sleep(0)
+        self._game_state(real_servicer, game_coordinator_pb2.GameState.ENDED)
+        request = menu_pb2.ProcessInputRequest(input_type="reset_menu")
+        with patch.object(real_servicer, "_restart_lobby", AsyncMock()) as restart:
+            first = asyncio.create_task(real_servicer.ProcessInput(request, MagicMock()))
+            await asyncio.wait_for(unwinding.wait(), timeout=2)
+            assert real_servicer._lobby_restarting is False
+
+            second = await real_servicer.ProcessInput(request, MagicMock())
+            assert (second.success, second.error) == (False, "stale")
+
+            unwind_gate.set()
+            reply = await asyncio.wait_for(first, timeout=2)
+        assert (reply.success, reply.error) == (True, "")
+        restart.assert_awaited_once()
+        assert _published(real_servicer).count(("game_start_cancelled", {})) == 1
+        assert real_servicer._reset_recovery is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
+    @pytest.mark.uc("UC-015", flow="A11")
+    async def test_reset_menu_caller_cancel_mid_restore_still_restores_the_lobby(self, real_servicer):
+        """The pad's deadline cancels the RPC mid state_manager.reset(): the recovery runs to its end."""
+        from proto import game_coordinator_pb2
+
+        never = asyncio.Event()
+        stuck, _stream = await self._live_game(real_servicer, never)
+        self._game_state(real_servicer, game_coordinator_pb2.GameState.ENDED)
+        manager = real_servicer.state_manager
+        original_connect = manager.on_controller_connected
+        in_reset = asyncio.Event()
+        reset_gate = asyncio.Event()
+
+        async def _connect_blocking(serial, *args, **kwargs):
+            if serial == "s2" and not reset_gate.is_set():
+                in_reset.set()
+                await reset_gate.wait()
+            return await original_connect(serial, *args, **kwargs)
+
+        manager.on_controller_connected = _connect_blocking
+        rpc = asyncio.create_task(
+            real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), MagicMock())
+        )
+        await asyncio.wait_for(in_reset.wait(), timeout=2)
+        restore = real_servicer._game_lifecycle_task
+        recovery = real_servicer._reset_recovery
+        rpc.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await rpc
+        assert not restore.done()
+
+        reset_gate.set()
+        await asyncio.wait_for(recovery, timeout=2)
+        assert stuck.cancelled()
+        assert not restore.cancelled()
+        assert manager.connected_controllers == {"s1", "s2"}
+        assert real_servicer._game_lifecycle_task is None
+        assert real_servicer._lobby_restarting is False
+        assert real_servicer.state == menu_pb2.MenuState.RUNNING
+        assert ("game_start_cancelled", {}) in _published(real_servicer)
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
@@ -1476,7 +1560,7 @@ class TestLobbyRestoreBounded:
         provider.add_span_processor(SimpleSpanProcessor(exporter))
 
         async def _go():
-            with provider.get_tracer("t").start_as_current_span("restart_lobby_music"):
+            with provider.get_tracer("t").start_as_current_span("menu.lobby_music.restart"):
                 await _bounded_restore_step("lobby music", step_run)
 
         return _go, exporter

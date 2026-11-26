@@ -1086,6 +1086,7 @@ class DiscoveryLoop:
                 name = self.name_manager.get_name(serial)
 
             adapter_type = self.backend.get_adapter_type(serial)
+            bt_adapter = self.backend.get_bt_adapter(serial)
 
             # Resolve reservation metadata (None when the backend has none). Reserved
             # controllers are hidden from button-stream consumers (the menu)
@@ -1106,6 +1107,7 @@ class DiscoveryLoop:
                 ControllerInfoKey.CONNECTED_AT: time.time(),
                 ControllerInfoKey.NAME: name,
                 ControllerInfoKey.ADAPTER: adapter_type,
+                ControllerInfoKey.BT_ADAPTER: bt_adapter,
                 ControllerInfoKey.RESERVED: reserved,
                 ControllerInfoKey.TAG: tag,
             }

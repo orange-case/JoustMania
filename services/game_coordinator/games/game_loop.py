@@ -27,6 +27,10 @@ from services.game_coordinator.runtime_config import GamePerformanceConfig
 from services.game_coordinator.stream_writes import serialized_write
 
 
+class MassDisconnectError(RuntimeError):
+    """Many players dropped at once (an infrastructure fault): the game ends with no winner (UC-002 BR-009)."""
+
+
 @dataclass(slots=True)
 class _LoopState:
     """The mutable state of one ``_game_loop`` run (frame timing, reconnects, alive set)."""
@@ -52,7 +56,7 @@ class GameLoopMixin:
         """Run countdown before game starts using unified countdown effect.
 
         Sends per-controller countdown effects so each controller.effect.countdown span
-        appears under the corresponding player's countdown_phase span.
+        appears under the corresponding player's game.phase.countdown span.
         Sound spans live under gameplay_phase (shared, not player-specific).
         """
         from proto import controller_manager_pb2
@@ -76,8 +80,8 @@ class GameLoopMixin:
             return
 
         # Send per-controller countdown effects via gameplay stream.
-        # Each effect carries its player's countdown_phase span context so
-        # controller.effect.countdown becomes a child of the correct countdown_phase.
+        # Each effect carries its player's game.phase.countdown span context so
+        # controller.effect.countdown becomes a child of the correct game.phase.countdown.
         if self.gameplay_stream:
             for player in self.players.values():
                 trace_parent, trace_state = _base.inject_trace_context(player._countdown_span)
@@ -94,7 +98,7 @@ class GameLoopMixin:
 
         # Play countdown beeps in sync with the visual countdown.
         # Sounds are shared (not per-player), so they inherit the active
-        # gameplay_phase span as their parent — not any player's countdown_phase.
+        # gameplay_phase span as their parent — not any player's game.phase.countdown.
         beep_count = COUNTDOWN_BEEP_COUNT
         beep_interval_ms = phase_duration_ms  # Match LED phase duration
 
@@ -170,6 +174,8 @@ class GameLoopMixin:
                     if serial in self.players and self.players[serial].alive:
                         accel_mag = self._compute_accel_magnitude(controller_data.accel)
                         self._update_ema(self.players[serial], accel_mag, self._ema_weight)
+                        if controller_data.bt_adapter:
+                            self._player_adapters[serial] = controller_data.bt_adapter
                 frames_consumed += 1
 
                 if _base.time.monotonic() - warmup_start >= self._WARMUP_DURATION_S:
@@ -204,7 +210,10 @@ class GameLoopMixin:
         with self._frame_config_scope():
             # UC-020 BR-001: win check after every disconnect and every controller sample.
             # Handle disconnects first
-            for disconnect in gameplay_update.disconnects:
+            disconnects = gameplay_update.disconnects
+            if disconnects:
+                await self._abort_on_mass_disconnect([d.serial for d in disconnects])
+            for disconnect in disconnects:
                 await self._handle_disconnect(disconnect.serial)
                 if await self._check_win_condition():
                     return True
@@ -256,6 +265,8 @@ class GameLoopMixin:
             True if game is over (win condition met), False otherwise
         """
         pending, self._warmup_disconnects = self._warmup_disconnects, []
+        if pending:
+            await self._abort_on_mass_disconnect(pending)
         for serial in pending:
             await self._handle_disconnect(serial)
             if await self._check_win_condition():
@@ -286,6 +297,46 @@ class GameLoopMixin:
 
         # Kill the player using the standard pipeline (accel_mag=0.0 — no motion)
         await self._kill_player(serial, accel_mag=0.0)
+
+    async def _abort_on_mass_disconnect(self, serials: list[str]) -> None:
+        """UC-002 BR-009: raise ``MassDisconnectError`` when this batch makes a mass disconnect.
+
+        Runs before the batch is handled, so nobody of it is eliminated and no win
+        check runs. The error ends the game through the frame-error path: ``game_error``,
+        no winner, the lobby comes back (UC-030 BR-006).
+        """
+        reason = self._mass_disconnect_reason(serials)
+        if reason is None:
+            return
+        logger.error(f"Aborting game {self.game_id} with no winner: {reason}")
+        await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=3)
+        raise MassDisconnectError(reason)
+
+    def _mass_disconnect_reason(self, serials: list[str]) -> str | None:
+        """Add the batch to the disconnect window; the abort reason when it is now a mass disconnect."""
+        now = game_clock.now()
+        start = self._disconnect_window_start
+        if start is None or now - start > self._MASS_DISCONNECT_WINDOW_S:
+            self._disconnect_window_start = now
+            self._disconnect_window_alive = frozenset(s for s, p in self.players.items() if p.alive)
+            self._disconnect_window_serials = set()
+        alive = self._disconnect_window_alive
+        dropped = self._disconnect_window_serials
+        # Dead players' disconnects still arrive (the stream roster, UC-002 BR-004): one who died
+        # inside the window and then switched off is no live player lost.
+        players = self.players
+        dropped.update(s for s in serials if s in alive and players[s].alive)
+        if len(dropped) < self._MASS_DISCONNECT_MIN_PLAYERS:
+            return None
+        summary = f"mass_disconnect: {len(dropped)} of {len(alive)} players disconnected"
+        if len(dropped) * 2 > len(alive):
+            return summary
+        adapters = self._player_adapters
+        for adapter in sorted({adapters[s] for s in dropped if s in adapters}):
+            on_adapter = [s for s in alive if adapters.get(s) == adapter]
+            if len(on_adapter) >= self._MASS_DISCONNECT_MIN_PLAYERS and dropped.issuperset(on_adapter):
+                return f"{summary} on adapter {adapter}"
+        return None
 
     def _update_frame_metrics(
         self,
@@ -332,7 +383,7 @@ class GameLoopMixin:
 
             if len(recent_frame_times) >= 2:
                 jitter_ms = statistics.stdev(recent_frame_times)
-                metrics.game_loop_jitter_ms.labels(**self._game_state_labels()).set(jitter_ms)
+                metrics.game_loop_jitter_seconds.labels(**self._game_state_labels()).set(jitter_ms / 1000)
 
         return frames_on_target
 
@@ -556,9 +607,9 @@ class GameLoopMixin:
         # UC-041 BR-004: the agent's span ids come only from game.phase.start.
         self._send_phase_start(gameplay_span, "gameplay_phase")
 
-        # Create "players" parent span (collapsible group in Jaeger)
+        # Create "game.players" parent span (collapsible group in Jaeger)
         self._players_span = _base.tracer.start_span(
-            "players",
+            "game.players",
             context=self.gameplay_span_context,
             attributes={"player_count": len(self.players)},
         )
@@ -573,7 +624,7 @@ class GameLoopMixin:
         self.game_cycle_context = trace.set_span_in_context(self._game_cycle_span)
         self._send_phase_start(self._game_cycle_span, "game_cycle")
 
-        # Create player lifecycle spans under "players" parent
+        # Create player lifecycle spans under "game.players" parent
         self._create_player_spans(players_ctx)
 
         # Open per-player countdown child spans
@@ -581,7 +632,7 @@ class GameLoopMixin:
             if player.span:
                 ctx = trace.set_span_in_context(player.span)
                 player._countdown_span = _base.tracer.start_span(
-                    "countdown_phase",
+                    "game.phase.countdown",
                     context=ctx,
                     attributes={"player.serial": player.serial},
                 )

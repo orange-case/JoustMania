@@ -70,9 +70,8 @@ class EventPublisher:
             data: Event payload as key-value pairs; non-string values are sent as ``str(value)``
                 (``MenuEvent.data`` is a ``map<string, string>``, #2105)
         """
-        # Use descriptive span name with event type
-        span_name = f"menu_publish:{event_type}"
-        with self._tracer.start_as_current_span(span_name, kind=SpanKind.PRODUCER) as span:
+        # The event type is an attribute, not part of the name, so the span name stays bounded.
+        with self._tracer.start_as_current_span("menu.event.publish", kind=SpanKind.PRODUCER) as span:
             span.set_attribute("event.type", event_type)
 
             # Inject W3C Trace Context into event data for cross-service propagation

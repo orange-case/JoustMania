@@ -1,9 +1,10 @@
 """Tournament `tournament_no_winner` (UC-025 A3, BR-003; maintainer decision M2, #1337).
 
 Published once, only when the bracket finishes with nobody left (every player out
-of it, e.g. all disconnected). The outcome is latched in the same synchronous step
+of it, e.g. disconnected one by one). The outcome is latched in the same synchronous step
 with no champion. A force-end never publishes it: it only gets `game_ended` with
-champion `none`, `outcome` `force_ended` and a reason.
+champion `none`, `outcome` `force_ended` and a reason. Every player dropping in one
+frame is a mass disconnect: it aborts the game instead (UC-002 BR-009).
 """
 
 import sys
@@ -19,6 +20,7 @@ from test_tournament_run import _bracket_game, _frame
 
 from lib.types import GameEvent, Sound
 from proto import controller_manager_pb2
+from services.game_coordinator.games.game_loop import MassDisconnectError
 from services.game_coordinator.games.tournament import TournamentState
 
 
@@ -31,12 +33,19 @@ async def _drive(game, frames=50, first=None):
     return False
 
 
+async def _take_everyone_out(game):
+    """Every player leaves the bracket through the disconnect path, one by one, no bracket step in between."""
+    for serial in list(game.players):
+        await game._handle_disconnect(serial)
+
+
 @pytest.mark.uc("UC-025", flow="A3", steps=[1, 2], br=["BR-003"])
 @pytest.mark.asyncio
-async def test_all_players_disconnecting_publishes_one_no_winner_and_no_champion():
+async def test_all_players_out_of_the_bracket_publishes_one_no_winner_and_no_champion():
     game, events = await _bracket_game(num_players=3)
+    await _take_everyone_out(game)
 
-    finished = await _drive(game, first=_frame(disconnects=list(game.players)))
+    finished = await _drive(game)
 
     assert finished
     assert all(p.tournament_state == TournamentState.ELIMINATED for p in game.players.values())
@@ -59,6 +68,22 @@ async def test_all_players_disconnecting_publishes_one_no_winner_and_no_champion
     ), "the end of a no-winner game showed a champion rainbow"
 
 
+@pytest.mark.uc("UC-025", flow="A3", br=["BR-003"])
+@pytest.mark.uc("UC-002", br=["BR-009"])
+@pytest.mark.asyncio
+async def test_every_player_dropping_in_one_frame_aborts_with_no_no_winner():
+    """A mass disconnect is not A3: the frame raises before anyone leaves the bracket; no no-winner, no champion."""
+    game, events = await _bracket_game(num_players=3)
+
+    with pytest.raises(MassDisconnectError, match=r"3 of 3"):
+        await game._process_gameplay_update(_frame(disconnects=list(game.players)))
+
+    assert all(p.alive for p in game.players.values())
+    assert events.get_events_of_type("tournament_no_winner") == []
+    assert events.get_events_of_type("tournament_champion") == []
+    assert game._champion is None
+
+
 @pytest.mark.uc("UC-025", flow="A3", steps=[1], br=["BR-003"])
 @pytest.mark.asyncio
 async def test_a_force_end_publishes_no_no_winner():
@@ -79,7 +104,7 @@ async def test_a_force_end_publishes_no_no_winner():
 async def test_a_force_end_after_the_bracket_emptied_before_the_tick_publishes_nothing():
     """The bracket step runs after a force-end: not running, so nothing is latched or published."""
     game, events = await _bracket_game(num_players=3)
-    await game._process_gameplay_update(_frame(disconnects=list(game.players)))
+    await _take_everyone_out(game)
     game.force_end("operator")
 
     await _drive(game)
@@ -103,7 +128,8 @@ async def test_a_force_end_inside_the_latch_window_publishes_no_no_winner():
         real_latch(game)
 
     game._latch_game_outcome = latch
-    await _drive(game, first=_frame(disconnects=list(game.players)))
+    await _take_everyone_out(game)
+    await _drive(game)
 
     assert fired, "the latch window was never hit"
     assert events.get_events_of_type("tournament_no_winner") == []

@@ -165,6 +165,9 @@ message GameplayData {
   // cleared per game frame, so a press between frames at 15/30 Hz is not lost). Only game streams
   // clear the latch; the game does the edge detection.
   bool trigger_pressed = 13;
+  // The HCI adapter the controller is routed to ("hci0"; empty for mock, USB or unknown).
+  // Game streams only: the game groups players by adapter for the mass-disconnect rule (UC-002 BR-009).
+  string bt_adapter = 14;
 }
 
 // Connection quality of a controller from the gaps between fresh frames over a
