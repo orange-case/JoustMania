@@ -1,12 +1,8 @@
 """The kill and elimination path of a game (UC-030 step 9).
 
-Split out of ``BaseGameMode`` (#2633): the kill gate, ``_kill_player`` / ``_run_kill``,
-the elimination count and order, and the winner rainbow wait. Names that tests patch on
-``games.base`` (``tracer``, ``time``, ``get_config_manager``, ``record_moment``,
-``inject_trace_context``) are looked up on the base module at call time (``_base.``), as
-in ``games/shields.py``. The kill path's gauges (``_count_elimination``,
-``_record_elimination_order``, ``_count_death``) stay on ``BaseGameMode``: tests patch
-``games.base.metrics`` there.
+Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
+``inject_trace_context`` on ``games.base``: read them as ``_base.<name>``.
+The kill path's gauges stay on ``BaseGameMode``: tests patch ``games.base.metrics``.
 """
 
 from opentelemetry import trace

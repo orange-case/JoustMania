@@ -1,9 +1,7 @@
-"""The outcome of a game: force-end, latch and record (UC-020 BR-003, #1328).
+"""The outcome of a game: force-end, latch and record (UC-020 BR-003).
 
-Split out of ``BaseGameMode`` (#2633). Names that tests patch on ``games.base``
-(``tracer``, ``time``, ``get_config_manager``, ``record_moment``,
-``inject_trace_context``) are looked up on the base module at call time (``_base.``), as
-in ``games/shields.py``.
+Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
+``inject_trace_context`` on ``games.base``: read them as ``_base.<name>``.
 """
 
 from opentelemetry import trace

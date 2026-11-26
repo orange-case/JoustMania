@@ -1,10 +1,7 @@
-"""The gameplay phase driver of a game: countdown, warm-up, frame loop, win hold.
+"""The gameplay phase of a game: countdown, warm-up, frame loop, win hold.
 
-Split out of ``BaseGameMode`` (#2633): ``_run_gameplay_phase`` and the frame loop it
-drives (per-frame config scope, disconnects, frame metrics). Names that tests patch on
-``games.base`` (``tracer``, ``time``, ``get_config_manager``, ``record_moment``,
-``inject_trace_context``) are looked up on the base module at call time (``_base.``), as
-in ``games/shields.py``.
+Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
+``inject_trace_context`` on ``games.base``: read them as ``_base.<name>``.
 """
 
 import asyncio

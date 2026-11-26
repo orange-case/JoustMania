@@ -626,8 +626,7 @@ class GameState(Enum):
     ENDED = "ended"
 
 
-# The mixins (games/shields.py, games/tempo.py and the concerns split out of
-# BaseGameMode in #2633) import the constants above back from this module, so
+# The mixins import the constants above back from this module, so
 # these imports stay below them.
 from services.game_coordinator.games.elimination import EliminationMixin  # noqa: E402
 from services.game_coordinator.games.game_loop import GameLoopMixin  # noqa: E402
