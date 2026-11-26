@@ -79,7 +79,7 @@ that is `/implement`'s call with the spec diff in hand, never a test-writing sho
 
 ## Reconcile, don't duplicate
 
-Grep for `// UC: UC-XXX`, `"UC-XXX/`, `UC-XXX` in comments and the UC's `**Code / tests:**` line. Add tags to
+Grep for `// UC: UC-XXX`, `"UC-XXX/`, `UC-XXX` in comments, and the flag keys and span names the UC names. Add tags to
 existing untagged tests that already cover a unit instead of writing a twin. Delete or retag tests for flows the
 spec dropped. A tag naming a flow that no longer exists is a bug.
 
@@ -97,7 +97,7 @@ spec dropped. A tag naming a flow that no longer exists is a bug.
 ## Workflow
 
 1. Read `docs/use_cases/UC-XXX.md` and the agent spec sections; list the units.
-2. Find the Go code (Code/tests line, grep) and the existing tests.
+2. Find the Go code (grep for the UC id, flag keys, span names) and the existing tests.
 3. Plan the units first, one test per unit; name units realized only in Python and leave them to `/pytest-test`.
 4. Write the tests with both tags.
 5. Run from `services/agent`: `go test -race -run '<TestName>' ./<pkg> -v`, then `go test -race ./...` and

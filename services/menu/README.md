@@ -278,7 +278,7 @@ the settings, the mode and the agent level, and force-starts, with the operator 
 whose commands arrive as `ProcessInput` `web_command`s (`services/menu/settings_ops.py`); the
 flag-service scripts, the web and Flagsmith change the same flags. Only `sensitivity`, `num_teams`,
 `force_all_start`, `game_instructions`, the mode and the shield mode are settable from the pad; the
-per-mode tunables stay baseline-only ([Ownership Model §3.1](../../docs/OWNERSHIP_MODEL.md#31-device-settable-flags-issue-815)).
+per-mode tunables stay baseline-only ([Ownership Model §3.1](../../docs/OWNERSHIP_MODEL.md#31-device-settable-flags)).
 
 ## Configuration
 
