@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -746,7 +747,10 @@ func TestPanickingWriteEndsItsInflightMark(t *testing.T) {
 		e := newEnv(t, true)
 		// Zero Metrics: finishWrite's RecordWrite dereferences a nil counter.
 		a := &API{State: e.st, Metrics: &telemetry.Metrics{}, Tracer: sdktrace.NewTracerProvider().Tracer("t"), Links: e.links}
-		srv := httptest.NewServer(a.Handler())
+		srv := httptest.NewUnstartedServer(a.Handler())
+		// The panic is the point: keep net/http's stack trace out of the CI log.
+		srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+		srv.Start()
 		t.Cleanup(srv.Close)
 		req, _ := http.NewRequest("PUT", srv.URL+"/game/nonstop.respawn_seconds", strings.NewReader(`{"value":4,"scope":{"experiment_id":"e","arm":"a"}}`))
 		resp, err := http.DefaultClient.Do(req)

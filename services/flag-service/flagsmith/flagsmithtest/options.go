@@ -62,6 +62,7 @@ type MVOptions struct {
 	// (Script); onWrite runs before every option write (OnWrite).
 	script  map[string][]int
 	onWrite func(method string)
+	writes  sync.WaitGroup
 }
 
 // Script makes the next option requests (POST, PUT, DELETE on mv-options, and
@@ -82,6 +83,11 @@ func (o *MVOptions) OnWrite(f func(method string)) {
 	defer o.mu.Unlock()
 	o.onWrite = f
 }
+
+// WaitWrites blocks until every option write being served has stored its
+// result. A client that gave up (a cancelled context) returns before its
+// request is served to the end; the write still lands, as on Flagsmith.
+func (o *MVOptions) WaitWrites() { o.writes.Wait() }
 
 // scripted runs the write hook (not for a GET) and answers a scripted status;
 // true: answered.
@@ -279,6 +285,8 @@ func (f *Fake) listOptions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *Fake) createOption(w http.ResponseWriter, r *http.Request) {
+	f.Options.writes.Add(1)
+	defer f.Options.writes.Done()
 	id, ok := featureOf(w, r, f.Options)
 	if !ok || f.Options.scripted(w, http.MethodPost) {
 		return
@@ -335,6 +343,8 @@ func (o *MVOptions) keyErrorLocked(feature, self int, key *string) string {
 // feature and default_percentage_allocation, so a body without them is a 500
 // on Flagsmith; the fake answers 400. The id and the environments' weights stay.
 func (f *Fake) updateOption(w http.ResponseWriter, r *http.Request) {
+	f.Options.writes.Add(1)
+	defer f.Options.writes.Done()
 	id, ok := featureOf(w, r, f.Options)
 	if !ok || f.Options.scripted(w, http.MethodPut) {
 		return
@@ -371,6 +381,8 @@ func (f *Fake) updateOption(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *Fake) deleteOption(w http.ResponseWriter, r *http.Request) {
+	f.Options.writes.Add(1)
+	defer f.Options.writes.Done()
 	id, ok := featureOf(w, r, f.Options)
 	if !ok || f.Options.scripted(w, http.MethodDelete) {
 		return

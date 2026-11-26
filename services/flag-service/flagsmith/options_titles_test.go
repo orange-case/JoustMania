@@ -464,6 +464,8 @@ func TestStartOptionsCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-e.s.optionsDone()
+	// The PUT that cancelled is still being served: count once it stored.
+	e.admin.f.Options.WaitWrites()
 	e.admin.f.Options.OnWrite(nil)
 	inStep := 0
 	for _, o := range e.admin.f.Options.Of(1) {
