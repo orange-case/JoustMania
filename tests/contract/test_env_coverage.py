@@ -104,20 +104,18 @@ ALLOWLIST: dict[tuple[str, str], str] = {
         "SHADOW_GAME_ARM",
     ): "one-shot shadow runner only (#2530); empty with SHADOW_GAME_EXPERIMENT_ID = an unbound game",
     # ---- agent: code-improvement promotion (#1011), never on in the compose stack ----
-    ("agent", "AGENT_CODE_IMPROVEMENT_ENABLED"): _OPT_IN_OFF,
-    ("agent", "AGENT_AUTONOMOUS_ENABLED"): _OPT_IN_OFF,
     (
         "agent",
         "AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES",
-    ): "operator attestation (UC-043 A23, C-034): unset = no objective validated, autonomous promotion refused (fail closed)",
+    ): "operator attestation and the single autonomous ceiling (UC-043 A23, C-034): unset = no objective validated, autonomous promotion refused (fail closed)",
     (
         "agent",
         "GITHUB_TOKEN",
-    ): "read only when AGENT_CODE_IMPROVEMENT_ENABLED=true (issue-mode promotion)",
+    ): "issue-mode promotion target; unset = issues are recorded no-ops",
     (
         "agent",
         "GITHUB_REPOSITORY",
-    ): "read only when AGENT_CODE_IMPROVEMENT_ENABLED=true (issue-mode promotion)",
+    ): "issue-mode promotion target; unset = issues are recorded no-ops",
 }
 
 

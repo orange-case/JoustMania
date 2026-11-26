@@ -19,7 +19,6 @@ import (
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/inference"
 	"github.com/joustmania/agent/llm"
-	"github.com/joustmania/agent/promote"
 )
 
 // tuning_test.go covers the #1788 agent tuning wiring (FR-150) through the real
@@ -140,30 +139,6 @@ func TestTuning_FlagDefaultPerSetting(t *testing.T) {
 			},
 			read:    func(t *agentTuning) any { return t.EffectWindow() },
 			flagVal: 10 * time.Second, flag2Val: 40 * time.Second, defWant: decision.DefaultEffectWindow,
-		},
-		{
-			name: "promotion.rewatch_interval_seconds",
-			setFlag: func(e *tuningEvaluator, second bool) {
-				e.setInt("promotion.rewatch_interval_seconds", map[bool]int64{false: 20, true: 30}[second])
-			},
-			read:    func(t *agentTuning) any { return t.RewatchInterval() },
-			flagVal: 20 * time.Second, flag2Val: 30 * time.Second, defWant: promote.DefaultRewatchInterval,
-		},
-		{
-			name: "promotion.rewatch_timeout_seconds",
-			setFlag: func(e *tuningEvaluator, second bool) {
-				e.setInt("promotion.rewatch_timeout_seconds", map[bool]int64{false: 1200, true: 1800}[second])
-			},
-			read:    func(t *agentTuning) any { return t.RewatchTimeout() },
-			flagVal: 1200 * time.Second, flag2Val: 1800 * time.Second, defWant: promote.DefaultRewatchTimeout,
-		},
-		{
-			name: "promotion.revert_cooldown_seconds",
-			setFlag: func(e *tuningEvaluator, second bool) {
-				e.setInt("promotion.revert_cooldown_seconds", map[bool]int64{false: 300, true: 30}[second])
-			},
-			read:    func(t *agentTuning) any { return t.RevertCooldown() },
-			flagVal: 300 * time.Second, flag2Val: 30 * time.Second, defWant: promote.DefaultRevertCooldown,
 		},
 	}
 	for _, s := range settings {
@@ -294,9 +269,7 @@ func TestTuningDefaults_IgnoreEnv(t *testing.T) {
 		t.Fatalf("compiledTuningDefaults changed with env set: %+v, want %+v", got, want)
 	}
 	if want.InferenceModel != inference.DefaultModel || want.InferenceEffort != inference.DefaultEffort ||
-		want.InferenceTimeout != inference.DefaultTimeout || want.EffectWindow != decision.DefaultEffectWindow ||
-		want.RewatchInterval != promote.DefaultRewatchInterval || want.RewatchTimeout != promote.DefaultRewatchTimeout ||
-		want.RevertCooldown != promote.DefaultRevertCooldown {
+		want.InferenceTimeout != inference.DefaultTimeout || want.EffectWindow != decision.DefaultEffectWindow {
 		t.Fatalf("compiledTuningDefaults = %+v, want the package constants", want)
 	}
 	down := newTuningEvaluator()
@@ -330,18 +303,15 @@ func TestCompiledDefaultsMatchFlagDefaults(t *testing.T) {
 		"verdict_min_pairs":                       float64(exp.VerdictMinPairs),
 		"experiment_shadow_effective_concurrency": float64(exp.ShadowEffectiveConcurrency),
 		// #1907 PR 4b: the dynamic declarer settings.
-		"experiment_dynamic_candidates":      exp.DynamicCandidates,
-		"experiment_dynamic_denylist":        exp.DynamicDenylist,
-		"experiment_dynamic_objective":       exp.DynamicObjective,
-		"inference.backend":                  envFallback,
-		"inference.model":                    d.InferenceModel,
-		"inference.effort":                   d.InferenceEffort,
-		"inference.timeout_seconds":          d.InferenceTimeout.Seconds(),
-		"effect.window_seconds":              d.EffectWindow.Seconds(),
-		"promotion.rewatch_interval_seconds": d.RewatchInterval.Seconds(),
-		"promotion.rewatch_timeout_seconds":  d.RewatchTimeout.Seconds(),
-		"promotion.revert_cooldown_seconds":  d.RevertCooldown.Seconds(),
-		"decision.probe_decisions":           false, // probeDecisions compiled fallback
+		"experiment_dynamic_candidates": exp.DynamicCandidates,
+		"experiment_dynamic_denylist":   exp.DynamicDenylist,
+		"experiment_dynamic_objective":  exp.DynamicObjective,
+		"inference.backend":             envFallback,
+		"inference.model":               d.InferenceModel,
+		"inference.effort":              d.InferenceEffort,
+		"inference.timeout_seconds":     d.InferenceTimeout.Seconds(),
+		"effect.window_seconds":         d.EffectWindow.Seconds(),
+		"decision.probe_decisions":      false, // probeDecisions compiled fallback
 	}
 	for _, path := range []string{
 		filepath.Join("..", "flagd", "agent.json"),

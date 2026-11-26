@@ -18,12 +18,11 @@ import (
 
 // github.go is the REAL GitHub API client — the consequential, network-touching
 // path of the safety rail. It is built ONLY by NewGitHubClientFromEnv, which
-// returns a real client ONLY when ALL of the gate conditions hold:
+// returns a real client ONLY when GITHUB_TOKEN and GITHUB_REPOSITORY are set and
+// GITHUB_API_URL is key-safe. Opening an issue changes no running system
+// (UC-043 BR-003), so the credential is the only opt-in.
 //
-//	AGENT_CODE_IMPROVEMENT_ENABLED=true   (explicit opt-in beyond the kill-switch)
-//	GITHUB_TOKEN present                  (the credential)
-//
-// Absent any one, NewGitHubClientFromEnv returns nil and main.go falls back to the
+// Otherwise NewGitHubClientFromEnv returns nil and main.go falls back to the
 // inert recording no-op (NewNoopGitHubClient). There is NO other constructor for a
 // real client — a test cannot instantiate one, so no unit/integration test can
 // reach github.com (the safety rail's structural guarantee). Stdlib net/http only:
@@ -31,7 +30,7 @@ import (
 // testing-strategy doc §4 "skip Microcks / go-github").
 
 // httpGitHubClient posts to the GitHub REST API. Constructed only via
-// NewGitHubClientFromEnv behind the env gate + token.
+// NewGitHubClientFromEnv behind the token and repository.
 type httpGitHubClient struct {
 	httpClient *http.Client
 	baseURL    string // https://api.github.com (overridable for a sandbox/e2e host)
@@ -45,31 +44,25 @@ type httpGitHubClient struct {
 // satisfied, else nil (the caller substitutes the no-op). This is the ONLY place a
 // real GitHub client is ever constructed.
 //
-// Gate conditions (ALL required):
-//   - AGENT_CODE_IMPROVEMENT_ENABLED == "true"       (explicit env opt-in)
+// Conditions (ALL required):
 //   - GITHUB_TOKEN non-empty                          (credential)
 //   - GITHUB_REPOSITORY == "owner/repo"               (where to act)
 //
-// Returns (nil, nil) when the gate is not satisfied — that is the EXPECTED,
-// fail-closed default, not an error. Returns (nil, err) only when the gate IS
-// satisfied but a required value is malformed (e.g. a bad GITHUB_REPOSITORY), so a
-// misconfigured opt-in fails loudly rather than silently dialing nothing.
+// Returns (nil, nil) without a token — the EXPECTED, fail-closed default, not an
+// error. Returns (nil, err) when a token is set but GITHUB_REPOSITORY is
+// malformed, so a misconfiguration fails loudly rather than silently dialing nothing.
 func NewGitHubClientFromEnv(log *slog.Logger) (*httpGitHubClient, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv("AGENT_CODE_IMPROVEMENT_ENABLED")), "true") {
-		log.Info("code_improvement github real client NOT built: AGENT_CODE_IMPROVEMENT_ENABLED != true")
-		return nil, nil
-	}
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	if token == "" {
-		log.Warn("code_improvement github real client NOT built: GITHUB_TOKEN absent (fail-closed to no-op)")
+		log.Info("code_improvement github real client NOT built: GITHUB_TOKEN absent (issue promotions are recorded no-ops)")
 		return nil, nil
 	}
 	owner, repo, ok := splitRepo(os.Getenv("GITHUB_REPOSITORY"))
 	if !ok {
-		return nil, fmt.Errorf("AGENT_CODE_IMPROVEMENT_ENABLED is set but GITHUB_REPOSITORY=%q is not owner/repo", os.Getenv("GITHUB_REPOSITORY"))
+		return nil, fmt.Errorf("GITHUB_TOKEN is set but GITHUB_REPOSITORY=%q is not owner/repo", os.Getenv("GITHUB_REPOSITORY"))
 	}
 	baseURL := strings.TrimRight(getenvDefault("GITHUB_API_URL", "https://api.github.com"), "/")
 	// GITHUB_TOKEN travels to this URL: https, or plain http only to loopback

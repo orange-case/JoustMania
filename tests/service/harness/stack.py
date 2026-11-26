@@ -87,7 +87,7 @@ class Composition:
     # the agent gets the fake's dummy ``JEV_API_KEY`` (without this flag it has none: UC-044 A1).
     fake_jev: bool = False
     # Also a fake GitHub REST API (``stack.fake_github``) the agent's promoter opens issues and
-    # PRs on (the promotion env gate + GITHUB_API_URL; needs ``agent``). Never github.com.
+    # PRs on (GITHUB_TOKEN, GITHUB_REPOSITORY + GITHUB_API_URL; needs ``agent``). Never github.com.
     fake_github: bool = False
     # Also a fake hosted Flagsmith (``stack.fake_flagsmith``) the flag service's Flagsmith link
     # is turned on against (FLAGSMITH_LINK=on and the fake's URLs and dummy keys, #2591).

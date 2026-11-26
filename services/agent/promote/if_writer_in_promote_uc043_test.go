@@ -33,7 +33,7 @@ func TestUC043_A19_PromotionWritePrecondition(t *testing.T) {
 
 	t.Run("UC-043/A19 SetRealDefault writes where no real overlay is present", func(t *testing.T) {
 		svc := newPromotionService(t)
-		w := writerForTest(t, svc, t.TempDir())
+		w := writerForTest(t, svc)
 		if err := w.SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
 			t.Fatalf("SetRealDefault: %v", err)
 		}
@@ -45,7 +45,7 @@ func TestUC043_A19_PromotionWritePrecondition(t *testing.T) {
 	t.Run("UC-043/A19 SetRealDefault replaces a previous promotion's overlay", func(t *testing.T) {
 		svc := newPromotionService(t)
 		putOverlay(t, svc, promotionWriter, 2.0)
-		w := writerForTest(t, svc, t.TempDir())
+		w := writerForTest(t, svc)
 		if err := w.SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
 			t.Fatalf("SetRealDefault: %v", err)
 		}
@@ -54,7 +54,7 @@ func TestUC043_A19_PromotionWritePrecondition(t *testing.T) {
 	t.Run("UC-043/A19 SetRealDefault over another writer's overlay is refused and leaves it in place", func(t *testing.T) {
 		svc := newPromotionService(t)
 		putOverlay(t, svc, "operator", 2.0)
-		w := writerForTest(t, svc, t.TempDir())
+		w := writerForTest(t, svc)
 		var logBuf bytes.Buffer
 		w.log = slog.New(slog.NewTextHandler(&logBuf, nil))
 		err := w.SetRealDefault(ctx, promotedFlag, 3.0)
@@ -67,16 +67,13 @@ func TestUC043_A19_PromotionWritePrecondition(t *testing.T) {
 		if got := realOverlayWriterOf(t, svc); got != "operator" {
 			t.Fatalf("real overlay writer = %q after a refused promotion, want operator", got)
 		}
-		if _, cooling := w.PersistedRevertTimes()[promotedFlag]; cooling {
-			t.Fatal("a refused promotion stamped the post-revert cooldown")
-		}
 	})
 
 	t.Run("UC-043/A19 an autonomous promotion over another writer's overlay is discarded, not retried", func(t *testing.T) {
 		svc := newPromotionService(t)
 		putOverlay(t, svc, "operator", 2.0)
 		rev := &recordingReverter{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, writerForTest(t, svc, t.TempDir()), fakeWatcher{}, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, writerForTest(t, svc), rev)
 		ev := testEvidence()
 		ev.RealDefaultValue = 3.0
 		prop := experiment.Proposal{FlagKey: promotedFlag, ExperimentID: "exp-a19", ExperimentalValue: 3.0}
@@ -89,9 +86,6 @@ func TestUC043_A19_PromotionWritePrecondition(t *testing.T) {
 		}
 		if got := realOverlayWriterOf(t, svc); got != "operator" {
 			t.Fatalf("real overlay writer = %q, want operator", got)
-		}
-		if _, cooling := p.cooldownRemaining(promotedFlag); cooling {
-			t.Fatal("a refused promotion started the post-revert cooldown")
 		}
 	})
 }
