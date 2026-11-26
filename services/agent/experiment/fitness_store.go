@@ -7,7 +7,7 @@ import (
 )
 
 // fitness_store.go is the FINALIZED-PER-GAME fitness store (#965, #1017). It
-// backs the #992 recent-real anchor.
+// backs the retro's fitness lookup (Get).
 //
 // THE #1017 GAP, precisely: shadow and real games already emit the SAME fitness
 // inputs through the SAME code path, and decision.EvaluateFitness is
@@ -19,8 +19,7 @@ import (
 // captures that already-computed sample for BOTH:
 //
 //   - a SHADOW experiment game (read back by game_id), and
-//   - a REAL primary game (RecentReal returns the last N real games; the anchor
-//     averages them).
+//   - a REAL primary game (RecentReal returns the last N real games).
 //
 // FINALIZED, NOT A LIVE SCRAPE (#958 / #1017): Record is called from onGameEnd
 // AFTER the game has concluded and its duration has been recovered
@@ -77,7 +76,7 @@ type FitnessSample struct {
 
 // FitnessStore is a bounded, thread-safe, finalized-per-game fitness store keyed
 // by game_id (#965). Construct with NewFitnessStore; the experiment loop's
-// onGameEnd Records into it, and the recent-real anchor reads it.
+// onGameEnd Records into it, and the retro reads it.
 type FitnessStore struct {
 	mu  sync.Mutex
 	cap int
@@ -162,8 +161,7 @@ func (s *FitnessStore) Get(gameID string) (FitnessSample, bool) {
 
 // RecentReal returns the most-recent (newest-first) finalized samples from REAL
 // (game_kind="real") games for the given objective, up to n. An empty objective
-// matches any objective (the caller filters). The recent-real anchor averages
-// what this returns.
+// matches any objective (the caller filters).
 func (s *FitnessStore) RecentReal(objective string, n int) []FitnessSample {
 	if n <= 0 {
 		return nil

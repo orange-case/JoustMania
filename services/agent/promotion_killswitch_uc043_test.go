@@ -63,7 +63,7 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 		root := t.TempDir()
 		loop.registry = experiment.NewRegistry(experiment.RegistryConfig{
 			Root: root, MaxShadowGames: 8, Spawner: &recordingSpawner{},
-			Verdict: experiment.NewVerdict(3, 0.5, nil), Log: testLogger(),
+			Verdict: experiment.NewVerdict(3, 0.5), Log: testLogger(),
 		})
 		agentOn := true
 		loop.enabledOverride = func(context.Context) bool { return agentOn }

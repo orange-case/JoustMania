@@ -174,12 +174,11 @@ type dossierView struct {
 
 // thesisView is the immutable intent surfaced as the experiment's thesis.
 type thesisView struct {
-	Hypothesis    string   `json:"hypothesis"`
-	FlagKey       string   `json:"flag_key"`
-	Candidate     any      `json:"candidate"`
-	Objective     string   `json:"objective"`
-	TargetNPerArm int      `json:"target_n_per_arm"`
-	Arms          []string `json:"arms"`
+	Hypothesis string   `json:"hypothesis"`
+	FlagKey    string   `json:"flag_key"`
+	Candidate  any      `json:"candidate"`
+	Objective  string   `json:"objective"`
+	Arms       []string `json:"arms"`
 }
 
 // noteView is a decision/outcome audit annotation with its timestamp.
@@ -272,12 +271,11 @@ func (d *dossierReader) dossier(id string) (*dossierView, error) {
 	view := &dossierView{
 		ID: intent.ExperimentID,
 		Thesis: thesisView{
-			Hypothesis:    intent.Hypothesis,
-			FlagKey:       intent.FlagKey,
-			Candidate:     intent.ExperimentalValue,
-			Objective:     intent.Objective,
-			TargetNPerArm: intent.TargetNPerArm,
-			Arms:          intent.Arms,
+			Hypothesis: intent.Hypothesis,
+			FlagKey:    intent.FlagKey,
+			Candidate:  intent.ExperimentalValue,
+			Objective:  intent.Objective,
+			Arms:       intent.Arms,
 		},
 		Status:     summary.Status,
 		StartedAt:  intent.CreatedAt,
@@ -468,7 +466,7 @@ func decisionLabel(v *journal.Verdict, status string, events []journal.Event) st
 }
 
 // promotionReverted reports whether the journal records a promotion that was
-// applied and then reverted (kill switch, watch): any promotion event whose outcome
+// applied and then reverted (kill switch): any promotion event whose outcome
 // is `reverted`.
 func promotionReverted(events []journal.Event) bool {
 	for _, e := range events {

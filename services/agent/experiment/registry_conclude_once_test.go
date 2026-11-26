@@ -99,7 +99,7 @@ func (s *syncBuffer) count(msg string) int {
 func concludeRace(t *testing.T, cfg RegistryConfig, verdict *rendezvousVerdict, holdFirst chan struct{}, terminal *atomic.Int32) (*Registry, string) {
 	t.Helper()
 	spawner := &patternSpawner{}
-	cfg.MaxShadowGames, cfg.EffectiveConcurrency, cfg.MaxGamesPerExperiment = 4, 4, -1
+	cfg.MaxShadowGames, cfg.EffectiveConcurrency = 4, 4
 	cfg.Spawner, cfg.Verdict = spawner, verdict
 	cfg.Patterns = &queuePinner{pins: []patterngame.Pin{testPin(t, "only")}}
 	r := newTestRegistry(t, cfg)

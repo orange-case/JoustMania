@@ -51,7 +51,7 @@ func TestSuitability_ShieldCharged(t *testing.T) {
 	})
 	t.Run("UC-048/A4 the candidate description names the charge", func(t *testing.T) {
 		for _, iv := range []string{"grant_shield", "soft_penalty"} {
-			if d := describeCandidates(st, iv)["MOCK0003"]; !strings.Contains(d, "Holds an agent shield charge, or has just used it.") {
+			if d := describeCandidates(st, iv)["MOCK0003"]; !strings.Contains(d, "Holds an agent shield charge.") {
 				t.Errorf("%s description lacks the charge sentence: %q", iv, d)
 			}
 		}

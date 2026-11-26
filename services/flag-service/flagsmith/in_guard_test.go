@@ -22,17 +22,24 @@ import (
 // delta review findings 1 to 3).
 
 var (
-	maxGamesKey      = flagsmith.Key{Set: "agent", Flag: "experiment_max_games", Scope: flagsmith.ScopeStack}
+	graceKey         = flagsmith.Key{Set: "agent", Flag: "experiment_completed_grace_seconds", Scope: flagsmith.ScopeStack}
 	minIntervalKey   = flagsmith.Key{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}
 	volumeOverrideG1 = flagsmith.Key{Set: "interventions", Flag: "volume_override", Scope: "game:g1"}
 )
 
+// graceKillSwitch makes agent/experiment_completed_grace_seconds the integer
+// kill switch of a test: no real kill switch has an integer range bound.
+func graceKillSwitch(t *testing.T) {
+	flagsmith.MarkKillSwitch(t, "agent/experiment_completed_grace_seconds")
+}
+
 func num(n string) flagsmith.Value { return flagsmith.Value{Present: true, Value: json.RawMessage(n)} }
 
-// operatorWriter lets the operator write 10 to experiment_max_games between
-// the round's snapshot and its pulled write, once (the pulled write is then
-// 412 slot_changed: a deferral that leaves the remote value unknown). With
-// confirm, the out side's push of 10 is confirmed while the round still runs.
+// operatorWriter lets the operator write 10 to
+// experiment_completed_grace_seconds between the round's snapshot and its
+// pulled write, once (the pulled write is then 412 slot_changed: a deferral
+// that leaves the remote value unknown). With confirm, the out side's push of
+// 10 is confirmed while the round still runs.
 type operatorWriter struct {
 	*api.API
 	st      *state.State
@@ -42,23 +49,24 @@ type operatorWriter struct {
 }
 
 func (w *operatorWriter) FlagsmithPut(ctx context.Context, req state.WriteRequest) (state.WriteResult, *fserr.Error) {
-	if req.Flag != "experiment_max_games" || w.done.Swap(true) {
+	if req.Flag != "experiment_completed_grace_seconds" || w.done.Swap(true) {
 		return w.API.FlagsmithPut(ctx, req)
 	}
-	if _, ferr := w.st.Put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("10"), Writer: "operator"}); ferr != nil {
+	if _, ferr := w.st.Put(state.WriteRequest{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("10"), Writer: "operator"}); ferr != nil {
 		panic(ferr)
 	}
 	res, ferr := w.API.FlagsmithPut(ctx, req)
 	if w.confirm {
-		w.link.Links().ConfirmPushed(maxGamesKey, num("10"))
+		w.link.Links().ConfirmPushed(graceKey, num("10"))
 	}
 	return res, ferr
 }
 
-// maxGamesRace starts a harness where the operator holds 500, the document
+// graceRace starts a harness where the operator holds 500, the document
 // 100 (tighter: applied at start) and the operator's 10 races the apply.
-func maxGamesRace(t *testing.T, confirm bool) *harness {
+func graceRace(t *testing.T, confirm bool) *harness {
 	t.Helper()
+	graceKillSwitch(t)
 	ow := &operatorWriter{confirm: confirm}
 	h := newHarness(t, harnessOpts{
 		writer: func(a *api.API, st *state.State) flagsmith.LocalWriter {
@@ -67,16 +75,16 @@ func maxGamesRace(t *testing.T, confirm bool) *harness {
 		},
 		before: func(hh *harness) {
 			ow.link = hh.link
-			if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("500"), Writer: "operator"}); ferr != nil {
+			if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("500"), Writer: "operator"}); ferr != nil {
 				t.Fatal(ferr)
 			}
-			hh.fake.SetDocument(document(hh.clock.Now().Add(-time.Minute), []map[string]any{fsState("experiment_max_games", true, 100)}), "")
+			hh.fake.SetDocument(document(hh.clock.Now().Add(-time.Minute), []map[string]any{fsState("experiment_completed_grace_seconds", true, 100)}), "")
 		}})
 	h.online()
 	if !ow.done.Load() {
 		t.Fatal("setup: the start round did not apply the tighter document value")
 	}
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "10" {
 		t.Fatalf("setup: local %+v, want the operator's 10", v)
 	}
 	return h
@@ -87,17 +95,17 @@ func maxGamesRace(t *testing.T, confirm bool) *harness {
 // guarded against the document that round read: the stale document (100)
 // never loosens the operator's confirmed 10 (#2596 delta finding 1).
 func TestGuardAfterDeferredApply(t *testing.T) {
-	h := maxGamesRace(t, false)
-	if r, ok := h.link.Links().Remote(maxGamesKey); ok {
+	h := graceRace(t, false)
+	if r, ok := h.link.Links().Remote(graceKey); ok {
 		t.Fatalf("setup: remote %+v known, want unknown after the deferred apply", r)
 	}
-	h.link.Links().ConfirmPushed(maxGamesKey, num("10"))
+	h.link.Links().ConfirmPushed(graceKey, num("10"))
 	h.clock.Advance(time.Minute)
 	for range 2 {
 		h.round()
 	}
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
-		t.Fatalf("UC-054/BR-005 experiment_max_games = %+v: a stale document (100) loosened the confirmed 10", v)
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "10" {
+		t.Fatalf("UC-054/BR-005 experiment_completed_grace_seconds = %+v: a stale document (100) loosened the confirmed 10", v)
 	}
 }
 
@@ -106,6 +114,7 @@ func TestGuardAfterDeferredApply(t *testing.T) {
 // value known before that apply: a stale copy without an update time (no
 // body updated_at, no header) that still shows it is not applied.
 func TestGuardKeepsRemoteBeforeDeferredApply(t *testing.T) {
+	graceKillSwitch(t)
 	ow := &operatorWriter{}
 	ow.done.Store(true)
 	h := newHarness(t, harnessOpts{writer: func(a *api.API, st *state.State) flagsmith.LocalWriter {
@@ -114,29 +123,29 @@ func TestGuardKeepsRemoteBeforeDeferredApply(t *testing.T) {
 	}})
 	h.online()
 	setDoc := func(v int) {
-		d := document(h.clock.Now(), []map[string]any{fsState("experiment_max_games", true, v)})
+		d := document(h.clock.Now(), []map[string]any{fsState("experiment_completed_grace_seconds", true, v)})
 		delete(d, "updated_at")
 		h.fake.SetDocument(d, "")
 	}
 	setDoc(100)
 	h.round()
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "100" {
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "100" {
 		t.Fatalf("setup: local %+v, want 100", v)
 	}
 	ow.done.Store(false)
 	setDoc(50)
 	h.round()
-	if r, ok := h.link.Links().Remote(maxGamesKey); !ok || string(r.Value) != "100" {
+	if r, ok := h.link.Links().Remote(graceKey); !ok || string(r.Value) != "100" {
 		t.Fatalf("setup: remote %+v %v after the deferred apply, want 100 restored", r, ok)
 	}
-	h.link.Links().ConfirmPushed(maxGamesKey, num("10"))
+	h.link.Links().ConfirmPushed(graceKey, num("10"))
 	h.clock.Advance(time.Minute)
 	setDoc(100)
 	for range 2 {
 		h.round()
 	}
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
-		t.Fatalf("UC-054/BR-005 experiment_max_games = %+v: a stale copy (100) loosened the confirmed 10", v)
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "10" {
+		t.Fatalf("UC-054/BR-005 experiment_completed_grace_seconds = %+v: a stale copy (100) loosened the confirmed 10", v)
 	}
 }
 
@@ -144,13 +153,13 @@ func TestGuardKeepsRemoteBeforeDeferredApply(t *testing.T) {
 // The same push confirmed while the round runs: the document value that round
 // read is guarded too.
 func TestGuardPushConfirmedDuringRound(t *testing.T) {
-	h := maxGamesRace(t, true)
+	h := graceRace(t, true)
 	h.clock.Advance(time.Minute)
 	for range 2 {
 		h.round()
 	}
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
-		t.Fatalf("UC-054/BR-005 experiment_max_games = %+v: a stale document (100) loosened the push confirmed mid-round", v)
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "10" {
+		t.Fatalf("UC-054/BR-005 experiment_completed_grace_seconds = %+v: a stale document (100) loosened the push confirmed mid-round", v)
 	}
 }
 
@@ -224,39 +233,40 @@ func healthOf(h *harness, feature string) []any {
 // local one is sent) and by adopting it (the document now holds the local
 // value) (#2596 delta finding 2, E and K; no kill-switch keep-local since #2621).
 func TestDeferralEndsByPushOrAdopt(t *testing.T) {
+	graceKillSwitch(t)
 	h := newHarness(t, harnessOpts{noStream: true})
 	h.online()
 	sub, _ := h.st.Subscribe("")
 	for _, w := range []state.WriteRequest{
 		{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("700"), Writer: "operator"},
-		{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("500"), Writer: "operator"},
+		{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("500"), Writer: "operator"},
 	} {
 		if _, ferr := h.st.Put(w); ferr != nil {
 			t.Fatal(ferr)
 		}
 	}
 	sub.Close()
-	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 900), fsState("experiment_max_games", true, 100)})
+	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 900), fsState("experiment_completed_grace_seconds", true, 100)})
 	for range 5 {
 		h.clock.Advance(time.Minute)
 		h.round()
 	}
 	h.waitFor("two unhealthy posts", func() bool {
-		return len(healthOf(h, "decision.min_interval_ms")) == 1 && len(healthOf(h, "experiment_max_games")) == 1
+		return len(healthOf(h, "decision.min_interval_ms")) == 1 && len(healthOf(h, "experiment_completed_grace_seconds")) == 1
 	})
-	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", false, nil), fsState("experiment_max_games", true, 500)})
+	h.setDoc([]map[string]any{fsState("decision.min_interval_ms", false, nil), fsState("experiment_completed_grace_seconds", true, 500)})
 	h.clock.Advance(time.Minute)
 	h.round()
 	h.waitFor("two healthy posts", func() bool {
-		return len(healthOf(h, "decision.min_interval_ms")) == 2 && len(healthOf(h, "experiment_max_games")) == 2
+		return len(healthOf(h, "decision.min_interval_ms")) == 2 && len(healthOf(h, "experiment_completed_grace_seconds")) == 2
 	})
-	for _, f := range []string{"decision.min_interval_ms", "experiment_max_games"} {
+	for _, f := range []string{"decision.min_interval_ms", "experiment_completed_grace_seconds"} {
 		if s := healthOf(h, f); s[1] != flagsmith.HealthHealthy {
 			t.Fatalf("UC-054/A4 %s posts %v, want unhealthy then healthy", f, s)
 		}
 	}
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "500" {
-		t.Fatalf("UC-054/A2 experiment_max_games = %+v, want 500 adopted", v)
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "500" {
+		t.Fatalf("UC-054/A2 experiment_completed_grace_seconds = %+v, want 500 adopted", v)
 	}
 }
 
@@ -427,15 +437,15 @@ func currentDoc(t *testing.T, h *harness) []byte {
 	return b
 }
 
-// pushDuringRound runs the deferred-first-apply race of maxGamesRace (remote
+// pushDuringRound runs the deferred-first-apply race of graceRace (remote
 // unknown, last document 100) with the push of 10 confirmed while the next
 // round's fetch is in flight; that fetch fails with status, or (status 0)
 // returns alt, or the current document when alt is nil. The rounds after it
 // read the pre-push document (100) again.
 func pushDuringRound(t *testing.T, status int, alt func(h *harness) []byte) {
 	t.Helper()
-	h := maxGamesRace(t, false)
-	if _, ok := h.link.Links().Remote(maxGamesKey); ok {
+	h := graceRace(t, false)
+	if _, ok := h.link.Links().Remote(graceKey); ok {
 		t.Fatal("setup: remote known, want unknown after the deferred first apply")
 	}
 	ds := &docSwitch{body: currentDoc(t, h), status: status}
@@ -443,15 +453,15 @@ func pushDuringRound(t *testing.T, status int, alt func(h *harness) []byte) {
 	if alt != nil {
 		ds.alt = alt(h)
 	}
-	ds.fn = func() { h.link.Links().ConfirmPushed(maxGamesKey, num("10")) }
+	ds.fn = func() { h.link.Links().ConfirmPushed(graceKey, num("10")) }
 	ds.armed = true
 	h.fake.Handle("GET "+flagsmithtest.APIPath+"environment-document/", ds.ServeHTTP)
 	h.clock.Advance(time.Minute)
 	for range 4 {
 		h.round()
 	}
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "10" {
-		t.Fatalf("UC-054/BR-005 experiment_max_games = %s: the pre-push document (100) loosened the push of 10 confirmed during a round that read no document", v.Value)
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "10" {
+		t.Fatalf("UC-054/BR-005 experiment_completed_grace_seconds = %s: the pre-push document (100) loosened the push of 10 confirmed during a round that read no document", v.Value)
 	}
 }
 
@@ -466,7 +476,7 @@ func TestGuardPushDuringRoundWithoutDocument(t *testing.T) {
 	})
 	t.Run("UC-054/BR-005 older document (stale_document)", func(t *testing.T) {
 		pushDuringRound(t, 0, func(h *harness) []byte {
-			b, err := json.Marshal(document(h.clock.Now().Add(-time.Hour), []map[string]any{fsState("experiment_max_games", true, 100)}))
+			b, err := json.Marshal(document(h.clock.Now().Add(-time.Hour), []map[string]any{fsState("experiment_completed_grace_seconds", true, 100)}))
 			if err != nil {
 				t.Fatal(err)
 			}

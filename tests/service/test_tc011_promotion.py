@@ -70,11 +70,8 @@ SERVICE_COMPOSITION = replace(AGENT, fake_github=True)
 # (verdict_min_pairs = 2, the minimum for a paired SD), so the promote verdict
 # concludes the experiment after four games.
 TUNING = {
-    "verdict_min_n": 2,
     "verdict_min_pairs": 2,
     "experiment_tick_seconds": 3,
-    "experiment_max_games": 12,
-    "experiment_dynamic_target_n": 2,
     "experiment.max_game_seconds": 90,
 }
 # Served before the agent starts (Composition.agent_flags), so its first tick already reads them.
