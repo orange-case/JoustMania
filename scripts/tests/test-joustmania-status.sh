@@ -28,9 +28,13 @@
 #  - --led (ExecStartPost, #2027 PR 4): the unit still activating counts as
 #    started, the state (never `starting`) is written to led.request; a game
 #    service running whose health check is still starting is degraded (#2135)
+#  - memory and disk headroom (NFR-081, #2914): OK, WARN and the urgent WARN at
+#    their thresholds, never FAIL (degraded, the game runs), the relief named, the data root from docker info
+#    (/var/lib/docker when docker is down), SKIP when unreadable, and --led
+#    writes the state a low value gives
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-joustmania-status.sh
 # UC: UC-060 main step 4; UC-002 A7
-# Spec: docs/specs/stage-host.md SH-2 SH-3 SH-4 SH-7 SH-8 SH-12 SH-15 SH-17
+# Spec: docs/specs/stage-host.md SH-2 SH-3 SH-4 SH-7 SH-8 SH-12 SH-15 SH-17 SH-18
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 
@@ -53,6 +57,8 @@ SECRET="dummy-secret-status-2027"
 #   $CASE/unhealthy: services running but unhealthy
 #   $CASE/health-starting: services running, health check not passed yet
 #   $CASE/active, $CASE/result: the unit's ActiveState / Result; $CASE/ntp
+#   $CASE/meminfo (set_mem); $CASE/df-kb: free KiB df reports (empty: df
+#   fails); $CASE/df-path: the path df was asked about; $CASE/dockerroot
 make_case() {
   CASE="${WORK}/$1"
   mkdir -p "${CASE}/repo/scripts/setup" "${CASE}/bin" "${CASE}/status" "${CASE}/run" "${CASE}/ledstate" "${CASE}/sys"
@@ -72,12 +78,15 @@ make_case() {
   echo active >"${CASE}/active"
   echo success >"${CASE}/result"
   echo yes >"${CASE}/ntp"
+  set_mem 3000
+  echo $((8192 * 1024)) >"${CASE}/df-kb"
+  echo /srv/docker >"${CASE}/dockerroot"
   cp "${ROOT}/scripts/setup/99-joustmania-operator-pad.rules" "${CASE}/pad.rules"
   printf 'phase=start\nresult=ok\nmissing=\ndown=\nts=2026-10-26T10:00:00+01:00\n' >"${CASE}/status/start.env"
   cat >"${CASE}/bin/docker" <<STUB
 #!/usr/bin/env bash
 C="${CASE}"
-[[ "\$1" == info ]] && { [[ -e "\$C/info-fails" ]] && exit 1; exit 0; }
+[[ "\$1" == info ]] && { [[ -e "\$C/info-fails" ]] && exit 1; [[ "\$2" == --format ]] && cat "\$C/dockerroot"; exit 0; }
 case " \$* " in
   *" compose "*" config "*)
     printf 'services:\n'
@@ -103,7 +112,21 @@ case " \$* " in
 esac
 STUB
   printf '#!/usr/bin/env bash\ncat "%s/ntp"\n' "${CASE}" >"${CASE}/bin/timedatectl"
+  cat >"${CASE}/bin/df" <<STUB
+#!/usr/bin/env bash
+C="${CASE}"
+[[ "\$1 \$2" == "-Pk --" ]] || { echo "df stub: unexpected args \$*" >&2; exit 64; }
+printf '%s\n' "\$3" >"\$C/df-path"
+[[ -s "\$C/df-kb" ]] || exit 1
+echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+echo "/dev/root 60000000 1 \$(cat "\$C/df-kb") 1% /"
+STUB
   chmod +x "${CASE}/bin/"*
+}
+
+# set_mem <MiB>: a 4 GB Pi's meminfo with that much MemAvailable
+set_mem() {
+  printf 'MemTotal:        3884000 kB\nMemFree:          100000 kB\nMemAvailable:    %d kB\n' "$(($1 * 1024))" >"${CASE}/meminfo"
 }
 
 # run_status: returns the command's exit code; output in $CASE/out.log
@@ -112,7 +135,7 @@ run_status() {
     JOUSTMANIA_RUN_STATE_DIR="${CASE}/run" JOUSTMANIA_LED_STATE_DIR="${CASE}/ledstate" \
     JOUSTMANIA_LED_SYSFS="${CASE}/sys" JOUSTMANIA_LED_HELPER="${CASE}/helper" \
     JOUSTMANIA_HOTSPOT_HELPER="${CASE}/hotspot-helper" JOUSTMANIA_HOTSPOT_STATUS="${CASE}/hotspot-status" \
-    JOUSTMANIA_PAD_RULE="${CASE}/pad.rules" \
+    JOUSTMANIA_PAD_RULE="${CASE}/pad.rules" JOUSTMANIA_MEMINFO="${CASE}/meminfo" \
     bash "${CASE}/repo/scripts/setup/joustmania-status.sh" "$@" >"${CASE}/out.log" 2>&1
 }
 expect() { # $1 = case, $2 = expected exit, $3 = expected state, $4.. = status args
@@ -381,7 +404,62 @@ if [[ "$(id -u)" != 0 ]]; then
   chmod 600 "${CASE}/pad.rules"
 fi
 
+# --- memory and disk headroom (NFR-081, #2914) ------------------------------
+relief() { echo "free memory without stopping the game: ${CASE}/repo/scripts/setup/joustmania-compose.sh stop jaeger grafana"; }
+make_case headroom-ok
+expect headroom-ok 0 ok
+grep -qx 'OK   memory: 3000 MiB available of 3792 MiB' "${CASE}/out.log" || fail "headroom-ok: memory line: $(grep memory "${CASE}/out.log")"
+grep -qx 'OK   disk: 8192 MiB free on the Docker data root (/srv/docker)' "${CASE}/out.log" || fail "headroom-ok: disk line: $(grep disk "${CASE}/out.log")"
+[[ "$(cat "${CASE}/df-path")" == /srv/docker ]] || fail "headroom-ok: df not asked about docker's DockerRootDir: $(cat "${CASE}/df-path")"
+# exactly at a threshold is not below it
+make_case headroom-edge
+set_mem 512
+echo $((2048 * 1024)) >"${CASE}/df-kb"
+expect headroom-edge 0 ok
+make_case mem-warn
+set_mem 511
+expect mem-warn 1 degraded
+grep -qxF "WARN memory: 511 MiB available of 3792 MiB, below 512 MiB; $(relief)" "${CASE}/out.log" ||
+  fail "mem-warn: line: $(grep memory "${CASE}/out.log")"
+make_case mem-urgent
+set_mem 255
+expect mem-urgent 1 degraded
+grep -qxF "WARN memory: 255 MiB available of 3792 MiB, below 256 MiB: an OOM kill is close; $(relief)" "${CASE}/out.log" ||
+  fail "mem-urgent: line: $(grep memory "${CASE}/out.log")"
+make_case mem-unreadable
+rm "${CASE}/meminfo"
+expect mem-unreadable 0 ok
+grep -qxF "SKIP memory: cannot read MemAvailable from ${CASE}/meminfo" "${CASE}/out.log" || fail "mem-unreadable: line: $(grep memory "${CASE}/out.log")"
+make_case disk-warn
+echo $((2047 * 1024)) >"${CASE}/df-kb"
+expect disk-warn 1 degraded
+grep -qxF 'WARN disk: 2047 MiB free on the Docker data root (/srv/docker), below 2048 MiB; see what uses it: docker system df' "${CASE}/out.log" ||
+  fail "disk-warn: line: $(grep disk "${CASE}/out.log")"
+make_case disk-urgent
+echo $((511 * 1024)) >"${CASE}/df-kb"
+expect disk-urgent 1 degraded
+grep -qxF 'WARN disk: 511 MiB free on the Docker data root (/srv/docker), below 512 MiB: containers cannot write logs or data; see what uses it: docker system df' "${CASE}/out.log" ||
+  fail "disk-urgent: line: $(grep disk "${CASE}/out.log")"
+make_case disk-unreadable
+: >"${CASE}/df-kb"
+expect disk-unreadable 0 ok
+grep -qxF 'SKIP disk: cannot read the free space of /srv/docker' "${CASE}/out.log" || fail "disk-unreadable: line: $(grep disk "${CASE}/out.log")"
+# docker down: the disk is still checked, at the default data root
+make_case disk-no-docker
+touch "${CASE}/info-fails"
+echo $((100 * 1024)) >"${CASE}/df-kb"
+expect disk-no-docker 2 failed
+grep -qF 'WARN disk: 100 MiB free on the Docker data root (/var/lib/docker), below 512 MiB' "${CASE}/out.log" ||
+  fail "disk-no-docker: line: $(grep disk "${CASE}/out.log")"
+# --led: low memory reaches the LED request
+make_case mem-led
+set_mem 400
+echo activating >"${CASE}/active"
+expect mem-led 1 degraded --led
+[[ "$(cat "${CASE}/run/led.request" 2>/dev/null)" == degraded ]] ||
+  fail "mem-led: led.request is not degraded: $(cat "${CASE}/run/led.request" 2>/dev/null)"
+
 if [[ "${fails}" -ne 0 ]]; then
   exit 1
 fi
-echo "ok: joustmania-status reports version, unit, images, services and clock"
+echo "ok: joustmania-status reports version, unit, images, services, memory, disk and clock"

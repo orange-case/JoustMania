@@ -84,7 +84,9 @@ def _make_winner(game, mode: Games) -> None:
         assert game._latch_champion(serials[0])
     elif mode == Games.NonStop:
         game._time_limit_reached = True
-        game.players[serials[0]].score = 5
+        # The score comes from the deaths at the end; a shared lead is a tie (UC-026 A4).
+        for serial in serials[1:]:
+            game.players[serial].deaths = 1
     else:  # pragma: no cover - a new mode must say how it wins
         raise AssertionError(f"no winner setup for {mode}")
 

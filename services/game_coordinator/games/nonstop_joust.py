@@ -88,6 +88,14 @@ class NonstopInitFlags:
         )
 
 
+# Time-left voice lines before the time limit (UC-026 step 3); the Zombies lines.
+TIME_ANNOUNCEMENTS: tuple[tuple[int, Sound], ...] = (
+    (60, Sound.VOX_1_MINUTE),
+    (30, Sound.VOX_ZOMBIE_THIRTY_SECONDS),
+    (10, Sound.VOX_ZOMBIE_TEN_SECONDS),
+)
+
+
 @dataclass
 class NonstopPlayer(Player):
     """Represents a player in Nonstop Joust with scoring and respawn state."""
@@ -167,6 +175,7 @@ class NonstopJoustGame(BaseGameMode):
         # Set when the game loop detects the time limit (UC-026 BR-003): the only
         # end that declares a winner.
         self._time_limit_reached = False
+        self._announced_marks: set[int] = set()
         # Monotonic clock for the respawn deadline (UC-026 step 2); tests inject a fake.
         self._clock = game_clock.now
 
@@ -239,6 +248,26 @@ class NonstopJoustGame(BaseGameMode):
             return True
 
         return False
+
+    async def _announce_time_left(self) -> None:
+        """Announce each mark once on the first frame at or past it (UC-026 step 3).
+
+        A mark at or above the limit would fire on the first frame, so it is skipped.
+        """
+        if self.time_limit == 0 or not self.start_time or not self.running or self.game_ending():
+            return
+        remaining = self.time_limit - (game_clock.now() - self.start_time)
+        if remaining <= 0:
+            return
+        # Smallest mark first: after a stalled frame only the line that is still true plays.
+        for seconds, sound in sorted(TIME_ANNOUNCEMENTS):
+            if seconds >= self.time_limit or seconds in self._announced_marks or remaining > seconds:
+                continue
+            self._announced_marks.update(m for m, _ in TIME_ANNOUNCEMENTS if m >= seconds)
+            logger.info(f"Time announcement: {seconds} seconds remaining")
+            await self.event_publisher("time_announcement", {"seconds_remaining": seconds})
+            await self._play_sound(sound, priority=2)
+            return
 
     async def _process_controller_state(self, controller_state):
         """
@@ -510,6 +539,7 @@ class NonstopJoustGame(BaseGameMode):
                     self._time_limit_reached = True
                     self._latch_game_outcome()
                     break
+                await self._announce_time_left()
 
         except Exception as e:
             logger.error(f"Game loop error: {e}", exc_info=True)
@@ -737,10 +767,22 @@ class NonstopJoustGame(BaseGameMode):
         # not force_ended; a force-end, A1 or an early stream end has none (UC-026 BR-003).
         force_ended = self.game_outcome() == "force_ended"
         winner = None
-        if self._time_limit_reached and not force_ended:
-            # Highest score, tie-break by fewest deaths
-            winner = max(self.players.values(), key=lambda p: (p.score, -p.deaths), default=None)
+        tie = False
+        if self._time_limit_reached and not force_ended and self.players:
+            # Highest score, tie-break by fewest deaths; a lead still shared is a tie (UC-026 A4)
+            ranking = {p.serial: (p.score, -p.deaths) for p in self.players.values()}
+            top = max(ranking.values())
+            leaders = [p for p in self.players.values() if ranking[p.serial] == top]
+            if len(leaders) == 1:
+                winner = leaders[0]
+            else:
+                tie = True
         winner_serial = winner.serial if winner else None
+
+        if tie:
+            logger.info(f"Tie at the time limit: {len(leaders)} players share the lead")
+            await self.event_publisher(GameEvent.GAME_TIE, {})
+            await self._show_tie_cue()
 
         if winner:
             logger.info(f"Winner: {winner.serial} with score {winner.score} (K:{winner.kills} D:{winner.deaths})")

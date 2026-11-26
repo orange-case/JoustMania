@@ -2239,7 +2239,7 @@ class TestBuildGameConfig:
         assert config.sensitivity == 2
         assert len(config.players) == 2
         assert config.HasField("nonstop_config")
-        servicer.game_settings_client.get_integer_value.assert_any_call("nonstop.time_limit_seconds", 0)
+        servicer.game_settings_client.get_integer_value.assert_any_call("nonstop.time_limit_seconds", 180)
 
     def test_build_config_tournament(self, servicer, players):
         """Tournament should produce tournament_config with invincibility_seconds."""
