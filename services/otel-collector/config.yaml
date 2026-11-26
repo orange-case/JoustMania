@@ -137,7 +137,7 @@ processors:
     send_batch_size: 1000
 
   # Traces batch processor (#828): a shorter timeout than the shared `batch`
-  # so the SECOND hop of the agent observe path (collector → otlp/agent) flushes
+  # so the SECOND hop of the agent observe path (collector → otlp_http/agent) flushes
   # sooner. Combined with the lower controller-manager BSP flush (per-service
   # observability flag), this cuts the agent's observe latency. Smaller,
   # sooner trace batches also lower the collector's peak heap held by the
@@ -332,10 +332,13 @@ exporters:
   # Resilience: a down/slow agent must NEVER stall delivery to Jaeger or
   # VictoriaMetrics, so retries are disabled, the timeout is short, and the
   # sending queue is bounded — overflow is dropped rather than back-pressured.
-  otlp/agent:
-    endpoint: agent:4317
-    tls:
-      insecure: true
+  # HTTP, not gRPC: a gRPC client backs off DNS re-resolution per signal for up
+  # to ~2.4 min after the agent was absent, so it missed game.start after a
+  # (re)start. net/http resolves on every new connection, without backoff.
+  otlp_http/agent:
+    endpoint: http://agent:4318
+    encoding: proto
+    compression: gzip
     timeout: 2s
     retry_on_failure:
       enabled: false
@@ -353,7 +356,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, filter/grpc_health, batch/traces, resource]
-      exporters: [otlp/jaeger, otlp/agent, debug]
+      exporters: [otlp/jaeger, otlp_http/agent, debug]
 
     # invoke_agent spans -> span_metrics connector (#1427). Same receiver as
     # the traces pipeline (fan-out), so the filter never affects Jaeger.
@@ -373,7 +376,7 @@ service:
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch/fast, resource]
-      exporters: [prometheus_remote_write, otlp/agent]
+      exporters: [prometheus_remote_write, otlp_http/agent]
 
     # Observability metrics — victoria-metrics, otel-collector
     metrics/observability:
@@ -410,12 +413,12 @@ service:
 
     # The agent's own lifecycle log events -> agent only (#2722, UC-041 A8). The
     # filter runs before the batch so the batch holds those records only; the batch
-    # also keeps a full otlp/agent queue from surfacing as an error to the
+    # also keeps a full otlp_http/agent queue from surfacing as an error to the
     # receiver.
     logs/agent:
       receivers: [otlp]
       processors: [memory_limiter, filter/agent_events, batch/agent_events, resource]
-      exporters: [otlp/agent]
+      exporters: [otlp_http/agent]
 
   extensions: [health_check]
 

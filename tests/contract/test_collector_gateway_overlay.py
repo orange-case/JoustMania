@@ -401,7 +401,7 @@ def test_an_unreachable_gateway_cannot_touch_the_in_case_pipelines_or_the_agent(
     agent_pipelines = {
         name
         for name, spec in base["service"]["pipelines"].items()
-        if "otlp/agent" in spec["exporters"]
+        if "otlp_http/agent" in spec["exporters"]
     }
     assert {"traces", "metrics", "logs/agent"} <= agent_pipelines
     queue = merged["exporters"][EXPORTER]["sending_queue"]
@@ -409,7 +409,7 @@ def test_an_unreachable_gateway_cannot_touch_the_in_case_pipelines_or_the_agent(
     assert not queue.get("block_on_overflow"), (
         "a full gateway queue must drop, never wait"
     )
-    assert merged["exporters"]["otlp/agent"] == base["exporters"]["otlp/agent"]
+    assert merged["exporters"]["otlp_http/agent"] == base["exporters"]["otlp_http/agent"]
 
 
 @pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])
@@ -528,11 +528,17 @@ def test_default_stack_loads_one_config_and_knows_no_gateway(base):
         host = re.sub(r"^[a-z]+://", "", endpoint).split("/")[0].split(":")[0]
         assert host in services, f"{name} exports outside the compose network: {host}"
     assert "ORANGECASE_GATEWAY" not in ic.COLLECTOR_FILE.read_text()
-    assert not [
-        name
-        for name in base["exporters"]
+    # The only HTTP exporter is the agent's: plain http inside the network, no
+    # headers or auth, so no gateway token can ride it (NFR-024).
+    http_exporters = {
+        name: cfg
+        for name, cfg in base["exporters"].items()
         if name.split("/")[0] in ("otlp_http", "otlphttp")
-    ]
+    }
+    assert list(http_exporters) == ["otlp_http/agent"]
+    agent = http_exporters["otlp_http/agent"]
+    assert agent["endpoint"] == "http://agent:4318"
+    assert not set(agent) & {"headers", "auth", "tls"}
 
 
 @pytest.mark.uc("UC-035", flow="A7", br=["BR-015"])

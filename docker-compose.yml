@@ -738,10 +738,13 @@ services:
       context: .
       dockerfile: services/agent/Dockerfile
     container_name: joustmania-agent
-    # Port exposed only within Docker network (the collector pushes OTLP to it)
+    # Ports exposed only within Docker network: the collector pushes OTLP/HTTP to
+    # 4318; 4317 is OTLP gRPC for direct producers
     expose:
+      - "4318"
       - "4317"
     environment:
+      - AGENT_OTLP_HTTP_ADDR=:4318
       - AGENT_LISTEN_ADDR=:4317
       - AGENT_HEALTH_ADDR=:13134
       # OpenFeature control layer. FLAGD_PORT is left to the binary's default on
