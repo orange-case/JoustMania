@@ -281,7 +281,7 @@ def test_v4_shield_wheel_starts_at_auto_without_operator_value_and_backend_wraps
     backend = render.setting_screen(
         4, "decision.backend", status(agent_backend="rules"), -1, lobby_only=False, bottom=bottom()
     )
-    assert backend.wheel == (("OPENAI", False), ("JEV", False), ("RULES", True))
+    assert backend.wheel == (("CLAUDE", False), ("JEV", False), ("RULES", True))
 
 
 def agent_wheel(net: int):
@@ -331,7 +331,7 @@ def test_wheel_settings_below_v4_are_now_and_new_rows(version):
     width = 16 if version >= 3 else 10
     assert [screen.lines[i][0][:width].rstrip() for i in (1, 3, 5)] == [
         render.lr("NOW", "CLAUDE", width),
-        render.lr("NEW", "OPENAI", width),
+        render.lr("NEW", "JEV", width),
         "RELEASE TO SET" if version >= 3 else "RELEASE",
     ]
 

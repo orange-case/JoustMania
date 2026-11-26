@@ -1017,7 +1017,7 @@ class TestWerewolfEndGame:
 
 
 class TestWerewolfForceEndWinner:
-    """A force-end declares no winner; a result latched earlier is kept (UC-022 BR-004, #1343)."""
+    """A force-end declares no winner; a result latched earlier is kept (UC-020 BR-007, #1343)."""
 
     @pytest_asyncio.fixture
     async def setup(self):
@@ -1055,7 +1055,7 @@ class TestWerewolfForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-022", br=["BR-004"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     async def test_force_end_while_running_declares_no_winner(self, setup):
         game, events = setup
         game.force_end("operator")
@@ -1074,7 +1074,7 @@ class TestWerewolfForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-022", br=["BR-004"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     @pytest.mark.parametrize("side", ["humans", "werewolves"])
     async def test_force_end_after_win_keeps_the_winner(self, setup, side):
         game, events = setup
@@ -1109,7 +1109,7 @@ class TestWerewolfForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-022", br=["BR-004"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     @pytest.mark.parametrize("side", ["humans", "werewolves"])
     async def test_force_end_during_the_winner_publish_keeps_the_winner_completed(self, setup, side):
         """#2009: a force-end landing while werewolf_winner is published keeps it, outcome completed."""
@@ -1136,7 +1136,7 @@ class TestWerewolfForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-022", br=["BR-004"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     async def test_force_end_after_the_decision_in_the_same_tick_keeps_the_winner(self, setup):
         """#2009: the win check decides first, the force-end follows in the same tick."""
         game, events = setup
@@ -1158,7 +1158,7 @@ class TestWerewolfForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-022", br=["BR-004"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     @pytest.mark.parametrize("side", ["humans", "werewolves", "tie"])
     async def test_force_end_racing_the_outcome_latch_publishes_nothing(self, setup, side):
         """#2009 (#2002 recipe): a force-end right before the outcome latch wins the race: no result anywhere."""
@@ -1188,7 +1188,7 @@ class TestWerewolfForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-022", br=["BR-004"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     @pytest.mark.parametrize("side", ["humans", "werewolves", "tie"])
     async def test_force_end_before_the_win_check_in_the_same_tick_publishes_nothing(self, setup, side):
         """#2009: a force-end that lands first declares no result, even with the win condition met."""
@@ -1210,7 +1210,7 @@ class TestWerewolfForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-022", br=["BR-004"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     async def test_force_end_after_tie_keeps_the_tie(self, setup):
         game, events = setup
         for player in game.players.values():
@@ -1229,7 +1229,7 @@ class TestWerewolfForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-022", br=["BR-004"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     async def test_win_is_latched_and_published_once(self, setup):
         game, events = setup
         for serial in game.human_serials:
@@ -1245,7 +1245,7 @@ class TestWerewolfForceEndWinner:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-027", flow="main", steps=[3])
-    @pytest.mark.uc("UC-022", br=["BR-004"])
+    @pytest.mark.uc("UC-022", br=["BR-007"])
     async def test_stream_end_without_a_win_declares_no_winner(self, setup):
         game, events = setup
         game._latch_game_outcome()  # the loop returned (stream closed), no win

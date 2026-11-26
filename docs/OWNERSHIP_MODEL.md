@@ -20,15 +20,16 @@ The section numbers below are kept stable because code comments cite them.
 > **The human admin owns pre-game intent. The agent owns bounded in-game deltas.**
 
 - **Human admin** decides *what game is played and how it is calibrated*: the game
-  mode, the baseline settings, and when the game starts. The menu's admin mode
-  ([`services/menu/handlers/admin.py`](../services/menu/handlers/admin.py)) writes
+  mode, the baseline settings, and when the game starts. The menu, driven by the
+  operator pad ([`services/menu/settings_ops.py`](../services/menu/settings_ops.py), UC-015;
+  the controller admin mode is gone since #2819), writes
   them to the `game` / `user` flag sets through the flag service
   (`FlagServiceWriter`, [`lib/flag_service_writer.py`](../lib/flag_service_writer.py))
   as **persisted admin values** (`"persist": true`), kept in the flag service's state
   file `/var/lib/flag-service/admin.json`.
 - **Agent** decides *how to nudge the experience while the game runs*: bounded
   overrides, factors, and shields. It writes them to the `interventions` flag set
-  through the flag service, scoped to one game (the gated tier-2 and rollout writes
+  through the flag service, scoped to one game (the gated tier-2 writes
   are listed under the invariants below)
   ([`services/agent/actions/writer.go`](../services/agent/actions/writer.go)); the
   game coordinator's `InterventionManager`
@@ -65,11 +66,6 @@ the agent has three narrow, gated writes beyond the `interventions` set.
      in memory and lasts until the flag service restarts; the durable path is the
      promotion PR. The stock stack passes none of these env gates (D-A6), so this
      write is off by default.
-
-   The agent also writes `rollout/current_controller_count` (through
-   `actions/rollout_writer.go`) for the infrastructure rollout, gated by
-   `rollout_enabled` and `remediation_allowed` (FR-071, FR-072). That flag is
-   infrastructure state, not a human game setting.
 2. **The write surfaces are disjoint by scope.** The menu writes persisted admin
    values of `game` / `user` flags (and of the `agent` keys
    `interventions_allowed` and `decision.backend`), plus, for the operator pad's
@@ -79,8 +75,8 @@ the agent has three narrow, gated writes beyond the `interventions` set.
    `agent` overlays `objectives`, `policy.max_interventions_per_minute`,
    `policy.group_grant.enabled`, `inference.effort` and `decision.operator_brief`, and the
    persisted `inference.backend`, and clears its own values on a reset (never a script's or Flagsmith's); human writes too.
-   `goal.profile` stays Flagsmith-only (FR-226). The agent writes game-scoped `interventions` values,
-   `rollout/current_controller_count`, and the experiment-arm and `real` overlays
+   `goal.profile` stays Flagsmith-only (FR-226). The agent writes game-scoped `interventions` values
+   and the experiment-arm and `real` overlays
    of `game` flags. The flag service holds each kind of value separately per flag
    (baseline, persisted admin value, stack overlays, `real` overlay, experiment
    arms, game-scoped values) and serialises every write, so an agent write can no
@@ -95,27 +91,26 @@ periods). Sections 4–5 define those compositions precisely.
 
 | Flag set (baseline `services/flagd/<set>.json`, read-only) | Owner | Writer (through the flag service) | Read by | Lifetime |
 |---|---|---|---|---|
-| `game` | Human admin | Menu admin mode → `FlagServiceWriter` (persisted admin values); agent: experiment arms (shadow only), gated `real` promotion overlay (§1) | Menu builds `StartGameConfig` at start; coordinator freezes at init | Baseline per deployment; admin values persist across restarts; agent overlays in memory |
-| `user` | Human admin | Menu admin mode → `FlagServiceWriter` (persisted admin values); operator pad through the menu: `audio_volume.master` (#2050, `step_setting`) | Menu / audio (volumes, voice, instructions) | Per-deployment |
+| `game` | Human admin | Menu (operator pad commands) → `FlagServiceWriter` (persisted admin values); agent: experiment arms (shadow only), gated `real` promotion overlay (§1) | Menu builds `StartGameConfig` at start; coordinator freezes at init | Baseline per deployment; admin values persist across restarts; agent overlays in memory |
+| `user` | Human admin | Menu (operator pad commands) → `FlagServiceWriter` (persisted admin values), `audio_volume.master` included (#2050, `step_setting`) | Menu / audio (volumes, voice, instructions) | Per-deployment |
 | `interventions` | Agent | Agent ActionSink → `writer.go` (game-scoped values and events) | Coordinator `InterventionManager`, live | One game: dropped when the game ends |
-| `rollout` | Operator (human) for the ladder; agent for `current_controller_count` | Agent `actions/rollout_writer.go` (gated by `rollout_enabled`, `remediation_allowed`); operator via `scripts/flags.sh` | Controller manager rollout router, agent infra loop | In memory until the flag service restarts |
 | `operator` | Operator (human) | None at runtime: a reviewed edit of `services/flagd/operator.json` and a restart of the flag service (read-only baseline, flags.md §13.5; #2050) | `services/operator_pad` (#2100; deployed under the `operator-pad` compose profile) | Per-deployment |
-| `agent` | Operator (human) | Operator / stage scripts (`scripts/flags.sh`, `agent-killswitch.sh`, `talk-stage.sh`: in-memory overlays; `agent-backend.sh`: backend and model persisted, #1682) **and** menu admin mode → `FlagServiceWriter` (`interventions_allowed` only, persisted, #819) **and** the operator pad commands through the menu (#2050: `interventions_allowed` and `decision.backend` persisted, `enabled` in memory only; UC-015 BR-001; planned, #2755: the pad's `GOAL`, `RATE`, `GROUP`, `EFFORT`, `BRIEF` rows in memory and `RETRO AI` persisted, UC-016 BR-012) | Agent + coordinator policy gates | Baseline per deployment; overlays until restart |
+| `agent` | Operator (human) | Operator / stage scripts (`scripts/flags.sh`, `agent-killswitch.sh`, `talk-stage.sh`: in-memory overlays; `agent-backend.sh`: backend and model persisted, #1682) **and** the operator pad commands through the menu (#819, #2050: `interventions_allowed` and `decision.backend` persisted, `enabled` in memory only; UC-015 BR-001; planned, #2755: the pad's `GOAL`, `RATE`, `GROUP`, `EFFORT`, `BRIEF` rows in memory and `RETRO AI` persisted, UC-016 BR-012) | Agent + coordinator policy gates | Baseline per deployment; overlays until restart |
 
 The `agent` set holds the agent's own governor — `enabled`, `decision.backend`, `objectives`,
-`interventions_allowed`, and the `policy.*` budgets. As of #819, **menu admin mode
-may write the single `interventions_allowed` key** (the on-device kill-switch);
-other `agent` keys change through operator overlays (only those in the registry)
+`interventions_allowed`, and the `policy.*` budgets. Since #819 the menu may write
+`interventions_allowed` (the on-device kill-switch, now the operator pad's, UC-015 BR-019),
+and since #2050 the pad's `enabled` and `decision.backend`; other `agent` keys change through operator overlays (only those in the registry)
 or a reviewed baseline edit. The **agent process never writes the `agent` set** —
 that invariant is unchanged (menu writes `game` / `user` admin values and the one
-agent-policy key; the agent writes `interventions`, `rollout/current_controller_count`
+agent-policy key; the agent writes `interventions`
 and the gated `game` writes of §1). The human owns agent policy; the agent cannot
 persist its own governor (§1, §6.2).
 
 > **How the agent-never-writes-the-`agent`-set invariant is enforced.** No service
 > mounts the flag directory writable any more; only the flag service mounts it, read-only.
 > The agent's flag-service client writes fixed flag sets: interventions to
-> `interventions`, the rollout count to `rollout`, experiment arms and promotion to
+> `interventions`, experiment arms and promotion to
 > `game` ([`services/agent/experiment/gate.go`](../services/agent/experiment/gate.go)
 > rejects a proposal naming another set, `non_game_target`, and the promotion
 > writer's set is always `game`, #1293). The flag service has no roles or tokens
@@ -153,44 +148,41 @@ no-ops** for that game — the game already captured its value.
 | `werewolf.reveal_time_seconds` | Human | `game` set baseline (`game.json`) | Frozen at init | Agent has no override; human-only. |
 | `force_all_start` | Human | `game` set, persisted admin value (menu) | **Live** (read at start by menu, not frozen into a game) | Human-only; the one admin flag with no freeze. |
 
-### 3.1 Controller-cycled admin surface (issue [#815](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/815))
+### 3.1 Device-settable flags (issue [#815](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/815))
 
-The eight flags above are all human-owned, but they are **not** all worth cycling
-blind on a controller (MOVE to select an option, SELECT/START to nudge its value,
-with only an LED pulse + voice line as feedback). Deep per-mode knobs that are
-frozen at start and rarely changed at party time are awkward and error-prone on
-that surface, so #815 trimmed the **controller-cycled** list to the human
-essentials. **Every flag still exists in the `game` set**; the moved ones change
-through a reviewed edit of the baseline `services/flagd/game.json` plus
-`scripts/flags.sh restart` (they are not stack-mutable in the flag service's
-registry) — only the controller-cycle UI shrinks.
+The eight flags above are all human-owned, but not all are worth setting from a device
+with only a voice line and an LED pulse as feedback. #815 trimmed the device list to the
+human essentials, first for the controller admin mode and, since #2819 removed it, for the
+operator pad. **Every flag still exists in the `game` set**; the others change through a
+reviewed edit of the baseline `services/flagd/game.json` plus `scripts/flags.sh restart`
+(they are not stack-mutable in the flag service's registry).
 
 | Flag | Decision | Rationale |
 |---|---|---|
-| `sensitivity` | **KEEP cycled** | Baseline calibration the admin tunes by feel; the primary human knob. |
-| `num_teams` | **KEEP cycled** | Structural pre-game choice; quick to set on the controller. |
-| `force_all_start` | **KEEP cycled** | Live-evaluated at force start (`admin.py` `handle_force_start`); human-essential. |
-| `random_assignment` | **MOVE → flag-only** | Folds into game-mode selection; baseline file only. |
-| `nonstop.time_limit_seconds` | **MOVE → flag-only** | Per-mode knob, frozen at start; baseline file only. |
-| `invincibility_seconds` | **MOVE → flag-only** | Per-mode knob overlapping agent `shield_seconds` (§4.2); baseline file only. |
-| `fight_club.min_rounds` | **MOVE → flag-only** | Per-mode knob, rarely changed at party time; baseline file only. |
-| `werewolf.reveal_time_seconds` | **MOVE → flag-only** | Per-mode knob, frozen at start; baseline file only. |
+| `sensitivity` | **On the pad** | Baseline calibration the host tunes by feel; the primary human knob. |
+| `num_teams` | **On the pad** | Structural pre-game choice. |
+| `force_all_start` | **On the pad** | Live-evaluated at force start (`settings_ops.py` `force_start_roster`); human-essential. |
+| `random_assignment` | **Flag-only** | Folds into game-mode selection; baseline file only. |
+| `nonstop.time_limit_seconds` | **Flag-only** | Per-mode knob, frozen at start; baseline file only. |
+| `invincibility_seconds` | **Flag-only** | Per-mode knob overlapping agent `shield_seconds` (§4.2); baseline file only. |
+| `fight_club.min_rounds` | **Flag-only** | Per-mode knob, rarely changed at party time; baseline file only. |
+| `werewolf.reveal_time_seconds` | **Flag-only** | Per-mode knob, frozen at start; baseline file only. |
 
-The moved flags keep their definitions in
+The flag-only flags keep their definitions in
 [`services/flagd/game.json`](../services/flagd/game.json) and are still read at
 game start by [`services/menu/servicer.py`](../services/menu/servicer.py)
 `_build_game_config` (`random_assignment`, `nonstop.time_limit_seconds`,
 `invincibility_seconds`, `fight_club.min_rounds`, `werewolf.reveal_time_seconds`).
-The controller cycle is defined by `option_names` / `option_colors` in
-[`services/menu/handlers/admin.py`](../services/menu/handlers/admin.py).
+The pad's options are `STEP_OPTIONS` in
+[`services/menu/settings_ops.py`](../services/menu/settings_ops.py).
 
-**Operator pad (#2050, [UC-015](use_cases/UC-015.md); the menu commands exist; the pad service deploys under the `operator-pad` compose profile).** The pad is a human surface equal to admin mode: it
+**Operator pad (#2050, [UC-015](use_cases/UC-015.md); the menu commands exist; the pad service deploys under the `operator-pad` compose profile).** The pad is the host's device surface: it
 reaches the flag service only through menu commands (`ProcessInput` `force_start`, `step_setting`, `agent_switch`,
-`set_backend`), never directly. It cycles the same flags as the controller: the `game` flags (`sensitivity`, `num_teams`,
+`set_backend`), never directly. It sets the `game` flags (`sensitivity`, `num_teams`,
 `force_all_start`) and the `user` flags (`game_instructions`, `current_game`) and adds the agent's `enabled` (in memory, no persist: the kill
-switch does not survive a restart), `decision.backend` (persisted) and the `user` flag `audio_volume.master`. Pad and
-controller admin mode race on the same keys: the last write wins, no lock. The agent still never writes the `agent`
-set; the "menu writes one agent key" statements of §1 and UC-013 BR-001 describe the admin-mode path.
+switch does not survive a restart), `decision.backend` (persisted) and the `user` flag `audio_volume.master`. The
+agent still never writes the `agent` set. Until #2819 the controller admin mode wrote the same keys and raced the pad
+(last write wins).
 Since #2747 ([UC-016](use_cases/UC-016.md) BR-012, BR-013; the pad's keys that send them are planned): two more menu commands, no new key: `reset_setting` clears
 the operator's persisted value of a key the pad already writes (the `automatic` clear generalised), and
 `interventions_switch` writes the in-memory `interventions_enabled` the resume already writes. The `policy.*` budgets stay
@@ -298,12 +290,11 @@ section 4.1.
 The model above needs a human feedback loop and an on-device control. Both have
 shipped, #818 gives the human a signal when the agent acts, and #819 gives the
 admin an on-device way to constrain the agent (`interventions_allowed` lives in the
-`agent` set, which admin mode now writes through the `agent_control` option).
+`agent` set, which the operator pad now writes, UC-015 BR-002 to BR-004, BR-019).
 
 ### 6.1 Visibility (`#818`, partly shipped)
 
-The normative contract, the on-device agent cue (shipped) and the truthful admin announcement (voice line and LED colour: effective value on option select, agent cue plus
-effective value after a step that an overlay differs from; UC-012 step 3, BR-006, #1739) live in
+The normative contract and the on-device agent cue (shipped) live in
 [flags.md section 14.2](specs/flags.md#142-the-visibility-contract).
 
 ### 6.2 Kill-switch / policy control (`#819`)
@@ -329,16 +320,15 @@ terminal (`scripts/flags.sh`) or a baseline edit. A conforming implementation mu
 > write path has no policy layer, by design (the human is trusted). #819 adds the
 > human's *control over the agent*, not a constraint on the human.
 
-**Implemented (#819).** Admin mode gains a new controller-cycled option,
-`agent_control` (MOVE to select it, SELECT/START to change), that cycles the
-GLOBAL `interventions_allowed` policy in the `agent` set through the levels
-`none → ambient → standard → full` and back
-(`AdminOptionsMixin.handle_agent_control`,
-[`services/menu/handlers/admin_options.py`](../services/menu/handlers/admin_options.py)). `none`
+**Implemented (#819; on the operator pad since #2819).** The pad's agent level steps the
+GLOBAL `interventions_allowed` policy in the `agent` set along the levels
+`none → ambient → standard → full`, clamped (UC-015 BR-004, BR-019;
+`SettingsOps._step_agent_level`, [`services/menu/settings_ops.py`](../services/menu/settings_ops.py)),
+and its agent key stops and resumes the agent (UC-015 BR-002, BR-003). `none`
 is the hard panic-off: it is **load-bearing at the gate** because the
 coordinator's allow-list (`_check_chain`, step (a)) then rejects every agent
 intervention regardless of what the agent process does. Each level has a distinct
-LED color (red = off / Turquoise / Orange / green = full) and a voice line.
+voice line. The controller admin mode's `agent_control` option did the same until #2819.
 
 - **Write-ownership decision (recorded).** The menu writes the single
   `interventions_allowed` key of the `agent` set through the flag service with a
@@ -357,7 +347,7 @@ LED color (red = off / Turquoise / Orange / green = full) and a voice line.
 
 | Concern | File |
 |---|---|
-| Human write path | [`services/menu/handlers/admin_options.py`](../services/menu/handlers/admin_options.py), [`lib/flag_service_writer.py`](../lib/flag_service_writer.py) → flag service ([`services/flag-service/`](../services/flag-service/)) |
+| Human write path | [`services/menu/settings_ops.py`](../services/menu/settings_ops.py) (operator pad commands), [`lib/flag_service_writer.py`](../lib/flag_service_writer.py) → flag service ([`services/flag-service/`](../services/flag-service/)) |
 | Baseline → game start | [`services/menu/game_lifecycle.py`](../services/menu/game_lifecycle.py) (`_build_game_config`), [`services/game_coordinator/game_factory.py`](../services/game_coordinator/game_factory.py) |
 | Baseline freeze | [`services/game_coordinator/games/base.py`](../services/game_coordinator/games/base.py) (`__init__`, ~490-580) |
 | Agent write path | [`services/agent/actions/writer.go`](../services/agent/actions/writer.go) |

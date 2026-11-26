@@ -18,16 +18,6 @@ type InterventionGate interface {
 	InterventionsEnabled(ctx context.Context) bool
 }
 
-// RolloutGate resolves the LIVE rollout_enabled safety gate (#1213) at USE-TIME.
-// *flags.Flags satisfies it via RolloutEnabled; tests supply a fake. It is read on
-// every SetControllerCount and DryRun call (never cached) so flipping the flag in
-// flagd starts/stops applying with no restart, and a flagd outage FAILS CLOSED
-// (RolloutEnabled returns false ⇒ dry-run) so the agent never flips the rollout
-// stage when it cannot confirm the gate is on (#1177/#1217).
-type RolloutGate interface {
-	RolloutEnabled(ctx context.Context) bool
-}
-
 // GatedActionSink wraps the real intervention Writer behind the LIVE
 // interventions_enabled flag (#1213). It REPLACES the old startup-time
 // AGENT_INTERVENTIONS_ENABLED env gate (which selected the Writer-or-nil sink ONCE
@@ -84,92 +74,3 @@ var _ decision.ActionApplier = (*GatedActionSink)(nil)
 // Mirrors flags.keyInterventionsEnabled (kept local so actions does not need the
 // flags key const exported).
 const keyInterventionsEnabledLog = "interventions_enabled"
-
-// GatedRolloutActuator wraps the real RolloutWriter behind the LIVE rollout_enabled
-// flag (#1213). It REPLACES the old startup-time AGENT_ROLLOUT_ENABLED env gate
-// (which selected RolloutWriter-or-DryRunRolloutWriter ONCE in main.go). On every
-// SetControllerCount it re-evaluates the gate: when on it delegates the real flip to
-// the wrapped RolloutWriter; when off (or flagd unreachable) it is a dry-run — it
-// logs the would-be flip and writes nothing. DryRun() likewise reports the LIVE gate
-// state, so the loop stamps rollout.dry_run correctly per cycle.
-//
-// rootCtx is the agent's long-lived context, used to evaluate the gate (rollout
-// flips happen on the infra loop's own goroutine, which has no per-decision ctx like
-// the ActionSink does). The ladder helpers delegate to the wrapped writer (the
-// value↔variant mapping stays single-sourced).
-type GatedRolloutActuator struct {
-	rootCtx context.Context
-	gate    RolloutGate
-	writer  *RolloutWriter
-	dry     *DryRunRolloutWriter
-	log     *slog.Logger
-}
-
-// NewGatedRolloutActuator wraps writer behind gate, evaluating against rootCtx. log
-// nil → slog.Default().
-func NewGatedRolloutActuator(rootCtx context.Context, gate RolloutGate, writer *RolloutWriter, log *slog.Logger) *GatedRolloutActuator {
-	if log == nil {
-		log = slog.Default()
-	}
-	return &GatedRolloutActuator{
-		rootCtx: rootCtx,
-		gate:    gate,
-		writer:  writer,
-		dry:     NewDryRunRolloutWriter(log),
-		log:     log,
-	}
-}
-
-// SetControllerCount delegates to the real writer when the LIVE rollout_enabled gate
-// is on; otherwise it is a dry-run (logs, writes nothing). Fail-closed: a flagd
-// error inside the gate resolves to false ⇒ dry-run.
-func (a *GatedRolloutActuator) SetControllerCount(variant string) error {
-	if !a.gate.RolloutEnabled(a.rootCtx) {
-		return a.dry.SetControllerCount(variant)
-	}
-	return a.writer.SetControllerCount(variant)
-}
-
-// ApplyControllerCount is SetControllerCount with the outcome reported: applied is
-// true only when the LIVE gate was on and the real writer ran. The gate is read
-// ONCE, so the InfraLoop commits its in-memory rollout state (lastWritten,
-// rollbackInFlight, cooldown) only for a write that actually happened, even if
-// rollout_enabled flips between the loop's DryRun() read and this call (UC-045 A4).
-func (a *GatedRolloutActuator) ApplyControllerCount(variant string) (applied bool, err error) {
-	if !a.gate.RolloutEnabled(a.rootCtx) {
-		return false, a.dry.SetControllerCount(variant)
-	}
-	return true, a.writer.SetControllerCount(variant)
-}
-
-// Compile-time check: the InfraLoop uses ApplyControllerCount only through this
-// optional interface, so a signature drift would silently fall back to the
-// two-read DryRun()+SetControllerCount path.
-var _ decision.RolloutApplier = (*GatedRolloutActuator)(nil)
-
-// NextStage / StageVariantForValue delegate to the wrapped writer so the
-// value↔variant ladder mapping is single-sourced regardless of the gate.
-func (a *GatedRolloutActuator) NextStage(current int) (variant string, value int, ok bool) {
-	return a.writer.NextStage(current)
-}
-
-func (a *GatedRolloutActuator) StageVariantForValue(value int) (string, bool) {
-	return a.writer.StageVariantForValue(value)
-}
-
-// ServedStage delegates to the wrapped writer regardless of the gate: reading the
-// served stage writes nothing, and the loop needs it to notice an operator reset
-// or a flag-service restart even while rollout_enabled is off (#1384).
-func (a *GatedRolloutActuator) ServedStage(ctx context.Context) (decision.ServedRolloutStage, error) {
-	return a.writer.ServedStage(ctx)
-}
-
-var _ decision.RolloutStageReader = (*GatedRolloutActuator)(nil)
-
-// DryRun reports the LIVE gate state: true (rehearsal) when rollout_enabled is off
-// or flagd is unreachable, false (applied) when it is on. The loop lifts this onto
-// every rollout decision span as rollout.dry_run, so a Jaeger consumer sees the
-// CURRENT gate state per cycle, not a boot-time snapshot.
-func (a *GatedRolloutActuator) DryRun() bool {
-	return !a.gate.RolloutEnabled(a.rootCtx)
-}

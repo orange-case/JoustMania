@@ -22,7 +22,6 @@ import (
 
 // TestRetro_TransportErrorSetsSpanError: a backend whose Infer errors sets Error status
 // (description = error type) on the retro span, and the error text appears nowhere on it.
-// UC: UC-070 A5
 // UC: UC-042 A9
 func TestRetro_TransportErrorSetsSpanError(t *testing.T) {
 	resetRetroResponseRef()
@@ -36,7 +35,7 @@ func TestRetro_TransportErrorSetsSpanError(t *testing.T) {
 	rc.AwaitInflight()
 
 	span := spansByName(sr.Ended(), SpanLLMRetro)[0]
-	// UC-070 A5 step 3: the model was called (inference.used names it), the summary
+	// UC-042 A9: the model was called (inference.used names it), the summary
 	// did not parse, llm.infer.error names the failure and a WARN log is written.
 	if v, ok := attrValue(span, AttrInferenceUsed); !ok || v.AsString() != "claude" {
 		t.Errorf("inference.used = %q (present=%v), want the called backend claude", v.AsString(), ok)

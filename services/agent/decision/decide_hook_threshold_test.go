@@ -12,7 +12,7 @@ import (
 
 // Per-backend act-confidence threshold (#1287): Jev's confidence is the calibrated
 // gate p_yes, so jev answers are routed against decision.jev.act_confidence_threshold
-// (default 0.6) while claude/openai keep the global decision.act_confidence_threshold
+// (default 0.6) while claude keeps the global decision.act_confidence_threshold
 // (default 0.8). These tests use the flag defaults unless they say otherwise.
 // Spec: decide-contract.md §5 and §12, UC-040 step 9 and A13, FR-047.
 
@@ -65,7 +65,6 @@ func assertThreshold(t *testing.T, span sdktrace.ReadOnlySpan, want float64, sou
 }
 
 // UC: UC-040 main A13
-// UC: UC-070 main
 func TestThreshold_JevActsAtGateByDefault(t *testing.T) {
 	h := newRemoteHarness(t, defaultThresholdSnapshot(flags.DecisionBackendJev, time.Second), jevBackend(nearThresholdConfidence))
 	span := h.run(t)
@@ -80,7 +79,6 @@ func TestThreshold_JevActsAtGateByDefault(t *testing.T) {
 }
 
 // UC: UC-040 A5
-// UC: UC-070 main A2
 func TestThreshold_ClaudeHeldAtGlobalByDefault(t *testing.T) {
 	be := newFakeDecideBackend(ffaAnswer("grant_shield", nearThresholdConfidence, "A", 0.5, "x"))
 	h := newRemoteHarness(t, defaultThresholdSnapshot(flags.DecisionBackendClaude, time.Second), be)

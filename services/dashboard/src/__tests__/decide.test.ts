@@ -648,3 +648,11 @@ describe("UC-040 A47: the Decisions row badges a group target (#2529)", () => {
     );
   });
 });
+
+describe("UC-035: a retired backend name (openai) renders as other", () => {
+  it("maps to the other class, not a backend colour", () => {
+    const html = renderDecideRow({ ...only(actFixture), backend: "openai", requested: "openai" });
+    expect(html).toContain("decide-backend-other");
+    expect(html).not.toContain("decide-backend-openai");
+  });
+});

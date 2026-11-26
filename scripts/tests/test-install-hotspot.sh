@@ -23,7 +23,8 @@
 #    a failed reconnect exits non-zero; without it the refusal names it
 #  - --remove uses the installed remover; the upgrade's stale-files hint
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-install-hotspot.sh
-# UC: UC-061 Pre-1 Pre-2 Pre-3 A8 A11 BR-001 BR-004
+# UC: UC-061 Pre-1 Pre-2 Pre-3
+# Spec: docs/specs/stage-host.md SH-13 SH-14
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 

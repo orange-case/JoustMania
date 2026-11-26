@@ -131,7 +131,7 @@ func TestRevertHoldsRefusedValueResavedDuringWrite(t *testing.T) {
 }
 
 // UC: UC-055 A4
-// A round applies Flagsmith's openai; before it records the write, the
+// A round applies Flagsmith's rules; before it records the write, the
 // operator saves jev and Flagsmith refuses it. The round must not end that
 // refusal, so pull rounds do not send jev again.
 func TestAppliedWriteKeepsLaterPushRefusal(t *testing.T) {
@@ -152,7 +152,7 @@ func TestAppliedWriteKeepsLaterPushRefusal(t *testing.T) {
 			return ok && v.Variant == "jev"
 		})
 	})
-	m.set("decision.backend", "openai")
+	m.set("decision.backend", "rules")
 	h.round()
 	if putErr != nil {
 		t.Fatal(putErr)

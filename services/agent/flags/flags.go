@@ -68,12 +68,6 @@ const (
 	keyBalancedSpikeSurvival       = "fitness.balanced.spike_survival_threshold"
 	keyAccelerateTargetSessionSecs = "fitness.accelerate.target_session_seconds"
 
-	// Infrastructure (Bluetooth) fitness thresholds (#735). Read every cycle so
-	// they can be tuned live on stage; they drive the infra fitness evaluation.
-	keyBluetoothMaxEventGapMs       = "fitness.bluetooth.max_event_gap_ms"
-	keyBluetoothMaxDroppedEventsPct = "fitness.bluetooth.max_dropped_events_pct"
-	keyBluetoothMinMovementUpdateHz = "fitness.bluetooth.min_movement_update_hz"
-
 	// M7-4 propose-stage flag (#931). Read live (never cached) so a retune of the
 	// propose cadence takes effect on the next propose cycle — same contract as the
 	// #847 llm.* gate flags. It governs how often the (expensive) propose call of
@@ -157,22 +151,20 @@ const (
 	keyVerdictSDFloor         = "verdict_sd_floor"
 	keyVerdictAnchorMargin    = "verdict_anchor_margin"
 
-	// Runtime SAFETY gates migrated from env to agent.json flags (#1213). These
-	// were the AGENT_INTERVENTIONS_ENABLED / AGENT_ROLLOUT_ENABLED env masters read
-	// ONCE at startup in main.go to select which action sink / rollout actuator was
-	// wired (#730/#734). Migrating them to flags makes the gate hot-reloadable —
+	// Runtime SAFETY gate migrated from env to an agent.json flag (#1213). It was
+	// the AGENT_INTERVENTIONS_ENABLED env master read ONCE at startup in main.go to
+	// select which action sink was wired (#730). Migrating them to flags makes the gate hot-reloadable —
 	// flip it in flagd and the agent stops/starts ACTUATING with no restart.
 	//
 	// They are SAFETY gates, not tuning knobs: unlike the #1215 game-cap migration
 	// (fail-OPEN to a default), these MUST fail CLOSED. When flagd is undefined or
 	// unreachable the gate resolves to the NOT-ACTING state (off), matching the
 	// fail-closed env default (`:-false` in docker-compose.yml) — see DefaultInterventionsEnabled
-	// / DefaultRolloutEnabled and the per-USE wiring (not cached-at-init, #1217).
+	// and the per-USE wiring (not cached-at-init, #1217).
 	//
 	// Read via the TYPED bool getter (boolFlag/BooleanValue), NOT ObjectValue — a
 	// flag read via ObjectValue silently TYPE_MISMATCHes to its default (#903/#1127).
 	keyInterventionsEnabled = "interventions_enabled"
-	keyRolloutEnabled       = "rollout_enabled"
 )
 
 // Safe defaults applied when flagd is unreachable or a flag is undefined.
@@ -228,19 +220,6 @@ const (
 	// the accelerate target (fitness.accelerate.target_session_seconds).
 	DefaultAccelerateTargetSessionSeconds = 60
 
-	// Infrastructure (Bluetooth) fitness defaults (#735), mirroring the
-	// services/flagd/agent.json fitness.bluetooth.* defaultVariants.
-
-	// DefaultBluetoothMaxEventGapMs: a window event gap above this fails infra
-	// fitness (fitness.bluetooth.max_event_gap_ms).
-	DefaultBluetoothMaxEventGapMs = 50.0
-	// DefaultBluetoothMaxDroppedEventsPct: a window drop ratio above this fails
-	// infra fitness (fitness.bluetooth.max_dropped_events_pct).
-	DefaultBluetoothMaxDroppedEventsPct = 0.02
-	// DefaultBluetoothMinMovementUpdateHz: an update rate below this fails infra
-	// fitness (fitness.bluetooth.min_movement_update_hz).
-	DefaultBluetoothMinMovementUpdateHz = 10.0
-
 	// M7-4 propose-stage defaults (#931), mirroring the services/flagd/agent.json
 	// code_improvement.* defaultVariants. Applied when flagd is unreachable or a
 	// flag is undefined.
@@ -287,24 +266,18 @@ const (
 	// throttleInterval = 1s).
 	DefaultDecisionThrottleSeconds = 1.0
 
-	// Runtime SAFETY-gate defaults (#1213), mirroring the services/flagd/agent.json
-	// interventions_enabled / rollout_enabled defaultVariants AND the fail-closed
-	// env default these replace (AGENT_INTERVENTIONS_ENABLED / AGENT_ROLLOUT_ENABLED,
-	// both `:-false` in docker-compose.yml). These defaults are deliberately the SAFE
-	// state, applied when flagd is undefined or UNREACHABLE (#1177): a missing/down
-	// control plane must NOT actuate — the agent does not write interventions /
-	// does not flip the rollout stage. Fail CLOSED, never fail open to acting.
+	// Runtime SAFETY-gate default (#1213), mirroring the services/flagd/agent.json
+	// interventions_enabled defaultVariant AND the fail-closed env default it
+	// replaces (AGENT_INTERVENTIONS_ENABLED `:-false` in docker-compose.yml). It is
+	// deliberately the SAFE state, applied when flagd is undefined or UNREACHABLE
+	// (#1177): a missing/down control plane must NOT actuate. Fail CLOSED, never
+	// fail open to acting.
 
 	// DefaultInterventionsEnabled is fail-closed OFF: when flagd is unreachable the
 	// agent's ActionSink does NOT write interventions — a decided, fully-gated
 	// intervention is RECORDED/spanned but never applied (the no-op sink behavior the
 	// old AGENT_INTERVENTIONS_ENABLED=false produced).
 	DefaultInterventionsEnabled = false
-	// DefaultRolloutEnabled is fail-closed OFF: when flagd is unreachable the rollout
-	// actuator is a DRY-RUN — the infra loop still decides+spans the expansion
-	// (rollout.dry_run=true) but never flips current_controller_count on the flag service
-	// (the old AGENT_ROLLOUT_ENABLED=false behavior).
-	DefaultRolloutEnabled = false
 )
 
 // defaultObjectives is the fallback objectives weighting. Returned as a fresh
@@ -422,23 +395,6 @@ type Fitness struct {
 	// AccelerateTargetSessionSeconds: sessions past this overshoot the accelerate
 	// target (fitness.accelerate.target_session_seconds, default 60).
 	AccelerateTargetSessionSeconds int
-}
-
-// BluetoothFitness is the infrastructure (Bluetooth) fitness thresholds (#735):
-// the transport-health limits the infra fitness evaluation scores the live
-// Bluetooth context against. Evaluated every cycle (never cached) so flipping a
-// threshold mid-stage changes the next infra evaluation. Kept SEPARATE from
-// Fitness (game objectives) — distinct flags, distinct concerns.
-type BluetoothFitness struct {
-	// MaxEventGapMs: a window event gap above this fails fitness
-	// (fitness.bluetooth.max_event_gap_ms, default 50).
-	MaxEventGapMs float64
-	// MaxDroppedEventsPct: a window drop ratio above this fails fitness
-	// (fitness.bluetooth.max_dropped_events_pct, default 0.02).
-	MaxDroppedEventsPct float64
-	// MinMovementUpdateHz: an update rate below this fails fitness
-	// (fitness.bluetooth.min_movement_update_hz, default 10).
-	MinMovementUpdateHz float64
 }
 
 // Lifecycle holds the agent's lifecycle + throttle calibration values (#766 F5),
@@ -756,8 +712,6 @@ type Snapshot struct {
 	LLMGate LLMGate
 	// Fitness holds the per-objective fitness thresholds (#731).
 	Fitness Fitness
-	// BluetoothFitness holds the infrastructure fitness thresholds (#735).
-	BluetoothFitness BluetoothFitness
 	// Decision holds the decision-backend flags (#1226): which backend answers
 	// the decide contract, the act-confidence threshold, content capture, and
 	// each remote backend's model / base URL / timeout. Read every cycle.
@@ -790,9 +744,6 @@ func (s Snapshot) Permits(intervention string) bool {
 // Flags evaluates the agent control flags against an OpenFeature client.
 type Flags struct {
 	client Evaluator
-	// rollout evaluates the rollout set (remediation_allowed): its own in-process
-	// provider and selector (#1713). nil: client serves it too (tests).
-	rollout Evaluator
 	// game evaluates the game set, read-only: only the two shield flags of the
 	// charge ledger (ShieldCharge, UC-040 A31). nil: ShieldCharge returns its
 	// defaults, never a read through client.
@@ -857,27 +808,11 @@ func (f *Flags) Evaluate(ctx context.Context) Snapshot {
 			BalancedSpikeSurvivalThreshold: f.floatFlag(ctx, keyBalancedSpikeSurvival, DefaultBalancedSpikeSurvivalThreshold),
 			AccelerateTargetSessionSeconds: f.intFlag(ctx, keyAccelerateTargetSessionSecs, DefaultAccelerateTargetSessionSeconds),
 		},
-		BluetoothFitness: f.BluetoothFitness(ctx),
-		Decision:         f.DecisionBackend(ctx),
-		ProbeDecisions:   f.probeDecisions(ctx),
+		Decision:       f.DecisionBackend(ctx),
+		ProbeDecisions: f.probeDecisions(ctx),
 
 		InterventionsEnabled: f.InterventionsEnabled(ctx),
 		ExperimentsEnabled:   f.boolFlag(ctx, keyExperimentsEnabled, false),
-	}
-}
-
-// BluetoothFitness evaluates ONLY the three fitness.bluetooth.* thresholds
-// (#735). It is the narrow accessor the infrastructure loop reads on every
-// observe cycle (~1Hz) so the Bluetooth fitness thresholds are tunable live on
-// stage with no restart — without paying for a full four-layer Evaluate the
-// infra path never consumes. Each flag falls back to its safe default on any
-// evaluation error (e.g. flagd unreachable), so a down control plane reverts to
-// the flagd-schema defaults rather than failing the cycle.
-func (f *Flags) BluetoothFitness(ctx context.Context) BluetoothFitness {
-	return BluetoothFitness{
-		MaxEventGapMs:       f.floatFlag(ctx, keyBluetoothMaxEventGapMs, DefaultBluetoothMaxEventGapMs),
-		MaxDroppedEventsPct: f.floatFlag(ctx, keyBluetoothMaxDroppedEventsPct, DefaultBluetoothMaxDroppedEventsPct),
-		MinMovementUpdateHz: f.floatFlag(ctx, keyBluetoothMinMovementUpdateHz, DefaultBluetoothMinMovementUpdateHz),
 	}
 }
 
@@ -894,36 +829,6 @@ func (f *Flags) BluetoothFitness(ctx context.Context) BluetoothFitness {
 // decision is actually APPLIED to disk.
 func (f *Flags) InterventionsEnabled(ctx context.Context) bool {
 	return f.boolFlag(ctx, keyInterventionsEnabled, DefaultInterventionsEnabled)
-}
-
-// RemediationAllowed evaluates the rollout set's remediation_allowed flag
-// through flagd (#1411, R1), on the rollout domain's provider (selector
-// flagSetId=rollout, #1713). Any error resolves false: auto-rollback stays off
-// (fail closed).
-func (f *Flags) RemediationAllowed(ctx context.Context) bool {
-	client := f.client
-	if f.rollout != nil {
-		client = f.rollout
-	}
-	v, err := client.BooleanValue(ctx, "remediation_allowed", false, openfeature.EvaluationContext{})
-	if err != nil {
-		f.log.Debug("flags remediation_allowed fell back to default", "error", err, "default", false)
-		return false
-	}
-	return v
-}
-
-// RolloutEnabled resolves the runtime rollout-actuation gate (#1213,
-// rollout_enabled). It is the migrated AGENT_ROLLOUT_ENABLED env master: when true
-// the infra loop's actuator FLIPS current_controller_count on the flag service (rollout set); when
-// false (or flagd unreachable) it is a DRY-RUN — the loop decides+spans the
-// expansion (rollout.dry_run=true) but writes nothing. Read at USE-TIME (per
-// SetControllerCount / DryRun call), NOT cached at startup — flipping the flag in
-// flagd starts/stops applying with no restart, and a flagd outage at any moment
-// FAILS CLOSED (DefaultRolloutEnabled=false) so the agent never flips the rollout
-// stage when it cannot confirm the gate is on (#1177).
-func (f *Flags) RolloutEnabled(ctx context.Context) bool {
-	return f.boolFlag(ctx, keyRolloutEnabled, DefaultRolloutEnabled)
 }
 
 // AgentEnabled resolves ONLY the `enabled` kill switch, without the full Evaluate

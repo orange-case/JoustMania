@@ -18,12 +18,10 @@ import { AgentView } from "./components/AgentView.js";
 import {
   DecideStore,
   FlagStateStore,
-  RolloutStore,
   activityFeed,
   blockedRowsFrom,
   fetchAgentState,
   fetchInterventionCounts,
-  fetchRollouts,
 } from "./agent.js";
 import type { FlagPanel, InterventionOverlay } from "./agent.js";
 import { fetchAdapters } from "./adapters.js";
@@ -38,11 +36,9 @@ import { ShieldStore } from "./shield.js";
 import { reduceGameEvent } from "./gameEvents.js";
 import {
   agentPanelsDown,
-  onAgentPollFailed,
   onDecidePollFailed,
   onExperimentsPollFailed,
   paintAgentPanels,
-  settleAgentPoll,
 } from "./degrade.js";
 import { FollowTracker, GameEventClock, followBanner, isRealGameLive, seedFromPoll, visibleTiles } from "./follow.js";
 import type { GameInfoLike } from "./follow.js";
@@ -61,12 +57,10 @@ const EXPERIMENTS_POLL_MS = 5000;
 const EXPERIMENTS_MAX_BACKOFF_MS = 15_000;
 const EXPERIMENTS_TIMEOUT_MS = 4000;
 
-// Agent tab, everything but the agent's state: VictoriaMetrics counts and the
-// rollout searches in Jaeger (every ROLLOUT_EVERY_TICKS).
+// Agent tab, everything but the agent's state: the VictoriaMetrics counts.
 const AGENT_POLL_MS = 5000;
 const AGENT_MAX_BACKOFF_MS = 15_000;
 const AGENT_TIMEOUT_MS = 4000;
-const ROLLOUT_EVERY_TICKS = 2;
 
 // The decide feed, strip and flag panel from the agent's GET /experiments/state
 // (#1233). Faster than the other agent panels: a live decision.backend switch must
@@ -118,13 +112,10 @@ let shadowStream: { gameId: string; abort: AbortController } | null = null;
 
 // invoke_agent rows of the agent's last answer; the follow poller tells it which game to describe.
 const decideStore = new DecideStore();
-// Flag states per game (agent state), rollout rows (Jaeger).
+// Flag states per game, from the agent's state.
 const flagStore = new FlagStateStore();
-const rolloutStore = new RolloutStore();
 // The VictoriaMetrics half of the overlay; null until the agent poller ran once.
 let interventionCounts: InterventionOverlay | null = null;
-/** False while the last Agent poll's Jaeger leg failed (UC-035 A3 step 2). */
-let agentJaegerOk = true;
 /** False while the last poll of the agent's state failed (UC-035 A3 step 2). */
 let agentStateOk = true;
 // The agent's progress snapshot per experiment.
@@ -176,7 +167,7 @@ async function init() {
   // Start polling the experiments (agent state)
   startExperimentsPolling();
 
-  // Start polling the rollout rows (Jaeger) and intervention counts (VM)
+  // Start polling the intervention counts (VM)
   startAgentPolling();
 
   // Start polling the decide feed and the flags (agent state)
@@ -347,42 +338,26 @@ function currentFlags(): FlagPanel | null {
 }
 
 // Render the activity feed, flag panel and overlay from the stores.
-// While the Agent poll's Jaeger leg fails only the overlay renders (UC-035 A3).
+// While the agent's state fails only the overlay renders (UC-035 A3).
 function renderAgentPanels() {
-  paintAgentPanels(agentView, interventionCounts, agentPanelsDown(agentStateOk, agentJaegerOk), () => ({
-    feed: activityFeed(blockedRowsFrom(decideStore.feed().rows), rolloutStore.list()),
+  paintAgentPanels(agentView, interventionCounts, agentPanelsDown(agentStateOk), () => ({
+    feed: activityFeed(blockedRowsFrom(decideStore.feed().rows)),
     flags: currentFlags(),
   }));
 }
 
-// Poll the Agent tab's other panels: VictoriaMetrics counts (never fail) and the
-// rollout searches (Jaeger; a failure keeps the last render, flagged stale).
+// Poll the Agent tab's VictoriaMetrics counts (they never fail: n/a when it is down).
 function startAgentPolling() {
-  let tick = 0;
   agentPoller = createPoller({
     baseMs: AGENT_POLL_MS,
     maxMs: AGENT_MAX_BACKOFF_MS,
     timeoutMs: AGENT_TIMEOUT_MS,
     isActive: () => tabActive("agent"),
     run: async (signal) => {
-      const rolloutDue = tick % ROLLOUT_EVERY_TICKS === 0;
-      // Settled, not all: the VictoriaMetrics counts render even when Jaeger
-      // fails (UC-035 A3 step 2); the Jaeger failure still marks the poll failed.
-      const settled = await Promise.allSettled([
-        fetchInterventionCounts(signal),
-        rolloutDue ? fetchRollouts(rolloutStore, signal) : Promise.resolve(),
-      ]);
-      tick += 1;
-      const result = settleAgentPoll(settled, interventionCounts, rolloutDue);
-      interventionCounts = result.overlay;
-      agentJaegerOk = result.jaegerOk ?? agentJaegerOk;
+      interventionCounts = await fetchInterventionCounts(signal);
       renderAgentPanels();
-      if (result.failed) throw result.failed.reason;
     },
-    onError: (error) => {
-      console.error("Agent poll error:", error);
-      onAgentPollFailed(agentView);
-    },
+    onError: (error) => console.warn("Intervention count poll error:", error),
   });
 
   setInterval(() => agentView.updateFreshness(), 1000);

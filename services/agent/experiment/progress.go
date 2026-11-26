@@ -22,9 +22,6 @@ const (
 	ProgressTriggerPromoting     = "promoting"
 	ProgressTriggerTerminal      = "terminal"
 	ProgressTriggerRehydrate     = "rehydrate"
-	// ProgressTriggerRecommendation: a deferred promotion was refused after the
-	// experiment ended (UC-043 A19, #2276); the snapshot carries the recommendation.
-	ProgressTriggerRecommendation = "recommendation"
 
 	// MaxFinishedProgress bounds the finished experiments kept (newest first).
 	MaxFinishedProgress = 10
@@ -91,7 +88,7 @@ type ProgressArm struct {
 
 // emitProgressLocked records the progress snapshot of e. link is the agent.experiment
 // span context (teardown passes the one it captured before ending the span).
-// endReason is kept once set. Assumes r.mu is held.
+// endReason is set on the terminal snapshot. Assumes r.mu is held.
 func (r *Registry) emitProgressLocked(e *entry, trigger, endReason string, link trace.SpanContext) {
 	if e == nil || e.journal == nil {
 		return
@@ -113,14 +110,6 @@ func (r *Registry) emitProgressLocked(e *entry, trigger, endReason string, link 
 	}
 	if link.IsValid() {
 		snap.TraceID = link.TraceID().String()
-	}
-	if held, ok := r.progress[e.id]; ok {
-		if snap.EndReason == "" {
-			snap.EndReason = held.EndReason
-		}
-		if snap.TraceID == "" {
-			snap.TraceID = held.TraceID
-		}
 	}
 	if v := summary.Verdict; v != nil {
 		snap.Verdict = &ProgressVerdict{Outcome: v.Outcome, Delta: v.Delta, Significant: v.Significant}

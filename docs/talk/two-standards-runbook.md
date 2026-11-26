@@ -74,7 +74,7 @@ The exception is the decision backend and its model: `agent-backend.sh`
 writes them **persisted** (#1682), as the operator's choice, so they survive a flag-service restart or a reboot. A stage
 overlay over a persisted backend is temporary: a restart brings the persisted
 backend back. `talk-stage.sh reset` clears the persisted backend and model too,
-and `talk-preflight.sh` WARNs while a remote backend (jev / claude / openai) is
+and `talk-preflight.sh` WARNs while a remote backend (jev / claude) is
 persisted.
 `./scripts/talk-preflight.sh` checks that flagd holds its sync stream to the
 flag service (the "flag service" section).
@@ -90,13 +90,12 @@ needed`, which is expected there; only the stage stack (`services/flagd/`,
 | Compose files | `docker-compose.yml` only, named with `-f` so the dev `docker-compose.override.yml` is **not** loaded (it publishes the gRPC and mock control ports on the venue network, #1319) | `docker-compose.yml` + `override` + `ci` + `dry-run`, profiles `agent` + `dashboard` |
 | Baseline the flag service loads (read-only) | `services/flagd/` | `services/flagd/ci/` |
 | Gameplay | real players | `tools/demo/demo_driver.py` (scripted mock movement) |
-| Infra rollback beat | possible (needs the python HID adapter) | not possible (see section 4) |
 
 Notes:
 
 - No helper and no service writes a flag file any more: the baseline files stay
-  as checked in. The agent's interventions are per game and die with the game;
-  its rollout moves (infra beat) are in-memory overlays. The backend and model
+  as checked in. The agent's interventions are per game and die with the game.
+  The backend and model
   flips are persisted (see above); every other stage change is in memory.
 - `make dry-run` also sets the experiment env vars, but the live gate
   `experiments_enabled` stays `off`, so the experiment loop and the proposer are
@@ -122,7 +121,6 @@ images. The image tag derives from the checked-out commit; do not set
 # .env.local  (git-ignored; never commit, never paste on screen)
 JEV_API_KEY=...                        # Jev, the main in-game backend
 ANTHROPIC_API_KEY=...                  # Claude: in-game backup AND the post-game summary
-# DECISION_OPENAI_API_KEY=...          # only for the optional second-vendor beat (6b)
 # AGENT_LLM_MAX_REQUESTS_PER_MINUTE=30 # optional ceiling on the budget flag (can only lower it), see "Budget"
 ```
 
@@ -209,29 +207,6 @@ ratio, the danger samples or the gap after an answer is off `default`. `talk-sta
 returns the budgets to `stage` and `aggressive`, those three knobs to `default`, and clears
 every overlay written with `--writer stage`.
 
-### The second vendor (optional beat 6b: fill in before T-24h or cut it)
-
-`decision.openai.model` ships with only an empty `unset` variant and
-`decision.openai.base_url` with only `default` (`https://api.openai.com/v1`).
-The model takes a free string at runtime. The base URL does **not**: it carries the
-API key (`Authorization: Bearer`), and `/flags/` has no authentication, so the
-registry accepts only declared variants. Add a `vendor` variant with your URL to
-`decision.openai.base_url` in the baseline file (`services/flagd/agent.json`, or
-`ci/agent.json` on the rehearsal stack), run `./scripts/flags.sh restart`, then:
-
-```bash
-./scripts/flags.sh set-value agent decision.openai.model '"<VENDOR_MODEL_ID>"' --writer stage
-./scripts/flags.sh set agent decision.openai.base_url vendor --writer stage
-```
-
-- `gen_ai.provider.name` is derived from the base URL host
-  (`services/agent/decide/backends/openai/provider.go`): the semconv
-  well-known value for OpenAI, Gemini, Vertex AI, Mistral, Groq, DeepSeek, xAI,
-  Perplexity, Cohere, Azure, Bedrock and IBM watsonx hosts. Unknown hosts
-  (self-hosted, other vendors) record `openai`.
-- If the model rejects `reasoning_effort=low`, run
-  `./scripts/agent-backend.sh effort omit`.
-
 ### The blackhole variant for the degrade beat
 
 `decision.jev.base_url` ships a non-default `blackhole` variant,
@@ -248,10 +223,10 @@ to whatever answers there.
 ### A helper for flags that `agent-backend.sh` does not cover
 
 `agent-backend.sh` flips the `decision.*` flags (backend, model, both act
-thresholds, capture, effort) and `agent-killswitch.sh` flips `enabled`. For the
+thresholds, capture) and `agent-killswitch.sh` flips `enabled`. For the
 rest (`interventions_allowed`, `interventions_enabled`,
 `decision.min_interval_ms`, `decision.jev.base_url`, `decision.*.timeout_ms`,
-`llm.max_requests_per_minute`, rollout flags) use `scripts/flags.sh`, or paste
+`llm.max_requests_per_minute`) use `scripts/flags.sh`, or paste
 this shorthand into the presenter shell:
 
 ```bash
@@ -288,7 +263,6 @@ name) answers 403 until it is added to `JOUSTMANIA_HOSTNAMES` in `.env.local`
 | Jaeger, decide span search (`invoke_agent joustmania-agent`, `agent.decide` before #2584) | `http://localhost/jaeger/search?service=agent&operation=invoke_agent%20joustmania-agent&lookback=15m&limit=20` |
 | Jaeger, held decisions only | `...&tags=%7B%22decide.outcome%22%3A%22held%22%7D` |
 | Jaeger, post-game summary (beat 8) | `http://localhost/jaeger/search?service=agent&operation=agent.llm.retro&lookback=30m&limit=5` |
-| Jaeger, infra decisions (section 4) | `http://localhost/jaeger/search?service=agent&operation=agent.infrastructure.decision&lookback=15m` |
 | Grafana, **stage view** | `http://localhost/grafana/d/talk?kiosk` (**Talk: Two Standards**, folder Talk, #1427): the one Grafana screen for this talk and Grafana's home page, eight large panels, refresh 10 s, no variables. Big numbers: live games (real / shadow), agent decisions per minute (the collector's span metrics over `invoke_agent joustmania-agent`: OTel in), OpenFeature flag evaluations per second (the standard OpenFeature OTel hook metrics `feature_flag_evaluation_*`) and flag-service writes per minute (every flip below is one: OpenFeature out). Below them: decisions per minute by `decide.backend` · `decide.outcome`, interventions applied per minute by type, evaluations per second by flag, and recent `invoke_agent joustmania-agent` traces from Jaeger. Use it next to the dashboard's Agent tab, which stays the decision-by-decision view |
 | Grafana, flags | `http://localhost/grafana/d/feature-flags` (**Flags / OpenFeature**, folder Platform): evaluations by flag, variant and reason, evaluation errors and fallbacks, the flag service (writes, live games registered, flagd sync streams, snapshot size) and flagd health |
 | Grafana, agent metrics | `http://localhost/grafana/d/agent-operations` (**Agent Decisions & Interventions**, the fleet view; replaced Agent Operations — Fleet and Interventions in #1427). Row Decide: decisions per minute by `decide.backend` and the outcome split (act / noop / held / fallback), derived by the OTel collector's span-metrics connector from the `invoke_agent joustmania-agent` spans, so a backend flip shows within a minute; row Remote Backends: `gen_ai.client.operation.duration` p95 and tokens by model |
@@ -359,7 +333,7 @@ asked with the `full` allow-list; on stage the agent asks with `standard`
 `set_pacing_profile`, `adjust_player_sensitivity` or `grant_shield`, and
 real (or mock) motion is noisier than the fixtures (mock motion noise: #1279).
 Say "around 0.7 near the threshold", and measure it in rehearsal (section 9). The global
-`decision.act_confidence_threshold` (default 0.8) governs claude and openai
+`decision.act_confidence_threshold` (default 0.8) governs claude
 only; it moves Jev's bar only when Jev's flag is `inherit`.
 
 **Duration-driven decisions (#1305).** Since #1305 the agent sees the real elapsed game time (before, `elapsed_s` was 0 for the whole game), so the
@@ -383,7 +357,7 @@ real game unless that is the point of the beat.
 ## 2. Talk timing (30-minute slot, about 15 minutes live)
 
 Beats marked **cut** can be dropped first; the order of cutting is 4b (operator
-brief, off the clock unless it replaces 3b), I (infra), 6b, 3b, then shorten 2 to one act and one noop row. With all three cut the live
+brief, off the clock unless it replaces 3b), 3b, then shorten 2 to one act and one noop row (the second-vendor beat 6b was removed with the OpenAI-compatible backend, #2788). With all three cut the live
 part is about 11 minutes.
 
 | Time | Segment | Live? | Cuttable |
@@ -398,9 +372,7 @@ part is about 11 minutes.
 | 14:00 | Beat 4b: tell the agent in words, it stays in its bounds | yes, 1.5 min | **cut** (not yet rehearsed on hardware); off the clock: play it only with 3b cut, it takes 3b's 1.5 min (then 4 runs at 11:30, 4b at 12:30 and 5 on time at 14:00) |
 | 14:00 | Beat 5: kill switch, including an in-flight discard | yes, 1 min | |
 | 15:00 | Beat 6: rollback, flip back to Jev | yes, 0.5 min | |
-| 15:30 | Beat 6b: second vendor (OpenAI-compatible) | yes, 1 min | **cut** |
 | 16:30 | Beat 7: degrade, never stall | yes, 1.5 min | |
-| 18:00 | Beat I: infra rollout, fitness violation, auto-rollback | yes, 2 min | **cut** (hardware only) |
 | 20:00 | Beat 8: the post-game summary by Claude | yes, 1.5 min | |
 | 21:30 | Takeaways: what OTel gave us, what OpenFeature gave us | no | |
 | 26:00 | Q&A (buffer: overruns eat this first) | | |
@@ -419,15 +391,13 @@ Start state: the baseline, a real game running. `backend.sh` below is
 |---|---|---|---|---|---|---|
 | 1 | **Observe**: the agent decides; why + confidence | (none; play) `backend.sh status` on screen | none | Dashboard: rows with backend `rules`, outcome `act`. Jaeger: open a row's `trace` link; `invoke_agent joustmania-agent` with `decide.rationale`, `decide.confidence`, `gen_ai.agent.name`; on the rules path the `agent.decision` spans (action, allowed/blocked) are its **siblings** under `agent.signal_received` | a row per rules decision; rules decisions depend on play. **Verify in rehearsal** how often a 4-player game decides | Run `demo_driver.py --scenario statue` (mock stack) or ask a player to freeze; show a pre-captured trace |
 | 2 | **Live model switch to Jev (the main in-game backend)**: acts when the game needs it, stays out when it does not | `backend.sh jev` | `decision.backend=jev` | Strip flashes to `jev` / `jev-latest`; the threshold (0.60) appears with the first `act` / `held` row (before that "—" or dimmed). Calm play: grey `noop` rows ("84% sure nothing is needed"). Ask the players to push to the edge (near the death threshold) or let eliminations pile up: a green `act` row and something the audience notices: `grant_shield` turns the player's LED and dashboard tile white with a `Shield 5.0s` badge, fades, blinks in the last second and returns to the player colour, with the shield sound; `adjust_music_tempo` speeds the music up; `play_audio_cue` plays the lobby ping. Jaeger: the act trace has two `chat jev-latest` children (`jev.stage=intervention`, then `details`); the stage-1 span shows `jev.gate.p_yes` (around 0.7 near the threshold, around 0.16 calm; measure, do not promise), the event says e.g. `confidence 0.720 >= threshold 0.600 (decision.jev.act_confidence_threshold)`, source `jev` | flag-service push (p95 200 ms, NFR-050) + next decide slot (up to 3 s) + call: noop round about 0.22-0.34 s, act round about 0.47-0.57 s | `~~jev~~ -> rules, backend_unavailable`: `JEV_API_KEY` missing, see failure modes. `timeout` / `error`: Jev unreachable, go to beat 4 now (Claude backup). No `act` ever: mock stack `demo_driver.py --scenario death_cascade` (collapse) or `skill_gap` (novices in the danger zone); show a captured act trace |
-| 3a | **Permissions: confidence threshold** (Jev's own bar) | `backend.sh jev-threshold strict`; after a held row: `backend.sh jev-threshold gate` | `decision.jev.act_confidence_threshold=strict` (0.95), then `gate` (0.6) | The near-threshold / collapsing rows that acted in beat 2 turn amber `held`: event "confidence 0.720 < threshold 0.950 (decision.jev.act_confidence_threshold)", nothing acts in the game. Calm / dragging rows stay grey `noop` (the gate is closed, p_yes ≤ 0.5, so there is nothing to hold). Back on `gate`: acts again | flag-service push (p95 200 ms, NFR-050) + the next decision that opens the gate | `held` needs an open gate: keep the players at the edge. The **global** `backend.sh threshold strict` does NOT move Jev (only claude/openai), so do not use it here. If no held row appears, show the evaluation event of a held captured trace |
+| 3a | **Permissions: confidence threshold** (Jev's own bar) | `backend.sh jev-threshold strict`; after a held row: `backend.sh jev-threshold gate` | `decision.jev.act_confidence_threshold=strict` (0.95), then `gate` (0.6) | The near-threshold / collapsing rows that acted in beat 2 turn amber `held`: event "confidence 0.720 < threshold 0.950 (decision.jev.act_confidence_threshold)", nothing acts in the game. Calm / dragging rows stay grey `noop` (the gate is closed, p_yes ≤ 0.5, so there is nothing to hold). Back on `gate`: acts again | flag-service push (p95 200 ms, NFR-050) + the next decision that opens the gate | `held` needs an open gate: keep the players at the edge. The **global** `backend.sh threshold strict` does NOT move Jev (only claude), so do not use it here. If no held row appears, show the evaluation event of a held captured trace |
 | 3b | Permissions: what it may do (**cut**) | `./scripts/talk-stage.sh permissions none 12` (holds `none` 12 s, then restores `standard`; Ctrl-C restores at once) | `interventions_allowed` | No new rows: **the permission shrinks the question the model is asked (remote backends)**, and with `none` the only option left would be `noop`, so the agent does not ask at all (no remote call, no budget spent; `agent_llm_gated_total{reason=no_interventions_allowed}` counts the skipped cycles, #1298). The `ffa.intervention` options are `noop` plus the allowed list (`decide.FFAQuestions`, visible in `decide.questions`). Back on `standard` Jev is offered shield, tempo, cue and the rest again | flag-service push (p95 200 ms, NFR-050) + next decision | The helper restores `standard` on every exit but `kill -9`; if the beat was killed, `./scripts/talk-stage.sh reset` (the pre-flight FAILs on `none` / `probe`) |
 | 4 | **The backup backend: flip to Claude** (manual, one flag; no automatic jev -> claude chain) | `backend.sh claude` (haiku) | `decision.backend=claude` | Strip flashes to `claude` / `claude-haiku-4-5-20251001`; the threshold may still show a dimmed 0.60 from Jev's last routed row until Claude's first `act` / `held` row shows 0.80 (the global one, source `global`). New rows backend `claude`; Jaeger child `chat claude-haiku-4-5-20251001` with `gen_ai.provider.name=anthropic`. Same contract, same rows, slower: point at `decide.latency_ms` (about 3 s vs Jev's 0.3-0.5 s) | flag-service push (p95 200 ms, NFR-050) + next slot + about 2.7-3.0 s (Haiku warm) | `backend_unavailable`: `ANTHROPIC_API_KEY` missing. `timeout` (above `decision.claude.timeout_ms`, default 5000 ms): `setflag agent decision.claude.timeout_ms patient` (8000) |
 | 4b | **Words, not code: the operator brief** (on Claude **Sonnet**; **cut**; rehearsed on the stage hardware 19 Nov: in 6 two-player games of 7 to 28 s it acted in time in 2, and the target won both) | Before the talk, note the protected player's controller serial (the model sees players only by serial, not by colour or name). From beat 4 (Claude on): `./scripts/flags.sh set agent decision.claude.model sonnet --writer stage` and `./scripts/flags.sh set agent decision.act_confidence_threshold gate --writer stage` (0.6: Sonnet answers at 0.6 to 0.8, so at the global default 0.8 every move is `held`; the router acts at or above the threshold). Why not Haiku: in rehearsal it shielded the opponent and once read the sensitivity direction backwards ("reduce opponent's sensitivity to make them easier to eliminate"); Sonnet aimed every move at the target with the direction right. Keep `decision.claude.timeout_ms=patient` (8000, the stage baseline; Sonnet took 2.1 to 4.2 s on the Pi). The operator (not the agent) widens the per-player sensitivity range down to its hard floor: `./scripts/flags.sh set-value agent decision.magnitude_bounds '{"adjust_player_sensitivity": {"min": 0.2, "max": 1.5}}' --writer stage` (#2696); then the brief: `./scripts/flags.sh set-value agent decision.operator_brief '"Make player <SERIAL> unkillable."' --writer stage`. Use "unkillable", not "should win" or "keep alive as long as you can": with "should win" the model shielded the opponent "to extend the game, helping <SERIAL> win" (the objectives pull towards a longer game). Afterwards `./scripts/flags.sh set agent decision.operator_brief off --writer stage`, `./scripts/flags.sh clear agent decision.magnitude_bounds`, `./scripts/flags.sh set agent decision.act_confidence_threshold default --writer stage`, `./scripts/flags.sh set agent decision.claude.model haiku --writer stage`, or simply `./scripts/talk-stage.sh reset` | `decision.operator_brief`, `decision.magnitude_bounds`, `decision.claude.model`, `decision.act_confidence_threshold` | No new game logic: the same question, the same levers. The first row of a game is a `noop` (the target's readings are still stale, so targeted moves would be refused). Then rows favour the named serial: `grant_shield` and `adjust_player_sensitivity` aimed at it, rationales that quote the brief ("Operator wants <SERIAL> unkillable; give it the longest shield"). After the first shield the next grant is refused (`shield_limited`, pool full) and Sonnet moves to `adjust_player_sensitivity` at the low end, 0.2: the death threshold times 5, practically unkillable (the hard floor in the game and the flag service, never 0); `invoke_agent joustmania-agent` shows `decide.magnitude_bounds.source=flag`; without the widening it stays within 0.7 to 1.5. Seen on the Pi: 0.2 applied at 6.6 s, the target then reached near-death ratio 1.03 and stayed in, and won a 28 s game. Shields barely help: in hold mode they protect only while the trigger is held, and no rehearsal shield was ever used (the summary says so). Jaeger: `invoke_agent joustmania-agent` carries `decide.operator_brief.present=true` and `decide.operator_brief.length`; with capture `on` (the stage baseline) the brief is in `gen_ai.input.messages` of the `chat` child, inside `<operator_brief>`. The post-game summary judges the brief: "The brief was served", "served only by luck" (no intervention applied) or "not served". Point: **words steer which allowed move it picks; flags decide what is allowed** | flag-service push (p95 200 ms, NFR-050) + next slot + the Sonnet call: about 3.5 s from decision to effect, so the first act lands 6 to 9 s into a game. **Needs a game that lasts beyond 15 s**: rehearsal games of 7 to 14 s ended before the agent acted | Game ends before the agent acts (likely with two players): say so, and tell the rehearsal game instead (game_6f6573573dfe: 28 s, 0.2 at 6.6 s, near-death 1.03, stayed in, "The brief was served"). An `invalid_answer` row falls back to rules for that cycle; the next cycle asks again. Everything `held`: the threshold is still 0.8, set `gate`. A brief or a widened range left over from a rehearsal: `./scripts/talk-stage.sh reset` sets them back to `off` and `default`. Jev ignores the brief by design (fixed, calibrated gate criteria), so do this beat on Claude, never on Jev |
 | 5 | **Kill switch**, including a discarded in-flight answer | `./scripts/agent-killswitch.sh off` right after a new Claude row appears (rows appear when a call lands; with about 3 s calls on a 3 s cadence, counted from each call's start, the next call is usually already in flight, so a discard is likely, about 3 in 4 tries; measure in rehearsal); after the point: `./scripts/agent-killswitch.sh on` | `enabled=off`, then `on` | No new `invoke_agent joustmania-agent` rows; Jaeger shows throttled `agent.disabled` spans. The in-flight call lands as a dashed `discarded` row with `kill_switch` (`decide.outcome=discarded`, `decide.discarded_reason=kill_switch`; its rules fallback is suppressed too). Game keeps playing, agent silent. Say what it stops (below) | flag-service push (p95 200 ms, NFR-050) + the next agent cycle | The discard is likely on Claude (about 3 in 4 tries), rare on Jev (its call is over in 0.3 s): do this beat while on Claude. If no discarded row: narrate the silent feed. **Verify in rehearsal** |
 | 6 | **Rollback without redeploy**: back to Jev | `backend.sh jev` | `decision.backend=jev` | Strip back to `jev`; a Claude answer that lands after the flip shows `discarded` / `backend_changed`. No container restarted (`docker ps` uptime). The full rollback to the floor is one more flip: `backend.sh rules` | flag-service push (p95 200 ms, NFR-050) + the next agent cycle | If Jev is unreachable at the venue, stay on Claude and say so: this *is* the backup working |
-| 6b | Second vendor, same contract (**cut**) | First `setflag agent decision.openai.base_url vendor`, **then** `backend.sh openai vendor`; afterwards `backend.sh jev` | `decision.backend=openai`, `decision.openai.model`, `decision.openai.base_url` | Backend `openai`, model `<VENDOR_MODEL_ID>`, `gen_ai.provider.name` changes to the vendor's value | as beat 4; **measure** (`decision.openai.timeout_ms` default 2500 ms) | `backend_unavailable`: model/base URL variant or `DECISION_OPENAI_API_KEY` missing. `invalid_answer` or `error`: `backend.sh effort omit`. Else skip |
 | 7 | **Degrade, never stall** (on Jev) | **Option B (preferred):** `setflag agent decision.jev.base_url blackhole` (the shipped TEST-NET-1 variant). Option A: switch off the Pi's uplink (hotspot off / unplug WAN) | `decision.jev.base_url` (B) or none (A) | B: rows `~~jev~~ -> rules`, `fallback_reason=timeout` once `decision.jev.timeout_ms` expires (or `error` if the network rejects the address fast). A: usually `timeout` too (the kept-alive connection hangs), `error` only on a fast DNS / connect failure. Both: `error.type` set, span status error. Game keeps playing; rules keep deciding in the same cycle | B: 2.5 s (`decision.jev.timeout_ms` default). A: up to 2.5 s | Option B keeps the local network and the presenter's view of the Pi. Afterwards `setflag agent decision.jev.base_url default`; with option A **restore the uplink before the game ends**, or the closing summary (beat 8) fails |
-| I | Infra: rollout -> fitness violation -> auto-rollback (**cut**, hardware only) | see section 4 | `rollout_enabled`, `remediation_allowed`, `target_backend`, `strategy` | `agent.infrastructure.decision`: `remediation.action=expand` then `rollback`, `fitness.violations` populated, `rollout.dry_run=false` | expand on the first passing health cycle (about 1 s), rollback a few seconds later; **verify in rehearsal** | Skip; show `TestInfraNarrative_FullIncident` or captured spans |
 | 8 | **Closing: Claude's post-game summary** | Let the running game end (or end it from the menu); open the Jaeger retro tab | none | Jaeger `agent.llm.retro` (own trace, linked to the game; `game.trace_id` tag): `inference.used=claude`, `llm.retro.parse_ok=true`, `llm.retro.session_assessment` and `llm.retro.session_focus` (the summary), `llm.retro.suggestion_count`, one `retro.suggestion` event per suggested improvement (`intervention_type`, `emphasis`, `reason`), child `chat claude-opus-5-5` (`gen_ai.provider.name=anthropic`). Point: Jev decides in game in 0.3 s, Claude reflects afterwards; same telemetry, same flags | after game end: the retro model call (default `claude-opus-5-5`, effort medium; **measure in rehearsal**, budget up to 120 s) | Have a game end earlier (after beat 6) so its summary is already there. No retro span at all: the budget was full at game end (only the log `agent.llm.retro_gated fallback_reason=llm_budget_exhausted`). `inference.used=none`: `no_backend_available` (env not set) or `agent_disabled` (kill switch off at game end). `inference.used=claude` with `llm.retro.parse_ok=false`: the call failed (`llm.infer.error`, error status, log `agent.llm.retro_failed`). See failure modes |
 
 **What the kill switch stops (beat 5, one sentence each on stage).** `enabled=off`
@@ -436,79 +406,18 @@ in-flight remote answer is discarded when it lands (`kill_switch`) instead of
 acting, and post-game model calls stop too (a retro is capture-only with
 `inference.fallback_reason=agent_disabled`; the proposer does not run, #1284).
 It does **not** stop the game, does not undo interventions already written for
-the running game (they end with the game), and does **not** stop the infrastructure loop, which has
-its own flag, `rollout_enabled` (section 4): each loop has its own switch.
+the running game (they end with the game).
 With the Flagsmith link online, the stop holds only while Flagsmith accepts the write: a refused stop is
 reverted a few seconds later (the helper prints `off` first; see "With the Flagsmith link on" in
 [Two stacks](#two-stacks-pick-one-then-never-mix-them), #2631).
 
 ---
 
-## 4. Beat I: infra rollout and auto-rollback (optional, hardware only)
+## 4. Beat I: infra rollout and auto-rollback (removed)
 
-Verified against the code on `main`; not run end to end on hardware yet.
-
-**Works only on the stage stack with a real controller on the python HID
-adapter.** The `unstable` adapter is registered only when a python adapter is
-loaded (`services/controller_manager/backend_factory.py`), and mock-only
-controllers skip rollout routing (`multiplexer/multiplexer_backend.py`). On the
-mock stack the agent only ever shows `expand`. A rollback needs real
-degradation. Since #1371 the baseline `controller.json` default backend is
-`rust`, which loads no python adapter; `backend` is not runtime-mutable, so this
-beat needs a baseline with a python variant (`python_rust`, a reviewed edit of
-`services/flagd/controller.json` plus `scripts/flags.sh restart`, then
-`talk-stage.sh reset`) and the `python-hid` compose profile (add
-`--profile python-hid` to the section 1 bring-up, or use the systemd drop-in
-described in `scripts/setup/joustmania.service`; never put `COMPOSE_PROFILES`
-in the tracked `.env`). The rollout routes its serials itself; outside this
-beat, real controllers reach python-hid only with `bluetooth_backend=python`
-as well (#1402).
-
-What happens: the agent watches the `controller.bluetooth_health` span (~1 Hz)
-and checks it against the `fitness.bluetooth.*` thresholds (gap 50 ms, drops 2%,
-rate 10 Hz). The `unstable` adapter delivers fresh frames at most every 120 ms
-(below 10 Hz, e.g. ~7.5 Hz observed) and drops every 10th one, so all three
-checks fail.
-
-```bash
-setflag agent rollout_enabled on            # agent may move the rollout stage (else dry-run)
-setflag rollout remediation_allowed on      # agent may roll back (else recommended_only)
-setflag rollout target_backend unstable
-setflag rollout strategy progressive        # last: this starts the rollout
-```
-
-Expected in Jaeger (`agent.infrastructure.decision`):
-
-1. `remediation.action=expand`, `rollout.controller_count=1`,
-   `rollout.dry_run=false`, `fitness.passing=true`. The flag service now serves
-   `current_controller_count: one` (`./scripts/flags.sh get rollout current_controller_count`).
-2. Within a few seconds the first controller (by sorted serial) is routed to
-   `unstable`: `fitness.passing=false`,
-   `fitness.violations="movement_update_hz[<serial>] 7.5<10; ..."` (example),
-   `remediation.action=rollback`, count back to `none`.
-3. `none` during the 30 s cooldown (`AGENT_ROLLOUT_COOLDOWN_SECONDS`), then
-   expand again, fail again: a ~30 s cycle, not a climb to three.
-
-Variant for the permissions story: with `remediation_allowed=off` the span says
-`remediation.action=recommended_only` and nothing is written.
-
-A dry run (`rollout_enabled` off) keeps no rollout state, so flipping it back
-on resumes without a restart.
-
-Reset after a run (no agent restart: once the agent sees the rollout inactive, or
-sees a `current_controller_count` it did not write, it drops its last written stage;
-#1384). The post-rollback cooldown is kept, so after a reset that follows a
-rollback the next run's first expansion can wait up to the cooldown (about 30 s,
-`AGENT_ROLLOUT_COOLDOWN_SECONDS`):
-
-```bash
-setflag rollout strategy off; setflag rollout target_backend python
-setflag rollout current_controller_count none; setflag rollout remediation_allowed off
-setflag agent rollout_enabled off
-```
-
-The infra loop is not gated by the `enabled` kill switch, only by
-`rollout_enabled` (see beat 5).
+Removed with the controller-backend rollout (#2784, UC-050 to UC-052 Obsolete): the
+agent's infrastructure loop, the `rollout` flags and `rollout_enabled` are gone.
+The section number is kept so references stay stable.
 
 ---
 
@@ -523,12 +432,11 @@ The infra loop is not gated by the `enabled` kill switch, only by
 - [ ] The running agent has its backend keys (values never printed; also
       section 4 of `./scripts/talk-preflight.sh`):
       ```bash
-      for k in JEV_API_KEY ANTHROPIC_API_KEY DECISION_OPENAI_API_KEY; do
+      for k in JEV_API_KEY ANTHROPIC_API_KEY; do
         docker exec joustmania-agent sh -c "test -n \"\$$k\"" && echo "$k set" || echo "$k MISSING"
       done
       ```
-      `JEV_API_KEY` and `ANTHROPIC_API_KEY` must be set; `DECISION_OPENAI_API_KEY`
-      only if beat 6b stays in.
+      `JEV_API_KEY` and `ANTHROPIC_API_KEY` must be set.
 - [ ] Reboot test (#1488): `sudo systemctl restart joustmania`, wait for it,
       then `docker inspect -f '{{.Config.Image}}' joustmania-agent` ends in the
       tag derived from the pinned checkout (not `0.7.0`), the journal shows
@@ -549,7 +457,7 @@ The infra loop is not gated by the `enabled` kill switch, only by
       `docker rm -f joustmania-python-hid`.
 - [ ] `.env.local` holds `JEV_API_KEY`, `ANTHROPIC_API_KEY`,
       no `IMAGE_TAG` (the pin is the checked-out
-      commit); `DECISION_OPENAI_API_KEY` only if beat 6b stays in. Nothing in
+      commit). Nothing in
       `.env` (`git diff .env` is empty).
 - [ ] Both keys have budget/credit. In `services/agent`:
       Jev: `JEV_API_KEY=... go test -tags live ./decide/backends/jev -run 'TestLiveGate$' -v`
@@ -558,7 +466,6 @@ The infra loop is not gated by the `enabled` kill switch, only by
       (or a warm-up game's summary with `llm.retro.parse_ok=true`).
       Both tests SKIP and still print `ok` when the key is empty or mistyped:
       look for `--- PASS` (not `--- SKIP`) in the `-v` output.
-- [ ] Vendor variants added to `decision.openai.*`, if beat 6b stays in.
 - [ ] `fake-hwclock` installed and enabled on the Pi (`sudo apt install
       fake-hwclock`): it restores the last saved time at boot. Without an RTC
       battery the Pi keeps no time while powered off.
@@ -615,7 +522,7 @@ The infra loop is not gated by the `enabled` kill switch, only by
 
 Stage values: `decision.backend=rules` (the session start; beat 2 flips to
 `jev`), `decision.jev.act_confidence_threshold=gate` (0.6, Jev's calibrated
-bar), `decision.act_confidence_threshold=default` (0.8, claude/openai),
+bar), `decision.act_confidence_threshold=default` (0.8, claude),
 `decision.min_interval_ms=default` (3000 ms), `decision.claude.timeout_ms=patient`
 (8000 ms, #2123: covers cold Claude calls), `decision.jev.timeout_ms=default`
 (2500 ms), `llm.max_requests_per_minute=stage` (30/min; the flag sets the budget, a set
@@ -637,9 +544,8 @@ and applies `scripts/talk-baseline.json` again through the flag service:
 Jev's `gate`), capture `on`, `min_interval_ms` `default`, claude model `haiku`,
 claude timeout `patient`, jev timeout `default`, `llm.eligible_game_kinds=real_only`, `enabled=on`,
 `interventions_enabled=on`, **`interventions_allowed=standard`**,
-**`policy.max_interventions_per_minute=aggressive`** (4), `experiments_enabled=off`, `rollout_enabled=off`, plus `decision.jev.base_url`,
-`decision.openai.base_url` / `.model` / `.reasoning_effort` back to their
-shipped variants, `llm.max_requests_per_minute=stage` and
+**`policy.max_interventions_per_minute=aggressive`** (4), `experiments_enabled=off`, plus `decision.jev.base_url` back to its
+shipped variant, `llm.max_requests_per_minute=stage` and
 `experiment.mock_archetypes=all` (it includes `calm_long`), `experiment_tick_seconds=default`,
 `policy.shield_danger_ratio`, `policy.shield_danger_samples` and `decision.min_gap_after_answer_ms`
 at `default` (#2518), `decision.operator_brief=off` (no brief, #2687), `decision.magnitude_bounds=default` (the code default ranges, #2696; the beat's widening is also a `stage` overlay, which reset clears first) and `experiment_dynamic_enabled=off` (this also turns the screen-only fallback off). The
@@ -647,7 +553,6 @@ agent's interventions need no reset: they belong to their game and the flag
 service drops them when the game ends (UC-053 BR-003). It is idempotent and does not care what a beat
 left behind, so it is also the recovery after an interrupted beat. It leaves
 `decision.jev.model` alone (`latest` or `pinned` is the presenter's choice).
-After beat I also run the rollout reset from section 4.
 
 **Why `standard` and not the shipped `ambient`:** on the mock stack nothing in
 `ambient` is visible (a controller effect defaults to rumble, volume 0.7 is
@@ -672,7 +577,7 @@ minute) stays far away. The shipped default stays 2.
 `policy.max_interventions_per_minute=aggressive` or a higher variant (PASS naming it, WARN above
 `frenzy` 20, #2518), FAIL naming
 an interrupted permissions beat for `none` / `probe`,
-`rollout_enabled=off`, `experiments_enabled=off`, `decision.backend=rules`,
+`experiments_enabled=off`, `decision.backend=rules`,
 both thresholds (`default` and Jev's `gate`), capture `on`, `min_interval_ms`
 `default`, claude model `haiku`, `decision.claude.timeout_ms` `patient`,
 `decision.jev.timeout_ms` `default`, `llm.eligible_game_kinds=real_only`,
@@ -740,7 +645,6 @@ first step above prevents that; the pre-flight WARN names the persisted backend.
 | Flag flipped, nothing changed | flagd lost its sync stream to the flag service (writes then fail with `503 no_sync_stream`) | `talk-preflight.sh` "flag service" section; `./scripts/flags.sh state` (`sync_streams`) | `./scripts/flags.sh restart` (flag service, then flagd; about 5 s), then `talk-stage.sh reset` |
 | A flip is refused (`422 flag_read_only` / `out_of_bounds`) | The flag is not runtime-mutable, or the variant does not exist | the helper's error line | Use a declared variant (`./scripts/flags.sh get agent <flag>`); read-only flags change only by a reviewed file edit and a flag-service restart |
 | Dashboard Decisions panel empty / stale | the agent's state endpoint does not answer (agent down or restarting; the panel says `Could not reach the agent`) | `curl -s -o /dev/null -w '%{http_code}' http://localhost/experiments/state` (200 = up) | Restart the agent (`docker compose restart agent`; its state starts empty and fills with the next decisions); the trace links still open Jaeger; present from the captured screenshots |
-| `invalid_answer` rows on the vendor (6b) | Model does not follow the JSON schema / rejects `reasoning_effort` | `error.type`, `decide.invalid_reason` | `backend.sh effort omit`; pick another model; or skip 6b |
 | Triggers do not ready controllers, `joustmania-status` shows `service rust-hid: running (unhealthy)` | rust-hid wedged under many controllers (#2125) | `joustmania-status`; `docker logs joustmania-rust-hid \| grep watchdog` | Wait about 30 s: its watchdog exits and compose restarts it (UC-002 A7); if still unhealthy, `docker restart joustmania-rust-hid` (the line `joustmania-status` prints). Controllers reconnect on their own; players press the trigger again |
 | LEDs lag or skip with many controllers; `dmesg` shows `Output queue is full` | More LED / rumble reports than the Bluetooth links drain (#2125) | `sudo dmesg \| grep 'Output queue is full'` | `setflag controller rust_hid.output_rate_hz slow` (10 per second per controller, live within 1 s); back with `normal` (20) |
 | Real controllers will not pair or keep dropping (venue Bluetooth) | 2.4 GHz congestion, dongle, batteries | `talk-preflight.sh` real-controller line | Try re-pairing once; then [Fallback: Bluetooth down](#fallback-bluetooth-down) |
@@ -824,7 +728,7 @@ back, and always after the talk (`reset` also does it).
 | 2 / 4 Model switch | `gen_ai.request.model` / `gen_ai.provider.name` prove which model decided, per decision; Jev's gate `p_yes` explains act vs noop | One flag (`decision.backend`) picks the backend, live, no redeploy; the backup is one flip away |
 | 4b Operator brief | `decide.operator_brief.present` shows a brief steered the call; the captured prompt shows its words; blocked rows show where the bounds held | The brief is one more flag, free text, operator-written only; it changes which allowed move the model picks, never what is allowed |
 | 3 / 5 Permissions | `held`, `noop`, `discarded` are visible with the reason; the evaluation event names the threshold flag | Per-backend thresholds, the allow-list (which shapes the question itself) and the kill switch are flags, evaluated at use time |
-| 6 Rollback | The trace timeline shows before/after; infra: `remediation.action` tells the story | Rollback = flip the flag back. Infra: the agent itself rolls back by writing a flag |
+| 6 Rollback | The trace timeline shows before/after | Rollback = flip the flag back |
 | 7 Degrade | `decide.fallback_reason` + `error.type` make the degradation explicit | Per-backend timeouts and base URLs are flags; rules is the floor, the game never waits |
 | 8 Summary | The post-game summary and its suggestions are a span linked to the game trace | The kill switch and the shared budget govern the post-game model calls too |
 
@@ -849,7 +753,6 @@ Reference values from development machines (not the Pi): Jev noop round
 | 4 claude haiku | | | |
 | 4b operator brief: first row favouring the serial; blocked grants on "unkillable" | first act 6 to 9 s into the game (19 Nov, Pi, Sonnet, gate 0.6) | Sonnet 3.2 s (2.1 to 4.2); Haiku 2.0 s (1.7 to 2.5) | first row always `noop` (stale); 0.2 applied in 2 of 6 games, target won both; Haiku under "should win" shielded the opponent |
 | 5 discard caught? (y/n, tries) | | | |
-| 6b vendor | | | |
 | 7 fallback (network off / blackhole) | | | |
 | I expand -> rollback | | n/a | |
 | 8 game end -> retro span visible | | n/a (`llm.retro.latency_ms`) | |

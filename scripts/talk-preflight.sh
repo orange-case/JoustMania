@@ -26,7 +26,7 @@
 #      intervention values are live (they die with their game); WARN
 #      when decision.backend is remote but interventions_allowed resolves to
 #      nothing (none / noop only): the agent then makes no remote call (#1298);
-#      WARN when a remote decision.backend (jev, claude, openai) is PERSISTED
+#      WARN when a remote decision.backend (jev, claude) is PERSISTED
 #      (agent-backend.sh, #1682): a stage overlay over it is temporary, and a
 #      flag-service restart or a reboot brings the persisted backend back
 #   4. the agent container env (presence only; key values are never printed):
@@ -408,7 +408,7 @@ if isinstance(backend_value, str) and backend_value not in ("", "rules") and isi
 # A persisted remote backend comes back after a flag-service restart or a
 # reboot, whatever the effective value is now.
 persisted_backend = (views.get("decision.backend", {}).get("admin_value") or {}).get("variant")
-if persisted_backend in ("jev", "claude", "openai"):
+if persisted_backend in ("jev", "claude"):
     persisted_model = (views.get(f"decision.{persisted_backend}.model", {}).get("admin_value") or {}).get("variant")
     model_note = f" with decision.{persisted_backend}.model = {persisted_model}" if persisted_model else ""
     print(f"WARN  decision.backend {persisted_backend} is persisted{model_note}: a flag-service restart or a "
@@ -438,23 +438,8 @@ if missing_threshold:
 else:
     print("PASS  decision.jev.act_confidence_threshold has the strict and gate variants")
 if "patient" not in flags.get("decision.claude.timeout_ms", {}).get("variants", {}):
-    print("WARN  decision.claude.timeout_ms has no patient variant: the Claude timeout recovery (UC-070 A3) "
+    print("WARN  decision.claude.timeout_ms has no patient variant: the Claude timeout recovery (UC-070 BR-003) "
           "cannot be flipped")
-
-# The optional second vendor (beat 6b) needs a model and a base URL variant the presenter adds.
-model = flags.get("decision.openai.model", {})
-model_value = model.get("variants", {}).get(model.get("defaultVariant"))
-non_empty = [v for v, val in model.get("variants", {}).items() if val]
-if not non_empty:
-    print("INFO  decision.openai.model has no non-empty variant: the optional openai beat (6b) "
-          "falls back to rules (backend_unavailable) until you add the vendor's model + base_url variants")
-elif not model_value:
-    print(f"PASS  decision.openai.model variants available: {', '.join(non_empty)} "
-          "(select with agent-backend.sh openai <variant>)")
-else:
-    print(f"PASS  decision.openai.model = {shown(model)}")
-base_url = flags.get("decision.openai.base_url", {})
-print(f"INFO  decision.openai.base_url = {shown(base_url)}; variants: {', '.join(base_url.get('variants', {}))}")
 
 budget = flags.get("llm.max_requests_per_minute")
 if budget is not None:
@@ -488,7 +473,6 @@ if [[ "${docker_ok}" -eq 1 ]]; then
     key_set() { grep -qE "^$1=[^[:space:]]+" <<<"${agent_env}"; }
     if key_set JEV_API_KEY; then pass "jev: JEV_API_KEY present"; else fail "jev: JEV_API_KEY missing: the main backend falls back to rules (backend_unavailable); put it in .env.local, recreate the agent"; fi
     if key_set ANTHROPIC_API_KEY; then pass "claude: ANTHROPIC_API_KEY present"; else fail "claude: ANTHROPIC_API_KEY missing: no in-game backup and no post-game summary; put it in .env.local, recreate the agent"; fi
-    if key_set DECISION_OPENAI_API_KEY; then pass "openai: DECISION_OPENAI_API_KEY present"; else info "openai: DECISION_OPENAI_API_KEY absent (only the optional second-vendor beat needs it)"; fi
     # The post-game text backend is the inference.backend flag only (the
     # AGENT_INFERENCE_BACKEND env was removed, #1907): read the effective value, so a
     # stage overlay counts and an unreachable flag service FAILs.

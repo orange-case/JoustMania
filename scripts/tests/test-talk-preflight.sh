@@ -52,7 +52,7 @@ if [[ "$1" == "inspect" ]]; then
   case "${fmt}" in
     *State.Status*) if [[ -n "${STUB_AUDIO_DOWN:-}" && "$4" == "joustmania-audio" ]]; then echo "exited"; else echo "running healthy"; fi ;;
     *Mounts*) echo "${STUB_MOUNT}" ;;
-    *Config.Env*) printf '%s\n' "PATH=/usr/bin" "ANTHROPIC_API_KEY=${STUB_CLAUDE_KEY-${STUB_SECRET}}" "JEV_API_KEY=${STUB_JEV_KEY-${STUB_SECRET}}" "DECISION_OPENAI_API_KEY=" "AGENT_LLM_MAX_REQUESTS_PER_MINUTE=${STUB_BUDGET:-}" ;;
+    *Config.Env*) printf '%s\n' "PATH=/usr/bin" "ANTHROPIC_API_KEY=${STUB_CLAUDE_KEY-${STUB_SECRET}}" "JEV_API_KEY=${STUB_JEV_KEY-${STUB_SECRET}}" "AGENT_LLM_MAX_REQUESTS_PER_MINUTE=${STUB_BUDGET:-}" ;;
   esac
   exit 0
 fi
@@ -138,7 +138,6 @@ flags = {
                     "set_pacing_profile,adjust_player_sensitivity,grant_shield",
         "quiet": "send_controller_effect,adjust_volume",
     }, "standard"),
-    "rollout_enabled": f(onoff, "off"),
     "experiments_enabled": f(onoff, "off"),
     "experiment_dynamic_enabled": f(onoff, "off"),
     "experiment_tick_seconds": f({"fast": 10, "default": 30, "slow": 60}, "default"),
@@ -154,8 +153,6 @@ flags = {
     "decision.jev.base_url": f({"default": "https://api.typesafe.ai/v1", "blackhole": "https://192.0.2.1/v1"}, "default"),
     "llm.eligible_game_kinds": f({"none": "", "real_only": "real", "real_and_shadow": "real,shadow"}, "real_only"),
     "experiment.mock_archetypes": f({"all": "calm_long,slow_cascade,quick_cascade", "quick_cascade": "quick_cascade"}, "all"),
-    "decision.openai.model": f({"unset": "", "vendor": "m"}, "unset"),
-    "decision.openai.base_url": f({"default": "https://api.openai.com/v1"}, "default"),
     "llm.max_requests_per_minute": f({"default": 6, "stage": 30, "interactive": 120}, "stage"),
     "inference.backend": f({"stub": "stub", "claude": "claude"}, "claude"),
     "policy.max_interventions_per_minute": f({"conservative": 1, "default": 2, "aggressive": 4, "lively": 8, "frenzy": 20, "leftover": 50}, "aggressive"),
@@ -191,7 +188,6 @@ check "flagd connected to the flag service" "PASS  flagd holds 1 sync stream(s) 
 check "agent set served" "PASS  the agent flag set is served by the flag service"
 check "jev key present" "PASS  jev: JEV_API_KEY present"
 check "claude key present" "PASS  claude: ANTHROPIC_API_KEY present"
-check "empty openai key is only info" "INFO  openai: DECISION_OPENAI_API_KEY absent"
 check "inference backend flag claude passes" "PASS  inference.backend = claude"
 check "inference backend effective flag claude passes" "PASS  inference.backend flag = claude (the post-game summary backend)"
 check "stage flag under the env ceiling passes" "PASS  LLM budget: llm.max_requests_per_minute = stage (30/min) under the AGENT_LLM_MAX_REQUESTS_PER_MINUTE=30 ceiling"
@@ -209,7 +205,6 @@ else
 fi
 STUB_BUDGET=30 STUB_JAEGER_EMPTY=1 run_preflight
 check "jaeger 404 no traces is no spans, not a failed query" "FAIL  no invoke_agent joustmania-agent (or agent.decide) spans in the last"
-check "vendor variant listed" "decision.openai.model variants available: vendor"
 check "clock in sync" "PASS  clock skew 0s"
 check "stage allow-list is standard" "PASS  interventions_allowed = standard"
 check "perceptible interventions listed" "PASS  perceptible interventions allowed: play_audio_cue, adjust_music_tempo, grant_shield"

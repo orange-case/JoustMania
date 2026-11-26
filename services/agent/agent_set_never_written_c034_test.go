@@ -3,12 +3,11 @@ package main
 // C-034 (#1799): the agent cannot loosen its own limits. The flag service has no
 // write authentication (D11), so the key-level invariant of C-034 holds only by
 // construction, and this test is what checks it on the wire. It drives every
-// agent writer (actions.Writer, actions.RolloutWriter, the experiment Writer,
-// Gate and GateTargetingWriter, the promotion real-default writer and the kill
+// agent writer (actions.Writer, the experiment Writer, Gate and
+// GateTargetingWriter, the promotion real-default writer and the kill
 // switch) against a recording copy of the flag service's routes and asserts, on
 // every raw request, the (set, key, scope) C-034 allows:
 //
-//   - rollout: only current_controller_count, stack scope;
 //   - interventions: only the keys of flags.md §13.1, always game-scoped;
 //   - game: only an experiment+arm value or a game_kind=real overlay, never
 //     stack-wide (the flag-service registry then refuses every key outside the
@@ -45,8 +44,6 @@ import (
 	"github.com/joustmania/agent/flagservice"
 	"github.com/joustmania/agent/flagservice/fake"
 	"github.com/joustmania/agent/promote"
-
-	"gopkg.in/yaml.v3"
 )
 
 // c034Request is one raw request the recording flag service saw.
@@ -239,39 +236,6 @@ var c034WriterRows = []c034Row{
 		},
 	},
 	{
-		name:   "rollout",
-		drives: []string{"actions/rollout_writer.go:RolloutWriter.SetControllerCount"},
-		run: func(t *testing.T, svc *flagservice.Client) {
-			w := actions.NewRolloutWriter(svc, testLogger())
-			variants := []string{actions.StageNoneVariant}
-			for cur := actions.StageNoneValue; ; {
-				v, next, ok := actions.NextStage(cur)
-				if !ok {
-					break
-				}
-				variants = append(variants, v)
-				cur = next
-			}
-			for _, v := range variants {
-				if err := w.SetControllerCount(v); err != nil {
-					t.Errorf("stage %s: %v", v, err)
-				}
-			}
-		},
-		check: func(r c034Request) string {
-			if r.Method != http.MethodPut || r.Write == nil {
-				return "rollout writer sent a non-PUT write"
-			}
-			if r.Set != actions.FlagSetRollout || r.Flag != "current_controller_count" {
-				return "rollout writer wrote " + r.Set + "/" + r.Flag + ", only rollout/current_controller_count is allowed"
-			}
-			if r.Write.Scope != (flagservice.Scope{}) || r.Write.Persist {
-				return fmt.Sprintf("rollout write not a stack overlay: %+v", r.Write.Scope)
-			}
-			return ""
-		},
-	},
-	{
 		name:   "experiment",
 		drives: []string{"experiment/writer.go:Writer.Apply", "experiment/writer.go:Writer.DryRun", "experiment/writer.go:Writer.Strip"},
 		run: func(t *testing.T, svc *flagservice.Client) {
@@ -340,14 +304,6 @@ var c034WriterRows = []c034Row{
 				if err := realDef.RevertRealDefault(ctx, key); err != nil {
 					t.Errorf("revert real default %q: %v", key, err)
 				}
-			}
-			// The guarded watch revert (#2236): same set, key and scope as the plain one.
-			var guarded promote.GuardedRealDefaultReverter = realDef
-			if err := realDef.SetRealDefault(ctx, "sensitivity", 3); err != nil {
-				t.Errorf("set real default: %v", err)
-			}
-			if err := guarded.RevertRealDefaultUnlessRealGame(ctx, "sensitivity"); err != nil {
-				t.Errorf("guarded revert: %v", err)
 			}
 			// The kill switch (UC-043 A1, #1704): list the promotion overlays and revert them.
 			pr := promote.NewPromoter(nil, nil, realDef, nil, realDef, promote.RepoRef{}, nil, testLogger())
@@ -425,10 +381,10 @@ func c034WireViolation(r c034Request) string {
 		return "write path is not /{set}/{flag}"
 	}
 	switch r.Set {
-	case actions.FlagSetInterventions, actions.FlagSetRollout, experiment.GameFlagSet:
+	case actions.FlagSetInterventions, experiment.GameFlagSet:
 		return ""
 	}
-	return "write outside the interventions, rollout and game sets"
+	return "write outside the interventions and game sets"
 }
 
 // c034Interventions enumerates every decision.Intervention* constant from the
@@ -562,33 +518,6 @@ func TestC034_HoldKeysCeilings(t *testing.T) {
 	if !slices.Equal(widened, want) {
 		t.Fatalf("UC-043/A17 the agent-writable shield keys are %v, want exactly %v (C-034)", widened, want)
 	}
-	// Every one of them carries the flag service's real-write guard (409 real_game_live
-	// while a real game is registered, #2216), so no real write lands mid-game.
-	rawRegistry, err := os.ReadFile(filepath.Join("..", "flag-service", "registry.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc struct {
-		Flags []struct {
-			Set       string `yaml:"set"`
-			Key       string `yaml:"key"`
-			RealWrite string `yaml:"real_write"`
-		} `yaml:"flags"`
-	}
-	if err := yaml.Unmarshal(rawRegistry, &doc); err != nil {
-		t.Fatal(err)
-	}
-	guarded := map[string]bool{}
-	for _, f := range doc.Flags {
-		if f.Set == experiment.GameFlagSet && f.RealWrite == "no_live_real_game" {
-			guarded[f.Key] = true
-		}
-	}
-	for _, key := range want {
-		if !guarded[key] {
-			t.Errorf("UC-043/A17 %s has no real_write: no_live_real_game in registry.yaml", key)
-		}
-	}
 	writes := func(value any) []flagservice.Write {
 		return []flagservice.Write{
 			{Value: value, Scope: flagservice.Scope{ExperimentID: "exp_c034", Arm: experiment.ArmExperimental}},
@@ -598,8 +527,12 @@ func TestC034_HoldKeysCeilings(t *testing.T) {
 	for key, ceiling := range c034HoldKeyCeilings {
 		t.Run("UC-043/A17 "+key, func(t *testing.T) {
 			p := policies[key]
-			if !slices.Equal(p.Scopes, []string{"stack", "experiment+arm", "real"}) {
-				t.Fatalf("%s scopes %v, want [stack experiment+arm real]", key, p.Scopes)
+			want := []string{"stack", "experiment+arm", "real"}
+			if key == experiment.HoldActivationKey {
+				want = want[:2] // read per grant, so never written for real games
+			}
+			if !slices.Equal(p.Scopes, want) {
+				t.Fatalf("%s scopes %v, want %v", key, p.Scopes, want)
 			}
 			if ceiling == nil {
 				return

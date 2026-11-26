@@ -23,9 +23,6 @@ func defaultDecisionBackend() DecisionBackend {
 		Claude: RemoteBackendConfig{BaseURL: DefaultDecisionClaudeBaseURL, Model: DefaultDecisionClaudeModel,
 			Timeout:              DefaultDecisionClaudeTimeoutMs * time.Millisecond,
 			MaxRequestsPerMinute: DefaultDecisionClaudeMaxRequestsPerMinute, HasMaxRequestsPerMinute: true},
-		OpenAI: RemoteBackendConfig{BaseURL: DefaultDecisionOpenAIBaseURL, Timeout: timeout,
-			ReasoningEffort:      DefaultDecisionOpenAIReasoningEffort,
-			MaxRequestsPerMinute: DefaultDecisionOpenAIMaxRequestsPerMinute, HasMaxRequestsPerMinute: true},
 		Jev: RemoteBackendConfig{BaseURL: DefaultDecisionJevBaseURL, Model: DefaultDecisionJevModel, Timeout: timeout,
 			ActConfidenceThreshold: DefaultDecisionJevActConfidenceThreshold, HasActConfidenceThreshold: true},
 	}
@@ -43,8 +40,8 @@ func TestDecisionBackend_DefaultsWhenMissing(t *testing.T) {
 
 // TestDecisionBackend_DefaultTimeoutsPerBackend pins the NFR-010 default
 // remote-call timeouts as literal values (the other tests compare against the
-// constants, so a changed constant would pass them): Claude 5000 ms, OpenAI and
-// Jev 2500 ms. TestDecisionBackend_FlagFilesMatchDefaults holds the flag files
+// constants, so a changed constant would pass them): Claude 5000 ms, Jev
+// 2500 ms. TestDecisionBackend_FlagFilesMatchDefaults holds the flag files
 // to the same values.
 // NFR: NFR-010
 // UC: UC-040 main
@@ -52,7 +49,6 @@ func TestDecisionBackend_DefaultTimeoutsPerBackend(t *testing.T) {
 	got := New(stubEvaluator{}, nil).Evaluate(context.Background()).Decision
 	for name, c := range map[string]struct{ got, want time.Duration }{
 		"claude": {got.Claude.Timeout, 5000 * time.Millisecond},
-		"openai": {got.OpenAI.Timeout, 2500 * time.Millisecond},
 		"jev":    {got.Jev.Timeout, 2500 * time.Millisecond},
 	} {
 		t.Run("NFR-010 "+name+" default timeout", func(t *testing.T) {
@@ -68,24 +64,19 @@ func TestDecisionBackend_FlagdShape(t *testing.T) {
 	stub := stubEvaluator{
 		booleans: map[string]bool{keyDecisionCaptureContent: true},
 		strings: map[string]string{
-			keyDecisionBackend:               " Claude ",
-			keyDecisionClaudeModel:           "claude-sonnet-5-5",
-			keyDecisionClaudeBaseURL:         "http://127.0.0.1:1",
-			keyDecisionOpenAIBaseURL:         "https://example.test/v1",
-			keyDecisionOpenAIModel:           "gpt-x",
-			keyDecisionOpenAIReasoningEffort: " Minimal ",
-			keyDecisionJevBaseURL:            "https://jev.test",
-			keyDecisionJevModel:              "jev-1",
+			keyDecisionBackend:       " Claude ",
+			keyDecisionClaudeModel:   "claude-sonnet-5-5",
+			keyDecisionClaudeBaseURL: "http://127.0.0.1:1",
+			keyDecisionJevBaseURL:    "https://jev.test",
+			keyDecisionJevModel:      "jev-1",
 		},
 		ints: map[string]int64{
 			keyDecisionClaudeTimeoutMs:         1500,
-			keyDecisionOpenAITimeoutMs:         5000,
 			keyDecisionJevTimeoutMs:            2000,
 			keyDecisionMinIntervalMs:           1500,
 			keyDecisionMinGapAfterAnswerMs:     3000,
 			keyDecisionMaxStateAgeMs:           6000,
 			keyDecisionClaudeMaxRequestsPerMin: 12,
-			keyDecisionOpenAIMaxRequestsPerMin: MaxRequestsPerMinuteInherit,
 		},
 		floats: map[string]float64{keyDecisionActConfidenceThreshold: 0.95, keyDecisionJevActConfidenceThreshold: 0.95},
 	}
@@ -99,8 +90,6 @@ func TestDecisionBackend_FlagdShape(t *testing.T) {
 		MaxStateAge:            6 * time.Second,
 		Claude: RemoteBackendConfig{BaseURL: "http://127.0.0.1:1", Model: "claude-sonnet-5-5", Timeout: 1500 * time.Millisecond,
 			MaxRequestsPerMinute: 12, HasMaxRequestsPerMinute: true},
-		OpenAI: RemoteBackendConfig{BaseURL: "https://example.test/v1", Model: "gpt-x", Timeout: 5 * time.Second,
-			ReasoningEffort: "minimal"},
 		Jev: RemoteBackendConfig{BaseURL: "https://jev.test", Model: "jev-1", Timeout: 2 * time.Second,
 			ActConfidenceThreshold: 0.95, HasActConfidenceThreshold: true},
 	}
@@ -110,8 +99,8 @@ func TestDecisionBackend_FlagdShape(t *testing.T) {
 	if got.IsRules() {
 		t.Fatal("claude is not rules")
 	}
-	if cfg, ok := got.Remote(DecisionBackendOpenAI); !ok || cfg.Model != "gpt-x" {
-		t.Fatalf("Remote(openai) = %+v %v", cfg, ok)
+	if cfg, ok := got.Remote(DecisionBackendJev); !ok || cfg.Model != "jev-1" {
+		t.Fatalf("Remote(jev) = %+v %v", cfg, ok)
 	}
 	if _, ok := got.Remote(DecisionBackendRules); ok {
 		t.Fatal("rules is not a remote backend")
@@ -136,8 +125,8 @@ func TestDecisionBackend_ClaudeBaseURLReadPerCall(t *testing.T) {
 
 func TestDecisionBackend_BadValuesFallBack(t *testing.T) {
 	stub := stubEvaluator{
-		strings: map[string]string{keyDecisionBackend: "   ", keyDecisionOpenAIReasoningEffort: " "},
-		ints: map[string]int64{keyDecisionClaudeTimeoutMs: 0, keyDecisionOpenAITimeoutMs: -5, keyDecisionMinIntervalMs: -1,
+		strings: map[string]string{keyDecisionBackend: "   "},
+		ints: map[string]int64{keyDecisionClaudeTimeoutMs: 0, keyDecisionJevTimeoutMs: -5, keyDecisionMinIntervalMs: -1,
 			keyDecisionMinGapAfterAnswerMs: -1, keyDecisionMaxStateAgeMs: -1},
 		floats: map[string]float64{keyDecisionActConfidenceThreshold: 1.5},
 	}
@@ -149,7 +138,7 @@ func TestDecisionBackend_BadValuesFallBack(t *testing.T) {
 
 // TestDecisionBackend_JevThreshold covers decision.jev.act_confidence_threshold
 // (#1287): its own value applies to jev only, "inherit" and out-of-range values
-// fall back to the global flag, and claude/openai/rules always use the global.
+// fall back to the global flag, and claude/rules always use the global.
 // Spec: flags.md (decision.jev.act_confidence_threshold), decide-contract.md §5, FR-047.
 // UC: UC-044 A3
 func TestDecisionBackend_JevThreshold(t *testing.T) {
@@ -175,7 +164,7 @@ func TestDecisionBackend_JevThreshold(t *testing.T) {
 			if v, src := d.ActThreshold(DecisionBackendJev); v != tc.wantJev || src != tc.wantSource {
 				t.Fatalf("ActThreshold(jev) = %v,%q, want %v,%q", v, src, tc.wantJev, tc.wantSource)
 			}
-			for _, b := range []string{DecisionBackendClaude, DecisionBackendOpenAI, DecisionBackendRules, "bogus"} {
+			for _, b := range []string{DecisionBackendClaude, DecisionBackendRules, "bogus"} {
 				if v, src := d.ActThreshold(b); v != 0.95 || src != ActThresholdSourceGlobal {
 					t.Fatalf("ActThreshold(%s) = %v,%q, want the global 0.95", b, v, src)
 				}
@@ -184,8 +173,7 @@ func TestDecisionBackend_JevThreshold(t *testing.T) {
 	}
 }
 
-// TestDecisionBackend_BackendMaxRequestsPerMinute: the paid backends' own decide
-// caps (#2519, FR-152 (c)). `inherit` has no cap of its own, `stage` is 30, a
+// TestDecisionBackend_BackendMaxRequestsPerMinute: claude's own decide cap (#2519, FR-152 (c)). `inherit` has no cap of its own, `stage` is 30, a
 // missing flag or a flagd error is the Go default 30 (the base file's `stage`),
 // and 0 or a bad negative value is a cap of 0, which closes the backend. jev has
 // no flag and never a cap of its own.
@@ -199,19 +187,19 @@ func TestDecisionBackend_BackendMaxRequestsPerMinute(t *testing.T) {
 		wantCap int
 		wantHas bool
 	}{
-		{"UC-070/BR-003 inherit sentinel has no cap", map[string]int64{keyDecisionClaudeMaxRequestsPerMin: -1, keyDecisionOpenAIMaxRequestsPerMin: -1}, nil, 0, false},
-		{"UC-070/BR-003 stage is 30", map[string]int64{keyDecisionClaudeMaxRequestsPerMin: 30, keyDecisionOpenAIMaxRequestsPerMin: 30}, nil, 30, true},
+		{"UC-070/BR-003 inherit sentinel has no cap", map[string]int64{keyDecisionClaudeMaxRequestsPerMin: -1}, nil, 0, false},
+		{"UC-070/BR-003 stage is 30", map[string]int64{keyDecisionClaudeMaxRequestsPerMin: 30}, nil, 30, true},
 		{"UC-070/BR-003 missing flag is the default 30", nil, nil, DefaultDecisionClaudeMaxRequestsPerMinute, true},
 		{"UC-070/BR-003 flagd error is the default 30", nil, map[string]error{
-			keyDecisionClaudeMaxRequestsPerMin: errors.New("flagd down"), keyDecisionOpenAIMaxRequestsPerMin: errors.New("flagd down")},
+			keyDecisionClaudeMaxRequestsPerMin: errors.New("flagd down")},
 			DefaultDecisionClaudeMaxRequestsPerMinute, true},
-		{"UC-070/BR-003 zero closes the backend", map[string]int64{keyDecisionClaudeMaxRequestsPerMin: 0, keyDecisionOpenAIMaxRequestsPerMin: 0}, nil, 0, true},
-		{"UC-070/BR-003 bad negative closes the backend", map[string]int64{keyDecisionClaudeMaxRequestsPerMin: -7, keyDecisionOpenAIMaxRequestsPerMin: -7}, nil, 0, true},
+		{"UC-070/BR-003 zero closes the backend", map[string]int64{keyDecisionClaudeMaxRequestsPerMin: 0}, nil, 0, true},
+		{"UC-070/BR-003 bad negative closes the backend", map[string]int64{keyDecisionClaudeMaxRequestsPerMin: -7}, nil, 0, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			d := New(stubEvaluator{ints: tc.ints, errs: tc.errs}, nil).DecisionBackend(context.Background())
-			for name, cfg := range map[string]RemoteBackendConfig{DecisionBackendClaude: d.Claude, DecisionBackendOpenAI: d.OpenAI} {
+			for name, cfg := range map[string]RemoteBackendConfig{DecisionBackendClaude: d.Claude} {
 				if cfg.MaxRequestsPerMinute != tc.wantCap || cfg.HasMaxRequestsPerMinute != tc.wantHas {
 					t.Errorf("%s cap = %d,%v, want %d,%v", name, cfg.MaxRequestsPerMinute, cfg.HasMaxRequestsPerMinute, tc.wantCap, tc.wantHas)
 				}
@@ -244,22 +232,14 @@ func TestDecisionBackend_DefaultsOnError(t *testing.T) {
 	stub := stubEvaluator{errs: map[string]error{}}
 	for _, k := range []string{
 		keyDecisionBackend, keyDecisionActConfidenceThreshold, keyDecisionCaptureContent,
-		keyDecisionClaudeModel, keyDecisionClaudeTimeoutMs, keyDecisionClaudeBaseURL, keyDecisionOpenAIBaseURL,
-		keyDecisionOpenAIModel, keyDecisionOpenAITimeoutMs, keyDecisionJevBaseURL,
+		keyDecisionClaudeModel, keyDecisionClaudeTimeoutMs, keyDecisionClaudeBaseURL, keyDecisionJevBaseURL,
 		keyDecisionJevModel, keyDecisionJevTimeoutMs, keyDecisionMinIntervalMs,
-		keyDecisionOpenAIReasoningEffort, keyDecisionJevActConfidenceThreshold,
+		keyDecisionJevActConfidenceThreshold,
 	} {
 		stub.errs[k] = boom
 	}
 	if got := New(stub, nil).DecisionBackend(context.Background()); got != defaultDecisionBackend() {
 		t.Fatalf("Decision = %+v, want defaults", got)
-	}
-}
-
-func TestDecisionBackend_ReasoningEffortOmit(t *testing.T) {
-	stub := stubEvaluator{strings: map[string]string{keyDecisionOpenAIReasoningEffort: " OMIT "}}
-	if got := New(stub, nil).DecisionBackend(context.Background()).OpenAI.ReasoningEffort; got != "omit" {
-		t.Fatalf("ReasoningEffort = %q, want omit", got)
 	}
 }
 
@@ -279,10 +259,6 @@ func TestDecisionBackend_FlagFilesMatchDefaults(t *testing.T) {
 		keyDecisionClaudeModel:               DefaultDecisionClaudeModel,
 		keyDecisionClaudeTimeoutMs:           float64(DefaultDecisionClaudeTimeoutMs),
 		keyDecisionClaudeBaseURL:             DefaultDecisionClaudeBaseURL,
-		keyDecisionOpenAIBaseURL:             DefaultDecisionOpenAIBaseURL,
-		keyDecisionOpenAIModel:               DefaultDecisionOpenAIModel,
-		keyDecisionOpenAITimeoutMs:           float64(DefaultDecisionTimeoutMs),
-		keyDecisionOpenAIReasoningEffort:     DefaultDecisionOpenAIReasoningEffort,
 		keyDecisionJevBaseURL:                DefaultDecisionJevBaseURL,
 		keyDecisionJevModel:                  DefaultDecisionJevModel,
 		keyDecisionJevTimeoutMs:              float64(DefaultDecisionTimeoutMs),
@@ -328,7 +304,7 @@ func TestDecisionBackend_FlagFilesMatchDefaults(t *testing.T) {
 // flag files that points at TEST-NET-1 (RFC 5737, never routed) over https, so
 // the TLS handshake fails before any request header (the bearer key) is sent.
 // The default stays DefaultDecisionJevBaseURL.
-// UC: UC-070 main
+// UC: UC-070 BR-004
 func TestDecisionBackend_JevBlackholeVariant(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join("..", "..", "flagd", "agent.json"),
@@ -364,7 +340,7 @@ func TestDecisionBackend_JevBlackholeVariant(t *testing.T) {
 // global remote-call budget (#1231): llm.max_requests_per_minute has a "stage"
 // variant of 30 in both flag files, while the default stays
 // DefaultLLMMaxRequestsPerMinute.
-// UC: UC-070 A4
+// UC: UC-070 BR-003
 func TestDecisionBackend_StageBudgetVariant(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join("..", "..", "flagd", "agent.json"),
@@ -419,7 +395,7 @@ func TestDecisionGate_Step3Defaults(t *testing.T) {
 // fallbacks, and the stage baseline (scripts/talk-baseline.json) runs claude with
 // the "patient" timeout (8000 ms), which the state-age bound stays above.
 // UC: UC-040 A4
-// UC: UC-070 main
+// UC: UC-070 BR-003
 func TestDecisionBackend_CadenceFlagDefaults(t *testing.T) {
 	type flagDoc struct {
 		Flags map[string]struct {

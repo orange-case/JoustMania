@@ -33,7 +33,7 @@ class TestButtonDebouncer:
         # Immediate second press blocked
         assert debouncer.should_process("serial1", "trigger") is False
 
-    @pytest.mark.uc("UC-012", flow="main", br=["BR-007"])
+    @pytest.mark.uc("UC-010", br=["BR-016"])
     def test_debounces_on_event_time_not_processing_time(self):
         """Event times 400 ms apart pass, 100 ms apart debounce, regardless of when they are processed."""
         debouncer = ButtonDebouncer(default_interval=0.3)
@@ -43,7 +43,7 @@ class TestButtonDebouncer:
         assert debouncer.should_process("serial1", "trigger", event_time=t0 + 0.4) is True
         assert debouncer.should_process("serial1", "trigger", event_time=t0 + 0.5) is False
 
-    @pytest.mark.uc("UC-012", flow="main", br=["BR-007"])
+    @pytest.mark.uc("UC-010", br=["BR-016"])
     def test_press_before_last_press_is_a_new_press(self):
         """A clock step back / out-of-order event must not lock the button out."""
         debouncer = ButtonDebouncer(default_interval=0.3)
@@ -276,7 +276,7 @@ class TestConnectedHandler:
 
         await handler.handle_button("serial1", "select")
 
-        select_cb.assert_awaited_once_with(expected.name, source="controller", serial="serial1")
+        select_cb.assert_awaited_once_with(expected.name, source="controller", serial="serial1", announce=True)
         manager.user_prefs_writer.update_default_variant.assert_not_called()
 
     @pytest.mark.asyncio

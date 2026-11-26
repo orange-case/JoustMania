@@ -52,7 +52,6 @@ type mdRow struct {
 	set, key, kind, bounds string
 	scopes                 []string
 	persist                bool
-	realWrite              bool // the row names `real_write: no_live_real_game`
 	flagsmithOnly          bool // the row's writer column starts with **Flagsmith only** (#2705)
 }
 
@@ -80,7 +79,7 @@ func parseFlagsMD(t *testing.T) []mdRow {
 		if strings.HasPrefix(line, "### 13.") {
 			section = ""
 			// A heading naming one set ("### 13.2 `agent`") sets it; a heading
-			// naming several ("### 13.4 `user`, `controller`, `rollout`") means
+			// naming several ("### 13.4 `user`, `controller`") means
 			// the table carries a Set column.
 			if m := backticked.FindAllStringSubmatch(line, -1); len(m) == 1 {
 				section = m[0][1]
@@ -110,7 +109,6 @@ func parseFlagsMD(t *testing.T) []mdRow {
 			rows = append(rows, mdRow{
 				set: set, key: k[1], kind: cells[1], scopes: scopes, bounds: cells[3],
 				persist:       strings.HasPrefix(cells[4], "**yes**"),
-				realWrite:     strings.Contains(strings.Join(cells[5:], "|"), "`real_write: "+RealWriteNoLiveRealGame+"`"),
 				flagsmithOnly: len(cells) > 5 && strings.HasPrefix(cells[5], "**Flagsmith only**"),
 			})
 		}
@@ -197,9 +195,6 @@ func TestRegistryMatchesFlagsMD(t *testing.T) {
 			}
 			if p.Persist != row.persist {
 				t.Errorf("%s: persist %v in registry, %v in flags.md", row.key, p.Persist, row.persist)
-			}
-			if p.RealWriteNeedsNoRealGame() != row.realWrite {
-				t.Errorf("%s: real_write %q in registry, flags.md names it: %v", row.key, p.RealWrite, row.realWrite)
 			}
 			if p.FlagsmithOnly() != row.flagsmithOnly {
 				t.Errorf("%s: Flagsmith only %v in registry.flagsmithOnly, %v in flags.md (writer column **Flagsmith only**)", row.key, p.FlagsmithOnly(), row.flagsmithOnly)
@@ -415,7 +410,7 @@ func TestCredentialBearingURLsAcceptOnlyDeclaredVariants(t *testing.T) {
 				}
 			}
 		}
-		for _, key := range []string{"decision.openai.base_url", "decision.jev.base_url", "decision.claude.base_url"} {
+		for _, key := range []string{"decision.jev.base_url", "decision.claude.base_url"} {
 			t.Run("UC-053/A5 "+dir+" "+key+" refuses an undeclared URL", func(t *testing.T) {
 				p := reg.Get("agent", key)
 				if p == nil {
@@ -457,40 +452,47 @@ func TestOperatorSetIsReadOnlyBaseline(t *testing.T) {
 }
 
 // UC: UC-043 A17
-func TestRealWriteAttribute(t *testing.T) {
-	t.Run("UC-043/A17 exactly the eight hold keys carry real_write: no_live_real_game", func(t *testing.T) {
-		want := []string{
-			"game/shield.activation", "game/shield.empty_pulse_ms", "game/shield.energy_budget_seconds",
-			"game/shield.energy_initial_seconds", "game/shield.energy_max_seconds", "game/shield.hold_rumble_intensity",
-			"game/shield.min_burst_seconds", "game/shield.recharge_per_second",
-		}
+func TestRealScopeIsLatched(t *testing.T) {
+	t.Run("UC-043/A17 every flag promotable in scope real is latched at game start", func(t *testing.T) {
 		for _, dir := range []string{"", "ci"} {
-			var got []string
+			real := map[string]bool{}
 			for _, p := range loadReal(t, dir).Policies() {
-				if p.RealWriteNeedsNoRealGame() {
-					got = append(got, id(p.Set, p.Key))
+				if !p.AllowsScope(ScopeReal) {
+					continue
+				}
+				real[id(p.Set, p.Key)] = true
+				if !p.LatchedAtGameStart() {
+					t.Errorf("flagd/%s: %s allows scope real but is not latched at game start; a real write would change a running game", dir, id(p.Set, p.Key))
 				}
 			}
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("flagd/%s: real_write keys %v, want %v", dir, got, want)
+			for key := range latchedAtGameStart {
+				if !real[key] {
+					t.Errorf("flagd/%s: latchedAtGameStart lists %s, which has no scope real", dir, key)
+				}
 			}
 		}
 	})
-	b, err := baseline.Load(filepath.Join(root(t), "..", "flagd", "ci"), baseline.DefaultFiles)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bad := []struct{ name, row string }{
-		{"an unknown value", `{set: game, key: sensitivity, kind: overlay, scope: [stack, real], real_write: always}`},
-		{"a kind other than overlay", `{set: game, key: num_teams, kind: state, scope: [game], real_write: no_live_real_game}`},
-	}
-	for _, c := range bad {
-		t.Run("UC-043/A17 the registry refuses real_write with "+c.name, func(t *testing.T) {
-			if _, err := Parse([]byte("flags:\n  - "+c.row+"\n"), b); err == nil {
-				t.Fatalf("accepted %s", c.row)
+}
+
+// shield.activation is read at each grant in instant and trigger games
+// (UC-040 BR-019), so it is neither latched nor writable in scope real.
+//
+// UC: UC-043 A17
+// UC: UC-040 BR-019
+func TestShieldActivationIsReadPerGrant(t *testing.T) {
+	t.Run("UC-043/A17 shield.activation is not latched and has no scope real", func(t *testing.T) {
+		const key = "game/shield.activation"
+		if _, listed := latchedAtGameStart[key]; listed {
+			t.Errorf("latchedAtGameStart lists %s, which instant and trigger games read per grant", key)
+		}
+		for _, dir := range []string{"", "ci"} {
+			for _, p := range loadReal(t, dir).Policies() {
+				if id(p.Set, p.Key) == key && p.AllowsScope(ScopeReal) {
+					t.Errorf("flagd/%s: %s allows scope real", dir, key)
+				}
 			}
-		})
-	}
+		}
+	})
 }
 
 // The kill-switch set is a Go set (not a registry.yaml key, so released images

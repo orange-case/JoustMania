@@ -7,7 +7,7 @@
 # Runs as part of `make lint` (needs only bash + python3), or directly:
 #   ./scripts/tests/test-talk-stage.sh
 #
-# UC: UC-070 main A7 A8 A9 BR-001 BR-003 BR-007 Pre-3 Post-S-2
+# UC: UC-070 main step 4 A8 A9 BR-001 BR-003 BR-007 Pre-3 Post-S-2
 # UC: UC-053 A1
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
@@ -77,7 +77,6 @@ drift policy.shield_danger_ratio early
 drift policy.shield_danger_samples quick
 drift decision.min_gap_after_answer_ms off
 drift decision.claude.max_requests_per_minute conservative
-drift decision.openai.max_requests_per_minute inherit
 out="$("${HELPER}" reset)"
 expect "reset: interventions_allowed back to standard" interventions_allowed standard
 expect "reset: kill switch back on" enabled on
@@ -91,7 +90,6 @@ expect "reset: danger samples default" policy.shield_danger_samples default
 expect "reset: gap after answer default" decision.min_gap_after_answer_ms default
 # UC: UC-070 BR-003 (#2519: an operator overlay of a paid backend's cap does not survive reset)
 expect "reset: claude decide cap stage" decision.claude.max_requests_per_minute stage
-expect "reset: openai decide cap stage" decision.openai.max_requests_per_minute stage
 [[ "${out}" == *"reset  interventions_allowed: none -> standard"* ]] && ok "reset reports what it changed" || not_ok "reset reports what it changed: ${out}"
 [[ "${out}" == *"interventions: 0 game-scoped value(s) in 0 live game(s)"* ]] && ok "reset reports interventions as per game" || not_ok "reset reports interventions as per game: ${out}"
 if grep -q '^DELETE /agent?writer=stage' "${FAKE_FLAG_LOG}"; then ok "reset clears the stage overlays first"; else not_ok "reset clears the stage overlays first"; fi

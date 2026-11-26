@@ -1,5 +1,5 @@
 """
-TC-013: Shadow game alongside a real FFA game (docs/test_cases/TC-013-shadow-game-alongside-real-game.md).
+TC-013: Shadow game alongside a real FFA game (journey document retired by #2799; this test is the journey).
 
 One journey on one stack: a real menu game R1 on four unreserved mock
 controllers and a headless shadow game S1 on four reserved ones run together.

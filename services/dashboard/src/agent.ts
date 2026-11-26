@@ -3,7 +3,7 @@
  *
  * The "Agent" tab is the demo's observability focus screen: it shows what the
  * in-game agent is doing live: the decisions it evaluates (invoke_agent), the
- * effective flag values it resolved, its activity (blocked decisions, rollouts)
+ * effective flag values it resolved, its activity (blocked decisions)
  * and the interventions it applied vs blocked.
  *
  * SOURCES (UC-035 step 3, docs/specs/services.md §5)
@@ -12,9 +12,7 @@
  *     decides               decision feed + strip, the blocked activity rows
  *                           (LinkedDecision), the prediction strip and the goal
  *     flags                 flag panel: each game's effective flags
- *   Jaeger (./jaeger.ts), only the rollout rows: agent.infrastructure.decision,
- *     one tag search per remediation.action (ROLLOUT_ACTIONS); every row links
- *     its trace in Jaeger.
+ *   Every row links its trace in Jaeger.
  *   VictoriaMetrics: the applied write counter and the blocked tallies (UC-040
  *   A21); `n/a` when it is down.
  */

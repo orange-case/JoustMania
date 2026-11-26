@@ -85,7 +85,6 @@ class LobbyState(StrEnum):
     FLASH = "flash"  # Initial green flash
     CONNECTED = "connected"  # Connected but not ready (dim color)
     READY = "ready"  # Ready to play (bright color)
-    ADMIN = "admin"  # In admin mode (white)
 
 
 # Button transition tracking keys (used in _detect_button_transitions)

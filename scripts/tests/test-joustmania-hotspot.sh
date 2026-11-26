@@ -23,7 +23,8 @@
 #    wins over it (BR-011); no LED helper or an older one is one line and
 #    exit 0, and the next check asks again (BR-006)
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-joustmania-hotspot.sh
-# UC: UC-061 main A1 A2 A3 A4 A5 A6 A7 A9 A10 Pre-1 Post-S-2 Post-F-1 BR-001 BR-002 BR-004 BR-006 BR-008 BR-010 BR-011
+# UC: UC-061 main A1 Pre-1 Post-S-2 Post-F-1
+# Spec: docs/specs/stage-host.md SH-11 SH-12 SH-13 SH-15
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 

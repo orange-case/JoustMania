@@ -17,7 +17,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | Document | What it answers |
 |---|---|
 | [requirements.md](requirements.md) | Every functional requirement (FR), measurable quality (NFR) and constraint (C), with status |
-| [entity_model.md](entity_model.md) | Domain entities: controller, game session, player, flag, decision, intervention, experiment, rollout |
+| [entity_model.md](entity_model.md) | Domain entities: controller, game session, player, flag, decision, intervention, experiment |
 | [glossary.md](glossary.md) | Shared vocabulary: game kinds, decision outcomes, confidence, gates, stages, shadow, experiment, kill switch, and the words to avoid |
 
 ## 3. How it behaves: use cases
@@ -27,13 +27,13 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | Area | Use cases |
 |---|---|
 | Pairing and controllers | [UC-001](use_cases/UC-001.md) pair over USB, [UC-002](use_cases/UC-002.md) connect and join, [UC-003](use_cases/UC-003.md) mock controllers, [UC-004](use_cases/UC-004.md) identify a controller |
-| Lobby and admin | [UC-010](use_cases/UC-010.md) ready up and start, [UC-011](use_cases/UC-011.md) select mode, [UC-012](use_cases/UC-012.md) admin settings, [UC-013](use_cases/UC-013.md) agent kill switch on the controller, [UC-014](use_cases/UC-014.md) force start |
+| Lobby and menu | [UC-010](use_cases/UC-010.md) ready up and start, [UC-011](use_cases/UC-011.md) select mode, [UC-014](use_cases/UC-014.md) force start, [UC-015](use_cases/UC-015.md) operator pad; Obsolete since #2819: [UC-012](use_cases/UC-012.md) admin settings, [UC-013](use_cases/UC-013.md) agent kill switch on the controller |
 | Playing | [UC-020](use_cases/UC-020.md) FFA, [UC-021](use_cases/UC-021.md) teams, [UC-022](use_cases/UC-022.md) hidden roles, [UC-023](use_cases/UC-023.md) zombies, [UC-024](use_cases/UC-024.md) swapper, [UC-025](use_cases/UC-025.md) 1v1, [UC-026](use_cases/UC-026.md) non-stop, [UC-027](use_cases/UC-027.md) force end, [UC-030](use_cases/UC-030.md) death detection, [UC-031](use_cases/UC-031.md) audio |
 | Observability | [UC-035](use_cases/UC-035.md) observe the system |
 | Agent | [UC-040](use_cases/UC-040.md) decide an intervention, [UC-041](use_cases/UC-041.md) observe a game, [UC-042](use_cases/UC-042.md) retro and proposals, [UC-043](use_cases/UC-043.md) shadow experiments and promotion, [UC-044](use_cases/UC-044.md) switch backend live, [UC-045](use_cases/UC-045.md) kill switch, [UC-046](use_cases/UC-046.md) repeatable pattern-driven shadow games (#1258), [UC-047](use_cases/UC-047.md) calibrate the shadow players offline from real games (#2813) |
-| Infrastructure | [UC-050](use_cases/UC-050.md) progressive rollout, [UC-051](use_cases/UC-051.md) automatic rollback, [UC-052](use_cases/UC-052.md) manual canary (all three parked since 2026-10-19) |
-| Operations | [UC-060](use_cases/UC-060.md) operate the stage Pi (planned, #2027), [UC-061](use_cases/UC-061.md) reach the stage Pi over its own hotspot (#2099) |
-| Talk | [UC-070](use_cases/UC-070.md) present the demo |
+| Infrastructure | [UC-050](use_cases/UC-050.md) progressive rollout, [UC-051](use_cases/UC-051.md) automatic rollback, [UC-052](use_cases/UC-052.md) manual canary (all three retired by #2784, Obsolete) |
+| Operations | [UC-060](use_cases/UC-060.md) operate the stage Pi (#2027), [UC-061](use_cases/UC-061.md) reach the stage Pi over its own hotspot (#2099); the host-OS detail is the ops spec [specs/stage-host.md](specs/stage-host.md) (#2785) |
+| Talk | [UC-070](use_cases/UC-070.md) present the demo: goal, stage baseline, pre-flight, fallback; the beats are the [talk runbook](talk/two-standards-runbook.md) §3 (#2785) |
 
 ## 4. Exact contracts: technical specs
 
@@ -43,8 +43,9 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [specs/flags.md](specs/flags.md) | Every flag: type, variants, default, readers, writers, reload behaviour |
 | [specs/telemetry.md](specs/telemetry.md) | Span names, attributes, metrics, game events, log lines others depend on |
 | [specs/decide-contract.md](specs/decide-contract.md) | The decision backend contract: questions, validation, confidence, outcomes, fallbacks |
+| [specs/stage-host.md](specs/stage-host.md) | Ops spec of the stage Pi's host side: autostart and offline start, upgrade and rollback, status and ACT LED, first-time install, hotspot fallback, with an acceptance checklist (moved from UC-060 / UC-061, #2785) |
 | [specs/generated/](specs/generated/) | Tables generated from the code by `make specs` (Python metric catalog, gRPC RPC tables, flag sets, `ci/` flag diffs; totals are not committed, `make specs-counts` prints them, #2152); never hand-edited, hand-written notes live in [specs/notes/](specs/notes/) |
-| [specs-inventory.md](specs-inventory.md) | Every older doc's status and the **discrepancies found** between docs and code |
+| [specs-inventory.md](specs-inventory.md) | Frozen snapshot (2026-11-25, #2798): every older doc's status and the historic `D-*` discrepancy ledger; new drift is a `spec-drift` issue |
 
 ## 5. How to: guides and runbooks
 
@@ -53,11 +54,10 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Set up, follow the spec-first workflow, pass CI |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Build, run, test and debug; compose and image workflow |
 | [hardware-setup-guide.md](hardware-setup-guide.md) (includes the 25-controller setup) | Set up a Pi 5 with many controllers |
-| [UC-010](use_cases/UC-010.md), [UC-012](use_cases/UC-012.md) | Lobby and admin button maps (BR-005 in each) |
+| [UC-010](use_cases/UC-010.md), [UC-015](use_cases/UC-015.md) | Lobby button map (UC-010 BR-005) and operator pad keys (UC-015 BR-011, BR-016) |
 | [CONTROLLER_CONNECTIVITY.md](CONTROLLER_CONNECTIVITY.md) | Troubleshoot Bluetooth |
 | [AUDIO.md](AUDIO.md) | Audio hardware and ALSA setup |
 | [observability-quickstart.md](observability-quickstart.md) | Performance tooling |
-| [CANARY_RUNBOOK.md](CANARY_RUNBOOK.md) | Manual backend canary |
 | [architecture/flag-service.md](architecture/flag-service.md) | Flag service: one gRPC sync source for flagd partitioned by flagSetId, `PUT /{flagSetId}/{flagName}` writes, mutable-flag registry, persisted admin settings, migration plan (epic #1407) |
 | [architecture/stack.md](architecture/stack.md) | AIUP stack file: layers mapped to our repo skills (`/implement`, `/pytest-test`, `/go-test`, `/integration-test`, `/coverage-check`), markers, commands, mapping of the aiup-core 3.x commands (#2079) |
 | [agent-act-runbook.md](agent-act-runbook.md) | Take the agent from inert to acting |
@@ -72,7 +72,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [challenges/can-you-see-the-swing.md](challenges/can-you-see-the-swing.md) | Run the booth challenge "Can you see the swing?": pick a death, read the player's 100 ms motion series in the case's VictoriaMetrics, record whether each backend keeps that density (UC-102) |
 
 Service READMEs (`services/*/README.md`) hold code-level detail; where they disagree with the specs, the
-specs win and the [inventory](specs-inventory.md#3-service-tool-and-test-docs) records the difference.
+specs win and the difference is tracked as a `spec-drift` issue (#2798).
 
 ## 6. Why it is like this: research and design history
 

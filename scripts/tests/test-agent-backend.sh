@@ -9,7 +9,6 @@
 #   ./scripts/tests/test-agent-backend.sh
 #
 # UC: UC-044 main A3 A4 A5 Post-F-1
-# UC: UC-070 A6
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 
@@ -40,7 +39,7 @@ write_fixture() {
     },
     "decision.backend": {
       "state": "ENABLED",
-      "variants": { "rules": "rules", "claude": "claude", "openai": "openai", "jev": "jev" },
+      "variants": { "rules": "rules", "claude": "claude", "jev": "jev" },
       "defaultVariant": "rules"
     },
     "decision.act_confidence_threshold": {
@@ -66,16 +65,6 @@ write_fixture() {
         "opus": "claude-opus-5-5"
       },
       "defaultVariant": "haiku"
-    },
-    "decision.openai.model": {
-      "state": "ENABLED",
-      "variants": { "unset": "", "gpt": "gpt-5" },
-      "defaultVariant": "unset"
-    },
-    "decision.openai.reasoning_effort": {
-      "state": "ENABLED",
-      "variants": { "auto": "auto", "none": "none", "minimal": "minimal", "low": "low", "omit": "omit" },
-      "defaultVariant": "auto"
     }
   }
 }
@@ -135,8 +124,8 @@ expect "flip to claude sonnet" 0 'agent backend -> claude  model -> sonnet ("cla
 check_variant decision.backend claude
 check_variant decision.claude.model sonnet
 expect "status shows claude model" 0 'model     = sonnet ("claude-sonnet-5-5")' -- status
-expect "flip backend only" 0 "agent backend -> openai" -- openai
-check_variant decision.backend openai
+expect "flip backend only" 0 "agent backend -> jev" -- jev
+check_variant decision.backend jev
 check_variant decision.claude.model sonnet
 expect "back to rules" 0 "agent backend -> rules" -- rules
 check_variant decision.backend rules
@@ -155,22 +144,20 @@ expect "jev-threshold strict" 0 "agent jev act threshold -> strict (0.95)" -- je
 check_variant decision.jev.act_confidence_threshold strict
 expect "capture off" 0 "agent content capture -> off" -- capture off
 check_variant decision.capture_content off
-expect "effort omit" 0 'agent openai reasoning effort -> omit ("omit")' -- effort omit
-check_variant decision.openai.reasoning_effort omit
 # UC-044 A3: tuning never switches the backend.
 check_variant decision.backend claude
-expect "status after effort flip" 0 "capture   = off (false)" -- status
-"${HELPER}" openai >/dev/null
-expect "status shows effort for openai" 0 'effort    = omit ("omit")' -- status
+expect "status after capture flip" 0 "capture   = off (false)" -- status
 
 # --- refusals change nothing ----------------------------------------------
 fixture
 expect "unknown model lists valid ones" 1 "valid: haiku, sonnet, opus" -- claude gpt4
 check_variant decision.backend rules
+expect "retired effort subcommand is rejected like an unknown action" 2 "usage:" -- effort low
 expect "unknown threshold lists valid ones" 1 "valid: low, default, strict" -- threshold yolo
 expect "unknown capture variant refused" 1 "valid: on, off" -- capture maybe
-expect "unknown effort lists valid ones" 1 "valid: auto, none, minimal, low, omit" -- effort high
-expect "effort needs a value" 2 "usage:" -- effort
+# UC-044 A4: a retired backend name (a stale "openai") is rejected like any unknown one.
+expect "UC-044/A4 retired openai backend is rejected like an unknown name" 2 "usage:" -- openai
+check_variant decision.backend rules
 expect "rules takes no model" 1 "rules backend has no model" -- rules haiku
 expect "missing model flag is named" 1 "flag 'decision.jev.model' not defined" -- jev small
 expect "unknown action shows usage" 2 "usage:" -- banana
@@ -229,18 +216,18 @@ start_fake_flag_service "${WORK}"
 expect "undeclared backend variant is refused" 1 "variant 'claude' not defined for flag 'decision.backend'" -- claude sonnet
 check_variant decision.claude.model haiku
 
-# --- UC-070 A6: second vendor after the rollback to jev ---------------------
+# --- UC-044 A4 / main: model variant on a backend switch ------------------
 # A model variant the flag file does not define is refused before anything is
-# switched (jev stays); a defined one switches to openai; `jev` switches back.
+# switched (jev stays); a defined one switches to claude; `jev` switches back.
 fixture
 "${HELPER}" jev >/dev/null
-expect "A6 undefined openai model variant is refused" 1 "valid: unset, gpt" -- openai llama
+expect "UC-044/A4 undefined claude model variant is refused" 1 "valid: haiku, sonnet, opus" -- claude llama
 check_variant decision.backend jev
-check_variant decision.openai.model unset
-expect "A6 a defined openai model variant switches" 0 "agent backend -> openai" -- openai gpt
-check_variant decision.backend openai
-check_variant decision.openai.model gpt
-expect "A6 back to jev" 0 "agent backend -> jev" -- jev
+check_variant decision.claude.model haiku
+expect "UC-044/main a defined claude model variant switches" 0 "agent backend -> claude" -- claude sonnet
+check_variant decision.backend claude
+check_variant decision.claude.model sonnet
+expect "UC-044/main back to jev" 0 "agent backend -> jev" -- jev
 check_variant decision.backend jev
 
 # --- the flag service unreachable -----------------------------------------
@@ -248,7 +235,7 @@ check_variant decision.backend jev
 # The stopped fake cannot log a PUT, so "nothing written" is not checked here; the refusal
 # case above (overlays stay 0) carries the "nothing changes" half.
 fixture
-"${HELPER}" openai >/dev/null
+"${HELPER}" jev >/dev/null
 stop_fake_flag_service
 expect "unreachable flag service fails a switch clearly" 1 "flag service unreachable" -- claude sonnet
 expect "unreachable flag service fails clearly" 1 "flag service unreachable" -- status

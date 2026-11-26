@@ -6,8 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentUnavailableError, fetchAgentState, fetchInterventionCounts, fetchRollouts, RolloutStore } from "../agent.js";
-import { JaegerUnavailableError } from "../jaeger.js";
+import { AgentUnavailableError, fetchAgentState, fetchInterventionCounts } from "../agent.js";
 import { keepGameEventStreamOpen } from "../stream.js";
 import { ShieldStore, shieldBadge } from "../shield.js";
 
@@ -96,21 +95,18 @@ describe("UC-035: A3 the agent down, Jaeger down, no data", () => {
   }
 
   for (const mode of ["reject", "503", "errors"] as const) {
-    it(`UC-035/A3 Jaeger down (${mode}) fails only the rollout search; the agent's state still loads`, async () => {
+    it(`UC-035/A3 Jaeger down (${mode}): the agent's state still loads`, async () => {
       stubBackends({ jaeger: mode });
-      await expect(fetchRollouts(new RolloutStore())).rejects.toBeInstanceOf(JaegerUnavailableError);
       await expect(fetchAgentState()).resolves.toEqual({ decides: { data: [] }, flags: [], experiments: [] });
     });
   }
 
-  it("UC-035/A3 nothing recorded yet (agent) or no spans (Jaeger) is data, not an error", async () => {
+  it("UC-035/A3 nothing recorded yet is data, not an error", async () => {
     stubBackends({});
     await expect(fetchAgentState()).resolves.toEqual({ decides: { data: [] }, flags: [], experiments: [] });
-    const store = new RolloutStore();
-    await fetchRollouts(store);
-    expect(store.list()).toEqual([]);
   });
 });
+
 describe("UC-035: A3 Grafana down", () => {
   it("UC-035/A3 only the Metrics tab's embed and its outbound links depend on Grafana", () => {
     const html = readFileSync(join(__dirname, "..", "index.html"), "utf8");
@@ -132,7 +128,6 @@ describe("UC-035: A3 Grafana down", () => {
 
     await expect(fetchInterventionCounts()).resolves.toBeDefined();
     await expect(fetchAgentState()).resolves.toBeDefined();
-    await expect(fetchRollouts(new RolloutStore())).resolves.toBeUndefined();
 
     expect(calls.length).toBeGreaterThan(0);
     expect(calls.filter((u) => u.includes("/grafana"))).toEqual([]);

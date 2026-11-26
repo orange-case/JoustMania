@@ -54,7 +54,6 @@ const budgetCapForTest = 100 // remoteSnapshot's llm.max_requests_per_minute
 
 // UC: UC-040 A14 BR-005
 // UC: UC-045 A2 BR-001
-// UC: UC-070 A7
 func TestRemote_NoInterventionsAllowed(t *testing.T) {
 	empties := map[string][]string{
 		"none (nil)":        nil,

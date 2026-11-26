@@ -7,8 +7,8 @@ import (
 )
 
 // prediction_ask.go is the model-stated prediction (#2479, UC-040 A45, BR-034;
-// decide-contract.md §3, §4.1): the optional ffa.prediction question a claude or
-// openai request carries in Request.PredictionAsk (opt-in by
+// decide-contract.md §3, §4.1): the optional ffa.prediction question a claude
+// request carries in Request.PredictionAsk (opt-in by
 // decision.predictions.ask_model), and the check of the model's answer to it.
 // The ask is outside Request.Questions and its answer is split off before
 // Validate, so a missing or bad prediction is dropped and never blocks, delays or

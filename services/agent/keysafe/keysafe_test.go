@@ -9,7 +9,7 @@ import "testing"
 // UC: C-016
 func TestKeySafeBaseURL(t *testing.T) {
 	accepted := []string{
-		"https://api.openai.com/v1",
+		"https://api.typesafe.ai/v1",
 		"https://192.0.2.1/v1", // the talk's blackhole variant
 		"http://127.0.0.1:1/v1",
 		"http://127.8.9.10/v1",
@@ -26,18 +26,18 @@ func TestKeySafeBaseURL(t *testing.T) {
 		})
 	}
 	rejected := map[string]string{
-		"http://fake-openai:8080/v1":        ReasonCleartextRemote,
-		"http://192.168.1.5/v1":             ReasonCleartextRemote,
-		"http://10.0.0.1/v1":                ReasonCleartextRemote,
-		"http://127.0.0.1.nip.io/v1":        ReasonCleartextRemote,
-		"http://localhost.evil.test/v1":     ReasonCleartextRemote,
-		"ftp://x/v1":                        ReasonMalformed,
-		"https://user:pw@api.openai.com/v1": ReasonMalformed,
-		"https://h/v1?k=1":                  ReasonMalformed,
-		"https://h/v1#f":                    ReasonMalformed,
-		"::nope":                            ReasonMalformed,
-		"https:///v1":                       ReasonMalformed,
-		"":                                  ReasonMalformed,
+		"http://fake-remote:8080/v1":         ReasonCleartextRemote,
+		"http://192.168.1.5/v1":              ReasonCleartextRemote,
+		"http://10.0.0.1/v1":                 ReasonCleartextRemote,
+		"http://127.0.0.1.nip.io/v1":         ReasonCleartextRemote,
+		"http://localhost.evil.test/v1":      ReasonCleartextRemote,
+		"ftp://x/v1":                         ReasonMalformed,
+		"https://user:pw@api.typesafe.ai/v1": ReasonMalformed,
+		"https://h/v1?k=1":                   ReasonMalformed,
+		"https://h/v1#f":                     ReasonMalformed,
+		"::nope":                             ReasonMalformed,
+		"https:///v1":                        ReasonMalformed,
+		"":                                   ReasonMalformed,
 	}
 	for raw, wantReason := range rejected {
 		t.Run("UC-044/BR-003 rejects "+raw, func(t *testing.T) {
