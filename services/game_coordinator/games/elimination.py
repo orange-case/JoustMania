@@ -163,7 +163,7 @@ class EliminationMixin:
     async def _send_death_effect(self, serial: str, trace_parent: str, trace_state: str) -> None:
         """Send the death effect (red + vibrate, no restore) on the gameplay stream, if the mode sends one."""
         # Send death effect via stream (red + vibrate, no restore)
-        # Use pre-extracted trace context so effect appears under player_lifecycle
+        # Use pre-extracted trace context so effect appears under game.player
         # in traces, even though _kill_player_impl may have closed the span.
         from proto import controller_manager_pb2
 
@@ -229,7 +229,7 @@ class EliminationMixin:
         death_ns = self._ground_truth.record_death(serial)
 
         # Extract trace context BEFORE _kill_player_impl() which may close the span.
-        # This ensures the death effect and sound are parented to the player_lifecycle
+        # This ensures the death effect and sound are parented to the game.player
         # span even after the subclass impl ends it.
         trace_parent, trace_state = _base.inject_trace_context(player.span)
 

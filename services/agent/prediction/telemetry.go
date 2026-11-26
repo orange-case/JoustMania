@@ -182,7 +182,7 @@ func spanAttrs(r Result) []attribute.KeyValue {
 	return a
 }
 
-// remoteParent is the game's game_cycle, else gameplay_phase, else root span as a
+// remoteParent is the game's game.cycle, else game.phase.gameplay, else root span as a
 // remote span context (the order of decision.inGameRemoteParent, UC-040 BR-013).
 func remoteParent(g gameParent) (trace.SpanContext, bool) {
 	tid, err := trace.TraceIDFromHex(g.traceID)

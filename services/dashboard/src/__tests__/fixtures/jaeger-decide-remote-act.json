@@ -6,7 +6,7 @@
         {
           "traceID": "bbbb000000000002",
           "spanID": "g1",
-          "operationName": "gameplay_phase",
+          "operationName": "game.phase.gameplay",
           "references": [],
           "startTime": 1759999940000000,
           "duration": 120000000,

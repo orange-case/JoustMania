@@ -88,7 +88,7 @@ async def _game(cls, tracer, num_players=3):
     game.running = True
     game._play_sound = async_noop
     for serial, player in game.players.items():
-        player.span = tracer.start_span("player_lifecycle", attributes={"player.serial": serial})
+        player.span = tracer.start_span("game.player", attributes={"player.serial": serial})
     game._game_root_span = tracer.start_span("root")
     return game
 
@@ -179,7 +179,7 @@ class TestGroundTruthAtNormalEnd:
         player_spans = {
             s.attributes["player.serial"]: s
             for s in tracer.exporter.get_finished_spans()
-            if s.name.startswith("player") and "player.serial" in (s.attributes or {})
+            if (s.name == "game.player" or s.name.startswith("player: ")) and "player.serial" in (s.attributes or {})
         }
         for serial in SERIALS[1:]:
             (death,) = truth[serial][DEATHS]

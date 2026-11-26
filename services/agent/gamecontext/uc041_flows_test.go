@@ -155,7 +155,7 @@ func TestMux_LostBatchLeavesNoTraceAndIsRestored(t *testing.T) {
 		mux.ApplyMetrics(gameActiveFor("game-A", 1))
 		clk.advance(interval)
 		mux.ApplyMetrics(gameActiveFor("game-A", 1)) // re-exported gauges bring no trace ids
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-A", "game_cycle"), logTraceHex, logCycleHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-A", "game.cycle"), logTraceHex, logCycleHex, true))
 		if got, want := traceIDsOf(t, mux, "game-A"), (traceIDs{trace: logTraceHex, cycle: logCycleHex}); got != want {
 			t.Fatalf("ids = %+v, want %+v (root span id stays unknown)", got, want)
 		}

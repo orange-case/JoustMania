@@ -60,7 +60,7 @@ async def test_kill_ends_with_the_base_death_effect(game_cls, sdk_tracer):
     game._play_sound = async_noop
 
     serial = next(iter(game.players))
-    game.players[serial].span = sdk_tracer.start_span("player_lifecycle")
+    game.players[serial].span = sdk_tracer.start_span("game.player")
     assert game._sends_death_effect(serial) is True
 
     await game._kill_player(serial, 5.0)

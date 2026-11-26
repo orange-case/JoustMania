@@ -57,7 +57,7 @@ class GameLoopMixin:
 
         Sends per-controller countdown effects so each controller.effect.countdown span
         appears under the corresponding player's game.phase.countdown span.
-        Sound spans live under gameplay_phase (shared, not player-specific).
+        Sound spans live under game.phase.gameplay (shared, not player-specific).
         """
         from proto import controller_manager_pb2
 
@@ -98,7 +98,7 @@ class GameLoopMixin:
 
         # Play countdown beeps in sync with the visual countdown.
         # Sounds are shared (not per-player), so they inherit the active
-        # gameplay_phase span as their parent — not any player's game.phase.countdown.
+        # game.phase.gameplay span as their parent — not any player's game.phase.countdown.
         beep_count = COUNTDOWN_BEEP_COUNT
         beep_interval_ms = phase_duration_ms  # Match LED phase duration
 
@@ -107,7 +107,7 @@ class GameLoopMixin:
                 logger.info(_MSG_COUNTDOWN_INTERRUPTED)
                 return
 
-            # Play countdown beep — inherits gameplay_phase as parent span
+            # Play countdown beep — inherits game.phase.gameplay as parent span
             await self._play_sound(Sound.SFX_BEEP_LOUD, priority=2)
 
             # Wait for beep interval (configurable based on countdown duration)
@@ -118,7 +118,7 @@ class GameLoopMixin:
                     return
                 await game_clock.sleep(self._COUNTDOWN_BEEP_POLL_S)
 
-        # Play start sound — inherits gameplay_phase as parent span
+        # Play start sound — inherits game.phase.gameplay as parent span
         await self._play_sound(Sound.SFX_START3, priority=2)
 
         await self.event_publisher(GameEvent.COUNTDOWN_END, {})
@@ -551,7 +551,7 @@ class GameLoopMixin:
         return False
 
     async def _run_gameplay_phase(self):
-        """Start the game and run gameplay_phase: countdown, game loop, outcome latch."""
+        """Start the game and run game.phase.gameplay: countdown, game loop, outcome latch."""
         # Game starts
         self.state = GameState.RUNNING
         current_span = trace.get_current_span()
@@ -570,10 +570,10 @@ class GameLoopMixin:
         )
 
         # Phase 2: Gameplay (player spans created before countdown)
-        with _base.tracer.start_as_current_span("gameplay_phase") as gameplay_span:
+        with _base.tracer.start_as_current_span("game.phase.gameplay") as gameplay_span:
             self._open_gameplay_spans(gameplay_span)
 
-            # Run countdown (sounds go under game_cycle via _play_sound)
+            # Run countdown (sounds go under game.cycle via _play_sound)
             await self._countdown()
 
             self._close_countdown_spans()
@@ -600,12 +600,12 @@ class GameLoopMixin:
                 self._close_grouping_spans()
 
     def _open_gameplay_spans(self, gameplay_span) -> None:
-        """Open the players, game_cycle, player lifecycle and per-player countdown spans."""
+        """Open the players, game.cycle, player lifecycle and per-player countdown spans."""
         # Store span reference and context for background tasks
         self.gameplay_span = gameplay_span
         self.gameplay_span_context = otel_context.get_current()
         # UC-041 BR-004: the agent's span ids come only from game.phase.start.
-        self._send_phase_start(gameplay_span, "gameplay_phase")
+        self._send_phase_start(gameplay_span, "game.phase.gameplay")
 
         # Create "game.players" parent span (collapsible group in Jaeger)
         self._players_span = _base.tracer.start_span(
@@ -615,14 +615,14 @@ class GameLoopMixin:
         )
         players_ctx = trace.set_span_in_context(self._players_span)
 
-        # Create "game_cycle" span for instrumentation (sounds, music tempo)
+        # Create "game.cycle" span for instrumentation (sounds, music tempo)
         self._game_cycle_span = _base.tracer.start_span(
-            "game_cycle",
+            "game.cycle",
             context=self.gameplay_span_context,
             attributes={"game.id": self.game_id},
         )
         self.game_cycle_context = trace.set_span_in_context(self._game_cycle_span)
-        self._send_phase_start(self._game_cycle_span, "game_cycle")
+        self._send_phase_start(self._game_cycle_span, "game.cycle")
 
         # Create player lifecycle spans under "game.players" parent
         self._create_player_spans(players_ctx)
@@ -653,7 +653,7 @@ class GameLoopMixin:
                 from proto import audio_pb2
 
                 self._audio_volume = self.game_volume
-                # game_cycle is open here: parent the RPC span to it like every in-game audio call (#2671)
+                # game.cycle is open here: parent the RPC span to it like every in-game audio call (#2671)
                 with self._game_cycle_attached():
                     await self.audio_client.SetVolume(audio_pb2.SetVolumeRequest(volume=self.game_volume))
             except Exception as e:

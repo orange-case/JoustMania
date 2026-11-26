@@ -2,7 +2,7 @@
 
 A whole FFA session runs through ``GameSession._run_game_loop_async`` with a real SDK tracer and an
 in-memory exporter. The collected spans must form one trace: a root named after the mode, the phase
-spans under it, and one ``player_lifecycle`` span per player under the ``players`` group.
+spans under it, and one ``game.player`` span per player under the ``players`` group.
 """
 
 import sys
@@ -59,13 +59,13 @@ async def test_game_trace_has_mode_root_phases_and_one_span_per_player(mock_fact
     def parent_name(span):
         return by_id[span.parent.span_id].name
 
-    for phase in ("game.phase.initialization", "gameplay_phase", "game.phase.teardown"):
+    for phase in ("game.phase.initialization", "game.phase.gameplay", "game.phase.teardown"):
         (span,) = [s for s in spans if s.name == phase]
         assert span.parent.span_id == root.context.span_id, phase
 
     players_group = next(s for s in spans if s.name == "game.players")
-    assert parent_name(players_group) == "gameplay_phase"
-    lifecycles = [s for s in spans if s.name == "player_lifecycle"]
+    assert parent_name(players_group) == "game.phase.gameplay"
+    lifecycles = [s for s in spans if s.name == "game.player"]
     assert len(lifecycles) == len(game.players) == 3
     assert {s.parent.span_id for s in lifecycles} == {players_group.context.span_id}
     assert {s.attributes["player.serial"] for s in lifecycles} == set(game.players)

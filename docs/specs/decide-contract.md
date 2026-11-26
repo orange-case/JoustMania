@@ -556,7 +556,7 @@ in that cycle (`services/agent/decision/decision.go:OnEvaluate`, `services/agent
 
 - the three **configuration** fallbacks (`unknown_backend`, `backend_unavailable`, `async_not_wired`;
   `services/agent/decision/decide_hook.go:isConfigFallback`) still emit an `invoke_agent joustmania-agent` span (`decide.outcome=fallback`,
-  `decide.fallback_reason`, `decide.backend=rules`) under its own `agent.signal_received` root (without game ids; in a game directly under `game_cycle`), throttled per
+  `decide.fallback_reason`, `decide.backend=rules`) under its own `agent.signal_received` root (without game ids; in a game directly under `game.cycle`), throttled per
   reason to one per `decision.throttle_seconds` window;
 - `llm_not_eligible` and `llm_budget_exhausted` stay counter-only, so quiet shadow games do not flood Jaeger;
 - the log line `agent.decide.backend_misconfigured` fires on state changes only: WARN (`state=entered`,
@@ -765,7 +765,7 @@ The coordinator re-checks independently before any handler runs
 event loop: not applied), plus `game_loop_late` on a not-blocked outcome (the handler started but had not finished
 after 5 s: outcome unknown; [UC-040 BR-018](../use_cases/UC-040.md#br-018-intervention-side-effects-run-on-the-owning-games-event-loop)). Every outcome emits `game_interventions_total{type,objective,blocked,block_reason}`
 and an `agent_intervention` game event. An applied player-targeted intervention is also recorded as an event on
-that player's `player_lifecycle` span naming the player (`player.serial`, `player.name`; event names in
+that player's `game.player` span naming the player (`player.serial`, `player.name`; event names in
 [telemetry.md §3.2](telemetry.md#32-game-coordinator)).
 
 Every payload the writer can send must be playable or visible on the stack it targets: the writer
@@ -778,9 +778,9 @@ not know (UC-040 BR-007).
 Full names in [telemetry.md](telemetry.md#4-agent). Summary:
 
 - `invoke_agent joustmania-agent` (INTERNAL; the GenAI *Invoke agent internal span*, semantic-conventions-genai v0.1.0, with its deviations in [telemetry.md §4.2](telemetry.md#42-genai-semantic-conventions)). Rules path: sibling of `agent.decision` under
-  the cycle's parent (`game_cycle` in a game, else `agent.signal_received`), only when the cycle produced decisions; ended after the cycle's decisions ran
+  the cycle's parent (`game.cycle` in a game, else `agent.signal_received`), only when the cycle produced decisions; ended after the cycle's decisions ran
   (backdated to the ranking) so it can carry their permission verdict. Remote path: async
-  root parented on the game's `game_cycle` span (fallback `gameplay_phase`, then the game root; UC-040 BR-013), linked to the fire-cycle
+  root parented on the game's `game.cycle` span (fallback `game.phase.gameplay`, then the game root; UC-040 BR-013), linked to the fire-cycle
   `agent.signal_received` (`link.kind=fire_cycle`) only without game ids (in a game the trigger is the `agent.signal_received` event on the span); parent of the backend's
   `chat {model}` CLIENT span and of the resulting `agent.decision`.
   Always: `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name=joustmania-agent` (both from span start), `gen_ai.conversation.id=<game id>`,

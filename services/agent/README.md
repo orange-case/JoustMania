@@ -24,7 +24,7 @@ Written in Go using the OpenTelemetry Collector `pdata` libraries and standard
 the Agent in roughly **100 ms – 1 s** end to end, so difficulty decisions are
 driven by metrics.
 
-**Spans are late by design.** `player_lifecycle` spans only flush at game end,
+**Spans are late by design.** `game.player` spans only flush at game end,
 and even then sit behind the ~10 s trace batch window. They are used for
 **audit/confirmation**. A span batch still wakes the
 evaluation and adds span-derived state (`game.mode`,
@@ -391,7 +391,7 @@ invoke_agent joustmania-agent
   └─ agent.decision ─ agent.action
 ```
 
-In a game the decide span (and, on the rules path, `agent.decision`) is a remote child of `game_cycle` (telemetry.md §4.1).
+In a game the decide span (and, on the rules path, `agent.decision`) is a remote child of `game.cycle` (telemetry.md §4.1).
 
 The root span is **signal-agnostic** (#1053): a metric-triggered cycle and a
 trace-triggered cycle both emit `agent.signal_received`, distinguished only by

@@ -1,11 +1,11 @@
 """
-Unit tests for controller health span tracking on player_lifecycle (#571).
+Unit tests for controller health span tracking on game.player (#571).
 
 Tests:
 - _process_health() opens/closes child spans on degradation transitions
 - Rolling window rate detection: spans open when drop rate exceeds threshold
 - Events are added to child spans per frame with drop_rate attribute
-- Summary attributes are set on player_lifecycle span on close
+- Summary attributes are set on game.player span on close
 - Healthy game produces no health child spans
 """
 

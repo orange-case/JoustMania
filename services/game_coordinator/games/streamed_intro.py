@@ -103,12 +103,12 @@ class StreamedIntroGameMode(BaseGameMode):
         return await self._run_streamed_gameplay()
 
     async def _run_streamed_gameplay(self) -> bool:
-        """After the warm-up: gameplay_phase on the game loop (the stream opened before the intro).
+        """After the warm-up: game.phase.gameplay on the game loop (the stream opened before the intro).
 
         Returns False when the run skips the teardown (force-ended).
         """
-        with self._run_tracer().start_as_current_span("gameplay_phase") as gameplay_span:
-            self._send_phase_start(gameplay_span, "gameplay_phase")
+        with self._run_tracer().start_as_current_span("game.phase.gameplay") as gameplay_span:
+            self._send_phase_start(gameplay_span, "game.phase.gameplay")
             await self._game_loop()
         return True
 

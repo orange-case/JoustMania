@@ -225,7 +225,7 @@ type GameContext struct {
 	// game), "shadow" (a parallel evaluation game), or "" (unknown — not yet
 	// observed on any labeled signal). Source: the game_kind datapoint label on
 	// game_active / game_active_players / game_duration_seconds, or the game.kind
-	// attribute on the game-session / player_lifecycle spans (#845). Always in the
+	// attribute on the game-session / game.player spans (#845). Always in the
 	// flag-evaluation vocabulary: the coordinator's telemetry "primary" is
 	// normalised to "real" at ingest (NormalizeGameKind, #1249).
 	GameKind string
@@ -252,22 +252,22 @@ type GameContext struct {
 	// game-start span. Empty when game.start was lost or unsampled; an empty
 	// trace_id OR span_id means "no link" (graceful fallback, no error).
 	GameTraceSpanID string
-	// GameplayPhaseSpanID is the hex span_id of the coordinator's gameplay_phase
+	// GameplayPhaseSpanID is the hex span_id of the coordinator's game.phase.gameplay
 	// sub-span for this session (#1195, refines #1187). Source: the trace context
-	// of its game.phase.start log record. gameplay_phase is the STABLE active-play
+	// of its game.phase.start log record. game.phase.gameplay is the STABLE active-play
 	// window WITHIN the game trace; the agent re-parents its in-game decision chain
 	// (signal_received -> decision -> action) under THIS span instead of the game
 	// root, so a reader sees interventions nested where they actually occurred.
 	// Same trace as GameTraceID.
-	// Two-tier fallback: when empty (gameplay_phase not yet open / unsampled) the
+	// Two-tier fallback: when empty (game.phase.gameplay not yet open / unsampled) the
 	// re-parent uses GameTraceSpanID (the game root, #1187 behavior); when that is
 	// also empty the span stays own-root. Never breaks span emission.
 	GameplayPhaseSpanID string
-	// GameCycleSpanID is the hex span_id of the coordinator's game_cycle span (a
-	// child of gameplay_phase) for this session (#1325, UC-041 BR-004). Source: the
+	// GameCycleSpanID is the hex span_id of the coordinator's game.cycle span (a
+	// child of game.phase.gameplay) for this session (#1325, UC-041 BR-004). Source: the
 	// trace context of its game.phase.start log record. It is the
 	// PREFERRED remote parent of the in-game agent spans (UC-040 BR-013); when empty
-	// (not yet open, unsampled, or a mode without game_cycle) the parent falls back to
+	// (not yet open, unsampled, or a mode without game.cycle) the parent falls back to
 	// GameplayPhaseSpanID, then GameTraceSpanID, then own root.
 	GameCycleSpanID string
 	Session         SessionSignals

@@ -12,15 +12,15 @@ import (
 )
 
 // game_cycle_parent_test.go covers #1325 (UC-040 BR-013): the agent's in-game spans
-// are remote children of the coordinator's game_cycle span, with the fallback order
-// game_cycle -> gameplay_phase -> game root -> own root, and every
+// are remote children of the coordinator's game.cycle span, with the fallback order
+// game.cycle -> game.phase.gameplay -> game root -> own root, and every
 // agent.intervention.effect span is a direct child of its own agent.decision.
 
-// hubGameCycleSpanID is a valid game_cycle span id in the same game trace as
+// hubGameCycleSpanID is a valid game.cycle span id in the same game trace as
 // hubGameSpanID / hubGameplayPhaseSpanID.
 const hubGameCycleSpanID = "1a2b3c4d5e6f7081"
 
-// gameCycleCtx is gameplayPhaseCtx additionally carrying the game_cycle span id.
+// gameCycleCtx is gameplayPhaseCtx additionally carrying the game.cycle span id.
 func gameCycleCtx(gameID string) gamecontext.GameContext {
 	c := gameplayPhaseCtx(gameID)
 	c.GameCycleSpanID = hubGameCycleSpanID
@@ -37,8 +37,8 @@ func TestSignalReceived_ParentFallbackOrder(t *testing.T) {
 		ctx        gamecontext.GameContext
 		wantParent string // "" = own root
 	}{
-		{"UC-040/BR-013 game_cycle known: child of game_cycle", gameCycleCtx("game_gc01"), hubGameCycleSpanID},
-		{"UC-040/BR-013 game_cycle invalid: child of gameplay_phase", invalidCycle, hubGameplayPhaseSpanID},
+		{"UC-040/BR-013 game.cycle known: child of game.cycle", gameCycleCtx("game_gc01"), hubGameCycleSpanID},
+		{"UC-040/BR-013 game.cycle invalid: child of game.phase.gameplay", invalidCycle, hubGameplayPhaseSpanID},
 		{"UC-040/BR-013 no phase ids: child of the game root", gameTraceCtx("game_gc03"), hubGameSpanID},
 		{"UC-040/BR-013 no game ids: own root", gamecontext.GameContext{SessionID: "game_gc04"}, ""},
 	}
@@ -89,25 +89,25 @@ func TestInGameRemoteParent_GameCycleFirst(t *testing.T) {
 	parentOf := func(ctx context.Context) string {
 		return trace.SpanContextFromContext(ctx).SpanID().String()
 	}
-	t.Run("UC-040/BR-013 game_cycle wins over gameplay_phase and root", func(t *testing.T) {
+	t.Run("UC-040/BR-013 game.cycle wins over game.phase.gameplay and root", func(t *testing.T) {
 		ctx, ok := inGameRemoteParent(context.Background(), hubGameTrace, hubGameSpanID, hubGameplayPhaseSpanID, hubGameCycleSpanID)
 		if !ok || parentOf(ctx) != hubGameCycleSpanID {
-			t.Fatalf("parent = %s (ok=%v), want game_cycle %s", parentOf(ctx), ok, hubGameCycleSpanID)
+			t.Fatalf("parent = %s (ok=%v), want game.cycle %s", parentOf(ctx), ok, hubGameCycleSpanID)
 		}
 	})
-	t.Run("UC-040/BR-013 game_cycle without gameplay_phase still wins", func(t *testing.T) {
+	t.Run("UC-040/BR-013 game.cycle without game.phase.gameplay still wins", func(t *testing.T) {
 		ctx, ok := inGameRemoteParent(context.Background(), hubGameTrace, hubGameSpanID, "", hubGameCycleSpanID)
 		if !ok || parentOf(ctx) != hubGameCycleSpanID {
-			t.Fatalf("parent = %s (ok=%v), want game_cycle %s", parentOf(ctx), ok, hubGameCycleSpanID)
+			t.Fatalf("parent = %s (ok=%v), want game.cycle %s", parentOf(ctx), ok, hubGameCycleSpanID)
 		}
 	})
-	t.Run("UC-040/BR-013 empty game_cycle falls back to gameplay_phase", func(t *testing.T) {
+	t.Run("UC-040/BR-013 empty game.cycle falls back to game.phase.gameplay", func(t *testing.T) {
 		ctx, ok := inGameRemoteParent(context.Background(), hubGameTrace, hubGameSpanID, hubGameplayPhaseSpanID, "")
 		if !ok || parentOf(ctx) != hubGameplayPhaseSpanID {
-			t.Fatalf("parent = %s (ok=%v), want gameplay_phase %s", parentOf(ctx), ok, hubGameplayPhaseSpanID)
+			t.Fatalf("parent = %s (ok=%v), want game.phase.gameplay %s", parentOf(ctx), ok, hubGameplayPhaseSpanID)
 		}
 	})
-	t.Run("UC-040/BR-013 no trace id: own root even with a game_cycle id", func(t *testing.T) {
+	t.Run("UC-040/BR-013 no trace id: own root even with a game.cycle id", func(t *testing.T) {
 		ctx, ok := inGameRemoteParent(context.Background(), "", hubGameSpanID, hubGameplayPhaseSpanID, hubGameCycleSpanID)
 		if ok || trace.SpanContextFromContext(ctx).IsValid() {
 			t.Fatalf("want own root, got ok=%v parent=%s", ok, parentOf(ctx))
@@ -118,7 +118,7 @@ func TestInGameRemoteParent_GameCycleFirst(t *testing.T) {
 // UC: UC-040 main BR-013
 // UC: UC-035 main step 5
 func TestRemote_DecideLandsUnderGameCycle(t *testing.T) {
-	t.Run("UC-040/BR-013 async invoke_agent is a remote child of game_cycle", func(t *testing.T) {
+	t.Run("UC-040/BR-013 async invoke_agent is a remote child of game.cycle", func(t *testing.T) {
 		be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.95, "A", 0.5, "shield"))
 		h := newRemoteHarness(t, remoteSnapshot(time.Second), be)
 		c := remoteContext()
@@ -134,7 +134,7 @@ func TestRemote_DecideLandsUnderGameCycle(t *testing.T) {
 			t.Fatalf("decide=%d anchors=%d, want 1 decide and no anchor span (#2648)", len(ds), len(anchors))
 		}
 		if p := ds[0].Parent(); p.TraceID().String() != hubGameTrace || p.SpanID().String() != hubGameCycleSpanID || !p.IsRemote() {
-			t.Fatalf("invoke_agent parent = %v, want remote game_cycle %s", p, hubGameCycleSpanID)
+			t.Fatalf("invoke_agent parent = %v, want remote game.cycle %s", p, hubGameCycleSpanID)
 		}
 		// The trigger rides the span as an event, not as a Link to an anchor span.
 		if len(ds[0].Links()) != 0 {
@@ -271,12 +271,12 @@ func TestEffectSpans_EachChildOfItsOwnDecision(t *testing.T) {
 }
 
 // A lost game.start leaves the root span id unknown while a game.phase.start still
-// gives the trace id (UC-041 BR-004): the decision is still a child of game_cycle,
+// gives the trace id (UC-041 BR-004): the decision is still a child of game.cycle,
 // without the Link to the game root and without game.trace_span_id.
 // UC: UC-040 BR-013
 // UC: UC-041 BR-004
 func TestDecision_WithoutRootSpanIDParentsOnGameCycle(t *testing.T) {
-	t.Run("UC-040/BR-013 no root span id: child of game_cycle, no Link, no game.trace_span_id", func(t *testing.T) {
+	t.Run("UC-040/BR-013 no root span id: child of game.cycle, no Link, no game.trace_span_id", func(t *testing.T) {
 		c := gameCycleCtx("game_gc09")
 		c.GameTraceSpanID = ""
 		l, sr, _ := meteredTestLoop(t)
@@ -291,7 +291,7 @@ func TestDecision_WithoutRootSpanIDParentsOnGameCycle(t *testing.T) {
 		}
 		parent := decisions[0].Parent()
 		if !parent.IsRemote() || parent.SpanID().String() != hubGameCycleSpanID || parent.TraceID().String() != hubGameTrace {
-			t.Fatalf("parent = %s/%s (remote=%v), want remote game_cycle %s", parent.TraceID(), parent.SpanID(), parent.IsRemote(), hubGameCycleSpanID)
+			t.Fatalf("parent = %s/%s (remote=%v), want remote game.cycle %s", parent.TraceID(), parent.SpanID(), parent.IsRemote(), hubGameCycleSpanID)
 		}
 		if links := decisions[0].Links(); len(links) != 0 {
 			t.Fatalf("decision links = %+v, want none without the root span id", links)
