@@ -358,12 +358,10 @@ PY2
 fixture
 persist_put decision.backend claude
 persist_put decision.claude.model sonnet
-persist_put decision.backend rules false
 STUB_BUDGET=30 run_preflight
-check "stage overlay rules over a persisted claude still passes the effective check" "PASS  decision.backend = rules"
 check "persisted remote backend warns" "WARN  decision.backend claude is persisted with decision.claude.model = sonnet: a flag-service restart or a reboot brings claude back"
 fixture
-persist_put decision.backend rules
+persist_put decision.backend rules false # persisted too: a persist row has one stack value (#2803)
 STUB_BUDGET=30 run_preflight
 if has "is persisted with\|brings rules back"; then not_ok "persisted rules does not warn"; else ok "persisted rules does not warn"; fi
 check "persisted rules is reported" "INFO  decision.backend rules is persisted"

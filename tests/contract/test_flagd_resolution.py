@@ -1009,16 +1009,15 @@ def test_allow_list_variants_only_name_coordinator_types(flag_dir):
     assert not failures, "\n".join(failures)
 
 
-GROUP_VARIANTS = {"standard_group", "shadow_group"}
+GROUP_VARIANTS = {"standard_group"}
 
 
 @pytest.mark.uc("UC-048", flow="A13", br=["BR-014"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_only_the_group_variants_name_grant_group_shield(flag_dir):
-    """The group lever is opt-in (#2467 PR 4): only ``standard_group`` and ``shadow_group`` name it.
+    """The group lever is opt-in (#2467 PR 4): only ``standard_group`` names it.
 
-    ``standard_group`` is ``standard`` plus the lever and ``shadow_group`` is
-    ``shadow_experimental`` plus the lever, so choosing a group variant changes nothing
+    ``standard_group`` is ``standard`` plus the lever, so choosing it changes nothing
     else; every other variant (the talk's ``standard`` included) stays without it.
     """
     root = fh.CI_FLAG_DIR if flag_dir == "ci" else fh.CI_FLAG_DIR.parent
@@ -1034,7 +1033,6 @@ def test_only_the_group_variants_name_grant_group_shield(flag_dir):
         f"{flag_dir}/agent.json: grant_group_shield is named by {sorted(named)}, want {sorted(GROUP_VARIANTS)}"
     )
     assert ids("standard_group") == ids("standard") + ["grant_group_shield"]
-    assert ids("shadow_group") == ids("shadow_experimental") + ["grant_group_shield"]
 
 
 # Every flag an intervention handler reads (#1872, flags.md section 1.2). Since #1970 the

@@ -83,7 +83,8 @@ func TestPreconditionMatrix_Put(t *testing.T) {
 		{name: "ttl zero", put: withReq(stackPut, func(r *WriteRequest) { r.TTLSeconds = ttl(0) }), status: 400, reason: fserr.Malformed},
 		{name: "ttl negative", put: withReq(stackPut, func(r *WriteRequest) { r.TTLSeconds = ttl(-1) }), status: 400, reason: fserr.Malformed},
 		{name: "ttl on an experiment arm", put: withReq(guardPut, func(r *WriteRequest) { r.Scope = expSc; r.TTLSeconds = ttl(5) }), status: 400, reason: fserr.Malformed},
-		{name: "ttl on a stack write is fine", put: withReq(stackPut, func(r *WriteRequest) { r.TTLSeconds = ttl(5) })},
+		{name: "ttl on a stack write of a persist row", put: withReq(stackPut, func(r *WriteRequest) { r.TTLSeconds = ttl(5) }), status: 400, reason: fserr.Malformed},
+		{name: "ttl on a stack write of a row without persist is fine", put: &WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", TTLSeconds: ttl(5)}},
 		{name: "ttl on another real write is fine", put: &WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Scope: realSc, TTLSeconds: ttl(5)}},
 		{name: "if_writer_in outside real", put: withReq(stackPut, func(r *WriteRequest) { r.IfWriterIn = []string{""} }), status: 400, reason: fserr.Malformed},
 		{name: "if_writer_in too many entries", put: withReq(guardPut, func(r *WriteRequest) { r.IfWriterIn = make([]string, MaxIfWriterIn+1) }), status: 400, reason: fserr.Malformed},
@@ -112,7 +113,8 @@ func TestPreconditionMatrix_Put(t *testing.T) {
 		{name: "if_writer_in mismatch, other writer", setup: func(t *testing.T, f *fixture) { f.put(*withReq(guardPut, func(r *WriteRequest) { r.Writer = "menu" })) }, put: withReq(guardPut, func(r *WriteRequest) { r.IfWriterIn = []string{"agent"} }), status: 412, reason: fserr.WriterMismatch},
 		{name: "event flag in a dry run", put: &WriteRequest{Set: "interventions", Flag: "end_game", Variant: "x", DryRun: true}, status: 400, reason: fserr.Malformed},
 		// successes
-		{name: "stack write", put: &stackPut},
+		{name: "stack write", put: &stackPut, marked: true},
+		{name: "stack write of a persist row without persist is persisted", persist: true, put: &stackPut, persisted: true, marked: true},
 		{name: "game write", setup: func(t *testing.T, f *fixture) { f.register("g1", "c1") }, put: &WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "g1"}}},
 		{name: "game+serial write", setup: func(t *testing.T, f *fixture) { f.register("g1", "c1", "S1") }, put: &WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("5"), Scope: Scope{GameID: "g1", Serial: "S1"}}},
 		{name: "game+serial write into a game that already has another serial", setup: func(t *testing.T, f *fixture) {
@@ -158,8 +160,8 @@ func TestPreconditionMatrix_Clear(t *testing.T) {
 		{name: "no sync stream", opts: fixtureOpts{noStream: true}, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams"}), status: 503, reason: fserr.NoSyncStream},
 		{name: "no sync stream beats persist-fit", opts: fixtureOpts{noStream: true}, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, Persist: true}), status: 503, reason: fserr.NoSyncStream},
 		{name: "persist outside the stack scope", clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, Persist: true}), status: 400, reason: fserr.Malformed},
-		{name: "if_writer with persist", clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu", Persist: true}), status: 400, reason: fserr.Malformed},
-		{name: "if_writer with persist, live game", setup: liveReal, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu", Persist: true}), status: 400, reason: fserr.Malformed},
+		{name: "if_writer with persist compares the persisted value", clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu", Persist: true})},
+		{name: "if_writer with persist, mismatch", setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "stage", Persist: true}), status: 412, reason: fserr.WriterMismatch},
 		{name: "if_writer in scope experiment+arm", clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: expSc, IfWriter: "menu"}), status: 400, reason: fserr.Malformed},
 		{name: "if_writer mismatch on the stack overlay", setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "stage"}), status: 412, reason: fserr.WriterMismatch},
 		{name: "if_writer match on the stack overlay", setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu"}), cleared: 1},
@@ -199,7 +201,7 @@ func TestPreconditionMatrix_Clear(t *testing.T) {
 		// persistence
 		{name: "persisted clear", persist: true, setup: func(t *testing.T, f *fixture) { f.put(plainPers) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", Persist: true}), cleared: 1, persisted: true},
 		{name: "persisted clear, nothing persisted", persist: true, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", Persist: true})},
-		{name: "persisted clear leaves the in-memory overlay", persist: true, setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", Persist: true})},
+		{name: "plain clear of a persist row clears the persisted value", persist: true, setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams"}), cleared: 1, persisted: true},
 		{name: "persisted clear, save fails: refused", persist: true, breakFile: true, setup: func(t *testing.T, f *fixture) { f.put(plainPers) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", Persist: true}), status: 500, reason: fserr.ReasonPersistFailed},
 		{name: "persisted kill switch clear, save fails: cleared, not persisted", persist: true, breakFile: true, setup: func(t *testing.T, f *fixture) { f.put(killPut) }, clr: clearReq(ClearRequest{Set: "agent", Flag: "interventions_allowed", Persist: true}), cleared: 1, failed: true},
 		{name: "persisted clear, newer state file, flag persistable: refused", persist: true, futureVer: true, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", Persist: true}), status: 500, reason: fserr.ReasonPersistFailed},
@@ -303,10 +305,10 @@ func (c matrixCase) checkEffects(t *testing.T, f *fixture, res WriteResult, path
 		changed = true
 		scope := c.put.Scope.Name()
 		slot := slotOf(fl, scope, c.put.Scope)
-		if scope == registry.ScopeStack && c.put.Persist {
+		if scope == registry.ScopeStack && fl.policy.Persist {
 			slot = fl.admin
 			if fl.stack != nil {
-				t.Fatalf("a persisted stack write must replace the in-memory overlay, stack holds %+v", *fl.stack)
+				t.Fatalf("a persist row has one stack value, stack holds %+v", *fl.stack)
 			}
 		}
 		if slot == nil {
@@ -323,12 +325,12 @@ func (c matrixCase) checkEffects(t *testing.T, f *fixture, res WriteResult, path
 		changed = res.Cleared > 0
 		scope := c.clr.Scope.Name()
 		switch {
-		case scope == registry.ScopeStack && c.clr.Persist:
+		case scope == registry.ScopeStack && fl.policy.Persist:
 			if fl.admin != nil {
 				t.Fatalf("the persisted value survived the clear: %+v", *fl.admin)
 			}
 			if fl.stack != beforeStack {
-				t.Fatalf("a persisted clear touched the in-memory overlay")
+				t.Fatalf("a clear of a persist row touched the in-memory overlay")
 			}
 		case scope == registry.ScopeStack:
 			if fl.stack != nil {

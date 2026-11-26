@@ -11,14 +11,14 @@ undeclared variant fails here exactly as it would against the service:
                                   admin_value
     GET    /{set}/{flag}
     PUT    /{set}/{flag}          {"variant"|"value", "writer", "persist"}: 422 flag_read_only / out_of_bounds;
-                                  "persist": true sets the persisted admin value and drops the stack overlay
-    DELETE /{set}/{flag}          clear the stack overlay (?persist=true: the persisted admin value)
+                                  on a persist row the stack value is the persisted admin value (#2803)
+    DELETE /{set}/{flag}          clear the stack value (a persist row: the persisted admin value)
                                   (?experiment_id=X&arm=Y: that arm value, #2530)
     A PUT with "scope": {"experiment_id", "arm"} writes an arm value (registry scope experiment+arm, else
     400); GET shows them as "experiments": {id: {arm: {variant, value, writer}}}.
     DELETE /{set}?writer=W        clear that writer's stack overlays (admin values stay)
 
-The persisted admin value is a layer under the stack overlay, as in the service.
+A persist row has one stack value, persisted (admin_value); any other row an in-memory overlay.
 
 --fail-put N / --fail-delete N answer the Nth PUT / DELETE with 503 (a refused write).
 
@@ -117,6 +117,8 @@ class Fake:
             "stack_overlay": layers.get("stack_overlay"),
             "admin_value": layers.get("admin_value"),
         }
+        if (flag_set, key) in self.registry:
+            out["policy"] = {"persist": self.registry[(flag_set, key)]["persist"]}
         if self.arms.get((flag_set, key)):
             out["experiments"] = self.arms[(flag_set, key)]
         return out
@@ -220,6 +222,9 @@ def make_handler(fake):
                 return self._err(400, "malformed", "exactly one of variant and value")
             if body.get("persist") and not row["persist"]:
                 return self._err(400, "malformed", f"{key} cannot persist")
+            persisted = row["persist"] and not exp
+            if persisted and body.get("ttl_seconds"):
+                return self._err(400, "malformed", f"{key} is persisted and takes no ttl_seconds")
             variants = fake.sets[flag_set][key]["variants"]
             if "variant" in body:
                 if body["variant"] not in variants:
@@ -257,8 +262,7 @@ def make_handler(fake):
                     fake.arms.setdefault((flag_set, key), {}).setdefault(exp, {})[
                         arm
                     ] = entry
-                elif body.get("persist"):
-                    # a persisted write replaces the stack overlay (state/write.go)
+                elif persisted:
                     fake.admin[(flag_set, key)] = entry
                     fake.overlays.pop((flag_set, key), None)
                 else:
@@ -271,7 +275,7 @@ def make_handler(fake):
                     "variant": variant,
                     "epoch": "fake0001",
                     "snapshot_version": 1,
-                    "persisted": bool(body.get("persist")),
+                    "persisted": persisted,
                 },
             )
 
@@ -302,7 +306,7 @@ def make_handler(fake):
                         if not by_arm:
                             fake.arms.get(tuple(parts), {}).pop(exp, None)
                         return self._send(204)
-                    if (query.get("persist") or [""])[0] == "true":
+                    if fake.registry.get(tuple(parts), {}).get("persist") and tuple(parts) not in fake.overlays:
                         fake.admin.pop(tuple(parts), None)
                     else:
                         fake.overlays.pop(tuple(parts), None)

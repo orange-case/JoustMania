@@ -736,10 +736,10 @@ target below `policy.battery_threshold`; the game ending; the per-game count at 
 target with the single grant's refusal check, phase 2 commits every target and counts the group, phase 3 sends the
 feedback. Phases 0 to 2 have no await. One `agent_intervention` / `game_interventions_total{type=grant_group_shield}`
 per group, with `target` empty. The agent writes it for a `grant_group_shield` decision (§2, §4.3 to §4.5).
-Only the opt-in `interventions_allowed` variants `standard_group` and `shadow_group` name the lever, so under every other
+Only the opt-in `interventions_allowed` variant `standard_group` names the lever, so under every other
 variant the coordinator refuses it `not_allowed`; `tests/contract/test_flagd_resolution.py`
 `test_allow_list_variants_only_name_coordinator_types` keeps a type the coordinator cannot apply out of every variant, and
-`test_only_the_group_variants_name_grant_group_shield` keeps the lever in exactly those two.
+`test_only_the_group_variants_name_grant_group_shield` keeps the lever in exactly that one.
 
 Per-serial **grant** flags (`shield_seconds`, `toughness_boost_seconds`,
 `soft_penalty_action`) are one-shot per decision: every write gets a fresh variant from the

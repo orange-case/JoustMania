@@ -56,6 +56,8 @@ type WriteRequest struct {
 	Value      json.RawMessage // nil when absent
 	Scope      Scope
 	TTLSeconds *float64
+	// Persist is optional and changes nothing: a stack write of a persist row
+	// always persists. It is still refused where nothing would be persisted.
 	Persist    bool
 	Writer     string
 	DecisionID string
@@ -91,8 +93,9 @@ type AppendRequest struct {
 	IfSlotVersion uint64
 }
 
-// ClearRequest is a DELETE /{flagSetId}/{flagName}. Persist clears the
-// persisted admin value instead of the in-memory stack overlay.
+// ClearRequest is a DELETE /{flagSetId}/{flagName}. Without scope it clears the
+// stack value: the persisted one of a persist row, else the in-memory overlay.
+// Persist changes nothing (refused with a scope).
 type ClearRequest struct {
 	Set     string
 	Flag    string
@@ -100,17 +103,12 @@ type ClearRequest struct {
 	Writer  string
 	Persist bool
 	// IfWriter is the opt-in compare-and-delete precondition (?if_writer=,
-	// #1877), like If-Match: in scope real or the in-memory stack overlay
-	// (without Persist), the overlay is cleared only when its writer label
+	// #1877), like If-Match: in scope real or stack, the value is cleared only when its writer label
 	// equals IfWriter, else 412 writer_mismatch and nothing changes. "" = no precondition. It is not the informational
 	// Writer label, which is never checked (D11).
 	IfWriter string
 	// IfSlotVersion: as WriteRequest.IfSlotVersion (in process only).
 	IfSlotVersion uint64
-	// StackAll clears the in-memory stack overlay and the persisted admin
-	// value under one lock, as one change (in process only: Flagsmith
-	// enabled=false on a persist row, services.md §7.3).
-	StackAll bool
 }
 
 // WriteResult is the response of an accepted write, and the telemetry of a
@@ -215,9 +213,8 @@ func (s *State) Put(req WriteRequest) (WriteResult, *fserr.Error) {
 		return s.dryRunLocked(f, req, scopeName, v, res)
 	}
 
-	if scopeName == registry.ScopeStack && req.Persist {
-		// The host's setting replaces any in-memory overlay, so it takes
-		// effect now, and is kept across restarts (A2).
+	if plan.persist {
+		// A persist row has one persisted stack value, kept across restarts (A2).
 		prevAdmin, prevStack := f.admin, f.stack
 		f.admin, f.stack = v, nil
 		if err := s.saveAdminLocked(); err != nil {
@@ -240,14 +237,14 @@ func (s *State) Put(req WriteRequest) (WriteResult, *fserr.Error) {
 	s.changed()
 	res.Variant = v.Variant
 	res.SnapshotVersion = s.version
-	res.Persisted = req.Persist && s.lastPersistOK
+	res.Persisted = plan.persist && s.lastPersistOK
 	return res, nil
 }
 
 // newPutValueLocked builds the value a checked Put places.
 func (s *State) newPutValueLocked(req WriteRequest, plan putPlan) *value {
 	now := s.opts.Now()
-	v := &value{Writer: req.Writer, DecisionID: servedDecisionID(req.DecisionID), WrittenAt: now, Persisted: req.Persist}
+	v := &value{Writer: req.Writer, DecisionID: servedDecisionID(req.DecisionID), WrittenAt: now, Persisted: plan.persist}
 	if plan.ttl > 0 {
 		v.ExpiresAt = now.Add(plan.ttl)
 	}
@@ -269,6 +266,7 @@ type putPlan struct {
 	f         *flagState
 	scope     string
 	stackLike bool
+	persist   bool // a stack write of a persist row
 	ttl       time.Duration
 	checked   *registry.Checked
 }
@@ -278,7 +276,7 @@ type putPlan struct {
 //
 //	lookup 404/422 > kind 400 > variant|value 400 > ids 400 > scope fit 400 >
 //	ttl 400 > if_writer_in shape 400 > persist 400 > live (served, game,
-//	serial, real game) 409/422 > value 422 > stream 503 >
+//	serial, real game) 409/422 > value 422 > persisted ttl 400 > stream 503 >
 //	if_writer_in 412 > if_slot_version 412 (in process only)
 //
 // The 412 is last, a dry run included, under the lock of the write, so no
@@ -309,6 +307,7 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 	}
 	plan.f, plan.scope = f, scopeName
 	plan.stackLike = scopeName == registry.ScopeStack || scopeName == registry.ScopeReal
+	plan.persist = scopeName == registry.ScopeStack && p.Persist
 	if req.TTLSeconds != nil {
 		if !plan.stackLike || *req.TTLSeconds <= 0 || math.IsInf(*req.TTLSeconds, 0) || math.IsNaN(*req.TTLSeconds) {
 			return plan, fserr.BadRequest("ttl_seconds must be positive and applies to stack overlays only")
@@ -319,8 +318,8 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 		return plan, err
 	}
 	if req.Persist {
-		// UC-053 BR-004: only a stack-scoped admin setting the registry marks
-		// persistable goes to the state file; nothing else outlives a restart.
+		// Refused where nothing would be persisted, so an older caller that
+		// expects persistence fails loudly (UC-053 BR-004).
 		switch {
 		case !p.Persist || scopeName != registry.ScopeStack:
 			return plan, fserr.BadRequest("%s cannot persist in scope %s (registry persist: %v)", req.Flag, scopeName, p.Persist)
@@ -336,6 +335,9 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 	plan.checked, err = registry.CheckValue(p, f.base, req.Variant, req.Value)
 	if err != nil {
 		return plan, err
+	}
+	if plan.persist && req.TTLSeconds != nil {
+		return plan, fserr.BadRequest("%s is persisted in scope stack and takes no ttl_seconds", req.Flag)
 	}
 	if err := s.streamCheckLocked(f.set); err != nil {
 		return plan, err
@@ -506,7 +508,7 @@ func (s *State) checkSlotVersionLocked(f *flagState, scopeName string, sc Scope,
 // failure answers; TestPreconditionMatrix_Clear pins each pair):
 //
 //	lookup 404/422 > ids 400 > scope fit 400 > served 409 > stream 503 > persist 400 >
-//	if_writer shape 400 > stack_all 400 > guarded revert 409 > if_writer 412 >
+//	if_writer shape 400 > guarded revert 409 > if_writer 412 >
 //	if_slot_version 412 (in process only)
 //
 // Like Put it refuses an id or label over MaxIDLength with 400 (#2370); unlike
@@ -539,16 +541,13 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 	if req.Persist && scopeName != registry.ScopeStack {
 		return nil, fserr.BadRequest("persist=true clears a stack-wide admin value only")
 	}
-	if req.IfWriter != "" && scopeName != registry.ScopeReal && (scopeName != registry.ScopeStack || req.Persist || req.StackAll) {
-		return nil, fserr.BadRequest("if_writer applies to the real overlay (game_kind=real) or the in-memory stack overlay (no persist) only")
-	}
-	if req.StackAll && (scopeName != registry.ScopeStack || req.Persist) {
-		return nil, fserr.BadRequest("stack_all clears the stack scope, without persist")
+	if req.IfWriter != "" && scopeName != registry.ScopeReal && scopeName != registry.ScopeStack {
+		return nil, fserr.BadRequest("if_writer applies to the real overlay (game_kind=real) or the stack value only")
 	}
 	if req.IfWriter != "" {
 		cur, layer := f.real, "real"
 		if scopeName == registry.ScopeStack {
-			cur, layer = f.stack, "stack"
+			cur, layer = f.slotValue(registry.ScopeStack, Scope{}), "stack"
 		}
 		if cur != nil && cur.Writer != req.IfWriter {
 			return nil, fserr.PreconditionFailed(fserr.WriterMismatch, "the %s overlay of %s was written by %q, not %q; nothing cleared", layer, f.key, cur.Writer, req.IfWriter)
@@ -560,47 +559,15 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 	return f, nil
 }
 
-// clearStackLocked clears the stack scope: the in-memory overlay, or with
-// Persist the persisted admin value (also leaving the state file).
+// clearStackLocked clears the stack value in force: an in-memory one (a row
+// without persist), else the persisted value of a persist row (also leaving the state file).
 func (s *State) clearStackLocked(f *flagState, req ClearRequest, res *WriteResult) *fserr.Error {
 	switch {
-	case req.StackAll:
-		prevStack, prevAdmin := f.stack, f.admin
-		if prevAdmin == nil && s.persistBlocked && f.policy.Persist {
-			// As the Persist branch below: no admin value in memory, but the
-			// unreadable state file may still hold one that returns at the
-			// next start (UC-053 A12, #2368). A kill switch clears the
-			// overlay and answers not persisted; any other flag keeps its
-			// overlay and is refused.
-			err := s.saveAdminLocked()
-			if f.policy.AppliesWhenPersistFails() {
-				s.opts.Logger.Error("flag service: kill switch clear not persisted; the state file was unreadable at start", "flag", f.key, "error", err)
-				if prevStack != nil {
-					f.stack, res.Cleared = nil, 1
-				}
-				res.PersistFailed = true
-				return nil
-			}
-			return fserr.PersistFailed("the persisted value of %s was not cleared: %v", req.Flag, err)
+	case !f.policy.Persist || f.stack != nil:
+		if f.stack != nil {
+			f.stack, res.Cleared = nil, 1
 		}
-		if prevStack == nil && prevAdmin == nil {
-			return nil
-		}
-		f.stack, f.admin, res.Cleared = nil, nil, 1
-		if prevAdmin == nil {
-			return nil
-		}
-		if err := s.saveAdminLocked(); err != nil {
-			if f.policy.AppliesWhenPersistFails() {
-				s.opts.Logger.Error("flag service: kill switch cleared in memory only; the state file could not be written", "flag", f.key, "error", err)
-				res.PersistFailed = true
-				return nil
-			}
-			f.stack, f.admin, res.Cleared = prevStack, prevAdmin, 0
-			return fserr.PersistFailed("%s was not cleared: the state file could not be written: %v", req.Flag, err)
-		}
-		res.Persisted = true
-	case req.Persist && f.admin != nil:
+	case f.admin != nil:
 		prevAdmin := f.admin
 		f.admin = nil
 		res.Cleared = 1
@@ -617,13 +584,11 @@ func (s *State) clearStackLocked(f *flagState, req ClearRequest, res *WriteResul
 			f.admin, res.Cleared = prevAdmin, 0
 			return fserr.PersistFailed("the persisted value of %s was not cleared: the state file could not be written: %v", req.Flag, err)
 		}
-		res.Persisted = true
-	case req.Persist && s.persistBlocked && f.policy.Persist:
-		// No admin value in memory, but the unreadable state file may
-		// still hold one that returns at the next start (UC-053 A12):
-		// a 204 would claim it is gone (#2368). saveAdminLocked counts
-		// the failure and returns the error. A flag whose policy takes no
-		// persisted value cannot be in the file: it keeps the plain 204.
+		res.Persisted = s.lastPersistOK
+	case s.persistBlocked:
+		// No value in memory, but the unreadable state file may still hold
+		// one that returns at the next start (UC-053 A12): a 204 would claim
+		// it is gone (#2368). saveAdminLocked counts the failure.
 		err := s.saveAdminLocked()
 		if f.policy.AppliesWhenPersistFails() {
 			s.opts.Logger.Error("flag service: kill switch clear not persisted; the state file was unreadable at start", "flag", f.key, "error", err)
@@ -631,8 +596,6 @@ func (s *State) clearStackLocked(f *flagState, req ClearRequest, res *WriteResul
 			return nil
 		}
 		return fserr.PersistFailed("the persisted value of %s was not cleared: %v", req.Flag, err)
-	case !req.Persist && f.stack != nil:
-		f.stack, res.Cleared = nil, 1
 	}
 	return nil
 }

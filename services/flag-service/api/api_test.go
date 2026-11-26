@@ -315,13 +315,18 @@ func TestReadEndpoints(t *testing.T) {
 			t.Fatalf("%d %v", s, b)
 		}
 	})
-	t.Run("UC-053/A1 a stage reset clears that writer's overlays", func(t *testing.T) {
+	t.Run("UC-053/A1 a stage reset leaves a persisted stage write; a per-flag DELETE clears it (#2803)", func(t *testing.T) {
 		e.do("PUT", "/agent/decision.backend", map[string]any{"variant": "jev", "writer": "stage"})
 		if s, _ := e.do("DELETE", "/agent?writer=stage", nil); s != 204 {
 			t.Fatal(s)
 		}
-		_, b := e.do("GET", "/agent/decision.backend", nil)
-		if b["effective_default"] != "rules" {
+		if _, b := e.do("GET", "/agent/decision.backend", nil); b["effective_default"] != "jev" {
+			t.Fatalf("%v, want the persisted stage write jev", b["effective_default"])
+		}
+		if s, _ := e.do("DELETE", "/agent/decision.backend", nil); s != 204 {
+			t.Fatal(s)
+		}
+		if _, b := e.do("GET", "/agent/decision.backend", nil); b["effective_default"] != "rules" {
 			t.Fatalf("%v", b["effective_default"])
 		}
 	})
@@ -460,9 +465,9 @@ func TestIfWriterDelete(t *testing.T) {
 			t.Fatalf("real overlay writer = %v, want operator", w)
 		}
 	})
-	t.Run("UC-043/A18 if_writer outside scope real and the in-memory stack overlay is 400 malformed", func(t *testing.T) {
+	t.Run("UC-043/A18 if_writer outside scope real and stack is 400 malformed", func(t *testing.T) {
 		e := setup(t, "operator")
-		for _, q := range []string{"?persist=true&if_writer=promotion", "?experiment_id=x&arm=A&if_writer=promotion"} {
+		for _, q := range []string{"?persist=true&experiment_id=x&arm=A&if_writer=promotion", "?experiment_id=x&arm=A&if_writer=promotion"} {
 			if s, b := e.do("DELETE", path+q, nil); s != 400 || b["error"] != "malformed" {
 				t.Fatalf("%s: %d %v, want 400 malformed", q, s, b)
 			}
