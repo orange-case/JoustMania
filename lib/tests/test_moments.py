@@ -423,9 +423,7 @@ def test_no_flush_without_the_flag_or_for_a_moment(spans, monkeypatch):
     tracer, _ = spans
     with tracer.start_as_current_span("game") as root:
         moments.emit_agent_event("game.end", span=root, attributes={})
-        record_moment(
-            "player_death", shape=MOMENT_SHAPE_LOG_EVENT, parent_span=root, attributes=ATTRS
-        )
+        record_moment("player_death", shape=MOMENT_SHAPE_LOG_EVENT, parent_span=root, attributes=ATTRS)
     assert not spy.calls.wait(0.2)
 
 
