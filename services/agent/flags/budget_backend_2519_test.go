@@ -11,14 +11,14 @@ import (
 	"github.com/open-feature/go-sdk/openfeature"
 )
 
-// #2519: the paid backends' own decide caps, decision.claude.max_requests_per_minute
-// and decision.openai.max_requests_per_minute. Tighten-only under the global
+// #2519: the paid backend's own decide cap, decision.claude.max_requests_per_minute.
+// Tighten-only under the global
 // llm.max_requests_per_minute (FR-152 (c)); operator-written, never by the agent
 // (C-034). The base file ships `stage` (30) so `frenzy` on jev does not let a
-// switch to a paid backend spend 600 calls a minute; the ci file ships `inherit`
+// switch to claude spend 600 calls a minute; the ci file ships `inherit`
 // so the service-test journeys at `journey` 600 are not capped.
 
-var backendCapKeys = []string{keyDecisionClaudeMaxRequestsPerMin, keyDecisionOpenAIMaxRequestsPerMin}
+var backendCapKeys = []string{keyDecisionClaudeMaxRequestsPerMin}
 
 // UC: UC-070 BR-003
 // NFR: NFR-011
@@ -52,16 +52,15 @@ func TestBudgetBackend2519_DeclaredInBothFlagFiles(t *testing.T) {
 		}
 	}
 	// The Go default mirrors the base file's defaultVariant (FR-151).
-	if DefaultDecisionClaudeMaxRequestsPerMinute != 30 || DefaultDecisionOpenAIMaxRequestsPerMinute != 30 {
-		t.Errorf("Go defaults = %d/%d, want 30/30 (the base file's stage)",
-			DefaultDecisionClaudeMaxRequestsPerMinute, DefaultDecisionOpenAIMaxRequestsPerMinute)
+	if DefaultDecisionClaudeMaxRequestsPerMinute != 30 {
+		t.Errorf("Go default = %d, want 30 (the base file's stage)", DefaultDecisionClaudeMaxRequestsPerMinute)
 	}
 }
 
 // TestBudgetBackend2519_ResolveThroughFlagd selects the variants the way a
 // flag-service overlay does (a defaultVariant substitution, flags.md §13) in a copy
 // of the shipped agent.json and resolves them through the flagd file resolver and
-// Flags.Evaluate: claude `inherit` has no cap of its own, openai `conservative` is 3.
+// Flags.Evaluate: claude `inherit` has no cap of its own, `conservative` is 3.
 // UC: UC-070 BR-003
 func TestBudgetBackend2519_ResolveThroughFlagd(t *testing.T) {
 	raw, err := os.ReadFile(budgetFlagFiles()[0])
@@ -72,36 +71,39 @@ func TestBudgetBackend2519_ResolveThroughFlagd(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	flags := doc["flags"].(map[string]any)
-	flags[keyDecisionClaudeMaxRequestsPerMin].(map[string]any)["defaultVariant"] = "inherit"
-	flags[keyDecisionOpenAIMaxRequestsPerMin].(map[string]any)["defaultVariant"] = "conservative"
-	body, err := json.Marshal(doc)
-	if err != nil {
-		t.Fatal(err)
+	resolve := func(t *testing.T, variant string) DecisionBackend {
+		t.Helper()
+		flags := doc["flags"].(map[string]any)
+		flags[keyDecisionClaudeMaxRequestsPerMin].(map[string]any)["defaultVariant"] = variant
+		body, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		overlay := filepath.Join(t.TempDir(), "agent.json")
+		if err := os.WriteFile(overlay, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		provider, err := flagd.NewProvider(flagd.WithFileResolver(), flagd.WithOfflineFilePath(overlay))
+		if err != nil {
+			t.Fatalf("provider: %v", err)
+		}
+		domain := "budget-backend-" + t.Name()
+		if err := openfeature.SetNamedProviderAndWait(domain, provider); err != nil {
+			t.Fatalf("set provider: %v", err)
+		}
+		t.Cleanup(func() { provider.Shutdown() })
+		return New(openfeature.NewClient(domain), nil).Evaluate(context.Background()).Decision
 	}
-	overlay := filepath.Join(t.TempDir(), "agent.json")
-	if err := os.WriteFile(overlay, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	provider, err := flagd.NewProvider(flagd.WithFileResolver(), flagd.WithOfflineFilePath(overlay))
-	if err != nil {
-		t.Fatalf("provider: %v", err)
-	}
-	domain := "budget-backend-" + t.Name()
-	if err := openfeature.SetNamedProviderAndWait(domain, provider); err != nil {
-		t.Fatalf("set provider: %v", err)
-	}
-	t.Cleanup(func() { provider.Shutdown() })
-
-	d := New(openfeature.NewClient(domain), nil).Evaluate(context.Background()).Decision
 	t.Run("UC-070/BR-003 claude inherit has no cap of its own", func(t *testing.T) {
+		d := resolve(t, "inherit")
 		if d.Claude.HasMaxRequestsPerMinute {
 			t.Errorf("claude cap = %d, want none (inherit)", d.Claude.MaxRequestsPerMinute)
 		}
 	})
-	t.Run("UC-070/BR-003 openai conservative resolves to 3", func(t *testing.T) {
-		if !d.OpenAI.HasMaxRequestsPerMinute || d.OpenAI.MaxRequestsPerMinute != 3 {
-			t.Errorf("openai cap = %d,%v, want 3,true", d.OpenAI.MaxRequestsPerMinute, d.OpenAI.HasMaxRequestsPerMinute)
+	t.Run("UC-070/BR-003 claude conservative resolves to 3", func(t *testing.T) {
+		d := resolve(t, "conservative")
+		if !d.Claude.HasMaxRequestsPerMinute || d.Claude.MaxRequestsPerMinute != 3 {
+			t.Errorf("claude cap = %d,%v, want 3,true", d.Claude.MaxRequestsPerMinute, d.Claude.HasMaxRequestsPerMinute)
 		}
 	})
 }

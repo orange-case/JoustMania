@@ -122,13 +122,13 @@ async def test_reset_without_an_operator_value_is_a_silent_no_op_with_the_value(
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
 async def test_reset_target_is_the_real_overlay_over_the_baseline(servicer, flags):
     key = ("agent", "decision.backend")
-    flags.real[key] = "openai"
+    flags.real[key] = "jev"
     operator_set(flags, key, "claude")
 
-    reply = await pad(servicer, "reset_setting", option="decision.backend", expect="openai")
+    reply = await pad(servicer, "reset_setting", option="decision.backend", expect="jev")
 
-    assert (reply.success, reply.value) == (True, "openai")
-    assert flags.values[key] == "openai"
+    assert (reply.success, reply.value) == (True, "jev")
+    assert flags.values[key] == "jev"
 
 
 @pytest.mark.asyncio

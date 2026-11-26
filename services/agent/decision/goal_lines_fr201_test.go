@@ -17,7 +17,7 @@ import (
 )
 
 // UC: UC-042 A12 BR-009
-// goal_lines_fr201_test.go: a claude, openai or jev (#2498) request carries the
+// goal_lines_fr201_test.go: a claude or jev (#2498) request carries the
 // goal lines only under decision.goal_in_prompt, never for neutral alone (#2479, FR-201,
 // decide-contract.md §14.4). Under v1 with goal_in_prompt off the request, and so
 // the prompt bytes, are unchanged.
@@ -53,7 +53,6 @@ func runGoalWith(t *testing.T, gp goal.Profile, goalInPrompt bool, profile strin
 		snap.Decision.Backend = backend
 		be.name = backend
 		snap.Decision.Jev = snap.Decision.Claude
-		snap.Decision.OpenAI = snap.Decision.Claude
 	}
 	h := newRemoteHarness(t, snap, be)
 	h.loop.SetPromptProfileSource(func(context.Context, string) string { return profile })

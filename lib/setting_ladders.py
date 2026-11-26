@@ -52,9 +52,9 @@ AGENT_POLICY_LEVELS: list[str] = ["none", "ambient", "standard", "full"]
 AGENT_STATE_LADDER: list[str] = ["off", "watch", "on"]
 
 # UC-044 decision backends, in knob order (UC-015 BR-004; wraps, `WRAPPING`).
-BACKENDS: list[str] = ["rules", "claude", "openai", "jev"]
+BACKENDS: list[str] = ["rules", "claude", "jev"]
 # UC-016 BR-014 (D12): the backends that call a paid remote API; `rules` is free.
-PAID_BACKENDS: frozenset[str] = frozenset({"claude", "openai", "jev"})
+PAID_BACKENDS: frozenset[str] = frozenset({"claude", "jev"})
 
 # UC-016 BR-012 (iteration 4): the agent rows the pad edits. Each ladder is in the option's canonical
 # format (services.md §3.1), the one the status, `from`, `expect`, `setting_defaults` and `value` use,

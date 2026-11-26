@@ -73,7 +73,7 @@ knob-step fix ([#2109](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/
 | ST-4.6 | **F19 K4 END**: hold 1.5 s in the lobby, then during a game | Lobby: force-start with the connected players; running: force-end. A tap does nothing | UC-015 BR-016, BR-008, UC-014, UC-027 | |
 | ST-4.7 | **F20 K5 TEAMS**: tap; hold and turn | Tap says "Teams", then the number; the knob sets 2 to 6 (lobby only) | UC-015 BR-016 | |
 | ST-4.8 | **F21 K6 INSTR**: tap in the lobby | Spoken instructions toggle (voice confirms) | UC-015 BR-016 | |
-| ST-4.9 | **F22 K7 BACKEND**: tap; hold and turn | Tap says "Backend", then its name (Rules, Claude, OpenAI, Jev); the knob steps the backend (rules, jev, claude): end the test on `jev` or the backend the talk uses | UC-015 BR-004, BR-016 | |
+| ST-4.9 | **F22 K7 BACKEND**: tap; hold and turn | Tap says "Backend", then its name (Rules, Claude, Jev); the knob steps the backend (rules, jev, claude): end the test on `jev` or the backend the talk uses | UC-015 BR-004, BR-016 | |
 | ST-4.10 | **F23 K8 PAGE**: tap (reserved), then lock: hold 3 s | Tap does nothing; the hold locks the pad ("Pad locked"); a locked pad ignores every key except the K3 stop hold; a second 3 s hold unlocks ("Pad unlocked") | UC-015 BR-016, A6 | |
 | ST-4.11 | **Knob press F15** and **knob F16 / F17** with no layer key | Press mutes / unmutes (fires at the press); left and right change the master volume, committed after a 250 ms pause; the volume audibly follows | UC-015 BR-006, BR-005 | |
 | ST-4.12 | **Layers**: hold each layer key (K1, K2, K3, K5, K7) and press the knob | The knob press belongs to the layer: **no** mute; releasing the layer key commits its setting once | UC-015 BR-007, BR-005 | |

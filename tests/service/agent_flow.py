@@ -1,6 +1,6 @@
 """Shared steps of the agent journeys on the service tier (AGENT composition, #1600).
 
-TC-006 step 5, TC-008 and TC-009. Ported from the full-stack
+TC-006 step 5, TC-008 and TC-009 (decided through the fake Claude, ``AGENT_CLAUDE_DECIDE``). Ported from the full-stack
 ``tests/integration/test_decide_backend_e2e.py`` (deleted with #1600): the same
 flags, scripts and budgets, with Jaeger replaced by the stack's ``OtlpSink`` (the
 agent exports its spans there) and audio-service by ``FakeAudio``.
@@ -31,8 +31,8 @@ AGENT = "agent"
 AGENT_SERVICE = "agent"  # the agent's OTEL_SERVICE_NAME (harness/agent.py)
 
 FAKE_BASE_URL_VARIANT = "fake"  # rewritten to the stack's fake (harness/stack.py)
-FAKE_MODEL = "fake-decider"
-CHAT_SPAN = f"chat {FAKE_MODEL}"
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # the shipped decision.claude.model default
+CHAT_SPAN = f"chat {CLAUDE_MODEL}"
 
 # The scripted intervention: session-scoped (target "none"), numeric magnitude, in the
 # DEFAULT ``ambient`` interventions_allowed variant, observable on the game stream as
@@ -49,10 +49,12 @@ ACT_THRESHOLD = 0.8  # decision.act_confidence_threshold default variant (ci/age
 # as game_kind "real" (#1249), so the remote cases also prove a menu game is eligible.
 ELIGIBLE_GAME_KINDS = "real"
 
-# Remote call budget per decide call (decision.openai.timeout_ms): long, so the held call
-# of the kill-switch case is still in flight after the switch flips. Below the agent's
+# Remote call budget per decide call: the kill-switch case rewrites the ``patient`` variant of
+# decision.claude.timeout_ms to this in its stack's baseline (the flag takes declared variants
+# only), long so the held call is still in flight after the switch flips. Below the agent's
 # HTTP backstop (30 s), and the fake's hold below it.
 DECIDE_TIMEOUT_MS = 25000
+DECIDE_TIMEOUT_VARIANT = ("agent", "decision.claude.timeout_ms", "patient")
 DECIDE_MIN_INTERVAL_MS = 1500
 
 # Polling budgets (worst-case bounds, not paid waits).
@@ -80,29 +82,27 @@ def configure_agent(
     enabled: bool = True,
     interventions: bool = True,
     allowed: str = INTERVENTIONS_ALLOWED_VARIANT,
-    openai_model: str | None = FAKE_MODEL,
     jev_fake: bool = False,
     claude_fake: bool = False,
+    timeout_variant: str | None = None,
 ) -> None:
     """Every agent-set flag a journey needs, as flag-service overlays.
 
-    ``openai_model=None`` leaves ``decision.openai.model`` at its shipped empty default
-    (UC-044 A1); ``jev_fake`` points ``decision.jev.base_url`` at the stack's fake Jev and
-    ``claude_fake`` ``decision.claude.base_url`` at the stack's fake Claude.
+    ``jev_fake`` points ``decision.jev.base_url`` at the stack's fake Jev and ``claude_fake``
+    ``decision.claude.base_url`` at the stack's fake Claude; ``timeout_variant`` names the
+    ``decision.claude.timeout_ms`` variant (the shipped default when None).
     """
     fs = flag_service_default()
     fs.put(AGENT, "enabled", variant=_onoff(enabled))
     fs.put(AGENT, "interventions_enabled", variant=_onoff(interventions))
     fs.put(AGENT, "interventions_allowed", variant=allowed)
     fs.put(AGENT, "decision.backend", variant=backend)
-    fs.put(AGENT, "decision.openai.base_url", variant=FAKE_BASE_URL_VARIANT)
-    if openai_model is not None:
-        fs.put(AGENT, "decision.openai.model", value=openai_model)
     if jev_fake:
         fs.put(AGENT, "decision.jev.base_url", variant=FAKE_BASE_URL_VARIANT)
     if claude_fake:
         fs.put(AGENT, "decision.claude.base_url", variant=FAKE_BASE_URL_VARIANT)
-    fs.put(AGENT, "decision.openai.timeout_ms", value=DECIDE_TIMEOUT_MS)
+    if timeout_variant is not None:
+        fs.put(AGENT, "decision.claude.timeout_ms", variant=timeout_variant)
     fs.put(AGENT, "decision.min_interval_ms", value=DECIDE_MIN_INTERVAL_MS)
     # The remote-call budget: since #1788 the env AGENT_LLM_MAX_REQUESTS_PER_MINUTE is
     # only a ceiling (min(env, flag)), so the flag itself is lifted. `journey` (600/min, a
@@ -121,7 +121,6 @@ def wait_agent_flags_served(
     backend: str,
     enabled: bool,
     rewrite: Callable[[], None] | None = None,
-    openai_model: str = FAKE_MODEL,
 ) -> None:
     """flagd serves the agent flags of the journey (typed getters: the #903 trap)."""
     ctx = EvaluationContext()
@@ -130,8 +129,6 @@ def wait_agent_flags_served(
             lambda: (
                 client.get_string_value("decision.backend", "", ctx) == backend
                 and client.get_boolean_value("enabled", not enabled, ctx) is enabled
-                and client.get_string_value("decision.openai.model", "", ctx) == openai_model
-                and client.get_integer_value("decision.openai.timeout_ms", -1, ctx) == DECIDE_TIMEOUT_MS
                 and client.get_string_value("llm.eligible_game_kinds", "", ctx) == ELIGIBLE_GAME_KINDS
             ),
             rewrite=rewrite,
@@ -186,18 +183,20 @@ async def assert_nothing_applied(collector: GameEventCollector, game_id: str) ->
 # --------------------------------------------------------------------------- #
 # Fake backend
 # --------------------------------------------------------------------------- #
+def decide_calls(stack, game_id: str) -> list[dict]:
+    """The decide calls the fake Claude got for ``game_id`` (parsed from the rendered prompt)."""
+    return [r for r in stack.fake_claude.requests("decide") if r.get("game_id") == game_id]
+
+
 async def wait_first_call(stack, game_id: str) -> list[dict]:
-    fake = stack.fake_openai
-    ok = await async_poll_until(lambda: bool(fake.requests(game_id)), FIRST_CALL_TIMEOUT, interval=0.5)
-    assert ok, (
-        f"the agent never called fake-openai for game {game_id} within {FIRST_CALL_TIMEOUT}s; "
-        f"unparseable prompts: {fake.parse_failures()}"
-    )
-    calls = fake.requests(game_id)
+    fake = stack.fake_claude
+    ok = await async_poll_until(lambda: bool(decide_calls(stack, game_id)), FIRST_CALL_TIMEOUT, interval=0.5)
+    assert ok, f"the agent never called fake-claude for game {game_id} within {FIRST_CALL_TIMEOUT}s: {fake.log_tail()}"
+    calls = decide_calls(stack, game_id)
     assert calls[0].get("questions"), (
-        "fake-openai parsed no decide questions from the prompt: the rendered prompt "
+        "fake-claude parsed no decide questions from the prompt: the rendered prompt "
         "(services/agent/decide/llmio/llmio.go Render) no longer matches "
-        f"tests/integration/fake_openai/server.py _QUESTION_RE: {calls[0]}"
+        f"tests/service/harness/fakes/decide_answer.py _QUESTION_RE: {calls[0]}"
     )
     return calls
 

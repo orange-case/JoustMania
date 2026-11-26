@@ -15,7 +15,7 @@ import (
 // declared variant as the feature's option at 100 %; a split is refused.
 
 // backendOptionIDs are the option ids of decision.backend in these tests.
-var backendOptionIDs = map[string]int{"rules": 11, "claude": 12, "openai": 13, "jev": 14}
+var backendOptionIDs = map[string]int{"rules": 11, "claude": 12, "jev": 14}
 
 // mvState is a feature state of decision.backend with option weights, as the
 // edge document carries them (api/util/mappers/engine.py).
@@ -23,7 +23,7 @@ func mvState(enabled bool, value string, weights map[string]float64) map[string]
 	s := fsState("decision.backend", enabled, value)
 	s["feature"] = map[string]any{"id": 1, "name": "decision.backend", "type": "MULTIVARIATE"}
 	mv := []map[string]any{}
-	for _, name := range []string{"rules", "claude", "openai", "jev"} {
+	for _, name := range []string{"rules", "claude", "jev"} {
 		mv = append(mv, map[string]any{
 			"id":                          100 + backendOptionIDs[name],
 			"multivariate_feature_option": map[string]any{"id": backendOptionIDs[name], "value": name, "key": nil},
@@ -108,13 +108,13 @@ func TestStackPushWeightsOptions(t *testing.T) {
 		h.fake.ServeFlagAPI()
 		fid = h.fake.AddFeature("decision.backend")
 		var known []flagsmith.Option
-		for _, name := range []string{"rules", "claude", "openai", "jev"} {
+		for _, name := range []string{"rules", "claude", "jev"} {
 			o := h.fake.Options.Add(fid, name)
 			if name != "jev" {
 				known = append(known, flagsmith.Option{ID: o.ID, Variant: name, Value: name, Text: true})
 			}
 		}
-		// The start saw three options; a person added jev since.
+		// The start saw two options; a person added jev since.
 		ids := h.link.IDs()
 		ids.Lock()
 		ids.FeatureID["decision.backend"] = fid
@@ -179,8 +179,8 @@ func TestStackPushWeightsOptions(t *testing.T) {
 			return !d.Enabled
 		})
 		d, _ := h.fake.Options.Default(fid)
-		if len(d.Variants) != 4 {
-			t.Fatalf("UC-055/BR-005 variants %v, want all 4", d.Variants)
+		if len(d.Variants) != 3 {
+			t.Fatalf("UC-055/BR-005 variants %v, want all 3", d.Variants)
 		}
 		for _, v := range d.Variants {
 			if v.Weight != 0 {

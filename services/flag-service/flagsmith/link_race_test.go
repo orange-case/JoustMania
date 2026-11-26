@@ -79,7 +79,7 @@ func TestWritesWhileRunIsBlocked(t *testing.T) {
 		}
 
 		const writers, each = 4, 25
-		variants := []string{"jev", "claude", "openai"}
+		variants := []string{"jev", "claude", "rules"}
 		var wg sync.WaitGroup
 		for w := 0; w < writers; w++ {
 			wg.Add(1)

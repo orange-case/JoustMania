@@ -11,7 +11,7 @@ import (
 )
 
 // UC: UC-040 BR-044
-// operator_brief_uc040_test.go: a claude or openai decide request carries the
+// operator_brief_uc040_test.go: a claude decide request carries the
 // operator's decision.operator_brief, jev never does, the brief changes neither the
 // state nor the questions, and invoke_agent records only its presence and length
 // (#2687, decide-contract.md §3, §12).
@@ -30,7 +30,6 @@ func TestRemote_OperatorBrief(t *testing.T) {
 		be.name = backend
 		snap := remoteSnapshot(time.Second)
 		snap.Decision.Backend = backend
-		snap.Decision.OpenAI = flags.RemoteBackendConfig{Model: "gpt-x", Timeout: time.Second}
 		snap.Decision.Jev = flags.RemoteBackendConfig{Model: "jev-latest", Timeout: time.Second}
 		h := newRemoteHarness(t, snap, be)
 		var res result
@@ -55,7 +54,7 @@ func TestRemote_OperatorBrief(t *testing.T) {
 	}
 	brief := "keep the red player alive"
 
-	for _, backend := range []string{flags.DecisionBackendClaude, flags.DecisionBackendOpenAI} {
+	for _, backend := range []string{flags.DecisionBackendClaude} {
 		t.Run("UC-040/BR-044 "+backend+" gets the brief and the span its presence and length", func(t *testing.T) {
 			r := run(t, backend, &brief)
 			if r.req.OperatorBrief != brief || r.asked != 1 {

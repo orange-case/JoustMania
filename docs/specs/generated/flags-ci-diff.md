@@ -10,7 +10,6 @@ Part of [flags.md §12](../flags.md#12-ci-differences). A table with no rows mea
 |---|---|---|---|
 | agent.json | `decision.capture_content` | `off` = false | `on` = true |
 | agent.json | `decision.claude.max_requests_per_minute` | `stage` = 30 | `inherit` = -1 |
-| agent.json | `decision.openai.max_requests_per_minute` | `stage` = 30 | `inherit` = -1 |
 | controller.json | `backend` | `rust` = "rust" | `mock` = "mock" |
 | game.json | `countdown_phase_duration_ms` | `normal` = 750 | `skip` = 0 |
 | game.json | `fight_club.min_rounds` | `ten` = 10 | `five` = 5 |
@@ -35,7 +34,6 @@ Part of [flags.md §12](../flags.md#12-ci-differences). A table with no rows mea
 |---|---|---|
 | agent.json | `decision.claude.base_url` | `fake` = "http://127.0.0.1:1" |
 | agent.json | `decision.jev.base_url` | `fake` = "http://127.0.0.1:1/v1" |
-| agent.json | `decision.openai.base_url` | `fake` = "http://127.0.0.1:1/v1" |
 | agent.json | `llm.max_requests_per_minute` | `journey` = 600 |
 | game.json | `force_all_start_seconds` | `ci` = 0.6 |
 | game.json | `tempo.ramp_down_seconds` | `ci` = 0.1 |

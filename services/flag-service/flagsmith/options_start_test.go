@@ -40,13 +40,13 @@ func TestStartSyncsVariantOptions(t *testing.T) {
 	<-e.s.optionsDone()
 
 	t.Run("UC-055/BR-005 an existing feature's options are made equal to the row's variants, in order", func(t *testing.T) {
-		if got, want := opts.Values(1), []string{"rules", "claude", "openai", "jev"}; !reflect.DeepEqual(got, want) {
+		if got, want := opts.Values(1), []string{"rules", "claude", "jev"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("decision.backend options %v, want %v", got, want)
 		}
 		if opts.Of(1)[0].ID != rules.ID {
 			t.Fatal("the existing rules option was replaced, want it kept")
 		}
-		if got, want := opts.Keys(1), []string{"rules", "claude", "openai", "jev"}; !reflect.DeepEqual(got, want) {
+		if got, want := opts.Keys(1), []string{"rules", "claude", "jev"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("UC-055/BR-005 decision.backend titles %v, want the variant names %v", got, want)
 		}
 	})
@@ -95,7 +95,7 @@ func TestStartSyncsVariantOptions(t *testing.T) {
 	})
 	t.Run("UC-055/BR-005 the link knows the options for its weight writes", func(t *testing.T) {
 		got := e.l.options("decision.backend")
-		if len(got) != 4 || got[0].ID != rules.ID || got[3].Value != "jev" || !got[3].Text || got[3].Variant != "jev" || got[0].Variant != "rules" {
+		if len(got) != 3 || got[0].ID != rules.ID || got[2].Value != "jev" || !got[2].Text || got[2].Variant != "jev" || got[0].Variant != "rules" {
 			t.Fatalf("known options %+v", got)
 		}
 	})

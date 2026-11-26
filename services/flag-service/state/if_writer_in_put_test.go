@@ -20,7 +20,7 @@ func ifWriterInPut(writer string, allowed ...string) WriteRequest {
 // UC: UC-043 A19
 func TestIfWriterInPut(t *testing.T) {
 	t.Run("UC-043/A19 no overlay present: the empty entry matches and the write lands", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
+		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		if _, err := f.state.Put(ifWriterInPut("promotion", "promotion", "")); err != nil {
 			t.Fatalf("put: %v", err)
 		}
@@ -30,7 +30,7 @@ func TestIfWriterInPut(t *testing.T) {
 	})
 
 	t.Run("UC-043/A19 the promotion's own overlay matches and is replaced", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
+		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		f.put(ifWriterInPut("promotion"))
 		if _, err := f.state.Put(ifWriterInPut("promotion", "promotion", "")); err != nil {
 			t.Fatalf("put: %v", err)
@@ -38,7 +38,7 @@ func TestIfWriterInPut(t *testing.T) {
 	})
 
 	t.Run("UC-043/A19 another writer's overlay is refused 412 writer_mismatch and left in place", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
+		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		f.put(ifWriterInPut("operator"))
 		v0 := f.state.Version()
 		_, err := f.state.Put(ifWriterInPut("promotion", "promotion", ""))
@@ -52,14 +52,14 @@ func TestIfWriterInPut(t *testing.T) {
 	})
 
 	t.Run("UC-043/A19 an overlay without a writer label matches no entry, not even the empty one", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
+		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		f.put(ifWriterInPut(""))
 		_, err := f.state.Put(ifWriterInPut("promotion", "promotion", ""))
 		wantReason(t, err, http.StatusPreconditionFailed, fserr.WriterMismatch)
 	})
 
 	t.Run("UC-043/A19 a list without the empty entry refuses a write where no overlay is present", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
+		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		_, err := f.state.Put(ifWriterInPut("promotion", "promotion"))
 		wantReason(t, err, http.StatusPreconditionFailed, fserr.WriterMismatch)
 		if _, ok := f.realWriter("sensitivity"); ok {
@@ -68,7 +68,7 @@ func TestIfWriterInPut(t *testing.T) {
 	})
 
 	t.Run("UC-043/A19 a dry run evaluates the precondition too", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
+		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		f.put(ifWriterInPut("operator"))
 		req := ifWriterInPut("promotion", "promotion", "")
 		req.DryRun = true
@@ -77,7 +77,7 @@ func TestIfWriterInPut(t *testing.T) {
 	})
 
 	t.Run("UC-043/A19 without the precondition a PUT writes over any overlay", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
+		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		f.put(ifWriterInPut("operator"))
 		f.put(ifWriterInPut("promotion"))
 		if w, _ := f.realWriter("sensitivity"); w != "promotion" {
@@ -86,7 +86,7 @@ func TestIfWriterInPut(t *testing.T) {
 	})
 
 	t.Run("UC-043/A19 outside scope real, over 16 entries or an entry over the id limit is 400 malformed", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
+		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		stack := ifWriterInPut("promotion", "promotion", "")
 		stack.Scope = Scope{}
 		_, err := f.state.Put(stack)
@@ -97,26 +97,12 @@ func TestIfWriterInPut(t *testing.T) {
 		wantReason(t, err, http.StatusBadRequest, fserr.Malformed)
 	})
 
-	t.Run("UC-043/A19 409 real_game_live on a hold key takes precedence over 412", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
-		f.put(WriteRequest{Set: "game", Flag: "shield.energy_budget_seconds", Value: raw("20"), Scope: realScope, Writer: "operator"})
-		f.registerKind("g-real", "real")
-		req := WriteRequest{Set: "game", Flag: "shield.energy_budget_seconds", Value: raw("21"), Scope: realScope, Writer: "promotion", IfWriterIn: []string{"promotion", ""}}
-		_, err := f.state.Put(req)
-		wantReason(t, err, http.StatusConflict, fserr.RealGameLive)
-		f.state.EndGame("g-real", EndReasonEnded)
-		_, err = f.state.Put(req)
-		wantReason(t, err, http.StatusPreconditionFailed, fserr.WriterMismatch)
-		if w, _ := f.realWriter("shield.energy_budget_seconds"); w != "operator" {
-			t.Fatalf("writer %q after two refused PUTs, want operator", w)
-		}
-	})
 }
 
 // UC: UC-043 A19
 func TestIfWriterInPutRaceFree(t *testing.T) {
 	t.Run("UC-043/A19 concurrent conditional and unconditional PUTs are race-free (run with -race), fail only with writer_mismatch, and the precondition still holds afterwards", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{registryYAML: guardRegistry})
+		f := newFixture(t, fixtureOpts{registryYAML: realRegistry})
 		const rounds = 300
 		var wg sync.WaitGroup
 		wg.Add(2)

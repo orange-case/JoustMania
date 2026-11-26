@@ -8,7 +8,7 @@ import (
 	"github.com/joustmania/agent/decide"
 )
 
-// group_uc040_test.go: claude and openai both parse through Parse, so a group
+// group_uc040_test.go: the LLM backends parse through Parse, so a group
 // answer is valid exactly when the request offered the group option (#2467 PR 4;
 // UC-040 A47; decide-contract §2, §4.1).
 
@@ -43,7 +43,7 @@ func TestParse_GroupAnswer(t *testing.T) {
 		}
 	})
 	t.Run("UC-040/A48 a group option the request did not offer is invalid", func(t *testing.T) {
-		if _, err := Parse(testRequest(), []byte(groupAnswer), "openai"); err == nil {
+		if _, err := Parse(testRequest(), []byte(groupAnswer), "claude"); err == nil {
 			t.Fatal("a group answer to a request without the lever must be rejected")
 		}
 	})

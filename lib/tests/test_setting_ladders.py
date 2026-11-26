@@ -340,6 +340,14 @@ def test_agent_row_preview_from_an_unknown_or_off_ladder_value_is_unknown(option
         assert preview_value(option, status, steps) == Preview(None)
 
 
+@pytest.mark.uc("UC-016", br=["BR-012", "BR-014"])
+@pytest.mark.parametrize("steps", [-6, -1, 1, 6])
+def test_retired_openai_backend_previews_like_any_unknown_value(steps):
+    """A persisted `openai` (older release) is off the ladder: never moved to a rung, as the menu refuses."""
+    assert "openai" not in setting_ladders.BACKENDS
+    assert preview_value("decision.backend", _status_at("decision.backend", "openai"), steps) == Preview(None)
+
+
 @pytest.mark.uc("UC-016", br=["BR-014"])
 @pytest.mark.parametrize(
     ("option", "old", "new", "expected"),
@@ -358,8 +366,10 @@ def test_agent_row_preview_from_an_unknown_or_off_ladder_value_is_unknown(option
         ("agent_level", "full", "none", False),
         ("decision.backend", "rules", "claude", True),  # free to paid (D12)
         ("decision.backend", "rules", "jev", True),
-        ("decision.backend", "claude", "openai", False),  # paid to paid
-        ("decision.backend", "openai", "rules", False),
+        ("decision.backend", "claude", "jev", False),  # paid to paid
+        ("decision.backend", "jev", "rules", False),
+        ("decision.backend", "openai", "rules", False),  # retired backend persisted by an older release
+        ("decision.backend", "openai", "claude", None),  # unknown NOW with a paid NEW: refused
         ("decision.backend", "", "claude", None),  # unknown NOW with a paid NEW: refused
         ("decision.backend", "", "rules", False),
         ("objectives", "balanced_focused", "chaos_focused", False),
