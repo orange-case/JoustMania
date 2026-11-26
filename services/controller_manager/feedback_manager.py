@@ -692,6 +692,8 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         active = self.active_effects.get(serial)
         if active is None or active.task.done():
             return False
+        if effect == controller_manager_pb2.GAME_EFFECT_LOW_BATTERY:
+            return True  # UC-002 A8: the lobby's low-battery blink is the lowest overlay; the next period retries
         if effect == controller_manager_pb2.GAME_EFFECT_PULSE and active.effect_type in PULSE_PROOF_EFFECTS:
             return True
         if effect in DEATH_YIELDING_EFFECTS and active.effect_type == controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH:

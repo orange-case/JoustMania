@@ -15,6 +15,7 @@ from services.menu.controller_events import ControllerEventLoop
 from services.menu.event_publisher import EventPublisher
 from services.menu.handlers import ConnectedHandler, IdleHandler, ReadyHandler
 from services.menu.idle_monitor import IdleMonitor, read_sentinel_animation
+from services.menu.low_battery import LowBatteryWarner
 from services.menu.settings_ops import SettingsOps
 from services.menu.state_manager import StateManager
 from services.menu.utils import AudioHelper, LedController
@@ -117,6 +118,10 @@ def build_menu(servicer) -> None:
         get_sentinel_count=lambda: servicer.system_client.get_integer_value("sentinel.count", 2),
         get_rotation_minutes=lambda: servicer.system_client.get_integer_value("sentinel.rotation_minutes", 5),
         get_sentinel_animation=lambda: read_sentinel_animation(servicer.system_client),
+        low_battery_warner=LowBatteryWarner(
+            state_manager=servicer.state_manager,
+            send_effect=lambda serial, effect: servicer.led.send_game_effect(serial, effect),
+        ),
     )
 
     # Wire idle handler's wake callback to idle monitor

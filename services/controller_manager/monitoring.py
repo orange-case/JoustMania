@@ -16,18 +16,8 @@ logger = logging.getLogger(__name__)
 class ControllerMonitoring:
     """Monitors controller battery levels."""
 
-    def __init__(
-        self,
-        low_battery_threshold: int = 1,
-    ):
-        """Initialize monitoring state.
-
-        Args:
-            low_battery_threshold: Battery level (0-5) at or below which to warn
-        """
-        # Battery monitoring (Phase 39 - Task 4)
-        self.last_battery_warning: dict[str, float] = {}
-        self.low_battery_threshold = low_battery_threshold
+    def __init__(self):
+        # The low-battery warning lives in the menu's lobby (UC-002 A8), not here.
         self.last_battery_check = 0.0
 
     def check_battery_levels(
@@ -53,11 +43,3 @@ class ControllerMonitoring:
 
             except Exception as e:
                 logger.error(f"Error checking battery for {serial}: {e}")
-
-    def cleanup_controller(self, serial: str):
-        """Clean up monitoring state for a removed controller.
-
-        Args:
-            serial: Controller serial number
-        """
-        self.last_battery_warning.pop(serial, None)

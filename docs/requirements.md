@@ -287,6 +287,7 @@
 | FR-262 | Page keys without a screen | As a host, I want the row keys to act as on one fixed page while the screen is down or too old for pages, so that the pad stays usable for the lobby without its screen. | High | Implemented | UC-016 A1, BR-016; refines FR-240. |
 | FR-263 | Agent and retro tuning from the pad | As a host, I want to set the agent's intervention rate, the group shield switch, the retro backend, the retro effort and the operator brief from the pad's rows, and reset each to its default, so that I can tune the agent on stage without a laptop, a script or Flagsmith. | Medium | Implemented | UC-016 BR-006, BR-007, BR-012 to BR-014; [services.md](specs/services.md) §3.1. |
 | FR-264 | The goal from the pad | As a host, I want to pick the agent's objectives from the pad in the lobby, and reset them to the default, so that I can set the next game's goal without a laptop, a script or Flagsmith. | Medium | Implemented | UC-016 BR-012 (`AGENT` row 3 `GOAL`); decide-contract §14.4. |
+| FR-265 | Low battery warning in the lobby | As a host, I want a controller whose battery is low to blink red in the lobby and the pad to show how many controllers are low, so that I charge or swap it before a dead battery takes its player out of a game. | High | Implemented | UC-002 A8, BR-009; UC-016 BR-006 (`START` row 2 `LOW`); [services.md](specs/services.md) §3.1. Replaces the admin-mode battery display of FR-008 (Obsolete) for the low case only; no voice line (no generated asset says it, #2906). |
 
 ## Non-Functional Requirements
 

@@ -125,9 +125,7 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
         # Battery monitoring - Phase 39, extracted to monitoring.py
         # NOTE: RSSI monitoring is handled by the host pairing-daemon
         # NOTE: Must be initialized before StateBuilder which depends on it
-        self.monitoring = ControllerMonitoring(
-            low_battery_threshold=1,
-        )
+        self.monitoring = ControllerMonitoring()
 
         # State caching (Phase 18 - Task 1, refactored)
         self.state_builder = StateBuilder(self.monitoring)

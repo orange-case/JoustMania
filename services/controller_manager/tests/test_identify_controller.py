@@ -672,3 +672,37 @@ class TestUC004IdentifyIsOperatorOnly:
         assert agent_sources
         offenders = [str(p) for p in agent_sources if "IdentifyController" in p.read_text()]
         assert offenders == []
+
+
+class TestUC002LowBatteryBlinkYields:
+    """UC-002 A8: the lobby's low-battery blink never takes the LED from a running effect."""
+
+    RED = (255, 0, 0)
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-009"])
+    async def test_low_battery_during_identify_is_skipped(self, manager, backend, clock):
+        clock.enable_blocking()
+        task = await _identify(manager)
+        clock.release_all()
+        await asyncio.sleep(0)
+
+        await manager.handle_game_effect(SERIAL, controller_manager_pb2.GAME_EFFECT_LOW_BATTERY)
+        active = manager.active_effects[SERIAL]
+        assert active.task is task
+        assert active.effect_type == controller_manager_pb2.GAME_EFFECT_IDENTIFY
+
+        clock.disable_blocking()
+        clock.release_all()
+        await task
+        assert self.RED not in backend.history
+        assert backend.colors[SERIAL] == LOBBY
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-009"])
+    async def test_low_battery_blinks_red_then_restores_the_base_colour(self, manager, backend):
+        with patch("services.controller_manager.feedback_manager.asyncio.sleep", AsyncMock()):
+            await manager.handle_game_effect(SERIAL, controller_manager_pb2.GAME_EFFECT_LOW_BATTERY)
+            await manager.active_effects[SERIAL].task
+        assert backend.history.count(self.RED) == 2
+        assert backend.colors[SERIAL] == LOBBY
