@@ -133,8 +133,8 @@ that JoustFFA shadow games read, `0` strictest to `4` most lenient, default `2`)
 variants (`off`, `windows_frantic`; [flags.md](specs/flags.md)), so a `sensitivity` seed variant has
 to be added to the flag file first, in a reviewed PR. The value is a flag-file change, not an
 ad-hoc write. Then turn the variant on the way `scripts/agent-dryrun-enable.sh` turns on
-`windows_frantic`. Read the per-arm mean fitness from the experiment's journal or its
-`experiment.progress` span.
+`windows_frantic`. Read the per-arm mean fitness from the experiment's journal or the agent's
+`GET /experiments/state` (its `experiments` entry).
 
 **Real side.** Run real games at each value: at least 8 games per value, the same player count
 (4) and mode (FFA), and the same players across all three values in one session. Set the value

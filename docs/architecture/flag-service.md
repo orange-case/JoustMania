@@ -300,8 +300,7 @@ states.
     an empty list). An empty epoch is the baseline value: nothing to apply, nothing reset;
   - a value whose `seq` is below the last applied one within the same epoch is ignored;
   - when the oldest event in the list is newer than `last + 1` (more than K = 16 events arrived between two
-    reads), the reader applies what it has, logs the gap and counts it in
-    `game_intervention_event_gaps_total{flag}`;
+    reads), the reader applies what it has and logs the gap;
   - the last-applied `(epoch, seq)` advances under the manager's lock **before** the events are dispatched,
     and `evaluate_all` is single-flight (§5.4), so overlapping passes cannot apply an event twice.
 - Grants (`shield_seconds`, `toughness_boost_seconds`, `soft_penalty_action`) stay per-player state flags

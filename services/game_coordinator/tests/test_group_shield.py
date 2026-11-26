@@ -372,17 +372,6 @@ class TestUC040A48GroupRefusedAsAWhole:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A48", br=["BR-033"])
-    async def test_a_refusal_is_counted_by_reason(self, game):
-        set_mode(game, INSTANT)
-        _cap(game, "p2")
-        with patch("services.game_coordinator.metrics.group_shield_refused_total") as metric:
-            await refused(game)
-        metric.labels.assert_called_once_with(
-            mode=game.get_game_name(), game_kind=GAME_KIND_SHADOW, reason="shield_cap_reached"
-        )
-
-    @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A48", br=["BR-033"])
     async def test_game_ending_refuses_the_whole_group(self, game):
         set_mode(game, INSTANT)
         game._latched_outcome = "winner"

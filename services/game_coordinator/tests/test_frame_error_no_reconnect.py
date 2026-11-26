@@ -88,19 +88,18 @@ MODES = {"ffa": _ffa, "fight_club": _fight_club, "tournament": _tournament}
 
 
 async def _run_until_error(game, client):
-    """Run the game to its end; return the error it raised and the reconnects it counted."""
+    """Run the game to its end; return the error it raised."""
     task = asyncio.create_task(game.run())
-    with patch("services.game_coordinator.games.base.metrics.gameplay_stream_reconnects_total") as reconnects:
-        try:
-            await asyncio.wait_for(task, timeout=10)
-            error = None
-        except Exception as e:  # noqa: BLE001 - the error under test
-            error = e
-        finally:
-            for stream in client.streams:
-                if stream.producer:
-                    stream.producer.cancel()
-    return error, reconnects.labels.return_value.inc.call_count
+    try:
+        await asyncio.wait_for(task, timeout=10)
+        error = None
+    except Exception as e:  # noqa: BLE001 - the error under test
+        error = e
+    finally:
+        for stream in client.streams:
+            if stream.producer:
+                stream.producer.cancel()
+    return error
 
 
 def _count_frames(game) -> list[int]:
@@ -139,12 +138,11 @@ async def test_a_kill_handler_error_ends_the_game_once_with_game_error(mode):
         stream.disconnect_at[stream.seq + 1] = SERIALS[-1]
 
     trigger = asyncio.create_task(disconnect_in_the_loop())
-    error, reconnects = await _run_until_error(game, client)
+    error = await _run_until_error(game, client)
     trigger.cancel()
 
     assert isinstance(error, RuntimeError) and "kill handler bug" in str(error), f"unexpected end: {error!r}"
     assert len(client.streams) == 1, "a kill handler error reconnected the healthy gameplay stream"
-    assert reconnects == 0
     if mode == "ffa":
         assert log.events.get_events_of_type(GameEvent.GAME_ERROR), "the base run did not publish game_error"
 
@@ -165,12 +163,11 @@ async def test_a_tournament_bracket_error_ends_without_the_win_hold(caplog):
 
     game._bracket_tick = failing_bracket_tick
     with caplog.at_level(logging.INFO, logger="services.game_coordinator.games.base"):
-        error, reconnects = await _run_until_error(game, client)
+        error = await _run_until_error(game, client)
 
     assert isinstance(error, RuntimeError) and "bracket bug" in str(error), f"unexpected end: {error!r}"
     assert WIN_HOLD_LOG not in caplog.text, "a bracket error was held as a win"
     assert len(client.streams) == 1
-    assert reconnects == 0
     assert not log.events.get_events_of_type(GameEvent.GAME_ENDED), "a bracket error ended the game as a natural end"
 
 
@@ -198,7 +195,7 @@ async def test_a_frame_error_after_a_force_end_ends_the_game_as_force_ended(capl
 
     trigger = asyncio.create_task(disconnect_in_the_loop())
     with caplog.at_level(logging.WARNING, logger="services.game_coordinator.games.base"):
-        error, reconnects = await _run_until_error(game, client)
+        error = await _run_until_error(game, client)
     trigger.cancel()
 
     assert error is None, f"a frame error after a force-end failed the run: {error!r}"
@@ -206,4 +203,3 @@ async def test_a_frame_error_after_a_force_end_ends_the_game_as_force_ended(capl
     assert game._game_outcome_attributes().get("game.outcome") == "force_ended"
     assert not log.events.get_events_of_type(GameEvent.GAME_ERROR), "a stopped game published game_error"
     assert len(client.streams) == 1
-    assert reconnects == 0

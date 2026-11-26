@@ -75,7 +75,9 @@ func (m *Multiplexer) applyGameStart(lr plog.LogRecord) {
 }
 
 // applyPhaseStart opens and holds the game's partition like game.start and takes
-// the opened span's id from the record's trace context (UC-041 A8 step 5, BR-004).
+// the opened span's id from the record's trace context (UC-041 A8 step 5, BR-004),
+// plus the game's trace id when a lost game.start left it unknown. The root span id
+// comes only from game.start.
 func (m *Multiplexer) applyPhaseStart(lr plog.LogRecord) {
 	attrs := lr.Attributes()
 	gameID := attrString(attrs, spanAttrGameID)
@@ -84,21 +86,21 @@ func (m *Multiplexer) applyPhaseStart(lr plog.LogRecord) {
 	}
 	s := m.openFromLog(gameID)
 	s.setFromLog(attrString(attrs, spanAttrGameKind), "")
-	_, spanID, ok := sampledContext(lr)
+	traceID, spanID, ok := sampledContext(lr)
 	if !ok {
 		return
 	}
 	switch attrString(attrs, attrPhaseSpan) {
 	case phaseGameplay:
-		s.setTraceFromLog(logTraceIDs{phase: spanID})
+		s.setTraceFromLog(logTraceIDs{phase: spanID, phaseTrace: traceID})
 	case phaseGameCycle:
-		s.setTraceFromLog(logTraceIDs{cycle: spanID})
+		s.setTraceFromLog(logTraceIDs{cycle: spanID, phaseTrace: traceID})
 	}
 }
 
-// sampledContext returns the record's trace and span id in the gauge labels' hex
-// form, ok only for a valid, sampled context: an unsampled span is never exported,
-// so parenting on it would dangle.
+// sampledContext returns the record's trace and span id in hex, ok only for a
+// valid, sampled context: an unsampled span is never exported, so parenting on it
+// would dangle.
 func sampledContext(lr plog.LogRecord) (traceID, spanID string, ok bool) {
 	tid, sid := lr.TraceID(), lr.SpanID()
 	if tid.IsEmpty() || sid.IsEmpty() || !lr.Flags().IsSampled() {

@@ -70,8 +70,6 @@ class EventPublisher:
             data: Event payload as key-value pairs; non-string values are sent as ``str(value)``
                 (``MenuEvent.data`` is a ``map<string, string>``, #2105)
         """
-        self._metrics.stream_events_published_total.labels(event_type=event_type).inc()
-
         # Use descriptive span name with event type
         span_name = f"menu_publish:{event_type}"
         with self._tracer.start_as_current_span(span_name, kind=SpanKind.PRODUCER) as span:
@@ -103,7 +101,6 @@ class EventPublisher:
                         event_queue.put_nowait(event)
                         logger.debug(f"Published {event_type} to subscriber {sub_id}")
                     except asyncio.QueueFull:
-                        self._metrics.stream_publish_drops_total.labels(event_type=event_type).inc()
                         logger.warning(f"Subscriber {sub_id} queue full, skipping event")
                     except Exception as e:
                         logger.error(f"Error publishing to subscriber {sub_id}: {e}")

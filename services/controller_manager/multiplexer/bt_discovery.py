@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import pathlib
 
-from services.controller_manager import bluetooth, metrics
+from services.controller_manager import bluetooth
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,6 @@ class CentralizedBTDiscovery:
             return {}
 
         logger.info(f"Found {len(self._adapters)} adapter(s): {self._adapters}")
-        metrics.bluetooth_adapter_count.set(len(self._adapters))
 
         for hci in self._adapters:
             try:
@@ -169,5 +168,4 @@ class CentralizedBTDiscovery:
                 logger.exception(f"Hot-plug: failed to enable {hci}")
 
         self._adapters = current
-        metrics.bluetooth_adapter_count.set(len(self._adapters))
         return list(new_adapters)

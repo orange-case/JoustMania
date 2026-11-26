@@ -32,9 +32,8 @@ class TestOnSystemFlagsChanged:
 
     @pytest.mark.nfr("NFR-003")
     @pytest.mark.uc("UC-030", flow="main", steps=[2])
-    @patch("services.controller_manager.servicer.metrics")
     @patch("lib.feature_flags.get_flag_client")
-    def test_valid_value_updates_override(self, mock_get_client, mock_metrics):
+    def test_valid_value_updates_override(self, mock_get_client):
         self._reset()
         try:
             mock_client = autospec_flag_client()
@@ -43,8 +42,6 @@ class TestOnSystemFlagsChanged:
 
             servicer_mod._on_system_flags_changed(None)
             assert servicer_mod._frequency_override == 30
-            mock_metrics.stream_frequency_changes_total.inc.assert_called_once()
-            mock_metrics.stream_current_frequency_hz.set.assert_called_once_with(30)
         finally:
             self._restore()
 
@@ -104,22 +101,6 @@ class TestOnSystemFlagsChanged:
             servicer_mod._on_system_flags_changed(None)
             # Negative values are <= 0, so skipped entirely
             assert servicer_mod._frequency_override is None
-        finally:
-            self._restore()
-
-    @patch("services.controller_manager.servicer.metrics")
-    @patch("lib.feature_flags.get_flag_client")
-    def test_same_value_no_metric_update(self, mock_get_client, mock_metrics):
-        self._reset()
-        servicer_mod._frequency_override = 60
-        try:
-            mock_client = autospec_flag_client()
-            mock_client.get_integer_value.return_value = 60
-            mock_get_client.return_value = mock_client
-
-            servicer_mod._on_system_flags_changed(None)
-            assert servicer_mod._frequency_override == 60
-            mock_metrics.stream_frequency_changes_total.inc.assert_not_called()
         finally:
             self._restore()
 

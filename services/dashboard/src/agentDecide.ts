@@ -1,13 +1,11 @@
-/** invoke_agent feed: parsing, follow anchor, stores, query windows and the decide poll. Split out of agent.ts (#2388). */
+/** invoke_agent feed: parsing, follow anchor and the store. Split out of agent.ts (#2388). */
 
-import { incrementalStartMs, searchTracesSized, spanStartMs, spanTags, tagBool, tagBoolOrNull, tagNumber, tagString, parentSpanId } from "./jaeger.js";
-import type { JaegerSpan, JaegerTracesResponse, SearchSpec } from "./jaeger.js";
-import { GoalStore } from "./agentGoal.js";
+import { spanStartMs, spanTags, tagBool, tagBoolOrNull, tagNumber, tagString, parentSpanId } from "./jaeger.js";
+import type { JaegerSpan, JaegerTracesResponse } from "./jaeger.js";
+import { GoalStore, parseGoalSummaries } from "./agentGoal.js";
 import type { GameGoal } from "./agentGoal.js";
-import { pickAnchor } from "./agentAnchor.js";
+import { isShadowGame, pickAnchor } from "./agentAnchor.js";
 import type { DecideFollow } from "./agentAnchor.js";
-import { parseFlagStates } from "./agentFlags.js";
-import type { FlagPanel } from "./agentFlags.js";
 
 /* ======================================================================== */
 /* invoke_agent feed (#1233, epic #1225)                                    */
@@ -16,119 +14,29 @@ import type { FlagPanel } from "./agentFlags.js";
  * The decide contract (#1226) records every decision on an `invoke_agent` span:
  * which backend answered (and which one the decision.backend flag requested),
  * the model, the answers + confidence, the confidence-threshold verdict, the
- * outcome and the model's one-line rationale. This feed reads the spans straight
- * from Jaeger's HTTP query API (./jaeger.ts), which envoy routes at /jaeger/*
- * (the same Jaeger the deep links open).
+ * outcome and the model's one-line rationale. The agent keeps its newest decide
+ * spans with their neighbours in memory and serves them from GET
+ * /experiments/state (agentState.ts) in the shape of a Jaeger answer, so the
+ * same fold reads them; the row links open the trace in Jaeger.
  *
  * TRACE SHAPE (services/agent/decision/decide_hook.go)
  *   rules path:  agent.signal_received ─┬─ invoke_agent
  *                                        └─ agent.decision ─ agent.action   (0..2)
  *   remote path: invoke_agent ─┬─ chat {model}            (backend CLIENT span)
  *                              └─ agent.decision ─ agent.action
- *                (invoke_agent is a remote child of the game's gameplay_phase
- *                 span, so the trace is the whole per-game trace.)
- *
- * Jaeger's search returns WHOLE traces that contain a matching span, so one
- * query gives us the decide spans plus their chat / decision neighbours.
+ *                (in a game, invoke_agent is a remote child of game_cycle.)
  *
  * Every string here (rationale above all) can be model output: it is untrusted
  * and the view escapes it before rendering.
  */
-
 /** Jaeger operation the decide feed searches for. */
 export const DECIDE_OPERATION = "invoke_agent joustmania-agent";
 
-/*
- * CLOCK SKEW: the stage Pi has no RTC and venue WiFi may block NTP, so the
- * agent + Jaeger clock (same host) can be hours off the presenter's browser
- * clock. The decide query therefore NEVER uses Date.now(). The v3 search
- * (#2283) requires both window bounds, so the upper one is a fixed far-future
- * date and a cold start's lower one is the Unix epoch (jaeger.ts searchParams).
- * That is bounded by searchDepth=DECIDE_TRACE_LIMIT, and Jaeger returns the most
- * recent matching traces, so a cold start costs the same 5 traces as a short
- * window would. Once a decide
- * is held, `start` is that span's own (agent-clock) timestamp minus the overlap.
- */
+/** Max decide rows kept (newest first): the agent keeps 30 per game-kind class (real and shadow). */
+const MAX_DECIDE_ROWS = 60;
 
-/**
- * Longest a decide can run: the top of the configurable
- * `decision.<backend>.timeout_ms` range (100 to 60000, docs/specs/flags.md).
- */
-export const DECIDE_TIMEOUT_CEILING_MS = 60 * 1000;
-
-/** Span export batching on top of that (the OTLP batch delay, with margin). */
-export const DECIDE_EXPORT_DELAY_MS = 2 * 1000;
-
-/**
- * Overlap behind the newest decide already seen: spans are exported when they
- * END, so a decide that started earlier than the newest one we hold can still
- * arrive late, by up to the longest decide plus the export delay.
- */
-export const DECIDE_OVERLAP_MS = DECIDE_TIMEOUT_CEILING_MS + DECIDE_EXPORT_DELAY_MS;
-
-/**
- * Max traces per Jaeger search. Both rules and remote invoke_agent spans live in
- * the whole per-GAME trace (since #1195), and Jaeger returns whole traces, so one
- * trace already carries every decide of its game. Keep this low: it is the main
- * bound on the payload of a poll (and on Jaeger's memory, see #1191).
- */
-const DECIDE_TRACE_LIMIT = 5;
-
-/** Max decide rows kept (newest first). */
-const MAX_DECIDE_ROWS = 30;
-
-/** Max prediction outcome spans kept for the per-game strip (a game scores a few dozen). */
+/** Max prediction outcome spans kept per class (shadow, other) for the per-game strip, as the agent sends them. */
 const MAX_OUTCOMES = 400;
-
-/*
- * PAYLOAD BUDGET (#2287): Jaeger's search returns WHOLE traces, so a live real
- * game's trace (every phase, player and decide span of the game) is downloaded
- * in full on every poll, and it keeps growing: 4.9 MB per poll on the stage Pi.
- * The legacy API has no "spans since" query, so the dashboard bounds the cost in
- * three ways:
- * - pace: the next decide poll waits at least `bytes / DECIDE_BYTES_PER_SEC`
- *   (capped at DECIDE_MAX_PACE_MS, or DECIDE_LIVE_MAX_PACE_MS while a real
- *   game is live), so one browser costs Jaeger at most about
- *   DECIDE_BYTES_PER_SEC however large the trace grows; small traces keep the
- *   1.5 s cadence;
- * - settle: once the newest decide held has not changed for DECIDE_OVERLAP_MS
- *   (browser-elapsed time, never a browser timestamp), the window starts just
- *   after it, so an ended or quiet game's trace is no longer re-fetched;
- * - target: while a real game is live the search asks for that game's
- *   `game.id` (shadow traces cannot crowd it out of the limit, #2255) and the
- *   shadow games' decides come from their own `game.kind=shadow` search every
- *   DECIDE_SHADOW_EVERY_TICKS polls.
- */
-
-/** Jaeger answer size per second the decide poll may cause (characters of JSON). */
-export const DECIDE_BYTES_PER_SEC = 512 * 1024;
-
-/** Upper bound of the payload pace, so a huge trace still refreshes. */
-export const DECIDE_MAX_PACE_MS = 15_000;
-
-/**
- * The same cap while a real game is live: the presenter's decision strip then
- * refreshes at least every 5 s even though a live game's trace only grows
- * (about 1 MB/s for a 4.9 MB trace instead of 512 KiB/s).
- */
-export const DECIDE_LIVE_MAX_PACE_MS = 5_000;
-
-/** While a real game is live, the shadow-game decide search runs every Nth poll. */
-export const DECIDE_SHADOW_EVERY_TICKS = 4;
-
-/** Search lanes of the decide poll; each has its own query window. */
-export const DECIDE_LANE_ALL = "all";
-export const DECIDE_LANE_SHADOW = "shadow";
-const DECIDE_LANE_GAME_PREFIX = "game:";
-
-/** Query windows kept for per-game lanes (old games drop out). */
-const MAX_GAME_LANES = 4;
-
-/** The minimum wait before the next decide poll after a `bytes`-sized answer. */
-export function decidePaceMs(bytes: number, maxMs: number = DECIDE_MAX_PACE_MS): number {
-  if (!Number.isFinite(bytes) || bytes <= 0) return 0;
-  return Math.min(maxMs, Math.ceil((bytes * 1000) / DECIDE_BYTES_PER_SEC));
-}
 
 /** The rules path's per-cycle parent span (decide + decisions are its children). */
 const SIGNAL_OPERATION = "agent.signal_received";
@@ -248,13 +156,8 @@ export interface DecideRow {
 /** Jaeger operation of a scored prediction (decide-contract §14, UC-040 A44). */
 export const PREDICTION_OUTCOME_OPERATION = "agent.prediction.outcome";
 
-/**
- * hit / miss / unscorable come from the outcome span; pending = no outcome span yet;
- * unknown = still no outcome span although the decide query window has moved
- * DECIDE_OVERLAP_MS past the row, so it will not be fetched again (a long-horizon or
- * game-end outcome exported after the window settled).
- */
-export type PredictionState = "hit" | "miss" | "unscorable" | "pending" | "unknown";
+/** hit / miss / unscorable come from the outcome span; pending = no outcome span (yet). */
+export type PredictionState = "hit" | "miss" | "unscorable" | "pending";
 
 /** The prediction a decision carried (decide.prediction.* tags) and its scored state. */
 export interface DecidePrediction {
@@ -313,8 +216,6 @@ export interface DecideCurrent {
 export interface DecideFeed {
   rows: DecideRow[];
   current: DecideCurrent | null;
-  /** agent.flag_state spans found in the same game traces (#2059); parse results only. */
-  flagStates?: FlagPanel[];
   /** Every agent.prediction.outcome span found (decisions and controls); parse results only. */
   outcomes?: PredictionOutcomeSpan[];
   /** The followed game's hit rate vs control base rate per source (#2479); null without outcomes. */
@@ -635,7 +536,6 @@ export function parseDecideTraces(body: JaegerTracesResponse): DecideFeed {
   return {
     rows: capped,
     current,
-    flagStates: parseFlagStates(body),
     ...(allOutcomes.length > 0 ? { outcomes: allOutcomes } : {}),
     ...(strip ? { predictionStrip: strip } : {}),
   };
@@ -676,119 +576,56 @@ export function currentFrom(rows: DecideRow[], follow?: DecideFollow): DecideCur
   };
 }
 
-function rowKey(r: DecideRow): string {
-  return `${r.traceId}/${r.spanId}`;
-}
-
 function newestFirst(a: DecideRow, b: DecideRow): number {
   return b.tsMs - a.tsMs || b.spanId.localeCompare(a.spanId);
 }
 
 /**
- * Start of the next decide query window (epoch ms, AGENT clock): DECIDE_OVERLAP_MS
- * behind the newest decide already held, derived only from span timestamps.
- * null on a cold start: the query then sends no `start` and Jaeger applies its
- * own server-side default (see CLOCK SKEW above).
- */
-export function decideQueryStartMs(newestSeenMs: number | null): number | null {
-  return incrementalStartMs(newestSeenMs, DECIDE_OVERLAP_MS);
-}
-
-
-
-/**
- * The incremental window of one decide search (#2287), agent clock. Before any
- * decide: null (no `start`). While the newest decide held is fresh: that span
- * minus DECIDE_OVERLAP_MS (a decide that started earlier can still end and be
- * exported later). Once the newest decide has stayed the newest for
- * DECIDE_OVERLAP_MS of browser-elapsed time (`now` is only ever subtracted from
- * itself, so clock skew does not matter), every older decide has ended: the
- * window starts just after it and Jaeger stops returning that game's trace.
- */
-export class QueryWindow {
-  private newestMs: number | null = null;
-  private heldSinceMs = 0;
-
-  constructor(private readonly now: () => number = () => performance.now()) {}
-
-  observe(rows: Pick<DecideRow, "tsMs">[]): void {
-    for (const r of rows) {
-      if (this.newestMs === null || r.tsMs > this.newestMs) {
-        this.newestMs = r.tsMs;
-        this.heldSinceMs = this.now();
-      }
-    }
-  }
-
-  startMs(): number | null {
-    if (this.newestMs === null) return null;
-    if (this.now() - this.heldSinceMs >= DECIDE_OVERLAP_MS) return this.newestMs + 1;
-    return decideQueryStartMs(this.newestMs);
-  }
-}
-
-/**
- * Client-side decide rows across polls: each poll only fetches a short window,
- * so the feed is the union of what the polls returned, keyed by trace/span (a
- * re-fetched span replaces its row: its linked decisions may have arrived
- * since), bounded to the newest `max` rows. Each search lane (all decides, one
- * real game, the shadow games) keeps its own QueryWindow.
+ * The decide rows of the agent's last answer (GET /experiments/state). The agent
+ * holds the newest decides per game-kind class, so the answer replaces the rows; a
+ * prediction outcome or game goal stays held after the agent dropped its span.
  */
 export class DecideStore {
-  private readonly rows = new Map<string, DecideRow>();
-  private newestMs: number | null = null;
+  private rows: DecideRow[] = [];
   private follow: DecideFollow = { realGameLive: null, followGameId: "" };
-  private readonly windows = new Map<string, QueryWindow>();
   private readonly outcomes = new Map<string, PredictionOutcomeSpan>();
   private readonly goals = new GoalStore();
 
-  constructor(
-    private readonly max = MAX_DECIDE_ROWS,
-    private readonly now: () => number = () => performance.now(),
-  ) {}
+  constructor(private readonly max = MAX_DECIDE_ROWS) {}
 
-  /** Merge rows a search of `lane` returned (its window moves with them). */
-  merge(rows: DecideRow[], lane: string = DECIDE_LANE_ALL): void {
-    this.window(lane).observe(rows);
-    for (const r of rows) {
-      this.rows.set(rowKey(r), r);
-      if (this.newestMs === null || r.tsMs > this.newestMs) this.newestMs = r.tsMs;
-    }
-    if (this.rows.size > this.max) {
-      const keep = this.sorted().slice(0, this.max);
-      this.rows.clear();
-      for (const r of keep) this.rows.set(rowKey(r), r);
-    }
+  /** Load an answer's decide spans: rows, scored predictions and game goals. */
+  load(body: JaegerTracesResponse): void {
+    const parsed = parseDecideTraces(body);
+    this.mergeOutcomes(parsed.outcomes ?? []);
+    this.goals.merge(parseGoalSummaries(body));
+    this.setRows(parsed.rows);
   }
 
-  /** Merge the outcome spans a search returned (keyed by prediction id, newest kept, bounded). */
+  /** Replace the rows (newest first after sorting, capped). */
+  setRows(rows: DecideRow[]): void {
+    this.rows = [...rows].sort(newestFirst).slice(0, this.max).map((r) => this.withHeldOutcome(r));
+  }
+
+  /**
+   * Merge outcome spans (keyed by prediction id, newest kept), bounded per class like
+   * the agent (shadow, everything else), so a shadow burst never pushes out the stage
+   * game's strip.
+   */
   mergeOutcomes(outcomes: PredictionOutcomeSpan[]): void {
     for (const o of outcomes) this.outcomes.set(o.id, o);
-    if (this.outcomes.size > MAX_OUTCOMES) {
-      const keep = [...this.outcomes.values()].sort((a, b) => b.tsMs - a.tsMs).slice(0, MAX_OUTCOMES);
-      this.outcomes.clear();
-      for (const o of keep) this.outcomes.set(o.id, o);
-    }
+    if (this.outcomes.size <= MAX_OUTCOMES) return;
+    const newest = [...this.outcomes.values()].sort((a, b) => b.tsMs - a.tsMs);
+    const keep = [
+      ...newest.filter((o) => isShadowGame(o.gameKind)).slice(0, MAX_OUTCOMES),
+      ...newest.filter((o) => !isShadowGame(o.gameKind)).slice(0, MAX_OUTCOMES),
+    ];
+    this.outcomes.clear();
+    for (const o of keep) this.outcomes.set(o.id, o);
   }
 
-  /** Merge the goals of the game summaries a search returned (#2498). */
-  mergeGoals(goals: GameGoal[]): void {
-    this.goals.merge(goals);
-  }
-
-  /** True when the summary goal of `gameId` is already held (#2498). */
-  hasGoal(gameId: string): boolean {
-    return this.goals.has(gameId);
-  }
-
-  /** Next query start of `lane` (agent clock), null before its first decide. */
-  queryStartMs(lane: string = DECIDE_LANE_ALL): number | null {
-    return this.windows.get(lane)?.startMs() ?? null;
-  }
-
-  /** Newest decide span time held (agent clock), null before the first one. */
-  newestSeenMs(): number | null {
-    return this.newestMs;
+  /** The followed game's goal (#2498), null until its summary arrived. */
+  goalFor(gameId: string): GameGoal | null {
+    return this.goals.forGame(gameId);
   }
 
   /** The follow state the next feed() uses. */
@@ -797,7 +634,7 @@ export class DecideStore {
   }
 
   get size(): number {
-    return this.rows.size;
+    return this.rows.length;
   }
 
   /** The game the dashboard follows (UC-070 BR-005); used by the next feed(). */
@@ -806,7 +643,7 @@ export class DecideStore {
   }
 
   feed(): DecideFeed {
-    const rows = this.sorted().map((r) => this.settlePrediction(r));
+    const rows = [...this.rows];
     const current = currentFrom(rows, this.follow);
     return {
       rows,
@@ -816,146 +653,11 @@ export class DecideStore {
     };
   }
 
-  /** A pending prediction the query window has left behind reads unknown, never pending forever. */
-  private settlePrediction(row: DecideRow): DecideRow {
-    if (row.prediction?.outcome !== "pending" || this.newestMs === null) return row;
-    if (row.tsMs >= this.newestMs - DECIDE_OVERLAP_MS) return row;
-    return { ...row, prediction: { ...row.prediction, outcome: "unknown" } };
+  /** A pending prediction whose outcome span is held from an earlier answer reads that outcome. */
+  private withHeldOutcome(row: DecideRow): DecideRow {
+    if (row.prediction?.outcome !== "pending") return row;
+    const scored = this.outcomes.get(row.prediction.id);
+    if (!scored) return row;
+    return { ...row, prediction: { ...row.prediction, outcome: scored.outcome, unscorableReason: scored.unscorableReason } };
   }
-
-  private window(lane: string): QueryWindow {
-    let w = this.windows.get(lane);
-    if (!w) {
-      w = new QueryWindow(this.now);
-      this.windows.set(lane, w);
-      const gameLanes = [...this.windows.keys()].filter((k) => k.startsWith(DECIDE_LANE_GAME_PREFIX));
-      for (const old of gameLanes.slice(0, Math.max(0, gameLanes.length - MAX_GAME_LANES))) {
-        this.windows.delete(old);
-      }
-    }
-    return w;
-  }
-
-  private sorted(): DecideRow[] {
-    return Array.from(this.rows.values()).sort(newestFirst);
-  }
-}
-
-/** One search of a decide poll and the lane whose window it uses. */
-export interface DecideSearch {
-  lane: string;
-  spec: SearchSpec;
-}
-
-/**
- * The searches of decide poll number `tick` (#2287, UC-035 BR-011). While a real
- * game is live (and its id known): that game's decides by `game.id`, plus every
- * DECIDE_SHADOW_EVERY_TICKS polls the shadow games' by `game.kind=shadow`, so a
- * burst of shadow traces never pushes the stage game out of the limit (#2255).
- * Otherwise one search over all decides (the shadow follow of UC-070 A9 and the
- * idle tab).
- */
-export function decideSearches(store: DecideStore, tick: number): DecideSearch[] {
-  const follow = store.followState;
-  const primary = follow.realGameLive === true ? (follow.primaryGameId ?? "") : "";
-  const search = (lane: string, tags?: Record<string, string>): DecideSearch => ({
-    lane,
-    spec: {
-      operation: DECIDE_OPERATION,
-      limit: DECIDE_TRACE_LIMIT,
-      startMs: store.queryStartMs(lane),
-      ...(tags ? { tags } : {}),
-    },
-  });
-  if (!primary) return [search(DECIDE_LANE_ALL)];
-  const out = [search(`${DECIDE_LANE_GAME_PREFIX}${primary}`, { "game.id": primary })];
-  if (tick % DECIDE_SHADOW_EVERY_TICKS === 0) out.push(search(DECIDE_LANE_SHADOW, { "game.kind": "shadow" }));
-  return out;
-}
-
-/** What one decide poll fetched: answer size (for the pace) and its flag states. */
-export interface DecidePollResult {
-  bytes: number;
-  /** Minimum wait before the next poll (decidePaceMs, live-game cap while a game search ran). */
-  paceMs: number;
-  flagStates: FlagPanel[];
-  /** Failures of lanes other than the primary feed (the shadow lane); their rows are simply missing. */
-  laneErrors: unknown[];
-}
-
-/** Each decide search has its own timeout, so a big game trace cannot starve the lane after it (#2386). */
-export const DECIDE_SEARCH_TIMEOUT_MS = 4000;
-
-/** `signal` plus a timeout of its own: aborts when either does. */
-function withTimeout(signal: AbortSignal | undefined, ms: number): { signal: AbortSignal; done: () => void } {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  if (signal?.aborted) abort();
-  signal?.addEventListener("abort", abort);
-  const timer = setTimeout(abort, ms);
-  return {
-    signal: controller.signal,
-    done: () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-    },
-  };
-}
-
-/**
- * One decide poll (#2287): run decideSearches(store, tick) one after the other,
- * merge each lane's rows into the store and return the total answer size and the
- * agent.flag_state spans of the fetched game traces. Throws
- * JaegerUnavailableError as the single-lane poll did when the primary (game or all) lane
- * fails; rows of a lane that answered before the failure stay merged. A failing
- * shadow lane is reported in `laneErrors` instead (#2386, UC-035 BR-011).
- */
-export async function pollDecides(
-  store: DecideStore,
-  tick: number,
-  signal?: AbortSignal,
-): Promise<DecidePollResult> {
-  let bytes = 0;
-  let liveGame = false;
-  const flagStates: FlagPanel[] = [];
-  const laneErrors: unknown[] = [];
-  for (const { lane, spec } of decideSearches(store, tick)) {
-    const isGame = lane.startsWith(DECIDE_LANE_GAME_PREFIX);
-    if (isGame) liveGame = true;
-    const guarded = withTimeout(signal, DECIDE_SEARCH_TIMEOUT_MS);
-    try {
-      const answer = await searchTracesSized(spec, guarded.signal);
-      bytes += answer.bytes;
-      const feed = parseDecideTraces(answer.body);
-      store.merge(feed.rows, lane);
-      store.mergeOutcomes(feed.outcomes ?? []);
-      flagStates.push(...(feed.flagStates ?? []));
-    } catch (error) {
-      // Only the shadow lane is optional: it must not block the primary feed (#2386).
-      if (lane !== DECIDE_LANE_SHADOW || signal?.aborted) throw error;
-      laneErrors.push(error);
-    } finally {
-      guarded.done();
-    }
-  }
-  const paceMs = decidePaceMs(bytes, liveGame ? DECIDE_LIVE_MAX_PACE_MS : DECIDE_MAX_PACE_MS);
-  return { bytes, paceMs, flagStates, laneErrors };
-}
-
-/**
- * The decide poller's `run` (main.ts and its test share it). The tick advances
- * BEFORE the await: a failing poll must not repeat the same tick's searches
- * forever, the shadow lane (every 4th tick) would never be reached otherwise
- * (UC-035 BR-011, #2386). `onPolled` renders the result; its return is the pace.
- */
-export function createDecideRun(
-  store: DecideStore,
-  onPolled: (polled: DecidePollResult) => void,
-): (signal?: AbortSignal) => Promise<number> {
-  let tick = 0;
-  return async (signal) => {
-    const polled = await pollDecides(store, tick++, signal);
-    onPolled(polled);
-    return polled.paceMs;
-  };
 }

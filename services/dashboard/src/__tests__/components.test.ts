@@ -6,8 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Controls } from "../components/Controls.js";
 import { GameStatus } from "../components/GameStatus.js";
 import { renderFlagPanel } from "../components/AgentView.js";
-import { flagPanelFrom } from "../agent.js";
-import type { JaegerSpan } from "../jaeger.js";
+import { flagPanelFromState } from "../agent.js";
 
 function mountControls() {
   document.body.innerHTML =
@@ -84,29 +83,15 @@ describe("UC-035: GameStatus", () => {
 });
 
 describe("UC-035: BR-013 flag panel shows the A9 fallback state", () => {
-  const flagSpan = (extra: Record<string, string | boolean>): JaegerSpan =>
-    ({
-      traceID: "t",
-      spanID: "s",
-      operationName: "agent.flag_state",
-      startTime: 1_760_000_000_000_000,
-      tags: Object.entries({ "game.id": "g1", ...extra }).map(([key, value]) => ({
-        key,
-        type: typeof value === "boolean" ? "bool" : "string",
-        value,
-      })),
-      logs: [],
-    }) as unknown as JaegerSpan;
-
   it("UC-035/BR-013 experiments.enabled and llm.eligible_game_kinds are rows of the panel", () => {
-    const on = renderFlagPanel(flagPanelFrom(flagSpan({ "experiments.enabled": true, "llm.eligible_game_kinds": "real,shadow" })));
+    const on = renderFlagPanel(flagPanelFromState({ game_id: "g1", experiments_enabled: true, llm_eligible_game_kinds: ["real", "shadow"] }));
     expect(on).toContain("experiments enabled");
     expect(on).toContain("real,shadow");
-    expect(flagPanelFrom(flagSpan({ "experiments.enabled": false })).experimentsEnabled).toBe(false);
+    expect(flagPanelFromState({ game_id: "g1", experiments_enabled: false }).experimentsEnabled).toBe(false);
   });
 
-  it("UC-035/BR-013 an older agent image shows dashes, not off", () => {
-    const panel = flagPanelFrom(flagSpan({}));
+  it("UC-035/BR-013 a missing field shows dashes, not off", () => {
+    const panel = flagPanelFromState({ game_id: "g1" });
     expect(panel.experimentsEnabled).toBeNull();
     expect(panel.eligibleGameKinds).toBe("");
   });

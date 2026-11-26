@@ -5,17 +5,10 @@ import "math"
 // calibration.go: arm calibration (UC-043 A21, BR-010, #2479, #2498). The
 // prediction Book hands every shadow game's tally of ACTED decision predictions
 // that scored hit or miss to the registry at game end; the registry adds it to an
-// in-memory, per-experiment, per-arm report that experiment.progress shows on its
-// experiment.arm events. Report-only: the tally is never journaled and never
+// in-memory, per-experiment, per-arm report that the progress snapshot shows per
+// arm (ProgressArm). Report-only: the tally is never journaled and never
 // reaches the CohortVerdict, the conclusion or the promotion. It measures the mock
 // archetypes (shadow calibration), not humans.
-
-// Span event attributes of the arm calibration on experiment.arm.
-const (
-	AttrExperimentArmPredictionsScored = "experiment.arm_stats.predictions_scored"
-	AttrExperimentArmPredictionHits    = "experiment.arm_stats.prediction_hits"
-	AttrExperimentArmPredictionBrier   = "experiment.arm_stats.prediction_brier"
-)
 
 // PredictionTally is a count of scored predictions: Scored = hits + misses,
 // BrierSum the sum of (p - y)^2 over them.
@@ -45,7 +38,7 @@ func (t PredictionTally) valid() bool {
 // ConcludeGame folds the game's fitness (foldCalibrationLocked); a game released
 // without a fold (errored, preempted, a stale end) or torn down adds nothing. A
 // game that is not one of ours (a real game, a released or unknown one) and an
-// empty or inconsistent tally are ignored. It emits nothing itself: the game's
+// empty or inconsistent tally are ignored. It records nothing itself: the game's
 // game_concluded snapshot carries the new tally.
 func (r *Registry) NotePredictions(gameID string, scored, hits int, brierSum float64) {
 	t := PredictionTally{Scored: scored, Hits: hits, BrierSum: brierSum}

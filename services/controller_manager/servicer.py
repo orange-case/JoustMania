@@ -238,8 +238,6 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
             await self.feedback_manager.apply_base_color(serial, color, label=stream_label)
             logger.debug(f"[{subscriber_id}] Base color set: serial={serial}, rgb={color}")
 
-        metrics.stream_commands_total.labels(command_type="base_color").inc()
-
     async def _process_game_effect_command(self, cmd, subscriber_id: str) -> None:
         """Process a game_effect command from either stream type."""
         effect_color = None
@@ -259,8 +257,6 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
 
         effect_name = controller_manager_pb2.GameEffect.Name(cmd.effect)
         logger.debug(f"[{subscriber_id}] Game effect: serial={cmd.serial or 'all'}, effect={effect_name}")
-
-        metrics.stream_commands_total.labels(command_type="game_effect").inc()
 
     async def StreamButtonEvents(self, request_iterator, context):
         """
@@ -326,8 +322,6 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
                     try:
                         event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
                         yield event
-                        # Track stream update (Phase 38)
-                        metrics.stream_updates_total.labels(stream_type="button_events").inc()
                     except TimeoutError:  # Phase 34: asyncio exception
                         # No events, continue loop to check cancellation
                         continue
@@ -683,11 +677,6 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
                     update = self._build_gameplay_update(current_filter, subscriber_id)
                     yield update
 
-                    # Track stream update
-                    if update.controllers:
-                        metrics.stream_updates_total.labels(stream_type="gameplay_data").inc()
-                        metrics.streamed_controllers.observe(len(update.controllers))
-
                     # Fixed frame timing: sleep until next scheduled frame time
                     # This accounts for processing time to maintain consistent frame rate
                     next_frame_time += interval
@@ -952,7 +941,6 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
 
             outcome, error = refusal if refusal else ("started", "")
             span.set_attribute("identify.outcome", outcome)
-            metrics.controller_identify_requests_total.labels(outcome=outcome).inc()
             logger.info(f"IdentifyController {serial or '<empty>'}: {outcome}")
 
             return controller_manager_pb2.IdentifyControllerResponse(
@@ -1084,7 +1072,5 @@ def _on_system_flags_changed(event_details) -> None:
         if new_hz != _frequency_override:
             logger.info(f"Streaming frequency override from flagd: {_frequency_override} -> {new_hz} Hz")
             _frequency_override = new_hz
-            metrics.stream_frequency_changes_total.inc()
-            metrics.stream_current_frequency_hz.set(new_hz)
     except Exception as e:
         logger.warning(f"Failed to read frequency flag: {e}")

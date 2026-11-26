@@ -513,7 +513,9 @@ type components struct {
 	// predictions is the shared prediction book (#2479, UC-040 A44, BR-034).
 	predictions     *prediction.Book
 	experimentFlags *experimentFlagLookup
-	loops           *decision.LoopSet
+	// flagBoard holds every partition's effective flag set for GET /experiments/state.
+	flagBoard *decision.FlagBoard
+	loops     *decision.LoopSet
 
 	retro     *decision.RetroCoordinator
 	summaries *gamesummary.Coordinator
@@ -664,6 +666,7 @@ func (c *components) buildDecisionLoops() {
 	})
 	// The Book scores each ended game against its goal profile (#2479, §14.4).
 	c.predictions.SetGoalResolver(c.goalProfile)
+	c.flagBoard = decision.NewFlagBoard()
 	c.loops = decision.NewLoopSet(c.newDecisionLoop)
 }
 
@@ -688,6 +691,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// flags are evaluated every cycle, the kill switch / objectives / permission
 	// gate are applied, and decisions flow through the #724 audit spans.
 	loop := decision.NewLoop(c.agentFlags, c.logger)
+	loop.SetFlagBoard(c.flagBoard)
 	// Throttle for the evaluate log line / agent.disabled span reads
 	// decision.throttle_seconds LIVE from the shared LifecycleHolder (#927): a
 	// config-change to the throttle flag is honored on the next cycle with no
@@ -1129,7 +1133,16 @@ func (c *components) buildPipeline(listenAddr, healthAddr string) *serverCompone
 		// the same journals the experiment loop writes, and surfaces nothing when the
 		// experiments root is empty (a first-run / experiments-disabled agent).
 		dossier: newDossierReader(),
+		state:   &stateReader{spans: agentRecentSpans, flags: c.flagBoard, progress: c.experimentProgress},
 	}
+}
+
+// experimentProgress is the registry's progress snapshots, none while experiments are off.
+func (c *components) experimentProgress() []experiment.ProgressSnapshot {
+	if c.expLoop == nil {
+		return nil
+	}
+	return c.expLoop.registry.Progress()
 }
 
 // newStore returns the multiplexer's per-partition Store factory.

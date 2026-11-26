@@ -8,7 +8,6 @@ import grpc.aio
 
 from lib.types import Sound
 from lib.voice_prompts import GAME_MODE_VOICE
-from services.menu import metrics
 from services.menu.utils.detached import run_detached
 from services.menu.utils.settings import validate_mode_keys
 
@@ -18,13 +17,6 @@ logger = logging.getLogger(__name__)
 # not a stage knob, so a code constant and no flag (C-035). PlaySound returns when the
 # clip is queued, not when it ends, so a healthy audio service answers well inside it.
 AUDIO_RPC_TIMEOUT_SECONDS = 2.0
-
-
-def _count_failure(rpc: str, error: Exception) -> None:
-    """Count a failed audio RPC: ``timeout`` when its deadline passed, else ``error``."""
-    timed_out = isinstance(error, grpc.aio.AioRpcError) and error.code() == grpc.StatusCode.DEADLINE_EXCEEDED
-    timed_out = timed_out or isinstance(error, TimeoutError)
-    metrics.audio_rpc_failures_total.labels(rpc=rpc, reason="timeout" if timed_out else "error").inc()
 
 
 # Default per-channel volumes (F7, #766). These double as the flagd user-domain
@@ -121,7 +113,6 @@ class AudioHelper:
             )
             logger.debug(f"Played sound: {sound_name}")
         except Exception as e:
-            _count_failure("PlaySound", e)
             logger.warning(f"Could not play sound {sound}: {e}")
 
     async def play_voice(self, voice: str | Sound, volume: float | None = None) -> None:
@@ -185,7 +176,6 @@ class AudioHelper:
                 logger.warning(f"Failed to start lobby music: {response.error}")
 
         except Exception as e:
-            _count_failure(rpc, e)
             logger.warning(f"Could not start lobby music ({rpc}): {e}")
 
     async def stop_lobby_music(self) -> None:
@@ -206,5 +196,4 @@ class AudioHelper:
             logger.info("Lobby music stopped")
 
         except Exception as e:
-            _count_failure("StopMusic", e)
             logger.warning(f"Could not stop lobby music: {e}")

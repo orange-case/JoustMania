@@ -13,10 +13,10 @@ sent in the shape the ``observability/telemetry.moment_shape`` flag chose for th
   ``log_level`` flag never drops it.
 
 The shapes serve the booth backends only (telemetry.md appendix A): the agent reads deaths
-from ``game_player_elimination_order``, whatever the shape (UC-041 BR-009). With
-``observability/telemetry.agent_log_events`` on for the game (#2722, UC-100 BR-012), the
-agent gets its own lifecycle log records on the same logger (``emit_agent_event``), each
-marked ``orangecase.audience`` = ``agent`` so the collector keeps them from the gateway.
+from ``game_player_elimination_order``, whatever the shape (UC-041 BR-009). In every game
+(#2722, #2783, UC-100 BR-012) the agent gets its own lifecycle log records on the same logger
+(``emit_agent_event``), each marked ``orangecase.audience`` = ``agent`` so the collector keeps
+them from the gateway.
 
 A shape that needs the log channel falls back to ``span_event`` in a process without
 OTLP logging (UC-100 A1). Every function here only enqueues (span processor, log
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
+import threading
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -49,11 +50,12 @@ MOMENT_SHAPES = frozenset({MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN, MOMENT_SH
 MOMENT_SHAPE_ATTR = "telemetry.moment_shape"
 MOMENT_ID_ATTR = "moment.id"
 
-AGENT_LOG_EVENTS_FLAG = "telemetry.agent_log_events"
-AGENT_LOG_EVENTS_ATTR = "telemetry.agent_log_events"
 AUDIENCE_ATTR = "orangecase.audience"
 AUDIENCE_AGENT = "agent"
 _LOGGER_NAME = "joustmania.moments"
+# The agent takes the game's trace ids from game.start / game.phase.start (UC-041 BR-004): send them
+# without the batch delay.
+FLUSH_TIMEOUT_MS = 2000
 
 # (provider, logger) for the last provider seen: get_logger once, not per moment.
 _logger_cache: tuple[Any, Any] | None = None
@@ -100,18 +102,6 @@ def read_moment_shape() -> str:
     from lib.feature_flags import read_string_flag  # lazy: lib.feature_flags pulls in the metrics libs
 
     return effective_moment_shape(read_string_flag("observability", MOMENT_SHAPE_FLAG, MOMENT_SHAPE_SPAN_EVENT))
-
-
-def read_agent_log_events() -> bool:
-    """Read ``telemetry.agent_log_events`` once (per game): whether the agent gets its own log events.
-
-    Fail-closed: anything but ``True`` is off, and so is a process without OTLP logging
-    (it could send none of them).
-    """
-    from lib.feature_flags import read_bool_flag  # lazy: lib.feature_flags pulls in the metrics libs
-
-    on = read_bool_flag("observability", AGENT_LOG_EVENTS_FLAG, False) is True
-    return on and otel_logging.get_logger_provider() is not None
 
 
 def moment_id(game_id: str, serial: str, sequence: int) -> str:
@@ -201,9 +191,10 @@ def _emit(moment_logger, name: str, span: trace.Span, attrs: Mapping[str, Any], 
     return True
 
 
-def emit_agent_event(name: str, *, span: trace.Span, attributes: Mapping[str, Any]) -> bool:
+def emit_agent_event(name: str, *, span: trace.Span, attributes: Mapping[str, Any], flush: bool = False) -> bool:
     """Emit log event ``name`` for the agent only, in ``span``'s context; never raises.
 
+    ``flush``: export it now instead of with the next batch (off the caller's thread).
     False when nothing was sent (no OTLP logging in this process, or a failed emit).
     """
     try:
@@ -213,4 +204,24 @@ def emit_agent_event(name: str, *, span: trace.Span, attributes: Mapping[str, An
         return False
     if moment_logger is None:
         return False
-    return _emit(moment_logger, name, span, {**attributes, AUDIENCE_ATTR: AUDIENCE_AGENT}, None)
+    sent = _emit(moment_logger, name, span, {**attributes, AUDIENCE_ATTR: AUDIENCE_AGENT}, None)
+    if sent and flush:
+        _flush_in_background(name)
+    return sent
+
+
+def _flush_in_background(name: str) -> None:
+    """Force-flush the log provider on a daemon thread; never blocks or raises."""
+
+    def run() -> None:
+        try:
+            provider = otel_logging.get_logger_provider()
+            if provider is not None:
+                provider.force_flush(FLUSH_TIMEOUT_MS)
+        except Exception as error:  # noqa: BLE001 - a flush never reaches the game
+            _report_failure_once(name, error)
+
+    try:
+        threading.Thread(target=run, name="agent-log-flush", daemon=True).start()
+    except Exception as error:  # noqa: BLE001
+        _report_failure_once(name, error)

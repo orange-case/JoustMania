@@ -809,7 +809,7 @@ coordinator applies every event with a sequence number above the last one it app
 game and flag, in order, exactly once; the last applied `(epoch, seq)` advances before the
 events are dispatched; a read that returns an evaluation error applies nothing; only a new,
 non-empty epoch (a flag-service restart) restarts the count; more than 16 events between two
-reads is logged and counted (`game_intervention_event_gaps_total`)
+reads is logged
 ([UC-040 BR-006](../use_cases/UC-040.md#br-006-a-one-shot-intervention-fires-once-only-in-its-game), FR-137).
 `end_game` force-ends only the session whose list holds it (`_handle_end_game` →
 `end_game_fn(game_id, reason)` = `GameCoordinatorServicer._force_end_session`, the same path as
@@ -1068,8 +1068,8 @@ nothing on, the game is released and re-run) to the registry, which holds them f
 only at the game's fitness fold (`ConcludeGame`); a game released without a fold (errored, preempted) or torn down adds nothing
 (`services/agent/prediction/book.go:Book.SetArmTallySink`, `services/agent/experiment/calibration.go:Registry.NotePredictions`,
 wired by `services/agent/gameend.go:wireArmCalibration`). The Book runs before the experiment hook in the game-end chain, so
-the game is still bound; a real game, a released or unknown game and an inconsistent tally are ignored. `experiment.progress`
-shows it on each `experiment.arm` event ([telemetry.md](telemetry.md)); a restart or rehydrate starts it empty.
+the game is still bound; a real game, a released or unknown game and an inconsistent tally are ignored. The experiment's
+progress snapshot shows it per arm (`GET /experiments/state`, [services.md §5](services.md#5-http-endpoints), #2809); a restart or rehydrate starts it empty.
 
 ### 14.4 Goal profiles
 

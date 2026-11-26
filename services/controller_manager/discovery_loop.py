@@ -433,23 +433,16 @@ class DiscoveryLoop:
     async def _discovery_step(self) -> None:
         """Check for new / lost controllers (1 Hz)."""
         # Discovery involves gRPC calls + USB enumeration in a worker thread.
-        with metrics.discovery_check_duration_seconds.time():
-            await self._check_for_new_controllers()
-            metrics.discovery_checks_total.inc()
+        await self._check_for_new_controllers()
 
     async def _led_step(self) -> None:
         """Flush LED colour / rumble changes and keep-alives (20 Hz)."""
         # Run in thread pool since update_all_leds() has blocking USB calls
-        updated_count = await asyncio.to_thread(self.backend.update_all_leds)
-        # Track LED batch update efficiency
-        metrics.led_batch_updates_total.inc()
-        metrics.led_controllers_updated_per_batch.observe(updated_count)
+        await asyncio.to_thread(self.backend.update_all_leds)
 
     async def _battery_step(self) -> None:
         """Refresh battery metrics (every 30 s; display/warnings live in the menu, Phase 70)."""
-        with metrics.battery_check_duration_seconds.time():
-            self.monitoring.check_battery_levels(self.tracked_controllers)
-            metrics.battery_checks_total.inc()
+        self.monitoring.check_battery_levels(self.tracked_controllers)
         self.monitoring.last_battery_check = time.time()
 
     async def _health_step(self) -> None:
@@ -546,8 +539,6 @@ class DiscoveryLoop:
         self._gap_window.forget(serial)
         # Clear per-serial health metric labels so disconnected
         # controllers don't linger in dashboards.
-        metrics.controller_bluetooth_dropped_events_ratio.remove(serial)
-        metrics.controller_bluetooth_movement_update_hz.remove(serial)
         _remove_quality_series(serial)
         # #1295: an untracked controller no longer exports its name.
         metrics.remove_controller_info(serial, name)
@@ -691,8 +682,6 @@ class DiscoveryLoop:
             # Post-PR #677, get_controller_state() is async but does zero I/O
             # (just a dict read from adapter._latest_data), so gather() overhead
             # (N coroutine objects + list + internal machinery) is pure waste.
-            start_time = time.time()
-
             results = []
             for serial in all_serials:
                 try:
@@ -704,11 +693,6 @@ class DiscoveryLoop:
             # lateness beyond one poll interval is the loop's own stall.
             pickup_mono = time.monotonic()
             self._note_batch_pickup(pickup_mono)
-
-            # Record metrics
-            poll_duration = time.time() - start_time
-            metrics.poll_batch_duration_seconds.observe(poll_duration)
-            metrics.poll_batch_size.observe(len(all_serials))
 
             # Process all results
             for serial, state in zip(all_serials, results, strict=False):
@@ -841,9 +825,6 @@ class DiscoveryLoop:
             gauges = record.accel_gauges
             if gauges:
                 gauges["magnitude"].set(magnitude)
-                gauges["x"].set(ax)
-                gauges["y"].set(ay)
-                gauges["z"].set(az)
 
             prev_accel = record.previous_accel
             if prev_accel and not activity_detected:
@@ -1030,16 +1011,6 @@ class DiscoveryLoop:
                     sample["bluetooth.connection_quality"] = quality.quality
                 span.add_event("bluetooth_controller_sample", sample)
 
-        # --- Metrics ----------------------------------------------------------
-        # Window-max gap in SECONDS (repo convention for *_seconds histograms).
-        metrics.controller_bluetooth_event_gap_seconds.observe(signals["event_gap_ms"] / 1000.0)
-        metrics.controller_bluetooth_dropped_events_ratio_window.set(signals["dropped_events_pct"])
-        for serial, s in signals["per_serial"].items():
-            metrics.controller_bluetooth_dropped_events_ratio.labels(serial=serial).set(s["dropped_pct"])
-            metrics.controller_bluetooth_movement_update_hz.labels(serial=serial).set(s["update_hz"])
-            # Populate the previously-unset generic update-rate gauge too.
-            metrics.controller_state_update_hz.labels(serial=serial).set(s["update_hz"])
-
         self._reset_health_window(now)
 
     def drain_health_counters(self, serial: str) -> tuple[int, int, int]:
@@ -1157,17 +1128,12 @@ class DiscoveryLoop:
 
             logger.info(f"Started tracking controller {serial} ({name})")
 
-            # Cache metric label children for this serial (Issue #542)
-            # Avoids 5× _validate_labels + _make_key per poll cycle per controller
+            # Cache the label child per serial: no label lookup per poll (#542)
             self._record(serial).accel_gauges = {
                 "magnitude": metrics.controller_accel_magnitude.labels(serial=serial),
-                "x": metrics.controller_accel_x.labels(serial=serial),
-                "y": metrics.controller_accel_y.labels(serial=serial),
-                "z": metrics.controller_accel_z.labels(serial=serial),
             }
 
             # Update metrics (Phase 38)
-            metrics.active_controllers.inc()
             metrics.controller_connected.labels(serial=serial).set(1)
             metrics.controller_battery_level.labels(serial=serial).set(battery)
             metrics.controller_battery_pct.labels(serial=serial).set(metrics.battery_to_pct(battery))

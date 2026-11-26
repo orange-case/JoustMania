@@ -23,9 +23,7 @@ def mock_tracer():
 @pytest.fixture
 def mock_metrics():
     """Create mock metrics."""
-    metrics = MagicMock()
-    metrics.stream_events_published_total.labels.return_value.inc = MagicMock()
-    return metrics
+    return MagicMock()
 
 
 @pytest.fixture
@@ -95,14 +93,6 @@ class TestEventPublisherPublish:
 
         assert not queue1.empty()
         assert not queue2.empty()
-
-    @pytest.mark.asyncio
-    async def test_publish_increments_metric(self, publisher, mock_metrics):
-        """Publishing should increment the metric counter."""
-        await publisher.subscribe("sub1")
-        await publisher.publish("test_event", {})
-
-        mock_metrics.stream_events_published_total.labels.assert_called_with(event_type="test_event")
 
     @pytest.mark.asyncio
     async def test_publish_creates_span(self, publisher, mock_tracer):

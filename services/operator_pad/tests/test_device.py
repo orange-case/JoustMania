@@ -111,12 +111,10 @@ async def test_ebusy_grab_is_retried_until_free():
 
 
 @pytest.mark.uc("UC-015", flow="A4")
-async def test_ebusy_after_the_retries_gives_up_and_counts():
+async def test_ebusy_after_the_retries_gives_up():
     dev = FakeDevice("/dev/input/event3", grab_errors=[errno.EBUSY] * 10)
-    with patch.object(device_module.metrics, "grab_failures_total") as counter:
-        got = await grab_node(FakeBackend({dev.path: dev}), dev.path, no_sleep, retries=2)
+    got = await grab_node(FakeBackend({dev.path: dev}), dev.path, no_sleep, retries=2)
     assert got is None and dev.closed and dev.grab_calls == 3
-    counter.labels.assert_called_once_with(reason="ebusy")
 
 
 class FakeClock:

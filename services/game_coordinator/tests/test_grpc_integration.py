@@ -1245,13 +1245,11 @@ class TestGameplayStreamReopen:
             real_update_ema(player, accel_mag, weight)
 
         game._update_ema = update_ema
-        with patch("services.game_coordinator.games.base.metrics.gameplay_stream_reconnects_total") as reconnects:
-            await asyncio.wait_for(game._warmup_ema(), timeout=5)
+        await asyncio.wait_for(game._warmup_ema(), timeout=5)
 
         assert frame_server.calls == 2
         assert not game.gameplay_stream.done(), "the warm-up left a dead call for the game loop"
         assert primed, "the warm-up primed no EMA after the reopen"
-        assert reconnects.labels.return_value.inc.call_count == 1
 
     @pytest.mark.uc("UC-030", br=["BR-006"])
     @pytest.mark.asyncio
@@ -1280,13 +1278,11 @@ class TestGameplayStreamReopen:
         game._RECONNECT_BACKOFF_S = 0.01
         processed = self._stop_after_frames(game)
 
-        with patch("services.game_coordinator.games.base.metrics.gameplay_stream_reconnects_total") as reconnects:
-            await asyncio.wait_for(game._game_loop(), timeout=5)
+        await asyncio.wait_for(game._game_loop(), timeout=5)
 
         assert frame_server.calls == 2
         assert game.gameplay_stream is not dead_call
         assert len(processed) >= 3, "the game loop got no frame from the reconnected call"
-        assert reconnects.labels.return_value.inc.call_count == 1, "a reconnect was not counted exactly once"
 
     @pytest.mark.uc("UC-030", br=["BR-006"])
     @pytest.mark.parametrize(
@@ -1357,12 +1353,10 @@ class TestGameplayStreamReopen:
         game._RECONNECT_BACKOFF_S = 0.3
         asyncio.get_running_loop().call_later(0.1, game.force_end, "test")
 
-        with patch("services.game_coordinator.games.base.metrics.gameplay_stream_reconnects_total") as reconnects:
-            await asyncio.wait_for(game._game_loop(), timeout=5)
+        await asyncio.wait_for(game._game_loop(), timeout=5)
 
         assert opens == [], "a force-ended game opened a new call after the backoff"
         assert frame_server.calls == 1
-        assert reconnects.labels.return_value.inc.call_count == 0, "a reopen that never happened was counted"
 
     @pytest.mark.uc("UC-030", br=["BR-003", "BR-006"])
     @pytest.mark.asyncio
@@ -1448,12 +1442,10 @@ class TestGameplayStreamReopen:
         game._RECONNECT_HEALTHY_FRAMES = 3  # each reopened stream delivers exactly the quota
         processed = self._stop_after_frames(game, count=5 * 3 + 3)
 
-        with patch("services.game_coordinator.games.base.metrics.gameplay_stream_reconnects_total") as reconnects:
-            loop_error = await self._run_loop(game)
+        loop_error = await self._run_loop(game)
 
         assert loop_error is None, f"the game ended although each failure followed a healthy stream: {loop_error!r}"
         assert frame_server.calls == 6, "five failures with healthy streams in between ended the game"
-        assert reconnects.labels.return_value.inc.call_count == 5
         assert len(processed) == 5 * 3 + 3, "the game loop did not play the healthy call after the fifth reconnect"
 
     @pytest.mark.uc("UC-030", br=["BR-006"])

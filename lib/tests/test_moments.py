@@ -5,6 +5,7 @@ so each shape's record, parent and trace context can be asserted.
 """
 
 import logging
+import threading
 
 import pytest
 from opentelemetry._logs import SeverityNumber
@@ -376,30 +377,6 @@ def test_emit_agent_event_without_otlp_logging_or_with_a_broken_channel_never_ra
     assert capsys.readouterr().err.count("moment could not be recorded") == 1
 
 
-@pytest.mark.uc("UC-100", br=["BR-012"])
-@pytest.mark.parametrize(("value", "expected"), [(True, True), (False, False), ("true", False), (None, False)])
-@pytest.mark.usefixtures("logs")
-def test_read_agent_log_events_reads_the_observability_flag(monkeypatch, value, expected):
-    calls = []
-
-    def _read(domain, key, default, game_id=None):  # noqa: ARG001
-        calls.append((domain, key, default))
-        return value
-
-    monkeypatch.setattr("lib.feature_flags.read_bool_flag", _read)
-
-    assert moments.read_agent_log_events() is expected
-    assert calls == [("observability", "telemetry.agent_log_events", False)]
-
-
-@pytest.mark.uc("UC-100", br=["BR-012"])
-def test_read_agent_log_events_is_off_without_otlp_logging(monkeypatch):
-    monkeypatch.setattr(otel_logging, "_logger_provider", None)
-    monkeypatch.setattr("lib.feature_flags.read_bool_flag", lambda *a, **k: True)  # noqa: ARG005
-
-    assert moments.read_agent_log_events() is False
-
-
 @pytest.mark.uc("UC-100", br=["BR-012"], cond=["Post-F-1"])
 @pytest.mark.usefixtures("logs")
 def test_emit_agent_event_never_raises_when_getting_the_logger_fails(spans, monkeypatch, capsys):
@@ -413,3 +390,55 @@ def test_emit_agent_event_never_raises_when_getting_the_logger_fails(spans, monk
     with tracer.start_as_current_span("game") as root:
         assert moments.emit_agent_event("game.end", span=root, attributes={}) is False
     assert "moment could not be recorded" in capsys.readouterr().err
+
+
+class _FlushSpy:
+    def __init__(self, monkeypatch, provider, error=None):
+        self.calls = threading.Event()
+        self.error = error
+
+        def force_flush(timeout_millis=30000):  # noqa: ARG001
+            self.calls.set()
+            if self.error is not None:
+                raise self.error
+            return True
+
+        monkeypatch.setattr(provider, "force_flush", force_flush)
+
+
+@pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
+@pytest.mark.usefixtures("logs")
+def test_emit_agent_event_with_flush_flushes_the_log_provider(spans, monkeypatch):
+    spy = _FlushSpy(monkeypatch, otel_logging.get_logger_provider())
+    tracer, _ = spans
+    with tracer.start_as_current_span("game") as root:
+        assert moments.emit_agent_event("game.start", span=root, attributes={}, flush=True) is True
+    assert spy.calls.wait(2.0)
+
+
+@pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
+@pytest.mark.usefixtures("logs")
+def test_no_flush_without_the_flag_or_for_a_moment(spans, monkeypatch):
+    spy = _FlushSpy(monkeypatch, otel_logging.get_logger_provider())
+    tracer, _ = spans
+    with tracer.start_as_current_span("game") as root:
+        moments.emit_agent_event("game.end", span=root, attributes={})
+        record_moment("player_death", shape=MOMENT_SHAPE_LOG_EVENT, parent_span=root, attributes=ATTRS)
+    assert not spy.calls.wait(0.2)
+
+
+@pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
+@pytest.mark.usefixtures("logs")
+def test_a_failing_flush_never_raises(spans, monkeypatch, capsys):
+    monkeypatch.setattr(moments, "_failure_reported", False)
+    spy = _FlushSpy(monkeypatch, otel_logging.get_logger_provider(), error=RuntimeError("exporter gone"))
+    tracer, _ = spans
+    with tracer.start_as_current_span("game") as root:
+        assert moments.emit_agent_event("game.phase.start", span=root, attributes={}, flush=True) is True
+    assert spy.calls.wait(2.0)
+    for _ in range(50):
+        if "moment could not be recorded" in capsys.readouterr().err:
+            break
+        threading.Event().wait(0.02)
+    else:
+        pytest.fail("the flush failure was not reported")
