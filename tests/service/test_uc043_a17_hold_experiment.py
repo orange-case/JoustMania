@@ -51,11 +51,8 @@ SERVICE_COMPOSITION = replace(
 
 # Agent overlays (flags.md section 13.2): one pair, bounded games.
 TUNING = {
-    "verdict_min_n": 1,
     "verdict_min_pairs": 1,
     "experiment_tick_seconds": 3,
-    "experiment_max_games": 4,
-    "experiment_dynamic_target_n": 1,
     "experiment.max_game_seconds": 60,
 }
 SERVICE_COMPOSITION = replace(

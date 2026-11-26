@@ -24,7 +24,6 @@ func seedJournal(t *testing.T, root, id string, concluded bool) string {
 		FlagKey:           "death_grace_period_seconds",
 		ExperimentalValue: 2.5,
 		Objective:         "endurance",
-		TargetNPerArm:     2,
 		Arms:              []string{journal.ArmExperimental, journal.ArmControl},
 	}
 	j, err := journal.Create(root, intent)

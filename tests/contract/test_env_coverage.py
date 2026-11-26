@@ -70,10 +70,6 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     # ---- agent: tuning knobs with a built-in fallback ----
     (
         "agent",
-        "AGENT_EXPERIMENT_MAX_GAMES",
-    ): "operator ceiling (C-034, #1810): unset = no ceiling, the experiment_max_games flag governs",
-    (
-        "agent",
         "AGENT_EXPERIMENT_DIR",
     ): "falls back to /var/lib/joustmania/agent/experiments, the agent-experiments volume mount",
     (

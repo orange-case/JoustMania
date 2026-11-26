@@ -3,6 +3,7 @@ package experiment
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/joustmania/agent/experiment/journal"
@@ -103,7 +104,7 @@ func TestProgress_Fields(t *testing.T) {
 	in := sampleIntent()
 	expCtx, _ := r.ExperimentSpanContext(id)
 	if s.ID != id || s.Status != string(StatusRunning) || s.FlagKey != in.FlagKey || s.Objective != in.Objective ||
-		s.Thesis != in.Hypothesis || s.TargetN != r.entries[id].journal.Intent().TargetNPerArm {
+		s.Thesis != in.Hypothesis {
 		t.Errorf("snapshot = %+v, want the intent's fields", s)
 	}
 	if fmt.Sprint(s.ExperimentalValue) != "0.5" {
@@ -372,19 +373,45 @@ func TestProgress_InFlightExcludesSpawnReservations(t *testing.T) {
 	t.Fatal("no probe snapshot")
 }
 
+// finalOnly records no interim verdict; from its at-th call on it returns a final
+// inconclusive.
+type finalOnly struct {
+	mu        sync.Mutex
+	calls, at int
+}
+
+func (f *finalOnly) Evaluate(journal.Summary) (journal.Verdict, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.calls >= f.at {
+		return journal.Verdict{Outcome: OutcomeInconclusive, Reason: "final (test)"}, true
+	}
+	return journal.Verdict{}, false
+}
+
 // The concluded snapshot carries the FINAL verdict (#2042), not the last interim
-// one: a give-up conclusion with no interim verdict still reports the outcome.
+// one: an exhaustion conclusion with no interim verdict still reports the outcome.
 // UC: UC-035 4
 func TestProgress_ConcludedSnapshotCarriesFinalVerdict(t *testing.T) {
-	spawner := &fakeSpawner{}
+	spawner := &patternSpawner{}
 	r, log := progressRegistry(t, RegistryConfig{
-		Spawner: spawner, Verdict: fakeVerdict{concludeAtN: 1000},
-		Targeting: &fakeTargeting{}, MaxShadowGames: 2, MaxGamesPerExperiment: 1,
+		Spawner: spawner, Verdict: &finalOnly{at: 3}, Targeting: &fakeTargeting{},
+		MaxShadowGames: 2, EffectiveConcurrency: 1,
+		Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "only")}},
 	})
 	startedExperiment(t, r)
-	r.AllocateAndSpawn(context.Background())
-	if _, err := r.ConcludeGame(context.Background(), spawner.calls[0].gameID, 0.4, 60); err != nil {
-		t.Fatal(err)
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		if n := r.AllocateAndSpawn(ctx); n != 1 {
+			t.Fatalf("game %d: spawned %d, want 1", i+1, n)
+		}
+		spawner.fakeSpawner.mu.Lock()
+		g := spawner.fakeSpawner.calls[len(spawner.fakeSpawner.calls)-1].gameID
+		spawner.fakeSpawner.mu.Unlock()
+		if _, err := r.ConcludeGame(ctx, g, 0.4, 60); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var gameConcluded, concluded *ProgressSnapshot
 	for i := range *log {

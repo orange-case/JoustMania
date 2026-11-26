@@ -158,11 +158,10 @@ type RetroCoordinator struct {
 
 	// suggestionSink forwards each DECODED retro suggestion (#1184) to a downstream
 	// consumer — in production the notes the M7-4 proposer prompt reads (UC-042 A3). It is
-	// PURELY additive: the suggestion is still stamped as a span event regardless. nil
-	// (the default / tests / proposer-disabled) means the suggestion is recorded-only,
-	// byte-identical to pre-#1184. The sink itself decides whether to act on the
-	// suggestion (the proposer is gated default-OFF), so wiring the sink is safe even
-	// when the proposer opt-in is off. Injected via SetSuggestionSink; not safe to call
+	// PURELY additive: the suggestion is still stamped as a span event regardless.
+	// main.go always sets it; nil (tests) means the suggestion is recorded-only. A
+	// recorded suggestion only reaches a model when the proposer gate lets a
+	// proposal run. Injected via SetSuggestionSink; not safe to call
 	// concurrently with OnGameEnd.
 	suggestionSink func(llm.RetroSuggestion)
 

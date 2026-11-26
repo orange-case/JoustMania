@@ -25,8 +25,8 @@ var updatePromptGolden = flag.Bool("update-prompt-golden", false, "rewrite decid
 
 // The fingerprints (llm.prompt.system_sha256) of the two system prompts.
 const (
-	systemSHA     = "7857b7fc3905a60a"
-	systemGoalSHA = "0bd4c9c52535c55b"
+	systemSHA     = "88c134b1ec07944d"
+	systemGoalSHA = "a35ca4f233ae58cf"
 )
 
 // bannedPhrases are purpose and verdict phrases the lever text must not carry

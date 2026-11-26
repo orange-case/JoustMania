@@ -437,8 +437,9 @@ func TestSegmentOverrideIsUnhealthy(t *testing.T) {
 // none, an admin setting too, with its state file updated); a game value
 // written offline is live game state and is still sent.
 func TestReconnectDiscardsOfflineStackChanges(t *testing.T) {
+	graceKillSwitch(t)
 	interval := flagsmith.Key{Set: "agent", Flag: "decision.min_interval_ms", Scope: flagsmith.ScopeStack}
-	maxGames := flagsmith.Key{Set: "agent", Flag: "experiment_max_games", Scope: flagsmith.ScopeStack}
+	grace := flagsmith.Key{Set: "agent", Flag: "experiment_completed_grace_seconds", Scope: flagsmith.ScopeStack}
 	backend := flagsmith.Key{Set: "agent", Flag: "decision.backend", Scope: flagsmith.ScopeStack}
 	gameKey := flagsmith.Key{Set: "interventions", Flag: "global_sensitivity_override", Scope: "game:g7"}
 	h := newHarness(t, harnessOpts{before: func(h *harness) {
@@ -467,7 +468,7 @@ func TestReconnectDiscardsOfflineStackChanges(t *testing.T) {
 	h.waitFor("link offline", func() bool { return h.link.Mode() == flagsmith.ModeOffline })
 	for _, w := range []state.WriteRequest{
 		{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("900"), Writer: "operator"},
-		{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("3"), Writer: "operator"},
+		{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("3"), Writer: "operator"},
 		{Set: "agent", Flag: "decision.backend", Variant: "claude", Writer: "operator", Persist: true},
 		{Set: "interventions", Flag: "global_sensitivity_override", Scope: state.Scope{GameID: "g7"}, Value: json.RawMessage("3"), Writer: "agent"},
 	} {
@@ -475,7 +476,7 @@ func TestReconnectDiscardsOfflineStackChanges(t *testing.T) {
 			t.Fatal(ferr)
 		}
 	}
-	for _, k := range []flagsmith.Key{interval, maxGames, backend, gameKey} {
+	for _, k := range []flagsmith.Key{interval, grace, backend, gameKey} {
 		h.waitFor("the offline write queued", func() bool { return h.link.Links().HasPending(k) })
 	}
 	h.fake.Fail(0)
@@ -484,13 +485,13 @@ func TestReconnectDiscardsOfflineStackChanges(t *testing.T) {
 	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
 		t.Fatalf("UC-054/A2 decision.min_interval_ms = %+v after the reconnect, want Flagsmith's 700 (the offline 900 discarded)", v)
 	}
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); v.Present {
-		t.Fatalf("UC-054/A2 experiment_max_games = %+v after the reconnect, want the baseline (Flagsmith holds no value)", v)
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); v.Present {
+		t.Fatalf("UC-054/A2 experiment_completed_grace_seconds = %+v after the reconnect, want the baseline (Flagsmith holds no value)", v)
 	}
 	if v, persisted := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Present || persisted {
 		t.Fatalf("UC-054/A2 decision.backend = %+v persisted %v, want the offline admin change dropped: the built-in default, the state file updated", v, persisted)
 	}
-	for _, k := range []flagsmith.Key{interval, maxGames, backend} {
+	for _, k := range []flagsmith.Key{interval, grace, backend} {
 		if h.link.Links().HasPending(k) {
 			t.Fatalf("UC-054/A2 %v still queued for Flagsmith after the reconnect, want discarded", k)
 		}
