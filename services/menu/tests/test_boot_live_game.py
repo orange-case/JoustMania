@@ -10,6 +10,7 @@ from lib.types import Games
 from proto import game_coordinator_pb2, menu_pb2
 from services.menu import game_lifecycle
 from services.menu.settings_ops import GAME_ACTIVE
+from services.menu.tests.test_menu_status import in_process_client
 
 DOWN = "down"
 
@@ -200,9 +201,9 @@ async def test_unreachable_coordinator_fails_closed_until_it_answers(real_servic
 @pytest.mark.uc("UC-010", flow="A16", steps=[4, 5], br=["BR-003"])
 async def test_adopted_game_restores_the_persisted_selection(real_servicer, patched):
     """The lobby after an adopted game shows, and the next start uses, the persisted mode (UC-011)."""
-    real_servicer.user_prefs_client.get_string_value.side_effect = lambda key, default, *_a, **_k: (
-        "Tournament" if key == "current_game" else default
-    )
+    real_servicer.user_prefs_client = in_process_client({"current_game": ("Tournament", "Tournament")})
+    real_servicer.game_settings_client = in_process_client({})
+    real_servicer.agent_settings_client = in_process_client({})
     patched.answers = [("RUNNING", "g1")]
 
     assert await real_servicer.boot_follows_live_game() is True
@@ -214,7 +215,8 @@ async def test_adopted_game_restores_the_persisted_selection(real_servicer, patc
     patched.end.set()
     await _lifecycle_end(real_servicer)
     assert real_servicer.current_selection == Games.Tournament
-    assert real_servicer._menu_status().selection == "Tournament"
+    status = await real_servicer.GetMenuStatus(menu_pb2.GetMenuStatusRequest(), None)
+    assert status.selection == "Tournament"
 
 
 @pytest.mark.asyncio
