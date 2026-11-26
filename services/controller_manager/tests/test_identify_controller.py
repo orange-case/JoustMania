@@ -728,7 +728,9 @@ class TestUC002GameClaimEndsTheLowBatteryBlink:
 
         config = controller_manager_pb2.GameplayStreamConfig(
             update_frequency_hz=60,
-            colors=[controller_manager_pb2.ControllerColorConfig(serial=SERIAL, color=controller_manager_pb2.RGB(g=255))],
+            colors=[
+                controller_manager_pb2.ControllerColorConfig(serial=SERIAL, color=controller_manager_pb2.RGB(g=255))
+            ],
         )
         with patch("services.controller_manager.feedback_manager.asyncio.sleep", blink_frames_wait):
             await fm.handle_game_effect(SERIAL, controller_manager_pb2.GAME_EFFECT_LOW_BATTERY)
