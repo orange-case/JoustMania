@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/joustmania/agent/experiment"
+	"github.com/joustmania/agent/flagservice"
 	"github.com/joustmania/agent/promote"
 )
 
@@ -51,4 +56,55 @@ func TestUC043_A23_BuildPromoterSetsTheBarFromEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+// UC: UC-043 A1
+func TestUC043_A1_BuildPromoterKillSwitchWithoutValidatedObjectives(t *testing.T) {
+	t.Run("UC-043/A1 with no validated objective the kill switch still reverts a promotion overlay", func(t *testing.T) {
+		const flag = "death_grace_period_seconds"
+		var mu sync.Mutex
+		overlay := true
+		var deletes []string
+		view := func() flagservice.FlagView {
+			v := flagservice.FlagView{Flag: flag, EffectiveDefault: "default"}
+			if overlay {
+				v.RealOverlay = &flagservice.ValueView{Variant: "long", Value: json.RawMessage("3"), Writer: "promotion"}
+			}
+			return v
+		}
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /game", func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			_ = json.NewEncoder(w).Encode(flagservice.SetView{FlagSet: "game", Flags: []flagservice.FlagView{view()}})
+		})
+		mux.HandleFunc("GET /game/{flag}", func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			_ = json.NewEncoder(w).Encode(view())
+		})
+		mux.HandleFunc("DELETE /game/{flag}", func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			deletes = append(deletes, r.PathValue("flag")+"?"+r.URL.RawQuery)
+			overlay = false
+			w.WriteHeader(http.StatusNoContent)
+		})
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+		t.Setenv("FLAG_SERVICE_URL", srv.URL)
+		t.Setenv("AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES", "")
+		t.Setenv("SERVICE_VERSION", "0.14.0")
+
+		got := buildPromoter(testLogger()).RevertOnKillSwitch(context.Background())
+
+		if len(got) != 1 || got[0].FlagKey != flag || got[0].Outcome != promote.OutcomeReverted || got[0].Reason != promote.KillSwitchReason {
+			t.Fatalf("kill switch = %+v, want one reverted / kill_switch for %s", got, flag)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if overlay || len(deletes) != 1 || !strings.Contains(deletes[0], "if_writer=promotion") {
+			t.Fatalf("overlay present=%v, deletes=%v, want one if_writer=promotion delete", overlay, deletes)
+		}
+	})
 }
