@@ -49,6 +49,9 @@ func isFalse(fv FSValue) bool {
 	return false
 }
 
+// isStopKey: k is agent/enabled.
+func isStopKey(k Key) bool { return k.Set+"/"+k.Flag == stopFlag }
+
 // stopValue is the `off` of agent/enabled; ok is false for every other flag.
 func stopValue(pol *registry.Policy, b *baseline.Flag) (Value, bool) {
 	if pol.Set+"/"+pol.Key != stopFlag || b == nil {

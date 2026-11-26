@@ -83,6 +83,10 @@ func (s *startup) writeReferences(ctx context.Context, jobs []referenceJob) erro
 		shown[fs.Feature.Name] = fs
 	}
 	for _, j := range jobs {
+		if isStopKey(j.k) && !j.created {
+			// An existing agent/enabled switched off is a stop: never written.
+			continue
+		}
 		fv, ok := s.referenceOf(j.k)
 		if !ok {
 			continue
@@ -350,7 +354,8 @@ func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue
 // patchReference sends the reference write once (adminPacer.once): its
 // retries are writeReference's, each after a re-read.
 func (s *startup) patchReference(ctx context.Context, j referenceJob, fv FSValue) error {
-	return s.pace.once(ctx, http.MethodPatch, s.l.futurePath(j.featureID), futureBodyOf(fv, false, s.l.options(j.k.Flag)), nil)
+	// A new agent/enabled starts switched on at its baseline: switched off it would read as the stop.
+	return s.pace.once(ctx, http.MethodPatch, s.l.futurePath(j.featureID), futureBodyOf(fv, isStopKey(j.k), s.l.options(j.k.Flag)), nil)
 }
 
 // relistOptions lists the feature's options again with the out side's
