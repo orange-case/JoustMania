@@ -268,6 +268,15 @@ describe("UC-035: A3 a telemetry backend is down (dashboard side)", () => {
     expect(el("fresh").textContent).toBe("stale — last updated 20s ago");
   });
 
+  it("UC-035/A3 nothing rendered and no counts yet: every agent panel names the agent", () => {
+    const el = stubDom();
+    paintAgentPanels(agentView(), null, agentPanelsDown(false), () => {
+      throw new Error("a failed agent poll renders no panel data");
+    });
+    for (const panel of ["feed", "flags", "overlay"]) {
+      expect(el(panel).innerHTML).toContain("Could not reach the agent for its decisions");
+    }
+  });
   it("UC-035/A3 the agent's state never delivered: the panels name the agent, not Jaeger", () => {
     const el = stubDom();
     paintAgentPanels(agentView(), counts, agentPanelsDown(false), () => ({ feed: [], flags: null }));
