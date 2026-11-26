@@ -106,9 +106,7 @@ class ReadyHandler:
         if manager is None or self._game_start_in_progress or not manager.all_ready():
             return
         if manager.below_mode_minimum():
-            logger.info(
-                f"All {manager.get_ready_count()} ready, below the minimum of {manager.current_game_mode.name}"
-            )
+            logger.info(f"All {manager.get_ready_count()} ready, below the minimum of {manager.current_game_mode.name}")
             await manager.audio.play_voice(Sound.MENU_VOX_NOT_ENOUGH_PLAYERS)
             return
         self._game_start_in_progress = True
