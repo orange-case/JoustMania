@@ -80,10 +80,11 @@ class TestStartOnAStoppedMenu:
         await _connect(real_servicer, "a", "b")
         assert real_servicer.state == menu_pb2.MenuState.STOPPED
         seen_states = []
+        game = _game_that_ends(real_servicer, seen_states)
 
         with (
             patch.object(real_servicer.settings_ops, "force_start_roster", AsyncMock(return_value=["a", "b"])),
-            patch.object(real_servicer, "_run_game_event_stream", side_effect=_game_that_ends(real_servicer, seen_states)),
+            patch.object(real_servicer, "_run_game_event_stream", side_effect=game),
         ):
             await real_servicer._pad_force_start(trace.get_current_span())
             await real_servicer._game_lifecycle_task
