@@ -29,8 +29,10 @@ var updateProfileGolden = flag.Bool("update-profile-golden", false, "rewrite dec
 // (#2513, UC-040 A49; 67933e383c260b5f), the sentence on readings_stale (#2514,
 // UC-040 A50; 988828bfff9a598a) and eliminate_player added to that sentence
 // (#2524, UC-040 BR-039) and the sentence on lever_cooldown (#2641, UC-040 A53;
-// 933a8b903dc39360), the only deliberate changes since.
-const v1SystemSHA = "45d9963cae974fb5"
+// 933a8b903dc39360) and the shield_charged rewording once the coordinator's gate
+// gauges replaced the agent's charge ledger (#2876, UC-040 A31; 45d9963cae974fb5),
+// the only deliberate changes since.
+const v1SystemSHA = "2c99112e9160b389"
 
 // bannedNeutralPhrases are purpose and verdict phrases the neutral lever text must
 // not carry (UC-040 BR-036).
