@@ -693,16 +693,15 @@ func (c *components) buildTextBackends() {
 // infrastructure observe + rollout loop (#733/#734).
 func (c *components) buildDecisionLoops() {
 	// Decision-backend registry (#1226, #1244): maps the decision.backend flag to a
-	// factory that builds the remote decide.Backend (claude / openai / jev) from the
-	// CURRENT flag snapshot (model, base URL, timeout, reasoning effort) on every
+	// factory that builds the remote decide.Backend (claude / jev) from the
+	// CURRENT flag snapshot (model, base URL, timeout) on every
 	// call, so a backend/model switch is one flagd edit with no restart. API keys
-	// (ANTHROPIC_API_KEY, DECISION_OPENAI_API_KEY, JEV_API_KEY) are read once here;
+	// (ANTHROPIC_API_KEY, JEV_API_KEY) are read once here;
 	// a backend without its key/model is unavailable and falls back to rules. `rules`
 	// is the built-in floor and needs no entry. See decide_backends.go.
 	decideEnv := decideBackendEnvFromOS()
 	slog.Info("Decision backends registered (#1244)",
 		"claude_key", decideEnv.AnthropicAPIKey != "",
-		"openai_key", decideEnv.OpenAIAPIKey != "",
 		"jev_key", decideEnv.JevAPIKey != "")
 	c.decideBackends = newDecideRegistry(decideEnv, newDecideHTTPClient())
 	// experimentFlags is installed once the experiment registry exists (buildExperimentStack).
@@ -842,7 +841,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// UC-040 BR-036 (#2467 PR 5): remote decide requests carry the game's
 	// decision.prompt_profile (v1 on any read error).
 	loop.SetPromptProfileSource(c.agentFlags.PromptProfile)
-	// UC-040 BR-044 (#2687): claude and openai requests carry the operator's
+	// UC-040 BR-044 (#2687): claude requests carry the operator's
 	// decision.operator_brief ("" on any read error: no brief).
 	loop.SetOperatorBriefSource(c.agentFlags.OperatorBrief)
 	loop.SetBriefLog(c.briefLog)

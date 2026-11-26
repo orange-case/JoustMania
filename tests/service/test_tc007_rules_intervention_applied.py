@@ -1,6 +1,6 @@
 """TC-007 on the service tier (T2): a rules decision applied end to end in one real FFA game (#1404).
 
-AGENT composition on a ``fresh_stack``: the real menu, game coordinator and
+AGENT_CLAUDE_DECIDE composition on a ``fresh_stack``: the real menu, game coordinator and
 controller manager (mock backend) from source at HEAD, the Go agent built at
 HEAD, a fresh flag plane, FakeAudio and the OtlpSink (the agent exports its
 spans there; the sink tees the services' telemetry to the agent as the
@@ -36,14 +36,15 @@ from tests.service.agent_flow import (
     RULES_DECIDE_TIMEOUT,
     agent_spans,
     configure_agent,
+    decide_calls,
     start_ffa,
     wait_agent_flags_served,
 )
-from tests.service.harness import AGENT
+from tests.service.harness import AGENT_CLAUDE_DECIDE
 
 pytestmark = pytest.mark.tier("service")
 
-SERVICE_COMPOSITION = AGENT
+SERVICE_COMPOSITION = AGENT_CLAUDE_DECIDE
 
 # The variant that lets the rules engine's in-game levers through on both sides
 # (agent Permits and the coordinator's allow-list re-check): tempo, audio cue,
@@ -105,7 +106,7 @@ async def test_tc007_rules_decision_applied_in_ffa_game(fresh_stack):
     same type on the game's own stream."""
     stack = fresh_stack
     # Scripted only so an accidental remote call would be visible; rules never calls it.
-    stack.fake_openai.script("valid", confidence=HIGH_CONFIDENCE)
+    stack.fake_claude.script(decide_mode="valid", confidence=HIGH_CONFIDENCE)
 
     def configure() -> None:
         configure_agent(backend="rules", interventions=True, allowed=ALLOWED_VARIANT)
@@ -154,7 +155,7 @@ async def test_tc007_rules_decision_applied_in_ffa_game(fresh_stack):
             assert all(gid == game_id for gid in seen_ids), f"agent_intervention for another game: {seen_ids}"
             kinds = {s.attributes.get("game.kind") for s in agent_spans(stack, "agent.decision", game_id)}
             assert kinds == {"real"}, f"agent.decision game.kind for a menu game: {kinds}"
-            assert stack.fake_openai.requests(game_id) == [], "the rules backend must never call the remote backend"
+            assert decide_calls(stack, game_id) == [], "the rules backend must never call the remote backend"
     finally:
         await mock_channel.close()
         await channel.close()

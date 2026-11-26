@@ -15,7 +15,7 @@ import (
 // change to a backend's model / base URL / timeout flag applies on the very next
 // call with no restart. Secrets (API keys) are not flags: main reads them from the
 // environment once at startup and the factories close over them, so they never
-// appear in a flag file or a span. The claude / openai / jev registrations live in
+// appear in a flag file or a span. The claude / jev registrations live in
 // services/agent/decide_backends.go (newDecideRegistry, #1244).
 //
 // `rules` is NOT registered here: it is the in-process floor the loop runs itself

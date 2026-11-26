@@ -350,14 +350,14 @@ func TestHeaderCopyOfNewestNotOlder(t *testing.T) {
 	h.online()
 	h.round()
 	mu.Lock()
-	headerOnly, backend = true, "openai"
+	headerOnly, backend = true, "jev"
 	mu.Unlock()
 	h.round()
 	if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
 		t.Fatalf("UC-054/main step 2 pull span %v: the header copy of the newest document was refused as older", a)
 	}
-	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
-		t.Fatalf("UC-054/main step 2 decision.backend = %+v, want openai from the header copy", v)
+	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "jev" {
+		t.Fatalf("UC-054/main step 2 decision.backend = %+v, want jev from the header copy", v)
 	}
 }
 

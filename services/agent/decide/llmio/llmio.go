@@ -1,5 +1,5 @@
 // Package llmio is the shared prompt/answer plumbing for the remote LLM decision
-// backends of epic #1225 (claude, openai, jev). It is pure: no network, no flag
+// backends of epic #1225 (claude, jev). It is pure: no network, no flag
 // reads, no import of package decision.
 //
 //   - Render turns a decide.Request into a system prompt + user message. It reads

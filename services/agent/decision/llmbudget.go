@@ -46,7 +46,7 @@ type llmBudget struct {
 }
 
 // llmBudgetEntry is one admission in the window (#2519). backend is the decide
-// backend that was charged ("claude", "openai", "jev"), or "" for an untagged
+// backend that was charged ("claude", "jev"), or "" for an untagged
 // charge (the post-game retro, the proposer's LLMAdmission). Every entry counts
 // toward the global total; only tagged entries count toward a backend cap.
 type llmBudgetEntry struct {

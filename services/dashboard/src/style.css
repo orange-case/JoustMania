@@ -60,7 +60,6 @@
   /* invoke_agent backends and accents */
   --decide-rules: #1d5fa8;
   --decide-claude: #a34505;
-  --decide-openai: #1b7a55;
   --decide-jev: #7b3fb0;
   --decide-allowed: #1b7a55;
   --decide-fallback-text: #b3401a;
@@ -94,7 +93,6 @@
     --quality-poor-text: #10141f;
     --decide-rules: #9ec9ff;
     --decide-claude: #ffb37a;
-    --decide-openai: #7ee2b8;
     --decide-jev: #e0a6ff;
     --decide-allowed: #7ee2b8;
     --decide-fallback-text: #ff8a5c;
@@ -125,7 +123,6 @@
   --quality-poor-text: #10141f;
   --decide-rules: #9ec9ff;
   --decide-claude: #ffb37a;
-  --decide-openai: #7ee2b8;
   --decide-jev: #e0a6ff;
   --decide-allowed: #7ee2b8;
   --decide-fallback-text: #ff8a5c;
@@ -1387,7 +1384,6 @@ a {
 /* Backend colours (text). */
 .decide-backend-rules { color: var(--decide-rules); }
 .decide-backend-claude { color: var(--decide-claude); }
-.decide-backend-openai { color: var(--decide-openai); }
 .decide-backend-jev { color: var(--decide-jev); }
 .decide-backend-other { color: var(--text-primary); }
 

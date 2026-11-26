@@ -79,7 +79,7 @@ func newTextBackends(logger *slog.Logger, tuning *agentTuning, src inferenceBack
 }
 
 // normalizeInferenceBackend lower-cases and trims; only "claude" is a real backend,
-// any other value (a typo, the retired "openai") is the stub.
+// any other value (a typo, a retired backend name) is the stub.
 func normalizeInferenceBackend(v string) string {
 	return strings.ToLower(strings.TrimSpace(v))
 }

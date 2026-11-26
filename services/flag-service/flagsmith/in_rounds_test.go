@@ -60,13 +60,13 @@ func TestPushGuardLetsNewValueThrough(t *testing.T) {
 		t.Fatal(ferr)
 	}
 	h.link.Links().ConfirmPushed(k, flagsmith.Value{Present: true, Variant: "claude", Value: json.RawMessage(`"claude"`)})
-	h.fake.SetDocument(document(t0.Add(-time.Minute), []map[string]any{fsState("decision.backend", true, "openai")}), "")
+	h.fake.SetDocument(document(t0.Add(-time.Minute), []map[string]any{fsState("decision.backend", true, "jev")}), "")
 	h.clock.Advance(time.Hour)
 	for range 3 {
 		h.round()
 	}
-	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
-		t.Fatalf("UC-054/BR-005 decision.backend = %+v an hour later, want openai (the guard skips only the replaced value)", v)
+	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "jev" {
+		t.Fatalf("UC-054/BR-005 decision.backend = %+v an hour later, want jev (the guard skips only the replaced value)", v)
 	}
 }
 

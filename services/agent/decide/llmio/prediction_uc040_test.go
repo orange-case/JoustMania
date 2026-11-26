@@ -108,7 +108,7 @@ func TestParse_PredictionNeverBlocks(t *testing.T) {
     {"id": "ffa.target", "choice": "none", "score": 0, "probabilities": [{"option": "none", "p": 1}], "confidence": 0.9},
     {"id": "ffa.magnitude", "choice": "", "score": 0.2, "probabilities": [], "confidence": 0.9},
     ` + predictionEntry("survives_15s", "0.8") + `], "rationale": "slow down"}`)
-		resp, err := Parse(askRequest(), raw, "openai")
+		resp, err := Parse(askRequest(), raw, "claude")
 		if err != nil {
 			t.Fatalf("Parse: %v", err)
 		}

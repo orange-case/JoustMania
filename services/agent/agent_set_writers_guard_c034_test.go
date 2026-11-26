@@ -52,9 +52,7 @@ var c034FlagServiceWrites = map[string]bool{
 }
 
 // c034OtherPostSites are Put/Post/Delete selectors that are not flag-service writes.
-var c034OtherPostSites = map[string]string{
-	"decide/backends/openai/openai.go:Backend.attempt": "chathttp.Post: the model API call (base URL from decision.*.base_url)",
-}
+var c034OtherPostSites = map[string]string{}
 
 // c034ClientSites build a flag-service client (flagservice.New / NewFromEnv).
 var c034ClientSites = map[string]bool{

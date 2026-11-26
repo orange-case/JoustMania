@@ -64,7 +64,7 @@ type Intervention struct {
 	JevDescription string
 	// JevDescriptionNeutral is the lever's effect under the neutral prompt profile
 	// (decision.prompt_profile = neutral, #2467, UC-040 BR-036): what the lever does,
-	// never what it is for or when it is right. claude / openai list it in the
+	// never what it is for or when it is right. claude lists it in the
 	// neutral system prompt's Levers block, jev in its criteria. JevDescription (v1)
 	// is left untouched so the v1 prompt stays byte-identical.
 	JevDescriptionNeutral string

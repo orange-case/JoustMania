@@ -265,13 +265,13 @@ func TestLiveFlip_AlreadyEvaluatedFlagsFollowTheFlagService(t *testing.T) {
 		t.Logf("experiments_enabled on->off seen after %s", took)
 	})
 
-	t.Run("UC-044/main decision.backend rules then openai", func(t *testing.T) {
+	t.Run("UC-044/main decision.backend rules then claude", func(t *testing.T) {
 		read := func() string { return p.flags.DecisionBackend(ctx).Backend }
 		p.put(t, keyDecisionBackend, "rules")
 		readSettled(t, "decision.backend", read, DecisionBackendRules)
-		p.put(t, keyDecisionBackend, "openai")
-		took := waitFor(t, "decision.backend", read, DecisionBackendOpenAI, liveFlipBound)
-		t.Logf("decision.backend rules->openai seen after %s", took)
+		p.put(t, keyDecisionBackend, "claude")
+		took := waitFor(t, "decision.backend", read, DecisionBackendClaude, liveFlipBound)
+		t.Logf("decision.backend rules->claude seen after %s", took)
 	})
 }
 
