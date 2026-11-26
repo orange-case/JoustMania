@@ -624,11 +624,51 @@ func TestDynamicDeclarer_ExplicitCandidate(t *testing.T) {
 			t.Fatalf("Declare = %+v, %v; want the next entry sensitivity=3", in, ok)
 		}
 	})
-	t.Run("UC-043/BR-012 the denylist still applies", func(t *testing.T) {
+	t.Run("UC-043/BR-012 the operator denylist still applies", func(t *testing.T) {
 		d := newDynamicDeclarer(svc, nil)
 		d.configure(flags.ExperimentConfig{DynamicCandidates: "sensitivity=fast", DynamicDenylist: "sensitivity"})
 		if in, ok := d.Declare(nil); ok {
 			t.Fatalf("Declare = %+v, want nothing (denied)", in)
+		}
+	})
+	t.Run("UC-043/BR-012 the built-in denylist still applies", func(t *testing.T) {
+		if !builtinDenied("shadow_policy") {
+			t.Fatal("shadow_policy is not on the built-in denylist")
+		}
+		d := newDynamicDeclarer(svc, nil)
+		d.configure(flags.ExperimentConfig{DynamicCandidates: "shadow_policy=block"})
+		if got := d.candidateOrder(d.readCandidateFlags()); len(got) != 0 {
+			t.Fatalf("candidate order = %v, want empty (built-in denylist)", got)
+		}
+	})
+	t.Run("UC-043/BR-012 a flag under test is not declared again", func(t *testing.T) {
+		d := newDynamicDeclarer(svc, nil)
+		d.configure(flags.ExperimentConfig{DynamicCandidates: "sensitivity=fast"})
+		if in, ok := d.Declare(activeFlags{"sensitivity": {}}); ok {
+			t.Fatalf("Declare = %+v, want nothing (flag already under test)", in)
+		}
+	})
+	t.Run("UC-043/BR-012 a key the shadow game's mode does not read is skipped", func(t *testing.T) {
+		d := newDynamicDeclarer(svc, nil)
+		d.configure(flags.ExperimentConfig{DynamicCandidates: "nonstop.respawn_seconds=fast"})
+		if in, ok := d.Declare(nil); ok {
+			t.Fatalf("JoustFFA shadow game: Declare = %+v, want nothing", in)
+		}
+		t.Setenv("SHADOW_GAME_MODE", "NonStop")
+		if in, ok := d.Declare(nil); !ok || in.FlagKey != "nonstop.respawn_seconds" || in.ExperimentalValue != 1.5 {
+			t.Fatalf("NonStop shadow game: Declare = %+v, %v; want nonstop.respawn_seconds=1.5", in, ok)
+		}
+	})
+	t.Run("UC-043/BR-012 a hold key passes the hold gate only", func(t *testing.T) {
+		hold := gameServiceFrom(t, filepath.Join("..", "flagd", "ci", "game.json"))
+		for _, ok := range []bool{false, true} {
+			d := newDynamicDeclarer(hold, nil)
+			d.hold = policyGate(ok)
+			d.configure(flags.ExperimentConfig{DynamicCandidates: experiment.HoldActivationKey + "=" + experiment.HoldValue})
+			in, declared := d.Declare(nil)
+			if declared != ok || (ok && in.ExperimentalValue != any(experiment.HoldValue)) {
+				t.Fatalf("policy %v: Declare = %+v, %v; want declared=%v toward hold", ok, in, declared, ok)
+			}
 		}
 	})
 }
