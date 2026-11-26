@@ -80,18 +80,19 @@ func (h *harness) wantLocal(t *testing.T, set, flag, scope, want string) {
 // override) read back as strings: the rounds apply nothing, refuse nothing
 // and send nothing back.
 func TestOwnIntegerPushReadBackAsString(t *testing.T) {
+	graceKillSwitch(t)
 	m := newFSModel()
-	maxPath := futureAPI + strconv.Itoa(inoutIDs["experiment_max_games"]) + "/"
-	patch, patches := storePatch(m, "experiment_max_games")
-	h := inoutHarness(t, m, map[string]http.HandlerFunc{"PATCH " + maxPath: patch}, nil)
+	gracePath := futureAPI + strconv.Itoa(inoutIDs["experiment_completed_grace_seconds"]) + "/"
+	patch, patches := storePatch(m, "experiment_completed_grace_seconds")
+	h := inoutHarness(t, m, map[string]http.HandlerFunc{"PATCH " + gracePath: patch}, nil)
 	h.online()
 	if _, ferr := h.st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "shadow"}); ferr != nil {
 		t.Fatal(ferr)
 	}
-	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("7")})
+	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("7")})
 	h.put(state.WriteRequest{Set: "interventions", Flag: sensFlag, Scope: state.Scope{GameID: "g1"}, Value: json.RawMessage("3")})
 	h.waitFor("both values confirmed", func() bool {
-		_, okStack := h.link.Links().Remote(maxGamesKey)
+		_, okStack := h.link.Links().Remote(graceKey)
 		_, okGame := h.link.Links().Remote(sensG1)
 		return okStack && okGame
 	})
@@ -101,10 +102,10 @@ func TestOwnIntegerPushReadBackAsString(t *testing.T) {
 		h.roundAndSettle()
 	}
 	t.Run("UC-054/A4 the string \"3\" and \"7\" are the pushed 3 and 7: nothing refused, nothing out of sync", func(t *testing.T) {
-		h.wantInSync(t, maxGamesKey, sensG1)
+		h.wantInSync(t, graceKey, sensG1)
 	})
 	t.Run("UC-054/BR-004 nothing is applied and nothing is sent back", func(t *testing.T) {
-		h.wantLocal(t, "agent", "experiment_max_games", flagsmith.ScopeStack, "7")
+		h.wantLocal(t, "agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack, "7")
 		h.wantLocal(t, "interventions", sensFlag, g1Identity, "3")
 		if n := patches(); n != 1 {
 			t.Fatalf("%d stack PATCHes, want 1 (no echo)", n)
@@ -116,46 +117,48 @@ func TestOwnIntegerPushReadBackAsString(t *testing.T) {
 }
 
 // UC: UC-054 main step 5 A4
-// A person's "7" on an integer flag (a kill switch, agent/experiment_max_games)
-// applies as the number 7, at the start reconcile and in a round.
+// A person's "7" on an integer kill switch (the stand-in
+// agent/experiment_completed_grace_seconds) applies as the number 7, at the
+// start reconcile and in a round.
 func TestPersonIntegerTextApplies(t *testing.T) {
+	graceKillSwitch(t)
 	m := newFSModel()
-	m.values["experiment_max_games"] = "5" // in Flagsmith before the start
+	m.values["experiment_completed_grace_seconds"] = "5" // in Flagsmith before the start
 	h := inoutHarness(t, m, nil, nil)
 	h.online()
 	t.Run("UC-054/A4 the start reconcile applies \"5\" as 5", func(t *testing.T) {
-		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "5" {
-			t.Fatalf("experiment_max_games = %+v, want 5", v)
+		if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "5" {
+			t.Fatalf("experiment_completed_grace_seconds = %+v, want 5", v)
 		}
 	})
-	m.set("experiment_max_games", "7")
+	m.set("experiment_completed_grace_seconds", "7")
 	h.roundAndSettle()
 	t.Run("UC-054/main step 5 a round applies \"7\" as 7", func(t *testing.T) {
-		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "7" {
-			t.Fatalf("experiment_max_games = %+v, want 7", v)
+		if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "7" {
+			t.Fatalf("experiment_completed_grace_seconds = %+v, want 7", v)
 		}
 		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 0 {
 			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 0 0", p, oos, r)
 		}
 	})
-	m.set("experiment_max_games", "5.0")
+	m.set("experiment_completed_grace_seconds", "5.0")
 	h.roundAndSettle()
 	t.Run("UC-054/A4 a whole-number \"5.0\" on an integer flag applies as 5", func(t *testing.T) {
-		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "5" {
-			t.Fatalf("experiment_max_games = %s, want 5", v.Value)
+		if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "5" {
+			t.Fatalf("experiment_completed_grace_seconds = %s, want 5", v.Value)
 		}
-		if r, _ := h.link.Links().Refusal(maxGamesKey); r != "" {
+		if r, _ := h.link.Links().Refusal(graceKey); r != "" {
 			t.Fatalf("refusal %q, want none", r)
 		}
 	})
-	m.set("experiment_max_games", "7.5")
+	m.set("experiment_completed_grace_seconds", "7.5")
 	h.roundAndSettle()
 	t.Run("UC-054/A4 \"7.5\" on an integer flag is flagsmith_type_mismatch", func(t *testing.T) {
-		if r, _ := h.link.Links().Refusal(maxGamesKey); r != "flagsmith_type_mismatch" {
+		if r, _ := h.link.Links().Refusal(graceKey); r != "flagsmith_type_mismatch" {
 			t.Fatalf("refusal %q, want flagsmith_type_mismatch", r)
 		}
-		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "5" {
-			t.Fatalf("experiment_max_games = %+v, want 5 kept", v)
+		if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "5" {
+			t.Fatalf("experiment_completed_grace_seconds = %+v, want 5 kept", v)
 		}
 	})
 }

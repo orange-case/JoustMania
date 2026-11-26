@@ -51,7 +51,7 @@ Service identities (`OTEL_SERVICE_NAME` / namespace): `controller-manager-servic
 | `game.*` | `game.id`, `game.kind`, `game.name`, `game.mode`, `game.trace_id`, `game.trace_span_id`, `game.winner`, `game.duration_seconds`, `game.phase.span` (on the agent-only `game.phase.start` log record only) | game-coordinator, agent (`game.id`, `game.kind`, `game.trace_id`, `game.trace_span_id`; never `game.name`, which the agent's ingest `isGameRootSpan` keys on) |
 | `player.*` | `player.serial`, `player.team`, `player.color`, `player.name`, `player.count` | game-coordinator; agent (`player.serial`, `player.name` on targeted `agent.decision` / `agent.action`) |
 | `controller.*`, `bluetooth.*`, `identify.*` | `controller.serial`, `controller.adapter`, `identify.outcome`, `bluetooth.event_gap_ms`, `bluetooth.dropped_events_pct`, `bluetooth.movement_update_hz`, `bluetooth.report_gap_p95_ms`, `bluetooth.report_gap_max_ms`, `bluetooth.connection_quality` | controller-manager |
-| `experiment.*`, `verdict.*` | `experiment.id`, `experiment.arm`, `experiment.objective`, `experiment.flag_key`, `experiment.target_n`, `experiment.arms`, `experiment.thesis`, `experiment.status`, `experiment.experimental_value`; `verdict.outcome`, `verdict.delta`, `verdict.significant` | game-coordinator, agent |
+| `experiment.*`, `verdict.*` | `experiment.id`, `experiment.arm`, `experiment.objective`, `experiment.flag_key`, `experiment.arms`, `experiment.thesis`, `experiment.status`, `experiment.experimental_value`; `verdict.outcome`, `verdict.delta`, `verdict.significant` | game-coordinator, agent |
 | `agent.*`, `decision.*`, `decide.*`, `intervention.*`, `policy.*`, `inference.*`, `llm.*` | see §4 | agent; `intervention.id`, `intervention.type` also game-coordinator (the intervention moment, [appendix A](#appendix-a-booth-profile)) |
 | `gen_ai.*` | OTel GenAI semantic conventions, see §4.2 | agent |
 | `pad.*` | `pad.key`, `pad.gesture`, `pad.action`, `pad.result`, `pad.steps`, `pad.device`, `pad.node_count` | operator-pad (§3.3) |
@@ -520,7 +520,7 @@ parameter objects, parameter digests, safety cap and a note when the cap fell ba
 sequence) per pattern game, and a `pattern_pair_rerun` / `pattern_archetype_skipped` decision note when a pair runs
 again or an archetype is skipped (UC-046 BR-015); a rerun after a real game preempted the pair
 (`preempted_by_real_game`) is noted as `pattern_pair_rerun_preempted` instead, and one after a stale end (UC-041 A4) as
-`pattern_pair_rerun_stale`; neither uses up the 3-rerun budget.
+`pattern_pair_rerun_stale`; all three share the pair's one budget of 10 reruns.
 The experiment's conclusion (`outcome` event) reports the timeout count and rate per arm and whether one arm timed out
 clearly more often (UC-046 BR-013), followed by the `agent_ended` count and rate per arm when any game ended that way;
 both rates are over the arm's pattern games that ended with a sample (`winner`, `tie`, `timeout`, `agent_ended`).

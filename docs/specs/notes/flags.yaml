@@ -210,19 +210,6 @@ agent:
     note: >-
       Objective of a dynamically declared experiment when no fitness-pressure signal picks one;
       empty, unknown, `chaos` or unresolved gives `balanced` (UC-043).
-  experiment_dynamic_target_n:
-    read_by: [agent]
-    reload: live
-    note: >-
-      Games per arm stamped on a dynamically declared experiment; 0 or negative becomes 0, which the
-      registry raises to `verdict_min_n`.
-  experiment_max_games:
-    read_by: [agent]
-    reload: live
-    note: >-
-      Most games per experiment; effective value is the lower of this and the
-      `AGENT_EXPERIMENT_MAX_GAMES` env ceiling, where 0 or less means no limit (C-034, FR-152).
-      Unresolved gives 50.
   experiment_proposer_enabled:
     read_by: [agent]
     reload: live
@@ -497,23 +484,12 @@ agent:
     reload: live
     note: >-
       How long a re-watch of a promoted change may run.
-  verdict_anchor_margin:
-    read_by: [agent]
-    reload: live
-    note: >-
-      A promote verdict is downgraded only when the experimental arm falls below recent real play by
-      more than this margin. Unresolved gives the compiled default.
   verdict_effect_threshold:
     read_by: [agent]
     reload: live
     note: >-
       Standardized effect size the experimental arm must reach for a verdict. Unresolved gives the
       compiled default.
-  verdict_min_n:
-    read_by: [agent]
-    reload: live
-    note: >-
-      Minimum games per arm before an experiment verdict; unresolved gives the compiled default.
   verdict_min_pairs:
     read_by: [agent]
     reload: live

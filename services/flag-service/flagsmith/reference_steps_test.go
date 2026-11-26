@@ -177,16 +177,16 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 		e := newStartEnv(t)
 		f := e.admin.f
 		f.ServeFlagAPI()
-		e.offFeatures("experiment_max_games")
+		e.offFeatures("llm.max_requests_per_minute")
 		f.Options.SetDefault(1, flagDefault(true, "integer", "20")) // turned on after the document was built
 		if err := e.s.Start(e.ctx); err != nil {
 			t.Fatal(err)
 		}
 		if n := referencePatches(f)[1]; n != 0 {
-			t.Fatalf("experiment_max_games written %d times, want never (on in the authoritative state)", n)
+			t.Fatalf("llm.max_requests_per_minute written %d times, want never (on in the authoritative state)", n)
 		}
 		if got, enabled, _ := storedDefault(t, f, 1); !enabled || got != "20" {
-			t.Fatalf("experiment_max_games enabled=%v %q, want the person's enabled=true 20 untouched", enabled, got)
+			t.Fatalf("llm.max_requests_per_minute enabled=%v %q, want the person's enabled=true 20 untouched", enabled, got)
 		}
 		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 1 {
 			t.Fatalf("%d re-reads, want 1", n)
@@ -196,7 +196,7 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 		e := newStartEnv(t)
 		f := e.admin.f
 		f.ServeFlagAPI()
-		e.offFeatures("experiment_max_games")
+		e.offFeatures("llm.max_requests_per_minute")
 		var mu sync.Mutex
 		patches := 0
 		f.Handle("PATCH /api/__future__/environments/{env}/features/1/{$}", func(w http.ResponseWriter, _ *http.Request) {
@@ -214,10 +214,10 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		if patches != 1 {
-			t.Fatalf("experiment_max_games written %d times, want 1 (no second write after the re-read shows it on)", patches)
+			t.Fatalf("llm.max_requests_per_minute written %d times, want 1 (no second write after the re-read shows it on)", patches)
 		}
 		if got, enabled, _ := storedDefault(t, f, 1); !enabled || got != "20" {
-			t.Fatalf("experiment_max_games enabled=%v %q, want the person's enabled=true 20 untouched", enabled, got)
+			t.Fatalf("llm.max_requests_per_minute enabled=%v %q, want the person's enabled=true 20 untouched", enabled, got)
 		}
 		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 2 {
 			t.Fatalf("%d re-reads, want 2 (one before the write, one after the 429)", n)
@@ -227,7 +227,7 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 		e := newStartEnv(t)
 		f := e.admin.f
 		f.ServeFlagAPI()
-		e.offFeatures("experiment_max_games")
+		e.offFeatures("llm.max_requests_per_minute")
 		patches := countingPatch(f, func(w http.ResponseWriter, _ int) {
 			// A person turns the kill switch on while the write waits its backoff.
 			f.Options.SetDefault(1, flagDefault(true, "integer", "20"))
@@ -237,10 +237,10 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 			t.Fatalf("start %v, want it to go on", err)
 		}
 		if n := patches(); n != 1 {
-			t.Fatalf("experiment_max_games written %d times, want 1 (no second write after the re-read shows it on)", n)
+			t.Fatalf("llm.max_requests_per_minute written %d times, want 1 (no second write after the re-read shows it on)", n)
 		}
 		if got, enabled, _ := storedDefault(t, f, 1); !enabled || got != "20" {
-			t.Fatalf("experiment_max_games enabled=%v %q, want the person's enabled=true 20 untouched", enabled, got)
+			t.Fatalf("llm.max_requests_per_minute enabled=%v %q, want the person's enabled=true 20 untouched", enabled, got)
 		}
 		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 2 {
 			t.Fatalf("%d re-reads, want 2 (one before the write, one after the 503)", n)
@@ -250,7 +250,7 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 		e := newStartEnv(t)
 		f := e.admin.f
 		f.ServeFlagAPI()
-		e.offFeatures("experiment_max_games")
+		e.offFeatures("llm.max_requests_per_minute")
 		patches := countingPatch(f, func(w http.ResponseWriter, _ int) {
 			flagsmithtest.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"detail": "unavailable"})
 		})
@@ -258,21 +258,21 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 			t.Fatalf("start %v, want it to go on past the failed write", err)
 		}
 		if n := patches(); n != 3 {
-			t.Fatalf("experiment_max_games written %d times, want 3 (transientAttempts)", n)
+			t.Fatalf("llm.max_requests_per_minute written %d times, want 3 (transientAttempts)", n)
 		}
 		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 3 {
 			t.Fatalf("%d re-reads, want 3 (one before each write)", n)
 		}
 		logs := e.logs.String()
-		if n := referenceLogLines(logs); n != 1 || !strings.Contains(logs, `level=WARN msg="flagsmith reference not written" flag_set=agent flag=experiment_max_games`) {
-			t.Fatalf("log %q, want one WARN naming experiment_max_games", logs)
+		if n := referenceLogLines(logs); n != 1 || !strings.Contains(logs, `level=WARN msg="flagsmith reference not written" flag_set=agent flag=llm.max_requests_per_minute`) {
+			t.Fatalf("log %q, want one WARN naming llm.max_requests_per_minute", logs)
 		}
 	})
 	t.Run("UC-054/A3 FR-227 a write that always answers 429 is sent 4 times, each after a re-read", func(t *testing.T) {
 		e := newStartEnv(t)
 		f := e.admin.f
 		f.ServeFlagAPI()
-		e.offFeatures("experiment_max_games")
+		e.offFeatures("llm.max_requests_per_minute")
 		patches := countingPatch(f, func(w http.ResponseWriter, _ int) {
 			w.Header().Set("Retry-After", "1")
 			flagsmithtest.WriteJSON(w, http.StatusTooManyRequests, map[string]any{"detail": "throttled"})
@@ -281,7 +281,7 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 			t.Fatalf("start %v, want it to go on past the failed write", err)
 		}
 		if n := patches(); n != 4 {
-			t.Fatalf("experiment_max_games written %d times, want 4 (1 + maxRateLimitRetries)", n)
+			t.Fatalf("llm.max_requests_per_minute written %d times, want 4 (1 + maxRateLimitRetries)", n)
 		}
 		if n := len(f.RequestsTo(http.MethodGet, reReadPath)); n != 4 {
 			t.Fatalf("%d re-reads, want 4 (one before each write)", n)
@@ -371,15 +371,15 @@ func TestReferenceReReadBeforeWrite(t *testing.T) {
 		e := newStartEnv(t)
 		f := e.admin.f
 		f.ServeFlagAPI()
-		e.offFeatures("experiment_max_games", "experiment_tick_seconds")
+		e.offFeatures("llm.max_requests_per_minute", "experiment_tick_seconds")
 		f.Options.SetDefault(1, flagDefault(false, "integer", "20"))
 		f.Options.SetDefault(2, flagDefault(false, "integer", "7"))
 		if err := e.s.Start(e.ctx); err != nil {
 			t.Fatal(err)
 		}
 		logs := e.logs.String()
-		if !strings.Contains(logs, `level=INFO msg="flagsmith reference overwrote a kill switch value" flag_set=agent flag=experiment_max_games old_value=20`) {
-			t.Fatalf("log %q, want the INFO naming experiment_max_games and its old value 20", logs)
+		if !strings.Contains(logs, `level=INFO msg="flagsmith reference overwrote a kill switch value" flag_set=agent flag=llm.max_requests_per_minute old_value=20`) {
+			t.Fatalf("log %q, want the INFO naming llm.max_requests_per_minute and its old value 20", logs)
 		}
 		if strings.Contains(logs, "flag=experiment_tick_seconds old_value") {
 			t.Fatalf("log %q, want no kill switch line for experiment_tick_seconds (no kill switch)", logs)
