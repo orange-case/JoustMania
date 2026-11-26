@@ -133,6 +133,63 @@ class EliminationMixin:
         """
         return True
 
+    def _record_death_moment(
+        self,
+        serial: str,
+        player: Player,
+        accel_mag: float,
+        reason: str,
+        alive_remaining: int,
+        since_shield_end: dict,
+        death_ns: int,
+    ) -> None:
+        """Record the ONE ``player_death`` moment of a death in the game's moment shape (UC-100 BR-007)."""
+        if player.span:
+            _base.record_moment(
+                "player_death",
+                shape=self.moment_shape,
+                parent_span=player.span,
+                attributes={
+                    "accel_magnitude": accel_mag,
+                    "sensitivity": self.sensitivity.name,
+                    "sensitivity_factor": player.sensitivity_factor,
+                    "music_speed": self.music_speed,
+                    "alive_remaining": alive_remaining,
+                    "death.reason": reason,
+                    **since_shield_end,
+                    **self._player_death_event_attributes(serial),
+                    **self._moment_identity(player, serial),
+                },
+                timestamp_ns=death_ns,
+                tracer=_base.tracer,
+            )
+
+    async def _send_death_effect(self, serial: str, trace_parent: str, trace_state: str) -> None:
+        """Send the death effect (red + vibrate, no restore) on the gameplay stream, if the mode sends one."""
+        # Send death effect via stream (red + vibrate, no restore)
+        # Use pre-extracted trace context so effect appears under player_lifecycle
+        # in traces, even though _kill_player_impl may have closed the span.
+        from proto import controller_manager_pb2
+
+        if not self._sends_death_effect(serial):
+            return
+        if not self.gameplay_stream:
+            return
+        effect_cmd = controller_manager_pb2.GameplayStreamControl(
+            game_effect=controller_manager_pb2.GameEffectCommand(
+                serial=serial,
+                effect=controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH,
+                trace_parent=trace_parent,
+                trace_state=trace_state,
+            )
+        )
+        try:
+            await serialized_write(self.gameplay_stream, effect_cmd)
+        except self._STREAM_CALL_ERRORS:
+            # The call died under the write (a reopen follows): the next stream sends it (UC-030 BR-006, #2471).
+            self._undelivered_deaths.add(serial)
+            raise
+
     async def _run_kill(self, serial: str, player: Player, accel_mag: float, reason: str) -> bool:
         """Body of _kill_player; runs at most once at a time per serial.
 
@@ -185,25 +242,7 @@ class EliminationMixin:
         # their own attributes through _player_death_event_attributes() and must not
         # emit a second player_death from _kill_player_impl(). record_moment never
         # raises, so the kill below is never half-applied.
-        if player.span:
-            _base.record_moment(
-                "player_death",
-                shape=self.moment_shape,
-                parent_span=player.span,
-                attributes={
-                    "accel_magnitude": accel_mag,
-                    "sensitivity": self.sensitivity.name,
-                    "sensitivity_factor": player.sensitivity_factor,
-                    "music_speed": self.music_speed,
-                    "alive_remaining": alive_count_before - 1,
-                    "death.reason": reason,
-                    **since_shield_end,
-                    **self._player_death_event_attributes(serial),
-                    **self._moment_identity(player, serial),
-                },
-                timestamp_ns=death_ns,
-                tracer=_base.tracer,
-            )
+        self._record_death_moment(serial, player, accel_mag, reason, alive_count_before - 1, since_shield_end, death_ns)
         # An eliminate_player intervention lands as this death: its moment comes right
         # after player_death, applied at the death's time (UC-101 BR-001, BR-006).
         self.record_intervention(serial, types=("eliminate_player",), timestamp_ns=death_ns)
@@ -221,29 +260,7 @@ class EliminationMixin:
         if self.running:
             self._set_players_alive_aggregate(len([p for p in self.players.values() if p.alive]))
 
-        # Send death effect via stream (red + vibrate, no restore)
-        # Use pre-extracted trace context so effect appears under player_lifecycle
-        # in traces, even though _kill_player_impl may have closed the span.
-        from proto import controller_manager_pb2
-
-        if not self._sends_death_effect(serial):
-            return True
-        if not self.gameplay_stream:
-            return True
-        effect_cmd = controller_manager_pb2.GameplayStreamControl(
-            game_effect=controller_manager_pb2.GameEffectCommand(
-                serial=serial,
-                effect=controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH,
-                trace_parent=trace_parent,
-                trace_state=trace_state,
-            )
-        )
-        try:
-            await serialized_write(self.gameplay_stream, effect_cmd)
-        except self._STREAM_CALL_ERRORS:
-            # The call died under the write (a reopen follows): the next stream sends it (UC-030 BR-006, #2471).
-            self._undelivered_deaths.add(serial)
-            raise
+        await self._send_death_effect(serial, trace_parent, trace_state)
         return True
 
     async def _wait_for_rainbow_effect(self) -> bool:
