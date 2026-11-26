@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 
 # UC-015 BR-019: the agent level, written persisted.
 AGENT_POLICY_FLAG = "interventions_allowed"
-# UC-015 BR-001: the pad also writes the agent state `off` / `watch` / `on` (in memory only) and the backend (persisted).
+# UC-015 BR-001: the pad also writes the agent state `off` / `watch` / `on` (in memory) and the backend (persisted).
 AGENT_ENABLED_FLAG = "enabled"
 DECISION_BACKEND_FLAG = "decision.backend"
 # UC-015 BR-018 (#2215): the shield mode the pad's K6 layer steps; a persisted admin value of the `game` set.
