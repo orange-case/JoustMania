@@ -140,7 +140,7 @@ func TestExperimentSpans_FitnessAndEvaluateEmitted(t *testing.T) {
 func TestExperimentSpans_VerdictEmitted(t *testing.T) {
 	loop, sr, spawner, expID := recordingExperimentLoop(t)
 
-	// Conclude enough games per arm (TargetNPerArm=3) for the #979 verdict to settle.
+	// Conclude enough games per arm for the #979 verdict to settle.
 	concludeCohort(t, loop, spawner, 4)
 
 	ended := sr.Ended()

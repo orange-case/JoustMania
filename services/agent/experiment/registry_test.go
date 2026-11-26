@@ -837,26 +837,10 @@ func TestConcurrentAllocateNeverExceedsCap(t *testing.T) {
 func TestConcurrentAllocateAndConcludeNoLeak(t *testing.T) {
 	const cap = 8
 	spawner := &fakeSpawner{}
-	// ROOT CAUSE of the historical flake (#1097): this is a TEST-DESIGN issue, not a
-	// registry race. The settling invariant below ("a final allocate refills to
-	// exactly the cap") only holds while every experiment is still RUNNING. The test
-	// concludes hundreds of games at a CONSTANT fitness (0.5), so each experiment's
-	// arms hit zero variance past their target N — the #1001 termination guard
-	// legitimately concludes them INCONCLUSIVE ("degenerate variance past target N").
-	// Whether all K experiments terminate before the final allocate is purely a
-	// function of the conclude race's timing, so the settling allocate would
-	// intermittently find NO live experiment, bind nothing, and report in-flight 0.
-	//
-	// Fix: disable ALL three #1001 give-up guards for this test so the experiments
-	// stay live regardless of timing — the invariant we actually want to assert
-	// (reservation accounting returns to cap) is then deterministic. The leak
-	// detection is fully preserved: a genuine reservation leak would still leave the
-	// settling in-flight BELOW cap.
-	//   - MaxGamesPerExperiment: -1 disables the absolute games-budget guard (a).
-	//   - VerdictMinN: -1 disables min-N reconciliation so the huge intent target_n
-	//     below survives Declare unchanged.
-	//   - a target_n far above any reachable game count keeps the inconclusive-past-
-	//     target (b) and degenerate-variance (c) guards inert (arms never reach it).
+	// The settling invariant below ("a final allocate refills to exactly the cap")
+	// holds only while every experiment is RUNNING (#1097): the verdict never
+	// concludes and these non-pattern experiments have no other stop rule, so they
+	// stay live and a reservation leak would still show as in-flight below cap.
 	r := newTestRegistry(t, RegistryConfig{
 		MaxShadowGames: cap,
 		Spawner:        spawner,
@@ -1301,13 +1285,12 @@ func journalNotes(t *testing.T, root, id string) string {
 }
 
 // UC-043 A3 step 1 + main step 5: a significant discard verdict concludes the
-// experiment at once, without promotion. The paired d_z path is gated by
-// verdict_min_pairs only, so it concludes after min-pairs completed pairs even
-// though every arm is far below verdict_min_n and the games budget.
+// experiment at once, without promotion. The paired d_z is gated by
+// verdict_min_pairs only, so it concludes after min-pairs completed pairs.
 //
 // UC: UC-043 main A3
 func TestConcludeSignificantDiscardImmediately(t *testing.T) {
-	t.Run("UC-043/A3 significant discard concludes at min pairs, before min N and max games", func(t *testing.T) {
+	t.Run("UC-043/A3 significant discard concludes at min pairs", func(t *testing.T) {
 		root := t.TempDir()
 		spawner := &fakeSpawner{}
 		promoter := &fakePromoter{}

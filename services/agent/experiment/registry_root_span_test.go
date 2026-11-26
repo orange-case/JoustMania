@@ -142,7 +142,7 @@ func TestRootSpan_DoubleTeardownNoDoubleEnd(t *testing.T) {
 }
 
 // TestRootSpan_CarriesIdentifyingAttrs: the root span carries experiment.id / flag_key /
-// objective / target_n / arms from the intent.
+// objective / arms from the intent.
 func TestRootSpan_CarriesIdentifyingAttrs(t *testing.T) {
 	r, sr := rootSpanRegistry(t, RegistryConfig{
 		Spawner: &fakeSpawner{}, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},

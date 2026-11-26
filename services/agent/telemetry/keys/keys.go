@@ -296,7 +296,7 @@ const (
 	// trace root the per-experiment ANALYSIS spans (experiment.fitness/evaluate/verdict,
 	// agent.llm.retro, agent.game.summary, code_improvement.promote) re-parent under for
 	// an experiment-bound game, so the whole hypothesis-test narrative is ONE trace.
-	// Carries experiment.id / flag_key / objective / target_n / arms. It outlives the
+	// Carries experiment.id / flag_key / objective / arms. It outlives the
 	// game spans it analyzes (the analysis runs "in between" games), which is why the
 	// analysis spans can be its CHILDREN. Observability only.
 	SpanExperiment = "agent.experiment"

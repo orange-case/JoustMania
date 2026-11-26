@@ -127,12 +127,12 @@ const (
 	keyExperimentProposerEnabled = "experiment_proposer_enabled"
 
 	// Verdict-tuning float knobs migrated from env to agent.json flags (#1214),
-	// finishing the cluster verdict_min_n / verdict_min_pairs started in #1044. These
-	// were the AGENT_VERDICT_EFFECT_THRESHOLD / _MIN_RAW_EFFECT / _SD_FLOOR /
-	// _ANCHOR_MARGIN env knobs once read at startup by the verdict constructor.
+	// next to verdict_min_pairs (#1044). These
+	// were the AGENT_VERDICT_EFFECT_THRESHOLD / _MIN_RAW_EFFECT / _SD_FLOOR
+	// env knobs once read at startup by the verdict constructor.
 	// Migrating them makes each numeric verdict gate hot-reloadable — flip it in flagd
 	// and the NEXT verdict evaluation uses the new threshold with no restart, exactly
-	// like the min_n/min_pairs siblings (live-mirrored onto the Verdict via the
+	// like verdict_min_pairs (live-mirrored onto the Verdict via the
 	// registry's Reconfigure → Verdict.SetThresholds, #1044/#1051).
 	//
 	// They are TUNING knobs, not safety gates: each FAILS OPEN to the current code

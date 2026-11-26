@@ -144,13 +144,12 @@ func TestPairedVerdict_NoOpFlag_ZeroDelta_Inconclusive(t *testing.T) {
 	}
 }
 
-// UC-043 step 5: once seed-matched pairs exist, the verdict is the paired d_z
-// gated only by verdict_min_pairs. verdict_min_n (here far above the pair
-// count) does not hold back a conclusive paired verdict.
+// UC-043 step 5: the verdict is the paired d_z gated by verdict_min_pairs; the
+// arms' own sample counts do not matter.
 //
 // UC: UC-043 main
-func TestPairedVerdict_GatedByMinPairsNotMinN(t *testing.T) {
-	const minN, minPairs = 50, 5
+func TestPairedVerdict_GatedByMinPairs(t *testing.T) {
+	const minPairs = 5
 	v := NewVerdict(minPairs, 0.5)
 	diffs := []float64{0.28, 0.32, 0.29, 0.31, 0.30}
 
@@ -164,9 +163,8 @@ func TestPairedVerdict_GatedByMinPairsNotMinN(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-043/main exactly verdict_min_pairs promotes although every arm is below verdict_min_n", func(t *testing.T) {
+	t.Run("UC-043/main exactly verdict_min_pairs promotes", func(t *testing.T) {
 		s := pairedSummary(pairDiffFrom(diffs...))
-		// Arms carry far fewer samples than verdict_min_n; the paired path ignores them.
 		exp, ctl := &journal.Welford{}, &journal.Welford{}
 		for i := 0; i < minPairs; i++ {
 			exp.Add(0.8 + float64(i)*0.01)
@@ -179,7 +177,7 @@ func TestPairedVerdict_GatedByMinPairsNotMinN(t *testing.T) {
 			t.Fatal("expected ok=true")
 		}
 		if got.Outcome != CohortOutcomePromote || !got.Significant {
-			t.Fatalf("verdict = %+v, want PROMOTE significant at %d pairs (min N %d not applied)", got, minPairs, minN)
+			t.Fatalf("verdict = %+v, want PROMOTE significant at %d pairs", got, minPairs)
 		}
 	})
 }
