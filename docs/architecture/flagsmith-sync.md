@@ -375,7 +375,7 @@ entity.
    game and player values could be pushed but never read back.
 3. For each synced `(set, key, scope)` the link computes the 3-way state of `remote`, the document value and the
    local value (§6) and turns each remote change into a write through the same in-process call the HTTP handler
-   uses (writer `flagsmith`, `persist: true` when the registry row has `persist: yes`). An override on
+   uses (writer `flagsmith`; a stack value of a `persist: yes` row is persisted, as every stack write of such a row, #2803). An override on
    `controller:<serial>` is read as the player value of the controller's owner, only while the controller is settled
    for it; `game:<gameId>:<serial>` is read only for a live shadow game (§2.2).
 4. A write refused by the registry or the game scope keeps the local value, records the

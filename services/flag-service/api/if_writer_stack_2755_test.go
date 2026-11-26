@@ -65,18 +65,18 @@ func TestIfWriterStackOverlay(t *testing.T) {
 			t.Fatalf("writer %v, want stage", w)
 		}
 	})
-	t.Run("UC-016/BR-013 no stack overlay is a 204 that leaves the persisted admin value", func(t *testing.T) {
+	t.Run("UC-016/BR-013 on a persist row it compares the persisted value, which stays for another writer (#2803)", func(t *testing.T) {
 		e := newEnv(t, true)
 		const backend = "/agent/decision.backend"
-		if status, body := e.do("PUT", backend, map[string]any{"variant": "claude", "writer": "menu", "persist": true}); status != http.StatusOK {
+		if status, body := e.do("PUT", backend, map[string]any{"variant": "claude", "writer": "operator", "persist": true}); status != http.StatusOK {
 			t.Fatalf("%d %v", status, body)
 		}
-		if status, body := e.do("DELETE", backend+"?writer=menu&if_writer=menu", nil); status != http.StatusNoContent {
-			t.Fatalf("%d %v, want 204", status, body)
+		if status, body := e.do("DELETE", backend+"?writer=menu&if_writer=menu", nil); status != http.StatusPreconditionFailed || body["error"] != fserr.WriterMismatch {
+			t.Fatalf("%d %v, want 412 writer_mismatch", status, body)
 		}
 		_, body := e.do("GET", backend, nil)
-		if body["admin_value"] == nil {
-			t.Fatal("the persisted admin value was cleared by an in-memory if_writer clear")
+		if body["admin_value"] == nil || body["stack_overlay"] != nil {
+			t.Fatalf("view %v, want the persisted value kept and no in-memory overlay", body)
 		}
 	})
 	t.Run("UC-053/A14 goal.profile stays 403 flagsmith_only for the menu", func(t *testing.T) {
