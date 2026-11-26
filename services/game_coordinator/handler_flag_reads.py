@@ -5,7 +5,7 @@
 #
 # A handler (and a revert handler and the agent cue) runs on the game's loop through
 # GameLoopDispatcher.run, and the InterventionManager sets the game's own flag transaction
-# context around it (interventions.py run_in_game_flag_context). A flag read there
+# context around it (intervention_dispatch.py run_in_game_flag_context). A flag read there
 # therefore sees the API-level attributes (service_name, service_namespace, language,
 # hostname, game_kind), the game's context (targetingKey=game_mode, game_mode,
 # controller_count, sensitivity, game_kind, experiment_id, arm; flags.md section 1.2) and
@@ -38,7 +38,7 @@ HANDLER_FLAG_READS = {
         "targeting": ["gameId"],
         "readers": "games/base.py _read_charge_expiry <- grant_shield <- handle_shield_seconds",
     },
-    # Hold mode (UC-040 BR-027): latched once per game, at the start of the game
+    # Hold mode (UC-048 BR-011): latched once per game, at the start of the game
     # loop or by the first grant, whichever is first, in the game's flag context, so an
     # experiment arm resolves (FR-162, UC-043 A17).
     ("game", "shield.energy_max_seconds"): {
@@ -66,7 +66,7 @@ HANDLER_FLAG_READS = {
         "experiment_rung": "applies",
         "readers": "games/base.py _latch_shield_hold <- grant_shield <- handle_shield_seconds (first grant)",
     },
-    # Hold feedback cue values (UC-040 BR-026): latched with the hold values and
+    # Hold feedback cue values (UC-048 BR-010): latched with the hold values and
     # shipped to the controller manager with every hold command.
     ("game", "shield.hold_rumble_intensity"): {
         "targeting": ["gameId", "experiment_id", "arm"],
@@ -87,7 +87,7 @@ HANDLER_FLAG_READS = {
         "targeting": ["gameId"],
         "readers": "games/base.py _latch_shield_hold <- grant_shield <- handle_shield_seconds (first grant)",
     },
-    # Shield end grace of #2464 (UC-040 BR-035): stack-only and human-only, latched in
+    # Shield end grace of #2464 (UC-048 BR-015): stack-only and human-only, latched in
     # every mode (instant shields exist in every mode).
     ("game", "shield.end_grace_seconds"): {
         "targeting": ["gameId"],
@@ -105,7 +105,7 @@ HANDLER_FLAG_READS = {
         "targeting": ["gameId"],
         "readers": "games/base.py _latch_shield_hold <- grant_shield <- handle_shield_seconds (first grant)",
     },
-    # Shield limits (UC-040 BR-022): operator flags the agent is to read with an empty
+    # Shield limits (UC-048 BR-007): operator flags the agent is to read with an empty
     # context too (#2044 agent half), so no targeting at all, or the two sides could differ.
     ("agent", "policy.max_shields_per_player_per_game"): {
         "targeting": [],
@@ -115,7 +115,7 @@ HANDLER_FLAG_READS = {
         "targeting": [],
         "readers": "games/base.py _shield_limits <- grant_shield <- handle_shield_seconds (no targeting)",
     },
-    # Group shield gate and backstop (UC-040 A47, A48, BR-033, #2467): operator flags the
+    # Group shield gate and backstop (UC-048 A13, A14, BR-014, #2467): operator flags the
     # agent reads with an empty context, so no targeting at all, or the two sides could differ.
     ("agent", "policy.group_grant.enabled"): {
         "targeting": [],

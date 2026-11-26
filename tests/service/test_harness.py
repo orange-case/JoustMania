@@ -115,8 +115,6 @@ def test_service_env_never_reaches_host_hardware_or_a_collector(tmp_path):
     controller_manager = envs["controller-manager"]
     assert controller_manager["RUST_HID_HOST"] == "127.0.0.1"
     assert controller_manager["RUST_HID_PORT"] == "1"
-    assert controller_manager["PYTHON_HID_HOST"] == "127.0.0.1"
-    assert controller_manager["PYTHON_HID_PORT"] == "1"
     assert controller_manager["DBUS_SYSTEM_BUS_ADDRESS"].startswith("unix:path=/nonexistent/")
     assert controller_manager["MOCK_CONTROL_PORT"] == "40004"
 
@@ -205,11 +203,11 @@ def test_agent_flags_are_written_as_overlays_before_the_agent_starts(tmp_path, m
             puts.append((flag_set, flag, kwargs))
 
     monkeypatch.setattr(flag_service, "FlagService", RecordingFlagService)
-    composition = replace(AGENT, agent_flags={"enabled": {"variant": "on"}, "verdict_min_n": {"value": 1}})
+    composition = replace(AGENT, agent_flags={"enabled": {"variant": "on"}, "verdict_min_pairs": {"value": 1}})
     ServiceStack(composition, tmp_path)._seed_agent_overlays()
     assert puts == [
         ("agent", "enabled", {"writer": "service-harness", "variant": "on"}),
-        ("agent", "verdict_min_n", {"writer": "service-harness", "value": 1}),
+        ("agent", "verdict_min_pairs", {"writer": "service-harness", "value": 1}),
     ]
     # The agent starts after the overlays are written (the first tick reads them).
     source = inspect.getsource(ServiceStack._start)

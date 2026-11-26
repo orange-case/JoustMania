@@ -128,10 +128,10 @@ class EliminationMixin:
         bookkeeping (UC-030 step 9, #1988).
         """
         # A held shield charge ends with the death, before the player span closes
-        # (UC-040 A32; a disconnect and eliminate_player come through here too).
+        # (UC-048 A5; a disconnect and eliminate_player come through here too).
         if player.shield_charge_seconds > 0:
             await self._discard_shield_charge(player, CHARGE_OUTCOME_DEATH)
-        # UC-040 A39: the death drops a hold pool; eliminate_player ignores the hold.
+        # UC-048 A11: the death drops a hold pool; eliminate_player ignores the hold.
         if self._shield_hold is not None:
             self._drop_shield_hold(player, HOLD_OUTCOME_DEATH, game_clock.now())
 
@@ -147,7 +147,7 @@ class EliminationMixin:
         # Again after the awaits: energy granted while the kill awaited is dropped too.
         if self._shield_hold is not None:
             self._drop_shield_hold(player, HOLD_OUTCOME_DEATH, game_clock.now())
-        # UC-040 BR-035: the death ends a shield end grace window; a respawn never inherits it.
+        # UC-048 BR-015: the death ends a shield end grace window; a respawn never inherits it.
         since_shield_end = self._shield_since_end_attributes(player, game_clock.now())
         player.end_grace_until = 0.0
         player.shield_end_at = 0.0

@@ -12,7 +12,7 @@ import (
 // UpdatedAt) is marked ReadingsStale and its movement readings and skill are left
 // out, so no backend reads an old value as current. The player stays listed and
 // alive. The levers in freshReadingsLevers are those of the rules that skip such a
-// player (R3, R4, R6, R8, R9; UC-040 A46, BR-037) and are never applied to a stale
+// player (R3, R4, R6, R8, R9; decide-contract.md §15.4) and are never applied to a stale
 // player from a backend answer either.
 
 // freshReadingsLevers are the player-targeted levers whose rule targets only a

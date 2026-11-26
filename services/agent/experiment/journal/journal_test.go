@@ -20,7 +20,6 @@ func testIntent() Intent {
 		FlagKey:           "death_grace_period_seconds",
 		ExperimentalValue: 0.5,
 		Objective:         "engagement_balanced",
-		TargetNPerArm:     20,
 		Arms:              []string{"experimental", "control"},
 	}
 }
@@ -212,8 +211,8 @@ func TestRehydrate_SurvivesRestart(t *testing.T) {
 
 // TestSummary_ObjectiveFromIntent: Summary().Objective is a derived view field
 // (#992) always sourced from the immutable intent, so it is present on a fresh
-// journal AND survives a rehydrate from disk (intent.json is authoritative) — the
-// #992 recent-real anchor reads it to key the per-objective baseline.
+// journal AND survives a rehydrate from disk (intent.json is authoritative);
+// it is the per-objective key of the experiment's fitness.
 func TestSummary_ObjectiveFromIntent(t *testing.T) {
 	dir := t.TempDir()
 	j, err := Create(dir, testIntent())

@@ -1,17 +1,15 @@
 """
-The evaluation context of the shield flags on the agent's grant path (#1837, UC-040 A31).
+The evaluation context of the shield flags on the agent's grant path (#1837, UC-048 A4).
 
 An agent grant reaches ``grant_shield`` through the InterventionManager on the
 servicer's MAIN loop and ``GameLoopDispatcher.run``, and the manager sets the game's
 flag transaction context around it (``run_in_game_flag_context``, #1970). So the
 coordinator reads ``shield.activation`` and ``shield.charge_expiry_seconds`` with the
 API-level attributes, the game's context (targetingKey and game_mode = the mode,
-game_kind) and ``gameId``. The agent's charge ledger resolves them with only
-``gameId`` and ``game_kind=real``, for real games only
-(services/agent/flags/game.go shieldChargeContext); that is sound because the
-targeting of these flags may reference only ``gameId`` and ``game_kind`` (flags.md
-§4, tests/contract/test_flagd_resolution.py). This test pins the coordinator's side
-with the real OpenFeature API and a recording provider.
+game_kind) and ``gameId``. The targeting of these flags may reference only
+``gameId`` and ``game_kind`` (flags.md §4, tests/contract/test_flagd_resolution.py).
+This test pins the coordinator's side with the real OpenFeature API and a recording
+provider.
 """
 
 import asyncio
@@ -113,9 +111,9 @@ def _make_ffa():
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A31", steps=[1])
+@pytest.mark.uc("UC-048", flow="A4", steps=[1])
 async def test_dispatched_grant_reads_the_shield_flags_in_the_game_transaction_context(recorder):
-    """A31 step 1, BR-018: a dispatched grant_shield in a real FFA game resolves both shield
+    """UC-048 A4 step 1, BR-018: a dispatched grant_shield in a real FFA game resolves both shield
     flags with the game's context (targetingKey and game_mode FFA, game_kind=real) plus
     gameId; the agent's gameId + game_kind=real is a subset that the targeting limit keeps
     equivalent."""

@@ -4,9 +4,9 @@ AGENT composition: the real agent (built at HEAD), game coordinator, controller 
 (mock backend) and menu from source, a fresh flag plane and the OtlpSink. It is a smoke
 test, not a statistical one:
 
-- The agent's experiment loop declares ``shield.activation`` -> ``hold`` from the
-  ``experiment_seed`` flag (its declared variant ``windows_frantic`` rewritten in the
-  stack's baseline, the TC-011 seam) on the one archetype that presses the trigger:
+- The agent's dynamic declarer declares ``shield.activation`` -> ``hold`` from the explicit
+  candidate ``experiment_dynamic_candidates`` = ``shield.activation`` (UC-043 A17, BR-012) on the
+  one archetype that presses the trigger:
   ``burst_holder`` (UC-046 BR-018, #2212), selected through the declared
   ``experiment.mock_archetypes`` variant ``quick_cascade`` rewritten to that name (the
   overlay takes declared variants only). ``verdict_min_pairs`` = 1 so one archetype
@@ -41,36 +41,27 @@ HOLD_VALUE = "hold"
 BASELINE_VALUE = "instant"  # shield.activation default (flags.md §4)
 TRIGGER_ARCHETYPE = "burst_holder"  # the one archetype with a trigger_policy (UC-046 BR-018)
 
-SEED_VARIANT = "windows_frantic"
-SEED = {
-    "flag": HOLD_FLAG,
-    "value": HOLD_VALUE,
-    "objective": "endurance",
-    "target_n": 1,
-    "hypothesis": "hold smoke test (#2096 PR-8)",
-}
 ARCHETYPES_VARIANT = "quick_cascade"
 SERVICE_COMPOSITION = replace(
     AGENT,
     flag_variant_values={
-        ("agent", "experiment_seed", SEED_VARIANT): SEED,
         ("agent", "experiment.mock_archetypes", ARCHETYPES_VARIANT): TRIGGER_ARCHETYPE,
     },
 )
 
 # Agent overlays (flags.md section 13.2): one pair, bounded games.
 TUNING = {
-    "verdict_min_n": 1,
     "verdict_min_pairs": 1,
     "experiment_tick_seconds": 3,
-    "experiment_max_games": 4,
     "experiment.max_game_seconds": 60,
 }
 SERVICE_COMPOSITION = replace(
     SERVICE_COMPOSITION,
     agent_flags={
         "experiment.mock_archetypes": {"variant": ARCHETYPES_VARIANT},
-        "experiment_seed": {"variant": SEED_VARIANT},  # before the gates
+        "experiment_dynamic_candidates": {"value": HOLD_FLAG},  # before the gates
+        "experiment_dynamic_objective": {"variant": "endurance"},
+        "experiment_dynamic_enabled": {"variant": "on"},
         "enabled": {"variant": "on"},
         "experiments_enabled": {"variant": "on"},
         "decision.backend": {"variant": "rules"},
@@ -130,7 +121,7 @@ def hold_stack(service_stack):
 @pytest.mark.uc("UC-043", flow="A17", steps=[1, 2])
 @pytest.mark.uc("UC-046", br=["BR-018"])
 def test_hold_experiment_runs_both_arms_and_the_experimental_arm_latches_hold(hold_stack):
-    """A17 steps 1-2: the seed declares shield.activation -> hold on burst_holder, the pin
+    """A17 steps 1-2: the declarer declares shield.activation -> hold on burst_holder, the pin
     passes the hold gate, both arms run, and only the experimental arm latches hold."""
     stack, _client = hold_stack
 
@@ -187,7 +178,7 @@ def test_hold_experiment_runs_both_arms_and_the_experimental_arm_latches_hold(ho
 @pytest.mark.uc("UC-043", flow="A17", steps=[3])
 def test_real_write_of_a_hold_key_lands_while_a_real_game_is_registered(hold_stack):
     """A17 step 3 (stack half): a hold sub-parameter's ``real`` write is accepted while a real
-    game is registered, because the game latched its values at its start (UC-040 BR-027);
+    game is registered, because the game latched its values at its start (UC-048 BR-011);
     ``shield.activation`` has no ``real`` scope. Dry run: nothing is written on the shared stack."""
     _, client = hold_stack
     game_id = f"uc043-a17-real-{uuid.uuid4().hex[:8]}"

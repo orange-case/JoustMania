@@ -2,7 +2,7 @@ package gamecontext
 
 import "testing"
 
-// UC: UC-040 A37
+// UC: UC-048 A9
 // UC: UC-042 BR-007
 // TestApplyMetrics_ShieldHoldGauges: the hold-mode gauges (#2096, telemetry.md §6)
 // land in the game's context: the latched mode and values on the session, the
@@ -20,7 +20,7 @@ func TestApplyMetrics_ShieldHoldGauges(t *testing.T) {
 		}
 		return out
 	}
-	t.Run("UC-040/A37 session mode and settings", func(t *testing.T) {
+	t.Run("UC-048/A9 session mode and settings", func(t *testing.T) {
 		s := newTestStore()
 		if !s.ApplyMetrics(metricsWith(metricShieldActivationMode, 1, with(map[string]string{"mode": "hold"}))) {
 			t.Fatal("mode gauge not applied")
@@ -43,7 +43,7 @@ func TestApplyMetrics_ShieldHoldGauges(t *testing.T) {
 			t.Fatalf("session id = %q, want the adopted g1", c.SessionID)
 		}
 	})
-	t.Run("UC-040/A37 a zero mode datapoint or a missing label is ignored", func(t *testing.T) {
+	t.Run("UC-048/A9 a zero mode datapoint or a missing label is ignored", func(t *testing.T) {
 		s := newTestStore()
 		if s.ApplyMetrics(metricsWith(metricShieldActivationMode, 0, with(map[string]string{"mode": "hold"}))) {
 			t.Fatal("a 0 mode datapoint applied")

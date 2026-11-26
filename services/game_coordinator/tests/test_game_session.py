@@ -528,7 +528,7 @@ class TestGameSessionLoop:
         assert mock_game.experiment_id == "exp_abc123"
         assert mock_game.arm == "experimental"
 
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-004"])
     @pytest.mark.asyncio
     @pytest.mark.parametrize("policy", [True, False])
     @patch("services.game_coordinator.game_session.metrics")
@@ -537,7 +537,7 @@ class TestGameSessionLoop:
     async def test_loop_threads_pattern_trigger_policy_to_the_game(
         self, mock_tracer_mod, mock_factory, mock_metrics, policy
     ):
-        """UC-040 BR-019 (#2096): the session hands its pattern_trigger_policy to the game mode."""
+        """UC-048 BR-004 (#2096): the session hands its pattern_trigger_policy to the game mode."""
         session = _make_session(game_kind=GAME_KIND_SHADOW, pattern_trigger_policy=policy)
         mock_tracer_mod.start_as_current_span = _tracer_mock().start_as_current_span
         mock_game = MagicMock()

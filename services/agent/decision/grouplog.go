@@ -21,7 +21,7 @@ const (
 )
 
 // GroupRecord is one group-shield decision as the game summary counts it (UC-040
-// A47, BR-033, #2529). Outcome is GroupOutcomeApplied, GroupOutcomeBlocked or
+// UC-048 A13, UC-048 BR-014, #2529). Outcome is GroupOutcomeApplied, GroupOutcomeBlocked or
 // another outcome (failed, gated_off), which the summary counts as neither. Rescue
 // is true when at least one target was near_threshold in the context the decision
 // was recorded with (for a remote answer, the context at landing time). Rationale is the backend's reason text only: no arm, no backend.

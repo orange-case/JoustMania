@@ -1,5 +1,5 @@
 """
-Shield hold feedback on the controller manager (#2096, UC-040 BR-026).
+Shield hold feedback on the controller manager (#2096, UC-048 BR-010).
 
 GAME_EFFECT_SHIELD_ENERGY is the idle energy layer (four LED states in the player's
 colour, the cue of a grant or an empty activation, the recharge-to-full pattern);
@@ -163,7 +163,7 @@ def _on_times(backend, intensity=255):
 
 
 class TestUC040HoldLedStates:
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     @pytest.mark.parametrize(
         ("energy", "full", "want"),
         [
@@ -179,13 +179,13 @@ class TestUC040HoldLedStates:
         ],
     )
     def test_energy_state_by_level(self, energy, full, want):
-        """UC-040 BR-026: empty below the minimum burst, low below a third of the cap, full at min(cap, budget)."""
+        """UC-048 BR-010: empty below the minimum burst, low below a third of the cap, full at min(cap, budget)."""
         assert hold_energy_state(energy, 5.0, full, 0.3) == want
 
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     @pytest.mark.parametrize("state", [HOLD_STATE_EMPTY, HOLD_STATE_LOW, HOLD_STATE_CHARGED, HOLD_STATE_FULL])
     def test_idle_frames_never_look_like_death_or_an_active_shield(self, state):
-        """UC-040 BR-026: an idle state is never off or red (death) and never plain white (protected)."""
+        """UC-048 BR-010: an idle state is never off or red (death) and never plain white (protected)."""
         for tick in range(0, 80):
             frame = hold_energy_frame(tick / 20, state, PLAYER)
             assert frame != (0, 0, 0)
@@ -193,9 +193,9 @@ class TestUC040HoldLedStates:
             assert frame != WHITE
             assert not (frame[0] > 0 and frame[1] == 0 and frame[2] == 0)
 
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     def test_each_idle_state_has_its_own_look(self):
-        """UC-040 BR-026: empty steady, low deep 1 Hz, charged 60-100 % 0.5 Hz, full towards a 50 % white blend."""
+        """UC-048 BR-010: empty steady, low deep 1 Hz, charged 60-100 % 0.5 Hz, full towards a 50 % white blend."""
         assert {hold_energy_frame(t / 10, HOLD_STATE_EMPTY, PLAYER) for t in range(40)} == {PLAYER}
         assert hold_energy_frame(0.0, HOLD_STATE_LOW, PLAYER) == PLAYER
         assert hold_energy_frame(0.5, HOLD_STATE_LOW, PLAYER) == (0, 40, 0)  # 20 % at the bottom, 1 Hz
@@ -206,9 +206,9 @@ class TestUC040HoldLedStates:
         assert hold_energy_frame(1.0, HOLD_STATE_FULL, PLAYER) == (128, 228, 128)  # 50 % towards white
 
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     def test_active_frame_is_white_by_the_energy_left_and_blinks_in_the_last_second(self):
-        """UC-040 BR-026 (#2463): floor + (1 - floor) x fill² white above the last second; 4 Hz blink; None at 0."""
+        """UC-048 BR-010 (#2463): floor + (1 - floor) x fill² white above the last second; 4 Hz blink; None at 0."""
         assert hold_active_frame(5.0, 5.0, 0.3) == WHITE
         assert hold_active_frame(3.0, 5.0, 0.3) == (121, 121, 121)  # fill 0.5: 0.3 + 0.7 * 0.25 = 47.5 %
         assert hold_active_frame(1.0, 5.0, 0.3) == WHITE  # the blink window starts on
@@ -217,9 +217,9 @@ class TestUC040HoldLedStates:
         assert hold_active_frame(0.0, 5.0, 0.3) is None
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-010"])
     async def test_a_recharge_moves_the_led_through_the_states_without_a_command(self, cue_manager, clock):
-        """UC-040 A38 / BR-026: 1 s at 0.5 s/s: low, then charged (after 2 s), then full (after 8 s)."""
+        """UC-048 A10 / BR-010: 1 s at 0.5 s/s: low, then charged (after 2 s), then full (after 8 s)."""
         await _effect(cue_manager, ENERGY, 5000, _state(energy=1000, rate=500))
         layer = cue_manager._shield_layers[SERIAL]["energy"]
         energy = cue_manager._hold_energy[SERIAL]
@@ -237,9 +237,9 @@ class TestUC040HoldLedStates:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_the_activation_draws_over_the_energy_layer(self, cue_manager, clock):
-        """UC-040 BR-026: SHIELD_HOLD is painted over the idle energy; SHIELD_HOLD 0 hands the LED back to it."""
+        """UC-048 BR-010: SHIELD_HOLD is painted over the idle energy; SHIELD_HOLD 0 hands the LED back to it."""
         await _effect(cue_manager, ENERGY, 5000, _state(energy=5000))
         await _effect(cue_manager, HOLD, 5000, _state(energy=5000))
         top = cue_manager._top_shield(SERIAL, START)
@@ -255,9 +255,9 @@ class TestUC040HoldLedStates:
 class TestUC040HoldRumble:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_the_background_rumble_comes_back_after_a_warning(self, cue_manager, backend, clock):
-        """UC-040 BR-026: the hold rumble (70) runs while active; a one-shot warning ends back at 70, not 0."""
+        """UC-048 BR-010: the hold rumble (70) runs while active; a one-shot warning ends back at 70, not 0."""
         await _effect(cue_manager, HOLD, 5000, _state(energy=5000, cues=_cues(ending_lead_ms=0)))
         assert backend.rumble[-1][1] == 70
 
@@ -272,9 +272,9 @@ class TestUC040HoldRumble:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_death_ends_the_hold_and_keeps_the_death_rumble(self, cue_manager, backend, clock, monkeypatch):
-        """UC-040 A39 / BR-026: death ends every layer and the background level; the death rumble stops at 0."""
+        """UC-048 A11 / BR-010: death ends every layer and the background level; the death rumble stops at 0."""
         monkeypatch.setattr(fm_module, "DEATH_RUMBLE_MS", 30)
         monkeypatch.setattr(fm_module, "DEATH_RED_HOLD_MS", 1)
         monkeypatch.setattr(fm_module, "DEATH_FADE_MS", 1)
@@ -290,9 +290,9 @@ class TestUC040HoldRumble:
         assert [i for _, i in backend.rumble][-2:] == [255, 0]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     async def test_ending_soon_double_pulse_before_the_energy_runs_out(self, cue_manager, backend, clock):
-        """UC-040 BR-026: 3 s of energy, lead 1 s: two 150 ms pulses from 2.0 s, the motor back at 70 between."""
+        """UC-048 BR-010: 3 s of energy, lead 1 s: two 150 ms pulses from 2.0 s, the motor back at 70 between."""
         clock.enable_blocking()
         await _effect(cue_manager, HOLD, 3000, _state(energy=3000))
         await _step_until(clock, START + 2.4)
@@ -305,9 +305,9 @@ class TestUC040HoldRumble:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     async def test_a_grant_during_the_hold_moves_the_ending_pulse(self, cue_manager, backend, clock):
-        """UC-040 A36 step 2 / BR-026: a restart with a later end moves the pulse; the background is not restarted."""
+        """UC-048 A8 step 2 / BR-010: a restart with a later end moves the pulse; the background is not restarted."""
         clock.enable_blocking()
         # Both commands before the first ending loop runs: the shared fake clock moves at each sleep call.
         assert await cue_manager.handle_game_effect(
@@ -325,9 +325,9 @@ class TestUC040HoldRumble:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     async def test_a_top_up_during_the_hold_is_one_pulse_over_the_background(self, cue_manager, backend, clock):
-        """UC-040 A36 step 4 / BR-026: a partial grant while held: one pulse, then back to the hold rumble."""
+        """UC-048 A8 step 4 / BR-010: a partial grant while held: one pulse, then back to the hold rumble."""
         await _effect(cue_manager, HOLD, 3000, _state(energy=3000, cues=_cues(ending_lead_ms=0)))
         await _effect(
             cue_manager, HOLD, 4000, _state(energy=4000, cue=pb.SHIELD_HOLD_CUE_TOP_UP, cues=_cues(ending_lead_ms=0))
@@ -338,9 +338,9 @@ class TestUC040HoldRumble:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_empty_is_one_pulse_of_empty_pulse_ms(self, cue_manager, backend, clock):
-        """UC-040 A39 / BR-026: the EMPTY cue is one 400 ms pulse at the cue intensity."""
+        """UC-048 A11 / BR-010: the EMPTY cue is one 400 ms pulse at the cue intensity."""
         await _effect(cue_manager, ENERGY, 5000, _state(energy=0, cue=pb.SHIELD_HOLD_CUE_EMPTY))
         await asyncio.wait_for(cue_manager._hold_cue_tasks.get(SERIAL) or asyncio.sleep(0), timeout=2)
 
@@ -348,12 +348,12 @@ class TestUC040HoldRumble:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     @pytest.mark.parametrize(
         ("cue", "want"), [(pb.SHIELD_HOLD_CUE_FULL, [0.0, 0.25, 0.5]), (pb.SHIELD_HOLD_CUE_TOP_UP, [0.0])]
     )
     async def test_full_plays_the_grant_pattern_and_a_top_up_one_pulse(self, cue_manager, backend, clock, cue, want):
-        """UC-040 A36 step 4 (maintainer decision): the full pattern only when the pool is full, else one pulse."""
+        """UC-048 A8 step 4 (maintainer decision): the full pattern only when the pool is full, else one pulse."""
         await _effect(
             cue_manager, ENERGY, 5000, _state(energy=5000 if cue == pb.SHIELD_HOLD_CUE_FULL else 2000, cue=cue)
         )
@@ -363,9 +363,9 @@ class TestUC040HoldRumble:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-010"])
     async def test_recharge_to_full_plays_the_grant_pattern_once(self, cue_manager, backend, clock):
-        """UC-040 A38 step 3: 4 s + 0.5 s/s fills (minus the 0.05 s room) at 1.9 s: the grant pattern, once."""
+        """UC-048 A10 step 3: 4 s + 0.5 s/s fills (minus the 0.05 s room) at 1.9 s: the grant pattern, once."""
         await _effect(cue_manager, ENERGY, 5000, _state(energy=4000, rate=500))
         await asyncio.wait_for(cue_manager._hold_cue_tasks[SERIAL], timeout=2)
 
@@ -373,9 +373,9 @@ class TestUC040HoldRumble:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-010"])
     async def test_no_recharge_pattern_without_a_rate_or_a_usable_budget(self, cue_manager, backend, clock):
-        """UC-040 A38 step 4: rate 0, or a budget remainder below the minimum burst, never plays the pattern."""
+        """UC-048 A10 step 4: rate 0, or a budget remainder below the minimum burst, never plays the pattern."""
         await _effect(cue_manager, ENERGY, 5000, _state(energy=1000, rate=0))
         await _spin()
         assert SERIAL not in cue_manager._hold_cue_tasks
@@ -386,9 +386,9 @@ class TestUC040HoldRumble:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026", "BR-027"])
+    @pytest.mark.uc("UC-048", br=["BR-010", "BR-011"])
     async def test_the_shipped_cue_values_win_over_the_flags(self, cue_manager, backend, clock, monkeypatch):
-        """UC-040 BR-026: the game's latched values play; a missing field falls back to the flag read."""
+        """UC-048 BR-010: the game's latched values play; a missing field falls back to the flag read."""
         await _effect(
             cue_manager, HOLD, 5000, _state(energy=5000, cues=_cues(hold_rumble_intensity=110, ending_lead_ms=0))
         )
@@ -402,9 +402,9 @@ class TestUC040HoldRumble:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_a_disconnect_drops_every_hold_state(self, cue_manager, clock):
-        """UC-040 BR-026: a disconnected controller keeps no hold layer, energy, cue values or background level."""
+        """UC-048 BR-010: a disconnected controller keeps no hold layer, energy, cue values or background level."""
         await _effect(cue_manager, ENERGY, 5000, _state(energy=4000, rate=500))
         await _effect(cue_manager, HOLD, 4000, _state(energy=4000))
         cue_manager.clear_controller(SERIAL)
@@ -422,9 +422,9 @@ class TestUC040HoldRumble:
 
 class TestUC040HoldRenderer:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_an_activation_that_runs_out_without_its_end_command_stops_its_rumble(self, manager, backend, clock):
-        """UC-040 BR-026: the renderer drops an expired hold layer and its background rumble with it."""
+        """UC-048 BR-010: the renderer drops an expired hold layer and its background rumble with it."""
         await _effect(manager, ENERGY, 5000, _state(energy=300))
         await _effect(manager, HOLD, 300, _state(energy=300, cues=_cues(ending_lead_ms=0)))
         assert backend.rumble[-1][1] == 70
@@ -462,12 +462,12 @@ class TestUC040HoldEmptyThenDeath:
     """#2462: the trigger held past empty, then a death; nothing of the hold survives the death."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     @pytest.mark.parametrize("death_after_s", [0.0, 0.1, 0.5])
     async def test_held_past_empty_then_death_ends_rumble_and_white(
         self, manager, backend, clock, monkeypatch, death_after_s
     ):
-        """UC-040 A39 step 4: HOLD 0 and the empty pulse, then the death: the motor ends at 0, the LED off."""
+        """UC-048 A11 step 4: HOLD 0 and the empty pulse, then the death: the motor ends at 0, the LED off."""
         _short_death(monkeypatch)
         await _effect(manager, ENERGY, 5000, _state(energy=2000))
         await _effect(manager, HOLD, 2000, _state(energy=2000))
@@ -490,9 +490,9 @@ class TestUC040HoldEmptyThenDeath:
         assert [i for _, i in backend.rumble[before_end:]].count(255) <= 2
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_the_empty_pulse_is_single_and_ends(self, manager, backend, clock):
-        """UC-040 BR-026: running out while held gives one empty_pulse_ms pulse, then the motor is off."""
+        """UC-048 BR-010: running out while held gives one empty_pulse_ms pulse, then the motor is off."""
         await _effect(manager, ENERGY, 5000, _state(energy=1000))
         await _effect(manager, HOLD, 1000, _state(energy=1000, cues=_cues(ending_lead_ms=0)))
         await _run_clock(clock, 1.0)
@@ -508,9 +508,9 @@ class TestUC040HoldEmptyThenDeath:
         await _finish(manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_death_ends_the_hold_state_when_no_layer_is_left(self, cue_manager, backend, clock, monkeypatch):
-        """UC-040 BR-026 (#2462): a death with no shield layer left still ends the background level and the cues.
+        """UC-048 BR-010 (#2462): a death with no shield layer left still ends the background level and the cues.
 
         A hold background level, or a cue task, that outlives its layer would bring the hold
         rumble back after the death rumble and keep it on: the death must clear it anyway.
@@ -531,9 +531,9 @@ class TestUC040HoldEmptyThenDeath:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_game_end_shield_zero_ends_the_hold_state_when_no_layer_is_left(self, cue_manager, backend, clock):
-        """UC-040 A39 / BR-026 (#2462): SHIELD 0 at the game end clears a leftover background level too."""
+        """UC-048 A11 / BR-010 (#2462): SHIELD 0 at the game end clears a leftover background level too."""
         await _effect(cue_manager, HOLD, 5000, _state(energy=5000, cues=_cues(ending_lead_ms=0)))
         cue_manager._shield_layers.pop(SERIAL)
 
@@ -544,10 +544,10 @@ class TestUC040HoldEmptyThenDeath:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     @pytest.mark.parametrize("effect", [pb.GAME_EFFECT_SHIELD_CHARGE, pb.GAME_EFFECT_TOUGHNESS_BOOST])
     async def test_a_partial_end_with_no_layer_left_keeps_the_hold_state(self, cue_manager, backend, clock, effect):
-        """UC-040 BR-026 (#2462): only a full end (death, game end) stops the hold state when no layer is left.
+        """UC-048 BR-010 (#2462): only a full end (death, game end) stops the hold state when no layer is left.
 
         A charge or boost end that finds no layer must not stop a living player's hold rumble or idle pool.
         """
@@ -567,9 +567,9 @@ class TestUC040HoldEmptyThenDeath:
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", br=["BR-026"])
+@pytest.mark.uc("UC-048", br=["BR-010"])
 async def test_the_servicer_forwards_the_hold_state():
-    """UC-040 BR-026: a GameEffectCommand's shield_hold reaches the feedback manager."""
+    """UC-048 BR-010: a GameEffectCommand's shield_hold reaches the feedback manager."""
     from services.controller_manager.servicer import ControllerManagerServicer
 
     servicer = MagicMock()

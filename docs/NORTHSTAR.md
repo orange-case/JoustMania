@@ -26,7 +26,7 @@ anywhere.
 |------|--------|-----------------|
 | 1 | In-game interventions: bounded, scoped to the current game, reversible | Applies directly, as a flag flip |
 | 2 | Persistent tuning (game flags, thresholds, weights) and interpreted game logic | Applies once shadow validation passes |
-| 3 | Anything needing a compile step | Proposes only (issue or PR); a human reviews |
+| 3 | Anything needing a compile step | Proposes only (an issue); a human reviews |
 
 The agent observes only through OTel, but it may *write* code proposals at tier 3.
 
@@ -42,7 +42,7 @@ Then we measure whether it finds the move on its own, in shadow experiments wher
 ## Data flywheel
 
 1. **Shadow games** are the main data source for experiments.
-2. **Real game spans calibrate the mocks** and anchor experiment verdicts
+2. **Real game spans calibrate the mocks**; an autonomous promotion is watched
    against recent real games.
 3. **Live outcomes become ground truth**, with automatic rollback on
    degradation.
@@ -79,8 +79,8 @@ engine is the offline floor.
 ## Where we are today
 
 - **Promotion** flips the real default flag only in the gated `autonomous`
-  mode. By default (`code_improvement.mode`: `issue`, then `pr`) a human
-  reviews the promotion, once `AGENT_CODE_IMPROVEMENT_ENABLED` / `GITHUB_*` are
+  mode. By default (`code_improvement.mode`: `issue`) a human
+  reviews the promotion as a GitHub issue, once `AGENT_CODE_IMPROVEMENT_ENABLED` / `GITHUB_*` are
   set (D-A6); the stock stack only records them.
 - **Live rollback** exists in gated form: autonomous promotion watches real
   games and reverts on degradation.

@@ -32,6 +32,9 @@
 #    and 5th restart inside the window start; a start systemd still refuses is
 #    retried once, then reported as refused (never unhealthy, never rolled back);
 #    --status shows start-limit-hit with the recovery command
+#  - the operator pad udev rule (#2858): a missing or differing rule is named
+#    with its fix after a healthy upgrade and after --rollback, never written;
+#    a current rule, or a version without one, prints nothing
 #  - a stale worktree registration is pruned; COMPOSE_PROFILES from the unit honoured
 #  - joustmania-compose.sh derives IMAGE_TAG from a pinned HEAD over .env.local
 #    (X.Y.Z of the release tag, else the sha; nothing on a branch), with a stderr
@@ -39,7 +42,7 @@
 #    IMAGE_TAG in .env.local
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-joustmania-upgrade.sh
 # UC: UC-060 main step 2 A2 A3
-# Spec: docs/specs/stage-host.md SH-4 SH-5 SH-6 SH-7
+# Spec: docs/specs/stage-host.md SH-4 SH-5 SH-6 SH-7 SH-17
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 
@@ -75,7 +78,8 @@ commit() { # $1 = message, $2 = IMAGE_TAG in .env
 add_scripts() { # $1 = floor commit
   mkdir -p "${SRC}/scripts/setup"
   cp "${ROOT}/scripts/setup/joustmania-compose.sh" "${ROOT}/scripts/setup/lib-joustmania.sh" \
-    "${ROOT}/scripts/setup/joustmania-start.sh" "${ROOT}/scripts/setup/joustmania.service" "${SRC}/scripts/setup/"
+    "${ROOT}/scripts/setup/joustmania-start.sh" "${ROOT}/scripts/setup/joustmania.service" \
+    "${ROOT}/scripts/setup/99-joustmania-operator-pad.rules" "${SRC}/scripts/setup/"
   sed -e "s/^MIN_PINNABLE_COMMIT=.*/MIN_PINNABLE_COMMIT=\"$1\"/" -e 's/^MIN_PINNABLE=.*/MIN_PINNABLE="1.0.0"/' \
     "${ROOT}/scripts/setup/joustmania-upgrade.sh" >"${SRC}/scripts/setup/joustmania-upgrade.sh"
   chmod +x "${SRC}/scripts/setup/"*.sh
@@ -236,12 +240,14 @@ STUB
 # upgrade <args...>: runs the checkout's own command; returns its exit code
 upgrade() {
   env PATH="${CASE}/bin:${PATH}" TMPDIR="${CASE}/tmp" JOUSTMANIA_HEALTH_TIMEOUT=1 JOUSTMANIA_HEALTH_POLL=1 \
+    JOUSTMANIA_PAD_RULE="${CASE}/pad.rules" \
     bash "${REPO}/scripts/setup/joustmania-upgrade.sh" "$@" >"${CASE}/out.log" 2>&1
 }
 # upgrade_killed <args...>: like upgrade, for a run the docker stub kills (kill-on-images)
 upgrade_killed() {
   rm -f "${CASE}/upgrade.pid"
   env PATH="${CASE}/bin:${PATH}" TMPDIR="${CASE}/tmp" JOUSTMANIA_HEALTH_TIMEOUT=1 JOUSTMANIA_HEALTH_POLL=1 \
+    JOUSTMANIA_PAD_RULE="${CASE}/pad.rules" \
     bash "${REPO}/scripts/setup/joustmania-upgrade.sh" "$@" >"${CASE}/out.log" 2>&1 &
   echo "$!" >"${CASE}/upgrade.pid"
   { wait "$!"; } 2>/dev/null || true
@@ -372,15 +378,42 @@ done
 for gone in "${GC}:0.9.0"; do
   grep -qxF "${gone}" "${CASE}/images.local" && fail "tag: superseded ${gone} not pruned"
 done
+# the operator pad udev rule (#2858): named, never written
+PAD_FIX="sudo ${REPO}/scripts/setup/setup_runtime.sh, or: sudo install -m 0644 ${REPO}/scripts/setup/99-joustmania-operator-pad.rules ${CASE}/pad.rules && sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=hidraw"
+grep -qxF "joustmania-upgrade: operator pad udev rule ${CASE}/pad.rules is missing (the pad screens of UC-016 need it): run ${PAD_FIX}" "${CASE}/out.log" ||
+  fail "tag: missing pad rule not named: $(grep 'pad' "${CASE}/out.log")"
+[[ -e "${CASE}/pad.rules" ]] && fail "tag: the upgrade wrote the pad rule"
+grep -q udevadm "${CASE}/calls.log" && fail "tag: the upgrade ran udevadm"
 
 # --- 5. --rollback, offline: no registry, no fetch --------------------------
 echo 000 >"${CASE}/http_code"
 : >"${CASE}/calls.log"
+{ cat "${REPO}/scripts/setup/99-joustmania-operator-pad.rules"; echo '# older'; } >"${CASE}/pad.rules"
+cp "${CASE}/pad.rules" "${CASE}/pad.rules.before"
 upgrade --rollback || fail "rollback: failed: $(tail -2 "${CASE}/out.log")"
 [[ "$(head_of)" == "${C_V1}" ]] || fail "rollback: HEAD is not back at 1.0.0"
 grep -qE '^curl|git fetch' "${CASE}/calls.log" && fail "rollback: touched the network"
 grep -qx "sudo systemctl restart joustmania" "${CASE}/calls.log" || fail "rollback: unit not restarted"
 [[ "$(rel current_ref)" == "${C_V1}" && "$(rel previous_ref)" == "${C_V11}" ]] || fail "rollback: record not swapped"
+grep -qxF "joustmania-upgrade: operator pad udev rule ${CASE}/pad.rules differs from this checkout (the pad screens of UC-016 need it): run ${PAD_FIX}" "${CASE}/out.log" ||
+  fail "rollback: outdated pad rule not named: $(grep 'pad' "${CASE}/out.log")"
+cmp -s "${CASE}/pad.rules" "${CASE}/pad.rules.before" || fail "rollback: the pad rule was changed"
+grep -q udevadm "${CASE}/calls.log" && fail "rollback: ran udevadm"
+# the rule as in the checkout: no hint
+make_case pad-rule-current "${C_V1}"
+cp "${REPO}/scripts/setup/99-joustmania-operator-pad.rules" "${CASE}/pad.rules"
+upgrade joustmania-v1.1.0 || fail "pad-rule-current: upgrade failed: $(tail -3 "${CASE}/out.log")"
+grep -q 'pad udev rule' "${CASE}/out.log" && fail "pad-rule-current: hint printed for a current rule"
+: >"${CASE}/calls.log"
+upgrade --rollback || fail "pad-rule-current: rollback failed: $(tail -2 "${CASE}/out.log")"
+grep -q 'pad udev rule' "${CASE}/out.log" && fail "pad-rule-current: hint printed after the rollback for a current rule"
+# a version without the rule (before #2748) says nothing
+(
+  # shellcheck source=../setup/lib-joustmania.sh
+  source "${ROOT}/scripts/setup/lib-joustmania.sh"
+  mkdir -p "${CASE}/no-rule/scripts/setup"
+  [[ -z "$(JOUSTMANIA_PAD_RULE="${CASE}/absent.rules" joustmania_pad_rule_hint "${CASE}/no-rule")" ]]
+) || fail "pad-rule: hint printed for a version without the rule"
 make_case rollback-norecord "${C_V1}"
 if upgrade --rollback; then fail "rollback-norecord: succeeded without a record"; fi
 nothing_changed rollback-norecord "${C_V1}"
@@ -578,12 +611,12 @@ grep -q restart "${CASE}/calls.log" && fail "same-missing-offline: restarted"
 
 # --- 6. sha accepted from a branch checkout (the one-time migration) --------
 make_case sha
-printf 'COMPOSE_PROFILES=python-hid JOUSTMANIA_UNIT_REV=2\n' >"${CASE}/unit-env"
+printf 'COMPOSE_PROFILES=operator-pad JOUSTMANIA_UNIT_REV=2\n' >"${CASE}/unit-env"
 upgrade "${C_MAIN}" || fail "sha: upgrade failed: $(tail -3 "${CASE}/out.log")"
 [[ "$(head_of)" == "${C_MAIN}" ]] || fail "sha: HEAD is not the sha"
 [[ "$(rel current_tag)" == "${C_MAIN}" ]] || fail "sha: image tag is not the full sha: $(rel current_tag)"
 [[ "$(rel previous_ref)" == "${C_V1}" ]] || fail "sha: previous is not the branch commit"
-grep -q "compose.* pull | tag=${C_MAIN} profiles=python-hid" "${CASE}/calls.log" \
+grep -q "compose.* pull | tag=${C_MAIN} profiles=operator-pad" "${CASE}/calls.log" \
   || fail "sha: pull did not use the sha tag and the unit's COMPOSE_PROFILES"
 
 # --- 7. not healthy: automatic rollback; --no-rollback leaves it ------------

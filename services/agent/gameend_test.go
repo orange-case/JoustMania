@@ -89,14 +89,13 @@ func TestOnGameEnd_StaleEndExcludedFromExperiments(t *testing.T) {
 		scored := 0
 		spawner := &recordingSpawner{}
 		resolve := func(context.Context) promote.Config {
-			return promote.Config{Mode: promote.ModeIssue, Target: promote.TargetLocal, Enabled: false}
+			return promote.Config{Mode: promote.ModeIssue, Enabled: false}
 		}
 		loop := buildLoopForTest(t, spawner, resolve, &recordingRealDefault{}, &recordingGitHub{},
 			countingFitness(&scored, armFitness()))
 		loop.fitnessStore = experiment.NewFitnessStore(0)
 		id, err := loop.registry.Declare(experiment.Intent{
-			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-		})
+			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 		if err != nil {
 			t.Fatalf("declare: %v", err)
 		}
@@ -135,12 +134,11 @@ func TestOnGameEnd_StaleEndExcludedFromExperiments(t *testing.T) {
 	t.Run("UC-041/A4 stale-ended experiment game: released as stale and refilled", func(t *testing.T) {
 		spawner := &recordingSpawner{}
 		resolve := func(context.Context) promote.Config {
-			return promote.Config{Mode: promote.ModeIssue, Target: promote.TargetLocal, Enabled: true}
+			return promote.Config{Mode: promote.ModeIssue, Enabled: true}
 		}
 		loop := buildLoopForTest(t, spawner, resolve, &recordingRealDefault{}, &recordingGitHub{}, armFitness())
 		id, err := loop.registry.Declare(experiment.Intent{
-			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-		})
+			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 		if err != nil {
 			t.Fatalf("declare: %v", err)
 		}

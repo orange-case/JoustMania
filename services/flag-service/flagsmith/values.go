@@ -23,8 +23,7 @@ type Value struct {
 	Present bool
 	// Variant is the declared variant name when the value is one, else "".
 	Variant string
-	// Value is the JSON value (compact). Event lists: the events array;
-	// fraction: FractionValue's object.
+	// Value is the JSON value (compact). Event lists: the events array.
 	Value json.RawMessage
 	// Writer is the writer label of the local change; it is not part of
 	// Equal (Flagsmith does not store it).
@@ -62,20 +61,6 @@ func compact(raw json.RawMessage) json.RawMessage {
 	return buf.Bytes()
 }
 
-// FractionValue is the one form of a fraction overlay's value (architecture
-// note §2): {"variant": <declared name, or the value>, "fraction_percent": n}.
-func FractionValue(variant string, value json.RawMessage, percent int) json.RawMessage {
-	v := compact(value)
-	if variant != "" {
-		v, _ = json.Marshal(variant)
-	}
-	out, _ := json.Marshal(struct {
-		Variant         json.RawMessage `json:"variant"`
-		FractionPercent int             `json:"fraction_percent"`
-	}{v, percent})
-	return out
-}
-
 // ValueOfChange maps an observer Change to its Key and Value, the one mapping
 // the out and in sides compare with. ok is false for the lifecycle kinds.
 func ValueOfChange(c state.Change) (Key, Value, bool) {
@@ -86,13 +71,6 @@ func ValueOfChange(c state.Change) (Key, Value, bool) {
 	case state.ChangeEvents:
 		return k, Value{Present: true, Value: compact(c.Events), Writer: c.Writer}, true
 	case state.ChangeValue:
-		if c.ScopeName == registry.ScopeFraction {
-			pct := 0
-			if c.Scope.FractionPercent != nil {
-				pct = *c.Scope.FractionPercent
-			}
-			return k, Value{Present: true, Value: FractionValue(c.DeclaredVariant, c.Value, pct), Writer: c.Writer}, true
-		}
 		return k, Value{Present: true, Variant: c.DeclaredVariant, Value: compact(c.Value), Writer: c.Writer}, true
 	}
 	return Key{}, Value{}, false
@@ -101,7 +79,7 @@ func ValueOfChange(c state.Change) (Key, Value, bool) {
 // Encode turns a Value into the Flagsmith value of architecture note §2.1: a
 // declared variant is its name (unicode); an integer range is int; a float
 // range is decimal text; a string is itself; an object or array (shape flags,
-// event lists, fraction) is compact JSON text. A Value that is not Present
+// event lists) is compact JSON text. A Value that is not Present
 // encodes the baseline default (the defaultVariant's name), which Flagsmith
 // shows with enabled=false for reference.
 func Encode(p *registry.Policy, b *baseline.Flag, v Value) (FSValue, error) {

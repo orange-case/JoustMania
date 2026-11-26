@@ -70,10 +70,6 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     # ---- agent: tuning knobs with a built-in fallback ----
     (
         "agent",
-        "AGENT_EXPERIMENT_MAX_GAMES",
-    ): "operator ceiling (C-034, #1810): unset = no ceiling, the experiment_max_games flag governs",
-    (
-        "agent",
         "AGENT_EXPERIMENT_DIR",
     ): "falls back to /var/lib/joustmania/agent/experiments, the agent-experiments volume mount",
     (
@@ -116,16 +112,12 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ): "operator attestation (UC-043 A23, C-034): unset = no objective validated, autonomous promotion refused (fail closed)",
     (
         "agent",
-        "AGENT_LOCAL_REPO_DIR",
-    ): "read only when AGENT_CODE_IMPROVEMENT_ENABLED=true (local promotion target)",
-    (
-        "agent",
         "GITHUB_TOKEN",
-    ): "read only when AGENT_CODE_IMPROVEMENT_ENABLED=true (GitHub promotion target)",
+    ): "read only when AGENT_CODE_IMPROVEMENT_ENABLED=true (issue-mode promotion)",
     (
         "agent",
         "GITHUB_REPOSITORY",
-    ): "read only when AGENT_CODE_IMPROVEMENT_ENABLED=true (GitHub promotion target)",
+    ): "read only when AGENT_CODE_IMPROVEMENT_ENABLED=true (issue-mode promotion)",
 }
 
 

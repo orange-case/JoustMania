@@ -25,18 +25,14 @@ func BuildState(c gamecontext.GameContext) State {
 // GameContext snapshot. The zero value adds nothing, so BuildStateWith(c,
 // Annotations{}) equals BuildState(c).
 type Annotations struct {
-	// Charged holds the serials the agent's shield-charge ledger holds a live
-	// entry for at the moment the state is built (UC-040 A31; #1870).
+	// Charged holds the serials the coordinator reports holding a trigger-mode
+	// charge (game_player_shield_gate, UC-048 A4).
 	Charged map[string]bool
-	// ShieldInFlight holds, per serial, the seconds of the agent's grant_shield
-	// writes in flight (reserved, not finished) at the moment the state is built. In
-	// a hold game they are added to the player's energy (#2096; UC-040 A37).
-	ShieldInFlight map[string]float64
 	// NoShield holds the serials the agent would refuse a grant_shield to at the
 	// moment the state is built, for any reason (Loop.ShieldSerials' no-shield set:
 	// charged, capped, cooling down, and in a hold game a full pool or a used-up
 	// budget). An alive player in it but not in Charged is marked ShieldLimited
-	// (#2066; UC-040 A33, A37).
+	// (#2066; UC-048 A6, A9).
 	NoShield map[string]bool
 	// Levels holds the values the agent last wrote to this game, keyed
 	// LevelKey(intervention, serial) (the applied-value ledger, Loop.AppliedValues;
@@ -97,7 +93,7 @@ func BuildStateWith(c gamecontext.GameContext, ann Annotations) State {
 		ElapsedSeconds: elapsedSeconds(c),
 		LeverCooldown:  ann.Cooling,
 	}
-	applyHoldState(&st, c, ann)
+	applyHoldState(&st, c)
 	st.MostHeadroom, st.Struggling = applyDangerSignals(st.Players, c.Session.DeathThreshold)
 	st.Narrative = renderNarrative(c, st)
 	st.Digest = digest(st)

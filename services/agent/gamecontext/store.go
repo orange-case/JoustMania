@@ -638,6 +638,40 @@ func (s *Store) SetShieldSetting(key string, v float64) {
 	s.touchSession()
 }
 
+// SetShieldGate records one stat of a player's agent shield gate (UC-048 A4, A6).
+// It touches neither the player nor the session: the series lasts the whole game.
+func (s *Store) SetShieldGate(serial, stat string, v float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	gates := make(map[string]ShieldGate, len(s.ctx.Session.ShieldGate)+1)
+	for k, old := range s.ctx.Session.ShieldGate {
+		gates[k] = old
+	}
+	g := gates[serial]
+	switch stat {
+	case ShieldGateGrants:
+		g.Grants = int(v)
+	case ShieldGateCharged:
+		g.Charged = v == 1
+	case ShieldGateCooldownUntil:
+		g.CooldownUntil = time.Time{}
+		if v > 0 {
+			g.CooldownUntil = time.UnixMilli(int64(v * 1000))
+		}
+	default:
+		return
+	}
+	gates[serial] = g
+	s.ctx.Session.ShieldGate = gates
+}
+
+// SetShieldGroupGrants records the game's applied group shields (UC-048 A13).
+func (s *Store) SetShieldGroupGrants(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ctx.Session.ShieldGroupGrants = &n
+}
+
 // SetPlayerShieldEnergy records a hold-mode player's shield energy (#2096).
 func (s *Store) SetPlayerShieldEnergy(serial string, v float64) {
 	s.mu.Lock()

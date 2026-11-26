@@ -37,7 +37,7 @@ func TestNewGitHubClientFromEnv_UnsafeAPIURLDisablesClient(t *testing.T) {
 			setGitHubEnv(t, raw)
 			var buf bytes.Buffer
 			log := slog.New(slog.NewTextHandler(&buf, nil))
-			gh, err := NewGitHubClientFromEnv(TargetGitHub, log)
+			gh, err := NewGitHubClientFromEnv(log)
 			if gh != nil || err != nil {
 				t.Fatalf("NewGitHubClientFromEnv(%q) = (%v, %v), want (nil, nil)", raw, gh, err)
 			}
@@ -63,7 +63,7 @@ func TestNewGitHubClientFromEnv_SafeAPIURLBuildsClient(t *testing.T) {
 		t.Run("UC-043/A14 accepts "+raw, func(t *testing.T) {
 			setGitHubEnv(t, raw)
 			var buf bytes.Buffer
-			gh, err := NewGitHubClientFromEnv(TargetGitHub, slog.New(slog.NewTextHandler(&buf, nil)))
+			gh, err := NewGitHubClientFromEnv(slog.New(slog.NewTextHandler(&buf, nil)))
 			if gh == nil || err != nil {
 				t.Fatalf("NewGitHubClientFromEnv(%q) = (%v, %v), want a client", raw, gh, err)
 			}
@@ -91,7 +91,7 @@ func TestGitHubClient_FollowsNoRedirect(t *testing.T) {
 	defer redirector.Close()
 
 	setGitHubEnv(t, redirector.URL)
-	gh, err := NewGitHubClientFromEnv(TargetGitHub, discardLogger())
+	gh, err := NewGitHubClientFromEnv(discardLogger())
 	if gh == nil || err != nil {
 		t.Fatalf("client = (%v, %v)", gh, err)
 	}

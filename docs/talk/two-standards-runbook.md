@@ -291,7 +291,7 @@ The Jaeger search URL parameters are standard Jaeger UI query parameters;
 - **`invoke_agent joustmania-agent` span** (Jaeger, service `agent`): `gen_ai.agent.name`,
   `gen_ai.conversation.id` (= the game), `gen_ai.request.model`,
   `decide.backend` / `decide.backend.requested`, `decide.fallback_reason`,
-  `decide.outcome`, `decide.discarded_reason`, `decide.confidence`,
+  `decide.outcome`, `decide.discarded_reason`, `decide.confidence` (remote backends only),
   `decide.act_confidence_threshold` (the answering backend's own flag),
   `decide.rationale` (the "why"), `decide.answers`,
   `decide.latency_ms`, `error.type`, and a `gen_ai.evaluation.result` event
@@ -391,7 +391,7 @@ Start state: the baseline, a real game running. `backend.sh` below is
 
 | # | Talk beat | Command | Flag changed | Expected on screen (dashboard / Jaeger / game) | Expected latency | Fallback if it doesn't show |
 |---|---|---|---|---|---|---|
-| 1 | **Observe**: the agent decides; why + confidence | (none; play) `backend.sh status` on screen | none | Dashboard: rows with backend `rules`, outcome `act`. Jaeger: open a row's `trace` link; `invoke_agent joustmania-agent` with `decide.rationale`, `decide.confidence`, `gen_ai.agent.name`; on the rules path the `agent.decision` spans (action, allowed/blocked) are its **siblings** under `agent.signal_received` | a row per rules decision; rules decisions depend on play. **Verify in rehearsal** how often a 4-player game decides | Run `demo_driver.py --scenario statue` (mock stack) or ask a player to freeze; show a pre-captured trace |
+| 1 | **Observe**: the agent decides, and why | (none; play) `backend.sh status` on screen | none | Dashboard: rows with backend `rules`, outcome `act`, no confidence (the rules record what they decided; confidence comes with a model, beat 2). Jaeger: open a row's `trace` link; `invoke_agent joustmania-agent` with `decide.answers`, `gen_ai.agent.name`; on the rules path the `agent.decision` spans (action, reason, allowed/blocked) are its **siblings** under `agent.signal_received` | a row per rules decision; rules decisions depend on play. **Verify in rehearsal** how often a 4-player game decides | Run `demo_driver.py --scenario statue` (mock stack) or ask a player to freeze; show a pre-captured trace |
 | 2 | **Live model switch to Jev (the main in-game backend)**: acts when the game needs it, stays out when it does not | `backend.sh jev` | `decision.backend=jev` | Strip flashes to `jev` / `jev-latest`; the threshold (0.60) appears with the first `act` / `held` row (before that "—" or dimmed). Calm play: grey `noop` rows ("84% sure nothing is needed"). Ask the players to push to the edge (near the death threshold) or let eliminations pile up: a green `act` row and something the audience notices: `grant_shield` turns the player's LED and dashboard tile white with a `Shield 5.0s` badge, fades, blinks in the last second and returns to the player colour, with the shield sound; `adjust_music_tempo` speeds the music up; `play_audio_cue` plays the lobby ping. Jaeger: the act trace has two `chat jev-latest` children (`jev.stage=intervention`, then `details`); the stage-1 span shows `jev.gate.p_yes` (around 0.7 near the threshold, around 0.16 calm; measure, do not promise), the event says e.g. `confidence 0.720 >= threshold 0.600 (decision.jev.act_confidence_threshold)` | flag-service push (p95 200 ms, NFR-050) + next decide slot (up to 3 s) + call: noop round about 0.22-0.34 s, act round about 0.47-0.57 s | `~~jev~~ -> rules, backend_unavailable`: `JEV_API_KEY` missing, see failure modes. `timeout` / `error`: Jev unreachable, go to beat 4 now (Claude backup). No `act` ever: mock stack `demo_driver.py --scenario death_cascade` (collapse) or `skill_gap` (novices in the danger zone); show a captured act trace |
 | 3b | Permissions: what it may do (**cut**) | `./scripts/talk-stage.sh permissions none 12` (holds `none` 12 s, then restores `standard`; Ctrl-C restores at once) | `interventions_allowed` | No new rows: **the permission shrinks the question the model is asked (remote backends)**, and with `none` the only option left would be `noop`, so the agent does not ask at all (no remote call, no budget spent; `agent_llm_gated_total{reason=no_interventions_allowed}` counts the skipped cycles, #1298). The `ffa.intervention` options are `noop` plus the allowed list (`decide.FFAQuestions`, visible in `decide.questions`). Back on `standard` Jev is offered shield, tempo, cue and the rest again | flag-service push (p95 200 ms, NFR-050) + next decision | The helper restores `standard` on every exit but `kill -9`; if the beat was killed, `./scripts/talk-stage.sh reset` (the pre-flight FAILs on `none` / `probe`) |
 | 4 | **The backup backend: flip to Claude** (manual, one flag; no automatic jev -> claude chain) | `backend.sh claude` (haiku) | `decision.backend=claude` | Strip flashes to `claude` / `claude-haiku-4-5-20251001`; the threshold may still show a dimmed 0.60 from Jev's last routed row until Claude's first `act` / `held` row shows 0.80 (claude's own `decision.claude.act_confidence_threshold`). New rows backend `claude`; Jaeger child `chat claude-haiku-4-5-20251001` with `gen_ai.provider.name=anthropic`. Same contract, same rows, slower: point at `decide.latency_ms` (about 3 s vs Jev's 0.3-0.5 s) | flag-service push (p95 200 ms, NFR-050) + next slot + about 2.7-3.0 s (Haiku warm) | `backend_unavailable`: `ANTHROPIC_API_KEY` missing. `timeout` (above `decision.claude.timeout_ms`, default 5000 ms): `setflag agent decision.claude.timeout_ms patient` (8000) |
@@ -455,7 +455,7 @@ The section number is kept so references stay stable.
       and a runtime pairing flag change applies.
 - [ ] No stale `joustmania-python-hid` from an older install (#1402):
       `docker ps -a --filter name=joustmania-python-hid` is empty. The start
-      script removes it when the `python-hid` profile is off; by hand:
+      removes it as a compose orphan (#2784); by hand:
       `docker rm -f joustmania-python-hid`.
 - [ ] `.env.local` holds `JEV_API_KEY`, `ANTHROPIC_API_KEY`,
       no `IMAGE_TAG` (the pin is the checked-out
@@ -674,12 +674,8 @@ like on a real game, so every beat from 2 to 7 still shows.
 loop; `experiment_dynamic_enabled=on` lets the agent declare experiments
 itself (on game-tuning flags of the `game` set only, the experiment catalog: plumbing, lobby and ceremony
 flags are excluded, UC-070 BR-008; shadow games only, promotion stays gated), so no
-env change or agent restart is needed. An `experiment_seed` variant (what
-`agent-dryrun-enable.sh on` sets) also works, but a seed left set is not declared
-again: after the kill-switch beat (`enabled=off` aborts every experiment) or a
-`fallback off`, only the dynamic declarer brings games back, unless the seed is set
-to `off` for one `experiment_tick_seconds` and then set again
-(`agent-dryrun-enable.sh off`, then `on`).
+env change or agent restart is needed. After the kill-switch beat (`enabled=off` aborts every
+experiment) or a `fallback off`, the dynamic declarer brings games back on its next tick.
 The loop refills on each experiment tick: `fallback on` selects the `fast`
 variant of `experiment_tick_seconds` (10 s instead of 30 s); `fallback off`
 and `reset` restore `default`. The controller-manager always loads the mock adapter, so pattern

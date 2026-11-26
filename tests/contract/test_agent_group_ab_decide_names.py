@@ -31,7 +31,7 @@ def test_decide_span_names_are_the_go_const_and_the_old_name():
     assert ab.DECIDE_SPANS == (ic.decide_span_name(), ic.OLD_DECIDE_SPAN)
 
 
-@pytest.mark.uc("UC-040", flow="A47")
+@pytest.mark.uc("UC-048", flow="A13")
 @pytest.mark.parametrize("name", [ic.decide_span_name(), ic.OLD_DECIDE_SPAN])
 def test_report_keeps_a_game_under_either_decide_span_name(name):
     entry = {"game_id": "g1", "profile": "v1", "record": {}}
@@ -39,7 +39,7 @@ def test_report_keeps_a_game_under_either_decide_span_name(name):
     assert "excluded" not in analysed, analysed
 
 
-@pytest.mark.uc("UC-040", flow="A47")
+@pytest.mark.uc("UC-048", flow="A13")
 def test_other_span_names_do_not_count_as_a_decide():
     entry = {"game_id": "g1", "profile": "v1", "record": {}}
     assert ab.analyse_game(entry, [_span("agent.decision", "g1", "v1")]) == {
@@ -47,7 +47,7 @@ def test_other_span_names_do_not_count_as_a_decide():
     }
 
 
-@pytest.mark.uc("UC-040", flow="A47")
+@pytest.mark.uc("UC-048", flow="A13")
 @pytest.mark.parametrize("name", [ic.decide_span_name(), ic.OLD_DECIDE_SPAN])
 def test_verify_game_accepts_either_name(tmp_path, name):
     doc = {

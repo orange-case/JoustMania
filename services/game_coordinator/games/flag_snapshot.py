@@ -41,13 +41,13 @@ def resolve_ramp_seconds(value: object, default: float) -> float:
     return max(RAMP_SECONDS_MIN, min(RAMP_SECONDS_MAX, seconds))
 
 
-# Player-activated shield charge (FR-160; UC-040 A30-A32, BR-019-BR-021;
+# Player-activated shield charge (FR-160; UC-048 A3-A5, BR-004-BR-006;
 # UC-030 A6, BR-005). The game flag ``shield.activation`` picks how a grant_shield
 # lands: ``instant`` (today's shield) or ``trigger`` (a charge the player activates
 # with the trigger). Both flags are read per grant, never per frame.
 SHIELD_ACTIVATION_INSTANT = "instant"
 SHIELD_ACTIVATION_TRIGGER = "trigger"
-# Hold mode (FR-161; UC-030 A7, UC-040 A36-A39, BR-024-BR-027): a pool of
+# Hold mode (FR-161; UC-030 A7, UC-048 A8-A11, BR-008-BR-011): a pool of
 # shield energy that protects while the trigger is held. Latched per game.
 SHIELD_ACTIVATION_HOLD = "hold"
 DEFAULT_SHIELD_ACTIVATION = SHIELD_ACTIVATION_INSTANT
@@ -56,7 +56,7 @@ CHARGE_EXPIRY_MAX_SECONDS = 120.0
 
 
 def resolve_shield_activation(value: object) -> str:
-    """Validate a ``shield.activation`` flag value: ``trigger``, ``hold`` or else ``instant`` (UC-040 BR-019)."""
+    """Validate a ``shield.activation`` flag value: ``trigger``, ``hold`` or else ``instant`` (UC-048 BR-004)."""
     if isinstance(value, str):
         mode = value.strip().lower()
         if mode in (SHIELD_ACTIVATION_TRIGGER, SHIELD_ACTIVATION_HOLD):
@@ -78,7 +78,7 @@ def resolve_charge_expiry(value: object) -> float:
     return min(CHARGE_EXPIRY_MAX_SECONDS, seconds)
 
 
-# Hold-mode flags (flags.md §4, UC-040 BR-024): key -> (default, min, max). The
+# Hold-mode flags (flags.md §4, UC-048 BR-008): key -> (default, min, max). The
 # ranges equal the registry bounds (flags.md §13.3), so a stage overlay the
 # registry accepts is never clamped here.
 SHIELD_HOLD_FLAGS: dict[str, tuple[float, float, float]] = {
@@ -100,7 +100,7 @@ def resolve_hold_value(value: object, default: float, low: float, high: float) -
     return max(low, min(high, number))
 
 
-# Hold feedback cue flags (flags.md §4, UC-040 BR-026): key -> (default, min, max), the
+# Hold feedback cue flags (flags.md §4, UC-048 BR-010): key -> (default, min, max), the
 # registry bounds. Latched with the hold values and shipped to the controller manager.
 SHIELD_HOLD_CUE_FLAGS: dict[str, tuple[float, float, float]] = {
     "shield.charge_rumble_intensity": (255.0, 0.0, 255.0),
@@ -115,7 +115,7 @@ SHIELD_HOLD_CUE_FLAGS: dict[str, tuple[float, float, float]] = {
 }
 
 
-# Shield end grace (flags.md §4, UC-040 BR-035, #2464): seconds after a shield ends in
+# Shield end grace (flags.md §4, UC-048 BR-015, #2464): seconds after a shield ends in
 # which movement cannot kill. Latched per game in every mode; 0 = no window.
 DEFAULT_SHIELD_END_GRACE_SECONDS = 0.75
 SHIELD_END_GRACE_MAX_SECONDS = 2.0
@@ -135,7 +135,7 @@ def resolve_end_grace(value: object) -> float:
     return min(SHIELD_END_GRACE_MAX_SECONDS, seconds)
 
 
-# Agent shield limits per player per game (UC-040 A34, BR-022): the
+# Agent shield limits per player per game (UC-048 A7, BR-007): the
 # coordinator's backstop. Operator flags in the `agent` set, read per grant.
 DEFAULT_MAX_SHIELDS_PER_PLAYER_PER_GAME = 3
 DEFAULT_SHIELD_COOLDOWN_SECONDS = 15

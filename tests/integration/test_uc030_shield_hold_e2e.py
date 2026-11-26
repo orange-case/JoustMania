@@ -2,12 +2,12 @@
 UC-030 A7: a player holds the shield in a hold-mode FFA game, end to end (#2096).
 
 The real stack on unreserved mock controllers: an operator stage overlay selects
-``shield.activation=hold`` (a stack-only flag, UC-040 BR-019) with a full starting
+``shield.activation=hold`` (a stack-only flag, UC-048 BR-004) with a full starting
 pool, the menu starts an FFA game, and ``SimulateButton`` holds and releases the
-trigger. Observable only: the controller's LED and rumble (UC-040 BR-026) and the
+trigger. Observable only: the controller's LED and rumble (UC-048 BR-010) and the
 game state. Latency is not asserted here (UC-030 BR-004: only the order of events).
 
-The second test adds an agent grant into the empty default pool (UC-040 A36), reads the
+The second test adds an agent grant into the empty default pool (UC-048 A8), reads the
 ``player_shield_energy`` events (UC-035 BR-008) and the hold gauges in VictoriaMetrics
 (telemetry.md §6), and measures press-to-protection on the mock path: the
 ``SimulateButton`` call to the server timestamp of the ``active`` energy event. It is
@@ -88,7 +88,7 @@ async def _alive(game_client, game_id: str, serial: str) -> bool:
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-@pytest.mark.uc("UC-040", br=["BR-019", "BR-026"])
+@pytest.mark.uc("UC-048", br=["BR-004", "BR-010"])
 async def test_uc030_a7_holding_the_trigger_protects_and_shows_white_with_a_rumble(
     docker_compose, ensure_game_stopped, flag_service
 ):
@@ -130,7 +130,7 @@ async def test_uc030_a7_holding_the_trigger_protects_and_shows_white_with_a_rumb
             1.0
         )  # past the 0.3 s start grace; the trigger reads released once (armed)
 
-        # Step 3: hold the trigger: the controller turns white and rumbles lightly (UC-040 BR-026).
+        # Step 3: hold the trigger: the controller turns white and rumbles lightly (UC-048 BR-010).
         mark = len(observer.get_events())
         await _trigger(mock_client, holder, True)
 
@@ -217,12 +217,12 @@ async def _gauge_matches(query: str, check) -> tuple[bool, float | None]:
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-030", flow="A7")
-@pytest.mark.uc("UC-040", flow="A36")
+@pytest.mark.uc("UC-048", flow="A8")
 @pytest.mark.uc("UC-035", br=["BR-008"])
 async def test_uc030_a7_uc040_a36_grant_hold_release_energy_events_and_gauges(
     intervention_env, docker_compose, ensure_game_stopped, flag_service, record_property
 ):
-    """UC-040 A36 + UC-030 A7: a grant fills the empty pool, a hold drains it, the events and gauges follow."""
+    """UC-048 A8 + UC-030 A7: a grant fills the empty pool, a hold drains it, the events and gauges follow."""
     mock_client, _mock_channel = await get_mock_client(docker_compose)
     game_client, _game_channel = await get_game_client(docker_compose)
 
@@ -277,7 +277,7 @@ async def test_uc030_a7_uc040_a36_grant_hold_release_energy_events_and_gauges(
             first.data
         )
 
-        # Step 4: the agent grants 3 s: energy 3 s, state charged, source agent (UC-040 A36).
+        # Step 4: the agent grants 3 s: energy 3 s, state charged, source agent (UC-048 A8).
         mark = len(collector.get_events())
         flag_service.wait_game_registered(game_id)
         set_player_value("shield_seconds", game_id, holder, _GRANT_SECONDS)
@@ -380,7 +380,7 @@ async def test_uc030_a7_uc040_a36_grant_hold_release_energy_events_and_gauges(
         )
         assert abs(budget_used_ms - used_ms) <= 2, dict(released.data)
 
-        # Step 8: the gauges agree (telemetry.md §6; the agent's view, UC-040 A37).
+        # Step 8: the gauges agree (telemetry.md §6; the agent's view, UC-048 A9).
         player = f'serial="{holder}",game_id="{game_id}"'
 
         def stat(name: str) -> str:

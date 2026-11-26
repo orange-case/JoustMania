@@ -64,7 +64,7 @@ async def serve(port=50052):
 
     # system domain: game_loop.update_frequency_hz (streaming frequency override)
     init_flag_domain("system")
-    # controller domain: backend, bluetooth_backend, poll_drop_threshold
+    # controller domain: backend, poll_drop_threshold
     init_flag_domain("controller")
     # Wait for both domains before backend creation: create_backend() evaluates
     # the controller domain, the frequency listener the system domain.

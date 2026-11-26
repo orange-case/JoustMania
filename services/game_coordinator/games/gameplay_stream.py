@@ -71,7 +71,7 @@ class GameplayStreamMixin:
 
         logger.info(f"Gameplay stream created with {len(player_colors)} players ({len(current_alive)} alive)")
 
-        # UC-040 BR-021: after a reconnect, re-send every held charge and running
+        # UC-048 BR-006: after a reconnect, re-send every held charge and running
         # shield with the time left, so the new stream owns the layers again.
         await self._resend_shield_layers()
         await self._resend_dead_player_state()

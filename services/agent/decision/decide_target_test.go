@@ -3,7 +3,7 @@ package decision
 import (
 	"context"
 	"encoding/json"
-	"reflect"
+	"math"
 	"testing"
 	"time"
 
@@ -113,6 +113,11 @@ func TestRulesPath_DecideMatchesEmittedDecision(t *testing.T) {
 		if _, ok := attrValue(ds[0], AttrDecideBlockReason); ok {
 			t.Error("decide.block_reason present on an applied decision")
 		}
+		for _, k := range []string{AttrDecideConfidence, AttrDecideConfidenceMin} {
+			if _, ok := attrValue(ds[0], k); ok {
+				t.Errorf("%s present on a rules record", k)
+			}
+		}
 	})
 	t.Run("UC-040/A1 every fixture: the answer is the first emitted decision whatever the allow-list", func(t *testing.T) {
 		for _, fx := range decideFixtures() {
@@ -161,6 +166,7 @@ func TestRulesDecide_NoopNeverReadsAct(t *testing.T) {
 		if len(out) != 0 || rec == nil {
 			t.Fatalf("want a ranked cycle without decisions, got %d decisions, rec %v", len(out), rec)
 		}
+		rec.answerRules(out)
 		if iv, _ := rec.resp.Find(decide.QuestionFFAIntervention); iv.Choice != decide.OptionNoop {
 			t.Fatalf("choice = %q, want noop", iv.Choice)
 		}
@@ -282,38 +288,28 @@ func TestRemote_BlockedDecisionNamesTargetAndDecideBlocked(t *testing.T) {
 }
 
 // UC: UC-040 A1
-func TestEmissionRequest_WidensWithoutMutating(t *testing.T) {
-	t.Run("UC-040/A1 ranked interventions and targets join the options; input untouched", func(t *testing.T) {
+func TestRulesAnswers_RecordTheFirstDecision(t *testing.T) {
+	t.Run("UC-040/A1 the first decision is the answer, also a target the questions do not offer", func(t *testing.T) {
 		fx := decideFixtures()[1]
 		req := ffaRequest(fx.ctx, []string{"play_audio_cue"})
-		orig := make([][]string, len(req.Questions))
-		for i, q := range req.Questions {
-			orig[i] = append([]string(nil), q.Options...)
+		ds := []Decision{
+			{Intervention: InterventionGrantShield, TargetSerial: "GONE", Value: "8"},
+			{Intervention: InterventionAdjustMusicTempo},
 		}
-		ranked := []scoredCandidate{
-			{candidate: candidate{decision: Decision{Intervention: InterventionGrantShield, TargetSerial: "GONE"}}, score: 1},
-			{candidate: candidate{decision: Decision{Intervention: InterventionAdjustMusicTempo}}, score: 0.5},
+		as := rulesAnswers(req, ds)
+		byID := map[string]decide.Answer{}
+		for _, a := range as {
+			byID[a.QuestionID] = a
 		}
-		wide := emissionRequest(req, ranked)
-		for i, q := range req.Questions {
-			if !reflect.DeepEqual(q.Options, orig[i]) {
-				t.Fatalf("question %s mutated: %v -> %v", q.ID, orig[i], q.Options)
-			}
+		if got := byID[decide.QuestionFFAIntervention].Choice; got != InterventionGrantShield {
+			t.Errorf("choice = %q, want grant_shield", got)
 		}
-		ivOpts := optionSet(wide.Questions[0])
-		tgtOpts := optionSet(wide.Questions[1])
-		if !ivOpts[InterventionGrantShield] || !ivOpts[InterventionAdjustMusicTempo] || !ivOpts["play_audio_cue"] {
-			t.Errorf("intervention options = %v", wide.Questions[0].Options)
+		if got := byID[decide.QuestionFFATarget].Choice; got != "GONE" {
+			t.Errorf("target = %q, want GONE", got)
 		}
-		if !tgtOpts["GONE"] || !tgtOpts[decide.TargetNone] {
-			t.Errorf("target options = %v", wide.Questions[1].Options)
-		}
-		resp := answerFromRanked(ranked, wide)
-		if iv, _ := resp.Find(decide.QuestionFFAIntervention); iv.Choice != InterventionGrantShield {
-			t.Errorf("choice = %q, want the top ranked grant_shield", iv.Choice)
-		}
-		if tg, _ := resp.Find(decide.QuestionFFATarget); tg.Choice != "GONE" {
-			t.Errorf("target = %q, want GONE (a non-alive target still answers)", tg.Choice)
+		// 8 s over grant_shield's [3, 10].
+		if got := byID[decide.QuestionFFAMagnitude].Score; math.Abs(got-5.0/7.0) > 1e-12 {
+			t.Errorf("magnitude = %v, want 5/7", got)
 		}
 	})
 }

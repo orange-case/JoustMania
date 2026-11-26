@@ -208,7 +208,7 @@ class MotionMixin:
         # Matches original JoustMania: if game_clock.now() > no_rumble. Uses the unified
         # effective-grace rule: max(agent shield grace_until, admin
         # invincible_until) so the agent shield and admin baseline compose here too.
-        # UC-040 BR-035: the shield end grace window gates the same way (one extra compare).
+        # UC-048 BR-015: the shield end grace window gates the same way (one extra compare).
         if current_time < self.effective_grace_until(player) or current_time < player.end_grace_until:
             # During grace, reset the EMA so it re-primes from the first
             # post-grace frame. Invincibility must *forget* the death spike:

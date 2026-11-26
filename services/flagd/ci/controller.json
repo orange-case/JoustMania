@@ -6,10 +6,8 @@
     "backend": {
       "state": "ENABLED",
       "variants": {
-        "python": "python",
         "mock": "mock",
-        "rust": "rust",
-        "python_rust": "python,rust"
+        "rust": "rust"
       },
       "defaultVariant": "mock"
     },
@@ -22,15 +20,6 @@
         "high": 20
       },
       "defaultVariant": "default"
-    },
-    "bluetooth_backend": {
-      "state": "ENABLED",
-      "variants": {
-        "python": "python",
-        "rust": "rust"
-      },
-      "defaultVariant": "rust",
-      "targeting": {}
     },
     "rust_hid.output_rate_hz": {
       "state": "ENABLED",

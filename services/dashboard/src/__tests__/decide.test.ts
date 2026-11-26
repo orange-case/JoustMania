@@ -58,13 +58,13 @@ function merged(...fs: unknown[]): JaegerTracesResponse {
 describe("UC-035: main step 3, parseDecideTraces — rules path", () => {
   const row = only(rulesFixture);
 
-  it("reads backend, answer and confidence; no model, no threshold", () => {
+  it("reads backend and answer; no confidence, no model, no threshold", () => {
     expect(row.backend).toBe("rules");
     expect(row.requested).toBe("rules");
     expect(row.model).toBe("");
     expect(row.intervention).toBe("grant_shield");
     expect(row.target).toBe("MOCK0002");
-    expect(row.confidence).toBeCloseTo(0.7);
+    expect(row.confidence).toBeNull();
     expect(row.threshold).toBeNull();
     expect(row.outcome).toBe("act");
     expect(row.latencyMs).toBe(0);
@@ -114,6 +114,7 @@ describe("UC-035: main step 3, parseDecideTraces — remote path", () => {
     expect(row.errorType).toBe("timeout");
     expect(row.intervention).toBe("noop");
     expect(row.target).toBe("none");
+    expect(row.confidence).toBeNull();
     expect(row.threshold).toBeNull();
   });
 
@@ -626,8 +627,8 @@ describe("UC-040: A11, a write the actuation gate dropped is not 'allowed' (#209
   });
 });
 
-describe("UC-040 A47: the Decisions row badges a group target (#2529)", () => {
-  it("UC-040 A47: labels group choices and leaves others raw", () => {
+describe("UC-048 A13: the Decisions row badges a group target (#2529)", () => {
+  it("UC-048 A13: labels group choices and leaves others raw", () => {
     expect(groupTargetLabel("group:all")).toBe("Group: all");
     expect(groupTargetLabel("group:all_except:MOCK0003")).toBe("Group: all but one");
     expect(groupTargetLabel("group:other")).toBe("Group");
@@ -637,7 +638,7 @@ describe("UC-040 A47: the Decisions row badges a group target (#2529)", () => {
     expect(groupTargetLabel("none")).toBeNull();
   });
 
-  it("UC-040 A47: renders a badge, not the raw choice string", () => {
+  it("UC-048 A13: renders a badge, not the raw choice string", () => {
     const row = only(rulesFixture);
     const html = renderDecideRow({ ...row, intervention: "grant_group_shield", target: "group:all_except:MOCK0003" });
     expect(html).toContain('<span class="decide-group-badge" title="group:all_except">Group: all but one</span>');

@@ -353,10 +353,10 @@ class GameLoopMixin:
             for player in self.players.values():
                 if player.alive:
                     player.grace_until = max(player.grace_until, grace_until)
-            # UC-040 BR-027: hold is latched here at the latest; the recharge starts now.
+            # UC-048 BR-011: hold is latched here at the latest; the recharge starts now.
             self._latch_shield_hold()
             self._start_shield_hold_clock(game_clock.now())
-            self._queue_hold_feedback_all()  # UC-040 BR-026: every player's energy layer
+            self._queue_hold_feedback_all()  # UC-048 BR-010: every player's energy layer
 
             # Track current alive set for detecting changes
             last_alive_serials = {p.serial for p in self.players.values() if p.alive}

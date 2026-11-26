@@ -91,7 +91,7 @@ async def _ffa_with_players(events=None) -> FFAGame:
 
 @pytest.fixture(autouse=True)
 def _no_shield_limits():
-    """Shield limits off (UC-040 BR-022): these tests are not about the cap or the cooldown."""
+    """Shield limits off (UC-048 BR-007): these tests are not about the cap or the cooldown."""
     with (
         patch.object(BaseGameMode, "_shield_limits", return_value=(0, 0)),
         patch.object(BaseGameMode, "_shield_activation_mode", return_value=base_module.SHIELD_ACTIVATION_INSTANT),

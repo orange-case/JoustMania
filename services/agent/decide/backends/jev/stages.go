@@ -257,7 +257,7 @@ func planDetails(req decide.Request, iv decide.Answer, details []decide.Question
 	for _, q := range details {
 		switch q.ID {
 		case decide.QuestionFFATarget:
-			// A group lever (#2467, UC-040 A47): the target options are the group
+			// A group lever (#2467, UC-048 A13): the target options are the group
 			// options, each described by the players it covers. One option is
 			// answered locally; none answers "none" at confidence 0, which the
 			// decision hook rejects (group_intervention_without_group).

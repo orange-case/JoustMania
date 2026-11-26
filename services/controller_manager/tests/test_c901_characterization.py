@@ -95,13 +95,13 @@ class TestUpdateControllerStatesCharacterization:
         loop = _loop(["AA", "BB", "CC"])
         loop._record("BB").last_activity_time = time.time() - 10 * loop._idle_threshold_seconds - 1
         loop._record("CC").last_activity_time = time.time()
-        loop.backend.get_adapter_type.side_effect = {"AA": "rust", "BB": "python", "CC": "rust"}.get
+        loop.backend.get_adapter_type.side_effect = {"AA": "rust", "BB": "mock", "CC": "rust"}.get
 
         with caplog.at_level(logging.INFO, logger=DISCOVERY_LOGGER):
             await loop._update_controller_states()
             await loop._update_controller_states()
 
-        assert _poll_logs(caplog) == ["Polling 3 controllers at 100Hz, active=2, idle=1, adapters=python:1+rust:2"]
+        assert _poll_logs(caplog) == ["Polling 3 controllers at 100Hz, active=2, idle=1, adapters=mock:1+rust:2"]
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="main", steps=[2])

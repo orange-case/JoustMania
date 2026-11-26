@@ -284,7 +284,7 @@ class TestGameLoopTiming:
         The stream write and the sound RPC each take 20 ms here: a hold transition
         that awaited either would blow the frame budget, so the frame path must
         not await anything for a hold transition (feedback goes to an outbound
-        task, UC-040 BR-026).
+        task, UC-048 BR-010).
         """
         import asyncio
         from unittest.mock import patch

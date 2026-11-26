@@ -196,10 +196,9 @@ details-stage target description then says another shield would be wasted. A
 charge is not protection until the player activates it.
 
 `shield_charged` (wire key `shield_charged`, #1870) marks an alive player the
-agent's charge ledger holds a live entry for (trigger mode, UC-040 A31): the
-player holds an agent shield charge or has just used it, and another
-`grant_shield` is refused. The candidate description then says "Holds an agent
-shield charge, or has just used it." and, for `grant_shield`, that another
+coordinator reports holding a shield charge (trigger mode, UC-048 A4), and
+another `grant_shield` is refused. The candidate description then says "Holds an agent
+shield charge." and, for `grant_shield`, that another
 shield is refused; a `toughness_boost` keeps the danger-based sentence.
 
 **Limits.** `danger` reads the SESSION's effective death threshold
