@@ -68,8 +68,8 @@ func (a *API) FlagsmithAppend(ctx context.Context, req state.AppendRequest) (sta
 	return res, ferr
 }
 
-// FlagsmithClear is the in-process DELETE of a pulled change (StackAll: the
-// overlay and the admin value, Flagsmith enabled=false).
+// FlagsmithClear is the in-process DELETE of a pulled change (Flagsmith
+// enabled=false clears the stack value, persisted or not).
 func (a *API) FlagsmithClear(ctx context.Context, req state.ClearRequest) (state.WriteResult, *fserr.Error) {
 	start := a.now()
 	ctx, span := a.Tracer.Start(ctx, telemetry.SpanWrite)

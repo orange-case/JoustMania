@@ -294,10 +294,11 @@ func (r *propRun) applyPut() (string, bool, bool, bump) {
 	default: // neither (a 400)
 	}
 	stack := req.Scope.Name() == registry.ScopeStack
+	persisted := r.persists(req.Flag, req.Scope)
 	if r.rng.IntN(10) < 4 && (chaos || stack) {
 		req.Persist = true
 	}
-	if r.rng.IntN(10) < 2 && (chaos || !req.Persist) {
+	if r.rng.IntN(10) < 2 && (chaos || !persisted) {
 		req.TTLSeconds = ttl(float64(1 + r.rng.IntN(30)))
 	}
 	if r.rng.IntN(10) < 2 && (chaos || !req.Persist) {
@@ -315,15 +316,15 @@ func (r *propRun) applyPut() (string, bool, bool, bump) {
 	if req.DryRun {
 		return desc + " -> dry", false, true, bumpNo
 	}
-	if req.Persist {
+	if persisted {
 		if !res.Persisted {
-			r.t.Fatalf("%s: a persisted Put with a writable state file answered persisted:false", desc)
+			r.t.Fatalf("%s: a Put of a persist row with a writable state file answered persisted:false", desc)
 		}
 		r.model[req.Flag] = adminEntry{Value: string(res.Value), Writer: req.Writer}
 		r.seen["put-persist"]++
 	}
 	r.seen["put"]++
-	if got := slotValue(r.st, req.Flag, req.Scope, req.Persist); got == nil || !jsonEq(got, res.Value) {
+	if got := slotValue(r.st, req.Flag, req.Scope, persisted); got == nil || !jsonEq(got, res.Value) {
 		r.t.Fatalf("%s: slot holds %s, want %s", desc, got, res.Value)
 	}
 	return desc + " -> ok", false, false, bumpYes
@@ -342,23 +343,31 @@ func (r *propRun) applyClear() (string, bool, bool, bump) {
 	if r.rng.IntN(10) < 3 && (chaos || req.Scope.Name() == registry.ScopeReal) {
 		req.IfWriter = pick(r.rng, propWriters[:3])
 	}
+	persisted := r.persists(req.Flag, req.Scope)
 	desc := fmt.Sprintf("Clear %s/%s scope=%+v persist=%v if_writer=%q",
 		req.Set, req.Flag, req.Scope, req.Persist, req.IfWriter)
 	res, err := r.st.Clear(req)
 	if err != nil {
 		return desc + " -> " + err.Reason, true, false, bumpNo
 	}
-	if req.Persist && res.Cleared > 0 {
+	if persisted && res.Cleared > 0 {
 		delete(r.model, req.Flag)
 		r.seen["clear-persist"]++
 	}
 	if res.Cleared > 0 {
 		r.seen["clear"]++
 	}
-	if got := slotValue(r.st, req.Flag, req.Scope, req.Persist); got != nil {
+	if got := slotValue(r.st, req.Flag, req.Scope, persisted); got != nil {
 		r.t.Fatalf("%s: slot still holds %s after an accepted clear", desc, got)
 	}
 	return fmt.Sprintf("%s -> cleared %d", desc, res.Cleared), false, false, bumpFor(res.Cleared > 0)
+}
+
+// persists reports whether a write of key in scope sc is persisted: a stack
+// write of a persist row, whatever the request says.
+func (r *propRun) persists(key string, sc Scope) bool {
+	f := r.st.flags[key]
+	return sc.Name() == registry.ScopeStack && f != nil && f.policy != nil && f.policy.Persist
 }
 
 // slotValue returns the JSON value in the slot a scope addresses (persist:

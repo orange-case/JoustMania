@@ -312,6 +312,7 @@ func TestPut_Rejections(t *testing.T) {
 		{"UC-053/A5 a free string that is not a string", WriteRequest{Set: "agent", Flag: "decision.operator_brief", Value: raw("42")}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 persist on a non-persistable flag", WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Persist: true}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 persist with a TTL", WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
+		{"UC-053/A5 TTL on the stack value of a persist row (#2803)", WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 TTL on a game value", WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "game_a"}, TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 fraction outside the bounds", WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: "rust", Scope: Scope{FractionPercent: intp(0)}}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 serial not in the game", WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("5"), Scope: Scope{GameID: "game_a", Serial: "MOCK0099"}}, http.StatusUnprocessableEntity, fserr.SerialNotInGame},
@@ -688,46 +689,45 @@ func TestAdminPersistence(t *testing.T) {
 	newPersisting := func(t *testing.T, path, epoch string) *fixture {
 		return newFixture(t, fixtureOpts{stateFile: path, epoch: epoch})
 	}
-	t.Run("UC-053/A2 a persisted admin value survives a restart, nothing else does", func(t *testing.T) {
+	t.Run("UC-053/A2 every stack write of a persist row survives a restart, nothing else does (#2803)", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "admin.json")
 		f := newPersisting(t, path, "e1")
 		res := f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, Writer: "menu"})
 		if !res.Persisted {
 			t.Fatal("the result does not say persisted")
 		}
-		f.put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev", Writer: "stage"})
-		f.put(WriteRequest{Set: "agent", Flag: "interventions_allowed", Variant: "full", Writer: "test"}) // persistable flag, no persist asked
+		if res := f.put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev", Writer: "stage"}); !res.Persisted {
+			t.Fatal("a stage write of a persist row was not persisted")
+		}
+		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "test"})
 		g := newPersisting(t, path, "e2")
 		if v := g.snapshotFlag("sensitivity")["defaultVariant"]; v != "slow" {
 			t.Fatalf("sensitivity after restart %v, want slow", v)
 		}
-		if v := g.snapshotFlag("decision.backend")["defaultVariant"]; v != "rules" {
-			t.Fatalf("decision.backend after restart %v, want the baseline", v)
+		if v := g.snapshotFlag("decision.backend")["defaultVariant"]; v != "jev" {
+			t.Fatalf("decision.backend after restart %v, want the stage write jev", v)
 		}
-		if v := g.snapshotFlag("interventions_allowed")["defaultVariant"]; v != "ambient" {
-			t.Fatalf("interventions_allowed after restart %v: a write without persist must not persist", v)
+		if v, want := g.snapshotFlag("enabled")["defaultVariant"], g.state.flags["enabled"].base.DefaultVariant; v != want {
+			t.Fatalf("enabled after restart %v, want the baseline %v: a row without persist never persists", v, want)
 		}
 	})
-	t.Run("UC-053/A2 an in-memory overlay sits on top of the admin value and clearing it shows the admin value", func(t *testing.T) {
+	t.Run("UC-053/A2 a persist row has one stack value: a later write replaces it, a clear removes it (#2803)", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "admin.json")
 		f := newPersisting(t, path, "e1")
 		f.put(WriteRequest{Set: "agent", Flag: "interventions_allowed", Variant: "standard", Persist: true, Writer: "menu"})
 		f.put(WriteRequest{Set: "agent", Flag: "interventions_allowed", Variant: "full", Writer: "stage"})
 		if v := f.snapshotFlag("interventions_allowed")["defaultVariant"]; v != "full" {
-			t.Fatalf("got %v, want the stage overlay", v)
+			t.Fatalf("got %v, want the stage write", v)
 		}
-		if _, err := f.state.ClearWriter("agent", "stage"); err != nil {
-			t.Fatal(err)
+		if n, err := f.state.ClearWriter("agent", "stage"); err != nil || n != 0 {
+			t.Fatalf("writer reset cleared %d (%v): it never clears a persisted value", n, err)
 		}
-		if v := f.snapshotFlag("interventions_allowed")["defaultVariant"]; v != "standard" {
-			t.Fatalf("got %v, want the admin value back", v)
-		}
-		if _, err := f.state.Clear(ClearRequest{Set: "agent", Flag: "interventions_allowed", Persist: true}); err != nil {
+		if _, err := f.state.Clear(ClearRequest{Set: "agent", Flag: "interventions_allowed"}); err != nil {
 			t.Fatal(err)
 		}
 		g := newPersisting(t, path, "e2")
 		if v := g.snapshotFlag("interventions_allowed")["defaultVariant"]; v != "ambient" {
-			t.Fatalf("after DELETE ?persist=true and a restart: %v, want the baseline", v)
+			t.Fatalf("after a DELETE and a restart: %v, want the baseline", v)
 		}
 	})
 	t.Run("UC-053/A2 the write is atomic: no temp file is left", func(t *testing.T) {
@@ -1261,9 +1261,15 @@ func TestClearWriter_KeepsPersistedAdminValues(t *testing.T) {
 		f := newFixture(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, Writer: "menu"})
 		f.put(WriteRequest{Set: "game", Flag: "num_teams", Variant: "four", Writer: "menu"})
-		n, err := f.state.ClearWriter("game", "menu")
-		if err != nil || n != 1 {
-			t.Fatalf("cleared %d (%v), want only the in-memory overlay", n, err)
+		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "menu"})
+		if n, err := f.state.ClearWriter("game", "menu"); err != nil || n != 0 {
+			t.Fatalf("cleared %d (%v), want nothing: num_teams is persisted", n, err)
+		}
+		if n, err := f.state.ClearWriter("agent", "menu"); err != nil || n != 1 {
+			t.Fatalf("cleared %d (%v), want the in-memory enabled", n, err)
+		}
+		if got := f.snapshotFlag("num_teams")["defaultVariant"]; got != "four" {
+			t.Fatalf("num_teams %v after the reset, want the persisted four", got)
 		}
 		if got := f.snapshotFlag("sensitivity")["defaultVariant"]; got != "slow" {
 			t.Fatalf("sensitivity %v after the reset, want the persisted slow", got)
@@ -1375,40 +1381,6 @@ func TestUnreadableStateFileBlocksPersistence(t *testing.T) {
 		}
 		f := newFixture(t, fixtureOpts{stateFile: path})
 		res, err := f.state.Clear(ClearRequest{Set: "agent", Flag: "interventions_allowed", Persist: true})
-		if err != nil {
-			t.Fatalf("err = %v: a kill switch clear is never refused", err)
-		}
-		if res.Persisted || !res.PersistFailed || f.state.PersistErrors() != 1 {
-			t.Fatalf("result %+v errors %d, want persist failed and 1 error", res, f.state.PersistErrors())
-		}
-	})
-	t.Run("UC-053/A12 a read error refuses a StackAll clear with only an overlay in memory (#2594)", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "admin.json")
-		if err := os.Mkdir(path, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		f := newFixture(t, fixtureOpts{stateFile: path})
-		if _, err := f.state.Put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Writer: "menu"}); err != nil {
-			t.Fatal(err)
-		}
-		res, err := f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", Writer: "flagsmith", StackAll: true})
-		if err == nil || err.Status != 500 || err.Reason != fserr.ReasonPersistFailed {
-			t.Fatalf("err = %v, want 500 persist_failed: the unreadable file may still hold an admin value", err)
-		}
-		if res.Cleared != 0 || f.state.PersistErrors() != 1 {
-			t.Fatalf("result %+v errors %d, want nothing cleared and 1 error", res, f.state.PersistErrors())
-		}
-		if got := f.snapshotFlag("sensitivity")["defaultVariant"]; got != "slow" {
-			t.Fatalf("defaultVariant = %v, want the overlay kept", got)
-		}
-	})
-	t.Run("UC-053/A12 a read error answers a kill switch's StackAll clear as not persisted (#2594)", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "admin.json")
-		if err := os.Mkdir(path, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		f := newFixture(t, fixtureOpts{stateFile: path})
-		res, err := f.state.Clear(ClearRequest{Set: "agent", Flag: "interventions_allowed", Writer: "flagsmith", StackAll: true})
 		if err != nil {
 			t.Fatalf("err = %v: a kill switch clear is never refused", err)
 		}

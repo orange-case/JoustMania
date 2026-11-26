@@ -1124,7 +1124,7 @@ func (p *puller) apply(rc *roundCtx, k Key, pol *registry.Policy, de docEntry, l
 		p.applyEvent(rc, k, de, le)
 		return
 	}
-	sc, scopeName, ok := scopeOfKey(k, de.v)
+	sc, _, ok := scopeOfKey(k, de.v)
 	if !ok {
 		return
 	}
@@ -1141,12 +1141,7 @@ func (p *puller) apply(rc *roundCtx, k Key, pol *registry.Policy, de docEntry, l
 		} else {
 			req.Value = de.v.Value
 		}
-		req.Persist = pol.Persist && scopeName == registry.ScopeStack
 		res, ferr = w.FlagsmithPut(rc.ctx, req)
-	case scopeName == registry.ScopeStack:
-		// enabled=false: the baseline applies; the overlay and the admin
-		// value go under one lock.
-		res, ferr = w.FlagsmithClear(rc.ctx, state.ClearRequest{Set: k.Set, Flag: k.Flag, StackAll: true, IfSlotVersion: le.slot})
 	default:
 		res, ferr = w.FlagsmithClear(rc.ctx, state.ClearRequest{Set: k.Set, Flag: k.Flag, Scope: sc, IfSlotVersion: le.slot})
 	}
