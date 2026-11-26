@@ -87,6 +87,8 @@ class TempoMixin:
         self._music_lost = False
         self._audio_probe_at = 0.0
         self._music_refusal_restarts = 0
+        # The running check-and-restart task of the music loop (single flight).
+        self._music_keeper: asyncio.Task | None = None
         # Last volume the game sent, so a music restart plays at the same level.
         self._audio_volume: float | None = None
         # Rate limit for the failing-tick warning of _music_loop.
@@ -235,6 +237,8 @@ class TempoMixin:
             from proto import audio_pb2
 
             self._music_wanted = False
+            # A restart still in flight must not start the music after this stop.
+            self._cancel_music_keeper()
             await self.audio_client.StopMusic(audio_pb2.StopMusicRequest(track_id=""))
             self.music_track_id = None
             logger.info("Game music stopped")
@@ -530,7 +534,7 @@ class TempoMixin:
         if not self._audio_synced and now >= self._audio_retry_at:
             await self._push_audio(self._intensity.target, self._intensity.end_time - now)
 
-        await self._keep_music_alive()
+        self._start_music_keeper()
 
         # Gauges follow the intensity while a ramp runs, plus once after it ends.
         ramp_running = not self._intensity.is_complete(now)
@@ -539,22 +543,41 @@ class TempoMixin:
             self._emit_threshold_metrics()
         self._ramp_metrics_open = ramp_running
 
-    async def _keep_music_alive(self) -> None:
-        """Start the game music again after the audio service lost it (UC-031 A7, BR-009).
+    def _start_music_keeper(self) -> None:
+        """Start :meth:`_keep_music_alive` beside the tick, once per probe interval.
 
-        Once per ``AUDIO_PROBE_INTERVAL_SECONDS`` while the game music should play.
-        After an outage the first answer is followed by a glide for the track: an
-        accepted glide means the track survived (a slow service, not a restart).
-        A refused glide, or a track that was lost already, restarts the music at the
-        game's volume and the tempo of the intensity now.
+        Not awaited: a check plus a music restart can take seconds against a slow
+        audio service, and the tick must keep driving the intensity meanwhile
+        (UC-031 A7 step 1). Single flight: no second check starts while one runs.
         """
         if not self._music_wanted or not self.audio_client:
+            return
+        if self._music_keeper is not None and not self._music_keeper.done():
             return
         now = game_clock.now()
         if now < self._audio_probe_at:
             return
         self._audio_probe_at = now + AUDIO_PROBE_INTERVAL_SECONDS
+        self._music_keeper = asyncio.get_running_loop().create_task(self._keep_music_alive())
+        self._music_keeper.add_done_callback(self._log_keeper_failure)
 
+    def _cancel_music_keeper(self) -> None:
+        if self._music_keeper is not None and not self._music_keeper.done():
+            self._music_keeper.cancel()
+
+    @staticmethod
+    def _log_keeper_failure(task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning(f"Game music check failed: {task.exception()!r}")
+
+    async def _keep_music_alive(self) -> None:
+        """Start the game music again after the audio service lost it (UC-031 A7, BR-009).
+
+        After an outage the first answer is followed by a glide for the track: an
+        accepted glide means the track survived (a slow service, not a restart).
+        A refused glide, or a track that was lost already, restarts the music at the
+        game's volume and the tempo of the intensity now.
+        """
         status = await self._probe_audio()
         if status == PROBE_DOWN:
             if not self._audio_down:
@@ -637,6 +660,7 @@ class TempoMixin:
                         self._log_tick_failure(e)
                     await game_clock.sleep(0.1)  # Check every 100ms
             finally:
+                self._cancel_music_keeper()
                 if token is not None:
                     otel_context.detach(token)
         except asyncio.CancelledError:

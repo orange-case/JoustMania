@@ -30,15 +30,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Default deadline per audio RPC (UC-031 BR-009). PlayMusic is long because the
-# audio service loads the track before it answers.
+# Default deadline per audio RPC (UC-031 BR-009). PlayMusic gets more because it
+# may respawn the music process before it answers.
 AUDIO_RPC_TIMEOUT_SECONDS = 1.0
 AUDIO_DEADLINES: Mapping[str, float] = {
     "PlaySound": AUDIO_RPC_TIMEOUT_SECONDS,
     "SetVolume": AUDIO_RPC_TIMEOUT_SECONDS,
     "StopMusic": AUDIO_RPC_TIMEOUT_SECONDS,
     "ChangeTempo": 0.5,
-    "PlayMusic": 5.0,
+    "PlayMusic": 2.0,
     "StopSound": 2.0,
 }
 AUDIO_HEALTH_DEADLINES: Mapping[str, float] = {"Check": 0.5}

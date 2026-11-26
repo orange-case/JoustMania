@@ -127,7 +127,7 @@ class ScriptedProbe:
         return self.answers.pop(0) if self.answers else PROBE_OK
 
 
-async def started_game(audio, probe=None) -> FFAGame:
+async def started_game(audio, probe=None, volume=GAME_VOLUME) -> FFAGame:
     game = FFAGame(
         controller_manager_client=MockControllerManagerService(num_controllers=2),
         event_publisher=EventCollector().publish,
@@ -139,7 +139,7 @@ async def started_game(audio, probe=None) -> FFAGame:
     for serial in ("p1", "p2"):
         game.players[serial] = Player(serial=serial, alive=True, color=(255, 0, 0))
     with patch.object(base_module, "read_float_flag", _flag_default):
-        await game._start_game_music(volume=GAME_VOLUME)
+        await game._start_game_music(volume=volume)
     game.change_time = T0 + 1_000.0  # no scheduled change during the test
     return game
 
@@ -149,6 +149,8 @@ async def tick(game, clock, seconds: float):
     for _ in range(round(seconds / 0.1)):
         clock.now += 0.1
         await game._check_music_speed()
+        if game._music_keeper is not None:
+            await game._music_keeper  # the check runs beside the tick; let it finish here
 
 
 # --------------------------------------------------------------------------- #
@@ -233,7 +235,7 @@ def test_deadline_stub_adds_the_method_default_and_keeps_a_caller_timeout():
         "SetVolume": 1.0,
         "StopMusic": 1.0,
         "ChangeTempo": 0.5,
-        "PlayMusic": 5.0,
+        "PlayMusic": 2.0,
         "StopSound": 2.0,
     }
 
@@ -430,3 +432,72 @@ async def test_audio_probe_sends_a_check_only_while_the_connection_is_not_ready(
     assert await probe.check() == PROBE_RECONNECTED
     assert await probe.check() == PROBE_OK
     assert health.checks == 4
+
+
+# --------------------------------------------------------------------------- #
+# Review follow-ups: the restart volume, and the loop never waits for a restart
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-031", flow="A7", steps=[2], br=["BR-009"])
+async def test_a_restart_after_the_countdown_plays_at_the_game_volume(clock):
+    """SetVolume is the master volume: a restart at the countdown level would leave effects at 15 %."""
+    audio = RestartingAudio()
+    game = await started_game(audio, volume=0.15)
+    assert game.game_volume != pytest.approx(0.15)
+    await game._raise_game_volume()
+    audio.restart()
+
+    await game._push_audio(1.0, 1.0)  # refused: the track is gone
+    await tick(game, clock, 1.1)
+
+    assert len(audio.of("PlayMusic")) == 2
+    assert audio.of("SetVolume")[-1] == ("SetVolume", round(game.game_volume, 3))
+
+
+class SlowMusicStart(RestartingAudio):
+    """PlayMusic waits for ``release`` while ``hold`` is set."""
+
+    def __init__(self):
+        super().__init__()
+        self.hold = False
+        self.release = asyncio.Event()
+
+    async def PlayMusic(self, request):  # noqa: N802 - gRPC stub name
+        if self.hold:
+            await self.release.wait()
+        return await super().PlayMusic(request)
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-031", flow="A7", steps=[1, 2], br=["BR-005", "BR-009"])
+async def test_a_slow_music_restart_never_holds_the_tempo_loop(clock):
+    """The restart runs beside the ticks (one at a time): a scheduled change starts while PlayMusic hangs."""
+    audio = SlowMusicStart()
+    game = await started_game(audio)
+    audio.hold = True
+    audio.restart()
+    await game._push_audio(1.0, 1.0)  # refused: the music is lost
+
+    with patch.object(base_module, "read_float_flag", _flag_default):
+        clock.now += 0.1
+        await game._check_music_speed()  # starts the restart, does not wait for it
+        await asyncio.sleep(0)
+        keeper = game._music_keeper
+        assert keeper is not None and not keeper.done()
+
+        game.change_time = clock.now
+        clock.now += 1.1  # past the next probe time too
+        await asyncio.wait_for(game._check_music_speed(), timeout=0.5)
+
+    assert game._intensity.target == 1.0  # the scheduled speed-up started
+    assert game._music_keeper is keeper  # single flight: no second check while one runs
+
+    # The game's end stops a restart still in flight: no music after the stop.
+    await game._stop_game_music()
+    await asyncio.sleep(0)
+    assert keeper.cancelled()
+    audio.release.set()
+    await asyncio.sleep(0)
+    assert len(audio.of("PlayMusic")) == 1
