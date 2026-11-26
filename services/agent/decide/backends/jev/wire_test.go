@@ -166,7 +166,7 @@ func TestEncodeRequest_Shapes(t *testing.T) {
 		Questions: []decide.Question{
 			{ID: "c", Kind: decide.KindChoice, Text: "pick", Options: []string{"z", "a"}},
 			{ID: "s", Kind: decide.KindScore, Text: "how much", Range: [2]float64{0, 10}},
-			{ID: "n", Kind: decide.KindNoul, Text: "yes?"},
+			{ID: "n", Kind: kindNoul, Text: "yes?"},
 		},
 	}
 	out, err := encodeRequest("jev-latest", req, "")

@@ -44,7 +44,7 @@ SCRIPTED_MAGNITUDE = 0.5  # over adjust_volume's [0.3, 1.0] bounds (decide.Resol
 EXPECTED_VALUE = 0.65
 HIGH_CONFIDENCE = 0.95
 LOW_CONFIDENCE = 0.3
-ACT_THRESHOLD = 0.8  # decision.act_confidence_threshold default variant (ci/agent.json)
+ACT_THRESHOLD = 0.8  # decision.claude.act_confidence_threshold default variant (ci/agent.json)
 # llm.eligible_game_kinds: the SHIPPED default, left untouched. Menu games reach the agent
 # as game_kind "real" (#1249), so the remote cases also prove a menu game is eligible.
 ELIGIBLE_GAME_KINDS = "real"

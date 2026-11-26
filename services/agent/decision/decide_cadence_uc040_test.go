@@ -274,8 +274,9 @@ func TestRemote_StaleAnswersDiscardedAndCounted(t *testing.T) {
 				tc.mutate(h)
 			})
 			assertDiscarded(t, h, span, tc.reason)
-			if got := discardedByReason(t, reader); got[tc.reason] != 1 || len(got) != 1 {
-				t.Fatalf("agent_decide_discarded_total = %v, want {%s: 1}", got, tc.reason)
+			// The detail is not a label: every failed re-validation counts as stale.
+			if got := discardedByReason(t, reader); got[DiscardStale] != 1 || len(got) != 1 {
+				t.Fatalf("agent_decide_discarded_total = %v, want {stale: 1}", got)
 			}
 		})
 	}
@@ -308,8 +309,8 @@ func TestRemote_StaleAnswersDiscardedAndCounted(t *testing.T) {
 			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 		}
 		assertDiscarded(t, h, ds[0], DiscardStateTooOld)
-		if got := discardedByReason(t, reader); got[DiscardStateTooOld] != 1 || len(got) != 1 {
-			t.Fatalf("agent_decide_discarded_total = %v, want {state_too_old: 1}", got)
+		if got := discardedByReason(t, reader); got[DiscardStale] != 1 || len(got) != 1 {
+			t.Fatalf("agent_decide_discarded_total = %v, want {stale: 1}", got)
 		}
 	})
 	t.Run("UC-040/A7 answer inside decision.max_state_age_ms acts", func(t *testing.T) {

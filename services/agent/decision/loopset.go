@@ -93,7 +93,7 @@ func (ls *LoopSet) Retain(active map[string]struct{}) {
 			// Dropping a loop with an async inference still in flight (#917) is safe
 			// and self-healing: the goroutine remains bounded by rootCtx+budget and
 			// terminates on its own, and its apply path re-fetches the context, finds
-			// the partition gone (Current()->ok=false), and discards as stale_context
+			// the partition gone (Current()->ok=false), and discards it as stale (context_missing)
 			// — no decision is applied to an ended game. AwaitInflight only joins
 			// loops still in the map, so a dropped loop's goroutine simply isn't waited
 			// on; it cannot outlive the budget regardless.

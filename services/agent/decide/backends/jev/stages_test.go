@@ -188,43 +188,76 @@ func TestDescribeCandidates(t *testing.T) {
 // TestGateAnswer: the synthesised routing answer (#1281) for every p_yes and
 // every possible stage-1 pick passes decide.Validate against the ORIGINAL
 // question (argmax rule, full option coverage), chooses the intervention iff
-// p_yes > 0.5, and carries the acting confidence p_yes (1 - p_yes for noop).
+// p_yes reaches the gate threshold (the act threshold, at least 0.5), and carries
+// the acting confidence p_yes (1 - p_yes for noop).
 // Spec: decide-contract.md §3.1, UC-040 A13, FR-046, FR-047.
 // UC: UC-040 A13
 func TestGateAnswer(t *testing.T) {
-	req := testRequest()
-	orig := req.Questions[0]
-	for _, best := range orig.Options[1:] {
-		for _, pYes := range []float64{0, 0.01, 0.3, 0.49, 0.5, 0.500001, 0.51, 0.7, 0.8, 0.99, 1} {
-			stage1 := decide.Answer{QuestionID: orig.ID, Choice: best, Probabilities: map[string]float64{best: 0.4}}
-			a := gateAnswer(orig, pYes, stage1)
-			resp := decide.Response{Answers: []decide.Answer{a,
-				{QuestionID: decide.QuestionFFATarget, Choice: decide.TargetNone, Probabilities: map[string]float64{decide.TargetNone: 1}, Confidence: 1},
-				{QuestionID: decide.QuestionFFAMagnitude, Confidence: 1}}}
-			if err := decide.Validate(req, resp); err != nil {
-				t.Fatalf("%s p_yes %v: %v", best, pYes, err)
-			}
-			if len(a.Probabilities) != len(orig.Options) {
-				t.Errorf("%s p_yes %v: %d options covered, want %d", best, pYes, len(a.Probabilities), len(orig.Options))
-			}
-			var mass float64
-			for o, p := range a.Probabilities {
-				if o != decide.OptionNoop && o != best && p != 0 {
-					t.Errorf("%s p_yes %v: p(%s) = %v, want 0 (no factorised split)", best, pYes, o, p)
+	full := testRequest()
+	orig := full.Questions[0]
+	// The intervention alone: the target fit is a later, full-round check.
+	req := decide.Request{State: full.State, Questions: []decide.Question{orig}}
+	for _, threshold := range []float64{0, 0.5, 0.6, 0.95} {
+		gate := gateThreshold(threshold)
+		for _, best := range orig.Options[1:] {
+			for _, pYes := range []float64{0, 0.01, 0.3, 0.49, 0.5, 0.500001, 0.51, 0.59, 0.6, 0.7, 0.8, 0.94, 0.95, 0.99, 1} {
+				stage1 := decide.Answer{QuestionID: orig.ID, Choice: best, Probabilities: map[string]float64{best: 0.4}}
+				a := gateAnswer(orig, pYes, gate, stage1)
+				if err := decide.Validate(req, decide.Response{Answers: []decide.Answer{a}}); err != nil {
+					t.Fatalf("%s p_yes %v threshold %v: %v", best, pYes, threshold, err)
 				}
-				mass += p
+				if len(a.Probabilities) != len(orig.Options) {
+					t.Errorf("%s p_yes %v: %d options covered, want %d", best, pYes, len(a.Probabilities), len(orig.Options))
+				}
+				var mass float64
+				for o, p := range a.Probabilities {
+					if o != decide.OptionNoop && o != best && p != 0 {
+						t.Errorf("%s p_yes %v: p(%s) = %v, want 0 (no factorised split)", best, pYes, o, p)
+					}
+					mass += p
+				}
+				acts := pYes >= math.Max(threshold, 0.5)
+				if (a.Choice == best) != acts || (a.Choice == decide.OptionNoop) == acts {
+					t.Errorf("p_yes %v threshold %v: choice %s", pYes, threshold, a.Choice)
+				}
+				wantConf := pYes
+				if !acts {
+					wantConf = 1 - pYes
+					if a.Probabilities[decide.OptionNoop] != 1 {
+						t.Errorf("p_yes %v threshold %v: a closed gate is noop with certainty, got %v", pYes, threshold, a.Probabilities)
+					}
+				}
+				if math.Abs(a.Confidence-wantConf) > 1e-12 || math.Abs(mass-1) > 1e-12 {
+					t.Errorf("p_yes %v: confidence %v (want %v), mass %v", pYes, a.Confidence, wantConf, mass)
+				}
 			}
-			acts := pYes > 0.5
-			if (a.Choice == best) != acts || (a.Choice == decide.OptionNoop) == acts {
-				t.Errorf("p_yes %v: choice %s", pYes, a.Choice)
-			}
-			wantConf := pYes
-			if !acts {
-				wantConf = 1 - pYes
-			}
-			if math.Abs(a.Confidence-wantConf) > 1e-12 || math.Abs(mass-1) > 1e-12 {
-				t.Errorf("p_yes %v: confidence %v (want %v), mass %v", pYes, a.Confidence, wantConf, mass)
-			}
+		}
+	}
+}
+
+// TestGateThreshold: the gate opens at the request's act threshold, so p_yes is
+// compared with one number; below 0.5 (or unset) it opens at 0.5, where the
+// synthesised choice is still the argmax.
+// Spec: decide-contract.md §3.1.
+// UC: UC-040 A13
+func TestGateThreshold(t *testing.T) {
+	for in, want := range map[float64]float64{0: 0.5, 0.3: 0.5, 0.5: 0.5, 0.6: 0.6, 0.95: 0.95, 1: 1, 1.5: 1, math.NaN(): 0.5} {
+		if got := gateThreshold(in); got != want {
+			t.Errorf("gateThreshold(%v) = %v, want %v", in, got, want)
+		}
+	}
+	p := splitStages(decide.Request{State: testRequest().State, Questions: testRequest().Questions, ActThreshold: 0.6})
+	if p.threshold != 0.6 {
+		t.Fatalf("plan threshold = %v, want the request's 0.6", p.threshold)
+	}
+	stage1 := decide.Answer{QuestionID: decide.QuestionFFAIntervention, Choice: "grant_shield", Probabilities: map[string]float64{"grant_shield": 1}, Confidence: 1}
+	for _, tc := range []struct {
+		pYes float64
+		want string
+	}{{0.55, decide.OptionNoop}, {0.6, "grant_shield"}, {0.7, "grant_shield"}} {
+		out, _, err := p.resolveGate([]decide.Answer{{QuestionID: GateQuestionID, Score: tc.pYes}, stage1})
+		if err != nil || out[0].Choice != tc.want {
+			t.Errorf("UC-040/A13 p_yes %v at threshold 0.6: %+v, %v, want %s", tc.pYes, out, err, tc.want)
 		}
 	}
 }
@@ -233,7 +266,7 @@ func TestResolveGate(t *testing.T) {
 	p := splitStages(testRequest())
 	yes := 0.8
 	answers := []decide.Answer{
-		{QuestionID: GateQuestionID, Noul: &yes, Confidence: 0.6},
+		{QuestionID: GateQuestionID, Score: yes, Confidence: 0.6},
 		{QuestionID: decide.QuestionFFAIntervention, Choice: "grant_shield", Probabilities: map[string]float64{"grant_shield": 1}, Confidence: 1},
 	}
 	out, stage1, err := p.resolveGate(answers)

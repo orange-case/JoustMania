@@ -87,6 +87,9 @@ class InterventionsStore(_Store):
 
 
 class AgentStore(_Store):
+    def get_boolean_value(self, key, default, _ctx=None):
+        return True if key == "enabled" else default
+
     def __init__(self, revision, allowed: str):
         super().__init__(revision)
         self.allowed = allowed

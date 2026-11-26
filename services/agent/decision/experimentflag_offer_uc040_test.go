@@ -136,10 +136,12 @@ func TestExperimentFlag_RepeatBlockQuiet(t *testing.T) {
 		flag = "sensitivity"
 		_ = runCycle(l, experimentCtx("control"))
 		// windows: pacing blocked (span), sensitivity dispatched (span); repeat:
-		// pacing quiet, sensitivity dispatched again (span, already-applied is off);
-		// sensitivity experiment: pacing dispatched (span), sensitivity blocked first time (span).
-		if n := decisionSpans(); n != 5 {
-			t.Fatalf("agent.decision spans = %d, want 5", n)
+		// the admitted sensitivity changed the budget state, so pacing is reported
+		// again (span, A21), sensitivity dispatched again (span, already-applied is
+		// off); sensitivity experiment: pacing dispatched (span), sensitivity
+		// blocked first time (span).
+		if n := decisionSpans(); n != 6 {
+			t.Fatalf("agent.decision spans = %d, want 6", n)
 		}
 	})
 }

@@ -66,14 +66,14 @@ func TestLeverCooldown_AlternatingMagnitudesWriteOncePerWindow(t *testing.T) {
 	t.Run("UC-040/A53 BR-014 a cooling lever charges no budget and does not end admission", func(t *testing.T) {
 		l, sink, clock, _ := appliedLoop(t, globalDifficulty("1.25"))
 		_ = runCycle(l, budgetCtx())
-		before := limiterEntries(l)
+		before := limiterEntries(l, l.nowOrDefault()())
 		*clock = clock.Add(3 * time.Second)
 		l.Rules = fakeRules{out: []Decision{globalDifficulty("1.625"), budgetShield("S")}}
 		got := outcomeSummary(runCycle(l, budgetCtx()))
 		if !equalStrings(got, []string{"adjust_global_difficulty/:lever_cooldown", "grant_shield/S:dispatched"}) {
 			t.Fatalf("outcomes = %v", got)
 		}
-		if after := limiterEntries(l); after != before+1 {
+		if after := limiterEntries(l, l.nowOrDefault()()); after != before+1 {
 			t.Fatalf("limiter entries %d -> %d, want only the shield charged", before, after)
 		}
 		if n := writesOf(sink, InterventionGrantShield, "S"); n != 1 {
