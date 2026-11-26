@@ -211,7 +211,7 @@ def test_label_values_render_in_labels_column():
 
 def test_label_values_for_unknown_label_fail(tmp_repo, monkeypatch):
     monkeypatch.setattr(
-        g, "_load_label_values", lambda name: {"games_completed_total": {"nope": "a"}}
+        g, "_load_label_values", lambda name: {"game_completed_total": {"nope": "a"}}
     )
     with pytest.raises(g.SpecSourceError, match="no label 'nope'"):
         g.telemetry_metric_catalog()

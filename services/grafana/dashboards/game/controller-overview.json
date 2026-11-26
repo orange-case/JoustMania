@@ -304,7 +304,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Controllers with effective poll rate below 50 Hz (degraded connection). Matches controller_poll_degraded spans in Jaeger.",
+      "description": "Controllers with effective poll rate below 50 Hz (degraded connection). Matches game.controller.poll_degraded spans in Jaeger.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2630,7 +2630,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Effective poll rate per controller (target - drops). Drops below the red threshold indicate degraded connection quality, matching controller_poll_degraded spans in Jaeger.",
+      "description": "Effective poll rate per controller (target - drops). Drops below the red threshold indicate degraded connection quality, matching game.controller.poll_degraded spans in Jaeger.",
       "fieldConfig": {
         "defaults": {
           "color": {

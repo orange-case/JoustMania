@@ -81,7 +81,7 @@ class GamePerformanceConfig:
 
     # Poll drop threshold: rolling-window drop rate (drops/sec) at or below this
     # value is considered normal USB/Bluetooth noise and won't open a
-    # controller_poll_degraded span. Evaluated over a 2-second window.
+    # game.controller.poll_degraded span. Evaluated over a 2-second window.
     poll_drop_threshold: int = 10
 
     # EMA filter weight for acceleration smoothing (agent domain flag

@@ -35,7 +35,7 @@ class StreamedIntroGameMode(BaseGameMode):
 
     _RUN_RETURNS_EARLY_ON_FORCE_END = True
 
-    # The mode span name, e.g. "fight_club_game".
+    # The mode span name, e.g. "game.run.fight_club".
     RUN_SPAN_NAME: str = ""
 
     def _run_tracer(self) -> trace.Tracer:
@@ -63,7 +63,7 @@ class StreamedIntroGameMode(BaseGameMode):
         await self.event_publisher(GameEvent.GAME_STARTING, {"game_id": self.game_id})
 
         # Initialization phase
-        with tracer.start_as_current_span("initialization_phase") as init_span:
+        with tracer.start_as_current_span("game.phase.initialization") as init_span:
             self._log_run_config()
             await self._initialize_players()
             if len(self.players) < 2:
@@ -81,7 +81,7 @@ class StreamedIntroGameMode(BaseGameMode):
             return False
 
         # Countdown
-        with tracer.start_as_current_span("countdown_phase"):
+        with tracer.start_as_current_span("game.phase.countdown"):
             await self._countdown()
 
         if not self.running:

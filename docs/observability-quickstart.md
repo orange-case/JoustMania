@@ -59,7 +59,7 @@ python3 tools/monitor_multi_hub_performance.py
 **Key metrics:**
 - `game_current_update_frequency_hz` - Configured game loop Hz (from the `game_loop.update_frequency_hz` flag)
 - `game_actual_update_frequency_hz{game_kind,game_id}` - Measured Hz, one series per live game
-- `game_loop_jitter_ms` - Game loop jitter (standard deviation of the frame interval, in ms)
+- `game_loop_jitter_seconds` - Game loop jitter (standard deviation of the frame interval, in seconds)
 - `game_loop_frame_consistency_percent` - Share of frames on schedule
 - `game_loop_frames_dropped_total{mode}` - Dropped frames counter
 
@@ -272,7 +272,7 @@ game_current_update_frequency_hz
 
 **Panel 2: Game Loop Health (jitter, frame consistency, dropped frames)**
 ```promql
-game_loop_jitter_ms
+game_loop_jitter_seconds
 game_loop_frame_consistency_percent
 sum by (mode) (increase(game_loop_frames_dropped_total[5m]))
 ```

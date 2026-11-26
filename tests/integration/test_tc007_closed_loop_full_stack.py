@@ -77,7 +77,7 @@ _envoy_root = ""
 _envoy_jaeger_api = ""
 # UC-035 step 5 / telemetry.md §3: the coordinator's spans of one game.
 GAME_ROOT_SPAN = "Joust Free-for-All"  # the mode's display name
-GAME_PHASES = ("initialization_phase", "gameplay_phase", "game_cycle", "teardown_phase")
+GAME_PHASES = ("game.phase.initialization", "gameplay_phase", "game_cycle", "game.phase.teardown")
 # Agent spans that must name the game (validation 1); game.kind where the spec puts it.
 AGENT_SPANS_WITH_GAME_ID = ("invoke_agent joustmania-agent", "agent.decision")
 AGENT_SPANS_WITH_GAME_KIND = ("invoke_agent joustmania-agent", "agent.decision")

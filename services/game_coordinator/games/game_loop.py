@@ -52,7 +52,7 @@ class GameLoopMixin:
         """Run countdown before game starts using unified countdown effect.
 
         Sends per-controller countdown effects so each controller.effect.countdown span
-        appears under the corresponding player's countdown_phase span.
+        appears under the corresponding player's game.phase.countdown span.
         Sound spans live under gameplay_phase (shared, not player-specific).
         """
         from proto import controller_manager_pb2
@@ -76,8 +76,8 @@ class GameLoopMixin:
             return
 
         # Send per-controller countdown effects via gameplay stream.
-        # Each effect carries its player's countdown_phase span context so
-        # controller.effect.countdown becomes a child of the correct countdown_phase.
+        # Each effect carries its player's game.phase.countdown span context so
+        # controller.effect.countdown becomes a child of the correct game.phase.countdown.
         if self.gameplay_stream:
             for player in self.players.values():
                 trace_parent, trace_state = _base.inject_trace_context(player._countdown_span)
@@ -94,7 +94,7 @@ class GameLoopMixin:
 
         # Play countdown beeps in sync with the visual countdown.
         # Sounds are shared (not per-player), so they inherit the active
-        # gameplay_phase span as their parent — not any player's countdown_phase.
+        # gameplay_phase span as their parent — not any player's game.phase.countdown.
         beep_count = COUNTDOWN_BEEP_COUNT
         beep_interval_ms = phase_duration_ms  # Match LED phase duration
 
@@ -332,7 +332,7 @@ class GameLoopMixin:
 
             if len(recent_frame_times) >= 2:
                 jitter_ms = statistics.stdev(recent_frame_times)
-                metrics.game_loop_jitter_ms.labels(**self._game_state_labels()).set(jitter_ms)
+                metrics.game_loop_jitter_seconds.labels(**self._game_state_labels()).set(jitter_ms / 1000)
 
         return frames_on_target
 
@@ -556,9 +556,9 @@ class GameLoopMixin:
         # UC-041 BR-004: the agent's span ids come only from game.phase.start.
         self._send_phase_start(gameplay_span, "gameplay_phase")
 
-        # Create "players" parent span (collapsible group in Jaeger)
+        # Create "game.players" parent span (collapsible group in Jaeger)
         self._players_span = _base.tracer.start_span(
-            "players",
+            "game.players",
             context=self.gameplay_span_context,
             attributes={"player_count": len(self.players)},
         )
@@ -573,7 +573,7 @@ class GameLoopMixin:
         self.game_cycle_context = trace.set_span_in_context(self._game_cycle_span)
         self._send_phase_start(self._game_cycle_span, "game_cycle")
 
-        # Create player lifecycle spans under "players" parent
+        # Create player lifecycle spans under "game.players" parent
         self._create_player_spans(players_ctx)
 
         # Open per-player countdown child spans
@@ -581,7 +581,7 @@ class GameLoopMixin:
             if player.span:
                 ctx = trace.set_span_in_context(player.span)
                 player._countdown_span = _base.tracer.start_span(
-                    "countdown_phase",
+                    "game.phase.countdown",
                     context=ctx,
                     attributes={"player.serial": player.serial},
                 )

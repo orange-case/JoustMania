@@ -27,10 +27,10 @@ GameCoordinator now has **full distributed tracing** with OpenTelemetry, trackin
 ```
 StartGame (incoming RPC to GameCoordinator)
 ├── Free-For-All (game session)
-│   ├── initialization_phase
+│   ├── game.phase.initialization
 │   │   └── GetReadyControllers → ControllerManager (outgoing RPC)
 │   │       └── controller_manager.get_ready_controllers
-│   ├── countdown_phase
+│   ├── game.phase.countdown
 │   ├── gameplay_phase
 │   │   ├── StreamGameplayData → ControllerManager (outgoing RPC)
 │   │   │   └── controller_manager.stream_controller_states
@@ -42,7 +42,7 @@ StartGame (incoming RPC to GameCoordinator)
 │   │   │   └── player_death (event)
 │   │   └── player_mock_controller_2_lifecycle
 │   │       └── player_survived (event)
-│   └── teardown_phase
+│   └── game.phase.teardown
 └── game_ended (event)
 ```
 
@@ -50,11 +50,11 @@ StartGame (incoming RPC to GameCoordinator)
 ```
 StartGame (incoming RPC to GameCoordinator)
 ├── Teams (or "Random Teams") (game session)
-│   ├── initialization_phase
+│   ├── game.phase.initialization
 │   │   └── GetReadyControllers → ControllerManager
-│   ├── team_formation_phase (Random Teams only)
+│   ├── game.phase.team_formation (Random Teams only)
 │   │   └── display_team_colors (event)
-│   ├── countdown_phase
+│   ├── game.phase.countdown
 │   ├── gameplay_phase
 │   │   ├── StreamGameplayData → ControllerManager
 │   │   ├── team_0_lifecycle
@@ -68,7 +68,7 @@ StartGame (incoming RPC to GameCoordinator)
 │   │       │   └── player_death (event)
 │   │       └── player_mock_controller_3_lifecycle
 │   │           └── player_survived (event)
-│   └── teardown_phase
+│   └── game.phase.teardown
 │       └── team_1_wins (event)
 └── game_ended (event)
 ```
@@ -77,14 +77,14 @@ StartGame (incoming RPC to GameCoordinator)
 ```
 StartGame (incoming RPC to GameCoordinator)
 ├── Nonstop Joust (game session)
-│   ├── initialization_phase
+│   ├── game.phase.initialization
 │   │   └── GetReadyControllers → ControllerManager
-│   ├── countdown_phase
+│   ├── game.phase.countdown
 │   ├── gameplay_phase
 │   │   ├── StreamGameplayData → ControllerManager
 │   │   └── players
 │   │       ├── player_mock_controller_0_lifecycle (open until gameplay_phase ends)
-│   │       │   ├── countdown_phase
+│   │       │   ├── game.phase.countdown
 │   │       │   ├── player_death (event)
 │   │       │   ├── player_respawned (event)
 │   │       │   ├── player_death (event)
@@ -96,20 +96,20 @@ StartGame (incoming RPC to GameCoordinator)
 │   │       └── player_mock_controller_2_lifecycle
 │   │           ├── player_death (event)
 │   │           └── final_score (event)
-│   └── teardown_phase
+│   └── game.phase.teardown
 │       └── game.outcome (event)
 └── game_ended (event)
 ```
 
 NonStop opens one lifecycle span per player, under `players` like the other modes (#1955, #1338;
 before that its game loop opened a second set directly under `gameplay_phase` and the first set,
-with the `countdown_phase` children, never ended). The `final_score` event is added when the
+with the `game.phase.countdown` children, never ended). The `final_score` event is added when the
 spans close at the end of `gameplay_phase` (`_close_all_player_spans`), before the winner is known.
 
 **Key Differences:**
 - **FFA**: Flat player hierarchy, players die permanently (spans end)
 - **Teams**: Hierarchical (team → player), team-based win condition
-- **Random Teams**: Same as Teams + `team_formation_phase` before countdown
+- **Random Teams**: Same as Teams + `game.phase.team_formation` before countdown
 - **Nonstop Joust**: Player spans stay open while the player respawns (death and respawn events), close with a `final_score` event; scoring-based winner only on a time-limit end (UC-026 BR-003)
 
 ## Context Propagation
@@ -156,17 +156,17 @@ async def run(self, game_context=None):
     span_name = get_game_display_name(self.get_game_name())
 
     with tracer.start_as_current_span(span_name, context=game_context) as game_span:
-        # initialization_phase span
-        with tracer.start_as_current_span("initialization_phase", ...):
+        # game.phase.initialization span
+        with tracer.start_as_current_span("game.phase.initialization", ...):
             await self._initialize_players()  # GetReadyControllers RPC automatically traced
             self._create_player_spans(game_context)
 
-        # Additional phases (e.g., team_formation_phase)
+        # Additional phases (e.g., game.phase.team_formation)
         for phase in self._get_additional_phases():
-            with tracer.start_as_current_span(phase.name, ...):
+            with tracer.start_as_current_span(f"game.phase.{phase.name}", ...):
                 await phase.execute()
 
-        # countdown_phase, gameplay_phase, teardown_phase...
+        # game.phase.countdown, gameplay_phase, game.phase.teardown...
 ```
 
 **Subclasses** (FFA, Teams, Random Teams, Nonstop Joust) focus on game-specific logic:
@@ -222,11 +222,11 @@ operation="Nonstop Joust"
 
 **By Game Phase:**
 ```
-operation="initialization_phase"
-operation="countdown_phase"
+operation="game.phase.initialization"
+operation="game.phase.countdown"
 operation="gameplay_phase"
-operation="teardown_phase"
-operation="team_formation_phase"  # Random Teams only
+operation="game.phase.teardown"
+operation="game.phase.team_formation"  # Random Teams only
 ```
 
 **By Player:**
@@ -246,11 +246,11 @@ You should see:
 - **Root span**: `StartGame` (incoming RPC to GameCoordinator)
 - **Game session span**: Human-readable name (`Free-For-All`, `Teams`, `Random Teams`, `Nonstop Joust`)
 - **Phase spans**: Consistent across all modes
-  - `initialization_phase` (contains ControllerManager RPCs)
-  - `team_formation_phase` (Random Teams only)
-  - `countdown_phase`
+  - `game.phase.initialization` (contains ControllerManager RPCs)
+  - `game.phase.team_formation` (Random Teams only)
+  - `game.phase.countdown`
   - `gameplay_phase` (contains player/team lifecycle spans)
-  - `teardown_phase`
+  - `game.phase.teardown`
 - **Lifecycle spans**:
   - FFA/Nonstop: `player_{serial}_lifecycle` (flat hierarchy)
   - Teams/Random Teams: `team_{number}_lifecycle` → `player_{serial}_lifecycle` (hierarchical)
@@ -263,15 +263,15 @@ You should see:
 ### Latency Metrics
 
 **Cross-Service Latency:**
-- Time from `initialization_phase` to `GetReadyControllers` response
+- Time from `game.phase.initialization` to `GetReadyControllers` response
 - Time from `gameplay_phase` to first `StreamGameplayData` frame
 
 **Game Phase Latency:**
-- `initialization_phase` duration (player setup)
-- `team_formation_phase` duration (Random Teams: ~3 seconds)
-- `countdown_phase` duration (typically 3 seconds)
+- `game.phase.initialization` duration (player setup)
+- `game.phase.team_formation` duration (Random Teams: ~3 seconds)
+- `game.phase.countdown` duration (typically 3 seconds)
 - `gameplay_phase` duration (entire game, varies by mode)
-- `teardown_phase` duration (cleanup + winner declaration)
+- `game.phase.teardown` duration (cleanup + winner declaration)
 
 **Player-Level Latency:**
 - Time to first warning (high acceleration detected)
@@ -336,7 +336,7 @@ GrpcInstrumentorClient().instrument()  # Must be present
 
 **Solution:**
 - Check ControllerManager is returning controllers
-- Verify `GetReadyControllers` RPC succeeds in `initialization_phase`
+- Verify `GetReadyControllers` RPC succeeds in `game.phase.initialization`
 - Look for `players_initialized` event in logs
 - Check that `gameplay_phase` span exists (player spans created there)
 
@@ -430,7 +430,7 @@ provider = TracerProvider(
 
 ### Phase 36: Span Hierarchy Normalization ✓
 - **Human-readable game names**: `Free-For-All`, `Teams`, `Random Teams`, `Nonstop Joust`
-- **Consistent phase spans**: `initialization_phase`, `countdown_phase`, `gameplay_phase`, `teardown_phase`
+- **Consistent phase spans**: `game.phase.initialization`, `game.phase.countdown`, `gameplay_phase`, `game.phase.teardown`
 - **Standardized lifecycle spans**: `player_{serial}_lifecycle`, `team_{number}_lifecycle`
 - **Hierarchical team spans**: Team spans contain player spans for Teams/Random Teams
 
@@ -451,7 +451,7 @@ ProcessInput (Menu) → StartGame (GameCoordinator) → Free-For-All → ...
 ### 2. Audio Service Integration
 When GameCoordinator calls Audio service:
 ```
-countdown_phase → PlaySound (Audio) → audio.play
+game.phase.countdown → PlaySound (Audio) → audio.play
 ```
 
 ### 3. Multi-Game Sessions

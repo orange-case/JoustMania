@@ -392,7 +392,7 @@ class NonstopJoustGame(BaseGameMode):
         try:
             from proto import controller_manager_pb2
 
-            # Player spans were created by the base _run_gameplay_phase (under "players").
+            # Player spans were created by the base _run_gameplay_phase (under "game.players").
             # Get runtime config (Phase 43: Dynamic Hz adjustment like base class)
             from services.game_coordinator.runtime_config import get_config_manager
 

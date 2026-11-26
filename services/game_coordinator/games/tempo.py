@@ -302,7 +302,7 @@ class TempoMixin:
 
         # Child span of game_cycle; the ChangeTempo call inherits it, so the audio
         # service span links back to the game trace.
-        with _base.tracer.start_as_current_span("music_tempo_change") as span:
+        with _base.tracer.start_as_current_span("game.music.tempo_change") as span:
             span.set_attribute("old_tempo", old_tempo)
             span.set_attribute("new_tempo", new_tempo)
             span.set_attribute("dead_count", self.dead_count)
@@ -382,7 +382,7 @@ class TempoMixin:
         """
         old_tempo = self.music_speed
         self._intensity = IntensityRamp.hold(intensity_from_tempo(target_tempo), game_clock.now())
-        with _base.tracer.start_as_current_span("music_tempo_ramp") as span:
+        with _base.tracer.start_as_current_span("game.music.tempo_ramp") as span:
             span.set_attribute("old_tempo", old_tempo)
             span.set_attribute("new_tempo", target_tempo)
             span.set_attribute("dead_count", self.dead_count)
@@ -408,7 +408,7 @@ class TempoMixin:
         bounded = abs(delta) * self._read_ramp_seconds(rising=delta > 0) if delta else 0.0
         remaining = max(ramp.start_time + ramp.duration - now, bounded, 0.0)
         self._intensity = IntensityRamp(start=old_intensity, target=target, start_time=now, duration=remaining)
-        with _base.tracer.start_as_current_span("music_tempo_ramp") as span:
+        with _base.tracer.start_as_current_span("game.music.tempo_ramp") as span:
             span.set_attribute("old_tempo", tempo_from_intensity(old_intensity))
             span.set_attribute("new_tempo", ramp.target_tempo)
             span.set_attribute("dead_count", self.dead_count)
@@ -510,7 +510,7 @@ class TempoMixin:
         Runs alongside the main game loop and periodically checks
         if tempo should change based on game progression.
 
-        Sets game_cycle as active context so each music_tempo_change span
+        Sets game_cycle as active context so each game.music.tempo_change span
         appears directly under game_cycle in traces.
         """
         logger.info("Music loop started")

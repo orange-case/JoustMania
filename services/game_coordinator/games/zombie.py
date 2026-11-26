@@ -132,7 +132,7 @@ class ZombieGame(StreamedIntroGameMode):
     Note: Weapon system not implemented (requires button events in gameplay stream).
     """
 
-    RUN_SPAN_NAME = "zombie_game"
+    RUN_SPAN_NAME = "game.run.zombie"
 
     def __init__(
         self,

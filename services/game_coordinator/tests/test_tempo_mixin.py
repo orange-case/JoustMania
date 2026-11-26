@@ -131,4 +131,4 @@ class TestTempoMixin:
             patch.object(base_module, "read_float_flag", autospec=True, return_value=1.0),
         ):
             await game._start_intensity_ramp(1.0, scheduled=False)
-        tracer.start_as_current_span.assert_called_once_with("music_tempo_change")
+        tracer.start_as_current_span.assert_called_once_with("game.music.tempo_change")

@@ -205,7 +205,7 @@ class PlayerTelemetryMixin:
             if player._led_degraded_span is None and player.span:
                 ctx = trace.set_span_in_context(player.span)
                 player._led_degraded_span = _base.tracer.start_span(
-                    "controller_led_degraded",
+                    "game.controller.led_degraded",
                     context=ctx,
                     attributes={"player.serial": serial},
                 )
@@ -250,7 +250,7 @@ class PlayerTelemetryMixin:
             if player._poll_degraded_span is None and player.span:
                 ctx = trace.set_span_in_context(player.span)
                 player._poll_degraded_span = _base.tracer.start_span(
-                    "controller_poll_degraded",
+                    "game.controller.poll_degraded",
                     context=ctx,
                     attributes={"player.serial": serial},
                 )

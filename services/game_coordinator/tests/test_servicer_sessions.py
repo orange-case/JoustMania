@@ -7,7 +7,7 @@ behavior at the servicer/RPC level BEFORE the multi-session refactor:
 - zero-arg StreamGameEvents subscribes to the running game's events
 - GetGameState reflects the running game; ForceEndGame ends it
 - <2 players rejected
-- metrics side effects: active_game 1->0, games_started_total increments
+- metrics side effects: active_game 1->0, game_started_total increments
 
 These must keep passing unchanged after the refactor (default cap=1 preserves
 today's behavior exactly).
@@ -333,15 +333,15 @@ class TestSingleGameCharacterization:
     @pytest.mark.asyncio
     @patch("services.game_coordinator.servicer.metrics")
     async def test_start_metric_side_effects(self, mock_metrics, servicer):
-        """Starting a game sets active_game=1 and increments games_started_total."""
+        """Starting a game sets active_game=1 and increments game_started_total."""
         with _NO_THREAD:
             await servicer._start_game_from_config(_config(), _MockSpan())
 
         # active_game gauge raised to 1 (now via the game_kind label).
         assert mock_metrics.active_game.labels.called
         mock_metrics.active_game.labels.return_value.set.assert_any_call(1)
-        # games_started_total incremented.
-        assert mock_metrics.games_started_total.labels.called
+        # game_started_total incremented.
+        assert mock_metrics.game_started_total.labels.called
 
 
 class TestMultiSession:
@@ -1350,8 +1350,8 @@ class TestShadowGameGovernance:
         with _NO_THREAD:
             await servicer._start_game_from_config(_shadow_config(serials=("a1", "a2")), _MockSpan())
         mock_metrics.active_game.labels.assert_any_call(game_kind="shadow", game_id=ANY, experiment_id="", arm="")
-        # games_started_total is a cumulative counter: no experiment_id/arm (#975).
-        mock_metrics.games_started_total.labels.assert_any_call(mode="FFA", game_kind="shadow")
+        # game_started_total is a cumulative counter: no experiment_id/arm (#975).
+        mock_metrics.game_started_total.labels.assert_any_call(mode="FFA", game_kind="shadow")
 
     # -- Resource gate ------------------------------------------------------
 
@@ -2119,7 +2119,7 @@ class TestFailedStartRetiresSession:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A7", br=["BR-007"])
     @patch("services.game_coordinator.servicer.metrics")
-    async def test_failed_thread_start_is_not_counted_in_games_started_total(self, mock_metrics, servicer, caplog):
+    async def test_failed_thread_start_is_not_counted_in_game_started_total(self, mock_metrics, servicer, caplog):
         def _start_fails(_session):
             raise RuntimeError("thread start failed")
 
@@ -2130,13 +2130,13 @@ class TestFailedStartRetiresSession:
             ok, _ = await servicer._start_game_from_config(_config(), _MockSpan())
 
         assert ok is False
-        mock_metrics.games_started_total.labels.return_value.inc.assert_not_called()
+        mock_metrics.game_started_total.labels.return_value.inc.assert_not_called()
         assert any("after admission (reason=error)" in r.getMessage() for r in caplog.records)
 
         with _NO_THREAD:
             ok, _ = await servicer._start_game_from_config(_config(), _MockSpan())
         assert ok is True
-        mock_metrics.games_started_total.labels.return_value.inc.assert_called_once_with()
+        mock_metrics.game_started_total.labels.return_value.inc.assert_called_once_with()
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A7", br=["BR-007"])
