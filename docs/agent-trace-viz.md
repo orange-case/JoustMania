@@ -72,8 +72,8 @@ chose and why"). Verified keys/values from live span data:
 
 **Backend attribution** is the "is a model actually driving this?" question.
 Every decided cycle has an **`invoke_agent joustmania-agent`** span with `decide.backend`,
-`decide.backend.requested`, `decide.fallback_reason`, `decide.confidence` and
-`decide.outcome`; a remote backend's call is its `chat {model}` child span with
+`decide.backend.requested`, `decide.fallback_reason`, `decide.outcome` and, when a
+remote backend answered, `decide.confidence`; a remote backend's call is its `chat {model}` child span with
 the `gen_ai.*` attributes. Since #2731 the decide span also carries the invocation's
 totals (the sum of its `chat {model}` children): count one or the other, not both. (The `agent.mode` / `agent.model` /
 `inference.*` attributes on `agent.decision` were removed with the legacy
