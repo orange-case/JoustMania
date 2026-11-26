@@ -43,8 +43,6 @@ services:
     environment:
       - FLAG_SERVICE_SETS=system,observability,interventions,agent,game,user,controller,operator
       - FLAG_SERVICE_BASELINE_DIR=/etc/flagd
-      # Pinned like docker-compose.yml (#2784).
-      - FLAG_SERVICE_BASELINE_FILES=system.json,controller.json,observability.json,game.json,user.json,agent.json,interventions.json,operator.json
       # The registry comes from the same checkout as the baseline (mounted below):
       # the image copy would reject a renamed flag (#1838).
       - FLAG_SERVICE_REGISTRY=/etc/flag-service/registry.yaml

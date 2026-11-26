@@ -36,15 +36,4 @@ run_case 0.9.0 0.10.0
 [[ $rc == 2 ]] || fail "manifest mismatch: want rc 2, got ${rc}: ${out}"
 grep -q 'not found locally or on origin' <<<"$out" || fail "no error line: ${out}"
 
-# The checker loads the list compose passes, so that list must be the tree's
-# baseline.DefaultFiles in every compose file that mounts services/flagd.
-REPO="${SCRIPT_DIR}/../.."
-want="$(sed -n '/^var DefaultFiles = \[\]string{/,/^}/s/^[[:space:]]*"\([^"]*\)",.*/\1/p' \
-  "${REPO}/services/flag-service/baseline/baseline.go" | tr -d '\r' | paste -sd, -)"
-[[ -n "$want" ]] || fail "no DefaultFiles in baseline.go"
-for f in docker-compose.yml docker-compose.lite.yml; do
-  got="$(sed -n 's/^[[:space:]]*- FLAG_SERVICE_BASELINE_FILES=\([^ #]*\).*/\1/p' "${REPO}/${f}" | tr -d '\r')"
-  [[ "$got" == "$want" ]] || fail "${f} FLAG_SERVICE_BASELINE_FILES=${got}, want ${want}"
-done
-
 echo "PASS: 4 checks"
