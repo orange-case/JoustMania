@@ -93,14 +93,15 @@ async def test_every_player_disconnecting_in_one_frame_aborts_with_no_winner():
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-002", br=["BR-009"])
-async def test_majority_across_frames_within_the_window_aborts(clock):
-    """3 players: p0 drops (eliminated as before), p1 drops 0.2 s later: 2 of 3 in the window, abort before p1 dies."""
+@pytest.mark.parametrize("gap_s", [0.2, 1.0, 1.5], ids=["same-pass", "next-discovery-pass", "window-edge"])
+async def test_majority_across_frames_within_the_window_aborts(clock, gap_s):
+    """3 players: p0 drops (eliminated as before), p1 drops up to 1.5 s later: 2 of 3 in the window, abort."""
     game, events = _game(["p0", "p1", "p2"])
 
     with patch.object(game, "_play_sound", AsyncMock()):
         assert await game._process_gameplay_update(_disconnect_frame("p0")) is False
         assert game.players["p0"].alive is False
-        clock.t += 0.2
+        clock.t += gap_s
         with pytest.raises(MassDisconnectError, match=r"2 of 3"):
             await game._process_gameplay_update(_disconnect_frame("p1"))
 
@@ -112,12 +113,13 @@ async def test_majority_across_frames_within_the_window_aborts(clock):
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-002", br=["BR-009"])
 @pytest.mark.uc("UC-020", flow="A2", br=["BR-001"])
-async def test_disconnects_further_apart_than_the_window_are_single_disconnects(clock):
-    """Two drops 0.6 s apart are two single disconnects: both eliminated, the last player wins."""
+@pytest.mark.parametrize("gap_s", [1.51, 3.0])
+async def test_disconnects_further_apart_than_the_window_are_single_disconnects(clock, gap_s):
+    """Two drops more than 1.5 s apart are two single disconnects: both eliminated, the last player wins."""
     game, events = _game(["p0", "p1", "p2"])
 
     assert await game._process_gameplay_update(_disconnect_frame("p0")) is False
-    clock.t += 0.6
+    clock.t += gap_s
     assert await game._process_gameplay_update(_disconnect_frame("p1")) is True
 
     assert events.get_events_of_type(GameEvent.GAME_WINNER) == [{"serial": "p2"}]
@@ -200,6 +202,19 @@ class TestOneAdapter:
         assert await game._process_gameplay_update(_disconnect_frame("p2", "p3")) is False
 
         assert [e["serial"] for e in events.get_events_of_type(GameEvent.PLAYER_DEATH)] == ["p2", "p3"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-002", br=["BR-009"])
+    @pytest.mark.uc("UC-020", flow="A2")
+    async def test_exactly_half_on_different_adapters_is_not_a_mass_disconnect(self):
+        """2 of 4 drop, one per adapter: half is not more than half, and no adapter is emptied. Both are eliminated."""
+        game, events = await self._warmed_game({"p0": "hci0", "p1": "hci0", "p2": "hci1", "p3": "hci1"})
+
+        assert await game._process_gameplay_update(_disconnect_frame("p0", "p2")) is False
+
+        assert [e["serial"] for e in events.get_events_of_type(GameEvent.PLAYER_DEATH)] == ["p0", "p2"]
+        assert game.players["p1"].alive is True
+        assert game.players["p3"].alive is True
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-002", br=["BR-009"])

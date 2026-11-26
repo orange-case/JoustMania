@@ -1266,7 +1266,8 @@ class BaseGameMode(
 
     # UC-002 BR-009: disconnects of this many players within this much game time are an
     # infrastructure fault (rust-hid restart, dongle loss, HID stall), not play.
-    _MASS_DISCONNECT_WINDOW_S: float = 0.5
+    # Disconnects arrive on the 1 Hz discovery pass: the window spans two consecutive passes.
+    _MASS_DISCONNECT_WINDOW_S: float = 1.5
     _MASS_DISCONNECT_MIN_PLAYERS: int = 2
 
     # Note: Don't set gameplay_stream = None here - it's needed by _end_game_impl
