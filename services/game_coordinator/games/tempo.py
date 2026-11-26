@@ -510,7 +510,7 @@ class TempoMixin:
         Runs alongside the main game loop and periodically checks
         if tempo should change based on game progression.
 
-        Sets game_cycle as active context so each music_tempo_change span
+        Sets game_cycle as active context so each game.music.tempo_change span
         appears directly under game_cycle in traces.
         """
         logger.info("Music loop started")

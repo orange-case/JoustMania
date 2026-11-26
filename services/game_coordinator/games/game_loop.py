@@ -52,7 +52,7 @@ class GameLoopMixin:
         """Run countdown before game starts using unified countdown effect.
 
         Sends per-controller countdown effects so each controller.effect.countdown span
-        appears under the corresponding player's countdown_phase span.
+        appears under the corresponding player's game.phase.countdown span.
         Sound spans live under gameplay_phase (shared, not player-specific).
         """
         from proto import controller_manager_pb2
@@ -76,8 +76,8 @@ class GameLoopMixin:
             return
 
         # Send per-controller countdown effects via gameplay stream.
-        # Each effect carries its player's countdown_phase span context so
-        # controller.effect.countdown becomes a child of the correct countdown_phase.
+        # Each effect carries its player's game.phase.countdown span context so
+        # controller.effect.countdown becomes a child of the correct game.phase.countdown.
         if self.gameplay_stream:
             for player in self.players.values():
                 trace_parent, trace_state = _base.inject_trace_context(player._countdown_span)
@@ -94,7 +94,7 @@ class GameLoopMixin:
 
         # Play countdown beeps in sync with the visual countdown.
         # Sounds are shared (not per-player), so they inherit the active
-        # gameplay_phase span as their parent — not any player's countdown_phase.
+        # gameplay_phase span as their parent — not any player's game.phase.countdown.
         beep_count = COUNTDOWN_BEEP_COUNT
         beep_interval_ms = phase_duration_ms  # Match LED phase duration
 
