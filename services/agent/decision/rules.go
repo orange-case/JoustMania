@@ -220,9 +220,9 @@ func (r *ObjectiveRules) Evaluate(_ context.Context, c gamecontext.GameContext) 
 	return out
 }
 
-// EvaluateDecide is Evaluate plus the decide-contract answers (#1226), both
-// derived from ONE ranking: one rankLocked call and therefore one chaos (R9) RNG
-// draw per evaluation, exactly as Evaluate alone. The returned decisions are
+// EvaluateDecide is Evaluate plus the record's decide request and the winning
+// rule's prediction (#1226), both derived from ONE ranking: one rankLocked call
+// and therefore one chaos (R9) RNG draw per evaluation, exactly as Evaluate alone. The returned decisions are
 // byte-for-byte what Evaluate would have returned for the same engine state.
 //
 // build constructs the decide.Request lazily: it is called (under the engine
@@ -279,12 +279,14 @@ func (r *ObjectiveRules) evaluate(c gamecontext.GameContext, build func(charged,
 	if build == nil {
 		return out, decide.Request{}, decide.Response{}, true
 	}
-	// #1295: the rules-path answers describe the decision Evaluate actually emits
-	// (out[0] == ranked[0]): the questions are widened to the engine's own ranked
-	// interventions and targets, so the allow-list (applied afterwards by the
-	// permission chain) cannot filter the answers into a different choice.
-	req := emissionRequest(build(charged, noShield), ranked)
-	return out, req, answerFromRanked(ranked, req), true
+	// The answers are filled by the loop once the decisions are stamped
+	// (decideRecord.answerRules), so they record what is written.
+	req := build(charged, noShield)
+	resp := decide.Response{Backend: RulesBackendName}
+	if len(ranked) > 0 {
+		resp.Prediction = rulesPrediction(ranked[0], req.State)
+	}
+	return out, req, resp, true
 }
 
 // RecordActed arms the variance cooldown for a decision some OTHER backend made
