@@ -309,7 +309,7 @@ class GameLifecycleMixin:
                 and not self._lobby_restore_started
                 and self.state != menu_pb2.MenuState.STOPPED
             ):
-                logger.info("Game lifecycle ended without a lobby restore; entering the lobby for the deferred StartMenu")
+                logger.info("Game lifecycle ended without a lobby restore; entering the lobby (deferred StartMenu)")
                 # menu_started already went out with the deferred request.
                 await self.enter_lobby(publish_started=False)
 
