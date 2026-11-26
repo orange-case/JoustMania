@@ -90,17 +90,19 @@ func rulesGoldenJSON(t *testing.T, predictionsOff bool, wire func(*Loop, *time.T
 			wire(l, &clock)
 		}
 		engine := newTestEngine(fx.cfg, &clock)
-		// R4's catch-up reads the loop's shield grants as main.go wires it (UC-040
-		// decide-contract §15.2, decide-contract §15.2; #2395): the one intended golden change, in the balanced fixture.
+		// R4's catch-up reads the coordinator's shield grants as main.go wires it
+		// (decide-contract.md §15.2; #2395): the one intended golden change, in the balanced
+		// fixture. The fake coordinator exports the grants the loop wrote.
 		engine.SetShieldGrantSource(l.ShieldGrants)
 		l.Rules = engine
 		l.now = func() time.Time { return clock }
 		sink := &capturingSink{}
 		l.Actions = sink
+		var coord fakeCoordinator
 
 		rec := rulesGoldenFixture{Name: fx.name}
 		for step := 0; step < 8; step++ {
-			st := l.OnEvaluate(context.Background(), fx.ctx, testTrigger())
+			st := l.OnEvaluate(context.Background(), coord.sync(fx.ctx, sink, clock), testTrigger())
 			rec.Steps = append(rec.Steps, rulesGoldenStep{Step: step, Outcomes: st.Outcomes})
 			advance(&clock, 7*time.Second)
 		}

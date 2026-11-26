@@ -8,10 +8,11 @@ import (
 
 	"github.com/joustmania/agent/decide"
 	"github.com/joustmania/agent/flags"
+	"github.com/joustmania/agent/gamecontext"
 )
 
 // The decide state's shield_limited marker and applied levels, fed from the loop's
-// ledgers (#2066; UC-040 main step 4, UC-048 A6, UC-040 A35; decide-contract §1.2).
+// shield gate and the applied-value ledger (#2066; UC-040 main step 4, A33, A35; decide-contract §1.2).
 
 func playerIn(t *testing.T, st decide.State, serial string) decide.PlayerState {
 	t.Helper()
@@ -28,11 +29,10 @@ func playerIn(t *testing.T, st decide.State, serial string) decide.PlayerState {
 // UC: UC-048 A6 BR-007
 func TestShieldLimitedState_RemoteRequest(t *testing.T) {
 	t.Run("UC-048/A6 a capped player is shield_limited in the remote request, not shield_charged", func(t *testing.T) {
-		l, _, _, _ := limitLoop(t, 100, 1, 0, budgetShield("WEAK"))
-		if got := outcomeSummary(runCycle(l, budgetCtx())); !equalStrings(got, []string{"grant_shield/WEAK:dispatched"}) {
-			t.Fatalf("first grant outcomes = %v, want dispatched", got)
-		}
-		st := l.buildDecideRequest(budgetCtx(), allInterventions(), false).State
+		l, _, _, _ := limitLoop(t, 100, 1, 0)
+		_ = runCycle(l, budgetCtx()) // publishes the cycle's limits
+		c := withGate(budgetCtx(), "WEAK", gamecontext.ShieldGate{Grants: 1})
+		st := l.buildDecideRequest(c, allInterventions(), false).State
 		if w := playerIn(t, st, "WEAK"); !w.ShieldLimited || w.ShieldCharged {
 			t.Fatalf("WEAK limited=%v charged=%v, want limited only", w.ShieldLimited, w.ShieldCharged)
 		}
@@ -41,10 +41,10 @@ func TestShieldLimitedState_RemoteRequest(t *testing.T) {
 		}
 	})
 	t.Run("UC-048/A6 a cooling-down player is shield_limited", func(t *testing.T) {
-		l, _, clock, _ := limitLoop(t, 100, 3, 15, budgetShield("WEAK"))
+		l, _, clock, _ := limitLoop(t, 100, 3, 15)
 		_ = runCycle(l, budgetCtx())
-		*clock = clock.Add(10 * time.Second) // within 5 s shield + 2 s + 15 s cooldown
-		if !playerIn(t, l.buildDecideRequest(budgetCtx(), allInterventions(), false).State, "WEAK").ShieldLimited {
+		c := withGate(budgetCtx(), "WEAK", gamecontext.ShieldGate{Grants: 1, CooldownUntil: clock.Add(10 * time.Second)})
+		if !playerIn(t, l.buildDecideRequest(c, allInterventions(), false).State, "WEAK").ShieldLimited {
 			t.Fatal("WEAK in the cooldown must be shield_limited")
 		}
 	})
@@ -97,13 +97,9 @@ func TestShieldLimitedState_RulesPathUsesRankingSnapshot(t *testing.T) {
 			func() time.Time { return clock }, rand.New(rand.NewPCG(1, 2)))
 		rules.SetShieldSource(l.ShieldSerials)
 		l.Rules = rules
-		var st LayerState
-		l.runDecision(context.Background(), snap, chargeRulesCtx(), budgetShield("WEAK"), clock, &st)
-		if got := outcomeSummary(st); !equalStrings(got, []string{"grant_shield/WEAK:dispatched"}) {
-			t.Fatalf("grant outcomes = %v, want dispatched", got)
-		}
-		clock = clock.Add(time.Minute)
-		_, req, _, ranked := rules.EvaluateDecide(context.Background(), chargeRulesCtx(), l.rulesRequestBuilder(chargeRulesCtx(), allInterventions()))
+		l.shieldLimits.set(limitsOf(snap.Policy))
+		c := withGate(chargeRulesCtx(), "WEAK", gamecontext.ShieldGate{Grants: 1})
+		_, req, _, ranked := rules.EvaluateDecide(context.Background(), c, l.rulesRequestBuilder(c, allInterventions()))
 		if !ranked {
 			t.Fatal("EvaluateDecide was throttled")
 		}

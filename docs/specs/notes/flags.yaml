@@ -449,16 +449,18 @@ agent:
     read_by: [agent, game-coordinator]
     reload: live
     note: >-
-      Most agent shields one player gets per game; the agent refuses `shield_cap_reached` and the
-      coordinator enforces the same backstop (UC-048 A6, A7, BR-007). A read error or negative
+      Most agent shields one player gets per game; the coordinator enforces it, and the agent refuses
+      `shield_cap_reached` once the coordinator's `game_player_shield_gate{stat="grants"}` reached
+      it (UC-048 A6, A7, BR-007). A read error or negative
       value gives 3; a lower cap applies at once.
   policy.shield_cooldown_seconds:
-    read_by: [agent, game-coordinator]
+    read_by: [game-coordinator]
     reload: live
     note: >-
       Seconds after a player's last agent shield ends before another is granted (UC-048 A6, A7,
       BR-007); `0` turns it off and allows extending a running shield. A read error or negative
-      value gives 15.
+      value gives 15. The agent refuses `shield_cooldown` from the coordinator's
+      `game_player_shield_gate{stat="cooldown_until"}`, which adds the value read at the grant.
   policy.shield_danger_enabled:
     read_by: [agent]
     reload: live
@@ -621,19 +623,19 @@ game:
       every session admission. Only a baseline edit may set `allow`; a stack overlay may only set
       `block`.
   shield.activation:
-    read_by: [agent, game-coordinator]
+    read_by: [game-coordinator]
     reload: live
     note: >-
       How a granted shield starts: at once, as a charge fired by the trigger, or held from an energy
       budget (UC-048 BR-004). `trigger` and `hold` apply in Free-for-All only; other modes, shadow
-      games and malformed values give `instant`. `hold` is latched per game (BR-027).
+      games and malformed values give `instant`. `hold` is latched per game (BR-011). The agent learns
+      of a held charge from `game_player_shield_gate{stat="charged"}` (UC-048 A4).
   shield.charge_expiry_seconds:
-    read_by: [agent, game-coordinator]
+    read_by: [game-coordinator]
     reload: live
     note: >-
       Seconds a shield charge is held before it expires, `0` = never; fixed per charge at grant.
-      Malformed or negative gives 20; clamped to 0 to 120. The agent's charge ledger uses min(value,
-      20 s) plus 2 s.
+      Malformed or negative gives 20; clamped to 0 to 120.
   shield.charge_pre_expiry_seconds:
     read_by: [controller-manager]
     reload: live
