@@ -457,7 +457,7 @@ type components struct {
 
 	gameFlags  *flagservice.Client
 	sharedSink decision.ActionSink
-	// shieldSeconds reads the grant_shield length for every loop (UC-040 BR-029).
+	// shieldSeconds reads the grant_shield length for every loop (UC-048 BR-012).
 	shieldSeconds *actions.ShieldSecondsReader
 	llmBudget     llmBudgetShare
 	groupLog      *decision.GroupLog
@@ -667,7 +667,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// min(AGENT_LLM_MAX_REQUESTS_PER_MINUTE, llm.max_requests_per_minute). 0 (unset)
 	// = no ceiling, the flag governs.
 	c.llmBudget.loop(loop)
-	// Group-shield decisions feed the game summary (#2529, UC-040 BR-033).
+	// Group-shield decisions feed the game summary (#2529, UC-048 BR-014).
 	loop.SetGroupLog(c.groupLog)
 	// Every intervention of the game feeds the summary span's list (#2640).
 	loop.SetInterventionLog(c.interventionLog)
@@ -715,7 +715,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	loop.SetAlreadyAppliedRecorder(func(intervention, serial string) {
 		mux.AppendInterventionInPlace(gameID, intervention, serial)
 	})
-	// UC-040 A31 step 1 (#1837): the per-loop shield-charge ledger reads the game's
+	// UC-048 A4 step 1 (#1837): the per-loop shield-charge ledger reads the game's
 	// shield.activation / shield.charge_expiry_seconds from the read-only game domain.
 	loop.SetShieldChargeMode(c.agentFlags.ShieldCharge)
 	// UC-040 BR-036 (#2467 PR 5): remote decide requests carry the game's
@@ -732,11 +732,11 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// #2479: goal.profile in the game's flag context, for the prompt's goal lines
 	// (only under decision.goal_in_prompt).
 	loop.SetGoalSource(c.goalProfile)
-	// UC-040 BR-029 (#2395): a grant_shield without a value gets the
+	// UC-048 BR-012 (#2395): a grant_shield without a value gets the
 	// interventions/shield_seconds "default" variant, read at use time through the
 	// flag service (fail closed: 5 s).
 	loop.SetShieldSecondsSource(c.shieldSeconds.Seconds)
-	// UC-040 A31 step 1, BR-027 (#2096): the game's first shield.activation is latched
+	// UC-048 A4 step 1, BR-011 (#2096): the game's first shield.activation is latched
 	// when the agent first sees the game, so a later flip to `hold` keeps a trigger game trigger.
 	c.agentFlags.LatchShieldMode(context.Background(), gameID)
 	// Shared decision-backend registry (#1226): decision.backend selects who decides.
@@ -758,10 +758,10 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	rules.SetChaosSeedSource(patternObs.SeedSource())
 	rules.SetLateSeedHook(patternObs.LateSeed)
 	// The rules engine reads the loop's shield ledger once per ranking and skips a
-	// grant_shield to a charged, capped or cooling-down player (UC-040 A31, A33).
+	// grant_shield to a charged, capped or cooling-down player (UC-048 A4, A6).
 	rules.SetShieldSource(loop.ShieldSerials)
 	// R4 keeps the candidate with the fewest agent shields in this game, the weakest on a tie
-	// (catch-up, UC-040 A41, BR-030; #2395).
+	// (catch-up, decide-contract.md §15.2; #2395).
 	rules.SetShieldGrantSource(loop.ShieldGrants)
 	// The rules engine skips a state or level candidate whose value the loop
 	// already applied (UC-040 A35 step 4), so it does not take a slot every second.

@@ -168,7 +168,7 @@ export class ControllerCard {
     // Update LED color: the colour last written to the LED (shield fade included, #1301)
     this.updateLedColor(data.color);
 
-    // Agent shield badge (UC-040 A16)
+    // Agent shield badge (UC-048 A1)
     this.updateShield(shield, nowMs);
 
     // Hold-mode energy bar (UC-035 BR-008)

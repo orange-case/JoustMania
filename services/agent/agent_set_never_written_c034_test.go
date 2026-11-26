@@ -467,8 +467,8 @@ func TestC034_InterventionKeysReadFromSpec(t *testing.T) {
 }
 
 // c034HumanOnlyGameKeys are game-set flags only a human may change (stage
-// overlay): the charge expiry of #1837 (UC-040 BR-019) and the charge cue flags
-// of #2094 (UC-040 BR-021). The agent writes the game set only as
+// overlay): the charge expiry of #1837 (UC-048 BR-004) and the charge cue flags
+// of #2094 (UC-048 BR-006). The agent writes the game set only as
 // experiment+arm or game_kind=real overlays, so these keys are out of its reach
 // exactly when their registry rows allow neither scope; the dynamic declarer
 // then never offers them either.
@@ -477,9 +477,9 @@ var c034HumanOnlyGameKeys = []string{
 	"shield.charge_rumble_intensity", "shield.charge_rumble_pulse_ms",
 	"shield.charge_reminder_seconds", "shield.charge_pre_expiry_seconds",
 	"shield.ending_rumble_seconds",
-	// The hold feedback flags of #2463 (UC-040 BR-026).
+	// The hold feedback flags of #2463 (UC-048 BR-010).
 	"shield.hold_rumble_max_intensity", "shield.hold_led_floor_percent",
-	// The shield end grace of #2464 (UC-040 BR-035): it lengthens every agent shield.
+	// The shield end grace of #2464 (UC-048 BR-015): it lengthens every agent shield.
 	"shield.end_grace_seconds",
 }
 
@@ -559,7 +559,7 @@ func TestC034_HoldKeysCeilings(t *testing.T) {
 	}
 }
 
-// UC: UC-040 BR-019
+// UC: UC-048 BR-004
 func TestC034_ShieldChargeFlagsAreNeverWrittenByTheAgent(t *testing.T) {
 	policies, err := fake.RegistryPolicies(filepath.Join("..", "flag-service", "registry.yaml"), experiment.GameFlagSet)
 	if err != nil {
@@ -573,7 +573,7 @@ func TestC034_ShieldChargeFlagsAreNeverWrittenByTheAgent(t *testing.T) {
 		d := &dynamicDeclarer{gameFlags: svc, defaultObjective: decision.ObjectiveBalanced}
 		candidates := d.readCandidateFlags()
 		for _, key := range c034HumanOnlyGameKeys {
-			t.Run("UC-040/BR-019 "+shipped+" "+key, func(t *testing.T) {
+			t.Run("UC-048/BR-004 "+shipped+" "+key, func(t *testing.T) {
 				view, err := svc.GetFlag(context.Background(), experiment.GameFlagSet, key)
 				if err != nil {
 					t.Fatalf("%s missing from %s: %v", key, shipped, err)

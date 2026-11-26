@@ -46,7 +46,7 @@ flags:
   - {set: interventions, key: controller_effect, kind: event, scope: [game], bounds: {payload: {serial: serial_or_empty, effect: "enum rumble|pulse|flash|show_battery"}}}
   - {set: interventions, key: audio_cue, kind: event, scope: [game], bounds: {payload: {sound: sound}}}
   - {set: interventions, key: end_game, kind: event, scope: [game], bounds: {payload: {}}}
-  # Group shield (#2467, UC-040 A47, BR-033): 2 to 6 distinct players of the game, 1 to 10 s.
+  # Group shield (#2467, UC-048 A13, BR-014): 2 to 6 distinct players of the game, 1 to 10 s.
   - {set: interventions, key: group_shield, kind: event, scope: [game], bounds: {payload: {serials: serial_set, seconds: "float 1 10"}}}
 
   # --- agent (flags.md §13.2) ---------------------------------------------------
@@ -89,7 +89,7 @@ flags:
   - {set: agent, key: policy.coordinator_backstop_per_minute, kind: overlay, scope: [stack], bounds: {range: [1, 100], integer: true}}
   - {set: agent, key: policy.max_shields_per_player_per_game, kind: overlay, scope: [stack], bounds: {range: [0, 20], integer: true}}
   - {set: agent, key: policy.shield_cooldown_seconds, kind: overlay, scope: [stack], bounds: {range: [0, 120], integer: true}}
-  # R4's danger shield tuning (UC-040 A43, BR-032; #2518): operator-written, never by
+  # R4's danger shield tuning (decide-contract.md §15.3; #2518): operator-written, never by
   # the agent (C-034); bounds are the declared variants (early/late, quick/patient).
   - {set: agent, key: policy.shield_danger_ratio, kind: overlay, scope: [stack]}
   - {set: agent, key: policy.shield_danger_samples, kind: overlay, scope: [stack]}
@@ -165,7 +165,7 @@ flags:
   # are the coordinator's own clamp (games/base.py RAMP_SECONDS_MIN/MAX).
   - {set: game, key: tempo.ramp_up_seconds, kind: overlay, scope: [stack], bounds: {range: [0.1, 10]}}
   - {set: game, key: tempo.ramp_down_seconds, kind: overlay, scope: [stack], bounds: {range: [0.1, 10]}}
-  # Shield charge (#1837, UC-040 BR-019): charge_expiry and the #2094 cue flags are human
+  # Shield charge (#1837, UC-048 BR-004): charge_expiry and the #2094 cue flags are human
   # flags, changeable on stage; never experiment+arm or real, so no agent writer can reach
   # them (C-034). shield.activation and the hold keys below are agent-tunable as
   # experiment+arm values, the hold keys also as real values (FR-162, UC-043 A17);
@@ -175,13 +175,13 @@ flags:
   # persist: the operator pad's value (UC-015 BR-018).
   - {set: game, key: shield.activation, kind: overlay, scope: [stack, experiment+arm], persist: true, bounds: {variants: [instant, trigger, hold]}, description: "how a granted shield works: on at grant, on a trigger press, or while the trigger is held"}
   - {set: game, key: shield.charge_expiry_seconds, kind: overlay, scope: [stack], bounds: {range: [0, 120]}}
-  # Shield charge rumble pattern (#2094, UC-040 BR-021): read by the controller manager per charge.
+  # Shield charge rumble pattern (#2094, UC-048 BR-006): read by the controller manager per charge.
   - {set: game, key: shield.charge_rumble_intensity, kind: overlay, scope: [stack], bounds: {range: [0, 255]}}
   - {set: game, key: shield.charge_rumble_pulse_ms, kind: overlay, scope: [stack], bounds: {range: [50, 500]}}
   - {set: game, key: shield.charge_reminder_seconds, kind: overlay, scope: [stack], bounds: {range: [0, 30]}}
   - {set: game, key: shield.charge_pre_expiry_seconds, kind: overlay, scope: [stack], bounds: {range: [0, 8]}}
   - {set: game, key: shield.ending_rumble_seconds, kind: overlay, scope: [stack], bounds: {range: [0, 3]}}
-  # Hold-mode shield energy (#2096, UC-040 BR-024, BR-027): latched per hold game.
+  # Hold-mode shield energy (#2096, UC-048 BR-008, BR-011): latched per hold game.
   # Agent-tunable since FR-162 (UC-043 A17); the ranges are the ceilings (C-034).
   # persist: an operator/admin value may be persisted (#2452); the agent writes in memory only.
   - {set: game, key: shield.energy_max_seconds, kind: overlay, scope: [stack, experiment+arm, real], persist: true, bounds: {range: [1, 10]}, description: "hold mode: most shield energy in seconds a player can store"}
@@ -189,14 +189,14 @@ flags:
   - {set: game, key: shield.energy_initial_seconds, kind: overlay, scope: [stack, experiment+arm, real], persist: true, bounds: {range: [0, 5]}, description: "hold mode: shield energy in seconds each player starts the game with"}
   - {set: game, key: shield.recharge_per_second, kind: overlay, scope: [stack, experiment+arm, real], persist: true, bounds: {range: [0, 0.5]}, description: "hold mode: shield energy regained per second while the shield is not held"}
   - {set: game, key: shield.min_burst_seconds, kind: overlay, scope: [stack, experiment+arm, real], persist: true, bounds: {range: [0.1, 1]}, description: "hold mode: least shield energy in seconds one activation costs"}
-  # Hold feedback (#2096, UC-040 BR-026): latched per hold game and shipped to the controller.
+  # Hold feedback (#2096, UC-048 BR-010): latched per hold game and shipped to the controller.
   - {set: game, key: shield.hold_rumble_intensity, kind: overlay, scope: [stack, experiment+arm, real], persist: true, bounds: {range: [0, 150]}, description: "hold mode: rumble strength while a player holds the shield, 0 = none"}
   - {set: game, key: shield.empty_pulse_ms, kind: overlay, scope: [stack, experiment+arm, real], persist: true, bounds: {range: [100, 800]}, description: "hold mode: length in ms of the pulse when a held shield runs out"}
-  # Hold feedback of #2463 (UC-040 BR-026): stack-only and human-only, outside the eight
+  # Hold feedback of #2463 (UC-048 BR-010): stack-only and human-only, outside the eight
   # agent-writable hold keys (C-034, TestC034_HoldKeysCeilings).
   - {set: game, key: shield.hold_rumble_max_intensity, kind: overlay, scope: [stack], bounds: {range: [0, 230]}}
   - {set: game, key: shield.hold_led_floor_percent, kind: overlay, scope: [stack], bounds: {range: [10, 100]}}
-  # Shield end grace of #2464 (UC-040 BR-035): stack-only and human-only; it makes every
+  # Shield end grace of #2464 (UC-048 BR-015): stack-only and human-only; it makes every
   # agent shield longer, so the agent never writes it (C-034).
   - {set: game, key: shield.end_grace_seconds, kind: overlay, scope: [stack], bounds: {range: [0, 2]}}
 

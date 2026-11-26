@@ -11,7 +11,7 @@ import (
 )
 
 // group_metric_uc040_test.go: agent_group_interventions_total{outcome,reason,backend,
-// game_kind,shape} (#2467 PR 6; UC-040 A47, A48, BR-033; telemetry.md section 4).
+// game_kind,shape} (#2467 PR 6; UC-048 A13, A14, BR-014; telemetry.md section 4).
 
 func groupMetricByLabels(t *testing.T, reader *metric.ManualReader) map[string]int64 {
 	t.Helper()
@@ -38,7 +38,7 @@ func groupMetricByLabels(t *testing.T, reader *metric.ManualReader) map[string]i
 	return out
 }
 
-// UC: UC-040 A47 BR-033
+// UC: UC-048 A13 BR-014
 func TestGroupInterventionsCounter(t *testing.T) {
 	ctx := context.Background()
 	run := func(t *testing.T, mutate func(l *Loop)) map[string]int64 {
@@ -50,13 +50,13 @@ func TestGroupInterventionsCounter(t *testing.T) {
 		l.runDecision(ctx, groupSnapshot(groupPolicy()), groupCtx("shadow", "A", "B", "C"), groupDecision("A", "B", "C"), *clock, &st)
 		return groupMetricByLabels(t, reader)
 	}
-	t.Run("UC-040/A47 an applied group of every alive player counts shape=all", func(t *testing.T) {
+	t.Run("UC-048/A13 an applied group of every alive player counts shape=all", func(t *testing.T) {
 		got := run(t, func(*Loop) {})
 		if want := "applied//rules/shadow/all"; got[want] != 1 || len(got) != 1 {
 			t.Fatalf("counts = %v, want %s once", got, want)
 		}
 	})
-	t.Run("UC-040/A47 a group that leaves one alive player out counts shape=all_except", func(t *testing.T) {
+	t.Run("UC-048/A13 a group that leaves one alive player out counts shape=all_except", func(t *testing.T) {
 		reader := metric.NewManualReader()
 		l, _, clock, _ := budgetLoop(t, 100)
 		l.groupInterventions = newGroupInterventionsCounter(metric.NewMeterProvider(metric.WithReader(reader)))
@@ -66,7 +66,7 @@ func TestGroupInterventionsCounter(t *testing.T) {
 			t.Fatalf("counts = %v", got)
 		}
 	})
-	t.Run("UC-040/A48 a refused group counts outcome=blocked with the block reason", func(t *testing.T) {
+	t.Run("UC-048/A14 a refused group counts outcome=blocked with the block reason", func(t *testing.T) {
 		reader := metric.NewManualReader()
 		l, _, clock, _ := budgetLoop(t, 100)
 		l.groupInterventions = newGroupInterventionsCounter(metric.NewMeterProvider(metric.WithReader(reader)))
@@ -90,7 +90,7 @@ func TestGroupInterventionsCounter(t *testing.T) {
 			t.Fatalf("counts = %v", got)
 		}
 	})
-	t.Run("UC-040/A47 a single grant adds no group sample", func(t *testing.T) {
+	t.Run("UC-048/A13 a single grant adds no group sample", func(t *testing.T) {
 		reader := metric.NewManualReader()
 		l, _, clock, _ := budgetLoop(t, 100)
 		l.groupInterventions = newGroupInterventionsCounter(metric.NewMeterProvider(metric.WithReader(reader)))
@@ -102,7 +102,7 @@ func TestGroupInterventionsCounter(t *testing.T) {
 			t.Fatalf("counts = %v, want none", got)
 		}
 	})
-	t.Run("UC-040/A47 the decision span carries the alive count at the group", func(t *testing.T) {
+	t.Run("UC-048/A13 the decision span carries the alive count at the group", func(t *testing.T) {
 		snap := groupSnapshot(groupPolicy())
 		l, sr := decideRecordingLoop(t, snap)
 		l.Rules = fakeRules{out: []Decision{groupDecision("A", "B")}}

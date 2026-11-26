@@ -166,7 +166,7 @@ class GameSession:
         # primary game is structurally unable to be seeded — same real-protection
         # guard as experiment_id/arm.
         self.rng_seed = rng_seed
-        # UC-046 BR-018 / UC-040 BR-019: the shadow game's pattern controllers
+        # UC-046 BR-018 / UC-048 BR-004: the shadow game's pattern controllers
         # press the trigger by themselves, so it honours trigger and hold. The
         # servicer forces False for a real (primary) session, like rng_seed.
         self.pattern_trigger_policy = pattern_trigger_policy

@@ -2,9 +2,9 @@
 Shield activation mode ``hold`` in the game coordinator (#2096, FR-161).
 
 UC-030 A7 (the player holds the shield), BR-008 (trigger hold), BR-009 (release
-tail); UC-040 A36 (energy granted), A37 (grant into a full pool or an exhausted
-budget), A38 (passive recharge), A39 (energy ends), BR-019 (mode allow-list),
-BR-024 (pool and budget), BR-025 (sources), BR-027 (latched per game).
+tail); UC-048 A8 (energy granted), UC-048 A9 (grant into a full pool or an exhausted
+budget), UC-048 A10 (passive recharge), UC-048 A11 (energy ends), UC-048 BR-004 (mode allow-list),
+UC-048 BR-008 (pool and budget), UC-048 BR-009 (sources), UC-048 BR-011 (latched per game).
 
 Every test runs on a fake clock (``base.time.time``) with the flags patched. The
 game is latched to hold by its own ``_latch_shield_hold`` reading the patched
@@ -49,7 +49,7 @@ IDLE = (0.0, 0.0, 1.0)
 
 @pytest.fixture(autouse=True)
 def _no_shield_limits():
-    """Shield limits off (UC-040 BR-022) unless a test sets them."""
+    """Shield limits off (UC-048 BR-007) unless a test sets them."""
     with patch.object(BaseGameMode, "_shield_limits", return_value=(0, 0)):
         yield
 
@@ -78,7 +78,7 @@ class Flags:
             "shield.energy_initial_seconds": 0.0,
             "shield.recharge_per_second": 0.0,
             "shield.min_burst_seconds": 0.3,
-            # No end grace window (UC-040 BR-035): these tests pin the rules before #2464.
+            # No end grace window (UC-048 BR-015): these tests pin the rules before #2464.
             "shield.end_grace_seconds": 0.0,
         }
         self.reads: list[str] = []
@@ -128,7 +128,7 @@ def _make_ffa(events, game_cls=FFAGame):
 
 
 def latch(game, clock):
-    """What the start of the game loop does (UC-040 BR-027)."""
+    """What the start of the game loop does (UC-048 BR-011)."""
     params = game._latch_shield_hold()
     game._start_shield_hold_clock(clock.t)
     return params
@@ -195,7 +195,7 @@ class TestUC030A7Hold:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-024"])
+    @pytest.mark.uc("UC-048", br=["BR-008"])
     async def test_release_books_the_time_held_and_keeps_the_rest(self, game, clock):
         """A7 steps 3-4: 1 s held of 3 s: 2 s left, 1 s of budget used, outcome released."""
         fill(game, "p1", 3.0)
@@ -213,7 +213,7 @@ class TestUC030A7Hold:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-024"])
+    @pytest.mark.uc("UC-048", br=["BR-008"])
     async def test_a_tap_costs_the_minimum_burst_and_protects_through_the_tail(self, game, clock):
         """A tap (one held frame) costs 0.3 s; a death jolt inside the tail does not kill."""
         fill(game, "p1", 2.0)
@@ -252,9 +252,9 @@ class TestUC030A7Hold:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-008"])
     async def test_holding_until_empty_ends_exactly_at_the_deadline_and_disarms(self, game, clock):
-        """A39 step 1: protection ends at the energy's end; holding on never restarts it."""
+        """UC-048 A11 step 1: protection ends at the energy's end; holding on never restarts it."""
         fill(game, "p1", 1.0)
         await arm(game, clock)
         await step(game, clock, "p1", True)
@@ -286,9 +286,9 @@ class TestUC030A7Hold:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-024"])
+    @pytest.mark.uc("UC-048", br=["BR-008"])
     async def test_less_than_a_minimum_burst_of_energy_does_not_activate(self, game, clock):
-        """BR-024: an activation needs a usable energy of at least the minimum burst."""
+        """UC-048 BR-008: an activation needs a usable energy of at least the minimum burst."""
         fill(game, "p1", 0.2)
         await arm(game, clock)
         await step(game, clock, "p1", True)
@@ -484,13 +484,13 @@ class TestUC030BR009OtherProtectionKeepsThePlainPrime:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A36, A37: grants add energy; grants that add nothing are refused
+# UC-048 A8, A9: grants add energy; grants that add nothing are refused
 # --------------------------------------------------------------------------- #
 class TestUC040A36EnergyGranted:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-024", "BR-025"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-008", "BR-009"])
     async def test_a_grant_adds_energy_clamped_to_the_cap_without_protection(self, game, clock):
-        """A36 step 1: +min(seconds, room); grace_until untouched."""
+        """UC-048 A8 step 1: +min(seconds, room); grace_until untouched."""
         fill(game, "p1", 3.0)
         assert await game.grant_shield("p1", 5.0) is True
         p1 = game.players["p1"]
@@ -499,17 +499,17 @@ class TestUC040A36EnergyGranted:
         assert not game.is_in_grace(p1, clock.t)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-008"])
     async def test_a_grant_is_clamped_to_the_budget_remaining(self, game, clock):
-        """BR-024: energy never exceeds the budget remaining."""
+        """UC-048 BR-008: energy never exceeds the budget remaining."""
         game.players["p1"].hold_budget_used = 13.0
         assert await game.grant_shield("p1", 5.0) is True
         assert game._shield_hold_energy(game.players["p1"], clock.t) == pytest.approx(2.0)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-008"])
     async def test_a_grant_during_a_hold_moves_the_deadline_out(self, game, clock):
-        """A36 step 2."""
+        """UC-048 A8 step 2."""
         fill(game, "p1", 1.0)
         await arm(game, clock)
         await step(game, clock, "p1", True)
@@ -519,9 +519,9 @@ class TestUC040A36EnergyGranted:
         assert game.players["p1"].hold_until == pytest.approx(start + 3.0)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-008"])
     async def test_a_grant_in_the_tail_only_adds_to_the_pool(self, game, clock):
-        """A36 step 2: in the minimum-burst tail the deadline stays."""
+        """UC-048 A8 step 2: in the minimum-burst tail the deadline stays."""
         fill(game, "p1", 1.0)
         await arm(game, clock)
         await step(game, clock, "p1", True)
@@ -535,18 +535,18 @@ class TestUC040A36EnergyGranted:
         assert p1.hold_energy == pytest.approx(3.0 - 0.3)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-007"])
     async def test_an_applied_grant_counts_and_paces_from_the_grant(self, game, clock):
-        """BR-022 in hold mode: a grant that added energy counts; cooldown runs from grant + seconds."""
+        """UC-048 BR-007 in hold mode: a grant that added energy counts; cooldown runs from grant + seconds."""
         fill(game, "p1", 4.0)
         assert await game.grant_shield("p1", 3.0) is True  # partial add: +1 s
         assert game._agent_shield_grants["p1"] == 1
         assert game._agent_shield_last_end["p1"] == pytest.approx(clock.t + 3.0)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-007"])
     async def test_the_cap_and_cooldown_still_refuse_after_the_pool_checks(self, game, clock):
-        """BR-022 / A34: the shield limits apply in hold mode too."""
+        """UC-048 BR-007 / UC-048 A7: the shield limits apply in hold mode too."""
         with patch.object(BaseGameMode, "_shield_limits", return_value=(1, 0)):
             assert await game.grant_shield("p1", 1.0) is True
             with pytest.raises(InterventionNotApplied) as exc:
@@ -556,9 +556,9 @@ class TestUC040A36EnergyGranted:
 
 class TestUC040A37NothingToAdd:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A37", br=["BR-024", "BR-022"])
+    @pytest.mark.uc("UC-048", flow="A9", br=["BR-008", "BR-007"])
     async def test_a_full_pool_refuses_and_counts_nothing(self, game, clock):
-        """A37 step 2: shield_pool_full, shield_refused, not counted."""
+        """UC-048 A9 step 2: shield_pool_full, shield_refused, not counted."""
         p1 = game.players["p1"]
         p1.span = create_autospec(Span, instance=True)
         fill(game, "p1", 4.98)
@@ -571,9 +571,9 @@ class TestUC040A37NothingToAdd:
         assert event.kwargs["attributes"]["shield.refusal_reason"] == "shield_pool_full"
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A37", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A9", br=["BR-008"])
     async def test_an_exhausted_budget_refuses_before_the_pool_check(self, game, clock):
-        """A37 step 2: budget first; a pool that is also full still reads shield_budget_exhausted."""
+        """UC-048 A9 step 2: budget first; a pool that is also full still reads shield_budget_exhausted."""
         game.players["p1"].hold_budget_used = 14.8
         with pytest.raises(InterventionNotApplied) as exc:
             await game.grant_shield("p1", 2.0)
@@ -581,10 +581,10 @@ class TestUC040A37NothingToAdd:
         assert "p1" not in game._agent_shield_grants
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A37")
+    @pytest.mark.uc("UC-048", flow="A9")
     @pytest.mark.uc("UC-040", flow="A22")
     async def test_manager_records_the_reason_and_refunds_the_backstop(self):
-        """A37 step 2 / A22: blocked=true with the reason; the reservation is refunded."""
+        """UC-048 A9 step 2 / A22: blocked=true with the reason; the reservation is refunded."""
         from services.game_coordinator.tests.event_list_helpers import edge_event
         from services.game_coordinator.tests.test_interventions import make_manager
 
@@ -604,7 +604,7 @@ class TestUC040A37NothingToAdd:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A38: passive recharge
+# UC-048 A10: passive recharge
 # --------------------------------------------------------------------------- #
 class TestUC040A38Recharge:
     @pytest.fixture
@@ -615,20 +615,20 @@ class TestUC040A38Recharge:
         with patch.object(g, "_play_sound", new_callable=AsyncMock):
             yield g
 
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-025"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-009"])
     def test_recharge_is_a_function_of_time_up_to_the_cap(self, recharging, clock):
         p1 = recharging.players["p1"]
         assert recharging._shield_hold_energy(p1, clock.t + 3.0) == pytest.approx(1.5)
         assert recharging._shield_hold_energy(p1, clock.t + 7.3) == pytest.approx(3.65)
         assert recharging._shield_hold_energy(p1, clock.t + 60.0) == pytest.approx(5.0)
 
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-024", "BR-025"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-008", "BR-009"])
     def test_recharge_stops_at_the_budget_remaining(self, recharging, clock):
         recharging.players["p1"].hold_budget_used = 13.0
         assert recharging._shield_hold_energy(recharging.players["p1"], clock.t + 60.0) == pytest.approx(2.0)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-025"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-009"])
     async def test_no_recharge_while_active_and_it_restarts_at_the_end(self, recharging, clock):
         p1 = recharging.players["p1"]
         clock.t += 4.0  # 2 s recharged
@@ -642,11 +642,11 @@ class TestUC040A38Recharge:
         await step(recharging, clock, "p1", False, dt=0.0)
         assert recharging._shield_hold_energy(p1, start + 3.0) == pytest.approx(e0 - 1.0 + 0.5 * 2.0)
 
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-025"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-009"])
     def test_zero_rate_never_recharges(self, game, clock):
         assert game._shield_hold_energy(game.players["p1"], clock.t + 600.0) == 0.0
 
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-025"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-009"])
     def test_no_recharge_before_the_game_loop_starts(self, clock, flags, events):
         flags.values["shield.recharge_per_second"] = 0.5
         g = _make_ffa(events)
@@ -655,13 +655,13 @@ class TestUC040A38Recharge:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A39: the pool ends
+# UC-048 A11: the pool ends
 # --------------------------------------------------------------------------- #
 class TestUC040A39EnergyEnds:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-008"])
     async def test_holding_until_the_budget_runs_out_ends_budget_exhausted(self, game, clock):
-        """A39 step 1: outcome budget_exhausted and the span event once; grants are refused after it."""
+        """UC-048 A11 step 1: outcome budget_exhausted and the span event once; grants are refused after it."""
         p1 = game.players["p1"]
         p1.span = create_autospec(Span, instance=True)
         p1.hold_budget_used = 13.0
@@ -676,9 +676,9 @@ class TestUC040A39EnergyEnds:
             await game.grant_shield("p1", 2.0)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-005"])
     async def test_eliminate_player_kills_a_holder_and_drops_the_pool(self, game, clock):
-        """A39 step 2: the kill path ignores the hold, ends it with death and drops the pool."""
+        """UC-048 A11 step 2: the kill path ignores the hold, ends it with death and drops the pool."""
         fill(game, "p1", 3.0)
         await arm(game, clock)
         await step(game, clock, "p1", True)
@@ -688,9 +688,9 @@ class TestUC040A39EnergyEnds:
         assert p1.hold_energy == 0.0 and p1.hold_until == 0.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39")
+    @pytest.mark.uc("UC-048", flow="A11")
     async def test_energy_granted_while_the_kill_awaits_is_dropped(self, game, clock):
-        """A39 step 2: the second drop after the kill path's awaits."""
+        """UC-048 A11 step 2: the second drop after the kill path's awaits."""
         fill(game, "p1", 2.0)
 
         async def sound_then_grant(*_a, **_kw):
@@ -701,7 +701,7 @@ class TestUC040A39EnergyEnds:
         assert game.players["p1"].hold_energy == 0.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39")
+    @pytest.mark.uc("UC-048", flow="A11")
     async def test_disconnect_drops_the_pool(self, game, clock):
         fill(game, "p1", 3.0)
         await arm(game, clock)
@@ -710,7 +710,7 @@ class TestUC040A39EnergyEnds:
         assert game.players["p1"].hold_energy == 0.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39")
+    @pytest.mark.uc("UC-048", flow="A11")
     async def test_game_end_drops_every_pool(self, game, clock):
         fill(game, "p1", 3.0)
         fill(game, "p2", 1.0)
@@ -720,7 +720,7 @@ class TestUC040A39EnergyEnds:
         assert all(p.hold_energy == 0.0 and p.hold_started_at == 0.0 for p in game.players.values())
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39")
+    @pytest.mark.uc("UC-048", flow="A11")
     async def test_error_teardown_ends_the_open_hold_span(self, game, clock):
         p1 = game.players["p1"]
         p1.span = create_autospec(Span, instance=True)
@@ -735,10 +735,10 @@ class TestUC040A39EnergyEnds:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 BR-024: the budget bounds every schedule
+# UC-048 BR-008: the budget bounds every schedule
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", br=["BR-024", "BR-025"])
+@pytest.mark.uc("UC-048", br=["BR-008", "BR-009"])
 @pytest.mark.parametrize("seed", range(6))
 async def test_protected_time_never_exceeds_the_budget(clock, flags, events, seed):
     """Seeded tap / hold schedules at the maximum recharge with grants: protection <= budget.
@@ -762,7 +762,7 @@ async def test_protected_time_never_exceeds_the_budget(clock, flags, events, see
             if rng.random() < 0.08:
                 pressed = not pressed
             if rng.random() < 0.002:
-                with contextlib.suppress(InterventionNotApplied):  # a full pool or a used-up budget (A37)
+                with contextlib.suppress(InterventionNotApplied):  # a full pool or a used-up budget (UC-048 A9)
                     await g.grant_shield("p1", 3.0)
             await step(g, clock, "p1", pressed)
             activations += bool(p1.hold_started_at) and not holding
@@ -775,10 +775,10 @@ async def test_protected_time_never_exceeds_the_budget(clock, flags, events, see
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 BR-027 and BR-019: latched per game, Free-for-All real games only
+# UC-048 BR-011 and BR-004: latched per game, Free-for-All real games only
 # --------------------------------------------------------------------------- #
 class TestUC040BR027Latch:
-    @pytest.mark.uc("UC-040", br=["BR-027", "BR-024"])
+    @pytest.mark.uc("UC-048", br=["BR-011", "BR-008"])
     def test_latch_reads_the_flags_once_and_clamps_them(self, clock, flags, events):
         flags.values.update(
             {
@@ -799,7 +799,7 @@ class TestUC040BR027Latch:
         assert len(flags.reads) == reads
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-027"])
+    @pytest.mark.uc("UC-048", br=["BR-011"])
     async def test_a_flag_flip_mid_game_changes_nothing(self, game, clock, flags):
         flags.values["shield.activation"] = "instant"
         flags.values["shield.energy_max_seconds"] = 1.0
@@ -808,7 +808,7 @@ class TestUC040BR027Latch:
         assert game._shield_hold_energy(game.players["p1"], clock.t) == pytest.approx(4.0)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-027", "BR-019"])
+    @pytest.mark.uc("UC-048", br=["BR-011", "BR-004"])
     async def test_hold_read_in_a_game_latched_to_instant_stays_instant(self, clock, flags, events):
         flags.values["shield.activation"] = "instant"
         g = _make_ffa(events)
@@ -821,9 +821,9 @@ class TestUC040BR027Latch:
         assert g.players["p1"].shield_charge_seconds == 0.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-027", "BR-019"])
+    @pytest.mark.uc("UC-048", br=["BR-011", "BR-004"])
     async def test_hold_read_in_a_game_latched_to_trigger_keeps_trigger(self, clock, flags, events):
-        """BR-027: a running trigger game keeps trigger when the flag flips to hold mid-game."""
+        """UC-048 BR-011: a running trigger game keeps trigger when the flag flips to hold mid-game."""
         flags.values["shield.activation"] = "trigger"
         g = _make_ffa(events)
         latch(g, clock)
@@ -833,13 +833,13 @@ class TestUC040BR027Latch:
         assert g.players["p1"].shield_charge_seconds == 4.0
         assert g.players["p1"].grace_until == 0.0
 
-    @pytest.mark.uc("UC-040", br=["BR-019"])
+    @pytest.mark.uc("UC-048", br=["BR-004"])
     def test_hold_is_a_free_for_all_allow_list(self):
         allowed = {cls for cls in _GAME_CLASSES.values() if cls.SHIELD_TRIGGER_ALLOWED}
         assert allowed == {FFAGame}
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-019"])
+    @pytest.mark.uc("UC-048", br=["BR-004"])
     async def test_another_mode_with_the_hold_flag_gets_the_instant_shield(self, clock, flags, events):
         from services.game_coordinator.games.nonstop_joust import NonstopJoustGame
 
@@ -849,14 +849,14 @@ class TestUC040BR027Latch:
             assert await g.grant_shield("p1", 4.0) is True
         assert g.players["p1"].grace_until == pytest.approx(clock.t + 4.0)
 
-    @pytest.mark.uc("UC-040", br=["BR-019"])
+    @pytest.mark.uc("UC-048", br=["BR-004"])
     def test_a_shadow_game_is_never_a_hold_game(self, clock, flags, events):
         g = _make_ffa(events)
         g.game_kind = "shadow"
         assert g._latch_shield_hold() is None
         assert "shield.activation" not in flags.reads
 
-    @pytest.mark.uc("UC-040", br=["BR-019"])
+    @pytest.mark.uc("UC-048", br=["BR-004"])
     def test_resolvers(self):
         assert resolve_shield_activation(" Hold ") == "hold"
         assert resolve_shield_activation("bogus") == "instant"

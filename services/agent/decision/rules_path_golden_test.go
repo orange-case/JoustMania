@@ -28,7 +28,7 @@ import (
 // outcome does. #2487 part 2 (PR #2539) changed it on purpose again: R5 writes the
 // slow tempo (Value 1, the lower bound) and its reason says slow the tempo; only
 // R5's two decisions change. Its review moved the rules' already-applied filter
-// after the ranking (BR-042): no golden byte changes (the harness wires no applied
+// after the ranking (decide-contract §15.6): no golden byte changes (the harness wires no applied
 // source, and no fixture step ranks two values for one key).
 //
 // Regenerate (only for an intended behavior change): go test ./decision -run
@@ -91,7 +91,7 @@ func rulesGoldenJSON(t *testing.T, predictionsOff bool, wire func(*Loop, *time.T
 		}
 		engine := newTestEngine(fx.cfg, &clock)
 		// R4's catch-up reads the loop's shield grants as main.go wires it (UC-040
-		// A41, BR-030; #2395): the one intended golden change, in the balanced fixture.
+		// decide-contract §15.2, decide-contract §15.2; #2395): the one intended golden change, in the balanced fixture.
 		engine.SetShieldGrantSource(l.ShieldGrants)
 		l.Rules = engine
 		l.now = func() time.Time { return clock }

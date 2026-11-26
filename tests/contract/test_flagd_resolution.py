@@ -788,7 +788,7 @@ def test_every_coordinator_flag_resolves_with_its_typed_getter(flagd, resolver):
 
 
 # --------------------------------------------------------------------------- #
-# 2a. The agent reads the shield flags like the coordinator (#1837, UC-040 A31)
+# 2a. The agent reads the shield flags like the coordinator (#1837, UC-048 A4)
 # --------------------------------------------------------------------------- #
 # The agent's charge ledger reads shield.activation and shield.charge_expiry_seconds
 # from the game set (services/agent/flags/game.go:ShieldCharge) with a SUBSET of the
@@ -878,7 +878,7 @@ def _json_vars(node) -> set[str]:
     return found
 
 
-@pytest.mark.uc("UC-040", flow="A31", steps=[1])
+@pytest.mark.uc("UC-048", flow="A4", steps=[1])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_shield_flag_targeting_uses_only_the_agents_context(flag_dir):
     """Static: targeting on the two shield flags may reference only the variables the
@@ -903,7 +903,7 @@ def test_shield_flag_targeting_uses_only_the_agents_context(flag_dir):
     assert not failures, "\n".join(failures)
 
 
-# The shield limits (#2044, UC-040 BR-022, flags.md §3): the coordinator reads them in
+# The shield limits (#2044, UC-048 BR-007, flags.md §3): the coordinator reads them in
 # the game's context, the agent with an empty one, so any targeting (even on the API-level
 # game_kind the handler registry allows) could give the two sides different limits.
 SHIELD_LIMIT_FLAGS = (
@@ -912,7 +912,7 @@ SHIELD_LIMIT_FLAGS = (
 )
 
 
-@pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+@pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_shield_limit_flags_carry_no_targeting(flag_dir):
     """Static: the two shield-limit flags exist in agent.json with no targeting at all."""
@@ -927,7 +927,7 @@ def test_shield_limit_flags_carry_no_targeting(flag_dir):
     assert not failures, "\n".join(failures)
 
 
-# The group-grant policy flags (#2467, UC-040 BR-033, flags.md §3): the agent reads them
+# The group-grant policy flags (#2467, UC-048 BR-014, flags.md §3): the agent reads them
 # with an empty context and the coordinator in the game's, so, like the shield limits,
 # any targeting could give the two sides different values.
 GROUP_GRANT_FLAGS = (
@@ -938,7 +938,7 @@ GROUP_GRANT_FLAGS = (
 )
 
 
-@pytest.mark.uc("UC-040", br=["BR-033"])
+@pytest.mark.uc("UC-048", br=["BR-014"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_group_grant_flags_carry_no_targeting(flag_dir):
     """Static: the four group-grant flags exist in agent.json with no targeting; the switches default off or 0."""
@@ -1043,7 +1043,7 @@ def _coordinator_type_ids() -> set[str]:
     return type_ids
 
 
-@pytest.mark.uc("UC-040", br=["BR-033"])
+@pytest.mark.uc("UC-048", br=["BR-014"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_allow_list_variants_only_name_coordinator_types(flag_dir):
     """Static: no ``interventions_allowed`` variant names a type the coordinator has no spec for.
@@ -1073,7 +1073,7 @@ def test_allow_list_variants_only_name_coordinator_types(flag_dir):
 GROUP_VARIANTS = {"standard_group", "shadow_group"}
 
 
-@pytest.mark.uc("UC-040", flow="A47", br=["BR-033"])
+@pytest.mark.uc("UC-048", flow="A13", br=["BR-014"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_only_the_group_variants_name_grant_group_shield(flag_dir):
     """The group lever is opt-in (#2467 PR 4): only ``standard_group`` and ``shadow_group`` name it.
@@ -1194,7 +1194,8 @@ def _flag_files(flag_dir: str) -> dict[str, dict]:
     }
 
 
-@pytest.mark.uc("UC-040", flow="A31", br=["BR-018"])
+@pytest.mark.uc("UC-040", br=["BR-018"])
+@pytest.mark.uc("UC-048", flow="A4")
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_handler_read_flag_targeting_uses_only_the_handler_context(flag_dir):
     """Static: targeting on a flag an intervention handler reads may use only the variables
@@ -1207,7 +1208,8 @@ def test_handler_read_flag_targeting_uses_only_the_handler_context(flag_dir):
     assert not failures, "\n".join(failures)
 
 
-@pytest.mark.uc("UC-040", flow="A31", br=["BR-018"])
+@pytest.mark.uc("UC-040", br=["BR-018"])
+@pytest.mark.uc("UC-048", flow="A4")
 def test_handler_read_flags_writer_scope():
     """Static: the flag service never renders a rung a handler read cannot match."""
     registry = handler_flag_reads()
@@ -1218,7 +1220,8 @@ def test_handler_read_flags_writer_scope():
     assert any(f["set"] == "game" and f["key"] == "windows" for f in writer_flags)
 
 
-@pytest.mark.uc("UC-040", flow="A31", br=["BR-018"])
+@pytest.mark.uc("UC-040", br=["BR-018"])
+@pytest.mark.uc("UC-048", flow="A4")
 def test_handler_read_checks_report_a_violation():
     """Negative fixture: a game_mode rung, a missing flag and an undeclared scope are reported."""
     registry = {
@@ -1280,7 +1283,7 @@ def test_handler_read_checks_report_a_violation():
 
 
 @pytest.mark.uc("UC-043", flow="A17", steps=[1])
-@pytest.mark.uc("UC-040", br=["BR-019", "BR-027"])
+@pytest.mark.uc("UC-048", br=["BR-004", "BR-011"])
 def test_hold_keys_are_the_only_shield_keys_in_the_experiment_catalog():
     """Static (FR-162, C-034): exactly the eight hold keys have the experiment+arm
     scope, all but shield.activation also real; each is declared experiment_rung applies
@@ -1327,7 +1330,7 @@ def test_hold_keys_have_no_baseline_targeting(flag_dir):
     )
 
 
-@pytest.mark.uc("UC-040", flow="A31", steps=[1])
+@pytest.mark.uc("UC-048", flow="A4", steps=[1])
 @pytest.mark.parametrize("resolver", ["rpc", "in_process"])
 def test_agent_reads_the_shield_flags_like_the_coordinator(flagd, resolver):
     """Live: each shield flag resolves, with the coordinator's getter, to the same value
@@ -1733,7 +1736,7 @@ def test_windows_experiment_rung_reaches_only_the_experimental_arm(
 
 
 @pytest.mark.uc("UC-043", flow="A17", steps=[1])
-@pytest.mark.uc("UC-040", flow="A31", steps=[1])
+@pytest.mark.uc("UC-048", flow="A4", steps=[1])
 @pytest.mark.parametrize("resolver", ["rpc", "in_process"])
 def test_agent_reads_the_activation_arm_like_the_coordinator(flagd, resolver):
     """Live (#2096): with a render.go-shaped experiment rung for shield.activation=hold,

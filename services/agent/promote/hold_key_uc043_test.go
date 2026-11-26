@@ -8,7 +8,7 @@ import (
 )
 
 // A hold sub-parameter is written and reverted at once: the game latches it at
-// its start (UC-040 BR-027), so a real write never reaches a running game.
+// its start (UC-048 BR-011), so a real write never reaches a running game.
 
 const holdKey = "shield.energy_budget_seconds"
 
@@ -25,7 +25,7 @@ func holdEvidence() Evidence {
 }
 
 // UC: UC-043 A17
-// UC: UC-040 BR-027
+// UC: UC-048 BR-011
 func TestHoldKeyPromotion_WritesAndRevertsAtOnce(t *testing.T) {
 	t.Run("UC-043/A17 a hold-key promotion writes the real value at once", func(t *testing.T) {
 		realDef := &recordingRealDefault{}
