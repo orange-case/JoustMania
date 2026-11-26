@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import statistics
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from typing import Any
 
 from opentelemetry import context as otel_context
@@ -27,6 +28,24 @@ from services.game_coordinator.games.base import (
 )
 from services.game_coordinator.runtime_config import GamePerformanceConfig
 from services.game_coordinator.stream_writes import serialized_write
+
+
+@dataclass(slots=True)
+class _LoopState:
+    """The mutable state of one ``_game_loop`` run (frame timing, reconnects, alive set)."""
+
+    loop_start_time: float
+    last_iteration_time: float
+    target_frame_time_ms: float
+    last_alive_serials: set[str]
+    loop_iterations: int = 0
+    recent_frame_times: list[float] = field(default_factory=list)  # for jitter calculation
+    frames_on_target: int = 0  # Frames within 50% of target time
+    # Stream gameplay data and process game logic with reconnection
+    max_reconnect_attempts: int = 3
+    reconnect_attempt: int = 0
+    frames_since_reconnect: int = 0
+    frame_failed: bool = False
 
 
 class GameLoopMixin:
@@ -345,22 +364,7 @@ class GameLoopMixin:
 
             logger.info("Starting game loop (stream rate controlled by controller-manager)")
 
-            # Stream was already created in _start_gameplay_stream() before countdown.
-            # EMA filters were primed and buffered data drained by _warmup_ema().
-            # UC-030 BR-003: startup grace period so any residual spikes can't cause instant death.
-            # It never shortens a longer grace (an agent shield) granted before the loop.
-            grace_until = game_clock.now() + 0.3
-            for player in self.players.values():
-                if player.alive:
-                    player.grace_until = max(player.grace_until, grace_until)
-            # UC-040 BR-027: hold is latched here at the latest; the recharge starts now.
-            self._latch_shield_hold()
-            self._start_shield_hold_clock(game_clock.now())
-            self._queue_hold_feedback_all()  # UC-040 BR-026: every player's energy layer
-
-            # Track current alive set for detecting changes
-            last_alive_serials = {p.serial for p in self.players.values() if p.alive}
-            logger.info(f"Initial alive players: {len(last_alive_serials)}")
+            last_alive_serials = self._open_game_loop()
 
             # UC-020 A2: disconnects seen during EMA warmup go through the death path now.
             # A game force-ended during the countdown or warmup stays force_ended (BR-003).
@@ -369,75 +373,30 @@ class GameLoopMixin:
                 return
             last_alive_serials = await self._send_alive_filter_update(last_alive_serials)
 
-            # Track loop timing for actual Hz calculation (Phase 43)
+            # Track loop timing for actual Hz calculation (Phase 43) and frame consistency
             loop_start_time = game_clock.now()
-            loop_iterations = 0
-            last_iteration_time = loop_start_time
-
-            # Track frame consistency
-            target_frame_time_ms = 1000.0 / update_frequency_hz
-            recent_frame_times: list[float] = []  # Store recent frame times for jitter calculation
-            frames_on_target = 0  # Frames within 50% of target time
-
-            # Stream gameplay data and process game logic with reconnection
-            max_reconnect_attempts = 3
-            reconnect_attempt = 0
-            frames_since_reconnect = 0
-            frame_failed = False
+            loop = _LoopState(
+                loop_start_time=loop_start_time,
+                last_iteration_time=loop_start_time,
+                target_frame_time_ms=1000.0 / update_frequency_hz,
+                last_alive_serials=last_alive_serials,
+            )
 
             logger.info("Starting gameplay data stream loop, waiting for first update...")
             while self.running:
                 try:
                     async for gameplay_update in self.gameplay_stream:
-                        if loop_iterations == 0:
-                            logger.info("Received first gameplay update from stream!")
-                            self.start_time = game_clock.now()
-
-                        # The count starts again only after a healthy run, not after
-                        # one frame (UC-030 BR-006).
-                        if reconnect_attempt:
-                            frames_since_reconnect += 1
-                            if frames_since_reconnect >= self._RECONNECT_HEALTHY_FRAMES:
-                                logger.info("Gameplay stream healthy again, reconnect count reset")
-                                reconnect_attempt = 0
+                        self._note_frame_received(loop)
 
                         if not self.running:
                             logger.info("Game running=False, breaking loop")
                             break
 
-                        # Process controllers and check for game over, then update the
-                        # alive filter if players changed. An error here that is not a
-                        # gRPC error of the call (a mode's kill handler, its win check)
-                        # ends the game, no reconnect (UC-030 BR-006).
-                        try:
-                            game_over = await self._process_gameplay_update(gameplay_update)
-                            if not game_over:
-                                last_alive_serials = await self._send_alive_filter_update(last_alive_serials)
-                        except self._STREAM_CALL_ERRORS:
-                            raise
-                        except Exception:
-                            frame_failed = True
-                            raise
-
-                        if game_over:
+                        if await self._process_loop_frame(loop, gameplay_update):
                             await self._hold_win_display()
                             return
 
-                        # Track loop timing for metrics
-                        loop_iterations += 1
-                        iteration_end = game_clock.now()
-                        iteration_latency_ms = (iteration_end - last_iteration_time) * 1000
-
-                        frames_on_target = self._update_frame_metrics(
-                            iteration_latency_ms,
-                            target_frame_time_ms,
-                            recent_frame_times,
-                            frames_on_target,
-                            loop_iterations,
-                            loop_start_time,
-                        )
-
-                        last_iteration_time = iteration_end
+                        self._record_loop_timing(loop)
 
                     # A call that ended with an error status is dead, not finished: an
                     # exhausted grpc.aio reader ends the loop silently (UC-030 BR-006).
@@ -451,23 +410,97 @@ class GameLoopMixin:
                     raise  # Never retry on cancellation
 
                 except Exception as e:
-                    if not self.running:
-                        if frame_failed:
-                            logger.warning(f"Frame processing failed after the game stopped: {e!r}", exc_info=True)
+                    if await self._on_loop_stream_error(loop, e):
                         break
-                    if frame_failed:
-                        logger.error("Frame processing failed, ending the game without a reconnect")
-                        raise
-
-                    reconnect_attempt += 1
-                    frames_since_reconnect = 0
-                    reconnect_attempt = await self._handle_stream_reconnection(
-                        e, reconnect_attempt, max_reconnect_attempts
-                    )
 
         except Exception as e:
             logger.error(f"Game loop error: {e}", exc_info=True)
             raise
+
+    def _open_game_loop(self) -> set[str]:
+        """The loop's startup grace and shield hold latch; returns the alive serials."""
+        # Stream was already created in _start_gameplay_stream() before countdown.
+        # EMA filters were primed and buffered data drained by _warmup_ema().
+        # UC-030 BR-003: startup grace period so any residual spikes can't cause instant death.
+        # It never shortens a longer grace (an agent shield) granted before the loop.
+        grace_until = game_clock.now() + 0.3
+        for player in self.players.values():
+            if player.alive:
+                player.grace_until = max(player.grace_until, grace_until)
+        # UC-040 BR-027: hold is latched here at the latest; the recharge starts now.
+        self._latch_shield_hold()
+        self._start_shield_hold_clock(game_clock.now())
+        self._queue_hold_feedback_all()  # UC-040 BR-026: every player's energy layer
+
+        # Track current alive set for detecting changes
+        last_alive_serials = {p.serial for p in self.players.values() if p.alive}
+        logger.info(f"Initial alive players: {len(last_alive_serials)}")
+        return last_alive_serials
+
+    def _note_frame_received(self, loop: "_LoopState") -> None:
+        """The first frame's start time, and the reconnect count's healthy-run reset."""
+        if loop.loop_iterations == 0:
+            logger.info("Received first gameplay update from stream!")
+            self.start_time = game_clock.now()
+
+        # The count starts again only after a healthy run, not after
+        # one frame (UC-030 BR-006).
+        if loop.reconnect_attempt:
+            loop.frames_since_reconnect += 1
+            if loop.frames_since_reconnect >= self._RECONNECT_HEALTHY_FRAMES:
+                logger.info("Gameplay stream healthy again, reconnect count reset")
+                loop.reconnect_attempt = 0
+
+    async def _process_loop_frame(self, loop: "_LoopState", gameplay_update) -> bool:
+        """Process one frame and update the alive filter; True: the game is over."""
+        # Process controllers and check for game over, then update the
+        # alive filter if players changed. An error here that is not a
+        # gRPC error of the call (a mode's kill handler, its win check)
+        # ends the game, no reconnect (UC-030 BR-006).
+        try:
+            game_over = await self._process_gameplay_update(gameplay_update)
+            if not game_over:
+                loop.last_alive_serials = await self._send_alive_filter_update(loop.last_alive_serials)
+        except self._STREAM_CALL_ERRORS:
+            raise
+        except Exception:
+            loop.frame_failed = True
+            raise
+        return game_over
+
+    def _record_loop_timing(self, loop: "_LoopState") -> None:
+        """Track loop timing for metrics after a processed frame."""
+        loop.loop_iterations += 1
+        iteration_end = game_clock.now()
+        iteration_latency_ms = (iteration_end - loop.last_iteration_time) * 1000
+
+        loop.frames_on_target = self._update_frame_metrics(
+            iteration_latency_ms,
+            loop.target_frame_time_ms,
+            loop.recent_frame_times,
+            loop.frames_on_target,
+            loop.loop_iterations,
+            loop.loop_start_time,
+        )
+
+        loop.last_iteration_time = iteration_end
+
+    async def _on_loop_stream_error(self, loop: "_LoopState", e: Exception) -> bool:
+        """An error of the stream loop: True ends the loop, else reconnect (or raise)."""
+        if not self.running:
+            if loop.frame_failed:
+                logger.warning(f"Frame processing failed after the game stopped: {e!r}", exc_info=True)
+            return True
+        if loop.frame_failed:
+            logger.error("Frame processing failed, ending the game without a reconnect")
+            raise e
+
+        loop.reconnect_attempt += 1
+        loop.frames_since_reconnect = 0
+        loop.reconnect_attempt = await self._handle_stream_reconnection(
+            e, loop.reconnect_attempt, loop.max_reconnect_attempts
+        )
+        return False
 
     async def _run_gameplay_phase(self):
         """Start the game and run gameplay_phase: countdown, game loop, outcome latch."""
