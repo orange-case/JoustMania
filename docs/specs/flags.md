@@ -720,7 +720,7 @@ variants with headroom; "same shape" accepts an object with exactly the default 
 
 An `experiment+arm` value never resolves for `game_kind == "real"` (FR-062, FR-138): the service generates the
 condition, so the invariant gate (`experiment/gate.go`) becomes a second check. A promotion overlay lasts until
-the flag service restarts; the durable change is the promotion PR (FR-064, C-007). A `sensitivity` overlay is a
+the flag service restarts; the durable change is a human change made from the promotion issue (FR-064, C-007). A `sensitivity` overlay is a
 `defaultVariant` substitution, so the baseline rule for Werewolf still wins as it does today.
 
 ### 13.4 `user`, `controller`
