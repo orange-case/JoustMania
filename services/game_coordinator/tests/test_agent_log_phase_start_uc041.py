@@ -17,7 +17,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.sdk.trace.sampling import ALWAYS_OFF
 
-from lib import otel_logging
+from lib import moments, otel_logging
 from services.game_coordinator.games import base, fight_club
 from services.game_coordinator.games.fight_club import FightClubGame
 from services.game_coordinator.games.zombie import ZombieGame
@@ -149,3 +149,16 @@ async def test_fight_club_sends_only_gameplay_phase(sdk, monkeypatch):
     assert record.attributes["game.phase.span"] == "gameplay_phase"
     assert record.attributes["game.id"] == "fight_club_phase_start"
     assert (record.trace_id, record.span_id) == (gameplay.context.trace_id, gameplay.context.span_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
+@pytest.mark.usefixtures("sdk")
+async def test_each_phase_start_is_flushed():
+    flushed: list[str] = []
+    game = _ffa()
+
+    with patch.object(moments, "_flush_in_background", flushed.append):
+        await game.run()
+
+    assert flushed == ["game.phase.start", "game.phase.start"]

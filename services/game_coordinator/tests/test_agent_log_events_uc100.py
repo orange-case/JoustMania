@@ -17,7 +17,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from lib import otel_logging
+from lib import moments, otel_logging
 from services.game_coordinator.games import base
 from services.game_coordinator.games.ffa import FFAGame
 from services.game_coordinator.tests.test_death_detection_uc030 import _game
@@ -257,3 +257,16 @@ def test_a_new_game_has_no_agent_log_events_switch():
     game, _ = _game(2)
 
     assert not hasattr(game, "agent_log_events")
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-041", flow="A8", br=["BR-004"])
+async def test_game_start_is_flushed_and_game_end_and_moment_copies_are_not(sdk):
+    flushed: list[str] = []
+    with patch.object(moments, "_flush_in_background", flushed.append):
+        await _run_session(sdk)
+        game = _ffa(sdk, "span_event")
+        await _warn(game)
+        assert await game._kill_player("p0", 3.0) is True
+
+    assert flushed == ["game.start"]

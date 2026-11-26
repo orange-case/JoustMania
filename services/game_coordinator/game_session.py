@@ -594,6 +594,7 @@ class GameSession:
                         "game.mode": game_mode,
                         "game.name": self.game_name,
                     },
+                    flush=True,
                 )
                 duration_ticker = asyncio.create_task(self._publish_duration_while_running())
                 try:

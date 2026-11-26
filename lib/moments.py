@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
+import threading
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -57,6 +58,9 @@ AUDIENCE_AGENT = "agent"
 # In the log shapes the moment's own log event already reaches the agent.
 _AGENT_COPY_SHAPES = frozenset({MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN})
 _LOGGER_NAME = "joustmania.moments"
+# The agent takes the game's trace ids from game.start / game.phase.start (UC-041 BR-004): send them
+# without the batch delay.
+FLUSH_TIMEOUT_MS = 2000
 
 # (provider, logger) for the last provider seen: get_logger once, not per moment.
 _logger_cache: tuple[Any, Any] | None = None
@@ -203,9 +207,10 @@ def _emit(moment_logger, name: str, span: trace.Span, attrs: Mapping[str, Any], 
     return True
 
 
-def emit_agent_event(name: str, *, span: trace.Span, attributes: Mapping[str, Any]) -> bool:
+def emit_agent_event(name: str, *, span: trace.Span, attributes: Mapping[str, Any], flush: bool = False) -> bool:
     """Emit log event ``name`` for the agent only, in ``span``'s context; never raises.
 
+    ``flush``: export it now instead of with the next batch (off the caller's thread).
     False when nothing was sent (no OTLP logging in this process, or a failed emit).
     """
     try:
@@ -215,4 +220,24 @@ def emit_agent_event(name: str, *, span: trace.Span, attributes: Mapping[str, An
         return False
     if moment_logger is None:
         return False
-    return _emit(moment_logger, name, span, {**attributes, AUDIENCE_ATTR: AUDIENCE_AGENT}, None)
+    sent = _emit(moment_logger, name, span, {**attributes, AUDIENCE_ATTR: AUDIENCE_AGENT}, None)
+    if sent and flush:
+        _flush_in_background(name)
+    return sent
+
+
+def _flush_in_background(name: str) -> None:
+    """Force-flush the log provider on a daemon thread; never blocks or raises."""
+
+    def run() -> None:
+        try:
+            provider = otel_logging.get_logger_provider()
+            if provider is not None:
+                provider.force_flush(FLUSH_TIMEOUT_MS)
+        except Exception as error:  # noqa: BLE001 - a flush never reaches the game
+            _report_failure_once(name, error)
+
+    try:
+        threading.Thread(target=run, name="agent-log-flush", daemon=True).start()
+    except Exception as error:  # noqa: BLE001
+        _report_failure_once(name, error)

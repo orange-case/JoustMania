@@ -3834,6 +3834,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             "game.phase.start",
             span=span,
             attributes={"game.id": self.game_id, "game.kind": self.game_kind, "game.phase.span": phase_span},
+            flush=True,
         )
 
     def _run_tracer(self) -> trace.Tracer:
