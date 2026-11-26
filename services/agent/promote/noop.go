@@ -12,8 +12,9 @@ import (
 // gate/token are not both present — can only RECORD that it "would have" acted,
 // never touch github.com.
 //
-// errNoopGitHub is returned so issue mode degrades to a RECORDED no-op (OutcomeDiscarded + reason on the span), making an unreachable
-// real path VISIBLE in the trace rather than silent (#936 safety rail).
+// errNoopGitHub is returned so issue mode degrades to a RECORDED no-op
+// (OutcomeDiscarded + reason on the span), making an unreachable real path
+// VISIBLE in the trace rather than silent (#936 safety rail).
 
 // errNoopGitHub is returned by the no-op GitHub client. Its presence in a Result
 // reason proves the promotion degraded to an inert recorded no-op because the real

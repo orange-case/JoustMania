@@ -26,7 +26,7 @@ anywhere.
 |------|--------|-----------------|
 | 1 | In-game interventions: bounded, scoped to the current game, reversible | Applies directly, as a flag flip |
 | 2 | Persistent tuning (game flags, thresholds, weights) and interpreted game logic | Applies once shadow validation passes |
-| 3 | Anything needing a compile step | Proposes only (issue or PR); a human reviews |
+| 3 | Anything needing a compile step | Proposes only (an issue); a human reviews |
 
 The agent observes only through OTel, but it may *write* code proposals at tier 3.
 

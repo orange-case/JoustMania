@@ -24,8 +24,8 @@
 //     There is NO test-reachable constructor for any of them; a test that wants a
 //     real client cannot get one.
 //   - The SAFE flag DEFAULT is baked in: mode defaults to issue (NEVER
-//     autonomous). autonomous (apply-to-real + watch) is additionally behind the agent `enabled` kill-switch — the
-//     caller passes Config.Enabled, and a disabled agent degrades autonomous to a
+//     autonomous). autonomous (apply-to-real + watch) is additionally behind
+//     the agent `enabled` kill-switch — the caller passes Config.Enabled, and a disabled agent degrades autonomous to a
 //     recorded no-op.
 //   - Real GitHub is default-off, fail-closed: with the env gate/token absent, the
 //     real client is not built; main.go passes the inert recording no-op fake, and
@@ -108,8 +108,8 @@ type Config struct {
 }
 
 // Evidence is the fitness + provenance the promotion records into an issue body
-// (fitness before/after, synthetic results, reasoning summary, flag state). It is assembled by the caller from the
-// M7-7 Decision + the live flag snapshot and threaded into the body renderer.
+// (fitness before/after, synthetic results, reasoning summary, flag state). It
+// is assembled by the caller from the M7-7 Decision + the live flag snapshot and threaded into the body renderer.
 type Evidence struct {
 	// FitnessBefore / FitnessAfter / FitnessDelta are the M7-7 baseline-vs-synthetic
 	// fitness numbers (experiment.Decision). Recorded in the body AND on the span.
