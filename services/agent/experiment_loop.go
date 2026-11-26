@@ -355,7 +355,7 @@ func buildExperimentLoop(
 	targeting := newExperimentTargeting(gameFlags, logger)
 
 	// Promoter (#980/#961): adapt the already-built, env-gated #961 Promoter. The
-	// ConfigResolver reads the LIVE promotion mode/target AND the agent kill-switch
+	// ConfigResolver reads the LIVE promotion mode AND the agent kill-switch
 	// each promotion, so the real-default path stays behind every existing gate.
 	promo := promote.NewExperimentPromoter(promoter, promotionConfigResolver(flagsClient))
 
@@ -514,7 +514,7 @@ func (e *experimentLoop) wirePromoter(promoter *promote.Promoter, flagsClient *f
 }
 
 // promotionConfigResolver builds the #980 ConfigResolver from the live agent
-// flags: the promotion mode/target come from flags.Promotion, and the kill-switch
+// flags: the promotion mode comes from flags.Promotion, and the kill-switch
 // (Config.Enabled) from the agent `enabled` snapshot. Reading them live per
 // promotion means flipping code_improvement.mode (or the kill-switch) takes effect
 // on the next promotion with no restart — and a disabled agent can never reach the
@@ -524,7 +524,6 @@ func promotionConfigResolver(f *flags.Flags) promote.ConfigResolver {
 		p := f.Promotion(ctx)
 		return promote.Config{
 			Mode:    promote.Mode(p.Mode),
-			Target:  promote.Target(p.Target),
 			Enabled: f.Evaluate(ctx).Enabled, // kill-switch: false ⇒ autonomous blocked
 		}
 	}

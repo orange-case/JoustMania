@@ -140,15 +140,14 @@ func actionSink(gate actions.InterventionGate, writer *actions.Writer, logger *s
 // default path) gets the inert recording no-ops.
 //
 // The real clients are built ONLY when AGENT_CODE_IMPROVEMENT_ENABLED=true AND the
-// per-target conditions hold (GitHub: GITHUB_TOKEN + GITHUB_REPOSITORY + the live
-// target=github flag; local: AGENT_LOCAL_REPO_DIR; autonomous real-default:
-// AGENT_AUTONOMOUS_ENABLED; the write goes to the flag service). Absent any condition,
+// per-path conditions hold (GitHub: GITHUB_TOKEN + GITHUB_REPOSITORY; autonomous
+// real-default: AGENT_AUTONOMOUS_ENABLED; the write goes to the flag service). Absent any condition,
 // the corresponding FromEnv constructor returns nil and NewPromoter substitutes the
 // inert no-op / leaves autonomous as a recorded no-op — fail-closed, never a silent
-// real action. The promotion mode/target are read LIVE per promotion (flags), so
+// real action. The promotion mode is read LIVE per promotion (flags), so
 // flipping the mode flag takes effect on the next promotion with no restart.
 //
-// The default flag values are the SAFE ones (mode=issue, target=local; see
+// The default flag value is the SAFE one (mode=issue; see
 // services/flagd/agent.json + flags.DefaultPromotion*), so even a fully-enabled
 // agent only opens an issue until an operator deliberately flips the flags.
 //
@@ -174,25 +173,10 @@ func actionSink(gate actions.InterventionGate, writer *actions.Writer, logger *s
 //     more real games complete (#1065 item 4).
 //   - Cooldown: a post-revert cooldown suppresses re-promotion thrash (#1065 item 3).
 func buildPromoter(rootCtx context.Context, store *experiment.FitnessStore, objResolver *promote.LateObjectiveResolver, tuning *agentTuning, logger *slog.Logger) *promote.Promoter {
-	// Resolve the target for client construction from the ENV (AGENT_CODE_IMPROVEMENT_TARGET),
-	// distinct from the LIVE flag (code_improvement.target) that Promote dispatches on.
-	// This is a deliberate DOUBLE gate and is STRICTER than a single switch: opening a
-	// real GitHub PR needs BOTH the env target=github at construction (so the http
-	// client is even built) AND the live flag target=github at dispatch. If they
-	// diverge (env=local, flag=github) the dispatch hits the inert no-op and degrades
-	// to a RECORDED no-op — safe, but an operator who flips only the live flag will see
-	// recorded no-ops; flipping to real GitHub requires the env target too.
-	target := promote.Target(getEnv("AGENT_CODE_IMPROVEMENT_TARGET", string(promote.TargetLocal)))
-
-	github, err := promote.NewGitHubClientFromEnv(target, logger)
+	github, err := promote.NewGitHubClientFromEnv(logger)
 	if err != nil {
 		logger.Error("code_improvement GitHub client misconfigured; using inert no-op", "error", err)
 		github = nil // NewPromoter substitutes the recording no-op
-	}
-	git, err := promote.NewGitClientFromEnv(target, logger)
-	if err != nil {
-		logger.Error("code_improvement local git client misconfigured; using inert no-op", "error", err)
-		git = nil
 	}
 	realDef, err := promote.NewRealDefaultWriterFromEnv(logger)
 	if err != nil {
@@ -207,10 +191,6 @@ func buildPromoter(rootCtx context.Context, store *experiment.FitnessStore, objR
 	if github != nil {
 		ghIface = github
 	}
-	var gitIface promote.GitClient
-	if git != nil {
-		gitIface = git
-	}
 	// The real-default writer is ALSO the reverter (#1065): the same instance backs
 	// both seams.
 	var realDefIface promote.RealDefaultWriter
@@ -218,12 +198,6 @@ func buildPromoter(rootCtx context.Context, store *experiment.FitnessStore, objR
 	if realDef != nil {
 		realDefIface = realDef
 		reverterIface = realDef
-	}
-
-	repo := promote.RepoRef{
-		Owner: firstField(getEnv("GITHUB_REPOSITORY", ""), 0),
-		Name:  firstField(getEnv("GITHUB_REPOSITORY", ""), 1),
-		Base:  getEnv("GITHUB_BASE_BRANCH", "main"),
 	}
 
 	// LIVE WATCH (#1057/#1065): build the Watcher over the real fitness source ONLY
@@ -243,7 +217,7 @@ func buildPromoter(rootCtx context.Context, store *experiment.FitnessStore, objR
 		logger.Info("code_improvement autonomous watch NOT wired (autonomous env gate off or no fitness store); autonomous fails closed (#1016)")
 	}
 
-	p := promote.NewPromoter(ghIface, gitIface, realDefIface, watcherIface, reverterIface, repo, nil, logger)
+	p := promote.NewPromoter(ghIface, realDefIface, watcherIface, reverterIface, nil, logger)
 	// The substrate validity bar (UC-043 A23, FR-152 g): set once, here, before the
 	// experiment loop starts. Unset env = no objective validated (fail closed).
 	p.SetSubstrateBar(substrateBarFromEnv(logger))
@@ -274,16 +248,6 @@ func substrateBarFromEnv(logger *slog.Logger) map[string]bool {
 	logger.Info("code_improvement substrate validity bar (UC-043 A23): autonomous promotion only for these objectives",
 		"validated_objectives", promote.ValidatedObjectiveList(validated), "service_version", serviceVersion)
 	return validated
-}
-
-// firstField splits an "owner/repo" string and returns the owner (i==0) or repo
-// (i==1), or "" when absent.
-func firstField(repo string, i int) string {
-	parts := strings.SplitN(repo, "/", 2)
-	if i < len(parts) {
-		return parts[i]
-	}
-	return ""
 }
 
 // objectiveForFlag resolves the fitness objective a promoted flag's experiment
@@ -967,8 +931,8 @@ func (c *components) buildProposer() {
 
 // buildPromotion builds the M7-8 code-improvement promotion surface (#936): the
 // Promoter with the env-gated real clients (or the inert recording no-ops when not
-// gated — the SAFETY RAIL). The promotion mode/target are read LIVE per promotion, so
-// an operator can flip code_improvement.mode (issue→pr→autonomous) at runtime with
+// gated — the SAFETY RAIL). The promotion mode is read LIVE per promotion, so
+// an operator can flip code_improvement.mode (issue→autonomous) at runtime with
 // no restart.
 func (c *components) buildPromotion() {
 	// FitnessStore (#965/#1017): the finalized-per-game fitness store. It is built HERE
@@ -1001,7 +965,6 @@ func (c *components) buildPromotion() {
 	c.promoter = buildPromoter(c.ctx, c.fitnessStore, c.objResolver, c.tuning, c.logger)
 	slog.Info("Code-improvement promotion surface enabled (#936, M7-8)",
 		"code_improvement_enabled", getEnv("AGENT_CODE_IMPROVEMENT_ENABLED", "false"),
-		"target", getEnv("AGENT_CODE_IMPROVEMENT_TARGET", string(promote.TargetLocal)),
 		"autonomous_enabled", getEnv("AGENT_AUTONOMOUS_ENABLED", "false"),
 	)
 }

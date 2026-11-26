@@ -497,10 +497,8 @@ The values 6 and 7 of `GameEffect` (`ADMIN_ENTER`, `ADMIN_EXIT`) are reserved: t
 | `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` | unset | yes (empty = no ceiling) | operator ceiling (#1810, C-034): the concurrent-experiment budget is `min(env, experiment_dynamic_max_concurrent)`, clamped to the shadow capacity; unset, invalid or non-positive = no ceiling |
 | `AGENT_EXPERIMENT_MAX_GAMES` | unset | no | operator ceiling (#1810, C-034): the per-experiment games budget is `min(env, experiment_max_games)`, 0 or less = no limit on either side; unset, 0 or invalid = no ceiling |
 | `AGENT_EXPERIMENT_DIR` | `/var/lib/joustmania/agent/experiments` | no (volume `agent-experiments` mounted there) | experiment journal and autonomous-revert snapshot root |
-| `AGENT_CODE_IMPROVEMENT_ENABLED` | `false` | no | opt-in for real promotion clients (local git, GitHub) |
-| `AGENT_CODE_IMPROVEMENT_TARGET` | `local` | no | env target: `local` or `github` (the live flag must agree at dispatch) |
-| `AGENT_LOCAL_REPO_DIR` | unset | no | repo directory for the local target; unset = no-op |
-| `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_BASE_BRANCH`, `GITHUB_API_URL` | unset, unset, `main`, `https://api.github.com` | no | GitHub target (`owner/repo`); misconfiguration, or a `GITHUB_API_URL` that is not key-safe (C-016: https, or http to loopback), falls back to an inert no-op |
+| `AGENT_CODE_IMPROVEMENT_ENABLED` | `false` | no | opt-in for the real GitHub client that opens `issue`-mode promotions |
+| `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_API_URL` | unset, unset, `https://api.github.com` | no | where `issue`-mode promotions open issues (`owner/repo`); misconfiguration, or a `GITHUB_API_URL` that is not key-safe (C-016: https, or http to loopback), falls back to an inert no-op |
 | `AGENT_AUTONOMOUS_ENABLED` | `false` | no | opt-in for the autonomous real-default path (needs `AGENT_CODE_IMPROVEMENT_ENABLED`) |
 | `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` | unset | no | operator ceiling (UC-043 A23, FR-152 g, C-034, #2541): comma list of `objective@release` entries (`balanced@0.14.0`) attesting the objectives whose shadow substrate meets the validity bar; an entry counts only when its release equals `SERVICE_VERSION` and that is `X.Y.Z`; an autonomous promotion of any other objective is a recorded no-op `substrate_not_validated`; unset = none (closed) |
 

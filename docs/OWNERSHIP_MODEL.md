@@ -63,8 +63,8 @@ the agent has three narrow, gated writes beyond the `interventions` set.
      and `AGENT_AUTONOMOUS_ENABLED` are set and `enabled` is on, a shadow-validated
      winner becomes a `real` overlay (`scope.game_kind=real`, writer `promotion`),
      reverted on degradation with `DELETE ?game_kind=real` (FR-065). The overlay is
-     in memory and lasts until the flag service restarts; the durable path is the
-     promotion PR. The stock stack passes none of these env gates (D-A6), so this
+     in memory and lasts until the flag service restarts; the durable path is a
+     human change made from the promotion's evidence. The stock stack passes none of these env gates (D-A6), so this
      write is off by default.
 2. **The write surfaces are disjoint by scope.** The menu writes persisted admin
    values of `game` / `user` flags (and of the `agent` keys
