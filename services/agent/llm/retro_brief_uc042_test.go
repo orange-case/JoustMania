@@ -88,26 +88,6 @@ func TestRetro_OperatorBriefInjection(t *testing.T) {
 }
 
 // UC: UC-042 A13
-// llm.retro.user keeps the brief text only under content capture.
-func TestRetroPrompt_UserForSpan(t *testing.T) {
-	p := briefRetro(retroSnapshot(), "secret plan")
-	if p.UserForSpan(true) != p.User {
-		t.Error("with capture the span user prompt must be the prompt")
-	}
-	redacted := p.UserForSpan(false)
-	if strings.Contains(redacted, "secret plan") || !strings.HasPrefix(redacted, "<operator_brief>\n"+briefNotRecorded+"\n</operator_brief>\n\n") {
-		t.Errorf("redacted user prompt:\n%s", redacted)
-	}
-	if strings.TrimPrefix(redacted, operatorBriefBlock(briefNotRecorded)) != strings.TrimPrefix(p.User, operatorBriefBlock("secret plan")) {
-		t.Error("redaction must touch only the brief block")
-	}
-	none := briefRetro(retroSnapshot(), "")
-	if none.UserForSpan(false) != none.User {
-		t.Error("without a brief nothing is redacted")
-	}
-}
-
-// UC: UC-042 A13
 // The catalog lists only the allowed interventions, each with its effect, its
 // range, unit and neutral value from decide.MagnitudeBounds, its direction, the
 // shield caps, and the factor clamp when a factor lever is allowed.

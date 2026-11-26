@@ -46,8 +46,7 @@ type RetroPrompt struct {
 	User   string // serialized full-session summary
 	Model  string // model that serves the retro (attribution only; set by the caller)
 	// OperatorBrief is the cleaned brief rendered into User ("" = none, #2695), kept
-	// so the span can report its presence and length and redact its text
-	// (UserForSpan) without parsing the prompt.
+	// so the span can report its presence and length without parsing the prompt.
 	OperatorBrief string
 }
 
@@ -122,20 +121,6 @@ func operatorBriefBlock(brief string) string {
 		return ""
 	}
 	return "<operator_brief>\n" + brief + "\n</operator_brief>\n\n"
-}
-
-// briefNotRecorded replaces the brief text in llm.retro.user while
-// decision.capture_content is off (#2695, telemetry.md §4.1).
-const briefNotRecorded = "(not recorded: decision.capture_content off)"
-
-// UserForSpan is the User prompt as the agent.llm.retro span records it: the
-// brief text is kept only with captureContent (decision.capture_content), as on
-// the decide path, where only the GenAI content capture records the brief.
-func (p RetroPrompt) UserForSpan(captureContent bool) string {
-	if captureContent || p.OperatorBrief == "" {
-		return p.User
-	}
-	return strings.Replace(p.User, operatorBriefBlock(p.OperatorBrief), operatorBriefBlock(briefNotRecorded), 1)
 }
 
 // The retro brief paragraph (#2695, UC-042 BR-010) closes the system prompt of a

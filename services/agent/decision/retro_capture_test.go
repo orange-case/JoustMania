@@ -79,8 +79,28 @@ func TestRetroCapture_EmitsSpan(t *testing.T) {
 	if v, ok := attrValue(spans[0], "llm.retro.system"); ok {
 		t.Errorf("llm.retro.system must be ABSENT (got %q) — only the fingerprint rides the span", v.AsString())
 	}
+	// decision.capture_content is off by default: no prompt text on the span.
+	if v, ok := attrValue(spans[0], AttrLLMRetroUser); ok {
+		t.Errorf("llm.retro.user must be absent with capture_content off, got %q", v.AsString())
+	}
+	if v, ok := attrValue(spans[0], AttrLLMRetroBytes); !ok || v.AsInt64() == 0 {
+		t.Error("llm.retro.bytes must be present without content capture")
+	}
+}
+
+// UC: UC-042 main Post-S-1
+func TestRetroCapture_UserPromptUnderContentCapture(t *testing.T) {
+	snap := retroFlagSnapshot()
+	snap.Decision.CaptureContent = true
+	rc, sr := recordingRetro(t, snap)
+	rc.OnGameEnd(endedSession())
+
+	spans := spansByName(sr.Ended(), SpanLLMRetro)
+	if len(spans) != 1 {
+		t.Fatalf("agent.llm.retro spans = %d, want 1", len(spans))
+	}
 	if v, ok := attrValue(spans[0], AttrLLMRetroUser); !ok || v.AsString() == "" {
-		t.Error("llm.retro.user must be present and non-empty")
+		t.Error("llm.retro.user must be present and non-empty with capture_content on")
 	}
 }
 

@@ -371,15 +371,15 @@ const (
 	// (prompt_fingerprint.go), so this hash is always resolvable to the exact text.
 	AttrLLMRetroSystemSHA = "llm.retro.system_sha256"
 	// AttrLLMRetroUser carries the User retrospective prompt text — the VARIABLE,
-	// valuable analysis input — KEPT on the span, capped at maxUserPromptBytes with a
-	// truncation marker. The Go SDK applies no attribute length limit and the
+	// valuable analysis input — capped at maxUserPromptBytes with a truncation marker,
+	// and emitted only with decision.capture_content on (it names controller serials
+	// and the operator brief). The Go SDK applies no attribute length limit and the
 	// collector does not truncate.
 	AttrLLMRetroUser = "llm.retro.user"
 	// AttrLLMRetroOperatorBriefPresent is true on an agent.llm.retro span whose game
 	// had an operator brief (decision.operator_brief, #2695, UC-042 A13); absent
 	// otherwise. AttrLLMRetroOperatorBriefLength is its length in characters after
-	// decide.NormalizeOperatorBrief. The text is in llm.retro.user only with
-	// decision.capture_content on.
+	// decide.NormalizeOperatorBrief.
 	AttrLLMRetroOperatorBriefPresent = "llm.retro.operator_brief.present"
 	AttrLLMRetroOperatorBriefLength  = "llm.retro.operator_brief.length"
 	// AttrLLMRetroBytes is len(system)+len(user): the FULL prompt size in bytes (int),

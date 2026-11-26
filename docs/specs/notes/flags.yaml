@@ -29,7 +29,7 @@ agent:
     read_by: [agent]
     reload: live
     note: >-
-      Whether remote decide requests and answers are captured in full.
+      Whether remote decide requests and answers, and the retro's user prompt, are captured in full.
   decision.claude.act_confidence_threshold:
     read_by: [agent]
     reload: live

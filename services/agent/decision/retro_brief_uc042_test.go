@@ -15,7 +15,8 @@ import (
 // UC: UC-042 A13 BR-010
 // The retro reads the brief of the game that ended through the same per-game source
 // as the decide path, sends it to the model, and its span reports presence and
-// length while llm.retro.user keeps the text only under decision.capture_content.
+// length; llm.retro.user (with the brief text) is on the span only under
+// decision.capture_content.
 func TestRetro_OperatorBrief(t *testing.T) {
 	const brief = "Player AA:11 should win this game"
 	run := func(t *testing.T, capture bool, src OperatorBriefSource) (string, map[string]string) {
@@ -59,11 +60,10 @@ func TestRetro_OperatorBrief(t *testing.T) {
 			t.Errorf("brief attrs = %v, want present=true length=33", attrs)
 		}
 	})
-	t.Run("UC-042/A13 llm.retro.user hides the brief text without content capture", func(t *testing.T) {
+	t.Run("UC-042/A13 no llm.retro.user without content capture", func(t *testing.T) {
 		_, attrs := run(t, false, src)
-		u := attrs[AttrLLMRetroUser]
-		if strings.Contains(u, brief) || !strings.Contains(u, "<operator_brief>\n(not recorded: decision.capture_content off)\n</operator_brief>") {
-			t.Errorf("llm.retro.user must carry the placeholder, not the brief:\n%s", u)
+		if u, ok := attrs[AttrLLMRetroUser]; ok {
+			t.Errorf("llm.retro.user must be absent with capture_content off, got:\n%s", u)
 		}
 	})
 	t.Run("UC-042/A13 llm.retro.user keeps the brief text with content capture", func(t *testing.T) {
