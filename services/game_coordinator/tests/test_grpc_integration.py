@@ -31,6 +31,7 @@ from lib.types import GameEvent, Games, Sound
 from proto import controller_manager_pb2, controller_manager_pb2_grpc, game_coordinator_pb2, game_coordinator_pb2_grpc
 from services.game_coordinator import game_session as game_session_mod
 from services.game_coordinator.game_factory import _GAME_CLASSES
+from services.game_coordinator.games.gameplay_stream import GameplayStreamLostError
 from services.game_coordinator.servicer import GameCoordinatorServicer
 
 # #775: the game-loop thread moved onto GameSession. Patch its start_thread to
@@ -1657,7 +1658,9 @@ class TestGameplayStreamReopen:
         game._process_gameplay_update = process
         started = asyncio.get_running_loop().time()
 
-        await asyncio.wait_for(game.run(), timeout=10)
+        # run() publishes game_error, then re-raises the run error (UC-020 BR-003).
+        with pytest.raises(GameplayStreamLostError, match="gameplay_stream_lost"):
+            await asyncio.wait_for(game.run(), timeout=10)
 
         assert GameEvent.GAME_ERROR.value in events, f"no game_error: {events}"
         assert GameEvent.GAME_WINNER.value not in events
