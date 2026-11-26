@@ -72,7 +72,7 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | registry flag `<set>/<key>` | one **feature** named `<key>`, tagged `<set>`, description = registry `description` | keys are unique across sets (flag-service.md §5.2); one tag per flag set, created on demand |
 | declared variants of a registry flag (two or more) | the feature's **multivariate options**, one per variant: title (`key`) = the variant name, value = the variant's value as text (§2.3, #2709, #2713) | options are project-level (every environment of the project sees them), created with 0 % in every environment; the weights are per environment |
 | stack overlay (in memory or persisted) | the feature's **environment value**: `enabled=true`, value = §4.1 | |
-| no stack overlay | `enabled=false`, value = the baseline default (the **reference value**, F13) | `enabled=false` never means "flag off"; it means "baseline applies". Written when an overlay is cleared (§4.1 step 3) and, for every synced feature whose value differs, by the start sequence (§5.2, #2623) |
+| no stack overlay | `enabled=false`, value = the baseline default (the **reference value**, F13) | `enabled=false` never means "flag off"; it means "baseline applies". One exception: `agent/enabled` (the human stop, baseline `watch`) reads `enabled=false`, and a bool or text `false`, as `off` (`killswitch.go` `stopValue`; UC-054 BR-005). Written when an overlay is cleared (§4.1 step 3) and, for every synced feature whose value differs, by the start sequence (§5.2, #2623) |
 | game value | override on identity `game:<gameId>` | identity traits `game_kind`, `coordinator_instance` (best effort) |
 | player value in a real game (any kind but `shadow`) | override on identity `controller:<serial>`, the controller's own identity (F11, §2.2) | traits `game_id`, `game_kind`, `coordinator_instance` of the controller's current game (cleared when it leaves); the identity is never deleted |
 | player value in a shadow game | override on identity `game:<gameId>:<serial>` | no traits; deleted at game end, so a shadow player never touches a real controller |
@@ -582,7 +582,7 @@ discarded at it, §6). Cost: a persisted admin setting whose feature is off in F
 written twice at that start (the reference, then its overlay).
 
 **Not a change.** The pull reads `enabled=false` as no value whatever the value is (§4.2, §2.3), so a reference write
-never changes what the link reads from the document: it is never a change from Flagsmith, a conflict, an out-of-sync
+never changes what the link reads from the document (except for `agent/enabled`, where `enabled=false` reads `off`, see the table above): it is never a change from Flagsmith, a conflict, an out-of-sync
 key or a refusal, and no pull applies anything because of it. It does not touch `remote`, `pending`, `in_sync`,
 `refused` or the feature health, and it never changes a feature whose toggle is on at its re-read. A reference
 written as `enabled=false` also never touches another environment (no `initial_value`, §5.0) and no identity override.

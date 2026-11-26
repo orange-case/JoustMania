@@ -3,6 +3,7 @@ package flagsmith_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -912,41 +913,79 @@ func TestPullAppliesEnabledWatch(t *testing.T) {
 
 // UC: UC-054 BR-005
 // UC: UC-045 main
-// A Flagsmith stop of agent/enabled holds although the baseline is watch: the
-// feature switched off and a bool or text false read as off; a bool or text
-// true is refused, which discards the local value (UC-054 BR-005), so the
-// baseline watch applies and the agent never turns on.
+// agent/enabled boots at watch, yet every Flagsmith stop holds and no refused
+// value undoes a local stop: the feature switched off and a bool or text false
+// read as off; a bool or text true is refused, leaves no stack value, so the
+// baseline applies (watch shipped, off in this CI baseline), never on. The
+// assertions read the stored value (FlagView), not the change feed.
 func TestPullEnabledStopsFailClosed(t *testing.T) {
+	stored := func(h *harness) string {
+		fv, ferr := h.st.FlagView("agent", "enabled")
+		if ferr != nil {
+			t.Fatal(ferr)
+		}
+		return fv.EffectiveDefault
+	}
+	putOff := func(h *harness) {
+		if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "operator"}); ferr != nil {
+			t.Fatal(ferr)
+		}
+	}
 	cases := []struct {
-		name    string
-		state   map[string]any
-		variant string
-		refused bool
+		name  string
+		state map[string]any
+		want  string
 	}{
-		{"feature switched off", fsState("enabled", false, "on"), "off", false},
-		{"bool false", fsState("enabled", true, false), "off", false},
-		{"text false", fsState("enabled", true, "false"), "off", false},
-		{"bool true", fsState("enabled", true, true), "", true},
-		{"text true", fsState("enabled", true, "true"), "", true},
+		{"feature switched off", fsState("enabled", false, "on"), "off"},
+		{"bool false", fsState("enabled", true, false), "off"},
+		{"text false", fsState("enabled", true, "false"), "off"},
+		{"bool true", fsState("enabled", true, true), ""},
+		{"text true", fsState("enabled", true, "true"), ""},
 	}
 	for _, c := range cases {
 		t.Run("UC-054/BR-005 "+c.name, func(t *testing.T) {
 			h := newHarness(t, harnessOpts{})
-			if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "watch", Writer: "operator"}); ferr != nil {
-				t.Fatal(ferr)
-			}
 			h.online()
 			h.setDoc([]map[string]any{c.state})
 			h.round()
-			v, _ := h.local("agent", "enabled", flagsmith.ScopeStack)
-			if c.variant == "" && v.Present {
-				t.Fatalf("agent/enabled = %+v, want no stack value (the baseline watch)", v)
+			if c.want == "" {
+				fv, _ := h.st.FlagView("agent", "enabled")
+				if fv.StackOverlay != nil || fv.EffectiveDefault != fv.BaselineDefault || fv.EffectiveDefault == "on" {
+					t.Fatalf("agent/enabled = %s (overlay %+v), want the baseline %s", fv.EffectiveDefault, fv.StackOverlay, fv.BaselineDefault)
+				}
+				return
 			}
-			if c.variant != "" && v.Variant != c.variant {
-				t.Fatalf("agent/enabled = %+v, want %s", v, c.variant)
+			if got := stored(h); got != c.want {
+				t.Fatalf("agent/enabled = %s, want %s", got, c.want)
 			}
-			if refused := h.link.Status().Refused != 0; refused != c.refused {
-				t.Fatalf("refused = %v, want %v", refused, c.refused)
+		})
+	}
+	// A local stop never falls back to the watch baseline because Flagsmith
+	// holds a value the link refuses, whether the stop was made online and
+	// pushed, or offline before the first connect.
+	for _, v := range []any{true, "true"} {
+		t.Run(fmt.Sprintf("UC-054/BR-005 local off online, Flagsmith %#v", v), func(t *testing.T) {
+			h := newHarness(t, harnessOpts{})
+			h.online()
+			putOff(h)
+			h.round()
+			h.setDoc([]map[string]any{fsState("enabled", true, v)})
+			h.round()
+			h.round()
+			if got := stored(h); got != "off" {
+				t.Fatalf("agent/enabled = %s after a refused %#v, want off", got, v)
+			}
+		})
+		t.Run(fmt.Sprintf("UC-054/BR-005 local off offline, Flagsmith %#v", v), func(t *testing.T) {
+			h := newHarness(t, harnessOpts{before: func(hh *harness) {
+				putOff(hh)
+				hh.fake.SetDocument(document(hh.clock.Now().Add(-time.Minute), []map[string]any{fsState("enabled", true, v)}), "")
+			}})
+			h.online()
+			h.round()
+			h.round()
+			if got := stored(h); got != "off" {
+				t.Fatalf("agent/enabled = %s after a refused %#v, want off", got, v)
 			}
 		})
 	}
