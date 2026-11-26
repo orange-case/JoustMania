@@ -10,6 +10,7 @@ reconnect budget, and the game ends with one ``game_error``, no winner and
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import grpc
@@ -34,6 +35,7 @@ from test_random_teams_formation import RecordingLog, _players  # noqa: E402
 
 from lib.types import GameEvent, Sound  # noqa: E402
 from services.game_coordinator.games import nonstop_joust as nonstop_mod  # noqa: E402
+from services.game_coordinator.games.base import GameState  # noqa: E402
 from services.game_coordinator.games.ffa import FFAGame  # noqa: E402
 from services.game_coordinator.games.game_loop import _LoopState  # noqa: E402
 from services.game_coordinator.games.gameplay_stream import GameplayStreamLostError  # noqa: E402
@@ -169,6 +171,23 @@ async def test_a_stream_back_within_the_budget_resumes_the_game(fault):
     _lead_after_init(game)
     _fast_recovery(game)
     sounds = _record_sounds(game)
+    clock_at_fault, respawned_on = [], []
+    dead = list(_players())[2].serial
+    real_reopen, real_respawn = game._reopen_gameplay_stream, game._respawn_player
+
+    async def reopen(reason):
+        clock_at_fault.append(game.start_time)
+        # Dead when the stream broke, with the respawn deadline passed during the outage.
+        await game._kill_player_impl(dead, 0.0)
+        game.players[dead].respawn_deadline = game._clock()
+        await real_reopen(reason)
+
+    async def respawn(serial):
+        respawned_on.append((serial, client.streams.index(game.gameplay_stream), game.gameplay_stream.read))
+        return await real_respawn(serial)
+
+    game._reopen_gameplay_stream = reopen
+    game._respawn_player = respawn
     try:
         await asyncio.wait_for(game.run(), timeout=10)
     finally:
@@ -176,6 +195,9 @@ async def test_a_stream_back_within_the_budget_resumes_the_game(fault):
 
     assert len(client.streams) == 3, "the faulty game stream was reopened exactly once"
     assert client.streams[2].read > 0, "the reopened stream delivered no frame"
+    assert clock_at_fault[0] is not None
+    assert game.start_time == clock_at_fault[0], "the reconnect restarted the time-limit clock"
+    assert respawned_on[0] == (dead, 2, 1), "the respawn did not happen on the reopened stream's first frame"
     assert log.events.get_events_of_type(GameEvent.GAME_ERROR) == []
     assert len(log.events.get_events_of_type(GameEvent.GAME_WINNER)) == 1, "the time limit did not end the game"
     assert Sound.MENU_VOX_STATUS_CANCELLED not in sounds
@@ -270,3 +292,65 @@ async def test_a_watch_tick_that_raises_does_not_stop_silence_detection(make_gam
         assert not watch.done(), "the watch task ended"
     finally:
         watch.cancel()
+
+
+class _DyingCall:
+    """A gameplay call that fails every write with UNAVAILABLE, as a call dying under the write."""
+
+    async def write(self, _message):
+        raise grpc.aio.AioRpcError(grpc.StatusCode.UNAVAILABLE, None, None, "stream broke")
+
+
+class _RecordingCall:
+    def __init__(self):
+        self.messages = []
+
+    async def write(self, message):
+        self.messages.append(message)
+
+
+async def _running_nonstop():
+    log = RecordingLog()
+    game = _nonstop_game()
+    game.event_publisher = log.publish
+    await game._initialize_players_impl(game.controller_client.controllers)
+    game.state = GameState.RUNNING
+    game.running = True
+    return game, log
+
+
+@pytest.mark.uc("UC-030", br=["BR-006"])
+@pytest.mark.uc("UC-026", flow="main", steps=[2])
+@pytest.mark.asyncio
+async def test_a_respawn_whose_led_write_fails_on_a_dying_call_still_counts():
+    game, log = await _running_nonstop()
+    serial = next(iter(game.players))
+    game.players[serial].alive = False
+    game.gameplay_stream = _DyingCall()
+
+    with pytest.raises(grpc.aio.AioRpcError):
+        await game._respawn_player(serial)
+
+    assert game.players[serial].alive
+    assert [e["serial"] for e in log.events.get_events_of_type("player_respawned")] == [serial]
+
+
+@pytest.mark.uc("UC-030", br=["BR-006"])
+@pytest.mark.uc("UC-026", flow="main", steps=[2])
+@pytest.mark.usefixtures("fast_nonstop")
+@pytest.mark.asyncio
+async def test_a_reopened_stream_keeps_the_spawn_protection_colour():
+    game, _log = await _running_nonstop()
+    protected, unprotected = list(game.players)[:2]
+    game.players[protected].spawn_protected = True
+    for serial in (protected, unprotected):
+        game.players[serial].color = (255, 0, 0)  # a unique colour (_set_unique_colors)
+    call = _RecordingCall()
+    game.controller_client = SimpleNamespace(StreamGameplayData=lambda: call)
+
+    await game._create_gameplay_stream()
+
+    config = next(m.config for m in call.messages if m.HasField("config"))
+    colors = {c.serial: (c.color.r, c.color.g, c.color.b) for c in config.colors}
+    assert colors[protected] == nonstop_mod.SPAWN_PROTECTION_COLOR
+    assert colors[unprotected] == (255, 0, 0)

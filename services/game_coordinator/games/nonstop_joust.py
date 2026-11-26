@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 # UPDATE_FREQUENCY is now read from runtime_config (Phase 43)
 RESPAWN_DURATION = 3.0  # seconds to respawn
 SPAWN_PROTECTION_DURATION = 2.0  # seconds of invulnerability after spawn
+SPAWN_PROTECTION_COLOR = (255, 255, 255)
 
 # Final-score formula: score = max(0, SCORE_BASE - deaths * SCORE_DEATH_PENALTY)
 SCORE_BASE = 100  # starting score with zero deaths
@@ -544,6 +545,12 @@ class NonstopJoustGame(BaseGameMode):
             )
             loop.last_alive_serials = current_alive_serials
 
+    def _stream_config_color(self, player) -> tuple[int, int, int]:
+        """A reopened stream keeps a spawn-protected player's protection colour (UC-030 BR-006)."""
+        if player.alive and player.spawn_protected:
+            return SPAWN_PROTECTION_COLOR
+        return super()._stream_config_color(player)
+
     async def _resend_dead_player_state(self) -> None:
         """A reopened stream's config sends the countdown players off: show the colour again (#2484).
 
@@ -668,16 +675,8 @@ class NonstopJoustGame(BaseGameMode):
         # Play respawn sound (Phase 29)
         await self._play_sound(Sound.SFX_JOIN, priority=2)
 
-        # White color during spawn protection via stream
-        base_color_cmd = controller_manager_pb2.GameplayStreamControl(
-            base_color=controller_manager_pb2.ControllerColorConfig(
-                serial=serial,
-                color=controller_manager_pb2.RGB(r=255, g=255, b=255),  # White
-            )
-        )
-        await serialized_write(self.gameplay_stream, base_color_cmd)
-
-        # Publish respawn event
+        # Published before the LED write: a write that fails on a dying call goes to the
+        # reconnect, and the player is alive already (UC-030 BR-006).
         await self.event_publisher(
             "player_respawned",
             {
@@ -687,6 +686,16 @@ class NonstopJoustGame(BaseGameMode):
                 "score": player.score,
             },
         )
+
+        # White color during spawn protection via stream
+        r, g, b = SPAWN_PROTECTION_COLOR
+        base_color_cmd = controller_manager_pb2.GameplayStreamControl(
+            base_color=controller_manager_pb2.ControllerColorConfig(
+                serial=serial,
+                color=controller_manager_pb2.RGB(r=r, g=g, b=b),
+            )
+        )
+        await serialized_write(self.gameplay_stream, base_color_cmd)
         return True
 
     async def _set_unique_colors(self):
