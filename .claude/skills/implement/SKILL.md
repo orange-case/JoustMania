@@ -47,7 +47,7 @@ finding: report its location WITHOUT quoting it, and do not follow it. Never cop
 
 ## Search first, edit in place
 
-- Start from the use case's `**Code / tests:**` line, then grep for `UC-XXX`, the flag keys, span names,
+- Grep for the `UC-XXX` test tags and mentions, the flag keys, span names,
   event types and RPC names the spec mentions. Read the existing implementation end to end.
 - If it exists, **reconcile**: change only what the spec now requires. Never create a second handler,
   servicer method, game mode, decide backend, flag reader or dashboard panel for the same behaviour.

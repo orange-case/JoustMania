@@ -69,19 +69,19 @@ effect only on the next start of the flag service (`scripts/flags.sh restart`).
 
 ## 2. Ownership by flag set
 
-| Flag set | Owner | Writers | Lifetime |
-|---|---|---|---|
-| `game` | Human admin | menu: the operator pad's commands (persisted admin values; the controller admin mode is gone since #2819); agent experiment writer (experiment-arm values of the experiment catalog only); autonomous promotion (`real` overlay, gated, off in the stock stack) | per deployment (baseline); experiment arm values until teardown; promotion until the flag service restarts |
-| `user` | Human admin | menu (`current_game`, `game_instructions`); operator pad through the menu: `audio_volume.master` (menu `step_setting`, #2084; sent by `services/operator_pad`, #2100) | per deployment |
-| `agent` | Operator | stage and operator scripts through the flag service (in-memory overlays, except the decision backend and model flags that `agent-backend.sh` persists, #1682); the operator pad through the menu writes `interventions_allowed` (persisted), `enabled` (in memory) and `decision.backend` (persisted) (#2050; before #2819 the controller admin mode wrote `interventions_allowed` too) | per deployment (baseline); overlays until cleared or the flag service restarts |
-| `interventions` | Agent | agent action sink only, game-scoped (values and event lists) | per game: dropped when the game ends (UC-053 BR-003) |
-| `controller` | Operator | baseline edits; operator scripts through the flag service | per deployment (baseline); overlays until cleared |
-| `operator` | Operator | baseline edits only; no runtime writer, no registry row (§10a, §13.5) | per deployment |
-| `system`, `observability` | Operator | hand edits | per deployment |
+| Flag set | Owner | Lifetime |
+|---|---|---|
+| `game` | Human admin | per deployment (baseline); persisted admin values survive a restart; experiment-arm values until teardown; the promotion overlay until the flag service restarts |
+| `user` | Human admin | per deployment |
+| `agent` | Operator | per deployment (baseline); overlays until cleared or the flag service restarts; persisted values survive a restart |
+| `interventions` | Agent | per game: dropped when the game ends (UC-053 BR-003) |
+| `controller` | Operator | per deployment (baseline); overlays until cleared |
+| `operator`, `system` | Operator | per deployment; no runtime writer (§10a, §13.5) |
+| `observability` | Operator | per deployment; overlays of its §13.5 rows until cleared |
 
-No runtime writer persists into a flag file (C-033). The experiment writer and the autonomous promoter write
-in-memory overlays on the flag service (experiment-scoped and gated respectively), which is consistent with
-OWNERSHIP_MODEL.md invariant 1; concurrent writers are serialized by the flag service.
+Who writes each flag, in which scope and within which bounds is the Writers column of §13, the canonical place it is
+stated; a flag without a §13 row changes only by a reviewed edit of its baseline file (C-033). The ownership
+principle and invariants are [OWNERSHIP_MODEL.md §1](../OWNERSHIP_MODEL.md#1-the-ownership-principle).
 
 ## 3. `agent`
 
@@ -483,8 +483,12 @@ only within its bounds and only in its scope. Every other flag of every set is t
 changes by a reviewed edit of the flag file and a restart of the flag service (C-033). The registry file
 `services/flag-service/registry.yaml` encodes this table; a change to one updates the other in the same PR.
 
-There are **no writer roles and no authorization** (local party game, decided by the maintainer; architecture
-note D11). The "Today's writer" column says who writes the flag, for orientation only.
+**Writers** is the canonical place that says who writes each flag (the human surfaces: the menu for the operator pad,
+the operator and stage scripts, Flagsmith; the agent: `agent` for its game-scoped interventions, `agent
+experiment arm` and `agent promotion` for the two gated `game` writes of OWNERSHIP_MODEL §1); other documents link
+here instead of listing writers. A key whose Writers cell names none of the three agent writers is never agent-written (C-034).
+There are **no writer roles and no authorization** (local party game; architecture note D11): the column states the
+contract the writers' code keeps, not a check.
 
 **Kinds:** `state` = one value per scope; `level` = per-player value, re-applied as a whole; `grant` = per-player
 value with a fresh variant per write (the coordinator fires on a variant change); `event` = per-game event list
@@ -527,8 +531,6 @@ Renamed grant flags carry no persisted state (`toughness_boost_seconds`, formerl
 
 **Real write (#2096, #2810, UC-043 A17, C-034):** a `PUT` or `DELETE` in scope `real` (the promotion overlay) is never refused because a real game is registered: every flag with scope `real` is read once per game, at its start (UC-048 BR-011; the menu's game config and the coordinator's init flags otherwise), so a write or a revert applies from the next game. The flag service keeps that list as a Go set (`latchedAtGameStart` in `services/flag-service/registry/latched.go`, not a `registry.yaml` key, so released images still load the checkout's registry), and `TestRealScopeIsLatched` fails the build when a row with scope `real` is not in it. `shield.activation` is not latched (an instant or trigger game reads it at each grant, UC-048 BR-004), so it has no `real` scope and the agent never promotes it (UC-043 A17 step 3; maintainer decision on #2810); `TestShieldActivationIsReadPerGrant` fails the build if it is listed as latched or given scope `real`. Operator flips (stage, pad, scripts) keep working per grant. A `real` write may carry `ttl_seconds` like a stack write. An older agent's `?unless_real_game=true` is ignored. **Compare-and-delete (`?if_writer=<label>`, #1877, UC-043 A18):** a `DELETE` of the `real` overlay may carry this opt-in precondition (like If-Match): the overlay is cleared only when its stored writer equals the label, compared and cleared under one lock, else `412 writer_mismatch` and nothing changes. A missing overlay is a `204` that clears nothing. It is evaluated after every other check. It is valid in scope `real` and, since #2755 (maintainer decision D14), in scope `stack`: the in-memory stack overlay of a `DELETE` without scope parameters and without `persist`, so the menu's reset of a pad row clears only its own overlay (UC-016 BR-013); elsewhere, and empty, `400 malformed`. It is not the informational writer label, which is never checked (D11). Every revert of the agent sends `if_writer=promotion`, the kill switch's included: every overlay the agent writes carries writer `promotion`, so it never blocks the kill switch from clearing one, and another writer's overlay is never removed. **Write precondition (`?if_writer_in=<labels>`, #2260, UC-043 A19):** a `PUT` of the `real` overlay may carry a comma-separated list of writer labels (opt-in, like If-Match): the overlay is written only when the stored real overlay's writer is in the list, or when no real overlay is present and the list holds an empty entry (`if_writer_in=promotion,` = the promotion's own overlay or none), compared and written under one lock, else `412 writer_mismatch` and nothing changes. An overlay without a writer label matches no entry. It is evaluated after every other check (a dry run included). It is valid only in scope `real` (elsewhere, repeated, over 16 entries or an entry over 80 characters, `400 malformed`). A `PUT` without it writes unconditionally, as before. The agent's promotion write sends `if_writer_in=promotion,`, so a promotion never overwrites a real overlay another writer (a script, a maintainer on the API) set; it maps the `412` to outcome `discarded` (reason `real_overlay_owned_by_another_writer`). A mid-game `DELETE` is harmless for the running game: it latches its hold values and its activation at game start, and a game latched to `hold` stays `hold` (UC-048 BR-011), so the revert applies from the next game. Other scopes are not affected.
 
-Windows in which a running real game is not registered, so the guard does not see it (the latch makes each harmless for that game; the next game reads the new value from its start): (a) after a flag-service restart, until the coordinator reconciles (it reads the boot epoch from `GET /healthz` every 2 s, and reconciles every 15 s); (b) the coordinator awaits `PUT /games/{gameId}` for at most 200 ms (`REGISTER_AWAIT_SECONDS`) and then plays unregistered until its retry (2 s) or the reconcile (15 s); (c) closed by #2217: the 1 h expiry counts from the last registration or reconcile entry (`last_seen_at`), so a real game that the coordinator keeps reconciling every 15 s stays registered however long it runs; it expires only when not seen for 1 h (UC-053 A11).
-
 The seven hold sub-parameters of §13.3 (`shield.energy_max_seconds`, `shield.energy_budget_seconds`, `shield.energy_initial_seconds`, `shield.recharge_per_second`, `shield.min_burst_seconds`, `shield.hold_rumble_intensity`, `shield.empty_pulse_ms`) have scope `stack or experiment+arm or real` since FR-162 (#2096 PR-7b-2a); `shield.activation` has `stack or experiment+arm` (#2810).
 
 **Flagsmith only (#2705, FR-226, UC-053 A14, UC-054 BR-011):** a registry row may be marked Flagsmith only, so that the operator can change a baseline flag from Flagsmith while no writer on the network can. Such a flag changes at runtime only through the Flagsmith link's in-process write (writer `flagsmith`, §13.6). Every `PUT`, `POST` and `DELETE /{flagSetId}/{flagName}` over HTTP, a dry run included, is refused with `403 flagsmith_only`, whatever writer label the caller sends; the check runs right after the registry lookup (`404`, `422 flag_read_only` first) and before every other check, and an HTTP write labelled `flagsmith` stays `400 malformed` (UC-053 BR-002, checked before it). A writer reset (`DELETE /{flagSetId}?writer=`) skips the row, also with `writer=flagsmith`. The trust boundary is the process: no HTTP caller reaches the in-process path, so neither the agent nor any other writer of UC-053 can write the flag; whoever can change the stack's Flagsmith environment can (the operator, holding its keys, C-016). Otherwise the row is an ordinary row: it is a Flagsmith feature (§13.6), and kind, scope and bounds are checked as for any write. A marked row must be kind `overlay`, scope `stack` only and persist `no` (the flag service refuses to start otherwise), and is never an `interventions` row or a flag the agent writes (C-034). With the link off or offline the flag changes only by a reviewed edit of its flag file (C-033); a value from Flagsmith lives in memory and comes back from Flagsmith at a restart (UC-054 BR-006). The marker is a fixed set in the flag service's code (`registry.flagsmithOnly`), not a registry.yaml attribute: released images parse the checkout's registry.yaml strictly (#2403). This list is its single source of truth, kept in sync by a test: `agent/goal.profile`. A flag-service image older than the marker serves the row as an ordinary registry row, writable over HTTP, until a release that carries the marker runs.
@@ -546,26 +548,26 @@ exists in the audio catalog are checked by the game coordinator and the audio se
 
 ### 13.1 `interventions` (all writes are game-scoped)
 
-| Key | Kind | Scope | Bounds | Persist | Today's writer ([architecture note §3](../architecture/flag-service.md#3-today-the-writer-and-reader-inventory)) |
+| Key | Kind | Scope | Bounds | Persist | Writers |
 |---|---|---|---|---|---|
-| `music_tempo_override` | state | game | 1.0 to 1.3 | no | W1 agent |
-| `global_sensitivity_override` | state | game | int 0 to 4 | no | W1 agent |
-| `global_difficulty_factor` | state | game | 0.5 to 2.0 | no | W1 agent |
-| `volume_override` | state | game | 0.3 to 1.0 | no | W1 agent |
-| `pacing_profile` | state | game | `default`, `calm`, `frantic` | no | W1 agent |
-| `tempo_ramp` | state | game | `<target 1.0 to 1.3>:<seconds 0.1 to 15>:<linear\|ease>` | no | W1 agent |
-| `auto_rubberband` | state | game | `off`, `gentle`, `strong` | no | W1 agent |
-| `player_sensitivity_factor` | level | game+serial | 0.2 to 2.0 | no | W1 agent; floor 0.2 since #2696 (UC-040 BR-045, was 0.5), the game coordinator clamps to the same range |
-| `player_handicap_factor` | level | game+serial | 0.5 to 2.0 | no | W1 agent |
-| `shield_seconds` | grant | game+serial | 1 to 10 | no | W1 agent |
-| `toughness_boost_seconds` | grant | game+serial | `<seconds 0.1 to 30>` or `<seconds 0.1 to 30>:<factor 1.0 to 2.0>` | no | W1 agent |
-| `soft_penalty_action` | grant | game+serial | `warn`, `tighten`, `tighten:<seconds 0.1 to 30>:<factor 0.5 to 1.0>` | no | W1 agent |
-| `eliminate_player` | event | game | payload `{"serial"}`: a live player of the game | no | W1 agent |
-| `revive_player` | event | game | payload `{"serial"}`: a player of the game | no | W1 agent |
-| `controller_effect` | event | game | payload `{"serial","effect"}`: effect in the controller-manager effect set | no | W1 agent |
-| `audio_cue` | event | game | payload `{"sound"}`: a sound id registered in `services/audio/sound_catalog.py` | no | W1 agent |
-| `end_game` | event | game | payload `{}` (the game is the scope) | no | W1 agent |
-| `group_shield` | event | game | payload `{"serials","seconds"}`: `serials` `serial_set` (2 to 6 distinct players of the game), `seconds` `float 1 10`; the coordinator applies it to all of them or none (UC-048 A13, A14, BR-014) | no | W1 agent |
+| `music_tempo_override` | state | game | 1.0 to 1.3 | no | agent |
+| `global_sensitivity_override` | state | game | int 0 to 4 | no | agent |
+| `global_difficulty_factor` | state | game | 0.5 to 2.0 | no | agent |
+| `volume_override` | state | game | 0.3 to 1.0 | no | agent |
+| `pacing_profile` | state | game | `default`, `calm`, `frantic` | no | agent |
+| `tempo_ramp` | state | game | `<target 1.0 to 1.3>:<seconds 0.1 to 15>:<linear\|ease>` | no | agent |
+| `auto_rubberband` | state | game | `off`, `gentle`, `strong` | no | agent |
+| `player_sensitivity_factor` | level | game+serial | 0.2 to 2.0 | no | agent; floor 0.2 since #2696 (UC-040 BR-045, was 0.5), the game coordinator clamps to the same range |
+| `player_handicap_factor` | level | game+serial | 0.5 to 2.0 | no | agent |
+| `shield_seconds` | grant | game+serial | 1 to 10 | no | agent |
+| `toughness_boost_seconds` | grant | game+serial | `<seconds 0.1 to 30>` or `<seconds 0.1 to 30>:<factor 1.0 to 2.0>` | no | agent |
+| `soft_penalty_action` | grant | game+serial | `warn`, `tighten`, `tighten:<seconds 0.1 to 30>:<factor 0.5 to 1.0>` | no | agent |
+| `eliminate_player` | event | game | payload `{"serial"}`: a live player of the game | no | agent |
+| `revive_player` | event | game | payload `{"serial"}`: a player of the game | no | agent |
+| `controller_effect` | event | game | payload `{"serial","effect"}`: effect in the controller-manager effect set | no | agent |
+| `audio_cue` | event | game | payload `{"sound"}`: a sound id registered in `services/audio/sound_catalog.py` | no | agent |
+| `end_game` | event | game | payload `{}` (the game is the scope) | no | agent |
+| `group_shield` | event | game | payload `{"serials","seconds"}`: `serials` `serial_set` (2 to 6 distinct players of the game), `seconds` `float 1 10`; the coordinator applies it to all of them or none (UC-048 A13, A14, BR-014) | no | agent |
 
 Payload rules of the event rows (`registry.yaml` `payload:`; `registry/registry.go` `checkPayloadField`). Every payload
 value is a string. `serial` is a player of the game; `serial_or_empty` is that or empty; `sound` is a sound id;
@@ -582,7 +584,7 @@ it writes; the coordinator's re-check (decide-contract §11) is unchanged.
 
 ### 13.2 `agent`
 
-| Key | Kind | Scope | Bounds | Persist | Today's writer |
+| Key | Kind | Scope | Bounds | Persist | Writers |
 |---|---|---|---|---|---|
 | `interventions_allowed` | overlay | stack | declared variants (`none`, `probe`, `ambient`, `standard`, `full`, `shadow_experimental`) | **yes** (the host's kill switch, UC-015 BR-019) | menu (operator pad), `talk-stage.sh permissions`; a persisted kill switch (applies even when the state file cannot be saved, #2368, above); the run refuses to start over a persisted `none`, otherwise `agent-group-ab.sh` (writer `group-ab`, for the length of a run only: it snapshots the overlay with its writer and TTL and restores it only while the overlay is still its own, #2467 PR 6) |
 | `enabled` | overlay | stack | `on`, `off` | no | `agent-killswitch.sh`, `agent-dryrun-enable.sh`, `talk-stage.sh`; the operator pad through the menu (#2050, `agent_memory_writer`): a writer with no `persist` field, because a write asking to persist is `400` (UC-015 BR-001) |
@@ -641,42 +643,42 @@ authorization this is a convention the agent's code keeps, not a check, except f
 
 ### 13.3 `game`
 
-| Key | Kind | Scope | Bounds | Persist | Today's writer |
+| Key | Kind | Scope | Bounds | Persist | Writers |
 |---|---|---|---|---|---|
-| `sensitivity` | overlay | stack or experiment+arm or real | declared variants (5 levels) | **yes** | menu (the operator pad) as a persisted admin value, which the pad's `automatic` clears (UC-015 BR-018, #2222); W3 experiment writer; W5 promotion |
+| `sensitivity` | overlay | stack or experiment+arm or real | declared variants (5 levels) | **yes** | menu (the operator pad) as a persisted admin value, which the pad's `automatic` clears (UC-015 BR-018, #2222); agent experiment arm; agent promotion |
 | `num_teams` | overlay | stack | declared variants | **yes** | menu (the operator pad) as a persisted admin value, which the pad's `automatic` clears (UC-015 BR-018, #2222) |
 | `force_all_start` | overlay | stack | `on`, `off` | **yes** | menu (operator pad) |
 | `shadow_policy` | overlay | stack | `block` | no | `test_tc013_shadow_alongside_real.py` (step 8); an overlay only tightens admission, `allow` stays a baseline edit |
-| `nonstop.time_limit_seconds` | overlay | real | int 0 to 600 | no | W5 promotion of an experiment concluded before #2366 only; out of the experiment catalog until the shadow game reads it (#2366, UC-043 BR-009) |
-| `invincibility_seconds` | overlay | real | 0 to 10 | no | W5 promotion of an experiment concluded before #2366 only; out of the experiment catalog until the shadow game reads it (#2366, UC-043 BR-009) |
-| `fight_club.min_rounds` | overlay | real | int 1 to 30 | no | W5 promotion of an experiment concluded before #2366 only; out of the experiment catalog until the shadow game reads it (#2366, UC-043 BR-009) |
-| `werewolf.reveal_time_seconds` | overlay | real | 10 to 90 | no | W5 promotion of an experiment concluded before #2366 only; out of the experiment catalog until the shadow game reads it (#2366, UC-043 BR-009) |
-| `death_grace_period_seconds` | overlay | experiment+arm or real | 0 to 5 | no | W3 experiment writer; W5 promotion |
-| `nonstop.respawn_seconds` | overlay | experiment+arm or real | 0.5 to 10 | no | W3 experiment writer; W5 promotion |
-| `nonstop.spawn_protection_seconds` | overlay | experiment+arm or real | 0 to 6 | no | W3 experiment writer; W5 promotion |
-| `fight_club.round_seconds` | overlay | experiment+arm or real | 5 to 60 | no | W3 experiment writer; W5 promotion |
-| `tournament.match_seconds` | overlay | experiment+arm or real | 5 to 60 | no | W3 experiment writer; W5 promotion |
-| `tournament.time_between_matches_seconds` | overlay | experiment+arm or real | 1 to 15 | no | W3 experiment writer; W5 promotion |
-| `werewolf.werewolf_fraction` | overlay | experiment+arm or real | 0.1 to 0.6 | no | W3 experiment writer; W5 promotion |
-| `zombie.initial_count` | overlay | experiment+arm or real | int 1 to 5 | no | W3 experiment writer; W5 promotion |
-| `zombie.respawn_min_seconds` | overlay | experiment+arm or real | 0.5 to 10 | no | W3 experiment writer; W5 promotion |
-| `zombie.respawn_max_seconds` | overlay | experiment+arm or real | 2 to 30 | no | W3 experiment writer; W5 promotion |
-| `windows` | overlay | experiment+arm or real | same shape as the default variant; numbers within 0 to 2x the largest declared variant value per key (#2369) | no | W3 experiment writer; W5 promotion; the experiment+arm rung reaches both the per-game read at game start and the `pacing_profile` handler read in the arm's games (§1.2, #1970), so the experiment overrides the lever there (UC-043 BR-005) |
+| `nonstop.time_limit_seconds` | overlay | real | int 0 to 600 | no | agent promotion of an experiment concluded before #2366 only; out of the experiment catalog until the shadow game reads it (#2366, UC-043 BR-009) |
+| `invincibility_seconds` | overlay | real | 0 to 10 | no | agent promotion of an experiment concluded before #2366 only; out of the experiment catalog until the shadow game reads it (#2366, UC-043 BR-009) |
+| `fight_club.min_rounds` | overlay | real | int 1 to 30 | no | agent promotion of an experiment concluded before #2366 only; out of the experiment catalog until the shadow game reads it (#2366, UC-043 BR-009) |
+| `werewolf.reveal_time_seconds` | overlay | real | 10 to 90 | no | agent promotion of an experiment concluded before #2366 only; out of the experiment catalog until the shadow game reads it (#2366, UC-043 BR-009) |
+| `death_grace_period_seconds` | overlay | experiment+arm or real | 0 to 5 | no | agent experiment arm; agent promotion |
+| `nonstop.respawn_seconds` | overlay | experiment+arm or real | 0.5 to 10 | no | agent experiment arm; agent promotion |
+| `nonstop.spawn_protection_seconds` | overlay | experiment+arm or real | 0 to 6 | no | agent experiment arm; agent promotion |
+| `fight_club.round_seconds` | overlay | experiment+arm or real | 5 to 60 | no | agent experiment arm; agent promotion |
+| `tournament.match_seconds` | overlay | experiment+arm or real | 5 to 60 | no | agent experiment arm; agent promotion |
+| `tournament.time_between_matches_seconds` | overlay | experiment+arm or real | 1 to 15 | no | agent experiment arm; agent promotion |
+| `werewolf.werewolf_fraction` | overlay | experiment+arm or real | 0.1 to 0.6 | no | agent experiment arm; agent promotion |
+| `zombie.initial_count` | overlay | experiment+arm or real | int 1 to 5 | no | agent experiment arm; agent promotion |
+| `zombie.respawn_min_seconds` | overlay | experiment+arm or real | 0.5 to 10 | no | agent experiment arm; agent promotion |
+| `zombie.respawn_max_seconds` | overlay | experiment+arm or real | 2 to 30 | no | agent experiment arm; agent promotion |
+| `windows` | overlay | experiment+arm or real | same shape as the default variant; numbers within 0 to 2x the largest declared variant value per key (#2369) | no | agent experiment arm; agent promotion; the experiment+arm rung reaches both the per-game read at game start and the `pacing_profile` handler read in the arm's games (§1.2, #1970), so the experiment overrides the lever there (UC-043 BR-005) |
 | `tempo.ramp_up_seconds`, `tempo.ramp_down_seconds` | overlay | stack | 0.1 to 10 | no | operator on stage (#1833); read at each ramp start, so a write applies from the next tempo change |
-| `shield.activation` | overlay | stack or experiment+arm | `instant`, `trigger`, `hold` | **yes** | operator on stage (#1837, `hold` #2096), also from the operator pad through the menu's `game` writer as a persisted admin value (survives a flag-service restart; the pad's `automatic` clears it), refused while a game is live (UC-015 BR-018, #2215); read at each grant, so a write applies from the next `grant_shield` and never changes a held charge; `hold` is latched per game, so it applies from the next game (UC-048 BR-011); W3 experiment writer toward `hold` only (FR-162, UC-043 A17); no `real` scope and no promotion, because instant and trigger games read it per grant (§13) |
+| `shield.activation` | overlay | stack or experiment+arm | `instant`, `trigger`, `hold` | **yes** | operator on stage (#1837, `hold` #2096), also from the operator pad through the menu's `game` writer as a persisted admin value (survives a flag-service restart; the pad's `automatic` clears it), refused while a game is live (UC-015 BR-018, #2215); read at each grant, so a write applies from the next `grant_shield` and never changes a held charge; `hold` is latched per game, so it applies from the next game (UC-048 BR-011); agent experiment arm toward `hold` only (FR-162, UC-043 A17); no `real` scope and no promotion, because instant and trigger games read it per grant (§13) |
 | `shield.charge_expiry_seconds` | overlay | stack | 0 to 120 | no | operator on stage (#1837); read at each grant, fixed per charge; never written by the agent (C-034) |
 | `shield.charge_rumble_intensity` | overlay | stack | 0 to 255 | no | operator on stage (#2094); read by the controller manager when a charge layer starts, fixed for it; never written by the agent (C-034) |
 | `shield.charge_rumble_pulse_ms` | overlay | stack | 50 to 500 | no | operator on stage (#2094); read by the controller manager when a charge layer starts, fixed for it; never written by the agent (C-034) |
 | `shield.charge_reminder_seconds` | overlay | stack | 0 to 30 | no | operator on stage (#2094); read by the controller manager when a charge layer starts, fixed for it; never written by the agent (C-034) |
 | `shield.charge_pre_expiry_seconds` | overlay | stack | 0 to 8 | no | operator on stage (#2094); read by the controller manager when a charge layer starts, fixed for it; never written by the agent (C-034) |
 | `shield.ending_rumble_seconds` | overlay | stack | 0 to 3 | no | operator on stage (#2094); read by the controller manager when a full shield layer starts, fixed for it; never written by the agent (C-034) |
-| `shield.energy_max_seconds` | overlay | stack or experiment+arm or real | 1 to 10 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); W3 experiment writer and W5 promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.energy_budget_seconds` | overlay | stack or experiment+arm or real | 3 to 30 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); W3 experiment writer and W5 promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.energy_initial_seconds` | overlay | stack or experiment+arm or real | 0 to 5 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); W3 experiment writer and W5 promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.recharge_per_second` | overlay | stack or experiment+arm or real | 0 to 0.5 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); W3 experiment writer and W5 promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.min_burst_seconds` | overlay | stack or experiment+arm or real | 0.1 to 1 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); W3 experiment writer and W5 promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.hold_rumble_intensity` | overlay | stack or experiment+arm or real | 0 to 150 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); latched with the hold values per game (UC-048 BR-010, BR-011); W3 experiment writer and W5 promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.empty_pulse_ms` | overlay | stack or experiment+arm or real | 100 to 800 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); latched with the hold values per game (UC-048 BR-010, BR-011); W3 experiment writer and W5 promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.energy_max_seconds` | overlay | stack or experiment+arm or real | 1 to 10 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.energy_budget_seconds` | overlay | stack or experiment+arm or real | 3 to 30 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.energy_initial_seconds` | overlay | stack or experiment+arm or real | 0 to 5 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.recharge_per_second` | overlay | stack or experiment+arm or real | 0 to 0.5 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.min_burst_seconds` | overlay | stack or experiment+arm or real | 0.1 to 1 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.hold_rumble_intensity` | overlay | stack or experiment+arm or real | 0 to 150 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); latched with the hold values per game (UC-048 BR-010, BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.empty_pulse_ms` | overlay | stack or experiment+arm or real | 100 to 800 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); latched with the hold values per game (UC-048 BR-010, BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
 | `shield.hold_rumble_max_intensity` | overlay | stack | 0 to 230 | no | operator on stage (#2463); latched with the hold values per game (UC-048 BR-010, BR-011); never written by the agent (C-034) |
 | `shield.hold_led_floor_percent` | overlay | stack | 10 to 100 | no | operator on stage (#2463); latched with the hold values per game (UC-048 BR-010, BR-011); never written by the agent (C-034) |
 | `shield.end_grace_seconds` | overlay | stack | 0 to 2 | no | operator on stage (#2464); latched per game in every mode (UC-048 BR-015, BR-011), so a write applies from the next game; never written by the agent (C-034) |
@@ -689,7 +691,7 @@ proposer and the dynamic declarer read the catalog from the flag service (`GET /
 flag), and a value outside the bounds is refused with `out_of_bounds`. A numeric range covers the declared
 variants with headroom; "same shape" accepts an object with exactly the default variant's keys and value kinds, and every number of it within 0 to 2 times the largest value any declared variant holds for that key (so `windows` cannot be set to a value no preset comes near; the ceiling is derived from the baseline variants, the registry has no field for it, #2369). A `pattern` `float` segment takes plain decimals only (`2`, `2.5`); hex floats, `inf`, `nan` and exponents do not match.
 
-**Every catalog key is read on the shadow-game path (#2366, #2392, [UC-043](../use_cases/UC-043.md) BR-009):** an experiment arm runs as shadow games the agent starts with a fixed `StartGameConfig` (JoustFFA; `services/agent/gamerunner/operations.go` `buildStartConfig`) whose `sensitivity` is the arm's own value: the shadow spawner resolves the `game` flag `sensitivity` with the arm's evaluation context (`game_kind` shadow, `game_mode`, `experiment_id`, `arm`; `services/agent/shadow_spawner.go` `armSpec`, `flags.Flags.ShadowGameInt`), and a shadow game without an experiment keeps `SHADOW_GAME_SENSITIVITY` ([UC-046](../use_cases/UC-046.md) BR-019). An unreadable or out-of-range value refuses the spawn (the pair is rolled back and retried next tick). A catalog key must therefore be read by the game coordinator in the game's flag context (`read_*_flag("game", key, ..., game_id=...)`, which carries `game_kind`, `experiment_id` and `arm`), or be resolved by the agent with the arm's evaluation context into the shadow `StartGameConfig`. A key only the menu reads into `StartGameConfig` would give two identical arms, so `nonstop.time_limit_seconds`, `invincibility_seconds`, `fight_club.min_rounds` and `werewolf.reveal_time_seconds` left the catalog (scope `real` only; a promotion of an experiment concluded before the change still writes) and the `invincibility_4_5` seed variant was removed. **Mode-specific keys (#2392):** `nonstop.respawn_seconds`, `nonstop.spawn_protection_seconds` (NonStop), `fight_club.round_seconds` (FightClub), `tournament.match_seconds`, `tournament.time_between_matches_seconds` (Tournament), `werewolf.werewolf_fraction` (Werewolf), `zombie.*` (Zombies) and `death_grace_period_seconds` (read in `games/base.py` for every mode, used only by Swapper and Zombies) stay in the catalog, but the dynamic declarer and the proposer offer a key only when the shadow game's mode (`SHADOW_GAME_MODE`, JoustFFA) reads it. The one table of these keys and their modes is `catalogKeyModes` in `services/agent/shadow_mode_keys.go`; a key without an entry acts in every mode. Shadow games are JoustFFA only today, so none of the ten is offered; a shadow game in another mode picks up its keys with no change. A W5 promotion and a hand-set `experiment_seed` are not filtered. A rehydrated experiment on a key that left the catalog ends `discarded` (`not_experimentable`, UC-043 A10). Guard: `services/agent/experiment_catalog_shadow_reads_2366_test.go` (`TestUC043_BR009_CatalogKeysReachTheShadowGame`: every key offered for a mode is read on that mode's path, and a restricted key acts only in the modes its entry lists), `services/agent/shadow_mode_keys_2392_test.go`.
+**Every catalog key is read on the shadow-game path (#2366, #2392, [UC-043](../use_cases/UC-043.md) BR-009):** an experiment arm runs as shadow games the agent starts with a fixed `StartGameConfig` (JoustFFA; `services/agent/gamerunner/operations.go` `buildStartConfig`) whose `sensitivity` is the arm's own value: the shadow spawner resolves the `game` flag `sensitivity` with the arm's evaluation context (`game_kind` shadow, `game_mode`, `experiment_id`, `arm`; `services/agent/shadow_spawner.go` `armSpec`, `flags.Flags.ShadowGameInt`), and a shadow game without an experiment keeps `SHADOW_GAME_SENSITIVITY` ([UC-046](../use_cases/UC-046.md) BR-019). An unreadable or out-of-range value refuses the spawn (the pair is rolled back and retried next tick). A catalog key must therefore be read by the game coordinator in the game's flag context (`read_*_flag("game", key, ..., game_id=...)`, which carries `game_kind`, `experiment_id` and `arm`), or be resolved by the agent with the arm's evaluation context into the shadow `StartGameConfig`. A key only the menu reads into `StartGameConfig` would give two identical arms, so `nonstop.time_limit_seconds`, `invincibility_seconds`, `fight_club.min_rounds` and `werewolf.reveal_time_seconds` left the catalog (scope `real` only; a promotion of an experiment concluded before the change still writes) and the `invincibility_4_5` seed variant was removed. **Mode-specific keys (#2392):** `nonstop.respawn_seconds`, `nonstop.spawn_protection_seconds` (NonStop), `fight_club.round_seconds` (FightClub), `tournament.match_seconds`, `tournament.time_between_matches_seconds` (Tournament), `werewolf.werewolf_fraction` (Werewolf), `zombie.*` (Zombies) and `death_grace_period_seconds` (read in `games/base.py` for every mode, used only by Swapper and Zombies) stay in the catalog, but the dynamic declarer and the proposer offer a key only when the shadow game's mode (`SHADOW_GAME_MODE`, JoustFFA) reads it. The one table of these keys and their modes is `catalogKeyModes` in `services/agent/shadow_mode_keys.go`; a key without an entry acts in every mode. Shadow games are JoustFFA only today, so none of the ten is offered; a shadow game in another mode picks up its keys with no change. An agent promotion and a hand-set `experiment_seed` are not filtered. A rehydrated experiment on a key that left the catalog ends `discarded` (`not_experimentable`, UC-043 A10). Guard: `services/agent/experiment_catalog_shadow_reads_2366_test.go` (`TestUC043_BR009_CatalogKeysReachTheShadowGame`: every key offered for a mode is read on that mode's path, and a restricted key acts only in the modes its entry lists), `services/agent/shadow_mode_keys_2392_test.go`.
 
 **Descriptions (`description`, #2345, [UC-042](../use_cases/UC-042.md) BR-008):** every row of the experiment catalog carries a one-line `description` of what the flag does in game terms; the flag service serves it in the row's `policy` (`GET /game`) and the experiment proposer shows it to the model next to the key, the variants and the range. The registry file holds the same text as this table (`TestDescriptionsMatchFlagsMD`); the table lists `game` flags only, and a description on a row of another set (`decision.prompt_profile`, #2530) is quoted in that row's §13.2 entry instead.
 
@@ -723,7 +725,7 @@ the flag service restarts; the durable change is the promotion PR (FR-064, C-007
 
 ### 13.4 `user`, `controller`
 
-| Set | Key | Kind | Scope | Bounds | Persist | Today's writer |
+| Set | Key | Kind | Scope | Bounds | Persist | Writers |
 |---|---|---|---|---|---|---|
 | user | `current_game` | overlay | stack | declared variants (10 modes) | **yes** | menu selection |
 | user | `game_instructions` | overlay | stack | `on`, `off` | **yes** | menu (operator pad) |
@@ -737,14 +739,14 @@ the flag service restarts; the durable change is the promotion PR (FR-064, C-007
 `system` and `operator` (§10a) have no runtime-mutable flag, and `observability` only the propagation probe, the two logging flags, the experiment trace shape and the moment shape below: everything else changes
 by a file edit and a restart. Several of their flags are read only at process start anyway (§1.3).
 
-| Set | Key | Kind | Scope | Bounds | Persist | Today's writer |
+| Set | Key | Kind | Scope | Bounds | Persist | Writers |
 |---|---|---|---|---|---|---|
 | observability | `flagservice.propagation_probe` | overlay | stack | free string | no | flag-service integration tests (#1408; NFR-050 measurement #1413); read by no service |
 | observability | `log_level` | overlay | stack | declared variants | no | operator scripts and the integration fixtures (#1788); read by every Python service and the agent |
 | observability | `debug` | overlay | stack | declared variants | no | operator scripts and the integration fixtures (#1788); read by the pairing daemon |
 | observability | `telemetry.moment_shape` | overlay | stack | declared variants | no | presenter / operator at the booth (#2658, UC-100); read by the game coordinator once per game |
 **Traceability:** FR-018, FR-132, FR-133, FR-134, FR-136, FR-137, FR-138, FR-226, C-008, C-030, C-032, C-033 / UC-053 /
-planned `services/flag-service/registry.yaml` / planned tests in #1409.
+`services/flag-service/registry.yaml` / `services/flag-service/registry/registry_test.go` (this table and the registry declare the same flags).
 
 ### 13.6 Flagsmith link (implemented, #2588 to #2592; UC-054, UC-055)
 
@@ -808,9 +810,9 @@ integer; a float range, a `free string` and an object flag are strings (decimal 
 
 ## 14. Ownership composition: invalidation and visibility
 
-> Normative rules moved from [OWNERSHIP_MODEL.md](../OWNERSHIP_MODEL.md) sections 5 and 6.1 (epic #1546, D2). That
-> document keeps the ownership principle (section 1), the parameter table (section 3) and the composition of the two
-> contested runtime parameters (section 4: sensitivity, grace/shield); it points here for the two rules below.
+> [OWNERSHIP_MODEL.md](../OWNERSHIP_MODEL.md) holds the ownership principle and invariants (section 1) and the
+> composition of the two contested runtime parameters (section 4: sensitivity, grace/shield); it points here for the
+> two rules below.
 
 ### 14.1 The invalidation rule
 
@@ -845,7 +847,7 @@ least:
 
 - a **distinguishable signal** when the agent applies an in-game delta (an LED pattern, audio cue or dashboard
   indicator that is clearly agent action, not a game event and not "the settings are broken");
-- a signal that identifies **what** changed at the granularity of the parameter table (OWNERSHIP_MODEL section 3), so the
+- a signal that identifies **what** changed at the granularity of one registry key (§13.1), so the
   admin can reconcile observed behaviour with the baseline.
 
 Agent actions are already audited as spans (`agent.decision`, intervention events) and metrics
@@ -914,12 +916,12 @@ Each key above is added to the mutable-flag registry as a stack-scoped `overlay`
 | `FLAG_SERVICE_*` | The flag service cannot depend on itself. |
 | `LOG_LEVEL` of the flag service | The flag service serves the flag files to flagd and starts before it; it has no flag client, and reading its own store would make the log level depend on the component whose startup it must log. Stays env-only (not migrated, #1788). |
 | `FLAG_EVAL_STARTUP_GRACE_SECONDS` | Not migrated (#1788). The grace window suppresses the provider-not-ready fallback warnings and `flag_eval_errors_total` while flagd has not delivered its first sync; reading it from a flag would evaluate a flag inside the very failure path it silences (recursion through `record_flag_fallback`) and always be unresolved during the window. Stays env-only, default 15 s (`lib/flag_eval_visibility.py`). |
-| `AGENT_AUTONOMOUS_ENABLED`, `AGENT_CODE_IMPROVEMENT_ENABLED`, `AGENT_CODE_IMPROVEMENT_TARGET` | Limit the agent: stay env ceilings (C-034, FR-152). Combination with the existing human-owned flags: autonomous promotion = env AND `code_improvement.mode`=`autonomous` AND `enabled`; code changes = env AND `enabled`; target = `local` unless env and `code_improvement.target` both say `github`. Unset env = closed. A missing flag or lost sync resolves to its code default (`enabled` off, mode `issue`, target `local`), so they fail closed. No new flag. |
-| `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` | Limits the agent: an env ceiling only, no flag (C-034, FR-152 g, UC-043 A23, #2541). The operator's attestation that an objective's shadow substrate meets the validity bar: a comma list of `objective@release` entries (`balanced@0.14.0`); an entry counts only when its objective has a fitness function (`endurance`, `balanced`, `accelerate`) and its release equals the agent's `SERVICE_VERSION`, which must be a release (`X.Y.Z`; `latest`, `main`, `dev`, a sha never count). An autonomous promotion of any other objective is a recorded no-op `substrate_not_validated objective=<objective>`. Unset or empty = no objective validated (closed). Read once at startup; `code_improvement.mode` and `enabled` remain the runtime tighteners. Not passed through compose (D-A6). |
-| `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` | Stays an env ceiling (#1810, FR-152 e): the effective concurrent-experiment budget is `min(env, experiment_dynamic_max_concurrent)`, clamped to the shadow capacity. Unset, invalid or non-positive env = no ceiling (logged at WARN when set but not positive). An unresolved flag falls to the compiled 3, still capped by the env (before #1810 a set env was the fallback and was ignored while flagd answered). |
-| `AGENT_EXPERIMENT_MAX_GAMES` | Stays an env ceiling (#1810, FR-152 f): the effective games budget is `min(env, experiment_max_games)`, where 0 or less means no limit on either side. Unset, 0 or invalid env = no ceiling (env 0 used to mean "no games budget" as the fallback; it now means "no ceiling", the flag governs). An unresolved flag falls to the compiled 50, still capped by the env. |
-| `AGENT_EXPERIMENT_PROPOSER_ENABLED` | Stays an env ceiling (#1810, FR-152 d): the proposer gate is open only when the env is `true` AND `experiment_proposer_enabled` is on, for both the retro-seeded thesis proposer and the M7-4 proposer. Unset env = closed. A missing flag or a lost sync reads false (closed), so a deployment with the env set but an older `agent.json` without the flag loses the proposer until the file is updated (release note). |
-| `AGENT_LLM_MAX_REQUESTS_PER_MINUTE` | Stays an env ceiling; the existing `llm.max_requests_per_minute` (§3) can only lower it: effective = `min(env, flag)`, unset env = no ceiling (FR-152, NFR-011). A lost sync resolves the flag to its default 6 (not the lowest variant 3). The flag is operator-written (§13.2), never agent-written. |
+| `AGENT_AUTONOMOUS_ENABLED`, `AGENT_CODE_IMPROVEMENT_ENABLED`, `AGENT_CODE_IMPROVEMENT_TARGET` | Limit the agent: stay env ceilings, no new flag (C-034; §15.4 (a), (b)). |
+| `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` | Limits the agent: an env ceiling only, no flag (C-034; §15.4 (g)). |
+| `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` | Stays an env ceiling (§15.4 (e)). |
+| `AGENT_EXPERIMENT_MAX_GAMES` | Stays an env ceiling (§15.4 (f)). |
+| `AGENT_EXPERIMENT_PROPOSER_ENABLED` | Stays an env ceiling (§15.4 (d)). |
+| `AGENT_LLM_MAX_REQUESTS_PER_MINUTE` | Stays an env ceiling (§15.4 (c), NFR-011). |
 
 ### 15.3 Resolved points
 
@@ -927,5 +929,23 @@ Each key above is added to the mutable-flag registry as a stack-scoped `overlay`
 - Resolved (#1788), floor and OTLP: when `debug` is on, the pairing daemon's floor lowers the OTLP log handler to DEBUG too, so DEBUG records now also go out over OTLP (before, the handler stayed at `LOG_LEVEL`, default INFO).
 - Resolved (#1788), sync loss asymmetry: when the observability sync is lost, Python keeps the last resolved level while the provider is STALE, but the agent re-resolves on every refresh and drops to the `LOG_LEVEL` env level (default info) until the flag resolves again, logging "log level changed" at each flip.
 - Resolved (#1788): the Python log level is applied at import by `logging.basicConfig` from the deprecated `LOG_LEVEL` (flagd is not reachable yet). `lib/log_level.py` re-applies the resolved level (flag; `LOG_LEVEL` is bootstrap-only, the startup level until the flag resolves; else INFO) to the root logger and the OTLP handler when the observability provider turns ready, on every configuration change and every 5 s; the agent does the same through a `slog.LevelVar` (`services/agent/flags/loglevel.go`).
+
+### 15.4 Agent-limiting settings (FR-152)
+
+Every setting that limits the agent is an operator ceiling no agent write can loosen (C-034): the env var is the ceiling and the human-owned flag may only tighten it. The flags are operator-written (§13.2), never agent-written. Per setting:
+
+- **(a) Autonomous promotion** runs only when `AGENT_AUTONOMOUS_ENABLED` is true AND `code_improvement.mode` is `autonomous` AND `enabled` is on.
+- **(b) Code changes.** Opening a code change needs `AGENT_CODE_IMPROVEMENT_ENABLED` true AND `enabled` on; `code_improvement.mode` (default `issue`) then selects issue, PR or autonomous only within that ceiling. The target is `local` unless both `AGENT_CODE_IMPROVEMENT_TARGET` and `code_improvement.target` say `github` (the more restrictive wins).
+- **(c) Remote-call budget** = `min(AGENT_LLM_MAX_REQUESTS_PER_MINUTE, llm.max_requests_per_minute)` (NFR-011), shared by the decide path, the retro and the proposer. An in-game decide call on a paid backend (claude) also needs a slot under that backend's `decision.<backend>.max_requests_per_minute` in the same window: the cap can only tighten (`inherit` = no cap of its own, 0 or a negative value closes the backend, a value above the global cap does nothing). The jev backend, the retro and the proposer stay on the global budget only.
+- **(d) Proposer gate** (the retro-seeded thesis proposer and the M7-4 proposer) is open only when `AGENT_EXPERIMENT_PROPOSER_ENABLED` is true AND `experiment_proposer_enabled` is on. A missing flag or a lost sync reads false (closed), so a deployment with the env set and an `agent.json` without the flag has no proposer.
+- **(e) Concurrent-experiment budget** = `min(AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT, experiment_dynamic_max_concurrent)`, clamped to the shadow capacity. An unset, invalid or non-positive env is no ceiling (logged at WARN when set but not positive).
+- **(f) Per-experiment games budget** = `min(AGENT_EXPERIMENT_MAX_GAMES, experiment_max_games)`, where 0 or less means no limit on either side; an unset, 0 or invalid env is no ceiling.
+- **(g) Validated objectives.** An autonomous promotion (a) also needs its experiment's objective in `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES`, the operator's attestation that the objective's shadow substrate meets the validity bar (UC-043 A23, FR-203): a comma list of `objective@release` entries (`balanced@0.14.0`). An entry counts only when its objective has a fitness function (`endurance`, `balanced`, `accelerate`) and its release equals the agent's `SERVICE_VERSION`, which must be a release (`X.Y.Z`; `latest`, `main`, `dev` or a sha never count). Unset or empty validates no objective; an empty objective is never validated; no flag can widen it. An autonomous promotion of any other objective is a recorded no-op `substrate_not_validated objective=<objective>`. Read once at startup; `code_improvement.mode` and `enabled` stay the runtime tighteners. Not passed through compose (D-A6).
+
+**Unset env.** For the boolean gates unset is closed (false, target `local`); for the budgets (c), (e), (f) unset means no env ceiling and the flag governs.
+
+**Fail values.** A missing flag or a lost sync resolves each flag to its code default: `enabled` off, `code_improvement.mode` `issue`, `code_improvement.target` `local`, `llm.max_requests_per_minute` 6 (not the lowest variant 3), `decision.claude.max_requests_per_minute` 30 (so the global 6 binds), `experiment_proposer_enabled` false, `experiment_dynamic_max_concurrent` 3, `experiment_max_games` 50. The boolean gates therefore fail closed and the budgets fall to their defaults, still capped by a set env value.
+
+**Not agent-limiting.** `decision.probe_decisions` and `inference.backend` are tuning flags (§15 rows): the probe only swaps in a rules engine that emits synthetic `noop` decisions, and `inference.backend` only chooses between the stub and the Claude text backend of the retro and the proposer. Every egress ceiling stays with the operator: the Claude client exists only with `ANTHROPIC_API_KEY` set and a valid `AGENT_INFERENCE_BASE_URL`, the call count is (c), and the M7-4 proposer also needs the proposer gate (d), so no flag alone switches on model-chosen experiment declaration.
 
 **Traceability:** FR-150 to FR-152, C-034, NFR-011 / UC-045 (planned note) / `services/agent/main.go`, `lib/otel_logging.py` (OTLP handler level), `lib/flag_eval_visibility.py`; the Python services read `LOG_LEVEL` themselves in `services/game_coordinator/server.py:22`, `services/menu/server.py:23`, `services/audio/server.py:34`, `services/python_hid/server.py:32`, `services/controller_manager/server.py:LOG_LEVEL`.
