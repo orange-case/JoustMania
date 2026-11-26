@@ -278,9 +278,9 @@ async def test_an_undeclared_objectives_value_shows_question_mark_and_its_keys_s
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
 async def test_backend_target_and_raise_come_from_the_press_read_and_from_is_always_sent():
-    """Opposer M2: CLAUDE to OPENAI judged at the press; RULES written during the hold is caught by `from`."""
+    """Opposer M2: CLAUDE to JEV judged at the press; RULES written during the hold is caught by `from`."""
     result, data, _ = await edit("decision.backend", 1, rs(agent_backend="claude"), release=rs(agent_backend="rules"))
-    assert data == [{"command": "set_backend", "backend": "openai", "from": "claude"}]
+    assert data == [{"command": "set_backend", "backend": "jev", "from": "claude"}]
     # Free to paid at the press: unconfirmed nothing, whatever the release read says.
     result, data, cues = await edit(
         "decision.backend", 1, rs(agent_backend="rules"), release=rs(agent_backend="claude")
@@ -296,7 +296,7 @@ async def test_backend_target_and_raise_come_from_the_press_read_and_from_is_alw
 async def test_without_set_backend_from_only_a_switch_to_rules_is_sent():
     """Hardening: without the guard any paid target is refused, raise or not; `rules` still goes."""
     old = [c for c in COMMANDS if c != "set_backend.from"]
-    for backend, steps in (("rules", 1), ("claude", 1), ("openai", -1)):
+    for backend, steps in (("rules", 1), ("claude", 1), ("jev", -1)):
         press = rs(agent_backend=backend, commands=old)
         result, data, cues = await edit("decision.backend", steps, press, confirmed=True)
         assert (result, data) == (("set_backend", "refused"), []), backend

@@ -170,7 +170,6 @@ areas:
     # Decision backends (#2106)
     - {id: backend_rules, sound: MENU_VOX_BACKEND_RULES, text: "Rules."}
     - {id: backend_claude, sound: MENU_VOX_BACKEND_CLAUDE, text: "Claude."}
-    - {id: backend_openai, sound: MENU_VOX_BACKEND_OPENAI, text: "OpenAI.", say: "Open A I."}
     - {id: backend_jev, sound: MENU_VOX_BACKEND_JEV, text: "Jev."}
 
     # Shield mode layer (#2215, UC-015 BR-018)

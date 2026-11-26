@@ -13,9 +13,12 @@ each call by its system prompt, answers with a canned text (a real Messages API
     stack.fake_claude.script(decide_mode="valid", intervention="adjust_volume", confidence=0.95)
     calls = stack.fake_claude.requests("decide")
 
-A ``decide`` answer is BUILT FROM THE REQUEST (the shared builder of the fake OpenAI
-server), so every choice is an option the agent offered; ``decide_mode="garbage"``
-answers 200 with non-JSON text.
+A ``decide`` answer is BUILT FROM THE REQUEST (``decide_answer.build_answer``), so every
+choice is an option the agent offered; ``decide_mode="garbage"`` answers 200 with non-JSON
+text; ``decide_mode="hold"`` answers like ``valid`` but only after ``release()`` (or
+``hold_max_seconds``, default ``HOLD_MAX_SECONDS``), so a test can flip a flag while the
+agent's call is provably in flight.
+Each ``decide`` record carries the game id and question ids parsed from the prompt.
 
 An in-process threaded server (stdlib only, instance state): nothing is shared
 between stacks. The key check mirrors the real API (401 without the expected
@@ -28,9 +31,8 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from tests.integration.fake_openai.server import build_answer, parse_questions
-
 from ..processes import free_port
+from .decide_answer import build_answer, parse_game_id, parse_questions
 
 # Dummy key the agent sends (ANTHROPIC_API_KEY) and the fake checks; never a real key.
 API_KEY = "fake-claude-service-tier-key"
@@ -39,6 +41,8 @@ MODEL = "fake-claude"
 PROPOSAL_MARKER = "propose EXACTLY ONE experiment"
 # The decide system prompt (services/agent/decide/llmio/llmio.go systemPrompt).
 DECIDE_MARKER = "in-game decision engine of JoustMania"
+# A held decide call is answered at the latest after this (below the agent's own call timeout).
+HOLD_MAX_SECONDS = 30.0
 
 
 class FakeClaude:
@@ -46,8 +50,15 @@ class FakeClaude:
         self.port = free_port()
         self._lock = threading.Lock()
         self._replies: dict[str, str] = {"retro": "{}", "proposal": "{}"}
-        self._decide: dict = {"mode": "valid", "intervention": "adjust_volume", "confidence": 0.95, "magnitude": 0.5}
+        self._decide: dict = {
+            "mode": "valid",
+            "intervention": "adjust_volume",
+            "confidence": 0.95,
+            "magnitude": 0.5,
+            "hold_max_seconds": HOLD_MAX_SECONDS,
+        }
         self._requests: list[dict] = []
+        self._release = threading.Event()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -102,22 +113,36 @@ class FakeClaude:
         decide_mode: str | None = None,
         intervention: str | None = None,
         confidence: float | None = None,
+        magnitude: float | None = None,
+        hold_max_seconds: float | None = None,
     ) -> None:
         """Set the reply text per call kind (and the decide answer) and clear the request log."""
         with self._lock:
             if decide_mode is not None:
-                if decide_mode not in ("valid", "garbage"):
-                    raise ValueError(f"decide_mode must be valid or garbage, not {decide_mode!r}")
+                if decide_mode not in ("valid", "garbage", "hold"):
+                    raise ValueError(f"decide_mode must be valid, garbage or hold, not {decide_mode!r}")
                 self._decide["mode"] = decide_mode
             if intervention is not None:
                 self._decide["intervention"] = intervention
             if confidence is not None:
                 self._decide["confidence"] = confidence
+            if magnitude is not None:
+                self._decide["magnitude"] = magnitude
+            if hold_max_seconds is not None:
+                self._decide["hold_max_seconds"] = hold_max_seconds
             if retro is not None:
                 self._replies["retro"] = retro
             if proposal is not None:
                 self._replies["proposal"] = proposal
             self._requests.clear()
+            # Release anything still held by the previous script before swapping.
+            self._release.set()
+            self._release = threading.Event()
+
+    def release(self) -> None:
+        """Release every held decide request."""
+        with self._lock:
+            self._release.set()
 
     def requests(self, kind: str | None = None) -> list[dict]:
         """The calls so far (``kind`` = ``retro``, ``proposal`` or ``decide``), oldest first."""
@@ -137,12 +162,22 @@ class FakeClaude:
         kind = "decide" if DECIDE_MARKER in system else ("proposal" if PROPOSAL_MARKER in system else "retro")
         key_ok = key == API_KEY
         with self._lock:
-            self._requests.append(
-                {"kind": kind, "key_ok": key_ok, "model": body.get("model"), "system": system, "user": user}
-            )
+            entry = {"kind": kind, "key_ok": key_ok, "model": body.get("model"), "system": system, "user": user}
+            self._requests.append(entry)
+            hold = kind == "decide" and key_ok and self._decide["mode"] == "hold"
+            release = self._release
+            hold_for = float(self._decide["hold_max_seconds"])
+            if kind == "decide":
+                entry["game_id"] = parse_game_id(user)
+                entry["questions"] = [q["id"] for q in parse_questions(user)]
+                entry["held"] = hold
             text = self._decide_text(user) if kind == "decide" else self._replies[kind]
         if not key_ok:
             return 401, _error("authentication_error", "invalid x-api-key")
+        if hold:
+            release.wait(timeout=hold_for)
+            with self._lock:
+                entry["held"] = False
         return 200, {
             "id": f"msg_fake_{kind}",
             "type": "message",

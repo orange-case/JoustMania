@@ -87,7 +87,7 @@ func TestRetro_OperatorBrief(t *testing.T) {
 
 // UC: UC-042 A13 BR-010
 // The brief log notes a game only when a remote request carried the brief (claude
-// or openai, never jev), and the retro tells the analyst whether the in-game agent
+// only, never jev), and the retro tells the analyst whether the in-game agent
 // saw the brief.
 func TestRetro_OperatorBriefDelivered(t *testing.T) {
 	const brief = "keep the red player alive"

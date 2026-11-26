@@ -85,7 +85,7 @@ engine is the offline floor.
 - **Live rollback** exists in gated form: autonomous promotion watches real
   games and reverts on degradation.
 - **Decision backends** are selected by the `decision.backend` flag (epic #1225):
-  `rules` by default, `claude` / `openai` / `jev` called directly, rules on any
+  `rules` by default, `claude` / `jev` called directly, rules on any
   failure. The post-game retro and the experiment proposer call Claude directly
   when the `inference.backend` flag is `claude` (#1810). There is no gateway (#1234).
 - **Talk demo.** The live demo of that contract (observe, model switch,

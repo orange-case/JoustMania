@@ -473,7 +473,7 @@ model**, applied in order:
      (#731)](#fitness-functions-731)** below.
 3. **Decision backend** (who decides, epic #1225) —
    - `decision.backend` (string, default `rules`): `rules` runs the deterministic
-     rules engine; `claude` / `openai` / `jev` hand the decision to that remote
+     rules engine; `claude` / `jev` hand the decision to that remote
      backend, with the rules engine as the fallback. See **Decision backends**
      below and [decide-contract.md 10.1](../../docs/specs/decide-contract.md#101-the-text-backend-post-game-retro-and-proposer). The
      legacy `mode` / `model` / `prompt_variant` flags were removed in #1234.
@@ -1014,8 +1014,9 @@ table to keep in sync with the code. Live gates (`enabled`, `interventions_enabl
 ### Decision backends (#1225, #1244)
 
 `decision.backend` (agent.json) picks who answers the in-game decide questions:
-`rules` (default, in-process) or a remote backend, `claude`, `openai` or `jev`,
-called directly with no gateway. Flip it, and the backend's model, with
+`rules` (default, in-process) or a remote backend, `claude` or `jev`,
+called directly with no gateway. Any other value (for example `openai`,
+retired in #2788) falls back to rules with `unknown_backend`. Flip it, and the backend's model, with
 `./scripts/agent-backend.sh` (a `stage` overlay through the flag service, applied
 live on the next cycle with no restart; a flag-service restart drops it):
 
@@ -1031,12 +1032,7 @@ by `docker-compose.yml`, read once at startup) plus its flag config:
 | Backend | Env key | Flags it also needs |
 |---------|---------|---------------------|
 | `claude` | `ANTHROPIC_API_KEY` | `decision.claude.model` (defaults to haiku), `decision.claude.base_url` (defaults to `https://api.anthropic.com`, no `/v1`; must be key-safe) |
-| `openai` | `DECISION_OPENAI_API_KEY` | `decision.openai.model` (unset by default), `decision.openai.base_url` (any OpenAI-compatible vendor), `decision.openai.reasoning_effort` (`auto` / `none` / `minimal` / `low` / `omit`; set with `./scripts/agent-backend.sh effort <variant>`) |
 | `jev` | `JEV_API_KEY` | none: `decision.jev.base_url` defaults to `https://api.typesafe.ai/v1`, `decision.jev.model` to `latest` (`jev-latest`; `pinned` = `jev-1.13.0`) |
-
-`reasoning_effort=auto` sends `minimal` to the original gpt-5 family and `low` to
-other reasoning models; `omit` never sends the field (for models that reject
-`low`, e.g. o1-mini, o1-preview, gpt-5-pro).
 
 **Where to put the keys.** Put API keys in your shell environment or in the
 git-ignored `.env.local`, **never in `.env`**: `.env` is tracked in git (despite

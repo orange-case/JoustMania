@@ -287,7 +287,7 @@ connectors:
   # Exported to VictoriaMetrics (prometheus_remote_write) as
   #   traces_span_metrics_calls_total
   #   traces_span_metrics_duration_seconds_bucket / _sum / _count
-  # with labels decide_backend (rules, jev, claude, openai), decide_outcome
+  # with labels decide_backend (rules, jev, claude), decide_outcome
   # (act, noop, held, fallback, invalid, discarded), span_name, service_name
   # and status_code; job is infrastructure/agent (the span's resource).
   # Attribute names: services/agent/decision/decide_hook.go (AttrDecideBackend,

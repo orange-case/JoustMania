@@ -662,20 +662,31 @@ async def test_a_failed_reset_is_flag_service_unavailable(servicer, flags):
 @pytest.mark.uc("UC-016", br=["BR-014"])
 async def test_set_backend_from_the_backend_in_force_writes(servicer, flags):
     flags.admin["decision.backend"] = {"variant": "claude", "writer": "menu"}
-    reply = await pad(servicer, "set_backend", backend="openai", **{"from": "claude"})
-    assert (reply.success, reply.error, reply.value) == (True, "", "openai")
-    assert flags.admin["decision.backend"]["variant"] == "openai"
+    reply = await pad(servicer, "set_backend", backend="jev", **{"from": "claude"})
+    assert (reply.success, reply.error, reply.value) == (True, "", "jev")
+    assert flags.admin["decision.backend"]["variant"] == "jev"
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", br=["BR-014"])
+@pytest.mark.parametrize("old", ["openai", "mystery"])
+async def test_set_backend_from_a_retired_openai_value_is_refused_like_any_unknown_value(servicer, flags, old):
+    """A flag file persisted by an older release may still say `openai`: off the ladder, refused, nothing written."""
+    flags.admin["decision.backend"] = {"variant": old, "writer": "menu"}
+    reply = await pad(servicer, "set_backend", backend="rules", **{"from": old})
+    assert (reply.success, reply.error, reply.value) == (False, "bad_option", "")
+    assert flags.admin["decision.backend"]["variant"] == old
 
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A3", br=["BR-014"])
 async def test_set_backend_from_a_backend_no_longer_in_force_is_stale(servicer, flags):
-    """The pad judged claude -> openai paid to paid (no confirmation); the backend went to rules under the
+    """The pad judged claude -> jev paid to paid (no confirmation); the backend went to rules under the
     hold, so the switch would be an unconfirmed free-to-paid raise: refused, nothing written. The in-process
     flagd client still serves claude (its sync lag): the check reads the flag service."""
     servicer.agent_settings_client = agent_client(flags, **{"decision.backend": ("claude", "claude")})
 
-    reply = await pad(servicer, "set_backend", backend="openai", **{"from": "claude"})
+    reply = await pad(servicer, "set_backend", backend="jev", **{"from": "claude"})
 
     assert (reply.success, reply.error, reply.value) == (False, "stale", "")
     assert flags.writes() == []

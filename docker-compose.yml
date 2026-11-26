@@ -826,7 +826,7 @@ services:
       # flags (#1907: the env fallbacks are removed).
       # ---- Decision backends (#1244, epic #1225) ----
       # API keys for the remote in-game decision backends selected by the
-      # decision.backend flag (claude / openai / jev; flip with
+      # decision.backend flag (claude / jev; flip with
       # ./scripts/agent-backend.sh). ANTHROPIC_API_KEY also serves the
       # proposer/retro backend above. Keys go straight to the agent, which calls
       # the vendor directly: there is no gateway. Read once at agent startup;
@@ -836,7 +836,6 @@ services:
       # scripts/setup/joustmania-compose.sh, used by the systemd autostart,
       # passes --env-file .env --env-file .env.local to every call, #1488).
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - DECISION_OPENAI_API_KEY=${DECISION_OPENAI_API_KEY:-}
       - JEV_API_KEY=${JEV_API_KEY:-}
       # LIVE per-minute LLM request budget override (#964/#1071) for remote decide
       # calls. Read in main.go via SetLLMBudgetOverride; empty default = ignored
