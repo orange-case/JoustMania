@@ -960,9 +960,8 @@ class TournamentGame(StreamedIntroGameMode):
 
     def _player_death_event_attributes(self, serial: str) -> dict:
         """``match_id`` on the ``player_death`` moment of a death that decides a match."""
-        match = self.current_match
-        if match is not None and self._fights_undecided_match(serial):
-            return {"match_id": match.match_id}
+        if self._fights_undecided_match(serial):
+            return {"match_id": self.current_match.match_id}
         return {}
 
     def _fights_undecided_match(self, serial: str) -> bool:
