@@ -20,10 +20,10 @@ from .adapter_identity import (
 from .config import get_bt_monitor_interval
 from .metrics import (
     pairing_bluetooth_adapter_connections,
-    pairing_bluetooth_device_connected,
-    pairing_bluetooth_device_rssi_dbm,
     pairing_bluetooth_adapter_hci_errors_total,
     pairing_bluetooth_adapter_info,
+    pairing_bluetooth_device_connected,
+    pairing_bluetooth_device_rssi_dbm,
     pairing_bluetooth_link_role_info,
 )
 from .utils import run_command
