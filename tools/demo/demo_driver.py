@@ -471,13 +471,11 @@ Where to watch the agent react
 
 Prerequisites for the agent to ACT (see docs/agent-act-runbook.md)
 ------------------------------------------------------------------
-  The agent only DECIDES (and traces) unless both gates are open:
-    1. agent.json `interventions_enabled` = on (flagd flag, #1213; re-read at
-       use-time, no agent restart)                               — real sink
-    2. agent.json `enabled` = on   (flag flip, hot-reload)        — kill switch
+  The agent runs while `enabled` is `watch` or `on` and only ACTS when it is `on`
+  (./scripts/agent-killswitch.sh watch | on; read each cycle, no agent restart).
   And the permission layer (`interventions_allowed`) must include the rule's
   intervention. To SEE a *blocked* decision, run --scenario blocked_battery with the
-  stock `ambient` allow-list. Even with the gates CLOSED, the OBSERVE/DECIDE pipeline
+  stock `ambient` allow-list. In `watch` the OBSERVE/DECIDE pipeline
   still emits agent.signal_received -> agent.decision spans + agent_evaluations_total —
   enough to confirm the driver tripped a rule. LLM inference being unreachable (#1059)
   is fine: the decision loop runs in RULES mode, which is exactly what this driver targets.

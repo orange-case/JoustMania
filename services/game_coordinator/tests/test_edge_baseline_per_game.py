@@ -111,9 +111,6 @@ class GameScopedFlagClient:
 class AgentStub:
     """Agent domain: every intervention allowed, generous backstop."""
 
-    def get_boolean_value(self, key, default, _ctx=None):
-        return True if key == "enabled" else default
-
     def get_integer_value(self, key, default, _ctx=None):
         if key == "policy.coordinator_backstop_per_minute":
             return 1000
@@ -125,6 +122,8 @@ class AgentStub:
         return default
 
     def get_string_value(self, key, default, _ctx=None):
+        if key == "enabled":
+            return "on"
         if key == "interventions_allowed":
             return ",".join(sorted(ALL_TYPES))
         return default

@@ -596,15 +596,15 @@ describe("UC-040: A11, a write the actuation gate dropped is not 'allowed' (#209
     return only(body);
   }
 
-  it("UC-040/A11 decision.applied=false + write_gate_off reads as not applied with the reason", () => {
+  it("UC-040/A11 decision.applied=false + watch reads as not applied with the reason", () => {
     const row = withDecisionTags([
       { key: "decision.applied", type: "bool", value: false },
-      { key: "decision.not_applied_reason", type: "string", value: "write_gate_off" },
+      { key: "decision.not_applied_reason", type: "string", value: "watch" },
     ]);
     expect(row.decisions[0].applied).toBe(false);
-    expect(row.decisions[0].notAppliedReason).toBe("write_gate_off");
+    expect(row.decisions[0].notAppliedReason).toBe("watch");
     const html = renderDecideRow(row);
-    expect(html).toContain("not applied: write gate off (interventions_enabled)");
+    expect(html).toContain("not applied: agent in watch");
     expect(html).not.toMatch(/agent\.decision:[^<]*· allowed/);
     expect(html).toContain("decide-decision-blocked");
   });

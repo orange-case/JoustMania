@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# Flip the agent MASTER kill-switch (#999 dry-run helper; epic #1407).
+# Set the agent's state, the `enabled` flag (agent flag set): off / watch / on (#999 dry-run helper; epic #1407).
 #
-# The agent's `enabled` flag (agent flag set) is the master kill-switch and is
-# fail-closed `off` in the baseline (services/flagd/agent.json and ci/agent.json).
-# This helper changes it through the flag service (scripts/flags.sh): `on` sets an
-# in-memory stack overlay, `off` clears it, so the fail-closed baseline returns.
-# Nothing is persisted (re-review N4): a flag-service restart is `off` again.
+#   off    the agent does not run (the stop)
+#   watch  the agent observes, decides and records, but writes nothing to a game
+#   on     decisions are applied
+#
+# Every state, `off` included, is an in-memory stack overlay written through the
+# flag service (scripts/flags.sh). `off` is a PUT, never a clear: clearing the
+# overlay falls back to the flagd default, which is `watch`, so it would not stop
+# the agent. Nothing is persisted: a flag-service restart returns to the default.
 #
 # Usage:
-#   ./scripts/agent-killswitch.sh on    # enable the agent
-#   ./scripts/agent-killswitch.sh off   # back to the fail-closed baseline
+#   ./scripts/agent-killswitch.sh on      # apply decisions
+#   ./scripts/agent-killswitch.sh watch   # decide and record, write nothing
+#   ./scripts/agent-killswitch.sh off     # stop the agent
 #   ./scripts/agent-killswitch.sh status
 #
 # The change takes effect LIVE (the flag service pushes it to flagd at once): the
 # agent reads `enabled` each cycle, so no agent restart is needed.
 #
-# If the flag service cannot be reached, `off` cannot clear the overlay: the
-# helper then prints the fallback brake (stop the agent container; the game keeps
-# running without it) and exits non-zero.
+# If the flag service does not take the `off`, the helper prints the fallback
+# brake (stop the agent container; the game keeps running without it) and exits
+# non-zero.
 #
 # Env: FLAG_SERVICE_URL (default http://localhost/flags, the envoy route),
 #      AGENT_CONTAINER (default joustmania-agent, named in the fallback).
@@ -39,19 +43,19 @@ EOF_FALLBACK
 }
 
 case "${1:-status}" in
-  on)
-    "${FLAGS}" set agent enabled on >/dev/null
-    echo "agent kill-switch -> on"
+  on | watch)
+    "${FLAGS}" set agent enabled "$1" >/dev/null
+    echo "agent kill-switch -> $1"
     ;;
   off)
-    "${FLAGS}" clear agent enabled || fallback
-    echo "agent kill-switch -> $("${FLAGS}" variant agent enabled) (baseline)"
+    "${FLAGS}" set agent enabled off >/dev/null || fallback
+    echo "agent kill-switch -> off"
     ;;
   status)
     echo "agent kill-switch = $("${FLAGS}" variant agent enabled)"
     ;;
   *)
-    echo "usage: $0 {on|off|status}" >&2
+    echo "usage: $0 {on|watch|off|status}" >&2
     exit 2
     ;;
 esac

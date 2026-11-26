@@ -240,3 +240,30 @@ func TestProposeOnce_ConcurrentGatedCyclesRaceClean(t *testing.T) {
 type lockedBackend struct{ response string }
 
 func (b *lockedBackend) Infer(context.Context, llm.Prompt) (string, error) { return b.response, nil }
+
+// In watch the proposer drafts (the model is called) but WritePermit stops the
+// experiment write, and the reason lands on the attempt span.
+// UC: UC-045 BR-002
+func TestProposeOnce_WatchDraftsButDoesNotWrite(t *testing.T) {
+	backend := &switchingBackend{response: validReply, onInfer: func() {}}
+	p, svc, rec, _ := proposerWithRecorder(t, backend)
+
+	res := p.ProposeOnce(context.Background(), Narrative{}, ProposerConfig{
+		Permit:      allowPropose,
+		WritePermit: denyPropose(SkipReasonAgentWatch),
+	})
+
+	if res.Outcome != ProposeDisabled || res.Reason != SkipReasonAgentWatch {
+		t.Fatalf("result = (%q, %q), want (disabled, agent_watch)", res.Outcome, res.Reason)
+	}
+	if res.Proposal == nil || res.Proposal.FlagKey != "death_grace_period_seconds" {
+		t.Fatalf("drafted proposal = %+v, want the decoded proposal returned", res.Proposal)
+	}
+	if _, ok := experimentVariantValue(t, svc, "death_grace_period_seconds"); ok {
+		t.Fatal("watch must prevent the experiment write")
+	}
+	if spanExists(rec, SpanProposed) {
+		t.Fatal("Gate.Review must not run in watch")
+	}
+	assertSpanAttr(t, findSpan(t, rec, SpanProposeAttempt), AttrReason, SkipReasonAgentWatch)
+}

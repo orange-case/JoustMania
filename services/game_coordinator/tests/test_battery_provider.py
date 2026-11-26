@@ -42,13 +42,12 @@ ALL_TYPES = {spec.type_id for spec in INTERVENTION_SPECS}
 class FakeFlagClient:
     """In-memory flag client matching the OpenFeature get_*_value surface."""
 
-    def get_boolean_value(self, key, default, _ctx=None):
-        return self.values.get(key, True if key == "enabled" else default)
-
     def __init__(self, values=None):
         self.values = values or {}
 
     def get_string_value(self, key, default, _ctx=None):
+        if key == "enabled":
+            return self.values.get("enabled", "on")
         return str(self.values.get(key, default))
 
     def get_object_details(self, key, _default, _ctx=None):

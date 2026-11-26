@@ -27,7 +27,7 @@ var digestKeys = map[string][]string{
 		"shield.",
 	},
 	"agent": {
-		"enabled", "interventions_enabled", "interventions_allowed", "objectives", "perception.ema_weight",
+		"enabled", "interventions_allowed", "objectives", "perception.ema_weight",
 		"decision.backend", CapFlagKey, "policy.", "fitness.",
 	},
 	"interventions": {"*"},

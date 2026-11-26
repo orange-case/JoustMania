@@ -102,9 +102,6 @@ class PerSerialFlagClient:
 class AgentStub:
     """Agent domain: a fixed allow-list, generous backstop, no battery gate."""
 
-    def get_boolean_value(self, key, default, _ctx=None):
-        return True if key == "enabled" else default
-
     def __init__(self, allowed: str = ALL_TYPES):
         self.allowed = allowed
 
@@ -119,6 +116,8 @@ class AgentStub:
         return default
 
     def get_string_value(self, key, default, _ctx=None):
+        if key == "enabled":
+            return "on"
         if key == "interventions_allowed":
             return self.allowed
         return default

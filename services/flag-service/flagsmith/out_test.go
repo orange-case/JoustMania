@@ -41,6 +41,7 @@ var testFlags = []struct{ set, key string }{
 	{"interventions", "player_sensitivity_factor"},
 	{"interventions", "audio_cue"},
 	{"game", "windows"},
+	{"agent", "enabled"},
 }
 
 // testClock is the link's clock and sleep: a Sleep moves the clock, so a test

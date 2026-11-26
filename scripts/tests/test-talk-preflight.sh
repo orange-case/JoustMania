@@ -128,8 +128,7 @@ def f(variants, default):
     return {"state": "ENABLED", "variants": variants, "defaultVariant": default}
 onoff = {"on": True, "off": False}
 flags = {
-    "enabled": f(onoff, "on"),
-    "interventions_enabled": f(onoff, "on"),
+    "enabled": f({"off": "off", "watch": "watch", "on": "on"}, "on"),
     "interventions_allowed": f({
         "none": "",
         "probe": "noop",
@@ -224,11 +223,14 @@ if has "${SECRET}"; then not_ok "key value never printed"; else ok "key value ne
 fixture enabled=off decision.claude.act_confidence_threshold=strict decision.jev.act_confidence_threshold=default policy.max_interventions_per_minute=default
 run_preflight
 if [[ "${RC}" -eq 1 ]]; then ok "drift exits 1"; else not_ok "drift exits 1 (rc=${RC})"; fi
-check "kill switch off fails" "FAIL  enabled = off (false), stage baseline is on"
+check "kill switch off fails" "FAIL  enabled = off (\"off\"), stage baseline is on"
 check "strict threshold fails" "FAIL  decision.claude.act_confidence_threshold = strict (0.95), stage baseline is default"
 check "jev threshold default fails" "FAIL  decision.jev.act_confidence_threshold = default (0.8), stage baseline is gate"
 check "shipped intervention budget fails (#1326)" "FAIL  policy.max_interventions_per_minute = default (2), stage baseline is aggressive"
 check "unset env falls back to the stage flag" "PASS  LLM budget: llm.max_requests_per_minute = stage (30/min"
+fixture enabled=watch
+run_preflight
+check "watch fails: the talk needs interventions written" "FAIL  enabled = watch (\"watch\"), stage baseline is on"
 if grep -qE '^(PUT|POST|DELETE) ' "${FAKE_FLAG_LOG}"; then not_ok "the pre-flight writes nothing"; else ok "the pre-flight writes nothing"; fi
 
 # --- operator-only higher budgets for a cheap backend (#2518, UC-070 BR-003) ---

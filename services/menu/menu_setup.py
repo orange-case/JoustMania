@@ -56,8 +56,8 @@ def build_menu(servicer) -> None:
     # served by the flag service (#1412): the kill switch is a persisted admin
     # setting (PUT /agent/interventions_allowed {"persist": true}, UC-015 BR-019, D10).
     servicer.agent_settings_writer = FlagServiceWriter("agent")
-    # The operator pad's in-memory agent writes (#2050, #2093, UC-015 BR-001, UC-016 BR-012): agent/enabled,
-    # agent/interventions_enabled and the in-memory agent rows have no persist in the registry (a persisted
+    # The operator pad's in-memory agent writes (#2050, UC-015 BR-001, UC-016 BR-012): agent/enabled
+    # and the in-memory agent rows have no persist in the registry (a persisted
     # write is 400) and must not survive a restart (UC-045 step 7).
     servicer.agent_memory_writer = FlagServiceWriter("agent", persist=False)
 

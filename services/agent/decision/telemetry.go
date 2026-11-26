@@ -33,9 +33,9 @@ const (
 
 // decision.not_applied_reason values of a write that was not applied.
 const (
-	// NotAppliedWriteGateOff is the decision.not_applied_reason of a write the
-	// interventions_enabled gate dropped.
-	NotAppliedWriteGateOff = "write_gate_off"
+	// NotAppliedWatch is the decision.not_applied_reason of a write dropped
+	// because `enabled` is not on (watch).
+	NotAppliedWatch = "watch"
 	// NotAppliedWriteFailed is the reason of a write that returned an error (A27).
 	NotAppliedWriteFailed = "write_failed"
 )

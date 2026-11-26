@@ -145,7 +145,7 @@ func TestFlagdFactory_LateSyncServerReachesReadyAndSeesEveryFlip(t *testing.T) {
 		if st := client.State(); st == openfeature.ReadyState {
 			t.Fatalf("agent domain state = %s %s, want not READY", st, when)
 		}
-		details, _ := client.BooleanValueDetails(context.Background(), keyEnabled, false, openfeature.EvaluationContext{})
+		details, _ := client.StringValueDetails(context.Background(), keyEnabled, "off", openfeature.EvaluationContext{})
 		if details.ErrorCode != openfeature.ProviderNotReadyCode {
 			t.Fatalf("enabled error code = %q %s, want %q", details.ErrorCode, when, openfeature.ProviderNotReadyCode)
 		}
@@ -282,7 +282,7 @@ func TestSyncedProvider_DisabledKillSwitchReadsOff(t *testing.T) {
 	doc := map[string]any{"flags": map[string]any{
 		keyEnabled: map[string]any{
 			"state": "DISABLED", "defaultVariant": "on",
-			"variants": map[string]any{"on": true, "off": false},
+			"variants": map[string]any{"on": "on", "off": "off"},
 		},
 	}}
 	raw, _ := json.Marshal(doc)
@@ -290,10 +290,10 @@ func TestSyncedProvider_DisabledKillSwitchReadsOff(t *testing.T) {
 	_, f := scriptedSyncProvider(t, domain, string(raw))
 
 	t.Run("UC-045/A3 a DISABLED enabled flag reads off", func(t *testing.T) {
-		if DefaultEnabled {
-			t.Fatal("DefaultEnabled = true: the kill switch must default to off")
+		if DefaultEnabled != EnabledOff {
+			t.Fatal("DefaultEnabled is not off: the kill switch must default to off")
 		}
-		details, err := openfeature.NewClient(domain).BooleanValueDetails(context.Background(), keyEnabled, true, openfeature.EvaluationContext{})
+		details, err := openfeature.NewClient(domain).StringValueDetails(context.Background(), keyEnabled, "on", openfeature.EvaluationContext{})
 		if details.Reason != openfeature.DisabledReason {
 			t.Fatalf("enabled reason = %q (err %v), want DISABLED: the flag must reach the provider", details.Reason, err)
 		}
@@ -335,7 +335,7 @@ func TestUpstreamFlagdLateInit_StillWedges(t *testing.T) {
 	}
 
 	late.serve()
-	read := func() bool { return p.BooleanEvaluation(context.Background(), keyEnabled, false, nil).Value }
+	read := func() bool { return p.StringEvaluation(context.Background(), keyEnabled, "off", nil).Value == "on" }
 	if !eventually(read, true, 5*time.Second) {
 		t.Logf("bare provider never applied the late first sync: upstream late-init bug still present")
 		return

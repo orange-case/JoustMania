@@ -37,7 +37,7 @@ func TestExperimentLoop_RunsOnlyWhenEnabledAndExperimentsEnabled(t *testing.T) {
 			loop.configOverride = func(context.Context) flags.ExperimentConfig {
 				return flags.ExperimentConfig{Enabled: tc.experimentsEnabled}
 			}
-			loop.enabledOverride = func(context.Context) bool { return tc.agentEnabled }
+			loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(tc.agentEnabled) }
 
 			ctx := context.Background()
 			if tc.declare {

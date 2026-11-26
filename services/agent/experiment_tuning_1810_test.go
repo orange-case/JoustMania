@@ -176,7 +176,7 @@ func TestRetroProposer_GateIsEnvAndFlag(t *testing.T) {
 			cfg.ProposerEnabled = flagOn
 			return cfg
 		}
-		loop.enabledOverride = func(context.Context) bool { return true }
+		loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(true) }
 		loop.allocateIfEnabled(context.Background())
 		if got := loop.registry.LiveCount(); got != 0 {
 			t.Fatalf("LiveCount = %d with the flag off, want 0", got)

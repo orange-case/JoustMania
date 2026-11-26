@@ -72,15 +72,10 @@ ABSENCE_WINDOW = 6.0
 # --------------------------------------------------------------------------- #
 # Agent flags
 # --------------------------------------------------------------------------- #
-def _onoff(value: bool) -> str:
-    return "on" if value else "off"
-
-
 def configure_agent(
     *,
     backend: str,
-    enabled: bool = True,
-    interventions: bool = True,
+    state: str = "on",
     allowed: str = INTERVENTIONS_ALLOWED_VARIANT,
     jev_fake: bool = False,
     claude_fake: bool = False,
@@ -90,11 +85,11 @@ def configure_agent(
 
     ``jev_fake`` points ``decision.jev.base_url`` at the stack's fake Jev and ``claude_fake``
     ``decision.claude.base_url`` at the stack's fake Claude; ``timeout_variant`` names the
-    ``decision.claude.timeout_ms`` variant (the shipped default when None).
+    ``decision.claude.timeout_ms`` variant (the shipped default when None). ``state`` is
+    ``enabled``: ``on`` applies decisions, ``watch`` decides and writes nothing.
     """
     fs = flag_service_default()
-    fs.put(AGENT, "enabled", variant=_onoff(enabled))
-    fs.put(AGENT, "interventions_enabled", variant=_onoff(interventions))
+    fs.put(AGENT, "enabled", variant=state)
     fs.put(AGENT, "interventions_allowed", variant=allowed)
     fs.put(AGENT, "decision.backend", variant=backend)
     if jev_fake:
@@ -111,15 +106,16 @@ def configure_agent(
     fs.put(AGENT, "llm.max_requests_per_minute", variant="journey")
 
 
-def set_enabled(enabled: bool) -> None:
-    flag_service_default().put(AGENT, "enabled", variant=_onoff(enabled))
+def set_enabled(state: str) -> None:
+    """Write ``enabled`` (off / watch / on); a stop is a write of ``off``, never a clear."""
+    flag_service_default().put(AGENT, "enabled", variant=state)
 
 
 def wait_agent_flags_served(
     stack,
     *,
     backend: str,
-    enabled: bool,
+    state: str,
     rewrite: Callable[[], None] | None = None,
 ) -> None:
     """flagd serves the agent flags of the journey (typed getters: the #903 trap)."""
@@ -128,12 +124,12 @@ def wait_agent_flags_served(
         served = poll_until(
             lambda: (
                 client.get_string_value("decision.backend", "", ctx) == backend
-                and client.get_boolean_value("enabled", not enabled, ctx) is enabled
+                and client.get_string_value("enabled", "", ctx) == state
                 and client.get_string_value("llm.eligible_game_kinds", "", ctx) == ELIGIBLE_GAME_KINDS
             ),
             rewrite=rewrite,
         )
-    assert served, f"flagd did not serve decision.backend={backend} enabled={enabled}"
+    assert served, f"flagd did not serve decision.backend={backend} enabled={state}"
 
 
 def scripted_flag_value(game_id: str):

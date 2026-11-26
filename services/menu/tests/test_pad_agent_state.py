@@ -15,12 +15,10 @@ servicer = test_pad_commands.servicer
 
 LEVEL = ("agent", "interventions_allowed")
 ENABLED = ("agent", "enabled")
-GATE = ("agent", "interventions_enabled")
 
 
 def set_state(flags, state: str) -> None:
-    flags.values[ENABLED] = "off" if state == "off" else "on"
-    flags.values[GATE] = "on" if state == "on" else "off"
+    flags.values[ENABLED] = state
 
 
 # --- the stop (agent_switch) --------------------------------------------------------------------------
@@ -45,7 +43,7 @@ async def test_stop_writes_enabled_alone_whatever_the_state(servicer, flags, sta
 @pytest.mark.uc("UC-015", flow="A9", br=["BR-002"])
 async def test_stop_never_reads_first(servicer, flags):
     """Idempotent and never held up by a read: unreadable flags still get the stop."""
-    flags.failing_get = {LEVEL, ENABLED, GATE}
+    flags.failing_get = {LEVEL, ENABLED}
 
     reply = await pad(servicer, "agent_switch", direction="stop")
 
@@ -82,15 +80,15 @@ async def test_agent_switch_takes_only_the_stop(servicer, flags, direction):
 @pytest.mark.parametrize(
     ("now", "state", "written"),
     [
-        ("off", "on", [("agent", "interventions_enabled", "on"), ("agent", "enabled", "on")]),
-        ("off", "watch", [("agent", "interventions_enabled", "off"), ("agent", "enabled", "on")]),
-        ("watch", "on", [("agent", "interventions_enabled", "on")]),
-        ("on", "watch", [("agent", "interventions_enabled", "off")]),
+        ("off", "on", [("agent", "enabled", "on")]),
+        ("off", "watch", [("agent", "enabled", "watch")]),
+        ("watch", "on", [("agent", "enabled", "on")]),
+        ("on", "watch", [("agent", "enabled", "watch")]),
         ("on", "off", [("agent", "enabled", "off")]),
         ("watch", "off", [("agent", "enabled", "off")]),
     ],
 )
-async def test_switch_writes_the_gate_before_enabled_and_never_the_level(servicer, flags, now, state, written):
+async def test_switch_writes_enabled_alone_and_never_the_level(servicer, flags, now, state, written):
     set_state(flags, now)
 
     reply = await pad(servicer, "agent_state", state=state, **{"from": now})
@@ -143,10 +141,9 @@ async def test_switch_with_a_bad_state_or_from_is_refused(servicer, flags, data)
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A3", br=["BR-012"])
-@pytest.mark.parametrize("unreadable", [ENABLED, GATE])
-async def test_switch_with_the_state_unreadable_writes_nothing(servicer, flags, unreadable):
+async def test_switch_with_the_state_unreadable_writes_nothing(servicer, flags):
     set_state(flags, "on")
-    flags.failing_get = {unreadable}
+    flags.failing_get = {ENABLED}
     reply = await pad(servicer, "agent_state", state="off", **{"from": "on"})
     assert (reply.success, reply.error) == (False, "flag_service_unavailable")
     assert flags.puts == []
@@ -155,16 +152,25 @@ async def test_switch_with_the_state_unreadable_writes_nothing(servicer, flags, 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A3", br=["BR-012"])
 @pytest.mark.uc("UC-015", flow="A3", br=["BR-003", "BR-009", "BR-010"])
-async def test_a_failed_gate_write_never_switches_enabled_on(servicer, flags):
+async def test_a_failed_write_leaves_the_state(servicer, flags):
     set_state(flags, "off")
-    flags.failing = {GATE}
+    flags.failing = {ENABLED}
 
     reply = await pad(servicer, "agent_state", state="on", **{"from": "off"})
 
     assert (reply.success, reply.error) == (False, "flag_service_unavailable")
     assert flags.values[ENABLED] == "off"
-    assert ("agent", "enabled", "on") not in flags.written()
     assert failure_cues(servicer) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A3", br=["BR-011", "BR-012"])
+async def test_a_value_outside_the_three_states_is_unreadable(servicer, flags):
+    """A bool-era `on` is a state, but a stray value never is: the switch writes nothing."""
+    flags.values[ENABLED] = "true"
+    reply = await pad(servicer, "agent_state", state="off", **{"from": "on"})
+    assert (reply.success, reply.error) == (False, "flag_service_unavailable")
+    assert flags.puts == []
 
 
 @pytest.mark.asyncio

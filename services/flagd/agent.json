@@ -6,10 +6,11 @@
     "enabled": {
       "state": "ENABLED",
       "variants": {
-        "on": true,
-        "off": false
+        "off": "off",
+        "watch": "watch",
+        "on": "on"
       },
-      "defaultVariant": "off"
+      "defaultVariant": "watch"
     },
     "objectives": {
       "state": "ENABLED",
@@ -694,14 +695,6 @@
         "wide": 8
       },
       "defaultVariant": "default"
-    },
-    "interventions_enabled": {
-      "state": "ENABLED",
-      "variants": {
-        "off": false,
-        "on": true
-      },
-      "defaultVariant": "off"
     },
     "decision.backend": {
       "state": "ENABLED",

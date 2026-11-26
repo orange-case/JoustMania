@@ -412,7 +412,7 @@ if persisted_backend in ("jev", "claude"):
     persisted_model = (views.get(f"decision.{persisted_backend}.model", {}).get("admin_value") or {}).get("variant")
     model_note = f" with decision.{persisted_backend}.model = {persisted_model}" if persisted_model else ""
     print(f"WARN  decision.backend {persisted_backend} is persisted{model_note}: a flag-service restart or a "
-          f"reboot brings {persisted_backend} back (remote decisions while enabled is on); clear it: "
+          f"reboot brings {persisted_backend} back (remote decisions while the agent runs); clear it: "
           "./scripts/talk-stage.sh reset (or ./scripts/agent-backend.sh rules)")
 elif persisted_backend:
     print(f"INFO  decision.backend {persisted_backend} is persisted (kept across a restart)")

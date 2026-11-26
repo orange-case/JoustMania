@@ -28,7 +28,6 @@ DEFAULT_SETTINGS = {
 }
 LEVEL = ("agent", "interventions_allowed")
 ENABLED = ("agent", "enabled")
-GATE = ("agent", "interventions_enabled")
 
 
 @pytest.fixture(autouse=True)
@@ -326,17 +325,17 @@ async def test_a_stopped_agents_reset_clears_the_live_level_and_never_resumes(se
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-012"])
-@pytest.mark.parametrize("gate", ["on", "off"], ids=["running", "watching"])
-async def test_a_running_or_watching_agents_reset_clears_the_live_level_only(servicer, flags, gate):
+@pytest.mark.parametrize("state", ["on", "watch"], ids=["running", "watching"])
+async def test_a_running_or_watching_agents_reset_clears_the_live_level_only(servicer, flags, state):
     operator_set(flags, LEVEL, "full")
-    flags.values[GATE] = gate
+    flags.values[ENABLED] = state
 
     reply = await pad(servicer, "reset_setting", option="agent_level", expect="standard")
 
     assert (reply.success, reply.value) == (True, "standard")
     assert flags.deletes == [(*LEVEL, "persist=true")]
-    assert flags.puts == []  # never enabled, never the gate
-    assert (flags.values[ENABLED], flags.values[GATE]) == ("on", gate)
+    assert flags.puts == []  # never enabled
+    assert flags.values[ENABLED] == state
 
 
 @pytest.mark.asyncio

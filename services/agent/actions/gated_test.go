@@ -11,7 +11,7 @@ import (
 // staticGate is a constant InterventionGate for the gated-wrapper unit tests.
 type staticGate bool
 
-func (g staticGate) InterventionsEnabled(context.Context) bool { return bool(g) }
+func (g staticGate) Applying(context.Context) bool { return bool(g) }
 
 // recordingSink records whether Apply was called (the real Writer stand-in for the
 // intervention-gate tests).

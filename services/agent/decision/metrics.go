@@ -67,7 +67,7 @@ const MetricGroupInterventions = "agent_group_interventions_total"
 // newGroupInterventionsCounter builds agent_group_interventions_total (#2467 PR 6,
 // UC-040 A47): one increment per grant_group_shield decision the engine returned,
 // labeled outcome (applied, blocked, failed, gated_off), reason (the block reason of
-// a blocked group, write_failed or write_gate_off, else empty), backend (the decide
+// a blocked group, write_failed or watch, else empty), backend (the decide
 // backend that answered, rules when none), game_kind (real or shadow) and shape
 // (all, or all_except when a group leaves an alive player out). An instrument-creation
 // error yields a no-op counter, like newLLMGatedCounter.
@@ -170,7 +170,7 @@ func defaultDecisionsCounter() otelmetric.Int64Counter {
 // newInterventionsAppliedCounter builds the agent_interventions_applied_total
 // counter from the given meter provider (#790). It is incremented once per
 // decision that passes EVERY permission gate AND is successfully applied through
-// the ActionSink (a gated no-op while interventions_enabled is off is not
+// the ActionSink (a gated no-op while `enabled` is not on is not
 // counted, #1681) — the numerator for the demo dashboard's "interventions applied"
 // rate panel (#789/#1113). Label: action=<intervention id or "noop">. An
 // instrument-creation error yields a no-op counter so the Loop always has a usable

@@ -77,12 +77,11 @@ package):
 ```bash
 # 1. Bring the stack up (mock controllers + agent + observability).
 make dry-run
-./scripts/agent-killswitch.sh on    # the agent loop is inert until you do this
+./scripts/agent-killswitch.sh watch # the agent loop is inert (enabled=off) until you do this
 
 # (Optional) to see the agent ACT, not just decide — see docs/agent-act-runbook.md:
-#   flip interventions_enabled -> on in services/flagd/ci/agent.json (flagd flag, #1213;
-#   re-read at use-time, no agent restart), and widen interventions_allowed if you
-#   want a difficulty intervention to dispatch.
+#   ./scripts/agent-killswitch.sh on (read at use-time, no agent restart), and widen
+#   interventions_allowed if you want a difficulty intervention to dispatch.
 
 # 2. Fire a scenario.
 cd services/game_coordinator

@@ -13,30 +13,31 @@ see the observability section of `.claude/rules/development.md`.
 
 ## TL;DR
 
-A stock deployment dispatches **nothing**, by design. Two **independent gates**
-must both be open for an intervention to reach the game:
+A stock deployment dispatches **nothing**, by design. The agent's state is one
+flag, `enabled` in the `agent` flag set (baseline `services/flagd/agent.json`),
+with three values:
 
-| Gate | Where | Stock value | Act value | Restart? |
-|------|-------|-------------|-----------|----------|
-| **1. Sink** `interventions_enabled` | `agent` flag set (#1213); baseline `services/flagd/agent.json` | `off` (discards — decision recorded, not written) | `on` (real `actions.Writer` writes) | **No** — flag-service overlay, re-read at use-time |
-| **2. Kill switch** `enabled` | `agent` flag set; baseline `services/flagd/agent.json` | `off` | `on` | **No** — flag-service overlay, pushed to flagd over the sync stream |
+| State | The agent | Restart? |
+|-------|-----------|----------|
+| `off` | does not run (the stop) | **No** — flag-service overlay, pushed to flagd over the sync stream |
+| `watch` (stock default) | observes, decides and records; writes nothing to a game (a decision is spanned with `decision.not_applied_reason=watch`) | **No** |
+| `on` | applies decisions through the real `actions.Writer` | **No** — re-read per `Apply` |
 
-Both gates are flipped at runtime through the flag service (`scripts/flags.sh`,
-or the HTTP API at `http://localhost/flags/`). The baseline file is read-only and
-never written (C-033). A flip is an in-memory overlay: a flag-service restart
-drops it and the gate returns to its fail-closed baseline `off`.
+The state is changed at runtime through the flag service (`scripts/agent-killswitch.sh`,
+`scripts/flags.sh`, or the HTTP API at `http://localhost/flags/`). The baseline file
+is read-only and never written (C-033). A change is an in-memory overlay: a
+flag-service restart drops it and the baseline `watch` returns.
 
-Both gates are also the **safe defaults** when their backing config is missing —
-**fail-closed**: flagd unreachable or the flag undefined resolves to `off` for
-both `enabled` and `interventions_enabled`, so the agent always comes up
-**inert** (#1213).
+It is **fail-closed**: flagd unreachable or the flag unresolvable reads as `off`,
+so the agent never writes on a broken flag plane (#1213).
 
-The kill switch is a **flag flip** — instant, no restart. That is the stage
-panic button.
+The stop is a **flag write** of `off` — instant, no restart. That is the stage
+panic button. It is a write, never a clear: clearing the overlay falls back to
+`watch`, which keeps the agent running.
 
 ---
 
-## Stock deployment behavior (the two-gate baseline)
+## Stock deployment behavior (`watch`)
 
 With `docker compose up`, the agent:
 
@@ -47,11 +48,10 @@ With `docker compose up`, the agent:
 - **Traces**: emits the `agent.signal_received → agent.decision → agent.action`
   audit trace whenever the engine returns ≥ 1 decision (idle cycles cost no
   spans).
-- **Dispatches nothing**: the sink gate `interventions_enabled` is `off`
-  (fail-closed default), so a fully-permitted, fitting decision is recorded and
-  spanned but **not written** to the flag service. And `enabled=off`
+- **Dispatches nothing**: in `watch` a fully-permitted, fitting decision is
+  recorded and spanned but **not written** to the flag service. (`enabled=off`
   short-circuits the loop before any rule runs,
-  emitting only a throttled `agent.disabled` kill-switch trace.
+  emitting only a throttled `agent.disabled` kill-switch trace.)
 
 So the **whole OBSERVE/DECIDE/trace pipeline runs**, visible end to end in
 Jaeger, while no intervention ever reaches the game. That is intentional — and
@@ -59,11 +59,11 @@ the reason this runbook exists.
 
 ---
 
-## Going live — open both gates
+## Going live — set the agent `on`
 
-### Step 1 — Open the sink gate (flag, no restart)
+### Step 1 — Set `enabled` to `on` (flag, no restart)
 
-Flipping `interventions_enabled` to `on` lets the gated sink dispatch through the
+Setting `enabled` to `on` lets the gated sink dispatch through the
 real `actions.Writer`, which applies decisions through the flag service's HTTP
 API: a state, level or grant is a game-scoped value (`PUT /interventions/{flag}`
 with `scope.game_id`, plus `scope.serial` for a player), a one-shot intervention
@@ -71,44 +71,30 @@ with `scope.game_id`, plus `scope.serial` for a player), a one-shot intervention
 `end_game`) is an event appended to that game's event list
 (`POST /interventions/{flag}`). The game coordinator evaluates these through
 flagd with its `gameId` — there is no gRPC from the agent to the game services.
-As of #1213 this is a **flagd flag** in the `agent` flag set, re-read
-**at use-time** (per `Apply`, never cached at startup), so flipping it takes
-effect on the next decision with **no agent restart**. It is **fail-closed**:
-`off`, undefined, or flagd unreachable → the decision is recorded and spanned but
-**not written**.
-
-Set an `operator` overlay on `interventions_enabled` through the flag service:
+`enabled` is re-read **at use-time** (per `Apply`, never cached at startup), so a
+change takes effect on the next decision with **no agent restart**. Anything but
+`on` (`watch`, `off`, undefined, flagd unreachable) → the decision is recorded and
+spanned but **not written**.
 
 ```bash
-scripts/flags.sh set agent interventions_enabled on
-scripts/flags.sh variant agent interventions_enabled   # prints: on
+./scripts/agent-killswitch.sh on         # or: scripts/flags.sh set agent enabled on
+scripts/flags.sh variant agent enabled   # prints: on
 ```
 
-flagd gets the change over its sync stream; no restart. The next `Apply` reads
-`on` and writes through the real `Writer`. At start the agent logs the gate and
-the flag-service URL it writes to:
+flagd gets the change over its sync stream; no restart. At start the agent logs
+that intervention writes are gated by the LIVE `enabled` flag, with the
+flag-service URL it writes to.
 
-```
-Agent intervention writes gated by LIVE interventions_enabled flag (#1213; default fail-closed off) flag_service=http://flag-service:8070
-```
+### Step 2 — (none: the old separate sink gate is gone)
 
-> The sink alone changes nothing yet — gate 2 (`enabled`) still short-circuits
-> the loop. Both must be open.
-
-### Step 2 — Flip the kill switch on (flag, no restart)
-
-```bash
-./scripts/agent-killswitch.sh on      # or: scripts/flags.sh set agent enabled on
-```
-
-No restart. The agent's next cycle runs the rules engine instead of emitting
-`agent.disabled`. This is the same mechanism documented in
+`enabled` alone decides whether the agent runs (`watch` / `on`) and whether it
+writes (`on`). This is the same mechanism documented in
 [feature-flags.md → Edit Flag Values](feature-flags.md#3-edit-flag-values); the
 menu writes the operator pad's settings through the same API.
 
 ### Step 3 — Open the permission surface
 
-Even with both gates open, the **permission layer** still bounds what dispatches.
+Even with the agent `on`, the **permission layer** still bounds what dispatches.
 The stock `interventions_allowed` variant is `ambient` (audio cue, controller
 effect, volume only). To allow more, set another variant through the flag
 service (`scripts/flags.sh set agent interventions_allowed standard`, or
@@ -141,10 +127,12 @@ To walk the ladder live, repeat Step 3 with each variant and watch the `agent.ac
 
 ## Kill-switch path back (instant, no restart)
 
-`./scripts/agent-killswitch.sh off` (clears the `enabled` overlay; the baseline
-is `off`). The next cycle short-circuits before any rule runs; only the throttled
-`agent.disabled` trace is emitted (`agent.enabled=false` visible in Jaeger). This
-is the **demo panic button** — a single flag-service write, no container restart.
+`./scripts/agent-killswitch.sh off` (writes `enabled` = `off`; never a clear, which
+would fall back to the `watch` baseline). The next cycle short-circuits before any
+rule runs; only the throttled `agent.disabled` trace is emitted (`agent.enabled=off`
+visible in Jaeger). This is the **demo panic button** — a single flag-service
+write, no container restart. `./scripts/agent-killswitch.sh watch` keeps the agent
+deciding but stops its writes.
 
 (Setting `interventions_allowed` to `none` is a softer brake: the loop still runs
 and traces, but every decision is blocked `not_allowed`.)
@@ -163,8 +151,8 @@ objective was served, why this action, and was it permitted*.
 `objectives` is not in the flag service's mutable registry, so this is a
 baseline change: set `objectives.defaultVariant` in `services/flagd/agent.json`
 (e.g. `balanced_focused` → `accelerate_focused`) and run `scripts/flags.sh
-restart`. The restart drops every overlay, so open both gates again (Steps 1 and
-2) afterwards. On the next cycle the rules engine re-weights candidates;
+restart`. The restart drops every overlay, so set the agent `on` again (Step 1)
+afterwards. On the next cycle the rules engine re-weights candidates;
 the selected winner's **`decision.objective_served`** attribute on `agent.decision`
 flips toward the now-dominant objective (e.g. `accelerate`). The cycle-level
 `agent.objectives` attribute shows the new weight map.
@@ -185,7 +173,7 @@ winner — without blocking anything outright.
 
 ### C. Observe an **applied** intervention → `game_interventions_total`
 
-With both gates open and a permitting `interventions_allowed`, run a live game
+With the agent `on` and a permitting `interventions_allowed`, run a live game
 (or push synthetic metrics — see the agent README *Local smoke test*). When the
 engine selects a permitted, fitting decision:
 
@@ -235,8 +223,7 @@ env override no longer exists: a deployment that still sets the old
   `agent.signal_received → agent.decision` spans still emit — OBSERVE→DECIDE and the
   span schema are fully exercised; only `agent.action` is withheld.
 - **Full path**: flip `interventions_allowed` to the **`probe`** variant
-  (`"noop"`) through the flag service, plus `interventions_enabled=on` and
-  `enabled=on`. `noop` is a harmless no-op in the `Writer` (returns success
+  (`"noop"`) through the flag service, plus `enabled=on`. `noop` is a harmless no-op in the `Writer` (returns success
   without writing any flag), so the decision flows through every gate, reaches
   the real sink, and completes the `agent.action` span — all without changing the
   game.
@@ -281,13 +268,13 @@ not at normal play.
 | **Jaeger** | `http://localhost/jaeger/` | Decision audit traces: `agent.signal_received → agent.decision → agent.action`, and `agent.disabled` kill-switch traces. Service: `agent` |
 | **Grafana** | `http://localhost/grafana/` | Dashboards in `services/grafana/dashboards/` |
 | **VictoriaMetrics** | `http://localhost/victoria-metrics/vmui/` | `game_interventions_total`, agent process metrics |
-| **agent logs** | `docker compose logs -f agent` | the `Agent intervention writes gated by LIVE interventions_enabled flag` startup line, flag evaluation, block reasons |
+| **agent logs** | `docker compose logs -f agent` | the `Agent intervention writes gated by LIVE enabled flag` startup line, flag evaluation, block reasons |
 
 ### Span attributes to watch (see the agent README for the full table)
 
 | Attribute | On | Meaning |
 |-----------|----|---------|
-| `agent.enabled` | every span | gate 2 (`false` = kill switch on) |
+| `agent.enabled` | every span | the agent state: `off` / `watch` / `on` |
 | `agent.objectives` | `agent.decision` | live objective weight map |
 | `interventions.allowed` | `agent.decision` | active allow-list (`none` / `a,b,c`) |
 | `decision.objective_served` | `agent.decision` | objective the selected rule served |
@@ -303,16 +290,14 @@ Cross-reference: [agent README → Span schema (#724)](../services/agent/README.
 
 ### "The agent decides, but nothing happens in the game"
 
-Walk the two gates plus the permission layer, in order:
+Walk the agent state plus the permission layer, in order:
 
-1. **Sink gate** — does `scripts/flags.sh variant agent interventions_enabled`
-   print `on` (#1213)? It is re-read **per `Apply`**, so a flip takes effect with
-   no restart; `off`/undefined/flagd-unreachable is **fail-closed** and discards
-   everything (decision recorded, no write — no error). A flag-service restart
-   drops the overlay and returns the gate to `off`.
-2. **Kill switch** — does `scripts/flags.sh variant agent enabled` print `on`? If `off`, the loop
-   short-circuits and you'll see `agent.disabled` traces (`agent.enabled=false`),
-   not `agent.decision`.
+1. **Watch** — does `scripts/flags.sh variant agent enabled` print `on`? In
+   `watch` every decision is recorded but not written (`decision.not_applied_reason=watch`,
+   no error). It is re-read **per `Apply`**, so a change takes effect with no
+   restart. A flag-service restart drops the overlay and returns `watch`.
+2. **Stopped** — if it prints `off`, the loop short-circuits and you'll see
+   `agent.disabled` traces (`agent.enabled=off`), not `agent.decision`.
 3. **Allow-list** — is the rule's intervention in the active
    `interventions_allowed` variant? Look for `decision.block_reason=not_allowed`.
 4. **Battery gate** — a player-targeted decision is blocked when the target's

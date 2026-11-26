@@ -178,7 +178,7 @@ def make_manager(sessions_fn, *, interventions=None, end_game_fn=None, timeout_s
     mgr._interventions_client = FakeFlagClient(interventions or {})
     mgr._agent_client = FakeFlagClient(
         {
-            "enabled": True,
+            "enabled": "on",
             "interventions_allowed": ALLOWED,
             "policy.battery_threshold": 20,
             "policy.coordinator_backstop_per_minute": 60,

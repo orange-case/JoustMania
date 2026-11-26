@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Enable the experiment cohort loop for a `make dry-run` (#1077; epic #1407).
 #
-# The LIVE gate of the cohort loop is the `experiments_enabled` flag (agent set);
-# it and the master `enabled` kill-switch are fail-closed `off` in the baseline.
+# The LIVE gate of the cohort loop is the `experiments_enabled` flag (agent set),
+# `off` in the baseline; experiment arms are written only while `enabled` is `on`.
 # The experiment to run is the `experiment_seed` flag (#1907; it replaced the
 # AGENT_EXPERIMENT_SEED_* env vars), `off` in the baseline.
 # This helper sets all three through the flag service (scripts/flags.sh):
 #   on   -> `experiment_seed` set to `windows_frantic` FIRST (so the first enabled
-#           tick already sees it), then `enabled` and `experiments_enabled` on
-#   off  -> all three overlays cleared: the fail-closed baseline returns
+#           tick already sees it), then `enabled` on (arm writes need it, so the
+#           agent also writes the interventions the CI allow-list permits) and
+#           `experiments_enabled` on
+#   off  -> `enabled` set to `off` (a clear would fall back to the flagd default
+#           `watch` and leave the agent running), the other two overlays cleared
 # Nothing is persisted (re-review N4). The in-game decision backend is NOT touched
 # here: use ./scripts/agent-backend.sh (decision.backend, #1232).
 #
@@ -38,14 +41,16 @@ case "${1:-status}" in
     # (the agent must see `off` for one experiment tick).
     "${FLAGS}" set agent experiment_seed "${SEED_VARIANT}" >/dev/null
     echo "  experiment_seed -> ${SEED_VARIANT}"
-    for flag in enabled experiments_enabled; do
-      "${FLAGS}" set agent "${flag}" on >/dev/null
-      echo "  ${flag} -> on"
-    done
+    "${FLAGS}" set agent enabled on >/dev/null
+    echo "  enabled -> on"
+    "${FLAGS}" set agent experiments_enabled on >/dev/null
+    echo "  experiments_enabled -> on"
     echo "dry-run experiment gate -> on"
     ;;
   off)
-    for flag in enabled experiments_enabled experiment_seed; do
+    "${FLAGS}" set agent enabled off >/dev/null
+    echo "  enabled -> off"
+    for flag in experiments_enabled experiment_seed; do
       "${FLAGS}" clear agent "${flag}"
       echo "  ${flag} -> $("${FLAGS}" variant agent "${flag}") (baseline)"
     done

@@ -14,7 +14,7 @@ import (
 // startup using the SHADOW_GAME_* spec, then continues its normal loop. It
 // keeps the PR self-contained in services/agent (no flagd-schema change). It
 // mirrors the original env-gate shape the interventions actuation gate used
-// before #1213 migrated it to a LIVE agent.json flag (interventions_enabled);
+// before #1213 migrated it to a LIVE agent.json flag;
 // AGENT_SHADOW_GAME remains a one-shot
 // startup trigger, so it stays an env var.
 const (

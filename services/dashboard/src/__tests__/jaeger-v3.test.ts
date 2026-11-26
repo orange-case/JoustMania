@@ -123,7 +123,7 @@ describe("UC-035: main step 3, the recorded v3 answer folds like the legacy one 
     const evals = spanEvents(flagState, "feature_flag.evaluation");
     expect(evals.length).toBeGreaterThan(1);
     expect(evals[0].get("feature_flag.key")).toBe("enabled");
-    expect(evals[0].get("feature_flag.result.value")).toBe(false);
+    expect(evals[0].get("feature_flag.result.value")).toBe("off");
   });
 
   it("UC-035/main step 3 gives the decide row", () => {

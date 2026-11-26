@@ -1127,7 +1127,7 @@ func TestRemote_RealCadenceFlag(t *testing.T) {
 		return memprovider.InMemoryFlag{State: memprovider.Enabled, DefaultVariant: "v", Variants: map[string]any{"v": v}}
 	}
 	provider := memprovider.NewInMemoryProvider(map[string]memprovider.InMemoryFlag{
-		"enabled":                           num(true),
+		"enabled":                           str("on"),
 		"interventions_allowed":             str("noop,grant_shield,adjust_music_tempo"),
 		"llm.eligible_game_kinds":           str("real"),
 		"llm.max_requests_per_minute":       num(100),

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/joustmania/agent/experiment"
+	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamecontext"
 	"github.com/joustmania/agent/gamerunner"
 	"github.com/joustmania/agent/promote"
@@ -25,9 +26,9 @@ func newRefillLoop(t *testing.T) (*experimentLoop, *recordingSpawner, string, st
 	resolve := func(context.Context) promote.Config { return promote.Config{Mode: promote.ModeIssue} }
 	loop := buildLoopForTest(t, spawner, resolve, &recordingRealDefault{}, &recordingGitHub{}, armFitness())
 	var gateReads atomic.Int32
-	loop.enabledOverride = func(context.Context) bool {
+	loop.enabledOverride = func(context.Context) flags.EnabledState {
 		gateReads.Add(1)
-		return true
+		return flags.EnabledOn
 	}
 	ctx := context.Background()
 	id, err := loop.registry.Declare(experiment.Intent{

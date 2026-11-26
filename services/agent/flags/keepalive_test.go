@@ -120,8 +120,8 @@ func TestFlagdFactory_SyncsOverKeepaliveDialOptions(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("sync server never saw a SyncFlags call")
 		}
-		res := inner.BooleanEvaluation(context.Background(), keyEnabled, false, nil)
-		if res.Error() != nil || !res.Value {
+		res := inner.StringEvaluation(context.Background(), keyEnabled, "off", nil)
+		if res.Error() != nil || res.Value != "on" {
 			t.Fatalf("enabled = %v (err %v), want true from the synced config", res.Value, res.Error())
 		}
 	})

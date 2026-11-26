@@ -5,11 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamecontext"
 )
 
 // UC: UC-040 A11
-// A write the interventions_enabled gate drops is recorded as not applied on the
+// A write dropped because `enabled` is watch is recorded as not applied on the
 // agent.decision and agent.action spans, with the reason; a written one says
 // applied=true (#2093).
 func TestGateOff_SpansRecordNotApplied(t *testing.T) {
@@ -19,7 +20,7 @@ func TestGateOff_SpansRecordNotApplied(t *testing.T) {
 		wantApplied bool
 		wantReason  string
 	}{
-		{"UC-040/A11 gate off: not applied, write_gate_off", false, false, NotAppliedWriteGateOff},
+		{"UC-040/A11 watch: not applied, reason watch", false, false, NotAppliedWatch},
 		{"UC-040/main gate on: applied", true, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,15 +76,15 @@ type failingSink struct{}
 func (failingSink) Apply(context.Context, Decision) error { return errors.New("flag service refused") }
 
 // UC: UC-035 3
-// The flag state carries the live write gate, so the panel shows it flipping (#2093).
-func TestFlagState_CarriesInterventionsEnabled(t *testing.T) {
+// The flag state carries the `enabled` state, so the panel shows watch and on.
+func TestFlagState_CarriesEnabledState(t *testing.T) {
 	l, b, fl := boardLoop(t)
 	c := modeCtx("game_fs2093", "FFA")
-	for _, want := range []bool{false, true} {
-		fl.snap.InterventionsEnabled = want
+	for _, want := range []flags.EnabledState{flags.EnabledWatch, flags.EnabledOn} {
+		fl.snap.EnabledState = want
 		l.OnEvaluate(context.Background(), c, testTrigger())
-		if got := b.List(); len(got) != 1 || got[0].InterventionsEnabled != want {
-			t.Errorf("interventions_enabled = %+v, want %v", got, want)
+		if got := b.List(); len(got) != 1 || got[0].Enabled != string(want) {
+			t.Errorf("enabled = %+v, want %q", got, want)
 		}
 	}
 }

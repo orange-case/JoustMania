@@ -50,7 +50,7 @@ SERVICE_COMPOSITION = dataclasses.replace(
 # The fake holds the answer until released, at most this long (below DECIDE_TIMEOUT_MS
 # and the agent's 30 s HTTP backstop: our release, never a timeout, ends the call).
 KILL_HOLD_MAX_SECONDS = 28
-# From "the fake holds the call": flag write -> flagd serves enabled=false -> an
+# From "the fake holds the call": flag write -> flagd serves enabled=off -> an
 # agent.disabled span for this game proves the agent's own flag read sees it.
 KILL_SIGNAL_TIMEOUT = 15.0
 KILL_RELEASE_HEADROOM = 3.0
@@ -78,7 +78,7 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
         hold_max_seconds=KILL_HOLD_MAX_SECONDS,
     )
     configure()
-    wait_agent_flags_served(stack, backend="claude", enabled=True, rewrite=configure)
+    wait_agent_flags_served(stack, backend="claude", state="on", rewrite=configure)
 
     game_client, channel = await get_game_client(stack)
     try:
@@ -94,9 +94,9 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
 
             # Step 4: turn the agent off.
             disabled_before = {s.span_id for s in agent_spans(stack, "agent.disabled", game_id)}
-            set_enabled(False)
-            wait_agent_flags_served(stack, backend="claude", enabled=False, rewrite=lambda: set_enabled(False))
-            # Step 6 / positive signal that the AGENT (not just flagd) reads enabled=false:
+            set_enabled("off")
+            wait_agent_flags_served(stack, backend="claude", state="off", rewrite=lambda: set_enabled("off"))
+            # Step 6 / positive signal that the AGENT (not just flagd) reads enabled=off:
             # its kill-switch path emits agent.disabled for this game on the next cycle.
             # Only then release the held answer, which re-reads the live flags on landing.
             assert await async_poll_until(
@@ -128,8 +128,8 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
 
             # Step 7: turn the agent on; the next cycle records invoke_agent spans again.
             decided_before = {s.span_id for s in decide_spans(stack, game_id)}
-            set_enabled(True)
-            wait_agent_flags_served(stack, backend="claude", enabled=True, rewrite=lambda: set_enabled(True))
+            set_enabled("on")
+            wait_agent_flags_served(stack, backend="claude", state="on", rewrite=lambda: set_enabled("on"))
             assert await async_poll_until(
                 lambda: any(s.span_id not in decided_before for s in decide_spans(stack, game_id)),
                 SPAN_TIMEOUT,
@@ -150,7 +150,7 @@ async def test_kill_switch_keeps_written_state_intervention(fresh_stack):
     stack = fresh_stack
     stack.fake_claude.script(decide_mode="valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE)
     configure()
-    wait_agent_flags_served(stack, backend="claude", enabled=True, rewrite=configure)
+    wait_agent_flags_served(stack, backend="claude", state="on", rewrite=configure)
 
     game_client, channel = await get_game_client(stack)
     try:
@@ -165,8 +165,8 @@ async def test_kill_switch_keeps_written_state_intervention(fresh_stack):
 
             # Steps 1 to 3: turn the agent off; its next cycle records agent.disabled.
             disabled_before = {s.span_id for s in agent_spans(stack, "agent.disabled", game_id)}
-            set_enabled(False)
-            wait_agent_flags_served(stack, backend="claude", enabled=False, rewrite=lambda: set_enabled(False))
+            set_enabled("off")
+            wait_agent_flags_served(stack, backend="claude", state="off", rewrite=lambda: set_enabled("off"))
             assert await async_poll_until(
                 lambda: any(s.span_id not in disabled_before for s in agent_spans(stack, "agent.disabled", game_id)),
                 KILL_SIGNAL_TIMEOUT,

@@ -54,7 +54,7 @@ func TestFlagState_Fields(t *testing.T) {
 	l.now = func() time.Time { return at }
 	fl.snap.Objectives = map[string]float64{"endurance": 0.7, "balanced": 0.3}
 	fl.snap.InterventionsAllowed = []string{"grant_shield", "noop"}
-	fl.snap.InterventionsEnabled = true
+	fl.snap.EnabledState = flags.EnabledOn
 	fl.snap.ExperimentsEnabled = true
 	fl.snap.LLMGate.EligibleGameKinds = []string{"real", "shadow"}
 	fl.snap.Policy = flags.Policy{BatteryThreshold: 2, MaxInterventionsPerMinute: 6}
@@ -71,10 +71,9 @@ func TestFlagState_Fields(t *testing.T) {
 		GameMode:               "FFA",
 		TraceID:                c.GameTraceID,
 		UpdatedAtMs:            at.UnixMilli(),
-		Enabled:                true,
+		Enabled:                "on",
 		Objectives:             "balanced=0.3,endurance=0.7",
 		InterventionsAllowed:   "grant_shield,noop",
-		InterventionsEnabled:   true,
 		BatteryThreshold:       2,
 		MaxInterventionsPerMin: 6,
 		DecisionBackend:        flags.DecisionBackendJev,
@@ -91,11 +90,11 @@ func TestFlagState_Fields(t *testing.T) {
 // UC: UC-045 BR-001
 func TestFlagState_RecordedWhenKillSwitchOff(t *testing.T) {
 	l, b, fl := boardLoop(t)
-	fl.snap.Enabled = false
+	fl.snap.Enabled, fl.snap.EnabledState = false, flags.EnabledOff
 	l.OnEvaluate(context.Background(), modeCtx("game_fs03", "FFA"), testTrigger())
 	got := b.List()
-	if len(got) != 1 || got[0].Enabled {
-		t.Fatalf("UC-045/BR-001 flag state with the kill switch off = %+v, want one with enabled=false", got)
+	if len(got) != 1 || got[0].Enabled != "off" {
+		t.Fatalf("UC-045/BR-001 flag state with the kill switch off = %+v, want one with enabled=off", got)
 	}
 }
 

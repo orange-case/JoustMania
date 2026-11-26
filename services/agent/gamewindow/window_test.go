@@ -582,7 +582,7 @@ func TestWindow_InterventionsCountAppliedNotDispatched(t *testing.T) {
 		g := realGame()
 		g.InterventionsByType = []gamesummary.InterventionTypeCount{
 			// 5 passed the permission chain; 2 written, 2 no-ops of
-			// interventions_enabled, 1 failed write; 1 more refused by the chain.
+			// `enabled` watch, 1 failed write; 1 more refused by the chain.
 			{Type: "speed_up", Dispatched: 5, Blocked: 1, Applied: 2, GatedOff: 2},
 			{Type: "grant_shield", Dispatched: 3, GatedOff: 3},
 		}

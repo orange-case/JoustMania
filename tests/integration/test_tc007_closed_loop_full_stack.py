@@ -80,11 +80,10 @@ AGENT_SPANS_WITH_GAME_KIND = ("invoke_agent joustmania-agent", "agent.decision")
 # The Agent tab's decide query (agentDecide.ts DECIDE_OPERATION, DECIDE_TRACE_LIMIT).
 DECIDE_QUERY = {"service": "agent", "operation": "invoke_agent joustmania-agent", "limit": 5}
 
-# Interventions on, rules backend, the allow-list that lets the rules engine's
+# Agent on (decisions applied), rules backend, the allow-list that lets the rules engine's
 # in-game levers through on both sides (services/flagd/ci/agent.json).
 AGENT_FLAGS = {
     "enabled": "on",
-    "interventions_enabled": "on",
     "interventions_allowed": "standard",
     "decision.backend": "rules",
 }
@@ -108,8 +107,7 @@ _FLAGS: FlagService | None = None
 def _flags_served(client) -> bool:
     ctx = EvaluationContext()
     return (
-        client.get_boolean_value("enabled", False, ctx) is True
-        and client.get_boolean_value("interventions_enabled", False, ctx) is True
+        client.get_string_value("enabled", "", ctx) == "on"
         and client.get_string_value("decision.backend", "", ctx) == "rules"
     )
 
@@ -121,7 +119,7 @@ def _set_agent_flags() -> None:
 
 @pytest.fixture(scope="module")
 def closed_loop_stack(docker_compose, request):
-    """The session stack plus the agent (interventions on, rules) and envoy."""
+    """The session stack plus the agent (on, rules) and envoy."""
     global _FLAGS
     cwd = str(docker_compose.context)
     prefix = list(docker_compose.docker_compose_command())
@@ -154,8 +152,9 @@ def closed_loop_stack(docker_compose, request):
         with flagd_probe_client(docker_compose, "agent") as client:
             poll_until(
                 lambda: (
-                    client.get_boolean_value("enabled", True, EvaluationContext())
-                    is False
+                    # The CI baseline (services/flagd/ci/agent.json) is off.
+                    client.get_string_value("enabled", "", EvaluationContext())
+                    == "off"
                 )
             )
 

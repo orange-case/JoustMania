@@ -47,7 +47,7 @@ func (s *fakeFlagdSource) config(enabled string) string {
 	doc := map[string]any{"flags": map[string]any{
 		keyEnabled: map[string]any{
 			"state": "ENABLED", "defaultVariant": enabled,
-			"variants": map[string]any{"on": true, "off": false},
+			"variants": map[string]any{"on": "on", "off": "off"},
 		},
 		keyPlayerTTLSeconds: map[string]any{
 			"state": "ENABLED", "defaultVariant": "short",

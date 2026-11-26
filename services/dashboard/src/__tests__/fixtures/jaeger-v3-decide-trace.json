@@ -282,7 +282,7 @@
          {
           "key": "agent.enabled",
           "value": {
-           "boolValue": true
+           "stringValue": "on"
           }
          },
          {
@@ -502,7 +502,7 @@
          {
           "key": "agent.enabled",
           "value": {
-           "boolValue": false
+           "stringValue": "off"
           }
          },
          {
@@ -610,7 +610,7 @@
            {
             "key": "feature_flag.result.value",
             "value": {
-             "boolValue": false
+             "stringValue": "off"
             }
            },
            {
@@ -2171,54 +2171,6 @@
             "key": "feature_flag.key",
             "value": {
              "stringValue": "decision.probe_decisions"
-            }
-           },
-           {
-            "key": "feature_flag.provider.name",
-            "value": {
-             "stringValue": "flagd"
-            }
-           },
-           {
-            "key": "feature_flag.result.reason",
-            "value": {
-             "stringValue": "static"
-            }
-           },
-           {
-            "key": "feature_flag.result.value",
-            "value": {
-             "boolValue": false
-            }
-           },
-           {
-            "key": "feature_flag.result.variant",
-            "value": {
-             "stringValue": "off"
-            }
-           },
-           {
-            "key": "feature_flag.set.id",
-            "value": {
-             "stringValue": "agent"
-            }
-           }
-          ]
-         },
-         {
-          "timeUnixNano": "1793139268072362984",
-          "name": "feature_flag.evaluation",
-          "attributes": [
-           {
-            "key": "feature_flag.context.id",
-            "value": {
-             "stringValue": ""
-            }
-           },
-           {
-            "key": "feature_flag.key",
-            "value": {
-             "stringValue": "interventions_enabled"
             }
            },
            {

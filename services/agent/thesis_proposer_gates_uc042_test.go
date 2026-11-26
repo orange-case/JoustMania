@@ -37,7 +37,7 @@ func TestRetroProposer_SubordinateToGatesOnTick(t *testing.T) {
 				cfg.DynamicEnabled = false // isolate the retro-seeded path from the dynamic declarer
 				return cfg
 			}
-			loop.enabledOverride = func(context.Context) bool { return tc.agentEnabled }
+			loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(tc.agentEnabled) }
 
 			loop.allocateIfEnabled(context.Background())
 

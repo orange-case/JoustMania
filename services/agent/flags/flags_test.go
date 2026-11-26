@@ -74,8 +74,8 @@ func (s stubEvaluator) ObjectValue(_ context.Context, flag string, def any, _ op
 
 func TestEvaluate_FlagdShape(t *testing.T) {
 	stub := stubEvaluator{
-		booleans: map[string]bool{keyEnabled: true},
 		strings: map[string]string{
+			keyEnabled: "on",
 			// interventions_allowed is a STRING flag: comma-separated ids (#1127),
 			// read cleanly by the flagd RPC resolver (a LIST flag TYPE_MISMATCHes
 			// there and silently blocks every intervention).
@@ -103,8 +103,8 @@ func TestEvaluate_FlagdShape(t *testing.T) {
 	f := New(stub, nil)
 	got := f.Evaluate(context.Background())
 
-	if !got.Enabled {
-		t.Errorf("Enabled = false, want true")
+	if !got.Enabled || got.EnabledState != EnabledOn {
+		t.Errorf("Enabled = %v, EnabledState = %q, want true, on", got.Enabled, got.EnabledState)
 	}
 	wantObj := map[string]float64{"endurance": 0.7, "chaos": 0.3}
 	if !reflect.DeepEqual(got.Objectives, wantObj) {
@@ -136,8 +136,8 @@ func TestEvaluate_DefaultsWhenMissing(t *testing.T) {
 	f := New(stubEvaluator{}, nil)
 	got := f.Evaluate(context.Background())
 
-	if got.Enabled != DefaultEnabled {
-		t.Errorf("Enabled = %v, want %v (fail-closed)", got.Enabled, DefaultEnabled)
+	if got.Enabled || got.EnabledState != DefaultEnabled {
+		t.Errorf("Enabled = %v, EnabledState = %q, want false, %q (fail-closed)", got.Enabled, got.EnabledState, DefaultEnabled)
 	}
 	if !reflect.DeepEqual(got.Objectives, map[string]float64{"endurance": 1.0}) {
 		t.Errorf("Objectives = %v, want endurance:1.0", got.Objectives)
@@ -192,8 +192,8 @@ func TestEvaluate_DefaultsOnError(t *testing.T) {
 	f := New(stub, nil)
 	got := f.Evaluate(context.Background())
 
-	if got.Enabled {
-		t.Errorf("Enabled = true on error, want false (fail-closed)")
+	if got.Enabled || got.EnabledState != EnabledOff {
+		t.Errorf("Enabled = %v, EnabledState = %q on error, want false, off (fail-closed)", got.Enabled, got.EnabledState)
 	}
 	if !reflect.DeepEqual(got.Objectives, map[string]float64{"endurance": 1.0}) {
 		t.Errorf("Objectives = %v, want endurance:1.0", got.Objectives)
@@ -700,41 +700,58 @@ func TestExperiment_FlagOverridesCompiledDefault(t *testing.T) {
 	})
 }
 
-// TestInterventionsEnabled covers the #1213 intervention safety gate: a configured
-// value resolves via the TYPED bool getter, and the gate FAILS CLOSED (off) when the
-// flag is UNDEFINED (no value) or flagd is UNREACHABLE (error). A safety gate must
-// resolve to the not-acting state when the control plane cannot confirm it is on.
+// TestEnabledState covers the three-state `enabled` flag: each known variant
+// resolves to itself, and anything else (undefined, unknown, a bool-era value,
+// flagd unreachable) fails closed to off. watch runs but never applies.
 // UC: UC-045 A3
-func TestInterventionsEnabled(t *testing.T) {
-	t.Run("configured on resolves", func(t *testing.T) {
-		ev := stubEvaluator{booleans: map[string]bool{keyInterventionsEnabled: true}}
-		if !New(ev, nil).InterventionsEnabled(context.Background()) {
-			t.Fatal("interventions_enabled=true must resolve true")
-		}
-	})
-	t.Run("undefined flag fails closed (off)", func(t *testing.T) {
-		// No value set for the key -> stub returns the passed default
-		// (DefaultInterventionsEnabled=false). This is the fail-closed safe state.
-		ev := stubEvaluator{}
-		if New(ev, nil).InterventionsEnabled(context.Background()) {
-			t.Fatal("an UNDEFINED interventions_enabled flag must fail closed to false (#1177)")
-		}
-	})
-	t.Run("flagd unreachable fails closed (off)", func(t *testing.T) {
-		ev := stubEvaluator{errs: map[string]error{keyInterventionsEnabled: errors.New("flagd unreachable")}}
-		if New(ev, nil).InterventionsEnabled(context.Background()) {
-			t.Fatal("an UNREACHABLE flagd must fail closed to false (#1177)")
-		}
-	})
+func TestEnabledState(t *testing.T) {
+	down := errors.New("flagd unreachable")
+	cases := []struct {
+		name    string
+		ev      stubEvaluator
+		want    EnabledState
+		runs    bool
+		applies bool
+	}{
+		{"on", stubEvaluator{strings: map[string]string{keyEnabled: "on"}}, EnabledOn, true, true},
+		{"watch", stubEvaluator{strings: map[string]string{keyEnabled: "watch"}}, EnabledWatch, true, false},
+		{"off", stubEvaluator{strings: map[string]string{keyEnabled: "off"}}, EnabledOff, false, false},
+		{"undefined", stubEvaluator{}, EnabledOff, false, false},
+		{"unknown value", stubEvaluator{strings: map[string]string{keyEnabled: "ON"}}, EnabledOff, false, false},
+		{"bool-era value", stubEvaluator{strings: map[string]string{keyEnabled: "true"}}, EnabledOff, false, false},
+		{"flagd unreachable", stubEvaluator{errs: map[string]error{keyEnabled: down}}, EnabledOff, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := New(tc.ev, nil)
+			ctx := context.Background()
+			if got := f.EnabledState(ctx); got != tc.want {
+				t.Fatalf("EnabledState = %q, want %q", got, tc.want)
+			}
+			if got := f.AgentEnabled(ctx); got != tc.runs {
+				t.Errorf("AgentEnabled = %v, want %v", got, tc.runs)
+			}
+			if got := f.Applying(ctx); got != tc.applies {
+				t.Errorf("Applying = %v, want %v", got, tc.applies)
+			}
+			snap := f.Evaluate(ctx)
+			if snap.Enabled != tc.runs || snap.State() != tc.want {
+				t.Errorf("Snapshot Enabled = %v, State = %q, want %v, %q", snap.Enabled, snap.State(), tc.runs, tc.want)
+			}
+		})
+	}
+	if DefaultEnabled != EnabledOff {
+		t.Errorf("DefaultEnabled = %q, want off (fail-closed)", DefaultEnabled)
+	}
 }
 
-// TestSafetyGateDefaultsAreFailClosed pins the package-level safe default: the
-// safety gate defaults OFF (the not-acting state), matching the fail-closed env
-// default (AGENT_INTERVENTIONS_ENABLED `:-false`) it replaces.
-// UC: UC-045 A3
-func TestSafetyGateDefaultsAreFailClosed(t *testing.T) {
-	if DefaultInterventionsEnabled {
-		t.Error("DefaultInterventionsEnabled must be false (fail-closed)")
+// TestSnapshotStateHandBuilt: a snapshot that sets only Enabled never reads on.
+func TestSnapshotStateHandBuilt(t *testing.T) {
+	if got := (Snapshot{Enabled: true}).State(); got != EnabledWatch {
+		t.Errorf("Snapshot{Enabled: true}.State() = %q, want watch", got)
+	}
+	if got := (Snapshot{}).State(); got != EnabledOff {
+		t.Errorf("Snapshot{}.State() = %q, want off", got)
 	}
 }
 
@@ -745,13 +762,13 @@ func TestSafetyGateDefaultsAreFailClosed(t *testing.T) {
 func TestProposerGateAccessors(t *testing.T) {
 	down := errors.New("flagd unreachable")
 	t.Run("flags on", func(t *testing.T) {
-		f := New(stubEvaluator{booleans: map[string]bool{keyEnabled: true, keyExperimentsEnabled: true}}, nil)
+		f := New(stubEvaluator{strings: map[string]string{keyEnabled: "watch"}, booleans: map[string]bool{keyExperimentsEnabled: true}}, nil)
 		if !f.AgentEnabled(context.Background()) || !f.ExperimentsEnabled(context.Background()) {
 			t.Fatal("want both gates on")
 		}
 	})
 	t.Run("flags off", func(t *testing.T) {
-		f := New(stubEvaluator{booleans: map[string]bool{keyEnabled: false, keyExperimentsEnabled: false}}, nil)
+		f := New(stubEvaluator{strings: map[string]string{keyEnabled: "off"}, booleans: map[string]bool{keyExperimentsEnabled: false}}, nil)
 		if f.AgentEnabled(context.Background()) || f.ExperimentsEnabled(context.Background()) {
 			t.Fatal("want both gates off")
 		}

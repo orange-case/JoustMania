@@ -66,7 +66,6 @@ def st(**kw) -> menu_pb2.GetMenuStatusResponse:
     }
     base.update(kw)
     base.setdefault("agent_enabled_state", "on" if base["agent_enabled"] else "off")
-    base.setdefault("agent_interventions_enabled_state", "on")
     return menu_pb2.GetMenuStatusResponse(**base)
 
 
@@ -153,7 +152,7 @@ SWITCH = page_keys.ROWS["AGENT"][0]
         (st(agent_level="ambient"), 1, True),
         (st(agent_level="standard"), -1, False),
         (st(agent_level="full"), 1, False),  # clamped at the top: no raise
-        (st(agent_level="standard", agent_interventions_enabled_state="off"), 1, True),  # WATCH: its live level
+        (st(agent_level="standard", agent_enabled_state="watch"), 1, True),  # WATCH: its live level
         (st(agent_level="none"), 1, True),  # ON NONE
         (st(agent_enabled=False, agent_level="ambient"), 1, True),  # OFF: its live level
     ],
@@ -178,11 +177,11 @@ def test_an_unknown_level_is_refused_never_confirmed(status):
     [
         (st(agent_enabled=False), 1, page_keys.Plan("off", "watch", raises=True)),  # the resume
         (st(agent_enabled=False), 2, page_keys.Plan("off", "on", raises=True)),
-        (st(agent_interventions_enabled_state="off"), 1, page_keys.Plan("watch", "on", raises=True)),
+        (st(agent_enabled_state="watch"), 1, page_keys.Plan("watch", "on", raises=True)),
         (st(), 3, page_keys.Plan("on", "on")),  # clamped at the top
         (st(), -1, page_keys.Plan("on", "watch")),
         (st(), -2, page_keys.Plan("on", "off")),  # the stop
-        (st(agent_interventions_enabled_state="off"), -1, page_keys.Plan("watch", "off")),
+        (st(agent_enabled_state="watch"), -1, page_keys.Plan("watch", "off")),
         (st(agent_level="none"), -1, page_keys.Plan("on", "watch")),  # ON NONE is ON
     ],
 )
@@ -197,10 +196,10 @@ def test_a_higher_agent_state_is_a_raise_a_lower_one_is_not(status, steps, plan)
         None,
         st(agent_enabled_state="unknown"),
         st(agent_interventions_enabled_state="unknown"),
-        st(agent_interventions_enabled_state=""),
+        st(agent_enabled_state="maybe"),
         st(agent_level="probe"),
     ],
-    ids=["no-status", "enabled-unknown", "gate-unknown", "gate-missing", "level-off-the-ladder"],
+    ids=["no-status", "enabled-unknown", "old-menu-gate-unknown", "state-off-the-ladder", "level-off-the-ladder"],
 )
 def test_an_unknown_agent_state_is_refused_never_stepped_blind(status):
     assert page_keys.edit_plan(SWITCH, status, 1) == page_keys.Plan(None, None, refused=True)
@@ -302,7 +301,7 @@ async def test_an_unknown_level_edit_is_refused(actions, menu, cues):
     [
         (st(agent_enabled=False), 1, "watch"),
         (st(agent_enabled=False), 2, "on"),
-        (st(agent_interventions_enabled_state="off"), 1, "on"),
+        (st(agent_enabled_state="watch"), 1, "on"),
     ],
     ids=["off-watch", "off-on", "watch-on"],
 )
@@ -323,7 +322,7 @@ async def test_an_agent_state_raise_needs_the_confirmation(actions, menu, cues, 
     [
         (st(), -1, {"state": "watch", "from": "on"}),
         (st(), -2, {"state": "off", "from": "on"}),
-        (st(agent_interventions_enabled_state="off"), -1, {"state": "off", "from": "watch"}),
+        (st(agent_enabled_state="watch"), -1, {"state": "off", "from": "watch"}),
     ],
     ids=["on-watch", "on-off", "watch-off"],
 )
@@ -412,7 +411,7 @@ def test_only_the_gated_builders_send_a_raise():
     levels = ["none", "ambient", "standard", "full", "probe", ""]
     statuses = [
         st(agent_level=level, agent_enabled=enabled, agent_interventions_enabled_state=gate)
-        for level, enabled, gate in itertools.product(levels, (True, False), ("on", "off", "unknown"))
+        for level, enabled, gate in itertools.product(levels, (True, False), ("on", "off", "unknown", ""))
     ]
 
     async def sweep():
@@ -1022,7 +1021,7 @@ def test_the_agent_switch_resume_is_a_three_state_edit_that_asks_for_the_confirm
 
 @pytest.mark.uc("UC-016", br=["BR-001", "BR-006", "BR-011"])
 def test_a_watching_agent_shows_watch_on_the_page_and_its_icon():
-    watch = st(agent_level="standard", agent_interventions_enabled_state="off")
+    watch = st(agent_level="standard", agent_enabled_state="watch")
     assert page_rows(PAGES.index("AGENT"), watch, PageContext(), 3)[0] == ("AGENT", "WATCH")
     assert screens.ICON_AGENT in render.status_line(watch, PageContext(), True)[0]
     assert screens.agent_text(watch) == "WATCH STANDARD"

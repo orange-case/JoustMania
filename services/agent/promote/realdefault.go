@@ -35,8 +35,8 @@ import (
 //
 // It is built ONLY by NewRealDefaultWriterFromEnv behind the env gate, and it is
 // invoked only on the autonomous path, which is additionally behind the agent
-// kill-switch (Config.Enabled, checked in promoteAutonomous). Two independent gates
-// (env + kill-switch) guard every real-default change.
+// `enabled` = on (Config.Enabled, checked in promoteAutonomous). Two independent
+// gates (env + `enabled`) guard every real-default change.
 
 // gameFlagSet is the only flag set a promotion writes.
 const gameFlagSet = "game"

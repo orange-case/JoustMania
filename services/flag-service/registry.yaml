@@ -51,7 +51,7 @@ flags:
 
   # --- agent (flags.md §13.2) ---------------------------------------------------
   - {set: agent, key: interventions_allowed, kind: overlay, scope: [stack], persist: true}
-  - {set: agent, key: enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
+  - {set: agent, key: enabled, kind: overlay, scope: [stack], bounds: {variants: ["off", "watch", "on"]}}
   # The goal (flags.md §13.2): operator-written, a declared variant only (never a free
   # weighting), stack-wide, not persisted, so a restart returns to the file's goal.
   - {set: agent, key: objectives, kind: overlay, scope: [stack], bounds: {variants: [endurance_focused, balanced_focused, accelerate_focused, chaos_focused, mixed]}}
@@ -60,7 +60,6 @@ flags:
   # (C-034). The marker is registry.flagsmithOnly (Go, not a yaml attribute: released images
   # parse this file strictly, #2403). Declared variants only, stack-wide, not persisted.
   - {set: agent, key: goal.profile, kind: overlay, scope: [stack]}
-  - {set: agent, key: interventions_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: experiments_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: experiment_dynamic_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: decision.backend, kind: overlay, scope: [stack], persist: true, bounds: {variants: [rules, claude, jev]}}

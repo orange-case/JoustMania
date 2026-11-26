@@ -195,7 +195,6 @@ async def test_a_hanging_announcement_never_holds_up_the_next_key():
         agent_enabled=True,
         agent_level="standard",
         agent_enabled_state="on",
-        agent_interventions_enabled_state="on",
     )
     pad = PadController(config, reader, actions, cue_player)
     pad.attached(KEYMAP)

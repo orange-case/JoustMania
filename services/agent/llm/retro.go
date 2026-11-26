@@ -394,7 +394,7 @@ func buildRetroUser(ctx gamecontext.GameContext, summary gamesummary.Summary, no
 	fmt.Fprintf(&b, "  winner: %s\n", winner)
 	// #1771: applied and blocked are split as the game summary splits them, so a
 	// fully gated game reads "0 applied, 8 blocked by a gate", never "8 interventions".
-	fmt.Fprintf(&b, "  interventions: %d applied, %d blocked by a gate (permission chain or interventions_enabled)\n",
+	fmt.Fprintf(&b, "  interventions: %d applied, %d blocked by a gate (permission chain or enabled=watch)\n",
 		summary.InterventionsApplied, summary.InterventionsBlocked)
 	writeShieldHold(&b, summary.ShieldHold)
 

@@ -358,13 +358,12 @@ export function renderFlagPanel(flags: FlagPanel | null): string {
 function flagPanelHtml(flags: FlagPanel | null): SafeHtml {
   if (!flags) return html`<div class="loading">${FLAG_STATE_NO_DATA}</div>`;
   const rows: [string, string][] = [
-    ["agent enabled (kill switch)", onOff(flags.enabled)],
+    ["agent state", flags.enabled ?? "—"],
     ["decision backend", flags.decisionBackend || "—"],
     ["act confidence threshold", flags.actThreshold === null ? "—" : flags.actThreshold.toFixed(2)],
     ["battery threshold", flags.batteryThreshold || "—"],
     ["max interventions/min", flags.maxPerMinute || "—"],
     ["interventions allowed", flags.interventionsAllowed || "—"],
-    ["interventions enabled (write gate)", onOff(flags.interventionsEnabled)],
     ["experiments enabled", onOff(flags.experimentsEnabled)],
     ["LLM eligible game kinds", flags.eligibleGameKinds || "—"],
     ["objectives", flags.objectives || "—"],
@@ -377,13 +376,11 @@ function flagPanelHtml(flags: FlagPanel | null): SafeHtml {
           <span class="agent-flag-val">${v}</span>
         </div>`,
   );
-  // #2093: enabled=on with the write gate off looks live but writes nothing.
-  const gateHint =
-    flags.enabled === true && flags.interventionsEnabled === false
-      ? html`<div class="agent-flags-warn" role="status">${WRITE_GATE_OFF_HINT}</div>`
-      : "";
+  // watch looks live (decisions keep coming) but writes nothing.
+  const watchHint =
+    flags.enabled === "watch" ? html`<div class="agent-flags-warn" role="status">${WATCH_HINT}</div>` : "";
   return html`
-      ${gateHint}
+      ${watchHint}
       <div class="agent-flags-grid">${body}</div>
       <div class="agent-flags-note">
         Effective flags of ${renderGameBadge(flags.gameId, flags.gameKind)} as the agent evaluated them at
@@ -414,13 +411,15 @@ const OUTCOME_LABEL: Record<DecideRow["outcome"], string> = {
   unknown: "?",
 };
 
-/** Shown in the flag panel while the agent is enabled but the write gate is off (#2093). */
-export const WRITE_GATE_OFF_HINT =
-  "Agent is enabled but interventions_enabled is off: decisions are made and recorded, but no intervention is written.";
+/** Shown in the flag panel while the agent is in watch. */
+export const WATCH_HINT =
+  "Agent is in watch: decisions are made and recorded, but no intervention is written.";
 
 /** decision.not_applied_reason -> text; an unknown reason is shown as is. */
 const NOT_APPLIED_LABEL: Record<string, string> = {
-  write_gate_off: "write gate off (interventions_enabled)",
+  watch: "agent in watch",
+  // Traces recorded before the three-state flag.
+  write_gate_off: "write gate off",
   write_failed: "write failed",
 };
 

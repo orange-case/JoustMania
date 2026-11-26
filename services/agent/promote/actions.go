@@ -90,9 +90,9 @@ const ReasonNotRealPromotable = "not_real_promotable"
 // M7-7"). This is the consequential real-player-affecting path, so it is the most
 // heavily guarded:
 //
-//   - KILL-SWITCH: a disabled agent (cfg.Enabled == false) NEVER mutates the real
-//     default — degrades to a recorded no-op. autonomous is default-OFF AND behind
-//     the kill-switch (the safety rail).
+//   - ENABLED: unless `enabled` is on (cfg.Enabled), the agent NEVER mutates the
+//     real default — degrades to a recorded no-op. autonomous is default-OFF AND
+//     behind `enabled` = on (the safety rail).
 //   - SEPARATE WRITER: the real-default change goes through the injected
 //     RealDefaultWriter — explicitly NOT the shadow experiment.Writer (which is
 //     structurally shadow-only). A nil RealDefaultWriter (real path not wired) → a
@@ -114,7 +114,7 @@ func (pr *Promoter) promoteAutonomous(ctx context.Context, p experiment.Proposal
 	}
 	if !cfg.Enabled {
 		res.Outcome = OutcomeDiscarded
-		res.Reason = "autonomous requested but agent disabled (kill-switch); real default not changed"
+		res.Reason = "autonomous requested but agent `enabled` is not on; real default not changed"
 		return
 	}
 	if pr.realDef == nil {

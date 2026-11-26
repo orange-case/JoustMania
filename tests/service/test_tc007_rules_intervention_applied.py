@@ -109,10 +109,10 @@ async def test_tc007_rules_decision_applied_in_ffa_game(fresh_stack):
     stack.fake_claude.script(decide_mode="valid", confidence=HIGH_CONFIDENCE)
 
     def configure() -> None:
-        configure_agent(backend="rules", interventions=True, allowed=ALLOWED_VARIANT)
+        configure_agent(backend="rules", state="on", allowed=ALLOWED_VARIANT)
 
     configure()
-    wait_agent_flags_served(stack, backend="rules", enabled=True, rewrite=configure)
+    wait_agent_flags_served(stack, backend="rules", state="on", rewrite=configure)
 
     game_client, channel = await get_game_client(stack)
     mock_client, mock_channel = await get_mock_client(stack)

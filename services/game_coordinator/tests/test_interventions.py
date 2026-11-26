@@ -45,9 +45,6 @@ ALL_TYPES = {spec.type_id for spec in INTERVENTION_SPECS}
 class FakeFlagClient:
     """In-memory flag client matching the OpenFeature get_*_value surface."""
 
-    def get_boolean_value(self, key, default, _ctx=None):
-        return self.values.get(key, True if key == "enabled" else default)
-
     def __init__(self, values: dict | None = None):
         self.values = values or {}
 
@@ -55,6 +52,8 @@ class FakeFlagClient:
         self.values[key] = value
 
     def get_string_value(self, key, default, _ctx=None):
+        if key == "enabled":
+            return self.values.get("enabled", "on")
         return str(self.values.get(key, default))
 
     def get_object_details(self, key, _default, _ctx=None):
@@ -344,9 +343,9 @@ async def test_allowed_membership_permits_listed_type():
 @pytest.mark.uc("UC-040", br=["BR-004"])
 @pytest.mark.uc("UC-045", br=["BR-001"])
 @pytest.mark.uc("UC-015", br=["BR-002"])
-@pytest.mark.parametrize("enabled", [False, None], ids=["off", "unresolved"])
-async def test_a_stopped_agent_gets_nothing_applied_whatever_the_allow_list(enabled):
-    """The stop writes `enabled` alone, so the coordinator's own check of it holds a stopped agent."""
+@pytest.mark.parametrize("enabled", ["off", "watch", None], ids=["off", "watch", "unresolved"])
+async def test_an_agent_not_on_gets_nothing_applied_whatever_the_allow_list(enabled):
+    """`enabled` is the one stop and the watch switch, so the coordinator's own check of it holds the agent."""
     mgr, events = make_manager(
         interventions={"eliminate_player": edge_event("eliminate_player", "ctrl_a")},
         allowed="eliminate_player",

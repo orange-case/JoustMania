@@ -32,7 +32,6 @@ def status(**kw) -> menu_pb2.GetMenuStatusResponse:
         "connected_count": 5,
         "agent_enabled": True,
         "agent_enabled_state": "on",
-        "agent_interventions_enabled_state": "on",
         "agent_level": "standard",
         "agent_backend": "claude",
         "sensitivity": 3,
@@ -82,7 +81,9 @@ def test_status_screen_state_is_game_while_the_lifecycle_is_live_and_agent_off_w
 @pytest.mark.parametrize(
     ("fields", "line"),
     [
-        ({"agent_interventions_enabled_state": "off"}, "AGENT WATCH STANDARD"),  # UC-016 BR-011: only the gate closed
+        ({"agent_enabled_state": "watch"}, "AGENT WATCH STANDARD"),  # UC-016 BR-011
+        ({"agent_interventions_enabled_state": "off"}, "AGENT WATCH STANDARD"),  # a menu before #2846: gate closed
+        ({"agent_enabled_state": "maybe"}, "AGENT ?"),
         ({"agent_level": "none"}, "AGENT ON NONE"),  # a tuning level, not a stop
         (
             {"agent_enabled": False, "agent_enabled_state": "off", "agent_interventions_enabled_state": "unknown"},

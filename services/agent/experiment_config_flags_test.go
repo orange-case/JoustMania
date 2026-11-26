@@ -84,7 +84,7 @@ func loopForConfigTest(t *testing.T, maxShadow int) (*experimentLoop, *recording
 		},
 		configOverride: lc.get,
 		// Kill-switch ON via the seam so experiments_enabled is the variable under test.
-		enabledOverride: func(context.Context) bool { return true },
+		enabledOverride: func(context.Context) flags.EnabledState { return enabledState(true) },
 	}
 	lc.setSeed(testSeed("nonstop.respawn_seconds", 6.0, 50))
 	return loop, spawner, lc
@@ -186,7 +186,7 @@ func TestExperimentsEnabled_OffOnOff(t *testing.T) {
 // UC: UC-045 main
 func TestExperimentsEnabled_KillSwitchStillWins(t *testing.T) {
 	loop, spawner, lc := loopForConfigTest(t, 8)
-	loop.enabledOverride = func(context.Context) bool { return false } // kill-switch OFF
+	loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(false) } // kill-switch OFF
 	lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
 
 	loop.allocateIfEnabled(context.Background())

@@ -35,7 +35,7 @@ Conventions:
 | ST-1.4 | **Time to playable**: stopwatch from power on to the first controller in the lobby (press PS on a known controller) and to a started FFA | Write both times down. Target (proposed limit): lobby within about 90 s of power on (the start script ends at about 30 s; add controller connect time). Anything over 2 min is a finding | UC-002, UC-060 | |
 | ST-1.5 | `./scripts/setup/joustmania-upgrade.sh --status` | Prints `current:` and `previous:` with image tags, no `WARN` (no cut-off rollback, HEAD equals a recorded version) and no `start-limit-hit`; `joustmania-status` lists no service that is down | UC-060 BR-005, A2, A3 | |
 | ST-1.5a | Sound device: plug the USB sound device **before** power-on. If it was plugged in late, wait about 10 s | `docker compose logs audio` shows "ALSA card change" and a restart on its own within about 10 s of the plug-in, in the lobby (a running game defers it; no manual `docker restart`), then "Wrote /etc/asound.conf with card N" for the USB card; a voice line plays | UC-031 A6, BR-008 | |
-| ST-1.6 | Agent defaults after the reboot: dashboard Agent tab, or `./scripts/flags.sh` read of `enabled` and `interventions_enabled` | Back at the fail-closed defaults (`enabled=off`, `interventions_enabled=off`); the persisted level and backend stay. Run `./scripts/talk-stage.sh reset` and then `./scripts/talk-preflight.sh` before block 6 | UC-045, UC-070 | |
+| ST-1.6 | Agent defaults after the reboot: dashboard Agent tab, or `./scripts/flags.sh` read of `enabled` | Back at the default `enabled=watch` (decides, writes nothing); the persisted level and backend stay. Run `./scripts/talk-stage.sh reset` and then `./scripts/talk-preflight.sh` before block 6 | UC-045, UC-070 | |
 
 ## 2. Controllers
 
@@ -98,16 +98,16 @@ knob-step fix ([#2109](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/
 ## 6. Agent
 
 Setup: `./scripts/talk-stage.sh reset`, then `./scripts/talk-preflight.sh` (all PASS; WARN lines noted). Keys are in
-`.env.local` (`JEV_API_KEY`, `ANTHROPIC_API_KEY`). The agent overlays (`enabled`, `interventions_enabled`) start at
-off after a reboot.
+`.env.local` (`JEV_API_KEY`, `ANTHROPIC_API_KEY`). The agent state (`enabled`) starts at
+`watch` after a reboot.
 
 | Id | Action | Expected result | Verifies | Result |
 |---|---|---|---|---|
 | ST-6.1 | `./scripts/talk-stage.sh reset`, then `./scripts/talk-preflight.sh` | Reset exits 0; the pre-flight has no FAIL; flagd holds its sync stream to the flag service; rust-hid is healthy (stage stack, `backend=rust`). Known: rust-hid may not get a first flagd sync ([#2090](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/2090)): note the pre-flight line | UC-070 BR-003, UC-053 | |
-| ST-6.2 | **Rules backend**: `./scripts/agent-backend.sh rules`, play an FFA with the agent on | Decisions appear in the dashboard Agent tab; interventions only when the agent is on and the write gate is open | UC-040, UC-041 | |
+| ST-6.2 | **Rules backend**: `./scripts/agent-backend.sh rules`, play an FFA with the agent on | Decisions appear in the dashboard Agent tab; interventions only when the agent is `on` (not in `watch`) | UC-040, UC-041 | |
 | ST-6.3 | **Jev backend**: `./scripts/agent-backend.sh jev`, play an FFA | Remote decisions in about 0.2 to 0.6 s per round; on a Jev failure (disconnect the network) the same cycle falls back to rules and the game never waits | UC-040, runbook section 7 | |
 | ST-6.4 | **Claude backend**: `./scripts/agent-backend.sh claude`, play an FFA; then game end | Decisions in about 3 s (Claude is the backup, not the main backend); the post-game summary appears (needs `ANTHROPIC_API_KEY`) | UC-040, UC-042 | |
-| ST-6.5 | **Write gate**: with `enabled=on` and `interventions_enabled=off` play a round; then flip `interventions_enabled=on` | With the gate off nothing is written to the game; **(known, [#2093](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/2093))**: the dashboard may still show `act · allowed`, so check the `game_interventions_total{blocked="true"}` counter, not the label. With the gate on the intervention reaches the game | UC-040, UC-045, UC-053 | |
+| ST-6.5 | **Watch**: with `enabled=watch` play a round; then `./scripts/agent-killswitch.sh on` | In watch nothing is written to the game: the Agent tab shows the watch hint and `not applied: agent in watch` on the decision. With `on` the intervention reaches the game | UC-040, UC-045, UC-053 | |
 | ST-6.6 | **Shields in trigger mode** (`shield.activation=trigger`, the FFA default): play FFA rounds with the agent granting charges | The charged controller shows a slow breathing LED and the new charge rumble ([#2094](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/2094), shipped in #2098: shield charge and ending patterns) that is **clearly distinct** from the 1 s death rumble and from the warning; pressing the trigger activates the shield responsively; an unused charge expires (`shield.charge_expiry_seconds`) with the ending rumble. Rollback if wrong: `shield.activation` variant `instant` | UC-040 (shield rows), UC-030 | |
 | ST-6.7 | `./scripts/talk-stage.sh permissions none 12` during a game | Interventions stop within one decision; the baseline variant is restored after the hold | UC-070 BR-001, UC-045 A2, UC-053 | |
 | ST-6.8 | **Kill switch**: stop the agent from the pad (K3 hold) or by `enabled=off`, during a game | The agent stops at once; no intervention after the stop; the resume (`AGENT` row 1 or the script) brings it back at the level it holds now | UC-045, UC-015 BR-002 | |

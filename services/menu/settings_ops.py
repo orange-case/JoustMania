@@ -78,10 +78,8 @@ logger = logging.getLogger(__name__)
 
 # UC-015 BR-019: the agent level, written persisted.
 AGENT_POLICY_FLAG = "interventions_allowed"
-# UC-015 BR-001: the pad also writes the kill switch and the write gate (in memory only) and the backend (persisted).
+# UC-015 BR-001: the pad also writes the agent state `off` / `watch` / `on` (in memory only) and the backend (persisted).
 AGENT_ENABLED_FLAG = "enabled"
-# UC-016 BR-012: the agent's write gate (FR-051); only the agent switch writes it, in memory only.
-AGENT_WRITE_GATE_FLAG = "interventions_enabled"
 DECISION_BACKEND_FLAG = "decision.backend"
 # UC-015 BR-018 (#2215): the shield mode the pad's K6 layer steps; a persisted admin value of the `game` set.
 SHIELD_ACTIVATION_FLAG = "shield.activation"
@@ -246,13 +244,9 @@ def _layer_variant(view: dict, layer: str) -> str | None:
     return (value.get("variant") or None) if isinstance(value, dict) else None
 
 
-def agent_state_of(enabled: str | None, gate: str | None) -> str | None:
-    """UC-016 BR-011: `off` (enabled off), `watch` (gate off) or `on`; None when a flag is unreadable."""
-    if enabled == "off":
-        return "off"
-    if enabled != "on" or gate not in ("on", "off"):
-        return None
-    return "on" if gate == "on" else "watch"
+def agent_state_of(enabled: str | None) -> str | None:
+    """UC-016 BR-011: the `enabled` variant when it is a state, None when unreadable or unknown."""
+    return enabled if enabled in AGENT_STATE_LADDER else None
 
 
 def reset_target(view: dict | None) -> str | None:
@@ -500,19 +494,12 @@ class SettingsOps:
         return view.get("effective_default") if view else None
 
     def _agent_enabled(self) -> str | None:
-        """The kill switch as the flag service serves it (``on`` / ``off``), None when unreadable."""
-        return self._agent_switch_flag(AGENT_ENABLED_FLAG)
-
-    def _agent_switch_flag(self, key: str) -> str | None:
-        """An agent on/off flag (``enabled``, ``interventions_enabled``) as the flag service serves it.
-
-        ``on`` / ``off``, None when unreadable. Blocking.
-        """
+        """`enabled` as the flag service serves it (``off`` / ``watch`` / ``on``), None when unreadable. Blocking."""
         writer = self.agent_memory_writer or self.state_manager.agent_settings_writer
         try:
-            view = writer.get_flag_view(key)
+            view = writer.get_flag_view(AGENT_ENABLED_FLAG)
         except Exception as e:
-            logger.warning(f"Reading agent/{key} failed: {e}")
+            logger.warning(f"Reading agent/{AGENT_ENABLED_FLAG} failed: {e}")
             return None
         return view.get("effective_default") if view else None
 
@@ -857,10 +844,10 @@ class SettingsOps:
 
     def _read_agent_switch_state(self) -> str | None:
         """The switch state from the flag service, None when unreadable. Blocking."""
-        return agent_state_of(self._agent_enabled(), self._agent_switch_flag(AGENT_WRITE_GATE_FLAG))
+        return agent_state_of(self._agent_enabled())
 
     async def agent_state(self, state: str, from_state: str | None) -> Result:
-        """The `AGENT` row 1 switch: `off` is the stop; `watch` / `on` write the gate, then `enabled` on."""
+        """The `AGENT` row 1 switch: one write of `enabled`, `off` being the stop."""
         if state not in AGENT_STATE_LADDER or from_state not in AGENT_STATE_LADDER:
             return Result(None, None, BAD_OPTION)
         async with self._agent_change():
@@ -871,16 +858,7 @@ class SettingsOps:
                 return Result(now, None, STALE)
             if now == state:
                 return Result(now, state, OK)
-            writer = self.agent_memory_writer
-            if state == "off":
-                ok = await asyncio.to_thread(self._write, writer, AGENT_ENABLED_FLAG, "off")
-            else:
-                # The gate first, so `enabled` is never on before it (#2093); a failure stops here.
-                gate = "on" if state == "on" else "off"
-                ok = await asyncio.to_thread(self._write, writer, AGENT_WRITE_GATE_FLAG, gate)
-                if ok and now == "off":
-                    ok = await asyncio.to_thread(self._write, writer, AGENT_ENABLED_FLAG, "on")
-            if not ok:
+            if not await asyncio.to_thread(self._write, self.agent_memory_writer, AGENT_ENABLED_FLAG, state):
                 return Result(now, None, FLAG_SERVICE_UNAVAILABLE)
             return Result(now, state)
 

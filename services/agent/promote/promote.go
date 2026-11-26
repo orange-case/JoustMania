@@ -30,8 +30,8 @@
 //     constructor for any of them; a test that wants a real client cannot get one.
 //   - The SAFE flag DEFAULTS are baked in: mode defaults to issue (NEVER
 //     autonomous), target defaults to local (NEVER github). autonomous (apply-to-
-//     real + watch) is additionally behind the agent `enabled` kill-switch — the
-//     caller passes Config.Enabled, and a disabled agent degrades autonomous to a
+//     real + watch) is additionally behind `enabled` = on — the caller passes
+//     Config.Enabled, and an agent in off or watch degrades autonomous to a
 //     recorded no-op.
 //   - Real GitHub is default-off, fail-closed: with the env gate/token absent, the
 //     real client is not built; main.go passes the inert recording no-op fakes, and
@@ -72,7 +72,7 @@ const (
 	ModePR Mode = "pr"
 	// ModeAutonomous applies the validated change to the REAL default, watches real
 	// games, and reverts on degradation. The highest-privilege path; default-OFF and
-	// additionally behind the agent kill-switch (Config.Enabled).
+	// additionally behind `enabled` = on (Config.Enabled).
 	ModeAutonomous Mode = "autonomous"
 )
 
@@ -117,11 +117,11 @@ type Config struct {
 	Mode Mode
 	// Target is code_improvement.target (default local). Selects local/github.
 	Target Target
-	// Enabled is the agent `enabled` kill-switch (flags.Snapshot.Enabled). It gates
-	// ONLY the autonomous mode: a real-default mutation must never happen while the
-	// agent is disabled. issue/pr do not consume it (opening an issue/PR is not a
-	// live real-player change). A disabled agent degrades autonomous to a recorded
-	// no-op (OutcomeDiscarded + reason), never a silent real change.
+	// Enabled is `enabled` == on (flags.Flags.Applying). It gates ONLY the
+	// autonomous mode: a real-default mutation changes future games, so it never
+	// happens in off or watch. issue/pr do not consume it (opening an issue/PR is not
+	// a live real-player change). Otherwise autonomous degrades to a recorded no-op
+	// (OutcomeDiscarded + reason), never a silent real change.
 	Enabled bool
 
 	// killEpoch is Promoter.KillSwitchEpoch read before Enabled was resolved

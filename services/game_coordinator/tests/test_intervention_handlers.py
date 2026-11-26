@@ -32,9 +32,6 @@ from services.game_coordinator.tests.event_list_helpers import edge_event, objec
 # Fakes
 # --------------------------------------------------------------------------- #
 class FakeFlagClient:
-    def get_boolean_value(self, key, default, _ctx=None):
-        return self.values.get(key, True if key == "enabled" else default)
-
     def __init__(self, values=None):
         self.values = values or {}
 
@@ -42,6 +39,8 @@ class FakeFlagClient:
         self.values[key] = value
 
     def get_string_value(self, key, default, _ctx=None):
+        if key == "enabled":
+            return self.values.get("enabled", "on")
         return str(self.values.get(key, default))
 
     def get_object_details(self, key, _default, _ctx=None):

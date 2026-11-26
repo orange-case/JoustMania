@@ -69,8 +69,8 @@ the agent has three narrow, gated writes beyond the `interventions` set.
 2. **The write surfaces are disjoint by scope.** The menu writes persisted admin
    values of `game` / `user` flags (and of the `agent` keys
    `interventions_allowed` and `decision.backend`), plus, for the operator pad's
-   stop and resume, the in-memory `agent` overlays `enabled` and
-   `interventions_enabled` (UC-015 BR-001 to BR-003; human writes, so C-034 holds). Planned
+   stop and resume, the in-memory `agent` overlay `enabled` (`off` / `watch` / `on`, #2846;
+   UC-015 BR-001 to BR-003; human writes, so C-034 holds). Planned
    (#2755, UC-016 BR-012): for the pad's agent and retro rows the menu also writes the in-memory
    `agent` overlays `objectives`, `policy.max_interventions_per_minute`,
    `policy.group_grant.enabled`, `inference.effort` and `decision.operator_brief`, and the
@@ -185,7 +185,7 @@ agent still never writes the `agent` set. Until #2819 the controller admin mode 
 (last write wins).
 Since #2747 ([UC-016](use_cases/UC-016.md) BR-012, BR-013; the pad's keys that send them are planned): two more menu commands, no new key: `reset_setting` clears
 the operator's persisted value of a key the pad already writes (the `automatic` clear generalised), and
-`agent_state` (#2800, the resume) writes the in-memory `interventions_enabled` and `enabled`. The `policy.*` budgets stay
+`agent_state` (#2800, the resume) writes the in-memory `enabled`. The `policy.*` budgets stay
 off the pad (not persistable, operator overlays only).
 
 The agent's live intervention surface (all in the `interventions` set, game-scoped, bounded by the flag service's registry):

@@ -14,8 +14,9 @@ link is on (`FLAGSMITH_LINK=on`, the stage `.env.local`). How the link works:
   string such as the brief, the text itself, **without quotes**. For an object flag such as
   `decision.magnitude_bounds`, compact JSON.
 - **The toggle:** enabled with a value means "this value runs". **Disabled means the baseline applies, not
-  "flag off"**: switching `enabled` (the kill switch) off in Flagsmith brings back its baseline, which is `off`,
-  but for most flags it means "back to the file default". When the baseline is what you want, prefer typing the value.
+  "flag off"**: switching the `enabled` feature (the agent state) off in Flagsmith brings back its baseline,
+  which is `watch` (the agent keeps deciding, writes nothing), not a stop: to stop the agent, type `off`. For most
+  flags it means "back to the file default". When the baseline is what you want, prefer typing the value.
 - **A value under an off toggle is not in force.** Each disabled feature shows its file default as its value
   (FR-227); a value you type there while the toggle is off does nothing, and the flag service resets it to the file
   default at its next start. Stage a value by switching the toggle on.

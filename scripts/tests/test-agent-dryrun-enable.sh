@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Self-contained tests for scripts/agent-dryrun-enable.sh (FR-090, #1907): `on`
 # sets the experiment_seed flag to its windows_frantic variant BEFORE the
-# `enabled` and `experiments_enabled` gates, `off` clears all three, and
-# `status` shows them.
+# `enabled` (on) and `experiments_enabled` gates, `off` sets `enabled` off and
+# clears the other two, and `status` shows them.
 #
 # Runs the helper against scripts/tests/fake_flag_service.py serving
-# services/flagd/ci/agent.json with the REAL registry (epic #1407): the helper
+# services/flagd/agent.json (default `watch`) with the REAL registry (epic #1407): the helper
 # changes the flags only through the flag service, never a flag file.
 #
 # Runs as part of `make lint` (needs only bash + python3), or directly:
@@ -19,7 +19,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 HELPER="${SCRIPT_DIR}/../agent-dryrun-enable.sh"
-SHIPPED="${REPO_ROOT}/services/flagd/ci/agent.json"
+SHIPPED="${REPO_ROOT}/services/flagd/agent.json"
 unset COMPOSE DOCKER || true
 # A test that reaches for the real docker fails instead of using it
 WORK="$(mktemp -d)"
@@ -84,7 +84,8 @@ expect "status shows the seed variant" 0 "experiment_seed = windows_frantic" -- 
 # --- off: all three back to the baseline -----------------------------------------
 expect "off reports the seed baseline" 0 "experiment_seed -> off (baseline)" -- off
 check "off clears experiment_seed" experiment_seed off
-check "off clears enabled" enabled off
+check "off sets enabled off over a watch default" enabled off
+if grep -q "^DELETE /agent/enabled" "${FAKE_FLAG_LOG}"; then not_ok "off never DELETEs enabled"; else ok "off never DELETEs enabled"; fi
 check "off clears experiments_enabled" experiments_enabled off
 if grep -q "^DELETE /agent/experiment_seed" "${FAKE_FLAG_LOG}"; then ok "off is a flag-service DELETE of the seed"; else not_ok "off is a flag-service DELETE of the seed"; fi
 

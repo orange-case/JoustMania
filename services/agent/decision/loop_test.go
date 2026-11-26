@@ -146,7 +146,7 @@ func TestOnEvaluate_EmitsFullHierarchy(t *testing.T) {
 	// Full #724 + #729 schema on the decision span: cycle-level flags lifted from
 	// the LayerState plus the per-decision outcome.
 	want := map[string]string{
-		AttrEnabled:              "true",
+		AttrEnabled:              "watch", // a hand-built Enabled snapshot reads watch
 		AttrObjectives:           DefaultObjectives,
 		AttrInterventionsAllowed: "noop",
 		AttrDecisionAction:       "noop",
@@ -160,7 +160,6 @@ func TestOnEvaluate_EmitsFullHierarchy(t *testing.T) {
 			t.Errorf("decision attr %s missing", key)
 			continue
 		}
-		// AttrEnabled is a bool; compare via the rendered string for table reuse.
 		got := v.Emit()
 		if got != expected {
 			t.Errorf("decision attr %s = %q, want %q", key, got, expected)

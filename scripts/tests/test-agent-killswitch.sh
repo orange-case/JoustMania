@@ -3,8 +3,8 @@
 # A5 and A6: a refused or failed change leaves `enabled` as it was, Post-F-1).
 #
 # Runs the helper against scripts/tests/fake_flag_service.py serving
-# services/flagd/ci/agent.json with the REAL registry (epic #1407): the helper
-# changes `enabled` only through the flag service, never a flag file.
+# services/flagd/agent.json (default `watch`) with the REAL registry (epic #1407):
+# the helper changes `enabled` only through the flag service, never a flag file.
 #
 # Runs as part of `make lint` (needs only bash + python3), or directly:
 #   ./scripts/tests/test-agent-killswitch.sh
@@ -16,7 +16,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 HELPER="${SCRIPT_DIR}/../agent-killswitch.sh"
-SHIPPED="${REPO_ROOT}/services/flagd/ci/agent.json"
+SHIPPED="${REPO_ROOT}/services/flagd/agent.json"
 WORK="$(mktemp -d)"
 # shellcheck source=scripts/tests/lib-fake-flag-service.sh
 source "${SCRIPT_DIR}/lib-fake-flag-service.sh"
@@ -67,11 +67,20 @@ if others_unchanged; then ok "on leaves every other flag unchanged"; else not_ok
 expect "status shows on" 0 "agent kill-switch = on" -- status
 if grep -q "PUT /agent/enabled" "${FAKE_FLAG_LOG}"; then ok "on is a flag-service PUT"; else not_ok "on is a flag-service PUT"; fi
 
+# --- watch ----------------------------------------------------------------------
+expect "watch sets enabled watch" 0 "agent kill-switch -> watch" -- watch
+if [[ "$(effective enabled)" == "watch" ]]; then ok "enabled == watch"; else not_ok "enabled == watch (got $(effective enabled))"; fi
+
 # --- step 1: off --------------------------------------------------------------
-expect "off returns to the fail-closed baseline" 0 "agent kill-switch -> off (baseline)" -- off
-if [[ "$(effective enabled)" == "off" ]]; then ok "enabled == off"; else not_ok "enabled == off (got $(effective enabled))"; fi
+# A clear would fall back to the flagd default `watch`, which does not stop the agent.
+puts_before="$(grep -c "^PUT /agent/enabled" "${FAKE_FLAG_LOG}" || true)"
+expect "off stops the agent" 0 "agent kill-switch -> off" -- off
+if [[ "$(effective enabled)" == "off" ]]; then ok "enabled == off over a watch default"; else not_ok "enabled == off over a watch default (got $(effective enabled))"; fi
 if others_unchanged; then ok "off leaves every other flag unchanged"; else not_ok "off leaves every other flag unchanged"; fi
-if grep -q "^DELETE /agent/enabled" "${FAKE_FLAG_LOG}"; then ok "off is a flag-service DELETE"; else not_ok "off is a flag-service DELETE"; fi
+puts_after="$(grep -c "^PUT /agent/enabled" "${FAKE_FLAG_LOG}" || true)"
+if [[ "${puts_after}" -gt "${puts_before}" ]]; then ok "off is a flag-service PUT"; else not_ok "off is a flag-service PUT"; fi
+if grep -q "^DELETE /agent/enabled" "${FAKE_FLAG_LOG}"; then not_ok "off is never a DELETE"; else ok "off is never a DELETE"; fi
+expect "status shows off" 0 "agent kill-switch = off" -- status
 
 # --- the baseline file is never written ---------------------------------------
 if cmp -s "${SHIPPED}" "${FAKE_AGENT_FLAGS}"; then ok "the baseline file is unchanged"; else not_ok "the baseline file is unchanged"; fi
@@ -81,7 +90,7 @@ expect "unknown action is rejected" 2 "usage:" -- maybe
 
 # --- A5: the flag service refuses the off (503 no_sync_stream) -----------------
 stop_fake_flag_service
-start_fake_flag_service "${WORK}" --fail-delete 1
+start_fake_flag_service "${WORK}" --fail-put 2
 expect "A5 setup: on" 0 "agent kill-switch -> on" -- on
 expect "A5 refused off prints the docker stop fallback" 1 "docker stop joustmania-agent" -- off
 if [[ "$(effective enabled)" == "on" ]]; then ok "A5 refused off leaves enabled on"; else not_ok "A5 refused off leaves enabled on (got $(effective enabled))"; fi
@@ -90,7 +99,7 @@ if [[ "$(effective enabled)" == "on" ]]; then ok "A5 refused off leaves enabled 
 stop_fake_flag_service
 start_fake_flag_service "${WORK}" --fail-put 1
 expect "A6 refused on prints the error" 1 "PUT /agent/enabled -> HTTP 503" -- on
-if [[ "$(effective enabled)" == "off" ]]; then ok "A6 refused on leaves enabled off"; else not_ok "A6 refused on leaves enabled off (got $(effective enabled))"; fi
+if [[ "$(effective enabled)" == "${baseline}" ]]; then ok "A6 refused on leaves enabled as it was"; else not_ok "A6 refused on leaves enabled as it was (got $(effective enabled))"; fi
 
 # --- A5 / A6: the flag service cannot be reached --------------------------------
 stop_fake_flag_service

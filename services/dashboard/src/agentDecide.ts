@@ -81,7 +81,7 @@ export interface LinkedDecision {
    * was blocked / failed.
    */
   applied: boolean | null;
-  /** decision.not_applied_reason ("" unless applied is false), e.g. write_gate_off. */
+  /** decision.not_applied_reason ("" unless applied is false), e.g. watch. */
   notAppliedReason: string;
   /** player.serial of a player-targeted decision ("" when session-scoped), #1295. */
   targetSerial: string;

@@ -146,8 +146,8 @@ class TargetingFlagClient:
 
 
 class _AgentStub:
-    def get_boolean_value(self, key, default, _ctx=None):
-        return True if key == "enabled" else default
+    def get_string_value(self, key, default, _ctx=None):
+        return "on" if key == "enabled" else default
 
     def __init__(self, threshold):
         self._threshold = threshold
@@ -644,7 +644,7 @@ class _AllowingAgentStub(_AgentStub):
     def get_string_value(self, key, default, _ctx=None):
         if key == "interventions_allowed":
             return ",".join(self._allowed)
-        return default
+        return super().get_string_value(key, default, _ctx)
 
 
 class TestCoordinatorBlocksInFFA:

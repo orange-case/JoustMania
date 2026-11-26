@@ -51,9 +51,8 @@ func TestSafetyDefaultPromoterNeverActsForReal(t *testing.T) {
 }
 
 // TestSafetyAutonomousBlockedByKillSwitch: autonomous (the real-player-affecting
-// path) NEVER mutates the real default while the agent is disabled, even with a
-// real-default writer wired. The kill-switch is a hard gate independent of the env
-// gate.
+// path) NEVER mutates the real default unless `enabled` is on (off or watch), even
+// with a real-default writer wired. It is a hard gate independent of the env gate.
 // UC: UC-043 main
 func TestSafetyAutonomousBlockedByKillSwitch(t *testing.T) {
 	realDef := &recordingRealDefault{}
@@ -68,8 +67,8 @@ func TestSafetyAutonomousBlockedByKillSwitch(t *testing.T) {
 	if len(realDef.calls) != 0 {
 		t.Fatalf("SAFETY: a disabled agent mutated the real default %d time(s)", len(realDef.calls))
 	}
-	if !strings.Contains(res.Reason, "kill-switch") {
-		t.Errorf("reason = %q, want it to name the kill-switch", res.Reason)
+	if !strings.Contains(res.Reason, "`enabled` is not on") {
+		t.Errorf("reason = %q, want it to name `enabled`", res.Reason)
 	}
 }
 

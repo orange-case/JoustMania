@@ -896,3 +896,16 @@ func TestOverrideWaitsForGame(t *testing.T) {
 		t.Fatalf("UC-054/BR-003 %d health posts, want 0", n)
 	}
 }
+
+// UC: UC-054 main step 5
+// agent/enabled is three-state: a Flagsmith value watch is applied as the
+// variant watch, not read as a boolean.
+func TestPullAppliesEnabledWatch(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	h.setDoc([]map[string]any{fsState("enabled", true, "watch")})
+	h.round()
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "watch" {
+		t.Fatalf("UC-054/main step 5 agent/enabled = %+v, want watch", v)
+	}
+}

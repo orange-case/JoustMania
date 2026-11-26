@@ -81,7 +81,7 @@ func waitResolvesFromFlagd(t *testing.T) {
 	client := openfeature.NewClient(Domain)
 	deadline := time.Now().Add(liveSetupTimeout)
 	for {
-		d, err := client.BooleanValueDetails(context.Background(), keyEnabled, false, openfeature.EvaluationContext{})
+		d, err := client.StringValueDetails(context.Background(), keyEnabled, "", openfeature.EvaluationContext{})
 		if err == nil && d.ErrorCode == "" {
 			return
 		}
@@ -302,7 +302,9 @@ func TestLiveFlip_KillSwitchWhenFlagdWasLateAtStartup(t *testing.T) {
 
 // TestLiveFlip_KillSwitch: `enabled` read on, then turned off, reaches the agent's
 // decision cycle within NFR-050 bounds, both by an explicit off overlay and by clearing
-// the overlay back to the fail-closed baseline (scripts/agent-dryrun-enable.sh off).
+// the overlay back to the CI baseline (off in services/flagd/ci/agent.json; the
+// production default is watch, so a real stop is a PUT of off). watch runs the agent but
+// applies nothing.
 //
 // UC: UC-045 main
 // UC: UC-040 main
@@ -326,6 +328,16 @@ func TestLiveFlip_KillSwitch(t *testing.T) {
 			t.Logf("enabled on->off seen after %s", took)
 		})
 	}
+	t.Run("UC-045/main watch runs but does not apply", func(t *testing.T) {
+		applying := func() bool { return p.flags.Applying(ctx) }
+		p.put(t, keyEnabled, "on")
+		readSettled(t, "applying", applying, true)
+		p.put(t, keyEnabled, "watch")
+		waitFor(t, "applying (watch)", applying, false, liveFlipBound)
+		readSettled(t, "enabled (watch runs)", read, true)
+		p.put(t, keyEnabled, "off")
+		waitFor(t, "enabled (kill switch)", read, false, liveFlipBound)
+	})
 }
 
 // TestLiveFlip_FlagdRestartMidRun: flagd restarts while the agent runs (#1713). The sync

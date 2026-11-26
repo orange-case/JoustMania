@@ -19,7 +19,7 @@ func TestEvaluate_WithInMemoryProvider(t *testing.T) {
 		keyEnabled: {
 			State:          memprovider.Enabled,
 			DefaultVariant: "on",
-			Variants:       map[string]any{"on": true, "off": false},
+			Variants:       map[string]any{"on": "on", "off": "off"},
 		},
 		keyObjectives: {
 			State:          memprovider.Enabled,

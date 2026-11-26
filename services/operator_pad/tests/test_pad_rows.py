@@ -45,7 +45,6 @@ def rs(values: dict | None = None, defaults: dict | None = None, commands=COMMAN
         "lifecycle_live": False,
         "agent_enabled": True,
         "agent_enabled_state": "on",
-        "agent_interventions_enabled_state": "on",
         "agent_level": "ambient",
         "agent_backend": "claude",
         "pad_commands": commands,

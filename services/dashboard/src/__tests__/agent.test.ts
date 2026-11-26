@@ -25,7 +25,7 @@ import {
   parseBlockedCounts,
 } from "../agent.js";
 import type { FlagStateJson, JaegerTracesResponse, VmQueryResponse } from "../agent.js";
-import { WRITE_GATE_OFF_HINT, renderFlagPanel } from "../components/AgentView.js";
+import { WATCH_HINT, renderFlagPanel } from "../components/AgentView.js";
 import { FLAG_STATE_NO_DATA } from "../degrade.js";
 import { agentStateBody } from "./otlp.js";
 import gamesFixture from "./fixtures/jaeger-flag-state-games.json";
@@ -41,10 +41,9 @@ const FLAG_REAL: FlagStateJson = {
   game_mode: "JoustFFA",
   trace_id: "0af7651916cd43dd8448eb211c80319c",
   updated_at_ms: T0_MS,
-  enabled: true,
+  enabled: "on",
   objectives: "engagement=1.00",
   interventions_allowed: "grant_shield,end_game",
-  interventions_enabled: true,
   battery_threshold: 20,
   max_interventions_per_minute: 6,
   decision_backend: "claude",
@@ -57,7 +56,7 @@ const FLAG_SHADOW: FlagStateJson = {
   game_id: "game_shadow00001",
   game_kind: "shadow",
   updated_at_ms: T0_MS + 60_000,
-  enabled: false,
+  enabled: "off",
 };
 const flagStates = () => [FLAG_REAL, FLAG_SHADOW].map(flagPanelFromState);
 
@@ -100,24 +99,23 @@ describe("UC-035: main step 3, flag panel from the agent's state", () => {
       actThreshold: 0.7,
       batteryThreshold: "20",
       maxPerMinute: "6",
-      enabled: true,
+      enabled: "on",
       objectives: "engagement=1.00",
       interventionsAllowed: "grant_shield,end_game",
-      interventionsEnabled: true,
       experimentsEnabled: true,
       eligibleGameKinds: "real,shadow",
     });
-    expect(shadow.enabled).toBe(false);
+    expect(shadow.enabled).toBe("off");
   });
 
   it("UC-035/main step 3 a missing field reads — (null), never off", () => {
     const panel = flagPanelFromState({ game_id: "g" });
-    expect(panel).toMatchObject({ enabled: null, interventionsEnabled: null, experimentsEnabled: null, actThreshold: null, eligibleGameKinds: "" });
+    expect(panel).toMatchObject({ enabled: null, experimentsEnabled: null, actThreshold: null, eligibleGameKinds: "" });
   });
 
-  it("UC-035/main step 3 the panel shows the kill switch, objectives and allow-list, and links the game trace", () => {
+  it("UC-035/main step 3 the panel shows the agent state, objectives and allow-list, and links the game trace", () => {
     const html = renderFlagPanel(flagStates()[0]);
-    expect(html).toContain("agent enabled (kill switch)");
+    expect(html).toContain("agent state");
     expect(html).toContain("interventions allowed");
     expect(html).toContain("objectives");
     expect(html).toContain(`/jaeger/trace/${FLAG_REAL.trace_id}`);
@@ -125,18 +123,19 @@ describe("UC-035: main step 3, flag panel from the agent's state", () => {
     expect(renderFlagPanel({ ...flagStates()[0], traceId: "" })).not.toContain("/jaeger/trace/");
   });
 
-  it("UC-035/main step 3 enabled=on with interventions_enabled=off shows the write-gate hint (#2093)", () => {
+  it("UC-035/main step 3 enabled=watch shows the state and the watch hint", () => {
     const base = flagStates()[0];
-    const off = renderFlagPanel({ ...base, enabled: true, interventionsEnabled: false });
-    expect(off).toContain("interventions enabled (write gate)");
-    expect(off).toContain(WRITE_GATE_OFF_HINT);
-    for (const quiet of [
-      { enabled: true, interventionsEnabled: true },
-      { enabled: true, interventionsEnabled: null },
-      { enabled: false, interventionsEnabled: false },
-    ]) {
-      expect(renderFlagPanel({ ...base, ...quiet })).not.toContain(WRITE_GATE_OFF_HINT);
+    const watch = renderFlagPanel({ ...base, enabled: "watch" });
+    expect(watch).toMatch(/agent state<\/span>\s*<span class="agent-flag-val">watch</);
+    expect(watch).toContain(WATCH_HINT);
+    for (const quiet of ["on", "off", null] as const) {
+      expect(renderFlagPanel({ ...base, enabled: quiet })).not.toContain(WATCH_HINT);
     }
+  });
+
+  it("UC-035/main step 3 an unknown or boolean enabled reads — (null)", () => {
+    expect(flagPanelFromState({ game_id: "g", enabled: "maybe" }).enabled).toBeNull();
+    expect(flagPanelFromState({ game_id: "g", enabled: true as never }).enabled).toBeNull();
   });
 
   it("UC-035/A3 no flag state yet is a hint, not an error", () => {
