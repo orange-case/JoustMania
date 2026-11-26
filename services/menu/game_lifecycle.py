@@ -250,7 +250,7 @@ class GameLifecycleMixin:
         # - Web source: inherit current context (connects to dashboard trace)
         # - Controller/button sources: fresh context (prevents chaining to previous game)
         span_ctx = None if source == "web" else otel_context.Context()
-        with tracer.start_as_current_span("start_game", context=span_ctx) as span:
+        with tracer.start_as_current_span("menu.game.start", context=span_ctx) as span:
             span.set_attribute("controller.serial", serial)
             span.set_attribute("game.name", mode.name)
             span.set_attribute("game.source", source)
@@ -341,10 +341,10 @@ class GameLifecycleMixin:
         stopped_before = self.state == menu_pb2.MenuState.STOPPED
         self.idle_monitor.stop()
 
-        with tracer.start_as_current_span("stop_lobby_music"):
+        with tracer.start_as_current_span("menu.lobby_music.stop"):
             await self.audio.stop_lobby_music()
 
-        with tracer.start_as_current_span("stop_button_monitor"):
+        with tracer.start_as_current_span("menu.button_monitor.stop"):
             await self.stop_button_monitor()
 
         logger.info("Button monitor and lobby music stopped for game start")
@@ -624,15 +624,15 @@ class GameLifecycleMixin:
                 self.state = menu_pb2.MenuState.RUNNING
 
             # Start button monitor with fresh trace context (not chained to game trace)
-            with tracer.start_as_current_span("restart_button_monitor", context=otel_context.Context()):
+            with tracer.start_as_current_span("menu.button_monitor.restart", context=otel_context.Context()):
                 await _bounded_restore_step("button monitor", start_button_monitor_and_wait)
 
             # Reset lobby state
-            with tracer.start_as_current_span("reset_lobby_state"):
+            with tracer.start_as_current_span("menu.lobby_state.reset"):
                 # Reset state_manager and re-register controllers (sets lobby colors)
                 await _bounded_restore_step("controller re-registration", self.state_manager.reset)
 
-            with tracer.start_as_current_span("restart_lobby_music"):
+            with tracer.start_as_current_span("menu.lobby_music.restart"):
                 await _bounded_restore_step("lobby music", self.audio.start_lobby_music)
 
             # Restart idle monitor with fresh timer. The state is read here, not at the start: a
