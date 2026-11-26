@@ -293,7 +293,7 @@ class TestDiscoveryLoopExport:
             loop._emit_bluetooth_health(100.04, 100.04)
 
         name, attrs = span.add_event.call_args.args
-        assert name == "bluetooth_controller_sample"
+        assert name == "controller.bluetooth_sample"
         assert attrs["bluetooth.connection_quality"] == GOOD
         assert attrs["bluetooth.report_gap_p95_ms"] == pytest.approx(10.0)
         assert attrs["bluetooth.report_gap_max_ms"] == pytest.approx(10.0)

@@ -402,7 +402,7 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
             logger.info(f"[{subscriber_id}] Filter updated: {old_count} → {new_count} controllers")
 
             span.add_event(
-                "filter_updated",
+                "controller.filter_updated",
                 {"previous_count": old_count, "new_count": new_count},
             )
             return new_filter

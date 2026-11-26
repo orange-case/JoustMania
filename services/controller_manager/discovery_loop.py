@@ -589,14 +589,14 @@ class DiscoveryLoop:
         # Invalidate cached serial list
         self._cached_serials = None
         # New controller found - create event span
-        with tracer.start_as_current_span("controller_connected") as span:
+        with tracer.start_as_current_span("controller.connected") as span:
             span.set_attribute(SpanAttr.CONTROLLER_SERIAL, serial)
             span.set_attribute("controller.count_total", connected_count)
 
             logger.info(f"Discovered new controller: {serial}")
 
             # Spawn tracking process
-            with tracer.start_as_current_span("spawn_controller_process") as spawn_span:
+            with tracer.start_as_current_span("controller.spawn_process") as spawn_span:
                 spawn_span.set_attribute(SpanAttr.CONTROLLER_SERIAL, serial)
                 await self._spawn_controller_process(serial)
 
@@ -1009,7 +1009,7 @@ class DiscoveryLoop:
                     sample["bluetooth.report_gap_p95_ms"] = float(quality.p95_ms)
                     sample["bluetooth.report_gap_max_ms"] = float(quality.max_ms)
                     sample["bluetooth.connection_quality"] = quality.quality
-                span.add_event("bluetooth_controller_sample", sample)
+                span.add_event("controller.bluetooth_sample", sample)
 
         self._reset_health_window(now)
 
@@ -1116,13 +1116,13 @@ class DiscoveryLoop:
             # rebuilt the serial cache while this spawn awaited the first state.
             self._cached_serials = None
 
-            # Add attributes to current span (this is called within "spawn_controller_process" span)
+            # Add attributes to current span (this is called within "controller.spawn_process" span)
             current_span = trace.get_current_span()
             current_span.set_attribute(SpanAttr.CONTROLLER_SERIAL, serial)
             current_span.set_attribute("controller.battery", battery)
             current_span.set_attribute("controller.name", name)
             current_span.add_event(
-                "controller_added_to_tracking",
+                "controller.tracking_added",
                 {"serial": serial, "battery": battery, "name": name},
             )
 

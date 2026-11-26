@@ -523,12 +523,14 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         rumble_ms = DEATH_RUMBLE_MS
         red_hold_ms = DEATH_RED_HOLD_MS
         fade_ms = DEATH_FADE_MS
-        with tracer.start_as_current_span("effect_player_death", context=trace_context, kind=SpanKind.CONSUMER) as span:
+        with tracer.start_as_current_span(
+            "controller.effect.player_death", context=trace_context, kind=SpanKind.CONSUMER
+        ) as span:
             span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
 
             # End the agent shield immediately for a clean transition (#1301, UC-048 A2); the
             # running effect (e.g. a warning flash) is replaced by the death effect task below.
-            span.add_event("cancel_existing_effect")
+            span.add_event("effect.cancel_existing")
             # The player is out from the first moment: a reconnect during the effect
             # restores off, never the game colour (UC-002 BR-008, #2471).
             self.base_colors[serial] = Colors.Black.value
@@ -536,7 +538,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
 
             # Long rumble (~1 s, UC-030 step 9): clearly different from the 200 ms warning. It runs on its
             # own stop timer, so the red hold, the fade and the end of the game do not cut it short.
-            span.add_event("vibration", {"intensity": 255, "duration_ms": rumble_ms})
+            span.add_event("effect.vibration", {"intensity": 255, "duration_ms": rumble_ms})
             await self.set_vibration(serial, 255, rumble_ms)
             stop_timer = self.vibration_tasks.get(serial)
             if stop_timer is not None:
@@ -549,7 +551,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
                 # base_colors is already black (set above, before this task exists), so a base_color
                 # command that lands during the hold or the fade wins: apply_base_color writes win,
                 # and the restore below picks up the latest value (#757, #2540).
-                span.add_event("fade_to_black", {"duration_ms": fade_ms})
+                span.add_event("effect.fade_to_black", {"duration_ms": fade_ms})
                 await self._effect_fade_out(serial, Colors.Red.value, fade_ms)
 
             # The red hold and the fade run as the controller's effect task, so the command reader
@@ -562,7 +564,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
                 effect_type=controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH,
             )
             if death is not None:
-                span.add_event("led_red")
+                span.add_event("effect.led_red")
                 await self._set_led_color(serial, Colors.Red.value)
 
     async def _effect_player_respawn(self, serial: str, **_kwargs) -> None:
@@ -584,16 +586,16 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         # The winner rainbow ends an agent shield (#1301, UC-048 A2).
         await self.end_shield_effect(serial, restore=False, reason=SHIELD_END_GAME_END)
         with tracer.start_as_current_span(
-            "effect_winner_rainbow", context=trace_context, kind=SpanKind.CONSUMER
+            "controller.effect.winner_rainbow", context=trace_context, kind=SpanKind.CONSUMER
         ) as span:
             span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
             span.set_attribute("effect.duration_ms", duration_ms)
 
-            span.add_event("rainbow_start", {"duration_ms": duration_ms})
+            span.add_event("effect.rainbow_start", {"duration_ms": duration_ms})
             await self.play_effect_with_restore(
                 serial, "rainbow", Colors.White.value, duration_ms, 1, restore_color or True
             )
-            span.add_event("rainbow_end")
+            span.add_event("effect.rainbow_end")
 
     async def _effect_countdown(
         self,
@@ -1037,7 +1039,9 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         """
         phase_duration_sec = phase_duration_ms / 1000.0
 
-        with tracer.start_as_current_span("effect_countdown", context=trace_context, kind=SpanKind.CONSUMER) as span:
+        with tracer.start_as_current_span(
+            "controller.effect.countdown", context=trace_context, kind=SpanKind.CONSUMER
+        ) as span:
             span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
 
             try:
@@ -1045,24 +1049,24 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
                 self.backend.set_effect_active(serial, True)
 
                 # Red - "3"
-                span.add_event("countdown_red", {"phase": 3, "duration_ms": phase_duration_ms})
+                span.add_event("effect.countdown_red", {"phase": 3, "duration_ms": phase_duration_ms})
                 await self.set_controller_color(serial, Colors.Red.value)
                 await asyncio.sleep(phase_duration_sec)
 
                 # Yellow - "2"
-                span.add_event("countdown_yellow", {"phase": 2, "duration_ms": phase_duration_ms})
+                span.add_event("effect.countdown_yellow", {"phase": 2, "duration_ms": phase_duration_ms})
                 await self.set_controller_color(serial, Colors.Yellow.value)
                 await asyncio.sleep(phase_duration_sec)
 
                 # Green - "1" / GO!
-                span.add_event("countdown_green", {"phase": 1, "duration_ms": phase_duration_ms})
+                span.add_event("effect.countdown_green", {"phase": 1, "duration_ms": phase_duration_ms})
                 await self.set_controller_color(serial, Colors.Green.value)
                 await asyncio.sleep(phase_duration_sec)
 
-                span.add_event("countdown_complete")
+                span.add_event("effect.countdown_complete")
 
             except asyncio.CancelledError:
-                span.add_event("countdown_cancelled")
+                span.add_event("effect.countdown_cancelled")
                 raise
             finally:
                 # Remove from active_effects so new base colors can be applied immediately,

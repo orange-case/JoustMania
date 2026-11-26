@@ -102,7 +102,7 @@ Times are wall-clock epoch nanoseconds. In Free-for-All a player dies at most on
 **What counts as the moment record (BR-009).** Only a record with the moment's name and its `moment.id`: the
 span event, the span or the log record of section 3. These do not count, even when they describe the same
 happening: the INFO log lines the game writes for a warning or a death, the game event `player_death` that the
-event bus records on the current span, and the controller manager's effect records (`effect_player_death`,
+event bus records on the current span, and the controller manager's effect records (`controller.effect.player_death`,
 `player_warning`).
 
 ## 5. Result format
