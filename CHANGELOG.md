@@ -1,5 +1,76 @@
 # Changelog
 
+## [0.26.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.25.0...joustmania-v0.26.0) (2026-11-26)
+
+
+### Features
+
+* **agent:** enabled becomes off / watch / on; the write gate interventions_enabled is gone ([#2846](https://github.com/orange-case/JoustMania/issues/2846), [#2800](https://github.com/orange-case/JoustMania/issues/2800) PR B) ([#2863](https://github.com/orange-case/JoustMania/issues/2863)) ([a72d125](https://github.com/orange-case/JoustMania/commit/a72d125f82e58ddba9ea4a2b3f24a3bc7dbbe9dd))
+* **game-coordinator:** pulse the controllers while the instruction clip plays ([#2860](https://github.com/orange-case/JoustMania/issues/2860)) ([7f67f86](https://github.com/orange-case/JoustMania/commit/7f67f86d5cb3465fd61b4d596c378454b3f55c52))
+* **game-coordinator:** retire game_trace_correlation and the agent_log_events flag ([#2783](https://github.com/orange-case/JoustMania/issues/2783)) ([#2830](https://github.com/orange-case/JoustMania/issues/2830)) ([5b3b1a4](https://github.com/orange-case/JoustMania/commit/5b3b1a4f913216b95344e01687a4c5040e6d21d3))
+* **setup:** name a missing or outdated operator pad udev rule ([#2858](https://github.com/orange-case/JoustMania/issues/2858)) ([#2859](https://github.com/orange-case/JoustMania/issues/2859)) ([1d519b5](https://github.com/orange-case/JoustMania/commit/1d519b5d6691b766162c782aadb93aee60556ff5))
+
+
+### Bug Fixes
+
+* **agent:** deliver collector -&gt; agent over OTLP/HTTP so a late agent gets game trace ids ([#2887](https://github.com/orange-case/JoustMania/issues/2887)) ([5aa3b95](https://github.com/orange-case/JoustMania/commit/5aa3b951328c119775f94f7f6bc6b93ec8777919))
+* **agent:** reword the LLM prompt's shield_charged sentence ([#2876](https://github.com/orange-case/JoustMania/issues/2876)) ([#2879](https://github.com/orange-case/JoustMania/issues/2879)) ([7f52d52](https://github.com/orange-case/JoustMania/commit/7f52d5204268228318687da73d8dcdfc089a3b6f))
+
+
+### Refactoring
+
+* **agent,dashboard:** remove the report-only arm calibration and dead prediction code ([#2815](https://github.com/orange-case/JoustMania/issues/2815)) ([#2875](https://github.com/orange-case/JoustMania/issues/2875)) ([6c74ada](https://github.com/orange-case/JoustMania/commit/6c74ada2ea8397c051ce195220a157dc1525788c))
+* **agent:** drop the deferred hold-key promotion queue ([#2810](https://github.com/orange-case/JoustMania/issues/2810)) ([#2821](https://github.com/orange-case/JoustMania/issues/2821)) ([2e7b713](https://github.com/orange-case/JoustMania/commit/2e7b7135e0cd6ddc91aa7a38daa3b3e01242ee32))
+* **agent:** four experiment declarers become two ([#2812](https://github.com/orange-case/JoustMania/issues/2812)) ([#2868](https://github.com/orange-case/JoustMania/issues/2868)) ([02c6017](https://github.com/orange-case/JoustMania/commit/02c6017ebeb8688a56d87323c24edad2e9d5c2f2))
+* **agent:** no automatic revert; validated objectives are the single autonomous ceiling ([#2885](https://github.com/orange-case/JoustMania/issues/2885)) ([7eeb47e](https://github.com/orange-case/JoustMania/commit/7eeb47e50ab05db6c547ad981e76c94587f54259))
+* **agent:** offline archetype calibration instead of automatic recalibration ([#2813](https://github.com/orange-case/JoustMania/issues/2813)) ([#2827](https://github.com/orange-case/JoustMania/issues/2827)) ([72873e5](https://github.com/orange-case/JoustMania/commit/72873e53ff4f68e9df6b8098e51e66a365f36d2e))
+* **agent:** one human agent-stop key; operator pad keys stop racing ([#2800](https://github.com/orange-case/JoustMania/issues/2800) PR A) ([#2849](https://github.com/orange-case/JoustMania/issues/2849)) ([a0f619f](https://github.com/orange-case/JoustMania/commit/a0f619f0fe063558f31462e1aa0ab71b7a2c89b5))
+* **agent:** one neutral prompt; goal lines, brief and prediction ask on claude and jev ([#2817](https://github.com/orange-case/JoustMania/issues/2817)) ([#2886](https://github.com/orange-case/JoustMania/issues/2886)) ([132ea87](https://github.com/orange-case/JoustMania/commit/132ea870fc79c549c699aaa1781aca3c6a587874))
+* **agent:** promotion modes issue and autonomous only ([#2816](https://github.com/orange-case/JoustMania/issues/2816)) ([#2866](https://github.com/orange-case/JoustMania/issues/2866)) ([8939bb4](https://github.com/orange-case/JoustMania/commit/8939bb43ffe4821dcb1edc5ef10e00e0fbe0a1f2))
+* **agent:** read deaths from one channel; booth moment shapes in an appendix ([#2786](https://github.com/orange-case/JoustMania/issues/2786)) ([#2834](https://github.com/orange-case/JoustMania/issues/2834)) ([8a6c06a](https://github.com/orange-case/JoustMania/commit/8a6c06afa76899382e6759a807706b342e010c4d))
+* **agent:** remove the openai decision backend ([#2788](https://github.com/orange-case/JoustMania/issues/2788)) ([#2820](https://github.com/orange-case/JoustMania/issues/2820)) ([f3d1eec](https://github.com/orange-case/JoustMania/commit/f3d1eec2fde367d947a1f5f58bb6d9cc5edf65e9))
+* **agent:** rules path records decisions instead of posing as a decide backend ([#2865](https://github.com/orange-case/JoustMania/issues/2865)) ([a18acfe](https://github.com/orange-case/JoustMania/commit/a18acfe0de0cdacbed94d06f7b63ae971efd583d))
+* **agent:** shield gating from coordinator gauges, no agent-side ledger ([#2814](https://github.com/orange-case/JoustMania/issues/2814)) ([#2872](https://github.com/orange-case/JoustMania/issues/2872)) ([04bdac9](https://github.com/orange-case/JoustMania/commit/04bdac914a1e32593dce29de2c3ebed0dbb91cca))
+* **agent:** shrink the decision outcome and reason vocabulary ([#2805](https://github.com/orange-case/JoustMania/issues/2805)) ([#2851](https://github.com/orange-case/JoustMania/issues/2851)) ([f9a0a7b](https://github.com/orange-case/JoustMania/commit/f9a0a7bacaed20f3d462bd55df9f36dc6a96c2eb))
+* **agent:** split experiment registry by phase and break up long functions ([#2635](https://github.com/orange-case/JoustMania/issues/2635)) ([#2867](https://github.com/orange-case/JoustMania/issues/2867)) ([4b51d95](https://github.com/orange-case/JoustMania/commit/4b51d95df2c9c5ed4a8cd207433c331fdb8e3e09))
+* **agent:** trim the prediction machinery to the FR-200 core ([#2815](https://github.com/orange-case/JoustMania/issues/2815)) ([#2850](https://github.com/orange-case/JoustMania/issues/2850)) ([c9ca40c](https://github.com/orange-case/JoustMania/commit/c9ca40c754cac8f44a2c526de034f5f0a3930a93))
+* **agent:** verdict and stop rules sized to six-archetype experiments ([#2811](https://github.com/orange-case/JoustMania/issues/2811)) ([#2873](https://github.com/orange-case/JoustMania/issues/2873)) ([dd0767d](https://github.com/orange-case/JoustMania/commit/dd0767d26c271e1919e5a9f4b64ef07cea18a36d))
+* **dashboard:** read agent and experiment state from a JSON endpoint, not Jaeger ([#2809](https://github.com/orange-case/JoustMania/issues/2809)) ([#2845](https://github.com/orange-case/JoustMania/issues/2845)) ([2d016a4](https://github.com/orange-case/JoustMania/commit/2d016a45ea04df3094fcad0af507538c69db11cb))
+* **flag-service:** one kill-switch list, tolerant registry parser ([#2881](https://github.com/orange-case/JoustMania/issues/2881)) ([c890bdf](https://github.com/orange-case/JoustMania/commit/c890bdfddd54c2faabc50dca3d3490af6edccc5a))
+* **flag-service:** persistence is a property of the flag, not of the request ([#2803](https://github.com/orange-case/JoustMania/issues/2803)) ([#2882](https://github.com/orange-case/JoustMania/issues/2882)) ([ba2468a](https://github.com/orange-case/JoustMania/commit/ba2468a44d67e0424866b08d925277471667f157))
+* **game-coordinator:** one signal per fact for bus events and deaths ([#2807](https://github.com/orange-case/JoustMania/issues/2807)) ([#2862](https://github.com/orange-case/JoustMania/issues/2862)) ([41b49d0](https://github.com/orange-case/JoustMania/commit/41b49d0070b964aa1568ee89fc8b751b15b0171e))
+* **game-coordinator:** split BaseGameMode concerns into mixins ([#2633](https://github.com/orange-case/JoustMania/issues/2633)) ([#2874](https://github.com/orange-case/JoustMania/issues/2874)) ([ed423b6](https://github.com/orange-case/JoustMania/commit/ed423b6c198f4cd5dbf03ff0f5898d0c77c6139a))
+* **game-coordinator:** split InterventionManager by responsibility ([#2634](https://github.com/orange-case/JoustMania/issues/2634)) ([#2870](https://github.com/orange-case/JoustMania/issues/2870)) ([5521eb2](https://github.com/orange-case/JoustMania/commit/5521eb254b8a5ff907cf40e4236e3dfca55f1661))
+* **menu:** one settings option table for every input surface ([#2801](https://github.com/orange-case/JoustMania/issues/2801)) ([#2848](https://github.com/orange-case/JoustMania/issues/2848)) ([990f3c2](https://github.com/orange-case/JoustMania/commit/990f3c20e357afb183651b829c96ff3a0409ff86))
+* **menu:** remove controller admin mode ([#2819](https://github.com/orange-case/JoustMania/issues/2819)) ([#2822](https://github.com/orange-case/JoustMania/issues/2822)) ([0fedcdc](https://github.com/orange-case/JoustMania/commit/0fedcdc3068ea3465033c3e26f0a58c3ab44b079))
+* **otel:** drop metrics nothing reads ([#2808](https://github.com/orange-case/JoustMania/issues/2808)) ([#2844](https://github.com/orange-case/JoustMania/issues/2844)) ([96bb98c](https://github.com/orange-case/JoustMania/commit/96bb98c41a50a6c7423998e28a71ccc809733ac8))
+* remove python-hid, bluetooth_backend targeting and the fraction scope ([#2784](https://github.com/orange-case/JoustMania/issues/2784) part 2) ([#2869](https://github.com/orange-case/JoustMania/issues/2869)) ([9a85912](https://github.com/orange-case/JoustMania/commit/9a85912121e3e07e367a2543645725df323de01f))
+* retire force_all_start_seconds and the dashboard Admin badge ([#2864](https://github.com/orange-case/JoustMania/issues/2864)) ([bb01407](https://github.com/orange-case/JoustMania/commit/bb0140798e32cf3629e8108c535de67b13114026))
+* retire parked controller-backend rollout and canary ([#2784](https://github.com/orange-case/JoustMania/issues/2784)) ([#2823](https://github.com/orange-case/JoustMania/issues/2823)) ([8ea94f5](https://github.com/orange-case/JoustMania/commit/8ea94f5a00398bd58003532e0170cd6ac8f18b49))
+
+
+### Documentation
+
+* **agent:** spec retiring the trace gauge and the agent log events flag ([#2783](https://github.com/orange-case/JoustMania/issues/2783)) ([#2825](https://github.com/orange-case/JoustMania/issues/2825)) ([ac9855d](https://github.com/orange-case/JoustMania/commit/ac9855d4395bc37c70e1438b4fe3dbaaef905e00))
+* describe the queue-only service tiers and e2e ([#2780](https://github.com/orange-case/JoustMania/issues/2780)) ([#2781](https://github.com/orange-case/JoustMania/issues/2781)) ([fda2364](https://github.com/orange-case/JoustMania/commit/fda2364b81d365e0758d66f402ce58436bab6484))
+* **flags:** generate the flag catalog (flags.md §3–§10a) from flagd JSON and the registry ([#2855](https://github.com/orange-case/JoustMania/issues/2855)) ([f9fc53f](https://github.com/orange-case/JoustMania/commit/f9fc53f5ed48b29088f54e43659ae1d3f4fde4ce))
+* freeze the specs-inventory ledger; new drift is a spec-drift issue ([#2798](https://github.com/orange-case/JoustMania/issues/2798)) ([#2839](https://github.com/orange-case/JoustMania/issues/2839)) ([162372c](https://github.com/orange-case/JoustMania/commit/162372cffb903a000bea8268abfb1e3594a8b12e))
+* one base game lifecycle, mode use cases keep their delta ([#2797](https://github.com/orange-case/JoustMania/issues/2797)) ([#2842](https://github.com/orange-case/JoustMania/issues/2842)) ([d0f9e67](https://github.com/orange-case/JoustMania/commit/d0f9e6794dd00a7cdac8a602818e98187e1ce11f))
+* one canonical home for flag ownership ([#2794](https://github.com/orange-case/JoustMania/issues/2794)) ([#2852](https://github.com/orange-case/JoustMania/issues/2852)) ([85fbe5a](https://github.com/orange-case/JoustMania/commit/85fbe5a40f556d24081c5d287a256ee95b88ca15))
+* remove stale state headers and delivery-history markers ([#2789](https://github.com/orange-case/JoustMania/issues/2789)) ([#2826](https://github.com/orange-case/JoustMania/issues/2826)) ([a499f2f](https://github.com/orange-case/JoustMania/commit/a499f2f4273141b3f5789db8cd0e714d0866d007))
+* **requirements:** rows keep story, status and link; rules live in one place ([#2853](https://github.com/orange-case/JoustMania/issues/2853)) ([ab739d3](https://github.com/orange-case/JoustMania/commit/ab739d35a0c870efca3d8f8386775b1fa9ebe608))
+* **spec:** split UC-040: shield mechanics to UC-048, rules engine to decide-contract §15 ([#2857](https://github.com/orange-case/JoustMania/issues/2857)) ([d668630](https://github.com/orange-case/JoustMania/commit/d668630f6db64a0dff5cd3f6f9cb574f75c3584e))
+* **specs:** telemetry.md and services.md state current contracts only ([#2856](https://github.com/orange-case/JoustMania/issues/2856)) ([17bb03b](https://github.com/orange-case/JoustMania/commit/17bb03b5e1d319a7ee04a6515f68ac4781a08b08))
+* talk and stage-host material leaves the core use cases ([#2785](https://github.com/orange-case/JoustMania/issues/2785)) ([#2843](https://github.com/orange-case/JoustMania/issues/2843)) ([ca14767](https://github.com/orange-case/JoustMania/commit/ca14767e862a4ac46d27727cb5afed86ff112abf))
+* thin the entity model to diagram, meanings and source links ([#2796](https://github.com/orange-case/JoustMania/issues/2796)) ([#2840](https://github.com/orange-case/JoustMania/issues/2840)) ([42833d7](https://github.com/orange-case/JoustMania/commit/42833d79b52e5bd12db1e390ad41c557fabc1543))
+* **UC-016:** the Pi 5 check with the real pad is done ([#2741](https://github.com/orange-case/JoustMania/issues/2741)) ([#2861](https://github.com/orange-case/JoustMania/issues/2861)) ([b404e3c](https://github.com/orange-case/JoustMania/commit/b404e3ca29d6a5f17eab7eac0e3565cf40ca3117))
+* **use-cases:** drop Code/tests lines and issue provenance ([#2854](https://github.com/orange-case/JoustMania/issues/2854)) ([5586f44](https://github.com/orange-case/JoustMania/commit/5586f442abf3394f4d24f30fa2c81807d16740c5))
+
+
+### Tests
+
+* **integration:** make TC-007 wait for the agent's game trace ids ([#2880](https://github.com/orange-case/JoustMania/issues/2880)) ([000c930](https://github.com/orange-case/JoustMania/commit/000c930c3cb0c8ee2a130f067dbd894a9ff2a19b))
+
 ## [0.25.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.24.0...joustmania-v0.25.0) (2026-11-25)
 
 
