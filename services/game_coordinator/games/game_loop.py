@@ -652,6 +652,7 @@ class GameLoopMixin:
             try:
                 from proto import audio_pb2
 
+                self._audio_volume = self.game_volume
                 # game.cycle is open here: parent the RPC span to it like every in-game audio call (#2671)
                 with self._game_cycle_attached():
                     await self.audio_client.SetVolume(audio_pb2.SetVolumeRequest(volume=self.game_volume))

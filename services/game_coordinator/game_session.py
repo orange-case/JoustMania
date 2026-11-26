@@ -559,6 +559,7 @@ class GameSession:
                 # analytics cleanup and game-state gauges are per-session (#775,
                 # FR-041).
                 game.game_kind = self.game_kind
+                game.audio_health_client = self.clients.audio_health
                 game.moment_shape = moment_shape
                 # Thread experiment attribution onto the game so its in-loop
                 # set_game_transaction_context carries it for flag evaluation.
@@ -679,6 +680,14 @@ class GameSession:
                     self._set_duration_gauge()
                 except Exception as e:
                     logger.warning(f"Could not set final game_duration_seconds for game {self.game_id}: {e}")
+
+                # Detached sounds (the winner line) still need the audio channel.
+                drain_audio = getattr(game, "drain_audio", None)
+                if drain_audio is not None:
+                    try:
+                        await drain_audio()
+                    except Exception as e:
+                        logger.warning(f"Waiting for the open audio sends of game {self.game_id} failed: {e}")
 
                 # Cleanup channels
                 await self.clients.close()

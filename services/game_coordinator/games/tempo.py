@@ -33,12 +33,14 @@ from opentelemetry import trace
 from services.game_coordinator import game_clock, metrics
 from services.game_coordinator.games import base as _base
 from services.game_coordinator.games.base import (
+    AUDIO_PROBE_INTERVAL_SECONDS,
     AUDIO_TEMPO_RETRY_MAX_SECONDS,
     AUDIO_TEMPO_RETRY_MIN_SECONDS,
     AUDIO_TEMPO_RPC_TIMEOUT_SECONDS,
     DEFAULT_RAMP_DOWN_SECONDS,
     DEFAULT_RAMP_UP_SECONDS,
     MIN_GLIDE_SECONDS,
+    MUSIC_REFUSAL_RESTARTS_MAX,
     MUSIC_TICK_LOG_INTERVAL_SECONDS,
     MUTED_TRACK_ID,
     RAMP_CURVE_LINEAR,
@@ -51,6 +53,7 @@ from services.game_coordinator.games.base import (
     resolve_ramp_seconds,
     tempo_from_intensity,
 )
+from services.game_coordinator.grpc_clients import PROBE_DOWN, PROBE_OK
 
 
 class TempoMixin:
@@ -76,6 +79,18 @@ class TempoMixin:
         self._audio_synced = True
         self._audio_retry_at = 0.0
         self._audio_retry_backoff = AUDIO_TEMPO_RETRY_MIN_SECONDS
+        # Music resume (UC-031 A7, BR-009): set once the game sent its music start.
+        self._music_wanted = False
+        # The audio service failed a call or a probe since it last answered.
+        self._audio_down = False
+        # The game's track is gone (failed start, refused glide): start it again.
+        self._music_lost = False
+        self._audio_probe_at = 0.0
+        self._music_refusal_restarts = 0
+        # The running check-and-restart task of the music loop (single flight).
+        self._music_keeper: asyncio.Task | None = None
+        # Last volume the game sent, so a music restart plays at the same level.
+        self._audio_volume: float | None = None
         # Rate limit for the failing-tick warning of _music_loop.
         self._tick_error_text: str | None = None
         self._tick_error_logged_at = 0.0
@@ -166,30 +181,48 @@ class TempoMixin:
         if volume is None:
             volume = self.game_volume
 
-        try:
-            from proto import audio_pb2
+        self._music_wanted = True
+        self._music_lost = False
+        self._audio_down = False
+        self._music_refusal_restarts = 0
+        if await self._send_music_start(volume, SLOW_MUSIC_SPEED):
+            logger.info(f"Game music started: {self.music_track_id}, next change at +{self._next_change_in():.1f}s")
 
+    async def _send_music_start(self, volume: float, tempo: float) -> bool:
+        """SetVolume, then PlayMusic at ``tempo``; True when a track plays (UC-031 step 2, A7).
+
+        A failed call marks the audio service down and the music lost, so the
+        music loop starts it again once the service answers. A refusal (no
+        playable file) is final: repeating it would not help.
+        """
+        from proto import audio_pb2
+
+        self._audio_volume = volume
+        try:
             # Set initial volume (may be low during countdown, then ramped up)
             await self.audio_client.SetVolume(audio_pb2.SetVolumeRequest(volume=volume))
-
-            # Start game music
             response = await self.audio_client.PlayMusic(
                 audio_pb2.PlayMusicRequest(
                     file_pattern="Joust/music/*.ogg",
                     loop=True,
-                    tempo=SLOW_MUSIC_SPEED,
+                    tempo=tempo,
                     priority=audio_pb2.AudioPriority.MEDIUM,
                 )
             )
-
-            if response.success:
-                self.music_track_id = response.track_id
-                logger.info(f"Game music started: {response.track_id}, next change at +{self._next_change_in():.1f}s")
-            else:
-                logger.warning(f"Failed to start game music (tempo schedule runs without it): {response.error}")
-
         except Exception as e:
-            logger.warning(f"Failed to start game music (tempo schedule runs without it): {e}")
+            logger.warning(f"Failed to start game music (tempo schedule runs without it, retried): {e}")
+            self.music_track_id = None
+            self._music_lost = True
+            self._audio_down = True
+            return False
+
+        self._music_lost = False
+        if not response.success:
+            logger.warning(f"Failed to start game music (tempo schedule runs without it): {response.error}")
+            self.music_track_id = None
+            return False
+        self.music_track_id = response.track_id
+        return True
 
     def _next_change_in(self) -> float:
         """Seconds until the next scheduled tempo change (for logs)."""
@@ -203,6 +236,9 @@ class TempoMixin:
         try:
             from proto import audio_pb2
 
+            self._music_wanted = False
+            # A restart still in flight must not start the music after this stop.
+            self._cancel_music_keeper()
             await self.audio_client.StopMusic(audio_pb2.StopMusicRequest(track_id=""))
             self.music_track_id = None
             logger.info("Game music stopped")
@@ -328,19 +364,23 @@ class TempoMixin:
         if scheduled:
             logger.debug(f"Next tempo change at +{self._next_change_in():.1f}s")
 
-    async def _push_audio(self, target: float, remaining: float) -> None:
+    async def _push_audio(self, target: float, remaining: float, *, after_outage: bool = False) -> str:
         """Send one ChangeTempo glide toward ``target`` over ``remaining`` seconds (#1833).
 
         Skipped (nothing to keep in sync) without an audio client or a playing track
         (none, failed PlayMusic, or ``muted``): the intensity moves anyway (D1).
         An error or a timeout marks the audio unsynced, so the music loop resends
         the remaining glide after a back-off (0.5 s doubling to 5 s). A refusal
-        (``success=False``: the track was replaced or stopped) stops the resends
-        for this track: the audio service no longer plays it.
+        (``success=False``: the track was replaced, stopped, or the service
+        restarted) drops the track; the music loop starts the music again
+        (UC-031 A7), for refusals outside an outage at most
+        ``MUSIC_REFUSAL_RESTARTS_MAX`` times per game.
+
+        Returns ``accepted``, ``refused``, ``failed`` or ``skipped`` (no track).
         """
         if not self.audio_client or self.music_track_id in (None, MUTED_TRACK_ID):
             self._audio_synced = True
-            return
+            return "skipped"
 
         from proto import audio_pb2
 
@@ -358,18 +398,31 @@ class TempoMixin:
                 # First failure of a streak, then once per maximum back-off: no log flood.
                 logger.warning(f"Failed to change music tempo (intensity continues, resending): {e!r}")
             self._audio_synced = False
+            self._audio_down = True
             self._audio_retry_at = game_clock.now() + self._audio_retry_backoff
             self._audio_retry_backoff = min(self._audio_retry_backoff * 2, AUDIO_TEMPO_RETRY_MAX_SECONDS)
-            return
+            return "failed"
 
         self._audio_retry_backoff = AUDIO_TEMPO_RETRY_MIN_SECONDS
         self._audio_synced = True
         if response is not None and not response.success:
-            logger.warning(
-                f"Audio refused tempo change for track {self.music_track_id} ({response.error}); "
-                "no further tempo changes are sent for it"
-            )
+            track = self.music_track_id
             self.music_track_id = None
+            outage = after_outage or self._audio_down
+            if outage or self._music_refusal_restarts < MUSIC_REFUSAL_RESTARTS_MAX:
+                if not outage:
+                    self._music_refusal_restarts += 1
+                self._music_lost = self._music_wanted
+                logger.warning(
+                    f"Audio refused tempo change for track {track} ({response.error}); starting the game music again"
+                )
+            else:
+                logger.warning(
+                    f"Audio refused tempo change for track {track} ({response.error}); "
+                    "no further tempo changes are sent for it"
+                )
+            return "refused"
+        return "accepted"
 
     async def _apply_ramp_tempo(self, target_tempo: float) -> None:
         """Apply one interpolated step of an ``ease`` ramp_tempo curve (#1117).
@@ -481,12 +534,103 @@ class TempoMixin:
         if not self._audio_synced and now >= self._audio_retry_at:
             await self._push_audio(self._intensity.target, self._intensity.end_time - now)
 
+        self._start_music_keeper()
+
         # Gauges follow the intensity while a ramp runs, plus once after it ends.
         ramp_running = not self._intensity.is_complete(now)
         if ramp_running or self._ramp_metrics_open:
             self._emit_music_tempo_metric()
             self._emit_threshold_metrics()
         self._ramp_metrics_open = ramp_running
+
+    def _start_music_keeper(self) -> None:
+        """Start :meth:`_keep_music_alive` beside the tick, once per probe interval.
+
+        Not awaited: a check plus a music restart can take seconds against a slow
+        audio service, and the tick must keep driving the intensity meanwhile
+        (UC-031 A7 step 1). Single flight: no second check starts while one runs.
+        """
+        if not self._music_wanted or not self.audio_client:
+            return
+        if self._music_keeper is not None and not self._music_keeper.done():
+            return
+        now = game_clock.now()
+        if now < self._audio_probe_at:
+            return
+        self._audio_probe_at = now + AUDIO_PROBE_INTERVAL_SECONDS
+        self._music_keeper = asyncio.get_running_loop().create_task(self._keep_music_alive())
+        self._music_keeper.add_done_callback(self._log_keeper_failure)
+
+    def _cancel_music_keeper(self) -> None:
+        if self._music_keeper is not None and not self._music_keeper.done():
+            self._music_keeper.cancel()
+
+    @staticmethod
+    def _log_keeper_failure(task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning(f"Game music check failed: {task.exception()!r}")
+
+    async def _keep_music_alive(self) -> None:
+        """Start the game music again after the audio service lost it (UC-031 A7, BR-009).
+
+        After an outage the first answer is followed by a glide for the track: an
+        accepted glide means the track survived (a slow service, not a restart).
+        A refused glide, or a track that was lost already, restarts the music at the
+        game's volume and the tempo of the intensity now.
+        """
+        status = await self._probe_audio()
+        if status == PROBE_DOWN:
+            if not self._audio_down:
+                logger.warning("Audio service unreachable during the game; the music starts again when it is back")
+            self._audio_down = True
+            return
+        if status == PROBE_OK and not self._audio_down and not self._music_lost:
+            return
+
+        if self._audio_down or status != PROBE_OK:
+            logger.info("Audio service answers again: checking the game music")
+            if not self._music_lost and self.music_track_id not in (None, MUTED_TRACK_ID):
+                # Still "down" while this check runs: a tick glide refused meanwhile is the
+                # outage's doing and must not use up a refusal restart.
+                self._audio_down = True
+                outcome = await self._push_audio(
+                    self._intensity.target, self._intensity.end_time - game_clock.now(), after_outage=True
+                )
+                if outcome == "failed":
+                    return
+                self._audio_down = False
+                if outcome == "accepted":
+                    return
+            else:
+                self._audio_down = False
+        if self._music_lost:
+            await self._restart_game_music()
+
+    async def _probe_audio(self) -> str:
+        """``PROBE_OK`` / ``PROBE_DOWN`` / ``PROBE_RECONNECTED`` from the session's audio probe."""
+        probe = getattr(self, "audio_health_client", None)
+        if probe is None:
+            return PROBE_OK
+        try:
+            return await probe.check()
+        except Exception as e:
+            logger.debug(f"Audio probe failed: {e!r}")
+            return PROBE_DOWN
+
+    async def _restart_game_music(self) -> None:
+        """Send the music start again at the game's volume and the tempo of the intensity now."""
+        now = game_clock.now()
+        tempo = tempo_from_intensity(self._intensity.value_at(now))
+        volume = self._audio_volume if self._audio_volume is not None else self.game_volume
+        if not await self._send_music_start(volume, tempo):
+            return
+        logger.info(f"Game music started again: {self.music_track_id} at {tempo:.2f}x")
+        # Ticks ran while PlayMusic was in flight: a hold or a step set meanwhile is
+        # already complete, so compare with the tempo sent, not only the ramp state.
+        now = game_clock.now()
+        moved = abs(tempo_from_intensity(self._intensity.value_at(now)) - tempo) > 1e-6
+        if moved or not self._intensity.is_complete(now):
+            await self._push_audio(self._intensity.target, self._intensity.end_time - now)
 
     def _log_tick_failure(self, error: Exception) -> None:
         """Warn about a failed tempo tick: first, on a new error text, then every interval."""
@@ -527,6 +671,7 @@ class TempoMixin:
                         self._log_tick_failure(e)
                     await game_clock.sleep(0.1)  # Check every 100ms
             finally:
+                self._cancel_music_keeper()
                 if token is not None:
                     otel_context.detach(token)
         except asyncio.CancelledError:

@@ -403,11 +403,13 @@ async def test_resends_back_off_exponentially(clock):
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("flags")
 @pytest.mark.uc("UC-031", flow="main", steps=[3], br=["BR-005"], cond=["Post-F-1"])
-async def test_a_refused_glide_stops_tempo_requests_for_that_track(clock):
-    """A ChangeTempo the audio service refuses (track replaced or stopped) is not resent."""
+async def test_a_refused_glide_past_the_restart_cap_stops_tempo_requests_for_that_track(clock):
+    """A refused ChangeTempo once the game used its music restarts (A7) is not resent, nor the music."""
     audio = TempoAudio()
     audio.refuse = True
     game = make_game(audio)
+    game._music_wanted = True
+    game._music_refusal_restarts = base_module.MUSIC_REFUSAL_RESTARTS_MAX
     start_held(game, clock)
 
     with patch.object(game, "_decide_next_change_delay", return_value=20.0):

@@ -130,11 +130,21 @@ SENSITIVITY_FACTOR_FLOOR = 0.2
 # derived from it (one ChangeTempo glide per segment), so it can only trail.
 # Shortest glide sent to the audio service: a transition_duration of 0 means 1.0 s there.
 MIN_GLIDE_SECONDS = 0.05
-# Deadline for one ChangeTempo, so a wedged audio service never stalls the music loop.
-AUDIO_TEMPO_RPC_TIMEOUT_SECONDS = 0.5
+# Backstop for one ChangeTempo, so a wedged audio service never stalls the music loop.
+# Longer than the client's 0.5 s deadline, which ends the call first and is counted
+# as DEADLINE_EXCEEDED; a cancel from here would not be counted.
+AUDIO_TEMPO_RPC_TIMEOUT_SECONDS = 0.75
 # Back-off between resends after a ChangeTempo error (doubles per failure).
 AUDIO_TEMPO_RETRY_MIN_SECONDS = 0.5
 AUDIO_TEMPO_RETRY_MAX_SECONDS = 5.0
+# UC-031 A7 / BR-009: the music loop checks the audio service this often while
+# game music should play, and starts the music again once the service is back.
+AUDIO_PROBE_INTERVAL_SECONDS = 1.0
+# A refused ChangeTempo outside an outage restarts the music at most this often per
+# game: a second player of the shared track must not ping-pong it at every change.
+MUSIC_REFUSAL_RESTARTS_MAX = 3
+# How long the game's end waits for detached sound sends still open.
+AUDIO_DRAIN_TIMEOUT_SECONDS = 1.0
 # A persistent failing music-loop tick logs once, then at most this often.
 MUSIC_TICK_LOG_INTERVAL_SECONDS = 5.0
 # Track id the audio service returns for PlayMusic while play_audio is off (UC-031 A1).
@@ -713,6 +723,10 @@ class BaseGameMode(
         self.controller_client = controller_manager_client
         self.event_publisher = event_publisher
         self.audio_client = audio_client
+        # grpc.health.v1 stub on the audio channel; the session sets it (UC-031 A7).
+        self.audio_health_client: Any | None = None
+        # Detached PlaySound sends, held until they end (UC-031 BR-009).
+        self._audio_tasks: set[asyncio.Task] = set()
 
         # Per-instance RNG (the load-bearing CRN isolation). Shadow games
         # run concurrently in ONE game_coordinator interpreter, so global
@@ -1662,30 +1676,50 @@ class BaseGameMode(
             volume: Playback volume 0.0-1.0 (default 1.0).
 
         A shadow game plays nothing: it has no audience and the audio service is shared (#1835).
+
+        Fire and forget (UC-031 BR-009): the RPC runs in a detached task, so the
+        caller (the kill path, the countdown) never waits for the audio service.
+        The deadline comes from the client (``grpc_clients.AUDIO_DEADLINES``).
         """
         if not self.audio_client or self._is_shadow_game():
             return
 
+        from proto import audio_pb2
+
+        sound_name = sound.value if isinstance(sound, Sound) else sound
+        request = audio_pb2.PlaySoundRequest(file_path=sound_name, volume=volume, priority=priority)
+
+        # create_task copies the current context, so the RPC span gets this parent.
+        ctx = parent_context or self.game_cycle_context
+        token = otel_context.attach(ctx) if ctx else None
         try:
-            from proto import audio_pb2
+            task = asyncio.get_running_loop().create_task(self._send_sound(self.audio_client, request, sound_name))
+        finally:
+            if token is not None:
+                otel_context.detach(token)
+        self._audio_tasks.add(task)
+        task.add_done_callback(self._audio_tasks.discard)
+        # One yield hands the request to gRPC before the caller goes on, keeping sounds in order.
+        await asyncio.sleep(0)
 
-            # Convert Sound enum to string value if needed
-            sound_name = sound.value if isinstance(sound, Sound) else sound
-            request = audio_pb2.PlaySoundRequest(file_path=sound_name, volume=volume, priority=priority)
-
-            # Use explicit parent if provided, otherwise fall back to game.cycle
-            ctx = parent_context or self.game_cycle_context
-            if ctx:
-                token = otel_context.attach(ctx)
-                try:
-                    await self.audio_client.PlaySound(request)
-                finally:
-                    otel_context.detach(token)
-            else:
-                await self.audio_client.PlaySound(request)
+    @staticmethod
+    async def _send_sound(audio_client: Any, request: Any, sound_name: str) -> None:
+        try:
+            await audio_client.PlaySound(request)
             logger.debug(f"Playing sound: {sound_name}")
         except Exception as e:
             logger.warning(f"Failed to play sound {sound_name}: {e}")
+
+    async def drain_audio(self, bound_seconds: float = AUDIO_DRAIN_TIMEOUT_SECONDS) -> None:
+        """Wait up to ``bound_seconds`` for the detached sound sends still open, then cancel the rest."""
+        pending = set(self._audio_tasks)
+        if not pending:
+            return
+        _done, late = await asyncio.wait(pending, timeout=bound_seconds)
+        for task in late:
+            task.cancel()
+        if late:
+            await asyncio.gather(*late, return_exceptions=True)
 
     # ========================================================================
     # Phase 70: Music Tempo Control (the tempo driver is TempoMixin, games/tempo.py)
