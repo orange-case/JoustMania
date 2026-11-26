@@ -68,7 +68,7 @@ flag may only tighten it ([C-034](requirements.md)). Reviewers flag a new env-on
 |---|---|---|---|
 | Vision | [vision.md](vision.md) (+ [NORTHSTAR.md](NORTHSTAR.md)) | (none) | Why the product exists, stakeholders, northstar constraints |
 | Requirements | [requirements.md](requirements.md) | `requirements` | `FR-xxx` user stories, `NFR-xxx` measurable qualities, `C-xxx` constraints |
-| Entity model | [entity_model.md](entity_model.md) | `entity-model` | Domain entities, ER diagram, 5-column attribute tables |
+| Entity model | [entity_model.md](entity_model.md) | `entity-model` | ER diagram, one line per entity (meaning, proto / struct source), cross-service invariants (no attribute tables, see [architecture/stack.md](architecture/stack.md)) |
 | Use cases | [use_cases.puml](use_cases.puml), [use_cases/UC-xxx.md](use_cases/) | `use-case-diagram`, `use-case-spec` | Actor goals, main success scenario, alternative flows, business rules |
 | Technical specs | [specs/services.md](specs/services.md), [specs/flags.md](specs/flags.md), [specs/telemetry.md](specs/telemetry.md), [specs/decide-contract.md](specs/decide-contract.md) | (repo convention) | Ports, RPCs, flag catalog, span / metric / attribute names, the decision contract |
 
