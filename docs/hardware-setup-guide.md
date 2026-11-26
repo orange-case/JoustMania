@@ -182,7 +182,7 @@ docker compose restart pairing-daemon
 curl http://localhost:8002/healthz
 ```
 
-Pairing and Bluetooth metrics (`psmove_pairing_*`, `bluetooth_device_rssi_dbm`) are pushed to the
+Pairing and Bluetooth metrics (`psmove_pairing_*`, `pairing_bluetooth_device_rssi_dbm`) are pushed to the
 OTel collector; query them in Grafana (`/grafana/`) or see
 [telemetry.md section 6](specs/telemetry.md#6-metrics).
 

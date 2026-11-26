@@ -8,12 +8,12 @@ This guide helps diagnose and resolve PS Move controller connectivity issues in 
 
 RSSI comes from the pairing daemon, not the controller manager: every `pairing.bt_monitor_interval`
 (5 s by default) it runs `hcitool -i <hciN> rssi <address>` for each connected controller and exports
-`bluetooth_device_rssi_dbm{serial,hci_adapter}` over OTLP. The controller manager reports `rssi = 0`
+`pairing_bluetooth_device_rssi_dbm{serial,hci_adapter}` over OTLP. The controller manager reports `rssi = 0`
 in its controller state, so the dashboard and the gRPC state carry no signal value.
 
 - **Grafana** (`/grafana/d/controller-overview`, see [Monitoring with Grafana](#monitoring-with-grafana)):
   the Controller Health table shows RSSI per controller; Weak Signal counts controllers below -80 dBm.
-- **Raw metric:** query `bluetooth_device_rssi_dbm` in Grafana Explore or the VictoriaMetrics query API
+- **Raw metric:** query `pairing_bluetooth_device_rssi_dbm` in Grafana Explore or the VictoriaMetrics query API
   (`/victoria-metrics/`); names are listed in [telemetry.md section 6](specs/telemetry.md#6-metrics).
   Neither the controller manager nor the pairing daemon serves `/metrics` (removed in #1447; the pairing
   daemon's port 8002 serves `/healthz` and the unpair API only).
@@ -216,7 +216,7 @@ sudo rfkill block wifi
 Open the **Controllers & Bluetooth** dashboard at `http://localhost/grafana/d/controller-overview`
 (also embedded in the dashboard's Metrics tab):
 
-- **Weak Signal** counts controllers below -80 dBm (`bluetooth_device_rssi_dbm < -80`), **Low Battery**
+- **Weak Signal** counts controllers below -80 dBm (`pairing_bluetooth_device_rssi_dbm < -80`), **Low Battery**
   counts battery level 0 or 1 (`controller_battery_level < 2`), and **Poor Connection** counts controllers
   whose report gaps are poor (`controller_connection_quality == 2`).
 - The **Controller Health** table shows each controller's adapter, RSSI, battery, poll rate and connection

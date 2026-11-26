@@ -19,9 +19,9 @@ from .adapter_identity import (
 )
 from .config import get_bt_monitor_interval
 from .metrics import (
-    bluetooth_adapter_connections,
-    bluetooth_device_connected,
-    bluetooth_device_rssi_dbm,
+    pairing_bluetooth_adapter_connections,
+    pairing_bluetooth_device_connected,
+    pairing_bluetooth_device_rssi_dbm,
     pairing_bluetooth_adapter_hci_errors_total,
     pairing_bluetooth_adapter_info,
     pairing_bluetooth_link_role_info,
@@ -144,7 +144,7 @@ class BluetoothMonitor:
         self.monitor_count += 1
         logger.debug(f"Bluetooth monitor #{self.monitor_count}")
 
-        with self.tracer.start_as_current_span("bluetooth_monitor_cycle") as span:
+        with self.tracer.start_as_current_span("pairing.bluetooth_monitor.cycle") as span:
             span.set_attribute("monitor.count", self.monitor_count)
 
             identities = await self.get_adapter_identities()
@@ -163,7 +163,7 @@ class BluetoothMonitor:
                 roles = dict(links)
 
                 # Update adapter connection count
-                bluetooth_adapter_connections.labels(hci_adapter=hci).set(len(connections))
+                pairing_bluetooth_adapter_connections.labels(hci_adapter=hci).set(len(connections))
                 logger.debug(f"{hci}: {len(connections)} devices connected")
 
                 for bt_address in connections:
@@ -175,11 +175,11 @@ class BluetoothMonitor:
                     rssi = await self.get_rssi(hci, bt_address)
 
                     # Update metrics (normalized serial matches controller manager)
-                    bluetooth_device_connected.labels(serial=serial, hci_adapter=hci).set(1)
+                    pairing_bluetooth_device_connected.labels(serial=serial, hci_adapter=hci).set(1)
                     self._export_role(serial, hci, roles[bt_address])
 
                     if rssi is not None:
-                        bluetooth_device_rssi_dbm.labels(serial=serial, hci_adapter=hci).set(rssi)
+                        pairing_bluetooth_device_rssi_dbm.labels(serial=serial, hci_adapter=hci).set(rssi)
                         logger.debug(f"  {serial} on {hci}: RSSI={rssi} dBm")
                     else:
                         logger.debug(f"  {serial} on {hci}: RSSI unavailable")
@@ -191,10 +191,10 @@ class BluetoothMonitor:
             for (serial, hci), _last_seen in self._known_devices.items():
                 if (serial, hci) not in currently_seen:
                     # Device disconnected
-                    bluetooth_device_connected.labels(serial=serial, hci_adapter=hci).set(0)
+                    pairing_bluetooth_device_connected.labels(serial=serial, hci_adapter=hci).set(0)
                     # Drop the RSSI series so a link that moved adapters is not
                     # still counted with its old adapter's last value (#1468).
-                    bluetooth_device_rssi_dbm.remove(serial, hci)
+                    pairing_bluetooth_device_rssi_dbm.remove(serial, hci)
                     role = self._link_roles.pop((serial, hci), None)
                     if role is not None:
                         pairing_bluetooth_link_role_info.remove(serial, hci, role)

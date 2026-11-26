@@ -9,9 +9,6 @@ The totals (the number of names, of names without a consumer and of names never 
 | Metric | Type | Labels | Defined in | Emitted | Consumers | Notes |
 |---|---|---|---|---|---|---|
 | `audio_sounds_played_total` | counter | `result` | audio | yes | (none) | reader: docs/talk/two-standards-runbook.md |
-| `bluetooth_adapter_connections` | gauge | `hci_adapter` | pairing-daemon | yes | grafana |  |
-| `bluetooth_device_connected` | gauge | `serial`, `hci_adapter` | pairing-daemon | yes | grafana |  |
-| `bluetooth_device_rssi_dbm` | gauge | `serial`, `hci_adapter` | pairing-daemon | yes | grafana |  |
 | `controller_accel_magnitude` | gauge | `serial` | controller-manager | yes | grafana |  |
 | `controller_adapter_info` | gauge | `serial`, `adapter` | controller-manager | yes | dashboard, grafana |  |
 | `controller_backend_info` | gauge | `serial`, `backend` | controller-manager | yes | dashboard, grafana |  |
@@ -81,8 +78,11 @@ The totals (the number of names, of names without a consumer and of names never 
 | `grpc_client_errors_total` | counter | `service`, `method`, `code` | lib (`lib/grpc_metrics.py`) | yes | grafana | #1426; mid-stream errors and the HID adapters counted, a cancel by the caller is not; the Go agent and connect-proxy are not covered (telemetry.md §6) |
 | `grpc_client_request_duration_seconds` | histogram | `service`, `method` | lib (`lib/grpc_metrics.py`) | yes | grafana | #1426; a stream is timed once, at its end |
 | `menu_button_dispatch_seconds` | histogram | `event_type` | menu | yes | (none) | reader: tests/service/test_uc002_button_stream_reconnect.py |
+| `pairing_bluetooth_adapter_connections` | gauge | `hci_adapter` | pairing-daemon | yes | grafana |  |
 | `pairing_bluetooth_adapter_hci_errors_total` | counter | `hci_adapter`, `direction` | pairing-daemon | yes | grafana |  |
 | `pairing_bluetooth_adapter_info` | gauge | `hci_adapter`, `address`, `manufacturer`, `manufacturer_id`, `hci_version`, `bus`, `usb_id`, `onboard` | pairing-daemon | yes | grafana |  |
+| `pairing_bluetooth_device_connected` | gauge | `serial`, `hci_adapter` | pairing-daemon | yes | grafana |  |
+| `pairing_bluetooth_device_rssi_dbm` | gauge | `serial`, `hci_adapter` | pairing-daemon | yes | grafana |  |
 | `pairing_bluetooth_link_role_info` | gauge | `serial`, `hci_adapter`, `role` | pairing-daemon | yes | grafana |  |
 | `process_cpu_seconds_total` | counter | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon | yes (each service) | grafana |  |
 | `process_resident_memory_bytes` | gauge | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon | yes (each service) | grafana |  |

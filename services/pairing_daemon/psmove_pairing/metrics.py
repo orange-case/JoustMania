@@ -6,18 +6,18 @@ from lib.otel_metrics import Counter, Gauge
 # Note: These are distinct from controller_* metrics in controller-manager
 # which measure the application layer (psmoveapi). These measure the raw
 # Bluetooth HCI layer on the host.
-bluetooth_device_rssi_dbm = Gauge(
-    "bluetooth_device_rssi_dbm",
+pairing_bluetooth_device_rssi_dbm = Gauge(
+    "pairing_bluetooth_device_rssi_dbm",
     "Bluetooth device signal strength in dBm (host HCI layer)",
     ["serial", "hci_adapter"],
 )
-bluetooth_device_connected = Gauge(
-    "bluetooth_device_connected",
+pairing_bluetooth_device_connected = Gauge(
+    "pairing_bluetooth_device_connected",
     "Bluetooth device connection status at HCI layer (1=connected, 0=disconnected)",
     ["serial", "hci_adapter"],
 )
-bluetooth_adapter_connections = Gauge(
-    "bluetooth_adapter_connections",
+pairing_bluetooth_adapter_connections = Gauge(
+    "pairing_bluetooth_adapter_connections",
     "Number of controllers per adapter",
     ["hci_adapter"],
 )

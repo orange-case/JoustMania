@@ -229,7 +229,7 @@ class TestMonitorExports:
     async def test_disconnect_removes_the_rssi_series(self, monitor):
         """A link that goes away drops its RSSI series instead of keeping the last value (#1468)."""
         con = "Connections:\n\t< ACL 00:06:F7:AA:BB:CC handle 256 state 1 lm MASTER\n"
-        with patch(f"{MONITOR}.bluetooth_device_rssi_dbm") as rssi:
+        with patch(f"{MONITOR}.pairing_bluetooth_device_rssi_dbm") as rssi:
             with patch(f"{MONITOR}.run_command", self._runner(HCICONFIG_TWO, con)):
                 await monitor.monitor()
             rssi.labels.assert_called_with(serial="0006F7AABBCC", hci_adapter="hci1")

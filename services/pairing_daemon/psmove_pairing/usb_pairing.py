@@ -138,7 +138,7 @@ class USBPairing:
         """
         logger.info(f"Pairing controller {serial} to adapter {adapter_address}...")
 
-        with self.tracer.start_as_current_span("pair_controller") as span:
+        with self.tracer.start_as_current_span("pairing.controller.pair") as span:
             span.set_attribute(_ATTR_CONTROLLER_SERIAL, serial)
             span.set_attribute(_ATTR_ADAPTER_ADDRESS, adapter_address)
             start_time = time.time()
@@ -224,7 +224,7 @@ class USBPairing:
 
     async def process_controller(self, device_path: bytes, serial: str, product_id: int = 0) -> bool:
         """Process a single USB-connected controller with load-balanced adapter selection."""
-        with self.tracer.start_as_current_span("process_controller") as span:
+        with self.tracer.start_as_current_span("pairing.controller.process") as span:
             span.set_attribute(_ATTR_CONTROLLER_SERIAL, serial)
 
             # Refresh adapter state and check if already paired
@@ -405,7 +405,7 @@ class USBPairing:
         self.poll_count += 1
         logger.debug(f"Poll #{self.poll_count}")
 
-        with self.tracer.start_as_current_span("poll_cycle") as span:
+        with self.tracer.start_as_current_span("pairing.poll.cycle") as span:
             span.set_attribute("poll.count", self.poll_count)
 
             backend = self._get_backend()
