@@ -18,6 +18,8 @@ Sources:
                                  + notes/grpc-rpcs.yaml
     flag-counts.md               services/flagd/*.json (the flag sets and files)
     flags-ci-diff.md             services/flagd/*.json vs services/flagd/ci/*.json
+    flag-catalog.md              services/flagd/*.json + services/flag-service/registry.yaml
+                                 + notes/flags.yaml (readers, reload class, note; one per flag)
 
 Committed files carry no count-style aggregates (#2152): a total such as "193
 flags" changes with every flag, RPC or metric any PR adds, so two such PRs
@@ -443,11 +445,227 @@ def flags_ci_diff() -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Flags: the per-set catalog (flags.md §3 to §10a)
+# --------------------------------------------------------------------------- #
+REGISTRY = REPO_ROOT / "services" / "flag-service" / "registry.yaml"
+READERS = frozenset(
+    {
+        "agent",
+        "game-coordinator",
+        "menu",
+        "controller-manager",
+        "audio",
+        "rust-hid",
+        "pairing-daemon",
+        "operator-pad",
+        "flag-service",
+        "lib",
+    }
+)
+# flags.md §1.3; `none` only for a flag nothing reads.
+RELOADS = frozenset({"live", "event-refreshed", "per-game", "startup", "none"})
+_SHOWN_VALUE_MAX = 24
+
+
+def _flag_type(flag: dict) -> str:
+    values = list(flag["variants"].values())
+    if all(isinstance(v, bool) for v in values):
+        return "bool"
+    if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+        return "integer" if all(isinstance(v, int) for v in values) else "float"
+    if all(isinstance(v, str) for v in values):
+        return "string"
+    return "object"
+
+
+def _value(value) -> str:
+    return "(object)" if isinstance(value, (dict, list)) else json.dumps(value)
+
+
+def _variants_cell(flag: dict) -> str:
+    """Variant names; a short scalar value is shown with its name."""
+    out = []
+    for name, value in flag["variants"].items():
+        shown = _value(value)
+        if isinstance(value, (dict, list)) or len(shown) > _SHOWN_VALUE_MAX:
+            out.append(f"`{name}`")
+        else:
+            out.append(f"`{name}`={shown}")
+    return _cell(", ".join(out))
+
+
+def _bounds(bounds: dict) -> str:
+    if not bounds:
+        return "any declared variant"
+    if "variants" in bounds:
+        return "variants " + ", ".join(f"`{v}`" for v in bounds["variants"])
+    if "range" in bounds:
+        lo, hi = bounds["range"]
+        return f"{lo} to {hi}" + (" (integer)" if bounds.get("integer") else "")
+    if "pattern" in bounds:
+        return " or ".join("`" + ":".join(seg) + "`" for seg in bounds["pattern"])
+    if bounds.get("free_string"):
+        return "any string"
+    if "payload" in bounds:
+        fields = ", ".join(f"`{k}`" for k in bounds["payload"]) or "none"
+        return f"event payload: {fields}"
+    if "fraction" in bounds:
+        lo, hi = bounds["fraction"]
+        return f"fraction {lo} to {hi} %"
+    if bounds.get("shape"):
+        return "object of the default's shape"
+    raise SpecSourceError(
+        f"services/flag-service/registry.yaml: unknown bounds {bounds}"
+    )
+
+
+def _load_registry() -> dict[tuple[str, str], dict]:
+    data = yaml.safe_load(REGISTRY.read_text(encoding="utf-8")) or {}
+    rows = {}
+    for row in data.get("flags") or []:
+        key = (row["set"], row["key"])
+        if key in rows:
+            raise SpecSourceError(
+                f"services/flag-service/registry.yaml: duplicate row {key}"
+            )
+        rows[key] = row
+    return rows
+
+
+def _write_cell(row: dict | None) -> str:
+    if row is None:
+        return "none"
+    parts = [
+        f"{row['kind']}, {' or '.join(row['scope'])}",
+        _bounds(row.get("bounds") or {}),
+    ]
+    if row.get("persist"):
+        parts.append("persistable")
+    return _cell("; ".join(parts))
+
+
+def _load_flag_notes(sets: dict[str, dict]) -> dict[tuple[str, str], dict]:
+    """docs/specs/notes/flags.yaml: set -> key -> {read_by, reload, note}; one per flag."""
+    path = NOTES / "flags.yaml"
+    rel = "docs/specs/notes/flags.yaml"
+    data = (
+        yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    ) or {}
+    if not isinstance(data, dict):
+        raise SpecSourceError(f"{rel} must map flag set -> key -> entry")
+    out: dict[tuple[str, str], dict] = {}
+    for s, entries in data.items():
+        for key, entry in (entries or {}).items():
+            where = f"{rel}: {s}/{key}"
+            if not isinstance(entry, dict) or set(entry) - {
+                "read_by",
+                "reload",
+                "note",
+            }:
+                raise SpecSourceError(
+                    f"{where}: an entry has only read_by, reload and note"
+                )
+            readers = entry.get("read_by")
+            if not isinstance(readers, list) or set(readers) - READERS:
+                raise SpecSourceError(
+                    f"{where}: read_by must be a list of {sorted(READERS)}, got {readers!r}"
+                )
+            if entry.get("reload") not in RELOADS:
+                raise SpecSourceError(
+                    f"{where}: reload must be one of {sorted(RELOADS)} (flags.md §1.3)"
+                )
+            if (entry["reload"] == "none") != (readers == []):
+                raise SpecSourceError(
+                    f"{where}: reload is none exactly when read_by is []"
+                )
+            out[(str(s), str(key))] = {
+                "read_by": readers,
+                "reload": entry["reload"],
+                "note": " ".join(str(entry.get("note") or "").split()),
+            }
+    known = {(s, k) for s, flags in sets.items() for k in flags}
+    stale = sorted(f"{s}/{k}" for s, k in set(out) - known)
+    if stale:
+        raise SpecSourceError(
+            f"{rel} has entries for flags that no longer exist: {stale}; remove or rename them"
+        )
+    missing = sorted(f"{s}/{k}" for s, k in known - set(out))
+    if missing:
+        raise SpecSourceError(
+            f"{rel} has no entry for {missing}; add read_by, reload and note per flag"
+        )
+    return out
+
+
+def flag_catalog() -> str:
+    sets = _flag_files(FLAGD)
+    notes = _load_flag_notes(sets)
+    registry = _load_registry()
+    unknown = sorted(f"{s}/{k}" for s, k in registry if k not in sets.get(s, {}))
+    if unknown:
+        raise SpecSourceError(
+            f"services/flag-service/registry.yaml has rows for flags no flag file declares: {unknown}"
+        )
+    out = [
+        HEADER.format(
+            sources="services/flagd/*.json, services/flag-service/registry.yaml and "
+            "docs/specs/notes/flags.yaml"
+        ),
+        "# Flag catalog (generated)\n",
+        (
+            "Part of [flags.md §3 to §10a](../flags.md#3-agent): one table per flag set. "
+            "Type, variants, default and targeting come from the flag file; **Runtime write** "
+            "is the flag's registry row (kind, scopes, bounds, flags.md §13; `none` = "
+            "read-only baseline, C-033); **Reload** is the class of flags.md §1.3; **Read by**, "
+            "**Reload** and **Note** come from `docs/specs/notes/flags.yaml`.\n"
+        ),
+    ]
+    for s in _ordered_sets(sets):
+        out += [
+            f"## `{s}`\n",
+            f"File: [`services/flagd/{s}.json`](../../../services/flagd/{s}.json).\n",
+            "| Key | Type | Variants | Default | Targeting | Runtime write | Reload | Read by | Note |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for key in sorted(sets[s]):
+            flag = sets[s][key]
+            entry = notes[(s, key)]
+            reg = registry.get((s, key))
+            note = entry["note"] or (reg or {}).get("description", "")
+            state = (
+                ""
+                if flag.get("state", "ENABLED") == "ENABLED"
+                else f" ({flag['state']})"
+            )
+            default = flag["defaultVariant"]
+            out.append(
+                "| "
+                + " | ".join(
+                    [
+                        f"`{key}`{state}",
+                        _flag_type(flag),
+                        _variants_cell(flag),
+                        _cell(f"`{default}` = {_value(flag['variants'][default])}"),
+                        "yes" if flag.get("targeting") else "",
+                        _write_cell(reg),
+                        entry["reload"],
+                        ", ".join(entry["read_by"]) or "(none)",
+                        _cell(" ".join(str(note).split())),
+                    ]
+                )
+                + " |"
+            )
+        out.append("")
+    return "\n".join(out)
+
+
+# --------------------------------------------------------------------------- #
 GENERATORS = {
     "telemetry-metric-catalog.md": telemetry_metric_catalog,
     "grpc-rpcs.md": grpc_rpcs,
     "flag-counts.md": flag_counts,
     "flags-ci-diff.md": flags_ci_diff,
+    "flag-catalog.md": flag_catalog,
 }
 
 

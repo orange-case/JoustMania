@@ -23,8 +23,16 @@ def tmp_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "GENERATED", tmp_path / "docs/specs/generated")
     monkeypatch.setattr(g, "NOTES", tmp_path / "docs/specs/notes")
     monkeypatch.setattr(g, "FLAGD", tmp_path / "services/flagd")
-    for d in ("proto", "docs/specs/generated", "docs/specs/notes", "services/flagd/ci"):
+    monkeypatch.setattr(g, "REGISTRY", tmp_path / "services/flag-service/registry.yaml")
+    for d in (
+        "proto",
+        "docs/specs/generated",
+        "docs/specs/notes",
+        "services/flagd/ci",
+        "services/flag-service",
+    ):
         (tmp_path / d).mkdir(parents=True)
+    (tmp_path / "services/flag-service/registry.yaml").write_text("flags: []\n")
     return tmp_path
 
 
@@ -279,3 +287,175 @@ def test_check_and_counts_are_mutually_exclusive(capsys):
     with pytest.raises(SystemExit):
         g.main(["--check", "--counts"])
     assert "not allowed with" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# The per-set flag catalog (flags.md §3 to §10a, #2793)
+# --------------------------------------------------------------------------- #
+def _catalog_repo(tmp_repo, notes: dict, registry: list | None = None):
+    (tmp_repo / "docs/specs/notes/flags.yaml").write_text(json.dumps(notes))
+    (tmp_repo / "services/flag-service/registry.yaml").write_text(
+        json.dumps({"flags": registry or []})
+    )
+
+
+def _entry(note="", reload="live", read_by=("agent",)):
+    return {"read_by": list(read_by), "reload": reload, "note": note}
+
+
+def test_flag_catalog_renders_file_registry_and_notes(tmp_repo):
+    flagd = tmp_repo / "services/flagd"
+    targeted = _flag("off", on=True, off=False) | {"targeting": {"if": [True, "on"]}}
+    (flagd / "game.json").write_text(
+        _flags(
+            b=_flag("medium", low=0.5, medium=1),
+            a=targeted,
+            obj=_flag("shape", shape={"k": 1}) | {"state": "DISABLED"},
+            s=_flag("x", x="a|b", long="y" * 40),
+        )
+    )
+    _catalog_repo(
+        tmp_repo,
+        {
+            "game": {
+                "a": _entry("the switch", read_by=["game-coordinator", "menu"]),
+                "b": _entry(reload="per-game"),
+                "obj": _entry(reload="none", read_by=[]),
+                "s": _entry("pipes a|b", reload="startup"),
+            }
+        },
+        [
+            {
+                "set": "game",
+                "key": "a",
+                "kind": "overlay",
+                "scope": ["stack"],
+                "persist": True,
+            },
+            {
+                "set": "game",
+                "key": "b",
+                "kind": "overlay",
+                "scope": ["experiment+arm", "real"],
+                "bounds": {"range": [0, 4], "integer": True},
+                "description": "from the registry",
+            },
+        ],
+    )
+    text = g.flag_catalog()
+    rows = [line for line in text.splitlines() if line.startswith("| `")]
+    assert [r.split(" |")[0] for r in rows] == [
+        "| `a`",
+        "| `b`",
+        "| `obj` (DISABLED)",
+        "| `s`",
+    ]
+    assert rows[0] == (
+        "| `a` | bool | `on`=true, `off`=false | `off` = false | yes | "
+        "overlay, stack; any declared variant; persistable | live | game-coordinator, menu | "
+        "the switch |"
+    )
+    # A registry description fills an empty note; mixed numbers are floats.
+    assert rows[1] == (
+        "| `b` | float | `low`=0.5, `medium`=1 | `medium` = 1 |  | "
+        "overlay, experiment+arm or real; 0 to 4 (integer) | per-game | agent | from the registry |"
+    )
+    assert (
+        rows[2]
+        == "| `obj` (DISABLED) | object | `shape` | `shape` = (object) |  | none | none | (none) |  |"
+    )
+    # A long value shows its name only; every pipe is escaped.
+    assert '`x`="a\\|b", `long` |' in rows[3]
+    assert rows[3].endswith("| startup | agent | pipes a\\|b |")
+    assert "## `game`" in text
+
+
+@pytest.mark.parametrize(
+    "notes, match",
+    [
+        ({"game": {}}, r"no entry for \['game/a'\]"),
+        (
+            {"game": {"a": _entry(), "gone": _entry()}},
+            r"no longer exist: \['game/gone'\]",
+        ),
+        ({"game": {"a": _entry(reload="sometimes")}}, "reload must be one of"),
+        ({"game": {"a": _entry(read_by=["nobody"])}}, "read_by must be a list"),
+        (
+            {"game": {"a": _entry(reload="none")}},
+            "reload is none exactly when read_by is",
+        ),
+        ({"game": {"a": _entry(read_by=[])}}, "reload is none exactly when read_by is"),
+        (
+            {"game": {"a": _entry() | {"writer": "menu"}}},
+            "only read_by, reload and note",
+        ),
+    ],
+)
+def test_flag_catalog_notes_must_match_the_flag_files(tmp_repo, notes, match):
+    (tmp_repo / "services/flagd/game.json").write_text(_flags(a=_flag("x", x=1)))
+    _catalog_repo(tmp_repo, notes)
+    with pytest.raises(g.SpecSourceError, match=match):
+        g.flag_catalog()
+
+
+def test_flag_catalog_rejects_a_registry_row_without_a_flag(tmp_repo):
+    (tmp_repo / "services/flagd/game.json").write_text(_flags(a=_flag("x", x=1)))
+    _catalog_repo(
+        tmp_repo,
+        {"game": {"a": _entry()}},
+        [{"set": "game", "key": "gone", "kind": "overlay", "scope": ["stack"]}],
+    )
+    with pytest.raises(
+        g.SpecSourceError, match=r"no flag file declares: \['game/gone'\]"
+    ):
+        g.flag_catalog()
+
+
+def test_changing_a_default_or_adding_a_flag_changes_only_its_own_row(tmp_repo):
+    flagd = tmp_repo / "services/flagd"
+    notes = {"game": {"a": _entry(), "c": _entry()}}
+    (flagd / "game.json").write_text(_flags(a=_flag("x", x=1, y=2), c=_flag("x", x=1)))
+    _catalog_repo(tmp_repo, notes)
+    before = g.flag_catalog()
+
+    (flagd / "game.json").write_text(
+        _flags(a=_flag("y", x=1, y=2), b=_flag("x", x=3), c=_flag("x", x=1))
+    )
+    notes["game"]["b"] = _entry("new")
+    _catalog_repo(tmp_repo, notes)
+    assert _changed_lines(before, g.flag_catalog()) == [
+        "- | `a` | integer | `x`=1, `y`=2 | `x` = 1 |  | none | live | agent |  |",
+        "+ | `a` | integer | `x`=1, `y`=2 | `y` = 2 |  | none | live | agent |  |",
+        "+ | `b` | integer | `x`=3 | `x` = 3 |  | none | live | agent | new |",
+    ]
+
+
+def test_flag_catalog_covers_every_flag_of_the_real_files():
+    text = g.flag_catalog()
+    for s, flags in g._flag_files(g.FLAGD).items():
+        assert f"## `{s}`" in text
+        for key in flags:
+            assert f"| `{key}`" in text, f"{s}/{key}"
+
+
+@pytest.mark.parametrize(
+    "bounds, cell",
+    [
+        ({"variants": ["on", "off"]}, "variants `on`, `off`"),
+        (
+            {"pattern": [["float 0.1 30"], ["enum a", "int 1 2"]]},
+            "`float 0.1 30` or `enum a:int 1 2`",
+        ),
+        ({"free_string": True}, "any string"),
+        ({"payload": {}}, "event payload: none"),
+        ({"fraction": [1, 100]}, "fraction 1 to 100 %"),
+        ({"shape": True}, "object of the default's shape"),
+    ],
+)
+def test_registry_bounds_cells(bounds, cell):
+    assert g._bounds(bounds) == cell
+
+
+def test_unknown_registry_bounds_fail():
+    with pytest.raises(g.SpecSourceError, match="unknown bounds"):
+        g._bounds({"mystery": 1})
