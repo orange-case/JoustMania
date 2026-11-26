@@ -61,9 +61,6 @@ type appliedEntry struct {
 	serial string
 	value  string
 	at     time.Time
-	// reported: the first suppression against this entry was emitted in full; later
-	// ones are quiet repeats (as A21).
-	reported bool
 }
 
 // appliedLedger is the per-Loop applied-value record, under its own mutex.
@@ -80,9 +77,6 @@ type appliedLedger struct {
 	// reserved counts the decisions that passed the lever cooldown and have not
 	// finished yet: a concurrent decision for the key sees the lever as cooling.
 	reserved map[string]int
-	// cooldownReported: the first lever_cooldown refusal since the key's last write
-	// was emitted in full; later ones are quiet repeats.
-	cooldownReported map[string]bool
 }
 
 // present reports whether serial is still in the game (a game-wide key always is).
@@ -90,12 +84,12 @@ func present(c gamecontext.GameContext, serial string) bool {
 	return serial == "" || c.Players[serial] != nil
 }
 
-// check reports whether d repeats the value recorded for its key at now, and whether
-// that is the first suppression against the entry. It drops every entry whose serial
+// check reports whether d repeats the value recorded for its key at now. It drops
+// every entry whose serial
 // left the game and the key's entry when it has expired. While a write to the key is
 // in flight the value on the flag service is unknown, so it never matches (a
 // different value may land last). It reserves nothing.
-func (al *appliedLedger) check(c gamecontext.GameContext, d Decision, now time.Time) (match, first bool) {
+func (al *appliedLedger) check(c gamecontext.GameContext, d Decision, now time.Time) bool {
 	al.mu.Lock()
 	defer al.mu.Unlock()
 	for k, e := range al.entries {
@@ -105,23 +99,17 @@ func (al *appliedLedger) check(c gamecontext.GameContext, d Decision, now time.T
 	}
 	key := appliedKey(d)
 	if al.inflight[key] > 0 {
-		return false, false
+		return false
 	}
 	e, ok := al.entries[key]
 	if !ok {
-		return false, false
+		return false
 	}
 	if !now.Before(e.at.Add(appliedLedgerTTL)) {
 		delete(al.entries, key)
-		return false, false
+		return false
 	}
-	if e.value != normalisedValue(d.Value) {
-		return false, false
-	}
-	first = !e.reported
-	e.reported = true
-	al.entries[key] = e
-	return true, first
+	return e.value == normalisedValue(d.Value)
 }
 
 // begin marks a write of d in flight and returns its handle. A second write to the
@@ -165,10 +153,8 @@ func (al *appliedLedger) end(f *appliedFlight, wrote bool, err error, now time.T
 	if wrote && err == nil {
 		if al.written == nil {
 			al.written = make(map[string]leverWrite)
-			al.cooldownReported = make(map[string]bool)
 		}
 		al.written[f.key] = leverWrite{at: now, value: f.value, known: !overlapped}
-		delete(al.cooldownReported, f.key)
 	}
 }
 
@@ -189,10 +175,9 @@ func (al *appliedLedger) busy(key string) bool {
 // cooling reports whether value for key is refused at now: a write to the key is in
 // flight, another decision holds it, or its last applied write is younger than
 // window and wrote another value. Re-asserting the last written value is never
-// refused (BR-046). first is true for the first refusal since that write. A key
-// that is not cooling is held until hold.release, so two concurrent decisions
-// cannot both write inside one window.
-func (al *appliedLedger) cooling(key, value string, now time.Time, window time.Duration) (cooling, first bool, hold *cooldownHold) {
+// refused (BR-046). A key that is not cooling is held until hold.release, so two
+// concurrent decisions cannot both write inside one window.
+func (al *appliedLedger) cooling(key, value string, now time.Time, window time.Duration) (cooling bool, hold *cooldownHold) {
 	al.mu.Lock()
 	defer al.mu.Unlock()
 	if !al.busy(key) {
@@ -202,15 +187,10 @@ func (al *appliedLedger) cooling(key, value string, now time.Time, window time.D
 				al.reserved = make(map[string]int)
 			}
 			al.reserved[key]++
-			return false, false, &cooldownHold{ledger: al, key: key}
+			return false, &cooldownHold{ledger: al, key: key}
 		}
 	}
-	if al.cooldownReported == nil {
-		al.cooldownReported = make(map[string]bool)
-	}
-	first = !al.cooldownReported[key]
-	al.cooldownReported[key] = true
-	return true, first, nil
+	return true, nil
 }
 
 // cooldownHold is a decision's hold on a lever that passed the cooldown. A nil
@@ -322,11 +302,10 @@ func (l *Loop) tracksApplied(d Decision) bool {
 }
 
 // alreadyApplied is the check-only step of the permission chain (decide-contract
-// §4.5 step 3): whether d repeats the value this loop last wrote for its key, and
-// whether this is the first suppression against that entry.
-func (l *Loop) alreadyApplied(c gamecontext.GameContext, d Decision, now time.Time) (match, first bool) {
+// §4.5 step 3): whether d repeats the value this loop last wrote for its key.
+func (l *Loop) alreadyApplied(c gamecontext.GameContext, d Decision, now time.Time) bool {
 	if !l.tracksApplied(d) {
-		return false, false
+		return false
 	}
 	return l.applied.check(c, d, now)
 }

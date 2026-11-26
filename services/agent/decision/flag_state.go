@@ -22,15 +22,17 @@ type FlagState struct {
 	// game.phase.start log record gave it.
 	TraceID string `json:"trace_id"`
 	// UpdatedAtMs is the cycle's time, epoch ms on the agent's clock.
-	UpdatedAtMs            int64    `json:"updated_at_ms"`
-	Enabled                bool     `json:"enabled"`
-	Objectives             string   `json:"objectives"`
-	InterventionsAllowed   string   `json:"interventions_allowed"`
-	InterventionsEnabled   bool     `json:"interventions_enabled"`
-	BatteryThreshold       int      `json:"battery_threshold"`
-	MaxInterventionsPerMin int      `json:"max_interventions_per_minute"`
-	DecisionBackend        string   `json:"decision_backend"`
-	ActConfidenceThreshold float64  `json:"act_confidence_threshold"`
+	UpdatedAtMs            int64  `json:"updated_at_ms"`
+	Enabled                bool   `json:"enabled"`
+	Objectives             string `json:"objectives"`
+	InterventionsAllowed   string `json:"interventions_allowed"`
+	InterventionsEnabled   bool   `json:"interventions_enabled"`
+	BatteryThreshold       int    `json:"battery_threshold"`
+	MaxInterventionsPerMin int    `json:"max_interventions_per_minute"`
+	DecisionBackend        string `json:"decision_backend"`
+	// ActConfidenceThreshold is the selected backend's own threshold; nil on rules,
+	// which routes nothing.
+	ActConfidenceThreshold *float64 `json:"act_confidence_threshold,omitempty"`
 	ExperimentsEnabled     bool     `json:"experiments_enabled"`
 	LLMEligibleGameKinds   []string `json:"llm_eligible_game_kinds"`
 }
@@ -104,6 +106,11 @@ func (l *Loop) recordFlagState(snapshot flags.Snapshot, c gamecontext.GameContex
 	}
 	state := newLayerState(snapshot)
 	eligible := append([]string{}, snapshot.LLMGate.EligibleGameKinds...)
+	backend := requestedBackend(snapshot)
+	var threshold *float64
+	if thr, ok := snapshot.Decision.ActThreshold(backend); ok {
+		threshold = &thr
+	}
 	l.flagBoard.record(FlagState{
 		GameID:                 c.SessionID,
 		GameKind:               c.GameKind,
@@ -116,8 +123,8 @@ func (l *Loop) recordFlagState(snapshot flags.Snapshot, c gamecontext.GameContex
 		InterventionsEnabled:   snapshot.InterventionsEnabled,
 		BatteryThreshold:       state.PolicyBatteryThreshold,
 		MaxInterventionsPerMin: state.PolicyMaxPerMinute,
-		DecisionBackend:        requestedBackend(snapshot),
-		ActConfidenceThreshold: snapshot.Decision.ActConfidenceThreshold,
+		DecisionBackend:        backend,
+		ActConfidenceThreshold: threshold,
 		ExperimentsEnabled:     snapshot.ExperimentsEnabled,
 		LLMEligibleGameKinds:   eligible,
 	})

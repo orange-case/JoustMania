@@ -9,19 +9,15 @@
 // choice questions, a probability distribution over the options in which the
 // choice is the most probable option.
 //
-// A noul question (KindNoul) is a yes/no question answered with P(yes) in
-// Answer.Noul. Its Confidence is backend-defined like every other; the jev
-// backend uses |2p-1| (TypeSafe's documented choice formula for two outcomes).
-//
 // Only the routing answer's confidence (ffa.intervention, what the router
 // gates on) is required to follow the "acting is right" semantics below; other
-// answers (target, magnitude, noul) may carry backend-native confidence.
+// answers (target, magnitude) may carry backend-native confidence.
 //
 // Confidence is the backend's confidence that ACTING on the answer is right. Its
 // derivation is backend-defined (the rules adapter uses 1 - p(noop) for an
 // intervention, a model may report its own), but it is always in [0,1] and is
 // what the confidence router (#1225 PR E) compares against
-// decision.act_confidence_threshold. It is deliberately NOT required to equal or
+// decision.<backend>.act_confidence_threshold. It is deliberately NOT required to equal or
 // stay below p(choice): two strong competing interventions split the
 // probability mass yet still make acting a confident call. Backends are
 // UNTRUSTED (remote models can return anything), so callers must run Validate on
@@ -51,13 +47,6 @@ const (
 	KindChoice QuestionKind = "choice"
 	// KindScore asks for a number within Question.Range (inclusive).
 	KindScore QuestionKind = "score"
-	// KindNoul is a yes/no question answered with the probability of "yes"
-	// (Answer.Noul), the "noul" primitive of TypeSafe's Jev API (#1229). It
-	// carries only Text. Not every backend supports it: the claude backend
-	// rejects a Request containing one with an error wrapping
-	// ErrInvalid, and the rules adapter answers it neutrally (0.5, confidence 0).
-	// No FFA question uses it yet.
-	KindNoul QuestionKind = "noul"
 )
 
 // Question is one typed question a backend must answer.
@@ -84,10 +73,6 @@ type Answer struct {
 	Probabilities map[string]float64 `json:"probabilities,omitempty"`
 	// Score is the value of a KindScore question, within its Range.
 	Score float64 `json:"score"`
-	// Noul is the probability, in [0,1], that the answer to a KindNoul
-	// question is "yes". It is nil for every other kind (and omitted from JSON,
-	// so choice/score answers serialize exactly as before).
-	Noul *float64 `json:"noul,omitempty"`
 	// Confidence is the backend's confidence that acting on this answer is right,
 	// in [0,1] (see the package doc).
 	Confidence float64 `json:"confidence"`
@@ -223,6 +208,11 @@ type Request struct {
 	// the request (the ffa.magnitude text, the answer's resolution, jev, the rules
 	// adapter) reads ranges through Bounds.Lookup; nil is the code default table.
 	Bounds *MagnitudeTable `json:"-"`
+	// ActThreshold is the answering backend's decision.<backend>.act_confidence_threshold
+	// when the call fires. Only jev reads it: its gate acts at the same bar the
+	// router applies at landing, so p_yes is compared with one number.
+	ActThreshold float64 `json:"-"`
+
 	// Context is the raw snapshot State was built from. Only in-process backends
 	// (the rules adapter, which reasons over the full GameContext) may read it.
 	// Remote backends MUST NOT read it: State is the entire contract they get, and

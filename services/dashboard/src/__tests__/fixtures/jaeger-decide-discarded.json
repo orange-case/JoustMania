@@ -74,6 +74,11 @@
             {
               "key": "decide.discarded_reason",
               "type": "string",
+              "value": "stale"
+            },
+            {
+              "key": "decide.discarded_detail",
+              "type": "string",
               "value": "game_ended"
             },
             {

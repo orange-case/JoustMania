@@ -31,7 +31,7 @@ func TestStackValuePatchBody(t *testing.T) {
 	cases := []stackCase{
 		{name: "declared variant", flag: "decision.backend", variant: "jev", raw: `"jev"`, want: `{"environment_default":{"enabled":true,"value":{"type":"string","value":"jev"}}}`},
 		{name: "integer range", flag: "decision.min_interval_ms", raw: `2500`, want: `{"environment_default":{"enabled":true,"value":{"type":"integer","value":"2500"}}}`},
-		{name: "number without bounds is decimal text", flag: "decision.act_confidence_threshold", raw: `0.8`, want: `{"environment_default":{"enabled":true,"value":{"type":"string","value":"0.8"}}}`},
+		{name: "number without bounds is decimal text", flag: "decision.claude.act_confidence_threshold", raw: `0.8`, want: `{"environment_default":{"enabled":true,"value":{"type":"string","value":"0.8"}}}`},
 		{name: "object is compact JSON text", flag: "llm.eligible_game_kinds", raw: `{"b": 1, "a": [1, 2]}`, want: `{"environment_default":{"enabled":true,"value":{"type":"string","value":"{\"b\":1,\"a\":[1,2]}"}}}`},
 		{name: "cleared is off with the baseline default", flag: "decision.backend", clear: true, want: `{"environment_default":{"enabled":false,"value":{"type":"string","value":"rules"}}}`},
 	}

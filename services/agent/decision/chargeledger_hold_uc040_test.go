@@ -112,14 +112,14 @@ func TestHoldLedger_InFlightCounts(t *testing.T) {
 		l, _, _, _ := ledgerLoop(t, 100, nil)
 		c := holdCtx(holdPlayer{energy: fptr(1.6), budget: fptr(15)}, holdPlayer{})
 		now := time.Unix(50_000, 0)
-		res, reason, _ := l.reserveShield(context.Background(), flags.Snapshot{}, c, shieldOf("WEAK", "3"), now)
+		res, reason := l.reserveShield(context.Background(), flags.Snapshot{}, c, shieldOf("WEAK", "3"), now)
 		if res == nil || reason != "" {
 			t.Fatalf("first reservation = %v / %q, want a reservation", res, reason)
 		}
 		if got := l.ShieldInFlight()["WEAK"]; got != 3 {
 			t.Fatalf("in flight = %v, want 3", got)
 		}
-		if _, reason, _ := l.reserveShield(context.Background(), flags.Snapshot{}, c, shieldOf("WEAK", "3"), now); reason != ReasonShieldPoolFull {
+		if _, reason := l.reserveShield(context.Background(), flags.Snapshot{}, c, shieldOf("WEAK", "3"), now); reason != ReasonShieldPoolFull {
 			t.Fatalf("second grant with 1.6 + 3 s in flight = %q, want shield_pool_full", reason)
 		}
 		if _, noShield := l.ShieldSerials(c); !noShield["WEAK"] {
@@ -130,7 +130,7 @@ func TestHoldLedger_InFlightCounts(t *testing.T) {
 		if len(l.ShieldInFlight()) != 0 {
 			t.Fatalf("in flight after the release = %v, want none", l.ShieldInFlight())
 		}
-		if _, reason, _ := l.reserveShield(context.Background(), flags.Snapshot{}, c, shieldOf("WEAK", "3"), now); reason != "" {
+		if _, reason := l.reserveShield(context.Background(), flags.Snapshot{}, c, shieldOf("WEAK", "3"), now); reason != "" {
 			t.Fatalf("grant after the release = %q, want a reservation", reason)
 		}
 	})
