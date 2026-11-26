@@ -51,7 +51,7 @@ class GameLoopMixin:
     async def _countdown(self):
         """Run countdown before game starts using unified countdown effect.
 
-        Sends per-controller countdown effects so each effect_countdown span
+        Sends per-controller countdown effects so each controller.effect.countdown span
         appears under the corresponding player's countdown_phase span.
         Sound spans live under gameplay_phase (shared, not player-specific).
         """
@@ -77,7 +77,7 @@ class GameLoopMixin:
 
         # Send per-controller countdown effects via gameplay stream.
         # Each effect carries its player's countdown_phase span context so
-        # effect_countdown becomes a child of the correct countdown_phase.
+        # controller.effect.countdown becomes a child of the correct countdown_phase.
         if self.gameplay_stream:
             for player in self.players.values():
                 trace_parent, trace_state = _base.inject_trace_context(player._countdown_span)

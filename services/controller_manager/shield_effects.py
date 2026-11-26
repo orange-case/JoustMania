@@ -216,12 +216,12 @@ _CUE_EPSILON_S = 1e-6
 
 
 def _end_shield_span(spans: dict[str, tuple[ShieldLayer, Span]], kind: str, reason: str) -> None:
-    """End one layer's ``controller.shield_effect`` span with its ``shield_end`` event (#2669)."""
+    """End one layer's ``controller.shield_effect`` span with its ``shield.end`` event (#2669)."""
     entry = spans.pop(kind, None)
     if entry is None:
         return
     span = entry[1]
-    span.add_event("shield_end", {"shield.end_reason": reason})
+    span.add_event("shield.end", {"shield.end_reason": reason})
     span.end()
 
 
@@ -348,7 +348,7 @@ class ShieldEffectsMixin:
                     layer.blink_reported = True
                     entry = spans.get(layer.kind)
                     if entry is not None and entry[0] is layer:
-                        entry[1].add_event("shield_blink", {"shield.kind": layer.kind})
+                        entry[1].add_event("shield.blink", {"shield.kind": layer.kind})
                 if not self._overlay_active(serial):
                     frame = self._shield_layer_frame(serial, layer, now, elapsed)
                     if (

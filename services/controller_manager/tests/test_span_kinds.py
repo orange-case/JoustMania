@@ -90,7 +90,7 @@ async def test_death_effect_span_is_consumer(exporter, manager, command_context)
     await manager._effect_player_death(SERIAL, trace_context=command_context)
     await manager.active_effects[SERIAL].task
 
-    _assert_consumer_child_of_command(_only_span(exporter, "effect_player_death"))
+    _assert_consumer_child_of_command(_only_span(exporter, "controller.effect.player_death"))
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def test_death_effect_span_is_consumer(exporter, manager, command_context)
 async def test_winner_rainbow_span_is_consumer(exporter, manager, command_context):
     await manager._effect_winner_rainbow(SERIAL, restore_color=(0, 0, 255), trace_context=command_context)
 
-    _assert_consumer_child_of_command(_only_span(exporter, "effect_winner_rainbow"))
+    _assert_consumer_child_of_command(_only_span(exporter, "controller.effect.winner_rainbow"))
 
 
 @pytest.mark.asyncio
@@ -106,7 +106,7 @@ async def test_winner_rainbow_span_is_consumer(exporter, manager, command_contex
 async def test_countdown_span_is_consumer(exporter, manager, command_context):
     await manager._countdown_sequence(SERIAL, restore_color=(0, 0, 255), trace_context=command_context)
 
-    _assert_consumer_child_of_command(_only_span(exporter, "effect_countdown"))
+    _assert_consumer_child_of_command(_only_span(exporter, "controller.effect.countdown"))
 
 
 @pytest.mark.asyncio

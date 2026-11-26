@@ -156,7 +156,7 @@ def _reasons(exporter):
 
 
 def _end_reason(span):
-    ends = [e for e in span.events if e.name == "shield_end"]
+    ends = [e for e in span.events if e.name == "shield.end"]
     assert len(ends) == 1, [e.name for e in span.events]
     return ends[0].attributes["shield.end_reason"]
 
@@ -200,7 +200,7 @@ class TestUC040ShieldSpanPerLayer:
         first, second = _shield_spans(exporter)
         assert (first.attributes["effect.duration_ms"], _end_reason(first)) == (5000, "replaced")
         assert (second.attributes["effect.duration_ms"], _end_reason(second)) == (2000, "expired")
-        assert ("shield_blink", "full") in [(e.name, e.attributes.get("shield.kind")) for e in second.events]
+        assert ("shield.blink", "full") in [(e.name, e.attributes.get("shield.kind")) for e in second.events]
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])

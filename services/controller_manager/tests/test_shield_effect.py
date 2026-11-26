@@ -187,7 +187,7 @@ class TestUC040ShieldEffect:
         ],
     )
     async def test_layer_span_and_blink_event_carry_the_shield_kind(self, manager, monkeypatch, effect, kind):
-        """UC-048 A1: shield.kind on the layer's span and its shield_blink event is full or toughness_boost."""
+        """UC-048 A1: shield.kind on the layer's span and its shield.blink event is full or toughness_boost."""
         spans = []
 
         class _Span:
@@ -216,7 +216,7 @@ class TestUC040ShieldEffect:
 
         (_, span) = next(item for item in spans if item[0] == "controller.shield_effect")
         assert span.attributes["shield.kind"] == kind
-        assert ("shield_blink", {"shield.kind": kind}) in span.events
+        assert ("shield.blink", {"shield.kind": kind}) in span.events
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])

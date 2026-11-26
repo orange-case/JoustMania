@@ -4,7 +4,7 @@ Unit tests for the bluetooth-health window accumulator and span emission (#732 M
 Drives synthetic poll sequences (fresh / None / stale-replay patterns) through the
 DiscoveryLoop window accumulator with an injected wall clock, then asserts the
 computed gap / dropped-ratio / movement-hz signals, the controller.bluetooth_health
-span attributes, and the per-serial bluetooth_controller_sample events.
+span attributes, and the per-serial controller.bluetooth_sample events.
 
 A stale replay is detected by object identity: an adapter that returns the *same*
 dict object again is counted as a poll attempt but NOT a fresh movement update.
@@ -203,7 +203,7 @@ class TestSpanEmission:
         assert isinstance(a["bluetooth.movement_update_hz"], float)
 
         # One event per serial.
-        sample_events = [e for e in span.events if e[0] == "bluetooth_controller_sample"]
+        sample_events = [e for e in span.events if e[0] == "controller.bluetooth_sample"]
         assert len(sample_events) == 1
         ev_attrs = sample_events[0][1]
         assert ev_attrs["controller.serial"] == "AA"
