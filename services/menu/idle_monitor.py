@@ -282,12 +282,16 @@ class IdleMonitor:
             otel_context.detach(token)
 
     async def _enter_idle_mode(self) -> None:
-        """Transition all CONNECTED controllers to IDLE and start sentinels."""
-        connected_serials = [
-            serial
-            for serial, state in self._state_manager.controller_states.items()
-            if state == ControllerState.CONNECTED
-        ]
+        """Transition all CONNECTED controllers to IDLE and start sentinels.
+
+        UC-010 BR-018: in an A14 lobby (everyone ready, below the mode's minimum) no start can come, so
+        the READY controllers are un-readied and go IDLE too; elsewhere READY players keep waiting.
+        """
+        manager = self._state_manager
+        idle_states = {ControllerState.CONNECTED}
+        if manager.all_ready() and manager.below_mode_minimum():
+            idle_states.add(ControllerState.READY)
+        connected_serials = [serial for serial, state in manager.controller_states.items() if state in idle_states]
 
         if not connected_serials:
             return

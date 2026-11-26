@@ -129,9 +129,10 @@ class Composition:
             raise ValueError("agent=True needs otlp=True (the agent observes through OTLP) and the game coordinator")
 
 
-# The menu reports healthy before its boot lobby entry (menu_auto_start, services/menu/server.py);
-# a StopMenu/StartMenu restart that lands in that window sees STOPPED, then the boot flips the menu to
-# RUNNING and StartMenu fails "Menu already running" (#1798). The stack is ready after the entry.
+# Health goes SERVING after the boot lobby entry (menu_auto_start, services/menu/server.py), except when
+# the coordinator lookup outlasts its health bound and the entry comes later. A StopMenu/StartMenu restart
+# before the entry sees STOPPED, then the boot flips the menu to RUNNING and StartMenu fails "Menu already
+# running" (#1798). The stack is ready after the entry's log line.
 READY_LOG_MARKERS = {"menu": "Menu auto-started"}
 
 # Coordinator on mock controllers: headless games, interventions, flag service lifecycle.

@@ -13,6 +13,7 @@ from openfeature.client import OpenFeatureClient
 from lib.types import Games
 from proto import menu_pb2
 from services.menu import server
+from services.menu.event_publisher import EventPublisher
 from services.menu.idle_monitor import IdleMonitor
 from services.menu.servicer import MenuServicer
 from services.menu.utils import AudioHelper
@@ -25,6 +26,8 @@ def _servicer_with_flags(**flags):
     servicer.current_selection = Games.Tournament
     servicer.audio = create_autospec(AudioHelper, instance=True)
     servicer.idle_monitor = create_autospec(IdleMonitor, instance=True)
+    servicer.event_publisher = create_autospec(EventPublisher, instance=True)
+    servicer.start_menu_during_game.return_value = True
     servicer.user_prefs_client = create_autospec(OpenFeatureClient, instance=True)
     servicer.user_prefs_client.get_boolean_value.side_effect = lambda key, default, *_a, **_k: flags.get(key, default)
     servicer.boot_follows_live_game.return_value = False
@@ -57,12 +60,16 @@ async def _provider_ready(_domain, *_a, **_k):
     return True
 
 
-async def _boot(servicer, provider_wait=None):
-    """Run server.serve() until the boot sequence is done, then SIGTERM it; returns the gRPC server mock."""
+async def _boot(servicer, provider_wait=None, sigterm_when=None):
+    """Run server.serve() until the boot sequence is done, then SIGTERM it; returns the gRPC server mock.
+
+    ``sigterm_when`` overrides "boot done" (the loop watchdog started after health SERVING).
+    """
     loop = asyncio.get_running_loop()
     handlers = {}
     grpc_server = create_autospec(grpc.aio.Server, instance=True)
     with (
+        patch.object(server, "start_loop_watchdog", autospec=True) as start_watchdog,
         patch.object(server, "init_metrics", autospec=True),
         patch.object(server, "init_logging", autospec=True),
         patch.object(
@@ -76,7 +83,7 @@ async def _boot(servicer, provider_wait=None):
     ):
         task = asyncio.create_task(server.serve(port=0))
         for _ in range(200):
-            if signal.SIGTERM in handlers:
+            if signal.SIGTERM in handlers and (sigterm_when() if sigterm_when else start_watchdog.called):
                 break
             await asyncio.sleep(0.01)
         handlers[signal.SIGTERM]()
@@ -295,6 +302,47 @@ class TestBootFollowsLiveGame:
         await _boot(servicer)
 
         servicer.start_button_monitor.assert_awaited_once()
+        servicer.enter_lobby.assert_not_called()
+        # menu_auto_start on: the game's end restores the menu started (A12), announced like a StartMenu.
+        servicer.start_menu_during_game.assert_called_once_with()
+        servicer.event_publisher.publish.assert_awaited_once_with("menu_started", {})
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[3], br=["BR-003", "BR-014"])
+    async def test_start_during_the_boot_with_auto_start_off_leaves_the_menu_stopped(self):
+        servicer = _servicer_with_flags(menu_auto_start=False)
+        servicer._lifecycle_live.return_value = True
+
+        await _boot(servicer)
+
+        servicer.enter_lobby.assert_not_called()
+        servicer.start_menu_during_game.assert_not_called()
+
+
+class TestShutdownDuringBoot:
+    """services.md menu readiness: SIGTERM and SIGINT shut the menu down gracefully from process start."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[2])
+    async def test_sigterm_during_the_boot_lookup_shuts_down_gracefully(self):
+        events = []
+        servicer = _servicer_with_flags()
+        lookup_started = asyncio.Event()
+
+        async def unanswered():
+            lookup_started.set()
+            await asyncio.sleep(3600)
+
+        servicer.boot_follows_live_game.side_effect = unanswered
+
+        with patch.object(server.health.aio, "HealthServicer", TestMenuHealthReadiness._recording_health(events)):
+            grpc_server = await _boot(servicer, sigterm_when=lookup_started.is_set)
+
+        assert lookup_started.is_set()
+        assert not any(e[2] == health_pb2.HealthCheckResponse.SERVING for e in events)
+        servicer.stop_game_event_monitor.assert_awaited_once()
+        servicer.shutdown.assert_awaited_once()
+        grpc_server.stop.assert_awaited_once_with(grace=5)
         servicer.enter_lobby.assert_not_called()
 
     @pytest.mark.asyncio

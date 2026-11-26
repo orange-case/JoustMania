@@ -213,6 +213,7 @@ async def test_pad_key_set_and_persist_bodies(servicer, flags):
 @pytest.mark.uc("UC-015", flow="main", br=["BR-008"])
 @pytest.mark.uc("UC-014", flow="main", steps=[2, 3, 5])
 async def test_force_start_starts_with_the_ready_roster_and_no_host_serial(servicer):
+    servicer.state = menu_pb2.MenuState.RUNNING
     servicer.state_manager.controller_states = {
         "a": ControllerState.READY,
         "b": ControllerState.READY,

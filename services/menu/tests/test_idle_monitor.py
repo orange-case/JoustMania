@@ -32,6 +32,8 @@ def mock_state_manager(mock_led):
     sm.battery_levels = {}
     sm.current_game_mode = MagicMock()
     sm.current_game_mode.name = "JoustFFA"
+    sm.all_ready.return_value = False
+    sm.below_mode_minimum.return_value = False
     return sm
 
 
