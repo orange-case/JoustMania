@@ -369,14 +369,14 @@ def _event_payload_string(spec: "InterventionSpec", payload: dict) -> str:
     if spec.flag_key == "end_game":
         return ""
     if spec.flag_key == "group_shield":
-        # "<serial,serial,...>|<seconds>" (UC-040 A47): _event_target_serials and
+        # "<serial,serial,...>|<seconds>" (UC-048 A13): _event_target_serials and
         # _event_group_seconds read it back.
         return f"{payload.get('serials') or ''}|{payload.get('seconds') or ''}"
     return serial
 
 
 def _event_target_serials(spec: "InterventionSpec", payload: str) -> list[str]:
-    """The target serials of a group event's payload string, in payload order (UC-040 A47).
+    """The target serials of a group event's payload string, in payload order (UC-048 A13).
 
     Empty for every other flag. Entries are stripped; empty entries are kept, so
     the handler refuses a malformed set instead of shrinking it.

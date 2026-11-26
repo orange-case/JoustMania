@@ -319,10 +319,10 @@ func (p *puller) decodeDocument(doc *EnvironmentDocument, rc *roundCtx) (map[Key
 			continue
 		}
 		k := Key{Set: pol.Set, Flag: pol.Key, Scope: ScopeStack}
-		out[k] = p.decodeState(pol, registry.ScopeStack, fs)
+		out[k] = p.decodeState(pol, fs)
 	}
 	for _, ov := range doc.IdentityOverrides {
-		scope, scopeName, ok := rc.scopeOfIdentity(ov.Identifier)
+		scope, ok := rc.scopeOfIdentity(ov.Identifier)
 		if !ok {
 			continue
 		}
@@ -332,7 +332,7 @@ func (p *puller) decodeDocument(doc *EnvironmentDocument, rc *roundCtx) (map[Key
 				continue
 			}
 			k := Key{Set: pol.Set, Flag: pol.Key, Scope: scope}
-			out[k] = p.decodeState(pol, scopeName, fs)
+			out[k] = p.decodeState(pol, fs)
 		}
 	}
 	return out, segments
@@ -344,9 +344,8 @@ func isSegment(raw json.RawMessage) bool {
 }
 
 // decodeState turns one feature state into a Value: enabled=false is no
-// value; a fraction override is its {"variant", "fraction_percent"} object; a
-// declared variant carries its baseline value too.
-func (p *puller) decodeState(pol *registry.Policy, scopeName string, fs FeatureState) docEntry {
+// value; a declared variant carries its baseline value too.
+func (p *puller) decodeState(pol *registry.Policy, fs FeatureState) docEntry {
 	var e docEntry
 	if !fs.Enabled {
 		return e
@@ -387,16 +386,6 @@ func (p *puller) decodeState(pol *registry.Policy, scopeName string, fs FeatureS
 	}
 	fv := FSValueOf(fs.FeatureStateValue)
 	b := p.l.BaselineFlag(pol.Set, pol.Key)
-	if scopeName == registry.ScopeFraction {
-		var s string
-		if fv.Type == TypeUnicode && json.Unmarshal(fv.Value, &s) == nil && json.Valid([]byte(s)) {
-			e.v = Value{Present: true, Value: compact(json.RawMessage(s))}
-			return e
-		}
-		e.v = Value{Present: true, Value: compact(fs.FeatureStateValue)}
-		e.err = fserr.Unprocessable(fserr.FlagsmithTypeMismatch, "%s: a fraction value is the JSON text {\"variant\", \"fraction_percent\"}", pol.Key)
-		return e
-	}
 	variant, value, ferr := Decode(pol, b, fv)
 	if ferr != nil {
 		e.v = Value{Present: true, Value: compact(fs.FeatureStateValue)}
@@ -946,9 +935,9 @@ func (p *puller) reconcileKey(rc *roundCtx, k Key, d map[Key]docEntry, local map
 	}
 	le, ok := local[k]
 	if !ok {
-		// An empty game, game:serial or fraction slot is not in the snapshot:
+		// An empty game or game:serial slot is not in the snapshot:
 		// its version still makes the write conditional (#2590 P2).
-		le.slot = p.slotVersion(k, de.v)
+		le.slot = p.slotVersion(k)
 	}
 	if rf, ok := p.refused[k]; ok && !rf.d.Equal(de.v) {
 		delete(p.refused, k)
@@ -1068,12 +1057,12 @@ func (p *puller) accepted(k Key) {
 }
 
 // slotVersion reads the current version of k's slot (0: no slot).
-func (p *puller) slotVersion(k Key, v Value) uint64 {
+func (p *puller) slotVersion(k Key) uint64 {
 	st := p.l.State()
 	if st == nil {
 		return 0
 	}
-	sc, _, ok := scopeOfKey(k, v)
+	sc, _, ok := scopeOfKey(k)
 	if !ok {
 		return 0
 	}
@@ -1086,7 +1075,7 @@ func (p *puller) slotVersion(k Key, v Value) uint64 {
 // finding 6). Reoffer never re-queues a value Flagsmith refused (UC-055 A4,
 // #2604) nor replaces a pending entry.
 func (p *puller) offer(rc *roundCtx, k Key, le localEntry) bool {
-	if le.slot != 0 && p.slotVersion(k, le.v) != le.slot {
+	if le.slot != 0 && p.slotVersion(k) != le.slot {
 		return false
 	}
 	// The slot check above and ReofferRead hold no common lock; read closes
@@ -1124,7 +1113,7 @@ func (p *puller) apply(rc *roundCtx, k Key, pol *registry.Policy, de docEntry, l
 		p.applyEvent(rc, k, de, le)
 		return
 	}
-	sc, scopeName, ok := scopeOfKey(k, de.v)
+	sc, scopeName, ok := scopeOfKey(k)
 	if !ok {
 		return
 	}
@@ -1160,27 +1149,12 @@ type undo struct {
 	gen  uint64
 }
 
-// scopeOfKey returns the write scope of k. A fraction key always carries a
-// percent, so its write can never address the stack.
-func scopeOfKey(k Key, v Value) (state.Scope, string, bool) {
+// scopeOfKey returns the write scope of k.
+func scopeOfKey(k Key) (state.Scope, string, bool) {
 	if k.Scope == ScopeStack {
 		return state.Scope{}, registry.ScopeStack, true
 	}
-	sc, name, ok := ScopeOfIdentity(k.Scope)
-	if !ok {
-		return sc, name, false
-	}
-	if name == registry.ScopeFraction {
-		var fv struct {
-			FractionPercent int `json:"fraction_percent"`
-		}
-		if v.Present {
-			_ = json.Unmarshal(v.Value, &fv)
-		}
-		pct := fv.FractionPercent
-		sc.FractionPercent = &pct
-	}
-	return sc, name, true
+	return ScopeOfIdentity(k.Scope)
 }
 
 // applyEvent appends one payload set in Flagsmith (§4.3); the append is

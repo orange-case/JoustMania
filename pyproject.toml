@@ -47,7 +47,6 @@ members = [
     "services/audio",
     "services/operator_pad",
     "services/pairing_daemon",
-    "services/python_hid",
     "tests/integration",
     "tests/service",
 ]

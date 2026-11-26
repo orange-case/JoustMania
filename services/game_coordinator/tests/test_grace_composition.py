@@ -47,7 +47,7 @@ from services.game_coordinator.games.tournament import TournamentPlayer, Tournam
 
 @pytest.fixture(autouse=True)
 def _no_shield_limits():
-    """Shield limits off (#2044, UC-040 BR-022): these tests are not about the cap or the cooldown."""
+    """Shield limits off (#2044, UC-048 BR-007): these tests are not about the cap or the cooldown."""
     with patch.object(BaseGameMode, "_shield_limits", return_value=(0, 0)):
         yield
 
@@ -191,9 +191,9 @@ class TestGrantShieldComposition:
         assert game.effective_grace_until(p) >= now + 30.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_cooldown_off_restores_extend_not_shorten(self):
-        """Cooldown 0 (BR-022): repeated shields never shorten; a shorter follow-up is a no-op."""
+        """Cooldown 0 (UC-048 BR-007): repeated shields never shorten; a shorter follow-up is a no-op."""
         game = _make_ffa_game()
         p = Player(serial="A", alive=True)
         game.players["A"] = p

@@ -93,7 +93,7 @@ def test_an_exhausted_backstop_blocks_as_rate_limited():
     assert chain.check(ELIMINATE, "p1", None) == (BLOCK_RATE_LIMITED, None)
 
 
-@pytest.mark.uc("UC-040", flow="A31")
+@pytest.mark.uc("UC-048", flow="A4")
 def test_the_returned_reservation_refunds_exactly_its_own_weight():
     limiter = _limiter()
     chain = Policy().chain(limiter)

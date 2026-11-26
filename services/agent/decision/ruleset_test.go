@@ -1,5 +1,7 @@
 package decision
 
+// Spec: decide-contract.md §15.4 (the rules engine; tests tagged UC-040 A1)
+
 import (
 	"testing"
 	"time"
@@ -26,7 +28,7 @@ func gameCtx(duration float64, elims []string, players map[string]testPlayer) ga
 		SessionID: "s-1",
 		// A real context time, so the players' one reading is fresh through the
 		// freshness gate itself (now - At = 0 within 3 s), not through a zero
-		// time on both sides (UC-040 A46, BR-037, #2511).
+		// time on both sides (decide-contract.md §15.4, #2511).
 		UpdatedAt: gameCtxNow,
 		Players:   map[string]*gamecontext.PlayerSignals{},
 	}
@@ -42,7 +44,7 @@ func gameCtx(duration float64, elims []string, players map[string]testPlayer) ga
 			MovementVariance:  tp.variance,
 			Active:            bptr(tp.active),
 			// One reading at the context's time, so R3, R4 and R8 see a fresh
-			// player (UC-040 A46, BR-037, #2511). A test that moves UpdatedAt
+			// player (decide-contract.md §15.4, #2511). A test that moves UpdatedAt
 			// gives the players it needs fresh a track of its own.
 			History: []gamecontext.MovementSample{{At: c.UpdatedAt, Intensity: freshReading(tp.intensity)}},
 		}

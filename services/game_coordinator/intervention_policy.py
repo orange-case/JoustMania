@@ -28,17 +28,17 @@ BLOCK_LOW_BATTERY = "low_battery"
 BLOCK_MODE_UNSUPPORTED = "mode_unsupported"
 BLOCK_NO_GAME = "no_game"
 # The handler applied nothing on purpose (InterventionNotApplied): a grant_shield to
-# a player who already holds a shield charge (UC-040 A31, BR-020).
+# a player who already holds a shield charge (UC-048 A4, BR-005).
 BLOCK_ALREADY_CHARGED = "already_charged"
-# A grant_shield refused by the shield limits per player per game (UC-040 A34,
-# BR-022): raised by games/base.py grant_shield as InterventionNotApplied.
+# A grant_shield refused by the shield limits per player per game (UC-048 A7,
+# UC-048 BR-007): raised by games/base.py grant_shield as InterventionNotApplied.
 BLOCK_SHIELD_CAP_REACHED = "shield_cap_reached"
 BLOCK_SHIELD_COOLDOWN = "shield_cooldown"
-# A grant_shield in a hold game that could add nothing (UC-040 A37).
+# A grant_shield in a hold game that could add nothing (UC-048 A9).
 BLOCK_SHIELD_POOL_FULL = "shield_pool_full"
 BLOCK_SHIELD_BUDGET_EXHAUSTED = "shield_budget_exhausted"
 # A grant_shield that lands once the game is ending (outcome latched, force-ended,
-# ENDING / ENDED): no layer, no cue over the winner effect (UC-040 A42 step 3).
+# ENDING / ENDED): no layer, no cue over the winner effect (UC-048 A12 step 3).
 BLOCK_GAME_ENDING = "game_ending"
 # A revive_player the mode refused (decided game, unknown or already-alive player; #1948).
 BLOCK_REVIVE_REFUSED = "revive_refused"
@@ -104,7 +104,7 @@ class _RateLimiter:
         return self.reserve(cost) is not None
 
     def refund(self, token: int | None) -> None:
-        """Give back exactly the reservation ``token`` (an intervention that applied nothing, UC-040 A31).
+        """Give back exactly the reservation ``token`` (an intervention that applied nothing, UC-048 A4).
 
         Unknown, already-refunded or evicted tokens are ignored, so a refund never frees another write's slot.
         """

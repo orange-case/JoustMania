@@ -13,8 +13,8 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// chargeledger_uc040_test.go covers the agent's shield-charge ledger (UC-040 A31 step 1,
-// BR-019, BR-020; decide-contract §4.5 step 4; #1837 PR-4a): in trigger mode the agent
+// chargeledger_uc040_test.go covers the agent's shield-charge ledger (UC-048 A4 step 1,
+// BR-004, BR-005; decide-contract §4.5 step 4; #1837 PR-4a): in trigger mode the agent
 // gives a player at most one shield charge per window, blocks a second grant_shield
 // already_charged before the rate limit, keeps an entry only for an applied write, and
 // stays inert outside a real Free-for-All game in trigger mode.
@@ -55,9 +55,9 @@ func runCycle(l *Loop, c gamecontext.GameContext) LayerState {
 	return l.OnEvaluate(context.Background(), c, testTrigger())
 }
 
-// UC: UC-040 A31 BR-020
+// UC: UC-048 A4 BR-005
 func TestChargeLedger_SecondGrantBlockedNoBudget(t *testing.T) {
-	t.Run("UC-040/A31 a second grant within the window is already_charged and charges no budget", func(t *testing.T) {
+	t.Run("UC-048/A4 a second grant within the window is already_charged and charges no budget", func(t *testing.T) {
 		shieldCost := int(interventionCost(InterventionGrantShield))
 		l, sink, clock, _ := ledgerLoop(t, 2*shieldCost, triggerMode(20*time.Second, nil), budgetShield("WEAK"))
 
@@ -80,7 +80,7 @@ func TestChargeLedger_SecondGrantBlockedNoBudget(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31 BR-019
+// UC: UC-048 A4 BR-004
 func TestChargeLedger_Inert(t *testing.T) {
 	werewolf, unknown := "Werewolf", ""
 	for _, tc := range []struct {
@@ -89,17 +89,17 @@ func TestChargeLedger_Inert(t *testing.T) {
 		ctx       func() gamecontext.GameContext
 		wantReads int32
 	}{
-		{"UC-040/A31 instant mode", func(*atomic.Int32) ShieldChargeMode { return instantMode }, ffaRealCtx, -1},
-		{"UC-040/A31 nil mode source", func(*atomic.Int32) ShieldChargeMode { return nil }, ffaRealCtx, -1},
-		{"UC-040/A31 unknown game mode", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
+		{"UC-048/A4 instant mode", func(*atomic.Int32) ShieldChargeMode { return instantMode }, ffaRealCtx, -1},
+		{"UC-048/A4 nil mode source", func(*atomic.Int32) ShieldChargeMode { return nil }, ffaRealCtx, -1},
+		{"UC-048/A4 unknown game mode", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
 			func() gamecontext.GameContext { c := ffaRealCtx(); c.Session.GameMode = nil; return c }, 0},
-		{"UC-040/A31 empty game mode", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
+		{"UC-048/A4 empty game mode", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
 			func() gamecontext.GameContext { c := ffaRealCtx(); c.Session.GameMode = &unknown; return c }, 0},
-		{"UC-040/A31 BR-019 a non-FFA mode", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
+		{"UC-048/A4 BR-004 a non-FFA mode", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
 			func() gamecontext.GameContext { c := ffaRealCtx(); c.Session.GameMode = &werewolf; return c }, 0},
-		{"UC-040/A31 BR-019 a shadow game", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
+		{"UC-048/A4 BR-004 a shadow game", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
 			func() gamecontext.GameContext { c := ffaRealCtx(); c.GameKind = gamecontext.GameKindShadow; return c }, 0},
-		{"UC-040/A31 an unlabelled game kind", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
+		{"UC-048/A4 an unlabelled game kind", func(c *atomic.Int32) ShieldChargeMode { return triggerMode(20*time.Second, c) },
 			func() gamecontext.GameContext { c := ffaRealCtx(); c.GameKind = ""; return c }, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,7 +120,7 @@ func TestChargeLedger_Inert(t *testing.T) {
 		})
 	}
 
-	t.Run("UC-040/A31 other interventions and a session-scoped grant are never read or blocked", func(t *testing.T) {
+	t.Run("UC-048/A4 other interventions and a session-scoped grant are never read or blocked", func(t *testing.T) {
 		var reads atomic.Int32
 		session := Decision{Intervention: InterventionGrantShield, ObjectiveServed: ObjectiveBalanced, Objectives: balancedFocused()}
 		l, _, clock, _ := ledgerLoop(t, 100, triggerMode(20*time.Second, &reads), budgetNudge("WEAK"), session)
@@ -138,17 +138,17 @@ func TestChargeLedger_Inert(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestChargeLedger_Window(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		expiry time.Duration
 		window time.Duration
 	}{
-		{"UC-040/A31 expiry 10 s gives 12 s", 10 * time.Second, 12 * time.Second},
-		{"UC-040/A31 expiry 20 s gives 22 s", 20 * time.Second, 22 * time.Second},
-		{"UC-040/A31 expiry 0 (never) gives 22 s", 0, 22 * time.Second},
-		{"UC-040/A31 expiry 45 s is capped at 22 s", 45 * time.Second, 22 * time.Second},
+		{"UC-048/A4 expiry 10 s gives 12 s", 10 * time.Second, 12 * time.Second},
+		{"UC-048/A4 expiry 20 s gives 22 s", 20 * time.Second, 22 * time.Second},
+		{"UC-048/A4 expiry 0 (never) gives 22 s", 0, 22 * time.Second},
+		{"UC-048/A4 expiry 45 s is capped at 22 s", 45 * time.Second, 22 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			l, _, clock, _ := ledgerLoop(t, 100, triggerMode(tc.expiry, nil), budgetShield("WEAK"))
@@ -166,14 +166,15 @@ func TestChargeLedger_Window(t *testing.T) {
 	}
 }
 
-// UC: UC-040 A31 A11 A27
+// UC: UC-040 A11 A27
+// UC: UC-048 A4
 func TestChargeLedger_ReleasedWhenNotWritten(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		sink ActionSink
 	}{
-		{"UC-040/A31 UC-040/A11 a gated-off write keeps no entry", &gatedSink{gateOn: false}},
-		{"UC-040/A31 UC-040/A27 a failed write keeps no entry", errSink{}},
+		{"UC-048/A4 UC-040/A11 a gated-off write keeps no entry", &gatedSink{gateOn: false}},
+		{"UC-048/A4 UC-040/A27 a failed write keeps no entry", errSink{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			l, _, clock, _ := ledgerLoop(t, 100, triggerMode(20*time.Second, nil), budgetShield("WEAK"))
@@ -187,7 +188,7 @@ func TestChargeLedger_ReleasedWhenNotWritten(t *testing.T) {
 		})
 	}
 
-	t.Run("UC-040/A31 a rate-limit block after the reservation keeps no entry", func(t *testing.T) {
+	t.Run("UC-048/A4 a rate-limit block after the reservation keeps no entry", func(t *testing.T) {
 		l, _, clock, _ := ledgerLoop(t, 2, triggerMode(20*time.Second, nil), budgetShield("WEAK"))
 		l.limiter.allow(clock.Add(-rateWindow+500*time.Millisecond), 2, 2) // full now, frees in 0.5 s
 		if got := outcomeSummary(runCycle(l, ffaRealCtx())); !equalStrings(got, []string{"grant_shield/WEAK:rate_limit"}) {
@@ -199,7 +200,7 @@ func TestChargeLedger_ReleasedWhenNotWritten(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-040/A31 a stale reservation handle neither commits nor releases a newer entry", func(t *testing.T) {
+	t.Run("UC-048/A4 a stale reservation handle neither commits nor releases a newer entry", func(t *testing.T) {
 		var cl chargeLedger
 		now := time.Unix(1_000, 0)
 		old, _ := cl.reserve("WEAK", now, chargeOnly(22*time.Second))
@@ -221,9 +222,9 @@ func TestChargeLedger_ReleasedWhenNotWritten(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestChargeLedger_ConcurrentReserve(t *testing.T) {
-	t.Run("UC-040/A31 concurrent decisions for one player dispatch exactly one grant", func(t *testing.T) {
+	t.Run("UC-048/A4 concurrent decisions for one player dispatch exactly one grant", func(t *testing.T) {
 		l, sink, clock, _ := ledgerLoop(t, 100, triggerMode(20*time.Second, nil))
 		snap := rulesSnapshot()
 		c := ffaRealCtx()
@@ -246,9 +247,10 @@ func TestChargeLedger_ConcurrentReserve(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31 A21
+// UC: UC-040 A21
+// UC: UC-048 A4
 func TestChargeLedger_RepeatRefusalQuiet(t *testing.T) {
-	t.Run("UC-040/A31 only the first refusal per entry is emitted; repeats only count", func(t *testing.T) {
+	t.Run("UC-048/A4 only the first refusal per entry is emitted; repeats only count", func(t *testing.T) {
 		l, _, clock, decisionSpans := ledgerLoop(t, 100, triggerMode(20*time.Second, nil), budgetShield("WEAK"))
 		reader := metric.NewManualReader()
 		l.decisions = newDecisionsCounter(metric.NewMeterProvider(metric.WithReader(reader)))
@@ -288,9 +290,9 @@ func TestChargeLedger_RepeatRefusalQuiet(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestChargeLedger_NotCountedAsIntervention(t *testing.T) {
-	t.Run("UC-040/A31 a refusal is not dispatched, applied or written", func(t *testing.T) {
+	t.Run("UC-048/A4 a refusal is not dispatched, applied or written", func(t *testing.T) {
 		l, sink, clock, _ := ledgerLoop(t, 100, triggerMode(20*time.Second, nil), budgetShield("WEAK"))
 		reader := metric.NewManualReader()
 		l.interventionsApplied = newInterventionsAppliedCounter(metric.NewMeterProvider(metric.WithReader(reader)))
@@ -329,9 +331,9 @@ func TestChargeLedger_NotCountedAsIntervention(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestChargeLedger_DecideSpanReportsAlreadyCharged(t *testing.T) {
-	t.Run("UC-040/A31 a remote answer landing for a charged player is blocked already_charged", func(t *testing.T) {
+	t.Run("UC-048/A4 a remote answer landing for a charged player is blocked already_charged", func(t *testing.T) {
 		be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.95, "A", 0.5, "x"))
 		h := newRemoteHarness(t, remoteSnapshot(time.Second), be)
 		h.loop.SetShieldChargeMode(triggerMode(20*time.Second, nil))
@@ -363,9 +365,9 @@ func TestChargeLedger_DecideSpanReportsAlreadyCharged(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestChargeLedger_PanicAfterWriteKeepsShield(t *testing.T) {
-	t.Run("UC-040/A31 a panic in a post-write hook leaves the shield charge kept", func(t *testing.T) {
+	t.Run("UC-048/A4 a panic in a post-write hook leaves the shield charge kept", func(t *testing.T) {
 		l, sink, clock, _ := ledgerLoop(t, 100, triggerMode(20*time.Second, nil))
 		l.SetApplyOutcomeRecorder(func(string, gamecontext.ApplyOutcome) { panic("hook") })
 		var state LayerState

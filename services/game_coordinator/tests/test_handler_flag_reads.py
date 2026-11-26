@@ -64,7 +64,7 @@ DOMAINS = ("game", "user", "interventions", "agent", "system", "controller", "ob
 # Values that make the read path under test reachable (shield trigger mode).
 FLAG_VALUES = {
     "shield.activation": "trigger",
-    # The group shield's gate open, so its whole path runs (UC-040 A47, #2467).
+    # The group shield's gate open, so its whole path runs (UC-048 A13, #2467).
     "policy.group_grant.enabled": True,
     "policy.group_grant.real_games": True,
     "policy.group_grant.max_per_game": 1.0,
@@ -258,7 +258,8 @@ async def _run(game, seen_reads, *, game_task=None):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A31", br=["BR-018"])
+@pytest.mark.uc("UC-040", br=["BR-018"])
+@pytest.mark.uc("UC-048", flow="A4")
 async def test_every_handler_flag_read_is_declared(seen):
     """(i) A flag read while a handler runs is declared in handler_flag_reads.py."""
     game = _make_ffa()
@@ -273,7 +274,8 @@ async def test_every_handler_flag_read_is_declared(seen):
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("seen")
-@pytest.mark.uc("UC-040", flow="A31", br=["BR-018"])
+@pytest.mark.uc("UC-040", br=["BR-018"])
+@pytest.mark.uc("UC-048", flow="A4")
 async def test_census_covers_every_registered_handler():
     """(ii) The case table equals the registered handlers and revert handlers."""
     mgr = _manager(_make_ffa())
@@ -308,7 +310,8 @@ def _is_windows_baseline_read(domain, key, ctx):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A31", br=["BR-018"])
+@pytest.mark.uc("UC-040", br=["BR-018"])
+@pytest.mark.uc("UC-048", flow="A4")
 @pytest.mark.uc("UC-043", br=["BR-005"])
 async def test_handler_reads_carry_the_experiment_arm_game_context(seen):
     """(iii) A shadow game in an experiment's experimental arm: every handler read sees
@@ -340,7 +343,8 @@ async def test_handler_reads_carry_the_experiment_arm_game_context(seen):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A31", br=["BR-018"])
+@pytest.mark.uc("UC-040", br=["BR-018"])
+@pytest.mark.uc("UC-048", flow="A4")
 async def test_handler_reads_of_a_real_game_resolve_as_real(seen):
     """(iii) A real (primary) game: game_kind=real, no experiment or arm, its game context."""
     game = _make_ffa()
@@ -355,7 +359,8 @@ async def test_handler_reads_of_a_real_game_resolve_as_real(seen):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A31", br=["BR-018"])
+@pytest.mark.uc("UC-040", br=["BR-018"])
+@pytest.mark.uc("UC-048", flow="A4")
 async def test_handler_reads_before_the_run_see_the_session_kind(seen):
     """(iii) Init phase (the run has not set the game's context yet): the reads see the
     session-kind context the game's init reads saw, game_kind and the experiment."""

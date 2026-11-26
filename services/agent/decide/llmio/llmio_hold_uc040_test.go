@@ -8,11 +8,11 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// UC: UC-040 A36 A37
+// UC: UC-048 A8 A9
 // TestRender_HoldGame: an LLM prompt of a hold game (#2096) carries the pool in the
 // state, and the static system prompt explains the hold tokens.
 func TestRender_HoldGame(t *testing.T) {
-	t.Run("UC-040/A36 the hold tokens reach the prompt", func(t *testing.T) {
+	t.Run("UC-048/A8 the hold tokens reach the prompt", func(t *testing.T) {
 		mode := gamecontext.ShieldActivationHold
 		active := true
 		energy, budget := 2.4, 9.1

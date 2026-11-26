@@ -380,9 +380,9 @@ class GameEvent(StrEnum):
     PLAYER_REVIVE = "player_revive"
     PLAYER_OUT = "player_out"  # Player eliminated (no more lives)
     PLAYER_ANALYTICS = "player_analytics"  # Analytics summary for a player at game end
-    PLAYER_SHIELDED = "player_shielded"  # Agent shield feedback started (#1301, UC-040 A16)
-    PLAYER_SHIELD_CHARGED = "player_shield_charged"  # Shield charge granted (#1837, UC-040 A30)
-    PLAYER_SHIELD_CHARGE_ENDED = "player_shield_charge_ended"  # Charge used or dropped (#1837, UC-040 A32, UC-030 A6)
+    PLAYER_SHIELDED = "player_shielded"  # Agent shield feedback started (#1301, UC-048 A1)
+    PLAYER_SHIELD_CHARGED = "player_shield_charged"  # Shield charge granted (#1837, UC-048 A3)
+    PLAYER_SHIELD_CHARGE_ENDED = "player_shield_charge_ended"  # Charge used or dropped (#1837, UC-048 A5, UC-030 A6)
     PLAYER_SHIELD_ENERGY = "player_shield_energy"  # Hold pool state for the dashboard bar (#2096, UC-035 BR-008)
 
     # Game phase events

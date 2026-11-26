@@ -127,7 +127,7 @@ const (
 
 // Promotion is the recorded result of one promotion (entity PROMOTION): Outcome is
 // applied, discarded or reverted (code_improvement.outcome), Reason explains a
-// discarded or reverted outcome, Reference is the issue / PR URL or local commit.
+// discarded or reverted outcome, Reference is the issue URL.
 type Promotion struct {
 	Outcome   string `json:"outcome"`
 	Reason    string `json:"reason,omitempty"`

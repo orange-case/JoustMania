@@ -33,9 +33,9 @@ func holdState(t *testing.T, budgetLeft float64) decide.State {
 	return st
 }
 
-// UC: UC-040 A37
+// UC: UC-048 A9
 func TestSuitability_Hold(t *testing.T) {
-	t.Run("UC-040/A37 grant_shield into a full pool reads as refused", func(t *testing.T) {
+	t.Run("UC-048/A9 grant_shield into a full pool reads as refused", func(t *testing.T) {
 		d := describeCandidates(holdState(t, 12), "grant_shield")["MOCK0003"]
 		if !strings.Contains(d, "Shield energy already full: another shield is refused.") {
 			t.Errorf("description lacks the pool refusal: %q", d)
@@ -44,19 +44,19 @@ func TestSuitability_Hold(t *testing.T) {
 			t.Errorf("description lacks the pool: %q", d)
 		}
 	})
-	t.Run("UC-040/A37 grant_shield with the budget used up reads as refused", func(t *testing.T) {
+	t.Run("UC-048/A9 grant_shield with the budget used up reads as refused", func(t *testing.T) {
 		d := describeCandidates(holdState(t, 0.1), "grant_shield")["MOCK0003"]
 		if !strings.Contains(d, "Shield budget for this game used up") {
 			t.Errorf("description lacks the budget refusal: %q", d)
 		}
 	})
-	t.Run("UC-040/A36 a toughness_boost keeps the danger text", func(t *testing.T) {
+	t.Run("UC-048/A8 a toughness_boost keeps the danger text", func(t *testing.T) {
 		d := describeCandidates(holdState(t, 12), "toughness_boost")["MOCK0003"]
 		if strings.Contains(d, "is refused") {
 			t.Errorf("toughness_boost must not read as refused: %q", d)
 		}
 	})
-	t.Run("UC-040/A37 outside a hold game nothing changes", func(t *testing.T) {
+	t.Run("UC-048/A9 outside a hold game nothing changes", func(t *testing.T) {
 		st := testRequest().State
 		for _, p := range st.Players {
 			if strings.Contains(describeCandidates(st, "grant_shield")[p.Serial], "Shield energy") {
@@ -66,9 +66,9 @@ func TestSuitability_Hold(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A36
+// UC: UC-048 A8
 func TestEncodeState_Hold(t *testing.T) {
-	t.Run("UC-040/A36 the wire carries the hold values in a hold game only", func(t *testing.T) {
+	t.Run("UC-048/A8 the wire carries the hold values in a hold game only", func(t *testing.T) {
 		st := holdState(t, 12)
 		st.Players[0].ShieldEnergyS = f64(math.NaN())
 		raw, err := json.Marshal(encodeState(st, "", nil))

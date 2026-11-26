@@ -554,7 +554,7 @@ INTERVENTION_SPECS: tuple[InterventionSpec, ...] = (
         # the event alone ends the game whose list carries it
         payload_required=False,
     ),
-    # #2467 PR 3 (UC-040 A47, A48, BR-033): one event shields 2 to 6 players, all or
+    # #2467 PR 3 (UC-048 A13, A14, BR-014): one event shields 2 to 6 players, all or
     # nothing. Payload {"serials": "A,B,C", "seconds": "5"}. Not player_targeted: the
     # handler checks the battery of every serial itself (lifecycle_handlers.py).
     # Allowed in every mode, like grant_shield (no MODE_CAPABILITY_DENY row).
@@ -1477,7 +1477,7 @@ class InterventionManager:
             await record_outcome(spec, target, objective, session, blocked=not e.applied_unknown, block_reason=e.reason)
             return
         except InterventionNotApplied as e:
-            # UC-040 A31: nothing applied, so the backstop reservation is refunded.
+            # UC-048 A4: nothing applied, so the backstop reservation is refunded.
             self._rate_limiter.refund(reservation)
             logger.info(f"InterventionManager: {spec.flag_key} for {target or '<game>'} not applied: {e.reason}")
             await record_outcome(spec, target, objective, session, blocked=True, block_reason=e.reason)

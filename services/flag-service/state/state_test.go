@@ -313,7 +313,6 @@ func TestPut_Rejections(t *testing.T) {
 		{"UC-053/A5 persist on a non-persistable flag", WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Persist: true}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 persist with a TTL", WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 TTL on a game value", WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "game_a"}, TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
-		{"UC-053/A5 fraction outside the bounds", WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: "rust", Scope: Scope{FractionPercent: intp(0)}}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 serial not in the game", WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("5"), Scope: Scope{GameID: "game_a", Serial: "MOCK0099"}}, http.StatusUnprocessableEntity, fserr.SerialNotInGame},
 		{"UC-053/A6 game not registered", WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "game_zz"}}, http.StatusConflict, fserr.GameNotLive},
 		{"UC-053/A5 set still on its file source", WriteRequest{Set: "user", Flag: "play_audio", Variant: "off"}, http.StatusConflict, fserr.SetNotServed},
@@ -971,19 +970,6 @@ func breakStateFile(t *testing.T, path string) {
 	if err := os.WriteFile(filepath.Join(path, "x", "y"), []byte("y"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// UC: UC-052 main
-func TestFraction_RendersAFractionalElse(t *testing.T) {
-	t.Run("UC-052/main a fraction overlay splits between its variant and the effective default", func(t *testing.T) {
-		f := newFixture(t, fixtureOpts{})
-		f.put(WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: "python", Scope: Scope{FractionPercent: intp(10)}, Writer: "canary"})
-		targeting, _ := json.Marshal(f.snapshotFlag("bluetooth_backend")["targeting"])
-		want := `{"fractional":[["python",10],["rust",90]]}`
-		if string(targeting) != want {
-			t.Fatalf("targeting %s, want %s", targeting, want)
-		}
-	})
 }
 
 // fillGameToTheBound registers a game with the given serials and writes the

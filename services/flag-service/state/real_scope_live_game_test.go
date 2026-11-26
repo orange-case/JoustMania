@@ -26,7 +26,7 @@ func (f *fixture) registerKind(id, kind string) {
 	}
 }
 
-// The game latches every real-scoped key at its start (UC-040 BR-027), so a real
+// The game latches every real-scoped key at its start (UC-048 BR-011), so a real
 // write and its revert land at once, live real game or not.
 //
 // UC: UC-043 A17

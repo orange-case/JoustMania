@@ -1,5 +1,7 @@
 package decision
 
+// Spec: decide-contract.md §15.2 (the rules engine; tests tagged UC-040 A1)
+
 import (
 	"context"
 	"encoding/json"
@@ -18,8 +20,8 @@ import (
 )
 
 // shield_catchup_uc040_test.go covers #2395 on the agent side: R4's catch-up among the
-// candidates with the fewest agent shields in this game (UC-040 A41, BR-030) and the grant_shield length
-// from the shield_seconds "default" variant (UC-040 BR-029).
+// candidates with the fewest agent shields in this game (decide-contract.md §15.2) and the grant_shield length
+// from the shield_seconds "default" variant (UC-048 BR-012).
 
 // catchUpLoop is a rules loop with the shield ledger wired into the engine as main.go
 // does (no-shield filter and grant view), the limits off, on a controllable clock.
@@ -76,7 +78,7 @@ func r4Ranked(c gamecontext.GameContext, noShield map[string]bool) []scoredCandi
 	return scoreAndSort(r4, map[string]float64{ObjectiveBalanced: 1}, FitnessEvaluation{})
 }
 
-// UC: UC-040 A41 BR-030
+// UC: UC-040 A1
 func TestPickShieldCatchUp(t *testing.T) {
 	// GONE out of 4: ef 0.25, so urgency (1-skill)*0.5: WEAK 0.45, MID 0.35,
 	// STRONG 0.05 (below minScore 0.10: never a candidate).
@@ -110,7 +112,7 @@ func TestPickShieldCatchUp(t *testing.T) {
 		{name: "an alive player without a skill level does not hold the others back",
 			extra: map[string]testPlayer{"NEW": {active: true}}, grants: map[string]int{"WEAK": 1, "MID": 1}, want: "WEAK"},
 	} {
-		t.Run("UC-040/A41 BR-030 "+tc.name, func(t *testing.T) {
+		t.Run("UC-040/A1 "+tc.name, func(t *testing.T) {
 			c := field(tc.extra)
 			got := pickShieldCatchUp(r4Ranked(c, tc.noShield), c, tc.grants)
 			if tc.want == "" {
@@ -129,7 +131,7 @@ func TestPickShieldCatchUp(t *testing.T) {
 			}
 		})
 	}
-	t.Run("UC-040/A41 BR-030 the kept candidate takes the best R4 score and place, so it stays in the emission", func(t *testing.T) {
+	t.Run("UC-040/A1 the kept candidate takes the best R4 score and place, so it stays in the emission", func(t *testing.T) {
 		// WEAK 0.45 and MID 0.35 around two other rules' candidates at 0.42 and 0.40:
 		// MID at its own place would be third, out of the two-decision emission, where
 		// shielding WEAK would have gone out first.
@@ -155,7 +157,7 @@ func r4Targets(c gamecontext.GameContext, noShield map[string]bool) []string {
 	return shieldTargets(decisionsOf(candidatesOf(r4Ranked(c, noShield))))
 }
 
-// UC: UC-040 A41 BR-030
+// UC: UC-040 A1
 func TestShieldCandidates_StrugglingPlayersOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -183,7 +185,7 @@ func TestShieldCandidates_StrugglingPlayersOnly(t *testing.T) {
 		{name: "an even field has no struggling player",
 			gone: []string{"G1"}, players: map[string]float64{"A": 0.1, "B": 0.1, "C": 0.1}, ranked: nil, want: ""},
 	} {
-		t.Run("UC-040/A41 BR-030 "+tc.name, func(t *testing.T) {
+		t.Run("UC-040/A1 "+tc.name, func(t *testing.T) {
 			ps := map[string]testPlayer{}
 			for serial, skill := range tc.players {
 				ps[serial] = testPlayer{skill: fptr(skill), active: true}
@@ -200,7 +202,7 @@ func TestShieldCandidates_StrugglingPlayersOnly(t *testing.T) {
 			}
 		})
 	}
-	t.Run("UC-040/A41 BR-030 duel through the engine: no rule shields STRONG", func(t *testing.T) {
+	t.Run("UC-040/A1 duel through the engine: no rule shields STRONG", func(t *testing.T) {
 		clock := time.Unix(10_000, 0)
 		r := newObjectiveRules(balancedRulesConfig(), balancedRulesConfig(), balancedRulesConfig(),
 			func() time.Time { return clock }, rand.New(rand.NewPCG(1, 2)))
@@ -232,9 +234,9 @@ func sortRanked(ranked []scoredCandidate) {
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score > ranked[j].score })
 }
 
-// UC: UC-040 A41 BR-030
+// UC: UC-040 A1
 func TestCatchUp_RulesRotateShields(t *testing.T) {
-	t.Run("UC-040/A41 BR-030 the rules keep shielding and spread the shields over the candidates, fewest first", func(t *testing.T) {
+	t.Run("UC-040/A1 the rules keep shielding and spread the shields over the candidates, fewest first", func(t *testing.T) {
 		l, sink, clock := catchUpLoop(t)
 		c := catchUpCtx(gamecontext.GameKindReal)
 		for i := 0; i < 6; i++ {
@@ -254,9 +256,9 @@ func TestCatchUp_RulesRotateShields(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A41 BR-030
+// UC: UC-040 A1
 func TestCatchUp_ShadowGameCountsItsOwnGrants(t *testing.T) {
-	t.Run("UC-040/A41 BR-030 a shadow game's loop does not see the real game's grants, and a new game starts at 0", func(t *testing.T) {
+	t.Run("UC-040/A1 a shadow game's loop does not see the real game's grants, and a new game starts at 0", func(t *testing.T) {
 		real, realSink, _ := catchUpLoop(t)
 		runCycle(real, catchUpCtx(gamecontext.GameKindReal))
 		if got := shieldWriteOrder(realSink); len(got) != 1 || got[0] != "WEAK" {
@@ -273,9 +275,9 @@ func TestCatchUp_ShadowGameCountsItsOwnGrants(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A41 BR-030
+// UC: UC-040 A1
 func TestCatchUp_GrantsCountInFlight(t *testing.T) {
-	t.Run("UC-040/A41 a grant in flight counts, a released one does not", func(t *testing.T) {
+	t.Run("UC-040/A1 a grant in flight counts, a released one does not", func(t *testing.T) {
 		var cl chargeLedger
 		now := time.Unix(1, 0)
 		res, reason := cl.reserve("A", now, shieldRequest{seconds: 5 * time.Second})
@@ -292,10 +294,10 @@ func TestCatchUp_GrantsCountInFlight(t *testing.T) {
 	})
 }
 
-// UC: UC-040 BR-029
+// UC: UC-048 BR-012
 func TestShieldSeconds_StampedFromTheSource(t *testing.T) {
 	ctx := context.Background()
-	t.Run("UC-040/BR-029 a grant without a value is written with the source's length", func(t *testing.T) {
+	t.Run("UC-048/BR-012 a grant without a value is written with the source's length", func(t *testing.T) {
 		l, sink, _, _ := limitLoop(t, 50, 0, 0, budgetShield("WEAK"))
 		calls := 0
 		l.SetShieldSecondsSource(func(context.Context) float64 { calls++; return 3 })
@@ -308,7 +310,7 @@ func TestShieldSeconds_StampedFromTheSource(t *testing.T) {
 			t.Fatalf("source calls = %d, want 1 (read at use time)", calls)
 		}
 	})
-	t.Run("UC-040/BR-029 BR-022 the cooldown runs from the stamped length", func(t *testing.T) {
+	t.Run("UC-048/BR-012 BR-007 the cooldown runs from the stamped length", func(t *testing.T) {
 		// 3 s shield + 2 s margin + 15 s cooldown: refused at t0+19 s, allowed at t0+21 s
 		// (with the 5 s default it would still be refused until t0+22 s).
 		l, sink, clock, _ := limitLoop(t, 50, 0, 15, budgetShield("WEAK"))
@@ -327,7 +329,7 @@ func TestShieldSeconds_StampedFromTheSource(t *testing.T) {
 			t.Fatalf("writes = %d, want 2", n)
 		}
 	})
-	t.Run("UC-040/BR-029 a value the decision carries is kept and the source is not read", func(t *testing.T) {
+	t.Run("UC-048/BR-012 a value the decision carries is kept and the source is not read", func(t *testing.T) {
 		d := budgetShield("WEAK")
 		d.Value = "8"
 		l, sink, _, _ := limitLoop(t, 50, 0, 0, d)
@@ -337,7 +339,7 @@ func TestShieldSeconds_StampedFromTheSource(t *testing.T) {
 			t.Fatalf("written = %+v, want Value 8", ds)
 		}
 	})
-	t.Run("UC-040/BR-029 an unusable source value fails closed to 5 s", func(t *testing.T) {
+	t.Run("UC-048/BR-012 an unusable source value fails closed to 5 s", func(t *testing.T) {
 		l, sink, _, _ := limitLoop(t, 50, 0, 0, budgetShield("WEAK"))
 		l.SetShieldSecondsSource(func(context.Context) float64 { return 0 })
 		runCycle(l, chargeRulesCtx())
@@ -345,7 +347,7 @@ func TestShieldSeconds_StampedFromTheSource(t *testing.T) {
 			t.Fatalf("written = %+v, want Value 5", ds)
 		}
 	})
-	t.Run("UC-040/BR-029 a grant the allow-list refuses does not read the source", func(t *testing.T) {
+	t.Run("UC-048/BR-012 a grant the allow-list refuses does not read the source", func(t *testing.T) {
 		l, _, _, _ := limitLoop(t, 50, 0, 0, budgetShield("WEAK"))
 		snap := l.Flags.Evaluate(ctx)
 		snap.InterventionsAllowed = []string{InterventionPlayAudioCue}
@@ -355,9 +357,9 @@ func TestShieldSeconds_StampedFromTheSource(t *testing.T) {
 	})
 }
 
-// UC: UC-040 BR-029
+// UC: UC-048 BR-012
 func TestShieldSeconds_RulesMagnitudeReportsTheStampedLength(t *testing.T) {
-	t.Run("UC-040/BR-029 the rules record's ffa.magnitude is the stamped length, not the 5 s bounds default", func(t *testing.T) {
+	t.Run("UC-048/BR-012 the rules record's ffa.magnitude is the stamped length, not the 5 s bounds default", func(t *testing.T) {
 		l, sink, _ := catchUpLoop(t)
 		sr := tracetest.NewSpanRecorder()
 		tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))

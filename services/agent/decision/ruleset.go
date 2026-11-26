@@ -30,9 +30,9 @@ type candidate struct {
 	// are blocked for low-battery players by the battery policy.
 	difficulty bool
 	// shieldCatch marks an R4 grant_shield candidate: rankLocked keeps only one of
-	// them (pickShieldCatchUp, UC-040 A41, BR-030).
+	// them (pickShieldCatchUp, decide-contract.md §15.2).
 	shieldCatch bool
-	// danger marks an R4 candidate of the danger path (UC-040 A43, BR-032): a player
+	// danger marks an R4 candidate of the danger path (decide-contract.md §15.3): a player
 	// in sustained danger before the first elimination, skill level optional.
 	danger bool
 	// rule is the id of the rule that proposed the candidate ("R1".."R9", "R4d"
@@ -73,16 +73,16 @@ func activePlayers(c gamecontext.GameContext) []*gamecontext.PlayerSignals {
 
 // readingsFresh reports whether the player's movement readings are live at the
 // context's UpdatedAt: R4d's signal (decide.FreshReadings), shared by R3, R4 and R8
-// before they read a per-player skill level or movement variance (UC-040 A46,
-// BR-037, #2511). No readings, a frozen value or an unknown context time is not
+// before they read a per-player skill level or movement variance (decide-contract.md §15.4,
+// decide-contract §15.4, #2511). No readings, a frozen value or an unknown context time is not
 // fresh (fail closed).
 func readingsFresh(c gamecontext.GameContext, p *gamecontext.PlayerSignals) bool {
 	return decide.FreshReadings(p.History, c.UpdatedAt)
 }
 
 // freshPlayers returns the alive players (activePlayers order) whose readings are
-// fresh: the target pool of R6, and the check R9 applies to its pick (UC-040 A46
-// step 5, BR-037, #2517). A Fight
+// fresh: the target pool of R6, and the check R9 applies to its pick (decide-contract.md §15.4
+// step 5, decide-contract §15.4, #2517). A Fight
 // Club or Tournament player who just went back to waiting keeps its last alive
 // state until it is evicted, but its readings stop with its gauges, so it drops
 // out of this pool within 3 s.
@@ -128,7 +128,7 @@ func elimFraction(c gamecontext.GameContext, active int) float64 {
 // bounds (1.3, the `fast` variant of music_tempo_override). The coordinator's
 // death threshold slides from SLOW_MAX to FAST_MAX with the tempo, so the fast
 // end tolerates the most movement and slows the eliminations, which is what
-// endurance wants (#2487, UC-040 A51, BR-040). It mirrors the `slow` variant
+// endurance wants (#2487, decide-contract.md §15.5). It mirrors the `slow` variant
 // (1.0) that R1 was documented to write: the same 0.15 step from the 1.15
 // default, in the other direction.
 var enduranceTempo = func() string {
@@ -201,7 +201,7 @@ func balancedCandidates(c gamecontext.GameContext, fit FitnessThresholds) []cand
 	var out []candidate
 
 	// R3: skill gap. R3 and R4's elimination path read only the players whose
-	// movement readings are fresh (UC-040 A46, BR-037, #2511): a stalled or frozen
+	// movement readings are fresh (decide-contract.md §15.4, #2511): a stalled or frozen
 	// player's skill gauge is re-exported with its last value, so it is neither a
 	// target nor part of the spread, the mean or the strongest player.
 	skilled := make([]*gamecontext.PlayerSignals, 0, len(active))
@@ -248,7 +248,7 @@ func balancedCandidates(c gamecontext.GameContext, fit FitnessThresholds) []cand
 	// skilled field, and never the strongest alive player (so never R3's outlier, and
 	// never the stronger player of a duel). Each has their own urgency; after the
 	// filters and minScore the rules keep one R4 candidate: the one with the fewest
-	// agent shields this game, the weakest on a tie (catch-up, UC-040 A41, BR-030;
+	// agent shields this game, the weakest on a tie (catch-up, decide-contract.md §15.2;
 	// pickShieldCatchUp).
 	if len(skilled) >= 2 {
 		if ef := elimFraction(c, len(active)); ef > 0 {
@@ -278,7 +278,7 @@ func balancedCandidates(c gamecontext.GameContext, fit FitnessThresholds) []cand
 		}
 	}
 	// R4 before the first elimination: shield a player in sustained danger (UC-040
-	// A43, BR-032). The elimination path above needs ef > 0, so the two never both
+	// decide-contract §15.3, decide-contract §15.3). The elimination path above needs ef > 0, so the two never both
 	// propose, and after the first elimination R4 is exactly the path above.
 	if len(c.Session.EliminationSequence) == 0 {
 		out = append(out, dangerShieldCandidates(c, active, fit)...)
@@ -286,7 +286,7 @@ func balancedCandidates(c gamecontext.GameContext, fit FitnessThresholds) []cand
 	return out
 }
 
-// dangerShieldCandidates is R4's danger path (UC-040 A43, BR-032; #2461): with no
+// dangerShieldCandidates is R4's danger path (decide-contract.md §15.3; #2461): with no
 // elimination yet and at least two alive players, one grant_shield candidate per
 // alive player whose newest readings stay at or above the clamped
 // policy.shield_danger_ratio of the death threshold for policy.shield_danger_samples
@@ -333,7 +333,7 @@ func dangerShieldCandidates(c gamecontext.GameContext, active []*gamecontext.Pla
 }
 
 // shieldCandidates returns R4's candidates among the alive skilled players (UC-040
-// A41 step 2, BR-030): skill strictly below the field's mean and below the strongest
+// decide-contract §15.2 step 2, decide-contract §15.2): skill strictly below the field's mean and below the strongest
 // player's skill. The second check is not implied in floating point: with equal
 // skills the computed mean can land above them. An even field has no candidate.
 func shieldCandidates(skilled []*gamecontext.PlayerSignals) []*gamecontext.PlayerSignals {
@@ -352,7 +352,7 @@ func shieldCandidates(skilled []*gamecontext.PlayerSignals) []*gamecontext.Playe
 	return out
 }
 
-// pickShieldCatchUp keeps one R4 candidate in ranked (UC-040 A41, BR-030; #2395):
+// pickShieldCatchUp keeps one R4 candidate in ranked (decide-contract.md §15.2; #2395):
 // among the R4 candidates that survived the filters (charge, cap, cooldown, pool,
 // battery) and minScore, the one with the fewest agent shields in this game (grants,
 // Loop.ShieldGrants), ties to the weakest, then the serial. A player who is not a
@@ -363,7 +363,7 @@ func shieldCandidates(skilled []*gamecontext.PlayerSignals) []*gamecontext.Playe
 // fitness carries shield_grants. nil grants: every count is 0, so the weakest
 // surviving candidate.
 func pickShieldCatchUp(ranked []scoredCandidate, c gamecontext.GameContext, grants map[string]int) []scoredCandidate {
-	// A danger candidate may have no skill level (A43): it sorts after the skilled
+	// A danger candidate may have no skill level (decide-contract §15.3): it sorts after the skilled
 	// ones on a tie.
 	skill := func(sc scoredCandidate) float64 {
 		if p := c.Players[sc.decision.TargetSerial]; p != nil && p.SkillLevel != nil {
@@ -438,7 +438,7 @@ func fewerShields(a, b scoredCandidate, grants map[string]int, skill func(scored
 // bounds (1.0, the `slow` variant of music_tempo_override). The coordinator's
 // death threshold slides from SLOW_MAX to FAST_MAX with the tempo, so the slow
 // end tolerates the least movement and makes eliminations come sooner, which is
-// what accelerate wants past the target (#2487, UC-040 A52, BR-041).
+// what accelerate wants past the target (#2487, decide-contract.md §15.5).
 var accelerateTempo = func() string {
 	b, _ := decide.MagnitudeBounds(InterventionAdjustMusicTempo)
 	return strconv.FormatFloat(b.Min, 'g', -1, 64)

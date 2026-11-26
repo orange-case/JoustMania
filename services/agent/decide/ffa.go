@@ -24,7 +24,7 @@ const OptionNoop = "noop"
 // question stays answerable when no player is alive.
 const TargetNone = "none"
 
-// Group options of ffa.target (#2467, UC-040 A47, BR-033). They are offered only
+// Group options of ffa.target (#2467, UC-048 A13, BR-014). They are offered only
 // when the allow-list handed to FFAQuestions holds a GroupTargeted lever (the
 // decision loop drops it unless the group gate is open) and at least two players
 // are alive. "group:all" is every alive player; "group:all_except:<serial>" (only

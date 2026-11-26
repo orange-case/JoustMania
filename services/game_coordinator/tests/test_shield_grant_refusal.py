@@ -1,8 +1,8 @@
 """
 The refusal check of a single shield grant, before any write or await (#2467 PR 2).
 
-UC-040 A31 (``already_charged``), A34 (cap, cooldown), A37 (budget, pool), A42
-step 3 (``game_ending``), BR-022 (in trigger mode the cooldown and the count are
+UC-048 A4 (``already_charged``), UC-048 A7 (cap, cooldown), UC-048 A9 (budget, pool), UC-048 A12
+step 3 (``game_ending``), UC-048 BR-007 (in trigger mode the cooldown and the count are
 recorded when the charge is stored, before its feedback).
 
 ``_shield_grant_refusal`` is pure: it returns the reason ``grant_shield`` raises,
@@ -111,64 +111,64 @@ def refusal(game, mode=INSTANT, hold=None, serial="p1"):
 # Each reason, per mode
 # --------------------------------------------------------------------------- #
 class TestUC040ShieldGrantRefusalReasons:
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     @pytest.mark.parametrize("mode", [INSTANT, TRIGGER])
     def test_a_fresh_player_is_not_refused(self, game, mode):
         assert refusal(game, mode) is None
 
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     def test_a_fresh_player_is_not_refused_in_hold_mode(self, game):
         game.players["p1"].hold_energy = 1.0
         assert refusal(game, hold=HOLD) is None
 
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     @pytest.mark.parametrize("mode,hold", [(INSTANT, None), (TRIGGER, None), (INSTANT, HOLD)])
     def test_cap(self, game, mode, hold):
         used_up(game)
         assert refusal(game, mode, hold) == CAP
 
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     @pytest.mark.parametrize("mode,hold", [(INSTANT, None), (TRIGGER, None), (INSTANT, HOLD)])
     def test_cooldown(self, game, mode, hold):
         cooling(game)
         assert refusal(game, mode, hold) == COOLDOWN
 
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     def test_cooldown_ends_at_the_shield_end_plus_the_cooldown(self, game):
         cooling(game)  # ended at T0 - 1, cooldown 15 s: refused until T0 + 14
         player = game.players["p1"]
         assert game._shield_grant_refusal(player, 5.0, T0 + 13.9, INSTANT, None) == COOLDOWN
         assert game._shield_grant_refusal(player, 5.0, T0 + 14.0, INSTANT, None) is None
 
-    @pytest.mark.uc("UC-040", flow="A31", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A4", br=["BR-005"])
     def test_already_charged_in_trigger_mode(self, game):
         game.players["p1"].shield_charge_seconds = 5.0
         assert refusal(game, TRIGGER) == CHARGED
 
-    @pytest.mark.uc("UC-040", flow="A31", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A4", br=["BR-005"])
     def test_a_held_charge_refuses_nothing_outside_trigger_mode(self, game):
         game.players["p1"].shield_charge_seconds = 5.0
         assert refusal(game, INSTANT) is None
         assert refusal(game, TRIGGER, HOLD) is None  # hold mode ignores the activation mode
 
-    @pytest.mark.uc("UC-040", flow="A37", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A9", br=["BR-008"])
     def test_budget_exhausted_in_hold_mode(self, game):
         game.players["p1"].hold_budget_used = 14.8  # 0.2 s left, below the 0.5 s burst
         assert refusal(game, hold=HOLD) == BUDGET
 
-    @pytest.mark.uc("UC-040", flow="A37", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A9", br=["BR-008"])
     def test_pool_full_in_hold_mode(self, game):
         game.players["p1"].hold_energy = 5.0
         assert refusal(game, hold=HOLD) == POOL
 
-    @pytest.mark.uc("UC-040", flow="A37", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A9", br=["BR-008"])
     def test_no_hold_reason_outside_hold_mode(self, game):
         player = game.players["p1"]
         player.hold_budget_used = 15.0
         player.hold_energy = 5.0
         assert refusal(game, INSTANT) is None
 
-    @pytest.mark.uc("UC-040", flow="A42")
+    @pytest.mark.uc("UC-048", flow="A12")
     @pytest.mark.parametrize("mode,hold", [(INSTANT, None), (TRIGGER, None), (INSTANT, HOLD)])
     def test_game_ending(self, game, mode, hold):
         game.force_end_reason = "test"
@@ -179,7 +179,7 @@ class TestUC040ShieldGrantRefusalReasons:
 # The order
 # --------------------------------------------------------------------------- #
 class TestUC040ShieldGrantRefusalOrder:
-    @pytest.mark.uc("UC-040", flow="A42")
+    @pytest.mark.uc("UC-048", flow="A12")
     @pytest.mark.parametrize("mode,hold", [(INSTANT, None), (TRIGGER, None), (INSTANT, HOLD)])
     def test_game_ending_comes_first(self, game, mode, hold):
         player = game.players["p1"]
@@ -189,33 +189,33 @@ class TestUC040ShieldGrantRefusalOrder:
         game.force_end_reason = "test"
         assert refusal(game, mode, hold) == ENDING
 
-    @pytest.mark.uc("UC-040", flow="A31", br=["BR-020", "BR-022"])
+    @pytest.mark.uc("UC-048", flow="A4", br=["BR-005", "BR-007"])
     def test_trigger_already_charged_before_the_cap(self, game):
         game.players["p1"].shield_charge_seconds = 5.0
         used_up(game)
         assert refusal(game, TRIGGER) == CHARGED
 
-    @pytest.mark.uc("UC-040", flow="A37", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A9", br=["BR-008"])
     def test_hold_budget_before_the_pool(self, game):
         player = game.players["p1"]
         player.hold_budget_used = 14.8
         player.hold_energy = 5.0
         assert refusal(game, hold=HOLD) == BUDGET
 
-    @pytest.mark.uc("UC-040", flow="A37", br=["BR-022", "BR-024"])
+    @pytest.mark.uc("UC-048", flow="A9", br=["BR-007", "BR-008"])
     def test_hold_pool_before_the_cap(self, game):
         game.players["p1"].hold_energy = 5.0
         used_up(game)
         assert refusal(game, hold=HOLD) == POOL
 
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     @pytest.mark.parametrize("mode,hold", [(INSTANT, None), (TRIGGER, None), (INSTANT, HOLD)])
     def test_cap_before_the_cooldown(self, game, mode, hold):
         used_up(game)
         game._agent_shield_last_end["p1"] = T0 - 1.0
         assert refusal(game, mode, hold) == CAP
 
-    @pytest.mark.uc("UC-040", flow="A37", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A9", br=["BR-007"])
     def test_the_limits_are_not_read_when_an_earlier_check_refuses(self, game, limits):
         game.players["p1"].hold_budget_used = 15.0
         assert refusal(game, hold=HOLD) == BUDGET
@@ -228,7 +228,7 @@ class TestUC040ShieldGrantRefusalOrder:
 # Pure: the check writes nothing
 # --------------------------------------------------------------------------- #
 class TestUC040ShieldGrantRefusalIsPure:
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     def test_a_refusal_records_nothing(self, game):
         player = game.players["p1"]
         player.span = create_autospec(Span, instance=True)
@@ -239,7 +239,7 @@ class TestUC040ShieldGrantRefusalIsPure:
         player.span.add_event.assert_not_called()
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_grant_shield_raises_the_reason_the_check_returns(self, game, limits):
         cooling(game)
         assert refusal(game) == COOLDOWN
@@ -254,11 +254,11 @@ class TestUC040ShieldGrantRefusalIsPure:
 
 
 # --------------------------------------------------------------------------- #
-# BR-022: trigger mode records the charge before its feedback
+# UC-048 BR-007: trigger mode records the charge before its feedback
 # --------------------------------------------------------------------------- #
 class TestUC040BR022TriggerRecordsBeforeFeedback:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-007"])
     @pytest.mark.parametrize("error", [asyncio.CancelledError, RuntimeError])
     async def test_a_failed_charge_feedback_still_counts_the_charge(self, game, limits, error):
         """The charge is stored, so its count and cooldown hold even if the feedback raises."""
