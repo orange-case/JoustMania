@@ -518,7 +518,7 @@ deletions of #1416 are in the same PR. Deviations from the plan, all reflected i
   rules were not added; the Grafana **Flags / OpenFeature** dashboard (uid `feature-flags`) has a "Flag service" row instead.
 - **connect-proxy.** A fractional canary sets the stable counterpart as the default and the canary backend as a
   fraction overlay, which also fixes #1386 (the rest of the serials no longer resolve an undeclared variant).
-  The canary and the `rollout` set were removed later (#2784); the `fraction` scope has no writer since then.
+  The canary, the `rollout` set and the `fraction` scope were removed later (#2784).
 - **`set_not_served`** (409) stays for a set a stack does not list in `FLAG_SERVICE_SETS`; every stack lists all
   of them (nine then, eight since the `rollout` set was removed, #2784). `experiment_unknown` is reserved and not returned.
 

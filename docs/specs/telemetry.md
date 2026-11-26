@@ -38,7 +38,7 @@ Resource attributes (Python services, `lib/otel_resource.py:get_otel_resource`, 
 The Go services (agent, connect-proxy, flag-service: `serviceInstanceID` in each `otel.go`, `crypto/rand`) and rust-hid (`process_instance_id`) apply the same rule (#2546): `<HOSTNAME>-<8 hex>` drawn once per process via a `sync.Once` / `OnceLock`, shared by all three signals.
 
 Service identities (`OTEL_SERVICE_NAME` / namespace): `controller-manager-service`, `pairing-daemon`,
-`rust-hid`, `python-hid`, `connect-proxy`, `agent` (namespace `infrastructure`); `game-coordinator-service`,
+`rust-hid`, `connect-proxy`, `agent` (namespace `infrastructure`); `game-coordinator-service`,
 `menu-service`, `audio-service` (namespace `joustmania`) (`docker-compose.yml`).
 
 **Traceability:** C-001, FR-040, FR-080, FR-081, NFR-021 to NFR-024 / UC-035, UC-041 / `services/otel-collector/config.yaml`, `lib/telemetry.py`, `lib/otel_metrics.py` / `tests/service/test_otlp_sink.py` (OTLP export to a receiver); the collector-to-Jaeger hop is covered end to end by `tests/integration/test_tc002_ffa_game.py` (the game's root span reaches Jaeger, TC-002 validation 3), `tests/integration/test_uc035_a3_backend_down.py` (same, with the agent down) and `tests/integration/test_tc007_closed_loop_full_stack.py` (agent spans).
