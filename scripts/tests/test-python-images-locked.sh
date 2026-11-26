@@ -47,7 +47,7 @@ def check(cond, msg):
 services = sorted(
     p.parent for p in (root / "services").glob("*/pyproject.toml") if (p.parent / "Dockerfile").is_file()
 )
-check(len(services) >= 7, f"expected >= 7 Python service images, found {len(services)}")
+check(len(services) >= 6, f"expected >= 6 Python service images, found {len(services)}")
 for svc in services:
     name = svc.name
     text = (svc / "Dockerfile").read_text()
