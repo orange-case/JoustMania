@@ -159,7 +159,6 @@ func TestDynamicDeclarer_ConfigureFromFlags(t *testing.T) {
 	d.configure(flags.ExperimentConfig{
 		DynamicCandidates: "sensitivity, num_teams ,",
 		DynamicObjective:  " endurance ",
-		DynamicTargetN:    5,
 	})
 	if got := d.candidates; len(got) != 2 || got[0] != "sensitivity" || got[1] != "num_teams" {
 		t.Fatalf("candidates = %v, want [sensitivity num_teams]", got)
@@ -167,13 +166,10 @@ func TestDynamicDeclarer_ConfigureFromFlags(t *testing.T) {
 	if d.defaultObjective != decision.ObjectiveEndurance {
 		t.Fatalf("objective = %q, want endurance", d.defaultObjective)
 	}
-	if d.targetN != 5 {
-		t.Fatalf("targetN = %d, want 5", d.targetN)
-	}
 	for _, objective := range []string{decision.ObjectiveChaos, "", "bogus"} {
-		d.configure(flags.ExperimentConfig{DynamicObjective: objective, DynamicTargetN: -3})
-		if d.defaultObjective != decision.ObjectiveBalanced || d.targetN != 0 {
-			t.Fatalf("objective %q / target -3 gave %q / %d, want balanced / 0", objective, d.defaultObjective, d.targetN)
+		d.configure(flags.ExperimentConfig{DynamicObjective: objective})
+		if d.defaultObjective != decision.ObjectiveBalanced {
+			t.Fatalf("objective %q gave %q, want balanced", objective, d.defaultObjective)
 		}
 	}
 	// A later tick with the flags back at their defaults clears the earlier settings.
@@ -330,7 +326,7 @@ func loopWithRealRegistry(t *testing.T, maxShadow int) (*experimentLoop, *fake.S
 		Root:           t.TempDir(),
 		MaxShadowGames: maxShadow,
 		Spawner:        &recordingSpawner{},
-		Verdict:        experiment.NewVerdict(3, 0.5, nil),
+		Verdict:        experiment.NewVerdict(3, 0.5),
 		Targeting:      targeting,
 		Log:            log,
 	})

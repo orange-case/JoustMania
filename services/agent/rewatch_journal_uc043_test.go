@@ -54,7 +54,7 @@ func TestUC043_Step7_RewatchRevertJournaledByLoop(t *testing.T) {
 		root := t.TempDir()
 		seeded.registry = experiment.NewRegistry(experiment.RegistryConfig{
 			Root: root, MaxShadowGames: 8, Spawner: &recordingSpawner{},
-			Verdict: experiment.NewVerdict(3, 0.5, nil), Log: testLogger(),
+			Verdict: experiment.NewVerdict(3, 0.5), Log: testLogger(),
 		})
 		lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
 		seeded.allocateIfEnabled(context.Background())

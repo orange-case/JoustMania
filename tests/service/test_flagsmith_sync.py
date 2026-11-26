@@ -36,7 +36,7 @@ SERVICE_COMPOSITION = Composition(
 
 CAPTURE = ("agent", "decision.capture_content")  # variants on/off, stack only
 TICK = ("agent", "experiment_tick_seconds")  # integer 1..1000, stack only
-MAX_GAMES = ("agent", "experiment_max_games")  # kill switch (flags.md §13.6): Flagsmith wins it too
+GRACE = ("agent", "experiment_completed_grace_seconds")  # integer, int 0 to 600: Flagsmith wins it like every flag
 BACKEND = ("agent", "decision.backend")  # persist: true (an admin setting)
 PACING = ("interventions", "pacing_profile")  # game scope
 HANDICAP = ("interventions", "player_handicap_factor")  # game+serial scope
@@ -212,13 +212,13 @@ def test_offline_discards_stack_writes_and_drains_game_writes(flag_service, sett
         try:
             state = fl.wait_link(flag_service, fl.PULL_TIMEOUT, link="offline")
             assert state["offline_reason"] == "http_503", state
-            # Step 2: local writes, a kill switch and a game value included, are answered at once:
+            # Step 2: local writes, two stack values and a game value, are answered at once:
             # the case plays on its offline configuration.
             flag_service.put(*TICK, value=14)
-            flag_service.put(*MAX_GAMES, value=20)
+            flag_service.put(*GRACE, value=20)
             flag_service.put(*PACING, value="frantic", scope={"game_id": game})
             assert fl.link(flag_service)["pending"] >= 3
-            assert fl.overlay(flag_service, *MAX_GAMES).get("value") == 20
+            assert fl.overlay(flag_service, *GRACE).get("value") == 20
             reconnect = time.monotonic()
         finally:
             # Step 3: Flagsmith is back.
@@ -229,10 +229,10 @@ def test_offline_discards_stack_writes_and_drains_game_writes(flag_service, sett
         fl.wait_for(lambda: fl.link(flag_service).get("pending") == 0, fl.PULL_TIMEOUT, "pending 0")
         fl.wait_pulls(flag_service, 1)
         assert fl.overlay(flag_service, *TICK).get("value") == 13, fl.overlay(flag_service, *TICK)
-        assert fl.overlay(flag_service, *MAX_GAMES) == {}, fl.overlay(flag_service, *MAX_GAMES)
+        assert fl.overlay(flag_service, *GRACE) == {}, fl.overlay(flag_service, *GRACE)
         assert fake.env_value(TICK[1]) == (True, 13)
-        assert fake.env_value(MAX_GAMES[1])[0] is False
-        assert not [r for r in fake.pushes(TICK[1]) + fake.pushes(MAX_GAMES[1]) if r["t"] >= reconnect]
+        assert fake.env_value(GRACE[1])[0] is False
+        assert not [r for r in fake.pushes(TICK[1]) + fake.pushes(GRACE[1]) if r["t"] >= reconnect]
         fl.wait_for(lambda: fake.override(f"game:{game}", PACING[1]) is not None, fl.PULL_TIMEOUT, "game value sent")
     finally:
         fl.end_game(flag_service, game)
@@ -244,8 +244,8 @@ CONFLICT_ROWS = [
     ("local-change-pushed", TICK, 15, 16, None, 16, "local", 16),
     ("both-same-adopted", TICK, 15, 17, 17, 17, "local", 17),
     ("both-changed-flagsmith-wins", TICK, 15, 18, 19, 19, "flagsmith", 19),
-    ("kill-switch-flagsmith-looser-wins", MAX_GAMES, 40, 20, 30, 30, "flagsmith", 30),
-    ("kill-switch-flagsmith-tighter-wins", MAX_GAMES, 40, 20, 10, 10, "flagsmith", 10),
+    ("integer-flagsmith-higher-wins", GRACE, 40, 20, 30, 30, "flagsmith", 30),
+    ("integer-flagsmith-lower-wins", GRACE, 40, 20, 10, 10, "flagsmith", 10),
 ]
 
 

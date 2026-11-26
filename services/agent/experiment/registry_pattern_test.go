@@ -107,8 +107,7 @@ func TestRegistryPatternPairsOneAtATime(t *testing.T) {
 		spawner := &patternSpawner{}
 		pinner := &queuePinner{pins: []patterngame.Pin{testPin(t, "arch_a", "arch_b")}}
 		r := newTestRegistry(t, RegistryConfig{
-			MaxShadowGames: 4, EffectiveConcurrency: 4, MaxGamesPerExperiment: -1,
-			Spawner: spawner, Verdict: alwaysInconclusive{}, Patterns: pinner,
+			MaxShadowGames: 4, EffectiveConcurrency: 4, Spawner: spawner, Verdict: alwaysInconclusive{}, Patterns: pinner,
 		})
 		id := startExperiment(t, r)
 		ctx := context.Background()
@@ -347,10 +346,9 @@ func TestRegistryPatternFailedSpawnUsesNoArchetype(t *testing.T) {
 
 // UC: UC-046 A6 A9 BR-015
 func TestRegistryPatternReleasedArmRerunsPair(t *testing.T) {
-	t.Run("UC-046/A9 a released arm reruns its whole pair; after 3 reruns the archetype is skipped and the experiment concludes", func(t *testing.T) {
+	t.Run("UC-046/A9 a released arm reruns its whole pair; after the rerun budget the archetype is skipped and the experiment concludes", func(t *testing.T) {
 		spawner := &patternSpawner{}
-		r := newTestRegistry(t, RegistryConfig{MaxShadowGames: 2, EffectiveConcurrency: 1, MaxGamesPerExperiment: -1,
-			Spawner: spawner, Verdict: alwaysInconclusive{}, Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "only")}}})
+		r := newTestRegistry(t, RegistryConfig{MaxShadowGames: 2, EffectiveConcurrency: 1, Spawner: spawner, Verdict: alwaysInconclusive{}, Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "only")}}})
 		id := startExperiment(t, r)
 		ctx := context.Background()
 		nextGame := func() (string, *PatternSpawn) {
@@ -379,10 +377,10 @@ func TestRegistryPatternReleasedArmRerunsPair(t *testing.T) {
 		if arm3 != ArmExperimental || ps.PairIndex != 0 {
 			t.Fatalf("after a release the next game is %s pair %d, want experimental pair 0", arm3, ps.PairIndex)
 		}
-		// Three more releases exhaust the reruns: the archetype is skipped and the
+		// Releases up to the budget exhaust the reruns: the archetype is skipped and the
 		// experiment concludes in the next allocation pass, with nothing spawned.
 		r.ReleaseGame(g3, "error")
-		for i := 0; i < 2; i++ {
+		for i := 0; i < maxPairReruns-1; i++ {
 			g, _ := nextGame()
 			r.ReleaseGame(g, "error")
 		}
@@ -548,8 +546,7 @@ type preemptionHarness struct {
 func newPreemptionHarness(t *testing.T, root string) *preemptionHarness {
 	t.Helper()
 	spawner := &patternSpawner{}
-	r := newTestRegistry(t, RegistryConfig{Root: root, MaxShadowGames: 2, EffectiveConcurrency: 1, MaxGamesPerExperiment: -1,
-		Spawner: spawner, Verdict: alwaysInconclusive{}, Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "only")}}})
+	r := newTestRegistry(t, RegistryConfig{Root: root, MaxShadowGames: 2, EffectiveConcurrency: 1, Spawner: spawner, Verdict: alwaysInconclusive{}, Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "only")}}})
 	return &preemptionHarness{t: t, r: r, spawner: spawner, id: startExperiment(t, r)}
 }
 
@@ -568,72 +565,36 @@ func (h *preemptionHarness) releaseNext(reason string) bool {
 }
 
 // notes counts the BR-015 journal notes.
-func (h *preemptionHarness) notes() (reruns, preempted, skips int) {
+func (h *preemptionHarness) notes() (reruns, preempted, stale, skips int) {
 	for _, e := range eventsOfKind(journalEvents(h.t, h.r, h.id), journal.KindDecision) {
 		switch e.Note {
 		case notePairRerun:
 			reruns++
 		case notePairRerunPreempted:
 			preempted++
+		case notePairRerunStale:
+			stale++
 		case noteArchetypeSkipped:
 			skips++
 		}
 	}
-	return reruns, preempted, skips
+	return reruns, preempted, stale, skips
 }
 
 // UC: UC-046 A8 A9 A12 BR-015
 // UC: UC-043 A12
-func TestRegistryPatternPreemptionRerunBudget(t *testing.T) {
+// UC: UC-041 A4
+func TestRegistryPatternRerunBudget(t *testing.T) {
 	const killSwitchRelease = "game ended without usable fitness sample: force_ended"
 	const errorRelease = "game ended without usable fitness sample: error"
 
-	t.Run("UC-046/A8 preemptions rerun the pair without using up the 3-rerun budget", func(t *testing.T) {
-		h := newPreemptionHarness(t, "")
-		for i := 0; i < 5; i++ {
-			if !h.releaseNext(ReleaseReasonPreempted) {
-				t.Fatalf("preemption %d: no game spawned", i+1)
-			}
-		}
-		// The full 3-rerun budget is still there: three errors rerun, the fourth skips.
-		for i := 0; i < maxPairReruns+1; i++ {
-			if !h.releaseNext(errorRelease) {
-				t.Fatalf("error release %d: no game spawned, the preemptions used up the budget", i+1)
-			}
-		}
-		if h.releaseNext(errorRelease) {
-			t.Fatal("a game spawned after the archetype should have been skipped")
-		}
-		reruns, preempted, skips := h.notes()
-		if reruns != maxPairReruns || preempted != 5 || skips != 1 {
-			t.Errorf("reruns=%d preempted=%d skips=%d, want %d/5/1", reruns, preempted, skips, maxPairReruns)
-		}
-		if st, _ := h.r.Status(h.id); !st.IsTerminal() {
-			t.Errorf("status = %s, want concluded once the only archetype is skipped", st)
-		}
-	})
-
-	t.Run("UC-046/BR-015 safety valve: after 10 preemptions a further one counts against the budget", func(t *testing.T) {
-		h := newPreemptionHarness(t, "")
-		spawned := 0
-		for h.releaseNext(ReleaseReasonPreempted) {
-			spawned++
-			if spawned > 100 {
-				t.Fatal("a constantly preempted pair never stops rerunning")
-			}
-		}
-		// 1 first run + 10 free preemption reruns + 3 counting reruns.
-		if want := 1 + maxPairPreemptions + maxPairReruns; spawned != want {
-			t.Errorf("games spawned = %d, want %d", spawned, want)
-		}
-		reruns, preempted, skips := h.notes()
-		if reruns != maxPairReruns || preempted != maxPairPreemptions || skips != 1 {
-			t.Errorf("reruns=%d preempted=%d skips=%d, want %d/%d/1", reruns, preempted, skips, maxPairReruns, maxPairPreemptions)
-		}
-	})
-
-	for name, reason := range map[string]string{"A9 errors": errorRelease, "A12 kill-switch releases": killSwitchRelease} {
-		t.Run("UC-046/"+name+" still use up the 3-rerun budget", func(t *testing.T) {
+	for name, reason := range map[string]string{
+		"A8 preemptions":           ReleaseReasonPreempted,
+		"BR-015 stale ends":        ReleaseReasonStale,
+		"A9 errors":                errorRelease,
+		"A12 kill-switch releases": killSwitchRelease,
+	} {
+		t.Run("UC-046/"+name+" share the one rerun budget", func(t *testing.T) {
 			h := newPreemptionHarness(t, "")
 			spawned := 0
 			for h.releaseNext(reason) {
@@ -645,111 +606,61 @@ func TestRegistryPatternPreemptionRerunBudget(t *testing.T) {
 			if want := 1 + maxPairReruns; spawned != want {
 				t.Errorf("games spawned = %d, want %d", spawned, want)
 			}
-			if _, preempted, _ := h.notes(); preempted != 0 {
-				t.Errorf("%d releases were noted as preemptions", preempted)
+			reruns, preempted, stale, skips := h.notes()
+			if reruns+preempted+stale != maxPairReruns || skips != 1 {
+				t.Errorf("rerun notes=%d skips=%d, want %d/1", reruns+preempted+stale, skips, maxPairReruns)
+			}
+			if st, _ := h.r.Status(h.id); !st.IsTerminal() {
+				t.Errorf("status = %s, want concluded once the only archetype is skipped", st)
 			}
 		})
 	}
 
-	t.Run("UC-046/BR-015 a restart restores the preemption count", func(t *testing.T) {
+	t.Run("UC-046/BR-015 the note names the reason; mixed reasons count together", func(t *testing.T) {
+		h := newPreemptionHarness(t, "")
+		for _, reason := range []string{ReleaseReasonPreempted, ReleaseReasonStale, errorRelease} {
+			if !h.releaseNext(reason) {
+				t.Fatalf("%s: no game spawned", reason)
+			}
+		}
+		spawned := 3
+		for h.releaseNext(errorRelease) {
+			spawned++
+		}
+		if want := 1 + maxPairReruns; spawned != want {
+			t.Errorf("games spawned = %d, want %d", spawned, want)
+		}
+		if reruns, preempted, stale, _ := h.notes(); preempted != 1 || stale != 1 || reruns != maxPairReruns-2 {
+			t.Errorf("reruns=%d preempted=%d stale=%d, want %d/1/1", reruns, preempted, stale, maxPairReruns-2)
+		}
+	})
+
+	t.Run("UC-046/BR-015 a restart restores the rerun count from all three notes", func(t *testing.T) {
 		root := t.TempDir()
 		h := newPreemptionHarness(t, root)
-		for i := 0; i < maxPairPreemptions; i++ {
-			if !h.releaseNext(ReleaseReasonPreempted) {
-				t.Fatalf("preemption %d: no game spawned", i+1)
+		for i := 0; i < maxPairReruns; i++ {
+			reason := ReleaseReasonPreempted
+			if i%2 == 1 {
+				reason = ReleaseReasonStale
+			}
+			if !h.releaseNext(reason) {
+				t.Fatalf("release %d: no game spawned", i+1)
 			}
 		}
 		spawner2 := &patternSpawner{}
-		r2 := newTestRegistry(t, RegistryConfig{Root: root, MaxShadowGames: 2, EffectiveConcurrency: 1, MaxGamesPerExperiment: -1,
-			Spawner: spawner2, Verdict: alwaysInconclusive{}, Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "x")}}})
+		r2 := newTestRegistry(t, RegistryConfig{Root: root, MaxShadowGames: 2, EffectiveConcurrency: 1, Spawner: spawner2, Verdict: alwaysInconclusive{}, Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "x")}}})
 		if err := r2.Rehydrate([]string{h.id}); err != nil {
 			t.Fatal(err)
 		}
 		h2 := &preemptionHarness{t: t, r: r2, spawner: spawner2, id: h.id}
 		if !h2.releaseNext(ReleaseReasonPreempted) {
-			t.Fatal("the restored pair did not run again")
+			t.Fatal("the restored pair did not run its last spawn")
 		}
-		reruns, preempted, _ := h2.notes()
-		if preempted != maxPairPreemptions || reruns != 1 {
-			t.Errorf("after restart: preempted=%d reruns=%d, want %d/1 (the valve was already used up)", preempted, reruns, maxPairPreemptions)
+		if h2.releaseNext(errorRelease) {
+			t.Fatal("a game spawned after the restored budget was used up")
 		}
-	})
-}
-
-// staleNotes counts the BR-015 stale-rerun journal notes.
-func (h *preemptionHarness) staleNotes() int {
-	n := 0
-	for _, e := range eventsOfKind(journalEvents(h.t, h.r, h.id), journal.KindDecision) {
-		if e.Note == notePairRerunStale {
-			n++
-		}
-	}
-	return n
-}
-
-// UC: UC-046 BR-015
-// UC: UC-041 A4
-func TestRegistryPatternStaleRerunBudget(t *testing.T) {
-	const errorRelease = "game ended without usable fitness sample: error"
-
-	t.Run("UC-046/BR-015 stale ends rerun the pair without using up the 3-rerun budget", func(t *testing.T) {
-		h := newPreemptionHarness(t, "")
-		for i := 0; i < 5; i++ {
-			if !h.releaseNext(ReleaseReasonStale) {
-				t.Fatalf("stale end %d: no game spawned", i+1)
-			}
-		}
-		for i := 0; i < maxPairReruns+1; i++ {
-			if !h.releaseNext(errorRelease) {
-				t.Fatalf("error release %d: no game spawned, the stale ends used up the budget", i+1)
-			}
-		}
-		if h.releaseNext(errorRelease) {
-			t.Fatal("a game spawned after the archetype should have been skipped")
-		}
-		reruns, preempted, skips := h.notes()
-		if stale := h.staleNotes(); reruns != maxPairReruns || stale != 5 || preempted != 0 || skips != 1 {
-			t.Errorf("reruns=%d stale=%d preempted=%d skips=%d, want %d/5/0/1", reruns, stale, preempted, skips, maxPairReruns)
-		}
-	})
-
-	t.Run("UC-046/BR-015 stale safety valve: after 10 stale ends a further one counts against the budget", func(t *testing.T) {
-		h := newPreemptionHarness(t, "")
-		spawned := 0
-		for h.releaseNext(ReleaseReasonStale) {
-			spawned++
-			if spawned > 100 {
-				t.Fatal("a constantly stale pair never stops rerunning")
-			}
-		}
-		if want := 1 + maxPairStaleReruns + maxPairReruns; spawned != want {
-			t.Errorf("games spawned = %d, want %d", spawned, want)
-		}
-		if reruns, _, skips := h.notes(); reruns != maxPairReruns || h.staleNotes() != maxPairStaleReruns || skips != 1 {
-			t.Errorf("reruns=%d stale=%d skips=%d, want %d/%d/1", reruns, h.staleNotes(), skips, maxPairReruns, maxPairStaleReruns)
-		}
-	})
-
-	t.Run("UC-046/BR-015 a restart restores the stale-rerun count", func(t *testing.T) {
-		root := t.TempDir()
-		h := newPreemptionHarness(t, root)
-		for i := 0; i < maxPairStaleReruns; i++ {
-			if !h.releaseNext(ReleaseReasonStale) {
-				t.Fatalf("stale end %d: no game spawned", i+1)
-			}
-		}
-		spawner2 := &patternSpawner{}
-		r2 := newTestRegistry(t, RegistryConfig{Root: root, MaxShadowGames: 2, EffectiveConcurrency: 1, MaxGamesPerExperiment: -1,
-			Spawner: spawner2, Verdict: alwaysInconclusive{}, Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "x")}}})
-		if err := r2.Rehydrate([]string{h.id}); err != nil {
-			t.Fatal(err)
-		}
-		h2 := &preemptionHarness{t: t, r: r2, spawner: spawner2, id: h.id}
-		if !h2.releaseNext(ReleaseReasonStale) {
-			t.Fatal("the restored pair did not run again")
-		}
-		if reruns, _, _ := h2.notes(); h2.staleNotes() != maxPairStaleReruns || reruns != 1 {
-			t.Errorf("after restart: stale=%d reruns=%d, want %d/1 (the valve was already used up)", h2.staleNotes(), reruns, maxPairStaleReruns)
+		if _, _, _, skips := h2.notes(); skips != 1 {
+			t.Errorf("skips = %d after restart, want 1", skips)
 		}
 	})
 }
@@ -813,10 +724,9 @@ func (s *preBindReleaseSpawner) Spawn(_ context.Context, _, _ string, _ uint64) 
 
 // UC: UC-046 A8 BR-015
 func TestRegistryPatternPreemptedBeforeBind(t *testing.T) {
-	t.Run("UC-046/A8 a preemption released before the bind reruns the pair off-budget", func(t *testing.T) {
+	t.Run("UC-046/A8 a preemption released before the bind reruns the pair as a preemption", func(t *testing.T) {
 		spawner := &preBindReleaseSpawner{reason: ReleaseReasonPreempted}
-		r := newTestRegistry(t, RegistryConfig{MaxShadowGames: 2, EffectiveConcurrency: 1, MaxGamesPerExperiment: -1,
-			Spawner: spawner, Verdict: alwaysInconclusive{}, Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "only")}}})
+		r := newTestRegistry(t, RegistryConfig{MaxShadowGames: 2, EffectiveConcurrency: 1, Spawner: spawner, Verdict: alwaysInconclusive{}, Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "only")}}})
 		spawner.mu.Lock()
 		spawner.reg = r
 		spawner.mu.Unlock()
@@ -824,16 +734,16 @@ func TestRegistryPatternPreemptedBeforeBind(t *testing.T) {
 		r.AllocateAndSpawn(context.Background())
 
 		h := &preemptionHarness{t: t, r: r, id: id}
-		reruns, preempted, _ := h.notes()
+		reruns, preempted, _, _ := h.notes()
 		if preempted != 1 || reruns != 0 {
 			t.Fatalf("notes: preempted=%d reruns=%d, want 1/0 (the tombstone must carry the preemption reason)", preempted, reruns)
 		}
 		r.mu.Lock()
 		e := r.entries[id]
-		budget, preemptions := e.pairReruns[0], e.pairPreemptions[0]
+		reruns0 := e.pairReruns[0]
 		r.mu.Unlock()
-		if budget != 0 || preemptions != 1 {
-			t.Errorf("pairReruns=%d pairPreemptions=%d, want 0/1", budget, preemptions)
+		if reruns0 != 1 {
+			t.Errorf("pairReruns=%d, want 1", reruns0)
 		}
 	})
 }

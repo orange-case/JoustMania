@@ -95,8 +95,7 @@ func TestOnGameEnd_StaleEndExcludedFromExperiments(t *testing.T) {
 			countingFitness(&scored, armFitness()))
 		loop.fitnessStore = experiment.NewFitnessStore(0)
 		id, err := loop.registry.Declare(experiment.Intent{
-			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-		})
+			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 		if err != nil {
 			t.Fatalf("declare: %v", err)
 		}
@@ -139,8 +138,7 @@ func TestOnGameEnd_StaleEndExcludedFromExperiments(t *testing.T) {
 		}
 		loop := buildLoopForTest(t, spawner, resolve, &recordingRealDefault{}, &recordingGitHub{}, armFitness())
 		id, err := loop.registry.Declare(experiment.Intent{
-			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-		})
+			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 		if err != nil {
 			t.Fatalf("declare: %v", err)
 		}

@@ -182,7 +182,6 @@ func sampleIntent() Intent {
 		FlagKey:           "death_grace_period_seconds",
 		ExperimentalValue: 0.5,
 		Objective:         "balanced", // an experimentable objective (#1015): Declare rejects non-experimentable ones.
-		TargetNPerArm:     2,
 	}
 }
 
@@ -859,19 +858,13 @@ func TestConcurrentAllocateAndConcludeNoLeak(t *testing.T) {
 	//   - a target_n far above any reachable game count keeps the inconclusive-past-
 	//     target (b) and degenerate-variance (c) guards inert (arms never reach it).
 	r := newTestRegistry(t, RegistryConfig{
-		MaxShadowGames:        cap,
-		Spawner:               spawner,
-		Verdict:               fakeVerdict{concludeAtN: 1_000_000}, // never conclude the experiment itself
-		MaxGamesPerExperiment: -1,                                  // disable games-budget termination guard (#1097)
-		VerdictMinN:           -1,                                  // disable min-N reconciliation so target_n stays huge (#1097)
+		MaxShadowGames: cap,
+		Spawner:        spawner,
+		Verdict:        fakeVerdict{concludeAtN: 1_000_000}, // never conclude the experiment itself
 	})
 	ctx := context.Background()
 
-	// A target_n far above any game count this test can reach, so the
-	// inconclusive-past-target and degenerate-variance termination guards stay inert
-	// and the experiments never self-conclude during the alloc/conclude race (#1097).
 	liveIntent := sampleIntent()
-	liveIntent.TargetNPerArm = 1_000_000
 
 	const k = 4
 	for i := 0; i < k; i++ {
@@ -967,210 +960,6 @@ type alwaysInconclusive struct{}
 
 func (alwaysInconclusive) Evaluate(_ journal.Summary) (journal.Verdict, bool) {
 	return journal.Verdict{Outcome: OutcomeInconclusive, Reason: "always inconclusive (test)"}, true
-}
-
-// drainToTerminal repeatedly refills shadow capacity and concludes every spawned
-// game with the same fitness, until the experiment reaches a terminal status or
-// safetyMax games have been concluded (a safety net so a REGRESSED guard fails
-// the test instead of looping forever). It returns the terminal status and the
-// number of games concluded. The spawner is the source of truth for the spawned
-// game ids (robust regardless of journal tail size).
-func drainToTerminal(t *testing.T, r *Registry, spawner *fakeSpawner, id string, fitness float64, safetyMax int) (Status, int) {
-	t.Helper()
-	ctx := context.Background()
-	done := map[string]bool{}
-	concluded := 0
-	for concluded < safetyMax {
-		r.AllocateAndSpawn(ctx)
-
-		// Conclude every spawned-but-not-yet-concluded game for this experiment.
-		spawner.mu.Lock()
-		pending := make([]string, 0, len(spawner.calls))
-		for _, c := range spawner.calls {
-			if c.experimentID == id && !done[c.gameID] {
-				pending = append(pending, c.gameID)
-			}
-		}
-		spawner.mu.Unlock()
-
-		if len(pending) == 0 {
-			st, _ := r.Status(id)
-			t.Fatalf("no games to conclude but experiment still %s (stuck)", st)
-		}
-
-		for _, gid := range pending {
-			st, err := r.ConcludeGame(ctx, gid, fitness, 60)
-			if err != nil {
-				t.Fatalf("ConcludeGame(%s): %v", gid, err)
-			}
-			done[gid] = true
-			concluded++
-			if st.IsTerminal() {
-				return st, concluded
-			}
-		}
-	}
-	st, _ := r.Status(id)
-	return st, concluded
-}
-
-// (a) GAMES BUDGET: with a verdict that never concludes, the experiment MUST stop
-// at the configured max-games budget instead of spawning forever. This is the
-// direct #1001 regression: the dry run hit 235 games with no bound.
-// UC: UC-043 A3
-func TestTerminationGamesBudget(t *testing.T) {
-	root := t.TempDir()
-	spawner := &fakeSpawner{}
-	targeting := &fakeTargeting{}
-	r := newTestRegistry(t, RegistryConfig{
-		Root:                  root,
-		MaxShadowGames:        2,
-		MaxGamesPerExperiment: 6,   // small budget for the test
-		VerdictMinN:           100, // huge so the inconclusive-past-target guard never fires
-		Spawner:               spawner,
-		Verdict:               alwaysInconclusive{},
-		Targeting:             targeting,
-	})
-	ctx := context.Background()
-
-	id, err := r.Declare(sampleIntent())
-	if err != nil {
-		t.Fatalf("Declare: %v", err)
-	}
-	if err := r.Start(ctx, id); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	st, concluded := drainToTerminal(t, r, spawner, id, 0.5, 50)
-	if !st.IsTerminal() {
-		t.Fatalf("experiment did not terminate (status=%s, concluded=%d)", st, concluded)
-	}
-	if st != StatusDiscarded {
-		t.Fatalf("terminal status = %s, want discarded (inconclusive teardown)", st)
-	}
-	// It must have stopped near the budget, not run unbounded.
-	if concluded > 6+2 { // budget + one in-flight capacity pass of slack
-		t.Fatalf("concluded %d games, want ~6 (budget); guard did not bound the experiment", concluded)
-	}
-	if got := targeting.strippedIDs(); len(got) != 1 || got[0] != id {
-		t.Fatalf("stripped = %v, want [%s] (teardown freed targeting)", got, id)
-	}
-}
-
-// (c) DEGENERATE VARIANCE / all-zero fitness: using the REAL verdict, all games
-// score fitness=0 ⇒ both arms zero-variance ⇒ undefined effect ⇒ permanent
-// inconclusive. The experiment MUST terminate via the degenerate-variance guard
-// once both arms pass target N — not loop forever (the exact #997/#1001 case).
-// UC: UC-043 A3
-func TestTerminationAllZeroFitnessDegenerate(t *testing.T) {
-	root := t.TempDir()
-	spawner := &fakeSpawner{}
-	targeting := &fakeTargeting{}
-	r := newTestRegistry(t, RegistryConfig{
-		Root:                  root,
-		MaxShadowGames:        2,
-		MaxGamesPerExperiment: 1000, // do NOT let the budget be what stops it
-		VerdictMinN:           3,
-		Spawner:               spawner,
-		Verdict:               NewVerdict(3, 0.5, nil), // the real min-N + Cohen's d gate
-		Targeting:             targeting,
-	})
-	ctx := context.Background()
-
-	in := sampleIntent()
-	in.TargetNPerArm = 3
-	id, err := r.Declare(in)
-	if err != nil {
-		t.Fatalf("Declare: %v", err)
-	}
-	if err := r.Start(ctx, id); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	st, concluded := drainToTerminal(t, r, spawner, id, 0.0, 100)
-	if !st.IsTerminal() {
-		t.Fatalf("all-zero experiment did not terminate (status=%s, concluded=%d)", st, concluded)
-	}
-	if st != StatusDiscarded {
-		t.Fatalf("terminal status = %s, want discarded", st)
-	}
-	// Should stop shortly after both arms reach target N=3 (≈6 games), nowhere near
-	// the 1000 budget.
-	if concluded > 12 {
-		t.Fatalf("concluded %d games, want ~6 (degenerate guard at target N)", concluded)
-	}
-}
-
-// (target_n < min-N) must NOT cause an infinite under-powered loop. Declare
-// reconciles target_n up to min-N, and the guard then concludes once both arms
-// reach that floor. Uses the real verdict with constant non-zero fitness (still
-// inconclusive because zero within-arm variance).
-func TestTerminationTargetBelowMinNDoesNotLoop(t *testing.T) {
-	root := t.TempDir()
-	spawner := &fakeSpawner{}
-	targeting := &fakeTargeting{}
-	r := newTestRegistry(t, RegistryConfig{
-		Root:                  root,
-		MaxShadowGames:        2,
-		MaxGamesPerExperiment: 1000, // budget must not be the stopper
-		VerdictMinN:           8,    // min-N well above target_n
-		Spawner:               spawner,
-		Verdict:               NewVerdict(8, 0.5, nil),
-		Targeting:             targeting,
-	})
-	ctx := context.Background()
-
-	in := sampleIntent()
-	in.TargetNPerArm = 2 // < min-N=8: would loop forever without reconciliation
-	id, err := r.Declare(in)
-	if err != nil {
-		t.Fatalf("Declare: %v", err)
-	}
-
-	// Declare must have reconciled the persisted target_n up to min-N.
-	jrnl, err := journal.Load(root, id)
-	if err != nil {
-		t.Fatalf("journal.Load: %v", err)
-	}
-	if got := jrnl.Intent().TargetNPerArm; got != 8 {
-		t.Fatalf("persisted target_n = %d, want 8 (reconciled up to min-N)", got)
-	}
-
-	if err := r.Start(ctx, id); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	st, concluded := drainToTerminal(t, r, spawner, id, 0.42, 200)
-	if !st.IsTerminal() {
-		t.Fatalf("target_n<min-N experiment did not terminate (status=%s, concluded=%d)", st, concluded)
-	}
-	// Terminates around both arms reaching N=8 (≈16 games), not unbounded.
-	if concluded > 24 {
-		t.Fatalf("concluded %d games, want ~16 (reconciled target N=8)", concluded)
-	}
-}
-
-// Config/env semantics: MaxGamesPerExperimentFromEnv honors an explicit disable,
-// and NewRegistry's zero/negative handling matches the documented rule.
-func TestMaxGamesPerExperimentConfig(t *testing.T) {
-	t.Setenv(maxGamesPerExperimentEnv, "")
-	if got := MaxGamesPerExperimentFromEnv(); got != DefaultMaxGamesPerExperiment {
-		t.Fatalf("unset env = %d, want default %d", got, DefaultMaxGamesPerExperiment)
-	}
-	t.Setenv(maxGamesPerExperimentEnv, "0")
-	if got := MaxGamesPerExperimentFromEnv(); got != 0 {
-		t.Fatalf("env=0 = %d, want 0 (disabled)", got)
-	}
-	t.Setenv(maxGamesPerExperimentEnv, "garbage")
-	if got := MaxGamesPerExperimentFromEnv(); got != DefaultMaxGamesPerExperiment {
-		t.Fatalf("env=garbage = %d, want default", got)
-	}
-
-	// A negative config value disables the budget (registry maxGames clamps to 0).
-	r := NewRegistry(RegistryConfig{Root: t.TempDir(), MaxGamesPerExperiment: -1})
-	if r.maxGames != 0 {
-		t.Fatalf("negative config maxGames = %d, want 0 (disabled)", r.maxGames)
-	}
 }
 
 // fastTerminalSpawner reproduces the bind-vs-fast-terminal race (#1014): inside
@@ -1413,40 +1202,37 @@ func TestQuiescentRegistryHasNoTombstones(t *testing.T) {
 }
 
 // TestReconfigure_LiveCaps is the #1044 live-caps AC: Reconfigure applies
-// experiment_shadow_effective_concurrency / experiment_max_games / verdict_min_n /
-// verdict_min_pairs to the live registry (+ its Verdict) with no restart, clamps the
-// effective concurrency to the capacity bookkeeping bound, honors a 0 games-budget as
-// an explicit disable, and IGNORES a non-positive concurrency (never clobbering the
+// experiment_shadow_effective_concurrency / verdict_min_pairs to the live registry
+// (+ its Verdict) with no restart, clamps the effective concurrency to the capacity
+// bookkeeping bound, and IGNORES a non-positive concurrency (never clobbering the
 // current cap on a flagd hiccup).
 func TestReconfigure_LiveCaps(t *testing.T) {
-	verdict := NewVerdict(8, 0.2, nil)
+	verdict := NewVerdict(8, 0.2)
 	reg := NewRegistry(RegistryConfig{
-		Root:                  t.TempDir(),
-		MaxShadowGames:        20,
-		EffectiveConcurrency:  4,
-		MaxGamesPerExperiment: 50,
-		VerdictMinN:           8,
-		Verdict:               verdict,
-		Log:                   nil, // NewRegistry defaults to slog.Default()
+		Root:                 t.TempDir(),
+		MaxShadowGames:       20,
+		EffectiveConcurrency: 4,
+		Verdict:              verdict,
+		Log:                  nil, // NewRegistry defaults to slog.Default()
 	})
 	if reg.EffectiveCapacity() != 4 {
 		t.Fatalf("setup EffectiveCapacity = %d, want 4", reg.EffectiveCapacity())
 	}
 
-	// Raise concurrency to 8, disable the games budget (0), tighten min-N/min-pairs.
-	reg.Reconfigure(8, 0, 16, 12)
+	// Raise concurrency to 8, tighten min-pairs.
+	reg.Reconfigure(8, 12)
 	if reg.EffectiveCapacity() != 8 {
 		t.Fatalf("Reconfigure did not raise EffectiveCapacity: got %d, want 8", reg.EffectiveCapacity())
 	}
 
 	// A non-positive concurrency must NOT clobber the live value (keep 8).
-	reg.Reconfigure(0, 50, 8, 5)
+	reg.Reconfigure(0, 5)
 	if reg.EffectiveCapacity() != 8 {
 		t.Fatalf("Reconfigure(0,...) clobbered EffectiveCapacity: got %d, want 8", reg.EffectiveCapacity())
 	}
 
 	// Concurrency is clamped to the capacity bookkeeping bound (maxCap = 20).
-	reg.Reconfigure(999, 50, 8, 5)
+	reg.Reconfigure(999, 5)
 	if reg.EffectiveCapacity() != 20 {
 		t.Fatalf("Reconfigure did not clamp EffectiveCapacity to maxCap: got %d, want 20", reg.EffectiveCapacity())
 	}
@@ -1528,14 +1314,12 @@ func TestConcludeSignificantDiscardImmediately(t *testing.T) {
 		targeting := &fakeTargeting{}
 		const minPairs = 3
 		r := newTestRegistry(t, RegistryConfig{
-			Root:                  root,
-			MaxShadowGames:        2,
-			MaxGamesPerExperiment: 50,
-			VerdictMinN:           8,
-			Spawner:               spawner,
-			Promoter:              promoter,
+			Root:           root,
+			MaxShadowGames: 2,
+			Spawner:        spawner,
+			Promoter:       promoter,
 			// Real verdict: min N 8 per arm, min pairs 3, effect threshold 0.5.
-			Verdict:   NewVerdictWithPairs(8, minPairs, 0.5, nil),
+			Verdict:   NewVerdict(minPairs, 0.5),
 			Targeting: targeting,
 		})
 		ctx := context.Background()
@@ -1567,64 +1351,6 @@ func TestConcludeSignificantDiscardImmediately(t *testing.T) {
 		}
 		if notes := journalNotes(t, root, id); !strings.Contains(notes, "experiment concluded: "+CohortOutcomeDiscard) {
 			t.Fatalf("journal has no discard conclusion; notes:\n%s", notes)
-		}
-	})
-}
-
-// UC-043 A3 step 2: an experiment that is fully powered (every arm past target
-// N) but still within noise concludes as a final inconclusive, without
-// promotion, long before the games budget. Unlike the degenerate guard, the
-// arms here have real spread.
-//
-// UC: UC-043 A3
-func TestTerminationInconclusivePastTargetN(t *testing.T) {
-	t.Run("UC-043/A3 every arm past target N and still inconclusive gives up", func(t *testing.T) {
-		root := t.TempDir()
-		spawner := &fakeSpawner{}
-		promoter := &fakePromoter{}
-		targeting := &fakeTargeting{}
-		r := newTestRegistry(t, RegistryConfig{
-			Root:                  root,
-			MaxShadowGames:        2,
-			MaxGamesPerExperiment: 1000, // the budget must not be the stopper
-			VerdictMinN:           3,
-			Spawner:               spawner,
-			Promoter:              promoter,
-			// min pairs 5 > target 3: the paired verdict stays under-powered.
-			Verdict:   NewVerdictWithPairs(3, 5, 0.5, nil),
-			Targeting: targeting,
-		})
-		ctx := context.Background()
-		in := sampleIntent()
-		in.TargetNPerArm = 3
-		id, err := r.Declare(in)
-		if err != nil {
-			t.Fatalf("Declare: %v", err)
-		}
-		if err := r.Start(ctx, id); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-
-		// Per-pair differences -0.2, +0.2, 0: spread in both arms, no effect.
-		st, concluded := concludeByArm(t, r, spawner, id, map[string][]float64{
-			ArmExperimental: {0.4, 0.6, 0.5, 0.5, 0.5, 0.5},
-			ArmControl:      {0.6, 0.4, 0.5, 0.5, 0.5, 0.5},
-		})
-		if st != StatusDiscarded {
-			t.Fatalf("status = %s after %d games, want discarded (final inconclusive)", st, concluded)
-		}
-		if concluded != 6 {
-			t.Fatalf("concluded %d games, want 6 (both arms at target N=3)", concluded)
-		}
-		if promoter.count() != 0 {
-			t.Fatalf("promoter called %d times, want 0", promoter.count())
-		}
-		notes := journalNotes(t, root, id)
-		if !strings.Contains(notes, "inconclusive past target N=3") {
-			t.Fatalf("journal lacks the inconclusive-past-target reason; notes:\n%s", notes)
-		}
-		if strings.Contains(notes, "degenerate variance") {
-			t.Fatalf("arms with spread must not take the degenerate-variance guard; notes:\n%s", notes)
 		}
 	})
 }

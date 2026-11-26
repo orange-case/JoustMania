@@ -20,7 +20,6 @@ func testIntent() Intent {
 		FlagKey:           "death_grace_period_seconds",
 		ExperimentalValue: 0.5,
 		Objective:         "engagement_balanced",
-		TargetNPerArm:     20,
 		Arms:              []string{"experimental", "control"},
 	}
 }

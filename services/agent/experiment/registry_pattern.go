@@ -331,30 +331,18 @@ func (r *Registry) patternGamesLocked(ids []string) []string {
 	return games
 }
 
-// maxPairReruns bounds how often one pair runs again before its archetype is
-// skipped (UC-046 BR-015).
-const maxPairReruns = 3
-
-// maxPairPreemptions is the safety valve of BR-015: a pair reruns at most this
-// often after a real-game preemption without using up maxPairReruns. A further
-// preemption counts like any other release, so an experiment that real games
-// preempt again and again still ends (a pair runs at most 1 + 10 + 3 times).
-const maxPairPreemptions = 10
+// maxPairReruns bounds how often one pair runs again, for any reason, before its
+// archetype is skipped (UC-046 BR-015).
+const maxPairReruns = 10
 
 // ReleaseReasonPreempted is the ReleaseGame reason of a pattern game a real game
-// preempted (coordinator reason preempted_by_real_game, UC-046 A8). Its pair
-// reruns without using up maxPairReruns (BR-015).
+// preempted (coordinator reason preempted_by_real_game, UC-046 A8). Its rerun is
+// noted as a preemption (BR-015).
 const ReleaseReasonPreempted = "game ended without usable fitness sample: preempted_by_real_game"
 
-// maxPairStaleReruns is the stale counterpart of maxPairPreemptions (BR-015): a
-// pair reruns at most this often after a stale end without using up
-// maxPairReruns. A further stale end counts like any other release.
-const maxPairStaleReruns = 10
-
 // ReleaseReasonStale is the ReleaseGame reason of a game the agent ended because
-// its game_active series went silent (UC-041 A4, #1494). The agent's telemetry
-// failed, not the game, so its pair reruns without using up maxPairReruns
-// (BR-015), exactly like a preemption, with its own valve maxPairStaleReruns.
+// its game_active series went silent (UC-041 A4, #1494). Its rerun is noted as
+// stale (BR-015).
 const ReleaseReasonStale = "game ended without usable fitness sample: stale"
 
 // Journal notes of BR-015 (KindDecision events without a status change).
@@ -381,43 +369,15 @@ func (r *Registry) rewindFailedSpawn(id string, arms int) {
 }
 
 // rerunPairLocked makes a pair whose arm ended without a sample run again, both
-// arms, at most maxPairReruns times; then its archetype is skipped (UC-046
-// BR-015). A release after a real-game preemption (ReleaseReasonPreempted) reruns
-// the pair without using up maxPairReruns, at most maxPairPreemptions times; a
-// release after a stale end (ReleaseReasonStale) likewise, at most
-// maxPairStaleReruns times. Assumes r.mu is held.
+// arms, at most maxPairReruns times whatever the reason; then its archetype is
+// skipped (UC-046 BR-015). The journal note names a preemption or a stale end.
+// Assumes r.mu is held.
 func (r *Registry) rerunPairLocked(e *entry, pairIndex int, reason string) {
 	if e == nil || !e.patternActive() || len(e.arms) == 0 || e.pairSkipped[pairIndex] {
 		return
 	}
 	n := len(e.arms)
 	pi := pairIndex
-	if reason == ReleaseReasonPreempted && e.pairPreemptions[pairIndex] < maxPairPreemptions {
-		if e.pairPreemptions == nil {
-			e.pairPreemptions = map[int]int{}
-		}
-		e.pairPreemptions[pairIndex]++
-		if e.armCursor > pairIndex*n {
-			e.armCursor = pairIndex * n
-		}
-		r.appendEvent(e.journal, journal.Event{Kind: journal.KindDecision, PairIndex: &pi, Note: notePairRerunPreempted})
-		r.log.Info("experiment.pattern_pair_rerun_preempted", "experiment_id", e.id, "pair_index", pairIndex,
-			"preemptions", e.pairPreemptions[pairIndex])
-		return
-	}
-	if reason == ReleaseReasonStale && e.pairStaleReruns[pairIndex] < maxPairStaleReruns {
-		if e.pairStaleReruns == nil {
-			e.pairStaleReruns = map[int]int{}
-		}
-		e.pairStaleReruns[pairIndex]++
-		if e.armCursor > pairIndex*n {
-			e.armCursor = pairIndex * n
-		}
-		r.appendEvent(e.journal, journal.Event{Kind: journal.KindDecision, PairIndex: &pi, Note: notePairRerunStale})
-		r.log.Info("experiment.pattern_pair_rerun_stale", "experiment_id", e.id, "pair_index", pairIndex,
-			"stale_reruns", e.pairStaleReruns[pairIndex])
-		return
-	}
 	if e.pairReruns == nil {
 		e.pairReruns = map[int]int{}
 	}
@@ -438,7 +398,14 @@ func (r *Registry) rerunPairLocked(e *entry, pairIndex int, reason string) {
 	if e.armCursor > pairIndex*n {
 		e.armCursor = pairIndex * n
 	}
-	r.appendEvent(e.journal, journal.Event{Kind: journal.KindDecision, PairIndex: &pi, Note: notePairRerun})
+	note := notePairRerun
+	switch reason {
+	case ReleaseReasonPreempted:
+		note = notePairRerunPreempted
+	case ReleaseReasonStale:
+		note = notePairRerunStale
+	}
+	r.appendEvent(e.journal, journal.Event{Kind: journal.KindDecision, PairIndex: &pi, Note: note})
 	r.log.Info("experiment.pattern_pair_rerun", "experiment_id", e.id, "pair_index", pairIndex,
 		"rerun", e.pairReruns[pairIndex], "reason", reason)
 }
@@ -588,23 +555,11 @@ func (r *Registry) restorePatternLocked(e *entry) bool {
 		}
 		p := *ev.PairIndex
 		switch {
-		case ev.Kind == journal.KindDecision && ev.Note == notePairRerun:
+		case ev.Kind == journal.KindDecision && (ev.Note == notePairRerun || ev.Note == notePairRerunPreempted || ev.Note == notePairRerunStale):
 			if e.pairReruns == nil {
 				e.pairReruns = map[int]int{}
 			}
 			e.pairReruns[p]++
-			delete(done, p)
-		case ev.Kind == journal.KindDecision && ev.Note == notePairRerunPreempted:
-			if e.pairPreemptions == nil {
-				e.pairPreemptions = map[int]int{}
-			}
-			e.pairPreemptions[p]++
-			delete(done, p)
-		case ev.Kind == journal.KindDecision && ev.Note == notePairRerunStale:
-			if e.pairStaleReruns == nil {
-				e.pairStaleReruns = map[int]int{}
-			}
-			e.pairStaleReruns[p]++
 			delete(done, p)
 		case ev.Kind == journal.KindDecision && ev.Note == noteArchetypeSkipped:
 			if e.pairSkipped == nil {

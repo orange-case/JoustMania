@@ -161,7 +161,7 @@ func TestRootSpan_CarriesIdentifyingAttrs(t *testing.T) {
 	}
 	for _, key := range []string{
 		keys.AttrExperimentFlagKey, keys.AttrExperimentObjective,
-		keys.AttrExperimentTargetN, keys.AttrExperimentArms,
+		keys.AttrExperimentArms,
 	} {
 		if _, ok := rootSpanAttr(s, key); !ok {
 			t.Errorf("agent.experiment must carry %s", key)

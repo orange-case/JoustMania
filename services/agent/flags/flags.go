@@ -117,10 +117,7 @@ const (
 	keyExperimentDynamicCandidates = "experiment_dynamic_candidates"
 	keyExperimentDynamicDenylist   = "experiment_dynamic_denylist"
 	keyExperimentDynamicObjective  = "experiment_dynamic_objective"
-	keyExperimentDynamicTargetN    = "experiment_dynamic_target_n"
-	keyVerdictMinN                 = "verdict_min_n"
 	keyVerdictMinPairs             = "verdict_min_pairs"
-	keyExperimentMaxGames          = "experiment_max_games"
 	keyExperimentShadowConcurrency = "experiment_shadow_effective_concurrency"
 	// #1810 (C-035, flags.md §15): the completed-game grace window is tuning (flag,
 	// else compiled default; 0 = off). The proposer gate limits the agent (C-034,
@@ -146,7 +143,6 @@ const (
 	keyVerdictEffectThreshold = "verdict_effect_threshold"
 	keyVerdictMinRawEffect    = "verdict_min_raw_effect"
 	keyVerdictSDFloor         = "verdict_sd_floor"
-	keyVerdictAnchorMargin    = "verdict_anchor_margin"
 
 	// Runtime SAFETY gate migrated from env to an agent.json flag (#1213). It was
 	// the AGENT_INTERVENTIONS_ENABLED env master read ONCE at startup in main.go to
@@ -499,14 +495,8 @@ type ExperimentDefaults struct {
 	// (3). Since #1810 AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT is a ceiling the caller
 	// applies after the read (C-034, FR-152 e), never this fallback.
 	DynamicMaxConcurrent int
-	// VerdictMinN is the verdict_min_n default (8).
-	VerdictMinN int
 	// VerdictMinPairs is the verdict_min_pairs default (5).
 	VerdictMinPairs int
-	// MaxGames is the compiled default of experiment_max_games (50). Since #1810
-	// AGENT_EXPERIMENT_MAX_GAMES is a ceiling the caller applies after the read
-	// (C-034, FR-152 f), never this fallback.
-	MaxGames int
 	// ShadowEffectiveConcurrency is the experiment_shadow_effective_concurrency
 	// default (4).
 	ShadowEffectiveConcurrency int
@@ -522,9 +512,6 @@ type ExperimentDefaults struct {
 	// VerdictSDFloor is the minimum-SD denominator floor (#1042)
 	// (#1214; was AGENT_VERDICT_SD_FLOOR, default 1e-4).
 	VerdictSDFloor float64
-	// VerdictAnchorMargin is the recent-real regression margin (#992)
-	// (#1214; was AGENT_VERDICT_ANCHOR_MARGIN, default 0.02).
-	VerdictAnchorMargin float64
 }
 
 // DefaultDynamicObjective is the compiled default of experiment_dynamic_objective
@@ -549,28 +536,20 @@ type ExperimentConfig struct {
 	// DynamicMaxConcurrent caps simultaneously-live dynamically-declared experiments
 	// (experiment_dynamic_max_concurrent).
 	DynamicMaxConcurrent int
-	// VerdictMinN is the verdict min-N-per-arm gate (verdict_min_n).
-	VerdictMinN int
 	// VerdictMinPairs is the paired-verdict min-completed-pairs gate (verdict_min_pairs).
 	VerdictMinPairs int
-	// MaxGames is the per-experiment termination budget (experiment_max_games).
-	MaxGames int
 	// ShadowEffectiveConcurrency is the in-flight shadow-spawn concurrency cap
 	// (experiment_shadow_effective_concurrency).
 	ShadowEffectiveConcurrency int
 	// VerdictEffectThreshold is the live standardized-effect gate (verdict_effect_threshold,
-	// #1214): the minimum |Cohen's d| / |d_z| for a promote/discard verdict.
+	// #1214): the minimum |d_z| for a promote/discard verdict.
 	VerdictEffectThreshold float64
 	// VerdictMinRawEffect is the live practical-significance floor (verdict_min_raw_effect,
 	// #1214): the minimum RAW effect magnitude a promote/discard requires (#1042).
 	VerdictMinRawEffect float64
 	// VerdictSDFloor is the live minimum-SD denominator floor (verdict_sd_floor, #1214):
-	// floors the d_z / Cohen's d denominator so the standardized stat stays finite (#1042).
+	// floors the d_z denominator so the standardized stat stays finite (#1042).
 	VerdictSDFloor float64
-	// VerdictAnchorMargin is the live recent-real regression margin (verdict_anchor_margin,
-	// #1214): a PROMOTE is downgraded only when the experimental arm regresses below the
-	// recent-real baseline by MORE than this (#992).
-	VerdictAnchorMargin float64
 	// CompletedGrace is the #1020 bounded-grace window for a completed shadow game
 	// (experiment_completed_grace_seconds, #1810). 0 or less = off.
 	CompletedGrace time.Duration
@@ -586,10 +565,6 @@ type ExperimentConfig struct {
 	// DynamicObjective is the declarer's default objective
 	// (experiment_dynamic_objective, #1907); unresolved = DefaultDynamicObjective.
 	DynamicObjective string
-	// DynamicTargetN is the games-per-arm of a dynamically declared experiment
-	// (experiment_dynamic_target_n, #1907); unresolved = 0 (the registry
-	// reconciles it up to the verdict min-N).
-	DynamicTargetN int
 	// ProposerEnabled is the flag half of the proposer gate
 	// (experiment_proposer_enabled, #1810). The caller ANDs it with the
 	// AGENT_EXPERIMENT_PROPOSER_ENABLED ceiling (C-034, FR-152 d). It never falls
@@ -612,9 +587,7 @@ func (f *Flags) Experiment(ctx context.Context, def ExperimentDefaults) Experime
 		DynamicEnabled:             f.boolFlag(ctx, keyExperimentDynamicEnabled, false),
 		Tick:                       f.durationFlag(ctx, keyExperimentTickSeconds, def.Tick.Seconds()),
 		DynamicMaxConcurrent:       f.intFlag(ctx, keyExperimentDynamicMaxConcur, def.DynamicMaxConcurrent),
-		VerdictMinN:                f.intFlag(ctx, keyVerdictMinN, def.VerdictMinN),
 		VerdictMinPairs:            f.intFlag(ctx, keyVerdictMinPairs, def.VerdictMinPairs),
-		MaxGames:                   f.intFlag(ctx, keyExperimentMaxGames, def.MaxGames),
 		ShadowEffectiveConcurrency: f.intFlag(ctx, keyExperimentShadowConcurrency, def.ShadowEffectiveConcurrency),
 		// Verdict-tuning float knobs (#1214). Typed float getter (the flagd numeric-flag
 		// gotcha — see llmGate); fail-OPEN to the compiled default (the verdict's code
@@ -622,7 +595,6 @@ func (f *Flags) Experiment(ctx context.Context, def ExperimentDefaults) Experime
 		VerdictEffectThreshold: f.floatFlag(ctx, keyVerdictEffectThreshold, def.VerdictEffectThreshold),
 		VerdictMinRawEffect:    f.floatFlag(ctx, keyVerdictMinRawEffect, def.VerdictMinRawEffect),
 		VerdictSDFloor:         f.floatFlag(ctx, keyVerdictSDFloor, def.VerdictSDFloor),
-		VerdictAnchorMargin:    f.floatFlag(ctx, keyVerdictAnchorMargin, def.VerdictAnchorMargin),
 		// #1810: grace is tuning (flag, else 60 s; 0 = off, so not durationFlag,
 		// which floors a non-positive value). The proposer gate's def is false: a
 		// lost sync closes it (C-034).
@@ -634,7 +606,6 @@ func (f *Flags) Experiment(ctx context.Context, def ExperimentDefaults) Experime
 		DynamicCandidates: f.stringFlag(ctx, keyExperimentDynamicCandidates, ""),
 		DynamicDenylist:   f.stringFlag(ctx, keyExperimentDynamicDenylist, ""),
 		DynamicObjective:  f.stringFlag(ctx, keyExperimentDynamicObjective, DefaultDynamicObjective),
-		DynamicTargetN:    f.intFlag(ctx, keyExperimentDynamicTargetN, 0),
 	}
 }
 

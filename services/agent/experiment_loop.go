@@ -51,12 +51,6 @@ const (
 	// no ceiling (the flag governs).
 	envDynamicMaxConcurrent = "AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT"
 
-	// envMaxGames is the operator's CEILING on the per-experiment games budget
-	// (#1810, C-034, FR-152 f): effective = min(env, experiment_max_games), where 0
-	// or less means "no limit" on either side. Unset, invalid or non-positive ⇒ no
-	// ceiling (the flag governs).
-	envMaxGames = "AGENT_EXPERIMENT_MAX_GAMES"
-
 	// envProposerEnabled is the operator's CEILING of the M7-4 proposer gate (C-034,
 	// FR-152 d): open only when it is true AND experiment_proposer_enabled is on
 	// (proposerGateOpen, main.go proposerPermit).
@@ -154,7 +148,7 @@ type experimentLoop struct {
 	// fitnessStore is the finalized-per-game fitness store (#965/#1017): onGameEnd
 	// records every concluded game's settled fitness here, keyed by game_id, for
 	// BOTH a shadow experiment game and a real primary game (averaged by the #992
-	// recent-real anchor and the autonomous Watcher). nil ⇒ recording is skipped
+	// autonomous Watcher). nil ⇒ recording is skipped
 	// (test wiring that does not exercise the fitness path).
 	fitnessStore *experiment.FitnessStore
 
@@ -330,14 +324,14 @@ func buildExperimentLoop(
 	spawner := newExperimentSpawner(flagsClient, logger)
 
 	// FitnessStore (#965/#1017): the finalized-per-game fitness store onGameEnd
-	// Records into and the #992 recent-real anchor reads from. It is built
+	// Records into and the autonomous Watcher reads from. It is built
 	// by the CALLER (main.go) and passed in so the SAME store also backs the autonomous
 	// Watcher's real-game fitness source (#1057). A nil store (a test or a caller that
 	// did not build one) falls back to a fresh local store so the loop is still valid.
 	if fitnessStore == nil {
 		fitnessStore = newFitnessStore()
 	}
-	verdict := newExperimentVerdict(fitnessStore)
+	verdict := experiment.NewDefaultVerdict()
 
 	pinner := newPatternPinner(flagsClient, spawner.spec.GameName, expDefaults, logger)
 	registry := newExperimentRegistry(spawner, verdict, promo, targeting, pinner, promoter, gameFlags, logger)
@@ -387,18 +381,6 @@ func newExperimentSpawner(flagsClient *flags.Flags, logger *slog.Logger) *shadow
 	spawner := newShadowSpawner(gamerunner.ConfigFromEnv(), logger, flagsClient.ShadowGameInt)
 	spawner.SetSpawnFailureCounter(newSpawnFailureCounter(globalMeterProvider()))
 	return spawner
-}
-
-// newExperimentVerdict builds the CohortVerdict (#979) with the recent-real
-// SECONDARY anchor (#992): the within-experiment comparison gated by recent REAL
-// play. The anchor reads the FitnessStore's RecentReal mean for the experiment's
-// objective via a nil-safe accessor; it fails OPEN when no real-game baseline
-// exists (the current mock/shadow-only reality), so it never blocks the shadow loop.
-func newExperimentVerdict(fitnessStore *experiment.FitnessStore) *experiment.Verdict {
-	return experiment.NewDefaultVerdict().WithRecentRealBaseline(
-		recentRealBaselineAccessor(fitnessStore, anchorBaselineRecentN, anchorBaselineMinSamples),
-		experiment.DefaultAnchorMargin,
-	)
 }
 
 // newPatternPinner builds the UC-046 pinner: experiments are archetype-only; the
@@ -592,14 +574,11 @@ func unresolvedConfig(def flags.ExperimentDefaults) flags.ExperimentConfig {
 		DynamicEnabled:             false,
 		Tick:                       def.Tick,
 		DynamicMaxConcurrent:       def.DynamicMaxConcurrent,
-		VerdictMinN:                def.VerdictMinN,
 		VerdictMinPairs:            def.VerdictMinPairs,
-		MaxGames:                   def.MaxGames,
 		ShadowEffectiveConcurrency: def.ShadowEffectiveConcurrency,
 		VerdictEffectThreshold:     def.VerdictEffectThreshold,
 		VerdictMinRawEffect:        def.VerdictMinRawEffect,
 		VerdictSDFloor:             def.VerdictSDFloor,
-		VerdictAnchorMargin:        def.VerdictAnchorMargin,
 		CompletedGrace:             def.CompletedGrace,
 		ProposerEnabled:            false,
 	}
@@ -654,18 +633,9 @@ func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 		}
 		return
 	}
-	// Apply the live runtime caps (#1044) before the bootstrap and the allocation so
-	// a hot-reloaded concurrency / games-budget / min-N takes effect on THIS tick. A Declare
-	// reconciles target_n against the registry's min-N, so the live verdict_min_n
-	// must be in place first. The games
-	// budget is capped by the operator's env ceiling (#1810, C-034, FR-152 f).
-	e.registry.Reconfigure(cfg.ShadowEffectiveConcurrency, e.maxGamesBudget(cfg), cfg.VerdictMinN, cfg.VerdictMinPairs)
-	// #1214: mirror the four migrated FLOAT verdict knobs onto the verdict the same way,
-	// so a hot-reloaded verdict_effect_threshold / verdict_min_raw_effect /
-	// verdict_sd_floor / verdict_anchor_margin takes effect on THIS tick's verdict
-	// evaluations. Verdict-only (the registry reads none of them), so it is a separate
-	// forward to the verdict alongside Reconfigure.
-	e.registry.ReconfigureVerdictFloats(cfg.VerdictEffectThreshold, cfg.VerdictMinRawEffect, cfg.VerdictSDFloor, cfg.VerdictAnchorMargin)
+	// The live caps and verdict gates apply to THIS tick'"'"'s allocation and verdicts.
+	e.registry.Reconfigure(cfg.ShadowEffectiveConcurrency, cfg.VerdictMinPairs)
+	e.registry.ReconfigureVerdictFloats(cfg.VerdictEffectThreshold, cfg.VerdictMinRawEffect, cfg.VerdictSDFloor)
 	// First enabled tick: run the deferred one-time rehydrate (the startup-gate
 	// inversion bootstrap, #1044).
 	e.ensureStarted()
@@ -923,9 +893,9 @@ func (e *experimentLoop) onGameEnd(gc gamecontext.GameContext) {
 		// Not an experiment game. Pre-#965 this returned immediately and the game's
 		// fitness was dropped. The #1017 instrumentation gap: a REAL primary game's
 		// fitness is COMPUTABLE today (same EvaluateFitness, substrate-agnostic) but is
-		// never stored — leaving the recent-real anchor with no real-game signal.
+		// never stored — leaving the Watcher with no real-game signal.
 		// Record it into the finalized-per-game store (keyed by game_id) so the
-		// anchor can read the mean of the last N real games. This is a pure ADD:
+		// Watcher can read the recent real games. This is a pure ADD:
 		// a non-experiment game still does nothing else (no cohort fold, no allocate).
 		e.recordFinalizedRealFitness(gc, duration)
 		return
@@ -1203,9 +1173,9 @@ func (e *experimentLoop) recordFinalizedFitness(gc gamecontext.GameContext, obje
 
 // recordFinalizedRealFitness writes a REAL primary game's finalized fitness into
 // the store (#1017 §3 item 1) — the previously-DROPPED real-game fitness the
-// recent-real anchor needs. A real game is not bound to one objective, so it is
+// autonomous Watcher needs. A real game is not bound to one objective, so it is
 // scored against EVERY experimentable objective its GameContext can evaluate and a
-// per-objective sample is recorded; the anchor then filters by the experiment's
+// per-objective sample is recorded; the Watcher then filters by the experiment's
 // objective. Only objectives the fitness function
 // actually evaluated (signals present) are recorded — a missing-signal objective is
 // never fabricated (#731 honesty). A nil store or a non-real game_kind is skipped
@@ -1250,7 +1220,7 @@ func (e *experimentLoop) recordFinalizedRealFitness(gc gamecontext.GameContext, 
 // only a game explicitly labeled real (or "primary") may seed the recent-real
 // baseline (FR-041, fail closed). An unlabeled game may be a shadow game whose
 // signals carried no game_kind, so treating it as real would let shadow fitness
-// pollute the baseline the verdict anchors on.
+// pollute the real-game baseline.
 func normalizedGameKind(gc gamecontext.GameContext) string {
 	return gamecontext.NormalizeGameKind(gc.GameKind)
 }
@@ -1655,42 +1625,35 @@ func timelinePhaseDuration(timeline []gamecontext.TimelineEvent) (float64, bool)
 func experimentDefaults() flags.ExperimentDefaults {
 	return flags.ExperimentDefaults{
 		Tick: defaultExperimentTick,
-		// #1810: the two widening settings fall back to their COMPILED defaults; their
-		// env vars are ceilings (experimentCeilingsFromEnv), applied after the read.
+		// #1810: the widening setting falls back to its COMPILED default; its
+		// env var is a ceiling (experimentCeilingsFromEnv), applied after the read.
 		DynamicMaxConcurrent:       defaultDynamicMaxConcurrent,
-		VerdictMinN:                experiment.DefaultMinNPerArm,
 		VerdictMinPairs:            experiment.DefaultMinPairs,
-		MaxGames:                   experiment.DefaultMaxGamesPerExperiment,
 		ShadowEffectiveConcurrency: experiment.DefaultEffectiveConcurrency,
 		CompletedGrace:             defaultCompletedGrace,
 		// Verdict-tuning float knobs (#1214): the verdict's own Default* constants.
 		VerdictEffectThreshold: experiment.DefaultEffectThreshold,
 		VerdictMinRawEffect:    experiment.DefaultMinRawEffect,
 		VerdictSDFloor:         experiment.DefaultSDFloor,
-		VerdictAnchorMargin:    experiment.DefaultAnchorMargin,
 	}
 }
 
-// experimentCeilings are the operator's env ceilings on the two widening
-// experiment settings (#1810, C-034, FR-152 e/f). 0 = no ceiling.
+// experimentCeilings is the operator'"'"'s env ceiling on the widening experiment
+// setting (#1810, C-034, FR-152 e). 0 = no ceiling.
 type experimentCeilings struct {
 	// MaxConcurrent caps experiment_dynamic_max_concurrent
 	// (AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT).
 	MaxConcurrent int
-	// MaxGames caps experiment_max_games (AGENT_EXPERIMENT_MAX_GAMES).
-	MaxGames int
 }
 
-// experimentCeilingsFromEnv reads the two ceilings once at startup. Unset = no
-// ceiling. An invalid or non-positive value is no ceiling too (WARN, except a
-// max-games 0, which has always meant "no games limit").
+// experimentCeilingsFromEnv reads the ceiling once at startup. Unset = no ceiling;
+// an invalid or non-positive value is no ceiling too (WARN).
 func experimentCeilingsFromEnv(logger *slog.Logger) experimentCeilings {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return experimentCeilings{
 		MaxConcurrent: ceilingEnv(logger, envDynamicMaxConcurrent, true),
-		MaxGames:      ceilingEnv(logger, envMaxGames, false),
 	}
 }
 
@@ -1731,64 +1694,8 @@ func (e *experimentLoop) concurrentBudget(cfg flags.ExperimentConfig) int {
 	return budget
 }
 
-// maxGamesBudget is the effective per-experiment games budget (#1810, FR-152 f):
-// min(AGENT_EXPERIMENT_MAX_GAMES, experiment_max_games), where 0 or less means no
-// limit on either side. The result is what Registry.Reconfigure takes: 0 = no limit.
-func (e *experimentLoop) maxGamesBudget(cfg flags.ExperimentConfig) int {
-	games := cfg.MaxGames
-	if games < 0 {
-		games = 0
-	}
-	ceiling := e.ceilings.MaxGames
-	if ceiling <= 0 {
-		return games
-	}
-	if games == 0 || games > ceiling {
-		return ceiling
-	}
-	return games
-}
-
-// anchorBaselineRecentN is how many recent real games the #992 recent-real anchor
-// averages. It mirrors the verdict's DefaultMinNPerArm (8) so the anchor rests on
-// a comparable sample to what the cohort verdict already trusts (#1017 §2).
-const anchorBaselineRecentN = 8
-
-// anchorBaselineMinSamples is the minimum real samples before the anchor is
-// trusted; below it the anchor is skipped (fails open). A floor of 3 means the
-// anchor is never a single-game fluke.
-const anchorBaselineMinSamples = 3
-
 // newFitnessStore builds the finalized-fitness ring at its fixed compiled size
 // (the AGENT_FITNESS_STORE_CAPACITY env override is gone, #1907).
 func newFitnessStore() *experiment.FitnessStore {
 	return experiment.NewFitnessStore(experiment.DefaultFitnessStoreCapacity)
-}
-
-// recentRealBaselineAccessor adapts the #965 FitnessStore into the verdict's #992
-// RecentRealBaseline seam: given an objective it returns the mean finalized fitness
-// of the last recentN REAL games and whether a TRUSTWORTHY baseline exists (>=
-// minSamples real samples). It returns ok=false (anchor SKIPPED — fail open) when
-// the store is unwired or too few real samples exist. store may be nil ⇒ the accessor always reports ok=false (anchor disabled).
-func recentRealBaselineAccessor(store *experiment.FitnessStore, recentN, minSamples int) experiment.RecentRealBaseline {
-	if recentN < 1 {
-		recentN = 1
-	}
-	if minSamples < 1 {
-		minSamples = 1
-	}
-	return func(objective string) (float64, bool) {
-		if store == nil {
-			return 0, false
-		}
-		samples := store.RecentReal(objective, recentN)
-		if len(samples) < minSamples {
-			return 0, false
-		}
-		var sum float64
-		for _, s := range samples {
-			sum += s.Fitness
-		}
-		return sum / float64(len(samples)), true
-	}
 }

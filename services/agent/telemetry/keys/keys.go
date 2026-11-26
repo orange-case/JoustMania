@@ -332,13 +332,12 @@ const (
 	// recorded on experiment.fitness. It is also stamped on the agent.experiment ROOT
 	// span (#1188).
 	AttrExperimentObjective = "experiment.objective"
-	// AttrExperimentFlagKey / AttrExperimentTargetN / AttrExperimentArms are the
+	// AttrExperimentFlagKey / AttrExperimentArms are the
 	// agent.experiment ROOT span's identifying attributes (#1188): the flag/candidate
-	// under test, the per-arm target sample size, and the comma-joined arm names. They
+	// under test and the comma-joined arm names. They
 	// describe the experiment as a whole (not a single game), so they live only on the
 	// root span.
 	AttrExperimentFlagKey = "experiment.flag_key"
-	AttrExperimentTargetN = "experiment.target_n"
 	AttrExperimentArms    = "experiment.arms"
 	// AttrExperimentThesis is the experiment's explicit human-readable THESIS (#1184):
 	// the immutable Intent.Hypothesis — what idea is being tested + its expected

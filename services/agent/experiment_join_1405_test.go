@@ -85,8 +85,7 @@ func (r *joinRig) start(t *testing.T, targetN int) spawnRec {
 	ctx := context.Background()
 	id, err := r.loop.registry.Declare(experiment.Intent{
 		Hypothesis: "h", FlagKey: "death_grace_period_seconds",
-		ExperimentalValue: 0.5, Objective: "balanced", TargetNPerArm: targetN,
-	})
+		ExperimentalValue: 0.5, Objective: "balanced"})
 	if err != nil {
 		t.Fatalf("Declare: %v", err)
 	}
@@ -257,7 +256,7 @@ func TestExperimentLoop_EndJoin_PreemptedPairReruns(t *testing.T) {
 		base := promote.NewPromoter(&recordingGitHub{}, nil, &recordingRealDefault{}, nil, nil, promote.RepoRef{}, nil, log)
 		rig.loop.registry = experiment.NewRegistry(experiment.RegistryConfig{
 			Root: t.TempDir(), MaxShadowGames: 2, EffectiveConcurrency: 1, Spawner: rig.spawner,
-			Verdict: experiment.NewVerdict(3, 0.5, nil), Targeting: targeting, Log: log,
+			Verdict: experiment.NewVerdict(3, 0.5), Targeting: targeting, Log: log,
 			Promoter: promote.NewExperimentPromoter(base, resolve),
 			Patterns: &countingPinner{pin: patterngame.Pin{Selection: "only", MaxGameSeconds: 300, Archetypes: []patterngame.Archetype{arch}}},
 		})
