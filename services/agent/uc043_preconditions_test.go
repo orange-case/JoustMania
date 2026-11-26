@@ -31,7 +31,7 @@ func TestExperimentLoop_RunsOnlyWhenEnabledAndExperimentsEnabled(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			spawner := &recordingSpawner{}
 			resolve := func(context.Context) promote.Config {
-				return promote.Config{Mode: promote.ModeIssue, Target: promote.TargetLocal}
+				return promote.Config{Mode: promote.ModeIssue}
 			}
 			loop := buildLoopForTest(t, spawner, resolve, &recordingRealDefault{}, &recordingGitHub{}, armFitness())
 			loop.configOverride = func(context.Context) flags.ExperimentConfig {

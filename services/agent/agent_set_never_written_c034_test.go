@@ -306,7 +306,7 @@ var c034WriterRows = []c034Row{
 				}
 			}
 			// The kill switch (UC-043 A1, #1704): list the promotion overlays and revert them.
-			pr := promote.NewPromoter(nil, nil, realDef, nil, realDef, promote.RepoRef{}, nil, testLogger())
+			pr := promote.NewPromoter(nil, realDef, nil, realDef, nil, testLogger())
 			if got := pr.RevertOnKillSwitch(ctx); len(got) == 0 || got[0].Outcome != promote.OutcomeReverted {
 				t.Errorf("kill switch reverted nothing: %+v", got)
 			}

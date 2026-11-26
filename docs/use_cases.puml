@@ -215,7 +215,7 @@ agent --> UC055
 
 note right of maintainer
   Reviews tier-3 proposals
-  (issue / PR) from UC-043
+  (issues) from UC-043
 end note
 
 note bottom of UC050

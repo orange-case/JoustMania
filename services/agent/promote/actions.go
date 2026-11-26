@@ -12,7 +12,7 @@ import (
 // actions.go holds the per-mode promotion logic. Each helper mutates the passed
 // *Result (the span attributes are stamped by record()). Every consequential
 // effect routes through an injected seam, so these methods are exercised in unit
-// tests with recording fakes — ZERO network, ZERO real git, ZERO real-default
+// tests with recording fakes — ZERO network, ZERO real-default
 // mutation (the SAFETY RAIL, see promote.go).
 
 // promoteIssue opens a GitHub issue describing the hypothesis + implicated flag.
@@ -37,47 +37,6 @@ func (pr *Promoter) promoteIssue(ctx context.Context, p experiment.Proposal, ev 
 	}
 	res.Outcome = OutcomeApplied
 	res.URL = url
-}
-
-// promotePR opens a PR with the STRUCTURED evidence body (#936 AC). Nothing is
-// merged. Routing depends on target:
-//   - github: open the PR via the GitHubClient (env-gated real client, else no-op).
-//   - local:  commit the change into the local working tree via the GitClient
-//     (a throwaway git repo in tests; no push). A local PR has no URL — the commit
-//     SHA is recorded as the artifact.
-func (pr *Promoter) promotePR(ctx context.Context, p experiment.Proposal, ev Evidence, target Target, res *Result) {
-	body := renderPRBody(p, ev)
-
-	switch target {
-	case TargetGitHub:
-		req := PRReq{
-			Title: fmt.Sprintf("Flag experiment: %s", p.FlagKey),
-			Body:  body,
-			Head:  branchName(p),
-			Base:  pr.repo.Base,
-		}
-		url, err := pr.github.OpenPR(ctx, req)
-		if err != nil {
-			res.Outcome = OutcomeDiscarded
-			res.Reason = fmt.Sprintf("open pr: %v", err)
-			return
-		}
-		res.Outcome = OutcomeApplied
-		res.URL = url
-	default: // TargetLocal
-		req := CommitReq{
-			Message: fmt.Sprintf("flag experiment: %s\n\n%s", p.FlagKey, body),
-			Files:   map[string]string{evidenceFilePath(p): body},
-		}
-		sha, err := pr.git.Commit(ctx, req)
-		if err != nil {
-			res.Outcome = OutcomeDiscarded
-			res.Reason = fmt.Sprintf("local commit: %v", err)
-			return
-		}
-		res.Outcome = OutcomeApplied
-		res.URL = "local:" + sha // not a network URL; the recorded local artifact
-	}
 }
 
 // ReasonNotRealPromotable discards an autonomous promotion of shield.activation:

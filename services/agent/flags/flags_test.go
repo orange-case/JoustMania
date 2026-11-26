@@ -506,39 +506,33 @@ func TestCodeImprovement(t *testing.T) {
 	})
 }
 
-// TestPromotion covers the M7-8 promotion-flow flags (#936): the live mode/target
-// resolve, and — critically for the SAFETY RAIL — each falls back to its SAFE
-// default on an evaluation error (mode→issue, NEVER autonomous; target→local,
-// NEVER github).
+// TestPromotion covers the M7-8 promotion-flow flag (#936): the live mode
+// resolves, and — critically for the SAFETY RAIL — falls back to its SAFE default
+// on an evaluation error (mode→issue, NEVER autonomous).
 func TestPromotion(t *testing.T) {
 	t.Run("configured values resolve live", func(t *testing.T) {
 		ev := stubEvaluator{strings: map[string]string{
-			keyPromotionMode:   "autonomous",
-			keyPromotionTarget: "github",
+			keyPromotionMode: "autonomous",
 		}}
 		got := New(ev, nil).Promotion(context.Background())
-		want := PromotionConfig{Mode: "autonomous", Target: "github"}
+		want := PromotionConfig{Mode: "autonomous"}
 		if got != want {
 			t.Errorf("Promotion = %+v, want %+v", got, want)
 		}
 	})
 
-	t.Run("errors fall back to SAFE defaults (issue/local, never autonomous/github)", func(t *testing.T) {
+	t.Run("errors fall back to the SAFE default (issue, never autonomous)", func(t *testing.T) {
 		ev := stubEvaluator{errs: map[string]error{
-			keyPromotionMode:   errors.New("flagd down"),
-			keyPromotionTarget: errors.New("flagd down"),
+			keyPromotionMode: errors.New("flagd down"),
 		}}
 		got := New(ev, nil).Promotion(context.Background())
-		want := PromotionConfig{Mode: DefaultPromotionMode, Target: DefaultPromotionTarget}
+		want := PromotionConfig{Mode: DefaultPromotionMode}
 		if got != want {
 			t.Errorf("Promotion defaults = %+v, want %+v", got, want)
 		}
 		// The safety rail's hard invariant: the fail-closed defaults are the SAFE ones.
 		if got.Mode == "autonomous" {
 			t.Fatal("SAFETY: promotion mode defaulted to autonomous")
-		}
-		if got.Target == "github" {
-			t.Fatal("SAFETY: promotion target defaulted to github")
 		}
 	})
 }
