@@ -40,7 +40,7 @@ func (r *recordingRewatchJournal) snapshot() ([]string, []experiment.PromotionRe
 func rewatchedPromotion(t *testing.T, rev RealDefaultReverter, journal *recordingRewatchJournal) (*Promoter, *capturingRewatcher) {
 	t.Helper()
 	watcher := &stepWatcher{verdicts: []WatchVerdict{VerdictInsufficient}}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, watcher, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, watcher, rev)
 	rw := &capturingRewatcher{}
 	p.SetRewatcher(rw)
 	if journal != nil {
@@ -48,7 +48,7 @@ func rewatchedPromotion(t *testing.T, rev RealDefaultReverter, journal *recordin
 	}
 	proposal := promoteProposal
 	proposal.ExperimentID = "exp-1883"
-	on := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+	on := Config{Mode: ModeAutonomous, Enabled: true}
 	if res := p.Promote(context.Background(), proposal, promoteVerdict, on, testEvidence()); res.Outcome != OutcomeApplied {
 		t.Fatalf("precondition: outcome = %q, want applied", res.Outcome)
 	}
@@ -103,13 +103,13 @@ func TestUC043_Step7_RewatchRevertIsJournaled(t *testing.T) {
 	t.Run("UC-043/A9 no reverter wired journals the unrolled-back default once", func(t *testing.T) {
 		journal := &recordingRewatchJournal{}
 		watcher := &stepWatcher{verdicts: []WatchVerdict{VerdictInsufficient}}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, watcher, nil)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, watcher, nil)
 		rw := &capturingRewatcher{}
 		p.SetRewatcher(rw)
 		p.SetRewatchJournal(journal.record)
 		proposal := promoteProposal
 		proposal.ExperimentID = "exp-1883"
-		p.Promote(context.Background(), proposal, promoteVerdict, Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		p.Promote(context.Background(), proposal, promoteVerdict, Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
 		rw.revert(context.Background())
 
@@ -141,7 +141,7 @@ func TestUC043_Step7_RewatchRevertIsJournaled(t *testing.T) {
 		olderRevert := rw.revert // the newer promotion's re-watch replaces rw.revert
 		newer := promoteProposal
 		newer.ExperimentID = "exp-newer"
-		p.Promote(context.Background(), newer, promoteVerdict, Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		p.Promote(context.Background(), newer, promoteVerdict, Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
 		olderRevert(context.Background())
 
@@ -154,11 +154,11 @@ func TestUC043_Step7_RewatchRevertIsJournaled(t *testing.T) {
 		rev := &recordingReverter{}
 		journal := &recordingRewatchJournal{}
 		watcher := &stepWatcher{verdicts: []WatchVerdict{VerdictInsufficient}}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, watcher, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, watcher, rev)
 		rw := &capturingRewatcher{}
 		p.SetRewatcher(rw)
 		p.SetRewatchJournal(journal.record)
-		p.Promote(context.Background(), promoteProposal, promoteVerdict, Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		p.Promote(context.Background(), promoteProposal, promoteVerdict, Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 		if rw.revert == nil {
 			t.Fatal("precondition: no re-watch scheduled")
 		}

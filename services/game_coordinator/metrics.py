@@ -127,7 +127,7 @@ def reset_players_alive_if_owner(game_id: str) -> bool:
 # game_player_elimination_order{serial,game_id} (a gauge removed at the session's retire).
 player_deaths_total = Counter("game_player_deaths_total", "Total player deaths", ["mode", "game_kind"])
 
-# Hold-mode shield state for the agent (UC-040 A36, A37; UC-042 BR-007). Set at
+# Hold-mode shield state for the agent (UC-048 A8, A9; UC-042 BR-007). Set at
 # every hold transition and with the 2 s energy keyframe, removed at game end.
 # Per player (serial, game_id), like game_player_alive:
 player_shield_energy_seconds = Gauge(
@@ -478,9 +478,9 @@ def clear_session_player_analytics(
 #   blocked:      'true' if rejected by policy/permission enforcement, else 'false'
 #   block_reason: why a blocked attempt was rejected ('not_allowed', 'rate_limited',
 #                 'low_battery', 'mode_unsupported', 'no_game', 'handler_error',
-#                 'already_charged' (UC-040 A31), 'shield_cap_reached', 'shield_cooldown'
-#                 (UC-040 A34), 'shield_pool_full', 'shield_budget_exhausted'
-#                 (UC-040 A37), 'game_ending' (UC-040 A42), 'revive_refused', 'experiment_override',
+#                 'already_charged' (UC-048 A4), 'shield_cap_reached', 'shield_cooldown'
+#                 (UC-048 A7), 'shield_pool_full', 'shield_budget_exhausted'
+#                 (UC-048 A9), 'game_ending' (UC-048 A12), 'revive_refused', 'experiment_override',
 #                 'eliminate_refused' (UC-040 A22)); empty
 #                 string for applied (blocked='false') attempts. Cardinality is bounded
 #                 to this fixed reason set, so it is safe as a label.

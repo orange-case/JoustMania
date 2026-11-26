@@ -69,7 +69,6 @@ var (
 	propWriters = []string{"menu", "agent", "ops", ""}
 	propScopes  = []Scope{
 		{},
-		{FractionPercent: intp(50)},
 		{GameKind: "real"},
 		{GameKind: "shadow"},
 		{ExperimentID: "e1", Arm: "a"},
@@ -376,8 +375,6 @@ func slotValue(st *State, key string, sc Scope, persist bool) json.RawMessage {
 		}
 	case registry.ScopeReal:
 		v = f.real
-	case registry.ScopeFraction:
-		v = f.fraction
 	case registry.ScopeGame:
 		v = f.games[sc.GameID]
 	case registry.ScopeGameSerial:
@@ -442,12 +439,12 @@ func dumpSlots(st *State) string {
 		if v == nil {
 			return "-"
 		}
-		return fmt.Sprintf("%s|%s|%s|%v|%v|%d", v.Variant, compactJSON(f.jsonValue(v)), v.Writer, v.ExpiresAt.Unix(), v.Persisted, v.Fraction)
+		return fmt.Sprintf("%s|%s|%s|%v|%v", v.Variant, compactJSON(f.jsonValue(v)), v.Writer, v.ExpiresAt.Unix(), v.Persisted)
 	}
 	var b bytes.Buffer
 	for _, key := range sortedKeys(st.flags) {
 		f := st.flags[key]
-		fmt.Fprintf(&b, "%s{s=%s a=%s r=%s f=%s", key, one(f, f.stack), one(f, f.admin), one(f, f.real), one(f, f.fraction))
+		fmt.Fprintf(&b, "%s{s=%s a=%s r=%s", key, one(f, f.stack), one(f, f.admin), one(f, f.real))
 		for _, g := range sortedKeys(f.games) {
 			fmt.Fprintf(&b, " g[%s]=%s", g, one(f, f.games[g]))
 		}

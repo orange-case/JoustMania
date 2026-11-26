@@ -1,12 +1,12 @@
 /**
- * Agent shield state for the controller tiles (#1301, UC-040 A16 / A17).
+ * Agent shield state for the controller tiles (#1301, UC-048 A1 / A2).
  *
  * The LED colour itself (including the shield fade and last-second blink) comes
  * live from the controller stream (`GameplayData.color`, the colour last written
  * to the LED). This module adds what the colour alone cannot say: that the white
  * is an agent shield, which kind, and how long it has left. It folds the game
  * events `player_shielded`, `player_shield_charged`, `player_shield_charge_ended`,
- * `player_death`, `game_start`, `game_ended` and `game_force_ended` (charge: #1837, UC-040 A30),
+ * `player_death`, `game_start`, `game_ended` and `game_force_ended` (charge: #1837, UC-048 A3),
  * and in a hold game `player_shield_energy` for the energy bar (#2096, UC-035 BR-008).
  */
 
@@ -29,13 +29,13 @@ export interface GameEventLike {
   data: { [key: string]: string };
 }
 
-/** Seconds of the shield that blink on the controller (UC-040 BR-008). */
+/** Seconds of the shield that blink on the controller (UC-048 BR-001). */
 export const SHIELD_BLINK_WINDOW_S = 1;
 
 /** Largest charge expiry the coordinator allows (`shield.charge_expiry_seconds` clamp), plus slack. */
 export const CHARGE_MAX_COUNTDOWN_MS = 130_000;
 
-/** A held shield charge (UC-040 A30, #1837). */
+/** A held shield charge (UC-048 A3, #1837). */
 export interface ChargeState {
   /** Wall-clock expiry in ms since epoch, or null: never expires, or the clock is not trusted (A11). */
   expiresMs: number | null;
@@ -66,7 +66,7 @@ export interface HoldEnergyState {
   atMonoMs: number;
 }
 
-/** The bar's level, as the controller LED shows it (UC-040 BR-026), or `active`. */
+/** The bar's level, as the controller LED shows it (UC-048 BR-010), or `active`. */
 export type HoldLevel = "empty" | "low" | "charged" | "full" | "active";
 
 /** A hold pool at a moment, interpolated from the last event (UC-035 BR-008). */
@@ -183,7 +183,7 @@ export class ShieldStore {
         const hold = parseHoldEnergy(event.data, monoMs, this.energies.get(serial));
         if (!hold) return false;
         this.energies.set(serial, hold);
-        // A hold game shows the bar, never a timed shield badge (UC-040 BR-026).
+        // A hold game shows the bar, never a timed shield badge (UC-048 BR-010).
         this.shields.delete(serial);
         return true;
       }

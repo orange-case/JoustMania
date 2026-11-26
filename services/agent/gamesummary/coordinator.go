@@ -59,13 +59,13 @@ const (
 	attrPredictionsControls = "summary.predictions.controls"
 	// summary.goal.* (UC-042 A12, #2479): set only when the game had a goal;
 	// attainment only when a term could be measured.
-	// Group-shield decisions of the game (#2529, UC-040 BR-033).
+	// Group-shield decisions of the game (#2529, UC-048 BR-014).
 	attrGroupApplied       = "summary.group.applied"
 	attrGroupNonRescue     = "summary.group.non_rescue"
 	attrGroupRescueRefused = "summary.group.rescue_refused"
 	attrGroupBlocked       = "summary.group.blocked"
 	// eventGroupRationale is one span event per group decision's reason text; its
-	// attribute carries neither arm nor backend (the blind export, BR-033).
+	// attribute carries neither arm nor backend (the blind export, UC-048 BR-014).
 	eventGroupRationale = "summary.group.rationale"
 	attrGroupReason     = "reason"
 
@@ -179,7 +179,7 @@ func (c *Coordinator) SetPredictionLookup(f func(gameID string) []PredictionOutc
 func (c *Coordinator) SetGoalLookup(f func(gameID string) *Goal) { c.goal = f }
 
 // SetGroupLookup wires the lookup of a game's group-shield decisions (#2529, UC-040
-// BR-033). Set during construction, before the store fires OnGameEnd.
+// UC-048 BR-014). Set during construction, before the store fires OnGameEnd.
 func (c *Coordinator) SetGroupLookup(f func(gameID string) []GroupDecision) { c.groups = f }
 
 // SetInterventionLookup wires the lookup of a game's noted interventions (#2640),

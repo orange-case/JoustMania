@@ -34,7 +34,7 @@
 #   ci.yml) runs no service tier locally; the summary says so.
 #
 # Services / gate keys accepted by SERVICE:
-#   lib game_coordinator menu controller_manager audio pairing_daemon python_hid operator_pad
+#   lib game_coordinator menu controller_manager audio pairing_daemon operator_pad
 #   agent flag-service connect-proxy agent-protos dashboard rust-hid
 #   contract contract-flagd service service-touched grafana compose voice
 #   (audio also selects voice-check)
@@ -65,14 +65,13 @@ declare -A PYTEST_CMD=(
   [controller_manager]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
   [audio]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
   [pairing_daemon]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
-  [python_hid]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
   [operator_pad]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
 )
-PY_SERVICES=(game_coordinator menu controller_manager audio pairing_daemon python_hid operator_pad)
+PY_SERVICES=(game_coordinator menu controller_manager audio pairing_daemon operator_pad)
 
 # Gate order in the summary.
 ALL_GATES=(lint spec-lint spec-touched
-  py:lib py:game_coordinator py:menu py:controller_manager py:audio py:pairing_daemon py:python_hid py:operator_pad
+  py:lib py:game_coordinator py:menu py:controller_manager py:audio py:pairing_daemon py:operator_pad
   go:agent go:flag-service connect-proxy agent-protos dashboard rust-hid
   voice-check contract contract-flagd service service-touched grafana-json compose yaml-dupkeys)
 
@@ -101,7 +100,7 @@ select_key() {  # map a SERVICE key to gates
   local key="${1//-/_}"
   case "$key" in
     lib) selected[py:lib]=1 ;;
-    game_coordinator|menu|controller_manager|pairing_daemon|python_hid|operator_pad) selected[py:$key]=1 ;;
+    game_coordinator|menu|controller_manager|pairing_daemon|operator_pad) selected[py:$key]=1 ;;
     audio) selected[py:audio]=1; selected[voice-check]=1 ;;
     voice|voice_check) selected[voice-check]=1 ;;
     agent) selected[go:agent]=1 ;;
@@ -127,9 +126,9 @@ classify() {  # map one changed path to gates; each case mirrors a ci.yml filter
     pyproject.toml|uv.lock|proto/*|lib/*)
       for s in "${PY_SERVICES[@]}"; do selected[py:$s]=1; done ;;
   esac
-  # controller_manager / game_coordinator / menu / audio / pairing_daemon / python_hid / operator_pad
+  # controller_manager / game_coordinator / menu / audio / pairing_daemon / operator_pad
   case "$f" in
-    services/game_coordinator/*|services/menu/*|services/controller_manager/*|services/audio/*|services/pairing_daemon/*|services/python_hid/*|services/operator_pad/*)
+    services/game_coordinator/*|services/menu/*|services/controller_manager/*|services/audio/*|services/pairing_daemon/*|services/operator_pad/*)
       local s="${f#services/}"; selected[py:${s%%/*}]=1 ;;
   esac
   # lib (lib-tests)
@@ -295,7 +294,7 @@ gate_cmd() {  # print the shell command for a gate
     voice-check) echo "make voice-check" ;;
     rust-hid) echo "cd services/rust-hid && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test" ;;
     # Same steps as the Telemetry Contract job: generated specs, then the tests.
-    contract) echo "make specs-check && make spec-refs-check && uv run --no-project --with pytest --with pyyaml --with pytest-rerunfailures pytest tests/contract -q --tb=short -p no:cacheprovider --ignore tests/contract/test_flagd_resolution.py --ignore tests/contract/test_flagd_rpc_retry.py --ignore tests/contract/test_fractional_bucketing.py" ;;
+    contract) echo "make specs-check && make spec-refs-check && uv run --no-project --with pytest --with pyyaml --with pytest-rerunfailures pytest tests/contract -q --tb=short -p no:cacheprovider --ignore tests/contract/test_flagd_resolution.py --ignore tests/contract/test_flagd_rpc_retry.py" ;;
     contract-flagd) echo "make test-contract-flagd" ;;
     service) echo "make test-service" ;;
     service-touched)

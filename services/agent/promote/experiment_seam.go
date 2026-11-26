@@ -3,7 +3,7 @@ package promote
 // experiment_seam.go is the #980 adapter that lets the experiment REGISTRY
 // (#978) drive the EXISTING #961 Promoter unchanged. It implements the registry's
 // promotion seam (experiment.Promoter: Promote(ctx, journal.CompactView) PromotionResult)
-// as a thin adapter over *Promoter — it REUSES the env-gated mode/target dispatch
+// as a thin adapter over *Promoter — it REUSES the env-gated mode dispatch
 // and the whole safety rail (NewGitHubClientFromEnv / kill-switch / safe issue+
 // local defaults). It does NOT reimplement promotion, the env gates, or the
 // kill-switch (design §10).
@@ -40,7 +40,7 @@ import (
 	"github.com/joustmania/agent/experiment/journal"
 )
 
-// ConfigResolver resolves the LIVE promotion Config (mode/target + the agent
+// ConfigResolver resolves the LIVE promotion Config (mode + the agent
 // kill-switch) for one promotion. It is injected so the adapter stays free of an
 // OpenFeature dependency — the SAME "package owns logic, caller owns flagd" split
 // the Promoter, Gate, Writer, and Validator already use. main.go supplies a
@@ -56,11 +56,11 @@ type ConfigResolver func(ctx context.Context) Config
 // journal.CompactView into the (Proposal, Decision, Config, Evidence) the existing
 // Promoter consumes — then calls it UNCHANGED.
 type ExperimentPromoter struct {
-	// promoter is the existing #961 Promoter. Its env-gated seams (github/git/
+	// promoter is the existing #961 Promoter. Its env-gated seams (github/
 	// realDef) and safety rail are reused verbatim; this adapter only assembles its
 	// inputs.
 	promoter *Promoter
-	// resolveConfig resolves the live mode/target/kill-switch each promotion (never
+	// resolveConfig resolves the live mode/kill-switch each promotion (never
 	// cached), so flipping code_improvement.mode takes effect on the NEXT promotion.
 	resolveConfig ConfigResolver
 }
@@ -76,7 +76,7 @@ func NewExperimentPromoter(p *Promoter, resolveConfig ConfigResolver) *Experimen
 	if resolveConfig == nil {
 		// Fail-closed floor: no resolver ⇒ never autonomous, never github.
 		resolveConfig = func(context.Context) Config {
-			return Config{Mode: ModeIssue, Target: TargetLocal, Enabled: false}
+			return Config{Mode: ModeIssue, Enabled: false}
 		}
 	}
 	return &ExperimentPromoter{promoter: p, resolveConfig: resolveConfig}
@@ -163,7 +163,7 @@ func (a *ExperimentPromoter) Promote(ctx context.Context, view journal.CompactVi
 	// reason is a recorded no-op or a failure; it never blocks teardown.
 	reason := res.Reason
 	if res.Outcome == OutcomeDiscarded && reason != "" {
-		reason = fmt.Sprintf("%s (mode=%s target=%s)", reason, res.Mode, res.Target)
+		reason = fmt.Sprintf("%s (mode=%s)", reason, res.Mode)
 	}
 	return experiment.PromotionResult{Outcome: string(res.Outcome), Reason: reason, Reference: res.URL, ForeignOwner: res.ForeignOwner}
 }
@@ -199,7 +199,7 @@ func decisionOutcome(view journal.CompactView) experiment.Outcome {
 }
 
 // flagState renders a short human-readable snapshot of the experiment's flag
-// context for the issue/PR body (a reviewer sees what was promoted). Best-effort;
+// context for the issue body (a reviewer sees what was promoted). Best-effort;
 // the Evidence body renderer tolerates an empty value.
 func flagState(intent journal.Intent) string {
 	var b strings.Builder

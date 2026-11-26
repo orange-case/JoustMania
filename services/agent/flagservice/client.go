@@ -44,12 +44,11 @@ const (
 
 // Scope is a write's scope properties.
 type Scope struct {
-	GameID          string `json:"game_id,omitempty"`
-	Serial          string `json:"serial,omitempty"`
-	ExperimentID    string `json:"experiment_id,omitempty"`
-	Arm             string `json:"arm,omitempty"`
-	GameKind        string `json:"game_kind,omitempty"`
-	FractionPercent *int   `json:"fraction_percent,omitempty"`
+	GameID       string `json:"game_id,omitempty"`
+	Serial       string `json:"serial,omitempty"`
+	ExperimentID string `json:"experiment_id,omitempty"`
+	Arm          string `json:"arm,omitempty"`
+	GameKind     string `json:"game_kind,omitempty"`
 }
 
 // Write is a PUT body: exactly one of Variant and Value.

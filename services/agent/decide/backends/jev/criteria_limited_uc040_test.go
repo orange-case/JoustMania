@@ -27,9 +27,10 @@ func withPlayer(t *testing.T, edit func(p *decide.PlayerState)) decide.State {
 	return st
 }
 
-// UC: UC-040 A33 A35
+// UC: UC-040 A35
+// UC: UC-048 A6
 func TestSuitability_ShieldLimitedAndLevels(t *testing.T) {
-	t.Run("UC-040/A33 grant_shield to a shield_limited player reads as refused", func(t *testing.T) {
+	t.Run("UC-048/A6 grant_shield to a shield_limited player reads as refused", func(t *testing.T) {
 		st := withPlayer(t, func(p *decide.PlayerState) { p.ShieldLimited = true })
 		d := describeCandidates(st, "grant_shield")["MOCK0003"]
 		if !strings.Contains(d, "No more agent shields for this player right now (per-game cap or cooldown): another shield is refused.") {

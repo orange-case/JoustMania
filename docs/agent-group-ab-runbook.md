@@ -1,7 +1,7 @@
 # Group-shield A/B runbook (#2467)
 
 Question: does an LLM decision backend come up with group shields on its own when the lever is offered and described
-neutrally? We enable the capability and measure; no rule fires a group shield (UC-040 A47, BR-033, BR-036, C-034).
+neutrally? We enable the capability and measure; no rule fires a group shield (UC-048 A13, BR-014, UC-040 BR-036, C-034).
 
 ## What the script guarantees (and what it does not)
 

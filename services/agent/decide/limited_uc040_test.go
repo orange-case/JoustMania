@@ -7,11 +7,12 @@ import (
 )
 
 // The shield_limited marker and the applied per-player levels of the decide state
-// (#2066; UC-040 main step 4, A33, A35, A37; decide-contract.md §1.2).
+// (#2066; UC-040 main step 4, UC-048 A6, UC-040 A35, UC-048 A9; decide-contract.md §1.2).
 
-// UC: UC-040 main step 4 A33 A37
+// UC: UC-040 main step 4
+// UC: UC-048 A6 A9
 func TestBuildState_ShieldLimited(t *testing.T) {
-	t.Run("UC-040/A33 a limited alive player is marked in field, wire, narrative and digest", func(t *testing.T) {
+	t.Run("UC-048/A6 a limited alive player is marked in field, wire, narrative and digest", func(t *testing.T) {
 		c := sampleCtx()
 		st := BuildStateWith(c, Annotations{NoShield: map[string]bool{"B": true}})
 		b := playerByID(t, st, "B")
@@ -32,7 +33,7 @@ func TestBuildState_ShieldLimited(t *testing.T) {
 			t.Error("digest must change with shield_limited")
 		}
 	})
-	t.Run("UC-040/A33 a charged player is shield_charged, not also shield_limited", func(t *testing.T) {
+	t.Run("UC-048/A6 a charged player is shield_charged, not also shield_limited", func(t *testing.T) {
 		st := BuildStateWith(sampleCtx(), Annotations{Charged: map[string]bool{"B": true}, NoShield: map[string]bool{"B": true}})
 		b := playerByID(t, st, "B")
 		if !b.ShieldCharged || b.ShieldLimited {
@@ -43,7 +44,7 @@ func TestBuildState_ShieldLimited(t *testing.T) {
 			t.Error("a charged player in NoShield must keep the shield_charged-only digest")
 		}
 	})
-	t.Run("UC-040/A33 a dead player is never limited and an empty set keeps the digest", func(t *testing.T) {
+	t.Run("UC-048/A6 a dead player is never limited and an empty set keeps the digest", func(t *testing.T) {
 		c := sampleCtx()
 		st := BuildStateWith(c, Annotations{NoShield: map[string]bool{"C": true}})
 		if playerByID(t, st, "C").ShieldLimited || strings.Contains(st.Narrative, "shield_limited") {
@@ -53,7 +54,7 @@ func TestBuildState_ShieldLimited(t *testing.T) {
 			t.Error("a dead player's limit must not change the digest")
 		}
 	})
-	t.Run("UC-040/A37 in a hold game the token names the hold reason the state carries", func(t *testing.T) {
+	t.Run("UC-048/A9 in a hold game the token names the hold reason the state carries", func(t *testing.T) {
 		c := withHoldGauges(sampleCtx(), "hold")
 		a := *c.Players["A"]
 		a.ShieldEnergy = fptr(4.6) // cap 5, margin 0.5: shield_pool_full

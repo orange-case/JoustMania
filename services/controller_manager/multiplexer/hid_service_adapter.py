@@ -1,8 +1,7 @@
-"""Controller I/O adapter backed by a HID gRPC service (rust-hid or python-hid).
+"""Controller I/O adapter backed by a HID gRPC service (rust-hid).
 
-One class for both backends (#2352): ``RustServiceAdapter`` (``rust_adapter.py``)
-and ``PythonHidAdapter`` (``python_hid_adapter.py``) only set the backend
-constants below. Lifecycle RPCs (discover, open, close) are unary. Real-time
+``RustServiceAdapter`` (``rust_adapter.py``) only sets the backend constants
+below. Lifecycle RPCs (discover, open, close) are unary. Real-time
 I/O (poll, set_output) uses a bidirectional stream (``HidStreamMixin``): the
 server pushes SensorData and the client sends IOCommands for LED/rumble.
 

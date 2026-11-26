@@ -1,7 +1,7 @@
 """
 Hold-mode shield gauges for the agent (#2096, telemetry.md §6).
 
-UC-040 A37 step 1 (the agent's view of the pool), UC-042 BR-007 (the retro's latched
+UC-048 A9 step 1 (the agent's view of the pool), UC-042 BR-007 (the retro's latched
 values and per-player totals): the coordinator publishes the latched mode, every
 latched hold value and each player's energy, budget, active flag and totals, and
 removes them at game end.
@@ -84,7 +84,7 @@ def player_value(gauges, name, serial="p1", **extra):
 
 
 class TestUC040A37AgentView:
-    @pytest.mark.uc("UC-040", flow="A37")
+    @pytest.mark.uc("UC-048", flow="A9")
     @pytest.mark.uc("UC-042", br=["BR-007"])
     def test_the_latch_publishes_the_mode_and_every_latched_value(self, hold_game, gauges):
         assert gauges["shield_activation_mode"].get(mode="hold", **GAME) == 1
@@ -99,7 +99,7 @@ class TestUC040A37AgentView:
         assert settings.get(setting="shield.hold_rumble_max_intensity", **GAME) == 200.0  # #2463
         assert settings.get(setting="shield.hold_led_floor_percent", **GAME) == 20.0
 
-    @pytest.mark.uc("UC-040", flow="A37")
+    @pytest.mark.uc("UC-048", flow="A9")
     def test_a_trigger_game_publishes_its_mode_and_no_hold_value(self, clock, flags, events, gauges):  # noqa: F811
         flags.values["shield.activation"] = "trigger"
         g = _make_ffa(events)
@@ -108,7 +108,7 @@ class TestUC040A37AgentView:
         assert gauges["shield_hold_setting"].values == {}
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A37")
+    @pytest.mark.uc("UC-048", flow="A9")
     @pytest.mark.uc("UC-042", br=["BR-007"])
     async def test_player_gauges_follow_activation_grant_and_release(self, hold_game, clock, gauges):  # noqa: F811
         g = hold_game
@@ -137,7 +137,7 @@ class TestUC040A37AgentView:
         assert player_value(gauges, "player_shield_stats", stat="empties") == 0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A38")
+    @pytest.mark.uc("UC-048", flow="A10")
     @pytest.mark.uc("UC-042", br=["BR-007"])
     async def test_recharged_is_what_the_recharge_added(self, clock, flags, events, gauges):  # noqa: F811
         flags.values["shield.recharge_per_second"] = 0.5
@@ -149,7 +149,7 @@ class TestUC040A37AgentView:
         assert player_value(gauges, "player_shield_stats", stat="recharged_seconds") == pytest.approx(2.0)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39")
+    @pytest.mark.uc("UC-048", flow="A11")
     async def test_running_out_counts_an_empty_and_death_zeroes_the_pool(self, hold_game, clock, gauges):  # noqa: F811
         g = hold_game
         p1 = g.players["p1"]
@@ -166,13 +166,13 @@ class TestUC040A37AgentView:
         assert player_value(gauges, "player_shield_stats", stat="empties") == 1
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36")
+    @pytest.mark.uc("UC-048", flow="A8")
     async def test_the_energy_event_sets_the_gauges(self, hold_game, clock, gauges):  # noqa: F811
         fill(hold_game, "p1", 2.0)
         await hold_game._publish_hold_energy("p1", False)
         assert player_value(gauges, "player_shield_energy_seconds") == pytest.approx(2.0)
 
-    @pytest.mark.uc("UC-040", flow="A39")
+    @pytest.mark.uc("UC-048", flow="A11")
     def test_game_end_removes_the_game_series(self, hold_game, gauges):
         hold_game._clear_shield_metrics()
         labels = tuple(GAME.values())
@@ -182,7 +182,7 @@ class TestUC040A37AgentView:
         assert len(gauges["shield_activation_mode"].removed) == 1
 
 
-@pytest.mark.uc("UC-040", flow="A39")
+@pytest.mark.uc("UC-048", flow="A11")
 def test_clear_player_analytics_removes_the_player_shield_gauges():
     spies = {
         name: MagicMock()

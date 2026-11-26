@@ -13,31 +13,28 @@ package promote
 //	PROMOTE / DISCARD. The verdict does NOT change the real defaultVariant.
 //	    ↓
 //	M7-8 (THIS package, #936): take a PROMOTE verdict + its fitness evidence and
-//	ACT, per two live flags — open a GitHub issue (hypothesis), open a PR
-//	(structured fitness evidence), or apply autonomously to the REAL default +
-//	watch + revert. This is the consequential, real-affecting piece, so it is
+//	ACT, per one live flag — open a GitHub issue (hypothesis + fitness
+//	evidence), or apply autonomously to the REAL default + watch + revert.
+//	This is the consequential, real-affecting piece, so it is
 //	behind the SAFETY RAIL (see promote.go / NewGitHubClientFromEnv).
 //
 // The promotion is its own trace node so a Jaeger trace shows what the agent DID
 // with a validated experiment (the #936 AC: "Outcome visible in traces").
 const (
 	// SpanPromote wraps one Promoter.Promote of a validated experiment. It carries
-	// the resolved gate (mode) + target + the final outcome, so a single span answers
-	// "what did the agent do with this promotion, and where".
+	// the resolved gate (mode) + the final outcome, so a single span answers "what
+	// did the agent do with this promotion".
 	SpanPromote = "code_improvement.promote"
 )
 
-// Attribute keys of the promotion span schema (#936 AC: gate/target/outcome on
+// Attribute keys of the promotion span schema (#936 AC: gate/outcome on
 // the trace).
 const (
 	// AttrGate is the resolved code_improvement.mode the promotion acted under:
-	// issue | pr | autonomous. The #936 AC names this "code_improvement.gate" — the
+	// issue | autonomous. The #936 AC names this "code_improvement.gate" — the
 	// runtime "mode" flag is the gate that selects the promotion behaviour. The
 	// single attribute a dashboard groups by to see how a promotion was handled.
 	AttrGate = "code_improvement.gate"
-	// AttrTarget is the resolved code_improvement.target: local | github. Records
-	// WHERE a pr/commit landed (github → the GitHub API; local → a local apply).
-	AttrTarget = "code_improvement.target"
 	// AttrOutcome is the promotion result: applied | discarded | reverted (#936 AC:
 	// "code_improvement.outcome"). Distinct from experiment.AttrOutcome's
 	// promote/discard/revert verdict — THIS records what the ACTION achieved.
@@ -46,14 +43,14 @@ const (
 	// Proposal so the promotion span is self-describing without the validation span).
 	AttrFlagKey = "code_improvement.flag_key"
 	// AttrReason carries why a promotion degraded to a no-op / could not act
-	// (e.g. "github target requested but real client not enabled", "no real-default
+	// (e.g. "github not enabled", "no real-default
 	// writer wired"). Present only when the outcome is not the requested action —
 	// the promotion is RECORDED, never silently dropped (mirrors the Gate's blocked
-	// contract). Its presence on a github-target span is the SAFETY RAIL's visible
+	// contract). Its presence on an issue span is the SAFETY RAIL's visible
 	// proof that an absent env gate degraded to an inert recorded no-op.
 	AttrReason = "code_improvement.reason"
-	// AttrURL is the issue/PR URL a github-target promotion opened (empty for a
-	// local apply or a no-op). On the span so a trace links straight to the artifact.
+	// AttrURL is the issue URL a promotion opened (empty for an autonomous apply or
+	// a no-op). On the span so a trace links straight to the artifact.
 	AttrURL = "code_improvement.url"
 	// AttrFitnessBefore / AttrFitnessAfter / AttrFitnessDelta put the verdict's
 	// evidence on the promotion span so the trace shows what justified the action.

@@ -224,7 +224,7 @@ Open the **Controllers & Bluetooth** dashboard at `http://localhost/grafana/d/co
 - The collapsed **Bluetooth and Adapters (Pi only)** row has the signal per adapter, RSSI history, per-adapter
   poll rate and errors, adapter identity, HCI errors and link roles. RSSI, adapter identity, HCI errors and
   link roles come from the pairing daemon (only links it reports as connected are shown); the per-adapter
-  poll panels join `controller_adapter_info`, which the controller manager sets from its python-hid /
+  poll panels join `controller_adapter_info`, which the controller manager sets from its
   rust-hid backend (`get_adapter_for_serial`). All of them are empty in mock mode.
 
 No alert rules ship (FR-083 Rejected, #1425): watch the dashboard.

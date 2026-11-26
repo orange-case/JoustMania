@@ -1634,14 +1634,14 @@ class TestExperimentSpawnBinding:
         assert servicer.sessions[real_gid].game_kind == "real"
         assert servicer.sessions[real_gid].rng_seed == 0
 
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-004"])
     @pytest.mark.uc("UC-046", flow="main", br=["BR-018"])
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "origin", [game_coordinator_pb2.GAME_ORIGIN_AGENT, game_coordinator_pb2.GAME_ORIGIN_UNSPECIFIED]
     )
     async def test_pattern_trigger_policy_applies_to_shadow_and_is_dropped_for_real(self, servicer, origin):
-        """UC-040 BR-019 (#2096): ``pattern_trigger_policy`` binds only to a shadow session;
+        """UC-048 BR-004 (#2096): ``pattern_trigger_policy`` binds only to a shadow session;
         a menu-origin (real) start that carries it gets False, so it never changes a real game."""
         shadow_config = _experiment_config(serials=("a1", "a2"), origin=origin)
         shadow_config.pattern_trigger_policy = True
