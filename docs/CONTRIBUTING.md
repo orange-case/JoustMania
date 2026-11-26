@@ -406,9 +406,10 @@ The service tier (T2, `make test-service`) is deliberately a subset locally:
 | anything else (lib, other service code, agent, rust-hid, `Makefile`, `ci.yml`) | none; the summary prints a note |
 
 The two service tiers ("Service Tests", "Flagsmith Service Tests") do not run on a plain PR (#2768): the merge
-queue is their only gate, so `CI Complete` and queue entry never wait ~18 min for them. To run them on a PR
+queue is their only gate (and runs them only for an entry that touches their paths, the `service_tests` filter,
+#2770), so `CI Complete` and queue entry never wait for them. To run them on a PR
 before arming, add the `ci-full` label (it also builds every image) or dispatch CI on the branch. A tier failure
-otherwise first shows in the queue and costs one ~18 min queue run plus a re-arm. A local PASS is not tier
+otherwise first shows in the queue and costs one queue run plus a re-arm. A local PASS is not tier
 coverage for product paths; for a risky service-tier change, run them early with `ci-full`.
 
 ```bash
