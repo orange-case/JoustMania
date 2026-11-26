@@ -27,6 +27,8 @@ from services.controller_manager.servicer import SHUTDOWN_ABORT_DETAILS
 
 # Well under the 1 s button-queue poll and the 5 s server grace: the end comes from the shutdown itself.
 PROMPT_S = 0.5
+# A missing shutdown check fails here (TimeoutError) instead of hanging the job.
+TEST_BOUND_S = 5.0
 
 
 async def _button_requests():
@@ -35,7 +37,7 @@ async def _button_requests():
 
 
 async def _wait_for(predicate):
-    async with asyncio.timeout(5):
+    async with asyncio.timeout(TEST_BOUND_S):
         while not predicate():  # noqa: ASYNC110  (a plain dict check)
             await asyncio.sleep(0.01)
 
@@ -55,8 +57,9 @@ async def test_shutdown_aborts_gameplay_stream_unavailable_without_another_frame
     context = _Context()
 
     with pytest.raises(_AbortedError):
-        async for _ in stream_servicer.StreamGameplayData(_requests(), context):
-            stream_servicer.begin_shutdown()
+        async with asyncio.timeout(TEST_BOUND_S):
+            async for _ in stream_servicer.StreamGameplayData(_requests(), context):
+                stream_servicer.begin_shutdown()
 
     assert built == [False]
     assert context.abort_args == (grpc.StatusCode.UNAVAILABLE, SHUTDOWN_ABORT_DETAILS)
@@ -72,8 +75,9 @@ async def test_wire_shutdown_ends_open_gameplay_call_unavailable_promptly(stream
     stream_servicer.begin_shutdown()
     started = time.monotonic()
     with pytest.raises(grpc.aio.AioRpcError) as excinfo:
-        while True:
-            await call.read()
+        async with asyncio.timeout(TEST_BOUND_S):
+            while True:
+                await call.read()
 
     assert time.monotonic() - started < PROMPT_S
     assert excinfo.value.code() == grpc.StatusCode.UNAVAILABLE
@@ -88,7 +92,8 @@ async def test_wire_gameplay_call_opened_during_shutdown_gets_no_frame(stream_se
     call = wire.StreamGameplayData(_requests())
 
     with pytest.raises(grpc.aio.AioRpcError) as excinfo:
-        await call.read()
+        async with asyncio.timeout(TEST_BOUND_S):
+            await call.read()
 
     assert excinfo.value.code() == grpc.StatusCode.UNAVAILABLE
 
@@ -103,8 +108,9 @@ async def test_wire_shutdown_ends_button_call_unavailable_at_once(stream_service
     stream_servicer.begin_shutdown()
     started = time.monotonic()
     with pytest.raises(grpc.aio.AioRpcError) as excinfo:
-        async for _ in call:
-            pass
+        async with asyncio.timeout(TEST_BOUND_S):
+            async for _ in call:
+                pass
 
     assert time.monotonic() - started < PROMPT_S
     assert excinfo.value.code() == grpc.StatusCode.UNAVAILABLE
