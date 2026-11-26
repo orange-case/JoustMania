@@ -66,7 +66,7 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 			Verdict: experiment.NewVerdict(3, 0.5), Log: testLogger(),
 		})
 		agentOn := true
-		loop.enabledOverride = func(context.Context) bool { return agentOn }
+		loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(agentOn) }
 		lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
 		ctx := context.Background()
 		loop.allocateIfEnabled(ctx)
@@ -100,7 +100,7 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 
 	t.Run("UC-043/A1 enabled off with experiments_enabled off still reverts", func(t *testing.T) {
 		loop, _, lc := loopForConfigTest(t, 8)
-		loop.enabledOverride = func(context.Context) bool { return false }
+		loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(false) }
 		lc.set(flags.ExperimentConfig{Enabled: false})
 		promotions := &fakeKillSwitchPromotions{}
 		loop.promotions = promotions
@@ -112,22 +112,46 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 			t.Fatalf("kill-switch revert ran %d times over 2 ticks, want 2 (every tick while off)", promotions.calls)
 		}
 	})
+
+	t.Run("UC-045/main watch aborts experiments but reverts no promotion", func(t *testing.T) {
+		loop, _, lc := loopForConfigTest(t, 8)
+		state := flags.EnabledAct
+		loop.enabledOverride = func(context.Context) flags.EnabledState { return state }
+		lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
+		ctx := context.Background()
+		loop.allocateIfEnabled(ctx)
+		if got := loop.registry.LiveCount(); got != 1 {
+			t.Fatalf("precondition: LiveCount = %d, want 1", got)
+		}
+		promotions := &fakeKillSwitchPromotions{}
+		loop.promotions = promotions
+
+		state = flags.EnabledWatch
+		loop.allocateIfEnabled(ctx)
+
+		if got := loop.registry.LiveCount(); got != 0 {
+			t.Fatalf("LiveCount = %d in watch, want 0: arm writes need enabled=act", got)
+		}
+		if promotions.calls != 0 {
+			t.Fatalf("kill-switch revert ran %d times in watch, want 0 (watch is not a stop)", promotions.calls)
+		}
+	})
 }
 
 // fitnessFlagsEvaluator serves fitness.* int flags from a map; everything else
-// falls back to the caller's default (enabled is on).
+// falls back to the caller's default (enabled is act).
 type fitnessFlagsEvaluator struct {
 	ints map[string]int64
 }
 
-func (e fitnessFlagsEvaluator) BooleanValue(_ context.Context, k string, d bool, _ openfeature.EvaluationContext, _ ...openfeature.Option) (bool, error) {
-	if k == "enabled" {
-		return true, nil
-	}
+func (e fitnessFlagsEvaluator) BooleanValue(_ context.Context, _ string, d bool, _ openfeature.EvaluationContext, _ ...openfeature.Option) (bool, error) {
 	return d, nil
 }
 
-func (e fitnessFlagsEvaluator) StringValue(_ context.Context, _ string, d string, _ openfeature.EvaluationContext, _ ...openfeature.Option) (string, error) {
+func (e fitnessFlagsEvaluator) StringValue(_ context.Context, k string, d string, _ openfeature.EvaluationContext, _ ...openfeature.Option) (string, error) {
+	if k == "enabled" {
+		return "act", nil
+	}
 	return d, nil
 }
 

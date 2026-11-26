@@ -113,7 +113,7 @@ func testTrigger() decision.EvalTrigger {
 	return decision.EvalTrigger{Signal: "metrics", T0: time.Now()}
 }
 
-// TestDecideLoop_ActuationGateOff: with interventions_enabled off, a decision that
+// TestDecideLoop_ActuationGateOff: with `enabled` not act (watch), a decision that
 // passes the permission chain is recorded as dispatched, but the gated sink never
 // calls the Writer: the flag service receives no write and the decision is not
 // counted as applied (D-A9 resolved, #1681).

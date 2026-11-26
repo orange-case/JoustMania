@@ -203,10 +203,10 @@ def test_agent_flags_are_written_as_overlays_before_the_agent_starts(tmp_path, m
             puts.append((flag_set, flag, kwargs))
 
     monkeypatch.setattr(flag_service, "FlagService", RecordingFlagService)
-    composition = replace(AGENT, agent_flags={"enabled": {"variant": "on"}, "verdict_min_pairs": {"value": 1}})
+    composition = replace(AGENT, agent_flags={"enabled": {"variant": "act"}, "verdict_min_pairs": {"value": 1}})
     ServiceStack(composition, tmp_path)._seed_agent_overlays()
     assert puts == [
-        ("agent", "enabled", {"writer": "service-harness", "variant": "on"}),
+        ("agent", "enabled", {"writer": "service-harness", "variant": "act"}),
         ("agent", "verdict_min_pairs", {"writer": "service-harness", "value": 1}),
     ]
     # The agent starts after the overlays are written (the first tick reads them).

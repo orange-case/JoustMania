@@ -74,8 +74,8 @@ def test_agent_provider_sees_flips_of_already_evaluated_flags(service_stack):
 
 @pytest.mark.uc("UC-045", flow="main", steps=[1, 2, 3])
 @pytest.mark.uc("UC-040", flow="main", steps=[1])
-def test_agent_provider_sees_kill_switch_after_enabled_was_read_on(service_stack):
-    """enabled read on, then off (overlay off, and overlay cleared to the off baseline)."""
+def test_agent_provider_sees_kill_switch_after_enabled_was_read_act(service_stack):
+    """enabled read act, then off (overlay off, and overlay cleared to the off baseline)."""
     _run_live_go_test(service_stack, "TestLiveFlip_KillSwitch")
 
 
@@ -106,6 +106,6 @@ def test_agent_game_domain_sees_shield_activation_flip(service_stack):
 @pytest.mark.uc("UC-045", flow="A3", cond=["Pre-1"])
 def test_agent_idle_sync_stream_is_not_dropped_by_flagd_ping_policy(service_stack):
     """An idle sync stream outlives flagd's keepalive ping policy (#1768): for 150 s with
-    no flag change, enabled stays on. The SDK's own 30 s pings drew GOAWAY too_many_pings
+    no flag change, enabled stays act. The SDK's own 30 s pings drew GOAWAY too_many_pings
     about 120 s in, and the agent read the fail-closed default for about a second."""
     _run_live_go_test(service_stack, "TestLiveSync_IdleStreamOutlivesFlagdPingPolicy")

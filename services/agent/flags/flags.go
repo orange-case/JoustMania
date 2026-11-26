@@ -12,7 +12,7 @@
 //
 // All evaluation methods take a default and never return an error: when flagd
 // is unreachable or a flag is undefined, the safe default applies. The defaults
-// are deliberately fail-closed — enabled defaults to false and
+// are deliberately fail-closed — enabled defaults to off and
 // interventions_allowed to empty, so a missing control plane dispatches nothing.
 package flags
 
@@ -141,28 +141,13 @@ const (
 	keyVerdictEffectThreshold = "verdict_effect_threshold"
 	keyVerdictMinRawEffect    = "verdict_min_raw_effect"
 	keyVerdictSDFloor         = "verdict_sd_floor"
-
-	// Runtime SAFETY gate migrated from env to an agent.json flag (#1213). It was
-	// the AGENT_INTERVENTIONS_ENABLED env master read ONCE at startup in main.go to
-	// select which action sink was wired (#730). Migrating them to flags makes the gate hot-reloadable —
-	// flip it in flagd and the agent stops/starts ACTUATING with no restart.
-	//
-	// They are SAFETY gates, not tuning knobs: unlike the #1215 game-cap migration
-	// (fail-OPEN to a default), these MUST fail CLOSED. When flagd is undefined or
-	// unreachable the gate resolves to the NOT-ACTING state (off), matching the
-	// fail-closed env default (`:-false` in docker-compose.yml) — see DefaultInterventionsEnabled
-	// and the per-USE wiring (not cached-at-init, #1217).
-	//
-	// Read via the TYPED bool getter (boolFlag/BooleanValue), NOT ObjectValue — a
-	// flag read via ObjectValue silently TYPE_MISMATCHes to its default (#903/#1127).
-	keyInterventionsEnabled = "interventions_enabled"
 )
 
 // Safe defaults applied when flagd is unreachable or a flag is undefined.
 const (
 	// DefaultEnabled is fail-closed: a missing control plane means the agent
 	// stays off and dispatches no interventions.
-	DefaultEnabled = false
+	DefaultEnabled = EnabledOff
 	// DefaultBatteryThreshold (percent): player-targeted interventions are
 	// blocked when the target controller's battery is below this.
 	DefaultBatteryThreshold = 20
@@ -250,20 +235,34 @@ const (
 	// agent.disabled span are emitted (decision.throttle_seconds; was decision.go
 	// throttleInterval = 1s).
 	DefaultDecisionThrottleSeconds = 1.0
-
-	// Runtime SAFETY-gate default (#1213), mirroring the services/flagd/agent.json
-	// interventions_enabled defaultVariant AND the fail-closed env default it
-	// replaces (AGENT_INTERVENTIONS_ENABLED `:-false` in docker-compose.yml). It is
-	// deliberately the SAFE state, applied when flagd is undefined or UNREACHABLE
-	// (#1177): a missing/down control plane must NOT actuate. Fail CLOSED, never
-	// fail open to acting.
-
-	// DefaultInterventionsEnabled is fail-closed OFF: when flagd is unreachable the
-	// agent's ActionSink does NOT write interventions — a decided, fully-gated
-	// intervention is RECORDED/spanned but never applied (the no-op sink behavior the
-	// old AGENT_INTERVENTIONS_ENABLED=false produced).
-	DefaultInterventionsEnabled = false
 )
+
+// EnabledState is the `enabled` flag: off (the agent does not run), watch (it runs
+// but writes nothing that changes a game) or act (decisions are applied).
+type EnabledState string
+
+const (
+	EnabledOff   EnabledState = "off"
+	EnabledWatch EnabledState = "watch"
+	EnabledAct   EnabledState = "act"
+)
+
+// ParseEnabled maps a flag value to its state; anything unknown, the legacy on and
+// a bool included, is off (fail closed).
+func ParseEnabled(v string) EnabledState {
+	switch s := EnabledState(v); s {
+	case EnabledWatch, EnabledAct:
+		return s
+	default:
+		return EnabledOff
+	}
+}
+
+// Runs reports whether the agent runs (watch or act).
+func (s EnabledState) Runs() bool { return s == EnabledWatch || s == EnabledAct }
+
+// Applies reports whether the agent may write what changes a game (act only).
+func (s EnabledState) Applies() bool { return s == EnabledAct }
 
 // defaultObjectives is the fallback objectives weighting. Returned as a fresh
 // copy on every call so callers can never mutate the shared default.
@@ -629,8 +628,10 @@ func (f *Flags) durationFlag(ctx context.Context, key string, def float64) time.
 // Snapshot is the set of agent control flags captured for a single decision
 // cycle. It is a plain value so the decision loop reasons over a consistent view.
 type Snapshot struct {
-	// Enabled is the kill switch. When false the decision loop short-circuits.
+	// Enabled is EnabledState.Runs(): when false the decision loop short-circuits.
 	Enabled bool
+	// EnabledState is the resolved `enabled` flag; read it through State().
+	EnabledState EnabledState
 	// Objectives weights the session goals the rules engine optimizes for.
 	Objectives map[string]float64
 	// InterventionsAllowed is the permission gate: only decisions whose
@@ -647,11 +648,6 @@ type Snapshot struct {
 	// the decide contract, the act-confidence threshold, content capture, and
 	// each remote backend's model / base URL / timeout. Read every cycle.
 	Decision DecisionBackend
-	// InterventionsEnabled is the live interventions_enabled actuation gate
-	// (fail-closed false), carried so the flag state (GET /experiments/state) shows a write gate that is
-	// off while the agent is enabled (#2093). The write path reads the gate itself
-	// at use time (GatedActionSink); this copy is for observability only.
-	InterventionsEnabled bool
 	// ProbeDecisions is decision.probe_decisions (#1810, C-035): when true the
 	// loop swaps the rules engine for the probe engine (synthetic noop only),
 	// except in pattern games. Read every cycle.
@@ -660,6 +656,19 @@ type Snapshot struct {
 	// carried for the flag state (#2291): the stage fallback (UC-070 A9) turns it
 	// on. The experiment loop reads the gate itself at use time.
 	ExperimentsEnabled bool
+}
+
+// State is the snapshot's `enabled` state. A hand-built snapshot that sets only
+// Enabled reads watch when it runs, never act, so it cannot imply writes.
+func (s Snapshot) State() EnabledState {
+	switch s.EnabledState {
+	case EnabledOff, EnabledWatch, EnabledAct:
+		return s.EnabledState
+	}
+	if s.Enabled {
+		return EnabledWatch
+	}
+	return EnabledOff
 }
 
 // Permits reports whether the named intervention is in the allow-list.
@@ -707,8 +716,10 @@ func New(client Evaluator, log *slog.Logger) *Flags {
 // on every cycle (never cached) so runtime flag changes take effect immediately.
 // Each flag falls back to its safe default on any evaluation error.
 func (f *Flags) Evaluate(ctx context.Context) Snapshot {
+	enabled := f.EnabledState(ctx)
 	return Snapshot{
-		Enabled:              f.enabled(ctx),
+		Enabled:              enabled.Runs(),
+		EnabledState:         enabled,
 		Objectives:           f.objectives(ctx),
 		InterventionsAllowed: f.interventionsAllowed(ctx),
 		Policy: Policy{
@@ -735,32 +746,20 @@ func (f *Flags) Evaluate(ctx context.Context) Snapshot {
 		Decision:       f.DecisionBackend(ctx),
 		ProbeDecisions: f.probeDecisions(ctx),
 
-		InterventionsEnabled: f.InterventionsEnabled(ctx),
-		ExperimentsEnabled:   f.boolFlag(ctx, keyExperimentsEnabled, false),
+		ExperimentsEnabled: f.boolFlag(ctx, keyExperimentsEnabled, false),
 	}
 }
 
-// InterventionsEnabled resolves the runtime intervention-actuation gate (#1213,
-// interventions_enabled). It is the migrated AGENT_INTERVENTIONS_ENABLED env
-// master: when true the agent's ActionSink WRITES decisions to the flag service (interventions set);
-// when false (or flagd unreachable) it records/spans the decision but applies
-// nothing. Read at USE-TIME (per Apply), NOT cached at startup — flipping the flag
-// in flagd starts/stops actuation with no restart, and a flagd outage at any moment
-// FAILS CLOSED (DefaultInterventionsEnabled=false) so the agent never writes when it
-// cannot confirm the gate is on (#1177). Distinct from the `enabled` kill switch
-// (which gates whether the loop DECIDES) and from interventions_allowed (which gates
-// WHICH intervention types may dispatch): this gates whether a fully-permitted
-// decision is actually APPLIED to disk.
-func (f *Flags) InterventionsEnabled(ctx context.Context) bool {
-	return f.boolFlag(ctx, keyInterventionsEnabled, DefaultInterventionsEnabled)
+// Applying reports whether `enabled` is act, read at use time: the gate of every
+// write that changes a game. watch, off and an unresolvable flag read false.
+func (f *Flags) Applying(ctx context.Context) bool {
+	return f.EnabledState(ctx).Applies()
 }
 
-// AgentEnabled resolves ONLY the `enabled` kill switch, without the full Evaluate
-// snapshot. It is the narrow USE-TIME read the post-game experiment proposer makes
-// at each game end (#1270). It FAILS CLOSED (DefaultEnabled=false) when flagd is
-// unreachable, exactly like the decision loop's read.
+// AgentEnabled reports whether the agent runs (`enabled` is watch or act) without
+// the full Evaluate snapshot; an unresolvable flag reads off.
 func (f *Flags) AgentEnabled(ctx context.Context) bool {
-	return f.enabled(ctx)
+	return f.EnabledState(ctx).Runs()
 }
 
 // ExperimentsEnabled resolves ONLY the `experiments_enabled` gate (#1270). It fails
@@ -834,13 +833,14 @@ func (f *Flags) floatFlag(ctx context.Context, key string, def float64) float64 
 	return v
 }
 
-func (f *Flags) enabled(ctx context.Context) bool {
-	v, err := f.client.BooleanValue(ctx, keyEnabled, DefaultEnabled, openfeature.EvaluationContext{})
+// EnabledState resolves the `enabled` flag; an unresolvable or unknown value is off.
+func (f *Flags) EnabledState(ctx context.Context) EnabledState {
+	v, err := f.client.StringValue(ctx, keyEnabled, string(DefaultEnabled), openfeature.EvaluationContext{})
 	if err != nil {
 		f.log.Debug("flags.enabled fell back to default", "error", err, "default", DefaultEnabled)
 		return DefaultEnabled
 	}
-	return v
+	return ParseEnabled(v)
 }
 
 // objectives resolves the objectives object into map[string]float64. flagd

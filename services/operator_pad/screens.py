@@ -73,7 +73,7 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
     "decision.backend": {"rules": "RULES", "claude": "CLAUDE", "jev": "JEV"},
     "game_instructions": {"on": "ON", "off": "OFF"},
     "force_all_start": {"on": "ON", "off": "OFF"},
-    "agent_state": {"off": "OFF", "watch": "WATCH", "on": "ON"},
+    "agent_state": {"off": "OFF", "watch": "WATCH", "act": "ACT"},
     setting_ladders.GOAL_OPTION: {
         "endurance_focused": "ENDURANCE",
         "balanced_focused": "BALANCED",
@@ -216,13 +216,13 @@ def _knob_value(status, option: str, effective: str | None) -> str:
 
 
 def agent_text(status) -> str:
-    """UC-016 BR-011 agent states: ``OFF``, ``WATCH`` / ``ON`` and the level, ``?`` by BR-013's unknown rules."""
+    """UC-016 BR-011 agent states: ``OFF``, ``WATCH`` / ``ACT`` and the level, ``?`` by BR-013's unknown rules."""
     state = agent_state(status)
     if state == AGENT_UNKNOWN:
         return UNKNOWN
     if state == AGENT_OFF:
         return "OFF"
-    word = "WATCH" if state == AGENT_WATCH else "ON"
+    word = "WATCH" if state == AGENT_WATCH else "ACT"
     return f"{word} {short('agent_level', status.agent_level)}"
 
 

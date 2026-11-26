@@ -488,7 +488,7 @@ func TestDeclareDynamic_KillSwitchOffDeclaresNothing(t *testing.T) {
 	loop, svc := loopWithRealRegistry(t, 8)
 	loop.dynamic = newDynamicDeclarer(svc, nil)
 	withCandidates(loop, "sensitivity")
-	loop.enabledOverride = func(context.Context) bool { return false } // kill-switch OFF
+	loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(false) } // kill-switch OFF
 
 	loop.allocateIfEnabled(context.Background())
 	if got := loop.registry.LiveCount(); got != 0 {
@@ -496,7 +496,7 @@ func TestDeclareDynamic_KillSwitchOffDeclaresNothing(t *testing.T) {
 	}
 
 	// Flip the kill-switch ON: now the declarer runs and declares.
-	loop.enabledOverride = func(context.Context) bool { return true }
+	loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(true) }
 	loop.allocateIfEnabled(context.Background())
 	if got := loop.registry.LiveCount(); got != 1 {
 		t.Fatalf("kill-switch on should let the declarer declare, LiveCount = %d", got)
@@ -516,7 +516,7 @@ func TestDeclareDynamic_TalkFallbackKeepsAGameInProgress(t *testing.T) {
 		loop.dynamic = declarer(svc)
 		withCandidates(loop, "sensitivity")
 		enabled := true
-		loop.enabledOverride = func(context.Context) bool { return enabled }
+		loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(enabled) }
 
 		loop.allocateIfEnabled(ctx)
 		if got := loop.registry.LiveCount(); got != 1 {

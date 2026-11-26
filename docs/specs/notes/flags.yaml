@@ -129,11 +129,13 @@ agent:
     note: >-
       How long after an intervention its effect is measured; non-positive gives the default.
   enabled:
-    read_by: [agent]
+    read_by: [agent, game-coordinator, menu]
     reload: live
     note: >-
-      The agent's existence switch: off stops every decision, promotion, the experiment proposer and
-      the retro model call (fails closed).
+      The agent state off / watch / act, booting at watch (off in ci/): off stops every decision,
+      promotion, the experiment proposer and the retro model call; watch decides and records but writes
+      nothing that changes a game; only act writes, and the coordinator applies only at act. An
+      unreadable value, a bool or the old "on" reads off (FR-051, UC-045, UC-016 BR-011).
   experiment.max_game_seconds:
     read_by: [agent]
     reload: per-game
@@ -281,13 +283,6 @@ agent:
     note: >-
       Which intervention types the agent may use; the coordinator filters by the same list, and the
       operator pad shows it as its agent-level ladder (UC-015 BR-019).
-  interventions_enabled:
-    read_by: [agent]
-    reload: live
-    note: >-
-      Gates every intervention the agent would apply; decisions still run. Off after a restart
-      (fail closed); the operator pad's agent switch sets it in memory (UC-016 BR-012, UC-015
-      BR-003).
   lifecycle.evict_interval_seconds:
     read_by: [agent]
     reload: live

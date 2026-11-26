@@ -25,6 +25,7 @@ type fakeProposerGateFlags struct {
 
 func (f fakeProposerGateFlags) ExperimentProposerEnabled(context.Context) bool { return f.proposer }
 func (f fakeProposerGateFlags) AgentEnabled(context.Context) bool              { return f.agentEnabled }
+func (f fakeProposerGateFlags) Applying(context.Context) bool                  { return f.agentEnabled }
 func (f fakeProposerGateFlags) ExperimentsEnabled(context.Context) bool {
 	if f.experiments == nil {
 		return false
@@ -75,11 +76,31 @@ func TestProposerPermit_ReadsLive(t *testing.T) {
 	}
 }
 
-type liveGateFlags struct{ enabled, experiments, proposer bool }
+// Drafting runs in watch; the write half needs `enabled` = act, read live.
+// UC: UC-042 BR-002
+// UC: UC-045 A1
+func TestProposerWritePermit(t *testing.T) {
+	src := &liveGateFlags{enabled: true, experiments: true, proposer: true}
+	permit, write := proposerPermit(src, true), proposerWritePermit(src)
+	if ok, _ := write(context.Background()); !ok {
+		t.Fatal("want the write permitted while enabled is act")
+	}
+	src.watch = true
+	if ok, _ := permit(context.Background()); !ok {
+		t.Fatal("want drafting permitted in watch")
+	}
+	if ok, reason := write(context.Background()); ok || reason != experiment.SkipReasonAgentWatch {
+		t.Fatalf("write permit in watch = (%v, %q), want (false, agent_watch)", ok, reason)
+	}
+}
+
+// watch: the agent runs but `enabled` is not act.
+type liveGateFlags struct{ enabled, experiments, proposer, watch bool }
 
 func (f *liveGateFlags) ExperimentProposerEnabled(context.Context) bool { return f.proposer }
 
 func (f *liveGateFlags) AgentEnabled(context.Context) bool { return f.enabled }
+func (f *liveGateFlags) Applying(context.Context) bool     { return f.enabled && !f.watch }
 func (f *liveGateFlags) ExperimentsEnabled(context.Context) bool {
 	return f.experiments
 }

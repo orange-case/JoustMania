@@ -14,15 +14,15 @@ import (
 // The stale-document self-heal (architecture note §4.2 step 6) while a cache
 // or region keeps serving the copy stamped with the too-new update time
 // (#2602, probes of the #2596 delta-4 review). staleWedge (in_guard_test.go)
-// reads that copy first (2100, agent/enabled on) and then serves a current
+// reads that copy first (2100, agent/enabled act) and then serves a current
 // document with enabled off; the harness polls every hour, so the refusal
 // times out after 10 h.
 
 var tooNew = time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// serveTooNew serves the too-new copy again (enabled on).
+// serveTooNew serves the too-new copy again (enabled act).
 func serveTooNew(h *harness) {
-	h.fake.SetDocument(document(tooNew, []map[string]any{fsState("enabled", true, "on")}), "")
+	h.fake.SetDocument(document(tooNew, []map[string]any{fsState("enabled", true, "act")}), "")
 }
 
 // serveCurrent serves a current document (enabled off), stamped now.
@@ -89,9 +89,9 @@ func TestAbandonedCopyRefusedAfterHeal(t *testing.T) {
 			t.Fatalf("UC-054/BR-005 agent/enabled = %q: the abandoned too-new copy undid the kill (flap)", got)
 		}
 	}
-	h.fake.SetDocument(document(tooNew.Add(time.Second), []map[string]any{fsState("enabled", true, "on")}), "")
+	h.fake.SetDocument(document(tooNew.Add(time.Second), []map[string]any{fsState("enabled", true, "act")}), "")
 	h.round()
-	if got := enabledVariant(h); got != "on" {
+	if got := enabledVariant(h); got != "act" {
 		t.Fatalf("UC-054/main step 2 agent/enabled = %q: a document newer than the abandoned time was refused", got)
 	}
 }
@@ -141,7 +141,7 @@ func TestHealRoundDoesNotPushOverFlagsmith(t *testing.T) {
 
 // UC: UC-054 BR-005
 // The newest time is genuine (an operator's kill, stamped T) and a lagging
-// cache answers now and then with an older copy (enabled on): the correct
+// cache answers now and then with an older copy (enabled act): the correct
 // copy read on two full pulls in a row ends each run, so the lagging copy is
 // never accepted by the timeout and T is never abandoned (#2602, opposer
 // finding of #2732: two lagging hits 10 h apart must not undo the kill).
@@ -154,7 +154,7 @@ func TestGenuineNewestEndsRunOnRepeatedReads(t *testing.T) {
 		h.fake.SetDocument(document(genuine, []map[string]any{fsState("enabled", true, "off")}), genuine.UTC().Format(http.TimeFormat))
 	}
 	serveLagging := func() {
-		h.fake.SetDocument(document(genuine.Add(-time.Hour), []map[string]any{fsState("enabled", true, "on")}), "")
+		h.fake.SetDocument(document(genuine.Add(-time.Hour), []map[string]any{fsState("enabled", true, "act")}), "")
 	}
 	serveKill()
 	h.round()
@@ -206,7 +206,7 @@ func TestAbandonedCopyInsideRunKeepsRun(t *testing.T) {
 	// A second skewed time ahead of the accepted one opens a new run.
 	h.fake.SetDocument(document(accepted.Add(24*time.Hour), []map[string]any{fsState("enabled", true, "off")}), "")
 	h.round()
-	h.fake.SetDocument(document(accepted.Add(time.Minute), []map[string]any{fsState("enabled", true, "on")}), "")
+	h.fake.SetDocument(document(accepted.Add(time.Minute), []map[string]any{fsState("enabled", true, "act")}), "")
 	h.round()
 	wantStaleOn := func(when string) {
 		t.Helper()
@@ -230,14 +230,14 @@ func TestAbandonedCopyInsideRunKeepsRun(t *testing.T) {
 	h.round()
 	wantStaleOn("the abandoned copy between two newest reads")
 	serveNewest()
-	h.fake.SetDocument(document(accepted.Add(time.Minute), []map[string]any{fsState("enabled", true, "on")}), "")
+	h.fake.SetDocument(document(accepted.Add(time.Minute), []map[string]any{fsState("enabled", true, "act")}), "")
 	h.clock.Advance(4 * time.Hour)
 	h.round()
 	if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
 		t.Fatalf("UC-054/BR-005 pull span %v after 10 h: the abandoned copy inside the run restarted it", a)
 	}
-	if got := enabledVariant(h); got != "on" {
-		t.Fatalf("UC-054/BR-005 agent/enabled = %q, want on (the run's document accepted)", got)
+	if got := enabledVariant(h); got != "act" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %q, want act (the run's document accepted)", got)
 	}
 }
 
@@ -250,7 +250,7 @@ func TestHealAbandonsEveryTooNewTime(t *testing.T) {
 	h.online()
 	t1 := tooNew.Add(-24 * time.Hour)
 	serveT1 := func() {
-		h.fake.SetDocument(document(t1, []map[string]any{fsState("enabled", true, "on")}), "")
+		h.fake.SetDocument(document(t1, []map[string]any{fsState("enabled", true, "act")}), "")
 	}
 	serveT1()
 	h.round()
@@ -287,7 +287,7 @@ func TestRefusedTooNewTimeComesBackOnce(t *testing.T) {
 	h.online()
 	t1 := tooNew.Add(-24 * time.Hour)
 	serveT1 := func() {
-		h.fake.SetDocument(document(t1, []map[string]any{fsState("enabled", true, "on")}), "")
+		h.fake.SetDocument(document(t1, []map[string]any{fsState("enabled", true, "act")}), "")
 	}
 	serveTooNew(h)
 	h.round()
@@ -304,7 +304,7 @@ func TestRefusedTooNewTimeComesBackOnce(t *testing.T) {
 	h.clock.Advance(time.Hour)
 	serveT1()
 	h.round()
-	if got := enabledVariant(h); got != "on" {
+	if got := enabledVariant(h); got != "act" {
 		t.Fatalf("UC-054/BR-005 agent/enabled = %q: the documented residual changed (the refused T1 copy is expected back once)", got)
 	}
 	serveCurrent(h)
@@ -377,7 +377,7 @@ func TestHealKeepsTooNewTimesBeyondCap(t *testing.T) {
 	}
 	t1 := tooNew.Add(-24 * time.Hour)
 	serveT1 := func() {
-		h.fake.SetDocument(document(t1, []map[string]any{fsState("enabled", true, "on")}), "")
+		h.fake.SetDocument(document(t1, []map[string]any{fsState("enabled", true, "act")}), "")
 	}
 	serveT1()
 	h.round()

@@ -32,8 +32,7 @@ FLAGS = {
         "audio_volume.master": ("quiet", 0.3),
     },
     "agent": {
-        "enabled": ("on", True),
-        "interventions_enabled": ("off", False),
+        "enabled": ("watch", "watch"),
         "interventions_allowed": ("standard", "a,b"),
         "decision.backend": ("claude", "claude"),
         "objectives": ("chaos_focused", {"endurance": 0.1, "balanced": 0.1, "accelerate": 0.1, "chaos": 0.7}),
@@ -136,8 +135,7 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         instructions=True,
         force_all_start=True,
         audio_volume_master="quiet",
-        agent_enabled_state="on",
-        agent_interventions_enabled_state="off",
+        agent_enabled_state="watch",
         agent_objectives="chaos_focused",
         agent_max_interventions_per_minute="8",
         agent_group_grant_state="on",
@@ -197,22 +195,22 @@ async def test_status_empty_values_when_nothing_is_set_or_resolvable(menu):
     rows = (reply.agent_objectives, reply.agent_max_interventions_per_minute, reply.agent_group_grant_state)
     assert rows == ("", "", "")
     assert (reply.inference_backend, reply.inference_effort, reply.agent_operator_brief_variant) == ("", "", "")
-    # The kill switch fails closed: unreadable reads as off, and says it is unknown (#2101).
+    # `enabled` fails closed: unreadable reads as not running, and says it is unknown (#2101).
     assert reply.agent_enabled is False
     assert reply.agent_enabled_state == "unknown"
-    # So does the write gate (#2093).
-    assert reply.agent_interventions_enabled_state == "unknown"
+    # Field 18 (the retired write gate) is never filled.
+    assert reply.agent_interventions_enabled_state == ""
 
 
 def details_client(details: FlagEvaluationDetails, flag_key: str = "enabled"):
     """An agent client whose ``flag_key`` evaluation returns ``details`` (every other key resolves)."""
     client = in_process_client(FLAGS["agent"])
-    resolve = client.get_boolean_details.side_effect
+    resolve = client.get_string_details.side_effect
 
-    def boolean_details(key, default, *args, **kwargs):
+    def string_details(key, default, *args, **kwargs):
         return details if key == flag_key else resolve(key, default, *args, **kwargs)
 
-    client.get_boolean_details.side_effect = boolean_details
+    client.get_string_details.side_effect = string_details
     return client
 
 
@@ -221,15 +219,19 @@ def details_client(details: FlagEvaluationDetails, flag_key: str = "enabled"):
 @pytest.mark.parametrize(
     ("details", "expected"),
     [
-        (FlagEvaluationDetails(flag_key="enabled", value=True, variant="on", reason=Reason.STATIC), "on"),
-        (FlagEvaluationDetails(flag_key="enabled", value=False, variant="off", reason=Reason.STATIC), "off"),
+        (FlagEvaluationDetails(flag_key="enabled", value="act", variant="act", reason=Reason.STATIC), "act"),
+        # The value before the rename to act: not a state.
+        (FlagEvaluationDetails(flag_key="enabled", value="on", variant="on", reason=Reason.STATIC), "unknown"),
+        (FlagEvaluationDetails(flag_key="enabled", value="off", variant="off", reason=Reason.STATIC), "off"),
         # flagd's own default variant is a real resolution.
-        (FlagEvaluationDetails(flag_key="enabled", value=False, variant="off", reason=Reason.DEFAULT), "off"),
+        (FlagEvaluationDetails(flag_key="enabled", value="watch", variant="watch", reason=Reason.DEFAULT), "watch"),
+        # A value outside the three states (a flag file from before the three states, a bool).
+        (FlagEvaluationDetails(flag_key="enabled", value=True, variant="on", reason=Reason.STATIC), "unknown"),
         # A provider that is not ready: the SDK answers the caller's default with an error code.
         (
             FlagEvaluationDetails(
                 flag_key="enabled",
-                value=False,
+                value="off",
                 reason=Reason.ERROR,
                 error_code=ErrorCode.PROVIDER_NOT_READY,
             ),
@@ -237,18 +239,28 @@ def details_client(details: FlagEvaluationDetails, flag_key: str = "enabled"):
         ),
         # An error code without the ERROR reason is still not a resolution.
         (
-            FlagEvaluationDetails(flag_key="enabled", value=False, variant="off", error_code=ErrorCode.GENERAL),
+            FlagEvaluationDetails(flag_key="enabled", value="off", variant="off", error_code=ErrorCode.GENERAL),
             "unknown",
         ),
         # No provider set yet: the no-op provider passes the default back with reason DEFAULT.
         (
-            FlagEvaluationDetails(flag_key="enabled", value=False, variant=PASSED_IN_DEFAULT, reason=Reason.DEFAULT),
+            FlagEvaluationDetails(flag_key="enabled", value="off", variant=PASSED_IN_DEFAULT, reason=Reason.DEFAULT),
             "unknown",
         ),
         # No variant: the client fell back to the default.
-        (FlagEvaluationDetails(flag_key="enabled", value=False, variant=None), "unknown"),
+        (FlagEvaluationDetails(flag_key="enabled", value="off", variant=None), "unknown"),
     ],
-    ids=["on", "off", "flagd-default-variant", "not-ready", "error-code", "no-op-provider", "no-variant"],
+    ids=[
+        "act",
+        "legacy-on",
+        "off",
+        "flagd-default-variant",
+        "bool-value",
+        "not-ready",
+        "error-code",
+        "no-op-provider",
+        "no-variant",
+    ],
 )
 async def test_status_agent_enabled_state_tells_unknown_from_off(menu, details, expected):
     menu.agent_settings_client = details_client(details)
@@ -256,36 +268,7 @@ async def test_status_agent_enabled_state_tells_unknown_from_off(menu, details, 
     reply = await status(menu)
 
     assert reply.agent_enabled_state == expected
-    assert reply.agent_enabled is (expected == "on")
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", br=["BR-013"])
-@pytest.mark.parametrize(
-    ("details", "expected"),
-    [
-        (FlagEvaluationDetails(flag_key="interventions_enabled", value=True, variant="on"), "on"),
-        (FlagEvaluationDetails(flag_key="interventions_enabled", value=False, variant="off"), "off"),
-        (
-            FlagEvaluationDetails(
-                flag_key="interventions_enabled",
-                value=False,
-                reason=Reason.ERROR,
-                error_code=ErrorCode.PROVIDER_NOT_READY,
-            ),
-            "unknown",
-        ),
-    ],
-    ids=["on", "off", "not-ready"],
-)
-async def test_status_reports_the_write_gate_state(menu, details, expected):
-    """#2093: the pad counts a closed write gate as stopped, so the status carries its tri-state."""
-    menu.agent_settings_client = details_client(details, "interventions_enabled")
-
-    reply = await status(menu)
-
-    assert reply.agent_interventions_enabled_state == expected
-    assert reply.agent_enabled_state == "on"  # the kill switch is reported on its own
+    assert reply.agent_enabled is (expected in ("watch", "act"))
 
 
 # --- lifecycle_generation ----------------------------------------------------------------------

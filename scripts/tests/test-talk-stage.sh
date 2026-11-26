@@ -79,8 +79,7 @@ drift decision.min_gap_after_answer_ms off
 drift decision.claude.max_requests_per_minute conservative
 out="$("${HELPER}" reset)"
 expect "reset: interventions_allowed back to standard" interventions_allowed standard
-expect "reset: kill switch back on" enabled on
-expect "reset: interventions_enabled on" interventions_enabled on
+expect "reset: agent state back to act" enabled act
 expect "reset: backend back to rules" decision.backend rules
 expect "reset: blackhole undone" decision.jev.base_url default
 expect "reset: budget stage" llm.max_requests_per_minute stage

@@ -39,7 +39,7 @@ func TestExperimentGates_FailClosedIgnoringEnv(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("UC-045/A3 flagd unreachable: every gate closed", func(t *testing.T) {
-		ev := &switchableEvaluator{booleans: map[string]bool{"enabled": true, "experiments_enabled": true}}
+		ev := &switchableEvaluator{strings: map[string]string{"enabled": "act"}, booleans: map[string]bool{"experiments_enabled": true}}
 		ev.setUnreachable()
 		f := flags.New(ev, nil)
 
@@ -55,8 +55,8 @@ func TestExperimentGates_FailClosedIgnoringEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-045/A3 enabled on, experiments_enabled unresolved: closed", func(t *testing.T) {
-		ev := &keyErrEvaluator{switchableEvaluator{booleans: map[string]bool{"enabled": true}}}
+	t.Run("UC-045/A3 enabled act, experiments_enabled unresolved: closed", func(t *testing.T) {
+		ev := &keyErrEvaluator{switchableEvaluator{strings: map[string]string{"enabled": "act"}}}
 		f := flags.New(ev, nil)
 
 		if f.Experiment(ctx, experimentDefaults()).Enabled {

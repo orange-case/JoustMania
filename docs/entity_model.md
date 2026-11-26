@@ -77,7 +77,7 @@ is a business rule of its use case.
    `max_concurrent_games` sessions and `max_shadow_games` shadows; `experiment_id`, `arm` and `rng_seed` are honoured
    only for shadow sessions ([UC-043](use_cases/UC-043.md), [flags.md](specs/flags.md)).
 4. **Interventions.** The agent and the game coordinator both check the type against the live `interventions_allowed`
-   list; nothing is written while `interventions_enabled` is off. Every write is scoped to the game whose decision loop
+   list; nothing is written unless `enabled` is `act`. Every write is scoped to the game whose decision loop
    decided it and resolves only there (FR-069, FR-136, [UC-053](use_cases/UC-053.md)); its shape is the `kind` of the
    flag's MUTABLE_FLAG_POLICY ([UC-040](use_cases/UC-040.md), [flags.md §13](specs/flags.md#13-mutable-flag-registry)).
 5. **Runtime flag values.** A runtime value is a FLAG_OVERLAY in flag-service memory (C-030); no runtime writer changes a

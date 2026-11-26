@@ -48,8 +48,9 @@ const ReasonNotRealPromotable = "not_real_promotable"
 // every game and revert by hand, and the kill switch reverts every promotion
 // (UC-043 step 7, A1). The guards, in order:
 //
-//   - KILL-SWITCH: a disabled agent (cfg.Enabled == false) NEVER mutates the real
-//     default — degrades to a recorded no-op.
+//   - ENABLED: unless `enabled` is act (cfg.Enabled), the agent NEVER mutates the
+//     real default — degrades to a recorded no-op. autonomous is default-OFF AND
+//     behind `enabled` = act (the safety rail).
 //   - SEPARATE WRITER: the real-default change goes through the injected
 //     RealDefaultWriter — explicitly NOT the shadow experiment.Writer. A nil
 //     RealDefaultWriter (no validated objective) → a recorded no-op.
@@ -63,7 +64,7 @@ func (pr *Promoter) promoteAutonomous(ctx context.Context, p experiment.Proposal
 	}
 	if !cfg.Enabled {
 		res.Outcome = OutcomeDiscarded
-		res.Reason = "autonomous requested but agent disabled (kill-switch); real default not changed"
+		res.Reason = "autonomous requested but agent `enabled` is not act; real default not changed"
 		return
 	}
 	if pr.realDef == nil {

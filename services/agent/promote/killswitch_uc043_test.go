@@ -92,9 +92,9 @@ func TestUC043_A1_KillSwitchRevertsFromFlagService(t *testing.T) {
 		prop := promoteProposal
 		prop.FlagKey = flag
 		cfg := on
-		cfg.killEpoch, cfg.epochKnown = p.KillSwitchEpoch(), true // read with enabled still on
+		cfg.killEpoch, cfg.epochKnown = p.KillSwitchEpoch(), true // read with enabled still act
 
-		p.RevertOnKillSwitch(ctx) // the switch flips; enabled may be back on by the write
+		p.RevertOnKillSwitch(ctx) // the switch flips; enabled may be back to act by the write
 		res := p.Promote(ctx, prop, promoteVerdict, cfg, ev)
 
 		if res.Outcome != OutcomeDiscarded || len(svc.Calls) != 0 {

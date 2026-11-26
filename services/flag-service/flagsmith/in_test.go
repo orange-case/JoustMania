@@ -3,6 +3,7 @@ package flagsmith_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -498,7 +499,7 @@ func (w *racingWriter) FlagsmithPut(ctx context.Context, req state.WriteRequest)
 
 // UC: UC-054 BR-005
 // Compare-and-set (#2590 P2, test 6/6b): R = L = baseline (empty slot), a
-// person turns agent/enabled on in Flagsmith while the operator turns it off
+// person sets agent/enabled to act in Flagsmith while the operator turns it off
 // locally between the snapshot and the write: the pulled write is refused as
 // stale (412 slot_changed), remote is restored, and the next round sees the
 // conflict: Flagsmith wins, also for a kill switch (#2621).
@@ -507,7 +508,7 @@ func TestPulledWriteIsConditional(t *testing.T) {
 		return &racingWriter{API: a, st: st}
 	}})
 	h.online()
-	h.setDoc([]map[string]any{fsState("enabled", true, "on")})
+	h.setDoc([]map[string]any{fsState("enabled", true, "act")})
 	h.round()
 	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "off" {
 		t.Fatalf("UC-054/BR-005 agent/enabled = %+v after the race, want off (the local write wins)", v)
@@ -516,8 +517,8 @@ func TestPulledWriteIsConditional(t *testing.T) {
 		t.Fatalf("UC-054/A5 remote %+v after a stale write, want restored", r)
 	}
 	h.round()
-	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
-		t.Fatalf("UC-054/BR-005 agent/enabled = %+v after the conflict, want on (Flagsmith wins)", v)
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "act" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %+v after the conflict, want act (Flagsmith wins)", v)
 	}
 	if st := h.link.Status(); st.Pending != 0 {
 		t.Fatalf("UC-054/A2 step 1 pending %d, want nothing queued (the local off is not sent)", st.Pending)
@@ -792,14 +793,14 @@ func TestRealtimeWakes(t *testing.T) {
 func TestStaleDocumentNeverReverts(t *testing.T) {
 	setup := func(t *testing.T, docUpdated func(now time.Time) time.Time) *harness {
 		h := newHarness(t, harnessOpts{before: func(hh *harness) {
-			if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "operator"}); ferr != nil {
+			if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Writer: "operator"}); ferr != nil {
 				t.Fatal(ferr)
 			}
-			hh.fake.SetDocument(document(docUpdated(hh.clock.Now()), []map[string]any{fsState("enabled", true, "on")}), "")
+			hh.fake.SetDocument(document(docUpdated(hh.clock.Now()), []map[string]any{fsState("enabled", true, "act")}), "")
 		}})
 		h.online()
-		if r, ok := h.link.Links().Remote(enabledKey); !ok || r.Variant != "on" {
-			t.Fatalf("setup: remote %+v %v, want on", r, ok)
+		if r, ok := h.link.Links().Remote(enabledKey); !ok || r.Variant != "act" {
+			t.Fatalf("setup: remote %+v %v, want act", r, ok)
 		}
 		if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "operator"}); ferr != nil {
 			t.Fatal(ferr)
@@ -847,10 +848,10 @@ func TestStaleDocumentNeverReverts(t *testing.T) {
 		h.round()
 		h.setDoc([]map[string]any{fsState("enabled", true, "off")})
 		h.round()
-		h.setDoc([]map[string]any{fsState("enabled", true, "on")})
+		h.setDoc([]map[string]any{fsState("enabled", true, "act")})
 		h.round()
-		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
-			t.Fatalf("UC-054/BR-005 agent/enabled = %+v: a deliberate on after the push was not applied", v)
+		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "act" {
+			t.Fatalf("UC-054/BR-005 agent/enabled = %+v: a deliberate act after the push was not applied", v)
 		}
 	})
 	t.Run("UC-054/BR-005 the guard expires after ten poll intervals", func(t *testing.T) {
@@ -864,7 +865,7 @@ func TestStaleDocumentNeverReverts(t *testing.T) {
 		}
 		h.clock.Advance(2 * time.Hour)
 		h.round()
-		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
+		if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "act" {
 			t.Fatalf("UC-054/BR-005 agent/enabled = %+v: the guard outlived its bound", v)
 		}
 	})
@@ -894,5 +895,100 @@ func TestOverrideWaitsForGame(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if n := len(h.healthPosts()); n != 0 {
 		t.Fatalf("UC-054/BR-003 %d health posts, want 0", n)
+	}
+}
+
+// UC: UC-054 main step 5
+// agent/enabled is three-state: a Flagsmith value watch is applied as the
+// variant watch, not read as a boolean.
+func TestPullAppliesEnabledWatch(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.online()
+	h.setDoc([]map[string]any{fsState("enabled", true, "watch")})
+	h.round()
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "watch" {
+		t.Fatalf("UC-054/main step 5 agent/enabled = %+v, want watch", v)
+	}
+}
+
+// UC: UC-054 BR-005
+// UC: UC-045 main
+// agent/enabled boots at watch, yet every Flagsmith stop holds and no refused
+// value undoes a local stop: the feature switched off and a bool or text false
+// read as off; a bool or text true and the legacy text on are refused, leave no
+// stack value, so the baseline applies (watch shipped, off in this CI
+// baseline), never act. The assertions read the stored value (FlagView), not
+// the change feed.
+func TestPullEnabledStopsFailClosed(t *testing.T) {
+	stored := func(h *harness) string {
+		fv, ferr := h.st.FlagView("agent", "enabled")
+		if ferr != nil {
+			t.Fatal(ferr)
+		}
+		return fv.EffectiveDefault
+	}
+	putOff := func(h *harness) {
+		if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "operator"}); ferr != nil {
+			t.Fatal(ferr)
+		}
+	}
+	cases := []struct {
+		name  string
+		state map[string]any
+		want  string
+	}{
+		{"feature switched off", fsState("enabled", false, "act"), "off"},
+		{"bool false", fsState("enabled", true, false), "off"},
+		{"text false", fsState("enabled", true, "false"), "off"},
+		{"bool true", fsState("enabled", true, true), ""},
+		{"text true", fsState("enabled", true, "true"), ""},
+		{"legacy text on", fsState("enabled", true, "on"), ""},
+	}
+	for _, c := range cases {
+		t.Run("UC-054/BR-005 "+c.name, func(t *testing.T) {
+			h := newHarness(t, harnessOpts{})
+			h.online()
+			h.setDoc([]map[string]any{c.state})
+			h.round()
+			if c.want == "" {
+				fv, _ := h.st.FlagView("agent", "enabled")
+				if fv.StackOverlay != nil || fv.EffectiveDefault != fv.BaselineDefault || fv.EffectiveDefault == "act" {
+					t.Fatalf("agent/enabled = %s (overlay %+v), want the baseline %s", fv.EffectiveDefault, fv.StackOverlay, fv.BaselineDefault)
+				}
+				return
+			}
+			if got := stored(h); got != c.want {
+				t.Fatalf("agent/enabled = %s, want %s", got, c.want)
+			}
+		})
+	}
+	// A local stop never falls back to the watch baseline because Flagsmith
+	// holds a value the link refuses, whether the stop was made online and
+	// pushed, or offline before the first connect.
+	for _, v := range []any{true, "true", "on"} {
+		t.Run(fmt.Sprintf("UC-054/BR-005 local off online, Flagsmith %#v", v), func(t *testing.T) {
+			h := newHarness(t, harnessOpts{})
+			h.online()
+			putOff(h)
+			h.round()
+			h.setDoc([]map[string]any{fsState("enabled", true, v)})
+			h.round()
+			h.round()
+			if got := stored(h); got != "off" {
+				t.Fatalf("agent/enabled = %s after a refused %#v, want off", got, v)
+			}
+		})
+		t.Run(fmt.Sprintf("UC-054/BR-005 local off offline, Flagsmith %#v", v), func(t *testing.T) {
+			h := newHarness(t, harnessOpts{before: func(hh *harness) {
+				putOff(hh)
+				hh.fake.SetDocument(document(hh.clock.Now().Add(-time.Minute), []map[string]any{fsState("enabled", true, v)}), "")
+			}})
+			h.online()
+			h.round()
+			h.round()
+			if got := stored(h); got != "off" {
+				t.Fatalf("agent/enabled = %s after a refused %#v, want off", got, v)
+			}
+		})
 	}
 }

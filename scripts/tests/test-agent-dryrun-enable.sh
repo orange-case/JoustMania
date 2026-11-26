@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Self-contained tests for scripts/agent-dryrun-enable.sh (FR-090): `on` sets the
 # explicit candidate (experiment_dynamic_candidates = windows_frantic) and
-# experiment_dynamic_enabled BEFORE the `enabled` and `experiments_enabled` gates,
-# `off` clears all four, and `status` shows them.
+# experiment_dynamic_enabled BEFORE the `enabled` (act) and `experiments_enabled`
+# gates, `off` sets `enabled` off and clears the other three, and `status` shows them.
 #
 # Runs the helper against scripts/tests/fake_flag_service.py serving
-# services/flagd/ci/agent.json with the REAL registry (epic #1407): the helper
+# services/flagd/agent.json (default `watch`) with the REAL registry (epic #1407): the helper
 # changes the flags only through the flag service, never a flag file.
 #
 # Runs as part of `make lint` (needs only bash + python3), or directly:
@@ -18,7 +18,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 HELPER="${SCRIPT_DIR}/../agent-dryrun-enable.sh"
-SHIPPED="${REPO_ROOT}/services/flagd/ci/agent.json"
+SHIPPED="${REPO_ROOT}/services/flagd/agent.json"
 unset COMPOSE DOCKER || true
 # A test that reaches for the real docker fails instead of using it
 WORK="$(mktemp -d)"
@@ -68,7 +68,7 @@ expect "status shows decision.backend" 0 "decision.backend = " -- status
 expect "on reports the candidate" 0 "experiment_dynamic_candidates -> windows_frantic" -- on
 check "on sets the candidate windows_frantic" experiment_dynamic_candidates windows_frantic
 check "on sets experiment_dynamic_enabled on" experiment_dynamic_enabled on
-check "on sets enabled on" enabled on
+check "on sets enabled act" enabled act
 check "on sets experiments_enabled on" experiments_enabled on
 cand_line="$(line_of '^PUT /agent/experiment_dynamic_candidates ')"
 dyn_line="$(line_of '^PUT /agent/experiment_dynamic_enabled ')"
@@ -83,11 +83,12 @@ else
 fi
 expect "status shows the candidate variant" 0 "experiment_dynamic_candidates = windows_frantic" -- status
 
-# --- off: all four back to the baseline -----------------------------------------
+# --- off: all four back to the baseline, enabled by a write of off ---------------
 expect "off reports the candidate baseline" 0 "experiment_dynamic_candidates -> all (baseline)" -- off
 check "off clears the candidate" experiment_dynamic_candidates all
 check "off clears experiment_dynamic_enabled" experiment_dynamic_enabled off
-check "off clears enabled" enabled off
+check "off sets enabled off over a watch default" enabled off
+if grep -q "^DELETE /agent/enabled" "${FAKE_FLAG_LOG}"; then not_ok "off never DELETEs enabled"; else ok "off never DELETEs enabled"; fi
 check "off clears experiments_enabled" experiments_enabled off
 if grep -q "^DELETE /agent/experiment_dynamic_candidates" "${FAKE_FLAG_LOG}"; then ok "off is a flag-service DELETE of the candidate"; else not_ok "off is a flag-service DELETE of the candidate"; fi
 

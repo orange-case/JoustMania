@@ -11,6 +11,7 @@ from openfeature.provider.no_op_provider import PASSED_IN_DEFAULT
 from opentelemetry import trace
 
 from lib.setting_ladders import (
+    AGENT_STATE_LADDER,
     AUTOMATIC,
     AUTOMATIC_OPTIONS,
     EFFORT_OPTION,
@@ -29,7 +30,6 @@ from services.menu.menu_setup import build_menu
 from services.menu.settings_ops import (
     AGENT_ENABLED_FLAG,
     AGENT_POLICY_FLAG,
-    AGENT_WRITE_GATE_FLAG,
     BAD_OPTION,
     DECISION_BACKEND_FLAG,
     FLAG_SERVICE_UNAVAILABLE,
@@ -55,8 +55,6 @@ def _variant(details) -> str:
 def _enabled_state(details) -> str:
     """`on`, `off` or `unknown` for an agent on/off flag's evaluation (services.md §3.1, UC-015 BR-013, #2101).
 
-    Used for the kill switch `enabled` and the write gate `interventions_enabled` (#2093).
-
     Unknown is any evaluation that did not come from a resolved flag: an error code, reason ERROR
     (provider not ready, flag not found, ...), no variant (the client fell back to the default),
     or the no-op provider's passed-in default before a provider is set.
@@ -66,6 +64,11 @@ def _enabled_state(details) -> str:
     if not details.variant or details.variant == PASSED_IN_DEFAULT:
         return "unknown"
     return "on" if details.value is True else "off"
+
+
+def _agent_state(details) -> str:
+    """`enabled` as `off`, `watch`, `act` or `unknown` (unresolved, or a value outside the three states)."""
+    return details.value if _resolved(details) and details.value in AGENT_STATE_LADDER else "unknown"
 
 
 def _resolved(details) -> bool:
@@ -411,7 +414,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         """Read-only menu snapshot (services.md §3.1): menu memory and in-process flag clients only.
 
         Never the HTTP flag writer (0.5 s per flag). A flag the client cannot resolve reads as its
-        default: empty variant names, and the kill switch as off with `agent_enabled_state` unknown.
+        default: empty variant names, and the agent state `unknown` (`agent_enabled` false).
         """
         # UC-015 BR-018: the operator's shield value is read in the background, never in this call.
         self.settings_ops.schedule_operator_refresh()
@@ -422,7 +425,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         game = self.game_settings_client
         user = self.user_prefs_client
         agent = self.agent_settings_client
-        enabled_state = _enabled_state(agent.get_boolean_details(AGENT_ENABLED_FLAG, False))
+        enabled_state = _agent_state(agent.get_string_details(AGENT_ENABLED_FLAG, "off"))
         return menu_pb2.GetMenuStatusResponse(
             menu_state=self.state,
             lifecycle_live=self._lifecycle_live(),
@@ -430,9 +433,8 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             selection=self.current_selection.name,
             ready_count=self.ready_controller_count,
             connected_count=len(self.connected_controllers),
-            agent_enabled=enabled_state == "on",
+            agent_enabled=enabled_state in ("watch", "act"),
             agent_enabled_state=enabled_state,
-            agent_interventions_enabled_state=_enabled_state(agent.get_boolean_details(AGENT_WRITE_GATE_FLAG, False)),
             agent_level=_variant(agent.get_string_details(AGENT_POLICY_FLAG, "")),
             agent_backend=_variant(agent.get_string_details(DECISION_BACKEND_FLAG, "")),
             sensitivity=game.get_integer_value("sensitivity", 2),

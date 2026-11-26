@@ -51,7 +51,7 @@ func TestBuildSummary_MixedAppliedBlocked(t *testing.T) {
 			s.AppendInterventionEvent("speed_up", "", false)
 			s.RecordInterventionApply("speed_up", gamecontext.ApplyOutcomeApplied)
 		}
-		// One passed the permission chain, then interventions_enabled was off.
+		// One passed the permission chain, then `enabled` was watch.
 		s.AppendInterventionEvent("grant_shield", "AA:11", false)
 		s.RecordInterventionApply("grant_shield", gamecontext.ApplyOutcomeGatedOff)
 		// One passed every gate but the write failed.

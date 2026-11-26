@@ -12,7 +12,7 @@ import (
 // FlagState is the effective flag set of one game partition as its newest evaluated
 // cycle resolved it: the flag panel of the dashboard's Agent tab reads it from
 // GET /experiments/state (docs/specs/services.md §5). Recorded on every evaluated
-// cycle, before the kill-switch short-circuit, so enabled=false is visible.
+// cycle, before the kill-switch short-circuit, so enabled=off is visible.
 type FlagState struct {
 	GameID   string `json:"game_id"`
 	GameKind string `json:"game_kind"`
@@ -23,10 +23,9 @@ type FlagState struct {
 	TraceID string `json:"trace_id"`
 	// UpdatedAtMs is the cycle's time, epoch ms on the agent's clock.
 	UpdatedAtMs            int64  `json:"updated_at_ms"`
-	Enabled                bool   `json:"enabled"`
+	Enabled                string `json:"enabled"`
 	Objectives             string `json:"objectives"`
 	InterventionsAllowed   string `json:"interventions_allowed"`
-	InterventionsEnabled   bool   `json:"interventions_enabled"`
 	BatteryThreshold       int    `json:"battery_threshold"`
 	MaxInterventionsPerMin int    `json:"max_interventions_per_minute"`
 	DecisionBackend        string `json:"decision_backend"`
@@ -117,10 +116,9 @@ func (l *Loop) recordFlagState(snapshot flags.Snapshot, c gamecontext.GameContex
 		GameMode:               derefStr(c.Session.GameMode),
 		TraceID:                c.GameTraceID,
 		UpdatedAtMs:            at.UnixMilli(),
-		Enabled:                state.Enabled,
+		Enabled:                string(state.EnabledState),
 		Objectives:             summarizeObjectives(state.Objectives),
 		InterventionsAllowed:   allowedSummary(state.InterventionsAllowed),
-		InterventionsEnabled:   snapshot.InterventionsEnabled,
 		BatteryThreshold:       state.PolicyBatteryThreshold,
 		MaxInterventionsPerMin: state.PolicyMaxPerMinute,
 		DecisionBackend:        backend,

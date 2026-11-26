@@ -17,7 +17,7 @@ func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Disca
 // *flags.Flags.
 type fakeGate bool
 
-func (g fakeGate) InterventionsEnabled(context.Context) bool { return bool(g) }
+func (g fakeGate) Applying(context.Context) bool { return bool(g) }
 
 // TestActionSinkIsLiveGated: post-#1213 the sink wiring ALWAYS returns a
 // GatedActionSink (the gate is read per Apply against the live flag), never nil and

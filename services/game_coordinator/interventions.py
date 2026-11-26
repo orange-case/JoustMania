@@ -928,8 +928,8 @@ class InterventionFlagReader:
         if self._agent_client is None:
             return set()
         try:
-            # The human stop writes `enabled` alone (UC-040 BR-004): a stopped agent gets nothing applied.
-            if self._agent_client.get_boolean_value("enabled", False, EvaluationContext()) is not True:
+            # UC-040 BR-004: only an agent at `act` gets anything applied; `off` (the stop) and `watch` get nothing.
+            if self._agent_client.get_string_value("enabled", "off", EvaluationContext()) != "act":
                 return set()
             value = self._agent_client.get_string_value("interventions_allowed", "", EvaluationContext())
             if isinstance(value, str):

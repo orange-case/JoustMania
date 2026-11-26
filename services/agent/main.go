@@ -125,19 +125,18 @@ func parseLevel(s string) slog.Level {
 }
 
 // actionSink returns the intervention sink for every per-game loop, gated by the
-// LIVE interventions_enabled flag (#1213, migrated from AGENT_INTERVENTIONS_ENABLED).
-// It ALWAYS returns a non-nil GatedActionSink wrapping the real Writer: the gate is
-// re-read on EVERY Apply against agentFlags, so flipping interventions_enabled in
-// flagd starts/stops actuation with no restart, and a flagd outage FAILS CLOSED
-// (DefaultInterventionsEnabled=false ⇒ the wrapped Writer is never called, the
-// decision is recorded/spanned but not written). This REPLACES the old startup-time
+// LIVE `enabled` flag: it writes only while `enabled` is act. It ALWAYS returns a
+// non-nil GatedActionSink wrapping the real Writer: the gate is re-read on EVERY
+// Apply against agentFlags, so flipping `enabled` starts/stops actuation with no
+// restart, and a flagd outage FAILS CLOSED (off ⇒ the wrapped Writer is never
+// called, the decision is recorded/spanned but not written). This REPLACES the old startup-time
 // env gate that selected Writer-or-nil ONCE and could neither react to a flip nor
 // fail safe on a boot-time flagd outage (#1217). Returning decision.ActionSink keeps
 // main()'s wiring to one line and makes the gate unit-testable.
 //
 // writer is the one shared interventions Writer (writes go to the flag service).
 func actionSink(gate actions.InterventionGate, writer *actions.Writer, logger *slog.Logger) decision.ActionSink {
-	logger.Info("Agent intervention writes gated by LIVE interventions_enabled flag (#1213; default fail-closed off)",
+	logger.Info("Agent intervention writes gated by LIVE enabled flag (written only when act; fail-closed off)",
 		"flag_service", getEnv("FLAG_SERVICE_URL", "http://flag-service:8070"))
 	return actions.NewGatedActionSink(gate, writer, logger)
 }
@@ -461,10 +460,9 @@ func newComponents(ctx context.Context, logger *slog.Logger, agentFlags *flags.F
 		gameFlags:       gameFlags,
 	}
 	// SHARED gated action sink (#1213): one GatedActionSink wrapping the real Writer,
-	// closed over by every per-game loop. The interventions_enabled gate is re-read
-	// per Apply against the live agentFlags, so the gate is hot-reloadable and
-	// fail-closed on a flagd outage (the old AGENT_INTERVENTIONS_ENABLED env master,
-	// migrated). actions.Writer holds no per-game state (it serializes its writes
+	// closed over by every per-game loop. `enabled` == act is re-read per Apply
+	// against the live agentFlags, so the gate is hot-reloadable and fail-closed on
+	// a flagd outage. actions.Writer holds no per-game state (it serializes its writes
 	// under its own mutex, keyed by the decision's target), so sharing is safe.
 	// No per-player prune any more (#1323 is closed by construction, #1416): every
 	// intervention is written for one registered game and the flag service drops
@@ -702,7 +700,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	loop.ProbeRules = decision.NewProbeRules(probeInterval, nil)
 	// Action sink (#730/#1213): the shared GatedActionSink applies decisions as
 	// game-scoped writes to the flag service (#1411) ONLY when the
-	// LIVE interventions_enabled flag is on; otherwise it discards them (the loop's
+	// LIVE `enabled` flag is act; otherwise it discards them (the loop's
 	// discardActions default behavior) — gate read per Apply, fail-closed on a flagd outage. The one sink is
 	// safe to share across loops (no per-game state). The nil guard is defensive: a
 	// nil sink would leave the loop's default discardActions in place.
@@ -821,6 +819,8 @@ func (c *components) buildProposer() {
 	// ceiling AND the live experiment_proposer_enabled flag. A closed gate skips before any model call,
 	// so it spends no budget.
 	permitPropose := proposerPermit(c.agentFlags, proposerEnabled())
+	// Drafting runs in watch; the experiment write (an arm value in a game flag) needs on.
+	permitProposeWrite := proposerWritePermit(c.agentFlags)
 	// Propose on each GAME END, behind the kill switch + experiments_enabled, the
 	// cadence floor (code_improvement.min_interval_seconds, read live) and, for a
 	// real backend, the shared LLM call gate: proposing is an expensive LLM call, so
@@ -855,6 +855,7 @@ func (c *components) buildProposer() {
 			proposer.ProposeOnce(ctx, n, experiment.ProposerConfig{
 				MinInterval: cfg.MinInterval,
 				Permit:      permitPropose,
+				WritePermit: permitProposeWrite,
 				GameKind:    gc.GameKind,
 			})
 		})
@@ -1086,12 +1087,13 @@ func (b inferBackend) Infer(ctx context.Context, prompt llm.Prompt) (string, err
 // reads (#1270). *flags.Flags satisfies it; tests supply a fake.
 type proposerGateFlags interface {
 	AgentEnabled(ctx context.Context) bool
+	Applying(ctx context.Context) bool
 	ExperimentsEnabled(ctx context.Context) bool
 	ExperimentProposerEnabled(ctx context.Context) bool
 }
 
 // proposerPermit builds the experiment.ProposerConfig.Permit gate (#1270): a
-// proposal cycle may run only while the agent `enabled` kill switch AND the
+// proposal cycle may run only while the agent runs (`enabled` watch or act) AND the
 // `experiments_enabled` gate are both on — the same two gates the experiment loop
 // obeys (allocateIfEnabled). Both are read LIVE on every call and both fail closed
 // when flagd is unreachable (#1907: no env fallback), the same fallback the
@@ -1109,6 +1111,17 @@ func proposerPermit(src proposerGateFlags, proposerCeiling bool) func(ctx contex
 		}
 		if !proposerCeiling || !src.ExperimentProposerEnabled(ctx) {
 			return false, experiment.SkipReasonProposerDisabled
+		}
+		return true, ""
+	}
+}
+
+// proposerWritePermit is the write half of the proposer gate: the proposal starts an
+// experiment, which writes an arm value into a game flag, so it needs `enabled` = act.
+func proposerWritePermit(src proposerGateFlags) func(ctx context.Context) (bool, string) {
+	return func(ctx context.Context) (bool, string) {
+		if !src.Applying(ctx) {
+			return false, experiment.SkipReasonAgentWatch
 		}
 		return true, ""
 	}

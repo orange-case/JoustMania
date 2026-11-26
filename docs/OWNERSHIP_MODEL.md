@@ -48,7 +48,7 @@ Three invariants follow and are **load-bearing**:
 3. **The agent cannot loosen its own limits (C-034).** A setting that limits the agent is never a flag the
    agent writes:
    - The agent never writes the `agent` set. Every agent-limiting setting of FR-152 is in `agent`: `enabled`, `code_improvement.*`, `llm.max_requests_per_minute`, `decision.claude.max_requests_per_minute`, `experiment_proposer_enabled` and `experiment_dynamic_max_concurrent`. The
-     agent's governor is there too (`interventions_allowed`, `interventions_enabled`, `objectives`, the
+     agent's governor is there too (`interventions_allowed`, `enabled`, `objectives`, the
      `policy.*` budgets, `decision.magnitude_bounds`).
    - In the sets it does write it writes only the `interventions` keys (game-scoped) and the `game`
      experiment-catalog keys (experiment+arm, or a `real` promotion), never stack-wide. Every other key of

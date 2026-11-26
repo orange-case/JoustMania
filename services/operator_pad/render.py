@@ -138,7 +138,7 @@ def status_line(status, ctx: PageContext, connection_ok: bool) -> Line:
         mode = mode_name(status.selection, short_name=True)
         ready = f"{status.ready_count}/{status.connected_count}"
         agent_state = agent_text(status)
-        agent = ICON_AGENT if agent_state.startswith(("ON", "WATCH")) else (UNKNOWN if agent_state == UNKNOWN else " ")
+        agent = ICON_AGENT if agent_state.startswith(("ACT", "WATCH")) else (UNKNOWN if agent_state == UNKNOWN else " ")
         instructions = ICON_INSTRUCTIONS if status.instructions else " "
     left = f"{ICON_INTERNET if ctx.internet == NET_OK else ' '} {mode} {ready}"
     right = f"{agent}{instructions} {ICON_LOCK if ctx.locked else ' '}"

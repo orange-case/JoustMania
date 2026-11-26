@@ -24,7 +24,7 @@ shape, not a verdict on the backend.
 Preconditions (UC-101):
 
 - The gateway export is on and forwards to the backends that take part (FR-086, UC-035 A7).
-- The agent is enabled, its intervention writes are on (`interventions_enabled` = `on`) and its allow-list
+- The agent acts (`enabled` = `act`, so its interventions are written, not only recorded as in `watch`) and its allow-list
   (`interventions_allowed`) names at least one lever that can save a player. `standard` names two: `grant_shield`
   and `adjust_player_sensitivity` (BR-001, [flags.md §3](../specs/flags.md#3-agent)).
 - **Shields are instant.** The stack default of `shield.activation` is `trigger`, so set it to `instant` before the
@@ -42,8 +42,8 @@ a stack write during a game applies from the next grant (the operator pad refuse
 curl -sS -X PUT http://localhost/flags/game/shield.activation \
   -H 'Content-Type: application/json' -d '{"variant": "instant", "writer": "stage"}'
 # the agent writes interventions, with the standard allow-list
-curl -sS -X PUT http://localhost/flags/agent/interventions_enabled \
-  -H 'Content-Type: application/json' -d '{"variant": "on", "writer": "stage"}'
+curl -sS -X PUT http://localhost/flags/agent/enabled \
+  -H 'Content-Type: application/json' -d '{"variant": "act", "writer": "stage"}'
 curl -sS -X PUT http://localhost/flags/agent/interventions_allowed \
   -H 'Content-Type: application/json' -d '{"variant": "standard", "writer": "stage"}'
 ```

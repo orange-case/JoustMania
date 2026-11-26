@@ -193,7 +193,7 @@ type experimentLoop struct {
 	// without a flagd dependency. Production leaves it nil (the real flags client is
 	// consulted). It governs BOTH AllocateAndSpawn and the #995 dynamic declarer, so
 	// a test can prove the declarer is subordinate to the kill-switch.
-	enabledOverride func(ctx context.Context) bool
+	enabledOverride func(ctx context.Context) flags.EnabledState
 
 	// fitness maps a game-end GameContext to a single fitness scalar fed to
 	// ConcludeGame. Injected so it is overridable / testable.
@@ -482,8 +482,8 @@ func (e *experimentLoop) wirePromoter(promoter *promote.Promoter, flagsClient *f
 }
 
 // promotionConfigResolver builds the #980 ConfigResolver from the live agent
-// flags: the promotion mode comes from flags.Promotion, and the kill-switch
-// (Config.Enabled) from the agent `enabled` snapshot. Reading them live per
+// flags: the promotion mode comes from flags.Promotion, and Config.Enabled
+// is `enabled` == act. Reading them live per
 // promotion means flipping code_improvement.mode (or the kill-switch) takes effect
 // on the next promotion with no restart — and a disabled agent can never reach the
 // autonomous real-default path.
@@ -492,7 +492,7 @@ func promotionConfigResolver(f *flags.Flags) promote.ConfigResolver {
 		p := f.Promotion(ctx)
 		return promote.Config{
 			Mode:    promote.Mode(p.Mode),
-			Enabled: f.Evaluate(ctx).Enabled, // kill-switch: false ⇒ autonomous blocked
+			Enabled: f.Applying(ctx), // autonomous changes future games: needs enabled=act
 		}
 	}
 }
@@ -523,8 +523,9 @@ func promotionConfigResolver(f *flags.Flags) promote.ConfigResolver {
 //
 // The dynamic declarer fills the experiment set each tick,
 // bounded by the live concurrent-experiment backstop. The kill-switch (agent.json
-// `enabled`) is ALSO honored each tick (agentEnabled), independent of
-// experiments_enabled — either being off tears the surface down.
+// `enabled`) is ALSO honored each tick (agentState), independent of
+// experiments_enabled: experiments write arm values into game flags, so they
+// need `enabled` = act, and anything else tears the surface down.
 func (e *experimentLoop) run(ctx context.Context) {
 	e.runCtx.Store(&ctx)
 	// UC-043 A20 (#2332): once ctx is cancelled the registry declares and starts no
@@ -654,8 +655,8 @@ func (e *experimentLoop) allocationGatesOpen(ctx context.Context) (flags.Experim
 	// UC-043 A1 / UC-045 step 5 (#1704): with the kill switch off (or failed closed)
 	// every tick reverts the autonomous promotions this agent run applied, whatever
 	// experiments_enabled says, so none survives the switch.
-	agentOn := e.agentEnabled(ctx)
-	if !agentOn {
+	agent := e.agentState(ctx)
+	if !agent.Runs() {
 		e.revertPromotionsOnKillSwitch(ctx)
 	}
 	cfg := e.config(ctx)
@@ -665,9 +666,13 @@ func (e *experimentLoop) allocationGatesOpen(ctx context.Context) (flags.Experim
 		}
 		return cfg, false
 	}
-	if !agentOn {
-		if ids := e.registry.AbortAll(ctx, "kill-switch: agent disabled"); len(ids) > 0 {
-			e.log.Warn("experiment: kill-switch active — aborted live experiments", "count", len(ids))
+	if !agent.Applies() {
+		reason := "kill-switch: agent disabled"
+		if agent == flags.EnabledWatch {
+			reason = "agent watch: arm writes need enabled=act"
+		}
+		if ids := e.registry.AbortAll(ctx, reason); len(ids) > 0 {
+			e.log.Warn("experiment: enabled not act — aborted live experiments", "enabled", string(agent), "count", len(ids))
 		}
 		return cfg, false
 	}
@@ -725,19 +730,17 @@ func (e *experimentLoop) revertPromotionsOnKillSwitch(ctx context.Context) {
 	}
 }
 
-// agentEnabled reports whether the agent kill-switch is ON (agent.json `enabled`
-// true). It consults the enabledOverride seam first (test wiring), then the live
-// flags client. A nil flags client (test wiring only) is treated as enabled —
-// production always injects one (buildExperimentLoop) — so the leak test stays
-// free of a flagd dependency while the real path always consults the kill-switch.
-func (e *experimentLoop) agentEnabled(ctx context.Context) bool {
+// agentState is the live `enabled` state. It consults the enabledOverride seam
+// first (test wiring), then the live flags client. A nil flags client (test wiring
+// only) reads act; production always injects one (buildExperimentLoop).
+func (e *experimentLoop) agentState(ctx context.Context) flags.EnabledState {
 	if e.enabledOverride != nil {
 		return e.enabledOverride(ctx)
 	}
 	if e.flags == nil {
-		return true
+		return flags.EnabledAct
 	}
-	return e.flags.Evaluate(ctx).Enabled
+	return e.flags.EnabledState(ctx)
 }
 
 // declareDynamicIfEnabled lets the heuristic dynamic declarer (#995) CHOOSE and

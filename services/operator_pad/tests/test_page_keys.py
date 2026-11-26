@@ -65,8 +65,7 @@ def st(**kw) -> menu_pb2.GetMenuStatusResponse:
         "setting_defaults": DEFAULTS,
     }
     base.update(kw)
-    base.setdefault("agent_enabled_state", "on" if base["agent_enabled"] else "off")
-    base.setdefault("agent_interventions_enabled_state", "on")
+    base.setdefault("agent_enabled_state", "act" if base["agent_enabled"] else "off")
     return menu_pb2.GetMenuStatusResponse(**base)
 
 
@@ -153,8 +152,8 @@ SWITCH = page_keys.ROWS["AGENT"][0]
         (st(agent_level="ambient"), 1, True),
         (st(agent_level="standard"), -1, False),
         (st(agent_level="full"), 1, False),  # clamped at the top: no raise
-        (st(agent_level="standard", agent_interventions_enabled_state="off"), 1, True),  # WATCH: its live level
-        (st(agent_level="none"), 1, True),  # ON NONE
+        (st(agent_level="standard", agent_enabled_state="watch"), 1, True),  # WATCH: its live level
+        (st(agent_level="none"), 1, True),  # ACT NONE
         (st(agent_enabled=False, agent_level="ambient"), 1, True),  # OFF: its live level
     ],
 )
@@ -177,13 +176,13 @@ def test_an_unknown_level_is_refused_never_confirmed(status):
     ("status", "steps", "plan"),
     [
         (st(agent_enabled=False), 1, page_keys.Plan("off", "watch", raises=True)),  # the resume
-        (st(agent_enabled=False), 2, page_keys.Plan("off", "on", raises=True)),
-        (st(agent_interventions_enabled_state="off"), 1, page_keys.Plan("watch", "on", raises=True)),
-        (st(), 3, page_keys.Plan("on", "on")),  # clamped at the top
-        (st(), -1, page_keys.Plan("on", "watch")),
-        (st(), -2, page_keys.Plan("on", "off")),  # the stop
-        (st(agent_interventions_enabled_state="off"), -1, page_keys.Plan("watch", "off")),
-        (st(agent_level="none"), -1, page_keys.Plan("on", "watch")),  # ON NONE is ON
+        (st(agent_enabled=False), 2, page_keys.Plan("off", "act", raises=True)),
+        (st(agent_enabled_state="watch"), 1, page_keys.Plan("watch", "act", raises=True)),
+        (st(), 3, page_keys.Plan("act", "act")),  # clamped at the top
+        (st(), -1, page_keys.Plan("act", "watch")),
+        (st(), -2, page_keys.Plan("act", "off")),  # the stop
+        (st(agent_enabled_state="watch"), -1, page_keys.Plan("watch", "off")),
+        (st(agent_level="none"), -1, page_keys.Plan("act", "watch")),  # ACT NONE is ACT
     ],
 )
 def test_a_higher_agent_state_is_a_raise_a_lower_one_is_not(status, steps, plan):
@@ -196,11 +195,10 @@ def test_a_higher_agent_state_is_a_raise_a_lower_one_is_not(status, steps, plan)
     [
         None,
         st(agent_enabled_state="unknown"),
-        st(agent_interventions_enabled_state="unknown"),
-        st(agent_interventions_enabled_state=""),
+        st(agent_enabled_state="maybe"),
         st(agent_level="probe"),
     ],
-    ids=["no-status", "enabled-unknown", "gate-unknown", "gate-missing", "level-off-the-ladder"],
+    ids=["no-status", "enabled-unknown", "state-off-the-ladder", "level-off-the-ladder"],
 )
 def test_an_unknown_agent_state_is_refused_never_stepped_blind(status):
     assert page_keys.edit_plan(SWITCH, status, 1) == page_keys.Plan(None, None, refused=True)
@@ -301,13 +299,13 @@ async def test_an_unknown_level_edit_is_refused(actions, menu, cues):
     ("now", "steps", "new"),
     [
         (st(agent_enabled=False), 1, "watch"),
-        (st(agent_enabled=False), 2, "on"),
-        (st(agent_interventions_enabled_state="off"), 1, "on"),
+        (st(agent_enabled=False), 2, "act"),
+        (st(agent_enabled_state="watch"), 1, "act"),
     ],
     ids=["off-watch", "off-on", "watch-on"],
 )
 async def test_an_agent_state_raise_needs_the_confirmation(actions, menu, cues, now, steps, new):
-    """OFF to WATCH or ON is the resume: never without the knob press."""
+    """OFF to WATCH or ACT is the resume: never without the knob press."""
     gesture = Gesture(LAYER, "K1", steps=steps)
     assert await actions.dispatch(gesture, now, now, on("AGENT", "K1")) == ("agent_state", "cancelled")
     menu.ProcessInput.assert_not_awaited()
@@ -321,9 +319,9 @@ async def test_an_agent_state_raise_needs_the_confirmation(actions, menu, cues, 
 @pytest.mark.parametrize(
     ("now", "steps", "expected"),
     [
-        (st(), -1, {"state": "watch", "from": "on"}),
-        (st(), -2, {"state": "off", "from": "on"}),
-        (st(agent_interventions_enabled_state="off"), -1, {"state": "off", "from": "watch"}),
+        (st(), -1, {"state": "watch", "from": "act"}),
+        (st(), -2, {"state": "off", "from": "act"}),
+        (st(agent_enabled_state="watch"), -1, {"state": "off", "from": "watch"}),
     ],
     ids=["on-watch", "on-off", "watch-off"],
 )
@@ -344,8 +342,8 @@ async def test_an_agent_state_edit_to_the_same_state_sends_nothing(actions, menu
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-012", "BR-014"])
 @pytest.mark.parametrize(
     "status",
-    [st(agent_enabled_state="unknown"), st(agent_interventions_enabled_state="unknown"), st(agent_level="probe")],
-    ids=["enabled-unknown", "gate-unknown", "level-off-the-ladder"],
+    [st(agent_enabled_state="unknown"), st(agent_enabled_state="maybe"), st(agent_level="probe")],
+    ids=["enabled-unknown", "state-off-the-ladder", "level-off-the-ladder"],
 )
 async def test_an_agent_state_edit_from_an_unknown_state_is_refused(actions, menu, cues, status):
     result = await actions.dispatch(Gesture(LAYER, "K1", steps=-1, confirmed=True), status, status, on("AGENT", "K1"))
@@ -411,8 +409,8 @@ def test_only_the_gated_builders_send_a_raise():
     """Sweep: every edit and reset of the AGENT page, unconfirmed, from every agent state: no raise is sent."""
     levels = ["none", "ambient", "standard", "full", "probe", ""]
     statuses = [
-        st(agent_level=level, agent_enabled=enabled, agent_interventions_enabled_state=gate)
-        for level, enabled, gate in itertools.product(levels, (True, False), ("on", "off", "unknown"))
+        st(agent_level=level, agent_enabled=enabled != "off", agent_enabled_state=enabled)
+        for level, enabled in itertools.product(levels, ("off", "watch", "act", "on", "unknown", ""))
     ]
 
     async def sweep():
@@ -1008,7 +1006,7 @@ def test_reset_and_lock_screens_by_protocol(version):
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-007", "BR-012"])
 @pytest.mark.parametrize("version", [2, 3, 4])
-@pytest.mark.parametrize(("steps", "new"), [(1, "WATCH"), (2, "ON")])
+@pytest.mark.parametrize(("steps", "new"), [(1, "WATCH"), (2, "ACT")])
 def test_the_agent_switch_resume_is_a_three_state_edit_that_asks_for_the_confirmation(version, steps, new):
     status = st(agent_enabled=False)
     plan = page_keys.edit_plan(SWITCH, status, steps)
@@ -1022,7 +1020,7 @@ def test_the_agent_switch_resume_is_a_three_state_edit_that_asks_for_the_confirm
 
 @pytest.mark.uc("UC-016", br=["BR-001", "BR-006", "BR-011"])
 def test_a_watching_agent_shows_watch_on_the_page_and_its_icon():
-    watch = st(agent_level="standard", agent_interventions_enabled_state="off")
+    watch = st(agent_level="standard", agent_enabled_state="watch")
     assert page_rows(PAGES.index("AGENT"), watch, PageContext(), 3)[0] == ("AGENT", "WATCH")
     assert screens.ICON_AGENT in render.status_line(watch, PageContext(), True)[0]
     assert screens.agent_text(watch) == "WATCH STANDARD"

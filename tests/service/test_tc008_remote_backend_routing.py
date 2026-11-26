@@ -45,10 +45,10 @@ pytestmark = pytest.mark.tier("service")
 SERVICE_COMPOSITION = AGENT
 
 
-def _configure(stack, backend: str, **kwargs) -> None:
-    configure_agent(backend=backend, **kwargs)
+def _configure(stack, backend: str, state: str = "act", **kwargs) -> None:
+    configure_agent(backend=backend, state=state, **kwargs)
     wait_agent_flags_served(
-        stack, backend=backend, enabled=True, rewrite=lambda: configure_agent(backend=backend, **kwargs)
+        stack, backend=backend, state=state, rewrite=lambda: configure_agent(backend=backend, state=state, **kwargs)
     )
 
 
@@ -63,8 +63,8 @@ async def test_rules_backend_default_unchanged(fresh_stack):
     the rules agent.decision (same parent, same decide.state.digest; #2648: no
     agent.signal_received span in the game trace); the fake is never called."""
     stack = fresh_stack
-    # interventions stay off: this case observes the rules decision, not its effect.
-    _configure(stack, "rules", interventions=False)
+    # watch: this case observes the rules decision, not its effect.
+    _configure(stack, "rules", state="watch")
 
     game_client, channel = await get_game_client(stack)
     mock_client, mock_channel = await get_mock_client(stack)

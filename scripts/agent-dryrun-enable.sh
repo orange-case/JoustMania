@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # Enable the experiment cohort loop for a `make dry-run` (#1077; epic #1407).
 #
-# The LIVE gate of the cohort loop is the `experiments_enabled` flag (agent set);
-# it and the master `enabled` kill-switch are fail-closed `off` in the baseline.
+# The LIVE gate of the cohort loop is the `experiments_enabled` flag (agent set),
+# `off` in the baseline; experiment arms are written only while `enabled` is `act`.
 # The experiment to run is the dynamic declarer's explicit candidate (UC-043
 # BR-012): `experiment_dynamic_candidates` = `windows_frantic` (`windows=frantic`)
 # with `experiment_dynamic_enabled` on.
 # This helper sets them through the flag service (scripts/flags.sh):
 #   on   -> the candidate and `experiment_dynamic_enabled` FIRST (so the first
-#           enabled tick already sees them), then `enabled` and `experiments_enabled` on
-#   off  -> all four overlays cleared: the fail-closed baseline returns
+#           enabled tick already sees them), then `enabled` to `act` and
+#           `experiments_enabled` on (arm writes need `enabled` = `act`, so the agent
+#           also writes the interventions the CI allow-list permits)
+#   off  -> `enabled` set to `off` (a clear would fall back to the flagd default
+#           `watch` and leave the agent running), the other three overlays cleared
 # Nothing is persisted (re-review N4). The in-game decision backend is NOT touched
 # here: use ./scripts/agent-backend.sh (decision.backend, #1232).
 #
@@ -36,14 +39,18 @@ case "${1:-status}" in
   on)
     "${FLAGS}" set agent experiment_dynamic_candidates "${CANDIDATE_VARIANT}" >/dev/null
     echo "  experiment_dynamic_candidates -> ${CANDIDATE_VARIANT}"
-    for flag in experiment_dynamic_enabled enabled experiments_enabled; do
-      "${FLAGS}" set agent "${flag}" on >/dev/null
-      echo "  ${flag} -> on"
-    done
+    "${FLAGS}" set agent experiment_dynamic_enabled on >/dev/null
+    echo "  experiment_dynamic_enabled -> on"
+    "${FLAGS}" set agent enabled act >/dev/null
+    echo "  enabled -> act"
+    "${FLAGS}" set agent experiments_enabled on >/dev/null
+    echo "  experiments_enabled -> on"
     echo "dry-run experiment gate -> on"
     ;;
   off)
-    for flag in enabled experiments_enabled experiment_dynamic_enabled experiment_dynamic_candidates; do
+    "${FLAGS}" set agent enabled off >/dev/null
+    echo "  enabled -> off"
+    for flag in experiments_enabled experiment_dynamic_enabled experiment_dynamic_candidates; do
       "${FLAGS}" clear agent "${flag}"
       echo "  ${flag} -> $("${FLAGS}" variant agent "${flag}") (baseline)"
     done

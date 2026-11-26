@@ -42,21 +42,18 @@ def _flags(rel: str) -> dict:
 @pytest.mark.uc("UC-040", flow="A11")
 @pytest.mark.parametrize("prefix", FLAG_FILE_VARIANTS, ids=["base", "ci"])
 def test_agent_interventions_disabled_by_default(prefix):
-    """The ``interventions_enabled`` actuation gate (#1213) ships OFF, so the agent
-    never mutates interventions.json by default. The no-write behaviour itself is
-    covered by the Go unit tests (services/agent/actions/gated_test.go,
-    action_sink_test.go); this pins the default those tests rely on.
+    """``enabled`` ships at ``watch`` (``off`` in CI), never ``on``, so the agent writes no
+    intervention by default (FR-051). The no-write behaviour itself is covered by the Go unit
+    tests (services/agent/actions/gated_test.go, action_sink_test.go); this pins the default
+    those tests rely on.
     """
     rel = f"{prefix}agent.json"
     flags = _flags(rel)
-    assert "interventions_enabled" in flags, f"{rel} should define the interventions_enabled safety gate (#1213)"
-    flag = flags["interventions_enabled"]
-    default_variant = flag["defaultVariant"]
-    assert flag["variants"][default_variant] is False, (
-        f"interventions_enabled in {rel} must default OFF (fail-closed); "
-        f"defaultVariant {default_variant!r} resolves to "
-        f"{flag['variants'][default_variant]!r}"
-    )
+    assert "interventions_enabled" not in flags, f"{rel}: the write gate is folded into `enabled`"
+    flag = flags["enabled"]
+    assert flag["variants"] == {"off": "off", "watch": "watch", "act": "act"}
+    expected = "off" if prefix else "watch"
+    assert flag["defaultVariant"] == expected, f"enabled in {rel} must default to {expected!r}"
 
 
 def _const(src: str, name: str) -> str | None:

@@ -86,7 +86,7 @@ func TestGroupInterventionsCounter(t *testing.T) {
 	})
 	t.Run("UC-040/A11 a group the actuation gate turns into a no-op counts outcome=gated_off", func(t *testing.T) {
 		got := run(t, func(l *Loop) { l.Actions = &gatedSink{gateOn: false} })
-		if got["gated_off/write_gate_off/rules/shadow/all"] != 1 || len(got) != 1 {
+		if got["gated_off/watch/rules/shadow/all"] != 1 || len(got) != 1 {
 			t.Fatalf("counts = %v", got)
 		}
 	})

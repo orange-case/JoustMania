@@ -116,7 +116,6 @@ type Policy struct {
 var killSwitches = map[string]bool{
 	"agent/enabled":                                 true,
 	"agent/interventions_allowed":                   true,
-	"agent/interventions_enabled":                   true,
 	"agent/experiments_enabled":                     true,
 	"agent/experiment_proposer_enabled":             true,
 	"agent/llm.max_requests_per_minute":             true,

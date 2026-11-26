@@ -80,7 +80,7 @@ func TestPatternGames_NoSpawnWhileExperimentsOff(t *testing.T) {
 		log:             log,
 		expDefaults:     flags.ExperimentDefaults{Tick: 0, DynamicMaxConcurrent: defaultDynamicMaxConcurrent},
 		configOverride:  lc.get,
-		enabledOverride: func(context.Context) bool { return true },
+		enabledOverride: func(context.Context) flags.EnabledState { return enabledState(true) },
 		dynamic:         newDynamicDeclarer(svc, nil),
 	}
 	lc.setCandidates("sensitivity")

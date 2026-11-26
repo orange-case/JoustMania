@@ -484,7 +484,7 @@ def test_a_raise_awaiting_its_press_blinks_press_knob_in_the_title_bar(version, 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-007", "BR-014"])
 @pytest.mark.parametrize("version", [2, 3, 4])
 def test_the_agent_switch_blinks_too(version):
-    status = st(agent_interventions_enabled_state="off")
+    status = st(agent_enabled_state="watch")
     plan = page_keys.edit_plan(page_keys.ROWS["AGENT"][0], status, 1)
     shown = _edit(version, blink_on=False, option=page_keys.AGENT_STATE, plan=plan)
     assert shown.lines[0][0].rstrip().endswith("PRESS KNOB") and not shown.lines[0][1] & screens.INVERTED

@@ -14,8 +14,9 @@ link is on (`FLAGSMITH_LINK=on`, the stage `.env.local`). How the link works:
   string such as the brief, the text itself, **without quotes**. For an object flag such as
   `decision.magnitude_bounds`, compact JSON.
 - **The toggle:** enabled with a value means "this value runs". **Disabled means the baseline applies, not
-  "flag off"**: switching `enabled` (the kill switch) off in Flagsmith brings back its baseline, which is `off`,
-  but for most flags it means "back to the file default". When the baseline is what you want, prefer typing the value.
+  "flag off"**, with one exception: switching the `enabled` feature (the agent state) off in Flagsmith
+  stops the agent (it reads `off`, not its baseline `watch`), and so does a value `false`. For every other
+  flag it means "back to the file default". When the baseline is what you want, prefer typing the value.
 - **A value under an off toggle is not in force.** Each disabled feature shows its file default as its value
   (FR-227); a value you type there while the toggle is off does nothing, and the flag service resets it to the file
   default at its next start. Stage a value by switching the toggle on.
@@ -47,7 +48,7 @@ Run these on the Pi while the link is online, so its deletes and values are push
 | 1 Observe | none | | | a green act or grey noop row; open its trace |
 | 2 Ambient → standard | `interventions_allowed` | `standard` | `ambient` | the agent may shield: white LED, Shield badge |
 | 3 Threshold (on Claude) | `decision.backend`, then `decision.claude.act_confidence_threshold` | `claude`, then `strict` | `default`, then `jev` | Claude rows that would act turn amber `held`. On Jev the same flip only quiets the feed (grey `noop`): its gate opens at the act threshold |
-| 4 Kill switch | `enabled` | `off` | `on` | the feed goes silent, the game keeps playing; an in-flight answer lands `discarded` |
+| 4 Kill switch | `enabled` | `off` | `act` | the feed goes silent, the game keeps playing; an in-flight answer lands `discarded` |
 | 5 Degrade | `decision.jev.base_url` | `blackhole` | `default` | rows `jev → rules`, `fallback_reason=timeout`, the game never waits |
 
 Beat 4 is the one to rehearse from Flagsmith: the kill switch must stop the agent within seconds. If the

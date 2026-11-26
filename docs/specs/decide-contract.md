@@ -641,14 +641,14 @@ the global budget and the per-game in-flight guard are the gates (`services/agen
 
 | Change while a remote call is in flight | Effect | Evidence |
 |---|---|---|
-| `enabled` → off | HTTP call is **not** cancelled; on landing the live flags are re-read and the answer is `discarded/kill_switch`; the rules fallback is suppressed too | `services/agent/decision/decide_hook.go:runDecideRemote` (landing re-read); `TestRemote_KillSwitchAtLanding`, `TestRemote_KillSwitchSuppressesTimeoutFallback`; service tier `tests/service/test_tc009_kill_switch.py::test_kill_switch_discards_inflight_answer` |
+| `enabled` → `off` | HTTP call is **not** cancelled; on landing the live flags are re-read and the answer is `discarded/kill_switch`; the rules fallback is suppressed too | `services/agent/decision/decide_hook.go:runDecideRemote` (landing re-read); `TestRemote_KillSwitchAtLanding`, `TestRemote_KillSwitchSuppressesTimeoutFallback`; service tier `tests/service/test_tc009_kill_switch.py::test_kill_switch_discards_inflight_answer` |
 | `decision.backend` changed | `discarded/backend_changed` | `services/agent/decision/decide_hook.go:runDecideRemote`; `TestRemote_BackendChangedMidFlight` |
 | `decision.claude.act_confidence_threshold` / `decision.jev.act_confidence_threshold` changed | the answering backend's threshold is re-read at landing (§5); the answer is `act` or `held` against the new value | `services/agent/decision/decide_hook.go:runDecideRemote`; `TestRemote_ThresholdRaisedMidFlight`, `TestThreshold_JevRaisedMidFlightAppliesAtLanding` |
 | `interventions_allowed` narrowed (including to `none`) | outcome stays `act`; the permission chain blocks `not_allowed` (`decide.blocked=true`, `decide.block_reason=not_allowed`); the next cycle makes no new call (§7.1) | `TestRemote_AllowListAtLanding`, `TestRemote_BlockedDecisionNamesTargetAndDecideBlocked`, `TestRemote_NoInterventionsAllowed`, `TestRemote_NoInterventionsAllowedAtLanding` |
-| `interventions_enabled` → off | not checked by the decide hook; the gated sink writes nothing | `services/agent/actions/gated.go:GatedActionSink.Apply` |
+| `enabled` → `watch` | not checked by the decide hook; the gated sink writes nothing (it writes only while `enabled` is `act`) | `services/agent/actions/gated.go:GatedActionSink.Apply` |
 | agent shutdown | `discarded/shutdown` | `services/agent/decision/decide_hook.go:runDecideRemote` (shutdown check first) |
 
-With `enabled` off no new remote call fires: `OnEvaluate` short-circuits and emits a
+With `enabled` `off` no new remote call fires (at `watch` the agent decides as at `act`): `OnEvaluate` short-circuits and emits a
 throttled `agent.disabled` span (`services/agent/decision/decision.go:OnEvaluate`).
 
 ## 10. Live backend switch
@@ -669,7 +669,7 @@ The post-game retro and the experiment proposer use a separate text backend, whi
 ## 11. From decision to game effect
 
 The action sink writes to the flag service's `interventions` set, always for the deciding
-game (`actions/writer.go`, gated by `interventions_enabled`; [UC-053](../use_cases/UC-053.md)):
+game (`actions/writer.go`, only while `enabled` is `act`; [UC-053](../use_cases/UC-053.md)):
 a state value with `PUT … scope {game_id}`, a per-player value with
 `scope {game_id, serial}`, a one-shot event with `POST` (appended to the game's event list).
 A decision without a coordinator game id (`game_…`), such as the `session-<n>` id of the
@@ -839,7 +839,7 @@ A shield-gate refusal (`already_charged`, `shield_cap_reached`, `shield_cooldown
 
 `agent_interventions_applied_total` counts successful applies (written interventions and the probe
 `noop`, which succeeds without a write): an apply that the
-gated sink turns into a no-op while `interventions_enabled` is off is not counted
+gated sink turns into a no-op while `enabled` is `watch` is not counted
 (`services/agent/actions/gated.go:GatedActionSink.ApplyReported`).
 
 ## 13. Changing this contract

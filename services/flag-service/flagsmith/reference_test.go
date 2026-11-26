@@ -50,6 +50,25 @@ func weighted(st map[string]any, optionID int, value string, pct float64) map[st
 	return st
 }
 
+// UC: UC-054 BR-006
+// An agent/enabled feature that already exists switched off is a stop held in
+// Flagsmith: the start never writes a reference over it, whatever value it shows.
+func TestStartNeverTurnsAnExistingStopOn(t *testing.T) {
+	for _, staged := range []any{nil, "off", "on", "watch", "act"} {
+		e := newStartEnv(t)
+		f := e.admin.f
+		f.ServeFlagAPI()
+		e.admin.features = []fsFeature{{ID: 1, Name: "enabled"}}
+		f.SetDocument(testDocument([]map[string]any{fstate("enabled", false, staged)}, nil), "")
+		if err := e.s.Start(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if n := referencePatches(f)[1]; n != 0 {
+			t.Fatalf("UC-054/BR-006 enabled switched off with %v: written %d times, want never", staged, n)
+		}
+	}
+}
+
 // UC: UC-054 A3 BR-002
 func TestStartWritesReferenceValues(t *testing.T) {
 	e := newStartEnv(t)
@@ -113,12 +132,20 @@ func TestStartWritesReferenceValues(t *testing.T) {
 		if len(created) == 0 {
 			t.Fatal("no feature created")
 		}
+		sawStop := false
 		for _, c := range created {
 			p := e.reg.Get(e.st.Baseline().SetOf(c.Name), c.Name)
 			got, enabled, _ := storedDefault(t, f, c.ID)
-			if want := e.l.BaselineFlag(p.Set, p.Key).DefaultVariant; enabled || got != want {
-				t.Fatalf("%s: enabled=%v %q, want enabled=false %q", c.Name, enabled, got, want)
+			want := e.l.BaselineFlag(p.Set, p.Key).DefaultVariant
+			// agent/enabled is created switched on at its baseline: off would read as the stop.
+			wantOn := p.Set == "agent" && p.Key == "enabled"
+			sawStop = sawStop || wantOn
+			if enabled != wantOn || got != want {
+				t.Fatalf("%s: enabled=%v %q, want enabled=%v %q", c.Name, enabled, got, wantOn, want)
 			}
+		}
+		if !sawStop {
+			t.Fatal("setup: agent/enabled was not among the created features")
 		}
 	})
 	t.Run("UC-054/A3 FR-227 the writes are push spans with op reference and leave the link state alone", func(t *testing.T) {

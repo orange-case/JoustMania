@@ -84,7 +84,7 @@ def test_wrapping_is_an_explicit_set_of_options():
 # Every preview option: its ladder, a status at a given start, and whether it wraps.
 def _status_at(option: str, start: str) -> menu_pb2.GetMenuStatusResponse:
     # Effective sensitivity and teams off their ladders, so an `automatic` start is the automatic rung.
-    status = menu_pb2.GetMenuStatusResponse(sensitivity=7, num_teams=0, agent_enabled_state="on")
+    status = menu_pb2.GetMenuStatusResponse(sensitivity=7, num_teams=0, agent_enabled_state="act")
     if option == "current_game":
         status.selection = start
     elif option == "decision.backend":
@@ -197,7 +197,7 @@ def test_preview_of_a_status_field_out_of_range_is_unknown():
 
 
 @pytest.mark.uc("UC-015", br=["BR-013"])
-@pytest.mark.parametrize("enabled", ["on", "off", "unknown"])
+@pytest.mark.parametrize("enabled", ["act", "watch", "off", "unknown"])
 def test_agent_level_preview_with_the_level_unresolved_is_unknown(enabled):
     """The menu fails closed when the level cannot be read: no guessed value."""
     status = menu_pb2.GetMenuStatusResponse(agent_level="", agent_enabled_state=enabled)

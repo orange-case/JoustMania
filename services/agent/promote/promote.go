@@ -24,9 +24,9 @@
 //     at least one objective. There is NO test-reachable constructor for a real
 //     GitHub client; a test that wants one cannot get one.
 //   - The SAFE flag DEFAULT is baked in: mode defaults to issue (NEVER
-//     autonomous). autonomous is additionally behind the agent `enabled`
-//     kill-switch — the caller passes Config.Enabled, and a disabled agent degrades
-//     autonomous to a recorded no-op.
+//     autonomous). autonomous is additionally behind `enabled` = act — the caller
+//     passes Config.Enabled, and an agent in off or watch degrades autonomous to a
+//     recorded no-op.
 //   - Real GitHub is default-off, fail-closed: without the token the real client
 //     is not built; main.go passes the inert recording no-op fake, and an issue
 //     promotion degrades to a RECORDED no-op (logged + span reason), never a
@@ -60,8 +60,8 @@ const (
 	// NO code or flag change is applied. This is the SAFE default mode.
 	ModeIssue Mode = "issue"
 	// ModeAutonomous applies the validated change to the REAL default. The
-	// highest-privilege path; default-OFF and additionally behind the agent
-	// kill-switch (Config.Enabled).
+	// highest-privilege path; default-OFF and additionally behind `enabled` = act
+	// (Config.Enabled).
 	ModeAutonomous Mode = "autonomous"
 )
 
@@ -92,11 +92,11 @@ const (
 type Config struct {
 	// Mode is code_improvement.mode (default issue). Selects issue/autonomous.
 	Mode Mode
-	// Enabled is the agent `enabled` kill-switch (flags.Snapshot.Enabled). It gates
-	// ONLY the autonomous mode: a real-default mutation must never happen while the
-	// agent is disabled. issue does not consume it (opening an issue is not a
-	// live real-player change). A disabled agent degrades autonomous to a recorded
-	// no-op (OutcomeDiscarded + reason), never a silent real change.
+	// Enabled is `enabled` == act (flags.Flags.Applying). It gates ONLY the
+	// autonomous mode: a real-default mutation changes future games, so it never
+	// happens in off or watch. issue does not consume it (opening an issue is not a
+	// live real-player change). Otherwise autonomous degrades to a recorded no-op
+	// (OutcomeDiscarded + reason), never a silent real change.
 	Enabled bool
 
 	// killEpoch is Promoter.KillSwitchEpoch read before Enabled was resolved

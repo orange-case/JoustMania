@@ -62,7 +62,7 @@ SERVICE_COMPOSITION = replace(
         "experiment_dynamic_candidates": {"value": HOLD_FLAG},  # before the gates
         "experiment_dynamic_objective": {"variant": "endurance"},
         "experiment_dynamic_enabled": {"variant": "on"},
-        "enabled": {"variant": "on"},
+        "enabled": {"variant": "act"},
         "experiments_enabled": {"variant": "on"},
         "decision.backend": {"variant": "rules"},
         **{key: {"value": value} for key, value in TUNING.items()},

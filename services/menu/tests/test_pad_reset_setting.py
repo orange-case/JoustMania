@@ -28,7 +28,6 @@ DEFAULT_SETTINGS = {
 }
 LEVEL = ("agent", "interventions_allowed")
 ENABLED = ("agent", "enabled")
-GATE = ("agent", "interventions_enabled")
 
 
 @pytest.fixture(autouse=True)
@@ -326,17 +325,17 @@ async def test_a_stopped_agents_reset_clears_the_live_level_and_never_resumes(se
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-012"])
-@pytest.mark.parametrize("gate", ["on", "off"], ids=["running", "watching"])
-async def test_a_running_or_watching_agents_reset_clears_the_live_level_only(servicer, flags, gate):
+@pytest.mark.parametrize("state", ["act", "watch"], ids=["acting", "watching"])
+async def test_a_running_or_watching_agents_reset_clears_the_live_level_only(servicer, flags, state):
     operator_set(flags, LEVEL, "full")
-    flags.values[GATE] = gate
+    flags.values[ENABLED] = state
 
     reply = await pad(servicer, "reset_setting", option="agent_level", expect="standard")
 
     assert (reply.success, reply.value) == (True, "standard")
     assert flags.deletes == [(*LEVEL, "persist=true")]
-    assert flags.puts == []  # never enabled, never the gate
-    assert (flags.values[ENABLED], flags.values[GATE]) == ("on", gate)
+    assert flags.puts == []  # never enabled
+    assert flags.values[ENABLED] == state
 
 
 @pytest.mark.asyncio
@@ -388,7 +387,7 @@ async def test_setting_defaults_is_what_the_reset_puts_in_force(servicer, flags,
         flags.real[LEVEL] = layers["real"]
     if "stack" in layers:
         flags.stack[LEVEL] = flags.values[LEVEL] = layers["stack"]
-    flags.values[ENABLED] = layers.get("enabled", "on")
+    flags.values[ENABLED] = layers.get("enabled", "act")
     operator_set(flags, ("user", "game_instructions"), "on")
 
     await servicer.settings_ops.refresh_operator_settings()
@@ -480,7 +479,7 @@ async def test_status_lists_the_pad_commands_this_menu_understands(servicer):
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
 @pytest.mark.parametrize(
     ("enabled", "direction"),
-    [("on", "up"), ("off", "down"), ("off", "up")],
+    [("act", "up"), ("off", "down"), ("off", "up")],
 )
 async def test_level_step_from_the_shown_level_commits(servicer, flags, enabled, direction):
     """The live level is NOW whatever the agent's state (UC-015 BR-004)."""
@@ -494,7 +493,7 @@ async def test_level_step_from_the_shown_level_commits(servicer, flags, enabled,
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A3", br=["BR-014"])
-@pytest.mark.parametrize("enabled", ["on", "off"])
+@pytest.mark.parametrize("enabled", ["act", "off"])
 async def test_level_step_from_another_level_is_stale(servicer, flags, enabled):
     flags.values[ENABLED] = enabled
 
@@ -530,7 +529,7 @@ async def test_level_reset_whose_level_dropped_under_the_hold_is_stale(servicer,
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
-@pytest.mark.parametrize("enabled", ["on", "off"])
+@pytest.mark.parametrize("enabled", ["act", "off"])
 async def test_level_reset_from_the_level_it_replaces_commits(servicer, flags, enabled):
     operator_set(flags, LEVEL, "full")
     flags.values[ENABLED] = enabled

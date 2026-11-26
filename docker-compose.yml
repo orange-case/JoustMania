@@ -752,10 +752,10 @@ services:
       # port 8015 (selectors flagSetId=agent / game); an older pinned image
       # (IMAGE_TAG in .env) still defaults to its RPC port 8013.
       - FLAGD_HOST=flagd
-      # Action sink (#730/#1213, #1411): when the LIVE `interventions_enabled` flag
-      # (agent.json) is on, the agent applies each decision as ONE game-scoped write
-      # to the flag service (PUT/POST /interventions/<flag>). The gate is read per
-      # Apply, fail-closed off, so a flagd outage never writes. No restart needed.
+      # Action sink (#730/#1213, #1411): when the LIVE `enabled` flag (agent.json)
+      # is `act` (not `watch` or `off`), the agent applies each decision as ONE
+      # game-scoped write to the flag service (PUT/POST /interventions/<flag>). It is
+      # read per Apply, fail-closed off, so a flagd outage never writes. No restart needed.
       - FLAG_SERVICE_URL=http://flag-service:8070
       # ---- Proposer / retro text backend (#1234) ----
       # The OFFLINE LLM seams (shadow-experiment proposer, post-game retro), NOT

@@ -33,8 +33,8 @@ import (
 // NewRealDefaultWriterFromEnv always builds it, because the kill switch needs it
 // as reverter and lister (an overlay from before a restart is still removed);
 // main.go wires it as the WRITER only when an objective is validated (UC-043
-// A23), and the write is additionally behind the agent kill-switch
-// (Config.Enabled, checked in promoteAutonomous).
+// A23), and the write is additionally behind `enabled` = act (Config.Enabled,
+// checked in promoteAutonomous).
 
 // gameFlagSet is the only flag set a promotion writes.
 const gameFlagSet = "game"

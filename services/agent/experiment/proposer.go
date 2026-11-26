@@ -115,6 +115,9 @@ type ProposerConfig struct {
 	// no experiment write. A nil Permit FAILS CLOSED (SkipReasonNoPermit): a caller
 	// that forgets to wire the gate gets no proposals, never ungated ones.
 	Permit func(ctx context.Context) (ok bool, reason string)
+	// WritePermit, when set, is checked after Permit right before the write: drafting
+	// may run in watch, but the write starts an experiment, which needs `enabled` = act.
+	WritePermit func(ctx context.Context) (ok bool, reason string)
 	// GameKind is the kind of the game whose end triggered this cycle ("real",
 	// "shadow", ...). It is handed to the LLM admission (SetLLMAdmission) for the
 	// llm.eligible_game_kinds check, exactly as the retro checks its game's kind.
@@ -135,6 +138,8 @@ const (
 	// d): AGENT_EXPERIMENT_PROPOSER_ENABLED is not true, or experiment_proposer_enabled
 	// is off or cannot be resolved.
 	SkipReasonProposerDisabled = "proposer_disabled"
+	// SkipReasonAgentWatch: `enabled` is watch, so the drafted proposal is not written.
+	SkipReasonAgentWatch = "agent_watch"
 )
 
 // LLMAdmission is the shared LLM call gate the Proposer consults before a model
@@ -313,6 +318,14 @@ func permit(ctx context.Context, cfg ProposerConfig) (bool, string) {
 	return cfg.Permit(ctx)
 }
 
+// writePermit is permit plus the optional WritePermit.
+func writePermit(ctx context.Context, cfg ProposerConfig) (bool, string) {
+	if ok, reason := permit(ctx, cfg); !ok || cfg.WritePermit == nil {
+		return ok, reason
+	}
+	return cfg.WritePermit(ctx)
+}
+
 // ProposeOnce runs one propose cycle: kill-switch gate, cadence-gate, LLM
 // admission (eligibility + shared budget, real backend only), build the prompt, infer,
 // defensively decode, and submit through Gate.Review. It NEVER returns an error —
@@ -397,15 +410,15 @@ func (p *Proposer) ProposeOnce(ctx context.Context, n Narrative, cfg ProposerCon
 		attribute.String(AttrProposedDiffSummary, summarizeProposal(proposal)),
 	)
 
-	// Re-check the kill switch before the WRITE (#1270): the model call can take
+	// Re-check the gates before the WRITE (#1270), plus `enabled` = act: the model call can take
 	// seconds, and an operator who switched the agent off meanwhile must not see a
 	// new experiment land afterwards.
-	if ok, reason := permit(ctx, cfg); !ok {
+	if ok, reason := writePermit(ctx, cfg); !ok {
 		span.SetAttributes(
 			attribute.String(AttrOutcome, string(ProposeDisabled)),
 			attribute.String(AttrReason, reason),
 		)
-		p.log.Info("code_improvement.propose_skipped: switched off during inference, no write", "reason", reason, "flag", proposal.FlagKey)
+		p.log.Info("code_improvement.propose_skipped: gate closed before the write, no write", "reason", reason, "flag", proposal.FlagKey)
 		pr := proposal
 		return Result{Outcome: ProposeDisabled, Proposal: &pr, Reason: reason}
 	}
