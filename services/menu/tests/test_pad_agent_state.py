@@ -26,7 +26,7 @@ def set_state(flags, state: str) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-002"])
-@pytest.mark.parametrize("state", ["on", "watch", "off"])
+@pytest.mark.parametrize("state", ["act", "watch", "off"])
 async def test_stop_writes_enabled_alone_whatever_the_state(servicer, flags, state):
     set_state(flags, state)
 
@@ -80,11 +80,11 @@ async def test_agent_switch_takes_only_the_stop(servicer, flags, direction):
 @pytest.mark.parametrize(
     ("now", "state", "written"),
     [
-        ("off", "on", [("agent", "enabled", "on")]),
+        ("off", "act", [("agent", "enabled", "act")]),
         ("off", "watch", [("agent", "enabled", "watch")]),
-        ("watch", "on", [("agent", "enabled", "on")]),
-        ("on", "watch", [("agent", "enabled", "watch")]),
-        ("on", "off", [("agent", "enabled", "off")]),
+        ("watch", "act", [("agent", "enabled", "act")]),
+        ("act", "watch", [("agent", "enabled", "watch")]),
+        ("act", "off", [("agent", "enabled", "off")]),
         ("watch", "off", [("agent", "enabled", "off")]),
     ],
 )
@@ -114,7 +114,7 @@ async def test_switch_from_a_state_that_moved_under_the_hold_is_stale(servicer, 
     """A stop from elsewhere during the hold is never undone unseen."""
     set_state(flags, "off")
 
-    reply = await pad(servicer, "agent_state", state="watch", **{"from": "on"})
+    reply = await pad(servicer, "agent_state", state="watch", **{"from": "act"})
 
     assert (reply.success, reply.error) == (False, "stale")
     assert flags.puts == []
@@ -127,9 +127,11 @@ async def test_switch_from_a_state_that_moved_under_the_hold_is_stale(servicer, 
 @pytest.mark.parametrize(
     "data",
     [
-        {"state": "on"},
+        {"state": "act"},
         {"state": "ON", "from": "off"},
-        {"state": "on", "from": "stopped"},
+        {"state": "on", "from": "off"},  # the value before the rename to act
+        {"state": "watch", "from": "on"},
+        {"state": "act", "from": "stopped"},
         {"state": "", "from": "off"},
     ],
 )
@@ -142,9 +144,9 @@ async def test_switch_with_a_bad_state_or_from_is_refused(servicer, flags, data)
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A3", br=["BR-012"])
 async def test_switch_with_the_state_unreadable_writes_nothing(servicer, flags):
-    set_state(flags, "on")
+    set_state(flags, "act")
     flags.failing_get = {ENABLED}
-    reply = await pad(servicer, "agent_state", state="off", **{"from": "on"})
+    reply = await pad(servicer, "agent_state", state="off", **{"from": "act"})
     assert (reply.success, reply.error) == (False, "flag_service_unavailable")
     assert flags.puts == []
 
@@ -156,7 +158,7 @@ async def test_a_failed_write_leaves_the_state(servicer, flags):
     set_state(flags, "off")
     flags.failing = {ENABLED}
 
-    reply = await pad(servicer, "agent_state", state="on", **{"from": "off"})
+    reply = await pad(servicer, "agent_state", state="act", **{"from": "off"})
 
     assert (reply.success, reply.error) == (False, "flag_service_unavailable")
     assert flags.values[ENABLED] == "off"
@@ -168,7 +170,7 @@ async def test_a_failed_write_leaves_the_state(servicer, flags):
 async def test_a_value_outside_the_three_states_is_unreadable(servicer, flags):
     """A bool-era `on` is a state, but a stray value never is: the switch writes nothing."""
     flags.values[ENABLED] = "true"
-    reply = await pad(servicer, "agent_state", state="off", **{"from": "on"})
+    reply = await pad(servicer, "agent_state", state="off", **{"from": "act"})
     assert (reply.success, reply.error) == (False, "flag_service_unavailable")
     assert flags.puts == []
 
@@ -179,11 +181,11 @@ async def test_a_value_outside_the_three_states_is_unreadable(servicer, flags):
 @pytest.mark.parametrize(
     ("now", "state", "voice"),
     [
-        ("on", "off", Sound.MENU_VOX_ADMINOP_OFF),
-        ("off", "on", Sound.MENU_VOX_ADMINOP_ON),
+        ("act", "off", Sound.MENU_VOX_ADMINOP_OFF),
+        ("off", "act", Sound.MENU_VOX_ADMINOP_ON),
         ("off", "watch", Sound.MENU_VOX_AGENT_WATCHING),
-        ("watch", "on", Sound.MENU_VOX_INTERVENTIONS_ON),
-        ("on", "watch", Sound.MENU_VOX_INTERVENTIONS_OFF),
+        ("watch", "act", Sound.MENU_VOX_INTERVENTIONS_ON),
+        ("act", "watch", Sound.MENU_VOX_INTERVENTIONS_OFF),
     ],
 )
 async def test_switch_says_the_change(servicer, flags, now, state, voice):

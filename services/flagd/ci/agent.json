@@ -8,7 +8,7 @@
       "variants": {
         "off": "off",
         "watch": "watch",
-        "on": "on"
+        "act": "act"
       },
       "defaultVariant": "off"
     },

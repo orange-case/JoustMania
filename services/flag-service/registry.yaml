@@ -50,7 +50,7 @@ flags:
 
   # --- agent (flags.md §13.2) ---------------------------------------------------
   - {set: agent, key: interventions_allowed, kind: overlay, scope: [stack], persist: true}
-  - {set: agent, key: enabled, kind: overlay, scope: [stack], bounds: {variants: ["off", "watch", "on"]}}
+  - {set: agent, key: enabled, kind: overlay, scope: [stack], bounds: {variants: ["off", "watch", "act"]}}
   # The goal (flags.md §13.2): operator-written, a declared variant only (never a free
   # weighting), stack-wide, not persisted, so a restart returns to the file's goal.
   - {set: agent, key: objectives, kind: overlay, scope: [stack], bounds: {variants: [endurance_focused, balanced_focused, accelerate_focused, chaos_focused, mixed]}}

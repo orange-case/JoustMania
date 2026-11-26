@@ -49,7 +49,7 @@ SHIELD_KNOB_LADDER: list[str] = [AUTOMATIC, *SHIELD_ACTIVATION_LADDER]
 # UC-015 BR-004 / BR-019: the intervention levels, most restrictive first; clamped, never wraps.
 AGENT_POLICY_LEVELS: list[str] = ["none", "ambient", "standard", "full"]
 # UC-016 BR-011, BR-012: the `AGENT` row 1 switch, least first (`off`: `enabled` off; `watch`: the gate off).
-AGENT_STATE_LADDER: list[str] = ["off", "watch", "on"]
+AGENT_STATE_LADDER: list[str] = ["off", "watch", "act"]
 
 # UC-044 decision backends, in knob order (UC-015 BR-004; wraps, `WRAPPING`).
 BACKENDS: list[str] = ["rules", "claude", "jev"]

@@ -219,7 +219,9 @@ def details_client(details: FlagEvaluationDetails, flag_key: str = "enabled"):
 @pytest.mark.parametrize(
     ("details", "expected"),
     [
-        (FlagEvaluationDetails(flag_key="enabled", value="on", variant="on", reason=Reason.STATIC), "on"),
+        (FlagEvaluationDetails(flag_key="enabled", value="act", variant="act", reason=Reason.STATIC), "act"),
+        # The value before the rename to act: not a state.
+        (FlagEvaluationDetails(flag_key="enabled", value="on", variant="on", reason=Reason.STATIC), "unknown"),
         (FlagEvaluationDetails(flag_key="enabled", value="off", variant="off", reason=Reason.STATIC), "off"),
         # flagd's own default variant is a real resolution.
         (FlagEvaluationDetails(flag_key="enabled", value="watch", variant="watch", reason=Reason.DEFAULT), "watch"),
@@ -248,7 +250,7 @@ def details_client(details: FlagEvaluationDetails, flag_key: str = "enabled"):
         # No variant: the client fell back to the default.
         (FlagEvaluationDetails(flag_key="enabled", value="off", variant=None), "unknown"),
     ],
-    ids=["on", "off", "flagd-default-variant", "bool-value", "not-ready", "error-code", "no-op-provider", "no-variant"],
+    ids=["act", "legacy-on", "off", "flagd-default-variant", "bool-value", "not-ready", "error-code", "no-op-provider", "no-variant"],
 )
 async def test_status_agent_enabled_state_tells_unknown_from_off(menu, details, expected):
     menu.agent_settings_client = details_client(details)
@@ -256,7 +258,7 @@ async def test_status_agent_enabled_state_tells_unknown_from_off(menu, details, 
     reply = await status(menu)
 
     assert reply.agent_enabled_state == expected
-    assert reply.agent_enabled is (expected in ("watch", "on"))
+    assert reply.agent_enabled is (expected in ("watch", "act"))
 
 
 # --- lifecycle_generation ----------------------------------------------------------------------

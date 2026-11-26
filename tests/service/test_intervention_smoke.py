@@ -111,9 +111,9 @@ RATE_LIMIT_BUDGET = 50
 
 
 def set_interventions_allowed(variant: str) -> None:
-    """Set ``interventions_allowed`` to a named variant, ``enabled`` on first: the coordinator
+    """Set ``interventions_allowed`` to a named variant, ``enabled`` = ``act`` first: the coordinator
     applies nothing while the agent is stopped (UC-040 BR-004)."""
-    flag_service_default().put("agent", "enabled", variant="on")
+    flag_service_default().put("agent", "enabled", variant="act")
     flag_service_default().put("agent", "interventions_allowed", variant=variant)
 
 

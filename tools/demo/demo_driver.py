@@ -471,8 +471,8 @@ Where to watch the agent react
 
 Prerequisites for the agent to ACT (see docs/agent-act-runbook.md)
 ------------------------------------------------------------------
-  The agent runs while `enabled` is `watch` or `on` and only ACTS when it is `on`
-  (./scripts/agent-killswitch.sh watch | on; read each cycle, no agent restart).
+  The agent runs while `enabled` is `watch` or `act` and only ACTS when it is `act`
+  (./scripts/agent-killswitch.sh watch | act; read each cycle, no agent restart).
   And the permission layer (`interventions_allowed`) must include the rule's
   intervention. To SEE a *blocked* decision, run --scenario blocked_battery with the
   stock `ambient` allow-list. In `watch` the OBSERVE/DECIDE pipeline

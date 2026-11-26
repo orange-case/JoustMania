@@ -45,7 +45,7 @@ pytestmark = pytest.mark.tier("service")
 SERVICE_COMPOSITION = AGENT
 
 
-def _configure(stack, backend: str, state: str = "on", **kwargs) -> None:
+def _configure(stack, backend: str, state: str = "act", **kwargs) -> None:
     configure_agent(backend=backend, state=state, **kwargs)
     wait_agent_flags_served(
         stack, backend=backend, state=state, rewrite=lambda: configure_agent(backend=backend, state=state, **kwargs)

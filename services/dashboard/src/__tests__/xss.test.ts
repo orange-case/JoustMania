@@ -73,7 +73,7 @@ describe("UC-035: XSS in the agent view (rationale, decide answers)", () => {
     };
     view.render({
       feed: [feedRow],
-      flags: { gameId: IMG, gameKind: EVIL_ATTR, traceId: EVIL_ATTR, spanId: "s", trigger: IMG, tsMs: 0, enabled: "on", decisionBackend: IMG, objectives: EVIL_ATTR, actThreshold: null } as never,
+      flags: { gameId: IMG, gameKind: EVIL_ATTR, traceId: EVIL_ATTR, spanId: "s", trigger: IMG, tsMs: 0, enabled: "act", decisionBackend: IMG, objectives: EVIL_ATTR, actThreshold: null } as never,
       overlay: { appliedOk: 1, appliedError: 0, shadowAppliedOk: 0, shadowAppliedError: 0, shadowBlocked: 0, totalBlocked: 1, blockedByAction: [{ action: IMG, blocked: 1 }], blockedByReason: [{ reason: EVIL_ATTR, count: 1 }] },
     });
     for (const id of ["f", "g", "o"]) expectInert(document.getElementById(id)!);

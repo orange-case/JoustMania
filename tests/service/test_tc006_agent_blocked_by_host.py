@@ -126,7 +126,7 @@ async def test_agent_makes_no_remote_call_after_host_restricts_it(fresh_stack):
     wait_agent_flags_served(
         stack,
         backend="claude",
-        state="on",
+        state="act",
         rewrite=lambda: configure_agent(backend="claude", allowed=START_LEVEL, claude_fake=True),
     )
 

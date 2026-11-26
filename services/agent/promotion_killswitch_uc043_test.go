@@ -117,7 +117,7 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 
 	t.Run("UC-045/main watch aborts experiments but reverts no promotion", func(t *testing.T) {
 		loop, _, lc := loopForConfigTest(t, 8)
-		state := flags.EnabledOn
+		state := flags.EnabledAct
 		loop.enabledOverride = func(context.Context) flags.EnabledState { return state }
 		lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
 		ctx := context.Background()
@@ -132,7 +132,7 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 		loop.allocateIfEnabled(ctx)
 
 		if got := loop.registry.LiveCount(); got != 0 {
-			t.Fatalf("LiveCount = %d in watch, want 0: arm writes need enabled=on", got)
+			t.Fatalf("LiveCount = %d in watch, want 0: arm writes need enabled=act", got)
 		}
 		if promotions.calls != 0 {
 			t.Fatalf("kill-switch revert ran %d times in watch, want 0 (watch is not a stop)", promotions.calls)
@@ -141,7 +141,7 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 }
 
 // fitnessFlagsEvaluator serves fitness.* int flags from a map; everything else
-// falls back to the caller's default (enabled is on).
+// falls back to the caller's default (enabled is act).
 type fitnessFlagsEvaluator struct {
 	ints map[string]int64
 }
@@ -152,7 +152,7 @@ func (e fitnessFlagsEvaluator) BooleanValue(_ context.Context, _ string, d bool,
 
 func (e fitnessFlagsEvaluator) StringValue(_ context.Context, k string, d string, _ openfeature.EvaluationContext, _ ...openfeature.Option) (string, error) {
 	if k == "enabled" {
-		return "on", nil
+		return "act", nil
 	}
 	return d, nil
 }

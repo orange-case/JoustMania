@@ -38,7 +38,7 @@ func recordingLoop(t *testing.T, snap flags.Snapshot, out []Decision) (*Loop, *t
 func TestDecisionSpan_FullFlagSetLifted(t *testing.T) {
 	snap := flags.Snapshot{
 		Enabled:      true,
-		EnabledState: flags.EnabledOn,
+		EnabledState: flags.EnabledAct,
 		Objectives:   map[string]float64{"endurance": 0.6, "chaos": 0.4},
 		InterventionsAllowed: []string{
 			"grant_shield", "play_audio_cue",
@@ -60,7 +60,7 @@ func TestDecisionSpan_FullFlagSetLifted(t *testing.T) {
 	dec := spansByName(sr.Ended(), SpanDecision)[0]
 
 	wantStr := map[string]string{
-		AttrEnabled:              "on",
+		AttrEnabled:              "act",
 		AttrGameKind:             "real",
 		AttrObjectives:           "chaos=0.4,endurance=0.6",
 		AttrInterventionsAllowed: "grant_shield,play_audio_cue",

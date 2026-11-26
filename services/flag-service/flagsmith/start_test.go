@@ -786,7 +786,7 @@ func TestStartSeedsNothing(t *testing.T) {
 		[]map[string]any{
 			fstate("decision.backend", true, "claude"),  // persist: yes
 			fstate("experiment_tick_seconds", true, 10), // a plain flag
-			fstate("enabled", true, "on"),               // a kill switch
+			fstate("enabled", true, "act"),              // a kill switch
 		},
 		[]map[string]any{
 			identityOverride("game:g1", "u-g1", fstate("pacing_profile", true, "calm")),

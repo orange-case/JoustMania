@@ -82,10 +82,10 @@ AGENT_SPANS_WITH_GAME_KIND = ("invoke_agent joustmania-agent", "agent.decision")
 # The Agent tab's decide query (agentDecide.ts DECIDE_OPERATION, DECIDE_TRACE_LIMIT).
 DECIDE_QUERY = {"service": "agent", "operation": "invoke_agent joustmania-agent", "limit": 5}
 
-# Agent on (decisions applied), rules backend, the allow-list that lets the rules engine's
+# Agent at act (decisions applied), rules backend, the allow-list that lets the rules engine's
 # in-game levers through on both sides (services/flagd/ci/agent.json).
 AGENT_FLAGS = {
-    "enabled": "on",
+    "enabled": "act",
     "interventions_allowed": "standard",
     "decision.backend": "rules",
 }
@@ -113,7 +113,7 @@ _FLAGS: FlagService | None = None
 def _flags_served(client) -> bool:
     ctx = EvaluationContext()
     return (
-        client.get_string_value("enabled", "", ctx) == "on"
+        client.get_string_value("enabled", "", ctx) == "act"
         and client.get_string_value("decision.backend", "", ctx) == "rules"
     )
 

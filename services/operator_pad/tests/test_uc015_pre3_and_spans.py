@@ -25,7 +25,7 @@ def lobby_status() -> menu_pb2.GetMenuStatusResponse:
         lifecycle_live=False,
         lifecycle_generation=1,
         agent_enabled=True,
-        agent_enabled_state="on",
+        agent_enabled_state="act",
         agent_level="standard",
         agent_backend="claude",  # one step up is no raise (UC-016 BR-014, D12)
         audio_volume_master="normal",

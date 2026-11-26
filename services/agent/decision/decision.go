@@ -127,7 +127,7 @@ type ActionSink interface {
 }
 
 // ActionApplier is optionally implemented by a sink that can turn an Apply into a
-// no-op (actions.GatedActionSink while `enabled` is not on). It reads the
+// no-op (actions.GatedActionSink while `enabled` is not act). It reads the
 // gate and writes in one call and reports which happened: applied=false means
 // nothing was written, so the loop does not count the decision in
 // agent_interventions_applied_total (UC-040 A11, D-A9, #1681).
@@ -1082,7 +1082,7 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	// Apply succeeded: count the intervention as applied (#790) — the numerator for
 	// the dashboard's applied-rate panel. Only a clean Apply that wrote something
 	// increments this: an apply error returns above, and a gated no-op
-	// (`enabled` not on, UC-040 A11) is not counted (#1681).
+	// (`enabled` not act, UC-040 A11) is not counted (#1681).
 	if !wrote {
 		// #2093: the write never left the agent, so the spans must not read as an
 		// effective decision. Both spans, so a Jaeger search on either finds it.
@@ -1116,7 +1116,7 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	// delta, attributed to the decision's intervention id (made before the write,
 	// UC-101 BR-003; the sample reuses it, no second id). It is MEASUREMENT
 	// ONLY — it never reverts the intervention. Scheduled only for WRITTEN decisions:
-	// a blocked one, a gated no-op (`enabled` not on) and a failed write
+	// a blocked one, a gated no-op (`enabled` not act) and a failed write
 	// never moved the game, so they get no sample (#1728 review; a failed write still
 	// carries its id on the decision span, UC-101 A2). No sample is scheduled when effect
 	// measurement is un-wired, the cycle has no baseline signals or the pending cap is

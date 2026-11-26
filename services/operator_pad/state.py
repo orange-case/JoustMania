@@ -22,14 +22,14 @@ AGENT_LEVELS = frozenset({"none", "ambient", "standard", "full"})
 
 # `agent_enabled_state` of a resolved `enabled`; `unknown`, and the empty value of a menu older than #2101,
 # are not (services.md §3.1).
-ENABLED_STATES = frozenset({"off", "watch", "on"})
+ENABLED_STATES = frozenset({"off", "watch", "act"})
 
 
-AGENT_ON, AGENT_WATCH, AGENT_OFF, AGENT_UNKNOWN = "on", "watch", "off", "unknown"
+AGENT_ACT, AGENT_WATCH, AGENT_OFF, AGENT_UNKNOWN = "act", "watch", "off", "unknown"
 
 
 def agent_state(status: menu_pb2.GetMenuStatusResponse | None) -> str:
-    """UC-016 BR-011: `enabled` as `off`, `watch` or `on`, or `unknown` by BR-001 line 3."""
+    """UC-016 BR-011: `enabled` as `off`, `watch` or `act`, or `unknown` by BR-001 line 3."""
     if status is None or status.agent_enabled_state not in ENABLED_STATES:
         return AGENT_UNKNOWN
     if status.agent_enabled_state == "off":

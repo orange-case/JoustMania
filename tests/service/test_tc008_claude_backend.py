@@ -46,7 +46,7 @@ CLAUDE_CHAT_SPAN_PREFIX = "chat "
 def _configure(stack) -> None:
     configure_agent(backend="claude", claude_fake=True)
     wait_agent_flags_served(
-        stack, backend="claude", state="on", rewrite=lambda: configure_agent(backend="claude", claude_fake=True)
+        stack, backend="claude", state="act", rewrite=lambda: configure_agent(backend="claude", claude_fake=True)
     )
 
 

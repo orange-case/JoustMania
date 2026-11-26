@@ -200,7 +200,7 @@ async def test_no_status_at_the_press_is_silent():
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017", "BR-013"], steps=[5])
 async def test_an_unreadable_agent_level_is_silent():
     rig = Rig()
-    unknown = menu_pb2.GetMenuStatusResponse(agent_level="", agent_enabled_state="on")
+    unknown = menu_pb2.GetMenuStatusResponse(agent_level="", agent_enabled_state="act")
     rig.step(1, unknown, key="K3", option="agent_level", lobby_only=False)
     await rig.time.advance(0.6)
     assert rig.clips == []
@@ -219,7 +219,7 @@ async def test_a_lobby_only_layer_while_live_says_not_possible_once_and_no_value
 @pytest.mark.uc("UC-015", flow="A1", br=["BR-017"], steps=[5])
 async def test_the_agent_level_previews_while_a_game_is_live():
     rig = Rig()
-    live = menu_pb2.GetMenuStatusResponse(lifecycle_live=True, agent_level="ambient", agent_enabled_state="on")
+    live = menu_pb2.GetMenuStatusResponse(lifecycle_live=True, agent_level="ambient", agent_enabled_state="act")
     rig.step(1, live, key="K3", option="agent_level", lobby_only=False)
     await rig.time.advance(0.6)
     assert rig.files() == [Sound.MENU_VOX_LABEL_AGENT.value, Sound.MENU_VOX_ADMINOP_2.value]

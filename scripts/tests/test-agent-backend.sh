@@ -34,7 +34,7 @@ write_fixture() {
   "flags": {
     "enabled": {
       "state": "ENABLED",
-      "variants": { "off": "off", "watch": "watch", "on": "on" },
+      "variants": { "off": "off", "watch": "watch", "act": "act" },
       "defaultVariant": "off"
     },
     "decision.backend": {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Self-contained tests for scripts/agent-dryrun-enable.sh (FR-090): `on` sets the
 # explicit candidate (experiment_dynamic_candidates = windows_frantic) and
-# experiment_dynamic_enabled BEFORE the `enabled` (on) and `experiments_enabled`
+# experiment_dynamic_enabled BEFORE the `enabled` (act) and `experiments_enabled`
 # gates, `off` sets `enabled` off and clears the other three, and `status` shows them.
 #
 # Runs the helper against scripts/tests/fake_flag_service.py serving
@@ -68,7 +68,7 @@ expect "status shows decision.backend" 0 "decision.backend = " -- status
 expect "on reports the candidate" 0 "experiment_dynamic_candidates -> windows_frantic" -- on
 check "on sets the candidate windows_frantic" experiment_dynamic_candidates windows_frantic
 check "on sets experiment_dynamic_enabled on" experiment_dynamic_enabled on
-check "on sets enabled on" enabled on
+check "on sets enabled act" enabled act
 check "on sets experiments_enabled on" experiments_enabled on
 cand_line="$(line_of '^PUT /agent/experiment_dynamic_candidates ')"
 dyn_line="$(line_of '^PUT /agent/experiment_dynamic_enabled ')"

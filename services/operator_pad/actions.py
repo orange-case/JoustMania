@@ -358,7 +358,7 @@ class Actions:
         await self._cues.announce(label, voice)  # in the background (BR-009)
 
     async def _agent_tap(self, status) -> tuple[str, str]:
-        """K5 tap (UC-016 BR-011): `ON` / `WATCH` and the level, `OFF`; the refusal cue while unknown."""
+        """K5 tap (UC-016 BR-011): `ACT` / `WATCH` and the level, `OFF`; the refusal cue while unknown."""
         if status is None:
             await self._cues.failure()
             return "announce", MENU_UNAVAILABLE

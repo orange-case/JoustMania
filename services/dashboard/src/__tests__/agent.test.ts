@@ -41,7 +41,7 @@ const FLAG_REAL: FlagStateJson = {
   game_mode: "JoustFFA",
   trace_id: "0af7651916cd43dd8448eb211c80319c",
   updated_at_ms: T0_MS,
-  enabled: "on",
+  enabled: "act",
   objectives: "engagement=1.00",
   interventions_allowed: "grant_shield,end_game",
   battery_threshold: 20,
@@ -99,7 +99,7 @@ describe("UC-035: main step 3, flag panel from the agent's state", () => {
       actThreshold: 0.7,
       batteryThreshold: "20",
       maxPerMinute: "6",
-      enabled: "on",
+      enabled: "act",
       objectives: "engagement=1.00",
       interventionsAllowed: "grant_shield,end_game",
       experimentsEnabled: true,
@@ -128,13 +128,14 @@ describe("UC-035: main step 3, flag panel from the agent's state", () => {
     const watch = renderFlagPanel({ ...base, enabled: "watch" });
     expect(watch).toMatch(/agent state<\/span>\s*<span class="agent-flag-val">watch</);
     expect(watch).toContain(WATCH_HINT);
-    for (const quiet of ["on", "off", null] as const) {
+    for (const quiet of ["act", "off", null] as const) {
       expect(renderFlagPanel({ ...base, enabled: quiet })).not.toContain(WATCH_HINT);
     }
   });
 
   it("UC-035/main step 3 an unknown or boolean enabled reads — (null)", () => {
     expect(flagPanelFromState({ game_id: "g", enabled: "maybe" }).enabled).toBeNull();
+    expect(flagPanelFromState({ game_id: "g", enabled: "on" }).enabled).toBeNull();
     expect(flagPanelFromState({ game_id: "g", enabled: true as never }).enabled).toBeNull();
   });
 

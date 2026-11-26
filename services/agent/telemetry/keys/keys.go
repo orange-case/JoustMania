@@ -152,7 +152,7 @@ const (
 	// the Link references the actual game-start span and the span_id is searchable
 	// as a span tag. Empty/absent when no valid game span_id was ingested.
 	AttrGameTraceSpanID = "game.trace_span_id"
-	// AttrEnabled is the `enabled` state (off, watch or on). Lifted from
+	// AttrEnabled is the `enabled` state (off, watch or act). Lifted from
 	// the cycle's LayerState onto every decision span (including the disabled
 	// kill-switch span) so a trace shows whether the agent was live (#729).
 	AttrEnabled = "agent.enabled"
@@ -190,7 +190,7 @@ const (
 	// decision that passed every permission gate was actually written. Absent on a
 	// blocked decision (decision.blocked already says so) and on a failed write
 	// (the span carries the error). decision.applied=false carries the reason
-	// watch when `enabled` was not on, so the write was a no-op (UC-040 A11).
+	// watch when `enabled` was not act, so the write was a no-op (UC-040 A11).
 	AttrDecisionApplied          = "decision.applied"
 	AttrDecisionNotAppliedReason = "decision.not_applied_reason"
 	// AttrFitnessEvaluated lists the fitness values evaluated for the

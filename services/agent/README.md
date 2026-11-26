@@ -161,12 +161,12 @@ model**, applied in order:
 ### The four flag layers
 
 1. **Existence** (gates the loop) —
-   - `enabled` (string: `off` / `watch` / `on`): `off` is the kill switch: the
+   - `enabled` (string: `off` / `watch` / `act`): `off` is the kill switch: the
      loop short-circuits before any rules run (only the throttled `agent.disabled`
      span is emitted). `watch` runs everything (decide, journal, spans, dashboard)
-     but writes nothing that changes a game. `on` applies decisions. An
-     unresolvable or unknown value reads `off`, so the agent comes up inert when
-     flagd is unreachable.
+     but writes nothing that changes a game. `act` applies decisions. An
+     unresolvable or unknown value (the legacy `on` included) reads `off`, so the
+     agent comes up inert when flagd is unreachable.
 2. **Objective** (steers the rules) —
    - `objectives` (object → `map[string]float64`): per-session goal weights. The
      loop publishes the per-cycle value into the rules engine through a
@@ -220,12 +220,12 @@ The two decision hooks:
 - **Rules engine** (#726) — `ObjectiveRules`, the objective-weighted decision
   logic below. Active by default; its objectives are driven live by the flag.
 - **Action sink** (#730) — applies permitted intents via OpenFeature/flagd.
-  **No-op unless `enabled` is `on`**: the gated sink re-reads the live `enabled`
-  flag per `Apply`. With it `on` the real `actions.Writer` is dispatched and
+  **No-op unless `enabled` is `act`**: the gated sink re-reads the live `enabled`
+  flag per `Apply`. With it `act` the real `actions.Writer` is dispatched and
   decisions are written to the `interventions` set through the flag service (see
   **Action sink** below); `watch`/`off`/flagd-unreachable is **fail-closed** —
   decisions are traced (`decision.not_applied_reason=watch`) and discarded. Flip
-  the flag through the flag service (`scripts/flags.sh set agent enabled on`), no
+  the flag through the flag service (`scripts/flags.sh set agent enabled act`), no
   restart.
 
 The flags wrapper lives in [`flags/`](flags/) and uses the OpenFeature Go SDK
@@ -419,7 +419,7 @@ decision in the cycle):
 
 | Attribute | Source | Today | Real value arrives with |
 |-----------|--------|-------|-------------------------|
-| `agent.enabled` | existence flag `enabled` | live string `off` / `watch` / `on` | — |
+| `agent.enabled` | existence flag `enabled` | live string `off` / `watch` / `act` | — |
 | `agent.objectives` | objective flag `objectives` | sorted `k=v` weights / `"unset"` | — |
 | `decide.backend` | the backend that decided this cycle (only when the decide hook ran) | `"rules"` / `"claude"` / ... | — |
 | `interventions.allowed` | permission flag `interventions_allowed` | `"none"` / `a,b,c` | — |
@@ -670,7 +670,7 @@ table to keep in sync with the code. Live gates (`enabled`, `experiments_enabled
 > deferred rehydrate and begins allocating); an on→off flip **stops**
 > it cleanly (`AbortAll` clears the experiment-arm values and frees capacity — in-flight shadow games
 > conclude/release normally). The master `enabled` flag still wins: experiments write
-> experiment-arm values into game flags, so they run only while `enabled` is `on`; in
+> experiment-arm values into game flags, so they run only while `enabled` is `act`; in
 > `watch` or `off` the loop aborts them regardless of these flags. **The `agent` set is human-owned** —
 > the agent has **no** write path to it, so it can never enable its own experiments.
 > The agent writes two flag sets, both through the flag service (epic #1407):
@@ -771,14 +771,14 @@ change:
    (read live each tick; `off` and an unresolved flag are closed, #1907). The
    loop is always built; while the gate is closed it runs no declare, spawn,
    experiment-arm write or promotion.
-2. **Master kill-switch** — `agent` set `enabled` = `on` (read live each
+2. **Master kill-switch** — `agent` set `enabled` = `act` (read live each
    cycle; `off` is the fail-closed fallback). When `off` the decision loop
    short-circuits with a throttled `agent.disabled` span (`decision/telemetry.go`
    `SpanDisabled`), and the experiment loop aborts running experiments with the
    teardown reason `kill-switch: agent disabled` (in `watch`: `agent watch: arm
-   writes need enabled=on`). Flip it with
-   `./scripts/agent-killswitch.sh on` (an in-memory overlay through the flag
-   service) — the baseline stays `off`.
+   writes need enabled=act`). Flip it with
+   `./scripts/agent-killswitch.sh act` (an in-memory overlay through the flag
+   service) — the baseline stays `watch` (`off` in CI).
 3. **`code_improvement.*` promotion gates** — separate flags that gate the
    **real-default promotion** action only (still subject to the invariant gate +
    kill-switch). They stay at defaults in the dry run, so a concluded experiment
@@ -813,7 +813,7 @@ scripts/flags.sh set agent interventions_allowed probe
 
 `noop` is a **harmless no-op in the action sink**: the `Writer` recognizes it and
 returns success **without writing any flag** (`actions/writer.go`,
-`InterventionNoop`). So with the `probe` variant + `enabled=on`, a probe decision flows through allow-list, battery, and rate-limit
+`InterventionNoop`). So with the `probe` variant + `enabled=act`, a probe decision flows through allow-list, battery, and rate-limit
 gates, reaches the real `Writer`, and completes the `agent.action` span — all
 without touching the game. Revert with `scripts/flags.sh clear agent
 interventions_allowed` (back to the baseline `ambient`) or set `none`.

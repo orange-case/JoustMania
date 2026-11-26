@@ -48,7 +48,7 @@ Run these on the Pi while the link is online, so its deletes and values are push
 | 1 Observe | none | | | a green act or grey noop row; open its trace |
 | 2 Ambient → standard | `interventions_allowed` | `standard` | `ambient` | the agent may shield: white LED, Shield badge |
 | 3 Threshold (on Claude) | `decision.backend`, then `decision.claude.act_confidence_threshold` | `claude`, then `strict` | `default`, then `jev` | Claude rows that would act turn amber `held`. On Jev the same flip only quiets the feed (grey `noop`): its gate opens at the act threshold |
-| 4 Kill switch | `enabled` | `off` | `on` | the feed goes silent, the game keeps playing; an in-flight answer lands `discarded` |
+| 4 Kill switch | `enabled` | `off` | `act` | the feed goes silent, the game keeps playing; an in-flight answer lands `discarded` |
 | 5 Degrade | `decision.jev.base_url` | `blackhole` | `default` | rows `jev → rules`, `fallback_reason=timeout`, the game never waits |
 
 Beat 4 is the one to rehearse from Flagsmith: the kill switch must stop the agent within seconds. If the

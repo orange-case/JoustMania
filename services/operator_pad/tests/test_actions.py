@@ -44,7 +44,7 @@ def status(**kw) -> menu_pb2.GetMenuStatusResponse:
     }
     base.update(kw)
     # A resolved kill switch unless the test says otherwise (services.md §3.1, #2101).
-    base.setdefault("agent_enabled_state", "on" if base["agent_enabled"] else "off")
+    base.setdefault("agent_enabled_state", "act" if base["agent_enabled"] else "off")
     # An open, resolved write gate unless the test says otherwise (#2093).
     return menu_pb2.GetMenuStatusResponse(**base)
 
@@ -421,7 +421,7 @@ UNKNOWN_AGENTS = [
     "agent",
     [
         status(),
-        status(agent_level="none"),  # ON NONE: a tuning level, not a stop
+        status(agent_level="none"),  # ACT NONE: a tuning level, not a stop
         status(agent_enabled_state="watch"),
         status(agent_enabled=False),
         status(agent_enabled=False, agent_level=""),

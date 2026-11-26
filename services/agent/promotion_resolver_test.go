@@ -9,20 +9,22 @@ import (
 
 // UC: UC-045 A1
 // UC: UC-043 Pre-1
-// Autonomous promotion writes a real default, so only `enabled` = on may open
-// it: watch, off, a bool-era value and an unreachable flagd all keep it shut.
-func TestPromotionConfigResolverEnabledOnlyAtOn(t *testing.T) {
+// Autonomous promotion writes a real default, so only `enabled` = act may open
+// it: watch, off, the legacy on, a bool-era value and an unreachable flagd all
+// keep it shut.
+func TestPromotionConfigResolverEnabledOnlyAtAct(t *testing.T) {
 	cases := []struct {
 		name string
 		ev   *switchableEvaluator
 		want bool
 	}{
-		{"on", &switchableEvaluator{strings: map[string]string{"enabled": "on"}}, true},
+		{"act", &switchableEvaluator{strings: map[string]string{"enabled": "act"}}, true},
+		{"legacy on", &switchableEvaluator{strings: map[string]string{"enabled": "on"}}, false},
 		{"watch", &switchableEvaluator{strings: map[string]string{"enabled": "watch"}}, false},
 		{"off", &switchableEvaluator{strings: map[string]string{"enabled": "off"}}, false},
 		{"bool-era text true", &switchableEvaluator{strings: map[string]string{"enabled": "true"}}, false},
 		{"bool-era bool true", &switchableEvaluator{booleans: map[string]bool{"enabled": true}}, false},
-		{"flagd unreachable", &switchableEvaluator{strings: map[string]string{"enabled": "on"}, unreachable: true}, false},
+		{"flagd unreachable", &switchableEvaluator{strings: map[string]string{"enabled": "act"}, unreachable: true}, false},
 	}
 	for _, c := range cases {
 		t.Run("UC-045/A1 "+c.name, func(t *testing.T) {

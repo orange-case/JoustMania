@@ -60,12 +60,12 @@ for view in json.load(sys.stdin)["flags"]:
 baseline="$(effective enabled)"
 expect "status (no args) shows the current value" 0 "agent kill-switch = ${baseline}" --
 
-# --- step 7: on ---------------------------------------------------------------
-expect "on sets enabled on" 0 "agent kill-switch -> on" -- on
-if [[ "$(effective enabled)" == "on" ]]; then ok "enabled == on"; else not_ok "enabled == on (got $(effective enabled))"; fi
-if others_unchanged; then ok "on leaves every other flag unchanged"; else not_ok "on leaves every other flag unchanged"; fi
-expect "status shows on" 0 "agent kill-switch = on" -- status
-if grep -q "PUT /agent/enabled" "${FAKE_FLAG_LOG}"; then ok "on is a flag-service PUT"; else not_ok "on is a flag-service PUT"; fi
+# --- step 7: act --------------------------------------------------------------
+expect "act sets enabled act" 0 "agent kill-switch -> act" -- act
+if [[ "$(effective enabled)" == "act" ]]; then ok "enabled == act"; else not_ok "enabled == act (got $(effective enabled))"; fi
+if others_unchanged; then ok "act leaves every other flag unchanged"; else not_ok "act leaves every other flag unchanged"; fi
+expect "status shows act" 0 "agent kill-switch = act" -- status
+if grep -q "PUT /agent/enabled" "${FAKE_FLAG_LOG}"; then ok "act is a flag-service PUT"; else not_ok "act is a flag-service PUT"; fi
 
 # --- watch ----------------------------------------------------------------------
 expect "watch sets enabled watch" 0 "agent kill-switch -> watch" -- watch
@@ -87,23 +87,27 @@ if cmp -s "${SHIPPED}" "${FAKE_AGENT_FLAGS}"; then ok "the baseline file is unch
 
 # --- rejections ----------------------------------------------------------------
 expect "unknown action is rejected" 2 "usage:" -- maybe
+puts_before="$(grep -c "^PUT /agent/enabled" "${FAKE_FLAG_LOG}" || true)"
+expect "the old state name on is rejected" 2 "usage: " -- on
+puts_after="$(grep -c "^PUT /agent/enabled" "${FAKE_FLAG_LOG}" || true)"
+if [[ "${puts_after}" -eq "${puts_before}" ]]; then ok "a rejected on writes nothing"; else not_ok "a rejected on writes nothing"; fi
 
 # --- A5: the flag service refuses the off (503 no_sync_stream) -----------------
 stop_fake_flag_service
 start_fake_flag_service "${WORK}" --fail-put 2
-expect "A5 setup: on" 0 "agent kill-switch -> on" -- on
+expect "A5 setup: act" 0 "agent kill-switch -> act" -- act
 expect "A5 refused off prints the docker stop fallback" 1 "docker stop joustmania-agent" -- off
-if [[ "$(effective enabled)" == "on" ]]; then ok "A5 refused off leaves enabled on"; else not_ok "A5 refused off leaves enabled on (got $(effective enabled))"; fi
+if [[ "$(effective enabled)" == "act" ]]; then ok "A5 refused off leaves enabled act"; else not_ok "A5 refused off leaves enabled act (got $(effective enabled))"; fi
 
-# --- A6: the flag service refuses the on (503) ---------------------------------
+# --- A6: the flag service refuses the act (503) --------------------------------
 stop_fake_flag_service
 start_fake_flag_service "${WORK}" --fail-put 1
-expect "A6 refused on prints the error" 1 "PUT /agent/enabled -> HTTP 503" -- on
-if [[ "$(effective enabled)" == "${baseline}" ]]; then ok "A6 refused on leaves enabled as it was"; else not_ok "A6 refused on leaves enabled as it was (got $(effective enabled))"; fi
+expect "A6 refused act prints the error" 1 "PUT /agent/enabled -> HTTP 503" -- act
+if [[ "$(effective enabled)" == "${baseline}" ]]; then ok "A6 refused act leaves enabled as it was"; else not_ok "A6 refused act leaves enabled as it was (got $(effective enabled))"; fi
 
 # --- A5 / A6: the flag service cannot be reached --------------------------------
 stop_fake_flag_service
-expect "A6 on prints the error when the flag service is unreachable" 1 "flag service unreachable" -- on
+expect "A6 act prints the error when the flag service is unreachable" 1 "flag service unreachable" -- act
 expect "A5 off prints the docker stop fallback when the flag service is unreachable" 1 "docker stop joustmania-agent" -- off
 
 echo "${pass} passed, ${fail} failed"

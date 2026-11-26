@@ -8,16 +8,16 @@ import (
 )
 
 // InterventionGate resolves the live `enabled` state at use time: true only when
-// it is on. *flags.Flags satisfies it via Applying; tests supply a fake. It is
+// it is act. *flags.Flags satisfies it via Applying; tests supply a fake. It is
 // read on every Apply, never cached, so a flag flip takes effect with no restart,
 // and a flagd outage fails closed (off), so the agent never writes when it cannot
-// confirm `enabled` is on.
+// confirm `enabled` is act.
 type InterventionGate interface {
 	Applying(ctx context.Context) bool
 }
 
 // GatedActionSink wraps the real intervention Writer behind the live `enabled`
-// state. When it is on, Apply delegates to the Writer; in watch (or off, or with
+// state. When it is act, Apply delegates to the Writer; in watch (or off, or with
 // flagd unreachable) it discards the decision like the loop's default sink, so a
 // decided intervention is still recorded and spanned by the loop but never applied.
 type GatedActionSink struct {
@@ -27,7 +27,7 @@ type GatedActionSink struct {
 }
 
 // NewGatedActionSink wraps writer behind gate. writer is the real sink applied when
-// `enabled` is on (typically *Writer). log nil → slog.Default().
+// `enabled` is act (typically *Writer). log nil → slog.Default().
 func NewGatedActionSink(gate InterventionGate, writer decision.ActionSink, log *slog.Logger) *GatedActionSink {
 	if log == nil {
 		log = slog.Default()
@@ -35,7 +35,7 @@ func NewGatedActionSink(gate InterventionGate, writer decision.ActionSink, log *
 	return &GatedActionSink{gate: gate, writer: writer, log: log}
 }
 
-// Apply delegates to the real writer only while `enabled` is on; otherwise it is a
+// Apply delegates to the real writer only while `enabled` is act; otherwise it is a
 // no-op (the loop already recorded and spanned the decision).
 func (s *GatedActionSink) Apply(ctx context.Context, d decision.Decision) error {
 	_, err := s.ApplyReported(ctx, d)
@@ -43,7 +43,7 @@ func (s *GatedActionSink) Apply(ctx context.Context, d decision.Decision) error 
 }
 
 // ApplyReported is Apply with the outcome reported: applied is true only when
-// `enabled` was on and the real writer ran. The loop counts
+// `enabled` was act and the real writer ran. The loop counts
 // agent_interventions_applied_total only for applied=true, so a gated no-op is not
 // counted as an applied intervention (UC-040 A11).
 func (s *GatedActionSink) ApplyReported(ctx context.Context, d decision.Decision) (applied bool, err error) {

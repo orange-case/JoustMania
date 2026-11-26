@@ -147,7 +147,7 @@ class TargetingFlagClient:
 
 class _AgentStub:
     def get_string_value(self, key, default, _ctx=None):
-        return "on" if key == "enabled" else default
+        return "act" if key == "enabled" else default
 
     def __init__(self, threshold):
         self._threshold = threshold

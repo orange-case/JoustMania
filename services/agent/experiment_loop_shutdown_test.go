@@ -28,7 +28,7 @@ func newRefillLoop(t *testing.T) (*experimentLoop, *recordingSpawner, string, st
 	var gateReads atomic.Int32
 	loop.enabledOverride = func(context.Context) flags.EnabledState {
 		gateReads.Add(1)
-		return flags.EnabledOn
+		return flags.EnabledAct
 	}
 	ctx := context.Background()
 	id, err := loop.registry.Declare(experiment.Intent{

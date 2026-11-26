@@ -238,30 +238,31 @@ const (
 )
 
 // EnabledState is the `enabled` flag: off (the agent does not run), watch (it runs
-// but writes nothing that changes a game) or on (decisions are applied).
+// but writes nothing that changes a game) or act (decisions are applied).
 type EnabledState string
 
 const (
 	EnabledOff   EnabledState = "off"
 	EnabledWatch EnabledState = "watch"
-	EnabledOn    EnabledState = "on"
+	EnabledAct   EnabledState = "act"
 )
 
-// ParseEnabled maps a flag value to its state; anything unknown is off (fail closed).
+// ParseEnabled maps a flag value to its state; anything unknown, the legacy on and
+// a bool included, is off (fail closed).
 func ParseEnabled(v string) EnabledState {
 	switch s := EnabledState(v); s {
-	case EnabledWatch, EnabledOn:
+	case EnabledWatch, EnabledAct:
 		return s
 	default:
 		return EnabledOff
 	}
 }
 
-// Runs reports whether the agent runs (watch or on).
-func (s EnabledState) Runs() bool { return s == EnabledWatch || s == EnabledOn }
+// Runs reports whether the agent runs (watch or act).
+func (s EnabledState) Runs() bool { return s == EnabledWatch || s == EnabledAct }
 
-// Applies reports whether the agent may write what changes a game (on only).
-func (s EnabledState) Applies() bool { return s == EnabledOn }
+// Applies reports whether the agent may write what changes a game (act only).
+func (s EnabledState) Applies() bool { return s == EnabledAct }
 
 // defaultObjectives is the fallback objectives weighting. Returned as a fresh
 // copy on every call so callers can never mutate the shared default.
@@ -658,10 +659,10 @@ type Snapshot struct {
 }
 
 // State is the snapshot's `enabled` state. A hand-built snapshot that sets only
-// Enabled reads watch when it runs, never on, so it cannot imply writes.
+// Enabled reads watch when it runs, never act, so it cannot imply writes.
 func (s Snapshot) State() EnabledState {
 	switch s.EnabledState {
-	case EnabledOff, EnabledWatch, EnabledOn:
+	case EnabledOff, EnabledWatch, EnabledAct:
 		return s.EnabledState
 	}
 	if s.Enabled {
@@ -749,13 +750,13 @@ func (f *Flags) Evaluate(ctx context.Context) Snapshot {
 	}
 }
 
-// Applying reports whether `enabled` is on, read at use time: the gate of every
+// Applying reports whether `enabled` is act, read at use time: the gate of every
 // write that changes a game. watch, off and an unresolvable flag read false.
 func (f *Flags) Applying(ctx context.Context) bool {
 	return f.EnabledState(ctx).Applies()
 }
 
-// AgentEnabled reports whether the agent runs (`enabled` is watch or on) without
+// AgentEnabled reports whether the agent runs (`enabled` is watch or act) without
 // the full Evaluate snapshot; an unresolvable flag reads off.
 func (f *Flags) AgentEnabled(ctx context.Context) bool {
 	return f.EnabledState(ctx).Runs()

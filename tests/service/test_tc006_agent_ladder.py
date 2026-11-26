@@ -94,7 +94,7 @@ async def test_host_walks_the_agent_ladder_from_the_pad(fresh_stack):
     try:
         await start_lobby(stack, count=2, game_mode=START_MODE)
         # A running agent (the CI baseline has it off) at a level off the ladder.
-        flag_service_default().put(AGENT, "enabled", variant="on")
+        flag_service_default().put(AGENT, "enabled", variant="act")
         flag_service_default().put(AGENT, FLAG, variant="probe")
         assert await async_poll_until(lambda: _effective_variant() == "probe", timeout=PERSIST_TIMEOUT_SECONDS)
 

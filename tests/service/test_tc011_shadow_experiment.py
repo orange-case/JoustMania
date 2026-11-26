@@ -60,7 +60,7 @@ SERVICE_COMPOSITION = replace(
     agent_flags={
         "experiment_dynamic_candidates": {"variant": CANDIDATE_VARIANT},  # before the gates
         "experiment_dynamic_enabled": {"variant": "on"},
-        "enabled": {"variant": "on"},
+        "enabled": {"variant": "act"},
         "experiments_enabled": {"variant": "on"},
         "decision.backend": {"variant": "rules"},
         **{key: {"value": value} for key, value in TUNING.items()},

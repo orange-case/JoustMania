@@ -137,7 +137,7 @@ def agent_client(flags: AgentRowService, **overrides):
             layer["value"] if layer else view["variant_values"][view["effective_default"]],
         )
     values |= {
-        "enabled": ("on", "on"),
+        "enabled": ("act", "act"),
         "interventions_allowed": ("standard", "a,b"),
     }
     values |= overrides

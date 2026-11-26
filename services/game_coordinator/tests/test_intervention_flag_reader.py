@@ -50,12 +50,13 @@ class Client:
 
 
 @pytest.mark.uc("UC-040", br=["BR-004"])
-def test_allowed_types_is_empty_while_the_agent_is_disabled_or_unreachable():
+def test_allowed_types_is_empty_unless_the_agent_acts():
     reader = InterventionFlagReader()
     assert reader.allowed_types() == set()
-    reader._agent_client = Client({"enabled": False, "interventions_allowed": "a,b"})
-    assert reader.allowed_types() == set()
-    reader._agent_client = Client({"enabled": True, "interventions_allowed": " a, ,b "})
+    for state in ("off", "watch", "on", True):
+        reader._agent_client = Client({"enabled": state, "interventions_allowed": "a,b"})
+        assert reader.allowed_types() == set(), state
+    reader._agent_client = Client({"enabled": "act", "interventions_allowed": " a, ,b "})
     assert reader.allowed_types() == {"a", "b"}
     reader._agent_client = Client(raising=True)
     assert reader.allowed_types() == set()
@@ -125,7 +126,7 @@ def test_session_context_adds_game_id_only_for_a_real_id():
 
 def test_the_manager_flag_clients_and_deferral_state_forward_to_their_units():
     mgr = InterventionManager(event_publisher=AsyncMock(), get_game=lambda: None)
-    client = Client({"enabled": True, "interventions_allowed": "x"})
+    client = Client({"enabled": "act", "interventions_allowed": "x"})
     mgr._agent_client = client
     assert mgr._reads._agent_client is client
     assert mgr._allowed_types() == {"x"}

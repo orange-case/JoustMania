@@ -109,7 +109,7 @@ up-mock:
 #   1. flagd `experiments_enabled` flag = on  -> the only experiment gate (the
 #      env gate was removed in #1907). Fail-closed `off` by default and when flagd
 #      cannot answer; MANUAL opt-in via the enable step below.
-#   2. agent `enabled` flag = on       -> master kill-switch, fail-closed `off`
+#   2. agent `enabled` flag = act      -> master kill-switch, fail-closed `off`
 #      by default. Without it the loop self-aborts:
 #      `experiment.torn_down ... reason="kill-switch: agent disabled"`.
 #      (The enable step below flips BOTH 1 and 2 in one command.)
@@ -136,8 +136,8 @@ dry-run:
 	@echo "    [!] flagd experiments_enabled flag is the only gate (live since #1044)."
 	@echo "        Fail-closed off by default and while flagd cannot answer."
 	@echo "    [ ] experiment after enable: experiment_dynamic_candidates=windows_frantic (windows=frantic, frantic music pacing, objective=balanced, N=8/arm)"
-	@echo "    [ ] ENABLE experiments  -> ONE step (sets the candidate + experiment_dynamic_enabled, then flips enabled + experiments_enabled on):"
-	@echo "        ./scripts/agent-dryrun-enable.sh on   # flag service: experiment_dynamic_candidates -> windows_frantic, experiment_dynamic_enabled, enabled + experiments_enabled -> on"
+	@echo "    [ ] ENABLE experiments  -> ONE step (sets the candidate + experiment_dynamic_enabled, then enabled -> act and experiments_enabled -> on):"
+	@echo "        ./scripts/agent-dryrun-enable.sh on   # flag service: experiment_dynamic_candidates -> windows_frantic, experiment_dynamic_enabled -> on, enabled -> act, experiments_enabled -> on"
 	@echo "        # gate flips take effect LIVE (self-gated per-tick since #1044) -> NO agent restart"
 	@echo "        # in-game decision backend: ./scripts/agent-backend.sh (decision.backend, live)"
 	@echo "        # retro on Claude: flag inference.backend=claude + ANTHROPIC_API_KEY; proposer also AGENT_EXPERIMENT_PROPOSER_ENABLED=true + flag experiment_proposer_enabled on,"

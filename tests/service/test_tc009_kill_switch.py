@@ -7,7 +7,7 @@ fake Claude decide backend holding its answer until released.
 
 Steps 1 to 6 moved 1:1 from the full-stack
 ``tests/integration/test_decide_backend_e2e.py::test_kill_switch_discards_inflight_answer``;
-step 7 (turn the agent on again, the next cycle records ``invoke_agent`` again) is new.
+step 7 (set the agent back to act, the next cycle records ``invoke_agent`` again) is new.
 """
 
 import dataclasses
@@ -78,7 +78,7 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
         hold_max_seconds=KILL_HOLD_MAX_SECONDS,
     )
     configure()
-    wait_agent_flags_served(stack, backend="claude", state="on", rewrite=configure)
+    wait_agent_flags_served(stack, backend="claude", state="act", rewrite=configure)
 
     game_client, channel = await get_game_client(stack)
     try:
@@ -126,10 +126,10 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
             outcomes = {s.attributes.get("decide.outcome") for s in decide_spans(stack, game_id)}
             assert "act" not in outcomes, outcomes
 
-            # Step 7: turn the agent on; the next cycle records invoke_agent spans again.
+            # Step 7: set the agent back to act; the next cycle records invoke_agent spans again.
             decided_before = {s.span_id for s in decide_spans(stack, game_id)}
-            set_enabled("on")
-            wait_agent_flags_served(stack, backend="claude", state="on", rewrite=lambda: set_enabled("on"))
+            set_enabled("act")
+            wait_agent_flags_served(stack, backend="claude", state="act", rewrite=lambda: set_enabled("act"))
             assert await async_poll_until(
                 lambda: any(s.span_id not in decided_before for s in decide_spans(stack, game_id)),
                 SPAN_TIMEOUT,
@@ -150,7 +150,7 @@ async def test_kill_switch_keeps_written_state_intervention(fresh_stack):
     stack = fresh_stack
     stack.fake_claude.script(decide_mode="valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE)
     configure()
-    wait_agent_flags_served(stack, backend="claude", state="on", rewrite=configure)
+    wait_agent_flags_served(stack, backend="claude", state="act", rewrite=configure)
 
     game_client, channel = await get_game_client(stack)
     try:

@@ -51,7 +51,7 @@ def test_agent_interventions_disabled_by_default(prefix):
     flags = _flags(rel)
     assert "interventions_enabled" not in flags, f"{rel}: the write gate is folded into `enabled`"
     flag = flags["enabled"]
-    assert flag["variants"] == {"off": "off", "watch": "watch", "on": "on"}
+    assert flag["variants"] == {"off": "off", "watch": "watch", "act": "act"}
     expected = "off" if prefix else "watch"
     assert flag["defaultVariant"] == expected, f"enabled in {rel} must default to {expected!r}"
 

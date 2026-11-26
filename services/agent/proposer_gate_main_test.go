@@ -76,14 +76,14 @@ func TestProposerPermit_ReadsLive(t *testing.T) {
 	}
 }
 
-// Drafting runs in watch; the write half needs `enabled` on, read live.
+// Drafting runs in watch; the write half needs `enabled` = act, read live.
 // UC: UC-042 BR-002
 // UC: UC-045 A1
 func TestProposerWritePermit(t *testing.T) {
 	src := &liveGateFlags{enabled: true, experiments: true, proposer: true}
 	permit, write := proposerPermit(src, true), proposerWritePermit(src)
 	if ok, _ := write(context.Background()); !ok {
-		t.Fatal("want the write permitted while enabled is on")
+		t.Fatal("want the write permitted while enabled is act")
 	}
 	src.watch = true
 	if ok, _ := permit(context.Background()); !ok {
@@ -94,7 +94,7 @@ func TestProposerWritePermit(t *testing.T) {
 	}
 }
 
-// watch: the agent runs but `enabled` is not on.
+// watch: the agent runs but `enabled` is not act.
 type liveGateFlags struct{ enabled, experiments, proposer, watch bool }
 
 func (f *liveGateFlags) ExperimentProposerEnabled(context.Context) bool { return f.proposer }

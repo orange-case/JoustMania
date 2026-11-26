@@ -54,7 +54,7 @@ func weighted(st map[string]any, optionID int, value string, pct float64) map[st
 // An agent/enabled feature that already exists switched off is a stop held in
 // Flagsmith: the start never writes a reference over it, whatever value it shows.
 func TestStartNeverTurnsAnExistingStopOn(t *testing.T) {
-	for _, staged := range []any{nil, "off", "on", "watch"} {
+	for _, staged := range []any{nil, "off", "on", "watch", "act"} {
 		e := newStartEnv(t)
 		f := e.admin.f
 		f.ServeFlagAPI()

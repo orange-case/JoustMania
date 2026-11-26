@@ -502,7 +502,7 @@ func promotionConfigResolver(f *flags.Flags) promote.ConfigResolver {
 // bounded by the live concurrent-experiment backstop. The kill-switch (agent.json
 // `enabled`) is ALSO honored each tick (agentState), independent of
 // experiments_enabled: experiments write arm values into game flags, so they
-// need `enabled` on, and anything else tears the surface down.
+// need `enabled` = act, and anything else tears the surface down.
 func (e *experimentLoop) run(ctx context.Context) {
 	e.runCtx.Store(&ctx)
 	// UC-043 A20 (#2332): once ctx is cancelled the registry declares and starts no
@@ -630,10 +630,10 @@ func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 	if !agent.Applies() {
 		reason := "kill-switch: agent disabled"
 		if agent == flags.EnabledWatch {
-			reason = "agent watch: arm writes need enabled=on"
+			reason = "agent watch: arm writes need enabled=act"
 		}
 		if ids := e.registry.AbortAll(ctx, reason); len(ids) > 0 {
-			e.log.Warn("experiment: agent not on — aborted live experiments", "enabled", string(agent), "count", len(ids))
+			e.log.Warn("experiment: enabled not act — aborted live experiments", "enabled", string(agent), "count", len(ids))
 		}
 		return
 	}
@@ -701,13 +701,13 @@ func (e *experimentLoop) journalRewatchRevert(experimentID string, res experimen
 
 // agentState is the live `enabled` state. It consults the enabledOverride seam
 // first (test wiring), then the live flags client. A nil flags client (test wiring
-// only) reads on; production always injects one (buildExperimentLoop).
+// only) reads act; production always injects one (buildExperimentLoop).
 func (e *experimentLoop) agentState(ctx context.Context) flags.EnabledState {
 	if e.enabledOverride != nil {
 		return e.enabledOverride(ctx)
 	}
 	if e.flags == nil {
-		return flags.EnabledOn
+		return flags.EnabledAct
 	}
 	return e.flags.EnabledState(ctx)
 }

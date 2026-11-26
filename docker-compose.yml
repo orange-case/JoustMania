@@ -750,7 +750,7 @@ services:
       # (IMAGE_TAG in .env) still defaults to its RPC port 8013.
       - FLAGD_HOST=flagd
       # Action sink (#730/#1213, #1411): when the LIVE `enabled` flag (agent.json)
-      # is `on` (not `watch` or `off`), the agent applies each decision as ONE
+      # is `act` (not `watch` or `off`), the agent applies each decision as ONE
       # game-scoped write to the flag service (PUT/POST /interventions/<flag>). It is
       # read per Apply, fail-closed off, so a flagd outage never writes. No restart needed.
       - FLAG_SERVICE_URL=http://flag-service:8070

@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 
 # UC-015 BR-019: the agent level, written persisted.
 AGENT_POLICY_FLAG = "interventions_allowed"
-# UC-015 BR-001: the pad also writes the agent state `off` / `watch` / `on` (in memory) and the backend (persisted).
+# UC-015 BR-001: the pad also writes the agent state `off` / `watch` / `act` (in memory) and the backend (persisted).
 AGENT_ENABLED_FLAG = "enabled"
 DECISION_BACKEND_FLAG = "decision.backend"
 # UC-015 BR-018 (#2215): the shield mode the pad's K6 layer steps; a persisted admin value of the `game` set.
@@ -494,7 +494,7 @@ class SettingsOps:
         return view.get("effective_default") if view else None
 
     def _agent_enabled(self) -> str | None:
-        """`enabled` as the flag service serves it (``off`` / ``watch`` / ``on``), None when unreadable. Blocking."""
+        """`enabled` as the flag service serves it (``off`` / ``watch`` / ``act``), None when unreadable. Blocking."""
         writer = self.agent_memory_writer or self.state_manager.agent_settings_writer
         try:
             view = writer.get_flag_view(AGENT_ENABLED_FLAG)
@@ -1032,9 +1032,9 @@ class SettingsOps:
         if new == "off":
             voice = AGENT_SWITCH_VOICES["stop"]
         elif old == "off":
-            voice = AGENT_SWITCH_VOICES["resume"] if new == "on" else AGENT_WATCHING_VOICE
+            voice = AGENT_SWITCH_VOICES["resume"] if new == "act" else AGENT_WATCHING_VOICE
         else:
-            voice = INTERVENTIONS_VOICES["on" if new == "on" else "off"]
+            voice = INTERVENTIONS_VOICES["on" if new == "act" else "off"]
         manager = self.state_manager
         if manager is None:
             return

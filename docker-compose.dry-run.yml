@@ -19,8 +19,8 @@
 #    loads the CI baseline, so there is nothing to align.
 #
 # 2. Experiment framework. The loop is gated only by the experiments_enabled and
-#    `enabled` flags (the enable step `scripts/agent-dryrun-enable.sh on` flips
-#    both; #1907 removed the env gates). The same step names ONE experiment (the
+#    `enabled` flags (the enable step `scripts/agent-dryrun-enable.sh on` sets
+#    experiments_enabled on and `enabled` to act; #1907 removed the env gates). The same step names ONE experiment (the
 #    dynamic declarer's explicit candidate experiment_dynamic_candidates =
 #    windows_frantic, i.e. windows=frantic) so the declare->spawn->conclude->verdict
 #    loop has work once enabled. Another experiment is another flag=variant
@@ -29,8 +29,8 @@
 #    15 s env override is gone, #1907).
 #
 # The agent MASTER kill-switch (agent set `enabled`) still defaults to `off`
-# (fail-closed, unchanged). `make dry-run` prints the one-liner to switch it on
-# through the flag service (scripts/agent-killswitch.sh on).
+# (fail-closed, unchanged). `make dry-run` prints the one-liner to set it to act
+# through the flag service (scripts/agent-killswitch.sh act).
 
 services:
   # Flag service: the dry-run/demo stack keeps its own admin state file, apart

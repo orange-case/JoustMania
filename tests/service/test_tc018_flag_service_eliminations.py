@@ -78,7 +78,7 @@ def _pin_rate_limit_budget(stack) -> None:
 
 async def _serve_full_permission(stack) -> None:
     flag_service_default().put(
-        "agent", "enabled", variant="on"
+        "agent", "enabled", variant="act"
     )  # the coordinator applies nothing while the agent is stopped (UC-040 BR-004)
     flag_service_default().put("agent", "interventions_allowed", variant="full")
     expected = variant_value("agent", "interventions_allowed", "full")

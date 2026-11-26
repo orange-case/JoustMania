@@ -45,7 +45,7 @@ def status(**kw) -> menu_pb2.GetMenuStatusResponse:
         "ready_count": 3,
         "connected_count": 5,
         "agent_enabled": True,
-        "agent_enabled_state": "on",
+        "agent_enabled_state": "act",
         "agent_level": "standard",
         "agent_backend": "claude",
         "sensitivity": 3,
@@ -376,7 +376,7 @@ def _statuses():
         ("JoustFFA", "NonStop", "Commander", ""),
         ("rules", "jev", "", "gpt"),
         ("none", "full", "", "probe"),
-        ("on", "off", "watch", "unknown", ""),
+        ("act", "off", "watch", "on", "unknown", ""),
         (
             {},
             {"sensitivity": "automatic", "num_teams": "six", "shield.activation": "automatic"},

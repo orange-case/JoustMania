@@ -165,9 +165,15 @@ def test_dryrun_enable_sets_a_declared_candidate_before_the_gates():
     game = json.loads((CI_FLAGD_DIR / "game.json").read_text())["flags"]
     assert game_variant in game[key]["variants"], f"{value} names no declared variant"
     on = script[script.index("  on)") : script.index("  off)")]
-    assert on.index("experiment_dynamic_candidates") < on.index(
-        "for flag in experiment_dynamic_enabled enabled experiments_enabled"
-    ), "on must write the candidate before the gates"
+    for gate in (
+        "set agent experiment_dynamic_enabled on",
+        "set agent enabled act",
+        "set agent experiments_enabled on",
+    ):
+        assert gate in on, f"on must run `{gate}`"
+        assert on.index("experiment_dynamic_candidates") < on.index(gate), (
+            f"on must write the candidate before `{gate}`"
+        )
     off = script[script.index("  off)") : script.index("  status)")]
     assert "experiment_dynamic_candidates" in off, "off must clear the candidate"
     assert "experiment_dynamic_enabled" in off, "off must clear the declarer gate"

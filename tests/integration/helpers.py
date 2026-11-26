@@ -2281,7 +2281,7 @@ def set_interventions_allowed(variant: str) -> None:
     the flag service (a persist row, #2803), cleared by the ``flag_service`` fixture at teardown. ``enabled``
     goes to act first: the coordinator applies nothing unless the agent acts (UC-040 BR-004). The
     integration stack runs no agent outside TC-007 (profile-gated), so nothing else writes."""
-    flag_service_default().put("agent", "enabled", variant="on")
+    flag_service_default().put("agent", "enabled", variant="act")
     flag_service_default().put("agent", "interventions_allowed", variant=variant)
 
 

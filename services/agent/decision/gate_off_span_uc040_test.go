@@ -76,11 +76,11 @@ type failingSink struct{}
 func (failingSink) Apply(context.Context, Decision) error { return errors.New("flag service refused") }
 
 // UC: UC-035 3
-// The flag state carries the `enabled` state, so the panel shows watch and on.
+// The flag state carries the `enabled` state, so the panel shows watch and act.
 func TestFlagState_CarriesEnabledState(t *testing.T) {
 	l, b, fl := boardLoop(t)
 	c := modeCtx("game_fs2093", "FFA")
-	for _, want := range []flags.EnabledState{flags.EnabledWatch, flags.EnabledOn} {
+	for _, want := range []flags.EnabledState{flags.EnabledWatch, flags.EnabledAct} {
 		fl.snap.EnabledState = want
 		l.OnEvaluate(context.Background(), c, testTrigger())
 		if got := b.List(); len(got) != 1 || got[0].Enabled != string(want) {

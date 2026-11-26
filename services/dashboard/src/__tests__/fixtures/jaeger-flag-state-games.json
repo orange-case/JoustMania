@@ -64,7 +64,7 @@
             {
               "key": "agent.enabled",
               "type": "string",
-              "value": "on"
+              "value": "act"
             },
             {
               "key": "agent.objectives",

@@ -75,7 +75,7 @@ ABSENCE_WINDOW = 6.0
 def configure_agent(
     *,
     backend: str,
-    state: str = "on",
+    state: str = "act",
     allowed: str = INTERVENTIONS_ALLOWED_VARIANT,
     jev_fake: bool = False,
     claude_fake: bool = False,
@@ -86,7 +86,7 @@ def configure_agent(
     ``jev_fake`` points ``decision.jev.base_url`` at the stack's fake Jev and ``claude_fake``
     ``decision.claude.base_url`` at the stack's fake Claude; ``timeout_variant`` names the
     ``decision.claude.timeout_ms`` variant (the shipped default when None). ``state`` is
-    ``enabled``: ``on`` applies decisions, ``watch`` decides and writes nothing.
+    ``enabled``: ``act`` applies decisions, ``watch`` decides and writes nothing.
     """
     fs = flag_service_default()
     fs.put(AGENT, "enabled", variant=state)
@@ -107,7 +107,7 @@ def configure_agent(
 
 
 def set_enabled(state: str) -> None:
-    """Write ``enabled`` (off / watch / on); a stop is a write of ``off``, never a clear."""
+    """Write ``enabled`` (off / watch / act); a stop is a write of ``off``, never a clear."""
     flag_service_default().put(AGENT, "enabled", variant=state)
 
 

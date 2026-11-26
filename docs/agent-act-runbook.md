@@ -21,7 +21,7 @@ with three values:
 |-------|-----------|----------|
 | `off` | does not run (the stop) | **No** — flag-service overlay, pushed to flagd over the sync stream |
 | `watch` (stock default) | observes, decides and records; writes nothing to a game (a decision is spanned with `decision.not_applied_reason=watch`) | **No** |
-| `on` | applies decisions through the real `actions.Writer` | **No** — re-read per `Apply` |
+| `act` | applies decisions through the real `actions.Writer` | **No** — re-read per `Apply` |
 
 The state is changed at runtime through the flag service (`scripts/agent-killswitch.sh`,
 `scripts/flags.sh`, or the HTTP API at `http://localhost/flags/`). The baseline file
@@ -59,11 +59,11 @@ the reason this runbook exists.
 
 ---
 
-## Going live — set the agent `on`
+## Going live — set the agent to `act`
 
-### Step 1 — Set `enabled` to `on` (flag, no restart)
+### Step 1 — Set `enabled` to `act` (flag, no restart)
 
-Setting `enabled` to `on` lets the gated sink dispatch through the
+Setting `enabled` to `act` lets the gated sink dispatch through the
 real `actions.Writer`, which applies decisions through the flag service's HTTP
 API: a state, level or grant is a game-scoped value (`PUT /interventions/{flag}`
 with `scope.game_id`, plus `scope.serial` for a player), a one-shot intervention
@@ -73,12 +73,12 @@ with `scope.game_id`, plus `scope.serial` for a player), a one-shot intervention
 flagd with its `gameId` — there is no gRPC from the agent to the game services.
 `enabled` is re-read **at use-time** (per `Apply`, never cached at startup), so a
 change takes effect on the next decision with **no agent restart**. Anything but
-`on` (`watch`, `off`, undefined, flagd unreachable) → the decision is recorded and
+`act` (`watch`, `off`, undefined, flagd unreachable) → the decision is recorded and
 spanned but **not written**.
 
 ```bash
-./scripts/agent-killswitch.sh on         # or: scripts/flags.sh set agent enabled on
-scripts/flags.sh variant agent enabled   # prints: on
+./scripts/agent-killswitch.sh act        # or: scripts/flags.sh set agent enabled act
+scripts/flags.sh variant agent enabled   # prints: act
 ```
 
 flagd gets the change over its sync stream; no restart. At start the agent logs
@@ -87,14 +87,14 @@ flag-service URL it writes to.
 
 ### Step 2 — (none: the old separate sink gate is gone)
 
-`enabled` alone decides whether the agent runs (`watch` / `on`) and whether it
-writes (`on`). This is the same mechanism documented in
+`enabled` alone decides whether the agent runs (`watch` / `act`) and whether it
+writes (`act`). This is the same mechanism documented in
 [feature-flags.md → Edit Flag Values](feature-flags.md#3-edit-flag-values); the
 menu writes the operator pad's settings through the same API.
 
 ### Step 3 — Open the permission surface
 
-Even with the agent `on`, the **permission layer** still bounds what dispatches.
+Even with the agent at `act`, the **permission layer** still bounds what dispatches.
 The stock `interventions_allowed` variant is `ambient` (audio cue, controller
 effect, volume only). To allow more, set another variant through the flag
 service (`scripts/flags.sh set agent interventions_allowed standard`, or
@@ -151,7 +151,7 @@ objective was served, why this action, and was it permitted*.
 `objectives` is not in the flag service's mutable registry, so this is a
 baseline change: set `objectives.defaultVariant` in `services/flagd/agent.json`
 (e.g. `balanced_focused` → `accelerate_focused`) and run `scripts/flags.sh
-restart`. The restart drops every overlay, so set the agent `on` again (Step 1)
+restart`. The restart drops every overlay, so set the agent to `act` again (Step 1)
 afterwards. On the next cycle the rules engine re-weights candidates;
 the selected winner's **`decision.objective_served`** attribute on `agent.decision`
 flips toward the now-dominant objective (e.g. `accelerate`). The cycle-level
@@ -173,7 +173,7 @@ winner — without blocking anything outright.
 
 ### C. Observe an **applied** intervention → `game_interventions_total`
 
-With the agent `on` and a permitting `interventions_allowed`, run a live game
+With the agent at `act` and a permitting `interventions_allowed`, run a live game
 (or push synthetic metrics — see the agent README *Local smoke test*). When the
 engine selects a permitted, fitting decision:
 
@@ -223,7 +223,7 @@ env override no longer exists: a deployment that still sets the old
   `agent.signal_received → agent.decision` spans still emit — OBSERVE→DECIDE and the
   span schema are fully exercised; only `agent.action` is withheld.
 - **Full path**: flip `interventions_allowed` to the **`probe`** variant
-  (`"noop"`) through the flag service, plus `enabled=on`. `noop` is a harmless no-op in the `Writer` (returns success
+  (`"noop"`) through the flag service, plus `enabled=act`. `noop` is a harmless no-op in the `Writer` (returns success
   without writing any flag), so the decision flows through every gate, reaches
   the real sink, and completes the `agent.action` span — all without changing the
   game.
@@ -274,7 +274,7 @@ not at normal play.
 
 | Attribute | On | Meaning |
 |-----------|----|---------|
-| `agent.enabled` | every span | the agent state: `off` / `watch` / `on` |
+| `agent.enabled` | every span | the agent state: `off` / `watch` / `act` |
 | `agent.objectives` | `agent.decision` | live objective weight map |
 | `interventions.allowed` | `agent.decision` | active allow-list (`none` / `a,b,c`) |
 | `decision.objective_served` | `agent.decision` | objective the selected rule served |
@@ -292,7 +292,7 @@ Cross-reference: [agent README → Span schema (#724)](../services/agent/README.
 
 Walk the agent state plus the permission layer, in order:
 
-1. **Watch** — does `scripts/flags.sh variant agent enabled` print `on`? In
+1. **Watch** — does `scripts/flags.sh variant agent enabled` print `act`? In
    `watch` every decision is recorded but not written (`decision.not_applied_reason=watch`,
    no error). It is re-read **per `Apply`**, so a change takes effect with no
    restart. A flag-service restart drops the overlay and returns `watch`.

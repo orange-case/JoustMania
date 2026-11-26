@@ -47,7 +47,7 @@ class FakeFlagClient:
 
     def get_string_value(self, key, default, _ctx=None):
         if key == "enabled":
-            return self.values.get("enabled", "on")
+            return self.values.get("enabled", "act")
         return str(self.values.get(key, default))
 
     def get_object_details(self, key, _default, _ctx=None):

@@ -75,7 +75,7 @@ func (s stubEvaluator) ObjectValue(_ context.Context, flag string, def any, _ op
 func TestEvaluate_FlagdShape(t *testing.T) {
 	stub := stubEvaluator{
 		strings: map[string]string{
-			keyEnabled: "on",
+			keyEnabled: "act",
 			// interventions_allowed is a STRING flag: comma-separated ids (#1127),
 			// read cleanly by the flagd RPC resolver (a LIST flag TYPE_MISMATCHes
 			// there and silently blocks every intervention).
@@ -103,8 +103,8 @@ func TestEvaluate_FlagdShape(t *testing.T) {
 	f := New(stub, nil)
 	got := f.Evaluate(context.Background())
 
-	if !got.Enabled || got.EnabledState != EnabledOn {
-		t.Errorf("Enabled = %v, EnabledState = %q, want true, on", got.Enabled, got.EnabledState)
+	if !got.Enabled || got.EnabledState != EnabledAct {
+		t.Errorf("Enabled = %v, EnabledState = %q, want true, act", got.Enabled, got.EnabledState)
 	}
 	wantObj := map[string]float64{"endurance": 0.7, "chaos": 0.3}
 	if !reflect.DeepEqual(got.Objectives, wantObj) {
@@ -668,8 +668,8 @@ func TestExperiment_FlagOverridesCompiledDefault(t *testing.T) {
 }
 
 // TestEnabledState covers the three-state `enabled` flag: each known variant
-// resolves to itself, and anything else (undefined, unknown, a bool-era value,
-// flagd unreachable) fails closed to off. watch runs but never applies.
+// resolves to itself, and anything else (undefined, unknown, the legacy on, a
+// bool-era value, flagd unreachable) fails closed to off. watch runs but never applies.
 // UC: UC-045 A3
 func TestEnabledState(t *testing.T) {
 	down := errors.New("flagd unreachable")
@@ -680,7 +680,8 @@ func TestEnabledState(t *testing.T) {
 		runs    bool
 		applies bool
 	}{
-		{"on", stubEvaluator{strings: map[string]string{keyEnabled: "on"}}, EnabledOn, true, true},
+		{"act", stubEvaluator{strings: map[string]string{keyEnabled: "act"}}, EnabledAct, true, true},
+		{"legacy on", stubEvaluator{strings: map[string]string{keyEnabled: "on"}}, EnabledOff, false, false},
 		{"watch", stubEvaluator{strings: map[string]string{keyEnabled: "watch"}}, EnabledWatch, true, false},
 		{"off", stubEvaluator{strings: map[string]string{keyEnabled: "off"}}, EnabledOff, false, false},
 		{"undefined", stubEvaluator{}, EnabledOff, false, false},
@@ -712,7 +713,7 @@ func TestEnabledState(t *testing.T) {
 	}
 }
 
-// TestSnapshotStateHandBuilt: a snapshot that sets only Enabled never reads on.
+// TestSnapshotStateHandBuilt: a snapshot that sets only Enabled never reads act.
 func TestSnapshotStateHandBuilt(t *testing.T) {
 	if got := (Snapshot{Enabled: true}).State(); got != EnabledWatch {
 		t.Errorf("Snapshot{Enabled: true}.State() = %q, want watch", got)

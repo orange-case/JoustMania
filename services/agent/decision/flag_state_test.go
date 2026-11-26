@@ -54,7 +54,7 @@ func TestFlagState_Fields(t *testing.T) {
 	l.now = func() time.Time { return at }
 	fl.snap.Objectives = map[string]float64{"endurance": 0.7, "balanced": 0.3}
 	fl.snap.InterventionsAllowed = []string{"grant_shield", "noop"}
-	fl.snap.EnabledState = flags.EnabledOn
+	fl.snap.EnabledState = flags.EnabledAct
 	fl.snap.ExperimentsEnabled = true
 	fl.snap.LLMGate.EligibleGameKinds = []string{"real", "shadow"}
 	fl.snap.Policy = flags.Policy{BatteryThreshold: 2, MaxInterventionsPerMinute: 6}
@@ -71,7 +71,7 @@ func TestFlagState_Fields(t *testing.T) {
 		GameMode:               "FFA",
 		TraceID:                c.GameTraceID,
 		UpdatedAtMs:            at.UnixMilli(),
-		Enabled:                "on",
+		Enabled:                "act",
 		Objectives:             "balanced=0.3,endurance=0.7",
 		InterventionsAllowed:   "grant_shield,noop",
 		BatteryThreshold:       2,

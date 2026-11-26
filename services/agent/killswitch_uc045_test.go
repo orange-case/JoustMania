@@ -233,7 +233,7 @@ func TestKillSwitch_FlagdUnreachableStopsExperimentLoop(t *testing.T) {
 	t.Setenv("AGENT_EXPERIMENTS_ENABLED", "true") // ignored since #1907
 	loop, spawner, _ := loopForConfigTest(t, 8)
 	ev := &switchableEvaluator{
-		strings:  map[string]string{"enabled": "on"},
+		strings:  map[string]string{"enabled": "act"},
 		booleans: map[string]bool{"experiments_enabled": true, "experiment_dynamic_enabled": true},
 	}
 	loop.flags = flags.New(ev, nil)
@@ -271,7 +271,7 @@ func TestKillSwitch_FlagdUnreachableStopsExperimentLoop(t *testing.T) {
 // enabledState maps a test's on/off bool onto the `enabled` states the loop reads.
 func enabledState(on bool) flags.EnabledState {
 	if on {
-		return flags.EnabledOn
+		return flags.EnabledAct
 	}
 	return flags.EnabledOff
 }

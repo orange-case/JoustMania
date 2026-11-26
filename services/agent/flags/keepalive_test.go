@@ -98,7 +98,7 @@ func TestFlagdFactory_SyncsOverKeepaliveDialOptions(t *testing.T) {
 			MinTime:             flagdServerMinPingInterval,
 			PermitWithoutStream: false,
 		}))
-		fake := &fakeSyncServer{config: newFakeFlagdSource("on").config("on"), selectors: make(chan string, 4)}
+		fake := &fakeSyncServer{config: newFakeFlagdSource("act").config("act"), selectors: make(chan string, 4)}
 		syncv1grpc.RegisterFlagSyncServiceServer(srv, fake)
 		go func() { _ = srv.Serve(lis) }()
 		t.Cleanup(srv.Stop)
@@ -121,7 +121,7 @@ func TestFlagdFactory_SyncsOverKeepaliveDialOptions(t *testing.T) {
 			t.Fatal("sync server never saw a SyncFlags call")
 		}
 		res := inner.StringEvaluation(context.Background(), keyEnabled, "off", nil)
-		if res.Error() != nil || res.Value != "on" {
+		if res.Error() != nil || res.Value != "act" {
 			t.Fatalf("enabled = %v (err %v), want true from the synced config", res.Value, res.Error())
 		}
 	})

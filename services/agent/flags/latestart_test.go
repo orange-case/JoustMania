@@ -71,7 +71,7 @@ func newLateSyncServer(t *testing.T) *lateSyncServer {
 		MinTime:             flagdServerMinPingInterval,
 		PermitWithoutStream: false,
 	}))
-	fake := &pushSyncServer{src: newFakeFlagdSource("on"), selectors: make(chan string, 64)}
+	fake := &pushSyncServer{src: newFakeFlagdSource("act"), selectors: make(chan string, 64)}
 	syncv1grpc.RegisterFlagSyncServiceServer(srv, fake)
 	// Stop, not GracefulStop: a wedged client stream must not hold the cleanup.
 	t.Cleanup(func() { srv.Stop(); _ = lis.Close() })
@@ -116,7 +116,7 @@ func TestFlagdFactory_LateSyncServerReachesReadyAndSeesEveryFlip(t *testing.T) {
 	// rewrites a package-level map in every gRPC sync Init (nonRetryableCodes), so two
 	// providers starting at once are a data race under -race. The game domain syncs
 	// from a fake source that comes up with the server.
-	gameSrc := newFakeFlagdSource("on")
+	gameSrc := newFakeFlagdSource("act")
 	ctx, cancel := context.WithCancel(context.Background())
 	f, holder, shutdown, err := setupFlagd(ctx, counted, fakeFactory(gameSrc),
 		flagdUp.Load, testSyncTiming, nil)
@@ -139,7 +139,7 @@ func TestFlagdFactory_LateSyncServerReachesReadyAndSeesEveryFlip(t *testing.T) {
 	assertFailsClosed := func(t *testing.T, when string) {
 		t.Helper()
 		if read() {
-			t.Fatalf("enabled read on %s", when)
+			t.Fatalf("enabled read act %s", when)
 		}
 		client := openfeature.NewClient(Domain)
 		if st := client.State(); st == openfeature.ReadyState {
@@ -173,7 +173,7 @@ func TestFlagdFactory_LateSyncServerReachesReadyAndSeesEveryFlip(t *testing.T) {
 
 	t.Run("UC-045/main READY and every flip after flagd serves", func(t *testing.T) {
 		late.serve()
-		gameSrc.set(true, "on")
+		gameSrc.set(true, "act")
 		waitBool(t, "enabled after the late first sync", read, true, 5*time.Second)
 		if st := openfeature.NewClient(Domain).State(); st != openfeature.ReadyState {
 			t.Fatalf("agent domain state = %s after the first sync, want READY", st)
@@ -190,8 +190,8 @@ func TestFlagdFactory_LateSyncServerReachesReadyAndSeesEveryFlip(t *testing.T) {
 		for i := range 8 { // more than the upstream event buffer (5), where #1713 wedged
 			late.sync.src.set(true, "off")
 			waitBool(t, fmt.Sprintf("flip %d enabled off", i), read, false, time.Second)
-			late.sync.src.set(true, "on")
-			waitBool(t, fmt.Sprintf("flip %d enabled on", i), read, true, time.Second)
+			late.sync.src.set(true, "act")
+			waitBool(t, fmt.Sprintf("flip %d enabled act", i), read, true, time.Second)
 		}
 		if n := agentBuilds.Load(); n != 1 {
 			t.Fatalf("agent provider builds = %d, want 1", n)
@@ -258,7 +258,7 @@ func scriptedSyncProvider(t *testing.T, domain, first string) (*scriptSync, *Fla
 //
 // UC: UC-045 A3
 func TestSyncedProvider_IdenticalConfigAfterParseErrorIsServedAgain(t *testing.T) {
-	good := newFakeFlagdSource("on").config("on")
+	good := newFakeFlagdSource("act").config("act")
 	src, f := scriptedSyncProvider(t, "synced-provider-parse-error", good)
 	read := func() bool { return f.Evaluate(context.Background()).Enabled }
 
@@ -281,8 +281,8 @@ func TestSyncedProvider_IdenticalConfigAfterParseErrorIsServedAgain(t *testing.T
 func TestSyncedProvider_DisabledKillSwitchReadsOff(t *testing.T) {
 	doc := map[string]any{"flags": map[string]any{
 		keyEnabled: map[string]any{
-			"state": "DISABLED", "defaultVariant": "on",
-			"variants": map[string]any{"on": "on", "off": "off"},
+			"state": "DISABLED", "defaultVariant": "act",
+			"variants": map[string]any{"act": "act", "off": "off"},
 		},
 	}}
 	raw, _ := json.Marshal(doc)
@@ -293,12 +293,12 @@ func TestSyncedProvider_DisabledKillSwitchReadsOff(t *testing.T) {
 		if DefaultEnabled != EnabledOff {
 			t.Fatal("DefaultEnabled is not off: the kill switch must default to off")
 		}
-		details, err := openfeature.NewClient(domain).StringValueDetails(context.Background(), keyEnabled, "on", openfeature.EvaluationContext{})
+		details, err := openfeature.NewClient(domain).StringValueDetails(context.Background(), keyEnabled, "act", openfeature.EvaluationContext{})
 		if details.Reason != openfeature.DisabledReason {
 			t.Fatalf("enabled reason = %q (err %v), want DISABLED: the flag must reach the provider", details.Reason, err)
 		}
 		if f.Evaluate(context.Background()).Enabled || f.AgentEnabled(context.Background()) {
-			t.Fatal("a DISABLED enabled flag read on")
+			t.Fatal("a DISABLED enabled flag read act")
 		}
 	})
 }
@@ -335,7 +335,7 @@ func TestUpstreamFlagdLateInit_StillWedges(t *testing.T) {
 	}
 
 	late.serve()
-	read := func() bool { return p.StringEvaluation(context.Background(), keyEnabled, "off", nil).Value == "on" }
+	read := func() bool { return p.StringEvaluation(context.Background(), keyEnabled, "off", nil).Value == "act" }
 	if !eventually(read, true, 5*time.Second) {
 		t.Logf("bare provider never applied the late first sync: upstream late-init bug still present")
 		return
@@ -343,7 +343,7 @@ func TestUpstreamFlagdLateInit_StillWedges(t *testing.T) {
 	for i := range 10 {
 		variant, want := "off", false
 		if i%2 == 1 {
-			variant, want = "on", true
+			variant, want = "act", true
 		}
 		late.sync.src.set(true, variant)
 		if !eventually(read, want, 2*time.Second) {

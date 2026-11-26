@@ -650,10 +650,10 @@ the global budget and the per-game in-flight guard are the gates (`services/agen
 | `decision.backend` changed | `discarded/backend_changed` | `services/agent/decision/decide_hook.go:runDecideRemote`; `TestRemote_BackendChangedMidFlight` |
 | `decision.claude.act_confidence_threshold` / `decision.jev.act_confidence_threshold` changed | the answering backend's threshold is re-read at landing (§5); the answer is `act` or `held` against the new value | `services/agent/decision/decide_hook.go:runDecideRemote`; `TestRemote_ThresholdRaisedMidFlight`, `TestThreshold_JevRaisedMidFlightAppliesAtLanding` |
 | `interventions_allowed` narrowed (including to `none`) | outcome stays `act`; the permission chain blocks `not_allowed` (`decide.blocked=true`, `decide.block_reason=not_allowed`); the next cycle makes no new call (§7.1) | `TestRemote_AllowListAtLanding`, `TestRemote_BlockedDecisionNamesTargetAndDecideBlocked`, `TestRemote_NoInterventionsAllowed`, `TestRemote_NoInterventionsAllowedAtLanding` |
-| `enabled` → `watch` | not checked by the decide hook; the gated sink writes nothing (it writes only while `enabled` is `on`) | `services/agent/actions/gated.go:GatedActionSink.Apply` |
+| `enabled` → `watch` | not checked by the decide hook; the gated sink writes nothing (it writes only while `enabled` is `act`) | `services/agent/actions/gated.go:GatedActionSink.Apply` |
 | agent shutdown | `discarded/shutdown` | `services/agent/decision/decide_hook.go:runDecideRemote` (shutdown check first) |
 
-With `enabled` `off` no new remote call fires (at `watch` the agent decides as at `on`): `OnEvaluate` short-circuits and emits a
+With `enabled` `off` no new remote call fires (at `watch` the agent decides as at `act`): `OnEvaluate` short-circuits and emits a
 throttled `agent.disabled` span (`services/agent/decision/decision.go:OnEvaluate`).
 
 ## 10. Live backend switch
@@ -674,7 +674,7 @@ The post-game retro and the experiment proposer use a separate text backend, whi
 ## 11. From decision to game effect
 
 The action sink writes to the flag service's `interventions` set, always for the deciding
-game (`actions/writer.go`, only while `enabled` is `on`; [UC-053](../use_cases/UC-053.md)):
+game (`actions/writer.go`, only while `enabled` is `act`; [UC-053](../use_cases/UC-053.md)):
 a state value with `PUT … scope {game_id}`, a per-player value with
 `scope {game_id, serial}`, a one-shot event with `POST` (appended to the game's event list).
 A decision without a coordinator game id (`game_…`), such as the `session-<n>` id of the

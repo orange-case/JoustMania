@@ -89,7 +89,7 @@ message GetMenuStatusResponse {
   int32 connected_count = 6;
   reserved 7;
   reserved "admin_serial";
-  bool agent_enabled = 8;           // agent/enabled is `watch` or `on` (the agent runs)
+  bool agent_enabled = 8;           // agent/enabled is `watch` or `act` (the agent runs)
   string agent_level = 9;           // agent/interventions_allowed variant name
   string agent_saved_level = 10;    // unused since #2800 (no level is saved at a stop), always empty
   string agent_backend = 11;        // agent/decision.backend variant name
@@ -98,7 +98,7 @@ message GetMenuStatusResponse {
   bool instructions = 14;           // user/game_instructions
   bool force_all_start = 15;        // game/force_all_start
   string audio_volume_master = 16;  // user/audio_volume.master variant name
-  string agent_enabled_state = 17;  // agent/enabled: "off", "watch", "on" or "unknown" (unresolvable; UC-015 BR-013, #2101)
+  string agent_enabled_state = 17;  // agent/enabled: "off", "watch", "act" or "unknown" (unresolvable; UC-015 BR-013, #2101)
   string agent_interventions_enabled_state = 18;  // unused since #2846 (the write gate is gone), always empty
   string shield_activation = 19;   // game/shield.activation variant name, empty when unresolvable (UC-015 BR-018, #2215)
   reserved 20;  // was shield_activation_operator (#2218), folded into operator_settings

@@ -62,7 +62,7 @@ const (
 	ModeIssue Mode = "issue"
 	// ModeAutonomous applies the validated change to the REAL default, watches real
 	// games, and reverts on degradation. The highest-privilege path; default-OFF and
-	// additionally behind `enabled` = on (Config.Enabled).
+	// additionally behind `enabled` = act (Config.Enabled).
 	ModeAutonomous Mode = "autonomous"
 )
 

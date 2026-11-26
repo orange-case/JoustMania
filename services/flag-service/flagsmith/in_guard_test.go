@@ -171,11 +171,11 @@ func TestGuardPushConfirmedDuringRound(t *testing.T) {
 func TestOlderDocumentRefused(t *testing.T) {
 	var old time.Time
 	h := newHarness(t, harnessOpts{before: func(hh *harness) {
-		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "operator"}); ferr != nil {
+		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Writer: "operator"}); ferr != nil {
 			t.Fatal(ferr)
 		}
 		old = hh.clock.Now().Add(-time.Minute)
-		hh.fake.SetDocument(document(old, []map[string]any{fsState("enabled", true, "on")}), "")
+		hh.fake.SetDocument(document(old, []map[string]any{fsState("enabled", true, "act")}), "")
 	}})
 	h.online()
 	if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "operator"}); ferr != nil {
@@ -186,7 +186,7 @@ func TestOlderDocumentRefused(t *testing.T) {
 	h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off")}), "")
 	h.round()
 	h.round() // unchanged: the next pull is conditional again
-	h.fake.SetDocument(document(old, []map[string]any{fsState("enabled", true, "on")}), "")
+	h.fake.SetDocument(document(old, []map[string]any{fsState("enabled", true, "act")}), "")
 	h.round()
 	lastIMS := func() string {
 		reqs := h.docRequests()
@@ -598,16 +598,16 @@ func (h *harness) lastPull() map[string]string {
 
 // staleWedge starts a harness whose first document is stamped in 2100 (an
 // update time ahead of every later one: Flagsmith's clock skewed forward, a
-// database restore, a garbled but in-range time) with agent/enabled on, and
+// database restore, a garbled but in-range time) with agent/enabled act, and
 // then serves a document with a normal update time and enabled off.
 func staleWedge(t *testing.T) *harness {
 	t.Helper()
 	future := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	h := newHarness(t, harnessOpts{before: func(hh *harness) {
-		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "operator"}); ferr != nil {
+		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Writer: "operator"}); ferr != nil {
 			t.Fatal(ferr)
 		}
-		hh.fake.SetDocument(document(future, []map[string]any{fsState("enabled", true, "on")}), "")
+		hh.fake.SetDocument(document(future, []map[string]any{fsState("enabled", true, "act")}), "")
 	}})
 	h.online()
 	h.round()
@@ -616,14 +616,14 @@ func staleWedge(t *testing.T) *harness {
 }
 
 // wantStaleRefusal fails unless the last pull was refused as stale_document
-// and agent/enabled is still on.
+// and agent/enabled is still act.
 func wantStaleRefusal(t *testing.T, h *harness, when string) {
 	t.Helper()
 	if a := h.lastPull(); a[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
 		t.Fatalf("UC-054/BR-005 %s: pull span %v, want reason stale_document", when, a)
 	}
-	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
-		t.Fatalf("UC-054/BR-005 %s: agent/enabled = %+v, want on (refused)", when, v)
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "act" {
+		t.Fatalf("UC-054/BR-005 %s: agent/enabled = %+v, want act (refused)", when, v)
 	}
 }
 
@@ -680,7 +680,7 @@ func TestStaleRefusalEndsAfterTimeout(t *testing.T) {
 		h := staleWedge(t)
 		h.round()
 		wantStaleRefusal(t, h, "first refusal")
-		h.fake.SetDocument(document(time.Date(2100, 1, 1, 0, 0, 1, 0, time.UTC), []map[string]any{fsState("enabled", true, "on")}), "")
+		h.fake.SetDocument(document(time.Date(2100, 1, 1, 0, 0, 1, 0, time.UTC), []map[string]any{fsState("enabled", true, "act")}), "")
 		h.clock.Advance(5 * time.Hour)
 		h.round()
 		h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off")}), "")
@@ -698,10 +698,10 @@ func TestStaleRefusalEndsAfterTimeout(t *testing.T) {
 func TestStaleAcceptedAppliesLikeAnyFlag(t *testing.T) {
 	future := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	h := newHarness(t, harnessOpts{before: func(hh *harness) {
-		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "operator"}); ferr != nil {
+		if _, ferr := hh.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Writer: "operator"}); ferr != nil {
 			t.Fatal(ferr)
 		}
-		hh.fake.SetDocument(document(future, []map[string]any{fsState("enabled", true, "on")}), "")
+		hh.fake.SetDocument(document(future, []map[string]any{fsState("enabled", true, "act")}), "")
 	}})
 	h.online()
 	if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "operator"}); ferr != nil {
@@ -711,7 +711,7 @@ func TestStaleAcceptedAppliesLikeAnyFlag(t *testing.T) {
 	h.round()
 	h.fake.SetDocument(document(future.Add(time.Second), []map[string]any{fsState("enabled", true, "off")}), "")
 	h.round() // the newest document shows the push: the guard ends
-	h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "on")}), "")
+	h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "act")}), "")
 	h.round()
 	if a := h.lastPull(); a[flagsmith.AttrReason] != flagsmith.ReasonStaleDocument {
 		t.Fatalf("setup: pull span %v, want reason stale_document", a)
@@ -721,7 +721,7 @@ func TestStaleAcceptedAppliesLikeAnyFlag(t *testing.T) {
 	if a := h.lastPull(); a[flagsmith.AttrReason] == flagsmith.ReasonStaleDocument {
 		t.Fatalf("setup: pull span %v, want the older document accepted after 10 h", a)
 	}
-	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "on" {
-		t.Fatalf("UC-054/BR-005 agent/enabled = %+v: want on, the accepted document applied like any flag (Flagsmith wins)", v)
+	if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != "act" {
+		t.Fatalf("UC-054/BR-005 agent/enabled = %+v: want act, the accepted document applied like any flag (Flagsmith wins)", v)
 	}
 }

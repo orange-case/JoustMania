@@ -34,7 +34,7 @@ const (
 // decision.not_applied_reason values of a write that was not applied.
 const (
 	// NotAppliedWatch is the decision.not_applied_reason of a write dropped
-	// because `enabled` is not on (watch).
+	// because `enabled` is not act (watch).
 	NotAppliedWatch = "watch"
 	// NotAppliedWriteFailed is the reason of a write that returned an error (A27).
 	NotAppliedWriteFailed = "write_failed"

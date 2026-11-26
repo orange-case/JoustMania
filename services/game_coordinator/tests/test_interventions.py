@@ -53,7 +53,7 @@ class FakeFlagClient:
 
     def get_string_value(self, key, default, _ctx=None):
         if key == "enabled":
-            return self.values.get("enabled", "on")
+            return self.values.get("enabled", "act")
         return str(self.values.get(key, default))
 
     def get_object_details(self, key, _default, _ctx=None):
@@ -343,7 +343,7 @@ async def test_allowed_membership_permits_listed_type():
 @pytest.mark.uc("UC-040", br=["BR-004"])
 @pytest.mark.uc("UC-045", br=["BR-001"])
 @pytest.mark.uc("UC-015", br=["BR-002"])
-@pytest.mark.parametrize("enabled", ["off", "watch", None], ids=["off", "watch", "unresolved"])
+@pytest.mark.parametrize("enabled", ["off", "watch", "on", None], ids=["off", "watch", "legacy-on", "unresolved"])
 async def test_an_agent_not_on_gets_nothing_applied_whatever_the_allow_list(enabled):
     """`enabled` is the one stop and the watch switch, so the coordinator's own check of it holds the agent."""
     mgr, events = make_manager(

@@ -75,7 +75,7 @@ and the files together. `scripts/tools/gen-voice.sh --only <id> --dry-run` shows
   sources are listed in `services/audio/assets/audio_credits.txt`.
 - Agent page (#2747, UC-016 BR-012, BR-016): `agent_watching` ("Watching.", the pad's K5 tap of a `WATCH` agent without
   a screen) and `interventions_on` / `interventions_off` ("Interventions on." / "Interventions off.", the menu's line for
-  `agent_state` between `WATCH` and `ON`).
+  `agent_state` between `WATCH` and `ACT`).
 - The admin cues `admin_not_saved` and `admin_agent` (#1746) left the catalog with the controller admin mode (#2819); a failed pad write plays the failure beeps instead (UC-015 BR-009).
 - Scope: every voice line the code plays (Menu, Joust, Zombie), the #2106 pad lines and the mode instructions of the
   FR-014 backlog (#2151). A new voice line is a catalog line; there are no recordings to fall back on. The recordings no

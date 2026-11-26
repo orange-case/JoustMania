@@ -35,7 +35,7 @@ export interface FlagPanel {
   actThreshold: number | null;
   batteryThreshold: string;
   maxPerMinute: string;
-  /** agent/enabled: off (stopped), watch (decides, writes nothing) or on; null when absent or unknown. */
+  /** agent/enabled: off (stopped), watch (decides, writes nothing) or act (applies decisions); null when absent or unknown. */
   enabled: AgentEnabled | null;
   /** Objective weights summary ("k=v,..."). */
   objectives: string;
@@ -48,10 +48,10 @@ export interface FlagPanel {
 }
 
 /** The agent/enabled states. */
-export type AgentEnabled = "off" | "watch" | "on";
+export type AgentEnabled = "off" | "watch" | "act";
 
 function agentEnabledOrNull(v: unknown): AgentEnabled | null {
-  return v === "off" || v === "watch" || v === "on" ? v : null;
+  return v === "off" || v === "watch" || v === "act" ? v : null;
 }
 
 function boolOrNull(v: unknown): boolean | null {

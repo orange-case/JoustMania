@@ -18,8 +18,8 @@ func TestEvaluate_WithInMemoryProvider(t *testing.T) {
 	provider := memprovider.NewInMemoryProvider(map[string]memprovider.InMemoryFlag{
 		keyEnabled: {
 			State:          memprovider.Enabled,
-			DefaultVariant: "on",
-			Variants:       map[string]any{"on": "on", "off": "off"},
+			DefaultVariant: "act",
+			Variants:       map[string]any{"act": "act", "off": "off"},
 		},
 		keyObjectives: {
 			State:          memprovider.Enabled,

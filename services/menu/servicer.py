@@ -67,7 +67,7 @@ def _enabled_state(details) -> str:
 
 
 def _agent_state(details) -> str:
-    """`enabled` as `off`, `watch`, `on` or `unknown` (unresolved, or a value outside the three states)."""
+    """`enabled` as `off`, `watch`, `act` or `unknown` (unresolved, or a value outside the three states)."""
     return details.value if _resolved(details) and details.value in AGENT_STATE_LADDER else "unknown"
 
 
@@ -433,7 +433,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             selection=self.current_selection.name,
             ready_count=self.ready_controller_count,
             connected_count=len(self.connected_controllers),
-            agent_enabled=enabled_state in ("watch", "on"),
+            agent_enabled=enabled_state in ("watch", "act"),
             agent_enabled_state=enabled_state,
             agent_level=_variant(agent.get_string_details(AGENT_POLICY_FLAG, "")),
             agent_backend=_variant(agent.get_string_details(DECISION_BACKEND_FLAG, "")),

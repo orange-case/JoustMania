@@ -50,7 +50,7 @@ TELEMETRY_TIMEOUT_SECONDS = 30.0
 
 def _allow_grant_shield(stack, flag_service) -> None:
     flag_service.put(
-        "agent", "enabled", variant="on"
+        "agent", "enabled", variant="act"
     )  # the coordinator applies nothing while the agent is stopped (UC-040 BR-004)
     flag_service.put("agent", "interventions_allowed", variant="standard")
     allowed = variant_value("agent", "interventions_allowed", "standard")

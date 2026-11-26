@@ -46,7 +46,7 @@ Runtime flags change only through the flag service's HTTP API (envoy route
 | `flags.sh` | Generic client: `state`, `get`, `variant`, `set`, `set-value`, `clear`, `reset`, `restart` (flag service + flagd together) |
 | `flagservice.py` | The Python client the stage scripts share (standard library only) |
 | `agent-backend.sh` | `decision.*` flags (backend, model, thresholds, capture, effort) |
-| `agent-killswitch.sh` | The agent state `enabled`: `on` / `watch` / `off` (each a stack overlay; `off` is a write, never a clear) |
+| `agent-killswitch.sh` | The agent state `enabled`: `act` / `watch` / `off` (each a stack overlay; `off` is a write, never a clear) |
 | `agent-dryrun-enable.sh` | `enabled` + `experiments_enabled` for a `make dry-run` |
 | `talk-stage.sh` | The talk's stage baseline, permissions beat and Bluetooth fallback (`writer=stage` overlays) |
 | `talk-preflight.sh` | Read-only pre-flight; reads the flag service (`GET /state`, `GET /agent`) |

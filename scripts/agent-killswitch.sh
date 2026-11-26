@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Set the agent's state, the `enabled` flag (agent flag set): off / watch / on (#999 dry-run helper; epic #1407).
+# Set the agent's state, the `enabled` flag (agent flag set): off / watch / act (#999 dry-run helper; epic #1407).
 #
 #   off    the agent does not run (the stop)
 #   watch  the agent observes, decides and records, but writes nothing to a game
-#   on     decisions are applied
+#   act    decisions are applied
 #
 # Every state, `off` included, is an in-memory stack overlay written through the
 # flag service (scripts/flags.sh). `off` is a PUT, never a clear: clearing the
@@ -11,7 +11,7 @@
 # the agent. Nothing is persisted: a flag-service restart returns to the default.
 #
 # Usage:
-#   ./scripts/agent-killswitch.sh on      # apply decisions
+#   ./scripts/agent-killswitch.sh act     # apply decisions
 #   ./scripts/agent-killswitch.sh watch   # decide and record, write nothing
 #   ./scripts/agent-killswitch.sh off     # stop the agent
 #   ./scripts/agent-killswitch.sh status
@@ -43,7 +43,7 @@ EOF_FALLBACK
 }
 
 case "${1:-status}" in
-  on | watch)
+  act | watch)
     "${FLAGS}" set agent enabled "$1" >/dev/null
     echo "agent kill-switch -> $1"
     ;;
@@ -55,7 +55,7 @@ case "${1:-status}" in
     echo "agent kill-switch = $("${FLAGS}" variant agent enabled)"
     ;;
   *)
-    echo "usage: $0 {on|watch|off|status}" >&2
+    echo "usage: $0 {act|watch|off|status}" >&2
     exit 2
     ;;
 esac

@@ -47,16 +47,16 @@ func (s *fakeFlagdSource) config(enabled string) string {
 	doc := map[string]any{"flags": map[string]any{
 		keyEnabled: map[string]any{
 			"state": "ENABLED", "defaultVariant": enabled,
-			"variants": map[string]any{"on": "on", "off": "off"},
+			"variants": map[string]any{"act": "act", "off": "off"},
 		},
 		keyPlayerTTLSeconds: map[string]any{
 			"state": "ENABLED", "defaultVariant": "short",
 			"variants": map[string]any{"short": 3, "default": 5},
 		},
-		// The game set's shield flags (UC-048 A4): "on" reads trigger, "off" instant.
+		// The game set's shield flags (UC-048 A4): "act" reads trigger, "off" instant.
 		"shield.activation": map[string]any{
 			"state": "ENABLED", "defaultVariant": enabled,
-			"variants": map[string]any{"on": "trigger", "off": "instant"},
+			"variants": map[string]any{"act": "trigger", "off": "instant"},
 		},
 		"shield.charge_expiry_seconds": map[string]any{
 			"state": "ENABLED", "defaultVariant": "short",
@@ -129,9 +129,9 @@ func waitBool(t *testing.T, what string, read func() bool, want bool, timeout ti
 //
 // UC: UC-045 main A3
 func TestSyncedProvider_LateFirstSyncThenEveryFlipIsSeen(t *testing.T) {
-	agentSrc := newFakeFlagdSource("on")
+	agentSrc := newFakeFlagdSource("act")
 	ctx, cancel := context.WithCancel(context.Background())
-	f, holder, shutdown, err := setupFlagd(ctx, fakeFactory(agentSrc), fakeFactory(newFakeFlagdSource("on")), nil, testSyncTiming, nil)
+	f, holder, shutdown, err := setupFlagd(ctx, fakeFactory(agentSrc), fakeFactory(newFakeFlagdSource("act")), nil, testSyncTiming, nil)
 	if err != nil {
 		t.Fatalf("setupFlagd: %v", err)
 	}
@@ -151,18 +151,18 @@ func TestSyncedProvider_LateFirstSyncThenEveryFlipIsSeen(t *testing.T) {
 	t.Run("UC-045/A3 kill switch fails closed before the first sync", func(t *testing.T) {
 		time.Sleep(700 * time.Millisecond) // longer than the provider's default 500 ms init deadline
 		if read() {
-			t.Fatal("enabled read on before any flag sync")
+			t.Fatal("enabled read act before any flag sync")
 		}
 	})
 
 	t.Run("UC-045/main flips after a late first sync", func(t *testing.T) {
-		agentSrc.set(true, "on")
+		agentSrc.set(true, "act")
 		waitBool(t, "enabled after the first sync", read, true, 5*time.Second)
 		for i := 0; i < 8; i++ {
 			agentSrc.set(true, "off")
 			waitBool(t, fmt.Sprintf("flip %d enabled off", i), read, false, time.Second)
-			agentSrc.set(true, "on")
-			waitBool(t, fmt.Sprintf("flip %d enabled on", i), read, true, time.Second)
+			agentSrc.set(true, "act")
+			waitBool(t, fmt.Sprintf("flip %d enabled act", i), read, true, time.Second)
 		}
 		// The holder follows the synced value (configuration change or the 1 s re-read).
 		deadline := time.Now().Add(3 * time.Second)

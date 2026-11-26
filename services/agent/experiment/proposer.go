@@ -116,7 +116,7 @@ type ProposerConfig struct {
 	// that forgets to wire the gate gets no proposals, never ungated ones.
 	Permit func(ctx context.Context) (ok bool, reason string)
 	// WritePermit, when set, is checked after Permit right before the write: drafting
-	// may run in watch, but the write starts an experiment, which needs `enabled` on.
+	// may run in watch, but the write starts an experiment, which needs `enabled` = act.
 	WritePermit func(ctx context.Context) (ok bool, reason string)
 	// GameKind is the kind of the game whose end triggered this cycle ("real",
 	// "shadow", ...). It is handed to the LLM admission (SetLLMAdmission) for the
@@ -410,7 +410,7 @@ func (p *Proposer) ProposeOnce(ctx context.Context, n Narrative, cfg ProposerCon
 		attribute.String(AttrProposedDiffSummary, summarizeProposal(proposal)),
 	)
 
-	// Re-check the gates before the WRITE (#1270), plus `enabled` on: the model call can take
+	// Re-check the gates before the WRITE (#1270), plus `enabled` = act: the model call can take
 	// seconds, and an operator who switched the agent off meanwhile must not see a
 	// new experiment land afterwards.
 	if ok, reason := writePermit(ctx, cfg); !ok {

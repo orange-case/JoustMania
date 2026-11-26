@@ -63,7 +63,7 @@ PROPOSAL_REPLY = json.dumps(
 
 def _configure_agent() -> None:
     fs = flag_service_default()
-    fs.put(AGENT, "enabled", variant="on")
+    fs.put(AGENT, "enabled", variant="act")
     fs.put(AGENT, "experiments_enabled", variant="on")
     # The text-backend model is the inference.model flag (the env var was removed, #1907),
     # so the fake's model is set here.
