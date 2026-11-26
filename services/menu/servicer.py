@@ -44,7 +44,6 @@ from services.menu.settings_ops import (
     Result,
     is_failure,
 )
-from services.menu.utils.audio import GAME_MODE_VOICE
 from services.menu.utils.settings import DEFAULT_GAME_MODE, DEFAULT_VOICE_ACTOR, GAME_MODES, get_next_game_mode
 
 logger = logging.getLogger(__name__)
@@ -189,7 +188,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         return list(self.game_options)
 
     async def select_game_mode(
-        self, game_name: str, *, source: str = "operator_pad", serial: str | None = None
+        self, game_name: str, *, source: str = "operator_pad", serial: str | None = None, announce: bool = False
     ) -> bool:
         """Select a game mode by name (SettingsOps and StateManager callback).
 
@@ -199,7 +198,8 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         (#1030): the servicer's ``current_selection``, the state_manager's game
         mode, the lobby colour of every
         CONNECTED / READY controller (UC-011 BR-005), a ``selection_changed``
-        event and the ``current_game`` default persisted to flagd.
+        event and the ``current_game`` default persisted to flagd. ``announce`` adds the mode's
+        feedback of the option table (voice and lobby pulse, services.md ง3.1), the same on every surface.
 
         Returns False (and changes nothing) for an unknown or unplayable mode.
         """
@@ -216,6 +216,8 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             payload["serial"] = serial
         await self.event_publisher.publish("selection_changed", payload)
         await asyncio.to_thread(self.user_prefs_writer.update_default_variant, "current_game", game_mode.name)
+        if announce:
+            await self.settings_ops.announce("current_game", game_mode.name)
         logger.info(f"Game selected via {source}: {game_mode.name}")
         return True
 
@@ -532,7 +534,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
 
         elif button == "select":
             next_mode = get_next_game_mode(self.current_selection)
-            await self.select_game_mode(next_mode.name, source="button_input")
+            await self.select_game_mode(next_mode.name, source="button_input", announce=True)
         return None
 
     async def _handle_web_command(self, data: dict, span) -> str | None:
@@ -561,15 +563,12 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
 
         elif command == "select_game":
             game_name = data.get("game_name", "")
-            if await self.select_game_mode(game_name, source="web"):
-                # UC-011 A1 continues at step 5: both selection events.
+            if await self.select_game_mode(game_name, source="web", announce=True):
+                # UC-011 A1: the dashboard also listens for this event.
                 selected_name = Games.from_name(game_name).name
                 await self.event_publisher.publish(
                     "game_selection_changed", {"game_name": selected_name, "source": "web"}
                 )
-                voice_file = GAME_MODE_VOICE.get(game_name)
-                if voice_file:
-                    await self.audio.play_voice(voice_file)
         return None
 
     # Operator pad commands (#2050, UC-015, services.md ยง3.1): no serial, no LEDs, error codes.
