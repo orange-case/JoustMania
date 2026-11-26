@@ -430,11 +430,6 @@ a {
   border-color: rgba(var(--danger-rgb), 0.5);
 }
 
-.controller-card.admin {
-  border-color: rgba(var(--fg-rgb), 0.8);
-  box-shadow: 0 0 20px rgba(var(--fg-rgb), 0.3);
-}
-
 .controller-name {
   font-size: 1rem;
   font-weight: 700;
@@ -529,11 +524,6 @@ a {
 .status-badge.dead {
   background: rgba(var(--danger-rgb), 0.2);
   color: var(--accent-primary);
-}
-
-.status-badge.admin {
-  background: rgba(var(--fg-rgb), 0.2);
-  color: var(--text-primary);
 }
 
 /* Connection quality (UC-035 BR-005): p95 / longest report gap over 10 s;

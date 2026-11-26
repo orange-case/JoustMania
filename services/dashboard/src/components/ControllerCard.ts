@@ -184,7 +184,7 @@ export class ControllerCard {
     this.updateAccelerometer(data.accel);
 
     // Status: a followed shadow game's roster says alive/dead (UC-070 BR-005);
-    // otherwise the team (-1 = admin, > 0 = team n, 0 or unset = alive)
+    // otherwise the team (> 0 = team n, otherwise alive)
     this.updateStatus(statusView(data.team, alive));
   }
 
@@ -262,8 +262,8 @@ export class ControllerCard {
   }
 
   private updateStatus(view: StatusView) {
-    this.element.classList.remove("alive", "dead", "admin");
-    this.statusBadge.classList.remove("connected", "alive", "dead", "admin");
+    this.element.classList.remove("alive", "dead");
+    this.statusBadge.classList.remove("connected", "alive", "dead");
     this.element.classList.add(view.state);
     this.statusBadge.classList.add(view.state);
     this.statusBadge.textContent = view.text;

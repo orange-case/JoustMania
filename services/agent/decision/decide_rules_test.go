@@ -5,6 +5,7 @@ package decision
 import (
 	"context"
 	"math"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -29,16 +30,18 @@ func ffaRequest(c gamecontext.GameContext, allowed []string) decide.Request {
 	return decide.Request{State: st, Questions: decide.FFAQuestions(st, allowed), Context: &c}
 }
 
-// rulesDecide answers req on the in-loop rules path (EvaluateDecide) of engine and
-// returns the request it answered (options widened, #1295) with the response.
+// rulesDecide runs the in-loop rules path (EvaluateDecide) of engine on req and
+// returns the request it recorded with the response, answered from the emitted
+// decisions as the loop does before it stamps any value.
 func rulesDecide(t *testing.T, engine *ObjectiveRules, req decide.Request) (decide.Request, decide.Response) {
 	t.Helper()
-	_, wide, resp, ranked := engine.EvaluateDecide(context.Background(), *req.Context,
+	out, got, resp, ranked := engine.EvaluateDecide(context.Background(), *req.Context,
 		func(_, _ map[string]bool) decide.Request { return req })
 	if !ranked {
 		t.Fatal("EvaluateDecide was throttled")
 	}
-	return wide, resp
+	resp.Answers = rulesAnswers(got, out)
+	return got, resp
 }
 
 // decideFixture is one characterization scenario: a config and a context.
@@ -125,10 +128,7 @@ func TestRulesPath_MatchesEvaluate(t *testing.T) {
 			clock := time.Unix(10_000, 0)
 			want := newTestEngine(fx.cfg, &clock).Evaluate(context.Background(), fx.ctx)
 
-			req, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
-			if err := decide.Validate(req, resp); err != nil {
-				t.Fatalf("response does not validate: %v", err)
-			}
+			_, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
 			if resp.Backend != RulesBackendName {
 				t.Errorf("Backend = %q", resp.Backend)
 			}
@@ -144,7 +144,6 @@ func TestRulesPath_MatchesEvaluate(t *testing.T) {
 				t.Fatalf("answers picked %s -> %s, Evaluate picked %s -> %s (all: %+v)",
 					iv.Choice, tgt.Choice, wantIV, wantTgt, want)
 			}
-			t.Logf("%s -> %s (confidence %.4f, target confidence %.4f)", iv.Choice, tgt.Choice, iv.Confidence, tgt.Confidence)
 			if fx.name != "no candidates" && len(want) == 0 {
 				t.Fatalf("fixture %q should produce a decision", fx.name)
 			}
@@ -155,72 +154,43 @@ func TestRulesPath_MatchesEvaluate(t *testing.T) {
 	}
 }
 
-// TestRulesPath_ProbabilitiesAreSoftmaxOfScores checks the probability and
-// confidence math against the engine's own ranked scores.
-func TestRulesPath_ProbabilitiesAreSoftmaxOfScores(t *testing.T) {
+// TestRulesPath_AnswersCarryNoConfidence: the rules record what they decided;
+// no answer carries probabilities or a confidence.
+func TestRulesPath_AnswersCarryNoConfidence(t *testing.T) {
 	for _, fx := range decideFixtures() {
 		t.Run(fx.name, func(t *testing.T) {
 			clock := time.Unix(10_000, 0)
-			twin := newTestEngine(fx.cfg, &clock)
-			ranked, _, _ := twin.rankLocked(fx.ctx, clock, nil)
-
 			_, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
-			iv, _ := resp.Find(decide.QuestionFFAIntervention)
-
-			// Best score per intervention, noop at minScore.
-			best := map[string]float64{decide.OptionNoop: minScore}
-			for _, sc := range ranked {
-				if _, ok := best[sc.decision.Intervention]; !ok {
-					best[sc.decision.Intervention] = sc.score
+			if len(resp.Answers) != 3 {
+				t.Fatalf("answers = %+v, want one per FFA question", resp.Answers)
+			}
+			for _, a := range resp.Answers {
+				if len(a.Probabilities) != 0 || a.Confidence != 0 {
+					t.Errorf("answer %+v carries probabilities or a confidence", a)
 				}
-			}
-			for name, s := range best {
-				ratio := iv.Probabilities[name] / iv.Probabilities[decide.OptionNoop]
-				want := math.Exp((s - minScore) / rulesSoftmaxTemperature)
-				if math.Abs(ratio-want) > 1e-9*want {
-					t.Errorf("p(%s)/p(noop) = %v, want exp((%.3f-%.2f)/T) = %v", name, ratio, s, minScore, want)
-				}
-			}
-			for name, p := range iv.Probabilities {
-				if _, ok := best[name]; !ok && p != 0 {
-					t.Errorf("p(%s) = %v for an intervention without candidates", name, p)
-				}
-				if p > iv.Probabilities[iv.Choice] {
-					t.Errorf("choice %s (p=%v) is not the argmax (%s p=%v)", iv.Choice, iv.Probabilities[iv.Choice], name, p)
-				}
-			}
-			// Confidence that acting is right: 1 - p(noop) for an intervention,
-			// p(noop) for noop.
-			want := 1 - iv.Probabilities[decide.OptionNoop]
-			if iv.Choice == decide.OptionNoop {
-				want = iv.Probabilities[decide.OptionNoop]
-			}
-			if math.Abs(iv.Confidence-want) > 1e-12 {
-				t.Errorf("intervention confidence = %v, want %v", iv.Confidence, want)
-			}
-			tgt, _ := resp.Find(decide.QuestionFFATarget)
-			if tgt.Confidence != tgt.Probabilities[tgt.Choice] {
-				t.Errorf("target confidence = %v, want p(%s) = %v", tgt.Confidence, tgt.Choice, tgt.Probabilities[tgt.Choice])
 			}
 		})
 	}
 }
 
-func TestRulesPath_NoCandidatesIsConfidentNoop(t *testing.T) {
+func TestRulesPath_NoCandidatesIsNoop(t *testing.T) {
 	fx := decideFixtures()[5]
 	clock := time.Unix(10_000, 0)
 	_, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
 	iv, _ := resp.Find(decide.QuestionFFAIntervention)
 	tgt, _ := resp.Find(decide.QuestionFFATarget)
 	mag, _ := resp.Find(decide.QuestionFFAMagnitude)
-	if iv.Choice != decide.OptionNoop || iv.Probabilities[decide.OptionNoop] != 1 || iv.Confidence != 1 {
-		t.Errorf("intervention = %+v, want certain noop", iv)
+	if iv.Choice != decide.OptionNoop {
+		t.Errorf("intervention = %+v, want noop", iv)
 	}
-	if tgt.Choice != decide.TargetNone || tgt.Confidence != 1 {
-		t.Errorf("target = %+v, want certain none", tgt)
+	if tgt.Choice != decide.TargetNone {
+		t.Errorf("target = %+v, want none", tgt)
 	}
 	if mag.Score != 0 {
 		t.Errorf("magnitude = %+v, want 0 for noop", mag)
+	}
+	if resp.Prediction != nil {
+		t.Errorf("prediction = %+v, want none without a decision", resp.Prediction)
 	}
 }
 
@@ -234,21 +204,17 @@ func TestRulesPath_EnduranceDetails(t *testing.T) {
 	if iv.Choice != InterventionAdjustMusicTempo {
 		t.Fatalf("choice = %s", iv.Choice)
 	}
-	// Session-scoped: the only target among tempo candidates is "none".
-	if tgt.Choice != decide.TargetNone || tgt.Probabilities[decide.TargetNone] != 1 || tgt.Confidence != 1 {
-		t.Errorf("target = %+v", tgt)
+	if tgt.Choice != decide.TargetNone {
+		t.Errorf("target = %+v, want none for a session-scoped lever", tgt)
 	}
 	// R1 writes the fast end of [1.0, 1.3] (#2487, decide-contract.md §15.5), so the
 	// magnitude is 1.3, not the 1.15 writer default an empty Value would get.
 	if v, _ := decide.ResolveMagnitude(iv.Choice, mag.Score); math.Abs(v-1.3) > 1e-9 {
 		t.Errorf("magnitude resolves to %v, want 1.3", v)
 	}
-	if mag.Confidence != iv.Confidence {
-		t.Errorf("magnitude confidence %v, want the intervention's %v", mag.Confidence, iv.Confidence)
-	}
 }
 
-func TestRulesPath_ChaosTargetIsConditional(t *testing.T) {
+func TestRulesPath_ChaosTargetIsTheEmittedOne(t *testing.T) {
 	fx := decideFixtures()[4]
 	clock := time.Unix(10_000, 0)
 	_, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allInterventions()))
@@ -258,17 +224,14 @@ func TestRulesPath_ChaosTargetIsConditional(t *testing.T) {
 		t.Fatalf("choice = %s", iv.Choice)
 	}
 	// The statue S (R8, urgency 0.8) beats the R9 nudge (urgency <= 0.6).
-	if tgt.Choice != "S" || tgt.Probabilities["S"] <= tgt.Probabilities["T"] {
-		t.Errorf("target = %+v, want S as argmax", tgt)
-	}
-	if tgt.Probabilities[decide.TargetNone] != 0 {
-		t.Errorf("p(none) = %v for a player-targeted intervention", tgt.Probabilities[decide.TargetNone])
+	if tgt.Choice != "S" {
+		t.Errorf("target = %+v, want S", tgt)
 	}
 }
 
 // TestRulesPath_AnswersTheEmittedDecisionPastTheAllowList: the rules-path answers
 // name the decision the engine emits even when the allow-list does not offer it;
-// the options are widened (#1295) and the permission chain blocks it afterwards.
+// the questions stay the allow-listed ones and the permission chain blocks it.
 func TestRulesPath_AnswersTheEmittedDecisionPastTheAllowList(t *testing.T) {
 	fx := decideFixtures()[0]
 	clock := time.Unix(10_000, 0)
@@ -276,19 +239,19 @@ func TestRulesPath_AnswersTheEmittedDecisionPastTheAllowList(t *testing.T) {
 	if len(want) == 0 || want[0].Intervention != InterventionAdjustMusicTempo {
 		t.Fatalf("fixture changed: %+v", want)
 	}
-	req, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock),
-		ffaRequest(fx.ctx, []string{InterventionPlayAudioCue, InterventionGrantShield}))
-	if err := decide.Validate(req, resp); err != nil {
-		t.Fatalf("invalid: %v", err)
-	}
+	allowed := []string{InterventionPlayAudioCue, InterventionGrantShield}
+	req, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), ffaRequest(fx.ctx, allowed))
 	if iv, _ := resp.Find(decide.QuestionFFAIntervention); iv.Choice != want[0].Intervention {
 		t.Fatalf("choice = %s, want the emitted %s", iv.Choice, want[0].Intervention)
 	}
+	if opts := req.Questions[0].Options; slices.Contains(opts, InterventionAdjustMusicTempo) {
+		t.Errorf("questions offer %v, want the allow-listed options only", opts)
+	}
 }
 
-// TestRulesPath_UnknownQuestionsAreNeutral: questions the rules have no view on
-// get a neutral, valid answer at confidence 0.
-func TestRulesPath_UnknownQuestionsAreNeutral(t *testing.T) {
+// TestRulesPath_UnknownQuestionsAreEmpty: questions the rules have no view on get
+// an empty answer at the low end of a score range.
+func TestRulesPath_UnknownQuestionsAreEmpty(t *testing.T) {
 	fx := decideFixtures()[0]
 	clock := time.Unix(10_000, 0)
 	req := ffaRequest(fx.ctx, allInterventions())
@@ -296,11 +259,8 @@ func TestRulesPath_UnknownQuestionsAreNeutral(t *testing.T) {
 		decide.Question{ID: "ffa.mood", Kind: decide.KindChoice, Options: []string{"calm", "wild", "odd"}},
 		decide.Question{ID: "ffa.volume", Kind: decide.KindScore, Range: [2]float64{2, 5}},
 	)
-	req, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), req)
-	if err := decide.Validate(req, resp); err != nil {
-		t.Fatalf("invalid: %v", err)
-	}
-	if a, _ := resp.Find("ffa.mood"); a.Choice != "calm" || a.Confidence != 0 {
+	_, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), req)
+	if a, _ := resp.Find("ffa.mood"); a.Choice != "" || a.Confidence != 0 {
 		t.Errorf("unknown choice answer = %+v", a)
 	}
 	if a, _ := resp.Find("ffa.volume"); a.Score != 2 || a.Confidence != 0 {
@@ -318,72 +278,5 @@ func TestDecideContract_VocabularyMatches(t *testing.T) {
 		if _, ok := interventionWeights[iv]; !ok {
 			t.Errorf("bounds table names unknown intervention %q", iv)
 		}
-	}
-}
-
-// rankedCandidate builds a scored candidate directly, for the probability edge
-// cases that are awkward to reach through a full GameContext.
-func rankedCandidate(intervention, target string, score float64) scoredCandidate {
-	return scoredCandidate{
-		candidate: candidate{decision: Decision{Intervention: intervention, TargetSerial: target}},
-		score:     score,
-	}
-}
-
-// ffaQuestionsFor builds the FFA question set over the given alive serials.
-func ffaQuestionsFor(allowed []string, alive ...string) map[string]decide.Question {
-	c := gamecontext.GameContext{Players: map[string]*gamecontext.PlayerSignals{}}
-	for _, s := range alive {
-		c.Players[s] = &gamecontext.PlayerSignals{Serial: s, Active: bptr(true)}
-	}
-	return indexQuestions(decide.FFAQuestions(decide.BuildState(c), allowed))
-}
-
-// TestRulesAnswer_CompetingStrongInterventions: two strong candidates split the
-// probability mass, but both clearly beat noop, so acting is a confident call.
-// (A top-1 margin would have reported ~0.05 here and declined to act.)
-func TestRulesAnswer_CompetingStrongInterventions(t *testing.T) {
-	qs := ffaQuestionsFor(allInterventions(), "A")
-	eligible := []scoredCandidate{
-		rankedCandidate(InterventionAdjustMusicTempo, "", 0.90),
-		rankedCandidate(InterventionGrantShield, "A", 0.89),
-	}
-	pick := answerIntervention(qs[decide.QuestionFFAIntervention], eligible)
-	a := pick.answer
-	if a.Choice != InterventionAdjustMusicTempo {
-		t.Fatalf("choice = %s", a.Choice)
-	}
-	if p1, p2 := a.Probabilities[InterventionAdjustMusicTempo], a.Probabilities[InterventionGrantShield]; p1-p2 > 0.1 {
-		t.Fatalf("fixture should split the mass: p=%v vs %v", p1, p2)
-	}
-	if a.Confidence < 0.99 {
-		t.Errorf("confidence = %v, want >= 0.99 (1 - p(noop))", a.Confidence)
-	}
-	req := decide.Request{Questions: []decide.Question{qs[decide.QuestionFFAIntervention]}}
-	if err := decide.Validate(req, decide.Response{Answers: []decide.Answer{a}}); err != nil {
-		t.Fatalf("invalid: %v", err)
-	}
-}
-
-// TestRulesAnswer_ExactMinScoreTie: a candidate at exactly minScore survives the
-// engine's filter (s < minScore is dropped), so the rules act on it; it ties
-// noop at p=0.5 and the answer still validates (the choice is an argmax).
-func TestRulesAnswer_ExactMinScoreTie(t *testing.T) {
-	qs := ffaQuestionsFor(allInterventions(), "A")
-	eligible := []scoredCandidate{rankedCandidate(InterventionPlayAudioCue, "", minScore)}
-	pick := answerIntervention(qs[decide.QuestionFFAIntervention], eligible)
-	a := pick.answer
-	if a.Choice != InterventionPlayAudioCue {
-		t.Fatalf("choice = %s, want the candidate (rules act at score == minScore)", a.Choice)
-	}
-	if a.Probabilities[InterventionPlayAudioCue] != 0.5 || a.Probabilities[decide.OptionNoop] != 0.5 {
-		t.Errorf("probabilities = %v, want an even split with noop", a.Probabilities)
-	}
-	if a.Confidence != 0.5 {
-		t.Errorf("confidence = %v, want 0.5", a.Confidence)
-	}
-	req := decide.Request{Questions: []decide.Question{qs[decide.QuestionFFAIntervention]}}
-	if err := decide.Validate(req, decide.Response{Answers: []decide.Answer{a}}); err != nil {
-		t.Fatalf("invalid: %v", err)
 	}
 }

@@ -729,17 +729,19 @@ func (l *Loop) OnEvaluate(ctx context.Context, c gamecontext.GameContext, trig E
 	rootCtx, ev, endCycle := l.startCycle(ctx, c, trig)
 	defer endCycle()
 
-	// #1226: the decide-contract record of this cycle's rules ranking (the answers
-	// from the SAME ranking that produced these decisions), as an invoke_agent
-	// sibling of the agent.decision spans. Nil when the engine has no decide seam.
-	// #1295: the span is emitted AFTER the decisions ran (it is backdated to the
-	// ranking, so the timeline is unchanged) so it can report what the permission
-	// chain did with the decision its answers describe (decide.blocked).
+	// #1226: the record of this cycle's rules ranking, as an invoke_agent sibling of
+	// the agent.decision spans. Nil when the engine has no decide seam. #1295: the
+	// span is emitted AFTER the decisions ran (it is backdated to the ranking, so the
+	// timeline is unchanged) so it can report what the permission chain did with the
+	// decision its answers describe (decide.blocked).
 	if decideRec != nil {
 		state.DecideBackend = decideRec.used // rides every agent.decision span
 		state.DecideStateDigest = decideRec.req.State.Digest
+		decisions = l.stampShieldSeconds(rootCtx, snapshot, decisions, decideRec.req.Bounds)
+		decideRec.answerRules(decisions)
+	} else {
+		decisions = l.stampShieldSeconds(rootCtx, snapshot, decisions, nil)
 	}
-	decisions = l.stampShieldSeconds(rootCtx, snapshot, decisions, decideRec)
 	before := len(state.Outcomes)
 	for _, d := range decisions {
 		l.runDecision(rootCtx, snapshot, c, d, now(), &state)

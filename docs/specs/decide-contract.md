@@ -162,10 +162,10 @@ Helping end: low for `adjust_player_sensitivity` and `adjust_global_difficulty`;
 quieter / louder. They describe effects, not purposes, so the v1 and the neutral profile share them. jev's ladder end
 labels (`services/agent/decide/backends/jev/criteria.go`, §3.2) and its two-way directions agree with them (a test).
 
-The `rules` backend answers `ffa.magnitude` from its first decision's value, else from the Default above. A
-`grant_shield` from the rules carries no value when ranked; the loop stamps it with the `shield_seconds` `default`
-variant before the permission chain (UC-048 BR-012) and sets the record's `ffa.magnitude` answer to that stamped
-length, so `decide.answers` on the `invoke_agent joustmania-agent` span reports the seconds that are written, not 5 (`services/agent/decision/chargeledger.go:stampShieldSeconds`).
+The rules record's `ffa.magnitude` answer is its first decision's value, else the Default above, read after the
+loop stamped and clamped the decisions (§5). A `grant_shield` from the rules carries no value when ranked; the loop
+stamps it with the `shield_seconds` `default` variant before the permission chain (UC-048 BR-012), so `decide.answers` on the `invoke_agent joustmania-agent` span reports the seconds that are written, not 5
+(`services/agent/decision/chargeledger.go:stampShieldSeconds`).
 
 ## 3. Wire format for remote backends
 
@@ -470,21 +470,15 @@ decision repeats the verdict as `decide.blocked` / `decide.block_reason` (§6).
 
 - **Meaning:** the backend's confidence that *acting* on the answer is right, in
   [0,1]; derivation is backend-defined (`decide.go` (package doc)).
-- **Rules:** softmax over ranked candidate scores with `noop` competing at
-  `minScore` 0.10, temperature = `minScore`; `ffa.intervention` confidence is
-  1 − p(noop) when an intervention is chosen, p(noop) when `noop` is chosen
-  (`services/agent/decision/decide_rules.go:rulesSoftmaxTemperature`, `services/agent/decision/decide_rules.go:answerFromRanked`, `services/agent/decision/decide_rules.go:softmax`).
-- **Rules path answers = the emitted decision.** In the decision loop the rules answers describe
-  the decision the engine actually emitted this cycle (its first decision: intervention and target), from
-  the same ranking. The `ffa.intervention` / `ffa.target` options of the rules-path request are the
-  allow-listed interventions and alive players **plus** every intervention and target the engine ranked
-  (`services/agent/decision/decide_rules.go:emissionRequest`), so `decide.questions` on a rules span can list an intervention
-  the allow-list does not hold; the permission chain (§4.5) applies the allow-list afterwards and its verdict
-  is `decide.blocked`. A remote backend's request keeps the allow-listed options.
-  Only telemetry changed: the emitted decisions and their outcomes are pinned by
-  `decision/testdata/rules_path_golden.json`. Because the softmax runs over the widened options, the rules-path
-  `decide.confidence` (1 − p(noop) for the chosen intervention) is computed over the engine's own ranked
-  interventions, not only the allow-listed ones.
+- **Rules: a record, not a confidence.** The rules record's answers are the cycle's first emitted
+  decision as it runs (after the shield-length stamp and the magnitude clamp, §2.1): `ffa.intervention` its
+  intervention (`noop` when the ranking emitted nothing), `ffa.target` its target (`none` when session-scoped),
+  `ffa.magnitude` its value normalised over the request's ranges (the low end for `noop` and for interventions
+  without bounds). The answers carry no probabilities and confidence 0, and the span has no `decide.confidence`
+  or `decide.confidence.min` (`services/agent/decision/decide_rules.go:rulesAnswers`). The questions are the
+  request's own (allow-listed interventions, alive players), so an answer can name an intervention the questions
+  do not offer; the permission chain (§4.5) then blocks it and its verdict is `decide.blocked`. The
+  emitted decisions and their outcomes are pinned by `decision/testdata/rules_path_golden.json`.
 - **Remote:** the model reports `confidence` per answer.
 - **Routing (remote path only)** uses the `ffa.intervention` confidence against the act threshold of the
   backend that answered, one flag per backend `decision.<backend>.act_confidence_threshold`
@@ -834,7 +828,8 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   `{"question_id": "ffa.intervention", "choice": "grant_shield", "probabilities": {"noop": 0.3, "grant_shield": 0.7}, "score": 0, "confidence": 0.7}`,
   `{"question_id": "ffa.target", "choice": "MOCK0003", ...}`, `{"question_id": "ffa.magnitude", "score": 0.25, "confidence": 0.4}`;
   `choice` and `probabilities` are omitted when empty. On the rules path the `ffa.intervention` /
-  `ffa.target` choices are the emitted decision's (§5), also when the permission chain blocks it. Consumers: the dashboard Agent tab reads
+  `ffa.target` choices are the emitted decision's (§5), also when the permission chain blocks it, with no
+  probabilities and confidence 0; `decide.confidence` and `decide.confidence.min` are on remote answers only. Consumers: the dashboard Agent tab reads
   `question_id` / `choice` for `ffa.intervention` and `ffa.target` (`services/dashboard/src/agentDecide.ts:parseDecideAnswers`), and the
   decide service-tier tests match the scripted intervention in it (`tests/service/test_tc008_remote_backend_routing.py`, `tests/service/test_tc009_kill_switch.py`).
   Changing this shape breaks both.
