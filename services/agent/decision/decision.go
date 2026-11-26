@@ -170,8 +170,7 @@ type fitnessReader interface {
 // annotate the agent.signal_received root span with rpc.* semconv attributes and
 // backdate it to the moment the Export arrived.
 type EvalTrigger struct {
-	// Signal is the OTLP signal type: "traces", "metrics" or "logs" (moment log
-	// events, UC-041 A7).
+	// Signal is the OTLP signal type: "traces" or "metrics".
 	Signal string
 	// RPCService is the full OTLP gRPC service name, e.g.
 	// "opentelemetry.proto.collector.metrics.v1.MetricsService".
@@ -372,7 +371,7 @@ type Loop struct {
 	// promptProfile is the decision.prompt_profile source of remote decide requests
 	// (#2467 PR 5, UC-040 BR-036); nil leaves Request.PromptProfile empty (v1).
 	promptProfile PromptProfileSource
-	// operatorBrief is the decision.operator_brief source of claude and openai
+	// operatorBrief is the decision.operator_brief source of claude
 	// requests (#2687, UC-040 BR-044); nil never sets Request.OperatorBrief.
 	operatorBrief OperatorBriefSource
 	// magnitudeBounds is the decision.magnitude_bounds source of every decide
@@ -1153,8 +1152,7 @@ func (l *Loop) dispatchDecision(ctx, dCtx context.Context, snapshot flags.Snapsh
 	// fitness/objective signals NOW (the same fitness.evaluated quantities the decision
 	// span carries) and schedule a follow-up sample after the window to measure the
 	// delta, attributed to the decision's intervention id (made before the write,
-	// UC-101 BR-003; the sample reuses it, no second id). This closes the game-path
-	// measurement loop the infra path already has (fitness->rollback). It is MEASUREMENT
+	// UC-101 BR-003; the sample reuses it, no second id). It is MEASUREMENT
 	// ONLY — it never reverts the intervention. Scheduled only for WRITTEN decisions:
 	// a blocked one, a gated no-op (interventions_enabled off) and a failed write
 	// never moved the game, so they get no sample (#1728 review; a failed write still

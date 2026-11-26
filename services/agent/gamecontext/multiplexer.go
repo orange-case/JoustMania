@@ -41,10 +41,6 @@ type Multiplexer struct {
 	// batch is never routed to any partition. Set once before serving.
 	ownService string
 
-	// momentObs is told about every moment record (agent_moments_received_total,
-	// #2658 slice 3); handed to every partition it creates. Set once before serving.
-	momentObs MomentObserver
-
 	// names is the serial -> display-name view from controller_info{serial,name}
 	// (#1295). controller-manager metrics carry no game_id, so the view is
 	// process-wide rather than per partition; it is bounded by the number of
@@ -66,8 +62,7 @@ const endedGamesCap = 512
 
 // boundedIDs is a bounded FIFO set of ids: once it holds cap ids, adding a new
 // one forgets the oldest. Used for the ended game ids (Multiplexer.ended,
-// endedGamesCap) and the applied moment ids of a partition (Store.moments,
-// momentIDsCap, UC-041 BR-009). The zero value is ready once cap is set; a cap
+// endedGamesCap). The zero value is ready once cap is set; a cap
 // of 0 keeps nothing. Not concurrency-safe.
 type boundedIDs struct {
 	cap   int
@@ -122,21 +117,6 @@ func (m *Multiplexer) SetOwnService(name string) {
 	m.mu.Unlock()
 }
 
-// SetMomentObserver sets the observer of the moment records (#2658 slice 3): the
-// log path reports to it directly, and every partition created afterwards gets it
-// for its span path. Must be called before serving.
-func (m *Multiplexer) SetMomentObserver(obs MomentObserver) {
-	m.mu.Lock()
-	m.momentObs = obs
-	m.mu.Unlock()
-}
-
-func (m *Multiplexer) momentObserver() MomentObserver {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.momentObs
-}
-
 // store returns the Store for gameID, creating it lazily via the factory. Safe
 // for concurrent use: a read-locked fast path is followed by a write-locked
 // double-checked create.
@@ -145,7 +125,7 @@ func (m *Multiplexer) store(gameID string) *Store {
 }
 
 // openFromLog returns the Store for a log record's gameID, creating it held
-// (UC-041 A7 step 5, A8, BR-010) when it does not exist. Never the fallback:
+// (UC-041 A8, BR-010) when it does not exist. Never the fallback:
 // the caller has checked gameID is set.
 func (m *Multiplexer) openFromLog(gameID string) *Store {
 	return m.storeWith(gameID, (*Store).holdForLog)
@@ -167,9 +147,6 @@ func (m *Multiplexer) storeWith(gameID string, onCreate func(*Store)) *Store {
 		return s
 	}
 	s = m.newStore(gameID)
-	if m.momentObs != nil {
-		s.SetMomentObserver(m.momentObs)
-	}
 	if gameID != FallbackGameID {
 		s.setPartition(m.ended.has(gameID))
 	}
@@ -266,7 +243,7 @@ func (m *Multiplexer) ApplySpans(td ptrace.Traces) []string {
 			for k := 0; k < spans.Len(); k++ {
 				span := spans.At(k)
 				if ignoredSpan(span) {
-					continue // never creates a partition (game.shield_charge #1837; game.death_warning, game.player_death UC-100 BR-010; game.intervention UC-101 BR-010)
+					continue // never creates a partition
 				}
 				gameID := spanGameIDOf(span.Attributes())
 				s := m.store(gameID)

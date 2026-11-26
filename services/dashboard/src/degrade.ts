@@ -65,7 +65,7 @@ interface AgentPanelsCapable extends StaleCapable {
 
 /**
  * Paint the Agent tab's feed, flag panel and overlay. `jaegerOk` is false while
- * the last Agent poll's Jaeger leg (flag-state or rollout search) failed: the
+ * the last Agent poll's Jaeger leg (the flag-state search) failed: the
  * overlay still renders, the Jaeger-fed panels keep their last data and go
  * stale, or name Jaeger when they never rendered (UC-035 A3 step 2).
  */
@@ -88,32 +88,28 @@ export function paintAgentPanels(
 export type AgentPollResults = [
   PromiseSettledResult<InterventionOverlay>,
   PromiseSettledResult<FlagPanel[]>,
-  PromiseSettledResult<unknown>,
 ];
 
 /**
- * Fold one settled Agent poll (VictoriaMetrics counts, flag-state search,
- * rollout searches) into the state. Returns the overlay to keep, whether the
- * Jaeger legs succeeded and the first failure (the poller backs off on it).
- * `ran` names the Jaeger legs this tick actually searched; a skipped leg is a
- * resolved placeholder, not evidence. `jaegerOk` is null when no leg ran, so the
+ * Fold one settled Agent poll (VictoriaMetrics counts, flag-state search) into
+ * the state. Returns the overlay to keep, whether the Jaeger leg succeeded and
+ * the first failure (the poller backs off on it). `ran` names the Jaeger legs
+ * this tick actually searched; a skipped leg is a resolved placeholder, not
+ * evidence. `jaegerOk` is null when no leg ran, so the
  * caller keeps its previous verdict (a Jaeger outage must not clear on a tick
  * that never asked Jaeger).
  */
 export function settleAgentPoll(
-  [counts, flags, rollouts]: AgentPollResults,
+  [counts, flags]: AgentPollResults,
   overlay: InterventionOverlay | null,
   mergeFlags: (states: FlagPanel[]) => void,
-  ran: { flags: boolean; rollouts: boolean },
+  ran: { flags: boolean },
 ): { overlay: InterventionOverlay | null; jaegerOk: boolean | null; failed: PromiseRejectedResult | undefined } {
   if (flags.status === "fulfilled") mergeFlags(flags.value);
-  const failed = [counts, flags, rollouts].find((r): r is PromiseRejectedResult => r.status === "rejected");
+  const failed = [counts, flags].find((r): r is PromiseRejectedResult => r.status === "rejected");
   return {
     overlay: counts.status === "fulfilled" ? counts.value : overlay,
-    jaegerOk:
-      !ran.flags && !ran.rollouts
-        ? null
-        : (!ran.flags || flags.status === "fulfilled") && (!ran.rollouts || rollouts.status === "fulfilled"),
+    jaegerOk: ran.flags ? flags.status === "fulfilled" : null,
     failed,
   };
 }

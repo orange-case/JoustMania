@@ -1,6 +1,6 @@
 """A death that keeps the player in the game is no elimination (UC-041 BR-008; #2524).
 
-NonStop (UC-026 BR-004), Zombies (UC-023 BR-007) and Swapper (UC-024 BR-005) apply
+NonStop (UC-026 BR-004), Zombies (UC-023 BR-008) and Swapper (UC-024 BR-005) apply
 the Fight Club rule (#2517): such a death sets no ``game_player_elimination_order`` and
 its ``player_death`` span event carries ``death.eliminated`` false, so the agent's
 elimination sequence stays empty and its elimination fraction 0. A player who leaves
@@ -176,7 +176,7 @@ class TestNonstopRespawnDeathIsNoElimination:
 
 
 # ---------------------------------------------------------------------------
-# Zombies (UC-023 BR-007)
+# Zombies (UC-023 BR-008)
 # ---------------------------------------------------------------------------
 
 
@@ -197,7 +197,7 @@ async def _zombies(num_players: int = 6) -> ZombieGame:
 
 
 class TestZombiesDeathIsNoElimination:
-    @pytest.mark.uc("UC-023", flow="main", steps=[3], br=["BR-007"])
+    @pytest.mark.uc("UC-023", flow="main", steps=[3], br=["BR-008"])
     @pytest.mark.uc("UC-041", br=["BR-008"])
     @pytest.mark.asyncio
     async def test_a_human_turned_zombie_is_no_elimination(self):
@@ -220,7 +220,7 @@ class TestZombiesDeathIsNoElimination:
             assert _death_flags(game.players[serial].span) == [False]
         await game.cleanup()
 
-    @pytest.mark.uc("UC-023", flow="main", steps=[3, 4], br=["BR-007"])
+    @pytest.mark.uc("UC-023", flow="main", steps=[3, 4], br=["BR-008"])
     @pytest.mark.uc("UC-041", br=["BR-008"])
     @pytest.mark.asyncio
     async def test_zombie_deaths_and_disconnects_are_no_elimination(self):

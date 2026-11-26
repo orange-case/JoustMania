@@ -53,7 +53,7 @@ services/dashboard/
     ├── controllerStream.ts / stream.ts   # Reconnecting controller / game-event streams
     ├── poller.ts / pageGate.ts           # Single-chain pollers (backoff) and tab / page-visibility gate
     ├── jaeger.ts / vm.ts                 # Jaeger and VictoriaMetrics readers (no browser clock)
-    ├── agent.ts          # invoke_agent / flag_state / rollout spans and intervention counts
+    ├── agent.ts          # invoke_agent / flag_state spans and intervention counts
     ├── agentDecide.ts    # Decision feed: invoke_agent spans, follow anchor, decide poll
     ├── experiments.ts    # experiment.progress snapshots (ExperimentStore)
     ├── follow.ts         # Followed game (real, else live shadow)

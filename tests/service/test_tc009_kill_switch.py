@@ -1,15 +1,16 @@
 """TC-009 on the service tier (T2): kill switch during an FFA game (#1600, S7 of #1422).
 
-AGENT composition on ``fresh_stack`` (``enabled`` is a global flag): real menu,
+AGENT_CLAUDE_DECIDE composition on ``fresh_stack`` (``enabled`` is a global flag): real menu,
 game coordinator and controller manager from source at HEAD, the Go agent built
 at HEAD, a fresh flag plane, FakeAudio, the OtlpSink (the agent's spans) and the
-fake OpenAI backend holding its answer until released.
+fake Claude decide backend holding its answer until released.
 
 Steps 1 to 6 moved 1:1 from the full-stack
 ``tests/integration/test_decide_backend_e2e.py::test_kill_switch_discards_inflight_answer``;
 step 7 (turn the agent on again, the next cycle records ``invoke_agent`` again) is new.
 """
 
+import dataclasses
 import time
 
 import pytest
@@ -19,6 +20,7 @@ from tests.service.agent_flow import (
     ABSENCE_WINDOW,
     APPLY_TIMEOUT,
     DECIDE_TIMEOUT_MS,
+    DECIDE_TIMEOUT_VARIANT,
     FIRST_CALL_TIMEOUT,
     HIGH_CONFIDENCE,
     SCRIPTED_INTERVENTION,
@@ -26,6 +28,7 @@ from tests.service.agent_flow import (
     agent_spans,
     assert_nothing_applied,
     configure_agent,
+    decide_calls,
     decide_spans,
     intervention_events,
     scripted_flag_value,
@@ -34,11 +37,15 @@ from tests.service.agent_flow import (
     wait_agent_flags_served,
     wait_decide_span,
 )
-from tests.service.harness import AGENT
+from tests.service.harness import AGENT_CLAUDE_DECIDE
 
 pytestmark = pytest.mark.tier("service")
 
-SERVICE_COMPOSITION = AGENT
+# decision.claude.timeout_ms takes declared variants only: the stack's baseline copy rewrites the
+# ``patient`` variant to a budget that outlasts the held call (DECIDE_TIMEOUT_MS).
+SERVICE_COMPOSITION = dataclasses.replace(
+    AGENT_CLAUDE_DECIDE, flag_variant_values={DECIDE_TIMEOUT_VARIANT: DECIDE_TIMEOUT_MS}
+)
 
 # The fake holds the answer until released, at most this long (below DECIDE_TIMEOUT_MS
 # and the agent's 30 s HTTP backstop: our release, never a timeout, ends the call).
@@ -47,6 +54,10 @@ KILL_HOLD_MAX_SECONDS = 28
 # agent.disabled span for this game proves the agent's own flag read sees it.
 KILL_SIGNAL_TIMEOUT = 15.0
 KILL_RELEASE_HEADROOM = 3.0
+
+
+def configure() -> None:
+    configure_agent(backend="claude", claude_fake=True, timeout_variant=DECIDE_TIMEOUT_VARIANT[2])
 
 
 @pytest.mark.asyncio
@@ -58,13 +69,16 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
     high-confidence answer is discarded (decide.discarded_reason=kill_switch) and
     nothing is applied; turned on again, the agent decides again."""
     stack = fresh_stack
-    fake = stack.fake_openai
+    fake = stack.fake_claude
     # Step 1: the fake holds a high-confidence act.
     fake.script(
-        "hold", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE, hold_max_seconds=KILL_HOLD_MAX_SECONDS
+        decide_mode="hold",
+        intervention=SCRIPTED_INTERVENTION,
+        confidence=HIGH_CONFIDENCE,
+        hold_max_seconds=KILL_HOLD_MAX_SECONDS,
     )
-    configure_agent(backend="openai")
-    wait_agent_flags_served(stack, backend="openai", enabled=True, rewrite=lambda: configure_agent(backend="openai"))
+    configure()
+    wait_agent_flags_served(stack, backend="claude", enabled=True, rewrite=configure)
 
     game_client, channel = await get_game_client(stack)
     try:
@@ -74,14 +88,14 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
             game_id, _ = await start_ffa(stack, collector)
             # Step 3: the agent's call is in flight, the fake is holding it.
             assert await async_poll_until(
-                lambda: any(r.get("held") for r in fake.requests(game_id)), FIRST_CALL_TIMEOUT, interval=0.5
-            ), f"no held call for {game_id}: {fake.requests(game_id)}"
+                lambda: any(r.get("held") for r in decide_calls(stack, game_id)), FIRST_CALL_TIMEOUT, interval=0.5
+            ), f"no held call for {game_id}: {decide_calls(stack, game_id)}"
             held_at = time.monotonic()
 
             # Step 4: turn the agent off.
             disabled_before = {s.span_id for s in agent_spans(stack, "agent.disabled", game_id)}
             set_enabled(False)
-            wait_agent_flags_served(stack, backend="openai", enabled=False, rewrite=lambda: set_enabled(False))
+            wait_agent_flags_served(stack, backend="claude", enabled=False, rewrite=lambda: set_enabled(False))
             # Step 6 / positive signal that the AGENT (not just flagd) reads enabled=false:
             # its kill-switch path emits agent.disabled for this game on the next cycle.
             # Only then release the held answer, which re-reads the live flags on landing.
@@ -103,7 +117,7 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
             )
             tags = span.attributes
             assert tags.get("decide.discarded_reason") == "kill_switch", tags
-            assert tags.get("decide.backend") == "openai", tags
+            assert tags.get("decide.backend") == "claude", tags
             # The answer itself was a valid high-confidence act: the switch stopped it.
             assert SCRIPTED_INTERVENTION in tags.get("decide.answers", ""), tags
             assert abs(float(tags.get("decide.confidence")) - HIGH_CONFIDENCE) < 1e-9, tags
@@ -115,7 +129,7 @@ async def test_kill_switch_discards_inflight_answer(fresh_stack):
             # Step 7: turn the agent on; the next cycle records invoke_agent spans again.
             decided_before = {s.span_id for s in decide_spans(stack, game_id)}
             set_enabled(True)
-            wait_agent_flags_served(stack, backend="openai", enabled=True, rewrite=lambda: set_enabled(True))
+            wait_agent_flags_served(stack, backend="claude", enabled=True, rewrite=lambda: set_enabled(True))
             assert await async_poll_until(
                 lambda: any(s.span_id not in decided_before for s in decide_spans(stack, game_id)),
                 SPAN_TIMEOUT,
@@ -134,9 +148,9 @@ async def test_kill_switch_keeps_written_state_intervention(fresh_stack):
     agent already wrote for the game stays in place while the game runs (it is only
     dropped with the game's scope, UC-053 BR-003)."""
     stack = fresh_stack
-    stack.fake_openai.script("valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE)
-    configure_agent(backend="openai")
-    wait_agent_flags_served(stack, backend="openai", enabled=True, rewrite=lambda: configure_agent(backend="openai"))
+    stack.fake_claude.script(decide_mode="valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE)
+    configure()
+    wait_agent_flags_served(stack, backend="claude", enabled=True, rewrite=configure)
 
     game_client, channel = await get_game_client(stack)
     try:
@@ -152,7 +166,7 @@ async def test_kill_switch_keeps_written_state_intervention(fresh_stack):
             # Steps 1 to 3: turn the agent off; its next cycle records agent.disabled.
             disabled_before = {s.span_id for s in agent_spans(stack, "agent.disabled", game_id)}
             set_enabled(False)
-            wait_agent_flags_served(stack, backend="openai", enabled=False, rewrite=lambda: set_enabled(False))
+            wait_agent_flags_served(stack, backend="claude", enabled=False, rewrite=lambda: set_enabled(False))
             assert await async_poll_until(
                 lambda: any(s.span_id not in disabled_before for s in agent_spans(stack, "agent.disabled", game_id)),
                 KILL_SIGNAL_TIMEOUT,

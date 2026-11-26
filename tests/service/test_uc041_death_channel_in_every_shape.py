@@ -1,22 +1,16 @@
-"""UC-100 BR-007 / UC-041 A7 on the service tier (T2): a death sent as a log event reaches the agent (#2658 slice 3).
+"""UC-041 BR-008, BR-009 / UC-100 BR-007 on the service tier (T2): one agent death channel in every shape.
 
 AGENT composition with ``telemetry.moment_shape`` served as ``log_event`` (the
 baseline's ``span_event`` variant is rewritten, so every game of this stack reads
 ``log_event``): the real game coordinator and controller manager from source at HEAD,
-the Go agent built at HEAD and the OtlpSink, which tees the moment log events to the
-agent as the collector's ``logs/agent`` pipeline does.
+the Go agent built at HEAD and the OtlpSink, which tees to the agent only what the
+collector's ``logs/agent`` pipeline passes (the agent's own lifecycle log events).
 
-A NonStop death keeps the player in the game (``death.eliminated`` false) and its
-player span stays open until game end, so while the game runs the only way the agent
-can have read the death is its log event: the agent's
-``agent_moments_received_total{moment=player_death,shape=log_event,outcome=counted}``
-proves it. Without the slice the coordinator sends a span event, the sink forwards
-no log and the counter does not exist.
-
-The kill follows RUNNING without waiting for the game's spans to reach the agent: a
-death log event that overtakes them (SDK log batch up to 1 s, trace batch 2 s) opens
-the game's context and counts (UC-041 A7 step 5, BR-010, #2722), so the counter moves
-whichever signal arrives first.
+An FFA death in the ``log_event`` shape goes to the backends as a ``player_death`` log
+event (UC-100 step 4), and the coordinator still sets
+``game_player_elimination_order{serial,game_id}``, the one channel the agent reads deaths
+from whatever the shape (UC-041 BR-008, BR-009). The moment log event is not teed to the
+agent.
 """
 
 import dataclasses
@@ -42,17 +36,16 @@ SERVICE_COMPOSITION = dataclasses.replace(
     flag_variant_values={("observability", "telemetry.moment_shape", "span_event"): "log_event"},
 )
 
-TAG = "death-moment"
+TAG = "death-channel"
 COORDINATOR = "game-coordinator-service"
-AGENT_SERVICE = "agent"
 EVENT_TIMEOUT_SECONDS = 15.0
-# SDK log batch (up to 1 s), the agent's metric export (1 s), CI slack.
+# SDK log batch (up to 1 s), the coordinator's metric export (1 s), CI slack.
 TELEMETRY_TIMEOUT_SECONDS = 30.0
 
 
-@pytest.mark.uc("UC-100", flow="main", steps=[3, 4, 5], br=["BR-001", "BR-003", "BR-007"])
-@pytest.mark.uc("UC-041", flow="A7", steps=[1, 2, 5], br=["BR-009", "BR-010"])
-async def test_a_nonstop_death_as_a_log_event_reaches_the_agent(stack, headless_cleanup):
+@pytest.mark.uc("UC-100", flow="main", steps=[3, 4], br=["BR-001", "BR-003", "BR-007"])
+@pytest.mark.uc("UC-041", flow="main", steps=[4], br=["BR-008", "BR-009"])
+async def test_a_death_in_the_log_event_shape_reaches_the_agent_through_the_elimination_gauge(stack, headless_cleanup):
     sink = stack.otlp_sink
     assert sink is not None
 
@@ -61,7 +54,7 @@ async def test_a_nonstop_death_as_a_log_event_reaches_the_agent(stack, headless_
     mock_client, mock_channel = await get_mock_client(stack)
     collector = None
     try:
-        game_id, collector = await start_game_headless(game_client, build_start_config("NonStop", serials))
+        game_id, collector = await start_game_headless(game_client, build_start_config("JoustFFA", serials))
         headless_cleanup.add_game(game_id)
         assert game_id in await wait_until_running(game_client, {game_id}, timeout=20.0)
 
@@ -86,25 +79,18 @@ async def test_a_nonstop_death_as_a_log_event_reaches_the_agent(stack, headless_
                 f"no player_death log event: the shape log_event was not in effect for {game_id} "
                 "(the root span's telemetry.moment_shape says which shape was)"
             ) from exc
-        assert death.attributes["death.eliminated"] is False
-        assert death.attributes["game.kind"] == "shadow"
-        assert death.trace_id, "the log event carries the player span's trace context"
-        # The player span of a NonStop game stays open until game end: no span event could
-        # have brought this death to the agent yet.
-        assert not sink.spans("player_lifecycle", {"game.id": game_id, "player.serial": victim}), (
-            "the player span ended before game end"
-        )
+        assert "orangecase.audience" not in death.attributes, "a moment is never marked for the agent"
 
-        counted = await sink.wait_metric_async(
-            "agent_moments_received_total",
-            {"moment": "player_death", "shape": "log_event", "outcome": "counted"},
-            service=AGENT_SERVICE,
+        order = await sink.wait_metric_async(
+            "game_player_elimination_order",
+            {"game_id": game_id, "serial": victim},
+            service=COORDINATOR,
             timeout=TELEMETRY_TIMEOUT_SECONDS,
         )
-        assert counted.value >= 1
+        assert order.value == 1
 
         await game_client.ForceEndGame(
-            game_coordinator_pb2.ForceEndGameRequest(reason="death_moment_test", game_id=game_id)
+            game_coordinator_pb2.ForceEndGameRequest(reason="death_channel_test", game_id=game_id)
         )
         await collector.wait_for_event("game_force_ended", timeout=EVENT_TIMEOUT_SECONDS)
     finally:
@@ -114,9 +100,9 @@ async def test_a_nonstop_death_as_a_log_event_reaches_the_agent(stack, headless_
         await game_channel.close()
 
     root = await sink.wait_span_async(
-        # The game root: the only span with game.name, game.id and game.kind together.
-        None,
-        {"game.id": game_id, "game.kind": "shadow", "game.name": "NonStop"},
+        # By name: the StreamGameEvents server span of a real game is a root with game.id and game.name too.
+        "Joust Free-for-All",
+        {"game.id": game_id},
         service=COORDINATOR,
         root=True,
         timeout=TELEMETRY_TIMEOUT_SECONDS,

@@ -6,11 +6,8 @@ DiscoveryLoop window accumulator with an injected wall clock, then asserts the
 computed gap / dropped-ratio / movement-hz signals, the controller.bluetooth_health
 span attributes, and the per-serial bluetooth_controller_sample events.
 
-A stale replay is detected by object identity: UnstableAdapter returns the *same*
-dict object within a throttle window, so the discovery loop counts it as a poll
-attempt but NOT a fresh movement update. The end-to-end degradation test wraps a
-fake inner through a real UnstableAdapter and asserts all three fitness thresholds
-are violated (gap > 50 ms, drops > 0.02, hz < 10).
+A stale replay is detected by object identity: an adapter that returns the *same*
+dict object again is counted as a poll attempt but NOT a fresh movement update.
 """
 
 import sys
@@ -185,13 +182,9 @@ class TestWindowComputation:
 
 
 class TestSpanEmission:
-    @pytest.mark.uc("UC-050", flow="main", steps=[2])
-    @patch("services.controller_manager.metrics.controller_state_update_hz")
-    def test_span_attributes_and_events(self, _hz):
+    def test_span_attributes_and_events(self):
         backend = autospec_backend()
-        backend.get_adapter_type.return_value = "unstable"
-        backend.rollout_summary.return_value = ("unstable", 3)
-        backend.rollout_strategy.return_value = "progressive"
+        backend.get_adapter_type.return_value = "rust"
         loop = _make_loop(backend)
         loop._window_start = 0.0
         _feed(loop, "AA", [{"n": i} if i % 5 != 0 else None for i in range(10)], dt=0.01)
@@ -205,9 +198,7 @@ class TestSpanEmission:
         a = span.attributes
         assert a["bluetooth.active_controllers"] == 1
         assert a["bluetooth.dropped_events_pct"] == 0.2
-        assert a["bluetooth.target_backend"] == "unstable"
-        assert a["bluetooth.rollout_count"] == 3
-        assert a["bluetooth.rollout_strategy"] == "progressive"
+        assert not {"bluetooth.target_backend", "bluetooth.rollout_count", "bluetooth.rollout_strategy"} & set(a)
         assert isinstance(a["bluetooth.event_gap_ms"], float)
         assert isinstance(a["bluetooth.movement_update_hz"], float)
 
@@ -216,85 +207,9 @@ class TestSpanEmission:
         assert len(sample_events) == 1
         ev_attrs = sample_events[0][1]
         assert ev_attrs["controller.serial"] == "AA"
-        assert ev_attrs["controller.adapter"] == "unstable"
+        assert ev_attrs["controller.adapter"] == "rust"
         assert ev_attrs["bluetooth.dropped_events_pct"] == 0.2
         assert "bluetooth.movement_update_hz" in ev_attrs
-
-    @pytest.mark.uc("UC-050", flow="A5", steps=[1])
-    @patch("services.controller_manager.metrics.controller_state_update_hz")
-    def test_rollout_read_error_is_not_reported_as_off(self, *_metrics):
-        """#1489: a failed rollout read omits target/count and flags the error."""
-        from services.controller_manager.multiplexer.rollout_router import RolloutReadError
-
-        backend = autospec_backend()
-        backend.get_adapter_type.return_value = "python"
-        backend.rollout_summary.side_effect = RolloutReadError("flagd down")
-        # The strategy read falls back to its "off" default on the same error.
-        backend.rollout_strategy.return_value = "off"
-        loop = _make_loop(backend)
-        loop._window_start = 0.0
-        _feed(loop, "AA", [{"n": i} for i in range(5)], dt=0.01)
-
-        fake = FakeTracer()
-        with patch("services.controller_manager.discovery_loop.tracer", fake):
-            loop._emit_bluetooth_health(now=1.0)
-
-        a = fake.spans["controller.bluetooth_health"].attributes
-        assert a["bluetooth.rollout_read_error"] is True
-        assert "bluetooth.target_backend" not in a
-        assert "bluetooth.rollout_count" not in a
-        assert "bluetooth.rollout_strategy" not in a
-
-    @pytest.mark.uc("UC-050", flow="A5")
-    @patch("services.controller_manager.metrics.controller_state_update_hz")
-    def test_rollout_read_error_logs_once_on_enter_and_leave(self, *_metrics):
-        """#1489: a persistent read error warns once, recovery logs info once."""
-        from services.controller_manager.multiplexer.rollout_router import RolloutReadError
-
-        backend = autospec_backend()
-        backend.get_adapter_type.return_value = "python"
-        backend.rollout_strategy.return_value = "off"
-        loop = _make_loop(backend)
-
-        def emit(now):
-            loop._window_start = now - 1.0
-            _feed(loop, "AA", [{"n": i} for i in range(5)], dt=0.01)
-            with patch("services.controller_manager.discovery_loop.tracer", FakeTracer()):
-                loop._emit_bluetooth_health(now=now)
-
-        with patch("services.controller_manager.discovery_loop.logger") as log:
-            backend.rollout_summary.side_effect = RolloutReadError("flagd down")
-            for t in (1.0, 2.0, 3.0):
-                emit(t)
-            assert log.warning.call_count == 1
-            assert log.info.call_count == 0
-
-            backend.rollout_summary.side_effect = None
-            backend.rollout_summary.return_value = ("", 0)
-            for t in (4.0, 5.0):
-                emit(t)
-            assert log.warning.call_count == 1
-            assert log.info.call_count == 1
-
-    @pytest.mark.uc("UC-050", flow="A5")
-    @patch("services.controller_manager.metrics.controller_state_update_hz")
-    def test_rollout_off_has_empty_target_and_no_read_error(self, *_metrics):
-        backend = autospec_backend()
-        backend.get_adapter_type.return_value = "python"
-        backend.rollout_summary.return_value = ("", 0)
-        backend.rollout_strategy.return_value = "off"
-        loop = _make_loop(backend)
-        loop._window_start = 0.0
-        _feed(loop, "AA", [{"n": i} for i in range(5)], dt=0.01)
-
-        fake = FakeTracer()
-        with patch("services.controller_manager.discovery_loop.tracer", fake):
-            loop._emit_bluetooth_health(now=1.0)
-
-        a = fake.spans["controller.bluetooth_health"].attributes
-        assert a["bluetooth.target_backend"] == ""
-        assert a["bluetooth.rollout_count"] == 0
-        assert "bluetooth.rollout_read_error" not in a
 
     def test_skip_when_no_controllers(self):
         loop = _make_loop()
@@ -304,8 +219,7 @@ class TestSpanEmission:
             loop._emit_bluetooth_health(now=1.0)
         assert "controller.bluetooth_health" not in fake.spans
 
-    @patch("services.controller_manager.metrics.controller_state_update_hz")
-    def test_window_resets_after_emit(self, _hz):
+    def test_window_resets_after_emit(self):
         loop = _make_loop(MagicMock())
         loop._window_start = 0.0
         _feed(loop, "AA", [{"n": i} for i in range(5)], dt=0.01)
@@ -340,67 +254,3 @@ class TestUpdateControllerStatesWiring:
         assert loop._record("AA").hw_polls == 4
         assert loop._record("AA").hw_fresh == 2  # fresh1 + fresh2 (stale replay excluded)
         assert loop._record("AA").hw_drops == 1  # the None
-
-
-class TestUnstableAdapterDegradationEndToEnd:
-    """Drive a real UnstableAdapter through the accumulator; all 3 thresholds break."""
-
-    @pytest.mark.uc("UC-051", flow="main", steps=[1])
-    def test_unstable_routed_serial_violates_all_thresholds(self):
-        from services.controller_manager.multiplexer.unstable_adapter import UnstableAdapter
-
-        class FakeClock:
-            def __init__(self):
-                self.t = 0.0
-
-            def __call__(self):
-                return self.t
-
-        clock = FakeClock()
-        inner = MagicMock()
-        inner.adapter_type = "python"
-        inner.inner = None
-        # Inner always returns a NEW fresh object so identity-dedup is exercised
-        # purely by the UnstableAdapter's stale replays.
-        inner.poll = MagicMock(side_effect=lambda s: {"serial": s, "seq": inner.poll.call_count})
-
-        adapter = UnstableAdapter(inner, throttle_seconds=0.12, drop_every=10, time_source=clock)
-
-        loop = _make_loop()
-        serial = "AA:AA"
-
-        # Simulate a multi-second run at 100Hz: poll every 10ms through the
-        # adapter, feeding outcomes into the window accumulator exactly as the
-        # loop does. The window must span enough fresh frames (>= drop_every) for
-        # at least one deterministic drop to land, so the drop ratio is non-zero.
-        # ~3s -> ~25 fresh frames -> >= 2 drops at drop_every=10.
-        loop._window_start = 0.0
-        wall = 0.0
-        n_polls = 300  # 3 seconds at 100Hz
-        for _ in range(n_polls):
-            result = adapter.poll(serial)
-            loop._record(serial).hw_polls += 1
-            if result is None:
-                loop._record(serial).hw_drops += 1
-            else:
-                oid = id(result)
-                if loop._record(serial).hw_last_obj_id != oid:
-                    loop._record(serial).hw_last_obj_id = oid
-                    loop._record_fresh_frame(serial, wall)
-            clock.t += 0.01
-            wall += 0.01
-
-        sig = loop._compute_health_window(window_seconds=wall)
-        per = sig["per_serial"][serial]
-
-        # Threshold 1: movement update rate < 10 Hz (throttle ~8.3Hz, minus drops).
-        assert per["update_hz"] < 10.0, per["update_hz"]
-        assert sig["movement_update_hz"] < 10.0
-        # Threshold 2: dropped-event ratio > 2%. drop_every=10 drops every 10th
-        # fresh frame -> ~10% of event-bearing cycles. Stale replays are excluded
-        # from the denominator, so the ratio reflects genuine event loss.
-        assert per["dropped_pct"] > 0.02, per["dropped_pct"]
-        assert sig["dropped_events_pct"] > 0.02
-        # Threshold 3: event gap > 50 ms (throttle window is 120ms between fresh).
-        assert per["max_gap_ms"] > 50.0, per["max_gap_ms"]
-        assert sig["event_gap_ms"] > 50.0

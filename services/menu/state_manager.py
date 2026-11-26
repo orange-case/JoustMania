@@ -45,7 +45,7 @@ class StateManager:
             agent_settings_writer: flag-service writer for the agent set (kill-switch, #819)
             agent_settings_client: OpenFeature client for the "agent" domain, used
                 to read the effective ``interventions_allowed`` level (#819).
-            select_game_mode: async ``(game_name, *, source, serial)`` callback that
+            select_game_mode: async ``(game_name, *, source, serial, announce)`` callback that
                 applies a game-mode selection everywhere the menu reads it (the
                 servicer's ``current_selection``, this manager's mode, the persisted
                 ``current_game`` preference) and publishes ``selection_changed``.
@@ -263,25 +263,29 @@ class StateManager:
         """
         self.current_game_mode = game_mode
 
-    async def select_game_mode(self, game_mode: Games, *, source: str, serial: str | None = None) -> None:
+    async def select_game_mode(
+        self, game_mode: Games, *, source: str, serial: str | None = None, announce: bool = False
+    ) -> None:
         """
         Select a game mode for the next game and persist it (#1272).
 
         Delegates to the servicer callback so the controller SELECT path lands in
-        the same state as admin Cross / web ``select_game`` (the coordinator start
+        the same state as the pad and web ``select_game`` (the coordinator start
         path reads the servicer's ``current_selection``). Without a callback
         (test-only: production always wires the servicer callback in
         ``MenuServicer.__init__``), updates the local mode, persists
         ``current_game`` and publishes ``selection_changed`` directly. Keep this
-        fallback in step with ``MenuServicer.select_game_mode``.
+        fallback in step with ``MenuServicer.select_game_mode``, except that
+        ``announce`` gives the voice only here: the lobby pulse needs ``SettingsOps``.
 
         Args:
             game_mode: Games enum value to select
             source: Who made the selection (e.g. "controller", "operator_pad", "web")
             serial: Controller serial that made the selection, if any
+            announce: give the mode's feedback of the option table (voice and lobby pulse)
         """
         if self._select_game_mode is not None:
-            await self._select_game_mode(game_mode.name, source=source, serial=serial)
+            await self._select_game_mode(game_mode.name, source=source, serial=serial, announce=announce)
             return
 
         self.set_game_mode(game_mode)
@@ -291,6 +295,8 @@ class StateManager:
         if serial is not None:
             payload["serial"] = serial
         await self.publish_event("selection_changed", payload)
+        if announce:
+            await self.audio.play_game_mode_voice(game_mode.name)
 
     async def show_lobby_colors(self) -> None:
         """UC-011 step 6, BR-005: the current mode's lobby colour on every CONNECTED (dim) and READY

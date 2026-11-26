@@ -14,15 +14,14 @@
 #   ./scripts/agent-backend.sh claude                # decision.backend -> claude
 #   ./scripts/agent-backend.sh claude sonnet         # ... and decision.claude.model -> sonnet
 #   ./scripts/agent-backend.sh rules                 # back to the deterministic rules backend
-#   ./scripts/agent-backend.sh threshold strict      # decision.act_confidence_threshold -> strict (global: claude/openai)
+#   ./scripts/agent-backend.sh threshold strict      # decision.act_confidence_threshold -> strict (global: claude)
 #   ./scripts/agent-backend.sh jev-threshold inherit # decision.jev.act_confidence_threshold -> inherit (use the global)
 #   ./scripts/agent-backend.sh capture on            # decision.capture_content -> on
-#   ./scripts/agent-backend.sh effort low            # decision.openai.reasoning_effort -> low
 #
 # An unknown variant is refused by the flag service (422 out_of_bounds) with
 # the list of valid ones. The change is pushed to flagd at once; the agent reads
 # the decision.* flags at use time, so no agent restart is needed. API keys stay
-# env-only (ANTHROPIC_API_KEY, DECISION_OPENAI_API_KEY, JEV_API_KEY); a backend
+# env-only (ANTHROPIC_API_KEY, JEV_API_KEY); a backend
 # without its key/model falls back to rules.
 #
 # Env: FLAG_SERVICE_URL (default http://localhost/flags, the envoy route).
@@ -34,11 +33,10 @@ WRITER="${FLAGS_WRITER:-stage}"
 usage() {
   cat >&2 <<EOF
 usage: $0 [status]
-       $0 {rules|claude|openai|jev} [model-variant]
+       $0 {rules|claude|jev} [model-variant]
        $0 threshold {low|gate|default|strict}
        $0 jev-threshold {inherit|gate|default|strict}
        $0 capture {on|off}
-       $0 effort {auto|none|minimal|low|omit}
 EOF
   exit 2
 }
@@ -49,10 +47,10 @@ case "${action}" in
   status)
     [[ $# -le 1 ]] || usage
     ;;
-  rules|claude|openai|jev)
+  rules|claude|jev)
     [[ $# -le 2 ]] || usage
     ;;
-  threshold|jev-threshold|capture|effort)
+  threshold|jev-threshold|capture)
     [[ $# -eq 2 ]] || usage
     ;;
   *)
@@ -121,8 +119,6 @@ try:
         print(f"threshold = {current('decision.act_confidence_threshold')}")
         print(f"jev thr.  = {current('decision.jev.act_confidence_threshold')}")
         print(f"capture   = {current('decision.capture_content')}")
-        if backend == "openai":
-            print(f"effort    = {current('decision.openai.reasoning_effort')}")
         print(f"({fs.base_url})")
         sys.exit(0)
 
@@ -134,9 +130,6 @@ try:
         # has its own threshold; "inherit" makes jev use the global one.
         value = set_variant("decision.jev.act_confidence_threshold", args[1])
         print(f"agent jev act threshold -> {args[1]} ({value})")
-    elif action == "effort":
-        value = set_variant("decision.openai.reasoning_effort", args[1])
-        print(f"agent openai reasoning effort -> {args[1]} ({value})")
     elif action == "capture":
         set_variant("decision.capture_content", args[1])
         print(f"agent content capture -> {args[1]}")

@@ -20,7 +20,7 @@
 # host. update_permissions.sh runs in a scratch directory with a stub sudo: it
 # changes the owner of the current directory, recursively, to the calling user.
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-setup-scripts.sh
-# UC: UC-060 A6 A7
+# Spec: docs/specs/stage-host.md SH-9 SH-10
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 

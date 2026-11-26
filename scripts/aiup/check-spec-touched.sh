@@ -48,7 +48,7 @@ is_behaviour_file() {
 
 is_spec_file() {
   case "$1" in
-    docs/requirements.md|docs/use_cases.puml|docs/use_cases/*|docs/specs/*|docs/specs-inventory.md|docs/entity_model.md) return 0 ;;
+    docs/requirements.md|docs/use_cases.puml|docs/use_cases/*|docs/specs/*|docs/entity_model.md) return 0 ;;
   esac
   return 1
 }
@@ -76,7 +76,7 @@ fi
 # definitions need the flag catalog, .proto changes need the services spec.
 problems=()
 if [[ "$spec_touched" != true ]]; then
-  problems+=("Behaviour files changed but no spec file did (docs/requirements.md, docs/use_cases/**, docs/use_cases.puml, docs/specs/**, docs/specs-inventory.md, docs/entity_model.md).")
+  problems+=("Behaviour files changed but no spec file did (docs/requirements.md, docs/use_cases/**, docs/use_cases.puml, docs/specs/**, docs/entity_model.md).")
 fi
 if [[ ${#flagd[@]} -gt 0 && "$flags_spec" != true ]]; then
   problems+=("services/flagd/*.json changed but docs/specs/flags.md did not.")

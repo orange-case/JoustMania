@@ -36,8 +36,6 @@ def autospec_backend():
     backend.consume_trigger_press.return_value = False
     backend.get_adapter_type.return_value = ""
     backend.get_controller_metadata.return_value = None
-    backend.rollout_summary.return_value = ("", 0)
-    backend.rollout_strategy.return_value = ""
     backend.take_led_failures.return_value = 0
     return backend
 
@@ -74,8 +72,6 @@ def inert_hooks(backend):
     """Give a ``MagicMock(spec=[...])`` backend the inert defaults of MockFeatureHooks the discovery loop calls."""
     backend.get_adapter_type = MagicMock(return_value="")
     backend.get_controller_metadata = MagicMock(return_value=None)
-    backend.rollout_summary = MagicMock(return_value=("", 0))
-    backend.rollout_strategy = MagicMock(return_value="")
     backend.take_led_failures = MagicMock(return_value=0)
     return backend
 

@@ -120,7 +120,6 @@ BASELINE_FILES = (
     "user.json",
     "agent.json",
     "interventions.json",
-    "rollout.json",
     "operator.json",
 )
 

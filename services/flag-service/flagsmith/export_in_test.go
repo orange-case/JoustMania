@@ -67,3 +67,11 @@ func NoteControllerRemoved(l *Link, serial, flag string, featureID int, value st
 	l.ctrl.noteRemoved(serial, []FeatureState{{Feature: Feature{ID: featureID}, Enabled: true, FeatureStateValue: []byte(value)}},
 		func(int) string { return flag }, l.Now())
 }
+
+// MarkKillSwitch makes set/flag a kill switch until t ends: every real kill
+// switch is in the agent set, which sorts first anyway, so only a stand-in in a
+// later set shows that a round moves kill switches to the front.
+func MarkKillSwitch(t interface{ Cleanup(func()) }, setFlag string) {
+	killSwitches[setFlag] = true
+	t.Cleanup(func() { delete(killSwitches, setFlag) })
+}

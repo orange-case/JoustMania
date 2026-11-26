@@ -3,7 +3,7 @@
 AGENT_CLAUDE_DECIDE composition (the AGENT composition plus a fake Claude,
 ``tests/service/harness/fakes/claude.py``, behind the ``fake`` variant of ``decision.claude.base_url``
 and the agent's dummy ``ANTHROPIC_API_KEY``), one ``fresh_stack`` per case. Same journey as
-``test_tc008_remote_backend_routing.py`` (act, held, broken answer -> rules fallback). The fake only
+``test_tc008_remote_backend_routing.py`` (rules default, a backend without its key). The fake only
 answers ``POST /v1/messages``, so a base URL with a stray ``/v1`` (the SDK appends the path) is a 404
 and the case fails. The text backend (retro, proposer) stays on the stub in this composition.
 """
@@ -12,16 +12,23 @@ import pytest
 
 from tests.integration.helpers import GameEventCollector, async_poll_until, get_game_client
 from tests.service.agent_flow import (
+    ACT_THRESHOLD,
     APPLY_TIMEOUT,
+    CLAUDE_MODEL,
+    EXPECTED_VALUE,
     FIRST_CALL_TIMEOUT,
     HIGH_CONFIDENCE,
+    SCRIPTED_FLAG,
     SCRIPTED_INTERVENTION,
+    SCRIPTED_MAGNITUDE,
     SPAN_TIMEOUT,
     assert_nothing_applied,
     children,
     configure_agent,
     decide_spans,
+    evaluation_events,
     intervention_events,
+    scripted_flag_value,
     start_ffa,
     wait_agent_flags_served,
     wait_decide_span,
@@ -33,7 +40,6 @@ pytestmark = pytest.mark.tier("service")
 SERVICE_COMPOSITION = AGENT_CLAUDE_DECIDE
 
 CLAUDE_HELD_CONFIDENCE = 0.5  # a valid intervention answer below the global act threshold (0.8)
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # the shipped decision.claude.model default
 CLAUDE_CHAT_SPAN_PREFIX = "chat "
 
 
@@ -64,7 +70,12 @@ async def test_claude_high_confidence_acts(fresh_stack):
     the agent's key and the claude model, the intervention is written and applied by the coordinator,
     and the invoke_agent span names claude as the backend that decided."""
     stack = fresh_stack
-    stack.fake_claude.script(decide_mode="valid", intervention=SCRIPTED_INTERVENTION, confidence=HIGH_CONFIDENCE)
+    stack.fake_claude.script(
+        decide_mode="valid",
+        intervention=SCRIPTED_INTERVENTION,
+        confidence=HIGH_CONFIDENCE,
+        magnitude=SCRIPTED_MAGNITUDE,
+    )
     _configure(stack)
 
     game_client, channel = await get_game_client(stack)
@@ -76,10 +87,31 @@ async def test_claude_high_confidence_acts(fresh_stack):
             assert all(c["key_ok"] for c in calls), f"the agent did not send ANTHROPIC_API_KEY as x-api-key: {calls}"
             assert calls[0]["model"] == CLAUDE_MODEL, calls[0]
             assert not stack.fake_claude.requests("retro"), "the text backend must stay on the stub"
+            assert calls[0]["intervention"] == SCRIPTED_INTERVENTION, (
+                f"{SCRIPTED_INTERVENTION} was not among the offered options: {calls[0]}"
+            )
 
+            # Effect: the agent wrote the flag and the coordinator applied it.
             assert await async_poll_until(
                 lambda: any(e.get("blocked") == "false" for e in intervention_events(collector)), APPLY_TIMEOUT
             ), f"no applied {SCRIPTED_INTERVENTION} on the game stream; saw {intervention_events(collector)}"
+            value = scripted_flag_value(game_id)
+            assert value is not None, f"agent did not write {SCRIPTED_FLAG} for {game_id}"
+            assert abs(float(value) - EXPECTED_VALUE) < 1e-6, value
+            applied = [e for e in intervention_events(collector) if e.get("blocked") == "false"]
+            assert not applied[0].get("block_reason"), applied
+            # The handler's SetVolume reached the audio service (#1250): blocked=false alone would
+            # also hold for the no-audio-client no-op, so look for the SetVolume call itself.
+            assert await async_poll_until(
+                lambda: any(
+                    abs(float(c.request.get("volume", -1)) - EXPECTED_VALUE) < 1e-6
+                    for c in stack.fake_audio.calls_of("SetVolume")
+                ),
+                SPAN_TIMEOUT,
+            ), (
+                f"no SetVolume({EXPECTED_VALUE}) at the audio service: "
+                f"{[c.request for c in stack.fake_audio.calls_of('SetVolume')]}"
+            )
 
             span = await wait_decide_span(
                 stack, game_id, lambda t: t.get("decide.outcome") == "act", "decide.outcome=act", within=SPAN_TIMEOUT
@@ -89,6 +121,14 @@ async def test_claude_high_confidence_acts(fresh_stack):
             assert tags.get("decide.backend.requested") == "claude", tags
             assert tags.get("decide.fallback_reason", "") == "", tags
             assert abs(float(tags.get("decide.confidence")) - HIGH_CONFIDENCE) < 1e-9, tags
+            assert abs(float(tags.get("decide.act_confidence_threshold")) - ACT_THRESHOLD) < 1e-9, tags
+            assert tags.get("gen_ai.operation.name") == "invoke_agent", tags  # #2584
+            assert tags.get("game.kind") == "real", tags  # eligible under the shipped llm.eligible_game_kinds (#1249)
+            assert SCRIPTED_INTERVENTION in tags.get("decide.answers", ""), tags
+            evaluations = evaluation_events(span)
+            assert evaluations, f"no gen_ai.evaluation.result event: {span.events}"
+            assert evaluations[0].get("gen_ai.evaluation.name") == "act_confidence_threshold", evaluations
+            assert evaluations[0].get("gen_ai.evaluation.score.label") == "pass", evaluations
             assert _claude_chats(stack, span), (
                 f"no claude chat span under invoke_agent: {[s.name for s in children(stack, span)]}"
             )
@@ -120,6 +160,8 @@ async def test_claude_below_threshold_is_held(fresh_stack):
             tags = span.attributes
             assert tags.get("decide.backend") == "claude", tags
             assert abs(float(tags.get("decide.confidence")) - CLAUDE_HELD_CONFIDENCE) < 1e-9, tags
+            evaluations = evaluation_events(span)
+            assert evaluations and evaluations[0].get("gen_ai.evaluation.score.label") == "fail", evaluations
             assert not children(stack, span, "agent.decision"), "a held answer must not reach runDecision"
 
             await assert_nothing_applied(collector, game_id)
@@ -157,6 +199,7 @@ async def test_claude_garbage_falls_back_to_rules(fresh_stack):
             assert tags.get("decide.fallback_reason") == "invalid_answer", tags
             assert tags.get("decide.backend") == "rules", tags
             assert tags.get("decide.backend.requested") == "claude", tags
+            assert tags.get("error.type") == "invalid_answer", tags
             assert _claude_chats(stack, span), "the failed call still records its chat span"
     finally:
         await channel.close()

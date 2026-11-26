@@ -82,13 +82,9 @@ _ATTR_ADAPTER_ADDRESS = "adapter.address"
 
 # bluetooth_backend flag variant -> pairing backend (UC-001 BR-003, #1320).
 # The keys must match the variants in services/flagd/controller.json.
-# "unstable" is the controller manager's fault-injecting wrapper around the
-# python I/O path; pairing is a one-shot USB feature-report write, so it pairs
-# through the python (in-process hidapi) backend.
 VARIANT_TO_PAIRING_BACKEND = {
     "python": "python",
     "rust": "rust",
-    "unstable": "python",
 }
 
 # Unknown values and an unreachable flagd select rust-hid, the default backend
@@ -124,7 +120,7 @@ def _resolve_backend() -> tuple[PairingBackend, str]:
     """Resolve the pairing backend from feature flags.
 
     - "rust" (default) -> RustServiceBackend (rust-hid PairingService)
-    - "python" / "unstable" -> HidapiBackend (in-process hidapi)
+    - "python" -> HidapiBackend (in-process hidapi)
 
     Returns:
         Tuple of (backend_instance, backend_name).

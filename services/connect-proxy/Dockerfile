@@ -52,7 +52,7 @@ COPY services/connect-proxy/*.go ./
 # Download dependencies (after proto files are in place)
 RUN go mod tidy && go mod download
 
-# Run the unit tests (canary handlers, #1364). The generated proto packages
+# Run the unit tests. The generated proto packages
 # only exist inside this build, so the image build is where they can run.
 RUN go vet ./... && go test ./...
 

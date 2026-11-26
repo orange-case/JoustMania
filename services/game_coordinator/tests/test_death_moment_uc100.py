@@ -2,9 +2,9 @@
 
 The base kill path records the one ``player_death`` of a death (UC-030 step 9) through
 ``lib.moments.record_moment``: a span event by default (today's attributes plus the
-moment identity, BR-004, NFR-060), a span ``game.player_death`` with start = end, a log
-event in the player span's context, or both with one ``moment.id`` (BR-001, BR-003,
-BR-005). The record keeps its place in ``_run_kill``: after the second gate check (a
+moment identity, BR-004, NFR-060), a span ``game.player_death`` with start = end, or a log
+event in the player span's context (BR-001, BR-003). The record keeps its place in ``_run_kill``:
+after the second gate check (a
 declined kill records nothing), before the mode's handler (the mode extras describe
 the state as if the player were already out). A failing log channel never raises into
 the kill path, so a kill is never half-applied.
@@ -42,7 +42,7 @@ from services.game_coordinator.games.ffa import FFAGame  # noqa: E402
 DEATH = "player_death"
 TODAY = {"accel_magnitude", "sensitivity", "sensitivity_factor", "music_speed", "alive_remaining", "death.reason"}
 IDENTITY = {"moment.id", "player.serial", "game.id", "game.kind"}
-SHAPES = ["span_event", "span", "log_event", "both"]
+SHAPES = ["span_event", "span", "log_event"]
 
 
 class _Sdk:
@@ -154,20 +154,17 @@ async def test_log_event_shape_sends_a_log_record_in_the_player_span_context(sdk
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-100", flow="A6", br=["BR-003", "BR-005", "BR-007"])
+@pytest.mark.uc("UC-100", flow="A1", br=["BR-004"])
 @pytest.mark.uc("UC-030", flow="main", steps=[9])
-async def test_both_shape_sends_one_moment_id_as_span_event_and_log_event(sdk):
+async def test_the_retired_both_value_sends_the_default_span_event_only(sdk):
     game = _ffa(sdk, shape="both")
     span = game.players["p0"].span
 
     assert await game._kill_player("p0", 3.0) is True
 
     (event,) = _events(span)
-    (record,) = sdk.death_logs()
-    assert dict(record.attributes) == event
     assert event["moment.id"] == "test_uc030/p0/1"
-    (stamp,) = [e.timestamp for e in span.events if e.name == DEATH]
-    assert record.timestamp == stamp
+    assert sdk.death_logs() == []
 
 
 # --- T5: one moment id per moment, across warnings, deaths and recreated players -------
@@ -228,7 +225,7 @@ async def test_nonstop_respawn_death_log_carries_its_extras(sdk):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", flow="main", steps=[4], br=["BR-003", "BR-007"])
-@pytest.mark.uc("UC-023", flow="main", steps=[3], br=["BR-007"])
+@pytest.mark.uc("UC-023", flow="main", steps=[3], br=["BR-008"])
 async def test_zombies_conversion_log_says_not_eliminated(sdk):
     game = await _zombies(6)
     _with_sdk_spans(game, sdk, "log_event")
@@ -329,7 +326,7 @@ class _BrokenProcessor:
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", br=["BR-004"], cond=["Post-S-2", "Post-F-1"])
 @pytest.mark.uc("UC-030", flow="main", steps=[9])
-@pytest.mark.parametrize("shape", ["log_event", "both"])
+@pytest.mark.parametrize("shape", ["log_event"])
 async def test_a_broken_log_channel_never_half_applies_a_kill(sdk, monkeypatch, capsys, shape):
     """The provider raises on emit and the root OTLP handler (level ERROR) writes to the same provider.
 

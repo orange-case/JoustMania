@@ -60,13 +60,13 @@ func TestPushGuardLetsNewValueThrough(t *testing.T) {
 		t.Fatal(ferr)
 	}
 	h.link.Links().ConfirmPushed(k, flagsmith.Value{Present: true, Variant: "claude", Value: json.RawMessage(`"claude"`)})
-	h.fake.SetDocument(document(t0.Add(-time.Minute), []map[string]any{fsState("decision.backend", true, "openai")}), "")
+	h.fake.SetDocument(document(t0.Add(-time.Minute), []map[string]any{fsState("decision.backend", true, "jev")}), "")
 	h.clock.Advance(time.Hour)
 	for range 3 {
 		h.round()
 	}
-	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
-		t.Fatalf("UC-054/BR-005 decision.backend = %+v an hour later, want openai (the guard skips only the replaced value)", v)
+	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "jev" {
+		t.Fatalf("UC-054/BR-005 decision.backend = %+v an hour later, want jev (the guard skips only the replaced value)", v)
 	}
 }
 
@@ -109,18 +109,19 @@ func TestKillSwitchFirstAndWriteBudget(t *testing.T) {
 	for i := range 30 {
 		serials = append(serials, fmt.Sprintf("MOCK%04d", 100+i))
 	}
-	remediation := flagsmith.Key{Set: "rollout", Flag: "remediation_allowed", Scope: flagsmith.ScopeStack}
+	flagsmith.MarkKillSwitch(t, "user/play_audio")
+	kill := flagsmith.Key{Set: "user", Flag: "play_audio", Scope: flagsmith.ScopeStack}
 	h := newHarness(t, harnessOpts{before: func(h *harness) {
 		if _, ferr := h.st.RegisterGame(state.Game{ID: "g1", CoordinatorInstance: "c1", Kind: "shadow", Serials: serials}); ferr != nil {
 			t.Fatal(ferr)
 		}
-		if _, ferr := h.st.Put(state.WriteRequest{Set: "rollout", Flag: "remediation_allowed", Variant: "on", Writer: "operator"}); ferr != nil {
+		if _, ferr := h.st.Put(state.WriteRequest{Set: "user", Flag: "play_audio", Variant: "on", Writer: "operator"}); ferr != nil {
 			t.Fatal(ferr)
 		}
-		h.fake.SetDocument(document(h.clock.Now().Add(-time.Minute), []map[string]any{fsState("remediation_allowed", true, "on")}), "")
+		h.fake.SetDocument(document(h.clock.Now().Add(-time.Minute), []map[string]any{fsState("play_audio", true, "on")}), "")
 	}})
 	h.online()
-	if r, ok := h.link.Links().Remote(remediation); !ok || r.Variant != "on" {
+	if r, ok := h.link.Links().Remote(kill); !ok || r.Variant != "on" {
 		t.Fatalf("setup: remote %+v %v, want on", r, ok)
 	}
 	var ovs []override
@@ -130,10 +131,10 @@ func TestKillSwitchFirstAndWriteBudget(t *testing.T) {
 			fsState("player_handicap_factor", true, "1.5"),
 		}})
 	}
-	h.setDoc([]map[string]any{fsState("remediation_allowed", true, "off")}, ovs...)
+	h.setDoc([]map[string]any{fsState("play_audio", true, "off")}, ovs...)
 	h.round()
-	if v, _ := h.local("rollout", "remediation_allowed", flagsmith.ScopeStack); v.Variant != "off" {
-		t.Fatalf("UC-054/BR-005 rollout/remediation_allowed = %+v after the first round, want off (kill switches first)", v)
+	if v, _ := h.local("user", "play_audio", flagsmith.ScopeStack); v.Variant != "off" {
+		t.Fatalf("UC-054/BR-005 user/play_audio = %+v after the first round, want off (kill switches first)", v)
 	}
 	if n := serialValues(h, serials); n != 49 {
 		t.Fatalf("NFR-050 %d game:serial values after the first round, want 49 (50 writes, the kill switch included)", n)

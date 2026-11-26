@@ -132,7 +132,7 @@ class _ControllerRecord:
     # Kept across windows. Wall-clock (time.time()) ts of the last fresh frame.
     hw_last_fresh_ts: float | None = None
     # Identity of the last poll object — distinguishes a stale replay (same
-    # object, e.g. UnstableAdapter throttle window) from a fresh frame. The poll
+    # object, an adapter re-returning its cached sample) from a fresh frame. The poll
     # dict carries no sequence/timestamp, so identity is the cheapest reliable
     # freshness signal.
     hw_last_obj_id: int | None = None
@@ -241,9 +241,6 @@ class DiscoveryLoop:
         # Window/gap math uses wall-clock time.time() to match the poll loop's
         # current_time; the emission schedule itself is monotonic (_run_periodic).
         self._window_start = time.time()
-        # True while the rollout flags cannot be read (#1489): edge-triggers one
-        # warning on entering and one info on leaving, not one log per window.
-        self._rollout_read_failing = False
         # Connection quality (UC-035 BR-005): rolling 10 s window of fresh-frame
         # gaps per serial.
         self._gap_window = ReportGapWindow()
@@ -723,8 +720,8 @@ class DiscoveryLoop:
                     continue
 
                 # Truthy dict: fresh frame only if the poll returned a *different*
-                # object than last time. A stale replay (same object, e.g. an
-                # UnstableAdapter throttle window) is NOT a new movement update.
+                # object than last time. A stale replay (same object, the adapter's
+                # cached sample) is NOT a new movement update.
                 # A tap-latch copy (press_latch.LatchedState) is judged by the real sample it copies,
                 # so the copy is neither a fresh frame nor makes the next poll look like one (#2352 B3).
                 # id() is only safe while the previous sample stays referenced (controller_states[serial], directly or
@@ -933,9 +930,8 @@ class DiscoveryLoop:
             # Dropped-event ratio: drops as a fraction of event-bearing poll
             # cycles (fresh frames + drops). Stale replays are excluded — they
             # are the *absence* of an event, not a dropped event, so they must
-            # not dilute the denominator. This matches the UnstableAdapter
-            # design (every Nth *fresh* frame dropped) so the ratio reflects the
-            # genuine event-loss rate rather than washing out across 100Hz polls.
+            # not dilute the denominator, so the ratio reflects the genuine
+            # event-loss rate rather than washing out across 100Hz polls.
             events = fresh + drops
             dropped_pct = (drops / events) if events else 0.0
 
@@ -972,16 +968,6 @@ class DiscoveryLoop:
         # frame, and stale replays spanning the boundary are still detected.
         self._window_start = now
 
-    def _log_rollout_read_transition(self, failing: bool) -> None:
-        """Log entering / leaving the "rollout flags unreadable" state once each (#1489)."""
-        if failing == self._rollout_read_failing:
-            return
-        self._rollout_read_failing = failing
-        if failing:
-            logger.warning("Rollout flags unreadable: health span reports rollout_read_error until they recover")
-        else:
-            logger.info("Rollout flags readable again: health span reports the rollout state")
-
     def _emit_bluetooth_health(self, now: float, now_mono: float | None = None) -> None:
         """Emit the ~1Hz controller.bluetooth_health span + health metrics.
 
@@ -998,30 +984,6 @@ class DiscoveryLoop:
             self._reset_health_window(now)
             return
 
-        # Window-level rollout summary (target backend + cohort size). A failed
-        # read is NOT reported as "off" (""/0): target and count are omitted and
-        # bluetooth.rollout_read_error is set, so the agent holds its rollout
-        # state instead of treating a flagd hiccup as an operator act (#1489).
-        target_backend = ""
-        rollout_count = 0
-        rollout_read_error = False
-        try:
-            target_backend, rollout_count = self.backend.rollout_summary()
-        except Exception:
-            rollout_read_error = True
-            logger.debug("Failed to read rollout summary for health span", exc_info=True)
-        self._log_rollout_read_transition(rollout_read_error)
-
-        # Active rollout strategy ("off"/"immediate"/"progressive"). The agent
-        # reads this to skip its count ladder under "immediate" routing. Empty
-        # on any error so a flagd outage never breaks span emission; the agent
-        # treats absence as "behave as before" (progressive ladder).
-        rollout_strategy = ""
-        try:
-            rollout_strategy = self.backend.rollout_strategy()
-        except Exception:
-            logger.debug("Failed to read rollout strategy for health span", exc_info=True)
-
         self._update_connection_quality(
             list(signals["per_serial"]), now_mono if now_mono is not None else time.monotonic()
         )
@@ -1032,14 +994,6 @@ class DiscoveryLoop:
             span.set_attribute("bluetooth.dropped_events_pct", float(signals["dropped_events_pct"]))
             span.set_attribute("bluetooth.movement_update_hz", float(signals["movement_update_hz"]))
             span.set_attribute("bluetooth.active_controllers", int(signals["active_controllers"]))
-            if rollout_read_error:
-                span.set_attribute("bluetooth.rollout_read_error", True)
-            else:
-                span.set_attribute("bluetooth.target_backend", target_backend)
-                span.set_attribute("bluetooth.rollout_count", int(rollout_count))
-                # The strategy read degrades to "off" on the same flagd error, so
-                # it is only reported next to a successful rollout read (#1489).
-                span.set_attribute("bluetooth.rollout_strategy", rollout_strategy)
 
             # One event per active serial with per-serial signals.
             for serial, s in signals["per_serial"].items():
@@ -1056,11 +1010,6 @@ class DiscoveryLoop:
                     sample["bluetooth.report_gap_max_ms"] = float(quality.max_ms)
                     sample["bluetooth.connection_quality"] = quality.quality
                 span.add_event("bluetooth_controller_sample", sample)
-
-        # --- Metrics ----------------------------------------------------------
-        for serial, s in signals["per_serial"].items():
-            # Populate the previously-unset generic update-rate gauge too.
-            metrics.controller_state_update_hz.labels(serial=serial).set(s["update_hz"])
 
         self._reset_health_window(now)
 
@@ -1185,7 +1134,6 @@ class DiscoveryLoop:
             }
 
             # Update metrics (Phase 38)
-            metrics.active_controllers.inc()
             metrics.controller_connected.labels(serial=serial).set(1)
             metrics.controller_battery_level.labels(serial=serial).set(battery)
             metrics.controller_battery_pct.labels(serial=serial).set(metrics.battery_to_pct(battery))

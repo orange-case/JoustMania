@@ -273,7 +273,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "invoke_agent joustmania-agent spans (agent.decide before #2584) per minute by the backend that produced the answers (decide.backend: rules, jev, claude, openai; rules after a fallback). Derived in the OTel collector by the spanmetrics connector from the invoke_agent spans (traces_span_metrics_calls_total, services/otel-collector/config.yaml): the agent has no counter for this. A decision.backend flag flip shows here within a minute.",
+      "description": "invoke_agent joustmania-agent spans (agent.decide before #2584) per minute by the backend that produced the answers (decide.backend: rules, jev, claude; rules after a fallback). Derived in the OTel collector by the spanmetrics connector from the invoke_agent spans (traces_span_metrics_calls_total, services/otel-collector/config.yaml): the agent has no counter for this. A decision.backend flag flip shows here within a minute.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -814,7 +814,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "p95 of gen_ai.client.operation.duration (OTel GenAI semantic conventions; Prometheus name gen_ai_client_operation_duration_seconds) per caller and requested model, failed calls included. Caller = the last segment of otel_scope_name: claude, openai, jev (in-game decide backends) or inference (the offline proposer / retro calls). Buckets: the semconv advisory boundaries (10 ms to 82 s).",
+      "description": "p95 of gen_ai.client.operation.duration (OTel GenAI semantic conventions; Prometheus name gen_ai_client_operation_duration_seconds) per caller and requested model, failed calls included. Caller = the last segment of otel_scope_name: claude, jev (in-game decide backends) or inference (the offline proposer / retro calls). Buckets: the semconv advisory boundaries (10 ms to 82 s).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -900,7 +900,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Chat calls per minute per caller (last segment of otel_scope_name: claude, openai, jev = in-game decide; inference = offline proposer / retro), requested model and provider; error_type is set only on failed calls (timeout, HTTP status class, ...). Source: gen_ai_client_operation_duration_seconds_count.",
+      "description": "Chat calls per minute per caller (last segment of otel_scope_name: claude, jev = in-game decide; inference = offline proposer / retro), requested model and provider; error_type is set only on failed calls (timeout, HTTP status class, ...). Source: gen_ai_client_operation_duration_seconds_count.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -986,7 +986,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Input and output tokens per minute per caller (last segment of otel_scope_name: claude, openai, jev = in-game decide; inference = offline proposer / retro) and requested model, from gen_ai.client.token.usage (Prometheus name gen_ai_client_token_usage, a histogram; the _sum is the token count).",
+      "description": "Input and output tokens per minute per caller (last segment of otel_scope_name: claude, jev = in-game decide; inference = offline proposer / retro) and requested model, from gen_ai.client.token.usage (Prometheus name gen_ai_client_token_usage, a histogram; the _sum is the token count).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1840,7 +1840,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Agent flag writes the flag service refused in the last hour (flagservice_writes_total{result=\"rejected\"} on the interventions, rollout and game sets): out of bounds, game not live, read-only flag. Replaces the flag-file corruption panel (#1417).",
+      "description": "Agent flag writes the flag service refused in the last hour (flagservice_writes_total{result=\"rejected\"} on the interventions and game sets): out of bounds, game not live, read-only flag. Replaces the flag-file corruption panel (#1417).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1891,7 +1891,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(flagservice_writes_total{result=\"rejected\", flag_set=~\"interventions|rollout|game\"}[1h])) or vector(0)",
+          "expr": "sum(increase(flagservice_writes_total{result=\"rejected\", flag_set=~\"interventions|game\"}[1h])) or vector(0)",
           "legendFormat": "rejected writes",
           "refId": "A"
         }

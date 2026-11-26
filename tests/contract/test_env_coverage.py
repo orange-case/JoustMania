@@ -242,9 +242,6 @@ def test_inventory_classifies_defaults():
         "AGENT_EXPERIMENT_PROPOSER_ENABLED",
     } <= set(agent)  # raw + const key
     assert "FLAGD_HOST" not in agent  # getEnv("FLAGD_HOST", "flagd")
-    assert (
-        "AGENT_ROLLOUT_COOLDOWN_SECONDS" not in agent
-    )  # secondsEnv helper with fallback
 
 
 def test_ci_override_replaces_environment():

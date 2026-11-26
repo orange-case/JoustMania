@@ -114,11 +114,11 @@ func TestFlagdFactory_LateSyncServerReachesReadyAndSeesEveryFlip(t *testing.T) {
 
 	// Only the agent domain dials the gRPC server: go-sdk-contrib flagd v0.8.0 (and v0.6.0)
 	// rewrites a package-level map in every gRPC sync Init (nonRetryableCodes), so two
-	// providers starting at once are a data race under -race. The other two domains sync
-	// from fake sources that come up with the server.
-	rolloutSrc, gameSrc := newFakeFlagdSource("on"), newFakeFlagdSource("on")
+	// providers starting at once are a data race under -race. The game domain syncs
+	// from a fake source that comes up with the server.
+	gameSrc := newFakeFlagdSource("on")
 	ctx, cancel := context.WithCancel(context.Background())
-	f, holder, shutdown, err := setupFlagd(ctx, counted, fakeFactory(rolloutSrc), fakeFactory(gameSrc),
+	f, holder, shutdown, err := setupFlagd(ctx, counted, fakeFactory(gameSrc),
 		flagdUp.Load, testSyncTiming, nil)
 	if err != nil {
 		cancel()
@@ -140,9 +140,6 @@ func TestFlagdFactory_LateSyncServerReachesReadyAndSeesEveryFlip(t *testing.T) {
 		t.Helper()
 		if read() {
 			t.Fatalf("enabled read on %s", when)
-		}
-		if f.RemediationAllowed(context.Background()) {
-			t.Fatalf("remediation_allowed read on %s", when)
 		}
 		client := openfeature.NewClient(Domain)
 		if st := client.State(); st == openfeature.ReadyState {
@@ -176,10 +173,8 @@ func TestFlagdFactory_LateSyncServerReachesReadyAndSeesEveryFlip(t *testing.T) {
 
 	t.Run("UC-045/main READY and every flip after flagd serves", func(t *testing.T) {
 		late.serve()
-		rolloutSrc.set(true, "on")
 		gameSrc.set(true, "on")
 		waitBool(t, "enabled after the late first sync", read, true, 5*time.Second)
-		waitBool(t, "remediation_allowed (rollout domain)", func() bool { return f.RemediationAllowed(context.Background()) }, true, 5*time.Second)
 		if st := openfeature.NewClient(Domain).State(); st != openfeature.ReadyState {
 			t.Fatalf("agent domain state = %s after the first sync, want READY", st)
 		}

@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Spec references gate (#1280): `make spec-refs-check` plus the comparison with
-# the base commit (line-ref growth warning, baseline growth needs the
-# `spec-baseline-growth` label). Used by the Telemetry Contract job.
+# the base commit (line-ref growth warning, baseline growth fails, #2799).
+# Used by the Telemetry Contract job.
 #
 # Env: BASE_REF (PR: base branch name) or BASE_SHA (merge queue: base commit),
-# PR_NUMBER + GH_TOKEN + GH_REPO (label lookup), PR_LABELS (local testing).
 # Neither base set: only the checks that need no base run.
 set -euo pipefail
 

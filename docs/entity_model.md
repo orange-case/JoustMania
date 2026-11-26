@@ -38,8 +38,6 @@ erDiagram
     EXPERIMENT ||--o| VERDICT : "concludes with"
     VERDICT ||--o| PROMOTION : "triggers"
     GAME_SESSION ||--o| RETRO : "is reviewed by"
-    ROLLOUT ||--o{ ROLLOUT_STAGE : "advances through"
-    ROLLOUT_STAGE }o--o{ CONTROLLER : "routes"
     MOTION_ARCHETYPE |o--o{ CONTROLLER : "drives one slot of"
     EXPERIMENT ||--o{ PATTERN_PAIR_ASSIGNMENT : "pins"
     MOTION_ARCHETYPE ||--o{ PATTERN_PAIR_ASSIGNMENT : "is run by"
@@ -76,7 +74,7 @@ A physical or mock PS Move controller tracked by the controller manager (`proto/
 | color | Current LED colour (r, g, b) | Integer | 3 | Not Null, Min: 0, Max: 255 |
 | buttons | Pressed state of trigger, move, cross, circle, square, triangle, ps, select and start (one boolean field each in the proto) | Boolean | 1 | Not Null |
 | rssi | Signal strength in dBm (controller manager always reports 0; RSSI comes from the pairing daemon metric) | Integer | 4 | Optional, Min: -100, Max: 0 |
-| adapter | I/O adapter currently routing this controller | String | 10 | Not Null, Values: python, rust, mock, unstable |
+| adapter | I/O adapter currently routing this controller | String | 10 | Not Null, Values: python, rust, mock |
 | reserved | Mock controller reserved for a shadow game (hidden from the lobby roster) | Boolean | 1 | Not Null |
 | tag | Owner tag of a mock controller (e.g. `agent:` prefix); the agent's orphan sweep removes reserved controllers whose tag has its prefix and no live game references them (`services/agent/gamerunner/sweep.go` `SweepOrphans`) | String | 60 | Optional, mock controllers only |
 | pattern_archetype | Archetype installed on this mock controller | String | 40 | Optional, Foreign Key (MOTION_ARCHETYPE.archetype_id) |
@@ -229,7 +227,7 @@ One flag set: its read-only baseline file (`services/flagd/<set>.json`), served 
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
-| flag_set_id | `metadata.flagSetId` | String | 20 | Primary Key, Values: agent, controller, game, interventions, observability, operator, rollout, system, user |
+| flag_set_id | `metadata.flagSetId` | String | 20 | Primary Key, Values: agent, controller, game, interventions, observability, operator, system, user |
 | file | Flag file path | String | 100 | Not Null, Unique |
 | owner | Who owns the values ([OWNERSHIP_MODEL.md](OWNERSHIP_MODEL.md)) | String | 20 | Not Null, Values: human, operator, agent, operator+agent |
 
@@ -332,8 +330,8 @@ One agent decision cycle for a game: one evaluation, recorded on one `invoke_age
 |---|---|---|---|---|
 | decide_span_id | Span id of the cycle's `invoke_agent joustmania-agent` span (no agent-assigned id exists) | String | 16 | Primary Key, Format: 16 hex characters |
 | game_id | Game decided for | String | 17 | Not Null, Foreign Key (GAME_SESSION.game_id) |
-| backend_requested | `decision.backend` at fire time (`decide.backend.requested`); empty counts as `rules`, an unknown name is kept verbatim and decided by rules with `fallback_reason=unknown_backend` | String | 20 | Not Null, Values: rules, claude, openai, jev, or an unknown name |
-| backend | Backend that actually decided | String | 10 | Not Null, Values: rules, claude, openai, jev |
+| backend_requested | `decision.backend` at fire time (`decide.backend.requested`); empty counts as `rules`, an unknown name is kept verbatim and decided by rules with `fallback_reason=unknown_backend` | String | 20 | Not Null, Values: rules, claude, jev, or an unknown name (for example the retired `openai`, #2788) |
+| backend | Backend that actually decided | String | 10 | Not Null, Values: rules, claude, jev |
 | outcome | Decide outcome | String | 10 | Not Null, Values: act, held, noop, invalid, fallback, discarded |
 | fallback_reason | Why rules decided instead | String | 22 | Optional, Values: unknown_backend, backend_unavailable, async_not_wired, llm_not_eligible, llm_budget_exhausted, timeout, invalid_answer, error |
 | discarded_reason | Why a remote answer (valid, or under the kill switch also a failed or timed-out call) or its rules fallback was dropped | String | 16 | Optional, Values: stale_context, game_ended, target_gone, target_stale, state_too_old, kill_switch, backend_changed, shutdown |
@@ -428,7 +426,7 @@ A hypothesis about one `game.json` flag value, tested in shadow games (`services
 **Constraints:** the `chaos` objective is rejected. All running experiments are aborted when `enabled` or `experiments_enabled` is off. Status transitions (`services/agent/experiment/registry.go` `Status`): `proposed` → `running` → `concluded` → `promoting` → `done`, or `promoting` → `discarded`, or `concluded` → `discarded`; `proposed`, `running`, `concluded` or `promoting` → `aborted` when `enabled` or `experiments_enabled` is off (`AbortAll`), at agent shutdown, or when its start fails (`start_failed`, on every declarer path and for a `proposed` experiment restored from the journal, UC-042 A4, UC-043 A8, #1700). `done`, `discarded` and `aborted` are terminal and never overwritten: a `promoting` experiment aborted by `AbortAll` stays `aborted` when its promotion returns (#1701). Only a `concluded` experiment moves to `promoting`, and only once that decision is durable in the journal (UC-043 BR-007, #2042).
 - On an agent restart (`Rehydrate`, UC-043 A15, #2042) a restored experiment is never promoted: `concluded` → `discarded` (`concluded before restart: <outcome>; not promoted`); `concluded` or `promoting` → `done` / `discarded` from a `promotion` event journaled after its last `concluded` decision; `promoting` without one → `aborted` (`promotion_interrupted`).
 - `running` → `discarded` **without any verdict** (`registry_pattern.go` `pinPending`, `Rehydrate`): a pattern experiment is discarded before its first game when its archetype selection cannot be pinned, with the reason `pattern_selection_empty`, `pattern_selection_too_small` (fewer than `verdict_min_pairs` or a duplicate), `pattern_archetype_invalid`, `pattern_mode_unsupported` (UC-046 A1, A2, A4, A13), or after an agent restart when the pin cannot be restored, `pattern_pin_lost` (BR-015). An experiment on a hold flag is also discarded at its pin with `pattern_trigger_policy_missing` (UC-046 A17), `hold_not_real_default` or `hold_already_default`, and while running (`discardHoldStale`, every tick) with the latter two (UC-043 A17, #2096). No VERDICT exists for such an experiment.
-- Every conclusion goes through `concluded`; the end state then depends on the verdict outcome: `promote` → `promoting` → `done` when the promotion outcome is `applied`, `reverted` or `deferred` (UC-043 A17), `promoting` → `discarded` when it is `discarded` (inert or failed, UC-043 A4, A9, #1701), `discard` and `inconclusive` → `discarded`. A final `inconclusive` is a verdict like any other: it comes from the give-up guard ([UC-043](use_cases/UC-043.md) A3, `registry.go` `shouldGiveUp`) or from exhausted pattern archetypes (UC-046 A6), and maps to `discarded`. An interim `inconclusive` verdict keeps the experiment `running`. The final verdict is journaled on the `concluded` decision event and becomes the journal summary's verdict (#2042).
+- Every conclusion goes through `concluded`; the end state then depends on the verdict outcome: `promote` → `promoting` → `done` when the promotion outcome is `applied` or `reverted`, `promoting` → `discarded` when it is `discarded` (inert or failed, UC-043 A4, A9, #1701), `discard` and `inconclusive` → `discarded`. A final `inconclusive` is a verdict like any other: it comes from the give-up guard ([UC-043](use_cases/UC-043.md) A3, `registry.go` `shouldGiveUp`) or from exhausted pattern archetypes (UC-046 A6), and maps to `discarded`. An interim `inconclusive` verdict keeps the experiment `running`. The final verdict is journaled on the `concluded` decision event and becomes the journal summary's verdict (#2042).
 
 ### ARM
 
@@ -465,11 +463,11 @@ What happens to a promote verdict (`services/agent/promote/promote.go:91-105,420
 | experiment_id | Experiment promoted | String | 50 | Primary Key, Foreign Key (EXPERIMENT.experiment_id) |
 | mode | `code_improvement.mode` at promotion | String | 10 | Not Null, Values: issue, pr, autonomous |
 | target | `code_improvement.target` | String | 6 | Not Null, Values: local, github |
-| outcome | What the promotion achieved (`code_improvement.outcome`); a promotion that could not act is `discarded` with a reason | String | 10 | Not Null, Values: applied, discarded, reverted, deferred |
+| outcome | What the promotion achieved (`code_improvement.outcome`); a promotion that could not act is `discarded` with a reason | String | 10 | Not Null, Values: applied, discarded, reverted (`deferred` only in journals written before #2810) |
 | reason | Why it was discarded or reverted (`kill_switch` for a kill-switch revert, UC-043 A1) | String | 200 | Optional |
 | reference | Issue / PR URL or commit | String | 200 | Optional |
 
-**Constraints:** the outcome, reason and reference are on the `code_improvement.promote` span and in the experiment journal as a `promotion` event (`journal.Promotion`, `services/agent/experiment/journal/record.go`, #1701); the outcome sets the experiment's end state (`applied`, `reverted`, `deferred` → `done`; `discarded` → `discarded`). `deferred` (UC-043 A17 step 3, #2096): the `real` write of a hold key waits until no real game runs; its later outcome (`applied`, `reverted` or `discarded`) is appended as another `promotion` event. A promotion event may carry `revert_pending` (`journal.Promotion.RevertPending`): a hold-key watch or re-watch revert that waits until no real game runs, journaled write-ahead so a restart re-queues it; a `deferred` write a restart lost is journaled `discarded` with reason `lost_at_restart`. A kill-switch revert of an applied autonomous promotion (#1704) after its promotion returned appends a second `promotion` event (`reverted`, reason `kill_switch`) to the ended experiment's journal and does not change the end state; a kill-switch revert during the promotion is that promotion's single event. A failed kill-switch revert appends one `promotion` event (`applied`, reason `kill_switch; revert failed: …`) per promotion; the retries add none, and the retry that succeeds appends the `reverted` event (#1753). A re-watch revert (UC-043 step 7) after the promotion returned appends a `promotion` event with reason prefixed `re-watch: `: `reverted`, or, when the revert fails, one `applied` event with the failure reason. The re-watch tries the revert once; the retry, its first failure event and the final `reverted` event belong to the kill switch (UC-043 A1). It does not change the end state (#1883).
+**Constraints:** the outcome, reason and reference are on the `code_improvement.promote` span and in the experiment journal as a `promotion` event (`journal.Promotion`, `services/agent/experiment/journal/record.go`, #1701); the outcome sets the experiment's end state (`applied`, `reverted` → `done`; `discarded` → `discarded`; a `deferred` event an agent before #2810 journaled counts as `discarded`). A kill-switch revert of an applied autonomous promotion (#1704) after its promotion returned appends a second `promotion` event (`reverted`, reason `kill_switch`) to the ended experiment's journal and does not change the end state; a kill-switch revert during the promotion is that promotion's single event. A failed kill-switch revert appends one `promotion` event (`applied`, reason `kill_switch; revert failed: …`) per promotion; the retries add none, and the retry that succeeds appends the `reverted` event (#1753). A re-watch revert (UC-043 step 7) after the promotion returned appends a `promotion` event with reason prefixed `re-watch: `: `reverted`, or, when the revert fails, one `applied` event with the failure reason. The re-watch tries the revert once; the retry, its first failure event and the final `reverted` event belong to the kill switch (UC-043 A1). It does not change the end state (#1883).
 
 ### RETRO
 
@@ -487,28 +485,6 @@ A post-game retrospective (`services/agent/decision/retro_capture.go`, `services
 | session_focus | Suggested focus | String | 200 | Optional |
 
 **Constraints:** at most one retro per game (the agent remembers the last captured session ids). A retro that finds the shared `llm.max_requests_per_minute` budget exhausted is gated: it counts `agent_llm_gated_total{reason=llm_budget_exhausted}`, logs `agent.llm.retro_gated` and records nothing, no span and no row. A game that ended stale (`end_reason=stale`) gets no retro (UC-041 A4).
-
-### ROLLOUT
-
-A controller-backend rollout (`services/flagd/rollout.json`, `services/controller_manager/multiplexer/rollout_router.py`).
-
-| Attribute | Description | Data Type | Length/Precision | Validation Rules |
-|---|---|---|---|---|
-| target_backend | Backend being rolled out | String | 8 | Primary Key, Values: python, rust, unstable |
-| strategy | Rollout strategy | String | 11 | Not Null, Values: off, immediate, progressive |
-| remediation_allowed | Agent may roll back | Boolean | 1 | Not Null |
-
-### ROLLOUT_STAGE
-
-A stage of a progressive rollout: how many controllers (first N by sorted serial) use the target backend.
-
-| Attribute | Description | Data Type | Length/Precision | Validation Rules |
-|---|---|---|---|---|
-| current_controller_count | Controllers on the target backend | Integer | 2 | Primary Key, Values: 0, 1, 3, 6, 99 |
-| entered_at | When the agent entered the stage (dwell timer) | DateTime | - | Not Null |
-| fitness_passed | Last infrastructure fitness result | Boolean | 1 | Not Null |
-
-**Constraints:** per-serial `bluetooth_backend` targeting (manual canary) wins over the rollout; mock-only controllers are not routed.
 
 ### MOTION_ARCHETYPE
 

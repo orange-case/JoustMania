@@ -7,7 +7,7 @@ const maxBriefLogGames = 64
 
 // BriefLog remembers which games sent the operator brief to an in-game model
 // (#2695, UC-042 A13): a remote decide request that carried a non-empty
-// Request.OperatorBrief (claude and openai only, operatorBriefFor). The retro reads
+// Request.OperatorBrief (claude only, operatorBriefFor). The retro reads
 // it at game end to tell the analyst whether the in-game agent ever saw the brief.
 // Reading never forgets, so the order of the game-end consumers does not matter.
 type BriefLog struct {

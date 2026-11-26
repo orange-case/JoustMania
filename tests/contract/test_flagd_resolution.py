@@ -14,10 +14,10 @@ v0.18.1) serving a temporary copy of ``services/flagd/ci`` (see flagd_harness):
 
 flagd here reads the baseline files directly (``file:`` sources), which is what
 the flag service hands it unchanged when no runtime value is set. Runtime
-writes (per-player ladders, the rollout count, experiment arms, propagation)
-go through the flag service and are tested against the real stack in
-tests/service (test_intervention_targeting.py, test_rollout_plumbing.py,
-test_experiment_shadow_isolation.py, test_flag_propagation.py; epic #1407, #1561)
+writes (per-player ladders, experiment arms, propagation) go through the flag
+service and are tested against the real stack in tests/service
+(test_intervention_targeting.py, test_experiment_shadow_isolation.py,
+test_flag_propagation.py; epic #1407, #1561)
 and tests/integration (test_tc013_shadow_alongside_real.py).
 
 Docker is required: a missing docker fails in CI (``CI`` set) and skips locally.
@@ -811,7 +811,8 @@ SHIELD_TARGETING_VARS = {
     "shield.charge_expiry_seconds": {"gameId", "game_kind"},
 }
 # The eight hold keys of FR-162 (UC-043 A17): the only shield keys in the experiment
-# catalog. The agent's hold gate reads their effective default as what real games and
+# catalog. All but shield.activation also have scope real (it is read per grant, so it
+# is never promoted, #2810). The agent's hold gate reads their effective default as what real games and
 # shadow games outside an arm resolve, which holds only while they have no baseline
 # targeting.
 HOLD_KEYS = {
@@ -1281,10 +1282,10 @@ def test_handler_read_checks_report_a_violation():
 @pytest.mark.uc("UC-043", flow="A17", steps=[1])
 @pytest.mark.uc("UC-040", br=["BR-019", "BR-027"])
 def test_hold_keys_are_the_only_shield_keys_in_the_experiment_catalog():
-    """Static (FR-162, C-034): exactly the eight hold keys have the experiment+arm and
-    real scopes, each is declared experiment_rung applies with experiment_id and arm in
-    its handler targeting; charge_expiry and the #2094 cue flags stay stack-only with no
-    rung."""
+    """Static (FR-162, C-034): exactly the eight hold keys have the experiment+arm
+    scope, all but shield.activation also real; each is declared experiment_rung applies
+    with experiment_id and arm in its handler targeting; charge_expiry and the #2094 cue
+    flags stay stack-only with no rung."""
     registry = handler_flag_reads()
     writer_flags = ic.load_yaml(FLAG_SERVICE_REGISTRY)["flags"]
     shield_rows = {
@@ -1295,7 +1296,10 @@ def test_hold_keys_are_the_only_shield_keys_in_the_experiment_catalog():
     widened = {k for k, scope in shield_rows.items() if "experiment+arm" in scope}
     assert widened == HOLD_KEYS
     for key in HOLD_KEYS:
-        assert shield_rows[key] == {"stack", "experiment+arm", "real"}, key
+        want = {"stack", "experiment+arm"}
+        if key != "shield.activation":
+            want.add("real")
+        assert shield_rows[key] == want, key
         entry = registry[("game", key)]
         assert entry.get("experiment_rung") == "applies", key
         assert {"gameId", "experiment_id", "arm"} <= set(entry["targeting"]), key
@@ -1448,7 +1452,7 @@ _FRENZY_VARIANTS_2518 = {
 }
 
 
-@pytest.mark.uc("UC-070", flow="A4", br=["BR-003"])
+@pytest.mark.uc("UC-070", br=["BR-003"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_budget_variants_2518_are_integers_and_defaults_unchanged(flag_dir):
     """Static: both flag files declare the new integer variants; the default stays."""
@@ -1471,7 +1475,7 @@ def test_budget_variants_2518_are_integers_and_defaults_unchanged(flag_dir):
         )
 
 
-@pytest.mark.uc("UC-070", flow="A4", br=["BR-003"])
+@pytest.mark.uc("UC-070", br=["BR-003"])
 @pytest.mark.parametrize("tier", ["interactive", "frenzy"])
 @pytest.mark.parametrize("resolver", ["rpc", "in_process"])
 def test_budget_variants_2518_resolve_as_overlay(flagd, resolver, tier):
@@ -1503,11 +1507,10 @@ def test_budget_variants_2518_resolve_as_overlay(flagd, resolver, tier):
 
 
 # --------------------------------------------------------------------------- #
-# 2d. Per-backend decide caps for the paid backends (#2519, flags.md §3)
+# 2d. Per-backend decide cap for the paid backend (#2519, flags.md §3)
 # --------------------------------------------------------------------------- #
 _BACKEND_CAP_KEYS_2519 = (
     "decision.claude.max_requests_per_minute",
-    "decision.openai.max_requests_per_minute",
 )
 _BACKEND_CAP_VARIANTS_2519 = {
     "inherit": -1,
@@ -1515,7 +1518,7 @@ _BACKEND_CAP_VARIANTS_2519 = {
     "default": 6,
     "stage": 30,
 }
-# The base file caps the paid backends at stage; the ci file inherits the global
+# The base file caps the paid backend at stage; the ci file inherits the global
 # budget so the service-test journeys at `journey` 600 are not capped.
 _BACKEND_CAP_DEFAULT_2519 = {"base": "stage", "ci": "inherit"}
 
@@ -1523,7 +1526,7 @@ _BACKEND_CAP_DEFAULT_2519 = {"base": "stage", "ci": "inherit"}
 @pytest.mark.uc("UC-070", br=["BR-003"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_backend_caps_2519_are_integers_with_the_shipped_default(flag_dir):
-    """Static: both flag files declare the two integer caps with the shipped default."""
+    """Static: both flag files declare the integer cap with the shipped default."""
     root = fh.CI_FLAG_DIR if flag_dir == "ci" else fh.CI_FLAG_DIR.parent
     flags = json.loads((root / "agent.json").read_text())["flags"]
     for key in _BACKEND_CAP_KEYS_2519:

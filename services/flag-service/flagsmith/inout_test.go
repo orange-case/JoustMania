@@ -373,7 +373,7 @@ func TestRefusedPushNotResentByPolls(t *testing.T) {
 		}
 	})
 	t.Run("UC-055/A4 step 2 a different local value is sent", func(t *testing.T) {
-		h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "openai"})
+		h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "rules"})
 		h.waitFor("the second push", func() bool { return h.requests(http.MethodPatch, backendPath) == 2 })
 		h.roundAndSettle()
 		if n := h.requests(http.MethodPatch, backendPath); n != 2 {
@@ -562,21 +562,21 @@ func TestRefusedValueBackWhileNewerInFlight(t *testing.T) {
 				flagsmithtest.WriteJSON(w, http.StatusConflict, json.RawMessage(`{"detail":"change requests enabled"}`))
 				return
 			}
-			m.set("decision.backend", "openai") // Flagsmith holds the accepted value
+			m.set("decision.backend", "rules") // Flagsmith holds the accepted value
 			flagsmithtest.WriteJSON(w, http.StatusOK, json.RawMessage(`{}`))
 		},
 	}, nil)
 	h.online()
 	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"})
 	<-entered // jev in flight
-	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "openai"})
-	release <- struct{}{} // jev refused, openai still pending
-	<-entered             // openai in flight
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "rules"})
+	release <- struct{}{} // jev refused, rules still pending
+	<-entered             // rules in flight
 	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"})
-	release <- struct{}{} // openai confirmed
-	h.waitFor("openai confirmed", func() bool {
+	release <- struct{}{} // rules confirmed
+	h.waitFor("rules confirmed", func() bool {
 		r, ok := h.link.Links().Remote(backendKey)
-		return ok && r.Variant == "openai"
+		return ok && r.Variant == "rules"
 	})
 	t.Run("UC-055/A4 the confirmation of the newer value keeps the refusal of the local jev", func(t *testing.T) {
 		if p, oos, r := h.link.Links().Counts(); p != 0 || r != 1 {
@@ -588,10 +588,10 @@ func TestRefusedValueBackWhileNewerInFlight(t *testing.T) {
 			h.roundAndSettle()
 		}
 		if n := h.requests(http.MethodPatch, backendPath); n != 2 {
-			t.Fatalf("%d PATCHes of decision.backend, want 2 (jev refused once, openai confirmed)", n)
+			t.Fatalf("%d PATCHes of decision.backend, want 2 (jev refused once, rules confirmed)", n)
 		}
-		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
-			t.Fatalf("decision.backend = %+v, want Flagsmith's openai: the re-saved refused jev is reverted, not sent (#2621)", v)
+		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "rules" {
+			t.Fatalf("decision.backend = %+v, want Flagsmith's rules: the re-saved refused jev is reverted, not sent (#2621)", v)
 		}
 	})
 }

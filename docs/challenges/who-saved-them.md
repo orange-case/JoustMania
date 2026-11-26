@@ -1,7 +1,7 @@
 # Booth challenge: "Who saved them?"
 
 > Guide for a presenter or an outside reader. It restates [UC-101](../use_cases/UC-101.md),
-> [telemetry.md §3.2](../specs/telemetry.md#32-game-coordinator) and
+> [telemetry.md appendix A](../specs/telemetry.md#appendix-a-booth-profile) and
 > [§4.3](../specs/telemetry.md#43-decision-attributes); if they differ, the spec wins.
 > Part of epic #2569 (booth challenges), issue #2665. The moment shapes are those of
 > ["Where did it go?"](where-did-it-go.md) (UC-100).
@@ -53,11 +53,11 @@ The agent must also be `enabled`; the operator pad or `scripts/talk-stage.sh` se
 back where the next use of the case expects them.
 
 **Choose the shape for the next game** exactly as in ["Where did it go?" §2](where-did-it-go.md#2-setup): the flag
-`telemetry.moment_shape` (`span_event` default, `span`, `log_event`, `both`), read once when the game starts; reset
+`telemetry.moment_shape` (`span_event` default, `span`, `log_event`), read once when the game starts; reset
 it after the booth. The intervention follows the same shape as the warning and the death (UC-101 BR-002).
 
 **Confirm the shape the game ran in.** Read `telemetry.moment_shape` on the game's root span (named after the mode).
-If it differs from the chosen shape, or is `both`, the game is not counted (A1).
+If it differs from the chosen shape, the game is not counted (A1).
 
 ## 3. The two sides of the join
 
@@ -73,7 +73,6 @@ child carries the same id as `intervention.id`. The flag service's `flagservice.
 | `span_event` (default) | Span event `intervention` on the player span | On the player span; it reaches a backend with the player span (at the death in Free-for-All, at game end in NonStop, Fight Club, Zombies) | Span events searchable by name and attribute |
 | `span` | Span `game.intervention`, start = end = the apply | Child of the player span | Search of spans by name and attribute |
 | `log_event` | Log record with `event_name` `intervention`, carrying the player span's trace and span id | Not a span: linked to the player span | A log store for OTLP logs, and a jump from log to trace |
-| `both` | `span_event` and `log_event`, same `moment.id` | As the two shapes | Not a booth round |
 
 Every record carries `intervention.type`, `intervention.id` (left out when the write carried none, A3), `moment.id`,
 `player.serial`, `player.name` (once known), `game.id` and `game.kind` (BR-004). `intervention.type` is the
@@ -144,7 +143,7 @@ Template, one row per backend and shape:
 
 | Case | Why | Flow |
 |---|---|---|
-| The root span's `telemetry.moment_shape` differs from the chosen shape, or is `both` | The game ran in another shape | A1 |
+| The root span's `telemetry.moment_shape` differs from the chosen shape | The game ran in another shape | A1 |
 | No entry has an `intervention.id`, a `moment.id` and a lever that can save the player | There is no question to ask: record the round as without a question | A6 |
 | The game was force-ended or the coordinator stopped before the end | No ground truth is recorded for it | A7 |
 
@@ -161,16 +160,16 @@ moment is not wrong.
 - **The case keeps no log store** (UC-100 BR-006). A `log_event` round is checked only against the ground truth on
   the root span.
 - **A late effect after teardown.** An effect that lands late after the game's teardown recorded the ground truth
-  gets its moment but no ground truth entry (accepted gap, telemetry.md §3.2). Ask only about entries in the ground
+  gets its moment but no ground truth entry (accepted gap, telemetry.md appendix A). Ask only about entries in the ground
   truth.
-- A `log_event` or `both` game in a process without OTLP logging runs as `span_event` and records that shape on the
+- A `log_event` game in a process without OTLP logging runs as `span_event` and records that shape on the
   root span.
 
 ## 7. References
 
 - [UC-101](../use_cases/UC-101.md) Trace an Agent Intervention to its Effect
 - FR-216, FR-217, FR-220 to FR-222 and NFR-061 in [requirements.md](../requirements.md)
-- [telemetry.md §3.2](../specs/telemetry.md#32-game-coordinator) (intervention moment, ground truth of the
+- [telemetry.md appendix A](../specs/telemetry.md#appendix-a-booth-profile) (intervention moment, ground truth of the
   interventions), [§4.3](../specs/telemetry.md#43-decision-attributes) (`decision.intervention_id`)
 - [flags.md §5](../specs/flags.md#5-interventions) (intervention id), [§13.3](../specs/flags.md#133-game)
   (`shield.activation`)

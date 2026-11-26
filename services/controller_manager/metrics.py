@@ -101,15 +101,7 @@ controller_disconnect_total = Counter(
     "controller_disconnect_total", "Total number of controller disconnects", ["serial"]
 )
 
-controller_routing_decisions_total = Counter(
-    "controller_routing_decisions_total",
-    "Adapter routing decisions",
-    ["serial", "adapter", "method"],  # method: targeted, rollout, fallback, default
-)
-
 controller_reconnect_total = Counter("controller_reconnect_total", "Total number of controller reconnects", ["serial"])
-
-active_controllers = Gauge("active_controllers_total", "Number of currently active controllers")
 
 # Input latency: age of the sample each gameplay frame carries, from the CM poll
 # loop picking it up to the StreamGameplayData send. Stale replays keep aging, so
@@ -122,8 +114,6 @@ controller_input_lag_seconds = Histogram(
     ["serial"],
     buckets=[0.001, 0.005, 0.010, 0.016, 0.020, 0.030, 0.050, 0.100, 0.200, 0.500, 1.0],
 )
-
-controller_state_update_hz = Gauge("controller_state_update_hz", "Controller state update frequency", ["serial"])
 
 # Stream metrics
 active_streams = Gauge("controller_streams_active", "Number of active controller state streams")
@@ -141,12 +131,6 @@ process_cpu_seconds_total = Counter("process_cpu_seconds_total", "Total user and
 process_resident_memory_bytes = Gauge("process_resident_memory_bytes", "Resident memory size in bytes")
 
 process_threads = Gauge("process_threads", "Number of active threads")
-
-# Discovery pass counter
-discovery_full_enumerate_total = Counter(
-    "controller_discovery_full_enumerate_total",
-    "Full discovery enumerations (with HID/psmove scanning)",
-)
 
 # How late each poll started relative to its 100 Hz schedule (#1447). The poll
 # loop runs nothing but the poll, so lateness here is event-loop contention
