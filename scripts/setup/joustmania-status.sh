@@ -30,6 +30,9 @@
 # An INFO `hotspot:` line shows the stage hotspot (UC-061, FR-187) from the
 # root-owned helper's non-secret status file (format 1); it never changes the
 # state or the exit code (UC-061 BR-007); the hotspot helper sets the LED cue (BR-011).
+# An INFO `operator pad rule:` line says whether the pad's udev rule (UC-016) is
+# installed, missing or differs from the checkout, with the fix (#2858); it
+# never changes the state or the exit code.
 #
 #   ./scripts/setup/joustmania-status.sh --led
 #
@@ -231,6 +234,19 @@ hotspot_line() {
     fi
 }
 hotspot_line
+
+# --- operator pad udev rule (UC-016, #2858): INFO only, the game runs without the pad screens
+pad_rule_line() {
+    local rule
+    rule="$(joustmania_pad_rule_path)"
+    case "$(joustmania_pad_rule_state "$JOUSTMANIA_DIR")" in
+        installed) report INFO "operator pad rule: installed ($rule)" ;;
+        missing) report INFO "operator pad rule: $rule missing, so the pad screens (UC-016) cannot work; install it with: $(joustmania_pad_rule_fix "$JOUSTMANIA_DIR")" ;;
+        outdated) report INFO "operator pad rule: $rule differs from this checkout; update it with: $(joustmania_pad_rule_fix "$JOUSTMANIA_DIR")" ;;
+        unreadable) report INFO "operator pad rule: $rule is not readable by $(id -un 2>/dev/null || echo this user); cannot compare it with this checkout (it is installed 0644)" ;;
+    esac
+}
+pad_rule_line
 
 # --- clock ------------------------------------------------------------------
 if command -v timedatectl >/dev/null 2>&1; then

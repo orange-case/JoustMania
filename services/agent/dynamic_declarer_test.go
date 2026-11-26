@@ -373,26 +373,6 @@ func dynCfg(maxConcurrent int) flags.ExperimentConfig {
 	}
 }
 
-// withSeed makes the loop's live config carry the resolved experiment_seed
-// object (#1907); nil = the flag could not be resolved.
-func withSeed(loop *experimentLoop, seed any) {
-	base := loop.configOverride
-	loop.configOverride = func(ctx context.Context) flags.ExperimentConfig {
-		cfg := base(ctx)
-		cfg.Seed = seed
-		return cfg
-	}
-}
-
-// testSeed is a valid experiment_seed object as flagd resolves it (numbers as
-// float64, objective balanced).
-func testSeed(flagKey string, value any, targetN int) map[string]any {
-	return map[string]any{
-		"flag": flagKey, "value": value, "objective": decision.ObjectiveBalanced,
-		"target_n": float64(targetN), "hypothesis": "h",
-	}
-}
-
 // withCandidates makes the loop's live config (the configOverride seam) carry the
 // experiment_dynamic_candidates value keys (#1907: the declarer takes its settings
 // from the per-tick config, never from its struct fields).
@@ -529,9 +509,7 @@ func TestDeclareDynamic_KillSwitchOffDeclaresNothing(t *testing.T) {
 
 // TestDeclareDynamic_TalkFallbackKeepsAGameInProgress: in the talk's screen-only
 // fallback a game must always be in progress. The dynamic declarer keeps declaring
-// after the kill-switch beat or a `fallback off` aborted every experiment, while
-// the experiment seed (the experiment_seed flag) left set is not declared again
-// (the latch keeps the last value until `off` is read).
+// after the kill-switch beat or a `fallback off` aborted every experiment.
 // UC: UC-070 A9 BR-007
 func TestDeclareDynamic_TalkFallbackKeepsAGameInProgress(t *testing.T) {
 	ctx := context.Background()
@@ -583,45 +561,16 @@ func TestDeclareDynamic_TalkFallbackKeepsAGameInProgress(t *testing.T) {
 			t.Fatalf("fallback on again LiveCount = %d, want 1 (re-declared)", got)
 		}
 	})
-
-	t.Run("UC-070/BR-007 the experiment seed is declared once per agent process", func(t *testing.T) {
-		loop, svc := loopWithRealRegistry(t, 8)
-		loop.dynamic = declarer(svc)
-		withCandidates(loop, "sensitivity")
-		withSeed(loop, testSeed("nonstop.respawn_seconds", 6.0, 50))
-		enabled := true
-		loop.enabledOverride = func(context.Context) bool { return enabled }
-
-		loop.allocateIfEnabled(ctx)
-		active := loop.registry.ActiveFlags()
-		if _, ok := active["nonstop.respawn_seconds"]; !ok {
-			t.Fatalf("first tick did not declare the experiment seed: %v", active)
-		}
-		if _, ok := active["sensitivity"]; !ok {
-			t.Fatalf("first tick did not declare the dynamic experiment: %v", active)
-		}
-		enabled = false
-		loop.allocateIfEnabled(ctx)
-		enabled = true
-		loop.allocateIfEnabled(ctx)
-		active = loop.registry.ActiveFlags()
-		if _, ok := active["nonstop.respawn_seconds"]; ok {
-			t.Fatalf("the experiment seed was declared again after the kill switch: %v", active)
-		}
-		if _, ok := active["sensitivity"]; !ok {
-			t.Fatalf("the dynamic declarer did not re-declare: %v", active)
-		}
-	})
 }
 
 // TestDynamicDeclarer_DefaultRotationSkipsPlumbingFlags asserts the default
-// rotation over the SHIPPED game.json files never offers a plumbing, lobby/admin
+// rotation over the SHIPPED game.json files never offers a plumbing, lobby
 // or ceremony-timing flag (#1316), while game-tuning flags stay candidates.
 // UC: UC-070 A9 BR-008
 func TestDynamicDeclarer_DefaultRotationSkipsPlumbingFlags(t *testing.T) {
 	plumbing := []string{
 		"shadow_policy", "max_concurrent_games", "max_shadow_games",
-		"force_all_start", "force_all_start_seconds", "countdown_phase_duration_ms",
+		"force_all_start", "countdown_phase_duration_ms",
 		"winner_rainbow_duration_ms",
 	}
 	for _, shipped := range []string{"../flagd/ci/game.json", "../flagd/game.json"} {
@@ -645,4 +594,45 @@ func TestDynamicDeclarer_DefaultRotationSkipsPlumbingFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+// UC: UC-043 BR-012
+func TestDynamicDeclarer_ExplicitCandidate(t *testing.T) {
+	svc := gameServiceForDeclarer(t)
+	declare := func(candidates string) (experiment.Intent, bool) {
+		d := newDynamicDeclarer(svc, nil)
+		d.configure(flags.ExperimentConfig{DynamicCandidates: candidates})
+		return d.Declare(nil)
+	}
+
+	t.Run("UC-043/BR-012 flag=variant tries that variant's value", func(t *testing.T) {
+		in, ok := declare("sensitivity=ultra_fast")
+		if !ok || in.FlagKey != "sensitivity" || in.ExperimentalValue != 4.0 {
+			t.Fatalf("Declare = %+v, %v; want sensitivity=4", in, ok)
+		}
+	})
+	t.Run("UC-043/BR-012 a flag alone tries the variant next to the default", func(t *testing.T) {
+		in, ok := declare("sensitivity")
+		if !ok || in.FlagKey != "sensitivity" || in.ExperimentalValue != 1.0 {
+			t.Fatalf("Declare = %+v, %v; want sensitivity=1 (slow, after medium)", in, ok)
+		}
+	})
+	t.Run("UC-043/BR-012 a missing or default variant is skipped", func(t *testing.T) {
+		for _, c := range []string{"sensitivity=no_such", "sensitivity=medium"} {
+			if in, ok := declare(c); ok {
+				t.Fatalf("Declare(%q) = %+v, want nothing", c, in)
+			}
+		}
+		in, ok := declare("sensitivity=medium,sensitivity=fast")
+		if !ok || in.ExperimentalValue != 3.0 {
+			t.Fatalf("Declare = %+v, %v; want the next entry sensitivity=3", in, ok)
+		}
+	})
+	t.Run("UC-043/BR-012 the denylist still applies", func(t *testing.T) {
+		d := newDynamicDeclarer(svc, nil)
+		d.configure(flags.ExperimentConfig{DynamicCandidates: "sensitivity=fast", DynamicDenylist: "sensitivity"})
+		if in, ok := d.Declare(nil); ok {
+			t.Fatalf("Declare = %+v, want nothing (denied)", in)
+		}
+	})
 }

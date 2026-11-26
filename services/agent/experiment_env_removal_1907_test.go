@@ -11,32 +11,31 @@ import (
 )
 
 // experiment_env_removal_1907_test.go covers #1907 PR 2b: with the experiment and
-// verdict env fallbacks gone, the live flags reach the first-tick seed declare,
+// verdict env fallbacks gone, the live flags reach the first-tick declare,
 // the C-034 env ceilings still bind, and the first refill does not wait the
 // compiled 30 s tick.
 
-// The first enabled tick applies the live verdict_min_n BEFORE the seed Declare,
-// so the seed keeps its requested target_n instead of being raised to the
+// The first enabled tick applies the live verdict_min_n BEFORE the first Declare,
+// so the experiment keeps its requested target_n instead of being raised to the
 // compiled min-N the registry was built with (8).
 // UC: UC-043 A3
-func TestFirstTickSeed_UsesLiveVerdictMinN(t *testing.T) {
+func TestFirstTickDeclare_UsesLiveVerdictMinN(t *testing.T) {
 	t.Setenv("AGENT_VERDICT_MIN_N", "1") // ignored since #1907
 	loop, _, lc := loopForConfigTest(t, 8)
-	lc.setSeed(testSeed("nonstop.respawn_seconds", 6.0, 2))
-	lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4, VerdictMinN: 1, VerdictMinPairs: 1})
+	lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4, VerdictMinN: 1, VerdictMinPairs: 1, DynamicTargetN: 2})
 
 	loop.allocateIfEnabled(context.Background())
 
 	ids := loop.registry.Live()
 	if len(ids) != 1 {
-		t.Fatalf("live experiments = %v, want the one seed", ids)
+		t.Fatalf("live experiments = %v, want one experiment", ids)
 	}
 	view, ok := loop.registry.CompactView(ids[0])
 	if !ok {
 		t.Fatalf("no compact view for %s", ids[0])
 	}
 	if got := view.Intent.TargetNPerArm; got != 2 {
-		t.Fatalf("seed target_n = %d, want 2 (live verdict_min_n=1 applied before the declare)", got)
+		t.Fatalf("target_n = %d, want 2 (live verdict_min_n=1 applied before the declare)", got)
 	}
 }
 
