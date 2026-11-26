@@ -156,6 +156,16 @@ func (f *fakeMenu) GetMenuStatus(_ context.Context, r *menupb.GetMenuStatusReque
 	return menuStatus, nil
 }
 
+var bluetoothWarning = &menupb.WarnBluetoothRestartResponse{Warned: true, ConnectedCount: 3, LeadMs: 3000}
+
+func (f *fakeMenu) WarnBluetoothRestart(_ context.Context, r *menupb.WarnBluetoothRestartRequest) (*menupb.WarnBluetoothRestartResponse, error) {
+	f.log.record("WarnBluetoothRestart", r)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return bluetoothWarning, nil
+}
+
 func (f *fakeMenu) StreamMenuEvents(r *menupb.StreamMenuEventsRequest, s grpc.ServerStreamingServer[menupb.MenuEvent]) error {
 	f.log.record("StreamMenuEvents", r)
 	for _, ev := range f.events {
@@ -506,6 +516,27 @@ func TestProxyGetMenuStatus(t *testing.T) {
 		rig.menu.err = status.Error(codes.Unavailable, "menu restarting")
 		_, err := rig.menuClient.GetMenuStatus(testCtx(t), connect.NewRequest(&menupb.GetMenuStatusRequest{}))
 		assertBackendError(t, err, connect.CodeUnavailable, "menu restarting")
+	})
+}
+
+// UC: UC-001 BR-011
+func TestProxyWarnBluetoothRestart(t *testing.T) {
+	t.Run("UC-001/BR-011 the pairing daemon's warning reaches the menu and its answer comes back", func(t *testing.T) {
+		rig := newProxyRig(t)
+		resp, err := rig.menuClient.WarnBluetoothRestart(testCtx(t), connect.NewRequest(&menupb.WarnBluetoothRestartRequest{}))
+		if err != nil {
+			t.Fatalf("WarnBluetoothRestart: %v", err)
+		}
+		eq(t, resp.Msg, bluetoothWarning)
+		rig.menu.log.only(t, "WarnBluetoothRestart")
+		rig.otherBackendsUntouched(t, "menu")
+	})
+
+	t.Run("UC-001/BR-011 an older menu's unimplemented keeps its code", func(t *testing.T) {
+		rig := newProxyRig(t)
+		rig.menu.err = status.Error(codes.Unimplemented, "unknown method")
+		_, err := rig.menuClient.WarnBluetoothRestart(testCtx(t), connect.NewRequest(&menupb.WarnBluetoothRestartRequest{}))
+		assertBackendError(t, err, connect.CodeUnimplemented, "unknown method")
 	})
 }
 

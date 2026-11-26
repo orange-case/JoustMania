@@ -30,6 +30,16 @@ import pytest
 from dbus_fast import Variant
 
 
+@pytest.fixture(autouse=True)
+def _no_lobby_warning(monkeypatch):
+    """No test reaches a real menu: the lobby warning (UC-001 BR-011) answers 'no menu' unless a test injects one."""
+    from unittest.mock import AsyncMock
+
+    from psmove_pairing import bluez_reload
+
+    monkeypatch.setattr(bluez_reload, "warn_lobby", AsyncMock(return_value=None))
+
+
 class MockCommandRunner:
     """Mock for run_command() that returns predefined outputs.
 

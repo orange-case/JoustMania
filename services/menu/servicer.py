@@ -463,6 +463,19 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             pad_commands=self.settings_ops.pad_commands(),
         )
 
+    async def WarnBluetoothRestart(self, _request, _context):
+        """UC-002 A9, BR-011: the pairing daemon is about to restart bluetoothd (UC-001 BR-011)."""
+        answer = self.bt_restart_warner.warn(
+            menu_running=self.state == menu_pb2.MenuState.RUNNING,
+            lifecycle_live=self._lifecycle_live(),
+        )
+        return menu_pb2.WarnBluetoothRestartResponse(
+            warned=answer.warned,
+            game_live=answer.game_live,
+            connected_count=answer.connected_count,
+            lead_ms=answer.lead_ms,
+        )
+
     async def ListGameModes(self, _request, _context):
         """List the playable game modes (UC-011 BR-001) for the dashboard selector."""
         return menu_pb2.ListGameModesResponse(game_modes=list(GAME_MODES), default_mode=DEFAULT_GAME_MODE.name)

@@ -435,6 +435,18 @@ func (p *MenuProxy) GetMenuStatus(
 	return connect.NewResponse(resp), nil
 }
 
+// WarnBluetoothRestart forwards the pairing daemon's warning before a bluetoothd restart (UC-001 BR-011, services.md §3.2).
+func (p *MenuProxy) WarnBluetoothRestart(
+	ctx context.Context,
+	req *connect.Request[menupb.WarnBluetoothRestartRequest],
+) (*connect.Response[menupb.WarnBluetoothRestartResponse], error) {
+	resp, err := p.client.WarnBluetoothRestart(ctx, req.Msg)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // toConnectError maps a backend gRPC error to the Connect error with the same
 // code (the two code sets are identical, numbers and names), keeping the status
 // message. Errors that carry no gRPC status stay CodeInternal (#1560).

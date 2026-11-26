@@ -13,7 +13,13 @@ import pytest
 
 from psmove_pairing import bluez_reload
 from psmove_pairing.bluez_records import RecordOutcome
-from psmove_pairing.bluez_reload import BluezReloader, PendingRecord, primary_game_busy
+from psmove_pairing.bluez_reload import (
+    BluezReloader,
+    LobbyWarning,
+    PendingRecord,
+    primary_game_busy,
+    warn_lobby,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -450,3 +456,123 @@ class TestUsbQuietPeriod2091:
             reloader.note_usb_controllers(3)
             assert await _after_pairing(reloader, True) == "restarted"
         restart.assert_awaited_once()
+
+
+WARNED = LobbyWarning(warned=True, lead_s=3.0)
+
+
+def _warned_reloader(answer, busy_after=(False,)):
+    """A reloader whose game check answers idle first, then ``busy_after`` (the re-check after the cue)."""
+    events: list[str] = []
+    game_busy = AsyncMock(side_effect=[False, *busy_after])
+    restart = AsyncMock(side_effect=lambda: events.append("restart"))
+
+    async def warn():
+        events.append("warn")
+        return answer
+
+    async def sleep(seconds):
+        events.append(f"sleep {seconds}")
+
+    reloader = BluezReloader(game_busy=game_busy, restart=restart, warn=warn, sleep=sleep)
+    reloader.request(_record())
+    return reloader, events, game_busy
+
+
+class TestLobbyWarning:
+    @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+    async def test_a_planned_restart_in_the_lobby_warns_waits_for_the_cue_then_restarts(self):
+        reloader, events, game_busy = _warned_reloader(WARNED)
+        with _mode("when_idle"):
+            assert await reloader.run_pending() == "restarted"
+        assert events == ["warn", "sleep 3.0", "restart"]
+        assert game_busy.await_count == 2  # before the warning and again after the cue
+
+    @pytest.mark.uc("UC-001", flow="A6", br=["BR-005", "BR-011"])
+    async def test_no_warning_and_no_restart_during_a_game(self):
+        reloader, events, _game_busy = _warned_reloader(WARNED)
+        reloader._game_busy = AsyncMock(return_value=True)
+        with _mode("when_idle"):
+            assert await reloader.run_pending() == "deferred"
+        assert events == []
+        assert reloader.pending is True
+
+    @pytest.mark.uc("UC-001", flow="A6", br=["BR-011"])
+    async def test_a_live_game_in_the_menu_defers_without_a_cue(self):
+        reloader, events, _game_busy = _warned_reloader(LobbyWarning(game_live=True))
+        with _mode("when_idle"):
+            assert await reloader.run_pending() == "deferred"
+        assert events == ["warn"]
+        assert reloader.pending is True
+
+    @pytest.mark.uc("UC-001", flow="A6", br=["BR-011"])
+    async def test_a_game_that_starts_during_the_cue_defers_the_restart(self):
+        reloader, events, _game_busy = _warned_reloader(WARNED, busy_after=(True,))
+        with _mode("when_idle"):
+            assert await reloader.run_pending() == "deferred"
+        assert events == ["warn", "sleep 3.0"]
+        assert reloader.pending is True
+
+    @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+    async def test_an_empty_lobby_restarts_at_once(self):
+        reloader, events, game_busy = _warned_reloader(LobbyWarning(warned=False))
+        with _mode("when_idle"):
+            assert await reloader.run_pending() == "restarted"
+        assert events == ["warn", "restart"]
+        assert game_busy.await_count == 1
+
+    @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+    async def test_no_answer_from_the_menu_restarts_without_a_warning(self):
+        reloader, events, _game_busy = _warned_reloader(None)
+        with _mode("when_idle"):
+            assert await reloader.run_pending() == "restarted"
+        assert events == ["warn", "restart"]
+
+    @pytest.mark.uc("UC-001", flow="A6", br=["BR-005", "BR-011"])
+    async def test_always_warns_but_is_not_held_back(self):
+        reloader, events, game_busy = _warned_reloader(LobbyWarning(warned=True, game_live=True, lead_s=1.0))
+        with _mode("always"):
+            assert await reloader.run_pending() == "restarted"
+        assert events == ["warn", "sleep 1.0", "restart"]
+        game_busy.assert_not_awaited()
+
+
+class TestWarnLobby:
+    @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+    async def test_posts_an_empty_request_to_the_menu_and_reads_its_answer(self):
+        seen = []
+        body = {"warned": True, "connectedCount": 3, "leadMs": 3000}
+        with patch.object(bluez_reload._OPENER, "open", _serve(body, seen)):
+            assert await warn_lobby() == LobbyWarning(warned=True, game_live=False, lead_s=3.0)
+        assert [r.data for r in seen] == [b"{}"]
+        assert seen[0].full_url == bluez_reload.DEFAULT_MENU_WARN_URL
+        assert seen[0].get_method() == "POST"
+
+    @pytest.mark.uc("UC-001", flow="A6", br=["BR-011"])
+    async def test_reads_a_live_game(self):
+        with patch.object(bluez_reload._OPENER, "open", _serve({"gameLive": True, "connectedCount": 2}, [])):
+            assert await warn_lobby() == LobbyWarning(warned=False, game_live=True, lead_s=0.0)
+
+    @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+    async def test_proto3_json_omits_defaults(self):
+        with patch.object(bluez_reload._OPENER, "open", _serve({}, [])):
+            assert await warn_lobby() == LobbyWarning()
+
+    @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+    async def test_the_wait_is_capped(self):
+        with patch.object(bluez_reload._OPENER, "open", _serve({"warned": True, "leadMs": 600000}, [])):
+            answer = await warn_lobby()
+        assert answer.lead_s == bluez_reload.MAX_WARN_LEAD_SECONDS
+
+    @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+    async def test_an_unreachable_menu_is_no_answer(self):
+        with patch.object(bluez_reload._OPENER, "open", side_effect=OSError("connection refused")):
+            assert await warn_lobby() is None
+
+    @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+    async def test_url_comes_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("MENU_WARN_URL", "http://envoy/joustmania.menu.MenuService/WarnBluetoothRestart")
+        seen = []
+        with patch.object(bluez_reload._OPENER, "open", _serve({}, seen)):
+            await warn_lobby()
+        assert seen[0].full_url == "http://envoy/joustmania.menu.MenuService/WarnBluetoothRestart"

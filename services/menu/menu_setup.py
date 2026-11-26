@@ -11,6 +11,7 @@ from lib.feature_flags import get_flag_client, init_flag_domain
 from lib.flag_service_writer import FlagServiceWriter
 from lib.telemetry import get_tracer
 from services.menu import metrics
+from services.menu.bt_restart_warning import BluetoothRestartWarner
 from services.menu.controller_events import ControllerEventLoop
 from services.menu.event_publisher import EventPublisher
 from services.menu.handlers import ConnectedHandler, IdleHandler, ReadyHandler
@@ -87,6 +88,9 @@ def build_menu(servicer) -> None:
         publish_event=servicer.event_publisher.publish,
         select_game_mode=servicer.select_game_mode,
     )
+
+    # UC-002 A9: the pairing daemon's warning before a Bluetooth restart
+    servicer.bt_restart_warner = BluetoothRestartWarner(servicer.state_manager)
 
     # Register handlers with state manager
     servicer.connected_handler = ConnectedHandler()
