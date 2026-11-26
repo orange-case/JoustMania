@@ -76,6 +76,9 @@ joustmania.menu.MenuService/GetMenuStatus: 'Read-only menu snapshot for the oper
   `lifecycle_generation`, selection, controller counts, agent
   switch, level and backend, and the lobby settings; read from menu memory and the in-process flag
   clients, never the HTTP flag writer (services.md §3.1)'
+joustmania.menu.MenuService/WarnBluetoothRestart: The pairing daemon's warning before a planned bluetoothd restart;
+  the menu plays a beep and a white pulse in the lobby and answers `warned`, `game_live`, `connected_count`, `lead_ms`
+  (UC-001 BR-011, UC-002 A9, services.md §3.2)
 joustmania.psmove_hid.PairingService/GetUSBControllers: 'List USB-attached controllers: device path, serial and
   USB product id (`product_id`, `0x03D5` / `0x0C5E`, for the BlueZ device record of UC-001 BR-008)'
 joustmania.psmove_hid.PairingService/PairController: Write the host adapter address into a controller

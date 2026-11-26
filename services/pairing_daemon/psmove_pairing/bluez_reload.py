@@ -25,6 +25,10 @@ The primary game's state comes from the game coordinator's ``GetGameState``
 the host network, where envoy is the one published entry point, so no gRPC
 port or proto client is needed. An unreadable state counts as busy (fail closed).
 The read ignores HTTP proxy settings: a host ``HTTP_PROXY`` must not intercept it.
+
+Before a restart the daemon asks the menu to warn the lobby (``WarnBluetoothRestart``,
+UC-001 BR-011) over the same route and waits for the cue. The warning is best effort: no
+answer restarts without one. Only the game check fails closed.
 """
 
 from __future__ import annotations
@@ -48,7 +52,11 @@ from .config import get_bluez_restart_mode, get_restart_quiet_period
 logger = logging.getLogger("psmove-pairing")
 
 DEFAULT_GAME_STATE_URL = "http://localhost/joustmania.game_coordinator.GameCoordinatorService/GetGameState"
+DEFAULT_MENU_WARN_URL = "http://localhost/joustmania.menu.MenuService/WarnBluetoothRestart"
 GAME_STATE_TIMEOUT_SECONDS = 2.0
+MENU_WARN_TIMEOUT_SECONDS = 2.0
+# A menu answer can never hold the pairing lock longer than this
+MAX_WARN_LEAD_SECONDS = 10.0
 # Players hold connected controllers from the countdown until the results
 BUSY_GAME_STATES = frozenset({"STARTING", "RUNNING", "ENDING"})
 # Time for bluetoothd to come back and re-read its storage
@@ -68,6 +76,41 @@ def _fetch_primary_game_state(url: str) -> str:
         raise RuntimeError(f"GetGameState failed: {body.get('error', 'no success flag')}")
     # proto3 JSON omits default values: a missing state is IDLE
     return body.get("gameInfo", {}).get("state", "IDLE")
+
+
+@dataclass(frozen=True)
+class LobbyWarning:
+    """The menu's answer to WarnBluetoothRestart (services.md §3.2)."""
+
+    warned: bool = False
+    game_live: bool = False
+    lead_s: float = 0.0
+
+
+def _post_lobby_warning(url: str, check_only: bool) -> LobbyWarning:
+    data = b'{"checkOnly": true}' if check_only else b"{}"
+    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    with _OPENER.open(request, timeout=MENU_WARN_TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed local URL
+        body = json.loads(response.read() or b"{}")
+    lead_ms = body.get("leadMs", 0)
+    return LobbyWarning(
+        warned=bool(body.get("warned", False)),
+        game_live=bool(body.get("gameLive", False)),
+        lead_s=min(max(float(lead_ms) / 1000.0, 0.0), MAX_WARN_LEAD_SECONDS),
+    )
+
+
+async def warn_lobby(check_only: bool = False) -> LobbyWarning | None:
+    """Ask the menu to warn the lobby, or with ``check_only`` only whether a game is live.
+
+    None when the menu does not answer (UC-001 BR-011).
+    """
+    url = os.getenv("MENU_WARN_URL", DEFAULT_MENU_WARN_URL)
+    try:
+        return await asyncio.to_thread(_post_lobby_warning, url, check_only)
+    except Exception as e:
+        logger.warning(f"No answer from the menu to the bluetoothd restart warning ({e}); not holding the restart")
+        return None
 
 
 async def primary_game_busy() -> bool:
@@ -120,10 +163,15 @@ class BluezReloader:
         game_busy: Callable[[], Awaitable[bool]] = primary_game_busy,
         restart: Callable[[], Awaitable[None]] = restart_bluetoothd,
         clock: Callable[[], float] = time.monotonic,
+        warn: Callable[..., Awaitable[LobbyWarning | None]] | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
         self._game_busy = game_busy
         self._restart = restart
         self._clock = clock
+        # None = the module's warn_lobby, looked up at call time
+        self._warn = warn
+        self._sleep = sleep
         self.pending = False
         # Records waiting for the restart, by (adapter, controller)
         self.records: dict[tuple[str, str], PendingRecord] = {}
@@ -170,7 +218,9 @@ class BluezReloader:
         """Run a pending restart if the mode allows it now; returns the outcome.
 
         Outcomes: ``skipped`` (nothing to do), ``restarted``, ``deferred``
-        (when_idle and a real game is busy), ``waiting_usb`` (when_idle and a
+        (when_idle and a real game is busy, also when the menu reports a live
+        game or the game became busy during the lobby warning, UC-001 BR-011),
+        ``waiting_usb`` (when_idle and a
         PS Move was on USB within the quiet period, #2091), ``failed``,
         ``backoff`` (an earlier attempt failed and its retry wait has not
         passed). After ``deferred``, ``waiting_usb``, ``failed`` and ``backoff``
@@ -192,7 +242,14 @@ class BluezReloader:
         if mode == "when_idle" and await self._game_busy():
             logger.info("Deferring the bluetoothd restart until the real game has ended")
             return "deferred"
+        warned = await self._warn_lobby(mode)
+        if warned is None:
+            return "deferred"
         await self._rewrite_missing_records()
+        # Last, with no await before RestartUnit: only a start pressed after this answer slips through
+        if warned and mode == "when_idle" and await self._menu_game_live():
+            logger.info("Deferring the bluetoothd restart: a game started during the lobby warning")
+            return "deferred"
         logger.info(f"Restarting bluetoothd (pairing.bluez_restart_mode={mode})")
         try:
             await self._restart()
@@ -206,6 +263,33 @@ class BluezReloader:
             return "failed"
         self._clear()
         return "restarted"
+
+    async def _warn_lobby(self, mode: str) -> bool | None:
+        """Warn the lobby and wait for the cue (UC-001 BR-011).
+
+        Returns whether the lobby was warned, or None to defer the restart. Only
+        ``when_idle`` lets the menu's live game or a game the coordinator reports after
+        the cue hold the restart back; ``always`` restarts regardless.
+        """
+        answer = await (self._warn or warn_lobby)()
+        if answer is None:
+            return False
+        if answer.game_live and mode == "when_idle":
+            logger.info("Deferring the bluetoothd restart: the menu reports a live game")
+            return None
+        if not answer.warned:
+            return False
+        logger.info(f"Lobby warned of the bluetoothd restart; restarting in {answer.lead_s:.1f} s")
+        await self._sleep(answer.lead_s)
+        if mode == "when_idle" and await self._game_busy():
+            logger.info("Deferring the bluetoothd restart: a game started during the lobby warning")
+            return None
+        return True
+
+    async def _menu_game_live(self) -> bool:
+        """The menu's lifecycle goes live about 0.4 s before the coordinator reports STARTING."""
+        check = await (self._warn or warn_lobby)(check_only=True)
+        return check is not None and check.game_live
 
     async def _rewrite_missing_records(self) -> None:
         """Write again any pending record that vanished while the restart waited.

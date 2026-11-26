@@ -23,6 +23,9 @@ service MenuService {
 
   // Read-only menu snapshot for the operator pad (#2050, UC-015, services.md §3.1)
   rpc GetMenuStatus(GetMenuStatusRequest) returns (GetMenuStatusResponse);
+
+  // Warn the lobby before a planned bluetoothd restart (UC-001 BR-011, UC-002 A9, services.md §3.2)
+  rpc WarnBluetoothRestart(WarnBluetoothRestartRequest) returns (WarnBluetoothRestartResponse);
 }
 
 // Menu state
@@ -128,4 +131,21 @@ message GetMenuStatusResponse {
   // Connected controllers (any state) whose battery is 20 % or less on the battery_to_pct scale. Absent = a menu
   // older than the field (unknown); 0 is a real count. UC-002 A8, BR-010; UC-016 BR-006.
   optional int32 low_battery_count = 30;
+}
+
+// UC-001 BR-011, UC-002 A9, BR-011 (services.md §3.2)
+message WarnBluetoothRestartRequest {
+  // Only answer whether a game is live, play nothing (the daemon's check after the cue)
+  bool check_only = 1;
+}
+
+message WarnBluetoothRestartResponse {
+  // The cue (beep + white pulse) was started
+  bool warned = 1;
+  // A game is starting or running, the lobby is being restored or a reset_menu recovery runs: nothing was played
+  bool game_live = 2;
+  // Controllers connected in any state
+  int32 connected_count = 3;
+  // How long the cue lasts; 0 when not warned
+  int32 lead_ms = 4;
 }
