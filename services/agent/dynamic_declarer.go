@@ -64,9 +64,8 @@ var defaultDynamicDenylist = map[string]struct{}{
 	// Session capacity (#1018): how many games may run at once, not how one plays.
 	"max_concurrent_games": {},
 	"max_shadow_games":     {},
-	// Lobby / admin start controls: when the menu force-starts, not the game itself.
-	"force_all_start":         {},
-	"force_all_start_seconds": {},
+	// Lobby start control: when the pad force-starts, not the game itself.
+	"force_all_start": {},
 	// Ceremony timing around the game (countdown, winner animation).
 	"countdown_phase_duration_ms": {},
 	"winner_rainbow_duration_ms":  {},

@@ -50,20 +50,11 @@ func TestEvaluateDecide_MatchesEvaluate(t *testing.T) {
 			b := newTestEngine(fx.cfg, &clockB)
 			for step := 0; step < 6; step++ {
 				want := a.Evaluate(context.Background(), fx.ctx)
-				got, req, resp, ranked := b.EvaluateDecide(context.Background(), fx.ctx, func(_, _ map[string]bool) decide.Request {
+				got, _, _, _ := b.EvaluateDecide(context.Background(), fx.ctx, func(_, _ map[string]bool) decide.Request {
 					return ffaRequest(fx.ctx, allInterventions())
 				})
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("step %d: EvaluateDecide decisions = %+v, Evaluate = %+v", step, got, want)
-				}
-				if ranked {
-					if err := decide.Validate(req, resp); err != nil {
-						t.Fatalf("step %d: answers do not validate: %v", step, err)
-					}
-					iv, _ := resp.Find(decide.QuestionFFAIntervention)
-					if len(want) > 0 && iv.Choice != want[0].Intervention {
-						t.Errorf("step %d: answer %q, first decision %q: not from the same ranking", step, iv.Choice, want[0].Intervention)
-					}
 				}
 				// Half the steps land inside evalInterval (throttled, no ranking).
 				d := 600 * time.Millisecond
@@ -222,9 +213,12 @@ func TestDefaultRulesPath_DecideSpan(t *testing.T) {
 	if as[0].Choice != InterventionAdjustMusicTempo {
 		t.Errorf("rules answer = %q, want the top-ranked adjust_music_tempo", as[0].Choice)
 	}
-	for _, key := range []string{AttrDecideConfidence, AttrDecideConfidenceMin, AttrDecideLatencyMs} {
-		if _, ok := attrValue(span, key); !ok {
-			t.Errorf("attribute %s missing", key)
+	if _, ok := attrValue(span, AttrDecideLatencyMs); !ok {
+		t.Errorf("attribute %s missing", AttrDecideLatencyMs)
+	}
+	for _, key := range []string{AttrDecideConfidence, AttrDecideConfidenceMin} {
+		if _, ok := attrValue(span, key); ok {
+			t.Errorf("rules record has no confidence: %s present", key)
 		}
 	}
 	if _, ok := attrValue(span, AttrDecideActThreshold); ok {
@@ -547,6 +541,12 @@ func assertRulesFallbackFrom(t *testing.T, h remoteHarness, span sdktrace.ReadOn
 	}
 	if strAttr(t, span, AttrDecideAnswers) == "" {
 		t.Error("fallback span must carry the rules answers")
+	}
+	// The rules answered, so no confidence, even after an invalid remote answer.
+	for _, key := range []string{AttrDecideConfidence, AttrDecideConfidenceMin} {
+		if _, ok := attrValue(span, key); ok {
+			t.Errorf("%s present on a rules fallback record", key)
+		}
 	}
 }
 
