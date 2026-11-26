@@ -462,15 +462,21 @@ class TestUsbQuietPeriod2091:
 WARNED = LobbyWarning(warned=True, lead_s=3.0)
 LIVE = LobbyWarning(game_live=True)
 IDLE_LOBBY = LobbyWarning()
+# The full order of a warned restart: the menu check is the last step before RestartUnit
+WARNED_RESTART = ["coordinator", "warn", "sleep 3.0", "coordinator", "rewrite", "check", "restart"]
 
 
 def _warned_reloader(mode, answer, check=IDLE_LOBBY, busy_after=False):
     """A pending restart; the coordinator reads idle first, then ``busy_after`` after the cue.
 
-    The menu answers the warning with ``answer`` and the check after the cue with ``check``.
+    The menu answers the warning with ``answer`` and the check before RestartUnit with ``check``.
     """
     events: list[str] = []
-    game_busy = AsyncMock(spec=primary_game_busy, side_effect=[False, busy_after])
+    coordinator = iter([False, busy_after])
+
+    async def busy():
+        events.append("coordinator")
+        return next(coordinator)
 
     async def restart():
         events.append("restart")
@@ -482,29 +488,32 @@ def _warned_reloader(mode, answer, check=IDLE_LOBBY, busy_after=False):
     async def sleep(seconds):
         events.append(f"sleep {seconds}")
 
+    async def rewrite():
+        events.append("rewrite")
+
     reloader = BluezReloader(
-        game_busy=game_busy,
+        game_busy=AsyncMock(spec=primary_game_busy, side_effect=busy),
         restart=AsyncMock(spec=restart_bluetoothd, side_effect=restart),
         warn=AsyncMock(spec=warn_lobby, side_effect=warn),
         sleep=AsyncMock(spec=asyncio.sleep, side_effect=sleep),
     )
+    reloader._rewrite_missing_records = AsyncMock(spec=reloader._rewrite_missing_records, side_effect=rewrite)
     with _mode(mode):
         reloader.request(_record())
-    return reloader, events, game_busy
+    return reloader, events
 
 
 class TestLobbyWarning:
     @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
     async def test_a_planned_restart_in_the_lobby_warns_waits_for_the_cue_then_restarts(self):
-        reloader, events, game_busy = _warned_reloader("when_idle", WARNED)
+        reloader, events = _warned_reloader("when_idle", WARNED)
         with _mode("when_idle"):
             assert await reloader.run_pending() == "restarted"
-        assert events == ["warn", "sleep 3.0", "check", "restart"]
-        assert game_busy.await_count == 2  # before the warning and again after the cue
+        assert events == WARNED_RESTART
 
     @pytest.mark.uc("UC-001", flow="A6", br=["BR-005", "BR-011"])
     async def test_no_warning_and_no_restart_during_a_game(self):
-        reloader, events, _game_busy = _warned_reloader("when_idle", WARNED)
+        reloader, events = _warned_reloader("when_idle", WARNED)
         reloader._game_busy = AsyncMock(spec=primary_game_busy, return_value=True)
         with _mode("when_idle"):
             assert await reloader.run_pending() == "deferred"
@@ -512,61 +521,57 @@ class TestLobbyWarning:
         assert reloader.pending is True
 
     @pytest.mark.uc("UC-001", flow="A6", br=["BR-011"])
-    async def test_a_live_game_in_the_menu_defers_without_a_cue(self):
-        reloader, events, _game_busy = _warned_reloader("when_idle", LIVE)
+    async def test_a_live_game_in_the_menu_defers_without_a_cue_or_wait(self):
+        reloader, events = _warned_reloader("when_idle", LIVE)
         with _mode("when_idle"):
             assert await reloader.run_pending() == "deferred"
-        assert events == ["warn"]
+        assert events == ["coordinator", "warn"]
         assert reloader.pending is True
 
     @pytest.mark.uc("UC-001", flow="A6", br=["BR-011"])
-    async def test_a_game_the_coordinator_reports_during_the_cue_defers_the_restart(self):
-        reloader, events, _game_busy = _warned_reloader("when_idle", WARNED, busy_after=True)
+    async def test_a_game_the_coordinator_reports_after_the_cue_defers_the_restart(self):
+        reloader, events = _warned_reloader("when_idle", WARNED, busy_after=True)
         with _mode("when_idle"):
             assert await reloader.run_pending() == "deferred"
-        assert "restart" not in events
+        assert events == ["coordinator", "warn", "sleep 3.0", "coordinator"]
         assert reloader.pending is True
 
     @pytest.mark.uc("UC-001", flow="A6", br=["BR-011"])
-    async def test_a_menu_lifecycle_live_during_the_cue_defers_while_the_coordinator_is_still_idle(self):
-        reloader, events, game_busy = _warned_reloader("when_idle", WARNED, check=LIVE, busy_after=False)
+    async def test_a_menu_lifecycle_live_just_before_restartunit_defers_while_the_coordinator_is_still_idle(self):
+        reloader, events = _warned_reloader("when_idle", WARNED, check=LIVE, busy_after=False)
         with _mode("when_idle"):
             assert await reloader.run_pending() == "deferred"
-        assert events == ["warn", "sleep 3.0", "check"]
+        assert events == WARNED_RESTART[:-1]
         assert reloader.pending is True
-        assert game_busy.await_count == 1  # the menu's answer is enough
 
     @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
-    async def test_a_menu_gone_after_the_cue_still_waits_for_the_coordinator(self):
-        reloader, events, game_busy = _warned_reloader("when_idle", WARNED, check=None)
+    async def test_a_menu_gone_after_the_cue_does_not_hold_the_restart(self):
+        reloader, events = _warned_reloader("when_idle", WARNED, check=None)
         with _mode("when_idle"):
             assert await reloader.run_pending() == "restarted"
-        assert events == ["warn", "sleep 3.0", "check", "restart"]
-        assert game_busy.await_count == 2
+        assert events == WARNED_RESTART
 
     @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
     async def test_an_empty_lobby_restarts_at_once(self):
-        reloader, events, game_busy = _warned_reloader("when_idle", LobbyWarning(warned=False))
+        reloader, events = _warned_reloader("when_idle", LobbyWarning(warned=False))
         with _mode("when_idle"):
             assert await reloader.run_pending() == "restarted"
-        assert events == ["warn", "restart"]
-        assert game_busy.await_count == 1
+        assert events == ["coordinator", "warn", "rewrite", "restart"]
 
     @pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
     async def test_no_answer_from_the_menu_restarts_without_a_warning(self):
-        reloader, events, _game_busy = _warned_reloader("when_idle", None)
+        reloader, events = _warned_reloader("when_idle", None)
         with _mode("when_idle"):
             assert await reloader.run_pending() == "restarted"
-        assert events == ["warn", "restart"]
+        assert events == ["coordinator", "warn", "rewrite", "restart"]
 
     @pytest.mark.uc("UC-001", flow="A6", br=["BR-005", "BR-011"])
     async def test_always_warns_but_is_not_held_back(self):
         answer = LobbyWarning(warned=True, game_live=True, lead_s=1.0)
-        reloader, events, game_busy = _warned_reloader("always", answer, check=LIVE)
+        reloader, events = _warned_reloader("always", answer, check=LIVE)
         with _mode("always"):
             assert await reloader.run_pending() == "restarted"
-        assert events == ["warn", "sleep 1.0", "restart"]
-        game_busy.assert_not_awaited()
+        assert events == ["warn", "sleep 1.0", "rewrite", "restart"]
 
 
 class TestWarnLobby:
@@ -581,7 +586,7 @@ class TestWarnLobby:
         assert seen[0].get_method() == "POST"
 
     @pytest.mark.uc("UC-001", flow="A6", br=["BR-011"])
-    async def test_the_check_after_the_cue_asks_without_a_cue(self):
+    async def test_the_check_before_restartunit_asks_without_a_cue(self):
         seen = []
         with patch.object(bluez_reload._OPENER, "open", _serve({"gameLive": True, "connectedCount": 2}, seen)):
             assert await warn_lobby(check_only=True) == LobbyWarning(warned=False, game_live=True, lead_s=0.0)

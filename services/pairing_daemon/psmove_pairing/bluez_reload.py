@@ -242,9 +242,14 @@ class BluezReloader:
         if mode == "when_idle" and await self._game_busy():
             logger.info("Deferring the bluetoothd restart until the real game has ended")
             return "deferred"
-        if not await self._warn_lobby(mode):
+        warned = await self._warn_lobby(mode)
+        if warned is None:
             return "deferred"
         await self._rewrite_missing_records()
+        # Last, with no await before RestartUnit: only a start pressed after this answer slips through
+        if warned and mode == "when_idle" and await self._menu_game_live():
+            logger.info("Deferring the bluetoothd restart: a game started during the lobby warning")
+            return "deferred"
         logger.info(f"Restarting bluetoothd (pairing.bluez_restart_mode={mode})")
         try:
             await self._restart()
@@ -259,32 +264,32 @@ class BluezReloader:
         self._clear()
         return "restarted"
 
-    async def _warn_lobby(self, mode: str) -> bool:
-        """Warn the lobby and wait for the cue (UC-001 BR-011); False = defer the restart.
+    async def _warn_lobby(self, mode: str) -> bool | None:
+        """Warn the lobby and wait for the cue (UC-001 BR-011).
 
-        Only ``when_idle`` lets the menu's live game or a game that started during the
-        cue hold the restart back; ``always`` restarts regardless. After the cue both the
-        menu and the coordinator are asked again: the menu's lifecycle goes live before
-        the coordinator reports STARTING.
+        Returns whether the lobby was warned, or None to defer the restart. Only
+        ``when_idle`` lets the menu's live game or a game the coordinator reports after
+        the cue hold the restart back; ``always`` restarts regardless.
         """
-        warn = self._warn or warn_lobby
-        answer = await warn()
+        answer = await (self._warn or warn_lobby)()
         if answer is None:
-            return True
+            return False
         if answer.game_live and mode == "when_idle":
             logger.info("Deferring the bluetoothd restart: the menu reports a live game")
-            return False
+            return None
         if not answer.warned:
-            return True
+            return False
         logger.info(f"Lobby warned of the bluetoothd restart; restarting in {answer.lead_s:.1f} s")
         await self._sleep(answer.lead_s)
-        if mode != "when_idle":
-            return True
-        check = await warn(check_only=True)
-        if (check is not None and check.game_live) or await self._game_busy():
+        if mode == "when_idle" and await self._game_busy():
             logger.info("Deferring the bluetoothd restart: a game started during the lobby warning")
-            return False
+            return None
         return True
+
+    async def _menu_game_live(self) -> bool:
+        """The menu's lifecycle goes live about 0.4 s before the coordinator reports STARTING."""
+        check = await (self._warn or warn_lobby)(check_only=True)
+        return check is not None and check.game_live
 
     async def _rewrite_missing_records(self) -> None:
         """Write again any pending record that vanished while the restart waited.
