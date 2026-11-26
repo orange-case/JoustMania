@@ -1438,6 +1438,43 @@ class TestStartWhileGameActive:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
+    async def test_second_reset_menu_while_the_stuck_task_unwinds_is_stale(self, real_servicer):
+        """A reset_menu before the first recovery reaches its restore starts no second recovery."""
+        from proto import game_coordinator_pb2
+
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        unwinding = asyncio.Event()
+        unwind_gate = asyncio.Event()
+
+        async def _stuck():
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                unwinding.set()
+                await unwind_gate.wait()
+                raise
+
+        real_servicer._game_lifecycle_task = asyncio.create_task(_stuck())
+        await asyncio.sleep(0)
+        self._game_state(real_servicer, game_coordinator_pb2.GameState.ENDED)
+        request = menu_pb2.ProcessInputRequest(input_type="reset_menu")
+        with patch.object(real_servicer, "_restart_lobby", AsyncMock()) as restart:
+            first = asyncio.create_task(real_servicer.ProcessInput(request, MagicMock()))
+            await asyncio.wait_for(unwinding.wait(), timeout=2)
+            assert real_servicer._lobby_restarting is False
+
+            second = await real_servicer.ProcessInput(request, MagicMock())
+            assert (second.success, second.error) == (False, "stale")
+
+            unwind_gate.set()
+            reply = await asyncio.wait_for(first, timeout=2)
+        assert (reply.success, reply.error) == (True, "")
+        restart.assert_awaited_once()
+        assert _published(real_servicer).count(("game_start_cancelled", {})) == 1
+        assert real_servicer._reset_recovery is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
     @pytest.mark.uc("UC-015", flow="A11")
     async def test_reset_menu_caller_cancel_mid_restore_still_restores_the_lobby(self, real_servicer):
         """The pad's deadline cancels the RPC mid state_manager.reset(): the recovery runs to its end."""
