@@ -56,7 +56,7 @@
 | FR-236 to FR-245 | Operator pad display, phase 2 (UC-016) |
 | FR-246 to FR-255 | Orange Case booth challenges, continued |
 | FR-256 to FR-264 | Operator pad display, iterations 2 to 4 (UC-016) |
-| FR-265 | Low battery warning in the lobby (UC-002) |
+| FR-265 to FR-274 | Lobby: controller battery warning (UC-002) |
 | NFR-001 to NFR-009 | Gameplay timing |
 | NFR-010 to NFR-019 | Agent timing, budgets, degradation |
 | NFR-020 to NFR-029 | Platform, capacity, telemetry pipeline |
