@@ -73,70 +73,22 @@ func grantsShieldLength(d Decision) bool {
 }
 
 // stampShieldSeconds stamps the grant_shield length on the rules decisions of one
-// cycle before they run (withShieldSeconds), and makes the rules record's
-// ffa.magnitude answer report the stamped length of the decision its answers
-// describe (the first one), so the decide span and record say what is written, not
-// the 5 s bounds default (UC-040 BR-029, decide contract §4; #2395). runDecision
-// keeps a value already stamped, so the source is read once per grant.
+// cycle before they run (withShieldSeconds), so the writer and the record's answers
+// use what is written, not the 5 s bounds default (UC-040 BR-029; #2395).
+// runDecision keeps a value already stamped, so the source is read once per grant.
 //
 // It then clamps each decision's value into the request's magnitude ranges
 // (clampRulesValue, #2696, UC-040 BR-045), so a range the operator narrowed holds on
 // the rules path too; at the default ranges no rules value moves.
-func (l *Loop) stampShieldSeconds(ctx context.Context, snapshot flags.Snapshot, ds []Decision, rec *decideRecord) []Decision {
-	if len(ds) == 0 {
-		return ds
-	}
-	var bounds *decide.MagnitudeTable
-	if rec != nil {
-		bounds = rec.req.Bounds
-	}
-	if l.shieldSeconds == nil && bounds == nil {
+func (l *Loop) stampShieldSeconds(ctx context.Context, snapshot flags.Snapshot, ds []Decision, bounds *decide.MagnitudeTable) []Decision {
+	if len(ds) == 0 || (l.shieldSeconds == nil && bounds == nil) {
 		return ds
 	}
 	out := make([]Decision, len(ds))
 	for i, d := range ds {
 		out[i] = clampRulesValue(bounds, l.withShieldSeconds(ctx, snapshot, d))
 	}
-	if rec != nil && rec.hasResp && (l.shieldSeconds != nil || out[0].Value != ds[0].Value) {
-		rec.resp = magnitudeFromDecision(rec.req, rec.resp, out[0])
-	}
 	return out
-}
-
-// magnitudeFromDecision returns resp with its ffa.magnitude answer set to d's value,
-// normalised over d's bounds, when resp chose d's intervention and d carries a
-// numeric value. Otherwise resp is returned unchanged.
-func magnitudeFromDecision(req decide.Request, resp decide.Response, d Decision) decide.Response {
-	iv, ok := resp.Find(decide.QuestionFFAIntervention)
-	if !ok || iv.Choice != d.Intervention {
-		return resp
-	}
-	v, err := strconv.ParseFloat(d.Value, 64)
-	if err != nil {
-		return resp
-	}
-	norm, ok := req.Bounds.Normalize(d.Intervention, v)
-	if !ok {
-		return resp
-	}
-	var q *decide.Question
-	for i := range req.Questions {
-		if req.Questions[i].ID == decide.QuestionFFAMagnitude && req.Questions[i].Kind == decide.KindScore {
-			q = &req.Questions[i]
-		}
-	}
-	if q == nil {
-		return resp
-	}
-	answers := make([]decide.Answer, len(resp.Answers))
-	copy(answers, resp.Answers)
-	for i := range answers {
-		if answers[i].QuestionID == decide.QuestionFFAMagnitude {
-			answers[i].Score = q.Range[0] + norm*(q.Range[1]-q.Range[0])
-		}
-	}
-	resp.Answers = answers
-	return resp
 }
 
 // shieldLimits are the live shield limits of one check (UC-040 A33, BR-022): the

@@ -144,3 +144,48 @@ joustmania_hotspot_hint() {
         fi
     done
 }
+
+# The operator pad's udev rule (UC-016, #2748). Only setup_runtime.sh installs
+# it and an upgrade never writes host files (UC-060), so a Pi set up before the
+# rule needs it once by hand (#2858). JOUSTMANIA_PAD_RULE overrides the
+# installed path (tests).
+joustmania_pad_rule_path() {
+    printf '%s\n' "${JOUSTMANIA_PAD_RULE:-/etc/udev/rules.d/99-joustmania-operator-pad.rules}"
+}
+
+# joustmania_pad_rule_state <checkout dir>: installed, missing, outdated or
+# unreadable; nothing when the checkout has no rule (a version before #2748).
+joustmania_pad_rule_state() {
+    local installed source="$1/scripts/setup/99-joustmania-operator-pad.rules"
+    installed="$(joustmania_pad_rule_path)"
+    [[ -f "$source" ]] || return 0
+    if [[ ! -e "$installed" ]]; then
+        echo missing
+    elif [[ ! -r "$installed" ]]; then
+        echo unreadable
+    elif cmp -s "$installed" "$source"; then
+        echo installed
+    else
+        echo outdated
+    fi
+}
+
+# joustmania_pad_rule_fix <checkout dir>: the commands that install the rule.
+joustmania_pad_rule_fix() {
+    local setup="$1/scripts/setup"
+    printf 'sudo %s/setup_runtime.sh, or: sudo install -m 0644 %s/99-joustmania-operator-pad.rules %s && sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=hidraw\n' \
+        "$setup" "$setup" "$(joustmania_pad_rule_path)"
+}
+
+# joustmania_pad_rule_hint <checkout dir>: one line when the rule is missing or
+# differs from this checkout; nothing otherwise.
+joustmania_pad_rule_hint() {
+    local what
+    case "$(joustmania_pad_rule_state "$1")" in
+        missing) what="is missing" ;;
+        outdated) what="differs from this checkout" ;;
+        *) return 0 ;;
+    esac
+    printf 'operator pad udev rule %s %s (the pad screens of UC-016 need it): run %s\n' \
+        "$(joustmania_pad_rule_path)" "$what" "$(joustmania_pad_rule_fix "$1")"
+}
