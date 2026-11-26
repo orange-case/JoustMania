@@ -22,6 +22,7 @@ from opentelemetry import context as otel_context
 from services.menu.handlers.base import ControllerState
 
 if TYPE_CHECKING:
+    from services.menu.low_battery import LowBatteryWarner
     from services.menu.state_manager import StateManager
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,7 @@ class IdleMonitor:
         get_sentinel_count: callable,
         get_rotation_minutes: callable,
         get_sentinel_animation: callable | None = None,
+        low_battery_warner: LowBatteryWarner | None = None,
     ):
         """
         Initialize idle monitor.
@@ -160,6 +162,7 @@ class IdleMonitor:
             get_rotation_minutes: Callable returning int for rotation interval
             get_sentinel_animation: Callable returning a SentinelAnimation (F7, #766).
                 Read once at sentinel-loop start; defaults to hardcoded params.
+            low_battery_warner: Started and stopped with this monitor, so it runs only in the lobby (UC-002 A8).
         """
         self._state_manager = state_manager
         self._get_idle_enabled = get_idle_enabled
@@ -167,6 +170,7 @@ class IdleMonitor:
         self._get_sentinel_count = get_sentinel_count
         self._get_rotation_minutes = get_rotation_minutes
         self._get_sentinel_animation = get_sentinel_animation or SentinelAnimation
+        self._low_battery_warner = low_battery_warner
 
         self._last_activity_time: float = time.monotonic()
         self._idle_active: bool = False
@@ -191,6 +195,8 @@ class IdleMonitor:
 
     def start(self) -> None:
         """Start the idle monitoring task."""
+        if self._low_battery_warner is not None:
+            self._low_battery_warner.start()
         if self._monitor_task is not None and not self._monitor_task.done():
             return
 
@@ -201,6 +207,8 @@ class IdleMonitor:
 
     def stop(self) -> None:
         """Stop the idle monitoring task and sentinel effects."""
+        if self._low_battery_warner is not None:
+            self._low_battery_warner.stop()
         if self._monitor_task is not None:
             self._monitor_task.cancel()
             self._monitor_task = None

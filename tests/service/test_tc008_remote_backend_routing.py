@@ -72,7 +72,7 @@ async def test_rules_backend_default_unchanged(fresh_stack):
         collector = GameEventCollector(game_client)
         async with collector:
             game_id, serials = await start_ffa(stack, collector)
-            # The agent learns game_cycle only from its log record; kill after it was sent.
+            # The agent learns game.cycle only from its log record; kill after it was sent.
             await wait_game_cycle_id_sent(stack, game_id)
             # R1 (endurance): an early elimination in a young session makes the rules
             # engine slow the tempo / cue audio, i.e. decide something.
@@ -95,7 +95,7 @@ async def test_rules_backend_default_unchanged(fresh_stack):
             assert span.name == "invoke_agent joustmania-agent", span.name
             assert tags.get("gen_ai.operation.name") == "invoke_agent", tags
             # Sync rules path shape (#2648): invoke_agent and its agent.decision are
-            # siblings (one parent, the coordinator's game_cycle, which may still be
+            # siblings (one parent, the coordinator's game.cycle, which may still be
             # open so it is not looked up), paired by decide.state.digest; the Export
             # is an event on the decide, not a span; no backend chat span.
             assert span.parent_span_id, "invoke_agent has no parent on the rules path"

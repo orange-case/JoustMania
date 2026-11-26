@@ -236,7 +236,7 @@ class WerewolfGame(StreamedIntroGameMode):
             for serial, player in self.players.items():
                 wolf_player = player
                 player.span = tracer.start_span(
-                    "player_lifecycle",
+                    "game.player",
                     attributes={
                         "player.serial": serial,
                         "player.is_werewolf": wolf_player.is_werewolf,
@@ -251,7 +251,7 @@ class WerewolfGame(StreamedIntroGameMode):
             for serial, player in self.players.items():
                 wolf_player = player
                 player.span = tracer.start_span(
-                    "player_lifecycle",
+                    "game.player",
                     attributes={
                         "player.serial": serial,
                         "player.is_werewolf": wolf_player.is_werewolf,

@@ -12,21 +12,21 @@ import (
 
 // gameplay_phase_parent_test.go is the #1195 assertion suite (refines #1187): the
 // agent's IN-GAME decision chain (signal_received -> decision -> action; the async
-// infer.call + apply spans) re-parents under the coordinator's gameplay_phase span
+// infer.call + apply spans) re-parents under the coordinator's game.phase.gameplay span
 // when its span_id is present, with a STRICT two-tier fallback so correlation is
 // never lost:
 //
-//  1. gameplay_phase span_id present  -> child of gameplay_phase (the new target).
-//  2. gameplay_phase absent, game root present -> child of game root (#1187 behavior).
+//  1. game.phase.gameplay span_id present  -> child of game.phase.gameplay (the new target).
+//  2. game.phase.gameplay absent, game root present -> child of game root (#1187 behavior).
 //  3. both absent -> own-root (pre-#1187 shape).
 //
-// gameplay_phase is in the SAME trace as the game root (GameTraceID is identical),
+// game.phase.gameplay is in the SAME trace as the game root (GameTraceID is identical),
 // so the only thing that changes between tiers 1 and 2 is the parent span_id.
 
-// A distinct, valid gameplay_phase span id within the same game trace as hubGameSpanID.
+// A distinct, valid game.phase.gameplay span id within the same game trace as hubGameSpanID.
 const hubGameplayPhaseSpanID = "00f067aa0ba902b7" // valid 8-byte hex span id
 
-// gameplayPhaseCtx is gameTraceCtx additionally carrying the gameplay_phase span id.
+// gameplayPhaseCtx is gameTraceCtx additionally carrying the game.phase.gameplay span id.
 func gameplayPhaseCtx(gameID string) gamecontext.GameContext {
 	c := gameTraceCtx(gameID)
 	c.GameplayPhaseSpanID = hubGameplayPhaseSpanID
@@ -34,7 +34,7 @@ func gameplayPhaseCtx(gameID string) gamecontext.GameContext {
 }
 
 // TestSignalReceived_ChildOfGameplayPhaseSpan: the sync cycle-root agent.signal_received
-// span (and thus the whole sync decision->action subtree) parents under the gameplay_phase
+// span (and thus the whole sync decision->action subtree) parents under the game.phase.gameplay
 // span when its id is present — NOT the game root span.
 func TestSignalReceived_ChildOfGameplayPhaseSpan(t *testing.T) {
 	l, sr, _ := meteredTestLoop(t)
@@ -54,23 +54,23 @@ func TestSignalReceived_ChildOfGameplayPhaseSpan(t *testing.T) {
 	rootSID, _ := trace.SpanIDFromHex(hubGameSpanID)
 
 	if root.Parent().SpanID() != wantSID {
-		t.Errorf("signal_received parent span_id = %s, want gameplay_phase %s", root.Parent().SpanID(), wantSID)
+		t.Errorf("signal_received parent span_id = %s, want game.phase.gameplay %s", root.Parent().SpanID(), wantSID)
 	}
 	if root.Parent().SpanID() == rootSID {
-		t.Errorf("signal_received parented under the GAME ROOT span %s; want gameplay_phase %s", rootSID, wantSID)
+		t.Errorf("signal_received parented under the GAME ROOT span %s; want game.phase.gameplay %s", rootSID, wantSID)
 	}
 	if root.Parent().TraceID() != wantTID {
 		t.Errorf("signal_received parent trace_id = %s, want game trace %s", root.Parent().TraceID(), wantTID)
 	}
 	if !root.Parent().IsRemote() {
-		t.Error("signal_received parent must be the REMOTE gameplay_phase span")
+		t.Error("signal_received parent must be the REMOTE game.phase.gameplay span")
 	}
 	if root.SpanContext().TraceID() != wantTID {
 		t.Errorf("signal_received must live in the game trace; got %s want %s", root.SpanContext().TraceID(), wantTID)
 	}
 }
 
-// TestSignalReceived_FallsBackToGameRootWhenGameplayPhaseAbsent: with the gameplay_phase
+// TestSignalReceived_FallsBackToGameRootWhenGameplayPhaseAbsent: with the game.phase.gameplay
 // id empty but the game root id present, the span parents under the game ROOT (tier 2 —
 // the #1187 behavior). This proves the fallback never loses the existing correlation.
 func TestSignalReceived_FallsBackToGameRootWhenGameplayPhaseAbsent(t *testing.T) {
@@ -108,23 +108,23 @@ func TestSignalReceived_OwnRootWhenBothAbsent(t *testing.T) {
 	}
 }
 
-// TestInGameRemoteParent_TwoTierFallback exercises the resolver directly: gameplay_phase
-// wins when valid; game root is used when gameplay_phase is empty/invalid; own-root when
+// TestInGameRemoteParent_TwoTierFallback exercises the resolver directly: game.phase.gameplay
+// wins when valid; game root is used when game.phase.gameplay is empty/invalid; own-root when
 // both are empty/invalid.
 func TestInGameRemoteParent_TwoTierFallback(t *testing.T) {
 	parentSpanID := func(ctx context.Context) trace.SpanID {
 		return trace.SpanContextFromContext(ctx).SpanID()
 	}
 
-	t.Run("gameplay_phase wins", func(t *testing.T) {
+	t.Run("game.phase.gameplay wins", func(t *testing.T) {
 		ctx, ok := inGameRemoteParent(context.Background(), hubGameTrace, hubGameSpanID, hubGameplayPhaseSpanID, "")
 		want, _ := trace.SpanIDFromHex(hubGameplayPhaseSpanID)
 		if !ok || parentSpanID(ctx) != want {
-			t.Errorf("want gameplay_phase parent %s (ok=%v), got %s", want, ok, parentSpanID(ctx))
+			t.Errorf("want game.phase.gameplay parent %s (ok=%v), got %s", want, ok, parentSpanID(ctx))
 		}
 	})
 
-	t.Run("falls back to game root when gameplay_phase empty", func(t *testing.T) {
+	t.Run("falls back to game root when game.phase.gameplay empty", func(t *testing.T) {
 		ctx, ok := inGameRemoteParent(context.Background(), hubGameTrace, hubGameSpanID, "", "")
 		want, _ := trace.SpanIDFromHex(hubGameSpanID)
 		if !ok || parentSpanID(ctx) != want {
@@ -132,7 +132,7 @@ func TestInGameRemoteParent_TwoTierFallback(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to game root when gameplay_phase invalid", func(t *testing.T) {
+	t.Run("falls back to game root when game.phase.gameplay invalid", func(t *testing.T) {
 		ctx, ok := inGameRemoteParent(context.Background(), hubGameTrace, hubGameSpanID, "not-hex", "")
 		want, _ := trace.SpanIDFromHex(hubGameSpanID)
 		if !ok || parentSpanID(ctx) != want {

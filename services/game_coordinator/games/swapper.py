@@ -233,7 +233,7 @@ class SwapperGame(TeamsGameBase):
         if new_team_obj.span:
             with trace.use_span(new_team_obj.span, end_on_exit=False):
                 new_span = tracer.start_span(
-                    "player_lifecycle",
+                    "game.player",
                     context=otel_context.get_current(),
                     attributes={
                         "player.serial": serial,

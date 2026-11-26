@@ -1,6 +1,6 @@
-"""The game_cycle span the agent parents its in-game spans under (#1325, UC-041 BR-004).
+"""The game.cycle span the agent parents its in-game spans under (#1325, UC-041 BR-004).
 
-game_cycle is a child of gameplay_phase; the agent learns its id from the agent-only
+game.cycle is a child of game.phase.gameplay; the agent learns its id from the agent-only
 ``game.phase.start`` record (test_agent_log_phase_start_uc041.py), not from a gauge
 (the ``game_trace_correlation`` gauge is retired, #2783).
 """
@@ -55,8 +55,8 @@ async def test_run_opens_game_cycle_as_a_child_of_gameplay_phase(span_exporter):
     await game.run()
 
     spans = {s.name: s for s in span_exporter.get_finished_spans()}
-    cycle = spans["game_cycle"]
-    gameplay = spans["gameplay_phase"]
+    cycle = spans["game.cycle"]
+    gameplay = spans["game.phase.gameplay"]
     assert cycle.parent.span_id == gameplay.context.span_id
     assert cycle.context.span_id != gameplay.context.span_id
 
@@ -82,14 +82,14 @@ class _SpanEmittingAudioClient:
 @pytest.mark.uc("UC-041", br=["BR-004"])
 @pytest.mark.asyncio
 async def test_post_countdown_set_volume_span_is_child_of_game_cycle(span_exporter):
-    """The ramp to game volume after the countdown parents under game_cycle, not gameplay_phase (#2671)."""
+    """The ramp to game volume after the countdown parents under game.cycle, not game.phase.gameplay (#2671)."""
     game = _fast_ffa_game()
     game.audio_client = _SpanEmittingAudioClient()
 
     await game.run()
 
     spans = span_exporter.get_finished_spans()
-    cycle = next(s for s in spans if s.name == "game_cycle")
+    cycle = next(s for s in spans if s.name == "game.cycle")
     # Two SetVolume calls: the countdown level during initialization, then the game level after the countdown.
     set_volume = max((s for s in spans if s.name == "AudioService/SetVolume"), key=lambda s: s.start_time)
     assert set_volume.parent.span_id == cycle.context.span_id

@@ -672,3 +672,105 @@ class TestUC004IdentifyIsOperatorOnly:
         assert agent_sources
         offenders = [str(p) for p in agent_sources if "IdentifyController" in p.read_text()]
         assert offenders == []
+
+
+class TestUC002LowBatteryBlinkYields:
+    """UC-002 A8: the lobby's low-battery blink never takes the LED from a running effect."""
+
+    RED = (255, 0, 0)
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+    async def test_low_battery_during_identify_is_skipped(self, manager, backend, clock):
+        clock.enable_blocking()
+        task = await _identify(manager)
+        clock.release_all()
+        await asyncio.sleep(0)
+
+        await manager.handle_game_effect(SERIAL, controller_manager_pb2.GAME_EFFECT_LOW_BATTERY)
+        active = manager.active_effects[SERIAL]
+        assert active.task is task
+        assert active.effect_type == controller_manager_pb2.GAME_EFFECT_IDENTIFY
+
+        clock.disable_blocking()
+        clock.release_all()
+        await task
+        assert self.RED not in backend.history
+        assert backend.colors[SERIAL] == LOBBY
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+    async def test_low_battery_blinks_red_then_restores_the_base_colour(self, manager, backend):
+        with patch("services.controller_manager.feedback_manager.asyncio.sleep", AsyncMock()):
+            await manager.handle_game_effect(SERIAL, controller_manager_pb2.GAME_EFFECT_LOW_BATTERY)
+            await manager.active_effects[SERIAL].task
+        assert backend.history.count(self.RED) == 2
+        assert backend.colors[SERIAL] == LOBBY
+
+
+class TestUC002GameClaimEndsTheLowBatteryBlink:
+    """UC-002 BR-010: a game claiming a controller ends a lobby low-battery blink still running on it."""
+
+    GAME = (0, 255, 0)
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+    async def test_claim_cancels_a_running_blink_and_the_game_colour_stays(self, servicer):
+        fm = servicer.feedback_manager
+        real_sleep = asyncio.sleep
+        hold = asyncio.Event()
+
+        async def blink_frames_wait(seconds, *args, **kwargs):
+            if seconds == 0.15:  # the blink's frame time: hold the blink mid-way
+                await hold.wait()
+            else:
+                await real_sleep(seconds, *args, **kwargs)
+
+        config = controller_manager_pb2.GameplayStreamConfig(
+            update_frequency_hz=60,
+            colors=[
+                controller_manager_pb2.ControllerColorConfig(serial=SERIAL, color=controller_manager_pb2.RGB(g=255))
+            ],
+        )
+        with patch("services.controller_manager.feedback_manager.asyncio.sleep", blink_frames_wait):
+            await fm.handle_game_effect(SERIAL, controller_manager_pb2.GAME_EFFECT_LOW_BATTERY)
+            blink = fm.active_effects[SERIAL].task
+            await real_sleep(0)
+            assert servicer.backend.colors[SERIAL] == (255, 0, 0)
+
+            await servicer._process_gameplay_config(config, "game_stream_1", trace.INVALID_SPAN)
+            hold.set()
+            await real_sleep(0)
+
+        assert blink.done()
+        assert SERIAL not in fm.active_effects
+        assert servicer.backend.colors[SERIAL] == self.GAME
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+    async def test_cancel_low_battery_leaves_other_effects_alone(self, servicer):
+        clock = servicer.feedback_manager._clock
+        clock.enable_blocking()
+        task = await _identify(servicer.feedback_manager)
+        assert await servicer.feedback_manager.cancel_low_battery(SERIAL) is False
+        assert servicer.feedback_manager.active_effects[SERIAL].task is task
+        clock.disable_blocking()
+        clock.release_all()
+        await _drain(servicer)
+
+
+class TestUC002BatteryReported:
+    """UC-002 BR-010: the button stream marks a real battery reading, so an empty battery (0) reaches the menu."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+    async def test_the_connect_replay_reports_an_empty_battery(self, servicer):
+        servicer.tracked_controllers[SERIAL][ControllerInfoKey.BATTERY] = 0
+        servicer.tracked_controllers["MOCK0002"] = {ControllerInfoKey.NAME: "P2"}  # never read
+        queue = asyncio.Queue()
+
+        await servicer._send_initial_connection_events("menu", queue)
+
+        events = {e.serial: e for e in (queue.get_nowait(), queue.get_nowait())}
+        assert (events[SERIAL].battery, events[SERIAL].battery_reported) == (0, True)
+        assert events["MOCK0002"].battery_reported is False

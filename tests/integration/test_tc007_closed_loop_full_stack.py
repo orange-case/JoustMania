@@ -14,7 +14,7 @@ the wiring that only the full stack has:
   reads the agent's ``GET /experiments/state`` since #2809; UC-035 step 3);
 - the game's trace in Jaeger: the root span named after the mode, its phases,
   one span per player, and the agent's rules-path spans as remote children of
-  the coordinator's ``game_cycle`` span, each ``agent.decision`` keeping its
+  the coordinator's ``game.cycle`` span, each ``agent.decision`` keeping its
   Link to the game root (UC-035 step 5, UC-040 BR-013 first and third clause);
   every agent span of the trace names G1 and game kind ``real`` (validation 1).
 
@@ -77,7 +77,7 @@ _envoy_root = ""
 _envoy_jaeger_api = ""
 # UC-035 step 5 / telemetry.md §3: the coordinator's spans of one game.
 GAME_ROOT_SPAN = "Joust Free-for-All"  # the mode's display name
-GAME_PHASES = ("game.phase.initialization", "gameplay_phase", "game_cycle", "game.phase.teardown")
+GAME_PHASES = ("game.phase.initialization", "game.phase.gameplay", "game.cycle", "game.phase.teardown")
 # Agent spans that must name the game (validation 1); game.kind where the spec puts it.
 AGENT_SPANS_WITH_GAME_ID = ("invoke_agent joustmania-agent", "agent.decision")
 AGENT_SPANS_WITH_GAME_KIND = ("invoke_agent joustmania-agent", "agent.decision")
@@ -347,7 +347,7 @@ def _decide_rows(traces: list[dict], game_id: str) -> list[dict]:
             siblings = []
             if parent is not None:
                 # #2648: in a game the decide and its decisions are siblings under
-                # game_cycle and share decide.state.digest; without game ids they
+                # game.cycle and share decide.state.digest; without game ids they
                 # share an agent.signal_received parent.
                 digest = tags.get("decide.state.digest")
                 siblings = [
@@ -410,7 +410,7 @@ def _game_trace_problems(
     player_serials = sorted(
         _tags(s).get("player.serial", "")
         for s in coordinator
-        if s["operationName"] == "player_lifecycle"
+        if s["operationName"] == "game.player"
         or s["operationName"].startswith("player: ")
     )
     if player_serials != sorted(serials):
@@ -419,14 +419,14 @@ def _game_trace_problems(
         )
 
     # UC-040 BR-013: the rules-path invoke_agent is a remote child of the coordinator's
-    # game_cycle (#2648: no agent.signal_received span in the game trace) ...
+    # game.cycle (#2648: no agent.signal_received span in the game trace) ...
     decide = by_id.get(row["span_id"])
     cycle = by_id.get(_parent_id(decide)) if decide else None
     chain = [
         f"{s['operationName']}@{_service(trace, s)}" if s else "missing"
         for s in (decide, cycle)
     ]
-    if chain[1:] != [f"game_cycle@{COORDINATOR_SERVICE_NAME}"]:
+    if chain[1:] != [f"game.cycle@{COORDINATOR_SERVICE_NAME}"]:
         problems.append(f"decide chain {chain}")
     if any(s["operationName"] == "agent.signal_received" for s in trace["spans"]):
         problems.append("agent.signal_received span in the game trace")
@@ -473,7 +473,7 @@ def _applied_types(collector: GameEventCollector, game_id: str) -> list[str]:
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-041", flow="main", steps=[1, 2, 5, 6], tc="TC-007")
 @pytest.mark.uc("UC-040", flow="main", steps=[13], tc="TC-007")
-# BR-013: the rules-path clause (signal_received under game_cycle) and the
+# BR-013: the rules-path clause (signal_received under game.cycle) and the
 # decision's Link to the game root; the remote path and the effect span are not run.
 @pytest.mark.uc("UC-040", br=["BR-013"], tc="TC-007")
 @pytest.mark.uc("UC-035", flow="main", steps=[3, 5], tc="TC-007")
@@ -482,7 +482,7 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
 ):
     """TC-007 steps 1-6 and 8 (data only) on the shipped images: the rules decision reaches the
     game through the real collector, and Jaeger (via envoy, the Agent tab's query) holds it
-    under the game's game_cycle span."""
+    under the game's game.cycle span."""
     docker_compose = closed_loop_stack
     mock_client, mock_channel = await get_mock_client(docker_compose)
     game_client, game_channel = await get_game_client(docker_compose)
@@ -523,7 +523,7 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
         )
         running = await wait_until_running(game_client, {game_id}, timeout=15.0)
         assert game_id in running, f"Step 1: {game_id} never RUNNING"
-        # The agent parents its decide under game_cycle only once G1's log records gave it
+        # The agent parents its decide under game.cycle only once G1's log records gave it
         # the trace ids (UC-041 BR-004); a decide before that starts an agent-only trace.
         assert await async_poll_until(
             lambda: bool(_agent_game_trace_id(game_id)), AGENT_TRACE_TIMEOUT
@@ -551,7 +551,7 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
         )
         applied = set(_applied_types(collector, game_id))
 
-        # End the game so the coordinator exports its game_cycle span (it ends with the game).
+        # End the game so the coordinator exports its game.cycle span (it ends with the game).
         await force_end_game_by_id(game_client, game_id, reason="tc007_done")
         game_id_done = game_id
         game_id = ""
@@ -586,7 +586,7 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
         )
 
         # Step 8 (Jaeger): G1's whole trace: root span, phases and player spans
-        # (UC-035 step 5); invoke_agent -> remote game_cycle,
+        # (UC-035 step 5); invoke_agent -> remote game.cycle,
         # and the decisions' Link to the game root (UC-040 BR-013); every agent span
         # names G1 and kind real (validation 1).
         problems: list[str] = []

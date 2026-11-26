@@ -33,7 +33,7 @@ class FFAGame(BaseGameMode):
 
     Implements FFA-specific behavior:
     - All players on team=0 (no teams)
-    - Flat player hierarchy (players directly under gameplay_phase)
+    - Flat player hierarchy (players directly under game.phase.gameplay)
     - Last player standing win condition
     - Players stay dead permanently (spans end on death)
     """
@@ -73,7 +73,7 @@ class FFAGame(BaseGameMode):
 
     def _create_player_spans(self, game_context):
         """
-        Create flat player lifecycle spans (directly under gameplay_phase).
+        Create flat player lifecycle spans (directly under game.phase.gameplay).
 
         Args:
             game_context: Parent span context for proper hierarchy
@@ -274,7 +274,7 @@ class FFAGame(BaseGameMode):
         await self._wait_for_rainbow_effect()
 
         # Note: Player spans are already closed by _close_all_player_spans()
-        # at the end of gameplay_phase (before game.phase.teardown starts)
+        # at the end of game.phase.gameplay (before game.phase.teardown starts)
 
         # Publish analytics summaries for all players
         await self._publish_analytics_summaries({winner_serial} if winner_serial else set())

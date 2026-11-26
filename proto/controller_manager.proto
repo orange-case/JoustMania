@@ -116,6 +116,9 @@ message ButtonEvent {
   ControllerEventType event_type = 7;  // Event type (default EVENT_BUTTON for backwards compat)
   string name = 8;         // Human-readable controller name (Issue #7)
   repeated string connected_serials = 9;  // All connected serials (set on CONNECT/DISCONNECT only)
+  // battery is a real reading, so 0 (empty) is a level and not "unset". False from an older controller
+  // manager and on DISCONNECT. UC-002 BR-010.
+  bool battery_reported = 10;
 }
 
 // Phase XX: Bidirectional control for button event stream (menu/UI)

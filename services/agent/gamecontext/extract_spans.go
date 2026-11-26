@@ -49,7 +49,7 @@ func spanGameIDOf(attrs pcommon.Map) string {
 
 // spanGameLabels resolves the game identity from a span's attributes: the
 // game.id / game.kind attributes carried by the game-session span (always) and
-// the player_lifecycle span (since #845's producer change). Mirrors
+// the game.player span (since #845's producer change). Mirrors
 // metricGameLabels so the metric and span paths share the gameLabels routing
 // key PR B builds its multiplexer on.
 func spanGameLabels(attrs pcommon.Map) gameLabels {
@@ -81,7 +81,7 @@ func (s *Store) isOwnResource(res pcommon.Resource) bool {
 }
 
 // ApplySpans applies trace data to the store. Spans are a LATE signal in this
-// system: player_lifecycle spans only end at game end, and the collector batches
+// system: game.player spans only end at game end, and the collector batches
 // traces (~10s), so this path is used for identity enrichment and as the second
 // game-end signal (the game root span, #1494), not as the primary live signal.
 // It reads no death: eliminations come from game_player_elimination_order alone
@@ -177,7 +177,7 @@ func (s *Store) applySpan(span ptrace.Span) bool {
 // isGameRootSpan reports whether a span is a game's root span: the only span
 // that carries game.name together with game.id and game.kind (the
 // StreamGameEvents server span has game.name + game.id but no game.kind; the
-// player_lifecycle span has game.id + game.kind but no game.name).
+// game.player span has game.id + game.kind but no game.name).
 func isGameRootSpan(attrs pcommon.Map, labels gameLabels) bool {
 	if labels.GameID == "" || labels.GameKind == "" {
 		return false

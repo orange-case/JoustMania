@@ -115,7 +115,7 @@ def _force_end_after(game, phase: str) -> None:
 
 
 def _player_spans(exp) -> list:
-    return [s for s in exp.get_finished_spans() if s.name == "player_lifecycle" or s.name.startswith("player: ")]
+    return [s for s in exp.get_finished_spans() if s.name == "game.player" or s.name.startswith("player: ")]
 
 
 def _assert_no_span_left_open(exp) -> None:
@@ -208,7 +208,7 @@ async def test_an_error_in_the_warmup_ends_every_player_span(exporter, caplog, m
     assert all(s.status.status_code == StatusCode.ERROR for s in _player_spans(exporter))
     names = {s.name for s in exporter.get_finished_spans()}
     if mode in BASE_RUN_MODES:
-        assert {"game.players", "game_cycle"} <= names, "the grouping spans end with the player spans"
+        assert {"game.players", "game.cycle"} <= names, "the grouping spans end with the player spans"
 
 
 @pytest.mark.uc("UC-030", br=["BR-007"])
@@ -228,7 +228,7 @@ async def test_an_error_in_the_countdown_ends_the_countdown_and_grouping_spans(e
     _assert_every_player_span_ended_once(exporter, caplog, "error", None)
     finished = [s.name for s in exporter.get_finished_spans()]
     assert finished.count("game.phase.countdown") == len(SERIALS)
-    assert {"game.players", "game_cycle"} <= set(finished)
+    assert {"game.players", "game.cycle"} <= set(finished)
 
 
 @pytest.mark.uc("UC-030", br=["BR-007"])
@@ -275,7 +275,7 @@ async def test_a_failing_span_end_keeps_the_run_error_and_clears_the_analytics(e
 
     clear_analytics.assert_called_once()
     assert "Ending the open player spans failed" in caplog.text
-    assert {"game.players", "game_cycle"} <= {s.name for s in exporter.get_finished_spans()}
+    assert {"game.players", "game.cycle"} <= {s.name for s in exporter.get_finished_spans()}
 
 
 @pytest.mark.uc("UC-030", br=["BR-007"])

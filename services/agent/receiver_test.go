@@ -23,10 +23,10 @@ import (
 // fixedClock returns a stable time so gating/eviction are deterministic.
 func fixedClock() func() time.Time { return func() time.Time { return time.Unix(1000, 0) } }
 
-// gameSpan appends a player_lifecycle span (game path) to td.
+// gameSpan appends a game.player span (game path) to td.
 func gameSpan(td ptrace.Traces, serial string) {
 	span := td.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
-	span.SetName("player_lifecycle")
+	span.SetName("game.player")
 	span.Attributes().PutStr("player.serial", serial)
 }
 
@@ -116,11 +116,11 @@ func TestReceiver_SkipsOwnService(t *testing.T) {
 	}
 }
 
-// gameIDSpan appends a player_lifecycle span carrying a serial + game.id so the
+// gameIDSpan appends a game.player span carrying a serial + game.id so the
 // multiplexer routes it to that game's partition.
 func gameIDSpan(td ptrace.Traces, serial, gameID string) {
 	span := td.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
-	span.SetName("player_lifecycle")
+	span.SetName("game.player")
 	span.Attributes().PutStr("player.serial", serial)
 	span.Attributes().PutStr("game.id", gameID)
 }
@@ -320,7 +320,7 @@ func TestReceiver_MetricsAndSpansFeedTheLiveContext(t *testing.T) {
 	deathSpan := func(serial string) ptrace.Traces {
 		td := ptrace.NewTraces()
 		span := td.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
-		span.SetName("player_lifecycle")
+		span.SetName("game.player")
 		span.Attributes().PutStr("player.serial", serial)
 		span.Attributes().PutStr("game.id", "game-A")
 		span.Events().AppendEmpty().SetName("player_death")

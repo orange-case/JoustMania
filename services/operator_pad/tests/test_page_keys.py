@@ -115,7 +115,7 @@ def test_each_row_key_binds_the_setting_its_row_shows(page):
         ("HOME", "K2", False),  # the mode has no reset
         ("HOME", "K4", False),  # nor the volume
         ("HOME", "K7", True),
-        ("START", "K3", False),  # empty row
+        ("START", "K3", False),  # LOW is read-only
         ("AGENT", "K2", False),  # the agent switch has no reset
         ("AGENT", "K4", True),
         ("AGENT", "K6", True),  # GOAL, settable from iteration 4
