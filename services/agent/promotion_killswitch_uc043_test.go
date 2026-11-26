@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-feature/go-sdk/openfeature"
 
+	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/experiment"
 	"github.com/joustmania/agent/experiment/journal"
 	"github.com/joustmania/agent/flags"
@@ -170,6 +171,16 @@ func (e fitnessFlagsEvaluator) ObjectValue(_ context.Context, _ string, d any, _
 	return d, nil
 }
 
+// enduranceOnlySource switches accelerate off so a real game records only its
+// endurance sample, which Get then returns unambiguously.
+type enduranceOnlySource struct{ decision.FitnessSource }
+
+func (s enduranceOnlySource) Fitness() decision.FitnessThresholds {
+	t := s.FitnessSource.Fitness()
+	t.AccelerateTargetSessionSeconds = 0
+	return t
+}
+
 // UC: UC-043 main
 func TestUC043_Step4_FitnessUsesLiveThresholds(t *testing.T) {
 	// A 90 s real game: below the default endurance minimum (120 s), above the
@@ -190,16 +201,16 @@ func TestUC043_Step4_FitnessUsesLiveThresholds(t *testing.T) {
 	t.Run("UC-043/main step 5 real-game fitness scores with the live flags", func(t *testing.T) {
 		store := experiment.NewFitnessStore(0)
 		loop := loopWithStore(store)
-		loop.thresholds = src
+		loop.thresholds = enduranceOnlySource{src}
 
 		loop.onGameEnd(gc)
 
-		got := store.RecentReal("endurance", 1)
-		if len(got) != 1 {
-			t.Fatalf("recorded %d endurance samples, want 1", len(got))
+		got, ok := store.Get("game_live_fit")
+		if !ok || got.Objective != "endurance" || store.Len() != 1 {
+			t.Fatalf("recorded %+v (found=%v, %d samples), want one endurance sample", got, ok, store.Len())
 		}
-		if got[0].Fitness <= static {
-			t.Fatalf("recorded real fitness = %v, static = %v: the live fitness.* flag was ignored", got[0].Fitness, static)
+		if got.Fitness <= static {
+			t.Fatalf("recorded real fitness = %v, static = %v: the live fitness.* flag was ignored", got.Fitness, static)
 		}
 	})
 

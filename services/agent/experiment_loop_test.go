@@ -1150,7 +1150,7 @@ func TestNewFitnessStoreIgnoresCapacityEnv(t *testing.T) {
 	for i := 0; i < experiment.DefaultFitnessStoreCapacity+5; i++ {
 		s.Record(experiment.FitnessSample{GameID: fmt.Sprintf("g%d", i), Objective: "balanced", GameKind: experiment.GameKindReal})
 	}
-	if got := len(s.RecentReal("balanced", 10000)); got != experiment.DefaultFitnessStoreCapacity {
+	if got := s.Len(); got != experiment.DefaultFitnessStoreCapacity {
 		t.Fatalf("ring holds %d samples, want %d (env must be ignored)", got, experiment.DefaultFitnessStoreCapacity)
 	}
 }

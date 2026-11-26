@@ -1,7 +1,6 @@
 package experiment
 
 import (
-	"sort"
 	"sync"
 	"time"
 )
@@ -19,7 +18,7 @@ import (
 // captures that already-computed sample for BOTH:
 //
 //   - a SHADOW experiment game (read back by game_id), and
-//   - a REAL primary game (RecentReal returns the last N real games).
+//   - a REAL primary game, one sample per objective it could be scored on.
 //
 // FINALIZED, NOT A LIVE SCRAPE (#958 / #1017): Record is called from onGameEnd
 // AFTER the game has concluded and its duration has been recovered
@@ -33,15 +32,10 @@ import (
 // assembled here.
 
 // DefaultFitnessStoreCapacity bounds the store's ring. A few hundred finalized
-// samples is ample: readers only ever read the last N real games (N is a
-// handful) or a single game_id, so the working set is tiny. The ring keeps the store O(1) in memory
+// samples is ample: readers only ever read a single game_id, so the working set
+// is tiny. The ring keeps the store O(1) in memory
 // regardless of how long the agent runs.
 const DefaultFitnessStoreCapacity = 512
-
-// GameKindReal (the game_kind label a live, player-facing game carries —
-// game_session.py:52-53) is defined in targeting.go. RecentReal reads only
-// samples with this kind so a shadow game can never pollute the recent-real
-// baseline.
 
 // FitnessSample is one finalized per-game fitness datapoint (#965). It is the unit
 // the store holds.
@@ -54,12 +48,10 @@ type FitnessSample struct {
 	// journal folds.
 	Fitness float64
 	// Objective is the fitness objective the Fitness scalar scored (endurance /
-	// balanced / accelerate). RecentReal filters recent-real samples by it so a
-	// baseline is per-objective (the #958 study is per-objective: only
-	// endurance/accelerate carry real signal today, #1015).
+	// balanced / accelerate). The #958 study is per-objective: only
+	// endurance/accelerate carry real signal today (#1015).
 	Objective string
 	// GameKind is "real" for a primary game or "shadow" for a cohort game.
-	// RecentReal reads only GameKindReal.
 	GameKind string
 	// DurationS is the game's recovered effective duration in seconds (#997), kept
 	// alongside the fitness for the audit trail / drift monitor (#1017 §4).
@@ -69,8 +61,7 @@ type FitnessSample struct {
 	// observations (#1017 §3 item 3). Optional — nil when the loop has no resolved
 	// snapshot to attach. Copied on Record so a caller cannot mutate stored state.
 	Config map[string]any
-	// At is when the sample finalized (Record time), used for recency ordering in
-	// RecentReal.
+	// At is when the sample finalized (Record time).
 	At time.Time
 }
 
@@ -146,8 +137,7 @@ func (s *FitnessStore) Record(sample FitnessSample) {
 
 // Get returns a finalized sample for a game_id and whether one is present. A
 // shadow game holds exactly one (game_id, objective) sample, so Get returns it. For a game
-// id with several per-objective samples (a real game) Get returns an arbitrary one;
-// callers needing a specific objective use RecentReal, which filters by objective.
+// id with several per-objective samples (a real game) Get returns an arbitrary one.
 func (s *FitnessStore) Get(gameID string) (FitnessSample, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,38 +147,6 @@ func (s *FitnessStore) Get(gameID string) (FitnessSample, bool) {
 		}
 	}
 	return FitnessSample{}, false
-}
-
-// RecentReal returns the most-recent (newest-first) finalized samples from REAL
-// (game_kind="real") games for the given objective, up to n. An empty objective
-// matches any objective (the caller filters).
-func (s *FitnessStore) RecentReal(objective string, n int) []FitnessSample {
-	if n <= 0 {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Collect matching real samples, then sort newest-first and take n. The ring is
-	// small (cap), so a full scan + sort is cheap and keeps ordering correct even
-	// across re-Records (which do not move the order entry).
-	matches := make([]FitnessSample, 0, len(s.byKey))
-	for _, sample := range s.byKey {
-		if sample.GameKind != GameKindReal {
-			continue
-		}
-		if objective != "" && sample.Objective != objective {
-			continue
-		}
-		matches = append(matches, sample)
-	}
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].At.After(matches[j].At)
-	})
-	if len(matches) > n {
-		matches = matches[:n]
-	}
-	return matches
 }
 
 // Len returns the number of finalized samples currently held (test/observability).

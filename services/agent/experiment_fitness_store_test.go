@@ -43,8 +43,7 @@ func realEnduranceGC(gameID string, durationS float64) gamecontext.GameContext {
 
 // TestOnGameEnd_RecordsRealGameFitness: a finished REAL game's fitness is now
 // stored, keyed by game_id, for every experimentable objective it evaluated — the
-// #1017 gap (previously dropped). The recorded sample is readable as a recent-real
-// baseline input.
+// #1017 gap (previously dropped).
 func TestOnGameEnd_RecordsRealGameFitness(t *testing.T) {
 	store := experiment.NewFitnessStore(0)
 	loop := loopWithStore(store)
@@ -59,22 +58,10 @@ func TestOnGameEnd_RecordsRealGameFitness(t *testing.T) {
 	if sample.GameKind != experiment.GameKindReal {
 		t.Errorf("recorded game_kind = %q, want real", sample.GameKind)
 	}
-	// The store must surface it as a recent-real sample for the endurance baseline.
-	recent := store.RecentReal(decision.ObjectiveEndurance, 8)
-	found := false
-	for _, s := range recent {
-		if s.GameID == "game_real1" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("recorded real game not returned by RecentReal(endurance)")
-	}
 }
 
 // TestOnGameEnd_ShadowWithoutExperimentNotInRealBaseline: a game labeled shadow but
-// carrying no ExperimentID must NOT pollute the recent-real baseline (only real
-// games seed it).
+// carrying no ExperimentID is not recorded as real-game fitness.
 func TestOnGameEnd_ShadowWithoutExperimentNotInRealBaseline(t *testing.T) {
 	store := experiment.NewFitnessStore(0)
 	loop := loopWithStore(store)
@@ -83,8 +70,8 @@ func TestOnGameEnd_ShadowWithoutExperimentNotInRealBaseline(t *testing.T) {
 	gc.GameKind = "shadow" // labeled shadow, no ExperimentID
 	loop.onGameEnd(gc)
 
-	if got := store.RecentReal(decision.ObjectiveEndurance, 8); len(got) != 0 {
-		t.Fatalf("a shadow-labeled game must not seed the real baseline, got %d samples", len(got))
+	if store.Len() != 0 {
+		t.Fatalf("a shadow-labeled game must not be recorded as real, got %d samples", store.Len())
 	}
 }
 
@@ -103,9 +90,6 @@ func TestOnGameEnd_EmptyOrUnknownKindNotInRealBaseline(t *testing.T) {
 			gc.GameKind = kind
 			loop.onGameEnd(gc)
 
-			if got := store.RecentReal(decision.ObjectiveEndurance, 8); len(got) != 0 {
-				t.Fatalf("game_kind %q must not seed the real baseline, got %d samples", kind, len(got))
-			}
 			if store.Len() != 0 {
 				t.Fatalf("game_kind %q must not be recorded at all, got %d samples", kind, store.Len())
 			}
@@ -114,8 +98,7 @@ func TestOnGameEnd_EmptyOrUnknownKindNotInRealBaseline(t *testing.T) {
 }
 
 // TestRecordFinalizedFitness_EmptyKindNotLabeledReal (FR-041): a finalized
-// experiment-game sample with no game_kind keeps the empty label, so the store's
-// recent-real baseline never picks it up.
+// experiment-game sample with no game_kind keeps the empty label, never "real".
 func TestRecordFinalizedFitness_EmptyKindNotLabeledReal(t *testing.T) {
 	store := experiment.NewFitnessStore(0)
 	loop := loopWithStore(store)
@@ -129,9 +112,6 @@ func TestRecordFinalizedFitness_EmptyKindNotLabeledReal(t *testing.T) {
 	}
 	if sample.GameKind == experiment.GameKindReal {
 		t.Fatalf("an unlabeled sample must not be labeled real, got %q", sample.GameKind)
-	}
-	if got := store.RecentReal(decision.ObjectiveEndurance, 8); len(got) != 0 {
-		t.Fatalf("an unlabeled sample must not reach the real baseline, got %d", len(got))
 	}
 }
 
@@ -167,8 +147,8 @@ func TestOnGameEnd_PrimaryLabelledGameSeedsRealBaseline(t *testing.T) {
 	gc := realEnduranceGC("game_primary1", 600)
 	gc.GameKind = kind
 	loop.onGameEnd(gc)
-	if got := store.RecentReal(decision.ObjectiveEndurance, 8); len(got) != 1 || got[0].GameID != "game_primary1" {
-		t.Fatalf("primary-labelled game must seed the real baseline, got %+v", got)
+	if got, ok := store.Get("game_primary1"); !ok || got.GameKind != experiment.GameKindReal {
+		t.Fatalf("primary-labelled game must be recorded as real, got %+v (found=%v)", got, ok)
 	}
 
 	// Defense in depth: a raw (un-normalised) "primary" kind is still real.
