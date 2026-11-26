@@ -284,10 +284,10 @@ All game modes follow a consistent span hierarchy. The root span is created in `
 
 ```
 Free-For-All (game span)
-├── initialization_phase
+├── game.phase.initialization
 │   └── initialize_players
 ├── ffa_colors_phase (player colors shown)
-├── countdown_phase
+├── game.phase.countdown
 ├── gameplay_phase
 │   ├── player_lifecycle [player.serial=<serial1>]
 │   │   ├── death_warning (event)
@@ -296,7 +296,7 @@ Free-For-All (game span)
 │   │   └── victory (event) → span ends (winner)
 │   └── player_lifecycle [player.serial=<serial3>]
 │       └── player_death (event) → span ends
-└── teardown_phase
+└── game.phase.teardown
     └── end_game_impl
 ```
 
@@ -310,30 +310,30 @@ Free-For-All (game span)
 
 ```
 Teams (game span)
-├── initialization_phase
+├── game.phase.initialization
 │   └── initialize_players (with team assignment)
-├── countdown_phase
+├── game.phase.countdown
 ├── gameplay_phase
-│   ├── team_lifecycle [team.number=0, team.name=Pink]
+│   ├── game.team [team.number=0, team.name=Pink]
 │   │   ├── player_lifecycle [player.serial=<serial1>]
 │   │   │   ├── death_warning (event)
 │   │   │   └── player_death (event) → span ends
 │   │   ├── player_lifecycle [player.serial=<serial2>]
 │   │   │   └── player_death (event) → span ends
 │   │   └── team_eliminated (event) → team span ends
-│   ├── team_lifecycle [team.number=1, team.name=Magenta]
+│   ├── game.team [team.number=1, team.name=Magenta]
 │   │   ├── player_lifecycle [player.serial=<serial3>]
 │   │   │   └── player_survived (event) → span ends
 │   │   └── player_lifecycle [player.serial=<serial4>]
 │   │       └── player_survived (event) → span ends
 │   └── team_victory (event) → team span ends
-└── teardown_phase
+└── game.phase.teardown
     └── end_game_impl
 ```
 
 **Key Characteristics:**
-- **Hierarchical structure**: `gameplay_phase` → `team_lifecycle` → `player_lifecycle`
-- **Consistent span naming**: All team spans use `team_lifecycle`, all player spans use `player_lifecycle`
+- **Hierarchical structure**: `gameplay_phase` → `game.team` → `player_lifecycle`
+- **Consistent span naming**: All team spans use `game.team`, all player spans use `player_lifecycle`
 - **Span attributes**: Teams differentiated by `team.number` and `team.name`, players by `player.serial`
 - **Team spans**: One span per team, ends when team is eliminated or game ends
 - **Player spans**: Nested under their team span, end when player dies or game ends
@@ -343,32 +343,32 @@ Teams (game span)
 
 ```
 Random Teams (game span)
-├── initialization_phase
+├── game.phase.initialization
 │   └── initialize_players (with random team assignment)
-├── team_formation_phase (5 seconds showing team colors)
-├── countdown_phase
+├── game.phase.team_formation (5 seconds showing team colors)
+├── game.phase.countdown
 ├── gameplay_phase
-│   ├── team_lifecycle [team.number=0, team.name=<RandomColor1>]
+│   ├── game.team [team.number=0, team.name=<RandomColor1>]
 │   │   ├── player_lifecycle [player.serial=<serial1>]
 │   │   │   └── player_death (event) → span ends
 │   │   └── player_lifecycle [player.serial=<serial2>]
 │   │       └── player_death (event) → span ends
 │   │   └── team_eliminated (event) → team span ends
-│   └── team_lifecycle [team.number=1, team.name=<RandomColor2>]
+│   └── game.team [team.number=1, team.name=<RandomColor2>]
 │       ├── player_lifecycle [player.serial=<serial3>]
 │       │   └── player_survived (event) → span ends
 │       └── player_lifecycle [player.serial=<serial4>]
 │           └── player_survived (event) → span ends
 │       └── team_victory (event) → team span ends
-└── teardown_phase
+└── game.phase.teardown
     └── end_game_impl
 ```
 
 **Key Characteristics:**
-- **Additional phase**: `team_formation_phase` (unique to Random Teams)
+- **Additional phase**: `game.phase.team_formation` (unique to Random Teams)
 - **Random colors**: Team colors are shuffled each game (reflected in `team.name` attribute)
 - **Same hierarchy as Teams**: 2-level hierarchy (team → player)
-- **Consistent span naming**: Same as Teams - `team_lifecycle` and `player_lifecycle` with attributes
+- **Consistent span naming**: Same as Teams - `game.team` and `player_lifecycle` with attributes
 
 ### Span Naming Conventions (OpenTelemetry Best Practices)
 
@@ -381,12 +381,12 @@ JoustMania follows OpenTelemetry best practices for span naming to ensure:
 
 **✅ Use consistent names for similar operations:**
 - All player lifecycle spans use `"player_lifecycle"` (not `"player_<serial>_lifecycle"`)
-- All team lifecycle spans use `"team_lifecycle"` (not `"team_0_Pink_lifecycle"`)
+- All team lifecycle spans use `"game.team"` (not `"team_0_Pink_lifecycle"`)
 - Differentiation happens via attributes (e.g., `player.serial`, `team.number`, `team.name`)
 
 **✅ Use different names for fundamentally different operations:**
 - Game mode spans differ by operation: `"Free-For-All"`, `"Teams"`, `"Random Teams"`
-- Phase spans differ by purpose: `"initialization_phase"`, `"gameplay_phase"`, `"teardown_phase"`
+- Phase spans differ by purpose: `"game.phase.initialization"`, `"gameplay_phase"`, `"game.phase.teardown"`
 
 **Why this matters:**
 - **Cardinality**: Span names create unique operation types in tracing backends. High-cardinality names (e.g., one per player serial) can overwhelm the system and make queries difficult.
@@ -402,7 +402,7 @@ operation=player_lifecycle
 operation=player_lifecycle player.serial="00:06:F7:AB:CD:EF"
 
 # Find all team lifecycle spans in Teams games
-operation=team_lifecycle game.mode="Teams"
+operation=game.team game.mode="Teams"
 
 # Compare player lifecycle duration across game modes
 operation=player_lifecycle | group by game.mode
@@ -449,7 +449,7 @@ For Teams and Random Teams, team and player spans are created using `trace.use_s
 
 ```python
 # Create team span and register with SDK
-team_span = tracer.start_span("team_lifecycle", context=gameplay_context,
+team_span = tracer.start_span("game.team", context=gameplay_context,
                                 attributes={"team.number": 0, "team.name": "Pink", ...})
 
 # Register with SDK using trace.use_span()

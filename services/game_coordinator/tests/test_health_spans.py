@@ -107,7 +107,7 @@ class TestProcessHealthPollDegradation:
         game._process_health(player, "AA:BB:CC", gd4)
 
         mock_tracer.start_span.assert_called_once_with(
-            "controller_poll_degraded",
+            "game.controller.poll_degraded",
             context=mock_tracer.start_span.call_args.kwargs["context"],
             attributes={"player.serial": "AA:BB:CC"},
         )
@@ -316,7 +316,7 @@ class TestProcessHealthLedDegradation:
     @patch("services.game_coordinator.games.base.get_config_manager")
     @patch("services.game_coordinator.games.base.tracer")
     def test_opens_led_span_on_failures(self, mock_tracer, mock_get_config, mock_time):
-        """LED failures should open a controller_led_degraded span."""
+        """LED failures should open a game.controller.led_degraded span."""
         mock_get_config.return_value.get_config.return_value.poll_drop_threshold = 10
         mock_time.monotonic.return_value = 0.0
         game = _make_game()
@@ -328,7 +328,7 @@ class TestProcessHealthLedDegradation:
         game._process_health(player, "AA:BB:CC", gd)
 
         mock_tracer.start_span.assert_called_once_with(
-            "controller_led_degraded",
+            "game.controller.led_degraded",
             context=mock_tracer.start_span.call_args.kwargs["context"],
             attributes={"player.serial": "AA:BB:CC"},
         )

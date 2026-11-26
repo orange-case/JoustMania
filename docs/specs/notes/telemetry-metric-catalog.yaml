@@ -6,14 +6,15 @@ audio_sounds_played_total: 'reader: docs/talk/two-standards-runbook.md'
 controller_input_lag_seconds: '#1376; game streams only'
 controller_poll_loop_lateness_seconds: 'reader: docs/talk/stage-test-checklist.md'
 controller_stream_frame_overruns_total: 'reader: docs/talk/stage-test-checklist.md'
+game_accel_magnitude_g: 'in g, the unit of the death thresholds (telemetry.md §8)'
+game_completed_total: '`outcome` = `winner`, `tie`, `completed`, `force_ended`, or `error` when the session published
+  `game_error`; #1427'
 game_current_mode: '#1379; 1 while the game is live, removed at retire'
 game_current_update_frequency_hz: 'process-wide: the configured `game_loop.update_frequency_hz`, the same for every
   game; the per-game measured rate is `game_actual_update_frequency_hz`'
 game_loop_frame_consistency_percent: '#1471; one series per live game, removed when it ends and at retire'
-game_loop_jitter_ms: '#1471; one series per live game, removed when it ends and at retire'
+game_loop_jitter_seconds: '#1471; one series per live game, removed when it ends and at retire'
 game_player_deaths_total: '#1376'
-games_completed_total: '`outcome` = `winner`, `tie`, `completed`, `force_ended`, or `error` when the session published
-  `game_error`; #1427'
 grpc_client_errors_total: '#1426; mid-stream errors and the HID adapters counted, a cancel by the caller is not; the Go
   agent and connect-proxy are not covered (telemetry.md §6)'
 grpc_client_request_duration_seconds: '#1426; a stream is timed once, at its end'

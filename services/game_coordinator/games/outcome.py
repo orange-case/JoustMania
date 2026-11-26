@@ -98,7 +98,7 @@ class GameOutcomeMixin:
         """The ``game.outcome`` value: ``winner``, ``tie``, ``completed`` or ``force_ended``.
 
         The same value the game root span records; the session labels
-        ``games_completed_total{outcome}`` with it (#1427).
+        ``game_completed_total{outcome}`` with it (#1427).
         """
         return self._game_outcome_attributes()["game.outcome"]
 

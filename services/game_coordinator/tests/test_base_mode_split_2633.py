@@ -101,7 +101,7 @@ class TestPatchPointsStayOnBase:
         with patch.object(base_module, "tracer", autospec=True) as tracer:
             game._open_gameplay_spans(tracer.start_span.return_value)
         names = [call.args[0] for call in tracer.start_span.call_args_list]
-        assert names[:2] == ["players", "game_cycle"]
+        assert names[:2] == ["game.players", "game_cycle"]
 
 
 @pytest.mark.uc("UC-030", flow="A6", br=["BR-005"])

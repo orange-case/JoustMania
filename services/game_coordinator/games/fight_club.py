@@ -97,7 +97,7 @@ class FightClubGame(StreamedIntroGameMode):
     Special: Face-off mode for tied scores (no time limit).
     """
 
-    RUN_SPAN_NAME = "fight_club_game"
+    RUN_SPAN_NAME = "game.run.fight_club"
 
     def __init__(
         self,

@@ -274,7 +274,7 @@ class FFAGame(BaseGameMode):
         await self._wait_for_rainbow_effect()
 
         # Note: Player spans are already closed by _close_all_player_spans()
-        # at the end of gameplay_phase (before teardown_phase starts)
+        # at the end of gameplay_phase (before game.phase.teardown starts)
 
         # Publish analytics summaries for all players
         await self._publish_analytics_summaries({winner_serial} if winner_serial else set())

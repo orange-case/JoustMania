@@ -1166,7 +1166,7 @@ class BaseGameMode(
             for phase in self._get_additional_phases():
                 if not self.running:
                     break
-                with tracer.start_as_current_span(phase.name):
+                with tracer.start_as_current_span(f"game.phase.{phase.name}"):
                     await phase.execute()
             if self.running:
                 await self._play_instructions(init_span)
@@ -1422,7 +1422,7 @@ class BaseGameMode(
                 "game.id": self.game_id,
             },
         )
-        # Stop game music first (inside teardown_phase so StopMusic span is a child)
+        # Stop game music first (inside game.phase.teardown so StopMusic span is a child)
         await self._stop_game_music()
         progress.music_stopped = True
 
@@ -1449,9 +1449,9 @@ class BaseGameMode(
         - ``_stop_feedback_and_force_end``: the finally's music / shield stop
           and the force-end hook, in the flow's order.
 
-        The base flow: initialization_phase (setup: players, colors, stream,
-        music), gameplay_phase (player_lifecycle spans with countdown_phase
-        children), teardown_phase. Phase spans are children of the game span.
+        The base flow: game.phase.initialization (setup: players, colors, stream,
+        music), gameplay_phase (player_lifecycle spans with game.phase.countdown
+        children), game.phase.teardown. Phase spans are children of the game span.
 
         A run that raises or is cancelled before the teardown step still stops
         the game music and ends the shield feedback in ``finally`` (UC-020
@@ -1464,7 +1464,7 @@ class BaseGameMode(
             try:
                 if await self._run_until_teardown():
                     self._latch_game_outcome()
-                    with self._run_tracer().start_as_current_span("teardown_phase") as teardown_span:
+                    with self._run_tracer().start_as_current_span("game.phase.teardown") as teardown_span:
                         await self._teardown_before_end(teardown_span, progress)
                         await self._end_game_impl()
                         # The finally adds no shield end after the winner effects.
@@ -1499,7 +1499,7 @@ class BaseGameMode(
         )
 
     def _run_tracer(self) -> trace.Tracer:
-        """The tracer of run()'s own spans (teardown_phase)."""
+        """The tracer of run()'s own spans (game.phase.teardown)."""
         return tracer
 
     @contextlib.contextmanager
@@ -1524,7 +1524,7 @@ class BaseGameMode(
         await self.event_publisher(GameEvent.GAME_STARTING, {"game_id": self.game_id})
 
         # Phase 1: Initialization (setup only — no countdown)
-        with tracer.start_as_current_span("initialization_phase") as init_span:
+        with tracer.start_as_current_span("game.phase.initialization") as init_span:
             init_span.set_attribute("game.id", self.game_id)
             init_span.set_attribute(GAME_MODE_ATTR, self.get_game_name())
 
@@ -1551,9 +1551,9 @@ class BaseGameMode(
             phases_completed = False
             try:
                 # Additional phases (e.g., color_assignment, team_formation)
-                # These are children of initialization_phase
+                # These are children of game.phase.initialization
                 for phase in self._get_additional_phases():
-                    with tracer.start_as_current_span(phase.name):
+                    with tracer.start_as_current_span(f"game.phase.{phase.name}"):
                         await phase.execute()
 
                 # Spoken instructions, when the host switched them on (UC-020 A5):

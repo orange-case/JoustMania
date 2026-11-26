@@ -145,7 +145,7 @@ STEP6_PANELS = [
         "agent",
         "agent-operations",
         "Shadow Games Started / min",
-        r"games_started_total",
+        r"game_started_total",
         r"shadow",
     ),
     # Platform: infrastructure and services.

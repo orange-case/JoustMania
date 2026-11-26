@@ -32,11 +32,12 @@ The totals (the number of names, of names without a consumer and of names never 
 | `controller_stream_frame_overruns_total` | counter | (none) | controller-manager | yes | (none) | reader: docs/talk/stage-test-checklist.md |
 | `controller_streams_active` | gauge | (none) | controller-manager | yes | grafana |  |
 | `flag_eval_errors_total` | counter | `flag_key`, `reason` | lib (`lib/flag_eval_visibility.py`) | yes | grafana |  |
-| `game_accel_distribution` | histogram | `game_mode` | game-coordinator | yes | grafana |  |
+| `game_accel_magnitude_g` | histogram | `game_mode` | game-coordinator | yes | grafana | in g, the unit of the death thresholds (telemetry.md §8) |
 | `game_active` | gauge | `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent, grafana |  |
 | `game_active_players` | gauge | `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent, grafana |  |
 | `game_actual_update_frequency_hz` | gauge | `game_kind`, `game_id` | game-coordinator | yes | grafana |  |
 | `game_analytics_samples_total` | counter | `game_mode` | game-coordinator | yes | grafana |  |
+| `game_completed_total` | counter | `mode`, `game_kind`, `outcome` (winner\|tie\|completed\|force_ended\|error) | game-coordinator | yes | grafana | `outcome` = `winner`, `tie`, `completed`, `force_ended`, or `error` when the session published `game_error`; #1427 |
 | `game_current_mode` | gauge | `mode`, `game_kind`, `game_id` | game-coordinator | yes | agent, grafana, scripts | #1379; 1 while the game is live, removed at retire |
 | `game_current_update_frequency_hz` | gauge | (none) | game-coordinator | yes | grafana | process-wide: the configured `game_loop.update_frequency_hz`, the same for every game; the per-game measured rate is `game_actual_update_frequency_hz` |
 | `game_duration_seconds` | gauge | `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent, grafana, scripts, tools |  |
@@ -47,7 +48,7 @@ The totals (the number of names, of names without a consumer and of names never 
 | `game_interventions_total` | counter | `type`, `objective`, `blocked`, `block_reason` | game-coordinator | yes | grafana, tools |  |
 | `game_loop_frame_consistency_percent` | gauge | `game_kind`, `game_id` | game-coordinator | yes | grafana | #1471; one series per live game, removed when it ends and at retire |
 | `game_loop_frames_dropped_total` | counter | `mode` | game-coordinator | yes | grafana |  |
-| `game_loop_jitter_ms` | gauge | `game_kind`, `game_id` | game-coordinator | yes | grafana | #1471; one series per live game, removed when it ends and at retire |
+| `game_loop_jitter_seconds` | gauge | `game_kind`, `game_id` | game-coordinator | yes | grafana | #1471; one series per live game, removed when it ends and at retire |
 | `game_music_tempo` | gauge | `game_kind`, `game_id` | game-coordinator | yes | agent, grafana |  |
 | `game_near_death_events_total` | counter | `serial`, `game_mode` | game-coordinator | yes | grafana, scripts |  |
 | `game_player_accel_magnitude` | gauge | `serial`, `game_id` | game-coordinator | yes | agent, grafana, scripts |  |
@@ -73,8 +74,7 @@ The totals (the number of names, of names without a consumer and of names never 
 | `game_shield_activation_mode` | gauge | `mode`, `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent |  |
 | `game_shield_group_grants` | gauge | `game_kind`, `game_id` | game-coordinator | yes | agent |  |
 | `game_shield_hold_setting` | gauge | `setting`, `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent |  |
-| `games_completed_total` | counter | `mode`, `game_kind`, `outcome` (winner\|tie\|completed\|force_ended\|error) | game-coordinator | yes | grafana | `outcome` = `winner`, `tie`, `completed`, `force_ended`, or `error` when the session published `game_error`; #1427 |
-| `games_started_total` | counter | `mode`, `game_kind` | game-coordinator | yes | grafana |  |
+| `game_started_total` | counter | `mode`, `game_kind` | game-coordinator | yes | grafana |  |
 | `grpc_client_errors_total` | counter | `service`, `method`, `code` | lib (`lib/grpc_metrics.py`) | yes | grafana | #1426; mid-stream errors and the HID adapters counted, a cancel by the caller is not; the Go agent and connect-proxy are not covered (telemetry.md §6) |
 | `grpc_client_request_duration_seconds` | histogram | `service`, `method` | lib (`lib/grpc_metrics.py`) | yes | grafana | #1426; a stream is timed once, at its end |
 | `menu_button_dispatch_seconds` | histogram | `event_type` | menu | yes | (none) | reader: tests/service/test_uc002_button_stream_reconnect.py |

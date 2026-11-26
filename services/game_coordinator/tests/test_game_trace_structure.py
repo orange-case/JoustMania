@@ -59,11 +59,11 @@ async def test_game_trace_has_mode_root_phases_and_one_span_per_player(mock_fact
     def parent_name(span):
         return by_id[span.parent.span_id].name
 
-    for phase in ("initialization_phase", "gameplay_phase", "teardown_phase"):
+    for phase in ("game.phase.initialization", "gameplay_phase", "game.phase.teardown"):
         (span,) = [s for s in spans if s.name == phase]
         assert span.parent.span_id == root.context.span_id, phase
 
-    players_group = next(s for s in spans if s.name == "players")
+    players_group = next(s for s in spans if s.name == "game.players")
     assert parent_name(players_group) == "gameplay_phase"
     lifecycles = [s for s in spans if s.name == "player_lifecycle"]
     assert len(lifecycles) == len(game.players) == 3

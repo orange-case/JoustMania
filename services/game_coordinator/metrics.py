@@ -22,7 +22,7 @@ from lib.otel_metrics import Counter, Gauge, Histogram
 # experiment_id/arm. This is safe precisely because they are gauges keyed on the
 # already-unbounded game_id and SET per live game — the experiment labels add no
 # permanent series; they come and go with the game's game_id and are cleared at
-# game end. The cumulative COUNTERS (games_started_total, games_completed_total)
+# game end. The cumulative COUNTERS (game_started_total, game_completed_total)
 # deliberately do NOT carry experiment_id/arm: a label on a cumulative counter
 # creates one permanent series per experiment value, forever (TSDB blow-up), which
 # violates the §4.2 cardinality discipline. Per-experiment counts come from the
@@ -48,10 +48,11 @@ game_duration_seconds = Gauge(
     "game_duration_seconds",
     "Duration of current game in seconds",
     ["game_kind", "game_id", "experiment_id", "arm"],
+    unit="s",
 )
 
-games_started_total = Counter(
-    "games_started_total",
+game_started_total = Counter(
+    "game_started_total",
     "Total number of games started",
     ["mode", "game_kind"],
 )
@@ -59,8 +60,8 @@ games_started_total = Counter(
 # outcome: the game's game.outcome (winner, tie, completed, force_ended; #1328) or
 # error (the session published game_error), bounded to those five values by
 # game_session (GAME_OUTCOMES, completed_game_outcome; #1427).
-games_completed_total = Counter(
-    "games_completed_total",
+game_completed_total = Counter(
+    "game_completed_total",
     "Total number of games completed, by outcome",
     ["mode", "game_kind", "outcome"],
 )
@@ -134,11 +135,13 @@ player_shield_energy_seconds = Gauge(
     "game_player_shield_energy_seconds",
     "Hold-mode shield energy of a player (seconds)",
     ["serial", "game_id"],
+    unit="s",
 )
 player_shield_budget_remaining_seconds = Gauge(
     "game_player_shield_budget_remaining_seconds",
     "Hold-mode shield budget a player has left in this game (seconds)",
     ["serial", "game_id"],
+    unit="s",
 )
 player_shield_active = Gauge(
     "game_player_shield_active",
@@ -190,9 +193,11 @@ def clear_player_shield_gauges(serial: str, game_id: str) -> None:
 
 
 # System metrics
-process_cpu_seconds_total = Counter("process_cpu_seconds_total", "Total user and system CPU time spent in seconds")
+process_cpu_seconds_total = Counter(
+    "process_cpu_seconds_total", "Total user and system CPU time spent in seconds", unit="s"
+)
 
-process_resident_memory_bytes = Gauge("process_resident_memory_bytes", "Resident memory size in bytes")
+process_resident_memory_bytes = Gauge("process_resident_memory_bytes", "Resident memory size in bytes", unit="By")
 
 process_threads = Gauge("process_threads", "Number of active threads")
 
@@ -248,9 +253,9 @@ game_loop_frame_consistency_percent = Gauge(
     GAME_STATE_LABELS,
 )
 
-game_loop_jitter_ms = Gauge(
-    "game_loop_jitter_ms",
-    "Standard deviation of a live game loop's recent frame times in milliseconds",
+game_loop_jitter_seconds = Gauge(
+    "game_loop_jitter_seconds",
+    "Standard deviation of a live game loop's recent frame times in seconds",
     GAME_STATE_LABELS,
 )
 
@@ -269,7 +274,7 @@ GAME_STATE_GAUGES = (
     effective_death_threshold,
     actual_update_frequency_hz,
     game_loop_frame_consistency_percent,
-    game_loop_jitter_ms,
+    game_loop_jitter_seconds,
 )
 
 # Feature flag metrics (Phase 44). Evaluations are counted by the standard OpenFeature
@@ -303,6 +308,7 @@ player_accel_magnitude = Gauge(
     "game_player_accel_magnitude",
     "Current acceleration magnitude for player (g-force)",
     ["serial", "game_id"],
+    unit="{g}",
 )
 
 player_movement_zone = Gauge(
@@ -315,6 +321,7 @@ player_peak_accel = Gauge(
     "game_player_peak_accel",
     "Peak acceleration magnitude for player in current game (g-force)",
     ["serial", "game_id"],
+    unit="{g}",
 )
 
 player_playstyle = Gauge(
@@ -337,6 +344,7 @@ player_movement_variance = Gauge(
     "Rolling-window variance of acceleration magnitude (g^2). "
     "Near zero indicates a player gaming the EMA by holding still.",
     ["serial", "game_id"],
+    unit="{g^2}",
 )
 
 player_skill_level = Gauge(
@@ -358,6 +366,7 @@ player_movement_variance_aggregate = Gauge(
     "Whole-game cumulative variance of acceleration magnitude (g^2, Welford). "
     "Retained whole-game aggregate; meaningful at game conclusion (#1024).",
     ["serial", "game_id"],
+    unit="{g^2}",
 )
 
 player_elimination_order = Gauge(
@@ -382,10 +391,11 @@ player_warnings_total = Counter(
 
 # Histogram for distribution analysis
 accel_distribution = Histogram(
-    "game_accel_distribution",
-    "Distribution of acceleration magnitudes during gameplay",
+    "game_accel_magnitude_g",
+    "Distribution of acceleration magnitudes during gameplay, in g",
     ["game_mode"],
     buckets=[0.5, 1.0, 1.1, 1.3, 1.5, 1.8, 2.0, 2.5, 3.0, 4.0, 5.0],
+    unit="{g}",
 )
 
 # Per-game summary metrics (set at end of game)

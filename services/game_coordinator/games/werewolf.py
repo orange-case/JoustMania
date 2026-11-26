@@ -107,7 +107,7 @@ class WerewolfGame(StreamedIntroGameMode):
     This is a FFA-style game with two hidden teams.
     """
 
-    RUN_SPAN_NAME = "werewolf_game"
+    RUN_SPAN_NAME = "game.run.werewolf"
 
     def __init__(
         self,
