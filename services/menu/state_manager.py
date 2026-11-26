@@ -284,12 +284,13 @@ class StateManager:
         Select a game mode for the next game and persist it (#1272).
 
         Delegates to the servicer callback so the controller SELECT path lands in
-        the same state as admin Cross / web ``select_game`` (the coordinator start
+        the same state as the pad and web ``select_game`` (the coordinator start
         path reads the servicer's ``current_selection``). Without a callback
         (test-only: production always wires the servicer callback in
         ``MenuServicer.__init__``), updates the local mode, persists
         ``current_game`` and publishes ``selection_changed`` directly. Keep this
-        fallback in step with ``MenuServicer.select_game_mode``.
+        fallback in step with ``MenuServicer.select_game_mode``, except that
+        ``announce`` gives the voice only here: the lobby pulse needs ``SettingsOps``.
 
         Args:
             game_mode: Games enum value to select
