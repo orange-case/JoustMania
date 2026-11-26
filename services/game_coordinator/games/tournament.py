@@ -908,7 +908,7 @@ class TournamentGame(StreamedIntroGameMode):
         player = self.players.get(serial)
         return player is not None and self._fights_undecided_match(serial) and not self.is_in_grace(player)
 
-    async def _kill_player_impl(self, serial: str, accel_mag: float):
+    async def _kill_player_impl(self, serial: str, accel_mag: float):  # noqa: ARG002
         """
         Handle player death during a match.
 
@@ -958,16 +958,12 @@ class TournamentGame(StreamedIntroGameMode):
             self._latch_champion(winner)
         logger.info(f"Match {self.current_match.match_id}: {serial} eliminated, winner: {winner}")
 
-        # Add death event to player span
-        if player.span:
-            player.span.add_event(
-                "match_death",
-                attributes={
-                    "match_id": self.current_match.match_id,
-                    "accel_magnitude": accel_mag,
-                    "sensitivity": self.sensitivity.name,
-                },
-            )
+    def _player_death_event_attributes(self, serial: str) -> dict:
+        """``match_id`` on the ``player_death`` moment of a death that decides a match."""
+        match = self.current_match
+        if match is not None and self._fights_undecided_match(serial):
+            return {"match_id": match.match_id}
+        return {}
 
     def _fights_undecided_match(self, serial: str) -> bool:
         """Whether the player is a fighter of the current match and that match is not decided yet."""
