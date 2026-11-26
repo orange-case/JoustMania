@@ -480,6 +480,9 @@ A flag changes at runtime **only** if it has a row here,
 only within its bounds and only in its scope. Every other flag of every set is the **read-only baseline**: it
 changes by a reviewed edit of the flag file and a restart of the flag service (C-033). The registry file
 `services/flag-service/registry.yaml` encodes this table; a change to one updates the other in the same PR.
+The flag service ignores a registry.yaml key it does not know and logs one WARN at start that names it, so the
+checkout's file can carry a key a newer release reads; a unit test parses the checkout's file strictly, so a
+misspelt key fails CI (#2802). Releases before #2802 refuse to start on an unknown key (#2403).
 
 **Writers** is the canonical place that says who writes each flag (the human surfaces: the menu for the operator pad,
 the operator and stage scripts, Flagsmith; the agent: `agent` for its game-scoped interventions, `agent
@@ -508,14 +511,13 @@ Every value not persisted lives in memory only (architecture note §10.1).
 **Failed save, kill switches (#2368, UC-053 A12):** when the state file cannot be saved (or was unreadable at
 start), a persisted `PUT` or `DELETE ?persist=true` is refused with `500 persist_failed` and nothing changes in
 memory; with a state file unreadable at start that includes a persisted `DELETE` with no admin value in memory, because
-the file may still hold one (a flag whose row has no persist cannot be in the file: its `DELETE ?persist=true` stays a plain `204`, uncounted). The exception covers the persisted kill-switch flags, a fixed set in the flag service's
-code (`registry.killSwitches`), not a registry.yaml attribute (released images parse the checkout's registry.yaml
-strictly). This list is its single source of truth, kept in sync by a test: `agent/interventions_allowed`. A safety
+the file may still hold one (a flag whose row has no persist cannot be in the file: its `DELETE ?persist=true` stays a plain `204`, uncounted). The exception covers every kill switch of §13.6 whose row has persist `yes` (today only
+`interventions_allowed`). A safety
 stop must take effect now, so a write or clear of it applies in memory and answers `persisted: false` (`PUT`) or
 `204` with `X-Flag-Persisted: false` (`DELETE`), counted in `flagservice_admin_persist_errors_total` and not
-counted as persisted in `flagservice_overlays`; a restart brings back what the file holds (services.md §7.2). Only a
-row with persist `yes` can be in the set: `enabled` is a kill switch too, but it takes no persisted write
-(`400 malformed`), so a failed save never affects it.
+counted as persisted in `flagservice_overlays`; a restart brings back what the file holds (services.md §7.2). A
+kill switch without persist (`enabled`, for example) takes no persisted write (`400 malformed`), so a failed save
+never affects it.
 
 **Persisted vs overlay (who writes which, #1682):** a persisted value is an **operator choice** (the menu for the operator pad,
 `agent-backend.sh` for the decision backend and model); an in-memory overlay is a **stage beat** or a test
@@ -749,7 +751,7 @@ by a file edit and a restart. Several of their flags are read only at process st
 
 > Implemented: features and tags are created at start (#2591), the kill switches below applied first by the in side
 > (#2590, #2596), Flagsmith the source of truth once online: it wins every conflict, at a restart and at a reconnect, kill switches included, and stack-wide local changes made offline are discarded at the reconnect (#2621), [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md).
-> UC-054 and UC-055 are Tested (#2592; the kill-switch rows by `tests/service/test_flagsmith_sync.py::test_conflict_table`, `tests/service/test_flagsmith_link.py::test_restart_takes_flagsmith_kill_switch` and `services/flag-service/flagsmith/killswitch_test.go`). No registry attribute is added: the link
+> UC-054 and UC-055 are Tested (#2592; the kill-switch rows by `tests/service/test_flagsmith_sync.py::test_conflict_table`, `tests/service/test_flagsmith_link.py::test_restart_takes_flagsmith_kill_switch` and `services/flag-service/registry/registry_test.go` (`TestKillSwitchSetMatchesFlagsMD`)). No registry attribute is added: the link
 > follows the rows above.
 
 **Which flags.** Every row of §13.1 to §13.4 (and the mutable `observability` rows of §13.5) is one Flagsmith
@@ -773,37 +775,25 @@ outage that was never changed offline is kept and, with no Flagsmith value, sent
 
 **Kill switches** (UC-054 BR-005, FR-210). Since #2621 Flagsmith wins a conflict for these flags like for every
 other flag, at a restart, on a live conflict and at a reconnect: once online, Flagsmith is the source of truth. The
-link applies them first in a round (before the write budget defers anything). The second column is informational
-only: it is how the agent reads "more restrictive" for each flag, and the link no longer merges by it.
+link applies them first in a round (before the write budget defers anything), logs each kill-switch value the start's
+reference step overwrites, and a persisted write of one that has persist `yes` applies even when the save fails (§13,
+"Failed save, kill switches"). The members are `agent/enabled`, `agent/interventions_allowed`, the agent gates
+`agent/interventions_enabled` and `agent/experiments_enabled`, and the agent-limiting flags of FR-152 that have a
+registry row: `agent/experiment_proposer_enabled`, `agent/llm.max_requests_per_minute`,
+`agent/decision.claude.max_requests_per_minute`, `agent/experiment_max_games`.
 
-| Flag | More restrictive first (informational) |
-|---|---|
-| `agent/enabled` | `off`, then `on` |
-| `agent/interventions_allowed` | the variant whose allowed actions are a subset of the other's (`none` ⊂ `probe` ⊂ `ambient` ⊂ `standard` ⊂ `full` ⊂ `shadow_experimental`; `standard` ⊂ `standard_group`; `shadow_experimental` ⊂ `shadow_group`), computed from the declared action lists, `noop` counting as no action (equal action sets after dropping `noop` are ordered by their raw tokens, so `none` before `probe`); when neither contains the other (for example `standard_group` and `full`), the local value stays |
-| `agent/code_improvement.mode` | `issue`, `pr`, `autonomous`; an unknown value counts as `issue`, as the agent reads it |
-| `agent/code_improvement.target` | `local`, then `github`; an unknown value counts as `local`, as the agent reads it |
-| `agent/llm.max_requests_per_minute` | the lower number; a value ≤ 0 means closed and counts as the lowest (`inherit` does not apply to it) |
-| `agent/decision.claude.max_requests_per_minute` | the lower number; `inherit` (-1) counts as the highest; any other negative value counts as 0, as in the agent |
-| `agent/experiment_proposer_enabled`, `agent/interventions_enabled`, `agent/experiments_enabled` | `off`, then `on` |
-| `agent/experiment_max_games` | the lower number; `unlimited` (0) counts as the highest |
-| `agent/experiment_dynamic_max_concurrent` | the lower number; a value ≤ 0 resolves to the compiled default 3, as in the agent |
-| `agent/code_improvement.min_interval_seconds` | the higher number; a value ≤ 0 counts as the default 300 s, as the agent reads it |
-
-`code_improvement.*` and `experiment_dynamic_max_concurrent` have no row in the mutable-flag registry (§13.2) today,
-so they are not runtime-mutable and not Flagsmith features; their rules keep the table complete for when they get one.
-
-The agent normalises every value this way when it reads it.
-
-The table is the source of truth: `agent/enabled`, the registry kill switch `agent/interventions_allowed`
-(`registry.killSwitches`), the agent-limiting flags of FR-152, and the agent gates `interventions_enabled`
-and `experiments_enabled`; a test keeps the link's kill-switch set in sync with the table.
+This list is the one source of truth for kill-switch membership; the flag service holds the same set in
+`registry.killSwitches`, and `TestKillSwitchSetMatchesFlagsMD` keeps the two equal and fails a member without a
+registry row or an FR-152 flag with a row that is not a member. An FR-152 flag without a registry row
+(`code_improvement.*`, `experiment_dynamic_max_concurrent`) is read-only baseline and no Flagsmith feature, so it is
+no kill switch. How the agent reads each value is in §15.4.
 A change in Flagsmith is applied like any write, also when it loosens one; the agent never writes its own limits, and the env ceilings of C-034 still cap the agent-limiting flags, also a value from Flagsmith.
 
 **Values in Flagsmith** (architecture note §2.1): a declared variant is its name (string); an integer range is an
 integer; a float range, a `free string` and an object flag are strings (decimal text, the string, compact JSON).
 
 **Traceability:** FR-206, FR-208, FR-210, FR-214, FR-226, C-034, C-036 / UC-054, UC-055 /
-`services/flag-service/flagsmith/killswitch.go` (#2590, #2621: the set of kill switches, no order); `TestKillSwitchTableInSync` keeps it equal to this table.
+`services/flag-service/registry/registry.go` (`registry.killSwitches`); `TestKillSwitchSetMatchesFlagsMD` keeps it equal to the kill-switch list.
 
 ## 14. Ownership composition: invalidation and visibility
 
