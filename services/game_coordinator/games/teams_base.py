@@ -18,6 +18,7 @@ from opentelemetry.trace import Status, StatusCode
 from lib.colors import Colors
 from lib.types import GameEvent, Sound
 from services.game_coordinator import game_clock
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import BaseGameMode
 from services.game_coordinator.stream_writes import serialized_write
 
@@ -291,7 +292,7 @@ class TeamsGameBase(BaseGameMode):
                 return
 
             # Play countdown beep (Phase 29)
-            await self._play_sound(Sound.SFX_BEEP_LOUD, priority=2)
+            await self._play_sound(Sound.SFX_BEEP_LOUD, priority=sound_priority.CRITICAL)
 
             if phase.get("set_team_colors"):
                 # Set each player to their team color
@@ -317,7 +318,7 @@ class TeamsGameBase(BaseGameMode):
                 await game_clock.sleep(0.05)
 
         # Play start sound (Phase 29)
-        await self._play_sound(Sound.SFX_START3, priority=2)
+        await self._play_sound(Sound.SFX_START3, priority=sound_priority.CRITICAL)
 
         await self.event_publisher(GameEvent.COUNTDOWN_END, {})
         logger.info("Team countdown complete")
@@ -501,7 +502,7 @@ class TeamsGameBase(BaseGameMode):
         winning_team = self.teams.get(winning_team_num)
         if winning_team:
             sound = TEAM_WIN_SOUNDS.get(winning_team.name, Sound.VOX_CONGRATULATIONS)
-            await self._play_sound(sound, priority=2)
+            await self._play_sound(sound, priority=sound_priority.CRITICAL)
 
     def _build_survived_span_attrs(self, player, is_winner: bool) -> dict:
         """

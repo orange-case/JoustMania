@@ -14,6 +14,7 @@ from opentelemetry.trace import Status, StatusCode
 from lib.telemetry import inject_trace_context
 from lib.types import GameEvent, Sound
 from services.game_coordinator import game_clock
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import BaseGameMode, Phase
 
 logger = logging.getLogger(__name__)
@@ -263,7 +264,7 @@ class FFAGame(BaseGameMode):
             # Skipped with a warning when the server already ended the stream (UC-020 BR-003)
             if await self._write_end_effect(effect_cmd):
                 logger.info(f"WINNER_RAINBOW effect sent for {winner_serial}")
-            await self._play_sound(Sound.VOX_CONGRATULATIONS, priority=2)
+            await self._play_sound(Sound.VOX_CONGRATULATIONS, priority=sound_priority.CRITICAL)
             await self._wait_for_rainbow_effect()
         elif self.game_outcome() == "tie":
             await self._show_tie_cue()

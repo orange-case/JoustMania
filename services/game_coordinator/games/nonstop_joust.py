@@ -20,6 +20,7 @@ from opentelemetry import trace
 from lib.feature_flags import read_float_flag, read_object_flag
 from lib.types import GameEvent, Sound
 from services.game_coordinator import game_clock, metrics
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import (
     BaseGameMode,
     GameState,
@@ -757,7 +758,7 @@ class NonstopJoustGame(BaseGameMode):
                 await self._write_end_effect(effect_cmd)
 
             # Play victory sound (Phase 29)
-            await self._play_sound(Sound.VOX_CONGRATULATIONS, priority=2)
+            await self._play_sound(Sound.VOX_CONGRATULATIONS, priority=sound_priority.CRITICAL)
 
             await self.event_publisher(
                 GameEvent.GAME_WINNER,

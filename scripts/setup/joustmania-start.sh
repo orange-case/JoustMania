@@ -8,8 +8,25 @@
 # Two phases (BR-004, R2): the game services (and connect-proxy, dashboard,
 # envoy) start and are judged first; observability and the agent start after,
 # and only make the state `degraded`, never fail the unit.
+#
+#   joustmania-start.sh                  both phases (a start by hand, a rev-2 unit)
+#   joustmania-start.sh --game           phase 1 only; start.env gets phase=game
+#                                        and the observability services (obs=)
+#   joustmania-start.sh --observability  phase 2 for the services phase 1 recorded
+# The rev-3 unit runs --game, then the root LED helper, then --observability,
+# so the ACT LED shows the game's state as soon as the game is playable.
 
 set -euo pipefail
+
+case "${1:-}" in
+    "") MODE=all ;;
+    --game) MODE=game ;;
+    --observability) MODE=observability ;;
+    *)
+        echo "usage: joustmania-start.sh [--game|--observability]" >&2
+        exit 64
+        ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JOUSTMANIA_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
@@ -29,18 +46,20 @@ cd "$JOUSTMANIA_DIR"
 STATE_MISSING=""
 STATE_DOWN=""
 STATE_REASON=""
+STATE_PHASE="$([[ $MODE == game ]] && echo game || echo start)"
+OBS_PHASE=()
 write_state() { # $1 = phase, $2 = result
     {
         mkdir -p "$STATE_DIR" &&
-            printf 'phase=%s\nresult=%s\nreason=%s\nhead=%s\nimage_tag=%s\nmissing=%s\ndown=%s\nts=%s\n' \
+            printf 'phase=%s\nresult=%s\nreason=%s\nhead=%s\nimage_tag=%s\nmissing=%s\ndown=%s\nobs=%s\nts=%s\n' \
                 "$1" "$2" "$STATE_REASON" "${HEAD_SHORT:-unknown}" "${EFFECTIVE_IMAGE_TAG:-unknown}" \
-                "${STATE_MISSING# }" "${STATE_DOWN# }" "$(date -Iseconds)" \
+                "${STATE_MISSING# }" "${STATE_DOWN# }" "${OBS_PHASE[*]:-}" "$(date -Iseconds)" \
                 >"$STATE_FILE"
     } 2>/dev/null || true
 }
 on_exit() {
     local rc=$?
-    write_state start "$([[ $rc -eq 0 ]] && echo "$START_RESULT" || echo failed)"
+    write_state "$STATE_PHASE" "$([[ $rc -eq 0 ]] && echo "$START_RESULT" || echo failed)"
     if [[ $rc -ne 0 && -z "${JOUSTMANIA_UNIT_REV:-}" ]]; then
         echo "unit outdated: sudo $JOUSTMANIA_DIR/scripts/setup/install_autostart.sh (start failed, exit $rc; exiting 0 so the old unit does not loop)"
         exit 0
@@ -57,6 +76,58 @@ COMPOSE_WRAPPER="$SCRIPT_DIR/joustmania-compose.sh"
 compose() {
     "$COMPOSE_WRAPPER" "$@"
 }
+
+# Phase 2: observability and the agent, with their own timeout. A failure only
+# makes the state degraded (UC-060 A1); the unit still succeeds.
+observability_phase() {
+    [[ ${#OBS_PHASE[@]} -gt 0 ]] || return 0
+    local obs_timeout="${JOUSTMANIA_OBS_TIMEOUT_S:-300}" obs_rc=0 obs_deadline obs_left
+    echo "Phase 2/2: starting observability (timeout ${obs_timeout} s): ${OBS_PHASE[*]}"
+    obs_deadline=$((SECONDS + obs_timeout))
+    timeout "$((obs_timeout + 30))" "$COMPOSE_WRAPPER" up -d --pull never --wait --wait-timeout "$obs_timeout" "${OBS_PHASE[@]}" || obs_rc=$?
+    # One retry inside the same budget: a slow Jaeger can be unhealthy for the
+    # first attempt and fine a minute later, which left Grafana down (#2202).
+    # `up` only starts what is not running, so nothing is recreated (R1).
+    if [[ $obs_rc -ne 0 ]]; then
+        obs_left=$((obs_deadline - SECONDS - ${JOUSTMANIA_OBS_RETRY_PAUSE_S:-5}))
+        if [[ $obs_left -ge 30 ]]; then
+            echo "WARN: observability did not come up (exit $obs_rc); retrying once (${obs_left} s left)"
+            sleep "${JOUSTMANIA_OBS_RETRY_PAUSE_S:-5}"
+            obs_rc=0
+            timeout "$((obs_left + 30))" "$COMPOSE_WRAPPER" up -d --pull never --wait --wait-timeout "$obs_left" "${OBS_PHASE[@]}" || obs_rc=$?
+        fi
+    fi
+    if [[ $obs_rc -ne 0 ]]; then
+        STATE_DOWN+=" observability(exit $obs_rc)"
+        START_RESULT="degraded"
+        echo "WARN: observability did not come up (exit $obs_rc); the game keeps running (UC-060 A1)"
+    fi
+}
+
+if [[ $MODE == observability ]]; then
+    # Phase 1 ran in the unit's previous ExecStart and left its record; only
+    # observability services from it are started.
+    # shellcheck source=lib-joustmania.sh
+    source "$SCRIPT_DIR/lib-joustmania.sh"
+    recorded() { sed -n "s/^$1=//p" "$STATE_FILE" 2>/dev/null | head -n 1; }
+    START_RESULT="$(recorded result)"
+    if [[ "$(recorded phase)" != game || ! "$START_RESULT" =~ ^(ok|degraded)$ ]]; then
+        START_RESULT="failed"
+        echo "FAIL: $STATE_FILE records no finished game phase; run joustmania-start.sh --game first"
+        exit 1
+    fi
+    STATE_REASON="$(recorded reason)"
+    HEAD_SHORT="$(recorded head)"
+    EFFECTIVE_IMAGE_TAG="$(recorded image_tag)"
+    STATE_MISSING="$(recorded missing)"
+    STATE_DOWN="$(recorded down)"
+    for svc in $(recorded obs); do
+        if joustmania_in_list "$svc" "${JOUSTMANIA_OBS_SERVICES[@]}"; then OBS_PHASE+=("$svc"); fi
+    done
+    observability_phase
+    echo "JoustMania started: state $START_RESULT"
+    exit 0
+fi
 
 echo "=== JoustMania Startup ==="
 echo "Working directory: $JOUSTMANIA_DIR"
@@ -292,34 +363,13 @@ while :; do
 done
 echo "Game services ready"
 START_RESULT="ok"
-
-# Phase 2: observability and the agent, inline, with their own timeout. A
-# failure only makes the state degraded (UC-060 A1); the unit still succeeds.
-if [[ ${#OBS_PHASE[@]} -gt 0 ]]; then
-    OBS_TIMEOUT="${JOUSTMANIA_OBS_TIMEOUT_S:-300}"
-    echo "Phase 2/2: starting observability (timeout ${OBS_TIMEOUT} s): ${OBS_PHASE[*]}"
-    OBS_RC=0
-    OBS_DEADLINE=$((SECONDS + OBS_TIMEOUT))
-    timeout "$((OBS_TIMEOUT + 30))" "$COMPOSE_WRAPPER" up -d --pull never --wait --wait-timeout "$OBS_TIMEOUT" "${OBS_PHASE[@]}" || OBS_RC=$?
-    # One retry inside the same budget: a slow Jaeger can be unhealthy for the
-    # first attempt and fine a minute later, which left Grafana down (#2202).
-    # `up` only starts what is not running, so nothing is recreated (R1).
-    if [[ $OBS_RC -ne 0 ]]; then
-        OBS_LEFT=$((OBS_DEADLINE - SECONDS - ${JOUSTMANIA_OBS_RETRY_PAUSE_S:-5}))
-        if [[ $OBS_LEFT -ge 30 ]]; then
-            echo "WARN: observability did not come up (exit $OBS_RC); retrying once (${OBS_LEFT} s left)"
-            sleep "${JOUSTMANIA_OBS_RETRY_PAUSE_S:-5}"
-            OBS_RC=0
-            timeout "$((OBS_LEFT + 30))" "$COMPOSE_WRAPPER" up -d --pull never --wait --wait-timeout "$OBS_LEFT" "${OBS_PHASE[@]}" || OBS_RC=$?
-        fi
-    fi
-    if [[ $OBS_RC -ne 0 ]]; then
-        STATE_DOWN+=" observability(exit $OBS_RC)"
-        START_RESULT="degraded"
-        echo "WARN: observability did not come up (exit $OBS_RC); the game keeps running (UC-060 A1)"
-    fi
-fi
 if [[ -n "$MISSING_OTHER$BLOCKED_OTHER" || -n "$STATE_REASON" ]]; then
     START_RESULT="degraded"
 fi
+if [[ $MODE == game ]]; then
+    echo "Game phase done: state $START_RESULT; observability follows (joustmania-start.sh --observability)"
+    exit 0
+fi
+
+observability_phase
 echo "JoustMania started: state $START_RESULT"

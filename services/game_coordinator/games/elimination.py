@@ -11,6 +11,7 @@ from lib.colors import Colors
 from lib.types import Sound
 from services.game_coordinator import game_clock
 from services.game_coordinator.games import base as _base
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import (
     CHARGE_OUTCOME_DEATH,
     HOLD_OUTCOME_DEATH,
@@ -318,5 +319,5 @@ class EliminationMixin:
                     )
                 )
             )
-        await self._play_sound(sound, priority=2)
+        await self._play_sound(sound, priority=sound_priority.CRITICAL)
         await self._wait_while_running(TIE_FLASH_MS / 1000.0)

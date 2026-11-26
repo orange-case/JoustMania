@@ -22,6 +22,7 @@ from lib.feature_flags import read_float_flag, read_object_flag
 from lib.types import GameEvent, Sound
 from proto import controller_manager_pb2
 from services.game_coordinator import game_clock
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import (
     GAME_MODE_ATTR,
     Phase,
@@ -543,9 +544,9 @@ class WerewolfGame(StreamedIntroGameMode):
 
         # Play appropriate victory sound (Joust/vox/)
         if winner == "werewolves":
-            await self._play_sound(Sound.VOX_WEREWOLF_WIN, priority=2)
+            await self._play_sound(Sound.VOX_WEREWOLF_WIN, priority=sound_priority.CRITICAL)
         elif winner == "humans":
-            await self._play_sound(Sound.VOX_HUMAN_WIN, priority=2)
+            await self._play_sound(Sound.VOX_HUMAN_WIN, priority=sound_priority.CRITICAL)
 
         if winner_side == "tie":
             await self._show_tie_cue(Sound.SFX_WOLFDOWN)

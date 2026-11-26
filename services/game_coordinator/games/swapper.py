@@ -16,6 +16,7 @@ from opentelemetry.trace import Status, StatusCode
 from lib.types import Sound
 from proto import controller_manager_pb2
 from services.game_coordinator import game_clock, metrics
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import Phase, Player
 from services.game_coordinator.games.teams_base import TEAM_WIN_SOUNDS, TeamsGameBase
 from services.game_coordinator.stream_writes import serialized_write
@@ -584,7 +585,7 @@ class SwapperGame(TeamsGameBase):
         winning_team_obj = self.teams.get(winning_team) if winning_team is not None else None
         if winning_team_obj:
             sound = TEAM_WIN_SOUNDS.get(winning_team_obj.name, Sound.VOX_CONGRATULATIONS)
-            await self._play_sound(sound, priority=2)
+            await self._play_sound(sound, priority=sound_priority.CRITICAL)
 
         # Wait for celebration (interruptible); only a declared winner is celebrated
         for _ in range(20 if winning_team is not None else 0):  # 2 seconds

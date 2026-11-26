@@ -72,9 +72,14 @@ stage_steps() {
     # .env.local: decision-backend API keys and opt-in profiles, private
     if [[ -e "$SCRIPT_DIR/.env.local" ]]; then
         echo ".env.local exists; left as it is"
+        if ! joustmania_env_local_sets "$SCRIPT_DIR/.env.local" COMPOSE_PROFILES; then
+            echo "  → it sets no COMPOSE_PROFILES, so the operator pad is off; add COMPOSE_PROFILES=operator-pad to turn it on"
+        fi
     elif ask "Create .env.local (API keys, opt-in profiles; mode 600) from .env.example?"; then
-        if install -m 600 "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env.local"; then
-            echo "  → created; edit it with: nano $SCRIPT_DIR/.env.local (no IMAGE_TAG there: the pin decides it)"
+        # The stage Pi runs the operator pad (UC-015): the profile is on from the first boot
+        if install -m 600 "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env.local" &&
+            sed -i 's/^# COMPOSE_PROFILES=operator-pad$/COMPOSE_PROFILES=operator-pad/' "$SCRIPT_DIR/.env.local"; then
+            echo "  → created with COMPOSE_PROFILES=operator-pad; edit it with: nano $SCRIPT_DIR/.env.local (no IMAGE_TAG there: the pin decides it)"
         else
             echo "ERROR: could not create .env.local" >&2
             STEP_FAILED=1

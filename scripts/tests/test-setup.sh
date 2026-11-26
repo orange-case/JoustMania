@@ -5,7 +5,8 @@
 # and upgrade command; nothing real is installed or pulled:
 #  - a failed setup script (runtime or host) exits non-zero and offers nothing
 #    after it: no autostart, no pin, no .env.local, no reboot
-#  - .env.local is created from .env.example with mode 600 and no IMAGE_TAG; an
+#  - .env.local is created from .env.example with mode 600, no IMAGE_TAG and the
+#    operator-pad profile on; an existing one without COMPOSE_PROFILES is named; an
 #    existing one is left byte-identical
 #  - with the autostart installed, the pin runs joustmania-upgrade.sh (it pulls
 #    the images while online, so the first boot needs no network): the newest
@@ -110,6 +111,7 @@ make_case happy
 run_setup 1yyy || fail "happy: setup.sh failed: $(tail -5 "${CASE}/out.log")"
 [[ "$(stat -c %a "${CASE}/repo/.env.local" 2>/dev/null)" == 600 ]] || fail "happy: .env.local is not mode 600"
 grep -qE '^[[:space:]]*(export[[:space:]]+)?IMAGE_TAG' "${CASE}/repo/.env.local" && fail "happy: .env.local sets IMAGE_TAG"
+grep -qx 'COMPOSE_PROFILES=operator-pad' "${CASE}/repo/.env.local" || fail "happy: .env.local does not turn the operator-pad profile on (UC-060 A6)"
 called 'sudo .*/install_autostart.sh' || fail "happy: install_autostart.sh not run with sudo: $(cat "${CASE}/calls.log")"
 called 'joustmania-upgrade joustmania-v0.8.0$' || fail "happy: not pinned to joustmania-v0.8.0: $(cat "${CASE}/calls.log")"
 [[ "$(grep -n install_autostart "${CASE}/calls.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n joustmania-upgrade "${CASE}/calls.log" | cut -d: -f1)" ]] \
@@ -131,6 +133,7 @@ run_setup 1yy || fail "env-kept: setup.sh failed: $(tail -5 "${CASE}/out.log")"
 [[ "$(cat "${CASE}/repo/.env.local")" == "JEV_API_KEY=keep-me" ]] || fail "env-kept: .env.local changed"
 called 'joustmania-upgrade joustmania-v0.8.0$' || fail "env-kept: the answers shifted, no pin: $(cat "${CASE}/calls.log")"
 grep -q 'keep-me' "${CASE}/out.log" && fail "env-kept: an env value was printed"
+grep -q 'sets no COMPOSE_PROFILES, so the operator pad is off' "${CASE}/out.log" || fail "env-kept: the off operator pad is not named"
 
 # --- 6. docker not usable yet: nothing pulled, the command is listed --------
 make_case docker-group

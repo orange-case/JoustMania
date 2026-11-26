@@ -257,6 +257,7 @@ game_loop_jitter_seconds = Gauge(
     "game_loop_jitter_seconds",
     "Standard deviation of a live game loop's recent frame times in seconds",
     GAME_STATE_LABELS,
+    unit="s",
 )
 
 # Agent group shields applied in a live game (UC-048 A13, BR-014).
