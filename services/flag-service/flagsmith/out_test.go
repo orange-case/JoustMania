@@ -35,12 +35,13 @@ var testFlags = []struct{ set, key string }{
 	{"agent", "decision.min_interval_ms"},
 	{"agent", "decision.claude.act_confidence_threshold"},
 	{"agent", "llm.eligible_game_kinds"},
-	{"agent", "decision.prompt_profile"},
+	{"game", "shield.activation"},
 	{"interventions", "music_tempo_override"},
 	{"interventions", "global_sensitivity_override"},
 	{"interventions", "player_sensitivity_factor"},
 	{"interventions", "audio_cue"},
 	{"game", "windows"},
+	{"agent", "enabled"},
 }
 
 // testClock is the link's clock and sleep: a Sleep moves the clock, so a test

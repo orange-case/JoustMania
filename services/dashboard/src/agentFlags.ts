@@ -10,10 +10,9 @@ export interface FlagStateJson {
   game_mode?: string;
   trace_id?: string;
   updated_at_ms?: number;
-  enabled?: boolean;
+  enabled?: string;
   objectives?: string;
   interventions_allowed?: string;
-  interventions_enabled?: boolean;
   battery_threshold?: number;
   max_interventions_per_minute?: number;
   decision_backend?: string;
@@ -36,18 +35,23 @@ export interface FlagPanel {
   actThreshold: number | null;
   batteryThreshold: string;
   maxPerMinute: string;
-  /** agent.enabled (the kill switch), null when absent. */
-  enabled: boolean | null;
+  /** agent/enabled: off (stopped), watch (decides, writes nothing) or act (applies decisions); null when absent or unknown. */
+  enabled: AgentEnabled | null;
   /** Objective weights summary ("k=v,..."). */
   objectives: string;
   /** interventions.allowed summary. */
   interventionsAllowed: string;
-  /** The interventions_enabled write gate (#2093); null when absent. */
-  interventionsEnabled: boolean | null;
   /** experiments_enabled (#2291): the stage fallback (UC-070 A9) turns it on; null when absent. */
   experimentsEnabled: boolean | null;
   /** llm.eligible_game_kinds (#2291), comma joined. */
   eligibleGameKinds: string;
+}
+
+/** The agent/enabled states. */
+export type AgentEnabled = "off" | "watch" | "act";
+
+function agentEnabledOrNull(v: unknown): AgentEnabled | null {
+  return v === "off" || v === "watch" || v === "act" ? v : null;
 }
 
 function boolOrNull(v: unknown): boolean | null {
@@ -70,10 +74,9 @@ export function flagPanelFromState(s: FlagStateJson): FlagPanel {
     actThreshold: typeof s.act_confidence_threshold === "number" ? s.act_confidence_threshold : null,
     batteryThreshold: numberText(s.battery_threshold),
     maxPerMinute: numberText(s.max_interventions_per_minute),
-    enabled: boolOrNull(s.enabled),
+    enabled: agentEnabledOrNull(s.enabled),
     objectives: s.objectives ?? "",
     interventionsAllowed: s.interventions_allowed ?? "",
-    interventionsEnabled: boolOrNull(s.interventions_enabled),
     experimentsEnabled: boolOrNull(s.experiments_enabled),
     eligibleGameKinds: (s.llm_eligible_game_kinds ?? []).join(","),
   };

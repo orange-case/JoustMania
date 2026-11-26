@@ -87,9 +87,6 @@ class InterventionsStore(_Store):
 
 
 class AgentStore(_Store):
-    def get_boolean_value(self, key, default, _ctx=None):
-        return True if key == "enabled" else default
-
     def __init__(self, revision, allowed: str):
         super().__init__(revision)
         self.allowed = allowed
@@ -99,6 +96,8 @@ class AgentStore(_Store):
         return FlagEvaluationDetails(flag_key=key, value=value, variant="v", flag_metadata=self.meta())
 
     def get_string_value(self, key, default, _ctx=None):
+        if key == "enabled":
+            return "act"
         return self.allowed if key == "interventions_allowed" else default
 
     def get_integer_value(self, key, default, _ctx=None):

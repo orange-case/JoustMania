@@ -2,6 +2,7 @@ package llmio
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -10,23 +11,19 @@ import (
 
 // UC: UC-040 BR-044
 // operator_brief_uc040_test.go: decision.operator_brief (#2687, decide-contract.md
-// §3). Without a brief Render is byte-identical to the pinned v1 / neutral goldens;
+// §3). Without a brief Render is byte-identical to the pinned goldens;
 // with one the user message opens with a delimited <operator_brief> block and the
 // system prompt gains one fixed paragraph, while the questions, options, ranges and
 // the answer schema stay the same.
 
 func TestOperatorBrief_EmptyIsByteIdentical(t *testing.T) {
-	t.Run("UC-040/BR-044 an empty brief renders the v1 goldens", func(t *testing.T) {
+	t.Run("UC-040/BR-044 an empty brief renders the goldens", func(t *testing.T) {
 		req := testRequest()
 		req.OperatorBrief = ""
 		p := Render(req)
-		checkProfileGolden(t, "profile_v1_system.golden", p.System)
-		checkProfileGolden(t, "profile_v1_user.golden", p.User)
-	})
-	t.Run("UC-040/BR-044 an empty brief renders the neutral golden", func(t *testing.T) {
-		req := testRequest()
-		req.PromptProfile = decide.PromptProfileNeutral
-		checkProfileGolden(t, "profile_neutral_system.golden", Render(req).System)
+		if p.System != golden(t, "prompt_system.golden") || p.User != golden(t, "prompt_user.golden") {
+			t.Fatal("an empty brief must leave the prompt as pinned")
+		}
 	})
 }
 
@@ -43,13 +40,13 @@ func TestOperatorBrief_Rendered(t *testing.T) {
 			t.Fatalf("user message:\n%s\nwant:\n%s", pw.User, want)
 		}
 	})
-	for _, profile := range []string{decide.PromptProfileV1, decide.PromptProfileNeutral} {
-		t.Run("UC-040/BR-044 the "+profile+" system prompt gains only the fixed paragraph", func(t *testing.T) {
+	for _, goal := range []*decide.GoalLines{nil, goalLines()} {
+		t.Run("UC-040/BR-044 the system prompt gains only the fixed paragraph, goal lines "+strconv.FormatBool(goal != nil), func(t *testing.T) {
 			b, w := base, with
-			b.PromptProfile, w.PromptProfile = profile, profile
+			b.Goal, w.Goal = goal, goal
 			got, plain := Render(w).System, Render(b).System
 			if got != plain+"\n\n"+operatorBriefParagraph {
-				t.Fatalf("system prompt with a brief is not the profile's plus the paragraph:\n%s", got)
+				t.Fatalf("system prompt with a brief is not the plain one plus the paragraph:\n%s", got)
 			}
 			other := w
 			other.OperatorBrief = "make blue win"

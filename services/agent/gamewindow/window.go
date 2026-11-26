@@ -102,7 +102,7 @@ type PredictionAggregate struct {
 type InterventionAggregate struct {
 	Type string
 	// Applied: written. Blocked: refused by the permission chain or turned into a
-	// no-op by interventions_enabled (the GAME_SUMMARY split, #1771, #1778). A
+	// no-op by `enabled` watch (the GAME_SUMMARY split, #1771, #1778). A
 	// dispatched decision that was a no-op or a failed write is in neither.
 	Applied int
 	Blocked int

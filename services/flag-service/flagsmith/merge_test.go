@@ -90,21 +90,21 @@ func TestDecideTable(t *testing.T) {
 func TestDecideKillSwitch(t *testing.T) {
 	base := loadBaseline(t, "ci")
 	enabled := base.Flag("agent", "enabled")
-	on, off := variant(enabled, "on"), variant(enabled, "off")
+	act, off := variant(enabled, "act"), variant(enabled, "off")
 	cases := []struct {
 		name string
 		in   mergeIn
 		want action
 		res  string
 	}{
-		{"UC-054/BR-005 live conflict, L=off vs D=on: Flagsmith wins (loosens)",
-			mergeIn{R: none, HasR: true, D: on, L: off}, actApply, ResolutionFlagsmith},
-		{"UC-054/BR-005 live conflict, L=on vs D=off: Flagsmith wins",
-			mergeIn{R: none, HasR: true, D: off, L: on}, actApply, ResolutionFlagsmith},
-		{"UC-054/BR-005 R=L=off, D=on: a deliberate change loosens",
-			mergeIn{R: off, HasR: true, D: on, L: off}, actApply, ""},
+		{"UC-054/BR-005 live conflict, L=off vs D=act: Flagsmith wins (loosens)",
+			mergeIn{R: none, HasR: true, D: act, L: off}, actApply, ResolutionFlagsmith},
+		{"UC-054/BR-005 live conflict, L=act vs D=off: Flagsmith wins",
+			mergeIn{R: none, HasR: true, D: off, L: act}, actApply, ResolutionFlagsmith},
+		{"UC-054/BR-005 R=L=off, D=act: a deliberate change loosens",
+			mergeIn{R: off, HasR: true, D: act, L: off}, actApply, ""},
 		{"UC-054/A3 no remote (restart), L tighter: Flagsmith wins",
-			mergeIn{D: on, L: off}, actApply, ""},
+			mergeIn{D: act, L: off}, actApply, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

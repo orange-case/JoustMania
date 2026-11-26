@@ -37,8 +37,9 @@ func recordingLoop(t *testing.T, snap flags.Snapshot, out []Decision) (*Loop, *t
 // answer which flags were in effect.
 func TestDecisionSpan_FullFlagSetLifted(t *testing.T) {
 	snap := flags.Snapshot{
-		Enabled:    true,
-		Objectives: map[string]float64{"endurance": 0.6, "chaos": 0.4},
+		Enabled:      true,
+		EnabledState: flags.EnabledAct,
+		Objectives:   map[string]float64{"endurance": 0.6, "chaos": 0.4},
 		InterventionsAllowed: []string{
 			"grant_shield", "play_audio_cue",
 		},
@@ -59,7 +60,7 @@ func TestDecisionSpan_FullFlagSetLifted(t *testing.T) {
 	dec := spansByName(sr.Ended(), SpanDecision)[0]
 
 	wantStr := map[string]string{
-		AttrEnabled:              "true",
+		AttrEnabled:              "act",
 		AttrGameKind:             "real",
 		AttrObjectives:           "chaos=0.4,endurance=0.6",
 		AttrInterventionsAllowed: "grant_shield,play_audio_cue",
@@ -177,8 +178,8 @@ func TestDisabledSpan_EmittedWithFlagAttribution(t *testing.T) {
 		t.Error("disabled path must not emit an action span")
 	}
 	d := disabled[0]
-	if v, ok := attrValue(d, AttrEnabled); !ok || v.AsBool() {
-		t.Error("agent.enabled must be false on the disabled span")
+	if v, ok := attrValue(d, AttrEnabled); !ok || v.AsString() != "off" {
+		t.Errorf("agent.enabled = %q on the disabled span, want off", v.Emit())
 	}
 	if v, ok := attrValue(d, AttrPolicyBatteryThreshold); !ok || v.AsInt64() != 20 {
 		t.Errorf("policy.battery_threshold = %d, want 20", v.AsInt64())

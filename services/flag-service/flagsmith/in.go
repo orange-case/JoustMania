@@ -348,6 +348,9 @@ func isSegment(raw json.RawMessage) bool {
 func (p *puller) decodeState(pol *registry.Policy, fs FeatureState) docEntry {
 	var e docEntry
 	if !fs.Enabled {
+		if v, ok := stopValue(pol, p.l.BaselineFlag(pol.Set, pol.Key)); ok {
+			e.v = v
+		}
 		return e
 	}
 	// Variant options (#2709, §2.3): one option at 100 % is the value, any
@@ -386,6 +389,12 @@ func (p *puller) decodeState(pol *registry.Policy, fs FeatureState) docEntry {
 	}
 	fv := FSValueOf(fs.FeatureStateValue)
 	b := p.l.BaselineFlag(pol.Set, pol.Key)
+	if isFalse(fv) {
+		if v, ok := stopValue(pol, b); ok {
+			e.v = v
+			return e
+		}
+	}
 	variant, value, ferr := Decode(pol, b, fv)
 	if ferr != nil {
 		e.v = Value{Present: true, Value: compact(fs.FeatureStateValue)}

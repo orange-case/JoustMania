@@ -74,7 +74,9 @@ type DecisionOutcome struct {
 //	Outcomes:    per-decision dispatch/block results
 type LayerState struct {
 	// --- Existence layer ---
-	Enabled bool
+	// Enabled is EnabledState.Runs().
+	Enabled      bool
+	EnabledState flags.EnabledState
 
 	// --- Objective layer ---
 	Objectives map[string]float64
@@ -124,6 +126,7 @@ type LayerState struct {
 func newLayerState(s flags.Snapshot) LayerState {
 	return LayerState{
 		Enabled:                s.Enabled,
+		EnabledState:           s.State(),
 		Objectives:             s.Objectives,
 		InterventionsAllowed:   s.InterventionsAllowed,
 		PolicyBatteryThreshold: s.Policy.BatteryThreshold,

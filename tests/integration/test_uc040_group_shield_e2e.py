@@ -13,7 +13,7 @@ What this proves:
 - the global allow-list stays the outer gate: under ``full`` (no group lever) the event
   is dispatched once as ``grant_group_shield`` and blocked ``not_allowed``, nobody is
   shielded and the per-game group count does not move (UC-048 A14 step 4, UC-040 A22);
-- under the opt-in ``shadow_group`` variant (#2467 PR 4) the next event applies: one
+- under the opt-in ``standard_group`` variant (#2467 PR 4) the next event applies: one
   unblocked ``agent_intervention`` and one ``player_shielded`` per player of the set
   (UC-048 A13). The CI game set resolves ``shield.activation`` to ``instant``.
 
@@ -86,7 +86,7 @@ async def test_uc040_group_shield_event_blocked_then_applied(
     docker_compose,
     headless_cleanup,
 ):
-    """Three shadow players: blocked by the allow-list under ``full``, all shielded under ``shadow_group``."""
+    """Three shadow players: blocked by the allow-list under ``full``, all shielded under ``standard_group``."""
     _serve_group_gate(docker_compose, flag_service)
     headless_cleanup.add_tag(TAG)
     game_client, game_channel = await get_game_client(docker_compose)
@@ -138,7 +138,7 @@ async def test_uc040_group_shield_event_blocked_then_applied(
         )
 
         # UC-048 A13 (#2467 PR 4): the opt-in group variant lets the next event apply.
-        set_interventions_allowed("shadow_group")
+        set_interventions_allowed("standard_group")
         with flagd_probe_client(docker_compose, "agent") as client:
             assert poll_until(
                 lambda: (
@@ -147,7 +147,7 @@ async def test_uc040_group_shield_event_blocked_then_applied(
                         "interventions_allowed", "", EvaluationContext()
                     )
                 )
-            ), "flagd did not serve interventions_allowed=shadow_group"
+            ), "flagd did not serve interventions_allowed=standard_group"
         append_event(
             "group_shield", game_id, {"serials": ",".join(serials), "seconds": "5"}
         )

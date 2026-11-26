@@ -54,7 +54,7 @@ func TestFFAQuestions_GroupOptions(t *testing.T) {
 	t.Run("UC-048/A13 without the group lever the target question is unchanged", func(t *testing.T) {
 		got := target(FFAQuestions(st, []string{IntvGrantShield}))
 		if !slices.Equal(got.Options, []string{"none", "A", "B", "C"}) || strings.Contains(got.Text, "group") {
-			t.Fatalf("target = %+v, want the v1 question", got)
+			t.Fatalf("target = %+v, want the unchanged question", got)
 		}
 	})
 	t.Run("UC-048/A13 with the group lever the group options follow the serials", func(t *testing.T) {

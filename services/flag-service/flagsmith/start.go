@@ -43,6 +43,8 @@ func newStarter(l *Link) starter { return &startup{l: l, pace: newAdminPacer(l)}
 type startup struct {
 	l    *Link
 	pace *adminPacer
+	// stopOn: the created agent/enabled was switched on by its reference write.
+	stopOn bool
 
 	mu      sync.Mutex
 	cleanup chan struct{} // closed when the stale identity cleanup ended

@@ -30,6 +30,8 @@ type stackCase struct {
 func TestStackValuePatchBody(t *testing.T) {
 	cases := []stackCase{
 		{name: "declared variant", flag: "decision.backend", variant: "jev", raw: `"jev"`, want: `{"environment_default":{"enabled":true,"value":{"type":"string","value":"jev"}}}`},
+		{name: "three-state enabled watch", flag: "enabled", variant: "watch", raw: `"watch"`, want: `{"environment_default":{"enabled":true,"value":{"type":"string","value":"watch"}}}`},
+		{name: "three-state enabled act", flag: "enabled", variant: "act", raw: `"act"`, want: `{"environment_default":{"enabled":true,"value":{"type":"string","value":"act"}}}`},
 		{name: "integer range", flag: "decision.min_interval_ms", raw: `2500`, want: `{"environment_default":{"enabled":true,"value":{"type":"integer","value":"2500"}}}`},
 		{name: "number without bounds is decimal text", flag: "decision.claude.act_confidence_threshold", raw: `0.8`, want: `{"environment_default":{"enabled":true,"value":{"type":"string","value":"0.8"}}}`},
 		{name: "object is compact JSON text", flag: "llm.eligible_game_kinds", raw: `{"b": 1, "a": [1, 2]}`, want: `{"environment_default":{"enabled":true,"value":{"type":"string","value":"{\"b\":1,\"a\":[1,2]}"}}}`},
@@ -75,7 +77,7 @@ func TestIdentityOverrideBody(t *testing.T) {
 		{name: "game integer", set: "interventions", flag: "global_sensitivity_override", scopeName: registry.ScopeGame, scope: state.Scope{GameID: "g1"}, raw: `3`, identifier: "game:g1", value: `3`},
 		{name: "real game player (its controller, #2624)", set: "interventions", flag: "player_sensitivity_factor", scopeName: registry.ScopeGameSerial, scope: state.Scope{GameID: "g1", Serial: "MOCK0001"}, raw: `1.5`, identifier: "controller:MOCK0001", value: `"1.5"`, game: gameOf("g1", "real", "MOCK0001")},
 		{name: "shadow game player", set: "interventions", flag: "player_sensitivity_factor", scopeName: registry.ScopeGameSerial, scope: state.Scope{GameID: "g1", Serial: "MOCK0001"}, raw: `1.5`, identifier: "game:g1:MOCK0001", value: `"1.5"`, game: gameOf("g1", "shadow", "MOCK0001")},
-		{name: "experiment arm", set: "agent", flag: "decision.prompt_profile", scopeName: registry.ScopeExperiment, scope: state.Scope{ExperimentID: "e1", Arm: "armA"}, variant: "neutral", raw: `"neutral"`, identifier: "experiment:e1:armA", value: `"neutral"`},
+		{name: "experiment arm", set: "game", flag: "shield.activation", scopeName: registry.ScopeExperiment, scope: state.Scope{ExperimentID: "e1", Arm: "armA"}, variant: "hold", raw: `"hold"`, identifier: "experiment:e1:armA", value: `"hold"`},
 		{name: "real", set: "game", flag: "windows", scopeName: registry.ScopeReal, scope: state.Scope{GameKind: "real"}, raw: `{"min": 1}`, identifier: "real", value: `"{\"min\":1}"`},
 	}
 	for _, c := range cases {

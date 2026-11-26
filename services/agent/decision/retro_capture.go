@@ -317,7 +317,7 @@ func (rc *RetroCoordinator) SetOperatorBriefSource(src OperatorBriefSource) { rc
 
 // SetBriefDelivered injects the lookup that says whether a game's remote decide
 // requests carried the brief (main.go wires BriefLog.Delivered, #2695): the brief
-// reaches claude only, so a jev, rules or stub game never saw it. nil =
+// reaches claude and jev, so a rules or stub game never saw it. nil =
 // never delivered. Set at wiring.
 func (rc *RetroCoordinator) SetBriefDelivered(f func(gameID string) bool) { rc.briefDelivered = f }
 

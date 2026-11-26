@@ -4,21 +4,19 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/open-feature/go-sdk/openfeature"
 
 	"github.com/joustmania/agent/experiment"
 	"github.com/joustmania/agent/experiment/journal"
 	"github.com/joustmania/agent/flags"
-	"github.com/joustmania/agent/gamecontext"
 	"github.com/joustmania/agent/promote"
 )
 
 // promotion_killswitch_uc043_test.go covers the experiment loop's half of the
 // kill-switch revert of an autonomous promotion (UC-043 A1, UC-045 step 5, #1704)
 // and the live fitness.* thresholds of experiment fitness scoring (UC-043 step 4,
-// D-F5, #1740), plus the game start the autonomous watch filters on (#1702).
+// D-F5, #1740).
 
 // fakeKillSwitchPromotions records each RevertOnKillSwitch call and returns the
 // configured reverts once.
@@ -68,7 +66,7 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 			Verdict: experiment.NewVerdict(3, 0.5), Log: testLogger(),
 		})
 		agentOn := true
-		loop.enabledOverride = func(context.Context) bool { return agentOn }
+		loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(agentOn) }
 		lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
 		ctx := context.Background()
 		loop.allocateIfEnabled(ctx)
@@ -102,7 +100,7 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 
 	t.Run("UC-043/A1 enabled off with experiments_enabled off still reverts", func(t *testing.T) {
 		loop, _, lc := loopForConfigTest(t, 8)
-		loop.enabledOverride = func(context.Context) bool { return false }
+		loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(false) }
 		lc.set(flags.ExperimentConfig{Enabled: false})
 		promotions := &fakeKillSwitchPromotions{}
 		loop.promotions = promotions
@@ -114,22 +112,46 @@ func TestUC043_A1_KillSwitchTickRevertsPromotions(t *testing.T) {
 			t.Fatalf("kill-switch revert ran %d times over 2 ticks, want 2 (every tick while off)", promotions.calls)
 		}
 	})
+
+	t.Run("UC-045/main watch aborts experiments but reverts no promotion", func(t *testing.T) {
+		loop, _, lc := loopForConfigTest(t, 8)
+		state := flags.EnabledAct
+		loop.enabledOverride = func(context.Context) flags.EnabledState { return state }
+		lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
+		ctx := context.Background()
+		loop.allocateIfEnabled(ctx)
+		if got := loop.registry.LiveCount(); got != 1 {
+			t.Fatalf("precondition: LiveCount = %d, want 1", got)
+		}
+		promotions := &fakeKillSwitchPromotions{}
+		loop.promotions = promotions
+
+		state = flags.EnabledWatch
+		loop.allocateIfEnabled(ctx)
+
+		if got := loop.registry.LiveCount(); got != 0 {
+			t.Fatalf("LiveCount = %d in watch, want 0: arm writes need enabled=act", got)
+		}
+		if promotions.calls != 0 {
+			t.Fatalf("kill-switch revert ran %d times in watch, want 0 (watch is not a stop)", promotions.calls)
+		}
+	})
 }
 
 // fitnessFlagsEvaluator serves fitness.* int flags from a map; everything else
-// falls back to the caller's default (enabled is on).
+// falls back to the caller's default (enabled is act).
 type fitnessFlagsEvaluator struct {
 	ints map[string]int64
 }
 
-func (e fitnessFlagsEvaluator) BooleanValue(_ context.Context, k string, d bool, _ openfeature.EvaluationContext, _ ...openfeature.Option) (bool, error) {
-	if k == "enabled" {
-		return true, nil
-	}
+func (e fitnessFlagsEvaluator) BooleanValue(_ context.Context, _ string, d bool, _ openfeature.EvaluationContext, _ ...openfeature.Option) (bool, error) {
 	return d, nil
 }
 
-func (e fitnessFlagsEvaluator) StringValue(_ context.Context, _ string, d string, _ openfeature.EvaluationContext, _ ...openfeature.Option) (string, error) {
+func (e fitnessFlagsEvaluator) StringValue(_ context.Context, k string, d string, _ openfeature.EvaluationContext, _ ...openfeature.Option) (string, error) {
+	if k == "enabled" {
+		return "act", nil
+	}
 	return d, nil
 }
 
@@ -165,7 +187,7 @@ func TestUC043_Step4_FitnessUsesLiveThresholds(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-043/main step 7 real-game fitness scores with the live flags and records the start", func(t *testing.T) {
+	t.Run("UC-043/main step 5 real-game fitness scores with the live flags", func(t *testing.T) {
 		store := experiment.NewFitnessStore(0)
 		loop := loopWithStore(store)
 		loop.thresholds = src
@@ -179,9 +201,6 @@ func TestUC043_Step4_FitnessUsesLiveThresholds(t *testing.T) {
 		if got[0].Fitness <= static {
 			t.Fatalf("recorded real fitness = %v, static = %v: the live fitness.* flag was ignored", got[0].Fitness, static)
 		}
-		if want := time.Unix(1_000, 0); !got[0].StartedAt.Equal(want) {
-			t.Fatalf("recorded StartedAt = %v, want the game's start %v", got[0].StartedAt, want)
-		}
 	})
 
 	t.Run("UC-043/main step 4 the production loop is wired to the live flags", func(t *testing.T) {
@@ -191,47 +210,6 @@ func TestUC043_Step4_FitnessUsesLiveThresholds(t *testing.T) {
 		}
 		if loop.fitnessThresholds().EnduranceMinSessionSeconds != 60 {
 			t.Fatalf("buildExperimentLoop thresholds = %+v, want the live endurance minimum 60", loop.fitnessThresholds())
-		}
-	})
-}
-
-// UC: UC-043 main
-func TestUC043_Step7_LongRealGameCountsAfterWrite(t *testing.T) {
-	t.Run("UC-043/main step 7 a long 4-player game keeps its start past the timeline ring", func(t *testing.T) {
-		start := time.Unix(50_000, 0)
-		now := start
-		store := gamecontext.NewStore(time.Hour, time.Hour, func() time.Time { return now })
-		var ended *gamecontext.GameContext
-		store.OnGameEnd = func(gc gamecontext.GameContext) { ended = &gc }
-
-		store.SetGameActive(true)
-		store.SetGameKind(experiment.GameKindReal)
-		serials := []string{"p1", "p2", "p3", "p4"}
-		for i := 0; i < 200; i++ { // far more state deltas than the 64-entry timeline ring
-			now = now.Add(time.Second)
-			store.SetPlayerIntensity(serials[i%4], float64(i%10)/10+0.05)
-		}
-		store.SetGameActive(false)
-		if ended == nil {
-			t.Fatal("precondition: the store fired no game end")
-		}
-		for _, ev := range ended.Timeline {
-			if ev.Kind == gamecontext.EventPhase && ev.Detail == "start" {
-				t.Fatal("precondition: the start phase event is still in the timeline ring; the game is not long enough")
-			}
-		}
-
-		fitness := experiment.NewFitnessStore(0)
-		loop := loopWithStore(fitness)
-		loop.onGameEnd(*ended)
-
-		writeAt := start.Add(-time.Minute) // the promotion was written before this game started
-		got := fitness.RecentRealSince("endurance", writeAt, 5)
-		if len(got) != 1 {
-			t.Fatalf("watch window holds %d samples of a game that started after the write, want 1", len(got))
-		}
-		if !got[0].StartedAt.Equal(start) {
-			t.Fatalf("recorded StartedAt = %v, want the session start %v", got[0].StartedAt, start)
 		}
 	})
 }

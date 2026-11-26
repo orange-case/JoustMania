@@ -6,10 +6,11 @@
     "enabled": {
       "state": "ENABLED",
       "variants": {
-        "on": true,
-        "off": false
+        "off": "off",
+        "watch": "watch",
+        "act": "act"
       },
-      "defaultVariant": "off"
+      "defaultVariant": "watch"
     },
     "objectives": {
       "state": "ENABLED",
@@ -56,8 +57,7 @@
         "standard": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield",
         "full": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,adjust_global_sensitivity,adjust_global_difficulty,eliminate_player,revive_player,end_game",
         "shadow_experimental": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,adjust_global_sensitivity,adjust_global_difficulty,eliminate_player,revive_player,end_game,set_player_handicap,ramp_tempo,toughness_boost,soft_penalty,auto_rubberband",
-        "standard_group": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,grant_group_shield",
-        "shadow_group": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,adjust_global_sensitivity,adjust_global_difficulty,eliminate_player,revive_player,end_game,set_player_handicap,ramp_tempo,toughness_boost,soft_penalty,auto_rubberband,grant_group_shield"
+        "standard_group": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,grant_group_shield"
       },
       "defaultVariant": "ambient"
     },
@@ -630,14 +630,6 @@
       },
       "defaultVariant": "default"
     },
-    "interventions_enabled": {
-      "state": "ENABLED",
-      "variants": {
-        "off": false,
-        "on": true
-      },
-      "defaultVariant": "off"
-    },
     "decision.backend": {
       "state": "ENABLED",
       "variants": {
@@ -762,14 +754,6 @@
       },
       "defaultVariant": "default"
     },
-    "decision.prompt_profile": {
-      "state": "ENABLED",
-      "variants": {
-        "v1": "v1",
-        "neutral": "neutral"
-      },
-      "defaultVariant": "v1"
-    },
     "decision.operator_brief": {
       "state": "ENABLED",
       "variants": {
@@ -797,14 +781,6 @@
         }
       },
       "defaultVariant": "default"
-    },
-    "decision.goal_in_prompt": {
-      "state": "ENABLED",
-      "variants": {
-        "on": true,
-        "off": false
-      },
-      "defaultVariant": "off"
     },
     "goal.profile": {
       "state": "ENABLED",
@@ -894,33 +870,6 @@
         "default": 20.0,
         "short": 10.0,
         "long": 40.0
-      },
-      "defaultVariant": "default"
-    },
-    "promotion.rewatch_interval_seconds": {
-      "state": "ENABLED",
-      "variants": {
-        "short": 30,
-        "default": 60,
-        "long": 120
-      },
-      "defaultVariant": "default"
-    },
-    "promotion.rewatch_timeout_seconds": {
-      "state": "ENABLED",
-      "variants": {
-        "short": 1800,
-        "default": 3600,
-        "long": 7200
-      },
-      "defaultVariant": "default"
-    },
-    "promotion.revert_cooldown_seconds": {
-      "state": "ENABLED",
-      "variants": {
-        "short": 300,
-        "default": 600,
-        "long": 1200
       },
       "defaultVariant": "default"
     }

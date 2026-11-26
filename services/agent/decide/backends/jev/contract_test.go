@@ -29,13 +29,20 @@ package jev
 // derived from the recorded bodies by mutation, so no fixture is hand-written.
 //
 // When the request encoding changes on purpose (criteria wording, state
-// shape), re-record: TestContract_Request fails until the request fixtures
-// match encodeRequest again.
+// shape), re-record, or regenerate only the request side:
+//
+//	go test ./decide/backends/jev -run 'TestContract|TestGoalCriterion_Fixture' -update-request-fixtures
+//
+// The request fixtures carry the effect-only wording (decide-contract.md §3)
+// regenerated that way; the responses are the ones Jev gave to the earlier
+// wording, so a live re-record is due before the gate is re-calibrated.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"math"
 	"os"
@@ -53,6 +60,8 @@ import (
 
 const fixtureModel = "jev-latest"
 
+var updateRequestFixtures = flag.Bool("update-request-fixtures", false, "rewrite the testdata/*request*.json fixtures from encodeRequest")
+
 func loadFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", name))
@@ -64,6 +73,17 @@ func loadFixture(t *testing.T, name string) []byte {
 
 func jsonEqual(t *testing.T, got []byte, fixture string) {
 	t.Helper()
+	if *updateRequestFixtures {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, got, "", "  "); err != nil {
+			t.Fatal(err)
+		}
+		pretty.WriteByte('\n')
+		if err := os.WriteFile(filepath.Join("testdata", fixture), pretty.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	var g, w any
 	if err := json.Unmarshal(got, &g); err != nil {
 		t.Fatal(err)

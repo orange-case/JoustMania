@@ -63,8 +63,8 @@
             },
             {
               "key": "agent.enabled",
-              "type": "bool",
-              "value": true
+              "type": "string",
+              "value": "act"
             },
             {
               "key": "agent.objectives",
@@ -345,8 +345,8 @@
             },
             {
               "key": "agent.enabled",
-              "type": "bool",
-              "value": false
+              "type": "string",
+              "value": "off"
             },
             {
               "key": "agent.objectives",

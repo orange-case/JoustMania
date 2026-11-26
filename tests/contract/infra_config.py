@@ -16,8 +16,8 @@ COLLECTOR_FILE = REPO_ROOT / "services" / "otel-collector" / "config.yaml"
 
 
 DECISION_DIR = REPO_ROOT / "services" / "agent" / "decision"
-# The decide span's name before #2584; the collector filter, Grafana, the talk
-# pre-flight and agent_group_ab still accept it for the transition.
+# The decide span's name before #2584; the collector filter, Grafana and the talk
+# pre-flight still accept it for the transition.
 OLD_DECIDE_SPAN = "agent.decide"
 
 

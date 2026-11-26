@@ -45,8 +45,7 @@ def status(**kw) -> menu_pb2.GetMenuStatusResponse:
         "ready_count": 3,
         "connected_count": 5,
         "agent_enabled": True,
-        "agent_enabled_state": "on",
-        "agent_interventions_enabled_state": "on",
+        "agent_enabled_state": "act",
         "agent_level": "standard",
         "agent_backend": "claude",
         "sensitivity": 3,
@@ -204,7 +203,6 @@ def test_planned_fields_show_values_only_as_non_empty_strings():
             f: getattr(status(), f)
             for f in (
                 "agent_enabled_state",
-                "agent_interventions_enabled_state",
                 "agent_level",
                 "agent_enabled",
                 "agent_backend",
@@ -374,12 +372,11 @@ def test_result_screen_label_in_title_and_word_in_row_two():
 def _statuses():
     """Every kind of value a status can carry, the unknown and out-of-ladder ones included."""
     yield None
-    for selection, backend, level, gate, enabled, operator in itertools.product(
+    for selection, backend, level, enabled, operator in itertools.product(
         ("JoustFFA", "NonStop", "Commander", ""),
         ("rules", "jev", "", "gpt"),
         ("none", "full", "", "probe"),
-        ("on", "off"),
-        ("on", "off", "unknown"),
+        ("act", "off", "watch", "on", "unknown", ""),
         (
             {},
             {"sensitivity": "automatic", "num_teams": "six", "shield.activation": "automatic"},
@@ -390,7 +387,6 @@ def _statuses():
             selection=selection,
             agent_backend=backend,
             agent_level=level,
-            agent_interventions_enabled_state=gate,
             agent_enabled_state=enabled,
             operator_settings=operator,
             sensitivity=(len(selection) % 7) - 1,

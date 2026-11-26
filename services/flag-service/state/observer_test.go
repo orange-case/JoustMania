@@ -184,12 +184,12 @@ func TestObserver_MutationPaths(t *testing.T) {
 func TestSlotVersion_CompareAndSet(t *testing.T) {
 	t.Run("UC-054/BR-005 a local kill switch between read and write wins", func(t *testing.T) {
 		f, rec := observedFixture(t, fixtureOpts{})
-		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "menu"})
+		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Writer: "menu"})
 		cs, _ := f.state.Changes()
 		read := findChange(t, cs, "enabled", registry.ScopeStack)
 		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "menu"})
 		rec.take()
-		_, err := f.state.Put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "flagsmith", IfSlotVersion: read.SlotVersion})
+		_, err := f.state.Put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Writer: "flagsmith", IfSlotVersion: read.SlotVersion})
 		wantReason(t, err, 412, fserr.SlotChanged)
 		if got := rec.take(); len(got) != 0 {
 			t.Fatalf("got %+v, want nothing changed", got)
@@ -234,7 +234,7 @@ func TestSlotVersion_CompareAndSet(t *testing.T) {
 			scope           Scope
 			write           WriteRequest
 		}{
-			{"stack", "agent", "enabled", Scope{}, WriteRequest{Variant: "on"}},
+			{"stack", "agent", "enabled", Scope{}, WriteRequest{Variant: "act"}},
 			{"game:<id>", "interventions", "volume_override", Scope{GameID: "game_a"}, WriteRequest{Value: raw("0.5")}},
 		}
 		for _, tc := range cases {

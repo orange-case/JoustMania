@@ -14,7 +14,7 @@ Built with TypeScript and Vite, served in production by [static-web-server](http
 - **Game controls** -- mode selector dropdown, start/stop buttons
 - **Game event log** -- recent events (game start, player deaths, winner) in the status bar
 - **Embedded observability** -- tabbed Grafana dashboard and Jaeger trace views via iframes
-- **Agent decisions** -- the Agent tab polls the agent's read-only `GET /experiments/state` (through envoy, like the `/experiments` dossier) every 1.5s and shows one row per `invoke_agent joustmania-agent` span the agent holds; the Experiments tab reads the same answer every 5s (decisions recorded before #2584 are under `agent.decide` and not shown): backend (requested vs used), model, answer, confidence against the act threshold, outcome, rationale and a trace link, plus a current-backend strip
+- **Agent decisions** -- the Agent tab polls the agent's read-only `GET /experiments/state` (through envoy, like the `/experiments` dossier) every 1.5s and shows one row per `invoke_agent joustmania-agent` span the agent holds; the Experiments tab reads the same answer every 5s (decisions recorded before #2584 are under `agent.decide` and not shown): backend (requested vs used), model, answer, confidence against the act threshold, outcome, rationale and a trace link, plus a current-backend strip. Its flag panel shows the followed game's effective flags, the agent state (`agent/enabled`: `off` / `watch` / `act`) first; in `watch` it notes that decisions are made and recorded but no intervention is written, and a decision held back by watch reads `not applied: agent in watch`
 
 ## Configuration
 

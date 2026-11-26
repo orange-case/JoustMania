@@ -7,25 +7,19 @@ import (
 	"github.com/joustmania/agent/decision"
 )
 
-// InterventionGate resolves the LIVE interventions_enabled safety gate (#1213) at
-// USE-TIME. *flags.Flags satisfies it via InterventionsEnabled; tests supply a
-// fake. It is read on EVERY Apply (never cached at construction) so flipping the
-// flag in flagd starts/stops actuation with no restart, and a flagd outage at the
-// moment of an apply FAILS CLOSED (InterventionsEnabled returns the fail-closed
-// default false) so the agent never writes an intervention when it cannot
-// confirm the gate is on (#1177/#1217).
+// InterventionGate resolves the live `enabled` state at use time: true only when
+// it is act. *flags.Flags satisfies it via Applying; tests supply a fake. It is
+// read on every Apply, never cached, so a flag flip takes effect with no restart,
+// and a flagd outage fails closed (off), so the agent never writes when it cannot
+// confirm `enabled` is act.
 type InterventionGate interface {
-	InterventionsEnabled(ctx context.Context) bool
+	Applying(ctx context.Context) bool
 }
 
-// GatedActionSink wraps the real intervention Writer behind the LIVE
-// interventions_enabled flag (#1213). It REPLACES the old startup-time
-// AGENT_INTERVENTIONS_ENABLED env gate (which selected the Writer-or-nil sink ONCE
-// in main.go and so could never react to a flag flip and failed open to whatever
-// sink was chosen at boot). Apply re-evaluates the gate per decision against the
-// live Flags: when on it delegates to the real Writer; when off (or flagd
-// unreachable) it discards the decision exactly like the loop's default discarding sink, so a fully-gated,
-// decided intervention is still recorded/spanned by the loop but never applied.
+// GatedActionSink wraps the real intervention Writer behind the live `enabled`
+// state. When it is act, Apply delegates to the Writer; in watch (or off, or with
+// flagd unreachable) it discards the decision like the loop's default sink, so a
+// decided intervention is still recorded and spanned by the loop but never applied.
 type GatedActionSink struct {
 	gate   InterventionGate
 	writer decision.ActionSink
@@ -33,8 +27,7 @@ type GatedActionSink struct {
 }
 
 // NewGatedActionSink wraps writer behind gate. writer is the real sink applied when
-// the gate is on (typically *Writer); gate is the live interventions_enabled
-// source. log nil → slog.Default().
+// `enabled` is act (typically *Writer). log nil → slog.Default().
 func NewGatedActionSink(gate InterventionGate, writer decision.ActionSink, log *slog.Logger) *GatedActionSink {
 	if log == nil {
 		log = slog.Default()
@@ -42,25 +35,21 @@ func NewGatedActionSink(gate InterventionGate, writer decision.ActionSink, log *
 	return &GatedActionSink{gate: gate, writer: writer, log: log}
 }
 
-// Apply evaluates the LIVE interventions_enabled gate (#1213) and delegates to the
-// real writer only when it is on; otherwise it is a no-op (the decision was already
-// recorded/spanned by the loop). Fail-closed: a flagd error inside the gate
-// resolves to false, so the agent does NOT write when the control plane is
-// unreachable.
+// Apply delegates to the real writer only while `enabled` is act; otherwise it is a
+// no-op (the loop already recorded and spanned the decision).
 func (s *GatedActionSink) Apply(ctx context.Context, d decision.Decision) error {
 	_, err := s.ApplyReported(ctx, d)
 	return err
 }
 
-// ApplyReported is Apply with the outcome reported: applied is true only when the
-// LIVE gate was on and the real writer ran. The loop counts
+// ApplyReported is Apply with the outcome reported: applied is true only when
+// `enabled` was act and the real writer ran. The loop counts
 // agent_interventions_applied_total only for applied=true, so a gated no-op is not
-// counted as an applied intervention (UC-040 A11, #1681).
+// counted as an applied intervention (UC-040 A11).
 func (s *GatedActionSink) ApplyReported(ctx context.Context, d decision.Decision) (applied bool, err error) {
-	// UC-045 BR-001: interventions_enabled is the actuation gate of the three.
-	if !s.gate.InterventionsEnabled(ctx) {
+	if !s.gate.Applying(ctx) {
 		s.log.Debug("agent.intervention_gated_off",
-			"intervention", d.Intervention, "flag", keyInterventionsEnabledLog)
+			"intervention", d.Intervention, "flag", keyEnabledLog)
 		return false, nil
 	}
 	return true, s.writer.Apply(ctx, d)
@@ -70,7 +59,5 @@ func (s *GatedActionSink) ApplyReported(ctx context.Context, d decision.Decision
 // interface, so a signature drift would silently count gated no-ops again.
 var _ decision.ActionApplier = (*GatedActionSink)(nil)
 
-// keyInterventionsEnabledLog is the flag key surfaced in the gated-off log line.
-// Mirrors flags.keyInterventionsEnabled (kept local so actions does not need the
-// flags key const exported).
-const keyInterventionsEnabledLog = "interventions_enabled"
+// keyEnabledLog is the flag key surfaced in the gated-off log line.
+const keyEnabledLog = "enabled"

@@ -37,7 +37,6 @@ KEYS = {
     "agent": [
         "interventions_allowed",
         "enabled",
-        "interventions_enabled",
         "decision.backend",
         *setting_ladders.AGENT_ROW_LADDERS,
     ],
@@ -212,7 +211,9 @@ async def test_mode_ladder_preview_equals_commit(menu, flags):
 
 # (enabled, level): the live level moves whatever `enabled` is (UC-015 BR-004), at every rung and off the ladder.
 AGENT_LEVEL_STARTS = [
-    (enabled, level) for enabled in ("on", "off") for level in ("none", "ambient", "standard", "full", "probe")
+    (enabled, level)
+    for enabled in ("off", "watch", "act")
+    for level in ("none", "ambient", "standard", "full", "probe")
 ]
 
 

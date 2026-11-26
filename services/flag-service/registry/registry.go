@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"sort"
@@ -108,60 +109,28 @@ type Policy struct {
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
-// killSwitches is the set of kill-switch flags ("set/key"): a persisted write
-// or clear of one whose state-file save fails still applies in memory and
-// reports persisted false, instead of being rolled back (#2368, C-034). It is
-// a Go set, not a registry.yaml attribute, because released flag-service images
-// parse the checkout's registry.yaml strictly and would refuse a new key.
-// flags.md §13 ("Failed save, kill switches") lists the same set; a test keeps
-// them in sync. Only a persist row can use it: a non-persist flag never takes
-// a persisted write.
+// killSwitches is the kill-switch list of flags.md §13.6 ("set/key"); a test
+// keeps them equal. A Flagsmith round applies these first, and a persist row
+// among them applies a persisted write even when the save fails. A Go set, not
+// a registry.yaml attribute, until the pinned release parses the yaml tolerantly.
 var killSwitches = map[string]bool{
-	"agent/interventions_allowed": true,
+	"agent/enabled":                                 true,
+	"agent/interventions_allowed":                   true,
+	"agent/experiments_enabled":                     true,
+	"agent/experiment_proposer_enabled":             true,
+	"agent/llm.max_requests_per_minute":             true,
+	"agent/decision.claude.max_requests_per_minute": true,
 }
 
-// KillSwitches returns the kill-switch set as sorted "set/key" names.
-func KillSwitches() []string {
-	out := make([]string, 0, len(killSwitches))
-	for k := range killSwitches {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
+// IsKillSwitch reports whether set/key is a kill switch.
+func IsKillSwitch(set, key string) bool { return killSwitches[id(set, key)] }
 
 // AppliesWhenPersistFails reports whether a persisted write or clear of this
 // flag applies in memory even when the state file cannot be saved: a kill
 // switch must take effect now, a restart bringing the old value back is the
-// smaller risk (#2368). Every other flag is rolled back (500 persist_failed).
+// smaller risk. Every other flag is rolled back (500 persist_failed).
 func (p *Policy) AppliesWhenPersistFails() bool {
-	return killSwitches[p.Set+"/"+p.Key]
-}
-
-// sessionOnly holds, per persist row ("set/key"), the variants that are never
-// persisted: a stack write of one lives in memory over the persisted value, is
-// never sent to Flagsmith, and a restart drops it. A Go set, like killSwitches,
-// because released images parse registry.yaml strictly. flags.md §13 lists it.
-var sessionOnly = map[string]map[string]bool{
-	"agent/interventions_allowed": {"shadow_group": true},
-}
-
-// SessionOnly reports whether a stack write of variant on this row stays in
-// memory although the row persists.
-func (p *Policy) SessionOnly(variant string) bool {
-	return variant != "" && sessionOnly[p.Set+"/"+p.Key][variant]
-}
-
-// SessionOnlyVariants returns the session-only set as sorted "set/key=variant".
-func SessionOnlyVariants() []string {
-	var out []string
-	for k, vs := range sessionOnly {
-		for v := range vs {
-			out = append(out, k+"="+v)
-		}
-	}
-	sort.Strings(out)
-	return out
+	return p.Persist && IsKillSwitch(p.Set, p.Key)
 }
 
 // FlagsmithWriter is the writer label of the Flagsmith link's in-process
@@ -258,12 +227,17 @@ func LoadFile(path string, b *baseline.Baseline) (*Registry, error) {
 }
 
 // Parse decodes and validates a registry document against the baseline.
+// A key this release does not know is ignored with a WARN, so the checkout's
+// file may carry an attribute only a newer release reads (flags.md §13).
 func Parse(raw []byte, b *baseline.Baseline) (*Registry, error) {
-	var doc fileDoc
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
-		return nil, fmt.Errorf("registry: parse: %w", err)
+	doc, err := decodeRegistry(raw, true)
+	if err != nil {
+		lax, laxErr := decodeRegistry(raw, false)
+		if laxErr != nil {
+			return nil, fmt.Errorf("registry: parse: %w", laxErr)
+		}
+		slog.Warn("registry: unknown keys ignored", "error", err.Error())
+		doc = lax
 	}
 	r := &Registry{policies: map[string]*Policy{}}
 	for _, p := range doc.Flags {
@@ -276,6 +250,14 @@ func Parse(raw []byte, b *baseline.Baseline) (*Registry, error) {
 		r.policies[id(p.Set, p.Key)] = p
 	}
 	return r, nil
+}
+
+func decodeRegistry(raw []byte, strict bool) (fileDoc, error) {
+	var doc fileDoc
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(strict)
+	err := dec.Decode(&doc)
+	return doc, err
 }
 
 func validatePolicy(p *Policy, b *baseline.Baseline) error {

@@ -64,8 +64,8 @@ func TestGameContext_ExperimentArm(t *testing.T) {
 // UC: UC-045 A3
 func TestSetupFlagd_GameDomain(t *testing.T) {
 	t.Run("UC-048/A4 the game set is its own domain: default before its sync, served after", func(t *testing.T) {
-		agentSrc, gameSrc := newFakeFlagdSource("on"), newFakeFlagdSource("on")
-		agentSrc.set(true, "on")
+		agentSrc, gameSrc := newFakeFlagdSource("act"), newFakeFlagdSource("act")
+		agentSrc.set(true, "act")
 		ctx, cancel := context.WithCancel(context.Background())
 		f, _, shutdown, err := setupFlagd(ctx, fakeFactory(agentSrc), fakeFactory(gameSrc), nil, testSyncTiming, nil)
 		if err != nil {
@@ -78,7 +78,7 @@ func TestSetupFlagd_GameDomain(t *testing.T) {
 		if read() {
 			t.Fatal("shield.activation read trigger before the game domain synced")
 		}
-		gameSrc.set(true, "on")
+		gameSrc.set(true, "act")
 		waitBool(t, "shield.activation (game domain)", read, true, 5*time.Second)
 		if expiry, err := f.game.FloatValue(context.Background(), "shield.charge_expiry_seconds", 20, f.GameContext("g-1")); err != nil || expiry != 10 {
 			t.Fatalf("expiry = %v (%v), want 10 from the game set", expiry, err)

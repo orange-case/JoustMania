@@ -112,7 +112,7 @@ type Store struct {
 
 	// ownService is this agent's own OTEL service name. Telemetry from this
 	// service is skipped by the extractors: the collector fans the agent's own
-	// spans back to it (otlp/agent exporter), and while those spans carry no
+	// spans back to it (otlp_http/agent exporter), and while those spans carry no
 	// recognized signals anyway, the skip is cheap defense-in-depth against a
 	// self-ingestion feedback loop. Set once before serving; not mutex-guarded.
 	ownService string

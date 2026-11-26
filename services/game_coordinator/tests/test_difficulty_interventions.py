@@ -124,8 +124,8 @@ def make_manager(game=None, battery=None, threshold=20):
 
 
 class _AgentStub:
-    def get_boolean_value(self, key, default, _ctx=None):
-        return True if key == "enabled" else default
+    def get_string_value(self, key, default, _ctx=None):
+        return "act" if key == "enabled" else default
 
     def __init__(self, threshold):
         self._threshold = threshold
@@ -576,10 +576,9 @@ class _ScalarFlagClient:
 
 
 class _AllowAllAgent:
-    def get_boolean_value(self, key, default, _ctx=None):
-        return True if key == "enabled" else default
-
     def get_string_value(self, key, default, _ctx=None):
+        if key == "enabled":
+            return "act"
         # interventions_allowed is a STRING flag: comma-separated ids (#1127).
         if key == "interventions_allowed":
             return "adjust_music_tempo,adjust_global_sensitivity,adjust_player_sensitivity"

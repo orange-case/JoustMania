@@ -59,7 +59,7 @@
   "questions": {
     "ffa.magnitude": {
       "type": "score",
-      "instructions": "The agent will apply grant_shield (Make one player immune to elimination for a few seconds. Saves a player who is about to be eliminated unfairly). Which setting should it use?",
+      "instructions": "The agent will apply grant_shield (Make one player immune to elimination for a few seconds). Which setting should it use?",
       "criteria": [
         "The lowest setting: 3 seconds (shortest shield).",
         "A low setting: 4.75 seconds.",
@@ -70,11 +70,11 @@
     },
     "ffa.target": {
       "type": "choice",
-      "instructions": "The agent will apply grant_shield (Make one player immune to elimination for a few seconds. Saves a player who is about to be eliminated unfairly). Which player should receive it?",
+      "instructions": "The agent will apply grant_shield (Make one player immune to elimination for a few seconds). Which player should receive it?",
       "criteria": {
-        "MOCK0002": "Player MOCK0002. Safe: well below the death threshold (margin 1.70). Moving the least of 3 alive players. Most headroom of the alive players right now. Skill 0.90. In no danger: protection would be wasted on this player.",
-        "MOCK0003": "Player MOCK0003. Near the death threshold: one twitch from elimination (margin 0.10). Moving the most of 3 alive players. Currently struggling. Skill 0.25. About to be eliminated: protecting this player now matters most.",
-        "MOCK0004": "Player MOCK0004. Elevated danger: moving hard, some headroom left (margin 0.90). Moving the 2nd most of 3 alive players. Skill 0.50. Under some pressure: protection would help a little."
+        "MOCK0002": "Player MOCK0002. Safe: well below the death threshold (margin 1.70). Moving the least of 3 alive players. Most headroom of the alive players right now. Skill 0.90. In no danger right now.",
+        "MOCK0003": "Player MOCK0003. Near the death threshold: one twitch from elimination (margin 0.10). Moving the most of 3 alive players. Currently struggling. Skill 0.25. Near the death threshold right now.",
+        "MOCK0004": "Player MOCK0004. Elevated danger: moving hard, some headroom left (margin 0.90). Moving the 2nd most of 3 alive players. Skill 0.50. Under some pressure, some headroom left."
       }
     }
   }

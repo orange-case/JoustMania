@@ -88,7 +88,7 @@ type Summary struct {
 	InterventionsApplied int `json:"interventions_applied"`
 	// InterventionsBlocked is the number of interventions a gate refused this game:
 	// blocked by the permission chain (allow-list, battery, rate limit) plus
-	// actuation-gate no-ops (interventions_enabled off). A failed write is in
+	// actuation-gate no-ops (`enabled` watch). A failed write is in
 	// neither count. Falls back to the timeline's blocked entries when the tally
 	// was never populated (#1771).
 	InterventionsBlocked int `json:"interventions_blocked"`

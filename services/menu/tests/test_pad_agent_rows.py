@@ -137,8 +137,7 @@ def agent_client(flags: AgentRowService, **overrides):
             layer["value"] if layer else view["variant_values"][view["effective_default"]],
         )
     values |= {
-        "enabled": ("on", True),
-        "interventions_enabled": ("on", True),
+        "enabled": ("act", "act"),
         "interventions_allowed": ("standard", "a,b"),
     }
     values |= overrides
@@ -523,7 +522,7 @@ async def test_reset_clears_only_the_menus_own_overlay(servicer, flags, option):
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
 @pytest.mark.parametrize("option", IN_MEMORY_ROWS)
 async def test_reset_leaves_another_writers_value_alone(servicer, flags, option):
-    """D14: `talk-stage.sh`'s rate or goal, `agent-group-ab.sh`'s group shield or Flagsmith's value stay: no-op `ok`."""
+    """D14: `talk-stage.sh`'s rate or goal, a script's group shield or Flagsmith's value stay: no-op `ok`."""
     _low, high = LOW_HIGH[option]
     flags.set_stack(option, setting_ladders.RATE_VARIANTS.get(high, high), "talk-stage")
 

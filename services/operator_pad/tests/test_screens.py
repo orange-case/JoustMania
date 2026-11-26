@@ -31,8 +31,7 @@ def status(**kw) -> menu_pb2.GetMenuStatusResponse:
         "ready_count": 3,
         "connected_count": 5,
         "agent_enabled": True,
-        "agent_enabled_state": "on",
-        "agent_interventions_enabled_state": "on",
+        "agent_enabled_state": "act",
         "agent_level": "standard",
         "agent_backend": "claude",
         "sensitivity": 3,
@@ -57,7 +56,7 @@ def test_status_screen_lines():
         "JOUSTMANIA LOBBY",
         "FREE-FOR-ALL",  # BR-006 mode table: the full name wherever the pad names a mode
         "READY 3/5",
-        "AGENT ON STANDARD",
+        "AGENT ACT STANDARD",
         "BACKEND CLAUDE",
         "SENS 3 TEAMS AUTO",
         "SHIELD TRIG VOL NORM",
@@ -82,16 +81,17 @@ def test_status_screen_state_is_game_while_the_lifecycle_is_live_and_agent_off_w
 @pytest.mark.parametrize(
     ("fields", "line"),
     [
-        ({"agent_interventions_enabled_state": "off"}, "AGENT WATCH STANDARD"),  # UC-016 BR-011: only the gate closed
-        ({"agent_level": "none"}, "AGENT ON NONE"),  # a tuning level, not a stop
+        ({"agent_enabled_state": "watch"}, "AGENT WATCH STANDARD"),  # UC-016 BR-011
+        ({"agent_enabled_state": "maybe"}, "AGENT ?"),
+        ({"agent_level": "none"}, "AGENT ACT NONE"),  # a tuning level, not a stop
         (
-            {"agent_enabled": False, "agent_enabled_state": "off", "agent_interventions_enabled_state": "unknown"},
+            {"agent_enabled": False, "agent_enabled_state": "off", "agent_level": "probe"},
             "AGENT OFF",
         ),
         ({"agent_enabled": False, "agent_enabled_state": "off", "agent_level": ""}, "AGENT OFF"),
-        ({"agent_interventions_enabled_state": "unknown"}, "AGENT ?"),  # BR-013
+        ({"agent_enabled_state": "unknown"}, "AGENT ?"),  # BR-013
         ({"agent_level": "probe"}, "AGENT ?"),
-        ({"agent_level": "full"}, "AGENT ON FULL"),
+        ({"agent_level": "full"}, "AGENT ACT FULL"),
     ],
 )
 def test_status_screen_agent_line_follows_uc015_stopped_and_unknown_rules(fields, line):
@@ -160,7 +160,7 @@ def test_every_short_form_line_fits_21_characters():
         line = f"SHIELD {short('shield.activation', shield)} VOL {short('audio_volume.master', volume)}"
         assert len(line) <= WIDTH, line
     for level in AGENT_POLICY_LEVELS:
-        assert len(f"AGENT ON {short('agent_level', level)}") <= WIDTH
+        assert len(f"AGENT ACT {short('agent_level', level)}") <= WIDTH
     for backend in BACKENDS:
         assert len(f"BACKEND {short('decision.backend', backend)}") <= WIDTH
     for option in ("sensitivity", "num_teams", "shield.activation"):

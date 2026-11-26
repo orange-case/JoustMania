@@ -99,8 +99,8 @@ const (
 	// InterventionGrantGroupShield (#2467, UC-048 A13, BR-014) shields 2 to 6
 	// players with one decision, all or nothing (Decision.TargetSerials). The
 	// writer posts it as the group_shield event. Offered and permitted only while
-	// the group gate is open (group.go), and only the standard_group and
-	// shadow_group interventions_allowed variants name it.
+	// the group gate is open (group.go), and only the standard_group
+	// interventions_allowed variant names it.
 	InterventionGrantGroupShield = "grant_group_shield"
 
 	// InterventionNoop is the probe-mode synthetic intervention (ProbeRules). It

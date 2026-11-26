@@ -87,7 +87,7 @@ func TestRetro_OperatorBrief(t *testing.T) {
 
 // UC: UC-042 A13 BR-010
 // The brief log notes a game only when a remote request carried the brief (claude
-// only, never jev), and the retro tells the analyst whether the in-game agent
+// or jev), and the retro tells the analyst whether the in-game agent
 // saw the brief.
 func TestRetro_OperatorBriefDelivered(t *testing.T) {
 	const brief = "keep the red player alive"
@@ -110,9 +110,9 @@ func TestRetro_OperatorBriefDelivered(t *testing.T) {
 			t.Error("claude game not noted as brief-delivered")
 		}
 	})
-	t.Run("UC-042/A13 a jev game is not noted", func(t *testing.T) {
-		if noted(t, flags.DecisionBackendJev) {
-			t.Error("jev never gets the brief, but the game was noted")
+	t.Run("UC-042/A13 a jev request with the brief is noted", func(t *testing.T) {
+		if !noted(t, flags.DecisionBackendJev) {
+			t.Error("jev game not noted as brief-delivered")
 		}
 	})
 

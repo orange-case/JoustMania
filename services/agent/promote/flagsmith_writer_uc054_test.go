@@ -13,7 +13,7 @@ func TestFlagsmithOverlayIsNeverAPromotion(t *testing.T) {
 	ctx := context.Background()
 	svc := newPromotionService(t)
 	putOverlay(t, svc, "flagsmith", 2.0)
-	w := writerForTest(t, svc, t.TempDir())
+	w := writerForTest(t, svc)
 
 	t.Run("UC-054/BR-009 a flagsmith real overlay is not listed as promoted", func(t *testing.T) {
 		got, err := w.PromotedFlags(ctx)

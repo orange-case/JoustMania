@@ -59,6 +59,7 @@ func (s *startup) writeReferences(ctx context.Context, jobs []referenceJob) erro
 	if len(jobs) == 0 {
 		return nil
 	}
+	defer s.reportStopOff(jobs)
 	var doc *EnvironmentDocument
 	_, _, err := s.pace.do(ctx, true, nil, func() (int, error) {
 		d, _, _, err := s.l.client.EnvironmentDocument(ctx, "")
@@ -83,6 +84,10 @@ func (s *startup) writeReferences(ctx context.Context, jobs []referenceJob) erro
 		shown[fs.Feature.Name] = fs
 	}
 	for _, j := range jobs {
+		if isStopKey(j.k) && !j.created {
+			// An existing agent/enabled switched off is a stop: never written.
+			continue
+		}
 		fv, ok := s.referenceOf(j.k)
 		if !ok {
 			continue
@@ -289,6 +294,9 @@ func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue
 			return s.referenceFailed(ctx, j, rerr, false)
 		}
 		if !needsReference(cur, true, false, fv) {
+			if isStopKey(j.k) && cur.Enabled {
+				s.stopOn = true
+			}
 			if !cur.Enabled {
 				// Off and at the reference: Flagsmith applied the failed
 				// write (a timed-out PATCH), so the push ends ok. Turned on
@@ -303,6 +311,9 @@ func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue
 		}
 		werr = s.patchReference(sctx, j, fv)
 		if werr == nil {
+			if isStopKey(j.k) {
+				s.stopOn = true
+			}
 			end()
 			if old := fsText(cur.FeatureStateValue); isKillKey(j.k) && old != "" && old != fsText(fv.Value) {
 				// A kill switch value staged under the off toggle is not in
@@ -347,10 +358,25 @@ func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue
 	}
 }
 
+// reportStopOff says when the start created agent/enabled but could not
+// switch it on: the feature stays off, which reads as the stop.
+func (s *startup) reportStopOff(jobs []referenceJob) {
+	if s.stopOn {
+		return
+	}
+	for _, j := range jobs {
+		if isStopKey(j.k) && j.created {
+			s.l.Logger().Info("flagsmith: agent/enabled was created switched off and could not be switched on", "detail", "the stack reads off (the stop) until the feature is switched on in Flagsmith")
+			return
+		}
+	}
+}
+
 // patchReference sends the reference write once (adminPacer.once): its
 // retries are writeReference's, each after a re-read.
 func (s *startup) patchReference(ctx context.Context, j referenceJob, fv FSValue) error {
-	return s.pace.once(ctx, http.MethodPatch, s.l.futurePath(j.featureID), futureBodyOf(fv, false, s.l.options(j.k.Flag)), nil)
+	// A new agent/enabled starts switched on at its baseline: switched off it would read as the stop.
+	return s.pace.once(ctx, http.MethodPatch, s.l.futurePath(j.featureID), futureBodyOf(fv, isStopKey(j.k), s.l.options(j.k.Flag)), nil)
 }
 
 // relistOptions lists the feature's options again with the out side's

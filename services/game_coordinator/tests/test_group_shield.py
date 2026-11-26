@@ -507,9 +507,6 @@ class TestUC040BR033Gate:
 # The event, the handler and the manager
 # --------------------------------------------------------------------------- #
 class _AgentStub:
-    def get_boolean_value(self, key, default, _ctx=None):
-        return True if key == "enabled" else default
-
     def __init__(self, allowed, threshold=20):
         self._allowed = allowed
         self._threshold = threshold
@@ -518,6 +515,8 @@ class _AgentStub:
         return self._threshold if key == "policy.battery_threshold" else default
 
     def get_string_value(self, key, default, _ctx=None):
+        if key == "enabled":
+            return "act"
         return ",".join(self._allowed) if key == "interventions_allowed" else default
 
     def get_object_value(self, _key, default, _ctx=None):

@@ -206,7 +206,7 @@ func TestHTTPStatuses(t *testing.T) {
 		reason             string
 	}{
 		{"UC-053/A5 bad JSON", "PUT", "/agent/enabled", "{", 400, "malformed"},
-		{"UC-053/A5 unknown body field", "PUT", "/agent/enabled", map[string]any{"variant": "on", "owner": "x"}, 400, "malformed"},
+		{"UC-053/A5 unknown body field", "PUT", "/agent/enabled", map[string]any{"variant": "act", "owner": "x"}, 400, "malformed"},
 		{"UC-053/A5 empty body", "PUT", "/agent/enabled", "", 400, "malformed"},
 		{"UC-053/A5 unknown set", "PUT", "/nope/x", map[string]any{"variant": "a"}, 404, "unknown_flag_set"},
 		{"UC-053/A5 unknown flag", "GET", "/agent/nope", nil, 404, "unknown_flag"},
@@ -224,7 +224,7 @@ func TestHTTPStatuses(t *testing.T) {
 	}
 	t.Run("UC-053/A7 no stream: flag writes 503, the lifecycle is exempt", func(t *testing.T) {
 		e := newEnv(t, false)
-		if s, b := e.do("PUT", "/agent/enabled", map[string]any{"variant": "on"}); s != 503 || b["error"] != "no_sync_stream" {
+		if s, b := e.do("PUT", "/agent/enabled", map[string]any{"variant": "act"}); s != 503 || b["error"] != "no_sync_stream" {
 			t.Fatalf("%d %v", s, b)
 		}
 		if s, _ := e.do("PUT", "/games/g1", map[string]any{"coordinator_instance": "c/1"}); s != 200 {

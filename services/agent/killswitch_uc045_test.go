@@ -20,12 +20,13 @@ import (
 // and both gates fall back to off (A3).
 
 // switchableEvaluator is a flagd stand-in for the real flags client: it serves the
-// configured booleans while reachable, and fails every read once unreachable, as an
+// configured values while reachable, and fails every read once unreachable, as an
 // OpenFeature provider does when flagd is down. Missing keys fall back to the
 // caller's default (an undefined flag).
 type switchableEvaluator struct {
 	mu          sync.Mutex
 	booleans    map[string]bool
+	strings     map[string]string
 	objects     map[string]any
 	unreachable bool
 }
@@ -56,9 +57,14 @@ func (s *switchableEvaluator) BooleanValue(_ context.Context, k string, d bool, 
 	return d, nil
 }
 
-func (s *switchableEvaluator) StringValue(_ context.Context, _ string, d string, _ openfeature.EvaluationContext, _ ...openfeature.Option) (string, error) {
-	if s.down() {
+func (s *switchableEvaluator) StringValue(_ context.Context, k string, d string, _ openfeature.EvaluationContext, _ ...openfeature.Option) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unreachable {
 		return d, errFlagdUnreachable
+	}
+	if v, ok := s.strings[k]; ok {
+		return v, nil
 	}
 	return d, nil
 }
@@ -97,10 +103,10 @@ func TestKillSwitch_AbortsRunningExperiment(t *testing.T) {
 	loop, spawner, lc := loopForConfigTest(t, 8)
 	var mu sync.Mutex
 	agentEnabled := true
-	loop.enabledOverride = func(context.Context) bool {
+	loop.enabledOverride = func(context.Context) flags.EnabledState {
 		mu.Lock()
 		defer mu.Unlock()
-		return agentEnabled
+		return enabledState(agentEnabled)
 	}
 	lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
 	ctx := context.Background()
@@ -171,10 +177,10 @@ func TestKillSwitch_ForceEndsPatternGames(t *testing.T) {
 			expDefaults:    flags.ExperimentDefaults{Tick: time.Hour, DynamicMaxConcurrent: defaultDynamicMaxConcurrent},
 			dynamic:        newDynamicDeclarer(svc, nil),
 			configOverride: lc.get,
-			enabledOverride: func(context.Context) bool {
+			enabledOverride: func(context.Context) flags.EnabledState {
 				mu.Lock()
 				defer mu.Unlock()
-				return agentEnabled
+				return enabledState(agentEnabled)
 			},
 		}
 
@@ -227,7 +233,8 @@ func TestKillSwitch_FlagdUnreachableStopsExperimentLoop(t *testing.T) {
 	t.Setenv("AGENT_EXPERIMENTS_ENABLED", "true") // ignored since #1907
 	loop, spawner, _ := loopForConfigTest(t, 8)
 	ev := &switchableEvaluator{
-		booleans: map[string]bool{"enabled": true, "experiments_enabled": true, "experiment_dynamic_enabled": true},
+		strings:  map[string]string{"enabled": "act"},
+		booleans: map[string]bool{"experiments_enabled": true, "experiment_dynamic_enabled": true},
 	}
 	loop.flags = flags.New(ev, nil)
 	loop.configOverride = nil
@@ -259,4 +266,12 @@ func TestKillSwitch_FlagdUnreachableStopsExperimentLoop(t *testing.T) {
 	if recs := spawner.drain(); len(recs) != 0 {
 		t.Fatalf("flagd outage still spawned %d shadow games", len(recs))
 	}
+}
+
+// enabledState maps a test's on/off bool onto the `enabled` states the loop reads.
+func enabledState(on bool) flags.EnabledState {
+	if on {
+		return flags.EnabledAct
+	}
+	return flags.EnabledOff
 }

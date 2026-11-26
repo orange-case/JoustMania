@@ -6,7 +6,7 @@ rules decision is written and applied, with a harness sink in place of the
 collector. This journey runs the SHIPPED images under docker compose and covers
 the wiring that only the full stack has:
 
-- game coordinator -> otel-collector -> agent (``otlp/agent`` fan-out, UC-041);
+- game coordinator -> otel-collector -> agent (``otlp_http/agent`` fan-out, UC-041);
 - agent -> flag service -> flagd -> coordinator (the decision takes effect);
 - agent -> otel-collector -> Jaeger, read back through envoy (Jaeger query API v3,
   ``GET /jaeger/api/v3/traces?query.serviceName=agent&query.operationName=invoke_agent%20joustmania-agent&query.searchDepth=5``,
@@ -57,8 +57,10 @@ from tests.integration.setup_guard import SetupGuard, compose_diagnostics, run_b
 
 AGENT_SERVICE = "agent"
 ENVOY_SERVICE = "envoy"
-COLLECTOR_SERVICE = "otel-collector"
 COLLECTOR_CONTAINER = "joustmania-otel-collector"
+# State.StartedAt of the collector before the agent starts: the journey must see a
+# late agent served without a collector restart (NFR-024, #2883).
+_collector_started_at = ""
 COORDINATOR_SERVICE_NAME = "game-coordinator-service"  # its OTEL_SERVICE_NAME
 
 ENVOY_CONTAINER = "joustmania-envoy"  # container_name in docker-compose.yml
@@ -82,11 +84,10 @@ AGENT_SPANS_WITH_GAME_KIND = ("invoke_agent joustmania-agent", "agent.decision")
 # The Agent tab's decide query (agentDecide.ts DECIDE_OPERATION, DECIDE_TRACE_LIMIT).
 DECIDE_QUERY = {"service": "agent", "operation": "invoke_agent joustmania-agent", "limit": 5}
 
-# Interventions on, rules backend, the allow-list that lets the rules engine's
+# Agent at act (decisions applied), rules backend, the allow-list that lets the rules engine's
 # in-game levers through on both sides (services/flagd/ci/agent.json).
 AGENT_FLAGS = {
-    "enabled": "on",
-    "interventions_enabled": "on",
+    "enabled": "act",
     "interventions_allowed": "standard",
     "decision.backend": "rules",
 }
@@ -94,8 +95,6 @@ AGENT_FLAGS = {
 AGENT_UP_TIMEOUT = 600.0  # build (build mode) + health wait
 AGENT_WAIT_TIMEOUT = 180
 ENVOY_UP_TIMEOUT = 120.0
-COLLECTOR_RESTART_TIMEOUT = 120.0
-COLLECTOR_HEALTHY_TIMEOUT = 60.0
 START_TIMEOUT = 25.0
 # Log record -> coordinator export -> collector batch (1 s) -> agent, seen on its next evaluated cycle.
 AGENT_TRACE_TIMEOUT = 30.0
@@ -114,8 +113,7 @@ _FLAGS: FlagService | None = None
 def _flags_served(client) -> bool:
     ctx = EvaluationContext()
     return (
-        client.get_boolean_value("enabled", False, ctx) is True
-        and client.get_boolean_value("interventions_enabled", False, ctx) is True
+        client.get_string_value("enabled", "", ctx) == "act"
         and client.get_string_value("decision.backend", "", ctx) == "rules"
     )
 
@@ -127,7 +125,7 @@ def _set_agent_flags() -> None:
 
 @pytest.fixture(scope="module")
 def closed_loop_stack(docker_compose, request):
-    """The session stack plus the agent (interventions on, rules) and envoy."""
+    """The session stack plus the agent (on, rules) and envoy."""
     global _FLAGS
     cwd = str(docker_compose.context)
     prefix = list(docker_compose.docker_compose_command())
@@ -160,15 +158,18 @@ def closed_loop_stack(docker_compose, request):
         with flagd_probe_client(docker_compose, "agent") as client:
             poll_until(
                 lambda: (
-                    client.get_boolean_value("enabled", True, EvaluationContext())
-                    is False
+                    # The CI baseline (services/flagd/ci/agent.json) is off.
+                    client.get_string_value("enabled", "", EvaluationContext())
+                    == "off"
                 )
             )
 
 
 def _bring_up(docker_compose, prefix, cwd, env, no_build: bool) -> None:
     """Serve the agent flags, start the agent, then envoy; wait until envoy answers."""
-    global _envoy_jaeger_api, _envoy_root
+    global _envoy_jaeger_api, _envoy_root, _collector_started_at
+    _collector_started_at = _collector_started()
+    assert _collector_started_at, f"{COLLECTOR_CONTAINER} is not running"
     _set_agent_flags()
     with flagd_probe_client(docker_compose, "agent") as client:
         assert poll_until(lambda: _flags_served(client)), (
@@ -186,20 +187,8 @@ def _bring_up(docker_compose, prefix, cwd, env, no_build: bool) -> None:
         cwd=cwd,
         env=env,
     )
-    # The collector has resolved agent:4317 in vain since the session began, and each
-    # signal's gRPC client backs off on its own (up to 2 min): metrics can reach the new
-    # agent while the game's trace-id log records are still dropped (no retry, NFR-024).
-    # A restart redials every signal now; upstream OTLP exporters retry across it.
-    run_bounded(
-        [*prefix, "restart", COLLECTOR_SERVICE],
-        what="restart otel-collector",
-        timeout=COLLECTOR_RESTART_TIMEOUT,
-        cwd=cwd,
-        env=env,
-    )
-    assert poll_until(_collector_healthy, timeout=COLLECTOR_HEALTHY_TIMEOUT), (
-        f"{COLLECTOR_CONTAINER} not healthy {COLLECTOR_HEALTHY_TIMEOUT}s after its restart"
-    )
+    # No collector restart: it has exported to the absent agent since the session began
+    # and must reach it from the first batch now (OTLP/HTTP, NFR-024, UC-041 A6 step 4).
     # Envoy has no healthcheck (distroless); its readiness is polled below.
     run_bounded(
         [*prefix, "--profile", "dashboard", "up", "-d", "--no-deps", ENVOY_SERVICE],
@@ -215,17 +204,17 @@ def _bring_up(docker_compose, prefix, cwd, env, no_build: bool) -> None:
     )
 
 
-def _collector_healthy() -> bool:
+def _collector_started() -> str:
+    """The collector container's State.StartedAt, "" when docker cannot tell."""
     try:
-        status = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Health.Status}}", COLLECTOR_CONTAINER],
+        return subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.StartedAt}}", COLLECTOR_CONTAINER],
             capture_output=True,
             text=True,
             timeout=30,
         ).stdout.strip()
     except subprocess.TimeoutExpired:
-        return False
-    return status == "healthy"
+        return ""
 
 
 def _probe(url: str) -> tuple[int, str]:
@@ -541,6 +530,10 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
         ), (
             f"Step 2: the agent holds no trace id for {game_id} {AGENT_TRACE_TIMEOUT}s after RUNNING: "
             "its game.start / game.phase.start records did not reach it (collector -> agent logs)"
+        )
+        assert _collector_started() == _collector_started_at, (
+            f"Step 2: {COLLECTOR_CONTAINER} restarted during the journey; TC-007 must show the "
+            "collector reaching the late agent without one (NFR-024)"
         )
 
         # Step 3: early elimination of one player.

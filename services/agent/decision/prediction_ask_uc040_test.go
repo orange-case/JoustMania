@@ -72,8 +72,8 @@ func droppedCounts(t *testing.T, reader *metric.ManualReader) map[[2]string]int6
 }
 
 // UC: UC-040 A45 BR-034
-// TestPredictionAsk_FlagAndBackend: the ask is sent only when the flag is on and
-// the backend is claude; jev never gets it.
+// TestPredictionAsk_FlagAndBackend: the ask is sent only when the flag is on, to
+// claude and jev alike.
 func TestPredictionAsk_FlagAndBackend(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -84,7 +84,7 @@ func TestPredictionAsk_FlagAndBackend(t *testing.T) {
 	}{
 		{"UC-040/A45 BR-034 claude flag on asks", flags.DecisionBackendClaude, true, true, false},
 		{"UC-040/A45 BR-034 claude flag off does not ask", flags.DecisionBackendClaude, false, false, false},
-		{"UC-040/A45 BR-034 jev never asks", flags.DecisionBackendJev, true, false, false},
+		{"UC-040/A45 BR-034 jev flag on asks", flags.DecisionBackendJev, true, true, false},
 		{"UC-040/A45 BR-034 predictions_enabled off does not ask", flags.DecisionBackendClaude, true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -100,10 +100,10 @@ func TestPredictionAsk_FlagAndBackend(t *testing.T) {
 				t.Fatalf("ask sent = %v, want %v", got, tc.want)
 			}
 			if !tc.want {
-				v1 := req
-				v1.PredictionAsk = nil
-				if llmio.Render(req) != llmio.Render(v1) {
-					t.Fatal("without the ask the prompt must be the v1 prompt")
+				plain := req
+				plain.PredictionAsk = nil
+				if llmio.Render(req) != llmio.Render(plain) {
+					t.Fatal("without the ask the prompt must be unchanged")
 				}
 				return
 			}

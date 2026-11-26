@@ -44,9 +44,8 @@ def status(**kw) -> menu_pb2.GetMenuStatusResponse:
     }
     base.update(kw)
     # A resolved kill switch unless the test says otherwise (services.md §3.1, #2101).
-    base.setdefault("agent_enabled_state", "on" if base["agent_enabled"] else "off")
+    base.setdefault("agent_enabled_state", "act" if base["agent_enabled"] else "off")
     # An open, resolved write gate unless the test says otherwise (#2093).
-    base.setdefault("agent_interventions_enabled_state", "on")
     return menu_pb2.GetMenuStatusResponse(**base)
 
 
@@ -409,8 +408,7 @@ UNKNOWN_AGENTS = [
     None,  # GetMenuStatus failed or timed out
     status(agent_enabled=False, agent_enabled_state="unknown"),
     status(agent_enabled=False, agent_enabled_state=""),  # a menu older than #2101
-    status(agent_interventions_enabled_state="unknown"),
-    status(agent_interventions_enabled_state=""),  # a menu older than #2093
+    status(agent_enabled_state="maybe"),  # a value outside the three states
     status(agent_level="probe"),
 ]
 
@@ -423,8 +421,8 @@ UNKNOWN_AGENTS = [
     "agent",
     [
         status(),
-        status(agent_level="none"),  # ON NONE: a tuning level, not a stop
-        status(agent_interventions_enabled_state="off"),
+        status(agent_level="none"),  # ACT NONE: a tuning level, not a stop
+        status(agent_enabled_state="watch"),
         status(agent_enabled=False),
         status(agent_enabled=False, agent_level=""),
         *UNKNOWN_AGENTS,
@@ -438,8 +436,7 @@ UNKNOWN_AGENTS = [
         "unread",
         "enabled-unknown",
         "enabled-missing",
-        "gate-unknown",
-        "gate-missing",
+        "state-off-the-ladder",
         "level-off-the-ladder",
     ],
 )
@@ -583,17 +580,21 @@ async def test_k5_tap_with_a_resolved_off_and_an_empty_level_announces_stopped(a
 
 
 @pytest.mark.uc("UC-016", br=["BR-011", "BR-016"])
-async def test_k5_tap_with_the_write_gate_off_announces_watching(actions, cues):
-    """A watching agent (only the gate closed) is not stopped: the tap says "Watching"."""
-    await actions.dispatch(Gesture(TAP, "K5"), status(agent_interventions_enabled_state="off"))
+async def test_k5_tap_while_watching_announces_watching(actions, cues):
+    """A watching agent is not stopped: the tap says "Watching"."""
+    await actions.dispatch(Gesture(TAP, "K5"), status(agent_enabled_state="watch"))
     cues.announce.assert_awaited_once_with(Sound.MENU_VOX_LABEL_AGENT, Sound.MENU_VOX_AGENT_WATCHING)
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-011", "BR-013"])
-@pytest.mark.parametrize("state", ["unknown", ""], ids=["unknown", "missing"])
-async def test_k5_tap_with_an_unresolved_write_gate_refuses(actions, menu, cues, state):
-    """#2093: an unresolved gate is neither announced as running nor as stopped."""
-    result = await actions.dispatch(Gesture(TAP, "K5"), status(agent_interventions_enabled_state=state))
+@pytest.mark.parametrize(
+    "fields",
+    [{"agent_enabled_state": "maybe"}, {"agent_enabled_state": "unknown"}],
+    ids=["off-the-ladder", "unknown"],
+)
+async def test_k5_tap_with_an_unresolved_state_refuses(actions, menu, cues, fields):
+    """An unresolved state is neither announced as running nor as stopped."""
+    result = await actions.dispatch(Gesture(TAP, "K5"), status(**fields))
     assert result == ("announce", "ok")
     cues.refusal.assert_awaited_once()
     cues.announce.assert_not_awaited()

@@ -301,9 +301,6 @@ def make_manager(game=None, allowed=None, budget=10):
 
 
 class _AgentStub:
-    def get_boolean_value(self, key, default, _ctx=None):
-        return True if key == "enabled" else default
-
     def __init__(self, allowed, budget):
         self._allowed = allowed
         self._budget = budget
@@ -316,6 +313,8 @@ class _AgentStub:
         return default
 
     def get_string_value(self, key, default, _ctx=None):
+        if key == "enabled":
+            return "act"
         # interventions_allowed is a STRING flag: comma-separated ids (#1127).
         # Call sites still pass a list; join it here to match the flag format.
         if key == "interventions_allowed":

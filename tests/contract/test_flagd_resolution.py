@@ -964,66 +964,6 @@ def test_group_grant_flags_carry_no_targeting(flag_dir):
     assert not failures, "\n".join(failures)
 
 
-# decision.prompt_profile (#2467 PR 5, UC-040 BR-036, flags.md §3): only the agent reads it,
-# per remote request in the game's context (gameId, game_kind, experiment_id, arm). Its
-# targeting may use only the game attributes an experiment needs, so a rule can never
-# pick a wording by player, mode or anything the agent's context lacks; it ships with none.
-PROMPT_PROFILE_FLAG = "decision.prompt_profile"
-PROMPT_PROFILE_TARGETING_VARS = {"game_kind", "experiment_id", "arm"}
-
-
-def _prompt_profile_targeting_violations(flag: dict) -> set[str]:
-    """Variables the flag's targeting references beyond the allowed game attributes."""
-    return {
-        v
-        for v in _json_vars(flag.get("targeting", {}))
-        if v not in PROMPT_PROFILE_TARGETING_VARS and not v.startswith("$flagd.")
-    }
-
-
-@pytest.mark.uc("UC-040", br=["BR-036"])
-@pytest.mark.parametrize("flag_dir", ["ci", "base"])
-def test_prompt_profile_targeting_only_game_attributes(flag_dir):
-    """Static: decision.prompt_profile exists with v1/neutral, defaults to v1 and ships without targeting."""
-    root = fh.CI_FLAG_DIR if flag_dir == "ci" else fh.CI_FLAG_DIR.parent
-    flags = json.loads((root / "agent.json").read_text())["flags"]
-    flag = flags.get(PROMPT_PROFILE_FLAG)
-    assert flag is not None, f"{flag_dir}/agent.json has no {PROMPT_PROFILE_FLAG}"
-    assert flag["variants"] == {"v1": "v1", "neutral": "neutral"}, flag["variants"]
-    assert flag["defaultVariant"] == "v1"
-    assert not _prompt_profile_targeting_violations(flag), (
-        f"{flag_dir}/agent.json {PROMPT_PROFILE_FLAG} targeting references "
-        f"{sorted(_prompt_profile_targeting_violations(flag))}"
-    )
-    assert not flag.get("targeting"), (
-        f"{flag_dir}/agent.json {PROMPT_PROFILE_FLAG} must ship without targeting"
-    )
-
-
-@pytest.mark.uc("UC-040", br=["BR-036"])
-def test_prompt_profile_targeting_guard_rejects_other_attributes():
-    """The guard accepts game_kind / experiment_id / arm rules and rejects any other variable."""
-    allowed = {
-        "targeting": {
-            "if": [
-                {
-                    "and": [
-                        {"==": [{"var": "game_kind"}, "shadow"]},
-                        {"==": [{"var": "experiment_id"}, "exp"]},
-                        {"==": [{"var": "arm"}, "b"]},
-                    ]
-                },
-                "neutral",
-                "v1",
-            ]
-        }
-    }
-    assert not _prompt_profile_targeting_violations(allowed)
-    for var in ("gameId", "targetingKey", "game_mode", "serial"):
-        bad = {"targeting": {"if": [{"==": [{"var": var}, "x"]}, "neutral", "v1"]}}
-        assert _prompt_profile_targeting_violations(bad) == {var}
-
-
 INTERVENTION_SPEC_SOURCE = COORDINATOR_DIR / "interventions.py"
 
 
@@ -1069,16 +1009,15 @@ def test_allow_list_variants_only_name_coordinator_types(flag_dir):
     assert not failures, "\n".join(failures)
 
 
-GROUP_VARIANTS = {"standard_group", "shadow_group"}
+GROUP_VARIANTS = {"standard_group"}
 
 
 @pytest.mark.uc("UC-048", flow="A13", br=["BR-014"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_only_the_group_variants_name_grant_group_shield(flag_dir):
-    """The group lever is opt-in (#2467 PR 4): only ``standard_group`` and ``shadow_group`` name it.
+    """The group lever is opt-in (#2467 PR 4): only ``standard_group`` names it.
 
-    ``standard_group`` is ``standard`` plus the lever and ``shadow_group`` is
-    ``shadow_experimental`` plus the lever, so choosing a group variant changes nothing
+    ``standard_group`` is ``standard`` plus the lever, so choosing it changes nothing
     else; every other variant (the talk's ``standard`` included) stays without it.
     """
     root = fh.CI_FLAG_DIR if flag_dir == "ci" else fh.CI_FLAG_DIR.parent
@@ -1094,7 +1033,6 @@ def test_only_the_group_variants_name_grant_group_shield(flag_dir):
         f"{flag_dir}/agent.json: grant_group_shield is named by {sorted(named)}, want {sorted(GROUP_VARIANTS)}"
     )
     assert ids("standard_group") == ids("standard") + ["grant_group_shield"]
-    assert ids("shadow_group") == ids("shadow_experimental") + ["grant_group_shield"]
 
 
 # Every flag an intervention handler reads (#1872, flags.md section 1.2). Since #1970 the
@@ -1389,7 +1327,7 @@ def test_agent_tuning_scan_sees_every_key():
     """Guards the scan: every key constant in tuning.go is read through a known helper."""
     source = AGENT_TUNING_GO.read_text()
     keys = set(dict(_GO_KEY_CONST.findall(source)).values())
-    assert len(keys) >= 7, keys
+    assert len(keys) >= 6, keys
     assert {k for k, _ in agent_tuning_reads()} == keys
 
 

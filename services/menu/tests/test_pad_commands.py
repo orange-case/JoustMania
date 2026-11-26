@@ -50,12 +50,11 @@ BASELINE = {
         "audio_volume.master",
     ): ({"mute": 0.0, "quiet": 0.3, "normal": 0.6, "loud": 0.8, "max": 1.0}, "max"),
     ("agent", "interventions_allowed"): (AGENT_LEVELS, "standard"),
-    ("agent", "enabled"): ({"on": True, "off": False}, "on"),
-    ("agent", "interventions_enabled"): ({"on": True, "off": False}, "off"),
+    ("agent", "enabled"): ({"off": "off", "watch": "watch", "act": "act"}, "act"),
     ("agent", "decision.backend"): ({"rules": "rules", "claude": "claude", "jev": "jev"}, "rules"),
 }
 # Registry rows without persist (services/flag-service/registry.yaml): a persisted write is 400.
-NO_PERSIST = {("agent", "enabled"), ("agent", "interventions_enabled")}
+NO_PERSIST = {("agent", "enabled")}
 
 
 class FakeFlagService:
@@ -190,7 +189,7 @@ async def test_pad_key_set_and_persist_bodies(servicer, flags):
     await pad(servicer, "step_setting", option="agent_level", direction="up")
     await pad(servicer, "set_backend", backend="claude")
     await pad(servicer, "agent_switch", direction="stop")
-    await pad(servicer, "agent_state", state="on", **{"from": "off"})
+    await pad(servicer, "agent_state", state="act", **{"from": "off"})
 
     keys = {(flag_set, key, "persist" in body) for flag_set, key, body in flags.puts}
     assert keys == {
@@ -203,7 +202,6 @@ async def test_pad_key_set_and_persist_bodies(servicer, flags):
         ("agent", "interventions_allowed", True),
         ("agent", "decision.backend", True),
         ("agent", "enabled", False),
-        ("agent", "interventions_enabled", False),
     }
     assert all(body["writer"] == "menu" for _set, _key, body in flags.puts)
 
@@ -532,7 +530,7 @@ async def test_ladder_down_to_none_leaves_the_agent_running(servicer, flags):
     reply = await pad(servicer, "step_setting", option="agent_level", direction="down", steps=5)
     assert reply.success
     assert flags.written() == [("agent", "interventions_allowed", "none")]
-    assert flags.values[("agent", "enabled")] == "on"
+    assert flags.values[("agent", "enabled")] == "act"
 
 
 @pytest.mark.asyncio

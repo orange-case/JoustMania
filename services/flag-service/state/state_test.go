@@ -181,7 +181,7 @@ func TestStackOverlay_SubstitutesDefaultVariant(t *testing.T) {
 	t.Run("UC-053/A1 DELETE ?writer=stage clears that writer's overlays only", func(t *testing.T) {
 		f := newFixture(t, fixtureOpts{})
 		f.put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev", Writer: "stage"})
-		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "stage"})
+		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Writer: "stage"})
 		f.put(WriteRequest{Set: "agent", Flag: "experiment_dynamic_enabled", Variant: "on", Writer: "operator"})
 		n, err := f.state.ClearWriter("agent", "stage")
 		if err != nil || n != 1 {
@@ -300,12 +300,12 @@ func TestPut_Rejections(t *testing.T) {
 		{"UC-053/A5 unknown flag", WriteRequest{Set: "agent", Flag: "nope", Variant: "a"}, http.StatusNotFound, fserr.UnknownFlag},
 		{"UC-053/A5 flag of another set", WriteRequest{Set: "agent", Flag: "sensitivity", Variant: "slow"}, http.StatusNotFound, fserr.UnknownFlag},
 		{"UC-053/A5 BR-001 read-only flag", WriteRequest{Set: "system", Flag: "idle.enabled", Variant: "off"}, http.StatusUnprocessableEntity, fserr.FlagReadOnly},
-		{"UC-053/A5 both variant and value", WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Value: raw("true")}, http.StatusBadRequest, fserr.Malformed},
+		{"UC-053/A5 both variant and value", WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Value: raw("true")}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 neither variant nor value", WriteRequest{Set: "agent", Flag: "enabled"}, http.StatusBadRequest, fserr.Malformed},
-		{"UC-053/A5 stack flag with a game scope", WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Scope: Scope{GameID: "game_a"}}, http.StatusBadRequest, fserr.Malformed},
+		{"UC-053/A5 stack flag with a game scope", WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Scope: Scope{GameID: "game_a"}}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 game flag without a game", WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5")}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 grant without a serial", WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("5"), Scope: Scope{GameID: "game_a"}}, http.StatusBadRequest, fserr.Malformed},
-		{"UC-053/A5 arm without an experiment id", WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Scope: Scope{Arm: "experimental"}}, http.StatusBadRequest, fserr.Malformed},
+		{"UC-053/A5 arm without an experiment id", WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Scope: Scope{Arm: "experimental"}}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 event flag written with PUT", WriteRequest{Set: "interventions", Flag: "end_game", Variant: "none", Scope: Scope{GameID: "game_a"}}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 value above the range", WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("1.5"), Scope: Scope{GameID: "game_a"}}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 non-integer for an int range", WriteRequest{Set: "interventions", Flag: "global_sensitivity_override", Value: raw("2.5"), Scope: Scope{GameID: "game_a"}}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
@@ -313,7 +313,7 @@ func TestPut_Rejections(t *testing.T) {
 		{"UC-053/A5 declared variant outside the allowed list", WriteRequest{Set: "interventions", Flag: "pacing_profile", Variant: "none", Scope: Scope{GameID: "game_a"}}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 malformed composite value", WriteRequest{Set: "interventions", Flag: "tempo_ramp", Value: raw(`"1.3:8:bounce"`), Scope: Scope{GameID: "game_a"}}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 a free string that is not a string", WriteRequest{Set: "agent", Flag: "decision.operator_brief", Value: raw("42")}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
-		{"UC-053/A5 persist on a non-persistable flag", WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Persist: true}, http.StatusBadRequest, fserr.Malformed},
+		{"UC-053/A5 persist on a non-persistable flag", WriteRequest{Set: "agent", Flag: "enabled", Variant: "act", Persist: true}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 persist with a TTL", WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 TTL on the stack value of a persist row (#2803)", WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 TTL on a game value", WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "game_a"}, TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
@@ -337,7 +337,7 @@ func TestPut_Rejections(t *testing.T) {
 func TestPut_NoSyncStream(t *testing.T) {
 	t.Run("UC-053/A7 a write is rejected while flagd has no open stream", func(t *testing.T) {
 		f := newFixture(t, fixtureOpts{noStream: true})
-		_, err := f.state.Put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "on"})
+		_, err := f.state.Put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "act"})
 		wantReason(t, err, http.StatusServiceUnavailable, fserr.NoSyncStream)
 	})
 	t.Run("UC-053/A7 the game lifecycle is exempt", func(t *testing.T) {
@@ -353,7 +353,7 @@ func TestPut_NoSyncStream(t *testing.T) {
 		f := newFixture(t, fixtureOpts{noStream: true})
 		sub, _ := f.state.Subscribe("system")
 		defer sub.Close()
-		_, err := f.state.Put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "on"})
+		_, err := f.state.Put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "act"})
 		wantReason(t, err, http.StatusServiceUnavailable, fserr.NoSyncStream)
 	})
 }

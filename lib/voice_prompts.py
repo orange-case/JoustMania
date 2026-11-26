@@ -84,7 +84,7 @@ CANCELLED_VOICE = Sound.MENU_VOX_STATUS_CANCELLED
 NO_CONNECTION_VOICE = Sound.MENU_VOX_STATUS_NO_CONNECTION  # the menu cannot be reached
 # UC-016 BR-016: the K5 tap without a screen for an agent whose only closed key is the write gate.
 AGENT_WATCHING_VOICE = Sound.MENU_VOX_AGENT_WATCHING
-# UC-016 BR-012 (D3): the menu's line for `agent_state` between `watch` and `on`.
+# UC-016 BR-012 (D3): the menu's line for `agent_state` between `watch` and `act`.
 INTERVENTIONS_VOICES: dict[str, Sound] = {
     "on": Sound.MENU_VOX_INTERVENTIONS_ON,
     "off": Sound.MENU_VOX_INTERVENTIONS_OFF,

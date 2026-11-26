@@ -11,8 +11,8 @@ import (
 )
 
 // UC: UC-040 BR-044
-// operator_brief_uc040_test.go: a claude decide request carries the
-// operator's decision.operator_brief, jev never does, the brief changes neither the
+// operator_brief_uc040_test.go: a claude or jev decide request carries the
+// operator's decision.operator_brief, the brief changes neither the
 // state nor the questions, and invoke_agent records only its presence and length
 // (#2687, decide-contract.md §3, §12).
 
@@ -54,7 +54,7 @@ func TestRemote_OperatorBrief(t *testing.T) {
 	}
 	brief := "keep the red player alive"
 
-	for _, backend := range []string{flags.DecisionBackendClaude} {
+	for _, backend := range []string{flags.DecisionBackendClaude, flags.DecisionBackendJev} {
 		t.Run("UC-040/BR-044 "+backend+" gets the brief and the span its presence and length", func(t *testing.T) {
 			r := run(t, backend, &brief)
 			if r.req.OperatorBrief != brief || r.asked != 1 {
@@ -65,12 +65,6 @@ func TestRemote_OperatorBrief(t *testing.T) {
 			}
 		})
 	}
-	t.Run("UC-040/BR-044 jev never gets the brief and its span has no brief attributes", func(t *testing.T) {
-		r := run(t, flags.DecisionBackendJev, &brief)
-		if r.req.OperatorBrief != "" || r.asked != 0 || r.hasAttrs {
-			t.Fatalf("jev request brief %q, read %d, span attributes %v", r.req.OperatorBrief, r.asked, r.hasAttrs)
-		}
-	})
 	t.Run("UC-040/BR-044 an empty brief or no source leaves the request and the span as before", func(t *testing.T) {
 		empty := ""
 		for _, b := range []*string{nil, &empty} {

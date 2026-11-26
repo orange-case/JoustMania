@@ -11,27 +11,21 @@ import (
 
 // killswitch.go is the kill-switch revert of autonomous promotions (UC-043 A1,
 // UC-045 step 5, #1704): while `enabled` is off, every experiment tick removes each
-// real-default overlay a promotion wrote, stops the re-watch of the promotions this
-// agent run still tracks, and reports what it reverted so the caller journals it.
+// real-default overlay a promotion wrote and reports what it reverted so the
+// caller journals it. It is the agent's only revert: otherwise a person reverts.
 //
 // STATELESS: the overlays to revert are read from the flag service (the real
 // overlays whose writer is "promotion"), not only from memory, so a promotion
 // written before an agent restart is reverted too. The in-memory list only adds
-// what the flag service cannot tell: the experiment id (for the journal) and the
-// re-watch to cancel.
+// what the flag service cannot tell: the experiment id (for the journal).
 //
 // SERIALISED WITH THE WRITE: the autonomous write and the kill-switch revert hold
 // one mutex (killMu), and each kill-switch tick bumps an epoch. A promotion whose
 // config was resolved before a tick refuses to write after it, and a tick that
 // runs after a write finds the overlay. So once a tick has run, no promotion that
 // predates it writes a real default again, and the tick's revert is the last
-// real-default write of every promotion it reverted.
-//
-// A watch or re-watch revert (revertReal) holds killMu too, from its claim through
-// the revert and the retrack, so a tick never reverts an overlay a second time
-// while that revert is in flight, nor logs it as untracked (#1893). The lock order
-// is killMu, then mu (or the writer's lock); nothing under killMu journals, and
-// nothing that holds killMu calls revertReal.
+// real-default write of every promotion it reverted. Lock order: killMu, then mu
+// (or the writer's lock); nothing under killMu journals.
 
 // KillSwitchReason is the promotion reason a kill-switch revert journals.
 const KillSwitchReason = "kill_switch"
@@ -57,15 +51,6 @@ type PromotionOverlayLister interface {
 
 // errKillSwitched refuses a write whose config predates a kill-switch tick.
 var errKillSwitched = errors.New("autonomous write refused: the kill switch reverted promotions after this promotion's config was read (#1704)")
-
-// claimResult is the outcome of a watch or re-watch trying to own a revert.
-type claimResult int
-
-const (
-	claimOwned      claimResult = iota // the caller reverts
-	claimKilled                        // the kill switch reverted it already
-	claimSuperseded                    // a newer promotion of the flag replaced it
-)
 
 // KillSwitchEpoch returns the number of kill-switch ticks so far. A caller that
 // resolves a promotion Config reads it first (ExperimentPromoter does), so a tick
@@ -101,9 +86,6 @@ func (pr *Promoter) writeTracked(ctx context.Context, p experiment.Proposal, ev 
 	if pr.applied == nil {
 		pr.applied = map[string]*appliedPromotion{}
 	}
-	if old := pr.applied[p.FlagKey]; old != nil && old.cancel != nil {
-		old.cancel()
-	}
 	pr.applied[p.FlagKey] = entry
 	return entry, nil
 }
@@ -138,12 +120,6 @@ func (pr *Promoter) RevertOnKillSwitch(ctx context.Context) []KillSwitchRevert {
 	pr.killEpoch++
 	tracked := pr.applied
 	pr.applied = map[string]*appliedPromotion{}
-	for _, entry := range tracked {
-		entry.killed = true
-		if entry.cancel != nil {
-			entry.cancel()
-		}
-	}
 	pr.mu.Unlock()
 
 	flags := map[string]struct{}{}
@@ -186,7 +162,6 @@ func (pr *Promoter) RevertOnKillSwitch(ctx context.Context) []KillSwitchRevert {
 					report = !pr.markKillFailReported(entry)
 				}
 			} else {
-				pr.markReverted(flag)
 				rv.Outcome = OutcomeReverted
 				rv.Reason = KillSwitchReason
 				if superseded {
@@ -220,79 +195,23 @@ func (pr *Promoter) handOverToSync(entry *appliedPromotion) bool {
 	return true
 }
 
-// retrack puts back an entry whose revert failed (kill switch or watch), unless a
-// newer promotion of the flag took its place meanwhile, so the next tick retries
-// it with its experiment id.
+// retrack puts back an entry whose kill-switch revert failed, unless a newer
+// promotion of the flag took its place meanwhile, so the next tick retries it
+// with its experiment id.
 func (pr *Promoter) retrack(entry *appliedPromotion) {
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
 	if _, ok := pr.applied[entry.proposal.FlagKey]; !ok {
-		entry.cancel = nil
-		entry.killed = false
 		pr.applied[entry.proposal.FlagKey] = entry
 	}
 }
 
 // markKillFailReported marks a failed kill-switch revert of entry as reported and
-// returns whether an earlier tick reported it already (#1753). Only
-// RevertOnKillSwitch calls it, after the attempt and the retrack: a failed watch
-// revert journals through its own result and must not use up the kill switch's
-// failure report.
+// returns whether an earlier tick reported it already (#1753).
 func (pr *Promoter) markKillFailReported(entry *appliedPromotion) (alreadyReported bool) {
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
 	alreadyReported = entry.failReported
 	entry.failReported = true
 	return alreadyReported
-}
-
-// claimApplied lets a watch or re-watch take ownership of entry's revert: it
-// removes entry when it is still the applied promotion of its flag. A nil entry
-// (no tracking) is always owned. The caller (revertReal) holds killMu, so the
-// claim and the revert it owns are one step for the kill switch (#1893).
-func (pr *Promoter) claimApplied(entry *appliedPromotion) claimResult {
-	if entry == nil {
-		return claimOwned
-	}
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	if pr.applied[entry.proposal.FlagKey] == entry {
-		delete(pr.applied, entry.proposal.FlagKey)
-		return claimOwned
-	}
-	if entry.killed {
-		return claimKilled
-	}
-	return claimSuperseded
-}
-
-// appliedState reports, without claiming, whether entry is still the applied
-// promotion of its flag (claimOwned), was killed or was superseded. A nil entry is
-// owned.
-func (pr *Promoter) appliedState(entry *appliedPromotion) claimResult {
-	if entry == nil {
-		return claimOwned
-	}
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	switch {
-	case pr.applied[entry.proposal.FlagKey] == entry:
-		return claimOwned
-	case entry.killed:
-		return claimKilled
-	default:
-		return claimSuperseded
-	}
-}
-
-// setCancel attaches the re-watch cancel to entry while it is still applied, and
-// reports whether it is.
-func (pr *Promoter) setCancel(entry *appliedPromotion, cancel context.CancelFunc) bool {
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	if pr.applied[entry.proposal.FlagKey] != entry {
-		return false
-	}
-	entry.cancel = cancel
-	return true
 }

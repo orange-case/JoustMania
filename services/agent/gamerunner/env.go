@@ -14,7 +14,7 @@ import (
 // startup using the SHADOW_GAME_* spec, then continues its normal loop. It
 // keeps the PR self-contained in services/agent (no flagd-schema change). It
 // mirrors the original env-gate shape the interventions actuation gate used
-// before #1213 migrated it to a LIVE agent.json flag (interventions_enabled);
+// before #1213 migrated it to a LIVE agent.json flag;
 // AGENT_SHADOW_GAME remains a one-shot
 // startup trigger, so it stays an env var.
 const (
@@ -22,9 +22,8 @@ const (
 	envMode        = "SHADOW_GAME_MODE"
 	envSensitivity = "SHADOW_GAME_SENSITIVITY"
 
-	// Experiment binding of the one-shot game (#2530), both or neither: an operator
-	// A/B script (scripts/agent-group-ab.sh) binds each game to its arm so arm values
-	// of that experiment resolve in it.
+	// Experiment binding of the one-shot game (#2530), both or neither: it binds the game
+	// to an arm so arm values of that experiment resolve in it.
 	envExperimentID = "SHADOW_GAME_EXPERIMENT_ID"
 	envArm          = "SHADOW_GAME_ARM"
 

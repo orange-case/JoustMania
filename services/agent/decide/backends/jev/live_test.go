@@ -117,18 +117,11 @@ func TestLiveDecide(t *testing.T) {
 //
 // The fixture states offer the full intervention list; on stage the agent
 // asks with the live interventions_allowed (ambient), so the pick differs.
-//
-// JEV_LIVE_PROFILE=neutral asks with decision.prompt_profile=neutral (#2467 PR 6):
-// the re-calibration the neutral rewrite needs before stage use. Run it next to the
-// default run and compare p_yes per state with the threshold flag
-// (docs/agent-group-ab-runbook.md, "Re-calibrating the jev gate").
-//
-//	JEV_API_KEY=... JEV_LIVE_PROFILE=neutral go test -tags live ./decide/backends/jev -run 'TestLiveGate$' -v
+// Re-run it after a wording change and compare p_yes per state with the
+// threshold flag: the gate was calibrated on the wording of its time.
 func TestLiveGate(t *testing.T) {
 	key := liveKey(t)
 	b := liveBackend(key, newRecordingTransport(key))
-	profile := decide.NormalizePromptProfile(os.Getenv("JEV_LIVE_PROFILE"))
-	t.Logf("prompt profile: %s", profile)
 	for _, sc := range []struct {
 		name string
 		req  decide.Request
@@ -138,7 +131,6 @@ func TestLiveGate(t *testing.T) {
 		{"near-threshold", testRequest()},
 		{"collapsing", tooFastRequest()},
 	} {
-		sc.req.PromptProfile = profile
 		plan := splitStages(sc.req)
 		if plan.gated == nil {
 			t.Fatalf("%s: request is not gated (ffa.intervention needs noop + an intervention)", sc.name)

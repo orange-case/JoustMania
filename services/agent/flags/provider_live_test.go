@@ -81,7 +81,7 @@ func waitResolvesFromFlagd(t *testing.T) {
 	client := openfeature.NewClient(Domain)
 	deadline := time.Now().Add(liveSetupTimeout)
 	for {
-		d, err := client.BooleanValueDetails(context.Background(), keyEnabled, false, openfeature.EvaluationContext{})
+		d, err := client.StringValueDetails(context.Background(), keyEnabled, "", openfeature.EvaluationContext{})
 		if err == nil && d.ErrorCode == "" {
 			return
 		}
@@ -261,7 +261,7 @@ func TestLiveFlip_AlreadyEvaluatedFlagsFollowTheFlagService(t *testing.T) {
 		readSettled(t, "experiments_enabled", read, true)
 		p.put(t, keyExperimentsEnabled, "off")
 		took = waitFor(t, "experiments_enabled", read, false, liveFlipBound)
-		t.Logf("experiments_enabled on->off seen after %s", took)
+		t.Logf("experiments_enabled act->off seen after %s", took)
 	})
 
 	t.Run("UC-044/main decision.backend rules then claude", func(t *testing.T) {
@@ -286,22 +286,24 @@ func TestLiveFlip_KillSwitchWhenFlagdWasLateAtStartup(t *testing.T) {
 	read := func() bool { return p.flags.Evaluate(ctx).Enabled }
 
 	t.Run("UC-045/main flagd late at startup", func(t *testing.T) {
-		p.put(t, keyEnabled, "on")
+		p.put(t, keyEnabled, "act")
 		readSettled(t, "enabled", read, true)
 		// Several flips: one stale entry may still be dropped before the stream wedges.
 		for i := 0; i < 3; i++ {
 			p.put(t, keyEnabled, "off")
 			took := waitFor(t, "enabled (kill switch)", read, false, liveFlipBound)
-			t.Logf("flip %d: enabled on->off seen after %s", i, took)
-			p.put(t, keyEnabled, "on")
-			waitFor(t, "enabled (back on)", read, true, liveFlipBound)
+			t.Logf("flip %d: enabled act->off seen after %s", i, took)
+			p.put(t, keyEnabled, "act")
+			waitFor(t, "enabled (back to act)", read, true, liveFlipBound)
 		}
 	})
 }
 
-// TestLiveFlip_KillSwitch: `enabled` read on, then turned off, reaches the agent's
+// TestLiveFlip_KillSwitch: `enabled` read act, then turned off, reaches the agent's
 // decision cycle within NFR-050 bounds, both by an explicit off overlay and by clearing
-// the overlay back to the fail-closed baseline (scripts/agent-dryrun-enable.sh off).
+// the overlay back to the CI baseline (off in services/flagd/ci/agent.json; the
+// production default is watch, so a real stop is a PUT of off). watch runs the agent but
+// applies nothing.
 //
 // UC: UC-045 main
 // UC: UC-040 main
@@ -318,13 +320,23 @@ func TestLiveFlip_KillSwitch(t *testing.T) {
 		{"UC-045/main overlay cleared to the baseline", func(t *testing.T) { p.clear(t, keyEnabled) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p.put(t, keyEnabled, "on")
+			p.put(t, keyEnabled, "act")
 			readSettled(t, "enabled", read, true)
 			tc.off(t)
 			took := waitFor(t, "enabled (kill switch)", read, false, liveFlipBound)
-			t.Logf("enabled on->off seen after %s", took)
+			t.Logf("enabled act->off seen after %s", took)
 		})
 	}
+	t.Run("UC-045/main watch runs but does not apply", func(t *testing.T) {
+		applying := func() bool { return p.flags.Applying(ctx) }
+		p.put(t, keyEnabled, "act")
+		readSettled(t, "applying", applying, true)
+		p.put(t, keyEnabled, "watch")
+		waitFor(t, "applying (watch)", applying, false, liveFlipBound)
+		readSettled(t, "enabled (watch runs)", read, true)
+		p.put(t, keyEnabled, "off")
+		waitFor(t, "enabled (kill switch)", read, false, liveFlipBound)
+	})
 }
 
 // TestLiveFlip_FlagdRestartMidRun: flagd restarts while the agent runs (#1713). The sync
@@ -347,7 +359,7 @@ func TestLiveFlip_FlagdRestartMidRun(t *testing.T) {
 	}
 
 	t.Run("UC-045/A3 UC-045/main UC-048/A4 flagd restart: fail closed, reconnect, later flips seen", func(t *testing.T) {
-		p.put(t, keyEnabled, "on")
+		p.put(t, keyEnabled, "act")
 		readSettled(t, "enabled", read, true)
 		// The game domain (UC-048 A4) has its own sync stream: read before the restart.
 		p.putSet(t, GameDomain, "shield.activation", "trigger")
@@ -387,9 +399,9 @@ func TestLiveFlip_FlagdRestartMidRun(t *testing.T) {
 		readSettled(t, "enabled", read, true)
 		p.put(t, keyEnabled, "off")
 		took = waitFor(t, "enabled (kill switch) after the restart", read, false, liveFlipBound)
-		t.Logf("enabled on->off seen after %s", took)
-		p.put(t, keyEnabled, "on")
-		waitFor(t, "enabled back on after the restart", read, true, liveFlipBound)
+		t.Logf("enabled act->off seen after %s", took)
+		p.put(t, keyEnabled, "act")
+		waitFor(t, "enabled back to act after the restart", read, true, liveFlipBound)
 
 		// The game domain reconnected too: it serves trigger again and takes a flip.
 		waitFor(t, "shield.activation after the flagd restart", readTrigger, true, liveSetupTimeout)
@@ -405,8 +417,8 @@ func TestLiveFlip_FlagdRestartMidRun(t *testing.T) {
 const liveIdleStreamHold = 150 * time.Second
 
 // UC: UC-045 A3
-// An idle sync stream to a healthy flagd is never dropped (#1768): with enabled on and
-// no flag change, every read for liveIdleStreamHold serves on. Before the fix flagd sent
+// An idle sync stream to a healthy flagd is never dropped (#1768): with enabled act and
+// no flag change, every read for liveIdleStreamHold serves act. Before the fix flagd sent
 // GOAWAY too_many_pings every ~2-3 min and the agent read the fail-closed default (off)
 // for about a second each time.
 func TestLiveSync_IdleStreamOutlivesFlagdPingPolicy(t *testing.T) {
@@ -414,8 +426,8 @@ func TestLiveSync_IdleStreamOutlivesFlagdPingPolicy(t *testing.T) {
 	ctx := context.Background()
 	read := func() bool { return p.flags.Evaluate(ctx).Enabled }
 
-	t.Run("UC-045/A3 Pre-1 idle stream: enabled stays on, no fail-closed read", func(t *testing.T) {
-		p.put(t, keyEnabled, "on")
+	t.Run("UC-045/A3 Pre-1 idle stream: enabled stays act, no fail-closed read", func(t *testing.T) {
+		p.put(t, keyEnabled, "act")
 		readSettled(t, "enabled", read, true)
 		started := time.Now()
 		for time.Since(started) < liveIdleStreamHold {
@@ -425,6 +437,6 @@ func TestLiveSync_IdleStreamOutlivesFlagdPingPolicy(t *testing.T) {
 			}
 			time.Sleep(livePollInterval)
 		}
-		t.Logf("enabled served on for %s of idle stream", liveIdleStreamHold)
+		t.Logf("enabled served act for %s of idle stream", liveIdleStreamHold)
 	})
 }

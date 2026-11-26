@@ -10,7 +10,6 @@ import (
 
 	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/inference"
-	"github.com/joustmania/agent/promote"
 )
 
 // tuning.go wires the agent tuning settings migrated from env to flags (#1788,
@@ -26,9 +25,6 @@ type tuningFlagSource interface {
 	InferenceEffort(ctx context.Context, def string) string
 	InferenceTimeout(ctx context.Context, def time.Duration) time.Duration
 	EffectWindow(ctx context.Context, def time.Duration) time.Duration
-	RewatchInterval(ctx context.Context, def time.Duration) time.Duration
-	RewatchTimeout(ctx context.Context, def time.Duration) time.Duration
-	RevertCooldown(ctx context.Context, def time.Duration) time.Duration
 }
 
 // tuningDefaults are the fallbacks used when a flag cannot be resolved: the compiled
@@ -38,9 +34,6 @@ type tuningDefaults struct {
 	InferenceEffort  string
 	InferenceTimeout time.Duration
 	EffectWindow     time.Duration
-	RewatchInterval  time.Duration
-	RewatchTimeout   time.Duration
-	RevertCooldown   time.Duration
 }
 
 // compiledTuningDefaults returns the fallbacks used while a flag cannot be resolved
@@ -53,9 +46,6 @@ func compiledTuningDefaults() tuningDefaults {
 		InferenceEffort:  inference.DefaultEffort,
 		InferenceTimeout: inference.DefaultTimeout,
 		EffectWindow:     decision.DefaultEffectWindow,
-		RewatchInterval:  promote.DefaultRewatchInterval,
-		RewatchTimeout:   promote.DefaultRewatchTimeout,
-		RevertCooldown:   promote.DefaultRevertCooldown,
 	}
 }
 
@@ -96,30 +86,6 @@ func (t *agentTuning) EffectWindow() time.Duration {
 		return t.def.EffectWindow
 	}
 	return t.src.EffectWindow(context.Background(), t.def.EffectWindow)
-}
-
-// RewatchInterval resolves the autonomous re-watch poll interval.
-func (t *agentTuning) RewatchInterval() time.Duration {
-	if t.src == nil {
-		return t.def.RewatchInterval
-	}
-	return t.src.RewatchInterval(context.Background(), t.def.RewatchInterval)
-}
-
-// RewatchTimeout resolves how long an autonomous re-watch waits.
-func (t *agentTuning) RewatchTimeout() time.Duration {
-	if t.src == nil {
-		return t.def.RewatchTimeout
-	}
-	return t.src.RewatchTimeout(context.Background(), t.def.RewatchTimeout)
-}
-
-// RevertCooldown resolves the post-revert re-promotion cooldown.
-func (t *agentTuning) RevertCooldown() time.Duration {
-	if t.src == nil {
-		return t.def.RevertCooldown
-	}
-	return t.src.RevertCooldown(context.Background(), t.def.RevertCooldown)
 }
 
 // llmBudgetCeiling reads the operator's ceiling on remote model calls per minute

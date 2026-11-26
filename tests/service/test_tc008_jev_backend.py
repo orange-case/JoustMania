@@ -47,7 +47,7 @@ JEV_CHAT_SPAN_PREFIX = "chat "
 def _configure(stack) -> None:
     configure_agent(backend="jev", jev_fake=True)
     wait_agent_flags_served(
-        stack, backend="jev", enabled=True, rewrite=lambda: configure_agent(backend="jev", jev_fake=True)
+        stack, backend="jev", state="act", rewrite=lambda: configure_agent(backend="jev", jev_fake=True)
     )
 
 

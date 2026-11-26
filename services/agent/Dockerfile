@@ -37,6 +37,6 @@ RUN apk add --no-cache wget ca-certificates
 COPY --from=builder /agent /agent
 
 # 4317: OTLP gRPC receiver, 13134: HTTP health endpoint
-EXPOSE 4317 13134
+EXPOSE 4318 4317 13134
 
 ENTRYPOINT ["/agent"]

@@ -214,8 +214,7 @@ func (s *State) Put(req WriteRequest) (WriteResult, *fserr.Error) {
 	}
 
 	if plan.persist {
-		// A persist row has one persisted stack value, kept across restarts
-		// (A2); it also replaces a session-only value over it.
+		// A persist row has one persisted stack value, kept across restarts (A2).
 		prevAdmin, prevStack := f.admin, f.stack
 		f.admin, f.stack = v, nil
 		if err := s.saveAdminLocked(); err != nil {
@@ -277,7 +276,7 @@ type putPlan struct {
 //
 //	lookup 404/422 > kind 400 > variant|value 400 > ids 400 > scope fit 400 >
 //	ttl 400 > if_writer_in shape 400 > persist 400 > live (served, game,
-//	serial, real game) 409/422 > value 422 > session-only 400 > persisted ttl 400 > stream 503 >
+//	serial, real game) 409/422 > value 422 > persisted ttl 400 > stream 503 >
 //	if_writer_in 412 > if_slot_version 412 (in process only)
 //
 // The 412 is last, a dry run included, under the lock of the write, so no
@@ -336,17 +335,6 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 	plan.checked, err = registry.CheckValue(p, f.base, req.Variant, req.Value)
 	if err != nil {
 		return plan, err
-	}
-	if plan.persist && p.SessionOnly(plan.checked.Variant) {
-		// Never persisted and never from Flagsmith: a restart returns to the
-		// persisted value beneath it.
-		switch {
-		case req.Persist:
-			return plan, fserr.BadRequest("%s=%s is session-only and is never persisted", req.Flag, plan.checked.Variant)
-		case req.Writer == registry.FlagsmithWriter:
-			return plan, fserr.BadRequest("%s=%s is session-only and is never set from Flagsmith", req.Flag, plan.checked.Variant)
-		}
-		plan.persist = false
 	}
 	if plan.persist && req.TTLSeconds != nil {
 		return plan, fserr.BadRequest("%s is persisted in scope stack and takes no ttl_seconds", req.Flag)
@@ -572,8 +560,7 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 }
 
 // clearStackLocked clears the stack value in force: an in-memory one (a row
-// without persist, or a session-only value over the persisted one), else the
-// persisted value of a persist row (also leaving the state file).
+// without persist), else the persisted value of a persist row (also leaving the state file).
 func (s *State) clearStackLocked(f *flagState, req ClearRequest, res *WriteResult) *fserr.Error {
 	switch {
 	case !f.policy.Persist || f.stack != nil:
