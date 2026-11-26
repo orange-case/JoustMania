@@ -63,7 +63,8 @@ for f in "${files[@]}"; do
     [[ "$f" == proto/*.proto ]] && protos+=("$f")
   fi
   if is_spec_file "$f"; then spec_touched=true; fi
-  [[ "$f" == docs/specs/flags.md ]] && flags_spec=true
+  # The per-flag catalog is generated from docs/specs/notes/flags.yaml (#2793).
+  [[ "$f" == docs/specs/flags.md || "$f" == docs/specs/notes/flags.yaml || "$f" == docs/specs/generated/flag-catalog.md ]] && flags_spec=true
   [[ "$f" == docs/specs/services.md ]] && services_spec=true
 done
 
@@ -79,7 +80,7 @@ if [[ "$spec_touched" != true ]]; then
   problems+=("Behaviour files changed but no spec file did (docs/requirements.md, docs/use_cases/**, docs/use_cases.puml, docs/specs/**, docs/entity_model.md).")
 fi
 if [[ ${#flagd[@]} -gt 0 && "$flags_spec" != true ]]; then
-  problems+=("services/flagd/*.json changed but docs/specs/flags.md did not.")
+  problems+=("services/flagd/*.json changed but the flag catalog (docs/specs/flags.md, docs/specs/notes/flags.yaml or docs/specs/generated/flag-catalog.md) did not.")
 fi
 if [[ ${#protos[@]} -gt 0 && "$services_spec" != true ]]; then
   problems+=("proto/*.proto changed but docs/specs/services.md did not.")
