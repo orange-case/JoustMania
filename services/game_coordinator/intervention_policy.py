@@ -1,4 +1,4 @@
-"""Intervention enforcement chain and global backstop rate limiter (#2634).
+"""Intervention enforcement chain and global backstop rate limiter.
 
 Split out of ``InterventionManager``: the policy checks every intervention passes
 before its handler runs (UC-040 BR-004). The flag reads they need (allow-list,

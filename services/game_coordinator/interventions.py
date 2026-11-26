@@ -73,7 +73,7 @@ from services.game_coordinator.games.intervention_moment import (
     run_with_intervention_scope,
 )
 
-# The units the manager coordinates (#2634). Names that lived in this module
+# The units the manager coordinates. Names that lived in this module
 # before the split are re-exported here (``as`` form), so imports and patches of
 # ``services.game_coordinator.interventions.<name>`` keep resolving.
 from services.game_coordinator.intervention_deferral import (
@@ -641,7 +641,7 @@ class InterventionContext:
 
 
 class InterventionFlagReader:
-    """Every flag read of the intervention path: target resolution and policy values (#2634).
+    """Every flag read of the intervention path: target resolution and policy values.
 
     Owns the three flag clients (``interventions``, ``agent``, ``user`` domains).
     It resolves intervention flags per session (``gameId``) and per player
@@ -1009,7 +1009,7 @@ class _Forward:
     """An attribute kept on another object (``<owner>.<name>``), readable and settable here.
 
     Keeps the manager's flag clients and deferral state addressable as before the
-    split (#2634): ``mgr._agent_client = stub`` reaches the flag reader.
+    split: ``mgr._agent_client = stub`` reaches the flag reader.
     """
 
     def __init__(self, owner: str, name: str):
@@ -1033,7 +1033,7 @@ class InterventionManager:
     ``stop()`` removes the handler. ``get_game`` is a callable returning the
     live game (or None).
 
-    Split by responsibility (#2634): ``InterventionFlagReader`` (every flag read:
+    Split by responsibility: ``InterventionFlagReader`` (every flag read:
     targets, policy values), ``SpecEvaluator`` (change detection),
     ``EnforcementChain`` + ``_RateLimiter`` (policy, backstop), ``AllowListGate``
     (UC-053 A9), ``SessionState`` (per-game buckets, dispatchers) and
@@ -1042,7 +1042,7 @@ class InterventionManager:
     record and cue.
     """
 
-    # Flag clients and deferral state live on their units (#2634).
+    # Flag clients and deferral state live on their units.
     _interventions_client = _Forward("_reads", "_interventions_client")
     _agent_client = _Forward("_reads", "_agent_client")
     _user_client = _Forward("_reads", "_user_client")

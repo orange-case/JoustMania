@@ -1,4 +1,4 @@
-"""Cross-set consistency gate for intervention reads (UC-053 A9, #1552, #2634).
+"""Cross-set consistency gate for intervention reads (UC-053 A9, #1552).
 
 Split out of ``InterventionManager``. The flag service stamps every flag of the
 ``interventions`` set and ``agent/interventions_allowed`` with the snapshot it
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from services.game_coordinator.interventions import InterventionSpec
 
-# The manager's logger: log routing is unchanged by the split (#2634).
+# The manager's logger: log routing is unchanged by the split.
 logger = logging.getLogger("services.game_coordinator.interventions")
 
 # A deferral that lasts longer than this is logged as a WARNING (rate limited to

@@ -1,4 +1,4 @@
-"""Unit tests for the effect-emission helpers on their own (#2634, intervention_dispatch.py)."""
+"""Unit tests for the effect-emission helpers on their own (intervention_dispatch.py)."""
 
 from unittest.mock import patch
 

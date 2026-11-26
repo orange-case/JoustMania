@@ -1,4 +1,4 @@
-"""Unit tests for the per-session intervention state on its own (#2634, intervention_sessions.py)."""
+"""Unit tests for the per-session intervention state on its own (intervention_sessions.py)."""
 
 import asyncio
 

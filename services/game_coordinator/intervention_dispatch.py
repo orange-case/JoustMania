@@ -1,4 +1,4 @@
-"""Intervention effect emission helpers (#2634).
+"""Intervention effect emission helpers.
 
 Split out of ``InterventionManager``: how a handler call runs on the owning
 game's loop (its flag context and its UC-101 intervention scope), and how each
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from services.game_coordinator.intervention_target import InterventionTarget
     from services.game_coordinator.interventions import InterventionSpec
 
-# The manager's logger: log routing is unchanged by the split (#2634).
+# The manager's logger: log routing is unchanged by the split.
 logger = logging.getLogger("services.game_coordinator.interventions")
 
 

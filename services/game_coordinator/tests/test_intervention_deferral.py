@@ -1,4 +1,4 @@
-"""Unit tests for the cross-set consistency gate on its own (#2634, intervention_deferral.py)."""
+"""Unit tests for the cross-set consistency gate on its own (intervention_deferral.py)."""
 
 import asyncio
 import logging

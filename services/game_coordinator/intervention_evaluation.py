@@ -1,4 +1,4 @@
-"""Per-spec intervention evaluation: change detection over the flag reads (#2634).
+"""Per-spec intervention evaluation: change detection over the flag reads.
 
 Split out of ``InterventionManager``. For one spec and one live session,
 :class:`SpecEvaluator` decides what to apply: it reads the flag through the
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from services.game_coordinator.intervention_target import InterventionTarget
     from services.game_coordinator.interventions import InterventionSpec
 
-# The manager's logger: log routing is unchanged by the split (#2634).
+# The manager's logger: log routing is unchanged by the split.
 logger = logging.getLogger("services.game_coordinator.interventions")
 
 

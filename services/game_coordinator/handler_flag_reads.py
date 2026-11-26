@@ -5,7 +5,7 @@
 #
 # A handler (and a revert handler and the agent cue) runs on the game's loop through
 # GameLoopDispatcher.run, and the InterventionManager sets the game's own flag transaction
-# context around it (interventions.py run_in_game_flag_context). A flag read there
+# context around it (intervention_dispatch.py run_in_game_flag_context). A flag read there
 # therefore sees the API-level attributes (service_name, service_namespace, language,
 # hostname, game_kind), the game's context (targetingKey=game_mode, game_mode,
 # controller_count, sensitivity, game_kind, experiment_id, arm; flags.md section 1.2) and

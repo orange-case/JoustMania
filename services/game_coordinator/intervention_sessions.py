@@ -1,4 +1,4 @@
-"""Live sessions and their per-session intervention state (#838, #2634).
+"""Live sessions and their per-session intervention state (#838).
 
 Split out of ``InterventionManager``: the ``SessionView`` the servicer hands the
 manager per live game, and the per-game change-detection buckets and game-loop

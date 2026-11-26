@@ -1,4 +1,4 @@
-"""Unit tests for the enforcement chain on its own (#2634, intervention_policy.py)."""
+"""Unit tests for the enforcement chain on its own (intervention_policy.py)."""
 
 import pytest
 

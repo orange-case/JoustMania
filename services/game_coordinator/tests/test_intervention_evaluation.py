@@ -1,4 +1,4 @@
-"""Unit tests for the per-spec evaluator on its own (#2634, intervention_evaluation.py).
+"""Unit tests for the per-spec evaluator on its own (intervention_evaluation.py).
 
 The evaluator is driven with a scripted reader and recording dispatch/revert
 callbacks: no flag client, no manager, no handler.

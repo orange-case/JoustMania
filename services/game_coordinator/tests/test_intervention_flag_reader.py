@@ -1,4 +1,4 @@
-"""Unit tests for the intervention flag reader on its own (#2634, InterventionFlagReader).
+"""Unit tests for the intervention flag reader on its own (InterventionFlagReader).
 
 Target resolution (per session, per player) and the policy values, against an
 in-memory flag client; plus the manager attributes that forward to the reader.
