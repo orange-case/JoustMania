@@ -542,6 +542,12 @@ func assertRulesFallbackFrom(t *testing.T, h remoteHarness, span sdktrace.ReadOn
 	if strAttr(t, span, AttrDecideAnswers) == "" {
 		t.Error("fallback span must carry the rules answers")
 	}
+	// The rules answered, so no confidence, even after an invalid remote answer.
+	for _, key := range []string{AttrDecideConfidence, AttrDecideConfidenceMin} {
+		if _, ok := attrValue(span, key); ok {
+			t.Errorf("%s present on a rules fallback record", key)
+		}
+	}
 }
 
 // NFR: NFR-010 NFR-013

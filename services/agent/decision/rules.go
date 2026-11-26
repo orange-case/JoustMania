@@ -222,8 +222,9 @@ func (r *ObjectiveRules) Evaluate(_ context.Context, c gamecontext.GameContext) 
 
 // EvaluateDecide is Evaluate plus the record's decide request and the winning
 // rule's prediction (#1226), both derived from ONE ranking: one rankLocked call
-// and therefore one chaos (R9) RNG draw per evaluation, exactly as Evaluate alone. The returned decisions are
-// byte-for-byte what Evaluate would have returned for the same engine state.
+// and therefore one chaos (R9) RNG draw per evaluation, exactly as Evaluate
+// alone. The returned decisions are byte-for-byte what Evaluate would have
+// returned for the same engine state.
 //
 // build constructs the decide.Request lazily: it is called (under the engine
 // lock, so it must be pure and cheap enough) only when the evalInterval throttle

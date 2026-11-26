@@ -58,13 +58,13 @@ function merged(...fs: unknown[]): JaegerTracesResponse {
 describe("UC-035: main step 3, parseDecideTraces — rules path", () => {
   const row = only(rulesFixture);
 
-  it("reads backend, answer and confidence; no model, no threshold", () => {
+  it("reads backend and answer; no confidence, no model, no threshold", () => {
     expect(row.backend).toBe("rules");
     expect(row.requested).toBe("rules");
     expect(row.model).toBe("");
     expect(row.intervention).toBe("grant_shield");
     expect(row.target).toBe("MOCK0002");
-    expect(row.confidence).toBeCloseTo(0.7);
+    expect(row.confidence).toBeNull();
     expect(row.threshold).toBeNull();
     expect(row.outcome).toBe("act");
     expect(row.latencyMs).toBe(0);
@@ -114,6 +114,7 @@ describe("UC-035: main step 3, parseDecideTraces — remote path", () => {
     expect(row.errorType).toBe("timeout");
     expect(row.intervention).toBe("noop");
     expect(row.target).toBe("none");
+    expect(row.confidence).toBeNull();
     expect(row.threshold).toBeNull();
   });
 

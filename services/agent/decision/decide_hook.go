@@ -33,8 +33,9 @@ import (
 //     ObjectiveRules.EvaluateDecide is Evaluate plus the request and prediction from
 //     the SAME ranking (one rankLocked call, one chaos RNG draw per evaluation), so
 //     the emitted decisions are byte-for-byte unchanged. The record of the first
-//     decision, without confidence, rides an invoke_agent span; like every other span on the sync path it is emitted only
-//     on a cycle that produces decisions (idle cycles stay span-free).
+//     decision, without confidence, rides an invoke_agent span; like every other
+//     span on the sync path it is emitted only on a cycle that produces decisions
+//     (idle cycles stay span-free).
 //   - anything else: the remote backend OWNS the decision. The call runs off the
 //     loop on the existing async machinery (inflight CAS, inferWG, rootCtx,
 //     ContextProvider re-read at landing), bounded by the backend's timeout flag.
