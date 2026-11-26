@@ -73,13 +73,12 @@ var controlSpecs = []struct {
 	{decide.TemplateGameEnds, 60, false},
 }
 
-// Registration is one prediction to register.
+// Registration is one prediction to register: an acted decision's, or a control
+// (Source control). Only acted decisions register, so Acted on the result is
+// simply "not a control".
 type Registration struct {
 	Backend    string
 	Prediction decide.Prediction
-	// Acted: the decision passed the permission chain and its write was applied.
-	// false keeps it as a counterfactual (held, blocked, gated off, discarded).
-	Acted bool
 	// DecideSpan is the invoke_agent span the outcome span links to.
 	DecideSpan trace.SpanContext
 	// Context is the game's context at decision time (the baseline source).
@@ -116,7 +115,6 @@ type entry struct {
 	backend  string
 	pred     decide.Prediction
 	acted    bool
-	key      string
 	base     baseline
 	decideSC trace.SpanContext
 	parent   gameParent
@@ -136,10 +134,6 @@ type gameBook struct {
 	results       []Result
 	controls      int
 	nextControlAt time.Duration
-	// controlOffset is where this game's template rotation starts (a hash of the
-	// game id), so a template's base rate is not always sampled at the same
-	// game times.
-	controlOffset int
 	// goal is the game's running goal measurements (decide-contract.md §14.4).
 	goal goal.Accumulator
 }
@@ -210,60 +204,37 @@ func realAfterFunc(d time.Duration, fn func()) func() bool {
 // the root context is cancelled; tests use it to make a scoring land).
 func (b *Book) Await() { b.wg.Wait() }
 
-// dedupeKey identifies "the same prediction again" within a game.
-func dedupeKey(r Registration) string {
-	p := r.Prediction
-	acted := "0"
-	if r.Acted {
-		acted = "1"
-	}
-	return r.Backend + "|" + p.Source + "|" + p.Rule + "|" + p.Template + "|" + p.Target + "|" + acted
-}
-
-// Register adds a prediction of the game in r.Context. It returns the
-// prediction id; merged is true when an identical prediction (same backend,
-// source, rule or lever, template, target and acted) was pending, in which case
-// the id is that one's and nothing new is registered. ok is false when nothing
-// was registered or merged: an invalid prediction, or a game that already ended.
-// A prediction already settled at registration (no target, target not alive) is
-// scored at once.
-func (b *Book) Register(r Registration) (id string, merged, ok bool) {
+// Register adds a prediction of the game in r.Context and returns its id. ok is
+// false when nothing was registered: an invalid prediction, or a game that
+// already ended. A prediction already settled at registration (no target, target
+// not alive) is scored at once.
+func (b *Book) Register(r Registration) (id string, ok bool) {
 	probe := r.Prediction
 	if probe.Scope == decide.ScopeTarget && probe.Target == "" {
 		probe.Target = "?" // validated as targeted; scored no_target below
 	}
 	if !decide.ValidPrediction(probe) {
-		return "", false, false
+		return "", false
 	}
 	gameID := r.Context.SessionID
 	if gameID == "" {
-		return "", false, false
+		return "", false
 	}
 	now := b.now()
-	key := dedupeKey(r)
 
 	b.mu.Lock()
 	if _, ended := b.finalized[gameID]; ended {
 		b.mu.Unlock()
-		return "", false, false
+		return "", false
 	}
 	gb := b.gameLocked(gameID)
-	for _, e := range gb.pending {
-		if e.key == key {
-			id := e.id
-			b.mu.Unlock()
-			b.tel.merged(r.Backend, r.Prediction, r.Context.GameKind)
-			return id, true, true
-		}
-	}
 	e := &entry{
 		id:       uuid.NewString(),
 		gameID:   gameID,
 		gameKind: r.Context.GameKind,
 		backend:  r.Backend,
 		pred:     r.Prediction,
-		acted:    r.Acted,
-		key:      key,
+		acted:    r.Prediction.Source != decide.SourceControl,
 		base:     takeBaseline(r.Prediction, r.Context, now),
 		decideSC: r.DecideSpan,
 		parent: gameParent{r.Context.GameTraceID, r.Context.GameTraceSpanID,
@@ -284,16 +255,14 @@ func (b *Book) Register(r Registration) (id string, merged, ok bool) {
 	b.tel.registered(r.Backend, r.Prediction, r.Context.GameKind)
 	b.emit(out)
 	b.schedule(e)
-	return e.id, false, true
+	return e.id, true
 }
 
 // gameLocked returns gameID's book, creating it.
 func (b *Book) gameLocked(gameID string) *gameBook {
 	gb := b.games[gameID]
 	if gb == nil {
-		h := fnv.New32a()
-		_, _ = h.Write([]byte(gameID))
-		gb = &gameBook{nextControlAt: controlInterval, controlOffset: int(h.Sum32() % uint32(len(controlSpecs)))}
+		gb = &gameBook{nextControlAt: controlInterval}
 		b.games[gameID] = gb
 	}
 	return gb
@@ -443,7 +412,7 @@ func (b *Book) dueControlLocked(c gamecontext.GameContext) (decide.Prediction, b
 	if gb.controls >= maxControlsPerGame || time.Duration(dur*float64(time.Second)) < gb.nextControlAt {
 		return decide.Prediction{}, false
 	}
-	spec := controlSpecs[(gb.controlOffset+gb.controls)%len(controlSpecs)]
+	spec := controlSpecs[gb.controls%len(controlSpecs)]
 	gb.controls++
 	gb.nextControlAt += controlInterval
 	target := ""
@@ -505,7 +474,7 @@ func (b *Book) OnGameEnd(c gamecontext.GameContext) {
 
 // SetArmTallySink wires the per-game arm tally (UC-043 A21, BR-010, #2498): at
 // game end the Book hands f the game's acted decision predictions that scored hit
-// or miss (counterfactuals, controls and unscorables never), with their Brier sum.
+// or miss (controls and unscorables never), with their Brier sum.
 // Report-only; f must not block.
 func (b *Book) SetArmTallySink(f func(gameID string, scored, hits int, brierSum float64)) {
 	b.mu.Lock()

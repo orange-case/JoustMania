@@ -69,7 +69,7 @@ func TestGameEndChain_SummaryAndRetroSeePredictions(t *testing.T) {
 	running := gamecontext.GameContext{SessionID: "game_wiring", GameKind: "real", Players: map[string]*gamecontext.PlayerSignals{
 		"A": {Serial: "A", Active: &active}, "B": {Serial: "B", Active: &active}}}
 	running.Session.GameActive = &active
-	if _, _, ok := book.Register(prediction.Registration{Backend: "rules", Acted: true,
+	if _, ok := book.Register(prediction.Registration{Backend: "rules",
 		Prediction: decide.NewPrediction(decide.TemplateSurvives, 15, 0.7, decide.SourceRules, "R4", "A"), Context: running}); !ok {
 		t.Fatal("register failed")
 	}
@@ -101,7 +101,7 @@ func TestGameEndChain_SummaryAndRetroSeeGoal(t *testing.T) {
 	book := prediction.New(ctx, nil)
 	t.Cleanup(func() { cancel(); book.Await() })
 	book.SetGoalResolver(func(context.Context, gamecontext.GameContext) goal.Profile {
-		return goal.FromObjectives(map[string]float64{"accelerate": 0.7}, 120, 60)
+		return goal.FromObjectives(map[string]float64{"accelerate": 0.7})
 	})
 	summaries := gamesummary.NewCoordinator(nil)
 	sink := &summarySink{}
@@ -126,7 +126,7 @@ func TestGameEndChain_SummaryAndRetroSeeGoal(t *testing.T) {
 	}
 	text.mu.Lock()
 	defer text.mu.Unlock()
-	if !strings.Contains(text.user, "Goal (profile quick_game") || !strings.Contains(text.user, "duration<=60s: 45s -> 1.00") {
+	if !strings.Contains(text.user, "Goal (profile quick_game") || !strings.Contains(text.user, "duration<=120s: 45s -> 1.00") {
 		t.Errorf("UC-042/A12 the retro prompt lacks the goal block:\n%s", text.user)
 	}
 }
@@ -141,7 +141,7 @@ func TestBuildGameEnd_WiresPredictionLookups(t *testing.T) {
 	book := prediction.New(ctx, nil)
 	t.Cleanup(func() { cancel(); book.Await() })
 	book.SetGoalResolver(func(context.Context, gamecontext.GameContext) goal.Profile {
-		return goal.FromObjectives(map[string]float64{"accelerate": 0.7}, 120, 60)
+		return goal.FromObjectives(map[string]float64{"accelerate": 0.7})
 	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	c := &components{

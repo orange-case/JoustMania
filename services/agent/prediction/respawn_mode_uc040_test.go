@@ -32,7 +32,7 @@ func TestBook_RespawnModeEliminationTemplatesAreUnscorable(t *testing.T) {
 		t.Run("UC-040/BR-043 "+mode+": elimination at the horizon with 0 eliminations is unscorable, not a miss", func(t *testing.T) {
 			h := newHarness(t)
 			c := respawnGame(mode)
-			h.register(pred(decide.TemplateElimination, 30, ""), c, true)
+			h.register(pred(decide.TemplateElimination, 30, ""), c)
 			h.at(33 * time.Second)
 			h.setLive(&c)
 			h.fire()
@@ -44,8 +44,8 @@ func TestBook_RespawnModeEliminationTemplatesAreUnscorable(t *testing.T) {
 		t.Run("UC-040/BR-043 "+mode+": no_elimination and survives are unscorable, not a hit", func(t *testing.T) {
 			h := newHarness(t)
 			c := respawnGame(mode)
-			h.register(pred(decide.TemplateNoElimination, 15, ""), c, true)
-			h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+			h.register(pred(decide.TemplateNoElimination, 15, ""), c)
+			h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 			h.at(18 * time.Second)
 			h.setLive(&c)
 			h.fire()
@@ -60,7 +60,7 @@ func TestBook_RespawnModeEliminationTemplatesAreUnscorable(t *testing.T) {
 	t.Run("UC-040/BR-043 the first decision cycle that sees the mode scores it", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2", "P3") // mode not observed yet at registration
-		h.register(pred(decide.TemplateElimination, 30, ""), c, true)
+		h.register(pred(decide.TemplateElimination, 30, ""), c)
 		h.at(2 * time.Second)
 		live := respawnGame("Nonstop Joust")
 		h.b.Observe(live)
@@ -75,7 +75,7 @@ func TestBook_RespawnModeEliminationTemplatesAreUnscorable(t *testing.T) {
 	t.Run("UC-040/BR-043 a Swapper disconnect elimination does not make it a hit", func(t *testing.T) {
 		h := newHarness(t)
 		c := respawnGame("Swapper")
-		h.register(pred(decide.TemplateElimination, 30, ""), c, true)
+		h.register(pred(decide.TemplateElimination, 30, ""), c)
 		h.at(5 * time.Second)
 		r := h.one(h.end(eliminate(c, "P4", 4*time.Second)))
 		if r.Outcome != OutcomeUnscorable || r.UnscorableReason != ReasonRespawnMode {
@@ -85,14 +85,14 @@ func TestBook_RespawnModeEliminationTemplatesAreUnscorable(t *testing.T) {
 	t.Run("UC-040/BR-043 activity, closeness and game_ends still score in a respawn mode", func(t *testing.T) {
 		h := newHarness(t)
 		c := respawnGame("Nonstop Joust")
-		h.register(pred(decide.TemplateGameEnds, 30, ""), c, true)
+		h.register(pred(decide.TemplateGameEnds, 30, ""), c)
 		h.at(5 * time.Second)
 		want(t, h.one(h.end(c)), OutcomeHit, "", true)
 	})
 	t.Run("UC-040/BR-043 FFA is unchanged (positive control)", func(t *testing.T) {
 		h := newHarness(t)
 		c := respawnGame("FFA")
-		h.register(pred(decide.TemplateElimination, 30, ""), c, true)
+		h.register(pred(decide.TemplateElimination, 30, ""), c)
 		h.at(33 * time.Second)
 		h.setLive(&c)
 		h.fire()

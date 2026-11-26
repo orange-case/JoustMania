@@ -78,8 +78,7 @@ type Profile struct {
 
 // Goal sources (the decide.goal.source / summary.goal.source attribute and the
 // source label of agent_goal_attainment): a named goal.profile variant, or a
-// from_objectives form. The two keep same-named profiles apart (the
-// from_objectives long_running_game reads the fitness flag, the named one 180 s).
+// from_objectives form.
 const (
 	SourceNamed          = "named"
 	SourceFromObjectives = "from_objectives"
@@ -259,15 +258,6 @@ func term(char string, lo, hi *float64) Term {
 	return Term{Characteristic: char, Min: lo, Max: hi, Phase: PhaseWhole, Weight: 1}
 }
 
-// clampBound keeps a fitness-flag value inside the characteristic's hard bound.
-func clampBound(char string, v float64) float64 {
-	b := HardBounds[char]
-	if math.IsNaN(v) {
-		return b.Lower
-	}
-	return math.Max(b.Lower, math.Min(b.Upper, v))
-}
-
 // Objective weight keys (services/flagd/agent.json objectives).
 const (
 	objEndurance  = "endurance"
@@ -276,19 +266,14 @@ const (
 	objChaos      = "chaos"
 )
 
-// balancedMinDuration is balanced_contest's duration edge: no fitness flag backs it.
-const balancedMinDuration = 120
-
 // FromObjectives derives the from_objectives profile (decide-contract.md §14.4)
 // from the objectives weights: the objective with the strictly largest weight
 // picks it (endurance -> long_running_game, accelerate -> quick_game, balanced
 // -> balanced_contest, chaos -> chaos_focused); a tie for the largest (mixed) is
-// no goal. The duration edges read the fitness flags, so the goal and the
-// fitness thresholds cannot drift: enduranceMinS is
-// fitness.endurance.min_session_seconds, accelerateTargetS
-// fitness.accelerate.target_session_seconds. This is a mapping, not a migration:
-// the rules weights and the fitness functions are unchanged.
-func FromObjectives(weights map[string]float64, enduranceMinS, accelerateTargetS float64) Profile {
+// no goal. A mapped form carries exactly the terms of the same-named goal.profile
+// variant in agent.json (a test pins them equal). This is a mapping, not a
+// migration: the rules weights and the fitness functions are unchanged.
+func FromObjectives(weights map[string]float64) Profile {
 	top, best, tie := "", math.Inf(-1), false
 	for _, k := range []string{objEndurance, objBalanced, objAccelerate, objChaos} {
 		w, ok := weights[k]
@@ -310,21 +295,21 @@ func FromObjectives(weights map[string]float64, enduranceMinS, accelerateTargetS
 	case objEndurance:
 		p.Name = NameLongRunningGame
 		p.Terms = []Term{
-			term(decide.CharDuration, ptr(clampBound(decide.CharDuration, enduranceMinS)), nil),
+			term(decide.CharDuration, ptr(180), nil),
 			term(decide.CharActivity, ptr(0.3), ptr(0.6)),
 			term(decide.CharEliminationPace, nil, ptr(1)),
 		}
 	case objAccelerate:
 		p.Name = NameQuickGame
 		p.Terms = []Term{
-			term(decide.CharDuration, nil, ptr(clampBound(decide.CharDuration, accelerateTargetS))),
+			term(decide.CharDuration, nil, ptr(120)),
 			term(decide.CharEliminationPace, ptr(2), nil),
 		}
 	case objBalanced:
 		p.Name = NameBalancedContest
 		p.Terms = []Term{
 			term(decide.CharCloseness, nil, ptr(0.25)),
-			term(decide.CharDuration, ptr(balancedMinDuration), nil),
+			term(decide.CharDuration, ptr(120), nil),
 		}
 	case objChaos:
 		p.Name = NameChaos

@@ -122,7 +122,7 @@ func TestBook_GoalAttainment(t *testing.T) {
 			t.Fatal("no resolver must record no goal")
 		}
 		h.b.SetGoalResolver(func(context.Context, gamecontext.GameContext) goal.Profile {
-			return goal.FromObjectives(map[string]float64{"endurance": 0.25, "chaos": 0.25}, 120, 60)
+			return goal.FromObjectives(map[string]float64{"endurance": 0.25, "chaos": 0.25})
 		})
 		h.b.OnGameEnd(game("A"))
 		if h.b.SummaryGoal("g1") != nil {

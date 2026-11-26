@@ -49,8 +49,8 @@ type PredictionOutcome struct {
 	RegisteredAt time.Time `json:"-"`
 }
 
-// PredictionTally is the count of one (backend, source, template) group, acted
-// and counterfactual kept apart (UC-040 BR-034). It holds no serial, so the
+// PredictionTally is the count of one (backend, source, template, acted) group
+// (UC-040 BR-034). It holds no serial, so the
 // cross-game window may keep it.
 type PredictionTally struct {
 	Backend    string  `json:"backend"`
@@ -140,22 +140,18 @@ func TallyPredictions(outcomes []PredictionOutcome) []PredictionTally {
 // PredictionCounts are the totals the summary span carries.
 type PredictionCounts struct {
 	Scored, Hit, Miss, Unscorable int
-	// Counterfactual and Controls count the predictions left out of the four above.
-	Counterfactual, Controls int
+	// Controls counts the base-rate controls, left out of the four above.
+	Controls int
 }
 
-// CountPredictions totals the ACTED decision predictions (summary.predictions.*):
-// scored = hit + miss. Counterfactuals (acted=false) and controls are counted apart,
-// never mixed into the acted calibration (UC-040 BR-034).
+// CountPredictions totals the decision predictions (summary.predictions.*):
+// scored = hit + miss. Controls are counted apart, never mixed into the
+// calibration (UC-040 BR-034).
 func CountPredictions(outcomes []PredictionOutcome) PredictionCounts {
 	var c PredictionCounts
 	for _, o := range outcomes {
 		if o.Source == PredictionSourceControl {
 			c.Controls++
-			continue
-		}
-		if !o.Acted {
-			c.Counterfactual++
 			continue
 		}
 		switch o.Outcome {

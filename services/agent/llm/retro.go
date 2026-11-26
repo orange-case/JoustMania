@@ -437,7 +437,7 @@ func writePredictions(b *strings.Builder, summary gamesummary.Summary) {
 	if len(summary.Predictions) == 0 {
 		return
 	}
-	b.WriteString("\n\nPredictions vs outcomes (p = stated probability that it comes true; unscorable is neither a hit nor a miss; acted=false is a counterfactual, never applied):\n")
+	b.WriteString("\n\nPredictions vs outcomes (p = stated probability that it comes true; unscorable is neither a hit nor a miss):\n")
 	for i, p := range summary.Predictions {
 		if i == maxRetroPredictionLines {
 			fmt.Fprintf(b, "  ... %d more not shown\n", len(summary.Predictions)-maxRetroPredictionLines)
@@ -453,9 +453,6 @@ func writePredictions(b *strings.Builder, summary gamesummary.Summary) {
 		fmt.Fprintf(b, " horizon=%ds p=%.2f -> %s", p.HorizonS, p.P, p.Outcome)
 		if p.UnscorableReason != "" {
 			fmt.Fprintf(b, " (%s)", p.UnscorableReason)
-		}
-		if p.Source != gamesummary.PredictionSourceControl {
-			fmt.Fprintf(b, " acted=%t", p.Acted)
 		}
 		b.WriteString("\n")
 	}

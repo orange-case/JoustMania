@@ -12,7 +12,7 @@ import (
 // UC: UC-043 A21 BR-010
 // arm_tally_uc043_test.go: at game end the Book hands the game's tally of ACTED
 // decision predictions that scored hit or miss to the arm-calibration sink
-// (#2479, #2498); counterfactuals, controls and unscorables never count.
+// (#2479, #2498); controls and unscorables never count.
 
 type tallyCall struct {
 	gameID      string
@@ -29,15 +29,14 @@ func (h *harness) tallySink() *[]tallyCall {
 }
 
 // mixedGame registers, on a three-player game: an acted no_elimination that
-// misses early (P3 out at 3 s), an acted survives(P1) and the same survives(P2)
-// as a counterfactual (both hit at the horizon), and a control survives(P1).
+// misses early (P3 out at 3 s), an acted survives(P1) that hits at the horizon,
+// and a control survives(P1).
 func mixedGame(h *harness) gamecontext.GameContext {
 	c := game("P1", "P2", "P3")
-	h.register(pred(decide.TemplateNoElimination, 15, ""), c, true)
-	h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
-	h.register(pred(decide.TemplateSurvives, 15, "P2"), c, false)
+	h.register(pred(decide.TemplateNoElimination, 15, ""), c)
+	h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 	ctl := decide.NewPrediction(decide.TemplateSurvives, 15, 0.5, decide.SourceControl, "", "P1")
-	if _, _, ok := h.b.Register(Registration{Backend: BackendNone, Prediction: ctl, Context: c}); !ok {
+	if _, ok := h.b.Register(Registration{Backend: BackendNone, Prediction: ctl, Context: c}); !ok {
 		h.t.Fatal("control not registered")
 	}
 	h.at(4 * time.Second)
@@ -55,19 +54,15 @@ func TestBook_ArmTally(t *testing.T) {
 		calls := h.tallySink()
 		live := mixedGame(h)
 		results := h.end(live)
-		// Not vacuous: the counterfactual and the control scored too.
-		var cfScored, ctlScored bool
+		// Not vacuous: the control scored too.
+		var ctlScored bool
 		for _, r := range results {
-			scored := r.Outcome == OutcomeHit || r.Outcome == OutcomeMiss
-			if !r.Acted && r.Prediction.Source != decide.SourceControl && scored {
-				cfScored = true
-			}
-			if r.Prediction.Source == decide.SourceControl && scored {
+			if r.Prediction.Source == decide.SourceControl && (r.Outcome == OutcomeHit || r.Outcome == OutcomeMiss) {
 				ctlScored = true
 			}
 		}
-		if !cfScored || !ctlScored {
-			t.Fatalf("counterfactual scored %v, control scored %v: the filter is untested (%+v)", cfScored, ctlScored, results)
+		if !ctlScored {
+			t.Fatalf("control not scored: the filter is untested (%+v)", results)
 		}
 		var wantScored, wantHits int
 		var wantBrier float64
@@ -109,7 +104,10 @@ func TestBook_ArmTally(t *testing.T) {
 		h := newHarness(t)
 		calls := h.tallySink()
 		c := game("P1", "P2")
-		h.register(pred(decide.TemplateSurvives, 15, "P1"), c, false)
+		ctl := decide.NewPrediction(decide.TemplateSurvives, 15, 0.5, decide.SourceControl, "", "P1")
+		if _, ok := h.b.Register(Registration{Backend: BackendNone, Prediction: ctl, Context: c}); !ok {
+			t.Fatal("control not registered")
+		}
 		h.end(c)
 		if len(*calls) != 0 {
 			t.Fatalf("handed on %+v", *calls)
