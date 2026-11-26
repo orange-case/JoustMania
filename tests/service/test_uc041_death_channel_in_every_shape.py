@@ -44,7 +44,7 @@ TELEMETRY_TIMEOUT_SECONDS = 30.0
 
 
 @pytest.mark.uc("UC-100", flow="main", steps=[3, 4], br=["BR-001", "BR-003", "BR-007"])
-@pytest.mark.uc("UC-041", br=["BR-008", "BR-009"])
+@pytest.mark.uc("UC-041", flow="main", steps=[4], br=["BR-008", "BR-009"])
 async def test_a_death_in_the_log_event_shape_reaches_the_agent_through_the_elimination_gauge(stack, headless_cleanup):
     sink = stack.otlp_sink
     assert sink is not None
@@ -100,9 +100,9 @@ async def test_a_death_in_the_log_event_shape_reaches_the_agent_through_the_elim
         await game_channel.close()
 
     root = await sink.wait_span_async(
-        # The game root: the only span with game.name, game.id and game.kind together.
-        None,
-        {"game.id": game_id, "game.name": "JoustFFA"},
+        # By name: the StreamGameEvents server span of a real game is a root with game.id and game.name too.
+        "Joust Free-for-All",
+        {"game.id": game_id},
         service=COORDINATOR,
         root=True,
         timeout=TELEMETRY_TIMEOUT_SECONDS,
