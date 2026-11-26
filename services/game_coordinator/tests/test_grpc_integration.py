@@ -27,10 +27,11 @@ service_dir = test_dir.parent
 project_root = service_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from lib.types import GameEvent, Games
+from lib.types import GameEvent, Games, Sound
 from proto import controller_manager_pb2, controller_manager_pb2_grpc, game_coordinator_pb2, game_coordinator_pb2_grpc
 from services.game_coordinator import game_session as game_session_mod
 from services.game_coordinator.game_factory import _GAME_CLASSES
+from services.game_coordinator.games.gameplay_stream import GameplayStreamLostError
 from services.game_coordinator.servicer import GameCoordinatorServicer
 
 # #775: the game-loop thread moved onto GameSession. Patch its start_thread to
@@ -1491,3 +1492,186 @@ class TestGameplayStreamReopen:
 
         assert frame_server.calls == 1, "a call that ended with OK was reconnected"
         assert processed == []
+
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_game_loop_reconnects_a_silent_stream_within_the_frame_gap(self, serve):
+        """A call that stays open but sends no frame (wedged controller manager) is reopened, not awaited forever."""
+        frame_server, stub = await serve("stall", frames_before_fault=5)
+        game = self._ffa(stub)
+        await game._initialize_players()
+        game.running = True
+        await game._start_gameplay_stream()
+        game._STREAM_FRAME_GAP_S = 0.2
+        game._RECONNECT_BACKOFF_S = 0.01
+        reopened_at = []
+        real_create = game._create_gameplay_stream
+
+        async def create():
+            reopened_at.append(asyncio.get_running_loop().time())
+            await real_create()
+
+        game._create_gameplay_stream = create
+        processed = self._stop_after_frames(game, count=8)
+        loop_task = asyncio.create_task(game._game_loop())
+        await asyncio.wait_for(frame_server.faulted.wait(), timeout=5)
+        stalled_at = asyncio.get_running_loop().time()
+
+        await asyncio.wait_for(loop_task, timeout=5)
+
+        assert frame_server.calls == 2, "the silent call was not reopened exactly once"
+        assert len(processed) == 8, "the game loop got no frame after the silent call was reopened"
+        # Never before a whole gap of waiting (the last frame came at most 10 ms before the stall).
+        assert reopened_at[0] - stalled_at >= 0.2 - 0.02, "a call that was only briefly quiet was reopened"
+
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_frame_processing_longer_than_the_gap_is_no_silence(self, serve):
+        """A frame that takes several gaps to process (a round pause, a slow sound) is not cut short or reconnected."""
+        frame_server, stub = await serve(None)
+        game = self._ffa(stub)
+        await game._initialize_players()
+        game.running = True
+        await game._start_gameplay_stream()
+        game._STREAM_FRAME_GAP_S = 0.1
+        game._RECONNECT_BACKOFF_S = 0.01
+        processed, finished = [], []
+
+        async def process(update):
+            processed.append(update.timestamp)
+            if len(processed) == 2:
+                await asyncio.sleep(0.5)
+                finished.append(update.timestamp)
+            if len(processed) >= 5:
+                game.running = False
+            return False
+
+        game._process_gameplay_update = process
+
+        await asyncio.wait_for(game._game_loop(), timeout=5)
+
+        assert finished == [processed[1]], "the slow frame was cut short"
+        assert frame_server.calls == 1, "a healthy stream was reconnected while a frame was processed"
+        assert len(processed) == 5
+
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_win_hold_is_no_silence(self, serve):
+        """The stream goes quiet after the deciding frame: the win hold outlasts the gap, the call stays open."""
+        frame_server, stub = await serve("stall", frames_before_fault=3)
+        game = self._ffa(stub)
+        await game._initialize_players()
+        game.running = True
+        await game._start_gameplay_stream()
+        game._STREAM_FRAME_GAP_S = 0.1
+        game._WIN_HOLD_S = 0.5
+        held = []
+        real_hold = game._hold_win_display
+
+        async def hold():
+            await real_hold()
+            held.append(game.gameplay_stream.cancelled())
+
+        game._hold_win_display = hold
+        processed = []
+
+        async def process(update):
+            processed.append(update.timestamp)
+            return len(processed) == 3
+
+        game._process_gameplay_update = process
+
+        await asyncio.wait_for(game._game_loop(), timeout=5)
+
+        assert held == [False], "the frame-gap watch cancelled the call during the win hold"
+        assert frame_server.calls == 1
+
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_game_loop_resumes_when_the_controller_manager_is_back_within_the_budget(self, serve):
+        """A restart: the call dies, two reopens fail (controller manager down), the third reconnect plays on."""
+        frame_server, stub = await serve("abort")
+        game = self._ffa(stub)
+        await game._initialize_players()
+        game.running = True
+        await game._start_gameplay_stream()
+        game._RECONNECT_BACKOFF_S = 0.01
+        real_create = game._create_gameplay_stream
+        attempts = []
+
+        async def create():
+            attempts.append(1)
+            if len(attempts) <= 2:
+                raise RuntimeError("controller manager unavailable")
+            await real_create()
+
+        game._create_gameplay_stream = create
+        processed = self._stop_after_frames(game, count=8)
+
+        loop_error = await self._run_loop(game)
+
+        assert loop_error is None, f"a restart within the budget ended the game: {loop_error!r}"
+        assert len(attempts) == 3, "a failed reopen did not count as one reconnect"
+        assert frame_server.calls == 2
+        assert len(processed) == 8, "the game loop got no frame after the controller manager came back"
+
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.uc("UC-002", br=["BR-009"])
+    @pytest.mark.parametrize("outage", ["down", "wedged"])
+    @pytest.mark.asyncio
+    async def test_game_ends_with_no_winner_when_the_stream_stays_down(self, serve, outage):
+        """Past the budget (three reconnects) the game ends with game_error, "Cancelled." and no winner."""
+        fault_now = asyncio.Event()
+        frame_server, stub = await serve("abort", fault_now)
+        events = []
+
+        async def publish(event_type, _data=None, *_args, **_kwargs):
+            events.append(str(event_type))
+
+        game = self._ffa(stub, publish)
+        game._RECONNECT_BACKOFF_S = 0.01
+        game._STREAM_REOPEN_TIMEOUT_S = 0.1
+
+        async def countdown():
+            return None
+
+        game._countdown = countdown
+        real_create = game._create_gameplay_stream
+        opens = []
+
+        async def create():
+            opens.append(1)
+            if len(opens) == 1:
+                await real_create()
+            elif outage == "down":
+                raise RuntimeError("controller manager unavailable")
+            else:
+                await asyncio.Event().wait()
+
+        game._create_gameplay_stream = create
+        sounds = []
+
+        async def play_sound(sound, *_args, **_kwargs):
+            sounds.append(sound)
+
+        game._play_sound = play_sound
+        processed = []
+
+        async def process(update):
+            processed.append(update.timestamp)
+            if len(processed) == 3:
+                fault_now.set()
+            return False
+
+        game._process_gameplay_update = process
+        started = asyncio.get_running_loop().time()
+
+        # run() publishes game_error, then re-raises the run error (UC-020 BR-003).
+        with pytest.raises(GameplayStreamLostError, match="gameplay_stream_lost"):
+            await asyncio.wait_for(game.run(), timeout=10)
+
+        assert GameEvent.GAME_ERROR.value in events, f"no game_error: {events}"
+        assert GameEvent.GAME_WINNER.value not in events
+        assert len(opens) == 1 + 3, "the game did not try exactly three reconnects"
+        assert Sound.MENU_VOX_STATUS_CANCELLED in sounds
+        assert asyncio.get_running_loop().time() - started < 5, "the abort was not bounded"

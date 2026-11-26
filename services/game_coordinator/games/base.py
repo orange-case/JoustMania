@@ -1261,6 +1261,10 @@ class BaseGameMode(
     _WARMUP_STALL_TIMEOUT_S = 0.5
 
     _RECONNECT_BACKOFF_S = 1.0
+    # UC-030 BR-006: the controller manager sends a frame every tick, so a call this
+    # long without one is wedged; only the wait counts, detection lands at 1x to 1.5x.
+    _STREAM_FRAME_GAP_S: float = 1.0
+    _STREAM_REOPEN_TIMEOUT_S: float = 2.0
 
     # Real waits a test can shorten: production keeps these values.
     # Poll step of the countdown beep wait (one step per 50 ms of beep interval).

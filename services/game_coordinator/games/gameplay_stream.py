@@ -9,12 +9,17 @@ import inspect
 
 import grpc
 
+from lib.types import Sound
 from services.game_coordinator.games import base as _base
 from services.game_coordinator.games.base import (
     DEAD_PLAYER_COLOR,
     logger,
 )
 from services.game_coordinator.stream_writes import serialized_write
+
+
+class GameplayStreamLostError(RuntimeError):
+    """The gameplay stream stayed down through every reconnect: the game ends with no winner (UC-030 BR-006)."""
 
 
 class GameplayStreamMixin:
@@ -348,20 +353,29 @@ class GameplayStreamMixin:
             The new attempt number after reconnection
 
         Raises:
-            Exception: If max reconnection attempts exceeded
+            GameplayStreamLostError: If max reconnection attempts exceeded (no winner, UC-030 BR-006)
         """
         if attempt > max_attempts:
-            logger.error(f"Gameplay stream failed after {max_attempts} reconnect attempts, ending game")
-            raise error
+            logger.error(f"Gameplay stream failed after {max_attempts} reconnect attempts, ending game with no winner")
+            await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=3)
+            raise GameplayStreamLostError(f"gameplay_stream_lost: {error!r}") from error
 
         backoff = attempt * self._RECONNECT_BACKOFF_S  # Linear backoff: 1s, 2s, 3s
         logger.warning(
-            f"Gameplay stream error (attempt {attempt}/{max_attempts}): {error}. Reconnecting in {backoff}s..."
+            f"Gameplay stream error (attempt {attempt}/{max_attempts}): {error!r}. Reconnecting in {backoff}s..."
         )
         await asyncio.sleep(backoff)
         if not self.running:
             # Force-ended during the backoff: the outer loop ends, no reopen (UC-030 BR-006).
             return attempt
 
-        await self._reopen_gameplay_stream(f"game loop reconnect {attempt}/{max_attempts}")
+        try:
+            # A wedged controller manager may accept the call and never answer.
+            async with asyncio.timeout(self._STREAM_REOPEN_TIMEOUT_S):
+                await self._reopen_gameplay_stream(f"game loop reconnect {attempt}/{max_attempts}")
+        except Exception as reopen_error:
+            if not self.running:
+                return attempt
+            # The controller manager is down (a restart): this reconnect failed, the next one follows.
+            return await self._handle_stream_reconnection(reopen_error, attempt + 1, max_attempts)
         return attempt

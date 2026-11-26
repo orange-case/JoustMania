@@ -1309,6 +1309,51 @@ class TestHandleStreamReconnection:
         assert result == 3
         game._create_gameplay_stream.assert_called_once()
 
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_failed_reopen_counts_as_a_reconnect_and_the_next_one_follows(self, game):
+        """A controller manager that is down fails the reopen: the next attempt follows, no game end."""
+        game._RECONNECT_BACKOFF_S = 0.0
+        game._create_gameplay_stream = AsyncMock(side_effect=[RuntimeError("unavailable"), None])
+
+        result = await game._handle_stream_reconnection(RuntimeError("stream broken"), attempt=1, max_attempts=3)
+
+        assert result == 2
+        assert game._create_gameplay_stream.await_count == 2
+
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_reopen_failing_past_the_budget_ends_with_no_winner(self, game):
+        from services.game_coordinator.games.gameplay_stream import GameplayStreamLostError
+
+        game._RECONNECT_BACKOFF_S = 0.0
+        game._create_gameplay_stream = AsyncMock(side_effect=RuntimeError("unavailable"))
+        game._play_sound = AsyncMock()
+
+        with pytest.raises(GameplayStreamLostError, match="gameplay_stream_lost"):
+            await game._handle_stream_reconnection(RuntimeError("stream broken"), attempt=1, max_attempts=3)
+
+        assert game._create_gameplay_stream.await_count == 3
+        game._play_sound.assert_awaited_once_with(Sound.MENU_VOX_STATUS_CANCELLED, priority=3)
+
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_force_end_during_the_last_reopen_is_no_stream_loss(self, game):
+        """A force-end that lands while the last reopen fails ends the game force-ended, not game_error."""
+        game._RECONNECT_BACKOFF_S = 0.0
+        game._play_sound = AsyncMock()
+
+        async def reopen_during_force_end():
+            game.running = False
+            raise RuntimeError("unavailable")
+
+        game._create_gameplay_stream = AsyncMock(side_effect=reopen_during_force_end)
+
+        result = await game._handle_stream_reconnection(RuntimeError("stream broken"), attempt=3, max_attempts=3)
+
+        assert result == 3
+        game._play_sound.assert_not_awaited()
+
 
 # ========================================================================
 # _start_intensity_ramp (#1833; was _apply_tempo_change)
