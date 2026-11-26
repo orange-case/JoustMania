@@ -261,7 +261,7 @@
         "four_min": 240,
         "five_min": 300
       },
-      "defaultVariant": "unlimited"
+      "defaultVariant": "three_min"
     },
     "invincibility_seconds": {
       "state": "ENABLED",

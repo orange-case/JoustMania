@@ -920,6 +920,14 @@ class TestGameplayStreamRelease:
             time_limit_seconds=0.3,
         )
         game._countdown = _async_noop
+        init = game._initialize_players_impl
+
+        async def init_then_lead(controllers):
+            await init(controllers)
+            for serial in list(game.players)[1:]:
+                game.players[serial].deaths = 1  # one leader, no tie (UC-026 A4)
+
+        game._initialize_players_impl = init_then_lead
         with patch.object(nonstop_joust, "WINNER_HOLD_SECONDS", 0.2):
             await asyncio.wait_for(game.run(), timeout=10)
 

@@ -189,6 +189,8 @@ async def test_nonstop_winner_hold_ticks_in_tenths(monkeypatch):
     game = await _game(NonstopJoustGame)
     game.state = GameState.RUNNING
     game._time_limit_reached = True  # only a time-limit end has a winner (UC-026 BR-003)
+    for serial in list(game.players)[1:]:
+        game.players[serial].deaths = 1  # one leader, no tie (UC-026 A4)
     recorder = SleepRecorder(monkeypatch)
 
     await game._end_game_impl()
