@@ -22,7 +22,7 @@ func TestBuildGameEndChain_PredictionsScoredBeforeSummary(t *testing.T) {
 	c := gamecontext.GameContext{SessionID: "game_chain", Players: map[string]*gamecontext.PlayerSignals{
 		"A": {Serial: "A", Active: &active}, "B": {Serial: "B", Active: &active}}}
 	c.Session.GameActive = &active
-	if _, _, ok := book.Register(prediction.Registration{Backend: "rules",
+	if _, ok := book.Register(prediction.Registration{Backend: "rules",
 		Prediction: decide.NewPrediction(decide.TemplateSurvives, 15, 0.7, decide.SourceRules, "R4", "A"), Context: c}); !ok {
 		t.Fatal("register failed")
 	}

@@ -103,10 +103,10 @@ Player arcs (sorted by serial; offsets relative to game start; "unknown" = never
     near_death_ratio=unknown near_death_offset_seconds=unknown
     final_intensity=unknown final_skill=unknown
 
-Predictions vs outcomes (p = stated probability that it comes true; unscorable is neither a hit nor a miss; acted=false is a counterfactual, never applied):
-  +12s rules/rules survives rule=R4 target=AA:11 horizon=15s p=0.70 -> hit acted=true
-  +40s claude/model no_elimination horizon=15s p=0.90 -> miss acted=true
-  +55s claude/lever_default activity_rises target=BB:22 horizon=10s p=0.60 -> unscorable (game_ended) acted=false
+Predictions vs outcomes (p = stated probability that it comes true; unscorable is neither a hit nor a miss):
+  +12s rules/rules survives rule=R4 target=AA:11 horizon=15s p=0.70 -> hit
+  +40s claude/model no_elimination horizon=15s p=0.90 -> miss
+  +55s claude/lever_default activity_rises target=BB:22 horizon=10s p=0.60 -> unscorable (game_ended)
   +15s rules/control survives target=AA:11 horizon=15s p=0.50 -> hit
   +30s rules/control survives target=BB:22 horizon=15s p=0.50 -> miss
   +45s rules/control survives target=AA:11 horizon=15s p=0.50 -> hit

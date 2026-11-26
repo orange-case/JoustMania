@@ -13,7 +13,7 @@ import (
 func TestBook_SummaryOutcomes(t *testing.T) {
 	h := newHarness(t)
 	c := game("P1", "P2")
-	h.register(pred(decide.TemplateSurvives, 15, "P1"), c, false)
+	h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 	if got := h.b.SummaryOutcomes("g1"); got != nil {
 		t.Fatalf("a running game has no finalized outcomes, got %+v", got)
 	}
@@ -27,7 +27,7 @@ func TestBook_SummaryOutcomes(t *testing.T) {
 	}
 	o := got[0]
 	if o.Outcome != OutcomeHit || o.Source != decide.SourceRules || o.Rule != "R4" || o.Target != "P1" ||
-		o.Template != decide.TemplateSurvives || o.HorizonS != 15 || o.P != 0.7 || o.Acted || o.Backend != "rules" ||
+		o.Template != decide.TemplateSurvives || o.HorizonS != 15 || o.P != 0.7 || !o.Acted || o.Backend != "rules" ||
 		!o.RegisteredAt.Equal(t0) {
 		t.Errorf("outcome = %+v", o)
 	}

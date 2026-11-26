@@ -44,7 +44,7 @@ func TestGameEndChain_ArmCalibration(t *testing.T) {
 	running := gamecontext.GameContext{SessionID: shadow.gameID, GameKind: "shadow", ExperimentID: id, Arm: shadow.arm,
 		Players: map[string]*gamecontext.PlayerSignals{"A": {Serial: "A", Active: &active}, "B": {Serial: "B", Active: &active}}}
 	running.Session.GameActive = &active
-	if _, _, ok := book.Register(prediction.Registration{Backend: "rules", Acted: true,
+	if _, ok := book.Register(prediction.Registration{Backend: "rules",
 		Prediction: decide.NewPrediction(decide.TemplateNoElimination, 15, 0.7, decide.SourceRules, "R4", ""), Context: running}); !ok {
 		t.Fatal("register failed")
 	}

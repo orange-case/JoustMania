@@ -456,9 +456,8 @@ const (
 	// AttrPredictionBackend is the backend whose decision carried the prediction
 	// ("none" for a control); the same key as invoke_agent's decide.backend.
 	AttrPredictionBackend = "decide.backend"
-	// AttrPredictionActed is true when the decision passed the permission chain and
-	// its write was applied; false for held, blocked, gated-off and discarded
-	// decisions (counterfactuals) and for controls.
+	// AttrPredictionActed is true for a decision prediction (only acted decisions
+	// register one) and false for a control.
 	AttrPredictionActed = "prediction.acted"
 	// AttrPredictionOutcome is hit, miss or unscorable.
 	AttrPredictionOutcome = "prediction.outcome"
@@ -494,9 +493,6 @@ const (
 	AttrDecidePredictionP              = "decide.prediction.p"
 	AttrDecidePredictionSource         = "decide.prediction.source"
 	AttrDecidePredictionRule           = "decide.prediction.rule"
-	// AttrDecidePredictionMerged is true when an identical prediction was already
-	// pending: decide.prediction.id is that pending prediction's id.
-	AttrDecidePredictionMerged = "decide.prediction.merged"
 	// AttrDecidePredictionDroppedReason is why a model-stated prediction was
 	// dropped (missing, bad_option, bad_confidence, no_target, inconsistent; UC-040
 	// A45). Set on the accepted remote answer's invoke_agent span only.

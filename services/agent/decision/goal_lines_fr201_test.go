@@ -23,7 +23,7 @@ import (
 // the prompt bytes, are unchanged.
 
 func testGoalProfile() goal.Profile {
-	return goal.FromObjectives(map[string]float64{"endurance": 0.7, "balanced": 0.1}, 180, 60)
+	return goal.FromObjectives(map[string]float64{"endurance": 0.7, "balanced": 0.1})
 }
 
 // goalRun is one remote decide cycle with a goal source wired: the request, the
@@ -122,8 +122,9 @@ func TestRemote_GoalLines(t *testing.T) {
 		}
 	})
 	t.Run("UC-042/A12 the off-band terms are computed in code (#2498)", func(t *testing.T) {
-		// quick_game with a 1 s duration maximum: the measured duration is above it.
-		quick := goal.FromObjectives(map[string]float64{"accelerate": 1}, 180, 1)
+		// A 1 s duration maximum: the measured duration is above it.
+		one := 1.0
+		quick := goal.Profile{Name: "quick", Terms: []goal.Term{{Characteristic: "duration", Max: &one, Phase: goal.PhaseWhole, Weight: 1}}}
 		r := runGoalWith(t, quick, true, "v1", flags.DecisionBackendJev)
 		if r.req.Goal == nil || !reflect.DeepEqual(r.req.Goal.OffBand, []string{"duration"}) {
 			t.Fatalf("off band = %+v (now %q), want [duration]", r.req.Goal, r.req.Goal.Now)
@@ -168,7 +169,7 @@ func TestRemote_GoalLines(t *testing.T) {
 func TestGoalLines_NoTermsNoLines(t *testing.T) {
 	l := &Loop{}
 	l.SetGoalSource(func(context.Context, gamecontext.GameContext) goal.Profile {
-		return goal.FromObjectives(map[string]float64{"endurance": 0.25, "balanced": 0.25}, 120, 60) // mixed
+		return goal.FromObjectives(map[string]float64{"endurance": 0.25, "balanced": 0.25}) // mixed
 	})
 	snap := remoteSnapshot(time.Second)
 	snap.Decision.GoalInPrompt = true

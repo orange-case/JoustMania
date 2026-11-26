@@ -55,9 +55,8 @@ const (
 	attrPredictionsHit        = "summary.predictions.hit"
 	attrPredictionsMiss       = "summary.predictions.miss"
 	attrPredictionsUnscorable = "summary.predictions.unscorable"
-	// counterfactual and controls are kept out of the four above (BR-034).
-	attrPredictionsCounterfactual = "summary.predictions.counterfactual"
-	attrPredictionsControls       = "summary.predictions.controls"
+	// controls are kept out of the four above (BR-034).
+	attrPredictionsControls = "summary.predictions.controls"
 	// summary.goal.* (UC-042 A12, #2479): set only when the game had a goal;
 	// attainment only when a term could be measured.
 	// Group-shield decisions of the game (#2529, UC-040 BR-033).
@@ -292,7 +291,6 @@ func (c *Coordinator) OnGameEnd(gc gamecontext.GameContext) {
 			attribute.Int(attrPredictionsHit, n.Hit),
 			attribute.Int(attrPredictionsMiss, n.Miss),
 			attribute.Int(attrPredictionsUnscorable, n.Unscorable),
-			attribute.Int(attrPredictionsCounterfactual, n.Counterfactual),
 			attribute.Int(attrPredictionsControls, n.Controls),
 		)
 	}
@@ -341,7 +339,6 @@ func (c *Coordinator) OnGameEnd(gc gamecontext.GameContext) {
 		"predictions_hit", CountPredictions(summary.Predictions).Hit,
 		"predictions_miss", CountPredictions(summary.Predictions).Miss,
 		"predictions_unscorable", CountPredictions(summary.Predictions).Unscorable,
-		"predictions_counterfactual", CountPredictions(summary.Predictions).Counterfactual,
 		"predictions_controls", CountPredictions(summary.Predictions).Controls,
 		"group_applied", groupApplied,
 		"group_blocked", groupBlocked,
