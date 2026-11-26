@@ -24,9 +24,6 @@ const (
 	keyInferenceTimeoutSeconds = "inference.timeout_seconds"
 	keyEffectWindowSeconds     = "effect.window_seconds"
 	keyProbeDecisions          = "decision.probe_decisions"
-	keyRewatchIntervalSeconds  = "promotion.rewatch_interval_seconds"
-	keyRewatchTimeoutSeconds   = "promotion.rewatch_timeout_seconds"
-	keyRevertCooldownSeconds   = "promotion.revert_cooldown_seconds"
 )
 
 // InferenceBackend resolves inference.backend: the
@@ -68,21 +65,6 @@ func (f *Flags) InferenceTimeout(ctx context.Context, def time.Duration) time.Du
 // float of seconds). A non-positive value falls back to def.
 func (f *Flags) EffectWindow(ctx context.Context, def time.Duration) time.Duration {
 	return f.durationFlag(ctx, keyEffectWindowSeconds, def.Seconds())
-}
-
-// RewatchInterval resolves promotion.rewatch_interval_seconds.
-func (f *Flags) RewatchInterval(ctx context.Context, def time.Duration) time.Duration {
-	return f.secondsFlag(ctx, keyRewatchIntervalSeconds, def)
-}
-
-// RewatchTimeout resolves promotion.rewatch_timeout_seconds.
-func (f *Flags) RewatchTimeout(ctx context.Context, def time.Duration) time.Duration {
-	return f.secondsFlag(ctx, keyRewatchTimeoutSeconds, def)
-}
-
-// RevertCooldown resolves promotion.revert_cooldown_seconds.
-func (f *Flags) RevertCooldown(ctx context.Context, def time.Duration) time.Duration {
-	return f.secondsFlag(ctx, keyRevertCooldownSeconds, def)
 }
 
 // secondsFlag resolves an int "seconds" flag into a Duration, falling back to def

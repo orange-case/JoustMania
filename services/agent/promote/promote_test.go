@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
-	"time"
 
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -54,33 +53,6 @@ func (w *recordingRealDefault) SetRealDefault(_ context.Context, flag string, va
 	return w.err
 }
 
-// fakeWatcher reports a configured degradation verdict.
-type fakeWatcher struct {
-	degraded bool
-	err      error
-}
-
-func (w fakeWatcher) Degraded(context.Context, string, float64, time.Time) (bool, error) {
-	return w.degraded, w.err
-}
-
-// baselineRecordingWatcher records the baseline + flag it was asked to judge, so a
-// test can assert the Promoter threads Evidence.FitnessBefore through to the watch.
-type baselineRecordingWatcher struct {
-	calls        int
-	lastBaseline float64
-	lastFlag     string
-	degraded     bool
-	err          error
-}
-
-func (w *baselineRecordingWatcher) Degraded(_ context.Context, flag string, baseline float64, _ time.Time) (bool, error) {
-	w.calls++
-	w.lastFlag = flag
-	w.lastBaseline = baseline
-	return w.degraded, w.err
-}
-
 // recordingReverter records real-default reverts.
 type recordingReverter struct {
 	calls int
@@ -124,11 +96,11 @@ func testEvidence() Evidence {
 
 // promoterWithRecorder wires a Promoter over the given seams with an in-memory span
 // recorder, mirroring the validate_test.go recorder pattern.
-func promoterWithRecorder(t *testing.T, gh GitHubClient, realDef RealDefaultWriter, w Watcher, rev RealDefaultReverter) (*Promoter, *tracetest.SpanRecorder) {
+func promoterWithRecorder(t *testing.T, gh GitHubClient, realDef RealDefaultWriter, rev RealDefaultReverter) (*Promoter, *tracetest.SpanRecorder) {
 	t.Helper()
 	rec := tracetest.NewSpanRecorder()
 	tp := trace.NewTracerProvider(trace.WithSpanProcessor(rec))
-	p := NewPromoter(gh, realDef, w, rev, tp.Tracer("test"), discardLogger())
+	p := NewPromoter(gh, realDef, rev, tp.Tracer("test"), discardLogger())
 	// The substrate validity bar (UC-043 A23) admits testEvidence's objective.
 	p.SetSubstrateBar(map[string]bool{"balanced": true})
 	return p, rec
@@ -159,7 +131,7 @@ func stringAttr(s trace.ReadOnlySpan, key string) string {
 func TestPromoteIssueMode(t *testing.T) {
 	gh := &recordingGitHub{issueURL: "https://github.com/WatchMeJoustMyFlags/JoustMania/issues/42"}
 	realDef := &recordingRealDefault{}
-	p, rec := promoterWithRecorder(t, gh, realDef, nil, nil)
+	p, rec := promoterWithRecorder(t, gh, realDef, nil)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
 		Config{Mode: ModeIssue}, testEvidence())
@@ -208,7 +180,7 @@ func TestPromoteIssueMode(t *testing.T) {
 func TestPromoteRetiredPRModeCountsAsIssue(t *testing.T) {
 	gh := &recordingGitHub{issueURL: "https://github.com/WatchMeJoustMyFlags/JoustMania/issues/43"}
 	realDef := &recordingRealDefault{}
-	p, rec := promoterWithRecorder(t, gh, realDef, nil, nil)
+	p, rec := promoterWithRecorder(t, gh, realDef, nil)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
 		Config{Mode: Mode("pr")}, testEvidence())
@@ -224,161 +196,76 @@ func TestPromoteRetiredPRModeCountsAsIssue(t *testing.T) {
 	}
 }
 
-// --- mode=autonomous: applies to the REAL default (separate writer), outcome
-// applied when the watch holds (no degradation); a degradation reverts. A Watcher
-// MUST be wired (the safety net) — see TestPromoteAutonomousFailsClosedWithoutWatcher. ---
+// --- mode=autonomous: applies to the REAL default (separate writer) and the
+// promotion is applied. The agent never watches real games or reverts on its own:
+// a person reverts, or the kill switch (UC-043 step 7, A1). ---
 // UC: UC-043 main
 func TestPromoteAutonomousApplied(t *testing.T) {
-	realDef := &recordingRealDefault{}
-	// A wired, non-degrading watcher is the safety net that lets the apply stand.
-	p, rec := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{degraded: false}, &recordingReverter{})
-
-	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
-
-	if res.Outcome != OutcomeApplied {
-		t.Fatalf("outcome = %q, want applied", res.Outcome)
-	}
-	if len(realDef.calls) != 1 {
-		t.Fatalf("SetRealDefault calls = %d, want 1", len(realDef.calls))
-	}
-	if realDef.calls[0].flag != promoteProposal.FlagKey || realDef.calls[0].value != 500 {
-		t.Errorf("real-default call = %+v, want flag=%s value=500", realDef.calls[0], promoteProposal.FlagKey)
-	}
-	span := spanByName(t, rec, SpanPromote)
-	if got := stringAttr(span, AttrGate); got != "autonomous" {
-		t.Errorf("gate attr = %q, want autonomous", got)
-	}
-}
-
-// UC: UC-043 main
-func TestPromoteAutonomousRevertsOnDegradation(t *testing.T) {
-	realDef := &recordingRealDefault{}
-	rev := &recordingReverter{}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{degraded: true}, rev)
-
-	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
-
-	if res.Outcome != OutcomeReverted {
-		t.Fatalf("outcome = %q, want reverted", res.Outcome)
-	}
-	if len(realDef.calls) != 1 {
-		t.Errorf("SetRealDefault calls = %d, want 1 (applied then reverted)", len(realDef.calls))
-	}
-	if rev.calls != 1 {
-		t.Errorf("RevertRealDefault calls = %d, want 1", rev.calls)
-	}
-}
-
-func TestPromoteAutonomousRevertsOnUnconfirmableWatch(t *testing.T) {
-	realDef := &recordingRealDefault{}
-	rev := &recordingReverter{}
-	// Watch errors → cannot confirm healthy → fail-safe revert.
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{err: errors.New("telemetry unreachable")}, rev)
-
-	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
-
-	if res.Outcome != OutcomeReverted {
-		t.Fatalf("outcome = %q, want reverted (fail-safe)", res.Outcome)
-	}
-	if rev.calls != 1 {
-		t.Errorf("RevertRealDefault calls = %d, want 1", rev.calls)
-	}
-}
-
-// A failed autonomous revert leaves the real default applied, records the
-// failure in the reason and starts no cooldown: the next promotion of the same
-// flag is not refused.
-// UC: UC-043 A9
-func TestPromoteAutonomousFailedRevertKeepsDefault(t *testing.T) {
-	t.Run("UC-043/A9 a failed revert stays applied, records the failure, starts no cooldown", func(t *testing.T) {
+	t.Run("UC-043/main step 7 autonomous writes the real default and never reverts it on its own", func(t *testing.T) {
 		realDef := &recordingRealDefault{}
-		rev := &recordingReverter{err: errors.New("flag service unavailable")}
-		w := &baselineRecordingWatcher{degraded: true}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, w, rev)
+		rev := &recordingReverter{}
+		p, rec := promoterWithRecorder(t, &recordingGitHub{}, realDef, rev)
+
+		res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
+			Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
+
+		if res.Outcome != OutcomeApplied || res.Reason != "" {
+			t.Fatalf("result = %q (%s), want applied with no reason", res.Outcome, res.Reason)
+		}
+		if len(realDef.calls) != 1 {
+			t.Fatalf("SetRealDefault calls = %d, want 1", len(realDef.calls))
+		}
+		if realDef.calls[0].flag != promoteProposal.FlagKey || realDef.calls[0].value != 500 {
+			t.Errorf("real-default call = %+v, want flag=%s value=500", realDef.calls[0], promoteProposal.FlagKey)
+		}
+		if rev.calls != 0 {
+			t.Errorf("RevertRealDefault calls = %d, want 0: only a person or the kill switch reverts", rev.calls)
+		}
+		span := spanByName(t, rec, SpanPromote)
+		if got := stringAttr(span, AttrGate); got != "autonomous" {
+			t.Errorf("gate attr = %q, want autonomous", got)
+		}
+	})
+	t.Run("UC-043/main step 7 an immediate re-promotion of the same flag is written", func(t *testing.T) {
+		realDef := &recordingRealDefault{}
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, &recordingReverter{})
 		cfg := Config{Mode: ModeAutonomous, Enabled: true}
-
-		res := p.Promote(context.Background(), promoteProposal, promoteVerdict, cfg, testEvidence())
-
-		if res.Outcome != OutcomeApplied {
-			t.Fatalf("outcome = %q, want applied (the revert failed, the default stays)", res.Outcome)
+		p.Promote(context.Background(), promoteProposal, promoteVerdict, cfg, testEvidence())
+		if got := p.RevertOnKillSwitch(context.Background()); len(got) != 1 {
+			t.Fatalf("kill switch = %+v, want one revert", got)
 		}
-		if !strings.Contains(res.Reason, "revert failed") || !strings.Contains(res.Reason, "flag service unavailable") {
-			t.Errorf("reason = %q, want it to record the failed revert", res.Reason)
-		}
-		if rev.calls != 1 || len(realDef.calls) != 1 {
-			t.Fatalf("reverts=%d writes=%d, want 1 and 1 (no retry from the watch)", rev.calls, len(realDef.calls))
-		}
-
-		// No cooldown: a re-promotion of the same flag right away is written.
-		w.degraded = false
-		rev.err = nil
 		again := p.Promote(context.Background(), promoteProposal, promoteVerdict, cfg, testEvidence())
 		if again.Outcome != OutcomeApplied || len(realDef.calls) != 2 {
-			t.Fatalf("re-promotion = %q (%s), writes=%d, want applied and written: a failed revert must not start the cooldown",
+			t.Fatalf("re-promotion = %q (%s), writes=%d, want applied and written: no post-revert cooldown",
 				again.Outcome, again.Reason, len(realDef.calls))
 		}
 	})
 }
 
-// --- FAIL CLOSED (#1016): autonomous with NO Watcher REFUSES to apply. This is the
-// key safety assertion: an unguarded autonomous promotion (apply to real players
-// with no auto-revert) is the unacceptable state, so a nil Watcher is a HARD STOP —
-// nothing is written to the real default. This test would FAIL if the apply path
-// reverted to the old "apply without a watch" behaviour. ---
-func TestPromoteAutonomousFailsClosedWithoutWatcher(t *testing.T) {
-	realDef := &recordingRealDefault{}
-	rev := &recordingReverter{}
-	// realDef + reverter wired, but NO Watcher (the safety net is not connected).
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, nil, rev)
+// A failed real-default write is a recorded no-op, never retried.
+// UC: UC-043 A9
+func TestPromoteAutonomousFailedWriteIsDiscarded(t *testing.T) {
+	t.Run("UC-043/A9 a failed autonomous write is discarded with the reason", func(t *testing.T) {
+		realDef := &recordingRealDefault{err: errors.New("flag service unavailable")}
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, &recordingReverter{})
 
-	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
+		res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
+			Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
-	if res.Outcome != OutcomeDiscarded {
-		t.Fatalf("outcome = %q, want discarded (no watcher → fail closed)", res.Outcome)
-	}
-	if len(realDef.calls) != 0 {
-		t.Fatalf("SAFETY: autonomous applied to the real default %d time(s) with NO watch wired", len(realDef.calls))
-	}
-	if rev.calls != 0 {
-		t.Errorf("nothing was applied, so nothing should be reverted: revert calls = %d", rev.calls)
-	}
-	if !strings.Contains(res.Reason, "safety net") {
-		t.Errorf("reason = %q, want it to name the missing safety net", res.Reason)
-	}
-}
-
-// --- the watcher receives the pre-promotion baseline (Evidence.FitnessBefore) so it
-// can compare recent real-game fitness against what the promotion was justified by. ---
-func TestPromoteAutonomousPassesBaselineToWatcher(t *testing.T) {
-	realDef := &recordingRealDefault{}
-	bw := &baselineRecordingWatcher{}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, bw, &recordingReverter{})
-
-	ev := testEvidence()
-	ev.FitnessBefore = 0.61
-	p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Enabled: true}, ev)
-
-	if bw.calls != 1 {
-		t.Fatalf("watcher Degraded calls = %d, want 1", bw.calls)
-	}
-	if bw.lastBaseline != 0.61 {
-		t.Errorf("watcher baseline = %v, want 0.61 (Evidence.FitnessBefore)", bw.lastBaseline)
-	}
-	if bw.lastFlag != promoteProposal.FlagKey {
-		t.Errorf("watcher flag = %q, want %q", bw.lastFlag, promoteProposal.FlagKey)
-	}
+		if res.Outcome != OutcomeDiscarded || !strings.Contains(res.Reason, "flag service unavailable") {
+			t.Fatalf("result = %q (%s), want discarded with the write failure", res.Outcome, res.Reason)
+		}
+		if len(realDef.calls) != 1 {
+			t.Fatalf("SetRealDefault calls = %d, want 1 (no retry)", len(realDef.calls))
+		}
+	})
 }
 
 // --- only a PROMOTE verdict is ever acted on. ---
 func TestPromoteNonPromoteVerdictIsNoop(t *testing.T) {
 	gh := &recordingGitHub{}
 	realDef := &recordingRealDefault{}
-	p, _ := promoterWithRecorder(t, gh, realDef, nil, nil)
+	p, _ := promoterWithRecorder(t, gh, realDef, nil)
 
 	for _, verdict := range []experiment.Outcome{experiment.OutcomeDiscard, experiment.OutcomeRevert} {
 		res := p.Promote(context.Background(), promoteProposal,
@@ -398,7 +285,7 @@ func TestPromoteNonPromoteVerdictIsNoop(t *testing.T) {
 // UC: UC-043 A9
 func TestPromoteClientErrorIsRecordedNoop(t *testing.T) {
 	gh := &recordingGitHub{issueErr: errors.New("rate limited")}
-	p, _ := promoterWithRecorder(t, gh, nil, nil, nil)
+	p, _ := promoterWithRecorder(t, gh, nil, nil)
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
 		Config{Mode: ModeIssue}, testEvidence())
 	if res.Outcome != OutcomeDiscarded {

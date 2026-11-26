@@ -22,7 +22,7 @@ import (
 func TestSafetyDefaultPromoterNeverActsForReal(t *testing.T) {
 	// nil github => NewPromoter substitutes the inert recording no-op.
 	// nil realDef => autonomous cannot mutate a real default.
-	p := NewPromoter(nil, nil, nil, nil, nil, discardLogger())
+	p := NewPromoter(nil, nil, nil, nil, discardLogger())
 
 	t.Run("github issue degrades to recorded no-op", func(t *testing.T) {
 		res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
@@ -52,11 +52,12 @@ func TestSafetyDefaultPromoterNeverActsForReal(t *testing.T) {
 
 // TestSafetyAutonomousBlockedByKillSwitch: autonomous (the real-player-affecting
 // path) NEVER mutates the real default unless `enabled` is act (off or watch), even
-// with a real-default writer wired. It is a hard gate independent of the env gate.
+// with a real-default writer wired. It is a hard gate independent of the
+// validated objectives.
 // UC: UC-043 main
 func TestSafetyAutonomousBlockedByKillSwitch(t *testing.T) {
 	realDef := &recordingRealDefault{}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{}, &recordingReverter{})
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, &recordingReverter{})
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
 		Config{Mode: ModeAutonomous, Enabled: false}, testEvidence())
@@ -72,36 +73,16 @@ func TestSafetyAutonomousBlockedByKillSwitch(t *testing.T) {
 	}
 }
 
-// TestSafetyEnvGatedConstructorsReturnNilWhenUngated: the ONLY constructors for the
-// real clients return nil unless the explicit env gate is satisfied. This is the
-// structural proof that, without the env gate, main.go gets a nil real client and
-// substitutes the no-op — a test (which sets no env) can NEVER build a real client.
-// We do NOT set the env here, so every gated constructor must return nil.
-func TestSafetyEnvGatedConstructorsReturnNilWhenUngated(t *testing.T) {
-	// Defensive: ensure the gate env is unset for this test (t.Setenv restores it).
-	t.Setenv("AGENT_CODE_IMPROVEMENT_ENABLED", "")
+// TestSafetyGitHubClientNeedsAToken: the ONLY constructor of the real GitHub
+// client returns nil without GITHUB_TOKEN, also with a repository set, so a test
+// (which sets no token) can NEVER build a real client. No other env opt-in exists.
+// UC: UC-043 A4
+func TestSafetyGitHubClientNeedsAToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("AGENT_AUTONOMOUS_ENABLED", "")
-
-	if gh, err := NewGitHubClientFromEnv(discardLogger()); gh != nil || err != nil {
-		t.Errorf("NewGitHubClientFromEnv(ungated) = (%v, %v), want (nil, nil)", gh, err)
-	}
-	if w, err := NewRealDefaultWriterFromEnv(discardLogger()); w != nil || err != nil {
-		t.Errorf("NewRealDefaultWriterFromEnv(ungated) = (%v, %v), want (nil, nil)", w, err)
-	}
-}
-
-// TestSafetyEnvGateTokenStillRequired: with the explicit opt-in env set but the
-// TOKEN absent, the real GitHub client is STILL not built (fail-closed) — the
-// token is a required, separate condition.
-func TestSafetyEnvGateTokenStillRequired(t *testing.T) {
-	t.Setenv("AGENT_CODE_IMPROVEMENT_ENABLED", "true")
-	t.Setenv("GITHUB_TOKEN", "") // token absent
 	t.Setenv("GITHUB_REPOSITORY", "owner/repo")
 
-	gh, err := NewGitHubClientFromEnv(discardLogger())
-	if gh != nil || err != nil {
-		t.Errorf("NewGitHubClientFromEnv(enabled, no token) = (%v, %v), want (nil, nil)", gh, err)
+	if gh, err := NewGitHubClientFromEnv(discardLogger()); gh != nil || err != nil {
+		t.Errorf("NewGitHubClientFromEnv(no token) = (%v, %v), want (nil, nil)", gh, err)
 	}
 }
 

@@ -37,8 +37,8 @@ Three invariants follow and are **load-bearing**:
    exceptions write the `game` set, both tier 2 ([NORTHSTAR](NORTHSTAR.md)):
    - **Shadow-scoped experiment arms** of the experiment catalog (flags.md §13.3), which never resolve for a
      real game (FR-062, FR-138).
-   - **Gated autonomous promotion**: a shadow-validated winner becomes an in-memory `real` overlay, reverted on
-     degradation (FR-065), only when the FR-152 (a) gates are open; off in the stock stack. The durable path
+   - **Gated autonomous promotion**: a shadow-validated winner becomes an in-memory `real` overlay that a person
+     or the kill switch reverts (FR-065), only when the FR-152 (a) gates are open; off in the stock stack. The durable path
      is a human change made from the promotion's evidence.
 2. **The write surfaces are disjoint by scope.** Human writes are persisted admin values or stack overlays;
    agent writes are game-scoped `interventions` values, experiment-arm values and the `real` overlay. The flag

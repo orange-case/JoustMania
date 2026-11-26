@@ -1389,7 +1389,7 @@ def test_agent_tuning_scan_sees_every_key():
     """Guards the scan: every key constant in tuning.go is read through a known helper."""
     source = AGENT_TUNING_GO.read_text()
     keys = set(dict(_GO_KEY_CONST.findall(source)).values())
-    assert len(keys) >= 7, keys
+    assert len(keys) >= 6, keys
     assert {k for k, _ in agent_tuning_reads()} == keys
 
 

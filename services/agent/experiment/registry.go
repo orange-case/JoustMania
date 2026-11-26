@@ -194,7 +194,7 @@ type entry struct {
 
 	// promotionInFlight is set while the experiment's promotion runs and its own
 	// promotion event is not journaled yet; RecordPromotion holds later outcomes in
-	// laterPromotions until then (the re-watch may journal first).
+	// laterPromotions until then (the kill switch may journal first).
 	promotionInFlight bool
 	laterPromotions   []PromotionResult
 	// recommendOwner is the writer owning the real overlay when the experiment's
@@ -1667,7 +1667,7 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 		return res
 	}
 	e.status = StatusPromoting
-	// A later outcome (re-watch, kill switch) journaled before this promotion's own
+	// A later outcome (kill switch) journaled before this promotion's own
 	// event waits until it, so the journal keeps their order.
 	e.promotionInFlight = true
 	// UC-043 BR-007 (#2042): write-ahead. The promoter acts only once the promoting
@@ -1745,26 +1745,6 @@ func (r *Registry) flushLaterPromotionsLocked(e *entry) {
 		})
 	}
 	e.laterPromotions = nil
-}
-
-// warnLegacyRevert logs one WARN when the experiment's last promotion event is a
-// hold-key revert an older agent queued (revert_pending): nothing runs it now
-// (UC-043 A15 step 3). Reads only the journal, so r.mu may or may not be held.
-func (r *Registry) warnLegacyRevert(id string, jrnl *journal.Journal) {
-	events, err := jrnl.Events()
-	if err != nil {
-		return
-	}
-	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Kind != journal.KindPromotion || events[i].Promotion == nil {
-			continue
-		}
-		if events[i].Promotion.RevertPending {
-			r.log.Warn("experiment: a queued revert from an older agent was not run; check the flag on the flag service (GET /{flagSetId}/{flagName}): a real overlay of a hold sub-parameter is cleared by the kill switch, and shield.activation has no real scope any more, so its value comes from the stack overlay (UC-043 A15)",
-				"experiment_id", id, "flag", jrnl.Intent().FlagKey)
-		}
-		return
-	}
 }
 
 // RecordPromotion journals a later outcome of an experiment's promotion (UC-043
@@ -1996,7 +1976,6 @@ func (r *Registry) Rehydrate(ids []string) error {
 			st = StatusRunning
 		}
 		if st.IsTerminal() {
-			r.warnLegacyRevert(id, jrnl)
 			continue
 		}
 		e := &entry{
@@ -2060,7 +2039,6 @@ func (r *Registry) finishRestored(id string) {
 
 	ctx := context.Background()
 	if res, ok := r.journaledPromotion(id, jrnl); ok {
-		r.warnLegacyRevert(id, jrnl)
 		final := StatusDiscarded
 		if promotionActed(res) {
 			final = StatusDone
@@ -2086,7 +2064,7 @@ func (r *Registry) finishRestored(id string) {
 
 // journaledPromotion returns the first promotion event after the experiment's
 // last concluded decision: the result of its one promotion (later ones are
-// kill-switch or re-watch reverts of it). An unreadable log reports none.
+// kill-switch reverts of it). An unreadable log reports none.
 func (r *Registry) journaledPromotion(id string, jrnl *journal.Journal) (PromotionResult, bool) {
 	evs, err := jrnl.Events()
 	if err != nil {
