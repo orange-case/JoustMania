@@ -1,12 +1,14 @@
 package gamecontext
 
 import (
+	"context"
 	"encoding/hex"
 	"testing"
 	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -94,11 +96,11 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 	t.Run("UC-041/A8 a sampled game.phase.start sets the gameplay_phase and game_cycle span ids", func(t *testing.T) {
 		mux := newMux()
 		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "gameplay_phase"), logTraceHex, logPhaseHex, true))
-		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{phase: logPhaseHex}); got != want {
+		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, phase: logPhaseHex}); got != want {
 			t.Fatalf("after gameplay_phase ids = %+v, want %+v", got, want)
 		}
 		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
-		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{phase: logPhaseHex, cycle: logCycleHex}); got != want {
+		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, phase: logPhaseHex, cycle: logCycleHex}); got != want {
 			t.Fatalf("after game_cycle ids = %+v, want %+v", got, want)
 		}
 		snap, _ := mux.Snapshot("game-B")
@@ -165,27 +167,75 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-041/BR-004 log and gauge ids agree, the last non-empty value wins", func(t *testing.T) {
+	t.Run("UC-041/BR-004 a newer game_cycle record replaces the cycle id", func(t *testing.T) {
+		mux := newMux()
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logRootHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
+		if got := traceIDsOf(t, mux, "game-B"); got.cycle != logCycleHex {
+			t.Fatalf("cycle id = %q, want the newer %q", got.cycle, logCycleHex)
+		}
+	})
+}
+
+// UC: UC-041 BR-004
+// UC: UC-040 BR-013
+func TestApplyLogs_PhaseStartGivesTraceID(t *testing.T) {
+	const otherTraceHex = "0af7651916cd43dd8448eb211c80319c"
+	newMux := func() *Multiplexer {
+		return newTestMux(&muxClock{t: time.Unix(4000, 0)}, 5*time.Second, 15*time.Second, nil, nil)
+	}
+
+	t.Run("UC-041/BR-004 a phase record alone gives the trace id, not the root span id", func(t *testing.T) {
+		mux := newMux()
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
+		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, cycle: logCycleHex}); got != want {
+			t.Fatalf("ids = %+v, want %+v", got, want)
+		}
+		snap, _ := mux.Snapshot("game-B")
+		if !snap.UpdatedAt.IsZero() {
+			t.Fatalf("UpdatedAt = %v, want zero: a log record is never a live signal (BR-010)", snap.UpdatedAt)
+		}
+	})
+
+	t.Run("UC-041/BR-004 a later game.start fills the root span id", func(t *testing.T) {
+		mux := newMux()
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "gameplay_phase"), logTraceHex, logPhaseHex, true))
+		mux.ApplyLogs(withTrace(t, lifecycleLog("game.start", "game-B", "real", "", time.Time{}), logTraceHex, logRootHex, true))
+		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, root: logRootHex, phase: logPhaseHex}); got != want {
+			t.Fatalf("ids = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("UC-041/BR-004 a phase record never overwrites a known trace id", func(t *testing.T) {
 		mux := newMux()
 		mux.ApplyLogs(withTrace(t, lifecycleLog("game.start", "game-B", "real", "", time.Time{}), logTraceHex, logRootHex, true))
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "gameplay_phase"), logTraceHex, logPhaseHex, true))
-		// The gauge's first export: root ids, gameplay_phase not yet labelled.
-		mux.ApplyMetrics(metricsWith(metricTraceCorrelation, 1, map[string]string{
-			attrGameID: "game-B", attrGameKind: "real", attrGameTraceID: logTraceHex, attrGameTraceSpanID: logRootHex,
-		}))
-		want := traceIDs{trace: logTraceHex, root: logRootHex, phase: logPhaseHex}
-		if got := traceIDsOf(t, mux, "game-B"); got != want {
-			t.Fatalf("after gauge ids = %+v, want %+v (an empty label keeps the log id)", got, want)
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), otherTraceHex, logCycleHex, true))
+		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, root: logRootHex, cycle: logCycleHex}); got != want {
+			t.Fatalf("after game.start ids = %+v, want %+v", got, want)
 		}
 
-		// A later game_cycle from the gauge, then a newer one from the log.
-		mux.ApplyMetrics(metricsWith(metricTraceCorrelation, 1, map[string]string{
-			attrGameID: "game-B", attrGameCycleSpanID: logRootHex,
-		}))
+		mux = newMux()
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "gameplay_phase"), logTraceHex, logPhaseHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), otherTraceHex, logCycleHex, true))
+		if got := traceIDsOf(t, mux, "game-B"); got.trace != logTraceHex {
+			t.Fatalf("trace id = %q, want the first phase record's %q", got.trace, logTraceHex)
+		}
+	})
+
+	t.Run("UC-040/BR-013 without the root span id the in-game parent is the cycle span and there is no Link", func(t *testing.T) {
+		mux := newMux()
 		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
-		want.cycle = logCycleHex
-		if got := traceIDsOf(t, mux, "game-B"); got != want {
-			t.Fatalf("ids = %+v, want %+v (last non-empty wins)", got, want)
+		snap, _ := mux.Snapshot("game-B")
+		ctx, ok := RemoteParent(context.Background(), snap.GameTraceID, snap.GameCycleSpanID)
+		if !ok {
+			t.Fatal("no remote parent from the phase record's ids")
+		}
+		sc := trace.SpanContextFromContext(ctx)
+		if sc.TraceID().String() != logTraceHex || sc.SpanID().String() != logCycleHex {
+			t.Fatalf("parent = %s/%s, want %s/%s", sc.TraceID(), sc.SpanID(), logTraceHex, logCycleHex)
+		}
+		if opts := TraceLink(snap.GameTraceID, snap.GameTraceSpanID, "game.trace_id", "game.trace_span_id"); len(opts) != 0 {
+			t.Fatalf("Link options = %d, want none without the root span id", len(opts))
 		}
 	})
 }

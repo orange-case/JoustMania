@@ -203,7 +203,7 @@ The archetype one pair of an experiment runs, pinned in the journal (`pattern_pi
 
 ### TRACE_CORRELATION
 
-The ids that tie a game's telemetry together. Source: `services/game_coordinator/metrics.py` `game_trace_correlation` (retired by #2783, FR-253: the ids then reach the agent only as the trace context of `game.start` / `game.phase.start` log records). Rules: [UC-041](use_cases/UC-041.md) BR-004; invariant 6.
+The ids that tie a game's telemetry together. Source: the trace context of the agent-only `game.start` / `game.phase.start` log records, the agent's only source since #2783 retired the `game_trace_correlation` gauge (FR-253). Rules: [UC-041](use_cases/UC-041.md) BR-004; invariant 6.
 
 ### AGENT_GAME_CONTEXT
 

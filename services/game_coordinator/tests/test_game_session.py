@@ -603,64 +603,6 @@ class TestGameSessionLoop:
     @patch("services.game_coordinator.game_session.metrics")
     @patch("services.game_coordinator.game_session.GameFactory")
     @patch("services.game_coordinator.game_session.tracer")
-    async def test_loop_emits_trace_correlation_gauge(self, mock_tracer_mod, mock_factory, mock_metrics):
-        """#1133/#1157: while the game span is live the loop publishes
-        game_trace_correlation carrying game_id + the span's hex trace_id AND its
-        hex span_id, so the agent can link agent.decision -> this exact game span.
-        Both hex ids are captured onto the session."""
-        from opentelemetry import trace as ot_trace
-
-        session = _make_session(game_kind=GAME_KIND_SHADOW)
-        trace_id = 0x4BF92F3577B34DA6A3CE929D0E0E4736
-        span_id = 0x051581BF3CB55C13
-        mock_tracer_mod.start_as_current_span = _tracer_mock(trace_id=trace_id, span_id=span_id).start_as_current_span
-        mock_game = MagicMock()
-        mock_game.run = AsyncMock()
-        mock_factory.create_game.return_value = mock_game
-
-        await session._run_game_loop_async()
-
-        expected_trace_hex = ot_trace.format_trace_id(trace_id)
-        expected_span_hex = ot_trace.format_span_id(span_id)
-        assert session.game_trace_id == expected_trace_hex
-        assert session.game_trace_span_id == expected_span_hex
-        # The root-span emit carries an EMPTY gameplay_phase_span_id (#1195): the
-        # gameplay_phase span opens later inside game.run(), and the mocked game here
-        # never opens it, so it stays "".
-        mock_metrics.game_trace_correlation.labels.assert_any_call(
-            game_kind=GAME_KIND_SHADOW,
-            game_id="game_abc123",
-            game_trace_id=expected_trace_hex,
-            game_trace_span_id=expected_span_hex,
-            gameplay_phase_span_id="",
-            game_cycle_span_id="",
-        )
-        mock_metrics.game_trace_correlation.labels.return_value.set.assert_any_call(1)
-
-    @pytest.mark.asyncio
-    @patch("services.game_coordinator.game_session.metrics")
-    @patch("services.game_coordinator.game_session.GameFactory")
-    @patch("services.game_coordinator.game_session.tracer")
-    async def test_loop_skips_trace_correlation_for_unsampled_span(self, mock_tracer_mod, mock_factory, mock_metrics):
-        """#1133 fallback: an unsampled/non-recording span reports the all-zero invalid
-        trace id; the loop must NOT emit the correlation gauge (no link to an invalid
-        trace) and must leave game_trace_id empty — no crash."""
-        session = _make_session(game_kind=GAME_KIND_SHADOW)
-        mock_tracer_mod.start_as_current_span = _tracer_mock(trace_id=0).start_as_current_span
-        mock_game = MagicMock()
-        mock_game.run = AsyncMock()
-        mock_factory.create_game.return_value = mock_game
-
-        await session._run_game_loop_async()
-
-        assert session.game_trace_id == ""
-        assert session.game_trace_span_id == ""
-        mock_metrics.game_trace_correlation.labels.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("services.game_coordinator.game_session.metrics")
-    @patch("services.game_coordinator.game_session.GameFactory")
-    @patch("services.game_coordinator.game_session.tracer")
     async def test_game_span_is_rooted_with_link_to_stream(self, mock_tracer_mod, mock_factory, mock_metrics):
         """#1157: the game-lifecycle span is started as a NEW ROOT (explicit empty
         Context, never the inbound stream span's context) with an OTel Link back to
@@ -1280,39 +1222,6 @@ class TestGameSessionClearMetrics:
         expected = (GAME_KIND_PRIMARY, "game_abc123", "", "")
         mock_metrics.active_game.remove.assert_called_once_with(*expected)
 
-    @patch("services.game_coordinator.game_session.metrics")
-    def test_clear_metrics_removes_trace_correlation_when_set(self, mock_metrics):
-        """#1133/#1157/#1195: the trace-correlation gauge (labels game_kind, game_id,
-        game_trace_id, game_trace_span_id, gameplay_phase_span_id) is removed at retire
-        ONLY when a trace id was captured — otherwise it was never set. Removes with the
-        CURRENT gameplay_phase_span_id."""
-        session = _make_session(game_kind=GAME_KIND_SHADOW)
-        session.game_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
-        session.game_trace_span_id = "051581bf3cb55c13"
-        session.gameplay_phase_span_id = "00f067aa0ba902b7"
-
-        session.clear_metrics()
-
-        mock_metrics.game_trace_correlation.remove.assert_called_once_with(
-            GAME_KIND_SHADOW,
-            "game_abc123",
-            "4bf92f3577b34da6a3ce929d0e0e4736",
-            "051581bf3cb55c13",
-            "00f067aa0ba902b7",
-            "",
-        )
-
-    @patch("services.game_coordinator.game_session.metrics")
-    def test_clear_metrics_skips_trace_correlation_when_unset(self, mock_metrics):
-        """#1133: an unsampled span never set the correlation gauge, so retire must
-        not try to remove a series that was never created."""
-        session = _make_session(game_kind=GAME_KIND_SHADOW)
-        # game_trace_id stays "" (default) — span was never sampled.
-
-        session.clear_metrics()
-
-        mock_metrics.game_trace_correlation.remove.assert_not_called()
-
     @pytest.mark.uc("UC-041", flow="main", steps=[5])
     def test_mode_gauge_is_per_game_and_removed_at_retire(self, monkeypatch):
         """FR-041: game_current_mode is one series per game (mode, game_kind,
@@ -1381,69 +1290,7 @@ class TestGameModeGaugeVocabulary:
         assert metrics.current_game_mode._values == {}
 
 
-class TestPublishGameplayPhaseSpanID:
-    """#1195: when the gameplay_phase span opens, the game calls
-    publish_gameplay_phase_span_id; the session re-emits the correlation gauge
-    swapping the empty gameplay_phase_span_id series for the populated one, so the
-    agent re-parents its in-game decision chain under gameplay_phase."""
-
-    @patch("services.game_coordinator.game_session.metrics")
-    def test_publish_swaps_empty_series_for_populated(self, mock_metrics):
-        session = _make_session(game_kind=GAME_KIND_SHADOW)
-        # Simulate the root-span emit having run (gauge set with empty gameplay id).
-        session.game_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
-        session.game_trace_span_id = "051581bf3cb55c13"
-
-        session.publish_gameplay_phase_span_id("00f067aa0ba902b7")
-
-        # Empty-gameplay series removed first ...
-        mock_metrics.game_trace_correlation.remove.assert_called_once_with(
-            GAME_KIND_SHADOW,
-            "game_abc123",
-            "4bf92f3577b34da6a3ce929d0e0e4736",
-            "051581bf3cb55c13",
-            "",
-            "",
-        )
-        # ... then the populated series set.
-        mock_metrics.game_trace_correlation.labels.assert_called_once_with(
-            game_kind=GAME_KIND_SHADOW,
-            game_id="game_abc123",
-            game_trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-            game_trace_span_id="051581bf3cb55c13",
-            gameplay_phase_span_id="00f067aa0ba902b7",
-            game_cycle_span_id="",
-        )
-        mock_metrics.game_trace_correlation.labels.return_value.set.assert_called_once_with(1)
-        assert session.gameplay_phase_span_id == "00f067aa0ba902b7"
-
-    @patch("services.game_coordinator.game_session.metrics")
-    def test_publish_noop_when_game_trace_unsampled(self, mock_metrics):
-        """No gauge was ever set (game_trace_id empty) -> publish is a no-op so the
-        agent keeps falling back to the (absent) root; gameplay id stays empty."""
-        session = _make_session(game_kind=GAME_KIND_SHADOW)
-        # game_trace_id stays "" (unsampled).
-
-        session.publish_gameplay_phase_span_id("00f067aa0ba902b7")
-
-        mock_metrics.game_trace_correlation.remove.assert_not_called()
-        mock_metrics.game_trace_correlation.labels.assert_not_called()
-        assert session.gameplay_phase_span_id == ""
-
-    @patch("services.game_coordinator.game_session.metrics")
-    def test_publish_noop_when_span_id_empty(self, mock_metrics):
-        """An empty/unsampled gameplay_phase span_id is a no-op (two-tier fallback to
-        the root span on the agent side)."""
-        session = _make_session(game_kind=GAME_KIND_SHADOW)
-        session.game_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
-        session.game_trace_span_id = "051581bf3cb55c13"
-
-        session.publish_gameplay_phase_span_id("")
-
-        mock_metrics.game_trace_correlation.remove.assert_not_called()
-        mock_metrics.game_trace_correlation.labels.assert_not_called()
-        assert session.gameplay_phase_span_id == ""
-
+class TestClearMetricsIdempotent:
     def test_clear_metrics_idempotent_on_missing_series(self):
         """A double-retire (or never-started session) must not raise — the gauge
         client pops missing series silently and remove() is KeyError/Value-guarded."""

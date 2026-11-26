@@ -162,6 +162,13 @@ async def start_ffa(stack, collector: GameEventCollector, players: int = 4) -> t
     return game_id, serials
 
 
+async def wait_game_cycle_id_sent(stack, game_id: str) -> None:
+    """Wait until the game_cycle id left the coordinator: the agent parents on it (UC-041 BR-004)."""
+    await stack.otlp_sink.wait_log_async(
+        event_name="game.phase.start", attrs={"game.id": game_id, "game.phase.span": "game_cycle"}, timeout=15.0
+    )
+
+
 def intervention_events(collector: GameEventCollector) -> list[dict]:
     return [
         dict(e.data) for e in collector.get_events("agent_intervention") if e.data.get("type") == SCRIPTED_INTERVENTION

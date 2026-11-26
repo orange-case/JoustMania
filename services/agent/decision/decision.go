@@ -805,7 +805,7 @@ func (l *Loop) startSignalReceivedSpan(ctx context.Context, c gamecontext.GameCo
 	// decision->action subtree AND the #1140 async fire anchor (both call this shared
 	// helper), that whole subtree is pulled INSIDE the game trace, nested under
 	// game_cycle. The parent is remote (we hold only its span_id from the
-	// game_trace_correlation gauge); a remote child can be started under it regardless
+	// game.phase.start log record); a remote child can be started under it regardless
 	// of its liveness, and inherits the game trace's sampling fate. Fallback
 	// (inGameRemoteParent): game_cycle -> gameplay_phase -> game ROOT (#1187) -> own
 	// root, so correlation is never lost. The game trace ids are still stamped as
@@ -1384,7 +1384,7 @@ func (l *Loop) throttleAllows(last *time.Time) bool {
 
 // gameTraceLink builds the trace-correlation span option for #1133/#1157: when
 // gameTraceID is a valid hex trace_id AND gameTraceSpanID is a valid hex span_id
-// (both ingested into GameContext from the game_trace_correlation signal), it
+// (both from the agent-only game.start log record, UC-041 BR-004), it
 // returns a single trace.WithLinks option whose Link targets a remote SpanContext
 // reconstructed from BOTH ids. That makes the agent.decision span LINK to the
 // originating game's root span (not merely its trace), so Jaeger's uiFind

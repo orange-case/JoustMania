@@ -25,6 +25,7 @@ the decision rows link this Jaeger trace, and the feed fold below mirrors
 ``parseDecideTraces`` / ``decideRowFrom``.
 """
 
+import asyncio
 import json
 import os
 import subprocess
@@ -488,6 +489,8 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
         )
         running = await wait_until_running(game_client, {game_id}, timeout=15.0)
         assert game_id in running, f"Step 1: {game_id} never RUNNING"
+        # The agent learns game_cycle from its log record (UC-041 BR-004), batched up to ~2 s by the collector.
+        await asyncio.sleep(2.5)
 
         # Step 3: early elimination of one player.
         assert await kill_player_verified(

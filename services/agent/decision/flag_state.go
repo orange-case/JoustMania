@@ -18,8 +18,8 @@ type FlagState struct {
 	GameKind string `json:"game_kind"`
 	// GameMode is the ingested mode, "" when unknown.
 	GameMode string `json:"game_mode"`
-	// TraceID is the game's trace (the Jaeger drill-down), "" before the
-	// game_trace_correlation ids arrived.
+	// TraceID is the game's trace (the Jaeger drill-down), "" before a game.start or
+	// game.phase.start log record gave it.
 	TraceID string `json:"trace_id"`
 	// UpdatedAtMs is the cycle's time, epoch ms on the agent's clock.
 	UpdatedAtMs            int64    `json:"updated_at_ms"`

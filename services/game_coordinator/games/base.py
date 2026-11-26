@@ -732,8 +732,6 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # the game; and the per-serial moment sequence behind moment.id, kept by the game,
         # not the Player (BR-003).
         self.moment_shape = MOMENT_SHAPE_SPAN_EVENT
-        # UC-100 BR-012: telemetry.agent_log_events, read with the shape and held likewise.
-        self.agent_log_events = False
         self._moment_sequence: dict[str, int] = {}
         self.experiment_id = ""
         self.arm = ""
@@ -743,15 +741,6 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # The flag transaction context _set_flag_eval_context set for this game's
         # run; intervention handlers resolve flags in it (flag_eval_context).
         self._flag_eval_context: EvaluationContext | None = None
-        # Callback the owning GameSession sets so the game can publish its
-        # gameplay_phase span_id to the trace-correlation gauge when that
-        # span opens — letting the agent re-parent its in-game decision chain under
-        # gameplay_phase. Defaults to a no-op so a standalone game / every existing
-        # test runs unchanged.
-        self.on_gameplay_phase_open: Callable[[str], None] = lambda _span_id: None
-        # Same for the game_cycle span: the agent's preferred parent for its
-        # in-game spans (UC-040 BR-013). No-op by default.
-        self.on_game_cycle_open: Callable[[str], None] = lambda _span_id: None
 
         # Game state
         self.state = GameState.IDLE
@@ -3604,16 +3593,7 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             # Store span reference and context for background tasks
             self.gameplay_span = gameplay_span
             self.gameplay_span_context = otel_context.get_current()
-
-            # Publish the gameplay_phase span_id to the trace-correlation gauge
-            # so the agent re-parents its in-game decision chain under
-            # THIS span instead of the game root. gameplay_phase is the
-            # stable active-play window; a span_ctx with a zero/invalid span_id
-            # (unsampled) yields an empty hex id, which the session treats as a
-            # no-op so the agent keeps falling back to the game root span.
-            gameplay_span_ctx = gameplay_span.get_span_context()
-            if gameplay_span_ctx.span_id != 0:
-                self.on_gameplay_phase_open(trace.format_span_id(gameplay_span_ctx.span_id))
+            # UC-041 BR-004: the agent's span ids come only from game.phase.start.
             self._send_phase_start(gameplay_span, "gameplay_phase")
 
             # Create "players" parent span (collapsible group in Jaeger)
@@ -3631,13 +3611,6 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 attributes={"game.id": self.game_id},
             )
             self.game_cycle_context = trace.set_span_in_context(self._game_cycle_span)
-            # Publish the game_cycle span_id (UC-041 BR-004): the agent
-            # parents its in-game spans under game_cycle (UC-040 BR-013). An
-            # unsampled span has a zero id; publishing nothing keeps the agent on
-            # its gameplay_phase / game-root fallback.
-            game_cycle_span_ctx = self._game_cycle_span.get_span_context()
-            if game_cycle_span_ctx.span_id != 0:
-                self.on_game_cycle_open(trace.format_span_id(game_cycle_span_ctx.span_id))
             self._send_phase_start(self._game_cycle_span, "game_cycle")
 
             # Create player lifecycle spans under "players" parent
@@ -3848,12 +3821,13 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
 
     def _send_phase_start(self, span: trace.Span, phase_span: str) -> None:
         """Agent-only ``game.phase.start`` in ``span``'s context: the record's span id is the phase's id."""
-        if not self.agent_log_events or not span.get_span_context().trace_flags.sampled:
+        if not span.get_span_context().trace_flags.sampled:
             return
         emit_agent_event(
             "game.phase.start",
             span=span,
             attributes={"game.id": self.game_id, "game.kind": self.game_kind, "game.phase.span": phase_span},
+            flush=True,
         )
 
     def _run_tracer(self) -> trace.Tracer:
