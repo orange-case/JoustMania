@@ -1,15 +1,17 @@
 package decision
 
-// Async discard reasons (#917, reused by the remote decide path #1226). When a
-// remote decide answer lands it is re-validated against the CURRENT game context
-// (fetched fresh at landing, NOT the fire-time snapshot — the game may have moved
-// on while the call was in flight). An answer that fails a check is dropped and the
-// reason rides invoke_agent as decide.discarded_reason.
+// Async discards (#917, reused by the remote decide path #1226). When a remote
+// decide answer lands it is re-validated against the CURRENT game context (fetched
+// fresh at landing, NOT the fire-time snapshot — the game may have moved on while
+// the call was in flight). An answer that fails a check is dropped with
+// decide.discarded_reason=stale, and decide.discarded_detail names the check.
 const (
+	// DiscardStale is the decide.discarded_reason of every failed re-validation.
+	DiscardStale = "stale"
 	// DiscardStaleContext: the partition that fired the inference no longer exists
 	// at apply time (the game ended past grace and was evicted, or never reappeared)
 	// — there is no current context to re-validate against, so the result is stale.
-	DiscardStaleContext = "stale_context"
+	DiscardStaleContext = "context_missing"
 	// DiscardGameEnded: the partition still exists but the game is no longer active
 	// (GameActive flipped false while inference was in flight). An intervention into
 	// an ended game is meaningless; drop it.

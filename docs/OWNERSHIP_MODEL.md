@@ -5,7 +5,7 @@ principle, the invariants that keep the agent inside it, and the composition of 
 touch. It states the rules once; the lists live elsewhere and are linked:
 
 - who writes each runtime-mutable flag, in which scope and within which bounds: the Writers column of the
-  mutable-flag registry, [flags.md §13](specs/flags.md#13-mutable-flag-registry), the one place it is stated;
+  mutable-flag registry, [flags.md §13](specs/flags.md#13-mutable-flag-registry), the canonical place it is stated;
 - the owner and lifetime of each flag set: [flags.md §2](specs/flags.md#2-ownership-by-flag-set);
 - the invalidation rule and the visibility contract: [flags.md §14](specs/flags.md#14-ownership-composition-invalidation-and-visibility);
 - the agent-limiting settings and their per-setting ceilings: FR-152 in [requirements](requirements.md).
@@ -83,7 +83,7 @@ levers, their kinds and bounds: [flags.md §13.1](specs/flags.md#131-interventio
 Only two runtime parameters are touched by both; §4 composes them. Every other human setting has no agent
 override, and every other agent lever has no human analogue.
 
-### 3.1 Device-settable flags (issue [#815](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/815))
+### 3.1 Device-settable flags
 
 The settings the host changes from the operator pad: [UC-015](use_cases/UC-015.md). Every other `game` flag
 changes through Flagsmith, an operator script (registry rows only) or a reviewed baseline edit.
@@ -189,6 +189,6 @@ constrain the agent only; the human write path has no policy layer, by design.
 ## See Also
 
 - [Services spec](specs/services.md)
-- [Intervention Surface research (#722)](research/722-intervention-surface.md)
+- [Intervention Surface research](research/722-intervention-surface.md)
 - [Agent README](../services/agent/README.md)
 - [Feature flags](feature-flags.md)

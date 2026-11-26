@@ -68,12 +68,12 @@ func TestGroupLog_NotesRescueAndBlindRationale(t *testing.T) {
 	})
 	t.Run("UC-040/A47 a remote answer without a rationale marks its reason synthesized", func(t *testing.T) {
 		resp, _ := ffaAnswer("play_audio_cue", 0.9, "none", 0.6, "")(decide.Request{})
-		d, _, _ := mapAnswers(decide.Request{}, resp)
+		d, _ := mapAnswers(decide.Request{}, resp)
 		if !d.ReasonSynthesized || d.Reason != "decided by claude" {
 			t.Fatalf("decision = %+v", d)
 		}
 		resp, _ = ffaAnswer("play_audio_cue", 0.9, "none", 0.6, "real reason")(decide.Request{})
-		if d, _, _ = mapAnswers(decide.Request{}, resp); d.ReasonSynthesized {
+		if d, _ = mapAnswers(decide.Request{}, resp); d.ReasonSynthesized {
 			t.Fatalf("a written rationale is not synthesized: %+v", d)
 		}
 	})

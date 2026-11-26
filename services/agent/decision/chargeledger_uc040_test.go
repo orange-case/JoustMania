@@ -202,15 +202,15 @@ func TestChargeLedger_ReleasedWhenNotWritten(t *testing.T) {
 	t.Run("UC-040/A31 a stale reservation handle neither commits nor releases a newer entry", func(t *testing.T) {
 		var cl chargeLedger
 		now := time.Unix(1_000, 0)
-		old, _, _ := cl.reserve("WEAK", now, chargeOnly(22*time.Second))
+		old, _ := cl.reserve("WEAK", now, chargeOnly(22*time.Second))
 		old.now = func() time.Time { return now }
 		cl.release("WEAK", old.gen)
-		fresh, _, _ := cl.reserve("WEAK", now, chargeOnly(22*time.Second))
+		fresh, _ := cl.reserve("WEAK", now, chargeOnly(22*time.Second))
 		if fresh == nil {
 			t.Fatal("reserve after release refused")
 		}
 		old.finish(nil) // stale release
-		if res, _, _ := cl.reserve("WEAK", now.Add(time.Second), chargeOnly(22*time.Second)); res != nil {
+		if res, _ := cl.reserve("WEAK", now.Add(time.Second), chargeOnly(22*time.Second)); res != nil {
 			t.Fatal("a stale release dropped the newer entry")
 		}
 		applied := true
@@ -340,7 +340,7 @@ func TestChargeLedger_DecideSpanReportsAlreadyCharged(t *testing.T) {
 		c.Session.GameMode = &mode
 		h.provider.set(remoteGameID, c)
 		// The agent already wrote a charge for A in this game.
-		res, _, _ := h.loop.charges.reserve("A", h.loop.nowOrDefault()(), chargeOnly(chargeLedgerWindow(20*time.Second)))
+		res, _ := h.loop.charges.reserve("A", h.loop.nowOrDefault()(), chargeOnly(chargeLedgerWindow(20*time.Second)))
 		res.now = h.loop.nowOrDefault()
 		applied := true
 		res.finish(&applied)

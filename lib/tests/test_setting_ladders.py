@@ -91,8 +91,6 @@ def _status_at(option: str, start: str) -> menu_pb2.GetMenuStatusResponse:
         status.agent_backend = start
     elif option == "agent_level":
         status.agent_level = start
-    elif option == "agent_saved_level":
-        status.agent_level, status.agent_saved_level = "none", start
     elif option in setting_ladders.KNOB_LADDERS:
         status.operator_settings[option] = start
         if option == "shield.activation":
@@ -118,26 +116,22 @@ LADDERS = {
     "game_instructions": setting_ladders.ON_OFF_LADDER,
     "force_all_start": setting_ladders.ON_OFF_LADDER,
     "agent_level": setting_ladders.AGENT_POLICY_LEVELS,
-    "agent_saved_level": setting_ladders.AGENT_SAVED_LEVELS,  # a stopped agent: only the saved level moves
     **setting_ladders.AGENT_ROW_LADDERS,
 }
 
 
-@pytest.mark.uc("UC-015", br=["BR-003", "BR-004", "BR-005", "BR-018"], flow="A7")
+@pytest.mark.uc("UC-015", br=["BR-004", "BR-005", "BR-018"], flow="A7")
 @pytest.mark.uc("UC-016", br=["BR-007"])
 @pytest.mark.parametrize("option", sorted(LADDERS))
 def test_preview_wraps_only_the_wrapping_options(option):
     """Every start, every n up to 3 x len: wrapping options land on (i + n) % len and never report a
     limit (a multiple of len is the no-op); every other option clamps, with `at_limit` at its ends."""
     ladder = LADDERS[option]
-    preview_option = "agent_level" if option == "agent_saved_level" else option
     size = len(ladder)
     for i, start in enumerate(ladder):
-        if option == "agent_level" and start == "none":
-            continue  # a level of none is a stopped agent: the saved ladder (agent_saved_level)
         status = _status_at(option, start)
         for n in range(-3 * size, 3 * size + 1):
-            preview = preview_value(preview_option, status, n)
+            preview = preview_value(option, status, n)
             case = f"{option} from {start} by {n}"
             if option in setting_ladders.WRAPPING:
                 assert preview == Preview(ladder[(i + n) % size]), case
@@ -146,20 +140,20 @@ def test_preview_wraps_only_the_wrapping_options(option):
                 assert preview == Preview(ladder[target], at_limit=n != 0 and target == i), case
 
 
-@pytest.mark.uc("UC-015", br=["BR-002", "BR-003", "BR-004"], flow="A7")
+@pytest.mark.uc("UC-015", br=["BR-004"], flow="A7")
 @pytest.mark.parametrize(
-    ("level", "saved", "steps", "expected"),
+    ("level", "enabled", "steps", "expected"),
     [
-        ("none", "ambient", -1, Preview("ambient", at_limit=True)),  # the saved ladder's bottom is ambient
-        ("none", "full", 1, Preview("full", at_limit=True)),  # ... and its top full: never wraps to ambient
-        ("full", "", 1, Preview("full", at_limit=True)),  # a running agent at full stays at full
-        ("ambient", "", -2, Preview("none")),  # down past none stops at none, never wraps to full
-        ("ambient", "", -3, Preview("none")),
+        ("none", "on", -1, Preview("none", at_limit=True)),
+        ("none", "off", 1, Preview("ambient")),  # a stopped agent's live level moves too
+        ("full", "on", 1, Preview("full", at_limit=True)),
+        ("ambient", "on", -2, Preview("none")),  # down past none stops at none, never wraps to full
+        ("ambient", "off", -3, Preview("none")),
     ],
 )
-def test_agent_level_and_saved_level_stay_clamped_at_both_ends(level, saved, steps, expected):
-    """Kill-switch safety: the agent level never wraps (none -> full would be an escalation)."""
-    status = menu_pb2.GetMenuStatusResponse(agent_level=level, agent_enabled_state="on", agent_saved_level=saved)
+def test_agent_level_stays_clamped_at_both_ends(level, enabled, steps, expected):
+    """The agent level never wraps (none -> full would be an escalation)."""
+    status = menu_pb2.GetMenuStatusResponse(agent_level=level, agent_enabled_state=enabled)
     assert preview_value("agent_level", status, steps) == expected
 
 
@@ -203,18 +197,11 @@ def test_preview_of_a_status_field_out_of_range_is_unknown():
 
 
 @pytest.mark.uc("UC-015", br=["BR-013"])
-@pytest.mark.parametrize(("level", "enabled"), [("", "on"), ("standard", "unknown"), ("standard", "")])
-def test_agent_level_preview_with_an_unresolved_flag_is_unknown(level, enabled):
-    """The menu fails closed when the level or the kill switch cannot be read: no guessed value."""
-    status = menu_pb2.GetMenuStatusResponse(agent_level=level, agent_enabled_state=enabled)
+@pytest.mark.parametrize("enabled", ["on", "off", "unknown"])
+def test_agent_level_preview_with_the_level_unresolved_is_unknown(enabled):
+    """The menu fails closed when the level cannot be read: no guessed value."""
+    status = menu_pb2.GetMenuStatusResponse(agent_level="", agent_enabled_state=enabled)
     assert preview_value("agent_level", status, 1) == Preview(None)
-
-
-@pytest.mark.uc("UC-015", br=["BR-002", "BR-003", "BR-004"])
-def test_agent_level_preview_of_a_stopped_agent_moves_the_saved_level():
-    stopped = menu_pb2.GetMenuStatusResponse(agent_level="none", agent_enabled_state="on", agent_saved_level="")
-    assert preview_value("agent_level", stopped, 1) == Preview("standard")  # from the fallback `ambient`
-    assert preview_value("agent_level", stopped, -1) == Preview("ambient", at_limit=True)
 
 
 @pytest.mark.uc("UC-015", br=["BR-009", "BR-011"])

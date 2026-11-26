@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, create_autospec, patch
 
 import pytest
 
+from lib import setting_ladders
 from proto import menu_pb2
 from services.operator_pad import config as config_module
 from services.operator_pad import page_keys, render, screens
@@ -40,8 +41,7 @@ from services.operator_pad.tests.fakes import CoordinatorStubSpec, MenuStubSpec
 ALL_COMMANDS = [
     "reset_setting",
     "reset_setting.from",
-    "interventions_switch",
-    "agent_switch.only_if_stopped",
+    "agent_state",
     "step_setting.from",
 ]
 DEFAULTS = {
@@ -85,7 +85,7 @@ ROW_LABELS = {
     "shield.activation": "SHIELD",
     "game_instructions": "INSTRUCTIONS",
     "force_all_start": "FORCE ALL",
-    page_keys.INTERVENTIONS: "AGENT",
+    page_keys.AGENT_STATE: "AGENT",
     "agent_level": "LEVEL",
     "decision.backend": "BACKEND",
     "objectives": "GOAL",
@@ -117,7 +117,7 @@ def test_each_row_key_binds_the_setting_its_row_shows(page):
         ("HOME", "K4", False),  # nor the volume
         ("HOME", "K7", True),
         ("START", "K3", False),  # empty row
-        ("AGENT", "K2", False),  # the interventions switch has no reset
+        ("AGENT", "K2", False),  # the agent switch has no reset
         ("AGENT", "K4", True),
         ("AGENT", "K6", True),  # GOAL, settable from iteration 4
         ("AGENT", "K7", True),
@@ -154,7 +154,8 @@ SWITCH = page_keys.ROWS["AGENT"][0]
         (st(agent_level="standard"), -1, False),
         (st(agent_level="full"), 1, False),  # clamped at the top: no raise
         (st(agent_level="standard", agent_interventions_enabled_state="off"), 1, True),  # WATCH: its live level
-        (st(agent_enabled=False, agent_saved_level="ambient"), 1, True),  # OFF: the saved level is what K5 resumes
+        (st(agent_level="none"), 1, True),  # ON NONE
+        (st(agent_enabled=False, agent_level="ambient"), 1, True),  # OFF: its live level
     ],
 )
 def test_a_higher_rung_of_the_level_is_a_raise(status, steps, raises):
@@ -164,21 +165,46 @@ def test_a_higher_rung_of_the_level_is_a_raise(status, steps, raises):
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
 @pytest.mark.parametrize(
     "status",
-    [st(agent_level=""), st(agent_level="probe"), st(agent_enabled_state="unknown"), None],
-    ids=["empty", "probe", "enabled-unknown", "no-status"],
+    [st(agent_level=""), st(agent_level="probe"), None],
+    ids=["empty", "probe", "no-status"],
 )
 def test_an_unknown_level_is_refused_never_confirmed(status):
     assert page_keys.edit_plan(LEVEL, status, 1).refused
 
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-012", "BR-014"])
-def test_interventions_on_is_a_raise_off_is_not_and_an_off_agent_is_refused():
-    gate_off = st(agent_interventions_enabled_state="off")
-    assert page_keys.edit_plan(SWITCH, gate_off, 1) == page_keys.Plan("off", "on", raises=True)
-    assert page_keys.edit_plan(SWITCH, st(), -1) == page_keys.Plan("on", "off")
-    assert page_keys.edit_plan(SWITCH, st(agent_enabled=False), 1).refused
-    unknown_gate = st(agent_interventions_enabled_state="unknown")
-    assert page_keys.edit_plan(SWITCH, unknown_gate, 1).raises  # ON is known: still a confirmation
+@pytest.mark.parametrize(
+    ("status", "steps", "plan"),
+    [
+        (st(agent_enabled=False), 1, page_keys.Plan("off", "watch", raises=True)),  # the resume
+        (st(agent_enabled=False), 2, page_keys.Plan("off", "on", raises=True)),
+        (st(agent_interventions_enabled_state="off"), 1, page_keys.Plan("watch", "on", raises=True)),
+        (st(), 3, page_keys.Plan("on", "on")),  # clamped at the top
+        (st(), -1, page_keys.Plan("on", "watch")),
+        (st(), -2, page_keys.Plan("on", "off")),  # the stop
+        (st(agent_interventions_enabled_state="off"), -1, page_keys.Plan("watch", "off")),
+        (st(agent_level="none"), -1, page_keys.Plan("on", "watch")),  # ON NONE is ON
+    ],
+)
+def test_a_higher_agent_state_is_a_raise_a_lower_one_is_not(status, steps, plan):
+    assert page_keys.edit_plan(SWITCH, status, steps) == plan
+
+
+@pytest.mark.uc("UC-016", flow="A9", br=["BR-012", "BR-014"])
+@pytest.mark.parametrize(
+    "status",
+    [
+        None,
+        st(agent_enabled_state="unknown"),
+        st(agent_interventions_enabled_state="unknown"),
+        st(agent_interventions_enabled_state=""),
+        st(agent_level="probe"),
+    ],
+    ids=["no-status", "enabled-unknown", "gate-unknown", "gate-missing", "level-off-the-ladder"],
+)
+def test_an_unknown_agent_state_is_refused_never_stepped_blind(status):
+    assert page_keys.edit_plan(SWITCH, status, 1) == page_keys.Plan(None, None, refused=True)
+    assert page_keys.row_preview(page_keys.AGENT_STATE, status, 1) == page_keys.Preview(None)
 
 
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
@@ -188,8 +214,8 @@ def test_interventions_on_is_a_raise_off_is_not_and_an_off_agent_is_refused():
         (st(agent_level="ambient"), page_keys.Plan("ambient", "standard", raises=True)),
         (st(agent_level="standard"), page_keys.Plan("standard", "standard")),  # equal: `>` not `>=`
         (st(agent_level="full"), page_keys.Plan("full", "standard")),
-        (st(agent_enabled=False, agent_saved_level="full"), page_keys.Plan("full", "standard")),
-        (st(agent_enabled=False), page_keys.Plan("ambient", "standard", raises=True)),  # no saved level: ambient
+        (st(agent_enabled=False, agent_level="full"), page_keys.Plan("full", "standard")),  # OFF: the live level
+        (st(agent_enabled=False), page_keys.Plan("ambient", "standard", raises=True)),
     ],
 )
 def test_a_level_reset_raises_only_above_the_level_it_replaces(status, plan):
@@ -204,9 +230,9 @@ def test_a_level_reset_raises_only_above_the_level_it_replaces(status, plan):
         st(setting_defaults={"agent_level": "shadow_experimental"}),
         st(setting_defaults={}),
         st(agent_level="bogus"),
-        st(agent_interventions_enabled_state="unknown"),
+        st(agent_level=""),
     ],
-    ids=["probe", "shadow-experimental", "default-unknown", "level-unknown", "state-unknown"],
+    ids=["probe", "shadow-experimental", "default-unknown", "level-unknown", "level-empty"],
 )
 def test_an_off_ladder_or_unknown_level_default_is_refused(status):
     assert page_keys.reset_plan(LEVEL, status).refused
@@ -271,28 +297,88 @@ async def test_an_unknown_level_edit_is_refused(actions, menu, cues):
 
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-012", "BR-014"])
-async def test_interventions_on_needs_the_confirmation_off_is_immediate(actions, menu):
-    watch = st(agent_interventions_enabled_state="off")
-    assert await actions.dispatch(Gesture(LAYER, "K1", steps=1), watch, watch, on("AGENT", "K1")) == (
-        "interventions_switch",
-        "cancelled",
-    )
-    await actions.dispatch(Gesture(LAYER, "K1", steps=1, confirmed=True), watch, watch, on("AGENT", "K1"))
-    await actions.dispatch(Gesture(LAYER, "K1", steps=-1), st(), st(), on("AGENT", "K1"))
+@pytest.mark.parametrize(
+    ("now", "steps", "new"),
+    [
+        (st(agent_enabled=False), 1, "watch"),
+        (st(agent_enabled=False), 2, "on"),
+        (st(agent_interventions_enabled_state="off"), 1, "on"),
+    ],
+    ids=["off-watch", "off-on", "watch-on"],
+)
+async def test_an_agent_state_raise_needs_the_confirmation(actions, menu, cues, now, steps, new):
+    """OFF to WATCH or ON is the resume: never without the knob press."""
+    gesture = Gesture(LAYER, "K1", steps=steps)
+    assert await actions.dispatch(gesture, now, now, on("AGENT", "K1")) == ("agent_state", "cancelled")
+    menu.ProcessInput.assert_not_awaited()
+    cues.cancel.assert_awaited_once()
+    confirmed = Gesture(LAYER, "K1", steps=steps, confirmed=True)
+    assert await actions.dispatch(confirmed, now, now, on("AGENT", "K1")) == ("agent_state", "ok")
+    assert sent(menu) == [{"command": "agent_state", "state": new, "from": page_keys.switch_state(now)}]
+
+
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-012", "BR-014"])
+@pytest.mark.parametrize(
+    ("now", "steps", "expected"),
+    [
+        (st(), -1, {"state": "watch", "from": "on"}),
+        (st(), -2, {"state": "off", "from": "on"}),
+        (st(agent_interventions_enabled_state="off"), -1, {"state": "off", "from": "watch"}),
+    ],
+    ids=["on-watch", "on-off", "watch-off"],
+)
+async def test_a_lower_agent_state_commits_on_release(actions, menu, now, steps, expected):
+    result = await actions.dispatch(Gesture(LAYER, "K1", steps=steps), now, now, on("AGENT", "K1"))
+    assert result == ("agent_state", "ok")
+    assert sent(menu) == [{"command": "agent_state", **expected}]
+
+
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-012"])
+@pytest.mark.parametrize("steps", [3, 0], ids=["clamped", "no-turn"])
+async def test_an_agent_state_edit_to_the_same_state_sends_nothing(actions, menu, steps):
+    result = await actions.dispatch(Gesture(LAYER, "K1", steps=steps, confirmed=True), st(), st(), on("AGENT", "K1"))
+    assert result == ("agent_state", "noop")
+    menu.ProcessInput.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-012", "BR-014"])
+@pytest.mark.parametrize(
+    "status",
+    [st(agent_enabled_state="unknown"), st(agent_interventions_enabled_state="unknown"), st(agent_level="probe")],
+    ids=["enabled-unknown", "gate-unknown", "level-off-the-ladder"],
+)
+async def test_an_agent_state_edit_from_an_unknown_state_is_refused(actions, menu, cues, status):
+    result = await actions.dispatch(Gesture(LAYER, "K1", steps=-1, confirmed=True), status, status, on("AGENT", "K1"))
+    assert result == ("agent_state", "refused")
+    menu.ProcessInput.assert_not_awaited()
+    cues.refusal.assert_awaited_once()
+
+
+@pytest.mark.uc("UC-016", br=["BR-011", "BR-012"])
+async def test_an_agent_state_edit_needs_the_agent_state_command(actions, menu, cues):
+    """The old `interventions_switch` capability does not count."""
+    old = st(pad_commands=["reset_setting", "reset_setting.from", "interventions_switch", "step_setting.from"])
+    result = await actions.dispatch(Gesture(LAYER, "K1", steps=-1), old, old, on("AGENT", "K1"))
+    assert result == ("agent_state", "refused")
+    menu.ProcessInput.assert_not_awaited()
+    cues.refusal.assert_awaited_once()
+
+
+@pytest.mark.uc("UC-015", br=["BR-004"])
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-012"])
+async def test_a_level_edit_of_an_off_agent_steps_the_live_level(actions, menu):
+    off = st(agent_enabled=False, agent_level="full")
+    await actions.dispatch(Gesture(LAYER, "K3", steps=-2), off, off, on("AGENT", "K3"))
     assert sent(menu) == [
-        {"command": "interventions_switch", "state": "on"},
-        {"command": "interventions_switch", "state": "off"},
+        {"command": "step_setting", "option": "agent_level", "direction": "down", "steps": "2", "from": "full"}
     ]
 
 
-@pytest.mark.uc("UC-016", br=["BR-012"])
-async def test_interventions_switch_of_an_off_agent_is_refused(actions, menu, cues):
-    """BR-012: the resume restores the gate of the stop, so a switch now would be undone."""
-    off = st(agent_enabled=False)
-    result = await actions.dispatch(Gesture(LAYER, "K1", steps=1, confirmed=True), off, off, on("AGENT", "K1"))
-    assert result == ("interventions_switch", "refused")
-    menu.ProcessInput.assert_not_awaited()
-    cues.refusal.assert_awaited_once()
+@pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
+async def test_a_level_reset_of_an_off_agent_replaces_the_live_level(actions, menu):
+    off = st(agent_enabled=False, agent_level="full")
+    await actions.dispatch(Gesture(RESET, "K4", held_ms=1200), off, off, on("AGENT", "K4"))
+    assert sent(menu) == [{"command": "reset_setting", "option": "agent_level", "expect": "standard", "from": "full"}]
 
 
 @pytest.mark.uc("UC-016", br=["BR-011"])
@@ -325,8 +411,8 @@ def test_only_the_gated_builders_send_a_raise():
     """Sweep: every edit and reset of the AGENT page, unconfirmed, from every agent state: no raise is sent."""
     levels = ["none", "ambient", "standard", "full", "probe", ""]
     statuses = [
-        st(agent_level=level, agent_enabled=enabled, agent_interventions_enabled_state=gate, agent_saved_level=saved)
-        for level, enabled, gate, saved in itertools.product(levels, (True, False), ("on", "off"), ("", "ambient"))
+        st(agent_level=level, agent_enabled=enabled, agent_interventions_enabled_state=gate)
+        for level, enabled, gate in itertools.product(levels, (True, False), ("on", "off", "unknown"))
     ]
 
     async def sweep():
@@ -337,7 +423,9 @@ def test_only_the_gated_builders_send_a_raise():
             await actions.dispatch(Gesture(LAYER, key, steps=steps), status, status, on("AGENT", key))
             await actions.dispatch(Gesture(RESET, "K4", held_ms=1200), status, status, on("AGENT", "K4"))
             for data in sent(menu):
-                assert data.get("state") != "on", (status, steps)
+                if data["command"] == "agent_state":
+                    ladder = setting_ladders.AGENT_STATE_LADDER
+                    assert ladder.index(data["state"]) < ladder.index(data["from"]), (status, steps)
                 if data.get("option") == "agent_level" and data["command"] == "step_setting":
                     now = page_keys.row_preview("agent_level", status, 0).value
                     new = page_keys.row_preview("agent_level", status, steps).value
@@ -366,15 +454,13 @@ async def test_a_reset_sends_reset_setting_with_the_value_it_showed(actions, men
 
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
 async def test_a_level_reset_above_the_level_needs_the_confirmation(actions, menu):
-    status = st(agent_level="none", agent_enabled=True, agent_saved_level="ambient")
+    status = st(agent_level="none", agent_enabled=True)
     assert await actions.dispatch(Gesture(RESET, "K4"), status, status, on("AGENT", "K4")) == (
         "reset_setting",
         "cancelled",
     )
     await actions.dispatch(Gesture(RESET, "K4", confirmed=True), status, status, on("AGENT", "K4"))
-    assert sent(menu) == [
-        {"command": "reset_setting", "option": "agent_level", "expect": "standard", "from": "ambient"}
-    ]
+    assert sent(menu) == [{"command": "reset_setting", "option": "agent_level", "expect": "standard", "from": "none"}]
 
 
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
@@ -922,15 +1008,16 @@ def test_reset_and_lock_screens_by_protocol(version):
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-007", "BR-012"])
 @pytest.mark.parametrize("version", [2, 3, 4])
-def test_the_interventions_switch_is_a_two_state_edit_that_asks_for_the_confirmation(version):
-    status = st(agent_interventions_enabled_state="off")
-    plan = page_keys.edit_plan(SWITCH, status, 1)
+@pytest.mark.parametrize(("steps", "new"), [(1, "WATCH"), (2, "ON")])
+def test_the_agent_switch_resume_is_a_three_state_edit_that_asks_for_the_confirmation(version, steps, new):
+    status = st(agent_enabled=False)
+    plan = page_keys.edit_plan(SWITCH, status, steps)
     shown = render.setting_screen(
-        version, page_keys.INTERVENTIONS, status, 1, lobby_only=False, bottom=(" " * 21, 0), plan=plan
+        version, page_keys.AGENT_STATE, status, steps, lobby_only=False, bottom=(" " * 21, 0), plan=plan
     )
     texts = [text.rstrip() for text, _ in shown.lines]
     assert texts[0].endswith("PRESS KNOB")
-    assert texts[1].endswith("OFF") and texts[3].endswith("ON")
+    assert texts[1].endswith("OFF") and texts[3].endswith(new)
 
 
 @pytest.mark.uc("UC-016", br=["BR-001", "BR-006", "BR-011"])

@@ -33,8 +33,8 @@ package jev
 //	              details-stage ffa.magnitude uses the chosen intervention's own
 //	              levels (criteria.go magnitudeLevels), so its answer is the
 //	              normalized position of a concrete value of that lever.
-//	KindNoul   -> "noul":   criteria {true, false} when criteria.go has them
-//	              (the gate, #1281), else none; answer {noul: P(yes)}.
+//	kindNoul   -> "noul":   the gate only (#1281), criteria {true, false};
+//	              answer {noul: P(yes)}, kept in the internal answer's Score.
 //
 // Confidence. decide's contract is "confidence that ACTING on the answer is
 // right"; Jev's is the peakedness of the distribution (choice:
@@ -45,8 +45,8 @@ package jev
 // is noop. Jev's peakedness would punish two competing interventions that
 // together dominate noop (the case the contract explicitly calls a confident
 // call to act), and with ~15 options it collapses to roughly p_max. Jev's own
-// value is still recorded on the chat span (jev.native_confidence). A noul has
-// no Jev confidence; we use |2p-1|, the formula TypeSafe documents for it.
+// value is still recorded on the chat span (jev.native_confidence). The gate noul
+// has no Jev confidence; we use |2p-1|, the formula TypeSafe documents for it.
 
 import (
 	"bytes"
@@ -230,7 +230,7 @@ func encodeQuestion(q decide.Question, req decide.Request, chosen string) (jevQu
 	case decide.KindScore:
 		instructions, ladder := scoreLadder(q, req, chosen)
 		return jevQuestion{Type: typeScore, Instructions: instructions, Criteria: ladder}, nil
-	case decide.KindNoul:
+	case kindNoul:
 		jq := jevQuestion{Type: typeNoul, Instructions: q.Text}
 		if c, ok := noulCriteria[q.ID]; ok {
 			jq.Criteria = withGoal(q.ID, c, req.Goal)
@@ -398,15 +398,39 @@ func decodeResponse(req decide.Request, chosen string, body []byte) (wireResult,
 		}
 		resp.Answers = append(resp.Answers, a)
 	}
-	if err := decide.Validate(req, resp); err != nil {
+	if err := decide.Validate(withoutNouls(req, resp)); err != nil {
 		return res, "invalid_output", fmt.Errorf("jev: %w", err)
 	}
 	res.Response = resp
 	return res, "", nil
 }
 
+// withoutNouls is req and resp without the nouls (the gate), which are not a
+// decide kind, so decide.Validate checks the rest of the call; toAnswer already
+// checked each noul.
+func withoutNouls(req decide.Request, resp decide.Response) (decide.Request, decide.Response) {
+	r := req
+	r.Questions = nil
+	nouls := map[string]bool{}
+	for _, q := range req.Questions {
+		if q.Kind == kindNoul {
+			nouls[q.ID] = true
+		} else {
+			r.Questions = append(r.Questions, q)
+		}
+	}
+	out := resp
+	out.Answers = nil
+	for _, a := range resp.Answers {
+		if !nouls[a.QuestionID] {
+			out.Answers = append(out.Answers, a)
+		}
+	}
+	return r, out
+}
+
 // toAnswer maps one Jev answer onto q's decide.Answer. native is Jev's own
-// confidence (nil for a noul, which has none). chosen is the intervention of a
+// confidence (nil for the gate noul, which has none). chosen is the intervention of a
 // details-stage request ("" otherwise).
 func toAnswer(q decide.Question, ja jevAnswer, chosen string, bounds *decide.MagnitudeTable) (decide.Answer, *float64, error) {
 	a := decide.Answer{QuestionID: q.ID}
@@ -436,15 +460,17 @@ func toAnswer(q decide.Question, ja jevAnswer, chosen string, bounds *decide.Mag
 		a.Score = s
 		a.Confidence = *ja.Confidence
 		return a, ja.Confidence, nil
-	case decide.KindNoul:
+	case kindNoul:
 		if ja.Type != typeNoul || ja.Noul == nil {
 			return a, nil, fmt.Errorf("want a noul answer, got type %q", clip(ja.Type, 32))
 		}
 		p := *ja.Noul
-		a.Noul = &p
+		if math.IsNaN(p) || p < 0 || p > 1 {
+			return a, nil, fmt.Errorf("noul %v outside [0,1]", p)
+		}
+		a.Score = p
 		// Jev returns no confidence for a noul; |2p-1| is its documented
-		// equivalent (the choice formula for two outcomes). A NaN p is left to
-		// decide.Validate.
+		// equivalent (the choice formula for two outcomes).
 		a.Confidence = math.Abs(2*p - 1)
 		return a, nil, nil
 	}

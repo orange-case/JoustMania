@@ -1,11 +1,11 @@
 # Flag service: in-memory runtime flags as a gRPC sync source for flagd
 
-> **Historical / decision record (status: implemented, #1417).** Section 1 describes the pre-#1417 world, where every writer edited the flagd JSON files in place; that file-writer design no longer exists. The writer inventory, the migration plan, the alternatives and the superseded issues are in [archive/flag-service-migration.md](../archive/flag-service-migration.md); who writes each flag today is [flags.md §13](../specs/flags.md#13-mutable-flag-registry). Kept in place because specs and test cases cite its decisions. Normative content now lives in [services.md §7](../specs/services.md#7-flag-service-epic-1407), [flags.md §13](../specs/flags.md#13-mutable-flag-registry) and [telemetry.md §10](../specs/telemetry.md#10-flag-service-epic-1407).
+> **Historical / decision record (status: implemented, #1417).** Section 1 describes the pre-#1417 world, where every writer edited the flagd JSON files in place; that file-writer design no longer exists. Who writes each flag today is [flags.md §13](../specs/flags.md#13-mutable-flag-registry). Kept in place because specs and test cases cite its decisions. Normative content now lives in [services.md §7](../specs/services.md#7-flag-service-epic-1407), [flags.md §13](../specs/flags.md#13-mutable-flag-registry) and [telemetry.md §10](../specs/telemetry.md#10-flag-service-epic-1407).
 
-> Architecture note. Status: **implemented** (epic #1407, delivered in one PR, #1417; see the archive's §12.1). Written 2026-10-16 against `main`; revised the same day
+> Architecture note. Status: **implemented** (epic #1407, delivered in one PR, #1417). Written 2026-10-16 against `main`; revised the same day
 > with the maintainer's decisions on the review of PR #1417 (§1, decisions D3, D4, D10 to D13), and again with
 > the decisions on the re-review (N1 to N6: sync fan-out §5.4, event-list reader §6, persistence on request D10
-> and §10.1, read-only mounts at the checkpoint, archive §12). Implementation starts in the same PR (#1408 to #1410).
+> and §10.1, read-only mounts at the checkpoint). Implementation starts in the same PR (#1408 to #1410).
 > Spec rows: [UC-053](../use_cases/UC-053.md), FR-130 to FR-139, NFR-050 to NFR-053, C-030 to C-033
 > ([requirements](../requirements.md)); [services.md §7](../specs/services.md#7-flag-service-epic-1407),
 > [flags.md §13](../specs/flags.md#13-mutable-flag-registry), [telemetry.md §10](../specs/telemetry.md#10-flag-service-epic-1407),
@@ -56,14 +56,14 @@ game-scoped state dies with its game.
 | D2 | The service is a **gRPC sync source** (`flagd.sync.v1.FlagSyncService`). Every OpenFeature client keeps evaluating on **stock flagd** (C-031). | decided by the maintainer |
 | D3 | **flagSetIds partition the flags; flagd gets ONE gRPC sync source.** The service merges the per-set files at load time into one configuration whose flags each carry `metadata.flagSetId`; flagd's full replace per source then covers every set at once. Clients keep their `flagSetId=<set>` selectors. Verified against flagd v0.16.0 / core v0.15.6 (§5.2). Separate per-set sync paths are the documented fallback, not used (§5.3). | decided by the maintainer; verified |
 | D4 | **One write endpoint per flag set, addressed by path**: `PUT` / `DELETE` / `GET /{flagSetId}/{flagName}`, `GET /{flagSetId}`, and the game lifecycle as `PUT` / `DELETE /games/{gameId}`. Served as **plain HTTP/JSON** (§9). | decided by the maintainer; HTTP/JSON recommended |
-| D5 | **Separate containers**: stock flagd plus the flag service. Embedding flagd is rejected for now (archive §7.1). | recommendation |
+| D5 | **Separate containers**: stock flagd plus the flag service. Embedding flagd is rejected for now (§7.1). | recommendation |
 | D6 | The **game coordinator** reports the game lifecycle, not the agent; each coordinator instance reconciles only its own games (§8). | recommendation |
 | D7 | **One-shot interventions stay flags**, as a per-game **event list** object (`{"epoch","seq","events"}`), rendered on `gameId` only with the serial in the payload (§6). | decided by default (maintainer did not object) |
 | D8 | A **mutable-flag registry** declares every runtime-mutable flag and its bounds; every other flag is read-only baseline ([flags.md §13](../specs/flags.md#13-mutable-flag-registry)). | decided by the maintainer |
 | D9 | Every write is an OTel span and a metric ([telemetry.md §10](../specs/telemetry.md#10-flag-service-epic-1407)). | decided by the maintainer |
 | D10 | **Admin settings are persisted on request** to a service-owned state file (`FLAG_SERVICE_STATE_FILE`, default `/var/lib/flag-service/admin.json` on the stack's own `flag-service-state` volume), never to `services/flagd/*.json`. A write persists only when it says so (`"persist": true`) and the registry allows it for that flag; the menu admin asks for it, stage scripts, the harness and tests do not. Persisted values survive restarts (FR-018 stays). Details §10.1. | decided by the maintainer (persistence on request: re-review N4) |
 | D11 | **No roles, no tokens, no authorization.** This is a local party game: a write is validated only against the registry (mutable? in bounds?), the game scope (is the game registered?) and the sync stream (is flagd connected?). The `writer` field is an informational label for the trace. Authorization is out of scope by decision. | decided by the maintainer |
-| D12 | **Full migration before the talk**, then delete the file-write paths, nonce baselines and prune logic. No file-based fallback. A readiness checkpoint at T−14 days is a stabilisation gate (archive §12). | decided by the maintainer |
+| D12 | **Full migration before the talk**, then delete the file-write paths, nonce baselines and prune logic. No file-based fallback. A readiness checkpoint at T−14 days is a stabilisation gate. | decided by the maintainer |
 | D13 | **Overlays substitute `defaultVariant`**, so baseline targeting (for example the Werewolf rule on `sensitivity`) still wins, as it does today (§10). | decided by default |
 
 ## 2. Target architecture
@@ -98,14 +98,6 @@ and the `:ro` claims in `services/agent/experiment/*.go` comments are stale), an
 containers that make the directory group-writable are removed, so C-033 is enforced by the filesystem. That
 removal waits for the **last** file writer to move: it is an item of the readiness checkpoint #1414, done after
 every set is cut over, not part of any one set's cutover (re-review N3).
-
-## 3. Today: the writer and reader inventory
-
-Moved to [archive/flag-service-migration.md](../archive/flag-service-migration.md) (finished migration, #1417).
-
-## 4. After: the same writers through the service
-
-Moved to [archive/flag-service-migration.md](../archive/flag-service-migration.md) (finished migration, #1417).
 
 ## 5. flagd integration
 
@@ -266,7 +258,41 @@ states.
 
 ## 7. Alternatives considered
 
-Moved to [archive/flag-service-migration.md](../archive/flag-service-migration.md) (finished migration, #1417).
+### 7.1 One binary with flagd embedded (rejected for now)
+
+- `github.com/open-feature/flagd/core` is a v0 module; its semver ADR puts the Sync, Evaluation and
+  OFREP APIs outside semver ([pkg.go.dev](https://pkg.go.dev/github.com/open-feature/flagd/core),
+  [semantic versioning ADR](https://github.com/open-feature/flagd/blob/main/docs/architecture-decisions/semantic-versioning-policy.md)).
+- The daemon has no plugin hook for custom syncs; appending an `ISync` to the exported `Runtime.Syncs`
+  relies on undocumented internals, and we would own the evaluation, sync and OFREP servers.
+- The talk is about **stock** OpenFeature and OTel.
+- Embedding would avoid the reconnect backoff and one container; §5.4 covers both. Revisit when
+  flagd-core is versioned independently.
+
+### 7.2 Keep the files, fix the writers
+
+Each fix so far (#1306, #1315) added state to the coordinator, and #1323 lists the next ones. PR #1418
+(interim pruning of retired games' per-player entries, #1323 / #1317) still merges as the interim fix;
+#1416 deletes that pruning with the file paths. Rejected as the end state.
+
+### 7.3 flagd's HTTP sync (polling)
+
+`provider: http` polls every `interval` (default 5 s); it adds up to one interval to every write, which
+defeats NFR-050. Rejected.
+
+### 7.4 One sync source per set
+
+Needed only if per-flag `flagSetId` were not honoured (§5.3). Rejected in favour of D3: more sources,
+more streams, no benefit.
+
+### 7.5 In-process clients straight to the flag service
+
+Rejected: it would split evaluation between flagd and the service (C-031).
+
+### 7.6 Typed RPC per intervention (first draft)
+
+Replaced by the generic per-set endpoint (D4) at the maintainer's request: the registry's `kind` and
+bounds carry the per-flag knowledge, and new mutable flags need a registry row, not a new RPC.
 
 ## 8. Game lifecycle: who reports it
 
@@ -382,14 +408,6 @@ two, both display-only:
 | One more container on the Pi (NFR-020) | Go binary, memory limit 64 MiB (NFR-051); also in `docker-compose.lite.yml` |
 | Coordinator registration failure or slow registration | bounded 200 ms await before RUNNING, background retry, agent retries `game_not_live` once |
 | Conflicting edits with PR #1381 (NFR-014, the flags.md header rows, the entity-model ER diagram) | whichever merges second rebases; additive rows only here |
-
-## 12. Migration plan
-
-Moved to [archive/flag-service-migration.md](../archive/flag-service-migration.md) (finished migration, #1417).
-
-## 13. Issues
-
-Moved to [archive/flag-service-migration.md](../archive/flag-service-migration.md) (finished migration, #1417).
 
 ## 14. Sources
 
