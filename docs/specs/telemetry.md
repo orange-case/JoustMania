@@ -179,7 +179,7 @@ The game coordinator's event bus (§5) injects the current span's context into e
 | `watchdog.trip` | INTERNAL, root | Once, when a service's loop watchdog trips, just before the process exits with code 70 (UC-060 A8, NFR-080); attrs `watchdog.stalled_seconds` (seconds since the last beat), `watchdog.timeout_seconds` (the limit); the service comes from the resource's `service.name`. No span while the loop beats. | `lib/watchdog.py` |
 
 The trip also logs one ERROR line that starts with `watchdog:`, which `docker logs <container> | grep watchdog` finds
-(the same search as for rust-hid). Traces and logs are flushed for at most 1 s before the exit, so a collector that is
+(the same search as for rust-hid). Traces and logs are flushed for at most 2 s (1 s per provider, with a hard exit at 2 s) before the exit, so a collector that is
 down loses the span, never the restart. There is no watchdog metric: a trip is rare and the span and the restart count
 (`docker inspect`) are its record.
 

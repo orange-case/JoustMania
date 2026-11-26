@@ -93,6 +93,9 @@ class LoopWatchdog:
         self._clock = clock
         self._hard_exit_after_s = hard_exit_after_s
         self._last_beat = clock()
+        self._prev_check = self._last_beat
+        # A watcher gap this long means the whole process was frozen (docker pause, SIGSTOP), not just the loop.
+        self._freeze_after_s = max(timeout_s, 2 * check_interval_s)
         self._stopped = threading.Event()
         self._tripped = threading.Event()
         self._beat_task: asyncio.Task | None = None
@@ -117,7 +120,8 @@ class LoopWatchdog:
             from lib.telemetry import get_tracer
 
             self._tracer = get_tracer(__name__)
-        self._last_beat = self._clock()
+        self._beat_now()
+        self._prev_check = self._last_beat
         self._beat_task = loop.create_task(self._beat(), name="watchdog-beat")
         self._thread = threading.Thread(target=self._watch, name="loop-watchdog", daemon=True)
         self._thread.start()
@@ -131,15 +135,29 @@ class LoopWatchdog:
             self._beat_task.cancel()
             self._beat_task = None
 
+    def _beat_now(self) -> None:
+        self._last_beat = self._clock()
+
     async def _beat(self) -> None:
         while True:
-            self._last_beat = self._clock()
+            self._beat_now()
             await asyncio.sleep(self._beat_interval_s)
+
+    def _observe(self) -> float | None:
+        """One check: the stall in seconds when it trips the watchdog, else None."""
+        now = self._clock()
+        gap, self._prev_check = now - self._prev_check, now
+        if gap >= self._freeze_after_s:
+            # On thaw this thread may run before the loop gets to beat; count the stall from now.
+            self._last_beat = now
+            return None
+        stalled = now - self._last_beat
+        return stalled if stalled >= self.timeout_s else None
 
     def _watch(self) -> None:
         while not self._stopped.wait(self._check_interval_s):
-            stalled = self._clock() - self._last_beat
-            if stalled >= self.timeout_s:
+            stalled = self._observe()
+            if stalled is not None:
                 self._trip(stalled)
                 return
 

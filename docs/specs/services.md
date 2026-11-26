@@ -319,10 +319,13 @@ pairing daemon their devices and BlueZ agent are set up; the menu after its boot
 shutdown starts (UC-060 A8, NFR-080). A task on the service's event loop records a beat every 1 s; a daemon thread
 checks it every 1 s. When the last beat is older than the timeout, the thread logs one ERROR line starting with
 `watchdog:` that names the service, the stall and the limit, records the `watchdog.trip` span
-([telemetry.md §3.4](telemetry.md#34-loop-watchdog-all-python-services)), flushes traces and logs (at most 1 s; a hard
-exit fires after 2 s whatever the flush does) and exits the process with code 70 (`EXIT_CODE`, the code of rust-hid's
-watchdog, NFR-054). Every one of these services has `restart: unless-stopped` in `docker-compose.yml` and
-`docker-compose.lite.yml`, which restarts it on that exit. The gRPC health status is not changed first: the loop that
+([telemetry.md §3.4](telemetry.md#34-loop-watchdog-all-python-services)), flushes traces and logs (1 s per provider, at most
+2 s: a hard exit fires after 2 s whatever the flush does) and exits the process with code 70 (`EXIT_CODE`, the code of
+rust-hid's watchdog, NFR-054). Every one of these services has `restart: unless-stopped` in `docker-compose.yml`, and
+each of them that the lite stack runs (all but operator-pad) has it in `docker-compose.lite.yml` too; the policy
+restarts it on that exit. A whole-process freeze (`docker pause`, `SIGSTOP` / `SIGCONT`, a suspended VM) stops the
+watchdog thread too: when the thread's own gap between two checks exceeds the timeout, it takes the stall as a freeze,
+starts the beat age again from that check and does not trip. The gRPC health status is not changed first: the loop that
 would serve the change is the one that stalled.
 
 | Variable | Meaning | Default |

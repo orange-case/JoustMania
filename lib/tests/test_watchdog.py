@@ -61,9 +61,9 @@ async def test_stalled_loop_exits_with_code_70_and_records_the_trip_span(spans):
 async def test_ticking_loop_never_trips(spans):
     _, tracer = spans
     exit_fn = _Exit()
-    dog = _watchdog(0.2, exit_fn, tracer).start()
+    dog = _watchdog(1.0, exit_fn, tracer).start()
 
-    for _ in range(40):  # 0.8 s of short awaits, four times the timeout
+    for _ in range(100):  # 2 s of short awaits, twice the timeout
         await asyncio.sleep(0.02)
 
     dog.stop()
@@ -71,20 +71,69 @@ async def test_ticking_loop_never_trips(spans):
     assert not dog.tripped
 
 
-async def test_a_stall_shorter_than_the_timeout_does_not_trip(spans):
-    _, tracer = spans
-    exit_fn = _Exit()
-    dog = _watchdog(0.5, exit_fn, tracer).start()
-    await asyncio.sleep(0.05)
+class _Clock:
+    def __init__(self):
+        self.t = 1000.0
 
-    time.sleep(0.25)  # noqa: ASYNC251  # half the timeout
-    await asyncio.sleep(0.2)
+    def __call__(self) -> float:
+        return self.t
 
-    assert exit_fn.codes == []
-    time.sleep(0.7)  # noqa: ASYNC251  # past the timeout
-    assert exit_fn.called.wait(2)
-    assert exit_fn.codes == [70]
-    dog.stop()
+
+def _fake_clock_watchdog(timeout_s=20.0):
+    clock = _Clock()
+    dog = wd.LoopWatchdog("test-svc", timeout_s, exit_fn=_Exit(), flush_fn=lambda: None, clock=clock)
+    return dog, clock
+
+
+def _check_every_second(dog, clock, seconds):
+    """Run the watcher's 1 s checks for ``seconds``; the first stall that trips, else None."""
+    for _ in range(seconds):
+        clock.t += 1
+        stalled = dog._observe()
+        if stalled is not None:
+            return stalled
+    return None
+
+
+def test_the_timeout_is_honoured_to_the_second():
+    dog, clock = _fake_clock_watchdog(20.0)
+
+    assert _check_every_second(dog, clock, 19) is None
+    assert _check_every_second(dog, clock, 1) == 20.0
+
+
+def test_beats_keep_the_watchdog_quiet():
+    dog, clock = _fake_clock_watchdog(20.0)
+
+    for _ in range(100):
+        assert _check_every_second(dog, clock, 5) is None
+        dog._beat_now()
+
+
+def test_a_stall_shorter_than_the_timeout_does_not_trip():
+    dog, clock = _fake_clock_watchdog(20.0)
+
+    assert _check_every_second(dog, clock, 15) is None
+    dog._beat_now()  # the loop got going again
+
+    assert _check_every_second(dog, clock, 19) is None
+
+
+def test_a_whole_process_freeze_is_not_a_loop_stall():
+    """docker pause / SIGSTOP freezes the watcher too; on thaw it may check before the loop beats."""
+    dog, clock = _fake_clock_watchdog(20.0)
+    assert _check_every_second(dog, clock, 3) is None
+
+    clock.t += 60  # frozen: no check, no beat
+    assert dog._observe() is None
+
+    assert _check_every_second(dog, clock, 19) is None  # the loop really is stalled now: counted from the thaw
+    assert _check_every_second(dog, clock, 1) == 20.0
+
+
+def test_the_default_clock_is_monotonic():
+    """A wall-clock jump (NTP sync on a Pi without an RTC) must never look like a stall."""
+    assert wd.LoopWatchdog("test-svc", 20.0)._clock is time.monotonic
 
 
 async def test_stop_before_a_stall_means_no_exit(spans):
