@@ -41,10 +41,10 @@ case "${1:-status}" in
     # (the agent must see `off` for one experiment tick).
     "${FLAGS}" set agent experiment_seed "${SEED_VARIANT}" >/dev/null
     echo "  experiment_seed -> ${SEED_VARIANT}"
-    "${FLAGS}" set agent enabled on >/dev/null
-    echo "  enabled -> on"
-    "${FLAGS}" set agent experiments_enabled on >/dev/null
-    echo "  experiments_enabled -> on"
+    for flag in enabled experiments_enabled; do
+      "${FLAGS}" set agent "${flag}" on >/dev/null
+      echo "  ${flag} -> on"
+    done
     echo "dry-run experiment gate -> on"
     ;;
   off)
