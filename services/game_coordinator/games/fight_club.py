@@ -887,9 +887,7 @@ class FightClubGame(StreamedIntroGameMode):
         attributes: dict = {"death.eliminated": serial in self._disconnected}
         if self._fights_current_round(serial):
             attributes["round"] = self.round_number
-            attributes["winner"] = (
-                self.current_fighter if serial == self.current_defender else self.current_defender
-            )
+            attributes["winner"] = self.current_fighter if serial == self.current_defender else self.current_defender
         return attributes
 
     def _sends_death_effect(self, serial: str) -> bool:  # noqa: ARG002
