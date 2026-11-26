@@ -782,6 +782,7 @@ class NonstopJoustGame(BaseGameMode):
         if tie:
             logger.info(f"Tie at the time limit: {len(leaders)} players share the lead")
             await self.event_publisher(GameEvent.GAME_TIE, {})
+            await self._show_tie_cue()
 
         if winner:
             logger.info(f"Winner: {winner.serial} with score {winner.score} (K:{winner.kills} D:{winner.deaths})")

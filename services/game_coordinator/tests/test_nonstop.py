@@ -1075,6 +1075,7 @@ class TestNonstopStreamSwap:
 # ---------------------------------------------------------------------------
 
 RAINBOW = controller_manager_pb2.GAME_EFFECT_WINNER_RAINBOW
+FLASH = controller_manager_pb2.GAME_EFFECT_FLASH
 
 
 class _ClosableQueueStream(QueueStream):
@@ -2092,9 +2093,9 @@ class TestNonstopDefaultEnd:
         assert ended[0]["winner"] == serials[1]
 
     @pytest.mark.uc("UC-026", flow="A4", br=["BR-003"])
-    @pytest.mark.uc("UC-020", br=["BR-006"])
+    @pytest.mark.uc("UC-020", br=["BR-006", "BR-010"])
     @pytest.mark.asyncio
-    async def test_a_shared_lead_at_the_limit_is_a_tie_without_winner_cues(self):
+    async def test_a_shared_lead_at_the_limit_is_a_tie_with_the_tie_cue(self, monkeypatch):
         game, events, call = await _loop_game(time_limit=0.05)
         serials = list(game.players)
         game.players[serials[2]].deaths = 1
@@ -2104,9 +2105,14 @@ class TestNonstopDefaultEnd:
         await asyncio.wait_for(game._game_loop(), timeout=5)
         assert game._time_limit_reached
         game._latch_game_outcome()
+        monkeypatch.setattr(game_clock, "sleep", async_noop)
         await game._end_game_impl()
 
         assert len(events.get_events_of_type(GameEvent.GAME_TIE)) == 1
+        flashes = [m.game_effect for m in call.messages if m.HasField("game_effect") and m.game_effect.effect == FLASH]
+        assert sorted(f.serial for f in flashes) == sorted(game.players), "UC-020 BR-010: every player flashes"
+        assert sounds == [Sound.SFX_DEATH]
+        assert game.game_outcome() == "completed"
         assert events.get_events_of_type(GameEvent.GAME_WINNER) == []
         assert not [m for m in call.messages if m.HasField("game_effect") and m.game_effect.effect == RAINBOW]
         assert Sound.VOX_CONGRATULATIONS not in sounds
