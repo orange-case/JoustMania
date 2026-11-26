@@ -78,7 +78,7 @@ type wireOutput struct {
 //
 // Normalization is deliberately narrow:
 //   - a single markdown code fence around the JSON is stripped (some
-//     OpenAI-compatible servers add one even in JSON mode);
+//     servers add one even in JSON mode);
 //   - for a score question the choice/probabilities fields are dropped, and for
 //     a choice question the score field is dropped (the schema forces every
 //     field to be present, so the "unused" value is noise, not a contradiction);

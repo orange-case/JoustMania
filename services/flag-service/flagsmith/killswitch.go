@@ -19,7 +19,6 @@ var killSwitches = map[string]bool{
 	"agent/code_improvement.min_interval_seconds":   true,
 	"agent/llm.max_requests_per_minute":             true,
 	"agent/decision.claude.max_requests_per_minute": true,
-	"agent/decision.openai.max_requests_per_minute": true,
 	"agent/experiment_max_games":                    true,
 	"agent/experiment_dynamic_max_concurrent":       true,
 }

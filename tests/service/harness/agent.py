@@ -117,7 +117,6 @@ class AgentProcess(ManagedProcess):
         otlp_endpoint: str,
         coordinator_port: int,
         mock_control_port: int,
-        openai_api_key: str,
         extra_env: dict[str, str] | None = None,
     ):
         self.listen_port = listen_port
@@ -137,7 +136,6 @@ class AgentProcess(ManagedProcess):
             "MOCK_CONTROLLER_ADDR": f"127.0.0.1:{mock_control_port}",
             # The experiment journal (default /var/lib/joustmania/agent/experiments is not writable here).
             "AGENT_EXPERIMENT_DIR": str(workdir / "experiments"),
-            "DECISION_OPENAI_API_KEY": openai_api_key,
             "AGENT_LLM_MAX_REQUESTS_PER_MINUTE": LLM_MAX_REQUESTS_PER_MINUTE,
             "OTEL_SERVICE_NAME": OTEL_SERVICE_NAME,
             "OTEL_SERVICE_NAMESPACE": "infrastructure",

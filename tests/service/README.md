@@ -19,10 +19,9 @@ CI: the `service-tests` job (path-filtered on PRs, always on main, part of `ci-c
 | controller-manager, game-coordinator, menu | real, from source | `python services/<svc>/server.py` with the service-tests venv; `GRPC_PORT` / `MOCK_CONTROL_PORT` on ephemeral ports; ready on gRPC health SERVING |
 | audio | fake | `FakeAudio`, in-process gRPC server that records every call (`stack.fake_audio.calls_of("PlaySound")`) |
 | otel-collector, Jaeger | none by default; `OtlpSink` fake on opt-in | default: `OTEL_SDK_DISABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:1` in every Python service. `Composition(..., otlp=True)`: SDK on, endpoint = the in-process `OtlpSink` (`stack.otlp_sink`, compose name `otel-collector:4317`). The flag service gets no endpoint either way (no-op) |
-| agent | real, `go build` of `services/agent` (`AGENT` composition only) | subprocess; binary cached by source hash next to the flag service's; OTLP receiver on an ephemeral port (compose `agent:4317`), flagd RPC port, the stack's flag service; `OTEL_BSP_SCHEDULE_DELAY=200`, `AGENT_LLM_MAX_REQUESTS_PER_MINUTE=600`, dummy `DECISION_OPENAI_API_KEY` |
-| OpenAI-compatible backend | fake (`AGENT` only) | `tests/integration/fake_openai/server.py` as a subprocess (`stack.fake_openai`: `script()`, `release()`, `requests(game_id)`); the stack rewrites the `fake` variant of `decision.openai.base_url` in its temp baseline copy to it |
+| agent | real, `go build` of `services/agent` (`AGENT` composition only) | subprocess; binary cached by source hash next to the flag service's; OTLP receiver on an ephemeral port (compose `agent:4317`), flagd RPC port, the stack's flag service; `OTEL_BSP_SCHEDULE_DELAY=200`, `AGENT_LLM_MAX_REQUESTS_PER_MINUTE=600` |
 | Jev (TypeSafe System One) | fake (`AGENT_JEV` only) | `harness/fakes/jev.py`, in-process threaded server (`stack.fake_jev`: `script(mode, intervention=, confidence=)`, `requests(stage)`); the stack rewrites the `ci/` `fake` variant of `decision.jev.base_url` to it and gives the agent the fake's dummy `JEV_API_KEY` (other compositions have none) |
-| Claude (Anthropic Messages API) | fake (`AGENT_CLAUDE`: text backend; `AGENT_CLAUDE_DECIDE`: in-game decide backend, #1900) | `harness/fakes/claude.py`, in-process threaded server (`stack.fake_claude`: `script(retro=, proposal=, decide_mode=, intervention=, confidence=)`, `requests(kind)` with kind `retro`/`proposal`/`decide`); the stack writes the `inference.backend=claude` overlay (the flag wins over the env, #1810) before the agent starts, and the agent gets `ANTHROPIC_API_KEY` and `AGENT_INFERENCE_BASE_URL` = the fake, `AGENT_EXPERIMENT_DIR` in the workdir |
+| Claude (Anthropic Messages API) | fake (`AGENT_CLAUDE`: text backend; `AGENT_CLAUDE_DECIDE`: in-game decide backend, #1900) | `harness/fakes/claude.py`, in-process threaded server (`stack.fake_claude`: `script(retro=, proposal=, decide_mode=, intervention=, confidence=)`, `release()` for `decide_mode="hold"`, `requests(kind)` with kind `retro`/`proposal`/`decide`; a decide record carries `game_id`, `questions`, `intervention`, `held`; the answer is built from the prompt by `harness/fakes/decide_answer.py`); the stack writes the `inference.backend=claude` overlay (the flag wins over the env, #1810) before the agent starts, and the agent gets `ANTHROPIC_API_KEY` and `AGENT_INFERENCE_BASE_URL` = the fake, `AGENT_EXPERIMENT_DIR` in the workdir |
 | GitHub (REST API, issues and PRs) | fake (`Composition(fake_github=True)`, needs `agent`) | `harness/fakes/github.py`, in-process threaded server (`stack.fake_github`: `requests(kind)`, `html_url(kind, n)`); the agent gets the promoter env gate (`AGENT_CODE_IMPROVEMENT_ENABLED`, target `github`, a dummy `GITHUB_TOKEN` and `GITHUB_REPOSITORY`) with `GITHUB_API_URL` = the fake, so a promotion never reaches github.com (TC-011 promotion) |
 | Flagsmith (hosted, the flag service's Flagsmith link) | fake (`Composition(fake_flagsmith=True)`; `fake_flagsmith_preseed=True` creates every registry flag as a feature first) | `harness/fakes/flagsmith.py`, in-process threaded server, stateful like Flagsmith (`stack.fake_flagsmith`): environment document with `updated_at`, `Last-Modified` and 304; the link's pushes change it (`__future__` PATCH, identity overrides, identities, traits) with API-key audit rows; `person_sets` / `person_overrides` change it as a person; knobs `down`, `delay`, `refuse(feature, status, retry_after=, times=)`, `audit_rows`, `audit_status`, `versioning`, `identity_overrides_in_local_eval`; reads `pushes(feature)`, `env_value`, `override`, `identities`, `health_posts`; `reset_values()` between tests. The flag service gets FLAGSMITH_LINK=on, the fake's URLs and dummy keys, poll 5 s, timeout 1 s and the health webhook; every other composition runs with the link off. Journeys: `test_flagsmith_link.py`, `test_flagsmith_sync.py` (own CI job, #2592); fake self-tests `test_fake_flagsmith.py` |
 | rust-hid, python-hid, BlueZ | none | controller manager: `RUST_HID_*` / `PYTHON_HID_*` = `127.0.0.1:1`, dead `DBUS_SYSTEM_BUS_ADDRESS` |
@@ -55,7 +54,7 @@ point = await stack.otlp_sink.wait_metric_async("game_active", {"game_id": game_
 Proof: `test_otlp_sink.py` (a game's root span and `player_disconnected` reach the sink).
 
 Compositions (`harness/stack.py`): `GAME` = controller-manager + game-coordinator, `LOBBY` = `GAME` + menu,
-`AGENT` = `LOBBY` with `otlp=True` plus the agent and the fake OpenAI backend (#1600). In `AGENT` the sink
+`AGENT` = `LOBBY` with `otlp=True` plus the agent (#1600; the journeys that need a decide backend run on `AGENT_CLAUDE_DECIDE`). In `AGENT` the sink
 tees the services' traces and metrics to the agent (the collector's role) and the agent exports its own
 spans and metrics back to the sink (Jaeger's role): read `invoke_agent joustmania-agent` & co. with
 `stack.otlp_sink.spans("invoke_agent joustmania-agent", {"game.id": game_id}, service="agent")`. Shared journey steps
@@ -127,11 +126,11 @@ async def test_x(service_stack, flag_service):
 
 - New Python service: add it to `SERVICES` in `harness/stack.py` (source dir, compose port, OTel name) and
   its env wiring in `_start`. The service's `__main__` must read `GRPC_PORT` (`lib.grpc_utils.port_from_env`).
-- New fake (fake Claude, fake OpenAI): an in-process server with `start() -> port` / `stop()` like
+- New fake (fake Claude, fake Jev): an in-process server with `start() -> port` / `stop()` like
   `FakeAudio` or `OtlpSink` (`harness/fakes/`), started in `ServiceStack._start` and published under its
   compose name in `_ports`; point the services at it through `Composition.env` or the common env (as
   `Composition.otlp` does for the OtlpSink).
-- Agent composition: done (`AGENT`, `harness/agent.py`, `harness/fakes/openai.py`, #1600).
+- Agent composition: done (`AGENT`, `harness/agent.py`, #1600).
 - A moved TC keeps its `tc="TC-XXX"` tags and gets a `**Tier:**` line in its Automation section.
 
 `Composition(..., agent_env={...})` adds env to the agent process (TC-011 seeds its experiment this way);

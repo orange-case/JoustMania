@@ -673,7 +673,7 @@ class TestEndGameImpl:
             ],
         )
         game_with_mocks.running = True
-        assert await game_with_mocks._check_win_condition()  # latches team 0 (UC-021 BR-003)
+        assert await game_with_mocks._check_win_condition()  # latches team 0 (UC-020 BR-007)
 
         await game_with_mocks._end_game_impl()
 
@@ -695,7 +695,7 @@ class TestEndGameImpl:
             ],
         )
         game_with_mocks.running = True
-        assert await game_with_mocks._check_win_condition()  # latches the tie (UC-021 BR-003)
+        assert await game_with_mocks._check_win_condition()  # latches the tie (UC-020 BR-007)
 
         await game_with_mocks._end_game_impl()
 
@@ -734,7 +734,7 @@ class TestEndGameImpl:
             ],
         )
         game_with_mocks.running = True
-        assert await game_with_mocks._check_win_condition()  # latches team 0 (UC-021 BR-003)
+        assert await game_with_mocks._check_win_condition()  # latches team 0 (UC-020 BR-007)
 
         await game_with_mocks._end_game_impl()
 

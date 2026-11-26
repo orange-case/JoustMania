@@ -90,8 +90,8 @@ const docPath = "GET " + flagsmithtest.APIPath + "environment-document/"
 
 // UC: UC-055 main step 5
 // The operator goes back to Flagsmith's claude while the round fetches a
-// document that already shows the openai in flight: the round adopts the
-// openai it read before, but the key stays out of sync and openai is not
+// document that already shows the rules in flight: the round adopts the
+// rules it read before, but the key stays out of sync and rules is not
 // queued again.
 func TestRoundDoesNotActOnLocalValueChangedDuringFetch(t *testing.T) {
 	m := newFSModel()
@@ -105,27 +105,27 @@ func TestRoundDoesNotActOnLocalValueChangedDuringFetch(t *testing.T) {
 	}, nil)
 	confirm := releaseAll(t, release)
 	h.online()
-	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "openai"})
-	<-entered // openai in flight
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "rules"})
+	<-entered // rules in flight
 	var putErr error
-	doc.show("decision.backend", "openai", h.putDuring(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "claude"}, &putErr))
+	doc.show("decision.backend", "rules", h.putDuring(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "claude"}, &putErr))
 	h.round()
 	if putErr != nil {
 		t.Fatal(putErr)
 	}
 	t.Run("UC-055/main step 5 a round that read the older local value does not mark the key in sync", func(t *testing.T) {
 		if p, oos, _ := h.link.Links().Counts(); p != 0 || oos != 1 {
-			t.Fatalf("pending %d out_of_sync %d, want 0 1: the stack runs claude, Flagsmith shows openai", p, oos)
+			t.Fatalf("pending %d out_of_sync %d, want 0 1: the stack runs claude, Flagsmith shows rules", p, oos)
 		}
 	})
 	confirm()
-	h.waitFor("the openai push ended", func() bool { return len(h.ended(flagsmith.SpanPush)) == 1 })
+	h.waitFor("the rules push ended", func() bool { return len(h.ended(flagsmith.SpanPush)) == 1 })
 	t.Run("UC-055/main step 5 the confirm of the older push keeps the key out of sync", func(t *testing.T) {
 		if p, oos, _ := h.link.Links().Counts(); p != 0 || oos != 1 {
 			t.Fatalf("pending %d out_of_sync %d, want 0 1", p, oos)
 		}
 		if n := h.requests(http.MethodPatch, backendPath); n != 1 {
-			t.Fatalf("%d PATCHes, want 1: the round must not queue the openai it read before the change", n)
+			t.Fatalf("%d PATCHes, want 1: the round must not queue the rules it read before the change", n)
 		}
 		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" {
 			t.Fatalf("decision.backend = %+v, want the operator's claude", v)
@@ -134,9 +134,9 @@ func TestRoundDoesNotActOnLocalValueChangedDuringFetch(t *testing.T) {
 }
 
 // UC: UC-055 A4
-// Flagsmith refused jev; openai is in flight when the operator re-saves jev
-// during a round's fetch of a document that already shows openai. The round
-// adopts the openai it read before, but the refusal of jev stays and jev is
+// Flagsmith refused jev; rules is in flight when the operator re-saves jev
+// during a round's fetch of a document that already shows rules. The round
+// adopts the rules it read before, but the refusal of jev stays and jev is
 // not sent again.
 func TestRoundKeepsRefusalOfValueResavedDuringFetch(t *testing.T) {
 	m := newFSModel()
@@ -152,14 +152,14 @@ func TestRoundKeepsRefusalOfValueResavedDuringFetch(t *testing.T) {
 	h.online()
 	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"})
 	<-entered // jev in flight
-	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "openai"})
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "rules"})
 	pulls := h.pulls()
-	release <- struct{}{} // jev refused, openai pending
-	<-entered             // openai in flight
+	release <- struct{}{} // jev refused, rules pending
+	<-entered             // rules in flight
 	// The refusal wakes a pull of its own; the journey's round comes after it.
 	h.waitFor("the pull the refusal woke", func() bool { return h.pulls() > pulls })
 	var putErr error
-	doc.show("decision.backend", "openai", h.putDuring(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"}, &putErr))
+	doc.show("decision.backend", "rules", h.putDuring(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev"}, &putErr))
 	h.round()
 	if putErr != nil {
 		t.Fatal(putErr)
@@ -169,14 +169,14 @@ func TestRoundKeepsRefusalOfValueResavedDuringFetch(t *testing.T) {
 			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 1 1", p, oos, r)
 		}
 	})
-	release <- struct{}{} // openai confirmed
-	h.waitFor("the openai push ended", func() bool { return len(h.ended(flagsmith.SpanPush)) == 2 })
-	t.Run("UC-055/A4 the confirm of openai keeps the refusal and jev is not sent again", func(t *testing.T) {
+	release <- struct{}{} // rules confirmed
+	h.waitFor("the rules push ended", func() bool { return len(h.ended(flagsmith.SpanPush)) == 2 })
+	t.Run("UC-055/A4 the confirm of rules keeps the refusal and jev is not sent again", func(t *testing.T) {
 		if _, _, r := h.link.Links().Counts(); r != 1 {
 			t.Fatalf("refused %d, want 1", r)
 		}
 		if n := h.requests(http.MethodPatch, backendPath); n != 2 {
-			t.Fatalf("%d PATCHes, want 2 (jev refused once, openai)", n)
+			t.Fatalf("%d PATCHes, want 2 (jev refused once, rules)", n)
 		}
 	})
 }

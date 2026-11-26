@@ -372,7 +372,7 @@ type Loop struct {
 	// promptProfile is the decision.prompt_profile source of remote decide requests
 	// (#2467 PR 5, UC-040 BR-036); nil leaves Request.PromptProfile empty (v1).
 	promptProfile PromptProfileSource
-	// operatorBrief is the decision.operator_brief source of claude and openai
+	// operatorBrief is the decision.operator_brief source of claude
 	// requests (#2687, UC-040 BR-044); nil never sets Request.OperatorBrief.
 	operatorBrief OperatorBriefSource
 	// magnitudeBounds is the decision.magnitude_bounds source of every decide

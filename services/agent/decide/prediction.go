@@ -48,7 +48,7 @@ const (
 	// none (it scores the lever map, not the model).
 	SourceLeverDefault = "lever_default"
 	// SourceModel: stated by a model in answer to Request.PredictionAsk
-	// (claude, openai; opt-in by decision.predictions.ask_model).
+	// (claude; opt-in by decision.predictions.ask_model).
 	SourceModel = "model"
 	// SourceControl: a base-rate control the agent registers itself.
 	SourceControl = "control"
@@ -150,8 +150,8 @@ func NewPrediction(template string, horizonS int, p float64, source, rule, targe
 }
 
 // LeverPrediction is the per-intervention default prediction (source
-// lever_default) for a decision whose backend stated none: jev, and claude or
-// openai while the model is not asked. value is Decision.Value ("" when the
+// lever_default) for a decision whose backend stated none: jev, and claude
+// while the model is not asked. value is Decision.Value ("" when the
 // intervention takes no number), target the decision's target serial, and
 // tempo the game's current music tempo (nil when unknown; unused while the tempo
 // lever has no default). It returns nil for the interventions with nothing

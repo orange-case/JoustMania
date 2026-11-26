@@ -10,10 +10,9 @@ import (
 	"github.com/joustmania/agent/flags"
 )
 
-// backend_budget_2519_test.go covers the paid backends' own decide caps (#2519,
-// FR-152 (c), NFR-011, C-034): decision.claude.max_requests_per_minute and
-// decision.openai.max_requests_per_minute tighten the global
-// llm.max_requests_per_minute for decide calls on their backend. One window, one
+// backend_budget_2519_test.go covers claude's own decide cap (#2519, FR-152 (c),
+// NFR-011, C-034): decision.claude.max_requests_per_minute tightens the global
+// llm.max_requests_per_minute for decide calls on claude. One window, one
 // critical section: entries are tagged by backend; jev, the retro and the
 // proposer stay on the global budget only.
 
@@ -58,8 +57,8 @@ func TestLLMBudget_BackendCapTightens(t *testing.T) {
 		t.Fatal("claude charge after the window slid refused")
 	}
 	// A zero backend cap closes the backend even with global capacity left.
-	if b.allowBackend(later, global, flags.DecisionBackendOpenAI, 0) {
-		t.Fatal("openai cap 0 admitted, want closed")
+	if b.allowBackend(later, global, flags.DecisionBackendClaude, 0) {
+		t.Fatal("claude cap 0 admitted, want closed")
 	}
 }
 

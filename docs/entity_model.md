@@ -332,8 +332,8 @@ One agent decision cycle for a game: one evaluation, recorded on one `invoke_age
 |---|---|---|---|---|
 | decide_span_id | Span id of the cycle's `invoke_agent joustmania-agent` span (no agent-assigned id exists) | String | 16 | Primary Key, Format: 16 hex characters |
 | game_id | Game decided for | String | 17 | Not Null, Foreign Key (GAME_SESSION.game_id) |
-| backend_requested | `decision.backend` at fire time (`decide.backend.requested`); empty counts as `rules`, an unknown name is kept verbatim and decided by rules with `fallback_reason=unknown_backend` | String | 20 | Not Null, Values: rules, claude, openai, jev, or an unknown name |
-| backend | Backend that actually decided | String | 10 | Not Null, Values: rules, claude, openai, jev |
+| backend_requested | `decision.backend` at fire time (`decide.backend.requested`); empty counts as `rules`, an unknown name is kept verbatim and decided by rules with `fallback_reason=unknown_backend` | String | 20 | Not Null, Values: rules, claude, jev, or an unknown name (for example the retired `openai`, #2788) |
+| backend | Backend that actually decided | String | 10 | Not Null, Values: rules, claude, jev |
 | outcome | Decide outcome | String | 10 | Not Null, Values: act, held, noop, invalid, fallback, discarded |
 | fallback_reason | Why rules decided instead | String | 22 | Optional, Values: unknown_backend, backend_unavailable, async_not_wired, llm_not_eligible, llm_budget_exhausted, timeout, invalid_answer, error |
 | discarded_reason | Why a remote answer (valid, or under the kill switch also a failed or timed-out call) or its rules fallback was dropped | String | 16 | Optional, Values: stale_context, game_ended, target_gone, target_stale, state_too_old, kill_switch, backend_changed, shutdown |
