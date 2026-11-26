@@ -1061,15 +1061,8 @@ template's base rate; **lift = hit rate minus base rate**. A reported hit rate a
 rate and `game_kind`; the headline uses `acted=true` and real games, and shadow results are labelled "shadow calibration".
 
 **Calibration.** Brier score (p - y)^2 over scored (hit or miss) predictions, as a counter sum, so the rolling value is a
-PromQL ratio and no in-process rolling state exists ([telemetry.md §6](telemetry.md#6-metrics)). Per-experiment arm tallies are
-report-only: fed in memory, never journaled, never read by the verdict (UC-043 A21, BR-010). At game end the Book hands the
-game's ACTED decision predictions that scored hit or miss (counterfactuals, controls and unscorables never; a stale end hands
-nothing on, the game is released and re-run) to the registry, which holds them for the bound game and adds them to its arm
-only at the game's fitness fold (`ConcludeGame`); a game released without a fold (errored, preempted) or torn down adds nothing
-(`services/agent/prediction/book.go:Book.SetArmTallySink`, `services/agent/experiment/calibration.go:Registry.NotePredictions`,
-wired by `services/agent/gameend.go:wireArmCalibration`). The Book runs before the experiment hook in the game-end chain, so
-the game is still bound; a real game, a released or unknown game and an inconsistent tally are ignored. The experiment's
-progress snapshot shows it per arm (`GET /experiments/state`, [services.md §5](services.md#5-http-endpoints), #2809); a restart or rehydrate starts it empty.
+PromQL ratio and no in-process rolling state exists ([telemetry.md §6](telemetry.md#6-metrics)). No per-experiment arm tally exists
+(UC-043 A21 is Obsolete, #2815): an experiment's verdict reads fitness only.
 
 ### 14.4 Goal profiles
 
