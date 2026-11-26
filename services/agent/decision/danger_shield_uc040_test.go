@@ -1,5 +1,7 @@
 package decision
 
+// Spec: decide-contract.md §15.2, §15.3, §15.4 (the rules engine; tests tagged UC-040 A1)
+
 import (
 	"context"
 	"math"

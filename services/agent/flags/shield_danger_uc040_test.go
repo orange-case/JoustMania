@@ -1,5 +1,7 @@
 package flags
 
+// Spec: decide-contract.md §15.3 (the rules engine; tests tagged UC-040 A1)
+
 import (
 	"context"
 	"errors"

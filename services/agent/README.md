@@ -180,7 +180,7 @@ model**, applied in order:
    - `decision.backend` (string, default `rules`): `rules` runs the deterministic
      rules engine; `claude` / `jev` hand the decision to that remote
      backend, with the rules engine as the fallback. See **Decision backends**
-     below and [decide-contract.md 10.1](../../docs/specs/decide-contract.md#101-the-text-backend-post-game-retro-and-proposer). The
+     below and [text-backend.md](../../docs/specs/text-backend.md). The
      legacy `mode` / `model` / `prompt_variant` flags were removed in #1234.
 4. **Permission** (constrains which actions dispatch, and how fast) — applied to
    each candidate decision in this order, blocking with an attributed reason:
@@ -633,7 +633,7 @@ The environment variable table (names, defaults, whether `docker-compose.yml` pa
 table to keep in sync with the code. Live gates (`enabled`, `interventions_enabled`, `experiments_enabled`,
 `verdict_*`, `llm.*`) are flagd flags, documented in [flags.md](../../docs/specs/flags.md) and
 [feature-flags.md](../../docs/feature-flags.md). The text backend (`inference.*` flags) is specified in
-[decide-contract.md 10.1](../../docs/specs/decide-contract.md#101-the-text-backend-post-game-retro-and-proposer).
+[text-backend.md](../../docs/specs/text-backend.md).
 
 > **#1044 — runtime-tunable experiment knobs are now LIVE `agent.json` flags.**
 > The experiment loop reads these on **every tick** from the `agent` flagd domain.
