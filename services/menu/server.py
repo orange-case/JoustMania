@@ -33,6 +33,7 @@ from lib.feature_flags import wait_for_provider_ready
 from lib.otel_logging import init_logging
 from lib.otel_metrics import init_metrics
 from lib.system_metrics import start_system_metrics_collector
+from lib.watchdog import start_loop_watchdog
 from proto import menu_pb2, menu_pb2_grpc
 from services.menu import metrics
 from services.menu.servicer import MenuServicer
@@ -132,7 +133,9 @@ async def serve(port=50054):
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, shutdown_event.set)
 
+    watchdog = start_loop_watchdog("menu")
     await shutdown_event.wait()
+    watchdog.stop()
 
     logger.info("Shutting down Menu server...")
 

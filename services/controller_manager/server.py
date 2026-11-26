@@ -17,6 +17,7 @@ from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from lib.otel_logging import init_logging
 from lib.otel_metrics import init_metrics
 from lib.system_metrics import start_system_metrics_collector
+from lib.watchdog import start_loop_watchdog
 from proto import controller_manager_pb2_grpc
 from services.controller_manager import metrics
 from services.controller_manager.servicer import ControllerManagerServicer
@@ -173,7 +174,9 @@ async def serve(port=50052):
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, shutdown_event.set)
 
+    watchdog = start_loop_watchdog("controller-manager")
     await shutdown_event.wait()
+    watchdog.stop()
 
     await shutdown_services(controller_servicer, server, mock_server)
 

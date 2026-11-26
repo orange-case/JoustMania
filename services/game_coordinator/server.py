@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from lib.otel_logging import init_logging
 from lib.otel_metrics import init_metrics
 from lib.system_metrics import start_system_metrics_collector
+from lib.watchdog import start_loop_watchdog
 from proto import game_coordinator_pb2_grpc
 from services.game_coordinator import metrics
 from services.game_coordinator.servicer import GameCoordinatorServicer
@@ -115,7 +116,9 @@ async def serve(port=50053):
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, shutdown_event.set)
 
+    watchdog = start_loop_watchdog("game-coordinator")
     await shutdown_event.wait()
+    watchdog.stop()
 
     logger.info("Shutting down GameCoordinator server...")
     await game_servicer.shutdown()

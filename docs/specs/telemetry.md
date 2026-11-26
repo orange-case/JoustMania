@@ -55,6 +55,7 @@ Service identities (`OTEL_SERVICE_NAME` / namespace): `controller-manager-servic
 | `agent.*`, `decision.*`, `decide.*`, `intervention.*`, `policy.*`, `inference.*`, `llm.*` | see §4 | agent; `intervention.id`, `intervention.type` also game-coordinator (the intervention moment, [appendix A](#appendix-a-booth-profile)) |
 | `gen_ai.*` | OTel GenAI semantic conventions, see §4.2 | agent |
 | `pad.*` | `pad.key`, `pad.gesture`, `pad.action`, `pad.result`, `pad.steps`, `pad.device`, `pad.node_count` | operator-pad (§3.3) |
+| `watchdog.*` | `watchdog.stalled_seconds`, `watchdog.timeout_seconds` (on `watchdog.trip`, §3.4) | every long-running Python service |
 | `moment.*`, `telemetry.*` | `moment.id` on every record of the warning and death moments (`death_warning`, `player_death`); `telemetry.moment_shape` on the game root span ([appendix A](#appendix-a-booth-profile)); `orangecase.audience` (`agent`) on every log record meant for the agent only (§3.2 agent log events) | game-coordinator |
 | `challenge.*` | `challenge.warning_times_ns`, `challenge.death_times_ns` on the `challenge.ground_truth` event of the game root span, and the `challenge.intervention_ground_truth` events (FR-219, FR-222, [appendix A](#appendix-a-booth-profile)) | game-coordinator |
 | `rpc.*`, `server.*` | OTel RPC semantic conventions on gRPC spans | all |
@@ -170,6 +171,19 @@ A mode's `_kill_player_impl` never adds its own `player_death` span event. Swapp
 The game coordinator's event bus (§5) injects the current span's context into each `GameEvent` without a span of its own, so it has no `PRODUCER` span. The game's own structure (game root, phases, `game_cycle`, player, team and match spans) and the hardware spans of controller-manager, pairing-daemon and operator-pad stay `INTERNAL`.
 
 **Traceability:** FR-043, FR-080 / UC-020 to UC-030, UC-035 / files above / `tests/service/test_tc008_remote_backend_routing.py`.
+
+### 3.4 Loop watchdog (all Python services)
+
+| Span | Kind | When | Source |
+|---|---|---|---|
+| `watchdog.trip` | INTERNAL, root | Once, when a service's loop watchdog trips, just before the process exits with code 70 (UC-060 A8, NFR-080); attrs `watchdog.stalled_seconds` (seconds since the last beat), `watchdog.timeout_seconds` (the limit); the service comes from the resource's `service.name`. No span while the loop beats. | `lib/watchdog.py` |
+
+The trip also logs one ERROR line that starts with `watchdog:`, which `docker logs <container> | grep watchdog` finds
+(the same search as for rust-hid). Traces and logs are flushed for at most 2 s (1 s per provider, with a hard exit at 2 s) before the exit, so a collector that is
+down loses the span, never the restart. There is no watchdog metric: a trip is rare and the span and the restart count
+(`docker inspect`) are its record.
+
+**Traceability:** NFR-080 / UC-060 A8 / `lib/watchdog.py` / `lib/tests/test_watchdog.py`, `tests/service/test_uc060_a8_loop_watchdog.py`.
 
 ## 4. Agent
 
