@@ -80,6 +80,8 @@ make_case() {
   printf '#!/usr/bin/env bash\necho "sudo $*" >>"%s/calls.log"\nexec "$@"\n' "${CASE}" >"${CASE}/bin/sudo"
   printf '#!/usr/bin/env bash\necho "reboot" >>"%s/calls.log"\n' "${CASE}" >"${CASE}/bin/reboot"
   printf '#!/usr/bin/env bash\n[[ "$1" == info && -e "%s/docker-down" ]] && exit 1\nexit 0\n' "${CASE}" >"${CASE}/bin/docker"
+  # systemctl show: the unit's Environment= from ${CASE}/unit-env (none by default)
+  printf '#!/usr/bin/env bash\ncat "%s/unit-env" 2>/dev/null\nexit 0\n' "${CASE}" >"${CASE}/bin/systemctl"
   chmod +x "${CASE}/bin/"* "${repo}/scripts/setup/"*.sh
 }
 
@@ -134,6 +136,11 @@ run_setup 1yy || fail "env-kept: setup.sh failed: $(tail -5 "${CASE}/out.log")"
 called 'joustmania-upgrade joustmania-v0.8.0$' || fail "env-kept: the answers shifted, no pin: $(cat "${CASE}/calls.log")"
 grep -q 'keep-me' "${CASE}/out.log" && fail "env-kept: an env value was printed"
 grep -q 'sets no COMPOSE_PROFILES, so the operator pad is off' "${CASE}/out.log" || fail "env-kept: the off operator pad is not named"
+make_case env-kept-dropin
+printf 'JEV_API_KEY=keep-me\n' >"${CASE}/repo/.env.local"
+printf 'JOUSTMANIA_UNIT_REV=3 COMPOSE_PROFILES=operator-pad\n' >"${CASE}/unit-env"
+run_setup 1yy || fail "env-kept-dropin: setup.sh failed: $(tail -5 "${CASE}/out.log")"
+grep -q 'operator pad is off' "${CASE}/out.log" && fail "env-kept-dropin: the pad named off although the unit drop-in sets COMPOSE_PROFILES"
 
 # --- 6. docker not usable yet: nothing pulled, the command is listed --------
 make_case docker-group

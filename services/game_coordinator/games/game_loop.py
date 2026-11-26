@@ -310,7 +310,7 @@ class GameLoopMixin:
         if reason is None:
             return
         logger.error(f"Aborting game {self.game_id} with no winner: {reason}")
-        await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=3)
+        await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=sound_priority.CRITICAL)
         raise MassDisconnectError(reason)
 
     def _mass_disconnect_reason(self, serials: list[str]) -> str | None:
