@@ -26,7 +26,7 @@ fails=0
 ok() { # ok <name> <exit code of the condition>
   if [[ "$2" == 0 ]]; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi
 }
-# ov <flag>: "spec<TAB>writer<TAB>expires" of the stack overlay.
+# ov <flag>: "spec<TAB>writer<TAB>expires" of the stack value (overlay or persisted value).
 ov() { python3 "${TOOL}" overlay <<<"$("${FLAGS}" get agent "$1")"; }
 ov_spec() { ov "$1" | cut -f1; }
 ov_writer() { ov "$1" | cut -f2; }
@@ -63,14 +63,14 @@ wait_until() { # wait_until <seconds> <command...>
   return 1
 }
 seed_operator_overlays() {
-  "${FLAGS}" set agent interventions_allowed ambient --writer operator --ttl 3600 >/dev/null
+  "${FLAGS}" set agent interventions_allowed ambient --writer operator >/dev/null # a persist row: persisted, no TTL (#2803)
   "${FLAGS}" set agent decision.backend claude --writer operator >/dev/null
   "${FLAGS}" set agent experiment_dynamic_enabled on --writer operator >/dev/null
   "${FLAGS}" set agent llm.eligible_game_kinds real_only --writer operator --ttl 3600 >/dev/null
 }
 operator_overlays_intact() {
   [[ "$(ov_spec interventions_allowed)" == variant:ambient && "$(ov_writer interventions_allowed)" == operator ]] &&
-    ov_has_ttl interventions_allowed &&
+    ! ov_has_ttl interventions_allowed &&
     [[ "$(ov_spec decision.backend)" == variant:claude && "$(ov_writer decision.backend)" == operator ]] &&
     ! ov_has_ttl decision.backend &&
     [[ "$(ov_spec experiment_dynamic_enabled)" == variant:on && "$(ov_writer experiment_dynamic_enabled)" == operator ]] &&
