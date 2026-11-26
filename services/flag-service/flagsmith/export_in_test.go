@@ -72,6 +72,7 @@ func NoteControllerRemoved(l *Link, serial, flag string, featureID int, value st
 // switch is in the agent set, which sorts first anyway, so only a stand-in in a
 // later set shows that a round moves kill switches to the front.
 func MarkKillSwitch(t interface{ Cleanup(func()) }, setFlag string) {
-	killSwitches[setFlag] = true
-	t.Cleanup(func() { delete(killSwitches, setFlag) })
+	prev := killSwitch
+	killSwitch = func(set, key string) bool { return set+"/"+key == setFlag || prev(set, key) }
+	t.Cleanup(func() { killSwitch = prev })
 }
