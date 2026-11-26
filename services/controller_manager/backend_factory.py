@@ -7,8 +7,7 @@ Backend selection priority:
   1. OpenFeature "backend" flag from the controller domain (default "rust")
   2. Fallback when the flag is empty or flagd is unavailable: DEFAULT_BACKEND ("rust")
 
-rust-hid is the default Bluetooth backend (#1371, UC-002 BR-003). Variants naming
-"python" are opt-in and need the python-hid compose profile.
+rust-hid is the Bluetooth backend (#1371, UC-002 BR-003).
 
 Flag values are read once at startup.
 Runtime changes to these flags require a service restart to take effect.
@@ -72,10 +71,6 @@ def _create_adapter_by_name(name: str) -> ControllerIOAdapter:
             from services.controller_manager.multiplexer.mock_adapter import MockAdapter
 
             return MockAdapter(num_controllers=0)
-        case "python":
-            from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter
-
-            return PythonHidAdapter()
         case "rust":
             from services.controller_manager.multiplexer.rust_adapter import RustServiceAdapter
 

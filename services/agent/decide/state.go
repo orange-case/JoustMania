@@ -26,17 +26,17 @@ func BuildState(c gamecontext.GameContext) State {
 // Annotations{}) equals BuildState(c).
 type Annotations struct {
 	// Charged holds the serials the agent's shield-charge ledger holds a live
-	// entry for at the moment the state is built (UC-040 A31; #1870).
+	// entry for at the moment the state is built (UC-048 A4; #1870).
 	Charged map[string]bool
 	// ShieldInFlight holds, per serial, the seconds of the agent's grant_shield
 	// writes in flight (reserved, not finished) at the moment the state is built. In
-	// a hold game they are added to the player's energy (#2096; UC-040 A37).
+	// a hold game they are added to the player's energy (#2096; UC-048 A9).
 	ShieldInFlight map[string]float64
 	// NoShield holds the serials the agent would refuse a grant_shield to at the
 	// moment the state is built, for any reason (Loop.ShieldSerials' no-shield set:
 	// charged, capped, cooling down, and in a hold game a full pool or a used-up
 	// budget). An alive player in it but not in Charged is marked ShieldLimited
-	// (#2066; UC-040 A33, A37).
+	// (#2066; UC-048 A6, A9).
 	NoShield map[string]bool
 	// Levels holds the values the agent last wrote to this game, keyed
 	// LevelKey(intervention, serial) (the applied-value ledger, Loop.AppliedValues;

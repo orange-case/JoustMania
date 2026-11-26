@@ -170,7 +170,7 @@ func TestApplySpans_NoExperimentAttrsLeavesAttributionEmpty(t *testing.T) {
 }
 
 // shieldChargeSpan is the coordinator's game.shield_charge span at its end (UC-040
-// A32: outcome death), which reaches the agent after the player died.
+// UC-048 A5: outcome death), which reaches the agent after the player died.
 func shieldChargeSpan(serial, gameID string) ptrace.Traces {
 	td := spanWith(map[string]string{
 		"player.serial":         serial,
@@ -183,9 +183,9 @@ func shieldChargeSpan(serial, gameID string) ptrace.Traces {
 }
 
 // UC: UC-041 main
-// UC: UC-040 A32
+// UC: UC-048 A5
 func TestApplySpans_ShieldChargeSpanIsIgnored(t *testing.T) {
-	t.Run("UC-040/A32 a charge span never creates a player or adopts its game", func(t *testing.T) {
+	t.Run("UC-048/A5 a charge span never creates a player or adopts its game", func(t *testing.T) {
 		s := newTestStore()
 		if s.ApplySpans(shieldChargeSpan("DEAD", "game-9")) {
 			t.Fatal("game.shield_charge reported as recognized")
@@ -199,7 +199,7 @@ func TestApplySpans_ShieldChargeSpanIsIgnored(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-040/A32 a charge span never refreshes a player's last update", func(t *testing.T) {
+	t.Run("UC-048/A5 a charge span never refreshes a player's last update", func(t *testing.T) {
 		now := time.Unix(1000, 0)
 		s := NewStore(time.Hour, time.Hour, func() time.Time { return now })
 		s.ApplySpans(spanWith(map[string]string{"player.serial": "DEAD", "game.id": "game-9"}, nil))

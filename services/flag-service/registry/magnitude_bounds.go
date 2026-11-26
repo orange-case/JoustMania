@@ -56,7 +56,7 @@ func validMagnitudeRow(p *Policy, flag *baseline.Flag) error {
 		return nil
 	}
 	b := p.Bounds
-	if len(b.Variants) > 0 || b.Range != nil || b.Pattern != nil || b.FreeString || b.Payload != nil || b.Shape || b.Fraction != nil {
+	if len(b.Variants) > 0 || b.Range != nil || b.Pattern != nil || b.FreeString || b.Payload != nil || b.Shape {
 		return fmt.Errorf("a range-table row takes no other bounds")
 	}
 	if msg := checkMagnitudeTable(limits, flag.Variants[flag.DefaultVariant]); msg != "" {

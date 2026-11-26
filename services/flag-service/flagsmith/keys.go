@@ -12,7 +12,7 @@ const ScopeStack = "stack"
 
 // Key names one synced value: a flag in one scope. Scope is ScopeStack or the
 // identity the scope maps to (architecture note §2): game:<id>,
-// game:<id>:<serial>, experiment:<id>:<arm>, real, fraction.
+// game:<id>:<serial>, experiment:<id>:<arm>, real.
 type Key struct {
 	Set, Flag, Scope string
 }
@@ -30,8 +30,6 @@ func KeyOf(set, flag, scopeName string, sc state.Scope) Key {
 		k.Scope = "experiment:" + sc.ExperimentID + ":" + sc.Arm
 	case registry.ScopeReal:
 		k.Scope = "real"
-	case registry.ScopeFraction:
-		k.Scope = "fraction"
 	}
 	return k
 }
@@ -60,11 +58,8 @@ func GameOfIdentity(identifier string) string {
 // scope properties and the registry scope name, ok false for an identifier
 // the link does not use.
 func ScopeOfIdentity(identifier string) (state.Scope, string, bool) {
-	switch identifier {
-	case "real":
+	if identifier == "real" {
 		return state.Scope{GameKind: "real"}, registry.ScopeReal, true
-	case "fraction":
-		return state.Scope{}, registry.ScopeFraction, true
 	}
 	if rest, ok := strings.CutPrefix(identifier, "game:"); ok && rest != "" {
 		id, serial, hasSerial := strings.Cut(rest, ":")

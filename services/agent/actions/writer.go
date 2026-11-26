@@ -62,7 +62,7 @@ const (
 	flagAudioCue                  = "audio_cue"
 	flagControllerEffect          = "controller_effect"
 	flagEndGame                   = "end_game"
-	flagGroupShield               = "group_shield" // #2467 (UC-040 A47, BR-033)
+	flagGroupShield               = "group_shield" // #2467 (UC-048 A13, BR-014)
 )
 
 // Neutral variant names per flag in interventions.json: the baseline value a
@@ -99,7 +99,7 @@ const (
 	defaultPlayerSensitivity = 1.5  // matches "handicap"
 	defaultPlayerHandicap    = 1.25 // #1107: mild "help" (>1 harder to die), within [0.5,2.0]
 	// defaultShieldSeconds is the fail-closed length for a grant the loop did not
-	// stamp (UC-040 BR-029): the loop stamps every grant with the shield_seconds
+	// stamp (UC-048 BR-012): the loop stamps every grant with the shield_seconds
 	// "default" variant when the ShieldSecondsReader is wired (shield_seconds.go).
 	defaultShieldSeconds    = decision.DefaultShieldSeconds
 	defaultGlobalDifficulty = 1.5 // matches interventions.json "hard" (#766 F6)
@@ -228,7 +228,7 @@ func (w *Writer) write(ctx context.Context, d decision.Decision) error {
 	case decision.InterventionEndGame:
 		// The game is the scope (UC-040 BR-011): only the deciding game ends.
 		return w.post(ctx, d, flagEndGame, map[string]any{})
-	case decision.InterventionGrantGroupShield: // #2467: all or nothing at the coordinator (BR-033)
+	case decision.InterventionGrantGroupShield: // #2467: all or nothing at the coordinator (UC-048 BR-014)
 		if len(d.TargetSerials) < 2 {
 			return fmt.Errorf("group intervention on %q requires at least two target serials", flagGroupShield)
 		}

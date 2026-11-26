@@ -24,7 +24,7 @@ const (
 	IntvRevivePlayer            = "revive_player"
 	IntvEndGame                 = "end_game"
 	// IntvGrantGroupShield shields 2 to policy.group_grant.max_targets alive
-	// players with one decision, all or nothing (#2467, UC-040 A47, BR-033).
+	// players with one decision, all or nothing (#2467, UC-048 A13, BR-014).
 	IntvGrantGroupShield = "grant_group_shield"
 	// IntvNoop is the synthetic do-nothing intervention; it is not in the catalog.
 	IntvNoop = "noop"
@@ -40,7 +40,7 @@ type Intervention struct {
 	PlayerTargeted bool
 	// GroupTargeted: applied to a SET of alive players chosen with one group
 	// option of ffa.target (TargetGroupAll, TargetGroupAllExceptPrefix; #2467,
-	// UC-040 A47). Never also PlayerTargeted. The decision carries the set in
+	// UC-048 A13). Never also PlayerTargeted. The decision carries the set in
 	// Decision.TargetSerials.
 	GroupTargeted bool
 	// Weight is the cost against the per-minute budget (docs/research/722-intervention-surface.md
@@ -274,7 +274,7 @@ var Catalog = []Intervention{
 		JevDescriptionNeutral: "End the round now. Irreversible; the last player alive wins.",
 	},
 	{
-		// #2467 (UC-040 A47, BR-033): effect only, in both profiles, so the lever
+		// #2467 (UC-048 A13, BR-014): effect only, in both profiles, so the lever
 		// prescribes no purpose. Offered only while the group gate is open
 		// (decision/group.go), so no existing request or prompt changes.
 		Name:                  IntvGrantGroupShield,

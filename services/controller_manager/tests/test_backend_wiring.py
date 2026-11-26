@@ -136,33 +136,6 @@ class TestRustAdapterWiring:
         assert callable(adapter.set_output)
 
 
-class TestPythonAdapterWiring:
-    """Verify PythonHidAdapter construction and interface compliance."""
-
-    def test_python_adapter_type(self):
-        """PythonHidAdapter reports correct adapter_type."""
-        from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter
-
-        adapter = PythonHidAdapter()
-        assert adapter.adapter_type == "python"
-
-    def test_python_adapter_interface(self):
-        """PythonHidAdapter implements required ControllerIOAdapter methods."""
-        from services.controller_manager.multiplexer.adapter import ControllerIOAdapter
-        from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter
-
-        adapter = PythonHidAdapter()
-        assert isinstance(adapter, ControllerIOAdapter)
-
-        # Check all abstract methods are implemented
-        assert hasattr(adapter, "discover")
-        assert hasattr(adapter, "open")
-        assert hasattr(adapter, "close")
-        assert hasattr(adapter, "close_all")
-        assert hasattr(adapter, "poll")
-        assert hasattr(adapter, "set_output")
-
-
 class TestAdapterRoutingWiring:
     """Verify adapter routing and affinity plumbing."""
 
@@ -188,14 +161,6 @@ class TestAdapterRoutingWiring:
         backend = MultiplexerBackend(adapters=[adapter])
 
         assert backend.get_adapter_type("nonexistent_serial") == "unknown"
-
-    def test_adapter_by_type_lookup(self):
-        """MultiplexerBackend builds adapter_type -> adapter lookup."""
-        adapter = MockAdapter(num_controllers=0)
-        backend = MultiplexerBackend(adapters=[adapter])
-
-        assert "mock" in backend._adapter_by_type
-        assert backend._adapter_by_type["mock"] is adapter
 
     @pytest.mark.asyncio
     async def test_shutdown_clears_all_state(self):

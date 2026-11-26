@@ -177,6 +177,10 @@ class ZombieGame(StreamedIntroGameMode):
         # the delay runs off the game loop. Also tracked via _track_task.
         self._conversion_colour_tasks: dict[str, asyncio.Task] = {}
 
+        # A killed zombie's respawn delay, drawn for its player_death moment and taken
+        # by _kill_player_impl, so the moment and the timer agree.
+        self._drawn_respawn_delays: dict[str, float] = {}
+
         # zombie threshold overrides promoted to ``game.zombie.thresholds``.
         # Read once at init (init-frozen); malformed values fall back to ZOMBIE_THRESHOLDS.
         self.mode_flags = ZombieInitFlags.from_raw(
@@ -473,7 +477,9 @@ class ZombieGame(StreamedIntroGameMode):
         if zombie_player.is_zombie:
             # Zombie killed - set respawn timer
             zombie_player.alive = False
-            respawn_delay = self._rng.uniform(self.zombie_respawn_min, self.zombie_respawn_max)
+            respawn_delay = self._drawn_respawn_delays.pop(serial, None)
+            if respawn_delay is None:
+                respawn_delay = self._draw_respawn_delay()
             zombie_player.respawn_until = game_clock.now() + respawn_delay
 
             logger.info(f"Zombie {serial} killed, respawning in {respawn_delay:.1f}s")
@@ -489,15 +495,6 @@ class ZombieGame(StreamedIntroGameMode):
             self._respawn_tasks[serial] = self._track_task(
                 asyncio.create_task(self._respawn_zombie(serial, respawn_delay))
             )
-
-            if player.span:
-                player.span.add_event(
-                    "zombie_killed",
-                    attributes={
-                        "accel_magnitude": accel_mag,
-                        "respawn_delay": respawn_delay,
-                    },
-                )
         else:
             # Human killed - convert to zombie!
             zombie_player.alive = True  # Stays alive as zombie
@@ -606,9 +603,20 @@ class ZombieGame(StreamedIntroGameMode):
         """
         return False
 
-    def _player_death_event_attributes(self, serial: str) -> dict:  # noqa: ARG002
-        """``death.eliminated`` false on every Zombies ``player_death`` (UC-023 BR-008, #2524)."""
-        return {"death.eliminated": False}
+    def _player_death_event_attributes(self, serial: str) -> dict:
+        """``death.eliminated`` false on every Zombies ``player_death`` (UC-023 BR-008, #2524).
+
+        A killed zombie's moment also carries its ``respawn_delay``.
+        """
+        attributes: dict = {"death.eliminated": False}
+        if self.players[serial].is_zombie:
+            delay = self._draw_respawn_delay()
+            self._drawn_respawn_delays[serial] = delay
+            attributes["respawn_delay"] = delay
+        return attributes
+
+    def _draw_respawn_delay(self) -> float:
+        return self._rng.uniform(self.zombie_respawn_min, self.zombie_respawn_max)
 
     def _mark_alive_in_metrics(self, serial: str) -> None:
         metrics.player_alive.labels(serial=serial, game_id=self.game_id).set(1)

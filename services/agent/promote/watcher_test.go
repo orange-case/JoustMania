@@ -118,10 +118,10 @@ func TestPromoteAutonomousAutoRevertsViaFitnessWatcher(t *testing.T) {
 	// Real-game fitness collapses well below the baseline (0.50 in testEvidence).
 	regressing := fakeRealGameFitness{samples: []float64{0.20, 0.18, 0.22, 0.19}}
 	watcher := NewFitnessWatcher(regressing, DefaultWatchPolicy(), discardLogger())
-	p, rec := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, watcher, rev)
+	p, rec := promoterWithRecorder(t, &recordingGitHub{}, realDef, watcher, rev)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
 	if res.Outcome != OutcomeReverted {
 		t.Fatalf("outcome = %q, want reverted", res.Outcome)
@@ -146,10 +146,10 @@ func TestPromoteAutonomousKeepsWhenFitnessHolds(t *testing.T) {
 	// Baseline in testEvidence is 0.50; real games hold above it.
 	holding := fakeRealGameFitness{samples: []float64{0.55, 0.58, 0.60, 0.57}}
 	watcher := NewFitnessWatcher(holding, DefaultWatchPolicy(), discardLogger())
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, watcher, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, watcher, rev)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
 	if res.Outcome != OutcomeApplied {
 		t.Fatalf("outcome = %q, want applied (fitness held)", res.Outcome)

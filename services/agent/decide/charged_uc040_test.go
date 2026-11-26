@@ -8,7 +8,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// The shield_charged marker of the decide state (#1870, UC-040 main step 4 and A31
+// The shield_charged marker of the decide state (#1870, UC-040 main step 4, UC-048 A4
 // step 1): the decision loop annotates the alive players its charge ledger holds a
 // live entry for.
 
@@ -23,9 +23,10 @@ func playerByID(t *testing.T, st State, serial string) PlayerState {
 	return PlayerState{}
 }
 
-// UC: UC-040 main step 4 A31
+// UC: UC-040 main step 4
+// UC: UC-048 A4
 func TestBuildState_ShieldCharged(t *testing.T) {
-	t.Run("UC-040/A31 alive charged player is marked in field, narrative and digest", func(t *testing.T) {
+	t.Run("UC-048/A4 alive charged player is marked in field, narrative and digest", func(t *testing.T) {
 		c := sampleCtx()
 		st := BuildStateWith(c, Annotations{Charged: map[string]bool{"B": true}})
 		if !playerByID(t, st, "B").ShieldCharged {
@@ -41,7 +42,7 @@ func TestBuildState_ShieldCharged(t *testing.T) {
 			t.Error("digest must change with shield_charged")
 		}
 	})
-	t.Run("UC-040/A31 dead charged player is never marked", func(t *testing.T) {
+	t.Run("UC-048/A4 dead charged player is never marked", func(t *testing.T) {
 		c := sampleCtx()
 		st := BuildStateWith(c, Annotations{Charged: map[string]bool{"C": true}})
 		if playerByID(t, st, "C").ShieldCharged {
@@ -63,7 +64,7 @@ func TestBuildState_ShieldCharged(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestBuildState_ChargeSuppressesGrantShieldShielded(t *testing.T) {
 	withEvent := func(detail string) gamecontext.GameContext {
 		c := sampleCtx()
@@ -74,19 +75,19 @@ func TestBuildState_ChargeSuppressesGrantShieldShielded(t *testing.T) {
 	}
 	charged := Annotations{Charged: map[string]bool{"B": true}}
 
-	t.Run("UC-040/A31 grant_shield to a charged player is not shielded", func(t *testing.T) {
+	t.Run("UC-048/A4 grant_shield to a charged player is not shielded", func(t *testing.T) {
 		p := playerByID(t, BuildStateWith(withEvent("grant_shield"), charged), "B")
 		if p.Shielded || !p.ShieldCharged {
 			t.Errorf("shielded=%v shield_charged=%v, want false/true", p.Shielded, p.ShieldCharged)
 		}
 	})
-	t.Run("UC-040/A31 toughness_boost to a charged player is still shielded", func(t *testing.T) {
+	t.Run("UC-048/A4 toughness_boost to a charged player is still shielded", func(t *testing.T) {
 		p := playerByID(t, BuildStateWith(withEvent("toughness_boost"), charged), "B")
 		if !p.Shielded || !p.ShieldCharged {
 			t.Errorf("shielded=%v shield_charged=%v, want true/true", p.Shielded, p.ShieldCharged)
 		}
 	})
-	t.Run("UC-040/A31 grant_shield without a charge is shielded as before", func(t *testing.T) {
+	t.Run("UC-048/A4 grant_shield without a charge is shielded as before", func(t *testing.T) {
 		p := playerByID(t, BuildStateWith(withEvent("grant_shield"), Annotations{}), "B")
 		if !p.Shielded || p.ShieldCharged {
 			t.Errorf("shielded=%v shield_charged=%v, want true/false", p.Shielded, p.ShieldCharged)

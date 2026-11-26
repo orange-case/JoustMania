@@ -13,7 +13,7 @@ import (
 
 func TestCooldownSourceReadPerCheck(t *testing.T) {
 	realDef := &recordingRealDefault{}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, fakeWatcher{degraded: false}, &recordingReverter{})
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{degraded: false}, &recordingReverter{})
 	now := time.Unix(2000, 0)
 	p.SetClock(func() time.Time { return now })
 	p.SetCooldown(time.Second) // a startup value the source must override
@@ -22,7 +22,7 @@ func TestCooldownSourceReadPerCheck(t *testing.T) {
 	p.SetCooldownSource(func() time.Duration { return time.Duration(cooldown.Load()) })
 	p.SeedLastRevert(map[string]time.Time{promoteProposal.FlagKey: time.Unix(1900, 0)}) // 100 s ago
 
-	cfg := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+	cfg := Config{Mode: ModeAutonomous, Enabled: true}
 	if res := p.Promote(context.Background(), promoteProposal, promoteVerdict, cfg, testEvidence()); res.Outcome != OutcomeDiscarded {
 		t.Fatalf("outcome = %q with a 5 min cooldown, want discarded", res.Outcome)
 	}
@@ -36,7 +36,7 @@ func TestCooldownSourceReadPerCheck(t *testing.T) {
 }
 
 func TestCooldownSourceNonPositiveIsDefault(t *testing.T) {
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{}, &recordingReverter{})
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{}, &recordingReverter{})
 	p.SetCooldownSource(func() time.Duration { return 0 })
 	if got := p.effectiveCooldown(); got != DefaultRevertCooldown {
 		t.Fatalf("effectiveCooldown = %v, want %v", got, DefaultRevertCooldown)

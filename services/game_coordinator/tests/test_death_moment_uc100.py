@@ -240,6 +240,27 @@ async def test_zombies_conversion_log_says_not_eliminated(sdk):
     (record,) = sdk.death_logs()
     assert record.attributes["death.eliminated"] is False
     assert record.attributes["player.serial"] == human
+    assert "respawn_delay" not in record.attributes
+    await game.cleanup()
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-100", flow="main", steps=[4], br=["BR-003", "BR-007"])
+@pytest.mark.uc("UC-023", flow="main", steps=[4])
+async def test_zombie_death_moment_carries_the_respawn_delay_the_timer_uses(sdk):
+    game = await _zombies(6)
+    _with_sdk_spans(game, sdk, "span_event")
+    zombie = game.zombie_serials[0]
+    span = game.players[zombie].span
+    game._draw_respawn_delay = lambda: 4.25
+
+    before = base.game_clock.now()
+    assert await game._kill_player(zombie, 3.0) is True
+
+    (event,) = _events(span)
+    assert event["respawn_delay"] == 4.25
+    assert game.players[zombie].respawn_until - before == pytest.approx(4.25, abs=0.5)
+    assert [e.name for e in span.events] == [DEATH]
     await game.cleanup()
 
 
@@ -268,12 +289,16 @@ async def test_fight_club_round_loss_log_says_not_eliminated(sdk):
     game = await _seated_game(4, "test_fc_death_moment")
     _with_sdk_spans(game, sdk, "log_event")
     loser = game.current_fighter
+    winner = game.current_defender
+    round_number = game.round_number
 
     with patch(FC_METRICS):
         assert await game._kill_player(loser, 5.0) is True
 
     (record,) = sdk.death_logs()
     assert record.attributes["death.eliminated"] is False
+    assert record.attributes["round"] == round_number
+    assert record.attributes["winner"] == winner
     assert record.attributes["moment.id"] == f"test_fc_death_moment/{loser}/1"
     from test_fight_club import _end_round_timer
 

@@ -1501,8 +1501,8 @@ class TestKillPlayerSpan:
         return game, mock_controller_manager
 
     @pytest.mark.asyncio
-    async def test_kill_records_span_event(self, tournament_game):
-        """When a player is killed and has a span, add_event is called."""
+    async def test_match_deciding_death_moment_carries_the_match_id(self, tournament_game):
+        """The match id rides on the player_death moment; the mode adds no span event of its own."""
         from unittest.mock import MagicMock
 
         game, mock_cm = tournament_game
@@ -1520,13 +1520,11 @@ class TestKillPlayerSpan:
 
         game.current_match = Match(match_id=0, round_number=1, player1_serial=p1, player2_serial=p2)
 
+        assert game._player_death_event_attributes(p1) == {"match_id": 0}
         await game._kill_player_impl(p1, accel_mag=5.5)
 
-        mock_span.add_event.assert_called_once()
-        call_args = mock_span.add_event.call_args
-        assert call_args[0][0] == "match_death"
-        assert call_args[1]["attributes"]["match_id"] == 0
-        assert call_args[1]["attributes"]["accel_magnitude"] == 5.5
+        mock_span.add_event.assert_not_called()
+        assert game._player_death_event_attributes(p2) == {}
 
     @pytest.mark.asyncio
     async def test_kill_p2_makes_p1_winner(self, tournament_game):
