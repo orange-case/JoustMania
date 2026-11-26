@@ -445,8 +445,8 @@ func perturbValue(f candidateFlag) (any, bool) {
 }
 
 // hypothesis builds the human-readable hypothesis string stamped on a dynamically
-// declared Intent It records that this was
-// the agent's own heuristic choice and what it is trying.
+// declared Intent. It records that this was the agent's own heuristic choice
+// and what it is trying.
 func (d *dynamicDeclarer) hypothesis(flagKey string, value any, objective string) string {
 	vb, err := json.Marshal(value)
 	v := string(vb)
