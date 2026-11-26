@@ -127,7 +127,8 @@ class TestLobbySelectButton:
         menu_servicer.audio.play_game_mode_voice = AsyncMock()
         menu_servicer.user_prefs_writer.update_default_variant = MagicMock(return_value=True)
         await menu_servicer.on_connect("serial1")
-        menu_servicer.state_manager.controller_states["ready1"] = ControllerState.READY
+        # UC-010 BR-017: SELECT counts only while nobody in the lobby is READY.
+        menu_servicer.state_manager.controller_states["other1"] = ControllerState.CONNECTED
         expected = get_next_game_mode(Games.JoustFFA, forward=True)
 
         await menu_servicer.on_button("serial1", "select", True)
@@ -136,5 +137,8 @@ class TestLobbySelectButton:
         assert menu_servicer.state_manager.current_game_mode == expected
         menu_servicer.user_prefs_writer.update_default_variant.assert_called_once_with("current_game", expected.name)
         menu_servicer.audio.play_game_mode_voice.assert_awaited_once_with(expected.name)
-        # The lobby is untouched: the other player is still ready.
-        assert menu_servicer.state_manager.ready_controllers == {"ready1"}
+        # The lobby is untouched: nobody is readied or dropped.
+        assert menu_servicer.state_manager.controller_states == {
+            "serial1": ControllerState.CONNECTED,
+            "other1": ControllerState.CONNECTED,
+        }

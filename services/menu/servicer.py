@@ -246,7 +246,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         """Handle controller disconnect event (ControllerEventCallbacks)."""
         await self.state_manager.on_controller_disconnected(serial)
         # UC-010 A15: the leaver may have been the last one not ready.
-        if self.state == menu_pb2.MenuState.RUNNING and not self._lifecycle_live():
+        if self.state == menu_pb2.MenuState.RUNNING and not self._lifecycle_live() and not self._recovery_running():
             ready = sorted(self.state_manager.ready_controllers)
             if ready:
                 await self.ready_handler.try_auto_start(ready[0])

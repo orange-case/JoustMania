@@ -179,7 +179,8 @@ class GameLifecycleMixin:
         """
         # UC-010 A8 (#2054): a live lifecycle task is a game that is starting or running. Refuse
         # the start; never cancel the live game's stream. A finished task needs no cancel.
-        if self._lifecycle_live():
+        # A reset_menu recovery counts as live: between its cancel and its restore no task is live.
+        if self._lifecycle_live() or self._recovery_running():
             await self._reject_start_while_active(serial, source, game_mode)
             return False
 

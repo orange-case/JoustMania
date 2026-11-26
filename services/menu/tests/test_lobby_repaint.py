@@ -43,8 +43,14 @@ def assert_lobby_repainted(menu) -> None:
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-011", flow="A2", br=["BR-005"])
 async def test_lobby_select_repaints_the_lobby(servicer):
+    # UC-010 BR-017: lobby SELECT counts only while nobody is READY.
+    del servicer.state_manager.controller_states["ready"]
     await servicer.on_button("dim", "select", True)
-    assert_lobby_repainted(servicer)
+    mode = servicer.current_selection.name
+    assert mode != "JoustFFA"
+    led = servicer.state_manager.led
+    assert [c.args for c in led.set_connected_color.await_args_list] == [("dim", mode)]
+    led.set_ready_color.assert_not_awaited()
 
 
 @pytest.mark.asyncio

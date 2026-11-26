@@ -87,6 +87,9 @@ async def test_every_surface_gives_the_same_mode_feedback(servicer, surface):  #
         "ready": ControllerState.READY,
         "idle": ControllerState.IDLE,
     }
+    if surface == "lobby_select":
+        # UC-010 BR-017: lobby SELECT counts only while nobody is READY.
+        del servicer.state_manager.controller_states["ready"]
 
     await _select_from(surface, servicer)
 
@@ -94,4 +97,5 @@ async def test_every_surface_gives_the_same_mode_feedback(servicer, surface):  #
     assert servicer.current_selection.name == new
     servicer.state_manager.audio.play_game_mode_voice.assert_awaited_once_with(new)
     pulse = (controller_manager_pb2.GAME_EFFECT_PULSE, GAME_MODE_COLORS[new], settings_ops.MODE_PULSE_MS)
-    assert sorted(_pulses(servicer)) == [("dim", *pulse), ("ready", *pulse)]
+    pulsed = ["dim"] if surface == "lobby_select" else ["dim", "ready"]
+    assert sorted(_pulses(servicer)) == [(serial, *pulse) for serial in pulsed]

@@ -1069,8 +1069,10 @@ class TestLobbyReadinessChanges:
             real_servicer.state_manager.controller_states[serial] = ControllerState.READY
         assert real_servicer.state == menu_pb2.MenuState.STOPPED
 
-        await real_servicer.on_disconnect("s3")
+        with patch.object(real_servicer.ready_handler, "try_auto_start", autospec=True) as auto_start:
+            await real_servicer.on_disconnect("s3")
 
+        auto_start.assert_not_called()
         assert real_servicer._game_lifecycle_task is None
         real_servicer.event_publisher.publish.assert_not_awaited()
 
@@ -1450,6 +1452,39 @@ class TestStartWhileGameActive:
             await real_servicer.start_game("s1", source="web", controllers=["s1", "s2"])
             await _await_lifecycle(real_servicer)
         second.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
+    @pytest.mark.uc("UC-010", flow="A15", steps=[1])
+    async def test_no_start_between_the_recovery_cancel_and_its_restore(self, real_servicer):
+        """While reset_menu's recovery publishes game_start_cancelled, no lifecycle is live; a start or a
+        disconnect re-check then must not schedule a game next to the lobby restore."""
+        from proto import game_coordinator_pb2
+
+        task, _stream = await self._live_game(real_servicer, asyncio.Event())
+        self._game_state(real_servicer, game_coordinator_pb2.GameState.ENDED)
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        for serial in ("r1", "r2", "r3"):
+            real_servicer.state_manager.controller_states[serial] = ControllerState.READY
+        real_servicer.state_manager.controller_states["leaver"] = ControllerState.CONNECTED
+        in_window: dict[str, object] = {}
+
+        async def publish(event, data):
+            if event == "game_start_cancelled" and data == {} and not in_window:
+                assert not real_servicer._lifecycle_live()
+                with patch.object(real_servicer.ready_handler, "try_auto_start", autospec=True) as auto_start:
+                    await real_servicer.on_disconnect("leaver")
+                in_window["auto_start_called"] = auto_start.called
+                in_window["start"] = await real_servicer.start_game("r1", source="web", controllers=["r1", "r2"])
+                in_window["task"] = real_servicer._game_lifecycle_task
+
+        real_servicer.event_publisher.publish.side_effect = publish
+        with patch.object(type(real_servicer), "_restart_lobby", autospec=True):
+            await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), MagicMock())
+
+        assert task.cancelled()
+        assert in_window == {"auto_start_called": False, "start": False, "task": task}
+        assert real_servicer._game_lifecycle_task is None
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
