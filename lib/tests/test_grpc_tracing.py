@@ -1042,7 +1042,7 @@ class TestSyncClientSpanStatus:
         assert _code(span) == 0
 
     def test_blocking_unary_traceparent_carries_client_span(self, traced_sync_channel, span_exporter):
-        """rust-hid / python-hid server spans nest under the adapter's CLIENT span (#1897)."""
+        """rust-hid server spans nest under the adapter's CLIENT span (#1897)."""
         exporter, provider = span_exporter
         with provider.get_tracer("caller").start_as_current_span("caller") as outer:
             traced_sync_channel.unary_unary(_PROBE + "UnaryOk")(b"x")

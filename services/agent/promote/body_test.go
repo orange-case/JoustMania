@@ -7,24 +7,21 @@ import (
 	"github.com/joustmania/agent/experiment"
 )
 
-// TestRenderPRBodyStructured asserts the PR body contains every #936-mandated
-// section (fitness before/after, synthetic results, reasoning, flag state).
-func TestRenderPRBodyStructured(t *testing.T) {
-	body := renderPRBody(promoteProposal, testEvidence())
+// TestRenderIssueBodyStructured asserts the issue body carries the evidence
+// sections (fitness before/after, reasoning, flag state).
+func TestRenderIssueBodyStructured(t *testing.T) {
+	body := renderIssueBody(promoteProposal, testEvidence())
 	for _, want := range []string{
 		"### Fitness before/after",
 		"Before (real-game baseline):** 0.5000",
 		"After (synthetic suite):** 0.7200",
 		"Delta:** +0.2200",
-		"### Synthetic game results",
-		"Synthetic games run:** 5",
-		"### Reasoning summary",
 		"longer grace reduces early eliminations",
 		"### Flag state at improvement time",
 		"death_grace_period_ms: default=300, experimental=500",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("PR body missing %q:\n%s", want, body)
+			t.Errorf("issue body missing %q:\n%s", want, body)
 		}
 	}
 }
@@ -59,16 +56,5 @@ func TestReasoningFallback(t *testing.T) {
 func TestFlagStateMarkerWhenAbsent(t *testing.T) {
 	if got := renderFlagStateSection(Evidence{}); !strings.Contains(got, "not captured") {
 		t.Errorf("absent flag state = %q, want a not-captured marker", got)
-	}
-}
-
-// TestBranchAndPathSanitize: branch/file names are derived safely from the flag key.
-func TestBranchAndPathSanitize(t *testing.T) {
-	p := experiment.Proposal{FlagKey: "Policy.Battery_Threshold!!"}
-	if got := branchName(p); got != "agent/experiment-policy-battery-threshold" {
-		t.Errorf("branchName = %q", got)
-	}
-	if got := evidenceFilePath(p); got != "agent-experiments/policy-battery-threshold.md" {
-		t.Errorf("evidenceFilePath = %q", got)
 	}
 }

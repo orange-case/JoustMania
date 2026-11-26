@@ -446,24 +446,24 @@ func (c *controllers) dropRemoved(serial, flag string) {
 // reads it as: a readable controller as its owner's player key, a
 // game:<id>:<serial> identity only for a live shadow game, every other
 // identity as itself. ok is false for an identity the round ignores.
-func (rc *roundCtx) scopeOfIdentity(identifier string) (scope, scopeName string, ok bool) {
+func (rc *roundCtx) scopeOfIdentity(identifier string) (string, bool) {
 	if serial, isCtrl := SerialOfController(identifier); isCtrl {
 		v, known := rc.ctrl[serial]
 		if !known || !v.readable {
-			return "", "", false
+			return "", false
 		}
-		return "game:" + v.owner + ":" + serial, registry.ScopeGameSerial, true
+		return "game:" + v.owner + ":" + serial, true
 	}
 	sc, name, ok := ScopeOfIdentity(identifier)
 	if !ok {
-		return "", "", false
+		return "", false
 	}
 	if name == registry.ScopeGameSerial {
 		if kind, live := rc.kinds[sc.GameID]; !live || !isShadowKind(kind) {
-			return "", "", false
+			return "", false
 		}
 	}
-	return identifier, name, true
+	return identifier, true
 }
 
 // controllerOf returns the serial of a player key that lives on a
@@ -516,7 +516,7 @@ func (p *puller) removedGuard(rc *roundCtx, k Key, pol *registry.Policy, d, r Va
 	}
 	if d.Present && !r.Equal(d) {
 		for _, fs := range removed {
-			if p.decodeState(pol, registry.ScopeGameSerial, fs).v.Equal(d) {
+			if p.decodeState(pol, fs).v.Equal(d) {
 				rc.skip()
 				return true
 			}

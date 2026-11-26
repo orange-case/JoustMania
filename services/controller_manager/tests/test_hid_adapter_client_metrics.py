@@ -6,7 +6,6 @@ from unittest.mock import patch
 import grpc
 import pytest
 
-from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter
 from services.controller_manager.multiplexer.rust_adapter import RustServiceAdapter
 
 
@@ -31,7 +30,7 @@ def failing_hid_port():
 @pytest.mark.uc("UC-035", flow="main", steps=[6])
 @pytest.mark.parametrize(
     ("adapter_cls", "env_prefix"),
-    [(RustServiceAdapter, "RUST_HID"), (PythonHidAdapter, "PYTHON_HID")],
+    [(RustServiceAdapter, "RUST_HID")],
 )
 def test_adapter_rpc_error_is_counted(adapter_cls, env_prefix, failing_hid_port, monkeypatch):
     from proto import psmove_hid_pb2

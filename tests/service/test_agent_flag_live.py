@@ -88,15 +88,15 @@ def test_agent_provider_sees_kill_switch_when_flagd_was_late_at_startup(service_
 
 @pytest.mark.uc("UC-045", flow="A3")
 @pytest.mark.uc("UC-045", flow="main", steps=[1, 2, 3])
-@pytest.mark.uc("UC-040", flow="A31", steps=[1])
+@pytest.mark.uc("UC-048", flow="A4", steps=[1])
 def test_agent_provider_reconnects_after_flagd_restart(service_stack):
     """flagd restarts mid-run (#1713): enabled reads off while the sync stream is lost,
     the stream reconnects, and a later kill-switch flip is seen. The game domain's own
-    stream (shield.activation, UC-040 A31, #1837) reconnects and takes a flip too."""
+    stream (shield.activation, UC-048 A4, #1837) reconnects and takes a flip too."""
     _run_live_go_test(service_stack, "TestLiveFlip_FlagdRestartMidRun")
 
 
-@pytest.mark.uc("UC-040", flow="A31", steps=[1])
+@pytest.mark.uc("UC-048", flow="A4", steps=[1])
 def test_agent_game_domain_sees_shield_activation_flip(service_stack):
     """The agent's read-only game domain (#1837): shield.activation read instant, then a
     stage-overlay write of trigger (and back) reaches it within the NFR-050 bound."""

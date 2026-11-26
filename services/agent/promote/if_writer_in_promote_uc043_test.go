@@ -76,7 +76,7 @@ func TestUC043_A19_PromotionWritePrecondition(t *testing.T) {
 		svc := newPromotionService(t)
 		putOverlay(t, svc, "operator", 2.0)
 		rev := &recordingReverter{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, writerForTest(t, svc, t.TempDir()), fakeWatcher{}, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, writerForTest(t, svc, t.TempDir()), fakeWatcher{}, rev)
 		ev := testEvidence()
 		ev.RealDefaultValue = 3.0
 		prop := experiment.Proposal{FlagKey: promotedFlag, ExperimentID: "exp-a19", ExperimentalValue: 3.0}

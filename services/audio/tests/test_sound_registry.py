@@ -266,7 +266,8 @@ class TestUC040InterventionSounds:
     def registry(self):
         return build_sound_registry(ASSETS_DIR)
 
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-007"])
+    @pytest.mark.uc("UC-040", br=["BR-007"])
+    @pytest.mark.uc("UC-048", flow="A1")
     def test_every_intervention_sound_id_resolves_to_a_file(self, registry):
         """UC-040 BR-007: the writer default cue and the shield sound resolve to existing files."""
         sound_ids = {
@@ -290,7 +291,8 @@ class TestUC040InterventionSounds:
         assert relative_path(registry, "agent_cue") == relative_path(registry, Sound.SFX_BEEP_LOUD.value)
         assert relative_path(registry, "agent_cue") == "Joust/sounds/beep_loud.ogg"
 
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-007"])
+    @pytest.mark.uc("UC-040", br=["BR-007"])
+    @pytest.mark.uc("UC-048", flow="A1")
     def test_shield_up_plays_commander_power_ready(self, registry):
         """UC-040 BR-007: shield_up is an alias of an existing sting, no new asset."""
         assert relative_path(registry, "shield_up") == "Commander/sounds/power_ready.ogg"

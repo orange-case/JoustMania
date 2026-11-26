@@ -6,7 +6,7 @@ import (
 )
 
 // fitness_store_test.go covers the #965 finalized-per-game fitness store: the
-// instrumentation behind the recent-real anchor.
+// instrumentation behind the autonomous Watcher.
 
 // TestFitnessStore_RecordAndGet: a recorded sample is read back by game_id.
 func TestFitnessStore_RecordAndGet(t *testing.T) {

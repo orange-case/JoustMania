@@ -33,12 +33,12 @@ The Controller Manager service is the central component for managing PS Move con
 │  LED keep-alive: 4s refresh cycle                            │
 ├─────────────────────────────────────────────────────────────┤
 │               ControllerIOAdapter (sync I/O)                 │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│   │   Python    │  │    Rust    │  │    Mock     │         │
-│   │  Adapter    │  │   Adapter  │  │   Adapter   │         │
-│   │(gRPC →      │  │(gRPC →     │  │  (Testing)  │         │
-│   │ python-hid) │  │ rust-hid)  │  │             │         │
-│   └─────────────┘  └─────────────┘  └─────────────┘         │
+│   ┌─────────────┐  ┌─────────────┐                          │
+│   │    Rust     │  │    Mock     │                          │
+│   │   Adapter   │  │   Adapter   │                          │
+│   │(gRPC →      │  │  (Testing)  │                          │
+│   │ rust-hid)   │  │             │                          │
+│   └─────────────┘  └─────────────┘                          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -46,22 +46,18 @@ The Controller Manager service is the central component for managing PS Move con
 
 ## Configuration
 
-Backend selection uses OpenFeature flags (performance domain):
+Backend selection uses the `backend` flag (controller domain):
 
 | Setting | Source | Default | Description |
 |---------|--------|---------|-------------|
-| `controller_backend` | flagd (performance) | `python,rust` | Backend: `python`, `rust`, `mock`, or comma-separated |
-| `mock_controller_count` | flagd (performance) | `4` | Number of mock controllers |
+| `backend` | flagd (controller) | `rust` | Backend: `rust` or `mock` (mock is always added) |
 | `GRPC_PORT` | env var | `50052` | gRPC server port |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | env var | `http://localhost:4317` | OpenTelemetry endpoint |
 
 ### Backend Selection
 
-The backend is selected via the `controller_backend` flag in flagd (`services/flagd/performance.json`).
-If the flag is not set or flagd is unavailable, the default python backend is used.
-Use `controller_backend=mock` for testing without hardware.
-
-Multi-adapter mode: set `controller_backend=mock,python` to run mock and real controllers simultaneously.
+The backend is selected via the `backend` flag in flagd (`services/flagd/controller.json`), read at startup.
+If the flag is empty or flagd is unavailable, rust is used. Use `backend=mock` for testing without hardware.
 
 ## gRPC API
 
@@ -122,7 +118,7 @@ Used by `MultiplexerBackend`. Adapters handle raw hardware communication only:
 
 ```python
 class ControllerIOAdapter(ABC):
-    adapter_type: str              # "python", "rust", "mock"
+    adapter_type: str              # "rust", "mock"
     def discover(force=False) -> list[str]
     def open(serial) -> bool
     def poll(serial) -> dict | None
@@ -187,14 +183,12 @@ services/controller_manager/
 ├── servicer.py            # gRPC servicer implementation
 ├── backend.py             # ControllerBackend ABC
 ├── backend_factory.py     # Backend/adapter selection logic
-├── bluetooth_backend.py   # Legacy BlueZ backend (standalone)
 ├── hidapi_backend.py      # Legacy HID backend (standalone)
 ├── mock_backend.py        # Legacy mock backend (standalone)
 ├── multiplexer/
 │   ├── adapter.py         # ControllerIOAdapter ABC
 │   ├── multiplexer_backend.py  # Orchestrator with centralized state
 │   ├── hid_service_adapter.py  # HidServiceAdapter: shared gRPC HID-service client
-│   ├── python_hid_adapter.py  # PythonHidAdapter (HidServiceAdapter → python-hid)
 │   ├── rust_adapter.py    # RustServiceAdapter (HidServiceAdapter → rust-hid)
 │   ├── mock_adapter.py    # MockAdapter (simulated I/O)
 │   ├── bt_discovery.py    # CentralizedBTDiscovery

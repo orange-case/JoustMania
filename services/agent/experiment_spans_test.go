@@ -60,7 +60,7 @@ func recordingExperimentLoop(t *testing.T) (*experimentLoop, *tracetest.SpanReco
 	// Safe-default resolver (mode=issue, local, kill-switch off) — the verdict path is
 	// exercised without any real-player write, exactly like the safe-default E2E test.
 	resolve := func(context.Context) promote.Config {
-		return promote.Config{Mode: promote.ModeIssue, Target: promote.TargetLocal, Enabled: false}
+		return promote.Config{Mode: promote.ModeIssue, Enabled: false}
 	}
 	loop := buildLoopForTest(t, spawner, resolve, realDef, github, armFitness())
 

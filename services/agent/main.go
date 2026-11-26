@@ -140,15 +140,14 @@ func actionSink(gate actions.InterventionGate, writer *actions.Writer, logger *s
 // default path) gets the inert recording no-ops.
 //
 // The real clients are built ONLY when AGENT_CODE_IMPROVEMENT_ENABLED=true AND the
-// per-target conditions hold (GitHub: GITHUB_TOKEN + GITHUB_REPOSITORY + the live
-// target=github flag; local: AGENT_LOCAL_REPO_DIR; autonomous real-default:
-// AGENT_AUTONOMOUS_ENABLED; the write goes to the flag service). Absent any condition,
+// per-path conditions hold (GitHub: GITHUB_TOKEN + GITHUB_REPOSITORY; autonomous
+// real-default: AGENT_AUTONOMOUS_ENABLED; the write goes to the flag service). Absent any condition,
 // the corresponding FromEnv constructor returns nil and NewPromoter substitutes the
 // inert no-op / leaves autonomous as a recorded no-op — fail-closed, never a silent
-// real action. The promotion mode/target are read LIVE per promotion (flags), so
+// real action. The promotion mode is read LIVE per promotion (flags), so
 // flipping the mode flag takes effect on the next promotion with no restart.
 //
-// The default flag values are the SAFE ones (mode=issue, target=local; see
+// The default flag value is the SAFE one (mode=issue; see
 // services/flagd/agent.json + flags.DefaultPromotion*), so even a fully-enabled
 // agent only opens an issue until an operator deliberately flips the flags.
 //
@@ -174,25 +173,10 @@ func actionSink(gate actions.InterventionGate, writer *actions.Writer, logger *s
 //     more real games complete (#1065 item 4).
 //   - Cooldown: a post-revert cooldown suppresses re-promotion thrash (#1065 item 3).
 func buildPromoter(rootCtx context.Context, store *experiment.FitnessStore, objResolver *promote.LateObjectiveResolver, tuning *agentTuning, logger *slog.Logger) *promote.Promoter {
-	// Resolve the target for client construction from the ENV (AGENT_CODE_IMPROVEMENT_TARGET),
-	// distinct from the LIVE flag (code_improvement.target) that Promote dispatches on.
-	// This is a deliberate DOUBLE gate and is STRICTER than a single switch: opening a
-	// real GitHub PR needs BOTH the env target=github at construction (so the http
-	// client is even built) AND the live flag target=github at dispatch. If they
-	// diverge (env=local, flag=github) the dispatch hits the inert no-op and degrades
-	// to a RECORDED no-op — safe, but an operator who flips only the live flag will see
-	// recorded no-ops; flipping to real GitHub requires the env target too.
-	target := promote.Target(getEnv("AGENT_CODE_IMPROVEMENT_TARGET", string(promote.TargetLocal)))
-
-	github, err := promote.NewGitHubClientFromEnv(target, logger)
+	github, err := promote.NewGitHubClientFromEnv(logger)
 	if err != nil {
 		logger.Error("code_improvement GitHub client misconfigured; using inert no-op", "error", err)
 		github = nil // NewPromoter substitutes the recording no-op
-	}
-	git, err := promote.NewGitClientFromEnv(target, logger)
-	if err != nil {
-		logger.Error("code_improvement local git client misconfigured; using inert no-op", "error", err)
-		git = nil
 	}
 	realDef, err := promote.NewRealDefaultWriterFromEnv(logger)
 	if err != nil {
@@ -207,10 +191,6 @@ func buildPromoter(rootCtx context.Context, store *experiment.FitnessStore, objR
 	if github != nil {
 		ghIface = github
 	}
-	var gitIface promote.GitClient
-	if git != nil {
-		gitIface = git
-	}
 	// The real-default writer is ALSO the reverter (#1065): the same instance backs
 	// both seams.
 	var realDefIface promote.RealDefaultWriter
@@ -218,12 +198,6 @@ func buildPromoter(rootCtx context.Context, store *experiment.FitnessStore, objR
 	if realDef != nil {
 		realDefIface = realDef
 		reverterIface = realDef
-	}
-
-	repo := promote.RepoRef{
-		Owner: firstField(getEnv("GITHUB_REPOSITORY", ""), 0),
-		Name:  firstField(getEnv("GITHUB_REPOSITORY", ""), 1),
-		Base:  getEnv("GITHUB_BASE_BRANCH", "main"),
 	}
 
 	// LIVE WATCH (#1057/#1065): build the Watcher over the real fitness source ONLY
@@ -243,7 +217,7 @@ func buildPromoter(rootCtx context.Context, store *experiment.FitnessStore, objR
 		logger.Info("code_improvement autonomous watch NOT wired (autonomous env gate off or no fitness store); autonomous fails closed (#1016)")
 	}
 
-	p := promote.NewPromoter(ghIface, gitIface, realDefIface, watcherIface, reverterIface, repo, nil, logger)
+	p := promote.NewPromoter(ghIface, realDefIface, watcherIface, reverterIface, nil, logger)
 	// The substrate validity bar (UC-043 A23, FR-152 g): set once, here, before the
 	// experiment loop starts. Unset env = no objective validated (fail closed).
 	p.SetSubstrateBar(substrateBarFromEnv(logger))
@@ -274,16 +248,6 @@ func substrateBarFromEnv(logger *slog.Logger) map[string]bool {
 	logger.Info("code_improvement substrate validity bar (UC-043 A23): autonomous promotion only for these objectives",
 		"validated_objectives", promote.ValidatedObjectiveList(validated), "service_version", serviceVersion)
 	return validated
-}
-
-// firstField splits an "owner/repo" string and returns the owner (i==0) or repo
-// (i==1), or "" when absent.
-func firstField(repo string, i int) string {
-	parts := strings.SplitN(repo, "/", 2)
-	if i < len(parts) {
-		return parts[i]
-	}
-	return ""
 }
 
 // objectiveForFlag resolves the fitness objective a promoted flag's experiment
@@ -493,7 +457,7 @@ type components struct {
 
 	gameFlags  *flagservice.Client
 	sharedSink decision.ActionSink
-	// shieldSeconds reads the grant_shield length for every loop (UC-040 BR-029).
+	// shieldSeconds reads the grant_shield length for every loop (UC-048 BR-012).
 	shieldSeconds *actions.ShieldSecondsReader
 	llmBudget     llmBudgetShare
 	groupLog      *decision.GroupLog
@@ -703,7 +667,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// min(AGENT_LLM_MAX_REQUESTS_PER_MINUTE, llm.max_requests_per_minute). 0 (unset)
 	// = no ceiling, the flag governs.
 	c.llmBudget.loop(loop)
-	// Group-shield decisions feed the game summary (#2529, UC-040 BR-033).
+	// Group-shield decisions feed the game summary (#2529, UC-048 BR-014).
 	loop.SetGroupLog(c.groupLog)
 	// Every intervention of the game feeds the summary span's list (#2640).
 	loop.SetInterventionLog(c.interventionLog)
@@ -751,7 +715,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	loop.SetAlreadyAppliedRecorder(func(intervention, serial string) {
 		mux.AppendInterventionInPlace(gameID, intervention, serial)
 	})
-	// UC-040 A31 step 1 (#1837): the per-loop shield-charge ledger reads the game's
+	// UC-048 A4 step 1 (#1837): the per-loop shield-charge ledger reads the game's
 	// shield.activation / shield.charge_expiry_seconds from the read-only game domain.
 	loop.SetShieldChargeMode(c.agentFlags.ShieldCharge)
 	// UC-040 BR-036 (#2467 PR 5): remote decide requests carry the game's
@@ -768,11 +732,11 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// #2479: goal.profile in the game's flag context, for the prompt's goal lines
 	// (only under decision.goal_in_prompt).
 	loop.SetGoalSource(c.goalProfile)
-	// UC-040 BR-029 (#2395): a grant_shield without a value gets the
+	// UC-048 BR-012 (#2395): a grant_shield without a value gets the
 	// interventions/shield_seconds "default" variant, read at use time through the
 	// flag service (fail closed: 5 s).
 	loop.SetShieldSecondsSource(c.shieldSeconds.Seconds)
-	// UC-040 A31 step 1, BR-027 (#2096): the game's first shield.activation is latched
+	// UC-048 A4 step 1, BR-011 (#2096): the game's first shield.activation is latched
 	// when the agent first sees the game, so a later flip to `hold` keeps a trigger game trigger.
 	c.agentFlags.LatchShieldMode(context.Background(), gameID)
 	// Shared decision-backend registry (#1226): decision.backend selects who decides.
@@ -794,10 +758,10 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	rules.SetChaosSeedSource(patternObs.SeedSource())
 	rules.SetLateSeedHook(patternObs.LateSeed)
 	// The rules engine reads the loop's shield ledger once per ranking and skips a
-	// grant_shield to a charged, capped or cooling-down player (UC-040 A31, A33).
+	// grant_shield to a charged, capped or cooling-down player (UC-048 A4, A6).
 	rules.SetShieldSource(loop.ShieldSerials)
 	// R4 keeps the candidate with the fewest agent shields in this game, the weakest on a tie
-	// (catch-up, UC-040 A41, BR-030; #2395).
+	// (catch-up, decide-contract.md §15.2; #2395).
 	rules.SetShieldGrantSource(loop.ShieldGrants)
 	// The rules engine skips a state or level candidate whose value the loop
 	// already applied (UC-040 A35 step 4), so it does not take a slot every second.
@@ -976,8 +940,8 @@ func (c *components) buildProposer() {
 
 // buildPromotion builds the M7-8 code-improvement promotion surface (#936): the
 // Promoter with the env-gated real clients (or the inert recording no-ops when not
-// gated — the SAFETY RAIL). The promotion mode/target are read LIVE per promotion, so
-// an operator can flip code_improvement.mode (issue→pr→autonomous) at runtime with
+// gated — the SAFETY RAIL). The promotion mode is read LIVE per promotion, so
+// an operator can flip code_improvement.mode (issue→autonomous) at runtime with
 // no restart.
 func (c *components) buildPromotion() {
 	// FitnessStore (#965/#1017): the finalized-per-game fitness store. It is built HERE
@@ -1010,7 +974,6 @@ func (c *components) buildPromotion() {
 	c.promoter = buildPromoter(c.ctx, c.fitnessStore, c.objResolver, c.tuning, c.logger)
 	slog.Info("Code-improvement promotion surface enabled (#936, M7-8)",
 		"code_improvement_enabled", getEnv("AGENT_CODE_IMPROVEMENT_ENABLED", "false"),
-		"target", getEnv("AGENT_CODE_IMPROVEMENT_TARGET", string(promote.TargetLocal)),
 		"autonomous_enabled", getEnv("AGENT_AUTONOMOUS_ENABLED", "false"),
 	)
 }

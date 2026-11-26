@@ -1,7 +1,6 @@
 """Tests for psmove_pairing.usb_pairing module."""
 
 import asyncio
-import json
 import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
@@ -14,16 +13,10 @@ from dbus_fast.errors import DBusError as DBusReplyError
 from psmove_pairing.adapter_manager import AdapterInfo
 from psmove_pairing.bluez_agent import PairingAgent
 from psmove_pairing.bluez_records import HID_SDP_RECORD
-from psmove_pairing.pairing_backend import HidapiBackend, PairingResult, RustServiceBackend, UsbController
+from psmove_pairing.pairing_backend import PairingResult, RustServiceBackend, UsbController
 from psmove_pairing.registrations import PsMoveRegistration, RemovalResult
 from psmove_pairing.usb_led import GREEN, OFF, RED, UsbLedCue
-from psmove_pairing.usb_pairing import (
-    DEFAULT_PAIRING_BACKEND,
-    VARIANT_TO_PAIRING_BACKEND,
-    USBPairing,
-    _resolve_backend,
-    _resolve_routing,
-)
+from psmove_pairing.usb_pairing import USBPairing
 
 from .conftest import FAKE_PATH_1, MockCommandRunner, bluez_tree, devices
 
@@ -39,93 +32,30 @@ def usb_pairing(mock_tracer, tmp_path):
 
 
 def _mock_backend(controllers=None):
-    """Create a mock HidapiBackend with predefined controllers."""
-    backend = MagicMock(spec=HidapiBackend)
+    """Create a mock pairing backend with predefined controllers."""
+    backend = MagicMock(spec=RustServiceBackend)
     backend.get_usb_controllers = AsyncMock(return_value=controllers or [])
     backend.pair_controller = AsyncMock(return_value=PairingResult(success=True))
     return backend
 
 
-# Shipped flag file: the daemon's mapping must cover exactly its variants.
-_CONTROLLER_FLAGS = Path(__file__).resolve().parents[3] / "services" / "flagd" / "controller.json"
-
-
-def _bluetooth_backend_flag() -> dict:
-    return json.loads(_CONTROLLER_FLAGS.read_text())["flags"]["bluetooth_backend"]
-
-
-class TestResolveBackend:
-    """bluetooth_backend variant -> pairing backend (UC-001 BR-003, A3; #1320)."""
+class TestPairsThroughRustHid:
+    """The daemon pairs through the rust-hid PairingService (UC-001 BR-003)."""
 
     @pytest.mark.uc("UC-001", flow="main", steps=[4], br=["BR-003"])
-    def test_every_flag_variant_maps_to_a_pairing_backend(self):
-        """Every bluetooth_backend variant in controller.json has a defined daemon behaviour."""
-        variants = set(_bluetooth_backend_flag()["variants"].values())
-        assert variants == set(VARIANT_TO_PAIRING_BACKEND), (
-            "bluetooth_backend variants and the pairing daemon mapping drifted apart: "
-            f"flag={sorted(variants)}, daemon={sorted(VARIANT_TO_PAIRING_BACKEND)}"
-        )
-
-    @pytest.mark.uc("UC-001", flow="main", steps=[4], br=["BR-003"])
-    @pytest.mark.parametrize(
-        ("variant", "expected_name", "expected_type"),
-        [
-            ("rust", "rust", RustServiceBackend),
-            ("python", "python", HidapiBackend),
-        ],
-    )
-    @patch.object(RustServiceBackend, "__init__", lambda _self: None)
-    def test_variant_selects_backend_without_warning(self, variant, expected_name, expected_type):
-        """Each known variant selects its backend and logs no warning."""
-        with (
-            patch("psmove_pairing.usb_pairing.get_adapter_routing_default", return_value=variant),
-            patch("psmove_pairing.usb_pairing.logger") as mock_logger,
-        ):
-            backend, name = _resolve_backend()
-        assert isinstance(backend, expected_type)
-        assert name == expected_name
-        mock_logger.warning.assert_not_called()
-
-    @pytest.mark.uc("UC-001", flow="main", steps=[4], br=["BR-003"])
-    @patch.object(RustServiceBackend, "__init__", lambda _self: None)
-    def test_shipped_default_variant_is_rust(self):
-        """The shipped default variant pairs through rust-hid (#1371)."""
-        flag = _bluetooth_backend_flag()
-        default_value = flag["variants"][flag["defaultVariant"]]
-        with patch("psmove_pairing.usb_pairing.get_adapter_routing_default", return_value=default_value):
-            backend, name = _resolve_backend()
-        assert name == DEFAULT_PAIRING_BACKEND == "rust"
-        assert isinstance(backend, RustServiceBackend)
-
-    @pytest.mark.uc("UC-001", flow="A3", br=["BR-003"])
-    @pytest.mark.parametrize("value", ["bogus", "", "hidapi", "RUST", "unstable"])
-    @patch.object(RustServiceBackend, "__init__", lambda _self: None)
-    def test_unknown_value_falls_back_to_rust(self, value):
-        """A value that is not a flag variant falls back to rust-hid with a warning."""
-        with (
-            patch("psmove_pairing.usb_pairing.get_adapter_routing_default", return_value=value),
-            patch("psmove_pairing.usb_pairing.logger") as mock_logger,
-        ):
-            backend, name = _resolve_backend()
-        assert isinstance(backend, RustServiceBackend)
-        assert name == "rust"
-        mock_logger.warning.assert_any_call(f"Unknown bluetooth_backend '{value}', falling back to rust")
-
-    def test_resolve_routing_returns_names_without_constructing_backends(self):
-        """_resolve_routing() maps variants to names only."""
-        with patch("psmove_pairing.usb_pairing.get_adapter_routing_default", return_value="python"):
-            assert _resolve_routing() == "python"
-        with patch("psmove_pairing.usb_pairing.get_adapter_routing_default", return_value="rust"):
-            assert _resolve_routing() == "rust"
+    @patch("psmove_pairing.usb_pairing.RustServiceBackend")
+    def test_backend_is_rust_hid_created_once(self, mock_rust, usb_pairing):
+        assert usb_pairing._get_backend() is mock_rust.return_value
+        assert usb_pairing._get_backend() is mock_rust.return_value
+        mock_rust.assert_called_once_with()
 
 
 class TestGetUSBControllers:
     """Tests for poll() USB controller enumeration via backend."""
 
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python")
+    @patch("psmove_pairing.usb_pairing.RustServiceBackend")
     @pytest.mark.asyncio
-    async def test_no_controllers(self, _mock_routing, mock_create, usb_pairing):
+    async def test_no_controllers(self, mock_create, usb_pairing):
         """Poll with no controllers delegates to backend and finds none."""
         backend = _mock_backend(controllers=[])
         mock_create.return_value = backend
@@ -133,10 +63,9 @@ class TestGetUSBControllers:
         await usb_pairing.poll()
         backend.get_usb_controllers.assert_called_once()
 
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python")
+    @patch("psmove_pairing.usb_pairing.RustServiceBackend")
     @pytest.mark.asyncio
-    async def test_controllers_found(self, _mock_routing, mock_create, usb_pairing):
+    async def test_controllers_found(self, mock_create, usb_pairing):
         """Poll with controllers delegates to process_controller."""
         backend = _mock_backend(controllers=[UsbController(FAKE_PATH_1, "AA:BB:CC:DD:EE:FF", 0x0C5E)])
         mock_create.return_value = backend
@@ -156,8 +85,7 @@ class TestPairController:
         backend.pair_controller.return_value = PairingResult(
             success=True, already_paired=False, previous_host="00:00:00:00:00:00"
         )
-        usb_pairing._current_backend = backend
-        usb_pairing._current_backend_name = "python"
+        usb_pairing._backend = backend
 
         result = await usb_pairing.pair_controller(FAKE_PATH_1, "AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66")
         assert result is True
@@ -168,8 +96,7 @@ class TestPairController:
         """Returns False when backend pairing fails."""
         backend = _mock_backend()
         backend.pair_controller.return_value = PairingResult(success=False)
-        usb_pairing._current_backend = backend
-        usb_pairing._current_backend_name = "python"
+        usb_pairing._backend = backend
 
         result = await usb_pairing.pair_controller(FAKE_PATH_1, "AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66")
         assert result is False
@@ -179,8 +106,7 @@ class TestPairController:
         """Returns False when backend raises an exception."""
         backend = _mock_backend()
         backend.pair_controller.side_effect = RuntimeError("Hardware error")
-        usb_pairing._current_backend = backend
-        usb_pairing._current_backend_name = "python"
+        usb_pairing._backend = backend
 
         result = await usb_pairing.pair_controller(FAKE_PATH_1, "AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66")
         assert result is False
@@ -192,8 +118,7 @@ class TestPairController:
         backend.pair_controller.return_value = PairingResult(
             success=True, already_paired=True, previous_host="AA:BB:CC:DD:EE:FF"
         )
-        usb_pairing._current_backend = backend
-        usb_pairing._current_backend_name = "python"
+        usb_pairing._backend = backend
 
         await usb_pairing.pair_controller(FAKE_PATH_1, "AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66")
 
@@ -201,28 +126,26 @@ class TestPairController:
         span.set_attribute.assert_any_call("pair.already_paired", True)
         span.set_attribute.assert_any_call("pair.current_host", "AA:BB:CC:DD:EE:FF")
 
-    @patch("psmove_pairing.usb_pairing._resolve_backend")
+    @patch("psmove_pairing.usb_pairing.RustServiceBackend")
     @pytest.mark.asyncio
-    async def test_resolves_fresh_outside_poll_cycle(self, mock_resolve, usb_pairing):
-        """When called outside a poll cycle, resolves backend fresh."""
+    async def test_creates_backend_outside_poll_cycle(self, mock_create, usb_pairing):
+        """Called before any poll, pair_controller creates the backend."""
         backend = _mock_backend()
         backend.pair_controller.return_value = PairingResult(success=True)
-        mock_resolve.return_value = (backend, "python")
+        mock_create.return_value = backend
 
-        # _current_backend is None (outside poll cycle)
-        assert usb_pairing._current_backend is None
+        assert usb_pairing._backend is None
         result = await usb_pairing.pair_controller(FAKE_PATH_1, "AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66")
         assert result is True
-        mock_resolve.assert_called_once()
+        mock_create.assert_called_once()
 
 
 class TestBackendCoherence:
     """Tests for poll-cycle backend coherence."""
 
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python")
+    @patch("psmove_pairing.usb_pairing.RustServiceBackend")
     @pytest.mark.asyncio
-    async def test_same_backend_used_for_enumerate_and_pair(self, _mock_routing, mock_create, usb_pairing):
+    async def test_same_backend_used_for_enumerate_and_pair(self, mock_create, usb_pairing):
         """Backend resolved once in poll() is reused by pair_controller()."""
         backend = _mock_backend(controllers=[UsbController(FAKE_PATH_1, "AA:BB:CC:DD:EE:FF", 0x03D5)])
         backend.pair_controller.return_value = PairingResult(success=True)
@@ -237,47 +160,43 @@ class TestBackendCoherence:
 
         await usb_pairing.poll()
 
-        # _create_backend called exactly once (in poll), not again in pair_controller
+        # Backend created exactly once (in poll), not again in pair_controller
         mock_create.assert_called_once()
         # But pair_controller still delegated to the same backend
         backend.pair_controller.assert_called_once()
 
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python")
+    @patch("psmove_pairing.usb_pairing.RustServiceBackend")
     @pytest.mark.asyncio
-    async def test_backend_cached_after_poll(self, _mock_routing, mock_create, usb_pairing):
+    async def test_backend_cached_after_poll(self, mock_create, usb_pairing):
         """Backend instance is cached after poll for reuse."""
         backend = _mock_backend()
         mock_create.return_value = backend
 
         await usb_pairing.poll()
-        assert usb_pairing._current_backend is backend
-        assert usb_pairing._current_backend_name == "python"
+        assert usb_pairing._backend is backend
 
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python")
+    @patch("psmove_pairing.usb_pairing.RustServiceBackend")
     @pytest.mark.asyncio
-    async def test_backend_instance_reused_across_polls(self, _mock_routing, mock_create, usb_pairing):
-        """Same backend instance is reused when routing is unchanged."""
+    async def test_backend_instance_reused_across_polls(self, mock_create, usb_pairing):
+        """Same backend instance is reused across polls."""
         backend = _mock_backend()
         mock_create.return_value = backend
 
         await usb_pairing.poll()
-        assert usb_pairing._current_backend is backend
+        assert usb_pairing._backend is backend
 
         await usb_pairing.poll()
-        # Routing unchanged — _create_backend only called once, instance reused
+        # Created once, reused
         mock_create.assert_called_once()
-        assert usb_pairing._current_backend is backend
+        assert usb_pairing._backend is backend
 
 
 class TestPoll:
     """Tests for poll() with backend delegation."""
 
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python")
+    @patch("psmove_pairing.usb_pairing.RustServiceBackend")
     @pytest.mark.asyncio
-    async def test_poll_increments_count(self, _mock_routing, mock_create, usb_pairing):
+    async def test_poll_increments_count(self, mock_create, usb_pairing):
         """Poll count is incremented each cycle."""
         mock_create.return_value = _mock_backend()
 
@@ -285,54 +204,9 @@ class TestPoll:
         await usb_pairing.poll()
         assert usb_pairing.poll_count == initial_count + 1
 
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python")
+    @patch("psmove_pairing.usb_pairing.RustServiceBackend")
     @pytest.mark.asyncio
-    async def test_poll_sets_backend_span_attribute(self, _mock_routing, mock_create, usb_pairing):
-        """Poll sets pairing.backend span attribute."""
-        mock_create.return_value = _mock_backend()
-
-        await usb_pairing.poll()
-
-        span = usb_pairing.tracer.start_as_current_span.return_value.__enter__.return_value
-        span.set_attribute.assert_any_call("pairing.backend", "python")
-
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python")
-    @pytest.mark.asyncio
-    async def test_poll_logs_initial_backend(self, _mock_routing, mock_create, usb_pairing):
-        """Logs initial backend on first poll."""
-        mock_create.return_value = _mock_backend()
-
-        with patch("psmove_pairing.usb_pairing.logger") as mock_logger:
-            await usb_pairing.poll()
-            mock_logger.info.assert_any_call("Pairing backend initialized: python")
-
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing")
-    @pytest.mark.asyncio
-    async def test_poll_logs_backend_switch(self, mock_routing, mock_create, usb_pairing):
-        """Logs when backend switches between polls."""
-        python_backend = _mock_backend()
-        rust_backend = _mock_backend()
-
-        # First poll: python
-        mock_routing.return_value = "python"
-        mock_create.return_value = python_backend
-        await usb_pairing.poll()
-        assert usb_pairing._current_backend_name == "python"
-
-        # Second poll: rust
-        mock_routing.return_value = "rust"
-        mock_create.return_value = rust_backend
-        with patch("psmove_pairing.usb_pairing.logger") as mock_logger:
-            await usb_pairing.poll()
-            mock_logger.info.assert_any_call("Pairing backend switched: python -> rust")
-
-    @patch("psmove_pairing.usb_pairing._create_backend")
-    @patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python")
-    @pytest.mark.asyncio
-    async def test_poll_skips_when_no_controllers(self, _mock_routing, mock_create, usb_pairing):
+    async def test_poll_skips_when_no_controllers(self, mock_create, usb_pairing):
         """Poll skips processing when no USB controllers found."""
         mock_create.return_value = _mock_backend(controllers=[])
 
@@ -550,8 +424,7 @@ class _PairingFlowEnv:
             patch("psmove_pairing.registrations.get_system_bus", AsyncMock(return_value=bus)),
             patch("psmove_pairing.registrations.get_managed_objects", side_effect=managed_objects),
             patch("psmove_pairing.registrations.DEFAULT_BLUETOOTH_DIR", Path("/nonexistent-bluetooth-state")),
-            patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python"),
-            patch("psmove_pairing.usb_pairing._create_backend", return_value=backend),
+            patch("psmove_pairing.usb_pairing.RustServiceBackend", return_value=backend),
             patch("lib.bluez_dbus.get_system_bus", AsyncMock(return_value=bus)),
             patch("asyncio.create_subprocess_exec", _record_subprocesses(runner)),
             patch("asyncio.sleep", AsyncMock()),

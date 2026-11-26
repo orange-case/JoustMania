@@ -58,12 +58,6 @@
     {
       "code": "ATTR_UNDOCUMENTED",
       "file": "services/agent/promote/telemetry.go",
-      "value": "code_improvement.target",
-      "fingerprint": "1b16ef77f13a"
-    },
-    {
-      "code": "ATTR_UNDOCUMENTED",
-      "file": "services/agent/promote/telemetry.go",
       "value": "code_improvement.url",
       "fingerprint": "9b62d1431470"
     }

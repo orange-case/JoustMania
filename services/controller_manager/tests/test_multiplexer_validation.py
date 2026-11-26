@@ -24,7 +24,7 @@ from services.controller_manager.multiplexer.validation import validate_backend_
 class TestValidSingleBackends:
     """Single backends should always be valid."""
 
-    @pytest.mark.parametrize("name", ["mock", "python", "rust"])
+    @pytest.mark.parametrize("name", ["mock", "rust"])
     def test_single_backend_passes(self, name):
         validate_backend_combination([name])
 
@@ -32,28 +32,23 @@ class TestValidSingleBackends:
 class TestValidMultiBackends:
     """Valid multi-backend combinations."""
 
-    def test_mock_python(self):
-        validate_backend_combination(["mock", "python"])
-
     def test_mock_rust(self):
         validate_backend_combination(["mock", "rust"])
 
-    def test_python_rust(self):
-        validate_backend_combination(["python", "rust"])
-
-    def test_mock_python_rust(self):
-        validate_backend_combination(["mock", "python", "rust"])
+    def test_rejects_removed_python_backend(self):
+        with pytest.raises(ValueError, match="Unsupported backend combination"):
+            validate_backend_combination(["mock", "python"])
 
     def test_order_does_not_matter(self):
-        validate_backend_combination(["python", "mock"])
+        validate_backend_combination(["rust", "mock"])
 
 
 class TestInvalidCombinations:
     """Conflicting backend combinations should raise ValueError."""
 
-    def test_rejects_duplicate_python(self):
+    def test_rejects_duplicate_rust(self):
         with pytest.raises(ValueError, match="Unsupported backend combination"):
-            validate_backend_combination(["python", "python"])
+            validate_backend_combination(["rust", "rust"])
 
     def test_rejects_unknown_backend(self):
         with pytest.raises(ValueError, match="Unsupported backend combination"):

@@ -16,7 +16,6 @@ type ValueView struct {
 	DecisionID string          `json:"decision_id,omitempty"`
 	WrittenAt  time.Time       `json:"written_at"`
 	ExpiresAt  *time.Time      `json:"expires_at,omitempty"`
-	Fraction   int             `json:"fraction_percent,omitempty"`
 }
 
 // EventListView is one game's event list.
@@ -38,7 +37,6 @@ type FlagView struct {
 	StackOverlay     *ValueView                      `json:"stack_overlay,omitempty"`
 	AdminValue       *ValueView                      `json:"admin_value,omitempty"`
 	RealOverlay      *ValueView                      `json:"real_overlay,omitempty"`
-	FractionOverlay  *ValueView                      `json:"fraction_overlay,omitempty"`
 	Games            map[string]*ValueView           `json:"games,omitempty"`
 	Serials          map[string]map[string]ValueView `json:"serials,omitempty"`
 	Experiments      map[string]map[string]ValueView `json:"experiments,omitempty"`
@@ -67,7 +65,7 @@ func (f *flagState) view(v *value) *ValueView {
 	}
 	out := &ValueView{
 		Variant: v.Variant, Value: f.jsonValue(v), Writer: v.Writer, DecisionID: v.DecisionID,
-		WrittenAt: v.WrittenAt, Fraction: v.Fraction,
+		WrittenAt: v.WrittenAt,
 	}
 	if !v.ExpiresAt.IsZero() {
 		t := v.ExpiresAt
@@ -88,7 +86,6 @@ func (f *flagState) flagView() FlagView {
 		StackOverlay:     f.view(f.stack),
 		AdminValue:       f.view(f.admin),
 		RealOverlay:      f.view(f.real),
-		FractionOverlay:  f.view(f.fraction),
 	}
 	if len(f.games) > 0 {
 		fv.Games = map[string]*ValueView{}

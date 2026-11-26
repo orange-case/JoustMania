@@ -14,7 +14,7 @@ from lib.bluez_dbus import DBusError
 from psmove_pairing import registrations
 from psmove_pairing.adapter_manager import AdapterInfo
 from psmove_pairing.control_api import handle_post, unpair_response
-from psmove_pairing.pairing_backend import HidapiBackend, UsbController
+from psmove_pairing.pairing_backend import RustServiceBackend, UsbController
 from psmove_pairing.registrations import PsMoveRegistration, RemovalResult
 from psmove_pairing.usb_pairing import USBPairing
 
@@ -58,14 +58,10 @@ def stub_pairing_steps(usb_pairing: USBPairing, pair=None) -> None:
 
 async def poll_with_usb(usb_pairing: USBPairing, serials: list[str], path: bytes = FAKE_PATH_1) -> None:
     """One poll() where the backend reports these serials on USB (at ``path``)."""
-    backend = create_autospec(HidapiBackend, instance=True)
+    backend = create_autospec(RustServiceBackend, instance=True)
     backend.get_usb_controllers.return_value = [UsbController(path, s, 0x03D5) for s in serials]
-    usb_pairing._current_backend = None  # poll() caches its backend; use this one
-    with (
-        patch("psmove_pairing.usb_pairing._resolve_routing", return_value="python"),
-        patch("psmove_pairing.usb_pairing._create_backend", return_value=backend),
-    ):
-        await usb_pairing.poll()
+    usb_pairing._backend = backend
+    await usb_pairing.poll()
 
 
 class TestUnpairResponse:
@@ -272,7 +268,7 @@ class TestUnpairResponse:
     async def test_hung_backend_releases_the_pairing_lock(self, usb_pairing, remove):
         """A pair_controller that never answers times out, fails the pairing and frees the lock."""
         hung = asyncio.Event()
-        backend = create_autospec(HidapiBackend, instance=True)
+        backend = create_autospec(RustServiceBackend, instance=True)
 
         async def never(*_args):
             await hung.wait()
@@ -280,7 +276,7 @@ class TestUnpairResponse:
         backend.pair_controller.side_effect = never
         stub_pairing_steps(usb_pairing)
         del usb_pairing.pair_controller  # use the real one, with its deadline
-        usb_pairing._current_backend, usb_pairing._current_backend_name = backend, "python"
+        usb_pairing._backend = backend
 
         with patch("psmove_pairing.usb_pairing.PAIR_TIMEOUT_SECONDS", 0.05):
             assert await usb_pairing.process_controller(FAKE_PATH_1, OTHER) is False

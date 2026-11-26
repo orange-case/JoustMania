@@ -14,7 +14,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// The agent half of the group shield (#2467 PR 4; UC-040 A47, A48, BR-033;
+// The agent half of the group shield (#2467 PR 4; UC-048 A13, A14, BR-014;
 // decide-contract §2, §4.3 to §4.5, §7.1). grant_group_shield shields 2 to
 // policy.group_grant.max_targets alive players with one decision, all or nothing.
 //
@@ -29,7 +29,7 @@ import (
 //	2 <= alive players <= max_targets, AND
 //	the game's group shields (written plus in flight) < max_per_game.
 //
-// The coordinator re-checks the same gate at the event (A48 step 1), so it stays
+// The coordinator re-checks the same gate at the event (UC-048 A14 step 1), so it stays
 // authoritative; the agent's group count is in memory and lost on a restart, the
 // coordinator's per-game backstop is not.
 

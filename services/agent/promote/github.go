@@ -22,13 +22,12 @@ import (
 //
 //	AGENT_CODE_IMPROVEMENT_ENABLED=true   (explicit opt-in beyond the kill-switch)
 //	GITHUB_TOKEN present                  (the credential)
-//	target == github                      (the runtime flag, checked by the caller)
 //
 // Absent any one, NewGitHubClientFromEnv returns nil and main.go falls back to the
 // inert recording no-op (NewNoopGitHubClient). There is NO other constructor for a
 // real client — a test cannot instantiate one, so no unit/integration test can
 // reach github.com (the safety rail's structural guarantee). Stdlib net/http only:
-// two simple endpoints (issues, pulls) do not justify a new dependency (the M7-4
+// one simple endpoint (issues) does not justify a new dependency (the M7-4
 // testing-strategy doc §4 "skip Microcks / go-github").
 
 // httpGitHubClient posts to the GitHub REST API. Constructed only via
@@ -44,12 +43,9 @@ type httpGitHubClient struct {
 
 // NewGitHubClientFromEnv returns the REAL GitHub client IFF the env gate is fully
 // satisfied, else nil (the caller substitutes the no-op). This is the ONLY place a
-// real GitHub client is ever constructed. It deliberately takes the resolved
-// target so the gate includes the runtime flag: a real client is never built for a
-// local-target promotion even with the env gate + token set.
+// real GitHub client is ever constructed.
 //
 // Gate conditions (ALL required):
-//   - target == TargetGitHub                         (runtime flag)
 //   - AGENT_CODE_IMPROVEMENT_ENABLED == "true"       (explicit env opt-in)
 //   - GITHUB_TOKEN non-empty                          (credential)
 //   - GITHUB_REPOSITORY == "owner/repo"               (where to act)
@@ -58,12 +54,9 @@ type httpGitHubClient struct {
 // fail-closed default, not an error. Returns (nil, err) only when the gate IS
 // satisfied but a required value is malformed (e.g. a bad GITHUB_REPOSITORY), so a
 // misconfigured opt-in fails loudly rather than silently dialing nothing.
-func NewGitHubClientFromEnv(target Target, log *slog.Logger) (*httpGitHubClient, error) {
+func NewGitHubClientFromEnv(log *slog.Logger) (*httpGitHubClient, error) {
 	if log == nil {
 		log = slog.Default()
-	}
-	if target != TargetGitHub {
-		return nil, nil // not a github target — no real client (use the no-op)
 	}
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv("AGENT_CODE_IMPROVEMENT_ENABLED")), "true") {
 		log.Info("code_improvement github real client NOT built: AGENT_CODE_IMPROVEMENT_ENABLED != true")
@@ -105,17 +98,6 @@ func (c *httpGitHubClient) OpenIssue(ctx context.Context, req IssueReq) (string,
 		payload["labels"] = req.Labels
 	}
 	return c.post(ctx, fmt.Sprintf("/repos/%s/%s/issues", c.owner, c.repo), payload)
-}
-
-// OpenPR POSTs to /repos/{owner}/{repo}/pulls and returns the html_url.
-func (c *httpGitHubClient) OpenPR(ctx context.Context, req PRReq) (string, error) {
-	payload := map[string]any{
-		"title": req.Title,
-		"body":  req.Body,
-		"head":  req.Head,
-		"base":  req.Base,
-	}
-	return c.post(ctx, fmt.Sprintf("/repos/%s/%s/pulls", c.owner, c.repo), payload)
 }
 
 // post sends a JSON POST to the GitHub API and returns the response's html_url.
