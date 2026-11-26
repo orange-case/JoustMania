@@ -107,6 +107,7 @@ where
             if rpc_spans {
                 let span = info_span!(
                     "grpc.server",
+                    otel.name = %format!("{service}/{method}"),
                     otel.kind = "Server",
                     rpc.system = "grpc",
                     rpc.service = %service,
