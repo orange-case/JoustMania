@@ -20,6 +20,8 @@
 #    including "should be on but is not"; not set up, no check yet, an unknown
 #    status format and a stale installed helper are named; nothing but the known
 #    non-secret keys is printed
+#  - the operator pad udev rule (#2858): INFO only, installed, missing or
+#    differing from the checkout (with the fix), or not readable
 #  - git cannot read the checkout: WARN naming that (not a branch), degraded (A4)
 #  - a start refused on a branch checkout (A4): the reason from start.env is
 #    shown on the last-start line, exit 2
@@ -28,7 +30,7 @@
 #    service running whose health check is still starting is degraded (#2135)
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-joustmania-status.sh
 # UC: UC-060 main step 4; UC-002 A7
-# Spec: docs/specs/stage-host.md SH-2 SH-3 SH-4 SH-7 SH-8 SH-12 SH-15
+# Spec: docs/specs/stage-host.md SH-2 SH-3 SH-4 SH-7 SH-8 SH-12 SH-15 SH-17
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 
@@ -55,7 +57,7 @@ make_case() {
   CASE="${WORK}/$1"
   mkdir -p "${CASE}/repo/scripts/setup" "${CASE}/bin" "${CASE}/status" "${CASE}/run" "${CASE}/ledstate" "${CASE}/sys"
   cp "${ROOT}/scripts/setup/joustmania-status.sh" "${ROOT}/scripts/setup/joustmania-led.sh" "${ROOT}/scripts/setup/joustmania-compose.sh" \
-    "${ROOT}/scripts/setup/joustmania-hotspot.sh" \
+    "${ROOT}/scripts/setup/joustmania-hotspot.sh" "${ROOT}/scripts/setup/99-joustmania-operator-pad.rules" \
     "${ROOT}/scripts/setup/lib-joustmania.sh" "${CASE}/repo/scripts/setup/"
   printf 'IMAGE_TAG=0.0.0-test\n' >"${CASE}/repo/.env"
   printf 'JEV_API_KEY=%s\n' "${SECRET}" >"${CASE}/repo/.env.local"
@@ -70,6 +72,7 @@ make_case() {
   echo active >"${CASE}/active"
   echo success >"${CASE}/result"
   echo yes >"${CASE}/ntp"
+  cp "${ROOT}/scripts/setup/99-joustmania-operator-pad.rules" "${CASE}/pad.rules"
   printf 'phase=start\nresult=ok\nmissing=\ndown=\nts=2026-10-26T10:00:00+01:00\n' >"${CASE}/status/start.env"
   cat >"${CASE}/bin/docker" <<STUB
 #!/usr/bin/env bash
@@ -109,6 +112,7 @@ run_status() {
     JOUSTMANIA_RUN_STATE_DIR="${CASE}/run" JOUSTMANIA_LED_STATE_DIR="${CASE}/ledstate" \
     JOUSTMANIA_LED_SYSFS="${CASE}/sys" JOUSTMANIA_LED_HELPER="${CASE}/helper" \
     JOUSTMANIA_HOTSPOT_HELPER="${CASE}/hotspot-helper" JOUSTMANIA_HOTSPOT_STATUS="${CASE}/hotspot-status" \
+    JOUSTMANIA_PAD_RULE="${CASE}/pad.rules" \
     bash "${CASE}/repo/scripts/setup/joustmania-status.sh" "$@" >"${CASE}/out.log" 2>&1
 }
 expect() { # $1 = case, $2 = expected exit, $3 = expected state, $4.. = status args
@@ -345,6 +349,36 @@ if [[ "$(id -u)" != 0 ]]; then
     fail "hotspot-helper-unreadable: line: $(grep hotspot "${CASE}/out.log")"
   grep -q "differs from this checkout" "${CASE}/out.log" && fail "hotspot-helper-unreadable: reported as differing"
   chmod 600 "${CASE}/hotspot-status" "${CASE}/hotspot-helper"
+fi
+
+# --- the operator pad udev rule (UC-016, #2858): INFO only, never the state ---
+PAD_FIX="sudo install -m 0644 .*/scripts/setup/99-joustmania-operator-pad.rules .*/pad.rules && sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=hidraw"
+make_case pad-rule-missing
+rm "${CASE}/pad.rules"
+expect pad-rule-missing 0 ok
+grep -qx "INFO operator pad rule: ${CASE}/pad.rules missing, so the pad screens (UC-016) cannot work; install it with: sudo ${CASE}/repo/scripts/setup/setup_runtime.sh, or: ${PAD_FIX}" "${CASE}/out.log" ||
+  fail "pad-rule-missing: line: $(grep 'pad rule' "${CASE}/out.log")"
+make_case pad-rule-outdated
+{ cat "${ROOT}/scripts/setup/99-joustmania-operator-pad.rules"; echo '# older'; } >"${CASE}/pad.rules"
+expect pad-rule-outdated 0 ok
+grep -qx "INFO operator pad rule: ${CASE}/pad.rules differs from this checkout; update it with: sudo ${CASE}/repo/scripts/setup/setup_runtime.sh, or: ${PAD_FIX}" "${CASE}/out.log" ||
+  fail "pad-rule-outdated: line: $(grep 'pad rule' "${CASE}/out.log")"
+make_case pad-rule-current
+expect pad-rule-current 0 ok
+grep -qx "INFO operator pad rule: installed (${CASE}/pad.rules)" "${CASE}/out.log" ||
+  fail "pad-rule-current: line: $(grep 'pad rule' "${CASE}/out.log")"
+# a degraded Pi stays degraded: the line never lowers or raises the state
+make_case pad-rule-missing-degraded
+rm "${CASE}/pad.rules"
+echo jaeger >"${CASE}/exited"
+expect pad-rule-missing-degraded 1 degraded
+if [[ "$(id -u)" != 0 ]]; then
+  make_case pad-rule-unreadable
+  chmod 000 "${CASE}/pad.rules"
+  expect pad-rule-unreadable 0 ok
+  grep -q "^INFO operator pad rule: ${CASE}/pad.rules is not readable by .*; cannot compare it" "${CASE}/out.log" ||
+    fail "pad-rule-unreadable: line: $(grep 'pad rule' "${CASE}/out.log")"
+  chmod 600 "${CASE}/pad.rules"
 fi
 
 if [[ "${fails}" -ne 0 ]]; then
