@@ -1336,6 +1336,24 @@ class TestHandleStreamReconnection:
         assert game._create_gameplay_stream.await_count == 3
         game._play_sound.assert_awaited_once_with(Sound.MENU_VOX_STATUS_CANCELLED, priority=3)
 
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_force_end_during_the_last_reopen_is_no_stream_loss(self, game):
+        """A force-end that lands while the last reopen fails ends the game force-ended, not game_error."""
+        game._RECONNECT_BACKOFF_S = 0.0
+        game._play_sound = AsyncMock()
+
+        async def reopen_during_force_end():
+            game.running = False
+            raise RuntimeError("unavailable")
+
+        game._create_gameplay_stream = AsyncMock(side_effect=reopen_during_force_end)
+
+        result = await game._handle_stream_reconnection(RuntimeError("stream broken"), attempt=3, max_attempts=3)
+
+        assert result == 3
+        game._play_sound.assert_not_awaited()
+
 
 # ========================================================================
 # _start_intensity_ramp (#1833; was _apply_tempo_change)

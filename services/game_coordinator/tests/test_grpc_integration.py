@@ -1487,7 +1487,7 @@ class TestGameplayStreamReopen:
     @pytest.mark.uc("UC-030", br=["BR-006"])
     @pytest.mark.asyncio
     async def test_game_loop_reconnects_a_silent_stream_within_the_frame_gap(self, serve):
-        """A call that stays open but sends no frame (wedged controller manager) is reopened within 2 gaps."""
+        """A call that stays open but sends no frame (wedged controller manager) is reopened, not awaited forever."""
         frame_server, stub = await serve("stall", frames_before_fault=5)
         game = self._ffa(stub)
         await game._initialize_players()
@@ -1512,8 +1512,70 @@ class TestGameplayStreamReopen:
 
         assert frame_server.calls == 2, "the silent call was not reopened exactly once"
         assert len(processed) == 8, "the game loop got no frame after the silent call was reopened"
-        # The deadline runs from the last frame (10 ms before the stall): at most 2 gaps, plus the backoff.
-        assert reopened_at[0] - stalled_at <= 2 * 0.2 + 0.01 + 0.15, "the silent call was noticed too late"
+        # Never before a whole gap of waiting (the last frame came at most 10 ms before the stall).
+        assert reopened_at[0] - stalled_at >= 0.2 - 0.02, "a call that was only briefly quiet was reopened"
+
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_frame_processing_longer_than_the_gap_is_no_silence(self, serve):
+        """A frame that takes several gaps to process (a round pause, a slow sound) is not cut short or reconnected."""
+        frame_server, stub = await serve(None)
+        game = self._ffa(stub)
+        await game._initialize_players()
+        game.running = True
+        await game._start_gameplay_stream()
+        game._STREAM_FRAME_GAP_S = 0.1
+        game._RECONNECT_BACKOFF_S = 0.01
+        processed, finished = [], []
+
+        async def process(update):
+            processed.append(update.timestamp)
+            if len(processed) == 2:
+                await asyncio.sleep(0.5)
+                finished.append(update.timestamp)
+            if len(processed) >= 5:
+                game.running = False
+            return False
+
+        game._process_gameplay_update = process
+
+        await asyncio.wait_for(game._game_loop(), timeout=5)
+
+        assert finished == [processed[1]], "the slow frame was cut short"
+        assert frame_server.calls == 1, "a healthy stream was reconnected while a frame was processed"
+        assert len(processed) == 5
+
+    @pytest.mark.uc("UC-030", br=["BR-006"])
+    @pytest.mark.asyncio
+    async def test_win_hold_is_no_silence(self, serve):
+        """The stream goes quiet after the deciding frame: the win hold outlasts the gap, the call stays open."""
+        frame_server, stub = await serve("stall", frames_before_fault=3)
+        game = self._ffa(stub)
+        await game._initialize_players()
+        game.running = True
+        await game._start_gameplay_stream()
+        game._STREAM_FRAME_GAP_S = 0.1
+        game._WIN_HOLD_S = 0.5
+        held = []
+        real_hold = game._hold_win_display
+
+        async def hold():
+            await real_hold()
+            held.append(game.gameplay_stream.cancelled())
+
+        game._hold_win_display = hold
+        processed = []
+
+        async def process(update):
+            processed.append(update.timestamp)
+            return len(processed) == 3
+
+        game._process_gameplay_update = process
+
+        await asyncio.wait_for(game._game_loop(), timeout=5)
+
+        assert held == [False], "the frame-gap watch cancelled the call during the win hold"
+        assert frame_server.calls == 1
 
     @pytest.mark.uc("UC-030", br=["BR-006"])
     @pytest.mark.asyncio

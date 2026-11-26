@@ -374,6 +374,8 @@ class GameplayStreamMixin:
             async with asyncio.timeout(self._STREAM_REOPEN_TIMEOUT_S):
                 await self._reopen_gameplay_stream(f"game loop reconnect {attempt}/{max_attempts}")
         except Exception as reopen_error:
+            if not self.running:
+                return attempt
             # The controller manager is down (a restart): this reconnect failed, the next one follows.
             return await self._handle_stream_reconnection(reopen_error, attempt + 1, max_attempts)
         return attempt
