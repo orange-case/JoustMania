@@ -195,3 +195,21 @@ class TestIdleBelowTheMinimum:
             "b": ControllerState.READY,
             "c": ControllerState.IDLE,
         }
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A14", steps=[4], br=["BR-017"])
+    async def test_select_stays_locked_in_a_lobby_below_the_minimum(self, real_servicer):
+        """The way out of A14 is un-readying, the pad or the idle timeout; a READY Select changes nothing."""
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        manager = real_servicer.state_manager
+        await _connect(real_servicer, "a", "b", "c")
+        await real_servicer.select_game_mode(Games.Traitor.name)
+        for serial in ("a", "b", "c"):
+            manager.controller_states[serial] = ControllerState.READY
+        real_servicer.event_publisher.publish.reset_mock()
+
+        await manager.handle_button_event("a", "select", True, event_time=10.0)
+
+        assert real_servicer.current_selection == Games.Traitor
+        assert manager.current_game_mode == Games.Traitor
+        real_servicer.event_publisher.publish.assert_not_awaited()
