@@ -199,7 +199,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         mode, the lobby colour of every
         CONNECTED / READY controller (UC-011 BR-005), a ``selection_changed``
         event and the ``current_game`` default persisted to flagd. ``announce`` adds the mode's
-        feedback of the option table (voice and lobby pulse, services.md ง3.1), the same on every surface.
+        feedback of the option table (voice and lobby pulse, services.md ยง3.1), the same on every surface.
 
         Returns False (and changes nothing) for an unknown or unplayable mode.
         """
