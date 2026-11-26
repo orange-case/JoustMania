@@ -93,7 +93,6 @@ from services.game_coordinator.games.flag_snapshot import (  # noqa: F401  re-ex
     resolve_shield_activation,
     resolve_shield_limit,
 )
-from services.game_coordinator.games.ground_truth import GroundTruth
 from services.game_coordinator.runtime_config import GamePerformanceConfig, get_config_manager
 from services.game_coordinator.stream_writes import serialized_write
 
@@ -733,6 +732,38 @@ class BaseGameMode(
             game_id = f"{mode_prefix}_{int(time.time())}"
         self.game_id = game_id
 
+        self._init_session_state()
+
+        # Game state
+        self.state = GameState.IDLE
+        self.players: dict[str, Player] = {}
+        self.initial_players = initial_players  # Players from StartGame RPC
+        self.start_time = None
+        self.running = False
+
+        # The state each concern owns, set by its own mixin.
+        self._init_stream_state()
+        self._init_outcome_state()
+        self._init_shield_state()
+        self._init_sensitivity_state(sensitivity)
+        self._init_flag_state()
+        self._init_tempo_state()
+        # Backwards-compatible alias kept for any external reader.
+        # The reverted global_sensitivity_override now restores the CURRENT admin
+        # baseline, so this is no longer the restore target — but the
+        # game-start snapshot is still useful telemetry, so expose it as a
+        # property mirroring the baseline at construction time.
+        self._configured_sensitivity = self._baseline_sensitivity
+        self._init_elimination_state()
+        self._init_span_state()
+
+        # Tracked async tasks for automatic cleanup on game end
+        self._tasks: set[asyncio.Task] = set()
+
+        logger.info(f"{self.get_game_name()} game initialized: {self.game_id}")
+
+    def _init_session_state(self) -> None:
+        """Multi-session bookkeeping and the moment identity of the game (set at construction)."""
         # Multi-session bookkeeping. The servicer overrides these on the
         # game instance after construction based on the owning GameSession. They
         # default to the single-game/primary values so a standalone game (and
@@ -757,88 +788,8 @@ class BaseGameMode(
         # run; intervention handlers resolve flags in it (flag_eval_context).
         self._flag_eval_context: EvaluationContext | None = None
 
-        # Game state
-        self.state = GameState.IDLE
-        self.players: dict[str, Player] = {}
-        self.initial_players = initial_players  # Players from StartGame RPC
-        self.start_time = None
-        self.running = False
-        # Disconnects seen by _warmup_ema(); _game_loop() runs them through the
-        # death path before its first frame (UC-020 A2).
-        self._warmup_disconnects: list[str] = []
-        # Early stream drain (UC-021 A1, D-G10): a mode that opens its stream before
-        # its additional phases reads and discards frames until the start.
-        self._early_drain_task: asyncio.Task | None = None
-        self._early_drain_stop = asyncio.Event()
-        self._early_drain_disconnects: dict[str, None] = {}
-        # Set by force_end(): the reason the game was stopped from outside, or
-        # None for a game that ended on its own win condition.
-        self.force_end_reason: str | None = None
-        # The outcome, frozen once the game loop ends (win condition met, or the
-        # loop stopped). A force-end that lands later (e.g. during the winner
-        # rainbow) must not turn a real win into force_ended.
-        self._latched_outcome: dict | None = None
-        self._outcome_recorded = False
-        # Set when run() exits by an exception: the run-end cleanup labels the
-        # player spans it ends ``error`` (UC-030 BR-007).
-        self._run_failed = False
-        # Set once the base run() published game_error, so its session does not
-        # publish it a second time.
-        self.game_error_published = False
-        # The game root span (current when run() starts); the outcome lands on it.
-        self._game_root_span: trace.Span | None = None
-        # Warning and death times per serial, recorded on the root at a normal end (UC-100 BR-006).
-        self._ground_truth = GroundTruth()
-        self.gameplay_stream = None  # Phase 46: Bidirectional stream for feedback commands
-        # Deaths whose PLAYER_DEATH write failed on a dying call: the next stream sends it (UC-030 BR-006, #2471).
-        self._undelivered_deaths: set[str] = set()
-        # Shield feedback still running per serial: wall-clock end time (#1301,
-        # UC-048 A1/A2). Only a record for the game-end clear; no task.
-        self._shield_feedback_until: dict[str, float] = {}
-        # Agent shields per serial in this game (UC-048 BR-007): grants
-        # counted and the end of the last agent shield (grant time + seconds; in
-        # trigger mode from the charge grant). Per game-mode instance, so a new
-        # game starts fresh; keyed by serial, so a revive does not reset them.
-        self._agent_shield_grants: dict[str, int] = {}
-        self._agent_shield_last_end: dict[str, float] = {}
-        # Group shields applied in this game (UC-048 A13, BR-014): the coordinator's
-        # per-game backstop against policy.group_grant.max_per_game, so an agent
-        # restart (which resets the agent's own count) cannot exceed it.
-        self._agent_group_grants = 0
-        # Shield hold (UC-048 BR-011): latched once, at the start of the game
-        # loop or at the first grant, whichever comes first. None = not a hold game.
-        self._shield_hold: ShieldHoldParams | None = None
-        self._shield_hold_latched = False
-        # Shield end grace (UC-048 BR-015, #2464): latched with the shield mode in every
-        # mode; 0 until the latch, so nothing arms a window before it.
-        self._shield_end_grace = 0.0
-        # The mode the latch read, reused by the grant that triggered the latch, so
-        # that grant reads shield.activation once (flags.md §4: one read per grant).
-        self._shield_mode_at_latch: str | None = None
-        # The mode a non-hold game latched (instant or trigger): a mid-game `hold`
-        # read maps back to it, so a running game keeps its mode (UC-048 BR-011).
-        self._shield_mode_at_start: str = SHIELD_ACTIVATION_INSTANT
-        # The game_shield_activation_mode / game_shield_hold_setting series this game set (removed at game end).
-        self._shield_metric_mode: str | None = None
-        self._shield_metric_settings: tuple[str, ...] = ()
-        # Hold feedback (UC-048 BR-010): the cue values latched with the hold values,
-        # and one ordered outbound task per game. The frame path only marks a player
-        # (serial -> strongest pending cue); the task sends the player's state when it runs.
-        self._shield_hold_cues: ShieldHoldCues | None = None
-        self._hold_feedback_pending: dict[str, int] = {}
-        self._hold_feedback_wakeup: asyncio.Event | None = None
-        self._hold_feedback_task: asyncio.Task | None = None
-        # SHIELD_HOLD running on the controller: serial -> hold_started_at of the activation sent.
-        self._hold_layer_sent: dict[str, float] = {}
-        self._hold_commands_sent: set[str] = set()  # any hold command sent (ended at game end)
-        self._hold_sound_at: dict[str, float] = {}
-        # Serials granted energy since their last player_shield_energy event (source=agent, UC-035 BR-008).
-        self._hold_granted_pending: set[str] = set()
-        # serial -> loop time of the last player_shield_energy (the keyframe clock, UC-035 BR-008).
-        self._hold_energy_published_at: dict[str, float] = {}
-        # Set at the game end (and error teardown): no hold command after SHIELD 0 (UC-048 BR-010).
-        self._hold_feedback_stopped = False
-
+    def _init_sensitivity_state(self, sensitivity: int) -> None:
+        """The admin baseline sensitivity and the agent override layer (M9 ownership model)."""
         # Settings - sensitivity is now passed via StartGameConfig.
         #
         # Sensitivity arbitration (M9 ownership model):
@@ -862,6 +813,8 @@ class BaseGameMode(
         # No agent override at game start; effective == baseline.
         self._sensitivity_override: Sensitivity | None = None
 
+    def _init_flag_state(self) -> None:
+        """Read the init-latched flags once and derive the game's frozen settings from them."""
         # Init-latched flags: every read below happens once, here, and the raw
         # values are validated and frozen into ``init_flags`` (GameInitFlags.from_raw).
         # The attributes after it start from the snapshot. The readers are called as
@@ -920,34 +873,6 @@ class BaseGameMode(
         # Set/cleared by the global_difficulty_factor intervention handler and
         # live-read every frame.
         self.global_difficulty_factor: float = 1.0
-
-        self._init_tempo_state()
-        # Backwards-compatible alias kept for any external reader.
-        # The reverted global_sensitivity_override now restores the CURRENT admin
-        # baseline, so this is no longer the restore target — but the
-        # game-start snapshot is still useful telemetry, so expose it as a
-        # property mirroring the baseline at construction time.
-        self._configured_sensitivity = self._baseline_sensitivity
-        self.dead_count = 0  # Track deaths for tempo timing
-        # Elimination ordering for game_player_elimination_order metric.
-        # Incremented on each kill; the value at kill time is the player's order
-        # index (1 = first eliminated). In respawn modes this counts each death.
-        self._elimination_count = 0
-        # Serials whose _kill_player is mid-flight. _kill_player awaits (death
-        # sound) before the mode impl flips player.alive, so a concurrent kill
-        # of the same serial (e.g. motion death racing a disconnect) would
-        # otherwise pass the alive check and count the death twice.
-        self._kills_in_progress: set[str] = set()
-        self.gameplay_span: trace.Span | None = None  # Reference for span events
-        self.gameplay_span_context = None  # Context for child spans in background tasks
-        self._players_span: trace.Span | None = None  # Parent span grouping all player lifecycles
-        self._game_cycle_span: trace.Span | None = None  # Span for instrumentation (sounds, music)
-        self.game_cycle_context = None  # Context for sound/music spans
-
-        # Tracked async tasks for automatic cleanup on game end
-        self._tasks: set[asyncio.Task] = set()
-
-        logger.info(f"{self.get_game_name()} game initialized: {self.game_id}")
 
     # ========================================================================
     # Sensitivity arbitration (M9 ownership model)

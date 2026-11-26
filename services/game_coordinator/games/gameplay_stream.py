@@ -20,6 +20,20 @@ from services.game_coordinator.stream_writes import serialized_write
 class GameplayStreamMixin:
     """The gameplay stream of a game: open, reopen, drain, guarded writes, release. Mixed into ``BaseGameMode``."""
 
+    def _init_stream_state(self) -> None:
+        """The gameplay call, its early drain and the disconnects buffered before the loop."""
+        # Disconnects seen by _warmup_ema(); _game_loop() runs them through the
+        # death path before its first frame (UC-020 A2).
+        self._warmup_disconnects: list[str] = []
+        # Early stream drain (UC-021 A1, D-G10): a mode that opens its stream before
+        # its additional phases reads and discards frames until the start.
+        self._early_drain_task: asyncio.Task | None = None
+        self._early_drain_stop = asyncio.Event()
+        self._early_drain_disconnects: dict[str, None] = {}
+        self.gameplay_stream = None  # Phase 46: Bidirectional stream for feedback commands
+        # Deaths whose PLAYER_DEATH write failed on a dying call: the next stream sends it (UC-030 BR-006, #2471).
+        self._undelivered_deaths: set[str] = set()
+
     async def _create_gameplay_stream(self):
         """
         Create gameplay stream, send config, and update alive filter.

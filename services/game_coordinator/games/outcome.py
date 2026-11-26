@@ -10,10 +10,32 @@ from services.game_coordinator.games.base import (
     GameState,
     logger,
 )
+from services.game_coordinator.games.ground_truth import GroundTruth
 
 
 class GameOutcomeMixin:
     """The outcome of a game: force-end, latch and record (UC-020 BR-003, #1328). Mixed into ``BaseGameMode``."""
+
+    def _init_outcome_state(self) -> None:
+        """Force-end reason, the latched outcome and the root span the outcome lands on."""
+        # Set by force_end(): the reason the game was stopped from outside, or
+        # None for a game that ended on its own win condition.
+        self.force_end_reason: str | None = None
+        # The outcome, frozen once the game loop ends (win condition met, or the
+        # loop stopped). A force-end that lands later (e.g. during the winner
+        # rainbow) must not turn a real win into force_ended.
+        self._latched_outcome: dict | None = None
+        self._outcome_recorded = False
+        # Set when run() exits by an exception: the run-end cleanup labels the
+        # player spans it ends ``error`` (UC-030 BR-007).
+        self._run_failed = False
+        # Set once the base run() published game_error, so its session does not
+        # publish it a second time.
+        self.game_error_published = False
+        # The game root span (current when run() starts); the outcome lands on it.
+        self._game_root_span: trace.Span | None = None
+        # Warning and death times per serial, recorded on the root at a normal end (UC-100 BR-006).
+        self._ground_truth = GroundTruth()
 
     def force_end(self, reason: str = ""):
         """Force the game to end (called externally).

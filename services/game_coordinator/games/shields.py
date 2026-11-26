@@ -132,6 +132,55 @@ SHIELD_SINCE_END_REPORT_SECONDS = 3.0
 class ShieldMixin:
     """Shield behaviour of every game mode, mixed into ``BaseGameMode`` (#2360)."""
 
+    def _init_shield_state(self) -> None:
+        """Per-game shield state: feedback, agent grants, the hold latch and hold feedback."""
+        # Shield feedback still running per serial: wall-clock end time (#1301,
+        # UC-048 A1/A2). Only a record for the game-end clear; no task.
+        self._shield_feedback_until: dict[str, float] = {}
+        # Agent shields per serial in this game (UC-048 BR-007): grants
+        # counted and the end of the last agent shield (grant time + seconds; in
+        # trigger mode from the charge grant). Per game-mode instance, so a new
+        # game starts fresh; keyed by serial, so a revive does not reset them.
+        self._agent_shield_grants: dict[str, int] = {}
+        self._agent_shield_last_end: dict[str, float] = {}
+        # Group shields applied in this game (UC-048 A13, BR-014): the coordinator's
+        # per-game backstop against policy.group_grant.max_per_game, so an agent
+        # restart (which resets the agent's own count) cannot exceed it.
+        self._agent_group_grants = 0
+        # Shield hold (UC-048 BR-011): latched once, at the start of the game
+        # loop or at the first grant, whichever comes first. None = not a hold game.
+        self._shield_hold: ShieldHoldParams | None = None
+        self._shield_hold_latched = False
+        # Shield end grace (UC-048 BR-015, #2464): latched with the shield mode in every
+        # mode; 0 until the latch, so nothing arms a window before it.
+        self._shield_end_grace = 0.0
+        # The mode the latch read, reused by the grant that triggered the latch, so
+        # that grant reads shield.activation once (flags.md §4: one read per grant).
+        self._shield_mode_at_latch: str | None = None
+        # The mode a non-hold game latched (instant or trigger): a mid-game `hold`
+        # read maps back to it, so a running game keeps its mode (UC-048 BR-011).
+        self._shield_mode_at_start: str = SHIELD_ACTIVATION_INSTANT
+        # The game_shield_activation_mode / game_shield_hold_setting series this game set (removed at game end).
+        self._shield_metric_mode: str | None = None
+        self._shield_metric_settings: tuple[str, ...] = ()
+        # Hold feedback (UC-048 BR-010): the cue values latched with the hold values,
+        # and one ordered outbound task per game. The frame path only marks a player
+        # (serial -> strongest pending cue); the task sends the player's state when it runs.
+        self._shield_hold_cues: ShieldHoldCues | None = None
+        self._hold_feedback_pending: dict[str, int] = {}
+        self._hold_feedback_wakeup: asyncio.Event | None = None
+        self._hold_feedback_task: asyncio.Task | None = None
+        # SHIELD_HOLD running on the controller: serial -> hold_started_at of the activation sent.
+        self._hold_layer_sent: dict[str, float] = {}
+        self._hold_commands_sent: set[str] = set()  # any hold command sent (ended at game end)
+        self._hold_sound_at: dict[str, float] = {}
+        # Serials granted energy since their last player_shield_energy event (source=agent, UC-035 BR-008).
+        self._hold_granted_pending: set[str] = set()
+        # serial -> loop time of the last player_shield_energy (the keyframe clock, UC-035 BR-008).
+        self._hold_energy_published_at: dict[str, float] = {}
+        # Set at the game end (and error teardown): no hold command after SHIELD 0 (UC-048 BR-010).
+        self._hold_feedback_stopped = False
+
     async def grant_shield(self, serial: str, seconds: float) -> bool:
         """
         Grant a temporary shield (invulnerability) to a player (#730, N3).

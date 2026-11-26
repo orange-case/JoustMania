@@ -362,6 +362,72 @@ class RubberbandMixin:
 
         return True
 
+    def _rubberband_window(self, strength: str, seconds: float | None) -> tuple[float, float] | None:
+        """``(max_boost, seconds)`` of a normalised rubberband strength; None for a no-op."""
+        if strength == "gentle":
+            max_boost = self.RUBBERBAND_MAX_BOOST_GENTLE
+        elif strength == "strong":
+            max_boost = self.RUBBERBAND_MAX_BOOST_STRONG
+        else:
+            return None  # unknown strength: safe no-op
+
+        if seconds is None:
+            seconds = self.RUBBERBAND_DEFAULT_SECONDS
+        if seconds <= 0:
+            return None
+        return max_boost, min(seconds, self.RUBBERBAND_MAX_SECONDS)
+
+    def _rubberband_headrooms(self, alive: list[Player]) -> dict[str, tuple[float, float]]:
+        """serial -> (headroom to the effective death threshold, death threshold)."""
+        headrooms: dict[str, tuple[float, float]] = {}
+        for p in alive:
+            _, death = self._compute_effective_thresholds(p)
+            headrooms[p.serial] = (death - p.smoothed_accel, death)
+        return headrooms
+
+    def _rubberband_target_boost(
+        self, p: Player, headroom: float, death: float, max_leader_headroom: float, gap: float, max_boost: float
+    ) -> float:
+        """The rubberband boost of one alive player: deficit-scaled, no-invert capped, clamped to the band."""
+        # How far behind the leader this player is, in [0, 1]: the laggard
+        # (min headroom) is 1.0, the leader is 0.0. The boost scales with this
+        # deficit and the strength cap, so the leader gets ~0 and the laggard
+        # gets up to max_boost.
+        deficit = (max_leader_headroom - headroom) / gap
+        target_boost = 1.0 + max_boost * deficit
+        # No-invert cap (standings = headroom to death, NOT the raw threshold).
+        # The boosted player's headroom (death*boost - accel) must never exceed
+        # the leader's headroom — compression toward the leader, never past it.
+        # Solve death*boost - accel <= leader_headroom => boost <= cap.
+        no_invert_cap = (max_leader_headroom + p.smoothed_accel) / death
+        target_boost = min(target_boost, max(1.0, no_invert_cap))
+        # Final clamp to the rubberband boost band (still re-clamped [0.5,2.0]
+        # downstream when composed).
+        return max(self.RUBBERBAND_BOOST_MIN, min(self.RUBBERBAND_BOOST_MAX, target_boost))
+
+    def _apply_rubberband_boost(
+        self, p: Player, target_boost: float, now: float, seconds: float, strength: str
+    ) -> None:
+        """Arm a rubberband boost on one player (extend-not-shorten, strengthen-not-weaken)."""
+        new_until = now + seconds
+        # Extend-not-shorten / strengthen-not-weaken (mirror toughness_boost).
+        boost = target_boost
+        if now < p.rubberband_until:
+            new_until = max(new_until, p.rubberband_until)
+            boost = max(boost, p.rubberband_boost)
+        p.rubberband_until = new_until
+        p.rubberband_boost = boost
+        if p.span:
+            p.span.add_event(
+                "auto_rubberband_boost",
+                attributes={
+                    "rubberband_strength": strength,
+                    "rubberband_boost": boost,
+                    "rubberband_seconds": seconds,
+                    **player_identity_attributes(p.serial, p.name),
+                },
+            )
+
     async def apply_auto_rubberband(self, strength: str, seconds: float | None = None) -> int:
         """Auto-compress the live skill gap by boosting the trailing player(s) (#1143).
 
@@ -400,18 +466,10 @@ class RubberbandMixin:
             The number of players boosted (0 on a no-op).
         """
         strength = (strength or "").strip().lower()
-        if strength == "gentle":
-            max_boost = self.RUBBERBAND_MAX_BOOST_GENTLE
-        elif strength == "strong":
-            max_boost = self.RUBBERBAND_MAX_BOOST_STRONG
-        else:
-            return 0  # unknown strength: safe no-op
-
-        if seconds is None:
-            seconds = self.RUBBERBAND_DEFAULT_SECONDS
-        if seconds <= 0:
-            return 0
-        seconds = min(seconds, self.RUBBERBAND_MAX_SECONDS)
+        window = self._rubberband_window(strength, seconds)
+        if window is None:
+            return 0  # unknown strength or no window: safe no-op
+        max_boost, seconds = window
 
         # Rank alive players by headroom to their effective death threshold. We
         # need at least two to have a gap to compress.
@@ -419,10 +477,7 @@ class RubberbandMixin:
         if len(alive) < 2:
             return 0
 
-        headrooms: dict[str, tuple[float, float]] = {}  # serial -> (headroom, death)
-        for p in alive:
-            _, death = self._compute_effective_thresholds(p)
-            headrooms[p.serial] = (death - p.smoothed_accel, death)
+        headrooms = self._rubberband_headrooms(alive)
 
         # Leader = most headroom (comfortably ahead); laggard ranking from least.
         max_leader_headroom = max(hd[0] for hd in headrooms.values())
@@ -439,47 +494,39 @@ class RubberbandMixin:
             headroom, death = headrooms[p.serial]
             if death <= 0:
                 continue
-            # How far behind the leader this player is, in [0, 1]: the laggard
-            # (min headroom) is 1.0, the leader is 0.0. The boost scales with this
-            # deficit and the strength cap, so the leader gets ~0 and the laggard
-            # gets up to max_boost.
-            deficit = (max_leader_headroom - headroom) / gap
-            target_boost = 1.0 + max_boost * deficit
-            # No-invert cap (standings = headroom to death, NOT the raw threshold).
-            # The boosted player's headroom (death*boost - accel) must never exceed
-            # the leader's headroom — compression toward the leader, never past it.
-            # Solve death*boost - accel <= leader_headroom => boost <= cap.
-            no_invert_cap = (max_leader_headroom + p.smoothed_accel) / death
-            target_boost = min(target_boost, max(1.0, no_invert_cap))
-            # Final clamp to the rubberband boost band (still re-clamped [0.5,2.0]
-            # downstream when composed).
-            target_boost = max(self.RUBBERBAND_BOOST_MIN, min(self.RUBBERBAND_BOOST_MAX, target_boost))
+            target_boost = self._rubberband_target_boost(p, headroom, death, max_leader_headroom, gap, max_boost)
             if target_boost <= 1.0 + 1e-9:
                 continue  # nothing to add for this player (e.g. the leader)
 
-            new_until = now + seconds
-            # Extend-not-shorten / strengthen-not-weaken (mirror toughness_boost).
-            boost = target_boost
-            if now < p.rubberband_until:
-                new_until = max(new_until, p.rubberband_until)
-                boost = max(boost, p.rubberband_boost)
-            p.rubberband_until = new_until
-            p.rubberband_boost = boost
+            self._apply_rubberband_boost(p, target_boost, now, seconds, strength)
             boosted += 1
-            if p.span:
-                p.span.add_event(
-                    "auto_rubberband_boost",
-                    attributes={
-                        "rubberband_strength": strength,
-                        "rubberband_boost": boost,
-                        "rubberband_seconds": seconds,
-                        **player_identity_attributes(p.serial, p.name),
-                    },
-                )
 
         if boosted:
             logger.info(f"Auto-rubberband ({strength}): boosted {boosted} trailing player(s) for {seconds:.1f}s")
         return boosted
+
+    async def _send_revive_effects(self, serial: str, player: Player) -> None:
+        """Restore a revived player's base LED colour, then send the respawn pulse."""
+        from proto import controller_manager_pb2
+
+        trace_parent, trace_state = _base.inject_trace_context(player.span)
+        # Restore the player's base LED color, then a respawn pulse.
+        base_color_cmd = controller_manager_pb2.GameplayStreamControl(
+            base_color=controller_manager_pb2.ControllerColorConfig(
+                serial=serial,
+                color=controller_manager_pb2.RGB(r=player.color[0], g=player.color[1], b=player.color[2]),
+            )
+        )
+        await serialized_write(self.gameplay_stream, base_color_cmd)
+        respawn_cmd = controller_manager_pb2.GameplayStreamControl(
+            game_effect=controller_manager_pb2.GameEffectCommand(
+                serial=serial,
+                effect=controller_manager_pb2.GAME_EFFECT_PLAYER_RESPAWN,
+                trace_parent=trace_parent,
+                trace_state=trace_state,
+            )
+        )
+        await serialized_write(self.gameplay_stream, respawn_cmd)
 
     async def revive_player(self, serial: str, spawn_grace: float | None = None) -> bool:
         """
@@ -551,26 +598,7 @@ class RubberbandMixin:
         self.record_intervention(serial, types=("revive_player",))  # UC-101 BR-001
 
         if self.gameplay_stream:
-            from proto import controller_manager_pb2
-
-            trace_parent, trace_state = _base.inject_trace_context(player.span)
-            # Restore the player's base LED color, then a respawn pulse.
-            base_color_cmd = controller_manager_pb2.GameplayStreamControl(
-                base_color=controller_manager_pb2.ControllerColorConfig(
-                    serial=serial,
-                    color=controller_manager_pb2.RGB(r=player.color[0], g=player.color[1], b=player.color[2]),
-                )
-            )
-            await serialized_write(self.gameplay_stream, base_color_cmd)
-            respawn_cmd = controller_manager_pb2.GameplayStreamControl(
-                game_effect=controller_manager_pb2.GameEffectCommand(
-                    serial=serial,
-                    effect=controller_manager_pb2.GAME_EFFECT_PLAYER_RESPAWN,
-                    trace_parent=trace_parent,
-                    trace_state=trace_state,
-                )
-            )
-            await serialized_write(self.gameplay_stream, respawn_cmd)
+            await self._send_revive_effects(serial, player)
 
         await self.event_publisher("player_revived", {"serial": serial})
         logger.info(f"revive_player: {serial} revived (generic re-entry, grace {grace:.1f}s)")
