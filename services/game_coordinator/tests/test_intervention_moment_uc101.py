@@ -812,7 +812,7 @@ async def test_the_fake_game_and_every_lever_dispatch_open_a_scope():
 # Shapes (main 1-2, BR-002, A1)
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
-@pytest.mark.parametrize("shape", ["span", "log_event", "both"])
+@pytest.mark.parametrize("shape", ["span", "log_event"])
 @pytest.mark.uc("UC-101", flow="main", steps=[5], br=["BR-002"])
 @pytest.mark.uc("UC-101", flow="A1")
 async def test_the_moment_follows_the_game_shape(sdk, shape):
@@ -832,11 +832,7 @@ async def test_the_moment_follows_the_game_shape(sdk, shape):
         (record,) = sdk.moment_logs()
         assert record.attributes["intervention.type"] == "grant_shield"
         moment_id = record.attributes["moment.id"]
-        if shape == "both":
-            (event,) = _events(span)
-            assert event["moment.id"] == moment_id
-        else:
-            assert _events(span) == []
+        assert _events(span) == []
     (entry,) = _gt(game)
     assert entry["moment.id"] == moment_id
 

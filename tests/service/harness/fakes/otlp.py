@@ -17,10 +17,10 @@ event (``wait_log(event_name="player_death", attrs={...})``).
 Tee: ``OtlpSink(forward_to="127.0.0.1:<port>")`` forwards every trace and
 metrics export request unchanged to another OTLP/gRPC receiver (the agent's, as
 the collector's ``otlp/agent`` exporter does in its traces and metrics
-pipelines), and of each logs export request only the moment log events, as the
-collector's ``logs/agent`` pipeline with ``filter/agent_moments`` does (C-001,
-#2658): records named ``death_warning`` or ``player_death`` that carry a
-``moment.id``; a request with none is not forwarded. Best effort: a failed
+pipelines), and of each logs export request only the agent's own log events, as
+the collector's ``logs/agent`` pipeline with ``filter/agent_events`` does (C-001,
+#2722): records named ``game.start``, ``game.end`` or ``game.phase.start`` marked
+``orangecase.audience`` = ``agent``; a request with none is not forwarded. Best effort: a failed
 forward is counted in ``forward_errors`` and never fails the service's export.
 """
 
@@ -43,8 +43,8 @@ from opentelemetry.proto.logs.v1 import logs_pb2
 DEFAULT_WAIT_SECONDS = 30.0
 POLL_INTERVAL_SECONDS = 0.1
 FORWARD_TIMEOUT_SECONDS = 2.0
-# The moment log events the collector's filter/agent_moments passes to the agent (C-001).
-AGENT_MOMENT_EVENTS = frozenset({"death_warning", "player_death"})
+# The log events the collector's filter/agent_events passes to the agent (C-001).
+AGENT_LOG_EVENTS = frozenset({"game.start", "game.end", "game.phase.start"})
 
 
 # --------------------------------------------------------------------------- #
@@ -179,18 +179,20 @@ def _decode_logs(request) -> list[LogRecord]:
     return records
 
 
-def _is_agent_moment(record) -> bool:
-    """A moment log event the collector exports to the agent (``filter/agent_moments``)."""
-    return record.event_name in AGENT_MOMENT_EVENTS and any(kv.key == "moment.id" for kv in record.attributes)
+def _is_agent_event(record) -> bool:
+    """A log event the collector exports to the agent (``filter/agent_events``)."""
+    return record.event_name in AGENT_LOG_EVENTS and any(
+        kv.key == "orangecase.audience" and kv.value.string_value == "agent" for kv in record.attributes
+    )
 
 
-def _agent_moment_logs(request) -> logs_service_pb2.ExportLogsServiceRequest | None:
-    """``request`` with only its moment log events (empty scopes and resources dropped); None when none."""
+def _agent_event_logs(request) -> logs_service_pb2.ExportLogsServiceRequest | None:
+    """``request`` with only the agent's log events (empty scopes and resources dropped); None when none."""
     out = logs_service_pb2.ExportLogsServiceRequest()
     for resource_logs in request.resource_logs:
         scopes = []
         for scope_logs in resource_logs.scope_logs:
-            kept = [r for r in scope_logs.log_records if _is_agent_moment(r)]
+            kept = [r for r in scope_logs.log_records if _is_agent_event(r)]
             if kept:
                 scopes.append(
                     logs_pb2.ScopeLogs(scope=scope_logs.scope, log_records=kept, schema_url=scope_logs.schema_url)
@@ -267,7 +269,7 @@ class _LogsServicer(logs_service_pb2_grpc.LogsServiceServicer):
 # --------------------------------------------------------------------------- #
 class OtlpSink:
     def __init__(self, forward_to: str | None = None):
-        """``forward_to``: ``host:port`` of an OTLP/gRPC receiver to tee traces, metrics and moment logs to."""
+        """``forward_to``: ``host:port`` of an OTLP/gRPC receiver to tee traces, metrics and agent log events to."""
         self.forward_to = forward_to
         self._lock = threading.Lock()
         self._spans: list[SpanRecord] = []
@@ -350,9 +352,9 @@ class OtlpSink:
             self._logs.extend(records)
         stub = self._forward_logs_stub  # read once, as in _on_traces
         if stub is not None:
-            moments = _agent_moment_logs(request)
-            if moments is not None:
-                self._forward(stub, moments)
+            events = _agent_event_logs(request)
+            if events is not None:
+                self._forward(stub, events)
 
     # --------------------------------------------------------------- reading
     @property
