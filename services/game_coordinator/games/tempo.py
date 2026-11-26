@@ -588,14 +588,21 @@ class TempoMixin:
             return
 
         if self._audio_down or status != PROBE_OK:
-            self._audio_down = False
             logger.info("Audio service answers again: checking the game music")
             if not self._music_lost and self.music_track_id not in (None, MUTED_TRACK_ID):
+                # Still "down" while this check runs: a tick glide refused meanwhile is the
+                # outage's doing and must not use up a refusal restart.
+                self._audio_down = True
                 outcome = await self._push_audio(
                     self._intensity.target, self._intensity.end_time - game_clock.now(), after_outage=True
                 )
-                if outcome in ("failed", "accepted"):
+                if outcome == "failed":
                     return
+                self._audio_down = False
+                if outcome == "accepted":
+                    return
+            else:
+                self._audio_down = False
         if self._music_lost:
             await self._restart_game_music()
 
@@ -618,7 +625,11 @@ class TempoMixin:
         if not await self._send_music_start(volume, tempo):
             return
         logger.info(f"Game music started again: {self.music_track_id} at {tempo:.2f}x")
-        if not self._intensity.is_complete(now):
+        # Ticks ran while PlayMusic was in flight: a hold or a step set meanwhile is
+        # already complete, so compare with the tempo sent, not only the ramp state.
+        now = game_clock.now()
+        moved = abs(tempo_from_intensity(self._intensity.value_at(now)) - tempo) > 1e-6
+        if moved or not self._intensity.is_complete(now):
             await self._push_audio(self._intensity.target, self._intensity.end_time - now)
 
     def _log_tick_failure(self, error: Exception) -> None:

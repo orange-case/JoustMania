@@ -81,6 +81,7 @@ class RestartingAudio:
         self.track = "track-1"
         self.down = False
         self._next = 1
+        self.tempos: list[tuple[str, float]] = []
 
     def _check(self, name):
         if self.down:
@@ -103,6 +104,7 @@ class RestartingAudio:
         self._check("ChangeTempo")
         accepted = request.track_id == self.track
         self.calls.append(("ChangeTempo", request.track_id, accepted))
+        self.tempos.append((request.track_id, round(request.new_tempo, 3)))
         return audio_pb2.ChangeTempoResponse(success=accepted, error="" if accepted else "Failed to change tempo")
 
     async def StopMusic(self, request):  # noqa: N802 - gRPC stub name
@@ -501,3 +503,61 @@ async def test_a_slow_music_restart_never_holds_the_tempo_loop(clock):
     audio.release.set()
     await asyncio.sleep(0)
     assert len(audio.of("PlayMusic")) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-031", flow="A7", steps=[2], br=["BR-005", "BR-009"])
+async def test_a_tempo_change_during_a_slow_restart_reaches_the_new_track(clock):
+    """A hold set while PlayMusic is in flight (an override revert) is sent to the new track afterwards."""
+    audio = SlowMusicStart()
+    game = await started_game(audio)
+    audio.hold = True
+    audio.restart()
+    await game._push_audio(1.0, 1.0)  # refused: the music is lost
+
+    clock.now += 0.1
+    await game._check_music_speed()  # the restart starts at tempo 1.0
+    await asyncio.sleep(0)
+    keeper = game._music_keeper
+    game._intensity = IntensityRamp.hold(1.0, clock.now)  # held at 1.3x meanwhile: a complete segment
+    audio.release.set()
+    await keeper
+
+    assert audio.of("PlayMusic")[-1] == ("PlayMusic", 1.0)
+    assert audio.tempos[-1] == ("track-2", 1.3)
+
+
+class SlowFirstGlide(RestartingAudio):
+    """The next ChangeTempo waits for ``release`` while ``hold`` is set; later ones answer at once."""
+
+    def __init__(self):
+        super().__init__()
+        self.hold = False
+        self.release = asyncio.Event()
+
+    async def ChangeTempo(self, request):  # noqa: N802 - gRPC stub name
+        if self.hold:
+            self.hold = False
+            await self.release.wait()
+        return await super().ChangeTempo(request)
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-031", flow="A7", steps=[2], br=["BR-009"])
+async def test_a_glide_refused_during_the_outage_check_uses_no_refusal_restart(clock):
+    """The service stays "down" until its check glide answers, so a tick glide refused meanwhile is not capped."""
+    audio = SlowFirstGlide()
+    game = await started_game(audio, ScriptedProbe(PROBE_RECONNECTED))
+    audio.restart()  # a restart the probe saw
+    audio.hold = True
+
+    check = asyncio.get_running_loop().create_task(game._keep_music_alive())
+    await asyncio.sleep(0)  # the check glide is in flight
+    assert game._audio_down
+    await game._push_audio(1.0, 1.0)  # a tick glide, refused by the restarted service
+    audio.release.set()
+    await check
+
+    assert game._music_refusal_restarts == 0
+    assert len(audio.of("PlayMusic")) == 2
+    assert not game._audio_down
