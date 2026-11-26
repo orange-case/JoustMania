@@ -415,7 +415,7 @@ func TestReferenceVariantsRefused(t *testing.T) {
 		e := newStartEnv(t)
 		f := e.admin.f
 		f.ServeFlagAPI()
-		e.offFeatures("rollout_enabled")
+		e.offFeatures("experiment_dynamic_enabled")
 		f.Options.Add(1, "on")
 		f.Options.Add(1, "off")
 		var once sync.Once
@@ -427,7 +427,7 @@ func TestReferenceVariantsRefused(t *testing.T) {
 			t.Fatal(err)
 		}
 		if n := referencePatches(f)[1]; n != 2 {
-			t.Fatalf("rollout_enabled written %d times, want 2 (refused, relisted, sent again)", n)
+			t.Fatalf("experiment_dynamic_enabled written %d times, want 2 (refused, relisted, sent again)", n)
 		}
 		if n := len(f.RequestsTo(http.MethodGet, flagsmithtest.APIPath+"projects/42/features/1/mv-options/")); n != 1 {
 			t.Fatalf("%d option listings, want 1", n)
@@ -437,14 +437,14 @@ func TestReferenceVariantsRefused(t *testing.T) {
 		}
 		got, enabled, variants := storedDefault(t, f, 1)
 		if enabled || got != "off" || len(variants) != 3 {
-			t.Fatalf("rollout_enabled enabled=%v %q weights %+v, want enabled=false off with all three options named", enabled, got, variants)
+			t.Fatalf("experiment_dynamic_enabled enabled=%v %q weights %+v, want enabled=false off with all three options named", enabled, got, variants)
 		}
 	})
 	t.Run("UC-054/A3 FR-227 a second variants refusal is logged for the feature and the step goes on", func(t *testing.T) {
 		e := newStartEnv(t)
 		f := e.admin.f
 		f.ServeFlagAPI()
-		e.offFeatures("rollout_enabled", "experiment_tick_seconds")
+		e.offFeatures("experiment_dynamic_enabled", "experiment_tick_seconds")
 		f.Handle("PATCH /api/__future__/environments/{env}/features/1/{$}", func(w http.ResponseWriter, _ *http.Request) {
 			flagsmithtest.WriteJSON(w, http.StatusBadRequest, map[string]any{"environment_default": map[string]any{"variants": []string{"Must include all feature's variants."}}})
 		})
@@ -452,13 +452,13 @@ func TestReferenceVariantsRefused(t *testing.T) {
 			t.Fatal(err)
 		}
 		if n := referencePatches(f)[1]; n != 2 {
-			t.Fatalf("rollout_enabled written %d times, want 2 (one relist, no third try)", n)
+			t.Fatalf("experiment_dynamic_enabled written %d times, want 2 (one relist, no third try)", n)
 		}
 		if got, enabled, _ := storedDefault(t, f, 2); enabled || got != "default" {
 			t.Fatalf("experiment_tick_seconds %q enabled=%v, want its reference written after the refusal", got, enabled)
 		}
-		if !strings.Contains(e.logs.String(), `msg="flagsmith reference not written" flag_set=agent flag=rollout_enabled`) {
-			t.Fatalf("log %q, want a WARN naming rollout_enabled", e.logs.String())
+		if !strings.Contains(e.logs.String(), `msg="flagsmith reference not written" flag_set=agent flag=experiment_dynamic_enabled`) {
+			t.Fatalf("log %q, want a WARN naming experiment_dynamic_enabled", e.logs.String())
 		}
 	})
 }

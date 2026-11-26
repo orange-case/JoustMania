@@ -181,11 +181,10 @@ func TestShieldCharge_UnreadableWarnsThrottled(t *testing.T) {
 // UC: UC-045 A3
 func TestSetupFlagd_GameDomain(t *testing.T) {
 	t.Run("UC-040/A31 the game set is its own domain: default before its sync, served after", func(t *testing.T) {
-		agentSrc, rolloutSrc, gameSrc := newFakeFlagdSource("on"), newFakeFlagdSource("on"), newFakeFlagdSource("on")
+		agentSrc, gameSrc := newFakeFlagdSource("on"), newFakeFlagdSource("on")
 		agentSrc.set(true, "on")
-		rolloutSrc.set(true, "on")
 		ctx, cancel := context.WithCancel(context.Background())
-		f, _, shutdown, err := setupFlagd(ctx, fakeFactory(agentSrc), fakeFactory(rolloutSrc), fakeFactory(gameSrc), nil, testSyncTiming, nil)
+		f, _, shutdown, err := setupFlagd(ctx, fakeFactory(agentSrc), fakeFactory(gameSrc), nil, testSyncTiming, nil)
 		if err != nil {
 			t.Fatalf("setupFlagd: %v", err)
 		}

@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -139,7 +140,7 @@ func TestFromObjectives_PerVariant(t *testing.T) {
 			if !ok {
 				t.Fatalf("agent.json objectives has no %s", variant)
 			}
-			p := FromObjectives(w, 120, 60)
+			p := FromObjectives(w)
 			if !p.FromObjectives || p.Name != want {
 				t.Fatalf("FromObjectives(%s) = %+v, want %q", variant, p, want)
 			}
@@ -149,39 +150,55 @@ func TestFromObjectives_PerVariant(t *testing.T) {
 		})
 	}
 	t.Run("UC-042/A12 chaos is activity >= 0.6 plus change >= 0.3", func(t *testing.T) {
-		got := FromObjectives(variants["chaos_focused"], 120, 60).GoalLine()
+		got := FromObjectives(variants["chaos_focused"]).GoalLine()
 		if got != "chaos_focused activity>=0.60 change>=0.30" {
 			t.Fatalf("chaos line = %q", got)
 		}
 	})
 }
 
-func TestFromObjectives_DurationBandsReadFitnessFlags(t *testing.T) {
-	variants := objectivesVariants(t)
-	t.Run("UC-042/A12 endurance reads fitness.endurance.min_session_seconds", func(t *testing.T) {
-		for _, minS := range []float64{60, 120, 300} {
-			p := FromObjectives(variants["endurance_focused"], minS, 60)
-			d := p.Terms[0]
-			if d.Characteristic != decide.CharDuration || d.Min == nil || *d.Min != minS || d.Max != nil {
-				t.Fatalf("endurance duration term = %+v, want >= %v", d, minS)
+// goalProfileVariants reads the goal.profile variants of services/flagd/agent.json.
+func goalProfileVariants(t *testing.T) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "flagd", "agent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Flags map[string]struct {
+			Variants map[string]any `json:"variants"`
+		} `json:"flags"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc.Flags["goal.profile"].Variants
+}
+
+// The from_objectives forms are exactly the named goal.profile variants, so a
+// profile name always means one set of bands.
+func TestFromObjectives_EqualsNamedVariant(t *testing.T) {
+	objectives := objectivesVariants(t)
+	named := goalProfileVariants(t)
+	for objective, name := range map[string]string{
+		"endurance_focused":  NameLongRunningGame,
+		"accelerate_focused": NameQuickGame,
+		"balanced_focused":   NameBalancedContest,
+	} {
+		t.Run("UC-042/A12 "+objective+" is "+name, func(t *testing.T) {
+			want, _, err := Parse(named[name])
+			if err != nil {
+				t.Fatalf("agent.json goal.profile %s: %v", name, err)
 			}
-		}
-	})
-	t.Run("UC-042/A12 accelerate reads fitness.accelerate.target_session_seconds", func(t *testing.T) {
-		for _, target := range []float64{30, 60, 120} {
-			p := FromObjectives(variants["accelerate_focused"], 120, target)
-			d := p.Terms[0]
-			if d.Characteristic != decide.CharDuration || d.Max == nil || *d.Max != target || d.Min != nil {
-				t.Fatalf("accelerate duration term = %+v, want <= %v", d, target)
+			got := FromObjectives(objectives[objective])
+			if got.Name != name {
+				t.Fatalf("name = %q, want %q", got.Name, name)
 			}
-		}
-	})
-	t.Run("UC-042/A12 a fitness value outside the hard bound is clamped", func(t *testing.T) {
-		p := FromObjectives(variants["endurance_focused"], 99999, 60)
-		if *p.Terms[0].Min != 3600 {
-			t.Fatalf("clamped min = %v", *p.Terms[0].Min)
-		}
-	})
+			if !reflect.DeepEqual(got.Terms, want) {
+				t.Fatalf("from_objectives %q, named variant %q", got.GoalLine(), (Profile{Name: name, Terms: want}).GoalLine())
+			}
+		})
+	}
 }
 
 func TestGoalLine(t *testing.T) {

@@ -31,8 +31,6 @@ def _make_adapter(adapter_type="mock", serials=None):
     adapter.poll.return_value = None
     adapter.set_output.return_value = True
     adapter.get_adapter_for_serial.return_value = None
-    # Plain adapters are their own device owner — no shared inner.
-    adapter.inner = None
     return adapter
 
 
@@ -749,81 +747,21 @@ class TestRouteControllers:
         )
 
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_rollout_method_label_recorded(self, mock_metrics):
-        """A rollout-driven winner records the 'rollout' method label."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        mux = MultiplexerBackend(adapters=[a1])
+    @pytest.mark.uc("UC-002", flow="main", steps=[3])
+    def test_targeting_match_on_retired_unstable_falls_back_to_first_real_adapter(self, mock_metrics):
+        """A leftover per-serial `unstable` targeting rule names no loaded adapter: route to the first non-mock one."""
+        mock_adapter = _make_adapter("mock", serials=["AA:AA"])
+        rust = _make_adapter("rust", serials=["AA:AA"])
+        python = _make_adapter("python", serials=["AA:AA"])
+        mux = MultiplexerBackend(adapters=[mock_adapter, rust, python])
 
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a1, "rollout")):
-            mux.get_connected_controllers()
+        mock_client = autospec_flag_client()
+        mock_client.get_string_details.return_value = _details("unstable", "TARGETING_MATCH")
+        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
+            assert mux._resolve_adapter_for_serial("AA:AA") == (None, "default")
+            assert mux.get_connected_controllers() == ["AA:AA"]
 
-        mock_metrics.controller_routing_decisions_total.labels.assert_any_call(
-            serial="AA:AA",
-            adapter="python",
-            method="rollout",
-        )
-
-
-class TestUnstableRoutingOnly:
-    """Routing-only adapters (unstable) must never win by default/fallback."""
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_unstable_registered_for_targeting_not_discovery(self, mock_metrics):
-        a_py = _make_adapter("python")
-        a_un = _make_adapter("unstable")
-        mux = MultiplexerBackend(adapters=[a_py], routing_only_adapters=[a_un])
-
-        # Reachable as a targeting/rollout destination
-        assert mux._adapter_by_type["unstable"] is a_un
-        # But not an independent discoverer
-        assert a_un not in mux.adapters
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_unstable_excluded_from_fallback_selection(self, mock_metrics):
-        """When two non-mock adapters discover a serial and one is unstable,
-        the fallback path must pick the non-unstable adapter."""
-        a_py = _make_adapter("python", serials=["AA:AA"])
-        a_un = _make_adapter("unstable", serials=["AA:AA"])
-        # Put unstable FIRST so a naive 'first non-mock' would wrongly pick it.
-        mux = MultiplexerBackend(adapters=[a_un, a_py])
-
-        # No targeting/rollout resolves -> fallback selection
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(None, "default")):
-            mux.get_connected_controllers()
-
-        assert mux._serial_to_adapter["AA:AA"] is a_py
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_unstable_only_falls_back_to_itself(self, mock_metrics):
-        """If unstable is the ONLY discoverer, adapters[0] fallback still uses it."""
-        a_un = _make_adapter("unstable", serials=["AA:AA"])
-        mux = MultiplexerBackend(adapters=[a_un])
-
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(None, "default")):
-            mux.get_connected_controllers()
-
-        assert mux._serial_to_adapter["AA:AA"] is a_un
-
-
-class TestSharedInnerNotClosed:
-    """Switching between a plain adapter and a decorator sharing its inner
-    must not close the shared device."""
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_loser_sharing_inner_not_closed(self, mock_metrics):
-        from services.controller_manager.multiplexer.unstable_adapter import UnstableAdapter
-
-        a_py = _make_adapter("python", serials=["AA:AA"])
-        a_un = UnstableAdapter(a_py)  # shares a_py as inner
-        mux = MultiplexerBackend(adapters=[a_py], routing_only_adapters=[a_un])
-
-        # Route the serial to the unstable wrapper; python is the discoverer/loser.
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a_un, "targeted")):
-            mux.get_connected_controllers()
-
-        assert mux._serial_to_adapter["AA:AA"] is a_un
-        # Shared inner must NOT have been closed by the losing python discoverer
-        a_py.close.assert_not_called()
+        assert mux._serial_to_adapter["AA:AA"] is rust
 
 
 class TestIndependentDiscovery:
@@ -878,10 +816,9 @@ def _details(value, reason):
 
 
 class TestResolveAdapterForSerial:
-    """Tests for three-way precedence in _resolve_adapter_for_serial."""
+    """Tests for the precedence in _resolve_adapter_for_serial."""
 
     @pytest.mark.uc("UC-002", flow="main", steps=[3])
-    @pytest.mark.uc("UC-052", flow="main", steps=[3])
     def test_explicit_targeting_match_wins(self):
         """A TARGETING_MATCH on bluetooth_backend routes to that adapter."""
         a1 = _make_adapter("python")
@@ -892,7 +829,7 @@ class TestResolveAdapterForSerial:
         mock_client.get_string_details.return_value = _details("rust", "TARGETING_MATCH")
 
         with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA", ["AA:AA"])
+            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
 
         assert adapter is a2
         assert method == "targeted"
@@ -905,59 +842,11 @@ class TestResolveAdapterForSerial:
 
         mock_client = autospec_flag_client()
         mock_client.get_string_details.return_value = _details("python", "DEFAULT")
-        # No rollout in play
-        with (
-            patch("lib.feature_flags.get_flag_client", return_value=mock_client),
-            patch.object(mux._rollout_router, "target_for", return_value=None),
-        ):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA", ["AA:AA"])
+        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
+            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
 
         assert adapter is a1
         assert method == "default"
-
-    @pytest.mark.uc("UC-002", flow="main", steps=[3])
-    @pytest.mark.uc("UC-050", flow="main", steps=[6])
-    def test_rollout_beats_default_when_no_explicit_targeting(self):
-        """Rollout target wins over the flag default variant."""
-        a_py = _make_adapter("python")
-        a_un = _make_adapter("unstable")
-        mux = MultiplexerBackend(adapters=[a_py], routing_only_adapters=[a_un])
-
-        mock_client = autospec_flag_client()
-        # bluetooth_backend resolves to default variant (no TARGETING_MATCH)
-        mock_client.get_string_details.return_value = _details("python", "DEFAULT")
-
-        with (
-            patch("lib.feature_flags.get_flag_client", return_value=mock_client),
-            patch.object(mux._rollout_router, "target_for", return_value="unstable"),
-        ):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA", ["AA:AA"])
-
-        assert adapter is a_un
-        assert method == "rollout"
-
-    @pytest.mark.uc("UC-002", flow="main", steps=[3])
-    @pytest.mark.uc("UC-050", flow="A4")
-    @pytest.mark.uc("UC-052", flow="main", br=["BR-001"])
-    def test_explicit_targeting_beats_rollout(self):
-        """Explicit TARGETING_MATCH takes precedence over an active rollout."""
-        a_py = _make_adapter("python")
-        a_un = _make_adapter("unstable")
-        mux = MultiplexerBackend(adapters=[a_py], routing_only_adapters=[a_un])
-
-        mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _details("python", "TARGETING_MATCH")
-
-        with (
-            patch("lib.feature_flags.get_flag_client", return_value=mock_client),
-            patch.object(mux._rollout_router, "target_for", return_value="unstable") as rollout,
-        ):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA", ["AA:AA"])
-
-        assert adapter is a_py
-        assert method == "targeted"
-        # Explicit match short-circuits before rollout is consulted
-        rollout.assert_not_called()
 
     def test_returns_none_when_no_match(self):
         a1 = _make_adapter("python")
@@ -966,11 +855,8 @@ class TestResolveAdapterForSerial:
         mock_client = autospec_flag_client()
         mock_client.get_string_details.return_value = _details("nonexistent", "DEFAULT")
 
-        with (
-            patch("lib.feature_flags.get_flag_client", return_value=mock_client),
-            patch.object(mux._rollout_router, "target_for", return_value=None),
-        ):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA", ["AA:AA"])
+        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
+            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
 
         assert adapter is None
         assert method == "default"
@@ -982,11 +868,8 @@ class TestResolveAdapterForSerial:
         mock_client = autospec_flag_client()
         mock_client.get_string_details.return_value = _details("", "DEFAULT")
 
-        with (
-            patch("lib.feature_flags.get_flag_client", return_value=mock_client),
-            patch.object(mux._rollout_router, "target_for", return_value=None),
-        ):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA", ["AA:AA"])
+        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
+            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
 
         assert adapter is None
         assert method == "default"
@@ -996,7 +879,7 @@ class TestResolveAdapterForSerial:
         mux = MultiplexerBackend(adapters=[a1])
 
         with patch("lib.feature_flags.get_flag_client", side_effect=RuntimeError("flagd down")):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA", ["AA:AA"])
+            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
 
         assert adapter is None
         assert method == "default"
@@ -1009,7 +892,7 @@ class TestResolveAdapterForSerial:
         mock_client.get_string_details.return_value = _details("python", "TARGETING_MATCH")
 
         with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
-            mux._resolve_adapter_for_serial("E0AE5EE111AB", ["E0AE5EE111AB"])
+            mux._resolve_adapter_for_serial("E0AE5EE111AB")
 
         call_args = mock_client.get_string_details.call_args
         ctx = call_args[0][2]  # Third positional arg is the EvaluationContext

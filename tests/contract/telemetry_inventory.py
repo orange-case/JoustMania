@@ -18,7 +18,7 @@ Producers
 Consumers
     * Go agent ingest (docs/specs/telemetry.md §4.4): the metric-name and label
       constants of ``gamecontext/extract_metrics.go``, the span attribute/event
-      constants of ``gamecontext/extract_spans.go`` and ``infracontext/extract_spans.go``,
+      constants of ``gamecontext/extract_spans.go``,
       and the log event name and attribute constants of ``gamecontext/extract_logs.go``.
     * Grafana dashboards (``services/grafana/dashboards/<folder>/*.json``) and the dashboard
       SPA's VictoriaMetrics queries: metric names in PromQL.
@@ -563,15 +563,12 @@ class AgentIngest:
     span_attrs: dict[str, str]  # const -> span attribute key (game path)
     log_events: dict[str, str]  # const -> log event name
     log_attrs: dict[str, str]  # const -> log record attribute key
-    infra_span_names: dict[str, str]
-    infra_span_attrs: dict[str, str]
 
 
 def agent_ingest() -> AgentIngest:
     metrics_consts = _go_consts(AGENT_DIR / "gamecontext" / "extract_metrics.go")
     spans_consts = _go_consts(AGENT_DIR / "gamecontext" / "extract_spans.go")
     logs_consts = _go_consts(AGENT_DIR / "gamecontext" / "extract_logs.go")
-    infra_consts = _go_consts(AGENT_DIR / "infracontext" / "extract_spans.go")
     return AgentIngest(
         metric_names={
             k: v for k, v in metrics_consts.items() if k.startswith("metric")
@@ -580,12 +577,6 @@ def agent_ingest() -> AgentIngest:
         span_attrs={k: v for k, v in spans_consts.items() if k.startswith("spanAttr")},
         log_events={k: v for k, v in logs_consts.items() if k.startswith("logEvent")},
         log_attrs={k: v for k, v in logs_consts.items() if k.startswith("attr")},
-        infra_span_names={
-            k: v for k, v in infra_consts.items() if k.startswith("Span")
-        },
-        infra_span_attrs={
-            k: v for k, v in infra_consts.items() if k.startswith(("Attr", "Event"))
-        },
     )
 
 

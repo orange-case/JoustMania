@@ -3,8 +3,7 @@
 Every telemetry name a consumer depends on must have a live producer:
 
 (a) the Go agent ingest names (``gamecontext/extract_metrics.go``,
-    ``gamecontext/extract_spans.go``, ``gamecontext/extract_logs.go``,
-    ``infracontext/extract_spans.go``) are
+    ``gamecontext/extract_spans.go``, ``gamecontext/extract_logs.go``) are
     produced by the Python/Rust services; for metrics that means a definition
     AND a recording call site (#1334 / #1335 were defined but never recorded);
 (b) every metric (and Python label matcher) in the Grafana dashboards and the
@@ -131,7 +130,6 @@ def test_inventory_parsers_find_the_known_surface(python_metrics, consumer_queri
         "game.phase.start",
     }, "extract_logs.go event constants not found"
     assert ingest.log_attrs, "extract_logs.go attribute constants not found"
-    assert ingest.infra_span_names, "infracontext span-name constants not found"
     assert len(ti.spa_queries()) >= 2, (
         "dashboard SPA *_QUERY scan found too few queries"
     )
@@ -240,18 +238,6 @@ def test_agent_ingested_log_events_exist_in_producers():
     missing = sorted(f"{c}={v}" for c, v in wanted.items() if v not in literals)
     assert not missing, (
         f"Agent log event keys not found in any Python/Rust producer: {missing}"
-    )
-
-
-@pytest.mark.uc("UC-041", flow="A1")
-def test_agent_infra_span_contract_exists_in_producers():
-    """UC-041 A1: the controller.bluetooth_health span, its sample event and attributes are produced."""
-    ingest = ti.agent_ingest()
-    literals = ti.producer_string_literals()
-    wanted = {**ingest.infra_span_names, **ingest.infra_span_attrs}
-    missing = sorted(f"{c}={v}" for c, v in wanted.items() if v not in literals)
-    assert not missing, (
-        f"Agent infra span keys not found in any Python/Rust producer: {missing}"
     )
 
 

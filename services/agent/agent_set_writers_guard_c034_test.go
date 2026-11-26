@@ -8,10 +8,10 @@ package main
 //   - any selector named Put, Post or Delete (a call or a method value, on any
 //     receiver) outside the known call sites below;
 //   - a known flag-service write whose set argument is not a package constant
-//     with the value interventions, rollout or game;
+//     with the value interventions or game;
 //   - a known flag-service write that no row of c034WriterRows drives, or a known
 //     call site that no longer exists (stale entry);
-//   - a flag-service client built outside its five known sites;
+//   - a flag-service client built outside its four known sites;
 //   - a raw HTTP write verb (http.MethodPut/Post/Patch/Delete, the literal verbs,
 //     http.Post/PostForm, an (*http.Client).Do) outside its known sites;
 //   - inside flagservice/, a request method other than GET sent by any function
@@ -43,7 +43,6 @@ import (
 var c034FlagServiceWrites = map[string]bool{
 	"actions/writer.go:Writer.put":                                   true,
 	"actions/writer.go:Writer.post":                                  true,
-	"actions/rollout_writer.go:RolloutWriter.SetControllerCount":     true,
 	"experiment/writer.go:Writer.Apply":                              true,
 	"experiment/writer.go:Writer.DryRun":                             true,
 	"experiment/writer.go:Writer.Strip":                              true,
@@ -57,7 +56,6 @@ var c034OtherPostSites = map[string]string{}
 // c034ClientSites build a flag-service client (flagservice.New / NewFromEnv).
 var c034ClientSites = map[string]bool{
 	"actions/writer.go:NewWriterFromEnv":                 true,
-	"actions/rollout_writer.go:NewRolloutWriterFromEnv":  true,
 	"experiment/writer.go:NewWriterFromEnv":              true,
 	"promote/realdefault.go:NewRealDefaultWriterFromEnv": true,
 	"main.go:run": true,
@@ -71,7 +69,7 @@ var c034RawWriteSites = map[string]string{
 }
 
 // c034AllowedSets are the only values a write's set constant may have (C-034).
-var c034AllowedSets = map[string]bool{"interventions": true, "rollout": true, "game": true}
+var c034AllowedSets = map[string]bool{"interventions": true, "game": true}
 
 // c034FuncName names a declaration for a guard key: Recv.Func for a method
 // (pointer and type parameters stripped), Func for a plain function and
@@ -315,7 +313,7 @@ func TestC034_EveryAgentWriterIsKnownAndDriven(t *testing.T) {
 			continue
 		}
 		if !c034AllowedSets[val] {
-			t.Errorf("C-034 VIOLATION: %s: %s at %s writes set %s = %q; only interventions, rollout and game are allowed", site.pos, site.sel, site.key, ident.Name, val)
+			t.Errorf("C-034 VIOLATION: %s: %s at %s writes set %s = %q; only interventions and game are allowed", site.pos, site.sel, site.key, ident.Name, val)
 		}
 	}
 	for key := range c034FlagServiceWrites {

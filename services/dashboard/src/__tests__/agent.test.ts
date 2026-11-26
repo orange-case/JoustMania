@@ -7,7 +7,6 @@
  *                             game): game_cycle -> agent.flag_state, and
  *                             agent.signal_received -> invoke_agent + agent.decision
  *                             (one blocked, one allowed)
- *   jaeger-rollout-*          one-span agent.infrastructure.decision traces
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -15,22 +14,17 @@ import {
   DecideStore,
   FLAG_STATE_FALLBACK_LIMIT,
   FlagStateStore,
-  ROLLOUT_ACTIONS,
-  ROLLOUT_OVERLAP_MS,
-  RolloutStore,
   activityFeed,
   blockedRowsFrom,
   pollDecides,
   fetchFlagStates,
   fetchInterventionCounts,
-  fetchRollouts,
   needsFlagStateFallback,
   parseAppliedCounts,
   APPLIED_UNAVAILABLE,
   parseBlockedCounts,
   parseDecideTraces,
   parseFlagStates,
-  rolloutRowFrom,
 } from "../agent.js";
 import type { JaegerTracesResponse, VmQueryResponse } from "../agent.js";
 import { WRITE_GATE_OFF_HINT, renderFlagPanel } from "../components/AgentView.js";
@@ -38,14 +32,8 @@ import { FLAG_STATE_NO_DATA } from "../degrade.js";
 import { COLD_START_TIME_MIN, SEARCH_TIME_MAX } from "../jaeger.js";
 import { toOtlp } from "./otlp.js";
 import gamesFixture from "./fixtures/jaeger-flag-state-games.json";
-import expandFixture from "./fixtures/jaeger-rollout-expand.json";
-import rollbackFixture from "./fixtures/jaeger-rollout-rollback.json";
 
 const games = gamesFixture as unknown as JaegerTracesResponse;
-const expand = expandFixture as unknown as JaegerTracesResponse;
-const rollback = rollbackFixture as unknown as JaegerTracesResponse;
-
-const T0_MS = 1_760_000_000_000;
 
 function vm(result: { metric: Record<string, string>; value: [number, string] }[]): VmQueryResponse {
   return { status: "success", data: { resultType: "vector", result } };
@@ -253,7 +241,7 @@ describe("UC-070: BR-005 the flag-state search and store keep the live real game
   });
 });
 
-describe("UC-035: main step 3, activity feed (blocked decisions + rollout)", () => {
+describe("UC-035: main step 3, activity feed (blocked decisions)", () => {
   it("UC-035/main step 3 blocked rows come from the decide poll's agent.decision spans", () => {
     const store = new DecideStore();
     store.merge(parseDecideTraces(games).rows);
@@ -266,55 +254,13 @@ describe("UC-035: main step 3, activity feed (blocked decisions + rollout)", () 
     expect(rows.every((r) => r.blocked && r.kind === "blocked")).toBe(true);
   });
 
-  it("UC-035/main step 3 rollout rows come from agent.infrastructure.decision by remediation.action", () => {
-    const row = rolloutRowFrom(rollback.data![0].spans[0]);
-    expect(row).toMatchObject({ kind: "rollout", signal: "rollout rollback (dry run)", action: "bluez", reason: "event_gap_ms>40" });
-    const none = { ...expand.data![0].spans[0], tags: [{ key: "remediation.action", value: "none" }] };
-    expect(rolloutRowFrom(none)).toBeNull();
-  });
-
-  it("UC-035/main step 3 one tag search per action; later searches start at the newest span minus the overlap", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2031-01-01T00:00:00Z"));
-    const store = new RolloutStore();
-    const urls = stubFetch((url) => {
-      const tags = new URL(url, "http://x").searchParams.get("query.attributes") ?? "";
-      if (tags.includes('"expand"')) return json(toOtlp(expand));
-      if (tags.includes('"rollback"')) return json(toOtlp(rollback));
-      return json({ data: [] });
-    });
-
-    await fetchRollouts(store);
-    const first = urls.map((u) => new URL(u, "http://x").searchParams);
-    expect(first.map((p) => JSON.parse(p.get("query.attributes")!)["remediation.action"])).toEqual([...ROLLOUT_ACTIONS]);
-    expect(
-      first.every(
-        (p) =>
-          p.get("query.operationName") === "agent.infrastructure.decision" &&
-          p.get("query.startTimeMin") === COLD_START_TIME_MIN &&
-          p.get("query.startTimeMax") === SEARCH_TIME_MAX,
-      ),
-    ).toBe(true);
-
-    urls.length = 0;
-    await fetchRollouts(store);
-    const second = new Map(urls.map((u) => {
-      const p = new URL(u, "http://x").searchParams;
-      return [JSON.parse(p.get("query.attributes")!)["remediation.action"], p.get("query.startTimeMin")];
-    }));
-    expect(second.get("expand")).toBe(new Date(T0_MS + 70_000 - ROLLOUT_OVERLAP_MS).toISOString());
-    expect(second.get("rollback")).toBe(new Date(T0_MS + 80_000 - ROLLOUT_OVERLAP_MS).toISOString());
-    expect(second.get("recommended_only")).toBe(COLD_START_TIME_MIN);
-    expect(store.list().map((r) => r.signal)).toEqual(["rollout rollback (dry run)", "rollout expand"]);
-  });
-
-  it("UC-035/main step 3 the feed merges both, newest first", () => {
+  it("UC-035/main step 3 the feed is newest first", () => {
     const decide = new DecideStore();
     decide.merge(parseDecideTraces(games).rows);
-    const rollouts = new RolloutStore();
-    rollouts.merge("expand", expand);
-    const feed = activityFeed(blockedRowsFrom(decide.feed().rows), rollouts.list());
-    expect(feed.map((r) => r.kind)).toEqual(["rollout", "blocked", "blocked"]);
+    const blocked = blockedRowsFrom(decide.feed().rows);
+    const feed = activityFeed([...blocked].reverse());
+    expect(feed.map((r) => r.tsMs)).toEqual(blocked.map((r) => r.tsMs).sort((x, y) => y - x));
+    expect(feed).toHaveLength(2);
   });
 });
 

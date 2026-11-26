@@ -86,34 +86,25 @@ func (l *Loop) countPredictionDropped(ctx context.Context, rec *decideRecord) {
 		attribute.String("backend", rec.used), attribute.String("reason", reason)))
 }
 
-// predictionOutcomes are the decide outcomes whose prediction is registered: an
-// acted or rules-fallback decision (acted when its write was applied, else a
-// counterfactual), a held one and one discarded after mapping (counterfactuals).
-var predictionOutcomes = map[string]bool{
-	DecideOutcomeAct:       true,
-	DecideOutcomeFallback:  true,
-	DecideOutcomeHeld:      true,
-	DecideOutcomeDiscarded: true,
-}
-
 // registerPrediction registers rec's prediction with the book, linked to span,
-// and records the returned id on rec for the invoke_agent attributes.
+// and records the returned id on rec for the invoke_agent attributes. Only a
+// decision that acted (permission chain passed, write applied) registers.
 func (l *Loop) registerPrediction(span trace.Span, rec *decideRecord) {
-	if l.predictions == nil || rec.predictionsOff || rec.prediction == nil || rec.predictionCtx == nil ||
-		!predictionOutcomes[rec.outcome] {
+	if l.predictions == nil || rec.predictionsOff || rec.prediction == nil || rec.predictionCtx == nil {
 		return
 	}
 	acted := (rec.outcome == DecideOutcomeAct || rec.outcome == DecideOutcomeFallback) &&
 		rec.permissionKnown && !rec.blocked && rec.applied
-	id, merged, ok := l.predictions.Register(prediction.Registration{
+	if !acted {
+		return
+	}
+	if id, ok := l.predictions.Register(prediction.Registration{
 		Backend:    rec.used,
 		Prediction: *rec.prediction,
-		Acted:      acted,
 		DecideSpan: span.SpanContext(),
 		Context:    *rec.predictionCtx,
-	})
-	if ok {
-		rec.predictionID, rec.predictionMerged = id, merged
+	}); ok {
+		rec.predictionID = id
 	}
 }
 
@@ -135,9 +126,6 @@ func predictionAttributes(rec *decideRecord) []attribute.KeyValue {
 	}
 	if p.Rule != "" {
 		attrs = append(attrs, attribute.String(keys.AttrDecidePredictionRule, p.Rule))
-	}
-	if rec.predictionMerged {
-		attrs = append(attrs, attribute.Bool(keys.AttrDecidePredictionMerged, true))
 	}
 	return attrs
 }

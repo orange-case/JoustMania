@@ -12,13 +12,12 @@ import (
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-// fakeGate is a static InterventionGate/RolloutGate for the wiring tests: it
+// fakeGate is a static InterventionGate for the wiring tests: it
 // reports a constant gate value regardless of context, standing in for the live
 // *flags.Flags.
 type fakeGate bool
 
 func (g fakeGate) InterventionsEnabled(context.Context) bool { return bool(g) }
-func (g fakeGate) RolloutEnabled(context.Context) bool       { return bool(g) }
 
 // TestActionSinkIsLiveGated: post-#1213 the sink wiring ALWAYS returns a
 // GatedActionSink (the gate is read per Apply against the live flag), never nil and
@@ -42,27 +41,5 @@ func TestActionSinkGateOffSuppressesApply(t *testing.T) {
 	// returns nil without a flag-service call.
 	if err := sink.Apply(context.Background(), decision.Decision{Intervention: "audio_cue"}); err != nil {
 		t.Fatalf("gate-off Apply should be a no-op, got error: %v", err)
-	}
-}
-
-// TestRolloutActuatorIsLiveGated: post-#1213 the rollout wiring ALWAYS returns a
-// GatedRolloutActuator (the gate is read per SetControllerCount/DryRun against the
-// live flag), never a bare RolloutWriter or a fixed DryRunRolloutWriter.
-func TestRolloutActuatorIsLiveGated(t *testing.T) {
-	act := rolloutActuator(context.Background(), fakeGate(true), discardLogger())
-	if _, ok := act.(*actions.GatedRolloutActuator); !ok {
-		t.Fatalf("expected *actions.GatedRolloutActuator from the live-gated wiring, got %T", act)
-	}
-}
-
-// TestRolloutActuatorDryRunTracksGate: DryRun() reflects the LIVE gate state, not a
-// boot-time snapshot. Gate off (fail-closed default / flagd outage) ⇒ dry-run true;
-// gate on ⇒ dry-run false.
-func TestRolloutActuatorDryRunTracksGate(t *testing.T) {
-	if off := rolloutActuator(context.Background(), fakeGate(false), discardLogger()); !off.DryRun() {
-		t.Fatal("gate OFF must report DryRun()=true (rehearsal)")
-	}
-	if on := rolloutActuator(context.Background(), fakeGate(true), discardLogger()); on.DryRun() {
-		t.Fatal("gate ON must report DryRun()=false (applied)")
 	}
 }

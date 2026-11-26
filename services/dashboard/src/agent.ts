@@ -4,7 +4,7 @@
  *
  * The "Agent" tab is the demo's observability focus screen: it shows what the
  * in-game agent is doing live: the decisions it evaluates (invoke_agent), the
- * effective flag values it resolved, its activity (blocked decisions, rollouts)
+ * effective flag values it resolved, its activity (blocked decisions)
  * and the interventions it applied vs blocked.
  *
  * SOURCES (UC-035 step 3, docs/specs/telemetry.md §6.1)
@@ -16,8 +16,6 @@
  *     agent.flag_state      flag panel: also in the decide poll's game traces;
  *                           its own small search (FLAG_STATE_FALLBACK_LIMIT) only
  *                           when the decide poll brought none newer
- *     agent.infrastructure.decision  rollout rows, one tag search per
- *                           remediation.action (ROLLOUT_ACTIONS)
  *   VictoriaMetrics: the applied write counter and the blocked tallies (UC-040
  *   A21); `n/a` when it is down (no fallback: a fold over a few traces is not a
  *   10-minute window).

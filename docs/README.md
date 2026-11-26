@@ -17,7 +17,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | Document | What it answers |
 |---|---|
 | [requirements.md](requirements.md) | Every functional requirement (FR), measurable quality (NFR) and constraint (C), with status |
-| [entity_model.md](entity_model.md) | Domain entities: controller, game session, player, flag, decision, intervention, experiment, rollout |
+| [entity_model.md](entity_model.md) | Domain entities: controller, game session, player, flag, decision, intervention, experiment |
 | [glossary.md](glossary.md) | Shared vocabulary: game kinds, decision outcomes, confidence, gates, stages, shadow, experiment, kill switch, and the words to avoid |
 
 ## 3. How it behaves: use cases
@@ -31,7 +31,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | Playing | [UC-020](use_cases/UC-020.md) FFA, [UC-021](use_cases/UC-021.md) teams, [UC-022](use_cases/UC-022.md) hidden roles, [UC-023](use_cases/UC-023.md) zombies, [UC-024](use_cases/UC-024.md) swapper, [UC-025](use_cases/UC-025.md) 1v1, [UC-026](use_cases/UC-026.md) non-stop, [UC-027](use_cases/UC-027.md) force end, [UC-030](use_cases/UC-030.md) death detection, [UC-031](use_cases/UC-031.md) audio |
 | Observability | [UC-035](use_cases/UC-035.md) observe the system |
 | Agent | [UC-040](use_cases/UC-040.md) decide an intervention, [UC-041](use_cases/UC-041.md) observe a game, [UC-042](use_cases/UC-042.md) retro and proposals, [UC-043](use_cases/UC-043.md) shadow experiments and promotion, [UC-044](use_cases/UC-044.md) switch backend live, [UC-045](use_cases/UC-045.md) kill switch, [UC-046](use_cases/UC-046.md) repeatable pattern-driven shadow games (#1258), [UC-047](use_cases/UC-047.md) calibrate the shadow players offline from real games (#2813) |
-| Infrastructure | [UC-050](use_cases/UC-050.md) progressive rollout, [UC-051](use_cases/UC-051.md) automatic rollback, [UC-052](use_cases/UC-052.md) manual canary (all three parked since 2026-10-19) |
+| Infrastructure | [UC-050](use_cases/UC-050.md) progressive rollout, [UC-051](use_cases/UC-051.md) automatic rollback, [UC-052](use_cases/UC-052.md) manual canary (all three retired by #2784, Obsolete) |
 | Operations | [UC-060](use_cases/UC-060.md) operate the stage Pi (#2027), [UC-061](use_cases/UC-061.md) reach the stage Pi over its own hotspot (#2099); the host-OS detail is the ops spec [specs/stage-host.md](specs/stage-host.md) (#2785) |
 | Talk | [UC-070](use_cases/UC-070.md) present the demo: goal, stage baseline, pre-flight, fallback; the beats are the [talk runbook](talk/two-standards-runbook.md) §3 (#2785) |
 
@@ -58,7 +58,6 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [CONTROLLER_CONNECTIVITY.md](CONTROLLER_CONNECTIVITY.md) | Troubleshoot Bluetooth |
 | [AUDIO.md](AUDIO.md) | Audio hardware and ALSA setup |
 | [observability-quickstart.md](observability-quickstart.md) | Performance tooling |
-| [CANARY_RUNBOOK.md](CANARY_RUNBOOK.md) | Manual backend canary |
 | [architecture/flag-service.md](architecture/flag-service.md) | Flag service: one gRPC sync source for flagd partitioned by flagSetId, `PUT /{flagSetId}/{flagName}` writes, mutable-flag registry, persisted admin settings, migration plan (epic #1407) |
 | [architecture/stack.md](architecture/stack.md) | AIUP stack file: layers mapped to our repo skills (`/implement`, `/pytest-test`, `/go-test`, `/integration-test`, `/coverage-check`), markers, commands, mapping of the aiup-core 3.x commands (#2079) |
 | [agent-act-runbook.md](agent-act-runbook.md) | Take the agent from inert to acting |

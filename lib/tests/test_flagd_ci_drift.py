@@ -13,7 +13,7 @@ or a non-default variant can never be exercised.
 This test fails loudly whenever a base flagd config carries a flag key that its
 `ci/<domain>.json` counterpart is missing (or vice versa). It covers every
 domain present in `ci/`, including ones that are verbatim copies of base
-(e.g. `agent.json`, `interventions.json`, `rollout.json`) -- those must still
+(e.g. `agent.json`, `interventions.json`) -- those must still
 track base key-for-key.
 """
 

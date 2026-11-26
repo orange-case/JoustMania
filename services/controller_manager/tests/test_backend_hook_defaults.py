@@ -8,8 +8,6 @@ def test_default_hooks_are_inert():
     hooks = MockFeatureHooks()
     assert hooks.get_adapter_type("S1") == ""
     assert hooks.get_controller_metadata("S1") is None
-    assert hooks.rollout_summary() == ("", 0)
-    assert hooks.rollout_strategy() == ""
     assert hooks.take_led_failures("S1") == 0
 
 
@@ -23,4 +21,4 @@ def test_multiplexer_take_led_failures_drains_the_counter():
 
 
 def test_inert_backend_double_inherits_the_defaults():
-    assert InertBackendHooks().rollout_summary() == ("", 0)
+    assert InertBackendHooks().take_led_failures("S1") == 0
