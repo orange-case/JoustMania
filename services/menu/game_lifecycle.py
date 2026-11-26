@@ -16,7 +16,7 @@ from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-from lib.feature_flags import GAME_KIND_REAL, set_game_transaction_context
+from lib.feature_flags import GAME_KIND_REAL, set_game_transaction_context, wait_for_provider_ready
 from lib.telemetry import get_tracer
 from lib.types import GameEvent, Games, Sound
 from proto import menu_pb2
@@ -60,6 +60,8 @@ _UNREACHABLE_STATUS_CODES = (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLI
 # UC-010 A16: retry interval of the boot's coordinator lookup while the coordinator does not answer.
 BOOT_GAME_LOOKUP_RETRY_SECONDS = 1.0
 GAME_STATE_RPC_TIMEOUT_SECONDS = 2.0
+# While the lookup keeps failing, a WARNING again this often (the retries in between log at DEBUG).
+BOOT_GAME_LOOKUP_WARN_EVERY_SECONDS = 30.0
 
 
 def _log_lifecycle_failure(task: asyncio.Future) -> None:
@@ -101,17 +103,19 @@ class GameLifecycleMixin:
     async def _reject_start_while_active(self, serial: str, source: str, game_mode: Games | None) -> None:
         """Refuse a start request while the game lifecycle task is live (UC-010 A8).
 
-        Publishes ``game_start_rejected`` with reason ``game_active`` and clears the ready
+        Publishes ``game_start_rejected`` with reason ``game_active`` (``coordinator_unreachable`` while
+        the boot's coordinator lookup is undecided, UC-010 A16) and clears the ready
         latch, so a later trigger can start once the task has finished. Silent while a game
         is starting or running; a short beep only in the lobby-restart window, where the
         players are back in the lobby. The live game lifecycle is left untouched.
         """
         mode = game_mode if game_mode is not None else self.current_selection
-        logger.warning(f"Start from {serial} ({source}) refused: a game lifecycle is still live")
+        reason = "coordinator_unreachable" if self._boot_lookup_running else "game_active"
+        logger.warning(f"Start from {serial} ({source}) refused: {reason}")
         self.ready_handler.reset_game_start_flag()
         await self.event_publisher.publish(
             "game_start_rejected",
-            {"game_name": mode.name, "source": source, "reason": "game_active"},
+            {"game_name": mode.name, "source": source, "reason": reason},
         )
         if self._lobby_restarting:
             await self.audio.play_sound(Sound.SFX_BEEP_LOUD)
@@ -236,6 +240,12 @@ class GameLifecycleMixin:
         logger.warning(f"Boot: game {game_id or '(no id)'} is live on the coordinator; following it, no lobby")
         self.state = menu_pb2.MenuState.GAME_STARTING
         decided.set_result(True)
+        # The lobby restore at the game's end paints and the next start launches the persisted mode
+        # (UC-011, BR-003), as after a boot lobby entry; the stream is not open yet, so a game that ends
+        # meanwhile is caught by the re-check after the subscription.
+        if not await wait_for_provider_ready("user"):
+            logger.warning("flag provider not ready after 5s; using code defaults")
+        self.restore_user_selection()
         request = game_coordinator_pb2.StreamEventsRequest(game_id=game_id)
         await self._run_game_event_stream(
             stub, request, self._build_trace_metadata(), trace.get_current_span(), adopted_game_id=game_id
@@ -245,7 +255,8 @@ class GameLifecycleMixin:
         """The primary game's id while one is starting or running, else None; retried until the coordinator answers."""
         from proto import game_coordinator_pb2
 
-        warned = False
+        loop = asyncio.get_running_loop()
+        next_warning = loop.time()
         while True:
             try:
                 response = await stub.GetGameState(
@@ -258,9 +269,11 @@ class GameLifecycleMixin:
                 problem = f"unsuccessful: {response.error}"
             except Exception as e:
                 problem = str(e)
-            log = logger.debug if warned else logger.warning
+            log = logger.debug
+            if loop.time() >= next_warning:
+                log = logger.warning
+                next_warning = loop.time() + BOOT_GAME_LOOKUP_WARN_EVERY_SECONDS
             log(f"Boot: coordinator game state unknown ({problem}); no lobby and no start until it answers")
-            warned = True
             await asyncio.sleep(BOOT_GAME_LOOKUP_RETRY_SECONDS)
 
     async def _run_game_lifecycle(

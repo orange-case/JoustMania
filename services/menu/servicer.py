@@ -346,13 +346,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         """
         self.state = menu_pb2.MenuState.RUNNING
         self._clear_ready_state()
-
-        # Load settings from flagd (user domain)
-        self.voice_actor = self.user_prefs_client.get_string_value("menu_voice", DEFAULT_VOICE_ACTOR)
-        current_game_name = self.user_prefs_client.get_string_value("current_game", DEFAULT_GAME_MODE.name)
-        game = Games.from_name(current_game_name)
-        self.current_selection = game if game and game.name in GAME_MODES else DEFAULT_GAME_MODE
-        self.state_manager.set_game_mode(self.current_selection)
+        self.restore_user_selection()
         # UC-010 A11 (#2175): every controller the menu knows is CONNECTED again and shows the restored
         # mode's dim lobby colour; bounded like the post-game restore (BR-010).
         await _bounded_restore_step("controller re-registration", self.state_manager.reset)
@@ -360,6 +354,14 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         await _bounded_restore_step("lobby music", self.audio.start_lobby_music)
         self.idle_monitor.start()
         await self.event_publisher.publish("menu_started", {})
+
+    def restore_user_selection(self) -> None:
+        """Load the voice and the persisted ``current_game`` (an unplayable value falls back to JoustFFA)."""
+        self.voice_actor = self.user_prefs_client.get_string_value("menu_voice", DEFAULT_VOICE_ACTOR)
+        current_game_name = self.user_prefs_client.get_string_value("current_game", DEFAULT_GAME_MODE.name)
+        game = Games.from_name(current_game_name)
+        self.current_selection = game if game and game.name in GAME_MODES else DEFAULT_GAME_MODE
+        self.state_manager.set_game_mode(self.current_selection)
 
     async def StopMenu(self, _request, _context):
         """Stop the menu."""
@@ -723,6 +725,11 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         never finishes. A live task whose game is not active on the coordinator is cancelled and
         the lobby restored; a live task with an active game is kept (`game_active`).
         """
+        if self._boot_lookup_running:
+            # UC-010 A16: a recovery here would restore a lobby the boot has not decided on yet;
+            # the lookup itself settles within a retry once the coordinator answers.
+            logger.info("reset_menu ignored: the boot's coordinator lookup is still undecided")
+            return GAME_ACTIVE
         if self._lobby_restarting or self._recovery_running():
             # A lobby restore (this handler's or a lifecycle's post-game one) finishes by itself;
             # cancelling it mid state_manager.reset() would drop controllers not yet re-registered.

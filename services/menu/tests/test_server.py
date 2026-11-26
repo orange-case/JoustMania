@@ -29,6 +29,7 @@ def _servicer_with_flags(**flags):
     servicer.user_prefs_client.get_boolean_value.side_effect = lambda key, default, *_a, **_k: flags.get(key, default)
     servicer.boot_follows_live_game.return_value = False
     servicer.boot_start_requested = False
+    servicer._lifecycle_live.return_value = False
     return servicer
 
 
@@ -275,7 +276,7 @@ class TestBootFollowsLiveGame:
         servicer.boot_follows_live_game.side_effect = unanswered
 
         with (
-            patch.object(server, "BOOT_HEALTH_TIMEOUT_SECONDS", 0.05),
+            patch.object(server, "BOOT_LOOKUP_HEALTH_TIMEOUT_SECONDS", 0.05),
             patch.object(server.health.aio, "HealthServicer", TestMenuHealthReadiness._recording_health(events)),
         ):
             await _boot(servicer)
@@ -283,6 +284,39 @@ class TestBootFollowsLiveGame:
         assert ("health", "", health_pb2.HealthCheckResponse.SERVING) in events
         servicer.start_button_monitor.assert_not_awaited()
         servicer.enter_lobby.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[3])
+    async def test_start_during_the_boot_waits_gets_no_lobby_over_it(self):
+        """A web or pad start after the lookup, before the lobby entry: the boot paints no lobby over it."""
+        servicer = _servicer_with_flags()
+        servicer._lifecycle_live.return_value = True
+
+        await _boot(servicer)
+
+        servicer.start_button_monitor.assert_awaited_once()
+        servicer.enter_lobby.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", cond=["Pre-1"])
+    async def test_decided_lookup_keeps_health_until_the_lobby_entry_ends(self):
+        """The lookup bound applies only while it is undecided; a slow lobby entry still precedes SERVING."""
+        events = []
+        servicer = _servicer_with_flags()
+
+        async def slow_enter_lobby():
+            await asyncio.sleep(0.2)
+            events.append("lobby_entered")
+
+        servicer.enter_lobby.side_effect = slow_enter_lobby
+
+        with (
+            patch.object(server, "BOOT_LOOKUP_HEALTH_TIMEOUT_SECONDS", 0.05),
+            patch.object(server.health.aio, "HealthServicer", TestMenuHealthReadiness._recording_health(events)),
+        ):
+            await _boot(servicer)
+
+        assert events.index("lobby_entered") < events.index(("health", "", health_pb2.HealthCheckResponse.SERVING))
 
 
 class TestMenuHealthReadiness:

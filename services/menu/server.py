@@ -44,16 +44,18 @@ logger = logging.getLogger(__name__)
 # SERVING after it even on a timeout or error, so a hung audio service cannot hold the menu
 # NOT_SERVING (#1826). Inside the image healthcheck's 10 s start period plus retries.
 BOOT_LOBBY_ENTRY_TIMEOUT_SECONDS = 10.0
-# Health goes SERVING after this even while the coordinator lookup (UC-010 A16) still retries
-# behind it. The lookup answers in milliseconds; the 5 s flag wait and the 10 s lobby entry fit inside it.
-BOOT_HEALTH_TIMEOUT_SECONDS = 15.0
+# Health goes SERVING after this while the coordinator lookup (UC-010 A16) is still undecided; the
+# lookup keeps retrying behind it. A decided lookup leaves health to the boot entry's own bounds.
+BOOT_LOOKUP_HEALTH_TIMEOUT_SECONDS = 15.0
 
 
-async def _boot_entry(menu_servicer: MenuServicer, settled: asyncio.Event) -> None:
+async def _boot_entry(menu_servicer: MenuServicer, decided: asyncio.Event, settled: asyncio.Event) -> None:
     """Follow a game still live on the coordinator, else open the button stream and enter the lobby."""
     try:
         # UC-010 A16: a restart mid-game must not paint the lobby over the running game.
-        if await menu_servicer.boot_follows_live_game():
+        follows = await menu_servicer.boot_follows_live_game()
+        decided.set()
+        if follows:
             logger.info("Boot follows a live game; the lobby comes after it")
             return
 
@@ -69,7 +71,10 @@ async def _boot_entry(menu_servicer: MenuServicer, settled: asyncio.Event) -> No
         # A StartMenu RPC during the wait above already entered the lobby: entering again would
         # restart the music, republish menu_started and overwrite the user's selection.
         wanted = auto_start or menu_servicer.boot_start_requested
-        if wanted and menu_servicer.state != menu_pb2.MenuState.RUNNING:
+        if wanted and menu_servicer._lifecycle_live():
+            # A web or pad start during the waits above is a game now: no lobby over it (UC-010 A16).
+            logger.info("Boot lobby entry skipped: a game lifecycle started meanwhile")
+        elif wanted and menu_servicer.state != menu_pb2.MenuState.RUNNING:
             try:
                 await asyncio.wait_for(menu_servicer.enter_lobby(), timeout=BOOT_LOBBY_ENTRY_TIMEOUT_SECONDS)
                 logger.info("Menu auto-started (menu_auto_start flag=true)")
@@ -80,6 +85,7 @@ async def _boot_entry(menu_servicer: MenuServicer, settled: asyncio.Event) -> No
             except Exception:
                 logger.warning("boot lobby entry failed; reporting SERVING anyway", exc_info=True)
     finally:
+        decided.set()
         settled.set()
 
 
@@ -134,14 +140,16 @@ async def serve(port=50054):
     # UC-015 BR-018: the operator's shield mode for GetMenuStatus, read once now (in the background).
     menu_servicer.read_operator_settings_at_start()
 
+    lookup_decided = asyncio.Event()
     boot_settled = asyncio.Event()
-    boot_task = asyncio.create_task(_boot_entry(menu_servicer, boot_settled))
+    boot_task = asyncio.create_task(_boot_entry(menu_servicer, lookup_decided, boot_settled))
     try:
-        await asyncio.wait_for(boot_settled.wait(), timeout=BOOT_HEALTH_TIMEOUT_SECONDS)
+        await asyncio.wait_for(lookup_decided.wait(), timeout=BOOT_LOOKUP_HEALTH_TIMEOUT_SECONDS)
+        await boot_settled.wait()
     except TimeoutError:
         logger.warning(
-            "boot not settled after %ss (coordinator unreachable?); reporting SERVING anyway",
-            BOOT_HEALTH_TIMEOUT_SECONDS,
+            "coordinator game lookup undecided after %ss; reporting SERVING, no lobby until it answers",
+            BOOT_LOOKUP_HEALTH_TIMEOUT_SECONDS,
         )
 
     # Ready: a live game is followed, the lobby is entered, or menu_auto_start is off (or a StartMenu

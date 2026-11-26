@@ -1,10 +1,12 @@
 """UC-010 A16 (#2911): a menu that restarts while a game runs follows that game instead of entering the lobby."""
 
 import asyncio
-from unittest.mock import patch
+import logging
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from lib.types import Games
 from proto import game_coordinator_pb2, menu_pb2
 from services.menu import game_lifecycle
 from services.menu.settings_ops import GAME_ACTIVE
@@ -70,6 +72,7 @@ def patched(stub):
     with (
         patch("proto.game_coordinator_pb2_grpc.GameCoordinatorServiceStub", stub),
         patch.object(game_lifecycle, "BOOT_GAME_LOOKUP_RETRY_SECONDS", 0.01),
+        patch.object(game_lifecycle, "wait_for_provider_ready", AsyncMock(return_value=True)),
     ):
         yield stub
 
@@ -175,6 +178,10 @@ async def test_unreachable_coordinator_fails_closed_until_it_answers(real_servic
     assert not boot.done()
     assert patched.state_requests > 1, "the lookup is not retried"
     assert await real_servicer.start_game("web", source="web") is False
+    assert (
+        "game_start_rejected",
+        {"game_name": "JoustFFA", "source": "web", "reason": "coordinator_unreachable"},
+    ) in _published(real_servicer)
     reset = await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), None)
     assert reset.error == GAME_ACTIVE
     started = await real_servicer.StartMenu(menu_pb2.StartMenuRequest(), None)
@@ -187,3 +194,60 @@ async def test_unreachable_coordinator_fails_closed_until_it_answers(real_servic
     assert await asyncio.wait_for(boot, timeout=5) is False
     assert not real_servicer._lifecycle_live()
     assert real_servicer._boot_lookup_running is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-010", flow="A16", steps=[4, 5], br=["BR-003"])
+async def test_adopted_game_restores_the_persisted_selection(real_servicer, patched):
+    """The lobby after an adopted game shows, and the next start uses, the persisted mode (UC-011)."""
+    real_servicer.user_prefs_client.get_string_value.side_effect = lambda key, default, *_a, **_k: (
+        "Tournament" if key == "current_game" else default
+    )
+    patched.answers = [("RUNNING", "g1")]
+
+    assert await real_servicer.boot_follows_live_game() is True
+    await asyncio.sleep(0.05)
+
+    game_lifecycle.wait_for_provider_ready.assert_awaited_once_with("user")
+    assert real_servicer.current_selection == Games.Tournament
+    assert real_servicer.state_manager.current_game_mode == Games.Tournament
+    patched.end.set()
+    await _lifecycle_end(real_servicer)
+    assert real_servicer.current_selection == Games.Tournament
+    assert real_servicer._menu_status().selection == "Tournament"
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-010", flow="A16", steps=[2, 3], br=["BR-008"])
+async def test_reset_menu_during_the_lookup_is_refused(real_servicer, patched):
+    """A reset whose own lookup would succeed must not cancel the boot lookup (the deferred StartMenu stays)."""
+    patched.answers = [DOWN]
+    boot = asyncio.create_task(real_servicer.boot_follows_live_game())
+    await asyncio.sleep(0.05)
+    await real_servicer.StartMenu(menu_pb2.StartMenuRequest(), None)
+
+    patched.answers = [("IDLE", "")]
+    reset = await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), None)
+
+    assert reset.error == GAME_ACTIVE
+    assert await asyncio.wait_for(boot, timeout=5) is False
+    assert real_servicer.boot_start_requested is True
+    assert real_servicer._reset_recovery is None
+    real_servicer.controller_events.start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-010", flow="A16", steps=[2])
+async def test_failing_lookup_warns_again_periodically(real_servicer, patched, caplog):
+    patched.answers = [DOWN]
+    caplog.set_level(logging.DEBUG, logger="services.menu.servicer")
+    with patch.object(game_lifecycle, "BOOT_GAME_LOOKUP_WARN_EVERY_SECONDS", 0.05):
+        boot = asyncio.create_task(real_servicer.boot_follows_live_game())
+        await asyncio.sleep(0.3)
+
+    lookups = [r for r in caplog.records if "coordinator game state unknown" in r.getMessage()]
+    warnings = [r for r in lookups if r.levelno == logging.WARNING]
+    assert len(warnings) >= 2
+    assert len(lookups) > len(warnings), "the retries in between log at DEBUG"
+    boot.cancel()
+    real_servicer._game_lifecycle_task.cancel()
