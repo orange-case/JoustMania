@@ -107,30 +107,40 @@ type Policy struct {
 	// Required on a row that allows ScopeExperiment: the agent's experiment
 	// proposer shows it to the model next to the key, variants and range.
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+
+	// The attributes below are not served in the read API's policy.
+
+	// KillSwitch: a Flagsmith round applies the flag first, and with Persist a
+	// persisted write applies even when the save fails (flags.md §13.6).
+	KillSwitch bool `yaml:"kill_switch,omitempty" json:"-"`
+	// Stop is the variant a disabled Flagsmith feature or a false reads as.
+	Stop string `yaml:"stop,omitempty" json:"-"`
+	// FlagsmithOnly: only the Flagsmith link's in-process writes may change it.
+	FlagsmithOnly bool `yaml:"flagsmith_only,omitempty" json:"-"`
+	// Latched: the game reads it once per game, so a real write never changes
+	// a running game; set exactly on the rows with scope real.
+	Latched bool `yaml:"latched,omitempty" json:"-"`
+	// MagnitudeLimits is the range table of decision.magnitude_bounds.
+	MagnitudeLimits map[string]MagnitudeLimit `yaml:"magnitude_limits,omitempty" json:"-"`
 }
 
-// killSwitches is the kill-switch list of flags.md §13.6 ("set/key"); a test
-// keeps them equal. A Flagsmith round applies these first, and a persist row
-// among them applies a persisted write even when the save fails. A Go set, not
-// a registry.yaml attribute, until the pinned release parses the yaml tolerantly.
-var killSwitches = map[string]bool{
-	"agent/enabled":                                 true,
-	"agent/interventions_allowed":                   true,
-	"agent/experiments_enabled":                     true,
-	"agent/experiment_proposer_enabled":             true,
-	"agent/llm.max_requests_per_minute":             true,
-	"agent/decision.claude.max_requests_per_minute": true,
-}
+// IsKillSwitch reports whether the flag is a kill switch; false for nil.
+func (p *Policy) IsKillSwitch() bool { return p != nil && p.KillSwitch }
 
-// IsKillSwitch reports whether set/key is a kill switch.
-func IsKillSwitch(set, key string) bool { return killSwitches[id(set, key)] }
+// StopVariant is the row's stop variant, "" for none or nil.
+func (p *Policy) StopVariant() string {
+	if p == nil {
+		return ""
+	}
+	return p.Stop
+}
 
 // AppliesWhenPersistFails reports whether a persisted write or clear of this
 // flag applies in memory even when the state file cannot be saved: a kill
 // switch must take effect now, a restart bringing the old value back is the
 // smaller risk. Every other flag is rolled back (500 persist_failed).
 func (p *Policy) AppliesWhenPersistFails() bool {
-	return p.Persist && IsKillSwitch(p.Set, p.Key)
+	return p.Persist && p.KillSwitch
 }
 
 // FlagsmithWriter is the writer label of the Flagsmith link's in-process
@@ -139,40 +149,17 @@ func (p *Policy) AppliesWhenPersistFails() bool {
 // a write carrying it came through the link's in-process path.
 const FlagsmithWriter = "flagsmith"
 
-// flagsmithOnly is the set of Flagsmith-only flags ("set/key", #2705, FR-226,
-// flags.md §13 "Flagsmith only"): a write of one is accepted only from the
-// Flagsmith link's in-process path (writer FlagsmithWriter) and refused over
-// HTTP with 403 flagsmith_only, whatever writer label the caller sends. It is
-// a Go set, not a registry.yaml attribute, because released flag-service
-// images parse the checkout's registry.yaml strictly and would refuse a new
-// key (#2403). flags.md §13 lists the same set; a test keeps them in sync.
-// Each one must be a stack overlay row without persist outside interventions
-// (validatePolicy); a name without a row in the loaded registry is inert.
-var flagsmithOnly = map[string]bool{
-	"agent/goal.profile": true,
-}
-
-// FlagsmithOnlyFlags returns the Flagsmith-only set as sorted "set/key" names.
-func FlagsmithOnlyFlags() []string {
-	out := make([]string, 0, len(flagsmithOnly))
-	for k := range flagsmithOnly {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// FlagsmithOnly reports whether the flag changes only from Flagsmith (the
+// IsFlagsmithOnly reports whether the flag changes only from Flagsmith (the
 // link's in-process writes); false for nil (a read-only baseline flag).
-func (p *Policy) FlagsmithOnly() bool {
-	return p != nil && flagsmithOnly[id(p.Set, p.Key)]
+func (p *Policy) IsFlagsmithOnly() bool {
+	return p != nil && p.FlagsmithOnly
 }
 
 // WriterAllowed is the Flagsmith-only check (#2705): nil when writer may
 // write the flag, else 403 flagsmith_only. Only the Flagsmith link's
 // in-process writes carry FlagsmithWriter (the HTTP API refuses that label).
 func (p *Policy) WriterAllowed(writer string) *fserr.Error {
-	if p.FlagsmithOnly() && writer != FlagsmithWriter {
+	if p.IsFlagsmithOnly() && writer != FlagsmithWriter {
 		return fserr.Forbidden(fserr.FlagsmithOnly, "%s/%s changes only from Flagsmith (flags.md §13, Flagsmith only); no HTTP writer may write it", p.Set, p.Key)
 	}
 	return nil
@@ -282,8 +269,23 @@ func validatePolicy(p *Policy, b *baseline.Baseline) error {
 	if p.Persist && (p.Kind != KindOverlay || !p.AllowsScope(ScopeStack)) {
 		return fmt.Errorf("persist needs kind overlay with scope stack")
 	}
-	if p.FlagsmithOnly() && (p.Set == "interventions" || p.Kind != KindOverlay || len(p.Scopes) != 1 || p.Scopes[0] != ScopeStack || p.Persist) {
-		return fmt.Errorf("a Flagsmith only row (registry.flagsmithOnly) is kind overlay, scope [stack], no persist, outside interventions")
+	stackOnly := len(p.Scopes) == 1 && p.Scopes[0] == ScopeStack
+	if p.FlagsmithOnly && (p.Set == "interventions" || p.Kind != KindOverlay || !stackOnly || p.Persist) {
+		return fmt.Errorf("a flagsmith_only row is kind overlay, scope [stack], no persist, outside interventions")
+	}
+	if p.Stop != "" {
+		if !p.KillSwitch || !stackOnly {
+			return fmt.Errorf("a stop needs kill_switch and scope [stack]")
+		}
+		if _, ok := flag.Variants[p.Stop]; !ok {
+			return fmt.Errorf("stop %q is not a declared variant", p.Stop)
+		}
+		if len(p.Bounds.Variants) > 0 && !contains(p.Bounds.Variants, p.Stop) {
+			return fmt.Errorf("stop %q is not in bounds.variants", p.Stop)
+		}
+	}
+	if p.Latched != p.AllowsScope(ScopeReal) {
+		return fmt.Errorf("a row has scope real exactly when it is latched (a real write must not change a running game)")
 	}
 	if p.Kind == KindEvent {
 		if len(p.Scopes) != 1 || p.Scopes[0] != ScopeGame || p.Bounds.Payload == nil {
@@ -319,7 +321,7 @@ func validatePolicy(p *Policy, b *baseline.Baseline) error {
 			return fmt.Errorf("a shape bound needs an object-valued default variant")
 		}
 	}
-	return validMagnitudeRow(p, flag)
+	return validMagnitudeRow(p, flag, b)
 }
 
 // validDescription checks the description: one line of at most MaxDescription
@@ -386,7 +388,7 @@ func CheckValue(p *Policy, flag *baseline.Flag, variant string, value json.RawMe
 	if name := matchVariant(p, flag, value); name != "" {
 		return &Checked{Variant: name, Value: flag.Variants[name]}, nil
 	}
-	if p.MagnitudeLimits() != nil {
+	if p.MagnitudeLimits != nil {
 		if err := checkMagnitudeValue(p, value); err != nil {
 			return nil, err
 		}

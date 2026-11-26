@@ -8,19 +8,15 @@ import (
 	"github.com/joustmania/flag-service/registry"
 )
 
-// killSwitch is registry.IsKillSwitch (flags.md §13.6); tests swap it. A round
-// applies kill switches first, so one switched off in Flagsmith is in force
-// before the write budget defers anything.
-var killSwitch = registry.IsKillSwitch
+// killSwitch reads the row's kill_switch attribute (flags.md §13.6); tests
+// swap it. A round applies kill switches first, so one switched off in
+// Flagsmith is in force before the write budget defers anything.
+var killSwitch = func(l *Link, set, key string) bool { return l.Policy(set, key).IsKillSwitch() }
 
 // isKillKey: k is the stack value of a kill switch.
-func isKillKey(k Key) bool {
-	return k.Scope == ScopeStack && killSwitch(k.Set, k.Flag)
+func (l *Link) isKillKey(k Key) bool {
+	return k.Scope == ScopeStack && killSwitch(l, k.Set, k.Flag)
 }
-
-// agent/enabled boots at `watch`, so Flagsmith's own off (the feature switched
-// off) and a bool false must still read as the stop, never as the baseline.
-const stopFlag, stopVariant = "agent/enabled", "off"
 
 // isFalse: a Flagsmith bool false, or the text "false".
 func isFalse(fv FSValue) bool {
@@ -34,17 +30,20 @@ func isFalse(fv FSValue) bool {
 	return false
 }
 
-// isStopKey: k is agent/enabled.
-func isStopKey(k Key) bool { return k.Set+"/"+k.Flag == stopFlag }
+// isStopKey: k's row has a stop variant (agent/enabled). It boots at `watch`,
+// so Flagsmith's own off (the feature switched off) and a bool false must
+// still read as the stop, never as the baseline.
+func (l *Link) isStopKey(k Key) bool { return l.Policy(k.Set, k.Flag).StopVariant() != "" }
 
-// stopValue is the `off` of agent/enabled; ok is false for every other flag.
+// stopValue is the row's stop variant; ok is false for a row without one.
 func stopValue(pol *registry.Policy, b *baseline.Flag) (Value, bool) {
-	if pol.Set+"/"+pol.Key != stopFlag || b == nil {
+	stop := pol.StopVariant()
+	if stop == "" || b == nil {
 		return Value{}, false
 	}
-	raw, ok := b.Variants[stopVariant]
+	raw, ok := b.Variants[stop]
 	if !ok {
 		return Value{}, false
 	}
-	return Value{Present: true, Variant: stopVariant, Value: compact(raw)}, true
+	return Value{Present: true, Variant: stop, Value: compact(raw)}, true
 }

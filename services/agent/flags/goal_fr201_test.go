@@ -219,27 +219,21 @@ func TestGoalFlags_Contract(t *testing.T) {
 // never writes (C-034, agent_set_never_written_c034_test.go holds no key list).
 // It has a flag-service registry row only as a Flagsmith-only row (#2705, flags.md §13: the flag
 // service refuses every HTTP write of it, the agent's included, so only the
-// operator's Flagsmith changes it). The flag service's own test keeps its Go set
-// (registry.flagsmithOnly) equal to the flags.md paragraph read here.
+// operator's Flagsmith changes it): its row carries flagsmith_only: true.
 func TestGoalFlags_NeverWrittenC034(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "flag-service", "registry.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var reg map[string]any
+	var reg struct {
+		Flags []struct {
+			Set           string `yaml:"set"`
+			Key           string `yaml:"key"`
+			FlagsmithOnly bool   `yaml:"flagsmith_only"`
+		} `yaml:"flags"`
+	}
 	if err := yaml.Unmarshal(raw, &reg); err != nil {
 		t.Fatal(err)
-	}
-	spec, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "specs", "flags.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	flagsmithOnly := ""
-	if i := strings.Index(string(spec), "**Flagsmith only (#2705"); i >= 0 {
-		flagsmithOnly = strings.ReplaceAll(string(spec[i:]), "\r\n", "\n")
-		if end := strings.Index(flagsmithOnly, "\n\n"); end > 0 {
-			flagsmithOnly = flagsmithOnly[:end]
-		}
 	}
 	for _, key := range []string{keyGoalProfile} {
 		for _, path := range agentFlagFiles {
@@ -247,13 +241,17 @@ func TestGoalFlags_NeverWrittenC034(t *testing.T) {
 				t.Fatalf("UC-042/BR-009 %s must be in the agent set (%s)", key, path)
 			}
 		}
-		hasRow := strings.Contains(string(raw), "key: "+key+",") || strings.Contains(string(raw), "key: "+key+"}")
-		marked := strings.Contains(flagsmithOnly, "`agent/"+key+"`")
-		if hasRow && !marked {
-			t.Fatalf("UC-042/BR-009 %s must have no flag-service registry row unless it is Flagsmith only (flags.md §13)", key)
+		for _, row := range reg.Flags {
+			if row.Set == "agent" && row.Key == key && !row.FlagsmithOnly {
+				t.Fatalf("UC-042/BR-009 %s must have no flag-service registry row unless it is flagsmith_only (flags.md §13)", key)
+			}
 		}
 	}
-	if !strings.Contains(flagsmithOnly, "`agent/"+keyGoalProfile+"`") {
-		t.Fatalf("UC-042/BR-009 flags.md §13 Flagsmith-only paragraph does not name agent/%s", keyGoalProfile)
+	marked := false
+	for _, row := range reg.Flags {
+		marked = marked || row.Set == "agent" && row.Key == keyGoalProfile && row.FlagsmithOnly
+	}
+	if !marked {
+		t.Fatalf("UC-042/BR-009 registry.yaml has no flagsmith_only row for agent/%s", keyGoalProfile)
 	}
 }

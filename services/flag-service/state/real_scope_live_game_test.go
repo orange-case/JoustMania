@@ -9,8 +9,8 @@ import (
 const realRegistry = `
 flags:
   - {set: game, key: shield.activation, kind: overlay, scope: [stack, experiment+arm], bounds: {variants: [instant, trigger, hold]}, description: "test row"}
-  - {set: game, key: shield.energy_budget_seconds, kind: overlay, scope: [stack, experiment+arm, real], bounds: {range: [3, 30]}, description: "test row"}
-  - {set: game, key: sensitivity, kind: overlay, scope: [stack, experiment+arm, real], description: "test row"}
+  - {set: game, key: shield.energy_budget_seconds, kind: overlay, scope: [stack, experiment+arm, real], latched: true, bounds: {range: [3, 30]}, description: "test row"}
+  - {set: game, key: sensitivity, kind: overlay, scope: [stack, experiment+arm, real], latched: true, description: "test row"}
 `
 
 var realScope = Scope{GameKind: "real"}

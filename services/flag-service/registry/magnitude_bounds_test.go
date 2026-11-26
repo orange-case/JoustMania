@@ -32,7 +32,7 @@ func magnitudeRow(t *testing.T) (*Registry, *Policy) {
 	t.Helper()
 	reg := loadReal(t, "ci")
 	p := reg.Get("agent", "decision.magnitude_bounds")
-	if p == nil || p.MagnitudeLimits() == nil {
+	if p == nil || p.MagnitudeLimits == nil {
 		t.Fatal("agent/decision.magnitude_bounds has no registry row or no range table")
 	}
 	return reg, p
@@ -86,7 +86,7 @@ func TestMagnitudeBounds_Check(t *testing.T) {
 
 func TestMagnitudeBounds_LimitsMatchTheInterventionsRows(t *testing.T) {
 	reg, p := magnitudeRow(t)
-	for iv, l := range p.MagnitudeLimits() {
+	for iv, l := range p.MagnitudeLimits {
 		t.Run("UC-040/BR-045 "+iv, func(t *testing.T) {
 			row := reg.Get("interventions", l.Flag)
 			if row == nil {
@@ -106,9 +106,53 @@ func TestMagnitudeBounds_LimitsMatchTheInterventionsRows(t *testing.T) {
 			}
 		})
 	}
-	if names := magnitudeLimitNames(); len(names) != 1 || names[0] != "agent/decision.magnitude_bounds" {
+	var names []string
+	for _, p := range reg.Policies() {
+		if p.MagnitudeLimits != nil {
+			names = append(names, id(p.Set, p.Key))
+		}
+	}
+	if len(names) != 1 || names[0] != "agent/decision.magnitude_bounds" {
 		t.Fatalf("range tables %v", names)
 	}
+}
+
+// UC: UC-040 BR-045
+func TestParseRejectsBadMagnitudeLimits(t *testing.T) {
+	b, err := baseline.Load(filepath.Join(root(t), "..", "flagd", "ci"), baseline.DefaultFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The default variant names every intervention, so each case keeps the
+	// others and replaces grant_shield or set_player_handicap only.
+	const others = `adjust_music_tempo: {min: 1.0, max: 1.3, flag: music_tempo_override}, adjust_volume: {min: 0.3, max: 1.0, flag: volume_override}, adjust_global_sensitivity: {min: 0, max: 4, integer: true, flag: global_sensitivity_override}, adjust_player_sensitivity: {min: 0.2, max: 2.0, neutral: 1.0, flag: player_sensitivity_factor}, adjust_global_difficulty: {min: 0.5, max: 2.0, neutral: 1.0, flag: global_difficulty_factor}, toughness_boost: {min: 0.1, max: 30, flag: toughness_boost_seconds}`
+	const handicap = `set_player_handicap: {min: 0.5, max: 2.0, neutral: 1.0, flag: player_handicap_factor}`
+	const shield = `grant_shield: {min: 1, max: 10, flag: shield_seconds}`
+	row := func(limits string) string {
+		return `flags: [{set: agent, key: decision.magnitude_bounds, kind: overlay, scope: [stack], magnitude_limits: {` + others + `, ` + limits + `}}]`
+	}
+	t.Run("UC-040/BR-045 the full table loads", func(t *testing.T) {
+		if _, err := Parse([]byte(row(handicap+", "+shield)), b); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, tc := range []struct{ name, limits, want string }{
+		{"min not below max", handicap + `, grant_shield: {min: 10, max: 1, flag: shield_seconds}`, "min must be below max"},
+		{"neutral outside the limit", shield + `, set_player_handicap: {min: 0.5, max: 2.0, neutral: 3, flag: player_handicap_factor}`, "neutral outside"},
+		{"no interventions flag", handicap + `, grant_shield: {min: 1, max: 10, flag: no_such_flag}`, "no interventions flag"},
+		{"the default variant fails the table", handicap + `, grant_shield: {min: 1, max: 5, flag: shield_seconds}`, "default variant fails"},
+	} {
+		t.Run("UC-040/BR-045 "+tc.name, func(t *testing.T) {
+			if _, err := Parse([]byte(row(tc.limits)), b); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err %v, want %q", err, tc.want)
+			}
+		})
+	}
+	t.Run("UC-040/BR-045 a misspelt limit key is refused by the strict decode", func(t *testing.T) {
+		if _, err := decodeRegistry([]byte(row(handicap+`, grant_shield: {min: 1, max: 10, flag: shield_seconds, hasneutral: true}`)), true); err == nil {
+			t.Fatal("accepted")
+		}
+	})
 }
 
 func TestPlayerSensitivityFactorFloor(t *testing.T) {

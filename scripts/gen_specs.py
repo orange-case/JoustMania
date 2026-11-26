@@ -20,6 +20,7 @@ Sources:
     flags-ci-diff.md             services/flagd/*.json vs services/flagd/ci/*.json
     flag-catalog.md              services/flagd/*.json + services/flag-service/registry.yaml
                                  + notes/flags.yaml (readers, reload class, note; one per flag)
+    flag-registry.md             services/flag-service/registry.yaml (row attributes, flags.md §13)
 
 Committed files carry no count-style aggregates (#2152): a total such as "193
 flags" changes with every flag, RPC or metric any PR adds, so two such PRs
@@ -543,8 +544,51 @@ def _load_registry() -> dict[tuple[str, str], dict]:
             raise SpecSourceError(
                 f"services/flag-service/registry.yaml: duplicate row {key}"
             )
+        _check_attributes(f"{key[0]}/{key[1]}", row)
         rows[key] = row
     return rows
+
+
+# Row attributes (flags.md §13 "Row attributes"); the flag service checks their rules.
+_BOOL_ATTRIBUTES = ("kill_switch", "flagsmith_only", "latched")
+_LIMIT_KEYS = frozenset({"min", "max", "integer", "neutral", "flag"})
+
+
+def _check_attributes(name: str, row: dict) -> None:
+    where = f"services/flag-service/registry.yaml: {name}"
+    for attr in _BOOL_ATTRIBUTES:
+        if not isinstance(row.get(attr, False), bool):
+            raise SpecSourceError(f"{where}: {attr} must be true or false")
+    if "stop" in row and not isinstance(row["stop"], str):
+        # Unquoted `off` is a YAML 1.1 boolean to PyYAML.
+        raise SpecSourceError(f'{where}: stop must be a quoted variant name ("off")')
+    limits = row.get("magnitude_limits")
+    if limits is None:
+        return
+    if not isinstance(limits, dict) or not limits:
+        raise SpecSourceError(f"{where}: magnitude_limits maps intervention -> limit")
+    for iv, limit in limits.items():
+        if (
+            not isinstance(limit, dict)
+            or set(limit) - _LIMIT_KEYS
+            or not {"min", "max", "flag"} <= set(limit)
+        ):
+            raise SpecSourceError(
+                f"{where}: magnitude_limits {iv} takes min, max, flag and optional integer, neutral"
+            )
+
+
+def _attribute_parts(row: dict) -> list[str]:
+    parts = []
+    if row.get("kill_switch"):
+        parts.append("kill switch")
+    if row.get("stop"):
+        parts.append(f"stop `{row['stop']}`")
+    if row.get("flagsmith_only"):
+        parts.append("Flagsmith only")
+    if row.get("latched"):
+        parts.append("latched")
+    return parts
 
 
 def _write_cell(row: dict | None) -> str:
@@ -552,11 +596,84 @@ def _write_cell(row: dict | None) -> str:
         return "none"
     parts = [
         f"{row['kind']}, {' or '.join(row['scope'])}",
-        _bounds(row.get("bounds") or {}),
+        "range table"
+        if row.get("magnitude_limits")
+        else _bounds(row.get("bounds") or {}),
     ]
     if row.get("persist"):
         parts.append("persisted")
+    parts += _attribute_parts(row)
     return _cell("; ".join(parts))
+
+
+def _number(value) -> str:
+    return json.dumps(value)
+
+
+def flag_registry() -> str:
+    """The registry row attributes (flags.md §13): one list per attribute."""
+    registry = _load_registry()
+    rows = sorted(registry.items())
+
+    def names(attr: str) -> list[str]:
+        return [f"- `{s}/{k}`" for (s, k), row in rows if row.get(attr)] or [
+            f"- {NONE_CELL}"
+        ]
+
+    out = [
+        HEADER.format(sources="services/flag-service/registry.yaml"),
+        "# Registry attributes (generated)\n",
+        (
+            "Part of [flags.md §13](../flags.md#13-mutable-flag-registry): the rows of "
+            "`services/flag-service/registry.yaml` that carry each attribute. The flag "
+            "service reads the attributes; the rules they must keep are in flags.md §13.\n"
+        ),
+        "## Kill switches\n",
+        (
+            "`kill_switch: true` ([flags.md §13.6](../flags.md#136-flagsmith-link-implemented-2588-to-2592-uc-054-uc-055)): "
+            "applied first in a Flagsmith round; with persist, applied even when the save fails.\n"
+        ),
+        "| Flag | Persist | Stop |",
+        "|---|---|---|",
+        *(
+            f"| `{s}/{k}` | {'yes' if row.get('persist') else 'no'} | "
+            f"{'`' + row['stop'] + '`' if row.get('stop') else ''} |"
+            for (s, k), row in rows
+            if row.get("kill_switch")
+        ),
+        "",
+        "## Flagsmith only\n",
+        "`flagsmith_only: true`: written only by the Flagsmith link, `403 flagsmith_only` over HTTP.\n",
+        *names("flagsmith_only"),
+        "",
+        "## Latched at game start\n",
+        "`latched: true`: read once per game; exactly the rows with scope `real`.\n",
+        *names("latched"),
+        "",
+        "## Range tables\n",
+        (
+            "`magnitude_limits`: the hard limit of each intervention in the flag's range "
+            "table, equal to the registry range of the `interventions` flag it writes.\n"
+        ),
+    ]
+    for (s, k), row in rows:
+        limits = row.get("magnitude_limits")
+        if not limits:
+            continue
+        out += [
+            f"### `{s}/{k}`\n",
+            "| Intervention | Min | Max | Integer | Neutral | Writes |",
+            "|---|---|---|---|---|---|",
+            *(
+                f"| `{iv}` | {_number(lim['min'])} | {_number(lim['max'])} | "
+                f"{'yes' if lim.get('integer') else ''} | "
+                f"{_number(lim['neutral']) if 'neutral' in lim else ''} | "
+                f"`interventions/{lim['flag']}` |"
+                for iv, lim in sorted(limits.items())
+            ),
+            "",
+        ]
+    return "\n".join(out)
 
 
 _FLAG_NOTES_REL = "docs/specs/notes/flags.yaml"
@@ -741,6 +858,7 @@ GENERATORS = {
     "flag-counts.md": flag_counts,
     "flags-ci-diff.md": flags_ci_diff,
     "flag-catalog.md": flag_catalog,
+    "flag-registry.md": flag_registry,
 }
 
 
