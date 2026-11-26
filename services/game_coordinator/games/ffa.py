@@ -264,14 +264,15 @@ class FFAGame(BaseGameMode):
             if await self._write_end_effect(effect_cmd):
                 logger.info(f"WINNER_RAINBOW effect sent for {winner_serial}")
             await self._play_sound(Sound.VOX_CONGRATULATIONS, priority=2)
+            await self._wait_for_rainbow_effect()
+        elif self.game_outcome() == "tie":
+            await self._show_tie_cue()
         else:
             logger.warning(
                 f"Skipping rainbow effect: winner_serial={winner_serial}, "
                 f"stream_valid={self.gameplay_stream is not None}"
             )
-
-        # Wait for rainbow effect to complete
-        await self._wait_for_rainbow_effect()
+            await self._wait_for_rainbow_effect()
 
         # Note: Player spans are already closed by _close_all_player_spans()
         # at the end of gameplay_phase (before game.phase.teardown starts)

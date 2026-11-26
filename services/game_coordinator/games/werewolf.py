@@ -546,11 +546,10 @@ class WerewolfGame(StreamedIntroGameMode):
             await self._play_sound(Sound.VOX_WEREWOLF_WIN, priority=2)
         elif winner == "humans":
             await self._play_sound(Sound.VOX_HUMAN_WIN, priority=2)
-        elif winner_side == "tie":
-            await self._play_sound(Sound.SFX_WOLFDOWN, priority=2)
 
-        # Wait for rainbow effect to complete
-        if winner_side is not None:
+        if winner_side == "tie":
+            await self._show_tie_cue(Sound.SFX_WOLFDOWN)
+        elif winner_side is not None:
             await self._wait_for_rainbow_effect()
 
         # End surviving player spans
