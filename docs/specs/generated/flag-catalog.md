@@ -2,7 +2,7 @@
 
 # Flag catalog (generated)
 
-Part of [flags.md §3 to §10a](../flags.md#3-agent): one table per flag set. Type, variants, default and targeting come from the flag file; **Runtime write** is the flag's registry row (kind, scopes, bounds, flags.md §13; `none` = read-only baseline, C-033); **Reload** is the class of flags.md §1.3; **Read by**, **Reload** and **Note** come from `docs/specs/notes/flags.yaml`.
+Part of [flags.md §3 to §10a](../flags.md#3-agent): one table per flag set. Type, variants, default and targeting come from the flag file; **Runtime write** is the flag's registry row (kind, scopes, bounds, flags.md §13; `none` = read-only baseline, C-033); **Reload** is the class of flags.md §1.3; **Read by**, **Reload** and **Note** come from `docs/specs/notes/flags.yaml`; `make specs-check` fails when a **Read by** service's code never names the key.
 
 ## `agent`
 
@@ -13,20 +13,20 @@ File: [`services/flagd/agent.json`](../../../services/flagd/agent.json).
 | `code_improvement.min_interval_seconds` | integer | `default`=300, `fast`=60, `slow`=900 | `default` = 300 |  | none | live | agent | Minimum time between code-improvement proposals, checked at game end after the `enabled` and `experiments_enabled` permit. |
 | `code_improvement.mode` | string | `issue`="issue", `pr`="pr", `autonomous`="autonomous" | `issue` = "issue" |  | none | live | agent | What a promotion does: `issue` opens an issue only, `pr` opens a pull request and merges nothing, `autonomous` applies the change. Read at each promotion; never defaults to `autonomous`. |
 | `code_improvement.target` | string | `local`="local", `github`="github" | `local` = "local" |  | none | live | agent | Where a promotion acts: the local stack or GitHub. Read at each promotion. |
-| `decision.act_confidence_threshold` | float | `low`=0.5, `gate`=0.6, `default`=0.8, `strict`=0.95 | `default` = 0.8 |  | overlay, stack; any declared variant | live | agent | Confidence a remote answer needs to act, checked when the answer lands. Applies to claude, and to jev while `decision.jev.act_confidence_threshold` is `inherit`. |
 | `decision.backend` | string | `rules`="rules", `claude`="claude", `jev`="jev" | `rules` = "rules" |  | overlay, stack; variants `rules`, `claude`, `jev`; persistable | live | agent | Which decision backend the agent uses: the local rules or a remote model. |
 | `decision.capture_content` | bool | `on`=true, `off`=false | `off` = false |  | overlay, stack; variants `on`, `off` | live | agent | Whether remote decide requests and answers are captured in full. |
+| `decision.claude.act_confidence_threshold` | float | `low`=0.5, `gate`=0.6, `default`=0.8, `strict`=0.95 | `default` = 0.8 |  | overlay, stack; any declared variant | live | agent | Confidence a claude answer needs to act, checked when the answer lands. NaN, a value outside 0 to 1 or a read error gives 0.8. |
 | `decision.claude.base_url` | string | `default` | `default` = "https://api.anthropic.com" |  | overlay, stack; any declared variant | live | agent |  |
 | `decision.claude.max_requests_per_minute` | integer | `inherit`=-1, `conservative`=3, `default`=6, `stage`=30 | `stage` = 30 |  | overlay, stack; any declared variant | live | agent | Tighten-only cap on claude decide calls inside the shared LLM budget (FR-152, C-034); a value above `llm.max_requests_per_minute` does nothing, negative closes the backend, a read error gives 30. The retro and proposer are not charged to it. |
 | `decision.claude.model` | string | `haiku`, `sonnet`="claude-sonnet-5-5", `opus`="claude-opus-5-5" | `haiku` = "claude-haiku-4-5-20251001" |  | overlay, stack; any declared variant; persistable | live | agent |  |
 | `decision.claude.timeout_ms` | integer | `fast`=1500, `tight`=2500, `default`=5000, `patient`=8000 | `default` = 5000 |  | overlay, stack; any declared variant | live | agent |  |
 | `decision.goal_in_prompt` | bool | `on`=true, `off`=false | `off` = false |  | none | live | agent | The only switch that adds the goal and now lines to remote decide requests (claude and jev); `decision.prompt_profile` never implies them. Unreadable reads off. |
-| `decision.jev.act_confidence_threshold` | float | `inherit`=-1.0, `gate`=0.6, `default`=0.8, `strict`=0.95 | `gate` = 0.6 |  | overlay, stack; any declared variant | live | agent | Confidence a jev answer needs to act, checked when the answer lands. `inherit`, NaN or a value outside 0 to 1 uses `decision.act_confidence_threshold`; a read error gives 0.6. |
+| `decision.jev.act_confidence_threshold` | float | `gate`=0.6, `default`=0.8, `strict`=0.95 | `gate` = 0.6 |  | overlay, stack; any declared variant | live | agent | Confidence a jev answer needs to act, checked when the answer lands; the fire-time value is also the request's threshold, where jev's own gate opens (decide-contract §3.1). NaN, a value outside 0 to 1 or a read error gives 0.6. |
 | `decision.jev.base_url` | string | `default`, `blackhole`="https://192.0.2.1/v1" | `default` = "https://api.typesafe.ai/v1" |  | overlay, stack; any declared variant | live | agent |  |
 | `decision.jev.model` | string | `latest`="jev-latest", `pinned`="jev-1.13.0" | `latest` = "jev-latest" |  | overlay, stack; any declared variant; persistable | live | agent |  |
 | `decision.jev.timeout_ms` | integer | `fast`=1500, `default`=2500, `patient`=5000 | `default` = 2500 |  | overlay, stack; any declared variant | live | agent |  |
 | `decision.magnitude_bounds` | object | `default`, `unkillable` | `default` = (object) |  | overlay, stack; any declared variant | live | agent | Per-intervention magnitude ranges for rules and remote decisions, moved only inside the hard limits; an invalid entry falls back to that intervention's code default (UC-040 BR-045, FR-098). Human-only (C-034). |
-| `decision.max_state_age_ms` | integer | `off`=0, `tight`=6000, `default`=10000 | `default` = 10000 |  | none | live | agent | A remote answer is discarded (`state_too_old`) when the game state it was asked about is older than this when it lands. Negative gives the default. |
+| `decision.max_state_age_ms` | integer | `off`=0, `tight`=6000, `default`=10000 | `default` = 10000 |  | none | live | agent | A remote answer is discarded as `stale` (detail `state_too_old`) when the game state it was asked about is older than this when it lands. Negative gives the default. |
 | `decision.min_gap_after_answer_ms` | integer | `off`=0, `default`=1000, `slow`=3000 | `default` = 1000 |  | overlay, stack; any declared variant | live | agent | Minimum time in one game from when the previous remote call returned (answer, timeout or failure) to the next one; a call needs this and `decision.min_interval_ms`. Negative gives the default. |
 | `decision.min_interval_ms` | integer | `fast`=1500, `default`=3000, `slow`=10000 | `default` = 3000 |  | overlay, stack; 100 to 60000 (integer) | live | agent | Minimum time between remote decide calls in one game, from the previous call's admission. |
 | `decision.operator_brief` | string | `off`="", `unkillable`, `protect_weakest` | `off` = "" |  | overlay, stack; any string | live | agent | Free-text operator hint added to claude decide prompts and the retro, at most 512 characters after cleaning; it steers which offered option the model prefers, never options, ranges or caps (UC-040 BR-044, FR-096). Blank = no brief. Human-only (C-034). |
@@ -63,7 +63,7 @@ File: [`services/flagd/agent.json`](../../../services/flagd/agent.json).
 | `inference.model` | string | `default`="claude-opus-5-5" | `default` = "claude-opus-5-5" |  | overlay, stack; any string | live | agent | Model of the retro and proposer text backend; unresolved gives the compiled default. |
 | `inference.timeout_seconds` | integer | `default`=120, `short`=30 | `default` = 120 |  | overlay, stack; 30 to 120 (integer) | live | agent | Per-call deadline of the retro and proposer text backend, also the retro deadline; non-positive gives the default. |
 | `interventions_allowed` | string | `none`="", `probe`="noop", `ambient`, `standard`, `full`, `shadow_experimental`, `standard_group`, `shadow_group` | `ambient` = "play_audio_cue,send_controller_effect,adjust_volume" |  | overlay, stack; any declared variant; persistable | live | agent, game-coordinator, menu | Which intervention types the agent may use; the coordinator filters by the same list, and the operator pad shows it as its agent-level ladder (UC-015 BR-019). |
-| `interventions_enabled` | bool | `off`=false, `on`=true | `off` = false |  | overlay, stack; variants `on`, `off` | live | agent | Gates every intervention the agent would apply; decisions still run. The operator pad's pause and resume flip it in memory (UC-015 BR-003). |
+| `interventions_enabled` | bool | `off`=false, `on`=true | `off` = false |  | overlay, stack; variants `on`, `off` | live | agent | Gates every intervention the agent would apply; decisions still run. Off after a restart (fail closed); the operator pad's agent switch sets it in memory (UC-016 BR-012, UC-015 BR-003). |
 | `lifecycle.evict_interval_seconds` | float | `default`=1, `fast`=0.5, `slow`=2 | `default` = 1 |  | none | live | agent | How often the agent sweeps expired players and sessions; reloaded on each flag sync and polled every second as a safety net. |
 | `lifecycle.player_ttl_seconds` | integer | `default`=5, `short`=3, `long`=10 | `default` = 5 |  | none | live | agent | How long the agent keeps a player it no longer hears from; reloaded on each flag sync and polled every second as a safety net. |
 | `lifecycle.session_grace_seconds` | integer | `default`=15, `short`=5, `long`=30 | `default` = 15 |  | none | live | agent | Grace period before the agent closes an idle session; reloaded on each flag sync and polled every second as a safety net. |
@@ -271,4 +271,27 @@ File: [`services/flagd/observability.json`](../../../services/flagd/observabilit
 | `log_level` | string | `debug`="debug", `info`="info", `warning`="warning", `error`="error" | `info` = "info" |  | overlay, stack; any declared variant | live | agent, lib | Log level of the Python services and the agent. The `LOG_LEVEL` env var only sets the level until the flag resolves (and the agent's level on sync loss); the flag service itself keeps `LOG_LEVEL`. |
 | `metrics_export_interval_ms` | integer | `overkill`=10, `realtime`=100, `normal`=1000 | `normal` = 1000 | yes | none | startup | lib | OpenTelemetry metrics export interval of every Python service; targetable per `service`. A change needs a restart. |
 | `otel_bsp_schedule_delay_millis` | integer | `fast`=500, `default`=5000 | `default` = 5000 | yes | none | startup | lib | Span batch export delay of every Python service; targetable per `service`. A change needs a restart. |
-| `telemetry.moment_shape` | string | `span_event`="span_event", `span`="span", `log_event`="log_event" | `span_event` = "span_event" |  | overlay, stack; any declared variant | per-game | game-coordinator | How game moments (warning, death, intervention) are recorded, held for the game (UC-100 BR-002). An unknown value reads as `span_event`; reset it after the booth (UC-100 step 9). It never changes what the agent reads (UC-041 BR-009). |
+| `telemetry.moment_shape` | string | `span_event`="span_event", `span`="span", `log_event`="log_event" | `span_event` = "span_event" |  | overlay, stack; any declared variant | per-game | lib | How game moments (warning, death, intervention) are recorded, read by the game coordinator per game through `lib/moments.py` and held for the game (UC-100 BR-002). An unknown value reads as `span_event`; reset it after the booth (UC-100 step 9). It never changes what the agent reads (UC-041 BR-009). |
+
+## Startup-only flags
+
+Read once at process start ([flags.md §1.3](../flags.md#13-reload-semantics)): a change needs a restart of the reader.
+
+| Flag set | Key | Read by |
+|---|---|---|
+| `controller` | `backend` | controller-manager |
+| `user` | `audio_volume.lobby_music` | menu |
+| `user` | `audio_volume.menu_sound` | menu |
+| `user` | `audio_volume.menu_voice` | menu |
+| `user` | `menu_auto_start` | menu |
+| `observability` | `metrics_export_interval_ms` | lib |
+| `observability` | `otel_bsp_schedule_delay_millis` | lib |
+
+## Flags without an effective reader
+
+Declared in a flag file, read by no service ([flags.md §11](../flags.md#11-flags-without-an-effective-reader)).
+
+| Flag set | Key |
+|---|---|
+| `game` | `force_all_start_seconds` |
+| `observability` | `flagservice.propagation_probe` |

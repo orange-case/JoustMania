@@ -88,11 +88,11 @@ func TestLeverCooldown_BusyLever(t *testing.T) {
 		now := time.Unix(1_000, 0)
 		f := al.begin(globalDifficulty("1.25"))
 		key := appliedKey(globalDifficulty(""))
-		if cooling, first, _ := al.cooling(key, "1.625", now, time.Second); !cooling || !first {
-			t.Fatalf("cooling = %v / %v while a write is in flight", cooling, first)
+		if cooling, _ := al.cooling(key, "1.625", now, time.Second); !cooling {
+			t.Fatalf("cooling = %v while a write is in flight", cooling)
 		}
 		f.end(false, nil, now) // gated: nothing written
-		if cooling, _, hold := al.cooling(key, "1.625", now, time.Second); cooling {
+		if cooling, hold := al.cooling(key, "1.625", now, time.Second); cooling {
 			t.Fatal("a gated write starts no window")
 		} else {
 			hold.release()
@@ -102,13 +102,13 @@ func TestLeverCooldown_BusyLever(t *testing.T) {
 		var al appliedLedger
 		now := time.Unix(1_000, 0)
 		key := appliedKey(globalDifficulty(""))
-		_, _, hold := al.cooling(key, "1.25", now, time.Second)
-		if cooling, _, _ := al.cooling(key, "1.625", now, time.Second); !cooling {
+		_, hold := al.cooling(key, "1.25", now, time.Second)
+		if cooling, _ := al.cooling(key, "1.625", now, time.Second); !cooling {
 			t.Fatal("a held lever must cool")
 		}
 		hold.release()
 		hold.release()
-		if cooling, _, h := al.cooling(key, "1.625", now, time.Second); cooling || al.reserved[key] != 1 {
+		if cooling, h := al.cooling(key, "1.625", now, time.Second); cooling || al.reserved[key] != 1 {
 			t.Fatalf("after release: cooling %v, reserved %d", cooling, al.reserved[key])
 		} else {
 			h.release()

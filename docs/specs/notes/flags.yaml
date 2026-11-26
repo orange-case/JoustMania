@@ -26,12 +26,6 @@ agent:
     reload: live
     note: >-
       Where a promotion acts: the local stack or GitHub. Read at each promotion.
-  decision.act_confidence_threshold:
-    read_by: [agent]
-    reload: live
-    note: >-
-      Confidence a remote answer needs to act, checked when the answer lands. Applies to claude, and
-      to jev while `decision.jev.act_confidence_threshold` is `inherit`.
   decision.backend:
     read_by: [agent]
     reload: live
@@ -42,6 +36,12 @@ agent:
     reload: live
     note: >-
       Whether remote decide requests and answers are captured in full.
+  decision.claude.act_confidence_threshold:
+    read_by: [agent]
+    reload: live
+    note: >-
+      Confidence a claude answer needs to act, checked when the answer lands. NaN, a value outside 0
+      to 1 or a read error gives 0.8.
   decision.claude.base_url:
     read_by: [agent]
     reload: live
@@ -68,8 +68,9 @@ agent:
     read_by: [agent]
     reload: live
     note: >-
-      Confidence a jev answer needs to act, checked when the answer lands. `inherit`, NaN or a value
-      outside 0 to 1 uses `decision.act_confidence_threshold`; a read error gives 0.6.
+      Confidence a jev answer needs to act, checked when the answer lands; the fire-time value is
+      also the request's threshold, where jev's own gate opens (decide-contract §3.1). NaN, a value
+      outside 0 to 1 or a read error gives 0.6.
   decision.jev.base_url:
     read_by: [agent]
     reload: live
@@ -90,8 +91,8 @@ agent:
     read_by: [agent]
     reload: live
     note: >-
-      A remote answer is discarded (`state_too_old`) when the game state it was asked about is older
-      than this when it lands. Negative gives the default.
+      A remote answer is discarded as `stale` (detail `state_too_old`) when the game state it was
+      asked about is older than this when it lands. Negative gives the default.
   decision.min_gap_after_answer_ms:
     read_by: [agent]
     reload: live
@@ -320,8 +321,9 @@ agent:
     read_by: [agent]
     reload: live
     note: >-
-      Gates every intervention the agent would apply; decisions still run. The operator pad's pause
-      and resume flip it in memory (UC-015 BR-003).
+      Gates every intervention the agent would apply; decisions still run. Off after a restart
+      (fail closed); the operator pad's agent switch sets it in memory (UC-016 BR-012, UC-015
+      BR-003).
   lifecycle.evict_interval_seconds:
     read_by: [agent]
     reload: live
@@ -1254,9 +1256,9 @@ observability:
       Span batch export delay of every Python service; targetable per `service`. A change needs a
       restart.
   telemetry.moment_shape:
-    read_by: [game-coordinator]
+    read_by: [lib]
     reload: per-game
     note: >-
-      How game moments (warning, death, intervention) are recorded, held for the game (UC-100
-      BR-002). An unknown value reads as `span_event`; reset it after the booth (UC-100 step 9). It
+      How game moments (warning, death, intervention) are recorded, read by the game coordinator per
+      game through `lib/moments.py` and held for the game (UC-100 BR-002). An unknown value reads as `span_event`; reset it after the booth (UC-100 step 9). It
       never changes what the agent reads (UC-041 BR-009).

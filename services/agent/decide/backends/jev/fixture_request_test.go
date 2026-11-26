@@ -70,14 +70,14 @@ func testRequest() decide.Request {
 	}
 }
 
-// noulRequest asks two yes/no questions about the same state (#1229 KindNoul).
+// noulRequest asks two yes/no questions about the same state (#1229, jev's kindNoul).
 func noulRequest() decide.Request {
 	st := decide.BuildState(lopsidedContext())
 	return decide.Request{
 		State: st,
 		Questions: []decide.Question{
-			{ID: "lopsided", Kind: decide.KindNoul, Text: "Is one player clearly dominating the remaining players?"},
-			{ID: "about_to_end", Kind: decide.KindNoul, Text: "Is the round likely to end within the next few seconds?"},
+			{ID: "lopsided", Kind: kindNoul, Text: "Is one player clearly dominating the remaining players?"},
+			{ID: "about_to_end", Kind: kindNoul, Text: "Is the round likely to end within the next few seconds?"},
 		},
 	}
 }

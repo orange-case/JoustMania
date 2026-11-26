@@ -292,8 +292,23 @@ def test_check_and_counts_are_mutually_exclusive(capsys):
 # --------------------------------------------------------------------------- #
 # The per-set flag catalog (flags.md §3 to §10a, #2793)
 # --------------------------------------------------------------------------- #
-def _catalog_repo(tmp_repo, notes: dict, registry: list | None = None):
+def _catalog_repo(tmp_repo, notes: dict, registry: list | None = None, unread=()):
+    """Write the sidecar and registry, and reader sources naming every claimed key.
+
+    A (set, key) in `unread` is left out of the sources, so its read_by claim fails.
+    """
     (tmp_repo / "docs/specs/notes/flags.yaml").write_text(json.dumps(notes))
+    sources: dict[str, list[str]] = {}
+    for s, entries in notes.items():
+        for key, entry in entries.items():
+            for reader in entry.get("read_by") or []:
+                if (s, key) not in unread and reader in g.READER_SOURCES:
+                    sources.setdefault(reader, []).append(f'"{key}"')
+    for reader, keys in sources.items():
+        base, suffix = g.READER_SOURCES[reader]
+        src = tmp_repo / base / f"reads{suffix}"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_text("\n".join(keys) + "\n")
     (tmp_repo / "services/flag-service/registry.yaml").write_text(
         json.dumps({"flags": registry or []})
     )
@@ -338,12 +353,13 @@ def test_flag_catalog_renders_file_registry_and_notes(tmp_repo):
                 "kind": "overlay",
                 "scope": ["experiment+arm", "real"],
                 "bounds": {"range": [0, 4], "integer": True},
-                "description": "from the registry",
+                "description": "registry text, not shown",
             },
         ],
     )
     text = g.flag_catalog()
-    rows = [line for line in text.splitlines() if line.startswith("| `")]
+    table = text.split("## Startup-only flags")[0]
+    rows = [line for line in table.splitlines() if line.startswith("| `")]
     assert [r.split(" |")[0] for r in rows] == [
         "| `a`",
         "| `b`",
@@ -355,10 +371,10 @@ def test_flag_catalog_renders_file_registry_and_notes(tmp_repo):
         "overlay, stack; any declared variant; persistable | live | game-coordinator, menu | "
         "the switch |"
     )
-    # A registry description fills an empty note; mixed numbers are floats.
+    # The note has one home: a registry description is not shown. Mixed numbers are floats.
     assert rows[1] == (
         "| `b` | float | `low`=0.5, `medium`=1 | `medium` = 1 |  | "
-        "overlay, experiment+arm or real; 0 to 4 (integer) | per-game | agent | from the registry |"
+        "overlay, experiment+arm or real; 0 to 4 (integer) | per-game | agent |  |"
     )
     assert (
         rows[2]
@@ -368,6 +384,42 @@ def test_flag_catalog_renders_file_registry_and_notes(tmp_repo):
     assert '`x`="a\\|b", `long` |' in rows[3]
     assert rows[3].endswith("| startup | agent | pipes a\\|b |")
     assert "## `game`" in text
+    # The generated startup-only and unread lists (flags.md §1.3, §11).
+    lists = text.split("## Startup-only flags")[1]
+    startup, unread = lists.split("## Flags without an effective reader")
+    assert [r for r in startup.splitlines() if r.startswith("| `")] == [
+        "| `game` | `s` | agent |"
+    ]
+    assert [r for r in unread.splitlines() if r.startswith("| `")] == [
+        "| `game` | `obj` |"
+    ]
+
+
+def test_a_read_by_claim_the_code_does_not_back_fails(tmp_repo):
+    (tmp_repo / "services/flagd/game.json").write_text(
+        _flags(a=_flag("x", x=1), b=_flag("x", x=1))
+    )
+    notes = {
+        "game": {
+            "a": _entry(read_by=["agent", "menu"]),
+            "b": _entry(read_by=["agent"]),
+        }
+    }
+    _catalog_repo(tmp_repo, notes, unread={("game", "a")})
+    # A test file naming the key does not count.
+    test_file = tmp_repo / "services/menu/tests/test_reads.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text('"a"\n')
+    with pytest.raises(
+        g.SpecSourceError,
+        match=r"never names the key: \['game/a \(agent\)', 'game/a \(menu\)'\]",
+    ):
+        g.flag_catalog()
+
+
+def test_every_real_read_by_claim_is_backed_by_code():
+    sets = g._flag_files(g.FLAGD)
+    g._check_readers(g._load_flag_notes(sets))
 
 
 @pytest.mark.parametrize(

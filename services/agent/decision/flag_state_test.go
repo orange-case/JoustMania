@@ -58,12 +58,13 @@ func TestFlagState_Fields(t *testing.T) {
 	fl.snap.ExperimentsEnabled = true
 	fl.snap.LLMGate.EligibleGameKinds = []string{"real", "shadow"}
 	fl.snap.Policy = flags.Policy{BatteryThreshold: 2, MaxInterventionsPerMinute: 6}
-	fl.snap.Decision = flags.DecisionBackend{Backend: flags.DecisionBackendJev, ActConfidenceThreshold: 0.6}
+	fl.snap.Decision = flags.DecisionBackend{Backend: flags.DecisionBackendJev, Jev: flags.RemoteBackendConfig{ActConfidenceThreshold: 0.6}}
 	c := gameCycleCtx("game_fs02")
 	mode := "FFA"
 	c.Session.GameMode = &mode
 	l.OnEvaluate(context.Background(), c, testTrigger())
 
+	jevThreshold := 0.6
 	want := FlagState{
 		GameID:                 "game_fs02",
 		GameKind:               c.GameKind,
@@ -77,7 +78,7 @@ func TestFlagState_Fields(t *testing.T) {
 		BatteryThreshold:       2,
 		MaxInterventionsPerMin: 6,
 		DecisionBackend:        flags.DecisionBackendJev,
-		ActConfidenceThreshold: 0.6,
+		ActConfidenceThreshold: &jevThreshold,
 		ExperimentsEnabled:     true,
 		LLMEligibleGameKinds:   []string{"real", "shadow"},
 	}

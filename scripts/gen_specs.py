@@ -462,6 +462,20 @@ READERS = frozenset(
         "lib",
     }
 )
+# Where each reader's runtime code lives; a read_by claim needs the key literal there.
+READER_SOURCES = {
+    "agent": ("services/agent", ".go"),
+    "game-coordinator": ("services/game_coordinator", ".py"),
+    "menu": ("services/menu", ".py"),
+    "controller-manager": ("services/controller_manager", ".py"),
+    "audio": ("services/audio", ".py"),
+    "rust-hid": ("services/rust-hid/src", ".rs"),
+    "pairing-daemon": ("services/pairing_daemon", ".py"),
+    "operator-pad": ("services/operator_pad", ".py"),
+    "flag-service": ("services/flag-service", ".go"),
+    "lib": ("lib", ".py"),
+}
+_TEST_DIRS = frozenset({"tests", "test", "testdata", "gen"})
 # flags.md §1.3; `none` only for a flag nothing reads.
 RELOADS = frozenset({"live", "event-refreshed", "per-game", "startup", "none"})
 _SHOWN_VALUE_MAX = 24
@@ -597,9 +611,42 @@ def _load_flag_notes(sets: dict[str, dict]) -> dict[tuple[str, str], dict]:
     return out
 
 
+def _reader_source(reader: str, cache: dict[str, str]) -> str:
+    """The reader's non-test sources, concatenated."""
+    if reader not in cache:
+        base, suffix = READER_SOURCES[reader]
+        parts = []
+        for path in sorted((REPO_ROOT / base).rglob(f"*{suffix}")):
+            rel = path.relative_to(REPO_ROOT)
+            if _TEST_DIRS & set(rel.parts[:-1]) or path.name.endswith("_test.go"):
+                continue
+            if path.name.startswith("test_") or path.name == "conftest.py":
+                continue
+            parts.append(path.read_text(encoding="utf-8", errors="replace"))
+        cache[reader] = "\n".join(parts)
+    return cache[reader]
+
+
+def _check_readers(notes: dict[tuple[str, str], dict]) -> None:
+    """Each read_by claim must name the key literal in that reader's non-test sources."""
+    cache: dict[str, str] = {}
+    wrong = sorted(
+        f"{s}/{k} ({reader})"
+        for (s, k), entry in notes.items()
+        for reader in entry["read_by"]
+        if f'"{k}"' not in _reader_source(reader, cache)
+    )
+    if wrong:
+        raise SpecSourceError(
+            "docs/specs/notes/flags.yaml: read_by names a service whose code never "
+            f"names the key: {wrong}; fix read_by"
+        )
+
+
 def flag_catalog() -> str:
     sets = _flag_files(FLAGD)
     notes = _load_flag_notes(sets)
+    _check_readers(notes)
     registry = _load_registry()
     unknown = sorted(f"{s}/{k}" for s, k in registry if k not in sets.get(s, {}))
     if unknown:
@@ -617,7 +664,8 @@ def flag_catalog() -> str:
             "Type, variants, default and targeting come from the flag file; **Runtime write** "
             "is the flag's registry row (kind, scopes, bounds, flags.md §13; `none` = "
             "read-only baseline, C-033); **Reload** is the class of flags.md §1.3; **Read by**, "
-            "**Reload** and **Note** come from `docs/specs/notes/flags.yaml`.\n"
+            "**Reload** and **Note** come from `docs/specs/notes/flags.yaml`; `make specs-check` "
+            "fails when a **Read by** service's code never names the key.\n"
         ),
     ]
     for s in _ordered_sets(sets):
@@ -631,7 +679,6 @@ def flag_catalog() -> str:
             flag = sets[s][key]
             entry = notes[(s, key)]
             reg = registry.get((s, key))
-            note = entry["note"] or (reg or {}).get("description", "")
             state = (
                 ""
                 if flag.get("state", "ENABLED") == "ENABLED"
@@ -650,12 +697,37 @@ def flag_catalog() -> str:
                         _write_cell(reg),
                         entry["reload"],
                         ", ".join(entry["read_by"]) or "(none)",
-                        _cell(" ".join(str(note).split())),
+                        _cell(entry["note"]),
                     ]
                 )
                 + " |"
             )
         out.append("")
+    every = [(s, k) for s in _ordered_sets(sets) for k in sorted(sets[s])]
+    out += [
+        "## Startup-only flags\n",
+        (
+            "Read once at process start ([flags.md §1.3](../flags.md#13-reload-semantics)): "
+            "a change needs a restart of the reader.\n"
+        ),
+        "| Flag set | Key | Read by |",
+        "|---|---|---|",
+        *(
+            f"| `{s}` | `{k}` | {', '.join(notes[(s, k)]['read_by'])} |"
+            for s, k in every
+            if notes[(s, k)]["reload"] == "startup"
+        ),
+        "",
+        "## Flags without an effective reader\n",
+        (
+            "Declared in a flag file, read by no service "
+            "([flags.md §11](../flags.md#11-flags-without-an-effective-reader)).\n"
+        ),
+        "| Flag set | Key |",
+        "|---|---|",
+        *(f"| `{s}` | `{k}` |" for s, k in every if not notes[(s, k)]["read_by"]),
+        "",
+    ]
     return "\n".join(out)
 
 

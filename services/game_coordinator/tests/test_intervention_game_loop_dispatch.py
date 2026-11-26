@@ -177,7 +177,12 @@ def make_manager(sessions_fn, *, interventions=None, end_game_fn=None, timeout_s
     mgr = InterventionManager(event_publisher=publisher, get_sessions=sessions_fn, end_game_fn=end_game_fn)
     mgr._interventions_client = FakeFlagClient(interventions or {})
     mgr._agent_client = FakeFlagClient(
-        {"interventions_allowed": ALLOWED, "policy.battery_threshold": 20, "policy.coordinator_backstop_per_minute": 60}
+        {
+            "enabled": True,
+            "interventions_allowed": ALLOWED,
+            "policy.battery_threshold": 20,
+            "policy.coordinator_backstop_per_minute": 60,
+        }
     )
     mgr._user_client = FakeFlagClient({"agent_intervention_cue": False})
     if timeout_s is not None:

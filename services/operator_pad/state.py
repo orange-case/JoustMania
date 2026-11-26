@@ -2,7 +2,7 @@
 
 The pad reads a fresh status at every key press and release; it never caches one across
 gestures. A failed read is None: the caller sends nothing and never queues (UC-015 BR-010),
-except the K3 hold, which sends the stop (BR-013).
+except the K5 hold, whose stop needs no read (BR-002).
 """
 
 from __future__ import annotations
@@ -25,42 +25,16 @@ AGENT_LEVELS = frozenset({"none", "ambient", "standard", "full"})
 ENABLED_STATES = frozenset({"on", "off"})
 
 
-def is_known(status: menu_pb2.GetMenuStatusResponse | None) -> bool:
-    """UC-015 BR-013: a status that was read and whose agent flags resolved.
-
-    `enabled` and the write gate `interventions_enabled` (each state `on` or `off`) and the level
-    (on the ladder) must all have resolved.
-    """
-    return (
-        status is not None
-        and status.agent_enabled_state in ENABLED_STATES
-        and status.agent_interventions_enabled_state in ENABLED_STATES
-        and status.agent_level in AGENT_LEVELS
-    )
-
-
-def is_stopped(status: menu_pb2.GetMenuStatusResponse) -> bool:
-    """UC-015 BR-002: stopped when `enabled` is off, the level is `none` or the write gate is off (#2093)."""
-    return (
-        (not status.agent_enabled) or status.agent_level == "none" or status.agent_interventions_enabled_state == "off"
-    )
-
-
 AGENT_ON, AGENT_WATCH, AGENT_OFF, AGENT_UNKNOWN = "on", "watch", "off", "unknown"
 
 
 def agent_state(status: menu_pb2.GetMenuStatusResponse | None) -> str:
-    """UC-016 BR-011: `off` fully stopped (`enabled` off or level `none`, the stop's no-op test),
-    `watch` only the write gate closed, `on`, or `unknown` by BR-001 status line 3's rule."""
-    if (
-        status is None
-        or status.agent_enabled_state not in ENABLED_STATES
-        or status.agent_interventions_enabled_state not in ENABLED_STATES
-    ):
+    """UC-016 BR-011: `off` (`enabled` off), `watch` (the write gate off), `on`, or `unknown` by BR-001 line 3."""
+    if status is None or status.agent_enabled_state not in ENABLED_STATES:
         return AGENT_UNKNOWN
-    if not status.agent_enabled or status.agent_level == "none":
+    if status.agent_enabled_state == "off":
         return AGENT_OFF
-    if status.agent_level not in AGENT_LEVELS:
+    if status.agent_interventions_enabled_state not in ENABLED_STATES or status.agent_level not in AGENT_LEVELS:
         return AGENT_UNKNOWN
     return AGENT_WATCH if status.agent_interventions_enabled_state == "off" else AGENT_ON
 

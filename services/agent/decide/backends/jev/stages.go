@@ -9,8 +9,8 @@ package jev
 //
 //	stage "intervention": the gate noul ("Does the game need an intervention
 //	                      right now?"), ffa.intervention WITHOUT noop, plus every
-//	                      question that is not ffa.target / ffa.magnitude (e.g.
-//	                      nouls). See "The gate" below (#1281).
+//	                      question that is not ffa.target / ffa.magnitude. See
+//	                      "The gate" below (#1281).
 //	stage "details":      ffa.target and ffa.magnitude CONDITIONED on the chosen
 //	                      intervention: the instructions and state name it, the
 //	                      target options are the alive players described by their
@@ -32,12 +32,12 @@ package jev
 // do if acting). The ffa.intervention answer Decide returns is SYNTHESISED
 // from them (gateAnswer):
 //
-//	{noop: 1 - p_yes, argmax_iv: p_yes, every other option: 0}
+//	open:   {noop: 1 - p_yes, argmax_iv: p_yes, every other option: 0}
+//	closed: {noop: 1, every other option: 0}
 //
-// so the acting confidence 1 - p(noop) equals p_yes, gateAnswer picks the
-// intervention iff p_yes > 0.5 (its own strict >; decide.Validate's argmax
-// check merely accepts that choice, within its 1e-3 tolerance), and every
-// option is covered. It is deliberately NOT the factorised p_yes * q_i, which would
+// The gate opens iff p_yes reaches the act threshold the router applies at
+// landing (gateThreshold), so the acting confidence is p_yes, and every option
+// is covered. It is deliberately NOT the factorised p_yes * q_i, which would
 // split the acting mass again. Jev's real answers (p_yes and the distribution
 // over the interventions) are recorded on the stage-1 chat span
 // (jev.gate.p_yes, jev.stage1.choice, jev.stage1.distribution). The gate
@@ -90,6 +90,8 @@ type stagePlan struct {
 	// gate noul and ffa.intervention without noop instead of it; nil when the
 	// question is asked as is.
 	gated *decide.Question
+	// threshold is the p_yes at which the gate opens (gateThreshold).
+	threshold float64
 }
 
 // splitStages returns the stage plan of req. With no choice-kind
@@ -104,7 +106,11 @@ func splitStages(req decide.Request) stagePlan {
 	if !hasIntervention {
 		return stagePlan{first: req, stage: StageSingle}
 	}
-	p := stagePlan{first: decide.Request{State: req.State, PromptProfile: req.PromptProfile, Goal: req.Goal, Bounds: req.Bounds}, stage: StageIntervention}
+	p := stagePlan{
+		first:     decide.Request{State: req.State, PromptProfile: req.PromptProfile, Goal: req.Goal, Bounds: req.Bounds},
+		stage:     StageIntervention,
+		threshold: gateThreshold(req.ActThreshold),
+	}
 	for _, q := range req.Questions {
 		switch {
 		case isDetail(q):
@@ -126,6 +132,10 @@ func splitStages(req decide.Request) stagePlan {
 // backend: Decide answers the caller's ffa.intervention from it.
 const GateQuestionID = "jev.gate"
 
+// kindNoul is Jev's yes/no primitive (answer: P(yes)). It is not a decide kind:
+// only the gate asks it, and its P(yes) rides in the internal answer's Score.
+const kindNoul decide.QuestionKind = "noul"
+
 // gateable reports whether ffa.intervention q can be gated: it offers noop and
 // at least one intervention.
 func gateable(q decide.Question) bool {
@@ -134,7 +144,7 @@ func gateable(q decide.Question) bool {
 
 // gateQuestion is the stage-1 gate noul (criteria: criteria.go gateCriteria).
 func gateQuestion() decide.Question {
-	return decide.Question{ID: GateQuestionID, Kind: decide.KindNoul, Text: gateInstructions}
+	return decide.Question{ID: GateQuestionID, Kind: kindNoul, Text: gateInstructions}
 }
 
 // withoutNoop is ffa.intervention q without the noop option, asked as "which
@@ -149,34 +159,38 @@ func withoutNoop(q decide.Question) decide.Question {
 	return out
 }
 
-// gateOpen is the p_yes above which the synthesised choice is the
-// intervention. gateAnswer decides with a strict > (at exactly 0.5 the round
-// is noop); decide.Validate only accepts the result (the choice is the argmax
-// of {noop: 1-p, iv: p} within its 1e-3 tolerance), it does not decide it.
-const gateOpen = 0.5
+// gateFloor is the lowest p_yes that may act: below it noop holds more mass than
+// the intervention, and decide.Validate requires the choice to be the argmax.
+const gateFloor = 0.5
+
+// gateThreshold is the p_yes at which the gate opens: the request's act threshold
+// (decision.jev.act_confidence_threshold at fire time), at least gateFloor and at
+// most 1. An unset (0) or NaN threshold opens at gateFloor.
+func gateThreshold(t float64) float64 {
+	if !(t > gateFloor) {
+		return gateFloor
+	}
+	return min(t, 1)
+}
 
 // gateAnswer synthesises the caller's ffa.intervention answer from the gate's
-// p_yes and Jev's stage-1 answer over the interventions (iv):
-// {noop: 1 - p_yes, iv.Choice: p_yes, every other option of orig: 0}. The
-// choice is iv.Choice iff p_yes > 0.5, else noop; the confidence is the
-// acting confidence (p_yes for an intervention, 1 - p_yes for noop).
-func gateAnswer(orig decide.Question, pYes float64, iv decide.Answer) decide.Answer {
+// p_yes and Jev's stage-1 answer over the interventions (iv). An open gate
+// (p_yes >= threshold) is {noop: 1 - p_yes, iv.Choice: p_yes} at confidence
+// p_yes; a closed gate is noop with certainty, because between 0.5 and the
+// threshold noop would not be the argmax of the open form, at confidence
+// 1 - p_yes. Every other option of orig is 0.
+func gateAnswer(orig decide.Question, pYes, threshold float64, iv decide.Answer) decide.Answer {
 	probs := make(map[string]float64, len(orig.Options))
 	for _, o := range orig.Options {
 		probs[o] = 0
 	}
+	if pYes < threshold {
+		probs[decide.OptionNoop] = 1
+		return decide.Answer{QuestionID: orig.ID, Choice: decide.OptionNoop, Probabilities: probs, Confidence: 1 - pYes}
+	}
 	probs[decide.OptionNoop] = 1 - pYes
 	probs[iv.Choice] = pYes
-	choice := decide.OptionNoop
-	if pYes > gateOpen {
-		choice = iv.Choice
-	}
-	return decide.Answer{
-		QuestionID:    orig.ID,
-		Choice:        choice,
-		Probabilities: probs,
-		Confidence:    actingConfidence(choice, probs),
-	}
+	return decide.Answer{QuestionID: orig.ID, Choice: iv.Choice, Probabilities: probs, Confidence: pYes}
 }
 
 // resolveGate replaces stage 1's gate and gated ffa.intervention answers with
@@ -198,10 +212,10 @@ func (p stagePlan) resolveGate(answers []decide.Answer) ([]decide.Answer, decide
 			out = append(out, answers[i])
 		}
 	}
-	if gate == nil || gate.Noul == nil || iv == nil {
+	if gate == nil || iv == nil {
 		return nil, decide.Answer{}, fmt.Errorf("jev: %w: gate or intervention not answered", decide.ErrInvalid)
 	}
-	return append(out, gateAnswer(*p.gated, *gate.Noul, *iv)), *iv, nil
+	return append(out, gateAnswer(*p.gated, gate.Score, p.threshold, *iv)), *iv, nil
 }
 
 // detailsPlan is what the details stage asks Jev (ask) and what it answers
@@ -451,7 +465,10 @@ func rationale(resp decide.Response, stage1 decide.Answer) string {
 	}
 	s := "jev: " + iv.Choice + " (p=" + p2(iv.Probabilities[iv.Choice]) + ")"
 	if stage1.Choice != "" {
-		pYes := 1 - iv.Probabilities[decide.OptionNoop]
+		pYes := iv.Confidence
+		if iv.Choice == decide.OptionNoop {
+			pYes = 1 - iv.Confidence
+		}
 		s = "jev: " + iv.Choice + " (gate p_yes=" + p2(pYes) + "; " + stage1.Choice + " p=" +
 			p2(stage1.Probabilities[stage1.Choice]) + " among interventions)"
 	}
