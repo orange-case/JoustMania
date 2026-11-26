@@ -17,7 +17,7 @@ sys.path.insert(0, str(test_dir.parent.parent.parent))
 sys.path.insert(0, str(test_dir))
 
 from test_shield_hold_gauges import GaugeSpy  # noqa: E402
-from test_shield_limits import T0, _make_ffa, activation, clock, game, limits  # noqa: E402, F401
+from test_shield_limits import T0, activation, clock, game, limits  # noqa: E402, F401 - fixtures
 
 from services.game_coordinator import metrics as metrics_module  # noqa: E402
 from services.game_coordinator.games import base as base_module  # noqa: E402
@@ -40,7 +40,7 @@ def stat(gate, name, serial="p1"):
 class TestUC040AgentShieldGate:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A33", br=["BR-022"])
-    async def test_an_applied_grant_exports_the_count_and_the_cooldown_end(self, game, clock, limits, gate):  # noqa: ARG002
+    async def test_an_applied_grant_exports_count_and_cooldown_end(self, game, clock, limits, gate):  # noqa: F811, ARG002
         limits["value"] = (3, 15)
         assert await game.grant_shield("p1", 5.0) is True
         assert stat(gate, "grants") == 1
@@ -48,7 +48,7 @@ class TestUC040AgentShieldGate:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A33", br=["BR-022"])
-    async def test_without_a_cooldown_the_end_is_zero_and_a_refusal_exports_nothing(self, game, clock, limits, gate):  # noqa: ARG002
+    async def test_no_cooldown_exports_zero_and_a_refusal_nothing(self, game, clock, limits, gate):  # noqa: F811, ARG002
         limits["value"] = (1, 0)
         assert await game.grant_shield("p1", 5.0) is True
         assert stat(gate, "cooldown_until") == 0
@@ -59,7 +59,7 @@ class TestUC040AgentShieldGate:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A31", br=["BR-020"])
-    async def test_a_held_charge_is_exported_until_it_ends(self, game, activation, limits, gate):
+    async def test_a_held_charge_is_exported_until_it_ends(self, game, activation, limits, gate):  # noqa: F811, ARG002
         activation["value"] = "trigger"
         limits["value"] = (0, 0)
         player = game.players["p1"]
@@ -71,9 +71,13 @@ class TestUC040AgentShieldGate:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A47", br=["BR-033"])
-    async def test_an_applied_group_shield_exports_the_game_count(self, game, gate):
-        with patch.object(base_module, "read_bool_flag", return_value=True), patch.object(
-            base_module, "read_int_flag", side_effect=lambda _d, key, default, **_: {"policy.group_grant.max_targets": 3, "policy.group_grant.max_per_game": 2}.get(key, default)
+    async def test_an_applied_group_shield_exports_the_game_count(self, game, gate):  # noqa: F811, ARG002
+        ints = {"policy.group_grant.max_targets": 3, "policy.group_grant.max_per_game": 2}
+        with (
+            patch.object(base_module, "read_bool_flag", return_value=True),
+            patch.object(
+                base_module, "read_int_flag", side_effect=lambda _d, key, default, **_: ints.get(key, default)
+            ),
         ):
             game.game_kind = "shadow"
             assert await game.grant_group_shield(["p1", "p2"], 3.0) is True

@@ -6,12 +6,10 @@ servicer's MAIN loop and ``GameLoopDispatcher.run``, and the manager sets the ga
 flag transaction context around it (``run_in_game_flag_context``, #1970). So the
 coordinator reads ``shield.activation`` and ``shield.charge_expiry_seconds`` with the
 API-level attributes, the game's context (targetingKey and game_mode = the mode,
-game_kind) and ``gameId``. The agent's charge ledger resolves them with only
-``gameId`` and ``game_kind=real``, for real games only
-(services/agent/flags/game.go shieldChargeContext); that is sound because the
-targeting of these flags may reference only ``gameId`` and ``game_kind`` (flags.md
-§4, tests/contract/test_flagd_resolution.py). This test pins the coordinator's side
-with the real OpenFeature API and a recording provider.
+game_kind) and ``gameId``. The targeting of these flags may reference only
+``gameId`` and ``game_kind`` (flags.md §4, tests/contract/test_flagd_resolution.py).
+This test pins the coordinator's side with the real OpenFeature API and a recording
+provider.
 """
 
 import asyncio

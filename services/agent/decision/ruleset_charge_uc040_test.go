@@ -11,7 +11,7 @@ import (
 )
 
 // ruleset_charge_uc040_test.go covers applyChargePolicy (UC-040 A31; #1870): the rules
-// engine drops a grant_shield candidate whose target the loop's charge ledger holds;
+// engine drops a grant_shield candidate whose target holds a charge;
 // another player's R4 candidate may then be the one kept (A41, #2395).
 
 // chargeRulesCtx is a real FFA game in which R4 shields WEAK (the weakest while the field

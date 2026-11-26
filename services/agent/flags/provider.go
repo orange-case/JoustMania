@@ -21,7 +21,7 @@ import (
 const Domain = "agent"
 
 // The game set's domain (GameDomain) is declared in game.go: the agent reads only the
-// two shield flags of the charge ledger from it (UC-040 A31, #1837).
+// shadow start-config keys from it (ShadowGameInt).
 
 // Sync-stream reconnect backoff after a lost stream (flags.md §1.1): the provider's
 // default caps it at 12 s, which would hold the agent fail-closed that long after a

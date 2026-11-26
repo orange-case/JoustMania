@@ -9,8 +9,8 @@ import (
 )
 
 // The shield_charged marker of the decide state (#1870, UC-040 main step 4 and A31
-// step 1): the decision loop annotates the alive players its charge ledger holds a
-// live entry for.
+// step 1): the decision loop annotates the alive players the coordinator reports
+// holding a charge.
 
 func playerByID(t *testing.T, st State, serial string) PlayerState {
 	t.Helper()

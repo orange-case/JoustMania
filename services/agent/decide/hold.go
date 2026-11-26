@@ -19,8 +19,8 @@ const (
 	HoldRefusalPoolFull        = "shield_pool_full"
 )
 
-// HoldPoolFullMarginSeconds: a grant is refused shield_pool_full when the energy plus
-// the grants in flight is at least the full level minus this margin. A constant
+// HoldPoolFullMarginSeconds: a grant is refused shield_pool_full when the energy is
+// at least the full level minus this margin. A constant
 // (C-035): the gauges are up to one export interval old.
 const HoldPoolFullMarginSeconds = 0.5
 
@@ -49,7 +49,7 @@ func HoldShieldRefusal(energy, budgetLeft *float64, active bool, cap, minBurst *
 }
 
 // HoldRefusal is HoldShieldRefusal for a player of this state ("" outside a hold
-// game). The state's energy already includes the grants in flight.
+// game).
 func (s State) HoldRefusal(p PlayerState) string {
 	if s.ShieldActivation == "" || !p.Alive {
 		return ""

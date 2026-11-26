@@ -790,9 +790,8 @@ def test_every_coordinator_flag_resolves_with_its_typed_getter(flagd, resolver):
 # --------------------------------------------------------------------------- #
 # 2a. The agent reads the shield flags like the coordinator (#1837, UC-040 A31)
 # --------------------------------------------------------------------------- #
-# The agent's charge ledger reads shield.activation and shield.charge_expiry_seconds
-# from the game set (services/agent/flags/game.go:ShieldCharge) with a SUBSET of the
-# coordinator's evaluation context on the grant path: gameId, the game's game_kind and,
+# The agent's per-game evaluation context (services/agent/flags/game.go GameContext) is
+# a SUBSET of the coordinator's evaluation context on the grant path: gameId, the game's game_kind and,
 # for a shadow game of an experiment, experiment_id and arm (#2096, UC-043 A17). The coordinator reads both flags inside grant_shield, which the
 # InterventionManager dispatches through GameLoopDispatcher.run in the game's flag
 # transaction context (interventions.py run_in_game_flag_context, #1970): the API-level
