@@ -38,7 +38,6 @@ FLAG_SETS = (
     "user",
     "agent",
     "interventions",
-    "rollout",
     "operator",
 )
 PROBE_SET, PROBE_FLAG = "observability", "flagservice.propagation_probe"
@@ -186,8 +185,8 @@ def test_rejected_writes(stack):
         # A credential-bearing URL takes declared variants only (no key exfiltration).
         (
             "PUT",
-            "/agent/decision.openai.base_url",
-            {"value": "https://attacker.example/v1"},
+            "/agent/decision.claude.base_url",
+            {"value": "https://attacker.example"},
             422,
             "out_of_bounds",
         ),

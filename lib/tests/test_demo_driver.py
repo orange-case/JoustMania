@@ -154,7 +154,7 @@ def test_blocked_battery_plays_the_skill_gap_pattern(stack, clock):
     assert blocked == _moves(other)
 
 
-@pytest.mark.uc("UC-070", flow="main", steps=[1, 2])
+@pytest.mark.uc("UC-070", flow="main", steps=[1])
 def test_skill_gap_splits_steady_pros_from_jerky_novices(stack):
     serials = ["A", "B", "C", "D"]
     dd.scenario_skill_gap(stack, serials, 2.0)
@@ -187,7 +187,7 @@ def test_statue_holds_one_controller_still_while_the_others_jostle(stack):
     assert {s for s, _ in moves} == {"S", "M1", "M2"}
 
 
-@pytest.mark.uc("UC-070", flow="main", steps=[1, 2])
+@pytest.mark.uc("UC-070", flow="main", steps=[1])
 def test_death_cascade_eliminates_all_but_one_every_three_seconds(stack, clock):
     kill_times = []
 
@@ -352,7 +352,7 @@ def _countdown_stream(clock, seen):
         clock.now += 0.75  # one countdown phase passes between events
 
 
-@pytest.mark.uc("UC-070", flow="main", steps=[1, 2])
+@pytest.mark.uc("UC-070", flow="main", steps=[1])
 def test_start_real_game_returns_only_after_countdown_warmup_and_grace(stack, clock):
     """#1710: the coordinator ignores deaths until countdown_end + EMA warmup (0.1s) + startup grace (0.3s)."""
     seen = {}
@@ -363,7 +363,7 @@ def test_start_real_game_returns_only_after_countdown_warmup_and_grace(stack, cl
     assert dd.LIVE_PLAY_SETTLE_SECONDS >= dd.EMA_WARMUP_SECONDS + dd.STARTUP_GRACE_SECONDS
 
 
-@pytest.mark.uc("UC-070", flow="main", steps=[1, 2])
+@pytest.mark.uc("UC-070", flow="main", steps=[1])
 def test_death_cascade_first_kill_waits_for_live_play(stack, clock):
     seen = {}
     _wire_run(stack)

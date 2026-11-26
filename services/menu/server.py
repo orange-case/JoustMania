@@ -5,7 +5,7 @@ Manages the game selection menu and lobby experience:
 - Game mode selection and cycling
 - Controller lobby state (connected/ready)
 - LED feedback based on game mode and player state
-- Admin mode for in-game configuration
+- The operator pad's commands (settings, agent level, force start)
 - Real-time event streaming for UI updates
 
 See services/menu/README.md for full documentation.

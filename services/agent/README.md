@@ -6,7 +6,7 @@ Adaptive-difficulty agent that turns live telemetry into intervention decisions.
 
 The Agent sits between JoustMania's **observation layer** (OpenTelemetry) and its
 **control layer** ([OpenFeature](https://openfeature.dev/) / flagd). It receives
-spans, metrics and moment log events from the OTel Collector over OTLP, accumulates a rolling
+spans, metrics and its own lifecycle log events from the OTel Collector over OTLP, accumulates a rolling
 `GameContext`, gates on whether the context is worth acting on, and calls stub
 decision hooks that will eventually drive feature-flag changes.
 
@@ -26,8 +26,8 @@ driven by metrics.
 
 **Spans are late by design.** `player_lifecycle` spans only flush at game end,
 and even then sit behind the ~10 s trace batch window. They are used for
-**audit/confirmation** and the elimination order. A span batch still wakes the
-evaluation and adds span-derived state (elimination order, `game.mode`,
+**audit/confirmation**. A span batch still wakes the
+evaluation and adds span-derived state (`game.mode`,
 `game.kind`, experiment id/arm) that decisions may read, so that state lags the
 game (UC-041 BR-001).
 
@@ -151,301 +151,6 @@ OTLP Export (metrics/traces batch)
 > attach to this per-game Loop state; the **global** LLM budget stays shared
 > across loops (one inference-cost ceiling for the whole agent).
 
-## Infrastructure observe path (#733)
-
-Alongside the game `GameContext`, the Agent runs a **parallel infrastructure
-observe path** over the same OTLP trace receiver. It recognizes the periodic
-`controller.bluetooth_health` span emitted by controller-manager (PR #785),
-extracts the Bluetooth transport signals into a thread-safe `InfraContext`
-(`infracontext/`), and triggers an infrastructure evaluation loop.
-
-This PR is **OBSERVE only**: the loop is a logging stub
-(`decision.InfraLoop`, debug level, throttled to ~1/sec). Fitness, decisions, and
-remediation land in later stacked PRs behind the `decision.InfraEvaluator` seam.
-The telemetry constants those PRs converge on — span `agent.infrastructure.decision`
-and its attribute keys — are already declared in `decision/infra_telemetry.go`
-(no span is emitted yet).
-
-### Input span contract (`controller.bluetooth_health`)
-
-A ~1Hz root span; **absent when no controllers are connected**.
-
-| Span attribute | Type | Meaning |
-|----------------|------|---------|
-| `bluetooth.event_gap_ms` | float | window max inter-fresh-frame gap (ms) |
-| `bluetooth.dropped_events_pct` | float 0–1 | window drop ratio |
-| `bluetooth.movement_update_hz` | float | window min per-serial fresh rate |
-| `bluetooth.active_controllers` | int | active controller count |
-| `bluetooth.target_backend` | string | rollout target adapter_type (`""` when off) |
-| `bluetooth.rollout_count` | int | current rollout controller count (`0` when off) |
-| `bluetooth.rollout_read_error` | bool | `true` when the rollout flags could not be read; `target_backend`, `rollout_count` and `rollout_strategy` are then absent (#1489) |
-
-One `bluetooth_controller_sample` **span event per active serial** carries the
-per-controller view: `controller.serial`, `bluetooth.movement_update_hz`,
-`bluetooth.dropped_events_pct`, `controller.adapter` (winning adapter_type, e.g.
-`python`/`rust`/`unstable`). Numeric attributes are read tolerant of both Int and
-Double encodings; any missing window attribute simply stays `nil` (the extractor
-sets a pointer only for present attributes).
-
-### InfraContext lifecycle
-
-- **Window signals** are replaced **wholesale** on each health span — an absent
-  attribute next window drops back to `nil`, never a stale carry-over.
-- **Per-controller** records accumulate keyed on serial; each appearance stamps
-  `LastUpdate`.
-- **Eviction**: a controller absent from health spans past a **5 s** TTL (≈ five
-  missed 1Hz windows) is dropped, on the same eviction ticker as the game store.
-- `Snapshot()` deep-copies the controllers map, so the stub loop reads an
-  isolated view (the per-span pointer-replacement invariant means later spans
-  never mutate an already-handed-out snapshot).
-
-The same **self-ingestion skip** as the game path applies: any resource whose
-`service.name` equals the agent's own `OTEL_SERVICE_NAME` is ignored on the infra
-path too. A mixed batch (game spans + health spans) feeds both stores
-independently with no cross-contamination.
-
-### Infrastructure fitness (#735)
-
-`decision.EvaluateInfraFitness(InfraContext, BluetoothThresholds)` scores the
-Bluetooth transport against three **flag-sourced** thresholds and returns a
-structured `InfraFitnessResult` (`Evaluated` / `Passing` / `Violations` /
-`Values`). This is the infra-domain parallel to the game fitness functions
-(#731); it makes no rollout decision itself — rollout **expansion** (#734,
-[below](#progressive-rollout-expansion-734)) consumes the result, and
-**rollback** (#736) plugs into the same loop.
-
-| Fitness function | Flag key (default) | Violated when |
-|------------------|--------------------|---------------|
-| event gap | `fitness.bluetooth.max_event_gap_ms` (50) | `Window.EventGapMs > threshold` |
-| dropped events | `fitness.bluetooth.max_dropped_events_pct` (0.02) | `Window.DroppedEventsPct > threshold` |
-| movement rate | `fitness.bluetooth.min_movement_update_hz` (10) | an update rate `< threshold`, evaluated at both window-min and **per-controller** granularity |
-
-**Live-tunable:** the thresholds are read from the `fitness.bluetooth.*` flags on
-**every** infra observe cycle through a `decision.BluetoothFitnessSource`. In
-production that source is `decision.FlagBluetoothFitness`, which is backed
-**directly by the flags client** (`flags.Flags.BluetoothFitness`, a narrow
-accessor that evaluates only the three `fitness.bluetooth.*` flags, not the full
-four-layer agent `Snapshot`). The infra loop re-reads it once per ~1Hz cycle, so
-a threshold flipped on stage takes effect on the **next** evaluation with no
-restart — and it does so **in the lobby too**, independent of whether a game is
-active (the game decision loop only publishes thresholds while a session runs, so
-it cannot keep the infra loop live on its own). On any evaluation error the
-accessor falls back to the flagd-schema defaults, so a down flagd reverts to safe
-thresholds rather than failing the cycle. This source is **separate** from the
-game-objective `FitnessSource` — distinct flags, distinct concerns. (A
-`decision.LiveBluetoothFitness` push-source also exists, seeded with the defaults,
-used as a static seed in tests.)
-
-**Missing signals are skipped, not failed** (mirroring game fitness): a `nil`
-window signal contributes no violation, and a context with *no* window signals at
-all returns `Evaluated=false`. The movement-rate dedup: when the window min **and**
-a specific controller both breach the hz floor, only the **per-serial**
-violation(s) are emitted (each names its offending serial); the window-level hz
-violation fires **only** when no per-controller rate is available to attribute it.
-
-**Violation string** (`InfraFitnessResult.ViolationsString()`) is the stable,
-deterministic (sorted-serial) form PR F/G lifts onto the `fitness.violations` span
-attribute — `"<signal>[<serial>] <observed><cmp><threshold>"`, joined by `"; "`:
-
-```
-event_gap_ms 87.5>50; movement_update_hz[AA:BB] 8.3<10
-```
-
-### Progressive rollout expansion (#734)
-
-`decision.InfraLoop` consumes the infra fitness result to **expand the Bluetooth
-backend rollout controller-by-controller**. When fitness passes it advances
-`rollout.current_controller_count` one stage up a fixed ladder with one stack
-overlay write to the flag service, `PUT /rollout/current_controller_count
-{"variant": <stage>}` (`actions.RolloutWriter`, epic #1407); flagd serves it and
-the controller-manager converges on it. The overlay is in memory: a flag-service
-restart returns the rollout to its baseline stage. The baseline
-`services/flagd/rollout.json` is never written.
-
-**Stage ladder** (`current_controller_count` variants):
-
-| Variant | `none` | `one` | `three` | `six` | `all` |
-|---------|--------|-------|---------|-------|-------|
-| Value   | 0      | 1     | 3       | 6     | 99    |
-
-flagd flips by **variant name**, not value, so the loop maps the observed count
-(a number, read from the `controller.bluetooth_health` span's
-`bluetooth.rollout_count`) to the next variant via `actions.NextStage` /
-`actions.StageVariantForValue`. `all` (99) is terminal.
-
-**Decision matrix** (per observe cycle; observed state comes from the health
-span, **not** a flag re-read):
-
-| Rollout state | Fitness | Allowed / Dwell-or-hold | Action | `remediation.action` | Span? |
-|---------------|---------|--------------------------|--------|----------------------|-------|
-| unknown (`rollout_read_error`) | — | — | nothing; rollout record kept (UC-050 A5) | — | **no span** |
-| inactive (`target_backend==""`) | — | — | nothing; rollout record reset (UC-050 BR-001) | — | **no span** |
-| active, stage `< all` | passing | dwell elapsed, not held | flip to next variant | `expand` | yes |
-| active, stage `< all` | passing | dwell not elapsed / held (cooldown) | nothing | `none` | yes |
-| active, stage `== all` | passing | — | nothing (terminal) | `none` | yes |
-| active, stage `> none` | **failing** | **allowed** | reset to `none` (roll back) | `rollback` | yes |
-| active, stage `> none` | **failing** | **not allowed** | nothing (recommend) | `recommended_only` | yes |
-| active, stage `> none` | **failing** | rollback already in flight (settling) | nothing | `none` | yes |
-| active, stage `== none` | **failing** | — | nothing (nothing to roll back) | `none` | yes |
-| active | write error | — | attempted, failed | `expand` / `rollback` (+ span error/status) | yes |
-
-See [Auto-remediation / rollback](#auto-remediation--rollback-736) for the
-failing-fitness rows.
-
-**Dwell:** after each expansion the loop waits `AGENT_ROLLOUT_DWELL_SECONDS`
-(default **15s**) before expanding again, so fitness has time to observe the
-newly-added controllers at the current stage. The first expansion (no prior
-`lastExpansion`) is not delayed. A failed write does **not** advance the dwell
-clock, so the next passing cycle retries.
-
-**Freshness gate** (`gate.ShouldEvaluateInfra`): the loop only evaluates when
-≥1 controller reported fresh `controller.bluetooth_health` within the controller
-TTL (5s). It is **game-state-independent** — controllers connect and stream in
-the lobby, and the rollout is driven by transport health alone.
-
-**Span** — `agent.infrastructure.decision`, emitted on **every active-rollout
-cycle**, carries `rollout.target`, `fitness.passing`, `fitness.violations`
-(empty when passing), `remediation.action`, `rollout.dry_run` (whether the
-decision was only rehearsed, not applied), the observed `bluetooth.*` signals,
-and `rollout.controller_count` (the new stage value) when expanding. A write
-failure sets the span status to error and records the error.
-
-**Env gates:**
-
-| Env / flag | Default | Effect |
-|-----|---------|--------|
-| `rollout_enabled` (**flagd flag**, `agent.json`) | `off` | **#1213: migrated from the `AGENT_ROLLOUT_ENABLED` env var to a LIVE flag**, read per `SetControllerCount`/`DryRun` (never cached at startup). `on` → real `RolloutWriter` applies flips (`rollout.dry_run=false`). `off` (or flagd unreachable — **fail-closed**) → **dry-run**: the loop still decides and spans expansions (`remediation.action="expand"`, `rollout.controller_count` set, **`rollout.dry_run=true`**) but does **not** write the rollout stage (decided-but-not-applied; logged `agent.rollout_dry_run`). Flip it through the flag service (`scripts/flags.sh set agent rollout_enabled on`), no restart. |
-| `FLAG_SERVICE_URL` | `http://flag-service:8070` | flag service the rollout writer (and every other agent writer) calls |
-| `AGENT_ROLLOUT_DWELL_SECONDS` | `15` | per-stage dwell before re-expansion |
-| `AGENT_ROLLOUT_COOLDOWN_SECONDS` | `30` | post-rollback cooldown: re-expansion is suppressed this long after a rollback |
-
-### Auto-remediation / rollback (#736)
-
-When infrastructure fitness **fails** during an active rollout, the loop closes
-the remediation loop: it can **roll the backend rollout back** by resetting
-`current_controller_count` to `none` (value 0), pulling **all** controllers back
-to the stable default backend. `target_backend` is **left untouched** — that
-preserves the operator's intent for the next attempt; only the controller count
-is wound back.
-
-**The loop:**
-
-```
-if not fitness.passing and stage > none:
-    if remediation_allowed:
-        rollback_backend()                 # writes current_controller_count = "none"
-        span: remediation.action = "rollback"
-        start cooldown                     # suppress re-expansion for AGENT_ROLLOUT_COOLDOWN_SECONDS
-    else:
-        span: remediation.action = "recommended_only"   # no write
-```
-
-**`remediation_allowed` gating.** Auto-rollback is gated on the
-`remediation_allowed` flag. That flag lives in the **`rollout` flag set**
-(baseline `services/flagd/rollout.json`), **not** the agent set. The agent
-evaluates it through flagd each cycle like every other flag
-(`actions.RemediationReader`, #1411). Any evaluation error → **`false`**
-(recommend-only) — the fail-closed safe default. Enable/disable auto-rollback
-live through the flag service (`scripts/flags.sh set rollout remediation_allowed
-on` / `clear rollout remediation_allowed`), no restart.
-
-**Cooldown.** After a successful rollback the loop starts a cooldown
-(`AGENT_ROLLOUT_COOLDOWN_SECONDS`, default **30s**), wired through the
-`holdExpansion` hook. While in cooldown the loop will **not** re-expand even if
-fitness recovers — otherwise it would roll back, immediately see passing fitness
-at stage `none`, and climb straight back into the same failure. The cooldown is
-held **in-memory** (`cooldownUntil`), so restarting the agent process clears it
-(a demo reset path).
-
-**Span value set & the settling window.** `remediation.action` is a **closed
-set** of exactly four values — `none | expand | rollback | recommended_only`.
-The rollback is written **once per failure episode**: after the write, the
-controller-manager takes several windows to converge `current_controller_count`
-back to 0. During that **settling window** (rollback written, observed
-`bluetooth.rollout_count` still `> 0`), further failing cycles record
-**`none`** (with the populated `fitness.violations`) and do **not** re-write —
-re-emitting `rollback` without a write would lie. The episode ends when the
-observed count returns to 0; a later failure can then trigger a fresh rollback.
-
-| Failing-fitness state | observed `rollout_count` | allowed | write | `remediation.action` |
-|------------------------|--------------------------|---------|-------|----------------------|
-| active stage           | `> 0`, no rollback in flight | yes | `current_controller_count="none"` | `rollback` |
-| active stage           | `> 0`, no rollback in flight | no  | none | `recommended_only` |
-| rollback in flight (settling) | `> 0` | — | none | `none` |
-| at stable default      | `0` | — | none (nothing to roll back) | `none` |
-
-**Dry-run** (`rollout_enabled` flag `off` — flagd flag, #1213; the fail-closed
-default): the rollback is **decided and
-spanned** (`remediation.action="rollback"`, **`rollout.dry_run=true`**) but the
-`DryRunRolloutWriter`'s `SetControllerCount("none")` is a no-op —
-decided-but-not-applied, consistent with dry-run expansion. The `rollout.dry_run`
-attribute is what lets a Jaeger consumer tell this rehearsal apart from a real
-rollback (the spans are otherwise identical). A rollback **write error** sets the span status to error,
-records the error, and does **not** mark the episode in flight, so the next
-failing cycle retries (mirrors the expansion error path).
-
-**Demo reset.** Flip `remediation_allowed` to `off` to stop auto-rollback (the
-loop drops back to `recommended_only`); restart the agent to clear an in-progress
-cooldown.
-
-### Incident narrative (#737) — the rollout story is auditable in traces
-
-Every active-rollout cycle emits one `agent.infrastructure.decision` span, and the
-**ordered timeline of those spans reconstructs the whole incident** — rollout
-expanded → transport degraded → fitness violated → rollback executed → fitness
-recovered → re-expanded — with no extra logging. The spans are built by a **single
-attribute builder** (`infraDecisionAttributes`), so **every** decision span — on
-**every** outcome — carries the same five core attributes:
-
-| Attribute | Type | On every span | Meaning |
-|-----------|------|---------------|---------|
-| `rollout.target` | string | yes | the rollout target adapter in effect |
-| `fitness.passing` | bool | yes | did the Bluetooth fitness check pass this cycle |
-| `fitness.violations` | string | yes (**empty when passing**, never absent) | the failing checks, e.g. `movement_update_hz[AA:BB] 8.3<10` |
-| `remediation.action` | string | yes | `none \| expand \| rollback \| recommended_only` |
-| `rollout.dry_run` | bool | yes | did the actuator only **rehearse** this decision (no write to the flag service) rather than apply it — `true` when the `rollout_enabled` flag is `off` (flagd flag, #1213; the fail-closed default, re-read per cycle) and when there is no actuator; `false` when `rollout_enabled` is `on` and the real `RolloutWriter` applies. Lets a trace tell a rehearsed `expand`/`rollback` apart from a real one. |
-
-plus the observed `bluetooth.*` window signals (`target_backend` + `rollout_count`
-always; `event_gap_ms` / `dropped_events_pct` / `movement_update_hz` /
-`active_controllers` when present in the window), and `rollout.controller_count`
-(the stage expanded to) **only** on an `expand`.
-
-`fitness.violations` is **present-but-empty** on a passing cycle, never dropped —
-so a trace query can tell "passing" apart from "attribute missing".
-
-**The span timeline of a full episode** (read top-to-bottom in Jaeger):
-
-| # | cycle | `remediation.action` | `fitness.passing` | `fitness.violations` |
-|---|-------|----------------------|-------------------|----------------------|
-| 1 | rollout active, healthy | `expand` (`→1`) | true | *(empty)* |
-| 2 | dwell elapsed, still healthy | `expand` (`→3`) | true | *(empty)* |
-| 3 | transport degrades | `rollback` | false | non-empty |
-| 4 | settling (count still > 0) | `none` | false | non-empty |
-| 5 | reset landed, recovered, in cooldown | `none` | true | *(empty)* |
-| 6 | cooldown elapsed, healthy | `expand` (`→1`) | true | *(empty)* |
-
-The `recommended_only` variant (operator has **not** set `remediation_allowed`)
-stalls at step 3: the loop records `recommended_only` (with the violations) and
-never writes, so the story does not progress to recovery.
-
-**Query it in Jaeger.** The observability stack is at `http://localhost/`
-with Jaeger under the `/jaeger` base path:
-
-- UI: select **service `agent`**, **operation `agent.infrastructure.decision`**,
-  order by time, and read the `remediation.action` timeline down the trace list.
-- Jaeger query API v3 (note the `/jaeger` prefix; both window bounds are required):
-  `http://localhost/jaeger/api/v3/traces?query.serviceName=agent&query.operationName=agent.infrastructure.decision&query.startTimeMin=1970-01-01T00:00:00Z&query.startTimeMax=2100-01-01T00:00:00Z`
-  (or `http://jaeger:16686/jaeger/api/v3/traces?...` from inside the compose
-  network). Add `query.attributes={"remediation.action":"rollback"}` (URL-encoded)
-  to jump straight to the remediation events.
-
-The Go narrative test (`decision/infra_narrative_test.go`,
-`TestInfraNarrative_FullIncident`) drives this exact sequence with a fake
-clock/actuator/remediation and asserts the timeline; the schema-completeness test
-(`TestInfraSchemaCompleteness_AllOutcomes`) asserts the five core attributes are
-present on **every** outcome, catching any future emission path that forgets the
-builder.
-
 ## Gating & decisions
 
 After each context update the Agent evaluates `should_evaluate`. When the gate
@@ -473,7 +178,7 @@ model**, applied in order:
      (#731)](#fitness-functions-731)** below.
 3. **Decision backend** (who decides, epic #1225) —
    - `decision.backend` (string, default `rules`): `rules` runs the deterministic
-     rules engine; `claude` / `openai` / `jev` hand the decision to that remote
+     rules engine; `claude` / `jev` hand the decision to that remote
      backend, with the rules engine as the fallback. See **Decision backends**
      below and [decide-contract.md 10.1](../../docs/specs/decide-contract.md#101-the-text-backend-post-game-retro-and-proposer). The
      legacy `mode` / `model` / `prompt_variant` flags were removed in #1234.
@@ -823,9 +528,8 @@ no keys.
 ### Intervention-effect feedback (#918) — the game-path measurement loop
 
 Outbound attribution (above) records the agent's *reasoning*; it does not measure
-whether an intervention **helped**. The infra path has a closed loop (Bluetooth
-fitness → rollback); the game path had nothing. #918 closes the **measurement** half
-(it is measurement only — it never reverts a bad intervention):
+whether an intervention **helped**. #918 adds that **measurement** (it is
+measurement only — it never reverts a bad intervention):
 
 1. **At dispatch** (the applied-decision path in `runDecision`) the loop stamps a
    **baseline** of the game's fitness/objective signals — the same dotted-key
@@ -877,12 +581,11 @@ answers "is the agent receiving metrics?" directly, and the `outcome` split
 distinguishes "metrics arrive but trigger nothing" from "metrics aren't arriving"
 — the exact ambiguity that made the metric-driven loop look span-driven.
 
-**Moments read (#2658 slice 3, UC-041 A7, BR-009):** `agent_moments_received_total`
-(`Int64Counter`, `services/agent/moments.go`) counts every game moment record the agent reads, labeled
-`moment` (`player_death`|`death_warning`), `shape` (`span_event`|`log_event`) and `outcome`
-(`counted`|`duplicate`|`ignored`|`dropped`); 7 reachable series. It is the deterministic evidence that
-the log path delivered a moment (a NonStop respawn death changes no game context). In the `span` moment
-shape no `player_death` series moves: the agent ignores moment spans (UC-100 BR-010).
+**Deaths (UC-041 BR-008, BR-009):** the agent learns of an elimination only from
+`game_player_elimination_order`, which the coordinator sets in every moment shape and only for a
+death that takes the player out. It reads no booth moment record: a span carrying `moment.id` is
+skipped like `game.shield_charge`, and the `player_death` span event and moment log events change
+nothing (telemetry.md appendix A).
 
 **Lifecycle safety (#923 goleak):** each follow-up runs in a goroutine tracked on a
 `WaitGroup` (joined by `AwaitInflight` at shutdown) and bounded by the agent root
@@ -970,14 +673,13 @@ table to keep in sync with the code. Live gates (`enabled`, `interventions_enabl
 > conclude/release normally). The master `enabled` kill-switch still wins: a disabled
 > agent does nothing regardless of these flags. **The `agent` set is human-owned** —
 > the agent has **no** write path to it, so it can never enable its own experiments.
-> The agent writes three flag sets, all through the flag service (epic #1407):
-> `interventions` (game-scoped in-game interventions, `actions/writer.go`), `rollout`
-> (`current_controller_count`, `actions/rollout_writer.go`) and `game` (experiment-arm
-> values via `experiment.Writer`, plus a `real` overlay on gated autonomous
-> promotion). It must never write the `agent` set. The guards are in the client code:
+> The agent writes two flag sets, both through the flag service (epic #1407):
+> `interventions` (game-scoped in-game interventions, `actions/writer.go`) and `game`
+> (experiment-arm values via `experiment.Writer`, plus a `real` overlay on gated
+> autonomous promotion). It must never write the `agent` set. The guards are in the client code:
 > `experiment/gate.go` rejects a proposal that names another set
 > (`non_game_target`), the promotion writer's set is always `game` (#1293), and the
-> intervention and rollout writers use fixed sets. The agent mounts no flag file;
+> intervention writer uses a fixed set. The agent mounts no flag file;
 > only the flag service mounts the baseline directory, read-only.
 >
 > **Stays env (NOT migrated):** `AGENT_EXPERIMENT_DIR` (filesystem concern). The
@@ -1007,16 +709,17 @@ table to keep in sync with the code. Live gates (`enabled`, `interventions_enabl
 > `verdict_min_n` / `verdict_min_pairs` seam.
 
 > Since #1713 the Go agent uses the flagd **in-process** resolver on the sync port
-> `8015`, like the Python services: selectors `flagSetId=agent` and (for
-> `remediation_allowed`) `flagSetId=rollout`. `flags/synced_provider.go` waits for
+> `8015`, like the Python services: selectors `flagSetId=agent` and (read-only,
+> for the shield flags) `flagSetId=game`. `flags/synced_provider.go` waits for
 > flagd's first sync however late it is, and every read fails closed until then and
 > while the sync stream is lost ([flags.md §1.1](../../docs/specs/flags.md#11-clients)).
 
 ### Decision backends (#1225, #1244)
 
 `decision.backend` (agent.json) picks who answers the in-game decide questions:
-`rules` (default, in-process) or a remote backend, `claude`, `openai` or `jev`,
-called directly with no gateway. Flip it, and the backend's model, with
+`rules` (default, in-process) or a remote backend, `claude` or `jev`,
+called directly with no gateway. Any other value (for example `openai`,
+retired in #2788) falls back to rules with `unknown_backend`. Flip it, and the backend's model, with
 `./scripts/agent-backend.sh` (a `stage` overlay through the flag service, applied
 live on the next cycle with no restart; a flag-service restart drops it):
 
@@ -1032,12 +735,7 @@ by `docker-compose.yml`, read once at startup) plus its flag config:
 | Backend | Env key | Flags it also needs |
 |---------|---------|---------------------|
 | `claude` | `ANTHROPIC_API_KEY` | `decision.claude.model` (defaults to haiku), `decision.claude.base_url` (defaults to `https://api.anthropic.com`, no `/v1`; must be key-safe) |
-| `openai` | `DECISION_OPENAI_API_KEY` | `decision.openai.model` (unset by default), `decision.openai.base_url` (any OpenAI-compatible vendor), `decision.openai.reasoning_effort` (`auto` / `none` / `minimal` / `low` / `omit`; set with `./scripts/agent-backend.sh effort <variant>`) |
 | `jev` | `JEV_API_KEY` | none: `decision.jev.base_url` defaults to `https://api.typesafe.ai/v1`, `decision.jev.model` to `latest` (`jev-latest`; `pinned` = `jev-1.13.0`) |
-
-`reasoning_effort=auto` sends `minimal` to the original gpt-5 family and `low` to
-other reasoning models; `omit` never sends the field (for models that reject
-`low`, e.g. o1-mini, o1-preview, gpt-5-pro).
 
 **Where to put the keys.** Put API keys in your shell environment or in the
 git-ignored `.env.local`, **never in `.env`**: `.env` is tracked in git (despite
@@ -1260,8 +958,8 @@ A run gets an `agent.shadow_game.run` span with `run_id`, `mode`, `game_id`,
 ### Trigger (env, one-shot)
 
 The trigger is intentionally minimal — one env-gated path. It mirrors the
-original env-gate shape the actuation gates used before **#1213** migrated those
-two to LIVE `agent.json` flags (`interventions_enabled` / `rollout_enabled`);
+original env-gate shape the actuation gate used before **#1213** migrated it to
+a LIVE `agent.json` flag (`interventions_enabled`);
 `AGENT_SHADOW_GAME` is a one-shot startup trigger, so it stays an env var. When
 `AGENT_SHADOW_GAME=true`, the agent sweeps orphans then runs ONE shadow game at
 startup, then continues its normal observe loop.
@@ -1290,7 +988,6 @@ services/agent/
 ├── otel.go         # OTLP/self-telemetry setup
 ├── receiver.go     # OTLP span/metric ingestion + extraction into GameContext
 ├── gamecontext/    # GameContext accumulation, session identity, eviction
-├── infracontext/   # InfraContext: controller.bluetooth_health observe path (#733)
 ├── gate/           # should_evaluate gating logic
 ├── flags/          # OpenFeature/flagd four-layer control flags (existence, objective, capability, permission)
 ├── actions/        # Action sink (#730): game-scoped intervention writes to the flag service

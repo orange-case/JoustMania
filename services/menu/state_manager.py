@@ -4,7 +4,6 @@ import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 
-from lib.controller_constants import ButtonTrackingKey
 from lib.flag_service_writer import FlagServiceWriter
 from lib.types import Games
 from services.menu import metrics
@@ -47,7 +46,7 @@ class StateManager:
             agent_settings_writer: flag-service writer for the agent set (kill-switch, #819)
             agent_settings_client: OpenFeature client for the "agent" domain, used
                 to read the effective ``interventions_allowed`` level (#819).
-            select_game_mode: async ``(game_name, *, source, serial)`` callback that
+            select_game_mode: async ``(game_name, *, source, serial, announce)`` callback that
                 applies a game-mode selection everywhere the menu reads it (the
                 servicer's ``current_selection``, this manager's mode, the persisted
                 ``current_game`` preference) and publishes ``selection_changed``.
@@ -69,9 +68,6 @@ class StateManager:
         # Battery level tracking (0-5 scale, updated from button events)
         self.battery_levels: dict[str, int] = {}
 
-        # Button state tracking (for combo detection)
-        self.button_states: dict[str, dict[str, bool]] = {}
-
         # Handlers for each state
         self._handlers: dict[ControllerState, ControllerHandler] = {}
 
@@ -87,12 +83,6 @@ class StateManager:
     def ready_controllers(self) -> set[str]:
         """Controller serials in READY state (computed from controller_states)."""
         return {serial for serial, state in self.controller_states.items() if state == ControllerState.READY}
-
-    def _abandon_admin_session(self) -> None:
-        """UC-012 BR-004: release the admin session (single-admin lock) when state is cleared wholesale."""
-        admin_handler = self._handlers.get(ControllerState.ADMIN)
-        if admin_handler is not None and hasattr(admin_handler, "abandon_session"):
-            admin_handler.abandon_session()
 
     def register_handler(self, handler: ControllerHandler) -> None:
         """
@@ -147,33 +137,9 @@ class StateManager:
         if serial not in self.connected_controllers:
             await self.on_controller_connected(serial)
 
-        # Update button state
-        if serial not in self.button_states:
-            self.button_states[serial] = {
-                "trigger": False,
-                "move": False,
-                "cross": False,
-                "circle": False,
-                "square": False,
-                "triangle": False,
-                "ps": False,
-                "select": False,
-                "start": False,
-            }
-        self.button_states[serial][button] = is_press
-
-        # Handle release events - forward trigger releases in admin mode
         if not is_press:
-            if button == ButtonTrackingKey.TRIGGER:
-                state = self.get_controller_state(serial)
-                if state == ControllerState.ADMIN:
-                    handler = self._handlers.get(state)
-                    if handler and hasattr(handler, "handle_trigger_release"):
-                        await handler.handle_trigger_release(serial)
             return
 
-        # Dispatch to appropriate handler
-        # Note: Admin mode is handled externally by AdminModeHandler
         state = self.get_controller_state(serial)
         handler = self._handlers.get(state)
         if handler:
@@ -253,7 +219,6 @@ class StateManager:
 
         # Clean up state (removing from controller_states also removes from computed properties)
         self.controller_states.pop(serial, None)
-        self.button_states.pop(serial, None)
         self.battery_levels.pop(serial, None)
 
         logger.info(f"Controller {serial} disconnected")
@@ -267,9 +232,7 @@ class StateManager:
         Clear state so these events re-populate cleanly without ghosts.
         """
         count = len(self.controller_states)
-        self._abandon_admin_session()
         self.controller_states.clear()
-        self.button_states.clear()
         self.battery_levels.clear()
         metrics.player_ready.clear()
         logger.info(f"Stream reconnected: cleared {count} controller(s) for re-population")
@@ -281,7 +244,6 @@ class StateManager:
         """
         for serial in self.controller_states:
             self.controller_states[serial] = ControllerState.CONNECTED
-        self.button_states.clear()
         metrics.player_ready.clear()
 
     def update_battery(self, serial: str, battery: int) -> None:
@@ -315,25 +277,29 @@ class StateManager:
         """
         self.current_game_mode = game_mode
 
-    async def select_game_mode(self, game_mode: Games, *, source: str, serial: str | None = None) -> None:
+    async def select_game_mode(
+        self, game_mode: Games, *, source: str, serial: str | None = None, announce: bool = False
+    ) -> None:
         """
         Select a game mode for the next game and persist it (#1272).
 
         Delegates to the servicer callback so the controller SELECT path lands in
-        the same state as admin Cross / web ``select_game`` (the coordinator start
+        the same state as the pad and web ``select_game`` (the coordinator start
         path reads the servicer's ``current_selection``). Without a callback
         (test-only: production always wires the servicer callback in
         ``MenuServicer.__init__``), updates the local mode, persists
         ``current_game`` and publishes ``selection_changed`` directly. Keep this
-        fallback in step with ``MenuServicer.select_game_mode``.
+        fallback in step with ``MenuServicer.select_game_mode``, except that
+        ``announce`` gives the voice only here: the lobby pulse needs ``SettingsOps``.
 
         Args:
             game_mode: Games enum value to select
-            source: Who made the selection (e.g. "controller", "admin", "web")
+            source: Who made the selection (e.g. "controller", "operator_pad", "web")
             serial: Controller serial that made the selection, if any
+            announce: give the mode's feedback of the option table (voice and lobby pulse)
         """
         if self._select_game_mode is not None:
-            await self._select_game_mode(game_mode.name, source=source, serial=serial)
+            await self._select_game_mode(game_mode.name, source=source, serial=serial, announce=announce)
             return
 
         self.set_game_mode(game_mode)
@@ -343,10 +309,12 @@ class StateManager:
         if serial is not None:
             payload["serial"] = serial
         await self.publish_event("selection_changed", payload)
+        if announce:
+            await self.audio.play_game_mode_voice(game_mode.name)
 
     async def show_lobby_colors(self) -> None:
         """UC-011 step 6, BR-005: the current mode's lobby colour on every CONNECTED (dim) and READY
-        (bright) controller; ADMIN and IDLE controllers keep theirs. Best effort per controller."""
+        (bright) controller; IDLE controllers keep theirs. Best effort per controller."""
         mode = self.current_game_mode.name
         for serial, state in list(self.controller_states.items()):
             try:
@@ -370,12 +338,8 @@ class StateManager:
         # Remember which controllers were connected before clearing
         serials = list(self.controller_states.keys())
 
-        # Clearing state skips on_exit, so release the admin session explicitly.
-        self._abandon_admin_session()
-
         # Clear all state (controller_states is the single source of truth)
         self.controller_states.clear()
-        self.button_states.clear()
 
         # Clear all player ready metrics
         metrics.player_ready.clear()

@@ -1335,7 +1335,7 @@ def _lethal_frame(*lethal: str, still: tuple[str, ...] = ()):
 
 
 class TestSwapperMotionLoop:
-    """UC-024 steps 2 to 4 and FR-170 driven through the real motion path (no direct impl calls)."""
+    """UC-024 steps 2 to 4 and FR-033 (UC-024 BR-006) driven through the real motion path (no direct impl calls)."""
 
     @staticmethod
     async def _game(num_players: int):
@@ -1357,7 +1357,7 @@ class TestSwapperMotionLoop:
                 break
         assert game.players[serial].team == 1
         assert events.count_events_of_type("player_swapped") == 1
-        grace = game.death_grace_period  # the configured death_grace_period_seconds (FR-170)
+        grace = game.death_grace_period  # the configured death_grace_period_seconds (FR-033, UC-024 BR-006)
         assert grace > 0
         remaining = game.players[serial].grace_until - game_clock.now()
         assert grace - 1.0 < remaining <= grace

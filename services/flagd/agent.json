@@ -231,33 +231,6 @@
       },
       "defaultVariant": "default"
     },
-    "fitness.bluetooth.max_event_gap_ms": {
-      "state": "ENABLED",
-      "variants": {
-        "default": 50,
-        "strict": 25,
-        "lenient": 100
-      },
-      "defaultVariant": "default"
-    },
-    "fitness.bluetooth.max_dropped_events_pct": {
-      "state": "ENABLED",
-      "variants": {
-        "default": 0.02,
-        "strict": 0.01,
-        "lenient": 0.05
-      },
-      "defaultVariant": "default"
-    },
-    "fitness.bluetooth.min_movement_update_hz": {
-      "state": "ENABLED",
-      "variants": {
-        "default": 10,
-        "strict": 20,
-        "lenient": 5
-      },
-      "defaultVariant": "default"
-    },
     "perception.zone_still_max": {
       "state": "ENABLED",
       "variants": {
@@ -730,20 +703,11 @@
       },
       "defaultVariant": "off"
     },
-    "rollout_enabled": {
-      "state": "ENABLED",
-      "variants": {
-        "off": false,
-        "on": true
-      },
-      "defaultVariant": "off"
-    },
     "decision.backend": {
       "state": "ENABLED",
       "variants": {
         "rules": "rules",
         "claude": "claude",
-        "openai": "openai",
         "jev": "jev"
       },
       "defaultVariant": "rules"
@@ -792,40 +756,6 @@
       },
       "defaultVariant": "default"
     },
-    "decision.openai.base_url": {
-      "state": "ENABLED",
-      "variants": {
-        "default": "https://api.openai.com/v1"
-      },
-      "defaultVariant": "default"
-    },
-    "decision.openai.model": {
-      "state": "ENABLED",
-      "variants": {
-        "unset": ""
-      },
-      "defaultVariant": "unset"
-    },
-    "decision.openai.timeout_ms": {
-      "state": "ENABLED",
-      "variants": {
-        "fast": 1500,
-        "default": 2500,
-        "patient": 5000
-      },
-      "defaultVariant": "default"
-    },
-    "decision.openai.reasoning_effort": {
-      "state": "ENABLED",
-      "variants": {
-        "auto": "auto",
-        "none": "none",
-        "minimal": "minimal",
-        "low": "low",
-        "omit": "omit"
-      },
-      "defaultVariant": "auto"
-    },
     "decision.jev.base_url": {
       "state": "ENABLED",
       "variants": {
@@ -843,16 +773,6 @@
       "defaultVariant": "latest"
     },
     "decision.claude.max_requests_per_minute": {
-      "state": "ENABLED",
-      "variants": {
-        "inherit": -1,
-        "conservative": 3,
-        "default": 6,
-        "stage": 30
-      },
-      "defaultVariant": "stage"
-    },
-    "decision.openai.max_requests_per_minute": {
       "state": "ENABLED",
       "variants": {
         "inherit": -1,

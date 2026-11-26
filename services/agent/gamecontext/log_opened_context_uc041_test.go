@@ -9,9 +9,9 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 )
 
-// log_opened_context_uc041_test.go covers #2722 (FR-251): a moment log event or the
-// agent's game.start / game.end log event for a game the agent does not know yet
-// opens that game's context and holds it (UC-041 A7 step 5, A8, BR-010).
+// log_opened_context_uc041_test.go covers #2722 (FR-251): the agent's game.start /
+// game.end log event for a game the agent does not know yet opens that game's
+// context and holds it (UC-041 A8, BR-010).
 
 // lifecycleLog is an agent-only game.start or game.end record of gameID at ts
 // (zero leaves the timestamp out).
@@ -23,73 +23,21 @@ func lifecycleLog(eventName, gameID, kind, mode string, ts time.Time) plog.Logs 
 	if mode != "" {
 		attrs["game.mode"] = mode
 	}
-	ld := momentLog("game-coordinator", eventName, attrs)
+	ld := logEvent("game-coordinator", eventName, attrs)
 	if !ts.IsZero() {
 		ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).SetTimestamp(pcommon.NewTimestampFromTime(ts))
 	}
 	return ld
 }
 
-// UC: UC-041 A7
+// startLog is the game.start record that opens gameID's context.
+func startLog(gameID string) plog.Logs {
+	return lifecycleLog("game.start", gameID, "real", "Joust", time.Time{})
+}
+
+// UC: UC-041 A8
 // UC: UC-041 BR-010
-func TestApplyLogs_MomentOpensUnknownGame(t *testing.T) {
-	yes := true
-
-	t.Run("UC-041/A7 a player_death log event before any span or metric of its game counts", func(t *testing.T) {
-		rec := &momentRecorder{}
-		clk := &muxClock{t: time.Unix(4000, 0)}
-		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		mux.SetMomentObserver(rec.observe)
-
-		ids := mux.ApplyLogs(deathLog("game-B", "P1", "game-B/P1/1", &yes))
-		if len(ids) != 1 || ids[0] != "game-B" {
-			t.Fatalf("touched = %v, want [game-B]", ids)
-		}
-		requireCalls(t, rec.take(), momentCall{"player_death", "log_event", "counted"})
-		snap, ok := mux.Snapshot("game-B")
-		if !ok {
-			t.Fatal("no game-B context")
-		}
-		if snap.GameKind != GameKindReal {
-			t.Fatalf("GameKind = %q, want %q", snap.GameKind, GameKindReal)
-		}
-		if len(snap.Players) != 0 || (snap.Session.GameActive != nil && *snap.Session.GameActive) {
-			t.Fatalf("a log record added players %v or set the game active", snap.Players)
-		}
-
-		// The game's metrics and its span event arrive later.
-		clk.advance(2 * time.Second)
-		mux.ApplyMetrics(gameActiveFor("game-B", 1))
-		mux.ApplyMetrics(playerIntensityFor("P1", "game-B", 1.0))
-		mux.ApplySpans(deathSpanEvent("game-B", "P1", "game-B/P1/1", &yes))
-		requireCalls(t, rec.take(), momentCall{"player_death", "span_event", "duplicate"})
-		snap, _ = mux.Snapshot("game-B")
-		if seq := snap.Session.EliminationSequence; len(seq) != 1 || seq[0] != "P1" {
-			t.Fatalf("elimination seq = %v, want [P1] kept across game_active 1", seq)
-		}
-		if n := eliminationEvents(snap.Timeline); n != 1 {
-			t.Fatalf("elimination events = %d, want 1", n)
-		}
-		for i, e := range snap.Timeline {
-			if e.At.Before(snap.Session.StartedAt) || (i > 0 && e.At.Before(snap.Timeline[i-1].At)) {
-				t.Fatalf("timeline %v not oldest-first from the start %v", snap.Timeline, snap.Session.StartedAt)
-			}
-		}
-	})
-
-	t.Run("UC-041/A7 a moment log event never changes a known game kind", func(t *testing.T) {
-		clk := &muxClock{t: time.Unix(4000, 0)}
-		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		mux.ApplyLogs(deathLog("game-B", "P1", "game-B/P1/1", nil))
-		mux.ApplyLogs(momentLog("game-coordinator", "death_warning", map[string]string{
-			"moment.id": "game-B/P2/1", "player.serial": "P2", "game.id": "game-B", "game.kind": "shadow",
-		}))
-		mux.ApplyLogs(lifecycleLog("game.start", "game-B", "shadow", "Joust", time.Time{}))
-		if snap, _ := mux.Snapshot("game-B"); snap.GameKind != GameKindReal {
-			t.Fatalf("GameKind = %q, want real from the record that opened the context", snap.GameKind)
-		}
-	})
-
+func TestApplyLogs_OpensUnknownGame(t *testing.T) {
 	t.Run("UC-041/A8 game.end reads only game.id", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(4000, 0)}
 		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
@@ -99,10 +47,10 @@ func TestApplyLogs_MomentOpensUnknownGame(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-041/A5 the fallback partition's first game drops the deaths read before it", func(t *testing.T) {
+	t.Run("UC-041/A5 the fallback partition's first game drops the eliminations read before it", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(4000, 0)}
 		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		mux.ApplySpans(deathSpanEvent(FallbackGameID, "P1", "", nil))
+		mux.store(FallbackGameID).SetEliminationOrder("P1", 1)
 		if snap, _ := mux.Snapshot(FallbackGameID); len(snap.Session.EliminationSequence) != 1 {
 			t.Fatalf("setup: elimination seq = %v, want [P1]", snap.Session.EliminationSequence)
 		}
@@ -120,15 +68,11 @@ func TestApplyLogs_MomentOpensUnknownGame(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-041/A7 a legacy primary kind opens the context as real, an unknown kind fails closed", func(t *testing.T) {
+	t.Run("UC-041/A8 a legacy primary kind opens the context as real, an unknown kind fails closed", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(4000, 0)}
 		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		mux.ApplyLogs(momentLog("game-coordinator", "death_warning", map[string]string{
-			"moment.id": "game-B/P1/1", "player.serial": "P1", "game.id": "game-B", "game.kind": "primary",
-		}))
-		mux.ApplyLogs(momentLog("game-coordinator", "death_warning", map[string]string{
-			"moment.id": "game-C/P1/1", "player.serial": "P1", "game.id": "game-C", "game.kind": "odd",
-		}))
+		mux.ApplyLogs(lifecycleLog("game.start", "game-B", "primary", "Joust", time.Time{}))
+		mux.ApplyLogs(lifecycleLog("game.start", "game-C", "odd", "Joust", time.Time{}))
 		if snap, _ := mux.Snapshot("game-B"); snap.GameKind != GameKindReal {
 			t.Fatalf("game-B kind = %q, want real", snap.GameKind)
 		}
@@ -143,7 +87,7 @@ func TestApplyLogs_LogHold(t *testing.T) {
 	t.Run("UC-041/BR-010 a log-opened context survives eviction for 60 s, then drains", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(4000, 0)}
 		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		mux.ApplyLogs(deathLog("game-B", "P1", "game-B/P1/1", nil))
+		mux.ApplyLogs(startLog("game-B"))
 
 		clk.advance(logHoldFor - time.Second)
 		if removed := mux.EvictStale(); len(removed) != 0 {
@@ -161,9 +105,9 @@ func TestApplyLogs_LogHold(t *testing.T) {
 	t.Run("UC-041/BR-010 a later log record does not extend the hold", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(4000, 0)}
 		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		mux.ApplyLogs(deathLog("game-B", "P1", "game-B/P1/1", nil))
+		mux.ApplyLogs(startLog("game-B"))
 		clk.advance(30 * time.Second)
-		mux.ApplyLogs(deathLog("game-B", "P2", "game-B/P2/1", nil))
+		mux.ApplyLogs(startLog("game-B"))
 		clk.advance(30 * time.Second)
 		if removed := mux.EvictStale(); len(removed) != 1 {
 			t.Fatalf("removed = %v, want [game-B] 60 s after the opening record", removed)
@@ -173,7 +117,7 @@ func TestApplyLogs_LogHold(t *testing.T) {
 	t.Run("UC-041/BR-010 a metric within the hold continues the context", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(4000, 0)}
 		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		mux.ApplyLogs(deathLog("game-B", "P1", "game-B/P1/1", nil))
+		mux.ApplyLogs(startLog("game-B"))
 		clk.advance(10 * time.Second)
 		mux.ApplyMetrics(gameActiveFor("game-B", 1))
 		mux.ApplyMetrics(playerIntensityFor("P1", "game-B", 1.0))
@@ -184,8 +128,8 @@ func TestApplyLogs_LogHold(t *testing.T) {
 			t.Fatalf("removed %v: a live game must stay", removed)
 		}
 		snap, _ := mux.Snapshot("game-B")
-		if seq := snap.Session.EliminationSequence; len(seq) != 1 || seq[0] != "P1" {
-			t.Fatalf("elimination seq = %v, want [P1] from the log record", seq)
+		if snap.Session.GameMode == nil || *snap.Session.GameMode != "Joust" {
+			t.Fatalf("GameMode = %v, want Joust from the log record", snap.Session.GameMode)
 		}
 	})
 
@@ -200,7 +144,7 @@ func TestApplyLogs_LogHold(t *testing.T) {
 		if hasPartition(mux, "game-B") {
 			t.Fatal("game-B not drained")
 		}
-		mux.ApplyLogs(deathLog("game-B", "P1", "game-B/P1/1", nil))
+		mux.ApplyLogs(startLog("game-B"))
 		mux.ApplyMetrics(gameActiveFor("game-B", 1))
 		snap, _ := mux.Snapshot("game-B")
 		if snap.Session.GameActive != nil && *snap.Session.GameActive {
@@ -212,15 +156,44 @@ func TestApplyLogs_LogHold(t *testing.T) {
 	})
 }
 
+// UC: UC-041 BR-010
+func TestApplyLogs_LogOpenRacesEviction(t *testing.T) {
+	t.Run("UC-041/BR-010 a context opened while eviction runs is never lost to a removed partition", func(t *testing.T) {
+		clk := &muxClock{t: time.Unix(4000, 0)}
+		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
+		var wg sync.WaitGroup
+		stop := make(chan struct{})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					mux.EvictStale()
+				}
+			}
+		}()
+		for i := 0; i < 200; i++ {
+			id := "game-" + string(rune('a'+i%26)) + string(rune('a'+i/26))
+			mux.ApplyLogs(startLog(id))
+			if _, ok := mux.Snapshot(id); !ok {
+				t.Errorf("%s: partition removed within its hold", id)
+			}
+		}
+		close(stop)
+		wg.Wait()
+	})
+}
+
 // UC: UC-041 A8
 // UC: UC-041 BR-005
 func TestApplyLogs_GameStartAndEnd(t *testing.T) {
 	t.Run("UC-041/A8 game.start opens the context with mode and kind, not active and with no player", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(4000, 0)}
 		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		if ids := mux.ApplyLogs(lifecycleLog("game.start", "game-B", "shadow", "NonStop", time.Time{})); ids != nil {
-			t.Fatalf("touched = %v, want nil: game.start wakes no evaluation", ids)
-		}
+		mux.ApplyLogs(lifecycleLog("game.start", "game-B", "shadow", "NonStop", time.Time{}))
 		snap, ok := mux.Snapshot("game-B")
 		if !ok {
 			t.Fatal("no game-B context")
@@ -241,9 +214,9 @@ func TestApplyLogs_GameStartAndEnd(t *testing.T) {
 	t.Run("UC-041/A8 game.start without the agent marker or game id is ignored", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(4000, 0)}
 		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		mux.ApplyLogs(momentLog("game-coordinator", "game.start", map[string]string{"game.id": "game-B"}))
+		mux.ApplyLogs(logEvent("game-coordinator", "game.start", map[string]string{"game.id": "game-B"}))
 		mux.ApplyLogs(lifecycleLog("game.start", "", "real", "Joust", time.Time{}))
-		mux.ApplyLogs(momentLog("game-coordinator", "game.end", map[string]string{"game.id": "game-C"}))
+		mux.ApplyLogs(logEvent("game-coordinator", "game.end", map[string]string{"game.id": "game-C"}))
 		requirePartitions(t, mux, 0)
 	})
 
@@ -329,66 +302,6 @@ func TestApplyLogs_GameStartAndEnd(t *testing.T) {
 		mux.ApplyMetrics(gameActiveFor("game-B", 1))
 		if snap, _ := mux.Snapshot("game-B"); snap.Session.GameActive != nil && *snap.Session.GameActive {
 			t.Fatal("a game_active 1 after eviction started an ended game")
-		}
-	})
-}
-
-// UC: UC-041 BR-010
-func TestApplyLogs_LogOpenRacesEviction(t *testing.T) {
-	t.Run("UC-041/BR-010 a death read while eviction runs is never lost to a removed partition", func(t *testing.T) {
-		clk := &muxClock{t: time.Unix(4000, 0)}
-		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		var wg sync.WaitGroup
-		stop := make(chan struct{})
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-					mux.EvictStale()
-				}
-			}
-		}()
-		for i := 0; i < 200; i++ {
-			id := "game-" + string(rune('a'+i%26)) + string(rune('a'+i/26))
-			if ids := mux.ApplyLogs(deathLog(id, "P1", id+"/P1/1", nil)); len(ids) != 1 {
-				t.Errorf("%s: touched = %v", id, ids)
-			}
-			if _, ok := mux.Snapshot(id); !ok {
-				t.Errorf("%s: partition removed within its hold", id)
-			}
-		}
-		close(stop)
-		wg.Wait()
-	})
-}
-
-// UC: UC-041 BR-010
-func TestApplyLogs_KeptDeathsAfterStart(t *testing.T) {
-	t.Run("UC-041/BR-010 with a clock that ticks on every read the start event stays first", func(t *testing.T) {
-		var mu sync.Mutex
-		tick := time.Unix(4000, 0)
-		now := func() time.Time {
-			mu.Lock()
-			defer mu.Unlock()
-			tick = tick.Add(time.Microsecond)
-			return tick
-		}
-		mux := NewMultiplexer(func(string) *Store { return NewStore(5*time.Second, 15*time.Second, now) })
-		mux.ApplyLogs(deathLog("game-B", "P1", "game-B/P1/1", nil))
-		mux.ApplyMetrics(gameActiveFor("game-B", 1))
-		snap, _ := mux.Snapshot("game-B")
-		tl := snap.Timeline
-		if len(tl) != 2 || tl[0].Kind != EventPhase || tl[0].Detail != "start" {
-			t.Fatalf("timeline = %v, want the start event first, then the elimination", tl)
-		}
-		for _, e := range tl {
-			if e.At.Before(tl[0].At) {
-				t.Fatalf("event %v before the start %v", e, tl[0].At)
-			}
 		}
 	})
 }

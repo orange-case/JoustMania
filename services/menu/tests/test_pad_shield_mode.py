@@ -61,7 +61,6 @@ def lobby(menu) -> None:
     menu.state_manager.controller_states = {
         "dim": ControllerState.CONNECTED,
         "ready": ControllerState.READY,
-        "admin": ControllerState.ADMIN,
         "idle": ControllerState.IDLE,
     }
 

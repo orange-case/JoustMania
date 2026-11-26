@@ -1,6 +1,7 @@
 """The talk runbook is rehearsable and names only things that exist (FR-094).
 
-These are doc-existence checks for FR-094, not UC-070 scenario tests, so they carry no
+These are doc-existence checks for FR-094 (Obsolete since #2785; the runbook stays the
+single source for the beats and these checks stay), not UC-070 scenario tests, so they carry no
 ``uc`` marker (no flow, step or br fits; the repo has no FR-only tag). The behaviour of
 the reset and the screen-only fallback is covered by scripts/tests/test-talk-stage.sh
 and the dashboard follow tests.

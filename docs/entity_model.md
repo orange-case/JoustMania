@@ -39,8 +39,6 @@ erDiagram
     EXPERIMENT ||--o| VERDICT : "concludes with"
     VERDICT ||--o| PROMOTION : "triggers"
     GAME_SESSION ||--o| RETRO : "is reviewed by"
-    ROLLOUT ||--o{ ROLLOUT_STAGE : "advances through"
-    ROLLOUT_STAGE }o--o{ CONTROLLER : "routes"
     MOTION_ARCHETYPE |o--o{ CONTROLLER : "drives one slot of"
     EXPERIMENT ||--o{ PATTERN_PAIR_ASSIGNMENT : "pins"
     MOTION_ARCHETYPE ||--o{ PATTERN_PAIR_ASSIGNMENT : "is run by"
@@ -105,7 +103,7 @@ A physical or mock PS Move controller tracked by the controller manager. Source:
 
 ### LOBBY_ENTRY
 
-A controller's state in the menu lobby (CONNECTED, READY, ADMIN, IDLE; a disconnected controller is removed). Source: `services/menu/handlers/base.py`, `services/menu/state_manager.py`. Rules: [UC-010](use_cases/UC-010.md), [UC-012](use_cases/UC-012.md).
+A controller's state in the menu lobby (CONNECTED, READY, IDLE; a disconnected controller is removed; the ADMIN state is gone with the controller admin mode, #2819). Source: `services/menu/handlers/base.py`, `services/menu/state_manager.py`. Rules: [UC-010](use_cases/UC-010.md) (BR-015, BR-016).
 
 ### GAME_MODE
 
@@ -194,14 +192,6 @@ What happens to a promote verdict. Source: `services/agent/promote/promote.go`, 
 ### RETRO
 
 A post-game retrospective, at most one per game. Source: `services/agent/decision/retro_capture.go`, `services/agent/llm/retro.go`. Rules: [UC-042](use_cases/UC-042.md).
-
-### ROLLOUT
-
-A controller-backend rollout. Source: `services/flagd/rollout.json`, `services/controller_manager/multiplexer/rollout_router.py`. Rules: [flags.md §7](specs/flags.md#7-rollout).
-
-### ROLLOUT_STAGE
-
-A stage of a progressive rollout: how many controllers use the target backend. Source: `services/flagd/rollout.json`. Rules: [flags.md §7](specs/flags.md#7-rollout).
 
 ### MOTION_ARCHETYPE
 

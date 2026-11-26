@@ -13,7 +13,7 @@
 // (decision.jev.base_url / .model / .timeout_ms, decision.capture_content) and
 // env (JEV_API_KEY) on every call.
 //
-// Telemetry mirrors the claude and openai backends: one CLIENT span per HTTP
+// Telemetry mirrors the claude backend: one CLIENT span per HTTP
 // call (two for an acting FFA round, tagged jev.stage) named "chat {model}" (just "chat" without a model) with the OTel GenAI
 // semantic conventions (v1.41.0) and gen_ai.provider.name=jev (a custom value;
 // semconv has no well-known one), opt-in content capture, and the GenAI client
@@ -61,7 +61,7 @@ const instrumentationName = "github.com/joustmania/agent/decide/backends/jev"
 
 var metrics = chathttp.NewMetrics(instrumentationName)
 
-// Config configures one Backend. Same shape as the claude and openai backends.
+// Config configures one Backend. Same shape as the claude backend.
 type Config struct {
 	// APIKey is the Jev API key (JEV_API_KEY). Empty = unavailable.
 	APIKey string

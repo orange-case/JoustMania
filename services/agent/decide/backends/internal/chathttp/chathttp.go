@@ -1,5 +1,5 @@
 // Package chathttp is the plain net/http plumbing shared by the HTTP decision
-// backends of epic #1225 that do not use a vendor SDK (openai, jev): one POST
+// backends of epic #1225 that do not use a vendor SDK (jev): one POST
 // with W3C trace-context injection and a bounded body read, the low-cardinality
 // error.type of a failed call, server.address/server.port from a base URL, and
 // the OTel GenAI client metrics (gen_ai.client.operation.duration,
@@ -37,7 +37,7 @@ import (
 // model text itself at 64 KiB.
 const MaxResponseBytes = 1 << 20
 
-// ErrTooLarge is returned by Post when the response body exceeds the limit.
+// ErrTooLarge is returned by PostResponse when the response body exceeds the limit.
 var ErrTooLarge = errors.New("chathttp: response body too large")
 
 // DefaultHTTPClient is shared by every backend without an injected client, so
@@ -45,16 +45,6 @@ var ErrTooLarge = errors.New("chathttp: response body too large")
 // (that matters at a 2.5s budget). Its timeout is a backstop; the Decide ctx
 // deadline is the real budget.
 var DefaultHTTPClient = anthropichttp.NewHTTPClient(30 * time.Second)
-
-// Post sends body as a JSON POST to url with the given extra headers, injects
-// W3C traceparent from ctx (the caller's chat span) via the global propagator,
-// as inference/claude.go does, and reads at most maxBody bytes of the
-// response. It returns the status and body of any HTTP response (2xx or not);
-// err is set only for transport failures and an oversized body (ErrTooLarge).
-func Post(ctx context.Context, client *http.Client, url string, header http.Header, body []byte, maxBody int64) (int, []byte, error) {
-	r, err := PostResponse(ctx, client, url, header, body, maxBody)
-	return r.Status, r.Body, err
-}
 
 // Response is what PostResponse read: the status, the (size-capped) body and
 // the response headers (for a request id the vendor sends only as a header).
@@ -64,9 +54,9 @@ type Response struct {
 	Header http.Header
 }
 
-// PostResponse is Post that also returns the response headers. Status and
-// Header are set whenever an HTTP response arrived, even when err is
-// ErrTooLarge or a body read error.
+// PostResponse POSTs JSON with traceparent from ctx and reads at most maxBody bytes.
+// Any HTTP status is a Response, not an error; Status and Header are set even when
+// err is ErrTooLarge or a body read error.
 func PostResponse(ctx context.Context, client *http.Client, url string, header http.Header, body []byte, maxBody int64) (Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -113,10 +103,6 @@ func TransportErrorType(ctx context.Context, err error) string {
 	}
 	return semconv.ErrorTypeOther.Value.AsString()
 }
-
-// StatusErrorType is the error.type of a non-2xx response: the status code, the
-// convention for HTTP clients.
-func StatusErrorType(status int) string { return strconv.Itoa(status) }
 
 // ServerAddress splits a base URL into server.address / server.port.
 func ServerAddress(base string) (string, int) {

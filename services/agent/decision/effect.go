@@ -35,7 +35,7 @@ func newInterventionID() string {
 // effect.go closes the game-path intervention-effect MEASUREMENT loop (#918). The
 // agent attributes a decision's reasoning OUTBOUND (objectives / LayerState onto the
 // decision span, #729), but until now it never measured whether the intervention
-// HELPED: the infra path has fitness->rollback (#828), the game path had nothing.
+// HELPED.
 //
 // THE LOOP (measurement only — it never reverts an intervention):
 //

@@ -21,11 +21,11 @@ rectangle "JoustMania" {
         usecase "UC-004\nIdentify a Controller" as UC004
         usecase "UC-005\nUnpair a Controller" as UC005
     }
-    package "Lobby, menu & admin" {
+    package "Lobby and menu" {
         usecase "UC-010\nReady Up and Start a Game" as UC010
         usecase "UC-011\nSelect the Game Mode" as UC011
-        usecase "UC-012\nConfigure Settings in Admin Mode" as UC012
-        usecase "UC-013\nStop the Agent from the Controller" as UC013
+        usecase "UC-012\nConfigure Settings in Admin Mode\n(Obsolete, #2819)" as UC012
+        usecase "UC-013\nStop the Agent from the Controller\n(Obsolete, #2819)" as UC013
         usecase "UC-014\nForce-Start a Game" as UC014
         usecase "UC-015\nOperate the Game with the Operator Pad" as UC015
         usecase "UC-016\nSee the Game State on the Operator Pad" as UC016
@@ -56,9 +56,9 @@ rectangle "JoustMania" {
         usecase "UC-047\nCalibrate the Shadow Players Offline from Real Games" as UC047
     }
     package "Infrastructure" {
-        usecase "UC-050\nRoll Out a Controller Backend Progressively\n(parked)" as UC050
-        usecase "UC-051\nRoll Back Automatically on Degradation\n(parked)" as UC051
-        usecase "UC-052\nCanary a Backend by Hand\n(parked)" as UC052
+        usecase "UC-050\nRoll Out a Controller Backend Progressively\n(retired)" as UC050
+        usecase "UC-051\nRoll Back Automatically on Degradation\n(retired)" as UC051
+        usecase "UC-052\nCanary a Backend by Hand\n(retired)" as UC052
         usecase "UC-053\nChange a Runtime Flag through the Flag Service" as UC053
         usecase "UC-054\nManage Runtime Flags from Hosted Flagsmith" as UC054
         usecase "UC-055\nSee Runtime Flag Changes in Flagsmith" as UC055
@@ -98,8 +98,6 @@ player --> UC030
 player --> UC031
 
 host --> UC011
-host --> UC012
-host --> UC013
 host --> UC014
 host --> UC015
 host --> UC016
@@ -200,10 +198,7 @@ UC040 ..> UC053 : <<include>>
 UC042 ..> UC043 : <<include>>
 UC044 ..> UC053 : <<include>>
 UC045 ..> UC053 : <<include>>
-UC013 ..> UC053 : <<include>>
 UC015 ..> UC011 : <<include>>
-UC015 ..> UC012 : <<include>>
-UC015 ..> UC013 : <<include>>
 UC015 ..> UC014 : <<include>>
 UC015 ..> UC027 : <<include>>
 UC015 ..> UC053 : <<include>>
@@ -224,9 +219,20 @@ note right of maintainer
 end note
 
 note bottom of UC050
-  UC-050, UC-051 and UC-052 are parked
-  (maintainer decision 2026-10-19, #1617):
-  code kept, not audited
+  UC-050, UC-051 and UC-052 are retired
+  (Obsolete, #2784): code removed,
+  ids kept so they are not reused
+end note
+
+note bottom of UC061
+  UC-060 and UC-061 keep their goal and the flows of
+  FR-180, FR-182 and FR-184; the host-OS detail is the
+  ops spec docs/specs/stage-host.md (#2785)
+end note
+
+note bottom of UC070
+  The beats live in the talk runbook
+  (docs/talk/two-standards-runbook.md §3, #2785)
 end note
 
 @enduml

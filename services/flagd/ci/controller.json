@@ -27,8 +27,7 @@
       "state": "ENABLED",
       "variants": {
         "python": "python",
-        "rust": "rust",
-        "unstable": "unstable"
+        "rust": "rust"
       },
       "defaultVariant": "rust",
       "targeting": {}

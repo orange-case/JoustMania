@@ -68,7 +68,7 @@ func TestOnEvaluate_KillSwitchShortCircuits(t *testing.T) {
 }
 
 // UC: UC-045 A2 BR-001
-// UC: UC-013 BR-002
+// UC: UC-040 BR-004
 func TestOnEvaluate_PermissionGateFiltersBlocked(t *testing.T) {
 	rules := &recordingRules{out: []Decision{
 		{Intervention: "play_audio_cue", Reason: "allowed"},
@@ -98,10 +98,10 @@ func TestOnEvaluate_PermissionGateFiltersBlocked(t *testing.T) {
 	}
 }
 
-// UC: UC-013 Post-S-1
+// UC: UC-040 BR-005
 // UC: UC-045 A2
 func TestOnEvaluate_NoneAllowListBlocksEveryDecision(t *testing.T) {
-	t.Run("UC-013/Post-S-1 none blocks every non-noop decision as not_allowed", func(t *testing.T) {
+	t.Run("UC-040/BR-005 none blocks every non-noop decision as not_allowed", func(t *testing.T) {
 		// `none` is the empty string on the wire, parsed to an empty allow-list.
 		rules := &recordingRules{out: []Decision{
 			{Intervention: "play_audio_cue", Reason: "cosmetic"},

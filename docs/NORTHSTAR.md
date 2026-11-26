@@ -9,8 +9,8 @@ factory runs without workers on the floor.
 ## The loop: Observe → Experiment → Promote
 
 - **Observe.** The agent only ever sees the game through OpenTelemetry (spans,
-  metrics, the log events of game moments and those of the game's start
-  and end), never by reading code.
+  metrics and its own log events of the game's start, phase starts and end),
+  never by reading code.
 - **Experiment.** Any persistent change it considers is tested in shadow games
   with mock controllers, so real players never touch an untested variant.
 - **Promote.** Whatever survives is promoted by flipping an OpenFeature flag,
@@ -51,8 +51,8 @@ Then we measure whether it finds the move on its own, in shadow experiments wher
 
 These are what make this a northstar rather than a feature list:
 
-- **OTel only.** The agent's view of the game is spans, metrics and the log
-  events of game moments and of the game's start and end, nothing else,
+- **OTel only.** The agent's view of the game is spans, metrics and its own log
+  events of the game's start, phase starts and end, nothing else,
   except `StreamGameEvents` (lifecycle of the agent's own shadow games) and
   `ListGames` / `ListMockControllers` (controller hygiene), the named exceptions
   under "No control plane" below.
@@ -85,7 +85,7 @@ engine is the offline floor.
 - **Live rollback** exists in gated form: autonomous promotion watches real
   games and reverts on degradation.
 - **Decision backends** are selected by the `decision.backend` flag (epic #1225):
-  `rules` by default, `claude` / `openai` / `jev` called directly, rules on any
+  `rules` by default, `claude` / `jev` called directly, rules on any
   failure. The post-game retro and the experiment proposer call Claude directly
   when the `inference.backend` flag is `claude` (#1810). There is no gateway (#1234).
 - **Talk demo.** The live demo of that contract (observe, model switch,

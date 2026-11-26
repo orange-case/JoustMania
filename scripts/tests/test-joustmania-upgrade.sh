@@ -38,7 +38,8 @@
 #    note when it overrides a shell IMAGE_TAG; the start script WARNs about an
 #    IMAGE_TAG in .env.local
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-joustmania-upgrade.sh
-# UC: UC-060 main step 2 A2 A3 A4 BR-003 BR-006
+# UC: UC-060 main step 2 A2 A3
+# Spec: docs/specs/stage-host.md SH-4 SH-5 SH-6 SH-7
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 

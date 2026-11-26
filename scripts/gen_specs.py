@@ -310,7 +310,6 @@ FLAG_SET_ORDER = (
     "game",
     "interventions",
     "controller",
-    "rollout",
     "operator",
     "system",
     "user",

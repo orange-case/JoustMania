@@ -380,16 +380,11 @@ func (a *API) clear(w http.ResponseWriter, r *http.Request) {
 	a.beginWrite()
 	defer a.endWrite()
 	sc, ferr := scopeFromQuery(r)
-	var persist, guarded bool
+	var persist bool
 	if ferr == nil {
 		persist, ferr = boolParam(r.URL.Query(), "persist")
 	}
 	req := state.WriteRequest{Set: r.PathValue("set"), Flag: r.PathValue("flag"), Scope: sc, Writer: r.URL.Query().Get("writer")}
-	// ?unless_real_game=true: the agent's guarded revert (#2236, flags.md §13).
-	// Strict parse: a typo must not silently turn the guard off.
-	if ferr == nil {
-		guarded, ferr = boolParam(r.URL.Query(), "unless_real_game")
-	}
 	var res state.WriteResult
 	if ferr != nil {
 		res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
@@ -411,7 +406,7 @@ func (a *API) clear(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if ferr == nil {
-		res, ferr = a.State.Clear(state.ClearRequest{Set: req.Set, Flag: req.Flag, Scope: sc, Writer: req.Writer, Persist: persist, UnlessRealGame: guarded, IfWriter: ifWriter})
+		res, ferr = a.State.Clear(state.ClearRequest{Set: req.Set, Flag: req.Flag, Scope: sc, Writer: req.Writer, Persist: persist, IfWriter: ifWriter})
 	}
 	span.SetAttributes(attribute.Int("flagservice.cleared", res.Cleared))
 	a.finishWrite(ctx, span, telemetry.OpClear, req, res, ferr, start)

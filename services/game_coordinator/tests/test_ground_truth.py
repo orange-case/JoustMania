@@ -286,7 +286,7 @@ class TestGroundTruthEqualsTheRecordInEveryShape:
     """
 
     @pytest.mark.uc("UC-100", flow="main", steps=[4, 6], br=["BR-006", "BR-007"])
-    @pytest.mark.parametrize("shape", ["span_event", "span", "log_event", "both"])
+    @pytest.mark.parametrize("shape", ["span_event", "span", "log_event"])
     @pytest.mark.asyncio
     async def test_ffa_truth_equals_the_record_timestamps(self, tracer, monkeypatch, shape):
         from opentelemetry.sdk._logs import LoggerProvider
@@ -311,7 +311,7 @@ class TestGroundTruthEqualsTheRecordInEveryShape:
         truth = _truth(game._game_root_span)[p0]
 
         def records(name):
-            if shape in ("span_event", "both"):
+            if shape == "span_event":
                 return tuple(_stamps(span, name))
             if shape == "span":
                 moments = [s for s in tracer.exporter.get_finished_spans() if s.name == f"game.{name}"]
@@ -323,6 +323,3 @@ class TestGroundTruthEqualsTheRecordInEveryShape:
         assert len(truth[WARNINGS]) == 2
         assert truth[WARNINGS] == records("death_warning")
         assert truth[DEATHS] == records("player_death")
-        if shape == "both":
-            log_stamps = tuple(r.log_record.timestamp for r in logs.get_finished_logs())
-            assert log_stamps == truth[WARNINGS] + truth[DEATHS]

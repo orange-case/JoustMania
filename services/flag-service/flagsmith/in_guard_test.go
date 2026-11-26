@@ -526,9 +526,9 @@ func TestGarbledUpdateTimeIgnored(t *testing.T) {
 			if got := h.link.LastModified(); got != "" {
 				t.Fatalf("UC-054/main step 2 Last-Modified %q from the garbled header %q, want none", got, hdr)
 			}
-			set(fmt.Sprintf("%d", start.Add(-30*time.Second).Unix()), "openai")
+			set(fmt.Sprintf("%d", start.Add(-30*time.Second).Unix()), "jev")
 			h.round()
-			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
+			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "jev" {
 				t.Fatalf("UC-054/main step 2 decision.backend = %+v after the garbled header %q: the later document was refused as older", v, hdr)
 			}
 		})
@@ -544,7 +544,7 @@ func TestUpdateTimeAheadOfLocalClockUsed(t *testing.T) {
 	h, set := headerDocHarness(t, fmt.Sprintf("%d", start.Unix()), "claude", true)
 	h.online()
 	h.round()
-	set(fmt.Sprintf("%d", start.Add(-time.Hour).Unix()), "openai")
+	set(fmt.Sprintf("%d", start.Add(-time.Hour).Unix()), "jev")
 	h.round()
 	if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "claude" {
 		t.Fatalf("UC-054/main step 2 decision.backend = %+v: an older document was applied after a time ahead of the 1970 local clock", v)
@@ -567,9 +567,9 @@ func TestGarbledBodyUpdateTimeIgnored(t *testing.T) {
 			if got := h.link.LastModified(); got != "" {
 				t.Fatalf("UC-054/main step 2 Last-Modified %q from the body updated_at %q, want none", got, body)
 			}
-			h.fake.SetDocument(document(start.Add(-30*time.Second), []map[string]any{fsState("decision.backend", true, "openai")}), "")
+			h.fake.SetDocument(document(start.Add(-30*time.Second), []map[string]any{fsState("decision.backend", true, "jev")}), "")
 			h.round()
-			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
+			if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "jev" {
 				t.Fatalf("UC-054/main step 2 decision.backend = %+v after the body updated_at %q: the later document was refused as older", v, body)
 			}
 		})
@@ -641,9 +641,9 @@ func TestStaleRefusalEndsAfterTimeout(t *testing.T) {
 			t.Fatalf("telemetry §10.4 pull span %v, want result changed", a)
 		}
 		// The accepted time is the newest now: a later document is not refused.
-		h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off"), fsState("decision.backend", true, "openai")}), "")
+		h.fake.SetDocument(document(h.clock.Now(), []map[string]any{fsState("enabled", true, "off"), fsState("decision.backend", true, "jev")}), "")
 		h.round()
-		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "openai" {
+		if v, _ := h.local("agent", "decision.backend", flagsmith.ScopeStack); v.Variant != "jev" {
 			t.Fatalf("UC-054/main step 2 decision.backend = %+v: the document after the accepted one was refused", v)
 		}
 	})

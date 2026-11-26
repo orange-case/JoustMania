@@ -123,9 +123,6 @@ func main() {
 	)
 	mux.Handle(menuPath, menuHandler)
 
-	// Canary rollout control endpoints
-	registerCanaryHandlers(mux)
-
 	// Operator unpair forwarded to the pairing daemon (UC-005)
 	registerPairingHandlers(mux)
 

@@ -72,7 +72,6 @@ class TestResolveBackend:
         [
             ("rust", "rust", RustServiceBackend),
             ("python", "python", HidapiBackend),
-            ("unstable", "python", HidapiBackend),
         ],
     )
     @patch.object(RustServiceBackend, "__init__", lambda _self: None)
@@ -99,7 +98,7 @@ class TestResolveBackend:
         assert isinstance(backend, RustServiceBackend)
 
     @pytest.mark.uc("UC-001", flow="A3", br=["BR-003"])
-    @pytest.mark.parametrize("value", ["bogus", "", "hidapi", "RUST"])
+    @pytest.mark.parametrize("value", ["bogus", "", "hidapi", "RUST", "unstable"])
     @patch.object(RustServiceBackend, "__init__", lambda _self: None)
     def test_unknown_value_falls_back_to_rust(self, value):
         """A value that is not a flag variant falls back to rust-hid with a warning."""
@@ -114,7 +113,7 @@ class TestResolveBackend:
 
     def test_resolve_routing_returns_names_without_constructing_backends(self):
         """_resolve_routing() maps variants to names only."""
-        with patch("psmove_pairing.usb_pairing.get_adapter_routing_default", return_value="unstable"):
+        with patch("psmove_pairing.usb_pairing.get_adapter_routing_default", return_value="python"):
             assert _resolve_routing() == "python"
         with patch("psmove_pairing.usb_pairing.get_adapter_routing_default", return_value="rust"):
             assert _resolve_routing() == "rust"

@@ -76,7 +76,7 @@ span and is not counted in `agent_group_interventions_total` either; repeats are
 
 ## Pre-registration (fix before running)
 
-- Grid: at least 3 seeds, 2 repetitions per arm, per backend (jev, claude, openai), per archetype.
+- Grid: at least 3 seeds, 2 repetitions per arm, per backend (jev, claude), per archetype.
 - Primary measures: group grants per game by arm; share of groups decided with at most 3 alive; share in the last third.
 - Success: set the threshold and n before the first run, and write them in the issue. The script reports and does not judge.
 - Fairness: `shape=all_except` share, zero partial applies, zero group grants with the flag off or in a real game.

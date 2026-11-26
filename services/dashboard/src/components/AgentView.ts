@@ -4,8 +4,7 @@
  * The demo's agent focus screen. Panels fed from the agent's live telemetry
  * (see ../agent.ts; spans from Jaeger since #2059):
  *
- *   1. Activity feed     — blocked agent.decision spans and rollout rows
- *                          (agent.infrastructure.decision).
+ *   1. Activity feed     — blocked agent.decision spans.
  *   2. Flag panel        — the followed game's effective flag set, from its newest
  *                          agent.flag_state span (UC-070 BR-005 anchor).
  *   3. Intervention      — applied and blocked tallies from VictoriaMetrics (real games first, shadow games on their own line, #2294)
@@ -201,7 +200,7 @@ export class AgentView {
     if (feed.length === 0) {
       this.setPanel(
         this.feedEl,
-        html`<div class="loading">No blocked agent.decision or rollout spans in Jaeger yet. Allowed decisions appear in the decide feed below and in the Jaeger trace (link above); this feed shows blocked decisions and rollout activity.</div>`,
+        html`<div class="loading">No blocked agent.decision spans in Jaeger yet. Allowed decisions appear in the decide feed below and in the Jaeger trace (link above); this feed shows blocked decisions.</div>`,
       );
       return;
     }
@@ -616,9 +615,9 @@ function decideStripHtml(current: DecideCurrent | null, switched: boolean): Safe
     </div>`;
 }
 
-/** CSS-safe class suffix for a backend name (rules / claude / openai / jev / other). */
+/** CSS-safe class suffix for a backend name (rules / claude / jev / other). */
 function backendClass(backend: string): string {
-  return ["rules", "claude", "openai", "jev"].includes(backend) ? backend : "other";
+  return ["rules", "claude", "jev"].includes(backend) ? backend : "other";
 }
 
 /** The confidence bar with the threshold tick. */
