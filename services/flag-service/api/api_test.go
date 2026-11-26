@@ -614,6 +614,14 @@ func TestStrictBooleanQueryParams(t *testing.T) {
 			t.Fatal("dry_run=0 did not write")
 		}
 	})
+	t.Run("UC-042/main DELETE with the removed fraction parameter is 400 and clears nothing", func(t *testing.T) {
+		for _, q := range []string{"fraction=true", "fraction_percent=10"} {
+			e := newEnv(t, true)
+			if s, b := e.do("DELETE", path+"?"+q, nil); s != 400 || b["error"] != "malformed" {
+				t.Fatalf("?%s: %d %v, want 400 malformed", q, s, b)
+			}
+		}
+	})
 	t.Run("UC-042/main 1, 0, true and false are accepted on DELETE", func(t *testing.T) {
 		for _, q := range []string{"persist=1", "persist=0", "persist=true", "persist=false"} {
 			e := newEnv(t, true)

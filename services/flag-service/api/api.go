@@ -375,6 +375,10 @@ func (a *API) clear(w http.ResponseWriter, r *http.Request) {
 	defer a.endWrite()
 	sc := scopeFromQuery(r)
 	persist, ferr := boolParam(r.URL.Query(), "persist")
+	// A leftover fraction clear would otherwise clear the stack overlay.
+	if ferr == nil && (r.URL.Query().Has("fraction") || r.URL.Query().Has("fraction_percent")) {
+		ferr = fserr.BadRequest("the fraction scope was removed")
+	}
 	req := state.WriteRequest{Set: r.PathValue("set"), Flag: r.PathValue("flag"), Scope: sc, Writer: r.URL.Query().Get("writer")}
 	var res state.WriteResult
 	if ferr != nil {

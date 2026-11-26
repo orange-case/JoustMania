@@ -1,6 +1,6 @@
 """StreamIO lifecycle of the HID service adapter.
 
-The adapter holds one bidirectional ``StreamIO`` call to their HID service,
+The adapter holds one bidirectional ``StreamIO`` call to its HID service,
 read by a background thread. Since grpcio 1.83 a call that is merely dropped
 is no longer cancelled, so the call is cancelled explicitly: ``close_all()``
 cancels it, and the reader thread cancels its own call whenever it ends for

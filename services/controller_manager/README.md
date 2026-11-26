@@ -183,7 +183,6 @@ services/controller_manager/
 ├── servicer.py            # gRPC servicer implementation
 ├── backend.py             # ControllerBackend ABC
 ├── backend_factory.py     # Backend/adapter selection logic
-├── bluetooth_backend.py   # Legacy BlueZ backend (standalone)
 ├── hidapi_backend.py      # Legacy HID backend (standalone)
 ├── mock_backend.py        # Legacy mock backend (standalone)
 ├── multiplexer/
