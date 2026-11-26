@@ -344,8 +344,8 @@ func buildExperimentLoop(
 	return loop
 }
 
-// logExperimentLoopConstructed logs the compiled defaults the loop starts from
-// (#991/#1044); the live values are read per tick.
+// logExperimentLoopConstructed logs the compiled defaults the loop starts from;
+// the live values are read per tick.
 func logExperimentLoopConstructed(logger *slog.Logger, expDefaults flags.ExperimentDefaults) {
 	logger.Info("Experiment cohort loop constructed (#991/#1044) — gated LIVE by agent.json experiments_enabled",
 		"tick_default", expDefaults.Tick,

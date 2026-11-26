@@ -1,6 +1,6 @@
 package experiment
 
-// registry_pairing.go holds the Registry's PAIRING phase (#2635 split of registry.go):
+// registry_pairing.go holds the Registry's PAIRING phase:
 // capacity allocation, the paired-arm plan and reservation, the spawn of both arms
 // and the binding of a spawned game to its (experiment, arm).
 
@@ -157,7 +157,7 @@ func (r *Registry) handleReassertFailure(ctx context.Context, plan pairPlan, err
 }
 
 // spawnArms is spawnPair's allocation step: each arm is spawned in order and
-// bound; a spawn error rolls the whole pair back (#1003).
+// bound; a spawn error rolls the whole pair back.
 func (r *Registry) spawnArms(spawnCtx context.Context, plan pairPlan) (bound int, stop bool) {
 	var live []startedArm
 	for i, arm := range plan.arms {
@@ -518,7 +518,7 @@ func (r *Registry) bindGame(id, gameID, arm string, pairIndex int, pattern *Patt
 }
 
 // refuseTerminalBindLocked is bindGame's terminal-status step, called under r.mu:
-// the game is not bound into a done experiment, only recorded as released (#1004).
+// the game is not bound into a done experiment, only recorded as released.
 func (r *Registry) refuseTerminalBindLocked(e *entry, gameID, arm string) {
 	delete(r.releaseTombstones, gameID)
 	r.appendEvent(e.journal, journal.Event{

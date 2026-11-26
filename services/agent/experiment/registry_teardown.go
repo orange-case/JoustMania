@@ -1,7 +1,7 @@
 package experiment
 
-// registry_teardown.go holds the Registry's ABORT / TEARDOWN phase (#2635 split of
-// registry.go): Abort, AbortAll and the terminal teardown.
+// registry_teardown.go holds the Registry's ABORT / TEARDOWN phase:
+// Abort, AbortAll and the terminal teardown.
 
 import (
 	"context"

@@ -1,6 +1,6 @@
 package experiment
 
-// registry_promote.go holds the Registry's PROMOTE phase (#2635 split of registry.go):
+// registry_promote.go holds the Registry's PROMOTE phase:
 // the promotion of a CONCLUDED experiment and the recording of its result.
 
 import (

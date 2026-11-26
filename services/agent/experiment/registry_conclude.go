@@ -1,6 +1,6 @@
 package experiment
 
-// registry_conclude.go holds the Registry's CONCLUDE phase (#2635 split of registry.go):
+// registry_conclude.go holds the Registry's CONCLUDE phase:
 // folding a concluded or released game into the journal, the give-up checks and
 // the verdict-driven status transition.
 

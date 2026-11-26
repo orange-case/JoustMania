@@ -1,6 +1,6 @@
 package experiment
 
-// registry_start.go holds the Registry's START phase (#2635 split of registry.go):
+// registry_start.go holds the Registry's START phase:
 // PROPOSED → RUNNING, the targeting write, the late-write strip after an abort and
 // the experiment root span.
 

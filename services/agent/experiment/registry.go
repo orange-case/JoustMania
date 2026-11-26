@@ -519,7 +519,7 @@ func registryCaps(cfg RegistryConfig) (maxCap, effectiveCap int) {
 }
 
 // registryBudget is NewRegistry's budget step: the per-experiment games budget
-// (#1001) and the min-N mirror, normalized.
+// and the min-N mirror, normalized.
 func registryBudget(cfg RegistryConfig) (maxGames, minN int) {
 	// Termination budget (#1001): zero means "read the env default"; a negative
 	// config value is an explicit disable, normalized to 0 (the guard treats <= 0 as
@@ -657,7 +657,7 @@ func validateIntent(in Intent) error {
 	return nil
 }
 
-// reconcileTargetNLocked is Declare's target_n step (#1001), called under r.mu: a
+// reconcileTargetNLocked is Declare's target_n step, called under r.mu: a
 // target_n below the verdict min-N is raised to it (and logged when one was asked).
 func (r *Registry) reconcileTargetNLocked(id string, targetN int) int {
 	if r.minN > 0 && targetN < r.minN {

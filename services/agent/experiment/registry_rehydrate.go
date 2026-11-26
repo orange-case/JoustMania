@@ -1,7 +1,7 @@
 package experiment
 
-// registry_rehydrate.go holds the Registry's REHYDRATE phase (#2635 split of
-// registry.go): rebuilding the in-memory view from the durable journals on startup.
+// registry_rehydrate.go holds the Registry's REHYDRATE phase:
+// rebuilding the in-memory view from the durable journals on startup.
 
 import (
 	"context"
