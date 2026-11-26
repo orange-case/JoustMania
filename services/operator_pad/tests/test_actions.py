@@ -436,8 +436,7 @@ UNKNOWN_AGENTS = [
         "unread",
         "enabled-unknown",
         "enabled-missing",
-        "gate-unknown",
-        "gate-missing",
+        "state-off-the-ladder",
         "level-off-the-ladder",
     ],
 )
