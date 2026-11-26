@@ -24,7 +24,7 @@ import type { DecideFollow } from "./agentAnchor.js";
  *                                        └─ agent.decision ─ agent.action   (0..2)
  *   remote path: invoke_agent ─┬─ chat {model}            (backend CLIENT span)
  *                              └─ agent.decision ─ agent.action
- *                (in a game, invoke_agent is a remote child of game_cycle.)
+ *                (in a game, invoke_agent is a remote child of game.cycle.)
  *
  * Every string here (rationale above all) can be model output: it is untrusted
  * and the view escapes it before rendering.
@@ -399,9 +399,9 @@ function decideRowFrom(
   let decisionSpans = children.filter((s) => s.operationName === "agent.decision");
   // Only the rules path shares a parent with its decisions. Without game ids that
   // parent is the cycle's agent.signal_received. In a game (#2648) there is no such
-  // span: the decide and its decisions are siblings under game_cycle, and the
+  // span: the decide and its decisions are siblings under game.cycle, and the
   // decisions of one cycle carry the decide's decide.state.digest. A remote decide's
-  // parent is the game's game_cycle too, whose other children are unrelated: those
+  // parent is the game's game.cycle too, whose other children are unrelated: those
   // are never linked (a remote decide has its decisions as children, above).
   if (decisionSpans.length === 0) {
     const siblings = (byParent.get(parent) ?? []).filter((s) => s.operationName === "agent.decision");

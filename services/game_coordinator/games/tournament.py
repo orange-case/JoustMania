@@ -398,7 +398,7 @@ class TournamentGame(StreamedIntroGameMode):
 
         for serial, player in self.players.items():
             player.span = tracer.start_span(
-                "player_lifecycle",
+                "game.player",
                 context=game_context,
                 attributes={
                     "player.serial": serial,
@@ -485,7 +485,7 @@ class TournamentGame(StreamedIntroGameMode):
         self._start_player_gauges(match.player1_serial)
         self._start_player_gauges(match.player2_serial)
 
-        # Create match span (inherits current active context: gameplay_phase)
+        # Create match span (inherits current active context: game.phase.gameplay)
         self.match_span = tracer.start_span(
             "game.tournament.match",
             attributes={
@@ -1060,7 +1060,7 @@ class TournamentGame(StreamedIntroGameMode):
         """The bracket runs on the base game loop (UC-025 step 1, BR-002, D-G33, #1882).
 
         One stream read for the whole game, a bracket step per frame; match spans
-        start inside gameplay_phase. The end step closes the player spans with
+        start inside game.phase.gameplay. The end step closes the player spans with
         tournament_ended; an early exit or an error leaves them to the run-end
         cleanup (#1997).
         """

@@ -53,8 +53,8 @@ import (
 // GenAI semconv (semantic-conventions-genai v0.1.0) "Invoke agent internal span":
 // `{gen_ai.operation.name} {gen_ai.agent.name}` = "invoke_agent joustmania-agent",
 // kind INTERNAL, on both paths (#2584; it was agent.decide before). On the remote path
-// it is the root of the async trace (a remote child of the game's game_cycle span
-// when known, else gameplay_phase / the game root, UC-040 BR-013; Linked to the fire
+// it is the root of the async trace (a remote child of the game's game.cycle span
+// when known, else game.phase.gameplay / the game root, UC-040 BR-013; Linked to the fire
 // cycle) and wraps the backend call — the
 // backend's own `chat {model}` CLIENT span nests under it — and the resulting
 // agent.decision -> agent.action spans. On the rules path it is a sibling of the
@@ -635,7 +635,7 @@ func (l *Loop) gateRemoteDecide(ctx context.Context, snapshot flags.Snapshot, c 
 // rootCtx (shutdown cancels it) and the fire-cycle anchor span the async root
 // Links to.
 func (l *Loop) launchDecideAsync(ctx context.Context, snapshot flags.Snapshot, backend decide.Backend, requested string, c gamecontext.GameContext, trig EvalTrigger) {
-	// In a game the async span needs no anchor: it is a child of game_cycle and carries
+	// In a game the async span needs no anchor: it is a child of game.cycle and carries
 	// the trigger as an event (#2648). Without game ids it Links to an anchor span.
 	var fireSC trace.SpanContext
 	_, ev, endCycle := l.startCycle(ctx, c, trig)

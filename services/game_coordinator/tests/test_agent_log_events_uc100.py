@@ -186,7 +186,7 @@ def _ffa(sdk, shape):
     game._play_sound = AsyncMock()
     game.moment_shape = shape
     for serial, player in game.players.items():
-        player.span = sdk.tracer.start_span("player_lifecycle", attributes={"player.serial": serial})
+        player.span = sdk.tracer.start_span("game.player", attributes={"player.serial": serial})
     return game
 
 

@@ -579,7 +579,7 @@ class Player:
     _shield_hold_span: trace.Span | None = None
     # Per-player countdown span (created before countdown, ended after)
     _countdown_span: trace.Span | None = None
-    # Health tracking (#571: controller health on player_lifecycle spans)
+    # Health tracking (#571: controller health on game.player spans)
     total_poll_drops: int = 0
     total_poll_errors: int = 0
     total_led_failures: int = 0
@@ -981,7 +981,7 @@ class BaseGameMode(
         Args:
             game_context: Parent span context for proper hierarchy
 
-        FFA: Flat hierarchy - player spans directly under gameplay_phase
+        FFA: Flat hierarchy - player spans directly under game.phase.gameplay
         Teams/Random Teams: Hierarchical - team spans → player spans
         Nonstop Joust: Flat hierarchy like FFA
         """
@@ -1450,7 +1450,7 @@ class BaseGameMode(
           and the force-end hook, in the flow's order.
 
         The base flow: game.phase.initialization (setup: players, colors, stream,
-        music), gameplay_phase (player_lifecycle spans with game.phase.countdown
+        music), game.phase.gameplay (game.player spans with game.phase.countdown
         children), game.phase.teardown. Phase spans are children of the game span.
 
         A run that raises or is cancelled before the teardown step still stops
@@ -1673,7 +1673,7 @@ class BaseGameMode(
             sound_name = sound.value if isinstance(sound, Sound) else sound
             request = audio_pb2.PlaySoundRequest(file_path=sound_name, volume=volume, priority=priority)
 
-            # Use explicit parent if provided, otherwise fall back to game_cycle
+            # Use explicit parent if provided, otherwise fall back to game.cycle
             ctx = parent_context or self.game_cycle_context
             if ctx:
                 token = otel_context.attach(ctx)

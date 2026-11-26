@@ -58,7 +58,7 @@ class _Sdk:
         self.log_provider.add_log_record_processor(SimpleLogRecordProcessor(self.logs))
 
     def player_span(self, serial: str):
-        return self.tracer.start_span("player_lifecycle", attributes={"player.serial": serial})
+        return self.tracer.start_span("game.player", attributes={"player.serial": serial})
 
     def death_logs(self) -> list:
         return [r.log_record for r in self.logs.get_finished_logs() if r.log_record.event_name == DEATH]

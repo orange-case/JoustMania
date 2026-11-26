@@ -19,8 +19,12 @@ const (
 	attrAudience       = "orangecase.audience"
 	audienceAgent      = "agent"
 	attrPhaseSpan      = "game.phase.span"
-	phaseGameplay      = "gameplay_phase"
-	phaseGameCycle     = "game_cycle"
+	phaseGameplay      = "game.phase.gameplay"
+	phaseGameCycle     = "game.cycle"
+
+	// Pre-#2837 coordinator values, accepted for one release (telemetry.md §8).
+	phaseGameplayLegacy  = "gameplay_phase"
+	phaseGameCycleLegacy = "game_cycle"
 )
 
 // ApplyLogs walks a log batch and applies each game.start / game.phase.start /
@@ -91,9 +95,9 @@ func (m *Multiplexer) applyPhaseStart(lr plog.LogRecord) {
 		return
 	}
 	switch attrString(attrs, attrPhaseSpan) {
-	case phaseGameplay:
+	case phaseGameplay, phaseGameplayLegacy:
 		s.setTraceFromLog(logTraceIDs{phase: spanID, phaseTrace: traceID})
-	case phaseGameCycle:
+	case phaseGameCycle, phaseGameCycleLegacy:
 		s.setTraceFromLog(logTraceIDs{cycle: spanID, phaseTrace: traceID})
 	}
 }

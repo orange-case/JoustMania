@@ -42,14 +42,14 @@ func TestRecentSpans_KeepsTheDecideSpansBoundedPerGameKind(t *testing.T) {
 		_, s := tr.Start(context.Background(), spanDecide, trace.WithAttributes(attribute.String("game.kind", "shadow")))
 		s.End()
 	}
-	_, other := tr.Start(context.Background(), "game_cycle")
+	_, other := tr.Start(context.Background(), "game.cycle")
 	other.End()
 
 	got := rs.snapshot()
 	if n := names(got)[spanDecide]; n != recentSpanCaps[spanDecide]+1 {
 		t.Fatalf("UC-035/3 decides kept = %d, want %d shadow plus the real one", n, recentSpanCaps[spanDecide])
 	}
-	if names(got)["game_cycle"] != 0 {
+	if names(got)["game.cycle"] != 0 {
 		t.Error("a span the dashboard does not read is kept")
 	}
 	found := false

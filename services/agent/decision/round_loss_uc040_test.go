@@ -17,7 +17,7 @@ import (
 func fcDeath(serial string, eliminated bool) ptrace.Traces {
 	td := ptrace.NewTraces()
 	span := td.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
-	span.SetName("player_lifecycle")
+	span.SetName("game.player")
 	span.Attributes().PutStr("player.serial", serial)
 	ev := span.Events().AppendEmpty()
 	ev.SetName("player_death")

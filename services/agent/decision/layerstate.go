@@ -101,7 +101,7 @@ type LayerState struct {
 	DecideBackend string
 	// DecideStateDigest is the decide.state.digest of the rules cycle's invoke_agent
 	// span (#2648). In a game the rules-path invoke_agent and agent.decision spans are
-	// siblings under game_cycle, no longer under a per-cycle agent.signal_received
+	// siblings under game.cycle, no longer under a per-cycle agent.signal_received
 	// span; the shared digest is what tells which decisions belong to which decide.
 	DecideStateDigest string
 

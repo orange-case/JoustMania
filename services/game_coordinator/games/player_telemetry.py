@@ -28,7 +28,7 @@ class PlayerTelemetryMixin:
     """Player telemetry of a game: analytics, gauges, health and lifecycle spans. Mixed into ``BaseGameMode``."""
 
     def _init_span_state(self) -> None:
-        """The gameplay, players and game_cycle grouping spans and their contexts."""
+        """The gameplay, players and game.cycle grouping spans and their contexts."""
         self.gameplay_span: trace.Span | None = None  # Reference for span events
         self.gameplay_span_context = None  # Context for child spans in background tasks
         self._players_span: trace.Span | None = None  # Parent span grouping all player lifecycles
@@ -319,7 +319,7 @@ class PlayerTelemetryMixin:
             context = otel_context.get_current()
 
         return _base.tracer.start_span(
-            "player_lifecycle",  # Consistent name for all players (OpenTelemetry best practice)
+            "game.player",  # Consistent name for all players (OpenTelemetry best practice)
             context=context,
             attributes={
                 "player.serial": serial,
@@ -327,7 +327,7 @@ class PlayerTelemetryMixin:
                 "player.color": str(player.color),
                 GAME_MODE_ATTR: self.get_game_name(),
                 # stamp game identity so the agent can attribute a
-                # player_lifecycle span to its game (mirrors game.id/game.kind on
+                # game.player span to its game (mirrors game.id/game.kind on
                 # the parent game-session span in game_session.py).
                 "game.id": self.game_id,
                 "game.kind": self.game_kind,
@@ -337,7 +337,7 @@ class PlayerTelemetryMixin:
     def _finalize_player_health(self, player: Player) -> None:
         """Close health degradation spans and add summary attributes (#571).
 
-        Called per-player before closing the player_lifecycle span.
+        Called per-player before closing the game.player span.
         Safe to call even if no health spans were opened.
         """
         if not player.span:
@@ -360,7 +360,7 @@ class PlayerTelemetryMixin:
             player._led_degraded_span.end()
             player._led_degraded_span = None
 
-        # Summary health attributes on player_lifecycle span
+        # Summary health attributes on game.player span
         player.span.set_attribute("health.total_poll_drops", player.total_poll_drops)
         player.span.set_attribute("health.total_poll_errors", player.total_poll_errors)
         player.span.set_attribute("health.total_led_failures", player.total_led_failures)
@@ -374,7 +374,7 @@ class PlayerTelemetryMixin:
         """
         Close all open player lifecycle spans.
 
-        Called at the end of gameplay_phase to ensure all player spans
+        Called at the end of game.phase.gameplay to ensure all player spans
         end with the gameplay phase, not during teardown.
         Subclasses can override to add custom attributes before closing.
         """
@@ -443,9 +443,9 @@ class PlayerTelemetryMixin:
             player.span = None
 
     def _close_grouping_spans(self):
-        """Close the players and game_cycle grouping spans.
+        """Close the players and game.cycle grouping spans.
 
-        Called after all player spans are closed, before gameplay_phase ends.
+        Called after all player spans are closed, before game.phase.gameplay ends.
         """
         if self._players_span:
             self._players_span.end()
@@ -457,10 +457,10 @@ class PlayerTelemetryMixin:
 
     @contextlib.contextmanager
     def _game_cycle_attached(self):
-        """Make ``game_cycle`` the current span context for the block (no-op while it is not open).
+        """Make ``game.cycle`` the current span context for the block (no-op while it is not open).
 
         For an in-game audio RPC made outside ``_play_sound`` and the music loop, so its client span is
-        a child of ``game_cycle`` and not of the phase span that happens to be current (#2671).
+        a child of ``game.cycle`` and not of the phase span that happens to be current (#2671).
         """
         if self.game_cycle_context is None:
             yield

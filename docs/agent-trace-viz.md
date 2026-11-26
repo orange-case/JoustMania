@@ -33,14 +33,14 @@ Every triggering OTLP Export from a watched game produces a three-span spine
 (since #2648 the `signal_received` span is a span event in a game trace, see below). Verified live (trace `4f0a8448…`):
 
 ```
-agent.signal_received          remote child of the game's game_cycle span — "a signal arrived, the agent woke up"
+agent.signal_received          remote child of the game's game.cycle span — "a signal arrived, the agent woke up"
   └─ agent.decision            child — "the agent thought; here is the verdict"
        └─ agent.action         child — "the agent did (or was blocked from doing) it"
 ```
 
 `agent.signal_received` is the root of the agent's own spine, but not of the
-trace: it is a remote child of the coordinator's `game_cycle` span (fallback
-order `gameplay_phase`, the game root, else its own root; #1325, see
+trace: it is a remote child of the coordinator's `game.cycle` span (fallback
+order `game.phase.gameplay`, the game root, else its own root; #1325, see
 [telemetry.md](specs/telemetry.md)). Read top-to-bottom on the projector it is a sentence: **signal → decision →
 action**. A blocked decision still emits `signal_received → decision`; the
 `action` span records the block reason rather than a real effect.
@@ -48,7 +48,7 @@ action**. A blocked decision still emits `signal_received → decision`; the
 **Since #2648** a game trace has no `agent.signal_received` span (one per Export was
 noise): the Export is the event `agent.signal_received` (`otlp.signal`, `rpc.*`) on the
 cycle's `invoke_agent joustmania-agent` / `agent.disabled` span, and `invoke_agent joustmania-agent` / `agent.decision`
-are direct children of `game_cycle`. Without game ids the span below still exists.
+are direct children of `game.cycle`. Without game ids the span below still exists.
 
 `agent.signal_received` is the single entry span (SERVER kind, own-root only without game ids) for both trigger kinds (an OTLP
 *metrics* or *trace* Export). The former `agent.span_received` root was retired;

@@ -1,8 +1,8 @@
 """UC-041 A8 / BR-004 (#2766, #2783): ``game.phase.start`` carries the phase span ids to the agent.
 
-Every game sends one agent-only ``game.phase.start`` when ``gameplay_phase`` opens and
-one when ``game_cycle`` opens, each in that span's context and only when that span is
-sampled. A mode without ``game_cycle`` sends only the first.
+Every game sends one agent-only ``game.phase.start`` when ``game.phase.gameplay`` opens and
+one when ``game.cycle`` opens, each in that span's context and only when that span is
+sampled. A mode without ``game.cycle`` sends only the first.
 
 Real SDK tracer and logger providers with in-memory exporters (not the global ones).
 """
@@ -77,7 +77,7 @@ async def test_every_game_sends_one_phase_start_per_phase_span_in_its_context(sd
     await game.run()
 
     records = sdk.records()
-    assert [r.attributes["game.phase.span"] for r in records] == ["gameplay_phase", "game_cycle"]
+    assert [r.attributes["game.phase.span"] for r in records] == ["game.phase.gameplay", "game.cycle"]
     for record in records:
         span = sdk.span(record.attributes["game.phase.span"])
         assert dict(record.attributes) == {
@@ -117,8 +117,8 @@ async def test_mode_without_game_cycle_sends_only_gameplay_phase(sdk):
         await game._run_streamed_gameplay()
 
     (record,) = sdk.records()
-    gameplay = sdk.span("gameplay_phase")
-    assert record.attributes["game.phase.span"] == "gameplay_phase"
+    gameplay = sdk.span("game.phase.gameplay")
+    assert record.attributes["game.phase.span"] == "game.phase.gameplay"
     assert record.attributes["game.id"] == "zombie_phase_start"
     assert (record.trace_id, record.span_id) == (gameplay.context.trace_id, gameplay.context.span_id)
 
@@ -134,7 +134,7 @@ async def test_fight_club_sends_only_gameplay_phase(sdk, monkeypatch):
         initial_players=[type("P", (), {"serial": f"mock_controller_{i}"})() for i in range(3)],
     )
     game.running = True
-    # Fight Club opens gameplay_phase on its module tracer, not _run_tracer().
+    # Fight Club opens game.phase.gameplay on its module tracer, not _run_tracer().
     monkeypatch.setattr(fight_club, "tracer", sdk.tracer)
 
     with (
@@ -145,8 +145,8 @@ async def test_fight_club_sends_only_gameplay_phase(sdk, monkeypatch):
         assert await game._run_streamed_gameplay() is True
 
     (record,) = sdk.records()
-    gameplay = sdk.span("gameplay_phase")
-    assert record.attributes["game.phase.span"] == "gameplay_phase"
+    gameplay = sdk.span("game.phase.gameplay")
+    assert record.attributes["game.phase.span"] == "game.phase.gameplay"
     assert record.attributes["game.id"] == "fight_club_phase_start"
     assert (record.trace_id, record.span_id) == (gameplay.context.trace_id, gameplay.context.span_id)
 

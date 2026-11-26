@@ -180,8 +180,8 @@ def test_agent_events_filter_passes_lifecycle_records_only_when_marked(
 @pytest.mark.parametrize(
     ("attributes", "resource", "dropped"),
     [
-        ({"game.id": "g", "game.phase.span": "game_cycle", **_AGENT}, {}, False),
-        ({"game.id": "g", "game.phase.span": "gameplay_phase"}, {}, True),
+        ({"game.id": "g", "game.phase.span": "game.cycle", **_AGENT}, {}, False),
+        ({"game.id": "g", "game.phase.span": "game.phase.gameplay"}, {}, True),
         (_AGENT, {"orangecase.synthetic": True}, True),
     ],
     ids=["marked-kept", "unmarked-dropped", "synthetic-dropped"],

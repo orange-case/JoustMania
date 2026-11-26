@@ -1423,12 +1423,12 @@ class TestStartIntensityRamp:
 
 
 # ========================================================================
-# _play_sound (game_cycle context)
+# _play_sound (game.cycle context)
 # ========================================================================
 
 
 class TestPlaySound:
-    """Tests for _play_sound method with game_cycle context."""
+    """Tests for _play_sound method with game.cycle context."""
 
     @pytest.fixture
     def game(self):

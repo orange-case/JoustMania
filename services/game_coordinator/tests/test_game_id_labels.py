@@ -1,6 +1,6 @@
 """
 Tests for the additive ``game_id`` label on live-session and per-player metrics,
-plus ``game.id`` / ``game.kind`` on the player_lifecycle span (#845).
+plus ``game.id`` / ``game.kind`` on the game.player span (#845).
 
 These guarantee the producer side of per-game agent partitioning: every live
 signal the agent routes on is stamped with the emitting session's game_id, so

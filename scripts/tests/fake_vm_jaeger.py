@@ -171,7 +171,7 @@ def traces(params: dict):
     # The same summaries on two spans: counted once per player.
     spans = [
         {"name": "game.phase.teardown", "events": events},
-        {"name": "game_cycle", "events": events},
+        {"name": "game.cycle", "events": events},
     ]
     return {"result": {"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}}
 

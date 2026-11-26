@@ -85,7 +85,7 @@ is a business rule of its use case.
    admission (`game_not_live` otherwise); the overlay is dropped with its scope, at its time-to-live or by a restart
    (a `persist` stack value is restored). An experiment's arm value is an `experiment+arm` overlay, resolved only in
    that arm's shadow games ([UC-053](use_cases/UC-053.md), [flags.md](specs/flags.md)).
-6. **Trace correlation.** The ids of a game's root, `gameplay_phase` and `game_cycle` spans reach the agent, which
+6. **Trace correlation.** The ids of a game's root, `game.phase.gameplay` and `game.cycle` spans reach the agent, which
    parents its in-game spans on them ([UC-041](use_cases/UC-041.md) BR-004; [telemetry.md](specs/telemetry.md)).
 7. **Per-controller data stays in its game.** A serial, a name or another per-controller value of one game is used
    only for that game (its decisions, retro and telemetry) and never kept across games: GAME_AGGREGATE and LINKED_SET
