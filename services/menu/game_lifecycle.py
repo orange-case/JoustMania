@@ -16,7 +16,7 @@ from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-from lib.feature_flags import GAME_KIND_REAL, set_game_transaction_context
+from lib.feature_flags import GAME_KIND_REAL, set_game_transaction_context, wait_for_provider_ready
 from lib.telemetry import get_tracer
 from lib.types import GameEvent, Games, Sound
 from proto import menu_pb2
@@ -57,6 +57,20 @@ async def _bounded_restore_step(step: str, run) -> None:
 
 _UNREACHABLE_STATUS_CODES = (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED)
 
+# UC-010 A16: retry interval of the boot's coordinator lookup while the coordinator does not answer.
+BOOT_GAME_LOOKUP_RETRY_SECONDS = 1.0
+GAME_STATE_RPC_TIMEOUT_SECONDS = 2.0
+# While the lookup keeps failing, a WARNING again this often (the retries in between log at DEBUG).
+BOOT_GAME_LOOKUP_WARN_EVERY_SECONDS = 30.0
+
+
+def _log_lifecycle_failure(task: asyncio.Future) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error(f"Game lifecycle task failed: {exc}", exc_info=exc)
+
 
 def _start_failure_reason(error: Exception) -> str:
     """The `game_start_cancelled` reason for a start that failed before the first event (UC-010 A3).
@@ -89,17 +103,19 @@ class GameLifecycleMixin:
     async def _reject_start_while_active(self, serial: str, source: str, game_mode: Games | None) -> None:
         """Refuse a start request while the game lifecycle task is live (UC-010 A8).
 
-        Publishes ``game_start_rejected`` with reason ``game_active`` and clears the ready
+        Publishes ``game_start_rejected`` with reason ``game_active`` (``coordinator_unreachable`` while
+        the boot's coordinator lookup is undecided, UC-010 A16) and clears the ready
         latch, so a later trigger can start once the task has finished. Silent while a game
         is starting or running; a short beep only in the lobby-restart window, where the
         players are back in the lobby. The live game lifecycle is left untouched.
         """
         mode = game_mode if game_mode is not None else self.current_selection
-        logger.warning(f"Start from {serial} ({source}) refused: a game lifecycle is still live")
+        reason = "coordinator_unreachable" if self._boot_lookup_running else "game_active"
+        logger.warning(f"Start from {serial} ({source}) refused: {reason}")
         self.ready_handler.reset_game_start_flag()
         await self.event_publisher.publish(
             "game_start_rejected",
-            {"game_name": mode.name, "source": source, "reason": "game_active"},
+            {"game_name": mode.name, "source": source, "reason": reason},
         )
         if self._lobby_restarting:
             await self.audio.play_sound(Sound.SFX_BEEP_LOUD)
@@ -189,16 +205,76 @@ class GameLifecycleMixin:
             self._run_game_lifecycle(serial, source, controllers, game_mode=game_mode, ready_start=ready_start)
         )
 
-        # Log any exceptions from the background task
-        def _log_exception(t):
-            if t.cancelled():
-                return
-            exc = t.exception()
-            if exc:
-                logger.error(f"Game lifecycle task failed: {exc}", exc_info=exc)
-
-        self._game_lifecycle_task.add_done_callback(_log_exception)
+        self._game_lifecycle_task.add_done_callback(_log_lifecycle_failure)
         return True
+
+    async def boot_follows_live_game(self) -> bool:
+        """The boot's coordinator lookup (UC-010 A16); True when the boot must not enter the lobby.
+
+        The lookup runs as the game lifecycle task, so starts are refused (A8) and a StartMenu waits
+        for it. Returns once decided: True while a live game is followed (its end restores the lobby)
+        or when a reset_menu recovery cancelled the lookup (the recovery restores the lobby); False
+        when no game runs. A coordinator that never answers keeps this waiting (fail closed).
+        """
+        decided: asyncio.Future = asyncio.get_running_loop().create_future()
+        task = asyncio.create_task(self._follow_live_game_at_boot(decided))
+        self._game_lifecycle_task = task
+        task.add_done_callback(_log_lifecycle_failure)
+        await asyncio.wait({decided, task}, return_when=asyncio.FIRST_COMPLETED)
+        if decided.done():
+            return decided.result()
+        return task.cancelled()
+
+    async def _follow_live_game_at_boot(self, decided: asyncio.Future) -> None:
+        from proto import game_coordinator_pb2, game_coordinator_pb2_grpc
+
+        stub = game_coordinator_pb2_grpc.GameCoordinatorServiceStub(self.game_coordinator_channel)
+        self._boot_lookup_running = True
+        try:
+            game_id = await self._wait_for_primary_game(stub)
+        finally:
+            self._boot_lookup_running = False
+        if game_id is None:
+            decided.set_result(False)
+            return
+        logger.warning(f"Boot: game {game_id or '(no id)'} is live on the coordinator; following it, no lobby")
+        self.state = menu_pb2.MenuState.GAME_STARTING
+        decided.set_result(True)
+        # The lobby restore at the game's end paints and the next start launches the persisted mode
+        # (UC-011, BR-003), as after a boot lobby entry; the stream is not open yet, so a game that ends
+        # meanwhile is caught by the re-check after the subscription.
+        if not await wait_for_provider_ready("user"):
+            logger.warning("flag provider not ready after 5s; using code defaults")
+        self.restore_user_selection()
+        request = game_coordinator_pb2.StreamEventsRequest(game_id=game_id)
+        await self._run_game_event_stream(
+            stub, request, self._build_trace_metadata(), trace.get_current_span(), adopted_game_id=game_id
+        )
+
+    async def _wait_for_primary_game(self, stub) -> str | None:
+        """The primary game's id while one is starting or running, else None; retried until the coordinator answers."""
+        from proto import game_coordinator_pb2
+
+        loop = asyncio.get_running_loop()
+        next_warning = loop.time()
+        while True:
+            try:
+                response = await stub.GetGameState(
+                    game_coordinator_pb2.GetGameStateRequest(), timeout=GAME_STATE_RPC_TIMEOUT_SECONDS
+                )
+                if response.success:
+                    info = response.game_info
+                    live_states = (game_coordinator_pb2.GameState.STARTING, game_coordinator_pb2.GameState.RUNNING)
+                    return info.game_id if info.state in live_states else None
+                problem = f"unsuccessful: {response.error}"
+            except Exception as e:
+                problem = str(e)
+            log = logger.debug
+            if loop.time() >= next_warning:
+                log = logger.warning
+                next_warning = loop.time() + BOOT_GAME_LOOKUP_WARN_EVERY_SECONDS
+            log(f"Boot: coordinator game state unknown ({problem}); no lobby and no start until it answers")
+            await asyncio.sleep(BOOT_GAME_LOOKUP_RETRY_SECONDS)
 
     async def _run_game_lifecycle(
         self,
@@ -388,28 +464,31 @@ class GameLifecycleMixin:
         propagator.inject(carrier)
         return list(carrier.items())
 
-    async def _run_game_event_stream(self, stub, request, metadata, span) -> None:
+    async def _run_game_event_stream(self, stub, request, metadata, span, adopted_game_id: str | None = None) -> None:
         """
         Run the game event stream with reconnection logic.
 
         Args:
             stub: GameCoordinator gRPC stub
-            request: Initial StreamEventsRequest with start_config
+            request: Initial StreamEventsRequest with start_config (or the game_id of an adopted game)
             metadata: gRPC metadata with trace context
             span: Current tracing span
+            adopted_game_id: A game found live at boot (UC-010 A16): already started, followed by this id
         """
         stream = None
-        game_started = False
+        adopted = adopted_game_id is not None
+        game_started = adopted
         # UC-010 A13 (#2450): the start was confirmed and every reconnect failed.
         coordinator_lost = False
         max_reconnect_attempts = 3
-        self._followed_game_id = None
+        self._followed_game_id = adopted_game_id
 
         try:
             for attempt in range(max_reconnect_attempts + 1):
                 try:
                     stream = self._open_game_stream(stub, request, metadata, attempt, max_reconnect_attempts)
-                    if attempt > 0 and await self._followed_game_gone(stub, stream):
+                    # An adopted game may have ended between the boot lookup and this subscription.
+                    if (attempt > 0 or adopted) and await self._followed_game_gone(stub, stream):
                         await self._end_followed_game_while_disconnected()
                         return
                     result = await self._consume_game_events(stream, game_started, span)
