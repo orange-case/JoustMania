@@ -2,9 +2,9 @@
 
 ``telemetry.agent_log_events`` is read once per game next to the moment shape, recorded
 on the game root and held for the game. On, the coordinator sends ``game.start`` and
-``game.end`` in the root span's context and, in the ``span_event`` and ``span`` shapes, a
-log copy of each warning and death; every such record carries ``orangecase.audience`` =
-``agent``. Off (the default), nothing new is sent.
+``game.end`` in the root span's context, each carrying ``orangecase.audience`` = ``agent``;
+no moment is copied to the agent in any shape (it reads deaths from the elimination-order
+gauge, UC-041 BR-009). Off (the default), nothing new is sent.
 
 Real SDK tracer and logger providers with in-memory exporters (not the global ones).
 """
@@ -25,7 +25,7 @@ from services.game_coordinator.tests.test_death_detection_uc030 import _game
 from services.game_coordinator.tests.test_game_session import _make_session
 
 AUDIENCE = {"orangecase.audience": "agent"}
-SHAPES = ["span_event", "span", "log_event", "both"]
+SHAPES = ["span_event", "span", "log_event"]
 
 
 class _Sdk:
@@ -191,7 +191,7 @@ async def test_a_game_never_built_sends_no_agent_record(sdk):
     assert sdk.records() == []
 
 
-# --- the moments: a marked copy in the span shapes only -----------------------------------
+# --- the moments: never copied to the agent ----------------------------------------------
 
 
 def _ffa(sdk, shape, agent_log_events):
@@ -211,47 +211,21 @@ async def _warn(game, serial="p0"):
     await game._warn_player(serial, warn + 0.1, warn)
 
 
-def _moment(sdk, span, name, shape):
-    """The moment's attributes and time as its own record in ``shape`` carries them."""
-    if shape == "span":
-        (moment,) = [s for s in sdk.spans.get_finished_spans() if s.name == f"game.{name}"]
-        return dict(moment.attributes), moment.start_time
-    (event,) = [e for e in span.events if e.name == name]
-    return dict(event.attributes), event.timestamp
-
-
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", br=["BR-012"])
-@pytest.mark.uc("UC-041", flow="A8", steps=[3])
-@pytest.mark.parametrize("shape", ["span_event", "span"])
-async def test_span_shapes_send_a_marked_log_copy_of_the_warning_and_the_death(sdk, shape):
-    game = _ffa(sdk, shape, agent_log_events=True)
-    span = game.players["p0"].span
-
-    await _warn(game)
-    assert await game._kill_player("p0", 3.0) is True
-
-    for name in ("death_warning", "player_death"):
-        (copy,) = sdk.records(name)
-        expected, moment_time = _moment(sdk, span, name, shape)
-        assert dict(copy.attributes) == {**expected, **AUDIENCE}
-        assert copy.attributes["moment.id"] == expected["moment.id"]
-        assert copy.timestamp == moment_time
-        assert (copy.trace_id, copy.span_id) == (span.get_span_context().trace_id, span.get_span_context().span_id)
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-100", br=["BR-012"])
-@pytest.mark.parametrize("shape", ["log_event", "both"])
-async def test_log_shapes_send_no_copy(sdk, shape):
+@pytest.mark.uc("UC-041", br=["BR-009"])
+@pytest.mark.parametrize("shape", SHAPES)
+async def test_no_moment_is_copied_to_the_agent(sdk, shape):
+    """Flag on: the warning and the death go out only in the game's shape, never marked."""
     game = _ffa(sdk, shape, agent_log_events=True)
 
     await _warn(game)
     assert await game._kill_player("p0", 3.0) is True
 
     for name in ("death_warning", "player_death"):
-        (record,) = sdk.records(name)
-        assert "orangecase.audience" not in record.attributes
+        records = sdk.records(name)
+        assert len(records) == (1 if shape == "log_event" else 0)
+        assert all("orangecase.audience" not in r.attributes for r in records)
 
 
 @pytest.mark.asyncio
