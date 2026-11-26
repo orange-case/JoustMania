@@ -543,8 +543,9 @@ class SlowFirstGlide(RestartingAudio):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("clock")
 @pytest.mark.uc("UC-031", flow="A7", steps=[2], br=["BR-009"])
-async def test_a_glide_refused_during_the_outage_check_uses_no_refusal_restart(clock):
+async def test_a_glide_refused_during_the_outage_check_uses_no_refusal_restart():
     """The service stays "down" until its check glide answers, so a tick glide refused meanwhile is not capped."""
     audio = SlowFirstGlide()
     game = await started_game(audio, ScriptedProbe(PROBE_RECONNECTED))
