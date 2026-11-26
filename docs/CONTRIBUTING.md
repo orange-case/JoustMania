@@ -158,7 +158,9 @@ See UC-030 A2 and UC-035 A2.
 The `use-case-spec` skill asks for flows without implementation details. JoustMania's use cases
 deliberately name flags, span names and event types in their steps and business rules, because those
 identifiers are the contract the agent, the dashboard and the tests depend on, and naming them keeps
-traceability cheap. Every use case also ends with a "Code / tests" line.
+traceability cheap. Use cases name no code paths, tests or issue numbers (an issue number only on an
+Open or In Progress item): the test tags (`@pytest.mark.uc(...)`, `// UC:`) and `/coverage-check` map a
+use case to its code and tests.
 
 ### Pure refactors and non-behavioural changes
 
