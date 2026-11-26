@@ -114,9 +114,9 @@ KNOB_LADDERS: dict[str, list[str]] = {
 AUTOMATIC_OPTIONS = frozenset(KNOB_LADDERS)
 
 # UC-015 BR-005, UC-016 BR-007: the options whose ladder wraps (past the last option to the first and
-# back), with or without the pad's display. Named one by one, never a default: the agent level and the
-# saved-level ladder stay clamped (a kill switch that wraps from `none` to `full` is unsafe), and so do
-# the sensitivity, the teams, the volume and the toggles.
+# back), with or without the pad's display. Named one by one, never a default: the agent level stays
+# clamped (a level that wraps from `none` to `full` is unsafe), and so do the sensitivity, the teams,
+# the volume and the toggles.
 WRAPPING: frozenset[str] = frozenset({"current_game", "decision.backend", SHIELD_OPTION, GOAL_OPTION})
 
 
