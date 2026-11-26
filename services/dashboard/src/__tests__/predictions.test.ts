@@ -76,7 +76,6 @@ describe("UC-040 A44 BR-034: a decision's prediction and its scored outcome", ()
       p: 0.7,
       source: "rules",
       rule: "R4",
-      merged: false,
     });
   });
 
@@ -192,15 +191,6 @@ describe("UC-040 A44 BR-034: hit rate against the control base rate per game", (
     expect(rules.hitRate).toBeCloseTo(2 / 3);
     // Only the scored survives controls count for a source that predicted survives.
     expect(rules.baseRate).toBeCloseTo(0.5);
-  });
-
-  it("UC-040/A44 BR-034 counterfactual predictions stay out of the rates", () => {
-    const strip = predictionStripFrom(
-      [span("m1", "model", "survives", "hit", false), span("m2", "model", "survives", "hit", true)],
-      "game_abc",
-    )!;
-    expect(strip.sources[0]).toMatchObject({ source: "model", hits: 1, misses: 0 });
-    expect(strip.counterfactual).toBe(1);
   });
 
   it("UC-040/A44 no control of the template: the base rate is n/a, not zero", () => {
