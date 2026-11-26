@@ -444,7 +444,7 @@ The values 6 and 7 of `GameEffect` are reserved.
 
 ### agent
 
-- Environment: see `docker-compose.yml:692-783`. Live gates are flags: `interventions_enabled`, experiment and verdict knobs, the text-backend choice `inference.backend` and its tuning, effect window, promotion timers and the probe demo switch `decision.probe_decisions` ([flags.md §15](flags.md#15-env-to-flag-migration-1788)). Still env: API keys, `AGENT_INFERENCE_BASE_URL` (the key's destination, validated), `AGENT_LLM_MAX_REQUESTS_PER_MINUTE` (a ceiling), and every promotion gate (`AGENT_CODE_IMPROVEMENT_ENABLED`, `AGENT_AUTONOMOUS_ENABLED`, `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES`, `GITHUB_*`), which compose does not pass through (D-A6).
+- Environment: see `docker-compose.yml:692-783`. Live gates are flags: `interventions_enabled`, experiment and verdict knobs, the text-backend choice `inference.backend` and its tuning, effect window and the probe demo switch `decision.probe_decisions` ([flags.md §15](flags.md#15-env-to-flag-migration-1788)). Still env: API keys, `AGENT_INFERENCE_BASE_URL` (the key's destination, validated), `AGENT_LLM_MAX_REQUESTS_PER_MINUTE` (a ceiling), and every promotion setting (`AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES`, `GITHUB_*`), which compose does not pass through (D-A6).
 - Writes: `interventions.json` (action sink), `game.json` (experiment targeting; autonomous real default when enabled). Never `agent.json` (code guard in `experiment/gate.go`; the mount is read-write).
 - Persistent volume `agent-experiments` for the experiment journal and autonomous-revert snapshots.
 - Calibration (UC-047): the agent only journals real games; the fit runs offline (`scripts/agent_archetype_fit.py`) and proposes flag-file changes, so the agent holds no calibrated set and serves no calibration endpoint.
@@ -474,10 +474,8 @@ The values 6 and 7 of `GameEffect` are reserved.
 | `AGENT_EXPERIMENT_PROPOSER_ENABLED` | `false` | yes (empty = closed) | operator ceiling of the proposer gate (C-034): the M7-4 proposer runs only when this is `true` AND the `experiment_proposer_enabled` flag is on |
 | `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` | unset | yes (empty = no ceiling) | operator ceiling (C-034): the concurrent-experiment budget is `min(env, experiment_dynamic_max_concurrent)`, clamped to the shadow capacity; unset, invalid or non-positive = no ceiling |
 | `AGENT_EXPERIMENT_MAX_GAMES` | unset | no | operator ceiling (C-034): the per-experiment games budget is `min(env, experiment_max_games)`, 0 or less = no limit on either side; unset, 0 or invalid = no ceiling |
-| `AGENT_EXPERIMENT_DIR` | `/var/lib/joustmania/agent/experiments` | no (volume `agent-experiments` mounted there) | experiment journal and autonomous-revert snapshot root |
-| `AGENT_CODE_IMPROVEMENT_ENABLED` | `false` | no | opt-in for the real GitHub client that opens `issue`-mode promotions |
-| `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_API_URL` | unset, unset, `https://api.github.com` | no | where `issue`-mode promotions open issues (`owner/repo`); misconfiguration, or a `GITHUB_API_URL` that is not key-safe (C-016: https, or http to loopback), falls back to an inert no-op |
-| `AGENT_AUTONOMOUS_ENABLED` | `false` | no | opt-in for the autonomous real-default path (needs `AGENT_CODE_IMPROVEMENT_ENABLED`) |
+| `AGENT_EXPERIMENT_DIR` | `/var/lib/joustmania/agent/experiments` | no (volume `agent-experiments` mounted there) | experiment journal root |
+| `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_API_URL` | unset, unset, `https://api.github.com` | no | where `issue`-mode promotions open issues (`owner/repo`); the real GitHub client is built only when the token and the repository are set (no separate opt-in); misconfiguration, or a `GITHUB_API_URL` that is not key-safe (C-016: https, or http to loopback), falls back to an inert no-op |
 | `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` | unset | no | operator ceiling (UC-043 A23, FR-152 g, C-034): comma list of `objective@release` entries (`balanced@0.14.0`) attesting the objectives whose shadow substrate meets the validity bar; an entry counts only when its release equals `SERVICE_VERSION` and that is `X.Y.Z`; an autonomous promotion of any other objective is a recorded no-op `substrate_not_validated`; unset = none (closed) |
 
 ### connect-proxy

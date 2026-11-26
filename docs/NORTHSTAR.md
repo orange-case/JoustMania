@@ -80,10 +80,13 @@ engine is the offline floor.
 
 - **Promotion** flips the real default flag only in the gated `autonomous`
   mode. By default (`code_improvement.mode`: `issue`) a human
-  reviews the promotion as a GitHub issue, once `AGENT_CODE_IMPROVEMENT_ENABLED` / `GITHUB_*` are
-  set (D-A6); the stock stack only records them.
-- **Live rollback** exists in gated form: autonomous promotion watches real
-  games and reverts on degradation.
+  reviews the promotion as a GitHub issue, once `GITHUB_*` are
+  set (D-A6); the stock stack only records them. `autonomous` needs at
+  least one objective attested in `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES`.
+- **No automatic rollback.** Automatic rollback on real-game fitness is a
+  future platform goal. Today people watch every game: a person reverts a
+  bad promotion through the pad, the flag service or Flagsmith, and
+  switching `enabled` off reverts every promotion at once.
 - **Decision backends** are selected by the `decision.backend` flag (epic #1225):
   `rules` by default, `claude` / `jev` called directly, rules on any
   failure. The post-game retro and the experiment proposer call Claude directly

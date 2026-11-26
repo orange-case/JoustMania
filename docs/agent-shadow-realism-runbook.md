@@ -15,7 +15,9 @@ Together they are the evidence for the **validity bar** (UC-043 A23, FR-203). Un
 meets the bar it is human-review-only: its verdicts may open an issue but never change a real
 default autonomously. The agent enforces it (#2541): an autonomous promotion is made only for an
 objective the operator attested (section 3). Autonomous promotion is off on every stack today
-(`AGENT_AUTONOMOUS_ENABLED` is unset).
+(`AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` is unset, and that list is its only env ceiling). The agent
+never reverts a promotion on its own: a person reverts it (the pad, the flag service, Flagsmith) or
+switches `enabled` off; automatic rollback is a future platform goal (FR-065).
 
 ## 1. Realism characterization
 
@@ -153,7 +155,7 @@ above 0). This three-value run is the smoke test before that study.
 
 **Safety.** The real-side values are ordinary host settings. The shadow side runs only with the
 agent's experiment gates on (`enabled`, `experiments_enabled`). Leave
-`AGENT_AUTONOMOUS_ENABLED` unset, so a promote verdict never changes a real default (UC-043 A4).
+`AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` unset, so a promote verdict never changes a real default (UC-043 A4).
 
 ## 3. Attesting an objective (UC-043 A23, #2541)
 
@@ -175,8 +177,8 @@ mounts source over the release image) or an agent recreated alone under another 
 that proxy: do not attest there. Changing `experiment.mock_archetypes` by a stack overlay (for
 example `talk-stage.sh`) leaves the attestation standing; removing it is then your job.
 
-**Attest.** Add the entry to the agent's `environment:` in the compose overlay that already
-supplies `AGENT_AUTONOMOUS_ENABLED` (never the stock compose file, D-A6), then recreate the agent
+**Attest.** Add the entry to the agent's `environment:` in a compose overlay
+(never the stock compose file, D-A6), then recreate the agent
 with that overlay. A bare shell assignment does nothing: compose does not pass the variable through.
 
 ```yaml
@@ -184,7 +186,6 @@ with that overlay. A bare shell assignment does nothing: compose does not pass t
 services:
   agent:
     environment:
-      - AGENT_AUTONOMOUS_ENABLED=true
       - AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES=balanced@0.14.0   # comma list: balanced@0.14.0,endurance@0.14.0
 ```
 
