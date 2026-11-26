@@ -325,11 +325,11 @@ func (l *Loop) buildDecideRequest(c gamecontext.GameContext, allowed []string, w
 func (l *Loop) buildDecideRequestCtx(ctx context.Context, c gamecontext.GameContext, allowed []string, withContext bool) decide.Request {
 	charged, noShield := l.ShieldSerials(c)
 	return decideRequestWith(c, allowed, withContext, decide.Annotations{
-		Charged:        charged,
-		NoShield:       noShield,
-		Levels:         l.AppliedValues(),
-		Cooling:        l.CoolingLevers(),
-		Bounds:         l.magnitudeBoundsFor(ctx, c.SessionID),
+		Charged:  charged,
+		NoShield: noShield,
+		Levels:   l.AppliedValues(),
+		Cooling:  l.CoolingLevers(),
+		Bounds:   l.magnitudeBoundsFor(ctx, c.SessionID),
 	})
 }
 
@@ -345,11 +345,11 @@ func (l *Loop) rulesRequestBuilder(c gamecontext.GameContext, allowed []string) 
 func (l *Loop) rulesRequestBuilderCtx(ctx context.Context, c gamecontext.GameContext, allowed []string) func(charged, noShield map[string]bool) decide.Request {
 	return func(charged, noShield map[string]bool) decide.Request {
 		return decideRequestWith(c, allowed, true, decide.Annotations{
-			Charged:        charged,
-			NoShield:       noShield,
-			Levels:         l.AppliedValues(),
-			Cooling:        l.CoolingLevers(),
-			Bounds:         l.magnitudeBoundsFor(ctx, c.SessionID),
+			Charged:  charged,
+			NoShield: noShield,
+			Levels:   l.AppliedValues(),
+			Cooling:  l.CoolingLevers(),
+			Bounds:   l.magnitudeBoundsFor(ctx, c.SessionID),
 		})
 	}
 }

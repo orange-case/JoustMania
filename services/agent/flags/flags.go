@@ -750,7 +750,7 @@ type Flags struct {
 	// gameAttrs returns a game's kind, experiment id and arm as the agent has seen
 	// them (main.go wires the Multiplexer); nil means a real game (#2096).
 	gameAttrs func(gameID string) GameAttrs
-	log *slog.Logger
+	log       *slog.Logger
 	// goalWarn logs the first invalid goal.profile value once; goalInvalid counts
 	// every invalid read (agent_goal_profile_invalid_total), created on first use
 	// unless SetGoalMeterProvider set it (#2479).

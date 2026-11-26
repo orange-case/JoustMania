@@ -248,3 +248,29 @@ func (s *blockingSink) Apply(ctx context.Context, d Decision) error {
 	}
 	return s.capturingSink.Apply(ctx, d)
 }
+
+// UC: UC-040 A31
+func TestShieldGate_RemoteAnswerForAChargedPlayer(t *testing.T) {
+	t.Run("UC-040/A31 a remote answer landing for a charged player is blocked already_charged", func(t *testing.T) {
+		be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.95, "A", 0.5, "x"))
+		h := newRemoteHarness(t, remoteSnapshot(time.Second), be)
+		c := withGate(remoteContext(), "A", gamecontext.ShieldGate{Charged: true})
+		h.provider.set(remoteGameID, c)
+
+		_ = h.loop.OnEvaluate(context.Background(), c, testTrigger())
+		h.loop.AwaitInflight()
+		ds := spansByName(h.sr.Ended(), SpanDecide)
+		if len(ds) != 1 {
+			t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
+		}
+		if v, ok := attrValue(ds[0], AttrDecideBlocked); !ok || !v.AsBool() {
+			t.Fatal("decide.blocked must be true")
+		}
+		if g := strAttr(t, ds[0], AttrDecideBlockReason); g != string(ReasonAlreadyCharged) {
+			t.Fatalf("decide.block_reason = %q, want already_charged", g)
+		}
+		if n := len(h.sink.decisions()); n != 0 {
+			t.Fatalf("writes = %d, want 0", n)
+		}
+	})
+}
