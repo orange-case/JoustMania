@@ -315,6 +315,7 @@ class TestReadyHandler:
         manager.led = create_autospec(LedController, instance=True)
         manager.current_game_mode = Games.JoustFFA
         manager.all_ready.return_value = False
+        manager.below_mode_minimum.return_value = False
         manager.get_ready_count.return_value = 1
         manager.get_connected_count.return_value = 2
         return manager

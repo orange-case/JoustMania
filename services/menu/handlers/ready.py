@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from lib.types import Sound
 from services.menu.handlers.base import ButtonDebouncer, ControllerState
 
 if TYPE_CHECKING:
@@ -93,14 +94,28 @@ class ReadyHandler:
             f"({self._state_manager.get_ready_count()}/{self._state_manager.get_connected_count()})"
         )
 
-        # Check if all ready - auto start with feedback delay
-        if self._state_manager.all_ready() and not self._game_start_in_progress:
-            self._game_start_in_progress = True
+        await self.try_auto_start(serial)
+
+    async def try_auto_start(self, serial: str, *, feedback_delay: bool = True) -> None:
+        """UC-010 step 4: start when every connected controller is ready and the mode's minimum is met.
+
+        Everyone ready below the minimum announces it and keeps the players READY (A14): un-readying
+        them made the players ready up again into the same refusal.
+        """
+        manager = self._state_manager
+        if manager is None or self._game_start_in_progress or not manager.all_ready():
+            return
+        if manager.below_mode_minimum():
+            logger.info(f"All {manager.get_ready_count()} ready, below the minimum of {manager.current_game_mode.name}")
+            await manager.audio.play_voice(Sound.MENU_VOX_NOT_ENOUGH_PLAYERS)
+            return
+        self._game_start_in_progress = True
+        if feedback_delay:
             logger.info("All controllers ready - showing feedback before game start")
             # Brief delay so last player sees their LED go bright
             await asyncio.sleep(0.3)
-            logger.info("Starting game after feedback delay")
-            await self._start_game_callback(serial)
+        logger.info(f"Starting game (ready start from {serial})")
+        await self._start_game_callback(serial)
 
     async def on_exit(self, serial: str) -> None:
         """
@@ -127,11 +142,8 @@ class ReadyHandler:
         if self._state_manager is None:
             return
 
-        # Check if all ready and no start already in progress
         if self._state_manager.all_ready() and not self._game_start_in_progress:
-            self._game_start_in_progress = True
-            logger.info(f"All ready, starting game via trigger from {serial}")
-            await self._start_game_callback(serial)
+            await self.try_auto_start(serial, feedback_delay=False)
         elif self._game_start_in_progress:
             logger.debug(f"Trigger press from {serial} ignored - game start already in progress")
         else:

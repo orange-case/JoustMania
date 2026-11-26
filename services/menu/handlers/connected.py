@@ -130,6 +130,11 @@ class ConnectedHandler:
         if self._state_manager is None:
             return
 
+        # UC-010 BR-017: never switch the mode under players who readied for it.
+        if self._state_manager.ready_controllers:
+            logger.info(f"Controller {serial} select ignored: a controller is ready")
+            return
+
         # One step up the pad's mode wheel, through the single selection path with the same feedback.
         next_mode = get_next_game_mode(self._state_manager.current_game_mode, forward=True)
         await self._state_manager.select_game_mode(next_mode, source="controller", serial=serial, announce=True)

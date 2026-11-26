@@ -719,13 +719,12 @@ class TestMenuServicerReadyUpStart:
     async def test_second_trigger_starts_once(self, real_servicer):
         """UC-010 A4: with everyone ready, a trigger press starts the game; the latch stops a second start.
 
-        All-ready is reached without an on_enter (the last un-ready controller
-        disconnects), so the trigger path is what starts the game.
+        All-ready is set without an on_enter, so the trigger path is what starts the game.
         """
         real_servicer.state = menu_pb2.MenuState.RUNNING
-        await _connect(real_servicer, "s1", "s2", "s3")
-        await _ready_up(real_servicer, "s1", "s2")
-        await real_servicer.on_disconnect("s3")
+        await _connect(real_servicer, "s1", "s2")
+        for serial in ("s1", "s2"):
+            real_servicer.state_manager.controller_states[serial] = ControllerState.READY
         assert real_servicer.state_manager.all_ready()
         assert real_servicer._game_lifecycle_task is None
 
@@ -926,45 +925,39 @@ class TestModeMinimumPlayers:
     """UC-010 BR-001 / UC-014 BR-002: no start below the selected mode's minimum, on every start path."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-010", flow="A3", steps=[1, 2], br=["BR-001"])
+    @pytest.mark.uc("UC-010", flow="A14", steps=[1, 3], br=["BR-001"])
     @pytest.mark.uc("UC-021", cond=["Pre-1"])
     @pytest.mark.uc("UC-022", cond=["Pre-1"])
     @pytest.mark.uc("UC-023", cond=["Pre-1"])
     @pytest.mark.uc("UC-024", cond=["Pre-1"])
     @pytest.mark.uc("UC-025", cond=["Pre-1"])
     @pytest.mark.parametrize(("mode", "minimum"), [m for m in _MODE_MINIMUMS if m[1] > 2], ids=lambda v: str(v))
-    async def test_everyone_ready_below_minimum_is_cancelled_then_starts_at_minimum(self, real_servicer, mode, minimum):
-        """Everyone ready but one short of the mode's minimum: no coordinator start, game_start_cancelled
-        names the shortfall, "not enough players" is announced, everyone is un-readied (dim lobby LED).
-        With one more player the same lobby starts the mode."""
+    async def test_everyone_ready_below_minimum_keeps_ready_then_starts_at_minimum(self, real_servicer, mode, minimum):
+        """Everyone ready but one short of the mode's minimum: no start is scheduled, "not enough players" is
+        announced, and everyone stays READY (no start / cancel / ready loop). One more player starts the mode."""
         from lib.types import Sound
 
         real_servicer.state = menu_pb2.MenuState.RUNNING
         _select(real_servicer, mode)
         short = [f"s{i}" for i in range(1, minimum)]
         await _connect(real_servicer, *short)
-        led = real_servicer.state_manager.led
 
-        with patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as stream:
-            await _ready_up(real_servicer, *short)
-            await _await_lifecycle(real_servicer)
+        await _ready_up(real_servicer, *short)
 
-        stream.assert_not_awaited()
-        assert _published(real_servicer)[-1] == _not_enough(mode, minimum - 1, minimum)
+        assert real_servicer._game_lifecycle_task is None
+        assert real_servicer.ready_handler._game_start_in_progress is False
         real_servicer.audio.play_voice.assert_awaited_with(Sound.MENU_VOX_NOT_ENOUGH_PLAYERS)
-        assert real_servicer.state == menu_pb2.MenuState.RUNNING
-        assert set(real_servicer.state_manager.controller_states.values()) == {ControllerState.CONNECTED}
-        led.set_connected_color.assert_any_await("s1", mode.name)
+        assert real_servicer.ready_controllers == set(short)
         assert real_servicer.current_selection == mode
 
         full = [*short, f"s{minimum}"]
         await _connect(real_servicer, full[-1])
-        with patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as second_stream:
-            await _ready_up(real_servicer, *full)
+        with patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as stream:
+            await _ready_up(real_servicer, full[-1])
             await _await_lifecycle(real_servicer)
 
-        assert _started_roster(second_stream) == sorted(full)
-        assert second_stream.await_args.args[2].start_config.game_name == mode.name
+        assert _started_roster(stream) == sorted(full)
+        assert stream.await_args.args[2].start_config.game_name == mode.name
         assert real_servicer.state == menu_pb2.MenuState.GAME_STARTING
 
     @pytest.mark.asyncio
@@ -1029,6 +1022,162 @@ class TestModeMinimumPlayers:
 
         assert _started_roster(second_stream) == ["host", "s2", "s3", "s4"]
         assert second_stream.await_args.args[2].start_config.game_name == Games.Traitor.name
+
+
+class TestLobbyReadinessChanges:
+    """UC-010 A14 / A15 / BR-017: the lobby re-checks readiness on every change and never loops."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A15", steps=[1])
+    async def test_last_unready_player_disconnecting_starts_the_ready_players(self, real_servicer):
+        """Everyone ready but one; that one leaves: the remaining ready players start at once."""
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        await _connect(real_servicer, "s1", "s2", "s3")
+        await _ready_up(real_servicer, "s1", "s2")
+        assert real_servicer._game_lifecycle_task is None
+
+        with patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as stream:
+            await real_servicer.on_disconnect("s3")
+            await _await_lifecycle(real_servicer)
+
+        assert _started_roster(stream) == ["s1", "s2"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A15", steps=[1], br=["BR-001"])
+    async def test_disconnect_leaving_everyone_ready_below_minimum_announces(self, real_servicer):
+        """Zombies, three ready and one not: the fourth leaves, nothing starts, the cue plays, all stay READY."""
+        from lib.types import Sound
+
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        _select(real_servicer, Games.Zombies)
+        await _connect(real_servicer, "s1", "s2", "s3", "s4")
+        await _ready_up(real_servicer, "s1", "s2", "s3")
+        real_servicer.audio.play_voice.reset_mock()
+
+        await real_servicer.on_disconnect("s4")
+
+        assert real_servicer._game_lifecycle_task is None
+        real_servicer.audio.play_voice.assert_awaited_once_with(Sound.MENU_VOX_NOT_ENOUGH_PLAYERS)
+        assert real_servicer.ready_controllers == {"s1", "s2", "s3"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A15", steps=[1], br=["BR-014"])
+    async def test_disconnect_on_a_stopped_menu_starts_nothing(self, real_servicer):
+        """BR-014: a disconnect that leaves everyone ready on a STOPPED menu does not start."""
+        await _connect(real_servicer, "s1", "s2", "s3")
+        for serial in ("s1", "s2"):
+            real_servicer.state_manager.controller_states[serial] = ControllerState.READY
+        assert real_servicer.state == menu_pb2.MenuState.STOPPED
+
+        with patch.object(real_servicer.ready_handler, "try_auto_start", autospec=True) as auto_start:
+            await real_servicer.on_disconnect("s3")
+
+        auto_start.assert_not_called()
+        assert real_servicer._game_lifecycle_task is None
+        real_servicer.event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A14", steps=[2], br=["BR-001"])
+    async def test_trigger_below_minimum_announces_again_and_starts_nothing(self, real_servicer):
+        """A READY trigger while everyone is ready below the minimum repeats the cue; no start."""
+        from lib.types import Sound
+
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        _select(real_servicer, Games.Traitor)
+        await _connect(real_servicer, "s1", "s2", "s3")
+        await _ready_up(real_servicer, "s1", "s2", "s3")
+        real_servicer.audio.play_voice.reset_mock()
+
+        await real_servicer.on_button("s1", "trigger", True, event_time=100.0)
+
+        real_servicer.audio.play_voice.assert_awaited_once_with(Sound.MENU_VOX_NOT_ENOUGH_PLAYERS)
+        assert real_servicer._game_lifecycle_task is None
+        assert real_servicer.ready_controllers == {"s1", "s2", "s3"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A15", steps=[3], br=["BR-001"])
+    async def test_ready_player_leaving_a_pending_start_below_minimum_cancels_and_keeps_ready(self, real_servicer):
+        """Teams, three ready: the start is pending when one READY player leaves. The start is cancelled with
+        game_start_cancelled and the cue; the other two stay READY and the latch is clear."""
+        from lib.types import Sound
+
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        _select(real_servicer, Games.JoustTeams)
+        await _connect(real_servicer, "s1", "s2", "s3")
+        await _ready_up(real_servicer, "s1", "s2", "s3")
+        assert real_servicer._lifecycle_live()
+
+        with patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as stream:
+            await real_servicer.on_disconnect("s3")
+            await _await_lifecycle(real_servicer)
+
+        stream.assert_not_awaited()
+        assert _published(real_servicer)[-1] == _not_enough(Games.JoustTeams, 2, 3)
+        real_servicer.audio.play_voice.assert_awaited_with(Sound.MENU_VOX_NOT_ENOUGH_PLAYERS)
+        assert real_servicer.ready_controllers == {"s1", "s2"}
+        assert real_servicer.ready_handler._game_start_in_progress is False
+        assert real_servicer.state == menu_pb2.MenuState.RUNNING
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A15", steps=[2])
+    async def test_newcomer_during_a_pending_start_drops_it_then_starts_with_everyone(self, real_servicer):
+        """A controller that connects while the start is pending drops it silently; once it readies, the
+        game starts with all three."""
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        await _connect(real_servicer, "s1", "s2")
+        await _ready_up(real_servicer, "s1", "s2")
+        await _connect(real_servicer, "s3")
+
+        with patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as stream:
+            await _await_lifecycle(real_servicer)
+            stream.assert_not_awaited()
+            assert _published(real_servicer) == []
+            assert real_servicer.ready_handler._game_start_in_progress is False
+
+            await _ready_up(real_servicer, "s3")
+            await _await_lifecycle(real_servicer)
+
+        assert _started_roster(stream) == ["s1", "s2", "s3"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A15", steps=[2])
+    @pytest.mark.uc("UC-010", flow="A1")
+    async def test_unready_during_a_pending_start_drops_it(self, real_servicer):
+        """A Move press during the pending start un-readies the player; the start does not go on without them."""
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        await _connect(real_servicer, "s1", "s2", "s3")
+        await _ready_up(real_servicer, "s1", "s2", "s3")
+
+        with patch.object(type(real_servicer), "_run_game_event_stream", autospec=True) as stream:
+            await real_servicer.on_button("s3", "move", True)
+            await _await_lifecycle(real_servicer)
+
+        stream.assert_not_awaited()
+        assert real_servicer.ready_controllers == {"s1", "s2"}
+        assert real_servicer.ready_handler._game_start_in_progress is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", br=["BR-017", "BR-005"])
+    @pytest.mark.uc("UC-011", flow="A2")
+    async def test_select_is_ignored_while_anyone_is_ready(self, real_servicer):
+        """A CONNECTED newcomer's SELECT does not change or persist the mode under a READY player."""
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        _select(real_servicer, Games.JoustFFA)
+        await _connect(real_servicer, "s1", "s2", "s3")
+        await _ready_up(real_servicer, "s1")
+        real_servicer.audio.play_game_mode_voice.reset_mock()
+
+        await real_servicer.on_button("s3", "select", True)
+
+        assert real_servicer.current_selection == Games.JoustFFA
+        assert real_servicer.state_manager.current_game_mode == Games.JoustFFA
+        assert "selection_changed" not in [event for event, _ in _published(real_servicer)]
+        real_servicer.audio.play_game_mode_voice.assert_not_awaited()
+
+        await real_servicer.on_button("s1", "move", True)
+        await real_servicer.on_button("s3", "select", True, event_time=200.0)
+
+        assert real_servicer.current_selection != Games.JoustFFA
 
 
 class TestStartWhileGameActive:
@@ -1303,6 +1452,39 @@ class TestStartWhileGameActive:
             await real_servicer.start_game("s1", source="web", controllers=["s1", "s2"])
             await _await_lifecycle(real_servicer)
         second.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
+    @pytest.mark.uc("UC-010", flow="A15", steps=[1])
+    async def test_no_start_between_the_recovery_cancel_and_its_restore(self, real_servicer):
+        """While reset_menu's recovery publishes game_start_cancelled, no lifecycle is live; a start or a
+        disconnect re-check then must not schedule a game next to the lobby restore."""
+        from proto import game_coordinator_pb2
+
+        task, _stream = await self._live_game(real_servicer, asyncio.Event())
+        self._game_state(real_servicer, game_coordinator_pb2.GameState.ENDED)
+        real_servicer.state = menu_pb2.MenuState.RUNNING
+        for serial in ("r1", "r2", "r3"):
+            real_servicer.state_manager.controller_states[serial] = ControllerState.READY
+        real_servicer.state_manager.controller_states["leaver"] = ControllerState.CONNECTED
+        in_window: dict[str, object] = {}
+
+        async def publish(event, data):
+            if event == "game_start_cancelled" and data == {} and not in_window:
+                assert not real_servicer._lifecycle_live()
+                with patch.object(real_servicer.ready_handler, "try_auto_start", autospec=True) as auto_start:
+                    await real_servicer.on_disconnect("leaver")
+                in_window["auto_start_called"] = auto_start.called
+                in_window["start"] = await real_servicer.start_game("r1", source="web", controllers=["r1", "r2"])
+                in_window["task"] = real_servicer._game_lifecycle_task
+
+        real_servicer.event_publisher.publish.side_effect = publish
+        with patch.object(type(real_servicer), "_restart_lobby", autospec=True):
+            await real_servicer.ProcessInput(menu_pb2.ProcessInputRequest(input_type="reset_menu"), MagicMock())
+
+        assert task.cancelled()
+        assert in_window == {"auto_start_called": False, "start": False, "task": task}
+        assert real_servicer._game_lifecycle_task is None
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
