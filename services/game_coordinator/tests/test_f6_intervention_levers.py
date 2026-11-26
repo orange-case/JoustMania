@@ -314,7 +314,7 @@ class _AgentStub:
 
     def get_string_value(self, key, default, _ctx=None):
         if key == "enabled":
-            return "on"
+            return "act"
         # interventions_allowed is a STRING flag: comma-separated ids (#1127).
         # Call sites still pass a list; join it here to match the flag format.
         if key == "interventions_allowed":

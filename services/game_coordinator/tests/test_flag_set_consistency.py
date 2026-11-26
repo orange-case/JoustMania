@@ -97,7 +97,7 @@ class AgentStore(_Store):
 
     def get_string_value(self, key, default, _ctx=None):
         if key == "enabled":
-            return "on"
+            return "act"
         return self.allowed if key == "interventions_allowed" else default
 
     def get_integer_value(self, key, default, _ctx=None):

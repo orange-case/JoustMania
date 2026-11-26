@@ -83,7 +83,7 @@ class AgentStub:
 
     def get_string_value(self, key, default, _ctx=None):
         if key == "enabled":
-            return "on"
+            return "act"
         return ",".join(sorted(ALL_TYPES)) if key == "interventions_allowed" else default
 
     def get_object_value(self, key, default, _ctx=None):

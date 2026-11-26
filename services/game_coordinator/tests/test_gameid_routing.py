@@ -108,7 +108,7 @@ class AgentStub:
 
     def get_string_value(self, key, default, _ctx=None):
         if key == "enabled":
-            return "on"
+            return "act"
         # interventions_allowed is a STRING flag: comma-separated ids (#1127).
         if key == "interventions_allowed":
             return ",".join(sorted(ALL_TYPES))
