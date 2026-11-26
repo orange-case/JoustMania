@@ -113,6 +113,7 @@ controller_input_lag_seconds = Histogram(
     "Age of the controller sample when sent on the gameplay stream (CM poll pick-up to gRPC send)",
     ["serial"],
     buckets=[0.001, 0.005, 0.010, 0.016, 0.020, 0.030, 0.050, 0.100, 0.200, 0.500, 1.0],
+    unit="s",
 )
 
 # Stream metrics
@@ -126,9 +127,11 @@ button_events_total = Counter(
 
 
 # System metrics
-process_cpu_seconds_total = Counter("process_cpu_seconds_total", "Total user and system CPU time spent in seconds")
+process_cpu_seconds_total = Counter(
+    "process_cpu_seconds_total", "Total user and system CPU time spent in seconds", unit="s"
+)
 
-process_resident_memory_bytes = Gauge("process_resident_memory_bytes", "Resident memory size in bytes")
+process_resident_memory_bytes = Gauge("process_resident_memory_bytes", "Resident memory size in bytes", unit="By")
 
 process_threads = Gauge("process_threads", "Number of active threads")
 
@@ -139,6 +142,7 @@ poll_loop_lateness_seconds = Histogram(
     "controller_poll_loop_lateness_seconds",
     "How late each controller-manager poll started after its scheduled time",
     buckets=[0.0005, 0.001, 0.002, 0.005, 0.010, 0.020, 0.050, 0.100, 0.250],
+    unit="s",
 )
 
 # Fixed interval polling metrics
@@ -158,6 +162,7 @@ controller_accel_magnitude = Gauge(
     "controller_accel_magnitude",
     "Controller acceleration magnitude in g (100Hz)",
     ["serial"],
+    unit="{g}",
 )
 
 # Stream timing metrics (jitter optimization)
@@ -187,11 +192,13 @@ controller_bluetooth_report_gap_p95_seconds = Gauge(
     "controller_bluetooth_report_gap_p95_seconds",
     "p95 gap between fresh frames per controller over a rolling 10 s window (seconds)",
     ["serial"],
+    unit="s",
 )
 controller_bluetooth_report_gap_max_seconds = Gauge(
     "controller_bluetooth_report_gap_max_seconds",
     "Longest gap between fresh frames per controller over a rolling 10 s window, open gap included (seconds)",
     ["serial"],
+    unit="s",
 )
 controller_connection_quality = Gauge(
     "controller_connection_quality",

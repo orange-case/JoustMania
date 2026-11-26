@@ -10,6 +10,12 @@ Usage:
     # Define metrics at module level (before init_metrics)
     gauge = Gauge("metric_name", "description", ["serial"])
     counter = Counter("events_total", "description", ["type"])
+    latency = Histogram("op_duration_seconds", "description", unit="s")
+
+    # unit is UCUM. prometheus_remote_write appends the unit's suffix unless the
+    # name already ends in it ("s" -> _seconds, "By" -> _bytes) and adds _ratio
+    # to a gauge with unit "1"; a {annotation} unit adds nothing. Dashboards
+    # query the stored names, so a unit must never change them.
 
     # Initialize in server startup (service identity from env vars)
     init_metrics(export_interval_ms=100)
@@ -251,7 +257,9 @@ class Gauge(LabeledMetric):
         name: str,
         documentation: str,
         labelnames: Sequence[str] | None = None,
+        unit: str = "",
     ):
+        self.unit = unit
         # Store current values for callback-based reporting
         self._values: dict[frozenset, float] = {}
         self._gauge = None
@@ -265,6 +273,7 @@ class Gauge(LabeledMetric):
         self._gauge = meter.create_observable_gauge(
             name=self.name,
             description=self.documentation,
+            unit=self.unit,
             callbacks=[self._observe],
         )
         self._instrument_initialized = True
@@ -370,7 +379,9 @@ class Counter(LabeledMetric):
         name: str,
         documentation: str,
         labelnames: Sequence[str] | None = None,
+        unit: str = "",
     ):
+        self.unit = unit
         self._counter = None
         super().__init__(name, documentation, labelnames)
 
@@ -382,6 +393,7 @@ class Counter(LabeledMetric):
         self._counter = meter.create_counter(
             name=self.name,
             description=self.documentation,
+            unit=self.unit,
         )
         self._instrument_initialized = True
 
@@ -440,7 +452,9 @@ class Histogram(LabeledMetric):
         documentation: str,
         labelnames: Sequence[str] | None = None,
         buckets: Sequence[float] | None = None,
+        unit: str = "",
     ):
+        self.unit = unit
         self.buckets = list(buckets) if buckets else [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
         self._histogram = None
         super().__init__(name, documentation, labelnames)
@@ -454,6 +468,7 @@ class Histogram(LabeledMetric):
         self._histogram = meter.create_histogram(
             name=self.name,
             description=self.documentation,
+            unit=self.unit,
             explicit_bucket_boundaries_advisory=self.buckets,
         )
         self._instrument_initialized = True

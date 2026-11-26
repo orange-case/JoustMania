@@ -48,6 +48,7 @@ game_duration_seconds = Gauge(
     "game_duration_seconds",
     "Duration of current game in seconds",
     ["game_kind", "game_id", "experiment_id", "arm"],
+    unit="s",
 )
 
 games_started_total = Counter(
@@ -134,11 +135,13 @@ player_shield_energy_seconds = Gauge(
     "game_player_shield_energy_seconds",
     "Hold-mode shield energy of a player (seconds)",
     ["serial", "game_id"],
+    unit="s",
 )
 player_shield_budget_remaining_seconds = Gauge(
     "game_player_shield_budget_remaining_seconds",
     "Hold-mode shield budget a player has left in this game (seconds)",
     ["serial", "game_id"],
+    unit="s",
 )
 player_shield_active = Gauge(
     "game_player_shield_active",
@@ -190,9 +193,11 @@ def clear_player_shield_gauges(serial: str, game_id: str) -> None:
 
 
 # System metrics
-process_cpu_seconds_total = Counter("process_cpu_seconds_total", "Total user and system CPU time spent in seconds")
+process_cpu_seconds_total = Counter(
+    "process_cpu_seconds_total", "Total user and system CPU time spent in seconds", unit="s"
+)
 
-process_resident_memory_bytes = Gauge("process_resident_memory_bytes", "Resident memory size in bytes")
+process_resident_memory_bytes = Gauge("process_resident_memory_bytes", "Resident memory size in bytes", unit="By")
 
 process_threads = Gauge("process_threads", "Number of active threads")
 
@@ -303,6 +308,7 @@ player_accel_magnitude = Gauge(
     "game_player_accel_magnitude",
     "Current acceleration magnitude for player (g-force)",
     ["serial", "game_id"],
+    unit="{g}",
 )
 
 player_movement_zone = Gauge(
@@ -315,6 +321,7 @@ player_peak_accel = Gauge(
     "game_player_peak_accel",
     "Peak acceleration magnitude for player in current game (g-force)",
     ["serial", "game_id"],
+    unit="{g}",
 )
 
 player_playstyle = Gauge(
@@ -337,6 +344,7 @@ player_movement_variance = Gauge(
     "Rolling-window variance of acceleration magnitude (g^2). "
     "Near zero indicates a player gaming the EMA by holding still.",
     ["serial", "game_id"],
+    unit="{g^2}",
 )
 
 player_skill_level = Gauge(
@@ -358,6 +366,7 @@ player_movement_variance_aggregate = Gauge(
     "Whole-game cumulative variance of acceleration magnitude (g^2, Welford). "
     "Retained whole-game aggregate; meaningful at game conclusion (#1024).",
     ["serial", "game_id"],
+    unit="{g^2}",
 )
 
 player_elimination_order = Gauge(
@@ -386,6 +395,7 @@ accel_distribution = Histogram(
     "Distribution of acceleration magnitudes during gameplay",
     ["game_mode"],
     buckets=[0.5, 1.0, 1.1, 1.3, 1.5, 1.8, 2.0, 2.5, 3.0, 4.0, 5.0],
+    unit="{g}",
 )
 
 # Per-game summary metrics (set at end of game)
