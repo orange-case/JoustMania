@@ -84,22 +84,6 @@ func TestBuildState_HoldFields(t *testing.T) {
 			t.Fatal("a grant_shield in a hold game must not mark the player shielded")
 		}
 	})
-	t.Run("UC-048/A9 grants in flight add to the energy, at most the cap", func(t *testing.T) {
-		st := BuildStateWith(withHoldGauges(sampleCtx(), "hold"), Annotations{ShieldInFlight: map[string]float64{"A": 2, "B": 9}})
-		if got := *playerByID(t, st, "A").ShieldEnergyS; got < 4.4-1e-9 || got > 4.4+1e-9 {
-			t.Fatalf("A energy = %v, want 4.4", got)
-		}
-		if got := st.HoldRefusal(playerByID(t, st, "A")); got != "" {
-			t.Fatalf("A refusal = %q, want none at 4.4 of 5", got)
-		}
-		if got := *playerByID(t, st, "B").ShieldEnergyS; got != 5 {
-			t.Fatalf("B energy = %v, want the cap 5", got)
-		}
-		st = BuildStateWith(withHoldGauges(sampleCtx(), "hold"), Annotations{ShieldInFlight: map[string]float64{"A": 2.2}})
-		if got := st.HoldRefusal(playerByID(t, st, "A")); got != HoldRefusalPoolFull {
-			t.Fatalf("A refusal = %q, want shield_pool_full at 4.6 of 5", got)
-		}
-	})
 }
 
 // UC: UC-048 A9 BR-008
@@ -108,22 +92,20 @@ func TestHoldShieldRefusal(t *testing.T) {
 		name                    string
 		energy, budget, cap, mb *float64
 		active                  bool
-		inFlight                float64
 		want                    string
 	}{
-		{"UC-048/A9 room is no refusal", fptr(1), fptr(10), fptr(5), fptr(0.3), false, 0, ""},
-		{"UC-048/A9 within 0.5 s of the cap", fptr(4.5), fptr(10), fptr(5), fptr(0.3), false, 0, HoldRefusalPoolFull},
-		{"UC-048/A9 in flight counts", fptr(2), fptr(10), fptr(5), fptr(0.3), false, 2.5, HoldRefusalPoolFull},
-		{"UC-048/A9 full is min(cap, budget left)", fptr(1.5), fptr(2), fptr(5), fptr(0.3), false, 0, HoldRefusalPoolFull},
-		{"UC-048/A9 budget below the minimum burst", fptr(0), fptr(0.29), fptr(5), fptr(0.3), false, 0, HoldRefusalBudgetExhausted},
-		{"UC-048/A9 active skips the pool check", fptr(5), fptr(10), fptr(5), fptr(0.3), true, 0, ""},
-		{"UC-048/A9 active keeps the budget check", fptr(5), fptr(0.1), fptr(5), fptr(0.3), true, 0, HoldRefusalBudgetExhausted},
-		{"UC-048/A9 no energy fails open for the pool", nil, fptr(10), fptr(5), fptr(0.3), false, 0, ""},
-		{"UC-048/A9 no cap fails open", fptr(5), fptr(10), nil, fptr(0.3), false, 0, ""},
-		{"UC-048/A9 no minimum burst skips the budget check", fptr(0), fptr(0.1), fptr(5), nil, false, 0, HoldRefusalPoolFull},
+		{"UC-048/A9 room is no refusal", fptr(1), fptr(10), fptr(5), fptr(0.3), false, ""},
+		{"UC-048/A9 within 0.5 s of the cap", fptr(4.5), fptr(10), fptr(5), fptr(0.3), false, HoldRefusalPoolFull},
+		{"UC-048/A9 full is min(cap, budget left)", fptr(1.5), fptr(2), fptr(5), fptr(0.3), false, HoldRefusalPoolFull},
+		{"UC-048/A9 budget below the minimum burst", fptr(0), fptr(0.29), fptr(5), fptr(0.3), false, HoldRefusalBudgetExhausted},
+		{"UC-048/A9 active skips the pool check", fptr(5), fptr(10), fptr(5), fptr(0.3), true, ""},
+		{"UC-048/A9 active keeps the budget check", fptr(5), fptr(0.1), fptr(5), fptr(0.3), true, HoldRefusalBudgetExhausted},
+		{"UC-048/A9 no energy fails open for the pool", nil, fptr(10), fptr(5), fptr(0.3), false, ""},
+		{"UC-048/A9 no cap fails open", fptr(5), fptr(10), nil, fptr(0.3), false, ""},
+		{"UC-048/A9 no minimum burst skips the budget check", fptr(0), fptr(0.1), fptr(5), nil, false, HoldRefusalPoolFull},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := HoldShieldRefusal(tc.energy, tc.budget, tc.active, tc.cap, tc.mb, tc.inFlight); got != tc.want {
+			if got := HoldShieldRefusal(tc.energy, tc.budget, tc.active, tc.cap, tc.mb); got != tc.want {
 				t.Fatalf("refusal = %q, want %q", got, tc.want)
 			}
 		})
