@@ -36,9 +36,6 @@ const (
 const (
 	ReasonGameNotLive  = "game_not_live"
 	ReasonNoSyncStream = "no_sync_stream"
-	// ReasonRealGameLive refuses a real write of a hold key while a real game is
-	// registered (409, flags.md §13, UC-043 A17); the promoter defers the write.
-	ReasonRealGameLive = "real_game_live"
 	// ReasonWriterMismatch refuses a compare-and-delete (DELETE ?if_writer=,
 	// 412, #1877) or a guarded write (PUT ?if_writer_in=, 412, #2260): the
 	// overlay belongs to another writer; nothing was cleared or written.
@@ -332,22 +329,6 @@ func (c *Client) Epoch(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return h.Epoch, nil
-}
-
-// Game is one registered game scope (GET /games).
-type Game struct {
-	GameID   string `json:"game_id"`
-	GameKind string `json:"game_kind"`
-}
-
-// ListGames reads the registered game scopes (GET /games): the flag service's
-// authoritative live-game set (UC-043 A17).
-func (c *Client) ListGames(ctx context.Context) ([]Game, error) {
-	var v struct {
-		Games []Game `json:"games"`
-	}
-	err := c.do(ctx, http.MethodGet, "/games", nil, &v)
-	return v.Games, err
 }
 
 // GetFlag reads one flag's effective state with its rendered flagd JSON.

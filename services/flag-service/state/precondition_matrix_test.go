@@ -79,13 +79,12 @@ func TestPreconditionMatrix_Put(t *testing.T) {
 		{name: "game_kind shadow fits no scope", put: withReq(stackPut, func(r *WriteRequest) { r.Scope = Scope{GameKind: "shadow"} }), status: 400, reason: fserr.Malformed},
 		{name: "experiment id without an arm fits no scope", put: withReq(stackPut, func(r *WriteRequest) { r.Scope = Scope{ExperimentID: "e1"} }), status: 400, reason: fserr.Malformed},
 		{name: "scope fit beats a live game", setup: liveReal, put: withReq(guardPut, func(r *WriteRequest) { r.Scope = Scope{GameID: "g-real"} }), status: 400, reason: fserr.Malformed},
-		{name: "ttl on a guarded real write beats the live game", setup: liveReal, put: withReq(guardPut, func(r *WriteRequest) { r.TTLSeconds = ttl(5) }), status: 400, reason: fserr.Malformed},
-		{name: "ttl on a guarded real write", put: withReq(guardPut, func(r *WriteRequest) { r.TTLSeconds = ttl(5) }), status: 400, reason: fserr.Malformed},
+		{name: "ttl on a real write of a hold key is fine", put: withReq(guardPut, func(r *WriteRequest) { r.TTLSeconds = ttl(5) })},
 		{name: "ttl zero", put: withReq(stackPut, func(r *WriteRequest) { r.TTLSeconds = ttl(0) }), status: 400, reason: fserr.Malformed},
 		{name: "ttl negative", put: withReq(stackPut, func(r *WriteRequest) { r.TTLSeconds = ttl(-1) }), status: 400, reason: fserr.Malformed},
 		{name: "ttl on an experiment arm", put: withReq(guardPut, func(r *WriteRequest) { r.Scope = expSc; r.TTLSeconds = ttl(5) }), status: 400, reason: fserr.Malformed},
 		{name: "ttl on a stack write is fine", put: withReq(stackPut, func(r *WriteRequest) { r.TTLSeconds = ttl(5) })},
-		{name: "ttl on an unguarded real write is fine", put: &WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Scope: realSc, TTLSeconds: ttl(5)}},
+		{name: "ttl on another real write is fine", put: &WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Scope: realSc, TTLSeconds: ttl(5)}},
 		{name: "if_writer_in outside real", put: withReq(stackPut, func(r *WriteRequest) { r.IfWriterIn = []string{""} }), status: 400, reason: fserr.Malformed},
 		{name: "if_writer_in too many entries", put: withReq(guardPut, func(r *WriteRequest) { r.IfWriterIn = make([]string, MaxIfWriterIn+1) }), status: 400, reason: fserr.Malformed},
 		{name: "if_writer_in entry too long", put: withReq(guardPut, func(r *WriteRequest) { r.IfWriterIn = []string{longID} }), status: 400, reason: fserr.Malformed},
@@ -99,12 +98,8 @@ func TestPreconditionMatrix_Put(t *testing.T) {
 		{name: "game not live", put: &WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "gx"}}, status: 409, reason: fserr.GameNotLive},
 		{name: "game not live beats an invalid value", put: &WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("99"), Scope: Scope{GameID: "gx"}}, status: 409, reason: fserr.GameNotLive},
 		{name: "serial not in game", setup: func(t *testing.T, f *fixture) { f.register("g1", "c1", "S1") }, put: &WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("5"), Scope: Scope{GameID: "g1", Serial: "S9"}}, status: 422, reason: fserr.SerialNotInGame},
-		{name: "real game live", setup: liveReal, put: &guardPut, status: 409, reason: fserr.RealGameLive},
-		{name: "real game live, dry run", setup: liveReal, put: withReq(guardPut, func(r *WriteRequest) { r.DryRun = true }), status: 409, reason: fserr.RealGameLive},
-		{name: "real game live beats an invalid value", setup: liveReal, put: withReq(guardPut, func(r *WriteRequest) { r.Value = raw("999") }), status: 409, reason: fserr.RealGameLive},
-		{name: "real game live beats if_writer_in", setup: liveReal, put: withReq(guardPut, func(r *WriteRequest) { r.IfWriterIn = []string{"nobody"} }), status: 409, reason: fserr.RealGameLive},
+		{name: "a live real game does not block a real write", setup: liveReal, put: &guardPut},
 		{name: "shadow game does not block", setup: func(t *testing.T, f *fixture) { f.registerKind("g-s", "shadow") }, put: &guardPut},
-		{name: "unregistered kind blocks (fails closed)", setup: func(t *testing.T, f *fixture) { f.registerKind("g-k", "") }, put: &guardPut, status: 409, reason: fserr.RealGameLive},
 		{name: "invalid value", put: withReq(stackPut, func(r *WriteRequest) { r.Variant = "nope" }), status: 422, reason: fserr.OutOfBounds},
 		{name: "value out of range", put: withReq(guardPut, func(r *WriteRequest) { r.Value = raw("999") }), status: 422, reason: fserr.OutOfBounds},
 		{name: "invalid value beats no stream", opts: fixtureOpts{noStream: true}, put: withReq(stackPut, func(r *WriteRequest) { r.Variant = "nope" }), status: 422, reason: fserr.OutOfBounds},
@@ -167,26 +162,15 @@ func TestPreconditionMatrix_Clear(t *testing.T) {
 		{name: "no sync stream beats persist-fit", opts: fixtureOpts{noStream: true}, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, Persist: true}), status: 503, reason: fserr.NoSyncStream},
 		{name: "persist outside the stack scope", clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, Persist: true}), status: 400, reason: fserr.Malformed},
 		{name: "if_writer with persist", clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu", Persist: true}), status: 400, reason: fserr.Malformed},
-		{name: "if_writer with persist beats a live game", setup: liveReal, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu", Persist: true, UnlessRealGame: true}), status: 400, reason: fserr.Malformed},
+		{name: "if_writer with persist, live game", setup: liveReal, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu", Persist: true}), status: 400, reason: fserr.Malformed},
 		{name: "if_writer in scope experiment+arm", clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: expSc, IfWriter: "menu"}), status: 400, reason: fserr.Malformed},
 		{name: "if_writer mismatch on the stack overlay", setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "stage"}), status: 412, reason: fserr.WriterMismatch},
 		{name: "if_writer match on the stack overlay", setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu"}), cleared: 1},
 		{name: "if_writer on the stack with no overlay is an idempotent success", clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams", IfWriter: "menu"})},
-		{name: "guarded revert, real game live", setup: liveReal, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, UnlessRealGame: true}), status: 409, reason: fserr.RealGameLive},
-		{name: "guarded revert beats if_writer mismatch", setup: func(t *testing.T, f *fixture) {
-			f.put(guardPut)
-			liveReal(t, f)
-		}, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, UnlessRealGame: true, IfWriter: "other"}), status: 409, reason: fserr.RealGameLive},
-		{name: "plain clear ignores a live real game (kill switch revert)", setup: func(t *testing.T, f *fixture) {
+		{name: "a revert ignores a live real game", setup: func(t *testing.T, f *fixture) {
 			f.put(guardPut)
 			liveReal(t, f)
 		}, clr: &guardClear, cleared: 1},
-		{name: "guarded revert, no real game", setup: func(t *testing.T, f *fixture) { f.put(guardPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, UnlessRealGame: true}), cleared: 1},
-		{name: "guarded revert of an unguarded flag ignores a live game", setup: liveReal, clr: clearReq(ClearRequest{Set: "game", Flag: "sensitivity", Scope: realSc, UnlessRealGame: true})},
-		{name: "guarded revert in a non-real scope ignores a live real game", setup: func(t *testing.T, f *fixture) {
-			f.put(*withReq(guardPut, func(r *WriteRequest) { r.Scope = expSc }))
-			liveReal(t, f)
-		}, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: expSc, UnlessRealGame: true}), cleared: 1},
 		{name: "if_writer mismatch", setup: func(t *testing.T, f *fixture) { f.put(guardPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, IfWriter: "other"}), status: 412, reason: fserr.WriterMismatch},
 		{name: "if_writer match", setup: func(t *testing.T, f *fixture) { f.put(guardPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, IfWriter: "agent"}), cleared: 1},
 		{name: "if_writer with no overlay is an idempotent success", clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: realSc, IfWriter: "agent"})},
