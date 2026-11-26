@@ -1,4 +1,4 @@
-"""Codes -> gestures -> actions (UC-015 A4, A5): fresh status at every press and release."""
+"""Codes -> gestures -> actions (UC-015 A4, BR-010): fresh status at every press and release."""
 
 import asyncio
 from unittest.mock import create_autospec
@@ -36,7 +36,7 @@ def parts():
     return pad, config, reader, actions, cues
 
 
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-011"], steps=[7])
+@pytest.mark.uc("UC-015", flow="main", br=["BR-010"], steps=[7])
 async def test_k8_reads_a_fresh_status_at_press_and_release_and_passes_both(parts):
     pad, _, reader, actions, _ = parts
     at_press = menu_pb2.GetMenuStatusResponse(lifecycle_generation=2)

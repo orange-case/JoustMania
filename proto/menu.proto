@@ -63,7 +63,7 @@ message ProcessInputRequest {
 message ProcessInputResponse {
   bool success = 1;
   string error = 2;
-  // Operator pad step_setting / set_backend / reset_setting / interventions_switch (services.md §3.1): the value
+  // Operator pad step_setting / set_backend / reset_setting / agent_state (services.md §3.1): the value
   // the menu committed (or a reset put in force), as a variant, mode or backend name ("fast", "automatic",
   // "JoustFFA", "claude", "on"); empty on an error and for every other input. The pad's result screen shows it
   // (UC-016 BR-001).
@@ -91,7 +91,7 @@ message GetMenuStatusResponse {
   reserved "admin_serial";
   bool agent_enabled = 8;           // agent/enabled (the kill switch)
   string agent_level = 9;           // agent/interventions_allowed variant name
-  string agent_saved_level = 10;    // level a resume restores, empty when none saved
+  string agent_saved_level = 10;    // unused since #2800 (no level is saved at a stop), always empty
   string agent_backend = 11;        // agent/decision.backend variant name
   int32 sensitivity = 12;           // game/sensitivity (0-4)
   int32 num_teams = 13;             // game/num_teams
@@ -99,7 +99,7 @@ message GetMenuStatusResponse {
   bool force_all_start = 15;        // game/force_all_start
   string audio_volume_master = 16;  // user/audio_volume.master variant name
   string agent_enabled_state = 17;  // "on", "off" or "unknown" (agent/enabled unresolvable; UC-015 BR-013, #2101)
-  string agent_interventions_enabled_state = 18;  // agent/interventions_enabled (write gate): "on", "off" or "unknown" (UC-015 BR-002, BR-013, #2093)
+  string agent_interventions_enabled_state = 18;  // agent/interventions_enabled (write gate): "on", "off" or "unknown" (UC-016 BR-011, #2093)
   string shield_activation = 19;   // game/shield.activation variant name, empty when unresolvable (UC-015 BR-018, #2215)
   reserved 20;  // was shield_activation_operator (#2218), folded into operator_settings
   // Per setting with an "automatic" rung (sensitivity, num_teams, shield.activation): the operator's persisted
@@ -118,11 +118,11 @@ message GetMenuStatusResponse {
   string agent_operator_brief_variant = 27;
   // Per resettable option without an "automatic" rung (game_instructions, force_all_start, agent_level,
   // decision.backend, and the agent rows of fields 22 to 27 by option name): what a reset_setting would put in
-  // force (a stopped agent's level: save). A missing key = unknown, never "". From the background flag-service
+  // force. A missing key = unknown, never "". From the background flag-service
   // read, never read in the call. UC-016 BR-013, #2747, #2755.
   map<string, string> setting_defaults = 28;
-  // Pad commands and guard keys this menu understands ("reset_setting", "interventions_switch",
-  // "agent_switch.only_if_stopped", "step_setting.from", "set_backend.from", "step_setting:<option>",
+  // Pad commands and guard keys this menu understands ("reset_setting", "agent_state",
+  // "step_setting.from", "set_backend.from", "step_setting:<option>",
   // "reset_setting:<option>"); empty = a menu older than the field. #2747, #2755.
   repeated string pad_commands = 29;
 }

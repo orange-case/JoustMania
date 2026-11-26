@@ -185,7 +185,7 @@ agent still never writes the `agent` set. Until #2819 the controller admin mode 
 (last write wins).
 Since #2747 ([UC-016](use_cases/UC-016.md) BR-012, BR-013; the pad's keys that send them are planned): two more menu commands, no new key: `reset_setting` clears
 the operator's persisted value of a key the pad already writes (the `automatic` clear generalised), and
-`interventions_switch` writes the in-memory `interventions_enabled` the resume already writes. The `policy.*` budgets stay
+`agent_state` (#2800, the resume) writes the in-memory `interventions_enabled` and `enabled`. The `policy.*` budgets stay
 off the pad (not persistable, operator overlays only).
 
 The agent's live intervention surface (all in the `interventions` set, game-scoped, bounded by the flag service's registry):

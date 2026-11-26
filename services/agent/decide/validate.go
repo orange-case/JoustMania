@@ -32,8 +32,7 @@ var ErrInvalid = errors.New("decide: invalid response")
 //     acting on the answer is right (see Answer.Confidence);
 //   - a score answer is finite, within the inclusive range, and carries no
 //     choice or probabilities;
-//   - a noul answer carries a finite Noul in [0,1] and no choice, probabilities
-//     or score; only noul answers may carry a Noul.
+//   - the FFA answers agree with each other (validateFFA).
 //
 // The returned error wraps ErrInvalid and names the first offending question.
 // Backend-supplied strings in the message are truncated (see clip), so a
@@ -68,6 +67,36 @@ func Validate(req Request, resp Response) error {
 		if !answered[q.ID] {
 			return invalid("question %s not answered", clip(q.ID))
 		}
+	}
+	return validateFFA(req, resp)
+}
+
+// validateFFA checks the cross-question consistency of an answered FFA request
+// (decide-contract.md §4.3): the target fits the intervention. Only a request that
+// asks both ffa.intervention and ffa.target is checked: jev validates each stage of
+// its round on its own, and a stage asks only one of them.
+func validateFFA(req Request, resp Response) error {
+	iv, ok := resp.Find(QuestionFFAIntervention)
+	t, hasTarget := resp.Find(QuestionFFATarget)
+	if !ok || !hasTarget {
+		return nil
+	}
+	target := t.Choice
+	switch {
+	case iv.Choice == OptionNoop:
+		if target != TargetNone {
+			return invalid("noop with target %s", clip(target))
+		}
+	case GroupTargeted(iv.Choice):
+		if _, ok := ResolveGroupTarget(target, req.State.AliveSerials()); !ok {
+			return invalid("group intervention %s without a group of alive players", clip(iv.Choice))
+		}
+	case IsGroupTarget(target):
+		return invalid("group target on single intervention %s", clip(iv.Choice))
+	case playerTargeted[iv.Choice] && target == TargetNone:
+		return invalid("player intervention %s without target", clip(iv.Choice))
+	case !playerTargeted[iv.Choice] && target != TargetNone:
+		return invalid("session intervention %s with target %s", clip(iv.Choice), clip(target))
 	}
 	return nil
 }
@@ -113,8 +142,6 @@ func validateQuestion(q Question) error {
 		if !finite(lo) || !finite(hi) || lo > hi {
 			return fmt.Errorf("bad range [%v, %v]", lo, hi)
 		}
-	case KindNoul:
-		// Text only.
 	default:
 		return fmt.Errorf("unknown kind %s", clip(string(q.Kind)))
 	}
@@ -125,22 +152,9 @@ func validateAnswer(q Question, a Answer) error {
 	if !finite(a.Confidence) || a.Confidence < 0 || a.Confidence > 1 {
 		return fmt.Errorf("confidence %v outside [0,1]", a.Confidence)
 	}
-	if q.Kind != KindNoul && a.Noul != nil {
-		return errors.New("non-noul answer carries a noul")
-	}
 	switch q.Kind {
 	case KindChoice:
 		return validateChoice(q, a)
-	case KindNoul:
-		if a.Choice != "" || len(a.Probabilities) != 0 || a.Score != 0 {
-			return errors.New("noul answer carries a choice, probabilities or a score")
-		}
-		if a.Noul == nil {
-			return errors.New("noul answer without a noul")
-		}
-		if p := *a.Noul; !finite(p) || p < 0 || p > 1 {
-			return fmt.Errorf("noul %v outside [0,1]", p)
-		}
 	case KindScore:
 		if a.Choice != "" || len(a.Probabilities) != 0 {
 			return errors.New("score answer carries a choice or probabilities")

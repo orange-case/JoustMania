@@ -36,6 +36,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -228,7 +229,7 @@ var responseContracts = []responseContract{
 		if iv.Choice != "adjust_player_sensitivity" || iv.Probabilities["adjust_player_sensitivity"] != 0.38 || len(iv.Probabilities) != len(fullInterventions) {
 			t.Errorf("intervention = %+v", iv)
 		}
-		if g, _ := r.Find(GateQuestionID); g.Noul == nil || *g.Noul != 0.7 {
+		if g, _ := r.Find(GateQuestionID); g.Score != 0.7 {
 			t.Errorf("gate = %+v", g)
 		}
 		if !reflect.DeepEqual(res.NativeConfidence, map[string]float64{"ffa.intervention": 0.32}) {
@@ -278,11 +279,11 @@ var responseContracts = []responseContract{
 		body: mutated(fxDetails, shieldLevels(1.3, 0.5, -0.1, 0.3, 0.2, 0.1))},
 	{name: "noul", body: fixture("response_noul.json"), req: noulRequest, check: func(t *testing.T, res wireResult) {
 		a, _ := res.Response.Find("about_to_end")
-		if a.Noul == nil || *a.Noul != 0.6 || math.Abs(a.Confidence-0.2) > 1e-12 {
+		if a.Score != 0.6 || math.Abs(a.Confidence-0.2) > 1e-12 {
 			t.Errorf("about_to_end = %+v", a)
 		}
 		a, _ = res.Response.Find("lopsided")
-		if a.Noul == nil || *a.Noul != 0.31 || math.Abs(a.Confidence-0.38) > 1e-12 {
+		if a.Score != 0.31 || math.Abs(a.Confidence-0.38) > 1e-12 {
 			t.Errorf("lopsided = %+v", a)
 		}
 		if len(res.NativeConfidence) != 0 {
@@ -367,7 +368,7 @@ func TestContract_Responses(t *testing.T) {
 				t.Errorf("errors.Is(ErrInvalid) = %v, want %v", !c.isInvalid, c.isInvalid)
 			}
 			if err == nil {
-				if verr := decide.Validate(c.req(), res.Response); verr != nil {
+				if verr := decide.Validate(withoutNouls(c.req(), res.Response)); verr != nil {
 					t.Errorf("Validate: %v", verr)
 				}
 			}
@@ -409,13 +410,21 @@ func ok(body []byte) fakeReply { return fakeReply{status: 200, body: body} }
 // checkRouting asserts the synthesised ffa.intervention answer (#1281):
 // {noop: 1-p_yes, best: p_yes, every other option: 0}, every option of the
 // original question covered, the acting confidence p_yes (1-p_yes for noop).
+// checkRouting checks the synthesised routing answer of a request without an act
+// threshold, whose gate opens at gateFloor: open {noop: 1-p, best: p}, closed noop
+// with certainty.
 func checkRouting(t *testing.T, iv decide.Answer, best string, pYes float64) {
 	t.Helper()
 	want := map[string]float64{}
 	for _, o := range testRequest().Questions[0].Options {
 		want[o] = 0
 	}
-	want[decide.OptionNoop], want[best] = 1-pYes, pYes
+	open := pYes >= gateFloor
+	if open {
+		want[decide.OptionNoop], want[best] = 1-pYes, pYes
+	} else {
+		want[decide.OptionNoop] = 1
+	}
 	if len(iv.Probabilities) != len(want) {
 		t.Errorf("routing distribution covers %d options, want %d", len(iv.Probabilities), len(want))
 	}
@@ -425,7 +434,7 @@ func checkRouting(t *testing.T, iv decide.Answer, best string, pYes float64) {
 		}
 	}
 	wantChoice, wantConf := decide.OptionNoop, 1-pYes
-	if pYes > 0.5 {
+	if open {
 		wantChoice, wantConf = best, pYes
 	}
 	if iv.Choice != wantChoice || math.Abs(iv.Confidence-wantConf) > 1e-12 {
@@ -562,17 +571,17 @@ func TestContract_ActRound(t *testing.T) {
 	})
 }
 
-// TestContract_GateThreshold: the round acts iff p_yes > 0.5 (decide.Validate's
-// argmax rule on the synthesised distribution); a closed gate makes no details
-// call. The acting confidence is p_yes, which the decision hook then compares
-// with decision.jev.act_confidence_threshold (#1287).
+// TestContract_GateThreshold: the round acts iff p_yes reaches the request's act
+// threshold (decision.jev.act_confidence_threshold at fire time, #1287), at least
+// 0.5; a closed gate makes no details call. The acting confidence is p_yes, which
+// the decision hook compares with the same flag at landing.
 // Spec: decide-contract.md §3.1, UC-040 A13, FR-047.
 // UC: UC-040 A13
 func TestContract_GateThreshold(t *testing.T) {
 	for _, c := range []struct {
 		pYes  float64
 		calls int32
-	}{{0, 1}, {0.3, 1}, {0.5, 1}, {0.51, 2}, {0.7, 2}, {1, 2}} {
+	}{{0, 1}, {0.3, 1}, {0.49, 1}, {0.5, 2}, {0.51, 2}, {0.7, 2}, {1, 2}} {
 		api := newScriptedAPI(t, ok(gatedStage1(t, "", c.pYes)), ok(loadFixture(t, fxGateDetails)))
 		resp, err := api.backend(fixtureModel, false).Decide(context.Background(), testRequest())
 		if err != nil {
@@ -583,6 +592,27 @@ func TestContract_GateThreshold(t *testing.T) {
 		}
 		iv, _ := resp.Find(decide.QuestionFFAIntervention)
 		checkRouting(t, iv, "adjust_player_sensitivity", c.pYes)
+	}
+	for _, c := range []struct {
+		pYes   float64
+		calls  int32
+		choice string
+	}{{0.55, 1, decide.OptionNoop}, {0.6, 2, "adjust_player_sensitivity"}, {0.72, 2, "adjust_player_sensitivity"}} {
+		t.Run(fmt.Sprintf("UC-040/A13 p_yes %v at the gate threshold 0.6", c.pYes), func(t *testing.T) {
+			api := newScriptedAPI(t, ok(gatedStage1(t, "", c.pYes)), ok(loadFixture(t, fxGateDetails)))
+			req := testRequest()
+			req.ActThreshold = 0.6
+			resp, err := api.backend(fixtureModel, false).Decide(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := api.calls.Load(); n != c.calls {
+				t.Errorf("%d calls, want %d", n, c.calls)
+			}
+			if iv, _ := resp.Find(decide.QuestionFFAIntervention); iv.Choice != c.choice {
+				t.Errorf("choice = %s, want %s (below the threshold jev answers noop, not held)", iv.Choice, c.choice)
+			}
+		})
 	}
 }
 
@@ -780,8 +810,10 @@ func TestContract_TwoWayLever(t *testing.T) {
 }
 
 // TestContract_NoCandidate (#1262 review S2): a player intervention with
-// bounds and no alive candidate is answered locally without a details call;
-// the target none at confidence 0 is what the decision hook rejects.
+// bounds and no alive candidate is answered locally (target none) without a
+// details call; a player lever without a target fails validation (§4.3), so the
+// round is an invalid answer and the rules decide.
+// UC: UC-040 A8 A2
 func TestContract_NoCandidate(t *testing.T) {
 	c := lopsidedContext()
 	for _, p := range c.Players {
@@ -790,15 +822,12 @@ func TestContract_NoCandidate(t *testing.T) {
 	st := decide.BuildState(c)
 	req := decide.Request{State: st, Questions: decide.FFAQuestions(st, fullInterventions)}
 	api := newScriptedAPI(t, ok(actingIntervention(t, "grant_shield")))
-	resp, err := api.backend(fixtureModel, false).Decide(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
+	_, err := api.backend(fixtureModel, false).Decide(context.Background(), req)
+	if !errors.Is(err, decide.ErrInvalid) {
+		t.Fatalf("err = %v, want an invalid answer", err)
 	}
 	if n := api.calls.Load(); n != 1 {
 		t.Errorf("%d calls, want 1 (no candidate, no details call)", n)
-	}
-	if tg, _ := resp.Find(decide.QuestionFFATarget); tg.Choice != decide.TargetNone || tg.Confidence != 0 {
-		t.Errorf("target = %+v", tg)
 	}
 }
 

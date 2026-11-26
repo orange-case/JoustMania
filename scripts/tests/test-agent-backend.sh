@@ -42,14 +42,14 @@ write_fixture() {
       "variants": { "rules": "rules", "claude": "claude", "jev": "jev" },
       "defaultVariant": "rules"
     },
-    "decision.act_confidence_threshold": {
+    "decision.claude.act_confidence_threshold": {
       "state": "ENABLED",
       "variants": { "low": 0.5, "default": 0.8, "strict": 0.95 },
       "defaultVariant": "default"
     },
     "decision.jev.act_confidence_threshold": {
       "state": "ENABLED",
-      "variants": { "inherit": -1.0, "gate": 0.6, "default": 0.8, "strict": 0.95 },
+      "variants": { "gate": 0.6, "default": 0.8, "strict": 0.95 },
       "defaultVariant": "gate"
     },
     "decision.capture_content": {
@@ -134,12 +134,12 @@ check_variant decision.backend rules
 fixture
 expect "start the tuning beats on claude" 0 "agent backend -> claude" -- claude
 expect "threshold strict" 0 "agent act threshold -> strict (0.95)" -- threshold strict
-check_variant decision.act_confidence_threshold strict
+check_variant decision.claude.act_confidence_threshold strict
 check_variant decision.jev.act_confidence_threshold gate
-expect "jev-threshold inherit" 0 "agent jev act threshold -> inherit (-1.0)" -- jev-threshold inherit
-check_variant decision.jev.act_confidence_threshold inherit
-check_variant decision.act_confidence_threshold strict
-expect "status shows both thresholds" 0 "jev thr.  = inherit (-1.0)" -- status
+expect "jev-threshold default" 0 "agent jev act threshold -> default (0.8)" -- jev-threshold default
+check_variant decision.jev.act_confidence_threshold default
+check_variant decision.claude.act_confidence_threshold strict
+expect "status shows both thresholds" 0 "jev thr.  = default (0.8)" -- status
 expect "jev-threshold strict" 0 "agent jev act threshold -> strict (0.95)" -- jev-threshold strict
 check_variant decision.jev.act_confidence_threshold strict
 expect "capture off" 0 "agent content capture -> off" -- capture off
@@ -162,7 +162,8 @@ expect "rules takes no model" 1 "rules backend has no model" -- rules haiku
 expect "missing model flag is named" 1 "flag 'decision.jev.model' not defined" -- jev small
 expect "unknown action shows usage" 2 "usage:" -- banana
 expect "threshold needs a value" 2 "usage:" -- threshold
-expect "unknown jev-threshold lists valid ones" 1 "valid: inherit, gate, default, strict" -- jev-threshold low
+expect "unknown jev-threshold lists valid ones" 1 "valid: gate, default, strict" -- jev-threshold low
+expect "the retired inherit variant is refused" 1 "valid: gate, default, strict" -- jev-threshold inherit
 expect "jev-threshold needs a value" 2 "usage:" -- jev-threshold
 overlays="$(curl -sS "${FLAG_SERVICE_URL}/state" | python3 -c 'import json,sys; print(json.load(sys.stdin)["overlays"])')"
 if [[ "${overlays}" == "0" ]]; then

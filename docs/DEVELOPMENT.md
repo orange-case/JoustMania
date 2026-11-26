@@ -171,8 +171,8 @@ key, turn the knob, release the key to commit.
 | K1, K3, K6 | show the row's value | | change the row's setting (a raise of the agent: press the knob before release) |
 | K2, K4, K7 | show the row's default | 1 s: reset the row to its default | (press: confirm a raise) |
 | K4 | | 3 s: lock / unlock the pad | |
-| K5 | show the agent's state | 1 s: stop the agent (fires while held, whatever else is down) / resume a stopped one (on release) | |
-| K8 | start a game (lobby) | 1.5 s to 3 s: force-end (game) / force-start (lobby); 3 s or more: cancelled | |
+| K5 | show the agent's state | 1 s: stop the agent (fires while held, whatever else is down); never a resume: `AGENT` page row 1 (OFF / WATCH / ON, press the knob to raise) or `scripts/agent-killswitch.sh on` | |
+| K8 | start a game (lobby; the force-start roster) | 1.5 s to 3 s: force-end (game; refused in the lobby); 3 s or more: cancelled | |
 | knob | press: mute / unmute | | turn alone: next page (volume without pages); press and turn: volume |
 
 Old grips during the change-over (the first layout of UC-015): K3 held 1 s without a turn no longer stops the

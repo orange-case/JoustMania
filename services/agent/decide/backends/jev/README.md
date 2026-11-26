@@ -17,8 +17,7 @@ therefore split inside `Decide` (`stages.go`); the decision hook still sees one
 backend call:
 
 1. **`intervention`**: the **gate** noul and `ffa.intervention` **without
-   `noop`** (see [The gate](#the-gate-1281)), plus any other non-detail question
-   (e.g. a caller's noul).
+   `noop`** (see [The gate](#the-gate-1281)), plus any other non-detail question.
 2. **`details`**, only when it has something to ask: `ffa.target` and/or
    `ffa.magnitude` conditioned on the chosen intervention. The state carries
    `chosen_intervention`, the instructions name it ("The agent will apply
@@ -28,7 +27,7 @@ backend call:
 
 | stage-1 outcome | stage 2 asks | answered locally (rules adapter conventions) |
 |---|---|---|
-| gate closed (p_yes <= 0.5): `noop` | nothing (1 call) | target `none` (p=1, confidence 1); magnitude `Range[0]` at the intervention's confidence |
+| gate closed (p_yes below the act threshold): `noop` | nothing (1 call) | target `none` (p=1, confidence 1); magnitude `Range[0]` at the intervention's confidence |
 | player intervention with bounds (`grant_shield`, ...) | target + magnitude | nothing |
 | player intervention without bounds (`send_controller_effect`, ...) | target | magnitude `Range[0]` |
 | session intervention with bounds (`adjust_music_tempo`, ...) | magnitude | target `none` |
@@ -36,7 +35,7 @@ backend call:
 
 Both calls share one `decision.jev.timeout_ms` deadline. Each call is its own
 `chat` span with `jev.stage` = `intervention` | `details` (`single` for a
-request without `ffa.intervention`, e.g. nouls only).
+request without `ffa.intervention`).
 
 **A failed details call fails the round** (the caller falls back to rules with
 `error` / `timeout` / `invalid_answer`); there is no half answer. The
@@ -64,18 +63,21 @@ asks two independent questions in the same call:
   intervention fits the game best?".
 
 The `ffa.intervention` answer `Decide` returns is **synthesised**
-(`stages.go:gateAnswer`):
+(`stages.go:gateAnswer`). The gate opens when p_yes reaches the request's act
+threshold (`Request.ActThreshold`: `decision.jev.act_confidence_threshold` when
+the call fires, default 0.6, #1287; at least 0.5, `stages.go:gateThreshold`):
 
 ```
-{noop: 1 - p_yes, <Jev's pick among the interventions>: p_yes, every other option: 0}
+open:   {noop: 1 - p_yes, <Jev's pick among the interventions>: p_yes, every other option: 0}
+closed: {noop: 1, every other option: 0}
 ```
 
-- the acting confidence `1 - p(noop)` equals **p_yes**, so Jev's own
-  `decision.jev.act_confidence_threshold` (default 0.6, #1287) gates the gate;
-- `gateAnswer` makes the choice the intervention **iff p_yes > 0.5** (a strict
-  `>`: exactly 0.5 is `noop`), else `noop` (confidence `1 - p_yes`); a closed
-  gate makes no details call. `decide.Validate` only accepts the result (the
-  choice is the argmax within its 1e-3 tolerance), it does not decide it;
+- the confidence is **p_yes** when the gate opens and `1 - p_yes` when it stays
+  closed; the router compares the same p_yes with the same flag at landing, so
+  one number decides, and a jev answer is `held` only when the flag changed
+  while the call was in flight (between 0.5 and the threshold Jev answers `noop`);
+- a closed gate makes no details call, and its distribution puts the mass on
+  `noop` so the choice stays the argmax `decide.Validate` checks;
 - every option of the caller's question is covered.
 
 It is deliberately **not** the factorised `p_yes * q_i`, which would split the
@@ -93,9 +95,8 @@ The static game description no longer says "Doing nothing is often right;
 intervene only when the game state clearly calls for it": with `noop` out of
 the choice it biased the gate toward no. Restraint now comes from the gate's
 calibrated p_yes and the threshold. The description is part of the state of
-**every** Jev call, so the change also shifts the details stage and a
-caller's nouls slightly (re-recorded fixtures: the `about_to_end` noul 0.62 ->
-0.60, `lopsided` 0.29 -> 0.31; the shield level distribution moved too).
+**every** Jev call, so the change also shifts the details stage slightly
+(re-recorded fixtures: the shield level distribution moved).
 
 ### Calibration (2026-10-16, jev-1.13.0, `TestLiveGate`)
 
@@ -112,12 +113,11 @@ Stage-1 pick among the interventions: calm `set_pacing_profile`, dragging
 `play_audio_cue`, collapsing and near-threshold `adjust_player_sensitivity`
 (0.24 to 0.45), `grant_shield` second.
 
-**Threshold.** No state reaches the global `decision.act_confidence_threshold`
-default 0.8, which claude keeps. A bar of **0.6** separates the states:
-near-threshold and collapsing act, calm and dragging do not. Jev therefore has
-its own flag `decision.jev.act_confidence_threshold`, default variant `gate`
-(0.6) (#1287; `scripts/agent-backend.sh jev-threshold inherit|gate|default|strict`;
-`inherit` uses the global flag).
+**Threshold.** No state reaches claude's default 0.8
+(`decision.claude.act_confidence_threshold`). A bar of **0.6** separates the
+states: near-threshold and collapsing act, calm and dragging do not. Jev's flag
+`decision.jev.act_confidence_threshold` therefore defaults to its variant `gate`
+(0.6) (#1287; `scripts/agent-backend.sh jev-threshold gate|default|strict`).
 Dragging stays low because Jev does not compute "nobody eliminated for 130 s"
 from the timeline; a precomputed pace signal in `decide.State` is the follow-up.
 
@@ -161,7 +161,7 @@ The request id comes back only as the `x-typesafe-request-id` header; it becomes
 |---|---|---|---|
 | `choice` | `choice` | ordered `{option: description}` (`criteria.go`): lever effects for `ffa.intervention`, one sentence per player for `ffa.target` (status, signals and their rank among the alive players, computed in code), `null` otherwise | `choice`, `probabilities`: these must cover every option exactly (the details-stage target: every alive player), otherwise the answer is invalid. They are rescaled when the sum is within max(0.05, n·0.005) of 1 |
 | `score` | `score` | a ladder, lowest to highest setting. Details-stage `ffa.magnitude`: the chosen intervention's own levels (5 evenly spaced values of `decide.MagnitudeBounds`, whole numbers for an integer lever, fewer if its range is narrower), each with what it does. Otherwise 5 position levels (single-stage `ffa.magnitude` lists every allowed lever per level) | Jev's **most likely level**: the argmax of its per-level `probabilities` (#1281); a tie goes to the **gentler** level (nearer the lever's neutral, else the lower level: a shorter shield, a slighter change). Only an answer without level probabilities falls back to rounding the expected `score`. The answer is that level's normalized position, so `decide.ResolveMagnitude` returns exactly the level's value |
-| `noul` (new kind, #1229) | `noul` | `{true, false}` criteria for the gate, none for a caller's noul | `Answer.Noul` = P(yes) |
+| the gate only (not a `decide` kind; `kindNoul` in this package, #1229) | `noul` | `{true, false}` criteria | P(yes), kept in the internal gate answer's `Score` |
 
 `state` is `decide.State` as a JSON object: a static game description, game
 kind, elapsed seconds, the alive serials, the players (with the danger signals
@@ -249,8 +249,8 @@ is. For choices it is `(p_max - 1/n) / (1 - 1/n)`.
   collapses to `p_max`.
 - `ffa.target`, `ffa.magnitude`, other choice and score questions: Jev's native
   confidence.
-- noul: `|2p - 1|`. Jev returns no confidence for a noul, and this is the formula
-  its docs give (the choice formula for two outcomes).
+- the gate noul: `|2p - 1|`. Jev returns no confidence for a noul, and this is
+  the formula its docs give (the choice formula for two outcomes).
 
 Jev's native value for every choice and score is on the chat span as
 `jev.native_confidence`, for example
