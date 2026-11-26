@@ -250,7 +250,17 @@ def details_client(details: FlagEvaluationDetails, flag_key: str = "enabled"):
         # No variant: the client fell back to the default.
         (FlagEvaluationDetails(flag_key="enabled", value="off", variant=None), "unknown"),
     ],
-    ids=["act", "legacy-on", "off", "flagd-default-variant", "bool-value", "not-ready", "error-code", "no-op-provider", "no-variant"],
+    ids=[
+        "act",
+        "legacy-on",
+        "off",
+        "flagd-default-variant",
+        "bool-value",
+        "not-ready",
+        "error-code",
+        "no-op-provider",
+        "no-variant",
+    ],
 )
 async def test_status_agent_enabled_state_tells_unknown_from_off(menu, details, expected):
     menu.agent_settings_client = details_client(details)
