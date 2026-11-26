@@ -19,7 +19,6 @@ import (
 const (
 	otlpTraceService   = "opentelemetry.proto.collector.trace.v1.TraceService"
 	otlpMetricsService = "opentelemetry.proto.collector.metrics.v1.MetricsService"
-	otlpLogsService    = "opentelemetry.proto.collector.logs.v1.LogsService"
 )
 
 // pipeline ties the context stores and decision loops together. On each signal
@@ -178,27 +177,17 @@ func (r *metricsReceiver) Export(ctx context.Context, req pmetricotlp.ExportRequ
 	return pmetricotlp.NewExportResponse(), nil
 }
 
-// logsReceiver implements the OTLP logs gRPC service: moment log events and the
-// agent-only game.start / game.phase.start / game.end log events (UC-041 A7, A8,
-// FR-218, FR-251, FR-252). The
-// collector forwards nothing else (filter/agent_moments) and the extractor ignores
-// any other record. A new death wakes the game's evaluation with otlp.signal =
-// logs; the gate still needs live players, so log records alone never evaluate
-// (BR-010).
+// logsReceiver implements the OTLP logs gRPC service: the agent-only game.start /
+// game.phase.start / game.end log events (UC-041 A8, FR-250, FR-251, FR-252). The
+// collector forwards nothing else (filter/agent_events) and the extractor ignores
+// any other record. Log records never start an evaluation (BR-010).
 type logsReceiver struct {
 	plogotlp.UnimplementedGRPCServer
 	pipe *pipeline
 }
 
 // Export ingests a batch of log records.
-func (r *logsReceiver) Export(ctx context.Context, req plogotlp.ExportRequest) (plogotlp.ExportResponse, error) {
-	t0 := time.Now()
-	if ids := r.pipe.mux.ApplyLogs(req.Logs()); len(ids) > 0 {
-		r.pipe.signalUpdated(ctx, ids, decision.EvalTrigger{
-			Signal:     "logs",
-			RPCService: otlpLogsService,
-			T0:         t0,
-		})
-	}
+func (r *logsReceiver) Export(_ context.Context, req plogotlp.ExportRequest) (plogotlp.ExportResponse, error) {
+	r.pipe.mux.ApplyLogs(req.Logs())
 	return plogotlp.NewExportResponse(), nil
 }

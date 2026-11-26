@@ -211,7 +211,7 @@ def reset_players_alive_if_owner(game_id: str) -> bool:
 # Aggregate death count (UC-030 step 9). A cumulative counter, so it carries no
 # serial / game_id: those would leave one permanent series per (serial, game) with
 # nothing to remove them. Per-game, per-player death order is
-# game_player_elimination_order{serial,game_id} (a gauge cleared at game end).
+# game_player_elimination_order{serial,game_id} (a gauge removed at the session's retire).
 player_deaths_total = Counter("game_player_deaths_total", "Total player deaths", ["mode", "game_kind"])
 
 # Hold-mode shield activations (UC-030 A7, UC-040 A39): one per ended
@@ -548,15 +548,25 @@ def clear_player_analytics(serial: str, game_id: str = "") -> None:
     with suppress(KeyError, ValueError):
         player_alive.remove(serial, game_id)
 
-    # peak_accel and elimination_order also carry serial + game_id labels.
+    # peak_accel also carries serial + game_id labels. elimination_order is left to
+    # clear_elimination_order at the session's delayed retire.
     if game_id:
         with suppress(KeyError, ValueError):
             player_peak_accel.remove(serial, game_id)
 
+        clear_player_shield_gauges(serial, game_id)
+
+
+def clear_elimination_order(serials, game_id: str) -> None:
+    """Remove one game's ``game_player_elimination_order`` series (UC-041 BR-008).
+
+    Called with the other per-game series at the session's delayed retire, not at
+    teardown: a kill right before the end must still be exported, since the gauge is
+    the agent's only death channel.
+    """
+    for serial in serials:
         with suppress(KeyError, ValueError):
             player_elimination_order.remove(serial, game_id)
-
-        clear_player_shield_gauges(serial, game_id)
 
 
 def clear_game_state_gauges(game_kind: str, game_id: str) -> None:
