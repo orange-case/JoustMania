@@ -336,7 +336,7 @@ func TestRender_ShieldChargedToken(t *testing.T) {
 		if !strings.Contains(p.User, " shield_charged") {
 			t.Errorf("user message missing the shield_charged token:\n%s", p.User)
 		}
-		if !strings.Contains(p.System, `"shield_charged" marks a player the agent recently gave a shield charge`) {
+		if !strings.Contains(p.System, `"shield_charged" marks a player with an untriggered shield charge`) {
 			t.Error("system prompt does not explain shield_charged")
 		}
 	})
