@@ -205,7 +205,7 @@ Error codes (a refusal is `success=false` and the code in `error`; no state chan
 | `game_instructions` | `off`, `on` | clamped | yes | "Instructions on" / "off" | pad |
 | `audio_volume.master` | `mute`, `quiet`, `normal`, `loud`, `max` | clamped | no | a short sound at the new level (none with `cue=none`, UC-016 BR-004) | pad knob |
 | `agent_level` | `none`, `ambient`, `standard`, `full` | clamped | no | the level's voice line | pad |
-| `decision.backend` | `rules`, `claude`, `openai`, `jev` | wraps | no | none from the menu (the pad says or shows it) | pad (`set_backend`) |
+| `decision.backend` | `rules`, `claude`, `jev` | wraps | no | none from the menu (the pad says or shows it) | pad (`set_backend`) |
 | `objectives` | `endurance_focused`, `balanced_focused`, `accelerate_focused`, `chaos_focused`, `mixed` | wraps | yes | none from the menu (the pad's screen, UC-016 BR-012) | pad |
 | `policy.max_interventions_per_minute` | `1`, `2`, `4`, `8`, `20` | clamped | no | none from the menu (UC-016 BR-012) | pad |
 | `policy.group_grant.enabled` | `off`, `on` | clamped | no | none from the menu (UC-016 BR-012) | pad |
