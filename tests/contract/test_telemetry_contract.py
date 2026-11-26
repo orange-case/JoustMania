@@ -125,9 +125,11 @@ def test_inventory_parsers_find_the_known_surface(python_metrics, consumer_queri
         "extract_metrics.go constant scan found too few metric names"
     )
     assert len(ingest.span_attrs) >= 5, "extract_spans.go attribute constants not found"
-    assert set(ingest.log_events.values()) >= {"game.start", "game.end", "game.phase.start"}, (
-        "extract_logs.go event constants not found"
-    )
+    assert set(ingest.log_events.values()) >= {
+        "game.start",
+        "game.end",
+        "game.phase.start",
+    }, "extract_logs.go event constants not found"
     assert ingest.log_attrs, "extract_logs.go attribute constants not found"
     assert ingest.infra_span_names, "infracontext span-name constants not found"
     assert len(ti.spa_queries()) >= 2, (
@@ -221,7 +223,9 @@ def test_agent_ingested_span_attributes_exist_in_producers():
     """UC-041 step 4: the span attribute keys the agent reads exist in producer code."""
     ingest = ti.agent_ingest()
     literals = ti.producer_string_literals()
-    missing = sorted(f"{c}={v}" for c, v in ingest.span_attrs.items() if v not in literals)
+    missing = sorted(
+        f"{c}={v}" for c, v in ingest.span_attrs.items() if v not in literals
+    )
     assert not missing, (
         f"Agent span keys not found in any Python/Rust producer: {missing}"
     )
