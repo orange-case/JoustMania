@@ -414,6 +414,8 @@ COUNTDOWN_MUSIC_VOLUME = 0.15  # Soft background music during countdown
 MAX_INSTRUCTIONS_WAIT_SECONDS = 60.0
 # How often the instruction wait checks for a force-end.
 INSTRUCTIONS_POLL_SECONDS = 0.1
+# Slow breathing while the clip plays: calm enough not to read as the countdown.
+INSTRUCTIONS_CUE_PULSE_HZ = 1
 # Deadline for StopSound after a force-end, so a wedged audio service cannot stall teardown.
 STOP_SOUND_TIMEOUT_SECONDS = 2.0
 
@@ -1148,6 +1150,8 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         # Wait for the clip to finish; a force-end stops the wait at once.
         wait_seconds = duration * self._INSTRUCTIONS_WAIT_SCALE
         deadline = game_clock.now() + wait_seconds
+        if wait_seconds > 0:
+            await self._show_instructions_cue(wait_seconds)
         for _ in range(math.ceil(wait_seconds / INSTRUCTIONS_POLL_SECONDS)):
             remaining = deadline - game_clock.now()
             if not self.running or remaining <= 0:
@@ -1156,6 +1160,40 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
 
         if not self.running:
             await self._stop_instruction_clip()
+
+    async def _show_instructions_cue(self, wait_seconds: float) -> None:
+        """Pulse every controller in its colour while the clip plays (UC-020 A5).
+
+        In a loud venue the clip goes unheard, and unchanged LEDs read as a hung
+        start. Best effort: a failure is logged and the stream opens after the clip.
+        """
+        from proto import controller_manager_pb2
+
+        opened_here = self.gameplay_stream is None
+        try:
+            if opened_here:
+                await self._start_gameplay_stream()
+                self._start_early_stream_drain()
+            for serial, player in self.players.items():
+                r, g, b = player.color
+                await serialized_write(
+                    self.gameplay_stream,
+                    controller_manager_pb2.GameplayStreamControl(
+                        game_effect=controller_manager_pb2.GameEffectCommand(
+                            serial=serial,
+                            effect=controller_manager_pb2.GAME_EFFECT_PULSE,
+                            color=controller_manager_pb2.RGB(r=r, g=g, b=b),
+                            duration_ms=int(wait_seconds * 1000),
+                            speed=INSTRUCTIONS_CUE_PULSE_HZ,
+                        )
+                    ),
+                )
+        except Exception as e:
+            logger.warning(f"Failed to show the instructions cue on the controllers: {e}")
+            if opened_here and self._early_drain_task is None:
+                # The stream never got its drain: drop it so run() opens a fresh one after the clip.
+                self._cancel_gameplay_call()
+                self.gameplay_stream = None
 
     async def _stop_instruction_clip(self) -> None:
         """Cut the instruction clip short after a force-end (UC-020 A5, #1586).
@@ -3893,15 +3931,15 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
                 await self._play_instructions(init_span)
                 phases_completed = True
             finally:
-                if early_stream:
-                    await self._stop_early_stream_drain(reopen=phases_completed)
+                # Also stops the drain of a stream the instructions cue opened (a no-op without one).
+                await self._stop_early_stream_drain(reopen=phases_completed)
 
-            # A force-end during the instructions skips the start: no stream,
-            # music, game_started or countdown; teardown records force_ended.
+            # A force-end during the instructions skips the start: no music,
+            # game_started or countdown; teardown records force_ended.
             force_ended_before_start = not self.running
             if not force_ended_before_start:
                 # Start gameplay stream before countdown (needed for countdown effects)
-                if not early_stream:
+                if self.gameplay_stream is None:
                     await self._start_gameplay_stream()
 
                 # Start game music BEFORE countdown at low volume.

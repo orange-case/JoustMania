@@ -35,7 +35,7 @@ import (
 // fallback since #1907) AND the agent kill-switch (agent.json `enabled`). Since #1044 the loop is
 // ALWAYS built + run (so an off→on flag flip starts it with no restart), but while
 // disabled — the default — it is BEHAVIORALLY INERT: no shadow game is spawned, no
-// targeting is written, no promotion is attempted, the rehydrate+seed bootstrap is
+// targeting is written, no promotion is attempted, the rehydrate bootstrap is
 // deferred (startedOnce), and AllocateAndSpawn is skipped. The only residual work is
 // the registry/spawner/gate structs and one ~30s no-op tick (a no-op AbortAll + a few
 // live flag reads) — observably inert, though not literally zero goroutines. The
@@ -57,20 +57,9 @@ const (
 	// ceiling (the flag governs).
 	envMaxGames = "AGENT_EXPERIMENT_MAX_GAMES"
 
-	// envProposerEnabled is the opt-in for the retro-seeded THESIS proposer (#1184,
-	// epic #1181 incr. 4): the seam that turns post-game retro suggestions (#1179)
-	// into candidate experiment theses, closing the game→retro→thesis→experiment loop.
-	// Default false ⇒ recorded retro suggestions are NEVER turned into experiments,
-	// byte-identical to pre-#1184 declaration behavior. Subordinate to
-	// the experiments_enabled flag + the agent.json kill-switch (it is only consulted from
-	// allocateIfEnabled, which self-aborts when either is off) and, like the #995
-	// declarer, it reuses the SAME bounded flag selection + Gate + Registry caps — it
-	// adds ONLY the thesis provenance, never a new write surface.
-	//
-	// #1810 (C-034, FR-152 d): the env is the operator's CEILING of the proposer
-	// gate; the gate is open only when it is true AND the human-owned
-	// experiment_proposer_enabled flag is on (proposerGateOpen). The same gate also
-	// governs the M7-4 proposer (main.go proposerPermit).
+	// envProposerEnabled is the operator's CEILING of the M7-4 proposer gate (C-034,
+	// FR-152 d): open only when it is true AND experiment_proposer_enabled is on
+	// (proposerGateOpen, main.go proposerPermit).
 	envProposerEnabled = "AGENT_EXPERIMENT_PROPOSER_ENABLED"
 )
 
@@ -90,8 +79,7 @@ func proposerGateOpen(flagOn bool) bool {
 // defaultDynamicMaxConcurrent is the default ceiling on simultaneously-live
 // dynamically-declared experiments (#995). A small value keeps the autonomous
 // declarer from flooding the registry; it is further clamped to the shadow-game
-// capacity. The experiment seed (if any) counts toward this ceiling too — the
-// declarer reads the registry's LIVE count, which includes the seed.
+// capacity.
 const defaultDynamicMaxConcurrent = 3
 
 // defaultExperimentTick is the AllocateAndSpawn cadence when unset. Shadow games
@@ -176,31 +164,12 @@ type experimentLoop struct {
 	// have no default here (they fall back to false).
 	expDefaults flags.ExperimentDefaults
 
-	// seedLast is the canonical JSON of the last experiment_seed value this
-	// process acted on (declared, skipped as satisfied, refused or malformed);
-	// seedLatched says whether it is set. Observing `off` clears both
-	// (experiment_seed.go, #1907). Guarded by declarerLock().
-	seedLast    string
-	seedLatched bool
-	// seedMu is declarerLock() when no dynamic declarer is wired (test wiring).
-	seedMu sync.Mutex
-
 	// dynamic is the heuristic dynamic declarer (#995). #1044: it is ALWAYS built
 	// now; whether it actually declares each tick is gated by the LIVE
 	// experiment_dynamic_enabled flag (checked in declareDynamicIfEnabled), so an
 	// off→on flip starts dynamic declaration with no restart. nil only in tests that
 	// do not wire it.
 	dynamic *dynamicDeclarer
-
-	// proposer is the retro-seeded THESIS proposer (#1184): it consumes the post-game
-	// retro's structured suggestions (#1179) and turns the oldest into a candidate
-	// experiment whose thesis is seeded from the retro's reasoning, closing the
-	// game→retro→thesis→experiment loop. It DELEGATES flag/value selection to e.dynamic
-	// (the proven #995 selector), adding only the thesis provenance + objective bias.
-	// Whether it actually declares each tick is gated by proposerEnabled() (default
-	// OFF, #1184). nil only in tests that do not wire it. The retro coordinator feeds it
-	// via Record (wired in main.go).
-	proposer *experiment.ThesisProposer
 
 	// configOverride, when non-nil, supplies the live ExperimentConfig instead of
 	// reading e.flags.Experiment — the injectable seam tests use to drive the
@@ -223,8 +192,7 @@ type experimentLoop struct {
 	// observes experiments_enabled=true (the startup-gate inversion, #1044): the
 	// loop is always running, but its bootstrap is deferred until the flag turns
 	// on, so an agent that starts with experiments off and is flipped on later
-	// still rehydrates prior experiments. The seed is not part of it any more: it
-	// is read every enabled tick (maybeDeclareSeed, #1907).
+	// still rehydrates prior experiments.
 	startedOnce bool
 
 	// enabledOverride, when non-nil, supplies the kill-switch state instead of
@@ -318,7 +286,7 @@ func patternEndChain(registryEnd gamerunner.PatternCallback, sink func(patternga
 // #1044 startup-gate inversion the loop is ALWAYS built (no nil return) so an off→on
 // flip of the live experiments_enabled flag starts it with no restart. While the flag
 // is off — the default — the loop is BEHAVIORALLY INERT (it self-gates each tick: no
-// rehydrate, no seed, no spawn, no targeting write, no promotion), so the disabled
+// rehydrate, no spawn, no targeting write, no promotion), so the disabled
 // agent's experiment surface is observably dormant.
 //
 // Seams wired (the #991 assembly):
@@ -340,7 +308,7 @@ func buildExperimentLoop(
 	// experiments_enabled is a LIVE agent.json flag, so the loop must exist + run so
 	// an off→on flip at runtime starts it with no restart. It SELF-GATES each tick on
 	// the live flag (allocateIfEnabled / run): while disabled it does nothing —
-	// rehydrate+seed are deferred (startedOnce) and AllocateAndSpawn is skipped — so
+	// rehydrate is deferred (startedOnce) and AllocateAndSpawn is skipped — so
 	// the disabled agent is behaviorally inert (it runs one no-op tick goroutine but
 	// spawns/writes/promotes nothing). An unresolved experiments_enabled reads false
 	// (#1907: no env fallback).
@@ -390,11 +358,6 @@ func buildExperimentLoop(
 		ceilings:     experimentCeilingsFromEnv(logger),
 		dynamic:      newDynamicDeclarer(gameFlags, nil),
 		hold:         hold,
-		// #1184: the retro-seeded thesis proposer is ALWAYS built (like the #995
-		// declarer) so the retro coordinator can Record into it unconditionally; whether
-		// it actually DECLARES is gated by the proposer gate (env AND flag, #1810) in
-		// declareFromRetroIfEnabled. Backlog is bounded (DefaultMaxRetroBacklog).
-		proposer: experiment.NewThesisProposer(0),
 	}
 	loop.wirePromoter(promoter, flagsClient, logger)
 	loop.dynamic.hold = hold
@@ -538,15 +501,14 @@ func promotionConfigResolver(f *flags.Flags) promote.ConfigResolver {
 // is a LIVE agent.json flag, not a build-time env gate. Each tick the loop reads the
 // live ExperimentConfig and SELF-GATES:
 //   - DISABLED (experiments_enabled false, the default) ⇒ AbortAll every live
-//     experiment and do nothing else. No rehydrate, no seed, no allocate. This is
+//     experiment and do nothing else. No rehydrate, no allocate. This is
 //     behaviorally inert (the only residual work is one no-op tick), and it subsumes
 //     the kill-switch teardown (a disabled agent and a disabled-experiments flag both
 //     tear the experiment surface down).
 //   - ENABLED ⇒ apply the live caps (Reconfigure); on the FIRST enabled tick run
-//     the one-time rehydrate (#831 durable resume, startedOnce); declare the
-//     experiment seed if its value is new (#1907); then refill shadow capacity
+//     the one-time rehydrate (#831 durable resume, startedOnce); then refill shadow capacity
 //     (dynamic declare + allocate). An
-//     off→on flip therefore STARTS the loop (rehydrate+seed+allocate) and an on→off
+//     off→on flip therefore STARTS the loop (rehydrate+allocate) and an on→off
 //     flip STOPS it cleanly (AbortAll strips targeting + releases capacity; in-flight
 //     shadow games conclude/release normally — no corruption).
 //
@@ -554,9 +516,7 @@ func promotionConfigResolver(f *flags.Flags) promote.ConfigResolver {
 // whenever the resolved interval moves, mirroring the #927 eviction-ticker pattern,
 // so retuning the cadence takes effect with no restart.
 //
-// SEED + DYNAMIC COMPOSITION (#995, #1907): the experiment_seed flag is read every
-// enabled tick and each distinct value is acted on at most once per process
-// (maybeDeclareSeed); the dynamic declarer then fills the rest each tick,
+// The dynamic declarer fills the experiment set each tick,
 // bounded by the live concurrent-experiment backstop. The kill-switch (agent.json
 // `enabled`) is ALSO honored each tick (agentEnabled), independent of
 // experiments_enabled — either being off tears the surface down.
@@ -662,8 +622,8 @@ func (e *experimentLoop) tickInterval(ctx context.Context) time.Duration {
 // experiments_enabled flag (#1044) AND the agent kill-switch (agent.json `enabled`)
 // are on. When either is off it AbortAll's every live experiment instead — the
 // mid-run teardown that keeps the experiment loop subordinate to the same gates the
-// decision loop obeys. When enabled, it lazily runs the one-time rehydrate, the seed
-// (startup-gate inversion), applies the live caps, then allocates.
+// decision loop obeys. When enabled, it applies the live caps, lazily runs the one-time
+// rehydrate (startup-gate inversion), then declares and allocates.
 func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 	// #2323: a refill that arrives after shutdown began does nothing; run()'s own
 	// teardown aborts the live experiments ("agent shutdown"). The guard exists so
@@ -681,9 +641,6 @@ func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 		e.revertPromotionsOnKillSwitch(ctx)
 	}
 	cfg := e.config(ctx)
-	// #1907: an `off` experiment_seed re-arms the seed on ANY tick, so it is seen
-	// while the gates are off too (agent-dryrun-enable.sh off clears them first).
-	e.observeSeedOff(ctx, cfg)
 	if !cfg.Enabled {
 		if ids := e.registry.AbortAll(ctx, "experiments_enabled flag off"); len(ids) > 0 {
 			e.log.Warn("experiment: experiments_enabled flag off — aborted live experiments (#1044)", "count", len(ids))
@@ -697,10 +654,9 @@ func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 		return
 	}
 	// Apply the live runtime caps (#1044) before the bootstrap and the allocation so
-	// a hot-reloaded concurrency / games-budget / min-N takes effect on THIS tick. It
-	// runs BEFORE the seed (#1907): the seed Declare reconciles
-	// target_n against the registry's min-N, so the live verdict_min_n must be in
-	// place first, not the compiled default the registry was built with. The games
+	// a hot-reloaded concurrency / games-budget / min-N takes effect on THIS tick. A Declare
+	// reconciles target_n against the registry's min-N, so the live verdict_min_n
+	// must be in place first. The games
 	// budget is capped by the operator's env ceiling (#1810, C-034, FR-152 f).
 	e.registry.Reconfigure(cfg.ShadowEffectiveConcurrency, e.maxGamesBudget(cfg), cfg.VerdictMinN, cfg.VerdictMinPairs)
 	// #1214: mirror the four migrated FLOAT verdict knobs onto the verdict the same way,
@@ -712,23 +668,12 @@ func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 	// First enabled tick: run the deferred one-time rehydrate (the startup-gate
 	// inversion bootstrap, #1044).
 	e.ensureStarted()
-	// The experiment seed (#1907): after Reconfigure (so its target_n meets the live
-	// min-N) and the rehydrate (so a resumed experiment on its flag satisfies it),
-	// and BEFORE the dynamic declarer, so the seed takes the budget slot first.
-	e.maybeDeclareSeed(ctx, cfg)
 	// Heuristic dynamic declaration (#995): both gates are on (checked above) and the
 	// declarer is opted-in (live experiment_dynamic_enabled, #1044), so let the agent
 	// CHOOSE a fresh experiment to declare — bounded by the LIVE concurrent-experiment
 	// backstop and the per-flag dedup. This runs BEFORE AllocateAndSpawn so a
 	// freshly-Started experiment can accrue games on the same tick.
 	e.declareDynamicIfEnabled(ctx, cfg)
-	// Retro-seeded thesis proposal (#1184): close the game→retro→thesis→experiment
-	// loop. When the proposer opt-in is on (default OFF), turn the oldest recorded
-	// retro suggestion into a candidate experiment whose thesis is seeded from the
-	// retro's reasoning. It runs AFTER dynamic declaration (so a retro-seeded
-	// experiment is the marginal one when both are enabled) and BEFORE AllocateAndSpawn
-	// (so a freshly-declared experiment accrues games this tick).
-	e.declareFromRetroIfEnabled(ctx, cfg)
 	if n := e.registry.AllocateAndSpawn(ctx); n > 0 {
 		e.log.Debug("experiment: spawned shadow games this tick", "count", n,
 			"in_flight", e.registry.TotalInFlight(), "capacity", e.registry.Capacity())
@@ -803,8 +748,8 @@ func (e *experimentLoop) agentEnabled(ctx context.Context) bool {
 //     and a distinct alternate value (the per-flag dedup).
 //
 // It is a NO-OP when the declarer is not wired (dynamic == nil) OR the LIVE
-// experiment_dynamic_enabled flag is off (#1044), so the seed-only path is
-// byte-identical for everyone who has not opted in — and an off→on flip of the flag
+// experiment_dynamic_enabled flag is off (#1044), so nothing is declared
+// for anyone who has not opted in — and an off→on flip of the flag
 // starts dynamic declaration on the next tick with no restart. It is only ever
 // reached from allocateIfEnabled, which has already confirmed BOTH experiments_enabled
 // AND the kill-switch are on — so the declarer is subordinate to the SAME gates as
@@ -827,10 +772,10 @@ func (e *experimentLoop) agentEnabled(ctx context.Context) bool {
 // no lock-ordering deadlock with registry.mu.
 func (e *experimentLoop) declareDynamicIfEnabled(ctx context.Context, cfg flags.ExperimentConfig) {
 	if e.dynamic == nil {
-		return // declarer not wired (test path): seed-only behavior unchanged.
+		return // declarer not wired (test path)
 	}
 	if !cfg.DynamicEnabled {
-		return // LIVE experiment_dynamic_enabled off (#1044): seed-only behavior.
+		return // LIVE experiment_dynamic_enabled off (#1044)
 	}
 	// Serialize the entire select→budget-check→dedup→declare sequence so only one
 	// dynamic declare is ever in flight (closes the TOCTOU over-declaration window)
@@ -863,77 +808,13 @@ func (e *experimentLoop) declareDynamicIfEnabled(ctx context.Context, cfg flags.
 		"flag_key", intent.FlagKey, "value", intent.ExperimentalValue, "objective", intent.Objective)
 }
 
-// declareFromRetroIfEnabled lets the retro-seeded THESIS proposer (#1184) declare
-// ONE fresh experiment per call when:
-//   - the proposer is wired (proposer != nil) AND the proposer gate is open (the
-//     AGENT_EXPERIMENT_PROPOSER_ENABLED ceiling AND the live
-//     experiment_proposer_enabled flag, #1184/#1810, C-034), AND
-//   - the dynamic selector is wired (the proposer DELEGATES flag/value choice to it —
-//     it adds only the thesis provenance, no new selection surface), AND
-//   - the live experiment count is below the SAME concurrent-experiment backstop the
-//     dynamic declarer obeys (clamped to shadow capacity), AND
-//   - there is a recorded retro suggestion AND the selector finds a declarable flag.
-//
-// It is a NO-OP while the gate is closed, so declaration is byte-identical for
-// everyone who has not set AGENT_EXPERIMENT_PROPOSER_ENABLED (or has the flag off). Reached only from
-// allocateIfEnabled, which already confirmed experiments_enabled + the kill-switch —
-// so the proposer is subordinate to the SAME gates as every other declaration. At
-// most ONE experiment is declared per call (one retro suggestion drained per tick),
-// keeping the rate bounded.
-//
-// CONCURRENCY: it holds the dynamic declarer's mutex around the whole
-// budget-check → select → declare sequence (the proposer delegates to e.dynamic.Declare,
-// which mutates the shared round-robin cursor), mirroring declareDynamicIfEnabled so a
-// retro declare and a dynamic declare can never race the cursor or over-declare past
-// the budget. The ThesisProposer's own backlog mutex is separate and never held across
-// a registry call.
-func (e *experimentLoop) declareFromRetroIfEnabled(ctx context.Context, cfg flags.ExperimentConfig) {
-	if e.proposer == nil || e.dynamic == nil {
-		return // proposer/selector not wired (test path): declaration unchanged.
-	}
-	if !proposerGateOpen(cfg.ProposerEnabled) {
-		return // proposer gate closed (#1184 opt-in, #1810 env AND flag): no retro-seeded experiments.
-	}
-	// Serialize with the dynamic declarer (shared cursor + the same over-declaration
-	// budget window) — see declareDynamicIfEnabled's CONCURRENCY note.
-	e.dynamic.mu.Lock()
-	defer e.dynamic.mu.Unlock()
-	// #1907: the proposer selects through the same declarer, so it gets the same
-	// per-tick experiment_dynamic_* settings (built-in denylist included).
-	e.dynamic.configure(cfg)
-
-	if e.registry.LiveCount() >= e.concurrentBudget(cfg) {
-		return
-	}
-	// Adapt the #995 dynamic declarer to the proposer's FlagSelector: its Declare takes
-	// the main-package activeFlags defined type, so a one-line closure bridges it to the
-	// proposer's map[string]struct{} selector signature.
-	intent, ok := e.proposer.Propose(
-		func(active map[string]struct{}) (experiment.Intent, bool) { return e.dynamic.Declare(active) },
-		e.registry.ActiveFlags(),
-	)
-	if !ok {
-		return // no recorded suggestion, or nothing declarable this tick.
-	}
-	if _, err := e.declareAndStart(ctx, intent); err != nil {
-		e.log.Warn("experiment: retro-seeded declare/start failed (#1184)",
-			"flag_key", intent.FlagKey, "objective", intent.Objective, "error", err)
-		return
-	}
-	e.log.Info("experiment: retro-seeded thesis proposer declared a new experiment (#1184)",
-		"flag_key", intent.FlagKey, "value", intent.ExperimentalValue, "objective", intent.Objective,
-		"thesis", intent.Hypothesis, "backlog_remaining", e.proposer.Backlog())
-}
-
 // ensureStarted runs the deferred ONE-TIME bootstrap the FIRST time the loop
 // observes experiments_enabled=true (the startup-gate inversion, #1044): rehydrate
 // the durable journal (#831 resume). It is idempotent + concurrency-safe (startMu +
 // startedOnce), so the many concurrent callers of allocateIfEnabled run it exactly
 // once. A rehydrate error is logged and the bootstrap is STILL marked done (we do
 // not want to re-rehydrate every tick). After a teardown (on→off AbortAll) a
-// re-enable resumes work via the dynamic declarer (if experiment_dynamic_enabled is
-// on) and a seed value not acted on yet; a seed value already acted on is never
-// declared again (maybeDeclareSeed, #1051, #1907; TestExperimentsEnabled_OffOnOff).
+// re-enable resumes work via the dynamic declarer (if experiment_dynamic_enabled is on).
 func (e *experimentLoop) ensureStarted() {
 	e.startMu.Lock()
 	defer e.startMu.Unlock()
@@ -1827,7 +1708,7 @@ func ceilingEnv(logger *slog.Logger, key string, warnZero bool) int {
 }
 
 // concurrentBudget is the effective concurrent-experiment budget (#1810, FR-152 e)
-// shared by the dynamic declarer, the thesis proposer and the M7-4 proposer sink:
+// shared by the dynamic declarer and the M7-4 proposer sink:
 // the live experiment_dynamic_max_concurrent (a non-positive value falls back to
 // the compiled default 3), capped by the AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT
 // ceiling when set, then clamped to the shadow capacity (an experiment with no

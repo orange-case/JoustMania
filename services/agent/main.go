@@ -894,8 +894,7 @@ func (c *components) buildProposer() {
 	// at startup: flagd may be down then). Both `enabled` and `experiments_enabled`
 	// must be on, the same two gates the experiment loop obeys (FR-066), and the
 	// proposer gate (#1810, C-034, FR-152 d): the AGENT_EXPERIMENT_PROPOSER_ENABLED
-	// ceiling AND the live experiment_proposer_enabled flag, the same gate the
-	// retro-seeded thesis proposer obeys. A closed gate skips before any model call,
+	// ceiling AND the live experiment_proposer_enabled flag. A closed gate skips before any model call,
 	// so it spends no budget.
 	permitPropose := proposerPermit(c.agentFlags, proposerEnabled())
 	// Propose on each GAME END, behind the kill switch + experiments_enabled, the
@@ -907,6 +906,15 @@ func (c *components) buildProposer() {
 	// never returns an error (a failed/gated cycle is a recorded no-op).
 	// #2323: the proposer goroutines are tracked so the server's shutdown joins them,
 	// before run()'s deferred tracer / metrics shutdown.
+	// UC-042 A3: the recent retro suggestions ride in the next proposer prompt.
+	retroNotes := &experiment.RetroNotes{}
+	c.retro.SetSuggestionSink(func(s llm.RetroSuggestion) {
+		retroNotes.Record(experiment.RetroSuggestion{
+			InterventionType: s.InterventionType,
+			Emphasis:         s.Emphasis,
+			Reason:           s.Reason,
+		})
+	})
 	ctx, agentFlags, window := c.ctx, c.agentFlags, c.window
 	c.proposals = &backgroundGroup{}
 	proposals := c.proposals
@@ -914,7 +922,8 @@ func (c *components) buildProposer() {
 		proposals.Go(func() {
 			cfg := agentFlags.CodeImprovement(ctx)
 			n := experiment.Narrative{
-				ContextBlock: gamewindow.Render(window.SnapshotFor(gc.GameKind, gc.ExperimentID)),
+				ContextBlock:     gamewindow.Render(window.SnapshotFor(gc.GameKind, gc.ExperimentID)),
+				RetroSuggestions: retroNotes.Recent(),
 			}
 			if gc.Session.GameMode != nil {
 				n.GameMode = *gc.Session.GameMode
@@ -1010,23 +1019,6 @@ func (c *components) buildExperimentStack() {
 		c.proposalSink.Set(expLoop.proposalSink())
 		installExperimentFlags(c.experimentFlags, reg)
 		wireArmCalibration(c.predictions, reg)
-	}
-	// #1184: close the game→retro→thesis→experiment loop. Forward each decoded
-	// post-game retro suggestion (#1179) into the experiment loop's retro-seeded
-	// THESIS proposer, so the next experiment's thesis is seeded from the retro's
-	// reasoning. This wiring is purely additive — the suggestion is still recorded
-	// on the retro span — and the proposer only ACTS on the backlog when its
-	// opt-in (AGENT_EXPERIMENT_PROPOSER_ENABLED, default OFF) is on, so feeding it
-	// here changes autonomous behavior for nobody who has not opted in.
-	if expLoop.proposer != nil {
-		proposer := expLoop.proposer
-		c.retro.SetSuggestionSink(func(s llm.RetroSuggestion) {
-			proposer.Record(experiment.RetroSuggestion{
-				InterventionType: s.InterventionType,
-				Emphasis:         s.Emphasis,
-				Reason:           s.Reason,
-			})
-		})
 	}
 }
 

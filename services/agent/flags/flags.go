@@ -116,9 +116,6 @@ const (
 	keyExperimentDynamicDenylist   = "experiment_dynamic_denylist"
 	keyExperimentDynamicObjective  = "experiment_dynamic_objective"
 	keyExperimentDynamicTargetN    = "experiment_dynamic_target_n"
-	// keyExperimentSeed is the experiment seed (#1907): an OBJECT flag (a seeded
-	// experiment intent, not an RNG seed) read with ObjectValue; the loop parses it.
-	keyExperimentSeed              = "experiment_seed"
 	keyVerdictMinN                 = "verdict_min_n"
 	keyVerdictMinPairs             = "verdict_min_pairs"
 	keyExperimentMaxGames          = "experiment_max_games"
@@ -530,11 +527,10 @@ const DefaultDynamicObjective = "balanced"
 // ExperimentDefaults field, or false for the two gates (#1907).
 type ExperimentConfig struct {
 	// Enabled gates the WHOLE experiment loop (experiments_enabled). When false the
-	// loop does nothing — no rehydrate-spawn, no seed, no allocate. Flipping it on
+	// loop does nothing — no rehydrate-spawn, no allocate. Flipping it on
 	// at runtime starts the loop; flipping it off aborts every live experiment.
 	Enabled bool
 	// DynamicEnabled gates the #995 heuristic declarer (experiment_dynamic_enabled).
-	// When false the loop declares only the experiment seed (if any).
 	DynamicEnabled bool
 	// Tick is the AllocateAndSpawn cadence (experiment_tick_seconds). A non-positive
 	// flag value falls back to the compiled default (durationFlag guard).
@@ -583,11 +579,6 @@ type ExperimentConfig struct {
 	// (experiment_dynamic_target_n, #1907); unresolved = 0 (the registry
 	// reconciles it up to the verdict min-N).
 	DynamicTargetN int
-	// Seed is the raw resolved experiment_seed object (#1907): {} = no seed, else
-	// the flags.md §3 schema, which the experiment loop validates
-	// (parseExperimentSeed). nil = the flag could not be resolved: no seed, and
-	// nothing latched.
-	Seed any
 	// ProposerEnabled is the flag half of the proposer gate
 	// (experiment_proposer_enabled, #1810). The caller ANDs it with the
 	// AGENT_EXPERIMENT_PROPOSER_ENABLED ceiling (C-034, FR-152 d). It never falls
@@ -633,27 +624,7 @@ func (f *Flags) Experiment(ctx context.Context, def ExperimentDefaults) Experime
 		DynamicDenylist:   f.stringFlag(ctx, keyExperimentDynamicDenylist, ""),
 		DynamicObjective:  f.stringFlag(ctx, keyExperimentDynamicObjective, DefaultDynamicObjective),
 		DynamicTargetN:    f.intFlag(ctx, keyExperimentDynamicTargetN, 0),
-		Seed:              f.experimentSeed(ctx),
 	}
-}
-
-// experimentSeed resolves the raw experiment_seed object (#1907), or nil when it
-// cannot be resolved (flagd unreachable, flag missing, no first sync): an
-// unresolved seed declares nothing.
-func (f *Flags) experimentSeed(ctx context.Context) any {
-	v, err := f.client.ObjectValue(ctx, keyExperimentSeed, nil, openfeature.EvaluationContext{})
-	if err != nil {
-		f.log.Debug("flags experiment_seed unresolved: no seed", "error", err)
-		return nil
-	}
-	return v
-}
-
-// ExperimentSeed resolves only experiment_seed (#1966): the seed decision
-// re-reads it under the declarer lock so a caller holding an older
-// ExperimentConfig never acts on a stale seed. nil = unresolved (no seed).
-func (f *Flags) ExperimentSeed(ctx context.Context) any {
-	return f.experimentSeed(ctx)
 }
 
 // ExperimentProposerEnabled resolves only experiment_proposer_enabled (#1810), the
