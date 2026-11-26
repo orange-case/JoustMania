@@ -59,7 +59,7 @@ type ObjectiveRules struct {
 	// rolls from the time-seeded RNG (the game is then non-exact, BR-007).
 	lateSeed func()
 
-	// shieldSource is the loop's shield-ledger view (UC-040 A31, A33, #1870): read
+	// shieldSource is the loop's shield-gate view (UC-040 A31, A33, #1870): read
 	// once per ranking, after the throttle. charged feeds the state the ranking
 	// builds, noShield the no-shield filter. nil (the golden harness, every older
 	// test) means no player is charged or limited.
@@ -105,7 +105,7 @@ func (r *ObjectiveRules) SetCoolingSource(src func() map[string]coolingLever) {
 	r.mu.Unlock()
 }
 
-// SetChargedSource installs a charge-only ledger view: the charged set is also the
+// SetChargedSource installs a charge-only gate view: the charged set is also the
 // no-shield set. It is called under the engine lock, so it must not call back into
 // the engine.
 func (r *ObjectiveRules) SetChargedSource(src func() map[string]bool) {
@@ -128,7 +128,7 @@ func (r *ObjectiveRules) SetShieldSource(src func(c gamecontext.GameContext) (ch
 	r.mu.Unlock()
 }
 
-// shieldLocked takes the one ledger snapshot of a ranking. Caller holds r.mu.
+// shieldLocked takes the one shield-gate view of a ranking. Caller holds r.mu.
 func (r *ObjectiveRules) shieldLocked(c gamecontext.GameContext) (charged, noShield map[string]bool) {
 	if r.shieldSource == nil {
 		return nil, nil
@@ -228,7 +228,7 @@ func (r *ObjectiveRules) Evaluate(_ context.Context, c gamecontext.GameContext) 
 // build constructs the decide.Request lazily: it is called (under the engine
 // lock, so it must be pure and cheap enough) only when the evalInterval throttle
 // lets this evaluation actually rank, so the per-Export hot path never builds a
-// State it would throw away. It receives the ranking's shield-ledger snapshot
+// State it would throw away. It receives the ranking's shield-gate view
 // (#1870, #2066): the charged players and the no-shield set the ranking used, so
 // the state marks exactly the players the ranking skipped. ranked is false on a throttled call (no decisions,
 // no answers, req and resp are zero).
@@ -248,8 +248,8 @@ func (r *ObjectiveRules) evaluate(c gamecontext.GameContext, build func(charged,
 	}
 	r.lastEval = now
 
-	// One ledger snapshot per ranking: the no-shield filter and the state built
-	// below read the same snapshot (#1870, UC-040 A33).
+	// One shield-gate view per ranking: the no-shield filter and the state built
+	// below read the same view (#1870, UC-040 A33).
 	charged, noShield := r.shieldLocked(c)
 	ranked, weights, fitEval := r.rankLocked(c, now, noShield)
 	r.lastFitness = fitEval
@@ -313,7 +313,7 @@ var difficultyInterventions = decide.Set(func(iv decide.Intervention) bool { ret
 // shared by Evaluate and the decide rules backend (decide_rules.go): it draws
 // R9's chaos roll from r.rng but does NOT touch lastEval, lastFitness or
 // lastDifficultyAt — those belong to the caller that actually emits. noShield is
-// the ranking's shield-ledger snapshot: the players a grant_shield would be refused
+// the ranking's shield-gate view: the players a grant_shield would be refused
 // for (nil: nobody). Caller holds r.mu.
 func (r *ObjectiveRules) rankLocked(c gamecontext.GameContext, now time.Time, noShield map[string]bool) ([]scoredCandidate, map[string]float64, FitnessEvaluation) {
 	weights := normalizedWeights(r.objectives.Objectives())
@@ -394,7 +394,7 @@ func normalizedWeights(w map[string]float64) map[string]float64 {
 
 // applyChargePolicy is the shared no-shield filter (UC-040 A31, A33; #1870, #2044):
 // it drops every grant_shield candidate whose target is in noShield (charged, at the
-// shield cap or in the cooldown), because the ledger would refuse it. Like the
+// shield cap or in the cooldown), because the shield gate would refuse it. Like the
 // battery policy the candidate is not ranked, so R4 does not take an emission slot
 // every second for a refused shield. Another player's R4 candidate may then be the
 // one pickShieldCatchUp keeps (UC-040 A41, BR-030). A nil or empty noShield keeps

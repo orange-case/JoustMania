@@ -94,13 +94,12 @@ func TestGroupLever_OfferedOnlyWhileTheGateIsOpen(t *testing.T) {
 		})
 	}
 	t.Run("UC-040/A47 BR-033 the game's group count reached: not offered", func(t *testing.T) {
-		l, _, clock, _ := budgetLoop(t, 100)
+		l, _, _, _ := budgetLoop(t, 100)
 		snap := groupSnapshot(groupPolicy())
 		snap.InterventionsAllowed = allowed
 		c := groupCtx("shadow", "A", "B", "C")
 		one := 1
 		c.Session.ShieldGroupGrants = &one // the coordinator applied the game's one group
-		_ = clock
 		if slices.Contains(l.offeredInterventions(c, snap), InterventionGrantGroupShield) {
 			t.Fatal("a game at max_per_game must not be offered another group")
 		}

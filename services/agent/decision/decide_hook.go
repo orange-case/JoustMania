@@ -356,9 +356,9 @@ func (l *Loop) rulesRequestBuilderCtx(ctx context.Context, c gamecontext.GameCon
 
 // decideRequestWith builds the FFA decide request for c whose state marks the
 // charged players shield_charged, the other no-shield players shield_limited, the
-// applied per-player levels and, in a hold game, adds the grants in flight to the
-// players' energy (#2096, #2066). The rules path passes the snapshot its ranking
-// used, so the state and the charge policy agree.
+// applied per-player levels and, in a hold game, the players' energy (#2096,
+// #2066). The rules path passes the view its ranking used, so the state and the
+// charge policy agree.
 func decideRequestWith(c gamecontext.GameContext, allowed []string, withContext bool, ann decide.Annotations) decide.Request {
 	st := decide.BuildStateWith(c, ann)
 	req := decide.Request{State: st, Questions: decide.FFAQuestionsWith(st, allowed, ann.Bounds), Bounds: ann.Bounds}

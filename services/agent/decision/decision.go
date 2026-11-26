@@ -383,8 +383,8 @@ type Loop struct {
 	goalSource GoalSource
 	// shieldSeconds is the grant_shield length source (UC-040 BR-029, #2395): the
 	// interventions/shield_seconds "default" variant, read per grant. nil (the golden
-	// harness, every older test) leaves the decision's value empty, so the writer and
-	// the ledger use DefaultShieldSeconds.
+	// harness, every older test) leaves the decision's value empty, so the writer
+	// uses DefaultShieldSeconds.
 	shieldSeconds ShieldSecondsSource
 
 	// flagBoard receives this partition's effective flag set every cycle (flag_state.go).
@@ -1176,7 +1176,7 @@ type permission struct {
 // evaluatePermission runs the permission chain over one decision in order:
 // allow-list gate (#727), battery threshold, the experiment-flag check (UC-040
 // A40), the already-applied check (UC-040
-// A35), the lever cooldown (UC-040 A53), the shield ledger (UC-040 A31, A33), then the weighted rate limit (#728). It returns the verdict. The
+// A35), the lever cooldown (UC-040 A53), the shield gate (UC-040 A31, A33), then the weighted rate limit (#728). It returns the verdict. The
 // rate limit is charged ONLY when the decision passes the allow-list and
 // battery gates AND fits the budget — so the budget is spent on decisions the
 // agent actually dispatches, the unification chosen over #726's

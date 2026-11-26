@@ -198,7 +198,7 @@ charge is not protection until the player activates it.
 `shield_charged` (wire key `shield_charged`, #1870) marks an alive player the
 coordinator reports holding a shield charge (trigger mode, UC-040 A31), and
 another `grant_shield` is refused. The candidate description then says "Holds an agent
-shield charge, or has just used it." and, for `grant_shield`, that another
+shield charge." and, for `grant_shield`, that another
 shield is refused; a `toughness_boost` keeps the danger-based sentence.
 
 **Limits.** `danger` reads the SESSION's effective death threshold
