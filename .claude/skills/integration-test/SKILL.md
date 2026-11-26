@@ -100,7 +100,7 @@ spec's outcome names and reasons verbatim (span attributes from `docs/specs/tele
 
 1. Read the use case (or the TC and each UC it chains) and list the end-to-end observable units.
 2. Search `tests/integration/*.py` for the marker (multiline `mark\.uc\(\s*["']UC-XXX["']`), `UC-XXX`
-   and the flag keys, span names and event types the UC names.
+   and the UC's `**Code / tests:**` tests.
 3. Plan the units first, choose fixtures and helpers, decide sequential vs batched.
 4. Write the tests with markers, docstrings and `# Step` comments.
 5. Run just this module: `make test-integration TEST=<name>` (builds images) or `make test-dev TEST=<name>`

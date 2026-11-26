@@ -140,14 +140,18 @@ teardown (tc007's `closed_loop_stack`), because later modules share the stack.
 
 ### When CI runs them (#1583)
 
-The e2e job runs in the merge queue (`merge_group`, unless the entry is docs-only:
-that is the gate before `main`), on `workflow_dispatch`, and on a PR only with the
-`ci-full` label (#2768: no path trigger). Wherever it runs, every stack image is
-built at HEAD. Plain PR pushes skip it, whatever the diff touches, and so does a
-push to `main` (the queue already ran it on that commit). A failure therefore
-first shows in the queue; for a risky change (compose files, Dockerfiles, this
-suite, collector / envoy / flagd config) add `ci-full` before arming, or run
-`make test-integration` locally.
+The e2e job runs in the merge queue (`merge_group`, always: that is the gate before
+`main`), on `workflow_dispatch`, and on a PR only when it has the `ci-full` label
+or its non-docs diff touches a risky path: `docker-compose*.yml`, any
+`Dockerfile*`, `tests/integration/**` (this suite, `conftest.py`, `helpers.py`),
+`services/otel-collector/**`, `images/otel-collector/**`, `services/envoy/**`,
+`services/flagd/**` or `.github/workflows/ci.yml`. In the queue (and on
+`workflow_dispatch` / `ci-full`) every stack image is built at HEAD; other PRs
+take the fast path (pulled `:latest` plus source mounts) unless Dockerfiles or
+dependencies changed.
+Plain PR pushes skip them, and so does a push to `main` (the queue already ran
+them on that commit). To force a run on a PR, add the `ci-full` label; locally,
+`make test-integration`.
 
 ## Checks that need only flagd live in the contract tier (#1422)
 

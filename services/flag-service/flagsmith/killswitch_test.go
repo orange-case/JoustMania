@@ -15,10 +15,10 @@ import (
 var backticked = regexp.MustCompile("`([^`]+)`")
 
 // UC: UC-054 BR-005
-// killSwitches equals the flags.md §13.6 table:
+// FR-152 sync (#2590 P5, R4): killSwitches equals the flags.md §13.6 table
 // the table holds agent/enabled, the registry kill switches and every
-// agent-limiting flag of FR-152 (C-034 in OWNERSHIP_MODEL.md §1, code_improvement.* expanded against
-// both agent baselines). The set only orders a round (no merge rule).
+// agent-limiting flag of FR-152 (C-034, code_improvement.* expanded against
+// both agent baselines). Since #2621 the set only orders a round (no merge rule).
 func TestKillSwitchTableInSync(t *testing.T) {
 	root := repoRoot(t)
 	read := func(rel string) string {
@@ -58,11 +58,11 @@ func TestKillSwitchTableInSync(t *testing.T) {
 	}
 
 	// FR-152's agent-limiting flags (C-034).
-	reqs := read("docs/OWNERSHIP_MODEL.md")
+	reqs := read("docs/requirements.md")
 	const anchor = "Every agent-limiting setting of FR-152 is in `agent`:"
 	i := strings.Index(reqs, anchor)
 	if i < 0 {
-		t.Fatalf("OWNERSHIP_MODEL.md: the anchor %q is missing", anchor)
+		t.Fatalf("requirements.md: the anchor %q is missing", anchor)
 	}
 	sentence := reqs[i+len(anchor):]
 	if j := strings.Index(sentence, ". "); j >= 0 {
