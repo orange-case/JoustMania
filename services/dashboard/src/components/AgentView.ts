@@ -510,7 +510,7 @@ export function renderPredictionStrip(strip: PredictionStrip | null): string {
 export function predictionStripKey(strip: PredictionStrip | null): string {
   if (!strip) return "";
   return (
-    `|${strip.gameId}|${strip.counterfactual}|` +
+    `|${strip.gameId}|` +
     strip.sources.map((s) => `${s.source}:${s.hits}:${s.misses}:${s.unscorable}:${s.baseRate ?? ""}`).join(",")
   );
 }
@@ -527,16 +527,11 @@ function predictionStripHtml(strip: PredictionStrip | null): SafeHtml {
       PREDICTION_SOURCE_LABEL[s.source] ?? s.source
     } <b>${s.hits}/${scored}</b> hit ${fmtRate(s.hitRate)} vs controls ${fmtRate(s.baseRate)}${lift}</span>`;
   });
-  const counterfactual =
-    strip.counterfactual > 0
-      ? html`<span class="decide-prediction-source decide-strip-dim" title="held, blocked or discarded decisions: never in the rates">${strip.counterfactual} counterfactual</span>`
-      : "";
   return html`
     <div class="decide-strip decide-prediction-strip">
       <div class="decide-strip-item">
         <span class="decide-strip-key">predictions</span>
         ${parts}
-        ${counterfactual}
       </div>
       <div class="decide-strip-item decide-strip-time">${renderGameBadge(strip.gameId, strip.gameKind)}</div>
     </div>`;
@@ -656,9 +651,7 @@ export function renderDecideRow(row: DecideRow, isNew = false): string {
 function predictionHtml(p: DecidePrediction | null): SafeHtml {
   if (!p) return html``;
   const reason = p.outcome === "unscorable" && p.unscorableReason ? html` title="${p.unscorableReason}"` : "";
-  return html`<div class="decide-prediction decide-prediction-${p.outcome}"><span class="decide-prediction-label">expects:</span> ${predictionText(p)} <span class="decide-arrow">→</span> <span class="decide-prediction-outcome"${reason}>${p.outcome}</span>${
-    p.merged ? html` <span class="decide-strip-dim" title="an identical prediction was already pending">(same as pending)</span>` : ""
-  }</div>`;
+  return html`<div class="decide-prediction decide-prediction-${p.outcome}"><span class="decide-prediction-label">expects:</span> ${predictionText(p)} <span class="decide-arrow">→</span> <span class="decide-prediction-outcome"${reason}>${p.outcome}</span></div>`;
 }
 
 function decideRowHtml(row: DecideRow, isNew: boolean): SafeHtml {
