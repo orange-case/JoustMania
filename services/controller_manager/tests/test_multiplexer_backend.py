@@ -7,7 +7,7 @@ import asyncio
 import sys
 import threading
 from pathlib import Path
-from unittest.mock import ANY, MagicMock, create_autospec, patch
+from unittest.mock import ANY, create_autospec, patch
 
 import pytest
 
@@ -19,7 +19,7 @@ sys.path.insert(0, str(project_root))
 
 from services.controller_manager.multiplexer.adapter import ControllerIOAdapter
 from services.controller_manager.multiplexer.multiplexer_backend import MultiplexerBackend
-from services.controller_manager.tests.backend_doubles import autospec_adapter, autospec_flag_client
+from services.controller_manager.tests.backend_doubles import autospec_adapter
 
 
 def _make_adapter(adapter_type="mock", serials=None):
@@ -45,13 +45,13 @@ class TestMultiplexerInit:
         assert len(mux.adapters) == 1
 
     def test_accepts_multiple_adapters(self):
-        adapters = [_make_adapter("mock"), _make_adapter("python")]
+        adapters = [_make_adapter("mock"), _make_adapter("rust")]
         mux = MultiplexerBackend(adapters=adapters)
         assert len(mux.adapters) == 2
 
     def test_exposes_adapters_property(self):
         a1 = _make_adapter("mock")
-        a2 = _make_adapter("python")
+        a2 = _make_adapter("rust")
         mux = MultiplexerBackend(adapters=[a1, a2])
         assert mux.adapters[0] is a1
         assert mux.adapters[1] is a2
@@ -97,7 +97,7 @@ class TestMultiplexerGetConnectedControllers:
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
     def test_merges_serials_from_adapters(self, mock_metrics):
         a1 = _make_adapter("mock", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=["BB:BB"])
+        a2 = _make_adapter("rust", serials=["BB:BB"])
         mux = MultiplexerBackend(adapters=[a1, a2])
 
         result = mux.get_connected_controllers()
@@ -108,18 +108,17 @@ class TestMultiplexerGetConnectedControllers:
     def test_both_adapters_discover_independently(self, mock_metrics):
         """All adapters call discover(); when both find the same serial,
         deduplication picks the first non-mock adapter."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=["AA:AA"])
+        a1 = _make_adapter("rust", serials=["AA:AA"])
+        a2 = _make_adapter("mock", serials=["AA:AA"])
         mux = MultiplexerBackend(adapters=[a1, a2])
 
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(None, "default")):
-            result = mux.get_connected_controllers()
+        result = mux.get_connected_controllers()
 
         assert result == ["AA:AA"]
         # Both adapters called discover() independently
         a1.discover.assert_called_once()
         a2.discover.assert_called_once()
-        # First non-mock wins by default
+        # First non-mock wins
         assert mux._serial_to_adapter["AA:AA"] is a1
 
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
@@ -184,7 +183,7 @@ class TestControllerInfoSeriesRemoval:
         mux = MultiplexerBackend(adapters=[a1])
         mux.get_connected_controllers()
 
-        a1.adapter_type = "python"
+        a1.adapter_type = "mock"
         mux.get_connected_controllers()
 
         mock_metrics.controller_backend_info.remove.assert_called_once_with("AA:AA", "rust")
@@ -262,7 +261,7 @@ class TestMultiplexerRouting:
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
     def _setup_two_adapters(self, mock_metrics):
         a1 = _make_adapter("mock", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=["BB:BB"])
+        a2 = _make_adapter("rust", serials=["BB:BB"])
         a1.poll.return_value = {"serial": "AA:AA"}
         mux = MultiplexerBackend(adapters=[a1, a2])
         mux.get_connected_controllers()
@@ -582,170 +581,63 @@ class TestShutdownDuringDiscovery:
 
 
 class TestRouteControllers:
-    """Tests for OpenFeature targeting-based adapter routing."""
+    """A serial goes to the first non-mock adapter that discovered it."""
 
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    @pytest.mark.uc("UC-002", flow="main", steps=[3], br=["BR-001"])
-    def test_targeting_routes_to_preferred_adapter(self, mock_metrics):
-        """Both adapters discover AA:AA; targeting picks a2, a1's handle is closed."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=["AA:AA"])
-        mux = MultiplexerBackend(adapters=[a1, a2])
-
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a2, "targeted")):
-            result = mux.get_connected_controllers()
-
-        assert result == ["AA:AA"]
-        assert mux._serial_to_adapter["AA:AA"] is a2
-        # Losing adapter's handle is closed
-        a1.close.assert_called_with("AA:AA")
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_fallback_when_preferred_not_in_discoverers(self, mock_metrics):
-        """Preferred adapter didn't discover the serial; tries open() on demand.
-        If open() fails, falls back to first non-mock discoverer."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=[])
-        a2.open.return_value = False
-        mux = MultiplexerBackend(adapters=[a1, a2])
-
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a2, "targeted")):
-            result = mux.get_connected_controllers()
-
-        assert result == ["AA:AA"]
-        # Falls back to first non-mock discoverer
-        assert mux._serial_to_adapter["AA:AA"] is a1
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_preferred_adapter_open_on_demand(self, mock_metrics):
-        """Preferred adapter didn't discover it but open() succeeds."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=[])
-        a2.open.return_value = True
-        mux = MultiplexerBackend(adapters=[a1, a2])
-
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a2, "targeted")):
-            result = mux.get_connected_controllers()
-
-        assert result == ["AA:AA"]
-        assert mux._serial_to_adapter["AA:AA"] is a2
-        a2.open.assert_called_with("AA:AA")
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_mock_excluded_from_targeting(self, mock_metrics):
-        """Mock-only controllers (len==1, type==mock) skip targeting entirely."""
+    def test_mock_only_serial_routes_to_mock(self, mock_metrics):
         a1 = _make_adapter("mock", serials=["MOCK01"])
-        a2 = _make_adapter("python", serials=[])
-        mux = MultiplexerBackend(adapters=[a1, a2])
-
-        resolve_mock = MagicMock()
-        with patch.object(mux, "_resolve_adapter_for_serial", resolve_mock):
-            result = mux.get_connected_controllers()
-
-        assert result == ["MOCK01"]
-        assert mux._serial_to_adapter["MOCK01"] is a1
-        resolve_mock.assert_not_called()
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_dynamic_switch_logs(self, mock_metrics, caplog):
-        """Switching adapter mid-session should log the change.
-
-        The dynamic-switch path fires when the old adapter is NOT among
-        the current discoverers (it held the serial from a prior cycle).
-        """
-        import logging
-
-        caplog.set_level(logging.INFO)
-        a1 = _make_adapter("python", serials=["AA:AA"])
         a2 = _make_adapter("rust", serials=[])
         mux = MultiplexerBackend(adapters=[a1, a2])
 
-        # First discovery: a1 discovers, gets routed
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a1, "targeted")):
-            mux.get_connected_controllers()
+        assert mux.get_connected_controllers() == ["MOCK01"]
+        assert mux._serial_to_adapter["MOCK01"] is a1
 
+    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
+    def test_dynamic_switch_logs(self, mock_metrics, caplog):
+        """The serial moves to the adapter that discovers it now; the change is logged."""
+        import logging
+
+        caplog.set_level(logging.INFO)
+        a1 = _make_adapter("rust", serials=["AA:AA"])
+        a2 = _make_adapter("mock", serials=[])
+        mux = MultiplexerBackend(adapters=[a1, a2])
+
+        mux.get_connected_controllers()
         assert mux._serial_to_adapter["AA:AA"] is a1
 
-        # Second discovery: only a2 discovers the serial now
         a1.discover.return_value = []
         a2.discover.return_value = ["AA:AA"]
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a2, "targeted")):
-            mux.get_connected_controllers()
+        mux.get_connected_controllers()
 
         assert mux._serial_to_adapter["AA:AA"] is a2
-        assert "Switched AA:AA: python -> rust" in caplog.text
+        assert "Switched AA:AA: rust -> mock" in caplog.text
 
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
     @pytest.mark.uc("UC-002", flow="main", steps=[3], br=["BR-001"])
     def test_dynamic_switch_closes_old_adapter(self, mock_metrics):
-        """Switching adapter should close the handle on the old adapter."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=["AA:AA"])
+        """A serial that moves to another adapter is closed on the old one."""
+        a1 = _make_adapter("rust", serials=["AA:AA"])
+        a2 = _make_adapter("mock", serials=[])
         mux = MultiplexerBackend(adapters=[a1, a2])
 
-        # First discovery: targeting picks a1
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a1, "targeted")):
-            mux.get_connected_controllers()
-
+        mux.get_connected_controllers()
         assert mux._serial_to_adapter["AA:AA"] is a1
-        # Reset close counts from dedup (a2's handle closed as non-winner)
-        a1.close.reset_mock()
-        a2.close.reset_mock()
 
-        # Second discovery: targeting switches to a2
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a2, "targeted")):
-            mux.get_connected_controllers()
+        a1.discover.return_value = []
+        a2.discover.return_value = ["AA:AA"]
+        mux.get_connected_controllers()
 
-        # Old adapter (a1) should have been closed via dynamic switch
         a1.close.assert_called_with("AA:AA")
 
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    @pytest.mark.uc("UC-002", flow="main", steps=[3], br=["BR-001"])
-    def test_different_serials_to_different_adapters(self, mock_metrics):
-        """Each serial can route to a different adapter independently."""
-        a1 = _make_adapter("python", serials=["AA:AA", "BB:BB"])
-        a2 = _make_adapter("python", serials=["AA:AA", "BB:BB"])
+    def test_single_real_adapter_is_used(self, mock_metrics):
+        a1 = _make_adapter("rust", serials=["AA:AA"])
+        a2 = _make_adapter("mock", serials=[])
         mux = MultiplexerBackend(adapters=[a1, a2])
 
-        def route(serial, _candidate_serials=None):
-            return (a2, "targeted") if serial == "AA:AA" else (a1, "targeted")
-
-        with patch.object(mux, "_resolve_adapter_for_serial", side_effect=route):
-            mux.get_connected_controllers()
-
-        # AA:AA routed to a2, BB:BB routed to a1
-        assert mux._serial_to_adapter["AA:AA"] is a2
-        assert mux._serial_to_adapter["BB:BB"] is a1
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_single_real_adapter_skips_targeting(self, mock_metrics):
-        """When only one adapter discovers a serial, use it directly."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=[])
-        mux = MultiplexerBackend(adapters=[a1, a2])
-
-        # _resolve returns None — but only one real adapter found it
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(None, "default")):
-            mux.get_connected_controllers()
+        mux.get_connected_controllers()
 
         assert mux._serial_to_adapter["AA:AA"] is a1
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    @pytest.mark.uc("UC-002", flow="main", steps=[3])
-    def test_targeting_match_on_retired_unstable_falls_back_to_first_real_adapter(self, mock_metrics):
-        """A leftover per-serial `unstable` targeting rule names no loaded adapter: route to the first non-mock one."""
-        mock_adapter = _make_adapter("mock", serials=["AA:AA"])
-        rust = _make_adapter("rust", serials=["AA:AA"])
-        python = _make_adapter("python", serials=["AA:AA"])
-        mux = MultiplexerBackend(adapters=[mock_adapter, rust, python])
-
-        mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _details("unstable", "TARGETING_MATCH")
-        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
-            assert mux._resolve_adapter_for_serial("AA:AA") == (None, "default")
-            assert mux.get_connected_controllers() == ["AA:AA"]
-
-        assert mux._serial_to_adapter["AA:AA"] is rust
 
 
 class TestIndependentDiscovery:
@@ -753,9 +645,8 @@ class TestIndependentDiscovery:
 
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
     def test_all_adapters_discover_independently(self, mock_metrics):
-        """Two non-mock adapters both get discover() called."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=["BB:BB"])
+        a1 = _make_adapter("rust", serials=["AA:AA"])
+        a2 = _make_adapter("mock", serials=["BB:BB"])
         mux = MultiplexerBackend(adapters=[a1, a2])
 
         mux.get_connected_controllers()
@@ -764,133 +655,27 @@ class TestIndependentDiscovery:
         a2.discover.assert_called_once()
 
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
+    @pytest.mark.uc("UC-002", flow="main", steps=[3])
     def test_deduplication_non_mock_wins_over_mock(self, mock_metrics):
-        """Serial found by both mock and python — non-mock wins."""
+        """Serial found by both mock and rust: rust wins, mock's handle is closed."""
         a1 = _make_adapter("mock", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=["AA:AA"])
+        a2 = _make_adapter("rust", serials=["AA:AA"])
         mux = MultiplexerBackend(adapters=[a1, a2])
 
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(None, "default")):
-            mux.get_connected_controllers()
+        mux.get_connected_controllers()
 
         assert mux._serial_to_adapter["AA:AA"] is a2
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_losing_adapter_handle_closed(self, mock_metrics):
-        """When two adapters find the same serial, non-winner's handle is closed."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=["AA:AA"])
-        mux = MultiplexerBackend(adapters=[a1, a2])
-
-        # Targeting picks a1 as winner
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a1, "targeted")):
-            mux.get_connected_controllers()
-
-        assert mux._serial_to_adapter["AA:AA"] is a1
-        # Loser (a2) has its handle closed
-        a2.close.assert_called_with("AA:AA")
-
-
-def _details(value, reason):
-    """Build a fake FlagEvaluationDetails-like object for get_string_details."""
-    d = MagicMock()
-    d.value = value
-    d.reason = reason
-    return d
-
-
-class TestResolveAdapterForSerial:
-    """Tests for the precedence in _resolve_adapter_for_serial."""
-
-    @pytest.mark.uc("UC-002", flow="main", steps=[3])
-    def test_explicit_targeting_match_wins(self):
-        """A TARGETING_MATCH on bluetooth_backend routes to that adapter."""
-        a1 = _make_adapter("python")
-        a2 = _make_adapter("rust")
-        mux = MultiplexerBackend(adapters=[a1, a2])
-
-        mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _details("rust", "TARGETING_MATCH")
-
-        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
-
-        assert adapter is a2
-        assert method == "targeted"
-
-    @pytest.mark.uc("UC-002", flow="main", steps=[3])
-    def test_default_variant_is_method_default_not_targeted(self):
-        """A non-TARGETING_MATCH reason (default variant) routes as 'default'."""
-        a1 = _make_adapter("python")
-        mux = MultiplexerBackend(adapters=[a1])
-
-        mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _details("python", "DEFAULT")
-        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
-
-        assert adapter is a1
-        assert method == "default"
-
-    def test_returns_none_when_no_match(self):
-        a1 = _make_adapter("python")
-        mux = MultiplexerBackend(adapters=[a1])
-
-        mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _details("nonexistent", "DEFAULT")
-
-        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
-
-        assert adapter is None
-        assert method == "default"
-
-    def test_returns_none_when_empty_value(self):
-        a1 = _make_adapter("python")
-        mux = MultiplexerBackend(adapters=[a1])
-
-        mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _details("", "DEFAULT")
-
-        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
-
-        assert adapter is None
-        assert method == "default"
-
-    def test_returns_none_on_exception(self):
-        a1 = _make_adapter("python")
-        mux = MultiplexerBackend(adapters=[a1])
-
-        with patch("lib.feature_flags.get_flag_client", side_effect=RuntimeError("flagd down")):
-            adapter, method = mux._resolve_adapter_for_serial("AA:AA")
-
-        assert adapter is None
-        assert method == "default"
-
-    def test_passes_serial_as_targeting_key(self):
-        a1 = _make_adapter("python")
-        mux = MultiplexerBackend(adapters=[a1])
-
-        mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _details("python", "TARGETING_MATCH")
-
-        with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
-            mux._resolve_adapter_for_serial("E0AE5EE111AB")
-
-        call_args = mock_client.get_string_details.call_args
-        ctx = call_args[0][2]  # Third positional arg is the EvaluationContext
-        assert ctx.targeting_key == "E0AE5EE111AB"
+        a1.close.assert_called_with("AA:AA")
 
 
 class TestGetAdapterType:
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
     def test_returns_adapter_type_for_known_serial(self, mock_metrics):
-        a1 = _make_adapter("python", serials=["AA:AA"])
+        a1 = _make_adapter("rust", serials=["AA:AA"])
         mux = MultiplexerBackend(adapters=[a1])
         mux.get_connected_controllers()
 
-        assert mux.get_adapter_type("AA:AA") == "python"
+        assert mux.get_adapter_type("AA:AA") == "rust"
 
     def test_returns_unknown_for_missing_serial(self):
         mux = MultiplexerBackend(adapters=[_make_adapter()])
@@ -988,17 +773,16 @@ class TestRoutingSwitchKeepsTheController:
         from services.controller_manager.monitoring import ControllerMonitoring
         from services.controller_manager.multiplexer.adapter import ControllerIOAdapter
 
+        found: dict[str, list[str]] = {}
+
         def adapter(adapter_type):
             spec = create_autospec(ControllerIOAdapter, instance=True)
             spec.adapter_type = adapter_type
-            # Like rust-hid: a serial another adapter holds is not opened (exclude_serials).
-            spec.discover.side_effect = lambda force=False, exclude_serials=None: [  # noqa: ARG005
-                serial for serial in ["AA:AA"] if serial not in (exclude_serials or [])
-            ]
+            spec.discover.side_effect = lambda force=False, exclude_serials=None: found.get(adapter_type, [])  # noqa: ARG005
             spec.open.return_value = True
             return spec
 
-        a1, a2 = adapter("python"), adapter("rust")
+        a1, a2 = adapter("rust"), adapter("mock")
         mux = MultiplexerBackend(adapters=[a1, a2])
         button_detector = create_autospec(ButtonDetector, instance=True)
         rescan_timer = create_autospec(PeriodicRescanTimer, instance=True)
@@ -1019,8 +803,9 @@ class TestRoutingSwitchKeepsTheController:
         loop.backend_initialized = True
 
         for routed_to in (a1, a2):
-            with patch.object(mux, "_resolve_adapter_for_serial", return_value=(routed_to, "targeted")):
-                await loop._check_for_new_controllers()
+            found.clear()
+            found[routed_to.adapter_type] = ["AA:AA"]
+            await loop._check_for_new_controllers()
             assert mux._serial_to_adapter["AA:AA"] is routed_to
 
         button_detector.publish_connection_event.assert_not_called()

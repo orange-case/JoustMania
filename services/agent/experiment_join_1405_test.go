@@ -254,7 +254,7 @@ func TestExperimentLoop_EndJoin_PreemptedPairReruns(t *testing.T) {
 		log := testLogger()
 		writer := experiment.NewWriter(newGameFileForLoop(t), log)
 		targeting := experiment.NewGateTargetingWriter(experiment.NewGate(writer, nil, log), writer)
-		base := promote.NewPromoter(&recordingGitHub{}, nil, &recordingRealDefault{}, nil, nil, promote.RepoRef{}, nil, log)
+		base := promote.NewPromoter(&recordingGitHub{}, &recordingRealDefault{}, nil, nil, nil, log)
 		rig.loop.registry = experiment.NewRegistry(experiment.RegistryConfig{
 			Root: t.TempDir(), MaxShadowGames: 2, EffectiveConcurrency: 1, Spawner: rig.spawner,
 			Verdict: experiment.NewVerdict(3, 0.5, nil), Targeting: targeting, Log: log,

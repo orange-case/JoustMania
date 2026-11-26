@@ -1,5 +1,5 @@
 """
-The `_overlay_active` guard of the shield layer (#2354, UC-040 BR-010).
+The `_overlay_active` guard of the shield layer (#2354, UC-048 BR-003).
 
 While a real effect (a PULSE, a warning flash) owns the LED, the shield renderer must not paint,
 must not restore the base colour when it expires, and must not restore it when it is ended: the
@@ -75,10 +75,10 @@ async def _overlay(manager):
 
 
 class TestUC040ShieldOverlayGuard:
-    """UC-040 BR-010: a running overlay effect owns the LED; the shield layer waits under it."""
+    """UC-048 BR-003: a running overlay effect owns the LED; the shield layer waits under it."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_renderer_does_not_paint_over_a_running_overlay(self, manager, backend):
         await _start_shield(manager, duration_ms=10_000)
         async with _overlay(manager) as release:
@@ -91,7 +91,7 @@ class TestUC040ShieldOverlayGuard:
         assert backend.history, "the shield paints again once the overlay is done"
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_expiring_shield_does_not_restore_under_a_running_overlay(self, manager, backend):
         await _start_shield(manager, duration_ms=1000)
         async with _overlay(manager):
@@ -103,7 +103,7 @@ class TestUC040ShieldOverlayGuard:
             assert backend.effect_active[SERIAL] is True
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_ending_the_shield_does_not_restore_under_a_running_overlay(self, manager, backend):
         await _start_shield(manager, duration_ms=10_000)
         async with _overlay(manager):

@@ -15,8 +15,8 @@ function shielded(serial: string, kind: string, untilMs: number) {
   };
 }
 
-describe("UC-040: A16 shield badge on the controller tile", () => {
-  it("UC-040/A16 shows a full shield with its remaining time", () => {
+describe("UC-048: A1 shield badge on the controller tile", () => {
+  it("UC-048/A1 shows a full shield with its remaining time", () => {
     const store = new ShieldStore();
     expect(store.apply(shielded("MOCK0001", "full", NOW + 5000), NOW, NOW)).toBe(true);
 
@@ -25,7 +25,7 @@ describe("UC-040: A16 shield badge on the controller tile", () => {
     expect(store.get("MOCK0002", NOW, NOW)).toBeNull();
   });
 
-  it("UC-040/A16 BR-009 shows the toughness boost as the weaker badge", () => {
+  it("UC-048/A1 BR-002 shows the toughness boost as the weaker badge", () => {
     const store = new ShieldStore();
     store.apply(shielded("MOCK0002", "toughness_boost", NOW + 3000), NOW, NOW);
 
@@ -34,7 +34,7 @@ describe("UC-040: A16 shield badge on the controller tile", () => {
     expect(badge?.className).toContain("shield-toughness_boost");
   });
 
-  it("UC-040/A16 an older coordinator's kind partial still renders as the boost badge, never a full shield", () => {
+  it("UC-048/A1 an older coordinator's kind partial still renders as the boost badge, never a full shield", () => {
     const store = new ShieldStore();
     store.apply(shielded("MOCK0002", "partial", NOW + 3000), NOW, NOW);
 
@@ -43,7 +43,7 @@ describe("UC-040: A16 shield badge on the controller tile", () => {
     expect(badge?.className).toContain("shield-toughness_boost");
   });
 
-  it("UC-040/A16 BR-008 marks the last second as ending (the LED blinks)", () => {
+  it("UC-048/A1 BR-001 marks the last second as ending (the LED blinks)", () => {
     const store = new ShieldStore();
     store.apply(shielded("MOCK0001", "full", NOW + 5000), NOW, NOW);
 
@@ -53,7 +53,7 @@ describe("UC-040: A16 shield badge on the controller tile", () => {
     expect(ending?.className).toContain("shield-ending");
   });
 
-  it("UC-040/A16 BR-010 an extension replaces the shield and restarts the countdown", () => {
+  it("UC-048/A1 BR-003 an extension replaces the shield and restarts the countdown", () => {
     const store = new ShieldStore();
     store.apply(shielded("MOCK0001", "full", NOW + 2000), NOW, NOW);
     store.apply(shielded("MOCK0001", "full", NOW + 8000), NOW, NOW);
@@ -61,7 +61,7 @@ describe("UC-040: A16 shield badge on the controller tile", () => {
     expect(shieldBadge(store.get("MOCK0001", NOW + 1000, NOW + 1000), NOW + 1000, NOW + 1000)?.text).toBe("Shield 7.0s");
   });
 
-  it("UC-040/A16 the badge disappears when the protection ends", () => {
+  it("UC-048/A1 the badge disappears when the protection ends", () => {
     const store = new ShieldStore();
     store.apply(shielded("MOCK0001", "full", NOW + 5000), NOW, NOW);
 
@@ -69,7 +69,7 @@ describe("UC-040: A16 shield badge on the controller tile", () => {
     expect(shieldBadge(null, NOW)).toBeNull();
   });
 
-  it("UC-040/A16 ignores malformed events", () => {
+  it("UC-048/A1 ignores malformed events", () => {
     const store = new ShieldStore();
     expect(store.apply({ eventType: "player_shielded", data: { serial: "MOCK0001", until_ms: "soon" } })).toBe(false);
     expect(store.apply({ eventType: "game_started", data: {} })).toBe(false);
@@ -77,8 +77,8 @@ describe("UC-040: A16 shield badge on the controller tile", () => {
   });
 });
 
-describe("UC-040: A16 shield badge under Pi/browser clock skew (#2387)", () => {
-  it.each([-3_600_000, 3_600_000])("UC-040/A16 counts down `seconds` on the monotonic clock with a Pi %i ms off", (skewMs) => {
+describe("UC-048: A1 shield badge under Pi/browser clock skew (#2387)", () => {
+  it.each([-3_600_000, 3_600_000])("UC-048/A1 counts down `seconds` on the monotonic clock with a Pi %i ms off", (skewMs) => {
     const store = new ShieldStore();
     // The Pi's until_ms is an hour off the browser's wall clock; seconds is skew-free.
     const event = { eventType: "player_shielded", data: { serial: "MOCK0001", kind: "full", seconds: "5.0", until_ms: String(NOW + skewMs + 5000) } };
@@ -90,15 +90,15 @@ describe("UC-040: A16 shield badge under Pi/browser clock skew (#2387)", () => {
     expect(store.get("MOCK0001", NOW, 6001)).toBeNull();
   });
 
-  it("UC-040/A16 falls back to until_ms against the browser clock when the event has no seconds", () => {
+  it("UC-048/A1 falls back to until_ms against the browser clock when the event has no seconds", () => {
     const store = new ShieldStore();
     store.apply({ eventType: "player_shielded", data: { serial: "MOCK0001", kind: "full", until_ms: String(NOW + 5000) } }, NOW, 1000);
     expect(shieldBadge(store.get("MOCK0001", NOW + 1000, 9999), NOW + 1000, 9999)?.text).toBe("Shield 4.0s");
   });
 });
 
-describe("UC-040: A17 shield badge ends early", () => {
-  it("UC-040/A17 clears a player's badge on player_death", () => {
+describe("UC-048: A2 shield badge ends early", () => {
+  it("UC-048/A2 clears a player's badge on player_death", () => {
     const store = new ShieldStore();
     store.apply(shielded("MOCK0001", "full", NOW + 5000), NOW, NOW);
     store.apply(shielded("MOCK0002", "full", NOW + 5000), NOW, NOW);
@@ -108,7 +108,7 @@ describe("UC-040: A17 shield badge ends early", () => {
     expect(store.get("MOCK0002", NOW, NOW)).not.toBeNull();
   });
 
-  it.each(["game_ended", "game_force_ended"])("UC-040/A17 clears every badge on %s", (eventType) => {
+  it.each(["game_ended", "game_force_ended"])("UC-048/A2 clears every badge on %s", (eventType) => {
     const store = new ShieldStore();
     store.apply(shielded("MOCK0001", "full", NOW + 5000), NOW, NOW);
     store.apply(shielded("MOCK0002", "toughness_boost", NOW + 5000), NOW, NOW);
@@ -119,8 +119,8 @@ describe("UC-040: A17 shield badge ends early", () => {
   });
 });
 
-describe("UC-040: A16 live LED colour on the tile (shield fade without hardware)", () => {
-  it("UC-040/A16 BR-008 renders the shield frames the stream carries", () => {
+describe("UC-048: A1 live LED colour on the tile (shield fade without hardware)", () => {
+  it("UC-048/A1 BR-001 renders the shield frames the stream carries", () => {
     // full shield colour at t=0, ~65 % mid-fade, an off frame of the blink, then the player colour
     expect(ledColorCss({ r: 255, g: 255, b: 255 }).background).toBe("rgb(255, 255, 255)");
     expect(ledColorCss({ r: 166, g: 166, b: 166 }).background).toBe("rgb(166, 166, 166)");
@@ -128,7 +128,7 @@ describe("UC-040: A16 live LED colour on the tile (shield fade without hardware)
     expect(ledColorCss({ g: 255 }).background).toBe("rgb(0, 255, 0)");
   });
 
-  it("UC-040/A16 shows no LED before the first frame", () => {
+  it("UC-048/A1 shows no LED before the first frame", () => {
     expect(ledColorCss(undefined)).toEqual({ background: "#333", glow: "transparent" });
   });
 });
@@ -203,8 +203,8 @@ describe("UC-035: main step 2, shield charge badge (FR-084, #1837)", () => {
   });
 });
 
-describe("UC-040: A30 step 4 / A32 step 3 the dashboard badge follows the charge", () => {
-  it("UC-040/A32 player_shield_charge_ended clears the badge for every reason", () => {
+describe("UC-048: A3 step 4 / A5 step 3 the dashboard badge follows the charge", () => {
+  it("UC-048/A5 player_shield_charge_ended clears the badge for every reason", () => {
     for (const reason of ["expired", "death", "game_end", "activated"]) {
       const store = new ShieldStore();
       store.apply(charged("MOCK0001", 0), NOW);
@@ -213,7 +213,7 @@ describe("UC-040: A30 step 4 / A32 step 3 the dashboard badge follows the charge
     }
   });
 
-  it("UC-040/A30 activation by the trigger turns the charge into the running shield", () => {
+  it("UC-048/A3 activation by the trigger turns the charge into the running shield", () => {
     const store = new ShieldStore();
     store.apply(charged("MOCK0001", 0), NOW);
     store.apply({
@@ -230,7 +230,7 @@ describe("UC-040: A30 step 4 / A32 step 3 the dashboard badge follows the charge
     expect(shieldBadge(store.get("MOCK0001", NOW), NOW)?.text).toBe("Shield 5.0s");
   });
 
-  it("UC-040/A30 step 4 shows the Charged badge text, with the seconds to expiry when there is one", () => {
+  it("UC-048/A3 step 4 shows the Charged badge text, with the seconds to expiry when there is one", () => {
     const store = new ShieldStore();
     store.apply(charged("MOCK0001", NOW + 12_000), NOW);
     store.apply(charged("MOCK0002", 0), NOW);
@@ -238,7 +238,7 @@ describe("UC-040: A30 step 4 / A32 step 3 the dashboard badge follows the charge
     expect(shieldBadge(store.get("MOCK0002", NOW), NOW)?.text).toBe("Charged");
   });
 
-  it("UC-040/A32 a death, a game start and a game end clear the charge", () => {
+  it("UC-048/A5 a death, a game start and a game end clear the charge", () => {
     for (const clearing of <GameEventLike[]>[
       { eventType: "player_death", data: { serial: "MOCK0001" } },
       { eventType: "game_start", data: {} },

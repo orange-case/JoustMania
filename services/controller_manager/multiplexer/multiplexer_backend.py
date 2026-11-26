@@ -5,11 +5,7 @@ through ControllerIOAdapter instances with centralized state tracking.
 LED state, rumble, and effect tracking are centralized here instead of
 being duplicated across each backend.
 
-Adapter routing uses OpenFeature targeting via the ``bluetooth_backend``
-flag (controller domain) to decide which adapter handles each controller
-when multiple adapters
-discover the same serial.  Changing the flag value takes effect on the next
-discovery cycle — no reconnect needed.
+A serial that several adapters discover goes to the first non-mock adapter.
 """
 
 from __future__ import annotations
@@ -96,9 +92,6 @@ class MultiplexerBackend(ControllerBackend):
         # set.add / discard from the event loop need no lock.
         self._force_led_resend: set[str] = set()
         self._led_lock = threading.Lock()
-
-        # adapter_type -> adapter lookup for targeting resolution.
-        self._adapter_by_type: dict[str, ControllerIOAdapter] = {a.adapter_type: a for a in self._adapters}
 
         # Consecutive failed discovery passes per adapter (UC-002 A1, #2125).
         # Only the discovery worker thread reads and writes it.
@@ -254,8 +247,8 @@ class MultiplexerBackend(ControllerBackend):
         """All adapters discover independently, routing deduplicates.
 
         Phase 1 — Discover: every adapter enumerates + opens what it finds.
-        Phase 2 — Route: for serials seen by multiple adapters, pick one via
-                  OpenFeature targeting. Close handles on non-winning adapters.
+        Phase 2 — Route: for serials seen by multiple adapters, pick the first
+                  non-mock one. Close handles on non-winning adapters.
         """
         # Every pass is a full enumeration (the discovery check runs at 1 Hz,
         # NFR-002), which UC-002 step 3 needs to find a new controller on the next
@@ -285,23 +278,7 @@ class MultiplexerBackend(ControllerBackend):
         # Phase 2: route — pick winner for each serial
         seen: dict[str, ControllerIOAdapter] = {}
         for serial, adapters in candidates.items():
-            # Mock-only → skip targeting
-            if len(adapters) == 1 and adapters[0].adapter_type == "mock":
-                seen[serial] = adapters[0]
-                continue
-
-            preferred, _ = self._resolve_adapter_for_serial(serial)
-            winner = None
-
-            if preferred and preferred in adapters:
-                winner = preferred
-            elif preferred and preferred.open(serial):
-                # Preferred adapter didn't discover it: opened on demand.
-                winner = preferred
-
-            if winner is None:
-                # Pick first non-mock, or first overall.
-                winner = next((a for a in adapters if a.adapter_type != "mock"), adapters[0])
+            winner = next((a for a in adapters if a.adapter_type != "mock"), adapters[0])
 
             seen[serial] = winner
 
@@ -351,47 +328,6 @@ class MultiplexerBackend(ControllerBackend):
             f"keeping {len(owned)} controllers"
         )
         return owned
-
-    def _resolve_adapter_for_serial(self, serial: str) -> tuple[ControllerIOAdapter | None, str]:
-        """Resolve the preferred adapter for a serial.
-
-        Precedence (highest to lowest):
-          1. Explicit per-serial ``bluetooth_backend`` targeting — honored only
-             when the evaluation reason is ``TARGETING_MATCH`` (an actual rule
-             match, not the flag's default variant).
-          2. Default — the flag's resolved value (default variant / fallback).
-
-        Returns ``(adapter, method)`` where ``method`` is ``"targeted"`` or
-        ``"default"``. ``adapter`` is ``None`` when nothing resolves (targeting
-        unavailable, error, or no matching adapter).
-        """
-        try:
-            from openfeature.evaluation_context import EvaluationContext
-            from openfeature.flag_evaluation import Reason
-
-            from lib.feature_flags import get_flag_client
-
-            client = get_flag_client("controller")
-
-            # 1. Explicit per-serial targeting wins outright.
-            details = client.get_string_details(
-                "bluetooth_backend",
-                "",
-                EvaluationContext(targeting_key=serial),
-            )
-            if details.value and str(details.reason) == Reason.TARGETING_MATCH.value:
-                adapter = self._adapter_by_type.get(details.value)
-                if adapter is not None:
-                    return adapter, "targeted"
-
-            # 2. Default: the flag's resolved value (e.g. default variant).
-            if details.value:
-                adapter = self._adapter_by_type.get(details.value)
-                if adapter is not None:
-                    return adapter, "default"
-        except Exception:
-            logger.debug(f"Failed to resolve adapter for {serial}", exc_info=True)
-        return None, "default"
 
     def get_adapter_type(self, serial: str) -> str:
         """Return the adapter_type string for a tracked serial."""
@@ -448,7 +384,7 @@ class MultiplexerBackend(ControllerBackend):
     def _export_info_series(self, serial: str, adapter: ControllerIOAdapter) -> None:
         """Export one controller's backend / adapter info series (caller holds _info_series_lock)."""
         backend = adapter.adapter_type
-        # Clear old backend label when backend changes (e.g. rust -> python)
+        # Clear old backend label when backend changes (e.g. rust -> mock)
         prev = self._last_backend.get(serial)
         if prev and prev != backend:
             metrics.controller_backend_info.remove(serial, prev)

@@ -42,8 +42,7 @@ const (
 type Change struct {
 	Kind      ChangeKind
 	Set, Flag string
-	// Scope holds only the fields of ScopeName (fraction: FractionPercent is
-	// the value's percent).
+	// Scope holds only the fields of ScopeName.
 	Scope     Scope
 	ScopeName string // registry.Scope*
 	// Value is the decoded value now in force for the slot; nil when cleared.
@@ -244,8 +243,6 @@ func (f *flagState) slotValue(scopeName string, sc Scope) *value {
 		return f.admin
 	case registry.ScopeReal:
 		return f.real
-	case registry.ScopeFraction:
-		return f.fraction
 	case registry.ScopeGame:
 		return f.games[sc.GameID]
 	case registry.ScopeGameSerial:
@@ -281,10 +278,6 @@ func (s *State) slotChangeLocked(f *flagState, scopeName string, sc Scope) Chang
 	if !v.generated() {
 		c.DeclaredVariant = v.Variant
 	}
-	if scopeName == registry.ScopeFraction {
-		pct := v.Fraction
-		c.Scope.FractionPercent = &pct
-	}
 	return c
 }
 
@@ -319,9 +312,6 @@ func (s *State) Changes() ([]Change, uint64) {
 		add(f, registry.ScopeStack, Scope{})
 		if f.real != nil {
 			add(f, registry.ScopeReal, Scope{})
-		}
-		if f.fraction != nil {
-			add(f, registry.ScopeFraction, Scope{})
 		}
 		for _, id := range sortedKeys(f.games) {
 			add(f, registry.ScopeGame, Scope{GameID: id})

@@ -37,7 +37,7 @@ func deleteCalls(svc *fake.Service) int {
 // UC: UC-045 main
 func TestUC043_A1_KillSwitchRevertsFromFlagService(t *testing.T) {
 	ctx := context.Background()
-	on := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+	on := Config{Mode: ModeAutonomous, Enabled: true}
 
 	t.Run("UC-043/A1 a promotion written before an agent restart is reverted", func(t *testing.T) {
 		svc := newPromotionService(t)
@@ -46,7 +46,7 @@ func TestUC043_A1_KillSwitchRevertsFromFlagService(t *testing.T) {
 			t.Fatalf("precondition: %v", err)
 		}
 		w := writerForTest(t, svc, t.TempDir())
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, w, fakeWatcher{}, w)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, w, fakeWatcher{}, w)
 
 		got := p.RevertOnKillSwitch(ctx)
 
@@ -69,7 +69,7 @@ func TestUC043_A1_KillSwitchRevertsFromFlagService(t *testing.T) {
 			t.Fatalf("precondition: %v", err)
 		}
 		w := writerForTest(t, svc, t.TempDir())
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, w, fakeWatcher{}, w)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, w, fakeWatcher{}, w)
 
 		got := p.RevertOnKillSwitch(ctx)
 		if err := w.RevertRealDefault(ctx, promotedFlag); err != nil {
@@ -87,7 +87,7 @@ func TestUC043_A1_KillSwitchRevertsFromFlagService(t *testing.T) {
 	t.Run("UC-043/A1 a promotion whose config predates the kill switch does not write", func(t *testing.T) {
 		svc := newPromotionService(t)
 		w := writerForTest(t, svc, t.TempDir())
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, w, fakeWatcher{}, w)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, w, fakeWatcher{}, w)
 		ev, flag := killSwitchProposal()
 		prop := promoteProposal
 		prop.FlagKey = flag
@@ -107,7 +107,7 @@ func TestUC043_A1_KillSwitchRevertsFromFlagService(t *testing.T) {
 		w := writerForTest(t, svc, t.TempDir())
 		blocking := &blockingRealDefault{inner: w, entered: make(chan struct{}), release: make(chan struct{})}
 		t.Cleanup(blocking.releaseNow) // never leave the blocked write hanging
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, blocking, fakeWatcher{}, w)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, blocking, fakeWatcher{}, w)
 		ev, flag := killSwitchProposal()
 		prop := promoteProposal
 		prop.FlagKey = flag
@@ -176,8 +176,8 @@ func (b *blockingRealDefault) SetRealDefault(ctx context.Context, flag string, v
 func TestUC043_A1_LostClaimJournalsOnce(t *testing.T) {
 	t.Run("UC-043/A1 a revert superseded by a newer promotion is not a kill-switch revert", func(t *testing.T) {
 		rev := &recordingReverter{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{}, rev)
-		on := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{}, rev)
+		on := Config{Mode: ModeAutonomous, Enabled: true}
 		rw := &capturingRewatcher{}
 		p.SetRewatcher(rw)
 		p.watcher = &stepWatcher{verdicts: []WatchVerdict{VerdictInsufficient, VerdictHealthy}}
@@ -337,8 +337,8 @@ func TestUC043_A1_RewatchRevertSerialisedWithKillSwitch(t *testing.T) {
 
 	t.Run("UC-043/A1 a sync watch revert in flight holds the kill switch", func(t *testing.T) {
 		rev := newBlockingListingReverter(t, nil)
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{degraded: true}, rev)
-		on := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{degraded: true}, rev)
+		on := Config{Mode: ModeAutonomous, Enabled: true}
 		var res Result
 
 		assertKillMuHeldWhileReverting(t, p, rev, func() {

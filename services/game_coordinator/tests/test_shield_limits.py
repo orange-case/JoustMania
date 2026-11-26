@@ -1,7 +1,7 @@
 """
 Shield limits per player per game: the coordinator backstop (#2044).
 
-UC-040 A34 (the coordinator refuses a grant on the cap or the cooldown), BR-022
+UC-048 A7 (the coordinator refuses a grant on the cap or the cooldown), UC-048 BR-007
 (count and cooldown definitions, trigger mode counts from the grant), A22 (the
 manager records the refusal and refunds the backstop).
 
@@ -108,13 +108,13 @@ async def _refused(game, serial, seconds=5.0):
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A34 / BR-022: the cap
+# UC-048 A7 / BR-007: the cap
 # --------------------------------------------------------------------------- #
 class TestUC040A34Cap:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_three_grants_apply_and_the_fourth_is_refused(self, game, clock, limits):
-        """A34 step 1-2: 3 agent shields apply, the 4th raises shield_cap_reached and applies nothing."""
+        """UC-048 A7 step 1-2: 3 agent shields apply, the 4th raises shield_cap_reached and applies nothing."""
         limits["value"] = (3, 0)
         player = game.players["p1"]
         for _ in range(3):
@@ -128,9 +128,9 @@ class TestUC040A34Cap:
         assert await game.grant_shield("p2", 5.0) is True
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_refusal_is_recorded_on_the_player_span(self, game, clock, limits):
-        """A34 step 2: span event shield_refused with the reason and the grants used."""
+        """UC-048 A7 step 2: span event shield_refused with the reason and the grants used."""
         limits["value"] = (1, 0)
         player = game.players["p1"]
         player.span = create_autospec(Span, instance=True)
@@ -146,9 +146,9 @@ class TestUC040A34Cap:
         assert refused[0]["player.serial"] == "p1"
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_kept_grant_does_not_count(self, game, clock, limits):
-        """BR-022: a kept (no-op) grant moves nothing and does not use a slot."""
+        """UC-048 BR-007: a kept (no-op) grant moves nothing and does not use a slot."""
         limits["value"] = (1, 0)
         player = game.players["p1"]
         player.grace_until = T0 + 60.0  # a longer grace (e.g. a spawn grace) is already running
@@ -160,9 +160,9 @@ class TestUC040A34Cap:
         assert player.grace_until == clock.t + 5.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_zero_means_unlimited_and_off(self, game, clock, limits):
-        """BR-022: cap 0 = unlimited, cooldown 0 = off (a running shield is extended)."""
+        """UC-048 BR-007: cap 0 = unlimited, cooldown 0 = off (a running shield is extended)."""
         limits["value"] = (0, 0)
         player = game.players["p1"]
         for i in range(10):
@@ -171,9 +171,9 @@ class TestUC040A34Cap:
             clock.t += 1.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_a_new_game_instance_starts_fresh(self, clock, activation, limits):  # noqa: ARG002
-        """A34 step 3: the count lives on the game-mode instance; the next game starts at 0."""
+        """UC-048 A7 step 3: the count lives on the game-mode instance; the next game starts at 0."""
         limits["value"] = (1, 0)
         first, _ = _make_ffa("game-1")
         await first.grant_shield("p1", 5.0)
@@ -184,9 +184,9 @@ class TestUC040A34Cap:
         assert await second.grant_shield("p1", 5.0) is True
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_a_revive_does_not_reset_the_count(self, game, clock, limits):
-        """BR-022: keyed by serial, so a player who died and came back keeps the count."""
+        """UC-048 BR-007: keyed by serial, so a player who died and came back keeps the count."""
         limits["value"] = (1, 0)
         await game.grant_shield("p1", 5.0)
         clock.t += 10.0
@@ -197,13 +197,13 @@ class TestUC040A34Cap:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A34 / BR-022: the cooldown
+# UC-048 A7 / BR-007: the cooldown
 # --------------------------------------------------------------------------- #
 class TestUC040A34Cooldown:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_grant_within_the_cooldown_is_refused(self, game, clock, limits):
-        """A34: refused while now < shield end + cooldown; admitted after it."""
+        """UC-048 A7: refused while now < shield end + cooldown; admitted after it."""
         limits["value"] = (0, 15)
         assert await game.grant_shield("p1", 5.0) is True  # ends at T0 + 5
         clock.t = T0 + 5.0 + 15.0 - 0.01
@@ -212,9 +212,9 @@ class TestUC040A34Cooldown:
         assert await game.grant_shield("p1", 5.0) is True
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_cooldown_refuses_an_extension_of_a_running_shield(self, game, clock, limits):
-        """BR-022: with a cooldown set, a running agent shield is never extended."""
+        """UC-048 BR-007: with a cooldown set, a running agent shield is never extended."""
         limits["value"] = (0, 15)
         player = game.players["p1"]
         await game.grant_shield("p1", 5.0)
@@ -223,9 +223,9 @@ class TestUC040A34Cooldown:
         assert player.grace_until == T0 + 5.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_cooldown_ignores_other_graces(self, game, clock, limits):
-        """BR-022: the cooldown runs from the agent shield's own end, never grace_until."""
+        """UC-048 BR-007: the cooldown runs from the agent shield's own end, never grace_until."""
         limits["value"] = (0, 15)
         player = game.players["p1"]
         await game.grant_shield("p1", 5.0)  # agent shield ends at T0 + 5
@@ -234,15 +234,15 @@ class TestUC040A34Cooldown:
         assert await game.grant_shield("p1", 5.0) is True  # kept under the longer grace, not refused
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_cap_is_checked_before_the_cooldown(self, game, clock, limits):  # noqa: ARG002
-        """A34 step 1: the cap first, then the cooldown."""
+        """UC-048 A7 step 1: the cap first, then the cooldown."""
         limits["value"] = (1, 15)
         await game.grant_shield("p1", 5.0)
         assert await _refused(game, "p1") == CAP
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_a_live_cooldown_flip_applies_at_the_next_grant(self, game, clock, limits):
         """flags.md §3: the stored end plus the live value."""
         limits["value"] = (0, 15)
@@ -254,11 +254,11 @@ class TestUC040A34Cooldown:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A34 / BR-022: trigger mode counts the charge and paces from the grant
+# UC-048 A7 / BR-007: trigger mode counts the charge and paces from the grant
 # --------------------------------------------------------------------------- #
 class TestUC040A34TriggerMode:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022", "BR-020"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007", "BR-005"])
     async def test_charge_counts_and_already_charged_comes_first(self, game, clock, activation, limits):
         """A charge counts against the cap; a held charge still refuses as already_charged first."""
         activation["value"] = "trigger"
@@ -273,9 +273,9 @@ class TestUC040A34TriggerMode:
             assert await _refused(game, "p1") == CAP
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     async def test_cooldown_runs_from_the_grant_not_the_activation(self, game, clock, activation, limits):
-        """BR-022: trigger mode, cooldown from charge stored + seconds, whenever it is activated."""
+        """UC-048 BR-007: trigger mode, cooldown from charge stored + seconds, whenever it is activated."""
         activation["value"] = "trigger"
         limits["value"] = (0, 15)
         player = game.players["p1"]
@@ -291,10 +291,10 @@ class TestUC040A34TriggerMode:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 BR-022: the flag read
+# UC-048 BR-007: the flag read
 # --------------------------------------------------------------------------- #
 class TestUC040BR022FlagRead:
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     def test_flag_values_are_read_from_the_agent_set(self):
         """_shield_limits reads both literal keys from the agent set with the game id."""
         g, _ = _make_ffa("g-read")
@@ -309,15 +309,15 @@ class TestUC040BR022FlagRead:
             assert g._shield_limits() == (6, 8)
         assert {(d, gid) for d, _k, gid in calls} == {("agent", "g-read")}
 
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     def test_a_read_error_gives_the_defaults(self):
-        """BR-022: an unreadable flag set keeps the limits on (3 / 15 s)."""
+        """UC-048 BR-007: an unreadable flag set keeps the limits on (3 / 15 s)."""
         g, _ = _make_ffa()
         with patch("lib.feature_flags.init_flag_domain", side_effect=RuntimeError("flagd down")):
             assert g._shield_limits() == (3, 15)
         assert (DEFAULT_MAX_SHIELDS_PER_PLAYER_PER_GAME, DEFAULT_SHIELD_COOLDOWN_SECONDS) == (3, 15)
 
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     def test_a_negative_value_gives_the_default(self):
         g, _ = _make_ffa()
         with patch.object(base_module, "read_int_flag", return_value=-1):
@@ -329,14 +329,14 @@ class TestUC040BR022FlagRead:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A22 / A34: the manager records the refusal and refunds the backstop
+# UC-040 A22 / UC-048 A7: the manager records the refusal and refunds the backstop
 # --------------------------------------------------------------------------- #
 class TestUC040A34Manager:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     @pytest.mark.uc("UC-040", flow="A22")
     async def test_handler_lets_the_refusal_reach_the_manager(self, game, clock, limits):
-        """A34: handle_shield_seconds lets shield_cap_reached reach the manager."""
+        """UC-048 A7: handle_shield_seconds lets shield_cap_reached reach the manager."""
         from services.game_coordinator.interventions import INTERVENTION_SPECS, InterventionContext
         from services.game_coordinator.lifecycle_handlers import handle_shield_seconds
 
@@ -351,11 +351,11 @@ class TestUC040A34Manager:
         assert exc.value.reason == CAP
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A34", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
     @pytest.mark.uc("UC-040", flow="A22")
     @pytest.mark.parametrize(("limit", "reason"), [((1, 0), CAP), ((0, 15), COOLDOWN)])
     async def test_manager_records_the_reason_and_refunds_the_backstop(self, game, limits, limit, reason):
-        """A34 step 2 / A22: blocked=true with the reason; the backstop reservation is refunded."""
+        """UC-048 A7 step 2 / A22: blocked=true with the reason; the backstop reservation is refunded."""
         from services.game_coordinator.tests.event_list_helpers import edge_event
         from services.game_coordinator.tests.test_interventions import make_manager
 

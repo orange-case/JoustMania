@@ -39,7 +39,7 @@ Three invariants follow and are **load-bearing**:
      real game (FR-062, FR-138).
    - **Gated autonomous promotion**: a shadow-validated winner becomes an in-memory `real` overlay, reverted on
      degradation (FR-065), only when the FR-152 (a) gates are open; off in the stock stack. The durable path
-     is the promotion PR.
+     is a human change made from the promotion's evidence.
 2. **The write surfaces are disjoint by scope.** Human writes are persisted admin values or stack overlays;
    agent writes are game-scoped `interventions` values, experiment-arm values and the `real` overlay. The flag
    service holds each kind of value separately per flag and serialises every write, so an agent write never

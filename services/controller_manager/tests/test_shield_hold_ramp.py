@@ -1,5 +1,5 @@
 """
-Shield hold rumble ramp and LED dimming on the controller manager (#2463, UC-040 BR-026).
+Shield hold rumble ramp and LED dimming on the controller manager (#2463, UC-048 BR-010).
 
 Ramp mode (``hold_rumble_max_intensity`` above ``hold_rumble_intensity``): the background
 rumble rises from the hold rumble to the ramp top as the energy drains against the
@@ -151,9 +151,9 @@ def _levels(backend):
 
 
 class TestUC040HoldRampPure:
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     def test_ramp_rises_from_the_hold_rumble_to_the_top_and_is_flat_at_or_below_it(self):
-        """UC-040 BR-026 (#2463): 70 at a full activation, 200 empty, 135 halfway; top <= base is flat (rollback)."""
+        """UC-048 BR-010 (#2463): 70 at a full activation, 200 empty, 135 halfway; top <= base is flat (rollback)."""
         assert hold_ramp_intensity(1.0, 70, 200) == 70
         assert hold_ramp_intensity(0.5, 70, 200) == 135
         assert hold_ramp_intensity(0.0, 70, 200) == 200
@@ -164,16 +164,16 @@ class TestUC040HoldRampPure:
         levels = [hold_ramp_intensity(f / 20, 70, 200) for f in range(20, -1, -1)]
         assert levels == sorted(levels)
 
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     def test_fill_is_the_share_of_the_activation_energy_left(self):
         assert hold_fill(1.0, 2.0) == 0.5
         assert hold_fill(3.0, 2.0) == 1.0
         assert hold_fill(-1.0, 2.0) == 0.0
         assert hold_fill(1.0, 0.0) == 1.0  # no reference: full
 
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     def test_led_starts_white_and_dims_to_the_floor_when_the_last_second_starts(self):
-        """UC-040 BR-026 (#2463): measured against the activation energy, not the cap (a 2 s activation was 58 %)."""
+        """UC-048 BR-010 (#2463): measured against the activation energy, not the cap (a 2 s activation was 58 %)."""
         assert hold_active_frame(2.0, 2.0, 0.2) == WHITE
         before_blink = hold_active_frame(1.01, 2.0, 0.2)
         assert before_blink[0] == before_blink[1] == before_blink[2]
@@ -181,14 +181,14 @@ class TestUC040HoldRampPure:
         assert hold_active_frame(1.0, 2.0, 0.2) == WHITE  # the blink starts on
         assert hold_active_frame(5.0, 5.0, 1.0) == hold_active_frame(1.5, 5.0, 1.0) == WHITE  # 100 = no dimming
 
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     @pytest.mark.parametrize(
         ("raw", "want"), [(999, 230), (255, 230), (-1, 0), ("loud", 200), (float("nan"), 200), (0, 0), (180, 180)]
     )
     def test_ramp_top_is_validated(self, raw, want):
         assert resolve_hold_rumble_max_intensity(raw) == want
 
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     @pytest.mark.parametrize(("raw", "want"), [(0, 10), (5, 10), (150, 100), ("dim", 20), (None, 20), (30, 30)])
     def test_led_floor_is_validated_and_never_below_10(self, raw, want):
         assert resolve_hold_led_floor_pct(raw) == want
@@ -197,9 +197,9 @@ class TestUC040HoldRampPure:
 class TestUC040HoldRampLayer:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_the_layer_dims_against_the_activation_energy_not_the_cap(self, cue_manager, clock):
-        """UC-040 BR-026 (#2463): a 2 s activation, 5 s cap: 100 % white at the start (58 % before), then the floor."""
+        """UC-048 BR-010 (#2463): a 2 s activation, 5 s cap: 100 % white at the start (58 % before), then the floor."""
         await _effect(cue_manager, HOLD, 2000, _state(energy=2000, cap=5000, activation=2000))
         layer = cue_manager._shield_layers[SERIAL]["hold"]
         assert cue_manager._shield_layer_frame(SERIAL, layer, START, 0.0) == WHITE
@@ -208,9 +208,9 @@ class TestUC040HoldRampLayer:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_ramp_mode_starts_no_ending_pulse_and_plays_no_empty_pulse(self, cue_manager, backend, clock):
-        """UC-040 A39 step 4 (#2463): the ramp is the warning; the end is a clean stop, no hold_pulse ever runs."""
+        """UC-048 A11 step 4 (#2463): the ramp is the warning; the end is a clean stop, no hold_pulse ever runs."""
         await _effect(cue_manager, HOLD, 3000, _state(energy=3000, activation=3000))
         assert SERIAL not in cue_manager._hold_ending_tasks
         await _effect(cue_manager, HOLD, 0)
@@ -223,9 +223,9 @@ class TestUC040HoldRampLayer:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     async def test_a_grant_mid_hold_steps_the_ramp_down_without_restarting_it(self, cue_manager, backend, clock):
-        """UC-040 A36 step 4 (#2463): more activation energy moves the level down, never above the top, no restart."""
+        """UC-048 A8 step 4 (#2463): more activation energy moves the level down, never above the top, no restart."""
         await _effect(cue_manager, HOLD, 2000, _state(energy=2000, activation=2000))
         await _ramp_to(cue_manager, clock, 1.0)
         assert _levels(backend) == [70, 135]
@@ -238,17 +238,17 @@ class TestUC040HoldRampLayer:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_a_resend_after_a_reconnect_lands_mid_ramp(self, cue_manager, backend, clock):
-        """UC-040 BR-026 (#2463): a new layer with 1 s left of a 4 s activation starts at the ramp level, not at 70."""
+        """UC-048 BR-010 (#2463): a new layer with 1 s left of a 4 s activation starts at the ramp level, not at 70."""
         await _effect(cue_manager, HOLD, 1000, _state(energy=1000, activation=4000))
         assert _levels(backend) == [168]  # 70 + 130 * 3 / 4
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_a_warning_during_the_ramp_restores_the_current_level(self, cue_manager, backend, clock):
-        """UC-040 BR-026 (#2463): the one-shot keeps the slot; its stop restores the ramp level, not 70."""
+        """UC-048 BR-010 (#2463): the one-shot keeps the slot; its stop restores the ramp level, not 70."""
         await _effect(cue_manager, HOLD, 2000, _state(energy=2000, activation=2000))
         await _ramp_to(cue_manager, clock, 1.0)
         await cue_manager.set_vibration(SERIAL, 100, 20)
@@ -259,9 +259,9 @@ class TestUC040HoldRampLayer:
         await _finish(cue_manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_the_ramp_writes_at_most_every_100_ms_and_in_steps_of_8(self, cue_manager, backend, clock):
-        """UC-040 BR-026 (#2463): HID budget: no write for a step below 8 or within 100 ms of the last one."""
+        """UC-048 BR-010 (#2463): HID budget: no write for a step below 8 or within 100 ms of the last one."""
         await _effect(cue_manager, HOLD, 1000, _state(energy=1000, activation=1000))  # 130 per second
         await _ramp_to(cue_manager, clock, 0.05)  # 76.5: below the step and too early
         await _ramp_to(cue_manager, clock, 0.07)  # 79: a step of 9, but 70 ms after the start
@@ -276,9 +276,9 @@ class TestUC040HoldRampLayer:
 class TestUC040HoldRampRenderer:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_a_two_second_hold_ramps_from_70_to_the_top_then_stops(self, manager, backend, clock):
-        """UC-040 BR-026 (#2463): 70 at t=0, never down, >= 190 before the end, 0 within one tick after it."""
+        """UC-048 BR-010 (#2463): 70 at t=0, never down, >= 190 before the end, 0 within one tick after it."""
         await _effect(manager, HOLD, 2000, _state(energy=2000, activation=2000))
         for _ in range(400):
             await asyncio.sleep(0)
@@ -296,9 +296,9 @@ class TestUC040HoldRampRenderer:
         await _finish(manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_hold_rumble_off_stays_silent_and_keeps_the_flat_cues(self, manager, backend, clock):
-        """UC-040 BR-026 (#2463 review): hold rumble 0 means no hold rumble; the ramp top changes nothing."""
+        """UC-048 BR-010 (#2463 review): hold rumble 0 means no hold rumble; the ramp top changes nothing."""
         off = _ramp_cues(hold_rumble_intensity=0)
         await _effect(manager, HOLD, 2000, _state(energy=2000, activation=4000, cues=off))
         assert manager._hold_cues[SERIAL].ramp is False
@@ -313,9 +313,9 @@ class TestUC040HoldRampRenderer:
         await _finish(manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_no_ramp_write_after_shield_hold_0_while_the_energy_layer_renders(self, manager, backend, clock):
-        """UC-040 A39 (#2463 review probe): a release ends the ramp for good while the energy layer still renders."""
+        """UC-048 A11 (#2463 review probe): a release ends the ramp for good while the energy layer still renders."""
         await _effect(manager, ENERGY, 5000, _state(energy=3000, activation=0))
         await _effect(manager, HOLD, 3000, _state(energy=3000, activation=3000))
         for _ in range(400):
@@ -337,9 +337,9 @@ class TestUC040HoldRampRenderer:
         await _finish(manager, clock)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_death_mid_ramp_ends_at_0_and_no_ramp_write_follows(self, manager, backend, clock, monkeypatch):
-        """UC-040 A39 (#2462, #2463): death at 90 % of the ramp: the death rumble keeps the motor, then 0, no ramp."""
+        """UC-048 A11 (#2462, #2463): death at 90 % of the ramp: the death rumble keeps the motor, then 0, no ramp."""
         monkeypatch.setattr(fm_module, "DEATH_RUMBLE_MS", 30)
         monkeypatch.setattr(fm_module, "DEATH_RED_HOLD_MS", 1)
         monkeypatch.setattr(fm_module, "DEATH_FADE_MS", 1)

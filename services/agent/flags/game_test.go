@@ -14,7 +14,7 @@ import (
 	"github.com/open-feature/go-sdk/openfeature"
 )
 
-// game_test.go covers the agent's read-only game domain (UC-040 A31 step 1, #1837):
+// game_test.go covers the agent's read-only game domain (UC-048 A4 step 1, #1837):
 // ShieldCharge mirrors the coordinator's resolve_shield_activation /
 // resolve_charge_expiry, evaluates with the coordinator's context, fails open, and
 // warns at most once per 30 s when the game set cannot be read.
@@ -48,7 +48,7 @@ func gameFlags(game Evaluator, log *slog.Logger) *Flags {
 	return f
 }
 
-// UC: UC-040 A31 BR-019
+// UC: UC-048 A4 BR-004
 func TestShieldCharge_Resolution(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -58,17 +58,17 @@ func TestShieldCharge_Resolution(t *testing.T) {
 		wantTrigger bool
 		wantExpiry  time.Duration
 	}{
-		{"UC-040/A31 trigger with the default expiry", "trigger", nil, nil, true, 20 * time.Second},
-		{"UC-040/A31 instant", "instant", nil, nil, false, 20 * time.Second},
-		{"UC-040/A31 trigger trimmed and lower-cased", " TRIGGER ", nil, nil, true, 20 * time.Second},
-		{"UC-040/A31 a malformed mode is instant", "garbage", nil, nil, false, 20 * time.Second},
-		{"UC-040/A31 expiry 10", "trigger", fp(10), nil, true, 10 * time.Second},
-		{"UC-040/A31 expiry 0 means never", "trigger", fp(0), nil, true, 0},
-		{"UC-040/A31 NaN expiry gives 20", "trigger", fp(math.NaN()), nil, true, 20 * time.Second},
-		{"UC-040/A31 negative expiry gives 20", "trigger", fp(-1), nil, true, 20 * time.Second},
-		{"UC-040/A31 expiry clamped to 120", "trigger", fp(200), nil, true, 120 * time.Second},
-		{"UC-040/A31 unreadable mode fails open", "trigger", nil, map[string]error{"shield.activation": errors.New("PROVIDER_NOT_READY")}, false, 20 * time.Second},
-		{"UC-040/A31 unreadable expiry gives 20", "trigger", nil, map[string]error{"shield.charge_expiry_seconds": errors.New("TYPE_MISMATCH")}, true, 20 * time.Second},
+		{"UC-048/A4 trigger with the default expiry", "trigger", nil, nil, true, 20 * time.Second},
+		{"UC-048/A4 instant", "instant", nil, nil, false, 20 * time.Second},
+		{"UC-048/A4 trigger trimmed and lower-cased", " TRIGGER ", nil, nil, true, 20 * time.Second},
+		{"UC-048/A4 a malformed mode is instant", "garbage", nil, nil, false, 20 * time.Second},
+		{"UC-048/A4 expiry 10", "trigger", fp(10), nil, true, 10 * time.Second},
+		{"UC-048/A4 expiry 0 means never", "trigger", fp(0), nil, true, 0},
+		{"UC-048/A4 NaN expiry gives 20", "trigger", fp(math.NaN()), nil, true, 20 * time.Second},
+		{"UC-048/A4 negative expiry gives 20", "trigger", fp(-1), nil, true, 20 * time.Second},
+		{"UC-048/A4 expiry clamped to 120", "trigger", fp(200), nil, true, 120 * time.Second},
+		{"UC-048/A4 unreadable mode fails open", "trigger", nil, map[string]error{"shield.activation": errors.New("PROVIDER_NOT_READY")}, false, 20 * time.Second},
+		{"UC-048/A4 unreadable expiry gives 20", "trigger", nil, map[string]error{"shield.charge_expiry_seconds": errors.New("TYPE_MISMATCH")}, true, 20 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := stubEvaluator{strings: map[string]string{"shield.activation": tc.mode}, floats: map[string]float64{}, errs: tc.errs}
@@ -82,7 +82,7 @@ func TestShieldCharge_Resolution(t *testing.T) {
 		})
 	}
 
-	t.Run("UC-040/A31 a nil game client returns the defaults, never a read through the agent client", func(t *testing.T) {
+	t.Run("UC-048/A4 a nil game client returns the defaults, never a read through the agent client", func(t *testing.T) {
 		f := gameFlags(nil, nil) // the agent client WOULD answer trigger
 		if trigger, expiry := f.ShieldCharge(context.Background(), "g-1"); trigger || expiry != 20*time.Second {
 			t.Fatalf("ShieldCharge = (%v, %s), want (false, 20s)", trigger, expiry)
@@ -96,11 +96,11 @@ func TestShieldCharge_Resolution(t *testing.T) {
 
 func fp(v float64) *float64 { return &v }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestShieldCharge_CoordinatorContext(t *testing.T) {
 	// The coordinator's grant read carries the game's context too (#1970); the shield
 	// flags' targeting may use only gameId and game_kind, so this subset resolves the same.
-	t.Run("UC-040/A31 both reads use game_kind=real and gameId, no targetingKey or game_mode", func(t *testing.T) {
+	t.Run("UC-048/A4 both reads use game_kind=real and gameId, no targetingKey or game_mode", func(t *testing.T) {
 		rec := &ctxRecorder{stubEvaluator: stubEvaluator{strings: map[string]string{"shield.activation": "trigger"}}}
 		_, _ = gameFlags(rec, nil).ShieldCharge(context.Background(), "g-42")
 		if len(rec.seen) != 2 {
@@ -153,9 +153,9 @@ func TestShieldCharge_ExperimentArmContext(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestShieldCharge_UnreadableWarnsThrottled(t *testing.T) {
-	t.Run("UC-040/A31 an unready game set warns once per 30 s, not on every check", func(t *testing.T) {
+	t.Run("UC-048/A4 an unready game set warns once per 30 s, not on every check", func(t *testing.T) {
 		var buf bytes.Buffer
 		log := slog.New(slog.NewTextHandler(&buf, nil))
 		down := stubEvaluator{errs: map[string]error{"shield.activation": errors.New("PROVIDER_NOT_READY")}}
@@ -177,10 +177,10 @@ func TestShieldCharge_UnreadableWarnsThrottled(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 // UC: UC-045 A3
 func TestSetupFlagd_GameDomain(t *testing.T) {
-	t.Run("UC-040/A31 the game set is its own domain: default before its sync, served after", func(t *testing.T) {
+	t.Run("UC-048/A4 the game set is its own domain: default before its sync, served after", func(t *testing.T) {
 		agentSrc, gameSrc := newFakeFlagdSource("on"), newFakeFlagdSource("on")
 		agentSrc.set(true, "on")
 		ctx, cancel := context.WithCancel(context.Background())

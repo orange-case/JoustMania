@@ -24,7 +24,6 @@ import pytest
 
 from proto import psmove_hid_pb2, psmove_hid_pb2_grpc
 from services.controller_manager.multiplexer import hid_stream
-from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter
 from services.controller_manager.multiplexer.rust_adapter import RustServiceAdapter
 
 SAMPLE_RATE_HZ = 1000  # all controllers together, as rust-hid sends them at full HID rate
@@ -85,10 +84,10 @@ def hid_server(epoch):
     server.stop(grace=0)
 
 
-@pytest.fixture(params=[RustServiceAdapter, PythonHidAdapter], ids=["rust", "python_hid"])
+@pytest.fixture(params=[RustServiceAdapter], ids=["rust"])
 def adapter(request, hid_server, monkeypatch):
     _, port = hid_server
-    prefix = "RUST_HID" if request.param is RustServiceAdapter else "PYTHON_HID"
+    prefix = "RUST_HID"
     monkeypatch.setenv(f"{prefix}_HOST", "127.0.0.1")
     monkeypatch.setenv(f"{prefix}_PORT", str(port))
     instance = request.param()
@@ -98,12 +97,7 @@ def adapter(request, hid_server, monkeypatch):
 
 @pytest.mark.uc("UC-002", flow="main", steps=[2])
 def test_a_lagging_reader_gets_samples_at_most_100ms_old(adapter, hid_server, epoch, monkeypatch):
-    """NFR-056: reader at half the arrival rate, the median sample age stays under the bound.
-
-    The ``python_hid`` case runs the same fake latest-sample server, so it only shows that the
-    python-hid adapter's channel carries the window options; python-hid's own input slots are
-    covered in ``services/python_hid/tests/test_device_manager.py`` (#2503).
-    """
+    """NFR-056: reader at half the arrival rate, the median sample age stays under the bound."""
     service, _ = hid_server
     ages_ms: list[int] = []
     lock = threading.Lock()

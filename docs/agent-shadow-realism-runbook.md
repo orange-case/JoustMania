@@ -12,7 +12,7 @@ how to refit the archetypes when the realism is off (section 4, UC-047):
    in real games, to check that the sign and rough size of the fitness change agree.
 
 Together they are the evidence for the **validity bar** (UC-043 A23, FR-203). Until an objective
-meets the bar it is human-review-only: its verdicts may open an issue or PR but never change a real
+meets the bar it is human-review-only: its verdicts may open an issue but never change a real
 default autonomously. The agent enforces it (#2541): an autonomous promotion is made only for an
 objective the operator attested (section 3). Autonomous promotion is off on every stack today
 (`AGENT_AUTONOMOUS_ENABLED` is unset).

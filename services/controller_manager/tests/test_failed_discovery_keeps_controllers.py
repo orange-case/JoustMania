@@ -1,6 +1,6 @@
 """A failed or timed-out HID Discover is not "no controllers" (UC-002 A1, #2125, #2140).
 
-Real DiscoveryLoop + MultiplexerBackend + RustServiceAdapter / PythonHidAdapter;
+Real DiscoveryLoop + MultiplexerBackend + RustServiceAdapter;
 only the HID service stub and the loop's other collaborators are mocked.
 """
 
@@ -23,14 +23,13 @@ from services.controller_manager.multiplexer.multiplexer_backend import (
     MAX_FAILED_DISCOVERY_PASSES,
     MultiplexerBackend,
 )
-from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter
 from services.controller_manager.multiplexer.rust_adapter import RustServiceAdapter
 from services.controller_manager.tests.backend_doubles import autospec_channel
 
 SERIALS = ["AABBCCDDEE01", "AABBCCDDEE02"]
 
 
-def _hid_adapter(adapter_cls: type[RustServiceAdapter | PythonHidAdapter]) -> RustServiceAdapter | PythonHidAdapter:
+def _hid_adapter(adapter_cls: type[RustServiceAdapter]) -> RustServiceAdapter:
     adapter = adapter_cls.__new__(adapter_cls)
     adapter._init_stream_state()
     adapter._channel = autospec_channel()
@@ -104,7 +103,7 @@ class _Harness:
         ]
 
 
-@pytest.fixture(params=[RustServiceAdapter, PythonHidAdapter], ids=["rust", "python_hid"])
+@pytest.fixture(params=[RustServiceAdapter], ids=["rust"])
 def adapter_cls(request):
     return request.param
 

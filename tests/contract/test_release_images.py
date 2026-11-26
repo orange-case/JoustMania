@@ -93,7 +93,7 @@ def test_compose_images_are_released(compose):
 
 
 def test_release_images_cover_main_compose():
-    # python-hid and operator-pad are profile-gated but still released.
+    # operator-pad is profile-gated but still released.
     assert _release_images() == _compose_images("docker-compose.yml") - NOT_RELEASED
 
 

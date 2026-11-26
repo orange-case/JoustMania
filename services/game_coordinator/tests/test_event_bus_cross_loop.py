@@ -318,14 +318,14 @@ async def test_a_half_full_queue_drops_the_energy_event_on_its_own_loop_but_neve
 
 @pytest.mark.uc("UC-035", br=["BR-008"])
 @pytest.mark.asyncio
-async def test_the_energy_event_records_no_span_event():
-    """UC-035 BR-008: an energy event adds no span event (the span event limit stays for real events)."""
+async def test_a_bus_event_records_no_span_event():
+    """The bus never mirrors an event onto the current span: each fact has one signal."""
     bus = EventBus()
     span = _RecordingSpan()
-    with patch("services.game_coordinator.event_bus.trace.get_current_span", return_value=span):
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
         await bus.publish(GameEvent.PLAYER_SHIELD_ENERGY, {"serial": "p1"})
         await bus.publish(GameEvent.PLAYER_DEATH, {"serial": "p1"})
-    assert span.events == ["player_death"]
+    assert span.events == []
 
 
 class _RecordingSpan:

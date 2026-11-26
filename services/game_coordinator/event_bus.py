@@ -4,7 +4,9 @@ Event Bus - Pub/sub system for game coordinator events.
 Provides thread-safe event publishing and async streaming for game events:
 - Multiple subscribers via async queues
 - State synchronization callbacks
-- OpenTelemetry span event recording
+
+Bus events are not mirrored as span events: each fact has one signal, and the
+spans carry their own events (telemetry.md §5).
 
 Threading model (#1300): one bus is used from SEVERAL event loops. The
 persistent primary bus outlives every game; each game runs on its own
@@ -46,7 +48,6 @@ import threading
 import time
 from collections.abc import Callable
 
-from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from proto import game_coordinator_pb2
@@ -58,7 +59,7 @@ logger = logging.getLogger(__name__)
 # _deliver, on the subscriber's own loop, once that queue is a quarter full, so
 # droppable events never hold more than a quarter of a queue and at least three
 # quarters stay for player_death, game_ended and game_winner (a full queue still
-# drops any event). A droppable event records no span event.
+# drops any event).
 DROPPABLE_EVENT_TYPES = frozenset({"player_shield_energy"})
 # Droppable events are delivered only while the queue holds less than maxsize / this.
 DROPPABLE_QUEUE_SHARE_DIVISOR = 4
@@ -72,7 +73,6 @@ class EventBus:
     Supports:
     - Multiple async subscribers via queues
     - State synchronization callbacks for game lifecycle events
-    - Span event recording for observability
     """
 
     def __init__(self, state_sync_callback: Callable[[str], None] | None = None):
@@ -155,16 +155,6 @@ class EventBus:
 
             # Snapshot subscribers to avoid dict modification during iteration
             subscribers_snapshot = dict(self._subscribers)
-
-        # Record as span event for observability (not a droppable event: UC-035 BR-008)
-        current_span = trace.get_current_span()
-        if str(event_type) not in DROPPABLE_EVENT_TYPES and current_span.is_recording():
-            attributes = {
-                "event.type": event_type,
-                "subscribers.count": len(subscribers_snapshot),
-                **{k: str(v) for k, v in data.items()},
-            }
-            current_span.add_event(event_type, attributes=attributes)
 
         # Convert all values to strings (protobuf map<string, string> requirement)
         string_data = {k: str(v) for k, v in data.items()}

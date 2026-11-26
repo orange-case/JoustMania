@@ -206,7 +206,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         # Agent shield layers per controller ("full" / "toughness_boost" / "charge") and the one
         # renderer task per controller that paints the top layer (#1301). The
         # shield is NOT an active_effects entry: other effects overlay it, a new
-        # base colour only changes what is restored after it (UC-040 BR-010).
+        # base colour only changes what is restored after it (UC-048 BR-003).
         self._shield_layers: dict[str, dict[str, ShieldLayer]] = {}
         self._shield_tasks: dict[str, asyncio.Task] = {}
         # The open controller.shield_effect span of each shown layer, per controller (#2669): kind ->
@@ -216,7 +216,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         self._charge_cue_tasks: dict[str, asyncio.Task] = {}
         # One "ending soon" task per controller while a full shield layer runs (#2094).
         self._shield_ending_tasks: dict[str, asyncio.Task] = {}
-        # Shield hold (#2096, UC-040 BR-026): the idle energy last sent, the game's cue values, the
+        # Shield hold (#2096, UC-048 BR-010): the idle energy last sent, the game's cue values, the
         # background rumble restored after every one-shot rumble while an activation runs, the
         # "ending soon" task of the activation and the cue task of the energy layer (its cue, then
         # the recharge-to-full pattern).
@@ -409,7 +409,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
             # unless another effect already owns the LED (#1430).
             if await self._release_effect(serial):
                 # Restore the current base colour, or hand the LED back to an
-                # active agent shield (#1301, UC-040 BR-010).
+                # active agent shield (#1301, UC-048 BR-003).
                 fallback = restore_color if isinstance(restore_color, tuple) else None
                 await self._finish_effect(serial, bool(restore_color), fallback)
 
@@ -526,7 +526,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         with tracer.start_as_current_span("effect_player_death", context=trace_context, kind=SpanKind.CONSUMER) as span:
             span.set_attribute(CONTROLLER_SERIAL_ATTR, serial)
 
-            # End the agent shield immediately for a clean transition (#1301, UC-040 A17); the
+            # End the agent shield immediately for a clean transition (#1301, UC-048 A2); the
             # running effect (e.g. a warning flash) is replaced by the death effect task below.
             span.add_event("cancel_existing_effect")
             # The player is out from the first moment: a reconnect during the effect
@@ -581,7 +581,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         (base_colors may be updated DURING the effect, e.g., menu sends lobby color)
         """
         duration_ms = get_winner_rainbow_duration_ms()
-        # The winner rainbow ends an agent shield (#1301, UC-040 A17).
+        # The winner rainbow ends an agent shield (#1301, UC-048 A2).
         await self.end_shield_effect(serial, restore=False, reason=SHIELD_END_GAME_END)
         with tracer.start_as_current_span(
             "effect_winner_rainbow", context=trace_context, kind=SpanKind.CONSUMER
@@ -834,7 +834,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
 
             # The agent shield is a layer, not an active effect: route it before
             # the placeholder below, which re-types a running effect (#1301,
-            # UC-040 BR-010).
+            # UC-048 BR-003).
             if effect in SHIELD_EFFECTS:
                 for target_serial in serials:
                     await self._handle_shield_command(
@@ -948,7 +948,7 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         async with self.effect_lock:
             self.base_colors[serial] = color
             if self.shield_active(serial):
-                # Restored when the agent shield ends (#1301, UC-040 BR-010).
+                # Restored when the agent shield ends (#1301, UC-048 BR-003).
                 logger.info(f"[{label}] Base color for {serial} stored; shown after the agent shield")
             elif serial not in self.active_effects:
                 await self.set_controller_color(serial, color)

@@ -1,5 +1,5 @@
 """
-A closed game stream ends its players' shield layers after a short delay (#1837, UC-040 A32).
+A closed game stream ends its players' shield layers after a short delay (#1837, UC-048 A5).
 
 A charge lasts minutes: a coordinator crash must not leave a breathing controller in the
 lobby. A coordinator reconnect re-claims the controllers within the delay and keeps them.
@@ -70,9 +70,9 @@ async def _wait_cleanups(svc):
 
 class TestUC040StreamCloseCleanup:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-006"])
     async def test_closed_stream_ends_the_layers_of_its_roster_after_the_delay(self, stream_servicer):
-        """UC-040 A32: roster snapshotted BEFORE the release; layers end ~2 s (here 50 ms) later."""
+        """UC-048 A5: roster snapshotted BEFORE the release; layers end ~2 s (here 50 ms) later."""
         await _run_stream(stream_servicer)
 
         assert stream_servicer._game_stream_serials == {}  # released ...
@@ -82,9 +82,9 @@ class TestUC040StreamCloseCleanup:
         stream_servicer.feedback_manager.end_shield_effect.assert_awaited_once_with(SERIAL, restore=True)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-006"])
     async def test_a_new_game_stream_claiming_the_serial_cancels_the_cleanup(self, stream_servicer):
-        """UC-040 A32: the coordinator reconnect re-claims the controller; its charge layer survives."""
+        """UC-048 A5: the coordinator reconnect re-claims the controller; its charge layer survives."""
         await _run_stream(stream_servicer)
         # The reconnected stream sends its colours config within the delay.
         await stream_servicer._process_gameplay_config(_game_config(SERIAL), "game_stream_2", autospec_span())
@@ -94,9 +94,9 @@ class TestUC040StreamCloseCleanup:
         stream_servicer.feedback_manager.end_shield_effect.assert_not_called()
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-006"])
     async def test_observer_stream_close_does_not_touch_shield_layers(self, stream_servicer):
-        """UC-040 A32: a stream that never sent colours owns no layers."""
+        """UC-048 A5: a stream that never sent colours owns no layers."""
 
         class Ctx(_Context):
             pass
@@ -118,15 +118,15 @@ class TestUC040StreamCloseCleanup:
 
 
 class TestUC040CleanupOutlastsReconnectBackoff:
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-006"])
     def test_delay_covers_the_coordinator_reconnect_backoff(self):
         """The coordinator retries after 1, 2, 3 s (cumulative 6 s): the delay must outlast that."""
         assert servicer_module.STREAM_CLOSE_SHIELD_CLEANUP_DELAY_S >= 7.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-006"])
     async def test_late_reconnect_claim_inside_the_delay_keeps_the_layers(self, stream_servicer, monkeypatch):
-        """UC-040 A32: a second reconnect attempt claims mid-delay (scaled: 0.2 s of 0.4 s); layers kept."""
+        """UC-048 A5: a second reconnect attempt claims mid-delay (scaled: 0.2 s of 0.4 s); layers kept."""
         monkeypatch.setattr(servicer_module, "STREAM_CLOSE_SHIELD_CLEANUP_DELAY_S", 0.4)
         await _run_stream(stream_servicer)
         await asyncio.sleep(0.2)
