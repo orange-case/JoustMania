@@ -38,6 +38,7 @@ class FakeFlagService:
         self.completed: list[tuple[str, str]] = []
         self.delay = 0.0
         self.register_delay = 0.0  # slows only PUT /games/{id}
+        self.reconcile_delay = 0.0  # slows only PUT /coordinators/{instance}/games
         self.fail = False
         self.epoch = "boot-a"
         owner = self
@@ -50,6 +51,8 @@ class FakeFlagService:
                 time.sleep(owner.delay)
                 if self.command == "PUT" and self.path.startswith("/games/"):
                     time.sleep(owner.register_delay)
+                if self.command == "PUT" and self.path.startswith("/coordinators/"):
+                    time.sleep(owner.reconcile_delay)
                 owner.completed.append((self.command, self.path))
                 status = 503 if owner.fail else (204 if self.command == "DELETE" else 200)
                 self.send_response(status)
@@ -323,6 +326,28 @@ async def test_reconcile_runs_periodically(service):
     )
     lc.start()
     await wait_for(lambda: len(_reconciled_games(service)) >= 3)
+    await lc.stop()
+
+
+@pytest.mark.uc("UC-053", flow="main", steps=[1])
+@pytest.mark.uc("UC-053", flow="A10")
+@pytest.mark.asyncio
+async def test_registration_during_a_reconcile_is_not_dropped_by_its_older_snapshot(service):
+    """The start-up reconcile snapshots no games; a game registers while that
+    reconcile is in flight and lands first. The service replaces the instance's
+    set with the snapshot, so the coordinator must reconcile again with the game
+    now, not after the 15 s period."""
+    live: list[GameRecord] = []
+    lc = FlagServiceLifecycle(FlagServiceClient(service.url), lambda: list(live), instance="h/1", retry_interval=10.0)
+    service.reconcile_delay = 0.3
+    lc.start()
+    await wait_for(lambda: _reconciled_games(service) == [[]])  # received, still in flight
+    live.append(GAME)
+    assert await lc.register(GAME) is True
+    assert ("PUT", "/coordinators/h%2F1/games") not in service.completed  # the register landed first
+
+    await wait_for(lambda: len(_reconciled_games(service)) == 2, limit=1.5)
+    assert _reconciled_games(service)[-1] == [GAME.game_id]
     await lc.stop()
 
 
