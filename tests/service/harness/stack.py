@@ -375,13 +375,10 @@ class ServiceStack:
                 # and enable every adapter it finds over D-Bus.
                 "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/nonexistent/joustmania-service-tier",
                 # Never real controllers: the rust backend (the default when the
-                # controller.backend flag is unreadable) and the python backend
-                # would dial localhost:50058/50059, where a compose stack on this
-                # host publishes rust-hid.
+                # controller.backend flag is unreadable) would dial localhost:50058,
+                # where a compose stack on this host publishes rust-hid.
                 "RUST_HID_HOST": "127.0.0.1",
                 "RUST_HID_PORT": str(UNREACHABLE_PORT),
-                "PYTHON_HID_HOST": "127.0.0.1",
-                "PYTHON_HID_PORT": str(UNREACHABLE_PORT),
             },
             "game-coordinator": {"FLAG_SERVICE_INSTANCE": "game-coordinator"},
             "menu": {},

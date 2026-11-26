@@ -797,7 +797,7 @@ type KeyState struct {
 	Flag    string `json:"flag"`
 	// Scope is "stack" or the key's identity (game:<id>, game:<id>:<serial>
 	// also for a real game's player value sent to controller:<serial>,
-	// experiment:<id>:<arm>, real, fraction).
+	// experiment:<id>:<arm>, real).
 	Scope   string `json:"scope"`
 	InSync  bool   `json:"in_sync"`
 	Pending bool   `json:"pending"`

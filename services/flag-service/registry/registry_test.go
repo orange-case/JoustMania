@@ -127,9 +127,6 @@ func checkBounds(t *testing.T, row mdRow, p *Policy) {
 		if len(b.Variants) > 0 || b.Range != nil || b.Pattern != nil || b.FreeString || b.Payload != nil {
 			t.Errorf("%s: flags.md says declared variants, registry %+v", row.key, b)
 		}
-		if strings.Contains(text, "fraction 1 to 100") && !reflect.DeepEqual(b.Fraction, []int{1, 100}) {
-			t.Errorf("%s: fraction bounds %v", row.key, b.Fraction)
-		}
 	case strings.HasPrefix(text, "range table"):
 		if p.MagnitudeLimits() == nil {
 			t.Errorf("%s: flags.md says range table, registry.magnitudeLimits has no entry", row.key)
@@ -369,16 +366,15 @@ func TestParseRejectsBadRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := map[string]string{
-		"unknown flag":            `flags: [{set: agent, key: nope, kind: overlay, scope: [stack]}]`,
-		"wrong set":               `flags: [{set: game, key: enabled, kind: overlay, scope: [stack]}]`,
-		"unknown kind":            `flags: [{set: agent, key: enabled, kind: weird, scope: [stack]}]`,
-		"unknown scope":           `flags: [{set: agent, key: enabled, kind: overlay, scope: [world]}]`,
-		"persist on a game flag":  `flags: [{set: interventions, key: volume_override, kind: state, scope: [game], persist: true}]`,
-		"event without payload":   `flags: [{set: interventions, key: end_game, kind: event, scope: [game]}]`,
-		"undeclared variant":      `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack], bounds: {variants: [maybe]}}]`,
-		"unknown field":           `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack], owner: agent}]`,
-		"duplicate row":           `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack]}, {set: agent, key: enabled, kind: overlay, scope: [stack]}]`,
-		"fraction without bounds": `flags: [{set: controller, key: bluetooth_backend, kind: overlay, scope: [fraction]}]`,
+		"unknown flag":           `flags: [{set: agent, key: nope, kind: overlay, scope: [stack]}]`,
+		"wrong set":              `flags: [{set: game, key: enabled, kind: overlay, scope: [stack]}]`,
+		"unknown kind":           `flags: [{set: agent, key: enabled, kind: weird, scope: [stack]}]`,
+		"unknown scope":          `flags: [{set: agent, key: enabled, kind: overlay, scope: [world]}]`,
+		"persist on a game flag": `flags: [{set: interventions, key: volume_override, kind: state, scope: [game], persist: true}]`,
+		"event without payload":  `flags: [{set: interventions, key: end_game, kind: event, scope: [game]}]`,
+		"undeclared variant":     `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack], bounds: {variants: [maybe]}}]`,
+		"unknown field":          `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack], owner: agent}]`,
+		"duplicate row":          `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack]}, {set: agent, key: enabled, kind: overlay, scope: [stack]}]`,
 	}
 	for name, doc := range bad {
 		if _, err := Parse([]byte(doc), b); err == nil {

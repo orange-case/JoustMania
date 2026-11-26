@@ -1,10 +1,9 @@
-# Opt-in compose profiles (python-hid, operator-pad) go in .env.local or a
-# drop-in, never in .env (tracked by git). Set the whole comma-separated list
-# in one place: a unit drop-in Environment= wins over .env.local, so a drop-in
-# naming only python-hid switches the operator pad off. For a drop-in,
-# `sudo systemctl edit joustmania` and add:
+# Opt-in compose profiles (operator-pad) go in .env.local or a drop-in, never
+# in .env (tracked by git). Set the whole comma-separated list in one place: a
+# unit drop-in Environment= wins over .env.local, so a profile missing from the
+# drop-in's list is off. For a drop-in, `sudo systemctl edit joustmania` and add:
 #   [Service]
-#   Environment=COMPOSE_PROFILES=python-hid,operator-pad
+#   Environment=COMPOSE_PROFILES=operator-pad
 # ExecStart and ExecStop both inherit it (#1402 S2).
 #
 # Compose calls go through scripts/setup/joustmania-compose.sh: -f

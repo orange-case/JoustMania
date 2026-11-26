@@ -360,18 +360,12 @@ func boolParam(q url.Values, name string) (bool, *fserr.Error) {
 	return false, fserr.BadRequest("%s must be true, false, 1 or 0", name)
 }
 
-func scopeFromQuery(r *http.Request) (state.Scope, *fserr.Error) {
+func scopeFromQuery(r *http.Request) state.Scope {
 	q := r.URL.Query()
-	sc := state.Scope{
+	return state.Scope{
 		GameID: q.Get("game_id"), Serial: q.Get("serial"),
 		ExperimentID: q.Get("experiment_id"), Arm: q.Get("arm"), GameKind: q.Get("game_kind"),
 	}
-	fraction, ferr := boolParam(q, "fraction")
-	if fraction || q.Has("fraction_percent") {
-		zero := 0
-		sc.FractionPercent = &zero
-	}
-	return sc, ferr
 }
 
 func (a *API) clear(w http.ResponseWriter, r *http.Request) {
@@ -379,11 +373,8 @@ func (a *API) clear(w http.ResponseWriter, r *http.Request) {
 	ctx, span := a.Tracer.Start(r.Context(), telemetry.SpanWrite)
 	a.beginWrite()
 	defer a.endWrite()
-	sc, ferr := scopeFromQuery(r)
-	var persist bool
-	if ferr == nil {
-		persist, ferr = boolParam(r.URL.Query(), "persist")
-	}
+	sc := scopeFromQuery(r)
+	persist, ferr := boolParam(r.URL.Query(), "persist")
 	req := state.WriteRequest{Set: r.PathValue("set"), Flag: r.PathValue("flag"), Scope: sc, Writer: r.URL.Query().Get("writer")}
 	var res state.WriteResult
 	if ferr != nil {

@@ -6,8 +6,8 @@
 # Game services: the ones an upgrade waits for before it calls the new version
 # healthy (UC-060 main step 3, A2 step 3). Observability, the agent, the
 # dashboard, connect-proxy and envoy only make the state degraded (A1, BR-002).
-# Only the services the active profiles enable are checked (python-hid is opt-in).
-JOUSTMANIA_GAME_SERVICES=(flag-service flagd controller-manager rust-hid python-hid pairing-daemon game-coordinator menu audio)
+# Only the services the active profiles enable are checked.
+JOUSTMANIA_GAME_SERVICES=(flag-service flagd controller-manager rust-hid pairing-daemon game-coordinator menu audio)
 
 # joustmania_pin_image_tag <checkout dir>
 # Prints the image tag the checkout pins (UC-060 BR-003, C-040) and returns 0,

@@ -49,7 +49,6 @@ type Scope struct {
 	ExperimentID    string `json:"experiment_id,omitempty"`
 	Arm             string `json:"arm,omitempty"`
 	GameKind        string `json:"game_kind,omitempty"`
-	FractionPercent *int   `json:"fraction_percent,omitempty"`
 }
 
 // Write is a PUT body: exactly one of Variant and Value.

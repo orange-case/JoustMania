@@ -338,11 +338,10 @@ test-contract:
 	uv run --no-project $(CONTRACT_DEPS) pytest tests/contract -v -p no:cacheprovider
 
 # Only the flagd contract (tests/contract/test_flagd_resolution.py, ~1 min), plus
-# the #2184 RPC retry test and the #1945 pinned fractional buckets (need grpc +
-# the provider from CONTRACT_DEPS).
+# the #2184 RPC retry test (need grpc + the provider from CONTRACT_DEPS).
 .PHONY: test-contract-flagd
 test-contract-flagd:
-	uv run --no-project $(CONTRACT_DEPS) pytest tests/contract/test_flagd_resolution.py tests/contract/test_flagd_rpc_retry.py tests/contract/test_fractional_bucketing.py -v --tb=short -p no:cacheprovider
+	uv run --no-project $(CONTRACT_DEPS) pytest tests/contract/test_flagd_resolution.py tests/contract/test_flagd_rpc_retry.py -v --tb=short -p no:cacheprovider
 
 # Integration tests with pre-built images + volume-mounted source (no rebuild)
 # Requires images: run `docker compose pull` or `make dev` first

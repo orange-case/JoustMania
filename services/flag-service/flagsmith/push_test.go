@@ -70,7 +70,6 @@ type overrideCase struct {
 // Every scope but the stack is an override on its identity, with the value in
 // its Flagsmith type; an ended value deletes the override.
 func TestIdentityOverrideBody(t *testing.T) {
-	pct := 25
 	cases := []overrideCase{
 		{name: "game float", set: "interventions", flag: "music_tempo_override", scopeName: registry.ScopeGame, scope: state.Scope{GameID: "g1"}, raw: `1.25`, identifier: "game:g1", value: `"1.25"`},
 		{name: "game integer", set: "interventions", flag: "global_sensitivity_override", scopeName: registry.ScopeGame, scope: state.Scope{GameID: "g1"}, raw: `3`, identifier: "game:g1", value: `3`},
@@ -78,7 +77,6 @@ func TestIdentityOverrideBody(t *testing.T) {
 		{name: "shadow game player", set: "interventions", flag: "player_sensitivity_factor", scopeName: registry.ScopeGameSerial, scope: state.Scope{GameID: "g1", Serial: "MOCK0001"}, raw: `1.5`, identifier: "game:g1:MOCK0001", value: `"1.5"`, game: gameOf("g1", "shadow", "MOCK0001")},
 		{name: "experiment arm", set: "agent", flag: "decision.prompt_profile", scopeName: registry.ScopeExperiment, scope: state.Scope{ExperimentID: "e1", Arm: "armA"}, variant: "neutral", raw: `"neutral"`, identifier: "experiment:e1:armA", value: `"neutral"`},
 		{name: "real", set: "game", flag: "windows", scopeName: registry.ScopeReal, scope: state.Scope{GameKind: "real"}, raw: `{"min": 1}`, identifier: "real", value: `"{\"min\":1}"`},
-		{name: "fraction", set: "agent", flag: "decision.prompt_profile", scopeName: registry.ScopeFraction, scope: state.Scope{FractionPercent: &pct}, variant: "v1", raw: `"v1"`, identifier: "fraction", value: `"{\"variant\":\"v1\",\"fraction_percent\":25}"`},
 	}
 	for _, c := range cases {
 		t.Run("UC-055/BR-002 "+c.name, func(t *testing.T) { checkOverrideCase(t, c) })

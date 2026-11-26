@@ -2,8 +2,7 @@
 
 The LED is the primary feedback channel at a venue. The daemon writes the
 PS Move output report 0x06 (LED colour, no rumble) to the controller's USB
-HID node itself, whichever pairing backend is selected: the node is the
-``device_path`` the backend listed, and the daemon runs privileged with /dev.
+HID node itself: the node is the ``device_path`` rust-hid listed, and the daemon runs privileged with /dev.
 
 - pulse: slow white pulse while the controller waits for or goes through pairing
 - paired: three short green flashes, then off (the host can unplug it)

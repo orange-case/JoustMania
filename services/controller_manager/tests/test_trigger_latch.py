@@ -24,7 +24,6 @@ from lib.controller_constants import ButtonKey, normalize_serial
 from proto import controller_manager_pb2, psmove_hid_pb2
 from services.controller_manager.multiplexer.mock_adapter import MockAdapter
 from services.controller_manager.multiplexer.multiplexer_backend import MultiplexerBackend
-from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter
 from services.controller_manager.multiplexer.rust_adapter import RustServiceAdapter
 from services.controller_manager.tests.backend_doubles import autospec_channel, inert_hooks
 from services.controller_manager.tests.fake_stream_call import FakeStreamCall
@@ -164,7 +163,7 @@ def _bare_hid(adapter_cls):
     return adapter
 
 
-@pytest.mark.parametrize("adapter_cls", [RustServiceAdapter, PythonHidAdapter], ids=["rust", "python_hid"])
+@pytest.mark.parametrize("adapter_cls", [RustServiceAdapter], ids=["rust"])
 class TestUC030HidTriggerLatch:
     @pytest.mark.uc("UC-030", flow="A6", br=["BR-005"])
     def test_press_and_release_between_polls_is_latched(self, adapter_cls):

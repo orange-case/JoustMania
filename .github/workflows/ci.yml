@@ -64,7 +64,7 @@ name: CI
 # A skipped e2e job is fine for CI Complete unless e2e_required was true.
 #
 # Release contract: release.yml tag-images retags IMAGE:<sha> -> IMAGE:<version>
-# for all 13 release images, so every main push must produce a :<sha> tag for
+# for all 12 release images, so every main push must produce a :<sha> tag for
 # every image. Images skipped by the path filter get a seconds-long manifest
 # retag from :main instead (retag-skipped job).
 
@@ -339,10 +339,7 @@ jobs:
             pairing_daemon:
               - *shared_python
               - 'services/pairing_daemon/**'
-            python_hid:
-              - *shared_python
-              - 'services/python_hid/**'
-            # #2050: the operator pad (profile-gated image, docker-build-extra like python-hid)
+            # #2050: the operator pad (profile-gated image, built in docker-build-extra)
             operator_pad:
               - *shared_python
               - 'services/operator_pad/**'
@@ -460,7 +457,6 @@ jobs:
           CH_MENU: ${{ steps.f.outputs.menu }}
           CH_AUDIO: ${{ steps.f.outputs.audio }}
           CH_PAIRING_DAEMON: ${{ steps.f.outputs.pairing_daemon }}
-          CH_PYTHON_HID: ${{ steps.f.outputs.python_hid }}
           CH_OPERATOR_PAD: ${{ steps.f.outputs.operator_pad }}
           CH_CONNECT_PROXY: ${{ steps.f.outputs.connect_proxy }}
           CH_AGENT: ${{ steps.f.outputs.agent }}
@@ -475,10 +471,10 @@ jobs:
             if [ "$#" -eq 0 ]; then echo -n '[]'; else printf '%s\n' "$@" | jq -R . | jq -sc .; fi
           }
 
-          # service-checks matrix: changed Python services; all 7 on main push /
+          # service-checks matrix: changed Python services; all 6 on main push /
           # force (keeps full SonarCloud coverage on main)
           checks=()
-          for s in controller_manager game_coordinator menu audio pairing_daemon python_hid operator_pad; do
+          for s in controller_manager game_coordinator menu audio pairing_daemon operator_pad; do
             key="CH_${s^^}"
             if [ "$RUN_ALL_CHECKS" = "true" ] || [ "${!key}" = "true" ]; then checks+=("$s"); fi
           done
@@ -507,7 +503,6 @@ jobs:
           maybe_extra "$CH_FLAG_SERVICE"   flag-service   services/flag-service/Dockerfile  . flag-service
           maybe_extra "$CH_DASHBOARD"      dashboard      services/dashboard/Dockerfile     . dashboard
           maybe_extra "$CH_RUST"           rust-hid       services/rust-hid/Dockerfile      . rust-hid
-          maybe_extra "$CH_PYTHON_HID"     python-hid     services/python_hid/Dockerfile    . python-hid
           maybe_extra "$CH_OPERATOR_PAD"   operator-pad   services/operator_pad/Dockerfile  . operator-pad
           maybe_extra "$CH_OTEL_COLLECTOR" otel-collector images/otel-collector/Dockerfile  images/otel-collector otel-collector
           if [ "${#extra[@]}" -eq 0 ]; then
@@ -516,7 +511,7 @@ jobs:
             echo "docker_extra=$(printf '%s\n' "${extra[@]}" | jq -sc .)" >> "$GITHUB_OUTPUT"
           fi
 
-          # retag matrix: the 13 release.yml images NOT built this run — on main
+          # retag matrix: the 12 release.yml images NOT built this run — on main
           # pushes they still need a :<sha> tag for release tagging
           retag=()
           maybe_retag() {
@@ -530,7 +525,6 @@ jobs:
           maybe_retag "$CH_CONNECT_PROXY"      connect-proxy
           maybe_retag "$CH_DASHBOARD"          dashboard
           maybe_retag "$CH_RUST"               rust-hid
-          maybe_retag "$CH_PYTHON_HID"         python-hid
           maybe_retag "$CH_OPERATOR_PAD"       operator-pad
           maybe_retag "$CH_OTEL_COLLECTOR"     otel-collector
           maybe_retag "$CH_FLAG_SERVICE"       flag-service
@@ -932,8 +926,8 @@ jobs:
         run: scripts/ci/docker-pull-retry.sh compose:envoy compose:flagd
 
       - name: Run telemetry contract tests
-        # test_flagd_resolution.py, test_flagd_rpc_retry.py and test_fractional_bucketing.py (grpc + provider) run in the Flagd Contract job below.
-        run: uv run --no-project --with pytest --with pyyaml --with pytest-rerunfailures pytest tests/contract -v --tb=short -p no:cacheprovider --ignore tests/contract/test_flagd_resolution.py --ignore tests/contract/test_flagd_rpc_retry.py --ignore tests/contract/test_fractional_bucketing.py
+        # test_flagd_resolution.py and test_flagd_rpc_retry.py (grpc + provider) run in the Flagd Contract job below.
+        run: uv run --no-project --with pytest --with pyyaml --with pytest-rerunfailures pytest tests/contract -v --tb=short -p no:cacheprovider --ignore tests/contract/test_flagd_resolution.py --ignore tests/contract/test_flagd_rpc_retry.py
 
   # flagd contract tier (#1422): ONE real flagd (compose image tag) on a temp
   # copy of services/flagd/ci, no game services, no build. Typed-getter
@@ -1987,7 +1981,7 @@ jobs:
       - name: Inspect manifest
         run: docker buildx imagetools inspect "${IMAGE_PREFIX}/${IMAGE_NAME}:${GITHUB_SHA}"
 
-  # Release contract: release.yml tag-images expects IMAGE:<sha> for all 13
+  # Release contract: release.yml tag-images expects IMAGE:<sha> for all 12
   # release images. Images skipped by the path filter get a manifest-only retag
   # from :main (seconds each). Explicit if-condition because the build jobs may
   # legitimately be 'skipped' (plain `needs` semantics would skip this job too).
