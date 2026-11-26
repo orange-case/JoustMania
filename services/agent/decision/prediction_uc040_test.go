@@ -254,7 +254,6 @@ func TestRegisterPrediction_ActedOnly(t *testing.T) {
 		{"UC-040/A44 discarded stale registers nothing", decideRecord{outcome: DecideOutcomeDiscarded, discardedReason: DiscardStale, discardedDetail: DiscardTargetGone}, false},
 		{"UC-040/A44 applied rules fallback registers", decideRecord{outcome: DecideOutcomeFallback, permissionKnown: true, applied: true}, true},
 		{"UC-040/A44 noop registers nothing", decideRecord{outcome: DecideOutcomeNoop}, false},
-
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := testBook(t, &clock)
