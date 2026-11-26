@@ -134,32 +134,6 @@ func (p *Policy) AppliesWhenPersistFails() bool {
 	return p.Persist && IsKillSwitch(p.Set, p.Key)
 }
 
-// sessionOnly holds, per persist row ("set/key"), the variants that are never
-// persisted: a stack write of one lives in memory over the persisted value, is
-// never sent to Flagsmith, and a restart drops it. A Go set, like killSwitches,
-// because released images parse registry.yaml strictly. flags.md §13 lists it.
-var sessionOnly = map[string]map[string]bool{
-	"agent/interventions_allowed": {"shadow_group": true},
-}
-
-// SessionOnly reports whether a stack write of variant on this row stays in
-// memory although the row persists.
-func (p *Policy) SessionOnly(variant string) bool {
-	return variant != "" && sessionOnly[p.Set+"/"+p.Key][variant]
-}
-
-// SessionOnlyVariants returns the session-only set as sorted "set/key=variant".
-func SessionOnlyVariants() []string {
-	var out []string
-	for k, vs := range sessionOnly {
-		for v := range vs {
-			out = append(out, k+"="+v)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 // FlagsmithWriter is the writer label of the Flagsmith link's in-process
 // writes (flagsmith.WriterLabel, which equals it; a test keeps them equal).
 // The HTTP API refuses it as a writer label (400 malformed, UC-053 BR-002), so

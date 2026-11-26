@@ -649,10 +649,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	loop.SetAlreadyAppliedRecorder(func(intervention, serial string) {
 		mux.AppendInterventionInPlace(gameID, intervention, serial)
 	})
-	// UC-040 BR-036 (#2467 PR 5): remote decide requests carry the game's
-	// decision.prompt_profile (v1 on any read error).
-	loop.SetPromptProfileSource(c.agentFlags.PromptProfile)
-	// UC-040 BR-044 (#2687): claude requests carry the operator's
+	// UC-040 BR-044 (#2687): claude and jev requests carry the operator's
 	// decision.operator_brief ("" on any read error: no brief).
 	loop.SetOperatorBriefSource(c.agentFlags.OperatorBrief)
 	loop.SetBriefLog(c.briefLog)
@@ -660,8 +657,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// decision.magnitude_bounds (code default ranges on any read error).
 	loop.SetMagnitudeBoundsSource(c.agentFlags.MagnitudeBounds)
 	loop.SetBoundsLog(c.boundsLog)
-	// #2479: goal.profile in the game's flag context, for the prompt's goal lines
-	// (only under decision.goal_in_prompt).
+	// #2479: goal.profile in the game's flag context, for the prompt's goal lines.
 	loop.SetGoalSource(c.goalProfile)
 	// UC-048 BR-012 (#2395): a grant_shield without a value gets the
 	// interventions/shield_seconds "default" variant, read at use time through the

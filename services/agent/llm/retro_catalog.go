@@ -58,7 +58,7 @@ func catalogLine(name string, policy flags.Policy, bounds *decide.MagnitudeTable
 		return name
 	}
 	var b strings.Builder
-	b.WriteString(name + " (" + leverScope(iv) + "): " + iv.Description(decide.PromptProfileNeutral))
+	b.WriteString(name + " (" + leverScope(iv) + "): " + iv.Effect)
 	if bd, ok := retroBounds(bounds, name); ok {
 		lo, hi := retroNum(bd.Min), retroNum(bd.Max)
 		// The range-end effects are the decide question's (#2696): one source of

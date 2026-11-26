@@ -34,35 +34,13 @@ func (f *Flags) SetGameAttrs(lookup func(gameID string) GameAttrs) {
 // GameContext is the agent's per-game evaluation context (#2467 PR 5, generalised
 // from the shield reads): gameId, the game's game_kind (real when unknown) and, for
 // a game of an experiment, experiment_id and arm, from the lookup SetGameAttrs wired.
-// decision.prompt_profile (PromptProfile) and decision.operator_brief are read with it.
+// decision.operator_brief is read with it.
 func (f *Flags) GameContext(gameID string) openfeature.EvaluationContext {
 	var attrs GameAttrs
 	if f != nil && f.gameAttrs != nil {
 		attrs = f.gameAttrs(gameID)
 	}
 	return shieldChargeContext(gameID, attrs)
-}
-
-// keyDecisionPromptProfile is decision.prompt_profile (agent set, flags.md §3).
-const keyDecisionPromptProfile = "decision.prompt_profile"
-
-// PromptProfile reads decision.prompt_profile for one game from the agent set, in
-// the game's context (GameContext), and normalizes it (decide-contract.md §3,
-// UC-040 BR-036): "neutral" is neutral, anything else is v1. A nil wrapper, a nil
-// client or any evaluation error gives v1, the shipped prompt (debug log only: the
-// remote path reads it per request). The coordinator never reads this flag, and
-// flags.md allows its targeting only game_kind, experiment_id and arm
-// (tests/contract/test_flagd_resolution.py).
-func (f *Flags) PromptProfile(ctx context.Context, gameID string) string {
-	if f == nil || f.client == nil {
-		return decide.PromptProfileV1
-	}
-	v, err := f.client.StringValue(ctx, keyDecisionPromptProfile, decide.PromptProfileV1, f.GameContext(gameID))
-	if err != nil {
-		f.log.Debug("flags decision.prompt_profile unreadable, using v1", "game_id", gameID, "error", err)
-		return decide.PromptProfileV1
-	}
-	return decide.NormalizePromptProfile(v)
 }
 
 // keyDecisionOperatorBrief is decision.operator_brief (agent set, flags.md §3, #2687).

@@ -267,11 +267,6 @@ func (s *State) slotChangeLocked(f *flagState, scopeName string, sc Scope) Chang
 		return c
 	}
 	v := f.slotValue(scopeName, sc)
-	if scopeName == registry.ScopeStack && v != nil && v == f.stack && f.policy != nil && f.policy.SessionOnly(v.Variant) {
-		// A session-only value is never sent to Flagsmith: the link sees the
-		// persisted value beneath it.
-		v = f.admin
-	}
 	if v == nil {
 		c.Kind = ChangeCleared
 		return c

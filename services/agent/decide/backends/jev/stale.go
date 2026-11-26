@@ -3,7 +3,7 @@ package jev
 import "github.com/joustmania/agent/decide"
 
 // staleReadingsPhrase describes a player marked readings_stale (UC-040 A50,
-// BR-039, #2514): the state only, in both prompt profiles.
+// BR-039, #2514): the state only, no verdict.
 const staleReadingsPhrase = " Its movement readings are stale, so intensity, variance and skill are not known."
 
 // stalePhrase is p's stale-readings sentence, empty when its readings are fresh.

@@ -45,7 +45,7 @@ func TestSuitability_ShieldCharged(t *testing.T) {
 	})
 	t.Run("UC-048/A4 toughness_boost to a charged player keeps the danger text", func(t *testing.T) {
 		d := describeCandidates(st, "toughness_boost")["MOCK0003"]
-		if !strings.Contains(d, "protecting this player now matters most") || strings.Contains(d, "another shield is refused") {
+		if !strings.Contains(d, "Near the death threshold right now.") || strings.Contains(d, "another shield is refused") {
 			t.Errorf("toughness_boost description = %q, want the danger text", d)
 		}
 	})

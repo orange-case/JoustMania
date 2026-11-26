@@ -71,7 +71,7 @@ type RetroInput struct {
 	// prompt has no brief block and no brief paragraph.
 	OperatorBrief string
 	// BriefDelivered: at least one of the game's remote decide requests carried the
-	// brief (claude, #2695). False for a jev, rules or stub game, and then
+	// brief (claude or jev, #2695). False for a rules or stub game, and then
 	// the brief paragraph says the in-game agent never saw it.
 	BriefDelivered bool
 	// Bounds are the game's magnitude ranges (decision.magnitude_bounds, the table
@@ -140,8 +140,8 @@ func (p RetroPrompt) UserForSpan(captureContent bool) string {
 
 // The retro brief paragraph (#2695, UC-042 BR-010) closes the system prompt of a
 // game that had an operator brief: a fixed lead, one of two middles (the in-game
-// model was sent the brief, or never saw it: the brief reaches claude
-// only, so a jev, rules or stub game never did), and a fixed tail. Fixed texts, so
+// model was sent the brief, or never saw it: a rules or stub game never did),
+// and a fixed tail. Fixed texts, so
 // the system prompt stays static per brief presence and delivery whatever the
 // brief says.
 const (

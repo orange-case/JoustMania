@@ -108,8 +108,7 @@ func parseDescriptionsMD(t *testing.T) map[string]string {
 
 // Every registry description is the same text as its row in the flags.md §13.3
 // description table, and every row of the experiment catalog has one, so the
-// spec and what the proposer shows cannot drift (#2345). A described row of
-// another set (agent/decision.prompt_profile, #2530) is quoted in flags.md §13.2.
+// spec and what the proposer shows cannot drift (#2345).
 //
 // UC: UC-042 BR-008
 // UC: UC-043 BR-008

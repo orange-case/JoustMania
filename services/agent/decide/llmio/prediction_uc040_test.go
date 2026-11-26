@@ -47,7 +47,7 @@ func TestRender_PredictionAsk(t *testing.T) {
 	}
 	head := strings.TrimSuffix(off.User, "</questions>")
 	if !strings.HasPrefix(on.User, head) || !strings.HasSuffix(on.User, "</questions>") {
-		t.Fatalf("UC-040/A45 the ask must be appended after the v1 questions:\n%s", on.User)
+		t.Fatalf("UC-040/A45 the ask must be appended after the FFA questions:\n%s", on.User)
 	}
 	item := strings.TrimSuffix(strings.TrimPrefix(on.User, head), "</questions>")
 	if !strings.HasPrefix(item, "- id: ffa.prediction\n  kind: choice\n  options: [\"none\", ") ||

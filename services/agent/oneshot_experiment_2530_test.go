@@ -11,7 +11,7 @@ import (
 
 // UC: UC-040 BR-036
 // oneshot_experiment_2530_test.go: a one-shot game bound to an experiment arm prints the
-// experiment id and arm in its replay record, so scripts/agent-group-ab.sh can tell an agent
+// experiment id and arm in its replay record, so a caller can tell an agent
 // that honoured SHADOW_GAME_EXPERIMENT_ID / SHADOW_GAME_ARM from one that ignored them (#2530).
 
 func replayRecordOf(t *testing.T, rec patterngame.Record) map[string]any {

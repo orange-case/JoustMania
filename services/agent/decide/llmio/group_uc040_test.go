@@ -53,16 +53,14 @@ func TestParse_GroupAnswer(t *testing.T) {
 			t.Fatalf("user message lacks the group options:\n%s", p.User)
 		}
 		if p.System != Render(testRequest()).System {
-			t.Fatal("offering the group lever must not change the v1 system prompt")
+			t.Fatal("offering the group lever must not change the system prompt")
 		}
 	})
-	t.Run("UC-048/A13 the neutral Levers block describes the lever by its effect", func(t *testing.T) {
-		req := groupRequest()
-		req.PromptProfile = decide.PromptProfileNeutral
-		if !slices.ContainsFunc(strings.Split(Render(req).System, "\n"), func(l string) bool {
+	t.Run("UC-048/A13 the Levers block describes the lever by its effect", func(t *testing.T) {
+		if !slices.ContainsFunc(strings.Split(Render(groupRequest()).System, "\n"), func(l string) bool {
 			return strings.HasPrefix(l, "- grant_group_shield: ")
 		}) {
-			t.Fatal("neutral Levers block lacks grant_group_shield")
+			t.Fatal("Levers block lacks grant_group_shield")
 		}
 	})
 }

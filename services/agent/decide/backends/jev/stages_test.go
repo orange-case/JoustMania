@@ -101,7 +101,7 @@ func TestMagnitudeLevels(t *testing.T) {
 		t.Errorf("handicap = %v (neutral 1.0 must be excluded)", got)
 	}
 	mag := decide.Question{ID: decide.QuestionFFAMagnitude, Kind: decide.KindScore, Range: [2]float64{0, 1}}
-	instr, ladder := conditionedMagnitude(nil, mag, "adjust_global_difficulty", "", magnitudeLevels(nil, "adjust_global_difficulty"))
+	instr, ladder := conditionedMagnitude(nil, mag, "adjust_global_difficulty", magnitudeLevels(nil, "adjust_global_difficulty"))
 	if !strings.HasPrefix(instr, "The agent will apply adjust_global_difficulty (") || len(ladder) != 5 {
 		t.Fatalf("%q %v", instr, ladder)
 	}
@@ -131,7 +131,7 @@ func TestStrengthLevels(t *testing.T) {
 	}
 	q := decide.Question{ID: strengthQuestionID(directionHelp), Kind: decide.KindScore, Range: [2]float64{0, 1}}
 	instr, ladder := scoreLadder(q, decide.Request{}, "adjust_player_sensitivity")
-	if !strings.Contains(instr, "to help a struggling player") || ladder[0] != "A slight change: 0.9 factor (neutral is 1)." {
+	if !strings.Contains(instr, "to make the target harder to eliminate") || ladder[0] != "A slight change: 0.9 factor (neutral is 1)." {
 		t.Errorf("%q %q", instr, ladder)
 	}
 }
@@ -156,20 +156,19 @@ func TestDescribeCandidates(t *testing.T) {
 	if _, ok := shield["MOCK0001"]; ok {
 		t.Error("an eliminated player is no candidate")
 	}
-	if !strings.Contains(shield["MOCK0003"], "Near the death threshold") || !strings.Contains(shield["MOCK0003"], "protecting this player now matters most") ||
-		!strings.Contains(shield["MOCK0002"], "protection would be wasted") {
+	if !strings.Contains(shield["MOCK0003"], "Near the death threshold right now.") || !strings.Contains(shield["MOCK0002"], "In no danger right now.") {
 		t.Errorf("shield = %v", shield)
 	}
 	penalty := describeCandidates(st, "soft_penalty")
-	if !strings.Contains(penalty["MOCK0002"], "Most headroom below the death threshold right now: pressure here") || !strings.Contains(penalty["MOCK0003"], "pile on") {
+	if !strings.HasSuffix(penalty["MOCK0002"], " Most headroom below the death threshold right now.") || !strings.Contains(penalty["MOCK0003"], "Struggling: near the death threshold right now.") {
 		t.Errorf("penalty = %v", penalty)
 	}
 	balance := describeCandidates(st, "set_player_handicap")
-	if !strings.Contains(balance["MOCK0003"], "helping this player") || !strings.Contains(balance["MOCK0002"], "reining this player in") ||
-		!strings.Contains(balance["MOCK0004"], "little to balance") || strings.Contains(balance["MOCK0002"], "lead") {
+	if !strings.Contains(balance["MOCK0003"], "Struggling: near the death threshold right now.") || !strings.HasSuffix(balance["MOCK0002"], " Most headroom below the death threshold right now.") ||
+		!strings.Contains(balance["MOCK0004"], "Neither the calmest nor struggling right now.") || strings.Contains(balance["MOCK0002"], "lead") {
 		t.Errorf("balance = %v", balance)
 	}
-	if fx := describeCandidates(st, "send_controller_effect")["MOCK0003"]; strings.Contains(fx, "matters most") {
+	if fx := describeCandidates(st, "send_controller_effect")["MOCK0003"]; strings.Contains(fx, "Struggling:") {
 		t.Errorf("no suitability for an unfamilied intervention: %q", fx)
 	}
 	// I2: never suggest eliminating a player because they are calm.
@@ -180,7 +179,7 @@ func TestDescribeCandidates(t *testing.T) {
 	}
 	// S1: a recently shielded player is not suggested for another shield.
 	st.Players[2].Shielded = true // MOCK0003
-	if d := describeCandidates(st, "grant_shield")["MOCK0003"]; !strings.Contains(d, "another shield would be wasted") || strings.Contains(d, "matters most") {
+	if d := describeCandidates(st, "grant_shield")["MOCK0003"]; !strings.Contains(d, "Shielded a moment ago.") {
 		t.Errorf("shielded MOCK0003 = %q", d)
 	}
 }

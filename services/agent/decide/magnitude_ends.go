@@ -3,8 +3,8 @@ package decide
 // magnitude_ends.go: what each end of a numeric lever's range does (#2696, UC-040
 // BR-045). The ffa.magnitude text names it next to each range end, so the model can
 // tell which end helps the target: with the per-player sensitivity floor at 0.2 a
-// wrong guess eliminates the player it meant to save. Effects, never purposes, so
-// the same words serve the v1 and the neutral prompt profile. jev's ladder ends
+// wrong guess eliminates the player it meant to save. Effects, never purposes, like
+// the lever lines of the prompt. jev's ladder ends
 // (backends/jev/criteria.go magnitudeEnds) say the same in its own words; a test
 // keeps the directions in sync.
 //

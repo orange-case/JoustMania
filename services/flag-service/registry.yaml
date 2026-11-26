@@ -96,12 +96,8 @@ flags:
   - {set: agent, key: policy.group_grant.real_games, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: policy.group_grant.max_per_game, kind: overlay, scope: [stack], bounds: {range: [0, 3], integer: true}}
   - {set: agent, key: policy.group_grant.max_targets, kind: overlay, scope: [stack], bounds: {range: [2, 6], integer: true}}
-  # decision.prompt_profile (#2467 PR 5, UC-040 BR-036): operator-written, never by the agent (C-034).
-  # experiment+arm (#2530): scripts/agent-group-ab.sh writes one value per arm; the rung never
-  # matches a real game. Not in the experiment catalog (that is the game set only).
-  - {set: agent, key: decision.prompt_profile, kind: overlay, scope: [stack, experiment+arm], bounds: {variants: ["v1", "neutral"]}, description: "wording of the LLM decide prompt: v1 shipped, neutral levers by effect"}
-  # decision.operator_brief (#2687, UC-040 BR-044, FR-096): operator-written free text the claude
-  # decide prompt carries as an <operator_brief> block; never by the agent (C-034). It adds no lever and no bound.
+  # decision.operator_brief (#2687, UC-040 BR-044, FR-096): operator-written free text the claude and jev
+  # decide requests carry (claude: an <operator_brief> block, jev: state.operator_brief); never by the agent (C-034). It adds no lever and no bound.
   - {set: agent, key: decision.operator_brief, kind: overlay, scope: [stack], bounds: {free_string: true}}
   # decision.magnitude_bounds (#2696, UC-040 BR-045, FR-098): the ranges the agent may choose its magnitudes
   # from; operator only, never the agent (C-034). Values are checked against registry.magnitudeLimits (Go,

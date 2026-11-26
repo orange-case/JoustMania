@@ -75,7 +75,7 @@ func TestIdentityOverrideBody(t *testing.T) {
 		{name: "game integer", set: "interventions", flag: "global_sensitivity_override", scopeName: registry.ScopeGame, scope: state.Scope{GameID: "g1"}, raw: `3`, identifier: "game:g1", value: `3`},
 		{name: "real game player (its controller, #2624)", set: "interventions", flag: "player_sensitivity_factor", scopeName: registry.ScopeGameSerial, scope: state.Scope{GameID: "g1", Serial: "MOCK0001"}, raw: `1.5`, identifier: "controller:MOCK0001", value: `"1.5"`, game: gameOf("g1", "real", "MOCK0001")},
 		{name: "shadow game player", set: "interventions", flag: "player_sensitivity_factor", scopeName: registry.ScopeGameSerial, scope: state.Scope{GameID: "g1", Serial: "MOCK0001"}, raw: `1.5`, identifier: "game:g1:MOCK0001", value: `"1.5"`, game: gameOf("g1", "shadow", "MOCK0001")},
-		{name: "experiment arm", set: "agent", flag: "decision.prompt_profile", scopeName: registry.ScopeExperiment, scope: state.Scope{ExperimentID: "e1", Arm: "armA"}, variant: "neutral", raw: `"neutral"`, identifier: "experiment:e1:armA", value: `"neutral"`},
+		{name: "experiment arm", set: "game", flag: "shield.activation", scopeName: registry.ScopeExperiment, scope: state.Scope{ExperimentID: "e1", Arm: "armA"}, variant: "hold", raw: `"hold"`, identifier: "experiment:e1:armA", value: `"hold"`},
 		{name: "real", set: "game", flag: "windows", scopeName: registry.ScopeReal, scope: state.Scope{GameKind: "real"}, raw: `{"min": 1}`, identifier: "real", value: `"{\"min\":1}"`},
 	}
 	for _, c := range cases {
