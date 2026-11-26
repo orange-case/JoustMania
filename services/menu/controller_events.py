@@ -316,8 +316,9 @@ class ControllerEventLoop:
         """
         serial = event.serial
 
-        # Update battery level from event (available on all event types)
-        if event.battery > 0:
+        # A reported 0 is an empty battery (UC-002 BR-010); an older controller manager sends no marker,
+        # and there 0 also means "not read".
+        if event.battery_reported or event.battery > 0:
             self._callbacks.update_battery(serial, event.battery)
 
         if event.event_type == controller_manager_pb2.EVENT_CONNECT:

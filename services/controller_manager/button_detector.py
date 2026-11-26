@@ -127,6 +127,7 @@ class ButtonDetector:
                     button=button_type,
                     action=action,
                     battery=info.get(ControllerInfoKey.BATTERY, 0),
+                    battery_reported=ControllerInfoKey.BATTERY in info,
                     color=controller_manager_pb2.RGB(r=0, g=0, b=255),
                     name=info.get(ControllerInfoKey.NAME, ""),
                 )
@@ -169,7 +170,7 @@ class ButtonDetector:
         self,
         serial: str,
         is_connect: bool,
-        battery: int = 0,
+        battery: int | None = None,
         name: str = "",
         connected_serials: list[str] | None = None,
     ) -> None:
@@ -182,7 +183,7 @@ class ButtonDetector:
         Args:
             serial: Controller serial number
             is_connect: True for connect, False for disconnect
-            battery: Battery level (only available for connect events)
+            battery: Battery level (only available for connect events); None = not read
             name: Human-readable controller name (Issue #7)
             connected_serials: All currently connected serials (for reconciliation)
         """
@@ -191,7 +192,8 @@ class ButtonDetector:
         event = controller_manager_pb2.ButtonEvent(
             serial=serial,
             timestamp=int(time.time() * 1000),
-            battery=battery,
+            battery=battery or 0,
+            battery_reported=battery is not None,
             event_type=event_type,
             name=name,
             connected_serials=connected_serials or [],

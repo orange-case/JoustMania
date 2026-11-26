@@ -125,9 +125,7 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
         # Battery monitoring - Phase 39, extracted to monitoring.py
         # NOTE: RSSI monitoring is handled by the host pairing-daemon
         # NOTE: Must be initialized before StateBuilder which depends on it
-        self.monitoring = ControllerMonitoring(
-            low_battery_threshold=1,
-        )
+        self.monitoring = ControllerMonitoring()
 
         # State caching (Phase 18 - Task 1, refactored)
         self.state_builder = StateBuilder(self.monitoring)
@@ -208,12 +206,13 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
         for serial, info in tracked_snapshot.items():
             if info.get(ControllerInfoKey.RESERVED, False):
                 continue
-            battery = info.get(ControllerInfoKey.BATTERY, 0)
             name = info.get(ControllerInfoKey.NAME, "")
             connect_event = controller_manager_pb2.ButtonEvent(
                 serial=serial,
                 timestamp=int(time.time() * 1000),
-                battery=battery,
+                battery=info.get(ControllerInfoKey.BATTERY, 0),
+                # The replay after every game restores a 0 the menu cleared with its lobby (UC-002 BR-010).
+                battery_reported=ControllerInfoKey.BATTERY in info,
                 event_type=controller_manager_pb2.EVENT_CONNECT,
                 name=name,
                 connected_serials=all_serials,
@@ -358,11 +357,12 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
 
         if config.colors:
             current_filter = set()
-            # A game claims these controllers: end any running identify first so
-            # it cannot paint over the game's colours or countdown (UC-004 BR-003).
+            # A game claims these controllers: end any running identify (UC-004 BR-003) or
+            # lobby low-battery blink (UC-002 BR-010) first so it cannot paint over the game's colours.
             for color_config in config.colors:
                 if color_config.serial:
                     await self.feedback_manager.cancel_identify(color_config.serial)
+                    await self.feedback_manager.cancel_low_battery(color_config.serial)
             for color_config in config.colors:
                 serial = color_config.serial
                 if serial:

@@ -26,6 +26,7 @@ from lib.types import Games
 from proto import menu_pb2, menu_pb2_grpc
 from services.menu.game_lifecycle import GameLifecycleMixin, _bounded_restore_step
 from services.menu.handlers.base import ControllerState
+from services.menu.low_battery import low_battery_serials
 from services.menu.menu_setup import build_menu
 from services.menu.settings_ops import (
     AGENT_ENABLED_FLAG,
@@ -435,6 +436,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             selection=self.current_selection.name,
             ready_count=self.ready_controller_count,
             connected_count=len(self.connected_controllers),
+            low_battery_count=len(low_battery_serials(self.state_manager)),
             agent_enabled=enabled_state in ("watch", "act"),
             agent_enabled_state=enabled_state,
             agent_level=_variant(agent.get_string_details(AGENT_POLICY_FLAG, "")),

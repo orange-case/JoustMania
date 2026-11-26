@@ -603,7 +603,7 @@ class DiscoveryLoop:
             # Publish connect event to button event stream subscribers —
             # but never announce reserved controllers to the menu (#777).
             info = self.tracked_controllers.get(serial, {})
-            battery = info.get(ControllerInfoKey.BATTERY, 0)
+            battery = info.get(ControllerInfoKey.BATTERY)
             name = info.get(ControllerInfoKey.NAME, "")
             # UC-002 BR-002: a reserved mock controller's connect is not published.
             if not info.get(ControllerInfoKey.RESERVED, False):

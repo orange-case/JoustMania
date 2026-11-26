@@ -121,7 +121,10 @@ def page_rows(page: int, status, ctx: PageContext, version: int) -> list[tuple[s
             (label("INSTRUCTIONS", "INSTR"), "ON" if status.instructions else "OFF"),
         ]
     if name == "START":
-        return [(label("FORCE ALL", "FORCE"), UNKNOWN if unknown else ("ON" if status.force_all_start else "OFF"))]
+        return [
+            (label("FORCE ALL", "FORCE"), UNKNOWN if unknown else ("ON" if status.force_all_start else "OFF")),
+            ("LOW", _low_battery_text(status)),
+        ]
     if name == "AGENT":
         agent = agent_text(status)
         level = None if unknown else status.agent_level
@@ -143,6 +146,13 @@ def page_rows(page: int, status, ctx: PageContext, version: int) -> list[tuple[s
         (label("EFFORT", "EFF"), _row_value(setting_ladders.EFFORT_OPTION, status, version)),
         ("BRIEF", _row_value(setting_ladders.BRIEF_OPTION, status, version)),
     ]
+
+
+def _low_battery_text(status) -> str:
+    """START row 2 (UC-002 A8): the count is optional, so an older menu reads `?`, never a guessed 0."""
+    if status is None or not status.HasField("low_battery_count"):
+        return UNKNOWN
+    return str(status.low_battery_count)
 
 
 def _row_value(option: str, status, version: int) -> str:

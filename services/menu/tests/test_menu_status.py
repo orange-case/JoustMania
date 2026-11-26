@@ -141,6 +141,7 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         agent_group_grant_state="on",
         inference_backend="claude",
         inference_effort="xhigh",
+        low_battery_count=0,
         pad_commands=[
             "reset_setting",
             "reset_setting.from",
@@ -170,6 +171,24 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         menu.agent_memory_writer,
     ):
         assert writer.mock_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+@pytest.mark.uc("UC-016", br=["BR-006"])
+async def test_status_counts_connected_controllers_with_a_low_battery(menu):
+    menu.state_manager.controller_states = {
+        "a": ControllerState.READY,
+        "b": ControllerState.CONNECTED,
+        "c": ControllerState.IDLE,
+        "d": ControllerState.CONNECTED,
+    }
+    menu.state_manager.battery_levels = {"a": 1, "b": 20, "c": 0, "d": 4, "gone": 1}
+
+    reply = await status(menu)
+
+    assert reply.HasField("low_battery_count")
+    assert reply.low_battery_count == 3
 
 
 @pytest.mark.asyncio

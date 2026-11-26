@@ -692,6 +692,8 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         active = self.active_effects.get(serial)
         if active is None or active.task.done():
             return False
+        if effect == controller_manager_pb2.GAME_EFFECT_LOW_BATTERY:
+            return True  # UC-002 A8: the lobby's low-battery blink is the lowest overlay; the next period retries
         if effect == controller_manager_pb2.GAME_EFFECT_PULSE and active.effect_type in PULSE_PROOF_EFFECTS:
             return True
         if effect in DEATH_YIELDING_EFFECTS and active.effect_type == controller_manager_pb2.GAME_EFFECT_PLAYER_DEATH:
@@ -756,6 +758,14 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
             return False
         await self.cancel_effect(serial)
         await self._stop_identify_rumble(serial)
+        return True
+
+    async def cancel_low_battery(self, serial: str) -> bool:
+        """End a running lobby low-battery blink (UC-002 BR-010: a game claims the controller)."""
+        active = self.active_effects.get(serial)
+        if active is None or active.effect_type != controller_manager_pb2.GAME_EFFECT_LOW_BATTERY:
+            return False
+        await self.cancel_effect(serial)
         return True
 
     async def _stop_identify_rumble(self, serial: str) -> None:

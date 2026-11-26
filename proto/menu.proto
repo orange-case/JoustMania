@@ -125,4 +125,7 @@ message GetMenuStatusResponse {
   // "step_setting.from", "set_backend.from", "step_setting:<option>",
   // "reset_setting:<option>"); empty = a menu older than the field. #2747, #2755.
   repeated string pad_commands = 29;
+  // Connected controllers (any state) whose battery is 20 % or less on the battery_to_pct scale. Absent = a menu
+  // older than the field (unknown); 0 is a real count. UC-002 A8, BR-010; UC-016 BR-006.
+  optional int32 low_battery_count = 30;
 }
