@@ -40,7 +40,7 @@ import (
 // the registry/spawner/gate structs and one ~30s no-op tick (a no-op AbortAll + a few
 // live flag reads) — observably inert, though not literally zero goroutines. The
 // real-DEFAULT promotion path stays behind ALL of #961's existing gates
-// (AGENT_CODE_IMPROVEMENT_ENABLED + token + kill-switch) — this file only ROUTES a
+// (validated objectives or token, and the kill-switch) — this file only ROUTES a
 // concluded experiment to that already-gated Promoter; it adds no new privilege.
 
 const (
@@ -154,7 +154,7 @@ type experimentLoop struct {
 	// fitnessStore is the finalized-per-game fitness store (#965/#1017): onGameEnd
 	// records every concluded game's settled fitness here, keyed by game_id, for
 	// BOTH a shadow experiment game and a real primary game (averaged by the #992
-	// recent-real anchor and the autonomous Watcher). nil ⇒ recording is skipped
+	// recent-real anchor). nil ⇒ recording is skipped
 	// (test wiring that does not exercise the fitness path).
 	fitnessStore *experiment.FitnessStore
 
@@ -331,8 +331,8 @@ func buildExperimentLoop(
 
 	// FitnessStore (#965/#1017): the finalized-per-game fitness store onGameEnd
 	// Records into and the #992 recent-real anchor reads from. It is built
-	// by the CALLER (main.go) and passed in so the SAME store also backs the autonomous
-	// Watcher's real-game fitness source (#1057). A nil store (a test or a caller that
+	// by the CALLER (main.go) and passed in, so the retro's fitness lookup reads the
+	// same store. A nil store (a test or a caller that
 	// did not build one) falls back to a fresh local store so the loop is still valid.
 	if fitnessStore == nil {
 		fitnessStore = newFitnessStore()
@@ -472,8 +472,6 @@ func (e *experimentLoop) wirePromoter(promoter *promote.Promoter, flagsClient *f
 		return
 	}
 	e.promotions = promoter
-	// A re-watch revert journals on its experiment (UC-043 step 7, #1883).
-	promoter.SetRewatchJournal(e.journalRewatchRevert)
 }
 
 // promotionConfigResolver builds the #980 ConfigResolver from the live agent
@@ -682,7 +680,7 @@ func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 
 // promotionKillSwitch is the Promoter half the kill switch drives (#1704):
 // RevertOnKillSwitch restores the previous real default of every autonomous
-// promotion still applied, stops its re-watch and returns what it reverted.
+// promotion still applied and returns what it reverted.
 type promotionKillSwitch interface {
 	RevertOnKillSwitch(ctx context.Context) []promote.KillSwitchRevert
 }
@@ -707,21 +705,6 @@ func (e *experimentLoop) revertPromotionsOnKillSwitch(ctx context.Context) {
 			Reason:  rv.Reason,
 		})
 	}
-}
-
-// journalRewatchRevert journals a re-watch revert of an autonomous promotion on
-// its experiment (UC-043 step 7 and A9, #1883). The Promoter calls it from the
-// re-watch goroutine at most once per promotion, with the re-watch's one
-// outcome (`reverted`, or `applied` when the revert failed); a later retry is the
-// kill switch's (A1). The registry is read at call time and RecordPromotion takes
-// the registry lock.
-func (e *experimentLoop) journalRewatchRevert(experimentID string, res experiment.PromotionResult) {
-	e.log.Warn("experiment: re-watch journaled an autonomous promotion revert (#1883)",
-		"experiment_id", experimentID, "outcome", res.Outcome, "reason", res.Reason)
-	if e.registry == nil {
-		return
-	}
-	e.registry.RecordPromotion(experimentID, res)
 }
 
 // agentEnabled reports whether the agent kill-switch is ON (agent.json `enabled`
@@ -1226,7 +1209,6 @@ func (e *experimentLoop) recordFinalizedRealFitness(gc gamecontext.GameContext, 
 		}
 		return
 	}
-	startedAt := gameStartedAt(gc)
 	eval := decision.EvaluateFitness(gc, e.fitnessThresholds())
 	for objective, r := range eval.Results {
 		if !r.Evaluated || !decision.IsExperimentable(objective) {
@@ -1238,7 +1220,6 @@ func (e *experimentLoop) recordFinalizedRealFitness(gc gamecontext.GameContext, 
 			Objective: objective,
 			GameKind:  experiment.GameKindReal,
 			DurationS: duration,
-			StartedAt: startedAt,
 		})
 	}
 }
@@ -1559,31 +1540,6 @@ func (s flagsFitnessSource) Fitness() decision.FitnessThresholds {
 		return decision.DefaultStaticConfig().FitnessThresholds
 	}
 	return decision.FitnessThresholdsFromFlags(s.flags.Evaluate(context.Background()).Fitness)
-}
-
-// gameStartedAt is when the game started, for the autonomous watch window (#1702):
-// the session's StartedAt (set at the game_active 0->1 transition, never evicted),
-// else the timeline's "start" phase event. The timeline is a 64-entry ring, so on a
-// normal-length game the start event is long evicted by game end and only serves
-// as a fallback for a context without a session start.
-func gameStartedAt(gc gamecontext.GameContext) time.Time {
-	if !gc.Session.StartedAt.IsZero() {
-		return gc.Session.StartedAt
-	}
-	return timelinePhaseAt(gc.Timeline, "start")
-}
-
-// timelinePhaseAt returns the time of the session's last phase event with the
-// given detail ("start", as timelinePhaseDuration reads it), or the zero time when
-// there is none.
-func timelinePhaseAt(timeline []gamecontext.TimelineEvent, detail string) time.Time {
-	var at time.Time
-	for _, ev := range timeline {
-		if ev.Kind == gamecontext.EventPhase && ev.Detail == detail {
-			at = ev.At
-		}
-	}
-	return at
 }
 
 // withEffectiveDuration returns gc with Session.DurationSeconds populated from the

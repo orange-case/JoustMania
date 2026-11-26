@@ -54,7 +54,7 @@ func adapterWithRecorder(t *testing.T, gh GitHubClient, realDef RealDefaultWrite
 	t.Helper()
 	rec := tracetest.NewSpanRecorder()
 	tp := trace.NewTracerProvider(trace.WithSpanProcessor(rec))
-	p := NewPromoter(gh, realDef, nil, nil, tp.Tracer("test"), discardLogger())
+	p := NewPromoter(gh, realDef, nil, tp.Tracer("test"), discardLogger())
 	return NewExperimentPromoter(p, fixedConfig(cfg)), rec
 }
 
@@ -146,7 +146,7 @@ func TestExperimentSeamNilResolverSafeDefault(t *testing.T) {
 	rec := tracetest.NewSpanRecorder()
 	tp := trace.NewTracerProvider(trace.WithSpanProcessor(rec))
 	// nil github ⇒ inert no-op; nil resolver ⇒ safe default issue/disabled.
-	p := NewPromoter(nil, realDef, nil, nil, tp.Tracer("test"), discardLogger())
+	p := NewPromoter(nil, realDef, nil, tp.Tracer("test"), discardLogger())
 	a := NewExperimentPromoter(p, nil)
 
 	_ = a.Promote(context.Background(), promoteView())

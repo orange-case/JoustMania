@@ -6,9 +6,9 @@
 //
 //	  - issue       — open a GitHub issue describing the hypothesis + implicated
 //	                  flag; NO code/flag applied.
-//	  - autonomous  — apply the validated change to the REAL default, watch real
-//	                  games, and revert if fitness degrades (per M7-7's
-//	                  Validator/Reverter seams).
+//	  - autonomous  — apply the validated change to the REAL default. The agent
+//	                  never reverts it on its own: a person does (pad, flag
+//	                  service, Flagsmith), or the kill switch (UC-043 step 7, A1).
 //
 // THE SAFETY RAIL (agreed, non-negotiable — see docs/research/m7-4-testing-strategy.md
 // §3.3). Promotion is the one consequential, REAL-affecting piece of the track,
@@ -18,19 +18,19 @@
 //   - The seams are interfaces (GitHubClient, RealDefaultWriter). Unit tests use
 //     RECORDING FAKES that assert "would open an issue with body X" / "would write
 //     real default Z" — ZERO network, ZERO real-default mutation.
-//   - The REAL GitHub client + real-default write are constructed ONLY in main.go
-//     behind an EXPLICIT env gate (AGENT_CODE_IMPROVEMENT_ENABLED=true) and a token
-//     (GITHUB_TOKEN) — via NewGitHubClientFromEnv / NewRealDefaultWriterFromEnv.
-//     There is NO test-reachable constructor for any of them; a test that wants a
-//     real client cannot get one.
+//   - The REAL GitHub client and the real-default writer are constructed ONLY in
+//     main.go: the GitHub client behind GITHUB_TOKEN + GITHUB_REPOSITORY, the
+//     real-default writer only when AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES validates
+//     at least one objective. There is NO test-reachable constructor for a real
+//     GitHub client; a test that wants one cannot get one.
 //   - The SAFE flag DEFAULT is baked in: mode defaults to issue (NEVER
-//     autonomous). autonomous (apply-to-real + watch) is additionally behind
-//     the agent `enabled` kill-switch — the caller passes Config.Enabled, and a disabled agent degrades autonomous to a
-//     recorded no-op.
-//   - Real GitHub is default-off, fail-closed: with the env gate/token absent, the
-//     real client is not built; main.go passes the inert recording no-op fake, and
-//     an issue promotion degrades to a RECORDED no-op (logged + span reason),
-//     never a silent or accidental real action.
+//     autonomous). autonomous is additionally behind the agent `enabled`
+//     kill-switch — the caller passes Config.Enabled, and a disabled agent degrades
+//     autonomous to a recorded no-op.
+//   - Real GitHub is default-off, fail-closed: without the token the real client
+//     is not built; main.go passes the inert recording no-op fake, and an issue
+//     promotion degrades to a RECORDED no-op (logged + span reason), never a
+//     silent or accidental real action.
 //   - autonomous changing the real defaultVariant is a SEPARATE, higher-privilege
 //     path than the shadow Writer (which is structurally shadow-only). It is the
 //     injected RealDefaultWriter, mutated explicitly + gated — the shadow Writer is
@@ -42,7 +42,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -60,9 +59,9 @@ const (
 	// ModeIssue opens a GitHub issue describing the hypothesis + implicated flag.
 	// NO code or flag change is applied. This is the SAFE default mode.
 	ModeIssue Mode = "issue"
-	// ModeAutonomous applies the validated change to the REAL default, watches real
-	// games, and reverts on degradation. The highest-privilege path; default-OFF and
-	// additionally behind the agent kill-switch (Config.Enabled).
+	// ModeAutonomous applies the validated change to the REAL default. The
+	// highest-privilege path; default-OFF and additionally behind the agent
+	// kill-switch (Config.Enabled).
 	ModeAutonomous Mode = "autonomous"
 )
 
@@ -78,8 +77,8 @@ const (
 	// agent was disabled (autonomous), or the issue degraded to an inert
 	// recorded no-op because the real path was not enabled. The Reason explains which.
 	OutcomeDiscarded Outcome = "discarded"
-	// OutcomeReverted — autonomous applied to the real default but a degradation was
-	// observed, so the real-default change was rolled back (per M7-7's Reverter seam).
+	// OutcomeReverted — autonomous applied to the real default and the kill switch
+	// rolled it back (UC-043 A1).
 	OutcomeReverted Outcome = "reverted"
 )
 
@@ -171,8 +170,8 @@ type Result struct {
 
 // GitHubClient is the GitHub API wire boundary (the SAFETY RAIL's network seam).
 // Unit tests inject a recording fake; the REAL client is built ONLY in main.go
-// behind the env gate + token (NewGitHubClientFromEnv) and is never reachable from
-// a test constructor.
+// behind the token (NewGitHubClientFromEnv) and is never reachable from a test
+// constructor.
 type GitHubClient interface {
 	// OpenIssue opens a GitHub issue and returns its URL.
 	OpenIssue(ctx context.Context, req IssueReq) (string, error)
@@ -183,38 +182,18 @@ type GitHubClient interface {
 // Writer. It is explicitly NOT experiment.Writer (which is structurally shadow-
 // scoped and can never change a real resolution). A nil RealDefaultWriter means
 // "no real-default mechanism wired", so autonomous degrades to a recorded no-op.
-// The real implementation is built only in main.go behind the env gate.
+// main.go wires it only when an objective is validated (UC-043 A23).
 type RealDefaultWriter interface {
 	// SetRealDefault changes the REAL defaultVariant for flagKey to value. This is the
-	// one sanctioned real-player-affecting write; it is gated by the env gate at
-	// construction AND the kill-switch at call time.
+	// one sanctioned real-player-affecting write; it is gated by the validated
+	// objectives at construction AND the kill-switch at call time.
 	SetRealDefault(ctx context.Context, flagKey string, value any) error
 }
 
-// Watcher observes real games after an autonomous real-default change and reports
-// whether fitness DEGRADED vs the pre-promotion baseline (so the change should be
-// reverted). It reuses M7-7's fitness measurement seam where wired.
-//
-// FAIL-CLOSED CONTRACT (#1016): a nil Watcher is NOT "apply without a watch" — it
-// is a HARD STOP. An autonomous real-default change with no safety net wired is the
-// single most dangerous state in the loop (apply to real players with no
-// auto-revert), so promoteAutonomous REFUSES to apply when the Watcher is nil
-// rather than applying unguarded. A safety net that is not connected blocks the
-// action; it is never silently skipped.
-type Watcher interface {
-	// Degraded reports whether real-game fitness degraded vs baseline after the
-	// change (true → the Promoter reverts via RealDefaultReverter). baseline is the
-	// pre-promotion real-game fitness (Evidence.FitnessBefore) the recent window is
-	// compared against; since is when the promoted default was written, and only real
-	// games that started after it count (UC-043 step 7, #1702). An error is treated
-	// as "cannot confirm healthy" → fail-safe revert.
-	Degraded(ctx context.Context, flagKey string, baseline float64, since time.Time) (bool, error)
-}
-
-// RealDefaultReverter rolls back an autonomous real-default change on degradation.
-// nil means no revert mechanism wired (a degradation is then recorded but not
-// rolled back — logged so it is visible). Distinct from experiment.Reverter (the
-// shadow rollback): this reverts the REAL default.
+// RealDefaultReverter removes a promotion's real-default overlay; only the kill
+// switch calls it (UC-043 A1). nil means no revert mechanism wired (a kill-switch
+// revert is then logged, not made). Distinct from experiment.Reverter (the shadow
+// rollback): this reverts the REAL default.
 type RealDefaultReverter interface {
 	// RevertRealDefault restores the prior real defaultVariant for flagKey.
 	RevertRealDefault(ctx context.Context, flagKey string) error
@@ -222,54 +201,26 @@ type RealDefaultReverter interface {
 
 // Promoter orchestrates a promotion per the live mode. It owns ONLY the
 // dispatch + outcome logic; every consequential effect (open issue, write real
-// default, watch, revert) is an injected seam, so the whole flow is
+// default, kill-switch revert) is an injected seam, so the whole flow is
 // unit-testable with recording fakes and the real path is built only in main.go.
 type Promoter struct {
-	github   GitHubClient        // wire boundary; recording fake in tests, env-gated real client in main.go
+	github   GitHubClient        // wire boundary; recording fake in tests, real client in main.go
 	realDef  RealDefaultWriter   // autonomous real-default mutation (nil = not wired)
-	watcher  Watcher             // autonomous live watch (nil = HARD STOP: autonomous refuses to apply, #1016)
-	reverter RealDefaultReverter // autonomous degradation rollback (nil = not wired)
+	reverter RealDefaultReverter // kill-switch rollback (nil = not wired)
 	tracer   trace.Tracer
 	log      *slog.Logger
 
-	// --- autonomous re-promotion COOLDOWN (#1065 item 3) ---
-	// A revert (especially the fail-safe revert on a telemetry error) must not be able
-	// to thrash: err→revert→re-promote→err→revert with no pause. After a revert the
-	// flag enters a cooldown; an autonomous re-promotion of the SAME flag inside the
-	// cooldown is refused (recorded no-op), so the loop cannot run hot. Defaults to
-	// DefaultRevertCooldown; SetCooldown overrides (env-driven from main.go).
-	cooldown time.Duration
-	// cooldownSource, when set, resolves the cooldown at use time (each cooldown
-	// check, promotion.revert_cooldown_seconds, #1788) and wins over cooldown.
-	cooldownSource func() time.Duration
-	now            func() time.Time // injectable clock (tests); defaults to time.Now
-	mu             sync.Mutex       // guards lastRevert
-	lastRevert     map[string]time.Time
-
-	// --- re-watch scheduling (#1065 item 4) ---
-	// When a watch sees INSUFFICIENT real games, the apply stands but is unverified. If
-	// a rewatcher is wired, the Promoter schedules a background re-watch that polls as
-	// more real games complete and reverts if a degradation is later CONFIRMED. nil →
-	// no re-watch (the apply stands unverified, exactly today's behavior). Wired in
-	// main.go alongside the live watcher.
-	rewatcher Rewatcher
+	mu sync.Mutex
 
 	// --- kill-switch revert (#1704) ---
-	// applied holds every autonomous promotion this agent run wrote and has not
-	// reverted, by flag (the newest write wins). RevertOnKillSwitch reverts them all;
-	// a watch or re-watch revert claims its entry first, under killMu (#1893), so
-	// each applied default is reverted at most once and nothing writes after the
-	// kill-switch revert. Guarded by mu.
+	// applied holds every autonomous promotion this agent run wrote and the kill
+	// switch has not reverted, by flag (the newest write wins). Guarded by mu.
 	applied map[string]*appliedPromotion
 	// killEpoch counts kill-switch ticks (guarded by mu); killMu serialises the
-	// autonomous write and the watch / re-watch revert with RevertOnKillSwitch
-	// (killswitch.go, #1704, #1893). Lock order: killMu before mu.
+	// autonomous write with RevertOnKillSwitch (killswitch.go, #1704). Lock order:
+	// killMu before mu.
 	killEpoch uint64
 	killMu    sync.Mutex
-
-	// rewatchJournal receives a re-watch revert's outcome for its experiment
-	// (UC-043 step 7, #1883); nil leaves it logged only. Guarded by mu.
-	rewatchJournal RewatchJournal
 
 	// --- substrate validity bar (UC-043 A23, substrate.go) ---
 	// substrate is the set of objectives attested as validated for the running
@@ -279,114 +230,25 @@ type Promoter struct {
 	substrateSet bool
 }
 
-// appliedPromotion is one autonomous real default this agent run wrote and has not
-// reverted (#1704). cancel stops its background re-watch (nil when none runs);
-// syncPending is true while its Promote call runs; killed is set when the kill
-// switch took it; failReported is set once a failed kill-switch revert of it was
-// reported (only by RevertOnKillSwitch, never by a failed watch revert), so later
-// kill-switch failures of the same promotion are retried without another report
+// appliedPromotion is one autonomous real default this agent run wrote and the
+// kill switch has not reverted (#1704). syncPending is true while its Promote call
+// runs; killReverted is set when the kill switch reverted it during that call;
+// failReported is set once a failed kill-switch revert of it was reported, so
+// later failures of the same promotion are retried without another report
 // (UC-043 A1, #1753). Guarded by Promoter.mu.
 type appliedPromotion struct {
 	proposal     experiment.Proposal
-	cancel       context.CancelFunc
 	syncPending  bool
-	killed       bool
 	killReverted bool
 	failReported bool
 }
 
-// DefaultRevertCooldown is the default post-revert cooldown before the same flag may
-// be autonomously re-promoted (#1065 item 3). Conservative: long enough that a
-// telemetry-error revert loop cannot spin, short enough that a genuinely better arm
-// can be retried after the transient clears.
-const DefaultRevertCooldown = 10 * time.Minute
-
-// Rewatcher schedules a background re-watch of an autonomously-applied flag whose
-// initial watch had INSUFFICIENT real games to judge (#1065 item 4). The Promoter
-// hands it everything needed to re-observe and act: the flag, the pre-promotion
-// baseline, the live Watcher, and a revert closure that performs (and records) a
-// fail-safe revert. The implementation polls as more real games complete and invokes
-// revert on a CONFIRMED degradation. It runs in the background (a promotion call must
-// not block on real games), so a nil Rewatcher means "no re-watch" (apply stands).
-type Rewatcher interface {
-	// Schedule starts a background re-watch. It MUST NOT block the caller. watch is the
-	// live Watcher (reuse the same degradation policy); since is the write time the
-	// watch counts games from (#1702); revert performs the gated fail-safe revert when
-	// a later cycle confirms degradation. The re-watch stops when ctx is cancelled
-	// (the kill switch reverted the promotion, #1704).
-	Schedule(ctx context.Context, flagKey string, baseline float64, since time.Time, watch Watcher, revert func(ctx context.Context))
-}
-
-// SetCooldown overrides the post-revert re-promotion cooldown (#1065 item 3). A
-// non-positive duration leaves the default in place. Called from main.go to make the
-// cooldown env-tunable without widening NewPromoter's heavily-used signature.
-func (pr *Promoter) SetCooldown(d time.Duration) {
-	if d > 0 {
-		pr.cooldown = d
-	}
-}
-
-// SetCooldownSource makes the post-revert cooldown resolve at use time, on every
-// cooldown check (promotion.revert_cooldown_seconds, #1788). It wins over
-// SetCooldown; a non-positive result falls back to DefaultRevertCooldown.
-func (pr *Promoter) SetCooldownSource(src func() time.Duration) {
-	pr.cooldownSource = src
-}
-
-// effectiveCooldown is the cooldown in force now: the source when set, else the
-// static value.
-func (pr *Promoter) effectiveCooldown() time.Duration {
-	if pr.cooldownSource != nil {
-		if d := pr.cooldownSource(); d > 0 {
-			return d
-		}
-		return DefaultRevertCooldown
-	}
-	return pr.cooldown
-}
-
-// SetClock injects the time source the cooldown uses (tests drive a fake clock). A
-// nil clock is ignored. Production uses the default time.Now.
-func (pr *Promoter) SetClock(now func() time.Time) {
-	if now != nil {
-		pr.now = now
-	}
-}
-
-// SetRewatcher wires the background re-watch scheduler (#1065 item 4). nil leaves
-// re-watch disabled (an insufficient-games apply stands unverified, as today).
-func (pr *Promoter) SetRewatcher(r Rewatcher) {
-	pr.rewatcher = r
-}
-
-// SeedLastRevert pre-populates the post-revert cooldown map from durably-persisted
-// revert timestamps (#1076 item 3), so post-revert thrash protection survives an
-// agent restart. Called once from main.go after construction with the reverter's
-// PersistedRevertTimes. A nil/empty map is a no-op. Existing in-memory entries are
-// only overwritten by a LATER persisted stamp (a fresh in-process revert always
-// wins), so seeding can never roll a cooldown backward.
-func (pr *Promoter) SeedLastRevert(times map[string]time.Time) {
-	if len(times) == 0 {
-		return
-	}
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	if pr.lastRevert == nil {
-		pr.lastRevert = map[string]time.Time{}
-	}
-	for k, t := range times {
-		if existing, ok := pr.lastRevert[k]; !ok || t.After(existing) {
-			pr.lastRevert[k] = t
-		}
-	}
-}
-
 // NewPromoter builds a Promoter over the injected seams. github defaults to the
 // inert recording no-op when nil (so a Promoter is ALWAYS safe to construct in a
-// test or when the real path is disabled — it can only no-op). realDef/watcher/
-// reverter may be nil (autonomous degrades accordingly). tracer nil uses the global
+// test or when the real path is disabled — it can only no-op). realDef/reverter
+// may be nil (autonomous degrades accordingly). tracer nil uses the global
 // tracer; log nil uses slog.Default().
-func NewPromoter(github GitHubClient, realDef RealDefaultWriter, watcher Watcher, reverter RealDefaultReverter, tracer trace.Tracer, log *slog.Logger) *Promoter {
+func NewPromoter(github GitHubClient, realDef RealDefaultWriter, reverter RealDefaultReverter, tracer trace.Tracer, log *slog.Logger) *Promoter {
 	if github == nil {
 		// Default to the inert recording no-op: a Promoter built without an explicit
 		// client can NEVER reach github.com. The real client is opt-in (main.go only).
@@ -399,16 +261,12 @@ func NewPromoter(github GitHubClient, realDef RealDefaultWriter, watcher Watcher
 		log = slog.Default()
 	}
 	return &Promoter{
-		github:     github,
-		realDef:    realDef,
-		watcher:    watcher,
-		reverter:   reverter,
-		tracer:     tracer,
-		log:        log,
-		cooldown:   DefaultRevertCooldown,
-		now:        time.Now,
-		lastRevert: map[string]time.Time{},
-		applied:    map[string]*appliedPromotion{},
+		github:   github,
+		realDef:  realDef,
+		reverter: reverter,
+		tracer:   tracer,
+		log:      log,
+		applied:  map[string]*appliedPromotion{},
 	}
 }
 
@@ -422,7 +280,7 @@ func NewPromoter(github GitHubClient, realDef RealDefaultWriter, watcher Watcher
 // verdict was not PROMOTE, or GitHub is unreachable (real client absent),
 // or autonomous is requested while disabled, the promotion degrades to
 // OutcomeDiscarded with a Reason on the span — visible, never silent. The real,
-// consequential paths run only through the env-gated injected seams.
+// consequential paths run only through the injected seams main.go gates.
 func (pr *Promoter) Promote(ctx context.Context, p experiment.Proposal, dec experiment.Decision, cfg Config, ev Evidence) Result {
 	mode := normalizeMode(cfg.Mode)
 	if !cfg.epochKnown {

@@ -424,7 +424,7 @@ func gameIDs(games []gameView) []string {
 // `discarded` and reads "discarded", and an aborted experiment reads "aborted"
 // whatever its verdict. "inconclusive" maps to "refined": the experiment did not
 // clear the bar and feeds the next thesis. A `done` experiment whose journal holds a
-// promotion event with outcome `reverted` (the kill switch or the watch undid the
+// promotion event with outcome `reverted` (the kill switch undid the
 // real default) reads "reverted"; its status stays `done` (#1869). A `done`
 // experiment whose last promotion event is `discarded` reads "discarded" (a journal
 // from an older agent whose deferred write was dropped). `promoting` is

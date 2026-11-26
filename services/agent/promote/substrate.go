@@ -16,7 +16,7 @@ import (
 // write). The bar is set once, in buildPromoter, before the loop starts; a
 // Promoter without a bar refuses every autonomous write (fail closed). It is
 // checked in promoteAutonomous and again in writeTracked, the one place every
-// real-default write passes. Reverts and the kill switch are never gated.
+// real-default write passes. The kill switch is never gated.
 
 // ReasonSubstrateNotValidated prefixes the reason of an autonomous promotion
 // refused by the validity bar: "substrate_not_validated objective=<obj>".

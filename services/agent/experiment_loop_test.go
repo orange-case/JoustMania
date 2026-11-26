@@ -105,16 +105,6 @@ func (r *recordingRealDefault) count() int {
 	return len(r.calls)
 }
 
-// loopWatcher is a non-degrading autonomous safety-net Watcher (#1016): autonomous
-// now FAILS CLOSED without a Watcher wired, so these end-to-end loop tests must wire
-// one for the real-default write path to be reachable. It reports "not degraded" so
-// a promoted change is kept (the gating-and-keep path these tests assert).
-type loopWatcher struct{}
-
-func (loopWatcher) Degraded(context.Context, string, float64, time.Time) (bool, error) {
-	return false, nil
-}
-
 // recordingGitHub records OpenIssue so a test can assert the safe (issue)
 // path was taken instead of a real-default mutation.
 type recordingGitHub struct {
@@ -181,9 +171,7 @@ func buildLoopForTestWithTracer(
 	gate := experiment.NewGate(writer, nil, log)
 	targeting := experiment.NewGateTargetingWriter(gate, writer)
 
-	// #1016: autonomous fails closed without a Watcher, so wire a non-degrading one
-	// (the safety net) for the real-default write path to be reachable in these tests.
-	base := promote.NewPromoter(github, realDef, loopWatcher{}, nil, nil, log)
+	base := promote.NewPromoter(github, realDef, nil, nil, log)
 	// The substrate validity bar (UC-043 A23) admits the objectives these tests use.
 	base.SetSubstrateBar(map[string]bool{"balanced": true, "endurance": true})
 	promo := promote.NewExperimentPromoter(base, resolveConfig)
@@ -896,7 +884,7 @@ func newRegistryConcurrency1(t *testing.T, spawner experiment.ShadowSpawner, res
 	writer := experiment.NewWriter(gamePath, log)
 	gate := experiment.NewGate(writer, nil, log)
 	targeting := experiment.NewGateTargetingWriter(gate, writer)
-	base := promote.NewPromoter(&recordingGitHub{}, &recordingRealDefault{}, nil, nil, nil, log)
+	base := promote.NewPromoter(&recordingGitHub{}, &recordingRealDefault{}, nil, nil, log)
 	promo := promote.NewExperimentPromoter(base, resolve)
 	return experiment.NewRegistry(experiment.RegistryConfig{
 		Root:                 t.TempDir(),

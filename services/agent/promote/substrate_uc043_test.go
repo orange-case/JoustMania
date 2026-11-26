@@ -24,15 +24,12 @@ func substrateEvidence(objective string) Evidence {
 	return ev
 }
 
-// barPromoter builds a Promoter with a watcher and a real-default writer, and the
-// given bar (nil: SetSubstrateBar is never called).
-func barPromoter(t *testing.T, bar map[string]bool, w Watcher) (*Promoter, *recordingRealDefault, *recordingReverter) {
+// barPromoter builds a Promoter with a real-default writer and the given bar
+// (nil: SetSubstrateBar is never called).
+func barPromoter(t *testing.T, bar map[string]bool) (*Promoter, *recordingRealDefault, *recordingReverter) {
 	t.Helper()
 	realDef, rev := &recordingRealDefault{}, &recordingReverter{}
-	if w == nil {
-		w = fakeWatcher{}
-	}
-	p := NewPromoter(&recordingGitHub{}, realDef, w, rev, nil, discardLogger())
+	p := NewPromoter(&recordingGitHub{}, realDef, rev, nil, discardLogger())
 	if bar != nil {
 		p.SetSubstrateBar(bar)
 	}
@@ -52,7 +49,7 @@ func wantSubstrateRefusal(t *testing.T, outcome Outcome, reason, objective strin
 // UC: UC-043 A23
 func TestUC043_A23_SubstrateBar(t *testing.T) {
 	t.Run("UC-043/A23 T1 no bar set refuses the autonomous write (fail closed)", func(t *testing.T) {
-		p, realDef, _ := barPromoter(t, nil, nil)
+		p, realDef, _ := barPromoter(t, nil)
 		res := p.Promote(context.Background(), promoteProposal, promoteVerdict, autoOn, substrateEvidence("balanced"))
 		wantSubstrateRefusal(t, res.Outcome, res.Reason, "balanced")
 		if len(realDef.calls) != 0 {
@@ -60,7 +57,7 @@ func TestUC043_A23_SubstrateBar(t *testing.T) {
 		}
 	})
 	t.Run("UC-043/A23 T2 only an attested objective is written", func(t *testing.T) {
-		p, realDef, _ := barPromoter(t, map[string]bool{"balanced": true}, nil)
+		p, realDef, _ := barPromoter(t, map[string]bool{"balanced": true})
 		res := p.Promote(context.Background(), promoteProposal, promoteVerdict, autoOn, substrateEvidence("endurance"))
 		wantSubstrateRefusal(t, res.Outcome, res.Reason, "endurance")
 		if len(realDef.calls) != 0 {
@@ -72,7 +69,7 @@ func TestUC043_A23_SubstrateBar(t *testing.T) {
 		}
 	})
 	t.Run("UC-043/A23 an empty objective is never validated", func(t *testing.T) {
-		p, realDef, _ := barPromoter(t, map[string]bool{"balanced": true, "": true}, nil)
+		p, realDef, _ := barPromoter(t, map[string]bool{"balanced": true, "": true})
 		res := p.Promote(context.Background(), promoteProposal, promoteVerdict, autoOn, substrateEvidence(""))
 		wantSubstrateRefusal(t, res.Outcome, res.Reason, "")
 		if len(realDef.calls) != 0 {
@@ -80,7 +77,7 @@ func TestUC043_A23_SubstrateBar(t *testing.T) {
 		}
 	})
 	t.Run("UC-043/A23 T3 a below-bar hold key is discarded, never written", func(t *testing.T) {
-		p, realDef, _ := barPromoter(t, map[string]bool{"balanced": true}, nil)
+		p, realDef, _ := barPromoter(t, map[string]bool{"balanced": true})
 		ev := holdEvidence()
 		ev.Objective = "endurance"
 		res := p.Promote(context.Background(), holdProposal("exp-t3"), promoteVerdict, autoOn, ev)
@@ -90,7 +87,7 @@ func TestUC043_A23_SubstrateBar(t *testing.T) {
 		}
 	})
 	t.Run("UC-043/A23 the bar is set once", func(t *testing.T) {
-		p, _, _ := barPromoter(t, map[string]bool{"balanced": true}, nil)
+		p, _, _ := barPromoter(t, map[string]bool{"balanced": true})
 		p.SetSubstrateBar(map[string]bool{"endurance": true})
 		if !p.SubstrateValidated("balanced") || p.SubstrateValidated("endurance") {
 			t.Fatal("a second SetSubstrateBar changed the bar")
@@ -109,7 +106,7 @@ func TestUC043_A23_SeamForwardsTheObjective(t *testing.T) {
 		{"", false},
 	} {
 		t.Run("UC-043/A23 T5 intent objective "+tc.objective+" through ExperimentPromoter", func(t *testing.T) {
-			p, realDef, _ := barPromoter(t, map[string]bool{"endurance": true}, nil)
+			p, realDef, _ := barPromoter(t, map[string]bool{"endurance": true})
 			a := NewExperimentPromoter(p, fixedConfig(autoOn))
 			view := promoteView()
 			view.Intent.Objective = tc.objective
@@ -133,7 +130,7 @@ func TestUC043_A23_SeamForwardsTheObjective(t *testing.T) {
 func TestUC043_A23_IssueModeUnaffected(t *testing.T) {
 	t.Run("UC-043/A23 G1 issue mode opens the issue under a closed bar", func(t *testing.T) {
 		gh := &recordingGitHub{issueURL: "https://example.invalid/issues/1"}
-		p := NewPromoter(gh, &recordingRealDefault{}, fakeWatcher{}, nil, nil, discardLogger())
+		p := NewPromoter(gh, &recordingRealDefault{}, nil, nil, discardLogger())
 		res := p.Promote(context.Background(), promoteProposal, promoteVerdict, Config{Mode: ModeIssue, Enabled: true}, substrateEvidence("endurance"))
 		if res.Outcome != OutcomeApplied || len(gh.issues) != 1 {
 			t.Fatalf("outcome = %q (%s) issues %d, want applied once", res.Outcome, res.Reason, len(gh.issues))
@@ -144,21 +141,9 @@ func TestUC043_A23_IssueModeUnaffected(t *testing.T) {
 // UC: UC-043 A23
 // UC: UC-043 A1
 func TestUC043_A23_RevertsNeverGated(t *testing.T) {
-	t.Run("UC-043/A23 G2 a watch revert runs under a closed bar", func(t *testing.T) {
-		p, _, rev := barPromoter(t, nil, nil)
-		entry := &appliedPromotion{proposal: promoteProposal}
-		p.mu.Lock()
-		p.applied[promoteProposal.FlagKey] = entry
-		p.mu.Unlock()
-		res := Result{Outcome: OutcomeApplied}
-		p.revertReal(context.Background(), promoteProposal, entry, &res, nil, false)
-		if res.Outcome != OutcomeReverted || rev.calls != 1 {
-			t.Fatalf("outcome = %q (%s) reverts %d, want reverted once", res.Outcome, res.Reason, rev.calls)
-		}
-	})
 	t.Run("UC-043/A23 G2 the kill switch reverts under a closed bar", func(t *testing.T) {
 		rev := &listingReverter{flags: []string{promoteProposal.FlagKey}}
-		p := NewPromoter(nil, &recordingRealDefault{}, fakeWatcher{}, rev, nil, discardLogger())
+		p := NewPromoter(nil, &recordingRealDefault{}, rev, nil, discardLogger())
 		got := p.RevertOnKillSwitch(context.Background())
 		if len(got) != 1 || got[0].Outcome != OutcomeReverted || rev.calls != 1 {
 			t.Fatalf("kill switch = %+v reverts %d, want one reverted", got, rev.calls)

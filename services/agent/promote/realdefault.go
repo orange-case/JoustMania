@@ -7,10 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"os"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/joustmania/agent/flagservice"
 )
@@ -33,10 +30,11 @@ import (
 // exact pre-promotion state, without the value snapshots the file writer needed
 // (#1065). The target is always the game flag set (#1293: no configurable path).
 //
-// It is built ONLY by NewRealDefaultWriterFromEnv behind the env gate, and it is
-// invoked only on the autonomous path, which is additionally behind the agent
-// kill-switch (Config.Enabled, checked in promoteAutonomous). Two independent gates
-// (env + kill-switch) guard every real-default change.
+// NewRealDefaultWriterFromEnv always builds it, because the kill switch needs it
+// as reverter and lister (an overlay from before a restart is still removed);
+// main.go wires it as the WRITER only when an objective is validated (UC-043
+// A23), and the write is additionally behind the agent kill-switch
+// (Config.Enabled, checked in promoteAutonomous).
 
 // gameFlagSet is the only flag set a promotion writes.
 const gameFlagSet = "game"
@@ -59,56 +57,21 @@ type serviceRealDefaultWriter struct {
 	svc realDefaultService
 	log *slog.Logger
 	mu  sync.Mutex
-	// snaps is the durable store of the post-revert cooldown stamps (#1065 item 3,
-	// #1076), so thrash protection survives an agent restart. nil when the store
-	// directory was unreadable at construction (logged).
-	snaps *snapStore
-	clock func() time.Time
 }
 
-// PersistedRevertTimes exposes the durable post-revert cooldown stamps so the
-// Promoter can seed its in-memory lastRevert map after a restart (#1076 item 3).
-func (w *serviceRealDefaultWriter) PersistedRevertTimes() map[string]time.Time {
-	if w.snaps == nil {
-		return nil
-	}
-	return w.snaps.loadLastRevert()
-}
-
-// NewRealDefaultWriterFromEnv builds the real-default writer, or (nil, nil) when
-// the autonomous path is not enabled (the fail-closed default; the caller then
-// treats autonomous as a recorded no-op). This is the ONLY constructor for a
-// real-default writer.
-//
-// Gate conditions:
-//   - AGENT_CODE_IMPROVEMENT_ENABLED == "true"        (explicit opt-in)
-//   - AGENT_AUTONOMOUS_ENABLED == "true"               (a SECOND opt-in specific to
-//     the real-default change — autonomous is the most privileged path)
-//
-// The flag service is FLAG_SERVICE_URL; the flag set is always `game` (#1293).
-func NewRealDefaultWriterFromEnv(log *slog.Logger) (*serviceRealDefaultWriter, error) {
+// NewRealDefaultWriterFromEnv builds the flag-service real-default writer
+// (FLAG_SERVICE_URL; the flag set is always `game`, #1293). It is always built:
+// as reverter it backs the kill switch. Whether it may also WRITE is main.go's
+// decision (a validated objective, UC-043 A23).
+func NewRealDefaultWriterFromEnv(log *slog.Logger) *serviceRealDefaultWriter {
 	if log == nil {
 		log = slog.Default()
 	}
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv("AGENT_CODE_IMPROVEMENT_ENABLED")), "true") {
-		return nil, nil
-	}
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv("AGENT_AUTONOMOUS_ENABLED")), "true") {
-		log.Info("code_improvement real-default writer NOT built: AGENT_AUTONOMOUS_ENABLED != true (autonomous stays a recorded no-op)")
-		return nil, nil
-	}
-	dir := snapStoreDir()
-	snaps, err := newSnapStore(dir)
-	if err != nil {
-		log.Warn("code_improvement real-default cooldown store could not be loaded; the post-revert cooldown starts empty",
-			"dir", dir, "error", err)
-	}
-	log.Warn("code_improvement AUTONOMOUS real-default writer ENABLED (#936): autonomous promotions WILL change the REAL default for live players (flag service, in memory until the promotion PR merges)")
-	return newServiceRealDefaultWriter(flagservice.NewFromEnv(), snaps, log), nil
+	return newServiceRealDefaultWriter(flagservice.NewFromEnv(), log)
 }
 
-func newServiceRealDefaultWriter(svc realDefaultService, snaps *snapStore, log *slog.Logger) *serviceRealDefaultWriter {
-	return &serviceRealDefaultWriter{svc: svc, log: log, snaps: snaps}
+func newServiceRealDefaultWriter(svc realDefaultService, log *slog.Logger) *serviceRealDefaultWriter {
+	return &serviceRealDefaultWriter{svc: svc, log: log}
 }
 
 // SetRealDefault makes real games resolve value for flagKey: a "real" overlay
@@ -121,7 +84,7 @@ func newServiceRealDefaultWriter(svc realDefaultService, snaps *snapStore, log *
 // promotion's overlay or where none is present, compared and written under its
 // lock. Another writer's real overlay is refused with 412 writer_mismatch and
 // left in place; SetRealDefault then returns ErrRealOverlayOwnedByAnotherWriter
-// and the promotion is not made (no retry, no cooldown: nothing was reverted).
+// and the promotion is not made (no retry).
 func (w *serviceRealDefaultWriter) SetRealDefault(ctx context.Context, flagKey string, value any) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -165,26 +128,25 @@ func (w *serviceRealDefaultWriter) SetRealDefault(ctx context.Context, flagKey s
 }
 
 // RevertRealDefault removes the promotion's real overlay, so real games resolve
-// the pre-promotion default again (#1065), and stamps the revert time for the
-// post-revert cooldown. With no promotion overlay present (a flag-service
-// restart dropped it) real games already resolve the pre-promotion default: the
-// revert writes nothing, stamps the cooldown and succeeds (PR #1417 review).
+// the pre-promotion default again (#1065). With no promotion overlay present (a
+// flag-service restart dropped it) real games already resolve the pre-promotion
+// default: the revert writes nothing and succeeds (PR #1417 review).
 //
 // COMPARE-AND-DELETE (#1877, closes the #1753 window): the DELETE carries
 // ?if_writer=promotion, so the flag service clears the real overlay only while
 // its writer is still "promotion", atomically under its lock. Another writer's
 // overlay set between the read and the delete is refused with 412
 // writer_mismatch and left in place; the revert is then dropped like the
-// "no promotion overlay" case (logged once, cooldown stamped, nil returned).
-// The kill switch uses the same path: every overlay this agent writes carries
-// writer "promotion", so the precondition never blocks clearing one of them.
+// "no promotion overlay" case (logged once, nil returned). Every overlay this
+// agent writes carries writer "promotion", so the precondition never blocks the
+// kill switch from clearing one of them.
 func (w *serviceRealDefaultWriter) RevertRealDefault(ctx context.Context, flagKey string) error {
 	return w.revert(ctx, flagKey)
 }
 
 // ErrSupersededByAnotherWriter is returned by a revert whose DELETE the flag service
-// refused with 412 writer_mismatch (#1877): nothing was cleared, the cooldown is
-// stamped, and the revert counts as done. Callers treat it as success; the kill
+// refused with 412 writer_mismatch (#1877): nothing was cleared, and the revert
+// counts as done. Callers treat it as success; the kill
 // switch adds SupersededReasonSuffix to the journaled reason so "the agent cleared
 // it" and "another writer owns it" can be told apart.
 var ErrSupersededByAnotherWriter = errors.New("real overlay superseded by another writer (writer_mismatch); nothing removed")
@@ -248,7 +210,6 @@ func (w *serviceRealDefaultWriter) revert(ctx context.Context, flagKey string) e
 		// (#1704): nothing is deleted.
 		w.log.Warn("code_improvement revert: no promotion overlay; nothing to remove",
 			"flag", flagKey, "real_overlay_writer", realOverlayWriter(view))
-		w.stampRevert(flagKey)
 		return nil
 	}
 	query := url.Values{"game_kind": {"real"}, "writer": {promotionWriter}, "if_writer": {promotionWriter}}
@@ -258,7 +219,6 @@ func (w *serviceRealDefaultWriter) revert(ctx context.Context, flagKey string) e
 			// the real default now, so the revert is dropped, not retried.
 			w.log.Warn("code_improvement revert dropped: another writer owns the real overlay now (writer_mismatch); nothing removed",
 				"flag", flagKey)
-			w.stampRevert(flagKey)
 			return ErrSupersededByAnotherWriter
 		}
 		return fmt.Errorf("revert %s/%s: %w", gameFlagSet, flagKey, err)
@@ -266,7 +226,6 @@ func (w *serviceRealDefaultWriter) revert(ctx context.Context, flagKey string) e
 	// 204 also when the overlay vanished between the read and the DELETE (a
 	// flag-service restart): the promotion's overlay is gone either way.
 	w.log.Warn("code_improvement.autonomous REVERTED: the promotion's real-default overlay is gone (cleared now, or already absent); real games resolve the default beneath it (#1065)", "flag", flagKey)
-	w.stampRevert(flagKey)
 	return nil
 }
 
@@ -308,24 +267,6 @@ func realOverlayWriter(view flagservice.FlagView) string {
 		return ""
 	}
 	return view.RealOverlay.Writer
-}
-
-// stampRevert records the revert time (#1076) so the cooldown survives a
-// restart. A failure is logged, NOT returned: the revert itself succeeded.
-func (w *serviceRealDefaultWriter) stampRevert(flagKey string) {
-	if w.snaps != nil {
-		if err := w.snaps.markReverted(flagKey, w.now()); err != nil {
-			w.log.Warn("code_improvement real-default revert succeeded but the durable cooldown stamp failed; the cooldown may not survive a restart (#1076)",
-				"flag", flagKey, "error", err)
-		}
-	}
-}
-
-func (w *serviceRealDefaultWriter) now() time.Time {
-	if w.clock != nil {
-		return w.clock()
-	}
-	return time.Now()
 }
 
 // jsonKind classifies a raw JSON value as number/string/bool/array/object, or ""

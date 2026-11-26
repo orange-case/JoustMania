@@ -32,13 +32,9 @@ func newPromotionService(t *testing.T) *fake.Service {
 	return svc
 }
 
-func writerForTest(t *testing.T, svc *fake.Service, storeDir string) *serviceRealDefaultWriter {
+func writerForTest(t *testing.T, svc *fake.Service) *serviceRealDefaultWriter {
 	t.Helper()
-	snaps, err := newSnapStore(storeDir)
-	if err != nil {
-		t.Fatalf("snap store: %v", err)
-	}
-	return newServiceRealDefaultWriter(svc, snaps, discardLogger())
+	return newServiceRealDefaultWriter(svc, discardLogger())
 }
 
 // effective returns the value real games resolve (the effective default).
@@ -58,7 +54,7 @@ func effective(t *testing.T, svc *fake.Service) string {
 func TestRealDefaultWriterPromotesThroughTheRealScope(t *testing.T) {
 	t.Run("UC-053/A1 a promoted default is one real-scoped overlay that real games resolve", func(t *testing.T) {
 		svc := newPromotionService(t)
-		w := writerForTest(t, svc, t.TempDir())
+		w := writerForTest(t, svc)
 		if err := w.SetRealDefault(context.Background(), promotedFlag, 3.0); err != nil {
 			t.Fatalf("SetRealDefault: %v", err)
 		}
@@ -74,7 +70,7 @@ func TestRealDefaultWriterPromotesThroughTheRealScope(t *testing.T) {
 // Defence in depth (#936): a value of another JSON kind is refused before any write.
 func TestRealDefaultWriterRejectsTypeMismatch(t *testing.T) {
 	svc := newPromotionService(t)
-	w := writerForTest(t, svc, t.TempDir())
+	w := writerForTest(t, svc)
 	if err := w.SetRealDefault(context.Background(), promotedFlag, "banana"); err == nil {
 		t.Fatal("SetRealDefault accepted a string value on a numeric flag")
 	}
@@ -89,7 +85,7 @@ func TestRealDefaultWriterRejectsTypeMismatch(t *testing.T) {
 // The registry bounds the promoted value: a refused value is an error, nothing stored.
 func TestRealDefaultWriterSurfacesARegistryRefusal(t *testing.T) {
 	svc := newPromotionService(t)
-	w := writerForTest(t, svc, t.TempDir())
+	w := writerForTest(t, svc)
 	if err := w.SetRealDefault(context.Background(), promotedFlag, 99.0); err == nil || !strings.Contains(err.Error(), "out_of_bounds") {
 		t.Fatalf("err = %v, want out_of_bounds", err)
 	}
@@ -98,30 +94,12 @@ func TestRealDefaultWriterSurfacesARegistryRefusal(t *testing.T) {
 	}
 }
 
-func TestRealDefaultWriterRequiresBothOptIns(t *testing.T) {
-	t.Setenv("AGENT_CODE_IMPROVEMENT_ENABLED", "true")
-	t.Setenv("AGENT_AUTONOMOUS_ENABLED", "")
-	if w, err := NewRealDefaultWriterFromEnv(discardLogger()); w != nil || err != nil {
-		t.Errorf("writer built without AGENT_AUTONOMOUS_ENABLED: (%v, %v)", w, err)
-	}
-	t.Setenv("AGENT_CODE_IMPROVEMENT_ENABLED", "")
-	t.Setenv("AGENT_AUTONOMOUS_ENABLED", "true")
-	if w, err := NewRealDefaultWriterFromEnv(discardLogger()); w != nil || err != nil {
-		t.Errorf("writer built without AGENT_CODE_IMPROVEMENT_ENABLED: (%v, %v)", w, err)
-	}
-	t.Setenv("AGENT_CODE_IMPROVEMENT_ENABLED", "true")
-	t.Setenv("AGENT_EXPERIMENT_DIR", t.TempDir())
-	if w, err := NewRealDefaultWriterFromEnv(discardLogger()); w == nil || err != nil {
-		t.Errorf("writer not built with both opt-ins: (%v, %v)", w, err)
-	}
-}
-
 // #1065: a revert restores exactly the pre-promotion state (the overlay is
 // removed; the baseline is untouched), and re-promotion then revert still lands
 // on the baseline.
 func TestRevertRestoresThePrePromotionState(t *testing.T) {
 	svc := newPromotionService(t)
-	w := writerForTest(t, svc, t.TempDir())
+	w := writerForTest(t, svc)
 	ctx := context.Background()
 	if err := w.SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
 		t.Fatal(err)
@@ -146,53 +124,25 @@ func TestRevertRestoresThePrePromotionState(t *testing.T) {
 // and nothing is fabricated (PR #1417 review).
 func TestRevertWithoutPromotionOverlayIsANoOp(t *testing.T) {
 	svc := newPromotionService(t)
-	w := writerForTest(t, svc, t.TempDir())
+	w := writerForTest(t, svc)
 	if err := w.RevertRealDefault(context.Background(), promotedFlag); err != nil {
 		t.Fatalf("revert of a lost overlay must succeed: %v", err)
 	}
 	if len(svc.Calls) != 0 {
 		t.Errorf("unexpected writes: %v", svc.Calls)
 	}
-	if _, ok := w.PersistedRevertTimes()[promotedFlag]; !ok {
-		t.Error("the cooldown was not stamped")
-	}
 }
 
-// #1076 item 3: the post-revert cooldown stamp survives a restart (a new writer
-// over the same store directory).
-func TestRevertCooldownSurvivesRestart(t *testing.T) {
+// The promotion lives in the flag service, so a restarted agent (a new writer)
+// can revert it: the kill switch's path after a restart (UC-043 A1).
+func TestRevertAfterRestart(t *testing.T) {
 	svc := newPromotionService(t)
-	storeDir := t.TempDir()
 	ctx := context.Background()
-	w1 := writerForTest(t, svc, storeDir)
-	if err := w1.SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
+	if err := writerForTest(t, svc).SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
 		t.Fatal(err)
 	}
-	// The promotion lives in the flag service, so a restarted agent can revert it.
-	w2 := writerForTest(t, svc, storeDir)
-	if err := w2.RevertRealDefault(ctx, promotedFlag); err != nil {
+	if err := writerForTest(t, svc).RevertRealDefault(ctx, promotedFlag); err != nil {
 		t.Fatalf("post-restart revert: %v", err)
-	}
-	w3 := writerForTest(t, svc, storeDir)
-	if _, ok := w3.PersistedRevertTimes()[promotedFlag]; !ok {
-		t.Error("post-revert cooldown stamp did not survive restart")
-	}
-}
-
-// A cooldown-stamp failure is logged, not returned: the revert itself succeeded.
-func TestRevertSucceedsWhenTheCooldownStampFails(t *testing.T) {
-	svc := newPromotionService(t)
-	storeDir := filepath.Join(t.TempDir(), "store")
-	w := writerForTest(t, svc, storeDir)
-	ctx := context.Background()
-	if err := w.SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(storeDir, []byte("not a dir"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.RevertRealDefault(ctx, promotedFlag); err != nil {
-		t.Fatalf("revert failed because of the cooldown stamp: %v", err)
 	}
 	if _, ok := svc.RealValue("game", promotedFlag); ok {
 		t.Error("overlay still present after revert")

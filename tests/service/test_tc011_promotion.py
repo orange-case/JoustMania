@@ -2,8 +2,8 @@
 
 AGENT composition plus a fake GitHub (``stack.fake_github``): the real agent (built
 at HEAD), game coordinator and controller manager (mock backend) from source, a
-fresh flag plane and the OtlpSink. The agent's promoter has its GitHub env gate set
-(``AGENT_CODE_IMPROVEMENT_ENABLED``, token, repository) with
+fresh flag plane and the OtlpSink. The agent's promoter has its GitHub env set
+(token, repository) with
 ``GITHUB_API_URL`` on the stub, so ``code_improvement.mode`` = ``issue`` opens the
 issue there and never on github.com.
 

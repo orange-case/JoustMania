@@ -290,13 +290,7 @@ var c034WriterRows = []c034Row{
 		run: func(t *testing.T, svc *flagservice.Client) {
 			ctx := context.Background()
 			t.Setenv("FLAG_SERVICE_URL", svc.BaseURL())
-			t.Setenv("AGENT_CODE_IMPROVEMENT_ENABLED", "true")
-			t.Setenv("AGENT_AUTONOMOUS_ENABLED", "true")
-			t.Setenv("AGENT_EXPERIMENT_DIR", t.TempDir()) // promote's snap store
-			realDef, err := promote.NewRealDefaultWriterFromEnv(testLogger())
-			if err != nil || realDef == nil {
-				t.Fatalf("real-default writer not built: %v", err)
-			}
+			realDef := promote.NewRealDefaultWriterFromEnv(testLogger())
 			for _, key := range append([]string{"sensitivity"}, c034Smuggled...) {
 				if err := realDef.SetRealDefault(ctx, key, 3); err != nil {
 					t.Errorf("set real default %q: %v", key, err)
@@ -306,7 +300,7 @@ var c034WriterRows = []c034Row{
 				}
 			}
 			// The kill switch (UC-043 A1, #1704): list the promotion overlays and revert them.
-			pr := promote.NewPromoter(nil, realDef, nil, realDef, nil, testLogger())
+			pr := promote.NewPromoter(nil, realDef, realDef, nil, testLogger())
 			if got := pr.RevertOnKillSwitch(ctx); len(got) == 0 || got[0].Outcome != promote.OutcomeReverted {
 				t.Errorf("kill switch reverted nothing: %+v", got)
 			}
