@@ -31,7 +31,7 @@ RemainAfterExit=yes
 WorkingDirectory=/home/pi/JoustMania
 # The start script checks this: a newer script under an older installed unit
 # logs "unit outdated" and never loops (UC-060, #2027)
-Environment=JOUSTMANIA_UNIT_REV=2
+Environment=JOUSTMANIA_UNIT_REV=3
 # Start state (start.env) lives here; it survives a restart of the unit
 RuntimeDirectory=joustmania
 RuntimeDirectoryPreserve=yes
@@ -42,6 +42,10 @@ RuntimeDirectoryPreserve=yes
 # needs root; no sudoers rule, and pi cannot edit what runs as root). `-`: the
 # LED never fails the unit, nor does a missing helper (unit copied by hand).
 #   ExecStartPre: heartbeat (starting)
+#   ExecStart: the game phase (--game), then the helper applies the game's
+#     result from start.env (no led.request yet: ok solid, degraded 1 Hz), so
+#     the LED leaves `starting` as soon as the game is playable; then the
+#     observability phase (up to 300 s, never fails the unit)
 #   ExecStartPost: joustmania-status --led (as pi) judges the ended start and
 #     leaves the state in led.request; the helper applies it (ok solid,
 #     degraded 1 Hz). Bounded by `timeout`: TimeoutStartSec applies to each
@@ -50,7 +54,9 @@ RuntimeDirectoryPreserve=yes
 #   ExecStopPost: $SERVICE_RESULT success (a clean stop) restores the board's
 #     trigger; any other result (failed or timed-out start) blinks 5 Hz.
 ExecStartPre=-+/usr/local/lib/joustmania/joustmania-led starting
-ExecStart=/home/pi/JoustMania/scripts/setup/joustmania-start.sh
+ExecStart=/home/pi/JoustMania/scripts/setup/joustmania-start.sh --game
+ExecStart=-+/usr/local/lib/joustmania/joustmania-led from-request
+ExecStart=/home/pi/JoustMania/scripts/setup/joustmania-start.sh --observability
 ExecStartPost=-/usr/bin/timeout 120 /home/pi/JoustMania/scripts/setup/joustmania-status.sh --led
 ExecStartPost=-+/usr/local/lib/joustmania/joustmania-led from-request
 ExecStop=/home/pi/JoustMania/scripts/setup/joustmania-compose.sh stop --timeout 20

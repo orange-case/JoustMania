@@ -61,6 +61,16 @@ pin_target() {
     git -C "$SCRIPT_DIR" rev-parse HEAD
 }
 
+# unit_sets_profiles: true when an installed unit (a `systemctl edit` drop-in)
+# sets COMPOSE_PROFILES, which wins over .env.local
+unit_sets_profiles() {
+    local word
+    for word in $(systemctl show -p Environment --value joustmania 2>/dev/null || true); do
+        [[ "$word" == COMPOSE_PROFILES=* ]] && return 0
+    done
+    return 1
+}
+
 stage_steps() {
     local autostart=0 target
 
@@ -72,9 +82,14 @@ stage_steps() {
     # .env.local: decision-backend API keys and opt-in profiles, private
     if [[ -e "$SCRIPT_DIR/.env.local" ]]; then
         echo ".env.local exists; left as it is"
+        if ! joustmania_env_local_sets "$SCRIPT_DIR/.env.local" COMPOSE_PROFILES && ! unit_sets_profiles; then
+            echo "  → it sets no COMPOSE_PROFILES, so the operator pad is off; add COMPOSE_PROFILES=operator-pad to turn it on"
+        fi
     elif ask "Create .env.local (API keys, opt-in profiles; mode 600) from .env.example?"; then
-        if install -m 600 "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env.local"; then
-            echo "  → created; edit it with: nano $SCRIPT_DIR/.env.local (no IMAGE_TAG there: the pin decides it)"
+        # The stage Pi runs the operator pad (UC-015): the profile is on from the first boot
+        if install -m 600 "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env.local" &&
+            sed -i 's/^# COMPOSE_PROFILES=operator-pad$/COMPOSE_PROFILES=operator-pad/' "$SCRIPT_DIR/.env.local"; then
+            echo "  → created with COMPOSE_PROFILES=operator-pad; edit it with: nano $SCRIPT_DIR/.env.local (no IMAGE_TAG there: the pin decides it)"
         else
             echo "ERROR: could not create .env.local" >&2
             STEP_FAILED=1

@@ -389,15 +389,14 @@ Defined in `lib/types.py` but never published: `player_revive`, `player_out`, `s
 Python metrics are created through `lib/otel_metrics.py` (`Counter`, observable `Gauge`, `Histogram`, each with an
 optional UCUM `unit`, exported as the OTLP unit). Units declared: `s` on every `*_seconds` metric
 (`grpc_client_request_duration_seconds`, `controller_input_lag_seconds`, `controller_poll_loop_lateness_seconds`,
-`controller_bluetooth_report_gap_p95_seconds`, `controller_bluetooth_report_gap_max_seconds`, `game_duration_seconds`,
+`controller_bluetooth_report_gap_p95_seconds`, `controller_bluetooth_report_gap_max_seconds`, `game_duration_seconds`, `game_loop_jitter_seconds`,
 `game_player_shield_energy_seconds`, `game_player_shield_budget_remaining_seconds`, `menu_button_dispatch_seconds`,
 `process_cpu_seconds_total`), `By` on `process_resident_memory_bytes`, `{g}` on the acceleration metrics
 (`controller_accel_magnitude`, `game_player_accel_magnitude`, `game_player_peak_accel`, `game_accel_distribution`) and
 `{g^2}` on `game_player_movement_variance` and `game_player_movement_variance_aggregate`; every other Python metric
 has none. The stored names do not change: prometheus_remote_write (`add_metric_suffixes` default) appends a unit's
 suffix only when the name does not already contain it as a `_`-separated token (`s` = `_seconds`, `By` = `_bytes`), and appends nothing for a
-`{annotation}` unit. A unit must keep that true: `1` on a gauge would add `_ratio`, `g` (gram) `_grams`, `ms` and
-`Hz` would rename `game_loop_jitter_ms` and the `*_hz` gauges, so those carry no unit. A `Histogram`'s `buckets` are passed to the SDK as explicit bucket boundaries, so each histogram exports
+`{annotation}` unit. A unit must keep that true: `1` on a gauge would add `_ratio`, `g` (gram) `_grams`, `Hz` would rename the `*_hz` gauges, so those carry no unit. A `Histogram`'s `buckets` are passed to the SDK as explicit bucket boundaries, so each histogram exports
 exactly the buckets it declares (UC-035 BR-004). The number of unique Python metric names and definitions is
 generated from the §6.2 scans and printed by `make specs-counts` (not committed) (the `process_*` trio is defined per service, and a few other names in more than one
 service; the catalog's Defined in column lists them); the Go agent adds 11 `agent_*` metrics plus the

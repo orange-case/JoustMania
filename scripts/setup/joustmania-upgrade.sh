@@ -606,6 +606,12 @@ roll_back_to_previous() {
         say "could not write $RELEASE_FILE"
         return 1
     }
+    # The installed unit stays the one of the version left: a rev-3 unit runs an
+    # older start script twice (it ignores --game/--observability), which can
+    # exceed the start timeout, so name the reinstall before the restart.
+    if ! git diff --quiet "$H_REF" "$T_REF" -- scripts/setup/joustmania.service scripts/setup/joustmania-led.sh 2>/dev/null; then
+        say "unit file or LED helper differs at $T_REF: run sudo $JOUSTMANIA_DIR/scripts/setup/install_autostart.sh (the installed unit is the one of $H_REF)"
+    fi
     local rc=0
     apply || rc=$?
     # A start systemd refused was never judged: keep rollback_to, so the next

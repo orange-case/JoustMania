@@ -21,6 +21,7 @@ from lib.feature_flags import read_float_flag
 from lib.types import Sound
 from proto import controller_manager_pb2
 from services.game_coordinator import game_clock
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import (
     Phase,
     Player,
@@ -1010,7 +1011,7 @@ class TournamentGame(StreamedIntroGameMode):
                 )
                 await self._write_end_effect(effect_cmd)
 
-            await self._play_sound(Sound.VOX_CONGRATULATIONS, priority=2)
+            await self._play_sound(Sound.VOX_CONGRATULATIONS, priority=sound_priority.CRITICAL)
 
             # Wait for the rainbow (interruptible by a force-end)
             await self._wait_for_rainbow_effect()

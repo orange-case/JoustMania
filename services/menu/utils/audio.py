@@ -25,6 +25,9 @@ DEFAULT_SOUND_VOLUME = 0.8
 DEFAULT_VOICE_VOLUME = 0.9
 DEFAULT_LOBBY_MUSIC_VOLUME = 0.4
 
+# Audio group of every menu voice line: a new line replaces the one still playing.
+MENU_VOICE_GROUP = "menu_voice"
+
 
 def _read_volume(client, flag_name: str, default: float) -> float:
     """Read a per-channel volume from the user domain with validation.
@@ -78,7 +81,7 @@ class AudioHelper:
             user_prefs_client, "audio_volume.lobby_music", DEFAULT_LOBBY_MUSIC_VOLUME
         )
 
-    async def play_sound(self, sound: str | Sound, volume: float | None = None) -> None:
+    async def play_sound(self, sound: str | Sound, volume: float | None = None, group: str = "") -> None:
         """
         Play a sound effect via the audio service, without waiting for the RPC (#2378).
 
@@ -90,12 +93,13 @@ class AudioHelper:
         Args:
             sound: Sound enum or relative path to audio file
             volume: Volume level 0.0-1.0; None uses the configured sound volume
+            group: Audio group; a clip of the same group still playing is replaced
         """
         if volume is None:
             volume = self.sound_volume
-        run_detached(self._send_sound(sound, volume), tasks=self._sound_tasks, what=f"Sound {sound}")
+        run_detached(self._send_sound(sound, volume, group), tasks=self._sound_tasks, what=f"Sound {sound}")
 
-    async def _send_sound(self, sound: str | Sound, volume: float) -> None:
+    async def _send_sound(self, sound: str | Sound, volume: float, group: str = "") -> None:
         try:
             from proto import audio_pb2, audio_pb2_grpc
 
@@ -108,6 +112,7 @@ class AudioHelper:
                     file_path=sound_name,
                     volume=volume,
                     priority=audio_pb2.AudioPriority.HIGH,
+                    group=group,
                 ),
                 timeout=AUDIO_RPC_TIMEOUT_SECONDS,
             )
@@ -125,7 +130,7 @@ class AudioHelper:
         """
         if volume is None:
             volume = self.voice_volume
-        await self.play_sound(voice, volume)
+        await self.play_sound(voice, volume, group=MENU_VOICE_GROUP)
 
     async def play_game_mode_voice(self, game_mode: str) -> None:
         """

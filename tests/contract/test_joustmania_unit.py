@@ -81,7 +81,7 @@ def test_stop_is_a_plain_compose_stop_not_down():
 
 # stage-host.md SH-3
 def test_unit_declares_revision_runtime_directory_and_timeouts():
-    assert "JOUSTMANIA_UNIT_REV=2" in " ".join(_lines("Service", "Environment"))
+    assert "JOUSTMANIA_UNIT_REV=3" in " ".join(_lines("Service", "Environment"))
     assert _lines("Service", "RuntimeDirectory") == ["joustmania"]
     assert _lines("Service", "TimeoutStartSec") == ["900"]
     assert _lines("Service", "Type") == ["oneshot"]
@@ -127,6 +127,16 @@ LED_HELPER = "/usr/local/lib/joustmania/joustmania-led"
 @pytest.mark.uc("UC-060", flow="main", steps=[4])  # stage-host.md SH-8
 def test_led_starting_is_applied_as_root_before_the_start_and_never_fails_it():
     assert _lines("Service", "ExecStartPre") == [f"-+{LED_HELPER} starting"]
+
+
+@pytest.mark.uc("UC-060", flow="main", steps=[3, 4])  # stage-host.md SH-2, SH-8
+def test_led_shows_the_game_state_before_the_observability_phase():
+    # A failed game phase ends the start before the helper; the helper never fails it
+    assert _lines("Service", "ExecStart") == [
+        "/home/pi/JoustMania/scripts/setup/joustmania-start.sh --game",
+        f"-+{LED_HELPER} from-request",
+        "/home/pi/JoustMania/scripts/setup/joustmania-start.sh --observability",
+    ]
 
 
 @pytest.mark.uc("UC-060", flow="main", steps=[4])  # stage-host.md SH-2, SH-8

@@ -23,6 +23,10 @@
 #    removed (A4)
 #  - git cannot read the checkout (git exits 128, no .git, no git binary): no
 #    branch is proven, so the game starts, state degraded with the reason (A4)
+#  - the unit's split start: --game starts and judges only the game and records
+#    phase=game, its result and the observability services; --observability
+#    starts only those and finishes the record; it refuses without a finished
+#    game phase; an unknown argument starts nothing
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-pi-start-offline.sh
 # UC: UC-060 main step 1 step 2 step 3 step 4 Pre-2 Post-S-1 Post-F-1
 # Spec: docs/specs/stage-host.md SH-1 SH-2 SH-3 SH-4
@@ -286,6 +290,52 @@ for variant in git-128 no-dotgit no-git; do
   [[ "$(state result)" == degraded ]] || fail "${variant}: state is not degraded: $(state result)"
   [[ "$(state reason)" == "git cannot read the checkout" ]] || fail "${variant}: start.env reason: $(state reason)"
 done
+
+# --- 10. the rev-3 unit: --game, then the LED, then --observability ---------
+# The game phase alone records phase=game and its result, so the LED helper
+# between the two shows the game's state before observability starts.
+run_mode() { # $1 = --game|--observability
+  env PATH="${CASE}/bin:${PATH}" JOUSTMANIA_UNIT_REV=3 JOUSTMANIA_DOCKER_WAIT_S=1 \
+    JOUSTMANIA_ASOUND_DIR="${CASE}/none" JOUSTMANIA_GAME_READY_S=1 JOUSTMANIA_POLL_S=0.2 \
+    JOUSTMANIA_STATUS_DIR="${CASE}/status" JOUSTMANIA_OBS_RETRY_PAUSE_S=0 \
+    bash "${CASE}/repo/scripts/setup/joustmania-start.sh" "$1" >>"${CASE}/out.log" 2>&1
+}
+make_case split
+run_mode --game || fail "split: the game phase failed: $(tail -3 "${CASE}/out.log")"
+grep -qxF "${GAME_UP} ${GAME}" "${CASE}/docker.log" || fail "split: the game phase did not start the game: $(grep ' up ' "${CASE}/docker.log")"
+grep -q -- '--wait' "${CASE}/docker.log" && fail "split: --game started observability"
+[[ "$(state phase)" == game && "$(state result)" == ok ]] || fail "split: after --game start.env is not phase=game result=ok: $(state phase) $(state result)"
+[[ "$(state obs)" == "${OBS}" ]] || fail "split: start.env does not record the observability services: $(state obs)"
+: >"${CASE}/docker.log"
+run_mode --observability || fail "split: the observability phase failed: $(tail -3 "${CASE}/out.log")"
+grep -qxF "${OBS_UP} ${OBS}" "${CASE}/docker.log" || fail "split: --observability did not start them: $(grep ' up ' "${CASE}/docker.log")"
+grep -qE " up .*--remove-orphans" "${CASE}/docker.log" && fail "split: --observability started the game again"
+grep -q '{{.Service}}' "${CASE}/docker.log" && fail "split: --observability judged the game again"
+[[ "$(state phase)" == start && "$(state result)" == ok ]] || fail "split: the final start.env is not phase=start result=ok: $(state phase) $(state result)"
+no_network split
+
+make_case split-degraded
+echo "ghcr.io/o/joustmania/jaeger:0.0.0-test" >"${CASE}/missing"
+run_mode --game || fail "split-degraded: the game phase failed"
+[[ "$(state result)" == degraded ]] || fail "split-degraded: a missing observability image is not degraded after --game: $(state result)"
+touch "${CASE}/obs-up-fails"
+run_mode --observability || fail "split-degraded: a failed observability phase failed the unit"
+[[ "$(state result)" == degraded ]] || fail "split-degraded: the final state is not degraded: $(state result)"
+[[ "$(state missing)" == *"jaeger("* && "$(state down)" == *"observability(exit"* ]] \
+  || fail "split-degraded: the game phase's record was lost: missing=$(state missing) down=$(state down)"
+
+make_case split-no-game
+if run_mode --observability; then fail "split-no-game: --observability ran without a recorded game phase"; fi
+grep -q ' up ' "${CASE}/docker.log" && fail "split-no-game: something was started"
+make_case split-game-down
+echo controller-manager >"${CASE}/down"
+if run_mode --game; then fail "split-game-down: --game succeeded with a game service down"; fi
+[[ "$(state phase)" == game && "$(state result)" == failed ]] || fail "split-game-down: start.env: $(state phase) $(state result)"
+if run_mode --observability; then fail "split-game-down: --observability ran after a failed game phase"; fi
+grep -q -- '--wait' "${CASE}/docker.log" && fail "split-game-down: observability was started"
+make_case bad-arg
+if run_mode --both; then fail "bad-arg: an unknown argument was accepted"; fi
+grep -q ' up ' "${CASE}/docker.log" && fail "bad-arg: something was started"
 
 if [[ "${fails}" -ne 0 ]]; then
   exit 1

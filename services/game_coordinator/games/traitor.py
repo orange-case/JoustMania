@@ -21,6 +21,7 @@ from lib.feature_flags import read_object_flag
 from lib.types import Sound
 from proto import controller_manager_pb2
 from services.game_coordinator import game_clock
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import Player
 from services.game_coordinator.games.teams_base import TeamsGameBase
 from services.game_coordinator.stream_writes import serialized_write
@@ -526,7 +527,7 @@ class TraitorGame(TeamsGameBase):
                     await self._write_end_effect(effect_cmd)
 
             # Play victory sound (audio service handles voice selection)
-            await self._play_sound(Sound.VOX_TRAITOR_WIN, priority=2)
+            await self._play_sound(Sound.VOX_TRAITOR_WIN, priority=sound_priority.CRITICAL)
 
         # Wait for the rainbow (interruptible by a force-end); only a winner is celebrated
         if winning_team is not None:

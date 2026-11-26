@@ -26,6 +26,7 @@ from lib.feature_flags import read_float_flag, read_int_flag, read_object_flag
 from lib.types import Sound
 from proto import controller_manager_pb2
 from services.game_coordinator import game_clock, metrics
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import (
     GAME_MODE_ATTR,
     Phase,
@@ -735,9 +736,9 @@ class ZombieGame(StreamedIntroGameMode):
 
         # Play victory sound (Zombie/vox/ directory)
         if winner_side == "humans":
-            await self._play_sound(Sound.VOX_HUMAN_VICTORY, priority=2)
+            await self._play_sound(Sound.VOX_HUMAN_VICTORY, priority=sound_priority.CRITICAL)
         elif winner_side == "zombies":
-            await self._play_sound(Sound.VOX_ZOMBIE_VICTORY, priority=2)
+            await self._play_sound(Sound.VOX_ZOMBIE_VICTORY, priority=sound_priority.CRITICAL)
 
         # Wait for rainbow effect to complete
         if winner_side is not None:

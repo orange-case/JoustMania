@@ -10,7 +10,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from lib.types import Sound
-from proto import controller_manager_pb2
+from proto import audio_pb2, controller_manager_pb2
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import COUNTDOWN_BEEP_COUNT
 from services.game_coordinator.games.ffa import FFAGame
 from services.game_coordinator.runtime_config import GamePerformanceConfig, RuntimeConfigManager
@@ -72,6 +73,23 @@ class TestCountdown:
         assert events.count_events_of_type("countdown_start") == 1
         assert events.get_events_of_type("countdown_start")[0] == {"phase_duration_ms": 100}
         assert events.count_events_of_type("countdown_end") == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-031", flow="A2")
+    async def test_countdown_sounds_are_critical_so_a_full_mix_cannot_drop_them(self):
+        game = await _game(EventCollector())
+        play = AsyncMock()
+
+        with (
+            patch("services.game_coordinator.games.base.get_config_manager", return_value=_config_manager(100)),
+            patch.object(game, "_play_sound", play),
+            patch("services.game_coordinator.games.base.asyncio.sleep", AsyncMock()),
+        ):
+            await game._countdown()
+
+        assert play.await_count == COUNTDOWN_BEEP_COUNT + 1
+        assert {c.kwargs["priority"] for c in play.await_args_list} == {audio_pb2.CRITICAL}
+        assert sound_priority.CRITICAL == audio_pb2.CRITICAL
 
     @pytest.mark.asyncio
     @pytest.mark.real_durations

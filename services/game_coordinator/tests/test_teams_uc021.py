@@ -26,6 +26,7 @@ from opentelemetry import trace
 from lib.types import GameEvent, Sound
 from proto import controller_manager_pb2, game_coordinator_pb2
 from services.game_coordinator import game_clock
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import GameState
 from services.game_coordinator.games.random_teams import RandomTeamsGame
 from services.game_coordinator.games.teams import SimpleTeamsGame
@@ -200,6 +201,28 @@ class TestMainStep2Countdown:
         types = [t for t, _ in events.events]
         assert types == [GameEvent.COUNTDOWN_START, GameEvent.COUNTDOWN_END]
         assert events.get_events_of_type(GameEvent.COUNTDOWN_START) == [{"phase_duration_ms": 50}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-021", flow="main", steps=[2])
+    @pytest.mark.uc("UC-031", flow="A2")
+    async def test_countdown_sounds_are_critical(self):
+        game, _events = _teams_game()
+        await game._initialize_players_impl(_controllers("c0", "c1"))
+        game.gameplay_stream = RecordingPlayerStream()
+        game.running = True
+        priorities: list = []
+
+        async def record_sound(_sound, **kwargs):
+            priorities.append(kwargs.get("priority"))
+
+        config = GamePerformanceConfig(countdown_phase_duration_ms=50)
+        with (
+            patch.object(get_config_manager(), "get_config", return_value=config),
+            patch.object(game, "_play_sound", autospec=True, side_effect=record_sound),
+        ):
+            await game._countdown()
+
+        assert priorities == [sound_priority.CRITICAL] * 4
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-021", flow="main", steps=[2])

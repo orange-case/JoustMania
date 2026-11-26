@@ -201,7 +201,7 @@ class TestPlayTeamVictorySound:
 
         await game._play_team_victory_sound(0)
 
-        game._play_sound.assert_awaited_once_with(TEAM_WIN_SOUNDS["Blue"], priority=2)
+        game._play_sound.assert_awaited_once_with(TEAM_WIN_SOUNDS["Blue"], priority=3)
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-021", flow="main", steps=[4])
@@ -216,7 +216,7 @@ class TestPlayTeamVictorySound:
 
         await game._play_team_victory_sound(0)
 
-        game._play_sound.assert_awaited_once_with(Sound.VOX_CONGRATULATIONS, priority=2)
+        game._play_sound.assert_awaited_once_with(Sound.VOX_CONGRATULATIONS, priority=3)
 
     @pytest.mark.asyncio
     async def test_invalid_team_num_does_nothing(self, game):

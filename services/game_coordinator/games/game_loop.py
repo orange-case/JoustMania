@@ -17,6 +17,7 @@ from opentelemetry import trace
 from lib.types import GameEvent, Sound
 from services.game_coordinator import game_clock, metrics
 from services.game_coordinator.games import base as _base
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import (
     _MSG_COUNTDOWN_INTERRUPTED,
     COUNTDOWN_BEEP_COUNT,
@@ -113,7 +114,7 @@ class GameLoopMixin:
                 return
 
             # Play countdown beep — inherits game.phase.gameplay as parent span
-            await self._play_sound(Sound.SFX_BEEP_LOUD, priority=2)
+            await self._play_sound(Sound.SFX_BEEP_LOUD, priority=sound_priority.CRITICAL)
 
             # Wait for beep interval (configurable based on countdown duration)
             wait_iterations = beep_interval_ms // 50  # 50ms per iteration
@@ -124,7 +125,7 @@ class GameLoopMixin:
                 await game_clock.sleep(self._COUNTDOWN_BEEP_POLL_S)
 
         # Play start sound — inherits game.phase.gameplay as parent span
-        await self._play_sound(Sound.SFX_START3, priority=2)
+        await self._play_sound(Sound.SFX_START3, priority=sound_priority.CRITICAL)
 
         await self.event_publisher(GameEvent.COUNTDOWN_END, {})
         logger.info("Countdown complete")
@@ -314,7 +315,7 @@ class GameLoopMixin:
         if reason is None:
             return
         logger.error(f"Aborting game {self.game_id} with no winner: {reason}")
-        await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=3)
+        await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=sound_priority.CRITICAL)
         raise MassDisconnectError(reason)
 
     def _mass_disconnect_reason(self, serials: list[str]) -> str | None:

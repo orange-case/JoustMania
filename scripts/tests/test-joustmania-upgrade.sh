@@ -109,6 +109,10 @@ C_SIDE="$(commit side 0.1.0)"
 g -C "${SRC}" checkout -q -b pre08 "${C_FLOOR}"
 add_scripts "${C_FLOOR}"
 C_PRE="$(commit pre08 0.1.0)"
+# A version off 1.0.0 whose unit file differs (like the rev-3 split start)
+g -C "${SRC}" checkout -q -b unitrev "${C_V1}"
+echo '# changed unit' >>"${SRC}/scripts/setup/joustmania.service"
+C_UNIT="$(commit unit-changed 1.0.0)"
 g -C "${SRC}" checkout -q main
 ORIGIN="${WORK}/origin.git"
 g clone -q --bare "${SRC}" "${ORIGIN}"
@@ -618,6 +622,21 @@ upgrade "${C_MAIN}" || fail "sha: upgrade failed: $(tail -3 "${CASE}/out.log")"
 [[ "$(rel previous_ref)" == "${C_V1}" ]] || fail "sha: previous is not the branch commit"
 grep -q "compose.* pull | tag=${C_MAIN} profiles=operator-pad" "${CASE}/calls.log" \
   || fail "sha: pull did not use the sha tag and the unit's COMPOSE_PROFILES"
+
+# --- 6b. the unit differs between the versions: upgrade and rollback name the reinstall
+make_case unit-changed "${C_V1}"
+upgrade "${C_UNIT}" || fail "unit-changed: upgrade failed: $(tail -3 "${CASE}/out.log")"
+grep -qF "unit file or LED helper changed: run sudo ${REPO}/scripts/setup/install_autostart.sh" "${CASE}/out.log" \
+  || fail "unit-changed: the upgrade does not name the reinstall"
+: >"${CASE}/out.log"
+upgrade --rollback || fail "unit-changed: rollback failed: $(tail -2 "${CASE}/out.log")"
+[[ "$(head_of)" == "${C_V1}" ]] || fail "unit-changed: not rolled back to 1.0.0"
+grep -qF "unit file or LED helper differs at ${C_V1}: run sudo ${REPO}/scripts/setup/install_autostart.sh" "${CASE}/out.log" \
+  || fail "unit-changed: the rollback does not name the reinstall: $(cat "${CASE}/out.log")"
+make_case unit-same "${C_V1}"
+upgrade joustmania-v1.1.0 || fail "unit-same: upgrade failed"
+upgrade --rollback || fail "unit-same: rollback failed"
+grep -q 'install_autostart' "${CASE}/out.log" && fail "unit-same: reinstall named although the unit is the same"
 
 # --- 7. not healthy: automatic rollback; --no-rollback leaves it ------------
 make_case unhealthy "${C_V1}"
