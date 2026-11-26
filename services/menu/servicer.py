@@ -792,6 +792,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             await self.event_publisher.publish("game_start_cancelled", {})
+
             # The restore runs as the lifecycle task, so a start in this window gets the A8
             # lobby-restart refusal instead of interleaving with the lobby restore. The cancelled task may
             # have been queued behind a lobby entry: the restore runs after that entry, not inside it.
