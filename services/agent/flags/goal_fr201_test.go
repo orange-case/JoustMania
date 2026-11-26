@@ -64,7 +64,7 @@ func TestGoalProfile_Read(t *testing.T) {
 			t.Fatalf("evaluation context = %v", got)
 		}
 	})
-	t.Run("UC-042/A12 the sentinel derives from the objectives and the fitness flags", func(t *testing.T) {
+	t.Run("UC-042/A12 the sentinel derives from the objectives, not the fitness flags", func(t *testing.T) {
 		ev := &goalEvaluator{
 			value: map[string]any{"from_objectives": true}, variant: "from_objectives",
 			stubEvaluator: stubEvaluator{
@@ -73,7 +73,7 @@ func TestGoalProfile_Read(t *testing.T) {
 			},
 		}
 		p := New(ev, nil).GoalProfile(ctx, "g-1", attrs)
-		if p.Name != goal.NameLongRunningGame || !p.FromObjectives || *p.Terms[0].Min != 300 {
+		if p.Name != goal.NameLongRunningGame || !p.FromObjectives || *p.Terms[0].Min != 180 {
 			t.Fatalf("profile = %+v", p)
 		}
 	})

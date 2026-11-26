@@ -114,20 +114,10 @@ Manual: **Service** `agent` · **Operation** `agent.decision` · Lookback `1h`.
 **Validated live:** returns traces; each expands to
 `signal_received → decision → action`.
 
-### (b) Infrastructure remediation — `agent.infrastructure.decision`
+### (b) Retired
 
-```
-http://localhost/jaeger/search?service=agent&operation=agent.infrastructure.decision&lookback=6h&limit=20
-```
-
-Manual: **Service** `agent` · **Operation** `agent.infrastructure.decision`.
-**NOT yet populated on this stack** (live query returned 0 results, and the op
-does not currently appear in `/api/operations?service=agent`). This is the
-infrastructure-agent decision path; it needs a **live infra-agent run** during
-the talk (or a dry-run that exercises remediation) before the operation shows up
-in the dropdown. Until then, the operation field will be empty — keep this as the
-"run it live" act rather than a pre-canned trace. *(See the noted follow-up in
-§4.)*
+The infrastructure remediation act is gone: the agent's infrastructure loop and
+its span were removed with the controller-backend rollout (#2784).
 
 ### (c) Backend attribution — is a model actually driving?
 
@@ -298,11 +288,6 @@ as follow-ups for the span-schema owners.
 2. **`game.id` vs `session.id` duplication** — both carry the identical value on
    every span. Harmless but redundant in the tag table; a follow-up could drop
    one alias or document the intent. *Code change — out of scope.*
-3. **`agent.infrastructure.decision` not emitted** — the operation does not
-   appear in live Jaeger (`/api/operations?service=agent`) and act (b) returns
-   no traces without a live infra-agent run. Confirm the infra path emits this
-   span under an infra scenario, or the act (b) bookmark will show an
-   empty operation dropdown. *Operational/verification follow-up.*
 
 ---
 
@@ -311,7 +296,7 @@ as follow-ups for the span-schema owners.
 - **Hierarchy** (`signal_received → decision → action`): verified against live
   trace `4f0a8448…`.
 - **Stage-act queries**: validated live except where explicitly flagged — (a) ✓,
-  (b) ✗ not yet emitted (needs live infra run), (c) ✓ (10), (d) ✓ (4), (e) ✓
+  (b) retired, (c) ✓ (10), (d) ✓ (4), (e) ✓
   (20), action bonus ✓ (10), code-improvement bonus ✓ (5).
 - **Attribute names/values**: read from real span data, not assumed.
 

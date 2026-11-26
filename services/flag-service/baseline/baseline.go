@@ -27,7 +27,6 @@ var DefaultFiles = []string{
 	"user.json",
 	"agent.json",
 	"interventions.json",
-	"rollout.json",
 	"operator.json",
 }
 

@@ -15,7 +15,6 @@ import (
 	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamecontext"
-	"github.com/joustmania/agent/infracontext"
 )
 
 // slowDecideBackend is a remote backend that answers only once released, ignoring
@@ -95,7 +94,7 @@ func TestRun_WaitsForInflightDecideBeforeReturning(t *testing.T) {
 			listenAddr:    freePort(t),
 			healthAddr:    freePort(t),
 			logger:        logger,
-			pipe:          newPipeline(mux, loops, time.Hour).withInfra(infracontext.NewStore(time.Hour, nil), nil),
+			pipe:          newPipeline(mux, loops, time.Hour),
 			mux:           mux,
 			loops:         loops,
 			evictInterval: time.Hour,

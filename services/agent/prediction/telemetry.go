@@ -19,7 +19,7 @@ import (
 // telemetry.go emits agent.prediction.outcome and the agent_prediction* metrics
 // (docs/specs/telemetry.md §4.1, §6). Every metric carries game_kind (real /
 // shadow, gamecontext.TelemetryGameKind), and the outcome and Brier metrics carry
-// acted, so counterfactuals never mix into the acted calibration.
+// acted, which keeps controls apart from decision predictions.
 
 const meterName = "github.com/joustmania/agent/prediction"
 
@@ -28,7 +28,6 @@ const (
 	MetricRegistered = "agent_predictions_registered_total"
 	MetricOutcomes   = "agent_prediction_outcomes_total"
 	MetricBrierSum   = "agent_prediction_brier_sum"
-	MetricMerged     = "agent_prediction_merged_total"
 	// MetricGoalAttainment is the per-game goal attainment 0..1 (#2479, §14.4).
 	MetricGoalAttainment = "agent_goal_attainment"
 )
@@ -38,7 +37,6 @@ type telemetry struct {
 	registeredC otelmetric.Int64Counter
 	outcomes    otelmetric.Int64Counter
 	brier       otelmetric.Float64Counter
-	mergedC     otelmetric.Int64Counter
 	goalH       otelmetric.Float64Histogram
 }
 
@@ -62,10 +60,6 @@ func newTelemetry(tp trace.TracerProvider, mp otelmetric.MeterProvider) telemetr
 	if t.brier, err = m.Float64Counter(MetricBrierSum,
 		otelmetric.WithDescription("Sum of (p - y)^2 over hit and miss predictions; divide by the hit+miss count for the Brier score (#2479)")); err != nil {
 		t.brier, _ = noop.Float64Counter(MetricBrierSum)
-	}
-	if t.mergedC, err = m.Int64Counter(MetricMerged,
-		otelmetric.WithDescription("Predictions not registered because an identical one was pending (#2479)")); err != nil {
-		t.mergedC, _ = noop.Int64Counter(MetricMerged)
 	}
 	if t.goalH, err = m.Float64Histogram(MetricGoalAttainment,
 		otelmetric.WithDescription("Goal attainment 0..1 per ended game: the weighted mean of the goal profile's term scores (#2479)"),
@@ -104,10 +98,6 @@ func (t telemetry) goalAttainment(r goal.Result, gameKind string) {
 
 func (t telemetry) registered(backend string, p decide.Prediction, gameKind string) {
 	t.registeredC.Add(context.Background(), 1, otelmetric.WithAttributes(baseAttrs(backend, p, gameKind)...))
-}
-
-func (t telemetry) merged(backend string, p decide.Prediction, gameKind string) {
-	t.mergedC.Add(context.Background(), 1, otelmetric.WithAttributes(baseAttrs(backend, p, gameKind)...))
 }
 
 // outcome records r's metrics and its agent.prediction.outcome span.

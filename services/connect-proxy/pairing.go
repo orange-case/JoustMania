@@ -26,7 +26,7 @@ var bluetoothAddressRe = regexp.MustCompile(`^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2})
 const maxDaemonResponseBytes = 64 << 10
 
 // registerPairingHandlers adds the operator unpair endpoint (UC-005). There is
-// no authentication (UC-005 BR-003), like the canary endpoints.
+// no authentication (UC-005 BR-003).
 func registerPairingHandlers(mux *http.ServeMux) {
 	client := &http.Client{Timeout: 35 * time.Second}
 	hostnames := append(parseHostnames(getEnv("JOUSTMANIA_HOSTNAMES", "")), hostHostnames(hostHostnameFile)...)

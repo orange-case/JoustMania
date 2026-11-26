@@ -42,8 +42,10 @@ services:
       - "50064"
       - "8070"
     environment:
-      - FLAG_SERVICE_SETS=system,observability,interventions,rollout,agent,game,user,controller,operator
+      - FLAG_SERVICE_SETS=system,observability,interventions,agent,game,user,controller,operator
       - FLAG_SERVICE_BASELINE_DIR=/etc/flagd
+      # Pinned like docker-compose.yml (#2784).
+      - FLAG_SERVICE_BASELINE_FILES=system.json,controller.json,observability.json,game.json,user.json,agent.json,interventions.json,operator.json
       # The registry comes from the same checkout as the baseline (mounted below):
       # the image copy would reject a renamed flag (#1838).
       - FLAG_SERVICE_REGISTRY=/etc/flag-service/registry.yaml
@@ -327,7 +329,6 @@ services:
       - CONTROLLER_MANAGER_SERVICE=controller-manager:50052
       - GAME_COORDINATOR_SERVICE=game-coordinator:50053
       - MENU_SERVICE=menu:50054
-      - FLAG_SERVICE_URL=http://flag-service:8070
       # Pairing daemon control API (UC-005 unpair); the daemon runs on the host network
       - PAIRING_DAEMON_URL=http://host.docker.internal:8002
       # Extra host names the dashboard is reached by (comma-separated), besides IP

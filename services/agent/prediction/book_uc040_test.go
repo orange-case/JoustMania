@@ -3,6 +3,7 @@ package prediction
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ import (
 
 // book_uc040_test.go covers the prediction book (#2479, UC-040 A44, BR-034):
 // per-template scoring (early decision, game end first, data missing, stale end,
-// the horizon grace), exactly-once scoring, caps, dedupe, controls, restart and
+// the horizon grace), exactly-once scoring, caps, controls, restart and
 // shutdown.
 
 var t0 = time.Unix(10_000, 0)
@@ -202,11 +203,11 @@ func pred(template string, h int, target string) decide.Prediction {
 	return decide.NewPrediction(template, h, 0.7, decide.SourceRules, "R4", target)
 }
 
-func (h *harness) register(p decide.Prediction, c gamecontext.GameContext, acted bool) string {
+func (h *harness) register(p decide.Prediction, c gamecontext.GameContext) string {
 	h.t.Helper()
-	id, merged, ok := h.b.Register(Registration{Backend: "rules", Prediction: p, Acted: acted, Context: c})
-	if !ok || merged {
-		h.t.Fatalf("Register ok=%v merged=%v", ok, merged)
+	id, ok := h.b.Register(Registration{Backend: "rules", Prediction: p, Context: c})
+	if !ok {
+		h.t.Fatal("Register refused")
 	}
 	return id
 }
@@ -224,7 +225,7 @@ func TestBook_Survives(t *testing.T) {
 	t.Run("UC-040/A44 alive at the horizon is a hit", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+		h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 		if d := h.timers.durations(); len(d) != 1 || d[0] != 18*time.Second {
 			t.Fatalf("timer = %v, want horizon 15 s + 3 s grace", d)
 		}
@@ -236,7 +237,7 @@ func TestBook_Survives(t *testing.T) {
 	t.Run("UC-040/A44 eliminated inside the horizon is an early miss", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+		h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 		h.at(6 * time.Second)
 		h.b.Observe(eliminate(c, "P1", 5*time.Second))
 		if h.b.Pending() != 0 {
@@ -247,7 +248,7 @@ func TestBook_Survives(t *testing.T) {
 	t.Run("UC-040/A44 horizon grace: eliminated after the horizon but before the check is a hit", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+		h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 		h.at(18 * time.Second)
 		live := eliminate(c, "P1", 17*time.Second)
 		h.setLive(&live)
@@ -257,7 +258,7 @@ func TestBook_Survives(t *testing.T) {
 	t.Run("UC-040/A44 eliminated exactly at the horizon is a miss", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+		h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 		h.at(18 * time.Second)
 		live := eliminate(c, "P1", 15*time.Second)
 		h.setLive(&live)
@@ -267,7 +268,7 @@ func TestBook_Survives(t *testing.T) {
 	t.Run("UC-040/A44 game ends first with the target alive: unscorable game_ended", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+		h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 		h.at(5 * time.Second)
 		r := h.one(h.end(c))
 		want(t, r, OutcomeUnscorable, ReasonGameEnded, false)
@@ -278,14 +279,14 @@ func TestBook_Survives(t *testing.T) {
 	t.Run("UC-040/A44 game ends first after the target died: early miss", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+		h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 		h.at(5 * time.Second)
 		want(t, h.one(h.end(eliminate(c, "P1", 4*time.Second))), OutcomeMiss, "", true)
 	})
 	t.Run("UC-040/A44 stale end: unscorable stale_end", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+		h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 		h.at(5 * time.Second)
 		end := eliminate(c, "P1", 4*time.Second)
 		end.EndReason = gamecontext.EndReasonStale
@@ -296,8 +297,8 @@ func TestBook_Survives(t *testing.T) {
 		h := newHarness(t)
 		c := eliminate(game("P1", "P2"), "P2", -time.Second)
 		noTarget := pred(decide.TemplateSurvives, 15, "")
-		h.register(noTarget, c, true)
-		h.register(pred(decide.TemplateSurvives, 15, "P2"), c, true)
+		h.register(noTarget, c)
+		h.register(pred(decide.TemplateSurvives, 15, "P2"), c)
 		if h.b.Pending() != 0 || len(h.timers.durations()) != 0 {
 			t.Fatal("predictions scored at registration must not stay pending or start a timer")
 		}
@@ -309,7 +310,7 @@ func TestBook_Survives(t *testing.T) {
 	t.Run("UC-040/A44 a horizon check with the partition gone waits for game end", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+		h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 		h.at(18 * time.Second)
 		h.fire() // no live context
 		if h.b.Pending() != 1 {
@@ -325,7 +326,7 @@ func TestBook_Eliminations(t *testing.T) {
 	t.Run("UC-040/A44 no_elimination: none in the horizon is a hit", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2", "P3")
-		h.register(pred(decide.TemplateNoElimination, 15, ""), c, true)
+		h.register(pred(decide.TemplateNoElimination, 15, ""), c)
 		h.at(18 * time.Second)
 		live := eliminate(c, "P3", 16*time.Second) // after the horizon
 		h.setLive(&live)
@@ -339,7 +340,7 @@ func TestBook_Eliminations(t *testing.T) {
 	t.Run("UC-040/A44 no_elimination: an elimination is an early miss", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2", "P3")
-		h.register(pred(decide.TemplateNoElimination, 15, ""), c, true)
+		h.register(pred(decide.TemplateNoElimination, 15, ""), c)
 		h.at(4 * time.Second)
 		h.b.Observe(eliminate(c, "P3", 3*time.Second))
 		want(t, h.one(h.end(c)), OutcomeMiss, "", true)
@@ -347,21 +348,21 @@ func TestBook_Eliminations(t *testing.T) {
 	t.Run("UC-040/A44 no_elimination: game ends first without one is unscorable", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2", "P3")
-		h.register(pred(decide.TemplateNoElimination, 15, ""), c, true)
+		h.register(pred(decide.TemplateNoElimination, 15, ""), c)
 		h.at(5 * time.Second)
 		want(t, h.one(h.end(c)), OutcomeUnscorable, ReasonGameEnded, false)
 	})
 	t.Run("UC-040/A44 elimination: one before the game ends is an early hit", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2", "P3")
-		h.register(pred(decide.TemplateElimination, 30, ""), c, true)
+		h.register(pred(decide.TemplateElimination, 30, ""), c)
 		h.at(5 * time.Second)
 		want(t, h.one(h.end(eliminate(c, "P3", 4*time.Second))), OutcomeHit, "", true)
 	})
 	t.Run("UC-040/A44 elimination: none at the horizon is a miss", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2", "P3")
-		h.register(pred(decide.TemplateElimination, 30, ""), c, true)
+		h.register(pred(decide.TemplateElimination, 30, ""), c)
 		h.at(33 * time.Second)
 		h.setLive(&c)
 		h.fire()
@@ -370,7 +371,7 @@ func TestBook_Eliminations(t *testing.T) {
 	t.Run("UC-040/A44 a lost timeline falls back to the sequence, flagged approx", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2", "P3")
-		h.register(pred(decide.TemplateElimination, 30, ""), c, true)
+		h.register(pred(decide.TemplateElimination, 30, ""), c)
 		h.at(5 * time.Second)
 		live := c
 		live.Session.EliminationSequence = []string{"P3"} // timeline empty: evicted
@@ -388,14 +389,14 @@ func TestBook_GameEnds(t *testing.T) {
 	t.Run("UC-040/A44 game ends inside the horizon: early hit", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2", "P3", "P4")
-		h.register(pred(decide.TemplateGameEnds, 60, ""), c, true)
+		h.register(pred(decide.TemplateGameEnds, 60, ""), c)
 		h.at(20 * time.Second)
 		want(t, h.one(h.end(c)), OutcomeHit, "", true)
 	})
 	t.Run("UC-040/A44 game still running at the horizon: miss", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2", "P3", "P4")
-		h.register(pred(decide.TemplateGameEnds, 60, ""), c, true)
+		h.register(pred(decide.TemplateGameEnds, 60, ""), c)
 		h.at(63 * time.Second)
 		h.setLive(&c)
 		h.fire()
@@ -408,7 +409,7 @@ func TestBook_ActivityAndCloseness(t *testing.T) {
 	t.Run("UC-040/A44 activity_rises: after above before x 1.05 is a hit", func(t *testing.T) {
 		h := newHarness(t)
 		c := withHistory(game("P1", "P2"), "P1", -10*time.Second, 10, 0.5)
-		h.register(pred(decide.TemplateActivityRises, 10, "P1"), c, true)
+		h.register(pred(decide.TemplateActivityRises, 10, "P1"), c)
 		h.at(13 * time.Second)
 		live := withHistory(c, "P1", 0, 10, 1.0)
 		h.setLive(&live)
@@ -422,7 +423,7 @@ func TestBook_ActivityAndCloseness(t *testing.T) {
 	t.Run("UC-040/A44 activity_rises: no rise is a miss", func(t *testing.T) {
 		h := newHarness(t)
 		c := withHistory(game("P1", "P2"), "P1", -10*time.Second, 10, 0.5)
-		h.register(pred(decide.TemplateActivityRises, 10, "P1"), c, true)
+		h.register(pred(decide.TemplateActivityRises, 10, "P1"), c)
 		h.at(13 * time.Second)
 		live := withHistory(c, "P1", 0, 10, 0.51)
 		h.setLive(&live)
@@ -432,7 +433,7 @@ func TestBook_ActivityAndCloseness(t *testing.T) {
 	t.Run("UC-040/A44 activity_rises: thin data is data_missing", func(t *testing.T) {
 		h := newHarness(t)
 		c := withHistory(game("P1", "P2"), "P1", -10*time.Second, 10, 0.5)
-		h.register(pred(decide.TemplateActivityRises, 10, "P1"), c, true)
+		h.register(pred(decide.TemplateActivityRises, 10, "P1"), c)
 		h.at(13 * time.Second)
 		live := withHistory(c, "P1", 0, 3, 1.0)
 		h.setLive(&live)
@@ -442,7 +443,7 @@ func TestBook_ActivityAndCloseness(t *testing.T) {
 	t.Run("UC-040/A44 activity_rises: a target that died is target_not_alive", func(t *testing.T) {
 		h := newHarness(t)
 		c := withHistory(game("P1", "P2"), "P1", -10*time.Second, 10, 0.5)
-		h.register(pred(decide.TemplateActivityRises, 10, "P1"), c, true)
+		h.register(pred(decide.TemplateActivityRises, 10, "P1"), c)
 		h.at(13 * time.Second)
 		live := eliminate(withHistory(c, "P1", 0, 10, 1.0), "P1", 8*time.Second)
 		h.setLive(&live)
@@ -453,7 +454,7 @@ func TestBook_ActivityAndCloseness(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
 		c = withHistory(withHistory(c, "P1", -15*time.Second, 15, 0.4), "P2", -15*time.Second, 15, 1.6)
-		h.register(pred(decide.TemplateClosenessRises, 15, ""), c, true)
+		h.register(pred(decide.TemplateClosenessRises, 15, ""), c)
 		h.at(18 * time.Second)
 		live := withHistory(withHistory(c, "P1", 0, 15, 0.9), "P2", 0, 15, 1.1)
 		h.setLive(&live)
@@ -469,7 +470,7 @@ func TestBook_ExactlyOnce(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		id := h.register(pred(decide.TemplateSurvives, 10, "P1"), c, true)
+		id := h.register(pred(decide.TemplateSurvives, 10, "P1"), c)
 		h.at(13 * time.Second)
 		h.setLive(&c)
 		var wg sync.WaitGroup
@@ -524,21 +525,17 @@ func counterSum(t *testing.T, r *sdkmetric.ManualReader, name string) int64 {
 }
 
 // UC: UC-040 A44 BR-034
-func TestBook_CapsAndDedupe(t *testing.T) {
-	t.Run("UC-040/A44 an identical pending prediction is merged", func(t *testing.T) {
+func TestBook_Caps(t *testing.T) {
+	t.Run("UC-040/A44 an identical pending prediction registers again", func(t *testing.T) {
 		h := newHarness(t)
 		c := game("P1", "P2")
-		id := h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
-		id2, merged, ok := h.b.Register(Registration{Backend: "rules", Prediction: pred(decide.TemplateSurvives, 15, "P1"), Acted: true, Context: c})
-		if !ok || !merged || id2 != id || h.b.Pending() != 1 {
-			t.Fatalf("second Register = %q merged=%v ok=%v pending=%d", id2, merged, ok, h.b.Pending())
+		id := h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
+		id2 := h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
+		if id2 == id || h.b.Pending() != 2 {
+			t.Fatalf("second Register = %q (first %q), pending=%d, want a new id and 2 pending", id2, id, h.b.Pending())
 		}
-		if n := counterSum(t, h.reader, MetricMerged); n != 1 {
-			t.Fatalf("merged counted %d, want 1", n)
-		}
-		// A counterfactual of the same prediction is not merged into the acted one.
-		if _, merged, _ := h.b.Register(Registration{Backend: "rules", Prediction: pred(decide.TemplateSurvives, 15, "P1"), Context: c}); merged {
-			t.Fatal("acted and counterfactual must not merge")
+		if n := counterSum(t, h.reader, MetricRegistered); n != 2 {
+			t.Fatalf("registered counted %d, want 2", n)
 		}
 	})
 	t.Run("UC-040/A44 over the per-game cap the oldest is overflow", func(t *testing.T) {
@@ -550,7 +547,7 @@ func TestBook_CapsAndDedupe(t *testing.T) {
 		var first string
 		for i := 0; i <= MaxPendingPerGame; i++ {
 			h.at(time.Duration(i) * time.Millisecond)
-			id := h.register(pred(decide.TemplateSurvives, 15, fmt.Sprintf("P%02d", i)), c, true)
+			id := h.register(pred(decide.TemplateSurvives, 15, fmt.Sprintf("P%02d", i)), c)
 			if i == 0 {
 				first = id
 			}
@@ -602,7 +599,6 @@ func TestBook_Controls(t *testing.T) {
 		t.Fatalf("pending = %d, want 2 controls (at 15 s and 30 s)", h.b.Pending())
 	}
 	for d := 45.0; d <= 600; d += 15 {
-		// Score the pending ones first, so no control merges into a pending twin.
 		h.at(time.Duration(d) * time.Second)
 		h.setLive(&c)
 		h.fire()
@@ -633,9 +629,9 @@ func TestBook_RestartAndLateEnd(t *testing.T) {
 	if h.b.Results("g1") != nil {
 		t.Fatal("unknown game must have no results")
 	}
-	h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
+	h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
 	h.end(c)
-	if _, _, ok := h.b.Register(Registration{Backend: "rules", Prediction: pred(decide.TemplateSurvives, 15, "P2"), Context: c}); ok {
+	if _, ok := h.b.Register(Registration{Backend: "rules", Prediction: pred(decide.TemplateSurvives, 15, "P2"), Context: c}); ok {
 		t.Fatal("a game that ended must refuse new predictions")
 	}
 	h.b.OnGameEnd(c) // a second end of the same game: no-op
@@ -651,7 +647,7 @@ func TestBook_OutcomeSpan(t *testing.T) {
 	c.GameTraceID = "0102030405060708090a0b0c0d0e0f10"
 	c.GameCycleSpanID = "1112131415161718"
 	decideSC := trace.NewSpanContext(trace.SpanContextConfig{TraceID: trace.TraceID{9}, SpanID: trace.SpanID{9}, TraceFlags: trace.FlagsSampled})
-	id, _, _ := h.b.Register(Registration{Backend: "jev", Prediction: pred(decide.TemplateSurvives, 15, "P1"), Acted: true, DecideSpan: decideSC, Context: c})
+	id, _ := h.b.Register(Registration{Backend: "jev", Prediction: pred(decide.TemplateSurvives, 15, "P1"), DecideSpan: decideSC, Context: c})
 	h.at(18 * time.Second)
 	h.setLive(&c)
 	h.fire()
@@ -703,7 +699,7 @@ func TestBook_ShutdownLeavesNoGoroutine(t *testing.T) {
 		if i == 0 {
 			target = "P1"
 		}
-		if _, _, ok := b.Register(Registration{Backend: "rules", Prediction: pred(tpl, map[int]int{0: 30, 1: 120}[i], target), Context: c}); !ok {
+		if _, ok := b.Register(Registration{Backend: "rules", Prediction: pred(tpl, map[int]int{0: 30, 1: 120}[i], target), Context: c}); !ok {
 			t.Fatal("register failed")
 		}
 	}
@@ -723,7 +719,7 @@ func TestBook_FieldSetFixedAtRegistration(t *testing.T) {
 	h := newHarness(t)
 	c := game("P1", "P2", "P3")
 	c = withHistory(withHistory(withHistory(c, "P1", -15*time.Second, 15, 0.8), "P2", -15*time.Second, 15, 1.2), "P3", -15*time.Second, 15, 3.0)
-	h.register(pred(decide.TemplateClosenessRises, 15, ""), c, true)
+	h.register(pred(decide.TemplateClosenessRises, 15, ""), c)
 	h.at(18 * time.Second)
 	live := withHistory(withHistory(c, "P1", 0, 15, 0.8), "P2", 0, 15, 1.2)
 	live = eliminate(live, "P3", 5*time.Second)
@@ -733,35 +729,40 @@ func TestBook_FieldSetFixedAtRegistration(t *testing.T) {
 }
 
 // UC: UC-040 A44 BR-034
-// TestBook_ControlRotationOffset: each game starts its control template rotation
-// at a hash of its id, so a template is not always sampled at the same game time.
-func TestBook_ControlRotationOffset(t *testing.T) {
-	first := map[string]string{}
-	for _, id := range []string{"g-a", "g-b", "g-c", "g-d", "g-e", "g-f", "g-g", "g-h"} {
+// TestBook_ControlRotationFixed: every game rotates the control templates in the
+// same fixed order, starting with survives.
+func TestBook_ControlRotationFixed(t *testing.T) {
+	for _, id := range []string{"g-a", "g-b", "g-c", "g-d"} {
 		h := newHarness(t)
 		c := game("P1", "P2")
 		c.SessionID = id
-		c.Session.DurationSeconds = fp(15)
-		h.b.Observe(c)
-		rs := h.end(c)
-		if len(rs) != 1 {
-			t.Fatalf("%s: %d controls, want 1", id, len(rs))
+		var got []string
+		for d := 15.0; d <= 90; d += 15 {
+			c.Session.DurationSeconds = fp(d)
+			h.b.Observe(c)
 		}
-		first[rs[0].Prediction.Template] = id
-	}
-	if len(first) < 2 {
-		t.Fatalf("every game started its rotation with the same template: %v", first)
+		for _, r := range h.end(c) {
+			got = append(got, r.Prediction.Template)
+		}
+		want := []string{decide.TemplateSurvives, decide.TemplateNoElimination, decide.TemplateElimination,
+			decide.TemplateActivityRises, decide.TemplateClosenessRises, decide.TemplateGameEnds}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("%s: control order %v, want %v", id, got, want)
+		}
 	}
 }
 
 // UC: UC-040 A44 BR-034
 // TestBook_MetricsSplitActed: outcomes and the Brier sum carry acted, so a
-// counterfactual never mixes into the acted calibration.
+// control never mixes into the decision calibration.
 func TestBook_MetricsSplitActed(t *testing.T) {
 	h := newHarness(t)
 	c := game("P1", "P2")
-	h.register(pred(decide.TemplateSurvives, 15, "P1"), c, true)
-	h.register(pred(decide.TemplateSurvives, 15, "P2"), c, false)
+	h.register(pred(decide.TemplateSurvives, 15, "P1"), c)
+	if _, ok := h.b.Register(Registration{Backend: BackendNone, Context: c,
+		Prediction: decide.NewPrediction(decide.TemplateSurvives, 15, 0.7, decide.SourceControl, "", "P2")}); !ok {
+		t.Fatal("control refused")
+	}
 	h.at(18 * time.Second)
 	h.setLive(&c)
 	h.fire()

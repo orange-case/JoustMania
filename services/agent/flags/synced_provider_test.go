@@ -53,10 +53,6 @@ func (s *fakeFlagdSource) config(enabled string) string {
 			"state": "ENABLED", "defaultVariant": "short",
 			"variants": map[string]any{"short": 3, "default": 5},
 		},
-		"remediation_allowed": map[string]any{
-			"state": "ENABLED", "defaultVariant": "on",
-			"variants": map[string]any{"on": true, "off": false},
-		},
 		// The game set's shield flags (UC-040 A31): "on" reads trigger, "off" instant.
 		"shield.activation": map[string]any{
 			"state": "ENABLED", "defaultVariant": enabled,
@@ -133,9 +129,9 @@ func waitBool(t *testing.T, what string, read func() bool, want bool, timeout ti
 //
 // UC: UC-045 main A3
 func TestSyncedProvider_LateFirstSyncThenEveryFlipIsSeen(t *testing.T) {
-	agentSrc, rolloutSrc := newFakeFlagdSource("on"), newFakeFlagdSource("on")
+	agentSrc := newFakeFlagdSource("on")
 	ctx, cancel := context.WithCancel(context.Background())
-	f, holder, shutdown, err := setupFlagd(ctx, fakeFactory(agentSrc), fakeFactory(rolloutSrc), fakeFactory(newFakeFlagdSource("on")), nil, testSyncTiming, nil)
+	f, holder, shutdown, err := setupFlagd(ctx, fakeFactory(agentSrc), fakeFactory(newFakeFlagdSource("on")), nil, testSyncTiming, nil)
 	if err != nil {
 		t.Fatalf("setupFlagd: %v", err)
 	}
@@ -157,16 +153,11 @@ func TestSyncedProvider_LateFirstSyncThenEveryFlipIsSeen(t *testing.T) {
 		if read() {
 			t.Fatal("enabled read on before any flag sync")
 		}
-		if f.RemediationAllowed(context.Background()) {
-			t.Fatal("remediation_allowed read on before any flag sync")
-		}
 	})
 
 	t.Run("UC-045/main flips after a late first sync", func(t *testing.T) {
 		agentSrc.set(true, "on")
-		rolloutSrc.set(true, "on")
 		waitBool(t, "enabled after the first sync", read, true, 5*time.Second)
-		waitBool(t, "remediation_allowed (rollout domain)", func() bool { return f.RemediationAllowed(context.Background()) }, true, 5*time.Second)
 		for i := 0; i < 8; i++ {
 			agentSrc.set(true, "off")
 			waitBool(t, fmt.Sprintf("flip %d enabled off", i), read, false, time.Second)

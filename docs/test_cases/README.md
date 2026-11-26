@@ -38,8 +38,8 @@ reported as `INFO UC_UNUSED_BY_TC`, which never fails the gate.
 | ID | Journey | Use cases | Priority | Status | Automation |
 |---|---|---|---|---|---|
 | [TC-001](TC-001-ffa-game-night-hardware.md) | FFA game night on real controllers | UC-001, UC-002, UC-010, UC-020, UC-030, UC-031 | Critical | Draft | Manual (hardware); mock twin TC-002 (`tests/integration/test_tc002_ffa_game.py`) |
-| [TC-014](TC-014-progressive-rollout-and-rollback.md) | Progressive rollout with automatic rollback | UC-050, UC-051, UC-045, UC-041 | High | Draft | Manual (real controllers); mock support + e2e #1390 |
-| [TC-015](TC-015-canary-by-hand.md) | Canary a backend by hand | UC-052, UC-035 | Medium | Draft | Manual; contract tests for routes; `/canary/*` handler tests (#1388) |
+| TC-014 | Progressive rollout with automatic rollback (retired with UC-050 and UC-051, #2784; id kept, not reused) | - | - | Retired | - |
+| TC-015 | Canary a backend by hand (retired with UC-052, #2784; id kept, not reused) | - | - | Retired | - |
 | [TC-016](TC-016-talk-demo-rehearsal.md) | Talk demo rehearsal | UC-070, UC-044, UC-045, UC-040, UC-042, UC-035 | Medium | Draft | Manual; script tests in CI (#1389) |
 
 Status follows the skill: `Draft` = not or only partly automated, or written for review.

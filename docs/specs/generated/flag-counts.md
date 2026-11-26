@@ -12,7 +12,6 @@ The totals (flags in all and per set) are not committed, so two PRs that each ad
 | `game` | [`services/flagd/game.json`](../../../services/flagd/game.json) |
 | `interventions` | [`services/flagd/interventions.json`](../../../services/flagd/interventions.json) |
 | `controller` | [`services/flagd/controller.json`](../../../services/flagd/controller.json) |
-| `rollout` | [`services/flagd/rollout.json`](../../../services/flagd/rollout.json) |
 | `operator` | [`services/flagd/operator.json`](../../../services/flagd/operator.json) |
 | `system` | [`services/flagd/system.json`](../../../services/flagd/system.json) |
 | `user` | [`services/flagd/user.json`](../../../services/flagd/user.json) |

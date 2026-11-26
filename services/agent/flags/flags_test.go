@@ -91,12 +91,9 @@ func TestEvaluate_FlagdShape(t *testing.T) {
 			keyAccelerateTargetSessionSecs: 30,
 		},
 		floats: map[string]float64{
-			keyBalancedMaxSkillGap:          0.2,
-			keyBalancedSpikeSurvival:        0.9,
-			keyShieldDangerRatio:            0.95,
-			keyBluetoothMaxEventGapMs:       25,
-			keyBluetoothMaxDroppedEventsPct: 0.05,
-			keyBluetoothMinMovementUpdateHz: 20,
+			keyBalancedMaxSkillGap:   0.2,
+			keyBalancedSpikeSurvival: 0.9,
+			keyShieldDangerRatio:     0.95,
 		},
 		objects: map[string]any{
 			// flagd surfaces object flags as map[string]any / []any.
@@ -131,10 +128,6 @@ func TestEvaluate_FlagdShape(t *testing.T) {
 	if got.Fitness != wantFitness {
 		t.Errorf("Fitness = %+v, want %+v", got.Fitness, wantFitness)
 	}
-	wantBT := BluetoothFitness{MaxEventGapMs: 25, MaxDroppedEventsPct: 0.05, MinMovementUpdateHz: 20}
-	if got.BluetoothFitness != wantBT {
-		t.Errorf("BluetoothFitness = %+v, want %+v", got.BluetoothFitness, wantBT)
-	}
 }
 
 func TestEvaluate_DefaultsWhenMissing(t *testing.T) {
@@ -166,9 +159,6 @@ func TestEvaluate_DefaultsWhenMissing(t *testing.T) {
 	if got.Fitness != defaultFitness() {
 		t.Errorf("Fitness = %+v, want defaults %+v", got.Fitness, defaultFitness())
 	}
-	if got.BluetoothFitness != defaultBluetoothFitness() {
-		t.Errorf("BluetoothFitness = %+v, want defaults %+v", got.BluetoothFitness, defaultBluetoothFitness())
-	}
 }
 
 // defaultFitness is the expected fitness snapshot when every flag falls back.
@@ -181,67 +171,23 @@ func defaultFitness() Fitness {
 	}
 }
 
-// defaultBluetoothFitness is the expected infra fitness snapshot when every
-// fitness.bluetooth.* flag falls back to its safe default (#735).
-func defaultBluetoothFitness() BluetoothFitness {
-	return BluetoothFitness{
-		MaxEventGapMs:       DefaultBluetoothMaxEventGapMs,
-		MaxDroppedEventsPct: DefaultBluetoothMaxDroppedEventsPct,
-		MinMovementUpdateHz: DefaultBluetoothMinMovementUpdateHz,
-	}
-}
-
-// TestBluetoothFitness_Accessor pins the narrow #735 accessor the infra loop
-// reads each cycle: it returns the three fitness.bluetooth.* thresholds and
-// nothing else, falling back to defaults on an evaluation error.
-func TestBluetoothFitness_Accessor(t *testing.T) {
-	stub := stubEvaluator{
-		floats: map[string]float64{
-			keyBluetoothMaxEventGapMs:       25,
-			keyBluetoothMaxDroppedEventsPct: 0.05,
-			keyBluetoothMinMovementUpdateHz: 20,
-		},
-	}
-	f := New(stub, nil)
-	got := f.BluetoothFitness(context.Background())
-	want := BluetoothFitness{MaxEventGapMs: 25, MaxDroppedEventsPct: 0.05, MinMovementUpdateHz: 20}
-	if got != want {
-		t.Errorf("BluetoothFitness = %+v, want %+v", got, want)
-	}
-
-	// On error every threshold falls back to its flagd-schema default, so a down
-	// flagd reverts the infra loop to safe defaults rather than failing.
-	boom := errors.New("flagd down")
-	errStub := stubEvaluator{errs: map[string]error{
-		keyBluetoothMaxEventGapMs:       boom,
-		keyBluetoothMaxDroppedEventsPct: boom,
-		keyBluetoothMinMovementUpdateHz: boom,
-	}}
-	if got := New(errStub, nil).BluetoothFitness(context.Background()); got != defaultBluetoothFitness() {
-		t.Errorf("BluetoothFitness on error = %+v, want defaults %+v", got, defaultBluetoothFitness())
-	}
-}
-
 // UC: UC-045 A3
 func TestEvaluate_DefaultsOnError(t *testing.T) {
 	// Every evaluation errors (e.g. flagd unreachable). Defaults must apply and
 	// the agent must come up disabled with no permitted interventions.
 	boom := errors.New("flagd unreachable")
 	stub := stubEvaluator{errs: map[string]error{
-		keyEnabled:                      boom,
-		keyObjectives:                   boom,
-		keyInterventionsAllowed:         boom,
-		keyBatteryThreshold:             boom,
-		keyMaxInterventionsPerMinute:    boom,
-		keyMaxShieldsPerPlayerPerGame:   boom,
-		keyShieldCooldownSeconds:        boom,
-		keyEnduranceMinSessionSeconds:   boom,
-		keyBalancedMaxSkillGap:          boom,
-		keyBalancedSpikeSurvival:        boom,
-		keyAccelerateTargetSessionSecs:  boom,
-		keyBluetoothMaxEventGapMs:       boom,
-		keyBluetoothMaxDroppedEventsPct: boom,
-		keyBluetoothMinMovementUpdateHz: boom,
+		keyEnabled:                     boom,
+		keyObjectives:                  boom,
+		keyInterventionsAllowed:        boom,
+		keyBatteryThreshold:            boom,
+		keyMaxInterventionsPerMinute:   boom,
+		keyMaxShieldsPerPlayerPerGame:  boom,
+		keyShieldCooldownSeconds:       boom,
+		keyEnduranceMinSessionSeconds:  boom,
+		keyBalancedMaxSkillGap:         boom,
+		keyBalancedSpikeSurvival:       boom,
+		keyAccelerateTargetSessionSecs: boom,
 	}}
 	f := New(stub, nil)
 	got := f.Evaluate(context.Background())
@@ -268,9 +214,6 @@ func TestEvaluate_DefaultsOnError(t *testing.T) {
 	}
 	if got.Fitness != defaultFitness() {
 		t.Errorf("Fitness = %+v on error, want defaults %+v", got.Fitness, defaultFitness())
-	}
-	if got.BluetoothFitness != defaultBluetoothFitness() {
-		t.Errorf("BluetoothFitness = %+v on error, want defaults %+v", got.BluetoothFitness, defaultBluetoothFitness())
 	}
 }
 
@@ -785,41 +728,13 @@ func TestInterventionsEnabled(t *testing.T) {
 	})
 }
 
-// TestRolloutEnabled covers the #1213 rollout safety gate: a configured value
-// resolves via the TYPED bool getter, and the gate FAILS CLOSED (off ⇒ dry-run) when
-// the flag is UNDEFINED or flagd is UNREACHABLE.
-// UC: UC-045 A3
-func TestRolloutEnabled(t *testing.T) {
-	t.Run("configured on resolves", func(t *testing.T) {
-		ev := stubEvaluator{booleans: map[string]bool{keyRolloutEnabled: true}}
-		if !New(ev, nil).RolloutEnabled(context.Background()) {
-			t.Fatal("rollout_enabled=true must resolve true")
-		}
-	})
-	t.Run("undefined flag fails closed (off)", func(t *testing.T) {
-		ev := stubEvaluator{}
-		if New(ev, nil).RolloutEnabled(context.Background()) {
-			t.Fatal("an UNDEFINED rollout_enabled flag must fail closed to false (#1177)")
-		}
-	})
-	t.Run("flagd unreachable fails closed (off)", func(t *testing.T) {
-		ev := stubEvaluator{errs: map[string]error{keyRolloutEnabled: errors.New("flagd unreachable")}}
-		if New(ev, nil).RolloutEnabled(context.Background()) {
-			t.Fatal("an UNREACHABLE flagd must fail closed to false (#1177)")
-		}
-	})
-}
-
-// TestSafetyGateDefaultsAreFailClosed pins the package-level safe defaults: both
-// safety gates default OFF (the not-acting state), matching the fail-closed env
-// default (AGENT_*_ENABLED `:-false`) they replace.
+// TestSafetyGateDefaultsAreFailClosed pins the package-level safe default: the
+// safety gate defaults OFF (the not-acting state), matching the fail-closed env
+// default (AGENT_INTERVENTIONS_ENABLED `:-false`) it replaces.
 // UC: UC-045 A3
 func TestSafetyGateDefaultsAreFailClosed(t *testing.T) {
 	if DefaultInterventionsEnabled {
 		t.Error("DefaultInterventionsEnabled must be false (fail-closed)")
-	}
-	if DefaultRolloutEnabled {
-		t.Error("DefaultRolloutEnabled must be false (fail-closed)")
 	}
 }
 

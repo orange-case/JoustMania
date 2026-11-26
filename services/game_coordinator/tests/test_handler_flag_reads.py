@@ -60,7 +60,7 @@ from services.game_coordinator.lifecycle_handlers import register_lifecycle_hand
 GAME_ID = "g-census-1872"
 # Every domain a coordinator flag read can name; a read on any other domain lands on the
 # default provider, is recorded as "<default>" and so fails the census.
-DOMAINS = ("game", "user", "interventions", "agent", "system", "controller", "observability", "rollout")
+DOMAINS = ("game", "user", "interventions", "agent", "system", "controller", "observability")
 # Values that make the read path under test reachable (shield trigger mode).
 FLAG_VALUES = {
     "shield.activation": "trigger",

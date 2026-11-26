@@ -26,7 +26,7 @@ const magnitudeBoundsKey = "decision.magnitude_bounds"
 
 func TestC034_MagnitudeBoundsAreNeverWrittenByTheAgent(t *testing.T) {
 	t.Run("UC-040/BR-045 the flag is in the agent set only, stack scope only", func(t *testing.T) {
-		for _, set := range []string{"agent", "interventions", "game", "rollout"} {
+		for _, set := range []string{"agent", "interventions", "game"} {
 			policies, err := fake.RegistryPolicies(filepath.Join("..", "flag-service", "registry.yaml"), set)
 			if err != nil {
 				t.Fatal(err)
