@@ -95,6 +95,7 @@ from services.game_coordinator.games.flag_snapshot import (  # noqa: F401  re-ex
 )
 from services.game_coordinator.games.ground_truth import GroundTruth
 from services.game_coordinator.runtime_config import GamePerformanceConfig, get_config_manager
+from services.game_coordinator.stream_writes import serialized_write
 
 tracer = trace.get_tracer(__name__)
 logger = logging.getLogger(__name__)
