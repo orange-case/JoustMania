@@ -168,6 +168,9 @@ class IdFlagClient:
 
 
 class AgentStub:
+    def get_boolean_value(self, key, default, _ctx=None):
+        return True if key == "enabled" else default
+
     def __init__(self, allowed=ALL_TYPES):
         self.allowed = allowed
 

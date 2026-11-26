@@ -343,7 +343,7 @@ class PadController:
         for gesture in self.machine.due(t_ms):
             gesture = self._stop_only_in_flight(gesture)
             press_status = self._read_now(self._press_reads.get(K5))
-            self._actions.begin_agent_hold(gesture, press_status)  # before the K5 lane can see the release
+            self._actions.begin_agent_hold()  # before the K5 lane can see the release
             task = asyncio.create_task(self._actions.dispatch(gesture, None, press_status, None))
             self._agent_tasks.add(task)
             task.add_done_callback(self._agent_tasks.discard)

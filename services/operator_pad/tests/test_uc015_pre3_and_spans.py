@@ -13,7 +13,7 @@ from services.operator_pad import actions as actions_module
 from services.operator_pad import page_keys
 from services.operator_pad.actions import Actions
 from services.operator_pad.cues import CuePlayer
-from services.operator_pad.gestures import AGENT_HOLD, HOLD, KNOB, KNOB_PRESS_GESTURE, LAYER, TAP, Gesture
+from services.operator_pad.gestures import AGENT_HOLD, KNOB, KNOB_PRESS_GESTURE, LAYER, TAP, Gesture
 from services.operator_pad.pages import PAGES
 from services.operator_pad.tests.fakes import CoordinatorStubSpec, MenuStubSpec
 
@@ -75,7 +75,7 @@ def test_the_pad_service_holds_no_flag_writer():
 @pytest.mark.parametrize(
     ("gesture", "expected"),
     [
-        (Gesture(TAP, "K8"), "start_game"),
+        (Gesture(TAP, "K8"), "force_start"),
         (Gesture(LAYER, "K6", steps=1), "step_setting"),
         (Gesture(LAYER, "K3", steps=1), "step_setting"),
         (Gesture(LAYER, "K1", steps=1, held_ms=1), "set_backend"),
@@ -100,7 +100,6 @@ async def test_every_setting_gesture_goes_to_the_menu_process_input(actions, men
         Gesture(LAYER, "K3", steps=1),
         Gesture(LAYER, "K1", steps=1, held_ms=1),
         Gesture(AGENT_HOLD, "K5"),
-        Gesture(HOLD, "K8"),
         Gesture(KNOB_PRESS_GESTURE, KNOB),
     ],
 )

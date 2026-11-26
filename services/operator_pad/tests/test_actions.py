@@ -1,4 +1,4 @@
-"""Gestures to commands (UC-015 steps 1 to 8, A1, A3, A5 to A7, BR-002 to BR-012), autospec'd stubs."""
+"""Gestures to commands (UC-015 steps 1 to 8, A1, A3, A6, A7, BR-002 to BR-012), autospec'd stubs."""
 
 import asyncio
 from unittest.mock import MagicMock, create_autospec
@@ -40,7 +40,7 @@ def status(**kw) -> menu_pb2.GetMenuStatusResponse:
         "num_teams": 2,
         "instructions": False,
         "audio_volume_master": "normal",
-        "pad_commands": ["reset_setting", "reset_setting.from", "interventions_switch", "step_setting.from"],
+        "pad_commands": ["reset_setting", "reset_setting.from", "agent_state", "step_setting.from"],
     }
     base.update(kw)
     # A resolved kill switch unless the test says otherwise (services.md §3.1, #2101).
@@ -104,27 +104,7 @@ def sent(menu) -> list[dict]:
     return [dict(c.args[0].data) for c in menu.ProcessInput.await_args_list]
 
 
-# --- K8: stale state (A5; UC-016 BR-011) -------------------------------------------------------------------
-
-
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-009", "BR-010"])
-@pytest.mark.parametrize(
-    "release",
-    [status(lifecycle_generation=4), status(lifecycle_live=True, lifecycle_generation=2)],
-    ids=["generation-changed", "state-class-changed"],
-)
-async def test_k8_generation_or_state_change_cancels_and_sends_nothing(actions, menu, coordinator, cues, release):
-    result = await actions.dispatch(Gesture(HOLD, "K8", held_ms=1500), release, status(lifecycle_generation=2))
-    assert result == ("force_start", "cancelled")
-    menu.ProcessInput.assert_not_awaited()
-    coordinator.ForceEndGame.assert_not_awaited()
-    cues.cancel.assert_awaited_once()
-
-
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-008"], steps=[7])
-async def test_k8_lobby_force_start_sends_the_generation_captured_at_press(actions, menu):
-    await actions.dispatch(Gesture(HOLD, "K8"), status(lifecycle_generation=6), status(lifecycle_generation=6))
-    assert sent(menu) == [{"command": "force_start", "expected_generation": "6"}]
+# --- K8 hold: end the game (step 7) ---------------------------------------------------------------------
 
 
 @pytest.mark.uc("UC-015", flow="main", steps=[7])
@@ -137,12 +117,25 @@ async def test_k8_running_game_force_ends_through_the_coordinator(actions, menu,
     menu.ProcessInput.assert_not_awaited()
 
 
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-012"])
-async def test_menu_stale_refusal_plays_the_cancel_cue(actions, menu, cues):
-    menu.ProcessInput.return_value = reply(False, "stale")
-    result = await actions.dispatch(Gesture(HOLD, "K8"), status(), status())
-    assert result == ("force_start", "stale")
-    cues.cancel.assert_awaited_once()
+@pytest.mark.uc("UC-015", flow="main", br=["BR-009"], steps=[7])
+@pytest.mark.parametrize("at_press", [status(), status(lifecycle_live=True)], ids=["lobby", "live-at-press"])
+async def test_k8_hold_in_the_lobby_is_refused_and_never_force_starts(actions, menu, coordinator, cues, at_press):
+    """The K8 tap is the one start: a hold released in the lobby sends nothing."""
+    result = await actions.dispatch(Gesture(HOLD, "K8", held_ms=1500), status(), at_press)
+    assert result == ("force_end", "refused")
+    menu.ProcessInput.assert_not_awaited()
+    coordinator.ForceEndGame.assert_not_awaited()
+    cues.refusal.assert_awaited_once()
+
+
+@pytest.mark.uc("UC-015", flow="main", steps=[7])
+async def test_k8_hold_is_decided_by_the_status_at_the_release_alone(actions, coordinator, cues):
+    """No press/release comparison: a game that went live during the hold is ended."""
+    release = status(lifecycle_live=True, lifecycle_generation=4)
+    result = await actions.dispatch(Gesture(HOLD, "K8", held_ms=1500), release, status(lifecycle_generation=2))
+    assert result == ("force_end", "ok")
+    coordinator.ForceEndGame.assert_awaited_once()
+    cues.cancel.assert_not_awaited()
 
 
 # --- disconnected: never queued (A3, BR-010) ------------------------------------------------
@@ -201,8 +194,6 @@ async def test_a_volume_turn_pending_at_disconnect_is_dropped(actions, menu, sle
         (False, "stale", "stale", "cancel"),
         (False, "bad_option", "bad_option", "refusal"),
         (False, "flag_service_unavailable", "flag_service_unavailable", None),
-        (False, "failed", "failed", None),
-        (False, "partial:enabled", "partial", None),
         (True, "ok", "ok", None),
         (True, "", "ok", None),
     ],
@@ -310,9 +301,9 @@ async def test_agent_level_volume_and_backend_are_not_refused_while_a_game_is_li
 
 @pytest.mark.uc("UC-015", flow="main", steps=[1, 2])
 @pytest.mark.uc("UC-016", br=["BR-011"])
-async def test_k8_tap_in_the_lobby_starts_a_game(actions, menu):
+async def test_k8_tap_in_the_lobby_force_starts_without_a_generation(actions, menu):
     assert await actions.dispatch(Gesture(TAP, "K8"), status()) == ("start_game", "ok")
-    assert sent(menu) == [{"command": "start_game"}]
+    assert sent(menu) == [{"command": "force_start"}]
 
 
 @pytest.mark.uc("UC-015", flow="A1", br=["BR-012"])
@@ -410,146 +401,76 @@ async def test_backend_preview_equals_commit(menu, coordinator, cues, sleep, cur
     cues.limit.assert_not_awaited()
 
 
-# --- agent switch (step 6, A6, BR-002, BR-003) ----------------------------------------------
+# --- K5 hold: always stop (step 6, A6, A9, BR-002, BR-003) -----------------------------------
+
+
+STOP = {"command": "agent_switch", "direction": "stop"}
+UNKNOWN_AGENTS = [
+    None,  # GetMenuStatus failed or timed out
+    status(agent_enabled=False, agent_enabled_state="unknown"),
+    status(agent_enabled=False, agent_enabled_state=""),  # a menu older than #2101
+    status(agent_interventions_enabled_state="unknown"),
+    status(agent_interventions_enabled_state=""),  # a menu older than #2093
+    status(agent_level="probe"),
+]
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-002", "BR-003"], steps=[6])
 @pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
-@pytest.mark.parametrize(
-    ("agent", "expected"),
-    [
-        ({"agent_enabled": True, "agent_level": "standard"}, {"direction": "stop"}),
-        ({"agent_interventions_enabled_state": "off"}, {"direction": "stop"}),  # WATCH stops (always stop)
-        ({"agent_enabled": False, "agent_level": "standard"}, {"direction": "resume", "only_if_stopped": "1"}),
-        ({"agent_enabled": True, "agent_level": "none"}, {"direction": "resume", "only_if_stopped": "1"}),
-    ],
-    ids=["on", "watch", "enabled-off", "level-none"],
-)
-async def test_k5_hold_stops_a_running_or_watching_agent_and_resumes_only_a_stopped_one(actions, menu, agent, expected):
-    await k5_hold(actions, status(**agent), status(**agent))
-    assert sent(menu) == [{"command": "agent_switch", **expected}]
-
-
-@pytest.mark.uc("UC-016", flow="A10", br=["BR-011", "BR-014"])
 @pytest.mark.parametrize("locked", [False, True], ids=["unlocked", "locked"])
-async def test_k5_hold_with_the_gate_closed_sends_the_stop_at_the_hold_time_never_the_resume(actions, menu, locked):
-    """Maintainer decision "always stop": a watching agent is stopped, its gate never opened by K5."""
-    watch = status(agent_interventions_enabled_state="off")
-    result = await actions.dispatch(
-        Gesture(AGENT_HOLD, "K5", held_ms=1000, locked=locked, clean=not locked), None, watch
-    )
-    assert result == ("agent_switch", "ok")
-    await actions.dispatch(Gesture(HOLD, "K5", held_ms=1500, locked=locked, clean=not locked), watch, watch)
-    assert sent(menu) == [{"command": "agent_switch", "direction": "stop"}]
-
-
-@pytest.mark.uc("UC-015", flow="A6", br=["BR-002", "BR-013"])
-@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+@pytest.mark.parametrize("clean", [True, False], ids=["clean", "chord"])
 @pytest.mark.parametrize(
-    ("at_press", "at_release"),
+    "agent",
     [
-        (status(), status()),
-        # Fully stopped: the stop goes out anyway and the menu's A9 makes it a no-op.
-        (status(agent_enabled=False), status(agent_enabled=False)),
-        (status(agent_level="none"), status(agent_level="none")),
-        # Only the write gate closed (#2093): the stop still ends remote decide calls.
-        (status(agent_interventions_enabled_state="off"), status(agent_interventions_enabled_state="off")),
-        # A change during the hold does not cancel a locked hold: it is kill only.
-        (status(agent_enabled=False), status()),
-    ],
-    ids=["running", "enabled-off", "level-none", "gate-closed", "changed-during-the-hold"],
-)
-async def test_locked_k5_hold_always_sends_the_stop(actions, menu, cues, at_press, at_release):
-    """A6: a locked pad is kill only; a locked K5 hold sends the stop whatever the status, never the resume."""
-    result = await k5_hold(actions, at_press, at_release, locked=True, clean=False)
-    assert result == ("agent_switch", "ok")
-    assert sent(menu) == [{"command": "agent_switch", "direction": "stop"}]
-    cues.cancel.assert_not_awaited()
-
-
-@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
-async def test_an_unclean_k5_hold_of_a_stopped_agent_stops_never_resumes(actions, menu):
-    """Another key or the knob down during the hold: it only ever stops."""
-    stopped = status(agent_enabled=False)
-    await k5_hold(actions, stopped, stopped, clean=False)
-    assert sent(menu) == [{"command": "agent_switch", "direction": "stop"}]
-
-
-@pytest.mark.uc("UC-015", flow="A3", br=["BR-002", "BR-003"])
-async def test_agent_switch_waits_for_the_slowest_resume(actions, menu):
-    """The resume from none is 2 reads + 3 settled writes (4.0 s of flag-service deadlines, #2093)."""
-    stopped = status(agent_level="none")
-    await k5_hold(actions, stopped, stopped)
-    assert sent(menu) == [{"command": "agent_switch", "direction": "resume", "only_if_stopped": "1"}]
-    assert menu.ProcessInput.await_args.kwargs["timeout"] >= 5.0
-
-
-@pytest.mark.uc("UC-015", flow="A10", br=["BR-009", "BR-013"])
-@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
-async def test_k5_resume_intent_cancels_when_the_agent_runs_again_by_release(actions, menu, cues):
-    result = await k5_hold(actions, status(agent_level="none"), status())
-    assert result == ("agent_switch", "cancelled")
-    menu.ProcessInput.assert_not_awaited()
-    cues.cancel.assert_awaited_once()
-
-
-@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
-async def test_k5_stop_intent_is_never_cancelled(actions, menu, cues):
-    """A13: stopped from the dashboard during a kill hold: the stop went out at the hold time anyway."""
-    result = await k5_hold(actions, status(), status(agent_enabled=False))
-    assert result == ("agent_switch", "ok")
-    assert sent(menu) == [{"command": "agent_switch", "direction": "stop"}]
-    cues.cancel.assert_not_awaited()
-
-
-@pytest.mark.uc("UC-015", flow="A10", br=["BR-002", "BR-013"])
-@pytest.mark.parametrize("locked", [False, True], ids=["unlocked", "locked"])
-@pytest.mark.parametrize(
-    ("at_press", "at_release"),
-    [
-        (None, None),  # GetMenuStatus failed or timed out
-        (None, status(agent_enabled=False)),
-        (status(agent_enabled=False), None),  # a resume hold whose release read failed
-        (status(agent_enabled=False, agent_level=""), status(agent_enabled=False, agent_level="")),  # unresolvable
-        (status(agent_level="bogus"), status(agent_level="bogus")),
-        # `enabled` unresolvable (#2101): the menu reports it off, so without the state it read as stopped.
-        (status(agent_enabled=False, agent_enabled_state="unknown"), status(agent_enabled=False)),
-        (status(agent_enabled=False), status(agent_enabled=False, agent_enabled_state="unknown")),
-        (status(), status(agent_enabled=False, agent_enabled_state="unknown")),
-        # A menu older than #2101 sends no state.
-        (status(agent_enabled=False, agent_enabled_state=""), status(agent_enabled=False, agent_enabled_state="")),
-        # probe and shadow_experimental are off the ladder (BR-013).
-        (status(agent_level="probe"), status(agent_level="probe")),
-        (status(agent_level="shadow_experimental"), status(agent_level="shadow_experimental")),
-        # The write gate unresolvable (#2093).
-        (status(agent_interventions_enabled_state="unknown"), status(agent_interventions_enabled_state="unknown")),
-        (status(agent_enabled=False), status(agent_interventions_enabled_state="unknown")),
-        # A menu older than #2093 sends no gate state.
-        (status(agent_interventions_enabled_state=""), status(agent_interventions_enabled_state="")),
+        status(),
+        status(agent_level="none"),  # ON NONE: a tuning level, not a stop
+        status(agent_interventions_enabled_state="off"),
+        status(agent_enabled=False),
+        status(agent_enabled=False, agent_level=""),
+        *UNKNOWN_AGENTS,
     ],
     ids=[
-        "both-unread",
-        "press-unread",
-        "release-unread",
-        "flags-unresolvable",
-        "level-off-the-ladder",
-        "enabled-unknown-at-press",
-        "enabled-unknown-at-release",
-        "enabled-lost-during-a-kill-hold",
-        "enabled-state-missing",
-        "level-probe",
-        "level-shadow-experimental",
+        "on",
+        "on-none",
+        "watch",
+        "off",
+        "off-no-level",
+        "unread",
+        "enabled-unknown",
+        "enabled-missing",
         "gate-unknown",
-        "gate-lost-during-a-resume-hold",
-        "gate-state-missing",
+        "gate-missing",
+        "level-off-the-ladder",
     ],
 )
-async def test_k5_hold_with_an_unknown_status_sends_the_stop_never_the_resume(
-    actions, menu, at_press, at_release, locked
-):
-    result = await k5_hold(actions, at_press, at_release, locked=locked, clean=not locked)
+async def test_k5_hold_sends_the_stop_at_the_hold_time_whatever_the_state(actions, menu, cues, agent, clean, locked):
+    """Never a resume and never cancelled: the release after the stop sends nothing more."""
+    first = await actions.dispatch(Gesture(AGENT_HOLD, "K5", held_ms=1000, locked=locked, clean=clean), None, agent)
+    assert first == ("agent_switch", "ok")
+    second = await actions.dispatch(Gesture(HOLD, "K5", held_ms=1200, locked=locked, clean=clean), agent, agent)
+    assert second == ("none", "noop")
+    assert sent(menu) == [STOP]
+    cues.cancel.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-015", flow="A9", br=["BR-002"])
+@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
+@pytest.mark.parametrize(
+    ("at_press", "at_release"),
+    [(status(agent_enabled=False), status()), (status(), status(agent_enabled=False)), (None, None)],
+    ids=["resumed-during-the-hold", "stopped-during-the-hold", "unread"],
+)
+async def test_k5_hold_release_without_a_prior_hold_time_event_sends_the_stop(actions, menu, at_press, at_release):
+    """A lost hold-time event: the release still stops, never resumes."""
+    result = await actions.dispatch(Gesture(HOLD, "K5", held_ms=1200), at_release, at_press)
     assert result == ("agent_switch", "ok")
-    assert sent(menu) == [{"command": "agent_switch", "direction": "stop"}]
+    assert sent(menu) == [STOP]
+
+
+@pytest.mark.uc("UC-015", br=["BR-002"])
+async def test_the_stop_uses_the_command_deadline(actions, menu):
+    await k5_hold(actions, status(agent_enabled=False), status(agent_enabled=False))
+    assert menu.ProcessInput.await_args.kwargs["timeout"] == actions_module.COMMAND_TIMEOUT_SECONDS
 
 
 @pytest.mark.uc("UC-015", flow="A6", br=["BR-009"])

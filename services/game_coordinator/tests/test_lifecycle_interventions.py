@@ -146,6 +146,9 @@ class TargetingFlagClient:
 
 
 class _AgentStub:
+    def get_boolean_value(self, key, default, _ctx=None):
+        return True if key == "enabled" else default
+
     def __init__(self, threshold):
         self._threshold = threshold
 

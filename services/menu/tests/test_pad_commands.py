@@ -190,7 +190,7 @@ async def test_pad_key_set_and_persist_bodies(servicer, flags):
     await pad(servicer, "step_setting", option="agent_level", direction="up")
     await pad(servicer, "set_backend", backend="claude")
     await pad(servicer, "agent_switch", direction="stop")
-    await pad(servicer, "agent_switch", direction="resume")
+    await pad(servicer, "agent_state", state="on", **{"from": "off"})
 
     keys = {(flag_set, key, "persist" in body) for flag_set, key, body in flags.puts}
     assert keys == {
@@ -224,7 +224,7 @@ async def test_force_start_starts_with_the_ready_roster_and_no_host_serial(servi
         live_roster({"a", "b", "c"}),
         patch.object(servicer, "_run_game_lifecycle", autospec=True) as lifecycle,
     ):
-        reply = await pad(servicer, "force_start", expected_generation=0)
+        reply = await pad(servicer, "force_start")
         await servicer._game_lifecycle_task
 
     assert (reply.success, reply.error) == (True, "")
@@ -458,47 +458,7 @@ async def test_step_setting_refused_write_is_not_retried(servicer, flags):
     assert failure_cues(servicer) == 2
 
 
-# --- agent_switch (step 6, A3, A9, BR-002, BR-003) ------------------------------------------------
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="main", br=["BR-002"])
-async def test_stop_writes_the_level_first_then_the_kill_switch(servicer, flags):
-    reply = await pad(servicer, "agent_switch", direction="stop")
-
-    assert (reply.success, reply.error) == (True, "ok")
-    assert flags.written() == [("agent", "interventions_allowed", "none"), ("agent", "enabled", "off")]
-    assert servicer.settings_ops.saved_agent_level == "standard"
-    servicer.state_manager.audio.play_voice.assert_awaited_with(Sound.MENU_VOX_ADMINOP_OFF)
-    assert failure_cues(servicer) == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A3", br=["BR-002", "BR-009"])
-@pytest.mark.parametrize(
-    ("failing", "error"),
-    [
-        ({("agent", "enabled")}, "partial:enabled"),
-        ({("agent", "interventions_allowed")}, "partial:interventions_allowed"),
-        ({("agent", "enabled"), ("agent", "interventions_allowed")}, "failed"),
-    ],
-)
-async def test_stop_attempts_both_writes_and_reports_partial_results(servicer, flags, failing, error):
-    flags.failing = failing
-    reply = await pad(servicer, "agent_switch", direction="stop")
-
-    assert (reply.success, reply.error) == (False, error)
-    assert [k for _s, k, _v in flags.written()] == ["interventions_allowed", "enabled"]
-    assert failure_cues(servicer) == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A3", br=["BR-002", "BR-010"])
-async def test_stop_with_the_flag_service_down_fails(servicer, flags):
-    flags.down = True
-    reply = await pad(servicer, "agent_switch", direction="stop")
-    assert (reply.success, reply.error) == (False, "failed")
-    assert failure_cues(servicer) == 2
+# --- agent level ladder (BR-004, BR-019; the stop and the switch: test_pad_agent_state.py) -----------
 
 
 def stale_flagd(menu, level: str) -> None:
@@ -509,21 +469,7 @@ def stale_flagd(menu, level: str) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A3", br=["BR-002"])
-@pytest.mark.uc("UC-015", br=["BR-019"])
-async def test_stop_with_a_timed_out_level_write_that_landed_reports_ok(servicer, flags):
-    """Truthful result (#2095): the level PUT times out but lands; the re-read confirms it, so no partial."""
-    flags.slow_put = {("agent", "interventions_allowed")}
-    reply = await pad(servicer, "agent_switch", direction="stop")
-
-    assert (reply.success, reply.error) == (True, "ok")
-    assert flags.values[("agent", "interventions_allowed")] == "none"
-    assert failure_cues(servicer) == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", br=["BR-002", "BR-004"])
-@pytest.mark.uc("UC-015", br=["BR-019"])
+@pytest.mark.uc("UC-015", br=["BR-004", "BR-019"])
 async def test_ladder_steps_from_the_flag_service_not_from_stale_flagd(servicer, flags):
     """A down step whose PUT timed out but landed, then another: the second steps from the landed level."""
     stale_flagd(servicer, "full")
@@ -543,180 +489,6 @@ async def test_ladder_steps_from_the_flag_service_not_from_stale_flagd(servicer,
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A9", br=["BR-002"])
-@pytest.mark.parametrize(("level", "enabled"), [("standard", "off"), ("none", "on")])
-async def test_stop_when_already_stopped_is_a_no_op(servicer, flags, level, enabled):
-    flags.values[("agent", "interventions_allowed")] = level
-    flags.values[("agent", "enabled")] = enabled
-    servicer.settings_ops.saved_agent_level = "full"
-
-    reply = await pad(servicer, "agent_switch", direction="stop")
-
-    assert (reply.success, reply.error) == (True, "ok")
-    assert flags.puts == []
-    assert servicer.settings_ops.saved_agent_level == "full"
-    servicer.state_manager.audio.play_voice.assert_awaited_with(Sound.MENU_VOX_ADMINOP_OFF)
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="main", br=["BR-003"], cond=["Post-S-1"])
-async def test_resume_restores_the_saved_level_then_enables(servicer, flags):
-    flags.values[("agent", "interventions_enabled")] = "on"
-    await pad(servicer, "agent_switch", direction="stop")
-    flags.puts.clear()
-
-    reply = await pad(servicer, "agent_switch", direction="resume")
-
-    assert (reply.success, reply.error) == (True, "ok")
-    assert flags.written() == [
-        ("agent", "interventions_allowed", "standard"),
-        ("agent", "interventions_enabled", "on"),
-        ("agent", "enabled", "on"),
-    ]
-    assert all("persist" not in body for _s, key, body in flags.puts if key != "interventions_allowed")
-    servicer.state_manager.audio.play_voice.assert_awaited_with(Sound.MENU_VOX_ADMINOP_ON)
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="main", br=["BR-003"])
-@pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
-async def test_resume_restores_the_saved_level_over_a_level_raised_after_the_kill(servicer, flags):
-    """#2747 "resume as before the stop": never more than the stop left, also when the level was raised."""
-    flags.values[("agent", "interventions_enabled")] = "on"
-    await pad(servicer, "agent_switch", direction="stop")
-    flags.values[("agent", "interventions_allowed")] = "full"  # an admin raised it after the kill
-    flags.puts.clear()
-
-    reply = await pad(servicer, "agent_switch", direction="resume")
-
-    assert reply.success
-    assert flags.written() == [
-        ("agent", "interventions_allowed", "standard"),
-        ("agent", "interventions_enabled", "on"),
-        ("agent", "enabled", "on"),
-    ]
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="main", br=["BR-003"])
-async def test_resume_without_a_saved_level_falls_back_to_ambient(servicer, flags):
-    """A menu restart loses the saved level and gate: the level is ambient, never full; the gate stays."""
-    flags.values[("agent", "interventions_allowed")] = "none"
-    flags.values[("agent", "enabled")] = "off"
-
-    reply = await pad(servicer, "agent_switch", direction="resume")
-
-    assert reply.success
-    assert flags.written() == [("agent", "interventions_allowed", "ambient"), ("agent", "enabled", "on")]
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A3", br=["BR-003", "BR-010"])
-async def test_resume_never_enables_when_the_level_is_unreadable(servicer, flags):
-    flags.values[("agent", "enabled")] = "off"
-    # Only the level read fails: the enabled read and its PUT would still work.
-    flags.failing_get = {("agent", "interventions_allowed")}
-    reply = await pad(servicer, "agent_switch", direction="resume")
-    assert (reply.success, reply.error) == (False, "failed")
-    assert flags.puts == []
-    assert failure_cues(servicer) == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A3", br=["BR-003"])
-async def test_resume_with_the_enable_refused_is_partial(servicer, flags):
-    await pad(servicer, "agent_switch", direction="stop")
-    flags.failing = {("agent", "enabled")}
-    reply = await pad(servicer, "agent_switch", direction="resume")
-    assert (reply.success, reply.error) == (False, "partial:enabled")
-    assert servicer.settings_ops.saved_agent_level == "standard"
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A3", br=["BR-003", "BR-009"])
-@pytest.mark.parametrize(
-    ("failing", "error"),
-    [
-        ({("agent", "interventions_enabled")}, "partial:interventions_enabled"),
-        ({("agent", "interventions_allowed")}, "partial:interventions_allowed"),
-        ({("agent", "interventions_allowed"), ("agent", "interventions_enabled")}, "partial:interventions_allowed"),
-        ({("agent", "interventions_enabled"), ("agent", "enabled")}, "partial:interventions_enabled"),
-        (
-            {("agent", "interventions_allowed"), ("agent", "interventions_enabled"), ("agent", "enabled")},
-            "failed",
-        ),
-    ],
-)
-async def test_resume_attempts_every_write_and_reports_partial_results(servicer, flags, failing, error):
-    """#2093: the resume writes level, write gate, enabled in that order; a failed write is partial:<key>."""
-    await pad(servicer, "agent_switch", direction="stop")
-    flags.puts.clear()
-    flags.failing = failing
-    reply = await pad(servicer, "agent_switch", direction="resume")
-
-    assert (reply.success, reply.error) == (False, error)
-    assert [k for _s, k, _v in flags.written()] == ["interventions_allowed", "interventions_enabled", "enabled"]
-    assert servicer.settings_ops.saved_agent_level == "standard"
-    assert failure_cues(servicer) == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="main", br=["BR-002"])
-async def test_stop_never_touches_the_write_gate(servicer, flags):
-    """#2093: the kill direction writes the level and enabled only; the write gate stays as it is."""
-    flags.values[("agent", "interventions_enabled")] = "on"
-    reply = await pad(servicer, "agent_switch", direction="stop")
-
-    assert reply.success
-    assert "interventions_enabled" not in [k for _s, k, _v in flags.written()]
-    assert flags.values[("agent", "interventions_enabled")] == "on"
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A9")
-async def test_resume_when_running_is_a_no_op(servicer, flags):
-    flags.values[("agent", "interventions_enabled")] = "on"
-    reply = await pad(servicer, "agent_switch", direction="resume")
-    assert (reply.success, reply.error) == (True, "ok")
-    assert flags.puts == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A9", br=["BR-002", "BR-003"])
-@pytest.mark.parametrize("gate_readable", [True, False], ids=["gate-off", "gate-unreadable"])
-async def test_resume_with_the_write_gate_closed_opens_it(servicer, flags, gate_readable):
-    """#2093: enabled on and a level set but the gate off (or unreadable) is not running: resume opens it."""
-    if not gate_readable:
-        flags.failing_get = {("agent", "interventions_enabled")}
-    reply = await pad(servicer, "agent_switch", direction="resume")
-
-    assert (reply.success, reply.error) == (True, "ok")
-    assert flags.written() == [("agent", "interventions_enabled", "on"), ("agent", "enabled", "on")]
-    assert flags.values[("agent", "interventions_allowed")] == "standard"  # a set level is kept
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A9", br=["BR-002"])
-async def test_stop_with_only_the_write_gate_closed_still_kills(servicer, flags):
-    """The stop's no-op checks the kill keys only: a closed gate does not end decide calls (#2093)."""
-    reply = await pad(servicer, "agent_switch", direction="stop")
-
-    assert (reply.success, reply.error) == (True, "ok")
-    assert flags.written() == [("agent", "interventions_allowed", "none"), ("agent", "enabled", "off")]
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A8")
-async def test_agent_switch_bad_direction(servicer, flags):
-    reply = await pad(servicer, "agent_switch", direction="pause")
-    assert (reply.success, reply.error) == (False, "bad_option")
-    assert flags.puts == []
-
-
-# --- agent level ladder (BR-003, BR-004) -----------------------------------------------------
-
-
-@pytest.mark.asyncio
 @pytest.mark.uc("UC-015", flow="main", br=["BR-004"])
 async def test_ladder_steps_the_level_clamped(servicer, flags):
     flags.values[("agent", "interventions_allowed")] = "ambient"
@@ -730,102 +502,51 @@ async def test_ladder_steps_the_level_clamped(servicer, flags):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A7", br=["BR-002", "BR-003", "BR-004"])
-@pytest.mark.parametrize(
-    ("enabled", "level", "saved", "direction", "steps", "error", "live", "saved_after"),
-    [
-        # Kill-switch safety: never wraps (none -> full would escalate). The live level stops at none ...
-        ("on", "ambient", None, "down", 4, "", "none", "ambient"),
-        # ... a stopped agent's saved level stops at full going up and at ambient going down.
-        ("off", "standard", "full", "up", 1, "at_limit", "standard", "full"),
-        ("off", "standard", "full", "up", 3, "at_limit", "standard", "full"),
-        ("off", "standard", "ambient", "down", 3, "at_limit", "standard", "ambient"),
-    ],
-)
-async def test_agent_level_and_saved_level_never_wrap(
-    servicer, flags, enabled, level, saved, direction, steps, error, live, saved_after
-):
-    flags.values[("agent", "enabled")] = enabled
-    flags.values[("agent", "interventions_allowed")] = level
-    servicer.settings_ops.saved_agent_level = saved
-    reply = await pad(servicer, "step_setting", option="agent_level", direction=direction, steps=steps)
+@pytest.mark.uc("UC-015", flow="A7", br=["BR-004"])
+async def test_agent_level_never_wraps_below_none(servicer, flags):
+    flags.values[("agent", "interventions_allowed")] = "ambient"
+    reply = await pad(servicer, "step_setting", option="agent_level", direction="down", steps=4)
+    assert reply.success
+    assert flags.values[("agent", "interventions_allowed")] == "none"
 
-    assert reply.error == error
-    assert flags.values[("agent", "interventions_allowed")] == live
-    assert servicer.settings_ops.saved_agent_level == saved_after
+    reply = await pad(servicer, "step_setting", option="agent_level", direction="down")
+    assert (reply.success, reply.error) == (False, "at_limit")
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="main", br=["BR-003", "BR-004"])
-async def test_ladder_while_stopped_changes_only_the_saved_level(servicer, flags):
-    flags.values[("agent", "interventions_enabled")] = "on"
-    await pad(servicer, "agent_switch", direction="stop")
-    flags.puts.clear()
+@pytest.mark.uc("UC-015", flow="main", br=["BR-002", "BR-004"])
+async def test_ladder_of_a_stopped_agent_moves_the_live_level_and_never_resumes(servicer, flags):
+    """The level is a tuning setting, not a kill: it moves whatever `enabled` is and never writes it."""
+    flags.values[("agent", "enabled")] = "off"
 
     reply = await pad(servicer, "step_setting", option="agent_level", direction="up")
 
     assert reply.success
-    assert flags.puts == []
-    assert servicer.settings_ops.saved_agent_level == "full"
-    reply = await pad(servicer, "agent_switch", direction="resume")
-    assert flags.written() == [
-        ("agent", "interventions_allowed", "full"),
-        ("agent", "interventions_enabled", "on"),
-        ("agent", "enabled", "on"),
-    ]
+    assert flags.written() == [("agent", "interventions_allowed", "full")]
+    assert flags.values[("agent", "enabled")] == "off"
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", br=["BR-003"])
-async def test_ladder_while_stopped_never_saves_none(servicer, flags):
-    flags.values[("agent", "enabled")] = "off"
-    reply = await pad(servicer, "step_setting", option="agent_level", direction="down", steps=3)
-    assert (reply.success, reply.error) == (False, "at_limit")
-    assert servicer.settings_ops.saved_agent_level is None
-    assert flags.puts == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", br=["BR-002", "BR-003", "BR-004"])
-async def test_ladder_step_down_to_none_saves_the_level_it_left(servicer, flags):
-    flags.values[("agent", "interventions_enabled")] = "on"
+@pytest.mark.uc("UC-015", br=["BR-002", "BR-004"])
+async def test_ladder_down_to_none_leaves_the_agent_running(servicer, flags):
     reply = await pad(servicer, "step_setting", option="agent_level", direction="down", steps=5)
     assert reply.success
     assert flags.written() == [("agent", "interventions_allowed", "none")]
-    assert servicer.settings_ops.saved_agent_level == "standard"
-
-    flags.puts.clear()
-    await pad(servicer, "agent_switch", direction="resume")
-    assert flags.written() == [
-        ("agent", "interventions_allowed", "standard"),
-        ("agent", "interventions_enabled", "on"),
-        ("agent", "enabled", "on"),
-    ]
+    assert flags.values[("agent", "enabled")] == "on"
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A3", br=["BR-003", "BR-010"])
+@pytest.mark.uc("UC-015", flow="A3", br=["BR-010", "BR-019"])
 @pytest.mark.parametrize("direction", ["up", "down"])
-async def test_ladder_with_the_switch_unreadable_writes_nothing(servicer, flags, direction):
-    servicer.settings_ops.saved_agent_level = "standard"
-    flags.failing_get = {("agent", "enabled")}
+async def test_ladder_with_the_level_unreadable_writes_nothing(servicer, flags, direction):
+    flags.failing_get = {("agent", "interventions_allowed")}
 
     reply = await pad(servicer, "step_setting", option="agent_level", direction=direction)
 
     assert (reply.success, reply.error) == (False, "flag_service_unavailable")
     assert flags.puts == []
-    assert servicer.settings_ops.saved_agent_level == "standard"
     servicer.state_manager.audio.play_voice.assert_not_awaited()
     assert failure_cues(servicer) == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A3", br=["BR-002"])
-async def test_stop_with_the_switch_unreadable_still_writes_both_keys(servicer, flags):
-    flags.failing_get = {("agent", "enabled")}
-    reply = await pad(servicer, "agent_switch", direction="stop")
-    assert (reply.success, reply.error) == (True, "ok")
-    assert flags.written() == [("agent", "interventions_allowed", "none"), ("agent", "enabled", "off")]
 
 
 @pytest.mark.asyncio

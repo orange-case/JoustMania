@@ -99,7 +99,7 @@ def test_a_dropped_machine_keeps_only_k5_and_makes_it_unclean():
 
 @pytest.mark.uc("UC-016", flow="A10", br=["BR-011"])
 async def test_a_k5_release_before_the_hold_time_wins_over_a_slow_release_read():
-    """Released at 900 ms; its status read is still out at 1000 ms: a cancel, never a stop or a resume."""
+    """Released at 900 ms; its status read is still out at 1000 ms: a cancel, never a stop."""
     rig = Rig()
     gate = asyncio.Event()
     reads = iter([None, gate])
@@ -198,7 +198,7 @@ def actions(menu, cues):
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
 async def test_a_level_reset_needs_a_menu_that_checks_from(actions, menu, cues):
     """MAJOR 4: without `reset_setting.from` a level that dropped under the hold could commit a raise."""
-    old = st(agent_level="full", pad_commands=["reset_setting", "interventions_switch", "step_setting.from"])
+    old = st(agent_level="full", pad_commands=["reset_setting", "agent_state", "step_setting.from"])
     result = await actions.dispatch(Gesture(RESET, "K4", held_ms=1200), old, old, on("AGENT", "K4"))
     assert result == ("reset_setting", "refused")
     menu.ProcessInput.assert_not_awaited()
@@ -483,10 +483,10 @@ def test_a_raise_awaiting_its_press_blinks_press_knob_in_the_title_bar(version, 
 
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-007", "BR-014"])
 @pytest.mark.parametrize("version", [2, 3, 4])
-def test_the_two_state_switch_blinks_too(version):
+def test_the_agent_switch_blinks_too(version):
     status = st(agent_interventions_enabled_state="off")
     plan = page_keys.edit_plan(page_keys.ROWS["AGENT"][0], status, 1)
-    shown = _edit(version, blink_on=False, option=page_keys.INTERVENTIONS, plan=plan)
+    shown = _edit(version, blink_on=False, option=page_keys.AGENT_STATE, plan=plan)
     assert shown.lines[0][0].rstrip().endswith("PRESS KNOB") and not shown.lines[0][1] & screens.INVERTED
 
 
