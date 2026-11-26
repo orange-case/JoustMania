@@ -1,205 +1,92 @@
 # Human / Agent Settings Ownership & Arbitration Model
 
-This document is the **authoritative contract** for how the human admin and the
-adaptive agent share control of game parameters. It records the ownership model
-ratified with the maintainer (epic [#814](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/814),
-doc issue [#820](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/820)).
-The code fixes #815 (admin surface), #816 (sensitivity), #817 (grace/shield),
-#818 (visibility, including the truthful announcement on the controller, D-M6 resolved by #1739) and #819 (kill-switch) have shipped;
-this document describes the current state, verified against the code. Where the two ever
-disagree, treat it as a bug in one of them and fix both in the same PR.
+The contract for how the human operator and the adaptive agent share control of the system: the ownership
+principle, the invariants that keep the agent inside it, and the composition of the runtime parameters both
+touch. It states the rules once; the lists live elsewhere and are linked:
 
-The normative rules for the invalidation of agent overrides
-and the human-visibility contract live in the flag
-catalog, [flags.md section 14](specs/flags.md#14-ownership-composition-invalidation-and-visibility).
-The section numbers below are kept stable because code comments cite them.
+- who writes each runtime-mutable flag, in which scope and within which bounds: the Writers column of the
+  mutable-flag registry, [flags.md §13](specs/flags.md#13-mutable-flag-registry), the canonical place it is stated;
+- the owner and lifetime of each flag set: [flags.md §2](specs/flags.md#2-ownership-by-flag-set);
+- the invalidation rule and the visibility contract: [flags.md §14](specs/flags.md#14-ownership-composition-invalidation-and-visibility);
+- the agent-limiting settings and their per-setting ceilings: FR-152 in [requirements](requirements.md).
 
+Where this document and the code disagree, one of them is a bug; fix both in the same PR. The section numbers
+are stable because code comments cite them.
 
 ## 1. The Ownership Principle
 
 > **The human admin owns pre-game intent. The agent owns bounded in-game deltas.**
 
-- **Human admin** decides *what game is played and how it is calibrated*: the game
-  mode, the baseline settings, and when the game starts. The menu, driven by the
-  operator pad ([`services/menu/settings_ops.py`](../services/menu/settings_ops.py), UC-015;
-  the controller admin mode is gone since #2819), writes
-  them to the `game` / `user` flag sets through the flag service
-  (`FlagServiceWriter`, [`lib/flag_service_writer.py`](../lib/flag_service_writer.py))
-  as **persisted admin values** (`"persist": true`), kept in the flag service's state
-  file `/var/lib/flag-service/admin.json`.
-- **Agent** decides *how to nudge the experience while the game runs*: bounded
-  overrides, factors, and shields. It writes them to the `interventions` flag set
-  through the flag service, scoped to one game (the gated tier-2 writes
-  are listed under the invariants below)
-  ([`services/agent/actions/writer.go`](../services/agent/actions/writer.go)); the
-  game coordinator's `InterventionManager`
-  ([`services/game_coordinator/interventions.py`](../services/game_coordinator/interventions.py))
-  evaluates them live with its `gameId`.
+- **Human admin** decides *what game is played and how it is calibrated*: the game mode, the baseline
+  settings, when the game starts, and the agent's own policy and limits. Human writes reach the flag service
+  from the menu (the operator pad, [UC-015](use_cases/UC-015.md)), the operator and stage scripts and
+  Flagsmith ([UC-054](use_cases/UC-054.md)).
+- **Agent** decides *how to nudge the experience while the game runs*: bounded overrides, factors, shields
+  and one-shot events in the `interventions` set, scoped to one game, which the game coordinator's
+  `InterventionManager` evaluates live with its `gameId`.
 
-Since the flag service (epic #1407) **no process writes a flag file**: the files in
-`services/flagd/` are the read-only baseline the flag service loads at start (C-033),
-every runtime write is an HTTP call to the flag service, and only flags in its
-mutable-flag registry ([flags.md §13](specs/flags.md#13-mutable-flag-registry)) can
-change, within their bounds.
+No process writes a flag file: the files in `services/flagd/` are the read-only baseline (C-033), every
+runtime write is an HTTP call to the flag service, and only a flag with a registry row changes, within its
+bounds and scope ([flags.md §13](specs/flags.md#13-mutable-flag-registry)).
 
-Two invariants follow and are **load-bearing**. Both were amended (spec
-consistency pass, epic #1260, D-A3) to match the northstar's tier 2 and the code:
-the agent has three narrow, gated writes beyond the `interventions` set.
+Three invariants follow and are **load-bearing**:
 
-1. **The agent never persists a human baseline it was not allowed to change.**
-   Its in-game write surface is the `interventions` set, always game-scoped
-   (`scope.game_id`, plus `scope.serial` for per-player values; one-shot
-   interventions are events in the game's event list). The flag service drops a
-   game's values when the coordinator ends the game (UC-053 BR-003). The agent
-   never writes the `user` or `agent` set and never passes `"persist": true`.
-   Two exceptions write the `game` set, and both are tier 2 ([NORTHSTAR](NORTHSTAR.md)):
-   - **Shadow-scoped experiment arms**: `PUT /game/{flag}` with scope
-     `{experiment_id, arm}`; the flag service renders a rung that matches only
-     `game_kind != "real"` plus that experiment and arm, and accepts only flags in
-     the experiment catalog (flags.md §13.3) within their bounds (FR-062). What a
-     real game resolves is unchanged.
-   - **Gated autonomous promotion** (`promote/realdefault.go`): in
-     `code_improvement.mode=autonomous`, and only when `AGENT_CODE_IMPROVEMENT_ENABLED`
-     and `AGENT_AUTONOMOUS_ENABLED` are set and `enabled` is on, a shadow-validated
-     winner becomes a `real` overlay (`scope.game_kind=real`, writer `promotion`),
-     reverted on degradation with `DELETE ?game_kind=real` (FR-065). The overlay is
-     in memory and lasts until the flag service restarts; the durable path is a
-     human change made from the promotion's evidence. The stock stack passes none of these env gates (D-A6), so this
-     write is off by default.
-2. **The write surfaces are disjoint by scope.** The menu writes persisted admin
-   values of `game` / `user` flags (and of the `agent` keys
-   `interventions_allowed` and `decision.backend`), plus, for the operator pad's
-   stop and resume, the in-memory `agent` overlays `enabled` and
-   `interventions_enabled` (UC-015 BR-001 to BR-003; human writes, so C-034 holds). Planned
-   (#2755, UC-016 BR-012): for the pad's agent and retro rows the menu also writes the in-memory
-   `agent` overlays `objectives`, `policy.max_interventions_per_minute`,
-   `policy.group_grant.enabled`, `inference.effort` and `decision.operator_brief`, and the
-   persisted `inference.backend`, and clears its own values on a reset (never a script's or Flagsmith's); human writes too.
-   `goal.profile` stays Flagsmith-only (FR-226). The agent writes game-scoped `interventions` values
-   and the experiment-arm and `real` overlays
-   of `game` flags. The flag service holds each kind of value separately per flag
-   (baseline, persisted admin value, stack overlays, `real` overlay, experiment
-   arms, game-scoped values) and serialises every write, so an agent write can no
-   longer overwrite a concurrent admin write. The old risk of two read-modify-write
-   writers on `game.json` without a shared lock (#1292) is gone with the files.
+1. **The agent never persists a human baseline it was not allowed to change.** Its in-game write surface is
+   the `interventions` set, always game-scoped; the flag service drops a game's values when the game ends
+   (UC-053 BR-003). The agent never writes the `user` or `agent` set and never passes `"persist": true`. Two
+   exceptions write the `game` set, both tier 2 ([NORTHSTAR](NORTHSTAR.md)):
+   - **Shadow-scoped experiment arms** of the experiment catalog (flags.md §13.3), which never resolve for a
+     real game (FR-062, FR-138).
+   - **Gated autonomous promotion**: a shadow-validated winner becomes an in-memory `real` overlay, reverted on
+     degradation (FR-065), only when the FR-152 (a) gates are open; off in the stock stack. The durable path
+     is a human change made from the promotion's evidence.
+2. **The write surfaces are disjoint by scope.** Human writes are persisted admin values or stack overlays;
+   agent writes are game-scoped `interventions` values, experiment-arm values and the `real` overlay. The flag
+   service holds each kind of value separately per flag and serialises every write, so an agent write never
+   overwrites a human one. The contested ground is therefore not the flag sets but the runtime state both
+   paths converge on inside the game object; §4 defines those compositions.
+3. **The agent cannot loosen its own limits (C-034).** A setting that limits the agent is never a flag the
+   agent writes:
+   - The agent never writes the `agent` set. Every agent-limiting setting of FR-152 is in `agent`: `enabled`, `code_improvement.*`, `llm.max_requests_per_minute`, `decision.claude.max_requests_per_minute`, `experiment_proposer_enabled`, `experiment_dynamic_max_concurrent` and `experiment_max_games`. The
+     agent's governor is there too (`interventions_allowed`, `interventions_enabled`, `objectives`, the
+     `policy.*` budgets, `decision.magnitude_bounds`).
+   - In the sets it does write it writes only the `interventions` keys (game-scoped) and the `game`
+     experiment-catalog keys (experiment+arm, or a `real` promotion), never stack-wide. Every other key of
+     those sets is human-only, including the ones that bound the agent (`shadow_policy`, `max_shadow_games`,
+     `max_concurrent_games`). A registry range on an agent-writable key is the human ceiling.
+   - Each agent-limiting setting with an environment variable takes that variable as the operator's ceiling;
+     a human-owned flag may only tighten it (effective value = the more restrictive of the two; the
+     per-setting rules are FR-152). A missing flag or a lost sync resolves to the flag's code default, which
+     is closed for the gates. A setting that only widens what the agent may do and has no safe flag form is
+     env only (the substrate attestation of FR-152 (g)).
+   - `decision.magnitude_bounds` moves an agent range only inside the hard limits that stay in code
+     (FR-098).
 
-The contested ground is therefore not the *flag sets* but the *runtime
-state* the two write paths converge on inside the game object (sensitivity, grace
-periods). Sections 4–5 define those compositions precisely.
+   **Enforcement.** The shipped compose files leave the environment ceilings unset, so there the guarantee
+   rests on the agent never writing the `agent` set. The flag service has no roles or tokens (local party game, architecture note D11). Its
+   registry refuses the loosening `game` writes (`shadow_policy` takes only a stack overlay to `block`; the
+   capacity keys are not mutable) and refuses every HTTP write of a Flagsmith-only row (`403 flagsmith_only`,
+   flags.md §13). For the rest of the `agent` set the guarantee is the agent's client code, which writes fixed
+   flag sets only, held by two tests: `services/agent/agent_set_never_written_c034_test.go` (every agent
+   writer against a recording flag service) and `services/agent/agent_set_writers_guard_c034_test.go` (no new
+   write call site or set argument). Every write is visible as a `flagservice.write` span with its writer.
 
 ## 2. Flag Domain Ownership
 
-| Flag set (baseline `services/flagd/<set>.json`, read-only) | Owner | Writer (through the flag service) | Read by | Lifetime |
-|---|---|---|---|---|
-| `game` | Human admin | Menu (operator pad commands) → `FlagServiceWriter` (persisted admin values); agent: experiment arms (shadow only), gated `real` promotion overlay (§1) | Menu builds `StartGameConfig` at start; coordinator freezes at init | Baseline per deployment; admin values persist across restarts; agent overlays in memory |
-| `user` | Human admin | Menu (operator pad commands) → `FlagServiceWriter` (persisted admin values), `audio_volume.master` included (#2050, `step_setting`) | Menu / audio (volumes, voice, instructions) | Per-deployment |
-| `interventions` | Agent | Agent ActionSink → `writer.go` (game-scoped values and events) | Coordinator `InterventionManager`, live | One game: dropped when the game ends |
-| `operator` | Operator (human) | None at runtime: a reviewed edit of `services/flagd/operator.json` and a restart of the flag service (read-only baseline, flags.md §13.5; #2050) | `services/operator_pad` (#2100; deployed under the `operator-pad` compose profile) | Per-deployment |
-| `agent` | Operator (human) | Operator / stage scripts (`scripts/flags.sh`, `agent-killswitch.sh`, `talk-stage.sh`: in-memory overlays; `agent-backend.sh`: backend and model persisted, #1682) **and** the operator pad commands through the menu (#819, #2050: `interventions_allowed` and `decision.backend` persisted, `enabled` in memory only; UC-015 BR-001; planned, #2755: the pad's `GOAL`, `RATE`, `GROUP`, `EFFORT`, `BRIEF` rows in memory and `RETRO AI` persisted, UC-016 BR-012) | Agent + coordinator policy gates | Baseline per deployment; overlays until restart |
-
-The `agent` set holds the agent's own governor — `enabled`, `decision.backend`, `objectives`,
-`interventions_allowed`, and the `policy.*` budgets. Since #819 the menu may write
-`interventions_allowed` (the on-device kill-switch, now the operator pad's, UC-015 BR-019),
-and since #2050 the pad's `enabled` and `decision.backend`; other `agent` keys change through operator overlays (only those in the registry)
-or a reviewed baseline edit. The **agent process never writes the `agent` set** —
-that invariant is unchanged (menu writes `game` / `user` admin values and the one
-agent-policy key; the agent writes `interventions`
-and the gated `game` writes of §1). The human owns agent policy; the agent cannot
-persist its own governor (§1, §6.2).
-
-> **How the agent-never-writes-the-`agent`-set invariant is enforced.** No service
-> mounts the flag directory writable any more; only the flag service mounts it, read-only.
-> The agent's flag-service client writes fixed flag sets: interventions to
-> `interventions`, experiment arms and promotion to
-> `game` ([`services/agent/experiment/gate.go`](../services/agent/experiment/gate.go)
-> rejects a proposal naming another set, `non_game_target`, and the promotion
-> writer's set is always `game`, #1293). The flag service has no roles or tokens
-> (local party game, decision D11 of the [architecture note](architecture/flag-service.md)),
-> so for the `agent` set the guarantee rests on this client code, held by two tests
-> (C-034, #1799): [`agent_set_never_written_c034_test.go`](../services/agent/agent_set_never_written_c034_test.go)
-> drives every agent writer against a recording flag service and checks each
-> request's (set, key, scope), and [`agent_set_writers_guard_c034_test.go`](../services/agent/agent_set_writers_guard_c034_test.go)
-> fails on any new flag-service write call site, raw write verb or set argument
-> outside the known constants. A write that would change the `agent` set is also
-> visible as a `flagservice.write` span with `flagservice.writer`.
-
-> **Historical: the nonroot menu and the flag dir (#1031).** The menu used to write
-> the bind-mounted flag files and needed a one-shot `flag-dir-init` sidecar to make
-> the directory group-writable. Both are gone: the menu writes over HTTP to the flag
-> service, and the flag directory is mounted read-only.
+Owner and lifetime per flag set: [flags.md §2](specs/flags.md#2-ownership-by-flag-set). Writers per flag:
+[flags.md §13](specs/flags.md#13-mutable-flag-registry). The human owns agent policy (§1, §6.2).
 
 ## 3. Parameter Ownership Table
 
-The eight admin flags. All are read once by the menu into `StartGameConfig`
-([`services/menu/game_lifecycle.py:GameLifecycleMixin._build_game_config`](../services/menu/game_lifecycle.py),
-`StartGameConfig` build) and frozen into the game object in its constructor
-([`services/game_coordinator/games/base.py:__init__`](../services/game_coordinator/games/base.py),
-constructor). "Frozen at start" means a mid-game admin flag change **silently
-no-ops** for that game — the game already captured its value.
+The human's game settings and when each is read: [flags.md §4](specs/flags.md#4-game). The agent's live
+levers, their kinds and bounds: [flags.md §13.1](specs/flags.md#131-interventions-all-writes-are-game-scoped).
+Only two runtime parameters are touched by both; §4 composes them. Every other human setting has no agent
+override, and every other agent lever has no human analogue.
 
-| Parameter | Owner | Write path | Frozen / Live | Arbitration rule |
-|---|---|---|---|---|
-| `sensitivity` | Human (baseline) | `game` set, persisted admin value (menu) | Frozen at init → `game.baseline_sensitivity` (effective value: `game.sensitivity`; `configured_sensitivity` is game-start telemetry only, #816) | **Contested with agent `global_sensitivity_override`.** See §4.1. |
-| `num_teams` | Human | `game` set, persisted admin value (menu) | Frozen at init | Agent has no override; human-only. |
-| `random_assignment` | Human | `game` set baseline (`game.json`) | Frozen at init | Agent has no override; human-only. |
-| `nonstop.time_limit_seconds` | Human | `game` set baseline (`game.json`) | Frozen at init | Agent has no override; human-only. |
-| `invincibility_seconds` | Human (baseline) | `game` set baseline (`game.json`) | Frozen at init → `_invincibility_duration` (Tournament/Fight Club) | **Adjacent to agent `shield_seconds`.** See §4.2. |
-| `fight_club.min_rounds` | Human | `game` set baseline (`game.json`) | Frozen at init | Agent has no override; human-only. |
-| `werewolf.reveal_time_seconds` | Human | `game` set baseline (`game.json`) | Frozen at init | Agent has no override; human-only. |
-| `force_all_start` | Human | `game` set, persisted admin value (menu) | **Live** (read at start by menu, not frozen into a game) | Human-only; the one admin flag with no freeze. |
+### 3.1 Device-settable flags
 
-### 3.1 Device-settable flags (issue [#815](https://github.com/WatchMeJoustMyFlags/JoustMania/issues/815))
-
-The eight flags above are all human-owned, but not all are worth setting from a device
-with only a voice line and an LED pulse as feedback. #815 trimmed the device list to the
-human essentials, first for the controller admin mode and, since #2819 removed it, for the
-operator pad. **Every flag still exists in the `game` set**; the others change through a
-reviewed edit of the baseline `services/flagd/game.json` plus `scripts/flags.sh restart`
-(they are not stack-mutable in the flag service's registry).
-
-| Flag | Decision | Rationale |
-|---|---|---|
-| `sensitivity` | **On the pad** | Baseline calibration the host tunes by feel; the primary human knob. |
-| `num_teams` | **On the pad** | Structural pre-game choice. |
-| `force_all_start` | **On the pad** | Live-evaluated at force start (`settings_ops.py` `force_start_roster`); human-essential. |
-| `random_assignment` | **Flag-only** | Folds into game-mode selection; baseline file only. |
-| `nonstop.time_limit_seconds` | **Flag-only** | Per-mode knob, frozen at start; baseline file only. |
-| `invincibility_seconds` | **Flag-only** | Per-mode knob overlapping agent `shield_seconds` (§4.2); baseline file only. |
-| `fight_club.min_rounds` | **Flag-only** | Per-mode knob, rarely changed at party time; baseline file only. |
-| `werewolf.reveal_time_seconds` | **Flag-only** | Per-mode knob, frozen at start; baseline file only. |
-
-The flag-only flags keep their definitions in
-[`services/flagd/game.json`](../services/flagd/game.json) and are still read at
-game start by [`services/menu/servicer.py`](../services/menu/servicer.py)
-`_build_game_config` (`random_assignment`, `nonstop.time_limit_seconds`,
-`invincibility_seconds`, `fight_club.min_rounds`, `werewolf.reveal_time_seconds`).
-The pad's options are `STEP_OPTIONS` in
-[`services/menu/settings_ops.py`](../services/menu/settings_ops.py).
-
-**Operator pad (#2050, [UC-015](use_cases/UC-015.md); the menu commands exist; the pad service deploys under the `operator-pad` compose profile).** The pad is the host's device surface: it
-reaches the flag service only through menu commands (`ProcessInput` `force_start`, `step_setting`, `agent_switch`,
-`set_backend`), never directly. It sets the `game` flags (`sensitivity`, `num_teams`,
-`force_all_start`) and the `user` flags (`game_instructions`, `current_game`) and adds the agent's `enabled` (in memory, no persist: the kill
-switch does not survive a restart), `decision.backend` (persisted) and the `user` flag `audio_volume.master`. The
-agent still never writes the `agent` set. Until #2819 the controller admin mode wrote the same keys and raced the pad
-(last write wins).
-Since #2747 ([UC-016](use_cases/UC-016.md) BR-012, BR-013; the pad's keys that send them are planned): two more menu commands, no new key: `reset_setting` clears
-the operator's persisted value of a key the pad already writes (the `automatic` clear generalised), and
-`agent_state` (#2800, the resume) writes the in-memory `interventions_enabled` and `enabled`. The `policy.*` budgets stay
-off the pad (not persistable, operator overlays only).
-
-The agent's live intervention surface (all in the `interventions` set, game-scoped, bounded by the flag service's registry):
-
-| Parameter | Shape | Runtime target | Composition |
-|---|---|---|---|
-| `global_sensitivity_override` | state (int 0-4, −1=none) | mutates `game.sensitivity` | §4.1 — collides with human baseline |
-| `player_sensitivity_factor` | per-serial state (0.2–2.0, #2696) | `player.sensitivity_factor` | Multiplies into thresholds; agent-only, no human analogue |
-| `global_difficulty_factor` | state (0.5–2.0) | `game.global_difficulty_factor` | Multiplies into thresholds; agent-only |
-| `shield_seconds` | per-serial state (>0) | extends `player.grace_until` | §4.2 — adjacent to human `invincibility_seconds` |
-| `music_tempo_override` | state (float) | `game.tempo_override` | Agent-only; no human lever |
-| `pacing_profile` | state (preset name) | `game.music_windows` | Agent-only; reverts to init windows |
-| `volume_override` | state (float) | audio volume | Agent-only at runtime; human owns the `user` set baseline volumes |
-| `eliminate_player` / `revive_player` / `audio_cue` / `controller_effect` / `end_game` | one-shot event (per-game event list) | one-shot through native paths | Agent-only; no persisted state |
+The settings the host changes from the operator pad: [UC-015](use_cases/UC-015.md). Every other `game` flag
+changes through Flagsmith, an operator script (registry rows only) or a reviewed baseline edit.
 
 ## 4. Composition Rules
 
@@ -233,7 +120,7 @@ the effective level returns to the **current** baseline, not the start-of-game v
    re-propose against the new baseline on its next decision.
 4. The `player_sensitivity_factor` and `global_difficulty_factor` levers are pure
    **multiplicative deltas** in `_compute_effective_thresholds` (the combined factor
-   is clamped to [0.5, 2.0], a floor only a per-player sensitivity factor below 0.5 lowers, to at most 0.2, #2696) and do **not** touch the human-owned baseline. They are
+   is clamped to [0.5, 2.0], a floor only a per-player sensitivity factor below 0.5 lowers, to at most 0.2) and do **not** touch the human-owned baseline. They are
    the **preferred** agent levers because they compose without contention.
 
 Note: `set_baseline_sensitivity` is the game-object API for a human change. No
@@ -284,81 +171,24 @@ human's new value wins immediately, the invalidation is per-parameter, and the
 agent may re-propose afterwards. The sensitivity implementation is described in
 section 4.1.
 
-
 ## 6. Visibility & Kill-Switch Contract
 
-The model above needs a human feedback loop and an on-device control. Both have
-shipped, #818 gives the human a signal when the agent acts, and #819 gives the
-admin an on-device way to constrain the agent (`interventions_allowed` lives in the
-`agent` set, which the operator pad now writes, UC-015 BR-002 to BR-004, BR-019).
+### 6.1 Visibility
 
-### 6.1 Visibility (`#818`, partly shipped)
-
-The normative contract and the on-device agent cue (shipped) live in
+The normative contract and the on-device agent cue live in
 [flags.md section 14.2](specs/flags.md#142-the-visibility-contract).
 
-### 6.2 Kill-switch / policy control (`#819`)
+### 6.2 Kill-switch / policy control
 
-The admin MUST have an **on-device** way to constrain the agent without a
-terminal (`scripts/flags.sh`) or a baseline edit. A conforming implementation must let the admin:
-
-- **Disable the agent entirely** for the current deployment (a hard kill-switch —
-  the agent applies no deltas), and re-enable it.
-- Optionally **scope** what the agent may do, mapping onto the existing
-  `interventions_allowed` allow-list and `policy.*` budgets that the coordinator
-  already enforces (the enforcement chain — allow-list → mode matrix → battery
-  guard → rate limit — lives in
-  [`interventions.py:_check_chain`](../services/game_coordinator/interventions.py),
-  it gates the *agent* only, never the human).
-- The control must be **load-bearing at the gate**: flipping the kill-switch off
-  means the coordinator's allow-list rejects every agent intervention, so the
-  switch degrades safely even if the agent process ignores it.
-
-> Note: the existing guardrails (`interventions.py`: allow-list,
-> mode-capability matrix, battery guard, weighted rate-limit backstop) all
-> constrain the **agent**. Nothing governs the **human** path — the admin
-> write path has no policy layer, by design (the human is trusted). #819 adds the
-> human's *control over the agent*, not a constraint on the human.
-
-**Implemented (#819; on the operator pad since #2819).** The pad's agent level steps the
-GLOBAL `interventions_allowed` policy in the `agent` set along the levels
-`none → ambient → standard → full`, clamped (UC-015 BR-004, BR-019;
-`SettingsOps._step_agent_level`, [`services/menu/settings_ops.py`](../services/menu/settings_ops.py)),
-and its agent key stops and resumes the agent (UC-015 BR-002, BR-003). `none`
-is the hard panic-off: it is **load-bearing at the gate** because the
-coordinator's allow-list (`_check_chain`, step (a)) then rejects every agent
-intervention regardless of what the agent process does. Each level has a distinct
-voice line. The controller admin mode's `agent_control` option did the same until #2819.
-
-- **Write-ownership decision (recorded).** The menu writes the single
-  `interventions_allowed` key of the `agent` set through the flag service with a
-  dedicated `FlagServiceWriter` for the `agent` set
-  (`MenuServicer.agent_settings_writer`), as a persisted admin value
-  (`PUT /agent/interventions_allowed` with `"persist": true`), so the level
-  survives a restart; the agent process never writes the `agent` set. The write
-  surfaces stay disjoint (§2), so no real-resolution invariant is touched — this
-  is global policy, read by the agent and coordinator with a bare
-  (non-game-scoped) `EvaluationContext`.
-- **Live.** The flag service pushes the write to flagd over the sync stream
-  (NFR-050: p95 at most 200 ms) and the agent re-reads `interventions_allowed`
-  live per decision, so the change takes effect without a restart.
-
-## 7. Source Map
-
-| Concern | File |
-|---|---|
-| Human write path | [`services/menu/settings_ops.py`](../services/menu/settings_ops.py) (operator pad commands), [`lib/flag_service_writer.py`](../lib/flag_service_writer.py) → flag service ([`services/flag-service/`](../services/flag-service/)) |
-| Baseline → game start | [`services/menu/game_lifecycle.py`](../services/menu/game_lifecycle.py) (`_build_game_config`), [`services/game_coordinator/game_factory.py`](../services/game_coordinator/game_factory.py) |
-| Baseline freeze | [`services/game_coordinator/games/base.py`](../services/game_coordinator/games/base.py) (`__init__`, ~490-580) |
-| Agent write path | [`services/agent/actions/writer.go`](../services/agent/actions/writer.go) |
-| Agent guardrails | [`services/game_coordinator/interventions.py`](../services/game_coordinator/interventions.py) |
-| Sensitivity contention | [`services/game_coordinator/difficulty_handlers.py`](../services/game_coordinator/difficulty_handlers.py), [`base.py` `_compute_effective_thresholds`](../services/game_coordinator/games/base.py) |
-| Grace / shield | [`services/game_coordinator/lifecycle_handlers.py`](../services/game_coordinator/lifecycle_handlers.py), [`shields.py` `grant_shield`](../services/game_coordinator/games/shields.py), [`fight_club.py`](../services/game_coordinator/games/fight_club.py), [`tournament.py`](../services/game_coordinator/games/tournament.py) |
-| Flag domains | read-only baseline [`services/flagd/`](../services/flagd/) (`game.json`, `user.json`, `interventions.json`, `agent.json`); mutable-flag registry [`services/flag-service/registry.yaml`](../services/flag-service/registry.yaml) ([flags.md §13](specs/flags.md#13-mutable-flag-registry)) |
+The operator stops, resumes and scopes the agent on the device, without a terminal
+([UC-015](use_cases/UC-015.md) BR-002 to BR-004, BR-019; the keys in flags.md §13.2). The control is
+**load-bearing at the gate**: the coordinator's allow-list (FR-050) rejects every agent intervention the
+policy does not allow, whatever the agent process does, so the switch degrades safely. The guardrails
+constrain the agent only; the human write path has no policy layer, by design.
 
 ## See Also
 
 - [Services spec](specs/services.md)
-- [Intervention Surface research (#722)](research/722-intervention-surface.md)
+- [Intervention Surface research](research/722-intervention-surface.md)
 - [Agent README](../services/agent/README.md)
 - [Feature flags](feature-flags.md)
