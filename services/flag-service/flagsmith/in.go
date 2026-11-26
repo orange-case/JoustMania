@@ -1249,7 +1249,7 @@ func (p *puller) result(rc *roundCtx, k Key, d, lv Value, u undo, res state.Writ
 	}
 	delete(p.reverting, k)
 	switch ferr.Reason {
-	case fserr.NoSyncStream, fserr.ReasonPersistFailed, fserr.SlotChanged, fserr.RealGameLive:
+	case fserr.NoSyncStream, fserr.ReasonPersistFailed, fserr.SlotChanged:
 		// Not seen: the next round tries again (UC-054 A5).
 		l.links.RestoreRemoteGen(k, u.gen, u.prev, u.had)
 		p.deferKey(rc, k, ferr)

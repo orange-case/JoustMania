@@ -179,16 +179,7 @@ func (w *serviceRealDefaultWriter) SetRealDefault(ctx context.Context, flagKey s
 // The kill switch uses the same path: every overlay this agent writes carries
 // writer "promotion", so the precondition never blocks clearing one of them.
 func (w *serviceRealDefaultWriter) RevertRealDefault(ctx context.Context, flagKey string) error {
-	return w.revert(ctx, flagKey, false)
-}
-
-// RevertRealDefaultUnlessRealGame is RevertRealDefault with the guarded DELETE
-// (?unless_real_game=true, #2236): for a flag marked real_write:
-// no_live_real_game the flag service refuses it with 409 real_game_live while a
-// non-shadow game is registered, checked under its registration lock. The watch
-// and re-watch reverts of hold keys use it; the kill switch never does.
-func (w *serviceRealDefaultWriter) RevertRealDefaultUnlessRealGame(ctx context.Context, flagKey string) error {
-	return w.revert(ctx, flagKey, true)
+	return w.revert(ctx, flagKey)
 }
 
 // ErrSupersededByAnotherWriter is returned by a revert whose DELETE the flag service
@@ -243,7 +234,7 @@ var ErrRealOverlayOwnedByAnotherWriter = errors.New(ReasonRealOverlayForeign + "
 // revert was dropped on a writer_mismatch.
 const SupersededReasonSuffix = "; superseded by another writer"
 
-func (w *serviceRealDefaultWriter) revert(ctx context.Context, flagKey string, unlessRealGame bool) error {
+func (w *serviceRealDefaultWriter) revert(ctx context.Context, flagKey string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -261,9 +252,6 @@ func (w *serviceRealDefaultWriter) revert(ctx context.Context, flagKey string, u
 		return nil
 	}
 	query := url.Values{"game_kind": {"real"}, "writer": {promotionWriter}, "if_writer": {promotionWriter}}
-	if unlessRealGame {
-		query.Set("unless_real_game", "true")
-	}
 	if err := w.svc.Delete(ctx, gameFlagSet, flagKey, query); err != nil {
 		if flagservice.IsReason(err, flagservice.ReasonWriterMismatch) {
 			// Another writer replaced the overlay after the read (#1877): it owns

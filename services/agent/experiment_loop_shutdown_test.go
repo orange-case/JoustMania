@@ -163,8 +163,5 @@ func TestUC043_A20_LoopShutdown(t *testing.T) {
 		if st, _ := loop.registry.Status(id); st != experiment.StatusDiscarded {
 			t.Fatalf("experiment status = %q, want discarded", st)
 		}
-		if experiment.PromotionReasonShutdown != promote.ReasonShutdown {
-			t.Fatalf("shutdown reasons differ: %q vs %q", experiment.PromotionReasonShutdown, promote.ReasonShutdown)
-		}
 	})
 }

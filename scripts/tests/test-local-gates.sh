@@ -98,7 +98,7 @@ expect "tests/service/test_deleted_in_this_diff.py" "$ALWAYS"
 expect "tests/service/README.md" "$ALWAYS"
 expect "services/menu/server.py" "$ALWAYS py:menu contract service"
 expect "services/agent/main.go" "$ALWAYS go:agent contract contract-flagd"
-expect "tests/integration/fake_openai/server.py" "$ALWAYS service"
+expect "tests/service/harness/fakes/decide_answer.py" "$ALWAYS service"
 
 # Explicit SERVICE keys replace auto-detection (hyphen/underscore agnostic).
 got="$(SERVICE="flag_service,game-coordinator" PR_GATES_FILES=/dev/null "${GATES}" --plan 2>/dev/null | tr '\n' ' ')"

@@ -25,8 +25,8 @@ var holdSubParams = []string{
 }
 
 // holdService is the shipped stack game set (shield.activation defaults to trigger)
-// with an optional stack and real overlay on shield.activation.
-func holdService(t *testing.T, stack, real string) *fake.Service {
+// with an optional stack overlay on shield.activation (it has no real scope).
+func holdService(t *testing.T, stack string) *fake.Service {
 	t.Helper()
 	svc := gameServiceFrom(t, filepath.Join("..", "flagd", "game.json"))
 	put := func(variant string, scope flagservice.Scope) {
@@ -39,7 +39,6 @@ func holdService(t *testing.T, stack, real string) *fake.Service {
 		}
 	}
 	put(stack, flagservice.Scope{})
-	put(real, flagservice.Scope{GameKind: "real"})
 	return svc
 }
 
@@ -80,21 +79,20 @@ func keysOf[V any](m map[string]V) []string {
 // UC: UC-043 A17
 func TestHoldGate_DeclarerAndVocab(t *testing.T) {
 	cases := []struct {
-		name        string
-		stack, real string
-		policy      bool
-		want        []string
+		name   string
+		stack  string
+		policy bool
+		want   []string
 	}{
-		{"UC-043/A17 trigger default: shield.activation only, toward hold", "", "", true, []string{experiment.HoldActivationKey}},
-		{"UC-043/A17 archetypes without a trigger policy: no hold key", "", "", false, nil},
-		{"UC-043/A17 real overlay hold: the sub-parameters only", "", "hold", true, holdSubParams},
-		{"UC-043/A17 stage overlay hold: the sub-parameters only", "hold", "", true, holdSubParams},
-		{"UC-043/A17 stage trigger outranks a real hold: shield.activation only", "trigger", "hold", true, []string{experiment.HoldActivationKey}},
-		{"UC-043/A17 hold resolved but no trigger policy: no hold key", "hold", "", false, nil},
+		{"UC-043/A17 trigger default: shield.activation only, toward hold", "", true, []string{experiment.HoldActivationKey}},
+		{"UC-043/A17 archetypes without a trigger policy: no hold key", "", false, nil},
+		{"UC-043/A17 stage overlay hold: the sub-parameters only", "hold", true, holdSubParams},
+		{"UC-043/A17 stage trigger: shield.activation only", "trigger", true, []string{experiment.HoldActivationKey}},
+		{"UC-043/A17 hold resolved but no trigger policy: no hold key", "hold", false, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := holdService(t, tc.stack, tc.real)
+			svc := holdService(t, tc.stack)
 			want := append([]string(nil), tc.want...)
 			sort.Strings(want)
 
@@ -128,7 +126,7 @@ func TestHoldGate_DeclarerAndVocab(t *testing.T) {
 		}
 	})
 	t.Run("UC-043/A17 no policy set yet: fail closed", func(t *testing.T) {
-		svc := holdService(t, "hold", "")
+		svc := holdService(t, "hold")
 		if got := declaredKeys(t, svc, &holdGate{}); len(got) != 0 {
 			t.Fatalf("declared %v with no policy", keysOf(got))
 		}
@@ -139,17 +137,17 @@ func TestHoldGate_DeclarerAndVocab(t *testing.T) {
 func TestHoldGate_RegistryReasons(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
-		name, stack, real, key, want string
+		name, stack, key, want string
 	}{
-		{"UC-043/A17 sub-parameter under trigger", "", "", "shield.energy_budget_seconds", experiment.DiscardHoldNotRealDefault},
-		{"UC-043/A17 sub-parameter under hold", "", "hold", "shield.energy_budget_seconds", ""},
-		{"UC-043/A17 activation under trigger", "", "", experiment.HoldActivationKey, ""},
-		{"UC-043/A17 activation already hold", "hold", "", experiment.HoldActivationKey, experiment.DiscardHoldAlreadyDefault},
-		{"UC-043/A17 a non-hold key is never gated", "", "", "windows", ""},
+		{"UC-043/A17 sub-parameter under trigger", "", "shield.energy_budget_seconds", experiment.DiscardHoldNotRealDefault},
+		{"UC-043/A17 sub-parameter under hold", "hold", "shield.energy_budget_seconds", ""},
+		{"UC-043/A17 activation under trigger", "", experiment.HoldActivationKey, ""},
+		{"UC-043/A17 activation already hold", "hold", experiment.HoldActivationKey, experiment.DiscardHoldAlreadyDefault},
+		{"UC-043/A17 a non-hold key is never gated", "", "windows", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := registryHoldGate(holdService(t, tc.stack, tc.real))(ctx, tc.key)
+			got, err := registryHoldGate(holdService(t, tc.stack))(ctx, tc.key)
 			if err != nil || got != tc.want {
 				t.Fatalf("reason %q err %v, want %q", got, err, tc.want)
 			}

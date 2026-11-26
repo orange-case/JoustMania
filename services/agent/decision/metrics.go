@@ -93,7 +93,7 @@ const MetricPredictionDropped = "agent_prediction_dropped_total"
 
 // newPredictionDroppedCounter builds agent_prediction_dropped_total (#2479,
 // UC-040 A45): one increment per accepted remote answer whose model prediction
-// was dropped, labeled backend (claude, openai) and reason (missing, bad_option,
+// was dropped, labeled backend (claude) and reason (missing, bad_option,
 // bad_confidence, no_target, inconsistent: a closed set). An instrument-creation
 // error yields a no-op counter, like newLLMGatedCounter.
 func newPredictionDroppedCounter(mp otelmetric.MeterProvider) otelmetric.Int64Counter {

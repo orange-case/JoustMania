@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,7 +23,6 @@ import (
 	"github.com/joustmania/agent/decide"
 	"github.com/joustmania/agent/decide/backends/claude"
 	"github.com/joustmania/agent/decide/backends/jev"
-	"github.com/joustmania/agent/decide/backends/openai"
 	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/keysafe"
@@ -73,22 +71,19 @@ func decisionFlags(t *testing.T, strs map[string]string) flags.DecisionBackend {
 	return flags.New(mapEvaluator{strings: strs}, nil).DecisionBackend(context.Background())
 }
 
-var remoteBackends = []string{flags.DecisionBackendClaude, flags.DecisionBackendOpenAI, flags.DecisionBackendJev}
+var remoteBackends = []string{flags.DecisionBackendClaude, flags.DecisionBackendJev}
 
-// fullyConfigured sets the model / base URL flags every remote backend needs (the
-// shipped defaults leave openai's model unset).
+// fullyConfigured sets the model / base URL flags of every remote backend.
 func fullyConfigured(backend string) map[string]string {
 	return map[string]string{
-		"decision.backend":                 backend,
-		"decision.openai.model":            "gpt-5-mini",
-		"decision.jev.base_url":            "https://jev.example.test",
-		"decision.jev.model":               "jev-1",
-		"decision.claude.model":            "claude-haiku-4-5-20251001",
-		"decision.openai.reasoning_effort": "auto",
+		"decision.backend":      backend,
+		"decision.jev.base_url": "https://jev.example.test",
+		"decision.jev.model":    "jev-1",
+		"decision.claude.model": "claude-haiku-4-5-20251001",
 	}
 }
 
-var allKeys = decideBackendEnv{AnthropicAPIKey: "sk-ant-test", OpenAIAPIKey: "sk-test", JevAPIKey: "jev-test"}
+var allKeys = decideBackendEnv{AnthropicAPIKey: "sk-ant-test", JevAPIKey: "jev-test"}
 
 // TestDecideRegistry_NoKeysFallsBackToRules: the default deployment (no API keys
 // in the env) resolves every remote backend to backend_unavailable, so the loop
@@ -109,25 +104,16 @@ func TestDecideRegistry_NoKeysFallsBackToRules(t *testing.T) {
 	}
 }
 
-// TestDecideRegistry_KeyWithoutConfigFallsBack: a key alone is not enough when the
-// shipped defaults leave openai's model empty. claude and jev have a default
-// model (and jev a default base URL), so their key alone makes them available:
+// TestDecideRegistry_KeyWithShippedDefaults: claude and jev have a default model
+// (and jev a default base URL), so their key alone makes them available:
 // scripts/agent-backend.sh jev works with only JEV_API_KEY set (#1229).
-// UC: UC-044 A1
-// UC: UC-070 A6
-func TestDecideRegistry_KeyWithoutConfigFallsBack(t *testing.T) {
+// UC: UC-044 A1 BR-002
+func TestDecideRegistry_KeyWithShippedDefaults(t *testing.T) {
 	reg := newDecideRegistry(allKeys, newDecideHTTPClient())
-	for name, wantAvailable := range map[string]bool{
-		flags.DecisionBackendClaude: true,
-		flags.DecisionBackendOpenAI: false,
-		flags.DecisionBackendJev:    true,
-	} {
+	for _, name := range remoteBackends {
 		b, reason := reg.Resolve(decisionFlags(t, map[string]string{"decision.backend": name}))
-		if got := b != nil; got != wantAvailable {
-			t.Errorf("%s with key + shipped defaults: Resolve = (%v, %q), want available=%v", name, b, reason, wantAvailable)
-		}
-		if !wantAvailable && reason != decision.DecideFallbackUnavailable {
-			t.Errorf("%s: reason = %q, want %q", name, reason, decision.DecideFallbackUnavailable)
+		if b == nil {
+			t.Errorf("%s with key + shipped defaults: Resolve fell back (%q), want available", name, reason)
 		}
 	}
 }
@@ -151,6 +137,38 @@ func TestDecideRegistry_KeysResolveEachBackend(t *testing.T) {
 	}
 }
 
+// TestDecideRegistry_RetiredOpenAIFallsBackToRules: "openai" was retired in
+// #2788. A stale flag file or a persisted flag that still serves it must not
+// break startup: the flag keeps the name verbatim (it is no remote backend), and
+// the registry, with every key set, resolves it to unknown_backend, so the
+// decision falls back to rules like any other unknown name.
+// UC: UC-044 Pre-1
+// UC: UC-040 A3
+func TestDecideRegistry_RetiredOpenAIFallsBackToRules(t *testing.T) {
+	strs := fullyConfigured("openai")
+	strs["decision.openai.model"] = "gpt-5-mini"
+	strs["decision.openai.base_url"] = "https://api.openai.com/v1"
+	d := decisionFlags(t, strs)
+
+	t.Run("UC-044/Pre-1 decision.backend openai is kept verbatim and is no remote backend", func(t *testing.T) {
+		if d.Backend != "openai" {
+			t.Errorf("Backend = %q, want \"openai\" kept verbatim", d.Backend)
+		}
+		if d.IsRules() {
+			t.Error("IsRules() = true, want false (the unknown name is recorded, not rewritten)")
+		}
+		if _, ok := d.Remote("openai"); ok {
+			t.Error(`Remote("openai") = true, want false`)
+		}
+	})
+	t.Run("UC-040/A3 the registry resolves openai to unknown_backend (rules)", func(t *testing.T) {
+		reg := newDecideRegistry(allKeys, newDecideHTTPClient())
+		if b, reason := reg.Resolve(d); b != nil || reason != decision.DecideFallbackUnknownBackend {
+			t.Errorf("Resolve = (%v, %q), want (nil, %q)", b, reason, decision.DecideFallbackUnknownBackend)
+		}
+	})
+}
+
 type modeler interface {
 	decide.Backend
 	Model() string
@@ -164,7 +182,6 @@ func TestDecideRegistry_ModelFlagAppliesNextResolve(t *testing.T) {
 	reg := newDecideRegistry(allKeys, newDecideHTTPClient())
 	modelKey := map[string]string{
 		flags.DecisionBackendClaude: "decision.claude.model",
-		flags.DecisionBackendOpenAI: "decision.openai.model",
 		flags.DecisionBackendJev:    "decision.jev.model",
 	}
 	for _, name := range remoteBackends {
@@ -244,71 +261,13 @@ func TestDecideRegistry_ClaudeCacheConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-// TestDecideRegistry_OpenAIWiresKeyAndFlags drives the resolved openai backend
-// against a fake endpoint: the env key is the Bearer token, and the model and
-// reasoning_effort flags reach the wire (a flag flip applies on the next call).
-// UC: UC-070 A6
-// UC: UC-044 A3
-func TestDecideRegistry_OpenAIWiresKeyAndFlags(t *testing.T) {
-	type seen struct {
-		auth string
-		body map[string]any
-	}
-	var (
-		mu    sync.Mutex
-		calls []seen
-	)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var body map[string]any
-		_ = json.Unmarshal(raw, &body)
-		mu.Lock()
-		calls = append(calls, seen{auth: r.Header.Get("Authorization"), body: body})
-		mu.Unlock()
-		http.Error(w, `{"error":{"message":"nope"}}`, http.StatusUnauthorized)
-	}))
-	defer srv.Close()
-
-	reg := newDecideRegistry(allKeys, srv.Client())
-	strs := fullyConfigured(flags.DecisionBackendOpenAI)
-	strs["decision.openai.base_url"] = srv.URL + "/v1"
-	req := decide.Request{Questions: []decide.Question{{ID: decide.QuestionFFAIntervention}}}
-
-	for i, step := range []struct{ model, effort, wantEffort string }{
-		{"gpt-5-mini", "auto", "minimal"},
-		{"gpt-6", "auto", "low"},
-		{"gpt-6", "none", "none"},
-	} {
-		strs["decision.openai.model"] = step.model
-		strs["decision.openai.reasoning_effort"] = step.effort
-		b, reason := reg.Resolve(decisionFlags(t, strs))
-		if b == nil {
-			t.Fatalf("Resolve fell back: %q", reason)
-		}
-		if _, err := b.Decide(context.Background(), req); err == nil {
-			t.Fatal("a 401 must be an error")
-		}
-		mu.Lock()
-		got := calls[i]
-		mu.Unlock()
-		if got.auth != "Bearer "+allKeys.OpenAIAPIKey {
-			t.Errorf("Authorization = %q, want the DECISION_OPENAI_API_KEY bearer", got.auth)
-		}
-		if got.body["model"] != step.model || got.body["reasoning_effort"] != step.wantEffort {
-			t.Errorf("step %d: model=%v reasoning_effort=%v, want %s / %s",
-				i, got.body["model"], got.body["reasoning_effort"], step.model, step.wantEffort)
-		}
-	}
-}
-
-// TestDecideBackendEnvFromOS reads (and trims) the three key variables.
+// TestDecideBackendEnvFromOS reads (and trims) the two key variables.
 // UC: UC-044 BR-001
 func TestDecideBackendEnvFromOS(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", " a ")
-	t.Setenv("DECISION_OPENAI_API_KEY", "o")
 	t.Setenv("JEV_API_KEY", "")
 	got := decideBackendEnvFromOS()
-	if got != (decideBackendEnv{AnthropicAPIKey: "a", OpenAIAPIKey: "o"}) {
+	if got != (decideBackendEnv{AnthropicAPIKey: "a"}) {
 		t.Errorf("env = %+v", got)
 	}
 }
@@ -316,7 +275,6 @@ func TestDecideBackendEnvFromOS(t *testing.T) {
 // compile-time: the concrete backends expose Model for the flip test.
 var (
 	_ modeler = (*claude.Backend)(nil)
-	_ modeler = (*openai.Backend)(nil)
 	_ modeler = (*jev.Backend)(nil)
 )
 
@@ -334,22 +292,13 @@ func TestJevFlagDefaultsMatchBackend(t *testing.T) {
 	}
 }
 
-// TestDecideRegistry_EmptyBaseURL: an empty decision.openai.base_url has no
-// endpoint to call, so openai falls back to rules (backend_unavailable) even with
-// a key and a model. Jev is the documented exception: an empty base URL means
-// jev.DefaultBaseURL, so jev stays available.
+// TestDecideRegistry_EmptyBaseURL: an empty jev base URL means jev.DefaultBaseURL,
+// so jev stays available.
 // UC: UC-044 A1
 func TestDecideRegistry_EmptyBaseURL(t *testing.T) {
 	reg := newDecideRegistry(allKeys, newDecideHTTPClient())
 
-	strs := fullyConfigured(flags.DecisionBackendOpenAI)
-	strs["decision.openai.base_url"] = ""
-	b, reason := reg.Resolve(decisionFlags(t, strs))
-	if b != nil || reason != decision.DecideFallbackUnavailable {
-		t.Errorf("openai with an empty base URL: Resolve = (%v, %q), want (nil, %q)", b, reason, decision.DecideFallbackUnavailable)
-	}
-
-	strs = fullyConfigured(flags.DecisionBackendJev)
+	strs := fullyConfigured(flags.DecisionBackendJev)
 	strs["decision.jev.base_url"] = ""
 	if b, reason := reg.Resolve(decisionFlags(t, strs)); b == nil {
 		t.Errorf("jev with an empty base URL must default it, got fallback %q", reason)
@@ -420,7 +369,7 @@ func TestClaudeFlagDefaultsMatchBackend(t *testing.T) {
 // key needs a restart) and does not swap the key of an available one.
 // UC: UC-044 BR-001
 func TestDecideRegistry_KeysFixedAtStartup(t *testing.T) {
-	for _, name := range []string{"ANTHROPIC_API_KEY", "DECISION_OPENAI_API_KEY", "JEV_API_KEY"} {
+	for _, name := range []string{"ANTHROPIC_API_KEY", "JEV_API_KEY"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("JEV_API_KEY", "jev-at-startup")
@@ -428,12 +377,9 @@ func TestDecideRegistry_KeysFixedAtStartup(t *testing.T) {
 
 	// A key that appears after startup changes nothing.
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-late")
-	t.Setenv("DECISION_OPENAI_API_KEY", "sk-late")
-	for _, name := range []string{flags.DecisionBackendClaude, flags.DecisionBackendOpenAI} {
-		b, reason := reg.Resolve(decisionFlags(t, fullyConfigured(name)))
-		if b != nil || reason != decision.DecideFallbackUnavailable {
-			t.Errorf("%s with a key set after startup: Resolve = (%v, %q), want (nil, %q)", name, b, reason, decision.DecideFallbackUnavailable)
-		}
+	b, reason := reg.Resolve(decisionFlags(t, fullyConfigured(flags.DecisionBackendClaude)))
+	if b != nil || reason != decision.DecideFallbackUnavailable {
+		t.Errorf("claude with a key set after startup: Resolve = (%v, %q), want (nil, %q)", b, reason, decision.DecideFallbackUnavailable)
 	}
 
 	// A key removed after startup does not disable the backend either.
@@ -459,20 +405,15 @@ func TestDecideBackends_KeyNeverInSpanAttributes(t *testing.T) {
 	defer srv.Close()
 
 	reg := newDecideRegistry(allKeys, srv.Client())
-	openaiFlags := fullyConfigured(flags.DecisionBackendOpenAI)
-	openaiFlags["decision.openai.base_url"] = srv.URL + "/v1"
 	jevFlags := fullyConfigured(flags.DecisionBackendJev)
 	jevFlags["decision.jev.base_url"] = srv.URL
-	backends := map[string]decide.Backend{}
-	for name, strs := range map[string]map[string]string{"openai": openaiFlags, "jev": jevFlags} {
-		cfg := decisionFlags(t, strs)
-		cfg.CaptureContent = true
-		b, reason := reg.Resolve(cfg)
-		if b == nil {
-			t.Fatalf("%s: Resolve fell back: %q", name, reason)
-		}
-		backends[name] = b
+	cfg := decisionFlags(t, jevFlags)
+	cfg.CaptureContent = true
+	jevBackend, reason := reg.Resolve(cfg)
+	if jevBackend == nil {
+		t.Fatalf("jev: Resolve fell back: %q", reason)
 	}
+	backends := map[string]decide.Backend{"jev": jevBackend}
 	backends["claude"] = claude.New(claude.Config{
 		APIKey: allKeys.AnthropicAPIKey, Model: "claude-haiku-4-5-20251001", BaseURL: srv.URL,
 		HTTPClient: srv.Client(), CaptureContent: true,
@@ -491,7 +432,7 @@ func TestDecideBackends_KeyNeverInSpanAttributes(t *testing.T) {
 	}
 	for _, sp := range ended {
 		for _, kv := range sp.Attributes() {
-			for _, secret := range []string{allKeys.AnthropicAPIKey, allKeys.OpenAIAPIKey, allKeys.JevAPIKey} {
+			for _, secret := range []string{allKeys.AnthropicAPIKey, allKeys.JevAPIKey} {
 				if strings.Contains(kv.Value.Emit(), secret) {
 					t.Errorf("span %q attribute %s carries an API key", sp.Name(), kv.Key)
 				}
@@ -499,7 +440,7 @@ func TestDecideBackends_KeyNeverInSpanAttributes(t *testing.T) {
 		}
 		for _, ev := range sp.Events() {
 			for _, kv := range ev.Attributes {
-				for _, secret := range []string{allKeys.AnthropicAPIKey, allKeys.OpenAIAPIKey, allKeys.JevAPIKey} {
+				for _, secret := range []string{allKeys.AnthropicAPIKey, allKeys.JevAPIKey} {
 					if strings.Contains(kv.Value.Emit(), secret) {
 						t.Errorf("span %q event %q attribute %s carries an API key", sp.Name(), ev.Name, kv.Key)
 					}
@@ -516,7 +457,7 @@ const flagdDir = "../flagd"
 var secretKeyName = regexp.MustCompile(`(?i)(api[_.-]?key|secret|password|passwd|bearer|authorization|credential|access[_.-]?token)`)
 
 // secretValue matches a string value shaped like an API key or bearer token:
-// OpenAI / Anthropic (sk-..., sk-ant-...), GitHub, AWS, Google, a JWT, a Bearer
+// sk-style keys (sk-..., sk-ant-..., sk-proj-...), GitHub, AWS, Google, a JWT, a Bearer
 // header, or an opaque run of 32+ letters and digits.
 var secretValue = regexp.MustCompile(`(?i)(\bsk-(ant-|proj-)?[a-z0-9_-]{16,}|\bgh[pousr]_[a-z0-9]{20,}|\bAKIA[0-9A-Z]{16}\b|\bAIza[0-9a-z_-]{30,}|\beyJ[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}|\bbearer\s+\S{8,}|^[a-z0-9]{32,}$)`)
 
@@ -584,7 +525,7 @@ func TestFlagFiles_HoldNoSecrets(t *testing.T) {
 	t.Run("UC-044/C-016 the scanner flags planted keys and passes clean flags", func(t *testing.T) {
 		planted := map[string]string{
 			"anthropic value": `{"flags":{"decision.claude.model":{"variants":{"x":"sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv"}}}}`,
-			"openai value":    `{"flags":{"x":{"variants":{"on":"sk-proj-AbCdEfGhIjKlMnOpQrSt"}}}}`,
+			"sk-proj value":   `{"flags":{"x":{"variants":{"on":"sk-proj-AbCdEfGhIjKlMnOpQrSt"}}}}`,
 			"opaque value":    `{"flags":{"x":{"variants":{"on":"0123456789abcdef0123456789abcdef"}}}}`,
 			"bearer value":    `{"flags":{"x":{"variants":{"on":"Bearer abcdefgh12345678"}}}}`,
 			"key name":        `{"flags":{"decision.jev.api_key":{"variants":{"on":"x"}}}}`,
@@ -596,7 +537,7 @@ func TestFlagFiles_HoldNoSecrets(t *testing.T) {
 			}
 		}
 		clean := `{"flags":{"decision.claude.model":{"variants":{"haiku":"claude-haiku-4-5-20251001"}},` +
-			`"decision.openai.base_url":{"variants":{"openai":"https://api.openai.com/v1"}},` +
+			`"decision.jev.base_url":{"variants":{"typesafe":"https://api.typesafe.ai/v1"}},` +
 			`"llm.max_tokens":{"variants":{"default":512}}}}`
 		if got, err := secretsInFlagJSON([]byte(clean)); err != nil || len(got) != 0 {
 			t.Errorf("clean flags: findings = %v (err %v), want none", got, err)
@@ -654,13 +595,13 @@ func TestFlagFiles_BaseURLVariantsAreKeySafe(t *testing.T) {
 			}
 		}
 	}
-	// decision.openai/jev/claude.base_url, in the base set and in ci/.
-	if checked < 6 {
-		t.Fatalf("checked %d base_url flags, want at least 6 (the scan would pass vacuously)", checked)
+	// decision.jev/claude.base_url, in the base set and in ci/.
+	if checked < 4 {
+		t.Fatalf("checked %d base_url flags, want at least 4 (the scan would pass vacuously)", checked)
 	}
 }
 
-// TestDecideRegistry_RefusesClearTextRemoteBaseURL: an openai, jev or claude base URL that
+// TestDecideRegistry_RefusesClearTextRemoteBaseURL: a jev or claude base URL that
 // is plain http to a non-loopback host resolves to backend_unavailable, so rules
 // decide and no backend (hence no request carrying the key) exists. Loopback http
 // stays available (the service tier's fakes).
@@ -668,13 +609,13 @@ func TestFlagFiles_BaseURLVariantsAreKeySafe(t *testing.T) {
 // UC: C-016
 func TestDecideRegistry_RefusesClearTextRemoteBaseURL(t *testing.T) {
 	reg := newDecideRegistry(allKeys, newDecideHTTPClient())
-	for _, backend := range []string{flags.DecisionBackendOpenAI, flags.DecisionBackendJev, flags.DecisionBackendClaude} {
+	for _, backend := range []string{flags.DecisionBackendJev, flags.DecisionBackendClaude} {
 		key := "decision." + backend + ".base_url"
 		suffix := "/v1" // claude's base URL has none: the SDK appends /v1/messages
 		if backend == flags.DecisionBackendClaude {
 			suffix = ""
 		}
-		for _, raw := range []string{"http://fake-openai:8080" + suffix, "http://192.168.1.5" + suffix, "https://u:p@api.example.test" + suffix} {
+		for _, raw := range []string{"http://fake-remote:8080" + suffix, "http://192.168.1.5" + suffix, "https://u:p@api.example.test" + suffix} {
 			t.Run("UC-044/A1 "+backend+" refuses "+raw, func(t *testing.T) {
 				strs := fullyConfigured(backend)
 				strs[key] = raw
@@ -733,7 +674,7 @@ func TestDecideHTTPClient_FollowsNoRedirect(t *testing.T) {
 	// Every backend is resolved through the registry, so the test proves the
 	// factory passes the shared no-redirect client AND the flag's base URL
 	// (the hit-count check below). claude's URL has no /v1 (the SDK appends it).
-	for _, name := range []string{flags.DecisionBackendClaude, flags.DecisionBackendOpenAI, flags.DecisionBackendJev} {
+	for _, name := range remoteBackends {
 		backend := name
 		backends[backend] = func() decide.Backend {
 			strs := fullyConfigured(backend)
