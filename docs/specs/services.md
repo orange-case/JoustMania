@@ -111,6 +111,30 @@ Outside the Pi path, `docker-compose.override.yml` adds the dev and test binding
 flag-service 8070 on loopback). Every other service is reachable only on
 `joustmania-network`, or through envoy's routes. Do not add a host port to the base file without a loopback bind and a reason in this table.
 
+### Memory pressure: OOM order (NFR-081)
+
+The memory limits are per-container ceilings, not use; their sum is above the RAM of a 4 GB Pi by design. They do not
+decide who dies when the host runs out of memory: the kernel's OOM killer does, by each process's share of RAM plus its
+`oom_score_adj`. Compose sets that per service, so a game service outlives every observability and agent container:
+
+| Tier | `oom_score_adj` | Services (`docker-compose.yml`; `docker-compose.lite.yml` for those it has) |
+|---|---|---|
+| Game (kept longest) | `-500` | flag-service, flagd, controller-manager, rust-hid, pairing-daemon, game-coordinator, menu, audio (`JOUSTMANIA_GAME_SERVICES` in `scripts/setup/lib-joustmania.sh`), and operator-pad: the operator's way out of a stuck game (UC-015) |
+| Neutral | unset (0) | envoy, connect-proxy |
+| Expendable (killed first) | `+500` | jaeger, victoria-metrics, grafana, otel-collector, agent (`JOUSTMANIA_OBS_SERVICES`), dashboard |
+
+- `+500` puts even a small expendable container ahead of any unprotected one; `-500` offsets a game container holding up
+  to half of RAM. Not `-1000`: a leaking game service can still be killed, rather than the host freezing.
+- In `docker-compose.yml` every game service has a memory limit (the pairing daemon 256m, like the other Python
+  services), so a leak in a protected container ends at its own limit instead of pushing the host into OOM. The lite
+  file keeps its few limits.
+- No `mem_reservation`: a reservation only steers reclaim, not the kill order, and needs a measured working set per
+  service; none is set.
+- An overlay file sets no `oom_score_adj`, so the base file decides the order on every path.
+
+On the Pi, `joustmania-status` warns when available memory or free disk on the Docker data root is low
+([stage-host.md](stage-host.md) §3). Contract test: `tests/contract/test_compose_oom_order.py`.
+
 **Traceability:** C-014, C-015, FR-085, C-010 / UC-035 / `docker-compose*.yml`, `services/envoy/envoy.yaml`, `services/*/server.py` / `tests/integration/conftest.py`, `tests/service/harness/stack.py`.
 
 ## 3. gRPC services

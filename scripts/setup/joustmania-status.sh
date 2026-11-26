@@ -20,9 +20,13 @@
 #     not need it, so it never changes the state)
 #   - docker not reachable (daemon down, user not in the docker group): FAIL,
 #     and the image and service checks are skipped
+#   - memory: MemAvailable, WARN below 512 MiB (urgent below 256 MiB); disk:
+#     free space on the Docker data root, WARN below 2 GiB (urgent below
+#     512 MiB) (NFR-081, #2914); never FAIL: the game still runs, so low
+#     headroom is degraded; a value that cannot be read is SKIP
 # The last line is `state: ok|starting|degraded|failed`.
 # Exit: 0 ok, 1 starting or degraded (any WARN: an observability or agent
-# problem, a branch checkout), 2 failed (a game service down or its image
+# problem, a branch checkout, low memory or disk), 2 failed (a game service down or its image
 # missing, the unit failed, docker not reachable). While the unit is starting,
 # a game service that is not running yet is INFO and the state is `starting`.
 # An INFO `led:` line shows the ACT LED state (C-042) joustmania-led recorded,
@@ -139,7 +143,9 @@ fi
 # The full config holds interpolated secrets: it goes straight into the parser.
 # compose config works without the daemon: check docker first, or every image
 # would look missing.
-if ! docker info >/dev/null 2>&1; then
+DOCKER_UP=0
+docker info >/dev/null 2>&1 && DOCKER_UP=1
+if ((DOCKER_UP == 0)); then
     report FAIL "docker: not reachable (daemon not running, or $(id -un 2>/dev/null || echo this user) not in the docker group); images and services not checked"
 elif ! SERVICE_IMAGES="$(compose config 2>/dev/null | joustmania_service_graph)" || [[ -z "$SERVICE_IMAGES" ]]; then
     report FAIL "docker: compose cannot read the project (compose config failed)"
@@ -189,6 +195,52 @@ else
         fi
     done <<<"$SERVICE_IMAGES"
 fi
+
+# --- memory and disk headroom (NFR-081, #2914) ------------------------------
+MEMINFO="${JOUSTMANIA_MEMINFO:-/proc/meminfo}"
+MEM_WARN_MIB=512 MEM_URGENT_MIB=256
+DISK_WARN_MIB=2048 DISK_URGENT_MIB=512
+memory_line() {
+    local avail total relief
+    avail="$(awk '$1 == "MemAvailable:" { print int($2 / 1024) }' "$MEMINFO" 2>/dev/null)"
+    total="$(awk '$1 == "MemTotal:" { print int($2 / 1024) }' "$MEMINFO" 2>/dev/null)"
+    if [[ ! "$avail" =~ ^[0-9]+$ ]]; then
+        report SKIP "memory: cannot read MemAvailable from $MEMINFO"
+        return
+    fi
+    local text="memory: $avail MiB available${total:+ of $total MiB}"
+    # Nothing in the game depends on these two (BR-004), and they hold the most.
+    relief="free memory without stopping the game: $SCRIPT_DIR/joustmania-compose.sh stop jaeger grafana"
+    if ((avail < MEM_URGENT_MIB)); then
+        report WARN "$text, below $MEM_URGENT_MIB MiB: an OOM kill is close; $relief"
+    elif ((avail < MEM_WARN_MIB)); then
+        report WARN "$text, below $MEM_WARN_MIB MiB; $relief"
+    else
+        report OK "$text"
+    fi
+}
+memory_line
+
+disk_line() {
+    local root="" free
+    # Also when docker is down: a full disk can be why
+    ((DOCKER_UP == 1)) && root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"
+    root="${root:-/var/lib/docker}"
+    free="$(df -Pk -- "$root" 2>/dev/null | awk 'NR == 2 { print int($4 / 1024) }')"
+    if [[ ! "$free" =~ ^[0-9]+$ ]]; then
+        report SKIP "disk: cannot read the free space of $root"
+        return
+    fi
+    local text="disk: $free MiB free on the Docker data root ($root)"
+    if ((free < DISK_URGENT_MIB)); then
+        report WARN "$text, below $DISK_URGENT_MIB MiB: containers cannot write logs or data; see what uses it: docker system df"
+    elif ((free < DISK_WARN_MIB)); then
+        report WARN "$text, below $DISK_WARN_MIB MiB; see what uses it: docker system df"
+    else
+        report OK "$text"
+    fi
+}
+disk_line
 
 # --- stage hotspot (UC-061, FR-187): INFO only, never the state (BR-007) -----
 hotspot_line() {
