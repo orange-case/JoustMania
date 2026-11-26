@@ -149,7 +149,7 @@ async def test_jev_below_threshold_is_noop(fresh_stack):
             )
             tags = span.attributes
             assert tags.get("decide.backend") == "jev", tags
-            # A noop's confidence is p(noop) = 1 - p_yes.
+            # A closed gate is noop with p(noop) = 1; its confidence is 1 - p_yes.
             assert abs(float(tags.get("decide.confidence")) - (1 - JEV_BELOW_CONFIDENCE)) < 1e-9, tags
             assert not children(stack, span, "agent.decision"), "a noop must not reach runDecision"
             assert not any(c["stage"] == "details" for c in stack.fake_jev.requests()), "a closed gate asks no details"

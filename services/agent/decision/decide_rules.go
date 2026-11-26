@@ -259,7 +259,6 @@ func neutralAnswer(q decide.Question) decide.Answer {
 		}
 	case decide.KindScore:
 		a.Score = q.Range[0]
-
 	}
 	return a
 }

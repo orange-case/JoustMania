@@ -65,7 +65,6 @@ const (
 	// ~0.16, dragging ~0.35, collapsing ~0.68, near-threshold ~0.72), not a
 	// self-report, so it acts at 0.6 while claude needs 0.8.
 	DefaultDecisionJevActConfidenceThreshold = 0.6
-
 	// DefaultDecisionCaptureContent is off: GenAI content capture (prompts,
 	// completions, rationale as message parts) is opt-in per the GenAI semconv.
 	DefaultDecisionCaptureContent = false
@@ -94,7 +93,7 @@ const (
 	// Zero disables the gap.
 	DefaultDecisionMinGapAfterAnswerMs = 1000
 	// DefaultDecisionMaxStateAgeMs is decision.max_state_age_ms (#2123): a remote
-	// answer that would act is discarded (decide.discarded_reason=state_too_old)
+	// answer that would act is discarded (decide.discarded_reason=stale, detail state_too_old)
 	// when the game state it was built on (the fire-time GameContext.UpdatedAt) is
 	// older than this when the answer lands. 10 s sits above the longest call
 	// timeout (claude "patient", 8 s) plus the coordinator's metric export
@@ -151,7 +150,6 @@ type RemoteBackendConfig struct {
 	// [0,1]: the backend's answers act at or above it (#1287). Hand-built test
 	// snapshots leave it 0, so every answer acts.
 	ActConfidenceThreshold float64
-
 	// MaxRequestsPerMinute is the backend's own per-minute decide cap
 	// (decision.<backend>.max_requests_per_minute, #2519). It applies only when
 	// HasMaxRequestsPerMinute is true and only tightens the global
@@ -237,7 +235,6 @@ func (d DecisionBackend) ActThreshold(backend string) (float64, bool) {
 func (f *Flags) DecisionBackend(ctx context.Context) DecisionBackend {
 	d := DecisionBackend{
 		Backend: normalizeBackendName(f.stringFlag(ctx, keyDecisionBackend, DefaultDecisionBackend)),
-
 		CaptureContent:      f.boolFlag(ctx, keyDecisionCaptureContent, DefaultDecisionCaptureContent),
 		MinInterval:         f.minIntervalFlag(ctx),
 		MinGapAfterAnswer:   f.nonNegativeMsFlag(ctx, keyDecisionMinGapAfterAnswerMs, DefaultDecisionMinGapAfterAnswerMs),
@@ -260,7 +257,6 @@ func (f *Flags) DecisionBackend(ctx context.Context) DecisionBackend {
 				DefaultDecisionJevActConfidenceThreshold),
 		},
 	}
-
 	d.Claude.MaxRequestsPerMinute, d.Claude.HasMaxRequestsPerMinute = f.backendMaxRequestsPerMinute(
 		ctx, keyDecisionClaudeMaxRequestsPerMin, DefaultDecisionClaudeMaxRequestsPerMinute)
 	return d

@@ -9,7 +9,6 @@
 // choice questions, a probability distribution over the options in which the
 // choice is the most probable option.
 //
-
 // Only the routing answer's confidence (ffa.intervention, what the router
 // gates on) is required to follow the "acting is right" semantics below; other
 // answers (target, magnitude) may carry backend-native confidence.
@@ -74,7 +73,6 @@ type Answer struct {
 	Probabilities map[string]float64 `json:"probabilities,omitempty"`
 	// Score is the value of a KindScore question, within its Range.
 	Score float64 `json:"score"`
-
 	// Confidence is the backend's confidence that acting on this answer is right,
 	// in [0,1] (see the package doc).
 	Confidence float64 `json:"confidence"`
