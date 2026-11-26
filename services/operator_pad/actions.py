@@ -6,7 +6,7 @@ cannot be sent now is dropped with a cue, never queued or retried (BR-010).
 
 A row key acts on the row it bound to at its press (`page_keys.Binding`); without one (no screen)
 on the fallback page `HOME` (UC-016 BR-016). A raise of the agent (BR-014) is sent only through
-`_level_step`, `_row_step`, `_set_backend`, `_reset_send` and `_interventions_switch`, which take
+`_level_step`, `_row_step`, `_set_backend`, `_reset_send` and `_agent_state`, which take
 the confirmation and refuse an unconfirmed raise with an explicit check.
 """
 
@@ -42,9 +42,9 @@ from services.operator_pad.gestures import (
     Gesture,
 )
 from services.operator_pad.page_keys import (
+    AGENT_STATE,
     BACKEND,
     EDIT,
-    INTERVENTIONS,
     RESET_BACKEND_FROM,
     SET_BACKEND_FROM,
     SWITCH,
@@ -52,17 +52,13 @@ from services.operator_pad.page_keys import (
 )
 from services.operator_pad.preview import Previewer, value_voice
 from services.operator_pad.screens import SETTING_LABELS, TRANSITION_TEXT, agent_text, result_word, short
-from services.operator_pad.state import AGENT_OFF, AGENT_UNKNOWN, AGENT_WATCH, agent_state, is_known, pad_commands
+from services.operator_pad.state import AGENT_OFF, AGENT_UNKNOWN, AGENT_WATCH, agent_state, pad_commands
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)
 
-# Every command but the agent switch: at most two flag reads and one write settled by a re-read (#2095).
+# At most two flag reads and two writes settled by a re-read (#2095); the agent switch is the slowest.
 COMMAND_TIMEOUT_SECONDS = 4.0
-# The resume is the menu's slowest command (#2093): from level `none` two flag reads (0.5 s each) and three
-# writes whose timeout is settled by a re-read (0.5 s + 0.5 s each, #2095), 4.0 s of flag-service deadlines,
-# plus the menu's own work. A cut still leaves the agent stopped: `enabled` is written last (UC-015 BR-003).
-AGENT_SWITCH_TIMEOUT_SECONDS = 5.0
 VOLUME_PAUSE_SECONDS = 0.25  # BR-005: the volume is committed after this pause in turning
 FORCE_END_REASON = "operator_pad"
 
@@ -73,8 +69,8 @@ AT_LIMIT = "at_limit"
 STALE = "stale"
 BAD_OPTION = "bad_option"
 FLAG_SERVICE_UNAVAILABLE = "flag_service_unavailable"
+# Pad-side: a success the menu sent without a value (UC-016 BR-011, "Menu too old").
 FAILED = "failed"
-PARTIAL_PREFIX = "partial:"
 # Pad-side results (telemetry.md §6).
 REFUSED = "refused"
 CANCELLED = "cancelled"
@@ -83,11 +79,11 @@ NOOP = "noop"
 
 # UC-016 BR-011 "Menu too old": the commands a menu must list in `pad_commands` before the pad sends them.
 RESET_COMMAND = "reset_setting"
-SWITCH_COMMAND = "interventions_switch"
+SWITCH_COMMAND = "agent_state"
 RESET_FROM = "reset_setting.from"  # the menu refuses a level reset whose level moved under the hold
 STEP_FROM = "step_setting.from"  # the same for a level step
 # The edits whose screen and release follow a `page_keys.Plan` (NOW, NEW, raise, refusal).
-PLANNED_EDITS = frozenset({"agent_level", INTERVENTIONS, "decision.backend", *setting_ladders.AGENT_ROW_OPTIONS})
+PLANNED_EDITS = frozenset({"agent_level", AGENT_STATE, "decision.backend", *setting_ladders.AGENT_ROW_OPTIONS})
 
 VOLUME_VARIANTS = setting_ladders.VOLUME_LADDER
 MUTE = "mute"
@@ -95,18 +91,16 @@ UNMUTE_DEFAULT = "max"
 VOLUME_OPTION = "audio_volume.master"
 
 # UC-016 BR-001 result labels of the commands that are not a row setting.
-COMMAND_LABELS = {"start_game": "START", "force_end": "END GAME", "force_start": "FORCE START", "agent_switch": "AGENT"}
+COMMAND_LABELS = {"start_game": "START", "force_end": "END GAME", "agent_switch": "AGENT"}
 # The last command sent in this task and the value the menu reports as committed (UC-016 BR-001).
 # A context variable, so a volume commit running in its own task never mixes into a key's result.
 _SENT: contextvars.ContextVar[tuple[dict[str, str], str] | None] = contextvars.ContextVar("pad_sent", default=None)
 
 
 def result_label(error: str) -> str:
-    """A menu error code as a metric label: `partial:<key>` folds to `partial` (bounded cardinality)."""
+    """A menu error code as a metric label."""
     if error in ("", OK):
         return OK
-    if error.startswith(PARTIAL_PREFIX):
-        return "partial"
     return error
 
 
@@ -125,8 +119,8 @@ def voice_of(option: str, value: str | None):
         return voice_prompts.INSTRUCTIONS_VOICES.get(value == "on") if value in ("on", "off") else None
     if option == "force_all_start":
         return voice_prompts.FORCE_ALL_START_VOICES.get(value == "on") if value in ("on", "off") else None
-    if option == INTERVENTIONS:
-        return voice_prompts.INTERVENTIONS_VOICES.get(value)
+    if option == AGENT_STATE:
+        return None  # the K5 tap announces the agent (the row's tap is that tap)
     return value_voice(option, value)
 
 
@@ -202,9 +196,6 @@ class Actions:
             preview_refused = self._previewer is not None and self._previewer.refused(gesture.key)
             # The preview never plays on over the commit's voice line.
             self.end_preview(commit_steps=self._release_commit_steps(gesture, status, binding))
-        if gesture.kind == AGENT_HOLD and not self._agent_hold_stops(gesture, press_status):
-            self._agent_stopped = False
-            return "none", NOOP  # a clean hold of a stopped agent: the resume waits for the release
         pending = self._pending_label(gesture, status, binding)
         if pending is not None:
             self._show("pending", pending)  # the label while the command runs (up to its deadline)
@@ -216,7 +207,7 @@ class Actions:
                 span.set_attribute("pad.gesture", gesture.kind)
                 action, result = await self._run(gesture, status, press_status, binding, span, preview_refused)
                 self._record(span, action, result)
-            self._show_result(gesture, press_status, binding, action, result, _SENT.get())
+            self._show_result(gesture, binding, action, result, _SENT.get())
             return action, result
         finally:
             _SENT.reset(token)
@@ -229,9 +220,9 @@ class Actions:
         if self._previewer is not None and (unless_key is None or unless_key != self._previewer.hold_key):
             self._previewer.end_hold(commit_steps)
 
-    def begin_agent_hold(self, gesture: Gesture, press_status) -> None:
-        """K5 reached its hold time: settle at once whether this hold stops, before its release is handled."""
-        self._agent_stopped = self._agent_hold_stops(gesture, press_status)
+    def begin_agent_hold(self) -> None:
+        """K5 reached its hold time: it stops (UC-015 BR-002), before its release is handled."""
+        self._agent_stopped = True
 
     def push_lock_led(self, locked: bool) -> None:
         """UC-016 BR-011: the Scroll Lock LED shows the pad's lock state (at every attach)."""
@@ -273,7 +264,7 @@ class Actions:
         self._show("confirm_state", gesture.key, False)  # A9: a later step clears the confirmation
         # UC-016 step 4: the setting screen, whatever `operator_pad.preview_enabled` says.
         self._show("layer_step", gesture.key, spec.option, press_status, gesture.steps, spec.lobby_only, plan)
-        if self._previewer is not None and spec.option not in (INTERVENTIONS, VOLUME_OPTION):  # no value voice (D6)
+        if self._previewer is not None and spec.option not in (AGENT_STATE, VOLUME_OPTION):  # no value voice (D6)
             self._previewer.step(gesture.key, spec.option, press_status, gesture.steps, spec.lobby_only)
         return plan
 
@@ -315,12 +306,12 @@ class Actions:
             return await self._tap(key, status, binding)
         if kind == AGENT_HOLD:
             self._agent_stopped = True
-            return "agent_switch", await self._agent_send("stop")
+            return "agent_switch", await self._agent_stop()
         if kind == HOLD:
             if key == K5:
-                return await self._agent_release(gesture, status)
+                return await self._agent_release()
             if key == K8:
-                return await self._end_or_start(status, press_status)
+                return await self._end_game(status)
             return "none", NOOP
         if kind == LAYER:
             span.set_attribute("pad.steps", gesture.steps)
@@ -343,7 +334,7 @@ class Actions:
             return "announce", MENU_UNAVAILABLE
         option = binding.spec.option
         if binding.role == EDIT:
-            if option == INTERVENTIONS:
+            if option == AGENT_STATE:
                 return await self._agent_tap(status)
             value = row_value(option, status)
             self._tap_screen = (label_of(option), short(option, value))
@@ -388,62 +379,38 @@ class Actions:
         return "announce", OK
 
     async def _start_game(self, status) -> tuple[str, str]:
+        """K8 tap (UC-015 step 2): the pad's one start, `force_start` with the menu's roster (BR-008)."""
         if status is None:
             await self._cues.failure()
             return "start_game", MENU_UNAVAILABLE
         if status.lifecycle_live:
-            await self._cues.refusal()  # A1: the pad refuses itself; the menu's A8 guard is the backstop
+            await self._cues.refusal()  # A1: the pad refuses itself; the menu's guard is the backstop
             return "start_game", REFUSED
-        return "start_game", await self._send({"command": "start_game"})
+        return "start_game", await self._send({"command": "force_start"})
 
     # --- K5: the agent (UC-016 A10, "always stop") ------------------------------------------
 
-    @staticmethod
-    def _agent_hold_stops(gesture: Gesture, press_status) -> bool:
-        """At the hold time: stop unless a clean hold of an agent read fully stopped at the press."""
-        if not gesture.clean or gesture.locked:
-            return True
-        return not (is_known(press_status) and agent_state(press_status) == AGENT_OFF)
-
-    async def _agent_release(self, gesture: Gesture, status) -> tuple[str, str]:
+    async def _agent_release(self) -> tuple[str, str]:
         """K5 released after its hold time; the stop at the hold time ends the gesture."""
         if self._agent_stopped:
             self._agent_stopped = False
             return "none", NOOP
-        if not gesture.clean or gesture.locked:
-            return "agent_switch", await self._agent_send("stop")
-        if not is_known(status):
-            return "agent_switch", await self._agent_send("stop")  # UC-015 A10 step 2
-        if agent_state(status) != AGENT_OFF:
-            await self._cues.cancel()  # UC-015 A10: no longer fully stopped; a resume intent only
-            return "agent_switch", CANCELLED
-        return "agent_switch", await self._agent_send("resume")
+        return "agent_switch", await self._agent_stop()
 
-    async def _agent_send(self, direction: str) -> str:
-        data = {"command": "agent_switch", "direction": direction}
-        if direction == "resume":
-            data["only_if_stopped"] = "1"  # the menu refuses (`stale`) an agent not fully stopped
-        return await self._send(data, deadline_seconds=AGENT_SWITCH_TIMEOUT_SECONDS)
+    async def _agent_stop(self) -> str:
+        return await self._send({"command": "agent_switch", "direction": "stop"})
 
-    # --- K8: end / force-start (UC-015 step 7, A5) -----------------------------------------
+    # --- K8: end (UC-015 step 7) -----------------------------------------------------------
 
-    async def _end_or_start(self, status, press_status) -> tuple[str, str]:
-        """K8 hold: cancel when the state changed between press and release."""
-        if status is None or press_status is None:
+    async def _end_game(self, status) -> tuple[str, str]:
+        """K8 hold: force-end a live game; in the lobby the tap is the start, so the hold is refused."""
+        if status is None:
             await self._cues.failure()
             return "force_end", MENU_UNAVAILABLE
-        if (
-            status.lifecycle_generation != press_status.lifecycle_generation
-            or status.lifecycle_live != press_status.lifecycle_live
-        ):
-            await self._cues.cancel()
-            return ("force_end" if press_status.lifecycle_live else "force_start"), CANCELLED
-        if status.lifecycle_live:
-            return "force_end", await self._force_end()
-        # The generation captured at the press, not the one read at release: the menu judges the whole hold.
-        return "force_start", await self._send(
-            {"command": "force_start", "expected_generation": str(press_status.lifecycle_generation)}
-        )
+        if not status.lifecycle_live:
+            await self._cues.refusal()
+            return "force_end", REFUSED
+        return "force_end", await self._force_end()
 
     # --- edit and reset (UC-016 A7 to A9, BR-012 to BR-014) ---------------------------------
 
@@ -480,7 +447,7 @@ class Actions:
                 return await self._refuse(action)
             if plan.new is None or plan.new == plan.now:
                 return action, NOOP
-            return action, await self._interventions_switch(plan.new, gesture.confirmed)
+            return action, await self._agent_state(plan.now, plan.new, gesture.confirmed)
         option = spec.option
         if option == "agent_level":
             plan = page_keys.edit_plan(spec, press_status, steps)
@@ -515,11 +482,12 @@ class Actions:
         }
         return await self._send(data)
 
-    async def _interventions_switch(self, state: str, confirmed: bool) -> str:
-        """The only builder of `interventions_switch`: `on` opens the write gate, a raise (BR-014)."""
-        if state == "on" and not confirmed:
+    async def _agent_state(self, now: str, state: str, confirmed: bool) -> str:
+        """The only builder of `agent_state`: a higher state (the resume, the gate opened) is a raise (BR-014)."""
+        raises = setting_ladders.AGENT_STATE_LADDER.index(state) > setting_ladders.AGENT_STATE_LADDER.index(now)
+        if raises and not confirmed:
             return await self._unconfirmed()
-        return await self._send({"command": SWITCH_COMMAND, "state": state}, expect_value=True)
+        return await self._send({"command": SWITCH_COMMAND, "state": state, "from": now}, expect_value=True)
 
     async def _reset(self, gesture: Gesture, status, press_status, binding) -> tuple[str, str]:
         """Reset release (A8, BR-013): one `reset_setting` with `expect`, the NEW the screen showed."""
@@ -720,13 +688,13 @@ class Actions:
             return self._row_label(binding)
         if gesture.kind in (AGENT_HOLD, HOLD) and gesture.key == K5:
             return None if self._agent_stopped else COMMAND_LABELS["agent_switch"]
-        if gesture.kind == HOLD and gesture.key == K8:
-            return COMMAND_LABELS["force_end" if status.lifecycle_live else "force_start"]
+        if gesture.kind == HOLD and gesture.key == K8 and status.lifecycle_live:
+            return COMMAND_LABELS["force_end"]
         if gesture.kind == TAP and gesture.key == K8 and not status.lifecycle_live:
             return COMMAND_LABELS["start_game"]
         return None
 
-    def _show_result(self, gesture: Gesture, press_status, binding, action: str, result: str, sent) -> None:
+    def _show_result(self, gesture: Gesture, binding, action: str, result: str, sent) -> None:
         """UC-016 step 5, A3: the result screen with the committed value or the UC-015 BR-009 word."""
         if gesture.kind == TRANSITION:
             self._show("result", "", TRANSITION_TEXT)
@@ -737,7 +705,7 @@ class Actions:
             elif result != OK:
                 self._show("result", self._tap_screen[0] if self._tap_screen else "", result_word(result))
             return
-        label = self._result_label(gesture, press_status, binding, action)
+        label = self._result_label(gesture, binding, action)
         if label is None or result in (NOOP, "pending") or (gesture.kind == KNOB_PRESS_GESTURE and result == OK):
             self._show("clear_pending")  # a mute shows on the volume screen; nothing else to show
             return
@@ -749,11 +717,10 @@ class Actions:
             text = result_word(result, up=up)
         self._show("result", label, text)
 
-    def _result_label(self, gesture: Gesture, press_status, binding, action: str) -> str | None:
+    def _result_label(self, gesture: Gesture, binding, action: str) -> str | None:
         if gesture.kind == CANCEL:
             if gesture.key == K8:
-                live = press_status is not None and press_status.lifecycle_live
-                return COMMAND_LABELS["force_end" if live else "force_start"]
+                return COMMAND_LABELS["force_end"]
             if gesture.key == K5:
                 return COMMAND_LABELS["agent_switch"]
             return self._row_label(binding)
@@ -773,7 +740,7 @@ class Actions:
         if action == "set_backend":
             option = "decision.backend"
         elif action == SWITCH_COMMAND:
-            option = INTERVENTIONS
+            option = AGENT_STATE
         else:
             option = data.get("option", "")
         return short(option, value)
@@ -826,7 +793,7 @@ class Actions:
             await self._cues.limit(up)  # "Maximum" stepping up, "Minimum" stepping down
         elif error == STALE:
             await self._cues.cancel()
-        # ok, flag_service_unavailable, failed, partial:<key>: the menu played the voice or the failure cue
+        # ok, flag_service_unavailable: the menu played the voice or the failure cue
 
     @staticmethod
     def _record(span, action: str, result: str) -> None:

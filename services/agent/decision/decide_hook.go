@@ -145,31 +145,25 @@ const (
 	AttrDecideConfidence = "decide.confidence"
 	// AttrDecideConfidenceMin is the minimum confidence over all answers.
 	AttrDecideConfidenceMin = "decide.confidence.min"
-	// AttrDecideActThreshold is the EFFECTIVE act threshold as read when the answer
-	// landed: the answering backend's own decision.<backend>.act_confidence_threshold
-	// when it has one (jev, #1287), else decision.act_confidence_threshold. Present
-	// only when the confidence router ran (outcome act or held): the rules path and
-	// rules fallbacks do not route by confidence.
+	// AttrDecideActThreshold is the answering backend's
+	// decision.<backend>.act_confidence_threshold as read when the answer landed
+	// (#1287). Present only when the confidence router ran (outcome act or held): the
+	// rules path and rules fallbacks do not route by confidence.
 	AttrDecideActThreshold = "decide.act_confidence_threshold"
-	// AttrDecideActThresholdSource names the flag AttrDecideActThreshold came from:
-	// "jev" (decision.jev.act_confidence_threshold) or "global"
-	// (decision.act_confidence_threshold). Present exactly when the threshold is.
-	AttrDecideActThresholdSource = "decide.act_confidence_threshold.source"
 	// AttrDecideLatencyMs is the backend call latency (ranking time for rules).
 	AttrDecideLatencyMs = "decide.latency_ms"
 	// AttrDecideOutcome is one of the DecideOutcome* values.
 	AttrDecideOutcome = "decide.outcome"
 	// AttrDecideRationale is the backend's one-line rationale, truncated.
 	AttrDecideRationale = "decide.rationale"
-	// AttrDecideInvalidReason names the cross-question inconsistency behind
-	// outcome=invalid.
-	AttrDecideInvalidReason = "decide.invalid_reason"
-	// AttrDecideDiscardedReason names why nothing acted although an answer exists:
-	// stale_context / game_ended / target_gone / target_stale (re-validation against the current
-	// context), kill_switch / backend_changed (live flags at landing) or shutdown.
-	// It accompanies outcome=discarded, and can also appear with outcome=fallback
-	// when the rules fallback itself found the game gone or ended.
+	// AttrDecideDiscardedReason names why nothing acted although the call returned:
+	// stale (re-validation against the current context failed), kill_switch /
+	// backend_changed (live flags at landing) or shutdown. It accompanies
+	// outcome=discarded.
 	AttrDecideDiscardedReason = "decide.discarded_reason"
+	// AttrDecideDiscardedDetail names the failed check of a stale discard
+	// (DiscardStaleContext .. DiscardStateTooOld).
+	AttrDecideDiscardedDetail = "decide.discarded_detail"
 	// AttrDecideBlocked / AttrDecideBlockReason (#1295) report what the permission
 	// chain did with the decision the answers describe (the cycle's first emitted
 	// decision): blocked true/false, and the BlockReason when blocked. Present
@@ -193,13 +187,10 @@ const (
 	DecideOutcomeHeld = "held"
 	// DecideOutcomeNoop: the backend chose noop; no action.
 	DecideOutcomeNoop = "noop"
-	// DecideOutcomeInvalid: the answers were individually valid but inconsistent
-	// across questions (e.g. noop with a target); no action.
-	DecideOutcomeInvalid = "invalid"
 	// DecideOutcomeFallback: the requested backend could not decide; rules did.
 	DecideOutcomeFallback = "fallback"
-	// DecideOutcomeDiscarded: a valid act answer that no longer fit the CURRENT
-	// context when it landed (game over, target gone); no action.
+	// DecideOutcomeDiscarded: an answer, or the rules fallback of a failed call,
+	// dropped when it landed (live flags, shutdown, or a stale context); no action.
 	DecideOutcomeDiscarded = "discarded"
 )
 
@@ -274,16 +265,13 @@ type decideRecord struct {
 	start, end     time.Time
 	outcome        string
 	threshold      float64
-	// thresholdSource is flags.ActThresholdSourceGlobal or the backend name whose
-	// own threshold flag applied (see flags.DecisionBackend.ActThreshold).
-	thresholdSource string
 	// routed is true when the confidence router ran (outcome act or held): only
 	// then is the gen_ai.evaluation.result event recorded.
 	routed          bool
 	confidence      float64
 	err             error
-	invalidReason   string
 	discardedReason string
+	discardedDetail string
 	// stateAt is the fire-time GameContext.UpdatedAt: when the state the request
 	// was built on last changed (#2123, decision.max_state_age_ms).
 	stateAt time.Time
@@ -302,6 +290,11 @@ type decideRecord struct {
 	predictionCtx  *gamecontext.GameContext
 	predictionsOff bool
 	predictionID   string
+}
+
+// discardStale records a failed re-validation against the current context.
+func (rec *decideRecord) discardStale(detail string) {
+	rec.outcome, rec.discardedReason, rec.discardedDetail = DecideOutcomeDiscarded, DiscardStale, detail
 }
 
 // notePermission records what the permission chain did with the first decision
@@ -412,7 +405,6 @@ func (l *Loop) rulesDecide(ctx context.Context, snapshot flags.Snapshot, rules R
 		start:          start,
 		end:            now(),
 		outcome:        DecideOutcomeAct,
-		threshold:      snapshot.Decision.ActConfidenceThreshold,
 		prediction:     resp.Prediction,
 		predictionCtx:  &c,
 		predictionsOff: snapshot.Decision.PredictionsOff,
@@ -715,8 +707,8 @@ const (
 )
 
 // runDecideRemote is the fired goroutine: call the backend under its timeout,
-// validate, re-read the LIVE flags, then route the answer (act / held / noop /
-// invalid) or fall back to rules for the CURRENT context. Everything is recorded
+// validate, re-read the LIVE flags, then route the answer (act / held / noop) or
+// fall back to rules for the CURRENT context. Everything is recorded
 // on one invoke_agent span.
 //
 // Every safety gate is evaluated against the flags as they are when the answer
@@ -776,10 +768,10 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 	// decision.goal_in_prompt, and only for claude or jev (jev's goal state
 	// and gate criterion, #2498); otherwise the request stays byte-identical.
 	rec.req.Goal = l.goalLines(root, fired, rec.used, c)
-	// Fire-time threshold: only a placeholder for spans that end before landing
-	// (none are routed then); the landing re-read below overwrites it with the
-	// LIVE effective threshold, which is what routing uses.
-	rec.threshold, rec.thresholdSource = fired.Decision.ActThreshold(rec.used)
+	// Fire-time threshold: jev's gate acts at it; the landing re-read below
+	// overwrites it with the LIVE threshold, which is what routing uses.
+	rec.threshold, _ = fired.Decision.ActThreshold(rec.used)
+	rec.req.ActThreshold = rec.threshold
 	defer func() {
 		l.endDecideSpan(span, rec, c)
 		if rec.discardedReason != "" {
@@ -841,10 +833,9 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 
 	// Re-read the LIVE flags: the safety gates apply as they are now.
 	live := l.Flags.Evaluate(root)
-	// The effective threshold for the answering backend, from the LIVE flags: a
-	// flip of decision.jev.act_confidence_threshold (or the global) mid-flight
+	// The answering backend's threshold from the LIVE flags: a flip mid-flight
 	// applies to the in-flight answer.
-	rec.threshold, rec.thresholdSource = live.Decision.ActThreshold(rec.used)
+	rec.threshold, _ = live.Decision.ActThreshold(rec.used)
 	rec.predictionsOff = live.Decision.PredictionsOff
 	if !live.Enabled {
 		rec.outcome, rec.discardedReason = DecideOutcomeDiscarded, DecideDiscardKillSwitch
@@ -886,11 +877,11 @@ func (l *Loop) decideRemoteFallback(ctx context.Context, snapshot flags.Snapshot
 	rec.resp = decide.Response{}
 	state.DecideBackend = RulesBackendName
 	if !ok {
-		rec.discardedReason = DiscardStaleContext
+		rec.discardStale(DiscardStaleContext)
 		return
 	}
 	if !gameActive(current) {
-		rec.discardedReason = DiscardGameEnded
+		rec.discardStale(DiscardGameEnded)
 		return
 	}
 	var decisions []Decision
@@ -917,22 +908,17 @@ func (l *Loop) decideRemoteFallback(ctx context.Context, snapshot flags.Snapshot
 }
 
 // decideRemoteApply maps a validated remote answer to a Decision and routes it by
-// confidence: at or above the effective act threshold (rec.threshold: the
-// backend's own decision.<backend>.act_confidence_threshold, else the global
-// decision.act_confidence_threshold) it goes through the
+// confidence: at or above the act threshold (rec.threshold: the backend's
+// decision.<backend>.act_confidence_threshold) it goes through the
 // normal permission chain (runDecision: allow-list, battery, rate limit) and the
 // action sink; below it is held.
 func (l *Loop) decideRemoteApply(ctx context.Context, snapshot flags.Snapshot, current gamecontext.GameContext, ok bool, rec *decideRecord, state *LayerState) {
 	state.DecideBackend = rec.used
-	d, outcome, invalidReason := mapAnswers(rec.req, rec.resp)
+	d, outcome := mapAnswers(rec.req, rec.resp)
 	if iv, found := rec.resp.Find(decide.QuestionFFAIntervention); found {
 		rec.confidence = iv.Confidence
 	}
-	switch outcome {
-	case DecideOutcomeInvalid:
-		rec.outcome, rec.invalidReason = DecideOutcomeInvalid, invalidReason
-		return
-	case DecideOutcomeNoop:
+	if outcome == DecideOutcomeNoop {
 		rec.outcome = DecideOutcomeNoop
 		l.noteNoopAnswer(current, rec.used)
 		return
@@ -952,25 +938,25 @@ func (l *Loop) decideRemoteApply(ctx context.Context, snapshot flags.Snapshot, c
 	rec.outcome = DecideOutcomeAct
 	switch {
 	case !ok:
-		rec.outcome, rec.discardedReason = DecideOutcomeDiscarded, DiscardStaleContext
+		rec.discardStale(DiscardStaleContext)
 		return
 	case !gameActive(current):
-		rec.outcome, rec.discardedReason = DecideOutcomeDiscarded, DiscardGameEnded
+		rec.discardStale(DiscardGameEnded)
 		return
 	case d.TargetSerial != "" && !targetPresent(current, d.TargetSerial):
-		rec.outcome, rec.discardedReason = DecideOutcomeDiscarded, DiscardTargetGone
+		rec.discardStale(DiscardTargetGone)
 		return
 	case len(d.TargetSerials) > 0 && !groupPresent(current, d.TargetSerials):
 		// A group shield is all or nothing (#2467, A48): one target gone drops it.
-		rec.outcome, rec.discardedReason = DecideOutcomeDiscarded, DiscardTargetGone
+		rec.discardStale(DiscardTargetGone)
 		return
 	case decide.NeedsFreshReadings(d.Intervention) && !decide.TargetReadingsFresh(current, d.TargetSerial):
 		// #2514: a lever whose rule needs fresh readings (R3, R4, R8) is not
 		// applied to a player whose readings are stale now (UC-040 BR-039).
-		rec.outcome, rec.discardedReason = DecideOutcomeDiscarded, DiscardTargetStale
+		rec.discardStale(DiscardTargetStale)
 		return
 	case stateTooOld(rec.stateAt, rec.end, snapshot.Decision.MaxStateAge):
-		rec.outcome, rec.discardedReason = DecideOutcomeDiscarded, DiscardStateTooOld
+		rec.discardStale(DiscardStateTooOld)
 		return
 	}
 	before := len(state.Outcomes)
@@ -999,63 +985,31 @@ func stateTooOld(stateAt, landed time.Time, maxAge time.Duration) bool {
 // Every other intervention is session-scoped and takes target "none".
 var playerTargetedInterventions = decide.Set(func(iv decide.Intervention) bool { return iv.PlayerTargeted })
 
-// Cross-question inconsistencies (decide.invalid_reason).
-const (
-	invalidNoopWithTarget          = "noop_with_target"
-	invalidPlayerTargetMissing     = "player_intervention_without_target"
-	invalidSessionTargetedAtPlayer = "session_intervention_with_target"
-	invalidMissingIntervention     = "missing_intervention_answer"
-	// #2467 (UC-040 A47): a group lever without a group option of the request's
-	// alive players, and a group option on any other intervention.
-	invalidGroupWithoutGroup    = "group_intervention_without_group"
-	invalidGroupTargetForSingle = "group_target_for_single_intervention"
-)
-
 // mapAnswers turns a VALIDATED FFA response into a Decision: ffa.intervention is
 // the intervention, ffa.target the TargetSerial ("none" -> session-scoped), and
 // ffa.magnitude resolves through decide.ResolveMagnitude into Decision.Value (left
 // empty for interventions without numeric bounds, so the writer default applies).
-// Reason is the truncated rationale. It returns outcome noop for a consistent noop,
-// invalid (with the reason) for cross-question inconsistencies, and act otherwise —
-// confidence routing is the caller's job.
+// Reason is the truncated rationale. It returns outcome noop for noop and act
+// otherwise; decide.Validate already rejected inconsistent answers, and confidence
+// routing is the caller's job.
 //
 // A group lever (decide.GroupTargeted) takes a group option, resolved against the
 // request's alive players into Decision.TargetSerials (#2467, UC-040 A47); req is
 // the request the answers belong to.
-func mapAnswers(req decide.Request, resp decide.Response) (Decision, string, string) {
-	iv, ok := resp.Find(decide.QuestionFFAIntervention)
-	if !ok {
-		return Decision{}, DecideOutcomeInvalid, invalidMissingIntervention
+func mapAnswers(req decide.Request, resp decide.Response) (Decision, string) {
+	iv, _ := resp.Find(decide.QuestionFFAIntervention)
+	if iv.Choice == decide.OptionNoop || iv.Choice == "" {
+		return Decision{}, DecideOutcomeNoop
 	}
 	target := decide.TargetNone
 	if t, ok := resp.Find(decide.QuestionFFATarget); ok {
 		target = t.Choice
 	}
-	if iv.Choice == decide.OptionNoop {
-		if target != decide.TargetNone {
-			return Decision{}, DecideOutcomeInvalid, invalidNoopWithTarget
-		}
-		return Decision{}, DecideOutcomeNoop, ""
-	}
-	groupScoped := decide.GroupTargeted(iv.Choice)
 	var group []string
-	switch {
-	case groupScoped:
-		serials, ok := decide.ResolveGroupTarget(target, req.State.AliveSerials())
-		if !ok {
-			return Decision{}, DecideOutcomeInvalid, invalidGroupWithoutGroup
-		}
-		group = serials
-	case decide.IsGroupTarget(target):
-		return Decision{}, DecideOutcomeInvalid, invalidGroupTargetForSingle
+	if decide.GroupTargeted(iv.Choice) {
+		group, _ = decide.ResolveGroupTarget(target, req.State.AliveSerials())
 	}
 	playerScoped := playerTargetedInterventions[iv.Choice]
-	switch {
-	case playerScoped && target == decide.TargetNone:
-		return Decision{}, DecideOutcomeInvalid, invalidPlayerTargetMissing
-	case !playerScoped && !groupScoped && target != decide.TargetNone:
-		return Decision{}, DecideOutcomeInvalid, invalidSessionTargetedAtPlayer
-	}
 	d := Decision{Intervention: iv.Choice, Reason: truncateRationale(resp.Rationale), TargetSerials: group}
 	if playerScoped {
 		d.TargetSerial = target
@@ -1069,7 +1023,7 @@ func mapAnswers(req decide.Request, resp decide.Response) (Decision, string, str
 			d.Value = strconv.FormatFloat(v, 'g', -1, 64)
 		}
 	}
-	return d, DecideOutcomeAct, ""
+	return d, DecideOutcomeAct
 }
 
 // truncateRationale makes untrusted model text safe for a span attribute and a
@@ -1130,9 +1084,7 @@ func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecon
 	}
 	signalEvent(span, rec.trig)
 	if rec.routed {
-		attrs = append(attrs,
-			attribute.Float64(AttrDecideActThreshold, rec.threshold),
-			attribute.String(AttrDecideActThresholdSource, rec.thresholdSource))
+		attrs = append(attrs, attribute.Float64(AttrDecideActThreshold, rec.threshold))
 	}
 	if rec.model != "" {
 		attrs = append(attrs, semconv.GenAIRequestModel(rec.model))
@@ -1148,11 +1100,11 @@ func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecon
 			attribute.String(AttrDecideRationale, truncateRationale(rec.resp.Rationale)),
 		)
 	}
-	if rec.invalidReason != "" {
-		attrs = append(attrs, attribute.String(AttrDecideInvalidReason, rec.invalidReason))
-	}
 	if rec.discardedReason != "" {
 		attrs = append(attrs, attribute.String(AttrDecideDiscardedReason, rec.discardedReason))
+	}
+	if rec.discardedDetail != "" {
+		attrs = append(attrs, attribute.String(AttrDecideDiscardedDetail, rec.discardedDetail))
 	}
 	if rec.permissionKnown {
 		attrs = append(attrs, attribute.Bool(AttrDecideBlocked, rec.blocked))
@@ -1186,7 +1138,7 @@ func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecon
 			semconv.GenAIEvaluationScoreValue(rec.confidence),
 			semconv.GenAIEvaluationScoreLabel(label),
 			semconv.GenAIEvaluationExplanation("confidence "+fmtFloat(rec.confidence)+" "+cmp+
-				" threshold "+fmtFloat(rec.threshold)+" ("+thresholdFlag(rec.thresholdSource)+")"),
+				" threshold "+fmtFloat(rec.threshold)+" (decision."+rec.used+".act_confidence_threshold)"),
 		))
 	}
 }
@@ -1279,15 +1231,6 @@ func minConfidence(answers []decide.Answer) float64 {
 		}
 	}
 	return m
-}
-
-// thresholdFlag is the flag key an act-threshold source names, for the
-// gen_ai.evaluation.result explanation.
-func thresholdFlag(source string) string {
-	if source == "" || source == flags.ActThresholdSourceGlobal {
-		return "decision.act_confidence_threshold"
-	}
-	return "decision." + source + ".act_confidence_threshold"
 }
 
 func fmtFloat(v float64) string { return strconv.FormatFloat(v, 'f', 3, 64) }

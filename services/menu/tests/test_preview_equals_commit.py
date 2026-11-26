@@ -141,11 +141,10 @@ DEFAULTS = {
 }
 
 
-def reset(flags: FlagFileService, menu) -> None:
-    """Every flag at its flag-file default, no saved agent level."""
+def reset(flags: FlagFileService) -> None:
+    """Every flag at its flag-file default."""
     flags.values = dict(DEFAULTS)
     flags.admin = {}
-    menu.settings_ops.saved_agent_level = None
 
 
 async def assert_preview_equals_commit(menu, option: str, steps: int, committed) -> None:
@@ -194,7 +193,7 @@ async def test_flag_ladders_preview_equals_commit(menu, flags, option):
     assert set(VARIANTS[key]) == set(setting_ladders.FLAG_LADDERS[option]), "ladder differs from the flag file"
     for start in VARIANTS[key]:
         for steps in wheel_steps(len(VARIANTS[key])):
-            reset(flags, menu)
+            reset(flags)
             flags.values[key] = start
             await assert_preview_equals_commit(menu, option, steps, lambda: flags.values[key])
 
@@ -206,35 +205,28 @@ async def test_mode_ladder_preview_equals_commit(menu, flags):
     assert menu.get_game_options() == setting_ladders.MODE_LADDER
     for start in setting_ladders.MODE_LADDER:
         for steps in wheel_steps(len(setting_ladders.MODE_LADDER)):
-            reset(flags, menu)
+            reset(flags)
             await menu.select_game_mode(start, source="test")
             await assert_preview_equals_commit(menu, "current_game", steps, lambda: menu.current_selection.name)
 
 
+# (enabled, level): the live level moves whatever `enabled` is (UC-015 BR-004), at every rung and off the ladder.
 AGENT_LEVEL_STARTS = [
-    # (enabled, level, saved level): running at every rung and off the ladder (probe), and stopped
-    # by the kill switch or by level none, with and without a saved level (BR-002, BR-003).
-    *[("on", level, None) for level in ("none", "ambient", "standard", "full", "probe")],
-    *[("off", level, saved) for level in ("none", "standard") for saved in (None, "ambient", "standard", "full")],
-    *[("on", "none", saved) for saved in ("ambient", "full")],
+    (enabled, level) for enabled in ("on", "off") for level in ("none", "ambient", "standard", "full", "probe")
 ]
 
 
-@pytest.mark.uc("UC-015", br=["BR-002", "BR-003", "BR-004"], flow="A7")
+@pytest.mark.uc("UC-015", br=["BR-004"], flow="A7")
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("enabled", "level", "saved"), AGENT_LEVEL_STARTS)
-async def test_agent_level_preview_equals_commit(menu, flags, enabled, level, saved):
+@pytest.mark.parametrize(("enabled", "level"), AGENT_LEVEL_STARTS)
+async def test_agent_level_preview_equals_commit(menu, flags, enabled, level):
     def committed():
-        live = flags.values[("agent", "interventions_allowed")]
-        if enabled == "on" and level != "none":
-            return live
-        return menu.settings_ops.saved_agent_level or setting_ladders.AGENT_RESUME_FALLBACK_LEVEL
+        return flags.values[("agent", "interventions_allowed")]
 
     for steps in wheel_steps(len(setting_ladders.AGENT_POLICY_LEVELS)):
-        reset(flags, menu)
+        reset(flags)
         flags.values[("agent", "enabled")] = enabled
         flags.values[("agent", "interventions_allowed")] = level
-        menu.settings_ops.saved_agent_level = saved
         await assert_preview_equals_commit(menu, "agent_level", steps, committed)
 
 
@@ -254,7 +246,7 @@ async def test_shield_knob_preview_equals_commit(menu, flags):
     starts += [(operator, operator) for operator in setting_ladders.SHIELD_ACTIVATION_LADDER]
     for operator, effective in starts:
         for steps in wheel_steps(len(setting_ladders.SHIELD_KNOB_LADDER)):
-            reset(flags, menu)
+            reset(flags)
             flags.values[key] = effective  # no operator value: a flag-file default or a promotion
             if operator is not None:
                 flags.admin[key] = operator
@@ -290,7 +282,7 @@ async def test_agent_row_preview_equals_commit(menu, flags, option):
         starts = ladder
     for start in starts:
         for steps in wheel_steps(len(ladder)):
-            reset(flags, menu)
+            reset(flags)
             flags.values[key] = start
             await menu.settings_ops.refresh_operator_settings()  # the brief's status field is the background read
             await assert_preview_equals_commit(menu, option, steps, lambda: row_canonical(flags, option))
@@ -323,7 +315,7 @@ async def test_automatic_knob_preview_equals_commit(menu, flags, option):
 
     for start in setting_ladders.KNOB_LADDERS[option]:
         for steps in wheel_steps(len(setting_ladders.KNOB_LADDERS[option])):
-            reset(flags, menu)
+            reset(flags)
             if start != setting_ladders.AUTOMATIC:
                 flags.values[key] = flags.admin[key] = start
             await menu.settings_ops.refresh_operator_settings()  # what GetMenuStatus serves (background read)

@@ -93,7 +93,7 @@ def test_v3_home_page_frame():
     [
         (status(), PageContext(internet=NET_DOWN), "  FFA 3/5", ICON_AGENT + ICON_INSTRUCTIONS + "  "),
         (
-            status(agent_level="none", instructions=False, selection="NonStop"),
+            status(agent_enabled=False, agent_enabled_state="off", instructions=False, selection="NonStop"),
             PageContext(internet=NET_UNKNOWN, locked=True),
             "  NSTOP 3/5",
             "   " + ICON_LOCK,  # a stopped agent: no icon
@@ -208,7 +208,6 @@ def test_planned_fields_show_values_only_as_non_empty_strings():
                 "agent_level",
                 "agent_enabled",
                 "agent_backend",
-                "agent_saved_level",
             )
         },
         agent_objectives="balanced_focused",
@@ -375,11 +374,11 @@ def test_result_screen_label_in_title_and_word_in_row_two():
 def _statuses():
     """Every kind of value a status can carry, the unknown and out-of-ladder ones included."""
     yield None
-    for selection, backend, level, saved, enabled, operator in itertools.product(
+    for selection, backend, level, gate, enabled, operator in itertools.product(
         ("JoustFFA", "NonStop", "Commander", ""),
         ("rules", "jev", "", "gpt"),
         ("none", "full", "", "probe"),
-        ("", "standard"),
+        ("on", "off"),
         ("on", "off", "unknown"),
         (
             {},
@@ -391,13 +390,13 @@ def _statuses():
             selection=selection,
             agent_backend=backend,
             agent_level=level,
-            agent_saved_level=saved,
+            agent_interventions_enabled_state=gate,
             agent_enabled_state=enabled,
             operator_settings=operator,
             sensitivity=(len(selection) % 7) - 1,
             num_teams=len(backend) + 1,
             audio_volume_master=("", "mute", "max", "x")[len(level) % 4],
-            shield_activation=("hold", "", "weird")[len(saved) % 3],
+            shield_activation=("hold", "", "weird")[len(enabled) % 3],
         )
 
 

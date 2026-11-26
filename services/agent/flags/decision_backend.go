@@ -22,18 +22,20 @@ import (
 // numeric flag read via ObjectValue silently TYPE_MISMATCHes to its default
 // (#903/#1127).
 const (
-	keyDecisionBackend                   = "decision.backend"
-	keyDecisionActConfidenceThreshold    = "decision.act_confidence_threshold"
-	keyDecisionCaptureContent            = "decision.capture_content"
-	keyDecisionMinIntervalMs             = "decision.min_interval_ms"
-	keyDecisionMinGapAfterAnswerMs       = "decision.min_gap_after_answer_ms"
-	keyDecisionMaxStateAgeMs             = "decision.max_state_age_ms"
-	keyDecisionPredictionsEnabled        = "decision.predictions_enabled"
-	keyDecisionPredictionsAskModel       = "decision.predictions.ask_model"
-	keyDecisionGoalInPrompt              = "decision.goal_in_prompt"
-	keyDecisionClaudeModel               = "decision.claude.model"
-	keyDecisionClaudeTimeoutMs           = "decision.claude.timeout_ms"
-	keyDecisionClaudeBaseURL             = "decision.claude.base_url"
+	keyDecisionBackend = "decision.backend"
+
+	keyDecisionCaptureContent               = "decision.capture_content"
+	keyDecisionMinIntervalMs                = "decision.min_interval_ms"
+	keyDecisionMinGapAfterAnswerMs          = "decision.min_gap_after_answer_ms"
+	keyDecisionMaxStateAgeMs                = "decision.max_state_age_ms"
+	keyDecisionPredictionsEnabled           = "decision.predictions_enabled"
+	keyDecisionPredictionsAskModel          = "decision.predictions.ask_model"
+	keyDecisionGoalInPrompt                 = "decision.goal_in_prompt"
+	keyDecisionClaudeModel                  = "decision.claude.model"
+	keyDecisionClaudeTimeoutMs              = "decision.claude.timeout_ms"
+	keyDecisionClaudeBaseURL                = "decision.claude.base_url"
+	keyDecisionClaudeActConfidenceThreshold = "decision.claude.act_confidence_threshold"
+
 	keyDecisionJevBaseURL                = "decision.jev.base_url"
 	keyDecisionJevModel                  = "decision.jev.model"
 	keyDecisionJevTimeoutMs              = "decision.jev.timeout_ms"
@@ -54,18 +56,15 @@ const (
 	// DefaultDecisionBackend is the deterministic rules engine: the floor every
 	// other backend falls back to. A down control plane never calls a remote model.
 	DefaultDecisionBackend = DecisionBackendRules
-	// DefaultDecisionActConfidenceThreshold is the confidence at or above which a
-	// remote answer is acted on; below it the answer is held (no action).
-	DefaultDecisionActConfidenceThreshold = 0.8
-	// DefaultDecisionJevActConfidenceThreshold is the jev backend's own act
-	// threshold (decision.jev.act_confidence_threshold, variant "gate", #1287).
-	// Jev's confidence is the calibrated gate p_yes (calm ~0.16, dragging ~0.35,
-	// collapsing ~0.68, near-threshold ~0.72), not a self-report, so it acts at
-	// 0.6 out of the box while claude keeps the global 0.8.
+	// DefaultDecisionClaudeActConfidenceThreshold is decision.claude.act_confidence_threshold:
+	// the confidence at or above which a claude answer is acted on; below it the
+	// answer is held (no action).
+	DefaultDecisionClaudeActConfidenceThreshold = 0.8
+	// DefaultDecisionJevActConfidenceThreshold is decision.jev.act_confidence_threshold
+	// (variant "gate", #1287). Jev's confidence is the calibrated gate p_yes (calm
+	// ~0.16, dragging ~0.35, collapsing ~0.68, near-threshold ~0.72), not a
+	// self-report, so it acts at 0.6 while claude needs 0.8.
 	DefaultDecisionJevActConfidenceThreshold = 0.6
-	// ActConfidenceThresholdInherit is the "inherit" variant of a per-backend act
-	// threshold: the backend uses decision.act_confidence_threshold.
-	ActConfidenceThresholdInherit = -1.0
 	// DefaultDecisionCaptureContent is off: GenAI content capture (prompts,
 	// completions, rationale as message parts) is opt-in per the GenAI semconv.
 	DefaultDecisionCaptureContent = false
@@ -94,7 +93,7 @@ const (
 	// Zero disables the gap.
 	DefaultDecisionMinGapAfterAnswerMs = 1000
 	// DefaultDecisionMaxStateAgeMs is decision.max_state_age_ms (#2123): a remote
-	// answer that would act is discarded (decide.discarded_reason=state_too_old)
+	// answer that would act is discarded (decide.discarded_reason=stale, detail state_too_old)
 	// when the game state it was built on (the fire-time GameContext.UpdatedAt) is
 	// older than this when the answer lands. 10 s sits above the longest call
 	// timeout (claude "patient", 8 s) plus the coordinator's metric export
@@ -147,17 +146,10 @@ type RemoteBackendConfig struct {
 	Model string
 	// Timeout bounds one decide call. Always positive.
 	Timeout time.Duration
-	// ActConfidenceThreshold is the backend's own act threshold
-	// (decision.<backend>.act_confidence_threshold, in [0,1]); it applies only
-	// when HasActConfidenceThreshold is true, otherwise the backend inherits
-	// decision.act_confidence_threshold. Only jev has the flag (#1287); the zero
-	// value (claude, hand-built test snapshots) inherits.
+	// ActConfidenceThreshold is decision.<backend>.act_confidence_threshold, in
+	// [0,1]: the backend's answers act at or above it (#1287). Hand-built test
+	// snapshots leave it 0, so every answer acts.
 	ActConfidenceThreshold float64
-	// HasActConfidenceThreshold reports whether ActConfidenceThreshold applies:
-	// true when the backend's own flag resolved to a value in [0,1], false for
-	// the "inherit" sentinel, an out-of-range value or a backend without the flag
-	// (then DecisionBackend.ActThreshold returns the global threshold).
-	HasActConfidenceThreshold bool
 	// MaxRequestsPerMinute is the backend's own per-minute decide cap
 	// (decision.<backend>.max_requests_per_minute, #2519). It applies only when
 	// HasMaxRequestsPerMinute is true and only tightens the global
@@ -176,8 +168,7 @@ type DecisionBackend struct {
 	// empty falls back to rules). Unknown names are kept verbatim so the decide
 	// span can record what was requested; the registry maps them to rules.
 	Backend string
-	// ActConfidenceThreshold is decision.act_confidence_threshold, in [0,1].
-	ActConfidenceThreshold float64
+
 	// CaptureContent is decision.capture_content (GenAI content capture opt-in).
 	CaptureContent bool
 	// MinInterval is decision.min_interval_ms: the per-game cadence of remote
@@ -229,21 +220,11 @@ func (d DecisionBackend) Remote(name string) (RemoteBackendConfig, bool) {
 	return RemoteBackendConfig{}, false
 }
 
-// Act-threshold sources (decide.act_confidence_threshold.source): the global
-// decision.act_confidence_threshold, or the answering backend's own flag (the
-// backend name, e.g. "jev").
-const ActThresholdSourceGlobal = "global"
-
-// ActThreshold returns the act-confidence threshold that applies to an answer from
-// the named backend, and where it came from: the backend's own
-// decision.<backend>.act_confidence_threshold when it has one (source = the
-// backend name), else the global decision.act_confidence_threshold (source
-// "global"). Rules and unknown names always get the global.
-func (d DecisionBackend) ActThreshold(backend string) (float64, string) {
-	if cfg, ok := d.Remote(backend); ok && cfg.HasActConfidenceThreshold {
-		return cfg.ActConfidenceThreshold, backend
-	}
-	return d.ActConfidenceThreshold, ActThresholdSourceGlobal
+// ActThreshold returns decision.<backend>.act_confidence_threshold of the named
+// remote backend, and false for rules or an unknown name (never routed).
+func (d DecisionBackend) ActThreshold(backend string) (float64, bool) {
+	cfg, ok := d.Remote(backend)
+	return cfg.ActConfidenceThreshold, ok
 }
 
 // DecisionBackend resolves the decision-backend flag group. Evaluate calls it every
@@ -253,28 +234,29 @@ func (d DecisionBackend) ActThreshold(backend string) (float64, string) {
 // make every answer actionable).
 func (f *Flags) DecisionBackend(ctx context.Context) DecisionBackend {
 	d := DecisionBackend{
-		Backend:                normalizeBackendName(f.stringFlag(ctx, keyDecisionBackend, DefaultDecisionBackend)),
-		ActConfidenceThreshold: f.actConfidenceThreshold(ctx),
-		CaptureContent:         f.boolFlag(ctx, keyDecisionCaptureContent, DefaultDecisionCaptureContent),
-		MinInterval:            f.minIntervalFlag(ctx),
-		MinGapAfterAnswer:      f.nonNegativeMsFlag(ctx, keyDecisionMinGapAfterAnswerMs, DefaultDecisionMinGapAfterAnswerMs),
-		MaxStateAge:            f.nonNegativeMsFlag(ctx, keyDecisionMaxStateAgeMs, DefaultDecisionMaxStateAgeMs),
-		PredictionsOff:         !f.boolFlag(ctx, keyDecisionPredictionsEnabled, true),
-		PredictionsAskModel:    f.boolFlag(ctx, keyDecisionPredictionsAskModel, false),
-		GoalInPrompt:           f.boolFlag(ctx, keyDecisionGoalInPrompt, false),
+		Backend:             normalizeBackendName(f.stringFlag(ctx, keyDecisionBackend, DefaultDecisionBackend)),
+		CaptureContent:      f.boolFlag(ctx, keyDecisionCaptureContent, DefaultDecisionCaptureContent),
+		MinInterval:         f.minIntervalFlag(ctx),
+		MinGapAfterAnswer:   f.nonNegativeMsFlag(ctx, keyDecisionMinGapAfterAnswerMs, DefaultDecisionMinGapAfterAnswerMs),
+		MaxStateAge:         f.nonNegativeMsFlag(ctx, keyDecisionMaxStateAgeMs, DefaultDecisionMaxStateAgeMs),
+		PredictionsOff:      !f.boolFlag(ctx, keyDecisionPredictionsEnabled, true),
+		PredictionsAskModel: f.boolFlag(ctx, keyDecisionPredictionsAskModel, false),
+		GoalInPrompt:        f.boolFlag(ctx, keyDecisionGoalInPrompt, false),
 		Claude: RemoteBackendConfig{
 			BaseURL: f.stringFlag(ctx, keyDecisionClaudeBaseURL, DefaultDecisionClaudeBaseURL),
 			Model:   f.stringFlag(ctx, keyDecisionClaudeModel, DefaultDecisionClaudeModel),
 			Timeout: f.timeoutMsFlag(ctx, keyDecisionClaudeTimeoutMs, DefaultDecisionClaudeTimeoutMs),
+			ActConfidenceThreshold: f.actConfidenceThreshold(ctx, keyDecisionClaudeActConfidenceThreshold,
+				DefaultDecisionClaudeActConfidenceThreshold),
 		},
 		Jev: RemoteBackendConfig{
 			BaseURL: f.stringFlag(ctx, keyDecisionJevBaseURL, DefaultDecisionJevBaseURL),
 			Model:   f.stringFlag(ctx, keyDecisionJevModel, DefaultDecisionJevModel),
 			Timeout: f.timeoutMsFlag(ctx, keyDecisionJevTimeoutMs, DefaultDecisionTimeoutMs),
+			ActConfidenceThreshold: f.actConfidenceThreshold(ctx, keyDecisionJevActConfidenceThreshold,
+				DefaultDecisionJevActConfidenceThreshold),
 		},
 	}
-	d.Jev.ActConfidenceThreshold, d.Jev.HasActConfidenceThreshold = f.backendActConfidenceThreshold(
-		ctx, keyDecisionJevActConfidenceThreshold, DefaultDecisionJevActConfidenceThreshold)
 	d.Claude.MaxRequestsPerMinute, d.Claude.HasMaxRequestsPerMinute = f.backendMaxRequestsPerMinute(
 		ctx, keyDecisionClaudeMaxRequestsPerMin, DefaultDecisionClaudeMaxRequestsPerMinute)
 	return d
@@ -288,32 +270,15 @@ func normalizeBackendName(v string) string {
 	return v
 }
 
-func (f *Flags) actConfidenceThreshold(ctx context.Context) float64 {
-	v := f.floatFlag(ctx, keyDecisionActConfidenceThreshold, DefaultDecisionActConfidenceThreshold)
+// actConfidenceThreshold reads one backend's act threshold. NaN or a value outside
+// [0,1] gives def (logged): a bad edit must never make every answer actionable.
+func (f *Flags) actConfidenceThreshold(ctx context.Context, key string, def float64) float64 {
+	v := f.floatFlag(ctx, key, def)
 	if math.IsNaN(v) || v < 0 || v > 1 {
-		f.log.Warn("flags threshold outside [0,1], using default",
-			"key", keyDecisionActConfidenceThreshold, "value", v, "default", DefaultDecisionActConfidenceThreshold)
-		return DefaultDecisionActConfidenceThreshold
+		f.log.Warn("flags threshold outside [0,1], using default", "key", key, "value", v, "default", def)
+		return def
 	}
 	return v
-}
-
-// backendActConfidenceThreshold reads a per-backend act threshold. The "inherit"
-// sentinel (ActConfidenceThresholdInherit) returns has=false: the backend uses the
-// global flag. NaN or a value outside [0,1] also inherits the global (logged): a
-// bad edit must never make every answer of one backend actionable. An evaluation
-// error (flagd down, flag undefined) yields def, mirroring the defaultVariant.
-func (f *Flags) backendActConfidenceThreshold(ctx context.Context, key string, def float64) (float64, bool) {
-	v := f.floatFlag(ctx, key, def)
-	if v == ActConfidenceThresholdInherit {
-		return 0, false
-	}
-	if math.IsNaN(v) || v < 0 || v > 1 {
-		f.log.Warn("flags threshold outside [0,1], inheriting decision.act_confidence_threshold",
-			"key", key, "value", v)
-		return 0, false
-	}
-	return v, true
 }
 
 // backendMaxRequestsPerMinute reads a per-backend decide cap (#2519). The

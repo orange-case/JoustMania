@@ -251,10 +251,9 @@ func TestRegisterPrediction_ActedOnly(t *testing.T) {
 		{"UC-040/A44 blocked act registers nothing", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true, blocked: true}, false},
 		{"UC-040/A44 gated-off act registers nothing", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true}, false},
 		{"UC-040/A44 held registers nothing", decideRecord{outcome: DecideOutcomeHeld}, false},
-		{"UC-040/A44 discarded target_gone registers nothing", decideRecord{outcome: DecideOutcomeDiscarded, discardedReason: DiscardTargetGone}, false},
+		{"UC-040/A44 discarded stale registers nothing", decideRecord{outcome: DecideOutcomeDiscarded, discardedReason: DiscardStale, discardedDetail: DiscardTargetGone}, false},
 		{"UC-040/A44 applied rules fallback registers", decideRecord{outcome: DecideOutcomeFallback, permissionKnown: true, applied: true}, true},
 		{"UC-040/A44 noop registers nothing", decideRecord{outcome: DecideOutcomeNoop}, false},
-		{"UC-040/A44 invalid registers nothing", decideRecord{outcome: DecideOutcomeInvalid}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := testBook(t, &clock)

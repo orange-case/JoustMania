@@ -430,13 +430,14 @@ else:
     print(f"PASS  decision.jev.base_url = {shown(jev_url)}; blackhole variant present")
 
 # Variants the beats flip to must exist: agent-backend.sh refuses an undeclared one on stage (#743).
-jev_threshold = flags.get("decision.jev.act_confidence_threshold", {}).get("variants", {})
-missing_threshold = [v for v in ("strict", "gate") if v not in jev_threshold]
+# The threshold beat (4a) runs on Claude: Jev's gate would only answer noop under strict.
+claude_threshold = flags.get("decision.claude.act_confidence_threshold", {}).get("variants", {})
+missing_threshold = [v for v in ("strict", "default") if v not in claude_threshold]
 if missing_threshold:
-    print(f"FAIL  decision.jev.act_confidence_threshold has no {'/'.join(missing_threshold)} variant: "
-          "the threshold beat (3a) cannot run (restore services/flagd/agent.json from git, restart the flag service)")
+    print(f"FAIL  decision.claude.act_confidence_threshold has no {'/'.join(missing_threshold)} variant: "
+          "the threshold beat (4a) cannot run (restore services/flagd/agent.json from git, restart the flag service)")
 else:
-    print("PASS  decision.jev.act_confidence_threshold has the strict and gate variants")
+    print("PASS  decision.claude.act_confidence_threshold has the strict and default variants")
 if "patient" not in flags.get("decision.claude.timeout_ms", {}).get("variants", {}):
     print("WARN  decision.claude.timeout_ms has no patient variant: the Claude timeout recovery (UC-070 BR-003) "
           "cannot be flipped")

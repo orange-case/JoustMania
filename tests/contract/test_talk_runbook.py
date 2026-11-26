@@ -28,7 +28,7 @@ FLAGD_DIR = REPO_ROOT / "services" / "flagd"
 FLAGS_SPEC = REPO_ROOT / "docs" / "specs" / "flags.md"
 
 # Beats the talk cannot run without; extra beats (6c, ...) are allowed.
-REQUIRED_BEAT_IDS = {"1", "2", "3a", "3b", "4", "5", "6", "7", "8"}
+REQUIRED_BEAT_IDS = {"1", "2", "3b", "4", "4a", "5", "6", "7", "8"}
 REQUIRED_SECTIONS = [
     "Setup",
     "Talk timing",
@@ -154,7 +154,7 @@ def test_every_flag_key_in_the_beat_table_exists():
             key = token.split("=")[0].strip()
             if re.fullmatch(r"[a-z][a-z0-9_]*(\.[a-z0-9_]+)*", key):
                 named.add(key)
-    assert {"decision.backend", "decision.jev.act_confidence_threshold"} <= named
+    assert {"decision.backend", "decision.claude.act_confidence_threshold"} <= named
     missing = sorted(k for k in named if k not in known and f"`{k}`" not in spec)
     assert not missing, f"runbook names flags that do not exist: {missing}"
 

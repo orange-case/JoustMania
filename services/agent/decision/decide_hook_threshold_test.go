@@ -7,13 +7,14 @@ import (
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
+	"github.com/joustmania/agent/decide"
 	"github.com/joustmania/agent/flags"
 )
 
-// Per-backend act-confidence threshold (#1287): Jev's confidence is the calibrated
-// gate p_yes, so jev answers are routed against decision.jev.act_confidence_threshold
-// (default 0.6) while claude keeps the global decision.act_confidence_threshold
-// (default 0.8). These tests use the flag defaults unless they say otherwise.
+// Per-backend act-confidence threshold (#1287): one flag per backend,
+// decision.<backend>.act_confidence_threshold (jev 0.6: its confidence is the
+// calibrated gate p_yes; claude 0.8), no shared or inherited one. These tests use
+// the flag defaults unless they say otherwise.
 // Spec: decide-contract.md §5 and §12, UC-040 step 9 and A13, FR-047.
 
 // nearThresholdConfidence is the Jev gate's p_yes for a near-threshold state.
@@ -24,11 +25,10 @@ const nearThresholdConfidence = 0.72
 func defaultThresholdSnapshot(name string, timeout time.Duration) flags.Snapshot {
 	s := remoteSnapshot(timeout)
 	s.Decision.Backend = name
-	s.Decision.ActConfidenceThreshold = flags.DefaultDecisionActConfidenceThreshold
+	s.Decision.Claude.ActConfidenceThreshold = flags.DefaultDecisionClaudeActConfidenceThreshold
 	s.Decision.Jev = flags.RemoteBackendConfig{
 		Model: flags.DefaultDecisionJevModel, Timeout: timeout,
-		ActConfidenceThreshold:    flags.DefaultDecisionJevActConfidenceThreshold,
-		HasActConfidenceThreshold: true,
+		ActConfidenceThreshold: flags.DefaultDecisionJevActConfidenceThreshold,
 	}
 	return s
 }
@@ -39,15 +39,17 @@ func jevBackend(conf float64) *fakeDecideBackend {
 	return be
 }
 
-func assertThreshold(t *testing.T, span sdktrace.ReadOnlySpan, want float64, source string) {
+// assertThreshold checks the routed threshold and that the evaluation event names
+// the backend's own flag.
+func assertThreshold(t *testing.T, span sdktrace.ReadOnlySpan, want float64, backend string) {
 	t.Helper()
 	if v, _ := attrValue(span, AttrDecideActThreshold); v.AsFloat64() != want {
 		t.Errorf("%s = %v, want %v", AttrDecideActThreshold, v.AsFloat64(), want)
 	}
-	if g := strAttr(t, span, AttrDecideActThresholdSource); g != source {
-		t.Errorf("%s = %q, want %q", AttrDecideActThresholdSource, g, source)
+	if _, ok := attrValue(span, "decide.act_confidence_threshold.source"); ok {
+		t.Error("the retired decide.act_confidence_threshold.source is still set")
 	}
-	wantFlag := thresholdFlag(source)
+	wantFlag := "decision." + backend + ".act_confidence_threshold"
 	for _, ev := range span.Events() {
 		if ev.Name != evaluationEventName {
 			continue
@@ -79,39 +81,42 @@ func TestThreshold_JevActsAtGateByDefault(t *testing.T) {
 }
 
 // UC: UC-040 A5
-func TestThreshold_ClaudeHeldAtGlobalByDefault(t *testing.T) {
+func TestThreshold_ClaudeHeldAtItsOwnByDefault(t *testing.T) {
 	be := newFakeDecideBackend(ffaAnswer("grant_shield", nearThresholdConfidence, "A", 0.5, "x"))
 	h := newRemoteHarness(t, defaultThresholdSnapshot(flags.DecisionBackendClaude, time.Second), be)
 	span := h.run(t)
 	if g := strAttr(t, span, AttrDecideOutcome); g != DecideOutcomeHeld {
-		t.Fatalf("outcome = %q, want held (0.72 < global 0.8; the jev threshold must not apply)", g)
+		t.Fatalf("outcome = %q, want held (0.72 < claude 0.8; the jev threshold must not apply)", g)
 	}
 	if len(h.sink.decisions()) != 0 {
 		t.Fatal("held answer applied")
 	}
-	assertThreshold(t, span, flags.DefaultDecisionActConfidenceThreshold, flags.ActThresholdSourceGlobal)
+	assertThreshold(t, span, flags.DefaultDecisionClaudeActConfidenceThreshold, flags.DecisionBackendClaude)
 	assertEvaluation(t, span, evaluationLabelFail, nearThresholdConfidence)
 }
 
-// UC: UC-040 A5 A13
-// UC: UC-044 A3
-func TestThreshold_JevInheritUsesGlobal(t *testing.T) {
-	snap := defaultThresholdSnapshot(flags.DecisionBackendJev, time.Second)
-	snap.Decision.Jev.HasActConfidenceThreshold = false // the "inherit" variant
-	h := newRemoteHarness(t, snap, jevBackend(nearThresholdConfidence))
-	span := h.run(t)
-	if g := strAttr(t, span, AttrDecideOutcome); g != DecideOutcomeHeld {
-		t.Fatalf("outcome = %q, want held under the inherited global 0.8", g)
+// TestThreshold_RequestCarriesFireTimeThreshold: the answering backend's threshold
+// rides on the request, so jev's gate opens at the bar routing applies (§3.1).
+// UC: UC-040 A13
+func TestThreshold_RequestCarriesFireTimeThreshold(t *testing.T) {
+	var got float64
+	be := newFakeDecideBackend(func(req decide.Request) (decide.Response, error) {
+		got = req.ActThreshold
+		return ffaAnswer("grant_shield", nearThresholdConfidence, "A", 0.5, "x")(req)
+	})
+	be.name = flags.DecisionBackendJev
+	h := newRemoteHarness(t, defaultThresholdSnapshot(flags.DecisionBackendJev, time.Second), be)
+	h.run(t)
+	if got != flags.DefaultDecisionJevActConfidenceThreshold {
+		t.Fatalf("Request.ActThreshold = %v, want jev's %v", got, flags.DefaultDecisionJevActConfidenceThreshold)
 	}
-	assertThreshold(t, span, flags.DefaultDecisionActConfidenceThreshold, flags.ActThresholdSourceGlobal)
 }
 
 // UC: UC-040 A13
-func TestThreshold_JevGlobalFlipDoesNotApplyWithOwnThreshold(t *testing.T) {
-	// The presenter lowering the global bar for Claude must not move Jev's, and
-	// vice versa: with its own threshold Jev ignores the global entirely.
+func TestThreshold_ClaudeFlipDoesNotMoveJev(t *testing.T) {
+	// Raising claude's bar must not move jev's, and vice versa.
 	snap := defaultThresholdSnapshot(flags.DecisionBackendJev, time.Second)
-	snap.Decision.ActConfidenceThreshold = 0.95
+	snap.Decision.Claude.ActConfidenceThreshold = 0.95
 	h := newRemoteHarness(t, snap, jevBackend(nearThresholdConfidence))
 	span := h.run(t)
 	if g := strAttr(t, span, AttrDecideOutcome); g != DecideOutcomeAct {
@@ -135,17 +140,4 @@ func TestThreshold_JevRaisedMidFlightAppliesAtLanding(t *testing.T) {
 		t.Fatal("held answer applied")
 	}
 	assertThreshold(t, span, 0.95, flags.DecisionBackendJev)
-}
-
-// UC: UC-040 A5 A13
-func TestThreshold_JevInheritFlippedMidFlightAppliesAtLanding(t *testing.T) {
-	be := jevBackend(nearThresholdConfidence)
-	_, span := fireAndMutateSnapshot(t, be, defaultThresholdSnapshot(flags.DecisionBackendJev, time.Hour), time.Hour,
-		func(h remoteHarness) {
-			h.flags.mutate(func(s *flags.Snapshot) { s.Decision.Jev.HasActConfidenceThreshold = false })
-		})
-	if g := strAttr(t, span, AttrDecideOutcome); g != DecideOutcomeHeld {
-		t.Fatalf("outcome = %q, want held: jev flipped to inherit the global 0.8 mid-flight", g)
-	}
-	assertThreshold(t, span, flags.DefaultDecisionActConfidenceThreshold, flags.ActThresholdSourceGlobal)
 }

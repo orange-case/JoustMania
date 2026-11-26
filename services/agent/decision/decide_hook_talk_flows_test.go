@@ -173,23 +173,23 @@ func TestTalk_JevDownThresholdBeatOnClaude(t *testing.T) {
 
 		// A2 step 2: the presenter flips the backup backend.
 		h.flags.mutate(func(s *flags.Snapshot) { s.Decision.Backend = flags.DecisionBackendClaude })
-		// A2 step 3: threshold strict (global) holds the answer that acted.
-		h.flags.mutate(func(s *flags.Snapshot) { s.Decision.ActConfidenceThreshold = 0.95 })
+		// A2 step 3: claude's threshold strict holds the answer that acted.
+		h.flags.mutate(func(s *flags.Snapshot) { s.Decision.Claude.ActConfidenceThreshold = 0.95 })
 		held := nextTalkCycle(t, h)
 		assertSpanAttrs(t, "claude strict", held, map[string]string{
 			AttrDecideBackend: flags.DecisionBackendClaude, AttrDecideOutcome: DecideOutcomeHeld,
 		})
-		assertThreshold(t, held, 0.95, flags.ActThresholdSourceGlobal)
+		assertThreshold(t, held, 0.95, flags.DecisionBackendClaude)
 
 		// threshold default restores it.
 		h.flags.mutate(func(s *flags.Snapshot) {
-			s.Decision.ActConfidenceThreshold = flags.DefaultDecisionActConfidenceThreshold
+			s.Decision.Claude.ActConfidenceThreshold = flags.DefaultDecisionClaudeActConfidenceThreshold
 		})
 		act := nextTalkCycle(t, h)
 		assertSpanAttrs(t, "claude default", act, map[string]string{
 			AttrDecideBackend: flags.DecisionBackendClaude, AttrDecideOutcome: DecideOutcomeAct,
 		})
-		assertThreshold(t, act, flags.DefaultDecisionActConfidenceThreshold, flags.ActThresholdSourceGlobal)
+		assertThreshold(t, act, flags.DefaultDecisionClaudeActConfidenceThreshold, flags.DecisionBackendClaude)
 		if got := h.sink.decisions(); len(got) != rulesApplied+1 || got[rulesApplied].Intervention != "grant_shield" {
 			t.Fatalf("applied %+v, want claude's grant_shield after the restore", got)
 		}
@@ -309,11 +309,11 @@ func TestTalk_EveryBeatShowsItsObservable(t *testing.T) {
 			s.Decision.Jev.ActConfidenceThreshold = flags.DefaultDecisionJevActConfidenceThreshold
 		})
 
-		// Step 4: rows with backend claude and the global threshold.
+		// Step 4: rows with backend claude and claude's threshold.
 		setBackend(flags.DecisionBackendClaude)
 		step4 := nextTalkCycle(t, h)
 		assertSpanAttrs(t, "step 4", step4, map[string]string{AttrDecideBackend: flags.DecisionBackendClaude})
-		assertThreshold(t, step4, snap.Decision.ActConfidenceThreshold, flags.ActThresholdSourceGlobal)
+		assertThreshold(t, step4, snap.Decision.Claude.ActConfidenceThreshold, flags.DecisionBackendClaude)
 
 		// Step 5: a discarded row with kill_switch, then no new rows while off.
 		release := make(chan struct{})

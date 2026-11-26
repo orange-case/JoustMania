@@ -71,6 +71,9 @@ def _summary(collector: GameEventCollector, event_type: str | None = None) -> li
 
 async def _serve_full_permission(stack) -> None:
     """end_game is only in the ``full`` allow-list; a stack overlay the flag_service fixture deletes."""
+    flag_service_default().put(
+        "agent", "enabled", variant="on"
+    )  # the coordinator applies nothing while the agent is stopped (UC-040 BR-004)
     flag_service_default().put("agent", "interventions_allowed", variant="full")
     expected = variant_value("agent", "interventions_allowed", "full")
     with flagd_probe_client(stack, "agent") as client:

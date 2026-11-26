@@ -59,7 +59,7 @@ func TestAlreadyApplied_RepeatBlockedNoWriteNoBudget(t *testing.T) {
 	t.Run("UC-040/A35 BR-023 a repeated 0.8 is blocked already_applied, not written, no budget", func(t *testing.T) {
 		l, sink, clock, _ := appliedLoop(t, sens("WEAK", "0.8"))
 		expectOutcome(t, runCycle(l, budgetCtx()), "adjust_player_sensitivity/WEAK:dispatched")
-		before := limiterEntries(l)
+		before := limiterEntries(l, l.nowOrDefault()())
 		for _, v := range []string{"0.8", "0.80", " 0.8 "} {
 			*clock = clock.Add(time.Second)
 			l.Rules = fakeRules{out: []Decision{sens("WEAK", v)}}
@@ -68,7 +68,7 @@ func TestAlreadyApplied_RepeatBlockedNoWriteNoBudget(t *testing.T) {
 		if n := writesOf(sink, InterventionAdjustPlayerSensitivity, "WEAK"); n != 1 {
 			t.Fatalf("writes = %d, want 1", n)
 		}
-		if after := limiterEntries(l); after != before {
+		if after := limiterEntries(l, l.nowOrDefault()()); after != before {
 			t.Fatalf("limiter entries %d -> %d: already_applied must not charge the budget", before, after)
 		}
 	})
