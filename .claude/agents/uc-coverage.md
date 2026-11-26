@@ -74,7 +74,7 @@ Ripgrep skips git-ignored paths (`.venv`, `node_modules`); still restrict paths 
 | NFR tag (pytest), for `NFR-XXX` units | pattern `mark\.nfr\([^)]*["']NFR-014["']`, `multiline: true`, `type: py`, paths `services`, `lib`, `tests` (also on classes) |
 | NFR tag (Go), for `NFR-XXX` units | pattern `^// NFR: .*\bNFR-012\b`, glob `*_test.go`, path `services` |
 | NFR tag (Rust), for `NFR-XXX` units | pattern `^\s*// NFR: .*\bNFR-012\b`, glob `*.rs`, path `services/rust-hid` |
-| Untagged evidence | pattern `UC-040`, then the tests on the UC's `**Code / tests:**` line, then domain vocabulary (flag keys, span names, outcome / reason strings) |
+| Untagged evidence | pattern `UC-040`, then domain vocabulary (flag keys, span names, outcome / reason strings) |
 
 A `Pre-n` / `Post-*-n` row is `Covered` by a `cond=` tag (or a `Pre-1` / `Post-F-1` unit token in Go, shell,
 vitest) on a test whose body establishes or asserts that condition. `cond=` is informational: a `cond=`-only
@@ -83,7 +83,7 @@ test is never evidence for `Main` or `A<n>`, and conditions stay out of the `Tes
 condition (`Pre-1`, `Post-F-1`, "precondition", "postcondition") as its subject: recommend retagging with
 `cond=`, and do not count it as a condition test until it carries one.
 
-Untagged evidence (docstring or comment mention, a `Code / tests` reference, a matching file name) is a
+Untagged evidence (docstring or comment mention, a matching file name) is a
 **traceability gap**, never tagged coverage. Record `file:line` for everything; when a search finds nothing,
 list the patterns you tried.
 
