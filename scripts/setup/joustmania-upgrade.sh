@@ -29,6 +29,9 @@
 #   6. Not healthy within the timeout: roll back to the previous version
 #      (A3) unless --no-rollback. Healthy: remove superseded images of the
 #      joustmania repositories the two recorded versions use (nothing else).
+#   7. Host files are never written: after the switch (and after --rollback) it
+#      only names the hotspot setup and, once healthy, the operator pad udev
+#      rule when the installed copies are missing or differ (#2858).
 # --rollback: switch to the recorded version that is not HEAD, with the images
 # on the Pi (no registry, no fetch), so it works offline. A version that ran
 # from a branch (the one-time migration) gets its branch back, so compose
@@ -500,6 +503,8 @@ do_upgrade() {
     apply || apply_rc=$?
     if ((apply_rc == 0)); then
         say "now at $TARGET_REF (image tag $tag); previous $prev_ref kept for --rollback"
+        hint="$(joustmania_pad_rule_hint "$JOUSTMANIA_DIR")"
+        [[ -z "$hint" ]] || say "$hint"
         prune_images
         return 0
     fi
@@ -640,6 +645,8 @@ do_rollback() {
         0)
             say "rolled back to $T_REF"
             hint="$(joustmania_hotspot_hint "$JOUSTMANIA_DIR")"
+            [[ -z "$hint" ]] || say "$hint"
+            hint="$(joustmania_pad_rule_hint "$JOUSTMANIA_DIR")"
             [[ -z "$hint" ]] || say "$hint"
             ;;
         2) die "rollback to $T_REF not applied; nothing changed: $running still runs" ;;

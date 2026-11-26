@@ -82,19 +82,9 @@
               "value": "claude-opus-5-5"
             },
             {
-              "key": "decide.confidence",
-              "type": "float64",
-              "value": 0.62
-            },
-            {
-              "key": "decide.confidence.min",
-              "type": "float64",
-              "value": 0.62
-            },
-            {
               "key": "decide.answers",
               "type": "string",
-              "value": "[{\"question_id\":\"ffa.intervention\",\"choice\":\"noop\",\"score\":0,\"confidence\":0.62},{\"question_id\":\"ffa.target\",\"choice\":\"none\",\"score\":0,\"confidence\":0.62}]"
+              "value": "[{\"question_id\":\"ffa.intervention\",\"choice\":\"noop\",\"score\":0,\"confidence\":0},{\"question_id\":\"ffa.target\",\"choice\":\"none\",\"score\":0,\"confidence\":0}]"
             },
             {
               "key": "decide.rationale",
