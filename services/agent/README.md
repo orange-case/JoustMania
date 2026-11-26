@@ -483,7 +483,7 @@ The span carries the full retro prompt plus attribution (single builder
 | `interventions.allowed` | the allow-list summary |
 | `session.id` | the finished session's id |
 | `llm.retro.system_sha256` | 16-hex **fingerprint** of the retro system prompt (#1168) — NOT the text; the full text is on the `agent.llm.system_prompt` log line |
-| `llm.retro.user` | the retro user prompt text, capped at 32 KiB (a `...[truncated]` marker is appended if it exceeds the cap) |
+| `llm.retro.user` | the retro user prompt text, capped at 32 KiB (a `...[truncated]` marker is appended if it exceeds the cap); only with `decision.capture_content` on |
 | `llm.retro.bytes` | `len(system)+len(user)` |
 | `inference.configured` | the text backend's model (`""` when capture-only) |
 | `inference.used` | `"claude"`, or **`"none"`** when capture-only (see below) |

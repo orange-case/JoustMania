@@ -489,15 +489,14 @@ func (rc *RetroCoordinator) OnGameEnd(c gamecontext.GameContext) {
 		retroModeValue, allowedSummary(snapshot.InterventionsAllowed), prompt.System)
 
 	attrs := retroPromptAttributes(retroPromptAttrs{
-		prompt:     prompt,
-		sessionID:  c.SessionID,
-		gameKind:   c.GameKind,
-		objectives: snapshot.Objectives,
-		allowed:    snapshot.InterventionsAllowed,
-		configured: attr.configured,
-		used:       attr.used,
-		fallback:   attr.fallback,
-		// #2695: the brief text stays in llm.retro.user only under content capture.
+		prompt:         prompt,
+		sessionID:      c.SessionID,
+		gameKind:       c.GameKind,
+		objectives:     snapshot.Objectives,
+		allowed:        snapshot.InterventionsAllowed,
+		configured:     attr.configured,
+		used:           attr.used,
+		fallback:       attr.fallback,
 		captureContent: snapshot.Decision.CaptureContent,
 	})
 	attrs = append(attrs, retroBriefAttributes(prompt.OperatorBrief)...)
@@ -783,8 +782,8 @@ type retroPromptAttrs struct {
 	configured string
 	used       string
 	fallback   string
-	// captureContent is decision.capture_content: llm.retro.user keeps the operator
-	// brief's text only when it is on (#2695, RetroPrompt.UserForSpan).
+	// captureContent is decision.capture_content: llm.retro.user is emitted only
+	// when it is on, the same gate as the decide backends' content capture.
 	captureContent bool
 }
 
@@ -798,7 +797,8 @@ type retroPromptAttrs struct {
 //   - interventions.allowed = the allow-list summary (allowedSummary)
 //   - session.id / game.id  = the finished session's id (= the real game_id, #1088)
 //   - llm.retro.system_sha256 = the System-prompt FINGERPRINT (#1168), NOT the text
-//   - llm.retro.user        = the User prompt text (capped at maxUserPromptBytes)
+//   - llm.retro.user        = the User prompt text (capped at maxUserPromptBytes),
+//     only with decision.capture_content on
 //   - llm.retro.bytes       = len(system)+len(user) (full size; system TEXT not emitted)
 //   - inference.configured  = the text backend's model ("" when capture-only)
 //   - inference.used        = the text backend's name, or "none" (see DIVERGENCE)
@@ -811,8 +811,7 @@ type retroPromptAttrs struct {
 func retroPromptAttributes(in retroPromptAttrs) []attribute.KeyValue {
 	system := in.prompt.System
 	user := in.prompt.User
-	spanUser := in.prompt.UserForSpan(in.captureContent)
-	return []attribute.KeyValue{
+	attrs := []attribute.KeyValue{
 		// Agent attribution (same vocabulary as the decision span).
 		attribute.String(AttrMode, retroModeValue),
 		attribute.String(AttrGameKind, in.gameKind),
@@ -829,7 +828,6 @@ func retroPromptAttributes(in retroPromptAttrs) []attribute.KeyValue {
 		// User prompt (variable, valuable) is KEPT, capped at maxUserPromptBytes. bytes
 		// still counts the full system+user size.
 		attribute.String(AttrLLMRetroSystemSHA, systemPromptSHA(system)),
-		attribute.String(AttrLLMRetroUser, capUserPrompt(spanUser)),
 		attribute.Int(AttrLLMRetroBytes, len(system)+len(user)),
 		// Inference attribution (#1234): the text backend's model and name, or
 		// "none" / no_backend_available when capture-only (the retro DIVERGENCE).
@@ -837,6 +835,10 @@ func retroPromptAttributes(in retroPromptAttrs) []attribute.KeyValue {
 		attribute.String(AttrInferenceUsed, in.used),
 		attribute.String(AttrInferenceFallback, in.fallback),
 	}
+	if in.captureContent {
+		attrs = append(attrs, attribute.String(AttrLLMRetroUser, capUserPrompt(user)))
+	}
+	return attrs
 }
 
 // outcomeAttributes builds the STRUCTURED game-outcome span attributes (#1100):

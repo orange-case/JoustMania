@@ -15,6 +15,7 @@
 # only a fingerprint of the system prompt, not its text — the full text is on a log):
 #   1. Open http://localhost/jaeger/ and find a span named `agent.llm.retro`.
 #   2. Copy the `llm.retro.user` attribute value into a file, e.g. user.txt.
+#      The span has it only with decision.capture_content on (on in ci/).
 #   3. Read the span's `llm.retro.system_sha256` attribute (a 16-hex fingerprint)
 #      and pull the full system text from the `agent.llm.system_prompt` log line:
 #        docker logs joustmania-agent 2>&1 \
