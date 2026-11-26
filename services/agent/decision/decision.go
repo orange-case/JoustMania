@@ -366,10 +366,7 @@ type Loop struct {
 	// shieldLimits are the latest cycle's shield limits, read by the shield gate's
 	// views (UC-048 A6, shieldgate.go).
 	shieldLimits shieldGateLimits
-	// promptProfile is the decision.prompt_profile source of remote decide requests
-	// (#2467 PR 5, UC-040 BR-036); nil leaves Request.PromptProfile empty (v1).
-	promptProfile PromptProfileSource
-	// operatorBrief is the decision.operator_brief source of claude
+	// operatorBrief is the decision.operator_brief source of claude and jev
 	// requests (#2687, UC-040 BR-044); nil never sets Request.OperatorBrief.
 	operatorBrief OperatorBriefSource
 	// magnitudeBounds is the decision.magnitude_bounds source of every decide

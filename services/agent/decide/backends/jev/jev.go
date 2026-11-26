@@ -14,7 +14,7 @@
 // env (JEV_API_KEY) on every call.
 //
 // Telemetry mirrors the claude backend: one CLIENT span per HTTP
-// call (two for an acting FFA round, tagged jev.stage) named "chat {model}" (just "chat" without a model) with the OTel GenAI
+// call (two for an acting FFA round, three with the prediction ask, tagged jev.stage) named "chat {model}" (just "chat" without a model) with the OTel GenAI
 // semantic conventions (v1.41.0) and gen_ai.provider.name=jev (a custom value;
 // semconv has no well-known one), opt-in content capture, and the GenAI client
 // metrics.
@@ -179,6 +179,9 @@ func (b *Backend) Decide(ctx context.Context, req decide.Request) (decide.Respon
 		return decide.Response{}, err
 	}
 	resp.Rationale = rationale(resp, stage1)
+	if req.PredictionAsk != nil {
+		b.askPrediction(ctx, req, &resp)
+	}
 	return resp, nil
 }
 

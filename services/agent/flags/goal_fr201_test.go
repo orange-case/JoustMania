@@ -172,8 +172,7 @@ func readAgentFlags(t *testing.T, path string) map[string]flagDef {
 }
 
 // TestGoalFlags_Contract checks every goal.profile variant of both agent.json
-// files against the schema, the shipped variant set and the default, and that
-// decision.goal_in_prompt ships off.
+// files against the schema, the shipped variant set and the default.
 func TestGoalFlags_Contract(t *testing.T) {
 	wantVariants := []string{"from_objectives", "long_running_game", "lively_finale", "balanced_contest", "quick_game"}
 	for _, path := range agentFlagFiles {
@@ -213,19 +212,12 @@ func TestGoalFlags_Contract(t *testing.T) {
 				t.Fatalf("lively_finale's activity term must be phase endgame, got %+v", finale[0])
 			}
 		})
-		t.Run("UC-042/A12 decision.goal_in_prompt "+path, func(t *testing.T) {
-			def, ok := flags[keyDecisionGoalInPrompt]
-			if !ok || def.DefaultVariant != "off" || def.Variants["off"] != false || def.Variants["on"] != true || def.Targeting != nil {
-				t.Fatalf("decision.goal_in_prompt = %+v", def)
-			}
-		})
 	}
 }
 
-// TestGoalFlags_NeverWrittenC034: both flags live in the agent set, which the agent
+// TestGoalFlags_NeverWrittenC034: goal.profile lives in the agent set, which the agent
 // never writes (C-034, agent_set_never_written_c034_test.go holds no key list).
-// decision.goal_in_prompt has no flag-service registry row (human edit only);
-// goal.profile has one only as a Flagsmith-only row (#2705, flags.md §13: the flag
+// It has a flag-service registry row only as a Flagsmith-only row (#2705, flags.md §13: the flag
 // service refuses every HTTP write of it, the agent's included, so only the
 // operator's Flagsmith changes it). The flag service's own test keeps its Go set
 // (registry.flagsmithOnly) equal to the flags.md paragraph read here.
@@ -249,7 +241,7 @@ func TestGoalFlags_NeverWrittenC034(t *testing.T) {
 			flagsmithOnly = flagsmithOnly[:end]
 		}
 	}
-	for _, key := range []string{keyGoalProfile, keyDecisionGoalInPrompt} {
+	for _, key := range []string{keyGoalProfile} {
 		for _, path := range agentFlagFiles {
 			if _, ok := readAgentFlags(t, path)[key]; !ok {
 				t.Fatalf("UC-042/BR-009 %s must be in the agent set (%s)", key, path)

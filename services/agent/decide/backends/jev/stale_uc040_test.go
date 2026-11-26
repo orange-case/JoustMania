@@ -53,7 +53,7 @@ func TestPlanDetails_ReadingsStale(t *testing.T) {
 		if !strings.Contains(d, "Player MOCK0003, still in the game. Its movement readings are stale") || strings.Contains(d, "Skill level") {
 			t.Errorf("stale player description = %q", d)
 		}
-		if c := describeCandidatesFor(req.State, decide.IntvEliminatePlayer, decide.PromptProfileNeutral)["MOCK0003"]; !strings.Contains(c, "Its movement readings are stale") {
+		if c := describeCandidates(req.State, decide.IntvEliminatePlayer)["MOCK0003"]; !strings.Contains(c, "Its movement readings are stale") {
 			t.Errorf("stale candidate description = %q", c)
 		}
 	})

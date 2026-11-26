@@ -21,16 +21,13 @@ func (l *Loop) sampleGoal(c gamecontext.GameContext) {
 	}
 }
 
-// goalLines are the request's goal lines, nil unless the backend is claude
-// or jev (#2498: jev's goal state and gate criterion, built from these
-// lines), decision.goal_in_prompt is on, a goal source is wired and the game's
-// profile has terms. decision.prompt_profile never implies them: the neutral
-// profile is a lever-wording factor only, and the goal is a separate factor. The now line is the game's running
+// goalLines are the request's goal lines, nil unless the backend is an LLM
+// backend (jev builds its goal state and gate criterion from them), a goal
+// source is wired and the game's profile has terms. The now line is the game's running
 // measurements (the same values the game-end attainment scores); without a book
 // it is one sample of c.
 func (l *Loop) goalLines(ctx context.Context, fired flags.Snapshot, backend string, c gamecontext.GameContext) *decide.GoalLines {
-	if l.goalSource == nil || !fired.Decision.GoalInPrompt ||
-		(backend != flags.DecisionBackendClaude && backend != flags.DecisionBackendJev) {
+	if l.goalSource == nil || !llmBackend(backend) {
 		return nil
 	}
 	profile := l.goalSource(ctx, c)

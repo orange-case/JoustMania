@@ -799,14 +799,6 @@
       },
       "defaultVariant": "default"
     },
-    "decision.prompt_profile": {
-      "state": "ENABLED",
-      "variants": {
-        "v1": "v1",
-        "neutral": "neutral"
-      },
-      "defaultVariant": "v1"
-    },
     "decision.operator_brief": {
       "state": "ENABLED",
       "variants": {
@@ -834,14 +826,6 @@
         }
       },
       "defaultVariant": "default"
-    },
-    "decision.goal_in_prompt": {
-      "state": "ENABLED",
-      "variants": {
-        "on": true,
-        "off": false
-      },
-      "defaultVariant": "off"
     },
     "goal.profile": {
       "state": "ENABLED",

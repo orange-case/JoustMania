@@ -49,11 +49,15 @@ func remotePrediction(req decide.Request, resp decide.Response, d Decision, curr
 // askModelPrediction reports whether a remote request to backend carries the
 // prediction ask: decision.predictions.ask_model and decision.predictions_enabled
 // are on (an ask whose answer is never registered would only cost tokens and
-// change the prompt) and the backend is claude (never jev, whose typed
-// wire format has no free choice for it).
+// change the prompt) and the backend is an LLM backend.
 func askModelPrediction(snapshot flags.Snapshot, backend string) bool {
-	return snapshot.Decision.PredictionsAskModel && !snapshot.Decision.PredictionsOff &&
-		backend == flags.DecisionBackendClaude
+	return snapshot.Decision.PredictionsAskModel && !snapshot.Decision.PredictionsOff && llmBackend(backend)
+}
+
+// llmBackend reports whether backend gets the prompt features (operator brief,
+// prediction ask, goal lines): claude and jev alike (decide-contract.md §3).
+func llmBackend(backend string) bool {
+	return backend == flags.DecisionBackendClaude || backend == flags.DecisionBackendJev
 }
 
 // droppedPrediction is the reason the model's prediction of rec's accepted

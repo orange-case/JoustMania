@@ -5,8 +5,6 @@ import (
 	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
-
-	"github.com/joustmania/agent/flags"
 )
 
 // The operator brief (#2687, decide-contract.md §3 and §12, UC-040 BR-044,
@@ -28,15 +26,13 @@ type OperatorBriefSource func(ctx context.Context, gameID string) string
 
 // SetOperatorBriefSource injects the operator-brief source of remote decide
 // requests. nil (the default and every older test) never sets
-// Request.OperatorBrief, so the prompts stay byte-identical. Set at construction,
-// before the loop serves.
+// Request.OperatorBrief. Set at construction, before the loop serves.
 func (l *Loop) SetOperatorBriefSource(src OperatorBriefSource) { l.operatorBrief = src }
 
 // operatorBriefFor is the brief a request to backend carries: the source's value
-// for claude, "" for every other backend (jev's gate criteria are fixed
-// and calibrated, decide-contract.md §3) and without a source.
+// for an LLM backend, "" for any other and without a source.
 func (l *Loop) operatorBriefFor(ctx context.Context, backend, gameID string) string {
-	if l.operatorBrief == nil || backend != flags.DecisionBackendClaude {
+	if l.operatorBrief == nil || !llmBackend(backend) {
 		return ""
 	}
 	return l.operatorBrief(ctx, gameID)

@@ -107,7 +107,7 @@ func splitStages(req decide.Request) stagePlan {
 		return stagePlan{first: req, stage: StageSingle}
 	}
 	p := stagePlan{
-		first:     decide.Request{State: req.State, PromptProfile: req.PromptProfile, Goal: req.Goal, Bounds: req.Bounds},
+		first:     decide.Request{State: req.State, Goal: req.Goal, OperatorBrief: req.OperatorBrief, Bounds: req.Bounds},
 		stage:     StageIntervention,
 		threshold: gateThreshold(req.ActThreshold),
 	}
@@ -232,11 +232,11 @@ type detailsPlan struct {
 
 // planDetails decides which detail questions need Jev for the chosen
 // intervention iv (with acting confidence iv.Confidence). req is the caller's
-// request: its state, its prompt profile (#2467) and its goal lines (#2498) are
-// carried into the details request.
+// request: its state, its goal lines (#2498) and its operator brief are carried
+// into the details request.
 func planDetails(req decide.Request, iv decide.Answer, details []decide.Question) detailsPlan {
-	st, profile := req.State, req.PromptProfile
-	p := detailsPlan{intervention: iv.Choice, ask: decide.Request{State: st, PromptProfile: profile, Goal: req.Goal, Bounds: req.Bounds}}
+	st := req.State
+	p := detailsPlan{intervention: iv.Choice, ask: decide.Request{State: st, Goal: req.Goal, OperatorBrief: req.OperatorBrief, Bounds: req.Bounds}}
 	acting := iv.Choice != decide.OptionNoop
 	playerScoped := acting && decide.PlayerTargeted(iv.Choice)
 	groupScoped := acting && decide.GroupTargeted(iv.Choice)
@@ -264,7 +264,7 @@ func planDetails(req decide.Request, iv decide.Answer, details []decide.Question
 			if groupScoped {
 				if len(group) > 1 {
 					p.ask.Questions = append(p.ask.Questions, decide.Question{
-						ID: q.ID, Kind: decide.KindChoice, Text: groupTargetInstructions(iv.Choice, profile), Options: group,
+						ID: q.ID, Kind: decide.KindChoice, Text: groupTargetInstructions(iv.Choice), Options: group,
 					})
 					continue
 				}
@@ -273,7 +273,7 @@ func planDetails(req decide.Request, iv decide.Answer, details []decide.Question
 			}
 			if playerScoped && len(alive) > 1 {
 				p.ask.Questions = append(p.ask.Questions, decide.Question{
-					ID: q.ID, Kind: decide.KindChoice, Text: targetInstructions(iv.Choice, profile), Options: alive,
+					ID: q.ID, Kind: decide.KindChoice, Text: targetInstructions(iv.Choice), Options: alive,
 				})
 				continue
 			}
