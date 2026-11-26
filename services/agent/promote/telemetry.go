@@ -14,7 +14,7 @@ package promote
 //	    ↓
 //	M7-8 (THIS package, #936): take a PROMOTE verdict + its fitness evidence and
 //	ACT, per one live flag — open a GitHub issue (hypothesis + fitness
-//	evidence), or apply autonomously to the REAL default + watch + revert.
+//	evidence), or apply autonomously to the REAL default (a person reverts).
 //	This is the consequential, real-affecting piece, so it is
 //	behind the SAFETY RAIL (see promote.go / NewGitHubClientFromEnv).
 //

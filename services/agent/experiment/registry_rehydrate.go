@@ -93,7 +93,6 @@ func (r *Registry) rehydrateOneLocked(id string, b *rehydrateBuckets) {
 		st = StatusRunning
 	}
 	if st.IsTerminal() {
-		r.warnLegacyRevert(id, jrnl)
 		return
 	}
 	e := r.restoreEntryLocked(id, jrnl, view, st)
@@ -159,7 +158,6 @@ func (r *Registry) finishRestored(id string) {
 
 	ctx := context.Background()
 	if res, ok := r.journaledPromotion(id, jrnl); ok {
-		r.warnLegacyRevert(id, jrnl)
 		final := StatusDiscarded
 		if promotionActed(res) {
 			final = StatusDone
@@ -185,7 +183,7 @@ func (r *Registry) finishRestored(id string) {
 
 // journaledPromotion returns the first promotion event after the experiment's
 // last concluded decision: the result of its one promotion (later ones are
-// kill-switch or re-watch reverts of it). An unreadable log reports none.
+// kill-switch reverts of it). An unreadable log reports none.
 func (r *Registry) journaledPromotion(id string, jrnl *journal.Journal) (PromotionResult, bool) {
 	evs, err := jrnl.Events()
 	if err != nil {

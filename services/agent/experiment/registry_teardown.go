@@ -113,7 +113,6 @@ func (r *Registry) teardown(ctx context.Context, id, flagKey string, terminal St
 	// (game_id → pair index) map; clear it too so no stale binding survives teardown.
 	e.games = make(map[string]string)
 	e.gamePairs = make(map[string]int)
-	e.pendingCalibration = nil
 	r.appendEvent(e.journal, journal.Event{
 		Kind:   journal.KindOutcome,
 		Status: string(terminal),

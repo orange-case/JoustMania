@@ -189,7 +189,7 @@ type entry struct {
 
 	// promotionInFlight is set while the experiment's promotion runs and its own
 	// promotion event is not journaled yet; RecordPromotion holds later outcomes in
-	// laterPromotions until then (the re-watch may journal first).
+	// laterPromotions until then (the kill switch may journal first).
 	promotionInFlight bool
 	laterPromotions   []PromotionResult
 	// recommendOwner is the writer owning the real overlay when the experiment's
@@ -235,13 +235,6 @@ type entry struct {
 	patternGames      map[string]int
 	patternTimeouts   map[string]int
 	patternAgentEnded map[string]int
-	// calibration is the per-arm prediction tally (UC-043 A21, BR-010, #2498):
-	// in memory only, never journaled, never read by the verdict; a restart or a
-	// rehydrate starts it empty. pendingCalibration holds a bound game's tally
-	// (keyed by game id) until ConcludeGame folds the game's fitness; a released
-	// or torn-down game drops it, so only folded games count.
-	calibration        map[string]PredictionTally
-	pendingCalibration map[string]PredictionTally
 }
 
 // inFlight returns the experiment's current count of live (unconcluded) shadow

@@ -1,8 +1,7 @@
 """FakeGitHub: a recording GitHub REST API stub, one per stack (#1404, TC-011 promotion).
 
 The agent's promoter (``services/agent/promote/github.go``) builds its real GitHub
-client only when ``AGENT_CODE_IMPROVEMENT_ENABLED=true``, ``GITHUB_TOKEN`` and
-``GITHUB_REPOSITORY`` are set; ``GITHUB_API_URL`` points it here, so an ``issue``
+client only when ``GITHUB_TOKEN`` and ``GITHUB_REPOSITORY`` are set; ``GITHUB_API_URL`` points it here, so an ``issue``
 mode promotion reaches this stub and never github.com. The stub answers ``POST /repos/<owner>/<repo>/issues`` and ``/pulls`` with
 a ``201`` and an ``html_url``, and records every request::
 
@@ -45,9 +44,8 @@ class FakeGitHub:
         return f"{self.base_url}/{REPOSITORY}/{kind}/{number}"
 
     def agent_env(self) -> dict[str, str]:
-        """The promoter env gate of services/agent/promote/github.go, pointed at this stub."""
+        """The promoter's GitHub env of services/agent/promote/github.go, pointed at this stub."""
         return {
-            "AGENT_CODE_IMPROVEMENT_ENABLED": "true",
             "GITHUB_TOKEN": TOKEN,
             "GITHUB_REPOSITORY": REPOSITORY,
             "GITHUB_API_URL": self.base_url,

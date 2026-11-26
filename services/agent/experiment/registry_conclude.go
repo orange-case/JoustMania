@@ -55,9 +55,6 @@ func (r *Registry) ConcludeGame(ctx context.Context, gameID string, fitness floa
 // journal. The caller holds r.mu; it does not lock.
 func (r *Registry) foldConcludedGameLocked(e *entry, gameID, arm string, fitness, durationS float64) *journal.Journal {
 	delete(e.games, gameID)
-	// UC-043 A21: the game's fitness is folded now, so its prediction tally joins
-	// the arm (report-only; the journal and the verdict never see it).
-	e.foldCalibrationLocked(gameID, arm)
 	// Recover the game's Common-Random-Numbers pair index (#1003) recorded at bind so
 	// the game_concluded event carries it — the journal's paired-difference fold
 	// (#1004) matches the two games of a pair by it. A bound game always has an entry;
@@ -157,7 +154,6 @@ func (r *Registry) ReleaseGame(gameID, reason string) bool {
 		return false // no bound slot freed (the bind, if any, frees it).
 	}
 	delete(e.games, gameID)
-	delete(e.pendingCalibration, gameID) // UC-043 A21: a released game is never folded
 	// Recover the pair index so the journal can drop a parked pending half whose
 	// partner is now gone (#1004 carried-over item 1): a released game that was the
 	// first-concluded half of an open pair must NEVER fold a fabricated difference.

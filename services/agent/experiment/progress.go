@@ -78,11 +78,6 @@ type ProgressArm struct {
 	// Samples / MeanFitness are the journal summary's per-arm count and mean.
 	Samples     int     `json:"samples"`
 	MeanFitness float64 `json:"mean_fitness"`
-	// The report-only shadow calibration (UC-043 A21, calibration.go); the mean
-	// Brier score only once a prediction is scored (0 would read as perfect).
-	PredictionsScored int      `json:"predictions_scored"`
-	PredictionHits    int      `json:"prediction_hits"`
-	PredictionBrier   *float64 `json:"prediction_brier"`
 }
 
 // emitProgressLocked records the progress snapshot of e. link is the agent.experiment
@@ -129,12 +124,6 @@ func (r *Registry) emitProgressLocked(e *entry, trigger, endReason string, link 
 		a := ProgressArm{Arm: arm, InFlight: inFlight[arm]}
 		if st := summary.Arms[arm]; st != nil {
 			a.Samples, a.MeanFitness = st.Count, st.Mean
-		}
-		cal := e.calibration[arm]
-		a.PredictionsScored, a.PredictionHits = cal.Scored, cal.Hits
-		if cal.Scored > 0 {
-			brier := cal.Brier()
-			a.PredictionBrier = &brier
 		}
 		snap.Arms = append(snap.Arms, a)
 	}

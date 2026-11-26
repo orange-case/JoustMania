@@ -13,7 +13,6 @@ import (
 
 func setGitHubEnv(t *testing.T, apiURL string) {
 	t.Helper()
-	t.Setenv("AGENT_CODE_IMPROVEMENT_ENABLED", "true")
 	t.Setenv("GITHUB_TOKEN", "ghp_secret_token_value")
 	t.Setenv("GITHUB_REPOSITORY", "owner/repo")
 	t.Setenv("GITHUB_API_URL", apiURL)
