@@ -21,7 +21,7 @@
 #    names scripts/hardware/update_permissions.sh; both exit 1 before any step
 #  - a pinned checkout with the autostart keeps its own version (A6 step 4)
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-setup.sh
-# UC: UC-060 A6 A4
+# Spec: docs/specs/stage-host.md SH-4 SH-9
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 

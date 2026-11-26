@@ -2,7 +2,7 @@
 
 import logging
 
-from lib.setting_ladders import MODE_LADDER
+from lib.setting_ladders import MODE_LADDER, step_ladder
 from lib.types import Games
 
 logger = logging.getLogger(__name__)
@@ -35,13 +35,6 @@ def get_next_game_mode(current: Games, forward: bool = True) -> Games:
     Returns:
         Next Games enum value
     """
-    current_name = current.name
-    current_index = GAME_MODES.index(current_name) if current_name in GAME_MODES else 0
-
-    if forward:
-        next_name = GAME_MODES[(current_index + 1) % len(GAME_MODES)]
-    else:
-        next_name = GAME_MODES[(current_index - 1) % len(GAME_MODES)]
-
-    # Convert back to Games enum
+    # The pad's `step_setting` stepping, so every surface walks the same wheel.
+    next_name, _ = step_ladder("current_game", GAME_MODES, current.name, 1 if forward else -1)
     return Games.from_name(next_name) or DEFAULT_GAME_MODE

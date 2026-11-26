@@ -304,7 +304,7 @@ func TestDecisionBackend_FlagFilesMatchDefaults(t *testing.T) {
 // flag files that points at TEST-NET-1 (RFC 5737, never routed) over https, so
 // the TLS handshake fails before any request header (the bearer key) is sent.
 // The default stays DefaultDecisionJevBaseURL.
-// UC: UC-070 main
+// UC: UC-070 BR-004
 func TestDecisionBackend_JevBlackholeVariant(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join("..", "..", "flagd", "agent.json"),
@@ -340,7 +340,7 @@ func TestDecisionBackend_JevBlackholeVariant(t *testing.T) {
 // global remote-call budget (#1231): llm.max_requests_per_minute has a "stage"
 // variant of 30 in both flag files, while the default stays
 // DefaultLLMMaxRequestsPerMinute.
-// UC: UC-070 A4
+// UC: UC-070 BR-003
 func TestDecisionBackend_StageBudgetVariant(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join("..", "..", "flagd", "agent.json"),
@@ -395,7 +395,7 @@ func TestDecisionGate_Step3Defaults(t *testing.T) {
 // fallbacks, and the stage baseline (scripts/talk-baseline.json) runs claude with
 // the "patient" timeout (8000 ms), which the state-age bound stays above.
 // UC: UC-040 A4
-// UC: UC-070 main
+// UC: UC-070 BR-003
 func TestDecisionBackend_CadenceFlagDefaults(t *testing.T) {
 	type flagDoc struct {
 		Flags map[string]struct {

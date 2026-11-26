@@ -179,7 +179,6 @@ func strAttr(t *testing.T, span sdktrace.ReadOnlySpan, key string) string {
 }
 
 // UC: UC-040 A1
-// UC: UC-070 main
 func TestDefaultRulesPath_DecideSpan(t *testing.T) {
 	fx := decideFixtures()[0] // endurance: rules decide on the first evaluation
 	fx.ctx.GameKind = "real"
@@ -552,7 +551,6 @@ func assertRulesFallbackFrom(t *testing.T, h remoteHarness, span sdktrace.ReadOn
 
 // NFR: NFR-010 NFR-013
 // UC: UC-040 A2
-// UC: UC-070 main A2 A3
 func TestRemote_TimeoutFallsBackToRules(t *testing.T) {
 	be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.9, "A", 0.5, ""))
 	be.block = true
@@ -563,7 +561,6 @@ func TestRemote_TimeoutFallsBackToRules(t *testing.T) {
 
 // NFR: NFR-013
 // UC: UC-040 A2
-// UC: UC-070 main A2
 func TestRemote_ErrorFallsBackToRules(t *testing.T) {
 	be := newFakeDecideBackend(func(decide.Request) (decide.Response, error) {
 		return decide.Response{}, errors.New("boom")
@@ -1165,7 +1162,6 @@ func TestRemote_RealCadenceFlag(t *testing.T) {
 // agent_llm_gated_total counts too.
 // NFR: NFR-011
 // UC: UC-040 A3
-// UC: UC-070 A4
 func TestRemote_BudgetExhaustedFallsBackToRules(t *testing.T) {
 	t.Run("UC-040/A3 exhausted budget: rules decide now, no remote call", func(t *testing.T) {
 		be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.95, "A", 0.5, "x"))

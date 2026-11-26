@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stage helper for the "Two Standards Walk Into an Agent" talk (#743, #1301).
-# Runbook: docs/talk/two-standards-runbook.md. Use case: UC-070 (BR-003, A7, A8, A9).
+# Runbook: docs/talk/two-standards-runbook.md. Use case: UC-070 (BR-001, BR-003, A8, A9).
 #
 # The stage baseline (scripts/talk-baseline.json) is the flag state every act
 # beat starts from; the shipped flag files keep their own, fail-closed defaults.
@@ -16,7 +16,7 @@
 #       Idempotent; run it between rehearsals and after any interrupted beat,
 #       then ./scripts/talk-preflight.sh.
 #   ./scripts/talk-stage.sh permissions <variant> [seconds]
-#       The permissions beat (UC-070 A7): set interventions_allowed to <variant>
+#       The permissions beat (UC-070 BR-001): set interventions_allowed to <variant>
 #       (e.g. none), hold it for [seconds] (default 12; 0 = until Enter), then
 #       restore the baseline variant. The restore also runs when the beat is
 #       interrupted (Ctrl-C, closed terminal, TERM). Only SIGKILL skips it: then
@@ -212,7 +212,7 @@ case "${action}" in
       if [[ -n "${sleeper}" ]]; then kill "${sleeper}" 2>/dev/null || true; fi
       flags set interventions_allowed "${restore_to}"
     }
-    # Restore on every way out but SIGKILL (UC-070 A7): normal end, Ctrl-C,
+    # Restore on every way out but SIGKILL (UC-070 BR-001): normal end, Ctrl-C,
     # closed terminal, TERM.
     trap restore EXIT
     trap 'exit 130' INT

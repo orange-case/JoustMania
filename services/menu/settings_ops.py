@@ -1,6 +1,6 @@
 """Settings core of the operator pad commands (#2050, UC-015).
 
-The pad's ``ProcessInput`` commands (services.md Â§3.1) land here: the force-start
+The pad's ``ProcessInput`` commands (services.md §3.1) land here: the force-start
 roster with ghost pruning (UC-014), the clamped setting step, the agent level
 ladder, the kill switch and resume of UC-015 BR-002 / BR-003, the backend write,
 and the voice tables. A refusal is an error code, not a log line.
@@ -89,7 +89,7 @@ SHIELD_ACTIVATION_FLAG = "shield.activation"
 # Ladders (UC-015 BR-004, BR-019): one source with the pad's preview, lib/setting_ladders.py (#2106).
 DECISION_BACKENDS = tuple(BACKENDS)
 
-# --- Error codes (UC-015 BR-012, services.md Â§3.1) ------------------------------------------
+# --- Error codes (UC-015 BR-012, services.md §3.1) ------------------------------------------
 
 GAME_ACTIVE = "game_active"
 AT_LIMIT = "at_limit"
@@ -195,7 +195,7 @@ FROM_REQUIRED_OPTIONS = RAISE_LADDER_OPTIONS
 # The agent rows written in memory (writer `menu`, no persist field); `inference.backend` is persisted.
 AGENT_MEMORY_ROWS = frozenset({GOAL_OPTION, RATE_OPTION, GROUP_OPTION, EFFORT_OPTION, BRIEF_OPTION})
 
-# --- reset_setting (UC-016 A8, BR-013; services.md Â§3.1) ---------------------------------------
+# --- reset_setting (UC-016 A8, BR-013; services.md §3.1) ---------------------------------------
 
 # A reset of these clears the operator value, exactly as their `automatic` rung.
 RESET_AUTOMATIC_OPTIONS = ("sensitivity", "num_teams", SHIELD_ACTIVATION_FLAG)
@@ -269,7 +269,7 @@ def reset_target(view: dict | None) -> str | None:
     )
 
 
-# --- The agent rows' canonical values (services.md Â§3.1, iteration 4) ------------------------------
+# --- The agent rows' canonical values (services.md §3.1, iteration 4) ------------------------------
 
 _MISSING = object()
 
