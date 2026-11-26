@@ -211,7 +211,7 @@ describe("UC-070: A9 BR-005 current-backend strip anchors on the followed game",
 
   it("UC-070/A9 the decide store applies the follow state", () => {
     const store = new DecideStore();
-    store.merge(rows);
+    store.setRows(rows);
     expect(store.feed().current?.gameId).toBe("game_real00000001");
     store.setFollow({ realGameLive: false, followGameId: "game_shadow00001" });
     expect(store.feed().current?.gameId).toBe("game_shadow00001");

@@ -122,6 +122,8 @@ func initTracing(ctx context.Context) func(context.Context) error {
 
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
+		// GET /experiments/state reads the newest decide spans from here (state.go).
+		sdktrace.WithSpanProcessor(agentRecentSpans),
 		sdktrace.WithResource(res),
 	)
 	otel.SetTracerProvider(quietEvaluatorProvider{TracerProvider: provider})

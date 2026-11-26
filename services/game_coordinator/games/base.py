@@ -208,7 +208,7 @@ CHARGE_OUTCOME_GAME_END = "game_end"
 
 # A grant that could add less than this is refused as shield_pool_full (A37).
 SHIELD_HOLD_POOL_FULL_ROOM_SECONDS = 0.05
-# shield.hold_outcome values (telemetry.md §3.2) and game_shield_hold_activations_total{outcome}.
+# shield.hold_outcome values (telemetry.md §3.2).
 HOLD_OUTCOME_RELEASED = "released"
 HOLD_OUTCOME_EMPTY = "empty"
 HOLD_OUTCOME_BUDGET_EXHAUSTED = "budget_exhausted"
@@ -1660,7 +1660,6 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
         failed open raises; the old call is closed either way.
         """
         logger.warning(f"Reopening the gameplay stream: {reason}")
-        metrics.gameplay_stream_reconnects_total.labels(game_mode=self.get_game_name()).inc()
         # UC-030 BR-008: no drain crosses a reconnect.
         self._force_release_shield_holds()
         old_stream = self.gameplay_stream
@@ -1873,10 +1872,6 @@ class BaseGameMode(ShieldMixin, TempoMixin, ABC):
             logger.info(
                 f"Updated controller filter: {len(last_alive_serials)} → {len(current_alive_serials)} alive players"
             )
-
-            metrics.filter_updates_total.labels(game_mode=self.get_game_name()).inc()
-            metrics.active_controllers.set(len(current_alive_serials))
-            metrics.filtered_controllers.set(len(self.players) - len(current_alive_serials))
 
         return current_alive_serials
 

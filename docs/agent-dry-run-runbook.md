@@ -64,9 +64,10 @@ To re-run the same seed: `off`, wait one tick, `on`.
 
 - Agent log: `experiment.declared`, `experiment.started`, `experiment.game_assigned`, then a conclude. The
   `Experiment cohort loop constructed` line alone does not mean it runs.
-- Jaeger (`http://localhost/jaeger/`, service `agent`): `experiment.progress` and the experiment spans. The
-  dashboard's Experiments view (`http://localhost/`) shows the experiment cards; `http://localhost/experiments`
-  is the agent's experiment dossier (an HTML list).
+- Jaeger (`http://localhost/jaeger/`, service `agent`): the experiment spans (`agent.experiment` and its
+  children). The dashboard's Experiments view (`http://localhost/`) shows the experiment cards, read from the
+  agent's `http://localhost/experiments/state`; `http://localhost/experiments` is the agent's experiment dossier
+  (an HTML list).
 - `inconclusive` verdicts are expected on mock controllers.
 - Editing `services/flagd/` changes nothing on a running stack; use `scripts/flags.sh`. `scripts/flags.sh restart`
   drops every overlay, so run `agent-dryrun-enable.sh on` again.

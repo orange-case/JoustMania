@@ -261,7 +261,6 @@ class MultiplexerBackend(ControllerBackend):
         # NFR-002), which UC-002 step 3 needs to find a new controller on the next
         # check. It is cheap: rust-hid enumerates but opens only controllers that
         # are not open yet and never reads a polled one (UC-002 BR-006, #2314).
-        metrics.discovery_full_enumerate_total.inc()
 
         # Phase 1: all adapters discover independently.
         # Each adapter receives exclude_serials — serials claimed by other adapters
@@ -289,27 +288,16 @@ class MultiplexerBackend(ControllerBackend):
             # Mock-only → skip targeting
             if len(adapters) == 1 and adapters[0].adapter_type == "mock":
                 seen[serial] = adapters[0]
-                metrics.controller_routing_decisions_total.labels(
-                    serial=serial,
-                    adapter="mock",
-                    method="default",
-                ).inc()
                 continue
 
-            preferred, preferred_method = self._resolve_adapter_for_serial(serial)
+            preferred, _ = self._resolve_adapter_for_serial(serial)
             winner = None
-            method = "default"
 
             if preferred and preferred in adapters:
                 winner = preferred
-                method = preferred_method
-            elif preferred:
-                # Preferred adapter didn't discover it — try open on demand.
-                if preferred.open(serial):
-                    winner = preferred
-                    method = preferred_method
-                else:
-                    method = "fallback"
+            elif preferred and preferred.open(serial):
+                # Preferred adapter didn't discover it: opened on demand.
+                winner = preferred
 
             if winner is None:
                 # Pick first non-mock, or first overall.
@@ -321,12 +309,6 @@ class MultiplexerBackend(ControllerBackend):
             for adapter in adapters:
                 if adapter is not winner:
                     adapter.close(serial)
-
-            metrics.controller_routing_decisions_total.labels(
-                serial=serial,
-                adapter=winner.adapter_type,
-                method=method,
-            ).inc()
 
             # UC-002 BR-001: a routing change moves the serial to its new adapter in
             # this cycle; it stays in the returned list, so no disconnect/connect.

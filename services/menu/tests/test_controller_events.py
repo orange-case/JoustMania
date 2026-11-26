@@ -320,7 +320,6 @@ class TestReconciliation:
 
         # serial2 should be pruned
         mock_callbacks.on_disconnect.assert_any_call("serial2")
-        mock_metrics.ghost_controllers_pruned_total.inc.assert_called()
 
     @pytest.mark.asyncio
     async def test_no_reconciliation_when_connected_serials_empty(
@@ -427,14 +426,13 @@ class TestHandlerErrorIsolation:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-011", flow="main", br=["BR-003"])
-    async def test_dispatch_safely_swallows_and_counts(self, event_loop_instance, mock_callbacks, mock_metrics):
-        """A raising callback is logged and counted, not propagated."""
+    async def test_dispatch_safely_swallows(self, event_loop_instance, mock_callbacks):
+        """A raising callback is logged, not propagated."""
         mock_callbacks.on_button.side_effect = AttributeError("boom")
 
         await event_loop_instance._dispatch_event_safely(_button_event("serial1", controller_manager_pb2.BUTTON_SELECT))
 
-        mock_metrics.button_event_errors_total.labels.assert_called_once_with(event_type="button")
-        mock_metrics.button_event_errors_total.labels.return_value.inc.assert_called_once()
+        mock_callbacks.on_button.assert_called_once()
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-011", flow="main", br=["BR-003"])
@@ -496,35 +494,20 @@ class TestHandlerErrorIsolation:
         assert broken_handler.handle_button.await_count == 2
         assert state_manager.ready_controllers == {"ready1"}
         assert state_manager.get_controller_state("lobby1") == ControllerState.CONNECTED
-        mock_metrics.button_event_errors_total.labels.assert_called_once_with(event_type="button")
 
 
 class TestButtonTelemetry:
-    """#2380: presses, frames and dispatch latency count what their names say."""
-
-    @pytest.mark.asyncio
-    @pytest.mark.uc("UC-011", flow="main", br=["BR-003"])
-    async def test_press_counted_by_button_but_release_not(self, event_loop_instance, mock_callbacks, mock_metrics):
-        press = _button_event("serial1", controller_manager_pb2.BUTTON_SELECT)
-        release = _button_event("serial1", controller_manager_pb2.BUTTON_SELECT)
-        release.action = controller_manager_pb2.ACTION_RELEASE
-
-        await event_loop_instance._dispatch_event_safely(press)
-        await event_loop_instance._dispatch_event_safely(release)
-
-        mock_metrics.button_presses_total.labels.assert_called_once_with(button="select", action="press")
-        mock_metrics.button_presses_total.labels.return_value.inc.assert_called_once()
+    """#2380: dispatch latency is timed per event type."""
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-002", flow="A1")
-    async def test_every_event_is_a_frame_and_timed_by_type(self, event_loop_instance, mock_callbacks, mock_metrics):
+    async def test_every_event_is_timed_by_type(self, event_loop_instance, mock_callbacks, mock_metrics):
         connect = MagicMock(serial="s1", event_type=controller_manager_pb2.EVENT_CONNECT, battery=0)
         connect.connected_serials = []
 
         await event_loop_instance._dispatch_event_safely(connect)
         await event_loop_instance._dispatch_event_safely(_button_event("s1", controller_manager_pb2.BUTTON_MOVE))
 
-        assert mock_metrics.button_frames_processed_total.inc.call_count == 2
         timed = [c.kwargs["event_type"] for c in mock_metrics.button_dispatch_seconds.labels.call_args_list]
         assert timed == ["connect", "button"]
         assert mock_metrics.button_dispatch_seconds.labels.return_value.observe.call_count == 2

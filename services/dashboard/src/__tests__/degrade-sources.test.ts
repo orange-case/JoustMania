@@ -6,9 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DecideStore, pollDecides, fetchFlagStates, fetchInterventionCounts } from "../agent.js";
-import { ExperimentStore, pollExperiments } from "../experiments.js";
-import { JaegerUnavailableError } from "../jaeger.js";
+import { AgentUnavailableError, fetchAgentState, fetchInterventionCounts } from "../agent.js";
 import { keepGameEventStreamOpen } from "../stream.js";
 import { ShieldStore, shieldBadge } from "../shield.js";
 
@@ -17,7 +15,7 @@ function json(status: number, body: unknown): Response {
 }
 
 /** A fetch stub that answers per backend path; a backend in `down` fails. */
-function stubBackends(down: { vm?: boolean; grafana?: boolean; jaeger?: "reject" | "503" | "errors" }) {
+function stubBackends(down: { vm?: boolean; grafana?: boolean; jaeger?: "reject" | "503" | "errors"; agent?: "reject" | "503" }) {
   const calls: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -36,6 +34,11 @@ function stubBackends(down: { vm?: boolean; grafana?: boolean; jaeger?: "reject"
       if (down.jaeger === "errors") return json(500, { error: { httpCode: 500, message: "badger: closed" } });
       // Jaeger v3 answers "nothing matched" with 404 No traces found (#2283): data, not an outage.
       return json(404, { error: { httpCode: 404, message: "No traces found" } });
+    }
+    if (url.endsWith("/experiments/state")) {
+      if (down.agent === "reject") throw new TypeError("Failed to fetch");
+      if (down.agent === "503") return new Response("no healthy upstream", { status: 503 });
+      return json(200, { decides: { resourceSpans: [] }, flags: [], experiments: [] });
     }
     if (url.includes("/loki/")) throw new Error(`the dashboard must not read Loki: ${url}`);
     throw new Error(`unexpected URL ${url}`);
@@ -82,20 +85,25 @@ describe("UC-040: A21 VictoriaMetrics unreachable", () => {
   });
 });
 
-describe("UC-035: A3 Jaeger down vs no data", () => {
-  for (const mode of ["reject", "503", "errors"] as const) {
-    it(`UC-035/A3 Jaeger down (${mode}) fails every agent and experiment search`, async () => {
-      stubBackends({ jaeger: mode });
-      await expect(pollDecides(new DecideStore(), 0)).rejects.toBeInstanceOf(JaegerUnavailableError);
-      await expect(fetchFlagStates()).rejects.toBeInstanceOf(JaegerUnavailableError);
-      await expect(pollExperiments(new ExperimentStore())).rejects.toBeInstanceOf(JaegerUnavailableError);
+describe("UC-035: A3 the agent down, Jaeger down, no data", () => {
+  for (const mode of ["reject", "503"] as const) {
+    it(`UC-035/A3 the agent down (${mode}) fails the decide, flag and experiment poll; Jaeger is not asked`, async () => {
+      const calls = stubBackends({ agent: mode });
+      await expect(fetchAgentState()).rejects.toBeInstanceOf(AgentUnavailableError);
+      expect(calls.filter((u) => u.includes("/jaeger/"))).toEqual([]);
     });
   }
 
-  it("UC-035/A3 Jaeger up without spans (agent or collector down, or an old agent image) is data, not an error", async () => {
+  for (const mode of ["reject", "503", "errors"] as const) {
+    it(`UC-035/A3 Jaeger down (${mode}): the agent's state still loads`, async () => {
+      stubBackends({ jaeger: mode });
+      await expect(fetchAgentState()).resolves.toEqual({ decides: { data: [] }, flags: [], experiments: [] });
+    });
+  }
+
+  it("UC-035/A3 nothing recorded yet is data, not an error", async () => {
     stubBackends({});
-    await expect(fetchFlagStates()).resolves.toEqual([]);
-    await expect(pollExperiments(new ExperimentStore())).resolves.toEqual([]);
+    await expect(fetchAgentState()).resolves.toEqual({ decides: { data: [] }, flags: [], experiments: [] });
   });
 });
 
@@ -105,9 +113,9 @@ describe("UC-035: A3 Grafana down", () => {
     const grafanaRefs = [...html.matchAll(/(src|href)="(\/grafana[^"]*)"/g)].map((m) => `${m[1]}=${m[2]}`);
     expect(grafanaRefs.length).toBeGreaterThan(0);
     expect(grafanaRefs).toContain("src=/grafana/d/controller-overview/controller-overview?orgId=1&theme=dark&kiosk");
-    // The Experiments link opens the spans in Jaeger, no longer Loki in Grafana (#2059).
+    // The Experiments links open the agent's dossiers and Jaeger, never Grafana.
     expect(grafanaRefs.some((r) => r.startsWith("href=/grafana/explore"))).toBe(false);
-    expect(html).toContain('href="/jaeger/search?service=agent&operation=experiment.progress"');
+    expect(html).toContain('href="/experiments?format=html"');
     // Every other Grafana reference is an outbound link, never a source a panel reads.
     for (const ref of grafanaRefs) {
       if (ref.startsWith("src=")) expect(ref).toContain("/grafana/d/controller-overview/");
@@ -119,9 +127,7 @@ describe("UC-035: A3 Grafana down", () => {
     const calls = stubBackends({ grafana: true });
 
     await expect(fetchInterventionCounts()).resolves.toBeDefined();
-    await expect(fetchFlagStates()).resolves.toBeDefined();
-    await expect(pollExperiments(new ExperimentStore())).resolves.toBeDefined();
-    await expect(pollDecides(new DecideStore(), 0)).resolves.toBeDefined();
+    await expect(fetchAgentState()).resolves.toBeDefined();
 
     expect(calls.length).toBeGreaterThan(0);
     expect(calls.filter((u) => u.includes("/grafana"))).toEqual([]);

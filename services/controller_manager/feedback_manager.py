@@ -245,9 +245,6 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         gauges = self._color_gauges.get(serial)
         if gauges is None:
             gauges = {
-                "r": metrics.controller_color_r.labels(serial=serial),
-                "g": metrics.controller_color_g.labels(serial=serial),
-                "b": metrics.controller_color_b.labels(serial=serial),
                 "hex": metrics.controller_color_hex.labels(serial=serial),
             }
             self._color_gauges[serial] = gauges
@@ -269,9 +266,6 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
             self.current_colors[serial] = (color[0], color[1], color[2])
             # Update color metrics for Grafana dashboard (Issue #542: cached gauges)
             gauges = self._get_color_gauges(serial)
-            gauges["r"].set(color[0])
-            gauges["g"].set(color[1])
-            gauges["b"].set(color[2])
             gauges["hex"].set((color[0] << 16) | (color[1] << 8) | color[2])
         except Exception as e:
             logger.error(f"Error setting LED color on {serial}: {e}", exc_info=True)
@@ -300,9 +294,6 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
                 self.current_colors[serial] = (color_rgb[0], color_rgb[1], color_rgb[2])
                 # Emit color metrics for Grafana dashboard (Issue #542: cached gauges)
                 gauges = self._get_color_gauges(serial)
-                gauges["r"].set(color_rgb[0])
-                gauges["g"].set(color_rgb[1])
-                gauges["b"].set(color_rgb[2])
                 gauges["hex"].set((color_rgb[0] << 16) | (color_rgb[1] << 8) | color_rgb[2])
             else:
                 logger.warning(f"Failed to set color on {serial}")

@@ -234,14 +234,12 @@ async def test_an_already_applied_event_still_listed_is_not_applied_again():
 
 @pytest.mark.uc("UC-053", flow="A4", br=["BR-006"])
 @pytest.mark.asyncio
-async def test_a_gap_larger_than_k_is_logged_and_counted():
+async def test_a_gap_larger_than_k_still_applies_the_remaining_events():
     h = Harness()
     game = h.start_game("game_a")
     # Events 1..3 already fell out of a K-long list before the first read.
     h.flags.put_events("eliminate_player", "game_a", "e1", [ev(4, serial="MOCK0001"), ev(5, serial="MOCK0002")])
-    with patch("services.game_coordinator.metrics.intervention_event_gaps_total") as gaps:
-        await h.flag_change()
-    gaps.labels.assert_called_once_with(flag="eliminate_player")
+    await h.flag_change()
     assert game.killed == ["MOCK0001", "MOCK0002"]
 
 

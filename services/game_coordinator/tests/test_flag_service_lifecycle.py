@@ -80,12 +80,6 @@ def service():
     s.close()
 
 
-@pytest.fixture(autouse=True)
-def _no_metrics():
-    with patch("services.game_coordinator.metrics.flag_service_calls_total"):
-        yield
-
-
 async def wait_for(predicate, limit=3.0):
     deadline = time.monotonic() + limit
     while not predicate():
