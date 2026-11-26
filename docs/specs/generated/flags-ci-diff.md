@@ -14,7 +14,6 @@ Part of [flags.md §12](../flags.md#12-ci-differences). A table with no rows mea
 | controller.json | `backend` | `rust` = "rust" | `mock` = "mock" |
 | game.json | `countdown_phase_duration_ms` | `normal` = 750 | `skip` = 0 |
 | game.json | `fight_club.min_rounds` | `ten` = 10 | `five` = 5 |
-| game.json | `force_all_start_seconds` | `default` = 3.0 | `ci` = 0.6 |
 | game.json | `invincibility_seconds` | `4s` = 4.0 | `2s` = 2.0 |
 | game.json | `max_concurrent_games` | `eight` = 8 | `four` = 4 |
 | game.json | `shadow_policy` | `block` = "block" | `allow` = "allow" |
@@ -36,7 +35,6 @@ Part of [flags.md §12](../flags.md#12-ci-differences). A table with no rows mea
 | agent.json | `decision.claude.base_url` | `fake` = "http://127.0.0.1:1" |
 | agent.json | `decision.jev.base_url` | `fake` = "http://127.0.0.1:1/v1" |
 | agent.json | `llm.max_requests_per_minute` | `journey` = 600 |
-| game.json | `force_all_start_seconds` | `ci` = 0.6 |
 | game.json | `tempo.ramp_down_seconds` | `ci` = 0.1 |
 | game.json | `tempo.ramp_up_seconds` | `ci` = 0.1 |
 | game.json | `tournament.match_seconds` | `ci` = 6.0 |
