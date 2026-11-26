@@ -119,7 +119,7 @@ def _player_spans(exp) -> list:
 
 
 def _assert_no_span_left_open(exp) -> None:
-    """Every span the run started ended: player, countdown_phase and the grouping spans."""
+    """Every span the run started ended: player, game.phase.countdown and the grouping spans."""
     open_spans = sorted(s.name for s in exp.started.spans if s.end_time is None)
     assert open_spans == [], f"spans left open: {open_spans}"
 

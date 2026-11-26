@@ -516,13 +516,10 @@ against the sensitivity thresholds. Old names, renamed by #2837 and still in sto
 `game_cycle` (now `game.cycle`), `player_lifecycle` (now `game.player`) and the bare phase names; metrics `games_started_total`,
 `games_completed_total`, `game_loop_jitter_ms`, `game_accel_distribution`.
 
-Agent transition for the spans the agent reads (#2837): the agent takes the `game.phase.span` value of a
-`game.phase.start` record (§3.2) as either the new name or the old one (`gameplay_phase`, `game_cycle`) for one
-release, so it keeps its parents with a coordinator that still sends the old names; the old values are dropped in
-the next release. An agent built before the rename does not recognise the new values and parents its in-game spans
-on the game root (the last fallback of UC-040 BR-013) until it is updated: decisions and interventions are
-unchanged, only the trace is flatter. Agent and coordinator ship in the same release, so this lasts only while a
-rollout is partial.
+The agent recognises only the new `game.phase.span` values (`game.phase.gameplay`, `game.cycle`) of a
+`game.phase.start` record (§3.2). Agent and coordinator ship in the same release; while a rollout is partial, an
+agent and coordinator on different sides of the rename parent the agent's in-game spans on the game root (the last
+fallback of UC-040 BR-013): decisions and interventions are unchanged, only the trace is flatter.
 
 **Traceability:** NFR-030, NFR-031 / UC-035 / `.claude/rules/development.md`.
 

@@ -21,10 +21,6 @@ const (
 	attrPhaseSpan      = "game.phase.span"
 	phaseGameplay      = "game.phase.gameplay"
 	phaseGameCycle     = "game.cycle"
-
-	// Pre-#2837 coordinator values, accepted for one release (telemetry.md §8).
-	phaseGameplayLegacy  = "gameplay_phase"
-	phaseGameCycleLegacy = "game_cycle"
 )
 
 // ApplyLogs walks a log batch and applies each game.start / game.phase.start /
@@ -95,9 +91,9 @@ func (m *Multiplexer) applyPhaseStart(lr plog.LogRecord) {
 		return
 	}
 	switch attrString(attrs, attrPhaseSpan) {
-	case phaseGameplay, phaseGameplayLegacy:
+	case phaseGameplay:
 		s.setTraceFromLog(logTraceIDs{phase: spanID, phaseTrace: traceID})
-	case phaseGameCycle, phaseGameCycleLegacy:
+	case phaseGameCycle:
 		s.setTraceFromLog(logTraceIDs{cycle: spanID, phaseTrace: traceID})
 	}
 }
