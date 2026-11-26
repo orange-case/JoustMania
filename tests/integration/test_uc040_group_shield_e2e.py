@@ -1,5 +1,5 @@
 """
-UC-040 A47 / A48: a group shield event against a shadow game, end to end (#2467 PR 3, PR 4).
+UC-048 A13 / A14: a group shield event against a shadow game, end to end (#2467 PR 3, PR 4).
 
 The real stack on reserved mock controllers: a headless (shadow) FFA game with three
 players, the group-grant gate open through flag-service overlays (``enabled`` on,
@@ -12,10 +12,10 @@ What this proves:
   one-serial set;
 - the global allow-list stays the outer gate: under ``full`` (no group lever) the event
   is dispatched once as ``grant_group_shield`` and blocked ``not_allowed``, nobody is
-  shielded and the per-game group count does not move (UC-040 A48 step 4, A22);
+  shielded and the per-game group count does not move (UC-048 A14 step 4, UC-040 A22);
 - under the opt-in ``shadow_group`` variant (#2467 PR 4) the next event applies: one
   unblocked ``agent_intervention`` and one ``player_shielded`` per player of the set
-  (UC-040 A47). The CI game set resolves ``shield.activation`` to ``instant``.
+  (UC-048 A13). The CI game set resolves ``shield.activation`` to ``instant``.
 
 ``interventions_allowed`` and the rate limiter are global, so this test runs alone.
 """
@@ -79,7 +79,7 @@ def _serve_group_gate(docker_compose, flag_service) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A47", br=["BR-033"])
+@pytest.mark.uc("UC-048", flow="A13", br=["BR-014"])
 async def test_uc040_group_shield_event_blocked_then_applied(
     intervention_env,
     flag_service,
@@ -137,7 +137,7 @@ async def test_uc040_group_shield_event_blocked_then_applied(
             f"a blocked group shielded players: {[dict(e.data) for e in shielded]}"
         )
 
-        # A47 (#2467 PR 4): the opt-in group variant lets the next event apply.
+        # UC-048 A13 (#2467 PR 4): the opt-in group variant lets the next event apply.
         set_interventions_allowed("shadow_group")
         with flagd_probe_client(docker_compose, "agent") as client:
             assert poll_until(

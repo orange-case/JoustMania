@@ -397,7 +397,7 @@ check "missing flag-service container named" "FAIL  joustmania-flag-service: not
 controller_fixture() {
   python3 - "${FAKE_CONTROLLER_FLAGS}" "$1" <<'PY'
 import json, sys
-variants = {"python": "python", "mock": "mock", "rust": "rust", "python_rust": "python,rust"}
+variants = {"mock": "mock", "rust": "rust"}
 json.dump({"flags": {"backend": {"state": "ENABLED", "variants": variants, "defaultVariant": sys.argv[2]}}},
           open(sys.argv[1], "w"), indent=2)
 PY
@@ -412,10 +412,10 @@ STUB_BUDGET=30 run_preflight
 if [[ "${RC}" -eq 0 ]]; then ok "backend=rust + healthy rust-hid exits 0"; else not_ok "backend=rust + healthy rust-hid exits 0 (rc=${RC})"; fi
 check "backend=rust + healthy rust-hid passes" "PASS  backend = rust; joustmania-rust-hid running (healthy)"
 
-controller_fixture python_rust
+controller_fixture rust
 STUB_BUDGET=30 STUB_RUST_HID_STATE="running starting" run_preflight
 if [[ "${RC}" -eq 1 ]]; then ok "unhealthy rust-hid exits 1"; else not_ok "unhealthy rust-hid exits 1 (rc=${RC})"; fi
-check "comma list naming rust checks rust-hid health" "FAIL  backend = python,rust but joustmania-rust-hid is not healthy (health: starting)"
+check "backend=rust + unhealthy rust-hid fails" "FAIL  backend = rust but joustmania-rust-hid is not healthy (health: starting)"
 
 controller_fixture rust
 STUB_BUDGET=30 STUB_MISSING=joustmania-rust-hid run_preflight

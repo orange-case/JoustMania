@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Operator A/B over one-shot SHADOW games: does the LLM come up with group shields on its
-# own, and does the neutral prompt profile change that? (#2467 PR 6, UC-040 A47, BR-033, BR-036)
+# own, and does the neutral prompt profile change that? (#2467 PR 6, UC-048 A13, BR-014, UC-040 BR-036)
 #
 # Arms (group shields are on in both; only the wording differs; a third arm, v1 without the
 # lever, is not implemented):

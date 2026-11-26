@@ -456,7 +456,7 @@ func ComputeProximity(samples []MovementSample, track []SpeedSample, fallbackThr
 // ThresholdAt is the effective death threshold in force at t: the most-recent
 // track sample at or before t that carries a DeathThreshold, else fallback (the
 // last observed scalar threshold), else nil. The rules' danger shield reads each
-// movement sample against it (UC-040 A43, #2461), as ComputeProximity does.
+// movement sample against it (decide-contract.md §15.3, #2461), as ComputeProximity does.
 func ThresholdAt(track []SpeedSample, fallback *float64, t time.Time) *float64 {
 	return thresholdLookup(track, fallback)(t)
 }

@@ -1,9 +1,9 @@
 """
-Controller feedback of the shield hold in the game coordinator (#2096, UC-040 BR-026).
+Controller feedback of the shield hold in the game coordinator (#2096, UC-048 BR-010).
 
 One ordered outbound task per hold game sends the player's hold state; the frame path
 only marks the player and never awaits (UC-030 BR-008). The cue values are latched
-with the hold values and shipped with every command (BR-027).
+with the hold values and shipped with every command (UC-048 BR-011).
 """
 
 import asyncio
@@ -48,7 +48,7 @@ class RecordingStream:
     def effects(self, serial=None):
         """(effect name, duration_ms, shield_hold or None) per game effect, optionally for one serial.
 
-        The help cue PULSE (UC-040 A42, BR-031) is left out; test_shield_help_cue.py pins it.
+        The help cue PULSE (UC-048 A12, BR-013) is left out; test_shield_help_cue.py pins it.
         """
         out = []
         for message in self.writes:
@@ -83,7 +83,7 @@ class Flags:
             "shield.empty_pulse_ms": 500,
             "shield.hold_rumble_max_intensity": 180,
             "shield.hold_led_floor_percent": 15,
-            # No shield end grace window (UC-040 BR-035): a death right after empty stays reachable.
+            # No shield end grace window (UC-048 BR-015): a death right after empty stays reachable.
             "shield.end_grace_seconds": 0.0,
         }
         self.reads: list[str] = []
@@ -132,7 +132,7 @@ def _make_ffa():
 async def game(clock, flags):  # noqa: ARG001 - flags patch base for the test
     g = _make_ffa()
     with patch.object(g, "_play_sound", new_callable=AsyncMock):
-        # What the start of the game loop does (UC-040 BR-026, BR-027).
+        # What the start of the game loop does (UC-048 BR-010, BR-011).
         g._latch_shield_hold()
         g._start_shield_hold_clock(clock.t)
         g._queue_hold_feedback_all()
@@ -173,9 +173,9 @@ async def start_holding(game, clock, serial="p1", energy=3.0):
 
 class TestUC040HoldFeedbackCommands:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_game_start_sends_every_player_the_energy_layer(self, game):
-        """UC-040 BR-026: at the start of the game loop each player gets SHIELD_ENERGY with the latched values."""
+        """UC-048 BR-010: at the start of the game loop each player gets SHIELD_ENERGY with the latched values."""
         await drain()
         for serial in ("p1", "p2"):
             effects = game.gameplay_stream.effects(serial)
@@ -197,9 +197,9 @@ class TestUC040HoldFeedbackCommands:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_activation_sends_shield_hold_with_the_energy_left_and_one_sound(self, game, clock):
-        """UC-030 A7 step 1 / UC-040 BR-026: SHIELD_HOLD for the usable energy; shield_up once."""
+        """UC-030 A7 step 1 / UC-048 BR-010: SHIELD_HOLD for the usable energy; shield_up once."""
         await drain()
         game.gameplay_stream.writes.clear()
         await start_holding(game, clock, energy=3.0)
@@ -213,7 +213,7 @@ class TestUC040HoldFeedbackCommands:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_release_ends_the_layer_and_sends_the_energy_left(self, game, clock):
         """UC-030 A7 step 4: SHIELD_HOLD 0, then SHIELD_ENERGY with what is left, no cue."""
         await start_holding(game, clock, energy=3.0)
@@ -233,9 +233,9 @@ class TestUC040HoldFeedbackCommands:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_a_release_inside_the_minimum_burst_tail_sends_nothing(self, game, clock):
-        """UC-040 BR-026: a release in the tail sends nothing; SHIELD_HOLD 0 goes out when the tail ends."""
+        """UC-048 BR-010: a release in the tail sends nothing; SHIELD_HOLD 0 goes out when the tail ends."""
         await start_holding(game, clock, energy=3.0)
         await drain()
         game.gameplay_stream.writes.clear()
@@ -252,9 +252,9 @@ class TestUC040HoldFeedbackCommands:
         ]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_running_out_while_held_sends_the_empty_cue(self, game, clock):
-        """UC-040 A39 step 4: held until the energy ran out: SHIELD_HOLD 0, then SHIELD_ENERGY with EMPTY."""
+        """UC-048 A11 step 4: held until the energy ran out: SHIELD_HOLD 0, then SHIELD_ENERGY with EMPTY."""
         await start_holding(game, clock, energy=0.5)
         await drain()
         game.gameplay_stream.writes.clear()
@@ -268,9 +268,9 @@ class TestUC040HoldFeedbackCommands:
         assert effects[1][2].energy_ms == 0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     async def test_a_partial_grant_is_a_top_up_and_a_filling_grant_is_full(self, game):
-        """UC-040 A36 step 4 (maintainer decision): full pattern only when the pool is full, else one pulse."""
+        """UC-048 A8 step 4 (maintainer decision): full pattern only when the pool is full, else one pulse."""
         await drain()
         game.gameplay_stream.writes.clear()
         assert await game.grant_shield("p1", 2.0)
@@ -285,9 +285,9 @@ class TestUC040HoldFeedbackCommands:
         ]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     async def test_a_grant_during_the_hold_moves_the_end(self, game, clock):
-        """UC-040 A36 step 2: SHIELD_HOLD again with the later end and the cue; no second sound."""
+        """UC-048 A8 step 2: SHIELD_HOLD again with the later end and the cue; no second sound."""
         await start_holding(game, clock, energy=1.0)
         await drain()
         game.gameplay_stream.writes.clear()
@@ -301,9 +301,9 @@ class TestUC040HoldFeedbackCommands:
         game._play_sound.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     async def test_shield_hold_carries_the_activation_energy_and_a_grant_raises_it(self, game, clock):
-        """UC-040 BR-026 (#2463): SHIELD_HOLD ships the activation energy, the ramp's reference; a grant adds to it."""
+        """UC-048 BR-010 (#2463): SHIELD_HOLD ships the activation energy, the ramp's reference; a grant adds to it."""
         await start_holding(game, clock, energy=2.0)
         await drain()
         player = game.players["p1"]
@@ -329,9 +329,9 @@ class TestUC040HoldFeedbackCommands:
         assert game.gameplay_stream.effects("p1")[-1][2].activation_ms == 0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-010"])
     async def test_the_idle_energy_carries_the_recharge_rate(self, clock, flags):
-        """UC-040 A38 step 3: the controller gets the rate, so it shows the recharge and detects full itself."""
+        """UC-048 A10 step 3: the controller gets the rate, so it shows the recharge and detects full itself."""
         flags.values["shield.recharge_per_second"] = 0.25
         g = _make_ffa()
         g._latch_shield_hold()
@@ -346,7 +346,7 @@ class TestUC040HoldFeedbackCommands:
 class TestUC040HoldFeedbackOrdering:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_frames_never_wait_for_the_stream(self, game, clock):
         """UC-030 BR-008: with a stream that never completes a write, toggling frames still finish."""
         blocked = asyncio.Event()
@@ -365,9 +365,9 @@ class TestUC040HoldFeedbackOrdering:
         blocked.set()
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_changes_between_two_sends_coalesce(self, game, clock):
-        """UC-040 BR-026: an activation that ended before the task ran sends only the idle state."""
+        """UC-048 BR-010: an activation that ended before the task ran sends only the idle state."""
         await drain()
         game.gameplay_stream.writes.clear()
         fill(game, "p1", 3.0)
@@ -381,9 +381,9 @@ class TestUC040HoldFeedbackOrdering:
         assert [n for n, _, _ in game.gameplay_stream.effects("p1")] == ["GAME_EFFECT_SHIELD_ENERGY"]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_shield_up_plays_at_most_once_per_two_seconds(self, game, clock):
-        """UC-040 BR-026: a mashed trigger never queues sound RPCs."""
+        """UC-048 BR-010: a mashed trigger never queues sound RPCs."""
         fill(game, "p1", 5.0)
         activations = 0
         for _ in range(8):  # one activation about every 0.37 s, about 2.9 s in all
@@ -395,9 +395,9 @@ class TestUC040HoldFeedbackOrdering:
         assert game._play_sound.await_count == 2  # the first activation, then the first one 2 s later
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_a_dead_player_gets_nothing(self, game, clock):
-        """UC-040 A39: a death drops the pool; the death effect, not a hold command, owns the controller."""
+        """UC-048 A11: a death drops the pool; the death effect, not a hold command, owns the controller."""
         await start_holding(game, clock, energy=3.0)
         game.players["p1"].alive = False
         game._drop_shield_hold(game.players["p1"], base_module.HOLD_OUTCOME_DEATH, clock.t)
@@ -405,9 +405,9 @@ class TestUC040HoldFeedbackOrdering:
         assert [n for n, _, _ in game.gameplay_stream.effects("p1")] == ["GAME_EFFECT_SHIELD_ENERGY"]  # game start
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_game_end_stops_the_task_and_ends_every_hold_layer(self, game, clock):
-        """UC-040 A39 / BR-026: no hold command after the game end; SHIELD 0 ends the layers of every player."""
+        """UC-048 A11 / BR-010: no hold command after the game end; SHIELD 0 ends the layers of every player."""
         await start_holding(game, clock, energy=3.0)
         await drain()
         game.gameplay_stream.writes.clear()
@@ -426,9 +426,9 @@ class TestUC040HoldFeedbackOrdering:
         assert game._hold_feedback_task is None
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026", "BR-021"])
+    @pytest.mark.uc("UC-048", br=["BR-010", "BR-006"])
     async def test_a_reconnect_sends_the_state_again(self, game, clock):
-        """UC-040 BR-021 / BR-026: after a mid-game reconnect the hold state of every living player is re-sent."""
+        """UC-048 BR-006 / BR-010: after a mid-game reconnect the hold state of every living player is re-sent."""
         await start_holding(game, clock, energy=3.0)
         await drain()
         game.gameplay_stream.writes.clear()
@@ -454,10 +454,10 @@ class TestUC040HoldEmptyThenDeath:
     """#2462: the trigger held past empty, then a death in the next frames."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     @pytest.mark.parametrize("frames_before_death", [0, 1, 6])
     async def test_nothing_of_the_hold_follows_the_death_effect(self, game, clock, frames_before_death):
-        """UC-040 A39 step 4: SHIELD_HOLD 0 and the empty pulse (when sent) come before the death effect, none after."""
+        """UC-048 A11 step 4: SHIELD_HOLD 0 and the empty pulse (when sent) come before the death effect, none after."""
         game.gameplay_stream = YieldingStream()
         await start_holding(game, clock, energy=0.5)
         await drain()
@@ -480,9 +480,9 @@ class TestUC040HoldEmptyThenDeath:
         assert hold_starts == []  # the held trigger never restarts an activation after empty
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_the_game_end_still_ends_the_dead_players_hold_layers(self, game, clock):
-        """UC-040 A39 / BR-026: SHIELD 0 at the game end reaches a player who died after a hold, and nothing else."""
+        """UC-048 A11 / BR-010: SHIELD 0 at the game end reaches a player who died after a hold, and nothing else."""
         await start_holding(game, clock, energy=0.5)
         await drain()
         while game.players["p1"].hold_started_at:
@@ -501,9 +501,9 @@ class TestUC040HoldEmptyThenDeath:
 
 class TestUC040HoldCueLatch:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-026", "BR-027"])
+    @pytest.mark.uc("UC-048", br=["BR-010", "BR-011"])
     async def test_cue_values_are_read_once_and_a_flip_mid_game_changes_nothing(self, game, clock, flags):
-        """UC-040 BR-027: the cue flags are read with the hold values; a later stage flip applies next game."""
+        """UC-048 BR-011: the cue flags are read with the hold values; a later stage flip applies next game."""
         cue_keys = set(base_module.SHIELD_HOLD_CUE_FLAGS)
         assert sorted(k for k in flags.reads if k in cue_keys) == sorted(cue_keys)
         flags.values["shield.hold_rumble_intensity"] = 10
@@ -516,7 +516,7 @@ class TestUC040HoldCueLatch:
         assert (state.cues.hold_rumble_max_intensity, state.cues.hold_led_floor_pct) == (180, 15)
         assert sorted(k for k in flags.reads if k in cue_keys) == sorted(cue_keys)
 
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     @pytest.mark.parametrize(
         ("key", "raw", "field", "want"),
         [
@@ -538,9 +538,9 @@ class TestUC040HoldCueLatch:
         assert getattr(g._read_shield_hold_cues(), field) == want
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", br=["BR-019", "BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-004", "BR-010"])
     async def test_a_trigger_game_sends_no_hold_command(self, clock, flags):
-        """UC-040 BR-019: a game not latched to hold has no outbound task and sends no hold command."""
+        """UC-048 BR-004: a game not latched to hold has no outbound task and sends no hold command."""
         flags.values["shield.activation"] = "trigger"
         g = _make_ffa()
         g._latch_shield_hold()
@@ -613,7 +613,7 @@ class OverlapCheckingStream(RecordingStream):
 class TestUC030OneWriteInFlight:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-006", "BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_the_hold_task_and_the_frame_path_never_overlap_writes(self, game):
         """UC-030 BR-006: the hold task's writes and the frame path's warnings share one call, one write at a time."""
         stream = OverlapCheckingStream()
@@ -629,9 +629,10 @@ class TestUC030OneWriteInFlight:
         assert any(m.game_effect.effect == pb.GAME_EFFECT_PLAYER_WARNING for m in stream.writes)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="main", steps=[13], br=["BR-026"])
+    @pytest.mark.uc("UC-040", flow="main", steps=[13])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_the_agent_cue_never_queues_a_batch_ahead_of_a_frame_write(self):
-        """UC-040 BR-026: the cue pulses one player after the other, so a frame write waits for one pulse only."""
+        """UC-048 BR-010: the cue pulses one player after the other, so a frame write waits for one pulse only."""
         from unittest.mock import AsyncMock
 
         from services.game_coordinator.interventions import INTERVENTION_SPECS, InterventionManager
@@ -677,7 +678,7 @@ class TestUC030OneWriteInFlight:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-006", "BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-026"])
+    @pytest.mark.uc("UC-048", br=["BR-010"])
     async def test_a_real_aio_call_survives_hold_marks_and_warnings(self, game):
         """UC-030 BR-006 on a real grpc.aio loopback call: 300 marks plus warnings never end the call."""
         async with aio_loopback_call() as (call, _received):
@@ -694,10 +695,10 @@ class TestUC030OneWriteInFlight:
             await drain()
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     @pytest.mark.uc("UC-030", br=["BR-006"])
     async def test_the_game_end_during_a_hold_write_keeps_the_call_and_sends_shield_0(self, game):
-        """UC-040 A39: stopping the task while its write is in flight neither cancels the call nor loses SHIELD 0."""
+        """UC-048 A11: stopping the task while its write is in flight neither cancels the call nor loses SHIELD 0."""
         async with aio_loopback_call() as (call, received):
             started = asyncio.Event()
 

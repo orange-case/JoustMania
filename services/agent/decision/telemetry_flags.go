@@ -17,7 +17,7 @@ const (
 	// blocked decision span (not_allowed / battery_threshold / rate_limit), so
 	// #729 finds the attribution on the span as well as in the LayerState.
 	AttrDecisionBlockReason = "decision.block_reason"
-	// The group shield's set on agent.decision (#2467, UC-040 A47, A48; telemetry.md
+	// The group shield's set on agent.decision (#2467, UC-048 A13, A14; telemetry.md
 	// §4.3): the number of targets, the targets (sorted, comma-separated) and, on a
 	// shield-ledger refusal, the target refused.
 	AttrDecisionGroupSize    = "decision.group.size"

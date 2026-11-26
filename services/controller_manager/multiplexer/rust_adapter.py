@@ -1,7 +1,6 @@
 """Controller I/O adapter backed by the Rust HID gRPC service (rust-hid, port 50058).
 
-The implementation is shared with the python-hid adapter: ``HidServiceAdapter``
-(``hid_service_adapter.py``, #2352).
+The implementation is ``HidServiceAdapter`` (``hid_service_adapter.py``).
 """
 
 from __future__ import annotations

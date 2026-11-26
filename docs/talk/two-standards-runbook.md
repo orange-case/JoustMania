@@ -452,7 +452,7 @@ The section number is kept so references stay stable.
       and a runtime pairing flag change applies.
 - [ ] No stale `joustmania-python-hid` from an older install (#1402):
       `docker ps -a --filter name=joustmania-python-hid` is empty. The start
-      script removes it when the `python-hid` profile is off; by hand:
+      removes it as a compose orphan (#2784); by hand:
       `docker rm -f joustmania-python-hid`.
 - [ ] `.env.local` holds `JEV_API_KEY`, `ANTHROPIC_API_KEY`,
       no `IMAGE_TAG` (the pin is the checked-out

@@ -14,12 +14,11 @@ import (
 
 // Scope is a write's scope properties (services.md §7.2).
 type Scope struct {
-	GameID          string `json:"game_id,omitempty"`
-	Serial          string `json:"serial,omitempty"`
-	ExperimentID    string `json:"experiment_id,omitempty"`
-	Arm             string `json:"arm,omitempty"`
-	GameKind        string `json:"game_kind,omitempty"`
-	FractionPercent *int   `json:"fraction_percent,omitempty"`
+	GameID       string `json:"game_id,omitempty"`
+	Serial       string `json:"serial,omitempty"`
+	ExperimentID string `json:"experiment_id,omitempty"`
+	Arm          string `json:"arm,omitempty"`
+	GameKind     string `json:"game_kind,omitempty"`
 }
 
 // Name derives the registry scope a set of scope properties addresses, or ""
@@ -27,25 +26,23 @@ type Scope struct {
 func (sc Scope) Name() string {
 	hasGame, hasSerial := sc.GameID != "", sc.Serial != ""
 	hasExp := sc.ExperimentID != "" || sc.Arm != ""
-	hasKind, hasFrac := sc.GameKind != "", sc.FractionPercent != nil
+	hasKind := sc.GameKind != ""
 	switch {
-	case hasGame && hasSerial && !hasExp && !hasKind && !hasFrac:
+	case hasGame && hasSerial && !hasExp && !hasKind:
 		return registry.ScopeGameSerial
-	case hasGame && !hasSerial && !hasExp && !hasKind && !hasFrac:
+	case hasGame && !hasSerial && !hasExp && !hasKind:
 		return registry.ScopeGame
-	case hasExp && !hasGame && !hasSerial && !hasKind && !hasFrac:
+	case hasExp && !hasGame && !hasSerial && !hasKind:
 		if sc.ExperimentID == "" || sc.Arm == "" {
 			return ""
 		}
 		return registry.ScopeExperiment
-	case hasKind && !hasGame && !hasSerial && !hasExp && !hasFrac:
+	case hasKind && !hasGame && !hasSerial && !hasExp:
 		if sc.GameKind != gameKindReal {
 			return ""
 		}
 		return registry.ScopeReal
-	case hasFrac && !hasGame && !hasSerial && !hasExp && !hasKind:
-		return registry.ScopeFraction
-	case !hasGame && !hasSerial && !hasExp && !hasKind && !hasFrac:
+	case !hasGame && !hasSerial && !hasExp && !hasKind:
 		return registry.ScopeStack
 	}
 	return ""
@@ -209,21 +206,7 @@ func (s *State) Put(req WriteRequest) (WriteResult, *fserr.Error) {
 	}
 	f, scopeName, checked := plan.f, plan.scope, plan.checked
 
-	now := s.opts.Now()
-	v := &value{Writer: req.Writer, DecisionID: servedDecisionID(req.DecisionID), WrittenAt: now, Persisted: plan.persist}
-	if plan.ttl > 0 {
-		v.ExpiresAt = now.Add(plan.ttl)
-	}
-	if plan.stackLike && checked.Variant != "" {
-		v.Variant = checked.Variant // D13: point defaultVariant at the declared variant
-	} else {
-		prefix := "r"
-		if plan.stackLike {
-			prefix = "o"
-		}
-		v.Variant = s.nextVariant(prefix)
-		v.Value = checked.Value
-	}
+	v := s.newPutValueLocked(req, plan)
 	res.Value = checked.Value
 
 	if req.DryRun {
@@ -258,6 +241,26 @@ func (s *State) Put(req WriteRequest) (WriteResult, *fserr.Error) {
 	return res, nil
 }
 
+// newPutValueLocked builds the value a checked Put places.
+func (s *State) newPutValueLocked(req WriteRequest, plan putPlan) *value {
+	now := s.opts.Now()
+	v := &value{Writer: req.Writer, DecisionID: servedDecisionID(req.DecisionID), WrittenAt: now, Persisted: plan.persist}
+	if plan.ttl > 0 {
+		v.ExpiresAt = now.Add(plan.ttl)
+	}
+	if plan.stackLike && plan.checked.Variant != "" {
+		v.Variant = plan.checked.Variant // D13: point defaultVariant at the declared variant
+		return v
+	}
+	prefix := "r"
+	if plan.stackLike {
+		prefix = "o"
+	}
+	v.Variant = s.nextVariant(prefix)
+	v.Value = plan.checked.Value
+	return v
+}
+
 // putPlan is a checked Put, ready to apply.
 type putPlan struct {
 	f         *flagState
@@ -273,7 +276,7 @@ type putPlan struct {
 //
 //	lookup 404/422 > kind 400 > variant|value 400 > ids 400 > scope fit 400 >
 //	ttl 400 > if_writer_in shape 400 > persist 400 > persisted ttl 400 > live (served, game,
-//	serial, real game) 409/422 > value 422 > fraction 422 > stream 503 >
+//	serial, real game) 409/422 > value 422 > stream 503 >
 //	if_writer_in 412 > if_slot_version 412 (in process only)
 //
 // The 412 is last, a dry run included, under the lock of the write, so no
@@ -303,7 +306,7 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 		return plan, err
 	}
 	plan.f, plan.scope = f, scopeName
-	plan.stackLike = scopeName == registry.ScopeStack || scopeName == registry.ScopeReal || scopeName == registry.ScopeFraction
+	plan.stackLike = scopeName == registry.ScopeStack || scopeName == registry.ScopeReal
 	plan.persist = scopeName == registry.ScopeStack && p.Persist
 	if req.TTLSeconds != nil {
 		if !plan.stackLike || *req.TTLSeconds <= 0 || math.IsInf(*req.TTLSeconds, 0) || math.IsNaN(*req.TTLSeconds) {
@@ -335,12 +338,6 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 	plan.checked, err = registry.CheckValue(p, f.base, req.Variant, req.Value)
 	if err != nil {
 		return plan, err
-	}
-	if scopeName == registry.ScopeFraction {
-		pct := *req.Scope.FractionPercent
-		if pct < p.Bounds.Fraction[0] || pct > p.Bounds.Fraction[1] {
-			return plan, fserr.Unprocessable(fserr.OutOfBounds, "fraction_percent %d outside %v", pct, p.Bounds.Fraction)
-		}
 	}
 	if err := s.streamCheckLocked(f.set); err != nil {
 		return plan, err
@@ -613,8 +610,6 @@ func (s *State) removeLocked(f *flagState, scopeName string, sc Scope) bool {
 	switch scopeName {
 	case registry.ScopeReal:
 		return clearSlot(&f.real)
-	case registry.ScopeFraction:
-		return clearSlot(&f.fraction)
 	case registry.ScopeGame:
 		if f.policy.Kind == registry.KindEvent {
 			if list, ok := f.events[sc.GameID]; ok && len(list.Events) > 0 {
@@ -662,7 +657,7 @@ func deleteNested(outer map[string]map[string]*value, o, inner string) bool {
 	return true
 }
 
-// ClearWriter removes every stack-wide overlay (stack, real, fraction) that
+// ClearWriter removes every stack-wide overlay (stack, real) that
 // writer set in a flag set (DELETE /{flagSetId}?writer=, the talk reset).
 // It returns how many overlays it removed.
 func (s *State) ClearWriter(set, writer string) (int, *fserr.Error) {
@@ -699,11 +694,6 @@ func (s *State) ClearWriter(set, writer string) (int, *fserr.Error) {
 			n++
 			s.slotChangedLocked(f, registry.ScopeReal, Scope{}, writer)
 		}
-		if f.fraction != nil && f.fraction.Writer == writer {
-			f.fraction = nil
-			n++
-			s.slotChangedLocked(f, registry.ScopeFraction, Scope{}, writer)
-		}
 	}
 	if n > 0 {
 		s.changed()
@@ -729,11 +719,6 @@ func (s *State) ExpireOverlays() int {
 			f.real = nil
 			n++
 			s.slotChangedLocked(f, registry.ScopeReal, Scope{}, "")
-		}
-		if expired(f.fraction) {
-			f.fraction = nil
-			n++
-			s.slotChangedLocked(f, registry.ScopeFraction, Scope{}, "")
 		}
 	}
 	if n > 0 {
@@ -875,11 +860,6 @@ func (f *flagState) place(scopeName string, sc Scope, v *value) func() {
 		old := f.real
 		f.real = v
 		return func() { f.real = old }
-	case registry.ScopeFraction:
-		old := f.fraction
-		v.Fraction = *sc.FractionPercent
-		f.fraction = v
-		return func() { f.fraction = old }
 	case registry.ScopeGame:
 		old, had := f.games[sc.GameID]
 		f.games[sc.GameID] = v

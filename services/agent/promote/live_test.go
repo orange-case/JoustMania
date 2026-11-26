@@ -82,14 +82,14 @@ func TestRevertCooldownSuppressesImmediateRepromotion(t *testing.T) {
 	rev := &recordingReverter{}
 	// Watcher always errors → every apply fail-safe reverts.
 	erroring := fakeWatcher{err: errTelemetry}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, erroring, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, erroring, rev)
 
 	// Drive the clock manually so the test is deterministic.
 	now := time.Unix(1000, 0)
 	p.SetClock(func() time.Time { return now })
 	p.SetCooldown(5 * time.Minute)
 
-	cfg := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+	cfg := Config{Mode: ModeAutonomous, Enabled: true}
 
 	// First promotion: applies, watch errors, reverts (sets cooldown at t=1000).
 	res1 := p.Promote(context.Background(), promoteProposal, promoteVerdict, cfg, testEvidence())
@@ -128,7 +128,7 @@ func TestSeedLastRevertPreservesCooldownAcrossRestart(t *testing.T) {
 	realDef := &recordingRealDefault{}
 	rev := &recordingReverter{}
 	healthy := fakeWatcher{degraded: false} // would normally apply + keep
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, healthy, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, healthy, rev)
 
 	now := time.Unix(2000, 0)
 	p.SetClock(func() time.Time { return now })
@@ -137,7 +137,7 @@ func TestSeedLastRevertPreservesCooldownAcrossRestart(t *testing.T) {
 	// Simulate a pre-restart revert at t=1900 recovered from the durable store.
 	p.SeedLastRevert(map[string]time.Time{promoteProposal.FlagKey: time.Unix(1900, 0)})
 
-	cfg := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+	cfg := Config{Mode: ModeAutonomous, Enabled: true}
 
 	// Within the seeded cooldown (1900 + 5m > 2000): re-promotion is suppressed.
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict, cfg, testEvidence())
@@ -220,13 +220,13 @@ func TestInsufficientGamesSchedulesRewatchThatReverts(t *testing.T) {
 	rev := &syncReverter{}
 	// Initial Observe: insufficient. Re-watch poll: insufficient again, then degraded.
 	watcher := &stepWatcher{verdicts: []WatchVerdict{VerdictInsufficient, VerdictInsufficient, VerdictDegraded}}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, watcher, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, watcher, rev)
 
 	rw := NewPollingRewatcher(context.Background(), time.Millisecond, time.Second, discardLogger())
 	p.SetRewatcher(rw)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
 	// The promotion applied (insufficient evidence does not revert synchronously).
 	if res.Outcome != OutcomeApplied {
@@ -246,12 +246,12 @@ func TestRewatchKeepsOnConfirmedHealthy(t *testing.T) {
 	realDef := &recordingRealDefault{}
 	rev := &syncReverter{}
 	watcher := &stepWatcher{verdicts: []WatchVerdict{VerdictInsufficient, VerdictHealthy}}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, watcher, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, watcher, rev)
 	rw := NewPollingRewatcher(context.Background(), time.Millisecond, time.Second, discardLogger())
 	p.SetRewatcher(rw)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 	if res.Outcome != OutcomeApplied {
 		t.Fatalf("outcome = %q, want applied", res.Outcome)
 	}

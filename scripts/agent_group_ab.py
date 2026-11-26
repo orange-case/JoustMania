@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JSON helpers and the report of scripts/agent-group-ab.sh (#2467 PR 6, UC-040 A47).
+"""JSON helpers and the report of scripts/agent-group-ab.sh (#2467 PR 6, UC-048 A13).
 
 Stdlib only. Subcommands:
 

@@ -41,12 +41,11 @@ const (
 	ScopeGameSerial = "game+serial"
 	ScopeExperiment = "experiment+arm"
 	ScopeReal       = "real"
-	ScopeFraction   = "fraction"
 )
 
 var validKinds = map[string]bool{KindState: true, KindLevel: true, KindGrant: true, KindEvent: true, KindOverlay: true}
 var validScopes = map[string]bool{
-	ScopeStack: true, ScopeGame: true, ScopeGameSerial: true, ScopeExperiment: true, ScopeReal: true, ScopeFraction: true,
+	ScopeStack: true, ScopeGame: true, ScopeGameSerial: true, ScopeExperiment: true, ScopeReal: true,
 }
 
 // MaxDescription is the longest description a registry row may carry (in
@@ -89,8 +88,6 @@ type Bounds struct {
 	// "sound", "float lo hi" (a plain decimal string within the bounds) or an
 	// "enum a|b" list.
 	Payload map[string]string `yaml:"payload,omitempty" json:"payload,omitempty"`
-	// Fraction is the allowed fraction_percent range for a fraction write.
-	Fraction []int `yaml:"fraction,omitempty" json:"fraction,omitempty"`
 	// Shape accepts a JSON object with exactly the keys of the flag's baseline
 	// default variant, each value of the same JSON kind (an object-valued
 	// experiment catalog flag such as `windows`).
@@ -314,15 +311,7 @@ func validatePolicy(p *Policy, b *baseline.Baseline) error {
 			return fmt.Errorf("a shape bound needs an object-valued default variant")
 		}
 	}
-	if err := validMagnitudeRow(p, flag); err != nil {
-		return err
-	}
-	if p.AllowsScope(ScopeFraction) {
-		if f := p.Bounds.Fraction; len(f) != 2 || f[0] < 1 || f[1] > 100 || f[0] > f[1] {
-			return fmt.Errorf("a fraction scope needs bounds.fraction [lo, hi] within 1..100")
-		}
-	}
-	return nil
+	return validMagnitudeRow(p, flag)
 }
 
 // validDescription checks the description: one line of at most MaxDescription

@@ -138,9 +138,7 @@ Read from the release tarballs `flagd/v0.16.0` (whose `flagd/go.mod` requires
   that match. So the in-process resolvers on 8015 with `flagSetId=<set>` receive exactly their set, and
   RPC evaluation with a `flagd-selector` header resolves within the set.
 - **Duplicate keys.** One payload is a JSON object keyed by flag key, so a key can appear only once
-  across all merged sets. Today there is one duplicate, `bluetooth_backend` in
-  `services/flagd/controller.ci-rust.json`, a file that nothing loads (flags.md §11); `services/flagd/ci/`
-  has none. The service loads an explicit list of nine files (not a glob) and refuses to start on a
+  across all merged sets; neither `services/flagd/` nor `services/flagd/ci/` has a duplicate. The service loads an explicit list of nine files (not a glob) and refuses to start on a
   duplicate key. A future duplicate across sets would need per-set sync paths (§5.3).
 - Clients without a selector (agent RPC, rust-hid) keep working because keys are unique.
 

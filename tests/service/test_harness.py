@@ -115,8 +115,6 @@ def test_service_env_never_reaches_host_hardware_or_a_collector(tmp_path):
     controller_manager = envs["controller-manager"]
     assert controller_manager["RUST_HID_HOST"] == "127.0.0.1"
     assert controller_manager["RUST_HID_PORT"] == "1"
-    assert controller_manager["PYTHON_HID_HOST"] == "127.0.0.1"
-    assert controller_manager["PYTHON_HID_PORT"] == "1"
     assert controller_manager["DBUS_SYSTEM_BUS_ADDRESS"].startswith("unix:path=/nonexistent/")
     assert controller_manager["MOCK_CONTROL_PORT"] == "40004"
 

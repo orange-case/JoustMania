@@ -1,7 +1,7 @@
 """A closed HID adapter cancels its StreamIO call (#2266).
 
 Since grpcio 1.83 a dropped call is no longer cancelled: before #2266,
-``close_all()`` only cleared ``_stream_running``, so rust-hid / python-hid kept
+``close_all()`` only cleared ``_stream_running``, so rust-hid kept
 serving the closed adapter's stream until the channel closed. These tests run a
 real in-process gRPC server (the HID service's side) and check that it sees the
 cancellation, through the adapters' real channel with its interceptors.
@@ -19,7 +19,6 @@ import pytest
 
 from proto import psmove_hid_pb2, psmove_hid_pb2_grpc
 from services.controller_manager.multiplexer import hid_stream
-from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter
 from services.controller_manager.multiplexer.rust_adapter import RustServiceAdapter
 
 CANCEL_BOUND_S = 2.0  # the server must see the cancel well inside this
@@ -66,10 +65,10 @@ def hid_server():
     server.stop(grace=0)
 
 
-@pytest.fixture(params=[RustServiceAdapter, PythonHidAdapter], ids=["rust", "python_hid"])
+@pytest.fixture(params=[RustServiceAdapter], ids=["rust"])
 def adapter(request, hid_server, monkeypatch):
     service, port = hid_server
-    prefix = "RUST_HID" if request.param is RustServiceAdapter else "PYTHON_HID"
+    prefix = "RUST_HID"
     monkeypatch.setenv(f"{prefix}_HOST", "127.0.0.1")
     monkeypatch.setenv(f"{prefix}_PORT", str(port))
     instance = request.param()

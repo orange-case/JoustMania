@@ -28,7 +28,7 @@ class ActiveEffect:
     effect_type: int  # GameEffect enum value
 
 
-# Agent shield LED schedule (#1301, UC-040 BR-008 / BR-009). Pure function of the
+# Agent shield LED schedule (#1301, UC-048 BR-001 / BR-002). Pure function of the
 # elapsed time so it is testable without a clock and identical on real and mock
 # controllers.
 SHIELD_BLINK_WINDOW_S = 1.0  # last second blinks
@@ -38,7 +38,7 @@ TOUGHNESS_BOOST_BREATH_HZ = 0.5
 TOUGHNESS_BOOST_MIN = 0.10
 TOUGHNESS_BOOST_MAX = 0.50
 
-# Shield charge (#1837, UC-040 BR-021): the held, not yet activated shield breathes the
+# Shield charge (#1837, UC-048 BR-006): the held, not yet activated shield breathes the
 # player's colour; the activation swell is a rumble ramp. Pure functions, like shield_frame.
 CHARGE_BREATH_HZ = 0.5
 CHARGE_MIN = 0.60
@@ -49,7 +49,7 @@ SWELL_MS = 600
 SWELL_PEAK = 180
 SWELL_STEP_S = 0.05
 
-# Charge rumble pattern (#2094, UC-040 BR-021): a moving player must feel the charge without
+# Charge rumble pattern (#2094, UC-048 BR-006): a moving player must feel the charge without
 # looking at the controller. Defaults of the four ``game`` flags (flags.md §4), read per charge.
 CHARGE_GRANT_PULSES = 3
 CHARGE_PRE_EXPIRY_PULSES = 2
@@ -63,7 +63,7 @@ CHARGE_REMINDER_S_RANGE = (1.0, 30.0)  # 0 stays 0 (off)
 # Below the coordinator's 10 s re-send margin (SHIELD_CHARGE_RESEND_MARGIN_SECONDS), so a
 # layer that is re-sent (expiry never, or more than 120 s ahead) never gets an early pulse.
 CHARGE_PRE_EXPIRY_MAX_S = 8.0
-# Shield ending soon (#2094, UC-040 BR-021): a double pulse this long before an active
+# Shield ending soon (#2094, UC-048 BR-006): a double pulse this long before an active
 # (full) shield layer ends; ``shield.ending_rumble_seconds``, read per layer start.
 DEFAULT_SHIELD_ENDING_LEAD_S = 1.0
 SHIELD_ENDING_LEAD_MAX_S = 3.0
@@ -71,7 +71,7 @@ SHIELD_ENDING_PULSES = 2
 CHARGE_SLOT_WAIT_S = 1.0  # a cue waits this long for a busy rumble slot, then is skipped
 CHARGE_SLOT_POLL_S = 0.05
 
-# Shield hold (#2096, UC-040 BR-026): the idle energy layer shows four states in the
+# Shield hold (#2096, UC-048 BR-010): the idle energy layer shows four states in the
 # player's colour, the running activation is white by the energy left. Pure functions.
 HOLD_STATE_EMPTY = "empty"
 HOLD_STATE_LOW = "low"
@@ -83,12 +83,12 @@ HOLD_LOW_MIN = 0.20
 HOLD_LOW_HZ = 1.0
 HOLD_FULL_WHITE_BLEND = 0.50
 HOLD_FULL_HZ = 0.5
-HOLD_COLOR = (255, 255, 255)  # protected, as every shield (BR-008)
+HOLD_COLOR = (255, 255, 255)  # protected, as every shield (UC-048 BR-001)
 DEFAULT_HOLD_RUMBLE_INTENSITY = 70
 HOLD_RUMBLE_MAX = 150
 DEFAULT_EMPTY_PULSE_MS = 400
 EMPTY_PULSE_MS_RANGE = (100, 800)
-# Hold rumble ramp and LED dimming (#2463, UC-040 BR-026): the rumble rises from hold_rumble to
+# Hold rumble ramp and LED dimming (#2463, UC-048 BR-010): the rumble rises from hold_rumble to
 # the ramp top as the energy drains; at or below hold_rumble the rumble is flat (the cues before #2463).
 DEFAULT_HOLD_RUMBLE_MAX_INTENSITY = 200
 HOLD_RUMBLE_RAMP_TOP_MAX = 230  # below the death rumble (255): the end of a ramp never feels like a death
@@ -101,7 +101,7 @@ HOLD_RAMP_MIN_INTERVAL_S = 0.1
 
 @dataclass(frozen=True)
 class ChargeCues:
-    """The charge rumble pattern of one charge, fixed when its layer starts (UC-040 BR-021)."""
+    """The charge rumble pattern of one charge, fixed when its layer starts (UC-048 BR-006)."""
 
     intensity: int = DEFAULT_CHARGE_RUMBLE_INTENSITY
     pulse_ms: int = DEFAULT_CHARGE_RUMBLE_PULSE_MS
@@ -149,7 +149,7 @@ def _scale(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
 
 @dataclass(frozen=True)
 class HoldCues:
-    """The cue values of a hold game, as the coordinator latched them (UC-040 BR-026)."""
+    """The cue values of a hold game, as the coordinator latched them (UC-048 BR-010)."""
 
     pulses: ChargeCues = ChargeCues()
     ending_lead_s: float = DEFAULT_SHIELD_ENDING_LEAD_S
@@ -216,7 +216,7 @@ def hold_fill(remaining_s: float, ref_s: float) -> float:
 
 
 def hold_ramp_intensity(fill: float, base: int, top: int) -> int:
-    """Rumble of a held activation with ``fill`` of its energy left (#2463, UC-040 BR-026).
+    """Rumble of a held activation with ``fill`` of its energy left (#2463, UC-048 BR-010).
 
     ``base`` at a full activation, ``top`` when the energy runs out; flat ``base`` when
     ``top`` is not above it, or when ``base`` is 0 (the hold rumble is off, so it stays silent).
@@ -229,7 +229,7 @@ def hold_ramp_intensity(fill: float, base: int, top: int) -> int:
 
 @dataclass(frozen=True)
 class HoldEnergy:
-    """A player's idle shield energy as last sent by the coordinator (UC-040 BR-024, BR-026).
+    """A player's idle shield energy as last sent by the coordinator (UC-048 BR-008, BR-010).
 
     ``start`` is the controller clock at receipt; the level recharges at ``rate_per_s``
     up to ``full_s`` (``min(cap, budget remaining)``), so it is a pure function of time.
@@ -259,7 +259,7 @@ class HoldEnergy:
 
 
 def hold_energy_state(energy_s: float, cap_s: float, full_s: float, min_burst_s: float) -> str:
-    """The idle energy state (UC-040 BR-026): empty, low, charged or full."""
+    """The idle energy state (UC-048 BR-010): empty, low, charged or full."""
     if energy_s < min_burst_s - 1e-9:
         return HOLD_STATE_EMPTY  # cannot activate (also once the budget is used up)
     if energy_s >= full_s - HOLD_FULL_EPSILON_S:
@@ -270,11 +270,11 @@ def hold_energy_state(energy_s: float, cap_s: float, full_s: float, min_burst_s:
 
 
 def hold_energy_frame(elapsed_s: float, state: str, color: tuple[int, int, int]) -> tuple[int, int, int]:
-    """LED colour of the idle energy layer in ``state`` (UC-040 BR-026); never red, off or plain white.
+    """LED colour of the idle energy layer in ``state`` (UC-048 BR-010); never red, off or plain white.
 
     - empty: the base colour, steady (as in a game without a shield);
     - low: the base colour breathing 20 % to 100 % at 1 Hz;
-    - charged: the base colour breathing 60 % to 100 % at 0.5 Hz (the charge look, BR-021);
+    - charged: the base colour breathing 60 % to 100 % at 0.5 Hz (the charge look, UC-048 BR-006);
     - full: breathing between the base colour and a 50 % white blend at 0.5 Hz.
     """
     elapsed_s = max(0.0, elapsed_s)
@@ -293,12 +293,12 @@ def hold_energy_frame(elapsed_s: float, state: str, color: tuple[int, int, int])
 def hold_active_frame(
     remaining_s: float, ref_s: float, floor: float = DEFAULT_HOLD_LED_FLOOR_PCT / 100.0
 ) -> tuple[int, int, int] | None:
-    """LED colour of a running hold activation with ``remaining_s`` of energy left (UC-040 BR-026, #2463).
+    """LED colour of a running hold activation with ``remaining_s`` of energy left (UC-048 BR-010, #2463).
 
     White, dimming as the energy drains: ``floor + (1 - floor) x fill²``, with ``fill`` the energy
     left above the last second as a share of the activation energy ``ref_s`` above it, so every
     activation starts at 100 % and reaches the floor when the last second starts. The last second
-    blinks at 4 Hz like a shield (BR-008). None once the energy is gone: the layer below shows.
+    blinks at 4 Hz like a shield (UC-048 BR-001). None once the energy is gone: the layer below shows.
     """
     if remaining_s <= 0:
         return None
@@ -317,10 +317,10 @@ def shield_frame(
     Returns None once the shield is over (``elapsed_s >= total_s``): the caller
     restores the player's base colour.
 
-    - Full shield (BR-008): brightness falls linearly 100% -> 30% over the first
+    - Full shield (UC-048 BR-001): brightness falls linearly 100% -> 30% over the first
       ``total_s - 1`` seconds, then the last second blinks at 4 Hz between full
       colour and off. A shield of 1 s or less blinks for its whole duration.
-    - Toughness boost (BR-009): breathes at 0.5 Hz between 10% and 50% until the
+    - Toughness boost (UC-048 BR-002): breathes at 0.5 Hz between 10% and 50% until the
       last second, which blinks at 4 Hz between 50% and off.
     """
     if elapsed_s >= total_s:
@@ -342,7 +342,7 @@ def shield_frame(
 
 
 def charge_frame(elapsed_s: float, color: tuple[int, int, int]) -> tuple[int, int, int]:
-    """LED colour of a shield charge ``elapsed_s`` after it started (UC-040 BR-021).
+    """LED colour of a shield charge ``elapsed_s`` after it started (UC-048 BR-006).
 
     Breathes the colour between 60% and 100% at 0.5 Hz (a 2 s period), starting at 60%.
     """

@@ -104,9 +104,6 @@ func TestPreconditionMatrix_Put(t *testing.T) {
 		{name: "invalid value", put: withReq(stackPut, func(r *WriteRequest) { r.Variant = "nope" }), status: 422, reason: fserr.OutOfBounds},
 		{name: "value out of range", put: withReq(guardPut, func(r *WriteRequest) { r.Value = raw("999") }), status: 422, reason: fserr.OutOfBounds},
 		{name: "invalid value beats no stream", opts: fixtureOpts{noStream: true}, put: withReq(stackPut, func(r *WriteRequest) { r.Variant = "nope" }), status: 422, reason: fserr.OutOfBounds},
-		{name: "fraction below bounds", put: &WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: "rust", Scope: Scope{FractionPercent: intp(0)}}, status: 422, reason: fserr.OutOfBounds},
-		{name: "fraction above bounds", put: &WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: "rust", Scope: Scope{FractionPercent: intp(101)}}, status: 422, reason: fserr.OutOfBounds},
-		{name: "fraction in bounds", put: &WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: "rust", Scope: Scope{FractionPercent: intp(10)}}},
 		{name: "no sync stream", opts: fixtureOpts{noStream: true}, put: &stackPut, status: 503, reason: fserr.NoSyncStream},
 		{name: "no sync stream beats if_writer_in", opts: fixtureOpts{noStream: true}, put: withReq(guardPut, func(r *WriteRequest) { r.IfWriterIn = []string{"nobody"} }), status: 503, reason: fserr.NoSyncStream},
 		{name: "if_writer_in mismatch, no overlay", put: withReq(guardPut, func(r *WriteRequest) { r.IfWriterIn = []string{"agent"} }), status: 412, reason: fserr.WriterMismatch},
@@ -187,9 +184,6 @@ func TestPreconditionMatrix_Clear(t *testing.T) {
 		{name: "stack clear, nothing there", clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams"})},
 		{name: "stack clear", setup: func(t *testing.T, f *fixture) { f.put(stackPut) }, clr: clearReq(ClearRequest{Set: "game", Flag: "num_teams"}), cleared: 1},
 		{name: "experiment clear", setup: func(t *testing.T, f *fixture) { f.put(*withReq(guardPut, func(r *WriteRequest) { r.Scope = expSc })) }, clr: clearReq(ClearRequest{Set: "game", Flag: "shield.energy_budget_seconds", Scope: expSc}), cleared: 1},
-		{name: "fraction clear", setup: func(t *testing.T, f *fixture) {
-			f.put(WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: "rust", Scope: Scope{FractionPercent: intp(10)}})
-		}, clr: clearReq(ClearRequest{Set: "controller", Flag: "bluetooth_backend", Scope: Scope{FractionPercent: intp(10)}}), cleared: 1},
 		{name: "game clear", setup: func(t *testing.T, f *fixture) {
 			f.register("g1", "c1")
 			f.put(WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "g1"}})
@@ -394,8 +388,6 @@ func slotOf(fl *flagState, scope string, sc Scope) *value {
 		return fl.stack
 	case registry.ScopeReal:
 		return fl.real
-	case registry.ScopeFraction:
-		return fl.fraction
 	case registry.ScopeGame:
 		return fl.games[sc.GameID]
 	case registry.ScopeGameSerial:
@@ -424,7 +416,7 @@ func dumpState(s *State) string {
 	var b strings.Builder
 	for _, k := range keys {
 		fl := s.flags[k]
-		fmt.Fprintf(&b, "%s{stack:%s admin:%s real:%s frac:%s", k, dv(fl.stack), dv(fl.admin), dv(fl.real), dv(fl.fraction))
+		fmt.Fprintf(&b, "%s{stack:%s admin:%s real:%s", k, dv(fl.stack), dv(fl.admin), dv(fl.real))
 		for _, id := range matrixKeys(fl.games) {
 			fmt.Fprintf(&b, " g[%s]:%s", id, dv(fl.games[id]))
 		}

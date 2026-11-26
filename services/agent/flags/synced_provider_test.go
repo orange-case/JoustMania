@@ -53,7 +53,7 @@ func (s *fakeFlagdSource) config(enabled string) string {
 			"state": "ENABLED", "defaultVariant": "short",
 			"variants": map[string]any{"short": 3, "default": 5},
 		},
-		// The game set's shield flags (UC-040 A31): "on" reads trigger, "off" instant.
+		// The game set's shield flags (UC-048 A4): "on" reads trigger, "off" instant.
 		"shield.activation": map[string]any{
 			"state": "ENABLED", "defaultVariant": enabled,
 			"variants": map[string]any{"on": "trigger", "off": "instant"},
