@@ -38,7 +38,7 @@ from lib.feature_flags import eval_game_kind, set_game_session_kind_context
 from lib.moments import MOMENT_SHAPE_ATTR, emit_agent_event, read_moment_shape
 from lib.otel_metrics import get_export_interval_ms
 from lib.telemetry import get_tracer
-from lib.types import get_game_display_name
+from lib.types import NO_GAME_IN_PROGRESS, get_game_display_name
 from proto import game_coordinator_pb2
 from services.game_coordinator import metrics
 from services.game_coordinator.event_bus import EventBus
@@ -713,7 +713,7 @@ class GameSession:
                 game_coordinator_pb2.GameState.STARTING,
                 game_coordinator_pb2.GameState.RUNNING,
             ]:
-                return False, "No game in progress"
+                return False, NO_GAME_IN_PROGRESS
             if self._force_ending:
                 return False, "Game is already ending"
 
