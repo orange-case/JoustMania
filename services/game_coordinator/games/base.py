@@ -1264,6 +1264,11 @@ class BaseGameMode(
     # The win hold; a class attribute so tests shorten it. Production keeps 1 s.
     _WIN_HOLD_S: float = 1.0
 
+    # UC-002 BR-009: disconnects of this many players within this much game time are an
+    # infrastructure fault (rust-hid restart, dongle loss, HID stall), not play.
+    _MASS_DISCONNECT_WINDOW_S: float = 0.5
+    _MASS_DISCONNECT_MIN_PLAYERS: int = 2
+
     # Note: Don't set gameplay_stream = None here - it's needed by _end_game_impl
     # for sending winner effects. Stream cleanup happens after teardown phase.
 

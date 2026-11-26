@@ -458,7 +458,10 @@ class NonstopJoustGame(BaseGameMode):
                 # Disconnects first: they were detected before this frame, so a player
                 # whose respawn deadline also passed does not respawn and die twice
                 # (UC-026 A2)
-                for disconnect in gameplay_update.disconnects:
+                disconnects = gameplay_update.disconnects
+                if disconnects:
+                    await self._abort_on_mass_disconnect([d.serial for d in disconnects])
+                for disconnect in disconnects:
                     await self._handle_disconnect(disconnect.serial)
 
                 # Respawns whose deadline passed, before this frame's motion: a death in

@@ -73,6 +73,7 @@ class ControllerInfoKey(StrEnum):
     NAME = "name"
     PAIRED = "paired"
     ADAPTER = "adapter"  # Which adapter handles this controller (psmove, hidapi, mock)
+    BT_ADAPTER = "bt_adapter"  # HCI adapter the controller is routed to ("hci0"; "" for mock, USB, unknown)
     # Reserved controllers are hidden from button-stream consumers (the menu):
     # no connect/disconnect announcements, excluded from connected_serials.
     RESERVED = "reserved"
