@@ -458,14 +458,13 @@ func run() error {
 	// Construction order matters: each stage reads parts the earlier ones built, and
 	// the late-bound parts (the multiplexer, the experiment registry) are installed
 	// before any OTLP signal arrives.
-	// The flag-service clients (C-034): the shared one, and the deferred promotion's
-	// game lister.
+	// The shared flag-service client (C-034).
 	gameFlags := flagservice.NewFromEnv()
 	c := newComponents(ctx, logger, agentFlags, lifecycleHolder, lifecycle, gameFlags)
 	c.buildTextBackends()
 	c.buildDecisionLoops()
 	c.buildGameEnd()
-	c.buildPromotion(flagservice.NewFromEnv())
+	c.buildPromotion()
 	c.buildExperimentStack()
 	server := c.buildPipeline(listenAddr, healthAddr)
 
@@ -481,9 +480,9 @@ func run() error {
 // the split, so logs, flag reads and late bindings happen in the same sequence), and
 // buildPipeline hands the goroutine-owning part to serverComponents.
 //
-// Several parts are late-bound: the per-game loop factory and the deferred promotion
-// probe read c.mux at call time, after buildPipeline has assigned it and before any
-// signal arrives, so they never see nil.
+// Several parts are late-bound: the per-game loop factory reads c.mux at call
+// time, after buildPipeline has assigned it and before any signal arrives, so it
+// never sees nil.
 type components struct {
 	ctx             context.Context
 	logger          *slog.Logger
@@ -967,10 +966,7 @@ func (c *components) buildProposer() {
 // gated — the SAFETY RAIL). The promotion mode/target are read LIVE per promotion, so
 // an operator can flip code_improvement.mode (issue→pr→autonomous) at runtime with
 // no restart.
-//
-// promotionGames is the deferred hold-key promotion's own flag-service client (its
-// game lister), built in run() like gameFlags.
-func (c *components) buildPromotion(promotionGames *flagservice.Client) {
+func (c *components) buildPromotion() {
 	// FitnessStore (#965/#1017): the finalized-per-game fitness store. It is built HERE
 	// (hoisted out of buildExperimentLoop) so it can back BOTH the experiment loop's
 	// validation/anchor seams AND the autonomous Watcher's real-game fitness source
@@ -999,9 +995,6 @@ func (c *components) buildPromotion(promotionGames *flagservice.Client) {
 	c.objResolver = &promote.LateObjectiveResolver{}
 
 	c.promoter = buildPromoter(c.ctx, c.fitnessStore, c.objResolver, c.tuning, c.logger)
-	// UC-043 A17 step 3: the real-game probe of the deferred hold-key writes reads the
-	// telemetry multiplexer, which buildPipeline assigns, at call time.
-	wireDeferredPromotions(c.promoter, func() *gamecontext.Multiplexer { return c.mux }, promotionGames, globalMeterProvider(), c.logger)
 	slog.Info("Code-improvement promotion surface enabled (#936, M7-8)",
 		"code_improvement_enabled", getEnv("AGENT_CODE_IMPROVEMENT_ENABLED", "false"),
 		"target", getEnv("AGENT_CODE_IMPROVEMENT_TARGET", string(promote.TargetLocal)),
@@ -1080,8 +1073,8 @@ func (c *components) buildPipeline(listenAddr, healthAddr string) *serverCompone
 	// mode collapses to exactly today's single-store behavior). The factory applies
 	// the lifecycle TTLs/clock, skips the agent's own telemetry (otlp/agent
 	// self-ingestion loop), and wires OnGameEnd per partition so the retrospective
-	// fires per game on the right partition's state. The per-game loop factory and
-	// the deferred promotion probe read c.mux at call time.
+	// fires per game on the right partition's state. The per-game loop factory reads
+	// c.mux at call time.
 	staleEnds := newGameEndStaleCounter(globalMeterProvider())
 	c.mux = gamecontext.NewMultiplexer(c.newStore(staleEnds))
 	c.mux.SetOwnService(c.ownService)

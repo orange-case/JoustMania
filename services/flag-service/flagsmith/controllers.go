@@ -48,8 +48,7 @@ import (
 const ControllerPrefix = "controller:"
 
 // gameKindShadow is the one game kind whose players keep per-game identities.
-// Any other kind, empty or unknown included, is a real game (fail closed, as
-// the state's no_live_real_game rule).
+// Any other kind, empty or unknown included, is a real game (fail closed).
 const gameKindShadow = "shadow"
 
 // Controller traits (architecture note §2.2).
