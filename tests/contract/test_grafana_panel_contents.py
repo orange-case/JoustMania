@@ -138,7 +138,7 @@ STEP6_PANELS = [
         "agent",
         "agent-operations",
         "Effect Delta p50 (by signal)",
-        r"agent_intervention_effect_delta_bucket",
+        r"agent_intervention_effect_delta_ratio_bucket",
     ),
     # Agent: shadow games.
     (

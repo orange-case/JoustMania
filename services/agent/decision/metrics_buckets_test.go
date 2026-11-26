@@ -23,7 +23,7 @@ func TestEffectDeltaHistogram_ExportsExplicitBuckets(t *testing.T) {
 	}
 	for _, sm := range rm.ScopeMetrics {
 		for _, md := range sm.Metrics {
-			if md.Name != "agent_intervention_effect_delta" {
+			if md.Name != "agent_intervention_effect_delta_ratio" {
 				continue
 			}
 			bounds := md.Data.(metricdata.Histogram[float64]).DataPoints[0].Bounds
@@ -33,5 +33,5 @@ func TestEffectDeltaHistogram_ExportsExplicitBuckets(t *testing.T) {
 			return
 		}
 	}
-	t.Fatal("agent_intervention_effect_delta not exported")
+	t.Fatal("agent_intervention_effect_delta_ratio not exported")
 }

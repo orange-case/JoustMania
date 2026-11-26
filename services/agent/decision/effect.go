@@ -50,7 +50,7 @@ func newInterventionID() string {
 //     record carries the shortened window and window_end_reason=game_ended (#2668).
 //  3. It emits an effect record attributed to the intervention id: an
 //     agent.intervention.effect span (one per intervention, #2640) AND an
-//     agent_intervention_effect_delta metric, both carrying baseline/follow-up/delta +
+//     agent_intervention_effect_delta_ratio metric, both carrying baseline/follow-up/delta +
 //     window, so the M5 dashboard (#791/#792) and the #844 retro can consume it.
 //
 // LEAK-FREENESS / LIFECYCLE SAFETY (#923 goleak): every scheduled follow-up runs in a
@@ -111,7 +111,7 @@ type effectSampler struct {
 	// sample's goroutine when it completes (never closed then), so no channel is
 	// closed twice.
 	gameEnd map[string]chan struct{}
-	// effectDelta records agent_intervention_effect_delta. Never nil (NewLoop seeds a
+	// effectDelta records agent_intervention_effect_delta_ratio. Never nil (NewLoop seeds a
 	// no-op), so the record path is always safe.
 	effectDelta otelmetric.Float64Histogram
 	// afterFunc schedules fn to run after d, returning a stop function. It is the test
@@ -399,7 +399,7 @@ type pendingEffect struct {
 // emitEffectSample is the follow-up half (#918): it re-reads the game's CURRENT signals
 // through the ContextProvider (same per-game source the #917 async path uses), recomputes
 // the SAME fitness functions with the dispatch-time thresholds, computes the per-signal
-// delta, and emits ONE agent.intervention.effect span + the agent_intervention_effect_delta
+// delta, and emits ONE agent.intervention.effect span + the agent_intervention_effect_delta_ratio
 // metric (progress-type signals only, see effectMetricSignal). If the partition is
 // gone (game ended/evicted before the window elapsed) the span is marked ABORTED — no
 // delta, no metric — so the cancellation is visible rather than silent.
@@ -568,7 +568,7 @@ func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 func round4(v float64) float64 { return math.Round(v*1e4) / 1e4 }
 
 // effectMetricSignal reports whether a fitness signal's delta is recorded on the
-// agent_intervention_effect_delta metric (#1444). Only the 0..1 progress signals
+// agent_intervention_effect_delta_ratio metric (#1444). Only the 0..1 progress signals
 // (`*_progress`, `*_ratio`) and the skill gap qualify: their deltas share a unit and
 // fit EffectDeltaBuckets, so a quantile across signals means something. The other
 // Evaluated() keys stay on the agent.intervention.effect spans only:

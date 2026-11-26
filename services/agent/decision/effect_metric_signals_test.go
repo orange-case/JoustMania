@@ -13,7 +13,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// effect_metric_signals_test.go pins #1444: agent_intervention_effect_delta carries
+// effect_metric_signals_test.go pins #1444: agent_intervention_effect_delta_ratio carries
 // only the 0..1 progress-type signals, so a quantile across signals is meaningful.
 // The elapsed-time (`*_seconds`) and constant-threshold keys stay on the
 // agent.intervention.effect spans.
@@ -100,7 +100,7 @@ func TestEffect_MetricOmitsSecondsAndThresholdKeys(t *testing.T) {
 	var recorded []string
 	for _, sm := range rm.ScopeMetrics {
 		for _, m := range sm.Metrics {
-			if m.Name != "agent_intervention_effect_delta" {
+			if m.Name != "agent_intervention_effect_delta_ratio" {
 				continue
 			}
 			for _, dp := range m.Data.(metricdata.Histogram[float64]).DataPoints {
@@ -111,7 +111,7 @@ func TestEffect_MetricOmitsSecondsAndThresholdKeys(t *testing.T) {
 	}
 	sort.Strings(recorded)
 	if !slices.Equal(recorded, wantEffectMetricSignals) {
-		t.Fatalf("agent_intervention_effect_delta signals = %v, want %v", recorded, wantEffectMetricSignals)
+		t.Fatalf("agent_intervention_effect_delta_ratio signals = %v, want %v", recorded, wantEffectMetricSignals)
 	}
 	for _, s := range recorded {
 		if strings.HasSuffix(s, "_seconds") || strings.HasSuffix(s, "_threshold") || s == "balanced.max_skill_gap" {

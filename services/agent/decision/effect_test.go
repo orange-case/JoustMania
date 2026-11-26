@@ -353,7 +353,7 @@ func attrMap(kvs []attribute.KeyValue) map[attribute.Key]interface{} {
 
 func float64Attr(v float64) interface{} { return v }
 
-// readEffectDelta sums the recorded agent_intervention_effect_delta histogram points
+// readEffectDelta sums the recorded agent_intervention_effect_delta_ratio histogram points
 // whose signal label matches; pass "" to sum across all signals.
 func readEffectDelta(t *testing.T, reader *metric.ManualReader, signal string) float64 {
 	t.Helper()
@@ -364,7 +364,7 @@ func readEffectDelta(t *testing.T, reader *metric.ManualReader, signal string) f
 	var sum float64
 	for _, sm := range rm.ScopeMetrics {
 		for _, m := range sm.Metrics {
-			if m.Name != "agent_intervention_effect_delta" {
+			if m.Name != "agent_intervention_effect_delta_ratio" {
 				continue
 			}
 			h, ok := m.Data.(metricdata.Histogram[float64])

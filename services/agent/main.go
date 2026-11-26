@@ -615,7 +615,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// Intervention-effect MEASUREMENT window (#918): after a dispatched intervention,
 	// the loop samples THIS game's fitness/objective signals again after this window
 	// and emits the before/after delta (agent.intervention.effect span +
-	// agent_intervention_effect_delta metric), reusing the SetContextProvider source
+	// agent_intervention_effect_delta_ratio metric), reusing the SetContextProvider source
 	// above to re-read the game's CURRENT signals. The follow-up goroutine is bounded
 	// by SetRootContext so shutdown cancels it cleanly (no leak). Resolved per
 	// intervention from effect.window_seconds (#1788); non-positive = the default.
