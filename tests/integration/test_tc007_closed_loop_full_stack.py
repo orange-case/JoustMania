@@ -25,7 +25,6 @@ the decision rows link this Jaeger trace, and the feed fold below mirrors
 ``parseDecideTraces`` / ``decideRowFrom``.
 """
 
-import asyncio
 import json
 import os
 import subprocess
@@ -58,6 +57,8 @@ from tests.integration.setup_guard import SetupGuard, compose_diagnostics, run_b
 
 AGENT_SERVICE = "agent"
 ENVOY_SERVICE = "envoy"
+COLLECTOR_SERVICE = "otel-collector"
+COLLECTOR_CONTAINER = "joustmania-otel-collector"
 COORDINATOR_SERVICE_NAME = "game-coordinator-service"  # its OTEL_SERVICE_NAME
 
 ENVOY_CONTAINER = "joustmania-envoy"  # container_name in docker-compose.yml
@@ -70,6 +71,7 @@ ENVOY_PORT = 80
 # opts in, it dials envoy's address on the compose network instead (Linux docker
 # only; Docker Desktop does not route to container IPs). Set once envoy is up.
 ENVOY_VIA_CONTAINER_IP_ENV = "TC007_ENVOY_VIA_CONTAINER_IP"
+_envoy_root = ""
 _envoy_jaeger_api = ""
 # UC-035 step 5 / telemetry.md §3: the coordinator's spans of one game.
 GAME_ROOT_SPAN = "Joust Free-for-All"  # the mode's display name
@@ -92,7 +94,11 @@ AGENT_FLAGS = {
 AGENT_UP_TIMEOUT = 600.0  # build (build mode) + health wait
 AGENT_WAIT_TIMEOUT = 180
 ENVOY_UP_TIMEOUT = 120.0
+COLLECTOR_RESTART_TIMEOUT = 120.0
+COLLECTOR_HEALTHY_TIMEOUT = 60.0
 START_TIMEOUT = 25.0
+# Log record -> coordinator export -> collector batch (1 s) -> agent, seen on its next evaluated cycle.
+AGENT_TRACE_TIMEOUT = 30.0
 # Early elimination -> a rule fires -> write -> flagd -> coordinator applies.
 DECIDE_APPLY_TIMEOUT = 60.0
 # Span end -> agent / coordinator batch export -> collector -> Jaeger.
@@ -162,7 +168,7 @@ def closed_loop_stack(docker_compose, request):
 
 def _bring_up(docker_compose, prefix, cwd, env, no_build: bool) -> None:
     """Serve the agent flags, start the agent, then envoy; wait until envoy answers."""
-    global _envoy_jaeger_api
+    global _envoy_jaeger_api, _envoy_root
     _set_agent_flags()
     with flagd_probe_client(docker_compose, "agent") as client:
         assert poll_until(lambda: _flags_served(client)), (
@@ -180,6 +186,20 @@ def _bring_up(docker_compose, prefix, cwd, env, no_build: bool) -> None:
         cwd=cwd,
         env=env,
     )
+    # The collector has resolved agent:4317 in vain since the session began, and each
+    # signal's gRPC client backs off on its own (up to 2 min): metrics can reach the new
+    # agent while the game's trace-id log records are still dropped (no retry, NFR-024).
+    # A restart redials every signal now; upstream OTLP exporters retry across it.
+    run_bounded(
+        [*prefix, "restart", COLLECTOR_SERVICE],
+        what="restart otel-collector",
+        timeout=COLLECTOR_RESTART_TIMEOUT,
+        cwd=cwd,
+        env=env,
+    )
+    assert poll_until(_collector_healthy, timeout=COLLECTOR_HEALTHY_TIMEOUT), (
+        f"{COLLECTOR_CONTAINER} not healthy {COLLECTOR_HEALTHY_TIMEOUT}s after its restart"
+    )
     # Envoy has no healthcheck (distroless); its readiness is polled below.
     run_bounded(
         [*prefix, "--profile", "dashboard", "up", "-d", "--no-deps", ENVOY_SERVICE],
@@ -188,10 +208,21 @@ def _bring_up(docker_compose, prefix, cwd, env, no_build: bool) -> None:
         cwd=cwd,
         env=env,
     )
-    _envoy_jaeger_api = _envoy_base(prefix, cwd, env) + "/jaeger/api"
+    _envoy_root = _envoy_base(prefix, cwd, env)
+    _envoy_jaeger_api = _envoy_root + "/jaeger/api"
     assert poll_until(_jaeger_reachable, timeout=30.0), (
         f"envoy never answered {_envoy_jaeger_api}/v3/services"
     )
+
+
+def _collector_healthy() -> bool:
+    status = subprocess.run(
+        ["docker", "inspect", "-f", "{{.State.Health.Status}}", COLLECTOR_CONTAINER],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout.strip()
+    return status == "healthy"
 
 
 def _probe(url: str) -> tuple[int, str]:
@@ -276,6 +307,17 @@ def _trace(trace_id: str) -> dict:
         return jaeger_v3.get_trace(_envoy_jaeger_api, trace_id)
     except (OSError, ValueError):
         return {}
+
+
+def _agent_game_trace_id(game_id: str) -> str:
+    """The game trace id the agent holds for ``game_id`` (GET /experiments/state), "" while it has none."""
+    try:
+        flags = _get_json(f"{_envoy_root}/experiments/state").get("flags") or []
+    except (OSError, ValueError):
+        return ""
+    return next(
+        (f.get("trace_id", "") for f in flags if f.get("game_id") == game_id), ""
+    )
 
 
 def _tags(span: dict) -> dict:
@@ -489,8 +531,14 @@ async def test_tc007_closed_loop_through_collector_and_jaeger(
         )
         running = await wait_until_running(game_client, {game_id}, timeout=15.0)
         assert game_id in running, f"Step 1: {game_id} never RUNNING"
-        # The agent learns game_cycle from its log record (UC-041 BR-004), batched up to ~2 s by the collector.
-        await asyncio.sleep(2.5)
+        # The agent parents its decide under game_cycle only once G1's log records gave it
+        # the trace ids (UC-041 BR-004); a decide before that starts an agent-only trace.
+        assert await async_poll_until(
+            lambda: bool(_agent_game_trace_id(game_id)), AGENT_TRACE_TIMEOUT
+        ), (
+            f"Step 2: the agent holds no trace id for {game_id} {AGENT_TRACE_TIMEOUT}s after RUNNING: "
+            "its game.start / game.phase.start records did not reach it (collector -> agent logs)"
+        )
 
         # Step 3: early elimination of one player.
         assert await kill_player_verified(
