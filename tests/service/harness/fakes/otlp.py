@@ -17,10 +17,12 @@ event (``wait_log(event_name="player_death", attrs={...})``).
 Tee: ``OtlpSink(forward_to="127.0.0.1:<port>")`` forwards every trace and
 metrics export request unchanged to another OTLP/gRPC receiver (the agent's, as
 the collector's ``otlp/agent`` exporter does in its traces and metrics
-pipelines), and of each logs export request only the moment log events, as the
-collector's ``logs/agent`` pipeline with ``filter/agent_moments`` does (C-001,
-#2658): records named ``death_warning`` or ``player_death`` that carry a
-``moment.id``; a request with none is not forwarded. Best effort: a failed
+pipelines), and of each logs export request only what the collector's
+``logs/agent`` pipeline with ``filter/agent_moments`` passes (C-001, #2658):
+records named ``death_warning`` or ``player_death`` that carry a ``moment.id``,
+and ``game.start``, ``game.end`` and ``game.phase.start`` marked
+``orangecase.audience`` = ``agent`` (the agent's only source of the game's trace
+ids, UC-041 BR-004); a request with none is not forwarded. Best effort: a failed
 forward is counted in ``forward_errors`` and never fails the service's export.
 """
 
@@ -45,6 +47,8 @@ POLL_INTERVAL_SECONDS = 0.1
 FORWARD_TIMEOUT_SECONDS = 2.0
 # The moment log events the collector's filter/agent_moments passes to the agent (C-001).
 AGENT_MOMENT_EVENTS = frozenset({"death_warning", "player_death"})
+# The agent-only game records it also passes, when marked orangecase.audience=agent (#2722, #2766).
+AGENT_ONLY_EVENTS = frozenset({"game.start", "game.end", "game.phase.start"})
 
 
 # --------------------------------------------------------------------------- #
@@ -180,8 +184,12 @@ def _decode_logs(request) -> list[LogRecord]:
 
 
 def _is_agent_moment(record) -> bool:
-    """A moment log event the collector exports to the agent (``filter/agent_moments``)."""
-    return record.event_name in AGENT_MOMENT_EVENTS and any(kv.key == "moment.id" for kv in record.attributes)
+    """A log record the collector exports to the agent (``filter/agent_moments``)."""
+    if record.event_name in AGENT_MOMENT_EVENTS:
+        return any(kv.key == "moment.id" for kv in record.attributes)
+    if record.event_name in AGENT_ONLY_EVENTS:
+        return any(kv.key == "orangecase.audience" and kv.value.string_value == "agent" for kv in record.attributes)
+    return False
 
 
 def _agent_moment_logs(request) -> logs_service_pb2.ExportLogsServiceRequest | None:
