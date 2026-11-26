@@ -12,7 +12,7 @@ how to refit the archetypes when the realism is off (section 4, UC-047):
    in real games, to check that the sign and rough size of the fitness change agree.
 
 Together they are the evidence for the **validity bar** (UC-043 A23, FR-203). Until an objective
-meets the bar it is human-review-only: its verdicts may open an issue or PR but never change a real
+meets the bar it is human-review-only: its verdicts may open an issue but never change a real
 default autonomously. The agent enforces it (#2541): an autonomous promotion is made only for an
 objective the operator attested (section 3). Autonomous promotion is off on every stack today
 (`AGENT_AUTONOMOUS_ENABLED` is unset).
@@ -67,8 +67,7 @@ Jaeger cross-check.
 | `movement_variance` | player, compared per game | final `game_player_movement_variance`; a game's value is the mean over its players |
 
 **Verdict per metric** (every count is games; players of one game are not independent samples):
-`insufficient` when either kind has fewer than `--min-n` games (default 8, the cohort's
-`verdict_min_n`), or while a KS above `--ks-max` would not yet be significant at alpha 0.05: the
+`insufficient` when either kind has fewer than `--min-n` games (default 8), or while a KS above `--ks-max` would not yet be significant at alpha 0.05: the
 critical value 1.358 x sqrt((n+m)/(n x m)) must be at most `--ks-max` (0.3). That takes about 27
 shadow games against 89 real ones, or 41 per kind when the counts are equal. With fewer games,
 "divergent" would mostly be noise: with 8 games per kind and identical distributions it came out
@@ -128,8 +127,8 @@ that JoustFFA shadow games read, `0` strictest to `4` most lenient, default `2`)
 | known-good | `sensitivity` 4 (ultra_fast, most lenient) | longer games, fitness up |
 | known-bad | `sensitivity` 0 (ultra_slow, strictest) | shorter games, fitness down |
 
-**Shadow side.** Run one experiment per change against the baseline, `objective: endurance`,
-`target_n` of at least 8. Name the change as the dynamic declarer's explicit candidate
+**Shadow side.** Run one experiment per change against the baseline, objective `endurance`
+(`experiment_dynamic_objective`). Name the change as the dynamic declarer's explicit candidate
 (`experiment_dynamic_candidates` = `sensitivity=<variant>`, UC-043 BR-012): the value must be a
 declared variant of the flag, so a new value is a flag-file change in a reviewed PR, not an ad-hoc
 write. Turn it on the way `scripts/agent-dryrun-enable.sh` turns on `windows=frantic`. Read the per-arm mean fitness from the experiment's journal or the agent's

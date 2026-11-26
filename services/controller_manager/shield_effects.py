@@ -1,5 +1,5 @@
 """
-Agent shield effects of the FeedbackManager (#1301, #1837, #2094, #2096; UC-040 A16 / A17, BR-008..BR-026).
+Agent shield effects of the FeedbackManager (#1301, #1837, #2094, #2096; UC-048 A1 / A2, BR-001..BR-010).
 
 ``ShieldEffectsMixin`` holds the shield LED layers, the charge / hold / ending rumble cues and the
 activation swell. It was moved out of ``feedback_manager.py`` unchanged (#2354); the state it uses
@@ -106,7 +106,7 @@ def read_shield_ending_lead() -> float:
 
 
 def read_hold_cues() -> HoldCues:
-    """Fallback cue values of a hold layer when a command carries none (UC-040 BR-026, #2096).
+    """Fallback cue values of a hold layer when a command carries none (UC-048 BR-010, #2096).
 
     The coordinator ships the values its game latched (``ShieldCueParams``); this read, with
     no game context, only fills fields a command leaves out.
@@ -163,7 +163,7 @@ def hold_cues_from(state) -> HoldCues:
 
 @dataclass
 class ShieldLayer:
-    """One agent shield on one controller (#1301, UC-040 BR-008..BR-010).
+    """One agent shield on one controller (#1301, UC-048 BR-001..BR-003).
 
     The shield is a persistent LED LAYER, not a replaceable effect: short LED
     effects overlay it and it resumes after them (``shield_frame`` is a pure
@@ -229,7 +229,7 @@ class ShieldEffectsMixin:
     """Shield layers, cues and swell of the FeedbackManager (state is set up in its __init__)."""
 
     # =========================================================================
-    # Agent shield layer (#1301, UC-040 A16 / A17, BR-008..BR-010)
+    # Agent shield layer (#1301, UC-048 A1 / A2, BR-001..BR-003)
     # =========================================================================
 
     def shield_active(self, serial: str) -> bool:
@@ -302,7 +302,7 @@ class ShieldEffectsMixin:
             )
         self._ensure_shield_renderer(serial, kind, duration_ms)
         if newly_charged:
-            # The charge rumble pattern starts with the layer, not with a re-send (UC-040 BR-021, #2094).
+            # The charge rumble pattern starts with the layer, not with a re-send (UC-048 BR-006, #2094).
             await self._stop_charge_cues(serial)
             self._charge_cue_tasks[serial] = asyncio.create_task(self._charge_cue_loop(serial))
         elif kind == "full":
@@ -452,7 +452,7 @@ class ShieldEffectsMixin:
         kinds: frozenset[str] | None = None,
         reason: str = SHIELD_END_CANCELLED,
     ) -> bool:
-        """End shield layers now (#1301, UC-040 A17); other effects are untouched.
+        """End shield layers now (#1301, UC-048 A2); other effects are untouched.
 
         ``kinds`` (or ``toughness_boost_only``) ends just those layers (a full shield keeps
         painting under a charge end). With no layer left the renderer is cancelled and, if
@@ -461,7 +461,7 @@ class ShieldEffectsMixin:
 
         A full end (``kinds`` None: death, game end, stream close) also stops the hold and
         charge state when no layer is left, so a background level or a cue that outlived
-        its layer never brings a rumble back after the death rumble (#2462, UC-040 BR-026).
+        its layer never brings a rumble back after the death rumble (#2462, UC-048 BR-010).
 
         ``reason`` is the ``shield.end_reason`` of the ended layers' spans (#2669): ``death``,
         ``game_end`` or ``cancelled``.
@@ -545,7 +545,7 @@ class ShieldEffectsMixin:
         )
 
     # =========================================================================
-    # Shield hold (#2096, UC-040 BR-026)
+    # Shield hold (#2096, UC-048 BR-010)
     # =========================================================================
 
     async def _motor_off(self, serial: str) -> None:
@@ -631,7 +631,7 @@ class ShieldEffectsMixin:
         self._hold_cue_tasks[serial] = asyncio.create_task(self._hold_cue_loop(serial, cue, "energy"))
 
     async def _step_hold_ramp(self, serial: str, now: float) -> None:
-        """One renderer tick of the hold rumble ramp (#2463, UC-040 BR-026).
+        """One renderer tick of the hold rumble ramp (#2463, UC-048 BR-010).
 
         Reads only the live hold layer, so an ended layer (death, game end, ``SHIELD_HOLD`` 0)
         never brings the rumble back. Writes through the background level, so a one-shot rumble
@@ -669,7 +669,7 @@ class ShieldEffectsMixin:
         Full: the #2094 grant pattern; top-up: one pulse; empty: one pulse of ``empty_pulse_ms``
         (flat mode only, #2463).
         The recharge-to-full pattern plays once per fill, detected from the level and rate the
-        coordinator sent, so a recharge needs no command (UC-040 A38 step 3).
+        coordinator sent, so a recharge needs no command (UC-048 A10 step 3).
         """
         me = asyncio.current_task()
         try:
@@ -730,7 +730,7 @@ class ShieldEffectsMixin:
                 del self._hold_ending_tasks[serial]
 
     # =========================================================================
-    # Charge rumble pattern (#2094, UC-040 BR-021)
+    # Charge rumble pattern (#2094, UC-048 BR-006)
     # =========================================================================
 
     def _rumble_slot_busy(self, serial: str) -> bool:
@@ -747,7 +747,7 @@ class ShieldEffectsMixin:
         return layer
 
     async def _stop_charge_cues(self, serial: str) -> None:
-        """Stop the charge rumble pattern now, a pulse in progress included (UC-040 A32)."""
+        """Stop the charge rumble pattern now, a pulse in progress included (UC-048 A5)."""
         await self._stop_shield_pulses(serial, self._charge_cue_tasks, CHARGE_PULSE_TASK_NAME)
 
     async def _stop_shield_pulses(self, serial: str, cue_tasks: dict[str, asyncio.Task], pulse_name: str) -> None:
@@ -883,13 +883,13 @@ class ShieldEffectsMixin:
         return task is not None and not task.done() and task.get_name() == DEATH_RUMBLE_TASK_NAME
 
     async def _effect_shield_swell(self, serial: str, **_kwargs) -> None:
-        """Activation swell (#1837, UC-040 BR-021): rumble 0 -> 180 -> 0 over 600 ms, no LED.
+        """Activation swell (#1837, UC-048 BR-006): rumble 0 -> 180 -> 0 over 600 ms, no LED.
 
         It owns the rumble slot (``vibration_tasks``), so a later rumble (warning, death)
         cancels it and runs on its own timer.
         """
         if self._death_rumble_running(serial):
-            return  # the death rumble is never shortened (UC-040 BR-021)
+            return  # the death rumble is never shortened (UC-048 BR-006)
         previous = self.vibration_tasks.pop(serial, None)
         if previous is not None:
             previous.cancel()

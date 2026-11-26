@@ -163,7 +163,7 @@ func TestKillSwitch_ForceEndsPatternGames(t *testing.T) {
 		targeting := experiment.NewGateTargetingWriter(experiment.NewGate(writer, nil, log), writer)
 		reg := experiment.NewRegistry(experiment.RegistryConfig{
 			Root: t.TempDir(), MaxShadowGames: 4, EffectiveConcurrency: 2, Spawner: spawner,
-			Verdict: experiment.NewVerdict(3, 0.5, nil), Targeting: targeting, Log: log,
+			Verdict: experiment.NewVerdict(3, 0.5), Targeting: targeting, Log: log,
 			Patterns: pinner, PatternTracker: tracker,
 		})
 		lc := &liveConfig{}

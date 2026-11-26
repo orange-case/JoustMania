@@ -1,4 +1,4 @@
-"""One write in flight per gameplay stream call (UC-030 BR-006, UC-040 BR-026, #2096).
+"""One write in flight per gameplay stream call (UC-030 BR-006, UC-048 BR-010, #2096).
 
 grpc.aio allows a single outstanding write per call: a second ``write`` that starts while
 one is pending fails with GRPC_CALL_ERROR_TOO_MANY_OPERATIONS and ends the whole call with

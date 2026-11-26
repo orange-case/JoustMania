@@ -239,7 +239,7 @@ type StartGameConfig struct {
 	// (menu-origin/primary) start ignores it — see game_coordinator's spawn
 	// binding, which only honors rng_seed for a shadow session.
 	RngSeed uint64 `protobuf:"varint,7,opt,name=rng_seed,json=rngSeed,proto3" json:"rng_seed,omitempty"`
-	// Simulated trigger policy (#2096, UC-046 BR-018, UC-040 BR-019). True when
+	// Simulated trigger policy (#2096, UC-046 BR-018, UC-048 BR-004). True when
 	// the motion archetype installed on this game's pattern controllers carries a
 	// trigger_policy, so the controllers press the trigger by themselves: the
 	// shadow game then honours shield.activation trigger and hold instead of

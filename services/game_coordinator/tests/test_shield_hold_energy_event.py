@@ -66,7 +66,7 @@ def flags():
 
 
 def _start(g, clock):
-    """What the start of the game loop does (UC-040 BR-026, BR-027)."""
+    """What the start of the game loop does (UC-048 BR-010, BR-011)."""
     g._latch_shield_hold()
     g._start_shield_hold_clock(clock.t)
     g._queue_hold_feedback_all()
@@ -152,7 +152,7 @@ class TestUC035HoldEnergyEvent:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-035", br=["BR-008"])
-    @pytest.mark.uc("UC-040", flow="A39")
+    @pytest.mark.uc("UC-048", flow="A11")
     async def test_running_out_publishes_empty(self, game, clock):
         """UC-035 BR-008: held until the energy ran out: `empty` at 0."""
         await start_holding(game, clock, energy=0.5)
@@ -167,7 +167,7 @@ class TestUC035HoldEnergyEvent:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-035", br=["BR-008"])
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-024"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-008"])
     async def test_a_used_up_budget_publishes_exhausted(self, game, clock):
         """UC-035 BR-008: less than a minimum burst of budget left is `exhausted` (budget used up)."""
         game.players["p1"].hold_budget_used = 14.5
@@ -184,7 +184,7 @@ class TestUC035HoldEnergyEvent:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-035", br=["BR-008"])
-    @pytest.mark.uc("UC-040", flow="A36")
+    @pytest.mark.uc("UC-048", flow="A8")
     async def test_a_grant_publishes_source_agent(self, game):
         """UC-035 BR-008: a grant marks the source `agent`; the next event without a grant has none."""
         await drain()
@@ -202,7 +202,7 @@ class TestUC035HoldEnergyEvent:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-035", br=["BR-008"])
-    @pytest.mark.uc("UC-040", flow="A38")
+    @pytest.mark.uc("UC-048", flow="A10")
     async def test_recharging_publishes_the_rate_and_the_full_level(self, clock, flags):
         """UC-035 BR-008: a recharging pool is `recharging`, source `recharge`, with the rate; no tick follows."""
         flags.values["shield.recharge_per_second"] = 0.25
@@ -237,7 +237,7 @@ class TestUC035HoldEnergyEvent:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-035", br=["BR-008"])
-    @pytest.mark.uc("UC-040", br=["BR-019"])
+    @pytest.mark.uc("UC-048", br=["BR-004"])
     async def test_a_trigger_game_publishes_no_energy_event(self, clock, flags):
         """UC-035 BR-008: no hold game, no energy event, so the dashboard shows no bar."""
         flags.values["shield.activation"] = "trigger"

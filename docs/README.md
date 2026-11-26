@@ -42,7 +42,8 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [specs/services.md](specs/services.md) | Services, ports, every gRPC RPC, HTTP endpoints, dependencies |
 | [specs/flags.md](specs/flags.md) | Every flag: type, variants, default, readers, writers, reload behaviour |
 | [specs/telemetry.md](specs/telemetry.md) | Span names, attributes, metrics, game events, log lines others depend on |
-| [specs/decide-contract.md](specs/decide-contract.md) | The decision backend contract: questions, validation, confidence, outcomes, fallbacks |
+| [specs/decide-contract.md](specs/decide-contract.md) | The decision backend contract: questions, validation, confidence, outcomes, fallbacks, the rules engine (§15) |
+| [specs/text-backend.md](specs/text-backend.md) | The text backend of the post-game retro and the experiment proposer: key, budget, eligibility, stub |
 | [specs/stage-host.md](specs/stage-host.md) | Ops spec of the stage Pi's host side: autostart and offline start, upgrade and rollback, status and ACT LED, first-time install, hotspot fallback, with an acceptance checklist (moved from UC-060 / UC-061, #2785) |
 | [specs/generated/](specs/generated/) | Tables generated from the code by `make specs` (Python metric catalog, gRPC RPC tables, flag sets, `ci/` flag diffs; totals are not committed, `make specs-counts` prints them, #2152); never hand-edited, hand-written notes live in [specs/notes/](specs/notes/) |
 | [specs-inventory.md](specs-inventory.md) | Frozen snapshot (2026-11-25, #2798): every older doc's status and the historic `D-*` discrepancy ledger; new drift is a `spec-drift` issue |

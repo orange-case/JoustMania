@@ -38,7 +38,7 @@ import (
 // MaxBodyBytes bounds a request body.
 const MaxBodyBytes = 64 << 10
 
-// HeaderPersisted is set on the 204 of a DELETE ?persist=true that cleared a
+// HeaderPersisted is set on the 204 of a stack DELETE of a persist row that cleared a
 // value: "true" when the state file was written, "false" when a kill switch was
 // cleared in memory only because the save failed, or its clear could not reach
 // a state file unreadable at start (#2368, services.md §7.2).
@@ -360,18 +360,31 @@ func boolParam(q url.Values, name string) (bool, *fserr.Error) {
 	return false, fserr.BadRequest("%s must be true, false, 1 or 0", name)
 }
 
-func scopeFromQuery(r *http.Request) (state.Scope, *fserr.Error) {
+func scopeFromQuery(r *http.Request) state.Scope {
 	q := r.URL.Query()
-	sc := state.Scope{
+	return state.Scope{
 		GameID: q.Get("game_id"), Serial: q.Get("serial"),
 		ExperimentID: q.Get("experiment_id"), Arm: q.Get("arm"), GameKind: q.Get("game_kind"),
 	}
-	fraction, ferr := boolParam(q, "fraction")
-	if fraction || q.Has("fraction_percent") {
-		zero := 0
-		sc.FractionPercent = &zero
+}
+
+// clearQueryError checks a DELETE's query beyond scope and persist, in
+// answer order.
+func clearQueryError(q url.Values, writer string) *fserr.Error {
+	// A leftover fraction clear would otherwise clear the stack overlay.
+	if q.Has("fraction") || q.Has("fraction_percent") {
+		return fserr.BadRequest("the fraction scope was removed")
 	}
-	return sc, ferr
+	// ?if_writer=<label>: the compare-and-delete precondition (#1877, flags.md
+	// §13). Strict: an empty value must not silently drop the precondition.
+	ifWriter := q.Get("if_writer")
+	if q.Has("if_writer") && ifWriter == "" {
+		return fserr.BadRequest("if_writer must not be empty")
+	}
+	if len(ifWriter) > state.MaxIDLength {
+		return fserr.BadRequest("if_writer is longer than %d characters", state.MaxIDLength)
+	}
+	return reservedWriter(writer)
 }
 
 func (a *API) clear(w http.ResponseWriter, r *http.Request) {
@@ -379,34 +392,18 @@ func (a *API) clear(w http.ResponseWriter, r *http.Request) {
 	ctx, span := a.Tracer.Start(r.Context(), telemetry.SpanWrite)
 	a.beginWrite()
 	defer a.endWrite()
-	sc, ferr := scopeFromQuery(r)
-	var persist bool
+	q := r.URL.Query()
+	sc := scopeFromQuery(r)
+	persist, ferr := boolParam(q, "persist")
+	req := state.WriteRequest{Set: r.PathValue("set"), Flag: r.PathValue("flag"), Scope: sc, Writer: q.Get("writer")}
 	if ferr == nil {
-		persist, ferr = boolParam(r.URL.Query(), "persist")
+		ferr = clearQueryError(q, req.Writer)
 	}
-	req := state.WriteRequest{Set: r.PathValue("set"), Flag: r.PathValue("flag"), Scope: sc, Writer: r.URL.Query().Get("writer")}
 	var res state.WriteResult
 	if ferr != nil {
 		res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
-	}
-	// ?if_writer=<label>: the compare-and-delete precondition (#1877, flags.md
-	// §13). Strict: an empty value must not silently drop the precondition.
-	ifWriter := r.URL.Query().Get("if_writer")
-	if ferr == nil && r.URL.Query().Has("if_writer") && ifWriter == "" {
-		ferr = fserr.BadRequest("if_writer must not be empty")
-		res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
-	}
-	if ferr == nil && len(ifWriter) > state.MaxIDLength {
-		ferr = fserr.BadRequest("if_writer is longer than %d characters", state.MaxIDLength)
-		res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
-	}
-	if ferr == nil {
-		if ferr = reservedWriter(req.Writer); ferr != nil {
-			res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
-		}
-	}
-	if ferr == nil {
-		res, ferr = a.State.Clear(state.ClearRequest{Set: req.Set, Flag: req.Flag, Scope: sc, Writer: req.Writer, Persist: persist, IfWriter: ifWriter})
+	} else {
+		res, ferr = a.State.Clear(state.ClearRequest{Set: req.Set, Flag: req.Flag, Scope: sc, Writer: req.Writer, Persist: persist, IfWriter: q.Get("if_writer")})
 	}
 	span.SetAttributes(attribute.Int("flagservice.cleared", res.Cleared))
 	a.finishWrite(ctx, span, telemetry.OpClear, req, res, ferr, start)
@@ -414,8 +411,8 @@ func (a *API) clear(w http.ResponseWriter, r *http.Request) {
 		writeError(w, ferr)
 		return
 	}
-	if persist && (res.Cleared > 0 || res.PersistFailed) {
-		// #2368: a persisted clear says whether it reached the state file; a
+	if res.Persisted || res.PersistFailed {
+		// #2368: a clear of a persisted value says whether it reached the state file; a
 		// kill switch cleared in memory only, or whose clear could not reach
 		// an unreadable state file, answers "false".
 		w.Header().Set(HeaderPersisted, strconv.FormatBool(!res.PersistFailed))

@@ -51,11 +51,8 @@ SERVICE_COMPOSITION = replace(
 
 # Agent overlays (flags.md section 13.2): one pair, bounded games.
 TUNING = {
-    "verdict_min_n": 1,
     "verdict_min_pairs": 1,
     "experiment_tick_seconds": 3,
-    "experiment_max_games": 4,
-    "experiment_dynamic_target_n": 1,
     "experiment.max_game_seconds": 60,
 }
 SERVICE_COMPOSITION = replace(
@@ -181,7 +178,7 @@ def test_hold_experiment_runs_both_arms_and_the_experimental_arm_latches_hold(ho
 @pytest.mark.uc("UC-043", flow="A17", steps=[3])
 def test_real_write_of_a_hold_key_lands_while_a_real_game_is_registered(hold_stack):
     """A17 step 3 (stack half): a hold sub-parameter's ``real`` write is accepted while a real
-    game is registered, because the game latched its values at its start (UC-040 BR-027);
+    game is registered, because the game latched its values at its start (UC-048 BR-011);
     ``shield.activation`` has no ``real`` scope. Dry run: nothing is written on the shared stack."""
     _, client = hold_stack
     game_id = f"uc043-a17-real-{uuid.uuid4().hex[:8]}"

@@ -3,7 +3,7 @@
 AGENT composition plus a fake GitHub (``stack.fake_github``): the real agent (built
 at HEAD), game coordinator and controller manager (mock backend) from source, a
 fresh flag plane and the OtlpSink. The agent's promoter has its GitHub env gate set
-(``AGENT_CODE_IMPROVEMENT_ENABLED``, token, repository, target ``github``) with
+(``AGENT_CODE_IMPROVEMENT_ENABLED``, token, repository) with
 ``GITHUB_API_URL`` on the stub, so ``code_improvement.mode`` = ``issue`` opens the
 issue there and never on github.com.
 
@@ -70,11 +70,8 @@ SERVICE_COMPOSITION = replace(AGENT, fake_github=True)
 # (verdict_min_pairs = 2, the minimum for a paired SD), so the promote verdict
 # concludes the experiment after four games.
 TUNING = {
-    "verdict_min_n": 2,
     "verdict_min_pairs": 2,
     "experiment_tick_seconds": 3,
-    "experiment_max_games": 12,
-    "experiment_dynamic_target_n": 2,
     "experiment.max_game_seconds": 90,
 }
 # Served before the agent starts (Composition.agent_flags), so its first tick already reads them.

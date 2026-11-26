@@ -83,8 +83,6 @@ type Intent struct {
 	ExperimentalValue any `json:"experimental_value"`
 	// Objective is the fitness objective being optimized (one of "endurance"/"balanced"/"accelerate"; chaos is rejected at Declare, #1015).
 	Objective string `json:"objective"`
-	// TargetNPerArm is the minimum games per arm before a verdict can be conclusive.
-	TargetNPerArm int `json:"target_n_per_arm"`
 	// Arms are the arm names, e.g. ["experimental", "control"]. The summary keeps
 	// one Welford accumulator per arm; an event for an unknown arm is recorded in
 	// the log but folds into no accumulator (the log stays the complete audit trail).
@@ -127,7 +125,7 @@ const (
 
 // Promotion is the recorded result of one promotion (entity PROMOTION): Outcome is
 // applied, discarded or reverted (code_improvement.outcome), Reason explains a
-// discarded or reverted outcome, Reference is the issue / PR URL or local commit.
+// discarded or reverted outcome, Reference is the issue URL.
 type Promotion struct {
 	Outcome   string `json:"outcome"`
 	Reason    string `json:"reason,omitempty"`

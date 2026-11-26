@@ -613,7 +613,7 @@ class GameCoordinatorServicer(game_coordinator_pb2_grpc.GameCoordinatorServiceSe
             # a real game MUST get entropy (0) so its behavior is byte-unchanged.
             # Same invariant — never seed a primary session from a caller value.
             #
-            # pattern_trigger_policy (UC-046 BR-018, UC-040 BR-019) rides it
+            # pattern_trigger_policy (UC-046 BR-018, UC-048 BR-004) rides it
             # too: it lets a shadow game honour shield.activation trigger/hold
             # because its pattern controllers press the trigger; a real start's
             # value is dropped so it can never change a real game.

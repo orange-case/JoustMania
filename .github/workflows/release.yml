@@ -210,7 +210,6 @@ jobs:
           - connect-proxy
           - dashboard
           - rust-hid
-          - python-hid
           - operator-pad
           - otel-collector
           - flag-service

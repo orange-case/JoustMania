@@ -62,6 +62,7 @@ func TestOnlineWriteInFlightSurvivesBlip(t *testing.T) {
 // discarded at the first connect like at a reconnect: Flagsmith's value is
 // applied, with none the baseline; nothing of them is sent.
 func TestOfflineBootThenConnectDiscards(t *testing.T) {
+	graceKillSwitch(t)
 	h := newHarness(t, harnessOpts{realOut: true, featureIDs: inoutIDs,
 		before: func(h *harness) {
 			h.setDoc([]map[string]any{fsState("decision.min_interval_ms", true, 700)})
@@ -69,14 +70,14 @@ func TestOfflineBootThenConnectDiscards(t *testing.T) {
 		},
 	})
 	h.waitFor("offline", func() bool { return h.link.Mode() == flagsmith.ModeOffline })
-	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("3")})
+	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("3")})
 	h.put(state.WriteRequest{Set: "agent", Flag: "decision.min_interval_ms", Value: json.RawMessage("900")})
 	h.fake.Fail(0)
 	h.waitFor("online", func() bool { return h.link.Mode() == flagsmith.ModeOnline })
 	h.round()
 	h.round()
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); v.Present {
-		t.Fatalf("UC-054/A3 experiment_max_games = %+v after the first connect, want the baseline (Flagsmith holds none)", v)
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); v.Present {
+		t.Fatalf("UC-054/A3 experiment_completed_grace_seconds = %+v after the first connect, want the baseline (Flagsmith holds none)", v)
 	}
 	if v, _ := h.local("agent", "decision.min_interval_ms", flagsmith.ScopeStack); string(v.Value) != "700" {
 		t.Fatalf("UC-054/A3 decision.min_interval_ms = %s after the first connect, want Flagsmith's 700", v.Value)

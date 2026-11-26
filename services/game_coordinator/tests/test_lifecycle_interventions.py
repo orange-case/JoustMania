@@ -67,7 +67,7 @@ from services.game_coordinator.lifecycle_handlers import (
 
 @pytest.fixture(autouse=True)
 def _no_shield_limits():
-    """Shield limits off (#2044, UC-040 BR-022): these tests are not about the cap or the cooldown."""
+    """Shield limits off (#2044, UC-048 BR-007): these tests are not about the cap or the cooldown."""
     with patch.object(BaseGameMode, "_shield_limits", return_value=(0, 0)):
         yield
 

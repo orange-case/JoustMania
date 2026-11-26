@@ -72,7 +72,7 @@ type Decision struct {
 	Reason string
 	// ReasonSynthesized is true when Reason is the loop's own fallback text
 	// ("decided by <backend>", a remote answer without a rationale) rather than text
-	// the decider wrote; the blind group export drops such a reason (UC-040 BR-033).
+	// the decider wrote; the blind group export drops such a reason (UC-048 BR-014).
 	ReasonSynthesized bool `json:"-"`
 	// ObjectiveServed names the session objective this decision serves
 	// (endurance/balanced/accelerate/chaos), recorded as
@@ -106,7 +106,7 @@ type Decision struct {
 	// so it is not serialized.
 	InterventionID string `json:"-"`
 	// TargetSerials is the set of players of a group intervention
-	// (grant_group_shield, #2467 UC-040 A47): 2 to 6 distinct serials, sorted.
+	// (grant_group_shield, #2467 UC-048 A13): 2 to 6 distinct serials, sorted.
 	// Empty for every other intervention, which uses TargetSerial.
 	TargetSerials []string `json:",omitempty"`
 }
@@ -280,7 +280,7 @@ type Loop struct {
 	// (agent_prediction_dropped_total{backend,reason}, #2479, UC-040 A45).
 	predictionDropped otelmetric.Int64Counter
 	// groupInterventions counts group-shield decisions
-	// (agent_group_interventions_total, #2467 PR 6, UC-040 A47).
+	// (agent_group_interventions_total, #2467 PR 6, UC-048 A13).
 	groupInterventions otelmetric.Int64Counter
 	// groupLog notes group-shield decisions for the game summary (#2529); nil = none.
 	groupLog *GroupLog
@@ -363,11 +363,9 @@ type Loop struct {
 	// decision sequence. nil = not wired (no pattern bookkeeping).
 	pattern PatternObserver
 
-	// charges is this game's shield-charge ledger (UC-040 A31 step 1, chargeledger.go),
-	// guarded by its own mutex. shieldChargeMode is its trigger-mode source; nil keeps
-	// the ledger inert.
-	charges          chargeLedger
-	shieldChargeMode ShieldChargeMode
+	// shieldLimits are the latest cycle's shield limits, read by the shield gate's
+	// views (UC-048 A6, shieldgate.go).
+	shieldLimits shieldGateLimits
 	// promptProfile is the decision.prompt_profile source of remote decide requests
 	// (#2467 PR 5, UC-040 BR-036); nil leaves Request.PromptProfile empty (v1).
 	promptProfile PromptProfileSource
@@ -383,10 +381,10 @@ type Loop struct {
 	// goalSource is the goal-profile source of the prompt's goal lines (#2479);
 	// nil renders none.
 	goalSource GoalSource
-	// shieldSeconds is the grant_shield length source (UC-040 BR-029, #2395): the
+	// shieldSeconds is the grant_shield length source (UC-048 BR-012, #2395): the
 	// interventions/shield_seconds "default" variant, read per grant. nil (the golden
-	// harness, every older test) leaves the decision's value empty, so the writer and
-	// the ledger use DefaultShieldSeconds.
+	// harness, every older test) leaves the decision's value empty, so the writer
+	// uses DefaultShieldSeconds.
 	shieldSeconds ShieldSecondsSource
 
 	// flagBoard receives this partition's effective flag set every cycle (flag_state.go).
@@ -652,9 +650,9 @@ func (l *Loop) OnEvaluate(ctx context.Context, c gamecontext.GameContext, trig E
 		return state
 	}
 
-	// The shield ledger's views (the rules' no-shield filter) use this cycle's
-	// live shield limits (UC-040 A33).
-	l.charges.setLimits(limitsOf(snapshot.Policy))
+	// The shield gate's views (the rules' no-shield filter) use this cycle's
+	// live shield limits (UC-048 A6).
+	l.shieldLimits.set(limitsOf(snapshot.Policy))
 
 	// Objective layer: publish the per-cycle objectives flag into the rules
 	// engine. The engine reads them inside Evaluate; engines that ignore
@@ -906,16 +904,7 @@ func (l *Loop) runDecision(ctx context.Context, snapshot flags.Snapshot, c gamec
 	reason, blocked := perm.reason, perm.blocked
 	// UC-040 A53: released after the write ended, so its time is recorded first.
 	defer perm.cooldown.release()
-	// UC-040 A31 step 1, A33: a shield reserved by the permission chain is kept only
-	// when the write is applied; every other way out of this function, a later
-	// refusal in the chain included, releases it.
 	applied := false
-	defer func() {
-		// A nil interface (no ledger step ran) holds nothing to finish.
-		if perm.shield != nil {
-			perm.shield.finish(&applied)
-		}
-	}()
 	if blocked && l.repeatRefusal(reason, d, now) {
 		// A repeated refusal is counted, but emits no span, warning or timeline entry.
 		l.recordRepeatRefusal(ctx, c.GameKind, d, cost, state, reason)
@@ -1178,11 +1167,7 @@ func (l *Loop) emitDisabledSpan(ctx context.Context, snapshot flags.Snapshot, c 
 type permission struct {
 	reason  BlockReason
 	blocked bool
-	// shield is the shield-ledger reservation this decision holds (UC-040 A31, A33;
-	// a group shield's targets, A47), nil when the ledger does not apply or refused.
-	// It is returned on a later refusal too: the caller's deferred finish releases it.
-	shield shieldHold
-	// refusedSerial is the group target the shield ledger refused (#2467, A48), ""
+	// refusedSerial is the group target the shield gate refused (#2467, A48), ""
 	// otherwise.
 	refusedSerial string
 	// cooldown is the lever hold of a decision that passed step 3a (UC-040 A53), nil
@@ -1193,7 +1178,7 @@ type permission struct {
 // evaluatePermission runs the permission chain over one decision in order:
 // allow-list gate (#727), battery threshold, the experiment-flag check (UC-040
 // A40), the already-applied check (UC-040
-// A35), the lever cooldown (UC-040 A53), the shield ledger (UC-040 A31, A33), then the weighted rate limit (#728). It returns the verdict. The
+// A35), the lever cooldown (UC-040 A53), the shield gate (UC-048 A4, A6), then the weighted rate limit (#728). It returns the verdict. The
 // rate limit is charged ONLY when the decision passes the allow-list and
 // battery gates AND fits the budget — so the budget is spent on decisions the
 // agent actually dispatches, the unification chosen over #726's
@@ -1210,7 +1195,7 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 	// battery is below the threshold. Session-scoped decisions (empty
 	// TargetSerial) are unaffected; missing battery is treated as unknown (does
 	// not block, but is noted).
-	// 1a. Group gate and set (#2467, UC-040 A47, A48, BR-033): a grant_group_shield
+	// 1a. Group gate and set (#2467, UC-048 A13, A14, BR-014): a grant_group_shield
 	// needs the open gate and 2..max_targets distinct alive players. Check-only.
 	if d.Intervention == InterventionGrantGroupShield {
 		if r := groupSetRefusal(snapshot.Policy, c, d); r != "" {
@@ -1243,35 +1228,25 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 	if cooling {
 		return permission{reason: ReasonLeverCooldown, blocked: true}
 	}
-	// 4. Shield ledger (UC-040 A31 step 1, BR-020; A33, BR-022): a targeted
-	// grant_shield is refused already_charged (trigger mode), shield_cap_reached or
-	// shield_cooldown, else reserved. Before the rate limit, so a refusal charges no
-	// budget and does not end rank-order admission.
-	var shield shieldHold
+	// 4. Shield gate (UC-048 A4, A6, A9): a targeted grant_shield is refused from
+	// the coordinator's gauges, check-only. Before the rate limit, so a refusal
+	// charges no budget and does not end rank-order admission.
 	if d.Intervention == InterventionGrantGroupShield {
-		// A group reserves every target and a group slot, all or nothing (A47, A48).
-		res, refused, serial := l.reserveGroupShield(ctx, snapshot, c, d, now)
-		if refused != "" {
+		if refused, serial := l.checkGroupShield(snapshot, c, d, now); refused != "" {
 			return permission{reason: refused, blocked: true, refusedSerial: serial, cooldown: cooldown}
 		}
-		shield = res
-	} else {
-		res, refused := l.reserveShield(ctx, snapshot, c, d, now)
-		if refused != "" {
-			return permission{reason: refused, blocked: true, cooldown: cooldown}
-		}
-		shield = res
+	} else if refused := l.checkShield(snapshot, c, d, now); refused != "" {
+		return permission{reason: refused, blocked: true, cooldown: cooldown}
 	}
 	// 5. Weighted rate limit: block when the per-minute budget is exhausted. The
 	// limiter charges the cost only when it admits, so blocked decisions above do
 	// not draw down the budget. Budget-aware (UC-040 BR-014/BR-015, budget.go):
 	// rank order is kept within a cycle and nudges leave a protective reserve.
-	// admitOrHold charges the budget on admit and may set the cycle's hold. A
-	// block returns the shield reservation, and the caller's finish releases it.
+	// admitOrHold charges the budget on admit and may set the cycle's hold.
 	if !l.admitOrHold(snapshot, d, now, cost, state) {
-		return permission{reason: ReasonRateLimit, blocked: true, shield: shield, cooldown: cooldown}
+		return permission{reason: ReasonRateLimit, blocked: true, cooldown: cooldown}
 	}
-	return permission{shield: shield, cooldown: cooldown}
+	return permission{cooldown: cooldown}
 }
 
 // batteryBlocks reports whether a player-targeted decision must be blocked
@@ -1282,7 +1257,7 @@ func (l *Loop) batteryBlocks(snapshot flags.Snapshot, c gamecontext.GameContext,
 	if snapshot.Policy.BatteryThreshold <= 0 {
 		return false
 	}
-	// A group shield is blocked when any of its targets is low (#2467, A48).
+	// A group shield is blocked when any of its targets is low (#2467, UC-048 A14).
 	for _, serial := range d.TargetSerials {
 		if p := c.Players[serial]; p != nil && p.BatteryPct != nil && *p.BatteryPct < float64(snapshot.Policy.BatteryThreshold) {
 			return true
@@ -1612,7 +1587,7 @@ func fitnessThresholds(f flags.Fitness) FitnessThresholds {
 }
 
 // rulesThresholds is what the loop publishes into the rules engine each cycle: the
-// fitness thresholds plus R4's danger-shield policy (UC-040 A43, BR-032), which
+// fitness thresholds plus R4's danger-shield policy (decide-contract.md §15.3), which
 // the engine clamps at use time.
 func rulesThresholds(s flags.Snapshot) FitnessThresholds {
 	t := fitnessThresholds(s.Fitness)

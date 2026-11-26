@@ -27,7 +27,7 @@ import (
 // "real" overlay the flag service renders as a defaultVariant substitution).
 //
 // The overlay lives in the flag service's memory: a flag-service restart drops
-// it. The durable path for a promoted default is the promotion PR (FR-064,
+// it. The durable path for a promoted default is a human change (FR-064,
 // C-007, FR-138). A revert is DELETE /game/{flag}?game_kind=real, which returns
 // the flag to whatever the baseline (and any admin or stage overlay) says — the
 // exact pre-promotion state, without the value snapshots the file writer needed

@@ -1,15 +1,11 @@
 // Package promote implements M7-8 (#936): the PROMOTION flow for the agent's
 // shadow-scoped flag experiments. It takes a VALIDATED (PROMOTE) experiment plus
-// its fitness Evidence and ACTS according to two live flags:
+// its fitness Evidence and ACTS according to one live flag:
 //
-//		code_improvement.mode   = issue | pr | autonomous   (the "gate")
-//		code_improvement.target = local | github
+//		code_improvement.mode = issue | autonomous   (the "gate")
 //
 //	  - issue       — open a GitHub issue describing the hypothesis + implicated
 //	                  flag; NO code/flag applied.
-//	  - pr          — open a PR with a STRUCTURED body (fitness before/after,
-//	                  synthetic results, proposer reasoning, flag state); nothing
-//	                  merged.
 //	  - autonomous  — apply the validated change to the REAL default, watch real
 //	                  games, and revert if fitness degrades (per M7-7's
 //	                  Validator/Reverter seams).
@@ -19,23 +15,21 @@
 // so the design makes a real action impossible to reach by accident or from a
 // test:
 //
-//   - The seams are interfaces (GitHubClient, GitClient, RealDefaultWriter). Unit
-//     tests use RECORDING FAKES that assert "would open an issue/PR with body X" /
-//     "would commit Y" / "would write real default Z" — ZERO network, ZERO real
-//     git, ZERO real-default mutation.
-//   - The REAL GitHub client + real git + real-default write are constructed ONLY
-//     in main.go behind an EXPLICIT env gate (AGENT_CODE_IMPROVEMENT_ENABLED=true),
-//     a token (GITHUB_TOKEN), and target=github — via NewGitHubClientFromEnv /
-//     NewGitClientFromEnv / NewRealDefaultWriterFromEnv. There is NO test-reachable
-//     constructor for any of them; a test that wants a real client cannot get one.
-//   - The SAFE flag DEFAULTS are baked in: mode defaults to issue (NEVER
-//     autonomous), target defaults to local (NEVER github). autonomous (apply-to-
-//     real + watch) is additionally behind `enabled` = on — the caller passes
-//     Config.Enabled, and an agent in off or watch degrades autonomous to a
+//   - The seams are interfaces (GitHubClient, RealDefaultWriter). Unit tests use
+//     RECORDING FAKES that assert "would open an issue with body X" / "would write
+//     real default Z" — ZERO network, ZERO real-default mutation.
+//   - The REAL GitHub client + real-default write are constructed ONLY in main.go
+//     behind an EXPLICIT env gate (AGENT_CODE_IMPROVEMENT_ENABLED=true) and a token
+//     (GITHUB_TOKEN) — via NewGitHubClientFromEnv / NewRealDefaultWriterFromEnv.
+//     There is NO test-reachable constructor for any of them; a test that wants a
+//     real client cannot get one.
+//   - The SAFE flag DEFAULT is baked in: mode defaults to issue (NEVER
+//     autonomous). autonomous (apply-to-real + watch) is additionally behind
+//     `enabled` = act — the caller passes Config.Enabled, and an agent in off or watch degrades autonomous to a
 //     recorded no-op.
 //   - Real GitHub is default-off, fail-closed: with the env gate/token absent, the
-//     real client is not built; main.go passes the inert recording no-op fakes, and
-//     a github-target promotion degrades to a RECORDED no-op (logged + span reason),
+//     real client is not built; main.go passes the inert recording no-op fake, and
+//     an issue promotion degrades to a RECORDED no-op (logged + span reason),
 //     never a silent or accidental real action.
 //   - autonomous changing the real defaultVariant is a SEPARATE, higher-privilege
 //     path than the shadow Writer (which is structurally shadow-only). It is the
@@ -66,26 +60,10 @@ const (
 	// ModeIssue opens a GitHub issue describing the hypothesis + implicated flag.
 	// NO code or flag change is applied. This is the SAFE default mode.
 	ModeIssue Mode = "issue"
-	// ModePR opens a PR with the structured fitness-evidence body. Nothing is merged
-	// — a human reviews + merges. Lands per target (github → GitHub API, local →
-	// local apply/commit).
-	ModePR Mode = "pr"
 	// ModeAutonomous applies the validated change to the REAL default, watches real
 	// games, and reverts on degradation. The highest-privilege path; default-OFF and
 	// additionally behind `enabled` = on (Config.Enabled).
 	ModeAutonomous Mode = "autonomous"
-)
-
-// Target is the resolved code_improvement.target — where a pr/commit lands.
-type Target string
-
-const (
-	// TargetLocal applies/commits locally (a local git repo or in-process). The SAFE
-	// default target — never reaches github.com.
-	TargetLocal Target = "local"
-	// TargetGitHub commits + opens a PR/issue via the GitHub API. Only reaches a real
-	// client when the env gate + token are present (see NewGitHubClientFromEnv).
-	TargetGitHub Target = "github"
 )
 
 // Outcome is what the promotion ACHIEVED (#936 AC: code_improvement.outcome). The
@@ -93,11 +71,11 @@ const (
 type Outcome string
 
 const (
-	// OutcomeApplied — the requested action happened: an issue/PR was opened, or the
+	// OutcomeApplied — the requested action happened: an issue was opened, or the
 	// autonomous real-default change was applied.
 	OutcomeApplied Outcome = "applied"
 	// OutcomeDiscarded — the promotion did NOT act: the verdict was not PROMOTE, the
-	// agent was disabled (autonomous), or a github action degraded to an inert
+	// agent was disabled (autonomous), or the issue degraded to an inert
 	// recorded no-op because the real path was not enabled. The Reason explains which.
 	OutcomeDiscarded Outcome = "discarded"
 	// OutcomeReverted — autonomous applied to the real default but a degradation was
@@ -113,14 +91,12 @@ const (
 // package stays free of an OpenFeature dependency (the Gate/Writer/Validator all
 // follow this "package owns logic, caller owns flagd" split).
 type Config struct {
-	// Mode is code_improvement.mode (default issue). Selects issue/pr/autonomous.
+	// Mode is code_improvement.mode (default issue). Selects issue/autonomous.
 	Mode Mode
-	// Target is code_improvement.target (default local). Selects local/github.
-	Target Target
-	// Enabled is `enabled` == on (flags.Flags.Applying). It gates ONLY the
+	// Enabled is `enabled` == act (flags.Flags.Applying). It gates ONLY the
 	// autonomous mode: a real-default mutation changes future games, so it never
-	// happens in off or watch. issue/pr do not consume it (opening an issue/PR is not
-	// a live real-player change). Otherwise autonomous degrades to a recorded no-op
+	// happens in off or watch. issue does not consume it (opening an issue is not a
+	// live real-player change). Otherwise autonomous degrades to a recorded no-op
 	// (OutcomeDiscarded + reason), never a silent real change.
 	Enabled bool
 
@@ -131,10 +107,9 @@ type Config struct {
 	epochKnown bool
 }
 
-// Evidence is the fitness + provenance the promotion records into an issue/PR
-// body (#936 AC: "PR description is structured: fitness before/after, synthetic
-// results, reasoning summary, flag state"). It is assembled by the caller from the
-// M7-7 Decision + the live flag snapshot and threaded into the body renderer.
+// Evidence is the fitness + provenance the promotion records into an issue body
+// (fitness before/after, synthetic results, reasoning summary, flag state). It
+// is assembled by the caller from the M7-7 Decision + the live flag snapshot and threaded into the body renderer.
 type Evidence struct {
 	// FitnessBefore / FitnessAfter / FitnessDelta are the M7-7 baseline-vs-synthetic
 	// fitness numbers (experiment.Decision). Recorded in the body AND on the span.
@@ -156,7 +131,7 @@ type Evidence struct {
 	FlagState string
 	// RealDefaultValue is the value the autonomous path would write as the REAL
 	// defaultVariant for the flag (typically the experiment's experimental value once
-	// validated). Used only by ModeAutonomous; ignored by issue/pr.
+	// validated). Used only by ModeAutonomous; ignored by issue.
 	RealDefaultValue any
 	// Objective is the experiment's objective (journal.Intent.Objective). The
 	// autonomous write is made only when it meets the substrate validity bar
@@ -174,41 +149,19 @@ type IssueReq struct {
 	Labels []string
 }
 
-// PRReq is the GitHub pull request a ModePR / TargetGitHub promotion opens.
-type PRReq struct {
-	// Title is the PR title.
-	Title string
-	// Body is the STRUCTURED, machine-readable evidence body (see renderPRBody):
-	// fitness before/after, synthetic results, reasoning, flag state.
-	Body string
-	// Head is the branch carrying the change; Base is the branch to merge into.
-	Head string
-	Base string
-}
-
-// CommitReq is a local-target commit (TargetLocal): the change written + committed
-// into a working tree (no network). Used by the GitClient seam.
-type CommitReq struct {
-	// Message is the commit message.
-	Message string
-	// Files maps repo-relative path -> new file contents written before the commit.
-	Files map[string]string
-}
-
 // Result is the recorded outcome of one Promote, returned to the caller for the
 // span/log and any follow-up. Never nil-meaningful: even a no-op returns a Result
 // with OutcomeDiscarded + a Reason, so a promotion is always attributable.
 type Result struct {
-	// Mode / Target are the resolved flags the promotion acted under (echoed for the
-	// caller's log without re-reading flagd).
-	Mode   Mode
-	Target Target
+	// Mode is the resolved flag the promotion acted under (echoed for the caller's
+	// log without re-reading flagd).
+	Mode Mode
 	// Outcome is applied | discarded | reverted.
 	Outcome Outcome
-	// URL is the opened issue/PR URL (empty for local/no-op).
+	// URL is the opened issue URL (empty for a no-op).
 	URL string
 	// Reason explains a no-op / degrade / revert (empty on a clean applied). Its
-	// presence on a github-target Result is the SAFETY RAIL's visible proof that the
+	// presence on an issue Result is the SAFETY RAIL's visible proof that the
 	// real path was unreachable and the promotion degraded to an inert recorded no-op.
 	Reason string
 	// ForeignOwner: the writer that owns the real overlay when the promotion was
@@ -223,17 +176,6 @@ type Result struct {
 type GitHubClient interface {
 	// OpenIssue opens a GitHub issue and returns its URL.
 	OpenIssue(ctx context.Context, req IssueReq) (string, error)
-	// OpenPR opens a GitHub pull request and returns its URL.
-	OpenPR(ctx context.Context, req PRReq) (string, error)
-}
-
-// GitClient is the local-target git seam (TargetLocal): write files + commit into
-// a working tree. Unit tests use a throwaway `git init` temp repo (real git, NO
-// network — there is no push); the real client is built only in main.go.
-type GitClient interface {
-	// Commit writes req.Files and commits them, returning the commit SHA. It MUST
-	// NOT push (local target never reaches a remote).
-	Commit(ctx context.Context, req CommitReq) (string, error)
 }
 
 // RealDefaultWriter performs the autonomous mode's REAL defaultVariant mutation —
@@ -278,17 +220,15 @@ type RealDefaultReverter interface {
 	RevertRealDefault(ctx context.Context, flagKey string) error
 }
 
-// Promoter orchestrates a promotion per the live mode/target. It owns ONLY the
-// dispatch + outcome logic; every consequential effect (open issue/PR, commit,
-// write real default, watch, revert) is an injected seam, so the whole flow is
+// Promoter orchestrates a promotion per the live mode. It owns ONLY the
+// dispatch + outcome logic; every consequential effect (open issue, write real
+// default, watch, revert) is an injected seam, so the whole flow is
 // unit-testable with recording fakes and the real path is built only in main.go.
 type Promoter struct {
 	github   GitHubClient        // wire boundary; recording fake in tests, env-gated real client in main.go
-	git      GitClient           // local-target commit; temp git repo in tests
 	realDef  RealDefaultWriter   // autonomous real-default mutation (nil = not wired)
 	watcher  Watcher             // autonomous live watch (nil = HARD STOP: autonomous refuses to apply, #1016)
 	reverter RealDefaultReverter // autonomous degradation rollback (nil = not wired)
-	repo     RepoRef             // owner/name/base used to build issue/PR/commit requests
 	tracer   trace.Tracer
 	log      *slog.Logger
 
@@ -441,28 +381,16 @@ func (pr *Promoter) SeedLastRevert(times map[string]time.Time) {
 	}
 }
 
-// RepoRef identifies the GitHub repo + default base branch a promotion targets.
-// Populated from env in main.go (GITHUB_REPOSITORY / GITHUB_BASE_BRANCH); the
-// fakes in tests use a fixed value.
-type RepoRef struct {
-	Owner string
-	Name  string
-	Base  string
-}
-
-// NewPromoter builds a Promoter over the injected seams. github/git default to the
-// inert recording no-ops when nil (so a Promoter is ALWAYS safe to construct in a
+// NewPromoter builds a Promoter over the injected seams. github defaults to the
+// inert recording no-op when nil (so a Promoter is ALWAYS safe to construct in a
 // test or when the real path is disabled — it can only no-op). realDef/watcher/
 // reverter may be nil (autonomous degrades accordingly). tracer nil uses the global
 // tracer; log nil uses slog.Default().
-func NewPromoter(github GitHubClient, git GitClient, realDef RealDefaultWriter, watcher Watcher, reverter RealDefaultReverter, repo RepoRef, tracer trace.Tracer, log *slog.Logger) *Promoter {
+func NewPromoter(github GitHubClient, realDef RealDefaultWriter, watcher Watcher, reverter RealDefaultReverter, tracer trace.Tracer, log *slog.Logger) *Promoter {
 	if github == nil {
 		// Default to the inert recording no-op: a Promoter built without an explicit
 		// client can NEVER reach github.com. The real client is opt-in (main.go only).
 		github = NewNoopGitHubClient(log)
-	}
-	if git == nil {
-		git = NewNoopGitClient(log)
 	}
 	if tracer == nil {
 		tracer = otel.Tracer(instrumentationName)
@@ -472,11 +400,9 @@ func NewPromoter(github GitHubClient, git GitClient, realDef RealDefaultWriter, 
 	}
 	return &Promoter{
 		github:     github,
-		git:        git,
 		realDef:    realDef,
 		watcher:    watcher,
 		reverter:   reverter,
-		repo:       repo,
 		tracer:     tracer,
 		log:        log,
 		cooldown:   DefaultRevertCooldown,
@@ -488,25 +414,23 @@ func NewPromoter(github GitHubClient, git GitClient, realDef RealDefaultWriter, 
 
 // Promote acts on a validated experiment per the live cfg. p is the PROMOTE'd
 // Proposal, dec is the M7-7 verdict, ev is the assembled fitness Evidence. It
-// emits the code_improvement.promote span carrying gate (mode) + target + outcome
+// emits the code_improvement.promote span carrying gate (mode) + outcome
 // (+ the fitness evidence + any degrade reason), and returns the recorded Result.
 //
-// UC-043 BR-003: issue and PR modes never change a running system; a human merges.
+// UC-043 BR-003: issue mode never changes a running system; a human acts on it.
 // FAIL-SAFE / RECORDED: a promotion NEVER silently acts or silently no-ops. If the
-// verdict was not PROMOTE, or a github target is unreachable (real client absent),
+// verdict was not PROMOTE, or GitHub is unreachable (real client absent),
 // or autonomous is requested while disabled, the promotion degrades to
 // OutcomeDiscarded with a Reason on the span — visible, never silent. The real,
 // consequential paths run only through the env-gated injected seams.
 func (pr *Promoter) Promote(ctx context.Context, p experiment.Proposal, dec experiment.Decision, cfg Config, ev Evidence) Result {
 	mode := normalizeMode(cfg.Mode)
-	target := normalizeTarget(cfg.Target)
 	if !cfg.epochKnown {
 		cfg.killEpoch, cfg.epochKnown = pr.KillSwitchEpoch(), true
 	}
 
 	ctx, span := pr.tracer.Start(ctx, SpanPromote, trace.WithAttributes(
 		attribute.String(AttrGate, string(mode)),
-		attribute.String(AttrTarget, string(target)),
 		attribute.String(AttrFlagKey, p.FlagKey),
 		attribute.Float64(AttrFitnessBefore, ev.FitnessBefore),
 		attribute.Float64(AttrFitnessAfter, ev.FitnessAfter),
@@ -514,7 +438,7 @@ func (pr *Promoter) Promote(ctx context.Context, p experiment.Proposal, dec expe
 	))
 	defer span.End()
 
-	res := Result{Mode: mode, Target: target}
+	res := Result{Mode: mode}
 
 	// GUARD 1: only a validated PROMOTE verdict is ever promoted (#936 depends on
 	// M7-7: "only validated changes are promoted"). Anything else is a recorded
@@ -528,8 +452,6 @@ func (pr *Promoter) Promote(ctx context.Context, p experiment.Proposal, dec expe
 	switch mode {
 	case ModeIssue:
 		pr.promoteIssue(ctx, p, ev, &res)
-	case ModePR:
-		pr.promotePR(ctx, p, ev, target, &res)
 	case ModeAutonomous:
 		pr.promoteAutonomous(ctx, p, cfg, ev, &res)
 	default:
@@ -557,7 +479,6 @@ func (pr *Promoter) record(span trace.Span, res Result) Result {
 	}
 	pr.log.Info("code_improvement.promoted",
 		"gate", string(res.Mode),
-		"target", string(res.Target),
 		"outcome", string(res.Outcome),
 		"url", res.URL,
 		"reason", res.Reason,
@@ -570,21 +491,9 @@ func (pr *Promoter) record(span trace.Span, res Result) Result {
 // silently become a real-default mutation.
 func normalizeMode(m Mode) Mode {
 	switch m {
-	case ModeIssue, ModePR, ModeAutonomous:
+	case ModeIssue, ModeAutonomous:
 		return m
 	default:
 		return ModeIssue
-	}
-}
-
-// normalizeTarget coerces an unknown/empty target to the SAFE default (local) —
-// the safety rail's "default target is never github". A garbled flag value can
-// never silently route to github.com.
-func normalizeTarget(t Target) Target {
-	switch t {
-	case TargetLocal, TargetGitHub:
-		return t
-	default:
-		return TargetLocal
 	}
 }

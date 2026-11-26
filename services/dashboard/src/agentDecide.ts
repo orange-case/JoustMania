@@ -95,7 +95,7 @@ export function decisionTargetLabel(d: Pick<LinkedDecision, "targetSerial" | "ta
 }
 
 /**
- * The label of an ffa.target choice that names a group (UC-040 A47, BR-033, #2529):
+ * The label of an ffa.target choice that names a group (UC-048 A13, BR-014, #2529):
  * "Group: all" for group:all, "Group: all but one" for group:all_except:<serial>
  * (the serial is not shown). null for any other choice, which keeps its raw text.
  */
@@ -108,7 +108,7 @@ export function groupTargetLabel(target: string): string | null {
 
 /**
  * The badge tooltip: the group choice without its excepted serial ("group:all",
- * "group:all_except"), so the serial stays out of the UI (BR-033).
+ * "group:all_except"), so the serial stays out of the UI (UC-048 BR-014).
  */
 export function groupTargetShape(target: string): string {
   return target.split(":").slice(0, 2).join(":");
@@ -172,8 +172,6 @@ export interface DecidePrediction {
   source: string;
   /** The rules-table row ("R4") or "". */
   rule: string;
-  /** True when an identical prediction was already pending (decide.prediction.merged). */
-  merged: boolean;
   /** Joined from the agent.prediction.outcome span of the same trace by id. */
   outcome: PredictionState;
   /** prediction.unscorable_reason of the joined span ("" otherwise). */
@@ -192,7 +190,7 @@ export interface PredictionOutcomeSpan {
   source: string;
   template: string;
   p: number | null;
-  /** The decision was applied (false = counterfactual, never in the headline). */
+  /** Not a control (only applied decisions register a prediction). */
   acted: boolean;
   outcome: "hit" | "miss" | "unscorable";
   unscorableReason: string;
@@ -239,13 +237,11 @@ export interface PredictionStripSource {
   baseRate: number | null;
 }
 
-/** The per-game prediction strip: acted predictions only (counterfactuals never count). */
+/** The per-game prediction strip: decision predictions, controls as the base rate. */
 export interface PredictionStrip {
   gameId: string;
   gameKind: string;
   sources: PredictionStripSource[];
-  /** Counterfactual (held, blocked, discarded) predictions left out of the rates. */
-  counterfactual: number;
 }
 
 /**
@@ -298,7 +294,6 @@ function predictionFrom(
     p: tagNumber(tags, "decide.prediction.p"),
     source: tagString(tags, "decide.prediction.source"),
     rule: tagString(tags, "decide.prediction.rule"),
-    merged: tagBool(tags, "decide.prediction.merged"),
     outcome: scored ? scored.outcome : "pending",
     unscorableReason: scored ? scored.unscorableReason : "",
   };
@@ -329,9 +324,8 @@ function outcomeSpanFrom(span: JaegerSpan): PredictionOutcomeSpan | null {
 }
 
 /**
- * Hit rate per source against the controls' base rate (#2479). Only the game's acted
- * predictions count (UC-040 BR-034: a counterfactual is never mixed in); unscorable
- * is neither a hit nor a miss. The base rate of a source is the controls' hit rate on
+ * Hit rate per source against the controls' base rate (#2479). Unscorable is neither a hit
+ * nor a miss. The base rate of a source is the controls' hit rate on
  * the templates that source predicted, weighted by its own template mix, so a source
  * that only picks easy templates is compared with how easy they are.
  */
@@ -350,13 +344,8 @@ export function predictionStripFrom(
     control.set(o.template, c);
   }
   const bySource = new Map<string, PredictionStripSource & { mix: Map<string, number> }>();
-  let counterfactual = 0;
   for (const o of game) {
     if (o.source === "control") continue;
-    if (!o.acted) {
-      counterfactual++;
-      continue;
-    }
     let src = bySource.get(o.source);
     if (!src) {
       src = { source: o.source, hits: 0, misses: 0, unscorable: 0, hitRate: null, baseRate: null, mix: new Map() };
@@ -391,7 +380,7 @@ export function predictionStripFrom(
     });
   }
   const gameKind = game[0].gameKind;
-  return { gameId, gameKind, sources, counterfactual };
+  return { gameId, gameKind, sources };
 }
 
 /** Fold one invoke_agent span (with its trace neighbours) into a feed row. */

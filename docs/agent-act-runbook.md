@@ -240,7 +240,7 @@ drift (closes bug classes #800/#848):
 | Layer | Where | Scope | Reads flag | Role |
 |-------|-------|-------|-----------|------|
 | **Agent (authoritative)** | `services/agent/decision/` — per-game `Loop` in `loopset.go`, limiter in `ratelimit.go` | **Per game** (`game_id`) | `policy.max_interventions_per_minute` | The real governor. Each game gets its **own** weighted per-minute budget; one game exhausting it never starves another. The agent only emits an intervention once its per-game limiter admits it. |
-| **Coordinator (backstop)** | `services/game_coordinator/interventions.py` — `_RateLimiter` | **Process-global** (all games share one) | `policy.coordinator_backstop_per_minute` | A generous global safety net. Caps a *runaway/buggy* agent that floods flag writes far beyond any sane per-game rate. Tuned high enough that normal multi-session traffic never reaches it. |
+| **Coordinator (backstop)** | `services/game_coordinator/intervention_policy.py` — `_RateLimiter` | **Process-global** (all games share one) | `policy.coordinator_backstop_per_minute` | A generous global safety net. Caps a *runaway/buggy* agent that floods flag writes far beyond any sane per-game rate. Tuned high enough that normal multi-session traffic never reaches it. |
 
 **The single-owner rule (drift prevention).** Per-game pacing lives in exactly
 **one** place — the agent. The coordinator does **not** re-derive or mirror the

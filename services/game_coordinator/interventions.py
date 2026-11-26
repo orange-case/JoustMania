@@ -52,12 +52,10 @@ import contextlib
 import logging
 import threading
 import time
-from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from openfeature import api as openfeature_api
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.flag_evaluation import Reason
 from openfeature.provider import ProviderEvent
@@ -70,11 +68,36 @@ from services.game_coordinator.game_loop_dispatch import (
     GameLoopUnavailableError,
 )
 from services.game_coordinator.games.intervention_moment import (
-    PLAYER_LEVER_TYPES,
-    InterventionScope,
     decision_id_of,
     event_decision_id,
     run_with_intervention_scope,
+)
+
+# The units the manager coordinates. Names that lived in this module
+# before the split are re-exported here (``as`` form), so imports and patches of
+# ``services.game_coordinator.interventions.<name>`` keep resolving.
+from services.game_coordinator.intervention_deferral import (
+    DEFERRAL_RECHECK_S as DEFERRAL_RECHECK_S,
+)
+from services.game_coordinator.intervention_deferral import (
+    DEFERRAL_WARN_AFTER_S as DEFERRAL_WARN_AFTER_S,
+)
+from services.game_coordinator.intervention_deferral import (
+    DEFERRAL_WARN_INTERVAL_S as DEFERRAL_WARN_INTERVAL_S,
+)
+from services.game_coordinator.intervention_deferral import AllowListGate
+from services.game_coordinator.intervention_dispatch import (
+    _ids_for as _ids_for,
+)
+from services.game_coordinator.intervention_dispatch import (
+    _intervention_scope as _intervention_scope,
+)
+from services.game_coordinator.intervention_dispatch import (
+    count_dispatch_failure,
+    record_outcome,
+)
+from services.game_coordinator.intervention_dispatch import (
+    run_in_game_flag_context as run_in_game_flag_context,
 )
 from services.game_coordinator.intervention_effects import (
     _CONTROLLER_EFFECT_NAMES as _CONTROLLER_EFFECT_NAMES,
@@ -92,19 +115,110 @@ from services.game_coordinator.intervention_effects import (
     _resolve_effect as _resolve_effect,
 )
 from services.game_coordinator.intervention_errors import InterventionNotApplied
+from services.game_coordinator.intervention_evaluation import (
+    _UNKNOWN as _UNKNOWN,
+)
+from services.game_coordinator.intervention_evaluation import (
+    SpecEvaluator,
+)
+from services.game_coordinator.intervention_evaluation import (
+    _active_player_serials as _active_player_serials,
+)
+from services.game_coordinator.intervention_evaluation import (
+    _edge_target_serial as _edge_target_serial,
+)
+from services.game_coordinator.intervention_evaluation import (
+    _event_group_seconds as _event_group_seconds,
+)
+from services.game_coordinator.intervention_evaluation import (
+    _event_payload_string as _event_payload_string,
+)
+from services.game_coordinator.intervention_evaluation import (
+    _event_target_serials as _event_target_serials,
+)
+from services.game_coordinator.intervention_evaluation import (
+    _is_none_value as _is_none_value,
+)
+from services.game_coordinator.intervention_evaluation import (
+    _ReadFailed as _ReadFailed,
+)
+from services.game_coordinator.intervention_evaluation import (
+    _same_value as _same_value,
+)
+from services.game_coordinator.intervention_evaluation import (
+    _spec_default as _spec_default,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_ALREADY_CHARGED as BLOCK_ALREADY_CHARGED,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_ELIMINATE_REFUSED as BLOCK_ELIMINATE_REFUSED,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_GAME_ENDING as BLOCK_GAME_ENDING,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_LOW_BATTERY as BLOCK_LOW_BATTERY,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_MODE_UNSUPPORTED as BLOCK_MODE_UNSUPPORTED,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_NO_GAME as BLOCK_NO_GAME,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_NOT_ALLOWED as BLOCK_NOT_ALLOWED,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_RATE_LIMITED as BLOCK_RATE_LIMITED,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_REVIVE_REFUSED as BLOCK_REVIVE_REFUSED,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_SHIELD_BUDGET_EXHAUSTED as BLOCK_SHIELD_BUDGET_EXHAUSTED,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_SHIELD_CAP_REACHED as BLOCK_SHIELD_CAP_REACHED,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_SHIELD_COOLDOWN as BLOCK_SHIELD_COOLDOWN,
+)
+from services.game_coordinator.intervention_policy import (
+    BLOCK_SHIELD_POOL_FULL as BLOCK_SHIELD_POOL_FULL,
+)
+from services.game_coordinator.intervention_policy import (
+    RATE_LIMIT_WINDOW_SECONDS as RATE_LIMIT_WINDOW_SECONDS,
+)
+from services.game_coordinator.intervention_policy import (
+    EnforcementChain,
+)
+from services.game_coordinator.intervention_policy import (
+    _game_mode_name as _game_mode_name,
+)
+from services.game_coordinator.intervention_policy import (
+    _RateLimiter as _RateLimiter,
+)
+from services.game_coordinator.intervention_sessions import (
+    _PRIMARY_SENTINEL_GAME_ID as _PRIMARY_SENTINEL_GAME_ID,
+)
+from services.game_coordinator.intervention_sessions import (
+    SessionState,
+)
+from services.game_coordinator.intervention_sessions import (
+    SessionView as SessionView,
+)
 
 if TYPE_CHECKING:
     from services.game_coordinator.intervention_target import InterventionTarget
 
 logger = logging.getLogger(__name__)
 
+
 # Rate-limit weighting classes (§5). Cost per applied intervention.
 WEIGHT_SOFT = 0.5  # psychological, self-reverting
 WEIGHT_MEDIUM = 1.0  # tunable, reversible
 WEIGHT_HARD = 2.0  # state-changing, player-visible as unfair if wrong
-
-# Sliding rate-limit window in seconds (§5: "max_interventions_per_minute").
-RATE_LIMIT_WINDOW_SECONDS = 60.0
 
 # ---------------------------------------------------------------------------- #
 # Defense-in-depth budget contract
@@ -123,7 +237,7 @@ RATE_LIMIT_WINDOW_SECONDS = 60.0
 #      limiter admits it.
 #
 #   2. Coordinator ``_RateLimiter`` (BACKSTOP, process-global). The limiter in
-#      this module is a single GLOBAL safety net shared across every concurrent
+#      ``intervention_policy.py`` is a single GLOBAL safety net shared across every concurrent
 #      game in this coordinator process. Its job is NOT to govern normal
 #      per-game pacing — that is the agent's. Its job is to cap a *runaway or
 #      buggy* agent that floods flag writes far beyond any sane per-game rate
@@ -153,21 +267,6 @@ RATE_LIMIT_WINDOW_SECONDS = 60.0
 DEFAULT_COORDINATOR_BACKSTOP_BUDGET = 60.0
 
 
-class _ReadFailed:
-    """A per-player flag read that failed (flagd error, #1299/#1313).
-
-    OpenFeature's value getters return the default on an error, which would
-    look like "neutral" and move the change-detection baseline. A failed read
-    is reported as ``_UNKNOWN`` instead: it never moves a baseline and never
-    fires (fail closed); the next good read is compared as usual.
-    """
-
-    def __repr__(self) -> str:
-        return "<read failed>"
-
-
-_UNKNOWN = _ReadFailed()
-
 # Cross-set consistency (UC-053 A9). The flag service stamps every flag of
 # the ``interventions`` set and ``agent/interventions_allowed`` with the snapshot
 # it rendered them from. The two sets arrive on separate in-process sync streams
@@ -177,15 +276,6 @@ _UNKNOWN = _ReadFailed()
 # configuration change that re-evaluates them.
 SNAPSHOT_EPOCH_KEY = "snapshotEpoch"
 SNAPSHOT_VERSION_KEY = "snapshotVersion"
-
-
-# A deferral that lasts longer than this is logged as a WARNING (rate limited to
-# one per DEFERRAL_WARN_INTERVAL_S) and re-checked every DEFERRAL_RECHECK_S even
-# when no flag changes: a steady-state deferral lasts milliseconds, a permanent
-# one (the ``agent`` set not served or its stream stuck) stops every intervention.
-DEFERRAL_WARN_AFTER_S = 5.0
-DEFERRAL_WARN_INTERVAL_S = 30.0
-DEFERRAL_RECHECK_S = 5.0
 
 
 def _hookless_provider(client: object, method: str) -> object | None:
@@ -464,7 +554,7 @@ INTERVENTION_SPECS: tuple[InterventionSpec, ...] = (
         # the event alone ends the game whose list carries it
         payload_required=False,
     ),
-    # #2467 PR 3 (UC-040 A47, A48, BR-033): one event shields 2 to 6 players, all or
+    # #2467 PR 3 (UC-048 A13, A14, BR-014): one event shields 2 to 6 players, all or
     # nothing. Payload {"serials": "A,B,C", "seconds": "5"}. Not player_targeted: the
     # handler checks the battery of every serial itself (lifecycle_handlers.py).
     # Allowed in every mode, like grant_shield (no MODE_CAPABILITY_DENY row).
@@ -550,204 +640,415 @@ class InterventionContext:
     game_id: str = ""
 
 
-class _RateLimiter:
-    """Weighted sliding-window rate limiter — the GLOBAL BACKSTOP (#919).
+class InterventionFlagReader:
+    """Every flag read of the intervention path: target resolution and policy values.
 
-    This is the process-global defense-in-depth backstop described in the
-    "Defense-in-depth budget contract" block at the top of this module. It is
-    NOT the per-game governor — the Go agent owns that
-    (``policy.max_interventions_per_minute``, per-game Loop). This limiter is one
-    generous global cap shared across all concurrent games, instantiated with
-    ``DEFAULT_COORDINATOR_BACKSTOP_BUDGET`` and tuned via the separate
-    ``policy.coordinator_backstop_per_minute`` flag. It only trips when a runaway
-    agent floods flag writes well beyond all sane per-game traffic combined.
-
-    Tracks (timestamp, cost) of applied interventions over the last
-    ``RATE_LIMIT_WINDOW_SECONDS``. ``check(cost)`` returns True (and reserves the
-    cost) when ``current_weight + cost <= budget``; otherwise returns False and
-    reserves nothing.
+    Owns the three flag clients (``interventions``, ``agent``, ``user`` domains).
+    It resolves intervention flags per session (``gameId``) and per player
+    (``targetingKey``), reads the event lists and per-serial grants and levels,
+    and reads the policy values the enforcement chain and the manager use
+    (allow-list, battery threshold, backstop budget, objectives, cue toggle) and
+    the snapshot stamps of the consistency gate. Reads stay in this module: the
+    flagd contract test (``tests/contract/test_flagd_resolution.py``) pins each
+    read site by file and function.
     """
 
-    def __init__(self, budget: float, time_fn: Callable[[], float] = time.monotonic):
-        self._budget = budget
-        self._time_fn = time_fn
-        # (timestamp, cost, reservation token); tokens are unique per reservation.
-        self._events: deque[tuple[float, float, int]] = deque()
-        self._next_token = 0
-        self._lock = threading.Lock()
+    def __init__(self, battery_provider: Callable[[str], float | None] | None = None):
+        self._interventions_client = None  # interventions domain
+        self._agent_client = None  # agent domain (backstop reads)
+        self._user_client = None  # user domain (on-device cue gate)
+        self._battery_provider = battery_provider
 
-    def set_budget(self, budget: float) -> None:
-        with self._lock:
-            self._budget = budget
+    def connect(self) -> None:
+        """Initialize the three flag domains and their clients. Raises on failure."""
+        from lib.feature_flags import get_flag_client, init_flag_domain
 
-    def _evict(self, now: float) -> None:
-        cutoff = now - RATE_LIMIT_WINDOW_SECONDS
-        while self._events and self._events[0][0] <= cutoff:
-            self._events.popleft()
+        init_flag_domain("interventions")
+        self._interventions_client = get_flag_client("interventions")
 
-    def current_weight(self) -> float:
-        with self._lock:
-            self._evict(self._time_fn())
-            return sum(cost for _, cost, _ in self._events)
+        init_flag_domain("agent")
+        self._agent_client = get_flag_client("agent")
 
-    def reserve(self, cost: float) -> int | None:
-        """Reserve ``cost`` if budget allows. Returns the reservation token, or None when over budget."""
-        with self._lock:
-            now = self._time_fn()
-            self._evict(now)
-            used = sum(c for _, c, _ in self._events)
-            if used + cost > self._budget:
-                return None
-            self._next_token += 1
-            self._events.append((now, cost, self._next_token))
-            return self._next_token
+        # User domain holds the operator-facing cue mute toggle.
+        init_flag_domain("user")
+        self._user_client = get_flag_client("user")
 
-    def check(self, cost: float) -> bool:
-        """Reserve ``cost`` if budget allows. Returns True if reserved."""
-        return self.reserve(cost) is not None
+    @property
+    def has_interventions_client(self) -> bool:
+        return self._interventions_client is not None
 
-    def refund(self, token: int | None) -> None:
-        """Give back exactly the reservation ``token`` (an intervention that applied nothing, UC-040 A31).
+    @property
+    def has_agent_client(self) -> bool:
+        return self._agent_client is not None
 
-        Unknown, already-refunded or evicted tokens are ignored, so a refund never frees another write's slot.
+    # ------------------------------------------------------------------ #
+    # Intervention flags, per session and per player
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def session_context(game_id: str, *, targeting_key: str | None = None) -> EvaluationContext:
+        """Build the per-session EvaluationContext (#838).
+
+        Adds ``gameId`` so flagd targeting rules can scope an intervention to one
+        game. An empty ``game_id`` (the synthesized primary session in the legacy
+        ``get_game`` path) adds NO ``gameId`` attribute, so un-targeted flags
+        resolve exactly as before. ``targeting_key`` (the player serial) is set
+        for per-player resolution so per-player and per-game rules compose.
         """
-        if token is None:
-            return
-        with self._lock:
-            for i, (_, _, event_token) in enumerate(self._events):
-                if event_token == token:
-                    del self._events[i]
-                    return
+        attributes = {"gameId": game_id} if game_id else {}
+        return EvaluationContext(targeting_key=targeting_key, attributes=attributes)
+
+    def _read_flag(self, spec: InterventionSpec, session: "SessionView") -> object:
+        client = self._interventions_client
+        if client is None:
+            return _spec_default(spec)
+        ctx = self.session_context(session.game_id)
+        if spec.value_kind == "int":
+            return client.get_integer_value(spec.flag_key, spec.none_value, ctx)
+        if spec.value_kind == "float":
+            return client.get_float_value(spec.flag_key, float(spec.none_value), ctx)
+        # State-shaped string flags carry a string none_value (e.g. pacing_profile
+        # "none").
+        string_default = spec.none_value if isinstance(spec.none_value, str) else ""
+        return client.get_string_value(spec.flag_key, string_default, ctx)
+
+    def _read_event_list(
+        self, spec: InterventionSpec, session: "SessionView"
+    ) -> "tuple[str, int, list[tuple[int, dict, str | None]]] | None":
+        """Read an event list as ``(epoch, seq, [(seq, payload, decision_id), ...])``,
+        or None on a failed or malformed read (fail closed: nothing applies).
+
+        ``decision_id`` is the entry's intervention id, None without one; it never
+        makes a read fail (UC-101 BR-003, NFR-061)."""
+        client = self._interventions_client
+        if client is None:
+            return None
+        ctx = self.session_context(session.game_id)
+        try:
+            details = client.get_object_details(spec.flag_key, {}, ctx)
+        except Exception as e:
+            record_flag_fallback(spec.flag_key, type(e).__name__, str(e))
+            return None
+        if details.error_code is not None or details.reason == Reason.ERROR:
+            error_code = getattr(details.error_code, "value", None) or str(details.error_code or "ERROR")
+            record_flag_fallback(spec.flag_key, error_code, details.error_message or "")
+            return None
+        value = details.value
+        if not isinstance(value, dict):
+            return None
+        try:
+            epoch = str(value.get("epoch") or "")
+            seq = int(value.get("seq") or 0)
+            events = [
+                (
+                    int(e["seq"]),
+                    e.get("payload") if isinstance(e.get("payload"), dict) else {},
+                    event_decision_id(e),
+                )
+                for e in value.get("events") or []
+                if isinstance(e, dict) and "seq" in e
+            ]
+        except (TypeError, ValueError):
+            return None
+        return epoch, seq, events
+
+    def read_levels(self, spec: InterventionSpec, game_id: str, serials, ids: "dict | None" = None) -> dict:
+        """Read a per-player LEVEL flag for each battery-eligible serial as its
+        float value, or ``_UNKNOWN`` on a flagd error. Battery-gated serials are
+        left out (their level is neither applied nor baselined). ``ids``, when
+        given, gets each serial's intervention id served with its value (UC-101
+        BR-004); the id never takes part in change detection (NFR-061)."""
+        threshold = self.battery_threshold()
+        reads: dict = {}
+        for serial in serials:
+            pct = self.battery_pct(serial)
+            if pct is not None and pct < threshold:
+                continue  # battery guard: skip low-battery controllers
+            grant = self._read_grant(spec, game_id, serial)
+            if grant is _UNKNOWN:
+                reads[serial] = grant
+                continue
+            reads[serial] = grant[1]
+            if ids is not None and grant[2]:
+                ids[serial] = grant[2]
+        return reads
+
+    def _read_grant(
+        self, spec: InterventionSpec, game_id: str, serial: str
+    ) -> "tuple[object, object, str | None] | _ReadFailed":
+        """Read one serial's grant as ``(variant, value, decision_id)`` or ``_UNKNOWN``.
+
+        Read with evaluation details: the value getters never raise and return
+        the default on error, which would look like "no grant" and move the
+        baseline (#1299). The variant is part of the grant identity because the
+        flag service generates a fresh opaque ``r<epoch>_<n>`` variant per write.
+        ``decision_id`` is the intervention id served with the resolved variant
+        (``decisionId.<variant>`` metadata, UC-101 BR-003), None without one; it is
+        informational only and never makes a read fail (NFR-061).
+        """
+        client = self._interventions_client
+        if client is None:
+            return _UNKNOWN
+        ctx = self.session_context(game_id, targeting_key=serial)
+        default = _spec_default(spec)
+        try:
+            if spec.value_kind == "string":
+                details = client.get_string_details(spec.flag_key, str(default), ctx)
+            else:
+                details = client.get_float_details(spec.flag_key, float(default), ctx)
+        except Exception as e:
+            record_flag_fallback(spec.flag_key, type(e).__name__, str(e))
+            return _UNKNOWN
+        if details.error_code is not None or details.reason == Reason.ERROR:
+            error_code = getattr(details.error_code, "value", None) or str(details.error_code or "ERROR")
+            record_flag_fallback(spec.flag_key, error_code, details.error_message or "")
+            return _UNKNOWN
+        value = details.value
+        if spec.value_kind == "string":
+            if not isinstance(value, str):
+                return _UNKNOWN
+        else:
+            value = _coerce_float(value)
+            if value is None:
+                return _UNKNOWN
+        return (details.variant, value, decision_id_of(details))
+
+    def resolve_player_targets(
+        self,
+        flag_key: str,
+        default,
+        game: "InterventionTarget | None",
+        *,
+        value_kind: str = "float",
+        battery_gate: bool = True,
+        game_id: str = "",
+    ) -> dict:
+        """Evaluate a per-player targeted flag for every active player serial.
+
+        For each active serial in ``game.players`` the flag is evaluated with an
+        ``EvaluationContext(targeting_key=serial, attributes={gameId})`` so
+        flagd's per-serial AND per-game targeting rules resolve and compose in a
+        single rule (#838: a rule may match both ``targetingKey == serial`` and
+        ``gameId == <id>``). Serials with no targeting match receive ``default``.
+        When ``battery_gate`` is True, any serial whose battery pct is below
+        ``policy.battery_threshold`` is dropped from the result (the per-serial
+        equivalent of the chain's battery guard, which is a no-op for fan-out
+        flags: they have no single chain-level target).
+
+        Reusable across player-targeted state interventions: PR C uses it for
+        ``player_sensitivity_factor``; PR D uses it for ``shield_seconds``.
+
+        Args:
+            flag_key: Flag to evaluate in the ``interventions`` domain.
+            default: Neutral value returned for serials with no targeting match
+                (e.g. 1.0 for sensitivity factor, 0 for shield seconds).
+            game: Live game whose ``players`` dict supplies the active serials.
+            value_kind: ``"float"``, ``"int"`` or ``"string"`` (flag value type).
+                ``"string"`` (#1129 toughness_boost) returns raw per-serial strings
+                for the handler to parse; float/int return coerced numbers.
+            battery_gate: If True, drop serials below the battery threshold.
+            game_id: Owning session's game id, added as ``gameId`` to the context
+                (#838). Empty string adds no ``gameId`` (legacy primary path).
+
+        Returns:
+            ``{serial: value}`` for every active serial that should be acted on.
+            Battery-gated serials are omitted entirely.
+        """
+        result: dict = {}
+        client = self._interventions_client
+        serials = _active_player_serials(game)
+        threshold = self.battery_threshold() if battery_gate else None
+
+        for serial in serials:
+            if threshold is not None:
+                pct = self.battery_pct(serial)
+                if pct is not None and pct < threshold:
+                    continue  # battery guard: skip low-battery controllers
+
+            if client is None:
+                value = default
+            else:
+                ctx = self.session_context(game_id, targeting_key=serial)
+                try:
+                    if value_kind == "int":
+                        value = float(client.get_integer_value(flag_key, int(default), ctx))
+                    elif value_kind == "string":
+                        # Raw string returned for the handler to parse.
+                        value = str(client.get_string_value(flag_key, str(default), ctx))
+                    else:
+                        value = float(client.get_float_value(flag_key, float(default), ctx))
+                except Exception as e:  # one bad serial must not drop the rest
+                    logger.debug(f"InterventionManager: per-serial read failed for {serial}: {e}")
+                    value = default
+            result[serial] = value
+
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Cross-set consistency stamps (UC-053 A9)
+    # ------------------------------------------------------------------ #
+    def interventions_snapshot(self) -> "tuple[str, int] | None":
+        """The interventions set's stamp, probed on ``end_game`` (in every rendering of the set)."""
+        from openfeature.exception import FlagNotFoundError
+
+        provider = _hookless_provider(self._interventions_client, "resolve_object_details")
+        try:
+            if provider is not None:
+                details = provider.resolve_object_details("end_game", {}, EvaluationContext())
+            else:
+                details = self._interventions_client.get_object_details("end_game", {}, EvaluationContext())
+        except FlagNotFoundError:
+            return None
+        return _snapshot_of(details)
+
+    def allow_list_snapshot(self) -> "tuple[str, int] | None":
+        """The stamp of ``agent/interventions_allowed``."""
+        from openfeature.exception import FlagNotFoundError
+
+        provider = _hookless_provider(self._agent_client, "resolve_string_details")
+        try:
+            if provider is not None:
+                details = provider.resolve_string_details("interventions_allowed", "", EvaluationContext())
+            else:
+                details = self._agent_client.get_string_details("interventions_allowed", "", EvaluationContext())
+        except FlagNotFoundError:
+            return None
+        return _snapshot_of(details)
+
+    # ------------------------------------------------------------------ #
+    # Policy values
+    # ------------------------------------------------------------------ #
+    def allowed_types(self) -> set[str]:
+        # interventions_allowed is a STRING flag whose value is a comma-separated
+        # list of intervention ids (`none` == ""). It used to be a LIST/object
+        # flag, but the agent's flagd RPC resolver silently TYPE_MISMATCHes
+        # get_object_value on a top-level LIST flag and falls back to its empty
+        # default, blocking EVERY intervention even with a non-`none` variant
+        # active. Both sides now read a string and parse it identically;
+        # the coordinator's in-process resolver reads the string cleanly too.
+        if self._agent_client is None:
+            return set()
+        try:
+            # UC-040 BR-004: only an agent at `act` gets anything applied; `off` (the stop) and `watch` get nothing.
+            if self._agent_client.get_string_value("enabled", "off", EvaluationContext()) != "act":
+                return set()
+            value = self._agent_client.get_string_value("interventions_allowed", "", EvaluationContext())
+            if isinstance(value, str):
+                return {token.strip() for token in value.split(",") if token.strip()}
+        except Exception as e:
+            logger.debug(f"InterventionManager: interventions_allowed read failed: {e}")
+        return set()
+
+    def battery_threshold(self) -> float:
+        if self._agent_client is None:
+            return 20.0
+        try:
+            return float(self._agent_client.get_integer_value("policy.battery_threshold", 20, EvaluationContext()))
+        except Exception:
+            return 20.0
+
+    def battery_pct(self, serial: str) -> float | None:
+        if self._battery_provider is None:
+            return None
+        try:
+            return self._battery_provider(serial)
+        except Exception:
+            return None
+
+    def backstop_budget(self) -> float:
+        """The GLOBAL BACKSTOP budget (#919): ``policy.coordinator_backstop_per_minute``.
+
+        NOT ``policy.max_interventions_per_minute``: that is the agent's
+        authoritative per-game budget, which the coordinator must not mirror (that
+        is exactly the drift the contract forbids). Falls back to
+        ``DEFAULT_COORDINATOR_BACKSTOP_BUDGET`` when the flag is unreachable.
+        """
+        budget = DEFAULT_COORDINATOR_BACKSTOP_BUDGET
+        if self._agent_client is not None:
+            try:
+                budget = float(
+                    self._agent_client.get_integer_value(
+                        "policy.coordinator_backstop_per_minute",
+                        int(DEFAULT_COORDINATOR_BACKSTOP_BUDGET),
+                        EvaluationContext(),
+                    )
+                )
+            except Exception:
+                budget = DEFAULT_COORDINATOR_BACKSTOP_BUDGET
+        return budget
+
+    def dominant_objective(self) -> str:
+        """Return the highest-weight objective from the agent ``objectives``
+        flag (weighted dict). Defaults to ``balanced``."""
+        if self._agent_client is None:
+            return "balanced"
+        try:
+            weights = self._agent_client.get_object_value("objectives", {}, EvaluationContext())
+            if isinstance(weights, dict) and weights:
+                return max(weights, key=lambda k: weights.get(k, 0.0))
+        except Exception:
+            pass
+        return "balanced"
+
+    def cue_enabled(self) -> bool:
+        """Whether the on-device agent-intervention cue is enabled (#818).
+
+        Reads the ``agent_intervention_cue`` toggle from the user domain. Defaults
+        to ON (fail-open to visibility) when the client is unavailable or the read
+        fails — the whole point of #818 is that the operator can SEE agent action.
+        """
+        if self._user_client is None:
+            return True
+        try:
+            return bool(self._user_client.get_boolean_value("agent_intervention_cue", True, EvaluationContext()))
+        except Exception as e:
+            logger.debug(f"agent cue gate read failed, defaulting to enabled: {e}")
+            return True
 
 
-# Reason codes for blocked interventions (event payload ``block_reason``).
-BLOCK_NOT_ALLOWED = "not_allowed"
-BLOCK_RATE_LIMITED = "rate_limited"
-BLOCK_LOW_BATTERY = "low_battery"
-BLOCK_MODE_UNSUPPORTED = "mode_unsupported"
-BLOCK_NO_GAME = "no_game"
-# The handler applied nothing on purpose (InterventionNotApplied): a grant_shield to
-# a player who already holds a shield charge (UC-040 A31, BR-020).
-BLOCK_ALREADY_CHARGED = "already_charged"
-# A grant_shield refused by the shield limits per player per game (UC-040 A34,
-# BR-022): raised by games/base.py grant_shield as InterventionNotApplied.
-BLOCK_SHIELD_CAP_REACHED = "shield_cap_reached"
-BLOCK_SHIELD_COOLDOWN = "shield_cooldown"
-# A grant_shield in a hold game that could add nothing (UC-040 A37).
-BLOCK_SHIELD_POOL_FULL = "shield_pool_full"
-BLOCK_SHIELD_BUDGET_EXHAUSTED = "shield_budget_exhausted"
-# A grant_shield that lands once the game is ending (outcome latched, force-ended,
-# ENDING / ENDED): no layer, no cue over the winner effect (UC-040 A42 step 3).
-BLOCK_GAME_ENDING = "game_ending"
-# A revive_player the mode refused (decided game, unknown or already-alive player; #1948).
-BLOCK_REVIVE_REFUSED = "revive_refused"
-# An eliminate_player that killed nobody: unknown or already-dead player, a kill of
-# the same player in flight, or the mode declined the kill (_accepts_kill; #1383).
-BLOCK_ELIMINATE_REFUSED = "eliminate_refused"
+class _Forward:
+    """An attribute kept on another object (``<owner>.<name>``), readable and settable here.
 
-# Sentinel game_id for the synthesized primary-only session when the manager is
-# wired with the legacy ``get_game`` callback (no session registry). An empty
-# game_id adds NO ``gameId`` attribute to the EvaluationContext, so un-targeted
-# flags resolve exactly as before (today's primary-only semantics).
-_PRIMARY_SENTINEL_GAME_ID = ""
-
-
-def _intervention_scope(
-    spec: InterventionSpec,
-    value: object,
-    target: str | None,
-    intervention_id: str | None,
-    intervention_ids: "dict[str, str] | None",
-) -> InterventionScope | None:
-    """The intervention scope a handler call runs in, or None for a lever that records no moment.
-
-    Only the player levers of UC-101 BR-001 get one. The players it names: the target
-    serial; a level's changed serials (the ``{serial: level}`` value); any player when
-    neither is known (a group shield, whose serials the game resolves, A4).
+    Keeps the manager's flag clients and deferral state addressable as before the
+    split: ``mgr._agent_client = stub`` reaches the flag reader.
     """
-    if spec.type_id not in PLAYER_LEVER_TYPES:
-        return None
-    if target:
-        serials: frozenset[str] | None = frozenset({target})
-    elif isinstance(value, dict):
-        serials = frozenset(str(serial) for serial in value)
-    else:
-        serials = None
-    return InterventionScope(spec.type_id, serials=serials, ids=intervention_ids, default_id=intervention_id)
 
+    def __init__(self, owner: str, name: str):
+        self._owner = owner
+        self._name = name
 
-def _ids_for(ids: "dict[str, str]", serials) -> dict[str, str]:
-    """The intervention ids of ``serials`` (those with one)."""
-    return {serial: ids[serial] for serial in serials if ids.get(serial)}
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return self
+        return getattr(getattr(obj, self._owner), self._name)
 
-
-async def run_in_game_flag_context(
-    game: "InterventionTarget | None", fn: Callable[..., Awaitable[Any]], *args: Any
-) -> Any:
-    """Run ``await fn(*args)`` with ``game``'s flag transaction context (#1970, UC-040 BR-018).
-
-    Called on the game's loop by ``GameLoopDispatcher.run``, so a dispatched
-    handler's flag reads resolve as the game's own reads do (an experiment arm's
-    value included). The context is read from the game here, on the game loop,
-    and the previous transaction context is restored afterwards, so on the
-    inline path it never leaks into the caller's task. No game, or a context that
-    is not an ``EvaluationContext``, runs ``fn`` unchanged.
-    """
-    eval_context = game.flag_eval_context if game is not None else None
-    if not isinstance(eval_context, EvaluationContext):
-        return await fn(*args)
-    previous = openfeature_api.get_transaction_context()
-    openfeature_api.set_transaction_context(eval_context)
-    try:
-        return await fn(*args)
-    finally:
-        openfeature_api.set_transaction_context(previous)
-
-
-@dataclass(frozen=True)
-class SessionView:
-    """A live session the manager evaluates interventions against (#838).
-
-    The servicer supplies one of these per live game (primary + every shadow)
-    via ``get_sessions``. Each carries the game instance, its ``game_id`` (used
-    as the ``gameId`` EvaluationContext attribute so flagd targeting rules can
-    scope an intervention to one game), and the publish callable for THAT
-    session's EventBus (so effects/blocked events land on the right stream).
-
-    Backward compatibility (#838): a manager wired with the legacy ``get_game``
-    callback synthesizes a single primary view with ``game_id=""`` (no ``gameId``
-    in context) and the primary publisher — so un-targeted interventions behave
-    exactly as today and only touch the primary game.
-
-    Attributes:
-        game_id: The session's game id. ``""`` means the synthesized primary
-            session (legacy path); no ``gameId`` is added to the context.
-        game: The live BaseGameMode instance (or ``None``).
-        publish: Async ``publish(event_type, data)`` for this session's bus.
-        is_real: Whether this is the real (primary) game. Defaults to False so a
-            caller that does not say is treated as a shadow (fail closed).
-        loop: The asyncio loop the session's game runs on (its own thread). The
-            game's gRPC clients and gameplay stream belong to it, so handler side
-            effects run there (UC-040 BR-018, #1250). ``None`` (legacy / tests)
-            runs effects inline on the caller's loop.
-    """
-
-    game_id: str
-    game: "InterventionTarget | None"
-    publish: "Callable[[str, dict], Awaitable[None]]"
-    # True only for the real (primary) game; unknown kind fails closed (shadow).
-    is_real: bool = False
-    loop: asyncio.AbstractEventLoop | None = None
+    def __set__(self, obj, value) -> None:
+        setattr(getattr(obj, self._owner), self._name, value)
 
 
 class InterventionManager:
-    """Owns the intervention flag clients and the enforcement/dispatch loop.
+    """Coordinates the intervention path: flag change -> evaluation -> enforcement -> handler -> outcome.
 
     Lifecycle mirrors RuntimeConfigManager: ``start()`` initializes flag
     domains, registers the change handler, and does an initial evaluation;
     ``stop()`` removes the handler. ``get_game`` is a callable returning the
     live game (or None).
+
+    Split by responsibility: ``InterventionFlagReader`` (every flag read:
+    targets, policy values), ``SpecEvaluator`` (change detection),
+    ``EnforcementChain`` + ``_RateLimiter`` (policy, backstop), ``AllowListGate``
+    (UC-053 A9), ``SessionState`` (per-game buckets, dispatchers) and
+    ``intervention_dispatch`` (flag context, scope, outcome record). The manager
+    owns the handler registry and runs each change through chain, handler,
+    record and cue.
     """
+
+    # Flag clients and deferral state live on their units.
+    _interventions_client = _Forward("_reads", "_interventions_client")
+    _agent_client = _Forward("_reads", "_agent_client")
+    _user_client = _Forward("_reads", "_user_client")
+    _battery_provider = _Forward("_reads", "_battery_provider")
+    _deferral_since = _Forward("_gate", "since")
+    _deferral_recheck = _Forward("_gate", "recheck")
 
     def __init__(
         self,
@@ -790,10 +1091,6 @@ class InterventionManager:
                 session reads only its own events (FR-137, BR-011).
         """
         self._publish = event_publisher
-        # Per game, per one-shot flag: the last applied (epoch, seq). Starts at
-        # ("", 0) when the game is first evaluated; advanced under the lock
-        # BEFORE the events are dispatched (re-review N1/N2).
-        self._last_event: dict[str, dict[str, tuple[str, int]]] = {}
         # Single-flight evaluate_all (re-review N1): one flag-service write
         # wakes every flagd domain watcher, so PROVIDER_CONFIGURATION_CHANGED
         # fires once per domain; overlapping passes coalesce into one follow-up.
@@ -802,72 +1099,70 @@ class InterventionManager:
         self._eval_dirty = False
         self._get_game = get_game
         self._get_sessions = get_sessions
-        self._battery_provider = battery_provider
         self._time_fn = time_fn
         self._end_game_fn = end_game_fn
-
-        self._interventions_client = None  # interventions domain
-        self._agent_client = None  # agent domain (backstop reads)
-        # Cross-set consistency gate: the allow-list stamp last read in
-        # this pass (the allow-list only moves forward, so a cached stamp that
-        # covers the probe needs no re-read), and the current deferral episode.
-        self._pass_allow_snapshot: tuple[str, int] | None = None
-        self._deferral_since: float | None = None
-        self._deferral_last_warned: float | None = None
-        self._deferral_recheck = None  # asyncio.TimerHandle while a re-check is pending
         # Strong references to the tasks this manager creates: the loop keeps only a weak one.
         self._background_tasks: set[asyncio.Task] = set()
-        self._user_client = None  # user domain (on-device cue gate)
 
-        # Per-session, per-flag last-applied state value (state-shaped change
-        # detection; per-serial maps for levels and grants). Keyed
-        # ``game_id -> flag_key -> value`` so each live session tracks its own
-        # baseline independently. The legacy single-primary path uses the
-        # ``_PRIMARY_SENTINEL_GAME_ID`` ("") bucket.
-        self._last_state_value: dict[str, dict[str, object]] = {}
+        self._reads = InterventionFlagReader(battery_provider)
+        # Per-game state: change-detection buckets (``game_id -> flag_key -> value``),
+        # last applied events and game-loop dispatchers, under one lock. Aliased
+        # here because tests and the pass read them by these names.
+        self._sessions = SessionState()
+        self._lock = self._sessions.lock
+        self._last_state_value = self._sessions.last_state_value
+        self._last_event = self._sessions.last_event
+        self._dispatchers = self._sessions.dispatchers
+        self._dispatch_timeout_s = DEFAULT_DISPATCH_TIMEOUT_S
+        # The re-check delay is read from this module when scheduled, so a patched value applies.
+        self._gate = AllowListGate(
+            self._reads,
+            time_fn=time_fn,
+            spawn_evaluation=self._spawn_evaluate_all,
+            recheck_s=lambda: DEFERRAL_RECHECK_S,
+        )
 
         # Global BACKSTOP limiter: generous, process-global, NOT the
         # per-game governor (that is the agent's). See the defense-in-depth
         # contract block at the top of this module.
         self._rate_limiter = _RateLimiter(budget=DEFAULT_COORDINATOR_BACKSTOP_BUDGET, time_fn=time_fn)
+        self._chain = EnforcementChain(
+            self._rate_limiter,
+            allowed_types=self._reads.allowed_types,
+            battery_pct=self._reads.battery_pct,
+            battery_threshold=self._reads.battery_threshold,
+            mode_deny=MODE_CAPABILITY_DENY,
+        )
+        # The evaluator calls back through the manager's methods, so a patched
+        # ``_allow_list_lags`` / ``_enforce_and_dispatch`` takes effect.
+        self._evaluator = SpecEvaluator(
+            self._sessions,
+            self._reads,
+            allow_list_lags=lambda spec: self._allow_list_lags(spec),
+            dispatch=lambda *args, **kwargs: self._enforce_and_dispatch(*args, **kwargs),
+            revert=lambda *args, **kwargs: self._run_revert(*args, **kwargs),
+        )
 
         # Handler registry: flag_key -> Handler. Defaults to the no-op stub for
         # every spec. PRs C/D/E replace entries via register_handler().
         self._handlers: dict[str, Handler] = {spec.flag_key: self._noop_handler for spec in INTERVENTION_SPECS}
         # Optional per-flag handlers run when a state-shaped flag reverts to its
-        # neutral value (e.g. volume_override -> default game volume). Additive;
-        # absence means "do nothing on revert" (the default for all flags).
-        #
-        # IMPORTANT: a revert-to-neutral is routed HERE, not back to the
-        # flag's apply-handler. So a state flag that mutates live game state on
-        # apply MUST register a revert handler to undo it — the apply-handler's
-        # own "neutral value" branch is never reached on revert. music_tempo_override
-        # is a concrete example: its apply-handler clears game.tempo_override for a
-        # 0 value, but that branch only runs when the value CHANGES TO a non-neutral
-        # value and back via a separate apply; on a genuine revert the dedicated
-        # handle_music_tempo_override_revert (registered in difficulty_handlers.py)
-        # is what actually resets the override.
+        # neutral value (e.g. volume_override -> default game volume); absence means
+        # "do nothing on revert". A revert is routed HERE, never to the apply-handler,
+        # so a flag that mutates live game state on apply MUST register one to undo
+        # it (e.g. handle_music_tempo_override_revert in difficulty_handlers.py).
         self._revert_handlers: dict[str, Handler] = {}
 
         # Flags whose handler must run on the coordinator's main loop instead of
         # the game's loop (UC-040 BR-018): end_game force-ends the session, which
         # joins the game's thread, so running it on that thread would deadlock.
         self._main_loop_flags: set[str] = set()
-        # Per-session dispatchers that run handler side effects on the owning
-        # game's loop, in decision order (UC-040 BR-018). Keyed by game_id.
-        self._dispatchers: dict[str, GameLoopDispatcher] = {}
-        self._dispatch_timeout_s = DEFAULT_DISPATCH_TIMEOUT_S
 
-        self._lock = threading.RLock()
         self._started = False
 
-        # The asyncio loop the servicer runs on, captured at start(). The
-        # OpenFeature provider fires PROVIDER_CONFIGURATION_CHANGED on a
-        # background thread, so evaluate_all() (which makes gRPC calls bound to
-        # this loop) MUST be scheduled back onto it via run_coroutine_threadsafe.
-        # Scheduling it on the firing thread's loop (or a fresh asyncio.run loop)
-        # binds the gRPC futures to a different loop and they fail with
-        # "attached to a different loop".
+        # The servicer's loop, captured at start(): PROVIDER_CONFIGURATION_CHANGED
+        # fires on a background thread, and evaluate_all() (loop-bound gRPC calls)
+        # MUST run on this loop, or its futures fail "attached to a different loop".
         self._loop: object | None = None
 
     # ------------------------------------------------------------------ #
@@ -917,12 +1212,8 @@ class InterventionManager:
         )
 
     # ------------------------------------------------------------------ #
-    # Ambient + session intervention handlers (PR E)
-    #
-    # These reuse the exact audio/effect paths the games already use; they do
-    # NOT touch the audio/controller services. Registered via
-    # register_ambient_handlers(); the enforcement chain has already passed when
-    # they run, so they only do the effect (defensively).
+    # Ambient + session intervention handlers (PR E): the games' own audio and
+    # effect paths (intervention_effects); the chain has already passed.
     # ------------------------------------------------------------------ #
     def register_ambient_handlers(self) -> None:
         """Register the PR E ambient/session handlers (one line per flag).
@@ -964,8 +1255,6 @@ class InterventionManager:
 
         # Capture the servicer's running loop so the (background-thread) flag
         # change handler can schedule evaluate_all() back onto it.
-        import asyncio
-
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -974,17 +1263,7 @@ class InterventionManager:
         try:
             from openfeature import api
 
-            from lib.feature_flags import get_flag_client, init_flag_domain
-
-            init_flag_domain("interventions")
-            self._interventions_client = get_flag_client("interventions")
-
-            init_flag_domain("agent")
-            self._agent_client = get_flag_client("agent")
-
-            # User domain holds the operator-facing cue mute toggle.
-            init_flag_domain("user")
-            self._user_client = get_flag_client("user")
+            self._reads.connect()
 
             api.add_handler(ProviderEvent.PROVIDER_CONFIGURATION_CHANGED, self._on_flags_changed)
             logger.info("InterventionManager: registered PROVIDER_CONFIGURATION_CHANGED handler")
@@ -1010,9 +1289,7 @@ class InterventionManager:
         except Exception as e:
             logger.debug(f"InterventionManager: handler removal failed: {e}")
         self._started = False
-        if self._deferral_recheck is not None:
-            self._deferral_recheck.cancel()
-            self._deferral_recheck = None
+        self._gate.cancel_recheck()
 
     def forget_session(self, game_id: str) -> None:
         """Drop all per-game state for a retired session (#1299).
@@ -1021,22 +1298,14 @@ class InterventionManager:
         game was never built. A pass suspended in that session sees no bucket
         afterwards and never fires into it.
         """
-        with self._lock:
-            self._last_state_value.pop(game_id, None)
-            self._dispatchers.pop(game_id, None)
-            self._last_event.pop(game_id, None)
+        self._sessions.forget(game_id)
 
     # ------------------------------------------------------------------ #
     # Session resolution + per-session change-detection buckets
     # ------------------------------------------------------------------ #
     def _live_sessions(self) -> list["SessionView"]:
-        """Resolve the live sessions to evaluate (#838).
-
-        Prefers ``get_sessions`` (the per-session seam). Falls back to the legacy
-        ``get_game`` callback, synthesizing a single primary-only view with an
-        empty game_id (no ``gameId`` context) and the primary publisher — exactly
-        today's behavior. Returns an empty list when neither yields a session.
-        """
+        """Resolve the live sessions to evaluate (#838): ``get_sessions``, else the
+        legacy ``get_game`` as one primary-only view (empty game_id, primary publisher)."""
         if self._get_sessions is not None:
             try:
                 return list(self._get_sessions() or [])
@@ -1048,44 +1317,18 @@ class InterventionManager:
         return [SessionView(game_id=_PRIMARY_SENTINEL_GAME_ID, game=game, publish=self._publish, is_real=True)]
 
     def _state_bucket(self, game_id: str) -> dict[str, object]:
-        return self._last_state_value.setdefault(game_id, {})
-
-    # Mid-pass accessor: never (re)creates a bucket. ``None`` means the session
-    # was forgotten (retired) while evaluate_all was suspended in it.
-    def _existing_state_bucket(self, game_id: str) -> dict[str, object] | None:
-        return self._last_state_value.get(game_id)
-
-    def _prune_stale_buckets(self, live_ids: set[str]) -> None:
-        """Drop change-detection state for sessions that are no longer live.
-
-        Prevents unbounded growth as shadow games come and go, and ensures a new
-        game reusing a (vanishingly unlikely) recycled id starts from a clean
-        baseline. The sentinel primary bucket is always retained.
-        """
-        with self._lock:
-            keep = live_ids | {_PRIMARY_SENTINEL_GAME_ID}
-            for stale in [gid for gid in self._last_state_value if gid not in keep]:
-                self._last_state_value.pop(stale, None)
-            for stale in [gid for gid in self._dispatchers if gid not in live_ids]:
-                self._dispatchers.pop(stale, None)
-            for stale in [gid for gid in self._last_event if gid not in keep]:
-                self._last_event.pop(stale, None)
+        return self._sessions.state_bucket(game_id)
 
     # ------------------------------------------------------------------ #
     # Flag change handling
     # ------------------------------------------------------------------ #
     def _on_flags_changed(self, _event_details) -> None:
-        """Event handler: re-evaluate all intervention flags.
+        """Event handler (background thread): re-evaluate all intervention flags.
 
-        Synchronous (OpenFeature handler) and fired on a background thread, so it
-        schedules evaluate_all() onto the servicer's loop (captured at start())
-        via run_coroutine_threadsafe — the only safe way to drive loop-bound gRPC
-        clients from another thread. Falls back to the current running loop, then
-        to a fresh loop, for direct/test invocations where no servicer loop was
-        captured.
+        Schedules evaluate_all() onto the servicer's loop captured at start()
+        (run_coroutine_threadsafe: loop-bound gRPC clients); without one, on the
+        running loop, else on a fresh loop (direct/test invocations).
         """
-        import asyncio
-
         loop = self._loop
         if loop is not None and loop.is_running():
             # Cross-thread-safe: bind the coroutine to the servicer's loop.
@@ -1101,6 +1344,12 @@ class InterventionManager:
             self._spawn_evaluate_all(running)
         else:
             asyncio.run(self.evaluate_all())
+
+    def _spawn_evaluate_all(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Run evaluate_all() as a task that stays referenced until it is done (#2357, RUF006)."""
+        task = loop.create_task(self.evaluate_all())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def evaluate_all(self) -> None:
         """Single-flight wrapper around :meth:`_evaluate_all_once` (re-review N1).
@@ -1131,32 +1380,26 @@ class InterventionManager:
     async def _evaluate_all_once(self) -> None:
         """Re-evaluate every intervention flag for every live session (#838).
 
-        Public for tests and the change handler. Refreshes the rate-limit budget
-        first (policy flag may have changed), then evaluates each live session
-        independently: per session it walks the registry in order, evaluating
-        every flag with that session's ``{gameId, targetingKey}`` context and
-        applying/publishing on that session.
-
-        A flag with no ``gameId`` targeting rule (the baseline default; agent
-        writes are game-scoped, FR-136) resolves to the same value for every live session, primary and shadow alike.
+        Refreshes the backstop budget first, then walks the registry in order per
+        session, with that session's ``{gameId, targetingKey}`` context. A flag with
+        no ``gameId`` targeting rule (the baseline default; agent writes are
+        game-scoped, FR-136) resolves to the same value for every live session.
         """
         self._refresh_budget()
-        self._pass_allow_snapshot = None
+        self._gate.begin_pass()
         sessions = self._live_sessions()
         if not sessions:
             # No game left to defer for: close the episode so the next game's
             # brief deferral is a new episode with a fresh age, not a stale WARNING.
-            self._end_deferral()
-        self._prune_stale_buckets({s.game_id for s in sessions})
+            self._gate.end()
+        self._sessions.prune({s.game_id for s in sessions})
         for session in sessions:
             # Create the session's buckets once, at the start of its iteration.
             # Inside the pass they are only read with .get(): if the servicer
             # retires the session while a handler is awaited (forget_session),
             # the remaining specs see no bucket and skip instead of firing into
             # a retired game.
-            with self._lock:
-                self._state_bucket(session.game_id)
-                self._last_event.setdefault(session.game_id, {})
+            self._sessions.begin(session.game_id)
             for spec in INTERVENTION_SPECS:
                 try:
                     await self._evaluate_one(spec, session)
@@ -1167,227 +1410,96 @@ class InterventionManager:
                     )
 
     async def _evaluate_one(self, spec: InterventionSpec, session: "SessionView") -> None:
-        # Player-targeted state flags are driven entirely through flagd's
-        # per-serial targeting if-ladder (grants: shield/toughness boost/soft
-        # penalty, per serial; levels: sensitivity/handicap factor); the
-        # agent writer leaves the flag's global defaultVariant on its neutral
-        # value, so the global evaluated read NEVER changes and can't be used for
-        # change detection. Resolve the per-serial values instead and key change
-        # detection on them (handled separately below).
-        if spec.per_serial_grant:
-            await self._evaluate_targeted_grant(spec, session)
-            return
-        if spec.player_targeted and not spec.edge_triggered:
-            await self._evaluate_targeted_state(spec, session)
-            return
-
-        if spec.edge_triggered:
-            await self._evaluate_event_list(spec, session)
-            return
-
-        raw = self._read_flag(spec, session)
-        if self._allow_list_lags(spec):
-            return  # deferred: the baseline stays, the agent stream's catch-up re-evaluates
-        # State-shaped: only act on value change away from the none-value.
-        with self._lock:
-            bucket = self._existing_state_bucket(session.game_id)
-            if bucket is None:
-                return  # session retired mid-pass
-            last = bucket.get(spec.flag_key)
-            changed = raw != last
-            bucket[spec.flag_key] = raw
-        if not changed:
-            return
-        if _is_none_value(spec, raw):
-            # Reverting to neutral is not an enforced intervention, but some
-            # state flags need to actively restore a default on revert (e.g.
-            # volume_override -> configured game volume). Such
-            # flags register a revert handler; it runs without enforcement
-            # (restoring a default is always safe / not rate-limited).
-            # Only fire when the PREVIOUS value was a real (non-none)
-            # intervention — a fresh none-to-none transition (unknown prior
-            # baseline) must not spuriously restore.
-            was_active = last is not None and not _is_none_value(spec, last)
-            if was_active:
-                await self._run_revert(spec, raw, session)
-            return
-        await self._enforce_and_dispatch(spec, raw, "", self._state_target_serial(spec), session)
+        await self._evaluator.evaluate(spec, session)
 
     async def _evaluate_event_list(self, spec: InterventionSpec, session: "SessionView") -> None:
-        """Apply every new event of a one-shot flag's per-game event list (FR-137).
+        await self._evaluator.evaluate_event_list(spec, session)
 
-        UC-040 BR-006: a one-shot intervention fires once, only in its game.
+    def _allow_list_lags(self, spec: InterventionSpec) -> bool:
+        """The cross-set consistency gate (UC-053 A9): True defers the values just read."""
+        return self._gate.lags(spec)
 
-        The flag resolves, for this game's ``gameId``, to
-        ``{"epoch","seq","events":[{"seq","payload"}, ...]}`` (the last K
-        events). Rules (architecture note §6, re-review N2):
+    def _schedule_deferral_recheck(self) -> None:
+        self._gate.schedule_recheck()
 
-        - a failed read (error code or reason ERROR) does nothing: it neither
-          applies nor moves the last applied ``(epoch, seq)``;
-        - an empty epoch is the baseline value: nothing to apply or reset;
-        - only a non-empty, different epoch (a flag-service restart) resets the
-          last seq to 0;
-        - a seq at or below the last applied one in the same epoch is ignored;
-        - more than K events between two reads is logged and counted;
-        - the last applied ``(epoch, seq)`` advances under the lock BEFORE the
-          events are dispatched, so an overlapping pass cannot apply them twice.
+    # ------------------------------------------------------------------ #
+    # Enforcement chain -> handler -> outcome -> cue
+    # ------------------------------------------------------------------ #
+    async def _enforce_and_dispatch(
+        self,
+        spec: InterventionSpec,
+        value: object,
+        payload: str,
+        target: str | None,
+        session: "SessionView",
+        *,
+        intervention_id: str | None = None,
+        intervention_ids: "dict[str, str] | None" = None,
+    ) -> None:
+        """Run the enforcement chain, then the handler, and record the outcome.
+
+        ``intervention_id`` (one target, an event) or ``intervention_ids`` (a level's
+        changed players) are the ids served with the value at the read that found the
+        change. A player lever's handler runs in an intervention scope carrying them,
+        so the game records the ``intervention`` moment where the effect lands
+        (UC-101 BR-004, BR-005). The ids are informational: the chain, the outcome
+        record and the ``agent_intervention`` event never see them (BR-008, NFR-061).
         """
-        value = self._read_event_list(spec, session)
-        if value is None:
-            return
-        epoch, seq, events = value
-        if not epoch:
-            return
-        if self._allow_list_lags(spec):
-            return  # deferred: (epoch, seq) stays, so nothing is skipped or replayed
-        with self._lock:
-            bucket = self._last_event.get(session.game_id)
-            if bucket is None:
-                return  # session retired mid-pass: never fire into it
-            last_epoch, last_seq = bucket.get(spec.flag_key, ("", 0))
-            if epoch != last_epoch:
-                last_seq = 0
-            elif seq <= last_seq:
-                return
-            fresh = sorted((e for e in events if e[0] > last_seq), key=lambda e: e[0])
-            gap = bool(fresh) and fresh[0][0] > last_seq + 1
-            bucket[spec.flag_key] = (epoch, max([seq, last_seq] + [e[0] for e in fresh]))
-        if gap:
-            logger.warning(
-                f"{spec.flag_key}: game {session.game_id}: events {last_seq + 1}..{fresh[0][0] - 1} "
-                "fell out of the event list before they were read (more than K between two reads)"
-            )
-        for _, payload, decision_id in fresh:
-            payload_str = _event_payload_string(spec, payload)
-            if spec.payload_required and not payload_str.strip(" :"):
-                continue
-            target = _edge_target_serial(spec, payload_str)
-            await self._enforce_and_dispatch(
-                spec, payload_str, payload_str, target, session, intervention_id=decision_id
-            )
-
-    def _read_event_list(
-        self, spec: InterventionSpec, session: "SessionView"
-    ) -> "tuple[str, int, list[tuple[int, dict, str | None]]] | None":
-        """Read an event list as ``(epoch, seq, [(seq, payload, decision_id), ...])``,
-        or None on a failed or malformed read (fail closed: nothing applies).
-
-        ``decision_id`` is the entry's intervention id, None without one; it never
-        makes a read fail (UC-101 BR-003, NFR-061)."""
-        client = self._interventions_client
-        if client is None:
-            return None
-        ctx = self._session_context(session.game_id)
-        try:
-            details = client.get_object_details(spec.flag_key, {}, ctx)
-        except Exception as e:
-            record_flag_fallback(spec.flag_key, type(e).__name__, str(e))
-            return None
-        if details.error_code is not None or details.reason == Reason.ERROR:
-            error_code = getattr(details.error_code, "value", None) or str(details.error_code or "ERROR")
-            record_flag_fallback(spec.flag_key, error_code, details.error_message or "")
-            return None
-        value = details.value
-        if not isinstance(value, dict):
-            return None
-        try:
-            epoch = str(value.get("epoch") or "")
-            seq = int(value.get("seq") or 0)
-            events = [
-                (
-                    int(e["seq"]),
-                    e.get("payload") if isinstance(e.get("payload"), dict) else {},
-                    event_decision_id(e),
-                )
-                for e in value.get("events") or []
-                if isinstance(e, dict) and "seq" in e
-            ]
-        except (TypeError, ValueError):
-            return None
-        return epoch, seq, events
-
-    async def _evaluate_targeted_state(self, spec: InterventionSpec, session: "SessionView") -> None:
-        """Change-detect and dispatch a player-targeted LEVEL flag.
-
-        Levels (``player_sensitivity_factor``, ``player_handicap_factor``) are
-        idempotent: the handler sets every player's factor, so re-applying an
-        unchanged factor is a no-op. One-shot grants use
-        :meth:`_evaluate_targeted_grant` instead (UC-040 BR-012).
-
-        The agent writer drives these flags via a per-serial targeting if-ladder
-        and never moves the global ``defaultVariant`` off neutral, so a global
-        read is useless for change detection. Instead resolve the flag per active
-        serial and key change detection on that resolved map. The handler (PR C/D)
-        re-resolves and applies; dispatch is idempotent so re-applying an
-        unchanged map would be harmless, but we still gate on change to avoid
-        spurious metrics/events and needless rate-limit consumption.
-
-        With no live game there are no serials to target, so this is a no-op
-        (and the baseline is reset to empty so a later game picks up the flag).
-
-        Only the players whose level changed since the last read in this game
-        are dispatched (as a ``{serial: level}`` value); a serial the game has
-        not read yet counts as neutral. Levels are game-scoped in the flag
-        service, so a new game never sees a level of an earlier game
-        (UC-040 BR-017). Players whose level moved to neutral go through the
-        flag's revert handler, which resets their factors without the
-        permission chain (UC-040 A24, #1317).
-        """
+        objective = self._dominant_objective()
         game = session.game
-        if game is None:
-            with self._lock:
-                bucket = self._existing_state_bucket(session.game_id)
-                if bucket is not None:
-                    bucket[spec.flag_key] = None
+
+        # The enforcement chain (UC-040 BR-004): allow-list, mode matrix, battery guard, backstop.
+        block_reason, reservation = self._chain.check(spec, target, game)
+        if block_reason is not None:
+            await record_outcome(spec, target, objective, session, blocked=True, block_reason=block_reason)
             return
 
-        # Each alive, battery-eligible serial is read with evaluation details
-        # (float getter, value_kind="float" for both levels): a flagd error
-        # reads as ``_UNKNOWN`` instead of the neutral default, so it can never
-        # look like "level reverted" nor move the baseline (fail closed, as for
-        # grants).
-        default = _spec_default(spec)
-        ids: dict[str, str] = {}
-        reads = self._read_levels(spec, session.game_id, _active_player_serials(game), ids)
-        if self._allow_list_lags(spec):
-            return  # deferred: no serial's baseline moves
-
-        # Per-serial baseline for this game: ``{serial: level}``. A serial with
-        # no entry is neutral, so a first non-neutral level applies.
-        changed: dict = {}
-        with self._lock:
-            bucket = self._existing_state_bucket(session.game_id)
-            if bucket is None:
-                return  # session retired mid-pass
-            last = bucket.get(spec.flag_key)
-            baseline = dict(last) if isinstance(last, dict) else {}
-            for serial, value in reads.items():
-                if value is _UNKNOWN:
-                    continue  # never move the baseline on an error read
-                previous = baseline.get(serial, default)
-                baseline[serial] = value
-                if _same_value(value, previous):
-                    continue
-                changed[serial] = value
-            bucket[spec.flag_key] = baseline
-        if not changed:
+        ctx = InterventionContext(
+            spec=spec,
+            value=value,
+            payload=payload,
+            target_serial=target,
+            game=game,
+            objective=objective,
+            game_id=session.game_id,
+        )
+        handler = self._handlers.get(spec.flag_key, self._noop_handler)
+        try:
+            if spec.flag_key in self._main_loop_flags:
+                await handler(ctx)
+            else:
+                scope = _intervention_scope(spec, value, target, intervention_id, intervention_ids)
+                await self._run_on_game_loop(session, spec, run_with_intervention_scope, scope, handler, ctx)
+        except GameLoopUnavailableError as e:
+            # UC-040 BR-018, already logged + counted. game_loop_late: the effect
+            # started and may still apply, so it is not reported as blocked;
+            # otherwise it was never applied (fail closed). No cue either way.
+            await record_outcome(spec, target, objective, session, blocked=not e.applied_unknown, block_reason=e.reason)
+            return
+        except InterventionNotApplied as e:
+            # UC-048 A4: nothing applied, so the backstop reservation is refunded.
+            self._rate_limiter.refund(reservation)
+            logger.info(f"InterventionManager: {spec.flag_key} for {target or '<game>'} not applied: {e.reason}")
+            await record_outcome(spec, target, objective, session, blocked=True, block_reason=e.reason)
+            return
+        except Exception as e:
+            logger.error(f"InterventionManager: handler for {spec.flag_key} raised: {e}")
+            await record_outcome(spec, target, objective, session, blocked=True, block_reason="handler_error")
             return
 
-        # Only the players whose level changed in this game are dispatched, so a
-        # level left over from an earlier game is never applied (UC-040 BR-017).
-        # A move to neutral is a revert: it bypasses the permission chain and the
-        # backstop, so a blocked chain (kill switch, exhausted budget) can never
-        # leave a factor stuck after the baseline moved (UC-040 A24).
-        to_neutral = {s: v for s, v in changed.items() if _is_none_value(spec, v)}
-        applied = {s: v for s, v in changed.items() if s not in to_neutral}
-        # UC-101 BR-004: each changed player's intervention id goes with its level.
-        if to_neutral:
-            await self._run_revert(spec, to_neutral, session, intervention_ids=_ids_for(ids, to_neutral))
-        if applied:
-            # Battery gating already happened in _read_levels; the chain-level
-            # target is None (fan-out), so its single-target battery check is a
-            # no-op here. The handler applies ``applied``.
-            await self._enforce_and_dispatch(spec, applied, "", None, session, intervention_ids=_ids_for(ids, applied))
+        await record_outcome(spec, target, objective, session, blocked=False, block_reason="")
+
+        # On-device visibility cue: surface HARD-class agent actions at the
+        # controller so an operator can tell agent activity from a malfunction.
+        # Gated behind a user.json mute toggle so it can be silenced for demos.
+        #
+        # Not for main-loop flags: end_game has just ended the game, so its loop
+        # is gone and there is no controller left to cue. The mute toggle is read
+        # here, on the main loop, so a muted cue is never dispatched.
+        if spec.weight >= WEIGHT_HARD and spec.flag_key not in self._main_loop_flags and self._cue_enabled():
+            # Best-effort cue: a game loop that just ended is not a failure.
+            with contextlib.suppress(GameLoopUnavailableError):
+                await self._run_on_game_loop(session, spec, self._emit_agent_cue, spec, target, game, quiet=True)
 
     async def _run_revert(
         self,
@@ -1428,210 +1540,12 @@ class InterventionManager:
         except Exception as e:
             logger.error(f"InterventionManager: revert handler for {spec.flag_key} raised: {e}")
 
-    def _read_levels(self, spec: InterventionSpec, game_id: str, serials, ids: "dict | None" = None) -> dict:
-        """Read a per-player LEVEL flag for each battery-eligible serial as its
-        float value, or ``_UNKNOWN`` on a flagd error. Battery-gated serials are
-        left out (their level is neither applied nor baselined). ``ids``, when
-        given, gets each serial's intervention id served with its value (UC-101
-        BR-004); the id never takes part in change detection (NFR-061)."""
-        threshold = self._battery_threshold()
-        reads: dict = {}
-        for serial in serials:
-            pct = self._battery_pct(serial)
-            if pct is not None and pct < threshold:
-                continue  # battery guard: skip low-battery controllers
-            grant = self._read_grant(spec, game_id, serial)
-            if grant is _UNKNOWN:
-                reads[serial] = grant
-                continue
-            reads[serial] = grant[1]
-            if ids is not None and grant[2]:
-                ids[serial] = grant[2]
-        return reads
-
-    async def _evaluate_targeted_grant(self, spec: InterventionSpec, session: "SessionView") -> None:
-        """Change-detect a per-serial GRANT flag and dispatch only new grants.
-
-        Grants (shield, toughness boost, soft penalty) are one-shot effects, so a
-        serial whose grant did not change since this game last read it must not
-        be granted again (UC-040 BR-012, #1313). Each live serial's
-        ``(variant, value)`` is compared with the game's per-serial baseline;
-        the flag service generates a fresh opaque ``r<epoch>_<n>`` variant per
-        write, so even a same-value re-grant is a change. A serial the game has
-        not read yet has no grant, so its first non-neutral grant fires. One
-        intervention is dispatched per changed, non-neutral serial with
-        ``target`` = that serial, so the battery guard and the backstop apply
-        per grant. Fail closed: a failed read never moves that serial's
-        baseline and never fires. Grants are game-scoped, so a new game never
-        sees a grant of an earlier game. A serial pruned by the agent
-        (UC-040 BR-016) resolves to the neutral variant, which is a change but
-        never fires.
-        """
-        game = session.game
-        if game is None:
-            return
-        reads = {serial: self._read_grant(spec, session.game_id, serial) for serial in _active_player_serials(game)}
-        if self._allow_list_lags(spec):
-            return  # deferred: no serial's baseline moves
-        fired: list[tuple[str, object, str | None]] = []
-        with self._lock:
-            bucket = self._existing_state_bucket(session.game_id)
-            if bucket is None:
-                return  # session retired mid-pass
-            baseline = bucket.get(spec.flag_key)
-            if not isinstance(baseline, dict):
-                baseline = {}
-                bucket[spec.flag_key] = baseline
-            for serial, grant in reads.items():
-                if grant is _UNKNOWN:
-                    continue  # never move the baseline on an error read
-                last = baseline.get(serial)
-                # The grant identity is ``(variant, value)``: the intervention id
-                # never takes part in change detection (NFR-061).
-                identity = (grant[0], grant[1])
-                baseline[serial] = identity
-                if identity == last:
-                    continue
-                value = grant[1]
-                if not _is_none_value(spec, value):
-                    fired.append((serial, value, grant[2]))
-        for serial, value, decision_id in fired:
-            await self._enforce_and_dispatch(spec, value, "", serial, session, intervention_id=decision_id)
-
-    def _read_grant(
-        self, spec: InterventionSpec, game_id: str, serial: str
-    ) -> "tuple[object, object, str | None] | _ReadFailed":
-        """Read one serial's grant as ``(variant, value, decision_id)`` or ``_UNKNOWN``.
-
-        Read with evaluation details: the value getters never raise and return
-        the default on error, which would look like "no grant" and move the
-        baseline (#1299). The variant is part of the grant identity because the
-        flag service generates a fresh opaque ``r<epoch>_<n>`` variant per write.
-        ``decision_id`` is the intervention id served with the resolved variant
-        (``decisionId.<variant>`` metadata, UC-101 BR-003), None without one; it is
-        informational only and never makes a read fail (NFR-061).
-        """
-        client = self._interventions_client
-        if client is None:
-            return _UNKNOWN
-        ctx = self._session_context(game_id, targeting_key=serial)
-        default = _spec_default(spec)
-        try:
-            if spec.value_kind == "string":
-                details = client.get_string_details(spec.flag_key, str(default), ctx)
-            else:
-                details = client.get_float_details(spec.flag_key, float(default), ctx)
-        except Exception as e:
-            record_flag_fallback(spec.flag_key, type(e).__name__, str(e))
-            return _UNKNOWN
-        if details.error_code is not None or details.reason == Reason.ERROR:
-            error_code = getattr(details.error_code, "value", None) or str(details.error_code or "ERROR")
-            record_flag_fallback(spec.flag_key, error_code, details.error_message or "")
-            return _UNKNOWN
-        value = details.value
-        if spec.value_kind == "string":
-            if not isinstance(value, str):
-                return _UNKNOWN
-        else:
-            value = _coerce_float(value)
-            if value is None:
-                return _UNKNOWN
-        return (details.variant, value, decision_id_of(details))
-
-    # ------------------------------------------------------------------ #
-    # Enforcement chain
-    # ------------------------------------------------------------------ #
-    async def _enforce_and_dispatch(
-        self,
-        spec: InterventionSpec,
-        value: object,
-        payload: str,
-        target: str | None,
-        session: "SessionView",
-        *,
-        intervention_id: str | None = None,
-        intervention_ids: "dict[str, str] | None" = None,
-    ) -> None:
-        """Run the enforcement chain, then the handler, and record the outcome.
-
-        ``intervention_id`` (one target, an event) or ``intervention_ids`` (a level's
-        changed players) are the ids served with the value at the read that found the
-        change. A player lever's handler runs in an intervention scope carrying them,
-        so the game records the ``intervention`` moment where the effect lands
-        (UC-101 BR-004, BR-005). The ids are informational: the chain, the outcome
-        record and the ``agent_intervention`` event never see them (BR-008, NFR-061).
-        """
-        objective = self._dominant_objective()
-        game = session.game
-
-        block_reason, reservation = self._check_chain(spec, target, game)
-        if block_reason is not None:
-            await self._record(spec, target, objective, session, blocked=True, block_reason=block_reason)
-            return
-
-        ctx = InterventionContext(
-            spec=spec,
-            value=value,
-            payload=payload,
-            target_serial=target,
-            game=game,
-            objective=objective,
-            game_id=session.game_id,
-        )
-        handler = self._handlers.get(spec.flag_key, self._noop_handler)
-        try:
-            if spec.flag_key in self._main_loop_flags:
-                await handler(ctx)
-            else:
-                scope = _intervention_scope(spec, value, target, intervention_id, intervention_ids)
-                await self._run_on_game_loop(session, spec, run_with_intervention_scope, scope, handler, ctx)
-        except GameLoopUnavailableError as e:
-            # UC-040 BR-018, already logged + counted. game_loop_late: the effect
-            # started and may still apply, so it is not reported as blocked;
-            # otherwise it was never applied (fail closed). No cue either way.
-            await self._record(spec, target, objective, session, blocked=not e.applied_unknown, block_reason=e.reason)
-            return
-        except InterventionNotApplied as e:
-            # UC-040 A31: nothing applied, so the backstop reservation is refunded.
-            self._rate_limiter.refund(reservation)
-            logger.info(f"InterventionManager: {spec.flag_key} for {target or '<game>'} not applied: {e.reason}")
-            await self._record(spec, target, objective, session, blocked=True, block_reason=e.reason)
-            return
-        except Exception as e:
-            logger.error(f"InterventionManager: handler for {spec.flag_key} raised: {e}")
-            await self._record(spec, target, objective, session, blocked=True, block_reason="handler_error")
-            return
-
-        await self._record(spec, target, objective, session, blocked=False, block_reason="")
-
-        # On-device visibility cue: surface HARD-class agent actions at the
-        # controller so an operator can tell agent activity from a malfunction.
-        # Gated behind a user.json mute toggle so it can be silenced for demos.
-        #
-        # Not for main-loop flags: end_game has just ended the game, so its loop
-        # is gone and there is no controller left to cue. The mute toggle is read
-        # here, on the main loop, so a muted cue is never dispatched.
-        if spec.weight >= WEIGHT_HARD and spec.flag_key not in self._main_loop_flags and self._cue_enabled():
-            # Best-effort cue: a game loop that just ended is not a failure.
-            with contextlib.suppress(GameLoopUnavailableError):
-                await self._run_on_game_loop(session, spec, self._emit_agent_cue, spec, target, game, quiet=True)
-
     # ------------------------------------------------------------------ #
     # Game-loop dispatch (UC-040 BR-018)
     # ------------------------------------------------------------------ #
     def _dispatcher_for(self, session: "SessionView") -> GameLoopDispatcher:
-        """Return the session's dispatcher, bound to its current game loop.
-
-        A session id whose loop changed (a new game reusing the id, or the legacy
-        sentinel across games) gets a fresh dispatcher for the new loop.
-        """
-        loop = session.loop
-        with self._lock:
-            dispatcher = self._dispatchers.get(session.game_id)
-            if dispatcher is None or dispatcher.loop is not loop:
-                dispatcher = GameLoopDispatcher(loop, timeout_s=self._dispatch_timeout_s)
-                self._dispatchers[session.game_id] = dispatcher
-            return dispatcher
+        """Return the session's dispatcher, bound to its current game loop."""
+        return self._sessions.dispatcher_for(session, self._dispatch_timeout_s)
 
     async def _run_on_game_loop(
         self, session: "SessionView", spec: InterventionSpec, fn, *args, quiet: bool = False
@@ -1655,28 +1569,8 @@ class InterventionManager:
                 f"InterventionManager: {spec.flag_key} effect for game {session.game_id or '<primary>'} "
                 f"not applied ({e})"
             )
-            try:
-                from services.game_coordinator import metrics
-
-                metrics.intervention_dispatch_failures_total.labels(type=spec.type_id, reason=e.reason).inc()
-            except Exception as metric_error:
-                logger.debug(f"InterventionManager: dispatch failure metric failed: {metric_error}")
+            count_dispatch_failure(spec, e.reason)
             raise
-
-    def _cue_enabled(self) -> bool:
-        """Whether the on-device agent-intervention cue is enabled (#818).
-
-        Reads the ``agent_intervention_cue`` toggle from the user domain. Defaults
-        to ON (fail-open to visibility) when the client is unavailable or the read
-        fails — the whole point of #818 is that the operator can SEE agent action.
-        """
-        if self._user_client is None:
-            return True
-        try:
-            return bool(self._user_client.get_boolean_value("agent_intervention_cue", True, EvaluationContext()))
-        except Exception as e:
-            logger.debug(f"agent cue gate read failed, defaulting to enabled: {e}")
-            return True
 
     async def _emit_agent_cue(
         self, spec: InterventionSpec, target: str | None, game: "InterventionTarget | None"
@@ -1684,129 +1578,28 @@ class InterventionManager:
         # Pass the bound gate, not a bool: the cue re-reads it on the game loop.
         return await intervention_effects.emit_agent_cue(spec, target, game, cue_enabled=self._cue_enabled)
 
-    def _check_chain(
-        self, spec: InterventionSpec, target: str | None, game: "InterventionTarget | None"
-    ) -> tuple[str | None, int | None]:
-        """Run the enforcement chain. Returns ``(block_reason, reservation)``: a reason when blocked, else
-        None plus the backstop reservation token to refund if the handler applies nothing (#1868).
-
-        Order: allowed-membership -> rate limit -> battery guard -> mode matrix.
-        The rate-limit reservation happens last among the cheap checks so a
-        blocked intervention never consumes budget.
-
-        UC-040 BR-004: the coordinator-side allow-list check (the agent has its own
-        in the permission chain). UC-040 BR-004: the coordinator's half of the
-        double enforcement, plus the global backstop.
-        """
-        # (a) allowed-membership
-        if spec.type_id not in self._allowed_types():
-            return BLOCK_NOT_ALLOWED, None
-
-        # (d) mode-capability matrix (cheap, no budget side effect) — checked
-        # before the rate limiter so unsupported types don't consume budget.
-        if game is not None:
-            mode_name = _game_mode_name(game)
-            if spec.type_id in MODE_CAPABILITY_DENY.get(mode_name, frozenset()):
-                return BLOCK_MODE_UNSUPPORTED, None
-
-        # (c) battery guard (player-targeted only)
-        if spec.player_targeted and target:
-            pct = self._battery_pct(target)
-            if pct is not None and pct < self._battery_threshold():
-                return BLOCK_LOW_BATTERY, None
-
-        # (b) weighted rate limit — the GENEROUS GLOBAL BACKSTOP, NOT the
-        # per-game governor (that is the agent's). Reserves budget; do last so
-        # the reservation only happens for otherwise-allowed interventions. A
-        # block here means a process-wide flood across ALL games, not a single
-        # game pacing itself out.
-        reservation = self._rate_limiter.reserve(spec.weight)
-        if reservation is None:
-            return BLOCK_RATE_LIMITED, None
-
-        return None, reservation
-
     # ------------------------------------------------------------------ #
-    # Metric + event emission
+    # Policy values (read by the flag reader) and per-player targeting
     # ------------------------------------------------------------------ #
-    async def _record(
-        self,
-        spec: InterventionSpec,
-        target: str | None,
-        objective: str,
-        session: "SessionView",
-        *,
-        blocked: bool,
-        block_reason: str,
-    ) -> None:
-        try:
-            from services.game_coordinator import metrics
+    def _cue_enabled(self) -> bool:
+        return self._reads.cue_enabled()
 
-            metrics.interventions_total.labels(
-                type=spec.type_id,
-                objective=objective,
-                blocked=str(blocked).lower(),
-                block_reason=block_reason,
-            ).inc()
-        except Exception as e:
-            logger.debug(f"InterventionManager: metric record failed: {e}")
+    def _allowed_types(self) -> set[str]:
+        return self._reads.allowed_types()
 
-        from lib.types import GameEvent
+    def _battery_threshold(self) -> float:
+        return self._reads.battery_threshold()
 
-        # Publish on THIS session's bus so the effect/blocked event lands on the
-        # stream the owning game's subscribers (and the agent runner) are reading.
-        # The session's game_id is stamped onto the event by the bus.
-        await session.publish(
-            GameEvent.AGENT_INTERVENTION,
-            {
-                "type": spec.type_id,
-                "target": target or "",
-                "blocked": str(blocked).lower(),
-                "block_reason": block_reason,
-            },
-        )
+    def _battery_pct(self, serial: str) -> float | None:
+        return self._reads.battery_pct(serial)
 
-    # ------------------------------------------------------------------ #
-    # Flag reads / policy values
-    # ------------------------------------------------------------------ #
-    def _session_context(self, game_id: str, *, targeting_key: str | None = None) -> EvaluationContext:
-        """Build the per-session EvaluationContext (#838).
+    def _dominant_objective(self) -> str:
+        return self._reads.dominant_objective()
 
-        Adds ``gameId`` so flagd targeting rules can scope an intervention to one
-        game. An empty ``game_id`` (the synthesized primary session in the legacy
-        ``get_game`` path) adds NO ``gameId`` attribute, so un-targeted flags
-        resolve exactly as before. ``targeting_key`` (the player serial) is set
-        for per-player resolution so per-player and per-game rules compose.
-        """
-        attributes = {"gameId": game_id} if game_id else {}
-        return EvaluationContext(targeting_key=targeting_key, attributes=attributes)
+    def _refresh_budget(self) -> None:
+        """Refresh the GLOBAL BACKSTOP budget (#919) from ``policy.coordinator_backstop_per_minute``."""
+        self._rate_limiter.set_budget(self._reads.backstop_budget())
 
-    def _read_flag(self, spec: InterventionSpec, session: "SessionView") -> object:
-        client = self._interventions_client
-        if client is None:
-            return _spec_default(spec)
-        ctx = self._session_context(session.game_id)
-        if spec.value_kind == "int":
-            return client.get_integer_value(spec.flag_key, spec.none_value, ctx)
-        if spec.value_kind == "float":
-            return client.get_float_value(spec.flag_key, float(spec.none_value), ctx)
-        # State-shaped string flags carry a string none_value (e.g. pacing_profile
-        # "none").
-        string_default = spec.none_value if isinstance(spec.none_value, str) else ""
-        return client.get_string_value(spec.flag_key, string_default, ctx)
-
-    def _state_target_serial(self, _spec: InterventionSpec) -> str | None:
-        """Player-targeted state flags fan out across all active serials via
-        flagd targeting (keyed on ``targeting_key = serial``); there is no single
-        chain-level target. The battery guard is therefore applied per serial
-        inside :meth:`resolve_player_targets`, not here, so this returns None
-        (the chain's single-target battery check is a no-op for fan-out flags).
-        """
-        return None
-
-    # ------------------------------------------------------------------ #
-    # Per-player targeting resolution (reusable; PR D shield_seconds uses it)
-    # ------------------------------------------------------------------ #
     def resolve_player_targets(
         self,
         flag_key: str,
@@ -1817,371 +1610,10 @@ class InterventionManager:
         battery_gate: bool = True,
         game_id: str = "",
     ) -> dict:
-        """Evaluate a per-player targeted flag for every active player serial.
+        """Evaluate a per-player targeted flag for every active player serial (``{serial: value}``).
 
-        For each active serial in ``game.players`` the flag is evaluated with an
-        ``EvaluationContext(targeting_key=serial, attributes={gameId})`` so
-        flagd's per-serial AND per-game targeting rules resolve and compose in a
-        single rule (#838: a rule may match both ``targetingKey == serial`` and
-        ``gameId == <id>``). Serials with no targeting match receive ``default``.
-        When ``battery_gate`` is True, any serial whose battery pct is below
-        ``policy.battery_threshold`` is dropped from the result (the per-serial
-        equivalent of the chain's battery guard — closes the
-        player-targeted-state-flag battery-guard gap documented in PR A's
-        ``_state_target_serial``).
-
-        Reusable across player-targeted state interventions: PR C uses it for
-        ``player_sensitivity_factor``; PR D uses it for ``shield_seconds``.
-
-        Args:
-            flag_key: Flag to evaluate in the ``interventions`` domain.
-            default: Neutral value returned for serials with no targeting match
-                (e.g. 1.0 for sensitivity factor, 0 for shield seconds).
-            game: Live game whose ``players`` dict supplies the active serials.
-            value_kind: ``"float"``, ``"int"`` or ``"string"`` (flag value type).
-                ``"string"`` (#1129 toughness_boost) returns raw per-serial strings
-                for the handler to parse; float/int return coerced numbers.
-            battery_gate: If True, drop serials below the battery threshold.
-            game_id: Owning session's game id, added as ``gameId`` to the context
-                (#838). Empty string adds no ``gameId`` (legacy primary path).
-
-        Returns:
-            ``{serial: value}`` for every active serial that should be acted on.
-            Battery-gated serials are omitted entirely.
+        Reusable by the per-player handlers; see :meth:`InterventionFlagReader.resolve_player_targets`.
         """
-        result: dict = {}
-        client = self._interventions_client
-        serials = _active_player_serials(game)
-        threshold = self._battery_threshold() if battery_gate else None
-
-        for serial in serials:
-            if threshold is not None:
-                pct = self._battery_pct(serial)
-                if pct is not None and pct < threshold:
-                    continue  # battery guard: skip low-battery controllers
-
-            if client is None:
-                value = default
-            else:
-                ctx = self._session_context(game_id, targeting_key=serial)
-                try:
-                    if value_kind == "int":
-                        value = float(client.get_integer_value(flag_key, int(default), ctx))
-                    elif value_kind == "string":
-                        # Raw string returned for the handler to parse.
-                        value = str(client.get_string_value(flag_key, str(default), ctx))
-                    else:
-                        value = float(client.get_float_value(flag_key, float(default), ctx))
-                except Exception as e:  # one bad serial must not drop the rest
-                    logger.debug(f"InterventionManager: per-serial read failed for {serial}: {e}")
-                    value = default
-            result[serial] = value
-
-        return result
-
-    def _allow_list_lags(self, spec: InterventionSpec) -> bool:
-        """True while the allow-list held is older than the interventions set
-        held (UC-053 A9, #1552): the values just read are then deferred.
-
-        Called after the values are read and before any baseline moves. The
-        probe is read after the values, and the allow-list after the probe (and
-        again by ``_check_chain`` after this check), so when this returns False
-        the allow-list that gates a value is at least as new as that value. Fail
-        closed: a stamped interventions set is deferred against an allow-list
-        with no stamp, another epoch or an older version, and a probe or
-        allow-list read that raises defers too. An unstamped interventions set
-        (file-sourced flagd) is not gated.
-        """
-        if self._interventions_client is None:
-            return False
-        allow = None
-        try:
-            held = self._interventions_snapshot()
-        except Exception as e:
-            self._note_deferral(spec, None, None, reason=f"snapshot probe failed: {e}")
-            return True
-        if held is None:
-            self._end_deferral()
-            return False
-        cached = self._pass_allow_snapshot
-        if cached is not None and cached[0] == held[0] and cached[1] >= held[1]:
-            self._end_deferral()
-            return False
-        if self._agent_client is not None:
-            try:
-                allow = self._allow_list_snapshot()
-            except Exception as e:
-                logger.debug(f"InterventionManager: interventions_allowed snapshot read failed: {e}")
-        self._pass_allow_snapshot = allow
-        if allow is not None and allow[0] == held[0] and allow[1] >= held[1]:
-            self._end_deferral()
-            return False
-        self._note_deferral(spec, held, allow)
-        return True
-
-    def _interventions_snapshot(self) -> "tuple[str, int] | None":
-        """The interventions set's stamp, probed on ``end_game`` (in every rendering of the set)."""
-        from openfeature.exception import FlagNotFoundError
-
-        provider = _hookless_provider(self._interventions_client, "resolve_object_details")
-        try:
-            if provider is not None:
-                details = provider.resolve_object_details("end_game", {}, EvaluationContext())
-            else:
-                details = self._interventions_client.get_object_details("end_game", {}, EvaluationContext())
-        except FlagNotFoundError:
-            return None
-        return _snapshot_of(details)
-
-    def _allow_list_snapshot(self) -> "tuple[str, int] | None":
-        """The stamp of ``agent/interventions_allowed``."""
-        from openfeature.exception import FlagNotFoundError
-
-        provider = _hookless_provider(self._agent_client, "resolve_string_details")
-        try:
-            if provider is not None:
-                details = provider.resolve_string_details("interventions_allowed", "", EvaluationContext())
-            else:
-                details = self._agent_client.get_string_details("interventions_allowed", "", EvaluationContext())
-        except FlagNotFoundError:
-            return None
-        return _snapshot_of(details)
-
-    def _note_deferral(
-        self,
-        spec: InterventionSpec,
-        held: "tuple[str, int] | None",
-        allow: "tuple[str, int] | None",
-        reason: str = "",
-    ) -> None:
-        """Record a deferral: warns (rate limited) once it lasts longer than
-        DEFERRAL_WARN_AFTER_S and keeps a re-check scheduled so a stuck deferral
-        stays visible without changes."""
-        now = self._time_fn()
-        if self._deferral_since is None:
-            self._deferral_since = now
-        age = now - self._deferral_since
-        detail = reason or f"allow-list snapshot {allow} is older than interventions snapshot {held}"
-        if age > DEFERRAL_WARN_AFTER_S and (
-            self._deferral_last_warned is None or now - self._deferral_last_warned >= DEFERRAL_WARN_INTERVAL_S
-        ):
-            self._deferral_last_warned = now
-            logger.warning(
-                f"InterventionManager: interventions deferred for {age:.1f}s ({spec.flag_key}): {detail}; "
-                "check that the flag service serves the agent set and the coordinator's agent stream is connected"
-            )
-        else:
-            logger.debug(f"InterventionManager: {spec.flag_key} deferred: {detail}")
-        self._schedule_deferral_recheck()
-
-    def _end_deferral(self) -> None:
-        if self._deferral_since is None:
-            return
-        self._deferral_since = None
-        self._deferral_last_warned = None
-        if self._deferral_recheck is not None:
-            self._deferral_recheck.cancel()
-            self._deferral_recheck = None
-
-    def _spawn_evaluate_all(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Run evaluate_all() as a task that stays referenced until it is done (#2357, RUF006)."""
-        task = loop.create_task(self.evaluate_all())
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
-
-    def _schedule_deferral_recheck(self) -> None:
-        if self._deferral_recheck is not None:
-            return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-
-        def _recheck() -> None:
-            self._deferral_recheck = None
-            self._spawn_evaluate_all(loop)
-
-        self._deferral_recheck = loop.call_later(DEFERRAL_RECHECK_S, _recheck)
-
-    def _allowed_types(self) -> set[str]:
-        # interventions_allowed is a STRING flag whose value is a comma-separated
-        # list of intervention ids (`none` == ""). It used to be a LIST/object
-        # flag, but the agent's flagd RPC resolver silently TYPE_MISMATCHes
-        # get_object_value on a top-level LIST flag and falls back to its empty
-        # default, blocking EVERY intervention even with a non-`none` variant
-        # active. Both sides now read a string and parse it identically;
-        # the coordinator's in-process resolver reads the string cleanly too.
-        if self._agent_client is None:
-            return set()
-        try:
-            # UC-040 BR-004: only an agent `on` gets anything applied; `off` (the stop) and `watch` get nothing.
-            if self._agent_client.get_string_value("enabled", "off", EvaluationContext()) != "on":
-                return set()
-            value = self._agent_client.get_string_value("interventions_allowed", "", EvaluationContext())
-            if isinstance(value, str):
-                return {token.strip() for token in value.split(",") if token.strip()}
-        except Exception as e:
-            logger.debug(f"InterventionManager: interventions_allowed read failed: {e}")
-        return set()
-
-    def _battery_threshold(self) -> float:
-        if self._agent_client is None:
-            return 20.0
-        try:
-            return float(self._agent_client.get_integer_value("policy.battery_threshold", 20, EvaluationContext()))
-        except Exception:
-            return 20.0
-
-    def _refresh_budget(self) -> None:
-        """Refresh the GLOBAL BACKSTOP budget (#919).
-
-        Reads ``policy.coordinator_backstop_per_minute`` — NOT
-        ``policy.max_interventions_per_minute``. The latter is the agent's
-        authoritative per-game budget; the coordinator must not mirror it (that
-        is exactly the drift the contract forbids). This limiter owns only the
-        generous global flood ceiling, which falls back to
-        ``DEFAULT_COORDINATOR_BACKSTOP_BUDGET`` when the flag is unreachable.
-        """
-        budget = DEFAULT_COORDINATOR_BACKSTOP_BUDGET
-        if self._agent_client is not None:
-            try:
-                budget = float(
-                    self._agent_client.get_integer_value(
-                        "policy.coordinator_backstop_per_minute",
-                        int(DEFAULT_COORDINATOR_BACKSTOP_BUDGET),
-                        EvaluationContext(),
-                    )
-                )
-            except Exception:
-                budget = DEFAULT_COORDINATOR_BACKSTOP_BUDGET
-        self._rate_limiter.set_budget(budget)
-
-    def _dominant_objective(self) -> str:
-        """Return the highest-weight objective from the agent ``objectives``
-        flag (weighted dict). Defaults to ``balanced``."""
-        if self._agent_client is None:
-            return "balanced"
-        try:
-            weights = self._agent_client.get_object_value("objectives", {}, EvaluationContext())
-            if isinstance(weights, dict) and weights:
-                return max(weights, key=lambda k: weights.get(k, 0.0))
-        except Exception:
-            pass
-        return "balanced"
-
-    def _battery_pct(self, serial: str) -> float | None:
-        if self._battery_provider is None:
-            return None
-        try:
-            return self._battery_provider(serial)
-        except Exception:
-            return None
-
-
-# ---------------------------------------------------------------------- #
-# Module-level helpers (pure; easy to unit-test)
-# ---------------------------------------------------------------------- #
-def _event_payload_string(spec: InterventionSpec, payload: dict) -> str:
-    """Map an event payload (FR-137) to the payload string the handlers take:
-    the serial (eliminate/revive), the sound id (audio_cue),
-    ``"<serial>:<effect>"`` (controller_effect) or ``""`` (end_game; the game
-    is the scope)."""
-    serial = str(payload.get("serial") or "")
-    if spec.flag_key == "audio_cue":
-        return str(payload.get("sound") or "")
-    if spec.flag_key == "controller_effect":
-        return f"{serial}:{payload.get('effect') or ''}"
-    if spec.flag_key == "end_game":
-        return ""
-    if spec.flag_key == "group_shield":
-        # "<serial,serial,...>|<seconds>" (UC-040 A47): _event_target_serials and
-        # _event_group_seconds read it back.
-        return f"{payload.get('serials') or ''}|{payload.get('seconds') or ''}"
-    return serial
-
-
-def _event_target_serials(spec: InterventionSpec, payload: str) -> list[str]:
-    """The target serials of a group event's payload string, in payload order (UC-040 A47).
-
-    Empty for every other flag. Entries are stripped; empty entries are kept, so
-    the handler refuses a malformed set instead of shrinking it.
-    """
-    if spec.flag_key != "group_shield":
-        return []
-    serials = payload.split("|", 1)[0]
-    if not serials.strip():
-        return []
-    return [serial.strip() for serial in serials.split(",")]
-
-
-def _event_group_seconds(payload: str) -> float | None:
-    """The seconds of a group event's payload string, or None when missing or not a number."""
-    if "|" not in payload:
-        return None
-    raw = payload.split("|", 1)[1].strip()
-    try:
-        return float(raw)
-    except ValueError:
-        return None
-
-
-def _edge_target_serial(spec: InterventionSpec, payload: str) -> str | None:
-    """Resolve the target serial for an edge-triggered intervention.
-
-    - eliminate_player / revive_player: payload IS the serial.
-    - controller_effect: payload is ``"<serial>:<effect>"``; empty serial =
-      broadcast (-> None).
-    - audio_cue / end_game: not player-targeted (-> None).
-    """
-    if not spec.player_targeted:
-        return None
-    serial = payload.split(":", 1)[0] if ":" in payload else payload
-    serial = serial.strip()
-    return serial or None
-
-
-def _is_none_value(spec: InterventionSpec, value: object) -> bool:
-    """True if a state-shaped flag value equals its neutral/none value."""
-    none_val = spec.none_value
-    if isinstance(none_val, (int, float)) and isinstance(value, (int, float)):
-        return abs(float(value) - float(none_val)) < 1e-9
-    return value == none_val
-
-
-def _same_value(a: object, b: object) -> bool:
-    """Equal values, comparing numbers with a float tolerance."""
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        return abs(float(a) - float(b)) < 1e-9
-    return a == b
-
-
-def _spec_default(spec: InterventionSpec) -> object:
-    if spec.edge_triggered:
-        return ""
-    if spec.value_kind in ("int", "float"):
-        return spec.none_value
-    # State-shaped string flag: fall back to its string none_value (e.g. "none").
-    return spec.none_value if isinstance(spec.none_value, str) else ""
-
-
-def _active_player_serials(game: "InterventionTarget | None") -> list[str]:
-    """Serials of the live game's players that are still alive.
-
-    Empty list when there is no game / no players.
-    """
-    if game is None:
-        return []
-    return [serial for serial, player in game.players.items() if player.alive]
-
-
-def _game_mode_name(game: "InterventionTarget | None") -> str:
-    """Best-effort mode name from a live game via get_game_name().
-
-    Fails open: no game or a raising getter gives ``""`` (no mode denial).
-    """
-    if game is None:
-        return ""
-    try:
-        return game.get_game_name()
-    except Exception:
-        return ""
+        return self._reads.resolve_player_targets(
+            flag_key, default, game, value_kind=value_kind, battery_gate=battery_gate, game_id=game_id
+        )

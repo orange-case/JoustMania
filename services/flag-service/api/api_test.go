@@ -315,13 +315,18 @@ func TestReadEndpoints(t *testing.T) {
 			t.Fatalf("%d %v", s, b)
 		}
 	})
-	t.Run("UC-053/A1 a stage reset clears that writer's overlays", func(t *testing.T) {
+	t.Run("UC-053/A1 a stage reset leaves a persisted stage write; a per-flag DELETE clears it (#2803)", func(t *testing.T) {
 		e.do("PUT", "/agent/decision.backend", map[string]any{"variant": "jev", "writer": "stage"})
 		if s, _ := e.do("DELETE", "/agent?writer=stage", nil); s != 204 {
 			t.Fatal(s)
 		}
-		_, b := e.do("GET", "/agent/decision.backend", nil)
-		if b["effective_default"] != "rules" {
+		if _, b := e.do("GET", "/agent/decision.backend", nil); b["effective_default"] != "jev" {
+			t.Fatalf("%v, want the persisted stage write jev", b["effective_default"])
+		}
+		if s, _ := e.do("DELETE", "/agent/decision.backend", nil); s != 204 {
+			t.Fatal(s)
+		}
+		if _, b := e.do("GET", "/agent/decision.backend", nil); b["effective_default"] != "rules" {
 			t.Fatalf("%v", b["effective_default"])
 		}
 	})
@@ -377,7 +382,7 @@ func TestDryRunEndpoint(t *testing.T) {
 }
 
 // A real write and its revert land while a real game runs: the game latched its
-// values at its start (UC-040 BR-027).
+// values at its start (UC-048 BR-011).
 //
 // UC: UC-043 A17
 func TestRealWriteDuringLiveRealGame(t *testing.T) {
@@ -460,9 +465,9 @@ func TestIfWriterDelete(t *testing.T) {
 			t.Fatalf("real overlay writer = %v, want operator", w)
 		}
 	})
-	t.Run("UC-043/A18 if_writer outside scope real and the in-memory stack overlay is 400 malformed", func(t *testing.T) {
+	t.Run("UC-043/A18 if_writer outside scope real and stack is 400 malformed", func(t *testing.T) {
 		e := setup(t, "operator")
-		for _, q := range []string{"?persist=true&if_writer=promotion", "?experiment_id=x&arm=A&if_writer=promotion"} {
+		for _, q := range []string{"?persist=true&experiment_id=x&arm=A&if_writer=promotion", "?experiment_id=x&arm=A&if_writer=promotion"} {
 			if s, b := e.do("DELETE", path+q, nil); s != 400 || b["error"] != "malformed" {
 				t.Fatalf("%s: %d %v, want 400 malformed", q, s, b)
 			}
@@ -579,7 +584,6 @@ func TestStrictBooleanQueryParams(t *testing.T) {
 	cases := []struct{ method, param, rest string }{
 		{"PUT", "dry_run", ""},
 		{"DELETE", "persist", ""},
-		{"DELETE", "fraction", ""},
 	}
 	for _, c := range cases {
 		for _, v := range bad {
@@ -615,8 +619,16 @@ func TestStrictBooleanQueryParams(t *testing.T) {
 			t.Fatal("dry_run=0 did not write")
 		}
 	})
+	t.Run("UC-042/main DELETE with the removed fraction parameter is 400 and clears nothing", func(t *testing.T) {
+		for _, q := range []string{"fraction=true", "fraction_percent=10"} {
+			e := newEnv(t, true)
+			if s, b := e.do("DELETE", path+"?"+q, nil); s != 400 || b["error"] != "malformed" {
+				t.Fatalf("?%s: %d %v, want 400 malformed", q, s, b)
+			}
+		}
+	})
 	t.Run("UC-042/main 1, 0, true and false are accepted on DELETE", func(t *testing.T) {
-		for _, q := range []string{"persist=1", "persist=0", "persist=true", "persist=false", "fraction=false", "fraction=0"} {
+		for _, q := range []string{"persist=1", "persist=0", "persist=true", "persist=false"} {
 			e := newEnv(t, true)
 			if s, b := e.do("DELETE", "/game/shield.activation?"+q, nil); s != 204 {
 				t.Fatalf("?%s: %d %v, want 204", q, s, b)

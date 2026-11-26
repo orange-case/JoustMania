@@ -19,7 +19,6 @@ test_dir = Path(__file__).parent
 project_root = test_dir.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter  # noqa: E402
 from services.controller_manager.multiplexer.rust_adapter import RustServiceAdapter  # noqa: E402
 from services.controller_manager.tests.backend_doubles import autospec_channel  # noqa: E402
 from services.controller_manager.tests.fake_stream_call import FakeStreamCall  # noqa: E402
@@ -47,7 +46,7 @@ def _bare(adapter_cls):
     return adapter
 
 
-@pytest.fixture(params=[RustServiceAdapter, PythonHidAdapter], ids=["rust", "python_hid"])
+@pytest.fixture(params=[RustServiceAdapter], ids=["rust"])
 def hid_adapter(request):
     return _bare(request.param)
 

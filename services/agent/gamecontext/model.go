@@ -71,7 +71,7 @@ type PlayerSignals struct {
 	// Zero until the first intensity sample; a snapshot copy like History.
 	Game GameMeans
 
-	// Hold-mode shield (#2096, UC-040 A37, UC-042 BR-007; nil / empty outside a hold
+	// Hold-mode shield (#2096, UC-048 A9, UC-042 BR-007; nil / empty outside a hold
 	// game). Sources: game_player_shield_energy_seconds,
 	// game_player_shield_budget_remaining_seconds, game_player_shield_active and
 	// game_player_shield_stats{stat} (live; set at every hold transition and at least
@@ -199,6 +199,15 @@ type SessionSignals struct {
 	ShieldActivation *string
 	ShieldSettings   map[string]float64
 
+	// ShieldGate is each player's agent shield gate by serial, from
+	// game_player_shield_gate{stat} (UC-048 A4, A6): what the coordinator's
+	// grant_shield refusal reads. Kept on the session, not the player, so its
+	// series never keeps a silent player alive. ShieldGroupGrants is the game's
+	// applied group shields (game_shield_group_grants, A47). Both up to one
+	// export interval old; nil until observed. The map is replaced, never mutated.
+	ShieldGate        map[string]ShieldGate
+	ShieldGroupGrants *int
+
 	// LastUpdate is the last time any session signal changed.
 	LastUpdate time.Time
 }
@@ -313,6 +322,23 @@ const (
 	ShieldSettingEnergyInitial = "shield.energy_initial_seconds"
 	ShieldSettingRecharge      = "shield.recharge_per_second"
 	ShieldSettingMinBurst      = "shield.min_burst_seconds"
+)
+
+// ShieldGate is one player's agent shield gate as the coordinator exports it.
+type ShieldGate struct {
+	// Grants is the agent shields the coordinator applied to the player in this game.
+	Grants int
+	// Charged is set while the player holds a trigger-mode charge.
+	Charged bool
+	// CooldownUntil is when the cooldown after the last agent shield ends; zero: none.
+	CooldownUntil time.Time
+}
+
+// Shield gate stats of game_player_shield_gate{stat}.
+const (
+	ShieldGateGrants        = "grants"
+	ShieldGateCharged       = "charged"
+	ShieldGateCooldownUntil = "cooldown_until"
 )
 
 // ShieldActivationHold is the game_shield_activation_mode value of a hold game.

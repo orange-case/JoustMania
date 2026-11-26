@@ -172,39 +172,20 @@ for card in "${JOUSTMANIA_ASOUND_DIR:-/proc/asound}"/card[0-9]*; do
 done
 echo "Audio volume configured"
 
-# Real controllers are read through rust-hid, the default Bluetooth backend
-# (#1371); it is part of the default compose services. python-hid is opt-in and
-# needs all three of:
-#   1. COMPOSE_PROFILES=python-hid, in .env.local or a systemd drop-in (never in
-#      .env: it is tracked). Set the whole comma-separated list in one place
-#      (e.g. python-hid,operator-pad): a unit drop-in Environment= wins over
-#      .env.local, so a drop-in with python-hid alone switches the pad off.
-#        sudo systemctl edit joustmania
-#          [Service]
-#          Environment=COMPOSE_PROFILES=python-hid
-#   2. backend=python_rust in services/flagd/controller.json (loads the python
-#      adapter next to rust; read once, restart controller-manager), AND
-#   3. bluetooth_backend=python (routes serials and pairing to python-hid; its
-#      default "rust" keeps every controller on rust-hid).
-#
-# Upgrade step (#1402 I1): Pis that ran python-hid before #1371 keep a
-# joustmania-python-hid container (restart: unless-stopped), and `up -d` never
-# removes a container whose profile is inactive. Remove it explicitly whenever
-# the python-hid profile is not active. Idempotent: no-op if it is absent.
-# The services go through a variable: `config | grep -q` under pipefail dies of
-# SIGPIPE when the list is long and grep exits early (audit F4).
-COMPOSE_SERVICES="$(compose config --services 2>/dev/null || true)"
-if ! grep -qx python-hid <<<"$COMPOSE_SERVICES"; then
-    docker rm -f joustmania-python-hid >/dev/null 2>&1 || true
-fi
+# Real controllers are read through rust-hid, the only HID backend. A
+# joustmania-python-hid container from an older install is an orphan now
+# (no compose service), so `up -d --remove-orphans` below removes it.
 
-# The operator pad (UC-015, #2050) is opt-in the same way: COMPOSE_PROFILES=
-# operator-pad. Set the whole comma-separated list in one place (e.g.
-# python-hid,operator-pad); a unit drop-in Environment= wins over .env.local.
+# The operator pad (UC-015, #2050) is opt-in: COMPOSE_PROFILES=operator-pad,
+# in .env.local or a systemd drop-in (never in .env: it is tracked); a unit
+# drop-in Environment= wins over .env.local.
 # A pad container left over from a run with the profile on would keep its
 # exclusive grab of the pad and keep sending commands (restart:
 # unless-stopped, and `up -d --remove-orphans` keeps a profile-inactive
 # container), so remove it whenever the profile is off. Idempotent.
+# The services go through a variable: `config | grep -q` under pipefail dies of
+# SIGPIPE when the list is long and grep exits early (audit F4).
+COMPOSE_SERVICES="$(compose config --services 2>/dev/null || true)"
 if ! grep -qx operator-pad <<<"$COMPOSE_SERVICES"; then
     docker rm -f joustmania-operator-pad >/dev/null 2>&1 || true
 fi

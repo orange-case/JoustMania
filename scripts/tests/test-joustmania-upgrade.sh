@@ -611,12 +611,12 @@ grep -q restart "${CASE}/calls.log" && fail "same-missing-offline: restarted"
 
 # --- 6. sha accepted from a branch checkout (the one-time migration) --------
 make_case sha
-printf 'COMPOSE_PROFILES=python-hid JOUSTMANIA_UNIT_REV=2\n' >"${CASE}/unit-env"
+printf 'COMPOSE_PROFILES=operator-pad JOUSTMANIA_UNIT_REV=2\n' >"${CASE}/unit-env"
 upgrade "${C_MAIN}" || fail "sha: upgrade failed: $(tail -3 "${CASE}/out.log")"
 [[ "$(head_of)" == "${C_MAIN}" ]] || fail "sha: HEAD is not the sha"
 [[ "$(rel current_tag)" == "${C_MAIN}" ]] || fail "sha: image tag is not the full sha: $(rel current_tag)"
 [[ "$(rel previous_ref)" == "${C_V1}" ]] || fail "sha: previous is not the branch commit"
-grep -q "compose.* pull | tag=${C_MAIN} profiles=python-hid" "${CASE}/calls.log" \
+grep -q "compose.* pull | tag=${C_MAIN} profiles=operator-pad" "${CASE}/calls.log" \
   || fail "sha: pull did not use the sha tag and the unit's COMPOSE_PROFILES"
 
 # --- 7. not healthy: automatic rollback; --no-rollback leaves it ------------

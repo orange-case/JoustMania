@@ -39,7 +39,7 @@ Three invariants follow and are **load-bearing**:
      real game (FR-062, FR-138).
    - **Gated autonomous promotion**: a shadow-validated winner becomes an in-memory `real` overlay, reverted on
      degradation (FR-065), only when the FR-152 (a) gates are open; off in the stock stack. The durable path
-     is the promotion PR.
+     is a human change made from the promotion's evidence.
 2. **The write surfaces are disjoint by scope.** Human writes are persisted admin values or stack overlays;
    agent writes are game-scoped `interventions` values, experiment-arm values and the `real` overlay. The flag
    service holds each kind of value separately per flag and serialises every write, so an agent write never
@@ -47,7 +47,7 @@ Three invariants follow and are **load-bearing**:
    paths converge on inside the game object; §4 defines those compositions.
 3. **The agent cannot loosen its own limits (C-034).** A setting that limits the agent is never a flag the
    agent writes:
-   - The agent never writes the `agent` set. Every agent-limiting setting of FR-152 is in `agent`: `enabled`, `code_improvement.*`, `llm.max_requests_per_minute`, `decision.claude.max_requests_per_minute`, `experiment_proposer_enabled`, `experiment_dynamic_max_concurrent` and `experiment_max_games`. The
+   - The agent never writes the `agent` set. Every agent-limiting setting of FR-152 is in `agent`: `enabled`, `code_improvement.*`, `llm.max_requests_per_minute`, `decision.claude.max_requests_per_minute`, `experiment_proposer_enabled` and `experiment_dynamic_max_concurrent`. The
      agent's governor is there too (`interventions_allowed`, `enabled`, `objectives`, the
      `policy.*` budgets, `decision.magnitude_bounds`).
    - In the sets it does write it writes only the `interventions` keys (game-scoped) and the `game`

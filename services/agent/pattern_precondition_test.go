@@ -71,7 +71,7 @@ func TestPatternGames_NoSpawnWhileExperimentsOff(t *testing.T) {
 	targeting := experiment.NewGateTargetingWriter(experiment.NewGate(writer, nil, log), writer)
 	reg := experiment.NewRegistry(experiment.RegistryConfig{
 		Root: t.TempDir(), MaxShadowGames: 2, EffectiveConcurrency: 2, Spawner: spawner,
-		Verdict: experiment.NewVerdict(3, 0.5, nil), Targeting: targeting, Log: log, Patterns: pinner,
+		Verdict: experiment.NewVerdict(3, 0.5), Targeting: targeting, Log: log, Patterns: pinner,
 	})
 	lc := &liveConfig{}
 	lc.set(flags.ExperimentConfig{Enabled: false})

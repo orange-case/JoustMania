@@ -131,7 +131,7 @@ type Summary struct {
 	// objectives) or no goal lookup is wired. Additive, schema version unchanged.
 	Goal *Goal `json:"goal,omitempty"`
 	// GroupGrants counts the game's group-shield decisions and exports their
-	// rationale text blind (UC-040 A47, BR-033, #2529); nil when the game had none.
+	// rationale text blind (UC-048 A13, BR-014, #2529); nil when the game had none.
 	// Additive, schema version unchanged.
 	GroupGrants *GroupGrants `json:"group_grants,omitempty"`
 }

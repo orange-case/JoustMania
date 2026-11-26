@@ -8,9 +8,8 @@
 #
 # Profiles: compose MERGES a service's `profiles` list with the base one, it
 # does not replace it. The hardware services below therefore start only under
-# the profiles listed here plus any profile the base file already gives them
-# (python-hid keeps its base `python-hid` profile). With no profile active,
-# none of them, nor the agent, dashboard, connect-proxy or envoy, starts.
+# the profiles listed here plus any profile the base file already gives them.
+# With no profile active, none of them, nor the agent, dashboard, connect-proxy or envoy, starts.
 #
 # Note: We must fully redefine services to clear device/volume lists
 # (docker-compose merges arrays, doesn't replace them)
@@ -54,8 +53,8 @@ services:
     devices: !reset []
     volumes: !reset []
     privileged: false
-    # Override depends_on to drop rust-hid and python-hid: they are profile-gated
-    # below (no HID hardware in CI) and the mock backend needs neither
+    # Override depends_on to drop rust-hid: it is profile-gated below (no HID
+    # hardware in CI) and the mock backend does not need it
     depends_on: !override
       flagd:
         condition: service_started
@@ -90,13 +89,6 @@ services:
   rust-hid:
     profiles:
       - hardware  # Only starts when 'hardware' profile is active
-
-  # Python HID Service - Requires hardware, excluded from CI
-  python-hid:
-    profiles:
-      # Merged with the base `python-hid` profile: starts under 'hardware' OR
-      # 'python-hid' (opt-in since #1371), never with no profile active
-      - hardware
 
   # Agent - OTLP fan-out target, not required for integration tests
   agent:

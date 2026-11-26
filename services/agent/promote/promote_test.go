@@ -16,43 +16,23 @@ import (
 )
 
 // ---- RECORDING FAKES for the three promotion seams (#936 safety rail). The
-// Promoter owns only the dispatch logic; opening an issue/PR, committing, and the
-// real-default write are faked here so every mode is exercised against EXACTLY what
-// it "would" do — ZERO network, ZERO real git, ZERO real-default mutation. None of
-// these fakes touch github.com or run git; they only record. ----
+// Promoter owns only the dispatch logic; opening an issue and the real-default
+// write are faked here so every mode is exercised against EXACTLY what it "would"
+// do — ZERO network, ZERO real-default mutation. None of these fakes touch
+// github.com; they only record. ----
 
-// recordingGitHub records the issue/PR it was asked to open and returns a canned
+// recordingGitHub records the issue it was asked to open and returns a canned
 // URL (or a configured error). It is the unit-test stand-in for the GitHubClient
 // wire boundary.
 type recordingGitHub struct {
 	issues   []IssueReq
-	prs      []PRReq
 	issueURL string
-	prURL    string
 	issueErr error
-	prErr    error
 }
 
 func (g *recordingGitHub) OpenIssue(_ context.Context, req IssueReq) (string, error) {
 	g.issues = append(g.issues, req)
 	return g.issueURL, g.issueErr
-}
-
-func (g *recordingGitHub) OpenPR(_ context.Context, req PRReq) (string, error) {
-	g.prs = append(g.prs, req)
-	return g.prURL, g.prErr
-}
-
-// recordingGit records the commits it was asked to make and returns a canned SHA.
-type recordingGit struct {
-	commits []CommitReq
-	sha     string
-	err     error
-}
-
-func (g *recordingGit) Commit(_ context.Context, req CommitReq) (string, error) {
-	g.commits = append(g.commits, req)
-	return g.sha, g.err
 }
 
 // recordingRealDefault records the real-default writes it was asked to make. This
@@ -116,10 +96,6 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func testRepo() RepoRef {
-	return RepoRef{Owner: "WatchMeJoustMyFlags", Name: "JoustMania", Base: "main"}
-}
-
 var promoteProposal = experiment.Proposal{
 	FlagKey:           "death_grace_period_ms",
 	ExperimentalValue: 500,
@@ -148,11 +124,11 @@ func testEvidence() Evidence {
 
 // promoterWithRecorder wires a Promoter over the given seams with an in-memory span
 // recorder, mirroring the validate_test.go recorder pattern.
-func promoterWithRecorder(t *testing.T, gh GitHubClient, git GitClient, realDef RealDefaultWriter, w Watcher, rev RealDefaultReverter) (*Promoter, *tracetest.SpanRecorder) {
+func promoterWithRecorder(t *testing.T, gh GitHubClient, realDef RealDefaultWriter, w Watcher, rev RealDefaultReverter) (*Promoter, *tracetest.SpanRecorder) {
 	t.Helper()
 	rec := tracetest.NewSpanRecorder()
 	tp := trace.NewTracerProvider(trace.WithSpanProcessor(rec))
-	p := NewPromoter(gh, git, realDef, w, rev, testRepo(), tp.Tracer("test"), discardLogger())
+	p := NewPromoter(gh, realDef, w, rev, tp.Tracer("test"), discardLogger())
 	// The substrate validity bar (UC-043 A23) admits testEvidence's objective.
 	p.SetSubstrateBar(map[string]bool{"balanced": true})
 	return p, rec
@@ -182,12 +158,11 @@ func stringAttr(s trace.ReadOnlySpan, key string) string {
 // UC: UC-043 main BR-003
 func TestPromoteIssueMode(t *testing.T) {
 	gh := &recordingGitHub{issueURL: "https://github.com/WatchMeJoustMyFlags/JoustMania/issues/42"}
-	git := &recordingGit{}
 	realDef := &recordingRealDefault{}
-	p, rec := promoterWithRecorder(t, gh, git, realDef, nil, nil)
+	p, rec := promoterWithRecorder(t, gh, realDef, nil, nil)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeIssue, Target: TargetLocal}, testEvidence())
+		Config{Mode: ModeIssue}, testEvidence())
 
 	if res.Outcome != OutcomeApplied {
 		t.Fatalf("outcome = %q, want applied", res.Outcome)
@@ -203,10 +178,18 @@ func TestPromoteIssueMode(t *testing.T) {
 	if !strings.Contains(body, "longer grace reduces early eliminations") {
 		t.Errorf("issue body missing reasoning:\n%s", body)
 	}
-	// Nothing else applied: no PR, no commit, no real-default change.
-	if len(gh.prs) != 0 || len(git.commits) != 0 || len(realDef.calls) != 0 {
-		t.Errorf("issue mode applied more than an issue: prs=%d commits=%d realDef=%d",
-			len(gh.prs), len(git.commits), len(realDef.calls))
+	// Nothing else applied: no real-default change.
+	if len(realDef.calls) != 0 {
+		t.Errorf("issue mode applied more than an issue: realDef=%d", len(realDef.calls))
+	}
+	// The body carries the structured evidence.
+	for _, want := range []string{
+		"Fitness before/after", "0.5000", "0.7200",
+		"death_grace_period_ms: default=300, experimental=500",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("issue body missing %q:\n%s", want, body)
+		}
 	}
 	span := spanByName(t, rec, SpanPromote)
 	if got := stringAttr(span, AttrGate); got != "issue" {
@@ -220,72 +203,24 @@ func TestPromoteIssueMode(t *testing.T) {
 	}
 }
 
-// --- mode=pr, target=github: opens a PR with a STRUCTURED body, merges nothing. ---
+// --- the retired `pr` mode (and any unknown value) counts as issue. ---
 // UC: UC-043 main BR-003
-func TestPromotePRModeGitHub(t *testing.T) {
-	gh := &recordingGitHub{prURL: "https://github.com/WatchMeJoustMyFlags/JoustMania/pull/99"}
-	git := &recordingGit{}
+func TestPromoteRetiredPRModeCountsAsIssue(t *testing.T) {
+	gh := &recordingGitHub{issueURL: "https://github.com/WatchMeJoustMyFlags/JoustMania/issues/43"}
 	realDef := &recordingRealDefault{}
-	p, rec := promoterWithRecorder(t, gh, git, realDef, nil, nil)
+	p, rec := promoterWithRecorder(t, gh, realDef, nil, nil)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModePR, Target: TargetGitHub}, testEvidence())
+		Config{Mode: Mode("pr")}, testEvidence())
 
-	if res.Outcome != OutcomeApplied {
-		t.Fatalf("outcome = %q, want applied", res.Outcome)
+	if res.Mode != ModeIssue || res.Outcome != OutcomeApplied {
+		t.Fatalf("result = %+v, want issue/applied", res)
 	}
-	if len(gh.prs) != 1 {
-		t.Fatalf("OpenPR calls = %d, want 1", len(gh.prs))
+	if len(gh.issues) != 1 || len(realDef.calls) != 0 {
+		t.Errorf("issues=%d realDef=%d, want 1/0", len(gh.issues), len(realDef.calls))
 	}
-	body := gh.prs[0].Body
-	// The #936 AC: structured body with fitness before/after, synthetic results,
-	// reasoning, flag state.
-	for _, want := range []string{
-		"Fitness before/after", "0.5000", "0.7200", // before/after
-		"Synthetic game results", "Synthetic games run:** 5",
-		"Reasoning summary", "longer grace reduces early eliminations",
-		"Flag state at improvement time", "death_grace_period_ms: default=300, experimental=500",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("PR body missing %q:\n%s", want, body)
-		}
-	}
-	// No local commit, no real-default change, and the PR is opened — not merged
-	// (the fake only records OpenPR; there is no merge call in the interface).
-	if len(git.commits) != 0 || len(realDef.calls) != 0 {
-		t.Errorf("pr/github mode applied locally: commits=%d realDef=%d", len(git.commits), len(realDef.calls))
-	}
-	span := spanByName(t, rec, SpanPromote)
-	if got := stringAttr(span, AttrTarget); got != "github" {
-		t.Errorf("target attr = %q, want github", got)
-	}
-}
-
-// --- mode=pr, target=local: commits to the local git seam, opens no PR. ---
-// UC: UC-043 main BR-003
-func TestPromotePRModeLocal(t *testing.T) {
-	gh := &recordingGitHub{}
-	git := &recordingGit{sha: "abc123"}
-	p, _ := promoterWithRecorder(t, gh, git, nil, nil, nil)
-
-	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModePR, Target: TargetLocal}, testEvidence())
-
-	if res.Outcome != OutcomeApplied {
-		t.Fatalf("outcome = %q, want applied", res.Outcome)
-	}
-	if len(git.commits) != 1 {
-		t.Fatalf("Commit calls = %d, want 1", len(git.commits))
-	}
-	if len(gh.prs) != 0 || len(gh.issues) != 0 {
-		t.Errorf("local target reached github: prs=%d issues=%d", len(gh.prs), len(gh.issues))
-	}
-	if !strings.HasPrefix(res.URL, "local:") {
-		t.Errorf("local commit URL = %q, want local: prefix", res.URL)
-	}
-	// The committed file carries the structured body.
-	if got := git.commits[0].Files; len(got) != 1 {
-		t.Errorf("commit files = %d, want 1", len(got))
+	if got := stringAttr(spanByName(t, rec, SpanPromote), AttrGate); got != "issue" {
+		t.Errorf("gate attr = %q, want issue", got)
 	}
 }
 
@@ -296,10 +231,10 @@ func TestPromotePRModeLocal(t *testing.T) {
 func TestPromoteAutonomousApplied(t *testing.T) {
 	realDef := &recordingRealDefault{}
 	// A wired, non-degrading watcher is the safety net that lets the apply stand.
-	p, rec := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, fakeWatcher{degraded: false}, &recordingReverter{})
+	p, rec := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{degraded: false}, &recordingReverter{})
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
 	if res.Outcome != OutcomeApplied {
 		t.Fatalf("outcome = %q, want applied", res.Outcome)
@@ -320,10 +255,10 @@ func TestPromoteAutonomousApplied(t *testing.T) {
 func TestPromoteAutonomousRevertsOnDegradation(t *testing.T) {
 	realDef := &recordingRealDefault{}
 	rev := &recordingReverter{}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, fakeWatcher{degraded: true}, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{degraded: true}, rev)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
 	if res.Outcome != OutcomeReverted {
 		t.Fatalf("outcome = %q, want reverted", res.Outcome)
@@ -340,10 +275,10 @@ func TestPromoteAutonomousRevertsOnUnconfirmableWatch(t *testing.T) {
 	realDef := &recordingRealDefault{}
 	rev := &recordingReverter{}
 	// Watch errors → cannot confirm healthy → fail-safe revert.
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, fakeWatcher{err: errors.New("telemetry unreachable")}, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{err: errors.New("telemetry unreachable")}, rev)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
 	if res.Outcome != OutcomeReverted {
 		t.Fatalf("outcome = %q, want reverted (fail-safe)", res.Outcome)
@@ -362,8 +297,8 @@ func TestPromoteAutonomousFailedRevertKeepsDefault(t *testing.T) {
 		realDef := &recordingRealDefault{}
 		rev := &recordingReverter{err: errors.New("flag service unavailable")}
 		w := &baselineRecordingWatcher{degraded: true}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, w, rev)
-		cfg := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, w, rev)
+		cfg := Config{Mode: ModeAutonomous, Enabled: true}
 
 		res := p.Promote(context.Background(), promoteProposal, promoteVerdict, cfg, testEvidence())
 
@@ -397,10 +332,10 @@ func TestPromoteAutonomousFailsClosedWithoutWatcher(t *testing.T) {
 	realDef := &recordingRealDefault{}
 	rev := &recordingReverter{}
 	// realDef + reverter wired, but NO Watcher (the safety net is not connected).
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, nil, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, nil, rev)
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+		Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 
 	if res.Outcome != OutcomeDiscarded {
 		t.Fatalf("outcome = %q, want discarded (no watcher → fail closed)", res.Outcome)
@@ -421,12 +356,12 @@ func TestPromoteAutonomousFailsClosedWithoutWatcher(t *testing.T) {
 func TestPromoteAutonomousPassesBaselineToWatcher(t *testing.T) {
 	realDef := &recordingRealDefault{}
 	bw := &baselineRecordingWatcher{}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, bw, &recordingReverter{})
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, bw, &recordingReverter{})
 
 	ev := testEvidence()
 	ev.FitnessBefore = 0.61
 	p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, ev)
+		Config{Mode: ModeAutonomous, Enabled: true}, ev)
 
 	if bw.calls != 1 {
 		t.Fatalf("watcher Degraded calls = %d, want 1", bw.calls)
@@ -443,19 +378,19 @@ func TestPromoteAutonomousPassesBaselineToWatcher(t *testing.T) {
 func TestPromoteNonPromoteVerdictIsNoop(t *testing.T) {
 	gh := &recordingGitHub{}
 	realDef := &recordingRealDefault{}
-	p, _ := promoterWithRecorder(t, gh, &recordingGit{}, realDef, nil, nil)
+	p, _ := promoterWithRecorder(t, gh, realDef, nil, nil)
 
 	for _, verdict := range []experiment.Outcome{experiment.OutcomeDiscard, experiment.OutcomeRevert} {
 		res := p.Promote(context.Background(), promoteProposal,
 			experiment.Decision{Outcome: verdict},
-			Config{Mode: ModeAutonomous, Target: TargetGitHub, Enabled: true}, testEvidence())
+			Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 		if res.Outcome != OutcomeDiscarded {
 			t.Errorf("verdict %q: outcome = %q, want discarded", verdict, res.Outcome)
 		}
 	}
-	if len(gh.issues)+len(gh.prs)+len(realDef.calls) != 0 {
-		t.Errorf("a non-promote verdict acted: issues=%d prs=%d realDef=%d",
-			len(gh.issues), len(gh.prs), len(realDef.calls))
+	if len(gh.issues)+len(realDef.calls) != 0 {
+		t.Errorf("a non-promote verdict acted: issues=%d realDef=%d",
+			len(gh.issues), len(realDef.calls))
 	}
 }
 
@@ -463,9 +398,9 @@ func TestPromoteNonPromoteVerdictIsNoop(t *testing.T) {
 // UC: UC-043 A9
 func TestPromoteClientErrorIsRecordedNoop(t *testing.T) {
 	gh := &recordingGitHub{issueErr: errors.New("rate limited")}
-	p, _ := promoterWithRecorder(t, gh, &recordingGit{}, nil, nil, nil)
+	p, _ := promoterWithRecorder(t, gh, nil, nil, nil)
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeIssue, Target: TargetGitHub}, testEvidence())
+		Config{Mode: ModeIssue}, testEvidence())
 	if res.Outcome != OutcomeDiscarded {
 		t.Fatalf("outcome = %q, want discarded on client error", res.Outcome)
 	}
@@ -475,28 +410,4 @@ func TestPromoteClientErrorIsRecordedNoop(t *testing.T) {
 	if len(gh.issues) != 1 {
 		t.Errorf("the attempt should still be recorded: %d", len(gh.issues))
 	}
-}
-
-// --- target selects github vs local fake (#936 AC). ---
-func TestTargetSelectsClient(t *testing.T) {
-	t.Run("github target uses GitHubClient", func(t *testing.T) {
-		gh := &recordingGitHub{prURL: "u"}
-		git := &recordingGit{}
-		p, _ := promoterWithRecorder(t, gh, git, nil, nil, nil)
-		p.Promote(context.Background(), promoteProposal, promoteVerdict,
-			Config{Mode: ModePR, Target: TargetGitHub}, testEvidence())
-		if len(gh.prs) != 1 || len(git.commits) != 0 {
-			t.Errorf("github target: prs=%d commits=%d, want 1,0", len(gh.prs), len(git.commits))
-		}
-	})
-	t.Run("local target uses GitClient", func(t *testing.T) {
-		gh := &recordingGitHub{}
-		git := &recordingGit{sha: "s"}
-		p, _ := promoterWithRecorder(t, gh, git, nil, nil, nil)
-		p.Promote(context.Background(), promoteProposal, promoteVerdict,
-			Config{Mode: ModePR, Target: TargetLocal}, testEvidence())
-		if len(git.commits) != 1 || len(gh.prs) != 0 {
-			t.Errorf("local target: commits=%d prs=%d, want 1,0", len(git.commits), len(gh.prs))
-		}
-	})
 }

@@ -7,19 +7,19 @@ import (
 )
 
 // group_uc040_test.go covers the group options of ffa.target (#2467 PR 4; UC-040
-// A47, BR-033; decide-contract §2): their encoding, their resolution, and that a
+// UC-048 A13, UC-048 BR-014; decide-contract §2): their encoding, their resolution, and that a
 // request without a group lever is unchanged.
 
-// UC: UC-040 A47 BR-033
+// UC: UC-048 A13 BR-014
 func TestGroupTargetOptions(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		alive []string
 		want  []string
 	}{
-		{"UC-040/A47 one alive player: none", []string{"A"}, nil},
-		{"UC-040/A47 two alive players: all only", []string{"B", "A"}, []string{"group:all"}},
-		{"UC-040/A47 three alive players: all plus one all_except each, sorted", []string{"C", "A", "B"},
+		{"UC-048/A13 one alive player: none", []string{"A"}, nil},
+		{"UC-048/A13 two alive players: all only", []string{"B", "A"}, []string{"group:all"}},
+		{"UC-048/A13 three alive players: all plus one all_except each, sorted", []string{"C", "A", "B"},
 			[]string{"group:all", "group:all_except:A", "group:all_except:B", "group:all_except:C"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -28,7 +28,7 @@ func TestGroupTargetOptions(t *testing.T) {
 			}
 		})
 	}
-	t.Run("UC-040/A47 resolution", func(t *testing.T) {
+	t.Run("UC-048/A13 resolution", func(t *testing.T) {
 		alive := []string{"C", "A", "B"}
 		if got, ok := ResolveGroupTarget("group:all", alive); !ok || !slices.Equal(got, []string{"A", "B", "C"}) {
 			t.Fatalf("group:all = %v %v", got, ok)
@@ -47,17 +47,17 @@ func TestGroupTargetOptions(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A47 BR-033
+// UC: UC-048 A13 BR-014
 func TestFFAQuestions_GroupOptions(t *testing.T) {
 	st := State{Players: []PlayerState{{Serial: "A", Alive: true}, {Serial: "B", Alive: true}, {Serial: "C", Alive: true}, {Serial: "D"}}}
 	target := func(qs []Question) Question { return qs[1] }
-	t.Run("UC-040/A47 without the group lever the target question is unchanged", func(t *testing.T) {
+	t.Run("UC-048/A13 without the group lever the target question is unchanged", func(t *testing.T) {
 		got := target(FFAQuestions(st, []string{IntvGrantShield}))
 		if !slices.Equal(got.Options, []string{"none", "A", "B", "C"}) || strings.Contains(got.Text, "group") {
 			t.Fatalf("target = %+v, want the v1 question", got)
 		}
 	})
-	t.Run("UC-040/A47 with the group lever the group options follow the serials", func(t *testing.T) {
+	t.Run("UC-048/A13 with the group lever the group options follow the serials", func(t *testing.T) {
 		got := target(FFAQuestions(st, []string{IntvGrantShield, IntvGrantGroupShield}))
 		want := []string{"none", "A", "B", "C", "group:all", "group:all_except:A", "group:all_except:B", "group:all_except:C"}
 		if !slices.Equal(got.Options, want) {
@@ -67,20 +67,20 @@ func TestFFAQuestions_GroupOptions(t *testing.T) {
 			t.Fatalf("text = %q, want the group sentence", got.Text)
 		}
 	})
-	t.Run("UC-040/A47 one alive player: no group option, text unchanged", func(t *testing.T) {
+	t.Run("UC-048/A13 one alive player: no group option, text unchanged", func(t *testing.T) {
 		one := State{Players: []PlayerState{{Serial: "A", Alive: true}}}
 		got := target(FFAQuestions(one, []string{IntvGrantGroupShield}))
 		if !slices.Equal(got.Options, []string{"none", "A"}) || strings.Contains(got.Text, "group") {
 			t.Fatalf("target = %+v", got)
 		}
 	})
-	t.Run("UC-040/A47 the lever is effect-only and never player-targeted", func(t *testing.T) {
+	t.Run("UC-048/A13 the lever is effect-only and never player-targeted", func(t *testing.T) {
 		iv, ok := ByName(IntvGrantGroupShield)
 		if !ok || !iv.GroupTargeted || iv.PlayerTargeted || iv.Weight != 1 || iv.Protective {
 			t.Fatalf("catalog row = %+v", iv)
 		}
 		if _, bounded := MagnitudeBounds(IntvGrantGroupShield); bounded {
-			t.Fatal("the group lever takes the BR-029 length, no magnitude")
+			t.Fatal("the group lever takes the UC-048 BR-012 length, no magnitude")
 		}
 	})
 	t.Run("UC-040/A45 a model prediction on a group target names no player", func(t *testing.T) {

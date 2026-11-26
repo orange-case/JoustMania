@@ -31,7 +31,7 @@ const (
 	ReasonRegistered    = "already_registered"
 
 	// The Flagsmith link (services.md §7.3, UC-054): a pulled write in scope
-	// experiment+arm, real or fraction (UC-054 BR-003); a Flagsmith value of
+	// experiment+arm or real (UC-054 BR-003); a Flagsmith value of
 	// another type than architecture note §2.1 (UC-054 A4); a pulled write
 	// whose slot changed since the link read it (412, nothing written).
 	FlagsmithScopeReadOnly = "flagsmith_scope_read_only"

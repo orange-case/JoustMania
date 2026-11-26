@@ -92,7 +92,7 @@ expect "reset: claude decide cap stage" decision.claude.max_requests_per_minute 
 [[ "${out}" == *"reset  interventions_allowed: none -> standard"* ]] && ok "reset reports what it changed" || not_ok "reset reports what it changed: ${out}"
 [[ "${out}" == *"interventions: 0 game-scoped value(s) in 0 live game(s)"* ]] && ok "reset reports interventions as per game" || not_ok "reset reports interventions as per game: ${out}"
 if grep -q '^DELETE /agent?writer=stage' "${FAKE_FLAG_LOG}"; then ok "reset clears the stage overlays first"; else not_ok "reset clears the stage overlays first"; fi
-if grep -q '"persist"' "${FAKE_FLAG_LOG}"; then not_ok "the stage never persists (N4)"; else ok "the stage never persists (N4)"; fi
+if grep -q '"persist"' "${FAKE_FLAG_LOG}"; then not_ok "the stage sends no persist field"; else ok "the stage sends no persist field"; fi
 out="$("${HELPER}" status)"
 [[ "${out}" == "at the stage baseline" ]] && ok "status after reset" || not_ok "status after reset: ${out}"
 before="$(snapshot)"
@@ -100,9 +100,9 @@ before="$(snapshot)"
 [[ "$(snapshot)" == "${before}" ]] && ok "reset is idempotent" || not_ok "reset is idempotent"
 
 # --- reset clears the persisted backend and model (#1682, C-018) -----------
-# agent-backend.sh persists decision.backend and the model: a stage overlay over
-# them would not survive a flag-service restart, so reset deletes them; the
-# host's other persisted settings (the menu's interventions_allowed) stay.
+# agent-backend.sh persists decision.backend and the model; reset deletes them.
+# A persist row has one stack value (#2803): reset writes the stage variant over
+# the host's persisted interventions_allowed only because it differs.
 persisted() { # persisted <flag>: the persisted admin variant, or "none"
   curl -sS "${FLAG_SERVICE_URL}/agent/$1" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("admin_value") or {}).get("variant", "none"))'
 }
@@ -117,7 +117,12 @@ persist interventions_allowed ambient
 out="$("${HELPER}" reset)"
 [[ "$(persisted decision.backend)" == "none" ]] && ok "reset clears the persisted backend" || not_ok "reset clears the persisted backend ($(persisted decision.backend))"
 [[ "$(persisted decision.claude.model)" == "none" ]] && ok "reset clears the persisted model" || not_ok "reset clears the persisted model ($(persisted decision.claude.model))"
-[[ "$(persisted interventions_allowed)" == "ambient" ]] && ok "reset keeps the host's other persisted settings" || not_ok "reset keeps the host's other persisted settings ($(persisted interventions_allowed))"
+[[ "$(persisted interventions_allowed)" == "standard" ]] && ok "reset replaces a persist row that differs (#2803)" || not_ok "reset replaces a persist row that differs ($(persisted interventions_allowed))"
+persist interventions_allowed standard
+puts_before="$(grep -c "^PUT /agent/interventions_allowed" "${FAKE_FLAG_LOG}")"
+"${HELPER}" reset >/dev/null
+puts_after="$(grep -c "^PUT /agent/interventions_allowed" "${FAKE_FLAG_LOG}")"
+[[ "${puts_after}" == "${puts_before}" ]] && ok "reset leaves a persist row at the stage variant alone (#2803)" || not_ok "reset rewrote a persist row at the stage variant (${puts_before} -> ${puts_after})"
 expect "reset after a persisted jev: backend rules" decision.backend rules
 [[ "${out}" == *"reset  decision.backend: persisted jev cleared"* ]] && ok "reset reports the cleared persisted backend" || not_ok "reset reports the cleared persisted backend: ${out}"
 if grep -q '^DELETE /agent/decision.backend?persist=true' "${FAKE_FLAG_LOG}"; then ok "reset deletes the persisted backend (persist=true)"; else not_ok "reset deletes the persisted backend (persist=true)"; fi

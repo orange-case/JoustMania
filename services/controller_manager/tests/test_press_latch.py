@@ -23,7 +23,6 @@ sys.path.insert(0, str(test_dir.parent.parent.parent))
 from lib.controller_constants import ButtonKey, normalize_serial
 from proto import controller_manager_pb2, psmove_hid_pb2
 from services.controller_manager.button_detector import ButtonDetector
-from services.controller_manager.multiplexer.python_hid_adapter import PythonHidAdapter
 from services.controller_manager.multiplexer.rust_adapter import RustServiceAdapter
 from services.controller_manager.tests.backend_doubles import autospec_channel, autospec_publisher, autospec_queue
 from services.controller_manager.tests.fake_stream_call import FakeStreamCall
@@ -52,7 +51,7 @@ def _bare_hid(adapter_cls):
 
 
 def _stream(adapter, *samples):
-    """Deliver ``samples`` through the adapter's real stream reader, as rust-hid / python-hid would."""
+    """Deliver ``samples`` through the adapter's real stream reader, as rust-hid would."""
     adapter._stub.StreamIO.return_value = FakeStreamCall(samples)
     adapter._stream_running = True
     adapter._stream_loop()
@@ -78,7 +77,7 @@ def detector():
         yield button_detector, publisher
 
 
-@pytest.mark.parametrize("adapter_cls", [RustServiceAdapter, PythonHidAdapter], ids=["rust", "python_hid"])
+@pytest.mark.parametrize("adapter_cls", [RustServiceAdapter], ids=["rust"])
 class TestUC010ShortTapBetweenPolls:
     @pytest.mark.uc("UC-010", flow="A1", br=["BR-012"])
     def test_tap_of_trigger_and_move_between_two_polls_gives_press_and_release(self, adapter_cls, detector):

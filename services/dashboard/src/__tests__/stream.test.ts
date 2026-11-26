@@ -97,7 +97,7 @@ describe("UC-035: A4 the dashboard loses a live stream", () => {
     vi.restoreAllMocks();
   });
 
-  it("UC-035/A4 the game event stream's loss clears the shield badges (UC-040 A32 step 3)", async () => {
+  it("UC-035/A4 the game event stream's loss clears the shield badges (UC-048 A5 step 3)", async () => {
     const shields = new ShieldStore();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await keepGameEventStreamOpen(

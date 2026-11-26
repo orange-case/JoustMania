@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Operator A/B over one-shot SHADOW games: does the LLM come up with group shields on its
-# own, and does the neutral prompt profile change that? (#2467 PR 6, UC-040 A47, BR-033, BR-036)
+# own, and does the neutral prompt profile change that? (#2467 PR 6, UC-048 A13, BR-014, UC-040 BR-036)
 #
 # Arms (group shields are on in both; only the wording differs; a third arm, v1 without the
 # lever, is not implemented):
@@ -33,7 +33,7 @@
 #   1. refuses to start when a real game is live, real_games is not off, a persisted
 #      interventions_allowed=none (the host's kill switch) would be lifted, DIR/snapshot.tsv exists
 #      (a killed run) or a touched flag already carries a group-ab overlay;
-#   2. snapshots the stack overlay of the five global flags it writes, with writer and expiry
+#   2. snapshots the stack value of the five global flags it writes (a persist row: its persisted value), with writer and expiry
 #      (DIR/snapshot.tsv), then writes the two arm values of decision.prompt_profile;
 #   3. stops the stack's agent container (it would decide in the one-shot game too; marker
 #      DIR/agent-was-running);
@@ -151,6 +151,8 @@ restore_flags() {
       [[ "${left}" -gt 0 ]] || spec=none # the old overlay has expired meanwhile
     fi
     [[ "${writer}" == "-" ]] && writer="${WRITER}-restored"
+    # The flag service refuses the label flagsmith over HTTP; a value pulled from Flagsmith goes back under ours.
+    [[ "${writer}" == flagsmith ]] && writer="${WRITER}-restored"
     local ttl=()
     [[ "${spec}" != none && "${expires}" != "-" ]] && ttl=(--ttl "${left}")
     case "${spec}" in

@@ -5,8 +5,7 @@
  * The agent records a snapshot after every state change (started, game assigned /
  * concluded / released, concluded, promoting, terminal, rehydrate) and holds every live experiment plus the newest finished
  * ones: status, flag, verdict once there is one, the end reason, and per arm the
- * games in flight, the samples and mean fitness of the journal summary and the
- * report-only prediction calibration (UC-043 A21).
+ * games in flight, and the samples and mean fitness of the journal summary.
  */
 
 /** Finished experiments kept on screen (the newest ones; maintainer decision D6). */

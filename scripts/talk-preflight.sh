@@ -27,7 +27,7 @@
 #      when decision.backend is remote but interventions_allowed resolves to
 #      nothing (none / noop only): the agent then makes no remote call (#1298);
 #      WARN when a remote decision.backend (jev, claude) is PERSISTED
-#      (agent-backend.sh, #1682): a stage overlay over it is temporary, and a
+#      (agent-backend.sh, #1682; a stage write of it is persisted too, #2803): a
 #      flag-service restart or a reboot brings the persisted backend back
 #   4. the agent container env (presence only; key values are never printed):
 #      JEV_API_KEY (Jev, the main in-game backend) and ANTHROPIC_API_KEY (Claude:
@@ -403,8 +403,8 @@ if isinstance(backend_value, str) and backend_value not in ("", "rules") and isi
               f"{shown(flags['interventions_allowed'])} allows no intervention: the agent makes no remote "
               "decide call, so nothing triggers (set interventions_allowed to ambient)")
 
-# The persisted layer (#1682): agent-backend.sh writes the backend and model
-# persisted, a stage overlay (talk-stage.sh) sits on top of it in memory only.
+# The persisted backend (#1682): agent-backend.sh, and since #2803 every stage
+# write of the row too, persist decision.backend (one stack value per persist row).
 # A persisted remote backend comes back after a flag-service restart or a
 # reboot, whatever the effective value is now.
 persisted_backend = (views.get("decision.backend", {}).get("admin_value") or {}).get("variant")

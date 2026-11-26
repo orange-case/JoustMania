@@ -21,7 +21,7 @@ const (
 	// unconditionally (empty when not in an experiment).
 	spanAttrExperimentID = "experiment.id"
 	spanAttrArm          = "experiment.arm"
-	// spanNameShieldCharge is the coordinator's per-charge span (UC-040 A30 to A32,
+	// spanNameShieldCharge is the coordinator's per-charge span (UC-048 A3 to A5,
 	// #1837). It ends live at activation, expiry, death or game end, often AFTER the
 	// player died; the agent takes nothing from it (A8 of the #1837 PR-4 plan): its
 	// player.serial must not re-create or refresh a dead or evicted player, and its

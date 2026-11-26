@@ -19,8 +19,8 @@ from lib import bluez_dbus
 from .adapter_manager import AdapterManager
 from .bluez_records import RecordOutcome, write_device_record
 from .bluez_reload import BluezReloader, PendingRecord
-from .config import get_adapter_routing_default, get_poll_interval, is_debug
-from .pairing_backend import HidapiBackend, PairingBackend, RustServiceBackend
+from .config import get_poll_interval, is_debug
+from .pairing_backend import PairingBackend, RustServiceBackend
 from .registrations import DEFAULT_BLUETOOTH_DIR, RemovalResult, normalize_address, remove_controller_registrations
 from .usb_led import UsbLedCue
 
@@ -80,61 +80,11 @@ TRUST_RETRY_DELAY_SECONDS = 2.0
 _ATTR_CONTROLLER_SERIAL = "controller.serial"
 _ATTR_ADAPTER_ADDRESS = "adapter.address"
 
-# bluetooth_backend flag variant -> pairing backend (UC-001 BR-003, #1320).
-# The keys must match the variants in services/flagd/controller.json.
-VARIANT_TO_PAIRING_BACKEND = {
-    "python": "python",
-    "rust": "rust",
-}
-
-# Unknown values and an unreachable flagd select rust-hid, the default backend
-# that every stack ships (UC-002 BR-003, #1371).
-DEFAULT_PAIRING_BACKEND = "rust"
-
-
-def _resolve_routing() -> str:
-    """Resolve the pairing backend name from the bluetooth_backend flag.
-
-    Maps the flag variant through VARIANT_TO_PAIRING_BACKEND. Returns
-    "python" or "rust"; unknown values log a warning and fall back to
-    DEFAULT_PAIRING_BACKEND (UC-001 A3).
-    """
-    variant = get_adapter_routing_default()
-
-    pairing_backend = VARIANT_TO_PAIRING_BACKEND.get(variant)
-    if pairing_backend is not None:
-        return pairing_backend
-
-    logger.warning(f"Unknown bluetooth_backend '{variant}', falling back to {DEFAULT_PAIRING_BACKEND}")
-    return DEFAULT_PAIRING_BACKEND
-
-
-def _create_backend(name: str) -> PairingBackend:
-    """Create a pairing backend by name ("python" or "rust")."""
-    if name == "python":
-        return HidapiBackend()
-    return RustServiceBackend()
-
-
-def _resolve_backend() -> tuple[PairingBackend, str]:
-    """Resolve the pairing backend from feature flags.
-
-    - "rust" (default) -> RustServiceBackend (rust-hid PairingService)
-    - "python" -> HidapiBackend (in-process hidapi)
-
-    Returns:
-        Tuple of (backend_instance, backend_name).
-    """
-    name = _resolve_routing()
-    return _create_backend(name), name
-
 
 class USBPairing:
     """Handles USB-connected PS Move controller pairing.
 
-    Delegates hardware I/O to a PairingBackend selected by feature flags.
-    The backend is resolved once per poll cycle — all operations within
-    a cycle use the same backend instance for coherence.
+    Delegates hardware I/O to the rust-hid PairingService.
     """
 
     def __init__(self, tracer: trace.Tracer):
@@ -146,9 +96,7 @@ class USBPairing:
         # Addresses paired over USB this session and not unpaired since: the only devices the
         # pairing agent answers for (UC-001 BR-009). Unlike _verified_serials, a replug retry keeps them.
         self._paired_addresses: set[str] = set()
-        # Cached backend instance — reused across polls when routing is unchanged
-        self._current_backend: PairingBackend | None = None
-        self._current_backend_name: str | None = None
+        self._backend: PairingBackend | None = None
         # Held from adapter selection through trust, and by an unpair (UC-005 A6):
         # an unpair never interleaves with a pairing.
         self._pairing_lock = asyncio.Lock()
@@ -169,15 +117,11 @@ class USBPairing:
         # LED cue on the controllers on USB while they are paired (UC-001 BR-010, #2091)
         self.led_cue = UsbLedCue()
 
-    def _get_backend(self) -> tuple[PairingBackend, str]:
-        """Return the cached backend, or resolve a new one.
-
-        Returns the backend cached from the most recent poll() call.
-        If no backend has been cached yet, resolves a fresh one.
-        """
-        if self._current_backend is not None and self._current_backend_name is not None:
-            return self._current_backend, self._current_backend_name
-        return _resolve_backend()
+    def _get_backend(self) -> PairingBackend:
+        """The rust-hid pairing backend, created on first use (UC-001 BR-003)."""
+        if self._backend is None:
+            self._backend = RustServiceBackend()
+        return self._backend
 
     async def pair_controller(self, device_path: bytes, serial: str, adapter_address: str) -> bool:
         """Pair a controller by writing the host BT address.
@@ -200,8 +144,7 @@ class USBPairing:
             start_time = time.time()
 
             try:
-                backend, backend_name = self._get_backend()
-                span.set_attribute("pairing.backend", backend_name)
+                backend = self._get_backend()
 
                 # Deadline: a hung backend must not hold the pairing lock forever (UC-005 A6)
                 result = await asyncio.wait_for(
@@ -465,19 +408,7 @@ class USBPairing:
         with self.tracer.start_as_current_span("poll_cycle") as span:
             span.set_attribute("poll.count", self.poll_count)
 
-            # Resolve routing name, only creating a new backend when it changes
-            backend_name = _resolve_routing()
-            if backend_name == self._current_backend_name and self._current_backend is not None:
-                backend = self._current_backend
-            else:
-                if self._current_backend_name is None:
-                    logger.info(f"Pairing backend initialized: {backend_name}")
-                elif backend_name != self._current_backend_name:
-                    logger.info(f"Pairing backend switched: {self._current_backend_name} -> {backend_name}")
-                backend = _create_backend(backend_name)
-                self._current_backend = backend
-                self._current_backend_name = backend_name
-            span.set_attribute("pairing.backend", backend_name)
+            backend = self._get_backend()
 
             # One restart for every pairing of this poll, or one deferred or failed earlier
             # (UC-001 A6, BR-005); also when enumeration failed, e.g. rust-hid is down (#1490).

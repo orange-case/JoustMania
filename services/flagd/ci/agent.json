@@ -363,18 +363,9 @@
       "state": "ENABLED",
       "variants": {
         "issue": "issue",
-        "pr": "pr",
         "autonomous": "autonomous"
       },
       "defaultVariant": "issue"
-    },
-    "code_improvement.target": {
-      "state": "ENABLED",
-      "variants": {
-        "local": "local",
-        "github": "github"
-      },
-      "defaultVariant": "local"
     },
     "experiments_enabled": {
       "state": "ENABLED",
@@ -434,22 +425,6 @@
       },
       "defaultVariant": "balanced"
     },
-    "experiment_dynamic_target_n": {
-      "state": "ENABLED",
-      "variants": {
-        "default": 0
-      },
-      "defaultVariant": "default"
-    },
-    "verdict_min_n": {
-      "state": "ENABLED",
-      "variants": {
-        "quick": 4,
-        "default": 8,
-        "strict": 16
-      },
-      "defaultVariant": "default"
-    },
     "verdict_min_pairs": {
       "state": "ENABLED",
       "variants": {
@@ -483,24 +458,6 @@
         "tight": 1e-05,
         "default": 0.0001,
         "loose": 0.001
-      },
-      "defaultVariant": "default"
-    },
-    "verdict_anchor_margin": {
-      "state": "ENABLED",
-      "variants": {
-        "loose": 0.01,
-        "default": 0.02,
-        "strict": 0.05
-      },
-      "defaultVariant": "default"
-    },
-    "experiment_max_games": {
-      "state": "ENABLED",
-      "variants": {
-        "default": 50,
-        "long": 100,
-        "unlimited": 0
       },
       "defaultVariant": "default"
     },

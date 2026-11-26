@@ -41,12 +41,11 @@ const (
 	ScopeGameSerial = "game+serial"
 	ScopeExperiment = "experiment+arm"
 	ScopeReal       = "real"
-	ScopeFraction   = "fraction"
 )
 
 var validKinds = map[string]bool{KindState: true, KindLevel: true, KindGrant: true, KindEvent: true, KindOverlay: true}
 var validScopes = map[string]bool{
-	ScopeStack: true, ScopeGame: true, ScopeGameSerial: true, ScopeExperiment: true, ScopeReal: true, ScopeFraction: true,
+	ScopeStack: true, ScopeGame: true, ScopeGameSerial: true, ScopeExperiment: true, ScopeReal: true,
 }
 
 // MaxDescription is the longest description a registry row may carry (in
@@ -89,8 +88,6 @@ type Bounds struct {
 	// "sound", "float lo hi" (a plain decimal string within the bounds) or an
 	// "enum a|b" list.
 	Payload map[string]string `yaml:"payload,omitempty" json:"payload,omitempty"`
-	// Fraction is the allowed fraction_percent range for a fraction write.
-	Fraction []int `yaml:"fraction,omitempty" json:"fraction,omitempty"`
 	// Shape accepts a JSON object with exactly the keys of the flag's baseline
 	// default variant, each value of the same JSON kind (an object-valued
 	// experiment catalog flag such as `windows`).
@@ -139,6 +136,32 @@ func KillSwitches() []string {
 // smaller risk (#2368). Every other flag is rolled back (500 persist_failed).
 func (p *Policy) AppliesWhenPersistFails() bool {
 	return killSwitches[p.Set+"/"+p.Key]
+}
+
+// sessionOnly holds, per persist row ("set/key"), the variants that are never
+// persisted: a stack write of one lives in memory over the persisted value, is
+// never sent to Flagsmith, and a restart drops it. A Go set, like killSwitches,
+// because released images parse registry.yaml strictly. flags.md §13 lists it.
+var sessionOnly = map[string]map[string]bool{
+	"agent/interventions_allowed": {"shadow_group": true},
+}
+
+// SessionOnly reports whether a stack write of variant on this row stays in
+// memory although the row persists.
+func (p *Policy) SessionOnly(variant string) bool {
+	return variant != "" && sessionOnly[p.Set+"/"+p.Key][variant]
+}
+
+// SessionOnlyVariants returns the session-only set as sorted "set/key=variant".
+func SessionOnlyVariants() []string {
+	var out []string
+	for k, vs := range sessionOnly {
+		for v := range vs {
+			out = append(out, k+"="+v)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // FlagsmithWriter is the writer label of the Flagsmith link's in-process
@@ -314,15 +337,7 @@ func validatePolicy(p *Policy, b *baseline.Baseline) error {
 			return fmt.Errorf("a shape bound needs an object-valued default variant")
 		}
 	}
-	if err := validMagnitudeRow(p, flag); err != nil {
-		return err
-	}
-	if p.AllowsScope(ScopeFraction) {
-		if f := p.Bounds.Fraction; len(f) != 2 || f[0] < 1 || f[1] > 100 || f[0] > f[1] {
-			return fmt.Errorf("a fraction scope needs bounds.fraction [lo, hi] within 1..100")
-		}
-	}
-	return nil
+	return validMagnitudeRow(p, flag)
 }
 
 // validDescription checks the description: one line of at most MaxDescription

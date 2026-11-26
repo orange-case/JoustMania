@@ -68,7 +68,7 @@ func loopForConfigTest(t *testing.T, maxShadow int) (*experimentLoop, *recording
 		Root:           t.TempDir(),
 		MaxShadowGames: maxShadow,
 		Spawner:        spawner,
-		Verdict:        experiment.NewVerdict(3, 0.5, nil),
+		Verdict:        experiment.NewVerdict(3, 0.5),
 		Targeting:      targeting,
 		Log:            log,
 	})

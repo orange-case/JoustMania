@@ -65,7 +65,7 @@ func defaultDecideDiscardedCounter() otelmetric.Int64Counter {
 const MetricGroupInterventions = "agent_group_interventions_total"
 
 // newGroupInterventionsCounter builds agent_group_interventions_total (#2467 PR 6,
-// UC-040 A47): one increment per grant_group_shield decision the engine returned,
+// UC-048 A13): one increment per grant_group_shield decision the engine returned,
 // labeled outcome (applied, blocked, failed, gated_off), reason (the block reason of
 // a blocked group, write_failed or watch, else empty), backend (the decide
 // backend that answered, rules when none), game_kind (real or shadow) and shape

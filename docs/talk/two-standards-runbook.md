@@ -72,8 +72,8 @@ the old env), `./scripts/flags.sh restart`, `talk-stage.sh reset`, then `agent-k
 persisted and comes back `watch`).
 The exception is the decision backend and its model: `agent-backend.sh`
 writes them **persisted** (#1682), as the operator's choice, so they survive a flag-service restart or a reboot. A stage
-overlay over a persisted backend is temporary: a restart brings the persisted
-backend back. `talk-stage.sh reset` clears the persisted backend and model too,
+write of a persisted row replaces the operator's value and is persisted too (#2803): there is no
+temporary stage value over it. `talk-stage.sh reset` clears the persisted backend and model too,
 and `talk-preflight.sh` WARNs while a remote backend (jev / claude) is
 persisted.
 `./scripts/talk-preflight.sh` checks that flagd holds its sync stream to the
@@ -95,8 +95,9 @@ Notes:
 
 - No helper and no service writes a flag file any more: the baseline files stay
   as checked in. The agent's interventions are per game and die with the game.
-  The backend and model
-  flips are persisted (see above); every other stage change is in memory.
+  The backend, model,
+  `interventions_allowed` and `inference.backend` writes are persisted (persist `yes` rows, #2803); every other
+  stage change is in memory.
 - `make dry-run` also sets the experiment env vars, but the live gate
   `experiments_enabled` stays `off`, so the experiment loop and the proposer are
   inert. Keep it off.
@@ -149,16 +150,12 @@ a flag-file default: `services/flagd/agent.json` and the CI baseline `services/f
 - **Flagsmith** (`FLAGSMITH_LINK=on`): set `inference.backend` to `claude` in the stage environment. The row
   is `persist: yes` ([flags.md §13](../specs/flags.md#13-mutable-flag-registry)), so the value survives a flag-service restart and a
   reboot, and Flagsmith wins at a restart. No script needed.
-- **`./scripts/talk-stage.sh reset`**: sets it as an in-memory stage overlay. Without the Flagsmith link a
-  flag-service restart or a reboot drops that overlay and the agent runs `stub` again (every retro span then
-  shows `inference.used=none`, `inference.fallback_reason=no_backend_available`): run `reset` after every boot.
+- **`./scripts/talk-stage.sh reset`**: sets it persisted (the row is `persist: yes`, #2803), so it survives a restart and a reboot.
 
 `talk-stage.sh reset` does **not** clear a persisted `inference.backend`; it clears only the persisted
 decision backend and model. What that means depends on the link:
 
-- **Link off:** the stage overlay `claude` sits on top of the persisted value while the flag service runs;
-  after a restart the overlay is gone and the persisted value is back (a persisted `stub` returns, a persisted
-  `claude` keeps the summary on).
+- **Link off:** `reset` writes `claude` only when another value is in force, and it is persisted (#2803).
 - **Link on:** the link pushes every local change, stage overlays included, so `reset` writes `claude` into
   Flagsmith, replacing a value set there, and it comes back after every restart ("a restart is no stage reset",
   [flagsmith-sync.md](../architecture/flagsmith-sync.md)). To get `stub` back, change it in Flagsmith.
@@ -455,7 +452,7 @@ The section number is kept so references stay stable.
       and a runtime pairing flag change applies.
 - [ ] No stale `joustmania-python-hid` from an older install (#1402):
       `docker ps -a --filter name=joustmania-python-hid` is empty. The start
-      script removes it when the `python-hid` profile is off; by hand:
+      removes it as a compose orphan (#2784); by hand:
       `docker rm -f joustmania-python-hid`.
 - [ ] `.env.local` holds `JEV_API_KEY`, `ANTHROPIC_API_KEY`,
       no `IMAGE_TAG` (the pin is the checked-out
@@ -561,8 +558,8 @@ left behind, so it is also the recovery after an interrupted beat. It leaves
 barely audible); `standard` adds `grant_shield` and `adjust_music_tempo`, which
 the audience sees on the dashboard tile and hears in the music (#1301). The
 stage baseline lives in the helper; the shipped baseline keeps `ambient`. The
-host's persisted admin choice of `interventions_allowed` (menu kill switch) is a
-layer under the stage overlay: `reset` does not touch it.
+host's persisted admin choice of `interventions_allowed` (menu kill switch) is the
+one stack value of that row: `reset` replaces it with `standard` when it differs, persisted (#2803).
 
 **Why `aggressive` (4) and not the shipped 2 per minute (#1326):** the
 intervention budget is per game and weighted (nudge 0.5, shield / tempo /
@@ -605,8 +602,9 @@ controller-manager does not answer; with the fallback on that is a WARN (see
 
 After the talk, return to the shipped, fail-closed defaults: clear the
 persisted backend and model, then clear the stage overlays, or restart the flag
-service and flagd together (in-memory overlays are gone; the persisted backend
-is not, so clear it first; the host's other persisted admin settings stay):
+service and flagd together (in-memory overlays are gone; persisted values are not,
+so clear the backend first; `interventions_allowed` and `inference.backend` keep the stage values the
+reset wrote, #2803: set them back on the pad or with `./scripts/flags.sh clear agent <flag>`):
 
 ```bash
 ./scripts/agent-backend.sh rules   # persisted rules; or ./scripts/talk-stage.sh reset
