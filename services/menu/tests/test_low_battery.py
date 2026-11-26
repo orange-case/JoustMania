@@ -100,7 +100,12 @@ async def test_tick_rate_limits_per_controller_and_a_recovered_controller_blinks
 @pytest.mark.uc("UC-016", br=["BR-006"])
 def test_low_battery_serials_counts_every_connected_state_but_not_unknown_levels():
     sm = state_manager(
-        {"a": ControllerState.CONNECTED, "b": ControllerState.IDLE, "c": ControllerState.READY, "d": ControllerState.READY},
+        {
+            "a": ControllerState.CONNECTED,
+            "b": ControllerState.IDLE,
+            "c": ControllerState.READY,
+            "d": ControllerState.READY,
+        },
         {"a": 1, "b": 0, "c": 4, "gone": 1},
     )
     assert low_battery_serials(sm) == {"a", "b"}
