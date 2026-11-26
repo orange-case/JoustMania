@@ -63,6 +63,10 @@ HEADER = (
 )
 
 
+# An empty list cell.
+NONE_CELL = "(none)"
+
+
 class SpecSourceError(Exception):
     """A sidecar is missing an entry or has a stale one."""
 
@@ -205,7 +209,7 @@ def telemetry_metric_catalog() -> str:
                 )
                 for label in labels
             )
-            or "(none)"
+            or NONE_CELL
         )
         out.append(
             "| "
@@ -216,7 +220,7 @@ def telemetry_metric_catalog() -> str:
                     _cell(label_cell),
                     ", ".join(definers),
                     _emitted(ds),
-                    ", ".join(sorted(consumers[metric])) or "(none)",
+                    ", ".join(sorted(consumers[metric])) or NONE_CELL,
                     _cell(notes.get(metric, "")),
                 ]
             )
@@ -558,45 +562,45 @@ def _write_cell(row: dict | None) -> str:
     return _cell("; ".join(parts))
 
 
+_FLAG_NOTES_REL = "docs/specs/notes/flags.yaml"
+
+
+def _flag_entry(where: str, entry) -> dict:
+    """One validated sidecar entry: {read_by, reload, note}."""
+    if not isinstance(entry, dict) or set(entry) - {"read_by", "reload", "note"}:
+        raise SpecSourceError(f"{where}: an entry has only read_by, reload and note")
+    readers = entry.get("read_by")
+    if not isinstance(readers, list) or set(readers) - READERS:
+        raise SpecSourceError(
+            f"{where}: read_by must be a list of {sorted(READERS)}, got {readers!r}"
+        )
+    if entry.get("reload") not in RELOADS:
+        raise SpecSourceError(
+            f"{where}: reload must be one of {sorted(RELOADS)} (flags.md §1.3)"
+        )
+    if (entry["reload"] == "none") != (readers == []):
+        raise SpecSourceError(f"{where}: reload is none exactly when read_by is []")
+    return {
+        "read_by": readers,
+        "reload": entry["reload"],
+        "note": " ".join(str(entry.get("note") or "").split()),
+    }
+
+
 def _load_flag_notes(sets: dict[str, dict]) -> dict[tuple[str, str], dict]:
     """docs/specs/notes/flags.yaml: set -> key -> {read_by, reload, note}; one per flag."""
     path = NOTES / "flags.yaml"
-    rel = "docs/specs/notes/flags.yaml"
+    rel = _FLAG_NOTES_REL
     data = (
         yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
     ) or {}
     if not isinstance(data, dict):
         raise SpecSourceError(f"{rel} must map flag set -> key -> entry")
-    out: dict[tuple[str, str], dict] = {}
-    for s, entries in data.items():
-        for key, entry in (entries or {}).items():
-            where = f"{rel}: {s}/{key}"
-            if not isinstance(entry, dict) or set(entry) - {
-                "read_by",
-                "reload",
-                "note",
-            }:
-                raise SpecSourceError(
-                    f"{where}: an entry has only read_by, reload and note"
-                )
-            readers = entry.get("read_by")
-            if not isinstance(readers, list) or set(readers) - READERS:
-                raise SpecSourceError(
-                    f"{where}: read_by must be a list of {sorted(READERS)}, got {readers!r}"
-                )
-            if entry.get("reload") not in RELOADS:
-                raise SpecSourceError(
-                    f"{where}: reload must be one of {sorted(RELOADS)} (flags.md §1.3)"
-                )
-            if (entry["reload"] == "none") != (readers == []):
-                raise SpecSourceError(
-                    f"{where}: reload is none exactly when read_by is []"
-                )
-            out[(str(s), str(key))] = {
-                "read_by": readers,
-                "reload": entry["reload"],
-                "note": " ".join(str(entry.get("note") or "").split()),
-            }
+    out = {
+        (str(s), str(key)): _flag_entry(f"{rel}: {s}/{key}", entry)
+        for s, entries in data.items()
+        for key, entry in (entries or {}).items()
+    }
     known = {(s, k) for s, flags in sets.items() for k in flags}
     stale = sorted(f"{s}/{k}" for s, k in set(out) - known)
     if stale:
@@ -648,7 +652,9 @@ def flag_catalog() -> str:
     notes = _load_flag_notes(sets)
     _check_readers(notes)
     registry = _load_registry()
-    unknown = sorted(f"{s}/{k}" for s, k in registry if k not in sets.get(s, {}))
+    unknown = sorted(
+        f"{s}/{k}" for (s, k), _row in registry.items() if k not in sets.get(s, {})
+    )
     if unknown:
         raise SpecSourceError(
             f"services/flag-service/registry.yaml has rows for flags no flag file declares: {unknown}"
@@ -696,7 +702,7 @@ def flag_catalog() -> str:
                         "yes" if flag.get("targeting") else "",
                         _write_cell(reg),
                         entry["reload"],
-                        ", ".join(entry["read_by"]) or "(none)",
+                        ", ".join(entry["read_by"]) or NONE_CELL,
                         _cell(entry["note"]),
                     ]
                 )
