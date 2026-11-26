@@ -715,9 +715,6 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	loop.SetAlreadyAppliedRecorder(func(intervention, serial string) {
 		mux.AppendInterventionInPlace(gameID, intervention, serial)
 	})
-	// UC-048 A4 step 1 (#1837): the per-loop shield-charge ledger reads the game's
-	// shield.activation / shield.charge_expiry_seconds from the read-only game domain.
-	loop.SetShieldChargeMode(c.agentFlags.ShieldCharge)
 	// UC-040 BR-036 (#2467 PR 5): remote decide requests carry the game's
 	// decision.prompt_profile (v1 on any read error).
 	loop.SetPromptProfileSource(c.agentFlags.PromptProfile)
@@ -736,9 +733,6 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// interventions/shield_seconds "default" variant, read at use time through the
 	// flag service (fail closed: 5 s).
 	loop.SetShieldSecondsSource(c.shieldSeconds.Seconds)
-	// UC-048 A4 step 1, BR-011 (#2096): the game's first shield.activation is latched
-	// when the agent first sees the game, so a later flip to `hold` keeps a trigger game trigger.
-	c.agentFlags.LatchShieldMode(context.Background(), gameID)
 	// Shared decision-backend registry (#1226): decision.backend selects who decides.
 	loop.SetDecideRegistry(c.decideBackends)
 	// Decision predictions (#2479): registered with the shared book while

@@ -643,8 +643,7 @@ table to keep in sync with the code. Live gates (`enabled`, `interventions_enabl
 > a change takes effect with **no container restart**: through the flag service
 > (`scripts/flags.sh set agent <flag> <variant>`) for the flags in its mutable
 > registry (`experiments_enabled`, `experiment_dynamic_enabled`,
-> `experiment_tick_seconds`, `experiment_max_games`, `verdict_min_n`,
-> `verdict_min_pairs`), or by a baseline edit plus `scripts/flags.sh restart` for
+> `experiment_tick_seconds`, `verdict_min_pairs`), or by a baseline edit plus `scripts/flags.sh restart` for
 > the rest. The
 > migrated flags (see [`services/flagd/agent.json`](../flagd/agent.json)):
 >
@@ -655,20 +654,17 @@ table to keep in sync with the code. Live gates (`enabled`, `interventions_enabl
 > | `experiment_tick_seconds` | 30 s (first refill within 5 s after start, `firstTickCap`) |
 > | `experiment_dynamic_max_concurrent` | _none — compiled 3; `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` is a ceiling, effective = min(env, flag) (#1810, C-034)_ |
 > | `experiment_shadow_effective_concurrency` | 4 (`DefaultEffectiveConcurrency`) |
-> | `experiment_max_games` | _none — compiled 50; `AGENT_EXPERIMENT_MAX_GAMES` is a ceiling, effective = min(env, flag), 0 = no limit (#1810, C-034)_ |
 > | `experiment_completed_grace_seconds` (#1810) | 60 s (flag 0 = off) |
-> | `experiment_proposer_enabled` (#1810) | _none — reads false when unresolved; ANDed with the `AGENT_EXPERIMENT_PROPOSER_ENABLED` ceiling for both proposers (C-034)_ |
-> | `verdict_min_n` | 8 (`DefaultMinNPerArm`) |
+> | `experiment_proposer_enabled` (#1810) | _none — reads false when unresolved; ANDed with the `AGENT_EXPERIMENT_PROPOSER_ENABLED` ceiling for the M7-4 proposer (C-034)_ |
 > | `verdict_min_pairs` | 5 (`DefaultMinPairs`) |
 > | `verdict_effect_threshold` (#1214) | _none — `DefaultEffectThreshold` (0.5)_ |
 > | `verdict_min_raw_effect` (#1214) | _none — `DefaultMinRawEffect` (0.02)_ |
 > | `verdict_sd_floor` (#1214) | _none — `DefaultSDFloor` (1e-4)_ |
-> | `verdict_anchor_margin` (#1214) | _none — `DefaultAnchorMargin` (0.02)_ |
 >
 > **Startup-gate inversion:** the loop + dynamic declarer are now **always built and
 > run**; they self-gate each tick on the live `experiments_enabled` /
 > `experiment_dynamic_enabled` flags. An off→on flip **starts** the loop (it runs the
-> deferred rehydrate + seed bootstrap and begins allocating); an on→off flip **stops**
+> deferred rehydrate and begins allocating); an on→off flip **stops**
 > it cleanly (`AbortAll` clears the experiment-arm values and frees capacity — in-flight shadow games
 > conclude/release normally). The master `enabled` kill-switch still wins: a disabled
 > agent does nothing regardless of these flags. **The `agent` set is human-owned** —
@@ -687,25 +683,23 @@ table to keep in sync with the code. Live gates (`enabled`, `interventions_enabl
 > (`experiment_dynamic_candidates` = `flag=variant`, UC-043 BR-012).
 >
 > **#1907 — dynamic declarer settings are flags.** `experiment_dynamic_candidates`,
-> `experiment_dynamic_denylist`, `experiment_dynamic_objective` and
-> `experiment_dynamic_target_n` replace the `AGENT_EXPERIMENT_DYNAMIC_*` env vars
+> `experiment_dynamic_denylist` and `experiment_dynamic_objective`
+> replace the `AGENT_EXPERIMENT_DYNAMIC_*` env vars
 > (only `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` stays, a C-034 ceiling). The two
 > lists are comma-separated **strings** read with `StringValue`, so the flagd
 > list-flag trap does not apply. They are read every experiment tick. The compiled
 > `defaultDynamicDenylist` is a floor: the denylist flag only adds keys, and the
 > floor also filters an explicit candidate list (UC-070 BR-008).
 >
-> **#1214 — verdict-tuning cluster completed.** The four remaining verdict knobs
-> (`verdict_effect_threshold`, `verdict_min_raw_effect`, `verdict_sd_floor`,
-> `verdict_anchor_margin`) are now live `agent.json` flags too, finishing the cluster
-> `verdict_min_n` / `verdict_min_pairs` started in #1044. These four were migrated
-> **fully** — their `AGENT_VERDICT_EFFECT_THRESHOLD` / `_MIN_RAW_EFFECT` / `_SD_FLOOR` /
-> `_ANCHOR_MARGIN` env vars are **removed**; the verdict's `Default*` constants are the
+> **#1214 — verdict-tuning cluster completed.** The verdict knobs
+> (`verdict_effect_threshold`, `verdict_min_raw_effect`, `verdict_sd_floor`) are live
+> `agent.json` flags next to `verdict_min_pairs` (#1044); their env vars are **removed**; the verdict's `Default*` constants are the
 > fail-open fallback the flag resolves to when flagd is undefined/unreachable. They are
 > read via the **typed float getter** (never `ObjectValue` — the #903/#1127
 > TYPE_MISMATCH trap) and live-mirrored onto the verdict each tick via the registry's
-> `Reconfigure` → `Verdict.SetThresholds` / `SetFloatThresholds`, exactly the
-> `verdict_min_n` / `verdict_min_pairs` seam.
+> `Reconfigure` → `Verdict.SetThresholds` / `SetFloatThresholds`. The paired d_z is the
+> only verdict (UC-043 step 5); `verdict_min_n`, `verdict_anchor_margin`,
+> `experiment_max_games` and `experiment_dynamic_target_n` were removed (#2811).
 
 > Since #1713 the Go agent uses the flagd **in-process** resolver on the sync port
 > `8015`, like the Python services: selectors `flagSetId=agent` and (read-only,

@@ -35,7 +35,7 @@ func pairedSummary(pd *journal.Welford) journal.Summary {
 
 // UC: UC-043 main
 func TestPairedVerdict_PromotesOnPositiveDz(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
+	v := NewVerdict(5, 0.5)
 	// 6 pairs, mean(d)=0.30, small spread ⇒ large d_z ⇒ PROMOTE.
 	pd := pairDiffFrom(0.28, 0.32, 0.29, 0.31, 0.30, 0.30)
 	got, ok := v.Evaluate(pairedSummary(pd))
@@ -52,7 +52,7 @@ func TestPairedVerdict_PromotesOnPositiveDz(t *testing.T) {
 
 // UC: UC-043 A3
 func TestPairedVerdict_DiscardsOnNegativeDz(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
+	v := NewVerdict(5, 0.5)
 	pd := pairDiffFrom(-0.28, -0.32, -0.29, -0.31, -0.30, -0.30)
 	got, ok := v.Evaluate(pairedSummary(pd))
 	if !ok {
@@ -65,7 +65,7 @@ func TestPairedVerdict_DiscardsOnNegativeDz(t *testing.T) {
 
 // UC: UC-043 main
 func TestPairedVerdict_MinPairsGate(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
+	v := NewVerdict(5, 0.5)
 	// Only 3 pairs (< min-pairs 5), even with a huge clean effect ⇒ INCONCLUSIVE.
 	pd := pairDiffFrom(0.50, 0.50, 0.50)
 	got, ok := v.Evaluate(pairedSummary(pd))
@@ -78,7 +78,7 @@ func TestPairedVerdict_MinPairsGate(t *testing.T) {
 }
 
 func TestPairedVerdict_NoOpFlagWithinNoise(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
+	v := NewVerdict(5, 0.5)
 	// A no-op flag: per-pair deltas tightly centered on 0 (CRN cancels shared
 	// variance). |d_z| is small ⇒ within-noise INCONCLUSIVE (not a false positive).
 	pd := pairDiffFrom(0.01, -0.01, 0.02, -0.02, 0.00, 0.01, -0.01)
@@ -99,7 +99,7 @@ func TestPairedVerdict_NoOpFlagWithinNoise(t *testing.T) {
 // conclusion when the delta actually matters.
 // UC: UC-043 main
 func TestPairedVerdict_ZeroSpreadMeaningfulDelta_SDFloor(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
+	v := NewVerdict(5, 0.5)
 	pd := pairDiffFrom(0.20, 0.20, 0.20, 0.20, 0.20, 0.20)
 	got, ok := v.Evaluate(pairedSummary(pd))
 	if !ok {
@@ -117,7 +117,7 @@ func TestPairedVerdict_ZeroSpreadMeaningfulDelta_SDFloor(t *testing.T) {
 // INCONCLUSIVE, NOT discard. This is the core bug fix.
 // UC: UC-043 main
 func TestPairedVerdict_TinyConsistentDelta_NotPractical(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
+	v := NewVerdict(5, 0.5)
 	// exp ~0.0496..0.0506 vs ctl ~0.0500..0.0510 ⇒ d_i ≈ -0.0004..-0.0006, tiny + consistent.
 	pd := pairDiffFrom(-0.0004, -0.0005, -0.0006, -0.0005, -0.0004, -0.0005)
 	got, ok := v.Evaluate(pairedSummary(pd))
@@ -133,7 +133,7 @@ func TestPairedVerdict_TinyConsistentDelta_NotPractical(t *testing.T) {
 // IDENTICAL fitness per pair ⇒ mean_d == 0 and zero spread. SD floored, but mean_d=0
 // is below the raw-effect floor ⇒ INCONCLUSIVE (never a false promote/discard).
 func TestPairedVerdict_NoOpFlag_ZeroDelta_Inconclusive(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
+	v := NewVerdict(5, 0.5)
 	pd := pairDiffFrom(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 	got, ok := v.Evaluate(pairedSummary(pd))
 	if !ok {
@@ -144,94 +144,13 @@ func TestPairedVerdict_NoOpFlag_ZeroDelta_Inconclusive(t *testing.T) {
 	}
 }
 
-// TestPairedVerdict_FallbackToTwoArmWhenNoPairs: a Summary with NO PairDiff falls
-// back to the two-arm Cohen's d path unchanged (legacy/unpaired experiments).
-// UC: UC-043 main
-func TestPairedVerdict_FallbackToTwoArmWhenNoPairs(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
-	// No PairDiff; canonical arms with a large clean effect ⇒ the two-arm path promotes.
-	exp := armFrom(spread(10, 1.0, 0.05)...)
-	ctl := armFrom(spread(10, 0.0, 0.05)...)
-	s := summaryWith(exp, ctl) // no PairDiff set
-	got, ok := v.Evaluate(s)
-	if !ok {
-		t.Fatalf("expected ok=true via two-arm fallback")
-	}
-	if got.Outcome != CohortOutcomePromote {
-		t.Fatalf("two-arm fallback verdict = %+v, want PROMOTE", got)
-	}
-}
-
-// TestPairedVerdict_EmptyPairDiffFallsBack: a non-nil but EMPTY PairDiff (Count 0)
-// must not take the paired path; it falls back to the two-arm path.
-func TestPairedVerdict_EmptyPairDiffFallsBack(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
-	exp := armFrom(spread(10, 1.0, 0.05)...)
-	ctl := armFrom(spread(10, 0.0, 0.05)...)
-	s := summaryWith(exp, ctl)
-	s.PairDiff = &journal.Welford{} // Count 0
-	got, ok := v.Evaluate(s)
-	if !ok || got.Outcome != CohortOutcomePromote {
-		t.Fatalf("empty PairDiff should fall back to two-arm PROMOTE, got %+v ok=%v", got, ok)
-	}
-}
-
-// TestPairedVerdict_CRNPrecisionBeatsTwoArm is the CRN-sanity check: on the SAME
-// underlying games, the paired path reaches a conclusive verdict where the two-arm
-// pooled Cohen's d stays inconclusive. We model a per-game shared component (the
-// CRN-controlled common variance) plus a small consistent treatment effect: the
-// two arms have large overlapping spread (so pooled d is small), but each per-pair
-// difference is nearly constant (so d_z is large).
-func TestPairedVerdict_CRNPrecisionBeatsTwoArm(t *testing.T) {
-	v := NewVerdictWithPairs(8, 5, 0.5, nil)
-
-	// Shared per-game component (large), identical within a seed-matched pair.
-	shared := []float64{0.10, 0.90, 0.40, 0.70, 0.20, 0.85, 0.55, 0.30, 0.95, 0.15}
-	// Small consistent treatment lift with a TINY per-pair jitter (so the paired SD is
-	// non-zero and d_z is defined): the effect is consistently positive and tightly
-	// clustered, which is exactly what CRN buys.
-	jitter := []float64{0.07, 0.09, 0.08, 0.07, 0.09, 0.08, 0.08, 0.07, 0.09, 0.08}
-
-	var exp, ctl journal.ArmStat
-	pd := &journal.Welford{}
-	for i, s := range shared {
-		e := s + jitter[i]
-		c := s
-		exp.Add(e)
-		ctl.Add(c)
-		pd.Add(e - c) // per-pair difference ≈ small effect (CRN cancels `shared`)
-	}
-
-	// Two-arm path on the same data: the large shared spread dominates the pooled SD,
-	// so Cohen's d is well below threshold ⇒ inconclusive.
-	twoArm, ok := v.Evaluate(summaryWith(&exp, &ctl))
-	if !ok {
-		t.Fatalf("two-arm evaluate not ok")
-	}
-	if twoArm.Significant {
-		t.Fatalf("two-arm path should be inconclusive on this noisy data, got %+v", twoArm)
-	}
-
-	// Paired path on the SAME games: each d_i = effect with ~zero spread ⇒ huge d_z.
-	paired, ok := v.Evaluate(pairedSummary(pd))
-	if !ok {
-		t.Fatalf("paired evaluate not ok")
-	}
-	if paired.Outcome != CohortOutcomePromote || !paired.Significant {
-		t.Fatalf("paired path should be conclusive PROMOTE on the same data, got %+v", paired)
-	}
-	t.Logf("CRN precision: two-arm=%q (delta=%.3f) vs paired=%q (mean_d=%.3f) — paired conclusive, two-arm not",
-		twoArm.Outcome, twoArm.Delta, paired.Outcome, paired.Delta)
-}
-
-// UC-043 step 5: once seed-matched pairs exist, the verdict is the paired d_z
-// gated only by verdict_min_pairs. verdict_min_n (here far above the pair
-// count) does not hold back a conclusive paired verdict.
+// UC-043 step 5: the verdict is the paired d_z gated by verdict_min_pairs; the
+// arms' own sample counts do not matter.
 //
 // UC: UC-043 main
-func TestPairedVerdict_GatedByMinPairsNotMinN(t *testing.T) {
-	const minN, minPairs = 50, 5
-	v := NewVerdictWithPairs(minN, minPairs, 0.5, nil)
+func TestPairedVerdict_GatedByMinPairs(t *testing.T) {
+	const minPairs = 5
+	v := NewVerdict(minPairs, 0.5)
 	diffs := []float64{0.28, 0.32, 0.29, 0.31, 0.30}
 
 	t.Run("UC-043/main one pair short of verdict_min_pairs is inconclusive", func(t *testing.T) {
@@ -244,9 +163,8 @@ func TestPairedVerdict_GatedByMinPairsNotMinN(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-043/main exactly verdict_min_pairs promotes although every arm is below verdict_min_n", func(t *testing.T) {
+	t.Run("UC-043/main exactly verdict_min_pairs promotes", func(t *testing.T) {
 		s := pairedSummary(pairDiffFrom(diffs...))
-		// Arms carry far fewer samples than verdict_min_n; the paired path ignores them.
 		exp, ctl := &journal.Welford{}, &journal.Welford{}
 		for i := 0; i < minPairs; i++ {
 			exp.Add(0.8 + float64(i)*0.01)
@@ -259,7 +177,7 @@ func TestPairedVerdict_GatedByMinPairsNotMinN(t *testing.T) {
 			t.Fatal("expected ok=true")
 		}
 		if got.Outcome != CohortOutcomePromote || !got.Significant {
-			t.Fatalf("verdict = %+v, want PROMOTE significant at %d pairs (min N %d not applied)", got, minPairs, minN)
+			t.Fatalf("verdict = %+v, want PROMOTE significant at %d pairs", got, minPairs)
 		}
 	})
 }

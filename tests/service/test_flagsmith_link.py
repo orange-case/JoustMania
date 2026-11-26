@@ -13,7 +13,7 @@ author) and a person's changes as a user's; since #2621 a restart reads no autho
 - offline start: an unreachable Flagsmith never stops the flag service (BR-007);
 - restart, Flagsmith wins (BR-006, FR-215): every value Flagsmith holds comes back,
   whoever wrote it: the link's own push, a person's value, an admin setting an API key set
-  (persisted), a kill switch a person loosened (no restart tightening, BR-005); game values
+  (persisted), an integer a person raised above the baseline; game values
   wait for their game's registration; stale game identities go after the grace (FR-211); a
   controller of a live game keeps its overrides and a controller without one is released (its
   identity kept, #2624); unsent local changes are lost (FR-212);
@@ -44,7 +44,7 @@ RESTART_SECONDS = fl.RESTART_SECONDS
 CAPTURE = ("agent", "decision.capture_content")
 BACKEND = ("agent", "decision.backend")  # an admin setting (persist: yes)
 TICK = ("agent", "experiment_tick_seconds")
-MAX_GAMES = ("agent", "experiment_max_games")  # kill switch: lower is tighter, baseline 50
+GRACE = ("agent", "experiment_completed_grace_seconds")  # integer, int 0 to 600, baseline 60
 PACING = ("interventions", "pacing_profile")
 HANDICAP = ("interventions", "player_handicap_factor")  # game+serial scope: a controller identity (#2624)
 
@@ -184,25 +184,25 @@ def test_restart_keeps_persons_value(stack, flag_service, settled_link):
     assert not [r for r in fake.pushes(CAPTURE[1]) if r["t"] >= restarted], "a person's value was cleared"
 
 
-@pytest.mark.uc("UC-054", flow="A3", br=["BR-005"], tc="TC-022")
-def test_restart_takes_flagsmith_kill_switch(stack, flag_service, settled_link):
+@pytest.mark.uc("UC-054", flow="A3", br=["BR-006"], tc="TC-022")
+def test_restart_takes_flagsmith_value(stack, flag_service, settled_link):
     fake = settled_link
-    baseline = flag_service.get(*MAX_GAMES)["variant_values"][flag_service.get(*MAX_GAMES)["baseline_default"]]
-    # Step 1: a kill switch is loosened above the baseline in Flagsmith (a person, then an API key
-    # such as the agent gates switched on by Terraform); it is in force.
-    fake.person_sets(MAX_GAMES[1], baseline + 30)
-    fl.wait_overlay(flag_service, *MAX_GAMES, value=baseline + 30, writer="flagsmith")
-    fake.set_value(MAX_GAMES[1], baseline + 40)  # author None: an API key
-    fl.wait_overlay(flag_service, *MAX_GAMES, value=baseline + 40, writer="flagsmith")
+    baseline = flag_service.get(*GRACE)["variant_values"][flag_service.get(*GRACE)["baseline_default"]]
+    # Step 1: the value is raised above the baseline in Flagsmith (a person, then an API key
+    # such as Terraform); it is in force.
+    fake.person_sets(GRACE[1], baseline + 30)
+    fl.wait_overlay(flag_service, *GRACE, value=baseline + 30, writer="flagsmith")
+    fake.set_value(GRACE[1], baseline + 40)  # author None: an API key
+    fl.wait_overlay(flag_service, *GRACE, value=baseline + 40, writer="flagsmith")
     fl.wait_pulls(flag_service, 1)
-    # Step 2: restart: the local value is the (tighter) baseline and no last state is known.
+    # Step 2: restart: the local value is the baseline and no last state is known.
     restarted = _restart(stack, flag_service, link="online")
-    # Step 3: Flagsmith wins (#2621): the looser Flagsmith value comes back; the tighter baseline is
-    # neither kept nor pushed over it (no restart tightening; live conflicts still tighten, BR-005).
-    fl.wait_overlay(flag_service, *MAX_GAMES, timeout=RESTART_SECONDS, value=baseline + 40, writer="flagsmith")
+    # Step 3: Flagsmith wins (#2621): the Flagsmith value comes back; the baseline is neither kept
+    # nor pushed over it.
+    fl.wait_overlay(flag_service, *GRACE, timeout=RESTART_SECONDS, value=baseline + 40, writer="flagsmith")
     fl.wait_pulls(flag_service, 2)
-    assert fake.env_value(MAX_GAMES[1]) == (True, baseline + 40)
-    assert not [r for r in fake.pushes(MAX_GAMES[1]) if r["t"] >= restarted], "a restart pushed the tighter value"
+    assert fake.env_value(GRACE[1]) == (True, baseline + 40)
+    assert not [r for r in fake.pushes(GRACE[1]) if r["t"] >= restarted], "a restart pushed the baseline"
 
 
 @pytest.mark.uc("UC-054", flow="A3", br=["BR-006"], tc="TC-022")

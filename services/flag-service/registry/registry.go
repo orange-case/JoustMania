@@ -121,7 +121,6 @@ var killSwitches = map[string]bool{
 	"agent/experiment_proposer_enabled":             true,
 	"agent/llm.max_requests_per_minute":             true,
 	"agent/decision.claude.max_requests_per_minute": true,
-	"agent/experiment_max_games":                    true,
 }
 
 // IsKillSwitch reports whether set/key is a kill switch.
