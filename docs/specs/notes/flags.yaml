@@ -541,8 +541,9 @@ game:
     read_by: [menu]
     reload: per-game
     note: >-
-      Non-Stop Joust time limit, `0` = unlimited. Only real games read it; shadow games use a fixed
-      config, so it is not experimentable (UC-043 BR-009).
+      Non-Stop Joust time limit, default 180 s so a round ends by itself (UC-026 BR-006); `0` =
+      unlimited. Only real games read it; shadow games use a fixed config, so it is not
+      experimentable (UC-043 BR-009).
   num_teams:
     read_by: [menu]
     reload: per-game

@@ -9,6 +9,7 @@ Tests the core Nonstop mechanics:
 """
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -863,6 +864,8 @@ class TestNonstopEndGameImpl:
 
         serials = list(game.players.keys())
         game.players[serials[0]].deaths = 0  # Winner
+        for serial in serials[1:]:
+            game.players[serial].deaths = 1
 
         stream = RecordingGameplayStream()
         game.gameplay_stream = stream
@@ -1072,6 +1075,7 @@ class TestNonstopStreamSwap:
 # ---------------------------------------------------------------------------
 
 RAINBOW = controller_manager_pb2.GAME_EFFECT_WINNER_RAINBOW
+FLASH = controller_manager_pb2.GAME_EFFECT_FLASH
 
 
 class _ClosableQueueStream(QueueStream):
@@ -1192,6 +1196,22 @@ class _FrameCall:
         return controller_manager_pb2.GameplayDataUpdate()
 
 
+def _give_first_player_the_lead(game):
+    """Every other player has died once, so the time limit has one winner (UC-026 A4)."""
+    for serial in list(game.players)[1:]:
+        game.players[serial].deaths = 1
+
+
+def _lead_after_init(game):
+    init = game._initialize_players_impl
+
+    async def init_then_lead(controllers):
+        await init(controllers)
+        _give_first_player_the_lead(game)
+
+    game._initialize_players_impl = init_then_lead
+
+
 async def _loop_game(time_limit=0.05):
     events = EventCollector()
     client = MockControllerManagerService(num_controllers=4, death_schedule={})
@@ -1219,6 +1239,7 @@ class TestNonstopEndOfGame:
         log = RecordingLog()
         client = _NonstopControllerManager(log)
         game = _nonstop_run_game(log, client, time_limit=0.3)
+        _lead_after_init(game)
         sounds = _record_sounds(game)
         span_serials = []
         create_span = game._create_player_lifecycle_span
@@ -1353,6 +1374,7 @@ class TestNonstopEndOfGame:
     @pytest.mark.asyncio
     async def test_server_ending_the_stream_after_the_time_limit_latch_keeps_the_winner(self):
         game, events, call = await _loop_game()
+        _give_first_player_the_lead(game)
         finished = []
 
         async def write(message):
@@ -1380,6 +1402,7 @@ class TestNonstopEndOfGame:
     @pytest.mark.asyncio
     async def test_force_end_after_the_time_limit_latch_keeps_the_winner(self):
         game, events, call = await _loop_game()
+        _give_first_player_the_lead(game)
         await asyncio.wait_for(game._game_loop(), timeout=5)
         game.force_end("late")  # during the winner hold
         game._latch_game_outcome()
@@ -1939,3 +1962,207 @@ class TestNonstopDisconnects:
         game.players[serial].grace_until = 0.0
         await game._process_controller_state(frame.controllers[0])
         assert game.players[serial].alive is False
+
+
+class TestNonstopDefaultEnd:
+    """UC-026 step 3, A4, BR-006: the round ends by itself, announces the end and can tie."""
+
+    @pytest.mark.uc("UC-026", br=["BR-006"])
+    def test_the_flag_defaults_to_three_minutes(self):
+        repo = Path(__file__).resolve().parents[3]
+        for name in ("game.json", "ci/game.json"):
+            flags = json.loads((repo / "services" / "flagd" / name).read_text(encoding="utf-8"))["flags"]
+            flag = flags["nonstop.time_limit_seconds"]
+            assert flag["variants"][flag["defaultVariant"]] == 180, name
+
+    async def _announcing_game(self, monkeypatch, time_limit):
+        game, events, _ = await _loop_game(time_limit=time_limit)
+        game.start_time = 1000.0
+        sounds = _record_sounds(game)
+        now = {"t": 1000.0}
+        monkeypatch.setattr(game_clock, "now", lambda: now["t"])
+        return game, events, sounds, now
+
+    @pytest.mark.uc("UC-026", flow="main", steps=[3])
+    @pytest.mark.asyncio
+    async def test_the_last_minute_is_announced_at_60_30_and_10_seconds_once_each(self, monkeypatch):
+        game, events, sounds, now = await self._announcing_game(monkeypatch, 180)
+        for elapsed in (0, 119.9, 120.0, 120.5, 149.0, 150.2, 160.0, 170.0, 171.0, 179.9):
+            now["t"] = 1000.0 + elapsed
+            await game._announce_time_left()
+
+        announced = [e["seconds_remaining"] for e in events.get_events_of_type("time_announcement")]
+        assert announced == [60, 30, 10]
+        assert sounds == [Sound.VOX_1_MINUTE, Sound.VOX_ZOMBIE_THIRTY_SECONDS, Sound.VOX_ZOMBIE_TEN_SECONDS]
+
+    @pytest.mark.uc("UC-026", flow="main", steps=[3])
+    @pytest.mark.asyncio
+    async def test_a_stalled_frame_plays_only_the_line_that_is_still_true(self, monkeypatch):
+        game, events, sounds, now = await self._announcing_game(monkeypatch, 180)
+        now["t"] = 1000.0 + 175.0  # the first frame past 60 s left comes with 5 s left
+        await game._announce_time_left()
+        now["t"] = 1000.0 + 176.0
+        await game._announce_time_left()
+
+        assert [e["seconds_remaining"] for e in events.get_events_of_type("time_announcement")] == [10]
+        assert sounds == [Sound.VOX_ZOMBIE_TEN_SECONDS]
+
+    @pytest.mark.uc("UC-026", flow="main", steps=[3])
+    @pytest.mark.asyncio
+    async def test_a_mark_at_or_above_the_limit_is_skipped(self, monkeypatch):
+        game, events, _, now = await self._announcing_game(monkeypatch, 60)
+        for elapsed in (0, 1, 31, 51):
+            now["t"] = 1000.0 + elapsed
+            await game._announce_time_left()
+
+        assert [e["seconds_remaining"] for e in events.get_events_of_type("time_announcement")] == [30, 10]
+
+    async def _clocked_loop(self, monkeypatch, step, force_end_at=None):
+        """Run the loop over 3 frames; the fake clock advances ``step`` s per frame."""
+        game, events, _ = await _loop_game(time_limit=180)
+        sounds = _record_sounds(game)
+        now = {"t": 1000.0}
+        monkeypatch.setattr(game_clock, "now", lambda: now["t"])
+        real_update = game._update_respawn_timers
+        frames = []
+
+        async def advance_then_update():
+            frames.append(True)
+            now["t"] += step
+            if len(frames) == force_end_at:
+                game.force_end("operator")
+            await real_update()
+
+        game._update_respawn_timers = advance_then_update
+        call = _FiniteFrameCall(frames=3)
+        game.controller_client = SimpleNamespace(StreamGameplayData=lambda: call)
+        await asyncio.wait_for(game._game_loop(), timeout=5)
+        return game, events, sounds
+
+    @pytest.mark.uc("UC-026", flow="main", steps=[3])
+    @pytest.mark.asyncio
+    async def test_the_game_loop_announces_the_mark_it_crosses_then_ends_at_the_limit(self, monkeypatch):
+        game, events, sounds = await self._clocked_loop(monkeypatch, step=85)  # 95 s, 10 s, then past the limit
+
+        assert [e["seconds_remaining"] for e in events.get_events_of_type("time_announcement")] == [10]
+        assert sounds == [Sound.VOX_ZOMBIE_TEN_SECONDS]
+        assert game._time_limit_reached
+
+    @pytest.mark.uc("UC-026", flow="A1", br=["BR-003"])
+    @pytest.mark.asyncio
+    async def test_a_force_end_in_the_frame_of_a_mark_announces_nothing(self, monkeypatch):
+        game, events, sounds = await self._clocked_loop(monkeypatch, step=85, force_end_at=2)
+
+        assert events.get_events_of_type("time_announcement") == []
+        assert sounds == []
+        assert not game._time_limit_reached
+
+    @pytest.mark.uc("UC-026", flow="A1")
+    @pytest.mark.asyncio
+    async def test_an_unlimited_game_announces_nothing(self, monkeypatch):
+        game, events, sounds, now = await self._announcing_game(monkeypatch, 0)
+        now["t"] = 1000.0 + 10_000
+        await game._announce_time_left()
+
+        assert events.get_events_of_type("time_announcement") == []
+        assert sounds == []
+
+    @pytest.mark.uc("UC-026", flow="main", steps=[3], br=["BR-001"])
+    @pytest.mark.asyncio
+    async def test_the_game_ends_at_the_limit_and_the_highest_score_wins(self):
+        game, events, _ = await _loop_game(time_limit=0.05)
+        serials = list(game.players)
+        game.players[serials[0]].deaths = 2
+        game.players[serials[1]].deaths = 1  # leader: 90
+        game.players[serials[2]].deaths = 3
+        game.players[serials[3]].deaths = 5
+        sounds = _record_sounds(game)
+
+        with patch.object(nonstop_mod, "WINNER_HOLD_SECONDS", 0.0):
+            await asyncio.wait_for(game._game_loop(), timeout=5)
+            assert game._time_limit_reached
+            game._latch_game_outcome()
+            await game._end_game_impl()
+
+        winners = events.get_events_of_type(GameEvent.GAME_WINNER)
+        assert [(w["serial"], w["score"]) for w in winners] == [(serials[1], 90)]
+        assert events.get_events_of_type(GameEvent.GAME_TIE) == []
+        assert Sound.VOX_CONGRATULATIONS in sounds
+        ended = events.get_events_of_type(GameEvent.GAME_ENDED)
+        assert ended[0]["outcome"] == "completed"
+        assert ended[0]["winner"] == serials[1]
+
+    @pytest.mark.uc("UC-026", flow="A4", br=["BR-003"])
+    @pytest.mark.uc("UC-020", br=["BR-006", "BR-010"])
+    @pytest.mark.asyncio
+    async def test_a_shared_lead_at_the_limit_is_a_tie_with_the_tie_cue(self, monkeypatch):
+        game, events, call = await _loop_game(time_limit=0.05)
+        serials = list(game.players)
+        game.players[serials[2]].deaths = 1
+        game.players[serials[3]].deaths = 4  # serials[0] and serials[1] share 100 points and 0 deaths
+        sounds = _record_sounds(game)
+
+        await asyncio.wait_for(game._game_loop(), timeout=5)
+        assert game._time_limit_reached
+        game._latch_game_outcome()
+        monkeypatch.setattr(game_clock, "sleep", async_noop)
+        await game._end_game_impl()
+
+        assert len(events.get_events_of_type(GameEvent.GAME_TIE)) == 1
+        flashes = [m.game_effect for m in call.messages if m.HasField("game_effect") and m.game_effect.effect == FLASH]
+        assert sorted(f.serial for f in flashes) == sorted(game.players), "UC-020 BR-010: every player flashes"
+        assert sounds == [Sound.SFX_DEATH]
+        assert game.game_outcome() == "completed"
+        assert events.get_events_of_type(GameEvent.GAME_WINNER) == []
+        assert not [m for m in call.messages if m.HasField("game_effect") and m.game_effect.effect == RAINBOW]
+        assert Sound.VOX_CONGRATULATIONS not in sounds
+        ended = events.get_events_of_type(GameEvent.GAME_ENDED)
+        assert ended[0]["outcome"] == "completed"
+        assert ended[0]["winner"] == "none"
+        for summary in events.get_events_of_type(GameEvent.PLAYER_ANALYTICS):
+            assert summary["winner"] is False
+
+    @pytest.mark.uc("UC-026", flow="A1", br=["BR-003"])
+    @pytest.mark.asyncio
+    async def test_a_force_end_before_the_default_limit_declares_no_winner(self):
+        game, events, _ = await _loop_game(time_limit=180)
+        _give_first_player_the_lead(game)
+        sounds = _record_sounds(game)
+
+        async def force_end_soon():
+            await asyncio.sleep(0.05)
+            game.force_end("operator")
+
+        forcer = asyncio.create_task(force_end_soon())
+        await asyncio.wait_for(game._game_loop(), timeout=5)
+        await forcer
+        assert not game._time_limit_reached
+        game._latch_game_outcome()
+        await game._end_game_impl()
+
+        assert events.get_events_of_type(GameEvent.GAME_WINNER) == []
+        assert events.get_events_of_type(GameEvent.GAME_TIE) == []
+        assert events.get_events_of_type("time_announcement") == []
+        assert Sound.VOX_CONGRATULATIONS not in sounds
+        ended = events.get_events_of_type(GameEvent.GAME_ENDED)
+        assert ended[0]["outcome"] == "force_ended"
+        assert ended[0]["winner"] == "none"
+
+    @pytest.mark.uc("UC-026", flow="A2")
+    @pytest.mark.uc("UC-002", br=["BR-009"])
+    @pytest.mark.asyncio
+    async def test_a_mass_disconnect_still_aborts_a_game_with_the_default_limit(self):
+        game, events, _ = await _loop_game(time_limit=180)
+        frame = controller_manager_pb2.GameplayDataUpdate()
+        for serial in game.players:
+            frame.disconnects.add(serial=serial)
+        call = _FiniteFrameCall(frames=5, frame=frame)
+        game.controller_client = SimpleNamespace(StreamGameplayData=lambda: call)
+
+        with pytest.raises(MassDisconnectError, match=r"4 of 4"):
+            await asyncio.wait_for(game._game_loop(), timeout=5)
+
+        assert not game._time_limit_reached
+        assert all(p.alive for p in game.players.values())
+        assert events.get_events_of_type(GameEvent.GAME_WINNER) == []
+        assert events.get_events_of_type(GameEvent.GAME_TIE) == []

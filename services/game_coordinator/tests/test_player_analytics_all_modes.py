@@ -182,7 +182,8 @@ def _golden_summary(game, mode: Games, serial: str) -> dict:
         team = game.players[serial].team
         summary.update(winner=team == game.players[first].team, team=team, survival_time_ms=96)
     elif mode == Games.NonStop:
-        summary.update(winner=serial == first, score=100, kills=0, deaths=0)
+        deaths = 0 if serial == first else 1
+        summary.update(winner=serial == first, score=100 - 10 * deaths, kills=0, deaths=deaths)
     else:
         summary.update(winner=serial == first, survival_time_ms=96)
     return summary

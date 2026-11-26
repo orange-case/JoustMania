@@ -728,7 +728,9 @@ class GameLifecycleMixin:
             case Games.NonStop:
                 config.nonstop_config.CopyFrom(
                     game_coordinator_pb2.NonstopConfig(
-                        time_limit_seconds=self.game_settings_client.get_integer_value("nonstop.time_limit_seconds", 0),
+                        time_limit_seconds=self.game_settings_client.get_integer_value(
+                            "nonstop.time_limit_seconds", 180
+                        ),
                     )
                 )
 
