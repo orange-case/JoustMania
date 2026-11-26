@@ -745,7 +745,7 @@ class TestUC040BR019ActivationMode:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-048", flow="A3", br=["BR-004", "BR-005"])
     async def test_flip_to_instant_keeps_a_held_charge_activatable(self, game, flags):
-        """UC-048 BR-004: after a flip to instant a held charge still activates, and an instant grant leaves it alone."""
+        """UC-048 BR-004: after a flip to instant a held charge activates, and an instant grant leaves it alone."""
         await game.grant_shield("p1", 5.0)
         flags.values["shield.activation"] = "instant"
 

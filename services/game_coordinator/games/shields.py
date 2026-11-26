@@ -831,7 +831,7 @@ class ShieldMixin:
         self.record_intervention(player.serial, types=SHIELD_INTERVENTION_TYPES)  # UC-101 BR-001
 
     async def _shield_charge_feedback(self, player: "Player", seconds: float, now: float) -> None:
-        """The stored charge's feedback: help cue, charge layer, ``player_shield_charged`` (UC-048 BR-006, UC-048 BR-013)."""
+        """The stored charge's feedback: help cue, charge layer, ``player_shield_charged`` (UC-048 BR-006, BR-013)."""
         await self._send_shield_help_cue(player)  # UC-048 BR-013: before the charge layer
         await self._send_shield_charge_layer(player, now)
         try:
@@ -1315,7 +1315,7 @@ class ShieldMixin:
                 )
 
     def _release_shield_hold(self, player: "Player", released_at: float, hold: ShieldHoldParams) -> None:
-        """The trigger reads released: the cost is ``max(held, min burst)``, at most the usable energy (UC-048 BR-008)."""
+        """The trigger reads released: cost ``max(held, min burst)``, at most the usable energy (UC-048 BR-008)."""
         held = max(0.0, released_at - player.hold_started_at)
         cost = min(max(held, hold.min_burst), player.hold_usable_start)
         player.hold_min_burst_applied = held < hold.min_burst
