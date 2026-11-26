@@ -39,6 +39,7 @@ from services.menu.settings_ops import (
     RESET_LOBBY_ONLY_OPTIONS,
     RESETTABLE_OPTIONS,
     SHIELD_ACTIVATION_FLAG,
+    STALE,
     Result,
     is_failure,
 )
@@ -144,6 +145,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         self._game_lifecycle_task = None
         # True while the lifecycle task restores the lobby after a game (UC-010 A8 lobby-restart window).
         self._lobby_restarting = False
+        self._reset_recovery: asyncio.Future | None = None
         # Set when a lobby restore begins; a failed start never restores twice (UC-010 A3, #2379).
         self._lobby_restore_started = False
         # Set when a StartMenu during the lifecycle undid a StopMenu (UC-010 A12, #2449).
@@ -393,7 +395,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             elif input_type == "web_command":
                 rejection = await self._handle_web_command(data, span)
             elif input_type == "reset_menu":
-                await self._handle_reset_menu()
+                rejection = await self._handle_reset_menu()
             if rejection is not None:
                 return menu_pb2.ProcessInputResponse(success=False, error=rejection)
 
@@ -698,46 +700,54 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         )
         return error
 
-    async def _handle_reset_menu(self) -> None:
-        """Handle reset_menu input type.
+    async def _handle_reset_menu(self) -> str | None:
+        """Handle reset_menu input type; the error code of an ignored reset, None otherwise.
 
         UC-010 BR-008 (#2054): reset_menu is the operator's recovery for a lifecycle task that
         never finishes. A live task whose game is not active on the coordinator is cancelled and
-        the lobby restored; a live task with an active game is kept.
+        the lobby restored; a live task with an active game is kept (`game_active`).
         """
         if self._lobby_restarting:
             # A lobby restore (this handler's or a lifecycle's post-game one) finishes by itself;
             # cancelling it mid state_manager.reset() would drop controllers not yet re-registered.
             logger.info("reset_menu ignored: a lobby restore is already running")
-            return
+            return STALE
         task = self._game_lifecycle_task
         if task is not None and not task.done():
             if await self._primary_game_active():
                 logger.warning("reset_menu ignored: a game is starting or running on the coordinator")
-                return
+                return GAME_ACTIVE
             if self._game_lifecycle_task is not task or task.done():
                 # The lifecycle finished (or a new start replaced it) during the lookup: nothing to recover.
                 logger.info("reset_menu ignored: the lifecycle task changed during the game-state lookup")
-                return
-            logger.warning("reset_menu: cancelling a game lifecycle task with no active game")
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-            await self.event_publisher.publish("game_start_cancelled", {})
-            # The restore runs as the lifecycle task, so a start in this window gets the A8
-            # lobby-restart refusal instead of interleaving with the lobby restore.
-            restore = asyncio.create_task(self._restart_lobby())
-            self._game_lifecycle_task = restore
-            try:
-                await restore
-            finally:
-                if self._game_lifecycle_task is restore:
-                    self._game_lifecycle_task = None
-            return
+                return STALE
+            # Shielded: the caller's deadline cancels this handler, and a cancel mid-recovery would
+            # leave the lifecycle cancelled with no restore, or cut state_manager.reset() short.
+            # The loop holds tasks weakly: keep the recovery referenced after the caller has gone.
+            self._reset_recovery = asyncio.ensure_future(self._recover_stuck_lifecycle(task))
+            await asyncio.shield(self._reset_recovery)
+            return None
         if self.state == menu_pb2.MenuState.GAME_STARTING:
             self.state = menu_pb2.MenuState.RUNNING
             await self.event_publisher.publish("game_start_cancelled", {})
             logger.info("Menu reset to RUNNING state (game start cancelled)")
+        return None
+
+    async def _recover_stuck_lifecycle(self, task: asyncio.Future) -> None:
+        logger.warning("reset_menu: cancelling a game lifecycle task with no active game")
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        await self.event_publisher.publish("game_start_cancelled", {})
+        # The restore runs as the lifecycle task, so a start in this window gets the A8
+        # lobby-restart refusal instead of interleaving with the lobby restore.
+        restore = asyncio.create_task(self._restart_lobby())
+        self._game_lifecycle_task = restore
+        try:
+            await restore
+        finally:
+            if self._game_lifecycle_task is restore:
+                self._game_lifecycle_task = None
 
     # Lifecycle methods
 

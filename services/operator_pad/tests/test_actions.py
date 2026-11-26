@@ -7,7 +7,7 @@ import grpc
 import pytest
 
 from lib.setting_ladders import BACKENDS, MODE_LADDER, preview_value
-from lib.types import Sound
+from lib.types import NO_GAME_IN_PROGRESS, Sound
 from proto import game_coordinator_pb2, menu_pb2
 from services.operator_pad import actions as actions_module
 from services.operator_pad import page_keys
@@ -156,6 +156,38 @@ async def test_k8_hold_on_a_stuck_lifecycle_sends_reset_menu(actions, menu, coor
     assert dict(request.data) == {}
     cues.confirmed.assert_awaited_once()
     cues.refusal.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-015", flow="A11", steps=[7])
+@pytest.mark.uc("UC-027", flow="A2")
+def test_the_stuck_lifecycle_match_is_the_coordinators_wire_text():
+    """Rewording the coordinator's answer must not silently disable the pad's recovery."""
+    assert actions_module.NO_GAME_ERROR == NO_GAME_IN_PROGRESS == "No game in progress"
+
+
+@pytest.mark.uc("UC-015", flow="A11", br=["BR-009"], steps=[7])
+@pytest.mark.parametrize("error", ["game_active", "stale"])
+async def test_k8_hold_reset_ignored_by_the_menu_plays_the_refusal_cue(actions, menu, coordinator, cues, error):
+    """The menu kept the lifecycle (a game is active, or a restore already runs): nothing was reset."""
+    no_game(coordinator)
+    menu.ProcessInput.return_value = reply(success=False, error=error)
+    live = status(lifecycle_live=True)
+    result = await actions.dispatch(Gesture(HOLD, "K8", held_ms=1500), live, live)
+    assert result == ("reset_menu", "refused")
+    cues.refusal.assert_awaited_once()
+    cues.confirmed.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-015", flow="A3", br=["BR-010"], steps=[7])
+async def test_k8_hold_with_the_coordinator_unreachable_sends_no_reset(actions, menu, coordinator, cues):
+    coordinator.ForceEndGame.side_effect = grpc.aio.AioRpcError(
+        grpc.StatusCode.UNAVAILABLE, grpc.aio.Metadata(), grpc.aio.Metadata()
+    )
+    live = status(lifecycle_live=True)
+    result = await actions.dispatch(Gesture(HOLD, "K8", held_ms=1500), live, live)
+    assert result == ("force_end", "menu_unavailable")
+    menu.ProcessInput.assert_not_awaited()
+    cues.failure.assert_awaited_once()
 
 
 @pytest.mark.uc("UC-015", flow="A11", br=["BR-009"], steps=[7])

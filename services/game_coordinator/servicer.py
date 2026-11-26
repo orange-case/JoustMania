@@ -48,7 +48,7 @@ from collections.abc import Awaitable, Callable
 from opentelemetry import trace
 
 from lib.telemetry import get_tracer
-from lib.types import GameEvent, Games
+from lib.types import NO_GAME_IN_PROGRESS, GameEvent, Games
 from proto import game_coordinator_pb2, game_coordinator_pb2_grpc
 from services.game_coordinator import metrics
 from services.game_coordinator.difficulty_handlers import register_difficulty_handlers
@@ -879,7 +879,7 @@ class GameCoordinatorServicer(game_coordinator_pb2_grpc.GameCoordinatorServiceSe
         # UC-027 BR-001: a given id never falls back to the primary; only "" targets the primary game.
         session = self._resolve_session(game_id)
         if session is None:
-            return False, (f"Unknown game_id: {game_id}" if game_id else "No game in progress")
+            return False, (f"Unknown game_id: {game_id}" if game_id else NO_GAME_IN_PROGRESS)
 
         # UC-027 A4 / BR-003: one end per session, shared with a preemption or
         # another force end under way; it completes even if this caller is

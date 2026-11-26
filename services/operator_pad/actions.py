@@ -23,6 +23,7 @@ from opentelemetry import trace
 from lib import setting_ladders, voice_prompts
 from lib.setting_ladders import PAID_BACKENDS
 from lib.telemetry import get_tracer
+from lib.types import NO_GAME_IN_PROGRESS
 from proto import game_coordinator_pb2, menu_pb2
 from services.operator_pad import cues, page_keys
 from services.operator_pad.config import K5, K8
@@ -62,7 +63,7 @@ COMMAND_TIMEOUT_SECONDS = 4.0
 VOLUME_PAUSE_SECONDS = 0.25  # BR-005: the volume is committed after this pause in turning
 FORCE_END_REASON = "operator_pad"
 # UC-027 A2: the coordinator has no primary game, so a live menu lifecycle is stuck (UC-015 A11).
-NO_GAME_ERROR = "No game in progress"
+NO_GAME_ERROR = NO_GAME_IN_PROGRESS
 
 # Menu error codes (services.md §3.1, UC-015 BR-012).
 OK = "ok"
@@ -806,7 +807,7 @@ class Actions:
             await self._cues.failure()
             return MENU_UNAVAILABLE
         if not response.success:
-            logger.warning(f"Pad reset_menu refused: {response.error}")
+            logger.warning(f"Pad reset_menu ignored by the menu: {response.error}")
             await self._cues.refusal()
             return REFUSED
         logger.warning("Pad K8 hold: no game on the coordinator, reset_menu sent")
