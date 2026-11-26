@@ -38,7 +38,7 @@ class FFAGame(BaseGameMode):
     - Players stay dead permanently (spans end on death)
     """
 
-    # UC-040 BR-019: the only mode where shield.activation=trigger applies.
+    # UC-048 BR-004: the only mode where shield.activation=trigger applies.
     SHIELD_TRIGGER_ALLOWED = True
 
     # Set by the win check that publishes the result (UC-020 BR-003).

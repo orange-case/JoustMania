@@ -20,7 +20,7 @@ import (
 // The concurrent-experiment budget is min(env ceiling, flag), a non-positive flag
 // falls back to the compiled 3 (capped by the env), an env value <= 0 or invalid
 // is no ceiling, and the shadow capacity clamps the result.
-// UC: UC-042 A11 A3
+// UC: UC-042 A11
 func TestConcurrentBudget_EnvCeilingTable(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -80,113 +80,6 @@ func TestConcurrentBudget_UnresolvedFlagUsesCompiledDefaultCappedByEnv(t *testin
 			}
 		})
 	}
-}
-
-// The games budget is min(env ceiling, flag) where 0 or less = no limit on either
-// side; env unset, 0 or invalid is no ceiling.
-// UC: UC-043 A3
-func TestMaxGamesBudget_EnvCeilingTable(t *testing.T) {
-	cases := []struct {
-		name string
-		env  string // AGENT_EXPERIMENT_MAX_GAMES; "" = unset
-		flag int
-		want int // 0 = no limit
-	}{
-		{"UC-043/A3 env unset: flag default", "", 50, 50},
-		{"UC-043/A3 env unset: flag long", "", 100, 100},
-		{"UC-043/A3 env unset: flag unlimited", "", 0, 0},
-		{"UC-043/A3 env caps a wider flag", "40", 100, 40},
-		{"UC-043/A3 env caps an unlimited flag", "40", 0, 40},
-		{"UC-043/A3 env caps a negative (unlimited) flag", "40", -1, 40},
-		{"UC-043/A3 a narrower flag tightens the env", "40", 30, 30},
-		{"UC-043/A3 env 0 is no ceiling", "0", 100, 100},
-		{"UC-043/A3 env negative is no ceiling", "-5", 100, 100},
-		{"UC-043/A3 env invalid is no ceiling", "lots", 100, 100},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(envMaxGames, tc.env)
-			loop := &experimentLoop{ceilings: experimentCeilingsFromEnv(testLogger())}
-			if got := loop.maxGamesBudget(flags.ExperimentConfig{MaxGames: tc.flag}); got != tc.want {
-				t.Fatalf("maxGamesBudget = %d, want %d", got, tc.want)
-			}
-		})
-	}
-}
-
-// Each tick hands the capped games budget to the registry, and a flag write
-// reaches the next tick.
-// UC: UC-043 A3
-func TestMaxGamesBudget_AppliedPerTick(t *testing.T) {
-	loop, _ := loopWithRealRegistry(t, 8)
-	loop.dynamic = nil // only the caps matter here
-	loop.ceilings = experimentCeilings{MaxGames: 40}
-	flag := 100
-	loop.configOverride = func(context.Context) flags.ExperimentConfig {
-		return flags.ExperimentConfig{Enabled: true, Tick: time.Hour, MaxGames: flag, ShadowEffectiveConcurrency: 1}
-	}
-	loop.allocateIfEnabled(context.Background())
-	if got := loop.registry.MaxGames(); got != 40 {
-		t.Fatalf("registry games budget = %d, want 40 (env ceiling caps flag 100)", got)
-	}
-	flag = 30
-	loop.allocateIfEnabled(context.Background())
-	if got := loop.registry.MaxGames(); got != 30 {
-		t.Fatalf("registry games budget = %d after the flag write, want 30", got)
-	}
-}
-
-// The retro-seeded thesis proposer declares only when AGENT_EXPERIMENT_PROPOSER_ENABLED
-// is true AND experiment_proposer_enabled is on; a flag flip reaches the next tick.
-// UC: UC-042 A3 BR-002
-func TestRetroProposer_GateIsEnvAndFlag(t *testing.T) {
-	cases := []struct {
-		name     string
-		env      string
-		flagOn   bool
-		wantLive int
-	}{
-		{"UC-042/A3 env true, flag on declares", "true", true, 1},
-		{"UC-042/A3 env true, flag off declares nothing", "true", false, 0},
-		{"UC-042/A3 env unset, flag on declares nothing", "", true, 0},
-		{"UC-042/A3 env unset, flag off declares nothing", "", false, 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(envProposerEnabled, tc.env)
-			loop := proposerLoop(t)
-			loop.proposer.Record(experiment.RetroSuggestion{Reason: "room faded"})
-			cfg := dynCfg(5)
-			cfg.ProposerEnabled = tc.flagOn
-			loop.declareFromRetroIfEnabled(context.Background(), cfg)
-			if got := loop.registry.LiveCount(); got != tc.wantLive {
-				t.Fatalf("LiveCount = %d, want %d", got, tc.wantLive)
-			}
-		})
-	}
-
-	t.Run("UC-042/A3 a flag flip reaches the next tick", func(t *testing.T) {
-		t.Setenv(envProposerEnabled, "true")
-		loop := proposerLoop(t)
-		loop.proposer.Record(experiment.RetroSuggestion{Reason: "room faded"})
-		flagOn := false
-		loop.configOverride = func(context.Context) flags.ExperimentConfig {
-			cfg := dynCfg(5)
-			cfg.DynamicEnabled = false
-			cfg.ProposerEnabled = flagOn
-			return cfg
-		}
-		loop.enabledOverride = func(context.Context) bool { return true }
-		loop.allocateIfEnabled(context.Background())
-		if got := loop.registry.LiveCount(); got != 0 {
-			t.Fatalf("LiveCount = %d with the flag off, want 0", got)
-		}
-		flagOn = true
-		loop.allocateIfEnabled(context.Background())
-		if got := loop.registry.LiveCount(); got != 1 {
-			t.Fatalf("LiveCount = %d after the flag flip, want 1", got)
-		}
-	})
 }
 
 // The M7-4 proposer obeys the same proposer gate: with a real text backend and the

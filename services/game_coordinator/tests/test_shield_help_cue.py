@@ -1,4 +1,4 @@
-"""The "helped" cue of an agent shield (#2395, UC-040 A42, BR-031).
+"""The "helped" cue of an agent shield (#2395, UC-048 A12, BR-013).
 
 An applied ``grant_shield`` (the agent's grant: the only caller is the
 ``shield_seconds`` intervention handler) pulses the helped controller magenta
@@ -119,10 +119,10 @@ def _assert_help_cue(command, serial):
 
 
 class TestUC040A42HelpCue:
-    """A42: an applied agent shield pulses the helped controller before the shield colour."""
+    """UC-048 A12: an applied agent shield pulses the helped controller before the shield colour."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_instant_grant_pulses_before_the_shield_layer(self, make_game):
         game = make_game("instant")
         assert await game.grant_shield("p1", 5.0) is True
@@ -132,7 +132,7 @@ class TestUC040A42HelpCue:
         _assert_help_cue(commands[0], "p1")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_trigger_grant_pulses_before_the_charge_layer(self, make_game):
         game = make_game("trigger")
         assert await game.grant_shield("p1", 5.0) is True
@@ -142,7 +142,7 @@ class TestUC040A42HelpCue:
         _assert_help_cue(commands[0], "p1")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_hold_grant_pulses_before_the_energy_layer(self, make_game):
         game = make_game("hold")
         game._latch_shield_hold()
@@ -163,7 +163,7 @@ class TestUC040A42HelpCue:
         _assert_help_cue(game.gameplay_stream.commands()[0], "p1")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_extension_of_a_running_shield_pulses_again(self, make_game):
         """Cooldown 0 (extend-not-shorten): each applied extension is a grant, so it is cued."""
         game = make_game("instant")
@@ -174,10 +174,10 @@ class TestUC040A42HelpCue:
 
 
 class TestUC040A42NoCueWithoutAGrant:
-    """A42 step 3: a grant that applies nothing, and every other shield path, sends no cue."""
+    """UC-048 A12 step 3: a grant that applies nothing, and every other shield path, sends no cue."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031", "BR-022"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013", "BR-007"])
     async def test_refused_grant_sends_no_cue(self, make_game):
         game = make_game("instant", limits=(1, 0))
         await game.grant_shield("p1", 3.0)
@@ -187,7 +187,7 @@ class TestUC040A42NoCueWithoutAGrant:
         assert game.gameplay_stream.effects() == []
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031", "BR-020"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013", "BR-005"])
     async def test_already_charged_sends_no_cue(self, make_game):
         game = make_game("trigger")
         await game.grant_shield("p1", 3.0)
@@ -197,7 +197,7 @@ class TestUC040A42NoCueWithoutAGrant:
         assert game.gameplay_stream.effects() == []
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_kept_grant_sends_no_cue(self, make_game):
         """A shorter grant inside a running longer shield adds nothing (kept): no cue, no layer."""
         game = make_game("instant")
@@ -207,7 +207,7 @@ class TestUC040A42NoCueWithoutAGrant:
         assert game.gameplay_stream.effects() == []
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_dead_player_gets_no_cue(self, make_game):
         game = make_game("instant")
         game.players["p1"].alive = False
@@ -215,14 +215,14 @@ class TestUC040A42NoCueWithoutAGrant:
         assert game.gameplay_stream.effects() == []
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_toughness_boost_sends_no_cue(self, make_game):
         game = make_game("instant")
         assert await game.grant_toughness_boost("p1", 5.0) is True
         assert PULSE not in [e for _, e in game.gameplay_stream.effects()]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_failing_stream_never_fails_the_grant(self, make_game):
         """The cue is best-effort: a closed stream still grants the protection."""
         game = make_game("instant")
@@ -231,7 +231,7 @@ class TestUC040A42NoCueWithoutAGrant:
         assert game.players["p1"].grace_until == pytest.approx(T0 + 5.0)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_no_stream_still_grants(self, make_game):
         game = make_game("instant")
         game.gameplay_stream = None
@@ -239,10 +239,10 @@ class TestUC040A42NoCueWithoutAGrant:
 
 
 class TestUC040A42HoldRefusalSendsNoCue:
-    """A42 step 3 in hold mode: a grant ``_grant_shield_energy`` refuses sends no cue."""
+    """UC-048 A12 step 3 in hold mode: a grant ``_grant_shield_energy`` refuses sends no cue."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031", "BR-024"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013", "BR-008"])
     async def test_pool_full_grant_sends_no_cue(self, make_game):
         game = make_game("hold")
         game._latch_shield_hold()
@@ -259,7 +259,7 @@ class TestUC040A42HoldRefusalSendsNoCue:
         assert PULSE not in [e for _, e in game.gameplay_stream.effects()]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031", "BR-024"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013", "BR-008"])
     async def test_budget_exhausted_grant_sends_no_cue(self, make_game):
         game = make_game("hold")
         game._latch_shield_hold()
@@ -287,14 +287,14 @@ def _end_by_state(game):
 
 
 class TestUC040A42GameEndingRefusesTheGrant:
-    """A42 step 3: once the game is ending a grant is refused ``game_ending``, with no layer and no cue.
+    """UC-048 A12 step 3: once the game is ending a grant is refused ``game_ending``, with no layer and no cue.
 
     A cue after the win would take over the winner rainbow (a PULSE overrides every
     effect but IDENTIFY and SHOW_BATTERY in the controller manager).
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     @pytest.mark.parametrize("activation", ["instant", "trigger", "hold"])
     @pytest.mark.parametrize("end", [_end_by_latch, _end_by_force, _end_by_state], ids=["latched", "forced", "ending"])
     async def test_grant_after_the_end_is_refused_without_a_cue(self, make_game, activation, end):
@@ -315,7 +315,7 @@ class TestUC040A42GameEndingRefusesTheGrant:
         assert player.shield_charge_seconds == 0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+    @pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
     async def test_help_cue_itself_is_not_sent_after_the_latch(self, make_game):
         """Belt and braces: a latch landing while a grant runs still sends no PULSE."""
         game = make_game("instant")

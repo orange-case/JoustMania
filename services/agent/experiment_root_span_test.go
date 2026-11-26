@@ -30,7 +30,7 @@ func rootSpanLoop(t *testing.T) (*experimentLoop, *tracetest.SpanRecorder, *reco
 	realDef := &recordingRealDefault{}
 	github := &recordingGitHub{}
 	resolve := func(context.Context) promote.Config {
-		return promote.Config{Mode: promote.ModeIssue, Target: promote.TargetLocal, Enabled: false}
+		return promote.Config{Mode: promote.ModeIssue, Enabled: false}
 	}
 
 	sr := tracetest.NewSpanRecorder()
@@ -44,8 +44,7 @@ func rootSpanLoop(t *testing.T) (*experimentLoop, *tracetest.SpanRecorder, *reco
 	loop.tracer = tr
 
 	id, err := loop.registry.Declare(experiment.Intent{
-		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-	})
+		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 	if err != nil {
 		t.Fatalf("declare: %v", err)
 	}

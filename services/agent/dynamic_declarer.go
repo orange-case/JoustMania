@@ -14,8 +14,7 @@ import (
 )
 
 // dynamic_declarer.go is the HEURISTIC (no-LLM) dynamic experiment declarer
-// (#995): instead of only the experiment seed (the experiment_seed flag, one
-// operator-named flag), the agent CHOOSES which existing game.json flag to
+// (#995): the agent CHOOSES which existing game.json flag to
 // experiment on by itself, using observed signals — so the parameterized surface
 // gets explored autonomously. It is the unblocked autonomy increment: the LLM
 // Proposer→Intents path (#960) is deferred (inert until the inference backend
@@ -31,7 +30,7 @@ import (
 //     chosen and is rejected at Registry.Declare anyway).
 //
 // Every Intent it builds therefore flows through the SAME #977 Gate + #978
-// Registry caps as the experiment seed; the declarer is a SELECTION heuristic in front
+// Registry caps as the M7-4 proposer; the declarer is a SELECTION heuristic in front
 // of the unchanged declare path, not a new privilege.
 //
 // GATING — default-off, byte-identical for everyone who does not opt in. The
@@ -41,8 +40,8 @@ import (
 // allocateIfEnabled, which already self-aborts when either is off). Both flags
 // fail closed when unresolved; there is no env fallback (#1907).
 
-// The declarer's settings (candidate list, denylist additions, default objective,
-// target N) are the experiment_dynamic_* agent flags (#1907, flags.md §15), resolved
+// The declarer's settings (candidate list, denylist additions, default objective)
+// are the experiment_dynamic_* agent flags (#1907, flags.md §15), resolved
 // per tick in flags.ExperimentConfig and applied with configure under mu before every
 // Declare. They replaced the AGENT_EXPERIMENT_DYNAMIC_* env vars read once at start.
 
@@ -65,9 +64,8 @@ var defaultDynamicDenylist = map[string]struct{}{
 	// Session capacity (#1018): how many games may run at once, not how one plays.
 	"max_concurrent_games": {},
 	"max_shadow_games":     {},
-	// Lobby / admin start controls: when the menu force-starts, not the game itself.
-	"force_all_start":         {},
-	"force_all_start_seconds": {},
+	// Lobby start control: when the pad force-starts, not the game itself.
+	"force_all_start": {},
 	// Ceremony timing around the game (countdown, winner animation).
 	"countdown_phase_duration_ms": {},
 	"winner_rainbow_duration_ms":  {},
@@ -108,7 +106,8 @@ type dynamicDeclarer struct {
 	// with their current defaults and variants (R2, #1415; read each call).
 	gameFlags gameFlagReader
 	// candidates, when non-empty, restricts/orders the flags the declarer rotates
-	// over. Empty ⇒ all tunable flags discovered in game.json (sorted, stable).
+	// over: a flag key, or `flag=variant` to try that variant (UC-043 BR-012).
+	// Empty ⇒ all tunable flags discovered in game.json (sorted, stable).
 	// Either way the effective denylist filters it (UC-070 BR-008).
 	candidates []string
 	// denylist holds the keys the experiment_dynamic_denylist flag ADDS to
@@ -118,9 +117,6 @@ type dynamicDeclarer struct {
 	// defaultObjective is the experimentable objective used when no pressure signal
 	// is available.
 	defaultObjective string
-	// targetN is the target games-per-arm stamped on each declared Intent (0 ⇒ the
-	// Registry reconciles to min-N).
-	targetN int
 	// pressure is the optional fitness-pressure selection signal (may be nil).
 	pressure pressureFunc
 	// hold gates the hold-mode shield keys (UC-043 A17); nil offers none of them.
@@ -134,7 +130,7 @@ type dynamicDeclarer struct {
 }
 
 // newDynamicDeclarer builds the declarer with the compiled defaults (every tunable
-// flag, only the built-in denylist, objective balanced, target 0). pressure is the
+// flag, only the built-in denylist, objective balanced). pressure is the
 // optional live signal seam (nil ⇒ default-objective fallback).
 //
 // #1044: the declarer is ALWAYS built — the on/off gate is the LIVE
@@ -153,8 +149,7 @@ func newDynamicDeclarer(gameFlags gameFlagReader, pressure pressureFunc) *dynami
 // caller holds d.mu (the same lock that guards Declare). An empty, blank or
 // unresolved list means no candidate restriction / no denylist additions; the
 // built-in denylist is applied in candidateOrder whatever cfg says (UC-070 BR-008).
-// A non-experimentable objective (empty, unknown, chaos) becomes balanced, and a
-// negative target N becomes 0.
+// A non-experimentable objective (empty, unknown, chaos) becomes balanced.
 func (d *dynamicDeclarer) configure(cfg flags.ExperimentConfig) {
 	d.candidates = parseCandidates(cfg.DynamicCandidates)
 	d.denylist = nil
@@ -169,7 +164,6 @@ func (d *dynamicDeclarer) configure(cfg flags.ExperimentConfig) {
 	if d.defaultObjective == "" || !decision.IsExperimentable(d.defaultObjective) {
 		d.defaultObjective = decision.ObjectiveBalanced
 	}
-	d.targetN = max(cfg.DynamicTargetN, 0)
 }
 
 // activeFlags is the set of flag keys that already have a live (non-terminal)
@@ -215,7 +209,7 @@ func (d *dynamicDeclarer) Declare(active activeFlags) (experiment.Intent, bool) 
 	n := len(order)
 	for i := 0; i < n; i++ {
 		idx := (d.cursor + i) % n
-		key := order[idx]
+		key, variant := splitCandidate(order[idx])
 		if active != nil {
 			if _, busy := active[key]; busy {
 				continue
@@ -225,7 +219,9 @@ func (d *dynamicDeclarer) Declare(active activeFlags) (experiment.Intent, bool) 
 			continue
 		}
 		value, ok := perturbValue(flags[key])
-		if key == experiment.HoldActivationKey {
+		if variant != "" {
+			value, ok = variantValueOf(flags[key], variant)
+		} else if key == experiment.HoldActivationKey {
 			// UC-043 A17 step 1: toward hold only, never the next variant in sort order.
 			value, ok = experiment.HoldValue, true
 		}
@@ -240,7 +236,6 @@ func (d *dynamicDeclarer) Declare(active activeFlags) (experiment.Intent, bool) 
 			FlagKey:           key,
 			ExperimentalValue: value,
 			Objective:         objective,
-			TargetNPerArm:     d.targetN,
 		}, true
 	}
 	return experiment.Intent{}, false
@@ -261,9 +256,10 @@ type candidateFlag struct {
 func (d *dynamicDeclarer) candidateOrder(flags map[string]candidateFlag) []string {
 	if len(d.candidates) > 0 {
 		order := make([]string, 0, len(d.candidates))
-		for _, k := range d.candidates {
+		for _, entry := range d.candidates {
+			k, _ := splitCandidate(entry)
 			if _, ok := flags[k]; ok && !d.denied(k) {
-				order = append(order, k)
+				order = append(order, entry)
 			}
 		}
 		return order
@@ -448,8 +444,8 @@ func perturbValue(f candidateFlag) (any, bool) {
 }
 
 // hypothesis builds the human-readable hypothesis string stamped on a dynamically
-// declared Intent (mirrors the experiment seed's shape). It records that this was
-// the agent's own heuristic choice and what it is trying.
+// declared Intent. It records that this was the agent's own heuristic choice
+// and what it is trying.
 func (d *dynamicDeclarer) hypothesis(flagKey string, value any, objective string) string {
 	vb, err := json.Marshal(value)
 	v := string(vb)
@@ -487,6 +483,31 @@ func parseCandidates(raw string) []string {
 		return nil
 	}
 	return out
+}
+
+// splitCandidate splits a candidate entry into its flag key and, for the explicit
+// operator candidate `flag=variant` (UC-043 BR-012), the variant name.
+func splitCandidate(entry string) (key, variant string) {
+	key, variant, _ = strings.Cut(entry, "=")
+	return strings.TrimSpace(key), strings.TrimSpace(variant)
+}
+
+// variantValueOf is the value of one declared variant, or ok=false when the variant
+// is missing or equals the baseline default (nothing to compare against).
+func variantValueOf(f candidateFlag, variant string) (any, bool) {
+	raw, ok := f.variants[variant]
+	if !ok {
+		return nil, false
+	}
+	defRaw, err := json.Marshal(f.defaultValue)
+	if err != nil || jsonRawEqual(raw, defRaw) {
+		return nil, false
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, false
+	}
+	return v, true
 }
 
 // jsonRawEqual compares two raw JSON values by their decoded form (so 4 and 4.0

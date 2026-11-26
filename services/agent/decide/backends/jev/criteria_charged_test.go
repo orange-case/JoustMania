@@ -31,10 +31,10 @@ func shieldChargedState(t *testing.T) decide.State {
 // TestSuitability_ShieldCharged: a shield_charged player is described as such, a
 // grant_shield to them is refused, and a toughness_boost keeps the danger text.
 //
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestSuitability_ShieldCharged(t *testing.T) {
 	st := shieldChargedState(t)
-	t.Run("UC-040/A31 grant_shield to a charged player reads as refused", func(t *testing.T) {
+	t.Run("UC-048/A4 grant_shield to a charged player reads as refused", func(t *testing.T) {
 		d := describeCandidates(st, "grant_shield")["MOCK0003"]
 		if !strings.Contains(d, "another shield is refused") {
 			t.Errorf("grant_shield description lacks the refusal: %q", d)
@@ -43,15 +43,15 @@ func TestSuitability_ShieldCharged(t *testing.T) {
 			t.Errorf("grant_shield description still recommends protection: %q", d)
 		}
 	})
-	t.Run("UC-040/A31 toughness_boost to a charged player keeps the danger text", func(t *testing.T) {
+	t.Run("UC-048/A4 toughness_boost to a charged player keeps the danger text", func(t *testing.T) {
 		d := describeCandidates(st, "toughness_boost")["MOCK0003"]
 		if !strings.Contains(d, "protecting this player now matters most") || strings.Contains(d, "another shield is refused") {
 			t.Errorf("toughness_boost description = %q, want the danger text", d)
 		}
 	})
-	t.Run("UC-040/A31 the candidate description names the charge", func(t *testing.T) {
+	t.Run("UC-048/A4 the candidate description names the charge", func(t *testing.T) {
 		for _, iv := range []string{"grant_shield", "soft_penalty"} {
-			if d := describeCandidates(st, iv)["MOCK0003"]; !strings.Contains(d, "Holds an agent shield charge, or has just used it.") {
+			if d := describeCandidates(st, iv)["MOCK0003"]; !strings.Contains(d, "Holds an agent shield charge.") {
 				t.Errorf("%s description lacks the charge sentence: %q", iv, d)
 			}
 		}

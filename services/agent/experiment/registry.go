@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -118,21 +117,6 @@ const DefaultMaxShadowGames = 20
 // still applies: a coordinator-at-capacity rejection is release+retry next tick.
 const DefaultEffectiveConcurrency = 4
 
-// DefaultMaxGamesPerExperiment is the per-experiment TERMINATION BUDGET (#1001):
-// the absolute upper bound on games a single experiment may accrue before the
-// registry gives up and concludes it INCONCLUSIVE. Without it, an experiment
-// whose verdict can never reach signal (e.g. all-zero fitness ⇒ both arms
-// zero-variance ⇒ undefined effect size ⇒ a permanent "inconclusive" verdict)
-// spawns games forever: the live M8 dry run hit 235 games (target_n=3 exceeded
-// ~70×) and never concluded. 50 is a deliberately small ceiling for cheap
-// headless shadow games; tune via AGENT_EXPERIMENT_MAX_GAMES. A non-positive
-// budget DISABLES this guard (the inconclusive-past-target and
-// degenerate-variance guards below still guarantee termination).
-const DefaultMaxGamesPerExperiment = 50
-
-// maxGamesPerExperimentEnv overrides DefaultMaxGamesPerExperiment.
-const maxGamesPerExperimentEnv = "AGENT_EXPERIMENT_MAX_GAMES"
-
 // Arm names. The experimental arm resolves the candidate value; the control arm
 // falls through to the existing default (within-experiment baseline). Both are
 // game_kind="shadow" (the hard invariant). These mirror the targeting contract
@@ -149,7 +133,7 @@ func DefaultArms() []string { return []string{ArmExperimental, ArmControl} }
 // Intent is the agent's definition of an experiment — the structured hypothesis
 // the registry persists to the journal at PROPOSED. It is the registry-level
 // counterpart to a Proposal (which carries only the flag write): an Intent adds
-// the experiment framing (objective, arms, target N, stop criteria). Minting the
+// the experiment framing (objective, arms). Minting the
 // experiment_id is the registry's job (Declare), so it is NOT a field here.
 type Intent struct {
 	// Hypothesis is the agent's reasoning: what change + why it might help.
@@ -162,9 +146,6 @@ type Intent struct {
 	Objective string
 	// Arms are the arm names. Empty ⇒ DefaultArms() (experimental + control).
 	Arms []string
-	// TargetNPerArm is the minimum games per arm before a verdict can be conclusive.
-	// Non-positive ⇒ the verdict seam decides (it stays inconclusive until it does).
-	TargetNPerArm int
 }
 
 // MintExperimentID returns a fresh experiment id in the "exp_<uuid hex[:12]>"
@@ -172,22 +153,6 @@ type Intent struct {
 // pre-mint an id (e.g. to correlate a span) before Declare.
 func MintExperimentID() string {
 	return "exp_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-}
-
-// MaxGamesPerExperimentFromEnv resolves the per-experiment termination budget
-// (#1001) from AGENT_EXPERIMENT_MAX_GAMES, falling back to
-// DefaultMaxGamesPerExperiment on an unset, empty, or non-numeric value. A 0 or
-// negative value is honored verbatim as "disable the games budget" — unlike the
-// shadow-cap (where a non-positive value is misconfiguration), disabling the
-// games budget is a legitimate choice because the other termination guards still
-// bound the experiment.
-func MaxGamesPerExperimentFromEnv() int {
-	if v := strings.TrimSpace(os.Getenv(maxGamesPerExperimentEnv)); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return DefaultMaxGamesPerExperiment
 }
 
 // entry is the registry's in-memory view of one experiment. It is a cache of the
@@ -266,15 +231,10 @@ type entry struct {
 	// its first allocation pass resolves it; restored from the journal on rehydrate
 	// (BR-015).
 	pin *patterngame.Pin
-	// pairReruns counts reruns per pair; pairSkipped marks archetypes given up
-	// after maxPairReruns (BR-015). pairPreemptions counts the reruns after a
-	// real-game preemption, which do not use up maxPairReruns (bounded by
-	// maxPairPreemptions); pairStaleReruns likewise counts the reruns after a stale
-	// end (UC-041 A4, bounded by maxPairStaleReruns).
-	pairReruns      map[int]int
-	pairPreemptions map[int]int
-	pairStaleReruns map[int]int
-	pairSkipped     map[int]bool
+	// pairReruns counts reruns per pair, any reason; pairSkipped marks archetypes
+	// given up after maxPairReruns (BR-015).
+	pairReruns  map[int]int
+	pairSkipped map[int]bool
 	// patternGames / patternTimeouts / patternAgentEnded count finished pattern
 	// games, timeouts and agent ends (A14) per arm (BR-013 reporting).
 	patternGames      map[string]int
@@ -324,20 +284,6 @@ type Registry struct {
 	// (every start/end/read is guarded), so the registry stays fully functional in
 	// unit tests that do not wire telemetry. Production injects otel.Tracer(...).
 	tracer trace.Tracer
-
-	// maxGames is the per-experiment termination budget (#1001): the registry gives
-	// up and concludes an experiment INCONCLUSIVE once it has accrued this many
-	// concluded games. <= 0 disables the games-budget guard (the other guards still
-	// guarantee termination).
-	maxGames int
-	// minN is the verdict min-N-per-arm gate, mirrored here ONLY for two
-	// registry-side concerns: reconciling a too-small Intent.TargetNPerArm up to it
-	// (so target_n < min-N cannot cause a perpetual under-powered loop), and the
-	// "inconclusive past target N" termination guard. It starts at the same
-	// compiled default the verdict starts at and both follow the live verdict_min_n
-	// via Reconfigure, so the two stay coherent without widening the CohortVerdict
-	// seam.
-	minN int
 
 	// shutdown is the context whose cancellation means the agent's graceful stop has
 	// begun (UC-043 A20, #2332); the experiment loop sets it to its run context. Once
@@ -427,20 +373,6 @@ type RegistryConfig struct {
 	// produces doomed "Game already in progress" rejections. Non-positive ⇒
 	// DefaultEffectiveConcurrency. It is clamped to <= MaxShadowGames.
 	EffectiveConcurrency int
-	// MaxGamesPerExperiment is the per-experiment termination budget (#1001): the
-	// upper bound on concluded games before the registry gives up and concludes the
-	// experiment INCONCLUSIVE. Zero ⇒ MaxGamesPerExperimentFromEnv() (the default
-	// path). A NEGATIVE value explicitly DISABLES the games budget; the
-	// inconclusive-past-target and degenerate-variance guards still terminate the
-	// experiment, so it can never loop forever even with the budget off.
-	MaxGamesPerExperiment int
-	// VerdictMinN is the verdict's min-N-per-arm gate, mirrored into the registry
-	// for target_n reconciliation and the inconclusive-past-target guard. Zero ⇒
-	// DefaultMinNPerArm (the verdict_min_n flag default; the live value arrives via
-	// Reconfigure on each enabled tick). Negative ⇒
-	// disabled (no min-N reconciliation; the inconclusive-past-target guard then
-	// keys off target_n alone).
-	VerdictMinN int
 	// Spawner / Verdict / Promoter / Targeting are the injected seams.
 	Spawner   ShadowSpawner
 	Verdict   CohortVerdict
@@ -491,30 +423,6 @@ func NewRegistry(cfg RegistryConfig) *Registry {
 	if effectiveCap > maxCap {
 		effectiveCap = maxCap
 	}
-	// Termination budget (#1001): zero means "read the env default"; a negative
-	// config value is an explicit disable, normalized to 0 (the guard treats <= 0 as
-	// off).
-	maxGames := cfg.MaxGamesPerExperiment
-	switch {
-	case maxGames == 0:
-		maxGames = MaxGamesPerExperimentFromEnv()
-	case maxGames < 0:
-		maxGames = 0
-	}
-	// The env default may itself be non-positive (operator disabled it); normalize.
-	if maxGames < 0 {
-		maxGames = 0
-	}
-	// Min-N mirror (#1001): zero means the compiled default; negative disables
-	// min-N reconciliation (normalized to 0, so the inconclusive-past-target guard
-	// then keys off target_n alone).
-	minN := cfg.VerdictMinN
-	switch {
-	case minN == 0:
-		minN = DefaultMinNPerArm
-	case minN < 0:
-		minN = 0
-	}
 	clock := cfg.Clock
 	if clock == nil {
 		clock = func() time.Time { return time.Now().UTC() }
@@ -534,8 +442,6 @@ func NewRegistry(cfg RegistryConfig) *Registry {
 		root:              cfg.Root,
 		maxCap:            maxCap,
 		effectiveCap:      effectiveCap,
-		maxGames:          maxGames,
-		minN:              minN,
 		spawner:           cfg.Spawner,
 		verdict:           cfg.Verdict,
 		promo:             cfg.Promoter,
@@ -605,21 +511,6 @@ func (r *Registry) Declare(in Intent) (string, error) {
 	// probes r.mu through r.clock().
 	now := r.clock()
 
-	// Reconcile target_n vs the verdict min-N (#1001). A target_n below the verdict
-	// min-N can NEVER satisfy the verdict's conclusive gate, so the experiment would
-	// be under-powered forever. Raise it to the min-N floor (the persisted intent
-	// records the effective value). This is the coherent semantic chosen for the
-	// issue: the lifecycle's "target reached" point is at least the verdict's min-N,
-	// so reaching target and reaching a conclusive-eligible sample coincide.
-	targetN := in.TargetNPerArm
-	if r.minN > 0 && targetN < r.minN {
-		if targetN > 0 {
-			r.log.Info("experiment.target_n_reconciled",
-				"experiment_id", id, "requested_target_n", targetN, "min_n", r.minN)
-		}
-		targetN = r.minN
-	}
-
 	jrnl, err := journal.Create(r.root, journal.Intent{
 		ExperimentID:      id,
 		CreatedAt:         now,
@@ -627,7 +518,6 @@ func (r *Registry) Declare(in Intent) (string, error) {
 		FlagKey:           in.FlagKey,
 		ExperimentalValue: in.ExperimentalValue,
 		Objective:         in.Objective,
-		TargetNPerArm:     targetN,
 		Arms:              arms,
 	})
 	if err != nil {
@@ -890,9 +780,6 @@ func (r *Registry) startSpanLocked(e *entry, intent journal.Intent) {
 	}
 	if intent.Objective != "" {
 		attrs = append(attrs, attribute.String(keys.AttrExperimentObjective, intent.Objective))
-	}
-	if intent.TargetNPerArm > 0 {
-		attrs = append(attrs, attribute.Int(keys.AttrExperimentTargetN, intent.TargetNPerArm))
 	}
 	if len(intent.Arms) > 0 {
 		attrs = append(attrs, attribute.String(keys.AttrExperimentArms, strings.Join(intent.Arms, ",")))
@@ -1512,17 +1399,6 @@ func (r *Registry) ConcludeGame(ctx context.Context, gameID string, fitness floa
 		return r.conclude(ctx, id, verdict)
 	}
 
-	// TERMINATION GUARD (#1001): the verdict is inconclusive (or absent). Without a
-	// bound, an experiment that can never reach signal — e.g. all-zero fitness ⇒
-	// both arms zero-variance ⇒ undefined effect size ⇒ permanent "inconclusive" —
-	// spawns games forever. If any give-up condition holds, conclude+teardown the
-	// experiment as a FINAL inconclusive instead of leaving it RUNNING.
-	if reason, giveUp := r.shouldGiveUp(jrnl.Summary(), jrnl.Intent().TargetNPerArm); giveUp {
-		r.log.Info("experiment.terminated_inconclusive",
-			"experiment_id", id, "reason", reason)
-		return r.conclude(ctx, id, giveUpVerdict(reason, verdict, haveVerdict))
-	}
-
 	// UC-046 A6: a pattern experiment whose archetypes are all used concludes once
 	// its last game has ended.
 	if st, done := r.concludeIfPatternExhausted(ctx, id); done {
@@ -1598,20 +1474,6 @@ func (r *Registry) emitConcludedProgress(id string) {
 	}
 }
 
-// giveUpVerdict is the FINAL inconclusive verdict of an experiment the termination
-// guard (#1001) gives up on. It keeps the interim verdict's Delta when there is one.
-func giveUpVerdict(reason string, v journal.Verdict, have bool) journal.Verdict {
-	final := journal.Verdict{
-		Outcome:     OutcomeInconclusive,
-		Significant: false,
-		Reason:      reason,
-	}
-	if have {
-		final.Delta = v.Delta
-	}
-	return final
-}
-
 // ReleaseGame frees the in-flight slot held by a shadow game that ended WITHOUT
 // producing a usable fitness sample (#1014): a game that terminated in
 // game_error, was force-ended on timeout, or was aborted. Unlike ConcludeGame it
@@ -1685,78 +1547,6 @@ func (r *Registry) ReleaseGame(gameID, reason string) bool {
 	// UC-046 A6: a released last game of an exhausted pattern experiment concludes it.
 	r.concludeIfPatternExhausted(context.Background(), id)
 	return true
-}
-
-// shouldGiveUp implements the #1001 termination guard: it decides whether an
-// experiment that is still inconclusive must be concluded INCONCLUSIVE (rather
-// than left RUNNING forever). It returns a human-readable reason and true when
-// ANY of the give-up conditions holds:
-//
-//	(a) GAMES BUDGET — total concluded games across arms has reached r.maxGames
-//	    (AGENT_EXPERIMENT_MAX_GAMES; the absolute ceiling, the primary backstop).
-//	(b) INCONCLUSIVE PAST TARGET — every arm has reached the effective target N
-//	    (max(target_n, min-N)), so the cohort is fully powered yet the verdict is
-//	    still inconclusive: more games will not change a within-noise result.
-//	(c) DEGENERATE VARIANCE — every arm is past target N AND has zero variance
-//	    (all-equal fitness, the #997 all-zero case): the effect size is undefined
-//	    and re-evaluating forever cannot help.
-//
-// The guard reads only the rolling Summary (per-arm Welford count/M2) plus the
-// persisted intent's target_n (passed in by the caller), so it is O(arms) and
-// needs no extra book-keeping.
-func (r *Registry) shouldGiveUp(s journal.Summary, targetN int) (string, bool) {
-	// Total concluded games across all arms (reservations are not in the Summary).
-	total := 0
-	for _, a := range s.Arms {
-		if a != nil {
-			total += a.Count
-		}
-	}
-
-	// (a) Absolute games budget. <= 0 disables this guard.
-	if r.maxGames > 0 && total >= r.maxGames {
-		return fmt.Sprintf("games budget exhausted: %d games >= max=%d, still inconclusive",
-			total, r.maxGames), true
-	}
-
-	// Effective target N: the larger of the persisted target_n and the verdict
-	// min-N. (Declare already reconciles target_n up to min-N, so they normally
-	// coincide; this max is a belt-and-braces floor for rehydrated/legacy intents.)
-	target := targetN
-	if r.minN > target {
-		target = r.minN
-	}
-
-	// Both (b) and (c) require every arm to have reached the effective target N.
-	// Until then the cohort is genuinely under-powered and keeps running (bounded by
-	// the games budget above). A non-positive target makes these guards inert (the
-	// budget alone bounds the experiment).
-	if target <= 0 {
-		return "", false
-	}
-	allReachedTarget := len(s.Arms) > 0
-	allDegenerate := true
-	for _, a := range s.Arms {
-		if a == nil || a.Count < target {
-			allReachedTarget = false
-			break
-		}
-		if a.M2 != 0 {
-			allDegenerate = false
-		}
-	}
-	if !allReachedTarget {
-		return "", false
-	}
-
-	// (c) Degenerate variance past target N — checked first for a precise reason.
-	if allDegenerate {
-		return fmt.Sprintf("degenerate variance past target N=%d on all arms (zero spread); effect size undefined",
-			target), true
-	}
-
-	// (b) Inconclusive past target N — fully powered but still within noise.
-	return fmt.Sprintf("inconclusive past target N=%d on all arms; no significant effect", target), true
 }
 
 // conclude transitions an experiment to CONCLUDED on a final verdict, routes a
@@ -1872,7 +1662,7 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 	}
 	if r.shuttingDown() {
 		// UC-043 A20 (#2332): a conclusion that lands after the graceful stop began
-		// keeps its sample and verdict but does not promote: no issue, PR or real
+		// keeps its sample and verdict but does not promote: no issue or real
 		// default write while the agent goes down. Journaled `discarded: shutdown`, so the
 		// experiment ends discarded and a restart finds the outcome (A15 step 3).
 		res := PromotionResult{Outcome: PromotionDiscarded, Reason: PromotionReasonShutdown}
@@ -1932,7 +1722,7 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 	}
 
 	// Journal the result whatever the experiment's status is now: an AbortAll that
-	// raced the promotion does not undo an issue, PR or real default it produced.
+	// raced the promotion does not undo an issue or real default it produced.
 	r.mu.Lock()
 	if e := r.entries[id]; e != nil {
 		promotion := res
@@ -2378,38 +2168,11 @@ func (r *Registry) Capacity() int { return r.maxCap }
 // flag, default 4) and clamped to Capacity.
 func (r *Registry) EffectiveCapacity() int { return r.effectiveCap }
 
-// MaxGames returns the live per-experiment games budget (0 = no limit), as last
-// set by Reconfigure (#1044) — the effective min(env ceiling, flag) since #1810.
-func (r *Registry) MaxGames() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.maxGames
-}
-
-// Reconfigure live-updates the registry's runtime caps (#1044) so a hot-reload of
-// experiment_shadow_effective_concurrency / experiment_max_games / verdict_min_n
-// takes effect with NO restart. The experiment loop calls it each tick from the
-// live agent.json flags; the compiled default (equal to the flag default, #1907) is what the
-// flag falls back to, so a fresh agent.json reproduces byte-identical behavior.
-//
-// SAFETY (the #1044 hard-part-2 requirement): every field is updated UNDER r.mu,
-// the same lock that guards all capacity/lifecycle bookkeeping (spawnsInFlight,
-// the games maps, tombstones, the round-robin cursors). It only changes the cap
-// VALUES the allocator reads on its next pass — it never touches an in-flight
-// game, a reservation, or a tombstone — so lowering a cap mid-run simply stops NEW
-// allocations until in-flight drains below it; existing shadow games conclude /
-// release normally. minN is mirrored onto the verdict too (via SetThresholds) so
-// the two stay coherent, exactly as construction did. Non-positive inputs are
-// treated per-field as the constructor does:
-//   - effectiveConcurrency <= 0 ⇒ ignored (keep current; a zero cap would stall
-//     every experiment — misconfiguration);
-//   - maxGames < 0 ⇒ normalized to 0 (explicit "disable the games budget"); 0 is a
-//     legitimate disable and is honored verbatim;
-//   - minN <= 0 ⇒ ignored (keep current; the verdict's own floor also guards).
-//
-// minPairs is verdict-only (the registry does not mirror it); it is forwarded to
-// the verdict via SetThresholds. A negative minPairs is ignored there.
-func (r *Registry) Reconfigure(effectiveConcurrency, maxGames, minN, minPairs int) {
+// Reconfigure live-updates the shadow concurrency cap and the verdict'"'"'s min-pairs
+// gate from the live flags. It only changes the cap the allocator reads next; an
+// in-flight game is untouched. A non-positive value is ignored (a zero cap would
+// stall every experiment; the verdict ignores a non-positive min-pairs itself).
+func (r *Registry) Reconfigure(effectiveConcurrency, minPairs int) {
 	r.mu.Lock()
 	if effectiveConcurrency > 0 {
 		eff := effectiveConcurrency
@@ -2418,48 +2181,19 @@ func (r *Registry) Reconfigure(effectiveConcurrency, maxGames, minN, minPairs in
 		}
 		r.effectiveCap = eff
 	}
-	if maxGames >= 0 {
-		r.maxGames = maxGames // 0 ⇒ disable the games budget (other guards still terminate).
-	}
-	if minN > 0 {
-		// LIVE minN raise (#1051): updating r.minN here applies the new floor to FUTURE
-		// Declare calls (which clamp target_n up to r.minN at declare time) and to the
-		// per-experiment "give up" guard (shouldGiveUp computes target = max(target_n,
-		// r.minN) on every read), but it does NOT retro-clamp the PERSISTED target_n of an
-		// already-declared experiment. That is HARMLESS and deliberately left
-		// un-retro-clamped: the verdict's own minN — mirrored below via SetThresholds — is
-		// the real conclusiveness backstop (an experiment can never reach a conclusive
-		// verdict below it regardless of its stored target_n), and the give-up guard already
-		// lifts the lifecycle "target reached" point to max(target_n, r.minN) on every read.
-		// Rewriting the durable intent mid-flight would disturb in-flight game accounting for
-		// no behavioral gain, so we don't.
-		r.minN = minN
-	}
 	r.mu.Unlock()
 
-	// Mirror the verdict gates outside r.mu (the verdict has its OWN lock; holding
-	// both is unnecessary and invites a lock-ordering question). SetThresholds
-	// ignores a non-positive value per gate, so a transient flagd hiccup never
-	// loosens the verdict.
+	// The verdict has its own lock; mirror outside r.mu.
 	if v, ok := r.verdict.(*Verdict); ok {
-		v.SetThresholds(minN, minPairs)
+		v.SetThresholds(minPairs)
 	}
 }
 
-// ReconfigureVerdictFloats live-mirrors the four migrated FLOAT verdict knobs (#1214)
-// onto the verdict so a hot-reload of verdict_effect_threshold / verdict_min_raw_effect
-// / verdict_sd_floor / verdict_anchor_margin takes effect on the NEXT verdict with no
-// restart — the float analog of the minN/minPairs mirroring in Reconfigure. The
-// experiment loop calls it each tick from the live agent.json flags, alongside
-// Reconfigure; the compiled default (equal to the flag default, #1907) is what the flag falls back to.
-// These knobs are verdict-only (the registry itself reads none of them), so unlike
-// minN this method only forwards to the verdict — it touches no registry state and
-// takes no registry lock. SetFloatThresholds ignores a non-positive value per knob, so
-// a transient flagd hiccup never loosens a gate. A non-*Verdict CohortStat (a custom
-// test seam) is left untouched.
-func (r *Registry) ReconfigureVerdictFloats(effectThreshold, minRawEffect, sdFloor, anchorMargin float64) {
+// ReconfigureVerdictFloats live-mirrors the float verdict gates onto the verdict;
+// it touches no registry state.
+func (r *Registry) ReconfigureVerdictFloats(effectThreshold, minRawEffect, sdFloor float64) {
 	if v, ok := r.verdict.(*Verdict); ok {
-		v.SetFloatThresholds(effectThreshold, minRawEffect, sdFloor, anchorMargin)
+		v.SetFloatThresholds(effectThreshold, minRawEffect, sdFloor)
 	}
 }
 

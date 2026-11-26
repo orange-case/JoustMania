@@ -9,7 +9,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// The hold-mode fields of the decide state (#2096; UC-040 A36, A37;
+// The hold-mode fields of the decide state (#2096; UC-048 A8, A9;
 // decide-contract.md §1.2): present only in a game whose game_shield_activation_mode
 // is hold, so every other state, wire and digest stays byte-identical.
 
@@ -30,9 +30,10 @@ func withHoldGauges(c gamecontext.GameContext, mode string) gamecontext.GameCont
 	return c
 }
 
-// UC: UC-040 main step 4 A36 A37
+// UC: UC-040 main step 4
+// UC: UC-048 A8 A9
 func TestBuildState_HoldFields(t *testing.T) {
-	t.Run("UC-040/A37 a trigger game with shield gauges keeps its state, wire and digest", func(t *testing.T) {
+	t.Run("UC-048/A9 a trigger game with shield gauges keeps its state, wire and digest", func(t *testing.T) {
 		plain := BuildStateWith(sampleCtx(), Annotations{Charged: map[string]bool{"B": true}})
 		trigger := BuildStateWith(withHoldGauges(sampleCtx(), "trigger"), Annotations{Charged: map[string]bool{"B": true}})
 		if trigger.Digest != plain.Digest || trigger.Narrative != plain.Narrative {
@@ -46,7 +47,7 @@ func TestBuildState_HoldFields(t *testing.T) {
 			t.Fatal("trigger mode keeps shield_charged")
 		}
 	})
-	t.Run("UC-040/A36 a hold game carries the pool, the latched values and the narrative token", func(t *testing.T) {
+	t.Run("UC-048/A8 a hold game carries the pool, the latched values and the narrative token", func(t *testing.T) {
 		c := withHoldGauges(sampleCtx(), "hold")
 		st := BuildStateWith(c, Annotations{Charged: map[string]bool{"B": true}})
 		a, b := playerByID(t, st, "A"), playerByID(t, st, "B")
@@ -76,53 +77,35 @@ func TestBuildState_HoldFields(t *testing.T) {
 			t.Error("the digest must change with the energy")
 		}
 	})
-	t.Run("UC-040/A36 a grant in a hold game is energy, not protection", func(t *testing.T) {
+	t.Run("UC-048/A8 a grant in a hold game is energy, not protection", func(t *testing.T) {
 		c := withHoldGauges(sampleCtx(), "hold")
 		c.Timeline = append(c.Timeline, gamecontext.TimelineEvent{At: c.UpdatedAt.Add(-time.Second), Kind: gamecontext.EventIntervention, Detail: "grant_shield", Serial: "A"})
 		if playerByID(t, BuildState(c), "A").Shielded {
 			t.Fatal("a grant_shield in a hold game must not mark the player shielded")
 		}
 	})
-	t.Run("UC-040/A37 grants in flight add to the energy, at most the cap", func(t *testing.T) {
-		st := BuildStateWith(withHoldGauges(sampleCtx(), "hold"), Annotations{ShieldInFlight: map[string]float64{"A": 2, "B": 9}})
-		if got := *playerByID(t, st, "A").ShieldEnergyS; got < 4.4-1e-9 || got > 4.4+1e-9 {
-			t.Fatalf("A energy = %v, want 4.4", got)
-		}
-		if got := st.HoldRefusal(playerByID(t, st, "A")); got != "" {
-			t.Fatalf("A refusal = %q, want none at 4.4 of 5", got)
-		}
-		if got := *playerByID(t, st, "B").ShieldEnergyS; got != 5 {
-			t.Fatalf("B energy = %v, want the cap 5", got)
-		}
-		st = BuildStateWith(withHoldGauges(sampleCtx(), "hold"), Annotations{ShieldInFlight: map[string]float64{"A": 2.2}})
-		if got := st.HoldRefusal(playerByID(t, st, "A")); got != HoldRefusalPoolFull {
-			t.Fatalf("A refusal = %q, want shield_pool_full at 4.6 of 5", got)
-		}
-	})
 }
 
-// UC: UC-040 A37 BR-024
+// UC: UC-048 A9 BR-008
 func TestHoldShieldRefusal(t *testing.T) {
 	for _, tc := range []struct {
 		name                    string
 		energy, budget, cap, mb *float64
 		active                  bool
-		inFlight                float64
 		want                    string
 	}{
-		{"UC-040/A37 room is no refusal", fptr(1), fptr(10), fptr(5), fptr(0.3), false, 0, ""},
-		{"UC-040/A37 within 0.5 s of the cap", fptr(4.5), fptr(10), fptr(5), fptr(0.3), false, 0, HoldRefusalPoolFull},
-		{"UC-040/A37 in flight counts", fptr(2), fptr(10), fptr(5), fptr(0.3), false, 2.5, HoldRefusalPoolFull},
-		{"UC-040/A37 full is min(cap, budget left)", fptr(1.5), fptr(2), fptr(5), fptr(0.3), false, 0, HoldRefusalPoolFull},
-		{"UC-040/A37 budget below the minimum burst", fptr(0), fptr(0.29), fptr(5), fptr(0.3), false, 0, HoldRefusalBudgetExhausted},
-		{"UC-040/A37 active skips the pool check", fptr(5), fptr(10), fptr(5), fptr(0.3), true, 0, ""},
-		{"UC-040/A37 active keeps the budget check", fptr(5), fptr(0.1), fptr(5), fptr(0.3), true, 0, HoldRefusalBudgetExhausted},
-		{"UC-040/A37 no energy fails open for the pool", nil, fptr(10), fptr(5), fptr(0.3), false, 0, ""},
-		{"UC-040/A37 no cap fails open", fptr(5), fptr(10), nil, fptr(0.3), false, 0, ""},
-		{"UC-040/A37 no minimum burst skips the budget check", fptr(0), fptr(0.1), fptr(5), nil, false, 0, HoldRefusalPoolFull},
+		{"UC-048/A9 room is no refusal", fptr(1), fptr(10), fptr(5), fptr(0.3), false, ""},
+		{"UC-048/A9 within 0.5 s of the cap", fptr(4.5), fptr(10), fptr(5), fptr(0.3), false, HoldRefusalPoolFull},
+		{"UC-048/A9 full is min(cap, budget left)", fptr(1.5), fptr(2), fptr(5), fptr(0.3), false, HoldRefusalPoolFull},
+		{"UC-048/A9 budget below the minimum burst", fptr(0), fptr(0.29), fptr(5), fptr(0.3), false, HoldRefusalBudgetExhausted},
+		{"UC-048/A9 active skips the pool check", fptr(5), fptr(10), fptr(5), fptr(0.3), true, ""},
+		{"UC-048/A9 active keeps the budget check", fptr(5), fptr(0.1), fptr(5), fptr(0.3), true, HoldRefusalBudgetExhausted},
+		{"UC-048/A9 no energy fails open for the pool", nil, fptr(10), fptr(5), fptr(0.3), false, ""},
+		{"UC-048/A9 no cap fails open", fptr(5), fptr(10), nil, fptr(0.3), false, ""},
+		{"UC-048/A9 no minimum burst skips the budget check", fptr(0), fptr(0.1), fptr(5), nil, false, HoldRefusalPoolFull},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := HoldShieldRefusal(tc.energy, tc.budget, tc.active, tc.cap, tc.mb, tc.inFlight); got != tc.want {
+			if got := HoldShieldRefusal(tc.energy, tc.budget, tc.active, tc.cap, tc.mb); got != tc.want {
 				t.Fatalf("refusal = %q, want %q", got, tc.want)
 			}
 		})

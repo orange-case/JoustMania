@@ -1,9 +1,7 @@
 """Death detection of a game: acceleration, EMA, thresholds and warnings.
 
-Split out of ``BaseGameMode`` (#2633): the per-player, per-frame path from a controller
-state to a warning or a kill. Names that tests patch on ``games.base`` (``tracer``,
-``time``, ``get_config_manager``, ``record_moment``, ``inject_trace_context``) are
-looked up on the base module at call time (``_base.``), as in ``games/shields.py``.
+Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
+``inject_trace_context`` on ``games.base``: read them as ``_base.<name>``.
 """
 
 import math
@@ -237,7 +235,7 @@ class MotionMixin:
         # Matches original JoustMania: if game_clock.now() > no_rumble. Uses the unified
         # effective-grace rule: max(agent shield grace_until, admin
         # invincible_until) so the agent shield and admin baseline compose here too.
-        # UC-040 BR-035: the shield end grace window gates the same way (one extra compare).
+        # UC-048 BR-015: the shield end grace window gates the same way (one extra compare).
         if self._grace_frame(player, serial, accel_mag, current_time):
             return  # In grace period, skip death/warning checks
 

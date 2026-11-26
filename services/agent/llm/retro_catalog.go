@@ -92,7 +92,7 @@ func leverScope(iv decide.Intervention) string {
 	}
 }
 
-// policyCaps is the snapshot's caps of the shield levers (UC-040 BR-022, BR-033),
+// policyCaps is the snapshot's caps of the shield levers (UC-048 BR-007, BR-014),
 // "" for every other lever. 0 means no cap (flags.Policy).
 func policyCaps(name string, p flags.Policy) string {
 	switch name {

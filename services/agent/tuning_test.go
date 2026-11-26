@@ -327,14 +327,12 @@ func TestCompiledDefaultsMatchFlagDefaults(t *testing.T) {
 		"experiment_dynamic_enabled":              exp.DynamicEnabled,
 		"experiment_tick_seconds":                 exp.Tick.Seconds(),
 		"experiment_completed_grace_seconds":      exp.CompletedGrace.Seconds(),
-		"verdict_min_n":                           float64(exp.VerdictMinN),
 		"verdict_min_pairs":                       float64(exp.VerdictMinPairs),
 		"experiment_shadow_effective_concurrency": float64(exp.ShadowEffectiveConcurrency),
 		// #1907 PR 4b: the dynamic declarer settings.
 		"experiment_dynamic_candidates":      exp.DynamicCandidates,
 		"experiment_dynamic_denylist":        exp.DynamicDenylist,
 		"experiment_dynamic_objective":       exp.DynamicObjective,
-		"experiment_dynamic_target_n":        float64(exp.DynamicTargetN),
 		"inference.backend":                  envFallback,
 		"inference.model":                    d.InferenceModel,
 		"inference.effort":                   d.InferenceEffort,
@@ -371,17 +369,6 @@ func TestCompiledDefaultsMatchFlagDefaults(t *testing.T) {
 			if got := f.Variants[f.DefaultVariant]; got != w {
 				t.Errorf("%s: %s default variant = %v, compiled default = %v", path, key, got, w)
 			}
-		}
-		// #1907 PR 4c: the experiment seed. With flagd down there is no seed (Seed
-		// nil); the flag's default must be `off` = {}, which is no seed too.
-		seed, ok := doc.Flags["experiment_seed"]
-		if !ok {
-			t.Errorf("%s: flag %q missing", path, "experiment_seed")
-			continue
-		}
-		if _, kind, _ := parseExperimentSeed(seed.Variants[seed.DefaultVariant]); seed.DefaultVariant != "off" || kind != seedOff || exp.Seed != nil {
-			t.Errorf("%s: experiment_seed default %q = %v (unresolved %v), want off = {} and no compiled seed",
-				path, seed.DefaultVariant, seed.Variants[seed.DefaultVariant], exp.Seed)
 		}
 	}
 }

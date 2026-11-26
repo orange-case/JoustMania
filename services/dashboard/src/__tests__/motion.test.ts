@@ -37,10 +37,10 @@ describe("UC-035: controller card reads omitted proto3-JSON zero scalars as 0", 
     expect(statusView(0)).toEqual({ state: "alive", text: "Alive" });
   });
 
-  it("UC-035 main step 2 only the followed roster marks a card Dead; admin and teams keep their badges", () => {
+  it("UC-035 main step 2 only the followed roster marks a card Dead; teams keep their badges", () => {
     expect(statusView(undefined, false)).toEqual({ state: "dead", text: "Dead" });
     expect(statusView(undefined, true)).toEqual({ state: "alive", text: "Alive" });
-    expect(statusView(-1)).toEqual({ state: "admin", text: "Admin" });
+    expect(statusView(-1)).toEqual({ state: "alive", text: "Alive" });
     expect(statusView(2)).toEqual({ state: "alive", text: "Team 2" });
     expect(statusView(2, true)).toEqual({ state: "alive", text: "Alive" });
   });

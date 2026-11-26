@@ -99,7 +99,7 @@ func TestUC043_A18_CompareAndDeleteRevert(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := racingWriter(t, svc, "admin")
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, w, fakeWatcher{}, w)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, w, fakeWatcher{}, w)
 
 		got := p.RevertOnKillSwitch(ctx)
 

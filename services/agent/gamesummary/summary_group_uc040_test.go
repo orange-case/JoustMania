@@ -11,12 +11,12 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// UC: UC-040 A47 BR-033
+// UC: UC-048 A13 BR-014
 func TestBuildSummary_GroupGrants(t *testing.T) {
 	build := func(ds []GroupDecision) Summary {
 		return BuildSummary(gamecontext.GameContext{SessionID: "g", Arm: "B", GameKind: "shadow"}, BuildOptions{Now: time.Unix(1, 0), GroupDecisions: ds})
 	}
-	t.Run("UC-040/A47 counts non-rescue grants and rescue-refused groups", func(t *testing.T) {
+	t.Run("UC-048/A13 counts non-rescue grants and rescue-refused groups", func(t *testing.T) {
 		got := build([]GroupDecision{
 			{Outcome: "applied", Rescue: false, Rationale: "rally"},
 			{Outcome: "applied", Rescue: true, Rationale: "save"},
@@ -33,14 +33,14 @@ func TestBuildSummary_GroupGrants(t *testing.T) {
 			t.Fatalf("rationales = %v", got.Rationales)
 		}
 	})
-	t.Run("UC-040/A47 a game without a group decision omits the field", func(t *testing.T) {
+	t.Run("UC-048/A13 a game without a group decision omits the field", func(t *testing.T) {
 		s := build(nil)
 		raw, _ := json.Marshal(s)
 		if s.GroupGrants != nil || strings.Contains(string(raw), "group_grants") {
 			t.Fatalf("summary = %s", raw)
 		}
 	})
-	t.Run("UC-040/A47 the rationale export carries no arm or backend label", func(t *testing.T) {
+	t.Run("UC-048/A13 the rationale export carries no arm or backend label", func(t *testing.T) {
 		raw, _ := json.Marshal(build([]GroupDecision{{Outcome: "applied", Rationale: "rally"}}).GroupGrants)
 		if string(raw) != `{"applied":1,"blocked":0,"non_rescue":1,"rescue_refused":0,"rationales":["rally"]}` {
 			t.Fatalf("group_grants json = %s", raw)
@@ -48,7 +48,7 @@ func TestBuildSummary_GroupGrants(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A47 BR-033
+// UC: UC-048 A13 BR-014
 func TestCoordinator_ExportsGroupRationalesBlind(t *testing.T) {
 	c, sr, _ := recordingCoordinator(t)
 	var logs bytes.Buffer

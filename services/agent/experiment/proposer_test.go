@@ -82,13 +82,13 @@ func findSpan(t *testing.T, rec *tracetest.SpanRecorder, name string) trace.Read
 // fake backend, with an in-memory span recorder and a frozen clock.
 func proposerWithRecorder(t *testing.T, backend Backend) (*Proposer, *fake.Service, *tracetest.SpanRecorder, *fakeClock) {
 	t.Helper()
-	p, svc, rec, clk, _ := proposerWithJournal(t, backend, 0)
+	p, svc, rec, clk, _ := proposerWithJournal(t, backend)
 	return p, svc, rec, clk
 }
 
-// proposerWithJournal is proposerWithRecorder with the registry's verdict min-N
-// (0 = the env default) and the journal root the declared intents land in.
-func proposerWithJournal(t *testing.T, backend Backend, verdictMinN int) (*Proposer, *fake.Service, *tracetest.SpanRecorder, *fakeClock, string) {
+// proposerWithJournal is proposerWithRecorder with the journal root the declared
+// intents land in.
+func proposerWithJournal(t *testing.T, backend Backend) (*Proposer, *fake.Service, *tracetest.SpanRecorder, *fakeClock, string) {
 	t.Helper()
 	svc := newGameService(t)
 	rec := tracetest.NewSpanRecorder()
@@ -97,11 +97,10 @@ func proposerWithJournal(t *testing.T, backend Backend, verdictMinN int) (*Propo
 	gate := NewGate(w, tp.Tracer("test"), discardLogger())
 	root := t.TempDir()
 	reg := NewRegistry(RegistryConfig{
-		Root:        root,
-		Targeting:   NewGateTargetingWriter(gate, w),
-		Verdict:     fakeVerdict{concludeAtN: 1000},
-		Clock:       fixedClock(),
-		VerdictMinN: verdictMinN,
+		Root:      root,
+		Targeting: NewGateTargetingWriter(gate, w),
+		Verdict:   fakeVerdict{concludeAtN: 1000},
+		Clock:     fixedClock(),
 	})
 	p := NewProposer(backend, &RegistrySink{Registry: reg, Objective: "balanced"}, gameVocab(svc), tp.Tracer("test"), discardLogger())
 	clk := &fakeClock{now: time.Unix(1_700_000_000, 0)}
@@ -132,8 +131,7 @@ func TestProposeOnce_ValidProposalWritesShadowExperiment(t *testing.T) {
 	backend := &fakeProposerBackend{
 		response: `{"flag":"death_grace_period_seconds","value":3.0,"rationale":"longer grace may extend sessions"}`,
 	}
-	const verdictMinN = 7
-	p, svc, rec, _, root := proposerWithJournal(t, backend, verdictMinN)
+	p, svc, rec, _, root := proposerWithJournal(t, backend)
 
 	res := p.ProposeOnce(context.Background(), Narrative{GameMode: "joust"}, ProposerConfig{Permit: allowPropose})
 
@@ -162,8 +160,7 @@ func TestProposeOnce_ValidProposalWritesShadowExperiment(t *testing.T) {
 	assertSpanBoolAttr(t, gateSpan, AttrBlocked, false)
 
 	// UC-042 step 5: the declared intent (its own exp_ id, arms experimental and
-	// control, hypothesis = the rationale, objective balanced, target N =
-	// verdict_min_n games per arm).
+	// control, hypothesis = the rationale, objective balanced).
 	ids, err := journal.List(root)
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("journal ids = %v (err %v), want exactly one declared experiment", ids, err)
@@ -181,9 +178,6 @@ func TestProposeOnce_ValidProposalWritesShadowExperiment(t *testing.T) {
 	}
 	if intent.Objective != "balanced" {
 		t.Errorf("objective = %q, want balanced", intent.Objective)
-	}
-	if intent.TargetNPerArm != verdictMinN {
-		t.Errorf("target N per arm = %d, want verdict_min_n %d", intent.TargetNPerArm, verdictMinN)
 	}
 	if len(intent.Arms) != 2 || intent.Arms[0] != ArmExperimental || intent.Arms[1] != ArmControl {
 		t.Errorf("arms = %v, want [%s %s]", intent.Arms, ArmExperimental, ArmControl)

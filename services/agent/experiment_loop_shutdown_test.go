@@ -32,8 +32,7 @@ func newRefillLoop(t *testing.T) (*experimentLoop, *recordingSpawner, string, st
 	ctx := context.Background()
 	id, err := loop.registry.Declare(experiment.Intent{
 		Hypothesis: "h", FlagKey: "death_grace_period_seconds",
-		ExperimentalValue: 0.5, Objective: "balanced", TargetNPerArm: 3,
-	})
+		ExperimentalValue: 0.5, Objective: "balanced"})
 	if err != nil {
 		t.Fatalf("Declare: %v", err)
 	}
@@ -139,12 +138,11 @@ func TestUC043_A20_LoopShutdown(t *testing.T) {
 		spawner := &recordingSpawner{}
 		realDef := &recordingRealDefault{}
 		resolve := func(context.Context) promote.Config {
-			return promote.Config{Mode: promote.ModeAutonomous, Target: promote.TargetLocal, Enabled: true}
+			return promote.Config{Mode: promote.ModeAutonomous, Enabled: true}
 		}
 		loop := buildLoopForTest(t, spawner, resolve, realDef, &recordingGitHub{}, armFitness())
 		id, err := loop.registry.Declare(experiment.Intent{
-			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-		})
+			FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 		if err != nil {
 			t.Fatalf("declare: %v", err)
 		}

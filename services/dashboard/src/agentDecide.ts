@@ -95,7 +95,7 @@ export function decisionTargetLabel(d: Pick<LinkedDecision, "targetSerial" | "ta
 }
 
 /**
- * The label of an ffa.target choice that names a group (UC-040 A47, BR-033, #2529):
+ * The label of an ffa.target choice that names a group (UC-048 A13, BR-014, #2529):
  * "Group: all" for group:all, "Group: all but one" for group:all_except:<serial>
  * (the serial is not shown). null for any other choice, which keeps its raw text.
  */
@@ -108,7 +108,7 @@ export function groupTargetLabel(target: string): string | null {
 
 /**
  * The badge tooltip: the group choice without its excepted serial ("group:all",
- * "group:all_except"), so the serial stays out of the UI (BR-033).
+ * "group:all_except"), so the serial stays out of the UI (UC-048 BR-014).
  */
 export function groupTargetShape(target: string): string {
   return target.split(":").slice(0, 2).join(":");

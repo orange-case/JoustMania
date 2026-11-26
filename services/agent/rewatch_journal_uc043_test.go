@@ -54,7 +54,7 @@ func TestUC043_Step7_RewatchRevertJournaledByLoop(t *testing.T) {
 		root := t.TempDir()
 		seeded.registry = experiment.NewRegistry(experiment.RegistryConfig{
 			Root: root, MaxShadowGames: 8, Spawner: &recordingSpawner{},
-			Verdict: experiment.NewVerdict(3, 0.5, nil), Log: testLogger(),
+			Verdict: experiment.NewVerdict(3, 0.5), Log: testLogger(),
 		})
 		lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 4})
 		seeded.allocateIfEnabled(context.Background())
@@ -65,14 +65,14 @@ func TestUC043_Step7_RewatchRevertJournaledByLoop(t *testing.T) {
 
 		rev := &switchableReverter{err: errRewatchFlagService}
 		rw := &heldRewatcher{}
-		promoter := promote.NewPromoter(&recordingGitHub{}, nil, &recordingRealDefault{}, insufficientWatcher{}, rev, promote.RepoRef{}, nil, testLogger())
+		promoter := promote.NewPromoter(&recordingGitHub{}, &recordingRealDefault{}, insufficientWatcher{}, rev, nil, testLogger())
 		promoter.SetRewatcher(rw)
 		promoter.SetSubstrateBar(map[string]bool{"balanced": true}) // UC-043 A23
 		loop := buildExperimentLoop(nil, promoter, nil, gameServiceForDeclarer(t), nil, testLogger())
 		loop.registry = seeded.registry // the journal is read at call time
 
 		proposal := experiment.Proposal{FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, ExperimentID: live[0]}
-		cfg := promote.Config{Mode: promote.ModeAutonomous, Target: promote.TargetLocal, Enabled: true}
+		cfg := promote.Config{Mode: promote.ModeAutonomous, Enabled: true}
 		ev := promote.Evidence{FitnessBefore: 0.5, RealDefaultValue: 6.0, Objective: "balanced"}
 		if res := promoter.Promote(context.Background(), proposal, experiment.Decision{Outcome: experiment.OutcomePromote}, cfg, ev); res.Outcome != promote.OutcomeApplied {
 			t.Fatalf("precondition: outcome = %q (%s), want applied", res.Outcome, res.Reason)

@@ -1,7 +1,7 @@
-"""The outcome of a game: force-end, latch and record (UC-020 BR-003, #1328).
+"""The outcome of a game: force-end, latch and record (UC-020 BR-003).
 
-Split out of ``BaseGameMode`` (#2633), with the outcome state it owns
-(``_init_outcome_state``).
+Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
+``inject_trace_context`` on ``games.base``: read them as ``_base.<name>``.
 """
 
 from opentelemetry import trace
@@ -65,7 +65,7 @@ class GameOutcomeMixin:
         """True once the game is ending: outcome latched, force-ended, or ENDING / ENDED.
 
         From then on the winner rainbow owns the winner's LED: no agent cue is sent
-        (UC-040 step 13, UC-020 BR-004, #2533) and no ``grant_shield`` applies (A42 step 3).
+        (UC-040 step 13, UC-020 BR-004, #2533) and no ``grant_shield`` applies (UC-048 A12 step 3).
         """
         return (
             self._latched_outcome is not None or self.force_ended or self.state in (GameState.ENDING, GameState.ENDED)

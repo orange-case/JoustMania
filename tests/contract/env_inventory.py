@@ -53,7 +53,6 @@ COMPOSE_DRY_RUN = REPO_ROOT / "docker-compose.dry-run.yml"
 CODE_ROOTS: dict[str, tuple[str, tuple[Path, ...]]] = {
     "controller-manager": ("python", (SERVICES / "controller_manager", LIB)),
     "pairing-daemon": ("python", (SERVICES / "pairing_daemon", LIB)),
-    "python-hid": ("python", (SERVICES / "python_hid", LIB)),
     "game-coordinator": ("python", (SERVICES / "game_coordinator", LIB)),
     "menu": ("python", (SERVICES / "menu", LIB)),
     "audio": ("python", (SERVICES / "audio", LIB)),

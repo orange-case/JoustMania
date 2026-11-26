@@ -180,7 +180,7 @@ model**, applied in order:
    - `decision.backend` (string, default `rules`): `rules` runs the deterministic
      rules engine; `claude` / `jev` hand the decision to that remote
      backend, with the rules engine as the fallback. See **Decision backends**
-     below and [decide-contract.md 10.1](../../docs/specs/decide-contract.md#101-the-text-backend-post-game-retro-and-proposer). The
+     below and [text-backend.md](../../docs/specs/text-backend.md). The
      legacy `mode` / `model` / `prompt_variant` flags were removed in #1234.
 4. **Permission** (constrains which actions dispatch, and how fast) — applied to
    each candidate decision in this order, blocking with an attributed reason:
@@ -247,14 +247,14 @@ per second. The weighted per-minute budget is enforced downstream by the loop
 |------|-----------|---------|--------------|
 | R1/R2 | endurance | session younger than `fitness.endurance.min_session_seconds` while players are eliminated | `adjust_music_tempo` 1.3 (fast: raises the death threshold, #2487) / `play_audio_cue` |
 | R3 | balanced | skill spread > `fitness.balanced.max_skill_gap`, among players with fresh readings (below) | `adjust_player_sensitivity` → highest-skill outlier |
-| R4 | balanced | after the first elimination: a struggling player (below the field mean, never the strongest; fewest shields first) while the field shrinks (needs ≥ 2 players with known skill and fresh readings — "struggling" is only meaningful relative to others). Before it: a player in sustained danger (the last `policy.shield_danger_samples` readings ≥ `policy.shield_danger_ratio` of the death threshold, the newest value at most 3 s old since it was last new, the window at most n × 2.5 s; off with `policy.shield_danger_enabled`; UC-040 A43, #2461), so a duel can get shields | `grant_shield` → struggling / endangered player |
-| R5 | accelerate | duration > `fitness.accelerate.target_session_seconds` | `adjust_music_tempo` (1.0, slow: lowers the death threshold; UC-040 A52, BR-041) |
+| R4 | balanced | after the first elimination: a struggling player (below the field mean, never the strongest; fewest shields first) while the field shrinks (needs ≥ 2 players with known skill and fresh readings — "struggling" is only meaningful relative to others). Before it: a player in sustained danger (the last `policy.shield_danger_samples` readings ≥ `policy.shield_danger_ratio` of the death threshold, the newest value at most 3 s old since it was last new, the window at most n × 2.5 s; off with `policy.shield_danger_enabled`; decide-contract.md §15.3, #2461), so a duel can get shields | `grant_shield` → struggling / endangered player |
+| R5 | accelerate | duration > `fitness.accelerate.target_session_seconds` | `adjust_music_tempo` (1.0, slow: lowers the death threshold; decide-contract.md §15.5) |
 | R6 | accelerate | duration > 1.5× target, > 2 players | `eliminate_player` → least active |
 | R7 | accelerate | duration > 2× target **and accelerate strictly dominant** (a tie never ends a game) | `end_game` |
 | R8 | chaos | movement variance ≈ 0 ("statue"), player with fresh readings | `send_controller_effect` |
 | R9 | chaos | periodic random nudge (injectable rng) | `send_controller_effect` |
 
-**Fresh readings (R3, R4, R8; UC-040 A46, BR-037, #2511).** The rules read a
+**Fresh readings (R3, R4, R8; decide-contract.md §15.4, #2511).** The rules read a
 player's skill level or movement variance only while the player's movement track
 is live: the newest `game_player_accel_magnitude` reading is finite, not newer
 than the context's `UpdatedAt`, and was last new at most 3 s before it
@@ -633,7 +633,7 @@ The environment variable table (names, defaults, whether `docker-compose.yml` pa
 table to keep in sync with the code. Live gates (`enabled`, `interventions_enabled`, `experiments_enabled`,
 `verdict_*`, `llm.*`) are flagd flags, documented in [flags.md](../../docs/specs/flags.md) and
 [feature-flags.md](../../docs/feature-flags.md). The text backend (`inference.*` flags) is specified in
-[decide-contract.md 10.1](../../docs/specs/decide-contract.md#101-the-text-backend-post-game-retro-and-proposer).
+[text-backend.md](../../docs/specs/text-backend.md).
 
 > **#1044 — runtime-tunable experiment knobs are now LIVE `agent.json` flags.**
 > The experiment loop reads these on **every tick** from the `agent` flagd domain.
@@ -643,8 +643,7 @@ table to keep in sync with the code. Live gates (`enabled`, `interventions_enabl
 > a change takes effect with **no container restart**: through the flag service
 > (`scripts/flags.sh set agent <flag> <variant>`) for the flags in its mutable
 > registry (`experiments_enabled`, `experiment_dynamic_enabled`,
-> `experiment_tick_seconds`, `experiment_max_games`, `verdict_min_n`,
-> `verdict_min_pairs`), or by a baseline edit plus `scripts/flags.sh restart` for
+> `experiment_tick_seconds`, `verdict_min_pairs`), or by a baseline edit plus `scripts/flags.sh restart` for
 > the rest. The
 > migrated flags (see [`services/flagd/agent.json`](../flagd/agent.json)):
 >
@@ -655,20 +654,17 @@ table to keep in sync with the code. Live gates (`enabled`, `interventions_enabl
 > | `experiment_tick_seconds` | 30 s (first refill within 5 s after start, `firstTickCap`) |
 > | `experiment_dynamic_max_concurrent` | _none — compiled 3; `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` is a ceiling, effective = min(env, flag) (#1810, C-034)_ |
 > | `experiment_shadow_effective_concurrency` | 4 (`DefaultEffectiveConcurrency`) |
-> | `experiment_max_games` | _none — compiled 50; `AGENT_EXPERIMENT_MAX_GAMES` is a ceiling, effective = min(env, flag), 0 = no limit (#1810, C-034)_ |
 > | `experiment_completed_grace_seconds` (#1810) | 60 s (flag 0 = off) |
-> | `experiment_proposer_enabled` (#1810) | _none — reads false when unresolved; ANDed with the `AGENT_EXPERIMENT_PROPOSER_ENABLED` ceiling for both proposers (C-034)_ |
-> | `verdict_min_n` | 8 (`DefaultMinNPerArm`) |
+> | `experiment_proposer_enabled` (#1810) | _none — reads false when unresolved; ANDed with the `AGENT_EXPERIMENT_PROPOSER_ENABLED` ceiling for the M7-4 proposer (C-034)_ |
 > | `verdict_min_pairs` | 5 (`DefaultMinPairs`) |
 > | `verdict_effect_threshold` (#1214) | _none — `DefaultEffectThreshold` (0.5)_ |
 > | `verdict_min_raw_effect` (#1214) | _none — `DefaultMinRawEffect` (0.02)_ |
 > | `verdict_sd_floor` (#1214) | _none — `DefaultSDFloor` (1e-4)_ |
-> | `verdict_anchor_margin` (#1214) | _none — `DefaultAnchorMargin` (0.02)_ |
 >
 > **Startup-gate inversion:** the loop + dynamic declarer are now **always built and
 > run**; they self-gate each tick on the live `experiments_enabled` /
 > `experiment_dynamic_enabled` flags. An off→on flip **starts** the loop (it runs the
-> deferred rehydrate + seed bootstrap and begins allocating); an on→off flip **stops**
+> deferred rehydrate and begins allocating); an on→off flip **stops**
 > it cleanly (`AbortAll` clears the experiment-arm values and frees capacity — in-flight shadow games
 > conclude/release normally). The master `enabled` kill-switch still wins: a disabled
 > agent does nothing regardless of these flags. **The `agent` set is human-owned** —
@@ -683,30 +679,27 @@ table to keep in sync with the code. Live gates (`enabled`, `interventions_enabl
 > only the flag service mounts the baseline directory, read-only.
 >
 > **Stays env (NOT migrated):** `AGENT_EXPERIMENT_DIR` (filesystem concern). The
-> experiment seed is the object flag `experiment_seed` since #1907 (the
-> `AGENT_EXPERIMENT_SEED_*` env vars are gone): read on every enabled tick and
-> declared at most once per distinct value per process (flags.md §3).
+> operator names an experiment as the dynamic declarer's explicit candidate
+> (`experiment_dynamic_candidates` = `flag=variant`, UC-043 BR-012).
 >
 > **#1907 — dynamic declarer settings are flags.** `experiment_dynamic_candidates`,
-> `experiment_dynamic_denylist`, `experiment_dynamic_objective` and
-> `experiment_dynamic_target_n` replace the `AGENT_EXPERIMENT_DYNAMIC_*` env vars
+> `experiment_dynamic_denylist` and `experiment_dynamic_objective`
+> replace the `AGENT_EXPERIMENT_DYNAMIC_*` env vars
 > (only `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` stays, a C-034 ceiling). The two
 > lists are comma-separated **strings** read with `StringValue`, so the flagd
 > list-flag trap does not apply. They are read every experiment tick. The compiled
 > `defaultDynamicDenylist` is a floor: the denylist flag only adds keys, and the
 > floor also filters an explicit candidate list (UC-070 BR-008).
 >
-> **#1214 — verdict-tuning cluster completed.** The four remaining verdict knobs
-> (`verdict_effect_threshold`, `verdict_min_raw_effect`, `verdict_sd_floor`,
-> `verdict_anchor_margin`) are now live `agent.json` flags too, finishing the cluster
-> `verdict_min_n` / `verdict_min_pairs` started in #1044. These four were migrated
-> **fully** — their `AGENT_VERDICT_EFFECT_THRESHOLD` / `_MIN_RAW_EFFECT` / `_SD_FLOOR` /
-> `_ANCHOR_MARGIN` env vars are **removed**; the verdict's `Default*` constants are the
+> **#1214 — verdict-tuning cluster completed.** The verdict knobs
+> (`verdict_effect_threshold`, `verdict_min_raw_effect`, `verdict_sd_floor`) are live
+> `agent.json` flags next to `verdict_min_pairs` (#1044); their env vars are **removed**; the verdict's `Default*` constants are the
 > fail-open fallback the flag resolves to when flagd is undefined/unreachable. They are
 > read via the **typed float getter** (never `ObjectValue` — the #903/#1127
 > TYPE_MISMATCH trap) and live-mirrored onto the verdict each tick via the registry's
-> `Reconfigure` → `Verdict.SetThresholds` / `SetFloatThresholds`, exactly the
-> `verdict_min_n` / `verdict_min_pairs` seam.
+> `Reconfigure` → `Verdict.SetThresholds` / `SetFloatThresholds`. The paired d_z is the
+> only verdict (UC-043 step 5); `verdict_min_n`, `verdict_anchor_margin`,
+> `experiment_max_games` and `experiment_dynamic_target_n` were removed (#2811).
 
 > Since #1713 the Go agent uses the flagd **in-process** resolver on the sync port
 > `8015`, like the Python services: selectors `flagSetId=agent` and (read-only,

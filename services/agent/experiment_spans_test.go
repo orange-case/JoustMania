@@ -60,7 +60,7 @@ func recordingExperimentLoop(t *testing.T) (*experimentLoop, *tracetest.SpanReco
 	// Safe-default resolver (mode=issue, local, kill-switch off) — the verdict path is
 	// exercised without any real-player write, exactly like the safe-default E2E test.
 	resolve := func(context.Context) promote.Config {
-		return promote.Config{Mode: promote.ModeIssue, Target: promote.TargetLocal, Enabled: false}
+		return promote.Config{Mode: promote.ModeIssue, Enabled: false}
 	}
 	loop := buildLoopForTest(t, spawner, resolve, realDef, github, armFitness())
 
@@ -70,8 +70,7 @@ func recordingExperimentLoop(t *testing.T) (*experimentLoop, *tracetest.SpanReco
 	loop.tracer = tp.Tracer("test")
 
 	id, err := loop.registry.Declare(experiment.Intent{
-		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-	})
+		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 	if err != nil {
 		t.Fatalf("declare: %v", err)
 	}
@@ -141,7 +140,7 @@ func TestExperimentSpans_FitnessAndEvaluateEmitted(t *testing.T) {
 func TestExperimentSpans_VerdictEmitted(t *testing.T) {
 	loop, sr, spawner, expID := recordingExperimentLoop(t)
 
-	// Conclude enough games per arm (TargetNPerArm=3) for the #979 verdict to settle.
+	// Conclude enough games per arm for the #979 verdict to settle.
 	concludeCohort(t, loop, spawner, 4)
 
 	ended := sr.Ended()

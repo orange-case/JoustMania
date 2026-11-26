@@ -34,19 +34,19 @@ const (
 	keyInterventionsAllowed      = "interventions_allowed"
 	keyBatteryThreshold          = "policy.battery_threshold"
 	keyMaxInterventionsPerMinute = "policy.max_interventions_per_minute"
-	// Shield limits per player per game (UC-040 A33, BR-022; #2044): operator flags
+	// Shield limits per player per game (UC-048 A6, BR-007; #2044): operator flags
 	// the agent reads and never writes (C-034). No targeting (flags.md §3), so the
 	// agent's empty context resolves the coordinator's value.
 	keyMaxShieldsPerPlayerPerGame = "policy.max_shields_per_player_per_game"
 	keyShieldCooldownSeconds      = "policy.shield_cooldown_seconds"
-	// R4's danger shield before the first elimination (UC-040 A43, BR-032; #2461):
+	// R4's danger shield before the first elimination (decide-contract.md §15.3; #2461):
 	// operator flags the agent reads and never writes (C-034); the rules clamp them.
 	keyShieldDangerRatio   = "policy.shield_danger_ratio"
 	keyShieldDangerSamples = "policy.shield_danger_samples"
 	// keyShieldDangerEnabled switches the danger path off on its own (on by default;
 	// an unreadable value reads on, like the other two).
 	keyShieldDangerEnabled = "policy.shield_danger_enabled"
-	// The group-shield gate (#2467, UC-040 A47, BR-033): human-only agent flags with
+	// The group-shield gate (#2467, UC-048 A13, BR-014): human-only agent flags with
 	// no targeting, read by the agent here (empty context) and by the coordinator in
 	// the game's flag context; both must resolve one value (flags.md §3).
 	keyGroupGrantEnabled    = "policy.group_grant.enabled"
@@ -77,12 +77,10 @@ const (
 
 	// M7-8 promotion flow flags (#936). Read LIVE (never cached) so flipping the
 	// mode flag takes effect on the NEXT promotion with no restart — the demo
-	// moment. mode selects issue|pr|autonomous; target selects local|github. Both
-	// are STRING flags read via the typed getter. The SAFE defaults (see
-	// DefaultPromotionMode/Target) are baked here: mode never defaults to autonomous,
-	// target never defaults to github — the safety rail.
-	keyPromotionMode   = "code_improvement.mode"
-	keyPromotionTarget = "code_improvement.target"
+	// moment. mode selects issue|autonomous, a STRING flag read via the typed
+	// getter. The SAFE default (DefaultPromotionMode) is baked here: mode never
+	// defaults to autonomous — the safety rail.
+	keyPromotionMode = "code_improvement.mode"
 
 	// Lifecycle + throttle calibration flags (#766 F5, hot-reloaded since #927).
 	// Unlike the per-cycle layers above, these are NOT re-read on the decision hot
@@ -117,13 +115,7 @@ const (
 	keyExperimentDynamicCandidates = "experiment_dynamic_candidates"
 	keyExperimentDynamicDenylist   = "experiment_dynamic_denylist"
 	keyExperimentDynamicObjective  = "experiment_dynamic_objective"
-	keyExperimentDynamicTargetN    = "experiment_dynamic_target_n"
-	// keyExperimentSeed is the experiment seed (#1907): an OBJECT flag (a seeded
-	// experiment intent, not an RNG seed) read with ObjectValue; the loop parses it.
-	keyExperimentSeed              = "experiment_seed"
-	keyVerdictMinN                 = "verdict_min_n"
 	keyVerdictMinPairs             = "verdict_min_pairs"
-	keyExperimentMaxGames          = "experiment_max_games"
 	keyExperimentShadowConcurrency = "experiment_shadow_effective_concurrency"
 	// #1810 (C-035, flags.md §15): the completed-game grace window is tuning (flag,
 	// else compiled default; 0 = off). The proposer gate limits the agent (C-034,
@@ -133,12 +125,12 @@ const (
 	keyExperimentProposerEnabled = "experiment_proposer_enabled"
 
 	// Verdict-tuning float knobs migrated from env to agent.json flags (#1214),
-	// finishing the cluster verdict_min_n / verdict_min_pairs started in #1044. These
-	// were the AGENT_VERDICT_EFFECT_THRESHOLD / _MIN_RAW_EFFECT / _SD_FLOOR /
-	// _ANCHOR_MARGIN env knobs once read at startup by the verdict constructor.
+	// next to verdict_min_pairs (#1044). These
+	// were the AGENT_VERDICT_EFFECT_THRESHOLD / _MIN_RAW_EFFECT / _SD_FLOOR
+	// env knobs once read at startup by the verdict constructor.
 	// Migrating them makes each numeric verdict gate hot-reloadable — flip it in flagd
 	// and the NEXT verdict evaluation uses the new threshold with no restart, exactly
-	// like the min_n/min_pairs siblings (live-mirrored onto the Verdict via the
+	// like verdict_min_pairs (live-mirrored onto the Verdict via the
 	// registry's Reconfigure → Verdict.SetThresholds, #1044/#1051).
 	//
 	// They are TUNING knobs, not safety gates: each FAILS OPEN to the current code
@@ -149,7 +141,6 @@ const (
 	keyVerdictEffectThreshold = "verdict_effect_threshold"
 	keyVerdictMinRawEffect    = "verdict_min_raw_effect"
 	keyVerdictSDFloor         = "verdict_sd_floor"
-	keyVerdictAnchorMargin    = "verdict_anchor_margin"
 
 	// Runtime SAFETY gate migrated from env to an agent.json flag (#1213). It was
 	// the AGENT_INTERVENTIONS_ENABLED env master read ONCE at startup in main.go to
@@ -178,13 +169,13 @@ const (
 	// DefaultMaxInterventionsPerMinute is the weighted per-minute budget.
 	DefaultMaxInterventionsPerMinute = 2
 	// DefaultMaxShieldsPerPlayerPerGame and DefaultShieldCooldownSeconds are the
-	// shield limits (UC-040 BR-022) when the flag cannot be read or is negative:
+	// shield limits (UC-048 BR-007) when the flag cannot be read or is negative:
 	// the limits stay on. They match services/flagd/agent.json and the coordinator's
 	// games/base.py defaults.
 	DefaultMaxShieldsPerPlayerPerGame = 3
 	DefaultShieldCooldownSeconds      = 15
 	// DefaultShieldDangerRatio and DefaultShieldDangerSamples are the danger-shield
-	// thresholds (UC-040 A43, BR-032) when the flag cannot be read; they match
+	// thresholds (decide-contract.md §15.3) when the flag cannot be read; they match
 	// services/flagd/agent.json and decision.DefaultShieldDanger*.
 	DefaultShieldDangerRatio   = 0.85
 	DefaultShieldDangerSamples = 3
@@ -230,21 +221,15 @@ const (
 	// cycle — 300s (5 min) keeps the agent from proposing every game. Tunable live.
 	DefaultCodeImprovementMinIntervalSeconds = 300.0
 
-	// M7-8 promotion-flow defaults (#936), the SAFETY RAIL's safe flag defaults —
-	// mirror the services/flagd/agent.json code_improvement.{mode,target}
-	// defaultVariants. Applied when flagd is unreachable or the flag is undefined.
+	// M7-8 promotion-flow default (#936), the SAFETY RAIL's safe flag default —
+	// mirrors the services/flagd/agent.json code_improvement.mode
+	// defaultVariant. Applied when flagd is unreachable or the flag is undefined.
 
 	// DefaultPromotionMode is "issue" — the SAFEST mode: a missing/unreachable
 	// control plane opens an issue (no code/flag change), NEVER autonomous (which
 	// would change the real default). The safety rail requires mode to never default
 	// to autonomous.
 	DefaultPromotionMode = "issue"
-	// DefaultPromotionTarget is "local" — NEVER "github". A missing/unreachable
-	// control plane keeps a promotion off github.com; the real GitHub path requires
-	// both this flag set to github AND the explicit env gate + token (see
-	// promote.NewGitHubClientFromEnv). The safety rail requires target to never
-	// default to github.
-	DefaultPromotionTarget = "local"
 
 	// Lifecycle + throttle defaults (#766 F5), mirroring the former hardcoded
 	// constants in main.go (playerTTL/sessionGrace/evictEvery) and decision.go
@@ -316,23 +301,23 @@ type Policy struct {
 	// MaxInterventionsPerMinute is the weighted per-minute dispatch budget.
 	MaxInterventionsPerMinute int
 	// MaxShieldsPerPlayerPerGame caps the agent's grant_shield writes per player per
-	// game (UC-040 A33, BR-022). 0 = unlimited (also the zero value, so a hand-built
+	// game (UC-048 A6, BR-007). 0 = unlimited (also the zero value, so a hand-built
 	// Snapshot, the rules golden among them, stays inert).
 	MaxShieldsPerPlayerPerGame int
 	// ShieldCooldownSeconds is the pause after the end of a player's last agent
-	// shield before the next grant (UC-040 A33, BR-022). 0 = off.
+	// shield before the next grant (UC-048 A6, BR-007). 0 = off.
 	ShieldCooldownSeconds int
 	// ShieldDangerRatio and ShieldDangerSamples are R4's danger-shield thresholds
-	// (UC-040 A43, BR-032): the fraction of the death threshold and the number of
+	// (decide-contract.md §15.3): the fraction of the death threshold and the number of
 	// consecutive readings at or above it. 0 (a hand-built Snapshot) means the
 	// rules' default; the rules clamp both.
 	ShieldDangerRatio   float64
 	ShieldDangerSamples int
 	// ShieldDangerOff is policy.shield_danger_enabled = off: R4's danger path
-	// proposes nothing (UC-040 A43, BR-032). Inverted so the zero value (a
+	// proposes nothing (decide-contract.md §15.3). Inverted so the zero value (a
 	// hand-built Snapshot) keeps the path on, like the flag's default.
 	ShieldDangerOff bool
-	// The group-shield gate (#2467, UC-040 A47, BR-033), read like the coordinator's
+	// The group-shield gate (#2467, UC-048 A13, BR-014), read like the coordinator's
 	// _group_grant_policy and failing closed: a missing or unreadable flag reads
 	// false / 0. GroupGrantMaxPerGame is clamped to 0..GroupGrantMaxPerGameCeiling,
 	// GroupGrantMaxTargets to 2..GroupGrantMaxTargetsCeiling (0 or less = off). The
@@ -463,28 +448,25 @@ func (f *Flags) CodeImprovement(ctx context.Context) CodeImprovementConfig {
 }
 
 // PromotionConfig is the M7-8 promotion-flow configuration (#936): the live mode
-// (issue|pr|autonomous) and target (local|github) the promoter acts under. It
+// (issue|autonomous) the promoter acts under. It
 // mirrors the promote.Config shape (the promote package stays free of an
 // OpenFeature dependency — the caller resolves the flags here, adds the kill-switch
 // from the Snapshot, and passes the value in: the same "package owns logic, caller
 // owns flagd" split the Gate/Writer use). The SAFE defaults are applied
-// on any flagd error: mode→issue (never autonomous), target→local (never github).
+// on any flagd error: mode→issue (never autonomous).
 type PromotionConfig struct {
 	// Mode is code_improvement.mode (default issue).
 	Mode string
-	// Target is code_improvement.target (default local).
-	Target string
 }
 
-// Promotion evaluates the two M7-8 promotion-flow flags (#936) for one promotion.
+// Promotion evaluates the M7-8 promotion-flow flag (#936) for one promotion.
 // Read LIVE (never cached) so flipping the mode flag mid-session takes effect on
 // the NEXT promotion with no restart — the demo moment. Each flag falls back to
 // its SAFE default on any evaluation error (flagd unreachable / undefined): the
-// safety rail's mode→issue / target→local defaults.
+// safety rail's mode→issue default.
 func (f *Flags) Promotion(ctx context.Context) PromotionConfig {
 	return PromotionConfig{
-		Mode:   f.stringFlag(ctx, keyPromotionMode, DefaultPromotionMode),
-		Target: f.stringFlag(ctx, keyPromotionTarget, DefaultPromotionTarget),
+		Mode: f.stringFlag(ctx, keyPromotionMode, DefaultPromotionMode),
 	}
 }
 
@@ -502,14 +484,8 @@ type ExperimentDefaults struct {
 	// (3). Since #1810 AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT is a ceiling the caller
 	// applies after the read (C-034, FR-152 e), never this fallback.
 	DynamicMaxConcurrent int
-	// VerdictMinN is the verdict_min_n default (8).
-	VerdictMinN int
 	// VerdictMinPairs is the verdict_min_pairs default (5).
 	VerdictMinPairs int
-	// MaxGames is the compiled default of experiment_max_games (50). Since #1810
-	// AGENT_EXPERIMENT_MAX_GAMES is a ceiling the caller applies after the read
-	// (C-034, FR-152 f), never this fallback.
-	MaxGames int
 	// ShadowEffectiveConcurrency is the experiment_shadow_effective_concurrency
 	// default (4).
 	ShadowEffectiveConcurrency int
@@ -525,9 +501,6 @@ type ExperimentDefaults struct {
 	// VerdictSDFloor is the minimum-SD denominator floor (#1042)
 	// (#1214; was AGENT_VERDICT_SD_FLOOR, default 1e-4).
 	VerdictSDFloor float64
-	// VerdictAnchorMargin is the recent-real regression margin (#992)
-	// (#1214; was AGENT_VERDICT_ANCHOR_MARGIN, default 0.02).
-	VerdictAnchorMargin float64
 }
 
 // DefaultDynamicObjective is the compiled default of experiment_dynamic_objective
@@ -541,11 +514,10 @@ const DefaultDynamicObjective = "balanced"
 // ExperimentDefaults field, or false for the two gates (#1907).
 type ExperimentConfig struct {
 	// Enabled gates the WHOLE experiment loop (experiments_enabled). When false the
-	// loop does nothing — no rehydrate-spawn, no seed, no allocate. Flipping it on
+	// loop does nothing — no rehydrate-spawn, no allocate. Flipping it on
 	// at runtime starts the loop; flipping it off aborts every live experiment.
 	Enabled bool
 	// DynamicEnabled gates the #995 heuristic declarer (experiment_dynamic_enabled).
-	// When false the loop declares only the experiment seed (if any).
 	DynamicEnabled bool
 	// Tick is the AllocateAndSpawn cadence (experiment_tick_seconds). A non-positive
 	// flag value falls back to the compiled default (durationFlag guard).
@@ -553,28 +525,20 @@ type ExperimentConfig struct {
 	// DynamicMaxConcurrent caps simultaneously-live dynamically-declared experiments
 	// (experiment_dynamic_max_concurrent).
 	DynamicMaxConcurrent int
-	// VerdictMinN is the verdict min-N-per-arm gate (verdict_min_n).
-	VerdictMinN int
 	// VerdictMinPairs is the paired-verdict min-completed-pairs gate (verdict_min_pairs).
 	VerdictMinPairs int
-	// MaxGames is the per-experiment termination budget (experiment_max_games).
-	MaxGames int
 	// ShadowEffectiveConcurrency is the in-flight shadow-spawn concurrency cap
 	// (experiment_shadow_effective_concurrency).
 	ShadowEffectiveConcurrency int
 	// VerdictEffectThreshold is the live standardized-effect gate (verdict_effect_threshold,
-	// #1214): the minimum |Cohen's d| / |d_z| for a promote/discard verdict.
+	// #1214): the minimum |d_z| for a promote/discard verdict.
 	VerdictEffectThreshold float64
 	// VerdictMinRawEffect is the live practical-significance floor (verdict_min_raw_effect,
 	// #1214): the minimum RAW effect magnitude a promote/discard requires (#1042).
 	VerdictMinRawEffect float64
 	// VerdictSDFloor is the live minimum-SD denominator floor (verdict_sd_floor, #1214):
-	// floors the d_z / Cohen's d denominator so the standardized stat stays finite (#1042).
+	// floors the d_z denominator so the standardized stat stays finite (#1042).
 	VerdictSDFloor float64
-	// VerdictAnchorMargin is the live recent-real regression margin (verdict_anchor_margin,
-	// #1214): a PROMOTE is downgraded only when the experimental arm regresses below the
-	// recent-real baseline by MORE than this (#992).
-	VerdictAnchorMargin float64
 	// CompletedGrace is the #1020 bounded-grace window for a completed shadow game
 	// (experiment_completed_grace_seconds, #1810). 0 or less = off.
 	CompletedGrace time.Duration
@@ -590,15 +554,6 @@ type ExperimentConfig struct {
 	// DynamicObjective is the declarer's default objective
 	// (experiment_dynamic_objective, #1907); unresolved = DefaultDynamicObjective.
 	DynamicObjective string
-	// DynamicTargetN is the games-per-arm of a dynamically declared experiment
-	// (experiment_dynamic_target_n, #1907); unresolved = 0 (the registry
-	// reconciles it up to the verdict min-N).
-	DynamicTargetN int
-	// Seed is the raw resolved experiment_seed object (#1907): {} = no seed, else
-	// the flags.md §3 schema, which the experiment loop validates
-	// (parseExperimentSeed). nil = the flag could not be resolved: no seed, and
-	// nothing latched.
-	Seed any
 	// ProposerEnabled is the flag half of the proposer gate
 	// (experiment_proposer_enabled, #1810). The caller ANDs it with the
 	// AGENT_EXPERIMENT_PROPOSER_ENABLED ceiling (C-034, FR-152 d). It never falls
@@ -621,9 +576,7 @@ func (f *Flags) Experiment(ctx context.Context, def ExperimentDefaults) Experime
 		DynamicEnabled:             f.boolFlag(ctx, keyExperimentDynamicEnabled, false),
 		Tick:                       f.durationFlag(ctx, keyExperimentTickSeconds, def.Tick.Seconds()),
 		DynamicMaxConcurrent:       f.intFlag(ctx, keyExperimentDynamicMaxConcur, def.DynamicMaxConcurrent),
-		VerdictMinN:                f.intFlag(ctx, keyVerdictMinN, def.VerdictMinN),
 		VerdictMinPairs:            f.intFlag(ctx, keyVerdictMinPairs, def.VerdictMinPairs),
-		MaxGames:                   f.intFlag(ctx, keyExperimentMaxGames, def.MaxGames),
 		ShadowEffectiveConcurrency: f.intFlag(ctx, keyExperimentShadowConcurrency, def.ShadowEffectiveConcurrency),
 		// Verdict-tuning float knobs (#1214). Typed float getter (the flagd numeric-flag
 		// gotcha — see llmGate); fail-OPEN to the compiled default (the verdict's code
@@ -631,7 +584,6 @@ func (f *Flags) Experiment(ctx context.Context, def ExperimentDefaults) Experime
 		VerdictEffectThreshold: f.floatFlag(ctx, keyVerdictEffectThreshold, def.VerdictEffectThreshold),
 		VerdictMinRawEffect:    f.floatFlag(ctx, keyVerdictMinRawEffect, def.VerdictMinRawEffect),
 		VerdictSDFloor:         f.floatFlag(ctx, keyVerdictSDFloor, def.VerdictSDFloor),
-		VerdictAnchorMargin:    f.floatFlag(ctx, keyVerdictAnchorMargin, def.VerdictAnchorMargin),
 		// #1810: grace is tuning (flag, else 60 s; 0 = off, so not durationFlag,
 		// which floors a non-positive value). The proposer gate's def is false: a
 		// lost sync closes it (C-034).
@@ -643,28 +595,7 @@ func (f *Flags) Experiment(ctx context.Context, def ExperimentDefaults) Experime
 		DynamicCandidates: f.stringFlag(ctx, keyExperimentDynamicCandidates, ""),
 		DynamicDenylist:   f.stringFlag(ctx, keyExperimentDynamicDenylist, ""),
 		DynamicObjective:  f.stringFlag(ctx, keyExperimentDynamicObjective, DefaultDynamicObjective),
-		DynamicTargetN:    f.intFlag(ctx, keyExperimentDynamicTargetN, 0),
-		Seed:              f.experimentSeed(ctx),
 	}
-}
-
-// experimentSeed resolves the raw experiment_seed object (#1907), or nil when it
-// cannot be resolved (flagd unreachable, flag missing, no first sync): an
-// unresolved seed declares nothing.
-func (f *Flags) experimentSeed(ctx context.Context) any {
-	v, err := f.client.ObjectValue(ctx, keyExperimentSeed, nil, openfeature.EvaluationContext{})
-	if err != nil {
-		f.log.Debug("flags experiment_seed unresolved: no seed", "error", err)
-		return nil
-	}
-	return v
-}
-
-// ExperimentSeed resolves only experiment_seed (#1966): the seed decision
-// re-reads it under the declarer lock so a caller holding an older
-// ExperimentConfig never acts on a stale seed. nil = unresolved (no seed).
-func (f *Flags) ExperimentSeed(ctx context.Context) any {
-	return f.experimentSeed(ctx)
 }
 
 // ExperimentProposerEnabled resolves only experiment_proposer_enabled (#1810), the
@@ -744,20 +675,13 @@ func (s Snapshot) Permits(intervention string) bool {
 // Flags evaluates the agent control flags against an OpenFeature client.
 type Flags struct {
 	client Evaluator
-	// game evaluates the game set, read-only: only the two shield flags of the
-	// charge ledger (ShieldCharge, UC-040 A31). nil: ShieldCharge returns its
-	// defaults, never a read through client.
-	game     Evaluator
-	gameWarn gameReadWarn
-	// gameModes keeps the first shield.activation read per game, so a `hold` read
-	// follows the coordinator's per-game latch (UC-040 A31, BR-027, #2096).
-	gameModes gameModeLatch
+	// game evaluates the game set, read-only: the shadow start-config keys
+	// (ShadowGameInt). nil: ShadowGameInt refuses.
+	game Evaluator
 	// gameAttrs returns a game's kind, experiment id and arm as the agent has seen
 	// them (main.go wires the Multiplexer); nil means a real game (#2096).
 	gameAttrs func(gameID string) GameAttrs
-	// now is the clock of gameModes; nil means time.Now (tests inject one).
-	now func() time.Time
-	log *slog.Logger
+	log       *slog.Logger
 	// goalWarn logs the first invalid goal.profile value once; goalInvalid counts
 	// every invalid read (agent_goal_profile_invalid_total), created on first use
 	// unless SetGoalMeterProvider set it (#2479).
@@ -868,7 +792,7 @@ func (f *Flags) intFlag(ctx context.Context, key string, def int) int {
 }
 
 // nonNegativeIntFlag is intFlag for a limit where a negative value is a mistake: it
-// gives def, like a read error, so the limit stays on (UC-040 BR-022).
+// gives def, like a read error, so the limit stays on (UC-048 BR-007).
 func (f *Flags) nonNegativeIntFlag(ctx context.Context, key string, def int) int {
 	v := f.intFlag(ctx, key, def)
 	if v < 0 {

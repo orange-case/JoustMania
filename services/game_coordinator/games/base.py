@@ -94,6 +94,7 @@ from services.game_coordinator.games.flag_snapshot import (  # noqa: F401  re-ex
     resolve_shield_limit,
 )
 from services.game_coordinator.runtime_config import GamePerformanceConfig, get_config_manager
+from services.game_coordinator.stream_writes import serialized_write
 
 tracer = trace.get_tracer(__name__)
 logger = logging.getLogger(__name__)
@@ -189,7 +190,7 @@ def intensity_from_tempo(tempo: float) -> float:
 
 
 # The controller manager caps a charge layer at 120 s (CHARGE_MAX_DURATION_MS);
-# the coordinator re-sends the layer this long before it runs out (BR-021).
+# the coordinator re-sends the layer this long before it runs out (UC-048 BR-006).
 SHIELD_CHARGE_LAYER_MAX_SECONDS = 120.0
 SHIELD_CHARGE_RESEND_MARGIN_SECONDS = 10.0
 # shield.charge_outcome values (telemetry.md §3.2) and player_shield_charge_ended reasons.
@@ -199,7 +200,7 @@ CHARGE_OUTCOME_DEATH = "death"
 CHARGE_OUTCOME_GAME_END = "game_end"
 
 
-# A grant that could add less than this is refused as shield_pool_full (A37).
+# A grant that could add less than this is refused as shield_pool_full (UC-048 A9).
 SHIELD_HOLD_POOL_FULL_ROOM_SECONDS = 0.05
 # shield.hold_outcome values (telemetry.md §3.2).
 HOLD_OUTCOME_RELEASED = "released"
@@ -213,7 +214,7 @@ SHIELD_REFUSED_BUDGET_EXHAUSTED = "shield_budget_exhausted"
 
 @dataclass(frozen=True)
 class ShieldHoldParams:
-    """The hold-mode values a game latched at the start of its loop (UC-040 BR-024, BR-027)."""
+    """The hold-mode values a game latched at the start of its loop (UC-048 BR-008, BR-011)."""
 
     cap: float
     budget: float
@@ -222,7 +223,7 @@ class ShieldHoldParams:
     min_burst: float
 
 
-# shield_up plays on an activation at most this often per player (UC-040 BR-026).
+# shield_up plays on an activation at most this often per player (UC-048 BR-010).
 SHIELD_HOLD_SOUND_MIN_INTERVAL_SECONDS = 2.0
 # Cue of a hold command (proto ShieldHoldCue); a later send keeps the strongest pending one.
 HOLD_CUE_NONE = 0
@@ -237,7 +238,7 @@ HOLD_ENERGY_KEYFRAME_SECONDS = 2.0
 
 @dataclass(frozen=True)
 class ShieldHoldCues:
-    """The cue values a hold game latched with its hold values (UC-040 BR-026, BR-027)."""
+    """The cue values a hold game latched with its hold values (UC-048 BR-010, BR-011)."""
 
     rumble_intensity: int = 255
     pulse_ms: int = 150
@@ -407,6 +408,8 @@ COUNTDOWN_MUSIC_VOLUME = 0.15  # Soft background music during countdown
 MAX_INSTRUCTIONS_WAIT_SECONDS = 60.0
 # How often the instruction wait checks for a force-end.
 INSTRUCTIONS_POLL_SECONDS = 0.1
+# Slow breathing while the clip plays: calm enough not to read as the countdown.
+INSTRUCTIONS_CUE_PULSE_HZ = 1
 # Deadline for StopSound after a force-end, so a wedged audio service cannot stall teardown.
 STOP_SOUND_TIMEOUT_SECONDS = 2.0
 
@@ -525,11 +528,11 @@ class Player:
     # inactive. Shadow-game-only via the allow-list gate.
     rubberband_until: float = 0.0
     rubberband_boost: float = 1.0
-    # Shield charge (UC-040 A30-A32, BR-020): at most one per player.
+    # Shield charge (UC-048 A3-A5, BR-005): at most one per player.
     # ``shield_charge_seconds`` > 0 means a charge is held; it becomes the shield
     # duration on activation. The expiry is fixed at grant time (0 = never).
     # ``shield_charge_layer_until`` is when the last SHIELD_CHARGE LED command runs
-    # out on the controller, so the frame path re-sends it in time (BR-021).
+    # out on the controller, so the frame path re-sends it in time (UC-048 BR-006).
     shield_charge_seconds: float = 0.0
     shield_charge_granted_at: float = 0.0
     shield_charge_expires_at: float = 0.0
@@ -540,7 +543,7 @@ class Player:
     # or latched from the lobby is never a press).
     trigger_prev: bool = False
     trigger_armed: bool = False
-    # Shield hold (UC-030 A7, UC-040 BR-024): only used in a game latched to
+    # Shield hold (UC-030 A7, UC-048 BR-008): only used in a game latched to
     # hold. The energy is a function of time, so nothing ticks: ``hold_energy`` is
     # the stored value at ``hold_energy_at`` (0 = the recharge clock has not
     # started). While an activation runs (``hold_started_at`` > 0) the energy and
@@ -560,7 +563,7 @@ class Player:
     # UC-030 BR-009: the first unprotected frame after an activation primes the EMA
     # with min(raw, warning threshold) instead of the raw sample.
     hold_prime_cap: bool = False
-    # UC-040 BR-035 (#2464): after a shield ends, movement cannot kill until this
+    # UC-048 BR-015 (#2464): after a shield ends, movement cannot kill until this
     # timestamp. Not part of effective_grace_until, so a re-hold or a charge press
     # inside the window starts at once. Cleared by an activation, the kill path, a revive.
     end_grace_until: float = 0.0
@@ -623,8 +626,7 @@ class GameState(Enum):
     ENDED = "ended"
 
 
-# The mixins (games/shields.py, games/tempo.py and the concerns split out of
-# BaseGameMode in #2633) import the constants above back from this module, so
+# The mixins import the constants above back from this module, so
 # these imports stay below them.
 from services.game_coordinator.games.elimination import EliminationMixin  # noqa: E402
 from services.game_coordinator.games.game_loop import GameLoopMixin  # noqa: E402
@@ -668,7 +670,7 @@ class BaseGameMode(
     - _end_game_impl() - cleanup and declare winner
     """
 
-    # UC-040 BR-019: ``shield.activation = trigger`` is an allow-list. Only a mode
+    # UC-048 BR-004: ``shield.activation = trigger`` is an allow-list. Only a mode
     # that sets this (Free-for-All) turns a grant_shield into a charge; every other
     # mode, and every shadow game whose pattern controllers do not press the
     # trigger (no ``pattern_trigger_policy``, UC-046 BR-018), always takes the
@@ -779,7 +781,7 @@ class BaseGameMode(
         self._moment_sequence: dict[str, int] = {}
         self.experiment_id = ""
         self.arm = ""
-        # UC-046 BR-018 / UC-040 BR-019: set by the session for a shadow game
+        # UC-046 BR-018 / UC-048 BR-004: set by the session for a shadow game
         # whose archetype presses the trigger; such a game honours trigger and hold.
         self.pattern_trigger_policy = False
         # The flag transaction context _set_flag_eval_context set for this game's
@@ -1086,6 +1088,8 @@ class BaseGameMode(
         # Wait for the clip to finish; a force-end stops the wait at once.
         wait_seconds = duration * self._INSTRUCTIONS_WAIT_SCALE
         deadline = game_clock.now() + wait_seconds
+        if wait_seconds > 0:
+            await self._show_instructions_cue(wait_seconds)
         for _ in range(math.ceil(wait_seconds / INSTRUCTIONS_POLL_SECONDS)):
             remaining = deadline - game_clock.now()
             if not self.running or remaining <= 0:
@@ -1094,6 +1098,40 @@ class BaseGameMode(
 
         if not self.running:
             await self._stop_instruction_clip()
+
+    async def _show_instructions_cue(self, wait_seconds: float) -> None:
+        """Pulse every controller in its colour while the clip plays (UC-020 A5).
+
+        In a loud venue the clip goes unheard, and unchanged LEDs read as a hung
+        start. Best effort: a failure is logged and the stream opens after the clip.
+        """
+        from proto import controller_manager_pb2
+
+        opened_here = self.gameplay_stream is None
+        try:
+            if opened_here:
+                await self._start_gameplay_stream()
+                self._start_early_stream_drain()
+            for serial, player in self.players.items():
+                r, g, b = player.color
+                await serialized_write(
+                    self.gameplay_stream,
+                    controller_manager_pb2.GameplayStreamControl(
+                        game_effect=controller_manager_pb2.GameEffectCommand(
+                            serial=serial,
+                            effect=controller_manager_pb2.GAME_EFFECT_PULSE,
+                            color=controller_manager_pb2.RGB(r=r, g=g, b=b),
+                            duration_ms=int(wait_seconds * 1000),
+                            speed=INSTRUCTIONS_CUE_PULSE_HZ,
+                        )
+                    ),
+                )
+        except Exception as e:
+            logger.warning(f"Failed to show the instructions cue on the controllers: {e}")
+            if opened_here and self._early_drain_task is None:
+                # The stream never got its drain: drop it so run() opens a fresh one after the clip.
+                self._cancel_gameplay_call()
+                self.gameplay_stream = None
 
     async def _stop_instruction_clip(self) -> None:
         """Cut the instruction clip short after a force-end (UC-020 A5, #1586).
@@ -1517,15 +1555,15 @@ class BaseGameMode(
                 await self._play_instructions(init_span)
                 phases_completed = True
             finally:
-                if early_stream:
-                    await self._stop_early_stream_drain(reopen=phases_completed)
+                # Also stops the drain of a stream the instructions cue opened (a no-op without one).
+                await self._stop_early_stream_drain(reopen=phases_completed)
 
-            # A force-end during the instructions skips the start: no stream,
-            # music, game_started or countdown; teardown records force_ended.
+            # A force-end during the instructions skips the start: no music,
+            # game_started or countdown; teardown records force_ended.
             force_ended_before_start = not self.running
             if not force_ended_before_start:
                 # Start gameplay stream before countdown (needed for countdown effects)
-                if not early_stream:
+                if self.gameplay_stream is None:
                     await self._start_gameplay_stream()
 
                 # Start game music BEFORE countdown at low volume.

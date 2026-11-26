@@ -60,7 +60,7 @@ type FitnessThresholds struct {
 	// accelerate rules (fitness.accelerate.target_session_seconds, default 60).
 	AccelerateTargetSessionSeconds float64
 	// ShieldDangerRatio and ShieldDangerSamples are R4's danger-shield thresholds
-	// (policy.shield_danger_ratio / policy.shield_danger_samples, UC-040 A43,
+	// (policy.shield_danger_ratio / policy.shield_danger_samples, decide-contract.md §15.3,
 	// BR-032). They are policy flags, carried here because this is the engine's
 	// live per-cycle source; shieldDangerParams clamps them at use time.
 	ShieldDangerRatio   float64
@@ -70,7 +70,7 @@ type FitnessThresholds struct {
 	ShieldDangerOff bool
 }
 
-// Danger-shield bounds and defaults (UC-040 A43, BR-032; flags.md
+// Danger-shield bounds and defaults (decide-contract.md §15.3; flags.md
 // policy.shield_danger_*). The bounds keep a single reading from ever qualifying.
 const (
 	DefaultShieldDangerRatio   = 0.85

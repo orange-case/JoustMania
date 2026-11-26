@@ -1,5 +1,7 @@
 package decide
 
+// Spec: decide-contract.md §15.3 (the rules engine; tests tagged UC-040 A1)
+
 import (
 	"math"
 	"testing"
@@ -17,7 +19,7 @@ func track(newest time.Time, intensities ...float64) []gamecontext.MovementSampl
 	return out
 }
 
-// UC: UC-040 A43 BR-032
+// UC: UC-040 A1
 func TestSustainedDanger(t *testing.T) {
 	now := time.Unix(1_000, 0)
 	thr := fptr(2.0)
@@ -66,7 +68,7 @@ func TestSustainedDanger(t *testing.T) {
 				{At: now.Add(-500 * time.Millisecond), DeathThreshold: fptr(3.0)},
 			}, threshold: fptr(3.0), level: 0.85, n: 3, want: true, wantMin: 2.6 / 3.0},
 	} {
-		t.Run("UC-040/A43 BR-032 "+tc.name, func(t *testing.T) {
+		t.Run("UC-040/A1 "+tc.name, func(t *testing.T) {
 			gotMin, ok := SustainedDanger(tc.samples, tc.speed, tc.threshold, now, tc.level, tc.n)
 			if ok != tc.want {
 				t.Fatalf("ok = %v, want %v", ok, tc.want)

@@ -430,11 +430,6 @@ a {
   border-color: rgba(var(--danger-rgb), 0.5);
 }
 
-.controller-card.admin {
-  border-color: rgba(var(--fg-rgb), 0.8);
-  box-shadow: 0 0 20px rgba(var(--fg-rgb), 0.3);
-}
-
 .controller-name {
   font-size: 1rem;
   font-weight: 700;
@@ -531,11 +526,6 @@ a {
   color: var(--accent-primary);
 }
 
-.status-badge.admin {
-  background: rgba(var(--fg-rgb), 0.2);
-  color: var(--text-primary);
-}
-
 /* Connection quality (UC-035 BR-005): p95 / longest report gap over 10 s;
    the tooltip carries both gaps. */
 .quality-badge {
@@ -563,7 +553,7 @@ a {
   color: var(--quality-poor-text);
 }
 
-/* Agent shield (#1301, UC-040 A16): the LED circle shows the live colour; the
+/* Agent shield (#1301, UC-048 A1): the LED circle shows the live colour; the
    ring and badge say it is a shield and how long it has left. */
 .controller-card.shielded {
   border-color: rgba(var(--fg-rgb), 0.9);
@@ -590,7 +580,7 @@ a {
   animation: shield-blink 0.25s steps(2, start) infinite;
 }
 
-/* Shield charge held, not yet activated (#1837, UC-040 A30): a slow pulse, not the blink. */
+/* Shield charge held, not yet activated (#1837, UC-048 A3): a slow pulse, not the blink. */
 .controller-card.charged {
   border-color: rgba(var(--fg-rgb), 0.6);
 }
@@ -623,7 +613,7 @@ a {
 }
 
 /* Hold-mode shield energy (#2096, UC-035 BR-008): the pool against the cap, a thin
-   budget bar under it, the levels of the controller LED (UC-040 BR-026). */
+   budget bar under it, the levels of the controller LED (UC-048 BR-010). */
 .hold-energy {
   display: flex;
   flex-direction: column;

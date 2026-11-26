@@ -1,10 +1,8 @@
 """Agent effects on a player: grace, toughness, soft penalty, rubberband, revive.
 
-Split out of ``BaseGameMode`` (#2633): the public effect methods the intervention
-manager calls (their signatures are unchanged), the grace deadline and the
-``intervention`` moment. Names that tests patch on ``games.base`` (``tracer``, ``time``,
-``get_config_manager``, ``record_moment``, ``inject_trace_context``) are looked up on
-the base module at call time (``_base.``), as in ``games/shields.py``.
+The intervention manager calls the public methods.
+Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
+``inject_trace_context`` on ``games.base``: read them as ``_base.<name>``.
 """
 
 from collections.abc import Collection
@@ -254,7 +252,7 @@ class RubberbandMixin:
             self.record_intervention(serial, types=("toughness_boost",))
 
         # Weaker perceptible feedback, only when the arming changed the window or
-        # the boost (UC-040 A16, BR-009/BR-010).
+        # the boost (UC-048 A1, BR-002/BR-003).
         if changed:
             await self._send_shield_feedback(
                 player, new_until - game_clock.now(), kind="toughness_boost", sound=not was_protected
@@ -565,7 +563,7 @@ class RubberbandMixin:
             return False
 
         grace = self.REVIVE_SPAWN_GRACE if spawn_grace is None else spawn_grace
-        # UC-040 BR-035: spawn grace is not a shield; no end grace window carries over.
+        # UC-048 BR-015: spawn grace is not a shield; no end grace window carries over.
         player.end_grace_until = 0.0
         player.shield_end_at = 0.0
 

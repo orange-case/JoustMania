@@ -24,7 +24,6 @@ AttrExperimentFlagKey=experiment.flag_key
 AttrExperimentID=experiment.id
 AttrExperimentObjective=experiment.objective
 AttrExperimentStatus=experiment.status
-AttrExperimentTargetN=experiment.target_n
 AttrExperimentThesis=experiment.thesis
 AttrFitnessEvaluated=fitness.evaluated
 AttrGameDurationSeconds=game.duration_seconds

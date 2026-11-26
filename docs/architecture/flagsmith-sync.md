@@ -51,14 +51,14 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | # | Decision | Status |
 |---|---|---|
 | F1 | **Flagsmith is a writer, not an evaluator.** Pulled changes are `flagsmith`-labelled writes through the registry (C-032, C-036); no OpenFeature client talks to Flagsmith (C-031). | decided by the maintainer |
-| F2 | **Every registry flag is synced**, every scope is shown (stack, game, player, experiment arm, `real`, fraction, event lists). Read-only baseline flags are not features. A baseline flag the operator should change from Flagsmith gets a **Flagsmith-only** registry row (flags.md §13, #2705): a feature like every row, written only by the link's in-process path, refused over HTTP (`403 flagsmith_only`), so the agent never can. | decided by the maintainer ("Everything"); Flagsmith-only rows #2705 |
-| F3 | **Flagsmith may set stack, game, player values and game events**; experiment-arm, `real` and fraction values are shown only, so a Flagsmith value never competes with an agent experiment or promotion (UC-054 BR-003). A Flagsmith-only row is stack scope only and Flagsmith is its only runtime writer (UC-054 BR-011). | decided in the review of UC-054 |
+| F2 | **Every registry flag is synced**, every scope is shown (stack, game, player, experiment arm, `real`, event lists). Read-only baseline flags are not features. A baseline flag the operator should change from Flagsmith gets a **Flagsmith-only** registry row (flags.md §13, #2705): a feature like every row, written only by the link's in-process path, refused over HTTP (`403 flagsmith_only`), so the agent never can. | decided by the maintainer ("Everything"); Flagsmith-only rows #2705 |
+| F3 | **Flagsmith may set stack, game, player values and game events**; experiment-arm and `real` values are shown only, so a Flagsmith value never competes with an agent experiment or promotion (UC-054 BR-003). A Flagsmith-only row is stack scope only and Flagsmith is its only runtime writer (UC-054 BR-011). | decided in the review of UC-054 |
 | F4 | **Flagsmith wins a conflict**, kill switches included, and is the source of truth once online: stack-scope changes made offline are discarded at the reconnect, game and player values are sent (UC-054 A2, BR-005, BR-007, §6). | decided by the maintainer 2026-11-16 (#2621; replaces "kill switches tighten" of 2026-11-15) |
 | F5 | **No disk copy.** The last-seen state and the outbox are in memory only (C-030 unchanged). An offline restart runs baseline + admin settings. | decided by the maintainer ("Keep, no cache") |
 | F6 | **Agent limits under full Flagsmith control**, capped by the env ceilings of C-034; on a conflict Flagsmith wins (F4); the agent never writes its own limits. | decided by the maintainer |
 | F7 | **Flagsmith wins at a restart** (UC-054 BR-006, FR-215): every value Flagsmith holds comes back, whoever made it (a person, the link's own pushes, Terraform, the Flagsmith MCP server); no authorship is read, nothing is cleared in Flagsmith (§5.1). | decided by the maintainer 2026-11-16 (#2621; replaces the restart rule by authorship of 2026-11-15) |
 | F8 | **Pull, not webhooks.** Polling the environment document (conditional `GET`) is the baseline; realtime SSE only shortens the delay. Flagsmith webhooks are rejected (§9.1). | recommendation |
-| F9 | **Non-stack scopes are identities.** Game, experiment-arm, `real` and fraction values are identity overrides on identities named after the scope (§4.2); a real game's player values live on the controller's own identity (F11). | recommendation; player part amended by F11 |
+| F9 | **Non-stack scopes are identities.** Game, experiment-arm and `real` values are identity overrides on identities named after the scope (§4.2); a real game's player values live on the controller's own identity (F11). | recommendation; player part amended by F11 |
 | F11 | **One identity per controller.** A Move controller is the Flagsmith identity `controller:<serial>`, kept across games, with the traits `game_id`, `game_kind`, `coordinator_instance` of the game it plays in; a real game's player values are overrides on it, removed when the controller leaves the game. A shadow game's players keep `game:<gameId>:<serial>` (§2.2). | decided by the maintainer, 2026-11-16 (#2624) |
 | F10 | **Off by default.** `FLAGSMITH_LINK=off` in every stack; CI and the dry-run stacks never call the SaaS; the stage stack opts in through `.env.local`. | recommendation |
 | F13 | **Flagsmith shows the whole configuration.** Every synced feature without a stack overlay carries the registry baseline default as its value under `enabled=false` (the **reference value**), written by the start sequence where it differs (§5.2); toggle off still means "baseline applies", toggle on "this value is the stack overlay". The reference is always the flag-file default, also for a persisted admin setting, which is a stack overlay and shown with the toggle on (§5.2). | decided by the maintainer 2026-11-16 (#2623); admin-setting rule, re-read before each write, failure handling and staged values decided by the maintainer 2026-11-23 (§5.2) |
@@ -78,7 +78,6 @@ Every arrow to Flagsmith starts at the stack (C-037): no webhook reaches the Pi,
 | player value in a shadow game | override on identity `game:<gameId>:<serial>` | no traits; deleted at game end, so a shadow player never touches a real controller |
 | experiment-arm value | override on identity `experiment:<id>:<arm>` | shown only (F3) |
 | `real` overlay | override on identity `real` | shown only (F3) |
-| fraction overlay | override on identity `fraction`, value `{"variant":…, "fraction_percent":…}` | shown only (F3) |
 | event list (one-shot interventions) | override on `game:<gameId>` with the list's latest value | a JSON payload set there by a person is appended as one event (§4.3) |
 | writer label | not stored in Flagsmith: the change's audit entry names an API-key change, not which writer of the stack made it (F7); the writer is on the push span | |
 
@@ -98,7 +97,7 @@ Flagsmith stores `string`, `integer` and `boolean` (`FeatureValueType`, `api/fea
 | integer range | integer | the number |
 | float range | string | decimal text (`1.25`), parsed by the flag service |
 | `free string` | string | the string |
-| object flags (`windows`, `goal.profile`, event lists, fraction) | string | compact JSON text |
+| object flags (`windows`, `goal.profile`, event lists) | string | compact JSON text |
 
 The pull hands the value to the same parser as `PUT /{set}/{flag}`: a string that names a declared variant selects
 it, anything else is a `value` checked against the bounds. **A document value is decoded by the registry flag's
@@ -376,7 +375,7 @@ entity.
    game and player values could be pushed but never read back.
 3. For each synced `(set, key, scope)` the link computes the 3-way state of `remote`, the document value and the
    local value (§6) and turns each remote change into a write through the same in-process call the HTTP handler
-   uses (writer `flagsmith`, `persist: true` when the registry row has `persist: yes`). An override on
+   uses (writer `flagsmith`; a stack value of a `persist: yes` row is persisted, as every stack write of such a row, #2803). An override on
    `controller:<serial>` is read as the player value of the controller's owner, only while the controller is settled
    for it; `game:<gameId>:<serial>` is read only for a live shadow game (§2.2).
 4. A write refused by the registry or the game scope keeps the local value, records the

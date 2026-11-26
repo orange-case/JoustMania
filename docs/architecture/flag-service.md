@@ -61,7 +61,7 @@ game-scoped state dies with its game.
 | D7 | **One-shot interventions stay flags**, as a per-game **event list** object (`{"epoch","seq","events"}`), rendered on `gameId` only with the serial in the payload (§6). | decided by default (maintainer did not object) |
 | D8 | A **mutable-flag registry** declares every runtime-mutable flag and its bounds; every other flag is read-only baseline ([flags.md §13](../specs/flags.md#13-mutable-flag-registry)). | decided by the maintainer |
 | D9 | Every write is an OTel span and a metric ([telemetry.md §10](../specs/telemetry.md#10-flag-service-epic-1407)). | decided by the maintainer |
-| D10 | **Admin settings are persisted on request** to a service-owned state file (`FLAG_SERVICE_STATE_FILE`, default `/var/lib/flag-service/admin.json` on the stack's own `flag-service-state` volume), never to `services/flagd/*.json`. A write persists only when it says so (`"persist": true`) and the registry allows it for that flag; the menu admin asks for it, stage scripts, the harness and tests do not. Persisted values survive restarts (FR-018 stays). Details §10.1. | decided by the maintainer (persistence on request: re-review N4) |
+| D10 | **Admin settings are persisted** to a service-owned state file (`FLAG_SERVICE_STATE_FILE`, default `/var/lib/flag-service/admin.json` on the stack's own `flag-service-state` volume), never to `services/flagd/*.json`. Persistence is a property of the flag: every stack write of a registry row with `persist: yes` persists, whoever writes it (#2803, replacing "on request" of re-review N4). Persisted values survive restarts (FR-018 stays). Details §10.1. | decided by the maintainer (re-review N4; by the flag, #2803) |
 | D11 | **No roles, no tokens, no authorization.** This is a local party game: a write is validated only against the registry (mutable? in bounds?), the game scope (is the game registered?) and the sync stream (is flagd connected?). The `writer` field is an informational label for the trace. Authorization is out of scope by decision. | decided by the maintainer |
 | D12 | **Full migration before the talk**, then delete the file-write paths, nonce baselines and prune logic. No file-based fallback. A readiness checkpoint at T−14 days is a stabilisation gate. | decided by the maintainer |
 | D13 | **Overlays substitute `defaultVariant`**, so baseline targeting (for example the Werewolf rule on `sensitivity`) still wins, as it does today (§10). | decided by default |
@@ -138,9 +138,7 @@ Read from the release tarballs `flagd/v0.16.0` (whose `flagd/go.mod` requires
   that match. So the in-process resolvers on 8015 with `flagSetId=<set>` receive exactly their set, and
   RPC evaluation with a `flagd-selector` header resolves within the set.
 - **Duplicate keys.** One payload is a JSON object keyed by flag key, so a key can appear only once
-  across all merged sets. Today there is one duplicate, `bluetooth_backend` in
-  `services/flagd/controller.ci-rust.json`, a file that nothing loads (flags.md §11); `services/flagd/ci/`
-  has none. The service loads an explicit list of nine files (not a glob) and refuses to start on a
+  across all merged sets; neither `services/flagd/` nor `services/flagd/ci/` has a duplicate. The service loads an explicit list of nine files (not a glob) and refuses to start on a
   duplicate key. A future duplicate across sets would need per-set sync paths (§5.3).
 - Clients without a selector (agent RPC, rust-hid) keep working because keys are unique.
 
@@ -368,16 +366,16 @@ write it re-renders the merged configuration and pushes it to every open stream.
 
 ### 10.1 Admin persistence (re-review N4)
 
-- **On request only.** A `PUT` persists only with `"persist": true` in the body, and only for a flag whose
-  registry row allows it (`persist: yes`, a stack overlay); otherwise `400 malformed`. The menu admin sends
-  `"persist": true`; the stage scripts, the validation harness and the tests never do, so their overlays stay
-  in memory and die with a restart. `ttl_seconds` together with `"persist": true` is `400 malformed`.
+- **By the flag (#2803).** Every stack-scope `PUT` or `DELETE` of a flag whose registry row says `persist: yes`
+  is persisted, whoever writes it; such a flag has one stack value, never an in-memory overlay over a persisted
+  one, and takes no `ttl_seconds` (`400 malformed`). Every other write stays in memory and dies with a restart.
+  The request's `persist` changes nothing; it stays `400 malformed` where no value is persisted (flags.md §13).
 - **One state file per stack.** `FLAG_SERVICE_STATE_FILE` names it; each compose stack that runs the service
   gets its own named volume (`flag-service-state`, project-scoped by compose), so the CI and dry-run
   stacks never read the production stack's admin settings.
 - **Atomic write.** The service writes a temporary file in the same directory and renames it over the state
   file (the state file is on a named volume, not a single-file bind mount, so rename is safe). A failed write
-  is logged and counted in `flagservice_admin_persist_errors_total`, and the persisted `PUT` or `DELETE ?persist=true` that caused it is rolled back and answered `500 persist_failed`, so memory never differs from the file (a cleared value would otherwise return after a restart; #2368). A persisted kill switch (the set in flags.md §13, today `interventions_allowed`) is the exception: it applies in memory and answers `persisted: false` or `X-Flag-Persisted: false`, because a safety stop must work now. Persistence switched off (`off`) never fails: the write applies in memory and reports `persisted: false`.
+  is logged and counted in `flagservice_admin_persist_errors_total`, and the stack `PUT` or `DELETE` of a `persist: yes` row that caused it is rolled back and answered `500 persist_failed`, so memory never differs from the file (a cleared value would otherwise return after a restart; #2368). A persisted kill switch (the set in flags.md §13, today `interventions_allowed`) is the exception: it applies in memory and answers `persisted: false` or `X-Flag-Persisted: false`, because a safety stop must work now. Persistence switched off (`off`) never fails: the write applies in memory and reports `persisted: false`.
 - **Corrupt file.** A state file that does not parse is moved aside to `admin.json.corrupt-<unix ts>`; the
   service logs it, counts it in `flagservice_admin_state_corrupt_total`, starts from the baseline and **never
   refuses to start** because of it.

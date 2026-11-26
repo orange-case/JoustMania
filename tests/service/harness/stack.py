@@ -105,8 +105,8 @@ class Composition:
     agent_flags: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
     # Declared variants rewritten in the stack's baseline copy before the flag service starts:
     # ``{(flag_set, flag, variant): value}`` (FlagPlane ``variant_values``). The variant must
-    # exist; e.g. TC-011's ``experiment_seed`` ``windows_frantic`` with a smaller ``target_n``
-    # (the registry takes declared variants only, so a test seed is a rewritten variant, #1907).
+    # exist; e.g. A17's ``experiment.mock_archetypes`` ``quick_cascade`` rewritten to one archetype
+    # (the registry takes declared variants only).
     flag_variant_values: Mapping[tuple[str, str, str], object] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -297,8 +297,7 @@ class ServiceStack:
         overlays: dict[str, Mapping[str, object]] = {}
         if self.composition.fake_claude:  # not AGENT_CLAUDE_DECIDE: its text backend stays the stub
             overlays["inference.backend"] = {"variant": "claude"}
-            # The proposer gate also opens the retro-seeded thesis proposer; a candidate
-            # list naming no game flag keeps it (and the dynamic declarer) from declaring
+            # A candidate list naming no game flag keeps the dynamic declarer from declaring
             # a second experiment next to the M7-4 one TC-010 asserts on. A flag since
             # #1907 (the AGENT_EXPERIMENT_DYNAMIC_CANDIDATES env was removed).
             overlays["experiment_dynamic_candidates"] = {"value": TC010_NO_CANDIDATES}
@@ -375,13 +374,10 @@ class ServiceStack:
                 # and enable every adapter it finds over D-Bus.
                 "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/nonexistent/joustmania-service-tier",
                 # Never real controllers: the rust backend (the default when the
-                # controller.backend flag is unreadable) and the python backend
-                # would dial localhost:50058/50059, where a compose stack on this
-                # host publishes rust-hid.
+                # controller.backend flag is unreadable) would dial localhost:50058,
+                # where a compose stack on this host publishes rust-hid.
                 "RUST_HID_HOST": "127.0.0.1",
                 "RUST_HID_PORT": str(UNREACHABLE_PORT),
-                "PYTHON_HID_HOST": "127.0.0.1",
-                "PYTHON_HID_PORT": str(UNREACHABLE_PORT),
             },
             "game-coordinator": {"FLAG_SERVICE_INSTANCE": "game-coordinator"},
             "menu": {},

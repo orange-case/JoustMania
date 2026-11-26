@@ -3,7 +3,6 @@ package state
 import (
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/joustmania/flag-service/fserr"
 	"github.com/joustmania/flag-service/registry"
@@ -79,51 +78,16 @@ func TestObserver_MutationPaths(t *testing.T) {
 			t.Fatalf("got %+v, want no change", got)
 		}
 	})
-	t.Run("UC-055/BR-001 clearing the stack overlay above an admin value reports the admin value with its writer", func(t *testing.T) {
-		f, rec := observedFixture(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
-		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, Writer: "menu"})
-		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Writer: "stage"})
-		rec.take()
-		if _, err := f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", Writer: "stage"}); err != nil {
-			t.Fatal(err)
-		}
-		c := wantOne(t, rec.take(), ChangeValue, "sensitivity")
-		if c.DeclaredVariant != "slow" || c.Writer != "menu" || !c.Persisted {
-			t.Fatalf("change %+v, want the persisted admin value slow by menu", c)
-		}
-	})
-	t.Run("UC-055/BR-001 an expired stack overlay above an admin value reports the admin value", func(t *testing.T) {
-		f, rec := observedFixture(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
-		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, Writer: "menu"})
-		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Writer: "stage", TTLSeconds: ttl(1)})
-		rec.take()
-		f.clock.Advance(2 * time.Second)
-		if n := f.state.ExpireOverlays(); n != 1 {
-			t.Fatalf("expired %d, want 1", n)
-		}
-		c := wantOne(t, rec.take(), ChangeValue, "sensitivity")
-		if c.DeclaredVariant != "slow" || c.Writer != "menu" {
-			t.Fatalf("change %+v, want the admin value slow by menu", c)
-		}
-	})
 	t.Run("UC-055/BR-001 DELETE /{set}?writer= reports each cleared overlay with the selector", func(t *testing.T) {
 		f, rec := observedFixture(t, fixtureOpts{})
-		f.put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev", Writer: "stage"})
+		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "off", Writer: "stage"})
 		rec.take()
 		if _, err := f.state.ClearWriter("agent", "stage"); err != nil {
 			t.Fatal(err)
 		}
-		c := wantOne(t, rec.take(), ChangeCleared, "decision.backend")
+		c := wantOne(t, rec.take(), ChangeCleared, "enabled")
 		if c.Writer != "stage" || c.Value != nil {
 			t.Fatalf("change %+v, want cleared by the selector stage", c)
-		}
-	})
-	t.Run("UC-055/BR-001 a fraction write carries its percent", func(t *testing.T) {
-		f, rec := observedFixture(t, fixtureOpts{})
-		f.put(WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: f.anyVariant("bluetooth_backend"), Scope: Scope{FractionPercent: intp(10)}, Writer: "proxy"})
-		c := wantOne(t, rec.take(), ChangeValue, "bluetooth_backend")
-		if c.ScopeName != registry.ScopeFraction || c.Scope.FractionPercent == nil || *c.Scope.FractionPercent != 10 {
-			t.Fatalf("change %+v, want fraction 10", c)
 		}
 	})
 	t.Run("UC-055/BR-001 an append reports the event list, a clear reports an empty list", func(t *testing.T) {
@@ -248,12 +212,12 @@ func TestSlotVersion_CompareAndSet(t *testing.T) {
 		_, err = f.state.Append(AppendRequest{Set: "interventions", Flag: "audio_cue", Scope: Scope{GameID: "game_a"}, Payload: map[string]any{"sound": "agent_cue"}, IfSlotVersion: res.SnapshotVersion + 1000})
 		wantReason(t, err, 412, fserr.SlotChanged)
 	})
-	t.Run("UC-054/BR-005 StackAll clears overlay and admin value in one change", func(t *testing.T) {
+	t.Run("UC-054/BR-005 a Flagsmith clear of a persist row clears its persisted value in one change", func(t *testing.T) {
 		f, rec := observedFixture(t, fixtureOpts{stateFile: filepath.Join(t.TempDir(), "admin.json")})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, Writer: "menu"})
 		f.put(WriteRequest{Set: "game", Flag: "sensitivity", Variant: "fast", Writer: "stage"})
 		rec.take()
-		res, err := f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", Writer: "flagsmith", StackAll: true})
+		res, err := f.state.Clear(ClearRequest{Set: "game", Flag: "sensitivity", Writer: "flagsmith"})
 		if err != nil || res.Cleared != 1 || !res.Persisted {
 			t.Fatalf("res %+v err %v, want one persisted clear", res, err)
 		}
@@ -404,17 +368,4 @@ func findChange(t *testing.T, cs []Change, flag, scope string) Change {
 	}
 	t.Fatalf("no %s change of %s", scope, flag)
 	return Change{}
-}
-
-// anyVariant returns a declared variant of key other than its default.
-func (f *fixture) anyVariant(key string) string {
-	f.t.Helper()
-	fl := f.state.flags[key]
-	for _, name := range fl.base.VariantNames() {
-		if name != fl.base.DefaultVariant {
-			return name
-		}
-	}
-	f.t.Fatalf("%s has a single variant", key)
-	return ""
 }

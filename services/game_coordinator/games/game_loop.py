@@ -1,10 +1,7 @@
-"""The gameplay phase driver of a game: countdown, warm-up, frame loop, win hold.
+"""The gameplay phase of a game: countdown, warm-up, frame loop, win hold.
 
-Split out of ``BaseGameMode`` (#2633): ``_run_gameplay_phase`` and the frame loop it
-drives (per-frame config scope, disconnects, frame metrics). Names that tests patch on
-``games.base`` (``tracer``, ``time``, ``get_config_manager``, ``record_moment``,
-``inject_trace_context``) are looked up on the base module at call time (``_base.``), as
-in ``games/shields.py``.
+Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
+``inject_trace_context`` on ``games.base``: read them as ``_base.<name>``.
 """
 
 import asyncio
@@ -427,10 +424,10 @@ class GameLoopMixin:
         for player in self.players.values():
             if player.alive:
                 player.grace_until = max(player.grace_until, grace_until)
-        # UC-040 BR-027: hold is latched here at the latest; the recharge starts now.
+        # UC-048 BR-011: hold is latched here at the latest; the recharge starts now.
         self._latch_shield_hold()
         self._start_shield_hold_clock(game_clock.now())
-        self._queue_hold_feedback_all()  # UC-040 BR-026: every player's energy layer
+        self._queue_hold_feedback_all()  # UC-048 BR-010: every player's energy layer
 
         # Track current alive set for detecting changes
         last_alive_serials = {p.serial for p in self.players.values() if p.alive}

@@ -122,8 +122,8 @@ func TestReservedWriterLabel(t *testing.T) {
 
 // UC: UC-054 BR-003
 // The in-process entry: same validation, span and metrics as HTTP, writer
-// forced to flagsmith; experiment-arm, real and fraction scopes are refused
-// first with 422 flagsmith_scope_read_only.
+// forced to flagsmith; experiment-arm and real scopes are refused first with
+// 422 flagsmith_scope_read_only.
 func TestFlagsmithInProcessWrites(t *testing.T) {
 	ctx := context.Background()
 	t.Run("UC-054/BR-003 a stack write is labelled flagsmith on its span and counted", func(t *testing.T) {
@@ -140,14 +140,12 @@ func TestFlagsmithInProcessWrites(t *testing.T) {
 			t.Fatal("the in-process write was not counted")
 		}
 	})
-	t.Run("UC-054/BR-003 experiment, real and fraction scopes are read-only, before any other check", func(t *testing.T) {
+	t.Run("UC-054/BR-003 experiment and real scopes are read-only, before any other check", func(t *testing.T) {
 		e := newEnv(t, false) // no stream: a 503 would come first if the scope check were not first
 		before := e.st.Version()
-		pct := 10
 		for _, req := range []state.WriteRequest{
 			{Set: "game", Flag: "sensitivity", Variant: "slow", Scope: state.Scope{ExperimentID: "e1", Arm: "a"}},
 			{Set: "game", Flag: "sensitivity", Variant: "slow", Scope: state.Scope{GameKind: "real"}},
-			{Set: "controller", Flag: "bluetooth_backend", Variant: "rust", Scope: state.Scope{FractionPercent: &pct}},
 		} {
 			_, ferr := e.api.FlagsmithPut(ctx, req)
 			if ferr == nil || ferr.Status != 422 || ferr.Reason != fserr.FlagsmithScopeReadOnly {

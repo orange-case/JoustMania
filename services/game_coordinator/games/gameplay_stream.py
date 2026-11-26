@@ -1,10 +1,7 @@
-"""The gameplay stream of a game: open, reopen, drain, guarded writes, release.
+"""The gameplay stream of a game: open, reopen, early drain, guarded writes, release.
 
-Split out of ``BaseGameMode`` (#2633): the ``StreamGameplayData`` call, the early drain
-before the additional phases, the alive filter and the reconnect path (UC-030 BR-006).
-Names that tests patch on ``games.base`` (``tracer``, ``time``, ``get_config_manager``,
-``record_moment``, ``inject_trace_context``) are looked up on the base module at call
-time (``_base.``), as in ``games/shields.py``.
+Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
+``inject_trace_context`` on ``games.base``: read them as ``_base.<name>``.
 """
 
 import asyncio
@@ -85,7 +82,7 @@ class GameplayStreamMixin:
 
         logger.info(f"Gameplay stream created with {len(player_colors)} players ({len(current_alive)} alive)")
 
-        # UC-040 BR-021: after a reconnect, re-send every held charge and running
+        # UC-048 BR-006: after a reconnect, re-send every held charge and running
         # shield with the time left, so the new stream owns the layers again.
         await self._resend_shield_layers()
         await self._resend_dead_player_state()

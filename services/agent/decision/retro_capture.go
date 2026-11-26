@@ -157,14 +157,11 @@ type RetroCoordinator struct {
 	experimentParent func(experimentID string) (trace.SpanContext, bool)
 
 	// suggestionSink forwards each DECODED retro suggestion (#1184) to a downstream
-	// consumer — in production the experiment loop's retro-seeded THESIS proposer,
-	// which turns a suggestion into a candidate experiment whose thesis is seeded from
-	// the retro's reasoning, closing the game→retro→thesis→experiment loop. It is
-	// PURELY additive: the suggestion is still stamped as a span event regardless. nil
-	// (the default / tests / proposer-disabled) means the suggestion is recorded-only,
-	// byte-identical to pre-#1184. The sink itself decides whether to act on the
-	// suggestion (the proposer is gated default-OFF), so wiring the sink is safe even
-	// when the proposer opt-in is off. Injected via SetSuggestionSink; not safe to call
+	// consumer — in production the notes the M7-4 proposer prompt reads (UC-042 A3). It is
+	// PURELY additive: the suggestion is still stamped as a span event regardless.
+	// main.go always sets it; nil (tests) means the suggestion is recorded-only. A
+	// recorded suggestion only reaches a model when the proposer gate lets a
+	// proposal run. Injected via SetSuggestionSink; not safe to call
 	// concurrently with OnGameEnd.
 	suggestionSink func(llm.RetroSuggestion)
 
@@ -287,7 +284,7 @@ func (rc *RetroCoordinator) SetFitnessLookup(f func(gameID string) (float64, boo
 // falls back to the existing behavior. Not safe to call concurrently with OnGameEnd —
 // set it during construction.
 // SetSuggestionSink injects the downstream consumer of decoded retro suggestions
-// (#1184) — the experiment loop's retro-seeded thesis proposer in production. Each
+// — in production the recent-suggestion notes the M7-4 proposer prompt reads (UC-042 A3). Each
 // suggestion a post-game retro decodes is forwarded to the sink (in addition to
 // being stamped as a span event). nil leaves the retro recorded-only (pre-#1184
 // behavior). Not safe to call concurrently with OnGameEnd — set it during
@@ -669,9 +666,7 @@ func (rc *RetroCoordinator) runRetroInfer(ctx context.Context, span trace.Span, 
 			attribute.String(AttrRetroSuggestionEmphasis, s.Emphasis),
 			attribute.String(AttrRetroSuggestionReason, s.Reason),
 		))
-		// #1184: forward the decoded suggestion to the downstream consumer (the
-		// retro-seeded thesis proposer) so it can seed the next experiment's thesis,
-		// closing the game→retro→thesis→experiment loop. Additive — the suggestion is
+		// Forward the decoded suggestion to the proposer's notes (UC-042 A3). Additive — the suggestion is
 		// already recorded as the span event above; a nil sink (proposer not wired)
 		// leaves the retro recorded-only.
 		if rc.suggestionSink != nil {

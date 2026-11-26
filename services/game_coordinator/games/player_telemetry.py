@@ -1,11 +1,7 @@
 """Player telemetry of a game: analytics, gauges, health and lifecycle spans.
 
-Split out of ``BaseGameMode`` (#2633): the per-player ``PlayerAnalytics`` trackers and
-their summaries, the ``game_player_*`` gauges, controller health degradation spans and
-the player / grouping lifecycle spans. Names that tests patch on ``games.base``
-(``tracer``, ``time``, ``get_config_manager``, ``record_moment``,
-``inject_trace_context``) are looked up on the base module at call time (``_base.``), as
-in ``games/shields.py``.
+Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
+``inject_trace_context`` on ``games.base``: read them as ``_base.<name>``.
 """
 
 import contextlib

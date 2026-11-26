@@ -61,18 +61,18 @@ func TestStartWritesReferenceValues(t *testing.T) {
 		{ID: 3, Name: "decision.capture_content"},
 		{ID: 4, Name: "not_a_registry_flag"},
 		{ID: 5, Name: "experiment_dynamic_enabled"},
-		{ID: 6, Name: "experiment_max_games"},
+		{ID: 6, Name: "llm.max_requests_per_minute"},
 	}
 	on := f.Options.Add(5, "on")
 	f.Options.Add(5, "off")
-	maxGames := e.l.BaselineFlag("agent", "experiment_max_games").DefaultVariant
+	rpm := e.l.BaselineFlag("agent", "llm.max_requests_per_minute").DefaultVariant
 	f.SetDocument(testDocument([]map[string]any{
 		fstate("decision.backend", false, nil),                                         // a blank feature
 		fstate("experiment_tick_seconds", false, "fast"),                               // an old default, or a person's staged value
 		fstate("decision.capture_content", true, "on"),                                 // a stack value Flagsmith holds
 		fstate("not_a_registry_flag", false, nil),                                      // not synced
 		weighted(fstate("experiment_dynamic_enabled", false, "off"), on.ID, "on", 100), // a pick staged under the off toggle
-		fstate("experiment_max_games", false, maxGames),                                // the reference already
+		fstate("llm.max_requests_per_minute", false, rpm),                              // the reference already
 	}, nil), "")
 	if err := e.s.Start(e.ctx); err != nil {
 		t.Fatal(err)

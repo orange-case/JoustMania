@@ -100,8 +100,8 @@ up-mock:
 # M8 agent shadow-game dry run (#999). Brings up a RUNNABLE experiment cohort
 # loop out-of-the-box: latest images (not the stale release IMAGE_TAG=0.7.0 from
 # .env), mock controllers + full observability (ci flag dir), the agent & the
-# dashboard profiles and the agent; the enable step below seeds one experiment
-# (the experiment_seed flag, #1907) and turns the loop on.
+# dashboard profiles and the agent; the enable step below names one experiment
+# (the dynamic declarer's explicit candidate windows=frantic) and turns the loop on.
 # The flag service loads the CI baseline (services/flagd/ci) and is flagd's
 # only source, so every agent write reaches the running flagd (epic #1407).
 #
@@ -135,9 +135,9 @@ dry-run:
 	@echo "  Experiment loop gating:"
 	@echo "    [!] flagd experiments_enabled flag is the only gate (live since #1044)."
 	@echo "        Fail-closed off by default and while flagd cannot answer."
-	@echo "    [ ] seeded experiment after enable: experiment_seed=windows_frantic (windows = frantic music pacing, objective=balanced, N=8/arm)"
-	@echo "    [ ] ENABLE experiments  -> ONE step (sets the seed, then flips enabled + experiments_enabled on):"
-	@echo "        ./scripts/agent-dryrun-enable.sh on   # flag service: experiment_seed -> windows_frantic, enabled + experiments_enabled -> on"
+	@echo "    [ ] experiment after enable: experiment_dynamic_candidates=windows_frantic (windows=frantic, frantic music pacing, objective=balanced, N=8/arm)"
+	@echo "    [ ] ENABLE experiments  -> ONE step (sets the candidate + experiment_dynamic_enabled, then flips enabled + experiments_enabled on):"
+	@echo "        ./scripts/agent-dryrun-enable.sh on   # flag service: experiment_dynamic_candidates -> windows_frantic, experiment_dynamic_enabled, enabled + experiments_enabled -> on"
 	@echo "        # gate flips take effect LIVE (self-gated per-tick since #1044) -> NO agent restart"
 	@echo "        # in-game decision backend: ./scripts/agent-backend.sh (decision.backend, live)"
 	@echo "        # retro on Claude: flag inference.backend=claude + ANTHROPIC_API_KEY; proposer also AGENT_EXPERIMENT_PROPOSER_ENABLED=true + flag experiment_proposer_enabled on,"
@@ -338,11 +338,10 @@ test-contract:
 	uv run --no-project $(CONTRACT_DEPS) pytest tests/contract -v -p no:cacheprovider
 
 # Only the flagd contract (tests/contract/test_flagd_resolution.py, ~1 min), plus
-# the #2184 RPC retry test and the #1945 pinned fractional buckets (need grpc +
-# the provider from CONTRACT_DEPS).
+# the #2184 RPC retry test (need grpc + the provider from CONTRACT_DEPS).
 .PHONY: test-contract-flagd
 test-contract-flagd:
-	uv run --no-project $(CONTRACT_DEPS) pytest tests/contract/test_flagd_resolution.py tests/contract/test_flagd_rpc_retry.py tests/contract/test_fractional_bucketing.py -v --tb=short -p no:cacheprovider
+	uv run --no-project $(CONTRACT_DEPS) pytest tests/contract/test_flagd_resolution.py tests/contract/test_flagd_rpc_retry.py -v --tb=short -p no:cacheprovider
 
 # Integration tests with pre-built images + volume-mounted source (no rebuild)
 # Requires images: run `docker compose pull` or `make dev` first

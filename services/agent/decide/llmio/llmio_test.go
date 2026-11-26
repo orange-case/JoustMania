@@ -336,7 +336,7 @@ func TestRender_ShieldChargedToken(t *testing.T) {
 		if !strings.Contains(p.User, " shield_charged") {
 			t.Errorf("user message missing the shield_charged token:\n%s", p.User)
 		}
-		if !strings.Contains(p.System, `"shield_charged" marks a player the agent recently gave a shield charge`) {
+		if !strings.Contains(p.System, `"shield_charged" marks a player with an untriggered shield charge`) {
 			t.Error("system prompt does not explain shield_charged")
 		}
 	})
@@ -345,9 +345,10 @@ func TestRender_ShieldChargedToken(t *testing.T) {
 // TestRender_ShieldLimitedAndLevelTokens: the shield_limited marker and the applied
 // factors (#2066) reach the user message and the system prompt explains them.
 //
-// UC: UC-040 main step 4 A33 A35
+// UC: UC-040 main step 4 A35
+// UC: UC-048 A6
 func TestRender_ShieldLimitedAndLevelTokens(t *testing.T) {
-	t.Run("UC-040/A33 shield_limited and the factors are rendered and explained", func(t *testing.T) {
+	t.Run("UC-048/A6 shield_limited and the factors are rendered and explained", func(t *testing.T) {
 		active := true
 		c := gamecontext.GameContext{SessionID: "game_abc", GameKind: "real",
 			Players: map[string]*gamecontext.PlayerSignals{"P1": {Serial: "P1", Active: &active}}}

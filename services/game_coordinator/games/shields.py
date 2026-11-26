@@ -1,8 +1,8 @@
 """ShieldMixin: the Free-for-All shield code of BaseGameMode (#2360).
 
 Agent shields (``grant_shield``, the per-player limits), the shield feedback
-(LED and rumble layers, sounds), trigger charges (UC-040 A30 to A32) and the hold
-pool (UC-030 A7, UC-040 A36 to A39) moved here unchanged from ``games/base.py``;
+(LED and rumble layers, sounds), trigger charges (UC-048 A3 to A5) and the hold
+pool (UC-030 A7, UC-048 A8 to A11) moved here unchanged from ``games/base.py``;
 ``BaseGameMode`` inherits them, so every call site and test still goes through
 the game object. The state they use is still set up in ``BaseGameMode.__init__``.
 
@@ -79,7 +79,7 @@ from services.game_coordinator.stream_writes import serialized_write
 if TYPE_CHECKING:
     from services.game_coordinator.games.base import Player
 
-# The "helped" cue of an agent shield (UC-040 A42, BR-031): a short magenta
+# The "helped" cue of an agent shield (UC-048 A12, BR-013): a short magenta
 # GAME_EFFECT_PULSE (the agent colour of #818) on the helped controller, sent before the
 # shield's own LED command. The controller manager plays an overlay effect over every
 # shield layer, so the layer shows once the pulse ends.
@@ -88,14 +88,14 @@ SHIELD_HELP_CUE_DURATION_MS = 500
 SHIELD_HELP_CUE_SPEED = 4  # pulses per second: two pulses in 500 ms
 
 # A grant_shield that lands once the game is ending (outcome latched, force-ended, or
-# state ENDING / ENDED) is refused (UC-040 A42 step 3): no shield layer and no cue may
+# state ENDING / ENDED) is refused (UC-048 A12 step 3): no shield layer and no cue may
 # appear over the winner rainbow (a PULSE takes over every effect but IDENTIFY and
 # SHOW_BATTERY in the controller manager).
 SHIELD_REFUSED_GAME_ENDING = "game_ending"
-# A grant to a player who holds a shield charge (UC-040 A31, BR-020).
+# A grant to a player who holds a shield charge (UC-048 A4, BR-005).
 SHIELD_REFUSED_ALREADY_CHARGED = "already_charged"
 
-# Group shield (UC-040 A47, A48, BR-033, #2467): one decision shields 2 to
+# Group shield (UC-048 A13, A14, BR-014, #2467): one decision shields 2 to
 # policy.group_grant.max_targets alive players, all or nothing. A refusal raises
 # InterventionNotApplied("group_refused:<reason>"); a per-target refusal uses the single
 # grant's reason (e.g. group_refused:shield_cap_reached) and names the refused serial.
@@ -125,7 +125,7 @@ def resolve_group_max_targets(value: int) -> int:
 
 
 # player_death carries `shield.since_end_ms` only when the player's last shield ended
-# less than this long ago (telemetry.md §4, UC-040 BR-035): the stage fairness check.
+# less than this long ago (telemetry.md §4, UC-048 BR-015): the stage fairness check.
 SHIELD_SINCE_END_REPORT_SECONDS = 3.0
 
 
@@ -135,35 +135,35 @@ class ShieldMixin:
     def _init_shield_state(self) -> None:
         """Per-game shield state: feedback, agent grants, the hold latch and hold feedback."""
         # Shield feedback still running per serial: wall-clock end time (#1301,
-        # UC-040 A16/A17). Only a record for the game-end clear; no task.
+        # UC-048 A1/A2). Only a record for the game-end clear; no task.
         self._shield_feedback_until: dict[str, float] = {}
-        # Agent shields per serial in this game (UC-040 BR-022): grants
+        # Agent shields per serial in this game (UC-048 BR-007): grants
         # counted and the end of the last agent shield (grant time + seconds; in
         # trigger mode from the charge grant). Per game-mode instance, so a new
         # game starts fresh; keyed by serial, so a revive does not reset them.
         self._agent_shield_grants: dict[str, int] = {}
         self._agent_shield_last_end: dict[str, float] = {}
-        # Group shields applied in this game (UC-040 A47, BR-033): the coordinator's
+        # Group shields applied in this game (UC-048 A13, BR-014): the coordinator's
         # per-game backstop against policy.group_grant.max_per_game, so an agent
         # restart (which resets the agent's own count) cannot exceed it.
         self._agent_group_grants = 0
-        # Shield hold (UC-040 BR-027): latched once, at the start of the game
+        # Shield hold (UC-048 BR-011): latched once, at the start of the game
         # loop or at the first grant, whichever comes first. None = not a hold game.
         self._shield_hold: ShieldHoldParams | None = None
         self._shield_hold_latched = False
-        # Shield end grace (UC-040 BR-035, #2464): latched with the shield mode in every
+        # Shield end grace (UC-048 BR-015, #2464): latched with the shield mode in every
         # mode; 0 until the latch, so nothing arms a window before it.
         self._shield_end_grace = 0.0
         # The mode the latch read, reused by the grant that triggered the latch, so
         # that grant reads shield.activation once (flags.md §4: one read per grant).
         self._shield_mode_at_latch: str | None = None
         # The mode a non-hold game latched (instant or trigger): a mid-game `hold`
-        # read maps back to it, so a running game keeps its mode (UC-040 BR-027).
+        # read maps back to it, so a running game keeps its mode (UC-048 BR-011).
         self._shield_mode_at_start: str = SHIELD_ACTIVATION_INSTANT
         # The game_shield_activation_mode / game_shield_hold_setting series this game set (removed at game end).
         self._shield_metric_mode: str | None = None
         self._shield_metric_settings: tuple[str, ...] = ()
-        # Hold feedback (UC-040 BR-026): the cue values latched with the hold values,
+        # Hold feedback (UC-048 BR-010): the cue values latched with the hold values,
         # and one ordered outbound task per game. The frame path only marks a player
         # (serial -> strongest pending cue); the task sends the player's state when it runs.
         self._shield_hold_cues: ShieldHoldCues | None = None
@@ -178,7 +178,7 @@ class ShieldMixin:
         self._hold_granted_pending: set[str] = set()
         # serial -> loop time of the last player_shield_energy (the keyframe clock, UC-035 BR-008).
         self._hold_energy_published_at: dict[str, float] = {}
-        # Set at the game end (and error teardown): no hold command after SHIELD 0 (UC-040 BR-026).
+        # Set at the game end (and error teardown): no hold command after SHIELD 0 (UC-048 BR-010).
         self._hold_feedback_stopped = False
 
     async def grant_shield(self, serial: str, seconds: float) -> bool:
@@ -200,7 +200,7 @@ class ShieldMixin:
         one. If the player is already shielded past ``now + seconds`` the existing
         (longer) grace is kept; a shorter request never shortens it.
 
-        Shield limits (#2044, UC-040 A34, BR-022): after the alive check (and in
+        Shield limits (#2044, UC-048 A7, BR-007): after the alive check (and in
         trigger mode after ``already_charged``) a grant is refused with
         ``InterventionNotApplied`` once the player has had
         ``policy.max_shields_per_player_per_game`` agent shields in this game
@@ -211,11 +211,11 @@ class ShieldMixin:
 
         Every caller is an agent grant (``handle_shield_seconds``, the
         ``shield_seconds`` intervention), so an applied grant first pulses the
-        helped controller magenta (#2395, UC-040 A42, BR-031) in all three modes;
+        helped controller magenta (#2395, UC-048 A12, BR-013) in all three modes;
         a refused or kept grant sends no cue. Once the game is ending (outcome
         latched, force-ended, ENDING / ENDED) a grant is refused ``game_ending``.
 
-        Shield feedback (#1301, UC-040 A16): the ``shield_up`` sound, a
+        Shield feedback (#1301, UC-048 A1): the ``shield_up`` sound, a
         ``GAME_EFFECT_SHIELD`` for the remaining protection (rendered by the
         controller manager: fade, last-second blink, restore) and a
         ``player_shielded`` event. A kept (no-op) grant sends no feedback.
@@ -237,7 +237,7 @@ class ShieldMixin:
             return False
 
         if self._shield_grants_closed():
-            # UC-040 A42 step 3: after the win (or a force-end) nothing is granted,
+            # UC-048 A12 step 3: after the win (or a force-end) nothing is granted,
             # so no layer and no cue cover the winner effect.
             from services.game_coordinator.intervention_errors import InterventionNotApplied
 
@@ -247,19 +247,19 @@ class ShieldMixin:
         hold, mode = self._grant_hold_and_mode()
 
         now = game_clock.now()
-        # Every check before any write or await (UC-040 A31, A34, A37, BR-022).
+        # Every check before any write or await (UC-048 A4, A7, A9, BR-007).
         self._raise_shield_refusal(player, now, mode, hold)
 
         if hold is not None:
             self._apply_shield_energy(player, seconds, now, hold)
-            # UC-040 BR-031: the helped cue; it takes the stream lock before the
+            # UC-048 BR-013: the helped cue; it takes the stream lock before the
             # queued SHIELD_ENERGY / SHIELD_HOLD write of this grant.
             await self._send_shield_help_cue(player)
             return True
 
         if mode == SHIELD_ACTIVATION_TRIGGER:
             self._store_shield_charge(player, seconds, now)
-            # BR-022: in trigger mode the cooldown runs from the grant (the charge
+            # UC-048 BR-007: in trigger mode the cooldown runs from the grant (the charge
             # stored), not from the activation; recorded before the first await, so a
             # feedback that fails or is cancelled still counts the stored charge.
             self._record_agent_shield(serial, now, seconds)
@@ -280,11 +280,11 @@ class ShieldMixin:
             )
             return True
 
-        # Sound only on the unprotected -> protected transition (UC-040
-        # BR-010); an extension restarts the LED fade silently.
+        # Sound only on the unprotected -> protected transition (UC-048
+        # BR-003); an extension restarts the LED fade silently.
         was_protected = self._shield_protected(player, game_clock.now())
         player.grace_until = new_grace
-        self._arm_shield_end_grace(player, new_grace)  # UC-040 BR-035: the end is known now
+        self._arm_shield_end_grace(player, new_grace)  # UC-048 BR-015: the end is known now
         self._record_agent_shield(serial, now, seconds)
         logger.info(f"Shield granted to {serial} for {seconds:.1f}s (grace_until={new_grace:.2f})")
 
@@ -299,7 +299,7 @@ class ShieldMixin:
             )
         self.record_intervention(serial, types=SHIELD_INTERVENTION_TYPES)  # UC-101 BR-001
 
-        # The helped cue (UC-040 BR-031), then the shield's own feedback (UC-040 A16).
+        # The helped cue (UC-048 BR-013), then the shield's own feedback (UC-048 A1).
         await self._send_shield_help_cue(player)
         await self._send_shield_feedback(player, new_grace - game_clock.now(), kind="full", sound=not was_protected)
 
@@ -308,9 +308,9 @@ class ShieldMixin:
     def _grant_hold_and_mode(self) -> tuple[ShieldHoldParams | None, str | None]:
         """``(hold values, activation mode)`` for the grant being applied now; synchronous.
 
-        UC-040 BR-027: a hold game adds the grant to the player's energy (A36), so
-        ``mode`` is None when ``hold`` is set. UC-040 BR-019: otherwise, in trigger
-        mode the grant is a charge the player activates (A30). Read per grant, so a
+        UC-048 BR-011: a hold game adds the grant to the player's energy (UC-048 A8), so
+        ``mode`` is None when ``hold`` is set. UC-048 BR-004: otherwise, in trigger
+        mode the grant is a charge the player activates (UC-048 A3). Read per grant, so a
         flip applies to the next grant only; the grant that latched the game reuses
         the latch's read.
         """
@@ -324,10 +324,10 @@ class ShieldMixin:
         return hold, mode
 
     # ------------------------------------------------------------------ #
-    # Group shield (UC-040 A47, A48, BR-033; #2467)
+    # Group shield (UC-048 A13, A14, BR-014; #2467)
     # ------------------------------------------------------------------ #
     def _group_grant_policy(self) -> tuple[bool, bool, int, int]:
-        """``(enabled, real_games, max_per_game, max_targets)`` read at the grant (BR-033).
+        """``(enabled, real_games, max_per_game, max_targets)`` read at the grant (UC-048 BR-014).
 
         Operator flags in the ``agent`` set with no targeting (flags.md §3), read in
         the game's flag context like the shield limits. A missing or unreadable flag
@@ -346,7 +346,7 @@ class ShieldMixin:
         )
 
     def _refuse_group(self, reason: str, serial: str | None = None, detail: str = "") -> None:
-        """Log and raise a whole-group refusal (UC-040 A48); nothing is applied."""
+        """Log and raise a whole-group refusal (UC-048 A14); nothing is applied."""
         from services.game_coordinator.intervention_errors import InterventionNotApplied
 
         logger.info(
@@ -369,7 +369,7 @@ class ShieldMixin:
         raise InterventionNotApplied(GROUP_REFUSED_PREFIX + reason, detail or reason, refused_serial=serial or "")
 
     def _group_set_refusal(self, serials: list[str], seconds: float, max_targets: int) -> tuple[str, str | None] | None:
-        """The payload check of a group (A48): ``(reason, serial)`` or None; pure."""
+        """The payload check of a group (UC-048 A14): ``(reason, serial)`` or None; pure."""
         if not math.isfinite(seconds) or not GROUP_MIN_SECONDS <= seconds <= GROUP_MAX_SECONDS:
             return GROUP_REFUSED_BAD_SET, None
         if len(serials) < GROUP_MIN_TARGETS or len(serials) > max_targets:
@@ -385,7 +385,7 @@ class ShieldMixin:
     async def grant_group_shield(
         self, serials: list[str], seconds: float, *, low_battery: frozenset[str] = frozenset()
     ) -> bool:
-        """Shield every player of ``serials`` for ``seconds``, or nobody (UC-040 A47, A48, BR-033).
+        """Shield every player of ``serials`` for ``seconds``, or nobody (UC-048 A13, A14, BR-014).
 
         One event, one game-loop turn. Phases 0 to 2 run without an await, so no
         frame, no other handler and no other grant can run between the first check
@@ -455,7 +455,7 @@ class ShieldMixin:
                     continue
                 was_protected = self._shield_protected(player, now)
                 player.grace_until = new_grace
-                self._arm_shield_end_grace(player, new_grace)  # UC-040 BR-035
+                self._arm_shield_end_grace(player, new_grace)  # UC-048 BR-015
                 self._record_agent_shield(player.serial, now, seconds)
                 if player.span:
                     with contextlib.suppress(Exception):
@@ -471,6 +471,8 @@ class ShieldMixin:
                 self.record_intervention(player.serial, types=SHIELD_INTERVENTION_TYPES)
                 applied.append((player, was_protected))
         self._agent_group_grants += 1
+        with contextlib.suppress(Exception):
+            metrics.shield_group_grants.labels(**self._game_state_labels()).set(self._agent_group_grants)
         logger.info(
             f"Group shield applied in {self.game_id}: {len(players)} players, {seconds:.1f}s, "
             f"{len(applied)} new ({self._agent_group_grants} of {max_per_game} group shields)"
@@ -493,12 +495,12 @@ class ShieldMixin:
         return True
 
     async def _send_shield_help_cue(self, player: "Player") -> None:
-        """Pulse the helped controller magenta before the shield colour (#2395, UC-040 A42, BR-031).
+        """Pulse the helped controller magenta before the shield colour (#2395, UC-048 A12, BR-013).
 
         Called only by an applied ``grant_shield`` (the agent's grant), after the
         protection, charge or energy is in place and before the shield's LED command.
         Best-effort: a failed write is logged and never fails the grant. Never sent
-        once the game is ending (A42 step 3): ``grant_shield`` refuses such a grant
+        once the game is ending (UC-048 A12 step 3): ``grant_shield`` refuses such a grant
         already; this re-check covers a latch that lands while the grant runs.
         """
         if not self.gameplay_stream or self._shield_grants_closed():
@@ -526,11 +528,11 @@ class ShieldMixin:
             logger.warning(f"Shield help cue for {player.serial} failed (shield unaffected): {e}")
 
     def _shield_grants_closed(self) -> bool:
-        """True once the game is ending: outcome latched, force-ended, or ENDING / ENDED (UC-040 A42 step 3)."""
+        """True once the game is ending: outcome latched, force-ended, or ENDING / ENDED (UC-048 A12 step 3)."""
         return self.game_ending()
 
     def _shield_limits(self) -> tuple[int, int]:
-        """``(max shields per player per game, cooldown seconds)`` for the next grant (UC-040 BR-022).
+        """``(max shields per player per game, cooldown seconds)`` for the next grant (UC-048 BR-007).
 
         Operator flags in the ``agent`` set, read per grant with the game's context
         (flags.md §3). 0 means unlimited / off. A read error or a negative value
@@ -559,15 +561,15 @@ class ShieldMixin:
         mode: str | None,
         hold: ShieldHoldParams | None,
     ) -> str | None:
-        """The reason a grant to ``player`` is refused at ``now``, or None (UC-040 A31, A34, A37, A42).
+        """The reason a grant to ``player`` is refused at ``now``, or None (UC-048 A4, A7, A9, A12).
 
         Pure: no write, no await, no span event; it reads the shield-limit flags
         only when the checks reach them. ``hold`` is the game's latched hold
         values (None outside hold mode); ``mode`` the activation mode of this
         grant (ignored in hold mode). The order is ``grant_shield``'s:
-        ``game_ending``; then in hold mode the budget, then the pool (A37), in
-        trigger mode ``already_charged`` (A31); then the cap, then the cooldown
-        (BR-022). ``seconds`` does not decide a refusal today; it is part of the
+        ``game_ending``; then in hold mode the budget, then the pool (UC-048 A9), in
+        trigger mode ``already_charged`` (UC-048 A4); then the cap, then the cooldown
+        (UC-048 BR-007). ``seconds`` does not decide a refusal today; it is part of the
         signature so a caller checks a grant with the values it will apply.
         """
         del seconds  # no refusal depends on the length (see the docstring)
@@ -604,7 +606,7 @@ class ShieldMixin:
             return
         reason, cooldown_remaining = refusal
         if reason in (SHIELD_REFUSED_GAME_ENDING, SHIELD_REFUSED_ALREADY_CHARGED):
-            # No shield_refused span event for these two (A31, A42 step 3), as before.
+            # No shield_refused span event for these two (UC-048 A4, UC-048 A12 step 3), as before.
             from services.game_coordinator.intervention_errors import InterventionNotApplied
 
             if reason == SHIELD_REFUSED_ALREADY_CHARGED:
@@ -615,7 +617,7 @@ class ShieldMixin:
         self._refuse_shield(player, reason, self._agent_shield_grants.get(player.serial, 0), cooldown_remaining)
 
     def _refuse_shield(self, player: "Player", reason: str, used: int, cooldown_remaining: float) -> None:
-        """Log, record ``shield_refused`` on the player's span and raise (UC-040 A34)."""
+        """Log, record ``shield_refused`` on the player's span and raise (UC-048 A7)."""
         from services.game_coordinator.intervention_errors import InterventionNotApplied
 
         logger.info(
@@ -636,9 +638,22 @@ class ShieldMixin:
         raise InterventionNotApplied(reason)
 
     def _record_agent_shield(self, serial: str, now: float, seconds: float) -> None:
-        """Count an applied agent shield and remember its own end (UC-040 BR-022; never ``grace_until``)."""
+        """Count an applied agent shield and remember its own end (UC-048 BR-007; never ``grace_until``)."""
         self._agent_shield_grants[serial] = self._agent_shield_grants.get(serial, 0) + 1
         self._agent_shield_last_end[serial] = now + seconds
+        _, cooldown = self._shield_limits()
+        until = game_clock.to_wall(now + seconds + cooldown) if cooldown > 0 else 0.0
+        self._publish_shield_gate(serial, grants=self._agent_shield_grants[serial], cooldown_until=until)
+
+    def _publish_shield_gate(self, serial: str, **stats: float) -> None:
+        """Set ``game_player_shield_gate`` stats of ``serial``: the agent filters its grants on them (UC-048 A4, A6).
+
+        The cooldown end is exported with the cooldown read at the grant; a later flag
+        change only makes the agent's view stale, and the coordinator still refuses.
+        """
+        with contextlib.suppress(Exception):
+            for stat, value in stats.items():
+                metrics.player_shield_gate.labels(serial=serial, game_id=self.game_id, stat=stat).set(round(value, 3))
 
     def _shield_protected(self, player: "Player", now: float) -> bool:
         """Whether any shield protection (grace / invincibility / toughness boost) is active."""
@@ -655,7 +670,7 @@ class ShieldMixin:
     ) -> None:
         """Shield LED effect + shield sound + ``player_shielded`` event (#1301).
 
-        UC-040 A16 / BR-008..BR-010. One command per grant: the controller manager
+        UC-048 A1 / BR-001..BR-003. One command per grant: the controller manager
         renders the fade / last-second blink / restore, so nothing is streamed and
         no task is kept here. ``sound`` is False for an extension of an already
         protected player (the LED restarts silently). Each channel is tried on
@@ -738,23 +753,23 @@ class ShieldMixin:
             logger.warning(f"player_shielded event for {serial} failed (protection unaffected): {e}")
 
     async def _end_shield_feedback(self) -> None:
-        """End every shield effect still running before the end-of-game effects (#1301, UC-040 A17).
+        """End every shield effect still running before the end-of-game effects (#1301, UC-048 A2).
 
         A zero-duration SHIELD ends only a running shield on the controller (the
         controller manager never cancels another effect for it) and restores the
         base colour. Best-effort; clears the record either way.
 
-        A held shield charge ends here too, with ``game_end`` (UC-040 A32, #1837).
+        A held shield charge ends here too, with ``game_end`` (UC-048 A5, #1837).
         """
         for player in self.players.values():
             if player.shield_charge_seconds > 0:
                 await self._discard_shield_charge(player, CHARGE_OUTCOME_GAME_END)
         now = game_clock.now()
-        # UC-040 A39: a hold game drops every pool; an open activation ends game_end.
+        # UC-048 A11: a hold game drops every pool; an open activation ends game_end.
         if self._shield_hold is not None:
             for player in self.players.values():
                 self._drop_shield_hold(player, HOLD_OUTCOME_GAME_END, now)
-        # UC-040 BR-026: no hold command after this point; SHIELD 0 below ends the hold layers too.
+        # UC-048 BR-010: no hold command after this point; SHIELD 0 below ends the hold layers too.
         hold_serials = await self._stop_hold_feedback()
         running = [serial for serial, until in self._shield_feedback_until.items() if until > now]
         running += [serial for serial in hold_serials if serial not in running]
@@ -779,17 +794,17 @@ class ShieldMixin:
             logger.warning(f"Ending shield feedback failed: {e}")
 
     # ------------------------------------------------------------------
-    # Shield charge (FR-160; UC-040 A30-A32, BR-019-BR-021; UC-030 A6)
+    # Shield charge (FR-160; UC-048 A3-A5, BR-004-BR-006; UC-030 A6)
     # ------------------------------------------------------------------
 
     def _shield_mode_flag_applies(self) -> bool:
-        """UC-040 BR-019: the allow-listed mode, in a real game or a shadow game whose pattern presses the trigger."""
+        """UC-048 BR-004: the allow-listed mode, in a real game or a shadow game whose pattern presses the trigger."""
         if not self.SHIELD_TRIGGER_ALLOWED:
             return False
         return self.game_kind != GAME_KIND_SHADOW or self.pattern_trigger_policy is True
 
     def _shield_activation_mode(self) -> str:
-        """``instant``, ``trigger`` or ``hold`` for the next grant_shield (UC-040 BR-019, BR-027).
+        """``instant``, ``trigger`` or ``hold`` for the next grant_shield (UC-048 BR-004, BR-011).
 
         Only an allow-listed mode (``SHIELD_TRIGGER_ALLOWED``, Free-for-All) in a
         real game, or in a shadow game whose archetype presses the trigger
@@ -807,7 +822,7 @@ class ShieldMixin:
         value = _base.read_string_flag("game", "shield.activation", DEFAULT_SHIELD_ACTIVATION, game_id=self.game_id)
         mode = resolve_shield_activation(value)
         if mode == SHIELD_ACTIVATION_HOLD and self._shield_hold_latched:
-            # BR-027: a game not latched to hold keeps the mode it latched at its start.
+            # UC-048 BR-011: a game not latched to hold keeps the mode it latched at its start.
             return self._shield_mode_at_start
         return mode
 
@@ -845,16 +860,17 @@ class ShieldMixin:
             logger.warning(f"{effect_name} for {player.serial} failed (charge state unaffected): {e}")
 
     def _store_shield_charge(self, player: "Player", seconds: float, now: float) -> None:
-        """Store one shield charge for the player (UC-040 A30, BR-020); synchronous.
+        """Store one shield charge for the player (UC-048 A3, BR-005); synchronous.
 
         ``grace_until`` is left alone: the player is not protected until they
         activate the charge with the trigger (UC-030 A6). A grant while a charge
         is held is refused by ``grant_shield`` before this runs (``already_charged``,
-        A31); the intervention manager records it as blocked and refunds the
+        UC-048 A4); the intervention manager records it as blocked and refunds the
         backstop reservation. The feedback follows in ``_shield_charge_feedback``.
         """
         expiry = self._read_charge_expiry()
         player.shield_charge_seconds = seconds
+        self._publish_shield_gate(player.serial, charged=1)
         player.shield_charge_granted_at = now
         player.shield_charge_expires_at = now + expiry if expiry > 0 else 0.0
         identity = player_identity_attributes(player.serial, player.name)
@@ -880,8 +896,8 @@ class ShieldMixin:
         self.record_intervention(player.serial, types=SHIELD_INTERVENTION_TYPES)  # UC-101 BR-001
 
     async def _shield_charge_feedback(self, player: "Player", seconds: float, now: float) -> None:
-        """The stored charge's feedback: help cue, charge layer, ``player_shield_charged`` (BR-021, BR-031)."""
-        await self._send_shield_help_cue(player)  # UC-040 BR-031: before the charge layer
+        """The stored charge's feedback: help cue, charge layer, ``player_shield_charged`` (UC-048 BR-006, BR-013)."""
+        await self._send_shield_help_cue(player)  # UC-048 BR-013: before the charge layer
         await self._send_shield_charge_layer(player, now)
         try:
             await self.event_publisher(
@@ -900,7 +916,7 @@ class ShieldMixin:
             logger.warning(f"player_shield_charged event for {player.serial} failed (charge unaffected): {e}")
 
     async def _send_shield_charge_layer(self, player: "Player", now: float) -> None:
-        """Send (or re-send) the charge LED layer for the time left, capped at 120 s (BR-021)."""
+        """Send (or re-send) the charge LED layer for the time left, capped at 120 s (UC-048 BR-006)."""
         if player.shield_charge_expires_at:
             layer_s = min(player.shield_charge_expires_at - now, SHIELD_CHARGE_LAYER_MAX_SECONDS)
         else:
@@ -914,8 +930,8 @@ class ShieldMixin:
     async def _process_shield_charge(self, player: "Player", edge: bool, now: float) -> None:
         """Frame-path work for a player who holds a charge or pressed the trigger (UC-030 BR-005).
 
-        Lazy expiry (no timer, BR-020), the re-send before the 120 s layer cap
-        (BR-021), then the activation when the press is valid: a charge is held
+        Lazy expiry (no timer, UC-048 BR-005), the re-send before the 120 s layer cap
+        (UC-048 BR-006), then the activation when the press is valid: a charge is held
         and no grace, shield or invincibility window is open. An invalid press does
         nothing and is not remembered.
         """
@@ -934,6 +950,8 @@ class ShieldMixin:
         await self._activate_shield_charge(player, now)
 
     def _clear_shield_charge(self, player: "Player") -> None:
+        if player.shield_charge_seconds > 0:
+            self._publish_shield_gate(player.serial, charged=0)
         player.shield_charge_seconds = 0.0
         player.shield_charge_granted_at = 0.0
         player.shield_charge_expires_at = 0.0
@@ -956,7 +974,7 @@ class ShieldMixin:
         delay_ms = int(round((now - player.shield_charge_granted_at) * 1000))
         self._clear_shield_charge(player)
         player.grace_until = max(player.grace_until, now + seconds)
-        self._arm_shield_end_grace(player, player.grace_until)  # UC-040 BR-035
+        self._arm_shield_end_grace(player, player.grace_until)  # UC-048 BR-015
         logger.info(f"Shield charge activated by {player.serial}: {seconds:.1f}s after {delay_ms} ms")
 
         # A6 step 2: SHIELD_CHARGE 0, then SHIELD and SWELL (in _send_shield_feedback).
@@ -974,13 +992,13 @@ class ShieldMixin:
                 )
         self._end_shield_charge_span(player, CHARGE_OUTCOME_ACTIVATED, delay_ms)
         await self._publish_charge_ended(player, CHARGE_OUTCOME_ACTIVATED)
-        # The player acted, so the sound always plays (UC-040 A16 / UC-030 A6).
+        # The player acted, so the sound always plays (UC-048 A1 / UC-030 A6).
         await self._send_shield_feedback(
             player, player.grace_until - now, kind="full", sound=True, charge_delay_ms=delay_ms
         )
 
     async def _discard_shield_charge(self, player: "Player", reason: str) -> None:
-        """Drop a held charge unused: expired, death or game end (UC-040 A32)."""
+        """Drop a held charge unused: expired, death or game end (UC-048 A5)."""
         if player.shield_charge_seconds <= 0:
             return
         self._clear_shield_charge(player)
@@ -1007,14 +1025,14 @@ class ShieldMixin:
             logger.warning(f"player_shield_charge_ended event for {player.serial} failed: {e}")
 
     async def _resend_shield_layers(self) -> None:
-        """Re-send held charges and running shields on a (re)created stream (UC-040 BR-021).
+        """Re-send held charges and running shields on a (re)created stream (UC-048 BR-006).
 
         Nothing is held when the stream is first created, so this only sends
         after a mid-game reconnect, on every attempt. A running full shield or
         toughness boost is re-sent with the time left; a charge with its layer.
         """
         now = game_clock.now()
-        self._queue_hold_feedback_all()  # UC-040 BR-026: the hold state of every living player
+        self._queue_hold_feedback_all()  # UC-048 BR-010: the hold state of every living player
         for serial, player in self.players.items():
             if not player.alive:
                 continue
@@ -1043,21 +1061,21 @@ class ShieldMixin:
                 self._drop_shield_hold(player, HOLD_OUTCOME_GAME_END, now)
 
     # ------------------------------------------------------------------
-    # Shield hold (FR-161; UC-030 A7, BR-008, BR-009; UC-040 A36-A39,
-    # BR-024-BR-027). Everything here is synchronous: no I/O, nothing awaited.
+    # Shield hold (FR-161; UC-030 A7, BR-008, BR-009; UC-048 A8-A11,
+    # UC-048 BR-008-BR-027). Everything here is synchronous: no I/O, nothing awaited.
     # ------------------------------------------------------------------
 
     def _latch_shield_hold(self) -> ShieldHoldParams | None:
-        """Latch hold mode and its values once per game (UC-040 BR-027); None = not a hold game.
+        """Latch hold mode and its values once per game (UC-048 BR-011); None = not a hold game.
 
         Called at the start of the game loop and by the first grant, in the game's
         flag context, so an experiment arm resolves. Only Free-for-All games (the
-        BR-019 allow-list), real or shadow with ``pattern_trigger_policy``, can be hold
+        UC-048 BR-004 allow-list), real or shadow with ``pattern_trigger_policy``, can be hold
         games. Every player starts with the starting energy, clamped to the cap and the budget.
         """
         if self._shield_hold_latched:
             return self._shield_hold
-        # UC-040 BR-035: the end grace is latched here in every mode and branch, because
+        # UC-048 BR-015: the end grace is latched here in every mode and branch, because
         # instant shields exist in every mode.
         self._latch_shield_end_grace()
         if not self._shield_mode_flag_applies():
@@ -1123,7 +1141,7 @@ class ShieldMixin:
         return params
 
     def _latch_shield_end_grace(self) -> None:
-        """Read ``shield.end_grace_seconds`` once per game, in the game's flag context (UC-040 BR-035)."""
+        """Read ``shield.end_grace_seconds`` once per game, in the game's flag context (UC-048 BR-015)."""
         # A literal key, so the contract scan resolves the read.
         raw = _base.read_float_flag(
             "game", "shield.end_grace_seconds", DEFAULT_SHIELD_END_GRACE_SECONDS, game_id=self.game_id
@@ -1131,7 +1149,7 @@ class ShieldMixin:
         self._shield_end_grace = resolve_end_grace(raw)
 
     def _arm_shield_end_grace(self, player: "Player", shield_end: float, cap: float | None = None) -> float:
-        """A shield ends at ``shield_end``: open the end grace window after it (UC-040 BR-035).
+        """A shield ends at ``shield_end``: open the end grace window after it (UC-048 BR-015).
 
         Assigned, never added, so windows never stack. ``cap`` limits the window (a hold
         run-out: at most the activation's cost). With a window the first unprotected
@@ -1203,7 +1221,7 @@ class ShieldMixin:
                 metrics.shield_hold_setting.remove(key, *labels)
 
     def _set_hold_gauges(self, player: "Player", now: float) -> None:
-        """Set a player's hold gauges for the agent (telemetry.md §6, UC-040 A37, UC-042 BR-007); no I/O.
+        """Set a player's hold gauges for the agent (telemetry.md §6, UC-048 A9, UC-042 BR-007); no I/O.
 
         A dead player's pool reads 0 and inactive; the totals keep their last value
         (energy + used = initial + granted + recharged holds only while the pool lives).
@@ -1236,7 +1254,7 @@ class ShieldMixin:
                 metrics.player_shield_stats.labels(serial=serial, game_id=game_id, stat=total).set(round(value, 3))
 
     def _read_shield_hold_cues(self) -> ShieldHoldCues:
-        """Read the hold feedback cue values once, with the hold values (UC-040 BR-026, BR-027)."""
+        """Read the hold feedback cue values once, with the hold values (UC-048 BR-010, BR-011)."""
         # Literal flag keys, so the contract scan resolves each read.
         raw = {
             "shield.charge_rumble_intensity": _base.read_int_flag(
@@ -1271,7 +1289,7 @@ class ShieldMixin:
         )
 
     def _start_shield_hold_clock(self, now: float) -> None:
-        """Start the recharge clock of every pool at the start of the game loop (UC-040 A38)."""
+        """Start the recharge clock of every pool at the start of the game loop (UC-048 A10)."""
         if self._shield_hold is None:
             return
         for player in self.players.values():
@@ -1279,14 +1297,14 @@ class ShieldMixin:
                 player.hold_energy_at = now
 
     def _shield_hold_budget_left(self, player: "Player", now: float) -> float:
-        """Budget remaining at ``now``, counting the running activation (UC-040 BR-024)."""
+        """Budget remaining at ``now``, counting the running activation (UC-048 BR-008)."""
         used = player.hold_budget_used
         if player.hold_started_at:
             used += max(0.0, min(now, player.hold_until) - player.hold_started_at)
         return max(0.0, self._shield_hold.budget - used)
 
     def _shield_hold_energy(self, player: "Player", now: float) -> float:
-        """The player's energy at ``now``: drained while active, recharged while idle (UC-040 BR-024, BR-025, A38)."""
+        """The player's energy at ``now``: drained while active, recharged while idle (UC-048 BR-008, BR-009, A10)."""
         hold = self._shield_hold
         if player.hold_started_at:
             spent = max(0.0, min(now, player.hold_until) - player.hold_started_at)
@@ -1338,7 +1356,7 @@ class ShieldMixin:
             return
         player.hold_started_at = now
         player.hold_pressed = True
-        # UC-040 BR-035: a re-hold inside the end grace window starts at once and closes it.
+        # UC-048 BR-015: a re-hold inside the end grace window starts at once and closes it.
         player.end_grace_until = 0.0
         player.shield_end_at = 0.0
         player.hold_energy_start = energy
@@ -1348,7 +1366,7 @@ class ShieldMixin:
         player.hold_last_pressed_at = now
         player.hold_min_burst_applied = False
         player.hold_activations += 1
-        self._queue_hold_feedback(player)  # UC-040 BR-026: SHIELD_HOLD, sent by the outbound task
+        self._queue_hold_feedback(player)  # UC-048 BR-010: SHIELD_HOLD, sent by the outbound task
         if player.span:
             with contextlib.suppress(Exception):
                 player._shield_hold_span = tracer.start_span(
@@ -1364,7 +1382,7 @@ class ShieldMixin:
                 )
 
     def _release_shield_hold(self, player: "Player", released_at: float, hold: ShieldHoldParams) -> None:
-        """The trigger reads released: the cost is ``max(held, min burst)``, at most the usable energy (BR-024)."""
+        """The trigger reads released: cost ``max(held, min burst)``, at most the usable energy (UC-048 BR-008)."""
         held = max(0.0, released_at - player.hold_started_at)
         cost = min(max(held, hold.min_burst), player.hold_usable_start)
         player.hold_min_burst_applied = held < hold.min_burst
@@ -1372,7 +1390,7 @@ class ShieldMixin:
         player.hold_pressed = False
 
     def _end_shield_hold(self, player: "Player", outcome: str, now: float) -> None:
-        """End the running activation: book its cost, close its span, count it (UC-030 A7 step 4, UC-040 A39)."""
+        """End the running activation: book its cost, close its span, count it (UC-030 A7 step 4, UC-048 A11)."""
         hold = self._shield_hold
         ended_at = min(now, player.hold_until)
         cost = max(0.0, ended_at - player.hold_started_at)
@@ -1390,14 +1408,14 @@ class ShieldMixin:
         end_grace = 0.0
         if ran_out:
             player.hold_empties += 1
-            # UC-040 BR-035: a window only when the energy ran out, never after a release, and
+            # UC-048 BR-015: a window only when the energy ran out, never after a release, and
             # at most the activation's cost, so run-outs and recharge never chain into immunity.
             end_grace = self._arm_shield_end_grace(player, ended_at, cap=cost)
         elif outcome == HOLD_OUTCOME_RELEASED:
             player.shield_end_at = ended_at
         if outcome in (HOLD_OUTCOME_RELEASED, HOLD_OUTCOME_EMPTY, HOLD_OUTCOME_BUDGET_EXHAUSTED):
             player.hold_prime_cap = True  # UC-030 BR-009
-            # UC-040 BR-026: SHIELD_HOLD 0 and the idle energy, with the empty pulse when it ran out.
+            # UC-048 BR-010: SHIELD_HOLD 0 and the idle energy, with the empty pulse when it ran out.
             self._queue_hold_feedback(player, HOLD_CUE_NONE if outcome == HOLD_OUTCOME_RELEASED else HOLD_CUE_EMPTY)
         span, player._shield_hold_span = player._shield_hold_span, None
         if span is not None:
@@ -1426,7 +1444,7 @@ class ShieldMixin:
                     )
 
     def _drop_shield_hold(self, player: "Player", outcome: str, now: float) -> None:
-        """Drop the pool on death, disconnect or game end (UC-040 A39); a running activation ends with ``outcome``."""
+        """Drop the pool on death, disconnect or game end (UC-048 A11); a running activation ends with ``outcome``."""
         if player.hold_started_at:
             self._end_shield_hold(player, outcome, now)
         player.hold_energy = 0.0
@@ -1444,7 +1462,7 @@ class ShieldMixin:
                 self._release_shield_hold(player, player.hold_last_pressed_at, hold)
 
     # ------------------------------------------------------------------
-    # Hold feedback (UC-040 BR-026): one ordered outbound task per hold game.
+    # Hold feedback (UC-048 BR-010): one ordered outbound task per hold game.
     # The frame path only marks a player; nothing here is awaited in the frame.
     # ------------------------------------------------------------------
 
@@ -1479,7 +1497,7 @@ class ShieldMixin:
         self._hold_feedback_wakeup.set()
 
     async def _shield_hold_feedback_loop(self) -> None:
-        """Send the marked players' hold state, in mark order, one write at a time (UC-040 BR-026)."""
+        """Send the marked players' hold state, in mark order, one write at a time (UC-048 BR-010)."""
         wakeup = self._hold_feedback_wakeup
         while True:
             try:
@@ -1607,7 +1625,7 @@ class ShieldMixin:
         )
 
     async def _send_hold_feedback(self, serial: str, cue: int) -> None:
-        """Send one player's hold state as it is now (UC-040 BR-026).
+        """Send one player's hold state as it is now (UC-048 BR-010).
 
         Active: ``SHIELD_HOLD`` with the time until the energy runs out (a new activation
         also plays ``shield_up``, at most once per 2 s). Idle: ``SHIELD_HOLD`` 0 when one
@@ -1686,9 +1704,9 @@ class ShieldMixin:
         return True
 
     def _shield_energy_refusal(self, player: "Player", now: float, hold: ShieldHoldParams) -> str | None:
-        """The reason a grant could add no energy (UC-040 A37), or None; pure.
+        """The reason a grant could add no energy (UC-048 A9), or None; pure.
 
-        Order: budget used up, then pool full. The BR-022 cap and cooldown come
+        Order: budget used up, then pool full. The UC-048 BR-007 cap and cooldown come
         after these (``_shield_grant_refusal``).
         """
         budget_left = self._shield_hold_budget_left(player, now)
@@ -1700,9 +1718,9 @@ class ShieldMixin:
         return None
 
     def _apply_shield_energy(self, player: "Player", seconds: float, now: float, hold: ShieldHoldParams) -> None:
-        """Add a checked grant to the player's energy and count it (UC-040 A36, BR-022).
+        """Add a checked grant to the player's energy and count it (UC-048 A8, BR-007).
 
-        The caller has run ``_shield_grant_refusal`` first (A37 and the limits);
+        The caller has run ``_shield_grant_refusal`` first (UC-048 A9 and the limits);
         synchronous. During a held activation the deadline moves out.
         """
         budget_left = self._shield_hold_budget_left(player, now)
@@ -1724,7 +1742,7 @@ class ShieldMixin:
         self._record_agent_shield(player.serial, now, seconds)
         self._hold_granted_pending.add(player.serial)  # UC-035 BR-008: the next energy event says source=agent
         energy_after = energy + added
-        # UC-040 A36 step 4: the grant pattern when the pool is full, one pulse for a top-up.
+        # UC-048 A8 step 4: the grant pattern when the pool is full, one pulse for a top-up.
         self._queue_hold_feedback(player, HOLD_CUE_FULL if energy_after >= full - 1e-9 else HOLD_CUE_TOP_UP)
         logger.info(f"Shield energy granted to {player.serial}: +{added:.2f}s of {seconds:.1f}s ({energy_after:.2f}s)")
         if player.span:
