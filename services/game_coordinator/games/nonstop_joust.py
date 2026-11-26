@@ -11,6 +11,7 @@ Features:
 Phase 36b: Refactored to extend BaseGameMode, eliminating ~450 lines of duplicate code.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -28,6 +29,7 @@ from services.game_coordinator.games.base import (
     Player,
     resolve_non_negative_duration,
 )
+from services.game_coordinator.games.game_loop import _LoopState
 from services.game_coordinator.stream_writes import serialized_write
 
 tracer = trace.get_tracer(__name__)
@@ -37,6 +39,7 @@ logger = logging.getLogger(__name__)
 # UPDATE_FREQUENCY is now read from runtime_config (Phase 43)
 RESPAWN_DURATION = 3.0  # seconds to respawn
 SPAWN_PROTECTION_DURATION = 2.0  # seconds of invulnerability after spawn
+SPAWN_PROTECTION_COLOR = (255, 255, 255)
 
 # Final-score formula: score = max(0, SCORE_BASE - deaths * SCORE_DEATH_PENALTY)
 SCORE_BASE = 100  # starting score with zero deaths
@@ -420,8 +423,6 @@ class NonstopJoustGame(BaseGameMode):
         logger.info("Starting Nonstop game loop with respawn mechanics and dynamic filtering...")
 
         try:
-            from proto import controller_manager_pb2
-
             # Player spans were created by the base _run_gameplay_phase (under "game.players").
             # Get runtime config (Phase 43: Dynamic Hz adjustment like base class)
             from services.game_coordinator.runtime_config import get_config_manager
@@ -465,88 +466,90 @@ class NonstopJoustGame(BaseGameMode):
                 await self._handle_warmup_disconnects()
                 last_alive_serials = await self._send_alive_filter_update(last_alive_serials)
 
-            # Frame metrics as in the base loop: game_loop_frames_dropped_total,
-            # actual Hz, consistency, jitter
-            loop_start_time = game_clock.now()
-            last_iteration_time = loop_start_time
-            loop_iterations = 0
-            target_frame_time_ms = 1000.0 / update_frequency_hz
-            recent_frame_times: list[float] = []
-            frames_on_target = 0
-
             # The controller manager paces the stream: each frame is processed as it
             # arrives, with no sleep in between (a sleep made the loop fall behind and
-            # act on stale frames, NFR-004)
-            async for gameplay_update in self.gameplay_stream:
-                # The time limit runs from the first frame after the warm-up (UC-026 step 3)
-                if self.start_time is None:
-                    self.start_time = game_clock.now()
-
-                if not self.running:
-                    break
-
-                # Disconnects first: they were detected before this frame, so a player
-                # whose respawn deadline also passed does not respawn and die twice
-                # (UC-026 A2)
-                disconnects = gameplay_update.disconnects
-                if disconnects:
-                    await self._abort_on_mass_disconnect([d.serial for d in disconnects])
-                for disconnect in disconnects:
-                    await self._handle_disconnect(disconnect.serial)
-
-                # Respawns whose deadline passed, before this frame's motion: a death in
-                # this frame respawns on the next one at the earliest (UC-026 step 2)
-                await self._update_respawn_timers()
-
-                # Motion; the time limit is checked once per frame below. The
-                # runtime config is read once for the frame.
-                with self._frame_config_scope():
-                    for gameplay_data in gameplay_update.controllers:
-                        await self._process_controller_state(gameplay_data)
-
-                # Check if alive players changed (Phase 45 - dynamic filtering)
-                # Note: Nonstop has frequent changes due to respawns
-                current_alive_serials = {p.serial for p in self.players.values() if p.alive}
-
-                if current_alive_serials != last_alive_serials:
-                    # Send filter update to server
-                    filter_msg = controller_manager_pb2.GameplayStreamControl(
-                        filter_update=controller_manager_pb2.FilterUpdate(serials=list(current_alive_serials))
-                    )
-                    await serialized_write(self.gameplay_stream, filter_msg)
-
-                    logger.info(
-                        f"Nonstop filter updated: {len(last_alive_serials)} → "
-                        f"{len(current_alive_serials)} alive players"
-                    )
-
-                    last_alive_serials = current_alive_serials
-
-                loop_iterations += 1
-                iteration_end = game_clock.now()
-                frames_on_target = self._update_frame_metrics(
-                    (iteration_end - last_iteration_time) * 1000,
-                    target_frame_time_ms,
-                    recent_frame_times,
-                    frames_on_target,
-                    loop_iterations,
-                    loop_start_time,
-                )
-                last_iteration_time = iteration_end
-
-                # Time limit: latch the outcome now, so a force-end after this point
-                # keeps the winner (UC-026 BR-003)
-                if await self._check_win_condition():
-                    self._time_limit_reached = True
-                    self._latch_game_outcome()
-                    break
-                await self._announce_time_left()
+            # act on stale frames, NFR-004). The base loop's reader adds the frame-gap
+            # watch and the reconnect (UC-030 BR-006, UC-026 BR-003); it sets start_time
+            # on the first frame, where the time limit starts (UC-026 step 3).
+            loop_start_time = game_clock.now()
+            loop = _LoopState(
+                loop_start_time=loop_start_time,
+                last_iteration_time=loop_start_time,
+                target_frame_time_ms=1000.0 / update_frequency_hz,
+                last_alive_serials=last_alive_serials,
+                clock=asyncio.get_running_loop().time,
+            )
+            await self._read_gameplay_frames(loop, self._handle_nonstop_frame)
 
         except Exception as e:
             logger.error(f"Game loop error: {e}", exc_info=True)
             raise
         # The stream stays open for the end-game step; run()'s teardown (natural end)
         # or cleanup() (force-end, error) closes it (UC-030 BR-006).
+
+    async def _handle_nonstop_frame(self, loop: _LoopState, gameplay_update) -> bool:
+        """One NonStop frame; True when the time limit ended the game.
+
+        A gRPC error of the call is a stream error (reconnect); any other error ends
+        the game without a reconnect, as in the base loop (UC-030 BR-006).
+        """
+        try:
+            await self._process_nonstop_frame(loop, gameplay_update)
+            self._record_loop_timing(loop)
+            # Time limit: latch the outcome now, so a force-end after this point
+            # keeps the winner (UC-026 BR-003)
+            if await self._check_win_condition():
+                self._time_limit_reached = True
+                self._latch_game_outcome()
+                return True
+            await self._announce_time_left()
+        except self._STREAM_CALL_ERRORS:
+            raise
+        except Exception:
+            loop.frame_failed = True
+            raise
+        return False
+
+    async def _process_nonstop_frame(self, loop: _LoopState, gameplay_update) -> None:
+        """Disconnects, respawns, motion and the alive filter of one frame."""
+        from proto import controller_manager_pb2
+
+        # Disconnects first: they were detected before this frame, so a player
+        # whose respawn deadline also passed does not respawn and die twice
+        # (UC-026 A2)
+        disconnects = gameplay_update.disconnects
+        if disconnects:
+            await self._abort_on_mass_disconnect([d.serial for d in disconnects])
+        for disconnect in disconnects:
+            await self._handle_disconnect(disconnect.serial)
+
+        # Respawns whose deadline passed, before this frame's motion: a death in
+        # this frame respawns on the next one at the earliest (UC-026 step 2)
+        await self._update_respawn_timers()
+
+        # Motion; the runtime config is read once for the frame.
+        with self._frame_config_scope():
+            for gameplay_data in gameplay_update.controllers:
+                await self._process_controller_state(gameplay_data)
+
+        # Respawns change the alive set often (Phase 45 dynamic filtering)
+        current_alive_serials = {p.serial for p in self.players.values() if p.alive}
+        last_alive_serials = loop.last_alive_serials
+        if current_alive_serials != last_alive_serials:
+            filter_msg = controller_manager_pb2.GameplayStreamControl(
+                filter_update=controller_manager_pb2.FilterUpdate(serials=list(current_alive_serials))
+            )
+            await serialized_write(self.gameplay_stream, filter_msg)
+            logger.info(
+                f"Nonstop filter updated: {len(last_alive_serials)} → {len(current_alive_serials)} alive players"
+            )
+            loop.last_alive_serials = current_alive_serials
+
+    def _stream_config_color(self, player) -> tuple[int, int, int]:
+        """A reopened stream keeps a spawn-protected player's protection colour (UC-030 BR-006)."""
+        if player.alive and player.spawn_protected:
+            return SPAWN_PROTECTION_COLOR
+        return super()._stream_config_color(player)
 
     async def _resend_dead_player_state(self) -> None:
         """A reopened stream's config sends the countdown players off: show the colour again (#2484).
@@ -578,11 +581,12 @@ class NonstopJoustGame(BaseGameMode):
             # Check spawn protection expiration
             if player.spawn_protected and current_time >= player.spawn_protection_end:
                 player.spawn_protected = False
-                # Return to normal white color via stream
+                # Back to the player's own colour (UC-026 step 2)
+                r, g, b = player.color
                 base_color_cmd = controller_manager_pb2.GameplayStreamControl(
                     base_color=controller_manager_pb2.ControllerColorConfig(
                         serial=serial,
-                        color=controller_manager_pb2.RGB(r=255, g=255, b=255),  # White
+                        color=controller_manager_pb2.RGB(r=r, g=g, b=b),
                     )
                 )
                 await serialized_write(self.gameplay_stream, base_color_cmd)
@@ -672,16 +676,6 @@ class NonstopJoustGame(BaseGameMode):
         # Play respawn sound (Phase 29)
         await self._play_sound(Sound.SFX_JOIN, priority=2)
 
-        # White color during spawn protection via stream
-        base_color_cmd = controller_manager_pb2.GameplayStreamControl(
-            base_color=controller_manager_pb2.ControllerColorConfig(
-                serial=serial,
-                color=controller_manager_pb2.RGB(r=255, g=255, b=255),  # White
-            )
-        )
-        await serialized_write(self.gameplay_stream, base_color_cmd)
-
-        # Publish respawn event
         await self.event_publisher(
             "player_respawned",
             {
@@ -691,6 +685,17 @@ class NonstopJoustGame(BaseGameMode):
                 "score": player.score,
             },
         )
+
+        # A write on a dying call is skipped: the respawn stands (an agent revive records it)
+        # and the reopened stream's config shows the protection colour (UC-030 BR-006).
+        r, g, b = SPAWN_PROTECTION_COLOR
+        base_color_cmd = controller_manager_pb2.GameplayStreamControl(
+            base_color=controller_manager_pb2.ControllerColorConfig(
+                serial=serial,
+                color=controller_manager_pb2.RGB(r=r, g=g, b=b),
+            )
+        )
+        await self._write_effect_guarded(base_color_cmd, "Respawn protection colour")
         return True
 
     async def _set_unique_colors(self):

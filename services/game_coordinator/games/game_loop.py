@@ -7,7 +7,7 @@ Tests patch ``tracer``, ``time``, ``get_config_manager``, ``record_moment`` and
 import asyncio
 import contextlib
 import statistics
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -438,58 +438,75 @@ class GameLoopMixin:
             )
 
             logger.info("Starting gameplay data stream loop, waiting for first update...")
-            gap_watch = asyncio.create_task(self._watch_frame_gap(loop))
-            try:
-                while self.running:
-                    stream_error: Exception
-                    try:
-                        loop.waiting_since = loop.clock()
-                        async for gameplay_update in self.gameplay_stream:
-                            # Processing and the win hold never count as silence: only the wait does.
-                            loop.waiting_since = None
-                            self._note_frame_received(loop)
-
-                            if not self.running:
-                                logger.info("Game running=False, breaking loop")
-                                break
-
-                            if await self._process_loop_frame(loop, gameplay_update):
-                                await self._hold_win_display()
-                                return
-
-                            self._record_loop_timing(loop)
-                            loop.waiting_since = loop.clock()
-                        loop.waiting_since = None
-
-                        # A call that ended with an error status is dead, not finished: an
-                        # exhausted grpc.aio reader ends the loop silently (UC-030 BR-006).
-                        if self.running and await self._gameplay_call_failed():
-                            raise RuntimeError("gameplay call ended with an error status")
-
-                        # Stream ended normally (server closed it with OK) — exit loop
-                        break
-
-                    except asyncio.CancelledError:
-                        # grpc.aio raises CancelledError from a read of a locally cancelled call;
-                        # only the gap watch's cancel is a stream error, a task cancel is not.
-                        current = asyncio.current_task()
-                        if not loop.silenced or (current is not None and current.cancelling()):
-                            raise
-                        stream_error = RuntimeError(f"gameplay stream silent: no frame for {self._STREAM_FRAME_GAP_S}s")
-
-                    except Exception as e:
-                        stream_error = e
-
-                    loop.waiting_since = None
-                    loop.silenced = False
-                    if await self._on_loop_stream_error(loop, stream_error):
-                        break
-            finally:
-                gap_watch.cancel()
+            await self._read_gameplay_frames(loop, self._handle_loop_frame)
 
         except Exception as e:
             logger.error(f"Game loop error: {e}", exc_info=True)
             raise
+
+    async def _handle_loop_frame(self, loop: "_LoopState", gameplay_update) -> bool:
+        """The base loop's frame: process it, hold the win display on a win; True ends the loop."""
+        if await self._process_loop_frame(loop, gameplay_update):
+            await self._hold_win_display()
+            return True
+        self._record_loop_timing(loop)
+        return False
+
+    async def _read_gameplay_frames(
+        self, loop: "_LoopState", handle_frame: Callable[["_LoopState", Any], Awaitable[bool]]
+    ) -> None:
+        """Feed each frame to ``handle_frame`` with the frame-gap watch and the reconnect (UC-030 BR-006).
+
+        Shared by the base loop and NonStop's own loop. Returns when ``handle_frame``
+        returns True, the game stops, or the call ends OK; raises when the reconnects
+        run out or a frame fails outside the gameplay call.
+        """
+        gap_watch = asyncio.create_task(self._watch_frame_gap(loop))
+        try:
+            while self.running:
+                stream_error: Exception
+                try:
+                    loop.waiting_since = loop.clock()
+                    async for gameplay_update in self.gameplay_stream:
+                        # Processing and the win hold never count as silence: only the wait does.
+                        loop.waiting_since = None
+                        self._note_frame_received(loop)
+
+                        if not self.running:
+                            logger.info("Game running=False, breaking loop")
+                            break
+
+                        if await handle_frame(loop, gameplay_update):
+                            return
+
+                        loop.waiting_since = loop.clock()
+                    loop.waiting_since = None
+
+                    # A call that ended with an error status is dead, not finished: an
+                    # exhausted grpc.aio reader ends the loop silently (UC-030 BR-006).
+                    if self.running and await self._gameplay_call_failed():
+                        raise RuntimeError("gameplay call ended with an error status")
+
+                    # Stream ended normally (server closed it with OK) — exit loop
+                    break
+
+                except asyncio.CancelledError:
+                    # grpc.aio raises CancelledError from a read of a locally cancelled call;
+                    # only the gap watch's cancel is a stream error, a task cancel is not.
+                    current = asyncio.current_task()
+                    if not loop.silenced or (current is not None and current.cancelling()):
+                        raise
+                    stream_error = RuntimeError(f"gameplay stream silent: no frame for {self._STREAM_FRAME_GAP_S}s")
+
+                except Exception as e:
+                    stream_error = e
+
+                loop.waiting_since = None
+                loop.silenced = False
+                if await self._on_loop_stream_error(loop, stream_error):
+                    break
+        finally:
+            gap_watch.cancel()
 
     def _open_game_loop(self) -> set[str]:
         """The loop's startup grace and shield hold latch; returns the alive serials."""
@@ -515,17 +532,26 @@ class GameLoopMixin:
         """Cancel the gameplay call when the loop has waited a whole gap for a frame (UC-030 BR-006).
 
         The read then ends and the loop reconnects. The check runs every half gap,
-        so it fires 1 to 1.5 gaps into the wait.
+        so it fires 1 to 1.5 gaps into the wait. A tick that raises is logged and the
+        watch goes on: detection must never stop for the rest of the game.
         """
         gap = self._STREAM_FRAME_GAP_S
         while True:
             await asyncio.sleep(gap / 2)
-            since = loop.waiting_since
-            if since is not None and loop.clock() - since >= gap:
-                logger.warning(f"Gameplay stream sent no frame for {gap}s: cancelling the call to reconnect")
-                loop.waiting_since = None
-                loop.silenced = True
-                self._cancel_gameplay_call()
+            try:
+                self._check_frame_gap(loop, gap)
+            except Exception:
+                logger.exception("Frame-gap watch tick failed, still watching")
+
+    def _check_frame_gap(self, loop: "_LoopState", gap: float) -> None:
+        """One watch tick: cancel the call once the loop has waited ``gap`` for a frame."""
+        since = loop.waiting_since
+        if since is not None and loop.clock() - since >= gap:
+            logger.warning(f"Gameplay stream sent no frame for {gap}s: cancelling the call to reconnect")
+            # Cancel first: a cancel that raises leaves the wait marked, so the next tick tries again.
+            self._cancel_gameplay_call()
+            loop.waiting_since = None
+            loop.silenced = True
 
     def _note_frame_received(self, loop: "_LoopState") -> None:
         """The first frame's start time, and the reconnect count's healthy-run reset."""

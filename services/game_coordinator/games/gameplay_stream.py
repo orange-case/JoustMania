@@ -11,6 +11,7 @@ import grpc
 
 from lib.types import Sound
 from services.game_coordinator.games import base as _base
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import (
     DEAD_PLAYER_COLOR,
     logger,
@@ -66,7 +67,7 @@ class GameplayStreamMixin:
         # A dead player's LED is off (UC-030 step 9): the config never lights it again (BR-006, #2471).
         player_colors = []
         for serial, player in self.players.items():
-            r, g, b = player.color if player.alive else DEAD_PLAYER_COLOR
+            r, g, b = self._stream_config_color(player)
             player_colors.append(
                 controller_manager_pb2.ControllerColorConfig(
                     serial=serial,
@@ -97,6 +98,10 @@ class GameplayStreamMixin:
         # shield with the time left, so the new stream owns the layers again.
         await self._resend_shield_layers()
         await self._resend_dead_player_state()
+
+    def _stream_config_color(self, player) -> tuple[int, int, int]:
+        """A player's colour in a (re)opened stream's config; a dead player's LED stays off (UC-030 step 9)."""
+        return player.color if player.alive else DEAD_PLAYER_COLOR
 
     def _is_mid_swap(self, serial: str) -> bool:  # noqa: ARG002
         """True for a player whose ``alive`` is False only while a swap repaints it (Swapper, #2484).
@@ -357,7 +362,7 @@ class GameplayStreamMixin:
         """
         if attempt > max_attempts:
             logger.error(f"Gameplay stream failed after {max_attempts} reconnect attempts, ending game with no winner")
-            await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=3)
+            await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=sound_priority.CRITICAL)
             raise GameplayStreamLostError(f"gameplay_stream_lost: {error!r}") from error
 
         backoff = attempt * self._RECONNECT_BACKOFF_S  # Linear backoff: 1s, 2s, 3s
