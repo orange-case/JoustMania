@@ -54,6 +54,9 @@ STREAM_CLOSE_DRAIN_TIMEOUT_S = 1.0
 STREAM_CLOSE_CANCEL_GRACE_S = 0.1
 # Ends a gameplay stream's command queue: everything queued before it is applied first.
 _END_OF_CONTROLS = object()
+# Wakes a button stream waiting on its queue when shutdown starts.
+_SHUTDOWN_WAKE = object()
+SHUTDOWN_ABORT_DETAILS = "controller-manager shutting down"
 
 tracer = get_tracer(__name__)
 
@@ -78,6 +81,7 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
         # Phase 57: Initialize backend (platform-agnostic)
         self.backend = create_backend()
         self._backend_closed = False
+        self._shutting_down = False
         logger.info(f"Using controller backend: {self.backend.__class__.__name__}")
 
         self.tracked_controllers: dict[str, dict] = {}  # serial -> controller info
@@ -315,11 +319,15 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
 
         try:
             while not context.cancelled():
+                if self._shutting_down:
+                    await context.abort(grpc.StatusCode.UNAVAILABLE, SHUTDOWN_ABORT_DETAILS)
                 try:
                     # Wait for button events (Phase 34: async wait with timeout)
                     # Check for events every 1s to stay responsive to cancellation
                     try:
                         event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+                        if event is _SHUTDOWN_WAKE:
+                            continue
                         yield event
                     except TimeoutError:  # Phase 34: asyncio exception
                         # No events, continue loop to check cancellation
@@ -653,6 +661,10 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
             next_frame_time = time.monotonic()
 
             while not context.cancelled():
+                # Checked before the frame is built: discovery stops right after shutdown starts,
+                # so any later frame would be stale (UC-030 BR-006).
+                if self._shutting_down:
+                    await context.abort(grpc.StatusCode.UNAVAILABLE, SHUTDOWN_ABORT_DETAILS)
                 try:
                     # UC-046 FR-103: a stream naming pattern controllers runs at the
                     # archetype's pinned stream_rate_hz and ignores the flag override.
@@ -984,9 +996,21 @@ class ControllerManagerServicer(controller_manager_pb2_grpc.ControllerManagerSer
             controllers=controllers,
         )
 
+    def begin_shutdown(self) -> None:
+        """End every client stream with UNAVAILABLE, now and for any call opened later. Idempotent."""
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        for queue in self.button_event_subscribers.values():
+            # A full queue needs no wake: its stream reads the next event at once and checks then.
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(_SHUTDOWN_WAKE)
+        logger.info("Shutdown started: ending client streams with UNAVAILABLE")
+
     async def shutdown(self):
         """Shutdown the controller manager."""
         logger.info("Shutting down ControllerManager...")
+        self.begin_shutdown()
 
         for cleanup in list(self._shield_cleanup_tasks):
             cleanup.cancel()
