@@ -913,8 +913,9 @@ func TestPullAppliesEnabledWatch(t *testing.T) {
 // UC: UC-054 BR-005
 // UC: UC-045 main
 // A Flagsmith stop of agent/enabled holds although the baseline is watch: the
-// feature switched off and a bool false read as off; a bool true is refused
-// and never turns the agent on.
+// feature switched off and a bool or text false read as off; a bool or text
+// true is refused, which discards the local value (UC-054 BR-005), so the
+// baseline watch applies and the agent never turns on.
 func TestPullEnabledStopsFailClosed(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -924,8 +925,9 @@ func TestPullEnabledStopsFailClosed(t *testing.T) {
 	}{
 		{"feature switched off", fsState("enabled", false, "on"), "off", false},
 		{"bool false", fsState("enabled", true, false), "off", false},
-		{"bool true", fsState("enabled", true, true), "watch", true},
-		{"text true", fsState("enabled", true, "true"), "watch", true},
+		{"text false", fsState("enabled", true, "false"), "off", false},
+		{"bool true", fsState("enabled", true, true), "", true},
+		{"text true", fsState("enabled", true, "true"), "", true},
 	}
 	for _, c := range cases {
 		t.Run("UC-054/BR-005 "+c.name, func(t *testing.T) {
@@ -936,7 +938,11 @@ func TestPullEnabledStopsFailClosed(t *testing.T) {
 			h.online()
 			h.setDoc([]map[string]any{c.state})
 			h.round()
-			if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != c.variant {
+			v, _ := h.local("agent", "enabled", flagsmith.ScopeStack)
+			if c.variant == "" && v.Present {
+				t.Fatalf("agent/enabled = %+v, want no stack value (the baseline watch)", v)
+			}
+			if c.variant != "" && v.Variant != c.variant {
 				t.Fatalf("agent/enabled = %+v, want %s", v, c.variant)
 			}
 			if refused := h.link.Status().Refused != 0; refused != c.refused {

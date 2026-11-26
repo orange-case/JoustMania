@@ -1,6 +1,9 @@
 package flagsmith
 
 import (
+	"bytes"
+	"encoding/json"
+
 	"github.com/joustmania/flag-service/baseline"
 	"github.com/joustmania/flag-service/registry"
 )
@@ -33,6 +36,18 @@ func isKillKey(k Key) bool {
 // agent/enabled boots at `watch`, so Flagsmith's own off (the feature switched
 // off) and a bool false must still read as the stop, never as the baseline.
 const stopFlag, stopVariant = "agent/enabled", "off"
+
+// isFalse: a Flagsmith bool false, or the text "false".
+func isFalse(fv FSValue) bool {
+	switch fv.Type {
+	case TypeBool:
+		return string(bytes.TrimSpace(fv.Value)) == "false"
+	case TypeUnicode:
+		var s string
+		return json.Unmarshal(fv.Value, &s) == nil && s == "false"
+	}
+	return false
+}
 
 // stopValue is the `off` of agent/enabled; ok is false for every other flag.
 func stopValue(pol *registry.Policy, b *baseline.Flag) (Value, bool) {
