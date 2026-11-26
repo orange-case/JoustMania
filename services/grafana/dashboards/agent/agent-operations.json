@@ -2186,7 +2186,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Headless shadow games started per minute (games_started_total{game_kind=\"shadow\"}).",
+      "description": "Headless shadow games started per minute (game_started_total{game_kind=\"shadow\"}).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2258,7 +2258,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(games_started_total{game_kind=\"shadow\"}[5m])) * 60 or vector(0)",
+          "expr": "sum(rate(game_started_total{game_kind=\"shadow\"}[5m])) * 60 or vector(0)",
           "legendFormat": "started",
           "refId": "A"
         }

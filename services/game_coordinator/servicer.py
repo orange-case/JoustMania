@@ -840,11 +840,11 @@ class GameCoordinatorServicer(game_coordinator_pb2_grpc.GameCoordinatorServiceSe
         # Counted only once the game thread started (telemetry.md): a start that
         # fails after admission is not a started game. No await since
         # start_thread(), so a cancel can not land between the two.
-        # games_started_total is a CUMULATIVE counter: it deliberately does
+        # game_started_total is a CUMULATIVE counter: it deliberately does
         # NOT carry experiment_id/arm (a label on a cumulative counter is one
         # permanent series per experiment, forever). Per-experiment counts
         # come from the game span's experiment.id/arm attributes.
-        metrics.games_started_total.labels(
+        metrics.game_started_total.labels(
             mode=session.game_name,
             game_kind=game_kind,
         ).inc()

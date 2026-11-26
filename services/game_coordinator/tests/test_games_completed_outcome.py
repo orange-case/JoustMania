@@ -1,4 +1,4 @@
-"""games_completed_total{outcome} (#1427, maintainer decision 3).
+"""game_completed_total{outcome} (#1427, maintainer decision 3).
 
 The session labels each completed game with the game's own ``game.outcome``
 (UC-020 BR-003, #1328): winner, tie, completed or force_ended, or with
@@ -64,7 +64,7 @@ def _force_ended_game():
 
 
 async def _completed_labels(game, mock_tracer_mod, mock_factory, mock_metrics):
-    """Run a session whose factory returns ``game``; return the games_completed_total labels."""
+    """Run a session whose factory returns ``game``; return the game_completed_total labels."""
     session = _make_session(game_kind=GAME_KIND_PRIMARY)
     mock_tracer_mod.start_as_current_span = _tracer_mock().start_as_current_span
     game.run = AsyncMock()
@@ -72,8 +72,8 @@ async def _completed_labels(game, mock_tracer_mod, mock_factory, mock_metrics):
 
     await session._run_game_loop_async()
 
-    mock_metrics.games_completed_total.labels.return_value.inc.assert_called_once()
-    return mock_metrics.games_completed_total.labels.call_args.kwargs
+    mock_metrics.game_completed_total.labels.return_value.inc.assert_called_once()
+    return mock_metrics.game_completed_total.labels.call_args.kwargs
 
 
 class TestGamesCompletedOutcomeLabel:
@@ -130,7 +130,7 @@ class TestGamesCompletedOutcomeLabel:
         await session._run_game_loop_async()
 
         mock_factory.create_game.assert_not_called()
-        assert mock_metrics.games_completed_total.labels.call_args.kwargs["outcome"] == "error"
+        assert mock_metrics.game_completed_total.labels.call_args.kwargs["outcome"] == "error"
 
     @pytest.mark.uc("UC-020", br=["BR-003"])
     @pytest.mark.asyncio
@@ -145,7 +145,7 @@ class TestGamesCompletedOutcomeLabel:
 
         await session._run_game_loop_async()
 
-        assert mock_metrics.games_completed_total.labels.call_args.kwargs["outcome"] == "error"
+        assert mock_metrics.game_completed_total.labels.call_args.kwargs["outcome"] == "error"
 
     @pytest.mark.uc("UC-020", br=["BR-003"])
     @pytest.mark.asyncio
@@ -164,7 +164,7 @@ class TestGamesCompletedOutcomeLabel:
 
         error_calls = [c for c in session.event_bus.publish.call_args_list if c.args[0] == "game_error"]
         assert error_calls
-        assert mock_metrics.games_completed_total.labels.call_args.kwargs["outcome"] == "error"
+        assert mock_metrics.game_completed_total.labels.call_args.kwargs["outcome"] == "error"
 
     @pytest.mark.uc("UC-020", flow="A4", br=["BR-003"])
     @pytest.mark.asyncio
@@ -188,7 +188,7 @@ class TestGamesCompletedOutcomeLabel:
         await session._run_game_loop_async()
 
         mock_factory.create_game.assert_not_called()
-        assert mock_metrics.games_completed_total.labels.call_args.kwargs["outcome"] == "force_ended"
+        assert mock_metrics.game_completed_total.labels.call_args.kwargs["outcome"] == "force_ended"
 
 
 class TestCompletedGameOutcomeIsBounded:

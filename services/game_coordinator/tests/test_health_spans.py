@@ -107,7 +107,7 @@ class TestProcessHealthPollDegradation:
         game._process_health(player, "AA:BB:CC", gd4)
 
         mock_tracer.start_span.assert_called_once_with(
-            "controller_poll_degraded",
+            "game.controller.poll_degraded",
             context=mock_tracer.start_span.call_args.kwargs["context"],
             attributes={"player.serial": "AA:BB:CC"},
         )
@@ -328,7 +328,7 @@ class TestProcessHealthLedDegradation:
         game._process_health(player, "AA:BB:CC", gd)
 
         mock_tracer.start_span.assert_called_once_with(
-            "controller_led_degraded",
+            "game.controller.led_degraded",
             context=mock_tracer.start_span.call_args.kwargs["context"],
             attributes={"player.serial": "AA:BB:CC"},
         )

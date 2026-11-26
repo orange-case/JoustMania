@@ -22,7 +22,7 @@ from lib.otel_metrics import Counter, Gauge, Histogram
 # experiment_id/arm. This is safe precisely because they are gauges keyed on the
 # already-unbounded game_id and SET per live game — the experiment labels add no
 # permanent series; they come and go with the game's game_id and are cleared at
-# game end. The cumulative COUNTERS (games_started_total, games_completed_total)
+# game end. The cumulative COUNTERS (game_started_total, game_completed_total)
 # deliberately do NOT carry experiment_id/arm: a label on a cumulative counter
 # creates one permanent series per experiment value, forever (TSDB blow-up), which
 # violates the §4.2 cardinality discipline. Per-experiment counts come from the
@@ -50,8 +50,8 @@ game_duration_seconds = Gauge(
     ["game_kind", "game_id", "experiment_id", "arm"],
 )
 
-games_started_total = Counter(
-    "games_started_total",
+game_started_total = Counter(
+    "game_started_total",
     "Total number of games started",
     ["mode", "game_kind"],
 )
@@ -59,8 +59,8 @@ games_started_total = Counter(
 # outcome: the game's game.outcome (winner, tie, completed, force_ended; #1328) or
 # error (the session published game_error), bounded to those five values by
 # game_session (GAME_OUTCOMES, completed_game_outcome; #1427).
-games_completed_total = Counter(
-    "games_completed_total",
+game_completed_total = Counter(
+    "game_completed_total",
     "Total number of games completed, by outcome",
     ["mode", "game_kind", "outcome"],
 )
@@ -248,9 +248,9 @@ game_loop_frame_consistency_percent = Gauge(
     GAME_STATE_LABELS,
 )
 
-game_loop_jitter_ms = Gauge(
-    "game_loop_jitter_ms",
-    "Standard deviation of a live game loop's recent frame times in milliseconds",
+game_loop_jitter_seconds = Gauge(
+    "game_loop_jitter_seconds",
+    "Standard deviation of a live game loop's recent frame times in seconds",
     GAME_STATE_LABELS,
 )
 
@@ -269,7 +269,7 @@ GAME_STATE_GAUGES = (
     effective_death_threshold,
     actual_update_frequency_hz,
     game_loop_frame_consistency_percent,
-    game_loop_jitter_ms,
+    game_loop_jitter_seconds,
 )
 
 # Feature flag metrics (Phase 44). Evaluations are counted by the standard OpenFeature
@@ -382,8 +382,8 @@ player_warnings_total = Counter(
 
 # Histogram for distribution analysis
 accel_distribution = Histogram(
-    "game_accel_distribution",
-    "Distribution of acceleration magnitudes during gameplay",
+    "game_accel_magnitude_g",
+    "Distribution of acceleration magnitudes during gameplay, in g",
     ["game_mode"],
     buckets=[0.5, 1.0, 1.1, 1.3, 1.5, 1.8, 2.0, 2.5, 3.0, 4.0, 5.0],
 )

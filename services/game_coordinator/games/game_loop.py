@@ -332,7 +332,7 @@ class GameLoopMixin:
 
             if len(recent_frame_times) >= 2:
                 jitter_ms = statistics.stdev(recent_frame_times)
-                metrics.game_loop_jitter_ms.labels(**self._game_state_labels()).set(jitter_ms)
+                metrics.game_loop_jitter_seconds.labels(**self._game_state_labels()).set(jitter_ms / 1000)
 
         return frames_on_target
 
@@ -556,9 +556,9 @@ class GameLoopMixin:
         # UC-041 BR-004: the agent's span ids come only from game.phase.start.
         self._send_phase_start(gameplay_span, "gameplay_phase")
 
-        # Create "players" parent span (collapsible group in Jaeger)
+        # Create "game.players" parent span (collapsible group in Jaeger)
         self._players_span = _base.tracer.start_span(
-            "players",
+            "game.players",
             context=self.gameplay_span_context,
             attributes={"player_count": len(self.players)},
         )
@@ -573,7 +573,7 @@ class GameLoopMixin:
         self.game_cycle_context = trace.set_span_in_context(self._game_cycle_span)
         self._send_phase_start(self._game_cycle_span, "game_cycle")
 
-        # Create player lifecycle spans under "players" parent
+        # Create player lifecycle spans under "game.players" parent
         self._create_player_spans(players_ctx)
 
         # Open per-player countdown child spans
@@ -581,7 +581,7 @@ class GameLoopMixin:
             if player.span:
                 ctx = trace.set_span_in_context(player.span)
                 player._countdown_span = _base.tracer.start_span(
-                    "countdown_phase",
+                    "game.phase.countdown",
                     context=ctx,
                     attributes={"player.serial": player.serial},
                 )

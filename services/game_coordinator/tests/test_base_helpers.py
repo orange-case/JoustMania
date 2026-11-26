@@ -1406,7 +1406,7 @@ class TestStartIntensityRamp:
         game.gameplay_span = mock_span
         await game._start_intensity_ramp(1.0, scheduled=True)
         mock_span.add_event.assert_called_once_with(
-            "music_tempo_change",
+            "game.music.tempo_change",
             attributes={
                 "old_tempo": SLOW_MUSIC_SPEED,
                 "new_tempo": FAST_MUSIC_SPEED,

@@ -45,7 +45,7 @@ SESSION_GAUGES = (
     metrics.current_game_mode,
 )
 LOOP_HEALTH_GAUGES = (
-    metrics.game_loop_jitter_ms,
+    metrics.game_loop_jitter_seconds,
     metrics.game_loop_frame_consistency_percent,
 )
 
@@ -61,7 +61,7 @@ def live_gauges(monkeypatch):
 
 @pytest.fixture
 def completed_counter():
-    with patch.object(metrics, "games_completed_total", autospec=True) as counter:
+    with patch.object(metrics, "game_completed_total", autospec=True) as counter:
         yield counter
 
 
@@ -154,7 +154,7 @@ class TestRetireBeforeTeardown:
     @pytest.mark.uc("UC-041", flow="main", steps=[7])
     @pytest.mark.asyncio
     async def test_outcome_counter_still_counts_once_when_retire_wins(self, live_gauges, completed_counter):
-        """#1311: the cumulative games_completed_total is not a retired series; the
+        """#1311: the cumulative game_completed_total is not a retired series; the
         game is still counted exactly once with its outcome."""
         session = _make_session()
         game = _game_that_retires_before_teardown(session)
@@ -394,7 +394,7 @@ class TestLoopHealthGaugesPerGame:
             assert set(by_game) == {"game_real", "game_shadow"}, gauge.name
             assert by_game["game_real"][0] == GAME_KIND_PRIMARY
             assert by_game["game_shadow"][0] == GAME_KIND_SHADOW
-        jitter = {dict(k)["game_id"]: v for k, v in metrics.game_loop_jitter_ms._values.items()}
+        jitter = {dict(k)["game_id"]: v for k, v in metrics.game_loop_jitter_seconds._values.items()}
         assert jitter["game_shadow"] > jitter["game_real"]
 
     @pytest.mark.uc("UC-041", flow="main", steps=[5])

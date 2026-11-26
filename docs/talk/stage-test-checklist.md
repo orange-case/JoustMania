@@ -166,7 +166,7 @@ q 'sum(last_over_time(game_loop_frames_dropped_total[3d]))'
 q 'sum(increase(controller_stream_frame_overruns_total[30m]))'
 # frame consistency and jitter of live games
 q 'game_loop_frame_consistency_percent'
-q 'max_over_time(game_loop_jitter_ms[30m])'
+q 'max_over_time(game_loop_jitter_seconds[30m])'
 # event-loop contention in the controller manager (poll lateness p99)
 q 'histogram_quantile(0.99, sum by (le) (rate(controller_poll_loop_lateness_seconds_bucket[10m])))'
 # disconnects and batteries

@@ -112,7 +112,7 @@ class TournamentGame(StreamedIntroGameMode):
     advance to next round).
     """
 
-    RUN_SPAN_NAME = "tournament_game"
+    RUN_SPAN_NAME = "game.run.tournament"
 
     def __init__(
         self,
@@ -487,7 +487,7 @@ class TournamentGame(StreamedIntroGameMode):
 
         # Create match span (inherits current active context: gameplay_phase)
         self.match_span = tracer.start_span(
-            "tournament_match",
+            "game.tournament.match",
             attributes={
                 "match.id": match.match_id,
                 "match.round": match.round_number,

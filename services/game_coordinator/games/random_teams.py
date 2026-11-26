@@ -37,7 +37,7 @@ class RandomTeamsGame(TeamsGameBase):
     Implements Random Teams-specific behavior:
     - Random team assignment (shuffled team pool)
     - Random team colors (shuffled from TEAM_COLORS)
-    - team_formation_phase before countdown (show team colors)
+    - game.phase.team_formation before countdown (show team colors)
     """
 
     def __init__(
@@ -219,4 +219,4 @@ class RandomTeamsGame(TeamsGameBase):
         Returns:
             List containing TeamFormationPhase
         """
-        return [Phase(name="team_formation_phase", execute=self._team_formation)]
+        return [Phase(name="team_formation", execute=self._team_formation)]
