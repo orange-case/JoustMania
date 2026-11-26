@@ -23,7 +23,7 @@
 #                    changes: any non-test_*.py file under tests/service/
 #                    (except README.md), tests/contract/{flagd_harness,infra_config}.py,
 #                    tests/integration/{helpers,flag_service}.py,
-#                    tests/integration/fake_openai/**, docker-compose.yml,
+#                    docker-compose.yml,
 #                    services/flagd/**, services/flag-service/**, proto/**,
 #                    pyproject.toml, uv.lock, and the game_coordinator,
 #                    menu and controller_manager server.py files.
@@ -200,7 +200,7 @@ classify() {  # map one changed path to gates; each case mirrors a ci.yml filter
         selected[service]=1
       fi ;;
     tests/contract/flagd_harness.py|tests/contract/flagd_rpc_retry.py|tests/contract/infra_config.py|\
-    tests/integration/helpers.py|tests/integration/flag_service.py|tests/integration/fake_openai/*|docker-compose.yml|\
+    tests/integration/helpers.py|tests/integration/flag_service.py|docker-compose.yml|\
     services/flagd/*|services/flag-service/*|proto/*|pyproject.toml|uv.lock|\
     services/game_coordinator/server.py|services/menu/server.py|services/controller_manager/server.py)
       selected[service]=1 ;;

@@ -144,7 +144,7 @@ ok "refusals changed no flag and never touched docker" "$(all_clear && [[ ! -e "
 
 # 2. a full run over pre-existing operator overlays (writer, TTL): A,B,B,A, everything back exactly.
 seed_operator_overlays
-"${AB}" run --archetype slow_cascade --seeds 7 --reps 2 --backend openai --no-verify --out "${WORK}/o2" >"${WORK}/out2"
+"${AB}" run --archetype slow_cascade --seeds 7 --reps 2 --backend claude --no-verify --out "${WORK}/o2" >"${WORK}/out2"
 order="$(python3 -c 'import json,sys; print("".join(json.loads(l)["arm"] for l in open(sys.argv[1])))' "${WORK}/o2/manifest.jsonl")"
 ok "games run A,B,B,A" "$([[ "${order}" == ABBA ]] && echo 0 || echo 1)"
 ok "operator overlays (writer, TTL) come back exactly, experiment_dynamic_enabled included" "$(operator_overlays_intact && echo 0 || echo 1)"
@@ -211,11 +211,11 @@ seed_operator_overlays
 "${AB_RUN[@]}" --out "${WORK}/o5" >/dev/null 2>&1 &
 pid=$!
 wait_until 20 arms_written || true
-"${FLAGS}" set agent decision.backend openai --writer operator >/dev/null
+"${FLAGS}" set agent decision.backend jev --writer operator >/dev/null
 "${FLAGS}" clear agent experiment_dynamic_enabled >/dev/null
 kill -TERM "${pid}"
 wait "${pid}" 2>/dev/null || true
-ok "the operator's new overlay survives" "$([[ "$(ov_spec decision.backend)" == variant:openai && "$(ov_writer decision.backend)" == operator ]] && echo 0 || echo 1)"
+ok "the operator's new overlay survives" "$([[ "$(ov_spec decision.backend)" == variant:jev && "$(ov_writer decision.backend)" == operator ]] && echo 0 || echo 1)"
 ok "an overlay the operator cleared stays cleared" "$([[ "$(ov_spec experiment_dynamic_enabled)" == none ]] && echo 0 || echo 1)"
 ok "the other flags are restored" "$([[ "$(ov_spec interventions_allowed)" == variant:ambient && "$(ov_spec decision.prompt_profile)" == none ]] && no_arms && echo 0 || echo 1)"
 clear_all

@@ -49,11 +49,11 @@ func remotePrediction(req decide.Request, resp decide.Response, d Decision, curr
 // askModelPrediction reports whether a remote request to backend carries the
 // prediction ask: decision.predictions.ask_model and decision.predictions_enabled
 // are on (an ask whose answer is never registered would only cost tokens and
-// change the prompt) and the backend is claude or openai (never jev, whose typed
+// change the prompt) and the backend is claude (never jev, whose typed
 // wire format has no free choice for it).
 func askModelPrediction(snapshot flags.Snapshot, backend string) bool {
 	return snapshot.Decision.PredictionsAskModel && !snapshot.Decision.PredictionsOff &&
-		(backend == flags.DecisionBackendClaude || backend == flags.DecisionBackendOpenAI)
+		backend == flags.DecisionBackendClaude
 }
 
 // droppedPrediction is the reason the model's prediction of rec's accepted

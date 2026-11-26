@@ -8,7 +8,7 @@
 
 The agent answers "should I intervene in this game, how, and on whom" through one
 contract, independent of who answers: the in-process **rules** engine or a remote
-model (**claude**, **openai**-compatible, **jev**). The backend is selected live by
+model (**claude**, **jev**). The backend is selected live by
 the `decision.backend` flag (epic #1225). The rules engine is the floor: whenever a
 remote backend cannot answer usefully, rules decide and the game keeps playing
 (northstar constraint "degrade, never stall", C-004).
@@ -33,7 +33,7 @@ Defined in `decide/decide.go`.
 | `Answer` | `QuestionID`, `Choice`, `Probabilities map[string]float64`, `Score`, `Noul *float64`, `Confidence` | `services/agent/decide/decide.go:Answer` |
 | `PlayerState` | `Serial`, `Alive`, `Intensity*`, `Variance*`, `Skill*`, `BatteryPct*`, `EliminationOrder` | pointer = never observed (`services/agent/decide/decide.go:PlayerState`) |
 | `State` | `GameID`, `GameKind`, `Digest`, `Narrative`, `Players` (sorted by serial), `ElapsedSeconds` | `services/agent/decide/decide.go:State` |
-| `Request` | `State`, `Questions`, `Context` (`json:"-"`), `PromptProfile` (`json:"prompt_profile,omitempty"`, #2467), `OperatorBrief` (`json:"operator_brief,omitempty"`, #2687, outside `State`, so not in the digest; set on claude and openai requests only, §3), `Bounds` (`json:"-"`, #2696: the game's magnitude ranges, §2.1; nil = the code defaults) | Only in-process backends (rules) may read `Context`; remote backends must not; never logged with `%v` (`services/agent/decide/decide.go:Request`). `PromptProfile` is set by the agent from `decision.prompt_profile` on the remote path only (§3); it is outside `State`, so it is not part of the State digest. |
+| `Request` | `State`, `Questions`, `Context` (`json:"-"`), `PromptProfile` (`json:"prompt_profile,omitempty"`, #2467), `OperatorBrief` (`json:"operator_brief,omitempty"`, #2687, outside `State`, so not in the digest; set on claude requests only, §3), `Bounds` (`json:"-"`, #2696: the game's magnitude ranges, §2.1; nil = the code defaults) | Only in-process backends (rules) may read `Context`; remote backends must not; never logged with `%v` (`services/agent/decide/decide.go:Request`). `PromptProfile` is set by the agent from `decision.prompt_profile` on the remote path only (§3); it is outside `State`, so it is not part of the State digest. |
 | `Response` | `Answers`, `Backend`, `Rationale` | Rationale is untrusted text, truncated (`services/agent/decide/decide.go:Response`). |
 | `Backend` | `Name() string`, `Decide(ctx, Request) (Response, error)` | Must honour `ctx` cancellation; the caller validates (`services/agent/decide/decide.go:Backend`). Optional `Available() bool`; false means `backend_unavailable` (`services/agent/decision/decide_registry.go:availability`, `DecideRegistry.Resolve`). |
 
@@ -43,9 +43,9 @@ the permission chain never see them:
 | Type | Fields | Rules |
 |---|---|---|
 | `Prediction` | `Characteristic`, `Scope` (`game`/`field`/`target`), `Target` (serial, `target` scope only), `Template`, `HorizonS`, `P`, `Source` (`rules`/`lever_default`/`model`/`control`), `Rule` | What the decider expects to be true after its answer is applied; closed vocabulary (§14.2). Carried on `Response.Prediction` and on the decide record, **never** on `Decision` or `DecisionOutcome` (the rules-path golden stays byte-identical). `P` is the probability the prediction comes true. |
-| `PredictionAsk` | `*Question` (`ffa.prediction`, kind choice), `json:"prediction_ask,omitempty"` | `Request.PredictionAsk`, **outside `Request.Questions`**. Set only when `decision.predictions.ask_model` and `decision.predictions_enabled` are on and the backend is claude or openai (§3). nil under v1. |
+| `PredictionAsk` | `*Question` (`ffa.prediction`, kind choice), `json:"prediction_ask,omitempty"` | `Request.PredictionAsk`, **outside `Request.Questions`**. Set only when `decision.predictions.ask_model` and `decision.predictions_enabled` are on and the backend is claude (§3). nil under v1. |
 | `PredictionDropped` | reason string on `Response` | `missing`, `bad_option`, `bad_confidence`, `no_target`, `inconsistent`. A model prediction that fails its own check (§4.1) is dropped; the decision is unaffected. |
-| `Goal` (goal profiles) | `*GoalLines{Profile, Source, Goal, Now, OffBand}`, `json:"goal,omitempty"` (`OffBand`, the labels of the terms outside their band now that can be judged, `off_band,omitempty`, is rendered by jev only, #2498) | `Request.Goal`, outside `State` (not in the digest) and outside `Questions`. Set only on a claude, openai or jev (#2498) request under `decision.goal_in_prompt` (never implied by `decision.prompt_profile`), for a goal profile with terms (§14.4; `services/agent/decision/goal_hook.go:goalLines`). nil whenever `decision.goal_in_prompt` is off. |
+| `Goal` (goal profiles) | `*GoalLines{Profile, Source, Goal, Now, OffBand}`, `json:"goal,omitempty"` (`OffBand`, the labels of the terms outside their band now that can be judged, `off_band,omitempty`, is rendered by jev only, #2498) | `Request.Goal`, outside `State` (not in the digest) and outside `Questions`. Set only on a claude or jev (#2498) request under `decision.goal_in_prompt` (never implied by `decision.prompt_profile`), for a goal profile with terms (§14.4; `services/agent/decision/goal_hook.go:goalLines`). nil whenever `decision.goal_in_prompt` is off. |
 
 ### 1.1 Question kinds
 
@@ -58,7 +58,7 @@ the permission chain never see them:
 
 Notes on `noul` (TypeSafe Jev's yes/no primitive, #1229): backward compatible (`noul` is omitted from
 choice / score answers). Support per backend: **jev** answers natively; **rules** answers 0.5 at confidence
-0; **claude** and **openai** reject a request containing a noul before any network I/O with an error
+0; **claude** rejects a request containing a noul before any network I/O with an error
 wrapping `ErrInvalid` (`llmio.Supported`, `services/agent/decide/llmio/llmio.go:Supported`), which the loop records as
 `fallback_reason=invalid_answer`. No caller-level FFA question is a noul; the Jev backend asks the internal `jev.gate` noul every stage-1 round (§3.1).
 
@@ -90,7 +90,7 @@ reflected. The rules engine does not read the state's danger fields; its danger 
 
 **Waiting players (#2513; [UC-040](../use_cases/UC-040.md) A49, BR-038).** A Fight Club or Tournament player waiting for its fight exports no gauges, so the agent evicts it from the game's context and remembers it as waiting (`GameContext.Waiting`, [UC-041](../use_cases/UC-041.md) BR-007). The state lists it as a player with `waiting: true`, `alive: false` and no readings, danger signals or shield fields, with its `elimination_order` when it already lost a round; it is not an `ffa.target` option (only alive serials are) and is not in jev's `alive_players`. Narrative: the session line adds ` waiting=<n>` after `eliminated=` and the player line reads `<serial> waiting`; digest: ` waiting=true` on the player only when set. A game without waiting players (every other mode) has the same state, narrative and digest as before, so `decision/testdata/rules_path_golden.json` and the user-message goldens stay byte-identical. The LLM system prompt (`llmio.go`, both profiles) defines the status in one sentence that describes the state only: a "waiting" player is a Fight Club or Tournament player between its fights, still in the game, not one of the alive players and without readings until it fights again, and the session line's `waiting=<n>` counts them; the `v1_system`, `profile_v1_system` and `profile_neutral_system` goldens and the v1 fingerprint pin (`profile_golden_test.go`) were regenerated for it. Jev (`jev/criteria.go`) describes the player as "waiting for its fight, still in the game." The rules' elimination fraction (R1, R2, R4's elimination path) counts waiting players through the game's `game_active_players` roster (UC-040 A49 step 2). Code: `services/agent/decide/state.go`, `decide/llmio/llmio.go`, `decide/backends/jev/criteria.go`; tests `decide/waiting_uc040_test.go`, `decide/backends/jev/criteria_waiting_uc040_test.go`, `decide/llmio/llmio_waiting_uc040_test.go`.
 
-**Stale readings (#2514; [UC-040](../use_cases/UC-040.md) A50, BR-039).** An alive player whose movement track fails `decide.FreshReadings` at the context's `UpdatedAt` (the check R3, R4 and R8 use: no readings, a frozen value, or a value last new more than 3 s ago) gets `readings_stale: true`, and its `intensity`, `variance` and `skill` are left out, so it has no danger signals and is never `most_headroom` or `struggling`. The player stays listed, `alive: true` and an `ffa.target` option; `battery_pct`, the shield fields and the applied factors stay; a player that is not alive (eliminated, waiting) is never marked. Narrative: the player line reads `<serial> alive readings_stale` with no `movement=` sparkline; digest: ` readings_stale=true` on the player only when set. The levers that need fresh readings are the rules' own (`decide.NeedsFreshReadings`): `adjust_player_sensitivity` (R3), `grant_shield` (R4), `eliminate_player` (R6, #2524) and `send_controller_effect` (R8, R9); the group lever `grant_group_shield` (#2467) has no rule and is not one of them. Jev does not offer a stale player as a target candidate of those four (the details-stage target options), and while alive players exist but none has fresh readings (the first second of a game, an agent restart, a stalled export) it leaves the four out of its intervention-stage options (`services/agent/decide/backends/jev/stale.go:withoutUntargetable`; the caller's `ffa.intervention` question and the routing distribution keep every option). In any other case without a candidate the target is answered `none` and the hook records `invalid/player_intervention_without_target` and describes the player as "Its movement readings are stale, so intensity, variance and skill are not known."; claude and openai keep the single-round target options, and the system prompt (both profiles) defines the marker in one sentence: what is left out and that those four levers targeted at the player are refused. A remote answer that applies one of them to a player whose readings are stale when it lands is discarded with `target_stale` (§4.4). The `v1_system`, `profile_v1_system` and `profile_neutral_system` goldens and the v1 fingerprint pin were regenerated for the sentence (and again when #2524 added `eliminate_player` to it); the user-message goldens and `decision/testdata/rules_path_golden.json` are unchanged. Code: `services/agent/decide/stale.go`, `decide/state.go`, `decide/llmio/llmio.go`, `decide/backends/jev/stale.go`, `decision/decide_hook.go`; tests `decide/stale_uc040_test.go`, `decide/llmio/llmio_stale_uc040_test.go`, `decide/backends/jev/stale_uc040_test.go`, `decision/stale_target_uc040_test.go`.
+**Stale readings (#2514; [UC-040](../use_cases/UC-040.md) A50, BR-039).** An alive player whose movement track fails `decide.FreshReadings` at the context's `UpdatedAt` (the check R3, R4 and R8 use: no readings, a frozen value, or a value last new more than 3 s ago) gets `readings_stale: true`, and its `intensity`, `variance` and `skill` are left out, so it has no danger signals and is never `most_headroom` or `struggling`. The player stays listed, `alive: true` and an `ffa.target` option; `battery_pct`, the shield fields and the applied factors stay; a player that is not alive (eliminated, waiting) is never marked. Narrative: the player line reads `<serial> alive readings_stale` with no `movement=` sparkline; digest: ` readings_stale=true` on the player only when set. The levers that need fresh readings are the rules' own (`decide.NeedsFreshReadings`): `adjust_player_sensitivity` (R3), `grant_shield` (R4), `eliminate_player` (R6, #2524) and `send_controller_effect` (R8, R9); the group lever `grant_group_shield` (#2467) has no rule and is not one of them. Jev does not offer a stale player as a target candidate of those four (the details-stage target options), and while alive players exist but none has fresh readings (the first second of a game, an agent restart, a stalled export) it leaves the four out of its intervention-stage options (`services/agent/decide/backends/jev/stale.go:withoutUntargetable`; the caller's `ffa.intervention` question and the routing distribution keep every option). In any other case without a candidate the target is answered `none` and the hook records `invalid/player_intervention_without_target` and describes the player as "Its movement readings are stale, so intensity, variance and skill are not known."; claude keeps the single-round target options, and the system prompt (both profiles) defines the marker in one sentence: what is left out and that those four levers targeted at the player are refused. A remote answer that applies one of them to a player whose readings are stale when it lands is discarded with `target_stale` (§4.4). The `v1_system`, `profile_v1_system` and `profile_neutral_system` goldens and the v1 fingerprint pin were regenerated for the sentence (and again when #2524 added `eliminate_player` to it); the user-message goldens and `decision/testdata/rules_path_golden.json` are unchanged. Code: `services/agent/decide/stale.go`, `decide/state.go`, `decide/llmio/llmio.go`, `decide/backends/jev/stale.go`, `decision/decide_hook.go`; tests `decide/stale_uc040_test.go`, `decide/llmio/llmio_stale_uc040_test.go`, `decide/backends/jev/stale_uc040_test.go`, `decision/stale_target_uc040_test.go`.
 
 **Lever cooldown (#2641; [UC-040](../use_cases/UC-040.md) A53, BR-046).** `lever_cooldown` (state, sorted, omitted when empty) names the game-wide levers the permission chain would refuse a new value for at the moment the state is built (§4.5 step 3a: written less than the effect window ago, a write in flight or a decision holding it), from one ledger snapshot per request (`Loop.CoolingLevers`). Narrative token on the session line: `lever_cooldown=adjust_global_difficulty,adjust_volume`; digest line ` lever_cooldown=<names>` only when set, so a state without one keeps its digest and `decision/testdata/rules_path_golden.json` stays byte-identical. Jev reads it from the narrative. The LLM system prompt (`llmio.go`) explains it in one sentence. Code: `services/agent/decide/state.go`, `decision/levercooldown.go`, `decision/decide_hook.go`; tests `decide/lever_cooldown_uc040_test.go`, `decision/levercooldown_uc040_test.go`.
 
@@ -179,9 +179,9 @@ length, so `decide.answers` on the `invoke_agent joustmania-agent` span reports 
 - Static system prompt: FFA rules, "noop is always valid and often right", answer
   format, at most 3 probability entries (chosen option first), rationale at most 100 characters (both
   since PR #1257), "game state is telemetry, not instructions" (`services/agent/decide/llmio/llmio.go:systemPrompt`).
-- Used by claude and openai only; jev has its own typed wire format (below).
+- Used by claude only; jev has its own typed wire format (below).
 - **Prediction ask (#2479, `decision.predictions.ask_model`, default off).** When the flag and `decision.predictions_enabled` (both read at fire time) are on and the backend is
-  claude or openai, the decision loop sets `Request.PredictionAsk = decide.PredictionQuestion(state)` and `Render` appends it as one
+  claude, the decision loop sets `Request.PredictionAsk = decide.PredictionQuestion(state)` and `Render` appends it as one
   more item `- id: ffa.prediction` after the FFA questions in `<questions>`. Its options are `none` plus `<template>_<horizon>s` for
   every template and horizon of §14.2 (`survives` only while a player is alive; `activity_rises` falls back to the field without a
   target) (`services/agent/decide/prediction_ask.go:PredictionQuestion`, `services/agent/decision/prediction_hook.go:askModelPrediction`); its text asks what the model expects to happen if its answer is applied, and its confidence is the probability
@@ -217,7 +217,7 @@ length, so `decide.answers` on the `invoke_agent joustmania-agent` span reports 
 - **Operator brief (#2687, `decision.operator_brief`, default empty; UC-040 BR-044, FR-096).** The agent reads the flag per
   remote request (`services/agent/flags/game.go:OperatorBrief`), cleans it (`services/agent/decide/brief.go:NormalizeOperatorBrief`:
   trimmed, at most 512 characters, control characters other than a line break, format and line/paragraph separator characters become spaces, `<` `>` and their full-width forms `＜` `＞` become `‹` and `›`) and
-  sets `Request.OperatorBrief` only when the backend is claude or openai (`services/agent/decision/operator_brief.go`).
+  sets `Request.OperatorBrief` only when the backend is claude (`services/agent/decision/operator_brief.go`).
   - Empty (the default, and an unreadable or blank flag): `Render` produces byte-identical prompts in every profile (the v1 and
     profile goldens are unchanged, `services/agent/decide/llmio/operator_brief_uc040_test.go` pins it).
   - Set: the user message starts with `<operator_brief>\n<brief>\n</operator_brief>\n\n` before `<game_state>`, and the system
@@ -245,7 +245,6 @@ length, so `decide.answers` on the `invoke_agent joustmania-agent` span reports 
 |---|---|---|---|
 | `rules` | in process | always | `decision/decide_rules.go` |
 | `claude` | Anthropic Messages API (official Go SDK), `POST {decision.claude.base_url}/v1/messages` (the SDK appends the path; the flag has no `/v1`), JSON-schema output; `max_tokens` 2048 where the model may think, 1024 where thinking is off (PR #1257); SDK retries 0 | `ANTHROPIC_API_KEY` + model | `services/agent/decide/backends/claude/claude.go:MaxTokens`, `services/agent/decide/backends/claude/claude.go:MaxTokensNoThinking`, `services/agent/decide/backends/claude/claude.go:newClient`, `services/agent/decide/backends/claude/claude.go:shapeFor`, `services/agent/decide/backends/claude/claude.go:Backend.params` |
-| `openai` | `POST {base_url}/chat/completions`, `response_format: json_schema` (`strict`); on a 400/422 whose body says the schema / format is unsupported, one retry with `json_object` in the same budget; the downgrade is remembered for that base URL + model for 10 minutes only if that retry succeeds (2xx) | `DECISION_OPENAI_API_KEY` + `decision.openai.model` + `decision.openai.base_url` | `services/agent/decide/backends/openai/openai.go:schemaDowngradeTTL`, `schemaUnsupportedBody`, `Backend.Available` |
 | `jev` | TypeSafe System One: `POST {decision.jev.base_url}/systemone`, `Authorization: Bearer`, typed body `{model, state, questions:{id:{type, instructions, criteria}}}`; plain HTTP, no retries on 429 / 529 | `JEV_API_KEY` only (base URL and model have defaults) | `services/agent/decide/backends/jev/wire.go:wirePath`, `services/agent/decide/backends/jev/jev.go:Backend.Decide`, `stages.go`, `services/agent/decide/backends/jev/jev.go:Backend.Available`, `decide/backends/jev/README.md` |
 
 **jev details** (PR #1261, #1229): `decision.jev.base_url` defaults to `https://api.typesafe.ai/v1` and
@@ -326,7 +325,7 @@ Consequences:
 dragging 0.36 / 0.35, collapsing 0.67 / 0.68, near-threshold 0.72 / 0.71. None reaches the global default
 threshold 0.8. A threshold of 0.6 makes near-threshold and collapsing act and leaves calm and dragging as noop,
 so Jev has its **own** threshold `decision.jev.act_confidence_threshold`, default variant `gate` (0.6), and acts
-out of the box (#1287); claude and openai keep the global `decision.act_confidence_threshold` (default 0.8),
+out of the box (#1287); claude keeps the global `decision.act_confidence_threshold` (default 0.8),
 whose `gate` variant (0.6) remains but no longer affects Jev unless Jev's flag is `inherit`. Dragging stays low because Jev does not derive "nobody eliminated for 130 s" from the timeline; a
 precomputed pace signal is a follow-up.
 
@@ -487,7 +486,7 @@ decision repeats the verdict as `decide.blocked` / `decide.block_reason` (§6, #
     inherit −1 / gate 0.6 / default 0.8 / strict 0.95). Jev's confidence is the calibrated gate p_yes (§3.1),
     not a self-report, so it has its own bar. The `inherit` sentinel (−1), and NaN or any other value outside
     [0,1], use the global flag instead; a flagd error yields 0.6 (the defaultVariant);
-  - every other backend (claude, openai): the global `decision.act_confidence_threshold` (default 0.8,
+  - every other backend (claude): the global `decision.act_confidence_threshold` (default 0.8,
     variants low 0.5 / gate 0.6 / strict 0.95; NaN or out of range → default).
 
   Both flags are read **live at landing** (`services/agent/decision/decide_hook.go:runDecideRemote`, `decideRemoteApply`), so flipping either mid-flight applies to
@@ -548,7 +547,7 @@ allow-list, the budgets or the writer (UC-040 BR-034). Details: §14.3.
 | `backend_unavailable` | no API key / model / base URL (`Available()==false`) | rules, same cycle |
 | `async_not_wired` | no context provider (never in production) | rules, same cycle |
 | `llm_not_eligible` | game kind not in `llm.eligible_game_kinds` (default `real`) | rules, same cycle |
-| `llm_budget_exhausted` | global per-minute budget full, or (claude, openai) the backend's own `decision.<backend>.max_requests_per_minute` cap full in the same window (#2519; the span's `decide.backend.requested` tells them apart) | rules, same cycle |
+| `llm_budget_exhausted` | global per-minute budget full, or (claude) the backend's own `decision.<backend>.max_requests_per_minute` cap full in the same window (#2519; the span's `decide.backend.requested` tells them apart) | rules, same cycle |
 | `timeout` | `decision.<backend>.timeout_ms` elapsed | rules on the **current** context when the call returns |
 | `invalid_answer` | parse / validate failure, refusal, max tokens, other stop reasons | rules on the current context |
 | `error` | anything else: transport, HTTP 4xx / 5xx **including 429**, error envelope | rules on the current context |
@@ -594,7 +593,7 @@ empty ids and `noop` dropped), so the `none` variant (`""`) and the `probe` vari
 
 | Aspect | Behaviour |
 |---|---|
-| Remote call | none (no Jev / Claude / OpenAI request built or sent) |
+| Remote call | none (no Jev / Claude request built or sent) |
 | Cadence `decision.min_interval_ms` | not charged (`lastDecideAttempt` unchanged) |
 | Gap `decision.min_gap_after_answer_ms` | not started (`lastDecideEnded` is set only when a call ends) |
 | Global budget `llm.max_requests_per_minute` | not charged |
@@ -620,7 +619,7 @@ the kill switch `enabled` and the shared LLM budget (NFR-011).
 | Knob | Default | Scope | Source |
 |---|---|---|---|
 | `decision.claude.timeout_ms` | 5000 ms (variants fast 1500 / tight 2500 / default 5000 / patient 8000, PR #1257); the talk stage baseline runs `patient` (#2123, `scripts/talk-baseline.json`) | per call | `services/agent/flags/decision_backend.go:keyDecisionClaudeTimeoutMs`, `services/agent/flags/decision_backend.go:DefaultDecisionClaudeTimeoutMs`, `services/agent/flags/decision_backend.go:Flags.timeoutMsFlag` |
-| `decision.openai.timeout_ms` / `decision.jev.timeout_ms` | 2500 ms (variants 1500 / 2500 / 5000) | per call | `services/agent/flags/decision_backend.go:keyDecisionOpenAITimeoutMs`, `services/agent/flags/decision_backend.go:keyDecisionJevTimeoutMs`, `services/agent/flags/decision_backend.go:DefaultDecisionTimeoutMs` |
+| `decision.jev.timeout_ms` | 2500 ms (variants 1500 / 2500 / 5000) | per call | `services/agent/flags/decision_backend.go:keyDecisionJevTimeoutMs`, `services/agent/flags/decision_backend.go:DefaultDecisionTimeoutMs` |
 | `decision.min_interval_ms` | 3000 ms (1500 / 10000; 0 disables) | per game, from admission (the previous call's start) | `services/agent/flags/decision_backend.go:DefaultDecisionMinIntervalMs`, `services/agent/decision/decide_hook.go:gateRemoteDecide` |
 | `decision.min_gap_after_answer_ms` (#2123) | 1000 ms (off 0 / slow 3000) | per game, from when the previous call returned (an answer, a timeout or a failure), before the live flag re-read and any action write; set while the call still holds the in-flight slot, and a later discard does not move it. A call is admitted only when both this gap and `decision.min_interval_ms` have passed | `services/agent/flags/decision_backend.go:DefaultDecisionMinGapAfterAnswerMs`, `services/agent/decision/decide_hook.go:noteDecideEnded` |
 | `decision.max_state_age_ms` (#2123) | 10000 ms (off 0 / tight 6000) | per answer that would act, read live at landing: older fire-time state → `discarded/state_too_old` (§4.4). The default sits above the longest timeout (`patient` 8000 ms) so it only drops answers built on a state that was already stale at fire time | `services/agent/flags/decision_backend.go:DefaultDecisionMaxStateAgeMs`, `services/agent/decision/decide_hook.go:stateTooOld` |
@@ -691,7 +690,7 @@ that cycle's snapshot, so model, base URL and timeout changes apply to the next 
 an empty value means `rules`.
 
 `scripts/agent-backend.sh` sets stack overlays on the flag service (writer `stage`,
-[UC-053](../use_cases/UC-053.md) A1): `status`, `{rules|claude|openai|jev} [model]`,
+[UC-053](../use_cases/UC-053.md) A1): `status`, `{rules|claude|jev} [model]`,
 `threshold {low|gate|default|strict}`, `capture {on|off}`, `effort {…}`. The flag service
 pushes the change to flagd at once (NFR-050); the agent reads the flags at use time.
 
@@ -713,13 +712,13 @@ ANTHROPIC_API_KEY=<key> docker compose up -d agent
 
 | Seam | Used for | Selected by | Backends |
 |---|---|---|---|
-| Decision backend | in-game decisions (FFA) | `decision.backend` flag, live | `rules` (default), `jev`, `claude`, `openai` |
+| Decision backend | in-game decisions (FFA) | `decision.backend` flag, live | `rules` (default), `jev`, `claude` |
 | Text backend | post-game retro (`agent.llm.retro`), experiment proposer | `inference.backend` flag, per use (retro / propose cycle); `stub` while flagd is unresolved (no env fallback, #1907) | `stub` (default), `claude` (needs the key and a valid base URL) |
 
 The text backend takes a System + User prompt and returns raw text (`Infer(ctx, llm.Prompt) (string, error)`,
 `inference/claude.go`, official Anthropic Go SDK). Env vars (`AGENT_INFERENCE_BASE_URL`, `ANTHROPIC_API_KEY`) are in the
 agent env table in [services.md](services.md) section 6. Keys live in the agent environment only (compose passes
-`ANTHROPIC_API_KEY`, `DECISION_OPENAI_API_KEY`, `JEV_API_KEY`); a backend without its key is unavailable and
+`ANTHROPIC_API_KEY`, `JEV_API_KEY`); a backend without its key is unavailable and
 decisions fall back to rules (§7). Keep keys out of the tracked `.env`: export them or use the git-ignored
 `.env.local` (`docker compose --env-file .env --env-file .env.local up`).
 
@@ -874,7 +873,7 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   `decide.fallback_reason`, `decide.state.digest`, `decide.questions_sha` (short hash of the questions JSON, #2648), `decide.latency_ms`, `decide.outcome`. Conditional: `decide.act_confidence_threshold` (the EFFECTIVE
   threshold, §5) and `decide.act_confidence_threshold.source` (`jev` = `decision.jev.act_confidence_threshold`,
   `global` = `decision.act_confidence_threshold`; #1287), both only when routed,
-  `gen_ai.request.model`, `gen_ai.output.type=json`, `gen_ai.request.max_tokens` and `gen_ai.request.temperature` (claude and openai only; jev sets neither) and, at span end, the summed `gen_ai.usage.*` tokens and `gen_ai.response.finish_reasons` of the invocation's model calls (remote path; [telemetry.md §4.2](telemetry.md#42-genai-semantic-conventions), #2584), `decide.answers`, `decide.confidence`, `decide.confidence.min`,
+  `gen_ai.request.model`, `gen_ai.output.type=json`, `gen_ai.request.max_tokens` and `gen_ai.request.temperature` (claude only; jev sets neither) and, at span end, the summed `gen_ai.usage.*` tokens and `gen_ai.response.finish_reasons` of the invocation's model calls (remote path; [telemetry.md §4.2](telemetry.md#42-genai-semantic-conventions), #2584), `decide.answers`, `decide.confidence`, `decide.confidence.min`,
   `decide.rationale`, `decide.invalid_reason`, `decide.discarded_reason`, `error.type`, `decide.blocked` and
   `decide.block_reason` (§6; #1295). `decide.questions` (the same JSON on every decide) rides only the first `invoke_agent joustmania-agent` of a game with a given `decide.questions_sha` (#2648). A group decision's `agent.decision` carries `decision.group.size`, `decision.group.alive` (#2467 PR 6),
   `decision.group.targets` and, on a ledger refusal, `decision.group.refused_serial` (#2467 PR 4; telemetry.md §4).
@@ -884,7 +883,7 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   (`services/agent/decision/decide_hook.go:emitDecideSpan`, `setDecideAttributes`).
 - **`decide.prompt_profile`** (#2467 PR 5): on a remote-path `invoke_agent joustmania-agent` span, the normalized profile the request was
   rendered with (`v1` or `neutral`, §3); absent on the rules path.
-- **`decide.operator_brief.present`** / **`decide.operator_brief.length`** (#2687): on a claude or openai `invoke_agent joustmania-agent` span
+- **`decide.operator_brief.present`** / **`decide.operator_brief.length`** (#2687): on a claude `invoke_agent joustmania-agent` span
   whose request carried an operator brief, `true` and the brief's length in characters after the clean-up (§3); absent without a
   brief, on jev and on the rules path. The text is never a `decide.*` attribute: it is part of the rendered user message, so it is
   recorded only by the GenAI content capture (`gen_ai.input.messages`), under `decision.capture_content=on`.
@@ -898,7 +897,7 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   `decide.prediction.id` (uuid), `decide.prediction.template`, `decide.prediction.characteristic`,
   `decide.prediction.scope`, `decide.prediction.horizon_s`, `decide.prediction.p`, `decide.prediction.source`
   (`rules`, `lever_default`, `model`) and `decide.prediction.rule` (rules `R1`..`R9`, `R4d`, or the lever name);
-  `decide.prediction.dropped_reason` when the accepted claude or openai answer's model prediction was dropped (§4.1; set
+  `decide.prediction.dropped_reason` when the accepted claude answer's model prediction was dropped (§4.1; set
   even when the answer is then held or discarded, counted by `agent_prediction_dropped_total{backend,reason}`;
   `services/agent/decision/prediction_hook.go:droppedPredictionAttributes`); `decide.prediction.merged=true` when an identical prediction was already pending (§6.1); `decide.goal.profile` and `decide.goal.source` (implemented)
   when the goal lines were rendered into the request: the profile name and `named` (a `goal.profile` variant) or
@@ -934,8 +933,8 @@ gated sink turns into a no-op while `interventions_enabled` is off is not counte
 
 A new question kind, outcome, fallback reason, discarded reason, span attribute or
 default changes this file first (see [CONTRIBUTING](../CONTRIBUTING.md#spec-driven-development-aiup)).
-The contract tests live in `decide/*_test.go`, the backend tests `decide/backends/claude/claude_test.go`,
-`decide/backends/openai/openai_test.go` and `decide/backends/jev/contract_test.go` (only jev has a dedicated
+The contract tests live in `decide/*_test.go`, the backend tests `decide/backends/claude/claude_test.go`
+and `decide/backends/jev/contract_test.go` (only jev has a dedicated
 `contract_test.go`; jev also has `stages_test.go` and `wire_test.go`), and `decision/decide_hook_test.go`
 (per-backend threshold: `decision/decide_hook_threshold_test.go`; empty allow-list: `decision/decide_no_allowed_test.go`).
 
@@ -1021,7 +1020,7 @@ as a prior and not a claim; the value is in the table):
 | R9 random effect | `activity_rises` target 10, P 0.6 |
 
 **Lever defaults** (a pure mapping from the chosen intervention, stamped `Source=lever_default`; used for jev, which has no
-free text, and for claude and openai when the ask is off; `P` is fixed at 0.6). It scores the lever map, not the model, and reports keep the two
+free text, and for claude when the ask is off; `P` is fixed at 0.6). It scores the lever map, not the model, and reports keep the two
 apart. Every lever default is scored by lift against the control:
 
 | Intervention | Prediction |
@@ -1134,7 +1133,7 @@ weighted mean over the measured terms is the game's goal attainment (none when n
 summary (`goal`, with `from_objectives`) and its span (`summary.goal.profile`, `summary.goal.source`, `summary.goal.attainment`), and as `agent_goal_attainment{profile,source,game_kind}`
 (UC-042 A12, BR-009). A game is scored once; a stale end is not scored (`services/agent/prediction/book.go:finishGoal`).
 
-**Goals reach the model as structured targets, never as prose.** Only for a claude or openai request, only when
+**Goals reach the model as structured targets, never as prose.** Only for a claude request, only when
 `decision.goal_in_prompt` (read at fire time) is on, and only for a profile with terms (the prompt profile never implies the
 lines: `neutral` stays a lever-wording factor and the goal is a separate factor, so the two can be varied apart), `Render` adds two lines at the end of the `<game_state>` block, for example
 `goal: long_running_game duration>=180s activity=0.30..0.60 elimination_pace<=1/min` and

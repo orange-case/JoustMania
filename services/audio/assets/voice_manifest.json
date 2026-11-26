@@ -375,14 +375,6 @@
    "lufs": -20.4,
    "text_sha256": "7ce84cd58cff73e24baca624edd608600065d783ae75ddfde244236336a8b643"
   },
-  "Menu/vox/gen_female/backend_openai.ogg": {
-   "line": "Menu/backend_openai",
-   "input_sha256": "7ebf580a863aaf26cbac52d16fa2eec8090bd685e05465697156681630ee28df",
-   "sha256": "e53173dcd5815d412c9852d76534dca0a671816c6454d3fb2ddd18b9b7060949",
-   "duration_s": 0.995,
-   "lufs": -20.4,
-   "text_sha256": "01267b4ad5c83fc6e260c38b53faac390862c88d9756717ee89d18ff7c128654"
-  },
   "Menu/vox/gen_female/backend_rules.ogg": {
    "line": "Menu/backend_rules",
    "input_sha256": "c0f21d6fbf0ad81756d30e3cee7e74b843d22bd3768da8a3be36ac5bd60e15e1",
@@ -870,14 +862,6 @@
    "duration_s": 0.496,
    "lufs": -20.62,
    "text_sha256": "7ce84cd58cff73e24baca624edd608600065d783ae75ddfde244236336a8b643"
-  },
-  "Menu/vox/gen_male/backend_openai.ogg": {
-   "line": "Menu/backend_openai",
-   "input_sha256": "fe93ec26793b6ea29fa0ccf20c5012678b8e7c197d9a961310e265449cfdc70a",
-   "sha256": "8889f961af6939cd1af08f10bd19cc6d76fe407ecebe4b6e50c1b903bcae76f9",
-   "duration_s": 0.808,
-   "lufs": -20.47,
-   "text_sha256": "01267b4ad5c83fc6e260c38b53faac390862c88d9756717ee89d18ff7c128654"
   },
   "Menu/vox/gen_male/backend_rules.ogg": {
    "line": "Menu/backend_rules",

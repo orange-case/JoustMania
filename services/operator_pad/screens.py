@@ -70,7 +70,7 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
     "shield.activation": {AUTOMATIC: "AUTO", "instant": "INST", "trigger": "TRIG", "hold": "HOLD"},
     "audio_volume.master": {"mute": "MUTE", "quiet": "QUIET", "normal": "NORM", "loud": "LOUD", "max": "MAX"},
     "agent_level": {"none": "NONE", "ambient": "AMBIENT", "standard": "STANDARD", "full": "FULL"},
-    "decision.backend": {"rules": "RULES", "claude": "CLAUDE", "openai": "OPENAI", "jev": "JEV"},
+    "decision.backend": {"rules": "RULES", "claude": "CLAUDE", "jev": "JEV"},
     "game_instructions": {"on": "ON", "off": "OFF"},
     "force_all_start": {"on": "ON", "off": "OFF"},
     "interventions": {"on": "ON", "off": "OFF"},
