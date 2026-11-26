@@ -409,7 +409,6 @@ UNKNOWN_AGENTS = [
     status(agent_enabled=False, agent_enabled_state="unknown"),
     status(agent_enabled=False, agent_enabled_state=""),  # a menu older than #2101
     status(agent_enabled_state="maybe"),  # a value outside the three states
-    status(agent_interventions_enabled_state="unknown"),  # a menu before #2846 with its write gate unresolved
     status(agent_level="probe"),
 ]
 
@@ -591,8 +590,8 @@ async def test_k5_tap_while_watching_announces_watching(actions, cues):
 @pytest.mark.uc("UC-015", flow="main", br=["BR-011", "BR-013"])
 @pytest.mark.parametrize(
     "fields",
-    [{"agent_enabled_state": "maybe"}, {"agent_interventions_enabled_state": "unknown"}],
-    ids=["unknown-state", "old-menu-gate-unknown"],
+    [{"agent_enabled_state": "maybe"}, {"agent_enabled_state": "unknown"}],
+    ids=["off-the-ladder", "unknown"],
 )
 async def test_k5_tap_with_an_unresolved_state_refuses(actions, menu, cues, fields):
     """An unresolved state is neither announced as running nor as stopped."""

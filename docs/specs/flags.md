@@ -798,7 +798,7 @@ The agent normalises every value this way when it reads it.
 The table is the source of truth: `agent/enabled`, the registry kill switch `agent/interventions_allowed`
 (`registry.killSwitches`), the agent-limiting flags of FR-152, and the agent gate
 `experiments_enabled` (`interventions_enabled` was one until #2846 deleted it); a test keeps the link's kill-switch set in sync with the table.
-A change in Flagsmith is applied like any write, also when it loosens one; the agent never writes its own limits, and the env ceilings of C-034 still cap the agent-limiting flags, also a value from Flagsmith.
+A change in Flagsmith is applied like any write, also when it loosens one; the agent never writes its own limits, and the env ceilings of C-034 still cap the agent-limiting flags, also a value from Flagsmith. `agent/enabled` is the one human stop and its baseline is `watch`, so Flagsmith's own off holds as the stop: the feature switched off, and a bool `false`, read as `off`; a bool `true` is refused (`flagsmith_type_mismatch`) and never turns the agent on. On a linked stack a local clear of `enabled` reaches Flagsmith as the feature switched off, so it comes back as `off`: set `watch` to watch.
 
 **Values in Flagsmith** (architecture note §2.1): a declared variant is its name (string); an integer range is an
 integer; a float range, a `free string` and an object flag are strings (decimal text, the string, compact JSON).

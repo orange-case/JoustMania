@@ -230,7 +230,7 @@ The two new commands:
 | `agent_enabled`, `agent_level`, `agent_backend` | whether the agent runs (`enabled` is `watch` or `on`), the allow-list level (`interventions_allowed` variant name), the decision backend (variant name) |
 | `agent_saved_level` (10) | unused (no level is saved at a stop), always empty |
 | `agent_enabled_state` | the agent state: `off`, `watch` or `on` when the in-process client resolved `agent/enabled` to one of them, `unknown` when it could not or resolved another value (an error code, reason `ERROR`, no variant, or the no-op provider's passed-in default before a provider is set); `agent_enabled` is then false. A consumer treats any other value, including the empty one of an older menu, as `unknown` (UC-015 BR-013) |
-| `agent_interventions_enabled_state` | unused, always empty (the agent's former write gate). A menu that still fills it with `on` / `off` / `unknown` sends an `agent_enabled_state` of `on` beside it; the pad then reads `WATCH` for `off`, `ON` for `on` and unknown otherwise (UC-016 BR-011) |
+| `agent_interventions_enabled_state` | unused, always empty (the agent's former write gate); no consumer reads it |
 | `sensitivity`, `num_teams`, `instructions`, `force_all_start` | the current lobby settings as values (sensitivity 0 to 4, team count, `game_instructions`, `force_all_start`; read-only; the taps of UC-015 BR-011 announce them) |
 | `audio_volume_master` | the variant name of `user/audio_volume.master` (UC-015 BR-006: the pad restores it on unmute) |
 | `shield_activation` | the effective variant name of `game/shield.activation` (`instant`, `trigger`, `hold`; empty when unresolvable; UC-015 BR-018) |

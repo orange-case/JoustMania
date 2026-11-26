@@ -349,6 +349,9 @@ func isSegment(raw json.RawMessage) bool {
 func (p *puller) decodeState(pol *registry.Policy, scopeName string, fs FeatureState) docEntry {
 	var e docEntry
 	if !fs.Enabled {
+		if v, ok := stopValue(pol, p.l.BaselineFlag(pol.Set, pol.Key)); ok {
+			e.v = v
+		}
 		return e
 	}
 	// Variant options (#2709, §2.3): one option at 100 % is the value, any
@@ -396,6 +399,12 @@ func (p *puller) decodeState(pol *registry.Policy, scopeName string, fs FeatureS
 		e.v = Value{Present: true, Value: compact(fs.FeatureStateValue)}
 		e.err = fserr.Unprocessable(fserr.FlagsmithTypeMismatch, "%s: a fraction value is the JSON text {\"variant\", \"fraction_percent\"}", pol.Key)
 		return e
+	}
+	if fv.Type == TypeBool && string(bytes.TrimSpace(fv.Value)) == "false" {
+		if v, ok := stopValue(pol, b); ok {
+			e.v = v
+			return e
+		}
 	}
 	variant, value, ferr := Decode(pol, b, fv)
 	if ferr != nil {

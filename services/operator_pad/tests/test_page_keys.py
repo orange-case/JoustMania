@@ -195,11 +195,10 @@ def test_a_higher_agent_state_is_a_raise_a_lower_one_is_not(status, steps, plan)
     [
         None,
         st(agent_enabled_state="unknown"),
-        st(agent_interventions_enabled_state="unknown"),
         st(agent_enabled_state="maybe"),
         st(agent_level="probe"),
     ],
-    ids=["no-status", "enabled-unknown", "old-menu-gate-unknown", "state-off-the-ladder", "level-off-the-ladder"],
+    ids=["no-status", "enabled-unknown", "state-off-the-ladder", "level-off-the-ladder"],
 )
 def test_an_unknown_agent_state_is_refused_never_stepped_blind(status):
     assert page_keys.edit_plan(SWITCH, status, 1) == page_keys.Plan(None, None, refused=True)
@@ -343,8 +342,8 @@ async def test_an_agent_state_edit_to_the_same_state_sends_nothing(actions, menu
 @pytest.mark.uc("UC-016", flow="A7", br=["BR-012", "BR-014"])
 @pytest.mark.parametrize(
     "status",
-    [st(agent_enabled_state="unknown"), st(agent_interventions_enabled_state="unknown"), st(agent_level="probe")],
-    ids=["enabled-unknown", "gate-unknown", "level-off-the-ladder"],
+    [st(agent_enabled_state="unknown"), st(agent_enabled_state="maybe"), st(agent_level="probe")],
+    ids=["enabled-unknown", "state-off-the-ladder", "level-off-the-ladder"],
 )
 async def test_an_agent_state_edit_from_an_unknown_state_is_refused(actions, menu, cues, status):
     result = await actions.dispatch(Gesture(LAYER, "K1", steps=-1, confirmed=True), status, status, on("AGENT", "K1"))
@@ -410,8 +409,8 @@ def test_only_the_gated_builders_send_a_raise():
     """Sweep: every edit and reset of the AGENT page, unconfirmed, from every agent state: no raise is sent."""
     levels = ["none", "ambient", "standard", "full", "probe", ""]
     statuses = [
-        st(agent_level=level, agent_enabled=enabled, agent_interventions_enabled_state=gate)
-        for level, enabled, gate in itertools.product(levels, (True, False), ("on", "off", "unknown", ""))
+        st(agent_level=level, agent_enabled=enabled != "off", agent_enabled_state=enabled)
+        for level, enabled in itertools.product(levels, ("off", "watch", "on", "unknown", ""))
     ]
 
     async def sweep():

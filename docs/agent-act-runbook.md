@@ -314,7 +314,7 @@ Walk the agent state plus the permission layer, in order:
 ### flagd unreachable → safe defaults
 
 If flagd is down or not yet reachable at startup, **every flag evaluation falls
-back to its safe default**: `enabled=false` (agent inert), and the lifecycle/
+back to its safe default**: `enabled` = `off` (agent inert), and the lifecycle/
 throttle flags fall back to their former hardcoded constants. The agent still
 starts; it just does nothing until flagd is back. (The provider connects in the
 background, so recovery needs no restart — except the read-at-startup lifecycle

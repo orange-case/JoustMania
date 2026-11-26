@@ -23,8 +23,6 @@ AGENT_LEVELS = frozenset({"none", "ambient", "standard", "full"})
 # `agent_enabled_state` of a resolved `enabled`; `unknown`, and the empty value of a menu older than #2101,
 # are not (services.md §3.1).
 ENABLED_STATES = frozenset({"off", "watch", "on"})
-# A menu from before the three-state `enabled` still sends on / off plus its write gate in field 18.
-_GATE_STATES = frozenset({"on", "off"})
 
 
 AGENT_ON, AGENT_WATCH, AGENT_OFF, AGENT_UNKNOWN = "on", "watch", "off", "unknown"
@@ -38,11 +36,6 @@ def agent_state(status: menu_pb2.GetMenuStatusResponse | None) -> str:
         return AGENT_OFF
     if status.agent_level not in AGENT_LEVELS:
         return AGENT_UNKNOWN
-    gate = status.agent_interventions_enabled_state
-    if gate:
-        if status.agent_enabled_state != "on" or gate not in _GATE_STATES:
-            return AGENT_UNKNOWN
-        return AGENT_WATCH if gate == "off" else AGENT_ON
     return status.agent_enabled_state
 
 

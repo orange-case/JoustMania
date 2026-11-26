@@ -243,7 +243,8 @@ func (b *lockedBackend) Infer(context.Context, llm.Prompt) (string, error) { ret
 
 // In watch the proposer drafts (the model is called) but WritePermit stops the
 // experiment write, and the reason lands on the attempt span.
-// UC: UC-045 BR-002
+// UC: UC-042 BR-002
+// UC: UC-045 A1
 func TestProposeOnce_WatchDraftsButDoesNotWrite(t *testing.T) {
 	backend := &switchingBackend{response: validReply, onInfer: func() {}}
 	p, svc, rec, _ := proposerWithRecorder(t, backend)

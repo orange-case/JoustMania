@@ -909,3 +909,39 @@ func TestPullAppliesEnabledWatch(t *testing.T) {
 		t.Fatalf("UC-054/main step 5 agent/enabled = %+v, want watch", v)
 	}
 }
+
+// UC: UC-054 BR-005
+// UC: UC-045 main
+// A Flagsmith stop of agent/enabled holds although the baseline is watch: the
+// feature switched off and a bool false read as off; a bool true is refused
+// and never turns the agent on.
+func TestPullEnabledStopsFailClosed(t *testing.T) {
+	cases := []struct {
+		name    string
+		state   map[string]any
+		variant string
+		refused bool
+	}{
+		{"feature switched off", fsState("enabled", false, "on"), "off", false},
+		{"bool false", fsState("enabled", true, false), "off", false},
+		{"bool true", fsState("enabled", true, true), "watch", true},
+		{"text true", fsState("enabled", true, "true"), "watch", true},
+	}
+	for _, c := range cases {
+		t.Run("UC-054/BR-005 "+c.name, func(t *testing.T) {
+			h := newHarness(t, harnessOpts{})
+			if _, ferr := h.st.Put(state.WriteRequest{Set: "agent", Flag: "enabled", Variant: "watch", Writer: "operator"}); ferr != nil {
+				t.Fatal(ferr)
+			}
+			h.online()
+			h.setDoc([]map[string]any{c.state})
+			h.round()
+			if v, _ := h.local("agent", "enabled", flagsmith.ScopeStack); v.Variant != c.variant {
+				t.Fatalf("agent/enabled = %+v, want %s", v, c.variant)
+			}
+			if refused := h.link.Status().Refused != 0; refused != c.refused {
+				t.Fatalf("refused = %v, want %v", refused, c.refused)
+			}
+		})
+	}
+}

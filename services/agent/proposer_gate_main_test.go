@@ -77,7 +77,8 @@ func TestProposerPermit_ReadsLive(t *testing.T) {
 }
 
 // Drafting runs in watch; the write half needs `enabled` on, read live.
-// UC: UC-045 BR-002
+// UC: UC-042 BR-002
+// UC: UC-045 A1
 func TestProposerWritePermit(t *testing.T) {
 	src := &liveGateFlags{enabled: true, experiments: true, proposer: true}
 	permit, write := proposerPermit(src, true), proposerWritePermit(src)
