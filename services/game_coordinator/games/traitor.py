@@ -531,6 +531,8 @@ class TraitorGame(TeamsGameBase):
         # Wait for the rainbow (interruptible by a force-end); only a winner is celebrated
         if winning_team is not None:
             await self._wait_for_rainbow_effect()
+        elif self._latched_tie():
+            await self._show_tie_cue()
 
         # End all player spans
         for _serial, player in self.players.items():

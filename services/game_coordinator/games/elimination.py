@@ -7,6 +7,7 @@ The kill path's gauges stay on ``BaseGameMode``: tests patch ``games.base.metric
 
 from opentelemetry import trace
 
+from lib.colors import Colors
 from lib.types import Sound
 from services.game_coordinator import game_clock
 from services.game_coordinator.games import base as _base
@@ -17,6 +18,11 @@ from services.game_coordinator.games.base import (
     logger,
 )
 from services.game_coordinator.stream_writes import serialized_write
+
+# Tie cue (UC-020 BR-010)
+TIE_CUE_DELAY_S = 0.3
+TIE_FLASH_MS = 2000
+TIE_FLASH_HZ = 4
 
 
 class EliminationMixin:
@@ -280,3 +286,37 @@ class EliminationMixin:
             await game_clock.sleep(0.1)
 
         return True
+
+    async def _wait_while_running(self, seconds: float) -> None:
+        """Sleep ``seconds`` of game time in 0.1 s steps; a force-end cuts it short."""
+        for _ in range(round(seconds / 0.1)):
+            if not self.running:
+                return
+            await game_clock.sleep(0.1)
+
+    async def _show_tie_cue(self, sound: Sound = Sound.SFX_DEATH) -> None:
+        """The tie cue (UC-020 BR-010): white flash on every player and the tie sound, then wait it out.
+
+        Sent after a latched tie even when a force-end landed after the latch (BR-007);
+        the force-end only cuts the waits short.
+        """
+        from proto import controller_manager_pb2
+
+        # The controller manager skips a flash on a running death effect, and the tied
+        # players' death effect (1 s) can outlast the 1 s post-win hold by the write latency.
+        await self._wait_while_running(TIE_CUE_DELAY_S)
+        r, g, b = Colors.White.value
+        for serial in self.players:
+            await self._write_end_effect(
+                controller_manager_pb2.GameplayStreamControl(
+                    game_effect=controller_manager_pb2.GameEffectCommand(
+                        serial=serial,
+                        effect=controller_manager_pb2.GAME_EFFECT_FLASH,
+                        color=controller_manager_pb2.RGB(r=r, g=g, b=b),
+                        duration_ms=TIE_FLASH_MS,
+                        speed=TIE_FLASH_HZ,
+                    )
+                )
+            )
+        await self._play_sound(sound, priority=2)
+        await self._wait_while_running(TIE_FLASH_MS / 1000.0)
