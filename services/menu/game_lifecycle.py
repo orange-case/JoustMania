@@ -119,6 +119,26 @@ class GameLifecycleMixin:
         logger.info(f"Ready start from {serial} dropped: menu is stopped (UC-010 BR-014)")
         self.ready_handler.reset_game_start_flag()
 
+    async def _ready_start_still_holds(self, serial: str, mode: Games) -> bool:
+        """UC-010 A15: re-check step 4 after the feedback delay; a dropped start keeps the players READY."""
+        manager = self.state_manager
+        if manager.ready_controllers != manager.connected_controllers:
+            logger.info(f"Ready start from {serial} dropped: not every controller is ready any more")
+            self.ready_handler.reset_game_start_flag()
+            return False
+        ready_count = len(manager.ready_controllers)
+        minimum_players = max(2, mode.minimum_players)
+        if ready_count >= minimum_players:
+            return True
+        logger.info(f"Ready start from {serial} cancelled: {ready_count} ready, {mode.name} needs {minimum_players}")
+        self.ready_handler.reset_game_start_flag()
+        await self.event_publisher.publish(
+            "game_start_cancelled",
+            {"game_name": mode.name, "player_count": ready_count, "minimum_players": mode.minimum_players},
+        )
+        await self.audio.play_voice(Sound.MENU_VOX_NOT_ENOUGH_PLAYERS)
+        return False
+
     def start_menu_during_game(self) -> bool:
         """Remember a `StartMenu` that arrives while the game lifecycle is live (UC-010 A12, #2449).
 
@@ -245,6 +265,8 @@ class GameLifecycleMixin:
             self._drop_ready_start_on_stopped_menu(serial)
             return
         mode = game_mode if game_mode is not None else self.current_selection
+        if ready_start and not await self._ready_start_still_holds(serial, mode):
+            return
 
         # Determine trace context for the game:
         # - Web source: inherit current context (connects to dashboard trace)

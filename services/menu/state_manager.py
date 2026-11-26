@@ -254,6 +254,10 @@ class StateManager:
         """Check if all connected controllers are ready (minimum 2)."""
         return len(self.ready_controllers) >= 2 and len(self.ready_controllers) == len(self.connected_controllers)
 
+    def below_mode_minimum(self) -> bool:
+        """Fewer ready controllers than the selected mode needs (UC-010 BR-001, A14)."""
+        return len(self.ready_controllers) < max(2, self.current_game_mode.minimum_players)
+
     def set_game_mode(self, game_mode: Games) -> None:
         """
         Set the current game mode.
