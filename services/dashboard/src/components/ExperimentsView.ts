@@ -174,8 +174,8 @@ export interface NormalizedVerdict {
 }
 
 /**
- * The card's verdict label. A status of `done` is NOT a promotion: the span does
- * not say whether the dossier decision was promoted, reverted or deferred (#2291),
+ * The card's verdict label. A status of `done` is NOT a promotion: the snapshot does
+ * not say whether the dossier decision was promoted or reverted (#2291),
  * so a `done` without a promote outcome reads "Done".
  */
 export function normalizeVerdict(verdict: string, live: boolean, status = ""): NormalizedVerdict {

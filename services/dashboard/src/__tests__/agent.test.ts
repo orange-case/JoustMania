@@ -32,6 +32,8 @@ import gamesFixture from "./fixtures/jaeger-flag-state-games.json";
 
 const games = gamesFixture as unknown as JaegerTracesResponse;
 
+const T0_MS = 1_760_000_000_000;
+
 /** A real game's flag state as the agent sends it, and a newer shadow game's. */
 const FLAG_REAL: FlagStateJson = {
   game_id: "game_real000001",
