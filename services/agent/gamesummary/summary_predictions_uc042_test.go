@@ -7,16 +7,15 @@ import (
 	"testing"
 )
 
-// predictionFixture: a hit and a miss of the rules (acted), a hit of the model
-// that was held (counterfactual), an unscorable one, and two controls. The
-// registration times are offsets from the game's first timeline event (base).
+// predictionFixture: a hit and a miss of the rules, a hit of the model, an
+// unscorable one, and a control. The registration times are offsets from the
+// game's first timeline event (base).
 func predictionFixture() []PredictionOutcome {
 	return []PredictionOutcome{
 		{ID: "c1", RegisteredAt: at(20), Backend: "rules", Source: PredictionSourceControl, Template: "survives", Scope: "target", Target: "AA:11", HorizonS: 15, P: 0.5, Outcome: PredictionHit},
 		{ID: "r2", RegisteredAt: at(30), Backend: "rules", Source: "rules", Template: "survives", Scope: "target", Target: "AA:11", HorizonS: 15, P: 0.8, Rule: "R4", Acted: true, Outcome: PredictionMiss},
 		{ID: "r1", RegisteredAt: at(10), Backend: "rules", Source: "rules", Template: "survives", Scope: "target", Target: "BB:22", HorizonS: 15, P: 0.6, Rule: "R4", Acted: true, Outcome: PredictionHit},
-		{ID: "m1", RegisteredAt: at(40), Backend: "claude", Source: "model", Template: "no_elimination", HorizonS: 15, P: 0.9, Acted: false, Outcome: PredictionHit},
-		{ID: "r4", RegisteredAt: at(45), Backend: "rules", Source: "rules", Template: "survives", Scope: "target", Target: "AA:11", HorizonS: 15, P: 0.9, Rule: "R4", Acted: false, Outcome: PredictionHit},
+		{ID: "m1", RegisteredAt: at(40), Backend: "claude", Source: "model", Template: "no_elimination", HorizonS: 15, P: 0.9, Acted: true, Outcome: PredictionHit},
 		{ID: "r3", RegisteredAt: at(50), Backend: "rules", Source: "rules", Template: "survives", Scope: "target", Target: "BB:22", HorizonS: 15, P: 0.7, Rule: "R4", Acted: true, Outcome: PredictionUnscorable, UnscorableReason: "game_ended"},
 	}
 }
@@ -42,16 +41,16 @@ func TestBuildSummary_Predictions(t *testing.T) {
 		for _, p := range s.Predictions {
 			ids = append(ids, p.ID)
 		}
-		if got := strings.Join(ids, ","); got != "r1,c1,r2,m1,r4,r3" {
-			t.Fatalf("order = %s, want r1,c1,r2,m1,r4,r3", got)
+		if got := strings.Join(ids, ","); got != "r1,c1,r2,m1,r3" {
+			t.Fatalf("order = %s, want r1,c1,r2,m1,r3", got)
 		}
 		// representativeGame starts at base (+0s), so the offset is the registration second.
-		if s.Predictions[0].OffsetSeconds != 10 || s.Predictions[5].OffsetSeconds != 50 {
-			t.Errorf("offsets = %v / %v, want 10 / 50", s.Predictions[0].OffsetSeconds, s.Predictions[5].OffsetSeconds)
+		if s.Predictions[0].OffsetSeconds != 10 || s.Predictions[4].OffsetSeconds != 50 {
+			t.Errorf("offsets = %v / %v, want 10 / 50", s.Predictions[0].OffsetSeconds, s.Predictions[4].OffsetSeconds)
 		}
 	})
 
-	t.Run("UC-042/A12 BR-009 tally keeps acted and counterfactual apart", func(t *testing.T) {
+	t.Run("UC-042/A12 BR-009 tally keeps controls apart", func(t *testing.T) {
 		rules := tallyOf(t, s.PredictionTally, "rules", "rules", "survives", true)
 		if rules.Hits != 1 || rules.Misses != 1 || rules.Unscorable != 1 {
 			t.Errorf("rules survives = %+v, want 1 hit, 1 miss, 1 unscorable", rules)
@@ -60,18 +59,9 @@ func TestBuildSummary_Predictions(t *testing.T) {
 		if math.Abs(rules.BrierSum-0.8) > 1e-9 {
 			t.Errorf("rules brier_sum = %v, want 0.8", rules.BrierSum)
 		}
-		heldRules := tallyOf(t, s.PredictionTally, "rules", "rules", "survives", false)
-		if heldRules.Hits != 1 || heldRules.Misses != 0 || heldRules.Unscorable != 0 {
-			t.Errorf("rules survives counterfactual = %+v, want 1 hit only", heldRules)
-		}
-		held := tallyOf(t, s.PredictionTally, "claude", "model", "no_elimination", false)
-		if held.Hits != 1 {
-			t.Errorf("counterfactual model = %+v, want 1 hit", held)
-		}
-		for _, x := range s.PredictionTally {
-			if x.Backend == "claude" && x.Acted {
-				t.Errorf("a held decision leaked into the acted tally: %+v", x)
-			}
+		model := tallyOf(t, s.PredictionTally, "claude", "model", "no_elimination", true)
+		if model.Hits != 1 {
+			t.Errorf("model = %+v, want 1 hit", model)
 		}
 		control := tallyOf(t, s.PredictionTally, "rules", PredictionSourceControl, "survives", false)
 		if control.Hits != 1 || control.Misses != 0 {
@@ -81,10 +71,9 @@ func TestBuildSummary_Predictions(t *testing.T) {
 
 	t.Run("UC-042/A12 the span counts split hit, miss and unscorable", func(t *testing.T) {
 		n := CountPredictions(s.Predictions)
-		// Acted decisions only: r1 hit, r2 miss, r3 unscorable. m1 and r4 are
-		// counterfactuals, c1 is a control.
-		if n != (PredictionCounts{Scored: 2, Hit: 1, Miss: 1, Unscorable: 1, Counterfactual: 2, Controls: 1}) {
-			t.Errorf("counts = %+v, want acted scored 2 (1 hit, 1 miss), unscorable 1, counterfactual 2, controls 1", n)
+		// Decisions only: r1 and m1 hit, r2 miss, r3 unscorable; c1 is a control.
+		if n != (PredictionCounts{Scored: 3, Hit: 2, Miss: 1, Unscorable: 1, Controls: 1}) {
+			t.Errorf("counts = %+v, want scored 3 (2 hit, 1 miss), unscorable 1, controls 1", n)
 		}
 	})
 }
@@ -126,9 +115,9 @@ func TestCoordinator_PredictionsOnSpan(t *testing.T) {
 		t.Fatalf("%d summary spans, want 1", len(spans))
 	}
 	for key, want := range map[string]int64{
-		"summary.predictions.scored": 2, "summary.predictions.hit": 1,
+		"summary.predictions.scored": 3, "summary.predictions.hit": 2,
 		"summary.predictions.miss": 1, "summary.predictions.unscorable": 1,
-		"summary.predictions.counterfactual": 2, "summary.predictions.controls": 1,
+		"summary.predictions.controls": 1,
 	} {
 		v, ok := spanAttr(spans[0], key)
 		if !ok || v.AsInt64() != want {

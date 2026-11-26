@@ -526,12 +526,12 @@ a `decide.discarded_reason` is counted in `agent_decide_discarded_total{reason}`
 
 ### 6.1 Prediction registration (#2479)
 
-A decision record that is not a `noop` and carries a prediction registers it with the agent's prediction book: every rules
-record, the rules fallback record (outcome `fallback`), and every remote record whose outcome is `act` (including a decision blocked by the permission chain, A10, or dropped by the actuation gate, A11) or `held` (A5, which ends at step 9) after `mapAnswers`, or `discarded` only for `target_gone`, `target_stale` and `state_too_old` (A7, step 10; a `stale_context`, `game_ended`, `backend_changed`, `kill_switch` or `shutdown` discard registers nothing, and neither does a game that ended or a stale context). Noops carry no prediction in
-v1 (maintainer decision 2026-10-31; no restraint calibration). The prediction is stamped `acted` = the permission chain passed
-and the intervention was applied; a held, blocked or discarded one is kept as a counterfactual (`acted=false`) and reported
-apart. An identical (backend, source, rule or lever, template, target, `acted`) prediction that is still pending is counted `merged` (`decide.prediction.merged=true` on `invoke_agent joustmania-agent`, `agent_prediction_merged_total`) and not
-registered again. A remote record's prediction is the backend's own when it stated one (a model prediction, §4.1, overrides
+One prediction per acting decision: a record (rules, rules fallback with outcome `fallback`, or remote with outcome `act`)
+whose decision carries a prediction registers it with the agent's prediction book only when the decision acted: the
+permission chain passed and the intervention was applied (`acted=true`). A held, blocked, gated-off (A11) or discarded
+decision registers nothing (#2815), and neither does a game that ended. Noops carry no prediction in
+v1 (maintainer decision 2026-10-31; no restraint calibration). Each acted decision registers its own prediction, also when an
+identical one is still pending. A remote record's prediction is the backend's own when it stated one (a model prediction, §4.1, overrides
 the lever default of §14.2); when the ask was sent and the model answered `none` or its prediction was dropped there is none
 (UC-040 A45: no lever default is substituted); otherwise it is the lever default of the mapped decision
 (`services/agent/decision/prediction_hook.go:remotePrediction`). Registration, scoring and the controls are observation only: they never reach the permission chain, the
@@ -899,9 +899,9 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   (`rules`, `lever_default`, `model`) and `decide.prediction.rule` (rules `R1`..`R9`, `R4d`, or the lever name);
   `decide.prediction.dropped_reason` when the accepted claude answer's model prediction was dropped (§4.1; set
   even when the answer is then held or discarded, counted by `agent_prediction_dropped_total{backend,reason}`;
-  `services/agent/decision/prediction_hook.go:droppedPredictionAttributes`); `decide.prediction.merged=true` when an identical prediction was already pending (§6.1); `decide.goal.profile` and `decide.goal.source` (implemented)
+  `services/agent/decision/prediction_hook.go:droppedPredictionAttributes`); `decide.prediction.id` and the rest of the prediction attributes only when the prediction was registered (an acted decision, §6.1); `decide.goal.profile` and `decide.goal.source` (implemented)
   when the goal lines were rendered into the request: the profile name and `named` (a `goal.profile` variant) or
-  `from_objectives` (a derived form, whose duration edge reads the fitness flag) (§14.4; `services/agent/decision/decide_hook.go:setDecideAttributes`). The scored result is a separate span, `agent.prediction.outcome`
+  `from_objectives` (derived from the objectives weights) (§14.4; `services/agent/decision/decide_hook.go:setDecideAttributes`). The scored result is a separate span, `agent.prediction.outcome`
   ([telemetry.md §4.1](telemetry.md#41-spans-and-topology)), linked to this span.
 - **`decide.answers`** is the JSON array of `decide.Answer` values (capped at the span-JSON size limit, with a
   truncation marker), one object per question:
@@ -1045,11 +1045,11 @@ and a prediction whose game partition is gone stays pending for game end. At gam
 predictions from the pre-reset snapshot **before** the experiment, retro and summary consumers run (second in the game-end
 chain, after the stale counter): early-decidable ones become hit or miss, the rest unscorable, everything `stale_end` on a
 stale end. A prediction resolves exactly once (a timer racing game end is claimed under one lock). Bounds: at most 32 pending
-per game and 256 overall (the oldest is evicted as unscorable `overflow`); an identical pending prediction is `merged`.
+per game and 256 overall (the oldest is evicted as unscorable `overflow`).
 Pending predictions are in memory only and are lost on a restart; the loss shows as registered minus scored counts and a
 decide span with no outcome span. A late game end for an unknown game is a no-op.
 
-**Controls (base rates).** Per real or shadow game, every 15 s of play, one `Source=control` prediction (P 0.5, `decide.backend` `none`), cycling through the six templates in turn from a per-game offset (a hash of the game id, so a template's base rate is not always sampled at the same game times) (target templates on a deterministic hash-chosen alive player), at most 12 per game. Control horizons: `survives` 15, `no_elimination` 15, `elimination` 30, `activity_rises` 10, `closeness_rises` 15, `game_ends` 60. They are scored by the same code and give each
+**Controls (base rates).** Per real or shadow game, every 15 s of play, one `Source=control` prediction (P 0.5, `decide.backend` `none`), cycling through the six templates in the fixed order of the horizon list below, starting with `survives` in every game (target templates on a deterministic hash-chosen alive player), at most 12 per game. Control horizons: `survives` 15, `no_elimination` 15, `elimination` 30, `activity_rises` 10, `closeness_rises` 15, `game_ends` 60. They are scored by the same code and give each
 template's base rate; **lift = hit rate minus base rate**. A reported hit rate always sits next to its base rate, its unscorable
 rate and `game_kind`; the headline uses `acted=true` and real games, and shadow results are labelled "shadow calibration".
 
@@ -1079,9 +1079,9 @@ A **goal profile** is a human-chosen set of up to 4 terms over the same characte
 
 `from_objectives` maps `endurance_focused` to `long_running_game`, `accelerate_focused` to `quick_game`, `balanced_focused`
 to `balanced_contest`, `chaos_focused` to `activity` >= 0.6 plus `change` >= 0.3, and `mixed` to none. Every term has weight 1. This is a **mapping, not a
-migration**: the rules engine's objective weights and the experiment fitness functions are unchanged, and the `duration` bands
-read the same flags as the fitness thresholds (`fitness.endurance.min_session_seconds`,
-`fitness.accelerate.target_session_seconds`) so the two cannot drift. `lively_finale` is the form the deferred `finale`
+migration**: the rules engine's objective weights and the experiment fitness functions are unchanged. A mapped profile is
+exactly the named profile of the table, bands included (#2815); the fitness thresholds are separate flags and the goal does
+not read them. `lively_finale` is the form the deferred `finale`
 objective of #2467 takes: no new objective or fitness function. The `goal.profile` flag ([flags.md §3](flags.md#3-agent)) parser accepts only the six
 characteristic keys, the two phases, finite bands inside per-characteristic hard bounds and at most 4 terms; anything
 invalid falls back to `from_objectives` (a WARN once and a metric). It is read per game, so a game's targeting context
@@ -1103,14 +1103,13 @@ The decisive-end idea ("the game ends soon after two players remain") is not a c
 **Profile names and the `from_objectives` forms** (`services/agent/goal/profile.go:FromObjectives`). A terms variant is
 named by its `goal.profile` variant (the metric label and the summary's `profile`) when that name matches `[a-z0-9_]{1,64}`,
 otherwise `custom` (the name reaches the prompt and a metric label). Every telemetry of a profile also carries its source,
-`named` or `from_objectives`, because a derived form shares its name with a named variant but not its duration edge. The `from_objectives` profile is derived
+`named` or `from_objectives`. The `from_objectives` profile is derived
 from the objectives *weights* (the same read and fallback as the rules engine; the code fallback is `endurance` only): the
 objective with the strictly largest weight picks it, so the shipped `*_focused` variants map as above and `mixed` (a tie)
-is no goal. Its forms carry the named profile's name but read the fitness flags for the duration edge: `long_running_game`
-is `duration` >= `fitness.endurance.min_session_seconds` (default 120, not the variant's 180), `quick_game` is `duration` <=
-`fitness.accelerate.target_session_seconds` (default 60, not 120); `balanced_contest` keeps `duration` >= 120 (no fitness flag
-backs it); `chaos_focused` is named after its objectives variant. A profile without terms is no goal: no summary goal, no
-metric, no prompt line. A value outside the hard bound is clamped into it. The named variants carry their bands as data in
+is no goal. A mapped form has the named profile's name and its terms as in the table above (`long_running_game` `duration`
+>= 180, `quick_game` `duration` <= 120, `balanced_contest` `duration` >= 120); `chaos_focused` has no named profile and is
+named after its objectives variant. A profile without terms is no goal: no summary goal, no
+metric, no prompt line. The named variants carry their bands as data in
 `agent.json`. An invalid value, an unreadable flag or the sentinel give the `from_objectives` profile; an invalid value also
 logs one WARN per process and counts `agent_goal_profile_invalid_total{reason}` (`shape`, `unknown_key`,
 `unknown_characteristic`, `bad_band`, `bad_phase`, `bad_weight`, `term_count`; `services/agent/flags/goal.go:GoalProfile`).
