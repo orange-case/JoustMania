@@ -1,5 +1,5 @@
 """
-The evaluation context of the shield flags on the agent's grant path (#1837, UC-040 A31).
+The evaluation context of the shield flags on the agent's grant path (#1837, UC-048 A4).
 
 An agent grant reaches ``grant_shield`` through the InterventionManager on the
 servicer's MAIN loop and ``GameLoopDispatcher.run``, and the manager sets the game's
@@ -111,9 +111,9 @@ def _make_ffa():
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A31", steps=[1])
+@pytest.mark.uc("UC-048", flow="A4", steps=[1])
 async def test_dispatched_grant_reads_the_shield_flags_in_the_game_transaction_context(recorder):
-    """A31 step 1, BR-018: a dispatched grant_shield in a real FFA game resolves both shield
+    """UC-048 A4 step 1, BR-018: a dispatched grant_shield in a real FFA game resolves both shield
     flags with the game's context (targetingKey and game_mode FFA, game_kind=real) plus
     gameId; the agent's gameId + game_kind=real is a subset that the targeting limit keeps
     equivalent."""

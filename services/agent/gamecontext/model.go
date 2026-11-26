@@ -71,7 +71,7 @@ type PlayerSignals struct {
 	// Zero until the first intensity sample; a snapshot copy like History.
 	Game GameMeans
 
-	// Hold-mode shield (#2096, UC-040 A37, UC-042 BR-007; nil / empty outside a hold
+	// Hold-mode shield (#2096, UC-048 A9, UC-042 BR-007; nil / empty outside a hold
 	// game). Sources: game_player_shield_energy_seconds,
 	// game_player_shield_budget_remaining_seconds, game_player_shield_active and
 	// game_player_shield_stats{stat} (live; set at every hold transition and at least
@@ -200,7 +200,7 @@ type SessionSignals struct {
 	ShieldSettings   map[string]float64
 
 	// ShieldGate is each player's agent shield gate by serial, from
-	// game_player_shield_gate{stat} (UC-040 A31, A33): what the coordinator's
+	// game_player_shield_gate{stat} (UC-048 A4, A6): what the coordinator's
 	// grant_shield refusal reads. Kept on the session, not the player, so its
 	// series never keeps a silent player alive. ShieldGroupGrants is the game's
 	// applied group shields (game_shield_group_grants, A47). Both up to one

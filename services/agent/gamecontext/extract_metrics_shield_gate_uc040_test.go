@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// UC: UC-040 A31 A33 A47
+// UC: UC-048 A4 A6 A13
 // TestApplyMetrics_ShieldGate: game_player_shield_gate{stat} and
 // game_shield_group_grants land on the session, never on the player, so the
 // series never keeps a silent player alive. A snapshot handed out before a later
@@ -14,7 +14,7 @@ func TestApplyMetrics_ShieldGate(t *testing.T) {
 	gate := func(serial, stat string) map[string]string {
 		return map[string]string{"game_id": "g1", "game_kind": "real", "serial": serial, "stat": stat}
 	}
-	t.Run("UC-040/A33 grants, charge and cooldown end per serial", func(t *testing.T) {
+	t.Run("UC-048/A6 grants, charge and cooldown end per serial", func(t *testing.T) {
 		s := newTestStore()
 		if !s.ApplyMetrics(metricsWith(metricPlayerShieldGate, 2, gate("A", ShieldGateGrants))) {
 			t.Fatal("grants not applied")
@@ -37,7 +37,7 @@ func TestApplyMetrics_ShieldGate(t *testing.T) {
 			t.Fatalf("session id = %q, want the adopted g1", before.SessionID)
 		}
 	})
-	t.Run("UC-040/A33 a zero cooldown end clears it and an unknown stat is ignored", func(t *testing.T) {
+	t.Run("UC-048/A6 a zero cooldown end clears it and an unknown stat is ignored", func(t *testing.T) {
 		s := newTestStore()
 		s.ApplyMetrics(metricsWith(metricPlayerShieldGate, 100, gate("A", ShieldGateCooldownUntil)))
 		s.ApplyMetrics(metricsWith(metricPlayerShieldGate, 0, gate("A", ShieldGateCooldownUntil)))
@@ -49,7 +49,7 @@ func TestApplyMetrics_ShieldGate(t *testing.T) {
 			t.Fatal("a gate datapoint without its stat applied")
 		}
 	})
-	t.Run("UC-040/A47 the game's group shields", func(t *testing.T) {
+	t.Run("UC-048/A13 the game's group shields", func(t *testing.T) {
 		s := newTestStore()
 		if !s.ApplyMetrics(metricsWith(metricShieldGroupGrants, 1, map[string]string{"game_id": "g1", "game_kind": "shadow"})) {
 			t.Fatal("group count not applied")

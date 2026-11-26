@@ -60,10 +60,10 @@ func TestGameContext_ExperimentArm(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 // UC: UC-045 A3
 func TestSetupFlagd_GameDomain(t *testing.T) {
-	t.Run("UC-040/A31 the game set is its own domain: default before its sync, served after", func(t *testing.T) {
+	t.Run("UC-048/A4 the game set is its own domain: default before its sync, served after", func(t *testing.T) {
 		agentSrc, gameSrc := newFakeFlagdSource("on"), newFakeFlagdSource("on")
 		agentSrc.set(true, "on")
 		ctx, cancel := context.WithCancel(context.Background())

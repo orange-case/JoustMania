@@ -111,11 +111,11 @@ func waitGameDomainServes(t *testing.T) {
 	}
 }
 
-// TestLiveFlip_GameDomainShieldActivation: the agent's read-only game domain (UC-040 A31,
+// TestLiveFlip_GameDomainShieldActivation: the agent's read-only game domain (UC-048 A4,
 // #1837) follows a stage-overlay write of shield.activation it has already read, within
 // NFR-050 bounds, with the coordinator's evaluation context.
 //
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestLiveFlip_GameDomainShieldActivation(t *testing.T) {
 	p := newLiveFlagPlane(t, 0)
 	waitGameDomainServes(t)
@@ -124,7 +124,7 @@ func TestLiveFlip_GameDomainShieldActivation(t *testing.T) {
 		return gameTrigger(ctx, p.flags, "live-game")
 	}
 
-	t.Run("UC-040/A31 shield.activation read instant, flipped to trigger and back", func(t *testing.T) {
+	t.Run("UC-048/A4 shield.activation read instant, flipped to trigger and back", func(t *testing.T) {
 		p.putSet(t, GameDomain, "shield.activation", "instant")
 		readSettled(t, "shield.activation", read, false)
 		p.putSet(t, GameDomain, "shield.activation", "trigger")
@@ -332,7 +332,7 @@ func TestLiveFlip_KillSwitch(t *testing.T) {
 // then the stream is back and later flips are seen within NFR-050 bounds.
 //
 // UC: UC-045 main A3
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestLiveFlip_FlagdRestartMidRun(t *testing.T) {
 	container := os.Getenv(envLiveFlagdContainer)
 	if container == "" {
@@ -346,10 +346,10 @@ func TestLiveFlip_FlagdRestartMidRun(t *testing.T) {
 		return gameTrigger(ctx, p.flags, "live-game")
 	}
 
-	t.Run("UC-045/A3 UC-045/main UC-040/A31 flagd restart: fail closed, reconnect, later flips seen", func(t *testing.T) {
+	t.Run("UC-045/A3 UC-045/main UC-048/A4 flagd restart: fail closed, reconnect, later flips seen", func(t *testing.T) {
 		p.put(t, keyEnabled, "on")
 		readSettled(t, "enabled", read, true)
-		// The game domain (UC-040 A31) has its own sync stream: read before the restart.
+		// The game domain (UC-048 A4) has its own sync stream: read before the restart.
 		p.putSet(t, GameDomain, "shield.activation", "trigger")
 		readSettled(t, "shield.activation", readTrigger, true)
 

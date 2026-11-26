@@ -1,5 +1,7 @@
 package decision
 
+// Spec: decide-contract.md §15.2 (the rules engine; tests tagged UC-040 A1)
+
 import (
 	"context"
 	"math/rand/v2"
@@ -10,7 +12,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// ruleset_charge_uc040_test.go covers applyChargePolicy (UC-040 A31; #1870): the rules
+// ruleset_charge_uc040_test.go covers applyChargePolicy (UC-048 A4; #1870): the rules
 // engine drops a grant_shield candidate whose target holds a charge;
 // another player's R4 candidate may then be the one kept (A41, #2395).
 
@@ -44,23 +46,24 @@ func shieldTargets(ds []Decision) []string {
 	return out
 }
 
-// UC: UC-040 A31 A41
+// UC: UC-040 A1
+// UC: UC-048 A4
 func TestApplyChargePolicy_R4SkipsChargedWeakest(t *testing.T) {
-	t.Run("UC-040/A31 A41 a charged weakest gets no grant_shield; the other struggling player stays a candidate", func(t *testing.T) {
+	t.Run("UC-048/A4 a charged weakest gets no grant_shield; the other struggling player stays a candidate", func(t *testing.T) {
 		cands := balancedCandidates(chargeRulesCtx(), defaultFit())
-		// Mean skill 0.43: WEAK and MID are below it; STRONG never is (A41 step 2).
+		// Mean skill 0.43: WEAK and MID are below it; STRONG never is (decide-contract §15.2 step 2).
 		if got := shieldTargets(decisionsOf(cands)); !equalStrings(got, []string{"MID", "WEAK"}) {
 			t.Fatalf("precondition: R4 candidates %v, want [MID WEAK]", got)
 		}
 		kept := applyChargePolicy(cands, map[string]bool{"WEAK": true})
 		if got := shieldTargets(decisionsOf(kept)); !equalStrings(got, []string{"MID"}) {
-			t.Fatalf("grant_shield candidates after the charge policy = %v, want [MID] (WEAK dropped, A41: a non-candidate holds nobody back)", got)
+			t.Fatalf("grant_shield candidates after the charge policy = %v, want [MID] (WEAK dropped, decide-contract §15.2: a non-candidate holds nobody back)", got)
 		}
 		if len(kept) == 0 {
 			t.Fatal("the charge policy must keep the other candidates")
 		}
 	})
-	t.Run("UC-040/A31 nil or empty charged keeps every candidate", func(t *testing.T) {
+	t.Run("UC-048/A4 nil or empty charged keeps every candidate", func(t *testing.T) {
 		for _, charged := range []map[string]bool{nil, {}} {
 			want := interventionsOf(balancedCandidates(chargeRulesCtx(), defaultFit()))
 			got := interventionsOf(applyChargePolicy(balancedCandidates(chargeRulesCtx(), defaultFit()), charged))
@@ -69,7 +72,7 @@ func TestApplyChargePolicy_R4SkipsChargedWeakest(t *testing.T) {
 			}
 		}
 	})
-	t.Run("UC-040/A31 the engine reads its charged source once per ranking", func(t *testing.T) {
+	t.Run("UC-048/A4 the engine reads its charged source once per ranking", func(t *testing.T) {
 		clock := time.Unix(10_000, 0)
 		r := newObjectiveRules(balancedRulesConfig(), balancedRulesConfig(), balancedRulesConfig(),
 			func() time.Time { return clock }, rand.New(rand.NewPCG(1, 2)))
@@ -80,7 +83,7 @@ func TestApplyChargePolicy_R4SkipsChargedWeakest(t *testing.T) {
 		r.SetChargedSource(func() map[string]bool { reads.Add(1); return map[string]bool{"WEAK": true} })
 		clock = clock.Add(evalInterval)
 		if got := shieldTargets(r.Evaluate(context.Background(), chargeRulesCtx())); !equalStrings(got, []string{"MID"}) {
-			t.Fatalf("with WEAK charged the engine shields %v, want [MID] (A41)", got)
+			t.Fatalf("with WEAK charged the engine shields %v, want [MID] (decide-contract §15.2)", got)
 		}
 		_ = r.Evaluate(context.Background(), chargeRulesCtx()) // throttled: no ranking, no read
 		if reads.Load() != 1 {

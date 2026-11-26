@@ -118,14 +118,6 @@ func TestObserver_MutationPaths(t *testing.T) {
 			t.Fatalf("change %+v, want cleared by the selector stage", c)
 		}
 	})
-	t.Run("UC-055/BR-001 a fraction write carries its percent", func(t *testing.T) {
-		f, rec := observedFixture(t, fixtureOpts{})
-		f.put(WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: f.anyVariant("bluetooth_backend"), Scope: Scope{FractionPercent: intp(10)}, Writer: "proxy"})
-		c := wantOne(t, rec.take(), ChangeValue, "bluetooth_backend")
-		if c.ScopeName != registry.ScopeFraction || c.Scope.FractionPercent == nil || *c.Scope.FractionPercent != 10 {
-			t.Fatalf("change %+v, want fraction 10", c)
-		}
-	})
 	t.Run("UC-055/BR-001 an append reports the event list, a clear reports an empty list", func(t *testing.T) {
 		f, rec := observedFixture(t, fixtureOpts{})
 		f.register("game_a", "c1", "MOCK0001")
@@ -404,17 +396,4 @@ func findChange(t *testing.T, cs []Change, flag, scope string) Change {
 	}
 	t.Fatalf("no %s change of %s", scope, flag)
 	return Change{}
-}
-
-// anyVariant returns a declared variant of key other than its default.
-func (f *fixture) anyVariant(key string) string {
-	f.t.Helper()
-	fl := f.state.flags[key]
-	for _, name := range fl.base.VariantNames() {
-		if name != fl.base.DefaultVariant {
-			return name
-		}
-	}
-	f.t.Fatalf("%s has a single variant", key)
-	return ""
 }

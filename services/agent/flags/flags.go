@@ -34,19 +34,19 @@ const (
 	keyInterventionsAllowed      = "interventions_allowed"
 	keyBatteryThreshold          = "policy.battery_threshold"
 	keyMaxInterventionsPerMinute = "policy.max_interventions_per_minute"
-	// Shield limits per player per game (UC-040 A33, BR-022; #2044): operator flags
+	// Shield limits per player per game (UC-048 A6, BR-007; #2044): operator flags
 	// the agent reads and never writes (C-034). No targeting (flags.md §3), so the
 	// agent's empty context resolves the coordinator's value.
 	keyMaxShieldsPerPlayerPerGame = "policy.max_shields_per_player_per_game"
 	keyShieldCooldownSeconds      = "policy.shield_cooldown_seconds"
-	// R4's danger shield before the first elimination (UC-040 A43, BR-032; #2461):
+	// R4's danger shield before the first elimination (decide-contract.md §15.3; #2461):
 	// operator flags the agent reads and never writes (C-034); the rules clamp them.
 	keyShieldDangerRatio   = "policy.shield_danger_ratio"
 	keyShieldDangerSamples = "policy.shield_danger_samples"
 	// keyShieldDangerEnabled switches the danger path off on its own (on by default;
 	// an unreadable value reads on, like the other two).
 	keyShieldDangerEnabled = "policy.shield_danger_enabled"
-	// The group-shield gate (#2467, UC-040 A47, BR-033): human-only agent flags with
+	// The group-shield gate (#2467, UC-048 A13, BR-014): human-only agent flags with
 	// no targeting, read by the agent here (empty context) and by the coordinator in
 	// the game's flag context; both must resolve one value (flags.md §3).
 	keyGroupGrantEnabled    = "policy.group_grant.enabled"
@@ -77,12 +77,10 @@ const (
 
 	// M7-8 promotion flow flags (#936). Read LIVE (never cached) so flipping the
 	// mode flag takes effect on the NEXT promotion with no restart — the demo
-	// moment. mode selects issue|pr|autonomous; target selects local|github. Both
-	// are STRING flags read via the typed getter. The SAFE defaults (see
-	// DefaultPromotionMode/Target) are baked here: mode never defaults to autonomous,
-	// target never defaults to github — the safety rail.
-	keyPromotionMode   = "code_improvement.mode"
-	keyPromotionTarget = "code_improvement.target"
+	// moment. mode selects issue|autonomous, a STRING flag read via the typed
+	// getter. The SAFE default (DefaultPromotionMode) is baked here: mode never
+	// defaults to autonomous — the safety rail.
+	keyPromotionMode = "code_improvement.mode"
 
 	// Lifecycle + throttle calibration flags (#766 F5, hot-reloaded since #927).
 	// Unlike the per-cycle layers above, these are NOT re-read on the decision hot
@@ -175,13 +173,13 @@ const (
 	// DefaultMaxInterventionsPerMinute is the weighted per-minute budget.
 	DefaultMaxInterventionsPerMinute = 2
 	// DefaultMaxShieldsPerPlayerPerGame and DefaultShieldCooldownSeconds are the
-	// shield limits (UC-040 BR-022) when the flag cannot be read or is negative:
+	// shield limits (UC-048 BR-007) when the flag cannot be read or is negative:
 	// the limits stay on. They match services/flagd/agent.json and the coordinator's
 	// games/base.py defaults.
 	DefaultMaxShieldsPerPlayerPerGame = 3
 	DefaultShieldCooldownSeconds      = 15
 	// DefaultShieldDangerRatio and DefaultShieldDangerSamples are the danger-shield
-	// thresholds (UC-040 A43, BR-032) when the flag cannot be read; they match
+	// thresholds (decide-contract.md §15.3) when the flag cannot be read; they match
 	// services/flagd/agent.json and decision.DefaultShieldDanger*.
 	DefaultShieldDangerRatio   = 0.85
 	DefaultShieldDangerSamples = 3
@@ -227,21 +225,15 @@ const (
 	// cycle — 300s (5 min) keeps the agent from proposing every game. Tunable live.
 	DefaultCodeImprovementMinIntervalSeconds = 300.0
 
-	// M7-8 promotion-flow defaults (#936), the SAFETY RAIL's safe flag defaults —
-	// mirror the services/flagd/agent.json code_improvement.{mode,target}
-	// defaultVariants. Applied when flagd is unreachable or the flag is undefined.
+	// M7-8 promotion-flow default (#936), the SAFETY RAIL's safe flag default —
+	// mirrors the services/flagd/agent.json code_improvement.mode
+	// defaultVariant. Applied when flagd is unreachable or the flag is undefined.
 
 	// DefaultPromotionMode is "issue" — the SAFEST mode: a missing/unreachable
 	// control plane opens an issue (no code/flag change), NEVER autonomous (which
 	// would change the real default). The safety rail requires mode to never default
 	// to autonomous.
 	DefaultPromotionMode = "issue"
-	// DefaultPromotionTarget is "local" — NEVER "github". A missing/unreachable
-	// control plane keeps a promotion off github.com; the real GitHub path requires
-	// both this flag set to github AND the explicit env gate + token (see
-	// promote.NewGitHubClientFromEnv). The safety rail requires target to never
-	// default to github.
-	DefaultPromotionTarget = "local"
 
 	// Lifecycle + throttle defaults (#766 F5), mirroring the former hardcoded
 	// constants in main.go (playerTTL/sessionGrace/evictEvery) and decision.go
@@ -313,23 +305,23 @@ type Policy struct {
 	// MaxInterventionsPerMinute is the weighted per-minute dispatch budget.
 	MaxInterventionsPerMinute int
 	// MaxShieldsPerPlayerPerGame caps the agent's grant_shield writes per player per
-	// game (UC-040 A33, BR-022). 0 = unlimited (also the zero value, so a hand-built
+	// game (UC-048 A6, BR-007). 0 = unlimited (also the zero value, so a hand-built
 	// Snapshot, the rules golden among them, stays inert).
 	MaxShieldsPerPlayerPerGame int
 	// ShieldCooldownSeconds is the pause after the end of a player's last agent
-	// shield before the next grant (UC-040 A33, BR-022). 0 = off.
+	// shield before the next grant (UC-048 A6, BR-007). 0 = off.
 	ShieldCooldownSeconds int
 	// ShieldDangerRatio and ShieldDangerSamples are R4's danger-shield thresholds
-	// (UC-040 A43, BR-032): the fraction of the death threshold and the number of
+	// (decide-contract.md §15.3): the fraction of the death threshold and the number of
 	// consecutive readings at or above it. 0 (a hand-built Snapshot) means the
 	// rules' default; the rules clamp both.
 	ShieldDangerRatio   float64
 	ShieldDangerSamples int
 	// ShieldDangerOff is policy.shield_danger_enabled = off: R4's danger path
-	// proposes nothing (UC-040 A43, BR-032). Inverted so the zero value (a
+	// proposes nothing (decide-contract.md §15.3). Inverted so the zero value (a
 	// hand-built Snapshot) keeps the path on, like the flag's default.
 	ShieldDangerOff bool
-	// The group-shield gate (#2467, UC-040 A47, BR-033), read like the coordinator's
+	// The group-shield gate (#2467, UC-048 A13, BR-014), read like the coordinator's
 	// _group_grant_policy and failing closed: a missing or unreadable flag reads
 	// false / 0. GroupGrantMaxPerGame is clamped to 0..GroupGrantMaxPerGameCeiling,
 	// GroupGrantMaxTargets to 2..GroupGrantMaxTargetsCeiling (0 or less = off). The
@@ -460,28 +452,25 @@ func (f *Flags) CodeImprovement(ctx context.Context) CodeImprovementConfig {
 }
 
 // PromotionConfig is the M7-8 promotion-flow configuration (#936): the live mode
-// (issue|pr|autonomous) and target (local|github) the promoter acts under. It
+// (issue|autonomous) the promoter acts under. It
 // mirrors the promote.Config shape (the promote package stays free of an
 // OpenFeature dependency — the caller resolves the flags here, adds the kill-switch
 // from the Snapshot, and passes the value in: the same "package owns logic, caller
 // owns flagd" split the Gate/Writer use). The SAFE defaults are applied
-// on any flagd error: mode→issue (never autonomous), target→local (never github).
+// on any flagd error: mode→issue (never autonomous).
 type PromotionConfig struct {
 	// Mode is code_improvement.mode (default issue).
 	Mode string
-	// Target is code_improvement.target (default local).
-	Target string
 }
 
-// Promotion evaluates the two M7-8 promotion-flow flags (#936) for one promotion.
+// Promotion evaluates the M7-8 promotion-flow flag (#936) for one promotion.
 // Read LIVE (never cached) so flipping the mode flag mid-session takes effect on
 // the NEXT promotion with no restart — the demo moment. Each flag falls back to
 // its SAFE default on any evaluation error (flagd unreachable / undefined): the
-// safety rail's mode→issue / target→local defaults.
+// safety rail's mode→issue default.
 func (f *Flags) Promotion(ctx context.Context) PromotionConfig {
 	return PromotionConfig{
-		Mode:   f.stringFlag(ctx, keyPromotionMode, DefaultPromotionMode),
-		Target: f.stringFlag(ctx, keyPromotionTarget, DefaultPromotionTarget),
+		Mode: f.stringFlag(ctx, keyPromotionMode, DefaultPromotionMode),
 	}
 }
 
@@ -832,7 +821,7 @@ func (f *Flags) intFlag(ctx context.Context, key string, def int) int {
 }
 
 // nonNegativeIntFlag is intFlag for a limit where a negative value is a mistake: it
-// gives def, like a read error, so the limit stays on (UC-040 BR-022).
+// gives def, like a read error, so the limit stays on (UC-048 BR-007).
 func (f *Flags) nonNegativeIntFlag(ctx context.Context, key string, def int) int {
 	v := f.intFlag(ctx, key, def)
 	if v < 0 {

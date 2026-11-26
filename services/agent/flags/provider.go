@@ -121,7 +121,7 @@ func flagdProviderOptions(cfg ProviderConfig, flagSet string, initDeadline time.
 }
 
 // SetupFlagd registers the agent's flagd providers (in-process resolver, #1713) for the
-// `agent` and `game` (read-only, UC-040 A31) domains and returns a Flags wrapper, a hot-reloadable
+// `agent` and `game` (read-only, UC-048 A4) domains and returns a Flags wrapper, a hot-reloadable
 // LifecycleHolder (#927), and a shutdown func.
 //
 // Setup never blocks startup: each provider waits for its first sync in the background

@@ -1,6 +1,6 @@
 """The agent's shield gate: the coordinator exports what its grant_shield refusal reads.
 
-UC-040 A31 (a held charge), A33 (the cap count and the cooldown end), A47 (the
+UC-048 A4 (a held charge), A6 (the cap count and the cooldown end), A13 (the
 game's group shields). The agent filters its grants on these gauges; the
 coordinator stays authoritative and refuses a grant the agent's stale view let
 through.
@@ -39,7 +39,7 @@ def stat(gate, name, serial="p1"):
 
 class TestUC040AgentShieldGate:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A33", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A6", br=["BR-007"])
     async def test_an_applied_grant_exports_count_and_cooldown_end(self, game, clock, limits, gate):  # noqa: F811, ARG002
         limits["value"] = (3, 15)
         assert await game.grant_shield("p1", 5.0) is True
@@ -47,7 +47,7 @@ class TestUC040AgentShieldGate:
         assert stat(gate, "cooldown_until") == pytest.approx(T0 + 5.0 + 15.0)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A33", br=["BR-022"])
+    @pytest.mark.uc("UC-048", flow="A6", br=["BR-007"])
     async def test_no_cooldown_exports_zero_and_a_refusal_nothing(self, game, clock, limits, gate):  # noqa: F811, ARG002
         limits["value"] = (1, 0)
         assert await game.grant_shield("p1", 5.0) is True
@@ -58,7 +58,7 @@ class TestUC040AgentShieldGate:
         assert stat(gate, "grants") == 1
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A31", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A4", br=["BR-005"])
     async def test_a_held_charge_is_exported_until_it_ends(self, game, activation, limits, gate):  # noqa: F811, ARG002
         activation["value"] = "trigger"
         limits["value"] = (0, 0)
@@ -70,7 +70,7 @@ class TestUC040AgentShieldGate:
         assert stat(gate, "charged") == 0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A47", br=["BR-033"])
+    @pytest.mark.uc("UC-048", flow="A13", br=["BR-014"])
     async def test_an_applied_group_shield_exports_the_game_count(self, game, gate):  # noqa: F811, ARG002
         ints = {"policy.group_grant.max_targets": 3, "policy.group_grant.max_per_game": 2}
         with (

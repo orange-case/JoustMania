@@ -11,7 +11,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// shieldgate_uc040_test.go covers the shield gate (UC-040 A31, A33, A37; decide-contract
+// shieldgate_uc040_test.go covers the shield gate (UC-048 A4, A6, A9; decide-contract
 // §4.5 step 4): a targeted grant_shield is refused from the coordinator's
 // game_player_shield_gate gauges before the rate limit, the views feed the decide state
 // and the rules, and missing gauges refuse nothing.
@@ -75,7 +75,7 @@ func chargedIn(t *testing.T, st decide.State, serial string) bool {
 	return playerIn(t, st, serial).ShieldCharged
 }
 
-// UC: UC-040 A31 A33 BR-020 BR-022
+// UC: UC-048 A4 A6 BR-005 BR-007
 func TestShieldGate_Refusals(t *testing.T) {
 	now := time.Unix(50_000, 0)
 	for _, tc := range []struct {
@@ -84,12 +84,12 @@ func TestShieldGate_Refusals(t *testing.T) {
 		max  int
 		want BlockReason
 	}{
-		{"UC-040/A31 a held charge is already_charged", gamecontext.ShieldGate{Charged: true, Grants: 5}, 3, ReasonAlreadyCharged},
-		{"UC-040/A33 grants at the cap", gamecontext.ShieldGate{Grants: 3}, 3, ReasonShieldCapReached},
-		{"UC-040/A33 the cap 0 is unlimited", gamecontext.ShieldGate{Grants: 30}, 0, ""},
-		{"UC-040/A33 before the cooldown end", gamecontext.ShieldGate{Grants: 1, CooldownUntil: now.Add(time.Second)}, 3, ReasonShieldCooldown},
-		{"UC-040/A33 at the cooldown end", gamecontext.ShieldGate{Grants: 1, CooldownUntil: now}, 3, ""},
-		{"UC-040/A33 the cap before the cooldown", gamecontext.ShieldGate{Grants: 3, CooldownUntil: now.Add(time.Second)}, 3, ReasonShieldCapReached},
+		{"UC-048/A4 a held charge is already_charged", gamecontext.ShieldGate{Charged: true, Grants: 5}, 3, ReasonAlreadyCharged},
+		{"UC-048/A6 grants at the cap", gamecontext.ShieldGate{Grants: 3}, 3, ReasonShieldCapReached},
+		{"UC-048/A6 the cap 0 is unlimited", gamecontext.ShieldGate{Grants: 30}, 0, ""},
+		{"UC-048/A6 before the cooldown end", gamecontext.ShieldGate{Grants: 1, CooldownUntil: now.Add(time.Second)}, 3, ReasonShieldCooldown},
+		{"UC-048/A6 at the cooldown end", gamecontext.ShieldGate{Grants: 1, CooldownUntil: now}, 3, ""},
+		{"UC-048/A6 the cap before the cooldown", gamecontext.ShieldGate{Grants: 3, CooldownUntil: now.Add(time.Second)}, 3, ReasonShieldCapReached},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := withGate(ffaRealCtx(), "WEAK", tc.gate)
@@ -98,12 +98,12 @@ func TestShieldGate_Refusals(t *testing.T) {
 			}
 		})
 	}
-	t.Run("UC-040/A31 no gauge refuses nothing", func(t *testing.T) {
+	t.Run("UC-048/A4 no gauge refuses nothing", func(t *testing.T) {
 		if got := shieldGateRefusal(ffaRealCtx(), "WEAK", shieldLimits{maxShields: 1}, now); got != "" {
 			t.Fatalf("refusal = %q, want none", got)
 		}
 	})
-	t.Run("UC-040/A37 a charge gauge in a hold game is not already_charged", func(t *testing.T) {
+	t.Run("UC-048/A9 a charge gauge in a hold game is not already_charged", func(t *testing.T) {
 		c := withGate(withHold(ffaRealCtx()), "WEAK", gamecontext.ShieldGate{Charged: true})
 		if got := shieldGateRefusal(c, "WEAK", shieldLimits{}, now); got != "" {
 			t.Fatalf("refusal = %q, want none", got)
@@ -111,9 +111,9 @@ func TestShieldGate_Refusals(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31 BR-020
+// UC: UC-048 A4 BR-005
 func TestShieldGate_BlockedBeforeTheRateLimit(t *testing.T) {
-	t.Run("UC-040/A31 a charged target is already_charged, not written and charges no budget", func(t *testing.T) {
+	t.Run("UC-048/A4 a charged target is already_charged, not written and charges no budget", func(t *testing.T) {
 		l, sink, clock, _ := budgetLoop(t, 100, budgetShield("WEAK"))
 		c := withGate(ffaRealCtx(), "WEAK", gamecontext.ShieldGate{Charged: true})
 		expectOutcome(t, runCycle(l, c), "grant_shield/WEAK:already_charged")
@@ -124,7 +124,7 @@ func TestShieldGate_BlockedBeforeTheRateLimit(t *testing.T) {
 			t.Fatalf("budget entries = %d, want 0", n)
 		}
 	})
-	t.Run("UC-040/A33 a capped target is shield_cap_reached", func(t *testing.T) {
+	t.Run("UC-048/A6 a capped target is shield_cap_reached", func(t *testing.T) {
 		l, sink, _, _ := limitLoop(t, 100, 2, 0, budgetShield("WEAK"))
 		c := withGate(ffaRealCtx(), "WEAK", gamecontext.ShieldGate{Grants: 2})
 		expectOutcome(t, runCycle(l, c), "grant_shield/WEAK:shield_cap_reached")
@@ -132,7 +132,7 @@ func TestShieldGate_BlockedBeforeTheRateLimit(t *testing.T) {
 			t.Fatalf("writes = %d, want 0", n)
 		}
 	})
-	t.Run("UC-040/A33 a cooling-down target is shield_cooldown until the end the coordinator exported", func(t *testing.T) {
+	t.Run("UC-048/A6 a cooling-down target is shield_cooldown until the end the coordinator exported", func(t *testing.T) {
 		l, sink, clock, _ := limitLoop(t, 100, 3, 15, budgetShield("WEAK"))
 		c := withGate(ffaRealCtx(), "WEAK", gamecontext.ShieldGate{Grants: 1, CooldownUntil: clock.Add(5 * time.Second)})
 		expectOutcome(t, runCycle(l, c), "grant_shield/WEAK:shield_cooldown")
@@ -142,7 +142,7 @@ func TestShieldGate_BlockedBeforeTheRateLimit(t *testing.T) {
 			t.Fatalf("writes = %d, want 1", n)
 		}
 	})
-	t.Run("UC-040/A31 a grant the gauges allow is written again: the coordinator stays authoritative", func(t *testing.T) {
+	t.Run("UC-048/A4 a grant the gauges allow is written again: the coordinator stays authoritative", func(t *testing.T) {
 		l, sink, clock, _ := budgetLoop(t, 100, budgetShield("WEAK"))
 		expectOutcome(t, runCycle(l, ffaRealCtx()), "grant_shield/WEAK:dispatched")
 		*clock = clock.Add(time.Second)
@@ -153,9 +153,9 @@ func TestShieldGate_BlockedBeforeTheRateLimit(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31 A33
+// UC: UC-048 A4 A6
 func TestShieldGate_Views(t *testing.T) {
-	t.Run("UC-040/A31 the state marks a charged player shield_charged, a capped one shield_limited", func(t *testing.T) {
+	t.Run("UC-048/A4 the state marks a charged player shield_charged, a capped one shield_limited", func(t *testing.T) {
 		l, _, _, _ := limitLoop(t, 100, 1, 0)
 		_ = runCycle(l, ffaRealCtx()) // the cycle publishes its limits to the views
 		c := withGate(withGate(ffaRealCtx(), "WEAK", gamecontext.ShieldGate{Charged: true}), "S", gamecontext.ShieldGate{Grants: 1})
@@ -167,14 +167,14 @@ func TestShieldGate_Views(t *testing.T) {
 			t.Fatalf("S limited=%v charged=%v, want limited only", s.ShieldLimited, s.ShieldCharged)
 		}
 	})
-	t.Run("UC-040/A41 ShieldGrants reads the coordinator's count", func(t *testing.T) {
+	t.Run("UC-040/A1 ShieldGrants reads the coordinator's count", func(t *testing.T) {
 		l, _, _, _ := budgetLoop(t, 100)
 		c := withGate(withGate(ffaRealCtx(), "WEAK", gamecontext.ShieldGate{Grants: 2}), "S", gamecontext.ShieldGate{})
 		if g := l.ShieldGrants(c); g["WEAK"] != 2 || len(g) != 1 {
 			t.Fatalf("ShieldGrants = %v, want WEAK 2 only", g)
 		}
 	})
-	t.Run("UC-040/A31 without gauges both views are empty", func(t *testing.T) {
+	t.Run("UC-048/A4 without gauges both views are empty", func(t *testing.T) {
 		l, _, _, _ := limitLoop(t, 100, 1, 0)
 		_ = runCycle(l, ffaRealCtx())
 		if charged, noShield := l.ShieldSerials(ffaRealCtx()); charged != nil || noShield != nil {
@@ -249,9 +249,9 @@ func (s *blockingSink) Apply(ctx context.Context, d Decision) error {
 	return s.capturingSink.Apply(ctx, d)
 }
 
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestShieldGate_RemoteAnswerForAChargedPlayer(t *testing.T) {
-	t.Run("UC-040/A31 a remote answer landing for a charged player is blocked already_charged", func(t *testing.T) {
+	t.Run("UC-048/A4 a remote answer landing for a charged player is blocked already_charged", func(t *testing.T) {
 		be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.95, "A", 0.5, "x"))
 		h := newRemoteHarness(t, remoteSnapshot(time.Second), be)
 		c := withGate(remoteContext(), "A", gamecontext.ShieldGate{Charged: true})

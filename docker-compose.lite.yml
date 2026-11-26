@@ -13,9 +13,8 @@
 # The controller manager reaches it as rust-hid:50058 on the joustmania network;
 # the pairing daemon runs on the host network (raw HCI, as in docker-compose.yml)
 # and reaches rust-hid and flagd through their loopback-published ports
-# (#1402). python-hid is not part of the lite stack (opt-in on the full stack
-# only, `docker compose --profile python-hid up -d`), and neither is the
-# operator pad (`operator-pad` profile, full stack only, #2050).
+# (#1402). The operator pad (`operator-pad` profile, full stack only, #2050)
+# is not part of the lite stack.
 #
 # All images use canonical GHCR names for consistency.
 # Use IMAGE_TAG environment variable to specify version (default: latest)
@@ -172,7 +171,7 @@ services:
       - CONTROL_BIND=${PAIRING_CONTROL_BIND:-127.0.0.1,172.17.0.1}
       - DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket
       - OTEL_SDK_DISABLED=true
-      # bluetooth_backend (default rust) pairs through rust-hid's PairingService
+      # The daemon pairs through rust-hid's PairingService
       # (UC-001 BR-003). Loopback because network_mode: host can't use Docker
       # DNS; 127.0.0.1, not localhost: 8015 and 50058 are published on
       # 127.0.0.1 only (#1319), and localhost may resolve to ::1 first.

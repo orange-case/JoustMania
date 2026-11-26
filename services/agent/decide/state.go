@@ -26,13 +26,13 @@ func BuildState(c gamecontext.GameContext) State {
 // Annotations{}) equals BuildState(c).
 type Annotations struct {
 	// Charged holds the serials the coordinator reports holding a trigger-mode
-	// charge (game_player_shield_gate, UC-040 A31).
+	// charge (game_player_shield_gate, UC-048 A4).
 	Charged map[string]bool
 	// NoShield holds the serials the agent would refuse a grant_shield to at the
 	// moment the state is built, for any reason (Loop.ShieldSerials' no-shield set:
 	// charged, capped, cooling down, and in a hold game a full pool or a used-up
 	// budget). An alive player in it but not in Charged is marked ShieldLimited
-	// (#2066; UC-040 A33, A37).
+	// (#2066; UC-048 A6, A9).
 	NoShield map[string]bool
 	// Levels holds the values the agent last wrote to this game, keyed
 	// LevelKey(intervention, serial) (the applied-value ledger, Loop.AppliedValues;

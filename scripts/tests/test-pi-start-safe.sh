@@ -2,7 +2,7 @@
 # The Pi start script never tears a running stack down (UC-060 BR-001, NFR-026, #2027 PR 2a).
 #
 # joustmania-start.sh runs against a stub docker (and a stub git, amixer):
-#  - no `rm -f` except a foreign joustmania-* container (or python-hid / operator-pad when its
+#  - no `rm -f` except a foreign joustmania-* container (or operator-pad when its
 #    profile is inactive), no `prune`, no `down`; the game starts with
 #    `up -d --pull never --remove-orphans <services>`
 #  - "ours" is what `compose ps -a` lists (so a COMPOSE_PROJECT_NAME in .env.local
@@ -10,8 +10,8 @@
 #    this checkout under another project name is foreign (it would block `up -d`)
 #  - the effective IMAGE_TAG comes from `compose config --images`, not from a grep
 #    of .env (the release-please inline comment stays out of the log and start.env)
-#  - a long `config --services` list does not make the python-hid check fail
-#    under pipefail (audit F4); an active python-hid is not removed
+#  - a long `config --services` list does not make the operator-pad check fail
+#    under pipefail (audit F4); an active operator-pad is not removed
 #  - an amixer that fails does not stop the start (errexit + pipefail)
 #  - state goes to $RUNTIME_DIRECTORY/start.env and an unwritable state dir is not fatal
 #  - without JOUSTMANIA_UNIT_REV (outdated unit) every start logs "unit outdated" and a failed
@@ -93,7 +93,7 @@ if grep -qE '(^| )(prune|down)( |$)' "${log}"; then fail "teardown: prune or dow
 grep -qE 'joustmania-(menu|audio)' <(grep -E '^(rm|container rm)' "${log}" || true) && fail "teardown: our own container was removed"
 grep -qx 'rm -f joustmania-old' "${log}" || fail "teardown: foreign container (no project label) not removed"
 grep -qx 'rm -f joustmania-other' "${log}" || fail "teardown: foreign container (other project) not removed"
-rm_calls="$(grep -E '^rm ' "${log}" | grep -vxE 'rm -f (joustmania-old|joustmania-other|joustmania-python-hid|joustmania-operator-pad)' || true)"
+rm_calls="$(grep -E '^rm ' "${log}" | grep -vxE 'rm -f (joustmania-old|joustmania-other|joustmania-operator-pad)' || true)"
 [[ -z "${rm_calls}" ]] || fail "teardown: unexpected rm call(s): ${rm_calls}"
 grep -qx "compose -f docker-compose.yml --env-file .env up -d --pull never --remove-orphans flagd game-coordinator rust-hid" "${log}" \
   || fail "teardown: no 'up -d --pull never --remove-orphans <game services>' call: $(grep ' up ' "${log}")"
@@ -134,12 +134,12 @@ if grep -qE '^rm -f joustmania-(menu|old)$' "${CASE}/docker.log"; then
   fail "ps-fails: a container was removed although compose could not list its own"
 fi
 
-# --- 2. F4: long service list, active python-hid stays --------------------
+# --- 2. F4: long service list, active operator-pad stays ------------------
 make_case f4
-{ echo python-hid; seq 1 20000 | sed 's/^/svc-/'; } >"${CASE}/services"
-run_start COMPOSE_PROFILES=python-hid || fail "f4: start exited non-zero"
-if grep -qx 'rm -f joustmania-python-hid' "${CASE}/docker.log"; then
-  fail "f4: an active python-hid was removed (pipefail + grep -q SIGPIPE)"
+{ echo operator-pad; seq 1 20000 | sed 's/^/svc-/'; } >"${CASE}/services"
+run_start COMPOSE_PROFILES=operator-pad || fail "f4: start exited non-zero"
+if grep -qx 'rm -f joustmania-operator-pad' "${CASE}/docker.log"; then
+  fail "f4: an active operator-pad was removed (pipefail + grep -q SIGPIPE)"
 fi
 
 # --- 3. a failing amixer does not stop the start -----------------------------
@@ -195,7 +195,7 @@ run_start JOUSTMANIA_UNIT_REV=2 || fail "no-recreate: second start exited non-ze
 grep ' up ' "${CASE}/docker.log" | grep -q -- '--pull never' || fail "no-recreate: an up without --pull never"
 grep ' up ' "${CASE}/docker.log" | grep -qE -- '--force-recreate|--renew-anon-volumes|--build' && fail "no-recreate: up forces a recreate"
 # (the name-based cleanup of an inactive opt-in profile's container is not a recreate)
-torn="$(grep -E '(^| )(rm|down|prune|stop|restart|kill)( |$)' "${CASE}/docker.log" | grep -vxE 'rm -f joustmania-(python-hid|operator-pad)' || true)"
+torn="$(grep -E '(^| )(rm|down|prune|stop|restart|kill)( |$)' "${CASE}/docker.log" | grep -vxE 'rm -f joustmania-operator-pad' || true)"
 [[ -z "${torn}" ]] || fail "no-recreate: something was removed or stopped: ${torn}"
 
 if [[ "${fails}" -ne 0 ]]; then

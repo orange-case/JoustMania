@@ -2,9 +2,8 @@
 
 The agent's promoter (``services/agent/promote/github.go``) builds its real GitHub
 client only when ``AGENT_CODE_IMPROVEMENT_ENABLED=true``, ``GITHUB_TOKEN`` and
-``GITHUB_REPOSITORY`` are set and the env target is ``github``; ``GITHUB_API_URL``
-points it here, so a promotion in ``issue`` or ``pr`` mode reaches this stub and never
-github.com. The stub answers ``POST /repos/<owner>/<repo>/issues`` and ``/pulls`` with
+``GITHUB_REPOSITORY`` are set; ``GITHUB_API_URL`` points it here, so an ``issue``
+mode promotion reaches this stub and never github.com. The stub answers ``POST /repos/<owner>/<repo>/issues`` and ``/pulls`` with
 a ``201`` and an ``html_url``, and records every request::
 
     issues = stack.fake_github.requests("issues")
@@ -49,7 +48,6 @@ class FakeGitHub:
         """The promoter env gate of services/agent/promote/github.go, pointed at this stub."""
         return {
             "AGENT_CODE_IMPROVEMENT_ENABLED": "true",
-            "AGENT_CODE_IMPROVEMENT_TARGET": "github",
             "GITHUB_TOKEN": TOKEN,
             "GITHUB_REPOSITORY": REPOSITORY,
             "GITHUB_API_URL": self.base_url,

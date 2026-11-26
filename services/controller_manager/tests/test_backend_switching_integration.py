@@ -156,57 +156,12 @@ class TestRustAdapterGracefulDegradation:
         assert result is False
 
 
-class TestBackendSwitchHidapiToRust:
-    """Simulate flag change from 'python' to 'rust', verify backend is recreated."""
-
-    def test_backend_switch_produces_different_adapter_types(self):
-        """Switching flag from 'python' to 'rust' produces different adapter types."""
-        # First creation: python
-        mock_client_python = autospec_flag_client()
-        mock_client_python.get_string_details.return_value = _mock_details("python")
-
-        with (
-            patch("lib.feature_flags.get_flag_client", return_value=mock_client_python),
-            patch("services.controller_manager.backend_factory._create_adapter_by_name") as mock_create,
-        ):
-            python_adapter = autospec_adapter()
-            python_adapter.adapter_type = "python"
-            mock_adapter_1 = autospec_adapter()
-            mock_adapter_1.adapter_type = "mock"
-            mock_create.side_effect = [python_adapter, mock_adapter_1]
-
-            backend_1 = create_backend()
-
-        # Second creation: rust
-        mock_client_rust = autospec_flag_client()
-        mock_client_rust.get_string_details.return_value = _mock_details("rust")
-
-        with (
-            patch("lib.feature_flags.get_flag_client", return_value=mock_client_rust),
-            patch("services.controller_manager.backend_factory._create_adapter_by_name") as mock_create,
-        ):
-            rust_adapter = _make_rust_adapter()
-            mock_adapter_2 = autospec_adapter()
-            mock_adapter_2.adapter_type = "mock"
-            mock_create.side_effect = [rust_adapter, mock_adapter_2]
-
-            backend_2 = create_backend()
-
-        # Verify different backends
-        assert isinstance(backend_1, MultiplexerBackend)
-        assert isinstance(backend_2, MultiplexerBackend)
-
-        types_1 = {a.adapter_type for a in backend_1.adapters}
-        types_2 = {a.adapter_type for a in backend_2.adapters}
-
-        assert "python" in types_1
-        assert "python" not in types_2
-        assert "rust" in types_2
-        assert "rust" not in types_1
+class TestMockAlwaysInjected:
+    """The mock adapter is added to every backend set."""
 
     def test_mock_auto_injected_in_both_modes(self):
         """Mock adapter is always auto-injected regardless of backend flag."""
-        for flag_value in ("python", "rust"):
+        for flag_value in ("mock", "rust"):
             mock_client = autospec_flag_client()
             mock_client.get_string_details.return_value = _mock_details(flag_value)
 
@@ -230,7 +185,7 @@ _CONTROLLER_FLAGS = Path(__file__).resolve().parents[3] / "services" / "flagd" /
 
 
 class TestRustIsTheDefaultBackend:
-    """rust-hid is the default Bluetooth backend; python is opt-in (UC-002 BR-003, #1371)."""
+    """rust-hid is the Bluetooth backend (UC-002 BR-003, #1371)."""
 
     @pytest.mark.uc("UC-002", flow="main", steps=[2], br=["BR-003"], cond=["Pre-2"])
     @pytest.mark.parametrize(
@@ -241,7 +196,7 @@ class TestRustIsTheDefaultBackend:
         ],
     )
     def test_unavailable_flag_falls_back_to_rust_plus_mock(self, flag_client):
-        """An empty or failing backend flag loads rust-hid (+ the auto-injected mock), never python."""
+        """An empty or failing backend flag loads rust-hid (+ the auto-injected mock)."""
         with (
             patch("lib.feature_flags.get_flag_client", return_value=flag_client()),
             patch("services.controller_manager.backend_factory._create_adapter_by_name") as mock_create,
@@ -256,21 +211,18 @@ class TestRustIsTheDefaultBackend:
         assert DEFAULT_BACKEND == "rust"
 
     @pytest.mark.uc("UC-002", flow="main", steps=[2], br=["BR-003"])
-    def test_shipped_flags_default_to_rust_and_keep_python_opt_in(self):
-        """controller.json defaults backend and bluetooth_backend to rust; python stays opt-in; no mock_* doubles."""
+    def test_shipped_flags_default_to_rust(self):
+        """controller.json defaults backend to rust; no python backend, no mock_* doubles."""
         flags = json.loads(_CONTROLLER_FLAGS.read_text())["flags"]
 
         backend = flags["backend"]
         assert backend["variants"][backend["defaultVariant"]] == "rust"
-        assert set(backend["variants"]) == {"python", "mock", "rust", "python_rust"}
+        assert set(backend["variants"]) == {"mock", "rust"}
         # The mock adapter is always added, so no variant needs to name it next to a real backend.
         assert not any(name.startswith("mock_") for name in backend["variants"])
         # Warning and death effect timings are fixed constants, not flags (#1322).
         assert not any(key.startswith("effect.") for key in flags)
-
-        routing = flags["bluetooth_backend"]
-        assert routing["variants"][routing["defaultVariant"]] == "rust"
-        assert set(routing["variants"].values()) == {"python", "rust"}
+        assert "bluetooth_backend" not in flags
 
 
 def _client_returning(details):

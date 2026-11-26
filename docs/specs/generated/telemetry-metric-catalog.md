@@ -84,6 +84,6 @@ The totals (the number of names, of names without a consumer and of names never 
 | `pairing_bluetooth_adapter_hci_errors_total` | counter | `hci_adapter`, `direction` | pairing-daemon | yes | grafana |  |
 | `pairing_bluetooth_adapter_info` | gauge | `hci_adapter`, `address`, `manufacturer`, `manufacturer_id`, `hci_version`, `bus`, `usb_id`, `onboard` | pairing-daemon | yes | grafana |  |
 | `pairing_bluetooth_link_role_info` | gauge | `serial`, `hci_adapter`, `role` | pairing-daemon | yes | grafana |  |
-| `process_cpu_seconds_total` | counter | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon, python-hid | yes (each service) | grafana |  |
-| `process_resident_memory_bytes` | gauge | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon, python-hid | yes (each service) | grafana |  |
-| `process_threads` | gauge | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon, python-hid | yes (each service) | grafana |  |
+| `process_cpu_seconds_total` | counter | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon | yes (each service) | grafana |  |
+| `process_resident_memory_bytes` | gauge | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon | yes (each service) | grafana |  |
+| `process_threads` | gauge | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon | yes (each service) | grafana |  |

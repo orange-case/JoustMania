@@ -41,11 +41,11 @@ class TestResolveBackendName:
     def test_openfeature_flag_used(self):
         """OpenFeature flag should be used as primary selection."""
         mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _mock_details("python")
+        mock_client.get_string_details.return_value = _mock_details("rust")
 
         with patch("lib.feature_flags.get_flag_client", return_value=mock_client):
             result = _resolve_backend_name()
-            assert result == "python"
+            assert result == "rust"
 
     def test_openfeature_flag_case_insensitive(self):
         """Flag value should be lowercased."""
@@ -84,11 +84,6 @@ class TestCreateAdapterByName:
         adapter = _create_adapter_by_name("rust")
         assert adapter.__class__.__name__ == "RustServiceAdapter"
         assert adapter.adapter_type == "rust"
-
-    def test_python_adapter(self):
-        adapter = _create_adapter_by_name("python")
-        assert adapter.__class__.__name__ == "PythonHidAdapter"
-        assert adapter.adapter_type == "python"
 
     def test_unknown_adapter_raises(self):
         with pytest.raises(RuntimeError, match="Unknown adapter"):
@@ -142,10 +137,10 @@ class TestMultiAdapterCreation:
         ):
             create_backend()
 
-    def test_mock_python_creates_two_adapters(self):
-        """flag='mock,python' -> MultiplexerBackend with 2 adapters."""
+    def test_mock_rust_creates_two_adapters(self):
+        """flag='mock,rust' -> MultiplexerBackend with 2 adapters."""
         mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _mock_details("mock,python")
+        mock_client.get_string_details.return_value = _mock_details("mock,rust")
 
         with (
             patch("lib.feature_flags.get_flag_client", return_value=mock_client),
@@ -153,9 +148,9 @@ class TestMultiAdapterCreation:
         ):
             mock_adapter = autospec_adapter()
             mock_adapter.adapter_type = "mock"
-            python_adapter = autospec_adapter()
-            python_adapter.adapter_type = "python"
-            mock_create.side_effect = [mock_adapter, python_adapter]
+            rust_adapter = autospec_adapter()
+            rust_adapter.adapter_type = "rust"
+            mock_create.side_effect = [mock_adapter, rust_adapter]
 
             backend = create_backend()
 
@@ -163,7 +158,7 @@ class TestMultiAdapterCreation:
         assert len(backend.adapters) == 2
         call_names = [call[0][0] for call in mock_create.call_args_list]
         assert "mock" in call_names
-        assert "python" in call_names
+        assert "rust" in call_names
 
     def test_single_name_creates_adapter(self):
         """flag='mock' -> MultiplexerBackend with 1 adapter."""
@@ -200,9 +195,9 @@ class TestMultiAdapterCreation:
         assert "mock" in call_names
 
     def test_whitespace_in_comma_separated_is_trimmed(self):
-        """flag='mock , python' -> names trimmed properly."""
+        """flag='mock , rust' -> names trimmed properly."""
         mock_client = autospec_flag_client()
-        mock_client.get_string_details.return_value = _mock_details("mock , python")
+        mock_client.get_string_details.return_value = _mock_details("mock , rust")
 
         with (
             patch("lib.feature_flags.get_flag_client", return_value=mock_client),
@@ -210,13 +205,13 @@ class TestMultiAdapterCreation:
         ):
             mock_adapter = autospec_adapter()
             mock_adapter.adapter_type = "mock"
-            python_adapter = autospec_adapter()
-            python_adapter.adapter_type = "python"
-            mock_create.side_effect = [mock_adapter, python_adapter]
+            rust_adapter = autospec_adapter()
+            rust_adapter.adapter_type = "rust"
+            mock_create.side_effect = [mock_adapter, rust_adapter]
 
             backend = create_backend()
 
         assert backend.__class__.__name__ == "MultiplexerBackend"
         call_names = [call[0][0] for call in mock_create.call_args_list]
         assert "mock" in call_names
-        assert "python" in call_names
+        assert "rust" in call_names

@@ -34,7 +34,7 @@ func storeWatchedPromoter(t *testing.T, store *experiment.FitnessStore, writeAt 
 	t.Helper()
 	src := NewStoreRealGameFitness(store, func(string) string { return watchObjective })
 	w := NewFitnessWatcher(src, DefaultWatchPolicy(), discardLogger())
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, w, rev)
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, w, rev)
 	p.SetClock(func() time.Time { return writeAt })
 	return p
 }
@@ -42,7 +42,7 @@ func storeWatchedPromoter(t *testing.T, store *experiment.FitnessStore, writeAt 
 // UC: UC-043 main
 func TestUC043_Step7_WatchCountsOnlyGamesStartedAfterWrite(t *testing.T) {
 	writeAt := time.Unix(10_000, 0)
-	autonomous := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+	autonomous := Config{Mode: ModeAutonomous, Enabled: true}
 
 	t.Run("UC-043/main step 7 games before the write do not count", func(t *testing.T) {
 		store := experiment.NewFitnessStore(0)
@@ -111,14 +111,14 @@ func (c *capturingRewatcher) Schedule(ctx context.Context, _ string, _ float64, 
 func TestUC043_A1_KillSwitchRevertsAppliedPromotion(t *testing.T) {
 	proposal := promoteProposal
 	proposal.ExperimentID = "exp-1704"
-	on := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
-	off := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: false}
+	on := Config{Mode: ModeAutonomous, Enabled: true}
+	off := Config{Mode: ModeAutonomous, Enabled: false}
 
 	t.Run("UC-043/A1 watched promotion: one revert, then no writes", func(t *testing.T) {
 		realDef := &recordingRealDefault{}
 		rev := &recordingReverter{}
 		watcher := &stepWatcher{verdicts: []WatchVerdict{VerdictInsufficient}}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, watcher, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, watcher, rev)
 		rw := &capturingRewatcher{}
 		p.SetRewatcher(rw)
 
@@ -158,7 +158,7 @@ func TestUC043_A1_KillSwitchRevertsAppliedPromotion(t *testing.T) {
 
 	t.Run("UC-043/A1 confirmed promotion is reverted too", func(t *testing.T) {
 		rev := &recordingReverter{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{degraded: false}, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{degraded: false}, rev)
 		p.Promote(context.Background(), proposal, promoteVerdict, on, testEvidence())
 
 		got := p.RevertOnKillSwitch(context.Background())
@@ -170,7 +170,7 @@ func TestUC043_A1_KillSwitchRevertsAppliedPromotion(t *testing.T) {
 
 	t.Run("UC-043/A1 a watch revert leaves nothing for the kill switch", func(t *testing.T) {
 		rev := &recordingReverter{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{degraded: true}, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{degraded: true}, rev)
 		p.Promote(context.Background(), proposal, promoteVerdict, on, testEvidence())
 
 		if got := p.RevertOnKillSwitch(context.Background()); len(got) != 0 || rev.calls != 1 {
@@ -180,7 +180,7 @@ func TestUC043_A1_KillSwitchRevertsAppliedPromotion(t *testing.T) {
 
 	t.Run("UC-043/A1 a failed revert is retried on the next tick", func(t *testing.T) {
 		rev := &recordingReverter{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{degraded: false}, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{degraded: false}, rev)
 		p.Promote(context.Background(), proposal, promoteVerdict, on, testEvidence())
 		rev.err = errFlagService
 
@@ -202,12 +202,12 @@ func TestUC043_A1_KillSwitchRevertsAppliedPromotion(t *testing.T) {
 func TestUC043_A1_FailedKillSwitchRevertJournaledOnce(t *testing.T) {
 	proposal := promoteProposal
 	proposal.ExperimentID = "exp-1704"
-	on := Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}
+	on := Config{Mode: ModeAutonomous, Enabled: true}
 
 	failingPromoter := func(t *testing.T) (*Promoter, *recordingReverter) {
 		t.Helper()
 		rev := &recordingReverter{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{degraded: false}, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{degraded: false}, rev)
 		if res := p.Promote(context.Background(), proposal, promoteVerdict, on, testEvidence()); res.Outcome != OutcomeApplied {
 			t.Fatalf("precondition: outcome = %q, want applied", res.Outcome)
 		}
@@ -254,7 +254,7 @@ func TestUC043_A1_FailedKillSwitchRevertJournaledOnce(t *testing.T) {
 	t.Run("UC-043/A1 a failed watch revert does not use up the kill switch's failure report (re-watch)", func(t *testing.T) {
 		rev := &recordingReverter{}
 		watcher := &stepWatcher{verdicts: []WatchVerdict{VerdictInsufficient}}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, watcher, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, watcher, rev)
 		rw := &capturingRewatcher{}
 		p.SetRewatcher(rw)
 		if res := p.Promote(context.Background(), proposal, promoteVerdict, on, testEvidence()); res.Outcome != OutcomeApplied {
@@ -269,7 +269,7 @@ func TestUC043_A1_FailedKillSwitchRevertJournaledOnce(t *testing.T) {
 
 	t.Run("UC-043/A1 a failed watch revert does not use up the kill switch's failure report (sync watch)", func(t *testing.T) {
 		rev := &recordingReverter{err: errFlagService}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{degraded: true}, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{degraded: true}, rev)
 		p.Promote(context.Background(), proposal, promoteVerdict, on, testEvidence())
 		if got := p.RevertOnKillSwitch(context.Background()); len(got) != 1 || got[0].Outcome != OutcomeApplied || got[0].ExperimentID != "exp-1704" {
 			t.Fatalf("kill-switch failure after a failed sync watch revert = %+v, want one applied / exp-1704", got)
@@ -298,7 +298,7 @@ func TestUC043_A1_FailedKillSwitchRevertJournaledOnce(t *testing.T) {
 		// loop logs it and never journals it; the Promoter keeps no marker for it.
 		rev := &listingReverter{flags: []string{"death_grace_period_ms"}}
 		rev.err = errFlagService
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{degraded: false}, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{degraded: false}, rev)
 		for tick := 0; tick < 2; tick++ {
 			got := p.RevertOnKillSwitch(context.Background())
 			if len(got) != 1 || got[0].ExperimentID != "" || got[0].Outcome != OutcomeApplied {

@@ -7,7 +7,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// Hold-mode shield (#2096; UC-040 A36, A37; decide-contract.md §1.2, §4.5 step 4).
+// Hold-mode shield (#2096; UC-048 A8, A9; decide-contract.md §1.2, §4.5 step 4).
 // In a game whose game_shield_activation_mode is hold, a grant_shield adds energy
 // to the player's pool, and the player is protected only while holding the trigger.
 // The state carries the pool from the coordinator's gauges; the agent's shield ledger

@@ -12,7 +12,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// The shield gate (UC-040 A31, A33, A37; decide-contract §4.5 step 4): a targeted
+// The shield gate (UC-048 A4, A6, A9; decide-contract §4.5 step 4): a targeted
 // grant_shield is refused from the coordinator's own view of the player, the
 // game_player_shield_gate gauges (a held trigger-mode charge, the agent shields
 // applied in this game, the end of the cooldown) and in a hold game the
@@ -21,15 +21,15 @@ import (
 // refused by the coordinator, which stays authoritative and refunds its refusal.
 // Missing gauges (an agent restart, a collector outage) refuse nothing.
 
-// DefaultShieldSeconds is the fail-closed grant_shield length (UC-040 BR-029, #2395):
+// DefaultShieldSeconds is the fail-closed grant_shield length (UC-048 BR-012, #2395):
 // the loop stamps a grant with no value with the shield_seconds "default" variant
 // (SetShieldSecondsSource) and falls back to this when that cannot be read; the writer
 // (actions/writer.go) uses it for a decision that still carries no
-// value, or one that does not parse (UC-040 BR-022). It equals the variant's baseline.
+// value, or one that does not parse (UC-048 BR-007). It equals the variant's baseline.
 const DefaultShieldSeconds = 5
 
 // ShieldSecondsSource returns the grant_shield length in seconds for a decision that
-// carries no value (UC-040 BR-029, #2395). main.go wires actions.ShieldSecondsReader,
+// carries no value (UC-048 BR-012, #2395). main.go wires actions.ShieldSecondsReader,
 // which reads the interventions/shield_seconds "default" variant through the flag
 // service at use time and fails closed to DefaultShieldSeconds, so it always returns a
 // usable length.
@@ -74,7 +74,7 @@ func grantsShieldLength(d Decision) bool {
 
 // stampShieldSeconds stamps the grant_shield length on the rules decisions of one
 // cycle before they run (withShieldSeconds), so the writer and the record's answers
-// use what is written, not the 5 s bounds default (UC-040 BR-029; #2395).
+// use what is written, not the 5 s bounds default (UC-048 BR-012; #2395).
 // runDecision keeps a value already stamped, so the source is read once per grant.
 //
 // It then clamps each decision's value into the request's magnitude ranges
@@ -91,7 +91,7 @@ func (l *Loop) stampShieldSeconds(ctx context.Context, snapshot flags.Snapshot, 
 	return out
 }
 
-// shieldLimits are the live shield limits of one check (UC-040 A33, BR-022): the
+// shieldLimits are the live shield limits of one check (UC-048 A6, BR-007): the
 // policy.max_shields_per_player_per_game and policy.shield_cooldown_seconds values of
 // the snapshot. 0 = unlimited / off. Only the cap is compared here: the cooldown end
 // comes from the coordinator, which read the cooldown when it applied the grant.
@@ -145,7 +145,7 @@ func (g *shieldGateLimits) get() shieldLimits {
 }
 
 // ShieldSerials is the gate's view of c, taken once per ranking and per request
-// (UC-040 A31, A33, A37): charged are the players holding a charge (the decide
+// (UC-048 A4, A6, A9): charged are the players holding a charge (the decide
 // state's shield_charged), noShield every player a targeted grant_shield would be
 // refused for now (the rules' no-shield filter, the state's shield_limited). Either
 // is nil when empty.
@@ -170,7 +170,7 @@ func (l *Loop) ShieldSerials(c gamecontext.GameContext) (charged, noShield map[s
 	return charged, noShield
 }
 
-// ShieldGrants is the rules engine's catch-up view (UC-040 A41, BR-030): the agent
+// ShieldGrants is the rules engine's catch-up view (decide-contract.md §15.2): the agent
 // shields the coordinator applied per serial in c's game. nil when there are none.
 func (l *Loop) ShieldGrants(c gamecontext.GameContext) map[string]int {
 	var out map[string]int

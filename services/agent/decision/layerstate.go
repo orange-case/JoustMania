@@ -20,18 +20,18 @@ const (
 	// (permission layer, policy.max_interventions_per_minute).
 	ReasonRateLimit BlockReason = "rate_limit"
 	// ReasonAlreadyCharged: the coordinator reports that this player holds a
-	// shield charge (UC-040 A31 step 1, BR-020).
+	// shield charge (UC-048 A4 step 1, BR-020).
 	ReasonAlreadyCharged BlockReason = "already_charged"
 	// ReasonShieldCapReached: the coordinator applied
 	// policy.max_shields_per_player_per_game agent shields to this player in this
-	// game (UC-040 A33, BR-022).
+	// game (UC-048 A6, BR-007).
 	ReasonShieldCapReached BlockReason = "shield_cap_reached"
 	// ReasonShieldCooldown: the coordinator's cooldown after the player's last agent
-	// shield has not ended (UC-040 A33, BR-022).
+	// shield has not ended (UC-048 A6, BR-007).
 	ReasonShieldCooldown BlockReason = "shield_cooldown"
 	// ReasonShieldBudgetExhausted / ReasonShieldPoolFull: in a hold game the target's
 	// shield budget left is below the minimum burst, or its energy plus the grants in
-	// flight is within 0.5 s of full (UC-040 A37 step 1, BR-024; #2096).
+	// flight is within 0.5 s of full (UC-048 A9 step 1, BR-008; #2096).
 	ReasonShieldBudgetExhausted BlockReason = decide.HoldRefusalBudgetExhausted
 	ReasonShieldPoolFull        BlockReason = decide.HoldRefusalPoolFull
 	// ReasonAlreadyApplied: a state or level decision repeats the value the agent

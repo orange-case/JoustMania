@@ -554,7 +554,7 @@ function startFollowPolling() {
 
 // Handle game events
 function handleGameEvent(event: { eventType: string; data: { [key: string]: string }; timestamp: bigint }) {
-  // Shield badges (UC-040 A16 / A17): the next controller frame re-renders them.
+  // Shield badges (UC-048 A1 / A2): the next controller frame re-renders them.
   shields.apply(event);
 
   const effect = reduceGameEvent(state, event);

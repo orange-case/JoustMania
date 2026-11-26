@@ -638,7 +638,7 @@ func (s *Store) SetShieldSetting(key string, v float64) {
 	s.touchSession()
 }
 
-// SetShieldGate records one stat of a player's agent shield gate (UC-040 A31, A33).
+// SetShieldGate records one stat of a player's agent shield gate (UC-048 A4, A6).
 // It touches neither the player nor the session: the series lasts the whole game.
 func (s *Store) SetShieldGate(serial, stat string, v float64) {
 	s.mu.Lock()
@@ -665,7 +665,7 @@ func (s *Store) SetShieldGate(serial, stat string, v float64) {
 	s.ctx.Session.ShieldGate = gates
 }
 
-// SetShieldGroupGrants records the game's applied group shields (UC-040 A47).
+// SetShieldGroupGrants records the game's applied group shields (UC-048 A13).
 func (s *Store) SetShieldGroupGrants(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

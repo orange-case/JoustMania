@@ -149,19 +149,13 @@ func TestEncodeDecode(t *testing.T) {
 			}
 		}
 	})
-	t.Run("UC-055/BR-001 ValueOfChange: fraction has one form, lifecycle kinds map to nothing", func(t *testing.T) {
-		pct := 10
-		k, v, ok := ValueOfChange(state.Change{Kind: state.ChangeValue, Set: "controller", Flag: "bluetooth_backend", ScopeName: registry.ScopeFraction,
-			Scope: state.Scope{FractionPercent: &pct}, DeclaredVariant: "rust", Value: json.RawMessage(`"rust"`)})
-		if !ok || k.Scope != "fraction" || string(v.Value) != `{"variant":"rust","fraction_percent":10}` {
-			t.Fatalf("key %v value %s", k, v.Value)
-		}
+	t.Run("UC-055/BR-001 ValueOfChange: lifecycle kinds map to nothing", func(t *testing.T) {
 		if _, _, ok := ValueOfChange(state.Change{Kind: state.ChangeGameEnded}); ok {
 			t.Fatal("a lifecycle Change mapped to a value")
 		}
 	})
 	t.Run("UC-055/BR-001 identities map both ways", func(t *testing.T) {
-		for _, id := range []string{"game:g1", "game:g1:MOCK0001", "experiment:e1:control", "real", "fraction"} {
+		for _, id := range []string{"game:g1", "game:g1:MOCK0001", "experiment:e1:control", "real"} {
 			sc, name, ok := ScopeOfIdentity(id)
 			if !ok || IdentityOf(KeyOf("s", "f", name, sc)) != id {
 				t.Fatalf("%s: %+v %q %v", id, sc, name, ok)

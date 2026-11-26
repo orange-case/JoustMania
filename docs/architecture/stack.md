@@ -16,7 +16,7 @@ the per-layer workhorses.
 | Migration   | –                                            | –            | –                                            | – |
 | Persistence | – (no database; state in memory + flagd flag files) | –     | –                                            | – |
 | Client      | gRPC stubs, OpenFeature/flagd, OTLP          | `/implement` | `/pytest-test`, `/go-test`                   | `lib/`, generated `*_pb2*.py` / `services/agent` proto |
-| Service     | Python 3.14 asyncio gRPC services; Go agent; Rust HID | `/implement` | `/pytest-test` (Python), `/go-test` (Go), Rust inline tests (`cargo test`) | `services/{audio,controller_manager,game_coordinator,menu,operator_pad,pairing_daemon,python_hid}`, `services/agent`, `services/flag-service`, `services/connect-proxy`, `services/rust-hid` |
+| Service     | Python 3.14 asyncio gRPC services; Go agent; Rust HID | `/implement` | `/pytest-test` (Python), `/go-test` (Go), Rust inline tests (`cargo test`) | `services/{audio,controller_manager,game_coordinator,menu,operator_pad,pairing_daemon}`, `services/agent`, `services/flag-service`, `services/connect-proxy`, `services/rust-hid` |
 | API         | gRPC (proto in `proto/`), Connect proxy for browsers | `/implement` | `/pytest-test`, `/go-test`            | `proto/`, `services/connect-proxy` |
 | UI          | TypeScript dashboard (browser, via connect-proxy); headless controller UI (LED, rumble, voice) | `/implement` | dashboard tests (vitest, `describe('UC-xxx: ...')`); controller UI via `/pytest-test` | `services/dashboard` |
 | E2E         | docker compose stack (`tests/integration`, `tests/service`) | – | `/integration-test`                    | `tests/` |

@@ -47,7 +47,7 @@ const (
 	// game signal and is never routed to a partition.
 	metricControllerInfo = "controller_info" // live
 
-	// Hold-mode shield (#2096, UC-040 A37, UC-042 BR-007): the latched mode (value 1,
+	// Hold-mode shield (#2096, UC-048 A9, UC-042 BR-007): the latched mode (value 1,
 	// label mode), the latched hold values (label setting = flag key), and per player
 	// the energy, budget left, active flag and per-game totals (label stat). The
 	// coordinator removes them at game end.
@@ -57,7 +57,7 @@ const (
 	metricPlayerShieldBudgetLeft = "game_player_shield_budget_remaining_seconds"
 	metricPlayerShieldActive     = "game_player_shield_active"
 	metricPlayerShieldStats      = "game_player_shield_stats"
-	// The agent shield gate (UC-040 A31, A33, A47): per player by stat, and the
+	// The agent shield gate (UC-048 A4, A6, A13): per player by stat, and the
 	// game's group shields.
 	metricPlayerShieldGate  = "game_player_shield_gate"
 	metricShieldGroupGrants = "game_shield_group_grants"

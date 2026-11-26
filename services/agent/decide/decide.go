@@ -121,13 +121,13 @@ type PlayerState struct {
 	// mode a charge is not protection). Danger ignores shields (see danger.go).
 	Shielded bool `json:"shielded,omitempty"`
 	// ShieldCharged is true while the coordinator reports that this alive player
-	// holds a shield charge (game_player_shield_gate, trigger mode, UC-040 A31):
+	// holds a shield charge (game_player_shield_gate, trigger mode, UC-048 A4):
 	// another grant_shield is refused.
 	ShieldCharged bool `json:"shield_charged,omitempty"`
 	// ShieldLimited is true while the agent would refuse another grant_shield to
 	// this alive player for a reason other than already_charged at the moment the
-	// state is built: the per-game cap or the cooldown (UC-040 A33), and in a hold
-	// game a full pool or a used-up budget (A37). Never set with ShieldCharged
+	// state is built: the per-game cap or the cooldown (UC-048 A6), and in a hold
+	// game a full pool or a used-up budget (UC-048 A9). Never set with ShieldCharged
 	// (#2066; decide-contract.md §1.2).
 	ShieldLimited bool `json:"shield_limited,omitempty"`
 	// SensitivityFactor and HandicapFactor are the per-player levels the agent
@@ -137,7 +137,7 @@ type PlayerState struct {
 	SensitivityFactor *float64 `json:"sensitivity_factor,omitempty"`
 	HandicapFactor    *float64 `json:"handicap_factor,omitempty"`
 
-	// Hold mode only (#2096, UC-040 A36, A37; decide-contract.md §1.2), set for alive
+	// Hold mode only (#2096, UC-048 A8, A9; decide-contract.md §1.2), set for alive
 	// players of a game whose game_shield_activation_mode is hold, from the
 	// game_player_shield_* gauges (up to one export interval old). ShieldEnergyS is
 	// the energy gauge; ShieldActive
