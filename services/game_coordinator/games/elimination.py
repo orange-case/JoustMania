@@ -26,6 +26,19 @@ from services.game_coordinator.stream_writes import serialized_write
 class EliminationMixin:
     """The kill and elimination path of a game (UC-030 step 9). Mixed into ``BaseGameMode``."""
 
+    def _init_elimination_state(self) -> None:
+        """Death count, elimination order and the kills in flight."""
+        self.dead_count = 0  # Track deaths for tempo timing
+        # Elimination ordering for game_player_elimination_order metric.
+        # Incremented on each kill; the value at kill time is the player's order
+        # index (1 = first eliminated). In respawn modes this counts each death.
+        self._elimination_count = 0
+        # Serials whose _kill_player is mid-flight. _kill_player awaits (death
+        # sound) before the mode impl flips player.alive, so a concurrent kill
+        # of the same serial (e.g. motion death racing a disconnect) would
+        # otherwise pass the alive check and count the death twice.
+        self._kills_in_progress: set[str] = set()
+
     def _player_death_event_attributes(self, serial: str) -> dict:  # noqa: ARG002
         """Mode-specific attributes for the base kill path's ``player_death`` moment.
 

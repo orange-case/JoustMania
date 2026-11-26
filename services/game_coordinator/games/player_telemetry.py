@@ -31,6 +31,14 @@ from services.game_coordinator.games.base import (
 class PlayerTelemetryMixin:
     """Player telemetry of a game: analytics, gauges, health and lifecycle spans. Mixed into ``BaseGameMode``."""
 
+    def _init_span_state(self) -> None:
+        """The gameplay, players and game_cycle grouping spans and their contexts."""
+        self.gameplay_span: trace.Span | None = None  # Reference for span events
+        self.gameplay_span_context = None  # Context for child spans in background tasks
+        self._players_span: trace.Span | None = None  # Parent span grouping all player lifecycles
+        self._game_cycle_span: trace.Span | None = None  # Span for instrumentation (sounds, music)
+        self.game_cycle_context = None  # Context for sound/music spans
+
     def _set_players_alive_aggregate(self, alive_count: int) -> None:
         """Set the unlabeled ``players_alive`` aggregate gauge — primary only.
 
