@@ -1,7 +1,7 @@
 """
 OTEL push metrics for Menu Service.
 
-Tracks system resources and gRPC request performance.
+Tracks system resources and button dispatch timing.
 """
 
 from lib.otel_metrics import Counter, Gauge, Histogram
@@ -13,125 +13,10 @@ process_resident_memory_bytes = Gauge("process_resident_memory_bytes", "Resident
 
 process_threads = Gauge("process_threads", "Number of active threads")
 
-# gRPC metrics
-grpc_requests_total = Counter("grpc_requests_total", "Total gRPC requests received", ["method", "status"])
-
-grpc_request_duration_seconds = Histogram(
-    "grpc_request_duration_seconds",
-    "gRPC request duration",
-    ["method"],
-    buckets=[0.001, 0.005, 0.010, 0.025, 0.050, 0.100, 0.250, 0.500, 1.0],
-)
-
-# Button monitoring metrics (Phase 56: Event-driven spans)
-button_frames_processed_total = Counter(
-    "menu_button_frames_processed_total",
-    "Total number of button-stream events (connect, disconnect, button) dispatched by the menu",
-)
-
-button_presses_total = Counter(
-    "menu_button_presses_total",
-    "Total number of button presses received from the controller manager",
-    ["button", "action"],  # button: BUTTON_TYPE_NAMES or 'unknown'; action: 'press' (releases are not counted)
-)
-
 # #2380: how long the menu takes to handle one button-stream event, handler failures included.
 button_dispatch_seconds = Histogram(
     "menu_button_dispatch_seconds",
     "Time the menu takes to dispatch one button-stream event",
     ["event_type"],  # connect / disconnect / button
     buckets=[0.001, 0.005, 0.010, 0.025, 0.050, 0.100, 0.250, 0.500, 1.0, 2.5],
-)
-
-# Stream metrics (Phase 59)
-stream_connections_active = Gauge(
-    "menu_stream_connections_active",
-    "Number of active StreamMenuEvents connections",
-)
-
-stream_events_published_total = Counter(
-    "menu_stream_events_published_total",
-    "Total events published to stream subscribers",
-    ["event_type"],
-)
-
-# Stream reconnection metrics (Issue #330)
-game_event_stream_reconnects_total = Counter(
-    "menu_game_event_stream_reconnects_total",
-    "Total game event stream reconnection attempts",
-)
-
-# Player ready state metrics (Phase 75: Per-player insights)
-player_ready = Gauge(
-    "menu_player_ready",
-    "Player ready status in lobby (1=ready, 0=not ready)",
-    ["serial"],
-)
-
-# Stream health metrics (Issue #337)
-stream_publish_drops_total = Counter(
-    "menu_stream_publish_drops_total",
-    "Total menu events dropped due to full subscriber queues",
-    ["event_type"],
-)
-
-stream_disconnections_total = Counter(
-    "menu_stream_disconnections_total",
-    "Total menu event stream disconnections",
-)
-
-# Idle mode metrics
-idle_mode_active = Gauge(
-    "menu_idle_mode_active",
-    "Whether idle mode is currently engaged (1=active, 0=inactive)",
-)
-
-idle_controllers_count = Gauge(
-    "menu_idle_controllers_count",
-    "Number of controllers currently in idle state",
-)
-
-sentinel_controllers_count = Gauge(
-    "menu_sentinel_controllers_count",
-    "Number of active sentinel controllers",
-)
-
-idle_mode_entries_total = Counter(
-    "menu_idle_mode_entries_total",
-    "Total times idle mode has been entered",
-)
-
-idle_mode_wake_total = Counter(
-    "menu_idle_mode_wake_total",
-    "Total times controllers have been woken from idle mode",
-)
-
-# Ghost controller reconciliation metrics
-ghost_controllers_pruned_total = Counter(
-    "menu_ghost_controllers_pruned_total",
-    "Total ghost controllers pruned via reconciliation with backend",
-)
-
-# #1153: force-start fell back to the menu-derived roster because the
-# controller-manager live-roster RPC was unreachable/errored (degraded reconcile).
-force_start_reconcile_failed_total = Counter(
-    "menu_force_start_reconcile_failed_total",
-    "Total force-starts that used the stale menu roster after the live-roster RPC failed",
-)
-
-# #2378: an audio RPC (PlaySound, SetVolume, PlayMusic, StopMusic) that failed or did not
-# answer within AUDIO_RPC_TIMEOUT_SECONDS. The menu goes on without the sound.
-audio_rpc_failures_total = Counter(
-    "menu_audio_rpc_failures_total",
-    "Total menu audio RPCs that failed or hit their deadline",
-    ["rpc", "reason"],  # rpc: PlaySound / SetVolume / PlayMusic / StopMusic; reason: timeout / error
-)
-
-# #1272: a callback raised while handling one button-stream event. The event is
-# dropped and logged; the stream stays up (previously the exception tore the
-# stream down and the reconnect cleared every controller's lobby state).
-button_event_errors_total = Counter(
-    "menu_button_event_errors_total",
-    "Total button-stream events whose menu handler raised (event dropped, stream kept)",
-    ["event_type"],
 )

@@ -45,16 +45,6 @@ Environment variables (can be set in the `pairing-daemon` service of `docker-com
 Metrics are pushed over OTLP to the collector; the daemon serves no `/metrics` endpoint (see
 [CONTROLLER_CONNECTIVITY](../../docs/CONTROLLER_CONNECTIVITY.md)). Port 8002 serves health and unpair only.
 
-### Pairing Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `psmove_pairing_attempts_total` | Counter | Total pairing attempts |
-| `psmove_pairing_success_total` | Counter | Successful pairings |
-| `psmove_pairing_failed_total` | Counter | Failed pairings |
-| `psmove_pairing_usb_controllers` | Gauge | Currently connected USB controllers |
-| `psmove_pairing_duration_seconds` | Histogram | Time to complete pairing |
-
 ### Bluetooth Monitoring Metrics (Host HCI Layer)
 
 These metrics measure the raw Bluetooth HCI layer on the host, distinct from
@@ -64,7 +54,6 @@ These metrics measure the raw Bluetooth HCI layer on the host, distinct from
 |--------|--------|-------------|
 | `bluetooth_device_rssi_dbm` | `serial`, `hci_adapter` | Signal strength in dBm |
 | `bluetooth_device_connected` | `serial`, `hci_adapter` | HCI connection status (1=connected) |
-| `bluetooth_device_last_seen_timestamp` | `serial`, `hci_adapter` | Unix timestamp when last seen |
 | `bluetooth_adapter_connections` | `hci_adapter` | Controllers per adapter |
 
 ### Example Grafana Queries
@@ -75,9 +64,6 @@ bluetooth_device_rssi_dbm
 
 # Controllers per adapter
 bluetooth_adapter_connections
-
-# Time since last seen at HCI layer (staleness detection)
-time() - bluetooth_device_last_seen_timestamp
 
 # Compare HCI vs application layer connection status
 # (useful for debugging connection issues)
@@ -181,8 +167,7 @@ Exposure is narrowed by:
   published).
   An address that cannot be bound at start (docker0 not up yet) is retried
   in the background (1 s doubling to 30 s); `GET /healthz` shows
-  `control_bind.requested` and `control_bind.bound`, and the gauge
-  `pairing_control_bind_unbound_addresses` counts the missing ones (#1450).
+  `control_bind.requested` and `control_bind.bound` (#1450).
 - The connect-proxy rejects browser requests from another origin (403), so a
   web page open on the operator's laptop cannot unpair controllers. It also
   answers 403 when the request's Host is not an IP, `localhost`, the Pi's host

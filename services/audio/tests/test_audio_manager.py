@@ -73,11 +73,10 @@ class TestAudioManagerPlaySound:
         mock_metric.labels.assert_called_with(result="file_not_found")
         mock_metric.labels.return_value.inc.assert_called()
 
-    @patch("services.audio.metrics.audio_channel_saturation_total")
     @patch("services.audio.metrics.audio_sounds_played_total")
     @pytest.mark.uc("UC-031", flow="A2")
-    def test_play_sound_no_channel_increments_saturation(self, mock_played, mock_saturation):
-        """All channels busy increments no_channel and saturation metrics."""
+    def test_play_sound_no_channel_increments_metric(self, mock_played):
+        """All channels busy increments the no_channel metric."""
         from services.audio.servicer import AudioManager
 
         manager = AudioManager(silent=False)
@@ -94,14 +93,12 @@ class TestAudioManagerPlaySound:
                 ch.priority = 3
             manager.play_sound(tmp_path, volume=1.0, priority=2)
             mock_played.labels.assert_called_with(result="no_channel")
-            mock_saturation.inc.assert_called()
         finally:
             os.unlink(tmp_path)
 
     @patch("services.audio.metrics.audio_sounds_played_total")
-    @patch("services.audio.metrics.audio_channels_active")
-    def test_play_sound_success_increments_metric(self, mock_active, mock_played):
-        """Successful play increments success metric and updates gauge."""
+    def test_play_sound_success_increments_metric(self, mock_played):
+        """Successful play increments success metric."""
         from services.audio.servicer import AudioManager
 
         manager = AudioManager(silent=False)
@@ -116,7 +113,6 @@ class TestAudioManagerPlaySound:
             with patch.object(channel, "play", return_value=True):
                 manager.play_sound(tmp_path, volume=1.0, priority=2)
             mock_played.labels.assert_called_with(result="success")
-            mock_active.set.assert_called()
         finally:
             os.unlink(tmp_path)
 
@@ -196,50 +192,11 @@ class TestAudioManagerMusic:
         result = mock_audio_manager.stop_music("wrong-id")
         assert result is False
 
-    @patch("services.audio.metrics.audio_music_tempo")
-    @patch("services.audio.metrics.audio_music_playing")
-    def test_play_music_sets_metrics(self, mock_playing, mock_tempo, mock_audio_manager):
-        """play_music sets music_playing=1 and music_tempo."""
-        mock_audio_manager.play_music("Joust/music/*.ogg", tempo=1.5)
-        mock_playing.set.assert_called_with(1)
-        mock_tempo.set.assert_called_with(1.5)
-
-    @patch("services.audio.metrics.audio_music_tempo")
-    @patch("services.audio.metrics.audio_music_playing")
-    def test_stop_music_clears_metrics(self, mock_playing, mock_tempo, mock_audio_manager):
-        """stop_music sets music_playing=0 and music_tempo=0."""
-        track_id = mock_audio_manager.play_music("Joust/music/*.ogg")
-        mock_audio_manager.stop_music(track_id)
-        mock_playing.set.assert_called_with(0)
-        mock_tempo.set.assert_called_with(0)
-
     def test_change_tempo_no_event_loop(self, mock_audio_manager):
         mock_audio_manager.play_music("Joust/music/*.ogg")
         assert mock_audio_manager.event_loop is None
         result = mock_audio_manager.change_tempo("track-123", 1.3)
         assert result is False
-
-
-class TestUpdateChannelGauge:
-    """Tests for AudioManager._update_channel_gauge."""
-
-    @patch("services.audio.metrics.audio_channels_active")
-    def test_update_channel_gauge_none_active(self, mock_gauge):
-        from services.audio.servicer import AudioManager
-
-        manager = AudioManager(silent=False)
-        manager._update_channel_gauge()
-        mock_gauge.set.assert_called_with(0)
-
-    @patch("services.audio.metrics.audio_channels_active")
-    def test_update_channel_gauge_some_active(self, mock_gauge):
-        from services.audio.servicer import AudioManager
-
-        manager = AudioManager(silent=False)
-        manager.channels[0]._playing.set()
-        manager.channels[1]._playing.set()
-        manager._update_channel_gauge()
-        mock_gauge.set.assert_called_with(2)
 
 
 class TestAudioManagerSetVolume:
@@ -296,12 +253,11 @@ class TestMasterVolumeAndMixing:
         assert play.call_args.kwargs["volume"] == pytest.approx(0.2)
 
 
-class TestPlaybackFailureIsCounted:
-    """UC-031 Post-F-1: a playback error is counted and frees the channel; it never raises to the caller."""
+class TestPlaybackFailureFreesChannel:
+    """UC-031 Post-F-1: a playback error frees the channel; it never raises to the caller."""
 
     @pytest.mark.uc("UC-031", flow="main", cond=["Post-F-1"])
-    @patch("services.audio.metrics.audio_playback_errors_total")
-    def test_playback_error_increments_audio_playback_errors_total(self, mock_errors, tmp_path):
+    def test_playback_error_frees_channel(self, tmp_path):
         import threading
 
         from services.audio.servicer import SoundChannel
@@ -312,20 +268,20 @@ class TestPlaybackFailureIsCounted:
         def broken_playback(*_args):
             raise RuntimeError("ALSA device gone")
 
-        def count(*_args):
+        def failed(*_args):
             done.set()
 
-        mock_errors.inc.side_effect = count
         with (
+            patch("services.audio.servicer.alsa_config.note_playback_failure", side_effect=failed) as note,
             patch("services.audio.servicer.miniaudio.get_file_info") as file_info,
             patch.object(channel, "_play_full_volume", side_effect=broken_playback),
         ):
             file_info.return_value.duration = 0.1
             assert channel.play(str(tmp_path / "effect.ogg"), volume=1.0, priority=2) is True
-            assert done.wait(timeout=2.0), "the playback error was never counted"
+            assert done.wait(timeout=2.0), "the playback error was never reported"
 
-        mock_errors.inc.assert_called_once()
-        for _ in range(100):  # the playback thread clears the flag right after counting
+        note.assert_called_once()
+        for _ in range(100):  # the playback thread clears the flag right after reporting
             if not channel.is_playing:
                 break
             threading.Event().wait(0.01)

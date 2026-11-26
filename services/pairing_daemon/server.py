@@ -148,12 +148,10 @@ class ControlBindStatus:
         with self._lock:
             self._requested = list(addresses)
             self._bound = set()
-            self._publish()
 
     def mark_bound(self, address: str) -> None:
         with self._lock:
             self._bound.add(address)
-            self._publish()
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -161,10 +159,6 @@ class ControlBindStatus:
                 "requested": list(self._requested),
                 "bound": [a for a in self._requested if a in self._bound],
             }
-
-    def _publish(self) -> None:
-        unbound = sum(1 for a in self._requested if a not in self._bound)
-        metrics.pairing_control_bind_unbound_addresses.set(unbound)
 
 
 _control_bind = ControlBindStatus()

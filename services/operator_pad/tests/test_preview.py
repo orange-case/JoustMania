@@ -4,7 +4,7 @@ A fake clock and sleep drive the debounce; the audio stub records every clip wit
 """
 
 import asyncio
-from unittest.mock import MagicMock, create_autospec, patch
+from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
@@ -153,16 +153,13 @@ async def test_the_value_waits_for_the_debounce_and_the_end_of_the_label():
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017"], steps=[5])
 async def test_a_value_equal_to_the_last_one_spoken_is_not_repeated():
     rig = Rig()
-    with patch.object(preview_module.metrics, "previews_total") as counter:
-        rig.step(1)
-        await rig.time.advance(0.6)  # "3"
-        rig.step(2)
-        await rig.time.advance(0.05)
-        rig.step(1)  # back to 3 before "4" was spoken
-        await rig.time.advance(0.6)
+    rig.step(1)
+    await rig.time.advance(0.6)  # "3"
+    rig.step(2)
+    await rig.time.advance(0.05)
+    rig.step(1)  # back to 3 before "4" was spoken
+    await rig.time.advance(0.6)
     assert rig.files() == [TEAMS, NUMBER[3]]
-    results = [c.kwargs["result"] for c in counter.labels.call_args_list]
-    assert results == ["spoken", "replaced", "suppressed"]
 
 
 @pytest.mark.uc("UC-015", flow="A7", br=["BR-017", "BR-009"], steps=[5])

@@ -182,12 +182,7 @@ class TestWindowComputation:
 
 
 class TestSpanEmission:
-    @patch("services.controller_manager.metrics.controller_bluetooth_movement_update_hz")
-    @patch("services.controller_manager.metrics.controller_bluetooth_dropped_events_ratio")
-    @patch("services.controller_manager.metrics.controller_bluetooth_dropped_events_ratio_window")
-    @patch("services.controller_manager.metrics.controller_bluetooth_event_gap_seconds")
-    @patch("services.controller_manager.metrics.controller_state_update_hz")
-    def test_span_attributes_and_events(self, _hz, _gap, _ratio_w, _ratio, _mhz):
+    def test_span_attributes_and_events(self):
         backend = autospec_backend()
         backend.get_adapter_type.return_value = "rust"
         loop = _make_loop(backend)
@@ -216,42 +211,15 @@ class TestSpanEmission:
         assert ev_attrs["bluetooth.dropped_events_pct"] == 0.2
         assert "bluetooth.movement_update_hz" in ev_attrs
 
-    @patch("services.controller_manager.metrics.controller_bluetooth_event_gap_seconds")
-    def test_skip_when_no_controllers(self, gap):
+    def test_skip_when_no_controllers(self):
         loop = _make_loop()
         loop._window_start = 0.0
         fake = FakeTracer()
         with patch("services.controller_manager.discovery_loop.tracer", fake):
             loop._emit_bluetooth_health(now=1.0)
-        # No span, no metric observation when the window had no controllers.
         assert "controller.bluetooth_health" not in fake.spans
-        gap.observe.assert_not_called()
 
-    @patch("services.controller_manager.metrics.controller_bluetooth_movement_update_hz")
-    @patch("services.controller_manager.metrics.controller_bluetooth_dropped_events_ratio")
-    @patch("services.controller_manager.metrics.controller_bluetooth_dropped_events_ratio_window")
-    @patch("services.controller_manager.metrics.controller_bluetooth_event_gap_seconds")
-    @patch("services.controller_manager.metrics.controller_state_update_hz")
-    def test_metrics_emitted_in_seconds(self, _hz, gap, ratio_w, ratio, mhz):
-        loop = _make_loop(MagicMock())
-        loop._window_start = 0.0
-        # One serial, two fresh frames 60ms apart -> max gap 60ms.
-        loop._record("AA").hw_polls = 2
-        loop._record_fresh_frame("AA", 0.0)
-        loop._record_fresh_frame("AA", 0.06)
-        fake = FakeTracer()
-        with patch("services.controller_manager.discovery_loop.tracer", fake):
-            loop._emit_bluetooth_health(now=1.0)
-        # Gap observed in SECONDS (0.06), not ms.
-        observed = gap.observe.call_args[0][0]
-        assert abs(observed - 0.06) < 1e-6
-
-    @patch("services.controller_manager.metrics.controller_bluetooth_movement_update_hz")
-    @patch("services.controller_manager.metrics.controller_bluetooth_dropped_events_ratio")
-    @patch("services.controller_manager.metrics.controller_bluetooth_dropped_events_ratio_window")
-    @patch("services.controller_manager.metrics.controller_bluetooth_event_gap_seconds")
-    @patch("services.controller_manager.metrics.controller_state_update_hz")
-    def test_window_resets_after_emit(self, _hz, _gap, _rw, _r, _mhz):
+    def test_window_resets_after_emit(self):
         loop = _make_loop(MagicMock())
         loop._window_start = 0.0
         _feed(loop, "AA", [{"n": i} for i in range(5)], dt=0.01)

@@ -396,35 +396,32 @@ class TestControlBind:
 
         status = server.ControlBindStatus()
         stop = threading.Event()
-        with patch.object(server.metrics, "pairing_control_bind_unbound_addresses") as gauge:
-            servers = server.start_health_server(
-                0,
-                ["127.0.0.1", "172.17.0.1"],
-                status=status,
-                server_factory=factory,
-                stop=stop,
-                initial_delay=0.01,
-                max_delay=0.02,
-            )
-            try:
-                assert status.snapshot()["bound"] == ["127.0.0.1"]
-                assert gauge.set.call_args.args == (1,)
-                for _ in range(200):
-                    if len(servers) == 2:
-                        break
-                    stop.wait(0.01)
-                assert len(servers) == 2
-                assert attempts.count("172.17.0.1") == 3
-                assert status.snapshot() == {
-                    "requested": ["127.0.0.1", "172.17.0.1"],
-                    "bound": ["127.0.0.1", "172.17.0.1"],
-                }
-                assert gauge.set.call_args.args == (0,)
-            finally:
-                stop.set()
-                for s in servers:
-                    s.shutdown()
-                    s.server_close()
+        servers = server.start_health_server(
+            0,
+            ["127.0.0.1", "172.17.0.1"],
+            status=status,
+            server_factory=factory,
+            stop=stop,
+            initial_delay=0.01,
+            max_delay=0.02,
+        )
+        try:
+            assert status.snapshot()["bound"] == ["127.0.0.1"]
+            for _ in range(200):
+                if len(servers) == 2:
+                    break
+                stop.wait(0.01)
+            assert len(servers) == 2
+            assert attempts.count("172.17.0.1") == 3
+            assert status.snapshot() == {
+                "requested": ["127.0.0.1", "172.17.0.1"],
+                "bound": ["127.0.0.1", "172.17.0.1"],
+            }
+        finally:
+            stop.set()
+            for s in servers:
+                s.shutdown()
+                s.server_close()
 
     @pytest.mark.uc("UC-005", br=["BR-003"])
     def test_retry_stops_when_asked(self):

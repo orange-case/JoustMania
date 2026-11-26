@@ -33,7 +33,10 @@ until it is removed, so the PR that fixes a gap also deletes its entry here.
 
 from __future__ import annotations
 
+import re
+
 import pytest
+import yaml
 import telemetry_inventory as ti
 
 # --------------------------------------------------------------------------- #
@@ -116,7 +119,7 @@ def consumer_queries():
 # Parser sanity: a broken parser must not turn the contract into a no-op.
 # --------------------------------------------------------------------------- #
 def test_inventory_parsers_find_the_known_surface(python_metrics, consumer_queries):
-    assert len(python_metrics) >= 140, (
+    assert len(python_metrics) >= 70, (
         "Python metric definition scan found too few metrics"
     )
     ingest = ti.agent_ingest()
@@ -301,6 +304,46 @@ def test_python_metric_definitions_are_recorded(python_metrics):
     )
     assert not dead, (
         f"Metrics defined but never recorded (record them or delete the definition): {dead}"
+    )
+
+
+_READER_NOTE = re.compile(r"\breader:\s*([^;]+)")
+
+
+def test_every_python_metric_has_a_named_consumer(python_metrics):
+    """telemetry.md §6.1 (#2808): a metric stays only while something reads it.
+
+    A scanned consumer (Grafana, SPA, agent, scripts, tools) or a ``reader:`` note in
+    docs/specs/notes/telemetry-metric-catalog.yaml naming files that still contain the name.
+    """
+    notes_path = (
+        ti.REPO_ROOT / "docs" / "specs" / "notes" / "telemetry-metric-catalog.yaml"
+    )
+    notes = yaml.safe_load(notes_path.read_text()) or {}
+    consumers = ti.python_metric_consumers(set(python_metrics))
+    unread, stale = [], []
+    for name in sorted(python_metrics):
+        if consumers[name]:
+            continue
+        match = _READER_NOTE.search(str(notes.get(name, "")))
+        if not match:
+            unread.append(name)
+            continue
+        for rel in (p.strip() for p in match.group(1).split(",")):
+            path = ti.REPO_ROOT / rel
+            if rel.startswith("docs/specs/"):
+                # The notes, the generated catalog and telemetry.md name every metric.
+                stale.append(f"{name}: {rel} (a spec is not a reader)")
+                continue
+            if not path.is_file() or not re.search(
+                rf"\b{name}(?:_bucket|_sum|_count)?\b", path.read_text(errors="ignore")
+            ):
+                stale.append(f"{name}: {rel}")
+    assert not unread, (
+        f"Metrics nothing reads (delete them, or name the reader as `reader: <path>` in {notes_path.name}): {unread}"
+    )
+    assert not stale, (
+        f"`reader:` paths that are gone or no longer name the metric: {stale}"
     )
 
 

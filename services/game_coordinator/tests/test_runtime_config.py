@@ -226,10 +226,7 @@ def test_refresh_from_flags_with_metrics(mock_get_client, _mock_add_handler):
     # countdown_phase_duration_ms, winner_rainbow_duration_ms
     mock_client.get_integer_value.side_effect = [60, 3, 750, 3000, 45, 5, 500, 1000]
 
-    with (
-        patch("services.game_coordinator.metrics.config_changes_total") as mock_changes,
-        patch("services.game_coordinator.metrics.current_update_frequency_hz") as mock_gauge,
-    ):
+    with patch("services.game_coordinator.metrics.current_update_frequency_hz") as mock_gauge:
         manager = RuntimeConfigManager()
 
         # Verify initial setup called metrics
@@ -237,11 +234,6 @@ def test_refresh_from_flags_with_metrics(mock_get_client, _mock_add_handler):
 
         # Trigger another refresh with different values
         manager._refresh_from_flags()
-
-        # Should track config changes for all changed parameters
-        mock_changes.labels.assert_any_call(parameter="update_frequency_hz")
-        mock_changes.labels.assert_any_call(parameter="countdown_phase_duration_ms")
-        mock_changes.labels.assert_any_call(parameter="winner_rainbow_duration_ms")
 
 
 @patch("openfeature.api.add_handler")

@@ -44,7 +44,6 @@ from lib.voice_prompts import (
     SHIELD_ACTIVATION_VOICES,
 )
 from proto import menu_pb2
-from services.operator_pad import metrics
 from services.operator_pad.config import PadConfig
 from services.operator_pad.cues import ANNOUNCE_GROUP, CuePlayer
 
@@ -60,14 +59,6 @@ AUTOMATIC_LED_OPTIONS = frozenset(setting_ladders.AUTOMATIC_OPTIONS) - {SHIELD_O
 LED_OPTIONS = frozenset({MODE_OPTION, SHIELD_OPTION}) | AUTOMATIC_LED_OPTIONS
 # A `preview_setting` is cosmetic: a short deadline, never retried (BR-010), no cue on failure.
 MODE_PREVIEW_TIMEOUT_SECONDS = 1.0
-
-# Metric results (telemetry.md §6, `operator_pad_previews_total{result}`).
-SPOKEN = "spoken"
-REPLACED = "replaced"
-SUPPRESSED = "suppressed"
-LIMIT = "limit"
-REFUSED = "refused"
-UNKNOWN = "unknown"
 
 
 def value_voice(option: str, value: str | None) -> Sound | None:
@@ -165,7 +156,6 @@ class Previewer:
         preview = setting_ladders.preview_value(option, status, net_steps)
         sound = value_voice(option, preview.value)
         if preview.value is None or sound is None:
-            metrics.previews_total.labels(result=UNKNOWN).inc()
             return
         pushed_further = abs(net_steps) > abs(self._last_net)
         if pushed_further and preview.value == self._last_value:
@@ -174,7 +164,6 @@ class Previewer:
             pending = _Pending(preview.value, sound)
         self._last_value, self._last_net = preview.value, net_steps
         if self._timer is not None:
-            metrics.previews_total.labels(result=REPLACED).inc()
             self._timer.cancel()
         self._pending = pending
         self._timer = self._spawn(self._speak_after_debounce())
@@ -265,18 +254,15 @@ class Previewer:
         self._stop(ANNOUNCE_GROUP)
         if status is None:
             self._silent = True  # no status at the press: silent, never a guess
-            metrics.previews_total.labels(result=UNKNOWN).inc()
             return
         if lobby_only and status.lifecycle_live:
             self._silent = True  # A1: one refusal for the hold, no values
             self._refused = True
-            metrics.previews_total.labels(result=REFUSED).inc()
             self._spawn(self._cues.refusal())
             return
         start = setting_ladders.preview_value(option, status, 0)
         if start.value is None or value_voice(option, start.value) is None:
             self._silent = True
-            metrics.previews_total.labels(result=UNKNOWN).inc()
             return
         self._last_value = start.value
         self._option, self._status = option, status
@@ -315,16 +301,13 @@ class Previewer:
         if pending is None:
             return
         if pending.sound is None:
-            metrics.previews_total.labels(result=LIMIT).inc()
             await self._cues.limit(pending.up)
             return
         if pending.value == self._last_spoken:
-            metrics.previews_total.labels(result=SUPPRESSED).inc()
             return
         self._last_spoken = pending.value
         if self._quiet():
             return  # UC-016 BR-005: the setting screen shows the value; the LED pulse above still ran
-        metrics.previews_total.labels(result=SPOKEN).inc()
         await self._cues.voice(pending.sound, PREVIEW_GROUP)
 
     def _show_pending_mode(self) -> None:

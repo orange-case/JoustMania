@@ -801,7 +801,7 @@ coordinator applies every event with a sequence number above the last one it app
 game and flag, in order, exactly once; the last applied `(epoch, seq)` advances before the
 events are dispatched; a read that returns an evaluation error applies nothing; only a new,
 non-empty epoch (a flag-service restart) restarts the count; more than 16 events between two
-reads is logged and counted (`game_intervention_event_gaps_total`)
+reads is logged
 ([UC-040 BR-006](../use_cases/UC-040.md#br-006-a-one-shot-intervention-fires-once-only-in-its-game), FR-137).
 `end_game` force-ends only the session whose list holds it (`_handle_end_game` →
 `end_game_fn(game_id, reason)` = `GameCoordinatorServicer._force_end_session`, the same path as

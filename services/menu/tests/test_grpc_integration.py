@@ -256,18 +256,14 @@ class TestStreamMenuEvents:
 
     @pytest.mark.asyncio
     async def test_client_leaving_during_header_send_unsubscribes(self, grpc_service):
-        """A client gone while the headers are sent leaves no subscriber and no open-stream gauge (#1613)."""
+        """A client gone while the headers are sent leaves no subscriber (#1613)."""
         servicer, _stub = grpc_service
 
-        with (
-            patch("services.menu.servicer.metrics.stream_connections_active") as gauge,
-            pytest.raises(asyncio.CancelledError),
-        ):
+        with pytest.raises(asyncio.CancelledError):
             async for _ in servicer.StreamMenuEvents(menu_pb2.StreamMenuEventsRequest(), _HeaderSendFails()):
                 pass
 
         assert len(servicer.event_publisher._subscribers) == 0
-        assert gauge.inc.call_count == gauge.dec.call_count == 1
 
     @pytest.mark.asyncio
     async def test_stream_client_disconnect_cleanup(self, grpc_service):
