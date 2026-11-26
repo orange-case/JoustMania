@@ -1452,7 +1452,7 @@ _FRENZY_VARIANTS_2518 = {
 }
 
 
-@pytest.mark.uc("UC-070", flow="A4", br=["BR-003"])
+@pytest.mark.uc("UC-070", br=["BR-003"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_budget_variants_2518_are_integers_and_defaults_unchanged(flag_dir):
     """Static: both flag files declare the new integer variants; the default stays."""
@@ -1475,7 +1475,7 @@ def test_budget_variants_2518_are_integers_and_defaults_unchanged(flag_dir):
         )
 
 
-@pytest.mark.uc("UC-070", flow="A4", br=["BR-003"])
+@pytest.mark.uc("UC-070", br=["BR-003"])
 @pytest.mark.parametrize("tier", ["interactive", "frenzy"])
 @pytest.mark.parametrize("resolver", ["rpc", "in_process"])
 def test_budget_variants_2518_resolve_as_overlay(flagd, resolver, tier):

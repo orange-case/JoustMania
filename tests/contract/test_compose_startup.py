@@ -76,18 +76,18 @@ def _reachable(services: dict, start: str) -> set[str]:
     return seen
 
 
-@pytest.mark.uc("UC-060", flow="main", br=["BR-004"])
+@pytest.mark.uc("UC-060", flow="main", steps=[3])  # stage-host.md SH-2
 @pytest.mark.parametrize("compose", COMPOSE_FILES)
 def test_no_game_service_depends_on_observability(compose):
     _assert_no_game_to_obs(_services(compose))
 
 
-@pytest.mark.uc("UC-060", flow="main", br=["BR-004"])
+@pytest.mark.uc("UC-060", flow="main", steps=[3])  # stage-host.md SH-2
 def test_overlays_add_no_game_to_observability_dependency():
     _assert_no_game_to_obs(_merged_with_overlays("docker-compose.yml"))
 
 
-@pytest.mark.uc("UC-060", flow="main", br=["BR-004"])
+@pytest.mark.uc("UC-060", flow="main", steps=[3])  # stage-host.md SH-2
 def test_graph_walk_finds_transitive_game_to_observability_edge():
     """Pins _reachable: game -> relay -> jaeger must be reported for game."""
     synthetic = {
@@ -110,13 +110,13 @@ def _assert_no_game_to_obs(services: dict) -> None:
     assert not offenders, f"game services reach observability: {offenders}"
 
 
-@pytest.mark.uc("UC-060", flow="main", br=["BR-004"])
+@pytest.mark.uc("UC-060", flow="main", steps=[3])  # stage-host.md SH-2
 def test_collector_does_not_wait_for_its_backends():
     collector = _services("docker-compose.yml")["otel-collector"]
     assert not (_deps(collector) & OBS), _deps(collector)
 
 
-@pytest.mark.uc("UC-060", flow="main", br=["BR-004"])
+@pytest.mark.uc("UC-060", flow="main", steps=[3])  # stage-host.md SH-2
 @pytest.mark.uc("UC-002", flow="A7")
 @pytest.mark.nfr("NFR-054")
 @pytest.mark.parametrize("compose", COMPOSE_FILES)

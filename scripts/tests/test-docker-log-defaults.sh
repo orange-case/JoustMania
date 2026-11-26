@@ -10,7 +10,7 @@
 #  - another log driver, or a file that is not a JSON object: left
 #    byte-identical, no restart
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-docker-log-defaults.sh
-# UC: UC-060 A6
+# Spec: docs/specs/stage-host.md SH-9
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 
