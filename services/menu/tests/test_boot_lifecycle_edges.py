@@ -127,7 +127,7 @@ class _Provider:
         self.ready.set()
         self.answer = True
 
-    async def __call__(self, _domain, *_a, **_k):
+    async def wait(self, _domain, *_a, **_k):
         await self.ready.wait()
         return self.answer
 
@@ -135,7 +135,8 @@ class _Provider:
 @pytest.fixture
 def provider():
     fake = _Provider()
-    with patch("services.menu.game_lifecycle.wait_for_provider_ready", side_effect=fake):
+    # new=, not side_effect=: patch makes an AsyncMock here, which would return the coroutine unawaited (truthy).
+    with patch("services.menu.game_lifecycle.wait_for_provider_ready", new=fake.wait):
         yield fake
 
 
