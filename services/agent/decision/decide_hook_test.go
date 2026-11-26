@@ -577,7 +577,7 @@ func TestRemote_ErrorFallsBackToRules(t *testing.T) {
 func TestRemote_ErrorTextNeverOnSpans(t *testing.T) {
 	const secret = "sk-live-SECRET-echoed-by-vendor"
 	be := newFakeDecideBackend(func(decide.Request) (decide.Response, error) {
-		return decide.Response{}, fmt.Errorf("openai: status 401: invalid key %s", secret)
+		return decide.Response{}, fmt.Errorf("claude: status 401: invalid key %s", secret)
 	})
 	h := newRemoteHarness(t, remoteSnapshot(time.Second), be)
 	var logs bytes.Buffer
@@ -627,7 +627,7 @@ func TestRemote_InvalidAnswerFallsBackToRules(t *testing.T) {
 // UC: UC-040 A2
 func TestRemote_BackendInvalidErrorIsInvalidAnswer(t *testing.T) {
 	be := newFakeDecideBackend(func(decide.Request) (decide.Response, error) {
-		return decide.Response{}, fmt.Errorf("openai: %w", fmt.Errorf("%w: malformed model output", decide.ErrInvalid))
+		return decide.Response{}, fmt.Errorf("jev: %w", fmt.Errorf("%w: malformed model output", decide.ErrInvalid))
 	})
 	h := newRemoteHarness(t, remoteSnapshot(time.Second), be)
 	span := h.run(t)
@@ -977,23 +977,23 @@ func TestRemote_ThresholdRaisedMidFlight(t *testing.T) {
 	}
 }
 
-// TestRemote_BackendChangedMidFlight: the operator switches claude -> openai
+// TestRemote_BackendChangedMidFlight: the operator switches claude -> jev
 // while a claude call is in flight. The late claude answer is discarded with
-// backend_changed (UC-040 A7), and the next cycle calls openai and its
+// backend_changed (UC-040 A7), and the next cycle calls jev and its
 // invoke_agent span carries the new backend (UC-044 A2, then main step 5).
 // UC: UC-040 A7
 // UC: UC-044 A2
 func TestRemote_BackendChangedMidFlight(t *testing.T) {
 	be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.95, "A", 0.5, "x"))
 	next := newFakeDecideBackend(ffaAnswer("noop", 0.9, "none", 0, ""))
-	next.name = flags.DecisionBackendOpenAI
+	next.name = flags.DecisionBackendJev
 	h, span := fireAndMutate(t, be, time.Hour, func(h remoteHarness) {
 		reg := NewDecideRegistry()
 		for _, b := range []*fakeDecideBackend{be, next} {
 			reg.Register(b.Name(), func(flags.DecisionBackend) decide.Backend { return b })
 		}
 		h.loop.SetDecideRegistry(reg)
-		h.flags.mutate(func(s *flags.Snapshot) { s.Decision.Backend = flags.DecisionBackendOpenAI })
+		h.flags.mutate(func(s *flags.Snapshot) { s.Decision.Backend = flags.DecisionBackendJev })
 	})
 	assertDiscarded(t, h, span, DecideDiscardBackendChanged)
 
@@ -1006,15 +1006,15 @@ func TestRemote_BackendChangedMidFlight(t *testing.T) {
 			t.Fatalf("invoke_agent spans = %d, want 2 (the discarded call and the next cycle)", len(ds))
 		}
 		for key, want := range map[string]string{
-			AttrDecideBackend:          flags.DecisionBackendOpenAI,
-			AttrDecideBackendRequested: flags.DecisionBackendOpenAI,
+			AttrDecideBackend:          flags.DecisionBackendJev,
+			AttrDecideBackendRequested: flags.DecisionBackendJev,
 		} {
 			if got := strAttr(t, ds[1], key); got != want {
 				t.Errorf("next cycle %s = %q, want %q", key, got, want)
 			}
 		}
 		if be.callCount() != 1 || next.callCount() != 1 {
-			t.Fatalf("calls claude=%d openai=%d, want 1 and 1", be.callCount(), next.callCount())
+			t.Fatalf("calls claude=%d jev=%d, want 1 and 1", be.callCount(), next.callCount())
 		}
 	})
 }

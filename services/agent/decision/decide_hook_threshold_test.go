@@ -12,7 +12,7 @@ import (
 
 // Per-backend act-confidence threshold (#1287): Jev's confidence is the calibrated
 // gate p_yes, so jev answers are routed against decision.jev.act_confidence_threshold
-// (default 0.6) while claude/openai keep the global decision.act_confidence_threshold
+// (default 0.6) while claude keeps the global decision.act_confidence_threshold
 // (default 0.8). These tests use the flag defaults unless they say otherwise.
 // Spec: decide-contract.md §5 and §12, UC-040 step 9 and A13, FR-047.
 

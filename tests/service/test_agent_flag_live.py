@@ -68,7 +68,7 @@ def _run_live_go_test(stack, name: str) -> None:
 @pytest.mark.uc("UC-044", flow="main", steps=[3, 4])
 @pytest.mark.uc("UC-040", flow="main", steps=[1])
 def test_agent_provider_sees_flips_of_already_evaluated_flags(service_stack):
-    """experiments_enabled off->on->off and decision.backend rules->openai, each read first."""
+    """experiments_enabled off->on->off and decision.backend rules->claude, each read first."""
     _run_live_go_test(service_stack, "TestLiveFlip_AlreadyEvaluatedFlagsFollowTheFlagService")
 
 

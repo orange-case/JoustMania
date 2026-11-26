@@ -1503,11 +1503,10 @@ def test_budget_variants_2518_resolve_as_overlay(flagd, resolver, tier):
 
 
 # --------------------------------------------------------------------------- #
-# 2d. Per-backend decide caps for the paid backends (#2519, flags.md §3)
+# 2d. Per-backend decide cap for the paid backend (#2519, flags.md §3)
 # --------------------------------------------------------------------------- #
 _BACKEND_CAP_KEYS_2519 = (
     "decision.claude.max_requests_per_minute",
-    "decision.openai.max_requests_per_minute",
 )
 _BACKEND_CAP_VARIANTS_2519 = {
     "inherit": -1,
@@ -1515,7 +1514,7 @@ _BACKEND_CAP_VARIANTS_2519 = {
     "default": 6,
     "stage": 30,
 }
-# The base file caps the paid backends at stage; the ci file inherits the global
+# The base file caps the paid backend at stage; the ci file inherits the global
 # budget so the service-test journeys at `journey` 600 are not capped.
 _BACKEND_CAP_DEFAULT_2519 = {"base": "stage", "ci": "inherit"}
 
@@ -1523,7 +1522,7 @@ _BACKEND_CAP_DEFAULT_2519 = {"base": "stage", "ci": "inherit"}
 @pytest.mark.uc("UC-070", br=["BR-003"])
 @pytest.mark.parametrize("flag_dir", ["ci", "base"])
 def test_backend_caps_2519_are_integers_with_the_shipped_default(flag_dir):
-    """Static: both flag files declare the two integer caps with the shipped default."""
+    """Static: both flag files declare the integer cap with the shipped default."""
     root = fh.CI_FLAG_DIR if flag_dir == "ci" else fh.CI_FLAG_DIR.parent
     flags = json.loads((root / "agent.json").read_text())["flags"]
     for key in _BACKEND_CAP_KEYS_2519:

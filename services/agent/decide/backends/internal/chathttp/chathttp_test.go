@@ -15,11 +15,11 @@ func TestServerAddress(t *testing.T) {
 		host string
 		port int
 	}{
-		"https://api.openai.com/v1": {"api.openai.com", 443},
-		"http://proxy.local/x/":     {"proxy.local", 80},
-		"http://127.0.0.1:8080/v1":  {"127.0.0.1", 8080},
-		"::bad":                     {"", 0},
-		"":                          {"", 0},
+		"https://api.typesafe.ai/v1": {"api.typesafe.ai", 443},
+		"http://proxy.local/x/":      {"proxy.local", 80},
+		"http://127.0.0.1:8080/v1":   {"127.0.0.1", 8080},
+		"::bad":                      {"", 0},
+		"":                           {"", 0},
 	}
 	for in, want := range cases {
 		if h, p := ServerAddress(in); h != want.host || p != want.port {
@@ -48,36 +48,33 @@ func TestPost(t *testing.T) {
 	defer srv.Close()
 	hdr := http.Header{"X-Test": []string{"1"}}
 
-	status, body, err := Post(context.Background(), srv.Client(), srv.URL+"/ok", hdr, []byte(`{}`), 10+1)
-	if err != nil || status != 201 || string(body) != `{"ok":true}` {
-		t.Errorf("ok = %d %q %v", status, body, err)
+	r, err := PostResponse(context.Background(), srv.Client(), srv.URL+"/ok", hdr, []byte(`{}`), 10+1)
+	if err != nil || r.Status != 201 || string(r.Body) != `{"ok":true}` {
+		t.Errorf("ok = %d %q %v", r.Status, r.Body, err)
 	}
-	if _, _, err := Post(context.Background(), srv.Client(), srv.URL+"/big", hdr, nil, 10); !errors.Is(err, ErrTooLarge) {
+	if _, err := PostResponse(context.Background(), srv.Client(), srv.URL+"/big", hdr, nil, 10); !errors.Is(err, ErrTooLarge) {
 		t.Errorf("big err = %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	_, _, err = Post(ctx, srv.Client(), srv.URL+"/slow", hdr, nil, 10)
+	_, err = PostResponse(ctx, srv.Client(), srv.URL+"/slow", hdr, nil, 10)
 	if err == nil || TransportErrorType(ctx, err) != "timeout" {
 		t.Errorf("slow err = %v (%s)", err, TransportErrorType(ctx, err))
 	}
 	canceled, cancel2 := context.WithCancel(context.Background())
 	cancel2()
-	_, _, err = Post(canceled, srv.Client(), srv.URL+"/ok", hdr, nil, 10)
+	_, err = PostResponse(canceled, srv.Client(), srv.URL+"/ok", hdr, nil, 10)
 	if TransportErrorType(canceled, err) != "canceled" {
 		t.Errorf("canceled = %s", TransportErrorType(canceled, err))
 	}
 	if TransportErrorType(context.Background(), errors.New("x")) != "_OTHER" {
 		t.Error("other")
 	}
-	if StatusErrorType(429) != "429" {
-		t.Error("status")
-	}
 }
 
 func TestMetricsNoPanic(t *testing.T) {
 	m := NewMetrics("test")
-	c := Call{Provider: "openai", RequestModel: "m", ResponseModel: "m2", Host: "h", Port: 443}
+	c := Call{Provider: "claude", RequestModel: "m", ResponseModel: "m2", Host: "h", Port: 443}
 	m.RecordDuration(context.Background(), c, "", time.Second)
 	m.RecordDuration(context.Background(), Call{Provider: "jev"}, "timeout", time.Second)
 	m.RecordTokens(context.Background(), c, 10, 5)
@@ -103,7 +100,7 @@ func TestPostResponse_Header(t *testing.T) {
 	}
 }
 
-// DefaultHTTPClient is the openai and jev client when none is injected. It must
+// DefaultHTTPClient is the jev client when none is injected. It must
 // refuse a cross-host redirect: net/http strips only Authorization and Cookie
 // across hosts, so jev's x-api-key would reach the redirect target.
 // UC: UC-044 BR-003
@@ -120,12 +117,12 @@ func TestDefaultHTTPClient_RefusesCrossHostRedirect(t *testing.T) {
 	defer redirector.Close()
 
 	header := http.Header{"X-Api-Key": {"sk-secret"}, "Authorization": {"Bearer sk-secret"}}
-	status, _, err := Post(context.Background(), DefaultHTTPClient, redirector.URL+"/v1/x", header, []byte("{}"), MaxResponseBytes)
+	r, err := PostResponse(context.Background(), DefaultHTTPClient, redirector.URL+"/v1/x", header, []byte("{}"), MaxResponseBytes)
 	if err != nil {
-		t.Fatalf("Post: %v", err)
+		t.Fatalf("PostResponse: %v", err)
 	}
-	if status != http.StatusTemporaryRedirect {
-		t.Errorf("status = %d, want the 307 returned as the response", status)
+	if r.Status != http.StatusTemporaryRedirect {
+		t.Errorf("status = %d, want the 307 returned as the response", r.Status)
 	}
 	if targetHits != 0 {
 		t.Errorf("redirect target received %d request(s)", targetHits)

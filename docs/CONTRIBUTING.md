@@ -399,7 +399,7 @@ The service tier (T2, `make test-service`) is deliberately a subset locally:
 
 | Diff touches | Local service tier |
 |---|---|
-| harness / stack: non-`test_*.py` files under `tests/service/` (not `README.md`), `tests/contract/{flagd_harness,infra_config}.py`, `tests/integration/{helpers,flag_service}.py`, `tests/integration/fake_openai/**`, `docker-compose.yml`, `services/flagd/**`, `services/flag-service/**`, `proto/**`, `pyproject.toml`, `uv.lock`, the `server.py` of game_coordinator / menu / controller_manager | full (`service`) |
+| harness / stack: non-`test_*.py` files under `tests/service/` (not `README.md`), `tests/contract/{flagd_harness,infra_config}.py`, `tests/integration/{helpers,flag_service}.py`, `docker-compose.yml`, `services/flagd/**`, `services/flag-service/**`, `proto/**`, `pyproject.toml`, `uv.lock`, the `server.py` of game_coordinator / menu / controller_manager | full (`service`) |
 | only `tests/service/**/test_*.py` (existing files) | those files (`service-touched`: `make test-service SERVICE_TESTS="<files>"`) |
 | anything else (lib, other service code, agent, rust-hid, `Makefile`, `ci.yml`) | none; the summary prints a note |
 

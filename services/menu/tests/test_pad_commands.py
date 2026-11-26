@@ -52,7 +52,7 @@ BASELINE = {
     ("agent", "interventions_allowed"): (AGENT_LEVELS, "standard"),
     ("agent", "enabled"): ({"on": True, "off": False}, "on"),
     ("agent", "interventions_enabled"): ({"on": True, "off": False}, "off"),
-    ("agent", "decision.backend"): ({"rules": "rules", "claude": "claude", "openai": "openai", "jev": "jev"}, "rules"),
+    ("agent", "decision.backend"): ({"rules": "rules", "claude": "claude", "jev": "jev"}, "rules"),
 }
 # Registry rows without persist (services/flag-service/registry.yaml): a persisted write is 400.
 NO_PERSIST = {("agent", "enabled"), ("agent", "interventions_enabled")}

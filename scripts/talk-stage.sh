@@ -77,7 +77,7 @@ with open(baseline_path) as fh:
 
 SET, WRITER = "agent", "stage"
 # The flags agent-backend.sh writes persisted (#1682); reset clears them.
-PERSISTED_BACKEND_KEYS = ("decision.backend", "decision.claude.model", "decision.jev.model", "decision.openai.model")
+PERSISTED_BACKEND_KEYS = ("decision.backend", "decision.claude.model", "decision.jev.model")
 fs = FlagService.from_env()
 fallback = baseline.get("fallback", {})
 

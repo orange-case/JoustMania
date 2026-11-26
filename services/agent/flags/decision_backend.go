@@ -34,23 +34,17 @@ const (
 	keyDecisionClaudeModel               = "decision.claude.model"
 	keyDecisionClaudeTimeoutMs           = "decision.claude.timeout_ms"
 	keyDecisionClaudeBaseURL             = "decision.claude.base_url"
-	keyDecisionOpenAIBaseURL             = "decision.openai.base_url"
-	keyDecisionOpenAIModel               = "decision.openai.model"
-	keyDecisionOpenAITimeoutMs           = "decision.openai.timeout_ms"
-	keyDecisionOpenAIReasoningEffort     = "decision.openai.reasoning_effort"
 	keyDecisionJevBaseURL                = "decision.jev.base_url"
 	keyDecisionJevModel                  = "decision.jev.model"
 	keyDecisionJevTimeoutMs              = "decision.jev.timeout_ms"
 	keyDecisionJevActConfidenceThreshold = "decision.jev.act_confidence_threshold"
 	keyDecisionClaudeMaxRequestsPerMin   = "decision.claude.max_requests_per_minute"
-	keyDecisionOpenAIMaxRequestsPerMin   = "decision.openai.max_requests_per_minute"
 )
 
 // Decision-backend names (the decision.backend variants).
 const (
 	DecisionBackendRules  = "rules"
 	DecisionBackendClaude = "claude"
-	DecisionBackendOpenAI = "openai"
 	DecisionBackendJev    = "jev"
 )
 
@@ -67,7 +61,7 @@ const (
 	// threshold (decision.jev.act_confidence_threshold, variant "gate", #1287).
 	// Jev's confidence is the calibrated gate p_yes (calm ~0.16, dragging ~0.35,
 	// collapsing ~0.68, near-threshold ~0.72), not a self-report, so it acts at
-	// 0.6 out of the box while claude/openai keep the global 0.8.
+	// 0.6 out of the box while claude keeps the global 0.8.
 	DefaultDecisionJevActConfidenceThreshold = 0.6
 	// ActConfidenceThresholdInherit is the "inherit" variant of a per-backend act
 	// threshold: the backend uses decision.act_confidence_threshold.
@@ -114,16 +108,6 @@ const (
 	// would post to /v1/v1/messages (404, every call falls back to rules).
 	// Equals claude.DefaultBaseURL.
 	DefaultDecisionClaudeBaseURL = "https://api.anthropic.com"
-	// DefaultDecisionOpenAIBaseURL is the openai backend's endpoint.
-	DefaultDecisionOpenAIBaseURL = "https://api.openai.com/v1"
-	// DefaultDecisionOpenAIModel is empty: unset means the openai backend is
-	// unavailable (and the decision falls back to rules).
-	DefaultDecisionOpenAIModel = ""
-	// DefaultDecisionOpenAIReasoningEffort lets the openai backend pick the
-	// reasoning_effort from the model id (backends/openai shapeFor); "omit"
-	// never sends the field; any other value (none, minimal, low, ...) is sent
-	// verbatim to reasoning models.
-	DefaultDecisionOpenAIReasoningEffort = "auto"
 	// DefaultDecisionJevBaseURL is TypeSafe's Jev API root (#1229); the jev
 	// backend posts to {base_url}/systemone.
 	DefaultDecisionJevBaseURL = "https://api.typesafe.ai/v1"
@@ -133,7 +117,7 @@ const (
 	DefaultDecisionJevModel = "jev-latest"
 	// DefaultDecisionTimeoutMs bounds one remote decide call ("degrade, never
 	// stall"): a call that has not answered within it falls back to rules. It is
-	// the default of decision.openai.timeout_ms and decision.jev.timeout_ms.
+	// the default of decision.jev.timeout_ms.
 	DefaultDecisionTimeoutMs = 2500
 	// DefaultDecisionClaudeTimeoutMs is the decision.claude.timeout_ms default
 	// (variant "default"). Measured live (#1231): Haiku 4.5 and Sonnet 5.5 answer
@@ -142,15 +126,13 @@ const (
 	// covers the warm p95 with ~1.5s headroom; "patient" (8s) also covers cold
 	// calls, "tight" is the old 2.5s.
 	DefaultDecisionClaudeTimeoutMs = 5000
-	// DefaultDecisionClaudeMaxRequestsPerMinute and
-	// DefaultDecisionOpenAIMaxRequestsPerMinute are the paid backends' own decide
-	// caps (decision.<backend>.max_requests_per_minute, variant "stage", #2519).
-	// They only tighten llm.max_requests_per_minute (FR-152 (c)): with the global
+	// DefaultDecisionClaudeMaxRequestsPerMinute is the claude backend's own decide
+	// cap (decision.claude.max_requests_per_minute, variant "stage", #2519). It
+	// only tightens llm.max_requests_per_minute (FR-152 (c)): with the global
 	// budget at "frenzy" (600, meant for the cheap jev backend) a switch to claude
-	// or openai still spends at most 30 decide calls a minute. At the global
-	// default 6 (also the lost-sync value) they never bind.
+	// still spends at most 30 decide calls a minute. At the global default 6 (also
+	// the lost-sync value) it never binds.
 	DefaultDecisionClaudeMaxRequestsPerMinute = 30
-	DefaultDecisionOpenAIMaxRequestsPerMinute = 30
 	// MaxRequestsPerMinuteInherit is the "inherit" variant of a per-backend decide
 	// cap: the backend has no cap of its own, only llm.max_requests_per_minute.
 	MaxRequestsPerMinuteInherit = -1
@@ -165,15 +147,11 @@ type RemoteBackendConfig struct {
 	Model string
 	// Timeout bounds one decide call. Always positive.
 	Timeout time.Duration
-	// ReasoningEffort is the reasoning_effort sent to reasoning models
-	// (decision.openai.reasoning_effort; lowercase, trimmed, never empty).
-	// Only the openai backend has the flag; it is empty for claude and jev.
-	ReasoningEffort string
 	// ActConfidenceThreshold is the backend's own act threshold
 	// (decision.<backend>.act_confidence_threshold, in [0,1]); it applies only
 	// when HasActConfidenceThreshold is true, otherwise the backend inherits
 	// decision.act_confidence_threshold. Only jev has the flag (#1287); the zero
-	// value (claude, openai, hand-built test snapshots) inherits.
+	// value (claude, hand-built test snapshots) inherits.
 	ActConfidenceThreshold float64
 	// HasActConfidenceThreshold reports whether ActConfidenceThreshold applies:
 	// true when the backend's own flag resolved to a value in [0,1], false for
@@ -184,8 +162,8 @@ type RemoteBackendConfig struct {
 	// (decision.<backend>.max_requests_per_minute, #2519). It applies only when
 	// HasMaxRequestsPerMinute is true and only tightens the global
 	// llm.max_requests_per_minute (FR-152 (c)); 0 closes the backend. Only claude
-	// and openai have the flag; the zero value (jev, hand-built test snapshots)
-	// has no cap of its own.
+	// has the flag; the zero value (jev, hand-built test snapshots) has no cap of
+	// its own.
 	MaxRequestsPerMinute int
 	// HasMaxRequestsPerMinute reports whether MaxRequestsPerMinute applies: false
 	// for the "inherit" sentinel and for a backend without the flag.
@@ -222,15 +200,14 @@ type DecisionBackend struct {
 	// hand-built snapshot matches the default.
 	PredictionsOff bool
 	// GoalInPrompt is decision.goal_in_prompt (#2479, decide-contract.md §14.4): a
-	// claude or openai request carries the "goal:" / "now:" lines. The only switch:
+	// claude request carries the "goal:" / "now:" lines. The only switch:
 	// decision.prompt_profile never implies them. Default off; unreadable reads off.
 	GoalInPrompt bool
 	// PredictionsAskModel is decision.predictions.ask_model (#2479, UC-040 A45,
-	// BR-034): a claude or openai request carries the ffa.prediction ask. Default
+	// BR-034): a claude request carries the ffa.prediction ask. Default
 	// off; a missing or unreadable value reads off, so the request bytes stay v1.
 	PredictionsAskModel bool
 	Claude              RemoteBackendConfig
-	OpenAI              RemoteBackendConfig
 	Jev                 RemoteBackendConfig
 }
 
@@ -246,8 +223,6 @@ func (d DecisionBackend) Remote(name string) (RemoteBackendConfig, bool) {
 	switch name {
 	case DecisionBackendClaude:
 		return d.Claude, true
-	case DecisionBackendOpenAI:
-		return d.OpenAI, true
 	case DecisionBackendJev:
 		return d.Jev, true
 	}
@@ -292,13 +267,6 @@ func (f *Flags) DecisionBackend(ctx context.Context) DecisionBackend {
 			Model:   f.stringFlag(ctx, keyDecisionClaudeModel, DefaultDecisionClaudeModel),
 			Timeout: f.timeoutMsFlag(ctx, keyDecisionClaudeTimeoutMs, DefaultDecisionClaudeTimeoutMs),
 		},
-		OpenAI: RemoteBackendConfig{
-			BaseURL: f.stringFlag(ctx, keyDecisionOpenAIBaseURL, DefaultDecisionOpenAIBaseURL),
-			Model:   f.stringFlag(ctx, keyDecisionOpenAIModel, DefaultDecisionOpenAIModel),
-			Timeout: f.timeoutMsFlag(ctx, keyDecisionOpenAITimeoutMs, DefaultDecisionTimeoutMs),
-			ReasoningEffort: normalizeReasoningEffort(
-				f.stringFlag(ctx, keyDecisionOpenAIReasoningEffort, DefaultDecisionOpenAIReasoningEffort)),
-		},
 		Jev: RemoteBackendConfig{
 			BaseURL: f.stringFlag(ctx, keyDecisionJevBaseURL, DefaultDecisionJevBaseURL),
 			Model:   f.stringFlag(ctx, keyDecisionJevModel, DefaultDecisionJevModel),
@@ -309,8 +277,6 @@ func (f *Flags) DecisionBackend(ctx context.Context) DecisionBackend {
 		ctx, keyDecisionJevActConfidenceThreshold, DefaultDecisionJevActConfidenceThreshold)
 	d.Claude.MaxRequestsPerMinute, d.Claude.HasMaxRequestsPerMinute = f.backendMaxRequestsPerMinute(
 		ctx, keyDecisionClaudeMaxRequestsPerMin, DefaultDecisionClaudeMaxRequestsPerMinute)
-	d.OpenAI.MaxRequestsPerMinute, d.OpenAI.HasMaxRequestsPerMinute = f.backendMaxRequestsPerMinute(
-		ctx, keyDecisionOpenAIMaxRequestsPerMin, DefaultDecisionOpenAIMaxRequestsPerMinute)
 	return d
 }
 
@@ -318,15 +284,6 @@ func normalizeBackendName(v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))
 	if v == "" {
 		return DefaultDecisionBackend
-	}
-	return v
-}
-
-// normalizeReasoningEffort lowercases and trims; empty means auto.
-func normalizeReasoningEffort(v string) string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	if v == "" {
-		return DefaultDecisionOpenAIReasoningEffort
 	}
 	return v
 }
