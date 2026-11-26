@@ -16,7 +16,10 @@ game's values when it ends (UC-053 BR-003):
   restart, UC-053 A10), whenever a call failed (until it succeeds), whenever
   the service's boot epoch changes (a restarted flag service lost every game
   scope, UC-053 A9 step 3; the worker reads the epoch from ``GET /healthz``
-  every 2 s and from every response), and every 15 s regardless. It only
+  every 2 s and from every response), and every 15 s regardless. A
+  registration that starts while a reconcile is in flight may land first and
+  then be dropped by the reconcile's older snapshot, so that reconcile is sent
+  again at once with a fresh snapshot. It only
   touches this instance's games; a second coordinator
   has its own instance id (review C3). The id is stable across restarts, so a
   restarted coordinator's first reconcile drops its previous process's games.
@@ -146,6 +149,8 @@ class FlagServiceLifecycle:
         self._epoch: str | None = None
         # In-flight registrations per game, awaited before that game's DELETE.
         self._registering: dict[str, asyncio.Future] = {}
+        # Registrations started so far; a reconcile compares it across its call.
+        self._registrations = 0
         self._loop: asyncio.AbstractEventLoop | None = None
         self._queue: asyncio.Queue | None = None
         self._worker: asyncio.Task | None = None
@@ -255,6 +260,7 @@ class FlagServiceLifecycle:
         if not self.enabled:
             return False
         path = "/games/" + urllib.parse.quote(game.game_id, safe="")
+        self._registrations += 1
         task = asyncio.ensure_future(self._call("register", "PUT", path, game.body(self.instance)))
         self._registering[game.game_id] = task
         task.add_done_callback(lambda _t, gid=game.game_id: self._registering.pop(gid, None))
@@ -286,14 +292,19 @@ class FlagServiceLifecycle:
         """Send this instance's full set of live games."""
         if not self.enabled:
             return False
-        games = [g.body(self.instance) for g in self._live_games()]
         path = "/coordinators/" + urllib.parse.quote(self.instance, safe="") + "/games"
-        self._needs_reconcile.clear()
-        self._last_reconcile = asyncio.get_running_loop().time()
-        ok = await self._call("reconcile", "PUT", path, {"games": games})
-        if ok:
+        while True:
+            registrations = self._registrations
+            games = [g.body(self.instance) for g in self._live_games()]
+            self._needs_reconcile.clear()
+            self._last_reconcile = asyncio.get_running_loop().time()
+            if not await self._call("reconcile", "PUT", path, {"games": games}):
+                return False
             logger.info("Flag service reconciled %d live game(s) for %s", len(games), self.instance)
-        return ok
+            # The service replaces this instance's set, so a registration that
+            # started after the snapshot and landed first was just dropped again.
+            if registrations == self._registrations:
+                return True
 
     async def _run(self) -> None:
         assert self._queue is not None
