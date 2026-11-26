@@ -241,12 +241,12 @@ func TestApplyLogs_PhaseStartGivesTraceID(t *testing.T) {
 }
 
 // UC: UC-041 A8
-// A coordinator from before #2837 still sends the old phase span values (telemetry.md §8).
-func TestApplyLogs_LegacyPhaseSpanValues(t *testing.T) {
+// The pre-#2837 phase span values are not recognised: no phase or cycle parent.
+func TestApplyLogs_OldPhaseSpanValuesIgnored(t *testing.T) {
 	mux := newTestMux(&muxClock{t: time.Unix(4000, 0)}, 5*time.Second, 15*time.Second, nil, nil)
 	mux.ApplyLogs(withTrace(t, phaseStartLog("game-L", "gameplay_phase"), logTraceHex, logPhaseHex, true))
 	mux.ApplyLogs(withTrace(t, phaseStartLog("game-L", "game_cycle"), logTraceHex, logCycleHex, true))
-	if got, want := traceIDsOf(t, mux, "game-L"), (traceIDs{trace: logTraceHex, phase: logPhaseHex, cycle: logCycleHex}); got != want {
-		t.Fatalf("ids = %+v, want %+v", got, want)
+	if got := traceIDsOf(t, mux, "game-L"); got.phase != "" || got.cycle != "" {
+		t.Fatalf("ids = %+v, want no phase or cycle span from the old values", got)
 	}
 }

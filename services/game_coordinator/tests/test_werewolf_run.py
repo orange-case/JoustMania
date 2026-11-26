@@ -326,7 +326,7 @@ async def test_force_end_during_the_intro_stops_the_drain_without_a_reopen():
     assert log.events.count_events_of_type(GameEvent.COUNTDOWN_START) == 0
     assert game.force_ended
     assert game._game_outcome_attributes()["game.outcome"] == "force_ended"
-    # run() returns early here (before teardown_phase): its finally drops the stream.
+    # run() returns early here (before game.phase.teardown): its finally drops the stream.
     assert game.gameplay_stream is None, "the early-return path keeps the stream reference"
 
 
