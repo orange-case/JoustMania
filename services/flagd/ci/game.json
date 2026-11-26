@@ -311,16 +311,6 @@
       },
       "defaultVariant": "off"
     },
-    "force_all_start_seconds": {
-      "state": "ENABLED",
-      "variants": {
-        "ci": 0.6,
-        "instant": 0.5,
-        "default": 3.0,
-        "long": 5.0
-      },
-      "defaultVariant": "ci"
-    },
     "countdown_phase_duration_ms": {
       "state": "ENABLED",
       "variants": {
