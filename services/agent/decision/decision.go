@@ -170,8 +170,7 @@ type fitnessReader interface {
 // annotate the agent.signal_received root span with rpc.* semconv attributes and
 // backdate it to the moment the Export arrived.
 type EvalTrigger struct {
-	// Signal is the OTLP signal type: "traces", "metrics" or "logs" (moment log
-	// events, UC-041 A7).
+	// Signal is the OTLP signal type: "traces" or "metrics".
 	Signal string
 	// RPCService is the full OTLP gRPC service name, e.g.
 	// "opentelemetry.proto.collector.metrics.v1.MetricsService".

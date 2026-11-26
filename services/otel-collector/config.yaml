@@ -248,28 +248,24 @@ processors:
       # lib/grpc_tracing.py records for the Python services.
       - span.attributes["rpc.service"] == "grpc.health.v1.Health" or span.attributes["rpc.service"] == "Health"
 
-  # Moment log events for the agent (#2658 slice 2, FR-218, UC-041 A7, BR-009).
-  # Only logs/agent uses it, so the debug sink and the gateway still get every
-  # log record. Drops (any condition true): a record not named as a moment the
-  # agent reads (intervention is not, UC-101 BR-010), a record without the
-  # moment identity, and synthetic data (#2577: orangecase.synthetic on the
-  # resource, a bool or the string "true"). C-001: the services' ordinary log
-  # lines never reach the agent.
-  # #2722 (UC-100 BR-012, UC-041 A8): game.start / game.end / game.phase.start
-  # pass too, only when marked orangecase.audience = "agent". The conditions are
-  # OR'ed drops, so after the first one only the five names are left: a moment
-  # needs its id, a lifecycle record its marker.
-  filter/agent_moments:
+  # The agent's own lifecycle log events (#2722, FR-250, UC-100 BR-012, UC-041
+  # A8): game.start / game.end / game.phase.start, only when marked
+  # orangecase.audience = "agent", never synthetic data (#2577:
+  # orangecase.synthetic on the resource, a bool or the string "true"). Only
+  # logs/agent uses it, so the debug sink and the gateway still get every log
+  # record. C-001: the services' ordinary log lines and the booth moment log
+  # events never reach the agent; it reads deaths from the elimination-order
+  # gauge (UC-041 BR-009).
+  filter/agent_events:
     error_mode: ignore
     log_conditions:
-      - log.event_name != "death_warning" and log.event_name != "player_death" and log.event_name != "game.start" and log.event_name != "game.end" and log.event_name != "game.phase.start"
-      - log.attributes["moment.id"] == nil and log.event_name != "game.start" and log.event_name != "game.end" and log.event_name != "game.phase.start"
-      - log.attributes["orangecase.audience"] != "agent" and log.event_name != "death_warning" and log.event_name != "player_death"
+      - log.event_name != "game.start" and log.event_name != "game.end" and log.event_name != "game.phase.start"
+      - log.attributes["orangecase.audience"] != "agent"
       - resource.attributes["orangecase.synthetic"] == true or resource.attributes["orangecase.synthetic"] == "true"
 
-  # Batch for the moment logs to the agent: a death reaches it about 2 s after
-  # the moment (SDK up to 1 s + 1 s here), not the shared 5 s logs batch.
-  batch/moments:
+  # Batch for the agent's log events: a phase start reaches it about 2 s after
+  # the span opened (SDK up to 1 s + 1 s here), not the shared 5 s logs batch.
+  batch/agent_events:
     timeout: 1s
     send_batch_size: 256
     send_batch_max_size: 1024
@@ -412,13 +408,13 @@ service:
       processors: [memory_limiter, batch, resource]
       exporters: [debug]
 
-    # Moment log events -> agent only (#2658 slice 2, FR-218, UC-041 A7). The
-    # filter runs before the batch so the batch holds moments only; the batch
+    # The agent's own lifecycle log events -> agent only (#2722, UC-041 A8). The
+    # filter runs before the batch so the batch holds those records only; the batch
     # also keeps a full otlp/agent queue from surfacing as an error to the
     # receiver.
     logs/agent:
       receivers: [otlp]
-      processors: [memory_limiter, filter/agent_moments, batch/moments, resource]
+      processors: [memory_limiter, filter/agent_events, batch/agent_events, resource]
       exporters: [otlp/agent]
 
   extensions: [health_check]

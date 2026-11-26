@@ -2811,7 +2811,7 @@ class TestHandleWebCommandSelectGame:
         assert real_servicer.current_selection == Games.Tournament
         assert real_servicer.state_manager.current_game_mode == Games.Tournament
         real_servicer.user_prefs_writer.update_default_variant.assert_called_once_with("current_game", "Tournament")
-        real_servicer.audio.play_voice.assert_awaited_once()
+        real_servicer.state_manager.audio.play_game_mode_voice.assert_awaited_once_with("Tournament")
 
     @pytest.mark.asyncio
     async def test_web_select_persists_off_the_event_loop_thread(self, real_servicer):

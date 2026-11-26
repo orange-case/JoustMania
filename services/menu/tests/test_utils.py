@@ -275,6 +275,14 @@ class TestSettingsModuleFunctions:
 
         assert result.name == expected_name
 
+    @pytest.mark.uc("UC-011", flow="A2", br=["BR-004", "BR-006"])
+    @pytest.mark.parametrize("forward", [True, False])
+    def test_get_next_game_mode_from_off_the_wheel_lands_on_the_first_mode(self, forward):
+        """From a mode off the wheel the first step lands on JoustFFA, either way, as the pad's step."""
+        from lib.types import Games
+
+        assert get_next_game_mode(Games.Random, forward=forward) == Games.JoustFFA
+
 
 class TestGameModesConstant:
     """Test GAME_MODES constant."""

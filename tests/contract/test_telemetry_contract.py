@@ -3,7 +3,7 @@
 Every telemetry name a consumer depends on must have a live producer:
 
 (a) the Go agent ingest names (``gamecontext/extract_metrics.go``,
-    ``gamecontext/extract_spans.go``) are
+    ``gamecontext/extract_spans.go``, ``gamecontext/extract_logs.go``) are
     produced by the Python/Rust services; for metrics that means a definition
     AND a recording call site (#1334 / #1335 were defined but never recorded);
 (b) every metric (and Python label matcher) in the Grafana dashboards and the
@@ -123,7 +123,13 @@ def test_inventory_parsers_find_the_known_surface(python_metrics, consumer_queri
     assert len(ingest.metric_names) >= 20, (
         "extract_metrics.go constant scan found too few metric names"
     )
-    assert ingest.span_events, "extract_spans.go event constants not found"
+    assert len(ingest.span_attrs) >= 5, "extract_spans.go attribute constants not found"
+    assert set(ingest.log_events.values()) >= {
+        "game.start",
+        "game.end",
+        "game.phase.start",
+    }, "extract_logs.go event constants not found"
+    assert ingest.log_attrs, "extract_logs.go attribute constants not found"
     assert len(ti.spa_queries()) >= 2, (
         "dashboard SPA *_QUERY scan found too few queries"
     )
@@ -211,14 +217,27 @@ def test_agent_ingested_labels_are_carried_by_an_ingested_metric(python_metrics)
 
 
 @pytest.mark.uc("UC-041", flow="main", steps=[4])
-def test_agent_ingested_span_attributes_and_events_exist_in_producers():
-    """UC-041 step 4: span attribute keys and the player_death event exist in producer code."""
+def test_agent_ingested_span_attributes_exist_in_producers():
+    """UC-041 step 4: the span attribute keys the agent reads exist in producer code."""
     ingest = ti.agent_ingest()
     literals = ti.producer_string_literals()
-    wanted = {**ingest.span_attrs, **ingest.span_events}
-    missing = sorted(f"{c}={v}" for c, v in wanted.items() if v not in literals)
+    missing = sorted(
+        f"{c}={v}" for c, v in ingest.span_attrs.items() if v not in literals
+    )
     assert not missing, (
         f"Agent span keys not found in any Python/Rust producer: {missing}"
+    )
+
+
+@pytest.mark.uc("UC-041", flow="A8", steps=[1, 2, 4])
+def test_agent_ingested_log_events_exist_in_producers():
+    """UC-041 A8: the log event names and attribute keys the agent reads exist in producer code."""
+    ingest = ti.agent_ingest()
+    literals = ti.producer_string_literals()
+    wanted = {**ingest.log_events, **ingest.log_attrs}
+    missing = sorted(f"{c}={v}" for c, v in wanted.items() if v not in literals)
+    assert not missing, (
+        f"Agent log event keys not found in any Python/Rust producer: {missing}"
     )
 
 
