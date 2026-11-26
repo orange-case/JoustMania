@@ -24,7 +24,6 @@ ALLOWED_MAX_LINES = {
     "docs/glossary.md": 1,
     "docs/specs/decide-contract.md": 1,
     "docs/specs/flags.md": 1,
-    "docs/specs/telemetry.md": 1,
     "services/agent/decide/decide_test.go": 3,
     "tests/contract/test_toughness_boost_rename.py": 2,
 }

@@ -127,9 +127,6 @@ func checkBounds(t *testing.T, row mdRow, p *Policy) {
 		if len(b.Variants) > 0 || b.Range != nil || b.Pattern != nil || b.FreeString || b.Payload != nil {
 			t.Errorf("%s: flags.md says declared variants, registry %+v", row.key, b)
 		}
-		if strings.Contains(text, "fraction 1 to 100") && !reflect.DeepEqual(b.Fraction, []int{1, 100}) {
-			t.Errorf("%s: fraction bounds %v", row.key, b.Fraction)
-		}
 	case strings.HasPrefix(text, "range table"):
 		if p.MagnitudeLimits() == nil {
 			t.Errorf("%s: flags.md says range table, registry.magnitudeLimits has no entry", row.key)
@@ -314,7 +311,7 @@ func TestPayloadCheck(t *testing.T) {
 	}
 }
 
-// UC: UC-040 BR-033
+// UC: UC-048 BR-014
 func TestPayloadCheckGroupShield(t *testing.T) {
 	game := map[string]bool{"A": true, "B": true, "C": true, "D": true, "E": true, "F": true, "G": true}
 	inGame := func(s string) bool { return game[s] }
@@ -325,22 +322,22 @@ func TestPayloadCheckGroupShield(t *testing.T) {
 		payload map[string]any
 		reason  string
 	}{
-		{"UC-040/BR-033 two serials", map[string]any{"serials": "A,B", "seconds": "5"}, ""},
-		{"UC-040/BR-033 six serials", map[string]any{"serials": "A,B,C,D,E,F", "seconds": "2.5"}, ""},
-		{"UC-040/BR-033 duplicate serial", map[string]any{"serials": "A,A,B", "seconds": "5"}, fserr.OutOfBounds},
-		{"UC-040/BR-033 single serial", map[string]any{"serials": "A", "seconds": "5"}, fserr.OutOfBounds},
-		{"UC-040/BR-033 seven serials", map[string]any{"serials": "A,B,C,D,E,F,G", "seconds": "5"}, fserr.OutOfBounds},
-		{"UC-040/BR-033 foreign serial", map[string]any{"serials": "A,Z", "seconds": "5"}, fserr.SerialNotInGame},
-		{"UC-040/BR-033 whitespace entry", map[string]any{"serials": "A, B", "seconds": "5"}, fserr.SerialNotInGame},
-		{"UC-040/BR-033 lower-case entry", map[string]any{"serials": "A,b", "seconds": "5"}, fserr.SerialNotInGame},
-		{"UC-040/BR-033 empty set", map[string]any{"serials": "", "seconds": "5"}, fserr.Malformed},
-		{"UC-040/BR-033 missing set", map[string]any{"seconds": "5"}, fserr.Malformed},
-		{"UC-040/BR-033 empty entry", map[string]any{"serials": "A,,B", "seconds": "5"}, fserr.OutOfBounds},
-		{"UC-040/BR-033 seconds below range", map[string]any{"serials": "A,B", "seconds": "0"}, fserr.OutOfBounds},
-		{"UC-040/BR-033 seconds above range", map[string]any{"serials": "A,B", "seconds": "11"}, fserr.OutOfBounds},
-		{"UC-040/BR-033 seconds not a number", map[string]any{"serials": "A,B", "seconds": "abc"}, fserr.OutOfBounds},
-		{"UC-040/BR-033 seconds hex float", map[string]any{"serials": "A,B", "seconds": "0x1p2"}, fserr.OutOfBounds},
-		{"UC-040/BR-033 seconds missing", map[string]any{"serials": "A,B"}, fserr.OutOfBounds},
+		{"UC-048/BR-014 two serials", map[string]any{"serials": "A,B", "seconds": "5"}, ""},
+		{"UC-048/BR-014 six serials", map[string]any{"serials": "A,B,C,D,E,F", "seconds": "2.5"}, ""},
+		{"UC-048/BR-014 duplicate serial", map[string]any{"serials": "A,A,B", "seconds": "5"}, fserr.OutOfBounds},
+		{"UC-048/BR-014 single serial", map[string]any{"serials": "A", "seconds": "5"}, fserr.OutOfBounds},
+		{"UC-048/BR-014 seven serials", map[string]any{"serials": "A,B,C,D,E,F,G", "seconds": "5"}, fserr.OutOfBounds},
+		{"UC-048/BR-014 foreign serial", map[string]any{"serials": "A,Z", "seconds": "5"}, fserr.SerialNotInGame},
+		{"UC-048/BR-014 whitespace entry", map[string]any{"serials": "A, B", "seconds": "5"}, fserr.SerialNotInGame},
+		{"UC-048/BR-014 lower-case entry", map[string]any{"serials": "A,b", "seconds": "5"}, fserr.SerialNotInGame},
+		{"UC-048/BR-014 empty set", map[string]any{"serials": "", "seconds": "5"}, fserr.Malformed},
+		{"UC-048/BR-014 missing set", map[string]any{"seconds": "5"}, fserr.Malformed},
+		{"UC-048/BR-014 empty entry", map[string]any{"serials": "A,,B", "seconds": "5"}, fserr.OutOfBounds},
+		{"UC-048/BR-014 seconds below range", map[string]any{"serials": "A,B", "seconds": "0"}, fserr.OutOfBounds},
+		{"UC-048/BR-014 seconds above range", map[string]any{"serials": "A,B", "seconds": "11"}, fserr.OutOfBounds},
+		{"UC-048/BR-014 seconds not a number", map[string]any{"serials": "A,B", "seconds": "abc"}, fserr.OutOfBounds},
+		{"UC-048/BR-014 seconds hex float", map[string]any{"serials": "A,B", "seconds": "0x1p2"}, fserr.OutOfBounds},
+		{"UC-048/BR-014 seconds missing", map[string]any{"serials": "A,B"}, fserr.OutOfBounds},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -352,7 +349,7 @@ func TestPayloadCheckGroupShield(t *testing.T) {
 	}
 }
 
-// UC: UC-040 BR-033
+// UC: UC-048 BR-014
 func TestPayloadRulesAreValidated(t *testing.T) {
 	for rule, ok := range map[string]bool{
 		"serial_set": true, "float 1 10": true, "float 10 1": false, "float 1": false, "float a b": false,
@@ -369,16 +366,15 @@ func TestParseRejectsBadRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := map[string]string{
-		"unknown flag":            `flags: [{set: agent, key: nope, kind: overlay, scope: [stack]}]`,
-		"wrong set":               `flags: [{set: game, key: enabled, kind: overlay, scope: [stack]}]`,
-		"unknown kind":            `flags: [{set: agent, key: enabled, kind: weird, scope: [stack]}]`,
-		"unknown scope":           `flags: [{set: agent, key: enabled, kind: overlay, scope: [world]}]`,
-		"persist on a game flag":  `flags: [{set: interventions, key: volume_override, kind: state, scope: [game], persist: true}]`,
-		"event without payload":   `flags: [{set: interventions, key: end_game, kind: event, scope: [game]}]`,
-		"undeclared variant":      `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack], bounds: {variants: [maybe]}}]`,
-		"unknown field":           `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack], owner: agent}]`,
-		"duplicate row":           `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack]}, {set: agent, key: enabled, kind: overlay, scope: [stack]}]`,
-		"fraction without bounds": `flags: [{set: controller, key: bluetooth_backend, kind: overlay, scope: [fraction]}]`,
+		"unknown flag":           `flags: [{set: agent, key: nope, kind: overlay, scope: [stack]}]`,
+		"wrong set":              `flags: [{set: game, key: enabled, kind: overlay, scope: [stack]}]`,
+		"unknown kind":           `flags: [{set: agent, key: enabled, kind: weird, scope: [stack]}]`,
+		"unknown scope":          `flags: [{set: agent, key: enabled, kind: overlay, scope: [world]}]`,
+		"persist on a game flag": `flags: [{set: interventions, key: volume_override, kind: state, scope: [game], persist: true}]`,
+		"event without payload":  `flags: [{set: interventions, key: end_game, kind: event, scope: [game]}]`,
+		"undeclared variant":     `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack], bounds: {variants: [maybe]}}]`,
+		"unknown field":          `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack], owner: agent}]`,
+		"duplicate row":          `flags: [{set: agent, key: enabled, kind: overlay, scope: [stack]}, {set: agent, key: enabled, kind: overlay, scope: [stack]}]`,
 	}
 	for name, doc := range bad {
 		if _, err := Parse([]byte(doc), b); err == nil {
@@ -475,10 +471,10 @@ func TestRealScopeIsLatched(t *testing.T) {
 }
 
 // shield.activation is read at each grant in instant and trigger games
-// (UC-040 BR-019), so it is neither latched nor writable in scope real.
+// (UC-048 BR-004), so it is neither latched nor writable in scope real.
 //
 // UC: UC-043 A17
-// UC: UC-040 BR-019
+// UC: UC-048 BR-004
 func TestShieldActivationIsReadPerGrant(t *testing.T) {
 	t.Run("UC-043/A17 shield.activation is not latched and has no scope real", func(t *testing.T) {
 		const key = "game/shield.activation"

@@ -527,9 +527,6 @@ def _bounds(bounds: dict) -> str:
     if "payload" in bounds:
         fields = ", ".join(f"`{k}`" for k in bounds["payload"]) or "none"
         return f"event payload: {fields}"
-    if "fraction" in bounds:
-        lo, hi = bounds["fraction"]
-        return f"fraction {lo} to {hi} %"
     if bounds.get("shape"):
         return "object of the default's shape"
     raise SpecSourceError(

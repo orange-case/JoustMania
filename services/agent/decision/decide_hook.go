@@ -30,11 +30,12 @@ import (
 // (#1226). decision.backend selects who decides:
 //
 //   - rules (default): the loop keeps calling the rules engine exactly as before —
-//     ObjectiveRules.EvaluateDecide is Evaluate plus the decide answers from the
-//     SAME ranking (one rankLocked call, one chaos RNG draw per evaluation), so the
-//     emitted decisions are byte-for-byte unchanged. The answers ride an
-//     invoke_agent span; like every other span on the sync path it is emitted only
-//     on a cycle that produces decisions (idle cycles stay span-free).
+//     ObjectiveRules.EvaluateDecide is Evaluate plus the request and prediction from
+//     the SAME ranking (one rankLocked call, one chaos RNG draw per evaluation), so
+//     the emitted decisions are byte-for-byte unchanged. The record of the first
+//     decision, without confidence, rides an invoke_agent span; like every other
+//     span on the sync path it is emitted only on a cycle that produces decisions
+//     (idle cycles stay span-free).
 //   - anything else: the remote backend OWNS the decision. The call runs off the
 //     loop on the existing async machinery (inflight CAS, inferWG, rootCtx,
 //     ContextProvider re-read at landing), bounded by the backend's timeout flag.
@@ -409,17 +410,12 @@ func (l *Loop) rulesDecide(ctx context.Context, snapshot flags.Snapshot, rules R
 		predictionCtx:  &c,
 		predictionsOff: snapshot.Decision.PredictionsOff,
 	}
-	iv, hasIV := resp.Find(decide.QuestionFFAIntervention)
-	if hasIV {
-		rec.confidence = iv.Confidence
-	}
 	switch {
 	case fallbackReason != "":
 		rec.outcome = DecideOutcomeFallback
-	case len(out) == 0 || (hasIV && iv.Choice == decide.OptionNoop):
-		// #1295, defensive: a noop choice never reads act. On the default rules
-		// path this record is never emitted (OnEvaluate returns before any span on
-		// a zero-decision cycle); it guards any future caller that emits it.
+	case len(out) == 0:
+		// Defensive: OnEvaluate emits no span on a zero-decision cycle, but a
+		// noop record must never read act.
 		rec.outcome = DecideOutcomeNoop
 	}
 	return out, rec
@@ -890,15 +886,13 @@ func (l *Loop) decideRemoteFallback(ctx context.Context, snapshot flags.Snapshot
 		decisions = out
 		if ranked {
 			rec.req, rec.resp, rec.hasResp = req, resp, true
-			if iv, found := resp.Find(decide.QuestionFFAIntervention); found {
-				rec.confidence = iv.Confidence
-			}
 			rec.prediction, rec.predictionCtx = resp.Prediction, &current
 		}
 	} else {
 		decisions = rules.Evaluate(ctx, current)
 	}
-	decisions = l.stampShieldSeconds(ctx, snapshot, decisions, rec)
+	decisions = l.stampShieldSeconds(ctx, snapshot, decisions, rec.req.Bounds)
+	rec.answerRules(decisions)
 	now := l.nowOrDefault()
 	before := len(state.Outcomes)
 	for _, d := range decisions {
@@ -947,7 +941,7 @@ func (l *Loop) decideRemoteApply(ctx context.Context, snapshot flags.Snapshot, c
 		rec.discardStale(DiscardTargetGone)
 		return
 	case len(d.TargetSerials) > 0 && !groupPresent(current, d.TargetSerials):
-		// A group shield is all or nothing (#2467, A48): one target gone drops it.
+		// A group shield is all or nothing (#2467, UC-048 A14): one target gone drops it.
 		rec.discardStale(DiscardTargetGone)
 		return
 	case decide.NeedsFreshReadings(d.Intervention) && !decide.TargetReadingsFresh(current, d.TargetSerial):
@@ -994,7 +988,7 @@ var playerTargetedInterventions = decide.Set(func(iv decide.Intervention) bool {
 // routing is the caller's job.
 //
 // A group lever (decide.GroupTargeted) takes a group option, resolved against the
-// request's alive players into Decision.TargetSerials (#2467, UC-040 A47); req is
+// request's alive players into Decision.TargetSerials (#2467, UC-048 A13); req is
 // the request the answers belong to.
 func mapAnswers(req decide.Request, resp decide.Response) (Decision, string) {
 	iv, _ := resp.Find(decide.QuestionFFAIntervention)
@@ -1095,10 +1089,13 @@ func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecon
 	if rec.hasResp {
 		attrs = append(attrs,
 			attribute.String(AttrDecideAnswers, capJSON(rec.resp.Answers)),
-			attribute.Float64(AttrDecideConfidence, rec.confidence),
-			attribute.Float64(AttrDecideConfidenceMin, minConfidence(rec.resp.Answers)),
 			attribute.String(AttrDecideRationale, truncateRationale(rec.resp.Rationale)),
 		)
+		if rec.used != RulesBackendName {
+			attrs = append(attrs,
+				attribute.Float64(AttrDecideConfidence, rec.confidence),
+				attribute.Float64(AttrDecideConfidenceMin, minConfidence(rec.resp.Answers)))
+		}
 	}
 	if rec.discardedReason != "" {
 		attrs = append(attrs, attribute.String(AttrDecideDiscardedReason, rec.discardedReason))

@@ -16,31 +16,31 @@ import (
 
 // TestSafetyDefaultPromoterNeverActsForReal: a Promoter built with NO explicit
 // seams (the maximally-safe construction) falls back to the inert recording no-op
-// clients, so a github-target PR degrades to a RECORDED no-op with a visible reason
+// client, so an issue degrades to a RECORDED no-op with a visible reason
 // — never a network call.
 // UC: UC-043 A4
 func TestSafetyDefaultPromoterNeverActsForReal(t *testing.T) {
-	// nil github + nil git => NewPromoter substitutes the inert recording no-ops.
+	// nil github => NewPromoter substitutes the inert recording no-op.
 	// nil realDef => autonomous cannot mutate a real default.
-	p := NewPromoter(nil, nil, nil, nil, nil, testRepo(), nil, discardLogger())
+	p := NewPromoter(nil, nil, nil, nil, nil, discardLogger())
 
-	t.Run("github PR degrades to recorded no-op", func(t *testing.T) {
+	t.Run("github issue degrades to recorded no-op", func(t *testing.T) {
 		res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-			Config{Mode: ModePR, Target: TargetGitHub}, testEvidence())
+			Config{Mode: ModeIssue}, testEvidence())
 		if res.Outcome != OutcomeDiscarded {
 			t.Fatalf("outcome = %q, want discarded (no real client)", res.Outcome)
 		}
 		if res.URL != "" {
 			t.Errorf("a no-op produced a URL %q — did it reach github?", res.URL)
 		}
-		if !strings.Contains(res.Reason, "github target not enabled") {
+		if !strings.Contains(res.Reason, "github not enabled") {
 			t.Errorf("reason = %q, want it to name the disabled github path", res.Reason)
 		}
 	})
 
 	t.Run("autonomous with no real-default writer degrades to recorded no-op", func(t *testing.T) {
 		res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-			Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true}, testEvidence())
+			Config{Mode: ModeAutonomous, Enabled: true}, testEvidence())
 		if res.Outcome != OutcomeDiscarded {
 			t.Fatalf("outcome = %q, want discarded (no real-default writer)", res.Outcome)
 		}
@@ -57,10 +57,10 @@ func TestSafetyDefaultPromoterNeverActsForReal(t *testing.T) {
 // UC: UC-043 main
 func TestSafetyAutonomousBlockedByKillSwitch(t *testing.T) {
 	realDef := &recordingRealDefault{}
-	p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingGit{}, realDef, fakeWatcher{}, &recordingReverter{})
+	p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{}, &recordingReverter{})
 
 	res := p.Promote(context.Background(), promoteProposal, promoteVerdict,
-		Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: false}, testEvidence())
+		Config{Mode: ModeAutonomous, Enabled: false}, testEvidence())
 
 	if res.Outcome != OutcomeDiscarded {
 		t.Fatalf("outcome = %q, want discarded (kill-switch)", res.Outcome)
@@ -84,15 +84,8 @@ func TestSafetyEnvGatedConstructorsReturnNilWhenUngated(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("AGENT_AUTONOMOUS_ENABLED", "")
 
-	if gh, err := NewGitHubClientFromEnv(TargetGitHub, discardLogger()); gh != nil || err != nil {
+	if gh, err := NewGitHubClientFromEnv(discardLogger()); gh != nil || err != nil {
 		t.Errorf("NewGitHubClientFromEnv(ungated) = (%v, %v), want (nil, nil)", gh, err)
-	}
-	// Even a github target with the gate off must not build a client.
-	if gh, _ := NewGitHubClientFromEnv(TargetLocal, discardLogger()); gh != nil {
-		t.Error("NewGitHubClientFromEnv(local) returned a real github client")
-	}
-	if git, err := NewGitClientFromEnv(TargetLocal, discardLogger()); git != nil || err != nil {
-		t.Errorf("NewGitClientFromEnv(ungated) = (%v, %v), want (nil, nil)", git, err)
 	}
 	if w, err := NewRealDefaultWriterFromEnv(discardLogger()); w != nil || err != nil {
 		t.Errorf("NewRealDefaultWriterFromEnv(ungated) = (%v, %v), want (nil, nil)", w, err)
@@ -107,13 +100,13 @@ func TestSafetyEnvGateTokenStillRequired(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "") // token absent
 	t.Setenv("GITHUB_REPOSITORY", "owner/repo")
 
-	gh, err := NewGitHubClientFromEnv(TargetGitHub, discardLogger())
+	gh, err := NewGitHubClientFromEnv(discardLogger())
 	if gh != nil || err != nil {
 		t.Errorf("NewGitHubClientFromEnv(enabled, no token) = (%v, %v), want (nil, nil)", gh, err)
 	}
 }
 
-// TestSafetyNoopClientsRecordButDoNotAct: the no-op clients record what they WOULD
+// TestSafetyNoopClientsRecordButDoNotAct: the no-op client records what they WOULD
 // do (so a disabled main.go is still observable) but always decline — proving the
 // recorded-no-op contract end to end.
 func TestSafetyNoopClientsRecordButDoNotAct(t *testing.T) {
@@ -123,13 +116,6 @@ func TestSafetyNoopClientsRecordButDoNotAct(t *testing.T) {
 	}
 	if len(gh.Issues) != 1 {
 		t.Errorf("no-op did not RECORD the issue it would open: %d", len(gh.Issues))
-	}
-	git := NewNoopGitClient(discardLogger())
-	if _, err := git.Commit(context.Background(), CommitReq{Message: "x"}); err == nil {
-		t.Error("no-op Commit should decline")
-	}
-	if len(git.Commits) != 1 {
-		t.Errorf("no-op did not RECORD the commit it would make: %d", len(git.Commits))
 	}
 }
 

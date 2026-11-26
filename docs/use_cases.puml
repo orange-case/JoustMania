@@ -54,6 +54,7 @@ rectangle "JoustMania" {
         usecase "UC-045\nStop the Agent with Flags" as UC045
         usecase "UC-046\nRun Repeatable Pattern-Driven Shadow Games" as UC046
         usecase "UC-047\nCalibrate the Shadow Players Offline from Real Games" as UC047
+        usecase "UC-048\nApply an Agent Shield" as UC048
     }
     package "Infrastructure" {
         usecase "UC-050\nRoll Out a Controller Backend Progressively\n(retired)" as UC050
@@ -126,6 +127,7 @@ agent --> UC042
 agent --> UC043
 agent --> UC046
 agent --> UC047
+agent --> UC048
 agent --> UC051
 agent --> UC053
 
@@ -177,6 +179,7 @@ presenter --> UC053
 maintainer --> UC043
 UC040 --> modelapi
 player --> UC040
+player --> UC048
 UC042 --> modelapi
 UC043 --> github
 
@@ -215,7 +218,7 @@ agent --> UC055
 
 note right of maintainer
   Reviews tier-3 proposals
-  (issue / PR) from UC-043
+  (issues) from UC-043
 end note
 
 note bottom of UC050

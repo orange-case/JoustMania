@@ -519,7 +519,7 @@ def get_context_propagation_interceptors(
 class SyncUnaryUnaryInterceptor(grpc.UnaryUnaryClientInterceptor):
     """Sync unary-unary client interceptor for trace context propagation.
 
-    Used by adapters that use blocking gRPC channels (e.g. python_hid_adapter,
+    Used by adapters that use blocking gRPC channels (e.g. the rust-hid adapter,
     rust_adapter) to inject W3C traceparent into outgoing RPCs. The sync ``continuation``
     never raises: it returns an outcome that carries the status, so the span ends from the
     outcome's done callback (inline for a blocking call, on a grpc thread for ``.future()``) (#1879).
@@ -600,7 +600,7 @@ def get_sync_context_propagation_interceptors(
     """Get context propagation interceptors for sync (blocking) gRPC channels.
 
     Use with grpc.intercept_channel() to add trace context to outgoing RPCs
-    on sync channels (e.g. HID adapter → python-hid/rust-hid).
+    on sync channels (e.g. HID adapter → rust-hid).
 
     Args:
         server_address: Target server hostname/IP (used in RPC span attributes).

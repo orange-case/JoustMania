@@ -12,7 +12,7 @@ how to refit the archetypes when the realism is off (section 4, UC-047):
    in real games, to check that the sign and rough size of the fitness change agree.
 
 Together they are the evidence for the **validity bar** (UC-043 A23, FR-203). Until an objective
-meets the bar it is human-review-only: its verdicts may open an issue or PR but never change a real
+meets the bar it is human-review-only: its verdicts may open an issue but never change a real
 default autonomously. The agent enforces it (#2541): an autonomous promotion is made only for an
 objective the operator attested (section 3). Autonomous promotion is off on every stack today
 (`AGENT_AUTONOMOUS_ENABLED` is unset).
@@ -129,11 +129,10 @@ that JoustFFA shadow games read, `0` strictest to `4` most lenient, default `2`)
 | known-bad | `sensitivity` 0 (ultra_slow, strictest) | shorter games, fitness down |
 
 **Shadow side.** Run one experiment per change against the baseline, `objective: endurance`,
-`target_n` of at least 8. The `experiment_seed` flag (UC-043 trigger) accepts only its declared
-variants (`off`, `windows_frantic`; [flags.md](specs/flags.md)), so a `sensitivity` seed variant has
-to be added to the flag file first, in a reviewed PR. The value is a flag-file change, not an
-ad-hoc write. Then turn the variant on the way `scripts/agent-dryrun-enable.sh` turns on
-`windows_frantic`. Read the per-arm mean fitness from the experiment's journal or the agent's
+`target_n` of at least 8. Name the change as the dynamic declarer's explicit candidate
+(`experiment_dynamic_candidates` = `sensitivity=<variant>`, UC-043 BR-012): the value must be a
+declared variant of the flag, so a new value is a flag-file change in a reviewed PR, not an ad-hoc
+write. Turn it on the way `scripts/agent-dryrun-enable.sh` turns on `windows=frantic`. Read the per-arm mean fitness from the experiment's journal or the agent's
 `GET /experiments/state` (its `experiments` entry).
 
 **Real side.** Run real games at each value: at least 8 games per value, the same player count

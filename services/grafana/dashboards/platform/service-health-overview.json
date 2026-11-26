@@ -54,7 +54,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Application services that pushed process metrics in the last few minutes (count of jobs with process_cpu_seconds_total). Expected on the default stack: game-coordinator, menu, audio, controller-manager, rust-hid, connect-proxy, agent (7), plus pairing-daemon on the Pi and python-hid when its profile is enabled. The table to the right shows which ones.",
+      "description": "Application services that pushed process metrics in the last few minutes (count of jobs with process_cpu_seconds_total). Expected on the default stack: game-coordinator, menu, audio, controller-manager, rust-hid, connect-proxy, agent (7), plus pairing-daemon on the Pi. The table to the right shows which ones.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -108,7 +108,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "count(count by (job) (process_cpu_seconds_total{job=~\"(.+/)?(.*game-coordinator-service|menu-service|audio-service|controller-manager-service|pairing-daemon|rust-hid|python-hid|connect-proxy|agent)\"})) or vector(0)",
+          "expr": "count(count by (job) (process_cpu_seconds_total{job=~\"(.+/)?(.*game-coordinator-service|menu-service|audio-service|controller-manager-service|pairing-daemon|rust-hid|connect-proxy|agent)\"})) or vector(0)",
           "refId": "A",
           "legendFormat": "Services"
         }

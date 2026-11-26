@@ -61,9 +61,7 @@ func (f *flagState) effectiveDefault() string {
 //     still wins;
 //   - game+serial, game (values and event lists) and experiment+arm values are
 //     prepended as targeting rungs, in that order, with the baseline targeting
-//     as the final else (null when there is none);
-//   - a fraction overlay replaces the final else with a fractional split
-//     between its variant and the effective default.
+//     as the final else (null when there is none).
 func (f *flagState) render(epoch string) (*renderedFlag, error) {
 	out := &renderedFlag{
 		State:          f.base.State,
@@ -87,7 +85,6 @@ func (f *flagState) render(epoch string) (*renderedFlag, error) {
 	addGenerated(f.stack)
 	addGenerated(f.admin)
 	addGenerated(f.real)
-	addGenerated(f.fraction)
 	// A game or per-player value serves its write's decision_id as metadata
 	// keyed by its own generated variant, so the id belongs to whichever
 	// value resolved, and it goes with the value (flags.md §5, UC-101 BR-003,
@@ -146,18 +143,7 @@ func (f *flagState) render(epoch string) (*renderedFlag, error) {
 	}
 
 	var elseBranch json.RawMessage
-	switch {
-	case f.fraction != nil:
-		frac := map[string]any{"fractional": []any{
-			[]any{f.fraction.Variant, f.fraction.Fraction},
-			[]any{out.DefaultVariant, 100 - f.fraction.Fraction},
-		}}
-		raw, err := json.Marshal(frac)
-		if err != nil {
-			return nil, err
-		}
-		elseBranch = raw
-	case f.base.HasTargeting():
+	if f.base.HasTargeting() {
 		elseBranch = f.base.Targeting
 	}
 

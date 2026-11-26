@@ -1,5 +1,5 @@
 """
-Shield feedback in the game coordinator (#1301, UC-040 A16 / A17, BR-007..BR-010).
+Shield feedback in the game coordinator (#1301, UC-048 A1 / A2, UC-040 BR-007, UC-048 BR-003).
 
 grant_shield / grant_toughness_boost send ONE controller-rendered effect per
 grant (no LED stream, no task), play the shield sound and publish
@@ -36,7 +36,7 @@ WALL_NOW = 5_000.0
 
 @pytest.fixture(autouse=True)
 def _no_shield_limits():
-    """Shield limits off (#2044, UC-040 BR-022): these tests are not about the cap or the cooldown."""
+    """Shield limits off (#2044, UC-048 BR-007): these tests are not about the cap or the cooldown."""
     with patch.object(BaseGameMode, "_shield_limits", return_value=(0, 0)):
         yield
 
@@ -65,7 +65,7 @@ class RecordingStream:
     def effects(self):
         """(serial, effect, duration_ms) per game effect, without the help cue PULSE.
 
-        The cue (UC-040 A42, BR-031) is pinned in test_shield_help_cue.py.
+        The cue (UC-048 A12, BR-013) is pinned in test_shield_help_cue.py.
         """
         return [
             (m.game_effect.serial, m.game_effect.effect, m.game_effect.duration_ms)
@@ -94,13 +94,14 @@ def _shielded_events(game):
 
 
 class TestUC040ShieldFeedback:
-    """UC-040 A16: one effect, the shield sound and a player_shielded event per grant."""
+    """UC-048 A1: one effect, the shield sound and a player_shielded event per grant."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-007", "BR-008"])
+    @pytest.mark.uc("UC-040", br=["BR-007"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-001"])
     @pytest.mark.uc("UC-031", flow="main", steps=[4])
     async def test_grant_sends_shield_effect_sound_and_event(self, game, frozen_clocks):
-        """UC-040 A16: grant_shield -> GAME_EFFECT_SHIELD for the duration, shield_up, player_shielded."""
+        """UC-048 A1: grant_shield -> GAME_EFFECT_SHIELD for the duration, shield_up, player_shielded."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             assert await game.grant_shield("p1", 5.0) is True
 
@@ -116,9 +117,9 @@ class TestUC040ShieldFeedback:
         assert "p1" in game._shield_feedback_until
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-009"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-002"])
     async def test_toughness_boost_sends_weaker_variant_at_half_volume(self, game, frozen_clocks):
-        """UC-040 BR-009: toughness_boost -> GAME_EFFECT_TOUGHNESS_BOOST and shield_up at 0.5."""
+        """UC-048 BR-002: toughness_boost -> GAME_EFFECT_TOUGHNESS_BOOST and shield_up at 0.5."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             assert await game.grant_toughness_boost("p2", 5.0) is True
 
@@ -129,9 +130,9 @@ class TestUC040ShieldFeedback:
         assert _shielded_events(game)[0]["kind"] == "toughness_boost"
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_extending_restarts_the_effect_with_the_new_remaining_time(self, game, frozen_clocks):
-        """UC-040 BR-010: a longer grant re-sends the effect for the new remaining protection."""
+        """UC-048 BR-003: a longer grant re-sends the effect for the new remaining protection."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             await game.grant_shield("p1", 3.0)
             await game.grant_shield("p1", 8.0)
@@ -142,9 +143,9 @@ class TestUC040ShieldFeedback:
         assert play.await_count == 1  # the extension restarts the LED silently
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_kept_grant_sends_no_feedback(self, game):
-        """UC-040 BR-010: a shorter grant keeps the protection and sends nothing."""
+        """UC-048 BR-003: a shorter grant keeps the protection and sends nothing."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             await game.grant_shield("p1", 8.0)
             await game.grant_shield("p1", 2.0)
@@ -156,9 +157,9 @@ class TestUC040ShieldFeedback:
         assert len(_shielded_events(game)) == 2
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_admin_invincibility_composition_holds(self, game):
-        """UC-040 BR-010 / #817: effective grace = max; a covered grant is kept with no feedback."""
+        """UC-048 BR-003 / #817: effective grace = max; a covered grant is kept with no feedback."""
         player = game.players["p1"]
         player.invincible_until = game_clock.now() + 10.0  # admin baseline (Tournament / Fight Club)
 
@@ -175,9 +176,9 @@ class TestUC040ShieldFeedback:
         assert effect == SHIELD and 5900 <= duration_ms <= 6000
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_feedback_failure_never_fails_the_shield(self, game):
-        """UC-040 BR-010: a broken stream loses the feedback, not the protection."""
+        """UC-048 BR-003: a broken stream loses the feedback, not the protection."""
         game.gameplay_stream = RecordingStream(fail=True)
         before = game_clock.now()
         with patch.object(game, "_play_sound", new_callable=AsyncMock):
@@ -185,9 +186,9 @@ class TestUC040ShieldFeedback:
         assert game.players["p1"].grace_until >= before + 4.5
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-008"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-001"])
     async def test_no_task_is_created_for_the_fade(self, game):
-        """UC-040 BR-008: the controller manager renders the fade; the coordinator keeps no task."""
+        """UC-048 BR-001: the controller manager renders the fade; the coordinator keeps no task."""
         before = set(asyncio.all_tasks())
         with patch.object(game, "_play_sound", new_callable=AsyncMock):
             await game.grant_shield("p1", 5.0)
@@ -196,12 +197,13 @@ class TestUC040ShieldFeedback:
 
 
 class TestUC040ShieldFeedbackChannels:
-    """UC-040 BR-010: sound only on unprotected -> protected; channels fail independently."""
+    """UC-048 BR-003: sound only on unprotected -> protected; channels fail independently."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-007", "BR-010"])
+    @pytest.mark.uc("UC-040", br=["BR-007"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_sound_only_on_the_unprotected_to_protected_transition(self, game):
-        """UC-040 BR-010: first grant plays shield_up; extensions resend the LED with no sound."""
+        """UC-048 BR-003: first grant plays shield_up; extensions resend the LED with no sound."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             await game.grant_shield("p1", 3.0)
             await game.grant_shield("p1", 6.0)
@@ -212,9 +214,10 @@ class TestUC040ShieldFeedbackChannels:
         assert len(_shielded_events(game)) == 3
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-007", "BR-010"])
+    @pytest.mark.uc("UC-040", br=["BR-007"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_sound_again_after_the_protection_lapsed(self, game):
-        """UC-040 BR-010: a grant after the previous shield expired is a new transition."""
+        """UC-048 BR-003: a grant after the previous shield expired is a new transition."""
         player = game.players["p1"]
         player.grace_until = game_clock.now() - 1  # an earlier shield has expired
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
@@ -222,9 +225,9 @@ class TestUC040ShieldFeedbackChannels:
         play.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_led_failure_still_plays_sound_and_publishes(self, game):
-        """UC-040 BR-010: a broken stream skips only the LED channel."""
+        """UC-048 BR-003: a broken stream skips only the LED channel."""
         game.gameplay_stream = RecordingStream(fail=True)
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             assert await game.grant_shield("p1", 5.0) is True
@@ -232,18 +235,18 @@ class TestUC040ShieldFeedbackChannels:
         assert len(_shielded_events(game)) == 1
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_sound_failure_still_sends_led_and_publishes(self, game):
-        """UC-040 BR-010: a failing audio call skips only the sound channel."""
+        """UC-048 BR-003: a failing audio call skips only the sound channel."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock, side_effect=RuntimeError("audio down")):
             assert await game.grant_shield("p1", 5.0) is True
         assert [e[1] for e in game.gameplay_stream.effects()] == [SHIELD]
         assert len(_shielded_events(game)) == 1
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_event_failure_does_not_fail_the_shield(self, game):
-        """UC-040 BR-010: a failing publisher skips only the event."""
+        """UC-048 BR-003: a failing publisher skips only the event."""
         game.event_publisher.side_effect = RuntimeError("bus closed")
         with patch.object(game, "_play_sound", new_callable=AsyncMock) as play:
             assert await game.grant_shield("p1", 5.0) is True
@@ -252,12 +255,12 @@ class TestUC040ShieldFeedbackChannels:
 
 
 class TestUC040ShieldFeedbackEnds:
-    """UC-040 A17: game end clears running shield effects."""
+    """UC-048 A2: game end clears running shield effects."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_game_end_sends_zero_duration_shield_to_running_ones(self, game):
-        """UC-040 A17: a zero-duration SHIELD goes to every still-running shield, then the record is clear."""
+        """UC-048 A2: a zero-duration SHIELD goes to every still-running shield, then the record is clear."""
         with patch.object(game, "_play_sound", new_callable=AsyncMock):
             await game.grant_shield("p1", 5.0)
             await game.grant_toughness_boost("p2", 5.0)
@@ -270,9 +273,9 @@ class TestUC040ShieldFeedbackEnds:
         assert game._shield_feedback_until == {}
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_shorter_toughness_boost_does_not_hide_a_running_full_shield(self, game):
-        """UC-040 A17: a short toughness boost grant after a long full one must not drop the full one from the clear."""
+        """UC-048 A2: a short toughness boost grant after a long full one must not drop the full one from the clear."""
         clock = [1000.0]
         with (
             patch("services.game_coordinator.game_clock.now", side_effect=lambda: clock[0]),
@@ -290,25 +293,25 @@ class TestUC040ShieldFeedbackEnds:
         assert game.gameplay_stream.effects() == [("p1", SHIELD, 0)]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_game_end_without_shields_sends_nothing(self, game):
-        """UC-040 A17: nothing to end, nothing sent."""
+        """UC-048 A2: nothing to end, nothing sent."""
         await game._end_shield_feedback()
         assert game.gameplay_stream.effects() == []
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_game_end_clear_survives_a_closed_stream(self, game):
-        """UC-040 A17: the clear is best-effort and never raises into the teardown."""
+        """UC-048 A2: the clear is best-effort and never raises into the teardown."""
         game._shield_feedback_until["p1"] = game_clock.now() + 5
         game.gameplay_stream = RecordingStream(fail=True)
         await game._end_shield_feedback()
         assert game._shield_feedback_until == {}
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_teardown_clears_shields_before_the_winner_effects(self, game):
-        """UC-040 A17: the end-of-game clear runs before _end_game_impl (winner rainbow)."""
+        """UC-048 A2: the end-of-game clear runs before _end_game_impl (winner rainbow)."""
         import inspect
 
         from services.game_coordinator.games.base import BaseGameMode
@@ -317,9 +320,9 @@ class TestUC040ShieldFeedbackEnds:
         assert source.index("await self._end_shield_feedback()") < source.index("await self._end_game_impl()")
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_real_run_ends_running_shields_before_the_winner_effects(self):
-        """UC-040 A17 (real run()): a game that ends with a shield running clears it before _end_game_impl."""
+        """UC-048 A2 (real run()): a game that ends with a shield running clears it before _end_game_impl."""
         from conftest import EventCollector
 
         events = EventCollector()
@@ -364,7 +367,7 @@ def _span_events(span, name: str) -> list[dict]:
 
 
 class TestUC040ShieldSpanEvents:
-    """UC-040 A16: the span events a shield grant records on the player span (#1362)."""
+    """UC-048 A1: the span events a shield grant records on the player span (#1362)."""
 
     @pytest.fixture
     def span(self, game):
@@ -374,9 +377,9 @@ class TestUC040ShieldSpanEvents:
         return span
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16")
+    @pytest.mark.uc("UC-048", flow="A1")
     async def test_full_shield_records_shield_granted_and_shield_feedback(self, game, span):
-        """UC-040 A16: grant_shield records shield_granted and shield_feedback (kind full, shield_up sound)."""
+        """UC-048 A1: grant_shield records shield_granted and shield_feedback (kind full, shield_up sound)."""
         assert await game.grant_shield("p1", 3.0) is True
 
         assert _span_events(span, "shield_granted")[0]["shield_seconds"] == 3.0
@@ -387,9 +390,9 @@ class TestUC040ShieldSpanEvents:
         assert 2900 <= feedback[0]["shield.duration_ms"] <= 3000
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16")
+    @pytest.mark.uc("UC-048", flow="A1")
     async def test_toughness_boost_records_toughness_boost_armed_and_shield_feedback(self, game, span):
-        """UC-040 A16: grant_toughness_boost records toughness_boost_armed + shield_feedback (kind toughness_boost)."""
+        """UC-048 A1: grant_toughness_boost records toughness_boost_armed + shield_feedback (kind toughness_boost)."""
         assert await game.grant_toughness_boost("p1", 2.0) is True
 
         assert _span_events(span, "toughness_boost_armed")

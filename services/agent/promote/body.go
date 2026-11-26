@@ -7,9 +7,8 @@ import (
 	"github.com/joustmania/agent/experiment"
 )
 
-// body.go renders the STRUCTURED issue/PR bodies (#936 AC: "PR description is
-// structured: fitness before/after, synthetic results, reasoning summary, flag
-// state"). The bodies are deterministic Markdown so they are golden-testable and a
+// body.go renders the STRUCTURED issue body (fitness before/after, synthetic
+// results, reasoning summary, flag state). The bodies are deterministic Markdown so they are golden-testable and a
 // reviewer (or a downstream parser) reads the same fields every time.
 
 // renderIssueBody renders the ModeIssue body: the hypothesis + the implicated flag
@@ -36,37 +35,8 @@ func renderIssueBody(p experiment.Proposal, ev Evidence) string {
 	return b.String()
 }
 
-// renderPRBody renders the ModePR body: the full machine-readable evidence the
-// #936 AC enumerates — fitness before/after, synthetic game results, the
-// proposer/coding-agent reasoning summary, and the flag state at improvement time.
-// Structured headings so it parses predictably and reviews at a glance.
-func renderPRBody(p experiment.Proposal, ev Evidence) string {
-	var b strings.Builder
-	b.WriteString("## Agent flag-experiment promotion\n\n")
-	b.WriteString("This PR was opened by the agent's self-improvement loop after a ")
-	b.WriteString("shadow-scoped flag experiment cleared synthetic validation. ")
-	b.WriteString("Nothing is merged automatically — a human reviews + merges.\n\n")
-
-	b.WriteString("### Proposed change\n\n")
-	fmt.Fprintf(&b, "- **Flag:** `%s`\n", p.FlagKey)
-	fmt.Fprintf(&b, "- **Experimental value:** `%v`\n\n", p.ExperimentalValue)
-
-	b.WriteString(renderFitnessSection(ev))
-
-	b.WriteString("### Synthetic game results\n\n")
-	fmt.Fprintf(&b, "- **Synthetic games run:** %d\n", ev.SyntheticGames)
-	fmt.Fprintf(&b, "- **Fitness measured over the synthetic suite (after):** %.4f\n\n", ev.FitnessAfter)
-
-	b.WriteString("### Reasoning summary\n\n")
-	b.WriteString(reasoningOrFallback(p, ev))
-	b.WriteString("\n\n")
-
-	b.WriteString(renderFlagStateSection(ev))
-	return b.String()
-}
-
-// renderFitnessSection renders the fitness before/after/delta block shared by the
-// issue and PR bodies (#936 AC: "fitness before/after").
+// renderFitnessSection renders the fitness before/after/delta block of the issue
+// body.
 func renderFitnessSection(ev Evidence) string {
 	var b strings.Builder
 	b.WriteString("### Fitness before/after\n\n")
@@ -102,34 +72,4 @@ func reasoningOrFallback(p experiment.Proposal, ev Evidence) string {
 		return s
 	}
 	return "_(no reasoning summary supplied)_"
-}
-
-// branchName derives a deterministic, filesystem/git-safe head branch name for a
-// github-target PR from the flag key.
-func branchName(p experiment.Proposal) string {
-	return "agent/experiment-" + sanitize(p.FlagKey)
-}
-
-// evidenceFilePath is the repo-relative path a TargetLocal commit writes the
-// evidence body to (a record of the experiment in the working tree; the real
-// flag-change wiring is a follow-up — here the committed artifact is the evidence).
-func evidenceFilePath(p experiment.Proposal) string {
-	return "agent-experiments/" + sanitize(p.FlagKey) + ".md"
-}
-
-// sanitize lowercases a flag key and replaces any non-alphanumeric run with a
-// single hyphen, so it is safe in a branch name / file path.
-func sanitize(s string) string {
-	var b strings.Builder
-	lastHyphen := false
-	for _, r := range strings.ToLower(s) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			lastHyphen = false
-		} else if !lastHyphen {
-			b.WriteByte('-')
-			lastHyphen = true
-		}
-	}
-	return strings.Trim(b.String(), "-")
 }

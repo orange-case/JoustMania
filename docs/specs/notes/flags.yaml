@@ -18,14 +18,8 @@ agent:
     read_by: [agent]
     reload: live
     note: >-
-      What a promotion does: `issue` opens an issue only, `pr` opens a pull request and merges
-      nothing, `autonomous` applies the change. Read at each promotion; never defaults to
-      `autonomous`.
-  code_improvement.target:
-    read_by: [agent]
-    reload: live
-    note: >-
-      Where a promotion acts: the local stack or GitHub. Read at each promotion.
+      What a promotion does: `issue` opens an issue only, `autonomous` applies the change. Read at
+      each promotion; never defaults to `autonomous`.
   decision.backend:
     read_by: [agent]
     reload: live
@@ -184,9 +178,11 @@ agent:
     read_by: [agent]
     reload: live
     note: >-
-      Comma-separated `game` flag keys the dynamic declarer rotates over in order (trimmed,
-      deduplicated, case-sensitive; unknown keys skipped). Empty = every tunable flag; the denylists
-      still apply (UC-070 BR-008).
+      Comma-separated entries the dynamic declarer rotates over in order (trimmed, deduplicated,
+      case-sensitive; unknown keys skipped). An entry is a `game` flag key (the declarer tries the
+      variant next to the baseline default) or `flag=variant`, an explicit operator candidate that is
+      skipped while the variant is missing or equals the baseline default (UC-043 BR-012). Empty =
+      every tunable flag; the denylists still apply (UC-070 BR-008).
   experiment_dynamic_denylist:
     read_by: [agent]
     reload: live
@@ -233,13 +229,6 @@ agent:
     note: >-
       The proposers run only when `AGENT_EXPERIMENT_PROPOSER_ENABLED=true` and this flag is on
       (C-034, FR-152); a missing flag or lost sync reads false (fails closed).
-  experiment_seed:
-    read_by: [agent]
-    reload: live
-    note: >-
-      An operator-chosen experiment (`flag`, `value`, optional `objective`, `target_n`,
-      `hypothesis`) declared once the loop is enabled; not a random seed. Acts only on a new value;
-      `{}` clears the latch and a malformed value declares nothing (UC-070 BR-007, UC-043 A1).
   experiment_shadow_effective_concurrency:
     read_by: [agent]
     reload: live
@@ -429,7 +418,7 @@ agent:
     read_by: [agent, game-coordinator]
     reload: live
     note: >-
-      Master switch of the group shield (UC-040 BR-033); also needs
+      Master switch of the group shield (UC-048 BR-014); also needs
       `policy.group_grant.max_per_game` of at least 1. A missing or unreadable value reads `off`.
       Human-only (C-034).
   policy.group_grant.max_per_game:
@@ -449,7 +438,7 @@ agent:
     reload: live
     note: >-
       Allows the group shield in real games; without it only shadow games get one, and a game of
-      unknown kind counts as real (UC-040 BR-033). A missing or unreadable value reads `off`.
+      unknown kind counts as real (UC-048 BR-014). A missing or unreadable value reads `off`.
   policy.max_interventions_per_minute:
     read_by: [agent]
     reload: live
@@ -461,28 +450,28 @@ agent:
     reload: live
     note: >-
       Most agent shields one player gets per game; the agent refuses `shield_cap_reached` and the
-      coordinator enforces the same backstop (UC-040 A33, A34, BR-022). A read error or negative
+      coordinator enforces the same backstop (UC-048 A6, A7, BR-007). A read error or negative
       value gives 3; a lower cap applies at once.
   policy.shield_cooldown_seconds:
     read_by: [agent, game-coordinator]
     reload: live
     note: >-
-      Seconds after a player's last agent shield ends before another is granted (UC-040 A33, A34,
-      BR-022); `0` turns it off and allows extending a running shield. A read error or negative
+      Seconds after a player's last agent shield ends before another is granted (UC-048 A6, A7,
+      BR-007); `0` turns it off and allows extending a running shield. A read error or negative
       value gives 15.
   policy.shield_danger_enabled:
     read_by: [agent]
     reload: live
     note: >-
       `off` stops the rules' danger shields before the first elimination without removing
-      `grant_shield` from the allow-list; the elimination path is unaffected (UC-040 A43, BR-032). A
+      `grant_shield` from the allow-list; the elimination path is unaffected (decide-contract.md §15.3). A
       missing or unreadable value reads `on`.
   policy.shield_danger_ratio:
     read_by: [agent]
     reload: live
     note: >-
       Fraction of the death threshold that each of the last `policy.shield_danger_samples` movement
-      readings must reach for a danger shield before the first elimination (UC-040 A43, BR-032).
+      readings must reach for a danger shield before the first elimination (decide-contract.md §15.3).
       Clamped to 0.7 to 1.0; invalid gives 0.85.
   policy.shield_danger_samples:
     read_by: [agent]
@@ -570,11 +559,6 @@ game:
     note: >-
       Whether a force start pulls every connected controller into the game, not only the ready ones;
       evaluated at force start.
-  force_all_start_seconds:
-    read_by: []
-    reload: none
-    note: >-
-      No effective reader; the operator pad's game key has its own hold time (UC-016 BR-011).
   invincibility_seconds:
     read_by: [menu]
     reload: per-game
@@ -641,7 +625,7 @@ game:
     reload: live
     note: >-
       How a granted shield starts: at once, as a charge fired by the trigger, or held from an energy
-      budget (UC-040 BR-019). `trigger` and `hold` apply in Free-for-All only; other modes, shadow
+      budget (UC-048 BR-004). `trigger` and `hold` apply in Free-for-All only; other modes, shadow
       games and malformed values give `instant`. `hold` is latched per game (BR-027).
   shield.charge_expiry_seconds:
     read_by: [agent, game-coordinator]
@@ -655,26 +639,26 @@ game:
     reload: live
     note: >-
       A double pulse plays this many seconds before a charge expires, `0` = none; fixed per charge
-      (UC-040 BR-021). Malformed or negative gives 3; clamped to 0 to 8, so a charge that never
+      (UC-048 BR-006). Malformed or negative gives 3; clamped to 0 to 8, so a charge that never
       expires gets no early pulse.
   shield.charge_reminder_seconds:
     read_by: [controller-manager]
     reload: live
     note: >-
       One reminder pulse every this many seconds while a charge is held, `0` = none; fixed per
-      charge (UC-040 BR-021). Malformed or negative gives 5; other values clamped to 1 to 30.
+      charge (UC-048 BR-006). Malformed or negative gives 5; other values clamped to 1 to 30.
   shield.charge_rumble_intensity:
     read_by: [controller-manager, game-coordinator]
     reload: live
     note: >-
       Rumble strength of every charge pulse (grant, reminder, pre-expiry), fixed per charge; `0`
-      turns the charge rumble off (UC-040 BR-021). Non-integer gives 255; clamped to 0 to 255. In a
+      turns the charge rumble off (UC-048 BR-006). Non-integer gives 255; clamped to 0 to 255. In a
       hold game the coordinator's latched value wins.
   shield.charge_rumble_pulse_ms:
     read_by: [controller-manager, game-coordinator]
     reload: live
     note: >-
-      Length of one charge pulse in ms, gaps fixed at 100 ms; fixed per charge (UC-040 BR-021).
+      Length of one charge pulse in ms, gaps fixed at 100 ms; fixed per charge (UC-048 BR-006).
       Non-integer gives 150; clamped to 50 to 500. In a hold game the coordinator's latched value
       wins.
   shield.empty_pulse_ms:
@@ -682,37 +666,37 @@ game:
     reload: per-game
     note: >-
       Length of the single "empty" pulse when a hold activation ends because energy or budget ran
-      out (UC-040 BR-026). Non-integer gives 400; clamped to 100 to 800.
+      out (UC-048 BR-010). Non-integer gives 400; clamped to 100 to 800.
   shield.end_grace_seconds:
     read_by: [game-coordinator]
     reload: per-game
     note: >-
-      Seconds after a shield ends in which movement cannot kill, in every mode (UC-040 BR-035); not
+      Seconds after a shield ends in which movement cannot kill, in every mode (UC-048 BR-015); not
       after a voluntary release. `0` = none. Malformed or negative gives 0.75; clamped to 0 to 2.
   shield.ending_rumble_seconds:
     read_by: [controller-manager, game-coordinator]
     reload: live
     note: >-
       The "ending soon" double pulse plays this many seconds before an active shield ends, `0` =
-      none; fixed per shield (UC-040 BR-021). Malformed or negative gives 1; clamped to 0 to 3. In a
+      none; fixed per shield (UC-048 BR-006). Malformed or negative gives 1; clamped to 0 to 3. In a
       hold game the coordinator's latched value wins.
   shield.energy_budget_seconds:
     read_by: [game-coordinator]
     reload: per-game
     note: >-
       Total active shield time per player per game in hold mode, summed over every activation
-      (UC-040 BR-024). Malformed gives 15; clamped to 3 to 30 (`0` does not mean unlimited).
+      (UC-048 BR-008). Malformed gives 15; clamped to 3 to 30 (`0` does not mean unlimited).
   shield.energy_initial_seconds:
     read_by: [game-coordinator]
     reload: per-game
     note: >-
-      Shield energy each player starts with in hold mode, clamped to the cap and the budget (UC-040
-      BR-024). Malformed gives 0; clamped to 0 to 5.
+      Shield energy each player starts with in hold mode, clamped to the cap and the budget (UC-048
+      BR-008). Malformed gives 0; clamped to 0 to 5.
   shield.energy_max_seconds:
     read_by: [game-coordinator]
     reload: per-game
     note: >-
-      Cap on a player's shield energy in hold mode (UC-040 BR-024); read only when
+      Cap on a player's shield energy in hold mode (UC-048 BR-008); read only when
       `shield.activation` is `hold` in a Free-for-All real game. Malformed gives 5; clamped to 1 to
       10.
   shield.hold_led_floor_percent:
@@ -727,7 +711,7 @@ game:
     reload: per-game
     note: >-
       Continuous rumble while a hold activation runs, and the start of the ramp in ramp mode; `0` =
-      none, also no ramp (UC-040 BR-026). Non-integer gives 70; clamped to 0 to 150.
+      none, also no ramp (UC-048 BR-010). Non-integer gives 70; clamped to 0 to 150.
   shield.hold_rumble_max_intensity:
     read_by: [game-coordinator, controller-manager]
     reload: per-game
@@ -740,14 +724,14 @@ game:
     read_by: [game-coordinator]
     reload: per-game
     note: >-
-      Minimum energy cost of one hold activation, also its debounce tail (UC-030 BR-008, UC-040
-      BR-024). Malformed gives 0.3; clamped to 0.1 to 1.
+      Minimum energy cost of one hold activation, also its debounce tail (UC-030 BR-008, UC-048
+      BR-008). Malformed gives 0.3; clamped to 0.1 to 1.
   shield.recharge_per_second:
     read_by: [game-coordinator]
     reload: per-game
     note: >-
-      Passive hold-mode recharge in energy seconds per second while no activation runs (UC-040 A38,
-      BR-025). Malformed gives 0; clamped to 0 to 0.5.
+      Passive hold-mode recharge in energy seconds per second while no activation runs (UC-048 A10,
+      BR-009). Malformed gives 0; clamped to 0 to 0.5.
   tempo.ramp_down_seconds:
     read_by: [game-coordinator]
     reload: live
@@ -874,8 +858,8 @@ interventions:
     read_by: [game-coordinator]
     reload: live
     note: >-
-      Event list; each event shields 2 to 6 players of the game for the given seconds (UC-040 A47,
-      A48, BR-033). Only the `standard_group` and `shadow_group` variants of
+      Event list; each event shields 2 to 6 players of the game for the given seconds (UC-048 A13,
+      A14, BR-014). Only the `standard_group` and `shadow_group` variants of
       `agent/interventions_allowed` allow it.
   music_tempo_override:
     read_by: [game-coordinator]
@@ -912,7 +896,7 @@ interventions:
     note: >-
       Shield grant length in seconds for one player. The agent takes the value of the variant named
       `default` as the length of a `grant_shield` without a value; a failed read, missing variant or
-      value outside 3 to 10 gives 5 (UC-040 BR-029).
+      value outside 3 to 10 gives 5 (UC-048 BR-012).
   soft_penalty_action:
     read_by: [game-coordinator]
     reload: live
@@ -941,15 +925,7 @@ controller:
     reload: startup
     note: >-
       I/O backend of the controller manager; a change needs a restart. `mock` is always added, and
-      an unreadable flag gives `rust`. A variant naming `python` needs the `python-hid` compose
-      profile (UC-002 BR-003).
-  bluetooth_backend:
-    read_by: [controller-manager, pairing-daemon]
-    reload: live
-    note: >-
-      Per-controller backend routing; the controller manager honours a per-serial value only on a
-      targeting match. For pairing, `python` uses in-process hidapi and any other value rust-hid
-      (UC-001 BR-003).
+      an unreadable flag gives `rust`.
   poll_drop_threshold:
     read_by: [game-coordinator]
     reload: event-refreshed

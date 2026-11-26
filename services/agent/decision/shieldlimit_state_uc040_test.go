@@ -11,7 +11,7 @@ import (
 )
 
 // The decide state's shield_limited marker and applied levels, fed from the loop's
-// ledgers (#2066; UC-040 main step 4, A33, A35; decide-contract §1.2).
+// ledgers (#2066; UC-040 main step 4, UC-048 A6, UC-040 A35; decide-contract §1.2).
 
 func playerIn(t *testing.T, st decide.State, serial string) decide.PlayerState {
 	t.Helper()
@@ -24,9 +24,10 @@ func playerIn(t *testing.T, st decide.State, serial string) decide.PlayerState {
 	return decide.PlayerState{}
 }
 
-// UC: UC-040 main step 4 A33 BR-022
+// UC: UC-040 main step 4
+// UC: UC-048 A6 BR-007
 func TestShieldLimitedState_RemoteRequest(t *testing.T) {
-	t.Run("UC-040/A33 a capped player is shield_limited in the remote request, not shield_charged", func(t *testing.T) {
+	t.Run("UC-048/A6 a capped player is shield_limited in the remote request, not shield_charged", func(t *testing.T) {
 		l, _, _, _ := limitLoop(t, 100, 1, 0, budgetShield("WEAK"))
 		if got := outcomeSummary(runCycle(l, budgetCtx())); !equalStrings(got, []string{"grant_shield/WEAK:dispatched"}) {
 			t.Fatalf("first grant outcomes = %v, want dispatched", got)
@@ -39,7 +40,7 @@ func TestShieldLimitedState_RemoteRequest(t *testing.T) {
 			t.Fatal("S has no shield: must not be shield_limited")
 		}
 	})
-	t.Run("UC-040/A33 a cooling-down player is shield_limited", func(t *testing.T) {
+	t.Run("UC-048/A6 a cooling-down player is shield_limited", func(t *testing.T) {
 		l, _, clock, _ := limitLoop(t, 100, 3, 15, budgetShield("WEAK"))
 		_ = runCycle(l, budgetCtx())
 		*clock = clock.Add(10 * time.Second) // within 5 s shield + 2 s + 15 s cooldown
@@ -81,9 +82,10 @@ func TestAppliedLevelState_RemoteRequest(t *testing.T) {
 	})
 }
 
-// UC: UC-040 main step 4 A33
+// UC: UC-040 main step 4
+// UC: UC-048 A6
 func TestShieldLimitedState_RulesPathUsesRankingSnapshot(t *testing.T) {
-	t.Run("UC-040/A33 the rules-path state marks the capped player the ranking skipped", func(t *testing.T) {
+	t.Run("UC-048/A6 the rules-path state marks the capped player the ranking skipped", func(t *testing.T) {
 		snap := rulesSnapshot()
 		snap.Objectives = balancedFocused()
 		snap.Policy = flags.Policy{MaxInterventionsPerMinute: 50, MaxShieldsPerPlayerPerGame: 1}

@@ -294,8 +294,8 @@ async def handle_shield_seconds(ctx: InterventionContext, manager: InterventionM
     the neutral default (0) — or battery-gated by the helper — are skipped.
     Reverting to none requires no action: existing shields simply expire.
 
-    In trigger mode a grant becomes a shield charge (#1837, UC-040 A30). A grant
-    to a player who holds one raises ``InterventionNotApplied`` (A31); in a
+    In trigger mode a grant becomes a shield charge (#1837, UC-048 A3). A grant
+    to a player who holds one raises ``InterventionNotApplied`` (UC-048 A4); in a
     fan-out it is re-raised only when no serial was applied.
     """
     game = ctx.game
@@ -324,7 +324,7 @@ async def handle_shield_seconds(ctx: InterventionContext, manager: InterventionM
 
 
 async def handle_group_shield(ctx: InterventionContext, manager: InterventionManager) -> None:
-    """Shield every player of a ``group_shield`` event, or nobody (UC-040 A47, A48, BR-033).
+    """Shield every player of a ``group_shield`` event, or nobody (UC-048 A13, A14, BR-014).
 
     The payload string is ``"<serials>|<seconds>"`` (``_event_payload_string``).
     The battery guard of a single grant applies per serial: the serials below

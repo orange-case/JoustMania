@@ -500,7 +500,6 @@ def test_flag_catalog_covers_every_flag_of_the_real_files():
         ),
         ({"free_string": True}, "any string"),
         ({"payload": {}}, "event payload: none"),
-        ({"fraction": [1, 100]}, "fraction 1 to 100 %"),
         ({"shape": True}, "object of the default's shape"),
     ],
 )

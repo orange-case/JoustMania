@@ -448,24 +448,9 @@ docker compose -f docker-compose.lite.yml up
 This excludes Jaeger, VictoriaMetrics, Grafana, and OTEL Collector, saving about 2.6 GB of container memory limits (Jaeger 1024m, collector 768m, VictoriaMetrics 256m, Grafana 512m; the agent, 128m, is not in the lite stack either).
 It still runs `rust-hid`, the default Bluetooth backend, so the controller manager
 reads real controllers and the pairing daemon pairs them through it (#1318).
-python-hid is not part of the lite stack; it is opt-in on the full stack only
-(see [Opting in to python-hid](#opting-in-to-python-hid)).
 
-### Opting in to python-hid
-
-rust-hid is the default Bluetooth backend (UC-002 BR-003). Reading real controllers through the slower
-python-hid backend takes all three of (#1402):
-
-1. the `python-hid` compose profile: `./scripts/setup/joustmania-compose.sh --profile python-hid up -d`;
-2. a `backend` flag variant naming `python` (`python_rust`) in `services/flagd/controller.json`, then
-   `scripts/flags.sh restart` and a controller-manager restart (`backend` is read at startup);
-3. `scripts/flags.sh set controller bluetooth_backend python`, so serials and USB pairing go to python-hid.
-
-On the Pi, set the profile in a systemd drop-in (`sudo systemctl edit joustmania`, `[Service]`
-`Environment=COMPOSE_PROFILES=python-hid`), not in `.env`: `.env` is tracked, and a modified tracked file
-makes `scripts/setup/joustmania-upgrade.sh` refuse to switch versions (the start itself never pulls, UC-060 BR-001). With the profile off, `scripts/setup/joustmania-start.sh` removes a stale
-`joustmania-python-hid` container. Adapter and routing details:
-[services.md, controller-manager "Backend layering"](specs/services.md#backend-layering).
+rust-hid is the only Bluetooth backend (UC-002 BR-003); the opt-in python-hid backend was removed in #2784.
+Adapter details: [services.md, controller-manager "Backend layering"](specs/services.md#backend-layering).
 
 ---
 

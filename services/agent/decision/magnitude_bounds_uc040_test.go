@@ -119,13 +119,12 @@ func TestRules_MagnitudeBounds(t *testing.T) {
 		}
 	})
 	t.Run("UC-040/BR-045 the rules answer normalizes over the request's range", func(t *testing.T) {
-		q := decide.Question{ID: decide.QuestionFFAMagnitude, Kind: decide.KindScore, Range: [2]float64{0, 1}}
-		pick := interventionPick{ok: true, best: &scoredCandidate{candidate: candidate{decision: Decision{Intervention: InterventionGrantShield, Value: "5"}}}}
-		if a := answerMagnitude(q, pick, widened()); a.Score != 0.5 {
-			t.Fatalf("score %v over [2,8], want 0.5", a.Score)
+		d := &Decision{Intervention: InterventionGrantShield, Value: "5"}
+		if got := rulesMagnitude(widened(), d); got != 0.5 {
+			t.Fatalf("score %v over [2,8], want 0.5", got)
 		}
-		if a := answerMagnitude(q, pick, nil); a.Score != 2.0/7.0 {
-			t.Fatalf("score %v over the default [3,10]", a.Score)
+		if got := rulesMagnitude(nil, d); got != 2.0/7.0 {
+			t.Fatalf("score %v over the default [3,10]", got)
 		}
 	})
 	t.Run("UC-040/BR-045 the rules request carries the game's ranges", func(t *testing.T) {

@@ -87,6 +87,9 @@ type Narrative struct {
 	// GameMode is the mode the recent games were (e.g. "joust"), for grounding the
 	// model's flag choice. Optional.
 	GameMode string
+	// RetroSuggestions are the most recent post-game retro suggestions (UC-042 A3),
+	// oldest first. Empty = no section.
+	RetroSuggestions []RetroSuggestion
 }
 
 // ProposerConfig is the live, per-cycle flag configuration the Proposer reads
@@ -518,6 +521,12 @@ func buildProposalPrompt(n Narrative, vocab map[string]flagservice.FlagView) llm
 		sort.Strings(keys)
 		for _, k := range keys {
 			fmt.Fprintf(&usr, "  %s = %.3f\n", k, n.FitnessSignals[k])
+		}
+	}
+	if len(n.RetroSuggestions) > 0 {
+		usr.WriteString("\nRECENT RETRO SUGGESTIONS (oldest first):\n")
+		for _, s := range n.RetroSuggestions {
+			fmt.Fprintf(&usr, "  - %s (%s): %s\n", oneLine(s.InterventionType, 60), oneLine(s.Emphasis, 20), oneLine(s.Reason, 200))
 		}
 	}
 

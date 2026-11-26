@@ -1,8 +1,8 @@
-"""The agent's trigger-mode list matches the coordinator's allow-list (UC-040 BR-019, #1837).
+"""The agent's trigger-mode list matches the coordinator's allow-list (UC-048 BR-004, #1837).
 
 ``shield.activation = trigger`` applies only in the game modes whose class sets
 ``SHIELD_TRIGGER_ALLOWED = True`` (services/game_coordinator/games/, today Free-for-All).
-The agent's charge ledger (UC-040 A31 step 1) blocks a second ``grant_shield`` only in
+The agent's charge ledger (UC-048 A4 step 1) blocks a second ``grant_shield`` only in
 the mode named by ``shieldTriggerGameMode`` in services/agent/decision/chargeledger.go,
 compared with ``game.mode`` (the class's ``get_game_name()``). If a second mode is
 allowed in Python without a matching Go change, the ledger stays inert there and the
@@ -97,7 +97,7 @@ def agent_trigger_modes() -> set[str]:
     return set(_GO_MODE_CONST.findall(LEDGER_GO.read_text()))
 
 
-@pytest.mark.uc("UC-040", flow="A31", steps=[1], br=["BR-019"])
+@pytest.mark.uc("UC-048", flow="A4", br=["BR-004"], steps=[1])
 def test_agent_trigger_mode_matches_the_coordinator_allow_list():
     coordinator = coordinator_trigger_modes()
     agent = agent_trigger_modes()
@@ -110,7 +110,7 @@ def test_agent_trigger_mode_matches_the_coordinator_allow_list():
     assert agent == coordinator, (
         f"agent ledger trigger modes {sorted(agent)} != coordinator allow-list {sorted(coordinator)}: "
         "change shieldTriggerGameMode (services/agent/decision/chargeledger.go) together with "
-        "SHIELD_TRIGGER_ALLOWED (UC-040 BR-019)"
+        "SHIELD_TRIGGER_ALLOWED (UC-048 BR-004)"
     )
 
 

@@ -59,7 +59,7 @@ type ObjectiveRules struct {
 	// rolls from the time-seeded RNG (the game is then non-exact, BR-007).
 	lateSeed func()
 
-	// shieldSource is the loop's shield-ledger view (UC-040 A31, A33, #1870): read
+	// shieldSource is the loop's shield-ledger view (UC-048 A4, A6, #1870): read
 	// once per ranking, after the throttle. charged feeds the state the ranking
 	// builds, noShield the no-shield filter. nil (the golden harness, every older
 	// test) means no player is charged or limited.
@@ -74,7 +74,7 @@ type ObjectiveRules struct {
 	// Loop.CoolingValues): read once per ranking. nil filters nothing.
 	coolingSource func() map[string]coolingLever
 
-	// grantSource is the loop's shield-grant view (UC-040 A41, BR-030,
+	// grantSource is the loop's shield-grant view (decide-contract.md §15.2,
 	// Loop.ShieldGrants): read once per ranking, R4 keeps the candidate with the
 	// fewest agent shields this game. nil (every older test) counts 0 for everyone,
 	// so R4 keeps the weakest surviving candidate.
@@ -220,10 +220,11 @@ func (r *ObjectiveRules) Evaluate(_ context.Context, c gamecontext.GameContext) 
 	return out
 }
 
-// EvaluateDecide is Evaluate plus the decide-contract answers (#1226), both
-// derived from ONE ranking: one rankLocked call and therefore one chaos (R9) RNG
-// draw per evaluation, exactly as Evaluate alone. The returned decisions are
-// byte-for-byte what Evaluate would have returned for the same engine state.
+// EvaluateDecide is Evaluate plus the record's decide request and the winning
+// rule's prediction (#1226), both derived from ONE ranking: one rankLocked call
+// and therefore one chaos (R9) RNG draw per evaluation, exactly as Evaluate
+// alone. The returned decisions are byte-for-byte what Evaluate would have
+// returned for the same engine state.
 //
 // build constructs the decide.Request lazily: it is called (under the engine
 // lock, so it must be pure and cheap enough) only when the evalInterval throttle
@@ -249,7 +250,7 @@ func (r *ObjectiveRules) evaluate(c gamecontext.GameContext, build func(charged,
 	r.lastEval = now
 
 	// One ledger snapshot per ranking: the no-shield filter and the state built
-	// below read the same snapshot (#1870, UC-040 A33).
+	// below read the same snapshot (#1870, UC-048 A6).
 	charged, noShield := r.shieldLocked(c)
 	ranked, weights, fitEval := r.rankLocked(c, now, noShield)
 	r.lastFitness = fitEval
@@ -279,12 +280,14 @@ func (r *ObjectiveRules) evaluate(c gamecontext.GameContext, build func(charged,
 	if build == nil {
 		return out, decide.Request{}, decide.Response{}, true
 	}
-	// #1295: the rules-path answers describe the decision Evaluate actually emits
-	// (out[0] == ranked[0]): the questions are widened to the engine's own ranked
-	// interventions and targets, so the allow-list (applied afterwards by the
-	// permission chain) cannot filter the answers into a different choice.
-	req := emissionRequest(build(charged, noShield), ranked)
-	return out, req, answerFromRanked(ranked, req), true
+	// The answers are filled by the loop once the decisions are stamped
+	// (decideRecord.answerRules), so they record what is written.
+	req := build(charged, noShield)
+	resp := decide.Response{Backend: RulesBackendName}
+	if len(ranked) > 0 {
+		resp.Prediction = rulesPrediction(ranked[0], req.State)
+	}
+	return out, req, resp, true
 }
 
 // RecordActed arms the variance cooldown for a decision some OTHER backend made
@@ -367,7 +370,7 @@ func (r *ObjectiveRules) chaosRoll(c gamecontext.GameContext) (float64, string) 
 	r.chaosDraws++
 	roll, picked := r.rng.Float64(), active[r.rng.IntN(len(active))]
 	// R9 never targets a player without fresh readings, such as one that just went
-	// back to waiting (UC-040 A46 step 5, #2517). The draw itself is unchanged, so a
+	// back to waiting (decide-contract.md §15.4, #2517). The draw itself is unchanged, so a
 	// seeded engine draws the same sequence (UC-046 BR-007); a stale pick proposes nothing.
 	if !readingsFresh(c, picked) {
 		return roll, ""
@@ -392,12 +395,12 @@ func normalizedWeights(w map[string]float64) map[string]float64 {
 	return cp
 }
 
-// applyChargePolicy is the shared no-shield filter (UC-040 A31, A33; #1870, #2044):
+// applyChargePolicy is the shared no-shield filter (UC-048 A4, A6; #1870, #2044):
 // it drops every grant_shield candidate whose target is in noShield (charged, at the
 // shield cap or in the cooldown), because the ledger would refuse it. Like the
 // battery policy the candidate is not ranked, so R4 does not take an emission slot
 // every second for a refused shield. Another player's R4 candidate may then be the
-// one pickShieldCatchUp keeps (UC-040 A41, BR-030). A nil or empty noShield keeps
+// one pickShieldCatchUp keeps (decide-contract.md §15.2). A nil or empty noShield keeps
 // every candidate.
 func applyChargePolicy(cands []candidate, noShield map[string]bool) []candidate {
 	if len(noShield) == 0 {
@@ -414,7 +417,7 @@ func applyChargePolicy(cands []candidate, noShield map[string]bool) []candidate 
 }
 
 // applyAppliedPolicy is the rules' already-applied filter (UC-040 A35 step 4,
-// #2046; A52 step 2, BR-041, #2487). It walks the ranked list in order and keeps at
+// #2046; decide-contract §15.5 step 2, decide-contract §15.5, #2487). It walks the ranked list in order and keeps at
 // most one candidate per state or level key (intervention + target):
 //   - a candidate whose value equals the one the loop last wrote for its key (applied,
 //     from one ledger snapshot per ranking) is dropped, as the permission chain would

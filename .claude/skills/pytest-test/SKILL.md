@@ -3,7 +3,7 @@ name: pytest-test
 description: >
   Generates or reconciles pytest unit tests for ONE JoustMania use case (UC-XXX)
   in the Python services (game_coordinator, menu, controller_manager, audio,
-  pairing_daemon, python_hid) and lib/: one test per main success scenario, per
+  pairing_daemon) and lib/: one test per main success scenario, per
   alternative flow (A1, A2, ...) and per business rule (BR-XXX), each tagged
   with the traceability marker @pytest.mark.uc("UC-040", flow="A2",
   br=["BR-001"]). Uses autospec/spec_set mocks, never bare MagicMock for
@@ -93,7 +93,7 @@ async def test_select_in_lobby_advances_to_next_playable_mode(self, menu_service
 ## Reconcile, don't duplicate
 
 1. Search `*.py` files only (skip `.venv`, `node_modules`) for the marker, which may span lines
-   (`mark\.uc\(\s*["']UC-XXX["']`, multiline), for `UC-XXX` in docstrings, and the UC's `**Code / tests:**` line.
+   (`mark\.uc\(\s*["']UC-XXX["']`, multiline), for `UC-XXX` in docstrings, and for the flag keys and span names the UC names.
 2. Extend the existing tests; add the marker to an existing untagged test that already covers a unit rather
    than writing a second one.
 3. Mirror the spec: add tests for new flows/rules, update changed ones, delete (or untag) tests for
@@ -113,7 +113,7 @@ async def test_select_in_lobby_advances_to_next_playable_mode(self, menu_service
 ## Workflow
 
 1. Read `docs/use_cases/UC-XXX.md` and list the units: main scenario, each `A<n>`, each `BR-XXX`.
-2. Find the Python code that realizes it (Code/tests line, grep) and the existing tests (step "Reconcile").
+2. Find the Python code that realizes it (grep for the UC id, flag keys, span names) and the existing tests (step "Reconcile").
 3. Plan the units first, one test per unit; skip units realized only in Go / the dashboard and name them.
 4. Write the tests with markers, docstrings and autospec mocks.
 5. Run: `cd services/<svc> && uv run pytest tests/<file>.py -v` (and `-k` for the new tests); run `make lint`.

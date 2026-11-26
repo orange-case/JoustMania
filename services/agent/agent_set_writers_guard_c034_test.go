@@ -65,7 +65,7 @@ var c034ClientSites = map[string]bool{
 var c034RawWriteSites = map[string]string{
 	"decide/backends/internal/chathttp/chathttp.go:PostResponse": "the model API POST (decide backends)",
 	"patterngame/digest.go:ResolvedFlagDigest":                   "flagd OFREP bulk evaluate: a read over POST",
-	"promote/github.go:httpGitHubClient.post":                    "GitHub REST /repos/... (promotion issue/PR)",
+	"promote/github.go:httpGitHubClient.post":                    "GitHub REST /repos/... (promotion issue)",
 }
 
 // c034AllowedSets are the only values a write's set constant may have (C-034).
