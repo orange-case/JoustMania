@@ -57,6 +57,10 @@ def load_registry(path):
     return rows
 
 
+# Session-only variants of persist rows (registry.sessionOnly): in memory over the persisted value.
+SESSION_ONLY = {("agent", "interventions_allowed"): {"shadow_group"}}
+
+
 class Fake:
     def __init__(
         self,
@@ -222,7 +226,9 @@ def make_handler(fake):
                 return self._err(400, "malformed", "exactly one of variant and value")
             if body.get("persist") and not row["persist"]:
                 return self._err(400, "malformed", f"{key} cannot persist")
-            persisted = row["persist"] and not exp
+            persisted = row["persist"] and not exp and body.get("variant") not in SESSION_ONLY.get((flag_set, key), ())
+            if row["persist"] and not persisted and not exp and body.get("persist"):
+                return self._err(400, "malformed", f"{key}={body.get('variant')} is session-only and is never persisted")
             if persisted and body.get("ttl_seconds"):
                 return self._err(400, "malformed", f"{key} is persisted and takes no ttl_seconds")
             variants = fake.sets[flag_set][key]["variants"]
@@ -264,6 +270,7 @@ def make_handler(fake):
                     ] = entry
                 elif persisted:
                     fake.admin[(flag_set, key)] = entry
+                    fake.overlays.pop((flag_set, key), None)  # replaces a session-only value
                 else:
                     fake.overlays[(flag_set, key)] = entry
             self._send(
@@ -305,7 +312,7 @@ def make_handler(fake):
                         if not by_arm:
                             fake.arms.get(tuple(parts), {}).pop(exp, None)
                         return self._send(204)
-                    if fake.registry.get(tuple(parts), {}).get("persist"):
+                    if fake.registry.get(tuple(parts), {}).get("persist") and tuple(parts) not in fake.overlays:
                         fake.admin.pop(tuple(parts), None)
                     else:
                         fake.overlays.pop(tuple(parts), None)

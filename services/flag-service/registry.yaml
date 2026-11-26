@@ -17,7 +17,7 @@
 #                   serial_set (2 to 6 distinct serials of the game, comma-separated),
 #                   sound, "enum a|b", "float lo hi" (a plain decimal string)
 #          shape: true    an object with the keys and value kinds of the default variant
-# persist: true = an admin setting a write MAY persist with "persist": true
+# persist: true = an admin setting: every stack write of the row is persisted (#2803)
 # description: one line in game terms, at most 120 characters; required on every row
 #          with scope experiment+arm (the experiment proposer shows it, #2345), optional
 #          elsewhere; for the game set the same text as the flags.md §13.3 description table,

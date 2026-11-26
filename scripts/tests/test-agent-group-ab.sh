@@ -191,6 +191,8 @@ wait_until 20 arms_written || true
 kill -KILL "${pid}"
 wait "${pid}" 2>/dev/null || true
 ok "SIGKILL left the experiment flags and arm values behind" "$([[ "$(ov_writer decision.backend)" == group-ab ]] && arms_written && echo 0 || echo 1)"
+adm="$(python3 "${TOOL}" admin-variant <<<"$("${FLAGS}" get agent interventions_allowed)")"
+ok "SIGKILL left shadow_group in memory only: the persisted level stays the operator's (#2803)" "$([[ "$(ov_spec interventions_allowed)" == variant:shadow_group && "${adm}" == ambient ]] && echo 0 || echo 1)"
 code=0
 run_ab --out "${WORK}/o4" 2>/dev/null || code=$?
 ok "a second run over the same --out is refused" "$([[ ${code} == 3 ]] && echo 0 || echo 1)"

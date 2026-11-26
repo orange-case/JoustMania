@@ -602,8 +602,9 @@ controller-manager does not answer; with the fallback on that is a WARN (see
 
 After the talk, return to the shipped, fail-closed defaults: clear the
 persisted backend and model, then clear the stage overlays, or restart the flag
-service and flagd together (in-memory overlays are gone; the persisted backend
-is not, so clear it first; the host's other persisted admin settings stay):
+service and flagd together (in-memory overlays are gone; persisted values are not,
+so clear the backend first; `interventions_allowed` and `inference.backend` keep the stage values the
+reset wrote, #2803: set them back on the pad or with `./scripts/flags.sh clear agent <flag>`):
 
 ```bash
 ./scripts/agent-backend.sh rules   # persisted rules; or ./scripts/talk-stage.sh reset

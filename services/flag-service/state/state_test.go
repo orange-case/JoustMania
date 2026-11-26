@@ -184,8 +184,11 @@ func TestStackOverlay_SubstitutesDefaultVariant(t *testing.T) {
 		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "stage"})
 		f.put(WriteRequest{Set: "agent", Flag: "experiment_dynamic_enabled", Variant: "on", Writer: "operator"})
 		n, err := f.state.ClearWriter("agent", "stage")
-		if err != nil || n != 2 {
-			t.Fatalf("cleared %d (%v), want 2", n, err)
+		if err != nil || n != 1 {
+			t.Fatalf("cleared %d (%v), want 1: the in-memory enabled", n, err)
+		}
+		if f.snapshotFlag("decision.backend")["defaultVariant"] != "jev" {
+			t.Fatal("a writer reset cleared a persisted value (#2803: a stage write of a persist row is persisted)")
 		}
 		if f.snapshotFlag("experiment_dynamic_enabled")["defaultVariant"] != "on" {
 			t.Fatal("another writer's overlay was cleared")
@@ -847,21 +850,14 @@ func TestAdminPersistence(t *testing.T) {
 			t.Fatalf("the refused write still applies in memory: %v", v)
 		}
 	})
-	t.Run("UC-053/A2 a persisted write that fails to save keeps the earlier admin value and overlay (#2368)", func(t *testing.T) {
+	t.Run("UC-053/A2 a persisted write that fails to save keeps the earlier value (#2368)", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "admin.json")
 		f := newPersisting(t, path, "e1")
 		f.put(WriteRequest{Set: "game", Flag: "num_teams", Variant: "two", Persist: true, Writer: "menu"})
-		f.put(WriteRequest{Set: "game", Flag: "num_teams", Variant: "three", Writer: "stage"}) // stack overlay
 		breakStateFile(t, path)
 		_, err := f.state.Put(WriteRequest{Set: "game", Flag: "num_teams", Variant: "four", Persist: true, Writer: "menu"})
 		if err == nil || err.Status != 500 {
 			t.Fatalf("err = %v, want 500", err)
-		}
-		if v := f.snapshotFlag("num_teams")["defaultVariant"]; v != "three" {
-			t.Fatalf("got %v, want the stage overlay back", v)
-		}
-		if _, cerr := f.state.ClearWriter("game", "stage"); cerr != nil {
-			t.Fatal(cerr)
 		}
 		if v := f.snapshotFlag("num_teams")["defaultVariant"]; v != "two" {
 			t.Fatalf("got %v, want the earlier admin value two", v)

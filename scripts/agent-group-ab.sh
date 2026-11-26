@@ -151,6 +151,8 @@ restore_flags() {
       [[ "${left}" -gt 0 ]] || spec=none # the old overlay has expired meanwhile
     fi
     [[ "${writer}" == "-" ]] && writer="${WRITER}-restored"
+    # The flag service refuses the label flagsmith over HTTP; a value pulled from Flagsmith goes back under ours.
+    [[ "${writer}" == flagsmith ]] && writer="${WRITER}-restored"
     local ttl=()
     [[ "${spec}" != none && "${expires}" != "-" ]] && ttl=(--ttl "${left}")
     case "${spec}" in
