@@ -708,8 +708,10 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         if self._lifecycle_live():
             return Result(None, None, GAME_ACTIVE)
         controllers = await self.settings_ops.force_start_roster(span)
+        # The event and the answer name the mode that starts, also in the boot window (UC-010 A16).
+        await self.ensure_user_selection()
         if self._lifecycle_live():
-            # A start won the race during the roster lookup (ready auto start, another caller).
+            # A start won the race during the roster lookup or the selection read (ready auto start, another caller).
             return Result(None, None, GAME_ACTIVE)
         previous_state = self.state
         if previous_state != menu_pb2.MenuState.STOPPED:

@@ -119,13 +119,41 @@ class TestStartOnAStoppedMenu:
         real_servicer.idle_monitor.start.assert_called_once_with()
 
 
+class _Provider:
+    """The user flag provider's bounded wait: answers ``answer`` once ``ready`` is set."""
+
+    def __init__(self):
+        self.ready = asyncio.Event()
+        self.ready.set()
+        self.answer = True
+
+    async def __call__(self, _domain, *_a, **_k):
+        await self.ready.wait()
+        return self.answer
+
+
+@pytest.fixture
+def provider():
+    fake = _Provider()
+    with patch("services.menu.game_lifecycle.wait_for_provider_ready", side_effect=fake):
+        yield fake
+
+
+def _persisted_fight_club(servicer) -> None:
+    servicer._user_selection_restored = False
+    servicer.user_prefs_client.get_string_value.side_effect = lambda key, default, *_a, **_k: (
+        Games.FightClub.name if key == "current_game" else default
+    )
+    servicer.user_prefs_client.get_string_value.reset_mock()
+
+
 class TestBootWindowStartWithoutAGame:
     """UC-010 A12, A16: a boot-window start that ends without a game or a restore enters the lobby after it."""
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A16", steps=[3])
     @pytest.mark.uc("UC-010", flow="A12", steps=[2], br=["BR-001"])
-    async def test_roster_abort_under_a_deferred_start_menu_enters_the_lobby(self, real_servicer):
+    async def test_roster_abort_under_a_deferred_start_menu_enters_the_lobby(self, real_servicer, provider):
         real_servicer._user_selection_restored = False
         real_servicer.user_prefs_client.get_string_value.side_effect = lambda key, default, *_a, **_k: (
             Games.FightClub.name if key == "current_game" else default
@@ -147,22 +175,58 @@ class TestBootWindowStartWithoutAGame:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A16", steps=[3])
-    async def test_a_boot_window_game_uses_the_persisted_mode(self, real_servicer):
-        real_servicer._user_selection_restored = False
-        real_servicer.user_prefs_client.get_string_value.side_effect = lambda key, default, *_a, **_k: (
-            Games.FightClub.name if key == "current_game" else default
-        )
+    async def test_a_boot_window_game_waits_for_the_provider_and_its_mode(self, real_servicer, provider):
+        _persisted_fight_club(real_servicer)
         await _connect(real_servicer, "a", "b")
         started_modes = []
 
         async def run_stream(_stub, request, *_args, **_kwargs):
             started_modes.append(request.start_config.game_name)
 
+        provider.ready.clear()
         with patch.object(real_servicer, "_run_game_event_stream", side_effect=run_stream):
             await real_servicer._start_game("", source="operator_pad", controllers=["a", "b"])
+            await asyncio.sleep(0.3)
+            assert started_modes == []
+            provider.ready.set()
             await real_servicer._game_lifecycle_task
 
         assert started_modes == [Games.FightClub.name]
+        assert real_servicer._user_selection_restored
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[3], br=["BR-003"])
+    async def test_a_provider_that_is_not_ready_leaves_the_selection_unread(self, real_servicer, provider):
+        _persisted_fight_club(real_servicer)
+        provider.answer = False
+        await _connect(real_servicer, "a", "b")
+
+        await real_servicer.ensure_user_selection()
+
+        assert real_servicer.current_selection == Games.JoustFFA
+        assert not real_servicer._user_selection_restored
+        real_servicer.user_prefs_client.get_string_value.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[3])
+    @pytest.mark.uc("UC-015", br=["BR-008"])
+    async def test_pad_force_start_names_the_persisted_mode(self, real_servicer, provider):
+        _persisted_fight_club(real_servicer)
+        await _connect(real_servicer, "a", "b")
+
+        with (
+            patch.object(real_servicer.settings_ops, "force_start_roster", AsyncMock(return_value=["a", "b"])),
+            patch.object(real_servicer, "_start_game", AsyncMock(return_value=True)),
+        ):
+            result = await real_servicer._pad_force_start(trace.get_current_span())
+
+        requested = [
+            c.args[1]["game_name"]
+            for c in real_servicer.event_publisher.publish.await_args_list
+            if c.args[0] == "game_requested"
+        ]
+        assert requested == [Games.FightClub.name]
+        assert result.new == Games.FightClub.name
 
 
 class TestRecoveryAgainstLobbyEntry:
@@ -208,6 +272,44 @@ class TestRecoveryAgainstLobbyEntry:
         assert (start_menu.success, start_menu.error) == (True, "")
         assert calls.index("lobby_music_started") < calls.index("restore")
         assert real_servicer.state == menu_pb2.MenuState.RUNNING
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
+    @pytest.mark.uc("UC-010", flow="A12", steps=[1])
+    async def test_start_menu_between_the_cancel_and_the_restore_is_deferred(self, real_servicer):
+        """The stuck task is already cancelled and the restore not assigned yet: only the recovery is live."""
+        cancelled_gate = asyncio.Event()
+        cancel_publishing = asyncio.Event()
+
+        async def publish(event_type, _data):
+            if event_type == "game_start_cancelled":
+                cancel_publishing.set()
+                await cancelled_gate.wait()
+
+        real_servicer.event_publisher.publish.side_effect = publish
+        real_servicer._game_lifecycle_task = asyncio.create_task(asyncio.sleep(3600))
+        await _connect(real_servicer, "a", "b")
+
+        with (
+            patch.object(real_servicer, "_primary_game_active", AsyncMock(return_value=False)),
+            patch.object(real_servicer, "enter_lobby", wraps=real_servicer.enter_lobby) as enter_lobby,
+        ):
+            reset = asyncio.create_task(real_servicer._handle_reset_menu())
+            await asyncio.wait_for(cancel_publishing.wait(), timeout=5)
+            assert not real_servicer._lifecycle_live()
+            assert real_servicer._recovery_running()
+
+            response = await real_servicer.StartMenu(menu_pb2.StartMenuRequest(), MagicMock())
+
+            assert (response.success, response.error) == (True, "")
+            assert real_servicer._start_menu_deferred
+            enter_lobby.assert_not_called()
+            cancelled_gate.set()
+            assert await reset is None
+
+        enter_lobby.assert_not_called()
+        assert real_servicer.state == menu_pb2.MenuState.RUNNING
+        real_servicer.idle_monitor.start.assert_called()
 
 
 class TestDroppedStartGeneration:

@@ -123,6 +123,9 @@ class FakeMenuServicer:
         self.game_coordinator_channel = create_autospec(grpc.aio.Channel, instance=True)
         self.audio_channel = create_autospec(grpc.aio.Channel, instance=True)
 
+    async def ensure_user_selection(self) -> None:
+        """A fake past its boot: the selection is already read."""
+
     # Computed properties that delegate to state_manager (match real implementation)
     @property
     def ready_controllers(self) -> set[str]:

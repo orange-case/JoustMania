@@ -155,6 +155,21 @@ class GameLifecycleMixin:
         await self.audio.play_voice(Sound.MENU_VOX_NOT_ENOUGH_PLAYERS)
         return False
 
+    async def ensure_user_selection(self) -> None:
+        """Read the voice and the persisted ``current_game`` when nothing has read or selected them yet.
+
+        UC-010 A16: a start in the boot window comes before the boot's own read. The same bounded ``user``
+        provider wait applies; a provider that is not ready leaves the selection as is and unread, so a later
+        read still picks up the persisted mode.
+        """
+        if self._user_selection_restored:
+            return
+        if not await wait_for_provider_ready("user"):
+            logger.warning("flag provider not ready after 5s; the start keeps the current selection")
+            return
+        if not self._user_selection_restored:
+            self.restore_user_selection()
+
     def start_menu_during_game(self) -> bool:
         """Remember a `StartMenu` that arrives while the game lifecycle is live (UC-010 A12, #2449).
 
@@ -352,9 +367,8 @@ class GameLifecycleMixin:
             # UC-010 BR-014: a StopMenu during the ready feedback delay also stops the auto start.
             self._drop_ready_start_on_stopped_menu(serial)
             return
-        if game_mode is None and not self._user_selection_restored:
-            # UC-010 A16: a start in the boot window, before the boot read the persisted mode.
-            self.restore_user_selection()
+        if game_mode is None:
+            await self.ensure_user_selection()
         mode = game_mode if game_mode is not None else self.current_selection
         if ready_start and not await self._ready_start_still_holds(serial, mode):
             return
