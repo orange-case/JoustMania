@@ -34,6 +34,7 @@ help:
 	@echo "  make test-service    - Service tier (T2): services from source + flag plane, no images (SERVICE_TESTS=<files> to narrow)"
 	@echo "  make test-contract   - Contract tier: telemetry/infra static + flagd contract (~1 min)"
 	@echo "  make test-contract-flagd - flagd contract only (one real flagd, ~1 min)"
+	@echo "  make test-contract-static - contract tier minus the flagd files"
 	@echo "  make test TEST=name  - Run specific test by name"
 	@echo ""
 	@echo "Protos:"
@@ -336,6 +337,12 @@ CONTRACT_DEPS = --with pytest --with pyyaml --with pytest-rerunfailures --with '
 .PHONY: test-contract
 test-contract:
 	uv run --no-project $(CONTRACT_DEPS) pytest tests/contract -v -p no:cacheprovider
+
+# The contract tier minus the flagd files (CI's Contract Tests job; the flagd
+# files run in the Flagd Contract job via test-contract-flagd).
+.PHONY: test-contract-static
+test-contract-static:
+	uv run --no-project --with pytest --with pyyaml --with pytest-rerunfailures pytest tests/contract -v --tb=short -p no:cacheprovider --ignore tests/contract/test_flagd_resolution.py --ignore tests/contract/test_flagd_rpc_retry.py
 
 # Only the flagd contract (tests/contract/test_flagd_resolution.py, ~1 min), plus
 # the #2184 RPC retry test (need grpc + the provider from CONTRACT_DEPS).

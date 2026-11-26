@@ -368,40 +368,42 @@ func scopeFromQuery(r *http.Request) state.Scope {
 	}
 }
 
+// clearQueryError checks a DELETE's query beyond scope and persist, in
+// answer order.
+func clearQueryError(q url.Values, writer string) *fserr.Error {
+	// A leftover fraction clear would otherwise clear the stack overlay.
+	if q.Has("fraction") || q.Has("fraction_percent") {
+		return fserr.BadRequest("the fraction scope was removed")
+	}
+	// ?if_writer=<label>: the compare-and-delete precondition (#1877, flags.md
+	// §13). Strict: an empty value must not silently drop the precondition.
+	ifWriter := q.Get("if_writer")
+	if q.Has("if_writer") && ifWriter == "" {
+		return fserr.BadRequest("if_writer must not be empty")
+	}
+	if len(ifWriter) > state.MaxIDLength {
+		return fserr.BadRequest("if_writer is longer than %d characters", state.MaxIDLength)
+	}
+	return reservedWriter(writer)
+}
+
 func (a *API) clear(w http.ResponseWriter, r *http.Request) {
 	start := a.now()
 	ctx, span := a.Tracer.Start(r.Context(), telemetry.SpanWrite)
 	a.beginWrite()
 	defer a.endWrite()
+	q := r.URL.Query()
 	sc := scopeFromQuery(r)
-	persist, ferr := boolParam(r.URL.Query(), "persist")
-	// A leftover fraction clear would otherwise clear the stack overlay.
-	if ferr == nil && (r.URL.Query().Has("fraction") || r.URL.Query().Has("fraction_percent")) {
-		ferr = fserr.BadRequest("the fraction scope was removed")
+	persist, ferr := boolParam(q, "persist")
+	req := state.WriteRequest{Set: r.PathValue("set"), Flag: r.PathValue("flag"), Scope: sc, Writer: q.Get("writer")}
+	if ferr == nil {
+		ferr = clearQueryError(q, req.Writer)
 	}
-	req := state.WriteRequest{Set: r.PathValue("set"), Flag: r.PathValue("flag"), Scope: sc, Writer: r.URL.Query().Get("writer")}
 	var res state.WriteResult
 	if ferr != nil {
 		res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
-	}
-	// ?if_writer=<label>: the compare-and-delete precondition (#1877, flags.md
-	// §13). Strict: an empty value must not silently drop the precondition.
-	ifWriter := r.URL.Query().Get("if_writer")
-	if ferr == nil && r.URL.Query().Has("if_writer") && ifWriter == "" {
-		ferr = fserr.BadRequest("if_writer must not be empty")
-		res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
-	}
-	if ferr == nil && len(ifWriter) > state.MaxIDLength {
-		ferr = fserr.BadRequest("if_writer is longer than %d characters", state.MaxIDLength)
-		res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
-	}
-	if ferr == nil {
-		if ferr = reservedWriter(req.Writer); ferr != nil {
-			res = state.WriteResult{FlagSet: req.Set, Flag: req.Flag, Epoch: a.State.Epoch(), ScopeKey: sc.Name()}
-		}
-	}
-	if ferr == nil {
-		res, ferr = a.State.Clear(state.ClearRequest{Set: req.Set, Flag: req.Flag, Scope: sc, Writer: req.Writer, Persist: persist, IfWriter: ifWriter})
+	} else {
+		res, ferr = a.State.Clear(state.ClearRequest{Set: req.Set, Flag: req.Flag, Scope: sc, Writer: req.Writer, Persist: persist, IfWriter: q.Get("if_writer")})
 	}
 	span.SetAttributes(attribute.Int("flagservice.cleared", res.Cleared))
 	a.finishWrite(ctx, span, telemetry.OpClear, req, res, ferr, start)

@@ -208,21 +208,7 @@ func (s *State) Put(req WriteRequest) (WriteResult, *fserr.Error) {
 	}
 	f, scopeName, checked := plan.f, plan.scope, plan.checked
 
-	now := s.opts.Now()
-	v := &value{Writer: req.Writer, DecisionID: servedDecisionID(req.DecisionID), WrittenAt: now, Persisted: req.Persist}
-	if plan.ttl > 0 {
-		v.ExpiresAt = now.Add(plan.ttl)
-	}
-	if plan.stackLike && checked.Variant != "" {
-		v.Variant = checked.Variant // D13: point defaultVariant at the declared variant
-	} else {
-		prefix := "r"
-		if plan.stackLike {
-			prefix = "o"
-		}
-		v.Variant = s.nextVariant(prefix)
-		v.Value = checked.Value
-	}
+	v := s.newPutValueLocked(req, plan)
 	res.Value = checked.Value
 
 	if req.DryRun {
@@ -256,6 +242,26 @@ func (s *State) Put(req WriteRequest) (WriteResult, *fserr.Error) {
 	res.SnapshotVersion = s.version
 	res.Persisted = req.Persist && s.lastPersistOK
 	return res, nil
+}
+
+// newPutValueLocked builds the value a checked Put places.
+func (s *State) newPutValueLocked(req WriteRequest, plan putPlan) *value {
+	now := s.opts.Now()
+	v := &value{Writer: req.Writer, DecisionID: servedDecisionID(req.DecisionID), WrittenAt: now, Persisted: req.Persist}
+	if plan.ttl > 0 {
+		v.ExpiresAt = now.Add(plan.ttl)
+	}
+	if plan.stackLike && plan.checked.Variant != "" {
+		v.Variant = plan.checked.Variant // D13: point defaultVariant at the declared variant
+		return v
+	}
+	prefix := "r"
+	if plan.stackLike {
+		prefix = "o"
+	}
+	v.Variant = s.nextVariant(prefix)
+	v.Value = plan.checked.Value
+	return v
 }
 
 // putPlan is a checked Put, ready to apply.
