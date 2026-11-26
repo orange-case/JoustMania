@@ -158,8 +158,12 @@ async def test_real_game_preempts_shadow_game_without_a_sample(preempt_stack):
         ), _agent_log(stack)[-4000:]
         s1_released = [line for line in _lines(stack, "experiment.game_released") if _field(line, "game_id") == s1]
         assert PREEMPTED in _field(s1_released[0], "reason"), s1_released
+        # No poll: the rerun is logged under the registry lock before game_released.
+        # On failure show every rerun variant, so a lost reason-specific note names itself.
         rerun = _lines(stack, "experiment.pattern_pair_rerun_preempted")
-        assert rerun and _field(rerun[0], "pair_index") == pair, rerun
+        assert rerun and _field(rerun[0], "pair_index") == pair, (
+            f"no pattern_pair_rerun_preempted for pair {pair}: {_lines(stack, 'experiment.pattern_pair_rerun')}"
+        )
 
         # shadow_policy=block: while R1 runs the next spawn is refused and no shadow game runs.
         assert await async_poll_until(

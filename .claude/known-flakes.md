@@ -10,5 +10,13 @@ Add a row only with the issue that tracks the flake.
 | Test | Symptom | When | Tracking |
 |---|---|---|---|
 
+## Investigated, not flaky
+
+Failures that looked like flakes but were real regressions. Do not dismiss these tests as flaky.
+
+| Test | Symptom | Cause | Tracking |
+|---|---|---|---|
+| `tests/service/test_tc013_real_game_preempts_shadow.py::test_real_game_preempts_shadow_game_without_a_sample` | `AssertionError` at the `pattern_pair_rerun_preempted` check (queue runs 45783492965, 45784029555) | A queued agent refactor logged a preemption rerun as plain `experiment.pattern_pair_rerun`; fixed before merge. The `Shadow games blocked` line in the log is expected (UC-043 A13). | #2913 |
+
 Infrastructure failures in CI (collector `exited (1)`, stale prebuilt images, `blob not found`) are listed in
 `.claude/skills/review-pr/SKILL.md` step 5, not here.
