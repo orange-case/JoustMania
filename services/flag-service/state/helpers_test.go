@@ -164,8 +164,6 @@ func wantReason(t *testing.T, err *fserr.Error, status int, reason string) {
 
 func raw(s string) json.RawMessage { return json.RawMessage(s) }
 
-func intp(n int) *int { return &n }
-
 func ttl(seconds float64) *float64 { return &seconds }
 
 func containsStr(haystack []byte, needle string) bool {

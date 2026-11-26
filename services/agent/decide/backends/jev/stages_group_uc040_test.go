@@ -9,7 +9,7 @@ import (
 )
 
 // stages_group_uc040_test.go: jev's details stage for the group lever (#2467 PR 4;
-// UC-040 A47; decide-contract §3 two-stage round). The target options are the group
+// UC-048 A13; decide-contract §3 two-stage round). The target options are the group
 // options, described by the players they cover; one option is answered locally.
 
 func groupRequestJev(alive int) decide.Request {
@@ -25,9 +25,9 @@ func groupRequestJev(alive int) decide.Request {
 	return req
 }
 
-// UC: UC-040 A47 BR-033
+// UC: UC-048 A13 BR-014
 func TestPlanDetails_GroupLever(t *testing.T) {
-	t.Run("UC-040/A47 three alive: jev picks among the group options", func(t *testing.T) {
+	t.Run("UC-048/A13 three alive: jev picks among the group options", func(t *testing.T) {
 		p := detailsRequest(groupRequestJev(3), decide.IntvGrantGroupShield)
 		if len(p.ask.Questions) != 1 || p.ask.Questions[0].ID != decide.QuestionFFATarget {
 			t.Fatalf("ask = %+v, want only the target", p.ask.Questions)
@@ -52,7 +52,7 @@ func TestPlanDetails_GroupLever(t *testing.T) {
 			t.Fatalf("target = %q", a.Choice)
 		}
 	})
-	t.Run("UC-040/A47 two alive: group:all is answered locally", func(t *testing.T) {
+	t.Run("UC-048/A13 two alive: group:all is answered locally", func(t *testing.T) {
 		p := detailsRequest(groupRequestJev(2), decide.IntvGrantGroupShield)
 		if len(p.ask.Questions) != 0 {
 			t.Fatalf("ask = %+v, want nothing (one call)", p.ask.Questions)
@@ -67,7 +67,7 @@ func TestPlanDetails_GroupLever(t *testing.T) {
 			t.Fatalf("local target = %+v, want group:all at 1", target)
 		}
 	})
-	t.Run("UC-040/A48 no group option: none at confidence 0", func(t *testing.T) {
+	t.Run("UC-048/A14 no group option: none at confidence 0", func(t *testing.T) {
 		p := detailsRequest(testRequest(), decide.IntvGrantGroupShield)
 		for _, a := range p.local {
 			if a.QuestionID == decide.QuestionFFATarget && (a.Choice != decide.TargetNone || a.Confidence != 0) {
@@ -75,7 +75,7 @@ func TestPlanDetails_GroupLever(t *testing.T) {
 			}
 		}
 	})
-	t.Run("UC-040/A47 the criteria describe each option by the players it covers, no verdict", func(t *testing.T) {
+	t.Run("UC-048/A13 the criteria describe each option by the players it covers, no verdict", func(t *testing.T) {
 		req := groupRequestJev(3)
 		q := detailsRequest(req, decide.IntvGrantGroupShield).ask.Questions[0]
 		crit := choiceCriteria(q, req.State, decide.IntvGrantGroupShield, "")

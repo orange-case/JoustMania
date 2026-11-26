@@ -941,7 +941,7 @@ func (l *Loop) decideRemoteApply(ctx context.Context, snapshot flags.Snapshot, c
 		rec.discardStale(DiscardTargetGone)
 		return
 	case len(d.TargetSerials) > 0 && !groupPresent(current, d.TargetSerials):
-		// A group shield is all or nothing (#2467, A48): one target gone drops it.
+		// A group shield is all or nothing (#2467, UC-048 A14): one target gone drops it.
 		rec.discardStale(DiscardTargetGone)
 		return
 	case decide.NeedsFreshReadings(d.Intervention) && !decide.TargetReadingsFresh(current, d.TargetSerial):
@@ -988,7 +988,7 @@ var playerTargetedInterventions = decide.Set(func(iv decide.Intervention) bool {
 // routing is the caller's job.
 //
 // A group lever (decide.GroupTargeted) takes a group option, resolved against the
-// request's alive players into Decision.TargetSerials (#2467, UC-040 A47); req is
+// request's alive players into Decision.TargetSerials (#2467, UC-048 A13); req is
 // the request the answers belong to.
 func mapAnswers(req decide.Request, resp decide.Response) (Decision, string) {
 	iv, _ := resp.Find(decide.QuestionFFAIntervention)

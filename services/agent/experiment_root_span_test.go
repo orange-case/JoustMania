@@ -30,7 +30,7 @@ func rootSpanLoop(t *testing.T) (*experimentLoop, *tracetest.SpanRecorder, *reco
 	realDef := &recordingRealDefault{}
 	github := &recordingGitHub{}
 	resolve := func(context.Context) promote.Config {
-		return promote.Config{Mode: promote.ModeIssue, Target: promote.TargetLocal, Enabled: false}
+		return promote.Config{Mode: promote.ModeIssue, Enabled: false}
 	}
 
 	sr := tracetest.NewSpanRecorder()

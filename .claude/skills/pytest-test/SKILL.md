@@ -3,7 +3,7 @@ name: pytest-test
 description: >
   Generates or reconciles pytest unit tests for ONE JoustMania use case (UC-XXX)
   in the Python services (game_coordinator, menu, controller_manager, audio,
-  pairing_daemon, python_hid) and lib/: one test per main success scenario, per
+  pairing_daemon) and lib/: one test per main success scenario, per
   alternative flow (A1, A2, ...) and per business rule (BR-XXX), each tagged
   with the traceability marker @pytest.mark.uc("UC-040", flow="A2",
   br=["BR-001"]). Uses autospec/spec_set mocks, never bare MagicMock for

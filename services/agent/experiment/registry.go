@@ -1872,7 +1872,7 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 	}
 	if r.shuttingDown() {
 		// UC-043 A20 (#2332): a conclusion that lands after the graceful stop began
-		// keeps its sample and verdict but does not promote: no issue, PR or real
+		// keeps its sample and verdict but does not promote: no issue or real
 		// default write while the agent goes down. Journaled `discarded: shutdown`, so the
 		// experiment ends discarded and a restart finds the outcome (A15 step 3).
 		res := PromotionResult{Outcome: PromotionDiscarded, Reason: PromotionReasonShutdown}
@@ -1932,7 +1932,7 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 	}
 
 	// Journal the result whatever the experiment's status is now: an AbortAll that
-	// raced the promotion does not undo an issue, PR or real default it produced.
+	// raced the promotion does not undo an issue or real default it produced.
 	r.mu.Lock()
 	if e := r.entries[id]; e != nil {
 		promotion := res

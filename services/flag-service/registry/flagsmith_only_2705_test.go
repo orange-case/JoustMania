@@ -101,11 +101,11 @@ func TestParseRejectsBadFlagsmithOnlyRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"interventions/volume_override", "agent/interventions_allowed", "game/sensitivity", "controller/bluetooth_backend"} {
+	for _, name := range []string{"interventions/volume_override", "agent/interventions_allowed", "game/sensitivity"} {
 		flagsmithOnly[name] = true
 	}
 	t.Cleanup(func() {
-		for _, name := range []string{"interventions/volume_override", "agent/interventions_allowed", "game/sensitivity", "controller/bluetooth_backend"} {
+		for _, name := range []string{"interventions/volume_override", "agent/interventions_allowed", "game/sensitivity"} {
 			delete(flagsmithOnly, name)
 		}
 	})
@@ -113,7 +113,6 @@ func TestParseRejectsBadFlagsmithOnlyRows(t *testing.T) {
 		"interventions row": `flags: [{set: interventions, key: volume_override, kind: state, scope: [game], bounds: {range: [0.3, 1.0]}}]`,
 		"persist row":       `flags: [{set: agent, key: interventions_allowed, kind: overlay, scope: [stack], persist: true}]`,
 		"wider scope":       `flags: [{set: game, key: sensitivity, kind: overlay, scope: [stack, experiment+arm], description: "x"}]`,
-		"fraction scope":    `flags: [{set: controller, key: bluetooth_backend, kind: overlay, scope: [stack, fraction], bounds: {fraction: [1, 100]}}]`,
 	}
 	for name, doc := range bad {
 		t.Run("UC-053/A14 "+name+" is refused", func(t *testing.T) {

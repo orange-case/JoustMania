@@ -13,12 +13,10 @@
 #    call it makes starts with `-f docker-compose.yml --env-file .env`, plus
 #    `--env-file .env.local` (last, so it wins) exactly when .env.local exists
 #    (#1488); it starts the game with `up -d --pull never --remove-orphans <services>`
-#    (UC-060 BR-001), never prints the env values, and removes a
-#    stale joustmania-python-hid container only while the python-hid profile
-#    is inactive (#1402 I1), and a stale joustmania-operator-pad container
-#    only while the operator-pad profile is inactive (#2050: an old pad
-#    container would keep its exclusive grab). The env files are dummies
-#    created by the test.
+#    (UC-060 BR-001), never prints the env values, and removes a stale
+#    joustmania-operator-pad container only while the operator-pad profile
+#    is inactive (#2050: an old pad container would keep its exclusive grab).
+#    The env files are dummies created by the test.
 # Runs as part of `make lint`, or directly:
 #   ./scripts/tests/test-pi-start-compose-files.sh
 # UC: UC-035 BR-001
@@ -162,37 +160,24 @@ check_compose_calls() { # $1 = docker.log, $2 = case name, $3 = expected compose
 
 BASE_PREFIX="compose -f docker-compose.yml --env-file .env"
 
-# No .env.local, python-hid profile inactive: only .env; the stale container is removed
+# No .env.local, operator-pad profile inactive: only .env; the stale pad container is removed
 run_start "flagd rust-hid controller-manager" no-profile no-env-local
 log="${WORK}/no-profile/docker.log"
 check_compose_calls "${log}" no-profile "${BASE_PREFIX}" "flagd rust-hid controller-manager"
 if grep -q 'env.local' "${log}"; then fail "no-profile: .env.local passed although it does not exist"; fi
-grep -qx 'rm -f joustmania-python-hid' "${log}" \
-  || fail "no-profile: stale joustmania-python-hid not removed"
 grep -qx 'rm -f joustmania-operator-pad' "${log}" \
   || fail "no-profile: stale joustmania-operator-pad not removed"
 
-# .env.local present, python-hid profile active: .env then .env.local (later
-# wins) on every call; the container is left to compose
-run_start "flagd rust-hid python-hid controller-manager" python-profile with-env-local
-log="${WORK}/python-profile/docker.log"
-check_compose_calls "${log}" python-profile "${BASE_PREFIX} --env-file .env.local" "flagd rust-hid python-hid controller-manager"
-grep -q 'Env files: .env + .env.local' "${WORK}/python-profile/out.log" \
-  || fail "python-profile: the start script does not say .env.local was loaded"
-if grep -qx 'rm -f joustmania-python-hid' "${log}"; then
-  fail "python-profile: joustmania-python-hid removed although its profile is active"
-fi
-
-# operator-pad profile active (#2050): the pad container is left to compose,
-# while the inactive python-hid one is still removed
+# .env.local present, operator-pad profile active (#2050): .env then .env.local
+# (later wins) on every call; the pad container is left to compose
 run_start "flagd rust-hid operator-pad controller-manager" pad-profile with-env-local
 log="${WORK}/pad-profile/docker.log"
 check_compose_calls "${log}" pad-profile "${BASE_PREFIX} --env-file .env.local" "flagd rust-hid operator-pad controller-manager"
 if grep -qx 'rm -f joustmania-operator-pad' "${log}"; then
   fail "pad-profile: joustmania-operator-pad removed although its profile is active"
 fi
-grep -qx 'rm -f joustmania-python-hid' "${log}" \
-  || fail "pad-profile: stale joustmania-python-hid not removed"
+grep -q 'Env files: .env + .env.local' "${WORK}/pad-profile/out.log" \
+  || fail "pad-profile: the start script does not say .env.local was loaded"
 
 if [[ "${fails}" -ne 0 ]]; then
   exit 1

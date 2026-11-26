@@ -15,7 +15,7 @@ import (
 
 // GameDomain is the domain / flagSetId of the game set (services/flagd/game.json).
 // The agent only READS flags from it: shield.activation and
-// shield.charge_expiry_seconds for the charge ledger of UC-040 A31 step 1 (#1837),
+// shield.charge_expiry_seconds for the charge ledger of UC-048 A4 step 1 (#1837),
 // and the shadow start-config keys of an experiment arm (ShadowGameInt, UC-046
 // BR-019, #2392). It never writes them (C-034, agent_set_never_written_c034_test.go).
 const GameDomain = "game"
@@ -31,7 +31,7 @@ const shieldChargeExpiryMax = 120 * time.Second
 // gameUnreadableWarnEvery throttles the agent.shield_charge_mode_unreadable warning.
 const gameUnreadableWarnEvery = 30 * time.Second
 
-// gameReadWarn throttles the unreadable-game-set warning (UC-040 A31 step 1).
+// gameReadWarn throttles the unreadable-game-set warning (UC-048 A4 step 1).
 type gameReadWarn struct {
 	mu   sync.Mutex
 	last time.Time
@@ -180,8 +180,8 @@ func (f *Flags) ShadowGameInt(ctx context.Context, key, mode, experimentID, arm 
 // game scope older than 1 h is dropped by the flag service as well (UC-053 A11).
 const gameModeLatchTTL = time.Hour
 
-// gameModeLatch is the first shield.activation the agent read per game (UC-040 A31 step 1,
-// BR-027, #2096). The coordinator latches `hold` per game, and a game not latched to hold
+// gameModeLatch is the first shield.activation the agent read per game (UC-048 A4 step 1,
+// UC-048 BR-011, #2096). The coordinator latches `hold` per game, and a game not latched to hold
 // keeps the mode it latched for a later `hold` read; the agent cannot see that latch, so it
 // keeps its own first read in its place.
 type gameModeLatch struct {
@@ -238,7 +238,7 @@ func ledgerTrigger(mode, first string) bool {
 // LatchShieldMode records the game's first shield.activation when the agent first sees the
 // game (main.go calls it from the per-game Loop factory, on the game's first signal), so a
 // later flip to `hold` before the first grant_shield decision does not become the game's
-// first mode (UC-040 A31 step 1, BR-027, #2096). Quiet: an unreadable flag latches nothing
+// first mode (UC-048 A4 step 1, BR-011, #2096). Quiet: an unreadable flag latches nothing
 // and logs at debug level; ShieldCharge warns when it really needs the flag.
 func (f *Flags) LatchShieldMode(ctx context.Context, gameID string) {
 	if f == nil || f.game == nil || gameID == "" {
@@ -257,7 +257,7 @@ func (f *Flags) LatchShieldMode(ctx context.Context, gameID string) {
 }
 
 // ShieldCharge reads the game's shield activation mode and charge expiry from the game
-// set for the agent's charge ledger (UC-040 A31 step 1). The mode, trimmed and
+// set for the agent's charge ledger (UC-048 A4 step 1). The mode, trimmed and
 // lower-cased (as resolve_shield_activation in games/base.py), counts as trigger when it
 // is "trigger" in a game the agent did not first read as "hold", or "hold" in a game the
 // agent first read as "trigger" (ledgerTrigger, #2096). expiry follows

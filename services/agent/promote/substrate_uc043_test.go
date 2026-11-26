@@ -32,7 +32,7 @@ func barPromoter(t *testing.T, bar map[string]bool, w Watcher) (*Promoter, *reco
 	if w == nil {
 		w = fakeWatcher{}
 	}
-	p := NewPromoter(&recordingGitHub{}, &recordingGit{}, realDef, w, rev, testRepo(), nil, discardLogger())
+	p := NewPromoter(&recordingGitHub{}, realDef, w, rev, nil, discardLogger())
 	if bar != nil {
 		p.SetSubstrateBar(bar)
 	}
@@ -130,21 +130,13 @@ func TestUC043_A23_SeamForwardsTheObjective(t *testing.T) {
 
 // UC: UC-043 A23
 // UC: UC-043 BR-003
-func TestUC043_A23_IssueAndPRModesUnaffected(t *testing.T) {
+func TestUC043_A23_IssueModeUnaffected(t *testing.T) {
 	t.Run("UC-043/A23 G1 issue mode opens the issue under a closed bar", func(t *testing.T) {
 		gh := &recordingGitHub{issueURL: "https://example.invalid/issues/1"}
-		p := NewPromoter(gh, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{}, nil, testRepo(), nil, discardLogger())
-		res := p.Promote(context.Background(), promoteProposal, promoteVerdict, Config{Mode: ModeIssue, Target: TargetLocal, Enabled: true}, substrateEvidence("endurance"))
+		p := NewPromoter(gh, &recordingRealDefault{}, fakeWatcher{}, nil, nil, discardLogger())
+		res := p.Promote(context.Background(), promoteProposal, promoteVerdict, Config{Mode: ModeIssue, Enabled: true}, substrateEvidence("endurance"))
 		if res.Outcome != OutcomeApplied || len(gh.issues) != 1 {
 			t.Fatalf("outcome = %q (%s) issues %d, want applied once", res.Outcome, res.Reason, len(gh.issues))
-		}
-	})
-	t.Run("UC-043/A23 G1 pr mode opens the PR under a closed bar", func(t *testing.T) {
-		gh := &recordingGitHub{prURL: "https://example.invalid/pull/1"}
-		p := NewPromoter(gh, &recordingGit{}, &recordingRealDefault{}, fakeWatcher{}, nil, testRepo(), nil, discardLogger())
-		res := p.Promote(context.Background(), promoteProposal, promoteVerdict, Config{Mode: ModePR, Target: TargetGitHub, Enabled: true}, substrateEvidence("endurance"))
-		if res.Outcome != OutcomeApplied || len(gh.prs) != 1 {
-			t.Fatalf("outcome = %q (%s) prs %d, want applied once", res.Outcome, res.Reason, len(gh.prs))
 		}
 	})
 }
@@ -166,7 +158,7 @@ func TestUC043_A23_RevertsNeverGated(t *testing.T) {
 	})
 	t.Run("UC-043/A23 G2 the kill switch reverts under a closed bar", func(t *testing.T) {
 		rev := &listingReverter{flags: []string{promoteProposal.FlagKey}}
-		p := NewPromoter(nil, nil, &recordingRealDefault{}, fakeWatcher{}, rev, testRepo(), nil, discardLogger())
+		p := NewPromoter(nil, &recordingRealDefault{}, fakeWatcher{}, rev, nil, discardLogger())
 		got := p.RevertOnKillSwitch(context.Background())
 		if len(got) != 1 || got[0].Outcome != OutcomeReverted || rev.calls != 1 {
 			t.Fatalf("kill switch = %+v reverts %d, want one reverted", got, rev.calls)

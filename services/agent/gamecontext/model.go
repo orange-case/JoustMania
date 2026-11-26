@@ -71,7 +71,7 @@ type PlayerSignals struct {
 	// Zero until the first intensity sample; a snapshot copy like History.
 	Game GameMeans
 
-	// Hold-mode shield (#2096, UC-040 A37, UC-042 BR-007; nil / empty outside a hold
+	// Hold-mode shield (#2096, UC-048 A9, UC-042 BR-007; nil / empty outside a hold
 	// game). Sources: game_player_shield_energy_seconds,
 	// game_player_shield_budget_remaining_seconds, game_player_shield_active and
 	// game_player_shield_stats{stat} (live; set at every hold transition and at least

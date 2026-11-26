@@ -9,6 +9,7 @@ package promote
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -49,25 +50,24 @@ func fixedConfig(cfg Config) ConfigResolver {
 
 // adapterWithRecorder wires an ExperimentPromoter over a Promoter that uses the
 // given seams + a span recorder, with the supplied live Config.
-func adapterWithRecorder(t *testing.T, gh GitHubClient, git GitClient, realDef RealDefaultWriter, cfg Config) (*ExperimentPromoter, *tracetest.SpanRecorder) {
+func adapterWithRecorder(t *testing.T, gh GitHubClient, realDef RealDefaultWriter, cfg Config) (*ExperimentPromoter, *tracetest.SpanRecorder) {
 	t.Helper()
 	rec := tracetest.NewSpanRecorder()
 	tp := trace.NewTracerProvider(trace.WithSpanProcessor(rec))
-	p := NewPromoter(gh, git, realDef, nil, nil, testRepo(), tp.Tracer("test"), discardLogger())
+	p := NewPromoter(gh, realDef, nil, nil, tp.Tracer("test"), discardLogger())
 	return NewExperimentPromoter(p, fixedConfig(cfg)), rec
 }
 
 // TestExperimentSeamEvidenceMapping: a promote view builds Evidence with control
 // mean→Before, experimental mean→After, delta, and N=total across arms, and the
-// underlying #961 Promoter is invoked with the right flag/value. mode=pr local
-// exercises a clean APPLIED outcome (a local commit) so the adapter returns nil.
+// underlying #961 Promoter is invoked with the right flag/value. mode=issue
+// exercises a clean APPLIED outcome (an opened issue).
 func TestExperimentSeamEvidenceMapping(t *testing.T) {
-	gh := &recordingGitHub{}
-	git := &recordingGit{sha: "deadbeef"}
-	a, rec := adapterWithRecorder(t, gh, git, nil, Config{Mode: ModePR, Target: TargetLocal, Enabled: false})
+	gh := &recordingGitHub{issueURL: "https://example.invalid/issues/7"}
+	a, rec := adapterWithRecorder(t, gh, nil, Config{Mode: ModeIssue, Enabled: false})
 
-	if res := a.Promote(context.Background(), promoteView()); res.Outcome != string(OutcomeApplied) || res.Reference != "local:deadbeef" {
-		t.Fatalf("Promote on clean local PR = %+v, want applied with reference local:deadbeef", res)
+	if res := a.Promote(context.Background(), promoteView()); res.Outcome != string(OutcomeApplied) || res.Reference != gh.issueURL {
+		t.Fatalf("Promote on a clean issue = %+v, want applied with reference %s", res, gh.issueURL)
 	}
 
 	// The #961 Promoter ran and stamped the fitness Evidence on its span.
@@ -85,22 +85,21 @@ func TestExperimentSeamEvidenceMapping(t *testing.T) {
 		t.Errorf("flag key: want death_grace_period_ms, got %q", got)
 	}
 
-	// A local PR commits the change; the recorder proves the right flag/value flowed
-	// through into the #961 Promoter's body (N=14 sample size).
-	if len(git.commits) == 0 {
-		t.Fatalf("expected a local commit (mode=pr, target=local)")
+	// The issue was opened with the promoted flag in its body.
+	if len(gh.issues) != 1 || !strings.Contains(gh.issues[0].Body, "death_grace_period_ms") {
+		t.Fatalf("expected one issue naming the flag, got %+v", gh.issues)
 	}
 }
 
 // TestExperimentSeamGitHubGatedNoOp: with the real github path NOT enabled (the
-// default — main.go passes inert no-op clients), a github-target promotion degrades
+// default — main.go passes the inert no-op client), an issue promotion degrades
 // to a RECORDED no-op. The adapter does NOT bypass the #961 gates: it surfaces the
 // recorded reason as a (non-fatal) error and touches nothing real.
 // UC: UC-043 A4
 func TestExperimentSeamGitHubGatedNoOp(t *testing.T) {
-	// gh/git nil ⇒ NewPromoter installs the inert recording no-ops (the default,
+	// gh nil ⇒ NewPromoter installs the inert recording no-op (the default,
 	// fail-closed floor). realDef nil ⇒ no real-default writer wired.
-	a, rec := adapterWithRecorder(t, nil, nil, nil, Config{Mode: ModeIssue, Target: TargetGitHub, Enabled: false})
+	a, rec := adapterWithRecorder(t, nil, nil, Config{Mode: ModeIssue, Enabled: false})
 
 	res := a.Promote(context.Background(), promoteView())
 	if res.Outcome != string(OutcomeDiscarded) || res.Reason == "" {
@@ -122,7 +121,7 @@ func TestExperimentSeamGitHubGatedNoOp(t *testing.T) {
 // UC: UC-043 main
 func TestExperimentSeamAutonomousDisabledNoOp(t *testing.T) {
 	realDef := &recordingRealDefault{}
-	a, rec := adapterWithRecorder(t, nil, nil, realDef, Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: false})
+	a, rec := adapterWithRecorder(t, nil, realDef, Config{Mode: ModeAutonomous, Enabled: false})
 
 	res := a.Promote(context.Background(), promoteView())
 	if res.Outcome != string(OutcomeDiscarded) || res.Reason == "" {
@@ -146,8 +145,8 @@ func TestExperimentSeamNilResolverSafeDefault(t *testing.T) {
 	realDef := &recordingRealDefault{}
 	rec := tracetest.NewSpanRecorder()
 	tp := trace.NewTracerProvider(trace.WithSpanProcessor(rec))
-	// nil git/github ⇒ inert no-ops; nil resolver ⇒ safe default issue/local/disabled.
-	p := NewPromoter(nil, nil, realDef, nil, nil, testRepo(), tp.Tracer("test"), discardLogger())
+	// nil github ⇒ inert no-op; nil resolver ⇒ safe default issue/disabled.
+	p := NewPromoter(nil, realDef, nil, nil, tp.Tracer("test"), discardLogger())
 	a := NewExperimentPromoter(p, nil)
 
 	_ = a.Promote(context.Background(), promoteView())
@@ -155,9 +154,6 @@ func TestExperimentSeamNilResolverSafeDefault(t *testing.T) {
 	span := spanByName(t, rec, SpanPromote)
 	if got := stringAttr(span, AttrGate); got != string(ModeIssue) {
 		t.Errorf("nil resolver should default to issue mode, got %q", got)
-	}
-	if got := stringAttr(span, AttrTarget); got != string(TargetLocal) {
-		t.Errorf("nil resolver should default to local target, got %q", got)
 	}
 	if len(realDef.calls) != 0 {
 		t.Errorf("safe default must not write the real default; got %d write(s)", len(realDef.calls))
@@ -170,7 +166,7 @@ func TestExperimentSeamNilResolverSafeDefault(t *testing.T) {
 // Promoter's "only PROMOTE acts" guard no-ops and nothing real is touched.
 func TestExperimentSeamNonPromoteVerdictNoOp(t *testing.T) {
 	realDef := &recordingRealDefault{}
-	a, rec := adapterWithRecorder(t, nil, nil, realDef, Config{Mode: ModeAutonomous, Target: TargetLocal, Enabled: true})
+	a, rec := adapterWithRecorder(t, nil, realDef, Config{Mode: ModeAutonomous, Enabled: true})
 
 	view := promoteView()
 	view.Verdict = &journal.Verdict{Outcome: experiment.CohortOutcomeDiscard}

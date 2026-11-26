@@ -66,7 +66,6 @@ case "$image" in
   connect-proxy) filter=connect_proxy ;;
   dashboard) filter=dashboard ;;
   rust-hid) filter=rust ;;
-  python-hid) filter=python_hid ;;
   operator-pad) filter=operator_pad ;;
   otel-collector) filter=otel_collector ;;
   flag-service) filter=flag_service ;;

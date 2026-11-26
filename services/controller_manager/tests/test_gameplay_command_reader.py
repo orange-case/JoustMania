@@ -288,7 +288,7 @@ class TestUC020EffectTakeOverHasNoGap:
 
 class TestStreamCloseCleanupAlwaysRuns:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-006"])
     async def test_a_cancel_during_the_drain_grace_still_releases_the_roster(self, game, monkeypatch):
         """#2540 review: a second cancel while the close waits out the cancel grace still releases the
         roster and schedules the shield cleanup (#1837), then the cancel goes on."""

@@ -1,7 +1,7 @@
 package registry
 
 // latchedAtGameStart lists the flags the game reads once per game, so a write in
-// scope real never changes a running game (UC-040 BR-027, flags.md §13). Every row
+// scope real never changes a running game (UC-048 BR-011, flags.md §13). Every row
 // with scope real must be listed and true (TestRealScopeIsLatched). A Go set, not
 // a registry.yaml key: released images load the checkout's registry.yaml with
 // KnownFields. shield.activation is not listed and has no real scope: instant and
@@ -25,7 +25,7 @@ var latchedAtGameStart = map[string]bool{
 	"game/zombie.respawn_min_seconds":              true,
 	"game/zombie.respawn_max_seconds":              true,
 	"game/windows":                                 true,
-	// Shield hold latch (UC-040 BR-027).
+	// Shield hold latch (UC-048 BR-011).
 	"game/shield.energy_max_seconds":     true,
 	"game/shield.energy_budget_seconds":  true,
 	"game/shield.energy_initial_seconds": true,
