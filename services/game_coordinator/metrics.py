@@ -152,6 +152,16 @@ player_shield_stats = Gauge(
     "Hold-mode shield statistics of a player in this game (seconds or counts by stat)",
     ["serial", "game_id", "stat"],
 )
+# The agent's shield gate (UC-048 A4, A6): what the coordinator's grant_shield
+# refusal reads, per player. stat: grants (agent shields applied in this game),
+# charged (1 while a trigger-mode charge is held), cooldown_until (wall-clock epoch
+# seconds the cooldown after the last agent shield ends; 0 = none).
+PLAYER_SHIELD_GATE_STATS = ("grants", "charged", "cooldown_until")
+player_shield_gate = Gauge(
+    "game_player_shield_gate",
+    "Agent shield gate of a player in this game (count, flag or epoch seconds by stat)",
+    ["serial", "game_id", "stat"],
+)
 # Per game: the shield activation mode the game latched (instant, trigger or hold), value 1,
 # and in a hold game every latched hold value (setting = the flag key).
 shield_activation_mode = Gauge(
@@ -174,6 +184,9 @@ def clear_player_shield_gauges(serial: str, game_id: str) -> None:
     for total in PLAYER_SHIELD_STATS:
         with suppress(KeyError, ValueError):
             player_shield_stats.remove(serial, game_id, total)
+    for stat in PLAYER_SHIELD_GATE_STATS:
+        with suppress(KeyError, ValueError):
+            player_shield_gate.remove(serial, game_id, stat)
 
 
 # System metrics
@@ -241,7 +254,15 @@ game_loop_jitter_ms = Gauge(
     GAME_STATE_LABELS,
 )
 
+# Agent group shields applied in a live game (UC-048 A13, BR-014).
+shield_group_grants = Gauge(
+    "game_shield_group_grants",
+    "Agent group shields applied in a live game",
+    GAME_STATE_LABELS,
+)
+
 GAME_STATE_GAUGES = (
+    shield_group_grants,
     music_tempo,
     game_sensitivity,
     effective_warning_threshold,

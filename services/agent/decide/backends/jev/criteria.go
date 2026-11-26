@@ -430,7 +430,7 @@ func suitability(iv string, p decide.PlayerState, st decide.State) string {
 		// An unused charge is no protection, so only another grant_shield is
 		// refused; a toughness_boost keeps the danger-based text (#1870).
 		if iv == "grant_shield" && p.ShieldCharged {
-			return "Already holds an agent shield charge, or has just used it: another shield is refused."
+			return "Already holds an agent shield charge: another shield is refused."
 		}
 		// Hold game (#2096): a grant adds energy; the pool or the budget can refuse it.
 		if iv == "grant_shield" && st.ShieldActivation != "" {
@@ -489,7 +489,7 @@ func suitabilityNeutral(iv string, p decide.PlayerState, st decide.State) string
 	switch {
 	case protectInterventions[iv]:
 		if iv == "grant_shield" && p.ShieldCharged {
-			return "Already holds an agent shield charge, or has just used it: another shield is refused."
+			return "Already holds an agent shield charge: another shield is refused."
 		}
 		if iv == "grant_shield" && st.ShieldActivation != "" {
 			switch st.HoldRefusal(p) {
@@ -562,7 +562,7 @@ func describeCandidatesFor(st decide.State, iv, profile string) map[string]strin
 			b.WriteString(" Shielded a moment ago.")
 		}
 		if p.ShieldCharged {
-			b.WriteString(" Holds an agent shield charge, or has just used it.")
+			b.WriteString(" Holds an agent shield charge.")
 		}
 		b.WriteString(holdPhrase(p, st))
 		b.WriteString(levelPhrase(p))

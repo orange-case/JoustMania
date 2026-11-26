@@ -704,20 +704,13 @@ func (s Snapshot) Permits(intervention string) bool {
 // Flags evaluates the agent control flags against an OpenFeature client.
 type Flags struct {
 	client Evaluator
-	// game evaluates the game set, read-only: only the two shield flags of the
-	// charge ledger (ShieldCharge, UC-048 A4). nil: ShieldCharge returns its
-	// defaults, never a read through client.
-	game     Evaluator
-	gameWarn gameReadWarn
-	// gameModes keeps the first shield.activation read per game, so a `hold` read
-	// follows the coordinator's per-game latch (UC-048 A4, BR-011, #2096).
-	gameModes gameModeLatch
+	// game evaluates the game set, read-only: the shadow start-config keys
+	// (ShadowGameInt). nil: ShadowGameInt refuses.
+	game Evaluator
 	// gameAttrs returns a game's kind, experiment id and arm as the agent has seen
 	// them (main.go wires the Multiplexer); nil means a real game (#2096).
 	gameAttrs func(gameID string) GameAttrs
-	// now is the clock of gameModes; nil means time.Now (tests inject one).
-	now func() time.Time
-	log *slog.Logger
+	log       *slog.Logger
 	// goalWarn logs the first invalid goal.profile value once; goalInvalid counts
 	// every invalid read (agent_goal_profile_invalid_total), created on first use
 	// unless SetGoalMeterProvider set it (#2479).
