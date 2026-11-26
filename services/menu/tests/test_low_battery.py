@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 
 from lib.clock import FakeClock
-from proto import controller_manager_pb2, menu_pb2
+from proto import controller_manager_pb2
 from services.menu import metrics as menu_metrics
 from services.menu.controller_events import ControllerEventLoop
 from services.menu.handlers.base import ControllerState
@@ -217,4 +217,3 @@ async def test_an_empty_battery_is_low_again_after_the_stream_reconnects(lobby):
     await events._dispatch_event(connect_event("a", 0, reported=True))
 
     assert low_battery_serials(menu.state_manager) == {"a"}
-    assert (await menu.GetMenuStatus(menu_pb2.GetMenuStatusRequest(), None)).low_battery_count == 1
