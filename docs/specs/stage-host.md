@@ -150,6 +150,17 @@ checkout's `scripts/setup/99-joustmania-operator-pad.rules` and says `installed`
 the fix of §2 ("Host files are named, never written"). It never changes `state:` or the exit code: the game runs
 without the pad screens. `JOUSTMANIA_PAD_RULE` overrides the installed path for tests only.
 
+A `memory:` line and a `disk:` line (#2914, NFR-081) show the headroom before a show. `memory:` is `MemAvailable` of
+`/proc/meminfo` against `MemTotal`, in MiB: OK from 512 MiB, WARN below 512 MiB, FAIL below 256 MiB; WARN and FAIL
+name the relief that keeps the game running, stopping the trace and dashboard stores
+(`scripts/setup/joustmania-compose.sh stop jaeger grafana`; nothing in the game depends on them, BR-004). `disk:` is
+the free space (`df`) of the filesystem that holds the Docker data root (`docker info` `DockerRootDir`, else
+`/var/lib/docker`; images, named volumes and container logs live there), also checked when docker is not reachable,
+since a full disk can be why: OK from 2 GiB, WARN below 2 GiB, FAIL below 512 MiB, with `docker system df` to see what
+uses it. Both count toward `state:` like any other line (WARN `degraded`, FAIL `failed`, also with `--led`). A value
+that cannot be read is SKIP and never changes the state. `JOUSTMANIA_MEMINFO` overrides the meminfo path for tests
+only.
+
 ## 4. First-time install and development setup (was FR-188)
 
 ### First-time install (was UC-060 A6)
@@ -402,4 +413,5 @@ by hand (#1402, #2088); everything else runs in CI on stubs, a fake sysfs and fa
 | SH-14 | The setup checks before it changes anything, proves the access point with a forced self-test, keeps the fallback armed and the old profile when re-run over the hotspot, pauses and restores a Wi-Fi client with `--pause-wifi-client`, and undoes it all with `--remove` | UC-061 A8, A11, BR-001 (self-test), BR-004, Pre-2, Pre-3 | `scripts/tests/test-install-hotspot.sh` |
 | SH-15 | The hotspot never orders against, gates or fails the game unit, and its status line is INFO only; it works without the start of §1 installed, while convention play needs that offline start (FR-180) | UC-061 BR-006, BR-007, Pre-4 | `tests/contract/test_hotspot_profile.py`, `scripts/tests/test-joustmania-status.sh`, `scripts/tests/test-joustmania-hotspot.sh` |
 | SH-17 | The upgrade and the rollback never write host files; a missing or differing operator pad udev rule is named with its fix after a healthy upgrade, after `--rollback` and on an INFO status line that never changes the state (#2858) | UC-060 A2, A3, BR-005 | `scripts/tests/test-joustmania-upgrade.sh`, `scripts/tests/test-joustmania-status.sh` |
-| SH-16 | On-Pi: start-up time N (NFR-027), the LED and the start on the Pi (#1402); the dashboard, Jaeger, Grafana and SSH at `10.42.0.1` over the hotspot in convention play mode (was FR-185), the hotspot timings (NFR-028) and the controllers' report gaps with the hotspot on (NFR-008), per the on-Pi checklist of §6 (#2088) | UC-061 main steps 4 to 6, BR-009 | manual (#1402, #2088) |
+| SH-18 | Under memory pressure every game service outlives the observability and agent containers (`oom_score_adj` tiers, NFR-081, services.md §2); `joustmania-status` reports available memory and free disk on the Docker data root with WARN and FAIL thresholds (#2914) | UC-060 main step 4, BR-005 | `tests/contract/test_compose_oom_order.py`, `scripts/tests/test-joustmania-status.sh` |
+| SH-16 | On-Pi: start-up time N (NFR-027), the LED and the start on the Pi (#1402); the dashboard, Jaeger, Grafana and SSH at `10.42.0.1` over the hotspot in convention play mode (was FR-185), the hotspot timings (NFR-028), the controllers' report gaps with the hotspot on (NFR-008) and the OOM order under `stress-ng --vm` on the host (observability containers die first, NFR-081, #2914), per the on-Pi checklist of §6 (#2088) | UC-061 main steps 4 to 6, BR-009 | manual (#1402, #2088) |
