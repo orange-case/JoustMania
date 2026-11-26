@@ -234,7 +234,7 @@ func (d DecisionBackend) ActThreshold(backend string) (float64, bool) {
 // make every answer actionable).
 func (f *Flags) DecisionBackend(ctx context.Context) DecisionBackend {
 	d := DecisionBackend{
-		Backend: normalizeBackendName(f.stringFlag(ctx, keyDecisionBackend, DefaultDecisionBackend)),
+		Backend:             normalizeBackendName(f.stringFlag(ctx, keyDecisionBackend, DefaultDecisionBackend)),
 		CaptureContent:      f.boolFlag(ctx, keyDecisionCaptureContent, DefaultDecisionCaptureContent),
 		MinInterval:         f.minIntervalFlag(ctx),
 		MinGapAfterAnswer:   f.nonNegativeMsFlag(ctx, keyDecisionMinGapAfterAnswerMs, DefaultDecisionMinGapAfterAnswerMs),
