@@ -388,7 +388,7 @@ func TestMux_ConcurrencySmoke(t *testing.T) {
 func spanForGame(gameID, serial string) ptrace.Traces {
 	td := ptrace.NewTraces()
 	span := td.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
-	span.SetName("player_lifecycle")
+	span.SetName("game.player")
 	span.Attributes().PutStr(spanAttrSerial, serial)
 	if gameID != "" {
 		span.Attributes().PutStr(spanAttrGameID, gameID)

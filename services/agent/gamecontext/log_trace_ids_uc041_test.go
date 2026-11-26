@@ -93,15 +93,15 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-041/A8 a sampled game.phase.start sets the gameplay_phase and game_cycle span ids", func(t *testing.T) {
+	t.Run("UC-041/A8 a sampled game.phase.start sets the game.phase.gameplay and game.cycle span ids", func(t *testing.T) {
 		mux := newMux()
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "gameplay_phase"), logTraceHex, logPhaseHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.phase.gameplay"), logTraceHex, logPhaseHex, true))
 		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, phase: logPhaseHex}); got != want {
-			t.Fatalf("after gameplay_phase ids = %+v, want %+v", got, want)
+			t.Fatalf("after game.phase.gameplay ids = %+v, want %+v", got, want)
 		}
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.cycle"), logTraceHex, logCycleHex, true))
 		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, phase: logPhaseHex, cycle: logCycleHex}); got != want {
-			t.Fatalf("after game_cycle ids = %+v, want %+v", got, want)
+			t.Fatalf("after game.cycle ids = %+v, want %+v", got, want)
 		}
 		snap, _ := mux.Snapshot("game-B")
 		if len(snap.Players) != 0 || (snap.Session.GameActive != nil && *snap.Session.GameActive) {
@@ -115,7 +115,7 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 	t.Run("UC-041/BR-010 a context opened by game.phase.start is held for 60 s", func(t *testing.T) {
 		clk := &muxClock{t: time.Unix(4000, 0)}
 		mux := newTestMux(clk, 5*time.Second, 15*time.Second, nil, nil)
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.cycle"), logTraceHex, logCycleHex, true))
 
 		clk.advance(logHoldFor - time.Second)
 		if removed := mux.EvictStale(); len(removed) != 0 {
@@ -131,10 +131,10 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 			"unsampled start":     withTrace(t, lifecycleLog("game.start", "game-B", "real", "", time.Time{}), logTraceHex, logRootHex, false),
 			"no trace id":         withTrace(t, lifecycleLog("game.start", "game-B", "real", "", time.Time{}), "", logRootHex, true),
 			"no span id":          withTrace(t, lifecycleLog("game.start", "game-B", "real", "", time.Time{}), logTraceHex, "", true),
-			"unsampled phase":     withTrace(t, phaseStartLog("game-B", "gameplay_phase"), logTraceHex, logPhaseHex, false),
-			"invalid phase":       withTrace(t, phaseStartLog("game-B", "game_cycle"), "", logCycleHex, true),
+			"unsampled phase":     withTrace(t, phaseStartLog("game-B", "game.phase.gameplay"), logTraceHex, logPhaseHex, false),
+			"invalid phase":       withTrace(t, phaseStartLog("game-B", "game.cycle"), "", logCycleHex, true),
 			"unknown phase span":  withTrace(t, phaseStartLog("game-B", "round"), logTraceHex, logPhaseHex, true),
-			"phase without trace": phaseStartLog("game-B", "gameplay_phase"),
+			"phase without trace": phaseStartLog("game-B", "game.phase.gameplay"),
 		}
 		for name, ld := range cases {
 			mux := newMux()
@@ -149,7 +149,7 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 		mux := newMux()
 		mux.ApplyLogs(withTrace(t, logEvent("game-coordinator", "game.start", map[string]string{"game.id": "game-B"}), logTraceHex, logRootHex, true))
 		mux.ApplyLogs(withTrace(t, logEvent("game-coordinator", "game.phase.start", map[string]string{
-			"game.id": "game-B", "game.phase.span": "gameplay_phase",
+			"game.id": "game-B", "game.phase.span": "game.phase.gameplay",
 		}), logTraceHex, logPhaseHex, true))
 		if _, ok := mux.Snapshot("game-B"); ok {
 			t.Fatal("an unmarked record opened a context")
@@ -159,7 +159,7 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 	t.Run("UC-041/A8 the agent's own game.phase.start is skipped", func(t *testing.T) {
 		mux := newMux()
 		mux.SetOwnService("agent")
-		ld := withTrace(t, phaseStartLog("game-B", "gameplay_phase"), logTraceHex, logPhaseHex, true)
+		ld := withTrace(t, phaseStartLog("game-B", "game.phase.gameplay"), logTraceHex, logPhaseHex, true)
 		ld.ResourceLogs().At(0).Resource().Attributes().PutStr("service.name", "agent")
 		mux.ApplyLogs(ld)
 		if _, ok := mux.Snapshot("game-B"); ok {
@@ -167,10 +167,10 @@ func TestApplyLogs_TraceIDsFromLogContext(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-041/BR-004 a newer game_cycle record replaces the cycle id", func(t *testing.T) {
+	t.Run("UC-041/BR-004 a newer game.cycle record replaces the cycle id", func(t *testing.T) {
 		mux := newMux()
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logRootHex, true))
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.cycle"), logTraceHex, logRootHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.cycle"), logTraceHex, logCycleHex, true))
 		if got := traceIDsOf(t, mux, "game-B"); got.cycle != logCycleHex {
 			t.Fatalf("cycle id = %q, want the newer %q", got.cycle, logCycleHex)
 		}
@@ -187,7 +187,7 @@ func TestApplyLogs_PhaseStartGivesTraceID(t *testing.T) {
 
 	t.Run("UC-041/BR-004 a phase record alone gives the trace id, not the root span id", func(t *testing.T) {
 		mux := newMux()
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.cycle"), logTraceHex, logCycleHex, true))
 		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, cycle: logCycleHex}); got != want {
 			t.Fatalf("ids = %+v, want %+v", got, want)
 		}
@@ -199,7 +199,7 @@ func TestApplyLogs_PhaseStartGivesTraceID(t *testing.T) {
 
 	t.Run("UC-041/BR-004 a later game.start fills the root span id", func(t *testing.T) {
 		mux := newMux()
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "gameplay_phase"), logTraceHex, logPhaseHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.phase.gameplay"), logTraceHex, logPhaseHex, true))
 		mux.ApplyLogs(withTrace(t, lifecycleLog("game.start", "game-B", "real", "", time.Time{}), logTraceHex, logRootHex, true))
 		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, root: logRootHex, phase: logPhaseHex}); got != want {
 			t.Fatalf("ids = %+v, want %+v", got, want)
@@ -209,14 +209,14 @@ func TestApplyLogs_PhaseStartGivesTraceID(t *testing.T) {
 	t.Run("UC-041/BR-004 a phase record never overwrites a known trace id", func(t *testing.T) {
 		mux := newMux()
 		mux.ApplyLogs(withTrace(t, lifecycleLog("game.start", "game-B", "real", "", time.Time{}), logTraceHex, logRootHex, true))
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), otherTraceHex, logCycleHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.cycle"), otherTraceHex, logCycleHex, true))
 		if got, want := traceIDsOf(t, mux, "game-B"), (traceIDs{trace: logTraceHex, root: logRootHex, cycle: logCycleHex}); got != want {
 			t.Fatalf("after game.start ids = %+v, want %+v", got, want)
 		}
 
 		mux = newMux()
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "gameplay_phase"), logTraceHex, logPhaseHex, true))
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), otherTraceHex, logCycleHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.phase.gameplay"), logTraceHex, logPhaseHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.cycle"), otherTraceHex, logCycleHex, true))
 		if got := traceIDsOf(t, mux, "game-B"); got.trace != logTraceHex {
 			t.Fatalf("trace id = %q, want the first phase record's %q", got.trace, logTraceHex)
 		}
@@ -224,7 +224,7 @@ func TestApplyLogs_PhaseStartGivesTraceID(t *testing.T) {
 
 	t.Run("UC-040/BR-013 without the root span id the in-game parent is the cycle span and there is no Link", func(t *testing.T) {
 		mux := newMux()
-		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game_cycle"), logTraceHex, logCycleHex, true))
+		mux.ApplyLogs(withTrace(t, phaseStartLog("game-B", "game.cycle"), logTraceHex, logCycleHex, true))
 		snap, _ := mux.Snapshot("game-B")
 		ctx, ok := RemoteParent(context.Background(), snap.GameTraceID, snap.GameCycleSpanID)
 		if !ok {
@@ -238,4 +238,15 @@ func TestApplyLogs_PhaseStartGivesTraceID(t *testing.T) {
 			t.Fatalf("Link options = %d, want none without the root span id", len(opts))
 		}
 	})
+}
+
+// UC: UC-041 A8
+// A coordinator from before #2837 still sends the old phase span values (telemetry.md §8).
+func TestApplyLogs_LegacyPhaseSpanValues(t *testing.T) {
+	mux := newTestMux(&muxClock{t: time.Unix(4000, 0)}, 5*time.Second, 15*time.Second, nil, nil)
+	mux.ApplyLogs(withTrace(t, phaseStartLog("game-L", "gameplay_phase"), logTraceHex, logPhaseHex, true))
+	mux.ApplyLogs(withTrace(t, phaseStartLog("game-L", "game_cycle"), logTraceHex, logCycleHex, true))
+	if got, want := traceIDsOf(t, mux, "game-L"), (traceIDs{trace: logTraceHex, phase: logPhaseHex, cycle: logCycleHex}); got != want {
+		t.Fatalf("ids = %+v, want %+v", got, want)
+	}
 }

@@ -312,7 +312,7 @@ class MotionMixin:
         logger.info(f"Player {serial} triggered warning (accel: {accel_mag:.2f}, threshold: {threshold:.2f})")
 
         # Send warning effect via stream (white flash + vibrate, auto-restore)
-        # Use player's span as parent so effect appears under player_lifecycle in traces
+        # Use player's span as parent so effect appears under game.player in traces
         if self.gameplay_stream:
             trace_parent, trace_state = _base.inject_trace_context(player.span)
             effect_cmd = controller_manager_pb2.GameplayStreamControl(

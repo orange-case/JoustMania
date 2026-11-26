@@ -700,7 +700,7 @@ class NonstopJoustGame(BaseGameMode):
     def _close_all_player_spans(self):
         """Add the ``final_score`` event to each player span, then close them (base).
 
-        The base closes the spans at the end of ``gameplay_phase``, before the
+        The base closes the spans at the end of ``game.phase.gameplay``, before the
         end-game step, so the score is computed here from the same formula.
         """
         for player in self.players.values():
@@ -773,7 +773,7 @@ class NonstopJoustGame(BaseGameMode):
                     break
                 await game_clock.sleep(WINNER_HOLD_TICK_SECONDS)
 
-        # The player spans (with final_score) were closed at the end of gameplay_phase.
+        # The player spans (with final_score) were closed at the end of game.phase.gameplay.
 
         # Publish analytics summaries for all players
         await self._publish_analytics_summaries({winner_serial} if winner_serial else set())

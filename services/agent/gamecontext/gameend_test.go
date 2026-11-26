@@ -150,7 +150,7 @@ func TestGameEnd_FiresExactlyOnceWhicheverSignalFirst(t *testing.T) {
 		rec := &endRecorder{}
 		mux := newEndMux(clk, rec)
 		mux.ApplyMetrics(gameActiveFor("game-A", 1))
-		// player_lifecycle carries game.id + game.kind but no game.name.
+		// game.player carries game.id + game.kind but no game.name.
 		td := spanForGame("game-A", "P1")
 		td.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes().PutStr(spanAttrGameKind, "primary")
 		mux.ApplySpans(td)

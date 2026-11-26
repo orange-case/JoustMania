@@ -177,7 +177,7 @@ class TeamsGameBase(BaseGameMode):
                     from opentelemetry import context as otel_context
 
                     player_span = tracer.start_span(
-                        "player_lifecycle",  # Consistent name for all players (OpenTelemetry best practice)
+                        "game.player",  # Consistent name for all players (OpenTelemetry best practice)
                         context=otel_context.get_current(),  # Gets team context (registered!)
                         attributes={
                             "player.serial": serial,

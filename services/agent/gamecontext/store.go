@@ -1317,8 +1317,8 @@ func (s *Store) EvictStale() {
 		s.ctx.Arm = ""
 		s.ctx.GameTraceID = ""         // drop the finished game's trace link (#1133)
 		s.ctx.GameTraceSpanID = ""     // ditto, the linked span_id (#1157)
-		s.ctx.GameplayPhaseSpanID = "" // ditto, the gameplay_phase span_id (#1195)
-		s.ctx.GameCycleSpanID = ""     // ditto, the game_cycle span_id (#1325)
+		s.ctx.GameplayPhaseSpanID = "" // ditto, the game.phase.gameplay span_id (#1195)
+		s.ctx.GameCycleSpanID = ""     // ditto, the game.cycle span_id (#1325)
 		s.elimOrder = make(map[string]int)
 		s.retained = make(map[string]retainedPlayer)
 		s.endedAt = time.Time{}

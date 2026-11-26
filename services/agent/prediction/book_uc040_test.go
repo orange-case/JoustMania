@@ -661,7 +661,7 @@ func TestBook_OutcomeSpan(t *testing.T) {
 		t.Fatal("no outcome span")
 	}
 	if span.Parent().SpanID().String() != c.GameCycleSpanID || span.Parent().TraceID().String() != c.GameTraceID {
-		t.Fatalf("parent = %v, want the game_cycle span", span.Parent())
+		t.Fatalf("parent = %v, want the game.cycle span", span.Parent())
 	}
 	if len(span.Links()) != 1 || span.Links()[0].SpanContext.SpanID() != decideSC.SpanID() {
 		t.Fatalf("links = %v, want the decide span", span.Links())

@@ -60,7 +60,7 @@ func TestSignalReceived_IsAnEventInGame(t *testing.T) {
 				t.Fatalf("invoke_agent spans = %d, want 1", len(ds))
 			}
 			if p := ds[0].Parent(); p.SpanID().String() != hubGameCycleSpanID || !p.IsRemote() {
-				t.Fatalf("invoke_agent parent = %v, want the remote game_cycle", p)
+				t.Fatalf("invoke_agent parent = %v, want the remote game.cycle", p)
 			}
 			requireSignalEvent(t, ds[0], signal)
 			if at := ds[0].Events()[0].Time; !at.Equal(trig.T0) {
@@ -68,7 +68,7 @@ func TestSignalReceived_IsAnEventInGame(t *testing.T) {
 			}
 			for _, d := range spansByName(spans, SpanDecision) {
 				if p := d.Parent(); p.SpanID().String() != hubGameCycleSpanID {
-					t.Errorf("agent.decision parent = %v, want the remote game_cycle", p)
+					t.Errorf("agent.decision parent = %v, want the remote game.cycle", p)
 				}
 			}
 		})

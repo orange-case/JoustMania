@@ -424,7 +424,7 @@ const (
 
 // SpanPredictionOutcome is one scored decision prediction or base-rate control
 // (#2479, UC-040 A44, BR-034; services/agent/prediction). It is a remote child of
-// the game's game_cycle / gameplay_phase / root span, starts when the prediction
+// the game's game.cycle / game.phase.gameplay / root span, starts when the prediction
 // was registered and ends when it was scored, and links to the invoke_agent span
 // that carried the prediction (link.kind=prediction).
 const SpanPredictionOutcome = "agent.prediction.outcome"

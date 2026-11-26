@@ -88,7 +88,7 @@ async def _game(cls, tracer, num_players=3):
     game.running = True
     game._play_sound = async_noop
     for serial, player in game.players.items():
-        player.span = tracer.start_span("player_lifecycle", attributes={"player.serial": serial})
+        player.span = tracer.start_span("game.player", attributes={"player.serial": serial})
     game._game_root_span = tracer.start_span("root")
     return game
 

@@ -226,7 +226,7 @@ class FightClubGame(StreamedIntroGameMode):
             logger.warning("No game_span available, creating orphan player spans")
             for serial, player in self.players.items():
                 player.span = tracer.start_span(
-                    "player_lifecycle",
+                    "game.player",
                     attributes={
                         "player.serial": serial,
                         GAME_MODE_ATTR: self.get_game_name(),
@@ -238,7 +238,7 @@ class FightClubGame(StreamedIntroGameMode):
         with trace.use_span(self.game_span, end_on_exit=False):
             for serial, player in self.players.items():
                 player.span = tracer.start_span(
-                    "player_lifecycle",
+                    "game.player",
                     attributes={
                         "player.serial": serial,
                         GAME_MODE_ATTR: self.get_game_name(),
@@ -1009,7 +1009,7 @@ class FightClubGame(StreamedIntroGameMode):
         logger.info(f"Fight Club config: invincibility={self._invincibility_duration}s, min_rounds={self._min_rounds}")
 
     async def _run_streamed_gameplay(self) -> bool:
-        """Seat round 1 after the warm-up, then gameplay_phase (UC-025 A2, A4)."""
+        """Seat round 1 after the warm-up, then game.phase.gameplay (UC-025 A2, A4)."""
         if not self.running:
             return False
 
@@ -1025,8 +1025,8 @@ class FightClubGame(StreamedIntroGameMode):
             await self._start_round()
 
         # Game loop (gameplay stream already started before intro)
-        with tracer.start_as_current_span("gameplay_phase") as gameplay_span:
-            self._send_phase_start(gameplay_span, "gameplay_phase")
+        with tracer.start_as_current_span("game.phase.gameplay") as gameplay_span:
+            self._send_phase_start(gameplay_span, "game.phase.gameplay")
             if ended_before_round_one:
                 await self._hold_win_display()
             else:

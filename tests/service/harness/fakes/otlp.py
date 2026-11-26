@@ -5,7 +5,7 @@ tier. The services export to it with their real OTLP exporters
 (``OTEL_EXPORTER_OTLP_ENDPOINT=sink.endpoint``); a test then waits on what
 arrived::
 
-    span = sink.wait_span("player_lifecycle", {"game.id": game_id}, event="player_disconnected")
+    span = sink.wait_span("game.player", {"game.id": game_id}, event="player_disconnected")
     point = sink.wait_metric("game_players_alive", {"game_id": game_id})
 
 Both ``wait_*`` block (poll a condition, never a sleep); an async test calls
@@ -459,7 +459,7 @@ class OtlpSink:
         ``TimeoutError`` when none arrives.
 
         A span is exported when it ENDS: the game-session span at game end, a
-        ``player_lifecycle`` span at the player's elimination or game end.
+        ``game.player`` span at the player's elimination or game end.
         The sink lives as long as the (module-scoped) stack and is not cleared
         between tests: filter by ``game.id`` so an earlier test's span cannot match.
         """

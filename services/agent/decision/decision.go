@@ -795,14 +795,14 @@ func (l *Loop) startSignalReceivedSpan(ctx context.Context, c gamecontext.GameCo
 	}
 	// In-game re-parenting (#1325, refining #1195/#1178/#1174; UC-040 BR-013): the
 	// agent's in-game decisions/actions belong to the running game CYCLE, so this
-	// cycle-root span is started as a remote CHILD of the coordinator's game_cycle span
+	// cycle-root span is started as a remote CHILD of the coordinator's game.cycle span
 	// instead of LINKED to the game. Because it is the parent of the whole sync
 	// decision->action subtree AND the #1140 async fire anchor (both call this shared
 	// helper), that whole subtree is pulled INSIDE the game trace, nested under
-	// game_cycle. The parent is remote (we hold only its span_id from the
+	// game.cycle. The parent is remote (we hold only its span_id from the
 	// game.phase.start log record); a remote child can be started under it regardless
 	// of its liveness, and inherits the game trace's sampling fate. Fallback
-	// (inGameRemoteParent): game_cycle -> gameplay_phase -> game ROOT (#1187) -> own
+	// (inGameRemoteParent): game.cycle -> game.phase.gameplay -> game ROOT (#1187) -> own
 	// root, so correlation is never lost. The game trace ids are still stamped as
 	// searchable attributes.
 	if parentCtx, ok := inGameRemoteParent(ctx, c.GameTraceID, c.GameTraceSpanID, c.GameplayPhaseSpanID, c.GameCycleSpanID); ok {
@@ -819,7 +819,7 @@ func (l *Loop) startSignalReceivedSpan(ctx context.Context, c gamecontext.GameCo
 
 // startCycle opens the scope the cycle's agent spans hang under. In a game whose
 // trace ids the agent knows, the spans (invoke_agent, agent.decision, agent.disabled)
-// are direct remote children of the game's game_cycle (#2648): no agent.signal_received
+// are direct remote children of the game's game.cycle (#2648): no agent.signal_received
 // span is added to the game trace, one per OTLP Export is noise there, and the trigger
 // rides the spans as an agent.signal_received event (signalEvent). The returned trigger
 // is non-nil exactly then. Without game ids the cycle keeps the agent.signal_received
@@ -1355,13 +1355,13 @@ func gameRemoteParent(ctx context.Context, gameTraceID, gameTraceSpanID string) 
 // inGameRemoteParent re-parents the agent's IN-GAME decision chain (#1325, refining
 // #1195/#1187; UC-040 BR-013). It is the target-swap entry point: the in-game cycle
 // root (agent.signal_received) and the async remote invoke_agent landing parent under
-// the coordinator's game_cycle span — the running game cycle — so a reader sees
+// the coordinator's game.cycle span — the running game cycle — so a reader sees
 // interventions nested where they actually occurred.
 //
 // Fallback order (the safety property — correlation is never lost):
-//  1. game_cycle span_id (gameCycleSpanID), if a valid hex id -> child of game_cycle.
-//  2. else gameplay_phase span_id (gameplayPhaseSpanID) -> child of gameplay_phase
-//     (the #1195 target) — used until game_cycle opens / when it is unsampled.
+//  1. game.cycle span_id (gameCycleSpanID), if a valid hex id -> child of game.cycle.
+//  2. else game.phase.gameplay span_id (gameplayPhaseSpanID) -> child of game.phase.gameplay
+//     (the #1195 target) — used until game.cycle opens / when it is unsampled.
 //  3. else the game ROOT span_id (gameTraceSpanID) -> child of the game root (the
 //     #1187 behavior) — modes with their own run() publish neither phase id.
 //  4. else (all empty/invalid) -> ctx unchanged, ok=false: own-root span. The

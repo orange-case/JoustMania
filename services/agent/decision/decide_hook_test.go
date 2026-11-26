@@ -1104,7 +1104,7 @@ func TestRemote_SpanParentAndFireCycleLink(t *testing.T) {
 	}
 	span := ds[0]
 	if span.Parent().TraceID().String() != traceID || span.Parent().SpanID().String() != phaseID {
-		t.Fatalf("parent = %v, want the gameplay_phase span %s", span.Parent(), phaseID)
+		t.Fatalf("parent = %v, want the game.phase.gameplay span %s", span.Parent(), phaseID)
 	}
 	if links := span.Links(); len(links) != 0 {
 		t.Fatalf("links = %+v, want none: the trigger is an event (#2648)", links)

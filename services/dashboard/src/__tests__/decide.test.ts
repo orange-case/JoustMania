@@ -6,7 +6,7 @@
  * Fixtures in ./fixtures are shaped like Jaeger's HTTP API response and follow
  * the span shape in services/agent/decision/decide_hook.go:
  *   rules       agent.signal_received -> { invoke_agent, agent.decision x2 }
- *   remote-act  gameplay_phase -> invoke_agent -> { chat {model}, agent.decision }
+ *   remote-act  game.phase.gameplay -> invoke_agent -> { chat {model}, agent.decision }
  *   held        invoke_agent (model only on the chat child) below threshold
  *   fallback    claude timed out, rules answered
  *   discarded   act answer dropped (game_ended), truncated answers, hostile rationale
@@ -93,7 +93,7 @@ describe("UC-035: main step 3, parseDecideTraces — remote path", () => {
     expect(row.decisions).toEqual([
       expect.objectContaining({ action: "send_controller_effect", blocked: false }),
     ]);
-    // gameplay_phase's other children must not leak in.
+    // game.phase.gameplay's other children must not leak in.
     expect(row.traceId).toBe("bbbb000000000002");
     expect(row.spanId).toBe("d1");
   });
@@ -263,11 +263,11 @@ describe("UC-035: rules path in a game trace (#2648: no agent.signal_received sp
   const inGame = () => {
     const f = structuredClone(rulesFixture) as unknown as { data: { spans: Span[] }[] };
     const spans = f.data[0].spans;
-    spans[0].operationName = "game_cycle"; // the per-cycle signal span is gone; game_cycle is the parent
+    spans[0].operationName = "game.cycle"; // the per-cycle signal span is gone; game.cycle is the parent
     const digest = { key: "decide.state.digest", type: "string", value: "sha256:9f2c" };
     const decisions = spans.filter((s) => s.operationName === "agent.decision");
     decisions.forEach((d) => d.tags.push(digest));
-    // A decision of another cycle under the same game_cycle must not attach.
+    // A decision of another cycle under the same game.cycle must not attach.
     const stray = structuredClone(decisions[0]);
     stray.spanID = "stray";
     stray.tags = stray.tags.filter((t) => t.key !== "decide.state.digest");
@@ -295,9 +295,9 @@ describe("multi-decide game trace (#1195 shape)", () => {
     expect(byId.get("R1")?.decisions.map((d) => d.action)).toEqual(["grant_shield"]);
   });
 
-  it("remote decides link only their own children, never gameplay_phase's", () => {
+  it("remote decides link only their own children, never game.phase.gameplay's", () => {
     expect(byId.get("D1")?.decisions.map((d) => d.action)).toEqual(["send_controller_effect"]);
-    // D2 has no children; the stray agent.decision under gameplay_phase must not attach.
+    // D2 has no children; the stray agent.decision under game.phase.gameplay must not attach.
     expect(byId.get("D2")?.decisions).toEqual([]);
   });
 

@@ -159,9 +159,9 @@ async def start_ffa(stack, collector: GameEventCollector, players: int = 4) -> t
 
 
 async def wait_game_cycle_id_sent(stack, game_id: str) -> None:
-    """Wait until the game_cycle id left the coordinator: the agent parents on it (UC-041 BR-004)."""
+    """Wait until the game.cycle id left the coordinator: the agent parents on it (UC-041 BR-004)."""
     await stack.otlp_sink.wait_log_async(
-        event_name="game.phase.start", attrs={"game.id": game_id, "game.phase.span": "game_cycle"}, timeout=15.0
+        event_name="game.phase.start", attrs={"game.id": game_id, "game.phase.span": "game.cycle"}, timeout=15.0
     )
 
 

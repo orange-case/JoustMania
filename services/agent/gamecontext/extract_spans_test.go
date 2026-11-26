@@ -11,7 +11,7 @@ import (
 func spanWith(attrs map[string]string, events []string) ptrace.Traces {
 	td := ptrace.NewTraces()
 	span := td.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
-	span.SetName("player_lifecycle")
+	span.SetName("game.player")
 	for k, v := range attrs {
 		span.Attributes().PutStr(k, v)
 	}
@@ -44,7 +44,7 @@ func TestApplySpans_Enrichment(t *testing.T) {
 	}
 }
 
-// TestApplySpans_AdoptsGameKind verifies the player_lifecycle / game-session span
+// TestApplySpans_AdoptsGameKind verifies the game.player / game-session span
 // now carries game.kind (#845) and the store records it alongside game.id.
 func TestApplySpans_AdoptsGameKind(t *testing.T) {
 	s := newTestStore()

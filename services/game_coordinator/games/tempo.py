@@ -300,7 +300,7 @@ class TempoMixin:
         else:
             direction = "hold"
 
-        # Child span of game_cycle; the ChangeTempo call inherits it, so the audio
+        # Child span of game.cycle; the ChangeTempo call inherits it, so the audio
         # service span links back to the game trace.
         with _base.tracer.start_as_current_span("game.music.tempo_change") as span:
             span.set_attribute("old_tempo", old_tempo)
@@ -510,8 +510,8 @@ class TempoMixin:
         Runs alongside the main game loop and periodically checks
         if tempo should change based on game progression.
 
-        Sets game_cycle as active context so each game.music.tempo_change span
-        appears directly under game_cycle in traces.
+        Sets game.cycle as active context so each game.music.tempo_change span
+        appears directly under game.cycle in traces.
         """
         logger.info("Music loop started")
 
