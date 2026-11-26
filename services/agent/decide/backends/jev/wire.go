@@ -138,10 +138,12 @@ type jevState struct {
 	ShieldBudgetS      *float64 `json:"shield_budget_s,omitempty"`
 	ShieldRechargePerS *float64 `json:"shield_recharge_per_s,omitempty"`
 	ShieldMinBurstS    *float64 `json:"shield_min_burst_s,omitempty"`
-	// Goal is the request's goal (#2498, decide-contract.md §14.4): set only when
-	// Request.Goal is (decision.goal_in_prompt on, a profile with terms), absent
-	// otherwise, so a goal-off body is byte-identical to the one before.
+	// Goal is the request's goal (#2498, decide-contract.md §14.4), absent when
+	// the game's goal profile has no terms.
 	Goal *jevGoal `json:"goal,omitempty"`
+	// OperatorBrief is the request's cleaned operator brief (decide-contract.md §3),
+	// state the model reads; the criteria never carry it, so the gate stays as calibrated.
+	OperatorBrief string `json:"operator_brief,omitempty"`
 }
 
 // jevGoal is Request.Goal as structured state: the profile name, its target
@@ -213,7 +215,7 @@ func encodeRequest(model string, req decide.Request, chosen string) (wireRequest
 		}
 		questions[q.ID] = jq
 	}
-	body, err := json.Marshal(jevRequest{Model: model, State: encodeState(req.State, chosen, req.Goal), Questions: questions})
+	body, err := json.Marshal(jevRequest{Model: model, State: encodeState(req.State, chosen, req.Goal, req.OperatorBrief), Questions: questions})
 	if err != nil {
 		return wireRequestOut{}, fmt.Errorf("jev: marshal request: %w", err)
 	}
@@ -226,7 +228,7 @@ func encodeQuestion(q decide.Question, req decide.Request, chosen string) (jevQu
 		if len(q.Options) == 0 || len(q.Options) > maxChoiceOptions {
 			return jevQuestion{}, fmt.Errorf("%d options, want 1..%d", len(q.Options), maxChoiceOptions)
 		}
-		return jevQuestion{Type: typeChoice, Instructions: q.Text, Criteria: choiceCriteria(q, req.State, chosen, req.PromptProfile)}, nil
+		return jevQuestion{Type: typeChoice, Instructions: q.Text, Criteria: choiceCriteria(q, req.State, chosen)}, nil
 	case decide.KindScore:
 		instructions, ladder := scoreLadder(q, req, chosen)
 		return jevQuestion{Type: typeScore, Instructions: instructions, Criteria: ladder}, nil
@@ -241,10 +243,10 @@ func encodeQuestion(q decide.Question, req decide.Request, chosen string) (jevQu
 	}
 }
 
-// encodeState copies st (and goal, when set) into the wire state. Jev rejects
+// encodeState copies st (and goal and brief, when set) into the wire state. Jev rejects
 // non-finite numbers (400), so an unobservable NaN/Inf reading is dropped like a
 // missing one.
-func encodeState(st decide.State, chosen string, goal *decide.GoalLines) jevState {
+func encodeState(st decide.State, chosen string, goal *decide.GoalLines, brief string) jevState {
 	players := make([]decide.PlayerState, len(st.Players))
 	for i, p := range st.Players {
 		p.Intensity = finiteOrNil(p.Intensity)
@@ -281,6 +283,7 @@ func encodeState(st decide.State, chosen string, goal *decide.GoalLines) jevStat
 
 		ChosenIntervention: chosen,
 		Goal:               wireGoal(goal),
+		OperatorBrief:      brief,
 	}
 }
 

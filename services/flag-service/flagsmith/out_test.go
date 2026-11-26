@@ -35,7 +35,7 @@ var testFlags = []struct{ set, key string }{
 	{"agent", "decision.min_interval_ms"},
 	{"agent", "decision.claude.act_confidence_threshold"},
 	{"agent", "llm.eligible_game_kinds"},
-	{"agent", "decision.prompt_profile"},
+	{"game", "shield.activation"},
 	{"interventions", "music_tempo_override"},
 	{"interventions", "global_sensitivity_override"},
 	{"interventions", "player_sensitivity_factor"},

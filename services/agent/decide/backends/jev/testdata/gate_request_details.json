@@ -59,7 +59,7 @@
   "questions": {
     "ffa.magnitude.help": {
       "type": "score",
-      "instructions": "The agent will apply adjust_player_sensitivity (Change one player's sensitivity, protecting them (harder to eliminate) or handicapping them (easier to eliminate)) to help a struggling player (make them harder to eliminate). How strong should the change be?",
+      "instructions": "The agent will apply adjust_player_sensitivity (Change one player's sensitivity, making them harder or easier to eliminate) to make the target harder to eliminate. How strong should the change be?",
       "criteria": [
         "A slight change: 0.9 factor (neutral is 1).",
         "A moderate change: 0.8 factor (neutral is 1).",
@@ -68,7 +68,7 @@
     },
     "ffa.magnitude.rein_in": {
       "type": "score",
-      "instructions": "The agent will apply adjust_player_sensitivity (Change one player's sensitivity, protecting them (harder to eliminate) or handicapping them (easier to eliminate)) to rein in the player with the most headroom (make them easier to eliminate). How strong should the change be?",
+      "instructions": "The agent will apply adjust_player_sensitivity (Change one player's sensitivity, making them harder or easier to eliminate) to make the target easier to eliminate. How strong should the change be?",
       "criteria": [
         "A slight change: 1.17 factor (neutral is 1).",
         "A moderate change: 1.33 factor (neutral is 1).",
@@ -77,11 +77,11 @@
     },
     "ffa.target": {
       "type": "choice",
-      "instructions": "The agent will apply adjust_player_sensitivity (Change one player's sensitivity, protecting them (harder to eliminate) or handicapping them (easier to eliminate)). Which player should receive it?",
+      "instructions": "The agent will apply adjust_player_sensitivity (Change one player's sensitivity, making them harder or easier to eliminate). Which player should receive it?",
       "criteria": {
-        "MOCK0002": "Player MOCK0002. Safe: well below the death threshold (margin 1.70). Moving the least of 3 alive players. Most headroom of the alive players right now. Skill 0.90. Most headroom below the death threshold right now: reining this player in would even the game.",
-        "MOCK0003": "Player MOCK0003. Near the death threshold: one twitch from elimination (margin 0.10). Moving the most of 3 alive players. Currently struggling. Skill 0.25. Struggling: helping this player would even the game.",
-        "MOCK0004": "Player MOCK0004. Elevated danger: moving hard, some headroom left (margin 0.90). Moving the 2nd most of 3 alive players. Skill 0.50. Neither the calmest nor struggling: little to balance."
+        "MOCK0002": "Player MOCK0002. Safe: well below the death threshold (margin 1.70). Moving the least of 3 alive players. Most headroom of the alive players right now. Skill 0.90. Most headroom below the death threshold right now.",
+        "MOCK0003": "Player MOCK0003. Near the death threshold: one twitch from elimination (margin 0.10). Moving the most of 3 alive players. Currently struggling. Skill 0.25. Struggling: near the death threshold right now.",
+        "MOCK0004": "Player MOCK0004. Elevated danger: moving hard, some headroom left (margin 0.90). Moving the 2nd most of 3 alive players. Skill 0.50. Neither the calmest nor struggling right now."
       }
     }
   }

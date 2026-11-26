@@ -173,10 +173,6 @@ const (
 	// outcome.
 	AttrDecideBlocked     = "decide.blocked"
 	AttrDecideBlockReason = "decide.block_reason"
-	// AttrDecidePromptProfile is the normalized decision.prompt_profile a remote
-	// request was rendered with (v1 or neutral; #2467 PR 5, decide-contract.md §12).
-	// Absent on the rules path.
-	AttrDecidePromptProfile = "decide.prompt_profile"
 )
 
 // decide.outcome values.
@@ -222,17 +218,6 @@ type decideEngine interface {
 type actedRecorder interface {
 	RecordActed(Decision)
 }
-
-// PromptProfileSource returns the decision.prompt_profile of one game, normalized
-// (decide.NormalizePromptProfile). main.go wires flags.Flags.PromptProfile, which
-// reads it in the game's flag context and gives v1 on any error.
-type PromptProfileSource func(ctx context.Context, gameID string) string
-
-// SetPromptProfileSource injects the prompt-profile source of remote decide
-// requests (#2467 PR 5, UC-040 BR-036). nil (the default and every older test)
-// leaves Request.PromptProfile empty, which every backend renders as v1. Set at
-// construction, before the loop serves.
-func (l *Loop) SetPromptProfileSource(src PromptProfileSource) { l.promptProfile = src }
 
 // GoalSource resolves one game's goal profile (#2479, decide-contract.md §14.4).
 // main.go wires flags.Flags.GoalProfile in the game's flag context.
@@ -740,27 +725,19 @@ func (l *Loop) runDecideRemote(root context.Context, fired flags.Snapshot, backe
 		start:     start,
 		stateAt:   c.UpdatedAt,
 	}
-	// The prompt profile is read per request in the game's flag context (#2467 PR 5);
-	// it changes only the wording a backend renders, never the questions or the state.
-	if l.promptProfile != nil {
-		rec.req.PromptProfile = decide.NormalizePromptProfile(l.promptProfile(root, c.SessionID))
-	}
-	// The operator brief (#2687, UC-040 BR-044): read per request, claude
-	// only; "" (no brief, jev, rules) leaves the request byte-identical.
+	// The operator brief (#2687, UC-040 BR-044): read per request.
 	rec.req.OperatorBrief = l.operatorBriefFor(root, rec.used, c.SessionID)
 	// #2695 (UC-042 A13): the retro tells the analyst whether the in-game model saw it.
 	if rec.req.OperatorBrief != "" {
 		l.briefLog.Note(c.SessionID)
 	}
 	// The prediction ask (#2479, UC-040 A45): only with decision.predictions.ask_model
-	// and decision.predictions_enabled on (fire-time flags) and a claude
-	// backend; otherwise the request stays v1.
+	// and decision.predictions_enabled on (fire-time flags).
 	if askModelPrediction(fired, rec.used) {
 		rec.req.PredictionAsk = decide.PredictionQuestion(rec.req.State)
 	}
-	// The goal lines (#2479, decide-contract.md §14.4): only under
-	// decision.goal_in_prompt, and only for claude or jev (jev's goal state
-	// and gate criterion, #2498); otherwise the request stays byte-identical.
+	// The goal lines (#2479, decide-contract.md §14.4): whenever the game's goal
+	// profile has terms.
 	rec.req.Goal = l.goalLines(root, fired, rec.used, c)
 	// Fire-time threshold: jev's gate acts at it; the landing re-read below
 	// overwrites it with the LIVE threshold, which is what routing uses.
@@ -1106,9 +1083,6 @@ func (l *Loop) setDecideAttributes(span trace.Span, rec *decideRecord, c gamecon
 		if rec.blocked {
 			attrs = append(attrs, attribute.String(AttrDecideBlockReason, string(rec.blockReason)))
 		}
-	}
-	if rec.req.PromptProfile != "" {
-		attrs = append(attrs, attribute.String(AttrDecidePromptProfile, rec.req.PromptProfile))
 	}
 	attrs = append(attrs, operatorBriefAttributes(rec.req.OperatorBrief)...)
 	attrs = append(attrs, magnitudeBoundsAttributes(rec.req.Bounds)...)

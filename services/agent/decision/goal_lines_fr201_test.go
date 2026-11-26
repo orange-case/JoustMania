@@ -17,13 +17,17 @@ import (
 )
 
 // UC: UC-042 A12 BR-009
-// goal_lines_fr201_test.go: a claude or jev (#2498) request carries the
-// goal lines only under decision.goal_in_prompt, never for neutral alone (#2479, FR-201,
-// decide-contract.md §14.4). Under v1 with goal_in_prompt off the request, and so
-// the prompt bytes, are unchanged.
+// goal_lines_fr201_test.go: a claude or jev request carries the goal lines
+// whenever the game's goal profile has terms (#2479, FR-201, decide-contract.md
+// §14.4); a profile without terms adds none.
 
 func testGoalProfile() goal.Profile {
 	return goal.FromObjectives(map[string]float64{"endurance": 0.7, "balanced": 0.1})
+}
+
+// noTermsProfile is a goal profile without terms (mixed objectives).
+func noTermsProfile() goal.Profile {
+	return goal.FromObjectives(map[string]float64{"endurance": 0.25, "balanced": 0.25})
 }
 
 // goalRun is one remote decide cycle with a goal source wired: the request, the
@@ -39,15 +43,14 @@ func (r goalRun) attr(key string) (string, bool) {
 	return v.Emit(), ok
 }
 
-func runGoal(t *testing.T, goalInPrompt bool, profile string, backend string) goalRun {
+func runGoal(t *testing.T, backend string) goalRun {
 	t.Helper()
-	return runGoalWith(t, testGoalProfile(), goalInPrompt, profile, backend)
+	return runGoalWith(t, testGoalProfile(), backend)
 }
 
-func runGoalWith(t *testing.T, gp goal.Profile, goalInPrompt bool, profile string, backend string) goalRun {
+func runGoalWith(t *testing.T, gp goal.Profile, backend string) goalRun {
 	t.Helper()
 	snap := remoteSnapshot(time.Second)
-	snap.Decision.GoalInPrompt = goalInPrompt
 	be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.9, "A", 0.5, "shield"))
 	if backend != "" {
 		snap.Decision.Backend = backend
@@ -55,7 +58,6 @@ func runGoalWith(t *testing.T, gp goal.Profile, goalInPrompt bool, profile strin
 		snap.Decision.Jev = snap.Decision.Claude
 	}
 	h := newRemoteHarness(t, snap, be)
-	h.loop.SetPromptProfileSource(func(context.Context, string) string { return profile })
 	h.loop.SetGoalSource(func(_ context.Context, c gamecontext.GameContext) goal.Profile {
 		if c.SessionID != remoteGameID {
 			t.Errorf("goal read for %q", c.SessionID)
@@ -67,14 +69,8 @@ func runGoalWith(t *testing.T, gp goal.Profile, goalInPrompt bool, profile strin
 }
 
 func TestRemote_GoalLines(t *testing.T) {
-	t.Run("UC-042/A12 v1 with goal_in_prompt off: no lines, the prompt bytes unchanged", func(t *testing.T) {
-		r := runGoal(t, false, "v1", "")
-		if _, ok := r.attr(keys.AttrDecideGoalProfile); r.req.Goal != nil || ok {
-			t.Fatalf("goal lines %+v, span attribute %v", r.req.Goal, ok)
-		}
-	})
-	t.Run("UC-042/A12 goal_in_prompt on adds the lines under v1, labelled by source", func(t *testing.T) {
-		r := runGoal(t, true, "v1", "")
+	t.Run("UC-042/A12 a profile with terms adds the lines, labelled by source", func(t *testing.T) {
+		r := runGoal(t, "")
 		profile, ok := r.attr(keys.AttrDecideGoalProfile)
 		source, _ := r.attr(keys.AttrDecideGoalSource)
 		if r.req.Goal == nil || !ok || profile != goal.NameLongRunningGame || source != goal.SourceFromObjectives {
@@ -86,58 +82,42 @@ func TestRemote_GoalLines(t *testing.T) {
 		if !strings.HasPrefix(r.req.Goal.Now, "duration=") {
 			t.Fatalf("now line = %q", r.req.Goal.Now)
 		}
-		if p := llmio.Render(r.req); strings.Contains(p.System, "pursue the goal targets") {
-			t.Fatal("v1 must keep its system prompt")
+		if p := llmio.Render(r.req); strings.Contains(p.System, "closer, more dramatic") || !strings.Contains(p.User, "\ngoal: long_running_game ") {
+			t.Fatal("a request with goal lines must carry the goal line and no prose goal")
 		}
 	})
-	t.Run("UC-042/A12 neutral alone carries no goal lines (a separate factor)", func(t *testing.T) {
-		r := runGoal(t, false, "neutral", "")
+	t.Run("UC-042/A12 a profile without terms adds no lines and keeps the prose goal", func(t *testing.T) {
+		r := runGoalWith(t, noTermsProfile(), "")
 		if _, ok := r.attr(keys.AttrDecideGoalProfile); r.req.Goal != nil || ok {
-			t.Fatalf("neutral without goal_in_prompt: goal lines %+v, span attribute %v", r.req.Goal, ok)
+			t.Fatalf("goal lines %+v, span attribute %v", r.req.Goal, ok)
 		}
 		if p := llmio.Render(r.req); !strings.Contains(p.System, "closer, more dramatic") || strings.Contains(p.User, "\ngoal: ") {
-			t.Fatal("neutral without goal lines must keep the #2467 neutral prompt")
+			t.Fatal("without goal lines the prompt keeps the prose goal")
 		}
 	})
-	t.Run("UC-042/A12 neutral with goal_in_prompt: the goal line and no prose goal", func(t *testing.T) {
-		r := runGoal(t, true, "neutral", "")
-		if p := llmio.Render(r.req); strings.Contains(p.System, "closer, more dramatic") || !strings.Contains(p.User, "\ngoal: long_running_game ") {
-			t.Fatal("neutral with goal lines must carry the goal line and no prose goal")
-		}
-	})
-	t.Run("UC-042/A12 jev gets the goal lines under goal_in_prompt (#2498), in both profiles", func(t *testing.T) {
-		for _, profile := range []string{"v1", "neutral"} {
-			r := runGoal(t, true, profile, flags.DecisionBackendJev)
-			if got, ok := r.attr(keys.AttrDecideGoalProfile); r.req.Goal == nil || !ok || got != goal.NameLongRunningGame {
-				t.Fatalf("%s: jev goal lines %+v, span attribute %q (%v)", profile, r.req.Goal, got, ok)
-			}
-		}
-	})
-	t.Run("UC-042/A12 jev with goal_in_prompt off gets no goal lines, neutral included", func(t *testing.T) {
-		for _, profile := range []string{"v1", "neutral"} {
-			r := runGoal(t, false, profile, flags.DecisionBackendJev)
-			if _, ok := r.attr(keys.AttrDecideGoalProfile); r.req.Goal != nil || ok {
-				t.Fatalf("%s: jev goal lines %+v, span attribute %v", profile, r.req.Goal, ok)
-			}
+	t.Run("UC-042/A12 jev gets the goal lines too (#2498)", func(t *testing.T) {
+		r := runGoal(t, flags.DecisionBackendJev)
+		if got, ok := r.attr(keys.AttrDecideGoalProfile); r.req.Goal == nil || !ok || got != goal.NameLongRunningGame {
+			t.Fatalf("jev goal lines %+v, span attribute %q (%v)", r.req.Goal, got, ok)
 		}
 	})
 	t.Run("UC-042/A12 the off-band terms are computed in code (#2498)", func(t *testing.T) {
 		// A 1 s duration maximum: the measured duration is above it.
 		one := 1.0
 		quick := goal.Profile{Name: "quick", Terms: []goal.Term{{Characteristic: "duration", Max: &one, Phase: goal.PhaseWhole, Weight: 1}}}
-		r := runGoalWith(t, quick, true, "v1", flags.DecisionBackendJev)
+		r := runGoalWith(t, quick, flags.DecisionBackendJev)
 		if r.req.Goal == nil || !reflect.DeepEqual(r.req.Goal.OffBand, []string{"duration"}) {
 			t.Fatalf("off band = %+v (now %q), want [duration]", r.req.Goal, r.req.Goal.Now)
 		}
 		// long_running_game at 20 s: the 180 s duration minimum cannot be judged yet,
 		// only the pace (3/min against <=1/min) is off.
-		if long := runGoal(t, true, "v1", flags.DecisionBackendJev); !reflect.DeepEqual(long.req.Goal.OffBand, []string{"elimination_pace"}) {
+		if long := runGoal(t, flags.DecisionBackendJev); !reflect.DeepEqual(long.req.Goal.OffBand, []string{"elimination_pace"}) {
 			t.Fatalf("off band %v (now %q), want [elimination_pace] and no duration", long.req.Goal.OffBand, long.req.Goal.Now)
 		}
 	})
 	t.Run("UC-042/BR-009 the goal lines change neither the request's state and questions nor what lands", func(t *testing.T) {
-		with := runGoal(t, true, "v1", "")
-		without := runGoal(t, false, "v1", "")
+		with := runGoal(t, "")
+		without := runGoalWith(t, noTermsProfile(), "")
 		if with.req.Goal == nil {
 			t.Fatal("the comparison is vacuous: no goal lines")
 		}
@@ -168,11 +148,8 @@ func TestRemote_GoalLines(t *testing.T) {
 
 func TestGoalLines_NoTermsNoLines(t *testing.T) {
 	l := &Loop{}
-	l.SetGoalSource(func(context.Context, gamecontext.GameContext) goal.Profile {
-		return goal.FromObjectives(map[string]float64{"endurance": 0.25, "balanced": 0.25}) // mixed
-	})
+	l.SetGoalSource(func(context.Context, gamecontext.GameContext) goal.Profile { return noTermsProfile() })
 	snap := remoteSnapshot(time.Second)
-	snap.Decision.GoalInPrompt = true
 	if got := l.goalLines(context.Background(), snap, flags.DecisionBackendClaude, gamecontext.GameContext{}); got != nil {
 		t.Fatalf("UC-042/A12 a profile without terms (mixed) must render no lines, got %+v", got)
 	}

@@ -51,12 +51,21 @@ const probeInterval = 5 * time.Second
 // defaultServiceName is the agent's OTEL service name default. It MUST stay
 // identical everywhere it is used: the exported resource (otel.go) and the
 // extractor self-skip (SetOwnService) rely on matching values to break the
-// otlp/agent self-ingestion loop.
+// otlp_http/agent self-ingestion loop.
 const defaultServiceName = "agent"
 
 // resolveServiceName resolves the agent's OTEL service name (env override or default).
 func resolveServiceName() string {
 	return getEnv("OTEL_SERVICE_NAME", defaultServiceName)
+}
+
+// otlpHTTPAddr is AGENT_OTLP_HTTP_ADDR, ":4318" when unset; set but empty turns
+// the OTLP/HTTP receiver off.
+func otlpHTTPAddr() string {
+	if v, ok := os.LookupEnv("AGENT_OTLP_HTTP_ADDR"); ok {
+		return v
+	}
+	return ":4318"
 }
 
 func getEnv(key, defaultValue string) string {
@@ -355,6 +364,7 @@ func run() error {
 	c.buildPromotion()
 	c.buildExperimentStack()
 	server := c.buildPipeline(listenAddr, healthAddr)
+	server.otlpHTTPAddr = otlpHTTPAddr()
 
 	if err := server.run(ctx); err != nil {
 		slog.Error("gRPC server failed", "error", err)
@@ -637,10 +647,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	loop.SetAlreadyAppliedRecorder(func(intervention, serial string) {
 		mux.AppendInterventionInPlace(gameID, intervention, serial)
 	})
-	// UC-040 BR-036 (#2467 PR 5): remote decide requests carry the game's
-	// decision.prompt_profile (v1 on any read error).
-	loop.SetPromptProfileSource(c.agentFlags.PromptProfile)
-	// UC-040 BR-044 (#2687): claude requests carry the operator's
+	// UC-040 BR-044 (#2687): claude and jev requests carry the operator's
 	// decision.operator_brief ("" on any read error: no brief).
 	loop.SetOperatorBriefSource(c.agentFlags.OperatorBrief)
 	loop.SetBriefLog(c.briefLog)
@@ -648,8 +655,7 @@ func (c *components) newDecisionLoop(gameID string) *decision.Loop {
 	// decision.magnitude_bounds (code default ranges on any read error).
 	loop.SetMagnitudeBoundsSource(c.agentFlags.MagnitudeBounds)
 	loop.SetBoundsLog(c.boundsLog)
-	// #2479: goal.profile in the game's flag context, for the prompt's goal lines
-	// (only under decision.goal_in_prompt).
+	// #2479: goal.profile in the game's flag context, for the prompt's goal lines.
 	loop.SetGoalSource(c.goalProfile)
 	// UC-048 BR-012 (#2395): a grant_shield without a value gets the
 	// interventions/shield_seconds "default" variant, read at use time through the
@@ -932,7 +938,7 @@ func (c *components) buildPipeline(listenAddr, healthAddr string) *serverCompone
 	// GameContext multiplexer (#845 PR B): one Store partition per game_id, plus the
 	// fallback partition "" for unlabeled signals (zero-regression — single-game
 	// mode collapses to exactly today's single-store behavior). The factory applies
-	// the lifecycle TTLs/clock, skips the agent's own telemetry (otlp/agent
+	// the lifecycle TTLs/clock, skips the agent's own telemetry (otlp_http/agent
 	// self-ingestion loop), and wires OnGameEnd per partition so the retrospective
 	// fires per game on the right partition's state. The per-game loop factory reads
 	// c.mux at call time.

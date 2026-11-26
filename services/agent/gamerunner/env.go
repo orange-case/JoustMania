@@ -22,9 +22,8 @@ const (
 	envMode        = "SHADOW_GAME_MODE"
 	envSensitivity = "SHADOW_GAME_SENSITIVITY"
 
-	// Experiment binding of the one-shot game (#2530), both or neither: an operator
-	// A/B script (scripts/agent-group-ab.sh) binds each game to its arm so arm values
-	// of that experiment resolve in it.
+	// Experiment binding of the one-shot game (#2530), both or neither: it binds the game
+	// to an arm so arm values of that experiment resolve in it.
 	envExperimentID = "SHADOW_GAME_EXPERIMENT_ID"
 	envArm          = "SHADOW_GAME_ARM"
 

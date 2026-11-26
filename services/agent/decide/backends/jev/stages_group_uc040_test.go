@@ -78,7 +78,7 @@ func TestPlanDetails_GroupLever(t *testing.T) {
 	t.Run("UC-048/A13 the criteria describe each option by the players it covers, no verdict", func(t *testing.T) {
 		req := groupRequestJev(3)
 		q := detailsRequest(req, decide.IntvGrantGroupShield).ask.Questions[0]
-		crit := choiceCriteria(q, req.State, decide.IntvGrantGroupShield, "")
+		crit := choiceCriteria(q, req.State, decide.IntvGrantGroupShield)
 		if crit[0].description != "All 3 alive players: MOCK0002, MOCK0003, MOCK0004." {
 			t.Fatalf("group:all = %q", crit[0].description)
 		}

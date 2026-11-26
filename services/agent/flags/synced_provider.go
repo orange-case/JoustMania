@@ -76,6 +76,10 @@ var errProviderShutDown = errors.New("flagd provider shut down before its first 
 // the domain NOT_READY while Init runs) and while the sync stream is lost (STALE / ERROR
 // until flagd sends again), every evaluation returns the caller's default with
 // PROVIDER_NOT_READY, as on the RPC resolver when flagd was unreachable (UC-045 A3).
+// Unlike the Python provider, a STALE domain serves no last-synced values. After an
+// unparseable configuration (ERROR), v0.8.0 sends READY on the next valid one, even an
+// identical one. It also ends the sync stream every 10 min (StreamDeadlineMs) and
+// re-opens it at once with no event, so reads stay served.
 type syncedProvider struct {
 	name    string
 	factory innerFactory

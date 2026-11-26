@@ -57,8 +57,7 @@
         "standard": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield",
         "full": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,adjust_global_sensitivity,adjust_global_difficulty,eliminate_player,revive_player,end_game",
         "shadow_experimental": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,adjust_global_sensitivity,adjust_global_difficulty,eliminate_player,revive_player,end_game,set_player_handicap,ramp_tempo,toughness_boost,soft_penalty,auto_rubberband",
-        "standard_group": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,grant_group_shield",
-        "shadow_group": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,adjust_global_sensitivity,adjust_global_difficulty,eliminate_player,revive_player,end_game,set_player_handicap,ramp_tempo,toughness_boost,soft_penalty,auto_rubberband,grant_group_shield"
+        "standard_group": "play_audio_cue,send_controller_effect,adjust_volume,adjust_music_tempo,set_pacing_profile,adjust_player_sensitivity,grant_shield,grant_group_shield"
       },
       "defaultVariant": "ambient"
     },
@@ -755,14 +754,6 @@
       },
       "defaultVariant": "default"
     },
-    "decision.prompt_profile": {
-      "state": "ENABLED",
-      "variants": {
-        "v1": "v1",
-        "neutral": "neutral"
-      },
-      "defaultVariant": "v1"
-    },
     "decision.operator_brief": {
       "state": "ENABLED",
       "variants": {
@@ -790,14 +781,6 @@
         }
       },
       "defaultVariant": "default"
-    },
-    "decision.goal_in_prompt": {
-      "state": "ENABLED",
-      "variants": {
-        "on": true,
-        "off": false
-      },
-      "defaultVariant": "off"
     },
     "goal.profile": {
       "state": "ENABLED",

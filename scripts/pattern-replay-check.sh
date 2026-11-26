@@ -31,7 +31,7 @@
 # --use-aliases passes `--use-aliases` to `docker compose run`, so the throwaway agent
 # carries the service's network alias (`agent`). The collector sends the stack's spans
 # to that alias; without it a one-off container observes nothing and its decision list
-# stays empty (same as scripts/agent-group-ab.sh, #2526 finding 1, #2529). With it the
+# stays empty (#2526 finding 1, #2529). With it the
 # throwaway agent observes EVERY game on the stack, real ones included, so stop the
 # stack's own agent first and keep interventions off for a real game.
 #
