@@ -71,7 +71,7 @@ func spanGameLabels(attrs pcommon.Map) gameLabels {
 
 // isOwnResource reports whether a resource belongs to this agent itself
 // (service.name matches ownService) — its telemetry is skipped to break the
-// otlp/agent fan-out feedback loop.
+// otlp_http/agent fan-out feedback loop.
 func (s *Store) isOwnResource(res pcommon.Resource) bool {
 	if s.ownService == "" {
 		return false

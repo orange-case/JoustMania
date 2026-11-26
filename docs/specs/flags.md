@@ -97,7 +97,7 @@ The agent's governor: existence (`enabled`), actuation gates, allow-list, policy
 | `policy.battery_threshold` | int | strict=30, default=20, lenient=10, off=0 | `default` = 20 | N | agent: services/agent/flags/flags.go:keyBatteryThreshold -> services/agent/decision/decision.go:Loop.batteryBlocks; game-coordinator: services/game_coordinator/interventions.py:InterventionFlagReader.battery_threshold (enforcement chain: services/game_coordinator/intervention_policy.py:EnforcementChain.check) | manual edit only | live (agent per cycle; NB rules-engine ObjectiveRules uses static DefaultStaticConfig policy, services/agent/decision/objectives.go:73 / services/agent/decision/config.go:124) |
 | `policy.max_interventions_per_minute` | int | conservative=1, default=2, aggressive=4, lively=8, frenzy=20 (#2518: operator-only, for a cheap remote backend on stage. Under the coordinator backstop `default` 60: `lively` with up to 7 games at the full budget, `frenzy` with up to 3; with more games, or other writers of interventions next to a `frenzy` game, select the backstop's `generous` 120. The shield caps and cooldown below bound shields at any budget) | `default` = 2 | N | agent: services/agent/flags/flags.go:674 -> services/agent/decision/budget.go (`admitOrHold`: rank-order admission + 1.0 nudge reserve, UC-040 BR-014/BR-015) -> services/agent/decision/ratelimit.go (weighted limiter) | talk stage helper scripts/talk-stage.sh (stage baseline `aggressive`, scripts/talk-baseline.json; #1326); operator flag-service overlay (`lively`, `frenzy`, #2518); never the agent (C-034) | live (per cycle) |
 | `llm.eligible_game_kinds` | string | none="", real_only="real", real_and_shadow="real,shadow", shadow_only="shadow" (#2530) | `real_only` = "real" | N | agent: services/agent/flags/flags.go:870 (llmGate) -> in-game decisions services/agent/decision/decide_hook.go:404 (`gateRemoteDecide`), the retro services/agent/decision/retro_capture.go:384, the proposer services/agent/decision/llm_admission.go:79-80 (PR #1284) | `scripts/talk-stage.sh fallback on/off` and `reset` (UC-070 A9, #1316); `scripts/agent-group-ab.sh` writes `shadow_only` for the length of a run, so no real game makes a remote LLM call while it runs (#2530); otherwise manual edit | live (per decide cycle, retro and proposer) |
-| `llm.max_requests_per_minute` | int | conservative=3, default=6, aggressive=12, stage=30 (PR #1257), interactive=120, frenzy=600 (#2518: operator-only, for a cheap remote backend such as Jev; at the shipped cadence one game wants about 20 calls a minute (NFR-012), so 120 leaves the per-game cadence as the binding cap for up to 6 games, or for one game at a cadence lowered to about 0.5 s; `frenzy` (the value of the ci `journey` variant) takes the budget out of the way, so the per-game cadence, the one call in flight and the backend's latency are the only limits); `journey`=600 only in services/flagd/ci/agent.json (service-test journeys, #1788) | `default` = 6 | N | agent: services/agent/flags/flags.go:854 -> one shared budget (`services/agent/decision/llmbudget.go`) charged by in-game decisions services/agent/decision/decide_hook.go:446 (`gateRemoteDecide`), the retro services/agent/decision/retro_capture.go:391 and the proposer services/agent/decision/llm_admission.go:84 (PR #1284); enforced cap = `min(AGENT_LLM_MAX_REQUESTS_PER_MINUTE, flag)` (services/agent/decision/llmbudget.go:26 `ceilBudget`, unset env = no ceiling, #1788, C-034); a decide call on claude also needs a slot under `decision.<backend>.max_requests_per_minute` (#2519, `allowBackend`), so `frenzy` binds jev decide calls, the retro and the proposer only | talk stage helper scripts/talk-stage.sh reset (`stage`); operator flag-service overlay (`interactive`, `frenzy`, #2518); never the agent (C-034) | live (per decide cycle, retro and proposer) |
+| `llm.max_requests_per_minute` | int | conservative=3, default=6, aggressive=12, stage=30 (PR #1257), interactive=120, frenzy=600 (#2518: operator-only, for a cheap remote backend such as Jev; at the shipped cadence one game wants about 20 calls a minute (NFR-012), so 120 leaves the per-game cadence as the binding cap for up to 6 games, or for one game at a cadence lowered to about 0.5 s; `frenzy` (the value of the ci `journey` variant) takes the budget out of the way, so the per-game cadence, the one call in flight and the backend's latency are the only limits); `journey`=600 only in services/flagd/ci/agent.json (service-test journeys, #1788) | `default` = 6 | N | agent: services/agent/flags/flags.go:854 -> one shared budget (`services/agent/decision/llmbudget.go`) charged by in-game decisions services/agent/decision/decide_hook.go:446 (`gateRemoteDecide`), the retro services/agent/decision/retro_capture.go:391 and the proposer services/agent/decision/llm_admission.go:84 (PR #1284); enforced cap = `min(AGENT_LLM_MAX_REQUESTS_PER_MINUTE, flag)` (services/agent/decision/llmbudget.go:26 `ceilBudget`, unset env = no ceiling, #1788, C-034); a value ≤ 0 means closed: no remote call is admitted; a decide call on claude also needs a slot under `decision.<backend>.max_requests_per_minute` (#2519, `allowBackend`), so `frenzy` binds jev decide calls, the retro and the proposer only | talk stage helper scripts/talk-stage.sh reset (`stage`); operator flag-service overlay (`interactive`, `frenzy`, #2518); never the agent (C-034) | live (per decide cycle, retro and proposer) |
 | `policy.coordinator_backstop_per_minute` | int | default=60, strict=20, generous=120 | `default` = 60 | N | game-coordinator: services/game_coordinator/interventions.py:InterventionFlagReader.backstop_budget (via InterventionManager._refresh_budget, at start and every evaluation pass) | manual edit only | live (re-read each evaluate_all, i.e. on each flagd config-change event) |
 | `policy.max_shields_per_player_per_game` | int | unlimited=0, one=1, default=3, generous=6 | `default` = 3 | N (none allowed: the readers resolve it with different contexts; tests/contract/test_flagd_resolution.py `test_shield_limit_flags_carry_no_targeting`) | game-coordinator: services/game_coordinator/games/shields.py `_shield_limits` <- `grant_shield` <- lifecycle_handlers.py `handle_shield_seconds` (the backstop, UC-048 A7, BR-007; a read error or a negative value gives 3); agent: services/agent/flags/flags.go `Evaluate` (`Policy.MaxShieldsPerPlayerPerGame`, `nonNegativeIntFlag`) -> services/agent/decision/shieldgate.go `checkShield` (UC-048 A6: refused `shield_cap_reached` when the coordinator's `game_player_shield_gate{stat="grants"}` reached it; same defaults) | operator (flag-service overlay or manual edit); never the agent (C-034) | live (coordinator: read per grant; agent: read per decision cycle and again when a remote answer lands; a lower cap refuses at once once the count reached it) |
 | `policy.shield_cooldown_seconds` | int | off=0, short=8, default=15, long=30 | `default` = 15 | N (none allowed, as above) | game-coordinator: services/game_coordinator/games/shields.py `_shield_limits` <- `grant_shield` (UC-048 A7, BR-007: a grant is refused while now is before the end of the player's last agent shield plus this value; 0 = off, which also restores extending a running shield; a read error or a negative value gives 15); agent: none (UC-048 A6: the agent refuses `shield_cooldown` from the coordinator's `game_player_shield_gate{stat="cooldown_until"}`, which adds the value read at the grant) | operator (flag-service overlay or manual edit); never the agent (C-034) | live (coordinator: read per grant and added to the stored shield end, so a flip applies at the next grant) |
@@ -126,7 +126,7 @@ The agent's governor: existence (`enabled`), actuation gates, allow-list, policy
 | `lifecycle.evict_interval_seconds` | float | default=1, fast=0.5, slow=2 | `default` = 1 | N | agent: services/agent/flags/flags.go:Flags.Lifecycle -> services/agent/flags/holder.go (LifecycleHolder) primed services/agent/flags/provider.go:setupFlagd | manual edit only | live: reloaded on an OpenFeature ProviderConfigChange (#927; the in-process resolver emits one per flag sync, #1713) and every 1 s by `LifecycleHolder.Poll` (`LifecycleReloadInterval`, #1709) as the safety net |
 | `decision.throttle_seconds` | float | default=1, chatty=0.5, quiet=5 | `default` = 1 | N | agent: services/agent/flags/flags.go:Flags.Lifecycle -> services/agent/flags/holder.go (LifecycleHolder) primed services/agent/flags/provider.go:setupFlagd | manual edit only | live: reloaded on an OpenFeature ProviderConfigChange (#927; the in-process resolver emits one per flag sync, #1713) and every 1 s by `LifecycleHolder.Poll` (`LifecycleReloadInterval`, #1709) as the safety net |
 | ~~`code_improvement.engine`~~ | - | - | - | - | Obsolete: retired in #1810 (D-A10). It was recorded on the proposer span only and selected nothing; the text backend is selected by the `inference.backend` flag (#1810 B2). Removed from both `agent.json` files and from the agent | - | - |
-| `code_improvement.min_interval_seconds` | int | default=300, fast=60, slow=900 | `default` = 300 | N | agent: services/agent/flags/flags.go:Flags.CodeImprovement <- services/agent/main.go (`proposeOnGameEnd`) -> services/agent/experiment/proposer.go (`ProposeOnce`, after the `enabled` / `experiments_enabled` permit, #1270) | manual edit only | live (per game end) |
+| `code_improvement.min_interval_seconds` | int | default=300, fast=60, slow=900 | `default` = 300 | N | agent: services/agent/flags/flags.go:Flags.CodeImprovement <- services/agent/main.go (`proposeOnGameEnd`) -> services/agent/experiment/proposer.go (`ProposeOnce`, after the `enabled` / `experiments_enabled` permit, #1270); a value ≤ 0 counts as the default 300 s | manual edit only | live (per game end) |
 | `code_improvement.mode` | string | issue="issue", autonomous="autonomous" | `issue` = "issue" | N | agent: services/agent/flags/flags.go:Flags.Promotion <- services/agent/experiment_loop.go:promotionConfigResolver | manual edit only | live (per promotion) |
 | ~~`code_improvement.target`~~ | - | - | - | - | Obsolete: retired with the `pr` mode in #2816; it only routed a PR to GitHub or a local git commit. Removed from both `agent.json` files and from the agent | - | - |
 | `experiments_enabled` | bool | on=true, off=false | `off` = false | N | agent: services/agent/flags/flags.go (Flags.Experiment) <- services/agent/experiment_loop.go config(); used `experimentLoop.allocateIfEnabled`; experiment proposer per game end via `Flags.ExperimentsEnabled` <- services/agent/main.go `proposerPermit` (same fail-closed fallback, #1270, #1907) | scripts/agent-dryrun-enable.sh (services/flagd/ci/agent.json); `scripts/talk-stage.sh fallback on/off` and `reset` (UC-070 A9, #1316) | live (per experiment tick). Gate: an unresolved flag reads false (fails closed, no env fallback since #1907; UC-045 A3) |
@@ -472,6 +472,9 @@ A flag changes at runtime **only** if it has a row here,
 only within its bounds and only in its scope. Every other flag of every set is the **read-only baseline**: it
 changes by a reviewed edit of the flag file and a restart of the flag service (C-033). The registry file
 `services/flag-service/registry.yaml` encodes this table; a change to one updates the other in the same PR.
+The flag service ignores a registry.yaml key it does not know and logs one WARN at start that names it, so the
+checkout's file can carry a key a newer release reads; a unit test parses the checkout's file strictly, so a
+misspelt key fails CI (#2802). Releases before #2802 refuse to start on an unknown key (#2403).
 
 **Writers** is the canonical place that says who writes each flag (the human surfaces: the menu for the operator pad,
 the operator and stage scripts, Flagsmith; the agent: `agent` for its game-scoped interventions, `agent
@@ -533,13 +536,12 @@ next start; clear it locally too (a `DELETE`, or the pad's reset) or set it in F
 **Failed save, kill switches (#2368, UC-053 A12):** when the state file cannot be saved (or was unreadable at
 start), a stack `PUT` or `DELETE` of a `yes` row is refused with `500 persist_failed` and nothing changes in
 memory, also for a stage script, which before #2803 wrote such a row in memory; with a state file unreadable at start that includes a `DELETE` with no persisted value in memory, because
-the file may still hold one (a `no` row cannot be in the file: its `DELETE` stays a plain `204`, uncounted). The exception covers the persisted kill-switch flags, a fixed set in the flag service's
-code (`registry.killSwitches`), not a registry.yaml attribute (released images parse the checkout's registry.yaml
-strictly). This list is its single source of truth, kept in sync by a test: `agent/interventions_allowed`. A safety
+the file may still hold one (a `no` row cannot be in the file: its `DELETE` stays a plain `204`, uncounted). The exception covers every kill switch of §13.6 whose row has persist `yes` (today only
+`interventions_allowed`). A safety
 stop must take effect now, so a write or clear of it applies in memory and answers `persisted: false` (`PUT`) or
 `204` with `X-Flag-Persisted: false` (`DELETE`), counted in `flagservice_admin_persist_errors_total` and not
 counted as persisted in `flagservice_overlays`; a restart brings back what the file holds (services.md §7.2). Only a
-row with persist `yes` can be in the set: `enabled` is a kill switch too, but its row is persist `no`, so a failed
+row with persist `yes` takes the exception: `enabled` is a kill switch too, but its row is persist `no`, so a failed
 save never affects it.
 
 **Stage beats and scripts on a `yes` row (#2803, replaces "persisted vs overlay" of #1682):** a stage beat
@@ -772,7 +774,7 @@ by a file edit and a restart. Several of their flags are read only at process st
 
 > Implemented: features and tags are created at start (#2591), the kill switches below applied first by the in side
 > (#2590, #2596), Flagsmith the source of truth once online: it wins every conflict, at a restart and at a reconnect, kill switches included, and stack-wide local changes made offline are discarded at the reconnect (#2621), [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md).
-> UC-054 and UC-055 are Tested (#2592; the kill-switch rows by `services/flag-service/flagsmith/killswitch_test.go` and the link unit tests; the service tier checks the same Flagsmith-wins rows on an integer flag, `tests/service/test_flagsmith_sync.py::test_conflict_table` and `tests/service/test_flagsmith_link.py::test_restart_takes_flagsmith_value`). No registry attribute is added: the link
+> UC-054 and UC-055 are Tested (#2592; the kill-switch set by `services/flag-service/registry/registry_test.go` (`TestKillSwitchSetMatchesFlagsMD`) and the link unit tests; the service tier checks the same Flagsmith-wins rows on an integer flag, `tests/service/test_flagsmith_sync.py::test_conflict_table` and `tests/service/test_flagsmith_link.py::test_restart_takes_flagsmith_value`). No registry attribute is added: the link
 > follows the rows above.
 
 **Which flags.** Every row of §13.1 to §13.4 (and the mutable `observability` rows of §13.5) is one Flagsmith
@@ -796,35 +798,25 @@ outage that was never changed offline is kept and, with no Flagsmith value, sent
 
 **Kill switches** (UC-054 BR-005, FR-210). Since #2621 Flagsmith wins a conflict for these flags like for every
 other flag, at a restart, on a live conflict and at a reconnect: once online, Flagsmith is the source of truth. The
-link applies them first in a round (before the write budget defers anything). The second column is informational
-only: it is how the agent reads "more restrictive" for each flag, and the link no longer merges by it.
+link applies them first in a round (before the write budget defers anything), logs each kill-switch value the start's
+reference step overwrites, and a persisted write of one that has persist `yes` applies even when the save fails (§13,
+"Failed save, kill switches"). The members are `agent/enabled`, `agent/interventions_allowed`, the agent gates
+`agent/interventions_enabled` and `agent/experiments_enabled`, and the agent-limiting flags of FR-152 that have a
+registry row: `agent/experiment_proposer_enabled`, `agent/llm.max_requests_per_minute` and
+`agent/decision.claude.max_requests_per_minute`.
 
-| Flag | More restrictive first (informational) |
-|---|---|
-| `agent/enabled` | `off`, then `on` |
-| `agent/interventions_allowed` | the variant whose allowed actions are a subset of the other's (`none` ⊂ `probe` ⊂ `ambient` ⊂ `standard` ⊂ `full` ⊂ `shadow_experimental`; `standard` ⊂ `standard_group`; `shadow_experimental` ⊂ `shadow_group`), computed from the declared action lists, `noop` counting as no action (equal action sets after dropping `noop` are ordered by their raw tokens, so `none` before `probe`); when neither contains the other (for example `standard_group` and `full`), the local value stays |
-| `agent/code_improvement.mode` | `issue`, then `autonomous`; an unknown value (the retired `pr` included) counts as `issue`, as the agent reads it |
-| `agent/llm.max_requests_per_minute` | the lower number; a value ≤ 0 means closed and counts as the lowest (`inherit` does not apply to it) |
-| `agent/decision.claude.max_requests_per_minute` | the lower number; `inherit` (-1) counts as the highest; any other negative value counts as 0, as in the agent |
-| `agent/experiment_proposer_enabled`, `agent/interventions_enabled`, `agent/experiments_enabled` | `off`, then `on` |
-| `agent/experiment_dynamic_max_concurrent` | the lower number; a value ≤ 0 resolves to the compiled default 3, as in the agent |
-| `agent/code_improvement.min_interval_seconds` | the higher number; a value ≤ 0 counts as the default 300 s, as the agent reads it |
-
-`code_improvement.*` and `experiment_dynamic_max_concurrent` have no row in the mutable-flag registry (§13.2) today,
-so they are not runtime-mutable and not Flagsmith features; their rules keep the table complete for when they get one.
-
-The agent normalises every value this way when it reads it.
-
-The table is the source of truth: `agent/enabled`, the registry kill switch `agent/interventions_allowed`
-(`registry.killSwitches`), the agent-limiting flags of FR-152, and the agent gates `interventions_enabled`
-and `experiments_enabled`; a test keeps the link's kill-switch set in sync with the table.
+This list is the one source of truth for kill-switch membership; the flag service holds the same set in
+`registry.killSwitches`, and `TestKillSwitchSetMatchesFlagsMD` keeps the two equal and fails a member without a
+registry row or an FR-152 flag with a row that is not a member. An FR-152 flag without a registry row
+(`code_improvement.*`, `experiment_dynamic_max_concurrent`) is read-only baseline and no Flagsmith feature, so it is
+no kill switch. How the agent reads each value is in its catalog row (§3) and in §15.4.
 A change in Flagsmith is applied like any write, also when it loosens one; the agent never writes its own limits, and the env ceilings of C-034 still cap the agent-limiting flags, also a value from Flagsmith.
 
 **Values in Flagsmith** (architecture note §2.1): a declared variant is its name (string); an integer range is an
 integer; a float range, a `free string` and an object flag are strings (decimal text, the string, compact JSON).
 
 **Traceability:** FR-206, FR-208, FR-210, FR-214, FR-226, C-034, C-036 / UC-054, UC-055 /
-`services/flag-service/flagsmith/killswitch.go` (#2590, #2621: the set of kill switches, no order); `TestKillSwitchTableInSync` keeps it equal to this table.
+`services/flag-service/registry/registry.go` (`registry.killSwitches`); `TestKillSwitchSetMatchesFlagsMD` keeps it equal to the kill-switch list.
 
 ## 14. Ownership composition: invalidation and visibility
 
