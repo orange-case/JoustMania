@@ -26,6 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNBOOK = REPO_ROOT / "docs" / "talk" / "two-standards-runbook.md"
 FLAGD_DIR = REPO_ROOT / "services" / "flagd"
 FLAGS_SPEC = REPO_ROOT / "docs" / "specs" / "flags.md"
+# Variant names (`gate`=0.6) are listed in the generated per-set catalog.
+FLAG_CATALOG = REPO_ROOT / "docs" / "specs" / "generated" / "flag-catalog.md"
 
 # Beats the talk cannot run without; extra beats (6c, ...) are allowed.
 REQUIRED_BEAT_IDS = {"1", "2", "3b", "4", "4a", "5", "6", "7", "8"}
@@ -147,7 +149,7 @@ def test_every_named_repo_path_exists():
 
 def test_every_flag_key_in_the_beat_table_exists():
     known = _flag_keys()
-    spec = FLAGS_SPEC.read_text()
+    spec = FLAGS_SPEC.read_text() + FLAG_CATALOG.read_text()
     named: set[str] = set()
     for row in _table_rows(_section("Beat table")):
         for token in re.findall(r"`([^`]+)`", row[3]):

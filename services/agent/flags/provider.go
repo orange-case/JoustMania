@@ -39,7 +39,9 @@ const (
 // min; each drop made the agent fail closed for about a second. v0.8.0 still hard-codes
 // PermitWithoutStream, and its default keepalive time 0 ("off") is raised to grpc's 10 s
 // minimum. The agent pings every 10 min (as lib/feature_flags.py does) and only while the
-// stream is open.
+// stream is open. flagd v0.18 serves sync over connect/net/http, which enforces no ping
+// policy; the options stay. Trade-off: a half-open connection can go unnoticed for up to
+// ~10 min (the agent stays READY on old values), accepted on one host and network.
 const (
 	flagdServerMinPingInterval = 5 * time.Minute
 	syncKeepaliveTime          = 10 * time.Minute
