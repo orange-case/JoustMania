@@ -1,12 +1,11 @@
 package experiment
 
 // registry_conclude.go holds the Registry's CONCLUDE phase:
-// folding a concluded or released game into the journal, the give-up checks and
-// the verdict-driven status transition.
+// folding a concluded or released game into the journal and the verdict-driven
+// status transition.
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/joustmania/agent/experiment/journal"
 )
@@ -41,17 +40,6 @@ func (r *Registry) ConcludeGame(ctx context.Context, gameID string, fitness floa
 	// verdict seam's call — it returns promote/discard once it is willing to.)
 	if haveVerdict && verdict.Outcome != OutcomeInconclusive {
 		return r.conclude(ctx, id, verdict)
-	}
-
-	// TERMINATION GUARD (#1001): the verdict is inconclusive (or absent). Without a
-	// bound, an experiment that can never reach signal — e.g. all-zero fitness ⇒
-	// both arms zero-variance ⇒ undefined effect size ⇒ permanent "inconclusive" —
-	// spawns games forever. If any give-up condition holds, conclude+teardown the
-	// experiment as a FINAL inconclusive instead of leaving it RUNNING.
-	if reason, giveUp := r.shouldGiveUp(jrnl.Summary(), jrnl.Intent().TargetNPerArm); giveUp {
-		r.log.Info("experiment.terminated_inconclusive",
-			"experiment_id", id, "reason", reason)
-		return r.conclude(ctx, id, giveUpVerdict(reason, verdict, haveVerdict))
 	}
 
 	// UC-046 A6: a pattern experiment whose archetypes are all used concludes once
@@ -129,20 +117,6 @@ func (r *Registry) emitConcludedProgress(id string) {
 	}
 }
 
-// giveUpVerdict is the FINAL inconclusive verdict of an experiment the termination
-// guard (#1001) gives up on. It keeps the interim verdict's Delta when there is one.
-func giveUpVerdict(reason string, v journal.Verdict, have bool) journal.Verdict {
-	final := journal.Verdict{
-		Outcome:     OutcomeInconclusive,
-		Significant: false,
-		Reason:      reason,
-	}
-	if have {
-		final.Delta = v.Delta
-	}
-	return final
-}
-
 // ReleaseGame frees the in-flight slot held by a shadow game that ended WITHOUT
 // producing a usable fitness sample (#1014): a game that terminated in
 // game_error, was force-ended on timeout, or was aborted. Unlike ConcludeGame it
@@ -216,78 +190,6 @@ func (r *Registry) ReleaseGame(gameID, reason string) bool {
 	// UC-046 A6: a released last game of an exhausted pattern experiment concludes it.
 	r.concludeIfPatternExhausted(context.Background(), id)
 	return true
-}
-
-// shouldGiveUp implements the #1001 termination guard: it decides whether an
-// experiment that is still inconclusive must be concluded INCONCLUSIVE (rather
-// than left RUNNING forever). It returns a human-readable reason and true when
-// ANY of the give-up conditions holds:
-//
-//	(a) GAMES BUDGET — total concluded games across arms has reached r.maxGames
-//	    (AGENT_EXPERIMENT_MAX_GAMES; the absolute ceiling, the primary backstop).
-//	(b) INCONCLUSIVE PAST TARGET — every arm has reached the effective target N
-//	    (max(target_n, min-N)), so the cohort is fully powered yet the verdict is
-//	    still inconclusive: more games will not change a within-noise result.
-//	(c) DEGENERATE VARIANCE — every arm is past target N AND has zero variance
-//	    (all-equal fitness, the #997 all-zero case): the effect size is undefined
-//	    and re-evaluating forever cannot help.
-//
-// The guard reads only the rolling Summary (per-arm Welford count/M2) plus the
-// persisted intent's target_n (passed in by the caller), so it is O(arms) and
-// needs no extra book-keeping.
-func (r *Registry) shouldGiveUp(s journal.Summary, targetN int) (string, bool) {
-	// Total concluded games across all arms (reservations are not in the Summary).
-	total := 0
-	for _, a := range s.Arms {
-		if a != nil {
-			total += a.Count
-		}
-	}
-
-	// (a) Absolute games budget. <= 0 disables this guard.
-	if r.maxGames > 0 && total >= r.maxGames {
-		return fmt.Sprintf("games budget exhausted: %d games >= max=%d, still inconclusive",
-			total, r.maxGames), true
-	}
-
-	// Effective target N: the larger of the persisted target_n and the verdict
-	// min-N. (Declare already reconciles target_n up to min-N, so they normally
-	// coincide; this max is a belt-and-braces floor for rehydrated/legacy intents.)
-	target := targetN
-	if r.minN > target {
-		target = r.minN
-	}
-
-	// Both (b) and (c) require every arm to have reached the effective target N.
-	// Until then the cohort is genuinely under-powered and keeps running (bounded by
-	// the games budget above). A non-positive target makes these guards inert (the
-	// budget alone bounds the experiment).
-	if target <= 0 {
-		return "", false
-	}
-	allReachedTarget := len(s.Arms) > 0
-	allDegenerate := true
-	for _, a := range s.Arms {
-		if a == nil || a.Count < target {
-			allReachedTarget = false
-			break
-		}
-		if a.M2 != 0 {
-			allDegenerate = false
-		}
-	}
-	if !allReachedTarget {
-		return "", false
-	}
-
-	// (c) Degenerate variance past target N — checked first for a precise reason.
-	if allDegenerate {
-		return fmt.Sprintf("degenerate variance past target N=%d on all arms (zero spread); effect size undefined",
-			target), true
-	}
-
-	// (b) Inconclusive past target N — fully powered but still within noise.
-	return fmt.Sprintf("inconclusive past target N=%d on all arms; no significant effect", target), true
 }
 
 // conclude transitions an experiment to CONCLUDED on a final verdict, routes a

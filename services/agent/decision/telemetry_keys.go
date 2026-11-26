@@ -30,7 +30,6 @@ const (
 	AttrExperimentID              = keys.AttrExperimentID
 	AttrExperimentObjective       = keys.AttrExperimentObjective
 	AttrExperimentStatus          = keys.AttrExperimentStatus
-	AttrExperimentTargetN         = keys.AttrExperimentTargetN
 	AttrExperimentThesis          = keys.AttrExperimentThesis
 	AttrFitnessEvaluated          = keys.AttrFitnessEvaluated
 	AttrGameDurationSeconds       = keys.AttrGameDurationSeconds

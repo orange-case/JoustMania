@@ -40,8 +40,8 @@ import (
 // allocateIfEnabled, which already self-aborts when either is off). Both flags
 // fail closed when unresolved; there is no env fallback (#1907).
 
-// The declarer's settings (candidate list, denylist additions, default objective,
-// target N) are the experiment_dynamic_* agent flags (#1907, flags.md §15), resolved
+// The declarer's settings (candidate list, denylist additions, default objective)
+// are the experiment_dynamic_* agent flags (#1907, flags.md §15), resolved
 // per tick in flags.ExperimentConfig and applied with configure under mu before every
 // Declare. They replaced the AGENT_EXPERIMENT_DYNAMIC_* env vars read once at start.
 
@@ -117,9 +117,6 @@ type dynamicDeclarer struct {
 	// defaultObjective is the experimentable objective used when no pressure signal
 	// is available.
 	defaultObjective string
-	// targetN is the target games-per-arm stamped on each declared Intent (0 ⇒ the
-	// Registry reconciles to min-N).
-	targetN int
 	// pressure is the optional fitness-pressure selection signal (may be nil).
 	pressure pressureFunc
 	// hold gates the hold-mode shield keys (UC-043 A17); nil offers none of them.
@@ -133,7 +130,7 @@ type dynamicDeclarer struct {
 }
 
 // newDynamicDeclarer builds the declarer with the compiled defaults (every tunable
-// flag, only the built-in denylist, objective balanced, target 0). pressure is the
+// flag, only the built-in denylist, objective balanced). pressure is the
 // optional live signal seam (nil ⇒ default-objective fallback).
 //
 // #1044: the declarer is ALWAYS built — the on/off gate is the LIVE
@@ -152,8 +149,7 @@ func newDynamicDeclarer(gameFlags gameFlagReader, pressure pressureFunc) *dynami
 // caller holds d.mu (the same lock that guards Declare). An empty, blank or
 // unresolved list means no candidate restriction / no denylist additions; the
 // built-in denylist is applied in candidateOrder whatever cfg says (UC-070 BR-008).
-// A non-experimentable objective (empty, unknown, chaos) becomes balanced, and a
-// negative target N becomes 0.
+// A non-experimentable objective (empty, unknown, chaos) becomes balanced.
 func (d *dynamicDeclarer) configure(cfg flags.ExperimentConfig) {
 	d.candidates = parseCandidates(cfg.DynamicCandidates)
 	d.denylist = nil
@@ -168,7 +164,6 @@ func (d *dynamicDeclarer) configure(cfg flags.ExperimentConfig) {
 	if d.defaultObjective == "" || !decision.IsExperimentable(d.defaultObjective) {
 		d.defaultObjective = decision.ObjectiveBalanced
 	}
-	d.targetN = max(cfg.DynamicTargetN, 0)
 }
 
 // activeFlags is the set of flag keys that already have a live (non-terminal)
@@ -241,7 +236,6 @@ func (d *dynamicDeclarer) Declare(active activeFlags) (experiment.Intent, bool) 
 			FlagKey:           key,
 			ExperimentalValue: value,
 			Objective:         objective,
-			TargetNPerArm:     d.targetN,
 		}, true
 	}
 	return experiment.Intent{}, false
@@ -450,8 +444,8 @@ func perturbValue(f candidateFlag) (any, bool) {
 }
 
 // hypothesis builds the human-readable hypothesis string stamped on a dynamically
-// declared Intent It records that this was
-// the agent's own heuristic choice and what it is trying.
+// declared Intent. It records that this was the agent's own heuristic choice
+// and what it is trying.
 func (d *dynamicDeclarer) hypothesis(flagKey string, value any, objective string) string {
 	vb, err := json.Marshal(value)
 	v := string(vb)

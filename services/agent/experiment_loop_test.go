@@ -191,7 +191,7 @@ func buildLoopForTestWithTracer(
 	// Low min-N so a handful of conclusions reaches a conclusive verdict; effect
 	// threshold default. A large mean gap in the test makes the effect clearly
 	// significant.
-	verdict := experiment.NewVerdict(3, 0.5, nil)
+	verdict := experiment.NewVerdict(3, 0.5)
 
 	reg := experiment.NewRegistry(experiment.RegistryConfig{
 		Root:           journalRoot,
@@ -312,8 +312,7 @@ func TestExperimentLoop_EndToEnd_SafeDefault_NoRealWrite(t *testing.T) {
 	loop := buildLoopForTest(t, spawner, resolve, realDef, github, armFitness())
 
 	id, err := loop.registry.Declare(experiment.Intent{
-		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-	})
+		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 	if err != nil {
 		t.Fatalf("declare: %v", err)
 	}
@@ -356,8 +355,7 @@ func TestExperimentLoop_EndToEnd_Autonomous_RealWriteGated(t *testing.T) {
 	loop := buildLoopForTest(t, spawner, resolve, realDef, github, armFitness())
 
 	id, err := loop.registry.Declare(experiment.Intent{
-		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-	})
+		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 	if err != nil {
 		t.Fatalf("declare: %v", err)
 	}
@@ -395,8 +393,7 @@ func TestExperimentLoop_EndToEnd_Autonomous_KillSwitchBlocksRealWrite(t *testing
 	loop := buildLoopForTest(t, spawner, resolve, realDef, github, armFitness())
 
 	id, _ := loop.registry.Declare(experiment.Intent{
-		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced", TargetNPerArm: 3,
-	})
+		FlagKey: "nonstop.respawn_seconds", ExperimentalValue: 6.0, Objective: "balanced"})
 	if err := loop.registry.Start(context.Background(), id); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -440,8 +437,7 @@ func TestExperimentLoop_OnGameTerminal_ReleasesErroredGame(t *testing.T) {
 
 	id, err := loop.registry.Declare(experiment.Intent{
 		Hypothesis: "h", FlagKey: "death_grace_period_seconds",
-		ExperimentalValue: 0.5, Objective: "balanced", TargetNPerArm: 3,
-	})
+		ExperimentalValue: 0.5, Objective: "balanced"})
 	if err != nil {
 		t.Fatalf("Declare: %v", err)
 	}
@@ -500,8 +496,7 @@ func TestExperimentLoop_OnGameTerminal_ReleasesPreemptedGame(t *testing.T) {
 
 		id, err := loop.registry.Declare(experiment.Intent{
 			Hypothesis: "h", FlagKey: "death_grace_period_seconds",
-			ExperimentalValue: 0.5, Objective: "balanced", TargetNPerArm: 3,
-		})
+			ExperimentalValue: 0.5, Objective: "balanced"})
 		if err != nil {
 			t.Fatalf("Declare: %v", err)
 		}
@@ -638,8 +633,7 @@ func TestExperimentLoop_CompletedGrace_ReleasesOnDroppedDatapoint(t *testing.T) 
 
 	id, err := loop.registry.Declare(experiment.Intent{
 		Hypothesis: "h", FlagKey: "death_grace_period_seconds",
-		ExperimentalValue: 0.5, Objective: "endurance", TargetNPerArm: 5,
-	})
+		ExperimentalValue: 0.5, Objective: "endurance"})
 	if err != nil {
 		t.Fatalf("Declare: %v", err)
 	}
@@ -720,8 +714,7 @@ func TestExperimentLoop_CompletedGrace_NoReleaseWhenConcluded(t *testing.T) {
 
 	id, err := loop.registry.Declare(experiment.Intent{
 		Hypothesis: "h", FlagKey: "death_grace_period_seconds",
-		ExperimentalValue: 0.5, Objective: "endurance", TargetNPerArm: 5,
-	})
+		ExperimentalValue: 0.5, Objective: "endurance"})
 	if err != nil {
 		t.Fatalf("Declare: %v", err)
 	}
@@ -807,8 +800,7 @@ func TestExperimentLoop_CompletedGrace_StopAllRaceGuard(t *testing.T) {
 	// callback WOULD ReleaseGame + refill-spawn a brand-new game during shutdown.
 	id, err := loop.registry.Declare(experiment.Intent{
 		Hypothesis: "h", FlagKey: "death_grace_period_seconds",
-		ExperimentalValue: 0.5, Objective: "endurance", TargetNPerArm: 50,
-	})
+		ExperimentalValue: 0.5, Objective: "endurance"})
 	if err != nil {
 		t.Fatalf("Declare: %v", err)
 	}
@@ -903,7 +895,7 @@ func newRegistryConcurrency1(t *testing.T, spawner experiment.ShadowSpawner, res
 		MaxShadowGames:       8,
 		EffectiveConcurrency: 1,
 		Spawner:              spawner,
-		Verdict:              experiment.NewVerdict(3, 0.5, nil),
+		Verdict:              experiment.NewVerdict(3, 0.5),
 		Promoter:             promo,
 		Targeting:            targeting,
 		Log:                  log,
@@ -988,8 +980,7 @@ func TestExperimentLoop_OnGameTerminal_TimeoutKeepsSample(t *testing.T) {
 		ctx := context.Background()
 		id, err := loop.registry.Declare(experiment.Intent{
 			Hypothesis: "h", FlagKey: "death_grace_period_seconds",
-			ExperimentalValue: 0.5, Objective: "balanced", TargetNPerArm: 3,
-		})
+			ExperimentalValue: 0.5, Objective: "balanced"})
 		if err != nil {
 			t.Fatalf("Declare: %v", err)
 		}
@@ -1045,8 +1036,7 @@ func TestExperimentLoop_OnGameTerminal_PatternOutcomes(t *testing.T) {
 		ctx := context.Background()
 		id, err := loop.registry.Declare(experiment.Intent{
 			Hypothesis: "h", FlagKey: "death_grace_period_seconds",
-			ExperimentalValue: 0.5, Objective: "balanced", TargetNPerArm: 3,
-		})
+			ExperimentalValue: 0.5, Objective: "balanced"})
 		if err != nil {
 			t.Fatalf("Declare: %v", err)
 		}

@@ -24,8 +24,7 @@ func TestGameEndChain_ArmCalibration(t *testing.T) {
 	spawner := &recordingSpawner{}
 	reg := experiment.NewRegistry(experiment.RegistryConfig{Root: t.TempDir(), MaxShadowGames: 2, Spawner: spawner, Log: testLogger()})
 	id, err := reg.Declare(experiment.Intent{
-		Hypothesis: "h", FlagKey: "windows", ExperimentalValue: 0.5, Objective: "balanced", TargetNPerArm: 2,
-	})
+		Hypothesis: "h", FlagKey: "windows", ExperimentalValue: 0.5, Objective: "balanced"})
 	if err != nil {
 		t.Fatalf("Declare: %v", err)
 	}

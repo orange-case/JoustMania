@@ -189,8 +189,7 @@ _Verified against main f38f076d, 2026-10-23._
 
 _Verified against main f38f076d, 2026-10-23._
 
-- **Charge ledger** (`decision/chargeledger.go`): refund deletes the newest equal-cost entry, not the dispatch's
-  own; a release must check its generation (`e.gen == gen`); late spans must be dropped before they re-create an
+- **Rate-limit refund and late spans**: refund deletes the newest equal-cost entry, not the dispatch's own; late spans must be dropped before they re-create an
   evicted partition (the multiplexer skips before `m.store`).
 - **Rules golden.** `ObjectiveRules` is the non-LLM floor; its pipeline (cadence gate, sources re-read per eval,
   chaos roll, battery policy, variance cooldown, scoring, <=2 emitted) is load-bearing and the golden decision

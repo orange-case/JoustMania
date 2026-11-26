@@ -51,12 +51,10 @@ func TestFinalVerdictJournaledAtConclusion_2042(t *testing.T) {
 		// pattern-exhausted conclusion (UC-046 A6), is promote and is not journaled
 		// as an interim verdict.
 		r := newTestRegistry(t, RegistryConfig{
-			MaxShadowGames: 4, EffectiveConcurrency: 4, MaxGamesPerExperiment: -1,
-			Spawner: spawner, Verdict: &promoteFromCall{at: 5}, Promoter: promoter, Targeting: &fakeTargeting{},
+			MaxShadowGames: 4, EffectiveConcurrency: 4, Spawner: spawner, Verdict: &promoteFromCall{at: 5}, Promoter: promoter, Targeting: &fakeTargeting{},
 			Patterns: &queuePinner{pins: []patterngame.Pin{testPin(t, "arch_a", "arch_b")}},
 		})
 		intent := sampleIntent()
-		intent.TargetNPerArm = 100 // keep the give-up guard out of the way
 		id, err := r.Declare(intent)
 		if err != nil {
 			t.Fatal(err)
@@ -87,30 +85,6 @@ func TestFinalVerdictJournaledAtConclusion_2042(t *testing.T) {
 		}
 		if st, _ := r.Status(id); st != StatusDone {
 			t.Errorf("status = %s, want done", st)
-		}
-	})
-
-	t.Run("UC-043/BR-006 the concluded decision carries the final give-up verdict", func(t *testing.T) {
-		spawner := &fakeSpawner{}
-		r := newTestRegistry(t, RegistryConfig{
-			MaxShadowGames: 4, Spawner: spawner, Verdict: alwaysInconclusive{}, Targeting: &fakeTargeting{},
-		})
-		id := startExperiment(t, r)
-		drainToTerminal(t, r, spawner, id, 0.5, 200)
-
-		evs := journalEvents(t, r, id)
-		var final *journal.Verdict
-		for _, ev := range evs {
-			if ev.Kind == journal.KindDecision && ev.Status == string(StatusConcluded) {
-				final = ev.Verdict
-			}
-		}
-		if final == nil || final.Outcome != OutcomeInconclusive || final.Reason == "always inconclusive (test)" {
-			t.Fatalf("concluded decision verdict = %+v, want the final give-up verdict", final)
-		}
-		view, _ := r.CompactView(id)
-		if view.Verdict == nil || view.Verdict.Reason != final.Reason {
-			t.Errorf("summary verdict = %+v, want the final verdict %+v", view.Verdict, final)
 		}
 	})
 }

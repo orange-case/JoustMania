@@ -546,15 +546,12 @@ func TestExperiment_FlagOverridesCompiledDefault(t *testing.T) {
 	def := ExperimentDefaults{
 		Tick:                       30 * time.Second,
 		DynamicMaxConcurrent:       3,
-		VerdictMinN:                8,
 		VerdictMinPairs:            5,
-		MaxGames:                   50,
 		ShadowEffectiveConcurrency: 4,
 		// #1214 verdict-tuning float defaults (the verdict's Default* constants).
 		VerdictEffectThreshold: 0.5,
 		VerdictMinRawEffect:    0.02,
 		VerdictSDFloor:         0.0001,
-		VerdictAnchorMargin:    0.02,
 	}
 
 	t.Run("flags present override every default", func(t *testing.T) {
@@ -569,15 +566,11 @@ func TestExperiment_FlagOverridesCompiledDefault(t *testing.T) {
 				keyVerdictEffectThreshold: 0.8,
 				keyVerdictMinRawEffect:    0.05,
 				keyVerdictSDFloor:         0.001,
-				keyVerdictAnchorMargin:    0.03,
 			},
 			ints: map[string]int64{
 				keyExperimentDynamicMaxConcur:  6,
-				keyVerdictMinN:                 16,
 				keyVerdictMinPairs:             10,
-				keyExperimentMaxGames:          100,
 				keyExperimentShadowConcurrency: 8,
-				keyExperimentDynamicTargetN:    12,
 			},
 			strings: map[string]string{
 				keyExperimentDynamicCandidates: "sensitivity,num_teams",
@@ -591,18 +584,14 @@ func TestExperiment_FlagOverridesCompiledDefault(t *testing.T) {
 			DynamicEnabled:             true,
 			Tick:                       10 * time.Second,
 			DynamicMaxConcurrent:       6,
-			VerdictMinN:                16,
 			VerdictMinPairs:            10,
-			MaxGames:                   100,
 			ShadowEffectiveConcurrency: 8,
 			VerdictEffectThreshold:     0.8,
 			VerdictMinRawEffect:        0.05,
 			VerdictSDFloor:             0.001,
-			VerdictAnchorMargin:        0.03,
 			DynamicCandidates:          "sensitivity,num_teams",
 			DynamicDenylist:            "foo",
 			DynamicObjective:           "endurance",
-			DynamicTargetN:             12,
 		}
 		if got != want {
 			t.Fatalf("Experiment with flags present = %+v, want %+v", got, want)
@@ -617,14 +606,11 @@ func TestExperiment_FlagOverridesCompiledDefault(t *testing.T) {
 			DynamicEnabled:             false,
 			Tick:                       def.Tick,
 			DynamicMaxConcurrent:       def.DynamicMaxConcurrent,
-			VerdictMinN:                def.VerdictMinN,
 			VerdictMinPairs:            def.VerdictMinPairs,
-			MaxGames:                   def.MaxGames,
 			ShadowEffectiveConcurrency: def.ShadowEffectiveConcurrency,
 			VerdictEffectThreshold:     def.VerdictEffectThreshold,
 			VerdictMinRawEffect:        def.VerdictMinRawEffect,
 			VerdictSDFloor:             def.VerdictSDFloor,
-			VerdictAnchorMargin:        def.VerdictAnchorMargin,
 			DynamicObjective:           DefaultDynamicObjective,
 		}
 		if got != want {
@@ -637,13 +623,11 @@ func TestExperiment_FlagOverridesCompiledDefault(t *testing.T) {
 			keyVerdictEffectThreshold: errors.New("down"),
 			keyVerdictMinRawEffect:    errors.New("down"),
 			keyVerdictSDFloor:         errors.New("down"),
-			keyVerdictAnchorMargin:    errors.New("down"),
 		}
 		got := New(stubEvaluator{errs: errAll}, nil).Experiment(context.Background(), def)
 		if got.VerdictEffectThreshold != def.VerdictEffectThreshold ||
 			got.VerdictMinRawEffect != def.VerdictMinRawEffect ||
-			got.VerdictSDFloor != def.VerdictSDFloor ||
-			got.VerdictAnchorMargin != def.VerdictAnchorMargin {
+			got.VerdictSDFloor != def.VerdictSDFloor {
 			t.Fatalf("verdict float flags under flagd error did not fail open to defaults: %+v", got)
 		}
 	})
@@ -654,20 +638,17 @@ func TestExperiment_FlagOverridesCompiledDefault(t *testing.T) {
 			keyExperimentDynamicEnabled:    errors.New("down"),
 			keyExperimentTickSeconds:       errors.New("down"),
 			keyExperimentDynamicMaxConcur:  errors.New("down"),
-			keyVerdictMinN:                 errors.New("down"),
 			keyVerdictMinPairs:             errors.New("down"),
-			keyExperimentMaxGames:          errors.New("down"),
 			keyExperimentShadowConcurrency: errors.New("down"),
 			keyExperimentDynamicCandidates: errors.New("down"),
 			keyExperimentDynamicDenylist:   errors.New("down"),
 			keyExperimentDynamicObjective:  errors.New("down"),
-			keyExperimentDynamicTargetN:    errors.New("down"),
 		}
 		got := New(stubEvaluator{errs: errAll}, nil).Experiment(context.Background(), def)
-		if got.Enabled || got.DynamicEnabled || got.Tick != def.Tick || got.VerdictMinN != def.VerdictMinN ||
-			got.MaxGames != def.MaxGames || got.ShadowEffectiveConcurrency != def.ShadowEffectiveConcurrency ||
+		if got.Enabled || got.DynamicEnabled || got.Tick != def.Tick ||
+			got.ShadowEffectiveConcurrency != def.ShadowEffectiveConcurrency ||
 			got.DynamicCandidates != "" || got.DynamicDenylist != "" ||
-			got.DynamicObjective != DefaultDynamicObjective || got.DynamicTargetN != 0 {
+			got.DynamicObjective != DefaultDynamicObjective {
 			t.Fatalf("Experiment under flagd error did not fall back to compiled defaults with gates closed: %+v", got)
 		}
 	})
@@ -682,14 +663,6 @@ func TestExperiment_FlagOverridesCompiledDefault(t *testing.T) {
 		stub.booleans[keyExperimentsEnabled] = true
 		if !f.Experiment(context.Background(), def).Enabled {
 			t.Fatal("Experiment cached the flag; a live change was not reflected on re-read")
-		}
-	})
-
-	t.Run("max_games=0 (disable budget) is honored verbatim, not floored", func(t *testing.T) {
-		stub := stubEvaluator{ints: map[string]int64{keyExperimentMaxGames: 0}}
-		got := New(stub, nil).Experiment(context.Background(), def)
-		if got.MaxGames != 0 {
-			t.Fatalf("max_games=0 must pass through as the explicit disable, got %d", got.MaxGames)
 		}
 	})
 }

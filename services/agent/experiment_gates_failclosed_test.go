@@ -50,10 +50,6 @@ func TestExperimentGates_FailClosedIgnoringEnv(t *testing.T) {
 		if cfg.DynamicEnabled {
 			t.Error("experiment_dynamic_enabled resolved on with flagd unreachable; want closed (env ignored)")
 		}
-		if cfg.VerdictMinN != experiment.DefaultMinNPerArm {
-			t.Errorf("verdict_min_n = %d with flagd unreachable, want the compiled default %d (env ignored)",
-				cfg.VerdictMinN, experiment.DefaultMinNPerArm)
-		}
 		if ok, reason := proposerPermit(f, true)(ctx); ok || reason != experiment.SkipReasonAgentDisabled {
 			t.Errorf("proposerPermit = (%v, %q), want (false, %q)", ok, reason, experiment.SkipReasonAgentDisabled)
 		}

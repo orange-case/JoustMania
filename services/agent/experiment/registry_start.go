@@ -260,9 +260,6 @@ func (r *Registry) startSpanLocked(e *entry, intent journal.Intent) {
 	if intent.Objective != "" {
 		attrs = append(attrs, attribute.String(keys.AttrExperimentObjective, intent.Objective))
 	}
-	if intent.TargetNPerArm > 0 {
-		attrs = append(attrs, attribute.Int(keys.AttrExperimentTargetN, intent.TargetNPerArm))
-	}
 	if len(intent.Arms) > 0 {
 		attrs = append(attrs, attribute.String(keys.AttrExperimentArms, strings.Join(intent.Arms, ",")))
 	}
