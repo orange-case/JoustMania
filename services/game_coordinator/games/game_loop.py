@@ -27,6 +27,10 @@ from services.game_coordinator.runtime_config import GamePerformanceConfig
 from services.game_coordinator.stream_writes import serialized_write
 
 
+class MassDisconnectError(RuntimeError):
+    """Many players dropped at once (an infrastructure fault): the game ends with no winner (UC-002 BR-009)."""
+
+
 @dataclass(slots=True)
 class _LoopState:
     """The mutable state of one ``_game_loop`` run (frame timing, reconnects, alive set)."""
@@ -170,6 +174,8 @@ class GameLoopMixin:
                     if serial in self.players and self.players[serial].alive:
                         accel_mag = self._compute_accel_magnitude(controller_data.accel)
                         self._update_ema(self.players[serial], accel_mag, self._ema_weight)
+                        if controller_data.bt_adapter:
+                            self._player_adapters[serial] = controller_data.bt_adapter
                 frames_consumed += 1
 
                 if _base.time.monotonic() - warmup_start >= self._WARMUP_DURATION_S:
@@ -204,7 +210,10 @@ class GameLoopMixin:
         with self._frame_config_scope():
             # UC-020 BR-001: win check after every disconnect and every controller sample.
             # Handle disconnects first
-            for disconnect in gameplay_update.disconnects:
+            disconnects = gameplay_update.disconnects
+            if disconnects:
+                await self._abort_on_mass_disconnect([d.serial for d in disconnects])
+            for disconnect in disconnects:
                 await self._handle_disconnect(disconnect.serial)
                 if await self._check_win_condition():
                     return True
@@ -256,6 +265,8 @@ class GameLoopMixin:
             True if game is over (win condition met), False otherwise
         """
         pending, self._warmup_disconnects = self._warmup_disconnects, []
+        if pending:
+            await self._abort_on_mass_disconnect(pending)
         for serial in pending:
             await self._handle_disconnect(serial)
             if await self._check_win_condition():
@@ -286,6 +297,46 @@ class GameLoopMixin:
 
         # Kill the player using the standard pipeline (accel_mag=0.0 — no motion)
         await self._kill_player(serial, accel_mag=0.0)
+
+    async def _abort_on_mass_disconnect(self, serials: list[str]) -> None:
+        """UC-002 BR-009: raise ``MassDisconnectError`` when this batch makes a mass disconnect.
+
+        Runs before the batch is handled, so nobody of it is eliminated and no win
+        check runs. The error ends the game through the frame-error path: ``game_error``,
+        no winner, the lobby comes back (UC-030 BR-006).
+        """
+        reason = self._mass_disconnect_reason(serials)
+        if reason is None:
+            return
+        logger.error(f"Aborting game {self.game_id} with no winner: {reason}")
+        await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=3)
+        raise MassDisconnectError(reason)
+
+    def _mass_disconnect_reason(self, serials: list[str]) -> str | None:
+        """Add the batch to the disconnect window; the abort reason when it is now a mass disconnect."""
+        now = game_clock.now()
+        start = self._disconnect_window_start
+        if start is None or now - start > self._MASS_DISCONNECT_WINDOW_S:
+            self._disconnect_window_start = now
+            self._disconnect_window_alive = frozenset(s for s, p in self.players.items() if p.alive)
+            self._disconnect_window_serials = set()
+        alive = self._disconnect_window_alive
+        dropped = self._disconnect_window_serials
+        # Dead players' disconnects still arrive (the stream roster, UC-002 BR-004): one who died
+        # inside the window and then switched off is no live player lost.
+        players = self.players
+        dropped.update(s for s in serials if s in alive and players[s].alive)
+        if len(dropped) < self._MASS_DISCONNECT_MIN_PLAYERS:
+            return None
+        summary = f"mass_disconnect: {len(dropped)} of {len(alive)} players disconnected"
+        if len(dropped) * 2 > len(alive):
+            return summary
+        adapters = self._player_adapters
+        for adapter in sorted({adapters[s] for s in dropped if s in adapters}):
+            on_adapter = [s for s in alive if adapters.get(s) == adapter]
+            if len(on_adapter) >= self._MASS_DISCONNECT_MIN_PLAYERS and dropped.issuperset(on_adapter):
+                return f"{summary} on adapter {adapter}"
+        return None
 
     def _update_frame_metrics(
         self,

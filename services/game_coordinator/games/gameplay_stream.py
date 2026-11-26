@@ -25,6 +25,12 @@ class GameplayStreamMixin:
         # Disconnects seen by _warmup_ema(); _game_loop() runs them through the
         # death path before its first frame (UC-020 A2).
         self._warmup_disconnects: list[str] = []
+        # UC-002 BR-009: each player's HCI adapter (learnt in the warm-up) and the open
+        # mass-disconnect window: its start, the players alive then, and who dropped in it.
+        self._player_adapters: dict[str, str] = {}
+        self._disconnect_window_start: float | None = None
+        self._disconnect_window_alive: frozenset[str] = frozenset()
+        self._disconnect_window_serials: set[str] = set()
         # Early stream drain (UC-021 A1, D-G10): a mode that opens its stream before
         # its additional phases reads and discards frames until the start.
         self._early_drain_task: asyncio.Task | None = None

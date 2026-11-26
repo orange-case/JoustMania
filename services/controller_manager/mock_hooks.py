@@ -37,6 +37,10 @@ class MockFeatureHooks:
         """Adapter type name of a tracked serial (telemetry label). Default: none."""
         return ""
 
+    def get_bt_adapter(self, serial: str) -> str:  # noqa: ARG002
+        """HCI adapter name of a tracked serial ("hci0"). Default: none."""
+        return ""
+
     def get_controller_metadata(self, serial: str) -> dict | None:  # noqa: ARG002
         """Adapter-supplied metadata (reserved / tag) of a serial. Default: none."""
         return None
