@@ -216,12 +216,15 @@ def _bring_up(docker_compose, prefix, cwd, env, no_build: bool) -> None:
 
 
 def _collector_healthy() -> bool:
-    status = subprocess.run(
-        ["docker", "inspect", "-f", "{{.State.Health.Status}}", COLLECTOR_CONTAINER],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    ).stdout.strip()
+    try:
+        status = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Health.Status}}", COLLECTOR_CONTAINER],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+    except subprocess.TimeoutExpired:
+        return False
     return status == "healthy"
 
 
