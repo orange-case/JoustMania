@@ -92,7 +92,7 @@ def get_adapter_routing_default() -> str:
     """Get the default adapter routing backend.
 
     Reads bluetooth_backend from the controller domain with no targeting
-    key. Returns the raw flag variant value ("python", "rust" or "unstable");
+    key. Returns the raw flag variant value ("python" or "rust");
     usb_pairing maps it to a pairing backend (UC-001 BR-003).
 
     Falls back to "rust", the flag's default, when flagd is unavailable (#1371).

@@ -11,7 +11,6 @@ import (
 	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/gamecontext"
 	"github.com/joustmania/agent/gate"
-	"github.com/joustmania/agent/infracontext"
 )
 
 // Full OTLP gRPC service names, recorded as rpc.service (semconv) on the
@@ -23,14 +22,9 @@ const (
 
 // pipeline ties the context stores and decision loops together. On each signal
 // update it snapshots the relevant partition(s) and, if the gate allows, runs the
-// per-game loop for that partition.
-//
-// There are two parallel observe paths sharing the one OTLP trace receiver:
-//   - the game path (mux + loops): the GameContext multiplexer (#845 PR B) — one
-//     Store partition per game_id, fallback partition "" for unlabeled signals —
-//     plus the per-game LoopSet (#845 PR C) — one decision.Loop per partition.
-//   - the infrastructure path (infraStore + infraLoop): the #733 Bluetooth-health
-//     observe path. infraLoop may be nil, in which case the infra path is inert.
+// per-game loop for that partition: the GameContext multiplexer (#845 PR B) holds
+// one Store partition per game_id, fallback partition "" for unlabeled signals,
+// and the per-game LoopSet (#845 PR C) one decision.Loop per partition.
 //
 // PER-GAME BUDGET (#845 PR C): each partition gets its OWN decision.Loop via the
 // LoopSet, lazily created on first evaluation. Each Loop owns its weighted rate
@@ -51,9 +45,6 @@ type pipeline struct {
 	// flags.LifecycleHolder.PlayerTTL (a lock-free atomic load). Nil keeps the static
 	// playerTTL, preserving the read-at-startup behavior in tests.
 	playerTTLSource func() time.Duration
-
-	infraStore *infracontext.Store
-	infraLoop  decision.InfraEvaluator
 
 	now func() time.Time
 }
@@ -84,24 +75,6 @@ func (p *pipeline) effectivePlayerTTL() time.Duration {
 		}
 	}
 	return p.playerTTL
-}
-
-// withInfra attaches the infrastructure observe path. Returns the pipeline for
-// chaining at construction.
-func (p *pipeline) withInfra(infraStore *infracontext.Store, infraLoop decision.InfraEvaluator) *pipeline {
-	p.infraStore = infraStore
-	p.infraLoop = infraLoop
-	return p
-}
-
-// infraUpdated is called after the Bluetooth-health context mutates. It snapshots
-// the infra store and triggers the (stub) infrastructure evaluation loop. Parallel
-// to signalUpdated for the game path; no gate yet (the real gate lands in PR E).
-func (p *pipeline) infraUpdated(ctx context.Context) {
-	if p.infraStore == nil || p.infraLoop == nil {
-		return
-	}
-	p.infraLoop.OnInfraEvaluate(ctx, p.infraStore.Snapshot())
 }
 
 // signalUpdated is called after a received signal mutates one or more partitions.
@@ -137,11 +110,8 @@ type traceReceiver struct {
 	pipe *pipeline
 }
 
-// Export ingests a batch of traces. A single batch may carry both game spans
-// (player_lifecycle etc.) and controller.bluetooth_health spans; each store sees
-// the whole batch and recognizes only its own span kinds, so both observe paths
-// fire independently with no cross-contamination. Both stores honor the same
-// own-service self-ingestion skip internally.
+// Export ingests a batch of traces into the game multiplexer, which recognizes
+// only its own span kinds and skips the agent's own spans.
 func (r *traceReceiver) Export(ctx context.Context, req ptraceotlp.ExportRequest) (ptraceotlp.ExportResponse, error) {
 	t0 := time.Now()
 	td := req.Traces()
@@ -151,9 +121,6 @@ func (r *traceReceiver) Export(ctx context.Context, req ptraceotlp.ExportRequest
 			RPCService: otlpTraceService,
 			T0:         t0,
 		})
-	}
-	if r.pipe.infraStore != nil && r.pipe.infraStore.ApplySpans(td) {
-		r.pipe.infraUpdated(ctx)
 	}
 	return ptraceotlp.NewExportResponse(), nil
 }

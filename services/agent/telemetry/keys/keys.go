@@ -210,9 +210,7 @@ const (
 // SpanInterventionEffect is the intervention-effect feedback span (#918): emitted
 // after a follow-up window (default DefaultEffectWindow) once per APPLIED (dispatched)
 // intervention, carrying the BEFORE/AFTER fitness-objective signals for that game and
-// their delta, attributed to the intervention id. It closes the game-path MEASUREMENT
-// loop — the infra path already has fitness->rollback, the game path had nothing
-// (#918). It is MEASUREMENT ONLY: it never reverts the intervention.
+// their delta, attributed to the intervention id (#918). It is MEASUREMENT ONLY: it never reverts the intervention.
 //
 // One span per evaluated fitness signal (or one aborted span), each a DIRECT remote
 // child of the causing agent.decision, backdated to dispatch time so a Jaeger trace

@@ -3,32 +3,21 @@ package main
 import (
 	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/open-feature/go-sdk/openfeature"
-	"go.opentelemetry.io/collector/pdata/ptrace"
-	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
-	"go.opentelemetry.io/otel"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/experiment"
 	"github.com/joustmania/agent/flags"
-	"github.com/joustmania/agent/gamecontext"
-	"github.com/joustmania/agent/infracontext"
 	"github.com/joustmania/agent/patterngame"
 )
 
 // killswitch_uc045_test.go covers the UC-045 (kill switch) flows the per-feature
 // suites leave open (#1653): the experiment loop aborting a RUNNING experiment when
-// `enabled` flips off (main step 5), the same abort when flagd becomes unreachable
-// and both gates fall back to off (A3), and the infrastructure loop that `enabled`
-// does not govern (A4 step 1, Post-S-3).
+// `enabled` flips off (main step 5) and the same abort when flagd becomes unreachable
+// and both gates fall back to off (A3).
 
 // switchableEvaluator is a flagd stand-in for the real flags client: it serves the
 // configured booleans while reachable, and fails every read once unreachable, as an
@@ -269,111 +258,5 @@ func TestKillSwitch_FlagdUnreachableStopsExperimentLoop(t *testing.T) {
 	}
 	if recs := spawner.drain(); len(recs) != 0 {
 		t.Fatalf("flagd outage still spawned %d shadow games", len(recs))
-	}
-}
-
-// recordingRollout is a rollout actuator that always writes (rollout_enabled on).
-type recordingRollout struct {
-	mu      sync.Mutex
-	written []string
-}
-
-func (r *recordingRollout) SetControllerCount(variant string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.written = append(r.written, variant)
-	return nil
-}
-
-func (r *recordingRollout) DryRun() bool { return false }
-
-func (r *recordingRollout) NextStage(current int) (string, int, bool) {
-	if current == 0 {
-		return "one", 1, true
-	}
-	return "", 0, false
-}
-
-func (r *recordingRollout) StageVariantForValue(value int) (string, bool) {
-	names := map[int]string{0: "none", 1: "one"}
-	n, ok := names[value]
-	return n, ok
-}
-
-func (r *recordingRollout) calls() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]string(nil), r.written...)
-}
-
-// rolloutHealthSpan appends a controller.bluetooth_health span for an ACTIVE
-// rollout (target backend set, stage 0) with healthy Bluetooth signals.
-func rolloutHealthSpan(td ptrace.Traces, serial string) {
-	span := td.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
-	span.SetName(infracontext.SpanBluetoothHealth)
-	span.Attributes().PutDouble(infracontext.AttrEventGapMs, 20)
-	span.Attributes().PutDouble(infracontext.AttrDroppedEventsPct, 0.01)
-	span.Attributes().PutDouble(infracontext.AttrMovementUpdateHz, 60)
-	span.Attributes().PutInt(infracontext.AttrActiveControllers, 1)
-	span.Attributes().PutStr(infracontext.AttrTargetBackend, "rust")
-	span.Attributes().PutInt(infracontext.AttrRolloutCount, 0)
-	ev := span.Events().AppendEmpty()
-	ev.SetName(infracontext.EventControllerSample)
-	ev.Attributes().PutStr(infracontext.AttrControllerSerial, serial)
-	ev.Attributes().PutDouble(infracontext.AttrMovementUpdateHz, 60)
-	ev.Attributes().PutStr(infracontext.AttrControllerAdapter, "python")
-}
-
-// TestKillSwitch_InfraLoopKeepsEvaluatingWhileAgentOff: with `enabled` off (the
-// fail-closed baseline the kill switch restores) a Bluetooth-health batch through
-// the receiver still reaches the real infrastructure loop, which evaluates fitness
-// and records an agent.infrastructure.decision span: `enabled` does not govern the
-// rollout, only rollout_enabled / remediation_allowed do.
-// UC: UC-045 A4 Post-S-3
-func TestKillSwitch_InfraLoopKeepsEvaluatingWhileAgentOff(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agentFlags := flags.New(&switchableEvaluator{booleans: map[string]bool{"enabled": false}}, nil)
-	if agentFlags.Evaluate(context.Background()).Enabled {
-		t.Fatal("precondition: the agent must be off")
-	}
-
-	// The infra loop takes its tracer from the global provider at construction.
-	sr := tracetest.NewSpanRecorder()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
-	prev := otel.GetTracerProvider()
-	otel.SetTracerProvider(tp)
-	t.Cleanup(func() {
-		otel.SetTracerProvider(prev)
-		_ = tp.Shutdown(context.Background())
-	})
-	rollout := &recordingRollout{}
-	infraLoop := decision.NewInfraLoop(logger, decision.DefaultRolloutDwell, decision.NewLiveBluetoothFitness(), rollout)
-	infraLoop.SetGate(func(infracontext.InfraContext, time.Time) bool { return true })
-
-	mux := gamecontext.NewMultiplexer(func(string) *gamecontext.Store {
-		return gamecontext.NewStore(time.Hour, time.Hour, fixedClock())
-	})
-	loops := decision.NewLoopSet(func(string) *decision.Loop { return decision.NewLoop(agentFlags, logger) })
-	infraStore := infracontext.NewStore(time.Hour, fixedClock())
-	r := &traceReceiver{pipe: newPipeline(mux, loops, time.Hour).withInfra(infraStore, infraLoop)}
-
-	td := ptrace.NewTraces()
-	rolloutHealthSpan(td, "A")
-	if _, err := r.Export(context.Background(), ptraceotlp.NewExportRequestFromTraces(td)); err != nil {
-		t.Fatalf("Export error: %v", err)
-	}
-
-	var decisions int
-	for _, s := range sr.Ended() {
-		if s.Name() == decision.SpanInfraDecision {
-			decisions++
-		}
-	}
-	if decisions == 0 {
-		t.Fatal("agent off stopped the infrastructure loop: no agent.infrastructure.decision span")
-	}
-	// Healthy fitness at stage 0 with rollout_enabled on: the loop expands as usual.
-	if got := rollout.calls(); len(got) != 1 || got[0] != "one" {
-		t.Fatalf("agent off changed the rollout: writes = %v, want [one]", got)
 	}
 }

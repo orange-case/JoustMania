@@ -18,12 +18,10 @@ import { AgentView } from "./components/AgentView.js";
 import {
   DecideStore,
   FlagStateStore,
-  RolloutStore,
   activityFeed,
   blockedRowsFrom,
   fetchFlagStates,
   fetchInterventionCounts,
-  fetchRollouts,
   needsFlagStateFallback,
   createDecideRun,
   createGoalRun,
@@ -69,11 +67,10 @@ const EXPERIMENTS_TIMEOUT_MS = 4000;
 
 // Agent tab, everything but the decide feed: VictoriaMetrics counts and, from
 // Jaeger, the flag-state fallback search (only when the decide poll brought no
-// flag state for its game) and the rollout searches (every ROLLOUT_EVERY_TICKS).
+// flag state for its game).
 const AGENT_POLL_MS = 5000;
 const AGENT_MAX_BACKOFF_MS = 15_000;
 const AGENT_TIMEOUT_MS = 4000;
-const ROLLOUT_EVERY_TICKS = 2;
 
 // Poll cadence for the invoke_agent feed (#1233, Jaeger query). Faster than the
 // other agent panels: a live decision.backend switch must show on the very next decision,
@@ -125,9 +122,8 @@ let shadowStream: { gameId: string; abort: AbortController } | null = null;
 
 // invoke_agent rows across polls; the follow poller tells it which game to describe.
 const decideStore = new DecideStore();
-// Agent-tab span state across polls (#2059): flag states per game, rollout rows.
+// Agent-tab span state across polls (#2059): flag states per game.
 const flagStore = new FlagStateStore();
-const rolloutStore = new RolloutStore();
 // The VictoriaMetrics half of the overlay; null until the agent poller ran once.
 let interventionCounts: InterventionOverlay | null = null;
 /** False while the last Agent poll's Jaeger leg failed (UC-035 A3 step 2). */
@@ -357,16 +353,15 @@ function currentFlags(): FlagPanel | null {
 // While the Agent poll's Jaeger leg fails only the overlay renders (UC-035 A3).
 function renderAgentPanels() {
   paintAgentPanels(agentView, interventionCounts, agentJaegerOk, () => ({
-    feed: activityFeed(blockedRowsFrom(decideStore.feed().rows), rolloutStore.list()),
+    feed: activityFeed(blockedRowsFrom(decideStore.feed().rows)),
     flags: currentFlags(),
   }));
 }
 
 // Poll the Agent tab's other panels (#2059): VictoriaMetrics counts (never fail),
-// the agent.flag_state fallback search and the rollout searches (Jaeger; a
-// failure keeps the last render, flagged stale).
+// and the agent.flag_state fallback search (Jaeger; a failure keeps the last
+// render, flagged stale).
 function startAgentPolling() {
-  let tick = 0;
   const flagFallbackPacer = new FlagFallbackPacer();
   agentPoller = createPoller({
     baseMs: AGENT_POLL_MS,
@@ -374,7 +369,6 @@ function startAgentPolling() {
     timeoutMs: AGENT_TIMEOUT_MS,
     isActive: () => tabActive("agent"),
     run: async (signal) => {
-      const rolloutDue = tick % ROLLOUT_EVERY_TICKS === 0;
       const decideGameId = decideStore.feed().current?.gameId ?? null;
       // Paced (#2287): the same game's fallback search repeats at most every 30 s.
       const flagsNeeded =
@@ -385,14 +379,12 @@ function startAgentPolling() {
       const settled = await Promise.allSettled([
         fetchInterventionCounts(signal),
         flagsNeeded ? fetchFlagStates(signal, decideStore.followState) : Promise.resolve([] as FlagPanel[]),
-        rolloutDue ? fetchRollouts(rolloutStore, signal) : Promise.resolve(),
       ]);
-      tick += 1;
       // A failed fallback search is retried on the next poll, not after the pace.
       if (flagsNeeded && settled[1].status === "rejected") flagFallbackPacer.forget();
       const result = settleAgentPoll(settled, interventionCounts, (states) =>
         flagStore.merge(states, decideStore.followState),
-        { flags: flagsNeeded, rollouts: rolloutDue },
+        { flags: flagsNeeded },
       );
       interventionCounts = result.overlay;
       agentJaegerOk = result.jaegerOk ?? agentJaegerOk;

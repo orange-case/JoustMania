@@ -6,7 +6,7 @@ the ``from os import environ, getenv`` and ``import os as _o`` spellings. A
 non-literal key (``os.getenv(name)``) cannot be attributed to a var and is
 skipped; its literal call sites through a wrapper are not tracked, so read
 env vars directly with a literal key. Go reads with regexes over ``os.Getenv`` / ``os.LookupEnv``
-and the per-package env helpers (``getEnv(key, def)``, ``secondsEnv``, ...), which
+and the per-package env helpers (``getEnv(key, def)``, ...), which
 are discovered from their bodies so a new helper is picked up without a list.
 Go comments are stripped before matching.
 

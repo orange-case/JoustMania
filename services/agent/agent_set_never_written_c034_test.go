@@ -3,12 +3,11 @@ package main
 // C-034 (#1799): the agent cannot loosen its own limits. The flag service has no
 // write authentication (D11), so the key-level invariant of C-034 holds only by
 // construction, and this test is what checks it on the wire. It drives every
-// agent writer (actions.Writer, actions.RolloutWriter, the experiment Writer,
-// Gate and GateTargetingWriter, the promotion real-default writer and the kill
+// agent writer (actions.Writer, the experiment Writer, Gate and
+// GateTargetingWriter, the promotion real-default writer and the kill
 // switch) against a recording copy of the flag service's routes and asserts, on
 // every raw request, the (set, key, scope) C-034 allows:
 //
-//   - rollout: only current_controller_count, stack scope;
 //   - interventions: only the keys of flags.md §13.1, always game-scoped;
 //   - game: only an experiment+arm value or a game_kind=real overlay, never
 //     stack-wide (the flag-service registry then refuses every key outside the
@@ -237,39 +236,6 @@ var c034WriterRows = []c034Row{
 		},
 	},
 	{
-		name:   "rollout",
-		drives: []string{"actions/rollout_writer.go:RolloutWriter.SetControllerCount"},
-		run: func(t *testing.T, svc *flagservice.Client) {
-			w := actions.NewRolloutWriter(svc, testLogger())
-			variants := []string{actions.StageNoneVariant}
-			for cur := actions.StageNoneValue; ; {
-				v, next, ok := actions.NextStage(cur)
-				if !ok {
-					break
-				}
-				variants = append(variants, v)
-				cur = next
-			}
-			for _, v := range variants {
-				if err := w.SetControllerCount(v); err != nil {
-					t.Errorf("stage %s: %v", v, err)
-				}
-			}
-		},
-		check: func(r c034Request) string {
-			if r.Method != http.MethodPut || r.Write == nil {
-				return "rollout writer sent a non-PUT write"
-			}
-			if r.Set != actions.FlagSetRollout || r.Flag != "current_controller_count" {
-				return "rollout writer wrote " + r.Set + "/" + r.Flag + ", only rollout/current_controller_count is allowed"
-			}
-			if r.Write.Scope != (flagservice.Scope{}) || r.Write.Persist {
-				return fmt.Sprintf("rollout write not a stack overlay: %+v", r.Write.Scope)
-			}
-			return ""
-		},
-	},
-	{
 		name:   "experiment",
 		drives: []string{"experiment/writer.go:Writer.Apply", "experiment/writer.go:Writer.DryRun", "experiment/writer.go:Writer.Strip"},
 		run: func(t *testing.T, svc *flagservice.Client) {
@@ -415,10 +381,10 @@ func c034WireViolation(r c034Request) string {
 		return "write path is not /{set}/{flag}"
 	}
 	switch r.Set {
-	case actions.FlagSetInterventions, actions.FlagSetRollout, experiment.GameFlagSet:
+	case actions.FlagSetInterventions, experiment.GameFlagSet:
 		return ""
 	}
-	return "write outside the interventions, rollout and game sets"
+	return "write outside the interventions and game sets"
 }
 
 // c034Interventions enumerates every decision.Intervention* constant from the

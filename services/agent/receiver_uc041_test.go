@@ -16,15 +16,13 @@ import (
 	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamecontext"
-	"github.com/joustmania/agent/infracontext"
 )
 
 // liveHarness is a receiver pair over an enabled decision loop whose rules
-// record every evaluation, plus the infra store/loop.
+// record every evaluation.
 type liveHarness struct {
 	mux      *gamecontext.Multiplexer
 	rules    *recordingRules
-	infra    *recordingInfraLoop
 	metrics  *metricsReceiver
 	traces   *traceReceiver
 	exportMD func(t *testing.T, md pmetric.Metrics)
@@ -47,10 +45,9 @@ func newLiveHarness(t *testing.T) *liveHarness {
 		l.Rules = rules
 		return l
 	})
-	infraLoop := &recordingInfraLoop{}
-	pipe := newPipeline(mux, loops, time.Hour).withInfra(infracontext.NewStore(time.Hour, func() time.Time { return clock }), infraLoop)
+	pipe := newPipeline(mux, loops, time.Hour)
 	pipe.now = func() time.Time { return clock }
-	h := &liveHarness{mux: mux, rules: rules, infra: infraLoop, metrics: &metricsReceiver{pipe: pipe}, traces: &traceReceiver{pipe: pipe}}
+	h := &liveHarness{mux: mux, rules: rules, metrics: &metricsReceiver{pipe: pipe}, traces: &traceReceiver{pipe: pipe}}
 	h.exportMD = func(t *testing.T, md pmetric.Metrics) {
 		t.Helper()
 		if _, err := h.metrics.Export(context.Background(), pmetricotlp.NewExportRequestFromMetrics(md)); err != nil {
@@ -91,9 +88,6 @@ func TestReceiver_HealthSpanTouchesNoGameAndTriggersNoEvaluation(t *testing.T) {
 			if fb, _ := h.mux.Snapshot(gamecontext.FallbackGameID); len(fb.Players) != 0 {
 				t.Fatalf("fallback context gained players %v from a health span", fb.Players)
 			}
-		}
-		if got := h.infra.calls.Load(); got != 1 {
-			t.Fatalf("infra loop calls = %d, want 1 (the health span still feeds the rollout loop)", got)
 		}
 	})
 }

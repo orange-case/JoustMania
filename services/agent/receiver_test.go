@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,19 +18,7 @@ import (
 	"github.com/joustmania/agent/decision"
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamecontext"
-	"github.com/joustmania/agent/infracontext"
 )
-
-// recordingInfraLoop counts OnInfraEvaluate calls and captures the last snapshot.
-type recordingInfraLoop struct {
-	calls atomic.Int32
-	last  infracontext.InfraContext
-}
-
-func (r *recordingInfraLoop) OnInfraEvaluate(_ context.Context, snap infracontext.InfraContext) {
-	r.calls.Add(1)
-	r.last = snap
-}
 
 // fixedClock returns a stable time so gating/eviction are deterministic.
 func fixedClock() func() time.Time { return func() time.Time { return time.Unix(1000, 0) } }
@@ -43,17 +30,18 @@ func gameSpan(td ptrace.Traces, serial string) {
 	span.Attributes().PutStr("player.serial", serial)
 }
 
-// healthSpanInto appends a controller.bluetooth_health span (infra path) to td.
+// healthSpanInto appends a controller.bluetooth_health span, which the game path
+// must ignore, to td.
 func healthSpanInto(td ptrace.Traces, gapMs float64, serial, adapter string) {
 	span := td.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
-	span.SetName(infracontext.SpanBluetoothHealth)
-	span.Attributes().PutDouble(infracontext.AttrEventGapMs, gapMs)
-	span.Attributes().PutInt(infracontext.AttrActiveControllers, 1)
+	span.SetName("controller.bluetooth_health")
+	span.Attributes().PutDouble("bluetooth.event_gap_ms", gapMs)
+	span.Attributes().PutInt("bluetooth.active_controllers", 1)
 	ev := span.Events().AppendEmpty()
-	ev.SetName(infracontext.EventControllerSample)
-	ev.Attributes().PutStr(infracontext.AttrControllerSerial, serial)
-	ev.Attributes().PutDouble(infracontext.AttrMovementUpdateHz, 60)
-	ev.Attributes().PutStr(infracontext.AttrControllerAdapter, adapter)
+	ev.SetName("controller.sample")
+	ev.Attributes().PutStr("controller.serial", serial)
+	ev.Attributes().PutDouble("bluetooth.movement_update_hz", 60)
+	ev.Attributes().PutStr("controller.adapter", adapter)
 }
 
 // testGameContext snapshots the fallback partition (game_id ""), the partition the
@@ -64,7 +52,7 @@ func testGameContext(t *testing.T, mux *gamecontext.Multiplexer) (gamecontext.Ga
 	return mux.Snapshot(gamecontext.FallbackGameID)
 }
 
-func newTestReceiver(t *testing.T) (*traceReceiver, *gamecontext.Multiplexer, *infracontext.Store, *recordingInfraLoop) {
+func newTestReceiver(t *testing.T) (*traceReceiver, *gamecontext.Multiplexer) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	mux := gamecontext.NewMultiplexer(func(string) *gamecontext.Store {
@@ -74,15 +62,12 @@ func newTestReceiver(t *testing.T) (*traceReceiver, *gamecontext.Multiplexer, *i
 	loops := decision.NewLoopSet(func(string) *decision.Loop {
 		return decision.NewLoop(nil, logger)
 	})
-	infraStore := infracontext.NewStore(time.Hour, fixedClock())
-	infraLoop := &recordingInfraLoop{}
-	pipe := newPipeline(mux, loops, time.Hour).withInfra(infraStore, infraLoop)
-	return &traceReceiver{pipe: pipe}, mux, infraStore, infraLoop
+	return &traceReceiver{pipe: newPipeline(mux, loops, time.Hour)}, mux
 }
 
 // UC: UC-041 A1
-func TestReceiver_RoutesMixedBatchToBothStores(t *testing.T) {
-	r, mux, infraStore, infraLoop := newTestReceiver(t)
+func TestReceiver_MixedBatchEnrichesGameOnly(t *testing.T) {
+	r, mux := newTestReceiver(t)
 
 	td := ptrace.NewTraces()
 	gameSpan(td, "A")
@@ -91,48 +76,14 @@ func TestReceiver_RoutesMixedBatchToBothStores(t *testing.T) {
 	if _, err := r.Export(context.Background(), ptraceotlp.NewExportRequestFromTraces(td)); err != nil {
 		t.Fatalf("Export error: %v", err)
 	}
-
-	// Game path: player identity enriched.
 	if gc, ok := testGameContext(t, mux); !ok || gc.Players["A"] == nil {
 		t.Fatal("game span must enrich the fallback game partition")
-	}
-	// Infra path: window + controller populated.
-	infra := infraStore.Snapshot()
-	if infra.Window.EventGapMs == nil || *infra.Window.EventGapMs != 42 {
-		t.Fatalf("infra window not populated: %v", infra.Window.EventGapMs)
-	}
-	if c := infra.Controllers["A"]; c == nil || c.Adapter != "python" {
-		t.Fatalf("infra controller A not populated: %+v", c)
-	}
-	if got := infraLoop.calls.Load(); got != 1 {
-		t.Fatalf("infra loop calls = %d, want 1", got)
-	}
-}
-
-// UC: UC-041 A1
-func TestReceiver_GameOnlyBatchDoesNotTriggerInfra(t *testing.T) {
-	r, mux, infraStore, infraLoop := newTestReceiver(t)
-
-	td := ptrace.NewTraces()
-	gameSpan(td, "A")
-
-	if _, err := r.Export(context.Background(), ptraceotlp.NewExportRequestFromTraces(td)); err != nil {
-		t.Fatalf("Export error: %v", err)
-	}
-	if gc, ok := testGameContext(t, mux); !ok || gc.Players["A"] == nil {
-		t.Fatal("game span must enrich the fallback game partition")
-	}
-	if got := infraLoop.calls.Load(); got != 0 {
-		t.Fatalf("infra loop calls = %d, want 0 (no health span, no cross-contamination)", got)
-	}
-	if infraStore.Snapshot().Window.EventGapMs != nil {
-		t.Fatal("game-only batch must not populate infra window")
 	}
 }
 
 // UC: UC-041 A1
 func TestReceiver_HealthOnlyBatchDoesNotCreatePlayers(t *testing.T) {
-	r, mux, infraStore, infraLoop := newTestReceiver(t)
+	r, mux := newTestReceiver(t)
 
 	td := ptrace.NewTraces()
 	healthSpanInto(td, 7, "A", "rust")
@@ -141,26 +92,17 @@ func TestReceiver_HealthOnlyBatchDoesNotCreatePlayers(t *testing.T) {
 		t.Fatalf("Export error: %v", err)
 	}
 	if gc, ok := testGameContext(t, mux); ok && len(gc.Players) != 0 {
-		t.Fatal("health span must not create game players (no cross-contamination)")
-	}
-	if got := infraLoop.calls.Load(); got != 1 {
-		t.Fatalf("infra loop calls = %d, want 1", got)
-	}
-	if infraStore.Snapshot().Controllers["A"] == nil {
-		t.Fatal("health span must populate infra controller")
+		t.Fatal("health span must not create game players")
 	}
 }
 
 // UC: UC-041 main
-func TestReceiver_SkipsOwnServiceForBothPaths(t *testing.T) {
-	r, mux, infraStore, infraLoop := newTestReceiver(t)
+func TestReceiver_SkipsOwnService(t *testing.T) {
+	r, mux := newTestReceiver(t)
 	mux.SetOwnService("agent")
-	infraStore.SetOwnService("agent")
 
 	td := ptrace.NewTraces()
 	gameSpan(td, "A")
-	healthSpanInto(td, 42, "A", "python")
-	// Tag every resource as the agent's own service.
 	rss := td.ResourceSpans()
 	for i := 0; i < rss.Len(); i++ {
 		rss.At(i).Resource().Attributes().PutStr("service.name", "agent")
@@ -171,12 +113,6 @@ func TestReceiver_SkipsOwnServiceForBothPaths(t *testing.T) {
 	}
 	if gc, ok := testGameContext(t, mux); ok && len(gc.Players) != 0 {
 		t.Fatal("own-service spans must not enrich the game store")
-	}
-	if infraStore.Snapshot().Window.EventGapMs != nil {
-		t.Fatal("own-service spans must not populate the infra store")
-	}
-	if got := infraLoop.calls.Load(); got != 0 {
-		t.Fatalf("infra loop calls = %d, want 0 (own-service skipped)", got)
 	}
 }
 
@@ -309,7 +245,7 @@ func countBlockedActions(spans []sdktrace.ReadOnlySpan) int {
 // (#845 PR B) — no cross-game player bleed.
 // UC: UC-041 main Post-F-1
 func TestReceiver_PartitionsByGameID(t *testing.T) {
-	r, mux, _, _ := newTestReceiver(t)
+	r, mux := newTestReceiver(t)
 
 	td := ptrace.NewTraces()
 	gameIDSpan(td, "P1", "game-A")

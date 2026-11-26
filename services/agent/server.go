@@ -239,8 +239,7 @@ func (c *serverComponents) startHealthServer() *http.Server {
 // startEvictionLoop runs the partition-eviction ticker in its own goroutine and
 // returns a channel closed when the loop exits (on ctx cancellation). On each tick
 // it evicts stale Store partitions, drops the matching decision Loops in lockstep
-// (#845 PR C; the fallback loop is retained by Retain), evicts the infra store, and
-// hot-reloads the cadence if the live source moved (#927).
+// (#845 PR C; the fallback loop is retained by Retain), and hot-reloads the cadence if the live source moved (#927).
 func (c *serverComponents) startEvictionLoop(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
@@ -259,9 +258,6 @@ func (c *serverComponents) startEvictionLoop(ctx context.Context) <-chan struct{
 				// and multiplexer locks, so the tick takes as long as that chain.
 				c.mux.EvictStale()
 				c.loops.Retain(partitionSet(c.mux.Partitions()))
-				if c.pipe.infraStore != nil {
-					c.pipe.infraStore.EvictStale()
-				}
 				if next := c.effectiveEvictInterval(); next > 0 && next != interval {
 					interval = next
 					ticker.Reset(interval)

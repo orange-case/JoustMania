@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DecideStore, pollDecides, fetchFlagStates, fetchInterventionCounts, fetchRollouts, RolloutStore } from "../agent.js";
+import { DecideStore, pollDecides, fetchFlagStates, fetchInterventionCounts } from "../agent.js";
 import { ExperimentStore, pollExperiments } from "../experiments.js";
 import { JaegerUnavailableError } from "../jaeger.js";
 import { keepGameEventStreamOpen } from "../stream.js";
@@ -88,7 +88,6 @@ describe("UC-035: A3 Jaeger down vs no data", () => {
       stubBackends({ jaeger: mode });
       await expect(pollDecides(new DecideStore(), 0)).rejects.toBeInstanceOf(JaegerUnavailableError);
       await expect(fetchFlagStates()).rejects.toBeInstanceOf(JaegerUnavailableError);
-      await expect(fetchRollouts(new RolloutStore())).rejects.toBeInstanceOf(JaegerUnavailableError);
       await expect(pollExperiments(new ExperimentStore())).rejects.toBeInstanceOf(JaegerUnavailableError);
     });
   }
@@ -97,9 +96,6 @@ describe("UC-035: A3 Jaeger down vs no data", () => {
     stubBackends({});
     await expect(fetchFlagStates()).resolves.toEqual([]);
     await expect(pollExperiments(new ExperimentStore())).resolves.toEqual([]);
-    const store = new RolloutStore();
-    await fetchRollouts(store);
-    expect(store.list()).toEqual([]);
   });
 });
 
