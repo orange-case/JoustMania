@@ -62,7 +62,6 @@ python3 tools/monitor_multi_hub_performance.py
 - `game_loop_jitter_ms` - Game loop jitter (standard deviation of the frame interval, in ms)
 - `game_loop_frame_consistency_percent` - Share of frames on schedule
 - `game_loop_frames_dropped_total{mode}` - Dropped frames counter
-- `game_config_changes_total{parameter}` - Runtime configuration changes picked up from flags
 
 The full list is the metric catalog in [telemetry.md §6](specs/telemetry.md#6-metrics). There is no
 game-loop latency histogram; jitter and frame consistency are the loop-health signals.

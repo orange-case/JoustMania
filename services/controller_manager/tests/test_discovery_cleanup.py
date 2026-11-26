@@ -82,8 +82,6 @@ async def test_disconnect_cleans_every_per_serial_record():
     gauges = {
         name: create_autospec(Gauge, instance=True)
         for name in (
-            "controller_bluetooth_dropped_events_ratio",
-            "controller_bluetooth_movement_update_hz",
             "controller_bluetooth_report_gap_p95_seconds",
             "controller_bluetooth_report_gap_max_seconds",
             "controller_connection_quality",

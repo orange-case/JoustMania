@@ -21,7 +21,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from services.operator_pad import metrics, page_keys
+from services.operator_pad import page_keys
 from services.operator_pad.actions import Actions
 from services.operator_pad.config import K5, KEYS, KNOB_PRESS, KNOB_TURN_A, KNOB_TURN_B, PadConfig, Timings
 from services.operator_pad.cues import CuePlayer
@@ -363,10 +363,9 @@ class PadController:
             return None
 
     async def _unknown(self, code: int, value: int) -> None:
-        """A4 step 3: ignored and counted; a pad that sends only unknown codes gets one warning and one cue."""
+        """A4 step 3: ignored; a pad that sends only unknown codes gets one warning and one cue."""
         if value != PRESS:
             return
-        metrics.unknown_keys_total.inc()
         logger.debug(f"Unknown pad key code {code} ignored")
         if not self._known_seen and not self._unknown_warned:
             self._unknown_warned = True

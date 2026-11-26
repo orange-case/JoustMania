@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 
 from opentelemetry import context as otel_context
 
-from services.menu import metrics
 from services.menu.handlers.base import ControllerState
 
 if TYPE_CHECKING:
@@ -209,9 +208,6 @@ class IdleMonitor:
         self._stop_sentinel_task()
         self._idle_active = False
         self._sentinel_serials.clear()
-        metrics.idle_mode_active.set(0)
-        metrics.idle_controllers_count.set(0)
-        metrics.sentinel_controllers_count.set(0)
         logger.info("Idle monitor stopped")
 
     async def wake_all(self, trigger_serial: str) -> None:
@@ -244,12 +240,6 @@ class IdleMonitor:
         self._idle_active = False
         self._sentinel_serials.clear()
         self._last_activity_time = time.monotonic()
-
-        # Update metrics
-        metrics.idle_mode_active.set(0)
-        metrics.idle_controllers_count.set(0)
-        metrics.sentinel_controllers_count.set(0)
-        metrics.idle_mode_wake_total.inc()
 
         logger.info(f"Woke {len(idle_serials) + 1} controllers from idle")
 
@@ -316,13 +306,6 @@ class IdleMonitor:
         if self._sentinel_serials:
             self._start_sentinel_task()
 
-        # Update metrics
-        idle_count = sum(1 for s in self._state_manager.controller_states.values() if s == ControllerState.IDLE)
-        metrics.idle_mode_active.set(1)
-        metrics.idle_controllers_count.set(idle_count)
-        metrics.sentinel_controllers_count.set(len(self._sentinel_serials))
-        metrics.idle_mode_entries_total.inc()
-
     def _select_sentinels(self, serials: list[str], count: int) -> list[str]:
         """
         Select sentinel controllers, preferring highest battery level.
@@ -383,7 +366,6 @@ class IdleMonitor:
                     await self._state_manager.led.set_color(serial, (0, 0, 0))
 
             self._sentinel_serials = new_sentinels
-            metrics.sentinel_controllers_count.set(len(self._sentinel_serials))
 
         self._last_rotation_time = time.monotonic()
 

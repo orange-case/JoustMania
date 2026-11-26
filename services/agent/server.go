@@ -75,6 +75,8 @@ type serverComponents struct {
 	// dossier shares the agent's lifecycle with no extra port. Nil leaves the health
 	// server serving only /healthz (the test path and the pre-#1183 behavior).
 	dossier *dossierReader
+	// state, when non-nil, serves GET /experiments/state (state.go) on the same server.
+	state *stateReader
 
 	// experiments, when non-nil, runs the #991 experiment cohort loop in its own
 	// ctx-bounded goroutine: declare → spawn shadow games into arms → conclude →
@@ -225,6 +227,9 @@ func (c *serverComponents) startHealthServer() *http.Server {
 	// reader is wired. GET-only, journal-off-disk reads — never blocks the agent loop.
 	if c.dossier != nil {
 		registerDossierRoutes(healthMux, c.dossier)
+	}
+	if c.state != nil {
+		healthMux.HandleFunc("/experiments/state", c.state.handle)
 	}
 	healthServer := &http.Server{Addr: c.healthAddr, Handler: healthMux}
 	go func() {

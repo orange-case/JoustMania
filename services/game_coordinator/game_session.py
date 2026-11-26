@@ -35,13 +35,7 @@ from opentelemetry import trace
 from opentelemetry.context import Context
 
 from lib.feature_flags import eval_game_kind, set_game_session_kind_context
-from lib.moments import (
-    AGENT_LOG_EVENTS_ATTR,
-    MOMENT_SHAPE_ATTR,
-    emit_agent_event,
-    read_agent_log_events,
-    read_moment_shape,
-)
+from lib.moments import MOMENT_SHAPE_ATTR, emit_agent_event, read_moment_shape
 from lib.otel_metrics import get_export_interval_ms
 from lib.telemetry import get_tracer
 from lib.types import get_game_display_name
@@ -180,37 +174,11 @@ class GameSession:
         self.game_start_time = time.time()
         self.game_state = game_coordinator_pb2.GameState.STARTING
         self.current_game = None
-        # Hex trace_id of this session's root game span. Captured once the
-        # span exists in _run_game and exposed as the game_trace_correlation gauge's
-        # game_trace_id label so the agent can link agent.decision -> this game trace.
-        # Empty until the span opens; used at retire to remove the exact gauge series.
-        self.game_trace_id = ""
-        # Hex span_id of this session's root game span. Carried alongside
-        # game_trace_id on the correlation gauge so the agent's Link references the
-        # actual game-start span (Jaeger highlights it via uiFind) rather than an
-        # all-zero span id under the trace. Captured/cleared in lockstep with
-        # game_trace_id.
-        self.game_trace_span_id = ""
-        # Hex span_id of this session's gameplay_phase span. gameplay_phase
-        # is the stable active-play sub-span within the game trace; the agent
-        # re-parents its in-game decision chain under THIS span instead of the game
-        # root. Empty until the gameplay_phase span opens (base.py calls
-        # publish_gameplay_phase_span_id); carried as the gameplay_phase_span_id
-        # label on the correlation gauge alongside game_trace_span_id (same trace).
-        # Captured/cleared in lockstep with game_trace_id so retire removes the
-        # exact gauge series.
-        self.gameplay_phase_span_id = ""
 
         # Mode label of this game's game_current_mode series: the built game's
         # get_game_name(), the same value as the game.mode span attribute. "" until
         # the game is built (publish_game_mode) and again once the series is removed.
         self.game_mode = ""
-        # Hex span_id of this session's game_cycle span (UC-041 BR-004).
-        # game_cycle is the child of gameplay_phase the agent parents its in-game
-        # spans under (UC-040 BR-013). Empty until base.py opens game_cycle and
-        # calls publish_game_cycle_span_id; modes with their own run() never open
-        # it, so the agent falls back to gameplay_phase / the game root.
-        self.game_cycle_span_id = ""
 
         # Per-session loop runs in its own thread with its own GrpcClientManager.
         self.clients = GrpcClientManager()
@@ -304,13 +272,6 @@ class GameSession:
             with suppress(KeyError, ValueError):
                 gauge.remove(*labels)
 
-        # The trace-correlation gauge carries a different label
-        # tuple (game_kind, game_id, game_trace_id, game_trace_span_id,
-        # gameplay_phase_span_id, game_cycle_span_id) and was only set when the span
-        # was sampled (game_trace_id non-empty), so remove it separately and only
-        # then. Remove with the CURRENT phase span ids: each is "" until its span
-        # opens and is then updated in lockstep with the gauge re-emit, so this
-        # always matches the live series tuple.
         # Per-game mode marker and game-state gauges (FR-041). The game removes
         # its game-state series when run() ends; removing them again here is
         # idempotent and catches a game that never reached its own cleanup.
@@ -318,65 +279,11 @@ class GameSession:
         metrics.clear_game_state_gauges(self.game_kind, self.game_id)
         metrics.clear_elimination_order([p.serial for p in self.players], self.game_id)
 
-        if self.game_trace_id:
-            with suppress(KeyError, ValueError):
-                metrics.game_trace_correlation.remove(*self._correlation_labels())
-
-    def _correlation_labels(self) -> tuple[str, str, str, str, str, str]:
-        """The game_trace_correlation label tuple of the live series, in label order."""
-        return (
-            self.game_kind,
-            self.game_id,
-            self.game_trace_id,
-            self.game_trace_span_id,
-            self.gameplay_phase_span_id,
-            self.game_cycle_span_id,
-        )
-
     def _set_gauges_unless_retired(self, write: Callable[[], None]) -> None:
         """Run ``write`` (per-game gauge writes) unless this session is retired (#1311)."""
         with self._metrics_lock:
             if not self._metrics_retired:
                 write()
-
-    def _set_trace_correlation(self) -> None:
-        """Set the game_trace_correlation series for the current label tuple to 1."""
-        metrics.game_trace_correlation.labels(
-            game_kind=self.game_kind,
-            game_id=self.game_id,
-            game_trace_id=self.game_trace_id,
-            game_trace_span_id=self.game_trace_span_id,
-            gameplay_phase_span_id=self.gameplay_phase_span_id,
-            game_cycle_span_id=self.game_cycle_span_id,
-        ).set(1)
-
-    def _republish_trace_correlation(self, attr: str, span_id: str) -> None:
-        """Swap the live correlation series for one carrying a newly opened span's id.
-
-        attr names the session field (and gauge label) to update. The previous
-        series (with the old, usually empty, value) is removed first so exactly one
-        series per live game remains, and clear_metrics removes the live tuple at
-        retire. No-op when the game span was unsampled (no gauge was ever set), the
-        id is empty, or it is unchanged.
-        """
-        if not self.game_trace_id or not span_id:
-            return
-        with self._metrics_lock:
-            if self._metrics_retired or getattr(self, attr) == span_id:
-                return
-            with suppress(KeyError, ValueError):
-                metrics.game_trace_correlation.remove(*self._correlation_labels())
-            setattr(self, attr, span_id)
-            self._set_trace_correlation()
-
-    def publish_game_cycle_span_id(self, game_cycle_span_id: str) -> None:
-        """Re-emit the correlation gauge carrying the game_cycle span_id (#1325).
-
-        Called by the game (base.py) right after it opens game_cycle. The agent
-        parents its in-game spans under game_cycle (UC-040 BR-013); until this is
-        published it falls back to gameplay_phase, then the game root.
-        """
-        self._republish_trace_correlation("game_cycle_span_id", game_cycle_span_id)
 
     def publish_game_mode(self, mode: str) -> None:
         """Set this game's game_current_mode series to 1 (FR-041).
@@ -404,26 +311,6 @@ class GameSession:
         with suppress(KeyError, ValueError):
             metrics.current_game_mode.remove(self.game_mode, self.game_kind, self.game_id)
         self.game_mode = ""
-
-    def publish_gameplay_phase_span_id(self, gameplay_phase_span_id: str) -> None:
-        """Re-emit the correlation gauge carrying the gameplay_phase span_id (#1195).
-
-        Called by the game (base.py) when its gameplay_phase span opens, passing
-        that span's hex span_id. gameplay_phase is the stable active-play sub-span;
-        the agent re-parents its in-game decision chain under it (a strict
-        refinement of the #1187 game-root parenting).
-
-        The gauge was already SET to 1 at game-root-span time with an EMPTY
-        gameplay_phase_span_id label (different label tuple -> different series).
-        To avoid leaving that empty-labeled series behind, REMOVE it first, then SET
-        the series carrying the populated id, and update self.gameplay_phase_span_id
-        so clear_metrics removes the live tuple at retire.
-
-        No-op when the game span was unsampled (game_trace_id empty -> the gauge was
-        never set) or the passed id is empty/invalid: the agent then keeps falling
-        back to the game root span (game_trace_span_id), so correlation is never lost.
-        """
-        self._republish_trace_correlation("gameplay_phase_span_id", gameplay_phase_span_id)
 
     def _set_duration_gauge(self) -> None:
         """Set game_duration_seconds to the seconds since this game was started.
@@ -615,29 +502,6 @@ class GameSession:
             # the game, after the admission wait (a provider still not READY at the deadline gives span_event, A1).
             moment_shape = read_moment_shape()
             game_span.set_attribute(MOMENT_SHAPE_ATTR, moment_shape)
-            agent_log_events = read_agent_log_events()
-            game_span.set_attribute(AGENT_LOG_EVENTS_ATTR, agent_log_events)
-
-            # Trace-correlation signal: capture THIS game span's trace_id and
-            # publish it as the game_trace_correlation gauge so the agent can read it
-            # off the metric stream and link agent.decision -> this game trace. A
-            # non-recording span (sampler dropped it, or telemetry off) reports the
-            # all-zero invalid trace id; skip the gauge in that case so the agent never
-            # tries to link to an invalid trace. Set to 1 while live; removed at retire.
-            span_ctx = game_span.get_span_context()
-            if span_ctx.trace_id != 0:
-                self.game_trace_id = trace.format_trace_id(span_ctx.trace_id)
-                # Carry the root span's span_id too so the agent's Link
-                # references the actual game-start span (Jaeger uiFind highlight)
-                # rather than an all-zero span id under that trace.
-                self.game_trace_span_id = trace.format_span_id(span_ctx.span_id)
-                # gameplay_phase_span_id is empty here: the gameplay_phase
-                # span has not opened yet (it opens inside game.run()). Early
-                # correlation is preserved via game_trace_span_id; the agent's
-                # two-tier fallback uses the game root span until gameplay_phase
-                # publishes its id, at which point the gauge is re-emitted with the
-                # populated label (publish_gameplay_phase_span_id).
-                self._set_gauges_unless_retired(self._set_trace_correlation)
 
             # The built game (None until GameFactory created it) and the outcome the
             # session decides itself (error, or force_ended before the game was
@@ -696,20 +560,11 @@ class GameSession:
                 # FR-041).
                 game.game_kind = self.game_kind
                 game.moment_shape = moment_shape
-                game.agent_log_events = agent_log_events
                 # Thread experiment attribution onto the game so its in-loop
                 # set_game_transaction_context carries it for flag evaluation.
                 game.experiment_id = self.experiment_id
                 game.arm = self.arm
                 game.pattern_trigger_policy = self.pattern_trigger_policy
-                # Let the game publish its gameplay_phase span_id back to the
-                # correlation gauge when that span opens, so the agent can
-                # re-parent its in-game decision chain under gameplay_phase. The
-                # game holds only this callback (not the session), mirroring how the
-                # session sets game_kind/experiment_id on the game.
-                game.on_gameplay_phase_open = self.publish_gameplay_phase_span_id
-                # Same for game_cycle: the agent's preferred parent.
-                game.on_game_cycle_open = self.publish_game_cycle_span_id
 
                 # Store reference and run game. The duration ticker shares this
                 # session's event loop (no extra thread/loop) and keeps
@@ -730,18 +585,18 @@ class GameSession:
                     return
                 game_mode = game.get_game_name()
                 self.publish_game_mode(game_mode)
-                if agent_log_events:
-                    # After the build: game.mode is the built mode's name, as on the spans.
-                    agent_game_started = emit_agent_event(
-                        "game.start",
-                        span=game_span,
-                        attributes={
-                            "game.id": self.game_id,
-                            "game.kind": self.game_kind,
-                            "game.mode": game_mode,
-                            "game.name": self.game_name,
-                        },
-                    )
+                # After the build: game.mode is the built mode's name, as on the spans.
+                agent_game_started = emit_agent_event(
+                    "game.start",
+                    span=game_span,
+                    attributes={
+                        "game.id": self.game_id,
+                        "game.kind": self.game_kind,
+                        "game.mode": game_mode,
+                        "game.name": self.game_name,
+                    },
+                    flush=True,
+                )
                 duration_ticker = asyncio.create_task(self._publish_duration_while_running())
                 try:
                     await game.run()

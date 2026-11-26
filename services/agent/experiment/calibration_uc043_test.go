@@ -10,17 +10,16 @@ import (
 	"testing"
 
 	"github.com/joustmania/agent/experiment/journal"
-	"github.com/joustmania/agent/telemetry/keys"
 )
 
 // UC: UC-043 A21 BR-010
 // calibration_uc043_test.go: arm calibration (#2479, #2498). The Book's per-game
-// tally lands on the game's arm, shows on experiment.progress's experiment.arm
-// events, and is never journaled and never read by the verdict.
+// tally lands on the game's arm, shows on its progress snapshot (ProgressArm),
+// and is never journaled and never read by the verdict.
 
 func TestArmCalibration_TalliedPerArmOnProgress(t *testing.T) {
 	spawner := &fakeSpawner{}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
+	r, log := progressRegistry(t, RegistryConfig{
 		Spawner: spawner, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
 		MaxShadowGames: 4,
 	})
@@ -76,32 +75,24 @@ func TestArmCalibration_TalliedPerArmOnProgress(t *testing.T) {
 			t.Errorf("control = %+v", c)
 		}
 	})
-	t.Run("UC-043/A21 experiment.progress carries predictions_scored, prediction_hits and the mean Brier", func(t *testing.T) {
-		spans := progressSpans(sr)
-		last := spans[len(spans)-1]
-		if v, _ := rootSpanAttr(last, AttrExperimentProgressTrigger); v != ProgressTriggerGameConcluded {
-			t.Fatalf("last trigger = %q", v)
+	t.Run("UC-043/A21 the progress snapshot carries predictions_scored, prediction_hits and the mean Brier", func(t *testing.T) {
+		last := (*log)[len(*log)-1]
+		if last.Trigger != ProgressTriggerGameConcluded {
+			t.Fatalf("last trigger = %q", last.Trigger)
 		}
-		events := map[string]map[string]any{}
-		for _, ev := range last.Events() {
-			if ev.Name != EventExperimentArm {
-				continue
-			}
-			m := map[string]any{}
-			for _, kv := range ev.Attributes {
-				m[string(kv.Key)] = kv.Value.AsInterface()
-			}
-			events[m[keys.AttrExperimentArm].(string)] = m
+		arms := map[string]ProgressArm{}
+		for _, a := range last.Arms {
+			arms[a.Arm] = a
 		}
-		e0, e1 := events["experimental"], events["control"]
-		if e0[AttrExperimentArmPredictionsScored] != int64(3) || e0[AttrExperimentArmPredictionHits] != int64(2) {
-			t.Errorf("experimental event = %v", e0)
+		e0, e1 := arms["experimental"], arms["control"]
+		if e0.PredictionsScored != 3 || e0.PredictionHits != 2 {
+			t.Errorf("experimental arm = %+v", e0)
 		}
-		if b, _ := e0[AttrExperimentArmPredictionBrier].(float64); math.Abs(b-0.18) > 1e-9 {
-			t.Errorf("experimental mean Brier = %v, want 0.18", e0[AttrExperimentArmPredictionBrier])
+		if e0.PredictionBrier == nil || math.Abs(*e0.PredictionBrier-0.18) > 1e-9 {
+			t.Errorf("experimental mean Brier = %v, want 0.18", e0.PredictionBrier)
 		}
-		if e1[AttrExperimentArmPredictionsScored] != int64(3) || e1[AttrExperimentArmPredictionHits] != int64(0) {
-			t.Errorf("control event = %v", e1)
+		if e1.PredictionsScored != 3 || e1.PredictionHits != 0 {
+			t.Errorf("control arm = %+v", e1)
 		}
 	})
 	t.Run("UC-043/A21 a concluded game is no longer bound: a late tally is ignored", func(t *testing.T) {
@@ -117,26 +108,14 @@ func TestArmCalibration_TalliedPerArmOnProgress(t *testing.T) {
 // TestArmCalibration_EmptyArmHasNoBrier: an arm without a scored prediction
 // reports 0 scored and no Brier (0 would read as a perfect score).
 func TestArmCalibration_EmptyArmHasNoBrier(t *testing.T) {
-	spawner := &fakeSpawner{}
-	r, sr := rootSpanRegistry(t, RegistryConfig{
-		Spawner: spawner, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
+	r, log := progressRegistry(t, RegistryConfig{
+		Spawner: &fakeSpawner{}, Verdict: fakeVerdict{concludeAtN: 1000}, Targeting: &fakeTargeting{},
 		MaxShadowGames: 2,
 	})
 	startedExperiment(t, r)
-	spans := progressSpans(sr)
-	for _, ev := range spans[len(spans)-1].Events() {
-		if ev.Name != EventExperimentArm {
-			continue
-		}
-		for _, kv := range ev.Attributes {
-			switch string(kv.Key) {
-			case AttrExperimentArmPredictionBrier:
-				t.Errorf("UC-043/A21 an empty arm must not carry %s", kv.Key)
-			case AttrExperimentArmPredictionsScored:
-				if kv.Value.AsInt64() != 0 {
-					t.Errorf("UC-043/A21 empty arm predictions_scored = %d", kv.Value.AsInt64())
-				}
-			}
+	for _, a := range (*log)[len(*log)-1].Arms {
+		if a.PredictionBrier != nil || a.PredictionsScored != 0 {
+			t.Errorf("UC-043/A21 empty arm = %+v, want 0 scored and no Brier", a)
 		}
 	}
 }

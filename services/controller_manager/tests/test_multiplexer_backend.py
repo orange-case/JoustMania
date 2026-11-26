@@ -731,22 +731,6 @@ class TestRouteControllers:
         assert mux._serial_to_adapter["AA:AA"] is a1
 
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
-    def test_routing_metric_incremented(self, mock_metrics):
-        """Routing decisions should increment the counter metric."""
-        a1 = _make_adapter("python", serials=["AA:AA"])
-        a2 = _make_adapter("python", serials=["AA:AA"])
-        mux = MultiplexerBackend(adapters=[a1, a2])
-
-        with patch.object(mux, "_resolve_adapter_for_serial", return_value=(a2, "targeted")):
-            mux.get_connected_controllers()
-
-        mock_metrics.controller_routing_decisions_total.labels.assert_any_call(
-            serial="AA:AA",
-            adapter="python",
-            method="targeted",
-        )
-
-    @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
     @pytest.mark.uc("UC-002", flow="main", steps=[3])
     def test_targeting_match_on_retired_unstable_falls_back_to_first_real_adapter(self, mock_metrics):
         """A leftover per-serial `unstable` targeting rule names no loaded adapter: route to the first non-mock one."""
@@ -927,7 +911,6 @@ class TestEveryPassIsAFullDiscovery:
 
         assert a1.discover.call_count == 2
         a1.discover.assert_called_with(force=False, exclude_serials=ANY)
-        assert mock_metrics.discovery_full_enumerate_total.inc.call_count == 2
 
     @patch("services.controller_manager.multiplexer.multiplexer_backend.metrics")
     def test_force_is_passed_through(self, mock_metrics):

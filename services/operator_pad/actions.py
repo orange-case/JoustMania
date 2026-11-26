@@ -24,7 +24,7 @@ from lib import setting_ladders, voice_prompts
 from lib.setting_ladders import PAID_BACKENDS
 from lib.telemetry import get_tracer
 from proto import game_coordinator_pb2, menu_pb2
-from services.operator_pad import cues, metrics, page_keys
+from services.operator_pad import cues, page_keys
 from services.operator_pad.config import K5, K8
 from services.operator_pad.gestures import (
     AGENT_HOLD,
@@ -801,4 +801,3 @@ class Actions:
         span.set_attribute("pad.result", result)
         if result == MENU_UNAVAILABLE:
             span.set_status(trace.Status(trace.StatusCode.ERROR, result))
-        metrics.gestures_total.labels(action=action, result=result).inc()

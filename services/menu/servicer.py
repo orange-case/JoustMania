@@ -23,7 +23,6 @@ from lib.setting_ladders import (
 )
 from lib.types import Games
 from proto import menu_pb2, menu_pb2_grpc
-from services.menu import metrics
 from services.menu.game_lifecycle import GameLifecycleMixin, _bounded_restore_step
 from services.menu.handlers.base import ControllerState
 from services.menu.menu_setup import build_menu
@@ -278,24 +277,20 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         return len(self.state_manager.ready_controllers)
 
     def _clear_ready_state(self) -> None:
-        """Clear ready controllers and associated metrics.
+        """Clear ready controllers.
 
-        Transitions all READY controllers back to CONNECTED state and
-        clears associated metrics. Used when game starts or menu stops.
+        Transitions all READY controllers back to CONNECTED state.
+        Used when game starts or menu stops.
         """
         # Transition ready controllers back to connected
         for serial in self.state_manager.ready_controllers:
             self.state_manager.controller_states[serial] = ControllerState.CONNECTED
-
-        # Clear metrics
-        metrics.player_ready.clear()
         logger.debug("Ready state cleared")
 
     # gRPC service methods (names defined by proto)
 
     async def StartMenu(self, _request, _context):
         """Start the menu."""
-        start_time = time.time()
         span = trace.get_current_span()
         try:
             if self._lifecycle_live():
@@ -304,18 +299,15 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
                 if self.start_menu_during_game():
                     await self.event_publisher.publish("menu_started", {})
                 logger.info("StartMenu during a game: the lobby restore will start the menu")
-                metrics.grpc_requests_total.labels(method="StartMenu", status="deferred").inc()
                 return menu_pb2.StartMenuResponse(success=True, error="")
 
             if self.state == menu_pb2.MenuState.RUNNING:
-                metrics.grpc_requests_total.labels(method="StartMenu", status="already_running").inc()
                 return menu_pb2.StartMenuResponse(success=False, error="Menu already running")
 
             await self.enter_lobby()
 
             logger.info("Menu started")
             span.set_attribute("menu.state", "RUNNING")
-            metrics.grpc_requests_total.labels(method="StartMenu", status="ok").inc()
 
             return menu_pb2.StartMenuResponse(success=True, error="")
 
@@ -323,10 +315,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             span.record_exception(e)
             span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
             logger.error(f"StartMenu error: {e}", exc_info=True)
-            metrics.grpc_requests_total.labels(method="StartMenu", status="error").inc()
             return menu_pb2.StartMenuResponse(success=False, error=str(e))
-        finally:
-            metrics.grpc_request_duration_seconds.labels(method="StartMenu").observe(time.time() - start_time)
 
     async def enter_lobby(self) -> None:
         """Enter the lobby: the one lobby-entry path for StartMenu and the boot auto-start (D-M2, #1505).
@@ -354,11 +343,9 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
 
     async def StopMenu(self, _request, _context):
         """Stop the menu."""
-        start_time = time.time()
         span = trace.get_current_span()
         try:
             if self.state == menu_pb2.MenuState.STOPPED:
-                metrics.grpc_requests_total.labels(method="StopMenu", status="already_stopped").inc()
                 return menu_pb2.StopMenuResponse(success=False, error="Menu already stopped")
 
             self.state = menu_pb2.MenuState.STOPPED
@@ -376,7 +363,6 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
 
             logger.info("Menu stopped")
             span.set_attribute("menu.state", "STOPPED")
-            metrics.grpc_requests_total.labels(method="StopMenu", status="ok").inc()
 
             return menu_pb2.StopMenuResponse(success=True, error="")
 
@@ -384,14 +370,10 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             span.record_exception(e)
             span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
             logger.error(f"StopMenu error: {e}", exc_info=True)
-            metrics.grpc_requests_total.labels(method="StopMenu", status="error").inc()
             return menu_pb2.StopMenuResponse(success=False, error=str(e))
-        finally:
-            metrics.grpc_request_duration_seconds.labels(method="StopMenu").observe(time.time() - start_time)
 
     async def ProcessInput(self, request, _context):
         """Process menu input."""
-        start_time = time.time()
         span = trace.get_current_span()
         span.set_attribute("input.type", request.input_type)
 
@@ -401,8 +383,6 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
 
             if input_type == "web_command" and data.get("command", "") in self.PAD_COMMANDS:
                 success, error, value = await self._handle_pad_command(data, span)
-                status = "ok" if success else "error"
-                metrics.grpc_requests_total.labels(method="ProcessInput", status=status).inc()
                 return menu_pb2.ProcessInputResponse(success=success, error=error, value=value)
             rejection = None
             if input_type == "button_press":
@@ -412,20 +392,15 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             elif input_type == "reset_menu":
                 await self._handle_reset_menu()
             if rejection is not None:
-                metrics.grpc_requests_total.labels(method="ProcessInput", status="error").inc()
                 return menu_pb2.ProcessInputResponse(success=False, error=rejection)
 
-            metrics.grpc_requests_total.labels(method="ProcessInput", status="ok").inc()
             return menu_pb2.ProcessInputResponse(success=True, error="")
 
         except Exception as e:
             span.record_exception(e)
             span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
             logger.error(f"ProcessInput error: {e}", exc_info=True)
-            metrics.grpc_requests_total.labels(method="ProcessInput", status="error").inc()
             return menu_pb2.ProcessInputResponse(success=False, error=str(e))
-        finally:
-            metrics.grpc_request_duration_seconds.labels(method="ProcessInput").observe(time.time() - start_time)
 
     def read_operator_settings_at_start(self) -> None:
         """Boot: read the operator-set values once in the background (UC-015 BR-018), so the first
@@ -438,18 +413,9 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         Never the HTTP flag writer (0.5 s per flag). A flag the client cannot resolve reads as its
         default: empty variant names, and the kill switch as off with `agent_enabled_state` unknown.
         """
-        start_time = time.time()
-        try:
-            # UC-015 BR-018: the operator's shield value is read in the background, never in this call.
-            self.settings_ops.schedule_operator_refresh()
-            response = self._menu_status()
-        except Exception:
-            metrics.grpc_requests_total.labels(method="GetMenuStatus", status="error").inc()
-            raise
-        finally:
-            metrics.grpc_request_duration_seconds.labels(method="GetMenuStatus").observe(time.time() - start_time)
-        metrics.grpc_requests_total.labels(method="GetMenuStatus", status="ok").inc()
-        return response
+        # UC-015 BR-018: the operator's shield value is read in the background, never in this call.
+        self.settings_ops.schedule_operator_refresh()
+        return self._menu_status()
 
     def _menu_status(self) -> menu_pb2.GetMenuStatusResponse:
         """Build the GetMenuStatus snapshot (synchronous: in-process reads only)."""
@@ -488,14 +454,11 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
 
     async def ListGameModes(self, _request, _context):
         """List the playable game modes (UC-011 BR-001) for the dashboard selector."""
-        metrics.grpc_requests_total.labels(method="ListGameModes", status="ok").inc()
         return menu_pb2.ListGameModesResponse(game_modes=list(GAME_MODES), default_mode=DEFAULT_GAME_MODE.name)
 
     async def StreamMenuEvents(self, _request, context):
         """Stream menu events in real-time."""
         subscriber_id = f"menu_events_{time.time()}"
-        metrics.stream_connections_active.inc()
-
         span = trace.get_current_span()
         span.set_attribute("subscriber.id", subscriber_id)
 
@@ -516,8 +479,6 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
                     break
         finally:
             await self.event_publisher.unsubscribe(subscriber_id)
-            metrics.stream_connections_active.dec()
-            metrics.stream_disconnections_total.inc()
 
     # Input handlers
 

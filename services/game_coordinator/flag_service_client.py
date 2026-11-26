@@ -40,8 +40,6 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from services.game_coordinator import metrics
-
 logger = logging.getLogger(__name__)
 
 # Bounded registration await before the game is RUNNING (FR-135, NFR-052).
@@ -220,10 +218,8 @@ class FlagServiceLifecycle:
             resp = await asyncio.to_thread(self._client.request, method, path, body)
         except FlagServiceError as e:
             self._log_failure(call, e)
-            metrics.flag_service_calls_total.labels(call=call, result="error").inc()
             self._needs_reconcile.set()
             return False
-        metrics.flag_service_calls_total.labels(call=call, result="ok").inc()
         self._observe_epoch(resp)
         self._failure_log.pop(call, None)
         return True
@@ -273,7 +269,6 @@ class FlagServiceLifecycle:
                 game.game_id,
                 self._register_await * 1000,
             )
-            metrics.flag_service_calls_total.labels(call="register", result="timeout").inc()
             self._needs_reconcile.set()
             return False
 

@@ -27,7 +27,7 @@ BUTTON_TYPE_NAMES = {
     controller_manager_pb2.BUTTON_START: "start",
 }
 
-# Low-cardinality labels for the button_event_errors_total metric
+# Low-cardinality event_type labels (dispatch histogram, logs)
 _EVENT_TYPE_NAMES = {
     controller_manager_pb2.EVENT_CONNECT: "connect",
     controller_manager_pb2.EVENT_DISCONNECT: "disconnect",
@@ -281,7 +281,6 @@ class ControllerEventLoop:
         for ghost_serial in ghosts:
             logger.warning(f"Reconciliation: pruning ghost controller {ghost_serial}")
             await self._callbacks.on_disconnect(ghost_serial)
-            self._metrics.ghost_controllers_pruned_total.inc()
 
         if ghosts:
             logger.info(f"Reconciliation pruned {len(ghosts)} ghost controller(s): {ghosts}")
@@ -293,20 +292,18 @@ class ControllerEventLoop:
         A bug in one handler must not escape to ``_run``: that path treats any
         exception as a connection error, reconnects, and the reconnect clears
         every controller's lobby state (un-readying the lobby). Instead the
-        event is dropped, logged with a traceback and counted.
+        event is dropped and logged with a traceback.
 
         Args:
             event: ButtonEvent from the stream
         """
         event_type = _EVENT_TYPE_NAMES.get(event.event_type, "button")
-        # Every stream event is a frame; the histogram times the whole dispatch, handler failures included (#2380).
-        self._metrics.button_frames_processed_total.inc()
+        # The histogram times the whole dispatch, handler failures included (#2380).
         started = time.perf_counter()
         try:
             await self._dispatch_event(event)
         except Exception:
             logger.exception(f"Error handling {event_type} event from {event.serial}; event dropped, stream kept")
-            self._metrics.button_event_errors_total.labels(event_type=event_type).inc()
         finally:
             self._metrics.button_dispatch_seconds.labels(event_type=event_type).observe(time.perf_counter() - started)
 
@@ -337,10 +334,6 @@ class ControllerEventLoop:
             # Regular button event (EVENT_BUTTON is default, 0)
             is_press = event.action == controller_manager_pb2.ACTION_PRESS
             button_name = BUTTON_TYPE_NAMES.get(event.button, "unknown")
-            # A real press, counted whether or not the menu acts on it (#2380).
-            if is_press:
-                self._metrics.button_presses_total.labels(button=button_name, action="press").inc()
-
             # Only process when menu is running
             if self._callbacks.get_menu_state() != menu_pb2.MenuState.RUNNING:
                 return

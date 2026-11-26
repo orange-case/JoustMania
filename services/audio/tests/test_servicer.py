@@ -585,20 +585,16 @@ class TestPlaySoundAllChannelsBusy:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-031", flow="A2", steps=[1])
-    async def test_non_critical_play_sound_is_dropped_and_counted(self, servicer, mock_grpc_context):
+    async def test_non_critical_play_sound_is_dropped(self, servicer, mock_grpc_context):
         from services.audio.servicer import SoundChannel
 
-        with (
-            patch.object(SoundChannel, "play", autospec=True, return_value=True) as channel_play,
-            patch("services.audio.metrics.audio_channel_saturation_total") as saturation,
-        ):
+        with patch.object(SoundChannel, "play", autospec=True, return_value=True) as channel_play:
             response = await servicer.PlaySound(
                 audio_pb2.PlaySoundRequest(file_path="effect", volume=1.0, priority=2), mock_grpc_context
             )
 
         assert response.success is False
         channel_play.assert_not_called()
-        saturation.inc.assert_called_once()
 
 
 class TestStopSound:

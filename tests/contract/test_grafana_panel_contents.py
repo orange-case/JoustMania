@@ -226,9 +226,10 @@ def test_step7_grafana_provisions_only_prometheus_and_jaeger_datasources():
         for ds in (ic.load_yaml(path).get("datasources") or [])
     ]
     assert sorted(ds["type"] for ds in sources) == ["jaeger", "prometheus"], sources
-    # The dashboard's Experiments link opens the experiment.progress spans in Jaeger.
+    # The dashboard's Experiments links open the agent's dossiers and agent.experiment in Jaeger.
     spa = (ic.REPO_ROOT / "services" / "dashboard" / "src" / "index.html").read_text()
-    assert "/jaeger/search?service=agent&operation=experiment.progress" in spa
+    assert "/experiments?format=html" in spa
+    assert "/jaeger/search?service=agent&operation=agent.experiment" in spa
 
 
 FLAGSMITH_TELEMETRY = (

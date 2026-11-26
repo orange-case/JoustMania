@@ -393,34 +393,26 @@ class Clock:
 
 @pytest.mark.uc("UC-053", flow="A9", tc="TC-019")
 @pytest.mark.asyncio
-async def test_a_lasting_deferral_is_counted_aged_and_warned(caplog):
+async def test_a_lasting_deferral_is_warned(caplog):
     interventions = InterventionsStore(("e2", 7))
     interventions.state["volume_override"] = 0.4
     agent = AgentStore(("e1", 41), AMBIENT)  # stuck on the pre-restart epoch
     clock = Clock()
     h = Harness(interventions, agent, time_fn=clock)
 
-    with (
-        patch("services.game_coordinator.metrics.intervention_deferrals_total") as episodes,
-        patch("services.game_coordinator.metrics.intervention_deferral_age_seconds") as age,
-        caplog.at_level(logging.DEBUG, logger="services.game_coordinator.interventions"),
-    ):
+    with caplog.at_level(logging.DEBUG, logger="services.game_coordinator.interventions"):
         await h.flag_change()
-        assert episodes.inc.call_count == 1  # one episode, however many specs deferred
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert h.mgr._deferral_recheck is not None  # re-checked even if no flag changes
 
         clock.now += 6.0
         await h.flag_change()
-        assert episodes.inc.call_count == 1
-        assert age.set.call_args.args[0] == pytest.approx(6.0)
         warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 1  # rate limited: one per DEFERRAL_WARN_INTERVAL_S
         assert "('e2', 7)" in warnings[0] and "('e1', 41)" in warnings[0]
 
         agent.revision = ("e2", 7)
         await h.flag_change()
-        assert age.set.call_args.args[0] == 0
         assert h.mgr._deferral_recheck is None
         assert h.outcomes("adjust_volume") == [("false", "")]
 
@@ -500,13 +492,8 @@ async def test_deferral_open_when_the_last_game_ends_does_not_leak_into_the_next
     clock = Clock()
     h = Harness(interventions, agent, time_fn=clock)
 
-    with (
-        patch("services.game_coordinator.metrics.intervention_deferrals_total") as episodes,
-        patch("services.game_coordinator.metrics.intervention_deferral_age_seconds") as age,
-        caplog.at_level(logging.DEBUG, logger="services.game_coordinator.interventions"),
-    ):
+    with caplog.at_level(logging.DEBUG, logger="services.game_coordinator.interventions"):
         await h.flag_change()
-        assert episodes.inc.call_count == 1
 
         # The last game ends while the deferral is open; the next pass sees no session.
         h.mgr._get_sessions = lambda: []
@@ -515,12 +502,10 @@ async def test_deferral_open_when_the_last_game_ends_does_not_leak_into_the_next
         assert h.mgr._deferral_since is None
         assert h.mgr._deferral_recheck is None
 
-        # The next game defers briefly: a NEW episode with a small age, no WARNING.
+        # The next game defers briefly: no WARNING.
         h.mgr._get_sessions = lambda: [h.view]
         clock.now += 1.0
         await h.flag_change()
-        assert episodes.inc.call_count == 2
-        assert age.set.call_args.args[0] == pytest.approx(0.0)
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 

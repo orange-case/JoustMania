@@ -717,7 +717,7 @@ type Snapshot struct {
 	// each remote backend's model / base URL / timeout. Read every cycle.
 	Decision DecisionBackend
 	// InterventionsEnabled is the live interventions_enabled actuation gate
-	// (fail-closed false), carried so agent.flag_state shows a write gate that is
+	// (fail-closed false), carried so the flag state (GET /experiments/state) shows a write gate that is
 	// off while the agent is enabled (#2093). The write path reads the gate itself
 	// at use time (GatedActionSink); this copy is for observability only.
 	InterventionsEnabled bool
@@ -726,7 +726,7 @@ type Snapshot struct {
 	// except in pattern games. Read every cycle.
 	ProbeDecisions bool
 	// ExperimentsEnabled is the live experiments_enabled gate (fail-closed false),
-	// carried for agent.flag_state (#2291): the stage fallback (UC-070 A9) turns it
+	// carried for the flag state (#2291): the stage fallback (UC-070 A9) turns it
 	// on. The experiment loop reads the gate itself at use time.
 	ExperimentsEnabled bool
 }

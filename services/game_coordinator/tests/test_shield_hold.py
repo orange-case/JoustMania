@@ -32,10 +32,6 @@ from services.game_coordinator import game_clock
 from services.game_coordinator.game_factory import _GAME_CLASSES
 from services.game_coordinator.games import base as base_module
 from services.game_coordinator.games.base import (
-    HOLD_OUTCOME_BUDGET_EXHAUSTED,
-    HOLD_OUTCOME_DEATH,
-    HOLD_OUTCOME_EMPTY,
-    HOLD_OUTCOME_GAME_END,
     HOLD_OUTCOME_RELEASED,
     SHIELD_HOLD_FLAGS,
     BaseGameMode,
@@ -177,16 +173,6 @@ def thresholds(game, serial="p1"):
     return game._compute_effective_thresholds(game.players[serial])
 
 
-@pytest.fixture
-def counter():
-    with patch.object(base_module.metrics, "shield_hold_activations_total") as c:
-        yield c
-
-
-def outcomes(counter):
-    return [call.kwargs["outcome"] for call in counter.labels.call_args_list]
-
-
 # --------------------------------------------------------------------------- #
 # UC-030 A7, BR-008: holding the trigger protects; release keeps the rest
 # --------------------------------------------------------------------------- #
@@ -210,7 +196,7 @@ class TestUC030A7Hold:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
     @pytest.mark.uc("UC-040", br=["BR-024"])
-    async def test_release_books_the_time_held_and_keeps_the_rest(self, game, clock, counter):
+    async def test_release_books_the_time_held_and_keeps_the_rest(self, game, clock):
         """A7 steps 3-4: 1 s held of 3 s: 2 s left, 1 s of budget used, outcome released."""
         fill(game, "p1", 3.0)
         await arm(game, clock)
@@ -224,7 +210,6 @@ class TestUC030A7Hold:
         assert p1.hold_started_at == 0.0, "held >= min burst: the release frame ends it"
         assert p1.hold_budget_used == pytest.approx(held)
         assert game._shield_hold_energy(p1, clock.t) == pytest.approx(3.0 - held)
-        assert outcomes(counter) == [HOLD_OUTCOME_RELEASED]
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
@@ -249,7 +234,7 @@ class TestUC030A7Hold:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
-    async def test_a_press_inside_the_tail_continues_the_same_activation(self, game, clock, counter):
+    async def test_a_press_inside_the_tail_continues_the_same_activation(self, game, clock):
         """BR-008 debounce: release then press within the minimum burst is one activation."""
         fill(game, "p1", 2.0)
         await arm(game, clock)
@@ -263,13 +248,12 @@ class TestUC030A7Hold:
         for _ in range(30):
             await step(game, clock, "p1", True)
         await step(game, clock, "p1", False)
-        assert outcomes(counter) == [HOLD_OUTCOME_RELEASED]
         assert p1.hold_budget_used == pytest.approx(clock.t - start)
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008"])
     @pytest.mark.uc("UC-040", flow="A39", br=["BR-024"])
-    async def test_holding_until_empty_ends_exactly_at_the_deadline_and_disarms(self, game, clock, counter):
+    async def test_holding_until_empty_ends_exactly_at_the_deadline_and_disarms(self, game, clock):
         """A39 step 1: protection ends at the energy's end; holding on never restarts it."""
         fill(game, "p1", 1.0)
         await arm(game, clock)
@@ -282,7 +266,6 @@ class TestUC030A7Hold:
         await step(game, clock, "p1", True, dt=0.0)
         p1 = game.players["p1"]
         assert not game.is_in_grace(p1, clock.t)
-        assert outcomes(counter) == [HOLD_OUTCOME_EMPTY]
         assert p1.hold_budget_used == pytest.approx(1.0)
         # Energy arrives while the trigger is still held: no new activation without a release.
         assert await game.grant_shield("p1", 2.0) is True
@@ -339,7 +322,7 @@ class TestUC030A7Hold:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A7", br=["BR-008", "BR-006"])
-    async def test_a_stream_reopen_releases_at_the_last_held_frame(self, game, clock, counter):
+    async def test_a_stream_reopen_releases_at_the_last_held_frame(self, game, clock):
         """BR-008: no drain crosses a reconnect."""
         fill(game, "p1", 4.0)
         await arm(game, clock)
@@ -353,7 +336,6 @@ class TestUC030A7Hold:
             await game._reopen_gameplay_stream("test")
         await step(game, clock, "p1", True, dt=0.0)
         p1 = game.players["p1"]
-        assert outcomes(counter) == [HOLD_OUTCOME_RELEASED]
         assert p1.hold_budget_used == pytest.approx(last_held - start)
         assert p1.hold_energy == pytest.approx(4.0 - (last_held - start))
 
@@ -678,7 +660,7 @@ class TestUC040A38Recharge:
 class TestUC040A39EnergyEnds:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A39", br=["BR-024"])
-    async def test_holding_until_the_budget_runs_out_ends_budget_exhausted(self, game, clock, counter):
+    async def test_holding_until_the_budget_runs_out_ends_budget_exhausted(self, game, clock):
         """A39 step 1: outcome budget_exhausted and the span event once; grants are refused after it."""
         p1 = game.players["p1"]
         p1.span = create_autospec(Span, instance=True)
@@ -688,7 +670,6 @@ class TestUC040A39EnergyEnds:
         await step(game, clock, "p1", True)
         clock.t = p1.hold_until
         await step(game, clock, "p1", True, dt=0.0)
-        assert outcomes(counter) == [HOLD_OUTCOME_BUDGET_EXHAUSTED]
         names = [c.args[0] for c in p1.span.add_event.call_args_list]
         assert names.count("shield_budget_exhausted") == 1
         with pytest.raises(InterventionNotApplied):
@@ -696,7 +677,7 @@ class TestUC040A39EnergyEnds:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A39", br=["BR-020"])
-    async def test_eliminate_player_kills_a_holder_and_drops_the_pool(self, game, clock, counter):
+    async def test_eliminate_player_kills_a_holder_and_drops_the_pool(self, game, clock):
         """A39 step 2: the kill path ignores the hold, ends it with death and drops the pool."""
         fill(game, "p1", 3.0)
         await arm(game, clock)
@@ -704,7 +685,6 @@ class TestUC040A39EnergyEnds:
         assert await game._kill_player("p1", 0.0, reason="agent_intervention") is True
         p1 = game.players["p1"]
         assert not p1.alive
-        assert outcomes(counter) == [HOLD_OUTCOME_DEATH]
         assert p1.hold_energy == 0.0 and p1.hold_until == 0.0
 
     @pytest.mark.asyncio
@@ -722,23 +702,21 @@ class TestUC040A39EnergyEnds:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A39")
-    async def test_disconnect_drops_the_pool(self, game, clock, counter):
+    async def test_disconnect_drops_the_pool(self, game, clock):
         fill(game, "p1", 3.0)
         await arm(game, clock)
         await step(game, clock, "p1", True)
         await game._handle_disconnect("p1")
-        assert outcomes(counter) == [HOLD_OUTCOME_DEATH]
         assert game.players["p1"].hold_energy == 0.0
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-040", flow="A39")
-    async def test_game_end_drops_every_pool(self, game, clock, counter):
+    async def test_game_end_drops_every_pool(self, game, clock):
         fill(game, "p1", 3.0)
         fill(game, "p2", 1.0)
         await arm(game, clock)
         await step(game, clock, "p1", True)
         await game._end_shield_feedback()
-        assert outcomes(counter) == [HOLD_OUTCOME_GAME_END]
         assert all(p.hold_energy == 0.0 and p.hold_started_at == 0.0 for p in game.players.values())
 
     @pytest.mark.asyncio
@@ -762,7 +740,7 @@ class TestUC040A39EnergyEnds:
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-040", br=["BR-024", "BR-025"])
 @pytest.mark.parametrize("seed", range(6))
-async def test_protected_time_never_exceeds_the_budget(clock, flags, events, counter, seed):
+async def test_protected_time_never_exceeds_the_budget(clock, flags, events, seed):
     """Seeded tap / hold schedules at the maximum recharge with grants: protection <= budget.
 
     Protection is sampled per frame and attributed forward ([t, t + DT)), so the
@@ -775,6 +753,8 @@ async def test_protected_time_never_exceeds_the_budget(clock, flags, events, cou
     rng = random.Random(seed)
     p1 = g.players["p1"]
     protected = 0.0
+    activations = 0
+    holding = False
     pressed = False
     with patch.object(g, "_play_sound", new_callable=AsyncMock):
         await arm(g, clock)
@@ -785,9 +765,10 @@ async def test_protected_time_never_exceeds_the_budget(clock, flags, events, cou
                 with contextlib.suppress(InterventionNotApplied):  # a full pool or a used-up budget (A37)
                     await g.grant_shield("p1", 3.0)
             await step(g, clock, "p1", pressed)
+            activations += bool(p1.hold_started_at) and not holding
+            holding = bool(p1.hold_started_at)
             if g.is_in_grace(p1, clock.t):
                 protected += DT
-    activations = len(outcomes(counter)) + (1 if p1.hold_started_at else 0)
     assert activations > 3
     assert p1.hold_budget_used <= 15.0 + 1e-9
     assert protected <= 15.0 + activations * DT + 1e-9

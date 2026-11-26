@@ -234,10 +234,10 @@ type entry struct {
 	laterPromotions   []PromotionResult
 	// recommendOwner is the writer owning the real overlay when the experiment's
 	// promotion was refused with 412 writer_mismatch (UC-043 A19, #2276). Non-empty
-	// = every experiment.progress snapshot carries the recommendation attributes.
+	// = every progress snapshot carries the recommendation.
 	recommendOwner string
 	// endReason is the teardown reason of a terminal experiment; a recommendation
-	// snapshot repeats it as experiment.end_reason (the dashboard reason line).
+	// snapshot repeats it as its end reason (the dashboard reason line).
 	endReason string
 
 	// span is the long-lived experiment ROOT span (#1188, epic #1181 PR2): the
@@ -347,6 +347,11 @@ type Registry struct {
 
 	mu      sync.Mutex
 	entries map[string]*entry
+	// progress is the newest snapshot per experiment for GET /experiments/state
+	// (progress.go): every live one plus the newest finished ones.
+	progress map[string]ProgressSnapshot
+	// onProgress, when set (tests), sees every recorded snapshot in order.
+	onProgress func(ProgressSnapshot)
 	// rrCursor is the cross-experiment round-robin cursor for fair capacity
 	// allocation: AllocateAndSpawn rotates the start of the live-experiment scan so
 	// no single experiment is always served first (equal-share, no starvation).

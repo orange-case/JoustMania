@@ -32,13 +32,10 @@ class TestInitialize:
 
     @pytest.mark.asyncio
     async def test_enumerates_and_enables_all_adapters(self, discovery):
-        """Should enumerate adapters, enable each, set metric, and return dict."""
+        """Should enumerate adapters, enable each, and return dict."""
         adapters = {"hci0": "AA:BB:CC:DD:EE:00", "hci1": "AA:BB:CC:DD:EE:01"}
 
-        with (
-            patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt,
-            patch("services.controller_manager.multiplexer.bt_discovery.metrics") as mock_metrics,
-        ):
+        with patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt:
             mock_bt.get_hci_dict = AsyncMock(return_value=adapters)
             mock_bt.enable_adapter = AsyncMock()
 
@@ -48,7 +45,6 @@ class TestInitialize:
         assert discovery.adapter_count == 2
         assert discovery.adapters == adapters
         assert mock_bt.enable_adapter.call_count == 2
-        mock_metrics.bluetooth_adapter_count.set.assert_called_once_with(2)
 
     @pytest.mark.asyncio
     async def test_no_adapters_returns_empty(self, discovery):
@@ -66,10 +62,7 @@ class TestInitialize:
         """One adapter failing enable should not prevent others."""
         adapters = {"hci0": "AA:BB:CC:DD:EE:00", "hci1": "AA:BB:CC:DD:EE:01"}
 
-        with (
-            patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt,
-            patch("services.controller_manager.multiplexer.bt_discovery.metrics") as mock_metrics,
-        ):
+        with patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt:
             mock_bt.get_hci_dict = AsyncMock(return_value=adapters)
             mock_bt.enable_adapter = AsyncMock(side_effect=[Exception("rfkill error"), None])
 
@@ -79,7 +72,6 @@ class TestInitialize:
         assert discovery.adapter_count == 2
         # Both adapters were attempted
         assert mock_bt.enable_adapter.call_count == 2
-        mock_metrics.bluetooth_adapter_count.set.assert_called_once_with(2)
 
 
 class TestGetAdapterForAddress:
@@ -109,10 +101,7 @@ class TestRefreshAdapters:
         """Should detect and enable newly plugged-in adapters."""
         discovery._adapters = {"hci0": "AA:00"}
 
-        with (
-            patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt,
-            patch("services.controller_manager.multiplexer.bt_discovery.metrics") as mock_metrics,
-        ):
+        with patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt:
             mock_bt.get_hci_dict = AsyncMock(return_value={"hci0": "AA:00", "hci1": "BB:00"})
             mock_bt.enable_adapter = AsyncMock()
 
@@ -121,17 +110,13 @@ class TestRefreshAdapters:
         assert new == ["hci1"]
         mock_bt.enable_adapter.assert_called_once_with("hci1")
         assert discovery.adapter_count == 2
-        mock_metrics.bluetooth_adapter_count.set.assert_called_once_with(2)
 
     @pytest.mark.asyncio
     async def test_adapter_removal(self, discovery):
         """Removed adapter should be cleaned from dict."""
         discovery._adapters = {"hci0": "AA:00", "hci1": "BB:00"}
 
-        with (
-            patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt,
-            patch("services.controller_manager.multiplexer.bt_discovery.metrics") as mock_metrics,
-        ):
+        with patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt:
             mock_bt.get_hci_dict = AsyncMock(return_value={"hci0": "AA:00"})
             mock_bt.enable_adapter = AsyncMock()
 
@@ -141,17 +126,13 @@ class TestRefreshAdapters:
         assert discovery.adapter_count == 1
         assert "hci1" not in discovery.adapters
         mock_bt.enable_adapter.assert_not_called()
-        mock_metrics.bluetooth_adapter_count.set.assert_called_once_with(1)
 
     @pytest.mark.asyncio
     async def test_no_changes(self, discovery):
         """No new or removed adapters should return empty list."""
         discovery._adapters = {"hci0": "AA:00"}
 
-        with (
-            patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt,
-            patch("services.controller_manager.multiplexer.bt_discovery.metrics"),
-        ):
+        with patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt:
             mock_bt.get_hci_dict = AsyncMock(return_value={"hci0": "AA:00"})
             mock_bt.enable_adapter = AsyncMock()
 
@@ -165,10 +146,7 @@ class TestRefreshAdapters:
         """Failure to enable new adapter should not prevent updating adapter list."""
         discovery._adapters = {"hci0": "AA:00"}
 
-        with (
-            patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt,
-            patch("services.controller_manager.multiplexer.bt_discovery.metrics"),
-        ):
+        with patch("services.controller_manager.multiplexer.bt_discovery.bluetooth") as mock_bt:
             mock_bt.get_hci_dict = AsyncMock(return_value={"hci0": "AA:00", "hci1": "BB:00"})
             mock_bt.enable_adapter = AsyncMock(side_effect=Exception("rfkill"))
 

@@ -1,7 +1,7 @@
 """Gestures to commands (UC-015 steps 1 to 8, A1, A3, A6, A7, BR-002 to BR-012), autospec'd stubs."""
 
 import asyncio
-from unittest.mock import MagicMock, create_autospec, patch
+from unittest.mock import MagicMock, create_autospec
 
 import grpc
 import pytest
@@ -200,10 +200,8 @@ async def test_a_volume_turn_pending_at_disconnect_is_dropped(actions, menu, sle
 )
 async def test_error_codes_map_to_cues(actions, menu, cues, success, error, label, cue):
     menu.ProcessInput.return_value = reply(success, error)
-    with patch.object(actions_module.metrics, "gestures_total") as counter:
-        result = await actions.dispatch(Gesture(LAYER, "K3", steps=1), status())
+    result = await actions.dispatch(Gesture(LAYER, "K3", steps=1), status())
     assert result == ("step_setting", label)
-    counter.labels.assert_called_once_with(action="step_setting", result=label)
     for name in ("refusal", "limit", "cancel", "failure"):
         mock = getattr(cues, name)
         if name == cue:

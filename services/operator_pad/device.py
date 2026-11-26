@@ -29,7 +29,6 @@ from typing import Any, Protocol
 from opentelemetry import trace
 
 from lib.telemetry import get_tracer
-from services.operator_pad import metrics
 from services.operator_pad.config import PadConfig
 from services.operator_pad.controller import PadController
 
@@ -112,7 +111,6 @@ def open_node(backend: Backend, path: str, warn: Callable[[str], None] = logger.
         return backend.open(path)
     except OSError as e:
         warn(f"Opening pad node {path} failed: {e}")
-        metrics.grab_failures_total.labels(reason="error").inc()
         return None
 
 
@@ -160,7 +158,6 @@ async def grab_device(
                 continue
             reason = "ebusy" if e.errno == errno.EBUSY else "error"
             warn(f"Grabbing pad node {path} failed ({reason}): {e}")
-            metrics.grab_failures_total.labels(reason=reason).inc()
             with contextlib.suppress(Exception):
                 device.close()
             return None
@@ -273,7 +270,6 @@ class DeviceManager:
         self._controller.pad_devices = len(resolved) + sum(usb is None for usb in self._usb.values())
         self._warned.clear()
         self._controller.attached(keymap)
-        metrics.device_attached.set(1)
         logger.info(f"Pad attached: {[d.path for d in devices]}")
         return True
 
@@ -291,7 +287,6 @@ class DeviceManager:
             logger.warning("Pad detached; rescanning")
         self._devices = []
         self._controller.detached()
-        metrics.device_attached.set(0)
 
     async def read_until_gone(self) -> None:
         """Feed key events of every grabbed node to the controller until a node fails.
@@ -360,7 +355,6 @@ class DeviceManager:
                     await task
 
     async def run(self, stop: asyncio.Event) -> None:
-        metrics.device_attached.set(0)
         while not stop.is_set():
             if await self.attach():
                 reader = asyncio.create_task(self.read_until_gone())

@@ -455,7 +455,6 @@ class SettingsOps:
         except Exception as e:
             logger.warning(f"Live roster query failed, using menu roster as-is: {e}")
             span.set_attribute("force_start.roster_reconciled", False)
-            self.metrics.force_start_reconcile_failed_total.inc()
             return controllers
 
         live_serials = set(response.connected_serials)
@@ -464,8 +463,6 @@ class SettingsOps:
 
         if ghosts:
             logger.warning(f"Force-start: pruning {len(ghosts)} ghost controller(s) via live roster: {ghosts}")
-            for _ in ghosts:
-                self.metrics.ghost_controllers_pruned_total.inc()
 
         span.set_attribute("force_start.roster_reconciled", True)
         span.set_attribute("force_start.ghosts_pruned", len(ghosts))

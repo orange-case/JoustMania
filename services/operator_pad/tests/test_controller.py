@@ -1,13 +1,12 @@
 """Codes -> gestures -> actions (UC-015 A4, BR-010): fresh status at every press and release."""
 
 import asyncio
-from unittest.mock import create_autospec, patch
+from unittest.mock import create_autospec
 
 import pytest
 
 from lib.types import Sound
 from proto import menu_pb2
-from services.operator_pad import controller as controller_module
 from services.operator_pad import page_keys
 from services.operator_pad.actions import Actions
 from services.operator_pad.config import DEFAULT_KEYMAP, PadConfig, Timings, parse_keymap
@@ -60,13 +59,11 @@ async def test_knob_turns_read_no_status(parts):
 
 
 @pytest.mark.uc("UC-015", flow="A4", br=["BR-009"])
-async def test_unknown_codes_are_ignored_counted_and_cued_once(parts):
+async def test_unknown_codes_are_ignored_and_cued_once(parts):
     pad, _, reader, actions, cues = parts
-    with patch.object(controller_module.metrics, "unknown_keys_total") as counter:
-        for t in range(3):
-            await pad.on_code(UNKNOWN, PRESS, t * 10)
-            await pad.on_code(UNKNOWN, RELEASE, t * 10 + 5)
-    assert counter.inc.call_count == 3
+    for t in range(3):
+        await pad.on_code(UNKNOWN, PRESS, t * 10)
+        await pad.on_code(UNKNOWN, RELEASE, t * 10 + 5)
     cues.unknown_key.assert_awaited_once()
     actions.dispatch.assert_not_awaited()
     reader.fetch.assert_not_awaited()

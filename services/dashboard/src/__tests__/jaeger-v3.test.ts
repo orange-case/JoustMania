@@ -17,9 +17,8 @@ import {
   spansNamed,
 } from "../jaeger.js";
 import type { JaegerTracesResponse, OtlpTracesResponse } from "../jaeger.js";
-import { parseDecideTraces, parseFlagStates } from "../agent.js";
+import { parseDecideTraces } from "../agent.js";
 import { DECIDE_OPERATION } from "../agentDecide.js";
-import { parseExperimentSnapshots } from "../experiments.js";
 import { jsonResponse, toOtlp } from "./otlp.js";
 import recorded from "./fixtures/jaeger-v3-decide-trace.json";
 import noTraces from "./fixtures/jaeger-v3-no-traces.json";
@@ -27,7 +26,6 @@ import rulesFixture from "./fixtures/jaeger-decide-rules.json";
 import actFixture from "./fixtures/jaeger-decide-remote-act.json";
 import multiFixture from "./fixtures/jaeger-decide-multi.json";
 import flagStateFixture from "./fixtures/jaeger-flag-state-games.json";
-import progressFixture from "./fixtures/jaeger-experiment-progress.json";
 
 const RECORDED_TRACE = "6941c034ab0b93c2af2e439d02580244";
 const RECORDED_DECIDE = "c66f7c2a844e006d";
@@ -128,7 +126,7 @@ describe("UC-035: main step 3, the recorded v3 answer folds like the legacy one 
     expect(evals[0].get("feature_flag.result.value")).toBe(false);
   });
 
-  it("UC-035/main step 3 gives the decide row and the flag panel", () => {
+  it("UC-035/main step 3 gives the decide row", () => {
     const feed = parseDecideTraces(body);
     expect(feed.rows).toHaveLength(1);
     expect(feed.rows[0]).toMatchObject({
@@ -139,9 +137,6 @@ describe("UC-035: main step 3, the recorded v3 answer folds like the legacy one 
       gameKind: "shadow",
     });
     expect(feed.rows[0].decisions.length).toBe(1);
-    const flags = parseFlagStates(body);
-    expect(flags).toHaveLength(1);
-    expect(flags[0].traceId).toBe(RECORDED_TRACE);
   });
 
   it("UC-035/main step 3 every legacy-shaped fixture folds the same after a v3 round trip", () => {
@@ -149,10 +144,7 @@ describe("UC-035: main step 3, the recorded v3 answer folds like the legacy one 
     for (const f of [rulesFixture, actFixture, multiFixture, flagStateFixture]) {
       const legacy = strip(f as unknown as JaegerTracesResponse);
       expect(parseDecideTraces(fromOtlp(toOtlp(legacy)))).toEqual(parseDecideTraces(legacy));
-      expect(parseFlagStates(fromOtlp(toOtlp(legacy)))).toEqual(parseFlagStates(legacy));
     }
-    const progress = progressFixture as unknown as JaegerTracesResponse;
-    expect(parseExperimentSnapshots(fromOtlp(toOtlp(progress)))).toEqual(parseExperimentSnapshots(progress));
   });
 });
 

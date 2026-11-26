@@ -487,13 +487,6 @@ class NonstopJoustGame(BaseGameMode):
                         f"{len(current_alive_serials)} alive players"
                     )
 
-                    # Emit filter metrics (Phase 45)
-                    from services.game_coordinator import metrics
-
-                    metrics.filter_updates_total.labels(game_mode=self.get_game_name()).inc()
-                    metrics.active_controllers.set(len(current_alive_serials))
-                    metrics.filtered_controllers.set(len(self.players) - len(current_alive_serials))
-
                     last_alive_serials = current_alive_serials
 
                 loop_iterations += 1

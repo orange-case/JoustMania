@@ -15,21 +15,17 @@ import { escapeHtml } from "../html.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DecideStore,
-  DECIDE_OVERLAP_MS,
   confidenceBar,
   decisionTargetLabel,
   groupTargetLabel,
   groupTargetShape,
-  decideQueryStartMs,
-  decideSearches,
-  pollDecides,
+  fetchAgentState,
   jaegerTraceUrl,
   parseDecideAnswers,
   parseDecideTraces,
 } from "../agent.js";
 import { createPoller } from "../poller.js";
-import { COLD_START_TIME_MIN, SEARCH_TIME_MAX, searchParams } from "../jaeger.js";
-import { toOtlp } from "./otlp.js";
+import { agentStateBody } from "./otlp.js";
 import type { DecideRow, JaegerTracesResponse } from "../agent.js";
 import {
   AgentView,
@@ -157,8 +153,8 @@ describe("parseDecideTraces — ordering, dedupe, current strip", () => {
   });
 
   it("empty / null data", () => {
-    expect(parseDecideTraces({ data: null })).toEqual({ rows: [], current: null, flagStates: [] });
-    expect(parseDecideTraces({})).toEqual({ rows: [], current: null, flagStates: [] });
+    expect(parseDecideTraces({ data: null })).toEqual({ rows: [], current: null });
+    expect(parseDecideTraces({})).toEqual({ rows: [], current: null });
   });
 });
 
@@ -339,44 +335,19 @@ describe("current strip with real + shadow games", () => {
   });
 });
 
-describe("incremental query window", () => {
-  it("cold start: the epoch lower bound, the fixed upper bound (#2283)", () => {
-    expect(decideQueryStartMs(null)).toBeNull();
-    const q = searchParams(decideSearches(new DecideStore(), 0)[0].spec);
-    expect(q.get("query.startTimeMin")).toBe(COLD_START_TIME_MIN);
-    expect(q.get("query.startTimeMax")).toBe(SEARCH_TIME_MAX);
-    expect(q.get("query.searchDepth")).toBe("5");
-  });
-
-  it("warm: the overlap behind the newest decide seen, RFC 3339, the fixed upper bound", () => {
-    const newest = 1_760_000_012_000;
-    expect(decideQueryStartMs(newest)).toBe(newest - DECIDE_OVERLAP_MS);
-    const store = new DecideStore();
-    store.merge([{ ...parseDecideTraces(asResp(multiFixture)).rows[0], tsMs: newest }]);
-    expect(store.queryStartMs()).toBe(newest - DECIDE_OVERLAP_MS);
-    const q = searchParams(decideSearches(store, 0)[0].spec);
-    expect(q.get("query.startTimeMin")).toBe(new Date(newest - DECIDE_OVERLAP_MS).toISOString());
-    expect(q.get("query.startTimeMax")).toBe(SEARCH_TIME_MAX);
-  });
-
-  it("DecideStore tracks the newest decide, replaces re-fetched rows, and stays bounded", () => {
+describe("DecideStore: the agent's answer replaces the rows", () => {
+  it("UC-035/3 no duplicates on a repeated answer, newest first, bounded", () => {
     const store = new DecideStore(3);
-    expect(store.queryStartMs()).toBeNull();
-    const multi = parseDecideTraces(asResp(multiFixture)).rows;
-    store.merge(multi);
-    const newest = Math.max(...multi.map((r) => r.tsMs));
-    expect(store.queryStartMs()).toBe(newest - DECIDE_OVERLAP_MS);
-    // Re-fetch of the same spans: no duplicates.
-    store.merge(multi);
+    store.load(asResp(multiFixture));
+    store.load(asResp(multiFixture));
     expect(store.size).toBe(3);
     // More rows than the bound: the oldest go.
-    store.merge(parseDecideTraces(asResp(shadowFixture)).rows);
+    store.load(merged(multiFixture, shadowFixture));
     expect(store.size).toBe(3);
     expect(store.feed().rows.map((r) => r.spanId)).toEqual(["SH1", "D2", "D1"]);
     expect(store.feed().current?.gameKind).toBe("real");
   });
 });
-
 describe("poller", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
@@ -548,47 +519,24 @@ describe("AgentView.renderDecide skips unchanged renders", () => {
   });
 });
 
-describe("clock skew: browser clock hours off the agent/Jaeger clock", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
-  });
+describe("UC-035 step 3: the decide feed reads the agent's state, never a browser-clock time", () => {
+  afterEach(() => vi.unstubAllGlobals());
 
-  it("never sends browser-derived times, and the rows still render", async () => {
-    vi.useFakeTimers();
-    // Fixture spans are at ~1_760_000_000_000 ms; the presenter laptop is 7h ahead.
-    const browserNow = 1_760_000_000_000 + 7 * 3_600_000;
-    vi.setSystemTime(browserNow);
+  it("UC-035/3 one GET /experiments/state without a query string, and the rows render", async () => {
     const urls: string[] = [];
     vi.stubGlobal("fetch", async (url: string) => {
       urls.push(url);
-      return new Response(JSON.stringify(toOtlp(merged(multiFixture))), { status: 200 });
+      return new Response(JSON.stringify(agentStateBody(merged(multiFixture))), { status: 200 });
     });
-
     const store = new DecideStore();
-    await pollDecides(store, 0);
-    const firstRows = store.feed().rows;
-    await pollDecides(store, 0);
-
-    const [cold, warm] = urls.map((u) => new URLSearchParams(u.split("?")[1]));
-    expect(cold.get("query.startTimeMin")).toBe(COLD_START_TIME_MIN);
-    expect(cold.get("query.startTimeMax")).toBe(SEARCH_TIME_MAX);
-    const newest = Math.max(...firstRows.map((r) => r.tsMs));
-    expect(warm.get("query.startTimeMin")).toBe(new Date(newest - DECIDE_OVERLAP_MS).toISOString());
-    expect(warm.get("query.startTimeMax")).toBe(SEARCH_TIME_MAX);
-    // The only times in either query are fixed bounds or span-derived (agent clock).
-    const keys = ["query.operationName", "query.searchDepth", "query.serviceName", "query.startTimeMax", "query.startTimeMin"];
-    expect([...cold.keys()].sort()).toEqual(keys);
-    expect([...warm.keys()].sort()).toEqual(keys);
-    expect(Date.parse(warm.get("query.startTimeMin")!)).toBeLessThan(browserNow - 6 * 3_600_000);
-
+    store.load((await fetchAgentState()).decides);
+    expect(urls).toEqual(["/experiments/state"]);
     const feed = store.feed();
     expect(feed.rows.map((r) => r.spanId)).toEqual(["D2", "D1", "R1"]);
     expect(renderDecideRow(feed.rows[0])).toContain("decide-outcome-noop");
     expect(feed.current?.backend).toBe("claude");
   });
 });
-
 describe("UC-040 main: the Decisions row names the targeted player (#1295)", () => {
   /** The rules fixture with player.serial / player.name on its decision spans. */
   function withTargets(serial: string, name: string): JaegerTracesResponse {

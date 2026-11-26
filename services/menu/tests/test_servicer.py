@@ -2605,8 +2605,6 @@ class TestClearReadyState:
 
     def test_transitions_ready_to_connected(self, servicer):
         """_clear_ready_state should transition READY controllers back to CONNECTED."""
-        from unittest.mock import patch
-
         from services.menu.servicer import MenuServicer
 
         servicer.state_manager.controller_states = {
@@ -2615,23 +2613,11 @@ class TestClearReadyState:
             "s3": ControllerState.READY,
         }
 
-        with patch("services.menu.servicer.metrics"):
-            MenuServicer._clear_ready_state(servicer)
+        MenuServicer._clear_ready_state(servicer)
 
         assert servicer.state_manager.controller_states["s1"] == ControllerState.CONNECTED
         assert servicer.state_manager.controller_states["s2"] == ControllerState.CONNECTED
         assert servicer.state_manager.controller_states["s3"] == ControllerState.CONNECTED
-
-    def test_clears_player_ready_metric(self, servicer):
-        """_clear_ready_state should clear the player_ready metric."""
-        from unittest.mock import patch
-
-        from services.menu.servicer import MenuServicer
-
-        with patch("services.menu.servicer.metrics") as mock_metrics:
-            MenuServicer._clear_ready_state(servicer)
-
-        mock_metrics.player_ready.clear.assert_called_once()
 
 
 class TestRunGameLifecycleMidStartFailure:
@@ -2661,12 +2647,10 @@ class TestRunGameLifecycleMidStartFailure:
 
     async def _run(self, servicer):
         """Call the real lifecycle steps (_run_game_lifecycle_steps) bound to the fake servicer."""
-        from unittest.mock import patch
 
         from services.menu.servicer import MenuServicer
 
-        with patch("services.menu.game_lifecycle.metrics"):
-            await MenuServicer._run_game_lifecycle_steps(servicer, "s1", source="web")
+        await MenuServicer._run_game_lifecycle_steps(servicer, "s1", source="web")
 
     @pytest.mark.asyncio
     async def test_build_config_exception_restores_lobby(self, servicer):
@@ -2757,7 +2741,7 @@ class TestRunGameLifecycleRosterAbort:
 
         from services.menu.servicer import MenuServicer
 
-        with patch("services.menu.game_lifecycle.metrics"), patch("services.menu.servicer.asyncio.sleep", AsyncMock()):
+        with patch("services.menu.servicer.asyncio.sleep", AsyncMock()):
             await MenuServicer._run_game_lifecycle_steps(servicer, "s1", source="controller", controllers=controllers)
 
     @pytest.mark.asyncio
@@ -2990,8 +2974,7 @@ class TestIdleWakeThenReadyUp:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A2", steps=[3])
-    @patch("services.menu.idle_monitor.metrics")
-    async def test_ready_up_works_after_wake_from_idle(self, _mock_metrics, real_servicer):
+    async def test_ready_up_works_after_wake_from_idle(self, real_servicer):
         """Idle, wake with a press (consumed), then trigger presses ready up and start the game."""
         from services.menu.idle_monitor import IdleMonitor
 

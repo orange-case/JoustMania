@@ -36,6 +36,7 @@ from tests.service.agent_flow import (
     trace_of,
     wait_agent_flags_served,
     wait_decide_span,
+    wait_game_cycle_id_sent,
 )
 from tests.service.harness import AGENT
 
@@ -71,6 +72,8 @@ async def test_rules_backend_default_unchanged(fresh_stack):
         collector = GameEventCollector(game_client)
         async with collector:
             game_id, serials = await start_ffa(stack, collector)
+            # The agent learns game_cycle only from its log record; kill after it was sent.
+            await wait_game_cycle_id_sent(stack, game_id)
             # R1 (endurance): an early elimination in a young session makes the rules
             # engine slow the tempo / cue audio, i.e. decide something.
             await kill_player_verified(mock_client, game_client, serials[0], lambda p: not p.alive)

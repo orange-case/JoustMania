@@ -24,6 +24,7 @@ DOCUMENTED_ROUTES = {
     "/victoria-metrics/api/v1/query": ("victoria_metrics", "/api/v1/query"),
     "/experiments": ("agent_dossier", "/experiments"),  # UC-035 A1
     "/experiments/exp-1": ("agent_dossier", "/experiments/exp-1"),
+    "/experiments/state": ("agent_dossier", "/experiments/state"),  # UC-035 steps 3, 4
     "/pairing/unpair": ("connect_proxy", "/pairing/unpair"),  # operator unpair (UC-005)
     "/joustmania.menu.MenuService/StreamMenuEvents": (
         "connect_proxy",
