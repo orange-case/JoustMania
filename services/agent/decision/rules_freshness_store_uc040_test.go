@@ -72,9 +72,9 @@ func storeCtx(t *testing.T, duration float64, elims []string, threshold *float64
 
 var calmTrack = []float64{1.01, 1.02, 1.03}
 
-// UC: UC-040 A46 BR-037
+// UC: UC-040 A1
 func TestRulesFreshness_ThroughTheStore(t *testing.T) {
-	t.Run("UC-040/A46 R3 handicaps the outlier whose accel reading came last", func(t *testing.T) {
+	t.Run("UC-040/A1 R3 handicaps the outlier whose accel reading came last", func(t *testing.T) {
 		c := storeCtx(t, 30, nil, nil, []storePlayer{
 			{serial: "LOW", skill: fptr(0.2), intensities: calmTrack},
 			{serial: "HIGH", skill: fptr(0.9), intensities: calmTrack},
@@ -83,7 +83,7 @@ func TestRulesFreshness_ThroughTheStore(t *testing.T) {
 			t.Fatalf("R3 targets = %v, want [HIGH]", got)
 		}
 	})
-	t.Run("UC-040/A46 R4 shields the struggling player whose accel reading came last", func(t *testing.T) {
+	t.Run("UC-040/A1 R4 shields the struggling player whose accel reading came last", func(t *testing.T) {
 		c := storeCtx(t, 30, []string{"GONE"}, nil, []storePlayer{
 			{serial: "MID", skill: fptr(0.5), intensities: calmTrack},
 			{serial: "STRONG", skill: fptr(0.9), intensities: calmTrack},
@@ -93,7 +93,7 @@ func TestRulesFreshness_ThroughTheStore(t *testing.T) {
 			t.Fatalf("R4 targets = %v, want WEAK among them", got)
 		}
 	})
-	t.Run("UC-040/A46 R8 nudges the statue whose accel reading came last", func(t *testing.T) {
+	t.Run("UC-040/A1 R8 nudges the statue whose accel reading came last", func(t *testing.T) {
 		c := storeCtx(t, 20, nil, nil, []storePlayer{
 			{serial: "T", variance: fptr(0.30), intensities: calmTrack},
 			{serial: "S", variance: fptr(0.01), intensities: calmTrack},
@@ -102,7 +102,7 @@ func TestRulesFreshness_ThroughTheStore(t *testing.T) {
 			t.Fatalf("R8 targets = %v, want [S]", got)
 		}
 	})
-	t.Run("UC-040/A43 R4d shields the endangered player whose accel reading came last", func(t *testing.T) {
+	t.Run("UC-040/A1 R4d shields the endangered player whose accel reading came last", func(t *testing.T) {
 		c := storeCtx(t, 20, nil, fptr(dangerThreshold), []storePlayer{
 			{serial: "B", intensities: []float64{0.4, 0.5, 0.4}},
 			{serial: "A", intensities: []float64{1.8, 1.9, 2.0}},

@@ -68,7 +68,7 @@ func newTestWriter(t *testing.T) (*Writer, *fakeService) {
 
 // UC: UC-053 main A4 BR-003 BR-006
 // UC: UC-040 main
-// UC: UC-040 A47 BR-033
+// UC: UC-048 A13 BR-014
 func TestWriter_EveryInterventionIsOneGameScopedWrite(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -95,17 +95,17 @@ func TestWriter_EveryInterventionIsOneGameScopedWrite(t *testing.T) {
 		{name: "UC-053/A4 end_game: the game is the scope",
 			d:      decision.Decision{Intervention: decision.InterventionEndGame},
 			method: "POST", flag: flagEndGame, payload: map[string]any{}},
-		{name: "UC-040/A47 group shield is one event with the serial set and the seconds",
+		{name: "UC-048/A13 group shield is one event with the serial set and the seconds",
 			d: decision.Decision{Intervention: decision.InterventionGrantGroupShield,
 				TargetSerials: []string{"MOCK0001", "MOCK0002", "MOCK0003"}, Value: "4.5"},
 			method: "POST", flag: flagGroupShield,
 			payload: map[string]any{"serials": "MOCK0001,MOCK0002,MOCK0003", "seconds": "4.5"}},
-		{name: "UC-040/A47 group shield without a stamped length uses the fail-closed default",
+		{name: "UC-048/A13 group shield without a stamped length uses the fail-closed default",
 			d: decision.Decision{Intervention: decision.InterventionGrantGroupShield,
 				TargetSerials: []string{"MOCK0001", "MOCK0002"}},
 			method: "POST", flag: flagGroupShield,
 			payload: map[string]any{"serials": "MOCK0001,MOCK0002", "seconds": strconv.FormatFloat(defaultShieldSeconds, 'f', -1, 64)}},
-		{name: "UC-040/A47 group shield of one player is refused without a write",
+		{name: "UC-048/A13 group shield of one player is refused without a write",
 			d: decision.Decision{Intervention: decision.InterventionGrantGroupShield,
 				TargetSerials: []string{"MOCK0001"}}, wantError: true},
 		{name: "UC-053/main music tempo is game state",
@@ -132,10 +132,10 @@ func TestWriter_EveryInterventionIsOneGameScopedWrite(t *testing.T) {
 		{name: "UC-053/main a shield grant is per player",
 			d:      decision.Decision{Intervention: decision.InterventionGrantShield, TargetSerial: "MOCK0003"},
 			method: "PUT", flag: flagShieldSeconds, serial: "MOCK0003", value: float64(defaultShieldSeconds)},
-		{name: "UC-040/A16 a toughness boost grant writes toughness_boost_seconds (#1838)",
+		{name: "UC-048/A1 a toughness boost grant writes toughness_boost_seconds (#1838)",
 			d:      decision.Decision{Intervention: decision.InterventionToughnessBoost, TargetSerial: "MOCK0003"},
 			method: "PUT", flag: "toughness_boost_seconds", serial: "MOCK0003", value: "5:2.0"},
-		{name: "UC-040/A16 an out-of-bounds toughness boost factor degrades to the default (#1838)",
+		{name: "UC-048/A1 an out-of-bounds toughness boost factor degrades to the default (#1838)",
 			d:      decision.Decision{Intervention: decision.InterventionToughnessBoost, TargetSerial: "MOCK0003", Value: "5:9.0"},
 			method: "PUT", flag: "toughness_boost_seconds", serial: "MOCK0003", value: "5:2.0"},
 		{name: "UC-053/main an escalating soft penalty value never escalates",

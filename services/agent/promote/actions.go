@@ -308,7 +308,7 @@ func (pr *Promoter) clock() time.Time {
 }
 
 // watchRevert is the revert of a watch or re-watch. A hold key reverts at once:
-// a running game keeps its latched values (UC-040 BR-027).
+// a running game keeps its latched values (UC-048 BR-011).
 func (pr *Promoter) watchRevert(ctx context.Context, flagKey string) error {
 	err := pr.reverter.RevertRealDefault(ctx, flagKey)
 	if errors.Is(err, ErrSupersededByAnotherWriter) {

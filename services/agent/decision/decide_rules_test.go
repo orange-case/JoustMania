@@ -236,7 +236,7 @@ func TestRulesPath_EnduranceDetails(t *testing.T) {
 	if tgt.Choice != decide.TargetNone || tgt.Probabilities[decide.TargetNone] != 1 || tgt.Confidence != 1 {
 		t.Errorf("target = %+v", tgt)
 	}
-	// R1 writes the fast end of [1.0, 1.3] (#2487, UC-040 A51, BR-040), so the
+	// R1 writes the fast end of [1.0, 1.3] (#2487, decide-contract.md §15.5), so the
 	// magnitude is 1.3, not the 1.15 writer default an empty Value would get.
 	if v, _ := decide.ResolveMagnitude(iv.Choice, mag.Score); math.Abs(v-1.3) > 1e-9 {
 		t.Errorf("magnitude resolves to %v, want 1.3", v)

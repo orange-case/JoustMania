@@ -75,7 +75,7 @@ func (l *Loop) experimentFlagBlocks(c gamecontext.GameContext, d Decision) strin
 // (§7.1) uses the same list, so a request left with only noop is never made.
 //
 // The group lever is offered only while the group gate is open for c (#2467,
-// UC-040 A47, group.go): snapshot carries the live policy.
+// UC-048 A13, group.go): snapshot carries the live policy.
 func (l *Loop) offeredInterventions(c gamecontext.GameContext, snapshot flags.Snapshot) []string {
 	allowed := l.withoutClosedGroupLever(snapshot.Policy, c, snapshot.InterventionsAllowed)
 	flag := l.experimentFlagOf(c)

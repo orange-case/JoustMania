@@ -12,7 +12,7 @@ import (
 	"github.com/joustmania/agent/flagservice"
 )
 
-// shield_seconds_default_uc040_test.go covers the grant_shield length (UC-040 BR-029,
+// shield_seconds_default_uc040_test.go covers the grant_shield length (UC-048 BR-012,
 // #2395): the ShieldSecondsReader reads the interventions/shield_seconds "default"
 // variant at use time and fails closed to 5 s.
 
@@ -48,10 +48,10 @@ func readerAt(svc FlagViewer, clock *time.Time) *ShieldSecondsReader {
 	return r
 }
 
-// UC: UC-040 BR-029
+// UC: UC-048 BR-012
 func TestShieldSecondsReader(t *testing.T) {
 	ctx := context.Background()
-	t.Run("UC-040/BR-029 the length is the value of the variant named default, not the defaultVariant", func(t *testing.T) {
+	t.Run("UC-048/BR-012 the length is the value of the variant named default, not the defaultVariant", func(t *testing.T) {
 		svc := &fakeFlagViewer{view: shieldView(map[string]string{"none": "0", "short": "3", "default": "3", "long": "10"})}
 		clock := time.Unix(1, 0)
 		if got := readerAt(svc, &clock).Seconds(ctx); got != 3 {
@@ -75,14 +75,14 @@ func TestShieldSecondsReader(t *testing.T) {
 		{"the variant is 2 s, below the 3 s magnitude bound", &fakeFlagViewer{view: shieldView(map[string]string{"default": "2"})}},
 		{"the variant is 1 s, below the 3 s magnitude bound", &fakeFlagViewer{view: shieldView(map[string]string{"default": "1"})}},
 	} {
-		t.Run("UC-040/BR-029 fail closed to 5 s when "+tc.name, func(t *testing.T) {
+		t.Run("UC-048/BR-012 fail closed to 5 s when "+tc.name, func(t *testing.T) {
 			clock := time.Unix(1, 0)
 			if got := readerAt(tc.svc, &clock).Seconds(ctx); got != decision.DefaultShieldSeconds {
 				t.Fatalf("Seconds = %v, want %v", got, decision.DefaultShieldSeconds)
 			}
 		})
 	}
-	t.Run("UC-040/BR-029 read at use time: a changed variant applies to the next grant after 1 s", func(t *testing.T) {
+	t.Run("UC-048/BR-012 read at use time: a changed variant applies to the next grant after 1 s", func(t *testing.T) {
 		svc := &fakeFlagViewer{view: shieldView(map[string]string{"default": "5"})}
 		clock := time.Unix(1, 0)
 		r := readerAt(svc, &clock)
@@ -101,7 +101,7 @@ func TestShieldSecondsReader(t *testing.T) {
 			t.Fatalf("after 1 s: Seconds = %v after %d reads, want 3 after 2", got, svc.calls)
 		}
 	})
-	t.Run("UC-040/BR-029 the reader is safe for concurrent loops", func(t *testing.T) {
+	t.Run("UC-048/BR-012 the reader is safe for concurrent loops", func(t *testing.T) {
 		svc := &fakeFlagViewer{view: shieldView(map[string]string{"default": "4"})}
 		r := NewShieldSecondsReader(svc, nil)
 		var wg sync.WaitGroup

@@ -961,7 +961,7 @@ func (l *Loop) decideRemoteApply(ctx context.Context, snapshot flags.Snapshot, c
 		rec.outcome, rec.discardedReason = DecideOutcomeDiscarded, DiscardTargetGone
 		return
 	case len(d.TargetSerials) > 0 && !groupPresent(current, d.TargetSerials):
-		// A group shield is all or nothing (#2467, A48): one target gone drops it.
+		// A group shield is all or nothing (#2467, UC-048 A14): one target gone drops it.
 		rec.outcome, rec.discardedReason = DecideOutcomeDiscarded, DiscardTargetGone
 		return
 	case decide.NeedsFreshReadings(d.Intervention) && !decide.TargetReadingsFresh(current, d.TargetSerial):
@@ -1005,7 +1005,7 @@ const (
 	invalidPlayerTargetMissing     = "player_intervention_without_target"
 	invalidSessionTargetedAtPlayer = "session_intervention_with_target"
 	invalidMissingIntervention     = "missing_intervention_answer"
-	// #2467 (UC-040 A47): a group lever without a group option of the request's
+	// #2467 (UC-048 A13): a group lever without a group option of the request's
 	// alive players, and a group option on any other intervention.
 	invalidGroupWithoutGroup    = "group_intervention_without_group"
 	invalidGroupTargetForSingle = "group_target_for_single_intervention"
@@ -1020,7 +1020,7 @@ const (
 // confidence routing is the caller's job.
 //
 // A group lever (decide.GroupTargeted) takes a group option, resolved against the
-// request's alive players into Decision.TargetSerials (#2467, UC-040 A47); req is
+// request's alive players into Decision.TargetSerials (#2467, UC-048 A13); req is
 // the request the answers belong to.
 func mapAnswers(req decide.Request, resp decide.Response) (Decision, string, string) {
 	iv, ok := resp.Find(decide.QuestionFFAIntervention)

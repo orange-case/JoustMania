@@ -115,7 +115,7 @@ func wirePredictionLookups(book *prediction.Book, summaries *gamesummary.Coordin
 }
 
 // wireGroupLookup hands the decision loops' group-shield log to the game summary
-// (#2529, UC-040 BR-033). The summary takes a game's records once, at game end.
+// (#2529, UC-048 BR-014). The summary takes a game's records once, at game end.
 func wireGroupLookup(log *decision.GroupLog, summaries *gamesummary.Coordinator) {
 	summaries.SetGroupLookup(func(gameID string) []gamesummary.GroupDecision {
 		records := log.Take(gameID)

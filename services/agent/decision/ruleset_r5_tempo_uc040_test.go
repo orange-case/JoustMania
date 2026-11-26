@@ -10,7 +10,7 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// ruleset_r5_tempo_uc040_test.go covers R5's tempo value (UC-040 A52, BR-041,
+// ruleset_r5_tempo_uc040_test.go covers R5's tempo value (decide-contract.md §15.5,
 // #2487): past the accelerate target R5 slows the music to 1.0, the lower end of
 // adjust_music_tempo's bounds, which lowers the death threshold so eliminations
 // come sooner. R1 writes the upper end (1.3). When both fire in overlapping
@@ -24,9 +24,9 @@ func tempoDecision(value string) Decision {
 		ObjectiveServed: ObjectiveAccelerate, Objectives: balancedFocused()}
 }
 
-// UC: UC-040 A52 BR-041
+// UC: UC-040 A1
 func TestR5SlowsTheTempo(t *testing.T) {
-	t.Run("UC-040/A52 BR-041 R5 proposes tempo 1.0, the lower bound", func(t *testing.T) {
+	t.Run("UC-040/A1 R5 proposes tempo 1.0, the lower bound", func(t *testing.T) {
 		players := map[string]testPlayer{"A": {active: true}, "B": {active: true}}
 		cands := accelerateCandidates(gameCtx(80, nil, players), defaultFit(), map[string]float64{ObjectiveAccelerate: 1})
 		var got *candidate
@@ -46,7 +46,7 @@ func TestR5SlowsTheTempo(t *testing.T) {
 		}
 	})
 
-	t.Run("UC-040/A52 BR-041 R1 then R5 both write; a same-value R5 repeat is already_applied", func(t *testing.T) {
+	t.Run("UC-040/A1 R1 then R5 both write; a same-value R5 repeat is already_applied", func(t *testing.T) {
 		l, sink, clock, _ := appliedLoop(t, tempoDecision("1.3"))
 		expectOutcome(t, runCycle(l, budgetCtx()), "adjust_music_tempo/:dispatched")
 		// R5's change waits out the lever cooldown of R1's write (A53, BR-046).
@@ -86,10 +86,10 @@ func tempoChanges(values []string) int {
 	return n
 }
 
-// UC: UC-040 A52 BR-041 BR-042
+// UC: UC-040 A1
 func TestR1R5TempoDoesNotFlap(t *testing.T) {
 	for name, w := range tempoMixWeights {
-		t.Run("UC-040/A52 BR-042 rules engine: the tempo changes once in the overlap, "+name, func(t *testing.T) {
+		t.Run("UC-040/A1 rules engine: the tempo changes once in the overlap, "+name, func(t *testing.T) {
 			cfg := DefaultStaticConfig()
 			cfg.ObjectiveWeights = w
 			clock := time.Unix(10_000, 0)
@@ -126,7 +126,7 @@ func TestR1R5TempoDoesNotFlap(t *testing.T) {
 
 	for _, budget := range []int{8, 20} {
 		for name, w := range tempoMixWeights {
-			t.Run("UC-040/A52 BR-042 loop: the tempo changes once, not every admitted write, "+name, func(t *testing.T) {
+			t.Run("UC-040/A1 loop: the tempo changes once, not every admitted write, "+name, func(t *testing.T) {
 				snap := rulesSnapshot()
 				snap.Objectives = w
 				snap.Policy = flags.Policy{MaxInterventionsPerMinute: budget}
@@ -162,7 +162,7 @@ func TestR1R5TempoDoesNotFlap(t *testing.T) {
 		}
 	}
 
-	t.Run("UC-040/A52 BR-042 an applied winner holds its key against a lower-ranked rival", func(t *testing.T) {
+	t.Run("UC-040/A1 an applied winner holds its key against a lower-ranked rival", func(t *testing.T) {
 		c := budgetCtx()
 		sc := func(v string) scoredCandidate {
 			return scoredCandidate{candidate: candidate{decision: tempoDecision(v)}}

@@ -13,7 +13,7 @@ import (
 )
 
 // chargeledger_hold_uc040_test.go covers the agent's shield ledger in a hold game
-// (UC-040 A37 step 1, BR-022, BR-024; decide-contract §4.5 step 4; #2096): no
+// (UC-048 A9 step 1, BR-007, BR-008; decide-contract §4.5 step 4; #2096): no
 // already_charged; shield_budget_exhausted and shield_pool_full from the
 // coordinator's gauges before the cap, the cooldown and the rate limit, counting the
 // grants in flight; skipped for an active shield; fail open without the gauges; the
@@ -51,7 +51,7 @@ func shieldOf(target, seconds string) Decision {
 	return d
 }
 
-// UC: UC-040 A37 BR-022 BR-024
+// UC: UC-048 A9 BR-007 BR-008
 func TestHoldLedger_Refusals(t *testing.T) {
 	roomy := holdPlayer{energy: fptr(1), budget: fptr(12)}
 	for _, tc := range []struct {
@@ -59,14 +59,14 @@ func TestHoldLedger_Refusals(t *testing.T) {
 		weak holdPlayer
 		want string
 	}{
-		{"UC-040/A37 a pool within 0.5 s of the cap is shield_pool_full", holdPlayer{energy: fptr(4.6), budget: fptr(12)}, "shield_pool_full"},
-		{"UC-040/A37 full is min(cap, budget left)", holdPlayer{energy: fptr(1.6), budget: fptr(2)}, "shield_pool_full"},
-		{"UC-040/A37 a budget left below the minimum burst is shield_budget_exhausted", holdPlayer{energy: fptr(0), budget: fptr(0.2)}, "shield_budget_exhausted"},
-		{"UC-040/A37 the budget is checked before the pool", holdPlayer{energy: fptr(5), budget: fptr(0.1)}, "shield_budget_exhausted"},
-		{"UC-040/A37 an active shield skips the pool check", holdPlayer{energy: fptr(5), budget: fptr(12), active: true}, "dispatched"},
-		{"UC-040/A37 an active shield keeps the budget check", holdPlayer{energy: fptr(5), budget: fptr(0.1), active: true}, "shield_budget_exhausted"},
-		{"UC-040/A37 missing gauges fail open", holdPlayer{}, "dispatched"},
-		{"UC-040/A36 room in the pool is a grant", roomy, "dispatched"},
+		{"UC-048/A9 a pool within 0.5 s of the cap is shield_pool_full", holdPlayer{energy: fptr(4.6), budget: fptr(12)}, "shield_pool_full"},
+		{"UC-048/A9 full is min(cap, budget left)", holdPlayer{energy: fptr(1.6), budget: fptr(2)}, "shield_pool_full"},
+		{"UC-048/A9 a budget left below the minimum burst is shield_budget_exhausted", holdPlayer{energy: fptr(0), budget: fptr(0.2)}, "shield_budget_exhausted"},
+		{"UC-048/A9 the budget is checked before the pool", holdPlayer{energy: fptr(5), budget: fptr(0.1)}, "shield_budget_exhausted"},
+		{"UC-048/A9 an active shield skips the pool check", holdPlayer{energy: fptr(5), budget: fptr(12), active: true}, "dispatched"},
+		{"UC-048/A9 an active shield keeps the budget check", holdPlayer{energy: fptr(5), budget: fptr(0.1), active: true}, "shield_budget_exhausted"},
+		{"UC-048/A9 missing gauges fail open", holdPlayer{}, "dispatched"},
+		{"UC-048/A8 room in the pool is a grant", roomy, "dispatched"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var modeReads atomic.Int32
@@ -85,9 +85,9 @@ func TestHoldLedger_Refusals(t *testing.T) {
 	}
 }
 
-// UC: UC-040 A37 BR-022
+// UC: UC-048 A9 BR-007
 func TestHoldLedger_NoAlreadyChargedAndNoBudgetCharge(t *testing.T) {
-	t.Run("UC-040/A37 a second grant is not already_charged in a hold game, and a refusal draws no budget", func(t *testing.T) {
+	t.Run("UC-048/A9 a second grant is not already_charged in a hold game, and a refusal draws no budget", func(t *testing.T) {
 		shieldCost := int(interventionCost(InterventionGrantShield))
 		l, _, clock, _ := ledgerLoop(t, 2*shieldCost, triggerMode(20*time.Second, nil), budgetShield("WEAK"))
 		roomy := holdPlayer{energy: fptr(0), budget: fptr(15)}
@@ -106,9 +106,9 @@ func TestHoldLedger_NoAlreadyChargedAndNoBudgetCharge(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A37
+// UC: UC-048 A9
 func TestHoldLedger_InFlightCounts(t *testing.T) {
-	t.Run("UC-040/A37 the seconds of a grant in flight count towards a full pool", func(t *testing.T) {
+	t.Run("UC-048/A9 the seconds of a grant in flight count towards a full pool", func(t *testing.T) {
 		l, _, _, _ := ledgerLoop(t, 100, nil)
 		c := holdCtx(holdPlayer{energy: fptr(1.6), budget: fptr(15)}, holdPlayer{})
 		now := time.Unix(50_000, 0)
@@ -136,9 +136,10 @@ func TestHoldLedger_InFlightCounts(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A37 A21
+// UC: UC-040 A21
+// UC: UC-048 A9
 func TestHoldLedger_RepeatRefusalQuiet(t *testing.T) {
-	t.Run("UC-040/A37 only the first shield_pool_full per entry is emitted; repeats log at debug", func(t *testing.T) {
+	t.Run("UC-048/A9 only the first shield_pool_full per entry is emitted; repeats log at debug", func(t *testing.T) {
 		l, _, clock, decisionSpans := ledgerLoop(t, 100, nil, budgetShield("WEAK"))
 		logs := &syncBuffer{}
 		l.Log = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -157,9 +158,9 @@ func TestHoldLedger_RepeatRefusalQuiet(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A37 BR-022
+// UC: UC-048 A9 BR-007
 func TestHoldLedger_RulesSkipRefusedPlayers(t *testing.T) {
-	t.Run("UC-040/A37 R4 does not propose a shield to a player whose pool is full", func(t *testing.T) {
+	t.Run("UC-048/A9 R4 does not propose a shield to a player whose pool is full", func(t *testing.T) {
 		snap := rulesSnapshot()
 		snap.Objectives = balancedFocused()
 		snap.Policy = flags.Policy{MaxInterventionsPerMinute: 50}

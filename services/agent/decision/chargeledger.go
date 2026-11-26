@@ -12,9 +12,9 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// The agent's shield ledger: the shield-charge ledger (UC-040 A31 step 1, BR-020;
-// #1837 PR-4a) merged with the per-player shield cap and cooldown (UC-040 A33,
-// BR-022; #2044). One entry per serial, one reserve and one finish, so a refusal of
+// The agent's shield ledger: the shield-charge ledger (UC-048 A4 step 1, BR-005;
+// #1837 PR-4a) merged with the per-player shield cap and cooldown (UC-048 A6,
+// UC-048 BR-007; #2044). One entry per serial, one reserve and one finish, so a refusal of
 // one check can never leave a reservation of another behind.
 //
 // Shield limits: the agent counts the grant_shield writes it made to each player in
@@ -25,7 +25,7 @@ import (
 // policy.shield_cooldown_seconds, or while another grant to the player is in flight.
 // Both limits are read from the cycle's live snapshot; 0 = unlimited / off, and a
 // hand-built Snapshot (the rules golden) leaves them 0, so nothing is refused. The
-// count is an upper bound of the coordinator's (BR-022): it also counts writes the
+// count is an upper bound of the coordinator's (UC-048 BR-007): it also counts writes the
 // coordinator refused or kept, so the agent errs towards fewer shields.
 //
 // In trigger mode a grant_shield gives the player a charge the coordinator holds until
@@ -35,7 +35,7 @@ import (
 // second grant_shield to the same player inside the window is blocked already_charged
 // before the rate limit, so it charges no budget and the coordinator never sees it.
 //
-// In a hold game (#2096; UC-040 A37 step 1) a grant_shield adds energy to the
+// In a hold game (#2096; UC-048 A9 step 1) a grant_shield adds energy to the
 // player's pool. The charge check does not apply; instead, before the cap and the
 // cooldown, the grant is refused shield_budget_exhausted or shield_pool_full from the
 // coordinator's game_player_shield_* gauges (decide.HoldShieldRefusal), counting the
@@ -44,18 +44,18 @@ import (
 //
 // The ledger lives in the per-game Loop (one Loop per game id, so a new game starts with
 // an empty ledger) under its own mutex, on the loop clock. It is in memory only: an
-// agent restart loses it and the coordinator's own already_charged check (A31 step 2)
+// agent restart loses it and the coordinator's own already_charged check (UC-048 A4 step 2)
 // is the backstop.
 
 // shieldTriggerGameMode is the only game mode in which shield.activation=trigger
-// applies (UC-040 BR-019; games/ffa.py SHIELD_TRIGGER_ALLOWED, get_game_name()).
+// applies (UC-048 BR-004; games/ffa.py SHIELD_TRIGGER_ALLOWED, get_game_name()).
 // tests/contract/test_shield_trigger_modes.py fails when the coordinator's allow-list
 // and this constant drift apart.
 const shieldTriggerGameMode = "FFA"
 
 // chargeLedgerCap caps the window for a long or never-expiring charge: past it the
 // agent may grant again and the coordinator refuses the grant if the charge is still
-// held (A31 step 2).
+// held (UC-048 A4 step 2).
 const chargeLedgerCap = 20 * time.Second
 
 // chargeLedgerMargin covers the time from the agent's write to the coordinator's apply
@@ -73,15 +73,15 @@ type ShieldChargeMode func(ctx context.Context, gameID string) (trigger bool, ex
 // inert: no grant_shield is ever blocked already_charged. Set during construction.
 func (l *Loop) SetShieldChargeMode(mode ShieldChargeMode) { l.shieldChargeMode = mode }
 
-// DefaultShieldSeconds is the fail-closed grant_shield length (UC-040 BR-029, #2395):
+// DefaultShieldSeconds is the fail-closed grant_shield length (UC-048 BR-012, #2395):
 // the loop stamps a grant with no value with the shield_seconds "default" variant
 // (SetShieldSecondsSource) and falls back to this when that cannot be read; the writer
 // (actions/writer.go) and the ledger use it for a decision that still carries no
-// value, or one that does not parse (UC-040 BR-022). It equals the variant's baseline.
+// value, or one that does not parse (UC-048 BR-007). It equals the variant's baseline.
 const DefaultShieldSeconds = 5
 
 // ShieldSecondsSource returns the grant_shield length in seconds for a decision that
-// carries no value (UC-040 BR-029, #2395). main.go wires actions.ShieldSecondsReader,
+// carries no value (UC-048 BR-012, #2395). main.go wires actions.ShieldSecondsReader,
 // which reads the interventions/shield_seconds "default" variant through the flag
 // service at use time and fails closed to DefaultShieldSeconds, so it always returns a
 // usable length.
@@ -94,7 +94,7 @@ func (l *Loop) SetShieldSecondsSource(src ShieldSecondsSource) { l.shieldSeconds
 // withShieldSeconds stamps a targeted grant_shield that carries no value (every rules
 // decision, a remote answer without a magnitude) with the configured length, so the
 // ledger's cooldown end and in-flight seconds and the writer use one value (UC-040
-// BR-029). The source is read only for a grant the allow-list permits; a value the
+// UC-048 BR-012). The source is read only for a grant the allow-list permits; a value the
 // decision already carries (a remote magnitude) is kept.
 func (l *Loop) withShieldSeconds(ctx context.Context, snapshot flags.Snapshot, d Decision) Decision {
 	if l.shieldSeconds == nil || d.Value != "" || !grantsShieldLength(d) {
@@ -128,7 +128,7 @@ func grantsShieldLength(d Decision) bool {
 // cycle before they run (withShieldSeconds), and makes the rules record's
 // ffa.magnitude answer report the stamped length of the decision its answers
 // describe (the first one), so the decide span and record say what is written, not
-// the 5 s bounds default (UC-040 BR-029, decide contract §4; #2395). runDecision
+// the 5 s bounds default (UC-048 BR-012, decide contract §4; #2395). runDecision
 // keeps a value already stamped, so the source is read once per grant.
 //
 // It then clamps each decision's value into the request's magnitude ranges
@@ -191,7 +191,7 @@ func magnitudeFromDecision(req decide.Request, resp decide.Response, d Decision)
 	return resp
 }
 
-// shieldLimits are the live shield limits of one check (UC-040 A33, BR-022): the
+// shieldLimits are the live shield limits of one check (UC-048 A6, BR-007): the
 // policy.max_shields_per_player_per_game and policy.shield_cooldown_seconds values of
 // the snapshot. 0 = unlimited / off; both 0 (the zero value) refuse nothing.
 type shieldLimits struct {
@@ -204,7 +204,7 @@ func limitsOf(p flags.Policy) shieldLimits {
 }
 
 // chargeEntry is one player's shield-ledger entry for this game: the trigger-mode
-// charge window (A31) and the shield count and last end (A33, BR-022). An entry is
+// charge window (UC-048 A4) and the shield count and last end (UC-048 A6, UC-048 BR-007). An entry is
 // never deleted during a game, so the count holds; the Loop is per game, so a new
 // game starts empty.
 type chargeEntry struct {
@@ -225,7 +225,7 @@ type chargeEntry struct {
 	lastEnd time.Time
 	// reported is the reason of the last refusal against this entry since the last
 	// reservation or write: a refusal with the same reason is a repeat and stays
-	// quiet (A31 step 1, A33, as A21).
+	// quiet (UC-048 A4 step 1, UC-048 A6, as A21).
 	reported BlockReason
 }
 
@@ -248,7 +248,7 @@ func (e chargeEntry) refusal(now time.Time, lim shieldLimits, chargeApplies bool
 }
 
 // chargeLedger is the per-Loop shield ledger by serial: the charges the agent wrote
-// (A31) and its shields per player in this game (A33). One mutex, so a check and the
+// (UC-048 A4) and its shields per player in this game (UC-048 A6). One mutex, so a check and the
 // views (ChargedSerials, ShieldSerials) each see one consistent state.
 type chargeLedger struct {
 	mu      sync.Mutex
@@ -256,7 +256,7 @@ type chargeLedger struct {
 	gen     uint64
 	// limits are the limits of the latest cycle or check: the views use them.
 	limits shieldLimits
-	// The game's group shields (#2467, UC-040 A47, BR-033): written, in flight
+	// The game's group shields (#2467, UC-048 A13, BR-014): written, in flight
 	// (by reservation generation), and whether the last group_cap_reached refusal
 	// was already reported (a repeat stays quiet, as A21).
 	groupCommitted   int
@@ -422,7 +422,7 @@ func (cl *chargeLedger) views(now time.Time) (charged, noShield map[string]bool)
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
 	for serial, e := range cl.entries {
-		// A live charge counts whatever the mode reads now (A31: entries written
+		// A live charge counts whatever the mode reads now (UC-048 A4: entries written
 		// before a trigger -> instant flip stay live for their window).
 		r := e.refusal(now, cl.limits, true)
 		if r == "" {
@@ -452,7 +452,7 @@ func (l *Loop) ChargedSerials() map[string]bool {
 }
 
 // ShieldSerials is the rules engine's view of the ledger for the game context c,
-// taken once per ranking (UC-040 A31, A33, A37): charged feeds the decide state the
+// taken once per ranking (UC-048 A4, A6, A9): charged feeds the decide state the
 // ranking builds, noShield (charged plus the players at the shield cap or in the
 // cooldown, and in a hold game the players whose pool is full or whose budget is used
 // up, #2096) feeds the rules' no-shield filter, so R4 does not propose a shield the
@@ -510,7 +510,7 @@ func (cl *chargeLedger) inFlight() map[string]time.Duration {
 	return out
 }
 
-// ShieldGrants is the rules engine's catch-up view of the ledger (UC-040 A41, BR-030;
+// ShieldGrants is the rules engine's catch-up view of the ledger (decide-contract.md §15.2;
 // #2395): the agent's grant_shield writes per serial in this game, the ones in flight
 // included (so two concurrent cycles do not both pick the same player with the fewest).
 // The ledger is per Loop and a Loop is per game id, so the count starts at 0 in every
@@ -614,9 +614,9 @@ func shieldSeconds(d Decision) time.Duration {
 
 // reserveShield runs the shield-ledger step of the permission chain (decide-contract
 // §4.5 step 4): for a targeted grant_shield it checks, in order, the trigger-mode
-// charge (already_charged, A31) or in a hold game the pool (shield_budget_exhausted,
-// shield_pool_full, A37), the cap (shield_cap_reached) and the cooldown
-// (shield_cooldown, A33), and reserves. It returns the reservation to finish (nil
+// charge (already_charged, UC-048 A4) or in a hold game the pool (shield_budget_exhausted,
+// shield_pool_full, UC-048 A9), the cap (shield_cap_reached) and the cooldown
+// (shield_cooldown, UC-048 A6), and reserves. It returns the reservation to finish (nil
 // when the ledger does not apply or refused), the refusal reason ("" when not
 // refused) and whether that refusal is the first of its kind against the entry.
 func (l *Loop) reserveShield(ctx context.Context, snapshot flags.Snapshot, c gamecontext.GameContext, d Decision, now time.Time) (res *chargeReservation, reason BlockReason, firstRefusal bool) {

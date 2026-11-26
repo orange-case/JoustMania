@@ -16,7 +16,7 @@ import (
 )
 
 // shieldlimit_uc040_test.go covers the agent's shield cap and cooldown per player per
-// game (UC-040 A33, BR-022; decide-contract §4.5 step 4; #2044): the merged shield
+// game (UC-048 A6, BR-007; decide-contract §4.5 step 4; #2044): the merged shield
 // ledger refuses a grant_shield shield_cap_reached or shield_cooldown before the rate
 // limit, releases every reservation that was not written, keeps a pending grant from
 // passing the cooldown, and refuses nothing at 0/0.
@@ -53,9 +53,9 @@ func shieldWritesTo(sink *capturingSink, serial string) int {
 	return n
 }
 
-// UC: UC-040 A33 BR-022
+// UC: UC-048 A6 BR-007
 func TestShieldLimits_RulesAcceptance(t *testing.T) {
-	t.Run("UC-040/A33 BR-022 rules at 50/min shield one near-threshold player exactly 3 times in 120 s", func(t *testing.T) {
+	t.Run("UC-048/A6 BR-007 rules at 50/min shield one near-threshold player exactly 3 times in 120 s", func(t *testing.T) {
 		snap := rulesSnapshot()
 		snap.Objectives = balancedFocused()
 		snap.Policy = flags.Policy{MaxInterventionsPerMinute: 50, MaxShieldsPerPlayerPerGame: 3, ShieldCooldownSeconds: 15}
@@ -97,9 +97,9 @@ func TestShieldLimits_RulesAcceptance(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A33 BR-022
+// UC: UC-048 A6 BR-007
 func TestShieldLimits_RemoteAlwaysGrantsShield(t *testing.T) {
-	t.Run("UC-040/A33 a remote backend that always answers grant_shield is capped at 3", func(t *testing.T) {
+	t.Run("UC-048/A6 a remote backend that always answers grant_shield is capped at 3", func(t *testing.T) {
 		be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.95, "A", 0.5, "x"))
 		snap := remoteSnapshot(time.Second)
 		snap.Policy.MaxShieldsPerPlayerPerGame = 3
@@ -133,7 +133,7 @@ func TestShieldLimits_RemoteAlwaysGrantsShield(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A33 BR-022
+// UC: UC-048 A6 BR-007
 func TestShieldLimits_CooldownBoundary(t *testing.T) {
 	// The default 5 s shield written at t0 ends at t0 + 5 s + 2 s margin; with a 15 s
 	// cooldown the next grant is refused until t0 + 22 s.
@@ -142,8 +142,8 @@ func TestShieldLimits_CooldownBoundary(t *testing.T) {
 		offset time.Duration
 		want   string
 	}{
-		{"UC-040/A33 refused just before the end of the cooldown", 22*time.Second - time.Millisecond, "grant_shield/WEAK:shield_cooldown"},
-		{"UC-040/A33 admitted at the end of the cooldown", 22 * time.Second, "grant_shield/WEAK:dispatched"},
+		{"UC-048/A6 refused just before the end of the cooldown", 22*time.Second - time.Millisecond, "grant_shield/WEAK:shield_cooldown"},
+		{"UC-048/A6 admitted at the end of the cooldown", 22 * time.Second, "grant_shield/WEAK:dispatched"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			l, _, clock, _ := limitLoop(t, 100, 0, 15, budgetShield("WEAK"))
@@ -155,7 +155,7 @@ func TestShieldLimits_CooldownBoundary(t *testing.T) {
 			}
 		})
 	}
-	t.Run("UC-040/A33 the end uses the granted seconds", func(t *testing.T) {
+	t.Run("UC-048/A6 the end uses the granted seconds", func(t *testing.T) {
 		long := budgetShield("WEAK")
 		long.Value = "10"
 		l, _, clock, _ := limitLoop(t, 100, 0, 15, long)
@@ -166,7 +166,7 @@ func TestShieldLimits_CooldownBoundary(t *testing.T) {
 			t.Fatalf("outcomes = %v, want shield_cooldown until 10 s + 2 s + 15 s", got)
 		}
 	})
-	t.Run("UC-040/A33 another player is not paced", func(t *testing.T) {
+	t.Run("UC-048/A6 another player is not paced", func(t *testing.T) {
 		l, _, clock, _ := limitLoop(t, 100, 0, 15, budgetShield("WEAK"))
 		_ = runCycle(l, budgetCtx())
 		l.Rules = fakeRules{out: []Decision{budgetShield("S")}}
@@ -177,14 +177,15 @@ func TestShieldLimits_CooldownBoundary(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A33 A11 A27 BR-022
+// UC: UC-040 A11 A27
+// UC: UC-048 A6 BR-007
 func TestShieldLimits_ReleasedWhenNotWritten(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		sink ActionSink
 	}{
-		{"UC-040/A33 UC-040/A11 a gated-off write does not count", &gatedSink{gateOn: false}},
-		{"UC-040/A33 UC-040/A27 a failed write does not count", errSink{}},
+		{"UC-048/A6 UC-040/A11 a gated-off write does not count", &gatedSink{gateOn: false}},
+		{"UC-048/A6 UC-040/A27 a failed write does not count", errSink{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			l, _, clock, _ := limitLoop(t, 100, 1, 15, budgetShield("WEAK"))
@@ -197,7 +198,7 @@ func TestShieldLimits_ReleasedWhenNotWritten(t *testing.T) {
 			}
 		})
 	}
-	t.Run("UC-040/A33 a rate-limit block after the reservation does not count", func(t *testing.T) {
+	t.Run("UC-048/A6 a rate-limit block after the reservation does not count", func(t *testing.T) {
 		l, _, clock, _ := limitLoop(t, 2, 1, 15, budgetShield("WEAK"))
 		l.limiter.allow(clock.Add(-rateWindow+500*time.Millisecond), 2, 2) // full now, frees in 0.5 s
 		if got := outcomeSummary(runCycle(l, budgetCtx())); !equalStrings(got, []string{"grant_shield/WEAK:rate_limit"}) {
@@ -210,9 +211,9 @@ func TestShieldLimits_ReleasedWhenNotWritten(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A31 A33 BR-020 BR-022
+// UC: UC-048 A4 A6 BR-005 BR-007
 func TestShieldLimits_RefusalLeaksNoCharge(t *testing.T) {
-	t.Run("UC-040/A33 a cap refusal in trigger mode leaves ChargedSerials empty", func(t *testing.T) {
+	t.Run("UC-048/A6 a cap refusal in trigger mode leaves ChargedSerials empty", func(t *testing.T) {
 		l, _, clock, _ := limitLoop(t, 100, 1, 0, budgetShield("WEAK"))
 		l.SetShieldChargeMode(triggerMode(20*time.Second, nil))
 		start := *clock
@@ -229,7 +230,7 @@ func TestShieldLimits_RefusalLeaksNoCharge(t *testing.T) {
 			t.Fatal("the decide state must not mark WEAK shield_charged after a cap refusal")
 		}
 	})
-	t.Run("UC-040/A31 a rate-limit block in trigger mode leaves ChargedSerials empty", func(t *testing.T) {
+	t.Run("UC-048/A4 a rate-limit block in trigger mode leaves ChargedSerials empty", func(t *testing.T) {
 		l, _, clock, _ := limitLoop(t, 2, 3, 15, budgetShield("WEAK"))
 		l.SetShieldChargeMode(triggerMode(20*time.Second, nil))
 		l.limiter.allow(clock.Add(-rateWindow+30*time.Second), 2, 2)
@@ -261,9 +262,9 @@ func (s *blockingSink) Apply(ctx context.Context, d Decision) error {
 	return s.capturingSink.Apply(ctx, d)
 }
 
-// UC: UC-040 A33 BR-022
+// UC: UC-048 A6 BR-007
 func TestShieldLimits_PendingBlocksCooldown(t *testing.T) {
-	t.Run("UC-040/A33 a grant still being written refuses a second grant shield_cooldown", func(t *testing.T) {
+	t.Run("UC-048/A6 a grant still being written refuses a second grant shield_cooldown", func(t *testing.T) {
 		l, _, clock, _ := limitLoop(t, 100, 3, 15)
 		sink := &blockingSink{entered: make(chan struct{}), release: make(chan struct{})}
 		l.Actions = sink
@@ -287,7 +288,7 @@ func TestShieldLimits_PendingBlocksCooldown(t *testing.T) {
 			t.Fatalf("writes = %d, want 1", n)
 		}
 	})
-	t.Run("UC-040/A33 with the cooldown off a pending grant still counts against the cap", func(t *testing.T) {
+	t.Run("UC-048/A6 with the cooldown off a pending grant still counts against the cap", func(t *testing.T) {
 		var cl chargeLedger
 		now := time.Unix(1_000, 0)
 		req := shieldRequest{limits: shieldLimits{maxShields: 1}, seconds: 5 * time.Second}
@@ -300,9 +301,9 @@ func TestShieldLimits_PendingBlocksCooldown(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A33 BR-022
+// UC: UC-048 A6 BR-007
 func TestShieldLimits_LastEndKeepsLater(t *testing.T) {
-	t.Run("UC-040/A33 a shorter grant committed later does not move the cooldown start back", func(t *testing.T) {
+	t.Run("UC-048/A6 a shorter grant committed later does not move the cooldown start back", func(t *testing.T) {
 		var cl chargeLedger
 		t0 := time.Unix(1_000, 0)
 		off := shieldLimits{}
@@ -326,9 +327,9 @@ func TestShieldLimits_LastEndKeepsLater(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A33 BR-022
+// UC: UC-048 A6 BR-007
 func TestShieldLimits_Concurrent(t *testing.T) {
-	t.Run("UC-040/A33 concurrent grants to one player never exceed the cap", func(t *testing.T) {
+	t.Run("UC-048/A6 concurrent grants to one player never exceed the cap", func(t *testing.T) {
 		l, sink, clock, _ := limitLoop(t, 1000, 3, 0)
 		snap := l.Flags.Evaluate(context.Background())
 		c := budgetCtx()
@@ -351,9 +352,10 @@ func TestShieldLimits_Concurrent(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A33 A21 BR-022
+// UC: UC-040 A21
+// UC: UC-048 A6 BR-007
 func TestShieldLimits_RepeatRefusalQuiet(t *testing.T) {
-	t.Run("UC-040/A33 only the first cap refusal is emitted; repeats only count", func(t *testing.T) {
+	t.Run("UC-048/A6 only the first cap refusal is emitted; repeats only count", func(t *testing.T) {
 		l, _, clock, decisionSpans := limitLoop(t, 100, 1, 0, budgetShield("WEAK"))
 		reader := metric.NewManualReader()
 		l.decisions = newDecisionsCounter(metric.NewMeterProvider(metric.WithReader(reader)))
@@ -381,7 +383,7 @@ func TestShieldLimits_RepeatRefusalQuiet(t *testing.T) {
 			t.Errorf("agent_decisions_total{grant_shield,true,shield_cap_reached} = %d, want %d", got, refusals)
 		}
 	})
-	t.Run("UC-040/A33 each new cooldown reports its first refusal", func(t *testing.T) {
+	t.Run("UC-048/A6 each new cooldown reports its first refusal", func(t *testing.T) {
 		l, _, clock, decisionSpans := limitLoop(t, 100, 0, 15, budgetShield("WEAK"))
 		for grant := 0; grant < 2; grant++ {
 			_ = runCycle(l, budgetCtx())
@@ -397,9 +399,9 @@ func TestShieldLimits_RepeatRefusalQuiet(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A33 BR-022
+// UC: UC-048 A6 BR-007
 func TestShieldLimits_NewGameAndInert(t *testing.T) {
-	t.Run("UC-040/A33 BR-022 a new game starts with no shields counted", func(t *testing.T) {
+	t.Run("UC-048/A6 BR-007 a new game starts with no shields counted", func(t *testing.T) {
 		snap := rulesSnapshot()
 		snap.Policy.MaxShieldsPerPlayerPerGame = 1
 		sinks := map[string]*capturingSink{}
@@ -421,7 +423,7 @@ func TestShieldLimits_NewGameAndInert(t *testing.T) {
 			t.Fatalf("game 2 outcomes = %v, want dispatched (a new game counts from 0)", got)
 		}
 	})
-	t.Run("UC-040/A33 0/0 refuses nothing and the views stay empty", func(t *testing.T) {
+	t.Run("UC-048/A6 0/0 refuses nothing and the views stay empty", func(t *testing.T) {
 		l, sink, clock, _ := limitLoop(t, 1000, 0, 0, budgetShield("WEAK"))
 		for i := 0; i < 10; i++ {
 			if got := outcomeSummary(runCycle(l, budgetCtx())); !equalStrings(got, []string{"grant_shield/WEAK:dispatched"}) {
@@ -436,7 +438,7 @@ func TestShieldLimits_NewGameAndInert(t *testing.T) {
 			t.Fatalf("views = %v / %v, want nil / nil", charged, noShield)
 		}
 	})
-	t.Run("UC-040/A33 a capped player is marked shield_limited, not shield_charged (#2066)", func(t *testing.T) {
+	t.Run("UC-048/A6 a capped player is marked shield_limited, not shield_charged (#2066)", func(t *testing.T) {
 		l, _, _, _ := limitLoop(t, 100, 1, 0, budgetShield("WEAK"))
 		_ = runCycle(l, budgetCtx())
 		got := l.buildDecideRequest(budgetCtx(), allInterventions(), false).State
@@ -445,7 +447,7 @@ func TestShieldLimits_NewGameAndInert(t *testing.T) {
 			t.Fatalf("decide state digest for a capped player: %q, want the shield_limited-only %q", got.Digest, want.Digest)
 		}
 	})
-	t.Run("UC-040/A33 shield seconds fall back to the default", func(t *testing.T) {
+	t.Run("UC-048/A6 shield seconds fall back to the default", func(t *testing.T) {
 		for _, v := range []string{"", "abc", "-1", "NaN"} {
 			if got := shieldSeconds(Decision{Value: v}); got != DefaultShieldSeconds*time.Second {
 				t.Errorf("shieldSeconds(%q) = %v, want %v", v, got, DefaultShieldSeconds*time.Second)

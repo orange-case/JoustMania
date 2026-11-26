@@ -7,7 +7,8 @@
 # the binding stops the run, eligible kinds is shadow_only, and every exit clears the arm values.
 # Fake flag service + stubbed docker, no stack.
 #
-# UC: UC-040 A47 BR-033 BR-036
+# UC: UC-040 BR-036
+# UC: UC-048 A13 BR-014
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 

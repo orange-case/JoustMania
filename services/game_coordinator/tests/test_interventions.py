@@ -199,7 +199,7 @@ def test_rate_limiter_window_slide():
     assert rl.check(WEIGHT_HARD)
 
 
-@pytest.mark.uc("UC-040", flow="A31")
+@pytest.mark.uc("UC-048", flow="A4")
 def test_rate_limiter_refund_frees_its_own_reservation_not_the_newest_equal_cost_one():
     """#1868: refunding the older of two equal-cost reservations leaves the newer one in the window."""
     clock = Clock()
@@ -215,7 +215,7 @@ def test_rate_limiter_refund_frees_its_own_reservation_not_the_newest_equal_cost
     assert rl.current_weight() == pytest.approx(WEIGHT_MEDIUM)
 
 
-@pytest.mark.uc("UC-040", flow="A31")
+@pytest.mark.uc("UC-048", flow="A4")
 def test_rate_limiter_refund_is_idempotent_and_ignores_unknown_tokens():
     rl = _RateLimiter(budget=5.0, time_fn=Clock())
     token = rl.reserve(WEIGHT_MEDIUM)

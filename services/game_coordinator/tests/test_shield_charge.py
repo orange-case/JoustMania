@@ -1,8 +1,8 @@
 """
 Player-activated shield charge in the game coordinator (#1837 PR-3, FR-160).
 
-UC-040 A30 (charge granted), A31 (grant while charged), A32 (charge ends unused),
-BR-019 (activation mode, FFA allow-list), BR-020 (one charge), BR-021 (feedback);
+UC-048 A3 (charge granted), UC-048 A4 (grant while charged), UC-048 A5 (charge ends unused),
+UC-048 BR-004 (activation mode, FFA allow-list), UC-048 BR-005 (one charge), UC-048 BR-006 (feedback);
 UC-030 A6 (the player activates the charge), BR-005 (trigger press).
 
 Every test runs on a fake clock (``base.time.time``) with the two flags patched.
@@ -47,7 +47,7 @@ T0 = 1000.0
 
 @pytest.fixture(autouse=True)
 def _no_shield_limits():
-    """Shield limits off (#2044, UC-040 BR-022): these tests are not about the cap or the cooldown."""
+    """Shield limits off (#2044, UC-048 BR-007): these tests are not about the cap or the cooldown."""
     with patch.object(BaseGameMode, "_shield_limits", return_value=(0, 0)):
         yield
 
@@ -62,7 +62,7 @@ class RecordingStream:
     def effects(self):
         """(serial, effect, duration_ms) per game effect, without the help cue PULSE.
 
-        The cue (UC-040 A42, BR-031) is pinned in test_shield_help_cue.py.
+        The cue (UC-048 A12, BR-013) is pinned in test_shield_help_cue.py.
         """
         return [
             (m.game_effect.serial, m.game_effect.effect, m.game_effect.duration_ms)
@@ -162,13 +162,13 @@ def effects_of(game, *kinds):
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A30: the grant becomes a charge
+# UC-048 A3: the grant becomes a charge
 # --------------------------------------------------------------------------- #
 class TestUC040A30ChargeGranted:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-019", "BR-021"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-004", "BR-006"])
     async def test_trigger_grant_stores_a_charge_without_protection(self, game, events):
-        """A30: grace_until unchanged, SHIELD_CHARGE for the expiry, player_shield_charged, no shield yet."""
+        """UC-048 A3: grace_until unchanged, SHIELD_CHARGE for the expiry, player_shield_charged, no shield yet."""
         assert await game.grant_shield("p1", 5.0) is True
 
         player = game.players["p1"]
@@ -182,9 +182,9 @@ class TestUC040A30ChargeGranted:
         game._play_sound.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-006"])
     async def test_never_expiring_charge_is_capped_at_120_s_and_reports_zero(self, game, flags, events):
-        """A30 / BR-021: expiry 0 = never: the layer is capped at 120 s and expires_ms is "0"."""
+        """UC-048 A3 / UC-048 BR-006: expiry 0 = never: the layer is capped at 120 s and expires_ms is "0"."""
         flags.values["shield.charge_expiry_seconds"] = 0
         await game.grant_shield("p1", 5.0)
 
@@ -193,9 +193,9 @@ class TestUC040A30ChargeGranted:
         assert game.players["p1"].shield_charge_expires_at == 0.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30")
+    @pytest.mark.uc("UC-048", flow="A3")
     async def test_span_event_and_charge_span(self, game, clock):
-        """A30 step 3: shield_charge_granted on the player span; game.shield_charge ends at activation."""
+        """UC-048 A3 step 3: shield_charge_granted on the player span; game.shield_charge ends at activation."""
         player_span = create_autospec(Span, instance=True)
         player_span.get_span_context.return_value = INVALID_SPAN_CONTEXT
         game.players["p1"].span = player_span
@@ -227,13 +227,13 @@ class TestUC040A30ChargeGranted:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A31 / BR-020: one charge per player
+# UC-048 A4 / BR-005: one charge per player
 # --------------------------------------------------------------------------- #
 class TestUC040A31AlreadyCharged:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A31", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A4", br=["BR-005"])
     async def test_second_grant_applies_nothing(self, game, events):
-        """A31 step 2: a grant while charged raises already_charged and sends nothing."""
+        """UC-048 A4 step 2: a grant while charged raises already_charged and sends nothing."""
         await game.grant_shield("p1", 5.0)
         game.gameplay_stream.writes.clear()
 
@@ -246,9 +246,9 @@ class TestUC040A31AlreadyCharged:
         assert len(events.get_events_of_type(GameEvent.PLAYER_SHIELD_CHARGED)) == 1
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A31", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A4", br=["BR-005"])
     async def test_handler_raises_for_the_targeted_serial(self, game):
-        """A31: handle_shield_seconds lets already_charged reach the manager."""
+        """UC-048 A4: handle_shield_seconds lets already_charged reach the manager."""
         from services.game_coordinator.interventions import INTERVENTION_SPECS, InterventionContext
         from services.game_coordinator.lifecycle_handlers import handle_shield_seconds
 
@@ -262,9 +262,9 @@ class TestUC040A31AlreadyCharged:
                 await handle_shield_seconds(ctx, manager)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A31", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A4", br=["BR-005"])
     async def test_fan_out_counts_a_refused_grant_as_not_applied(self, game):
-        """A31: a dead serial (grant False) next to an already charged one still raises."""
+        """UC-048 A4: a dead serial (grant False) next to an already charged one still raises."""
         from services.game_coordinator.interventions import INTERVENTION_SPECS, InterventionContext
         from services.game_coordinator.lifecycle_handlers import handle_shield_seconds
 
@@ -282,10 +282,10 @@ class TestUC040A31AlreadyCharged:
             await handle_shield_seconds(ctx, MagicMock())
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A31", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A4", br=["BR-005"])
     @pytest.mark.uc("UC-040", flow="A22")
     async def test_manager_records_already_charged_and_refunds_the_backstop(self):
-        """A31 step 2 / A22: blocked=true, block_reason=already_charged, the reservation is refunded."""
+        """UC-048 A4 step 2 / A22: blocked=true, block_reason=already_charged, the reservation is refunded."""
         from services.game_coordinator.tests.event_list_helpers import edge_event
         from services.game_coordinator.tests.test_interventions import make_manager
 
@@ -304,9 +304,9 @@ class TestUC040A31AlreadyCharged:
         assert mgr._rate_limiter.current_weight() == 0.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-005"])
     async def test_grant_while_a_shield_is_active_waits_under_it(self, game, clock):
-        """BR-020: a grant during an active shield is accepted; presses are ignored until it ends."""
+        """UC-048 BR-005: a grant during an active shield is accepted; presses are ignored until it ends."""
         game.players["p1"].grace_until = T0 + 3.0
         assert await game.grant_shield("p1", 5.0) is True
         await arm(game)
@@ -325,7 +325,7 @@ class TestUC040A31AlreadyCharged:
 class TestUC030A6Activation:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A6", br=["BR-005"])
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-006"])
     async def test_press_activates_the_shield_with_swell_sound_and_events(self, game, clock, events):
         """A6 steps 1-2: grace_until = now + s; CHARGE 0, SHIELD s, SWELL; shield_up; ended + shielded."""
         await game.grant_shield("p1", 5.0)
@@ -432,13 +432,13 @@ class TestUC030A6Activation:
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 A32: the charge ends unused
+# UC-048 A5: the charge ends unused
 # --------------------------------------------------------------------------- #
 class TestUC040A32ChargeEnds:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-005"])
     async def test_expiry_drops_the_charge_on_the_first_frame_after_it(self, game, clock, events):
-        """A32: expired -> SHIELD_CHARGE 0 and player_shield_charge_ended; a later press does nothing."""
+        """UC-048 A5: expired -> SHIELD_CHARGE 0 and player_shield_charge_ended; a later press does nothing."""
         await game.grant_shield("p1", 5.0)
         await arm(game)
         clock.t += 19.9
@@ -458,9 +458,9 @@ class TestUC040A32ChargeEnds:
         assert effects_of(game, SWELL) == []
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-006"])
     async def test_never_expiring_charge_is_resent_before_the_cap(self, game, clock, flags):
-        """BR-021: the 120 s layer is re-sent before it runs out, while the charge is held."""
+        """UC-048 BR-006: the 120 s layer is re-sent before it runs out, while the charge is held."""
         flags.values["shield.charge_expiry_seconds"] = 0
         await game.grant_shield("p1", 5.0)
         await arm(game)
@@ -479,9 +479,9 @@ class TestUC040A32ChargeEnds:
         assert game.players["p1"].shield_charge_seconds == 5.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-005"])
     async def test_expiring_charge_is_not_resent(self, game, clock):
-        """BR-021: a layer that already covers the expiry is never re-sent."""
+        """UC-048 BR-006: a layer that already covers the expiry is never re-sent."""
         await game.grant_shield("p1", 5.0)
         await arm(game)
         game.gameplay_stream.writes.clear()
@@ -490,9 +490,9 @@ class TestUC040A32ChargeEnds:
         assert game.gameplay_stream.effects() == []
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-005"])
     async def test_death_drops_the_charge_before_the_death_effect(self, game, events):
-        """A32: death -> charge ended (death), SHIELD_CHARGE 0 ahead of the death effect."""
+        """UC-048 A5: death -> charge ended (death), SHIELD_CHARGE 0 ahead of the death effect."""
         await game.grant_shield("p1", 5.0)
         await arm(game)
         await feed(game, "p1", False, accel=(30.0, 30.0, 30.0))
@@ -504,19 +504,19 @@ class TestUC040A32ChargeEnds:
         assert kinds[:2] == [CHARGE, CHARGE] and (DEATH not in kinds or kinds.index(DEATH) > 1)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-005"])
     @pytest.mark.uc("UC-020", flow="A2")
     async def test_disconnect_drops_the_charge_as_death(self, game, events):
-        """A32: a disconnect is a death in every mode."""
+        """UC-048 A5: a disconnect is a death in every mode."""
         await game.grant_shield("p1", 5.0)
         await game._handle_disconnect("p1")
         assert events.get_events_of_type(GameEvent.PLAYER_SHIELD_CHARGE_ENDED) == [{"serial": "p1", "reason": "death"}]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32")
-    @pytest.mark.uc("UC-040", flow="A17")
+    @pytest.mark.uc("UC-048", flow="A5")
+    @pytest.mark.uc("UC-048", flow="A2")
     async def test_game_end_drops_the_charge(self, game, events):
-        """A32: game end -> SHIELD_CHARGE 0 and charge ended (game_end), the record is clear."""
+        """UC-048 A5: game end -> SHIELD_CHARGE 0 and charge ended (game_end), the record is clear."""
         await game.grant_shield("p1", 5.0)
         game.gameplay_stream.writes.clear()
 
@@ -529,9 +529,9 @@ class TestUC040A32ChargeEnds:
         assert game.players["p1"].shield_charge_seconds == 0.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A32")
+    @pytest.mark.uc("UC-048", flow="A5")
     async def test_error_teardown_ends_the_open_charge_span(self, game):
-        """A32: an error teardown skips _end_shield_feedback; run()'s finally still ends the span."""
+        """UC-048 A5: an error teardown skips _end_shield_feedback; run()'s finally still ends the span."""
         charge_span = create_autospec(Span, instance=True)
         game.players["p1"].span = create_autospec(Span, instance=True)
         game.players["p1"].span.get_span_context.return_value = INVALID_SPAN_CONTEXT
@@ -546,11 +546,11 @@ class TestUC040A32ChargeEnds:
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A32")
-@pytest.mark.uc("UC-040", flow="A17")
+@pytest.mark.uc("UC-048", flow="A5")
+@pytest.mark.uc("UC-048", flow="A2")
 @pytest.mark.usefixtures("flags")
 async def test_real_run_drops_a_held_charge_before_the_winner_effects():
-    """A32 (real run()): a held charge ends with game_end before _end_game_impl."""
+    """UC-048 A5 (real run()): a held charge ends with game_end before _end_game_impl."""
     events = EventCollector()
     game = FFAGame(
         controller_manager_client=MockControllerManagerService(num_controllers=3, infinite=True),
@@ -581,10 +581,10 @@ async def test_real_run_drops_a_held_charge_before_the_winner_effects():
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A32")
+@pytest.mark.uc("UC-048", flow="A5")
 @pytest.mark.usefixtures("flags")
 async def test_error_teardown_ends_the_charge_span_even_when_cleanup_raises():
-    """A32 (real run()): run()'s finally ends the open charge span before cleanup, which may raise."""
+    """UC-048 A5 (real run()): run()'s finally ends the open charge span before cleanup, which may raise."""
     game = FFAGame(
         controller_manager_client=MockControllerManagerService(num_controllers=3, infinite=True),
         event_publisher=EventCollector().publish,
@@ -613,11 +613,11 @@ async def test_error_teardown_ends_the_charge_span_even_when_cleanup_raises():
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A32")
-@pytest.mark.uc("UC-040", flow="A42", br=["BR-031"])
+@pytest.mark.uc("UC-048", flow="A5")
+@pytest.mark.uc("UC-048", flow="A12", br=["BR-013"])
 @pytest.mark.usefixtures("flags")
 async def test_a_grant_arriving_during_cleanup_leaves_no_charge_span_open():
-    """A32 (#1868 nit), A42 step 3 (#2395): a grant that lands while cleanup() awaits is refused
+    """UC-048 A5 (#1868 nit), UC-048 A12 step 3 (#2395): a grant that lands while cleanup() awaits is refused
     ``game_ending``, so no charge is stored and no charge span is left open."""
     game = FFAGame(
         controller_manager_client=MockControllerManagerService(num_controllers=3, infinite=True),
@@ -655,10 +655,10 @@ async def test_a_grant_arriving_during_cleanup_leaves_no_charge_span_open():
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A32")
+@pytest.mark.uc("UC-048", flow="A5")
 @pytest.mark.usefixtures("flags")
 async def test_a_grant_during_cleanup_of_a_cancelled_run_closes_its_charge_span():
-    """A32 (#1868 nit): a cancelled run keeps its state RUNNING and sets no outcome latch, so a
+    """UC-048 A5 (#1868 nit): a cancelled run keeps its state RUNNING and sets no outcome latch, so a
     grant that lands while cleanup() awaits is applied; the second close ends its charge span."""
     game = FFAGame(
         controller_manager_client=MockControllerManagerService(num_controllers=3, infinite=True),
@@ -692,19 +692,19 @@ async def test_a_grant_during_cleanup_of_a_cancelled_run_closes_its_charge_span(
 
 
 # --------------------------------------------------------------------------- #
-# UC-040 BR-019: activation mode
+# UC-048 BR-004: activation mode
 # --------------------------------------------------------------------------- #
 class TestUC040BR019ActivationMode:
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-004"])
     @pytest.mark.parametrize("mode", sorted(_GAME_CLASSES, key=lambda m: m.name), ids=lambda m: m.name)
     def test_trigger_mode_is_an_ffa_only_allow_list(self, mode):
-        """BR-019: only Free-for-All may turn a grant into a charge; every other mode is instant."""
+        """UC-048 BR-004: only Free-for-All may turn a grant into a charge; every other mode is instant."""
         assert _GAME_CLASSES[mode].SHIELD_TRIGGER_ALLOWED is (_GAME_CLASSES[mode] is FFAGame)
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-004"])
     async def test_other_mode_with_trigger_flag_gets_the_instant_shield(self, clock, flags):
-        """BR-019: a non-FFA mode ignores shield.activation=trigger."""
+        """UC-048 BR-004: a non-FFA mode ignores shield.activation=trigger."""
         game = NonstopJoustGame(
             controller_manager_client=MockControllerManagerService(num_controllers=2),
             event_publisher=AsyncMock(),
@@ -718,34 +718,34 @@ class TestUC040BR019ActivationMode:
             await game.grant_shield("p1", 5.0)
         assert game.players["p1"].grace_until == T0 + 5.0
         assert [e[1] for e in game.gameplay_stream.effects()] == [SHIELD]
-        # Only the shield end grace, latched in every mode (UC-040 BR-035); never shield.activation.
+        # Only the shield end grace, latched in every mode (UC-048 BR-015); never shield.activation.
         assert flags.keys[-flags.reads :] == ["shield.end_grace_seconds"]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-004"])
     async def test_shadow_game_is_instant(self, game, flags):
-        """BR-019: a shadow game is always instant: no charge, no swell."""
+        """UC-048 BR-004: a shadow game is always instant: no charge, no swell."""
         game.game_kind = "shadow"
         flags.reads = 0
         await game.grant_shield("p1", 5.0)
         assert game.players["p1"].grace_until == T0 + 5.0
         assert effects_of(game, CHARGE, SWELL) == []
-        # Only the shield end grace, latched in every mode (UC-040 BR-035); never shield.activation.
+        # Only the shield end grace, latched in every mode (UC-048 BR-015); never shield.activation.
         assert flags.keys[-flags.reads :] == ["shield.end_grace_seconds"]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-004"])
     async def test_instant_flag_keeps_todays_shield(self, game, flags):
-        """BR-019: shield.activation=instant (the shipped default) is today's shield."""
+        """UC-048 BR-004: shield.activation=instant (the shipped default) is today's shield."""
         flags.values["shield.activation"] = "instant"
         await game.grant_shield("p1", 5.0)
         assert game.players["p1"].grace_until == T0 + 5.0
         assert [e[1] for e in game.gameplay_stream.effects()] == [SHIELD]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-019", "BR-020"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-004", "BR-005"])
     async def test_flip_to_instant_keeps_a_held_charge_activatable(self, game, flags):
-        """BR-019: after a flip to instant a held charge still activates, and an instant grant leaves it alone."""
+        """UC-048 BR-004: after a flip to instant a held charge still activates, and an instant grant leaves it alone."""
         await game.grant_shield("p1", 5.0)
         flags.values["shield.activation"] = "instant"
 
@@ -771,9 +771,9 @@ class TestUC040BR019ActivationMode:
             (1, "instant"),
         ],
     )
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-004"])
     def test_activation_value_is_validated(self, value, expected):
-        """BR-019: a malformed shield.activation gives instant."""
+        """UC-048 BR-004: a malformed shield.activation gives instant."""
         assert resolve_shield_activation(value) == expected
 
     @pytest.mark.parametrize(
@@ -791,7 +791,7 @@ class TestUC040BR019ActivationMode:
             (None, 20.0),
         ],
     )
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-020"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-005"])
     def test_expiry_value_is_validated_and_clamped(self, value, expected):
         """flags.md §4: non-number, NaN or negative gives 20; clamped to 0..120."""
         assert resolve_charge_expiry(value) == expected
@@ -828,9 +828,9 @@ class TestShieldChargeHotPathAndReconnect:
         assert flags.reads == reads_after_grant
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-006"])
     async def test_every_reconnect_resends_charges_and_running_shields(self, game, clock):
-        """BR-021: each _create_gameplay_stream re-sends SHIELD_CHARGE and SHIELD with the time left."""
+        """UC-048 BR-006: each _create_gameplay_stream re-sends SHIELD_CHARGE and SHIELD with the time left."""
         await game.grant_shield("p1", 5.0)  # charge, expires at T0 + 20
         game.players["p2"].grace_until = T0 + 8.0
         game._shield_feedback_until["p2"] = T0 + 8.0
@@ -852,9 +852,9 @@ class TestShieldChargeHotPathAndReconnect:
         assert streams[1].effects() == [("p1", CHARGE, 16_000), ("p2", SHIELD, 4000)]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-006"])
     async def test_first_stream_sends_no_shield_layers(self, game):
-        """BR-021: nothing held at game start, so the first stream gets no shield commands."""
+        """UC-048 BR-006: nothing held at game start, so the first stream gets no shield commands."""
         stream = RecordingStream()
         game.controller_client = MagicMock()
         game.controller_client.StreamGameplayData.return_value = stream
@@ -863,7 +863,7 @@ class TestShieldChargeHotPathAndReconnect:
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-030", flow="A6", br=["BR-005"])
-    @pytest.mark.uc("UC-040", flow="A32", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A5", br=["BR-006"])
     async def test_frame_path_awaits_only_when_charge_work_is_due(self, game, clock, flags):
         """BR-005: a held charge costs compares per frame; the coroutine runs only on expiry, re-send or a press."""
         flags.values["shield.charge_expiry_seconds"] = 0  # never: layer 120 s, re-send at 110 s
@@ -894,9 +894,9 @@ class TestShieldChargeHotPathAndReconnect:
             assert game.players["p1"].shield_charge_seconds == 0.0
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-006"])
     async def test_reconnect_resends_a_running_toughness_boost(self, game, clock):
-        """BR-021: a reconnect re-sends TOUGHNESS_BOOST with the time left, next to SHIELD."""
+        """UC-048 BR-006: a reconnect re-sends TOUGHNESS_BOOST with the time left, next to SHIELD."""
         game.players["p2"].grace_until = T0 + 8.0
         game.players["p2"].toughness_boost_until = T0 + 6.0
         game._shield_feedback_until["p2"] = T0 + 8.0

@@ -92,7 +92,7 @@ def _hold(**kwargs):
 
 
 async def _hold_past_empty_then_death(manager, winner_holds):
-    """The coordinator's commands up to the win (UC-040 A39): the loser holds past empty and dies."""
+    """The coordinator's commands up to the win (UC-048 A11): the loser holds past empty and dies."""
     await _effect(manager, LOSER, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _hold(energy=600))
     await _effect(manager, WINNER, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _hold(energy=2000))
     await _run(0.2)
@@ -122,7 +122,7 @@ def _rainbow_frames(frames):
 class TestUC020WinnerRainbowAfterHoldDeath:
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-020", steps=[6], br=["BR-004"])
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     @pytest.mark.parametrize("winner_holds", [False, True])
     @pytest.mark.parametrize("overlay", [pb.GAME_EFFECT_PULSE, pb.GAME_EFFECT_FLASH, pb.GAME_EFFECT_SHOW_BATTERY])
     async def test_an_agent_overlay_during_the_rainbow_does_not_cut_it(self, manager, backend, winner_holds, overlay):

@@ -1,7 +1,7 @@
 """
 Shadow games and the simulated trigger policy (#2096 PR-7a).
 
-UC-040 BR-019: a shadow game honours ``shield.activation`` trigger and hold only
+UC-048 BR-004: a shadow game honours ``shield.activation`` trigger and hold only
 when its pattern controllers press the trigger (``pattern_trigger_policy``,
 UC-046 BR-018); otherwise it stays instant. UC-035 BR-008: a shadow hold game
 publishes no ``player_shield_energy`` event (the agent's gauges are still set).
@@ -120,10 +120,10 @@ async def _step(game, clock, serial, trigger):
 
 class TestUC040BR019ShadowPolicy:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-004"])
     @pytest.mark.parametrize("activation", ["trigger", "hold"])
     async def test_shadow_game_without_policy_stays_instant(self, clock, events, activation):
-        """BR-019: no pattern_trigger_policy -> instant whatever the flag; the flag is not even read."""
+        """UC-048 BR-004: no pattern_trigger_policy -> instant whatever the flag; the flag is not even read."""
         flags = Flags(activation)
         with patched(flags):
             g = _game(events, policy=False)
@@ -136,9 +136,9 @@ class TestUC040BR019ShadowPolicy:
         assert "shield.activation" not in flags.reads
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-004"])
     async def test_shadow_game_with_policy_honours_trigger(self, clock, events):
-        """BR-019: with pattern_trigger_policy a trigger read makes the grant a charge."""
+        """UC-048 BR-004: with pattern_trigger_policy a trigger read makes the grant a charge."""
         flags = Flags("trigger")
         with patched(flags):
             g = _game(events, policy=True)
@@ -149,9 +149,9 @@ class TestUC040BR019ShadowPolicy:
         assert g.players["p1"].shield_charge_seconds == 4.0
         assert g.players["p1"].grace_until < clock.t
 
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-019", "BR-027"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-004", "BR-011"])
     def test_shadow_game_with_policy_honours_hold(self, clock, events):  # noqa: ARG002 - clock patches time
-        """BR-019 / BR-027: with pattern_trigger_policy a hold read latches the game to hold."""
+        """UC-048 BR-004, BR-011: with pattern_trigger_policy a hold read latches the game to hold."""
         flags = Flags("hold")
         with patched(flags):
             g = _game(events, policy=True)
@@ -159,9 +159,9 @@ class TestUC040BR019ShadowPolicy:
         assert hold is not None
         assert g._shield_activation_mode() == "hold"
 
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-019"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-004"])
     def test_policy_attribute_changes_nothing_in_another_mode(self, clock, events):  # noqa: ARG002
-        """BR-019: the allow-list still applies; only Free-for-All honours trigger or hold."""
+        """UC-048 BR-004: the allow-list still applies; only Free-for-All honours trigger or hold."""
         flags = Flags("hold")
         with patched(flags):
             g = _game(events, policy=True)

@@ -7,8 +7,8 @@ import (
 )
 
 // rules_fresh_targets_uc040_test.go covers #2517: R6 and R9 pick their target only
-// among the alive players with fresh readings (UC-040 A46 step 5, A49 step 4,
-// BR-037). A Fight Club or Tournament player who just went back to waiting is
+// among the alive players with fresh readings (decide-contract.md §15.4, UC-040 A49 step 4,
+// decide-contract §15.4). A Fight Club or Tournament player who just went back to waiting is
 // still alive in the context until it is evicted (about 5 s), but its readings
 // stopped with its gauges, so neither rule may pick it.
 
@@ -24,7 +24,7 @@ func waitingCtx(duration float64, fresh map[string]testPlayer) (c gamecontext.Ga
 	return c
 }
 
-// UC: UC-040 A46 A49 BR-037
+// UC: UC-040 A1 A49
 func TestFreshTargets_R6(t *testing.T) {
 	accelDominant := map[string]float64{ObjectiveAccelerate: 1}
 	r6 := func(cands []candidate) *candidate {
@@ -35,7 +35,7 @@ func TestFreshTargets_R6(t *testing.T) {
 		}
 		return nil
 	}
-	t.Run("UC-040/A46 R6 never eliminates a waiting player with stopped readings", func(t *testing.T) {
+	t.Run("UC-040/A1 R6 never eliminates a waiting player with stopped readings", func(t *testing.T) {
 		c := waitingCtx(100, map[string]testPlayer{
 			"A": {intensity: fptr(0.2), active: true},
 			"B": {intensity: fptr(0.9), active: true},
@@ -60,10 +60,10 @@ func TestFreshTargets_R6(t *testing.T) {
 	})
 }
 
-// UC: UC-040 A46 A49 BR-037
+// UC: UC-040 A1 A49
 // UC: UC-046 BR-007
 func TestFreshTargets_R9(t *testing.T) {
-	t.Run("UC-040/A46 R9 never draws a waiting player with stopped readings", func(t *testing.T) {
+	t.Run("UC-040/A1 R9 never draws a waiting player with stopped readings", func(t *testing.T) {
 		c := waitingCtx(5, map[string]testPlayer{"A": {active: true}, "B": {active: true}})
 		cfg := DefaultStaticConfig()
 		r := NewObjectiveRules(&cfg)
@@ -113,7 +113,7 @@ func TestFreshTargets_R9(t *testing.T) {
 			t.Fatalf("ChaosDraws = %d, want %d", r.ChaosDraws(), twin.ChaosDraws())
 		}
 	})
-	t.Run("UC-040/BR-037 R9 proposes nothing when no player has fresh readings", func(t *testing.T) {
+	t.Run("UC-040/A1 R9 proposes nothing when no player has fresh readings", func(t *testing.T) {
 		c := waitingCtx(5, nil)
 		cfg := DefaultStaticConfig()
 		r := NewObjectiveRules(&cfg)

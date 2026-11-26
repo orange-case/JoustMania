@@ -1,5 +1,5 @@
 """
-The coordinator's shield cap holds against any writer (#2044, UC-040 A34, BR-022).
+The coordinator's shield cap holds against any writer (#2044, UC-048 A7, BR-007).
 
 Service tier (T2, ``GAME`` composition: controller manager + game coordinator from
 source on a fresh flag plane). No agent runs: the test is the misbehaving writer and
@@ -102,7 +102,8 @@ async def _write_and_wait(collector, game_id: str, serial: str, n: int):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A34", br=["BR-022", "BR-004"])
+@pytest.mark.uc("UC-040", br=["BR-004"])
+@pytest.mark.uc("UC-048", flow="A7", br=["BR-007"])
 async def test_fourth_shield_is_refused_and_the_next_game_starts_fresh(stack, flag_service, headless_cleanup):
     _serve_agent_overlays(stack, flag_service)
     mock_client, mock_channel = await get_mock_client(stack)

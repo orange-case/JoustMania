@@ -194,7 +194,7 @@ func (s State) RankedCount() int {
 	return n
 }
 
-// Sustained-danger window limits (UC-040 A43, BR-032, #2461).
+// Sustained-danger window limits (decide-contract.md §15.3, #2461).
 const (
 	// DangerSampleStaleAfter is the oldest the newest movement reading may be,
 	// against the context's UpdatedAt, for the window to count.
@@ -211,8 +211,8 @@ const (
 // re-exported with its last value, so a frozen reading keeps arriving with a fresh
 // time: the reading is as old as the first sample of the newest run of identical
 // values (when the value was last new). R4d (SustainedDanger) and the rules that
-// read a player's skill level or movement variance (R3, R4, R8; UC-040 A46,
-// BR-037, #2511) share this signal. Fail closed (false): no readings, a newest
+// read a player's skill level or movement variance (R3, R4, R8; decide-contract.md §15.4,
+// decide-contract §15.4, #2511) share this signal. Fail closed (false): no readings, a newest
 // reading after now (so a zero now against readings with a real time), a frozen
 // or old value, a non-finite value. A zero now against readings stamped at the
 // zero time passes (now - At = 0); production contexts never carry that pair, the
@@ -233,8 +233,8 @@ func FreshReadings(samples []gamecontext.MovementSample, now time.Time) bool {
 }
 
 // SustainedDanger reports whether a player's newest n movement readings are each
-// at or above level x the death threshold in force at that reading (UC-040 A43,
-// BR-032): a sustained near-threshold signal, never a single spike. samples is the
+// at or above level x the death threshold in force at that reading (decide-contract.md §15.3,
+// decide-contract §15.3): a sustained near-threshold signal, never a single spike. samples is the
 // player's oldest-first track (gamecontext.PlayerSignals.History), track the
 // session's death-threshold track and threshold the last observed scalar (the
 // fallback when the track has no earlier value). now is the context's UpdatedAt.

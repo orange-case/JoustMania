@@ -1,4 +1,4 @@
-"""One ``controller.shield_effect`` span per shield layer the controller shows (#2669, UC-040 A16, A17, A39, BR-026).
+"""One ``controller.shield_effect`` span per shield layer the controller shows (#2669, UC-048 A1, A2, A11, BR-010).
 
 Before #2669 one span covered the controller's whole render loop: the first layer's kind (often the
 empty energy gauge), ``cancelled`` at game end, a span for a controller that never had a shield and
@@ -163,9 +163,9 @@ def _end_reason(span):
 
 class TestUC040ShieldSpanPerLayer:
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_game_end_ends_the_shield_span_with_game_end(self, exporter, manager, clock):
-        """UC-040 A17: SHIELD 0 at game end ends the span game_end, not cancelled."""
+        """UC-048 A2: SHIELD 0 at game end ends the span game_end, not cancelled."""
         await _effect(manager, pb.GAME_EFFECT_SHIELD, 5000)
         await _step_until(clock, START + 1.0)
 
@@ -177,9 +177,9 @@ class TestUC040ShieldSpanPerLayer:
         assert _end_reason(span) == "game_end"
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_death_ends_the_shield_span_with_death(self, exporter, manager, clock, monkeypatch):
-        """UC-040 A17: the death effect ends the shield layer; its span says death."""
+        """UC-048 A2: the death effect ends the shield layer; its span says death."""
         monkeypatch.setattr(manager, "set_vibration", AsyncMock())
         await _effect(manager, pb.GAME_EFFECT_SHIELD, 5000)
 
@@ -189,9 +189,9 @@ class TestUC040ShieldSpanPerLayer:
         assert _end_reason(span) == "death"
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A16", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A1", br=["BR-003"])
     async def test_a_new_shield_replaces_the_running_one_with_its_own_span(self, exporter, manager, clock):
-        """UC-040 BR-010: a restart is a new layer: the old span ends replaced, the new one runs its time."""
+        """UC-048 BR-003: a restart is a new layer: the old span ends replaced, the new one runs its time."""
         await _effect(manager, pb.GAME_EFFECT_SHIELD, 5000)
         await _step_until(clock, START + 1.0)
         await _effect(manager, pb.GAME_EFFECT_SHIELD, 2000)
@@ -203,9 +203,9 @@ class TestUC040ShieldSpanPerLayer:
         assert ("shield_blink", "full") in [(e.name, e.attributes.get("shield.kind")) for e in second.events]
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_an_empty_energy_gauge_has_no_shield_span(self, exporter, manager, clock):
-        """UC-040 BR-026: a gauge at 0 s shows the base colour, so no shield span, also not at game end."""
+        """UC-048 BR-010: a gauge at 0 s shows the base colour, so no shield span, also not at game end."""
         await _effect(manager, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _state(energy=0))
         await _step_until(clock, START + 2.0)
 
@@ -214,9 +214,9 @@ class TestUC040ShieldSpanPerLayer:
         assert _shield_spans(exporter) == []
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A36", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A8", br=["BR-010"])
     async def test_a_hold_activation_has_its_own_span(self, exporter, manager, clock):
-        """UC-040 BR-026: a hold gets a hold span for its own length, a child of the hold command; the
+        """UC-048 BR-010: a hold gets a hold span for its own length, a child of the hold command; the
         charged gauge keeps its own span until game end."""
         await _effect(
             manager, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _state(energy=3000), trace_parent=_traceparent(ENERGY_PARENT)
@@ -246,11 +246,11 @@ class TestUC040ShieldSpanPerLayer:
         assert format(energy.parent.span_id, "016x") == ENERGY_PARENT
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A39", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A11", br=["BR-010"])
     async def test_hold_release_ends_the_hold_span_cancelled_and_the_gauge_runs_on(
         self, exporter, manager, clock, open_spans
     ):
-        """UC-040 BR-026: SHIELD_HOLD 0 ends only the hold span (cancelled); a re-grant during the hold
+        """UC-048 BR-010: SHIELD_HOLD 0 ends only the hold span (cancelled); a re-grant during the hold
         replaced the first one; the gauge keeps its span until game end."""
         await _effect(manager, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _state(energy=3000))
         await _effect(manager, pb.GAME_EFFECT_SHIELD_HOLD, 2000, _state(energy=3000, activation=2000))
@@ -269,9 +269,9 @@ class TestUC040ShieldSpanPerLayer:
         assert not open_spans.open
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-009", "BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-002", "BR-003"])
     async def test_toughness_boost_end_cancels_only_its_span(self, exporter, manager, clock, open_spans):
-        """UC-040 BR-010: TOUGHNESS_BOOST 0 ends the boost span cancelled; the full shield runs on to expired."""
+        """UC-048 BR-003: TOUGHNESS_BOOST 0 ends the boost span cancelled; the full shield runs on to expired."""
         await _effect(manager, pb.GAME_EFFECT_SHIELD, 5000)
         await _effect(manager, pb.GAME_EFFECT_TOUGHNESS_BOOST, 5000)
         await _step_until(clock, START + 0.5)
@@ -284,11 +284,11 @@ class TestUC040ShieldSpanPerLayer:
         assert not open_spans.open
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A38", br=["BR-026"])
+    @pytest.mark.uc("UC-048", flow="A10", br=["BR-010"])
     async def test_an_emptied_gauge_ends_empty_and_a_refill_opens_a_new_span(
         self, exporter, manager, clock, open_spans
     ):
-        """UC-040 BR-026: the gauge span ends empty when the energy falls below the minimum burst; a
+        """UC-048 BR-010: the gauge span ends empty when the energy falls below the minimum burst; a
         refill is a new span."""
         await _effect(manager, pb.GAME_EFFECT_SHIELD_ENERGY, 5000, _state(energy=3000))
         await _step_until(clock, START + 0.5)
@@ -305,9 +305,9 @@ class TestUC040ShieldSpanPerLayer:
         assert not open_spans.open
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A30", br=["BR-021"])
+    @pytest.mark.uc("UC-048", flow="A3", br=["BR-006"])
     async def test_a_charge_resend_that_extends_keeps_one_span(self, exporter, manager, clock, open_spans):
-        """UC-040 BR-021: a charge re-send while it is held only extends it: one charge span, expired."""
+        """UC-048 BR-006: a charge re-send while it is held only extends it: one charge span, expired."""
         await _effect(manager, pb.GAME_EFFECT_SHIELD_CHARGE, 1000)
         await _step_until(clock, START + 0.5)
         await _effect(manager, pb.GAME_EFFECT_SHIELD_CHARGE, 1000)
@@ -318,9 +318,9 @@ class TestUC040ShieldSpanPerLayer:
         assert not open_spans.open
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_a_removed_controller_ends_every_layer_span_cancelled(self, exporter, manager, clock, open_spans):
-        """UC-040 A17: a controller removed mid-shield (renderer cancelled, not awaited) leaves no span open."""
+        """UC-048 A2: a controller removed mid-shield (renderer cancelled, not awaited) leaves no span open."""
         await _effect(manager, pb.GAME_EFFECT_SHIELD, 5000)
         await _effect(manager, pb.GAME_EFFECT_SHIELD_CHARGE, 5000)
         await _step_until(clock, START + 0.5)
@@ -333,9 +333,9 @@ class TestUC040ShieldSpanPerLayer:
         assert not open_spans.open
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-040", flow="A17", br=["BR-010"])
+    @pytest.mark.uc("UC-048", flow="A2", br=["BR-003"])
     async def test_a_failing_renderer_ends_its_spans_cancelled(self, exporter, manager, clock, open_spans, monkeypatch):
-        """UC-040 A17: a renderer that raises (HID write error) leaves no span open."""
+        """UC-048 A2: a renderer that raises (HID write error) leaves no span open."""
         await _effect(manager, pb.GAME_EFFECT_SHIELD, 5000)
         await _step_until(clock, START + 0.2)
         monkeypatch.setattr(manager, "_set_led_color", AsyncMock(side_effect=RuntimeError("hid")))

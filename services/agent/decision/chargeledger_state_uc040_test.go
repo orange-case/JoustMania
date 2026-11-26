@@ -11,7 +11,7 @@ import (
 )
 
 // chargeledger_state_uc040_test.go covers the shield_charged marker of the decide state
-// and the rules engine's charge policy (UC-040 main step 4 and A31 step 1; #1870): both
+// and the rules engine's charge policy (UC-040 main step 4, UC-048 A4 step 1; #1870): both
 // read the agent's own charge ledger, so the state marks a player charged exactly while
 // the ledger would refuse a grant_shield to them.
 
@@ -31,19 +31,19 @@ func chargedIn(t *testing.T, st decide.State, serial string) bool {
 // second grant. One fresh loop per offset, so a probe that dispatches cannot re-arm the
 // ledger for the next offset.
 //
-// UC: UC-040 A31 BR-020
+// UC: UC-048 A4 BR-005
 func TestChargeLedger_DecideStateMarksChargedForTheWholeWindow(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		offset  time.Duration
 		charged bool
 	}{
-		{"UC-040/A31 at the grant", 0, true},
-		{"UC-040/A31 at 9.999 s", 9999 * time.Millisecond, true},
-		{"UC-040/A31 at 10.001 s (past the shielded window)", 10001 * time.Millisecond, true},
-		{"UC-040/A31 at 21.999 s", 21999 * time.Millisecond, true},
-		{"UC-040/A31 at 22.000 s (window end)", 22 * time.Second, false},
-		{"UC-040/A31 at 22.001 s", 22001 * time.Millisecond, false},
+		{"UC-048/A4 at the grant", 0, true},
+		{"UC-048/A4 at 9.999 s", 9999 * time.Millisecond, true},
+		{"UC-048/A4 at 10.001 s (past the shielded window)", 10001 * time.Millisecond, true},
+		{"UC-048/A4 at 21.999 s", 21999 * time.Millisecond, true},
+		{"UC-048/A4 at 22.000 s (window end)", 22 * time.Second, false},
+		{"UC-048/A4 at 22.001 s", 22001 * time.Millisecond, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			l, _, clock, _ := ledgerLoop(t, 100, triggerMode(20*time.Second, nil), budgetShield("WEAK"))
@@ -72,7 +72,7 @@ func TestChargeLedger_DecideStateMarksChargedForTheWholeWindow(t *testing.T) {
 // TestChargeLedger_InertStateUnchanged: outside trigger mode the ledger holds nothing,
 // so the decide state is byte-identical to decide.BuildState.
 //
-// UC: UC-040 A31 BR-019
+// UC: UC-048 A4 BR-004
 func TestChargeLedger_InertStateUnchanged(t *testing.T) {
 	werewolf := "Werewolf"
 	for _, tc := range []struct {
@@ -80,11 +80,11 @@ func TestChargeLedger_InertStateUnchanged(t *testing.T) {
 		mode ShieldChargeMode
 		ctx  func() gamecontext.GameContext
 	}{
-		{"UC-040/A31 instant mode", instantMode, ffaRealCtx},
-		{"UC-040/A31 nil mode source", nil, ffaRealCtx},
-		{"UC-040/A31 BR-019 a non-FFA mode", triggerMode(20*time.Second, nil),
+		{"UC-048/A4 instant mode", instantMode, ffaRealCtx},
+		{"UC-048/A4 nil mode source", nil, ffaRealCtx},
+		{"UC-048/A4 BR-004 a non-FFA mode", triggerMode(20*time.Second, nil),
 			func() gamecontext.GameContext { c := ffaRealCtx(); c.Session.GameMode = &werewolf; return c }},
-		{"UC-040/A31 BR-019 a shadow game", triggerMode(20*time.Second, nil),
+		{"UC-048/A4 BR-004 a shadow game", triggerMode(20*time.Second, nil),
 			func() gamecontext.GameContext { c := ffaRealCtx(); c.GameKind = gamecontext.GameKindShadow; return c }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,12 +105,13 @@ func TestChargeLedger_InertStateUnchanged(t *testing.T) {
 
 // TestChargeLedger_RulesDoNotReproposeChargedTarget: with the engine wired to the
 // loop's ledger, the rules path never proposes a grant the ledger refuses; the shield
-// goes to another R4 candidate (A41) or the slot to the next-ranked candidate, and the
+// goes to another R4 candidate (decide-contract §15.2) or the slot to the next-ranked candidate, and the
 // invoke_agent state marks the charged players.
 //
-// UC: UC-040 A31 A41
+// UC: UC-040 A1
+// UC: UC-048 A4
 func TestChargeLedger_RulesDoNotReproposeChargedTarget(t *testing.T) {
-	t.Run("UC-040/A31 no already_charged refusals inside the window", func(t *testing.T) {
+	t.Run("UC-048/A4 no already_charged refusals inside the window", func(t *testing.T) {
 		snap := rulesSnapshot()
 		snap.Objectives = balancedFocused()
 		l, sr := decideRecordingLoop(t, snap)
@@ -144,7 +145,7 @@ func TestChargeLedger_RulesDoNotReproposeChargedTarget(t *testing.T) {
 				}
 			}
 		}
-		// A41: MID (the other R4 candidate) gets the next shield; STRONG is below minScore.
+		// decide-contract §15.2: MID (the other R4 candidate) gets the next shield; STRONG is below minScore.
 		if !charged["MID"] || charged["STRONG"] {
 			t.Fatalf("charged after 4 cycles = %v, want WEAK and MID", charged)
 		}
@@ -173,9 +174,9 @@ func containsString(xs []string, x string) bool {
 // in flight) as well as a committed one, and drops a released or ended one, exactly
 // like reserve's refusal.
 //
-// UC: UC-040 A31
+// UC: UC-048 A4
 func TestChargeLedger_LiveMatchesReserve(t *testing.T) {
-	t.Run("UC-040/A31 a reservation in flight counts as charged", func(t *testing.T) {
+	t.Run("UC-048/A4 a reservation in flight counts as charged", func(t *testing.T) {
 		var cl chargeLedger
 		now := time.Unix(50_000, 0)
 		res, _, _ := cl.reserve("WEAK", now, chargeOnly(22*time.Second))
@@ -193,7 +194,7 @@ func TestChargeLedger_LiveMatchesReserve(t *testing.T) {
 			t.Fatal("a released entry must not be live")
 		}
 	})
-	t.Run("UC-040/A31 a committed entry ends with its window", func(t *testing.T) {
+	t.Run("UC-048/A4 a committed entry ends with its window", func(t *testing.T) {
 		var cl chargeLedger
 		now := time.Unix(50_000, 0)
 		res, _, _ := cl.reserve("WEAK", now, chargeOnly(22*time.Second))

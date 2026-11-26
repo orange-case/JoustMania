@@ -105,7 +105,7 @@ func (l *Loop) repeatRefusal(d Decision, now time.Time) bool {
 	return !l.limiter.firstRefusal(refusalKey(d), now)
 }
 
-// recordRepeatRefusal records a repeated rate_limit (A21) or already_charged (A31)
+// recordRepeatRefusal records a repeated rate_limit (A21) or already_charged (UC-048 A4)
 // refusal without spans, warning or timeline entry: the outcome stays in the cycle's
 // LayerState (so invoke_agent still reports decide.blocked) and in
 // agent_decisions_total, and a debug line names the repeat.

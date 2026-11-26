@@ -47,7 +47,7 @@ const (
 	// game signal and is never routed to a partition.
 	metricControllerInfo = "controller_info" // live
 
-	// Hold-mode shield (#2096, UC-040 A37, UC-042 BR-007): the latched mode (value 1,
+	// Hold-mode shield (#2096, UC-048 A9, UC-042 BR-007): the latched mode (value 1,
 	// label mode), the latched hold values (label setting = flag key), and per player
 	// the energy, budget left, active flag and per-game totals (label stat). The
 	// coordinator removes them at game end.

@@ -34,19 +34,19 @@ const (
 	keyInterventionsAllowed      = "interventions_allowed"
 	keyBatteryThreshold          = "policy.battery_threshold"
 	keyMaxInterventionsPerMinute = "policy.max_interventions_per_minute"
-	// Shield limits per player per game (UC-040 A33, BR-022; #2044): operator flags
+	// Shield limits per player per game (UC-048 A6, BR-007; #2044): operator flags
 	// the agent reads and never writes (C-034). No targeting (flags.md §3), so the
 	// agent's empty context resolves the coordinator's value.
 	keyMaxShieldsPerPlayerPerGame = "policy.max_shields_per_player_per_game"
 	keyShieldCooldownSeconds      = "policy.shield_cooldown_seconds"
-	// R4's danger shield before the first elimination (UC-040 A43, BR-032; #2461):
+	// R4's danger shield before the first elimination (decide-contract.md §15.3; #2461):
 	// operator flags the agent reads and never writes (C-034); the rules clamp them.
 	keyShieldDangerRatio   = "policy.shield_danger_ratio"
 	keyShieldDangerSamples = "policy.shield_danger_samples"
 	// keyShieldDangerEnabled switches the danger path off on its own (on by default;
 	// an unreadable value reads on, like the other two).
 	keyShieldDangerEnabled = "policy.shield_danger_enabled"
-	// The group-shield gate (#2467, UC-040 A47, BR-033): human-only agent flags with
+	// The group-shield gate (#2467, UC-048 A13, BR-014): human-only agent flags with
 	// no targeting, read by the agent here (empty context) and by the coordinator in
 	// the game's flag context; both must resolve one value (flags.md §3).
 	keyGroupGrantEnabled    = "policy.group_grant.enabled"
@@ -178,13 +178,13 @@ const (
 	// DefaultMaxInterventionsPerMinute is the weighted per-minute budget.
 	DefaultMaxInterventionsPerMinute = 2
 	// DefaultMaxShieldsPerPlayerPerGame and DefaultShieldCooldownSeconds are the
-	// shield limits (UC-040 BR-022) when the flag cannot be read or is negative:
+	// shield limits (UC-048 BR-007) when the flag cannot be read or is negative:
 	// the limits stay on. They match services/flagd/agent.json and the coordinator's
 	// games/base.py defaults.
 	DefaultMaxShieldsPerPlayerPerGame = 3
 	DefaultShieldCooldownSeconds      = 15
 	// DefaultShieldDangerRatio and DefaultShieldDangerSamples are the danger-shield
-	// thresholds (UC-040 A43, BR-032) when the flag cannot be read; they match
+	// thresholds (decide-contract.md §15.3) when the flag cannot be read; they match
 	// services/flagd/agent.json and decision.DefaultShieldDanger*.
 	DefaultShieldDangerRatio   = 0.85
 	DefaultShieldDangerSamples = 3
@@ -316,23 +316,23 @@ type Policy struct {
 	// MaxInterventionsPerMinute is the weighted per-minute dispatch budget.
 	MaxInterventionsPerMinute int
 	// MaxShieldsPerPlayerPerGame caps the agent's grant_shield writes per player per
-	// game (UC-040 A33, BR-022). 0 = unlimited (also the zero value, so a hand-built
+	// game (UC-048 A6, BR-007). 0 = unlimited (also the zero value, so a hand-built
 	// Snapshot, the rules golden among them, stays inert).
 	MaxShieldsPerPlayerPerGame int
 	// ShieldCooldownSeconds is the pause after the end of a player's last agent
-	// shield before the next grant (UC-040 A33, BR-022). 0 = off.
+	// shield before the next grant (UC-048 A6, BR-007). 0 = off.
 	ShieldCooldownSeconds int
 	// ShieldDangerRatio and ShieldDangerSamples are R4's danger-shield thresholds
-	// (UC-040 A43, BR-032): the fraction of the death threshold and the number of
+	// (decide-contract.md §15.3): the fraction of the death threshold and the number of
 	// consecutive readings at or above it. 0 (a hand-built Snapshot) means the
 	// rules' default; the rules clamp both.
 	ShieldDangerRatio   float64
 	ShieldDangerSamples int
 	// ShieldDangerOff is policy.shield_danger_enabled = off: R4's danger path
-	// proposes nothing (UC-040 A43, BR-032). Inverted so the zero value (a
+	// proposes nothing (decide-contract.md §15.3). Inverted so the zero value (a
 	// hand-built Snapshot) keeps the path on, like the flag's default.
 	ShieldDangerOff bool
-	// The group-shield gate (#2467, UC-040 A47, BR-033), read like the coordinator's
+	// The group-shield gate (#2467, UC-048 A13, BR-014), read like the coordinator's
 	// _group_grant_policy and failing closed: a missing or unreadable flag reads
 	// false / 0. GroupGrantMaxPerGame is clamped to 0..GroupGrantMaxPerGameCeiling,
 	// GroupGrantMaxTargets to 2..GroupGrantMaxTargetsCeiling (0 or less = off). The
@@ -745,12 +745,12 @@ func (s Snapshot) Permits(intervention string) bool {
 type Flags struct {
 	client Evaluator
 	// game evaluates the game set, read-only: only the two shield flags of the
-	// charge ledger (ShieldCharge, UC-040 A31). nil: ShieldCharge returns its
+	// charge ledger (ShieldCharge, UC-048 A4). nil: ShieldCharge returns its
 	// defaults, never a read through client.
 	game     Evaluator
 	gameWarn gameReadWarn
 	// gameModes keeps the first shield.activation read per game, so a `hold` read
-	// follows the coordinator's per-game latch (UC-040 A31, BR-027, #2096).
+	// follows the coordinator's per-game latch (UC-048 A4, BR-011, #2096).
 	gameModes gameModeLatch
 	// gameAttrs returns a game's kind, experiment id and arm as the agent has seen
 	// them (main.go wires the Multiplexer); nil means a real game (#2096).
@@ -868,7 +868,7 @@ func (f *Flags) intFlag(ctx context.Context, key string, def int) int {
 }
 
 // nonNegativeIntFlag is intFlag for a limit where a negative value is a mistake: it
-// gives def, like a read error, so the limit stays on (UC-040 BR-022).
+// gives def, like a read error, so the limit stays on (UC-048 BR-007).
 func (f *Flags) nonNegativeIntFlag(ctx context.Context, key string, def int) int {
 	v := f.intFlag(ctx, key, def)
 	if v < 0 {
