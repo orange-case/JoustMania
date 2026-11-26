@@ -13,7 +13,7 @@ from openfeature.client import OpenFeatureClient
 from opentelemetry import trace
 
 from lib.types import GameEvent, Sound
-from proto import audio_pb2
+from proto import audio_pb2, controller_manager_pb2
 from services.game_coordinator import game_clock
 from services.game_coordinator.games.base import BaseGameMode
 from services.game_coordinator.games.ffa import FFAGame
@@ -261,7 +261,9 @@ class TestUC020InstructionsOn:
         types = _event_types(events)
         assert GameEvent.GAME_STARTED not in types
         assert GameEvent.COUNTDOWN_START not in types
-        assert cm.stream is None  # no gameplay stream
+        # The stream opened for the cue carries no countdown and is released at the end.
+        assert cm.stream.effects(controller_manager_pb2.GAME_EFFECT_COUNTDOWN) == []
+        assert game.gameplay_stream is None
         assert not [name for name, _ in audio.calls if name == "PlayMusic"]
         assert audio.sounds() == [INSTRUCTIONS]  # no countdown beeps
         ended = events.get_events_of_type(GameEvent.GAME_ENDED)
@@ -381,6 +383,86 @@ class TestUC020InstructionsOn:
         ended = events.get_events_of_type(GameEvent.GAME_ENDED)
         assert len(ended) == 1
         assert ended[0]["outcome"] == "force_ended"
+
+
+class FailingFirstStreamControllerManager(RecordingControllerManager):
+    """Recording controller manager whose first gameplay stream cannot be opened."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.opens = 0
+
+    def StreamGameplayData(self):  # noqa: N802 - gRPC stub name
+        self.opens += 1
+        if self.opens == 1:
+            raise ConnectionError("controller manager unreachable")
+        return super().StreamGameplayData()
+
+
+def _pulses(stream) -> list:
+    return [
+        m.game_effect
+        for m in stream.writes
+        if m.HasField("game_effect") and m.game_effect.effect == controller_manager_pb2.GAME_EFFECT_PULSE
+    ]
+
+
+class TestUC020InstructionsCue:
+    """UC-020 A5 step 2: the controllers pulse while the clip plays, for a crowd that cannot hear it."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-020", flow="A5", steps=[2])
+    async def test_every_controller_pulses_in_its_colour_for_the_clip(self, fast_config, monkeypatch):  # noqa: F811
+        """A5 step 2: the stream opens at the clip, each controller pulses its colour; the countdown follows on it."""
+        monkeypatch.setattr(BaseGameMode, "_INSTRUCTIONS_WAIT_SCALE", 1.0)
+        cm = RecordingControllerManager(num_controllers=3, death_schedule={1.0: 0, 1.6: 1}, max_duration=8.0)
+        game, events = _ffa(TimedAudio(), cm=cm)
+        flag_patch, init_patch = _patch_flag(_flag_client(True))
+
+        with flag_patch, init_patch:
+            await asyncio.wait_for(game.run(), timeout=15.0)
+
+        pulses = _pulses(cm.stream)
+        assert sorted(p.serial for p in pulses) == sorted(game.players)
+        for pulse in pulses:
+            assert (pulse.color.r, pulse.color.g, pulse.color.b) == tuple(game.players[pulse.serial].color)
+            assert pulse.duration_ms == int(CLIP_SECONDS * 1000)
+            assert pulse.speed == 1
+        # The countdown runs on the same stream, after the cue.
+        effects = [m.game_effect.effect for m in cm.stream.writes if m.HasField("game_effect")]
+        assert effects.index(controller_manager_pb2.GAME_EFFECT_COUNTDOWN) > effects.index(
+            controller_manager_pb2.GAME_EFFECT_PULSE
+        )
+        assert events.get_events_of_type(GameEvent.GAME_WINNER) == [{"serial": "mock_controller_2"}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-020", flow="A5", steps=[2])
+    async def test_clip_not_heard_opens_no_stream_early(self):
+        """A5 step 2: a 0 s clip waits for nothing, so nothing pulses and the stream opens as without instructions."""
+        game, _ = _ffa(TimedAudio(clip_seconds=0.0))
+        game.running = True
+        flag_patch, init_patch = _patch_flag(_flag_client(True))
+
+        with flag_patch, init_patch:
+            await game._play_instructions(create_autospec(trace.Span, instance=True))
+
+        assert game.gameplay_stream is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-020", flow="A5", steps=[2, 4])
+    async def test_cue_failure_still_starts_the_game(self, fast_config):  # noqa: F811
+        """A5 step 2: a stream that cannot open for the cue is logged; the game opens it after the clip and runs."""
+        cm = FailingFirstStreamControllerManager(num_controllers=3, death_schedule={1.0: 0, 1.6: 1}, max_duration=8.0)
+        game, events = _ffa(TimedAudio(clip_seconds=0.05), cm=cm)
+        flag_patch, init_patch = _patch_flag(_flag_client(True))
+
+        with flag_patch, init_patch:
+            await asyncio.wait_for(game.run(), timeout=15.0)
+
+        assert cm.opens == 2
+        assert _pulses(cm.stream) == []
+        assert GameEvent.GAME_STARTED in _event_types(events)
+        assert events.get_events_of_type(GameEvent.GAME_WINNER) == [{"serial": "mock_controller_2"}]
 
 
 class TestUC020InstructionsOff:
