@@ -89,9 +89,6 @@ def build_menu(servicer) -> None:
         select_game_mode=servicer.select_game_mode,
     )
 
-    # UC-002 A9: the pairing daemon's warning before a Bluetooth restart
-    servicer.bt_restart_warner = BluetoothRestartWarner(servicer.state_manager)
-
     # Register handlers with state manager
     servicer.connected_handler = ConnectedHandler()
     servicer.ready_handler = ReadyHandler(start_game_callback=servicer._ready_start_game)
@@ -110,6 +107,9 @@ def build_menu(servicer) -> None:
         agent_memory_writer=servicer.agent_memory_writer,
         lifecycle_live=lambda: servicer._lifecycle_live(),
     )
+
+    # UC-002 A9: the pairing daemon's warning before a Bluetooth restart
+    servicer.bt_restart_warner = BluetoothRestartWarner(servicer.state_manager, servicer.settings_ops._effect_lobby)
 
     # Idle handler and monitor
     servicer.idle_handler = IdleHandler()

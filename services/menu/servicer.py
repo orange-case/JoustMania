@@ -463,11 +463,13 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             pad_commands=self.settings_ops.pad_commands(),
         )
 
-    async def WarnBluetoothRestart(self, _request, _context):
+    async def WarnBluetoothRestart(self, request, _context):
         """UC-002 A9, BR-011: the pairing daemon is about to restart bluetoothd (UC-001 BR-011)."""
-        answer = self.bt_restart_warner.warn(
+        answer = await self.bt_restart_warner.warn(
             menu_running=self.state == menu_pb2.MenuState.RUNNING,
-            lifecycle_live=self._lifecycle_live(),
+            # A reset_menu recovery counts as live, as for a game start (UC-010 BR-008)
+            game_live=self._lifecycle_live() or self._recovery_running(),
+            check_only=request.check_only,
         )
         return menu_pb2.WarnBluetoothRestartResponse(
             warned=answer.warned,

@@ -270,12 +270,12 @@ The internet check of UC-016 BR-010 needs no RPC: the pad service makes an outbo
 
 ### 3.2 `MenuService.WarnBluetoothRestart`
 
-Spec for [UC-001](../use_cases/UC-001.md) BR-011 and [UC-002](../use_cases/UC-002.md) A9, BR-011. Unary, `WarnBluetoothRestartRequest {}` → `WarnBluetoothRestartResponse {warned, game_live, connected_count, lead_ms}` (`proto/menu.proto`). The pairing daemon calls it just before a planned bluetoothd restart: Connect JSON POST to `http://localhost/joustmania.menu.MenuService/WarnBluetoothRestart` (env `MENU_WARN_URL`) through envoy and the `MenuProxy` forwarder, like its `GetGameState` read, so the host-networked daemon needs no gRPC client or port of its own and the menu stays the owner of the lobby's audio and LEDs. The menu starts the cue detached and answers at once:
+Spec for [UC-001](../use_cases/UC-001.md) BR-011 and [UC-002](../use_cases/UC-002.md) A9, BR-011. Unary, `WarnBluetoothRestartRequest {check_only}` → `WarnBluetoothRestartResponse {warned, game_live, connected_count, lead_ms}` (`proto/menu.proto`). The pairing daemon calls it just before a planned bluetoothd restart: Connect JSON POST to `http://localhost/joustmania.menu.MenuService/WarnBluetoothRestart` (env `MENU_WARN_URL`) through envoy and the `MenuProxy` forwarder, like its `GetGameState` read, so the host-networked daemon needs no gRPC client or port of its own and the menu stays the owner of the lobby's audio and LEDs. The menu sends the beep (detached) and queues the pulses, then answers at once. `check_only` (the daemon's second call, after the cue, `when_idle` only) plays nothing and only answers `game_live`:
 
 | Field | Meaning |
 |---|---|
-| `warned` | The cue was started: one `SFX_BEEP_LOUD` and a white `GAME_EFFECT_PULSE` of `lead_ms` on every CONNECTED or READY controller. False while the menu is not `RUNNING`, a game lifecycle is live or no controller is connected |
-| `game_live` | A game lifecycle is live (starting, running, lobby restore): nothing was played; the daemon defers a `when_idle` restart |
+| `warned` | The cue was started: one `SFX_BEEP_LOUD` and a white `GAME_EFFECT_PULSE` of `lead_ms` on every CONNECTED or READY controller. False for `check_only`, while the menu is not `RUNNING`, a game is live or no controller is connected |
+| `game_live` | A game lifecycle is live (starting, running, lobby restore) or a `reset_menu` recovery runs: nothing was played; the daemon defers a `when_idle` restart, before and after the cue |
 | `connected_count` | Controllers connected in any state when the call arrived |
 | `lead_ms` | How long the cue lasts (3000 when `warned`, else 0); the daemon waits this long (capped at 10 s) before it restarts |
 

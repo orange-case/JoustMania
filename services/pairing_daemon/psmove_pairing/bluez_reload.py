@@ -87,8 +87,9 @@ class LobbyWarning:
     lead_s: float = 0.0
 
 
-def _post_lobby_warning(url: str) -> LobbyWarning:
-    request = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+def _post_lobby_warning(url: str, check_only: bool) -> LobbyWarning:
+    data = b'{"checkOnly": true}' if check_only else b"{}"
+    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     with _OPENER.open(request, timeout=MENU_WARN_TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed local URL
         body = json.loads(response.read() or b"{}")
     lead_ms = body.get("leadMs", 0)
@@ -99,13 +100,16 @@ def _post_lobby_warning(url: str) -> LobbyWarning:
     )
 
 
-async def warn_lobby() -> LobbyWarning | None:
-    """Ask the menu to warn the lobby; None when it does not answer (UC-001 BR-011)."""
+async def warn_lobby(check_only: bool = False) -> LobbyWarning | None:
+    """Ask the menu to warn the lobby, or with ``check_only`` only whether a game is live.
+
+    None when the menu does not answer (UC-001 BR-011).
+    """
     url = os.getenv("MENU_WARN_URL", DEFAULT_MENU_WARN_URL)
     try:
-        return await asyncio.to_thread(_post_lobby_warning, url)
+        return await asyncio.to_thread(_post_lobby_warning, url, check_only)
     except Exception as e:
-        logger.warning(f"Cannot warn the lobby of the bluetoothd restart ({e}); restarting without a warning")
+        logger.warning(f"No answer from the menu to the bluetoothd restart warning ({e}); not holding the restart")
         return None
 
 
@@ -159,7 +163,7 @@ class BluezReloader:
         game_busy: Callable[[], Awaitable[bool]] = primary_game_busy,
         restart: Callable[[], Awaitable[None]] = restart_bluetoothd,
         clock: Callable[[], float] = time.monotonic,
-        warn: Callable[[], Awaitable[LobbyWarning | None]] | None = None,
+        warn: Callable[..., Awaitable[LobbyWarning | None]] | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
         self._game_busy = game_busy
@@ -259,9 +263,12 @@ class BluezReloader:
         """Warn the lobby and wait for the cue (UC-001 BR-011); False = defer the restart.
 
         Only ``when_idle`` lets the menu's live game or a game that started during the
-        cue hold the restart back; ``always`` restarts regardless.
+        cue hold the restart back; ``always`` restarts regardless. After the cue both the
+        menu and the coordinator are asked again: the menu's lifecycle goes live before
+        the coordinator reports STARTING.
         """
-        answer = await (self._warn or warn_lobby)()
+        warn = self._warn or warn_lobby
+        answer = await warn()
         if answer is None:
             return True
         if answer.game_live and mode == "when_idle":
@@ -271,7 +278,10 @@ class BluezReloader:
             return True
         logger.info(f"Lobby warned of the bluetoothd restart; restarting in {answer.lead_s:.1f} s")
         await self._sleep(answer.lead_s)
-        if mode == "when_idle" and await self._game_busy():
+        if mode != "when_idle":
+            return True
+        check = await warn(check_only=True)
+        if (check is not None and check.game_live) or await self._game_busy():
             logger.info("Deferring the bluetoothd restart: a game started during the lobby warning")
             return False
         return True

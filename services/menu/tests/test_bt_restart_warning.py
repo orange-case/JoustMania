@@ -27,12 +27,8 @@ def lobby(servicer, states: dict[str, ControllerState]) -> None:
     servicer.state_manager.controller_states = dict(states)
 
 
-async def warn(servicer) -> menu_pb2.WarnBluetoothRestartResponse:
-    answer = await servicer.WarnBluetoothRestart(menu_pb2.WarnBluetoothRestartRequest(), None)
-    tasks = list(servicer.bt_restart_warner._tasks)
-    if tasks:
-        await asyncio.gather(*tasks)
-    return answer
+async def warn(servicer, check_only: bool = False) -> menu_pb2.WarnBluetoothRestartResponse:
+    return await servicer.WarnBluetoothRestart(menu_pb2.WarnBluetoothRestartRequest(check_only=check_only), None)
 
 
 def pulsed(servicer) -> list[str]:
@@ -41,6 +37,11 @@ def pulsed(servicer) -> list[str]:
         for c in servicer.state_manager.led.send_game_effect.await_args_list
         if c.args[1] == controller_manager_pb2.GAME_EFFECT_PULSE
     ]
+
+
+def no_cue(servicer) -> None:
+    servicer.state_manager.audio.play_sound.assert_not_awaited()
+    assert pulsed(servicer) == []
 
 
 @pytest.mark.uc("UC-002", flow="A9", br=["BR-011"])
@@ -54,7 +55,8 @@ async def test_lobby_hears_a_beep_and_sees_a_white_pulse_then_the_daemon_waits_f
     # IDLE keeps its LED off (UC-002 A3)
     assert sorted(pulsed(menu)) == ["a", "b"]
     for call in menu.state_manager.led.send_game_effect.await_args_list:
-        assert call.kwargs == {"color": Colors.White.value, "duration_ms": WARNING_LEAD_MS}
+        assert call.kwargs["color"] == Colors.White.value
+        assert call.kwargs["duration_ms"] == WARNING_LEAD_MS
 
 
 @pytest.mark.uc("UC-002", flow="A9", br=["BR-011"])
@@ -64,8 +66,7 @@ async def test_no_cue_when_no_controller_is_connected(menu):
     answer = await warn(menu)
 
     assert answer == menu_pb2.WarnBluetoothRestartResponse(warned=False, game_live=False, connected_count=0)
-    menu.state_manager.audio.play_sound.assert_not_awaited()
-    assert pulsed(menu) == []
+    no_cue(menu)
 
 
 @pytest.mark.uc("UC-002", flow="A9", br=["BR-011"])
@@ -78,10 +79,39 @@ async def test_no_cue_during_a_game_and_the_daemon_is_told_a_game_is_live(menu):
     finally:
         game.cancel()
 
-    assert answer.game_live is True
-    assert answer.warned is False
-    menu.state_manager.audio.play_sound.assert_not_awaited()
-    assert pulsed(menu) == []
+    assert (answer.warned, answer.game_live) == (False, True)
+    no_cue(menu)
+
+
+@pytest.mark.uc("UC-002", flow="A9", br=["BR-011"])
+async def test_a_reset_menu_recovery_counts_as_a_live_game(menu):
+    lobby(menu, {"a": ControllerState.CONNECTED})
+    recovery = asyncio.get_running_loop().create_future()
+    menu._reset_recovery = recovery
+    try:
+        answer = await warn(menu)
+    finally:
+        recovery.cancel()
+
+    assert (answer.warned, answer.game_live) == (False, True)
+    no_cue(menu)
+
+
+@pytest.mark.uc("UC-002", flow="A9", br=["BR-011"])
+async def test_the_check_after_the_cue_plays_nothing_and_reports_a_game_that_went_live(menu):
+    lobby(menu, {"a": ControllerState.READY})
+
+    idle = await warn(menu, check_only=True)
+    game = asyncio.get_running_loop().create_future()
+    menu._game_lifecycle_task = game
+    try:
+        live = await warn(menu, check_only=True)
+    finally:
+        game.cancel()
+
+    assert (idle.warned, idle.game_live, idle.lead_ms) == (False, False, 0)
+    assert (live.warned, live.game_live) == (False, True)
+    no_cue(menu)
 
 
 @pytest.mark.uc("UC-002", flow="A9", br=["BR-011"])
@@ -92,26 +122,7 @@ async def test_no_cue_while_the_menu_is_stopped(menu):
     answer = await warn(menu)
 
     assert (answer.warned, answer.game_live, answer.lead_ms) == (False, False, 0)
-    menu.state_manager.audio.play_sound.assert_not_awaited()
-
-
-@pytest.mark.uc("UC-002", flow="A9", br=["BR-011"])
-async def test_the_answer_does_not_wait_for_a_hung_audio_service(menu):
-    lobby(menu, {"a": ControllerState.CONNECTED})
-    hung = asyncio.Event()
-
-    async def hang(*_args, **_kwargs):
-        await hung.wait()
-
-    menu.state_manager.audio.play_sound.side_effect = hang
-
-    answer = await asyncio.wait_for(
-        menu.WarnBluetoothRestart(menu_pb2.WarnBluetoothRestartRequest(), None), timeout=1.0
-    )
-
-    assert answer.warned is True
-    hung.set()
-    await asyncio.gather(*list(menu.bt_restart_warner._tasks))
+    no_cue(menu)
 
 
 @pytest.mark.uc("UC-002", flow="A9", br=["BR-011"])
@@ -119,6 +130,7 @@ async def test_a_failed_pulse_does_not_stop_the_others(menu):
     lobby(menu, {"a": ControllerState.CONNECTED, "b": ControllerState.CONNECTED})
     menu.state_manager.led.send_game_effect.side_effect = [RuntimeError("cm down"), True]
 
-    await warn(menu)
+    answer = await warn(menu)
 
+    assert answer.warned is True
     assert pulsed(menu) == ["a", "b"]

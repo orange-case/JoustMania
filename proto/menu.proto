@@ -134,12 +134,15 @@ message GetMenuStatusResponse {
 }
 
 // UC-001 BR-011, UC-002 A9, BR-011 (services.md §3.2)
-message WarnBluetoothRestartRequest {}
+message WarnBluetoothRestartRequest {
+  // Only answer whether a game is live, play nothing (the daemon's check after the cue)
+  bool check_only = 1;
+}
 
 message WarnBluetoothRestartResponse {
   // The cue (beep + white pulse) was started
   bool warned = 1;
-  // A game is starting or running, or the lobby is being restored: nothing was played
+  // A game is starting or running, the lobby is being restored or a reset_menu recovery runs: nothing was played
   bool game_live = 2;
   // Controllers connected in any state
   int32 connected_count = 3;
