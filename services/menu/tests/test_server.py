@@ -13,6 +13,7 @@ from openfeature.client import OpenFeatureClient
 from lib.types import Games
 from proto import menu_pb2
 from services.menu import server
+from services.menu.event_publisher import EventPublisher
 from services.menu.idle_monitor import IdleMonitor
 from services.menu.servicer import MenuServicer
 from services.menu.utils import AudioHelper
@@ -25,6 +26,8 @@ def _servicer_with_flags(**flags):
     servicer.current_selection = Games.Tournament
     servicer.audio = create_autospec(AudioHelper, instance=True)
     servicer.idle_monitor = create_autospec(IdleMonitor, instance=True)
+    servicer.event_publisher = create_autospec(EventPublisher, instance=True)
+    servicer.start_menu_during_game.return_value = True
     servicer.user_prefs_client = create_autospec(OpenFeatureClient, instance=True)
     servicer.user_prefs_client.get_boolean_value.side_effect = lambda key, default, *_a, **_k: flags.get(key, default)
     servicer.boot_follows_live_game.return_value = False
@@ -300,8 +303,9 @@ class TestBootFollowsLiveGame:
 
         servicer.start_button_monitor.assert_awaited_once()
         servicer.enter_lobby.assert_not_called()
-        # menu_auto_start on: the game's end restores the menu started (A12).
+        # menu_auto_start on: the game's end restores the menu started (A12), announced like a StartMenu.
         servicer.start_menu_during_game.assert_called_once_with()
+        servicer.event_publisher.publish.assert_awaited_once_with("menu_started", {})
 
     @pytest.mark.asyncio
     @pytest.mark.uc("UC-010", flow="A16", steps=[3], br=["BR-003", "BR-014"])
@@ -319,7 +323,7 @@ class TestShutdownDuringBoot:
     """services.md menu readiness: SIGTERM and SIGINT shut the menu down gracefully from process start."""
 
     @pytest.mark.asyncio
-    @pytest.mark.uc("UC-010", flow="A16", steps=[2], cond=["Pre-1"])
+    @pytest.mark.uc("UC-010", flow="A16", steps=[2])
     async def test_sigterm_during_the_boot_lookup_shuts_down_gracefully(self):
         events = []
         servicer = _servicer_with_flags()
@@ -334,6 +338,7 @@ class TestShutdownDuringBoot:
         with patch.object(server.health.aio, "HealthServicer", TestMenuHealthReadiness._recording_health(events)):
             grpc_server = await _boot(servicer, sigterm_when=lookup_started.is_set)
 
+        assert lookup_started.is_set()
         assert not any(e[2] == health_pb2.HealthCheckResponse.SERVING for e in events)
         servicer.stop_game_event_monitor.assert_awaited_once()
         servicer.shutdown.assert_awaited_once()

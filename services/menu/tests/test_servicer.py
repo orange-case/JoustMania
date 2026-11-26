@@ -77,6 +77,7 @@ class FakeMenuServicer:
         self.current_selection = Games.JoustFFA
         self._lobby_restore_started = False
         self._lobby_entry_lock = asyncio.Lock()
+        self._user_selection_restored = True
 
         # Mocked dependencies (autospec'd: a misspelt method fails here, not in production, #1272)
         self.led = create_autospec(LedController, instance=True)

@@ -57,6 +57,9 @@ def make_real_servicer(writer_factory=None):
         from services.menu.servicer import MenuServicer
 
         servicer = MenuServicer()
+        # A menu past its boot: tests set current_selection directly, and a start must not re-read it
+        # from the flags (that path is the boot window's, UC-010 A16).
+        servicer._user_selection_restored = True
         # The autospec class, so a test can check what build_menu constructed the monitor with.
         servicer.idle_monitor_cls = idle_monitor_cls
         return servicer

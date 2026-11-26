@@ -200,6 +200,9 @@ class GameLifecycleMixin:
             await self._reject_start_while_active(serial, source, game_mode)
             return False
 
+        # Reset here, not in the task: a StartMenu can land before the task's first step.
+        self._start_menu_deferred = False
+        self._lobby_restore_started = False
         # Schedule game lifecycle as background task to avoid blocking button monitor
         self._game_lifecycle_task = asyncio.create_task(
             self._run_game_lifecycle(serial, source, controllers, game_mode=game_mode, ready_start=ready_start)
@@ -287,11 +290,10 @@ class GameLifecycleMixin:
         """Run the game lifecycle (`_run_game_lifecycle_steps`) and settle the menu state afterwards.
 
         UC-010 A12 (#2449): however the lifecycle ends (game end, failed start, roster abort), no game
-        runs any more, so a GAME_STARTING left behind by a StartMenu that undid a StopMenu after the
-        last state change becomes RUNNING with the idle monitor. A cancel (reset_menu, shutdown) is left
-        to its canceller.
+        runs any more. A StartMenu deferred during it that no lobby restore applied (a start that ended
+        without a game and without a restore) enters the lobby now, unless a later StopMenu won. A cancel
+        (reset_menu, shutdown) is left to its canceller.
         """
-        self._start_menu_deferred = False
         cancelled = False
         try:
             await self._run_game_lifecycle_steps(
@@ -301,10 +303,15 @@ class GameLifecycleMixin:
             cancelled = True
             raise
         finally:
-            if not cancelled and self._start_menu_deferred and self.state == menu_pb2.MenuState.GAME_STARTING:
-                logger.info("Game lifecycle ended with the menu in GAME_STARTING; menu set RUNNING")
-                self.state = menu_pb2.MenuState.RUNNING
-                self.idle_monitor.start()
+            if (
+                not cancelled
+                and self._start_menu_deferred
+                and not self._lobby_restore_started
+                and self.state != menu_pb2.MenuState.STOPPED
+            ):
+                logger.info("Game lifecycle ended without a lobby restore; entering the lobby for the deferred StartMenu")
+                # menu_started already went out with the deferred request.
+                await self.enter_lobby(publish_started=False)
 
     async def _run_game_lifecycle_steps(
         self,
@@ -345,6 +352,9 @@ class GameLifecycleMixin:
             # UC-010 BR-014: a StopMenu during the ready feedback delay also stops the auto start.
             self._drop_ready_start_on_stopped_menu(serial)
             return
+        if game_mode is None and not self._user_selection_restored:
+            # UC-010 A16: a start in the boot window, before the boot read the persisted mode.
+            self.restore_user_selection()
         mode = game_mode if game_mode is not None else self.current_selection
         if ready_start and not await self._ready_start_still_holds(serial, mode):
             return

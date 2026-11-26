@@ -156,8 +156,10 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         # UC-010 A16: the boot's coordinator lookup is undecided; a StartMenu meanwhile is applied after it.
         self._boot_lookup_running = False
         self.boot_start_requested = False
-        # Held for the whole lobby entry; a game start waits for it, so neither interleaves with the other.
+        # Held for the whole lobby entry and a reset_menu restore; a game start waits for it, so none interleave.
         self._lobby_entry_lock = asyncio.Lock()
+        # The voice and current_game were read from the user flags (or a mode was selected) since the boot.
+        self._user_selection_restored = False
 
         logger.info("Menu service initialized")
 
@@ -217,6 +219,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             logger.warning(f"Unknown game mode selected via {source}: {game_name}")
             return False
         self.current_selection = game_mode
+        self._user_selection_restored = True
         self.state_manager.set_game_mode(game_mode)
         # UC-011 step 6, BR-005 (#2105): every lobby controller takes the new mode's colour.
         await self.state_manager.show_lobby_colors()
@@ -315,7 +318,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
                 logger.info("StartMenu during the boot's coordinator lookup: deferred until it is decided")
                 return menu_pb2.StartMenuResponse(success=True, error="")
 
-            if self._lifecycle_live():
+            if self._lifecycle_live() or self._recovery_running():
                 # UC-010 A12 (#2449): no lobby mid-game, whatever the state; the lifecycle's end applies
                 # the request (checked before RUNNING, so the answer during a lifecycle is always success).
                 if self.start_menu_during_game():
@@ -339,7 +342,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             logger.error(f"StartMenu error: {e}", exc_info=True)
             return menu_pb2.StartMenuResponse(success=False, error=str(e))
 
-    async def enter_lobby(self) -> None:
+    async def enter_lobby(self, *, publish_started: bool = True) -> None:
         """Enter the lobby: the one lobby-entry path for StartMenu and the boot auto-start (D-M2, #1505).
 
         Sets RUNNING, un-readies everyone, restores the persisted ``current_game``
@@ -356,7 +359,8 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
 
             await _bounded_restore_step("lobby music", self.audio.start_lobby_music)
             self.idle_monitor.start()
-            await self.event_publisher.publish("menu_started", {})
+            if publish_started:
+                await self.event_publisher.publish("menu_started", {})
 
     def restore_user_selection(self) -> None:
         """Load the voice and the persisted ``current_game`` (an unplayable value falls back to JoustFFA)."""
@@ -364,6 +368,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         current_game_name = self.user_prefs_client.get_string_value("current_game", DEFAULT_GAME_MODE.name)
         game = Games.from_name(current_game_name)
         self.current_selection = game if game and game.name in GAME_MODES else DEFAULT_GAME_MODE
+        self._user_selection_restored = True
         self.state_manager.set_game_mode(self.current_selection)
 
     async def StopMenu(self, _request, _context):
@@ -788,8 +793,13 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
                 await task
             await self.event_publisher.publish("game_start_cancelled", {})
             # The restore runs as the lifecycle task, so a start in this window gets the A8
-            # lobby-restart refusal instead of interleaving with the lobby restore.
-            restore = asyncio.create_task(self._restart_lobby())
+            # lobby-restart refusal instead of interleaving with the lobby restore. The cancelled task may
+            # have been queued behind a lobby entry: the restore runs after that entry, not inside it.
+            async def restore_after_lobby_entry() -> None:
+                async with self._lobby_entry_lock:
+                    await self._restart_lobby()
+
+            restore = asyncio.create_task(restore_after_lobby_entry())
             self._game_lifecycle_task = restore
             try:
                 await restore

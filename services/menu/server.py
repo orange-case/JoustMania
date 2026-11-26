@@ -74,7 +74,8 @@ async def _boot_entry(menu_servicer: MenuServicer, decided: asyncio.Event, settl
         if wanted and menu_servicer._lifecycle_live():
             # A web or pad start during the waits above is a game now: no lobby over it (UC-010 A16).
             # The game ran on a STOPPED menu; its end restores the menu started, as after a StartMenu (A12).
-            menu_servicer.start_menu_during_game()
+            if menu_servicer.start_menu_during_game():
+                await menu_servicer.event_publisher.publish("menu_started", {})
             logger.info("Boot lobby entry skipped: a game lifecycle started meanwhile")
         elif wanted and menu_servicer.state != menu_pb2.MenuState.RUNNING:
             try:

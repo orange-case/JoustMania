@@ -1,7 +1,7 @@
 """Menu boot and lifecycle edge cases left after the boot lookup and the readiness re-check (#2938)."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from opentelemetry import trace
@@ -117,6 +117,97 @@ class TestStartOnAStoppedMenu:
         assert seen_states == [menu_pb2.MenuState.STOPPED]
         assert real_servicer.state == menu_pb2.MenuState.RUNNING
         real_servicer.idle_monitor.start.assert_called_once_with()
+
+
+class TestBootWindowStartWithoutAGame:
+    """UC-010 A12, A16: a boot-window start that ends without a game or a restore enters the lobby after it."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[3])
+    @pytest.mark.uc("UC-010", flow="A12", steps=[2], br=["BR-001"])
+    async def test_roster_abort_under_a_deferred_start_menu_enters_the_lobby(self, real_servicer):
+        real_servicer._user_selection_restored = False
+        real_servicer.user_prefs_client.get_string_value.side_effect = lambda key, default, *_a, **_k: (
+            Games.FightClub.name if key == "current_game" else default
+        )
+        await _connect(real_servicer, "a")
+
+        assert await real_servicer._start_game("", source="web")
+        # The boot decides to skip its lobby entry under the live lifecycle (server._boot_entry).
+        assert real_servicer.start_menu_during_game()
+        await real_servicer._game_lifecycle_task
+
+        assert real_servicer.current_selection == Games.FightClub
+        assert real_servicer.state == menu_pb2.MenuState.RUNNING
+        real_servicer.audio.start_lobby_music.assert_awaited_once_with()
+        real_servicer.idle_monitor.start.assert_called()
+        published = [event for event, _data in (c.args for c in real_servicer.event_publisher.publish.await_args_list)]
+        assert "menu_started" not in published
+        assert published.count("game_start_cancelled") == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[3])
+    async def test_a_boot_window_game_uses_the_persisted_mode(self, real_servicer):
+        real_servicer._user_selection_restored = False
+        real_servicer.user_prefs_client.get_string_value.side_effect = lambda key, default, *_a, **_k: (
+            Games.FightClub.name if key == "current_game" else default
+        )
+        await _connect(real_servicer, "a", "b")
+        started_modes = []
+
+        async def run_stream(_stub, request, *_args, **_kwargs):
+            started_modes.append(request.start_config.game_name)
+
+        with patch.object(real_servicer, "_run_game_event_stream", side_effect=run_stream):
+            await real_servicer._start_game("", source="operator_pad", controllers=["a", "b"])
+            await real_servicer._game_lifecycle_task
+
+        assert started_modes == [Games.FightClub.name]
+
+
+class TestRecoveryAgainstLobbyEntry:
+    """UC-010 A8, BR-008: a reset_menu restore and a lobby entry never run at the same time."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
+    async def test_recovery_restore_waits_for_the_lobby_entry(self, real_servicer):
+        calls = []
+        music_gate = asyncio.Event()
+
+        async def start_lobby_music():
+            calls.append("lobby_music_starting")
+            await music_gate.wait()
+            calls.append("lobby_music_started")
+
+        real_servicer.audio.start_lobby_music.side_effect = start_lobby_music
+        restart = real_servicer._restart_lobby
+
+        async def restart_lobby():
+            calls.append("restore")
+            await restart()
+
+        await _connect(real_servicer, "a", "b")
+        with (
+            patch.object(real_servicer, "_restart_lobby", side_effect=restart_lobby),
+            patch.object(real_servicer, "_primary_game_active", AsyncMock(return_value=False)),
+        ):
+            entry = asyncio.create_task(real_servicer.enter_lobby())
+            await _until(lambda: "lobby_music_starting" in calls)
+            assert await real_servicer._start_game("", source="operator_pad", controllers=["a", "b"])
+            await asyncio.sleep(0.2)
+
+            reset = asyncio.create_task(real_servicer._handle_reset_menu())
+            await asyncio.sleep(0.2)
+            assert "restore" not in calls
+            start_menu = await real_servicer.StartMenu(menu_pb2.StartMenuRequest(), MagicMock())
+
+            music_gate.set()
+            await entry
+            assert await reset is None
+
+        assert (start_menu.success, start_menu.error) == (True, "")
+        assert calls.index("lobby_music_started") < calls.index("restore")
+        assert real_servicer.state == menu_pb2.MenuState.RUNNING
 
 
 class TestDroppedStartGeneration:
