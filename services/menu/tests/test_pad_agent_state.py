@@ -168,7 +168,7 @@ async def test_a_failed_write_leaves_the_state(servicer, flags):
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A3", br=["BR-011", "BR-012"])
 async def test_a_value_outside_the_three_states_is_unreadable(servicer, flags):
-    """A bool-era `on` is a state, but a stray value never is: the switch writes nothing."""
+    """A value outside off / watch / act (a bool-era "true", the old "on") is no state: the switch writes nothing."""
     flags.values[ENABLED] = "true"
     reply = await pad(servicer, "agent_state", state="off", **{"from": "act"})
     assert (reply.success, reply.error) == (False, "flag_service_unavailable")
