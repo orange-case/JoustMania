@@ -102,11 +102,6 @@ type ClearRequest struct {
 	Scope   Scope
 	Writer  string
 	Persist bool
-	// UnlessRealGame is the opt-in guard of a watch or re-watch revert
-	// (?unless_real_game=true, #2236): in scope real, a flag marked
-	// real_write: no_live_real_game is refused 409 real_game_live while a
-	// non-shadow game is registered. The kill switch never sets it.
-	UnlessRealGame bool
 	// IfWriter is the opt-in compare-and-delete precondition (?if_writer=,
 	// #1877), like If-Match: in scope real or the in-memory stack overlay
 	// (without Persist), the overlay is cleared only when its writer label
@@ -190,42 +185,7 @@ func (s *State) liveChecksLocked(f *flagState, sc Scope, scopeName string, res *
 			return fserr.Unprocessable(fserr.SerialNotInGame, "serial %q is not a player of game %q", sc.Serial, sc.GameID)
 		}
 	}
-	// #2096, UC-043 A17: a real write of a flag marked real_write:
-	// no_live_real_game waits until every registered game is a shadow game. Checked under s.mu,
-	// the lock RegisterGame and Reconcile hold, so no registration can slip in
-	// between this check and the write. Clear has its own opt-in copy of this
-	// check (UnlessRealGame, #2236); the kill-switch revert does not opt in.
-	if err := s.checkRealGameLocked(f, scopeName, "a real write"); err != nil {
-		return err
-	}
 	return nil
-}
-
-// checkRealGameLocked is the real_game_live 409 of the real scope: a flag
-// marked real_write: no_live_real_game is refused while a non-shadow game is
-// registered. what names the refused act in the message ("a real write", "a
-// guarded revert"). Put always runs it; Clear only when the caller opted in.
-func (s *State) checkRealGameLocked(f *flagState, scopeName, what string) *fserr.Error {
-	if scopeName != registry.ScopeReal || !f.policy.RealWriteNeedsNoRealGame() {
-		return nil
-	}
-	if id := s.liveRealGameLocked(); id != "" {
-		return fserr.Conflict(fserr.RealGameLive, "real game %q is registered; %s of %s waits until no real game runs", id, what, f.key)
-	}
-	return nil
-}
-
-// liveRealGameLocked returns the id of a registered game that may be real (the
-// smallest, for a stable message), or "" when none is registered. It fails
-// closed: every kind except exactly "shadow" counts, an empty or unknown kind
-// included (unlike targeting, FR-041, where only "real" matches the real rung).
-func (s *State) liveRealGameLocked() string {
-	for _, id := range sortedKeys(s.games) {
-		if s.games[id].Kind != gameKindShadow {
-			return id
-		}
-	}
-	return ""
 }
 
 func (s *State) streamCheckLocked(set string) *fserr.Error {
@@ -346,11 +306,6 @@ func (s *State) checkPutLocked(req WriteRequest, res *WriteResult) (putPlan, *fs
 	}
 	plan.f, plan.scope = f, scopeName
 	plan.stackLike = scopeName == registry.ScopeStack || scopeName == registry.ScopeReal || scopeName == registry.ScopeFraction
-	if req.TTLSeconds != nil && scopeName == registry.ScopeReal && p.RealWriteNeedsNoRealGame() {
-		// An expiring real overlay would revert on a timer, mid-game, without
-		// passing the real-game guard (#2096, UC-043 A17).
-		return plan, fserr.BadRequest("ttl_seconds is not allowed on a real write of %s (real_write: %s)", req.Flag, p.RealWrite)
-	}
 	if req.TTLSeconds != nil {
 		if !plan.stackLike || *req.TTLSeconds <= 0 || math.IsInf(*req.TTLSeconds, 0) || math.IsNaN(*req.TTLSeconds) {
 			return plan, fserr.BadRequest("ttl_seconds must be positive and applies to stack overlays only")
@@ -592,14 +547,6 @@ func (s *State) checkClearLocked(req ClearRequest, res *WriteResult) (*flagState
 	}
 	if req.StackAll && (scopeName != registry.ScopeStack || req.Persist) {
 		return nil, fserr.BadRequest("stack_all clears the stack scope, without persist")
-	}
-	// #2236, UC-043 A17 step 3: the guarded revert. Checked under s.mu, like the
-	// Put guard, so a game registering between the agent's own read and this
-	// DELETE still blocks it. A plain DELETE (the kill switch) never comes here.
-	if req.UnlessRealGame {
-		if err := s.checkRealGameLocked(f, scopeName, "a guarded revert"); err != nil {
-			return nil, err
-		}
 	}
 	if req.IfWriter != "" {
 		cur, layer := f.real, "real"
