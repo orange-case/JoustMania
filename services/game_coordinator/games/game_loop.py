@@ -523,61 +523,13 @@ class GameLoopMixin:
 
         # Phase 2: Gameplay (player spans created before countdown)
         with _base.tracer.start_as_current_span("gameplay_phase") as gameplay_span:
-            # Store span reference and context for background tasks
-            self.gameplay_span = gameplay_span
-            self.gameplay_span_context = otel_context.get_current()
-            # UC-041 BR-004: the agent's span ids come only from game.phase.start.
-            self._send_phase_start(gameplay_span, "gameplay_phase")
-
-            # Create "players" parent span (collapsible group in Jaeger)
-            self._players_span = _base.tracer.start_span(
-                "players",
-                context=self.gameplay_span_context,
-                attributes={"player_count": len(self.players)},
-            )
-            players_ctx = trace.set_span_in_context(self._players_span)
-
-            # Create "game_cycle" span for instrumentation (sounds, music tempo)
-            self._game_cycle_span = _base.tracer.start_span(
-                "game_cycle",
-                context=self.gameplay_span_context,
-                attributes={"game.id": self.game_id},
-            )
-            self.game_cycle_context = trace.set_span_in_context(self._game_cycle_span)
-            self._send_phase_start(self._game_cycle_span, "game_cycle")
-
-            # Create player lifecycle spans under "players" parent
-            self._create_player_spans(players_ctx)
-
-            # Open per-player countdown child spans
-            for player in self.players.values():
-                if player.span:
-                    ctx = trace.set_span_in_context(player.span)
-                    player._countdown_span = _base.tracer.start_span(
-                        "countdown_phase",
-                        context=ctx,
-                        attributes={"player.serial": player.serial},
-                    )
+            self._open_gameplay_spans(gameplay_span)
 
             # Run countdown (sounds go under game_cycle via _play_sound)
             await self._countdown()
 
-            # Close per-player countdown spans
-            for player in self.players.values():
-                if player._countdown_span:
-                    player._countdown_span.end()
-                    player._countdown_span = None
-
-            # Ramp music volume up to game level after countdown (a shadow game is silent)
-            if self.audio_client and not self._is_shadow_game():
-                try:
-                    from proto import audio_pb2
-
-                    # game_cycle is open here: parent the RPC span to it like every in-game audio call (#2671)
-                    with self._game_cycle_attached():
-                        await self.audio_client.SetVolume(audio_pb2.SetVolumeRequest(volume=self.game_volume))
-                except Exception as e:
-                    logger.warning(f"Failed to set game volume: {e}")
+            self._close_countdown_spans()
+            await self._raise_game_volume()
 
             # Drain buffered stream data and prime EMA filters
             await self._warmup_ema()
@@ -598,3 +550,62 @@ class GameLoopMixin:
                 # Close all player spans, then grouping spans
                 self._close_all_player_spans()
                 self._close_grouping_spans()
+
+    def _open_gameplay_spans(self, gameplay_span) -> None:
+        """Open the players, game_cycle, player lifecycle and per-player countdown spans."""
+        # Store span reference and context for background tasks
+        self.gameplay_span = gameplay_span
+        self.gameplay_span_context = otel_context.get_current()
+        # UC-041 BR-004: the agent's span ids come only from game.phase.start.
+        self._send_phase_start(gameplay_span, "gameplay_phase")
+
+        # Create "players" parent span (collapsible group in Jaeger)
+        self._players_span = _base.tracer.start_span(
+            "players",
+            context=self.gameplay_span_context,
+            attributes={"player_count": len(self.players)},
+        )
+        players_ctx = trace.set_span_in_context(self._players_span)
+
+        # Create "game_cycle" span for instrumentation (sounds, music tempo)
+        self._game_cycle_span = _base.tracer.start_span(
+            "game_cycle",
+            context=self.gameplay_span_context,
+            attributes={"game.id": self.game_id},
+        )
+        self.game_cycle_context = trace.set_span_in_context(self._game_cycle_span)
+        self._send_phase_start(self._game_cycle_span, "game_cycle")
+
+        # Create player lifecycle spans under "players" parent
+        self._create_player_spans(players_ctx)
+
+        # Open per-player countdown child spans
+        for player in self.players.values():
+            if player.span:
+                ctx = trace.set_span_in_context(player.span)
+                player._countdown_span = _base.tracer.start_span(
+                    "countdown_phase",
+                    context=ctx,
+                    attributes={"player.serial": player.serial},
+                )
+
+    def _close_countdown_spans(self) -> None:
+        """Close the per-player countdown spans once the countdown ran."""
+        # Close per-player countdown spans
+        for player in self.players.values():
+            if player._countdown_span:
+                player._countdown_span.end()
+                player._countdown_span = None
+
+    async def _raise_game_volume(self) -> None:
+        """Ramp the music volume up to the game level after the countdown."""
+        # Ramp music volume up to game level after countdown (a shadow game is silent)
+        if self.audio_client and not self._is_shadow_game():
+            try:
+                from proto import audio_pb2
+
+                # game_cycle is open here: parent the RPC span to it like every in-game audio call (#2671)
+                with self._game_cycle_attached():
+                    await self.audio_client.SetVolume(audio_pb2.SetVolumeRequest(volume=self.game_volume))
+            except Exception as e:
+                logger.warning(f"Failed to set game volume: {e}")

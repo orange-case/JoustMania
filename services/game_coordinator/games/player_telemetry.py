@@ -181,6 +181,44 @@ class PlayerTelemetryMixin:
         """Re-export ``game_player_alive`` 1 for a player seated to fight; its frames set the rest."""
         metrics.player_alive.labels(serial=serial, game_id=self.game_id).set(1)
 
+    @staticmethod
+    def _update_poll_drop_rate(player: Player) -> None:
+        """Roll the player's 2 s poll-drop window and update its drop rate (drops/sec)."""
+        # --- Rolling window rate detection for poll drops ---
+        now = _base.time.monotonic()
+        window_seconds = 2.0  # evaluation window
+
+        # Initialize window on first call
+        if player._health_window_start is None:
+            player._health_window_start = now
+            player._health_window_drops = player.total_poll_drops
+
+        elapsed = now - player._health_window_start
+        if elapsed >= window_seconds:
+            drops_in_window = player.total_poll_drops - player._health_window_drops
+            player._health_drop_rate = drops_in_window / elapsed
+            # Reset window
+            player._health_window_start = now
+            player._health_window_drops = player.total_poll_drops
+
+    def _track_led_health(self, player: Player, serial: str, health, has_led_issues) -> None:
+        """Open or close the player's LED degradation span."""
+        # --- LED degradation span ---
+        if has_led_issues:
+            player.total_led_failures += health.led_failures
+            if player._led_degraded_span is None and player.span:
+                ctx = trace.set_span_in_context(player.span)
+                player._led_degraded_span = _base.tracer.start_span(
+                    "controller_led_degraded",
+                    context=ctx,
+                    attributes={"player.serial": serial},
+                )
+        else:
+            if player._led_degraded_span is not None:
+                player._led_degraded_span.set_attribute("health.total_led_failures", player.total_led_failures)
+                player._led_degraded_span.end()
+                player._led_degraded_span = None
+
     def _process_health(self, player: Player, serial: str, controller_state) -> None:
         """Process controller health counters and manage degradation child spans.
 
@@ -205,22 +243,7 @@ class PlayerTelemetryMixin:
         if health and health.poll_errors:
             player.total_poll_errors += health.poll_errors
 
-        # --- Rolling window rate detection for poll drops ---
-        now = _base.time.monotonic()
-        window_seconds = 2.0  # evaluation window
-
-        # Initialize window on first call
-        if player._health_window_start is None:
-            player._health_window_start = now
-            player._health_window_drops = player.total_poll_drops
-
-        elapsed = now - player._health_window_start
-        if elapsed >= window_seconds:
-            drops_in_window = player.total_poll_drops - player._health_window_drops
-            player._health_drop_rate = drops_in_window / elapsed
-            # Reset window
-            player._health_window_start = now
-            player._health_window_drops = player.total_poll_drops
+        self._update_poll_drop_rate(player)
 
         # Threshold is drops/sec (not drops/frame)
         has_poll_issues = player._health_drop_rate > threshold or (health and health.poll_errors > 0)
@@ -256,21 +279,7 @@ class PlayerTelemetryMixin:
                 player._poll_degraded_span.end()
                 player._poll_degraded_span = None
 
-        # --- LED degradation span ---
-        if has_led_issues:
-            player.total_led_failures += health.led_failures
-            if player._led_degraded_span is None and player.span:
-                ctx = trace.set_span_in_context(player.span)
-                player._led_degraded_span = _base.tracer.start_span(
-                    "controller_led_degraded",
-                    context=ctx,
-                    attributes={"player.serial": serial},
-                )
-        else:
-            if player._led_degraded_span is not None:
-                player._led_degraded_span.set_attribute("health.total_led_failures", player.total_led_failures)
-                player._led_degraded_span.end()
-                player._led_degraded_span = None
+        self._track_led_health(player, serial, health, has_led_issues)
 
     def _capture_controller_info(self, player: Player, serial: str, controller_state) -> None:
         """

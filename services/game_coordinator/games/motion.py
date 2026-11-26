@@ -146,6 +146,57 @@ class MotionMixin:
         handicap = max(0.5, min(2.0, effective_handicap))
         return warn * handicap, death * handicap
 
+    def _read_hold_trigger(self, player, pressed: bool, current_time: float, hold) -> None:
+        """UC-030 A7 / BR-008: the hold-mode trigger of one frame; compares only, nothing awaited."""
+        # The work runs only while the trigger is held or an activation is running.
+        if not pressed:
+            player.trigger_armed = True
+        if pressed or player.hold_started_at:
+            self._process_shield_hold(player, pressed, current_time, hold)
+
+    @staticmethod
+    def _read_charge_trigger(player, pressed: bool) -> bool:
+        """The trigger-mode press edge of one frame (UC-030 BR-005)."""
+        edge = pressed and player.trigger_armed and not player.trigger_prev
+        player.trigger_prev = pressed
+        if not pressed:
+            player.trigger_armed = True
+        return edge
+
+    @staticmethod
+    def _shield_charge_due(player, current_time: float) -> bool:
+        """Whether a held charge needs work this frame: its expiry or the layer re-send."""
+        return player.shield_charge_seconds > 0 and (
+            (player.shield_charge_expires_at and current_time >= player.shield_charge_expires_at)
+            or (
+                current_time >= player.shield_charge_layer_until - SHIELD_CHARGE_RESEND_MARGIN_SECONDS
+                and (
+                    not player.shield_charge_expires_at
+                    or player.shield_charge_expires_at > player.shield_charge_layer_until
+                )
+            )
+        )
+
+    def _grace_frame(self, player, serial: str, accel_mag: float, current_time: float) -> bool:
+        """A frame in the player's grace: re-prime the EMA and record analytics; True in grace."""
+        if not (current_time < self.effective_grace_until(player) or current_time < player.end_grace_until):
+            return False
+        # During grace, reset the EMA so it re-primes from the first
+        # post-grace frame. Invincibility must *forget* the death spike:
+        # otherwise the EMA still holds it when grace expires and the
+        # player is instantly re-killed by stale filter memory.
+        # Same re-prime pattern as NonStop revive (nonstop_joust.py).
+        player.smoothed_accel = 0.0
+        player.last_accel_mag = accel_mag
+        self._record_player_analytics(
+            player,
+            serial,
+            accel_mag,
+            accel_mag,
+            self._compute_effective_thresholds(player)[1],
+        )
+        return True
+
     async def _process_controller_state(self, controller_state):
         """
         Process a single controller's state and check for death.
@@ -174,34 +225,12 @@ class MotionMixin:
         # Hot path: a bool read and a few compares; no flag read, no allocation.
         hold = self._shield_hold
         if hold is not None:
-            # UC-030 A7 / BR-008: compares only; nothing is awaited, and the work
-            # runs only while the trigger is held or an activation is running.
-            pressed = controller_state.trigger_pressed
-            if not pressed:
-                player.trigger_armed = True
-            if pressed or player.hold_started_at:
-                self._process_shield_hold(player, pressed, current_time, hold)
+            self._read_hold_trigger(player, controller_state.trigger_pressed, current_time, hold)
         elif self.SHIELD_TRIGGER_ALLOWED:
-            pressed = controller_state.trigger_pressed
-            edge = pressed and player.trigger_armed and not player.trigger_prev
-            player.trigger_prev = pressed
-            if not pressed:
-                player.trigger_armed = True
+            edge = self._read_charge_trigger(player, controller_state.trigger_pressed)
             # Await only when work is due (an edge, the expiry or the re-send),
             # so a held charge costs a few compares per frame, not a coroutine.
-            if edge or (
-                player.shield_charge_seconds > 0
-                and (
-                    (player.shield_charge_expires_at and current_time >= player.shield_charge_expires_at)
-                    or (
-                        current_time >= player.shield_charge_layer_until - SHIELD_CHARGE_RESEND_MARGIN_SECONDS
-                        and (
-                            not player.shield_charge_expires_at
-                            or player.shield_charge_expires_at > player.shield_charge_layer_until
-                        )
-                    )
-                )
-            ):
+            if edge or self._shield_charge_due(player, current_time):
                 await self._process_shield_charge(player, edge, current_time)
 
         # Check grace period first - no death or warning during grace period
@@ -209,21 +238,7 @@ class MotionMixin:
         # effective-grace rule: max(agent shield grace_until, admin
         # invincible_until) so the agent shield and admin baseline compose here too.
         # UC-040 BR-035: the shield end grace window gates the same way (one extra compare).
-        if current_time < self.effective_grace_until(player) or current_time < player.end_grace_until:
-            # During grace, reset the EMA so it re-primes from the first
-            # post-grace frame. Invincibility must *forget* the death spike:
-            # otherwise the EMA still holds it when grace expires and the
-            # player is instantly re-killed by stale filter memory.
-            # Same re-prime pattern as NonStop revive (nonstop_joust.py).
-            player.smoothed_accel = 0.0
-            player.last_accel_mag = accel_mag
-            self._record_player_analytics(
-                player,
-                serial,
-                accel_mag,
-                accel_mag,
-                self._compute_effective_thresholds(player)[1],
-            )
+        if self._grace_frame(player, serial, accel_mag, current_time):
             return  # In grace period, skip death/warning checks
 
         if not (player.hold_prime_cap and self._prime_ema_after_hold(player, accel_mag)):
