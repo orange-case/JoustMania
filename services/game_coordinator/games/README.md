@@ -195,7 +195,9 @@ async def test_ffa_game_full_lifecycle(mock_controller_manager, event_collector)
 4. **Publish events via callback**
 5. **Add OpenTelemetry spans**
 6. **Create integration tests**
-7. **Register:** add the mode to the `Games` enum (`lib/types.py`) and to `_GAME_CLASSES` in `services/game_coordinator/game_factory.py` (`games/__init__.py` is empty); death thresholds come from `_compute_effective_thresholds()` in `games/base.py`
+7. **Register:** add the mode to the `Games` enum (`lib/types.py`) and to `_GAME_CLASSES` in `services/game_coordinator/game_factory.py` (`games/__init__.py` is empty); death thresholds come from `_compute_effective_thresholds()` in `games/motion.py`
+
+`BaseGameMode` (`games/base.py`) keeps the state, the abstract hooks and `run()`; its concerns live in mixins (#2633): `game_loop.py` (countdown, warm-up, frame loop, win hold), `motion.py` (EMA, thresholds, warnings), `gameplay_stream.py` (open, reopen, drain, guarded writes), `elimination.py` (kill gate and kill path), `outcome.py` (force-end and outcome), `rubberband.py` (agent effects: grace, toughness, soft penalty, rubberband, revive), `player_telemetry.py` (analytics, gauges, health and player spans), plus `shields.py` and `tempo.py`. Names that tests patch on `games.base` are looked up there at call time (`_base.`).
 
 ### Game Mode Checklist
 
