@@ -33,7 +33,6 @@ type ProgressSnapshot struct {
 	Status    string `json:"status"`
 	FlagKey   string `json:"flag_key"`
 	Objective string `json:"objective"`
-	TargetN   int    `json:"target_n"`
 	Thesis    string `json:"thesis"`
 	// ExperimentalValue is the experimental arm's flag value; the control arm
 	// resolves the flag's current value.
@@ -100,7 +99,6 @@ func (r *Registry) emitProgressLocked(e *entry, trigger, endReason string, link 
 		Status:            string(e.status),
 		FlagKey:           intent.FlagKey,
 		Objective:         intent.Objective,
-		TargetN:           intent.TargetNPerArm,
 		Thesis:            intent.Hypothesis,
 		ExperimentalValue: intent.ExperimentalValue,
 		EndReason:         endReason,

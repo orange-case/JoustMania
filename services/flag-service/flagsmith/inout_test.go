@@ -20,11 +20,11 @@ import (
 
 // Feature ids of the flags these journeys push.
 var inoutIDs = map[string]int{
-	"decision.backend":            101,
-	"decision.min_interval_ms":    102,
-	"experiment_max_games":        103,
-	"volume_override":             104,
-	"global_sensitivity_override": 105,
+	"decision.backend":                   101,
+	"decision.min_interval_ms":           102,
+	"experiment_completed_grace_seconds": 103,
+	"volume_override":                    104,
+	"global_sensitivity_override":        105,
 }
 
 const (
@@ -283,34 +283,35 @@ func TestConfirmAfterRevertStaysOutOfSync(t *testing.T) {
 // A kill-switch conflict (Flagsmith looser than the local value) takes the
 // Flagsmith value like any flag since #2621: nothing is pushed back.
 func TestKillSwitchConflictFlagsmithWins(t *testing.T) {
+	graceKillSwitch(t)
 	m := newFSModel()
-	m.values["experiment_max_games"] = 10
+	m.values["experiment_completed_grace_seconds"] = 10
 	entered, release := make(chan struct{}, 1), make(chan struct{})
-	path := futureAPI + strconv.Itoa(inoutIDs["experiment_max_games"]) + "/"
-	handler, calls := pushedBack(m, "experiment_max_games", 100, 10, entered, release)
+	path := futureAPI + strconv.Itoa(inoutIDs["experiment_completed_grace_seconds"]) + "/"
+	handler, calls := pushedBack(m, "experiment_completed_grace_seconds", 100, 10, entered, release)
 	h := inoutHarness(t, m, map[string]http.HandlerFunc{"PATCH " + path: handler}, func(h *harness) {
-		h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("10")})
+		h.put(state.WriteRequest{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("10")})
 	})
 	h.online()
-	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("100")})
+	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("100")})
 	<-entered // 100 in flight
-	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("10")})
+	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("10")})
 	close(release) // Flagsmith stores 100; the stack runs 10, nothing pending
 	h.waitFor("100 confirmed", func() bool {
-		r, ok := h.link.Links().Remote(maxGamesKey)
+		r, ok := h.link.Links().Remote(graceKey)
 		return ok && string(r.Value) == "100"
 	})
 	// Someone loosens it further in Flagsmith: R=100, D=500, L=10.
 	h.clock.Advance(2 * time.Second)
-	m.set("experiment_max_games", 500)
+	m.set("experiment_completed_grace_seconds", 500)
 	h.round()
 	t.Run("UC-054/A2 step 1 (BR-005) Flagsmith wins the kill-switch conflict; the local value is not sent", func(t *testing.T) {
 		h.roundAndSettle()
 		if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionFlagsmith); n != 1 {
 			t.Fatalf("conflicts{resolution=flagsmith} = %d, want 1", n)
 		}
-		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "500" {
-			t.Fatalf("experiment_max_games = %+v, want the Flagsmith 500", v)
+		if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "500" {
+			t.Fatalf("experiment_completed_grace_seconds = %+v, want the Flagsmith 500", v)
 		}
 		if n := calls(); n != 1 {
 			t.Fatalf("%d PATCHes, want 1 (only the 100; the local 10 is not pushed back)", n)
@@ -386,42 +387,43 @@ func TestRefusedPushNotResentByPolls(t *testing.T) {
 // A refused push of a kill-switch value is not sent again and is reverted to
 // Flagsmith's value at once (#2621, UC-055 A4); a later document value applies.
 func TestRefusedKillSwitchPushThenFlagsmithWins(t *testing.T) {
+	graceKillSwitch(t)
 	m := newFSModel()
-	m.values["experiment_max_games"] = 100
-	maxPath := futureAPI + strconv.Itoa(inoutIDs["experiment_max_games"]) + "/"
+	m.values["experiment_completed_grace_seconds"] = 100
+	gracePath := futureAPI + strconv.Itoa(inoutIDs["experiment_completed_grace_seconds"]) + "/"
 	h := inoutHarness(t, m, map[string]http.HandlerFunc{
-		"PATCH " + maxPath: answer(http.StatusConflict, `{"detail":"change requests enabled"}`),
+		"PATCH " + gracePath: answer(http.StatusConflict, `{"detail":"change requests enabled"}`),
 	}, func(h *harness) {
-		h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("100")})
+		h.put(state.WriteRequest{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("100")})
 	})
 	h.online()
-	if r, ok := h.link.Links().Remote(maxGamesKey); !ok || string(r.Value) != "100" {
+	if r, ok := h.link.Links().Remote(graceKey); !ok || string(r.Value) != "100" {
 		t.Fatalf("setup: remote %+v %v, want 100 adopted", r, ok)
 	}
-	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_max_games", Value: json.RawMessage("10")})
+	h.put(state.WriteRequest{Set: "agent", Flag: "experiment_completed_grace_seconds", Value: json.RawMessage("10")})
 	h.waitFor("the push refused", func() bool {
-		_, side := h.link.Links().Refusal(maxGamesKey)
+		_, side := h.link.Links().Refusal(graceKey)
 		return side == flagsmith.SideRemote
 	})
 	for range 3 {
 		h.roundAndSettle()
 	}
-	if n := h.requests(http.MethodPatch, maxPath); n != 1 {
-		t.Fatalf("UC-055/A4 %d PATCHes of experiment_max_games after 3 rounds, want 1", n)
+	if n := h.requests(http.MethodPatch, gracePath); n != 1 {
+		t.Fatalf("UC-055/A4 %d PATCHes of experiment_completed_grace_seconds after 3 rounds, want 1", n)
 	}
-	if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "100" {
-		t.Fatalf("UC-055/A4 experiment_max_games = %+v after the refusal, want Flagsmith's 100 (reverted at once, #2621)", v)
+	if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "100" {
+		t.Fatalf("UC-055/A4 experiment_completed_grace_seconds = %+v after the refusal, want Flagsmith's 100 (reverted at once, #2621)", v)
 	}
 	if n := h.counter(flagsmith.MetricConflicts, "resolution", flagsmith.ResolutionFlagsmith); n != 0 {
 		t.Fatalf("UC-055/A4 conflicts = %d, want 0: a revert is reported as a refusal, not a conflict", n)
 	}
 	t.Run("UC-054/main step 3 a later document value is applied; the refused 10 is not sent again", func(t *testing.T) {
-		m.set("experiment_max_games", 500)
+		m.set("experiment_completed_grace_seconds", 500)
 		h.roundAndSettle()
-		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "500" {
-			t.Fatalf("experiment_max_games = %+v, want the Flagsmith 500 (Flagsmith wins)", v)
+		if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "500" {
+			t.Fatalf("experiment_completed_grace_seconds = %+v, want the Flagsmith 500 (Flagsmith wins)", v)
 		}
-		if n := h.requests(http.MethodPatch, maxPath); n != 1 {
+		if n := h.requests(http.MethodPatch, gracePath); n != 1 {
 			t.Fatalf("%d PATCHes, want 1: the refused 10 is not sent again", n)
 		}
 		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 0 {
@@ -429,15 +431,15 @@ func TestRefusedKillSwitchPushThenFlagsmithWins(t *testing.T) {
 		}
 	})
 	t.Run("UC-054/main step 3 a later document value is applied", func(t *testing.T) {
-		m.set("experiment_max_games", 5)
+		m.set("experiment_completed_grace_seconds", 5)
 		h.roundAndSettle()
-		if v, _ := h.local("agent", "experiment_max_games", flagsmith.ScopeStack); string(v.Value) != "5" {
-			t.Fatalf("experiment_max_games = %+v, want 5 applied", v)
+		if v, _ := h.local("agent", "experiment_completed_grace_seconds", flagsmith.ScopeStack); string(v.Value) != "5" {
+			t.Fatalf("experiment_completed_grace_seconds = %+v, want 5 applied", v)
 		}
 		if p, oos, r := h.link.Links().Counts(); p != 0 || oos != 0 || r != 0 {
 			t.Fatalf("pending %d out_of_sync %d refused %d, want 0 0 0", p, oos, r)
 		}
-		if n := h.requests(http.MethodPatch, maxPath); n != 1 {
+		if n := h.requests(http.MethodPatch, gracePath); n != 1 {
 			t.Fatalf("%d PATCHes, want 1", n)
 		}
 	})

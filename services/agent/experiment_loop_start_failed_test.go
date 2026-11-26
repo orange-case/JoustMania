@@ -18,7 +18,7 @@ import (
 // UC: UC-043 A8
 func TestExperimentLoop_StartFailed_AbortsExperiment(t *testing.T) {
 	resolve := func(context.Context) promote.Config { return promote.Config{Mode: promote.ModeIssue} }
-	refused := experiment.Intent{FlagKey: "not_an_experiment_flag", ExperimentalValue: 1.0, Objective: "balanced", TargetNPerArm: 3}
+	refused := experiment.Intent{FlagKey: "not_an_experiment_flag", ExperimentalValue: 1.0, Objective: "balanced"}
 
 	assertFreed := func(t *testing.T, loop *experimentLoop) {
 		t.Helper()

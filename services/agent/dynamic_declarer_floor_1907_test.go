@@ -92,8 +92,8 @@ func TestDynamicDeclarer_FlagdDownMeansBuiltinDefaults(t *testing.T) {
 	if got := d.candidateOrder(d.readCandidateFlags()); !reflect.DeepEqual(got, []string{"foo", "sensitivity"}) {
 		t.Fatalf("rotation with flagd down = %v, want [foo sensitivity]", got)
 	}
-	if d.defaultObjective != decision.ObjectiveBalanced || d.targetN != 0 {
-		t.Fatalf("flagd down gave objective %q, target %d; want balanced, 0", d.defaultObjective, d.targetN)
+	if d.defaultObjective != decision.ObjectiveBalanced {
+		t.Fatalf("flagd down gave objective %q; want balanced", d.defaultObjective)
 	}
 }
 

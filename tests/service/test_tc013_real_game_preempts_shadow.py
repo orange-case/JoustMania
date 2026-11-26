@@ -47,11 +47,8 @@ pytestmark = pytest.mark.tier("service")
 CANDIDATE_VARIANT = "windows_frantic"
 SERVICE_COMPOSITION = AGENT
 TUNING = {
-    "verdict_min_n": 1,
     "verdict_min_pairs": 1,
     "experiment_tick_seconds": 3,
-    "experiment_max_games": 6,
-    "experiment_dynamic_target_n": 2,
     "experiment.max_game_seconds": 90,
 }
 # Served before the agent starts (Composition.agent_flags), so its first tick already reads them.
