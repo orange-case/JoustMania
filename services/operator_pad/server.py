@@ -25,6 +25,7 @@ from lib.grpc_utils import create_channel
 from lib.otel_logging import init_logging
 from lib.otel_metrics import init_metrics
 from lib.system_metrics import start_system_metrics_collector
+from lib.watchdog import start_loop_watchdog
 from proto import audio_pb2_grpc, game_coordinator_pb2_grpc, menu_pb2_grpc
 from services.operator_pad import metrics
 from services.operator_pad.actions import Actions
@@ -92,9 +93,11 @@ async def serve() -> None:
     logger.info("Operator pad service started")
     display_task = asyncio.create_task(display.run(stop))
     internet_task = asyncio.create_task(InternetCheck(config, display_model).run(stop))  # UC-016 BR-010
+    watchdog = start_loop_watchdog("operator-pad")
     try:
         await devices.run(stop)
     finally:
+        watchdog.stop()
         logger.info("Shutting down operator pad service")
         for task in (display_task, internet_task):
             task.cancel()

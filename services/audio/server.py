@@ -20,6 +20,7 @@ from lib.otel_logging import init_logging
 from lib.otel_metrics import init_metrics
 from lib.system_metrics import start_system_metrics_collector
 from lib.telemetry import get_tracer
+from lib.watchdog import start_loop_watchdog
 from proto import audio_pb2_grpc
 from services.audio import metrics
 from services.audio.servicer import AudioServiceServicer
@@ -122,7 +123,9 @@ async def serve():
             )
         )
 
+    watchdog = start_loop_watchdog("audio")
     await shutdown_event.wait()
+    watchdog.stop()
 
     logger.info("Shutting down Audio service...")
     if watcher is not None:

@@ -7,6 +7,8 @@ import time
 
 from opentelemetry import trace
 
+from lib.watchdog import start_loop_watchdog
+
 from .bluetooth_monitor import BluetoothMonitor
 from .bluez_agent import ensure_pairing_agent, register_pairing_agent, set_known_controller_check
 from .config import METRICS_PORT, get_bt_monitor_interval, get_poll_interval, is_debug
@@ -165,6 +167,7 @@ class PairingDaemon:
         # Register the BlueZ pairing agent (UC-001 BR-009)
         await register_pairing_agent()
 
+        watchdog = start_loop_watchdog("pairing-daemon", tracer=self.tracer)
         # Run both loops concurrently
         try:
             await asyncio.gather(
@@ -172,5 +175,6 @@ class PairingDaemon:
                 self._bt_monitor_loop(),
             )
         finally:
+            watchdog.stop()
             # Shutdown: end the LED cues on the controllers on USB (UC-001 BR-010, #2091)
             await self.usb_pairing.led_cue.close()
