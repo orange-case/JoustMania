@@ -61,10 +61,10 @@ func TestRevertNotDoneLeavesNoHeldValue(t *testing.T) {
 	mu.Lock()
 	refuse = false
 	mu.Unlock()
-	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "openai"})
+	h.put(state.WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "rules"})
 	h.waitFor("the push confirmed", func() bool {
 		r, ok := h.link.Links().Remote(backendKey)
-		return ok && r.Variant == "openai"
+		return ok && r.Variant == "rules"
 	})
 	h.roundAndSettle()
 	// An ordinary Flagsmith change, not a revert.

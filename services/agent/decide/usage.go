@@ -63,7 +63,7 @@ func (u *Usage) Add(c CallUsage) {
 	u.t.CacheReadInputTokens.add(c.CacheReadInputTokens)
 	u.t.CacheWriteInputTokens.add(c.CacheWriteInputTokens)
 	u.t.ReasoningOutputTokens.add(c.ReasoningOutputTokens)
-	// Skip empty reasons (some openai-compatible vendors send them).
+	// Skip empty reasons (some vendors send them).
 	for _, r := range c.FinishReasons {
 		if r != "" {
 			u.t.FinishReasons = append(u.t.FinishReasons, r)

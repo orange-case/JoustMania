@@ -113,7 +113,7 @@ Stage-1 pick among the interventions: calm `set_pacing_profile`, dragging
 (0.24 to 0.45), `grant_shield` second.
 
 **Threshold.** No state reaches the global `decision.act_confidence_threshold`
-default 0.8, which claude and openai keep. A bar of **0.6** separates the states:
+default 0.8, which claude keeps. A bar of **0.6** separates the states:
 near-threshold and collapsing act, calm and dragging do not. Jev therefore has
 its own flag `decision.jev.act_confidence_threshold`, default variant `gate`
 (0.6) (#1287; `scripts/agent-backend.sh jev-threshold inherit|gate|default|strict`;
@@ -186,8 +186,8 @@ intensity), `threshold_margin` (death threshold minus intensity, g) and
 Unknown threshold or intensity leaves `danger` empty. Session-level:
 `most_headroom` (strictly lowest current intensity: the calmest right now,
 **not** "winning", and never a reason to eliminate anyone) and `struggling` (strictly highest intensity, if
-elevated or near_threshold). They are in the narrative (so Claude and OpenAI
-read them, and the system prompt explains them) and in the digest.
+elevated or near_threshold). They are in the narrative (so Claude reads
+them, and the system prompt explains them) and in the digest.
 
 `shielded` marks a player a `grant_shield` / `toughness_boost` was dispatched to
 within the last 10 s (the longest shield, read from the timeline); the

@@ -162,7 +162,7 @@ class FlagPlane:
     ):
         """``variant_values``: ``{(flag_set, flag, variant): value}`` rewritten in the
         temporary baseline copy before the flag service starts (e.g. the ``fake``
-        variant of ``decision.openai.base_url`` -> the stack's fake). The variant must
+        variant of ``decision.claude.base_url`` -> the stack's fake). The variant must
         exist: a test-only value never adds a variant the registry does not know.
         ``extra_env``: more flag-service env, applied last (e.g. the FLAGSMITH_* env of a
         fake Flagsmith, #2591; without it the link is off)."""

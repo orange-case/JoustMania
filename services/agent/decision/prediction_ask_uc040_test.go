@@ -16,7 +16,7 @@ import (
 
 // prediction_ask_uc040_test.go: the decision side of the model-stated prediction
 // (#2479, UC-040 A45, BR-034): the ask is set only with
-// decision.predictions.ask_model on and a claude or openai backend, a valid
+// decision.predictions.ask_model on and a claude backend, a valid
 // model prediction is registered with Source model instead of the lever default,
 // and a dropped one registers nothing, is reported on invoke_agent and counted.
 
@@ -45,7 +45,7 @@ func askSnapshotWith(backend string, ask, predictionsOff bool) flags.Snapshot {
 	s.Decision.PredictionsAskModel = ask
 	s.Decision.PredictionsOff = predictionsOff
 	cfg := flags.RemoteBackendConfig{Model: "m", Timeout: time.Hour}
-	s.Decision.OpenAI, s.Decision.Jev = cfg, cfg
+	s.Decision.Jev = cfg
 	return s
 }
 
@@ -73,7 +73,7 @@ func droppedCounts(t *testing.T, reader *metric.ManualReader) map[[2]string]int6
 
 // UC: UC-040 A45 BR-034
 // TestPredictionAsk_FlagAndBackend: the ask is sent only when the flag is on and
-// the backend is claude or openai; jev never gets it.
+// the backend is claude; jev never gets it.
 func TestPredictionAsk_FlagAndBackend(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -83,9 +83,7 @@ func TestPredictionAsk_FlagAndBackend(t *testing.T) {
 		predOff bool
 	}{
 		{"UC-040/A45 BR-034 claude flag on asks", flags.DecisionBackendClaude, true, true, false},
-		{"UC-040/A45 BR-034 openai flag on asks", flags.DecisionBackendOpenAI, true, true, false},
 		{"UC-040/A45 BR-034 claude flag off does not ask", flags.DecisionBackendClaude, false, false, false},
-		{"UC-040/A45 BR-034 openai flag off does not ask", flags.DecisionBackendOpenAI, false, false, false},
 		{"UC-040/A45 BR-034 jev never asks", flags.DecisionBackendJev, true, false, false},
 		{"UC-040/A45 BR-034 predictions_enabled off does not ask", flags.DecisionBackendClaude, true, false, true},
 	} {
@@ -126,7 +124,7 @@ func TestPredictionAsk_FlagAndBackend(t *testing.T) {
 // prediction is registered with Source model (it overrides the lever default),
 // and no dropped reason is reported.
 func TestPredictionAsk_ModelPredictionRegisters(t *testing.T) {
-	for _, backend := range []string{flags.DecisionBackendClaude, flags.DecisionBackendOpenAI} {
+	for _, backend := range []string{flags.DecisionBackendClaude} {
 		t.Run("UC-040/A45 BR-034 "+backend+" model prediction registers", func(t *testing.T) {
 			be := newFakeDecideBackend(parsedAnswer(backend,
 				`{"id": "ffa.prediction", "choice": "survives_30s", "score": 0, "probabilities": [], "confidence": 0.65}`))
@@ -162,7 +160,7 @@ func TestPredictionAsk_DroppedNeverBlocks(t *testing.T) {
 		name, backend, entry, reason string
 	}{
 		{"UC-040/A45 BR-034 claude missing prediction", flags.DecisionBackendClaude, "", decide.PredictionDropMissing},
-		{"UC-040/A45 BR-034 openai bad option", flags.DecisionBackendOpenAI,
+		{"UC-040/A45 BR-034 claude bad option", flags.DecisionBackendClaude,
 			`{"id": "ffa.prediction", "choice": "survives_99s", "score": 0, "probabilities": [], "confidence": 0.7}`, decide.PredictionDropBadOption},
 		{"UC-040/A45 BR-034 claude bad confidence", flags.DecisionBackendClaude,
 			`{"id": "ffa.prediction", "choice": "survives_15s", "score": 0, "probabilities": [], "confidence": 7}`, decide.PredictionDropBadConfidence},

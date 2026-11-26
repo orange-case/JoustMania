@@ -23,7 +23,7 @@ func TestMetrics_ExportSemconvBucketBoundaries(t *testing.T) {
 	})
 
 	m := NewMetrics("test/chathttp-buckets")
-	call := Call{Provider: "openai", RequestModel: "m", Host: "h", Port: 443}
+	call := Call{Provider: "jev", RequestModel: "m", Host: "h", Port: 443}
 	m.RecordDuration(context.Background(), call, "", 300*time.Millisecond)
 	m.RecordTokens(context.Background(), call, 100, 20)
 

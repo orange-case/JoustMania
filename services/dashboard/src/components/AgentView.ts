@@ -615,9 +615,9 @@ function decideStripHtml(current: DecideCurrent | null, switched: boolean): Safe
     </div>`;
 }
 
-/** CSS-safe class suffix for a backend name (rules / claude / openai / jev / other). */
+/** CSS-safe class suffix for a backend name (rules / claude / jev / other). */
 function backendClass(backend: string): string {
-  return ["rules", "claude", "openai", "jev"].includes(backend) ? backend : "other";
+  return ["rules", "claude", "jev"].includes(backend) ? backend : "other";
 }
 
 /** The confidence bar with the threshold tick. */

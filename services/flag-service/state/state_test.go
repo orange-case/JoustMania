@@ -161,11 +161,11 @@ func TestStackOverlay_SubstitutesDefaultVariant(t *testing.T) {
 	})
 	t.Run("UC-053/A1 a free value gets an opaque o-variant; a TTL expires it", func(t *testing.T) {
 		f := newFixture(t, fixtureOpts{})
-		res := f.put(WriteRequest{Set: "agent", Flag: "decision.openai.model", Value: raw(`"vendor-model-1"`), TTLSeconds: ttl(60)})
+		res := f.put(WriteRequest{Set: "agent", Flag: "decision.operator_brief", Value: raw(`"keep it calm"`), TTLSeconds: ttl(60)})
 		if !strings.HasPrefix(res.Variant, "oe1_") {
 			t.Fatalf("variant %q, want an o<epoch>_<n> name", res.Variant)
 		}
-		if _, val := f.resolve("decision.openai.model", nil); val != "vendor-model-1" {
+		if _, val := f.resolve("decision.operator_brief", nil); val != "keep it calm" {
 			t.Fatalf("resolved %v", val)
 		}
 		f.clock.Advance(61 * time.Second)
@@ -173,9 +173,9 @@ func TestStackOverlay_SubstitutesDefaultVariant(t *testing.T) {
 			t.Fatalf("expired %d overlays, want 1", n)
 		}
 		// The flag that was written, not a neighbour: after the TTL it falls back
-		// to the baseline "unset" variant (empty model), not the o-variant.
-		if v, val := f.resolve("decision.openai.model", nil); v != "unset" || val != "" {
-			t.Fatalf("after the TTL decision.openai.model resolved %s=%v, want the baseline unset=\"\"", v, val)
+		// to the baseline "off" variant (empty brief), not the o-variant.
+		if v, val := f.resolve("decision.operator_brief", nil); v != "off" || val != "" {
+			t.Fatalf("after the TTL decision.operator_brief resolved %s=%v, want the baseline off=\"\"", v, val)
 		}
 	})
 	t.Run("UC-053/A1 DELETE ?writer=stage clears that writer's overlays only", func(t *testing.T) {
@@ -261,11 +261,11 @@ func TestStackOverlay_SubstitutesDefaultVariant(t *testing.T) {
 			}
 		}
 	})
-	// #2519: the paid backends' own decide caps are operator overlays within their
+	// #2519: the paid backend's own decide cap is an operator overlay within its
 	// declared variants (without the registry row a write is 422 flag_read_only).
 	t.Run("UC-053/A1 per-backend decide caps are operator overlays (#2519)", func(t *testing.T) {
 		f := newFixture(t, fixtureOpts{})
-		for _, flag := range []string{"decision.claude.max_requests_per_minute", "decision.openai.max_requests_per_minute"} {
+		for _, flag := range []string{"decision.claude.max_requests_per_minute"} {
 			f.put(WriteRequest{Set: "agent", Flag: flag, Variant: "stage", Writer: "operator"})
 			if v, val := f.resolve(flag, nil); v != "stage" || val != float64(30) {
 				t.Fatalf("%s resolved %s=%v, want stage=30", flag, v, val)
@@ -309,7 +309,7 @@ func TestPut_Rejections(t *testing.T) {
 		{"UC-053/A5 undeclared variant", WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "gpt"}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 declared variant outside the allowed list", WriteRequest{Set: "interventions", Flag: "pacing_profile", Variant: "none", Scope: Scope{GameID: "game_a"}}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 malformed composite value", WriteRequest{Set: "interventions", Flag: "tempo_ramp", Value: raw(`"1.3:8:bounce"`), Scope: Scope{GameID: "game_a"}}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
-		{"UC-053/A5 a free string that is not a string", WriteRequest{Set: "agent", Flag: "decision.openai.base_url", Value: raw("42")}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
+		{"UC-053/A5 a free string that is not a string", WriteRequest{Set: "agent", Flag: "decision.operator_brief", Value: raw("42")}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 persist on a non-persistable flag", WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Persist: true}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 persist with a TTL", WriteRequest{Set: "game", Flag: "sensitivity", Variant: "slow", Persist: true, TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
 		{"UC-053/A5 TTL on a game value", WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "game_a"}, TTLSeconds: ttl(10)}, http.StatusBadRequest, fserr.Malformed},
@@ -1471,4 +1471,54 @@ func TestHoldShieldKeysPersistRungs(t *testing.T) {
 			wantReason(t, err, http.StatusBadRequest, fserr.Malformed)
 		})
 	}
+}
+
+// UC: UC-053 A2
+// A state file from a release that still had the openai decision backend
+// (#2788): its decision.backend variant and its decision.openai.model value
+// are dropped as stale, the rest restores and decision.backend serves its baseline.
+func TestRetiredOpenAIBackendInStateFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admin.json")
+	doc := `{"version":1,"values":[
+		{"flag_set":"agent","flag":"decision.backend","variant":"openai","writer":"operator","written_at":"2026-10-16T12:00:00Z"},
+		{"flag_set":"agent","flag":"decision.openai.model","value":"gpt-x","writer":"operator","written_at":"2026-10-16T12:00:00Z"},
+		{"flag_set":"agent","flag":"decision.claude.model","variant":"sonnet","writer":"operator","written_at":"2026-10-16T12:00:00Z"},
+		{"flag_set":"game","flag":"sensitivity","variant":"fast","writer":"menu","written_at":"2026-10-16T12:00:00Z"}]}`
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fx := newFixture(t, fixtureOpts{})
+	var logs bytes.Buffer
+	st, report, err := New(fx.state.base, fx.state.reg, Options{Epoch: "e2", Served: fx.state.base.Order, StateFile: path,
+		Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	if err != nil {
+		t.Fatalf("UC-053/A2 the retired openai values refused the start: %v", err)
+	}
+	g := &fixture{t: t, state: st}
+	t.Run("UC-053/A2 both openai entries are reported stale with their reason", func(t *testing.T) {
+		want := []string{"agent/decision.backend", "agent/decision.openai.model"}
+		if report.Corrupt || report.AdminValues != 2 || strings.Join(report.Dropped, ",") != strings.Join(want, ",") {
+			t.Fatalf("report %+v, want 2 restored and %v dropped", report, want)
+		}
+		out := logs.String()
+		for _, line := range []string{
+			`flag=agent/decision.backend reason="\"openai\" is not a declared variant of decision.backend"`,
+			`flag=agent/decision.openai.model reason="unknown flag"`,
+		} {
+			if !strings.Contains(out, line) {
+				t.Fatalf("log lacks %s:\n%s", line, out)
+			}
+		}
+	})
+	t.Run("UC-053/A2 decision.backend serves its baseline, the other values restore", func(t *testing.T) {
+		if v := g.snapshotFlag("decision.backend")["defaultVariant"]; v != "rules" {
+			t.Fatalf("decision.backend %v, want the baseline rules", v)
+		}
+		if v := g.snapshotFlag("decision.claude.model")["defaultVariant"]; v != "sonnet" {
+			t.Fatalf("decision.claude.model %v, want the persisted sonnet", v)
+		}
+		if v := g.snapshotFlag("sensitivity")["defaultVariant"]; v != "fast" {
+			t.Fatalf("sensitivity %v, want the persisted fast", v)
+		}
+	})
 }

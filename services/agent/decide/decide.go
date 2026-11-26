@@ -1,6 +1,6 @@
 // Package decide is the in-game decision backend contract (epic #1225): one
 // typed request/response shape that every decision backend — the deterministic
-// rules engine today, remote models (claude, jev, openai) later — implements, so
+// rules engine today, remote models (claude, jev) — implements, so
 // an OpenFeature flag can pick the implementation without a gateway in between.
 //
 // A Request carries the game State (a deterministic narrative plus a sha256
@@ -53,8 +53,8 @@ const (
 	KindScore QuestionKind = "score"
 	// KindNoul is a yes/no question answered with the probability of "yes"
 	// (Answer.Noul), the "noul" primitive of TypeSafe's Jev API (#1229). It
-	// carries only Text. Not every backend supports it: the LLM backends
-	// (claude, openai) reject a Request containing one with an error wrapping
+	// carries only Text. Not every backend supports it: the claude backend
+	// rejects a Request containing one with an error wrapping
 	// ErrInvalid, and the rules adapter answers it neutrally (0.5, confidence 0).
 	// No FFA question uses it yet.
 	KindNoul QuestionKind = "noul"
@@ -213,8 +213,8 @@ type Request struct {
 	// It is outside State, so the Digest does not cover it.
 	PromptProfile string `json:"prompt_profile,omitempty"`
 	// OperatorBrief is the cleaned decision.operator_brief (NormalizeOperatorBrief,
-	// #2687, UC-040 BR-044): the operator's free-text wish, set on a claude or
-	// openai request only (jev never gets it). It is outside State, so the Digest
+	// #2687, UC-040 BR-044): the operator's free-text wish, set on a claude
+	// request only (jev never gets it). It is outside State, so the Digest
 	// does not cover it; "" (the default) leaves the rendered prompt byte-identical.
 	OperatorBrief string `json:"operator_brief,omitempty"`
 	// Bounds are the magnitude ranges of this request (#2696, UC-040 BR-045,
@@ -234,11 +234,11 @@ type Request struct {
 	// BR-034; PredictionQuestion): what the model expects to happen if its answer
 	// is applied. It is OUTSIDE Questions, so Validate, the questions span
 	// attribute, the digest and jev never see it. The decision loop sets it only
-	// when decision.predictions.ask_model is on and the backend is claude or
-	// openai; nil (the default) leaves the rendered prompt byte-identical to v1.
+	// when decision.predictions.ask_model is on and the backend is claude;
+	// nil (the default) leaves the rendered prompt byte-identical to v1.
 	PredictionAsk *Question `json:"prediction_ask,omitempty"`
 	// Goal is the optional pair of goal lines (#2479, decide-contract.md §14.4),
-	// set on a claude, openai or jev (#2498) request only under
+	// set on a claude or jev (#2498) request only under
 	// decision.goal_in_prompt, and
 	// only for a goal with terms. It is outside State,
 	// so the Digest does not cover it; with it nil the user message is
