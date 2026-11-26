@@ -952,10 +952,9 @@ and `decide/backends/jev/contract_test.go` (only jev has a dedicated
 ## 14. Characteristics, predictions, goals (#2479)
 
 > Status `Implemented` (FR-200, FR-201; not yet Verified, see the **Planned** line of UC-040). Delivered in slices, all on `main` (characteristics and rules predictions and the Book, #2485; the game summary, the
-> retro block and the dashboard Agent tab, #2479 PR C; model ask; goal profiles, #2479 PR E; jev's goal criterion and the
-> report-only arm calibration, #2498; the dashboard goal strip, PR #2499). The maintainer decisions of 2026-10-31: `activity` is the movement intensity relative to the
-> death threshold (always present, not the optional variance); noop predictions are not scored in v1; arm calibration is
-> report-only. Requirements: FR-200, FR-201. Rules: UC-040 A44, A45, BR-034.
+> retro block and the dashboard Agent tab, #2479 PR C; model ask; goal profiles, #2479 PR E; jev's goal criterion, #2498; the dashboard goal strip, PR #2499; the report-only arm calibration of #2498 was
+> removed in #2815). The maintainer decisions of 2026-10-31: `activity` is the movement intensity relative to the
+> death threshold (always present, not the optional variance); noop predictions are not scored in v1. Requirements: FR-200, FR-201. Rules: UC-040 A44, A45, BR-034.
 
 The agent observes the game only through telemetry (OTel-only observation) and acts only through flags. One small set of
 **measurable characteristics** is the shared vocabulary of (a) predictions the agent makes about what its intervention
