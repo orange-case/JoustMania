@@ -153,6 +153,9 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         self._start_menu_deferred = False
         # game_id of the game the lifecycle follows once its start is confirmed; None before (UC-010 BR-009).
         self._followed_game_id: str | None = None
+        # UC-010 A16: the boot's coordinator lookup is undecided; a StartMenu meanwhile is applied after it.
+        self._boot_lookup_running = False
+        self.boot_start_requested = False
 
         logger.info("Menu service initialized")
 
@@ -304,6 +307,12 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         """Start the menu."""
         span = trace.get_current_span()
         try:
+            if self._boot_lookup_running:
+                # UC-010 A16: whether a game is live is not known yet; the boot enters the lobby after it.
+                self.boot_start_requested = True
+                logger.info("StartMenu during the boot's coordinator lookup: deferred until it is decided")
+                return menu_pb2.StartMenuResponse(success=True, error="")
+
             if self._lifecycle_live():
                 # UC-010 A12 (#2449): no lobby mid-game, whatever the state; the lifecycle's end applies
                 # the request (checked before RUNNING, so the answer during a lifecycle is always success).

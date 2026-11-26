@@ -27,7 +27,29 @@ def _servicer_with_flags(**flags):
     servicer.idle_monitor = create_autospec(IdleMonitor, instance=True)
     servicer.user_prefs_client = create_autospec(OpenFeatureClient, instance=True)
     servicer.user_prefs_client.get_boolean_value.side_effect = lambda key, default, *_a, **_k: flags.get(key, default)
+    servicer.boot_follows_live_game.return_value = False
+    servicer.boot_start_requested = False
     return servicer
+
+
+class _IdleCoordinator:
+    """Coordinator stub for the boot's game lookup (UC-010 A16): no game runs."""
+
+    def __init__(self, _channel):
+        pass
+
+    async def GetGameState(self, _request, **_kwargs):  # noqa: N802 - gRPC stub name
+        from proto import game_coordinator_pb2
+
+        return game_coordinator_pb2.GetGameStateResponse(
+            success=True, game_info=game_coordinator_pb2.GameInfo(state=game_coordinator_pb2.GameState.IDLE)
+        )
+
+
+@pytest.fixture(autouse=True)
+def _idle_coordinator():
+    with patch("proto.game_coordinator_pb2_grpc.GameCoordinatorServiceStub", _IdleCoordinator):
+        yield
 
 
 async def _provider_ready(_domain, *_a, **_k):
@@ -201,6 +223,66 @@ class TestMenuAutoStart:
         servicer.shutdown.assert_awaited_once()
         grpc_server.start.assert_awaited_once()
         grpc_server.stop.assert_awaited_once_with(grace=5)
+
+
+class TestBootFollowsLiveGame:
+    """UC-010 A16 (#2911): the boot asks the coordinator before it opens the button stream or the lobby."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[1, 4])
+    async def test_live_game_skips_button_stream_and_lobby(self):
+        servicer = _servicer_with_flags()
+        servicer.boot_follows_live_game.return_value = True
+
+        await _boot(servicer)
+
+        servicer.boot_follows_live_game.assert_awaited_once()
+        servicer.start_button_monitor.assert_not_awaited()
+        servicer.enter_lobby.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[1, 3])
+    async def test_lookup_comes_before_the_button_stream(self):
+        servicer = _servicer_with_flags()
+        calls = []
+        servicer.boot_follows_live_game.side_effect = lambda: calls.append("lookup") or False
+        servicer.start_button_monitor.side_effect = lambda: calls.append("start_button_monitor")
+        servicer.enter_lobby.side_effect = lambda: calls.append("enter_lobby")
+
+        await _boot(servicer)
+
+        assert calls == ["lookup", "start_button_monitor", "enter_lobby"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[1, 3])
+    async def test_start_menu_during_lookup_enters_lobby_with_auto_start_off(self):
+        servicer = _servicer_with_flags(menu_auto_start=False)
+        servicer.boot_start_requested = True
+
+        await _boot(servicer)
+
+        servicer.enter_lobby.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-010", flow="A16", steps=[2])
+    async def test_unanswered_lookup_reports_serving_after_the_bound(self):
+        events = []
+        servicer = _servicer_with_flags()
+
+        async def unanswered():
+            await asyncio.sleep(3600)
+
+        servicer.boot_follows_live_game.side_effect = unanswered
+
+        with (
+            patch.object(server, "BOOT_HEALTH_TIMEOUT_SECONDS", 0.05),
+            patch.object(server.health.aio, "HealthServicer", TestMenuHealthReadiness._recording_health(events)),
+        ):
+            await _boot(servicer)
+
+        assert ("health", "", health_pb2.HealthCheckResponse.SERVING) in events
+        servicer.start_button_monitor.assert_not_awaited()
+        servicer.enter_lobby.assert_not_called()
 
 
 class TestMenuHealthReadiness:
