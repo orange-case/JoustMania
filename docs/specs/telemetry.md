@@ -10,7 +10,7 @@
 
 | Stage | What | Source |
 |---|---|---|
-| Producers | Python services: OTLP traces (`OTLPSpanExporter`), OTLP metrics (`OTLPMetricExporter`, interval from `metrics_export_interval_ms`), OTLP logs with trace ids; Go agent / connect-proxy and rust-hid: OTLP, metrics every 1 s (their only app-independent metrics are `process_cpu_seconds_total`, `process_resident_memory_bytes`, `process_threads`; the agent adds the §6 `agent_*` and `gen_ai.*` metrics, rust-hid adds `rust_hid_output_write_in_flight_seconds`) | `lib/telemetry.py`, `lib/otel_metrics.py:85-154`, `lib/otel_logging.py`, `services/agent/otel.go:initMetrics`, `services/rust-hid/src/main.rs` (process metrics) |
+| Producers | Python services: OTLP traces (`OTLPSpanExporter`), OTLP metrics (`OTLPMetricExporter`, interval from `metrics_export_interval_ms`), OTLP logs with trace ids; Go agent / connect-proxy and rust-hid: OTLP, metrics every 1 s (their only app-independent metrics are `process_cpu_seconds_total`, `process_resident_memory_bytes`, `process_threads`; the agent adds the §6 `agent_*` and `gen_ai.*` metrics, rust-hid adds `rust_hid_output_write_in_flight_seconds`) | `lib/telemetry.py`, `lib/otel_metrics.py:91-160`, `lib/otel_logging.py`, `services/agent/otel.go:initMetrics`, `services/rust-hid/src/main.rs` (process metrics) |
 | Collector receivers | `otlp` (4317 / 4318), `prometheus/observability`, `prometheus/infrastructure` (flagd 8014, envoy 9901), `hostmetrics`, `docker_stats` | `services/otel-collector/config.yaml:2-149` |
 | Processors | `memory_limiter` (600 MiB, spike 150 MiB, env-overridable), batch (traces 2 s, metrics 100 ms, logs 5 s, the agent's log events 1 s: `batch/agent_events`), resource attributes, `filter/agent_decide` (only in the span-metrics traces pipeline: keeps the decide spans of service `agent`: `invoke_agent joustmania-agent`, and the old name `agent.decide`, §4.2), `filter/agent_events` (only in `logs/agent`: passes only the agent's log events of §3.2, `game.start`, `game.end` and `game.phase.start` records marked `orangecase.audience` = `agent`, and none whose resource has `orangecase.synthetic` true, as a bool or the string `"true"`; no moment log event, UC-041 BR-009), `filter/gateway_agent_only` (only in `logs/gateway`: drops every log record whose attribute `orangecase.audience` is `agent`, UC-100 BR-012); **no sampling** | `config.yaml` |
 | Connectors | `span_metrics`: `traces_span_metrics_calls_total` and `traces_span_metrics_duration_seconds` (explicit buckets 5 ms to 32 s; a series stops being exported 10 min after its last span, because the agent's `instance` changes on every recreate) from the `invoke_agent joustmania-agent` spans (series carry `span_name="invoke_agent joustmania-agent"`, or `agent.decide` from an older agent image, §4.2), by `decide_backend` and `decide_outcome` (§6) | `config.yaml` (`connectors`), `images/otel-collector/builder-config.yaml` |
@@ -372,8 +372,18 @@ Defined in `lib/types.py` but never published: `player_revive`, `player_out`, `s
 
 ## 6. Metrics
 
-Python metrics are created through `lib/otel_metrics.py` (`Counter`, observable `Gauge`, `Histogram`; no unit
-argument). A `Histogram`'s `buckets` are passed to the SDK as explicit bucket boundaries, so each histogram exports
+Python metrics are created through `lib/otel_metrics.py` (`Counter`, observable `Gauge`, `Histogram`, each with an
+optional UCUM `unit`, exported as the OTLP unit). Units declared: `s` on every `*_seconds` metric
+(`grpc_client_request_duration_seconds`, `controller_input_lag_seconds`, `controller_poll_loop_lateness_seconds`,
+`controller_bluetooth_report_gap_p95_seconds`, `controller_bluetooth_report_gap_max_seconds`, `game_duration_seconds`,
+`game_player_shield_energy_seconds`, `game_player_shield_budget_remaining_seconds`, `menu_button_dispatch_seconds`,
+`process_cpu_seconds_total`), `By` on `process_resident_memory_bytes`, `{g}` on the acceleration metrics
+(`controller_accel_magnitude`, `game_player_accel_magnitude`, `game_player_peak_accel`, `game_accel_distribution`) and
+`{g^2}` on `game_player_movement_variance` and `game_player_movement_variance_aggregate`; every other Python metric
+has none. The stored names do not change: prometheus_remote_write (`add_metric_suffixes` default) appends a unit's
+suffix only when the name does not already contain it as a `_`-separated token (`s` = `_seconds`, `By` = `_bytes`), and appends nothing for a
+`{annotation}` unit. A unit must keep that true: `1` on a gauge would add `_ratio`, `g` (gram) `_grams`, `ms` and
+`Hz` would rename `game_loop_jitter_ms` and the `*_hz` gauges, so those carry no unit. A `Histogram`'s `buckets` are passed to the SDK as explicit bucket boundaries, so each histogram exports
 exactly the buckets it declares (UC-035 BR-004). The number of unique Python metric names and definitions is
 generated from the §6.2 scans and printed by `make specs-counts` (not committed) (the `process_*` trio is defined per service, and a few other names in more than one
 service; the catalog's Defined in column lists them); the Go agent adds 11 `agent_*` metrics plus the
