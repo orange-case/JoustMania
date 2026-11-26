@@ -137,6 +137,52 @@ async def test_k8_hold_is_decided_by_the_status_at_the_release_alone(actions, co
     cues.cancel.assert_not_awaited()
 
 
+def no_game(coordinator, error="No game in progress"):
+    """A stuck lifecycle: the menu reports it live, but the coordinator has no game to end."""
+    coordinator.ForceEndGame.return_value = game_coordinator_pb2.ForceEndGameResponse(success=False, error=error)
+
+
+@pytest.mark.uc("UC-015", flow="A11", steps=[7])
+@pytest.mark.uc("UC-010", flow="A8", br=["BR-008"])
+async def test_k8_hold_on_a_stuck_lifecycle_sends_reset_menu(actions, menu, coordinator, cues):
+    no_game(coordinator)
+    live = status(lifecycle_live=True, lifecycle_generation=3)
+    result = await actions.dispatch(Gesture(HOLD, "K8", held_ms=1500), live, live)
+    assert result == ("reset_menu", "ok")
+    coordinator.ForceEndGame.assert_awaited_once()
+    menu.ProcessInput.assert_awaited_once()
+    request = menu.ProcessInput.await_args.args[0]
+    assert request.input_type == "reset_menu"
+    assert dict(request.data) == {}
+    cues.confirmed.assert_awaited_once()
+    cues.refusal.assert_not_awaited()
+
+
+@pytest.mark.uc("UC-015", flow="A11", br=["BR-009"], steps=[7])
+async def test_k8_hold_on_a_game_already_ending_is_refused_without_reset(actions, menu, coordinator, cues):
+    """Only "No game in progress" is a stuck lifecycle; an ending game finishes by itself."""
+    no_game(coordinator, error="Game is already ending")
+    live = status(lifecycle_live=True)
+    result = await actions.dispatch(Gesture(HOLD, "K8", held_ms=1500), live, live)
+    assert result == ("force_end", "refused")
+    menu.ProcessInput.assert_not_awaited()
+    cues.refusal.assert_awaited_once()
+
+
+@pytest.mark.uc("UC-015", flow="A11", br=["BR-009", "BR-010"], steps=[7])
+async def test_k8_hold_reset_menu_unreachable_plays_the_failure_cue(actions, menu, coordinator, cues):
+    no_game(coordinator)
+    menu.ProcessInput.side_effect = grpc.aio.AioRpcError(
+        grpc.StatusCode.UNAVAILABLE, grpc.aio.Metadata(), grpc.aio.Metadata()
+    )
+    live = status(lifecycle_live=True)
+    result = await actions.dispatch(Gesture(HOLD, "K8", held_ms=1500), live, live)
+    assert result == ("reset_menu", "menu_unavailable")
+    menu.ProcessInput.assert_awaited_once()
+    cues.failure.assert_awaited_once()
+    cues.confirmed.assert_not_awaited()
+
+
 # --- disconnected: never queued (A3, BR-010) ------------------------------------------------
 
 

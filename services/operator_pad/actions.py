@@ -61,6 +61,8 @@ tracer = get_tracer(__name__)
 COMMAND_TIMEOUT_SECONDS = 4.0
 VOLUME_PAUSE_SECONDS = 0.25  # BR-005: the volume is committed after this pause in turning
 FORCE_END_REASON = "operator_pad"
+# UC-027 A2: the coordinator has no primary game, so a live menu lifecycle is stuck (UC-015 A11).
+NO_GAME_ERROR = "No game in progress"
 
 # Menu error codes (services.md §3.1, UC-015 BR-012).
 OK = "ok"
@@ -91,7 +93,7 @@ UNMUTE_DEFAULT = "max"
 VOLUME_OPTION = "audio_volume.master"
 
 # UC-016 BR-001 result labels of the commands that are not a row setting.
-COMMAND_LABELS = {"start_game": "START", "force_end": "END GAME", "agent_switch": "AGENT"}
+COMMAND_LABELS = {"start_game": "START", "force_end": "END GAME", "reset_menu": "LOBBY RESET", "agent_switch": "AGENT"}
 # The last command sent in this task and the value the menu reports as committed (UC-016 BR-001).
 # A context variable, so a volume commit running in its own task never mixes into a key's result.
 _SENT: contextvars.ContextVar[tuple[dict[str, str], str] | None] = contextvars.ContextVar("pad_sent", default=None)
@@ -403,14 +405,20 @@ class Actions:
     # --- K8: end (UC-015 step 7) -----------------------------------------------------------
 
     async def _end_game(self, status) -> tuple[str, str]:
-        """K8 hold: force-end a live game; in the lobby the tap is the start, so the hold is refused."""
+        """K8 hold: force-end a live game; in the lobby the tap is the start, so the hold is refused.
+
+        A live lifecycle the coordinator has no game for is stuck (UC-015 A11): `reset_menu` instead.
+        """
         if status is None:
             await self._cues.failure()
             return "force_end", MENU_UNAVAILABLE
         if not status.lifecycle_live:
             await self._cues.refusal()
             return "force_end", REFUSED
-        return "force_end", await self._force_end()
+        result = await self._force_end()
+        if result != NO_GAME_ERROR:
+            return "force_end", result
+        return "reset_menu", await self._reset_menu()
 
     # --- edit and reset (UC-016 A7 to A9, BR-012 to BR-014) ---------------------------------
 
@@ -781,8 +789,28 @@ class Actions:
             return MENU_UNAVAILABLE
         if not response.success:
             logger.warning(f"ForceEndGame refused: {response.error}")
+            if response.error == NO_GAME_ERROR:
+                return NO_GAME_ERROR  # the caller recovers the lifecycle; no refusal cue
             await self._cues.refusal()
             return REFUSED
+        return OK
+
+    async def _reset_menu(self) -> str:
+        """UC-010 BR-008 recovery; the menu checks the coordinator itself and keeps a live game."""
+        try:
+            response = await self._menu.ProcessInput(
+                menu_pb2.ProcessInputRequest(input_type="reset_menu"), timeout=COMMAND_TIMEOUT_SECONDS
+            )
+        except Exception as e:
+            logger.warning(f"Pad reset_menu not sent: {e}")
+            await self._cues.failure()
+            return MENU_UNAVAILABLE
+        if not response.success:
+            logger.warning(f"Pad reset_menu refused: {response.error}")
+            await self._cues.refusal()
+            return REFUSED
+        logger.warning("Pad K8 hold: no game on the coordinator, reset_menu sent")
+        await self._cues.confirmed()
         return OK
 
     async def _cue_for(self, error: str, up: bool = True) -> None:
