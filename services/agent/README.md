@@ -562,7 +562,7 @@ measurement only — it never reverts a bad intervention):
      `intervention.fitness_delta`, and `intervention.effect_aborted=true` when the
      follow-up could not be measured (the game's partition was gone at follow-up, or
      no signal left).
-   - **Metric** `agent_intervention_effect_delta` (`Float64Histogram`, unit `1`): the
+   - **Metric** `agent_intervention_effect_delta_ratio` (`Float64Histogram`, unit `1`): the
      `follow_up − baseline` change, labeled `intervention.type`,
      `intervention.objective`, `intervention.signal`. No point is recorded for an
      aborted follow-up. Only the 0..1 progress-type signals (`*_progress`, `*_ratio`,

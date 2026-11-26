@@ -2002,7 +2002,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Median change in a fitness signal a follow-up window (20 s) after an applied intervention, per signal (endurance / accelerate session_progress, balanced skill_gap, skill_gap_progress, spike_survival_*). Positive progress = the game moved toward the objective (for skill_gap, negative is better). Only the 0..1 progress-type signals reach the metric (#1444), so the buckets (-1 to 1) fit every series. Source: agent_intervention_effect_delta.",
+      "description": "Median change in a fitness signal a follow-up window (20 s) after an applied intervention, per signal (endurance / accelerate session_progress, balanced skill_gap, skill_gap_progress, spike_survival_*). Positive progress = the game moved toward the objective (for skill_gap, negative is better). Only the 0..1 progress-type signals reach the metric (#1444), so the buckets (-1 to 1) fit every series. Source: agent_intervention_effect_delta_ratio.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2075,7 +2075,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (intervention_signal, le) (rate(agent_intervention_effect_delta_bucket[10m])))",
+          "expr": "histogram_quantile(0.5, sum by (intervention_signal, le) (rate(agent_intervention_effect_delta_ratio_bucket[10m])))",
           "legendFormat": "{{intervention_signal}}",
           "refId": "A"
         }
@@ -2088,7 +2088,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Effect samples recorded per minute by the objective the intervention served (agent_intervention_effect_delta_count); one sample per measured signal.",
+      "description": "Effect samples recorded per minute by the objective the intervention served (agent_intervention_effect_delta_ratio_count); one sample per measured signal.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2160,7 +2160,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (intervention_objective) (rate(agent_intervention_effect_delta_count[5m])) * 60",
+          "expr": "sum by (intervention_objective) (rate(agent_intervention_effect_delta_ratio_count[5m])) * 60",
           "legendFormat": "{{intervention_objective}}",
           "refId": "A"
         }
