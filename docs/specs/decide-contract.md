@@ -30,10 +30,10 @@ Defined in `decide/decide.go`.
 |---|---|---|
 | `QuestionKind` | open string | Validate rejects unknown kinds (`services/agent/decide/decide.go:QuestionKind`). |
 | `Question` | `ID`, `Kind`, `Text`, `Options []string` (choice), `Range [2]float64` (score) | `services/agent/decide/decide.go:Question` |
-| `Answer` | `QuestionID`, `Choice`, `Probabilities map[string]float64`, `Score`, `Noul *float64`, `Confidence` | `services/agent/decide/decide.go:Answer` |
+| `Answer` | `QuestionID`, `Choice`, `Probabilities map[string]float64`, `Score`, `Confidence` | `services/agent/decide/decide.go:Answer` |
 | `PlayerState` | `Serial`, `Alive`, `Intensity*`, `Variance*`, `Skill*`, `BatteryPct*`, `EliminationOrder` | pointer = never observed (`services/agent/decide/decide.go:PlayerState`) |
 | `State` | `GameID`, `GameKind`, `Digest`, `Narrative`, `Players` (sorted by serial), `ElapsedSeconds` | `services/agent/decide/decide.go:State` |
-| `Request` | `State`, `Questions`, `Context` (`json:"-"`), `PromptProfile` (`json:"prompt_profile,omitempty"`, #2467), `OperatorBrief` (`json:"operator_brief,omitempty"`, #2687, outside `State`, so not in the digest; set on claude requests only, §3), `Bounds` (`json:"-"`, #2696: the game's magnitude ranges, §2.1; nil = the code defaults) | Only in-process backends (rules) may read `Context`; remote backends must not; never logged with `%v` (`services/agent/decide/decide.go:Request`). `PromptProfile` is set by the agent from `decision.prompt_profile` on the remote path only (§3); it is outside `State`, so it is not part of the State digest. |
+| `Request` | `State`, `Questions`, `Context` (`json:"-"`), `PromptProfile` (`json:"prompt_profile,omitempty"`, #2467), `OperatorBrief` (`json:"operator_brief,omitempty"`, #2687, outside `State`, so not in the digest; set on claude requests only, §3), `Bounds` (`json:"-"`, #2696: the game's magnitude ranges, §2.1; nil = the code defaults), `ActThreshold` (`json:"-"`: the answering backend's act threshold at fire time, §5; read only by jev's gate, §3.1) | Only in-process backends (rules) may read `Context`; remote backends must not; never logged with `%v` (`services/agent/decide/decide.go:Request`). `PromptProfile` is set by the agent from `decision.prompt_profile` on the remote path only (§3); it is outside `State`, so it is not part of the State digest. |
 | `Response` | `Answers`, `Backend`, `Rationale` | Rationale is untrusted text, truncated (`services/agent/decide/decide.go:Response`). |
 | `Backend` | `Name() string`, `Decide(ctx, Request) (Response, error)` | Must honour `ctx` cancellation; the caller validates (`services/agent/decide/decide.go:Backend`). Optional `Available() bool`; false means `backend_unavailable` (`services/agent/decision/decide_registry.go:availability`, `DecideRegistry.Resolve`). |
 
@@ -54,13 +54,9 @@ the permission chain never see them:
 | `choice` | Shipped (`services/agent/decide/decide.go:KindChoice`) | `Choice` ∈ `Options`, `Probabilities` over options (sum 1 ± 1e-3, choice is the argmax), `Score` = 0 | backend-defined, [0,1] |
 | `score` | Shipped (`services/agent/decide/decide.go:KindScore`) | `Score` within the inclusive `Range`; no choice / probabilities | backend-defined, [0,1] |
 | yes/no | Shipped as a two-option `choice` (`services/agent/decide/decide.go:KindChoice`) | as choice | as choice |
-| `noul` | Shipped in PR #1261 (`services/agent/decide/decide.go:KindNoul`) | `Answer.Noul` = P(yes), finite in [0,1]; no choice / probabilities / score; only noul answers may carry `Noul` (`services/agent/decide/validate.go:validateQuestion`, `validateAnswer`) | backend-defined; jev uses \|2p − 1\| |
-
-Notes on `noul` (TypeSafe Jev's yes/no primitive, #1229): backward compatible (`noul` is omitted from
-choice / score answers). Support per backend: **jev** answers natively; **rules** answers 0.5 at confidence
-0; **claude** rejects a request containing a noul before any network I/O with an error
-wrapping `ErrInvalid` (`llmio.Supported`, `services/agent/decide/llmio/llmio.go:Supported`), which the loop records as
-`fallback_reason=invalid_answer`. No caller-level FFA question is a noul; the Jev backend asks the internal `jev.gate` noul every stage-1 round (§3.1).
+There is no yes/no-probability kind in the contract. The noul (P(yes), TypeSafe Jev's native primitive) lives
+only in Jev's wire format, where the gate asks it (§3.1); a request never carries one, so rules and claude never
+see one and `Validate` rejects the kind as unknown.
 
 ### 1.2 State
 
@@ -90,7 +86,7 @@ reflected. The rules engine does not read the state's danger fields; its danger 
 
 **Waiting players (#2513; [UC-040](../use_cases/UC-040.md) A49, BR-038).** A Fight Club or Tournament player waiting for its fight exports no gauges, so the agent evicts it from the game's context and remembers it as waiting (`GameContext.Waiting`, [UC-041](../use_cases/UC-041.md) BR-007). The state lists it as a player with `waiting: true`, `alive: false` and no readings, danger signals or shield fields, with its `elimination_order` when it already lost a round; it is not an `ffa.target` option (only alive serials are) and is not in jev's `alive_players`. Narrative: the session line adds ` waiting=<n>` after `eliminated=` and the player line reads `<serial> waiting`; digest: ` waiting=true` on the player only when set. A game without waiting players (every other mode) has the same state, narrative and digest as before, so `decision/testdata/rules_path_golden.json` and the user-message goldens stay byte-identical. The LLM system prompt (`llmio.go`, both profiles) defines the status in one sentence that describes the state only: a "waiting" player is a Fight Club or Tournament player between its fights, still in the game, not one of the alive players and without readings until it fights again, and the session line's `waiting=<n>` counts them; the `v1_system`, `profile_v1_system` and `profile_neutral_system` goldens and the v1 fingerprint pin (`profile_golden_test.go`) were regenerated for it. Jev (`jev/criteria.go`) describes the player as "waiting for its fight, still in the game." The rules' elimination fraction (R1, R2, R4's elimination path) counts waiting players through the game's `game_active_players` roster (UC-040 A49 step 2). Code: `services/agent/decide/state.go`, `decide/llmio/llmio.go`, `decide/backends/jev/criteria.go`; tests `decide/waiting_uc040_test.go`, `decide/backends/jev/criteria_waiting_uc040_test.go`, `decide/llmio/llmio_waiting_uc040_test.go`.
 
-**Stale readings (#2514; [UC-040](../use_cases/UC-040.md) A50, BR-039).** An alive player whose movement track fails `decide.FreshReadings` at the context's `UpdatedAt` (the check R3, R4 and R8 use: no readings, a frozen value, or a value last new more than 3 s ago) gets `readings_stale: true`, and its `intensity`, `variance` and `skill` are left out, so it has no danger signals and is never `most_headroom` or `struggling`. The player stays listed, `alive: true` and an `ffa.target` option; `battery_pct`, the shield fields and the applied factors stay; a player that is not alive (eliminated, waiting) is never marked. Narrative: the player line reads `<serial> alive readings_stale` with no `movement=` sparkline; digest: ` readings_stale=true` on the player only when set. The levers that need fresh readings are the rules' own (`decide.NeedsFreshReadings`): `adjust_player_sensitivity` (R3), `grant_shield` (R4), `eliminate_player` (R6, #2524) and `send_controller_effect` (R8, R9); the group lever `grant_group_shield` (#2467) has no rule and is not one of them. Jev does not offer a stale player as a target candidate of those four (the details-stage target options), and while alive players exist but none has fresh readings (the first second of a game, an agent restart, a stalled export) it leaves the four out of its intervention-stage options (`services/agent/decide/backends/jev/stale.go:withoutUntargetable`; the caller's `ffa.intervention` question and the routing distribution keep every option). In any other case without a candidate the target is answered `none` and the hook records `invalid/player_intervention_without_target` and describes the player as "Its movement readings are stale, so intensity, variance and skill are not known."; claude keeps the single-round target options, and the system prompt (both profiles) defines the marker in one sentence: what is left out and that those four levers targeted at the player are refused. A remote answer that applies one of them to a player whose readings are stale when it lands is discarded with `target_stale` (§4.4). The `v1_system`, `profile_v1_system` and `profile_neutral_system` goldens and the v1 fingerprint pin were regenerated for the sentence (and again when #2524 added `eliminate_player` to it); the user-message goldens and `decision/testdata/rules_path_golden.json` are unchanged. Code: `services/agent/decide/stale.go`, `decide/state.go`, `decide/llmio/llmio.go`, `decide/backends/jev/stale.go`, `decision/decide_hook.go`; tests `decide/stale_uc040_test.go`, `decide/llmio/llmio_stale_uc040_test.go`, `decide/backends/jev/stale_uc040_test.go`, `decision/stale_target_uc040_test.go`.
+**Stale readings (#2514; [UC-040](../use_cases/UC-040.md) A50, BR-039).** An alive player whose movement track fails `decide.FreshReadings` at the context's `UpdatedAt` (the check R3, R4 and R8 use: no readings, a frozen value, or a value last new more than 3 s ago) gets `readings_stale: true`, and its `intensity`, `variance` and `skill` are left out, so it has no danger signals and is never `most_headroom` or `struggling`. The player stays listed, `alive: true` and an `ffa.target` option; `battery_pct`, the shield fields and the applied factors stay; a player that is not alive (eliminated, waiting) is never marked. Narrative: the player line reads `<serial> alive readings_stale` with no `movement=` sparkline; digest: ` readings_stale=true` on the player only when set. The levers that need fresh readings are the rules' own (`decide.NeedsFreshReadings`): `adjust_player_sensitivity` (R3), `grant_shield` (R4), `eliminate_player` (R6, #2524) and `send_controller_effect` (R8, R9); the group lever `grant_group_shield` (#2467) has no rule and is not one of them. Jev does not offer a stale player as a target candidate of those four (the details-stage target options), and while alive players exist but none has fresh readings (the first second of a game, an agent restart, a stalled export) it leaves the four out of its intervention-stage options (`services/agent/decide/backends/jev/stale.go:withoutUntargetable`; the caller's `ffa.intervention` question and the routing distribution keep every option). In any other case without a candidate the target is answered `none`, which fails the consistency check (§4.3) and falls back to the rules (`invalid_answer`), and jev describes the player as "Its movement readings are stale, so intensity, variance and skill are not known."; claude keeps the single-round target options, and the system prompt (both profiles) defines the marker in one sentence: what is left out and that those four levers targeted at the player are refused. A remote answer that applies one of them to a player whose readings are stale when it lands is discarded `stale` with detail `target_stale` (§4.4). The `v1_system`, `profile_v1_system` and `profile_neutral_system` goldens and the v1 fingerprint pin were regenerated for the sentence (and again when #2524 added `eliminate_player` to it); the user-message goldens and `decision/testdata/rules_path_golden.json` are unchanged. Code: `services/agent/decide/stale.go`, `decide/state.go`, `decide/llmio/llmio.go`, `decide/backends/jev/stale.go`, `decision/decide_hook.go`; tests `decide/stale_uc040_test.go`, `decide/llmio/llmio_stale_uc040_test.go`, `decide/backends/jev/stale_uc040_test.go`, `decision/stale_target_uc040_test.go`.
 
 **Lever cooldown (#2641; [UC-040](../use_cases/UC-040.md) A53, BR-046).** `lever_cooldown` (state, sorted, omitted when empty) names the game-wide levers the permission chain would refuse a new value for at the moment the state is built (§4.5 step 3a: written less than the effect window ago, a write in flight or a decision holding it), from one ledger snapshot per request (`Loop.CoolingLevers`). Narrative token on the session line: `lever_cooldown=adjust_global_difficulty,adjust_volume`; digest line ` lever_cooldown=<names>` only when set, so a state without one keeps its digest and `decision/testdata/rules_path_golden.json` stays byte-identical. Jev reads it from the narrative. The LLM system prompt (`llmio.go`) explains it in one sentence. Code: `services/agent/decide/state.go`, `decision/levercooldown.go`, `decision/decide_hook.go`; tests `decide/lever_cooldown_uc040_test.go`, `decision/levercooldown_uc040_test.go`.
 
@@ -257,8 +253,7 @@ where they are options (`ffa.target`; `ffa.intervention` only when it is not gat
 first-option bias then fails safe (measured in PR #1265: about 0.03 of p(noop); the noop wording matters
 more). Confidence: `ffa.intervention` is the acting confidence 1 − p(noop) (p(noop) when noop is chosen),
 the same definition as the rules adapter, computed on the synthesised routing distribution of the gate
-(§3.1), so it equals the gate's p_yes when acting; other questions keep Jev's native confidence; noul uses
-\|2p − 1\|. Jev's native values are recorded on the chat span as `jev.native_confidence`. HTTP errors (400 / 401 / 413 / 415 / 422 / 429 / 529 / 5xx) map to `error`;
+(§3.1), so it equals the gate's p_yes when acting; other questions keep Jev's native confidence. Jev's native values are recorded on the chat span as `jev.native_confidence`. HTTP errors (400 / 401 / 413 / 415 / 422 / 429 / 529 / 5xx) map to `error`;
 unparseable or incomplete answers to `invalid_answer`.
 
 **Two-stage Jev round** (PR #1265, `decide/backends/jev/stages.go`, `services/agent/decide/backends/jev/jev.go:Backend.Decide`). The hook still
@@ -267,7 +262,7 @@ makes one `Decide` call; inside it Jev answers an FFA request in up to two HTTP 
 
 | Stage-1 outcome | Stage 2 asks | Answered locally |
 |---|---|---|
-| gate closed (p_yes ≤ 0.5): `noop` | nothing (1 call) | target `none`, magnitude at the range minimum |
+| gate closed (p_yes below the act threshold, §3.1): `noop` | nothing (1 call) | target `none`, magnitude at the range minimum |
 | player intervention with bounds (e.g. `grant_shield`, `adjust_player_sensitivity`) | target and magnitude | nothing |
 | player intervention without bounds (e.g. `send_controller_effect`) | target | magnitude |
 | session intervention with bounds (e.g. `adjust_music_tempo`) | magnitude | target `none` |
@@ -281,7 +276,7 @@ levels; the neutral value is never a level. For two-way levers (factors with a n
 direction from the chosen target's signals and Jev only picks the strength, a level chosen as in §3.2.
 A stage-2 failure fails the whole round (rules fallback with `error`, `timeout` or
 `invalid_answer`); there are no half answers. Each call gets its own chat span with `jev.stage` =
-`intervention`, `details` or `single` (requests without `ffa.intervention`, e.g. nouls). The rationale is a
+`intervention`, `details` or `single` (requests without `ffa.intervention`). The rationale is a
 model-free summary such as
 `jev: adjust_player_sensitivity (gate p_yes=0.70; adjust_player_sensitivity p=0.38 among interventions) on MOCK0003 (p=0.89)`.
 
@@ -297,18 +292,22 @@ the death threshold (p(noop) 0.67, the rest split). Stage 1 therefore asks, **in
 
 - the **gate** noul, internal id `jev.gate` (never returned to the caller): "Does the game need an
   intervention right now?", with `true` / `false` criteria (a collapsing, dragging or lopsided round vs a
-  round going well on its own; `services/agent/decide/backends/jev/criteria.go:noulCriteria`);
+  round going well on its own; `services/agent/decide/backends/jev/criteria.go:noulCriteria`). The noul is a
+  detail of Jev's wire format (`type: "noul"`, answer `{noul: P(yes)}`), not a contract question kind (§1.1);
 - `ffa.intervention` **without `noop`**: "If the agent intervenes now, which intervention fits the game best?".
 
 The `ffa.intervention` answer the backend returns is **synthesised** (`services/agent/decide/backends/jev/stages.go:gateAnswer`):
-`{noop: 1 − p_yes, argmax_iv: p_yes, every other option: 0}`, where `argmax_iv` is Jev's stage-1 pick.
-Consequences:
+`{noop: 1 − p_yes, argmax_iv: p_yes, every other option: 0}` when the gate opens, where `argmax_iv` is Jev's
+stage-1 pick, and `{noop: 1, every other option: 0}` when it stays closed. Consequences:
 
-- **Confidence = p_yes** when acting (1 − p_yes for noop), so the confidence routing (§5) gates the gate,
-  against Jev's own `decision.jev.act_confidence_threshold` (default 0.6, #1287).
-- **Choice = argmax_iv iff p_yes > 0.5**, else `noop`, decided by `gateAnswer`'s strict `>` (exactly 0.5 is
-  `noop`; `decide.Validate` only accepts the result within its 1e-3 argmax tolerance); a closed gate makes no
-  details call.
+- **Confidence = p_yes** when acting, 1 − p_yes for noop (set on the answer, not read from the distribution).
+- **Choice = argmax_iv iff p_yes reaches the act threshold** (`Request.ActThreshold`: `decision.jev.act_confidence_threshold`
+  read when the call fires, default 0.6, §5), else `noop`; a closed gate makes no details call. One number decides
+  whether Jev acts: the routing (§5) compares the same p_yes with the same flag, so an answer is `held` only when the
+  flag changed while the call was in flight. Between 0.5 and the threshold Jev answers `noop`, not `held`; the closed
+  form puts the mass on `noop` because there the open form's argmax would be the intervention. A threshold below 0.5
+  (no declared variant is) opens the gate at 0.5, so the open form's choice stays the argmax that `decide.Validate`
+  checks (within its 1e-3 tolerance; exactly 0.5 acts) (`services/agent/decide/backends/jev/stages.go:gateThreshold`).
 - **Full option coverage**: every option of the caller's question is in the distribution.
 - Deliberately **not** the factorised `p_yes × q_i`, which would split the acting mass again.
 - `decide.answers` on `invoke_agent joustmania-agent` shows the synthesised distribution; Jev's **real** answers are on the
@@ -318,15 +317,13 @@ Consequences:
   the question unchanged.
 - Jev's static game description no longer says "Doing nothing is often right; intervene only when the game
   state clearly calls for it": it biased the gate (near-threshold p_yes 0.48 → 0.55). The description is in
-  the state of every Jev call, so the details stage and caller nouls shift slightly too (e.g. the recorded
-  `about_to_end` noul 0.62 → 0.60).
+  the state of every Jev call, so the details stage shifts slightly too.
 
 **Calibration** (live, jev-1.13.0, 2026-10-16, `TestLiveGate`, shipped wording, 2 runs): calm 0.16 / 0.16,
-dragging 0.36 / 0.35, collapsing 0.67 / 0.68, near-threshold 0.72 / 0.71. None reaches the global default
+dragging 0.36 / 0.35, collapsing 0.67 / 0.68, near-threshold 0.72 / 0.71. None reaches claude's default
 threshold 0.8. A threshold of 0.6 makes near-threshold and collapsing act and leaves calm and dragging as noop,
-so Jev has its **own** threshold `decision.jev.act_confidence_threshold`, default variant `gate` (0.6), and acts
-out of the box (#1287); claude keeps the global `decision.act_confidence_threshold` (default 0.8),
-whose `gate` variant (0.6) remains but no longer affects Jev unless Jev's flag is `inherit`. Dragging stays low because Jev does not derive "nobody eliminated for 130 s" from the timeline; a
+so Jev's threshold `decision.jev.act_confidence_threshold` defaults to its variant `gate` (0.6) and Jev acts
+out of the box (#1287); claude has its own `decision.claude.act_confidence_threshold` (default 0.8). Dragging stays low because Jev does not derive "nobody eliminated for 130 s" from the timeline; a
 precomputed pace signal is a follow-up.
 
 ### 3.2 Jev score levels (#1281)
@@ -341,8 +338,9 @@ that level's value. The help / rein-in direction of two-way levers is unchanged 
 
 ## 4. Validation
 
-Applied in this order. Any failure in 4.1 or 4.2 is `fallback_reason=invalid_answer`
-and rules decide on the **current** context.
+Applied in this order. Any failure in 4.1, 4.2 or 4.3 is `fallback_reason=invalid_answer`
+and rules decide on the **current** context. There is no outcome for an answer that is malformed in one
+question and one that is inconsistent across questions: both are invalid answers.
 
 ### 4.1 Parse (remote only), `decide/llmio/parse.go`
 
@@ -380,45 +378,49 @@ and rules decide on the **current** context.
   `toughness_boost` in #1838) is not among the options and is `invalid_answer`; the round falls back to the rules.
 - Score: finite, within the inclusive range, no choice / probabilities.
 
-### 4.3 Cross-question consistency, `services/agent/decision/decide_hook.go:mapAnswers`
+### 4.3 Cross-question consistency, `services/agent/decide/validate.go:validateFFA`
 
-Failure here is outcome `invalid` with `decide.invalid_reason`, **no action and no
-rules fallback**.
+Part of `decide.Validate`, for a request that asks `ffa.intervention`, so a failure wraps `ErrInvalid` like any
+other: `fallback_reason=invalid_answer`, rules decide. The error text names the check; the span carries only
+`error.type=invalid_answer`.
 
-| `decide.invalid_reason` | Condition |
+| Check | Condition that fails it |
 |---|---|
-| `noop_with_target` | intervention `noop` but target ≠ `none` |
-| `player_intervention_without_target` | player-scoped intervention with target `none` |
-| `session_intervention_with_target` | session-scoped intervention with a serial |
-| `missing_intervention_answer` | no `ffa.intervention` answer |
-| `group_intervention_without_group` | the group lever `grant_group_shield` with `none`, a serial, or a group option that does not resolve against the request's alive players (#2467, UC-048 A13) |
-| `group_target_for_single_intervention` | a group option (`group:…`) on any other intervention |
+| noop has no target | intervention `noop` but target ≠ `none` |
+| player lever has a player | player-scoped intervention with target `none` |
+| session lever has no target | session-scoped intervention with a serial |
+| group lever has a group | the group lever `grant_group_shield` with `none`, a serial, or a group option that does not resolve against the request's alive players (#2467, UC-048 A13) |
+| group options only on the group lever | a group option (`group:…`) on any other intervention |
 
-A group option resolves against the request's alive players (`decide.ResolveGroupTarget`) into the decision's set `TargetSerials` (sorted, 2 or more); the group lever never sets `TargetSerial`.
+A missing `ffa.intervention` answer already fails 4.2 (every question answered exactly once). A group option
+resolves against the request's alive players (`decide.ResolveGroupTarget`) into the decision's set
+`TargetSerials` (sorted, 2 or more); the group lever never sets `TargetSerial`.
 
 Player-scoped interventions: `send_controller_effect`, `eliminate_player`,
 `revive_player`, `adjust_player_sensitivity`, `set_player_handicap`, `grant_shield`,
-`toughness_boost`, `soft_penalty` (`services/agent/decision/decide_hook.go:playerTargetedInterventions`).
+`toughness_boost`, `soft_penalty` (`decide.Intervention.PlayerTargeted`, `services/agent/decide/catalog.go`).
 
 ### 4.4 Re-validation when a remote answer lands
 
 Order on landing (`services/agent/decision/decide_hook.go:Loop.runDecideRemote`, `decideRemoteApply`, `decideRemoteFallback`):
 
 1. Live flags: `enabled` off → `discarded/kill_switch`; `decision.backend` changed → `discarded/backend_changed`.
-2. Fallback path (the call failed): rules decide on the current context; if the context is missing or the
-   game has ended, nothing is decided and the span carries `outcome=fallback` **with**
-   `discarded_reason` = `stale_context` / `game_ended`.
-3. Answer path: cross-question check (`invalid`), `noop`, then confidence routing (`held` below the
-   threshold). Only an answer that would act is then checked against the current context: missing →
-   `discarded/stale_context`; game no longer active → `discarded/game_ended`; target absent or inactive (for a group: any target of its set, #2467) →
-   `discarded/target_gone` (`decision/async_state.go`, `services/agent/decision/group.go:groupPresent`); a lever that needs fresh readings (`decide.NeedsFreshReadings`: `adjust_player_sensitivity`, `grant_shield`, `send_controller_effect`) applied to a player whose readings are not fresh in the current context (`decide.FreshReadings`, §1.2) → `discarded/target_stale` (#2514, UC-040 A50, BR-039); the state the request was built on (the fire-time
+2. Fallback path (the call failed, `decide.fallback_reason` set): rules decide on the current context; if the
+   context is missing or the game has ended, nothing is decided and the span carries `outcome=discarded`,
+   `discarded_reason=stale` (detail `context_missing` / `game_ended`), with the fallback reason kept, as a kill-switch
+   discard of a failed call keeps it.
+3. Answer path: `noop`, then confidence routing (`held` below the threshold). Only an answer that would act
+   is then checked against the current context; any failure is `discarded/stale`, and
+   `decide.discarded_detail` names the check: context missing → `context_missing`; game no longer active →
+   `game_ended`; target absent or inactive (for a group: any target of its set, #2467) → `target_gone`
+   (`decision/async_state.go`, `services/agent/decision/group.go:groupPresent`); a lever that needs fresh readings (`decide.NeedsFreshReadings`: `adjust_player_sensitivity`, `grant_shield`, `send_controller_effect`) applied to a player whose readings are not fresh in the current context (`decide.FreshReadings`, §1.2) → `target_stale` (#2514, UC-040 A50, BR-039); the state the request was built on (the fire-time
    `GameContext.UpdatedAt`) older than the live `decision.max_state_age_ms` when the answer landed →
-   `discarded/state_too_old` (#2123, `services/agent/decision/decide_hook.go:stateTooOld`; 0 disables it, an
+   `state_too_old` (#2123, `services/agent/decision/decide_hook.go:stateTooOld`; 0 disables it, an
    unset `UpdatedAt` never discards). A low-confidence answer after the game ended is therefore `held`, not
    `discarded`.
 
 Every remote `invoke_agent joustmania-agent` span that carries a `decide.discarded_reason` (steps 1 to 3, and the shutdown discard
-of §9) is also counted in `agent_decide_discarded_total{reason}` (#2123).
+of §9) is also counted in `agent_decide_discarded_total{reason}` (#2123); the detail is not a label.
 
 ### 4.5 Permission chain (both paths)
 
@@ -428,14 +430,14 @@ of §9) is also counted in `agent_decide_discarded_total{reason}` (#2123).
 **1a.** Group gate and set (#2467 PR 4; UC-048 A13, A14, BR-014; `services/agent/decision/group.go:groupSetRefusal`), `grant_group_shield` only, check-only: `group_disabled` (`policy.group_grant.enabled` off, `max_targets` unreadable or `max_per_game` 0; the agent reads the four flags in `flags.Evaluate` with no context, fail closed, clamped like the coordinator), `group_real_game` (the game kind is not `shadow` and `real_games` is off; an empty or unknown kind counts as real), `group_bad_set` (the set is not 2 to `max_targets` distinct players the context shows alive). The same gate, plus 2 to `max_targets` alive players and the game's group count below `max_per_game`, decides whether the lever is offered at all: `Loop.withoutClosedGroupLever` drops it from the remote request's offered list (`offeredInterventions`, so also from the call gate of §7.1) and from the rules path's request, so a closed gate leaves every request byte-identical. No rule proposes the lever.
 2. `policy.battery_threshold` (player-targeted only, and every target of a group; unknown battery does not block) → `battery_threshold`
 
-**2a.** Experiment flag (#1975; UC-040 A40, BR-028; `decision/experimentflag.go`), check-only: in a game that belongs to an experiment in either arm, a decision whose intervention is a lever of the experiment's flag (`decision.ExperimentLevers`: `set_pacing_profile` → `windows`, `adjust_global_sensitivity` → `sensitivity`) → `experiment_flag`. The flag comes from the loop's source (`Loop.SetExperimentFlagSource`, wired in `main.go` to the experiment registry: the game id bound at spawn, then the context's `experiment_id`); no source, no experiment or an experiment the registry does not know blocks nothing. Before the rate limit, so it charges no budget and does not end rank-order admission. The rules engine never proposes these levers (#800), so the step acts on remote decisions; the rules golden is unchanged. Since #2251 (UC-040 A40 steps 5-6) the remote request of such a game does not offer the levers of the flag (`Loop.offeredInterventions`, §3.1, also used by the call gate of §7.1), so the step only catches a backend that answers an intervention it was not offered; and only the first block of a lever on a flag per game is emitted in full: a repeat only counts in `agent_decisions_total` and logs `agent.decision_experiment_flag_repeat` at debug level (as A21). The rules path request is unchanged.
+**2a.** Experiment flag (#1975; UC-040 A40, BR-028; `decision/experimentflag.go`), check-only: in a game that belongs to an experiment in either arm, a decision whose intervention is a lever of the experiment's flag (`decision.ExperimentLevers`: `set_pacing_profile` → `windows`, `adjust_global_sensitivity` → `sensitivity`) → `experiment_flag`. The flag comes from the loop's source (`Loop.SetExperimentFlagSource`, wired in `main.go` to the experiment registry: the game id bound at spawn, then the context's `experiment_id`); no source, no experiment or an experiment the registry does not know blocks nothing. Before the rate limit, so it charges no budget and does not end rank-order admission. The rules engine never proposes these levers (#800), so the step acts on remote decisions; the rules golden is unchanged. Since #2251 (UC-040 A40 steps 5-6) the remote request of such a game does not offer the levers of the flag (`Loop.offeredInterventions`, §3.1, also used by the call gate of §7.1), so the step only catches a backend that answers an intervention it was not offered. Repeats are quiet (repeated refusals, below). The rules path request is unchanged.
 
-3. Already applied (#2046; UC-040 A35, BR-023; `decision/appliedledger.go`), check-only: it reserves nothing, so its refusal cannot leak a reservation of a later step. Only when the loop's suppression is on (`Loop.SetSuppressReapplied(true)`, wired in `main.go`; off in a hand-built loop such as the rules golden) and only for a state or level intervention (the `state` and `level` kinds of flags.md §13.1, the static set `decision.IdempotentInterventions`, pinned against `registry.yaml` by `actions/idempotent_uc040_test.go`). A grant or an event is never suppressed. The per-game applied-value ledger is keyed `intervention|target serial` and holds the normalised value of the last write the agent made (`applied=true`): the decision's `Value` parsed as a float when it parses as a finite number, else the trimmed string (so `"0.8"` and `"0.80"` match; an empty value matches only an empty value, since the writer's default is a constant). The decision is blocked `already_applied` when the entry matches and is younger than 30 s (a constant, C-035), and its target is still in the game context's players (an entry for an absent serial is dropped). While a write to the key is in flight the entry never matches and is left out of the rules snapshot (a different value may land last); a failed write deletes the entry, as do two writes to one key in flight at once (they may finish in either order); a gated write (A11) leaves it unchanged; an expired entry is written again, which re-asserts a value the flag service lost (a restart, UC-053 A9 / A13). A new flag-service boot epoch does not clear the ledger: the writer drops the write result, so the 30 s TTL is the bound. The block charges no budget and does not end rank-order admission. The first suppression per recorded value emits the spans, an info log `agent.decision_already_applied` (not the `agent.decision_blocked` warning) and a timeline entry "already in place"; repeats only count in `agent_decisions_total` and log `agent.decision_already_applied_repeat` at debug level. The rules engine drops an already-applied candidate after ranking (`applyAppliedPolicy` on the ranked list, one ledger snapshot per ranking), so the rules may rank an intervention on another key instead, possibly a stronger one (a `grant_shield` for the same player, which step 4 and UC-048 BR-007 still bound). In rank order it keeps at most one candidate per state or level key: an already-applied candidate, though not emitted, and a kept one both claim their key, so a lower-ranked candidate with another value for that key is dropped (§15.6, #2487; R1 1.3 and R5 1.0 on the tempo no longer alternate every cycle). The decide state carries the applied per-player factors (`sensitivity_factor`, `handicap_factor`, §1.2; #2066).
-**3a.** Lever cooldown (#2641; UC-040 A53, BR-046; `decision/levercooldown.go`), check-only, after step 3 and only when it did not block: for a game-wide lever of BR-046 (`adjust_global_difficulty`, `adjust_global_sensitivity`, `adjust_music_tempo`, `adjust_volume`, `set_pacing_profile`; `decide.Intervention.Cooldown`) and only while suppression is on, the decision is blocked `lever_cooldown` when the loop's last applied write to the key `intervention|` is younger than the effect window (`Loop.effectWindow`, `effect.window_seconds` resolved at the check, default 20 s) and wrote another value, or a write to the key is in flight, or another decision holds the key. The last written value (normalised as in step 3, unknown after two overlapping writes) is never refused, so it is re-asserted once its 30 s TTL expires inside a longer window. A decision that passes holds the key (`cooldownHold`) until `runDecision` returns, after the write ended, so two concurrent decisions for one lever cannot both write inside one window. The rules engine drops a candidate this step would refuse before emission (`applyCoolingPolicy` after `applyAppliedPolicy` in `rankLocked`, one `Loop.CoolingValues` snapshot per ranking), so it takes no emission slot. The write time is kept in the applied-value ledger beside the value, set only by a write that applied (not by a failed or gated write), and does not expire with the value's 30 s TTL. The same value is caught by step 3 first, so a repeat stays `already_applied`. The block charges no budget and does not end rank-order admission. The first refusal per write emits the spans, an info log `agent.decision_lever_cooldown` and a blocked timeline entry; repeats only count in `agent_decisions_total` and log `agent.decision_lever_cooldown_repeat` at debug level. The decide state names the levers in cooldown (`lever_cooldown`, §1.2).
+3. Already applied (#2046; UC-040 A35, BR-023; `decision/appliedledger.go`), check-only: it reserves nothing, so its refusal cannot leak a reservation of a later step. Only when the loop's suppression is on (`Loop.SetSuppressReapplied(true)`, wired in `main.go`; off in a hand-built loop such as the rules golden) and only for a state or level intervention (the `state` and `level` kinds of flags.md §13.1, the static set `decision.IdempotentInterventions`, pinned against `registry.yaml` by `actions/idempotent_uc040_test.go`). A grant or an event is never suppressed. The per-game applied-value ledger is keyed `intervention|target serial` and holds the normalised value of the last write the agent made (`applied=true`): the decision's `Value` parsed as a float when it parses as a finite number, else the trimmed string (so `"0.8"` and `"0.80"` match; an empty value matches only an empty value, since the writer's default is a constant). The decision is blocked `already_applied` when the entry matches and is younger than 30 s (a constant, C-035), and its target is still in the game context's players (an entry for an absent serial is dropped). While a write to the key is in flight the entry never matches and is left out of the rules snapshot (a different value may land last); a failed write deletes the entry, as do two writes to one key in flight at once (they may finish in either order); a gated write (A11) leaves it unchanged; an expired entry is written again, which re-asserts a value the flag service lost (a restart, UC-053 A9 / A13). A new flag-service boot epoch does not clear the ledger: the writer drops the write result, so the 30 s TTL is the bound. The block charges no budget and does not end rank-order admission. A suppression emits the spans, an info log `agent.decision_already_applied` (not the `agent.decision_blocked` warning) and a timeline entry "already in place"; repeats are quiet (below). The rules engine drops an already-applied candidate after ranking (`applyAppliedPolicy` on the ranked list, one ledger snapshot per ranking), so the rules may rank an intervention on another key instead, possibly a stronger one (a `grant_shield` for the same player, which step 4 and UC-048 BR-007 still bound). In rank order it keeps at most one candidate per state or level key: an already-applied candidate, though not emitted, and a kept one both claim their key, so a lower-ranked candidate with another value for that key is dropped (§15.6, #2487; R1 1.3 and R5 1.0 on the tempo no longer alternate every cycle). The decide state carries the applied per-player factors (`sensitivity_factor`, `handicap_factor`, §1.2; #2066).
+**3a.** Lever cooldown (#2641; UC-040 A53, BR-046; `decision/levercooldown.go`), check-only, after step 3 and only when it did not block: for a game-wide lever of BR-046 (`adjust_global_difficulty`, `adjust_global_sensitivity`, `adjust_music_tempo`, `adjust_volume`, `set_pacing_profile`; `decide.Intervention.Cooldown`) and only while suppression is on, the decision is blocked `lever_cooldown` when the loop's last applied write to the key `intervention|` is younger than the effect window (`Loop.effectWindow`, `effect.window_seconds` resolved at the check, default 20 s) and wrote another value, or a write to the key is in flight, or another decision holds the key. The last written value (normalised as in step 3, unknown after two overlapping writes) is never refused, so it is re-asserted once its 30 s TTL expires inside a longer window. A decision that passes holds the key (`cooldownHold`) until `runDecision` returns, after the write ended, so two concurrent decisions for one lever cannot both write inside one window. The rules engine drops a candidate this step would refuse before emission (`applyCoolingPolicy` after `applyAppliedPolicy` in `rankLocked`, one `Loop.CoolingValues` snapshot per ranking), so it takes no emission slot. The write time is kept in the applied-value ledger beside the value, set only by a write that applied (not by a failed or gated write), and does not expire with the value's 30 s TTL. The same value is caught by step 3 first, so a repeat stays `already_applied`. The block charges no budget and does not end rank-order admission. A refusal emits the spans, an info log `agent.decision_lever_cooldown` and a blocked timeline entry; repeats are quiet (below). The decide state names the levers in cooldown (`lever_cooldown`, §1.2).
 4. The shield ledger (`decision/chargeledger.go` `reserveShield`; targeted `grant_shield` only). One per-game ledger by serial holds the trigger-mode charge (UC-048 A4), the shield count and the end of the last shield (UC-048 A6). One check returns exactly one of `already_charged`, `shield_cap_reached`, `shield_cooldown` or a reservation, in that order, so a refusal never leaves a reservation behind; the one reservation is kept only when the write is applied and is released by the caller's deferred finish on every other path (a rate-limit block, a gated write, a failed write). The check-only already-applied step (3) goes ahead of this step, so it cannot leak a reservation either.
-   - `already_charged` (#1837 PR-4a; UC-048 A4 step 1): at most one agent charge per player per window, in trigger mode only. Trigger mode means `game.mode` is `FFA`, the game is real and `shield.activation` resolves to `trigger`, read per targeted `grant_shield` from the `game` set (`services/agent/flags/game.go:ShieldCharge`) with `gameId` and `game_kind=real`, no `targetingKey` and no `game_mode`. The coordinator's grant read carries the game's transaction context as well (UC-040 BR-018, #1970), but targeting on these flags may reference only `gameId` and `game_kind` (flags.md §4) and the agent reads them only for a real game, so both resolve the same value. A `grant_shield` whose target holds an entry in the loop's charge ledger is blocked before the rate limit: it charges no budget, writes nothing and measures no effect. The window is `min(shield.charge_expiry_seconds, 20 s)` (20 s when the expiry is 0) plus 2 s for the write to reach the coordinator, so at most 22 s. The check reserves the entry; it is kept only when the write is applied (`applied=true`) and released by a rate-limit block, a gated write (UC-040 A11) or a failed write (A27). Every entry, a reserved one too, ends with its window, so a lost release blocks at most 22 s. The first refusal per entry gets the full spans, the `agent.decision_blocked` warning and a timeline entry; repeats only count in `agent_decisions_total` and log `agent.decision_already_charged_repeat` at debug level (as the `rate_limit` repeats below). On the remote path an answer that lands for such a target is blocked the same way and `invoke_agent joustmania-agent` carries `decide.blocked` / `decide.block_reason=already_charged`. Fail open: any other mode, a shadow game, an unknown mode or an unreadable `game` set (not READY) means no block; an unreadable set logs `agent.shield_charge_mode_unreadable` at most once per 30 s. The ledger is the agent's own record (no shield-state gauge, in memory only, lost on an agent restart), so it also refuses a grant after the player activated, which the coordinator would accept (UC-048 A4, BR-005), by design. The coordinator stays authoritative. The ledger also feeds the decide state (`shield_charged`, §1.2) and the rules engine, which drops a `grant_shield` candidate to a `shield_charged` target before ranking (`applyChargePolicy`, like the battery policy; the rules path takes one ledger snapshot per ranking and hands the same snapshot to the state it builds). An activation, an expiry or a death does not shorten the window: it is a pacing rule (#1870).
-   - `shield_cap_reached` and `shield_cooldown` (#2044; UC-048 A6, BR-007), in every mode and game kind, from the live `policy.max_shields_per_player_per_game` (default 3, 0 = unlimited) and `policy.shield_cooldown_seconds` (default 15, 0 = off) of the cycle's snapshot (a read error or a negative value gives the default; flags.md §3). The cap counts the player's written `grant_shield`s in this game plus the ones in flight, so concurrent cycles cannot both take the last slot. The cooldown refuses while now is before the last shield's end plus the cooldown; the end is write time + granted seconds (the decision's value; a grant without one is stamped before this step with the `shield_seconds` `default` variant, 5 when unreadable, UC-048 BR-012, #2395) + the same 2 s margin, in trigger mode too (the cooldown runs from the grant, UC-048 BR-007). While a cooldown is set, a grant still in flight for the player also refuses `shield_cooldown`: it has no end yet. The count is an upper bound of the coordinator's (UC-048 BR-007): it also counts a write the coordinator refused or kept. 0/0 refuses nothing (the zero `Policy` of a hand-built snapshot, so the rules golden is unchanged). Repeats are quiet as for `already_charged`: the first refusal per reason since the last reservation or write is emitted in full, later ones only count in `agent_decisions_total` and log `agent.decision_shield_cap_reached_repeat` / `agent.decision_shield_cooldown_repeat` at debug level. The rules engine's no-shield filter (`applyChargePolicy`) is fed with the charged players plus the capped and cooling-down ones (`Loop.ShieldSerials`, one snapshot per ranking), so R4 does not propose a refused shield. R4's target is the weakest of the alive players with the fewest agent shields in this game (`Loop.ShieldGrants`: written plus in flight, the same per-game ledger; catch-up, §15.2, #2395), so the rules path's `ffa.target` answer and its decisions shield every alive player once before any twice; the decide state marks the charged ones `shield_charged` and the capped and cooling-down ones `shield_limited` (§1.2; #2066).
-   - Hold games (#2096; UC-048 A9 step 1), in a game whose `game_shield_activation_mode` gauge says `hold` only, after the allow-list and battery and before the cap and cooldown: `already_charged` does not apply and `shield.activation` is not read from flagd (a hold game is latched, so a mid-game flip to `trigger` gives no charge window); `shield_budget_exhausted` when the player's budget remaining is below the minimum burst, then `shield_pool_full` when energy plus the seconds of this player's grants in flight is at least the full level `min(cap, budget remaining)` minus 0.5 s (a constant, C-035). The full level is the coordinator's (UC-048 A9), but the margin is deliberately stricter than the coordinator's refusal, which needs less than 0.05 s of room: the agent also refuses a grant that could add 0.05 to 0.5 s, which the coordinator would accept (the safe direction: fewer shields, never a grant the coordinator refuses for a stale view). For a player whose shield is active only the pool check is skipped (the energy gauge over-reads a draining pool); the budget check stays (a draining budget only falls, so refusing early is safe). Both fail open when the gauges are missing (an agent restart, a collector outage): the coordinator stays authoritative and refunds its own refusal. In a game that is not latched to hold the trigger/instant read stays per grant from flagd, as the coordinator's. Like `already_charged`, the first refusal per entry gets the full spans, the warning and a timeline entry, repeats log `agent.decision_shield_pool_full_repeat` / `agent.decision_shield_budget_exhausted_repeat` at debug. `Loop.ShieldSerials(c)` adds such players to `noShield`, so `applyChargePolicy` drops their R4 candidates (`decision/chargeledger.go` `holdPoolOf`, `decide.HoldShieldRefusal`; tests `decision/chargeledger_hold_uc040_test.go`).
+   - `already_charged` (#1837 PR-4a; UC-048 A4 step 1): at most one agent charge per player per window, in trigger mode only. Trigger mode means `game.mode` is `FFA`, the game is real and `shield.activation` resolves to `trigger`, read per targeted `grant_shield` from the `game` set (`services/agent/flags/game.go:ShieldCharge`) with `gameId` and `game_kind=real`, no `targetingKey` and no `game_mode`. The coordinator's grant read carries the game's transaction context as well (UC-040 BR-018, #1970), but targeting on these flags may reference only `gameId` and `game_kind` (flags.md §4) and the agent reads them only for a real game, so both resolve the same value. A `grant_shield` whose target holds an entry in the loop's charge ledger is blocked before the rate limit: it charges no budget, writes nothing and measures no effect. The window is `min(shield.charge_expiry_seconds, 20 s)` (20 s when the expiry is 0) plus 2 s for the write to reach the coordinator, so at most 22 s. The check reserves the entry; it is kept only when the write is applied (`applied=true`) and released by a rate-limit block, a gated write (UC-040 A11) or a failed write (A27). Every entry, a reserved one too, ends with its window, so a lost release blocks at most 22 s. Repeats are quiet (below). On the remote path an answer that lands for such a target is blocked the same way and `invoke_agent joustmania-agent` carries `decide.blocked` / `decide.block_reason=already_charged`. Fail open: any other mode, a shadow game, an unknown mode or an unreadable `game` set (not READY) means no block; an unreadable set logs `agent.shield_charge_mode_unreadable` at most once per 30 s. The ledger is the agent's own record (no shield-state gauge, in memory only, lost on an agent restart), so it also refuses a grant after the player activated, which the coordinator would accept (UC-048 A4, BR-005), by design. The coordinator stays authoritative. The ledger also feeds the decide state (`shield_charged`, §1.2) and the rules engine, which drops a `grant_shield` candidate to a `shield_charged` target before ranking (`applyChargePolicy`, like the battery policy; the rules path takes one ledger snapshot per ranking and hands the same snapshot to the state it builds). An activation, an expiry or a death does not shorten the window: it is a pacing rule (#1870).
+   - `shield_cap_reached` and `shield_cooldown` (#2044; UC-048 A6, BR-007), in every mode and game kind, from the live `policy.max_shields_per_player_per_game` (default 3, 0 = unlimited) and `policy.shield_cooldown_seconds` (default 15, 0 = off) of the cycle's snapshot (a read error or a negative value gives the default; flags.md §3). The cap counts the player's written `grant_shield`s in this game plus the ones in flight, so concurrent cycles cannot both take the last slot. The cooldown refuses while now is before the last shield's end plus the cooldown; the end is write time + granted seconds (the decision's value; a grant without one is stamped before this step with the `shield_seconds` `default` variant, 5 when unreadable, UC-048 BR-012, #2395) + the same 2 s margin, in trigger mode too (the cooldown runs from the grant, UC-048 BR-007). While a cooldown is set, a grant still in flight for the player also refuses `shield_cooldown`: it has no end yet. The count is an upper bound of the coordinator's (UC-048 BR-007): it also counts a write the coordinator refused or kept. 0/0 refuses nothing (the zero `Policy` of a hand-built snapshot, so the rules golden is unchanged). Repeats are quiet (below). The rules engine's no-shield filter (`applyChargePolicy`) is fed with the charged players plus the capped and cooling-down ones (`Loop.ShieldSerials`, one snapshot per ranking), so R4 does not propose a refused shield. R4's target is the weakest of the alive players with the fewest agent shields in this game (`Loop.ShieldGrants`: written plus in flight, the same per-game ledger; catch-up, §15.2, #2395), so the rules path's `ffa.target` answer and its decisions shield every alive player once before any twice; the decide state marks the charged ones `shield_charged` and the capped and cooling-down ones `shield_limited` (§1.2; #2066).
+   - Hold games (#2096; UC-048 A9 step 1), in a game whose `game_shield_activation_mode` gauge says `hold` only, after the allow-list and battery and before the cap and cooldown: `already_charged` does not apply and `shield.activation` is not read from flagd (a hold game is latched, so a mid-game flip to `trigger` gives no charge window); `shield_budget_exhausted` when the player's budget remaining is below the minimum burst, then `shield_pool_full` when energy plus the seconds of this player's grants in flight is at least the full level `min(cap, budget remaining)` minus 0.5 s (a constant, C-035). The full level is the coordinator's (UC-048 A9), but the margin is deliberately stricter than the coordinator's refusal, which needs less than 0.05 s of room: the agent also refuses a grant that could add 0.05 to 0.5 s, which the coordinator would accept (the safe direction: fewer shields, never a grant the coordinator refuses for a stale view). For a player whose shield is active only the pool check is skipped (the energy gauge over-reads a draining pool); the budget check stays (a draining budget only falls, so refusing early is safe). Both fail open when the gauges are missing (an agent restart, a collector outage): the coordinator stays authoritative and refunds its own refusal. In a game that is not latched to hold the trigger/instant read stays per grant from flagd, as the coordinator's. Repeats are quiet (below). `Loop.ShieldSerials(c)` adds such players to `noShield`, so `applyChargePolicy` drops their R4 candidates (`decision/chargeledger.go` `holdPoolOf`, `decide.HoldShieldRefusal`; tests `decision/chargeledger_hold_uc040_test.go`).
    - Group shields (#2467 PR 4; UC-048 A13, A14; `services/agent/decision/group.go:reserveGroup`): one lock checks the game's group count (written plus in flight; `group_cap_reached` at `max_per_game`), then every target with the single grant's checks in the same order (hold pool and budget, trigger-mode charge with the game's window, cap, cooldown), and reserves every target plus one group slot under one generation, or nothing; a refusal names the first refused target (`decision.group.refused_serial`). The length is stamped like a single grant's (UC-048 BR-012). Written, each target counts as one shield (cap, cooldown, catch-up, `shield_limited`); not written, everything is released. The count is in memory per game; the coordinator's per-game backstop stays authoritative.
 5. weighted per-game rate limit `policy.max_interventions_per_minute` → `rate_limit` (budget charged only on admit; a group costs its catalog weight 1 and counts as one decision of the cycle)
 
@@ -449,11 +451,17 @@ Budget-aware admission (#1326, UC-040 A20/A21, BR-014/BR-015; `decision/budget.g
   the strictly dominant objective weight or the allow-list permits no protective intervention
   (`grant_shield`, `toughness_boost`, `adjust_player_sensitivity`, `set_player_handicap`). `play_audio_cue`
   and `adjust_volume` (also 0.5) keep no reserve (accepted, UC-040 BR-015).
-- A `rate_limit` refusal is emitted in full (`agent.decision` + `agent.action`, warning, timeline) once per
-  budget state per (intervention, target); the state changes when an intervention is admitted or one leaves
-  the 60 s window. Repeats in between only count in `agent_decisions_total` and log
-  `agent.decision_rate_limit_repeat` at debug level. `invoke_agent joustmania-agent` still reports `decide.blocked`. The
-  dashboard's blocked tallies read `agent_decisions_total` for that reason (`services/dashboard/src/agentOverlay.ts`).
+
+**Repeated refusals** (one rule for every block reason; UC-040 A21, BR-014;
+`services/agent/decision/decision.go:runDecision`, `services/agent/decision/ratelimit.go:rateLimiter.firstRefusal`): a
+refusal is emitted in full (`agent.decision` + `agent.action`, the `agent.decision_blocked` warning or the info log of
+`already_applied` / `lever_cooldown`, a timeline entry) the first time its key (block reason, intervention, target or
+group set) is refused in the game's current budget state. The budget state changes when an intervention is admitted or
+one leaves the 60 s window, which is also when a ledger that refuses (applied value, cooldown, shield entry) can change.
+A refusal of the same key in between only counts in `agent_decisions_total` and logs
+`agent.decision_<reason>_repeat` at debug level; the cycle's outcomes still hold it, so `invoke_agent joustmania-agent`
+still reports `decide.blocked`. The dashboard's blocked tallies read `agent_decisions_total` for that reason
+(`services/dashboard/src/agentOverlay.ts`).
 
 Blocked decisions are recorded on the `agent.decision` span
 (`decision.blocked=true`, `decision.block_reason`) and never applied. The `invoke_agent joustmania-agent` span of the same
@@ -479,19 +487,19 @@ decision repeats the verdict as `decide.blocked` / `decide.block_reason` (§6, #
   `decide.confidence` (1 − p(noop) for the chosen intervention) is computed over the engine's own ranked
   interventions, not only the allow-listed ones.
 - **Remote:** the model reports `confidence` per answer.
-- **Routing (remote path only)** uses the `ffa.intervention` confidence against the
-  **effective threshold** for the backend that answered (`flags.DecisionBackend.ActThreshold`,
-  `services/agent/flags/decision_backend.go:DecisionBackend.ActThreshold`; #1287):
-  - backend `jev`: `decision.jev.act_confidence_threshold` (default variant `gate` 0.6; variants
-    inherit −1 / gate 0.6 / default 0.8 / strict 0.95). Jev's confidence is the calibrated gate p_yes (§3.1),
-    not a self-report, so it has its own bar. The `inherit` sentinel (−1), and NaN or any other value outside
-    [0,1], use the global flag instead; a flagd error yields 0.6 (the defaultVariant);
-  - every other backend (claude): the global `decision.act_confidence_threshold` (default 0.8,
-    variants low 0.5 / gate 0.6 / strict 0.95; NaN or out of range → default).
+- **Routing (remote path only)** uses the `ffa.intervention` confidence against the act threshold of the
+  backend that answered, one flag per backend `decision.<backend>.act_confidence_threshold`
+  (`services/agent/flags/decision_backend.go:DecisionBackend.ActThreshold`; #1287):
+  - `jev`: `decision.jev.act_confidence_threshold` (default variant `gate` 0.6; variants gate 0.6 / default 0.8 /
+    strict 0.95). Jev's confidence is the calibrated gate p_yes (§3.1), not a self-report, so it has a lower bar;
+  - `claude`: `decision.claude.act_confidence_threshold` (default 0.8; variants low 0.5 / gate 0.6 / default 0.8 /
+    strict 0.95).
 
-  Both flags are read **live at landing** (`services/agent/decision/decide_hook.go:runDecideRemote`, `decideRemoteApply`), so flipping either mid-flight applies to
-  the in-flight answer: ≥ threshold → `act`; < threshold → `held` (no action). The span records the effective
-  threshold and its source (§12). The rules path does not route by confidence.
+  NaN, a value outside [0,1] or a flagd error gives the flag's default variant. There is no shared or inherited
+  threshold. The flag is read **live at landing** (`services/agent/decision/decide_hook.go:runDecideRemote`, `decideRemoteApply`), so flipping it mid-flight applies to
+  the in-flight answer: ≥ threshold → `act`; < threshold → `held` (no action). The fire-time value also rides on
+  `Request.ActThreshold`, which jev's gate uses (§3.1), so a jev answer is `held` only after a flip in flight. The span
+  records the threshold (§12). The rules path does not route by confidence.
 - `held` answers are not queued anywhere on `main` (the epic #1225 body proposed a
   shadow-candidate queue; not implemented).
 
@@ -504,9 +512,8 @@ decision repeats the verdict as `decide.blocked` / `decide.block_reason` (§6, #
 | `act` | Routed to the permission chain (which may still block: `decide.blocked`, and the `agent.decision` span). Also the rules-path outcome when the rules emitted a decision. |
 | `held` | Valid intervention answer below the threshold. No action. |
 | `noop` | Backend chose `noop`. No action. Not seen on the rules path: a rules cycle whose ranking emitted no decision records no `invoke_agent joustmania-agent` span at all (`OnEvaluate` returns before any span); the rules record still sets `noop` for that case defensively, so a `noop` choice never reads `act` (#1295). |
-| `invalid` | Cross-question inconsistency (4.3). No action, no fallback. |
-| `fallback` | The requested backend could not decide; rules did. |
-| `discarded` | A valid answer was dropped when it landed; see `decide.discarded_reason`. |
+| `fallback` | The requested backend could not decide (§7, an invalid answer of §4 included); rules did. |
+| `discarded` | An answer, or the rules fallback of a failed call, was dropped when it landed; see `decide.discarded_reason`. |
 
 `decide.outcome` is the **routing** outcome. What the permission chain then did with the decision the
 answers describe (the first decision of the cycle) is on `decide.blocked` (bool) and, when blocked,
@@ -515,9 +522,10 @@ reached the permission chain: outcome `act`, or `fallback` when the rules fallba
 So a rules decision blocked by the allow-list reads `outcome=act`, `decide.blocked=true`,
 `decide.block_reason=not_allowed`, with answers naming the blocked intervention and target. `already_applied` (§4.5 step 3, UC-040 A35) is not a refusal by a gate: the decided value is already in place, so nothing needed writing; it uses `blocked` so the closed outcome vocabulary stays as it is (`noop` keeps meaning "the backend chose noop").
 
-`decide.discarded_reason`: `stale_context`, `game_ended`, `target_gone`, `target_stale` (#2514), `state_too_old` (#2123),
-`kill_switch`, `backend_changed`, `shutdown` (`services/agent/decision/telemetry.go:DiscardStateTooOld`;
-`services/agent/decision/decide_hook.go:DecideDiscardBackendChanged`).
+`decide.discarded_reason`: `stale` (the game moved on, §4.4), `kill_switch`, `backend_changed`, `shutdown`
+(`services/agent/decision/telemetry.go:DiscardStale`; `services/agent/decision/decide_hook.go:DecideDiscardBackendChanged`).
+`decide.discarded_detail`, only with `stale`, names the check: `context_missing`, `game_ended`, `target_gone`,
+`target_stale` (#2514) or `state_too_old` (#2123).
 
 Outcomes are recorded **only as span attributes** (the dashboard Agent tab reads them from Jaeger,
 `services/dashboard/src/agentDecide.ts:parseDecideTraces`). One exception: since #2123 every remote `invoke_agent joustmania-agent` record that carries
@@ -549,7 +557,7 @@ allow-list, the budgets or the writer (UC-040 BR-034). Details: §14.3.
 | `llm_not_eligible` | game kind not in `llm.eligible_game_kinds` (default `real`) | rules, same cycle |
 | `llm_budget_exhausted` | global per-minute budget full, or (claude) the backend's own `decision.<backend>.max_requests_per_minute` cap full in the same window (#2519; the span's `decide.backend.requested` tells them apart) | rules, same cycle |
 | `timeout` | `decision.<backend>.timeout_ms` elapsed | rules on the **current** context when the call returns |
-| `invalid_answer` | parse / validate failure, refusal, max tokens, other stop reasons | rules on the current context |
+| `invalid_answer` | parse / validate failure (§4.1 to §4.3, cross-question inconsistency included), refusal, max tokens, other stop reasons | rules on the current context |
 | `error` | anything else: transport, HTTP 4xx / 5xx **including 429**, error envelope | rules on the current context |
 
 There is no separate `rate_limited` reason: HTTP 429 is `error`, with
@@ -622,7 +630,7 @@ the kill switch `enabled` and the shared LLM budget (NFR-011).
 | `decision.jev.timeout_ms` | 2500 ms (variants 1500 / 2500 / 5000) | per call | `services/agent/flags/decision_backend.go:keyDecisionJevTimeoutMs`, `services/agent/flags/decision_backend.go:DefaultDecisionTimeoutMs` |
 | `decision.min_interval_ms` | 3000 ms (1500 / 10000; 0 disables) | per game, from admission (the previous call's start) | `services/agent/flags/decision_backend.go:DefaultDecisionMinIntervalMs`, `services/agent/decision/decide_hook.go:gateRemoteDecide` |
 | `decision.min_gap_after_answer_ms` (#2123) | 1000 ms (off 0 / slow 3000) | per game, from when the previous call returned (an answer, a timeout or a failure), before the live flag re-read and any action write; set while the call still holds the in-flight slot, and a later discard does not move it. A call is admitted only when both this gap and `decision.min_interval_ms` have passed | `services/agent/flags/decision_backend.go:DefaultDecisionMinGapAfterAnswerMs`, `services/agent/decision/decide_hook.go:noteDecideEnded` |
-| `decision.max_state_age_ms` (#2123) | 10000 ms (off 0 / tight 6000) | per answer that would act, read live at landing: older fire-time state → `discarded/state_too_old` (§4.4). The default sits above the longest timeout (`patient` 8000 ms) so it only drops answers built on a state that was already stale at fire time | `services/agent/flags/decision_backend.go:DefaultDecisionMaxStateAgeMs`, `services/agent/decision/decide_hook.go:stateTooOld` |
+| `decision.max_state_age_ms` (#2123) | 10000 ms (off 0 / tight 6000) | per answer that would act, read live at landing: older fire-time state → `discarded/stale`, detail `state_too_old` (§4.4). The default sits above the longest timeout (`patient` 8000 ms) so it only drops answers built on a state that was already stale at fire time | `services/agent/flags/decision_backend.go:DefaultDecisionMaxStateAgeMs`, `services/agent/decision/decide_hook.go:stateTooOld` |
 | `llm.max_requests_per_minute` | 6 (conservative 3 / aggressive 12 / `stage` 30, PR #1257 / operator-only `interactive` 120 and `frenzy` 600 for a cheap backend such as Jev, #2518: at the shipped cadence the per-game limits of NFR-012 bind first) | **global**, shared by in-game decisions, the retro and the proposer (PR #1284) | `services/agent/flags/flags.go:43`; `services/agent/decision/llmbudget.go:ceilBudget`, `services/agent/decision/llmbudget.go:llmBudget` |
 | `AGENT_LLM_MAX_REQUESTS_PER_MINUTE` (env) | unset | read once at startup; a positive value is a ceiling: the cap is `min(env, flag)`, so a flag can only tighten it (#1788, C-034) | `services/agent/tuning.go:llmBudgetCeiling`, `services/agent/decision/llmbudget.go:ceilBudget` |
 | `llm.eligible_game_kinds` | `real` | which game kinds may call a remote backend; read by in-game decisions, the retro and the proposer | `services/agent/flags/flags.go:llmGate` |
@@ -673,7 +681,7 @@ No p50 / p95 from production `invoke_agent joustmania-agent` spans has been publ
 |---|---|---|
 | `enabled` → off | HTTP call is **not** cancelled; on landing the live flags are re-read and the answer is `discarded/kill_switch`; the rules fallback is suppressed too | `services/agent/decision/decide_hook.go:runDecideRemote` (landing re-read); `TestRemote_KillSwitchAtLanding`, `TestRemote_KillSwitchSuppressesTimeoutFallback`; service tier `tests/service/test_tc009_kill_switch.py::test_kill_switch_discards_inflight_answer` |
 | `decision.backend` changed | `discarded/backend_changed` | `services/agent/decision/decide_hook.go:runDecideRemote`; `TestRemote_BackendChangedMidFlight` |
-| `decision.act_confidence_threshold` / `decision.jev.act_confidence_threshold` changed | the effective threshold for the answering backend is re-read at landing (§5); the answer is `act` or `held` against the new value | `services/agent/decision/decide_hook.go:runDecideRemote`; `TestRemote_ThresholdRaisedMidFlight`, `TestThreshold_JevRaisedMidFlightAppliesAtLanding`, `TestThreshold_JevInheritFlippedMidFlightAppliesAtLanding` |
+| `decision.claude.act_confidence_threshold` / `decision.jev.act_confidence_threshold` changed | the answering backend's threshold is re-read at landing (§5); the answer is `act` or `held` against the new value | `services/agent/decision/decide_hook.go:runDecideRemote`; `TestRemote_ThresholdRaisedMidFlight`, `TestThreshold_JevRaisedMidFlightAppliesAtLanding` |
 | `interventions_allowed` narrowed (including to `none`) | outcome stays `act`; the permission chain blocks `not_allowed` (`decide.blocked=true`, `decide.block_reason=not_allowed`); the next cycle makes no new call (§7.1) | `TestRemote_AllowListAtLanding`, `TestRemote_BlockedDecisionNamesTargetAndDecideBlocked`, `TestRemote_NoInterventionsAllowed`, `TestRemote_NoInterventionsAllowedAtLanding` |
 | `interventions_enabled` → off | not checked by the decide hook; the gated sink writes nothing | `services/agent/actions/gated.go:GatedActionSink.Apply` |
 | agent shutdown | `discarded/shutdown` | `services/agent/decision/decide_hook.go:runDecideRemote` (shutdown check first) |
@@ -870,16 +878,15 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   `chat {model}` CLIENT span and of the resulting `agent.decision`.
   Always: `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name=joustmania-agent` (both from span start), `gen_ai.conversation.id=<game id>`,
   `game.id`, `session.id`, `game.kind`, `decide.backend`, `decide.backend.requested`,
-  `decide.fallback_reason`, `decide.state.digest`, `decide.questions_sha` (short hash of the questions JSON, #2648), `decide.latency_ms`, `decide.outcome`. Conditional: `decide.act_confidence_threshold` (the EFFECTIVE
-  threshold, §5) and `decide.act_confidence_threshold.source` (`jev` = `decision.jev.act_confidence_threshold`,
-  `global` = `decision.act_confidence_threshold`; #1287), both only when routed,
+  `decide.fallback_reason`, `decide.state.digest`, `decide.questions_sha` (short hash of the questions JSON, #2648), `decide.latency_ms`, `decide.outcome`. Conditional: `decide.act_confidence_threshold` (the answering
+  backend's `decision.<backend>.act_confidence_threshold` read at landing, §5; #1287), only when routed,
   `gen_ai.request.model`, `gen_ai.output.type=json`, `gen_ai.request.max_tokens` and `gen_ai.request.temperature` (claude only; jev sets neither) and, at span end, the summed `gen_ai.usage.*` tokens and `gen_ai.response.finish_reasons` of the invocation's model calls (remote path; [telemetry.md §4.2](telemetry.md#42-genai-semantic-conventions), #2584), `decide.answers`, `decide.confidence`, `decide.confidence.min`,
-  `decide.rationale`, `decide.invalid_reason`, `decide.discarded_reason`, `error.type`, `decide.blocked` and
+  `decide.rationale`, `decide.discarded_reason`, `decide.discarded_detail` (with `stale`, §6), `error.type`, `decide.blocked` and
   `decide.block_reason` (§6; #1295). `decide.questions` (the same JSON on every decide) rides only the first `invoke_agent joustmania-agent` of a game with a given `decide.questions_sha` (#2648). A group decision's `agent.decision` carries `decision.group.size`, `decision.group.alive` (#2467 PR 6),
   `decision.group.targets` and, on a ledger refusal, `decision.group.refused_serial` (#2467 PR 4; telemetry.md §4).
   Event `gen_ai.evaluation.result` (`gen_ai.evaluation.name=act_confidence_threshold`,
   score value, label `pass`/`fail`, explanation `confidence 0.720 >= threshold 0.600
-  (decision.jev.act_confidence_threshold)` naming the flag the threshold came from) when routed
+  (decision.jev.act_confidence_threshold)` naming the flag) when routed
   (`services/agent/decision/decide_hook.go:emitDecideSpan`, `setDecideAttributes`).
 - **`decide.prompt_profile`** (#2467 PR 5): on a remote-path `invoke_agent joustmania-agent` span, the normalized profile the request was
   rendered with (`v1` or `neutral`, §3); absent on the rules path.
@@ -907,7 +914,7 @@ Full names in [telemetry.md](telemetry.md#4-agent). Summary:
   truncation marker), one object per question:
   `{"question_id": "ffa.intervention", "choice": "grant_shield", "probabilities": {"noop": 0.3, "grant_shield": 0.7}, "score": 0, "confidence": 0.7}`,
   `{"question_id": "ffa.target", "choice": "MOCK0003", ...}`, `{"question_id": "ffa.magnitude", "score": 0.25, "confidence": 0.4}`;
-  `choice`, `probabilities` and `noul` are omitted when empty. On the rules path the `ffa.intervention` /
+  `choice` and `probabilities` are omitted when empty. On the rules path the `ffa.intervention` /
   `ffa.target` choices are the emitted decision's (§5), also when the permission chain blocks it. Consumers: the dashboard Agent tab reads
   `question_id` / `choice` for `ffa.intervention` and `ffa.target` (`services/dashboard/src/agentDecide.ts:parseDecideAnswers`), and the
   decide service-tier tests match the scripted intervention in it (`tests/service/test_tc008_remote_backend_routing.py`, `tests/service/test_tc009_kill_switch.py`).
@@ -938,7 +945,7 @@ and `decide/backends/jev/contract_test.go` (only jev has a dedicated
 `contract_test.go`; jev also has `stages_test.go` and `wire_test.go`), and `decision/decide_hook_test.go`
 (per-backend threshold: `decision/decide_hook_threshold_test.go`; empty allow-list: `decision/decide_no_allowed_test.go`).
 
-**Traceability:** FR-044, FR-045, FR-046, FR-047, FR-048, FR-049, FR-050, FR-051, FR-052, FR-053, FR-054, FR-200, FR-201 (#2479) / UC-040, UC-044, UC-045 /
+**Traceability:** FR-044, FR-045, FR-046, FR-047, FR-048, FR-049, FR-050, FR-051, FR-052, FR-053, FR-200, FR-201 (#2479) / UC-040, UC-044, UC-045 /
 `services/agent/decide/` (`state.go`, `danger.go`, `hold.go`, `backends/jev/criteria.go`, `llmio/llmio.go`), `services/agent/decision/decide_hook.go`, `chargeledger.go`, `rules.go`, `decide_registry.go`, `decide_rules.go`, `decision.go`, `services/agent/decide_backends.go`, `services/agent/actions/`, `services/game_coordinator/interventions.py` /
 `services/agent/decide/*_test.go`, `services/agent/decision/decide_hook_test.go`, `tests/service/test_tc008_remote_backend_routing.py`, `tests/service/test_tc009_kill_switch.py`, `tests/service/test_tc006_agent_blocked_by_host.py`, `tests/integration/test_tc013_shadow_alongside_real.py`.
 

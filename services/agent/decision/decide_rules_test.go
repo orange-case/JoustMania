@@ -385,22 +385,3 @@ func TestRulesAnswer_ExactMinScoreTie(t *testing.T) {
 		t.Fatalf("invalid: %v", err)
 	}
 }
-
-// TestRulesPath_NoulIsNeutral: the rules have no view on a noul question
-// (#1229): they answer an even 0.5 at confidence 0, and the response still
-// validates.
-// UC: UC-040 A12
-func TestRulesPath_NoulIsNeutral(t *testing.T) {
-	fx := decideFixtures()[0]
-	clock := time.Unix(10_000, 0)
-	req := ffaRequest(fx.ctx, allInterventions())
-	req.Questions = append(req.Questions, decide.Question{ID: "close", Kind: decide.KindNoul, Text: "Is the game close?"})
-	req, resp := rulesDecide(t, newTestEngine(fx.cfg, &clock), req)
-	a, ok := resp.Find("close")
-	if !ok || a.Noul == nil || *a.Noul != 0.5 || a.Confidence != 0 {
-		t.Errorf("noul answer = %+v", a)
-	}
-	if err := decide.Validate(req, resp); err != nil {
-		t.Errorf("Validate: %v", err)
-	}
-}

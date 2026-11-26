@@ -404,8 +404,6 @@ type Loop struct {
 	// experimentFlag looks up the flag under test in a game (UC-040 A40, BR-028;
 	// experimentflag.go). nil skips nothing.
 	experimentFlag func(c gamecontext.GameContext) string
-	// experimentFlagSeen quiets repeated experiment_flag blocks (UC-040 A40 step 6).
-	experimentFlagSeen experimentFlagRefusals
 	// predictions is the SHARED prediction book (#2479, prediction_hook.go). nil
 	// registers nothing.
 	predictions *prediction.Book
@@ -916,12 +914,10 @@ func (l *Loop) runDecision(ctx context.Context, snapshot flags.Snapshot, c gamec
 			perm.shield.finish(&applied)
 		}
 	}()
-	if blocked {
-		if repeatReason, repeat := l.repeatRefusalReason(perm, d, now); repeat {
-			// A repeated refusal is counted, but emits no span, warning or timeline entry.
-			l.recordRepeatRefusal(ctx, c.GameKind, d, cost, state, repeatReason)
-			return
-		}
+	if blocked && l.repeatRefusal(reason, d, now) {
+		// A repeated refusal is counted, but emits no span, warning or timeline entry.
+		l.recordRepeatRefusal(ctx, c.GameKind, d, cost, state, reason)
+		return
 	}
 
 	startOpts, target := l.decisionSpanOptions(c, d, state, blocked, reason)
@@ -974,29 +970,6 @@ func (l *Loop) runDecision(ctx context.Context, snapshot flags.Snapshot, c gamec
 	if applied {
 		state.appliedOutcomes = append(state.appliedOutcomes, len(state.Outcomes)-1)
 	}
-}
-
-// repeatRefusalReason reports the reason of a blocked decision that repeats an
-// earlier refusal, to be counted without a span, warning or timeline entry.
-// Checked in order: UC-040 A21 (budget unchanged since the refusal), A40 step 6
-// (same experiment flag already blocked this lever in this game), A35 (the same
-// value already suppressed against this entry), A53 (the lever already refused
-// since its last write), UC-048 A4 step 1 / UC-048 A6 (the shield
-// ledger already refused a grant with this reason).
-func (l *Loop) repeatRefusalReason(perm permission, d Decision, now time.Time) (BlockReason, bool) {
-	switch {
-	case perm.reason == ReasonRateLimit && l.repeatRefusal(d, now):
-		return ReasonRateLimit, true
-	case perm.repeatExperimentFlag:
-		return ReasonExperimentFlag, true
-	case perm.repeatApplied:
-		return ReasonAlreadyApplied, true
-	case perm.repeatCooldown:
-		return ReasonLeverCooldown, true
-	case perm.repeatShield:
-		return perm.reason, true
-	}
-	return "", false
 }
 
 // decisionSpanOptions builds the agent.decision start options and returns the
@@ -1210,22 +1183,9 @@ type permission struct {
 	// refusedSerial is the group target the shield ledger refused (#2467, UC-048 A14), ""
 	// otherwise.
 	refusedSerial string
-	// repeatShield marks a shield-ledger refusal (already_charged,
-	// shield_cap_reached, shield_cooldown) that repeats an earlier one with the same
-	// reason against the same entry (quiet, as A21).
-	repeatShield bool
-	// repeatApplied marks an already_applied suppression that repeats an earlier one
-	// against the same entry (quiet, UC-040 A35).
-	repeatApplied bool
-	// repeatCooldown marks a lever_cooldown refusal that repeats an earlier one since
-	// the lever's last write (quiet, UC-040 A53).
-	repeatCooldown bool
 	// cooldown is the lever hold of a decision that passed step 3a (UC-040 A53), nil
 	// otherwise; the caller releases it when the decision finishes.
 	cooldown *cooldownHold
-	// repeatExperimentFlag marks an experiment_flag block of a lever already
-	// blocked on the same flag in this game (quiet, UC-040 A40 step 6).
-	repeatExperimentFlag bool
 }
 
 // evaluatePermission runs the permission chain over one decision in order:
@@ -1262,26 +1222,24 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 	// arm, a lever of the flag under test is blocked experiment_flag. Check-only and
 	// before the rate limit, so it charges no budget and does not end rank-order
 	// admission.
-	// A repeat of a block already emitted in this game is quiet (A40 step 6).
 	if flag := l.experimentFlagBlocks(c, d); flag != "" {
-		return permission{reason: ReasonExperimentFlag, blocked: true,
-			repeatExperimentFlag: !l.experimentFlagSeen.first(d.Intervention, flag)}
+		return permission{reason: ReasonExperimentFlag, blocked: true}
 	}
 	// 3. Already applied (UC-040 A35, BR-023): a state or level decision that
 	// repeats the value this loop last wrote for its key is blocked already_applied.
 	// Check-only, ahead of every step that reserves, so its refusal leaks nothing;
 	// before the rate limit, so it charges no budget and does not end rank-order
 	// admission.
-	if match, first := l.alreadyApplied(c, d, now); match {
-		return permission{reason: ReasonAlreadyApplied, blocked: true, repeatApplied: !first}
+	if l.alreadyApplied(c, d, now) {
+		return permission{reason: ReasonAlreadyApplied, blocked: true}
 	}
 	// 3a. Lever cooldown (UC-040 A53, BR-046): a game-wide lever changes at most once
 	// per effect window. Check-only and before the rate limit, like step 3.
 	// A lever that passes stays held until the decision finishes (the caller releases
 	// cooldown), so a concurrent decision for it is refused as cooling.
-	cooling, first, cooldown := l.leverCooling(d, now)
+	cooling, cooldown := l.leverCooling(d, now)
 	if cooling {
-		return permission{reason: ReasonLeverCooldown, blocked: true, repeatCooldown: !first}
+		return permission{reason: ReasonLeverCooldown, blocked: true}
 	}
 	// 4. Shield ledger (UC-048 A4 step 1, BR-005; A6, BR-007): a targeted
 	// grant_shield is refused already_charged (trigger mode), shield_cap_reached or
@@ -1290,15 +1248,15 @@ func (l *Loop) evaluatePermission(ctx context.Context, snapshot flags.Snapshot, 
 	var shield shieldHold
 	if d.Intervention == InterventionGrantGroupShield {
 		// A group reserves every target and a group slot, all or nothing (UC-048 A13, UC-048 A14).
-		res, refused, serial, firstRefusal := l.reserveGroupShield(ctx, snapshot, c, d, now)
+		res, refused, serial := l.reserveGroupShield(ctx, snapshot, c, d, now)
 		if refused != "" {
-			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal, refusedSerial: serial, cooldown: cooldown}
+			return permission{reason: refused, blocked: true, refusedSerial: serial, cooldown: cooldown}
 		}
 		shield = res
 	} else {
-		res, refused, firstRefusal := l.reserveShield(ctx, snapshot, c, d, now)
+		res, refused := l.reserveShield(ctx, snapshot, c, d, now)
 		if refused != "" {
-			return permission{reason: refused, blocked: true, repeatShield: !firstRefusal, cooldown: cooldown}
+			return permission{reason: refused, blocked: true, cooldown: cooldown}
 		}
 		shield = res
 	}

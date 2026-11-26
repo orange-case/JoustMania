@@ -47,7 +47,7 @@ func shieldTargets(ds []Decision) []string {
 // UC: UC-040 A1
 // UC: UC-048 A4
 func TestApplyChargePolicy_R4SkipsChargedWeakest(t *testing.T) {
-	t.Run("UC-040/A4 A1 a charged weakest gets no grant_shield; the other struggling player stays a candidate", func(t *testing.T) {
+	t.Run("UC-048/A4 a charged weakest gets no grant_shield; the other struggling player stays a candidate", func(t *testing.T) {
 		cands := balancedCandidates(chargeRulesCtx(), defaultFit())
 		// Mean skill 0.43: WEAK and MID are below it; STRONG never is (decide-contract §15.2 step 2).
 		if got := shieldTargets(decisionsOf(cands)); !equalStrings(got, []string{"MID", "WEAK"}) {

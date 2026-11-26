@@ -1,8 +1,6 @@
 package decision
 
 import (
-	"sync"
-
 	"github.com/joustmania/agent/flags"
 	"github.com/joustmania/agent/gamecontext"
 )
@@ -89,28 +87,4 @@ func (l *Loop) offeredInterventions(c gamecontext.GameContext, snapshot flags.Sn
 		}
 	}
 	return out
-}
-
-// experimentFlagRefusals remembers the experiment_flag blocks this game's loop has
-// already emitted, keyed by lever and flag (A40 step 6, as A21): a repeat only
-// counts. At most one entry per lever and flag, so it stays bounded.
-type experimentFlagRefusals struct {
-	mu   sync.Mutex
-	seen map[string]bool
-}
-
-// first reports whether this is the first experiment_flag block of intervention on
-// flag, and records it.
-func (r *experimentFlagRefusals) first(intervention, flag string) bool {
-	key := intervention + "|" + flag
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.seen[key] {
-		return false
-	}
-	if r.seen == nil {
-		r.seen = map[string]bool{}
-	}
-	r.seen[key] = true
-	return true
 }

@@ -185,14 +185,14 @@ func TestDangerShield_FailClosed(t *testing.T) {
 
 // UC: UC-040 A1
 func TestDangerShield_GatesStillBlock(t *testing.T) {
-	t.Run("UC-040/A1 BR-007 the per-game cap: one shield, however long the danger lasts", func(t *testing.T) {
+	t.Run("UC-048/BR-007 the per-game cap: one shield, however long the danger lasts", func(t *testing.T) {
 		l, sink, clock := dangerLoop(t, flags.Policy{MaxInterventionsPerMinute: 50, MaxShieldsPerPlayerPerGame: 1})
 		runDangerCycles(l, clock, duelCtx(), 12, 5*time.Second)
 		if n := shieldWritesTo(sink, "A"); n != 1 {
 			t.Fatalf("grant_shield writes to A = %d, want 1 (cap 1)", n)
 		}
 	})
-	t.Run("UC-040/A1 BR-007 the cooldown: no second shield before the last one ended plus the cooldown", func(t *testing.T) {
+	t.Run("UC-048/BR-007 the cooldown: no second shield before the last one ended plus the cooldown", func(t *testing.T) {
 		l, sink, clock := dangerLoop(t, flags.Policy{MaxInterventionsPerMinute: 50, ShieldCooldownSeconds: 30})
 		// The first shield ends after 5 s + 2 s; the cooldown runs to 37 s.
 		runDangerCycles(l, clock, duelCtx(), 7, 5*time.Second) // 0..30 s

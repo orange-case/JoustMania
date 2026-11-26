@@ -142,8 +142,8 @@ flags = {
     "experiment_dynamic_enabled": f(onoff, "off"),
     "experiment_tick_seconds": f({"fast": 10, "default": 30, "slow": 60}, "default"),
     "decision.backend": f({"rules": "rules", "claude": "claude"}, "rules"),
-    "decision.act_confidence_threshold": f({"default": 0.8, "strict": 0.95}, "default"),
-    "decision.jev.act_confidence_threshold": f({"inherit": -1.0, "gate": 0.6, "strict": 0.95}, "gate"),
+    "decision.claude.act_confidence_threshold": f({"default": 0.8, "strict": 0.95}, "default"),
+    "decision.jev.act_confidence_threshold": f({"gate": 0.6, "default": 0.8, "strict": 0.95}, "gate"),
     "decision.capture_content": f(onoff, "on"),
     "decision.min_interval_ms": f({"default": 3000}, "default"),
     "decision.claude.model": f({"haiku": "h", "sonnet": "s"}, "haiku"),
@@ -221,12 +221,12 @@ check "missing connect-proxy skips the reachability check" "WARN  pairing daemon
 if has "${SECRET}"; then not_ok "key value never printed"; else ok "key value never printed"; fi
 
 # --- drift from the stage baseline -----------------------------------------
-fixture enabled=off decision.act_confidence_threshold=strict decision.jev.act_confidence_threshold=inherit policy.max_interventions_per_minute=default
+fixture enabled=off decision.claude.act_confidence_threshold=strict decision.jev.act_confidence_threshold=default policy.max_interventions_per_minute=default
 run_preflight
 if [[ "${RC}" -eq 1 ]]; then ok "drift exits 1"; else not_ok "drift exits 1 (rc=${RC})"; fi
 check "kill switch off fails" "FAIL  enabled = off (false), stage baseline is on"
-check "strict threshold fails" "FAIL  decision.act_confidence_threshold = strict (0.95), stage baseline is default"
-check "jev threshold inherit fails" "FAIL  decision.jev.act_confidence_threshold = inherit (-1.0), stage baseline is gate"
+check "strict threshold fails" "FAIL  decision.claude.act_confidence_threshold = strict (0.95), stage baseline is default"
+check "jev threshold default fails" "FAIL  decision.jev.act_confidence_threshold = default (0.8), stage baseline is gate"
 check "shipped intervention budget fails (#1326)" "FAIL  policy.max_interventions_per_minute = default (2), stage baseline is aggressive"
 check "unset env falls back to the stage flag" "PASS  LLM budget: llm.max_requests_per_minute = stage (30/min"
 if grep -qE '^(PUT|POST|DELETE) ' "${FAKE_FLAG_LOG}"; then not_ok "the pre-flight writes nothing"; else ok "the pre-flight writes nothing"; fi
@@ -313,17 +313,17 @@ python3 - "${FAKE_AGENT_FLAGS}" <<'PY3'
 import json, sys
 path = sys.argv[1]
 data = json.load(open(path))
-del data["flags"]["decision.jev.act_confidence_threshold"]["variants"]["strict"]
+del data["flags"]["decision.claude.act_confidence_threshold"]["variants"]["strict"]
 del data["flags"]["decision.claude.timeout_ms"]["variants"]["patient"]
 json.dump(data, open(path, "w"), indent=2)
 PY3
 restart_fake
 STUB_BUDGET=30 run_preflight
-check "missing strict threshold variant fails" "FAIL  decision.jev.act_confidence_threshold has no strict variant"
+check "missing strict threshold variant fails" "FAIL  decision.claude.act_confidence_threshold has no strict variant"
 check "missing patient timeout variant warns" "WARN  decision.claude.timeout_ms has no patient variant"
 fixture
 STUB_BUDGET=30 run_preflight
-check "beat variants present pass" "PASS  decision.jev.act_confidence_threshold has the strict and gate variants"
+check "beat variants present pass" "PASS  decision.claude.act_confidence_threshold has the strict and default variants"
 
 # --- expected backend override ---------------------------------------------
 fixture decision.backend=claude

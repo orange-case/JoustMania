@@ -278,7 +278,7 @@ func TestCatchUp_GrantsCountInFlight(t *testing.T) {
 	t.Run("UC-040/A1 a grant in flight counts, a released one does not", func(t *testing.T) {
 		var cl chargeLedger
 		now := time.Unix(1, 0)
-		res, reason, _ := cl.reserve("A", now, shieldRequest{seconds: 5 * time.Second})
+		res, reason := cl.reserve("A", now, shieldRequest{seconds: 5 * time.Second})
 		if reason != "" {
 			t.Fatalf("reserve refused %q", reason)
 		}

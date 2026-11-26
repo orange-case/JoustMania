@@ -1434,7 +1434,6 @@ a {
 .decide-outcome-act { background: #4caf50; }
 .decide-outcome-held { background: #ffc107; }
 .decide-outcome-noop { background: #9aa4b2; }
-.decide-outcome-invalid { background: #c77dff; }
 .decide-outcome-fallback { background: #ff6d3a; }
 .decide-outcome-discarded { background: transparent; color: var(--text-secondary); border: 2px dashed var(--text-secondary); }
 .decide-outcome-unknown { background: #555; color: #fff; }
@@ -1442,7 +1441,6 @@ a {
 .decide-row-act { border-left-color: #4caf50; }
 .decide-row-held { border-left-color: #ffc107; }
 .decide-row-noop { border-left-color: #9aa4b2; }
-.decide-row-invalid { border-left-color: #c77dff; }
 .decide-row-fallback { border-left-color: #ff6d3a; }
 .decide-row-discarded { border-left-color: var(--text-secondary); border-left-style: dashed; }
 

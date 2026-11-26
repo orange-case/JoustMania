@@ -14,8 +14,8 @@
 #   ./scripts/agent-backend.sh claude                # decision.backend -> claude
 #   ./scripts/agent-backend.sh claude sonnet         # ... and decision.claude.model -> sonnet
 #   ./scripts/agent-backend.sh rules                 # back to the deterministic rules backend
-#   ./scripts/agent-backend.sh threshold strict      # decision.act_confidence_threshold -> strict (global: claude)
-#   ./scripts/agent-backend.sh jev-threshold inherit # decision.jev.act_confidence_threshold -> inherit (use the global)
+#   ./scripts/agent-backend.sh threshold strict      # decision.claude.act_confidence_threshold -> strict
+#   ./scripts/agent-backend.sh jev-threshold strict  # decision.jev.act_confidence_threshold -> strict
 #   ./scripts/agent-backend.sh capture on            # decision.capture_content -> on
 #
 # An unknown variant is refused by the flag service (422 out_of_bounds) with
@@ -35,7 +35,7 @@ usage() {
 usage: $0 [status]
        $0 {rules|claude|jev} [model-variant]
        $0 threshold {low|gate|default|strict}
-       $0 jev-threshold {inherit|gate|default|strict}
+       $0 jev-threshold {gate|default|strict}
        $0 capture {on|off}
 EOF
   exit 2
@@ -116,18 +116,17 @@ try:
             print("model     = n/a (rules backend)")
         else:
             print(f"model     = {current(f'decision.{backend}.model')}")
-        print(f"threshold = {current('decision.act_confidence_threshold')}")
+        print(f"threshold = {current('decision.claude.act_confidence_threshold')}")
         print(f"jev thr.  = {current('decision.jev.act_confidence_threshold')}")
         print(f"capture   = {current('decision.capture_content')}")
         print(f"({fs.base_url})")
         sys.exit(0)
 
     if action == "threshold":
-        value = set_variant("decision.act_confidence_threshold", args[1])
+        value = set_variant("decision.claude.act_confidence_threshold", args[1])
         print(f"agent act threshold -> {args[1]} ({value})")
     elif action == "jev-threshold":
-        # Jev's own bar (#1287): its confidence is the calibrated gate p_yes, so it
-        # has its own threshold; "inherit" makes jev use the global one.
+        # Jev's own bar (#1287): its confidence is the calibrated gate p_yes.
         value = set_variant("decision.jev.act_confidence_threshold", args[1])
         print(f"agent jev act threshold -> {args[1]} ({value})")
     elif action == "capture":

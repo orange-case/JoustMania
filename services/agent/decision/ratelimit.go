@@ -164,8 +164,9 @@ type rateLimiter struct {
 	// gen is the budget-state generation: bumped on every admit and on every
 	// prune that drops an entry.
 	gen uint64
-	// refused maps a refused decision key to the gen it was last reported at.
-	// Bounded by interventions x targets of one game (one limiter per game).
+	// refused maps a refusal key (reason, intervention, target or group set) to
+	// the gen it was last reported at. Bounded by reasons x interventions x
+	// targets of one game (one limiter per game).
 	refused map[string]uint64
 }
 
@@ -199,7 +200,7 @@ func (r *rateLimiter) admit(now time.Time, cost, budget, reserve float64) bool {
 	return true
 }
 
-// firstRefusal reports whether a rate_limit refusal of key at time now is the
+// firstRefusal reports whether a refusal of key (any block reason) at now is the
 // first since the budget last changed (UC-040 A21). It returns true (and
 // remembers the current budget state for key) the first time; false for a
 // repeat while nothing was admitted and nothing left the window since.

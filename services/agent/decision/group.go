@@ -200,9 +200,8 @@ func (cl *chargeLedger) finishGroup(gen uint64, applied bool) {
 // reserveGroup atomically checks the game's group count and every target's entry
 // (the same checks as a single grant: the hold pool, the trigger-mode charge, the
 // cap, the cooldown) and reserves all of them, or none. On a refusal it returns the
-// reason, the first refused serial ("" for the group count) and whether that
-// refusal is the first of its kind against the entry.
-func (cl *chargeLedger) reserveGroup(serials []string, now time.Time, reqs []shieldRequest, maxPerGame int) (res *groupReservation, reason BlockReason, refused string, firstRefusal bool) {
+// reason and the first refused serial ("" for the group count).
+func (cl *chargeLedger) reserveGroup(serials []string, now time.Time, reqs []shieldRequest, maxPerGame int) (res *groupReservation, reason BlockReason, refused string) {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
 	if cl.entries == nil {
@@ -212,9 +211,7 @@ func (cl *chargeLedger) reserveGroup(serials []string, now time.Time, reqs []shi
 		cl.limits = reqs[0].limits
 	}
 	if cl.groupCommitted+len(cl.groupPending) >= maxPerGame {
-		first := !cl.groupCapReported
-		cl.groupCapReported = true
-		return nil, ReasonGroupCapReached, "", first
+		return nil, ReasonGroupCapReached, ""
 	}
 	for i, s := range serials {
 		e := cl.entries[s]
@@ -223,10 +220,7 @@ func (cl *chargeLedger) reserveGroup(serials []string, now time.Time, reqs []shi
 			r = e.refusal(now, reqs[i].limits, reqs[i].chargeWindow > 0)
 		}
 		if r != "" {
-			first := e.reported != r
-			e.reported = r
-			cl.entries[s] = e
-			return nil, r, s, first
+			return nil, r, s
 		}
 	}
 	cl.gen++
@@ -236,7 +230,6 @@ func (cl *chargeLedger) reserveGroup(serials []string, now time.Time, reqs []shi
 			e.pending = make(map[uint64]time.Duration)
 		}
 		e.pending[cl.gen] = reqs[i].seconds
-		e.reported = ""
 		if reqs[i].chargeWindow > 0 {
 			e.chargeGen, e.chargeCommitted, e.chargeUntil = cl.gen, false, now.Add(reqs[i].chargeWindow)
 		}
@@ -246,14 +239,13 @@ func (cl *chargeLedger) reserveGroup(serials []string, now time.Time, reqs []shi
 		cl.groupPending = make(map[uint64]bool)
 	}
 	cl.groupPending[cl.gen] = true
-	cl.groupCapReported = false
-	return &groupReservation{ledger: cl, serials: append([]string(nil), serials...), gen: cl.gen, reqs: reqs}, "", "", false
+	return &groupReservation{ledger: cl, serials: append([]string(nil), serials...), gen: cl.gen, reqs: reqs}, "", ""
 }
 
 // reserveGroupShield is the shield-ledger step for a group decision: one request
 // per target (its length, its hold pool, the trigger-mode charge window when the
 // game is a real FFA game in trigger mode), then reserveGroup.
-func (l *Loop) reserveGroupShield(ctx context.Context, snapshot flags.Snapshot, c gamecontext.GameContext, d Decision, now time.Time) (res *groupReservation, reason BlockReason, refused string, firstRefusal bool) {
+func (l *Loop) reserveGroupShield(ctx context.Context, snapshot flags.Snapshot, c gamecontext.GameContext, d Decision, now time.Time) (res *groupReservation, reason BlockReason, refused string) {
 	window, charge := l.chargeWindow(ctx, c)
 	reqs := make([]shieldRequest, len(d.TargetSerials))
 	for i, s := range d.TargetSerials {
@@ -262,12 +254,12 @@ func (l *Loop) reserveGroupShield(ctx context.Context, snapshot flags.Snapshot, 
 			reqs[i].chargeWindow = window
 		}
 	}
-	res, reason, refused, first := l.charges.reserveGroup(d.TargetSerials, now, reqs, snapshot.Policy.GroupGrantMaxPerGame)
+	res, reason, refused = l.charges.reserveGroup(d.TargetSerials, now, reqs, snapshot.Policy.GroupGrantMaxPerGame)
 	if res == nil {
-		return nil, reason, refused, first
+		return nil, reason, refused
 	}
 	res.now = l.nowOrDefault()
-	return res, "", "", false
+	return res, "", ""
 }
 
 // groupAttributes are the agent.decision attributes of a group decision.

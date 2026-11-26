@@ -37,9 +37,12 @@ func limitLoop(t *testing.T, budget, maxShields, cooldownSeconds int, out ...Dec
 	return l, sink, clock, spans
 }
 
-func limiterEntries(l *Loop) int {
+// limiterEntries counts the budget entries in the window at now (pruned first: the
+// repeat check of every refusal prunes too).
+func limiterEntries(l *Loop, now time.Time) int {
 	l.limiter.mu.Lock()
 	defer l.limiter.mu.Unlock()
+	l.limiter.prune(now)
 	return len(l.limiter.entries)
 }
 
@@ -82,13 +85,13 @@ func TestShieldLimits_RulesAcceptance(t *testing.T) {
 		}
 		// Then the cap: a 4th grant is refused shield_cap_reached without charging
 		// the limiter.
-		before := limiterEntries(l)
+		before := limiterEntries(l, l.nowOrDefault()())
 		var st LayerState
 		l.runDecision(context.Background(), snap, chargeRulesCtx(), budgetShield("WEAK"), clock, &st)
 		if got := outcomeSummary(st); !equalStrings(got, []string{"grant_shield/WEAK:shield_cap_reached"}) {
 			t.Fatalf("4th grant outcomes = %v, want shield_cap_reached", got)
 		}
-		if after := limiterEntries(l); after != before {
+		if after := limiterEntries(l, l.nowOrDefault()()); after != before {
 			t.Fatalf("limiter entries %d -> %d: a cap refusal must not charge the budget", before, after)
 		}
 		if _, noShield := l.ShieldSerials(gamecontext.GameContext{}); !noShield["WEAK"] {
@@ -292,10 +295,10 @@ func TestShieldLimits_PendingBlocksCooldown(t *testing.T) {
 		var cl chargeLedger
 		now := time.Unix(1_000, 0)
 		req := shieldRequest{limits: shieldLimits{maxShields: 1}, seconds: 5 * time.Second}
-		if res, _, _ := cl.reserve("WEAK", now, req); res == nil {
+		if res, _ := cl.reserve("WEAK", now, req); res == nil {
 			t.Fatal("first reserve refused")
 		}
-		if res, reason, _ := cl.reserve("WEAK", now, req); res != nil || reason != ReasonShieldCapReached {
+		if res, reason := cl.reserve("WEAK", now, req); res != nil || reason != ReasonShieldCapReached {
 			t.Fatalf("second reserve = %v / %q, want shield_cap_reached", res, reason)
 		}
 	})
@@ -309,8 +312,8 @@ func TestShieldLimits_LastEndKeepsLater(t *testing.T) {
 		off := shieldLimits{}
 		long := shieldRequest{limits: off, seconds: 30 * time.Second}
 		short := shieldRequest{limits: off, seconds: 2 * time.Second}
-		resLong, _, _ := cl.reserve("WEAK", t0, long)
-		resShort, _, _ := cl.reserve("WEAK", t0, short)
+		resLong, _ := cl.reserve("WEAK", t0, long)
+		resShort, _ := cl.reserve("WEAK", t0, short)
 		if resLong == nil || resShort == nil {
 			t.Fatal("precondition: with the cooldown off both grants must be in flight")
 		}
@@ -318,10 +321,10 @@ func TestShieldLimits_LastEndKeepsLater(t *testing.T) {
 		cl.commit("WEAK", resShort.gen, t0.Add(time.Second), short)
 		// long ends at t0+32 s; short would end at t0+5 s.
 		on := shieldRequest{limits: shieldLimits{cooldown: 10 * time.Second}, seconds: 2 * time.Second}
-		if res, reason, _ := cl.reserve("WEAK", t0.Add(40*time.Second), on); res != nil || reason != ReasonShieldCooldown {
+		if res, reason := cl.reserve("WEAK", t0.Add(40*time.Second), on); res != nil || reason != ReasonShieldCooldown {
 			t.Fatalf("reserve at t0+40s = %v / %q, want shield_cooldown (runs to t0+42s)", res, reason)
 		}
-		if res, _, _ := cl.reserve("WEAK", t0.Add(42*time.Second), on); res == nil {
+		if res, _ := cl.reserve("WEAK", t0.Add(42*time.Second), on); res == nil {
 			t.Fatal("reserve at t0+42s refused, want the cooldown over")
 		}
 	})

@@ -409,7 +409,6 @@ const OUTCOME_LABEL: Record<DecideRow["outcome"], string> = {
   act: "act",
   held: "held",
   noop: "noop",
-  invalid: "invalid",
   fallback: "fallback",
   discarded: "discarded",
   unknown: "?",

@@ -223,10 +223,6 @@ type chargeEntry struct {
 	// lastEnd is the latest end of the written shields: write + granted seconds +
 	// chargeLedgerMargin (in trigger mode too: the cooldown runs from the grant).
 	lastEnd time.Time
-	// reported is the reason of the last refusal against this entry since the last
-	// reservation or write: a refusal with the same reason is a repeat and stays
-	// quiet (UC-048 A4 step 1, UC-048 A6, as A21).
-	reported BlockReason
 }
 
 // refusal returns the reason reserve refuses this entry at now under lim, or "".
@@ -256,12 +252,10 @@ type chargeLedger struct {
 	gen     uint64
 	// limits are the limits of the latest cycle or check: the views use them.
 	limits shieldLimits
-	// The game's group shields (#2467, UC-048 A13, BR-014): written, in flight
-	// (by reservation generation), and whether the last group_cap_reached refusal
-	// was already reported (a repeat stays quiet, as A21).
-	groupCommitted   int
-	groupPending     map[uint64]bool
-	groupCapReported bool
+	// The game's group shields (#2467, UC-048 A13, BR-014): written and in flight
+	// (by reservation generation).
+	groupCommitted int
+	groupPending   map[uint64]bool
 }
 
 // shieldRequest is what one targeted grant_shield asks the ledger for: a charge
@@ -317,9 +311,8 @@ func (e chargeEntry) inFlight() time.Duration {
 }
 
 // reserve atomically checks serial's entry and reserves it. It returns exactly one
-// of: a refusal (reason set, res nil; firstRefusal reports whether it is the first
-// with that reason since the last reservation or write) or a reservation.
-func (cl *chargeLedger) reserve(serial string, now time.Time, req shieldRequest) (res *chargeReservation, reason BlockReason, firstRefusal bool) {
+// of: a refusal (reason set, res nil) or a reservation.
+func (cl *chargeLedger) reserve(serial string, now time.Time, req shieldRequest) (res *chargeReservation, reason BlockReason) {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
 	cl.limits = req.limits
@@ -333,22 +326,19 @@ func (cl *chargeLedger) reserve(serial string, now time.Time, req shieldRequest)
 		r = e.refusal(now, req.limits, req.chargeWindow > 0)
 	}
 	if r != "" {
-		first := e.reported != r
-		e.reported = r
 		cl.entries[serial] = e
-		return nil, r, first
+		return nil, r
 	}
 	cl.gen++
 	if e.pending == nil {
 		e.pending = make(map[uint64]time.Duration)
 	}
 	e.pending[cl.gen] = req.seconds
-	e.reported = ""
 	if req.chargeWindow > 0 {
 		e.chargeGen, e.chargeCommitted, e.chargeUntil = cl.gen, false, now.Add(req.chargeWindow)
 	}
 	cl.entries[serial] = e
-	return &chargeReservation{ledger: cl, serial: serial, gen: cl.gen, req: req}, "", false
+	return &chargeReservation{ledger: cl, serial: serial, gen: cl.gen, req: req}, ""
 }
 
 // commit records the write of reservation gen at now: the charge window restarts at
@@ -375,7 +365,6 @@ func (cl *chargeLedger) commit(serial string, gen uint64, now time.Time, req shi
 	if end := now.Add(req.seconds + chargeLedgerMargin); end.After(e.lastEnd) {
 		e.lastEnd = end
 	}
-	e.reported = ""
 	cl.entries[serial] = e
 }
 
@@ -617,20 +606,20 @@ func shieldSeconds(d Decision) time.Duration {
 // charge (already_charged, UC-048 A4) or in a hold game the pool (shield_budget_exhausted,
 // shield_pool_full, UC-048 A9), the cap (shield_cap_reached) and the cooldown
 // (shield_cooldown, UC-048 A6), and reserves. It returns the reservation to finish (nil
-// when the ledger does not apply or refused), the refusal reason ("" when not
-// refused) and whether that refusal is the first of its kind against the entry.
-func (l *Loop) reserveShield(ctx context.Context, snapshot flags.Snapshot, c gamecontext.GameContext, d Decision, now time.Time) (res *chargeReservation, reason BlockReason, firstRefusal bool) {
+// when the ledger does not apply or refused) and the refusal reason ("" when not
+// refused).
+func (l *Loop) reserveShield(ctx context.Context, snapshot flags.Snapshot, c gamecontext.GameContext, d Decision, now time.Time) (res *chargeReservation, reason BlockReason) {
 	if d.Intervention != InterventionGrantShield || d.TargetSerial == "" {
-		return nil, "", false
+		return nil, ""
 	}
 	req := shieldRequest{limits: limitsOf(snapshot.Policy), seconds: shieldSeconds(d), hold: holdPoolOf(c, d.TargetSerial)}
 	if window, ok := l.chargeLedgerApplies(ctx, c, d); ok {
 		req.chargeWindow = window
 	}
-	res, reason, first := l.charges.reserve(d.TargetSerial, now, req)
+	res, reason = l.charges.reserve(d.TargetSerial, now, req)
 	if res == nil {
-		return nil, reason, first
+		return nil, reason
 	}
 	res.now = l.nowOrDefault()
-	return res, "", false
+	return res, ""
 }

@@ -33,7 +33,7 @@ import (
 var testFlags = []struct{ set, key string }{
 	{"agent", "decision.backend"},
 	{"agent", "decision.min_interval_ms"},
-	{"agent", "decision.act_confidence_threshold"},
+	{"agent", "decision.claude.act_confidence_threshold"},
 	{"agent", "llm.eligible_game_kinds"},
 	{"agent", "decision.prompt_profile"},
 	{"interventions", "music_tempo_override"},

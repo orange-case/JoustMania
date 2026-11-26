@@ -2,6 +2,7 @@ package decision
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -125,28 +126,41 @@ func TestGroupLever_MapAnswers(t *testing.T) {
 		}}
 	}
 	t.Run("UC-048/A13 group:all resolves to every alive player", func(t *testing.T) {
-		d, outcome, _ := mapAnswers(req, answer(InterventionGrantGroupShield, decide.TargetGroupAll))
+		d, outcome := mapAnswers(req, answer(InterventionGrantGroupShield, decide.TargetGroupAll))
 		if outcome != DecideOutcomeAct || !slices.Equal(d.TargetSerials, []string{"A", "B", "C"}) || d.TargetSerial != "" {
 			t.Fatalf("decision = %+v (%s), want set A,B,C and no single target", d, outcome)
 		}
 	})
 	t.Run("UC-048/A13 group:all_except:B resolves to the others", func(t *testing.T) {
-		d, outcome, _ := mapAnswers(req, answer(InterventionGrantGroupShield, decide.TargetGroupAllExceptPrefix+"B"))
+		d, outcome := mapAnswers(req, answer(InterventionGrantGroupShield, decide.TargetGroupAllExceptPrefix+"B"))
 		if outcome != DecideOutcomeAct || !slices.Equal(d.TargetSerials, []string{"A", "C"}) {
 			t.Fatalf("decision = %+v (%s), want set A,C", d, outcome)
 		}
 	})
-	for _, tc := range []struct{ name, iv, target, reason string }{
-		{"UC-048/A14 group lever with none", InterventionGrantGroupShield, decide.TargetNone, invalidGroupWithoutGroup},
-		{"UC-048/A14 group lever with a serial", InterventionGrantGroupShield, "A", invalidGroupWithoutGroup},
-		{"UC-048/A14 group lever excluding a player who is not alive", InterventionGrantGroupShield, decide.TargetGroupAllExceptPrefix + "Z", invalidGroupWithoutGroup},
-		{"UC-048/A14 group option on a single grant", InterventionGrantShield, decide.TargetGroupAll, invalidGroupTargetForSingle},
-		{"UC-048/A14 group option on a session lever", InterventionAdjustMusicTempo, decide.TargetGroupAll, invalidGroupTargetForSingle},
+	// An answer that does not fit the group lever is an invalid answer (rules fallback).
+	full := req
+	full.Questions = []decide.Question{
+		{ID: decide.QuestionFFAIntervention, Kind: decide.KindChoice, Options: []string{decide.OptionNoop,
+			InterventionGrantGroupShield, InterventionGrantShield, InterventionAdjustMusicTempo}},
+		{ID: decide.QuestionFFATarget, Kind: decide.KindChoice, Options: []string{decide.TargetNone, "A", "B", "C",
+			decide.TargetGroupAll, decide.TargetGroupAllExceptPrefix + "Z"}},
+	}
+	certain := func(iv, target string) decide.Response {
+		return decide.Response{Answers: []decide.Answer{
+			{QuestionID: decide.QuestionFFAIntervention, Choice: iv, Probabilities: map[string]float64{iv: 1}, Confidence: 1},
+			{QuestionID: decide.QuestionFFATarget, Choice: target, Probabilities: map[string]float64{target: 1}, Confidence: 1},
+		}}
+	}
+	for _, tc := range []struct{ name, iv, target string }{
+		{"UC-048/A14 group lever with none", InterventionGrantGroupShield, decide.TargetNone},
+		{"UC-048/A14 group lever with a serial", InterventionGrantGroupShield, "A"},
+		{"UC-048/A14 group lever excluding a player who is not alive", InterventionGrantGroupShield, decide.TargetGroupAllExceptPrefix + "Z"},
+		{"UC-048/A14 group option on a single grant", InterventionGrantShield, decide.TargetGroupAll},
+		{"UC-048/A14 group option on a session lever", InterventionAdjustMusicTempo, decide.TargetGroupAll},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, outcome, reason := mapAnswers(req, answer(tc.iv, tc.target))
-			if outcome != DecideOutcomeInvalid || reason != tc.reason {
-				t.Fatalf("outcome %s reason %q, want invalid %q", outcome, reason, tc.reason)
+			if err := decide.Validate(full, certain(tc.iv, tc.target)); !errors.Is(err, decide.ErrInvalid) {
+				t.Fatalf("Validate = %v, want an invalid answer", err)
 			}
 		})
 	}
@@ -292,11 +306,11 @@ func TestGroupLever_ReserveRacesASingleGrantForTheLastSlot(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			group, _, _, _ = cl.reserveGroup([]string{"A", "B"}, now, []shieldRequest{req, req}, 1)
+			group, _, _ = cl.reserveGroup([]string{"A", "B"}, now, []shieldRequest{req, req}, 1)
 		}()
 		go func() {
 			defer wg.Done()
-			single, _, _ = cl.reserve("B", now, req)
+			single, _ = cl.reserve("B", now, req)
 		}()
 		wg.Wait()
 		if (group == nil) == (single == nil) {
@@ -380,7 +394,7 @@ func TestGroupLever_UnwrittenGroupIsReleased(t *testing.T) {
 		}
 		assertReleased(t, l)
 	})
-	t.Run("UC-040/A14 A27 BR-014 a failed write releases the group", func(t *testing.T) {
+	t.Run("UC-048/A14 BR-014 a failed write (UC-040 A27) releases the group", func(t *testing.T) {
 		l, _, clock, _ := budgetLoop(t, 100)
 		l.Actions = errSink{}
 		var st LayerState

@@ -14,17 +14,17 @@ import (
 func defaultDecisionBackend() DecisionBackend {
 	timeout := DefaultDecisionTimeoutMs * time.Millisecond
 	return DecisionBackend{
-		Backend:                DefaultDecisionBackend,
-		ActConfidenceThreshold: DefaultDecisionActConfidenceThreshold,
-		CaptureContent:         DefaultDecisionCaptureContent,
-		MinInterval:            DefaultDecisionMinIntervalMs * time.Millisecond,
-		MinGapAfterAnswer:      DefaultDecisionMinGapAfterAnswerMs * time.Millisecond,
-		MaxStateAge:            DefaultDecisionMaxStateAgeMs * time.Millisecond,
+		Backend:           DefaultDecisionBackend,
+		CaptureContent:    DefaultDecisionCaptureContent,
+		MinInterval:       DefaultDecisionMinIntervalMs * time.Millisecond,
+		MinGapAfterAnswer: DefaultDecisionMinGapAfterAnswerMs * time.Millisecond,
+		MaxStateAge:       DefaultDecisionMaxStateAgeMs * time.Millisecond,
 		Claude: RemoteBackendConfig{BaseURL: DefaultDecisionClaudeBaseURL, Model: DefaultDecisionClaudeModel,
-			Timeout:              DefaultDecisionClaudeTimeoutMs * time.Millisecond,
-			MaxRequestsPerMinute: DefaultDecisionClaudeMaxRequestsPerMinute, HasMaxRequestsPerMinute: true},
+			Timeout:                DefaultDecisionClaudeTimeoutMs * time.Millisecond,
+			ActConfidenceThreshold: DefaultDecisionClaudeActConfidenceThreshold,
+			MaxRequestsPerMinute:   DefaultDecisionClaudeMaxRequestsPerMinute, HasMaxRequestsPerMinute: true},
 		Jev: RemoteBackendConfig{BaseURL: DefaultDecisionJevBaseURL, Model: DefaultDecisionJevModel, Timeout: timeout,
-			ActConfidenceThreshold: DefaultDecisionJevActConfidenceThreshold, HasActConfidenceThreshold: true},
+			ActConfidenceThreshold: DefaultDecisionJevActConfidenceThreshold},
 	}
 }
 
@@ -78,20 +78,19 @@ func TestDecisionBackend_FlagdShape(t *testing.T) {
 			keyDecisionMaxStateAgeMs:           6000,
 			keyDecisionClaudeMaxRequestsPerMin: 12,
 		},
-		floats: map[string]float64{keyDecisionActConfidenceThreshold: 0.95, keyDecisionJevActConfidenceThreshold: 0.95},
+		floats: map[string]float64{keyDecisionClaudeActConfidenceThreshold: 0.95, keyDecisionJevActConfidenceThreshold: 0.9},
 	}
 	got := New(stub, nil).DecisionBackend(context.Background())
 	want := DecisionBackend{
-		Backend:                DecisionBackendClaude,
-		ActConfidenceThreshold: 0.95,
-		CaptureContent:         true,
-		MinInterval:            1500 * time.Millisecond,
-		MinGapAfterAnswer:      3 * time.Second,
-		MaxStateAge:            6 * time.Second,
+		Backend:           DecisionBackendClaude,
+		CaptureContent:    true,
+		MinInterval:       1500 * time.Millisecond,
+		MinGapAfterAnswer: 3 * time.Second,
+		MaxStateAge:       6 * time.Second,
 		Claude: RemoteBackendConfig{BaseURL: "http://127.0.0.1:1", Model: "claude-sonnet-5-5", Timeout: 1500 * time.Millisecond,
-			MaxRequestsPerMinute: 12, HasMaxRequestsPerMinute: true},
+			ActConfidenceThreshold: 0.95, MaxRequestsPerMinute: 12, HasMaxRequestsPerMinute: true},
 		Jev: RemoteBackendConfig{BaseURL: "https://jev.test", Model: "jev-1", Timeout: 2 * time.Second,
-			ActConfidenceThreshold: 0.95, HasActConfidenceThreshold: true},
+			ActConfidenceThreshold: 0.9},
 	}
 	if got != want {
 		t.Fatalf("DecisionBackend = %+v, want %+v", got, want)
@@ -128,7 +127,7 @@ func TestDecisionBackend_BadValuesFallBack(t *testing.T) {
 		strings: map[string]string{keyDecisionBackend: "   "},
 		ints: map[string]int64{keyDecisionClaudeTimeoutMs: 0, keyDecisionJevTimeoutMs: -5, keyDecisionMinIntervalMs: -1,
 			keyDecisionMinGapAfterAnswerMs: -1, keyDecisionMaxStateAgeMs: -1},
-		floats: map[string]float64{keyDecisionActConfidenceThreshold: 1.5},
+		floats: map[string]float64{keyDecisionClaudeActConfidenceThreshold: 1.5, keyDecisionJevActConfidenceThreshold: -1},
 	}
 	got := New(stub, nil).DecisionBackend(context.Background())
 	if got != defaultDecisionBackend() {
@@ -136,37 +135,39 @@ func TestDecisionBackend_BadValuesFallBack(t *testing.T) {
 	}
 }
 
-// TestDecisionBackend_JevThreshold covers decision.jev.act_confidence_threshold
-// (#1287): its own value applies to jev only, "inherit" and out-of-range values
-// fall back to the global flag, and claude/rules always use the global.
-// Spec: flags.md (decision.jev.act_confidence_threshold), decide-contract.md §5, FR-047.
+// TestDecisionBackend_ActThresholdPerBackend covers decision.<backend>.act_confidence_threshold
+// (#1287): one flag per backend, no shared or inherited value; NaN or a value
+// outside [0,1] gives that flag's default; rules and unknown names have none.
+// Spec: flags.md, decide-contract.md §5, FR-047.
 // UC: UC-044 A3
-func TestDecisionBackend_JevThreshold(t *testing.T) {
+func TestDecisionBackend_ActThresholdPerBackend(t *testing.T) {
 	cases := []struct {
-		name       string
-		jev        float64
-		wantJev    float64
-		wantSource string
+		name            string
+		value           float64
+		wantJev, wantCl float64
 	}{
-		{"own gate", 0.6, 0.6, DecisionBackendJev},
-		{"own zero", 0, 0, DecisionBackendJev},
-		{"own one", 1, 1, DecisionBackendJev},
-		{"inherit sentinel", ActConfidenceThresholdInherit, 0.95, ActThresholdSourceGlobal},
-		{"above one inherits", 1.5, 0.95, ActThresholdSourceGlobal},
-		{"negative inherits", -0.5, 0.95, ActThresholdSourceGlobal},
-		{"NaN inherits", math.NaN(), 0.95, ActThresholdSourceGlobal},
+		{"gate", 0.6, 0.6, 0.6},
+		{"zero", 0, 0, 0},
+		{"one", 1, 1, 1},
+		{"former inherit sentinel is out of range", -1, 0.6, 0.8},
+		{"above one", 1.5, 0.6, 0.8},
+		{"negative", -0.5, 0.6, 0.8},
+		{"NaN", math.NaN(), 0.6, 0.8},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run("UC-044/A3 "+tc.name, func(t *testing.T) {
 			stub := stubEvaluator{floats: map[string]float64{
-				keyDecisionActConfidenceThreshold: 0.95, keyDecisionJevActConfidenceThreshold: tc.jev}}
+				keyDecisionClaudeActConfidenceThreshold: tc.value, keyDecisionJevActConfidenceThreshold: tc.value}}
 			d := New(stub, nil).DecisionBackend(context.Background())
-			if v, src := d.ActThreshold(DecisionBackendJev); v != tc.wantJev || src != tc.wantSource {
-				t.Fatalf("ActThreshold(jev) = %v,%q, want %v,%q", v, src, tc.wantJev, tc.wantSource)
+			if v, ok := d.ActThreshold(DecisionBackendJev); !ok || v != tc.wantJev {
+				t.Fatalf("ActThreshold(jev) = %v,%v, want %v", v, ok, tc.wantJev)
 			}
-			for _, b := range []string{DecisionBackendClaude, DecisionBackendRules, "bogus"} {
-				if v, src := d.ActThreshold(b); v != 0.95 || src != ActThresholdSourceGlobal {
-					t.Fatalf("ActThreshold(%s) = %v,%q, want the global 0.95", b, v, src)
+			if v, ok := d.ActThreshold(DecisionBackendClaude); !ok || v != tc.wantCl {
+				t.Fatalf("ActThreshold(claude) = %v,%v, want %v", v, ok, tc.wantCl)
+			}
+			for _, b := range []string{DecisionBackendRules, "bogus"} {
+				if _, ok := d.ActThreshold(b); ok {
+					t.Fatalf("ActThreshold(%s) has a threshold, want none", b)
 				}
 			}
 		})
@@ -216,14 +217,11 @@ func TestDecisionBackend_BackendMaxRequestsPerMinute(t *testing.T) {
 
 func TestDecisionBackend_JevThresholdDefaultActsAtGate(t *testing.T) {
 	d := New(stubEvaluator{}, nil).DecisionBackend(context.Background())
-	if v, src := d.ActThreshold(DecisionBackendJev); v != 0.6 || src != DecisionBackendJev {
-		t.Fatalf("default ActThreshold(jev) = %v,%q, want 0.6 from jev", v, src)
+	if v, _ := d.ActThreshold(DecisionBackendJev); v != 0.6 {
+		t.Fatalf("default ActThreshold(jev) = %v, want 0.6", v)
 	}
-	if v, src := d.ActThreshold(DecisionBackendClaude); v != 0.8 || src != ActThresholdSourceGlobal {
-		t.Fatalf("default ActThreshold(claude) = %v,%q, want the global 0.8", v, src)
-	}
-	if (DecisionBackend{}).Jev.HasActConfidenceThreshold {
-		t.Fatal("a zero-value snapshot must inherit the global threshold")
+	if v, _ := d.ActThreshold(DecisionBackendClaude); v != 0.8 {
+		t.Fatalf("default ActThreshold(claude) = %v, want 0.8", v)
 	}
 }
 
@@ -231,7 +229,7 @@ func TestDecisionBackend_DefaultsOnError(t *testing.T) {
 	boom := errors.New("flagd down")
 	stub := stubEvaluator{errs: map[string]error{}}
 	for _, k := range []string{
-		keyDecisionBackend, keyDecisionActConfidenceThreshold, keyDecisionCaptureContent,
+		keyDecisionBackend, keyDecisionClaudeActConfidenceThreshold, keyDecisionCaptureContent,
 		keyDecisionClaudeModel, keyDecisionClaudeTimeoutMs, keyDecisionClaudeBaseURL, keyDecisionJevBaseURL,
 		keyDecisionJevModel, keyDecisionJevTimeoutMs, keyDecisionMinIntervalMs,
 		keyDecisionJevActConfidenceThreshold,
@@ -254,16 +252,16 @@ func TestDecisionBackend_ZeroValueIsRules(t *testing.T) {
 // unreachable). capture_content is the one intended difference: on in ci/.
 func TestDecisionBackend_FlagFilesMatchDefaults(t *testing.T) {
 	want := map[string]any{
-		keyDecisionBackend:                   DefaultDecisionBackend,
-		keyDecisionActConfidenceThreshold:    DefaultDecisionActConfidenceThreshold,
-		keyDecisionClaudeModel:               DefaultDecisionClaudeModel,
-		keyDecisionClaudeTimeoutMs:           float64(DefaultDecisionClaudeTimeoutMs),
-		keyDecisionClaudeBaseURL:             DefaultDecisionClaudeBaseURL,
-		keyDecisionJevBaseURL:                DefaultDecisionJevBaseURL,
-		keyDecisionJevModel:                  DefaultDecisionJevModel,
-		keyDecisionJevTimeoutMs:              float64(DefaultDecisionTimeoutMs),
-		keyDecisionMinIntervalMs:             float64(DefaultDecisionMinIntervalMs),
-		keyDecisionJevActConfidenceThreshold: DefaultDecisionJevActConfidenceThreshold,
+		keyDecisionBackend:                      DefaultDecisionBackend,
+		keyDecisionClaudeActConfidenceThreshold: DefaultDecisionClaudeActConfidenceThreshold,
+		keyDecisionClaudeModel:                  DefaultDecisionClaudeModel,
+		keyDecisionClaudeTimeoutMs:              float64(DefaultDecisionClaudeTimeoutMs),
+		keyDecisionClaudeBaseURL:                DefaultDecisionClaudeBaseURL,
+		keyDecisionJevBaseURL:                   DefaultDecisionJevBaseURL,
+		keyDecisionJevModel:                     DefaultDecisionJevModel,
+		keyDecisionJevTimeoutMs:                 float64(DefaultDecisionTimeoutMs),
+		keyDecisionMinIntervalMs:                float64(DefaultDecisionMinIntervalMs),
+		keyDecisionJevActConfidenceThreshold:    DefaultDecisionJevActConfidenceThreshold,
 	}
 	for path, capture := range map[string]bool{
 		filepath.Join("..", "..", "flagd", "agent.json"):       DefaultDecisionCaptureContent,
@@ -359,10 +357,12 @@ func TestDecisionBackend_StageBudgetVariant(t *testing.T) {
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		// The jev threshold's "inherit" variant is the sentinel the getter maps to
-		// the global flag (#1287).
-		if got := doc.Flags[keyDecisionJevActConfidenceThreshold].Variants["inherit"]; got != ActConfidenceThresholdInherit {
-			t.Errorf("%s: %s inherit = %v, want %v", path, keyDecisionJevActConfidenceThreshold, got, ActConfidenceThresholdInherit)
+		// One threshold per backend and no shared one to inherit (#2805).
+		if _, ok := doc.Flags[keyDecisionJevActConfidenceThreshold].Variants["inherit"]; ok {
+			t.Errorf("%s: %s has an inherit variant", path, keyDecisionJevActConfidenceThreshold)
+		}
+		if _, ok := doc.Flags["decision.act_confidence_threshold"]; ok {
+			t.Errorf("%s: the shared decision.act_confidence_threshold still exists", path)
 		}
 		f := doc.Flags[keyLLMMaxRequestsPerMin]
 		if got := f.Variants["stage"]; got != float64(30) {

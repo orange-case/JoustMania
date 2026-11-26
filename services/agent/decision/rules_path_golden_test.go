@@ -82,9 +82,8 @@ func rulesGoldenJSON(t *testing.T, predictionsOff bool, wire func(*Loop, *time.T
 			InterventionsAllowed: allInterventions(),
 			Policy:               flags.Policy{MaxInterventionsPerMinute: 6},
 			Decision: flags.DecisionBackend{
-				Backend:                flags.DecisionBackendRules,
-				ActConfidenceThreshold: flags.DefaultDecisionActConfidenceThreshold,
-				PredictionsOff:         predictionsOff,
+				Backend:        flags.DecisionBackendRules,
+				PredictionsOff: predictionsOff,
 			},
 		})
 		if wire != nil {

@@ -68,9 +68,8 @@ func TestRun_WaitsForInflightDecideBeforeReturning(t *testing.T) {
 			Policy:               flags.Policy{MaxInterventionsPerMinute: 100},
 			LLMGate:              flags.LLMGate{EligibleGameKinds: []string{"real"}, MaxRequestsPerMinute: 100},
 			Decision: flags.DecisionBackend{
-				Backend:                flags.DecisionBackendClaude,
-				ActConfidenceThreshold: 0.8,
-				Claude:                 flags.RemoteBackendConfig{Model: "m", Timeout: time.Hour},
+				Backend: flags.DecisionBackendClaude,
+				Claude:  flags.RemoteBackendConfig{Model: "m", Timeout: time.Hour, ActConfidenceThreshold: 0.8},
 			},
 		}
 		be := &slowDecideBackend{started: make(chan struct{}), release: make(chan struct{})}

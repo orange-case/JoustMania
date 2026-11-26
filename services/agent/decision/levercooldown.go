@@ -28,13 +28,12 @@ var cooldownKeys = func() []string {
 	return keys
 }()
 
-// leverCooling is step 3a of the permission chain: whether d's lever is cooling,
-// and whether this is the first refusal since its last write. A decision that
-// passes holds the lever until the caller releases the hold. Only while suppression
-// is on, as the ledger is.
-func (l *Loop) leverCooling(d Decision, now time.Time) (cooling, first bool, hold *cooldownHold) {
+// leverCooling is step 3a of the permission chain: whether d's lever is cooling. A
+// decision that passes holds the lever until the caller releases the hold. Only
+// while suppression is on, as the ledger is.
+func (l *Loop) leverCooling(d Decision, now time.Time) (cooling bool, hold *cooldownHold) {
 	if !l.suppressReapplied || !cooldownLevers[d.Intervention] {
-		return false, false, nil
+		return false, nil
 	}
 	return l.applied.cooling(appliedKey(d), normalisedValue(d.Value), now, l.effectWindow())
 }
