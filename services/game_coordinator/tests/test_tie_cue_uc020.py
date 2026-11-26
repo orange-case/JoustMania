@@ -49,6 +49,15 @@ def log(monkeypatch):
 
 
 async def _tied_game(game_cls, log: list):
+    game, events = await _all_dead_game(game_cls, log)
+    assert await game._check_win_condition()
+    assert events.get_events_of_type(GameEvent.GAME_TIE) == [{}]
+    log.clear()
+    return game, events
+
+
+async def _all_dead_game(game_cls, log: list):
+    """A running game whose players are all dead; no win check has run yet."""
     manager = MockControllerManagerService(num_controllers=4, death_schedule={}, max_duration=10.0)
     events = EventCollector()
     kwargs = {}
@@ -70,9 +79,6 @@ async def _tied_game(game_cls, log: list):
     game._wait_for_rainbow_effect = AsyncMock(return_value=True)
     for player in game.players.values():
         player.alive = False
-    assert await game._check_win_condition()
-    assert events.get_events_of_type(GameEvent.GAME_TIE) == [{}]
-    log.clear()
     return game, events
 
 
@@ -172,6 +178,24 @@ async def test_force_end_after_the_tie_cuts_the_waits_but_keeps_the_cue(log):
     assert [s for kind, s in log if kind == "sleep"] == []
     (ended,) = events.get_events_of_type(GameEvent.GAME_ENDED)
     assert ended["outcome"] == "tie"
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-020", flow="A4", br=["BR-007", "BR-010"])
+@pytest.mark.parametrize("game_cls", [FFAGame, SimpleTeamsGame], ids=["FFA", "Teams"])
+async def test_force_end_before_the_tie_latch_gives_no_tie_cue(log, game_cls):
+    game, events = await _all_dead_game(game_cls, log)
+    game.force_end("operator")
+    assert not await game._check_win_condition()
+    game._latch_game_outcome()  # the run() latches when the loop exits
+
+    await game._end_game_impl()
+
+    assert _effects(log, FLASH) == []
+    assert Sound.SFX_DEATH not in _sounds(game)
+    assert events.get_events_of_type(GameEvent.GAME_TIE) == []
+    (ended,) = events.get_events_of_type(GameEvent.GAME_ENDED)
+    assert ended["outcome"] == "force_ended"
 
 
 @pytest.mark.asyncio
