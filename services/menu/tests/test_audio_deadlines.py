@@ -123,6 +123,7 @@ async def test_a_hung_stop_music_does_not_hold_the_game_start(hung_audio):
     from services.menu.tests.test_servicer import FakeMenuServicer
 
     servicer = FakeMenuServicer()
+    servicer.state = menu_pb2.MenuState.RUNNING
     servicer.audio = hung_audio
     servicer.idle_monitor = MagicMock()
     servicer.stop_button_monitor = AsyncMock()

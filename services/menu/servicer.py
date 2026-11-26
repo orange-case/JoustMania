@@ -156,6 +156,8 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         # UC-010 A16: the boot's coordinator lookup is undecided; a StartMenu meanwhile is applied after it.
         self._boot_lookup_running = False
         self.boot_start_requested = False
+        # Held for the whole lobby entry; a game start waits for it, so neither interleaves with the other.
+        self._lobby_entry_lock = asyncio.Lock()
 
         logger.info("Menu service initialized")
 
@@ -342,18 +344,19 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
 
         Sets RUNNING, un-readies everyone, restores the persisted ``current_game``
         (an unplayable value falls back to JoustFFA), starts lobby music and the
-        idle monitor, and publishes ``menu_started``.
+        idle monitor, and publishes ``menu_started``. A game start that lands meanwhile runs after it (A8).
         """
-        self.state = menu_pb2.MenuState.RUNNING
-        self._clear_ready_state()
-        self.restore_user_selection()
-        # UC-010 A11 (#2175): every controller the menu knows is CONNECTED again and shows the restored
-        # mode's dim lobby colour; bounded like the post-game restore (BR-010).
-        await _bounded_restore_step("controller re-registration", self.state_manager.reset)
+        async with self._lobby_entry_lock:
+            self.state = menu_pb2.MenuState.RUNNING
+            self._clear_ready_state()
+            self.restore_user_selection()
+            # UC-010 A11 (#2175): every controller the menu knows is CONNECTED again and shows the restored
+            # mode's dim lobby colour; bounded like the post-game restore (BR-010).
+            await _bounded_restore_step("controller re-registration", self.state_manager.reset)
 
-        await _bounded_restore_step("lobby music", self.audio.start_lobby_music)
-        self.idle_monitor.start()
-        await self.event_publisher.publish("menu_started", {})
+            await _bounded_restore_step("lobby music", self.audio.start_lobby_music)
+            self.idle_monitor.start()
+            await self.event_publisher.publish("menu_started", {})
 
     def restore_user_selection(self) -> None:
         """Load the voice and the persisted ``current_game`` (an unplayable value falls back to JoustFFA)."""
@@ -704,7 +707,9 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             # A start won the race during the roster lookup (ready auto start, another caller).
             return Result(None, None, GAME_ACTIVE)
         previous_state = self.state
-        self.set_menu_state(menu_pb2.MenuState.GAME_STARTING)
+        if previous_state != menu_pb2.MenuState.STOPPED:
+            # A stopped menu stays STOPPED through the game (UC-010 BR-014).
+            self.set_menu_state(menu_pb2.MenuState.GAME_STARTING)
         await self.event_publisher.publish(
             "game_requested",
             {

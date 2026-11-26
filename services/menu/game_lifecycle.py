@@ -337,6 +337,10 @@ class GameLifecycleMixin:
 
         # Brief delay to let button monitor finish current event dispatch
         await asyncio.sleep(0.1)
+        # UC-010 A8: a lobby entry under way (StartMenu, the boot) ends first; its music and
+        # re-registration must not land on top of the game preparation.
+        async with self._lobby_entry_lock:
+            pass
         if ready_start and self.state == menu_pb2.MenuState.STOPPED:
             # UC-010 BR-014: a StopMenu during the ready feedback delay also stops the auto start.
             self._drop_ready_start_on_stopped_menu(serial)
@@ -435,8 +439,8 @@ class GameLifecycleMixin:
         aborted, the lobby is restored with the menu left STOPPED, and no game is requested.
         """
         self._lobby_restore_started = False
-        # A start on a menu that was already STOPPED is #2449 (out of scope here); only a StopMenu
-        # that lands during the awaits below aborts the start.
+        # Only a StopMenu that lands during the awaits below aborts the start. A menu already STOPPED
+        # (a web or pad start) stays STOPPED through the game, so its restore keeps it so (BR-014).
         stopped_before = self.state == menu_pb2.MenuState.STOPPED
         self.idle_monitor.stop()
 
@@ -454,7 +458,8 @@ class GameLifecycleMixin:
             await self._restart_lobby()
             return False
 
-        self.state = menu_pb2.MenuState.GAME_STARTING
+        if not stopped_before:
+            self.state = menu_pb2.MenuState.GAME_STARTING
         return True
 
     def _build_trace_metadata(self) -> list[tuple[str, str]]:

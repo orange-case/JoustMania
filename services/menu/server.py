@@ -73,6 +73,8 @@ async def _boot_entry(menu_servicer: MenuServicer, decided: asyncio.Event, settl
         wanted = auto_start or menu_servicer.boot_start_requested
         if wanted and menu_servicer._lifecycle_live():
             # A web or pad start during the waits above is a game now: no lobby over it (UC-010 A16).
+            # The game ran on a STOPPED menu; its end restores the menu started, as after a StartMenu (A12).
+            menu_servicer.start_menu_during_game()
             logger.info("Boot lobby entry skipped: a game lifecycle started meanwhile")
         elif wanted and menu_servicer.state != menu_pb2.MenuState.RUNNING:
             try:
@@ -89,8 +91,26 @@ async def _boot_entry(menu_servicer: MenuServicer, decided: asyncio.Event, settl
         settled.set()
 
 
+async def _wait_for_boot(lookup_decided: asyncio.Event, boot_settled: asyncio.Event) -> None:
+    try:
+        await asyncio.wait_for(lookup_decided.wait(), timeout=BOOT_LOOKUP_HEALTH_TIMEOUT_SECONDS)
+        await boot_settled.wait()
+    except TimeoutError:
+        logger.warning(
+            "coordinator game lookup undecided after %ss; reporting SERVING, no lobby until it answers",
+            BOOT_LOOKUP_HEALTH_TIMEOUT_SECONDS,
+        )
+
+
 async def serve(port=50054):
     """Start the Menu gRPC server."""
+    # Before anything that can take a while: a SIGTERM (Docker stop) or SIGINT during the boot must
+    # still shut down gracefully instead of killing the process with Python's default handler.
+    shutdown_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, shutdown_event.set)
+
     # Initialize OTEL push metrics
     init_metrics()
     init_logging()
@@ -143,31 +163,26 @@ async def serve(port=50054):
     lookup_decided = asyncio.Event()
     boot_settled = asyncio.Event()
     boot_task = asyncio.create_task(_boot_entry(menu_servicer, lookup_decided, boot_settled))
-    try:
-        await asyncio.wait_for(lookup_decided.wait(), timeout=BOOT_LOOKUP_HEALTH_TIMEOUT_SECONDS)
-        await boot_settled.wait()
-    except TimeoutError:
-        logger.warning(
-            "coordinator game lookup undecided after %ss; reporting SERVING, no lobby until it answers",
-            BOOT_LOOKUP_HEALTH_TIMEOUT_SECONDS,
-        )
+    boot_wait = asyncio.create_task(_wait_for_boot(lookup_decided, boot_settled))
+    stop_wait = asyncio.create_task(shutdown_event.wait())
+    await asyncio.wait({boot_wait, stop_wait}, return_when=asyncio.FIRST_COMPLETED)
 
-    # Ready: a live game is followed, the lobby is entered, or menu_auto_start is off (or a StartMenu
-    # already entered it). A client that trusts health can no longer hit "Menu already running" from the boot entry.
-    await health_servicer.set("menu.MenuService", health_pb2.HealthCheckResponse.SERVING)
-    await health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
-    logger.info("Menu health SERVING")
+    if shutdown_event.is_set():
+        # Health stays NOT_SERVING: the boot below is cancelled, never reported as ready.
+        logger.info("Shutdown requested during the boot")
+        boot_wait.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await boot_wait
+    else:
+        # Ready: a live game is followed, the lobby is entered, or menu_auto_start is off (or a StartMenu
+        # already entered it). A client that trusts health can no longer hit "Menu already running" from the boot entry.
+        await health_servicer.set("menu.MenuService", health_pb2.HealthCheckResponse.SERVING)
+        await health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+        logger.info("Menu health SERVING")
 
-    # Use asyncio.Event for signal-driven shutdown so both SIGTERM (Docker stop)
-    # and SIGINT (Ctrl-C / KeyboardInterrupt) trigger graceful shutdown.
-    shutdown_event = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, shutdown_event.set)
-
-    watchdog = start_loop_watchdog("menu")
-    await shutdown_event.wait()
-    watchdog.stop()
+        watchdog = start_loop_watchdog("menu")
+        await stop_wait
+        watchdog.stop()
 
     logger.info("Shutting down Menu server...")
 

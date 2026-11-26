@@ -76,6 +76,7 @@ class FakeMenuServicer:
         self.state = menu_pb2.MenuState.STOPPED
         self.current_selection = Games.JoustFFA
         self._lobby_restore_started = False
+        self._lobby_entry_lock = asyncio.Lock()
 
         # Mocked dependencies (autospec'd: a misspelt method fails here, not in production, #1272)
         self.led = create_autospec(LedController, instance=True)
@@ -2086,6 +2087,7 @@ class TestPrepareGameStart:
         """Should set menu state to GAME_STARTING."""
         from services.menu.servicer import MenuServicer
 
+        servicer.state = menu_pb2.MenuState.RUNNING
         servicer.idle_monitor = MagicMock()
         servicer.stop_button_monitor = AsyncMock()
 
@@ -2899,6 +2901,7 @@ class TestRunGameLifecycleMidStartFailure:
     @pytest.fixture
     def servicer(self):
         s = FakeMenuServicer()
+        s.state = menu_pb2.MenuState.RUNNING
         # _run_game_lifecycle + _prepare_game_start + _restart_lobby dependencies
         s.idle_monitor = MagicMock()
         s.stop_button_monitor = AsyncMock()
