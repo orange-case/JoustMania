@@ -655,7 +655,7 @@ func (p *puller) roundKeys(d map[Key]docEntry, local map[Key]localEntry) []Key {
 	}
 	sortKeys(keys)
 	sort.SliceStable(keys, func(i, j int) bool {
-		return isKillKey(keys[i]) && !isKillKey(keys[j])
+		return p.l.isKillKey(keys[i]) && !p.l.isKillKey(keys[j])
 	})
 	return keys
 }

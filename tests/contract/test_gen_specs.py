@@ -510,3 +510,97 @@ def test_registry_bounds_cells(bounds, cell):
 def test_unknown_registry_bounds_fail():
     with pytest.raises(g.SpecSourceError, match="unknown bounds"):
         g._bounds({"mystery": 1})
+
+
+def _registry(tmp_repo, rows):
+    (tmp_repo / "services/flag-service/registry.yaml").write_text(
+        json.dumps({"flags": rows})
+    )
+
+
+def _row(key, **attrs):
+    return {"set": "agent", "key": key, "kind": "overlay", "scope": ["stack"]} | attrs
+
+
+def test_flag_registry_lists_each_attribute(tmp_repo):
+    _registry(
+        tmp_repo,
+        [
+            _row("enabled", kill_switch=True, stop="off"),
+            _row("allowed", kill_switch=True, persist=True),
+            _row("goal", flagsmith_only=True),
+            {
+                "set": "game",
+                "key": "t",
+                "kind": "overlay",
+                "scope": ["real"],
+                "latched": True,
+            },
+            _row(
+                "bounds",
+                magnitude_limits={
+                    "grant": {"min": 1, "max": 10, "flag": "shield_seconds"},
+                    "handicap": {
+                        "min": 0.5,
+                        "max": 2.0,
+                        "neutral": 1.0,
+                        "integer": True,
+                        "flag": "player_handicap_factor",
+                    },
+                },
+            ),
+        ],
+    )
+    text = g.flag_registry()
+    kill, rest = text.split("## Kill switches")[1].split("## Flagsmith only")
+    assert [r for r in kill.splitlines() if r.startswith("| `")] == [
+        "| `agent/allowed` | yes |  |",
+        "| `agent/enabled` | no | `off` |",
+    ]
+    only, rest = rest.split("## Latched at game start")
+    assert [r for r in only.splitlines() if r.startswith("- ")] == ["- `agent/goal`"]
+    latched, tables = rest.split("## Range tables")
+    assert [r for r in latched.splitlines() if r.startswith("- ")] == ["- `game/t`"]
+    assert "### `agent/bounds`" in tables
+    assert [r for r in tables.splitlines() if r.startswith("| `")] == [
+        "| `grant` | 1 | 10 |  |  | `interventions/shield_seconds` |",
+        "| `handicap` | 0.5 | 2.0 | yes | 1.0 | `interventions/player_handicap_factor` |",
+    ]
+
+
+def test_flag_registry_with_no_marked_rows_says_none(tmp_repo):
+    _registry(tmp_repo, [_row("x")])
+    text = g.flag_registry()
+    assert text.count(f"- {g.NONE_CELL}") == 2
+
+
+def test_write_cell_names_the_attributes():
+    row = _row("enabled", kill_switch=True, stop="off", bounds={"variants": ["off"]})
+    assert (
+        g._write_cell(row) == "overlay, stack; variants `off`; kill switch; stop `off`"
+    )
+    table = _row("b", magnitude_limits={"x": {"min": 0, "max": 1, "flag": "f"}})
+    assert g._write_cell(table) == "overlay, stack; range table"
+
+
+@pytest.mark.parametrize(
+    "attrs, match",
+    [
+        ({"kill_switch": "yes"}, "kill_switch must be true or false"),
+        ({"stop": False}, "stop must be a quoted variant name"),
+        ({"magnitude_limits": {}}, "magnitude_limits maps"),
+        ({"magnitude_limits": {"x": {"min": 0, "max": 1}}}, "takes min, max, flag"),
+        (
+            {
+                "magnitude_limits": {
+                    "x": {"min": 0, "max": 1, "flag": "f", "hasneutral": 1}
+                }
+            },
+            "takes min, max, flag",
+        ),
+    ],
+)
+def test_bad_registry_attributes_fail(tmp_repo, attrs, match):
+    _registry(tmp_repo, [_row("x", **attrs)])
+    with pytest.raises(g.SpecSourceError, match=match):
+        g.flag_registry()

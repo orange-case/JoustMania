@@ -16,48 +16,41 @@ import (
 // and Max are the registry range of the interventions flag the intervention
 // writes (a test keeps them equal); an operator range must lie inside them.
 type MagnitudeLimit struct {
-	Min, Max float64
+	Min float64 `yaml:"min"`
+	Max float64 `yaml:"max"`
 	// Integer requires whole-number bounds (an int-valued flag).
-	Integer bool
-	// Neutral, when HasNeutral, must stay inside the range (a two-way lever).
-	Neutral    float64
-	HasNeutral bool
+	Integer bool `yaml:"integer,omitempty"`
+	// Neutral, when set, must stay inside the range (a two-way lever). A
+	// pointer: 0 is a legal neutral.
+	Neutral *float64 `yaml:"neutral,omitempty"`
 	// Flag is the interventions flag whose registry range the limit equals.
-	Flag string
-}
-
-// magnitudeLimits are the range tables of the registry ("set/key" -> intervention
-// -> limit). A Go table, not a registry.yaml attribute, because released
-// flag-service images parse the checkout's registry.yaml strictly and would refuse
-// a new key; such an image accepts only the declared variants of the row.
-var magnitudeLimits = map[string]map[string]MagnitudeLimit{
-	"agent/decision.magnitude_bounds": {
-		"adjust_music_tempo":        {Min: 1.0, Max: 1.3, Flag: "music_tempo_override"},
-		"adjust_volume":             {Min: 0.3, Max: 1.0, Flag: "volume_override"},
-		"adjust_global_sensitivity": {Min: 0, Max: 4, Integer: true, Flag: "global_sensitivity_override"},
-		"adjust_player_sensitivity": {Min: 0.2, Max: 2.0, Neutral: 1.0, HasNeutral: true, Flag: "player_sensitivity_factor"},
-		"adjust_global_difficulty":  {Min: 0.5, Max: 2.0, Neutral: 1.0, HasNeutral: true, Flag: "global_difficulty_factor"},
-		"set_player_handicap":       {Min: 0.5, Max: 2.0, Neutral: 1.0, HasNeutral: true, Flag: "player_handicap_factor"},
-		"grant_shield":              {Min: 1, Max: 10, Flag: "shield_seconds"},
-		"toughness_boost":           {Min: 0.1, Max: 30, Flag: "toughness_boost_seconds"},
-	},
-}
-
-// MagnitudeLimits returns the range table of a policy (nil when it has none).
-func (p *Policy) MagnitudeLimits() map[string]MagnitudeLimit {
-	return magnitudeLimits[p.Set+"/"+p.Key]
+	Flag string `yaml:"flag"`
 }
 
 // validMagnitudeRow checks a row with a range table: no yaml bounds (the table is
-// the bound) and a baseline default variant that passes the table itself.
-func validMagnitudeRow(p *Policy, flag *baseline.Flag) error {
-	limits := p.MagnitudeLimits()
+// the bound), well-formed limits and a baseline default variant that passes the
+// table itself.
+func validMagnitudeRow(p *Policy, flag *baseline.Flag, b *baseline.Baseline) error {
+	limits := p.MagnitudeLimits
 	if limits == nil {
 		return nil
 	}
-	b := p.Bounds
-	if len(b.Variants) > 0 || b.Range != nil || b.Pattern != nil || b.FreeString || b.Payload != nil || b.Shape {
+	if len(limits) == 0 {
+		return fmt.Errorf("magnitude_limits is empty")
+	}
+	bd := p.Bounds
+	if len(bd.Variants) > 0 || bd.Range != nil || bd.Pattern != nil || bd.FreeString || bd.Payload != nil || bd.Shape {
 		return fmt.Errorf("a range-table row takes no other bounds")
+	}
+	for iv, l := range limits {
+		switch {
+		case math.IsNaN(l.Min) || math.IsNaN(l.Max) || l.Min >= l.Max:
+			return fmt.Errorf("magnitude_limits %s: min must be below max", iv)
+		case l.Neutral != nil && (*l.Neutral < l.Min || *l.Neutral > l.Max):
+			return fmt.Errorf("magnitude_limits %s: neutral outside min to max", iv)
+		case b.Flag("interventions", l.Flag) == nil:
+			return fmt.Errorf("magnitude_limits %s: flag %q is no interventions flag", iv, l.Flag)
+		}
 	}
 	if msg := checkMagnitudeTable(limits, flag.Variants[flag.DefaultVariant]); msg != "" {
 		return fmt.Errorf("default variant fails the range table: %s", msg)
@@ -67,7 +60,7 @@ func validMagnitudeRow(p *Policy, flag *baseline.Flag) error {
 
 // checkMagnitudeValue validates a decision.magnitude_bounds write.
 func checkMagnitudeValue(p *Policy, value json.RawMessage) *fserr.Error {
-	if msg := checkMagnitudeTable(p.MagnitudeLimits(), value); msg != "" {
+	if msg := checkMagnitudeTable(p.MagnitudeLimits, value); msg != "" {
 		return fserr.Unprocessable(fserr.OutOfBounds, "%s: %s", p.Key, msg)
 	}
 	return nil
@@ -111,19 +104,9 @@ func checkMagnitudeTable(limits map[string]MagnitudeLimit, value json.RawMessage
 			return fmt.Sprintf("%s must be within %v to %v (the hard limit of %s)", iv, l.Min, l.Max, l.Flag)
 		case l.Integer && (lo != math.Trunc(lo) || hi != math.Trunc(hi)):
 			return fmt.Sprintf("%s takes whole numbers", iv)
-		case l.HasNeutral && (l.Neutral < lo || l.Neutral > hi):
-			return fmt.Sprintf("%s must contain its neutral %v", iv, l.Neutral)
+		case l.Neutral != nil && (*l.Neutral < lo || *l.Neutral > hi):
+			return fmt.Sprintf("%s must contain its neutral %v", iv, *l.Neutral)
 		}
 	}
 	return ""
-}
-
-// magnitudeLimitNames lists the range-table rows ("set/key"), sorted (tests).
-func magnitudeLimitNames() []string {
-	out := make([]string, 0, len(magnitudeLimits))
-	for k := range magnitudeLimits {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

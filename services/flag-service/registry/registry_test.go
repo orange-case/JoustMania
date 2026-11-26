@@ -128,8 +128,8 @@ func checkBounds(t *testing.T, row mdRow, p *Policy) {
 			t.Errorf("%s: flags.md says declared variants, registry %+v", row.key, b)
 		}
 	case strings.HasPrefix(text, "range table"):
-		if p.MagnitudeLimits() == nil {
-			t.Errorf("%s: flags.md says range table, registry.magnitudeLimits has no entry", row.key)
+		if p.MagnitudeLimits == nil {
+			t.Errorf("%s: flags.md says range table, the row has no magnitude_limits", row.key)
 		}
 	case strings.HasPrefix(text, "same shape"):
 		if !b.Shape {
@@ -193,8 +193,8 @@ func TestRegistryMatchesFlagsMD(t *testing.T) {
 			if p.Persist != row.persist {
 				t.Errorf("%s: persist %v in registry, %v in flags.md", row.key, p.Persist, row.persist)
 			}
-			if p.FlagsmithOnly() != row.flagsmithOnly {
-				t.Errorf("%s: Flagsmith only %v in registry.flagsmithOnly, %v in flags.md (writer column **Flagsmith only**)", row.key, p.FlagsmithOnly(), row.flagsmithOnly)
+			if p.FlagsmithOnly != row.flagsmithOnly {
+				t.Errorf("%s: flagsmith_only %v in registry.yaml, %v in flags.md (writer column **Flagsmith only**)", row.key, p.FlagsmithOnly, row.flagsmithOnly)
 			}
 			checkBounds(t, row, p)
 		}
@@ -448,22 +448,35 @@ func TestOperatorSetIsReadOnlyBaseline(t *testing.T) {
 
 // UC: UC-043 A17
 func TestRealScopeIsLatched(t *testing.T) {
-	t.Run("UC-043/A17 every flag promotable in scope real is latched at game start", func(t *testing.T) {
+	b, err := baseline.Load(filepath.Join(root(t), "..", "flagd", "ci"), baseline.DefaultFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("UC-043/A17 a row with scope real must be latched at game start", func(t *testing.T) {
+		_, err := Parse([]byte(`flags: [{set: game, key: invincibility_seconds, kind: overlay, scope: [real], bounds: {range: [0, 10]}}]`), b)
+		if err == nil || !strings.Contains(err.Error(), "latched") {
+			t.Fatalf("err %v, want a latched refusal", err)
+		}
+	})
+	t.Run("UC-043/A17 a latched row must have scope real", func(t *testing.T) {
+		_, err := Parse([]byte(`flags: [{set: game, key: invincibility_seconds, kind: overlay, scope: [stack], latched: true, bounds: {range: [0, 10]}}]`), b)
+		if err == nil || !strings.Contains(err.Error(), "latched") {
+			t.Fatalf("err %v, want a latched refusal", err)
+		}
+	})
+	t.Run("UC-043/A17 every real row of registry.yaml is latched", func(t *testing.T) {
 		for _, dir := range []string{"", "ci"} {
-			real := map[string]bool{}
+			n := 0
 			for _, p := range loadReal(t, dir).Policies() {
-				if !p.AllowsScope(ScopeReal) {
-					continue
-				}
-				real[id(p.Set, p.Key)] = true
-				if !p.LatchedAtGameStart() {
-					t.Errorf("flagd/%s: %s allows scope real but is not latched at game start; a real write would change a running game", dir, id(p.Set, p.Key))
+				if p.AllowsScope(ScopeReal) {
+					n++
+					if !p.Latched {
+						t.Errorf("flagd/%s: %s allows scope real but is not latched", dir, id(p.Set, p.Key))
+					}
 				}
 			}
-			for key := range latchedAtGameStart {
-				if !real[key] {
-					t.Errorf("flagd/%s: latchedAtGameStart lists %s, which has no scope real", dir, key)
-				}
+			if n == 0 {
+				t.Fatalf("flagd/%s: no row with scope real", dir)
 			}
 		}
 	})
@@ -477,13 +490,10 @@ func TestRealScopeIsLatched(t *testing.T) {
 func TestShieldActivationIsReadPerGrant(t *testing.T) {
 	t.Run("UC-043/A17 shield.activation is not latched and has no scope real", func(t *testing.T) {
 		const key = "game/shield.activation"
-		if _, listed := latchedAtGameStart[key]; listed {
-			t.Errorf("latchedAtGameStart lists %s, which instant and trigger games read per grant", key)
-		}
 		for _, dir := range []string{"", "ci"} {
 			for _, p := range loadReal(t, dir).Policies() {
-				if id(p.Set, p.Key) == key && p.AllowsScope(ScopeReal) {
-					t.Errorf("flagd/%s: %s allows scope real", dir, key)
+				if id(p.Set, p.Key) == key && (p.AllowsScope(ScopeReal) || p.Latched) {
+					t.Errorf("flagd/%s: %s allows scope real or is latched", dir, key)
 				}
 			}
 		}
@@ -492,61 +502,36 @@ func TestShieldActivationIsReadPerGrant(t *testing.T) {
 
 // UC: UC-054 BR-005
 // UC: UC-053 A12
-func TestKillSwitchSetMatchesFlagsMD(t *testing.T) {
-	read := func(rel string) string {
-		raw, err := os.ReadFile(filepath.Join(root(t), "..", "..", rel))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return strings.ReplaceAll(string(raw), "\r\n", "\n")
+func TestKillSwitchRows(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(root(t), "..", "..", "docs", "OWNERSHIP_MODEL.md"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	paragraph := func(text, anchor string) string {
-		start := strings.Index(text, anchor)
-		if start < 0 {
-			t.Fatalf("anchor %q is missing", anchor)
-		}
-		para := text[start:]
-		if end := strings.Index(para, "\n\n"); end > 0 {
-			para = para[:end]
-		}
-		return para
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	const anchor = "Every agent-limiting setting of FR-152 is in `agent`:"
+	start := strings.Index(text, anchor)
+	if start < 0 {
+		t.Fatalf("anchor %q is missing", anchor)
 	}
-
-	t.Run("UC-054/BR-005 flags.md §13.6 lists exactly the Go kill-switch set", func(t *testing.T) {
-		var got []string
-		for _, m := range backticked.FindAllStringSubmatch(paragraph(read("docs/specs/flags.md"), "**Kill switches** (UC-054"), -1) {
-			if strings.Contains(m[1], "/") && !strings.ContainsAny(m[1], " ?*") {
-				got = append(got, m[1])
-			}
-		}
-		sort.Strings(got)
-		if want := sortedKeys(killSwitches); !reflect.DeepEqual(got, want) {
-			t.Fatalf("flags.md §13.6 names %v, the Go set is %v", got, want)
-		}
-	})
-
-	// FR-152's agent-limiting settings (C-034), "*" expanded against the registry rows.
-	sentence := paragraph(read("docs/OWNERSHIP_MODEL.md"), "Every agent-limiting setting of FR-152 is in `agent`:")
+	sentence := text[start:]
+	if end := strings.Index(sentence, "\n\n"); end > 0 {
+		sentence = sentence[:end]
+	}
 	if j := strings.Index(sentence, ". "); j >= 0 {
 		sentence = sentence[:j]
 	}
+	// FR-152's agent-limiting settings (C-034), "*" expanded against the registry rows.
 	fr152 := backticked.FindAllStringSubmatch(sentence, -1)
 	for _, dir := range []string{"", "ci"} {
-		t.Run("UC-054/BR-005 every kill switch has a row and every FR-152 row is one, against flagd/"+dir, func(t *testing.T) {
+		t.Run("UC-054/BR-005 every FR-152 row is a kill switch, against flagd/"+dir, func(t *testing.T) {
 			reg := loadReal(t, dir)
-			for _, name := range sortedKeys(killSwitches) {
-				set, key, _ := strings.Cut(name, "/")
-				if reg.Get(set, key) == nil {
-					t.Errorf("%s: kill switch with no registry row (not a Flagsmith feature)", name)
-				}
-			}
 			n := 0
 			for _, m := range fr152[1:] {
 				prefix, wild := strings.CutSuffix(m[1], "*")
 				for _, p := range reg.Policies() {
 					if p.Set == "agent" && (p.Key == m[1] || wild && strings.HasPrefix(p.Key, prefix)) {
 						n++
-						if !IsKillSwitch(p.Set, p.Key) {
+						if !p.IsKillSwitch() {
 							t.Errorf("agent/%s: FR-152 agent-limiting flag with a registry row is not a kill switch", p.Key)
 						}
 					}
@@ -554,6 +539,14 @@ func TestKillSwitchSetMatchesFlagsMD(t *testing.T) {
 			}
 			if n < 3 {
 				t.Fatalf("only %d FR-152 flags with a registry row (anchor drift?)", n)
+			}
+			for _, k := range []string{"enabled", "interventions_allowed", "experiments_enabled"} {
+				if !reg.Get("agent", k).IsKillSwitch() {
+					t.Errorf("agent/%s is not a kill switch", k)
+				}
+			}
+			if got := reg.Get("agent", "enabled").StopVariant(); got != "off" {
+				t.Errorf("agent/enabled stop %q, want off", got)
 			}
 		})
 		t.Run("UC-053/A12 only interventions_allowed applies when the save fails, against flagd/"+dir, func(t *testing.T) {
@@ -565,6 +558,23 @@ func TestKillSwitchSetMatchesFlagsMD(t *testing.T) {
 			}
 			if want := []string{"agent/interventions_allowed"}; !reflect.DeepEqual(got, want) {
 				t.Fatalf("AppliesWhenPersistFails holds for %v, want %v", got, want)
+			}
+		})
+	}
+	b, err := baseline.Load(filepath.Join(root(t), "..", "flagd", "ci"), baseline.DefaultFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, row, want string }{
+		{"a stop without kill_switch", `{set: agent, key: enabled, kind: overlay, scope: [stack], stop: "off"}`, "kill_switch"},
+		{"a stop outside scope [stack]", `{set: game, key: sensitivity, kind: overlay, scope: [stack, experiment+arm, real], latched: true, kill_switch: true, stop: ultra_slow, description: "x"}`, "kill_switch and scope [stack]"},
+		{"an undeclared stop", `{set: agent, key: enabled, kind: overlay, scope: [stack], kill_switch: true, stop: halt}`, "not a declared variant"},
+		{"a stop outside bounds.variants", `{set: agent, key: enabled, kind: overlay, scope: [stack], kill_switch: true, stop: "off", bounds: {variants: [watch, act]}}`, "not in bounds.variants"},
+	} {
+		t.Run("UC-054/BR-005 refused: "+tc.name, func(t *testing.T) {
+			_, err := Parse([]byte("flags: ["+tc.row+"]"), b)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err %v, want %q", err, tc.want)
 			}
 		})
 	}
@@ -587,7 +597,7 @@ func TestParseIgnoresUnknownKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := Parse([]byte(`flags: [{set: agent, key: interventions_allowed, kind: overlay, scope: [stack], persist: true, kill_switch: true, bounds: {variants: [none], later: 1}}]`), b)
+	r, err := Parse([]byte(`flags: [{set: agent, key: interventions_allowed, kind: overlay, scope: [stack], persist: true, newer_attribute: true, bounds: {variants: [none], later: 1}}]`), b)
 	if err != nil {
 		t.Fatalf("a newer release's key refused: %v", err)
 	}
@@ -636,13 +646,4 @@ func TestPatternFloatIsPlainDecimal(t *testing.T) {
 			}
 		})
 	}
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

@@ -681,7 +681,7 @@ func (s *State) ClearWriter(set, writer string) (int, *fserr.Error) {
 	for _, f := range s.flags {
 		// A Flagsmith-only flag changes from Flagsmith alone (#2705): an HTTP
 		// writer reset, even ?writer=flagsmith, never clears it.
-		if f.set != set || f.policy.FlagsmithOnly() {
+		if f.set != set || f.policy.IsFlagsmithOnly() {
 			continue
 		}
 		if f.stack != nil && f.stack.Writer == writer {
