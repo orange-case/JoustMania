@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.27.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.26.0...joustmania-v0.27.0) (2026-11-26)
+
+
+### Features
+
+* **lib:** loop watchdog restarts hung Python services (exit 70) ([#2924](https://github.com/orange-case/JoustMania/issues/2924)) ([f8369f0](https://github.com/orange-case/JoustMania/commit/f8369f02c2a7510d490a1d670632e1d5068d8930))
+* **menu:** warn about a low controller battery in the lobby ([#2906](https://github.com/orange-case/JoustMania/issues/2906)) ([#2920](https://github.com/orange-case/JoustMania/issues/2920)) ([5fdbff2](https://github.com/orange-case/JoustMania/commit/5fdbff2d15f11e8581e45918d1aa1d6a85e44a63))
+* **pairing,menu:** warn the lobby before a planned Bluetooth restart ([#2933](https://github.com/orange-case/JoustMania/issues/2933)) ([bbbdb15](https://github.com/orange-case/JoustMania/commit/bbbdb156385603af0b8810e0909990c75d17f5ec))
+
+
+### Bug Fixes
+
+* **agent:** drop the pre-[#2837](https://github.com/orange-case/JoustMania/issues/2837) phase span names ([#2932](https://github.com/orange-case/JoustMania/issues/2932)) ([5917664](https://github.com/orange-case/JoustMania/commit/5917664062a03945244aeadd57b6a25da57e3682))
+* **agent:** gate llm.retro.user on decision.capture_content ([#2892](https://github.com/orange-case/JoustMania/issues/2892)) ([da85db1](https://github.com/orange-case/JoustMania/commit/da85db16e25b90eea194a979410fb8f8d2b02101))
+* **agent:** rename agent_intervention_effect_delta to _ratio ([#2837](https://github.com/orange-case/JoustMania/issues/2837)) ([#2896](https://github.com/orange-case/JoustMania/issues/2896)) ([57ee705](https://github.com/orange-case/JoustMania/commit/57ee7052567bfb8456c5532eda34f673af9eadff))
+* **compose:** keep the game alive under memory pressure and check memory and disk ([#2929](https://github.com/orange-case/JoustMania/issues/2929)) ([53a404d](https://github.com/orange-case/JoustMania/commit/53a404de10a833602662d5ae84af4d9fd2199abd))
+* **game-coordinator,agent:** last coordinator spans in dot notation ([#2837](https://github.com/orange-case/JoustMania/issues/2837)) ([#2925](https://github.com/orange-case/JoustMania/issues/2925)) ([8821872](https://github.com/orange-case/JoustMania/commit/8821872c4e5bce74c6ef09185571307777f7a016))
+* **game-coordinator:** a mass disconnect aborts the game with no winner ([#2904](https://github.com/orange-case/JoustMania/issues/2904)) ([#2921](https://github.com/orange-case/JoustMania/issues/2921)) ([2d3bfd8](https://github.com/orange-case/JoustMania/commit/2d3bfd8ef9b55afa63622ebd97c2c25301572d2a))
+* **game-coordinator:** a tie gets a white flash and a tie sound ([#2907](https://github.com/orange-case/JoustMania/issues/2907)) ([#2927](https://github.com/orange-case/JoustMania/issues/2927)) ([85efeca](https://github.com/orange-case/JoustMania/commit/85efeca10d2db7c6fcd8aec81208ed48e064c1ab))
+* **game-coordinator:** bound in-game audio calls and resume music after an audio restart ([#2909](https://github.com/orange-case/JoustMania/issues/2909)) ([#2928](https://github.com/orange-case/JoustMania/issues/2928)) ([9a488c3](https://github.com/orange-case/JoustMania/commit/9a488c38e3d7eb8a124dd280459a51891d08e495))
+* **game-coordinator:** end the game cleanly when the gameplay stream goes silent or stays down ([#2931](https://github.com/orange-case/JoustMania/issues/2931)) ([06b1d38](https://github.com/orange-case/JoustMania/commit/06b1d38b3bdb70d678962d9a04243ac776808089))
+* **game-coordinator:** re-reconcile when a game registers during a reconcile ([#2922](https://github.com/orange-case/JoustMania/issues/2922)) ([fe2ccc6](https://github.com/orange-case/JoustMania/commit/fe2ccc604a0d1b6bca44010568dc60c933015231))
+* **game-coordinator:** telemetry names follow the naming rules ([#2837](https://github.com/orange-case/JoustMania/issues/2837)) ([#2898](https://github.com/orange-case/JoustMania/issues/2898)) ([66c3ce3](https://github.com/orange-case/JoustMania/commit/66c3ce35b0ba7d5120d507cf42c10e4be89ffffe))
+* **lib:** declare OTLP units on the shared metric wrappers ([#2902](https://github.com/orange-case/JoustMania/issues/2902)) ([adc7c70](https://github.com/orange-case/JoustMania/commit/adc7c70bc8c3203d1852018e1fd98afcc22a47d8))
+* **menu:** follow a game still live at boot instead of entering the lobby ([#2934](https://github.com/orange-case/JoustMania/issues/2934)) ([bf7fa0e](https://github.com/orange-case/JoustMania/commit/bf7fa0e0881976e18156d08098ccbd56fbf83d10))
+* **menu:** lobby re-checks readiness on every change, no loop below the mode minimum ([#2908](https://github.com/orange-case/JoustMania/issues/2908)) ([#2926](https://github.com/orange-case/JoustMania/issues/2926)) ([d8667be](https://github.com/orange-case/JoustMania/commit/d8667be610dac080ad23fdbb9f6e1f299c56c7bd))
+* **menu:** span names in dot notation ([#2837](https://github.com/orange-case/JoustMania/issues/2837)) ([#2899](https://github.com/orange-case/JoustMania/issues/2899)) ([0bb07cc](https://github.com/orange-case/JoustMania/commit/0bb07cc009f2508563ed7484191d9661c6bb0038))
+* **nonstop:** end Non-Stop Joust after 3 minutes by default ([#2930](https://github.com/orange-case/JoustMania/issues/2930)) ([f513eeb](https://github.com/orange-case/JoustMania/commit/f513eebe368928bd097bf9bdf37ed86412f765f1))
+* **operator-pad:** K8 hold recovers a stuck lifecycle with reset_menu ([#2905](https://github.com/orange-case/JoustMania/issues/2905)) ([#2919](https://github.com/orange-case/JoustMania/issues/2919)) ([226322a](https://github.com/orange-case/JoustMania/commit/226322aee3e7c68ed2a1ba97491ac7cad19d5315))
+* **pairing-daemon:** service prefix for metrics, dot-notation spans ([#2837](https://github.com/orange-case/JoustMania/issues/2837)) ([#2894](https://github.com/orange-case/JoustMania/issues/2894)) ([39295ba](https://github.com/orange-case/JoustMania/commit/39295ba7cd179adcddaa6129dfb8fdc4983cdd8a))
+* polish bundle: voice group, critical cues, pad profile, early game LED, jitter unit ([#2935](https://github.com/orange-case/JoustMania/issues/2935)) ([95c1348](https://github.com/orange-case/JoustMania/commit/95c134831650797a6bf905480b120a1fc292abdc))
+* **rust-hid:** name the gRPC server span {Service}/{Method} ([#2837](https://github.com/orange-case/JoustMania/issues/2837)) ([#2897](https://github.com/orange-case/JoustMania/issues/2897)) ([78cd469](https://github.com/orange-case/JoustMania/commit/78cd469c3f3d595d1f230e31de5638278185c818))
+
+
+### Refactoring
+
+* **agent:** drop FitnessStore.RecentReal ([#2901](https://github.com/orange-case/JoustMania/issues/2901)) ([879251d](https://github.com/orange-case/JoustMania/commit/879251da40ad8ec1c31f9677d58691d30508e6a8))
+* **controller-manager:** span and span-event names in dot notation ([#2837](https://github.com/orange-case/JoustMania/issues/2837)) ([#2895](https://github.com/orange-case/JoustMania/issues/2895)) ([d456d89](https://github.com/orange-case/JoustMania/commit/d456d896c800437511299124afa746f1f9df0d93))
+* **flag-service:** registry.yaml attributes replace the hard-coded Go sets ([#2890](https://github.com/orange-case/JoustMania/issues/2890)) ([d4c11d7](https://github.com/orange-case/JoustMania/commit/d4c11d759cd90d349120c134e407067a483bf905))
+* **game-coordinator:** group BaseGameMode init state and split long methods ([#2633](https://github.com/orange-case/JoustMania/issues/2633)) ([#2877](https://github.com/orange-case/JoustMania/issues/2877)) ([e009cad](https://github.com/orange-case/JoustMania/commit/e009cad32718d9078897c0fb481c0831881b24cc))
+
+
+### Documentation
+
+* retire NFR-020 (Pi memory budget without a target) ([#2893](https://github.com/orange-case/JoustMania/issues/2893)) ([aad6fc7](https://github.com/orange-case/JoustMania/commit/aad6fc7ca16e2900bea753def691e181c94da023))
+* **spec:** pin services.md compose refs to symbols ([#2632](https://github.com/orange-case/JoustMania/issues/2632)) ([#2903](https://github.com/orange-case/JoustMania/issues/2903)) ([df28da5](https://github.com/orange-case/JoustMania/commit/df28da5a0ed10143d591448cf3db9d630fceeb1c))
+
+
+### Tests
+
+* **flag-service:** make TestStartOptionsCancelled wait for the cancelling write ([#2900](https://github.com/orange-case/JoustMania/issues/2900)) ([5eaf8c3](https://github.com/orange-case/JoustMania/commit/5eaf8c3ce3205341adc76fbb386a75b4457970dc))
+* **service:** TC-013 failure names a lost preemption rerun note ([#2923](https://github.com/orange-case/JoustMania/issues/2923)) ([01322bd](https://github.com/orange-case/JoustMania/commit/01322bd40840bd41503d4e8c900495d99f6b6130))
+
+
+### Miscellaneous
+
+* **compose:** drop FLAG_SERVICE_BASELINE_FILES now that 0.26.0 is pinned ([#2889](https://github.com/orange-case/JoustMania/issues/2889)) ([620e51b](https://github.com/orange-case/JoustMania/commit/620e51b2bd0bb83d75a1917112665a776edf6d97))
+
 ## [0.26.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.25.0...joustmania-v0.26.0) (2026-11-26)
 
 
