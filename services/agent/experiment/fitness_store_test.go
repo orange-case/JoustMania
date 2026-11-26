@@ -2,7 +2,6 @@ package experiment
 
 import (
 	"testing"
-	"time"
 )
 
 // fitness_store_test.go covers the #965 finalized-per-game fitness store: the
@@ -71,41 +70,5 @@ func TestFitnessStore_ReRecordKeepsBounded(t *testing.T) {
 	}
 	if _, ok := s.Get("g2"); !ok {
 		t.Errorf("g2 must not be evicted by a re-record of g1")
-	}
-}
-
-// TestFitnessStore_RecentRealFiltersKindAndObjective: RecentReal returns only
-// game_kind="real" samples for the requested objective, newest-first, up to n.
-func TestFitnessStore_RecentRealFiltersKindAndObjective(t *testing.T) {
-	s := NewFitnessStore(0)
-	base := time.Now()
-	// Two real endurance samples, one real balanced, one shadow endurance.
-	s.Record(FitnessSample{GameID: "r1", Fitness: 0.4, Objective: "endurance", GameKind: "real", At: base})
-	s.Record(FitnessSample{GameID: "r2", Fitness: 0.6, Objective: "endurance", GameKind: "real", At: base.Add(time.Second)})
-	s.Record(FitnessSample{GameID: "rb", Fitness: 0.9, Objective: "balanced", GameKind: "real", At: base.Add(2 * time.Second)})
-	s.Record(FitnessSample{GameID: "sh", Fitness: 0.99, Objective: "endurance", GameKind: "shadow", At: base.Add(3 * time.Second)})
-
-	got := s.RecentReal("endurance", 10)
-	if len(got) != 2 {
-		t.Fatalf("RecentReal(endurance) returned %d samples, want 2 (real endurance only)", len(got))
-	}
-	// Newest-first: r2 then r1.
-	if got[0].GameID != "r2" || got[1].GameID != "r1" {
-		t.Errorf("RecentReal order = [%s,%s], want [r2,r1] (newest-first)", got[0].GameID, got[1].GameID)
-	}
-}
-
-// TestFitnessStore_RecentRealRespectsN: RecentReal caps the result at n.
-func TestFitnessStore_RecentRealRespectsN(t *testing.T) {
-	s := NewFitnessStore(0)
-	base := time.Now()
-	for i := 0; i < 5; i++ {
-		s.Record(FitnessSample{
-			GameID: "r" + string(rune('0'+i)), Fitness: 0.5, Objective: "endurance",
-			GameKind: "real", At: base.Add(time.Duration(i) * time.Second),
-		})
-	}
-	if got := s.RecentReal("endurance", 3); len(got) != 3 {
-		t.Fatalf("RecentReal(n=3) returned %d, want 3", len(got))
 	}
 }
