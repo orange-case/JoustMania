@@ -493,32 +493,68 @@ value with a fresh variant per write (the coordinator fires on a variant change)
 `experiment_id` and `arm`; `real` = the real default (promotion).
 Game-scoped values are dropped when the game ends (FR-135).
 
-**Persist:** `yes` = an admin setting that **may** be persisted: a write that asks for it (`"persist": true`, the
-menu for the operator pad) is written to the service's own state file and restored at start (FR-018, C-030); a stored value the registry no
-longer accepts (an unknown flag, a flag no longer persistable, a variant no longer declared, such as the retired
-`openai` of `decision.backend`, #2788) is skipped and logged as stale, and the flag serves its baseline; the same flag
-written without it (a stage script, a test) stays in memory. `no` = a write asking to persist is `400 malformed`.
-Every value not persisted lives in memory only (architecture note §10.1).
+**Persist (#2803):** persistence is a property of the flag, not of the request. `yes` = an admin setting: **every**
+stack-scope write of it is persisted, whoever writes it (the menu for the operator pad, a script, a stage beat,
+Flagsmith). A `PUT` without scope parameters sets the persisted value in the service's own state file, a `DELETE`
+without scope parameters clears it, and the value is restored at start (FR-018, C-030). The flag has one stack value:
+there is no in-memory overlay over a persisted value. A stack write of it takes no `ttl_seconds` (`400 malformed`: a
+persisted value never expires). A stored value the registry no longer accepts (an unknown flag, a flag no longer
+persistable, a variant no longer declared, such as the retired `openai` of `decision.backend`, #2788) is skipped and
+logged as stale, and the flag serves its baseline. `no` = every stack value lives in memory only (architecture note
+§10.1). Other scopes (`game`, `experiment+arm`, `real`, ...) are never persisted, also on a `yes` row. The request's
+`persist` (the `PUT` body field, `DELETE ?persist=`) is optional and changes nothing: it is accepted where it was valid
+before #2803 (a stack write of a `yes` row; `?persist=` on any stack `DELETE`) and stays `400 malformed` on a stack
+`PUT` of a `no` row, in another scope, with `ttl_seconds` or on a dry run, so an older caller that expects
+persistence is refused loudly instead of silently getting an in-memory value. A writer reset
+(`DELETE /{flagSetId}?writer=`) never clears a persisted value (PR #1417 review): only a per-flag `DELETE` does.
+
+**Session-only variants (#2803, maintainer decision):** a variant of a `yes` row may be session-only. A stack write of
+it is never persisted: it lives in memory over the persisted value, which stays as it was, and a restart, a `DELETE`
+of the flag or a writer reset of its writer returns to the persisted value; a later persisted write replaces it. It
+is never sent to Flagsmith (the link sees the persisted value beneath it), and a write of it with `"persist": true`
+or from Flagsmith is `400 malformed`. The set is fixed in the flag service's code (`registry.sessionOnly`, like
+`registry.killSwitches`): `agent/interventions_allowed` = `shadow_group` (the
+level `agent-group-ab.sh` sets for a run), so a run killed with `SIGKILL` never widens the host's kill switch
+across a restart.
+
+**Which store wins (#2803, FR-215, UC-054 A2, A3, BR-006):** with the Flagsmith link `off`, the state file is the
+persisted store. With the link `on`, Flagsmith is the persisted store and the state file is its offline cache: every
+value of a `yes` row the link applies is also persisted, so an offline start serves the last value Flagsmith gave.
+When the link connects, Flagsmith is the full backend (#2804): it wins wherever it holds a value, a kill switch too,
+and an empty Flagsmith is seeded from the local value:
+
+| When the link connects | Flagsmith holds a value | Flagsmith holds none |
+|---|---|---|
+| after a reconnect (no restart), for a stack value changed while the link was not connected | the Flagsmith value is applied and persisted; the local change is discarded | the baseline applies and the persisted value is removed |
+| at a start, for the value in the state file | the Flagsmith value is applied and persisted | Flagsmith is seeded: the persisted value stays and is sent to Flagsmith, which holds it from then on |
+
+The two rows differ because the mark "changed while not connected" lives in memory only (F5): at a start the state
+file's value cannot be told apart from Flagsmith's last value, so it is kept and sent (flagsmith-sync.md §5.1, §6). A
+value a person cleared in Flagsmith while the flag service was down therefore comes back from the state file at the
+next start; clear it locally too (a `DELETE`, or the pad's reset) or set it in Flagsmith.
 
 **Failed save, kill switches (#2368, UC-053 A12):** when the state file cannot be saved (or was unreadable at
-start), a persisted `PUT` or `DELETE ?persist=true` is refused with `500 persist_failed` and nothing changes in
-memory; with a state file unreadable at start that includes a persisted `DELETE` with no admin value in memory, because
-the file may still hold one (a flag whose row has no persist cannot be in the file: its `DELETE ?persist=true` stays a plain `204`, uncounted). The exception covers the persisted kill-switch flags, a fixed set in the flag service's
+start), a stack `PUT` or `DELETE` of a `yes` row is refused with `500 persist_failed` and nothing changes in
+memory, also for a stage script, which before #2803 wrote such a row in memory; with a state file unreadable at start that includes a `DELETE` with no persisted value in memory, because
+the file may still hold one (a `no` row cannot be in the file: its `DELETE` stays a plain `204`, uncounted). The exception covers the persisted kill-switch flags, a fixed set in the flag service's
 code (`registry.killSwitches`), not a registry.yaml attribute (released images parse the checkout's registry.yaml
 strictly). This list is its single source of truth, kept in sync by a test: `agent/interventions_allowed`. A safety
 stop must take effect now, so a write or clear of it applies in memory and answers `persisted: false` (`PUT`) or
 `204` with `X-Flag-Persisted: false` (`DELETE`), counted in `flagservice_admin_persist_errors_total` and not
 counted as persisted in `flagservice_overlays`; a restart brings back what the file holds (services.md §7.2). Only a
-row with persist `yes` can be in the set: `enabled` is a kill switch too, but it takes no persisted write
-(`400 malformed`), so a failed save never affects it.
+row with persist `yes` can be in the set: `enabled` is a kill switch too, but its row is persist `no`, so a failed
+save never affects it.
 
-**Persisted vs overlay (who writes which, #1682):** a persisted value is an **operator choice** (the menu for the operator pad,
-`agent-backend.sh` for the decision backend and model); an in-memory overlay is a **stage beat** or a test
-(`talk-stage.sh`, the dry-run scripts, fixtures). A persisted write replaces an in-memory overlay of the same
-flag. An overlay written over a persisted value is temporary: it wins while it lasts, and a flag-service restart or
-a reboot drops it and brings the persisted value back. `talk-stage.sh reset` therefore also deletes the persisted
-decision backend and model (`DELETE …?persist=true`), and `talk-preflight.sh` WARNs while a remote backend is
-persisted.
+**Stage beats and scripts on a `yes` row (#2803, replaces "persisted vs overlay" of #1682):** a stage beat
+(`talk-stage.sh`) or a script (`agent-group-ab.sh`) that writes a `yes` row replaces the host's value, and the
+replacement survives a restart; there is no temporary value over it, except a session-only variant (above). `talk-stage.sh reset` applies the stage
+baseline after deleting the persisted decision backend and models (#1682), and writes a `yes` row only where its value in force differs;
+`agent-group-ab.sh` snapshots the
+stack value of the rows it writes (the persisted one of a `yes` row) and puts it back with its writer (a value from
+Flagsmith under `group-ab-restored`) when the run ends. After a `SIGKILL` the run's `interventions_allowed` =
+`shadow_group` is session-only, so a restart returns the host's level; its persisted `decision.backend` stays until
+`agent-group-ab.sh restore --out DIR`. `talk-preflight.sh` WARNs while a
+remote backend is persisted.
 
 Renamed grant flags carry no persisted state (`toughness_boost_seconds`, formerly `partial_shield_seconds`, is not `persist`, is game-scoped and is dropped with its game): there is nothing to migrate. The persisted `interventions_allowed` stores a variant name only, so its content follows the baseline file (#1838).
 
@@ -579,7 +615,7 @@ it writes; the coordinator's re-check (decide-contract §11) is unchanged.
 
 | Key | Kind | Scope | Bounds | Persist | Writers |
 |---|---|---|---|---|---|
-| `interventions_allowed` | overlay | stack | declared variants (`none`, `probe`, `ambient`, `standard`, `full`, `shadow_experimental`) | **yes** (the host's kill switch, UC-015 BR-019) | menu (operator pad), `talk-stage.sh permissions`; a persisted kill switch (applies even when the state file cannot be saved, #2368, above); the run refuses to start over a persisted `none`, otherwise `agent-group-ab.sh` (writer `group-ab`, for the length of a run only: it snapshots the overlay with its writer and TTL and restores it only while the overlay is still its own, #2467 PR 6) |
+| `interventions_allowed` | overlay | stack | declared variants (`none`, `probe`, `ambient`, `standard`, `full`, `shadow_experimental`, `shadow_group`) | **yes** (the host's kill switch, UC-015 BR-019); `shadow_group` is session-only, never persisted (#2803, above) | menu (operator pad), `talk-stage.sh permissions`; a persisted kill switch (applies even when the state file cannot be saved, #2368, above); the run refuses to start over a persisted `none`, otherwise `agent-group-ab.sh` (writer `group-ab`, for the length of a run only: it writes the session-only `shadow_group`, snapshots the stack value with its writer and restores it only while the value in force is still its own, #2467 PR 6, #2803) |
 | `enabled` | overlay | stack | `on`, `off` | no | `agent-killswitch.sh`, `agent-dryrun-enable.sh`, `talk-stage.sh`; the operator pad through the menu (#2050, `agent_memory_writer`): a writer with no `persist` field, because a write asking to persist is `400` (UC-015 BR-001) |
 | `objectives` | overlay | stack | `endurance_focused`, `balanced_focused`, `accelerate_focused`, `chaos_focused`, `mixed` | no | operator: Flagsmith or `flags.sh`, the talk's game 3 (`chaos_focused`); `talk-stage.sh reset` (`balanced_focused`); never the agent (C-034); only these declared variants, never a free weighting. The agent reads it every cycle (`flags.Evaluate`), so the goal, the goal profile derived from it (`goal.profile` = `from_objectives`) and the nudge reserve follow on the next decision. It is part of `pattern.flag_digest`, so a change starts a new experiment round. Planned (#2755, FR-264, maintainer decision D17): also the operator pad's `GOAL` row through the menu (writer `menu`, in memory, lobby-only, along the declared order, wrapping; no confirmation; its reset clears only the menu's own value, so a script's or Flagsmith's value stays, D14; UC-016 BR-012, BR-013); a pad change starts a new experiment round like any other |
 | `goal.profile` | overlay | stack | declared variants | no | **Flagsmith only** (#2705, above): the operator in Flagsmith (UC-054), one of the five declared profiles (§3.2), never a free terms object; every HTTP write is `403 flagsmith_only`, the agent's included (C-034). `talk-stage.sh reset` does not touch it: a Flagsmith value is set back in Flagsmith. The agent reads it per game (§3) |
@@ -663,13 +699,13 @@ authorization this is a convention the agent's code keeps, not a check, except f
 | `shield.charge_reminder_seconds` | overlay | stack | 0 to 30 | no | operator on stage (#2094); read by the controller manager when a charge layer starts, fixed for it; never written by the agent (C-034) |
 | `shield.charge_pre_expiry_seconds` | overlay | stack | 0 to 8 | no | operator on stage (#2094); read by the controller manager when a charge layer starts, fixed for it; never written by the agent (C-034) |
 | `shield.ending_rumble_seconds` | overlay | stack | 0 to 3 | no | operator on stage (#2094); read by the controller manager when a full shield layer starts, fixed for it; never written by the agent (C-034) |
-| `shield.energy_max_seconds` | overlay | stack or experiment+arm or real | 1 to 10 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.energy_budget_seconds` | overlay | stack or experiment+arm or real | 3 to 30 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.energy_initial_seconds` | overlay | stack or experiment+arm or real | 0 to 5 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.recharge_per_second` | overlay | stack or experiment+arm or real | 0 to 0.5 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.min_burst_seconds` | overlay | stack or experiment+arm or real | 0.1 to 1 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.hold_rumble_intensity` | overlay | stack or experiment+arm or real | 0 to 150 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); latched with the hold values per game (UC-048 BR-010, BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
-| `shield.empty_pulse_ms` | overlay | stack or experiment+arm or real | 100 to 800 | **yes** | operator on stage (#2096), also as a persisted admin value that survives a flag-service restart (`"persist": true`, #2452; the agent writes in memory only); latched with the hold values per game (UC-048 BR-010, BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.energy_max_seconds` | overlay | stack or experiment+arm or real | 1 to 10 | **yes** | operator on stage (#2096); its stack value is persisted and survives a flag-service restart (#2452, #2803; the agent writes only `experiment+arm` and `real`, never persisted); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.energy_budget_seconds` | overlay | stack or experiment+arm or real | 3 to 30 | **yes** | operator on stage (#2096); its stack value is persisted and survives a flag-service restart (#2452, #2803; the agent writes only `experiment+arm` and `real`, never persisted); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.energy_initial_seconds` | overlay | stack or experiment+arm or real | 0 to 5 | **yes** | operator on stage (#2096); its stack value is persisted and survives a flag-service restart (#2452, #2803; the agent writes only `experiment+arm` and `real`, never persisted); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.recharge_per_second` | overlay | stack or experiment+arm or real | 0 to 0.5 | **yes** | operator on stage (#2096); its stack value is persisted and survives a flag-service restart (#2452, #2803; the agent writes only `experiment+arm` and `real`, never persisted); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.min_burst_seconds` | overlay | stack or experiment+arm or real | 0.1 to 1 | **yes** | operator on stage (#2096); its stack value is persisted and survives a flag-service restart (#2452, #2803; the agent writes only `experiment+arm` and `real`, never persisted); read at the start of a hold game's loop or at its first grant_shield, whichever comes first, fixed for that game (UC-048 BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.hold_rumble_intensity` | overlay | stack or experiment+arm or real | 0 to 150 | **yes** | operator on stage (#2096); its stack value is persisted and survives a flag-service restart (#2452, #2803; the agent writes only `experiment+arm` and `real`, never persisted); latched with the hold values per game (UC-048 BR-010, BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
+| `shield.empty_pulse_ms` | overlay | stack or experiment+arm or real | 100 to 800 | **yes** | operator on stage (#2096); its stack value is persisted and survives a flag-service restart (#2452, #2803; the agent writes only `experiment+arm` and `real`, never persisted); latched with the hold values per game (UC-048 BR-010, BR-011); agent experiment arm and agent promotion under UC-043 A17 (FR-162); the range is the ceiling (C-034, `TestC034_HoldKeysCeilings`); latched at game start, so a `real` write applies from the next game (§13) |
 | `shield.hold_rumble_max_intensity` | overlay | stack | 0 to 230 | no | operator on stage (#2463); latched with the hold values per game (UC-048 BR-010, BR-011); never written by the agent (C-034) |
 | `shield.hold_led_floor_percent` | overlay | stack | 10 to 100 | no | operator on stage (#2463); latched with the hold values per game (UC-048 BR-010, BR-011); never written by the agent (C-034) |
 | `shield.end_grace_seconds` | overlay | stack | 0 to 2 | no | operator on stage (#2464); latched per game in every mode (UC-048 BR-015, BR-011), so a write applies from the next game; never written by the agent (C-034) |
@@ -756,7 +792,7 @@ its value can be changed at runtime (FR-226).
 **What Flagsmith may set** (UC-054 BR-003): a `stack` value of any row (an `overlay`), a `game` or `game+serial`
 value of a row whose scope allows it, and an `event` for a live game (one payload, checked like the agent's).
 `experiment+arm` and `real` values are shown in Flagsmith and refused when changed there
-(`422 flagsmith_scope_read_only`). A Flagsmith value of a `persist: yes` row is persisted like the menu's (operator pad),
+(`422 flagsmith_scope_read_only`). A Flagsmith value of a `persist: yes` row is persisted like every stack value of that row (§13 "Which store wins"),
 also the value Flagsmith holds at a restart of the flag service: at a restart Flagsmith wins over the persisted
 local value, whoever set the Flagsmith value (UC-054 BR-006, FR-215, #2621); with Flagsmith unreachable the
 persisted value is served. An admin value changed while the link was not connected (offline, or before the first
