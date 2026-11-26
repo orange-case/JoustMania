@@ -126,6 +126,30 @@ async def test_disconnects_further_apart_than_the_window_are_single_disconnects(
 
 
 @pytest.mark.asyncio
+@pytest.mark.uc("UC-002", br=["BR-009"])
+@pytest.mark.uc("UC-020", flow="A2", br=["BR-001"])
+async def test_a_player_dead_by_motion_who_then_disconnects_is_not_a_drop(clock):
+    """4 players: p0 drops, p1 dies by motion and switches off at +1.0 s, p2 drops at +1.2 s.
+
+    Only 2 live players dropped (p0, p2): not more than half, so no abort; p2 is eliminated and p3 wins.
+    """
+    game, events = _game(["p0", "p1", "p2", "p3"])
+
+    with patch.object(game, "_play_sound", AsyncMock()) as play_sound:
+        assert await game._process_gameplay_update(_disconnect_frame("p0")) is False
+        clock.t += 0.5
+        await game._kill_player("p1", accel_mag=5.0)
+        assert game.players["p1"].alive is False
+        clock.t += 0.5
+        assert await game._process_gameplay_update(_disconnect_frame("p1")) is False
+        clock.t += 0.2
+        assert await game._process_gameplay_update(_disconnect_frame("p2")) is True
+
+    assert events.get_events_of_type(GameEvent.GAME_WINNER) == [{"serial": "p3"}]
+    assert Sound.MENU_VOX_STATUS_CANCELLED not in [c.args[0] for c in play_sound.await_args_list]
+
+
+@pytest.mark.asyncio
 @pytest.mark.uc("UC-020", flow="A2")
 @pytest.mark.uc("UC-002", br=["BR-009"])
 @pytest.mark.usefixtures("clock")

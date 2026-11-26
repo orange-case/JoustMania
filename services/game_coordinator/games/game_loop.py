@@ -322,7 +322,10 @@ class GameLoopMixin:
             self._disconnect_window_serials = set()
         alive = self._disconnect_window_alive
         dropped = self._disconnect_window_serials
-        dropped.update(s for s in serials if s in alive)
+        # Dead players' disconnects still arrive (the stream roster, UC-002 BR-004): one who died
+        # inside the window and then switched off is no live player lost.
+        players = self.players
+        dropped.update(s for s in serials if s in alive and players[s].alive)
         if len(dropped) < self._MASS_DISCONNECT_MIN_PLAYERS:
             return None
         summary = f"mass_disconnect: {len(dropped)} of {len(alive)} players disconnected"
