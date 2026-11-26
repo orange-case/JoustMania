@@ -116,21 +116,6 @@ async def test_span_shape_sends_a_game_death_warning_span_and_no_span_event(monk
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-100", flow="A6", br=["BR-003", "BR-005"])
-async def test_both_shape_sends_one_moment_id_as_span_event_and_log_event(otlp_logs):
-    game, _ = _game(2)
-    game.moment_shape = "both"
-
-    await _warn(game)
-
-    (event,) = _span_events(game.players["p0"].span, "death_warning")
-    (record,) = [r.log_record for r in otlp_logs.get_finished_logs()]
-    assert record.event_name == "death_warning"
-    assert dict(record.attributes) == event
-    assert record.attributes["moment.id"] == event["moment.id"] == "test_uc030/p0/1"
-
-
-@pytest.mark.asyncio
 @pytest.mark.nfr("NFR-060")
 @pytest.mark.uc("UC-100", flow="A2", br=["BR-002"])
 async def test_flag_change_mid_game_has_no_effect(otlp_logs):
@@ -170,7 +155,7 @@ async def _run_session(flag_value):
 @pytest.mark.nfr("NFR-060")
 @pytest.mark.uc("UC-100", flow="main", steps=[3], br=["BR-002"])
 @pytest.mark.uc("UC-101", flow="main", steps=[2])
-@pytest.mark.parametrize("shape", ["span_event", "span", "log_event", "both"])
+@pytest.mark.parametrize("shape", ["span_event", "span", "log_event"])
 @pytest.mark.usefixtures("otlp_logs")
 async def test_session_reads_the_shape_once_and_records_it_on_the_game_root(shape):
     root, game, reads = await _run_session(shape)
@@ -182,7 +167,7 @@ async def test_session_reads_the_shape_once_and_records_it_on_the_game_root(shap
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-100", flow="A1", br=["BR-004"])
-@pytest.mark.parametrize("value", ["", "spans", None])
+@pytest.mark.parametrize("value", ["", "spans", None, "both"])
 @pytest.mark.usefixtures("otlp_logs")
 async def test_absent_or_unknown_flag_runs_the_game_as_span_event(value):
     root, game, _ = await _run_session(value)

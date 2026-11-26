@@ -604,7 +604,7 @@ func TestStartCreatesFeatures(t *testing.T) {
 			switch f.Name {
 			case "decision.backend":
 				e.admin.features[i].Name = "Decision.Backend"
-			case "rollout_enabled":
+			case "experiment_dynamic_enabled":
 				e.admin.features[i].IsArchived = true
 			}
 		}
@@ -618,8 +618,8 @@ func TestStartCreatesFeatures(t *testing.T) {
 		if r, side := e.l.Links().Refusal(kBackend); r != ReasonFeatureNameCase || side != SideRemote {
 			t.Fatalf("decision.backend refusal %q %q, want feature_name_case", r, side)
 		}
-		if r, _ := e.l.Links().Refusal(Key{Set: "agent", Flag: "rollout_enabled", Scope: ScopeStack}); r != ReasonFeatureArchived {
-			t.Fatalf("rollout_enabled refusal %q, want feature_archived", r)
+		if r, _ := e.l.Links().Refusal(Key{Set: "agent", Flag: "experiment_dynamic_enabled", Scope: ScopeStack}); r != ReasonFeatureArchived {
+			t.Fatalf("experiment_dynamic_enabled refusal %q, want feature_archived", r)
 		}
 		ids := e.l.IDs()
 		ids.Lock()
@@ -627,7 +627,7 @@ func TestStartCreatesFeatures(t *testing.T) {
 		if _, has := ids.FeatureID["decision.backend"]; has {
 			t.Fatal("the case-different feature's id is used")
 		}
-		if _, has := ids.FeatureID["rollout_enabled"]; has {
+		if _, has := ids.FeatureID["experiment_dynamic_enabled"]; has {
 			t.Fatal("the archived feature's id is used")
 		}
 	})

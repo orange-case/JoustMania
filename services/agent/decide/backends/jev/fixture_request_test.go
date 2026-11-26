@@ -70,7 +70,7 @@ func testRequest() decide.Request {
 	}
 }
 
-// noulRequest asks two yes/no questions about the same state (#1229 KindNoul).
+// noulRequest asks two yes/no questions about the same state (#1229, jev's kindNoul).
 func noulRequest() decide.Request {
 	st := decide.BuildState(lopsidedContext())
 	return decide.Request{

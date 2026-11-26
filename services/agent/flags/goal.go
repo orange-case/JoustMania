@@ -65,12 +65,11 @@ func newGoalInvalidCounter(mp otelmetric.MeterProvider) otelmetric.Int64Counter 
 // targeting allowed, none shipped). A terms variant is the profile, named by its
 // variant. The from_objectives sentinel, a read error, a nil wrapper or client, and
 // an invalid value (a WARN once and agent_goal_profile_invalid_total{reason}) all
-// give the from_objectives profile: derived from the objectives weights, with the
-// duration edges read from the fitness flags. A profile without terms (the mixed
-// objectives) is no goal.
+// give the from_objectives profile, derived from the objectives weights. A profile
+// without terms (the mixed objectives) is no goal.
 func (f *Flags) GoalProfile(ctx context.Context, gameID string, attrs GameAttrs) goal.Profile {
 	if f == nil || f.client == nil {
-		return goal.FromObjectives(defaultObjectives(), DefaultEnduranceMinSessionSeconds, DefaultAccelerateTargetSessionSeconds)
+		return goal.FromObjectives(defaultObjectives())
 	}
 	raw, variant, err := f.goalProfileValue(ctx, shieldChargeContext(gameID, attrs))
 	if err != nil {
@@ -123,10 +122,8 @@ func (f *Flags) goalProfileValue(ctx context.Context, evalCtx openfeature.Evalua
 	return v, "", err
 }
 
-// goalFromObjectives is the from_objectives profile: the objectives weights (the
-// same read and fallback as the rules engine) and the two fitness thresholds.
+// goalFromObjectives is the from_objectives profile from the objectives weights
+// (the same read and fallback as the rules engine).
 func (f *Flags) goalFromObjectives(ctx context.Context) goal.Profile {
-	return goal.FromObjectives(f.objectives(ctx),
-		float64(f.intFlag(ctx, keyEnduranceMinSessionSeconds, DefaultEnduranceMinSessionSeconds)),
-		float64(f.intFlag(ctx, keyAccelerateTargetSessionSecs, DefaultAccelerateTargetSessionSeconds)))
+	return goal.FromObjectives(f.objectives(ctx))
 }

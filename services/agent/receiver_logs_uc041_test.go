@@ -10,9 +10,6 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
-	"go.opentelemetry.io/otel"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,9 +20,9 @@ import (
 	"github.com/joustmania/agent/gamecontext"
 )
 
-// receiver_logs_uc041_test.go covers #2658 slice 2 (FR-218, UC-041 A7): the agent
-// serves the OTLP logs service and a new death read from a moment log event wakes
-// the game's evaluation with otlp.signal = logs.
+// receiver_logs_uc041_test.go covers the agent's OTLP logs service: it serves the
+// agent-only lifecycle log events (UC-041 A8) and takes no death from a log record
+// (UC-041 BR-009): a booth moment log event never wakes an evaluation.
 
 // momentLogBatch is one moment log record of the game coordinator in game-A.
 func momentLogBatch(eventName, serial, id string) plog.Logs {
@@ -42,45 +39,8 @@ func momentLogBatch(eventName, serial, id string) plog.Logs {
 	return ld
 }
 
-// evaluationsBySignal reads agent_evaluations_total from reader as signal -> sum.
-func evaluationsBySignal(t *testing.T, reader *sdkmetric.ManualReader) map[string]int64 {
-	t.Helper()
-	var rm metricdata.ResourceMetrics
-	if err := reader.Collect(context.Background(), &rm); err != nil {
-		t.Fatalf("collect: %v", err)
-	}
-	out := map[string]int64{}
-	for _, sm := range rm.ScopeMetrics {
-		for _, m := range sm.Metrics {
-			if m.Name != "agent_evaluations_total" {
-				continue
-			}
-			sum, ok := m.Data.(metricdata.Sum[int64])
-			if !ok {
-				t.Fatalf("agent_evaluations_total is %T", m.Data)
-			}
-			for _, dp := range sum.DataPoints {
-				sig, _ := dp.Attributes.Value("signal")
-				out[sig.AsString()] += dp.Value
-			}
-		}
-	}
-	return out
-}
-
-// UC: UC-041 A7
-func TestLogsReceiver_MomentLogWakesEvaluation(t *testing.T) {
-	// The decision Loop builds agent_evaluations_total from the global meter
-	// provider at NewLoop, so a recording provider is installed for this test.
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() {
-		otel.SetMeterProvider(prev)
-		_ = mp.Shutdown(context.Background())
-	})
-
+// UC: UC-041 BR-009
+func TestLogsReceiver_MomentLogWakesNothing(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	clock := time.Unix(5000, 0)
 	mux := gamecontext.NewMultiplexer(func(string) *gamecontext.Store {
@@ -107,37 +67,25 @@ func TestLogsReceiver_MomentLogWakesEvaluation(t *testing.T) {
 		t.Fatalf("metrics export: %v", err)
 	}
 
-	t.Run("UC-041/A7 a death_warning log event wakes no evaluation", func(t *testing.T) {
-		before := len(rules.evaluations())
-		if _, err := logs.Export(context.Background(), plogotlp.NewExportRequestFromLogs(momentLogBatch("death_warning", "PB", "game-A/PB/1"))); err != nil {
-			t.Fatalf("logs export: %v", err)
-		}
-		if got := len(rules.evaluations()); got != before {
-			t.Fatalf("evaluations = %d, want %d", got, before)
-		}
-	})
-
-	t.Run("UC-041/A7 a player_death log event wakes one evaluation with signal logs", func(t *testing.T) {
-		before := len(rules.evaluations())
-		if _, err := logs.Export(context.Background(), plogotlp.NewExportRequestFromLogs(momentLogBatch("player_death", "PB", "game-A/PB/2"))); err != nil {
-			t.Fatalf("logs export: %v", err)
-		}
-		evals := rules.evaluations()
-		if len(evals) != before+1 {
-			t.Fatalf("evaluations = %d, want %d", len(evals), before+1)
-		}
-		if seq := evals[len(evals)-1].Session.EliminationSequence; len(seq) != 1 || seq[0] != "PB" {
-			t.Fatalf("evaluated elimination order = %v, want [PB]", seq)
-		}
-		if n := evaluationsBySignal(t, reader)["logs"]; n != 1 {
-			t.Fatalf("agent_evaluations_total{signal=logs} = %d, want 1", n)
-		}
-	})
+	for _, name := range []string{"death_warning", "player_death"} {
+		t.Run("UC-041/BR-009 a "+name+" log event wakes no evaluation and eliminates no one", func(t *testing.T) {
+			before := len(rules.evaluations())
+			if _, err := logs.Export(context.Background(), plogotlp.NewExportRequestFromLogs(momentLogBatch(name, "PB", "game-A/PB/1"))); err != nil {
+				t.Fatalf("logs export: %v", err)
+			}
+			if got := len(rules.evaluations()); got != before {
+				t.Fatalf("evaluations = %d, want %d", got, before)
+			}
+			if snap, _ := mux.Snapshot("game-A"); len(snap.Session.EliminationSequence) != 0 {
+				t.Fatalf("elimination seq = %v, want none", snap.Session.EliminationSequence)
+			}
+		})
+	}
 }
 
-// UC: UC-041 A7
+// UC: UC-041 A8
 func TestRun_ServesOTLPLogs(t *testing.T) {
-	t.Run("UC-041/A7 the agent's gRPC server serves the OTLP logs service", func(t *testing.T) {
+	t.Run("UC-041/A8 the agent's gRPC server serves the OTLP logs service", func(t *testing.T) {
 		c := newShutdownComponents(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -170,7 +118,7 @@ func TestRun_ServesOTLPLogs(t *testing.T) {
 
 // UC: UC-041 BR-010
 func TestLogsReceiver_LogOpenedContextNeverEvaluates(t *testing.T) {
-	t.Run("UC-041/BR-010 game.start and a death of an unknown game open its context and wake no evaluation", func(t *testing.T) {
+	t.Run("UC-041/BR-010 game.start and a death of an unknown game open its context, wake no evaluation and eliminate no one", func(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		clock := time.Unix(5000, 0)
 		mux := gamecontext.NewMultiplexer(func(string) *gamecontext.Store {
@@ -214,8 +162,8 @@ func TestLogsReceiver_LogOpenedContextNeverEvaluates(t *testing.T) {
 			t.Fatalf("evaluations = %d, want 0 on log records alone", got)
 		}
 		snap, ok := mux.Snapshot("game-B")
-		if !ok || snap.GameKind != gamecontext.GameKindReal || len(snap.Session.EliminationSequence) != 1 {
-			t.Fatalf("game-B context = %v (kind %q, seq %v), want opened with the death", ok, snap.GameKind, snap.Session.EliminationSequence)
+		if !ok || snap.GameKind != gamecontext.GameKindReal || len(snap.Session.EliminationSequence) != 0 {
+			t.Fatalf("game-B context = %v (kind %q, seq %v), want opened by game.start, no elimination", ok, snap.GameKind, snap.Session.EliminationSequence)
 		}
 	})
 }

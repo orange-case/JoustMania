@@ -138,7 +138,6 @@ flags = {
                     "set_pacing_profile,adjust_player_sensitivity,grant_shield",
         "quiet": "send_controller_effect,adjust_volume",
     }, "standard"),
-    "rollout_enabled": f(onoff, "off"),
     "experiments_enabled": f(onoff, "off"),
     "experiment_dynamic_enabled": f(onoff, "off"),
     "experiment_tick_seconds": f({"fast": 10, "default": 30, "slow": 60}, "default"),

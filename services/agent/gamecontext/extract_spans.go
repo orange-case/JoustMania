@@ -21,26 +21,16 @@ const (
 	// unconditionally (empty when not in an experiment).
 	spanAttrExperimentID = "experiment.id"
 	spanAttrArm          = "experiment.arm"
-	spanEventDeath       = "player_death"
-	// spanAttrDeathEliminated is false on a player_death that keeps the player in
-	// the game (a Fight Club round loss); absent means eliminated (UC-041 BR-008, #2517).
-	spanAttrDeathEliminated = "death.eliminated"
 	// spanNameShieldCharge is the coordinator's per-charge span (UC-040 A30 to A32,
 	// #1837). It ends live at activation, expiry, death or game end, often AFTER the
 	// player died; the agent takes nothing from it (A8 of the #1837 PR-4 plan): its
 	// player.serial must not re-create or refresh a dead or evicted player, and its
 	// game.id must not re-create an evicted partition.
 	spanNameShieldCharge = "game.shield_charge"
-	// spanNameDeathWarning and spanNamePlayerDeath are the coordinator's moment spans
-	// (UC-100 BR-010, #2658): children of the player span carrying player.serial,
-	// game.id and game.kind, a warning span possibly ending after the death. Like the
-	// shield charge span, the agent takes nothing from them.
-	spanNameDeathWarning = "game.death_warning"
-	spanNamePlayerDeath  = "game.player_death"
-	// spanNameIntervention is the intervention moment's span (UC-101 BR-010, #2665),
-	// a child of the player span like the other moments; the agent takes nothing
-	// from it (its own decisions and effect measurement are its source).
-	spanNameIntervention = "game.intervention"
+	// spanAttrMomentID marks a booth moment record (telemetry.md appendix A). A
+	// moment span can end after the player died, so, like the shield charge span,
+	// the agent takes nothing from a span that carries it (UC-041 BR-009).
+	spanAttrMomentID = "moment.id"
 
 	// resourceAttrServiceName mirrors semconv service.name, used for the
 	// own-telemetry skip.
@@ -92,10 +82,10 @@ func (s *Store) isOwnResource(res pcommon.Resource) bool {
 
 // ApplySpans applies trace data to the store. Spans are a LATE signal in this
 // system: player_lifecycle spans only end at game end, and the collector batches
-// traces (~10s), so this path is used for identity enrichment and elimination
-// confirmation, and as the second game-end signal (the game root span, #1494),
-// not as the primary live signal. The state it sets (elimination order, mode,
-// kind, experiment id/arm) is part of the context decisions read, and the
+// traces (~10s), so this path is used for identity enrichment and as the second
+// game-end signal (the game root span, #1494), not as the primary live signal.
+// It reads no death: eliminations come from game_player_elimination_order alone
+// (UC-041 BR-008). The state it sets (mode, kind, experiment id/arm) is part of the context decisions read, and the
 // receiver evaluates after a span batch too, so that state lags the game
 // (UC-041 BR-001). It returns true if anything was recognized.
 func (s *Store) ApplySpans(td ptrace.Traces) bool {
@@ -120,11 +110,11 @@ func (s *Store) ApplySpans(td ptrace.Traces) bool {
 
 // ignoredSpan reports whether a span carries nothing the agent takes in.
 func ignoredSpan(span ptrace.Span) bool {
-	switch span.Name() {
-	case spanNameShieldCharge, spanNameDeathWarning, spanNamePlayerDeath, spanNameIntervention:
+	if span.Name() == spanNameShieldCharge {
 		return true
 	}
-	return false
+	_, moment := span.Attributes().Get(spanAttrMomentID)
+	return moment
 }
 
 func (s *Store) applySpan(span ptrace.Span) bool {
@@ -168,19 +158,6 @@ func (s *Store) applySpan(span ptrace.Span) bool {
 		updated = true
 	}
 
-	events := span.Events()
-	for e := 0; e < events.Len(); e++ {
-		ev := events.At(e)
-		if ev.Name() == spanEventDeath && serial != "" {
-			// One read per moment id, shared with the moment log events (UC-041 BR-009).
-			outcome := s.recordDeathMoment(momentIDOf(ev.Attributes()), serial, deathEliminates(ev.Attributes()))
-			observeMoment(s.momentObs, momentDeath, MomentShapeSpanEvent, outcome)
-			if outcome == MomentCounted {
-				updated = true
-			}
-		}
-	}
-
 	// Game end from the root span (#1494, UC-041 A4): OTLP exports a span only
 	// once it ended, and the game root span ends when its session ends (natural
 	// end, force-end or error), so it reaching the agent means the game is over
@@ -216,15 +193,4 @@ func (s *Store) ensurePlayer(serial string) {
 	defer s.mu.Unlock()
 	p := s.player(serial)
 	s.touch(p)
-}
-
-// deathEliminates reports whether a player_death span event takes the player out
-// of the game: every death does, except one whose death.eliminated attribute is
-// false (a Fight Club round loss, UC-041 BR-008, #2517).
-func deathEliminates(attrs pcommon.Map) bool {
-	v, ok := attrs.Get(spanAttrDeathEliminated)
-	if !ok || v.Type() != pcommon.ValueTypeBool {
-		return true
-	}
-	return v.Bool()
 }

@@ -38,8 +38,6 @@ erDiagram
     EXPERIMENT ||--o| VERDICT : "concludes with"
     VERDICT ||--o| PROMOTION : "triggers"
     GAME_SESSION ||--o| RETRO : "is reviewed by"
-    ROLLOUT ||--o{ ROLLOUT_STAGE : "advances through"
-    ROLLOUT_STAGE }o--o{ CONTROLLER : "routes"
     MOTION_ARCHETYPE |o--o{ CONTROLLER : "drives one slot of"
     EXPERIMENT ||--o{ PATTERN_PAIR_ASSIGNMENT : "pins"
     MOTION_ARCHETYPE ||--o{ PATTERN_PAIR_ASSIGNMENT : "is run by"
@@ -76,7 +74,7 @@ A physical or mock PS Move controller tracked by the controller manager (`proto/
 | color | Current LED colour (r, g, b) | Integer | 3 | Not Null, Min: 0, Max: 255 |
 | buttons | Pressed state of trigger, move, cross, circle, square, triangle, ps, select and start (one boolean field each in the proto) | Boolean | 1 | Not Null |
 | rssi | Signal strength in dBm (controller manager always reports 0; RSSI comes from the pairing daemon metric) | Integer | 4 | Optional, Min: -100, Max: 0 |
-| adapter | I/O adapter currently routing this controller | String | 10 | Not Null, Values: python, rust, mock, unstable |
+| adapter | I/O adapter currently routing this controller | String | 10 | Not Null, Values: python, rust, mock |
 | reserved | Mock controller reserved for a shadow game (hidden from the lobby roster) | Boolean | 1 | Not Null |
 | tag | Owner tag of a mock controller (e.g. `agent:` prefix); the agent's orphan sweep removes reserved controllers whose tag has its prefix and no live game references them (`services/agent/gamerunner/sweep.go` `SweepOrphans`) | String | 60 | Optional, mock controllers only |
 | pattern_archetype | Archetype installed on this mock controller | String | 40 | Optional, Foreign Key (MOTION_ARCHETYPE.archetype_id) |
@@ -229,7 +227,7 @@ One flag set: its read-only baseline file (`services/flagd/<set>.json`), served 
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
-| flag_set_id | `metadata.flagSetId` | String | 20 | Primary Key, Values: agent, controller, game, interventions, observability, operator, rollout, system, user |
+| flag_set_id | `metadata.flagSetId` | String | 20 | Primary Key, Values: agent, controller, game, interventions, observability, operator, system, user |
 | file | Flag file path | String | 100 | Not Null, Unique |
 | owner | Who owns the values ([OWNERSHIP_MODEL.md](OWNERSHIP_MODEL.md)) | String | 20 | Not Null, Values: human, operator, agent, operator+agent |
 
@@ -486,28 +484,6 @@ A post-game retrospective (`services/agent/decision/retro_capture.go`, `services
 | session_focus | Suggested focus | String | 200 | Optional |
 
 **Constraints:** at most one retro per game (the agent remembers the last captured session ids). A retro that finds the shared `llm.max_requests_per_minute` budget exhausted is gated: it counts `agent_llm_gated_total{reason=llm_budget_exhausted}`, logs `agent.llm.retro_gated` and records nothing, no span and no row. A game that ended stale (`end_reason=stale`) gets no retro (UC-041 A4).
-
-### ROLLOUT
-
-A controller-backend rollout (`services/flagd/rollout.json`, `services/controller_manager/multiplexer/rollout_router.py`).
-
-| Attribute | Description | Data Type | Length/Precision | Validation Rules |
-|---|---|---|---|---|
-| target_backend | Backend being rolled out | String | 8 | Primary Key, Values: python, rust, unstable |
-| strategy | Rollout strategy | String | 11 | Not Null, Values: off, immediate, progressive |
-| remediation_allowed | Agent may roll back | Boolean | 1 | Not Null |
-
-### ROLLOUT_STAGE
-
-A stage of a progressive rollout: how many controllers (first N by sorted serial) use the target backend.
-
-| Attribute | Description | Data Type | Length/Precision | Validation Rules |
-|---|---|---|---|---|
-| current_controller_count | Controllers on the target backend | Integer | 2 | Primary Key, Values: 0, 1, 3, 6, 99 |
-| entered_at | When the agent entered the stage (dwell timer) | DateTime | - | Not Null |
-| fitness_passed | Last infrastructure fitness result | Boolean | 1 | Not Null |
-
-**Constraints:** per-serial `bluetooth_backend` targeting (manual canary) wins over the rollout; mock-only controllers are not routed.
 
 ### MOTION_ARCHETYPE
 

@@ -88,7 +88,7 @@ func TestLiveDecide(t *testing.T) {
 	if os.Getenv("JEV_LIVE_SCENARIO") != "" && os.Getenv("JEV_LIVE_NOUL") != "1" {
 		return
 	}
-	// A noul request (#1229 KindNoul): single stage.
+	// A noul request (#1229, jev's kindNoul): single stage.
 	rec := newRecordingTransport(key)
 	b := liveBackend(key, rec)
 	nreq := noulRequest()

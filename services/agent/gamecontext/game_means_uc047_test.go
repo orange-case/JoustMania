@@ -113,7 +113,7 @@ func TestGameMeansSurviveEviction(t *testing.T) {
 	t.Run("UC-047/BR-009 seconds after the elimination are left out", func(t *testing.T) {
 		s, now := newStore()
 		playSeconds(s, now, "a", 10, 1, 0.04)
-		s.RecordElimination("a")
+		s.SetEliminationOrder("a", 1)
 		*now = now.Add(time.Second)
 		playSeconds(s, now, "a", 5, 9, 9) // a coordinator still exporting the dead player
 		p := s.Snapshot().Players["a"]

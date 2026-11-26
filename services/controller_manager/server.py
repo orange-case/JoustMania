@@ -66,17 +66,11 @@ async def serve(port=50052):
     init_flag_domain("system")
     # controller domain: backend, bluetooth_backend, poll_drop_threshold
     init_flag_domain("controller")
-    # rollout domain: strategy, target_backend, current_controller_count
-    # (consumed by RolloutRouter during per-cycle adapter routing).
-    init_flag_domain("rollout")
-    # Wait for all domains to be ready before backend creation: create_backend()
-    # evaluates the controller domain, the frequency listener evaluates the
-    # system domain, and the multiplexer's RolloutRouter evaluates the rollout
-    # domain on the first routing cycle.
+    # Wait for both domains before backend creation: create_backend() evaluates
+    # the controller domain, the frequency listener the system domain.
     # Deadline must be shorter than the Docker HEALTHCHECK window (start_period + retries * interval).
     await wait_for_provider_ready("system", deadline_seconds=5.0)
     await wait_for_provider_ready("controller", deadline_seconds=5.0)
-    await wait_for_provider_ready("rollout", deadline_seconds=5.0)
 
     # Initialize OTEL push metrics
     # Export interval read from flagd with per-service targeting (Issue #479)

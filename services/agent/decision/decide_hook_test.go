@@ -1282,7 +1282,7 @@ func TestRemote_FallbackOnGoneContextDecidesNothing(t *testing.T) {
 }
 
 // TestRemote_DiscardedStaleContext: an answer that would act lands after the
-// game's context partition is gone: discarded with stale_context, nothing applied.
+// game's context partition is gone: discarded stale (context_missing), nothing applied.
 // UC: UC-040 A7
 func TestRemote_DiscardedStaleContext(t *testing.T) {
 	t.Run("UC-040/A7 acting answer with no current context is discarded", func(t *testing.T) {

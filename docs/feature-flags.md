@@ -9,7 +9,7 @@ not committed (#2152): `make specs-counts` prints them.
 ## 1. How it works
 
 JoustMania uses [OpenFeature](https://openfeature.dev/) with [flagd](https://flagd.dev/). Flags are the only
-runtime control surface: host settings, the agent's governor, the agent's interventions and the rollout are all
+runtime control surface: host settings, the agent's governor and the agent's interventions are all
 flags (C-002).
 
 ```
@@ -27,8 +27,7 @@ flagd  ──►  OpenFeature providers in each service (Python: in-process, one
 - **Flag sets.** Each file declares one `flagSetId` that matches its file name (`game.json` is `game`).
   Python services select a set with `flagSetId=<set>` (`lib/feature_flags.py`).
 - **Writes.** Nothing writes a flag file at runtime (C-033). Runtime changes go through the flag service:
-  the menu (admin settings), the agent (interventions, experiment arms, rollout count), connect-proxy (canary)
-  and the operator scripts. Only flags listed in the mutable-flag registry
+  the menu (admin settings), the agent (interventions, experiment arms) and the operator scripts. Only flags listed in the mutable-flag registry
   ([flags.md §13](specs/flags.md#13-mutable-flag-registry), `services/flag-service/registry.yaml`) accept writes.
 - **CI baseline.** `services/flagd/ci/` replaces the baseline in the CI, dry-run and demo stacks
   (`docker-compose.ci.yml`); the differences are listed in

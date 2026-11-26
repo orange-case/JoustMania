@@ -1840,7 +1840,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Agent flag writes the flag service refused in the last hour (flagservice_writes_total{result=\"rejected\"} on the interventions, rollout and game sets): out of bounds, game not live, read-only flag. Replaces the flag-file corruption panel (#1417).",
+      "description": "Agent flag writes the flag service refused in the last hour (flagservice_writes_total{result=\"rejected\"} on the interventions and game sets): out of bounds, game not live, read-only flag. Replaces the flag-file corruption panel (#1417).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1891,7 +1891,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(flagservice_writes_total{result=\"rejected\", flag_set=~\"interventions|rollout|game\"}[1h])) or vector(0)",
+          "expr": "sum(increase(flagservice_writes_total{result=\"rejected\", flag_set=~\"interventions|game\"}[1h])) or vector(0)",
           "legendFormat": "rejected writes",
           "refId": "A"
         }

@@ -10,14 +10,13 @@ sent in the shape the ``observability/telemetry.moment_shape`` flag chose for th
 - ``log_event``: an SDK log record with ``event_name`` = the moment's name, severity INFO,
   the parent span's trace context, emitted on the process's OTLP ``LoggerProvider``
   (``lib.otel_logging.get_logger_provider``), never through Python ``logging``, so the
-  ``log_level`` flag never drops it;
-- ``both``: ``span_event`` and ``log_event`` with the same attributes (one ``moment.id``).
+  ``log_level`` flag never drops it.
 
-With ``observability/telemetry.agent_log_events`` on for the game (#2722, UC-100 BR-012),
-the agent also gets its own log records on the same logger, each marked
-``orangecase.audience`` = ``agent`` so the collector keeps them from the gateway: a log
-copy of a moment the shape sends as a span event or a span (``agent_copy``), and the
-game's ``game.start`` / ``game.end`` (``emit_agent_event``).
+The shapes serve the booth backends only (telemetry.md appendix A): the agent reads deaths
+from ``game_player_elimination_order``, whatever the shape (UC-041 BR-009). With
+``observability/telemetry.agent_log_events`` on for the game (#2722, UC-100 BR-012), the
+agent gets its own lifecycle log records on the same logger (``emit_agent_event``), each
+marked ``orangecase.audience`` = ``agent`` so the collector keeps them from the gateway.
 
 A shape that needs the log channel falls back to ``span_event`` in a process without
 OTLP logging (UC-100 A1). Every function here only enqueues (span processor, log
@@ -44,9 +43,7 @@ MOMENT_SHAPE_FLAG = "telemetry.moment_shape"
 MOMENT_SHAPE_SPAN_EVENT = "span_event"
 MOMENT_SHAPE_SPAN = "span"
 MOMENT_SHAPE_LOG_EVENT = "log_event"
-MOMENT_SHAPE_BOTH = "both"
-MOMENT_SHAPES = frozenset({MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN, MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH})
-_LOG_SHAPES = frozenset({MOMENT_SHAPE_LOG_EVENT, MOMENT_SHAPE_BOTH})
+MOMENT_SHAPES = frozenset({MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN, MOMENT_SHAPE_LOG_EVENT})
 
 # Root span attribute carrying the shape in effect for the game (UC-100 step 3).
 MOMENT_SHAPE_ATTR = "telemetry.moment_shape"
@@ -56,8 +53,6 @@ AGENT_LOG_EVENTS_FLAG = "telemetry.agent_log_events"
 AGENT_LOG_EVENTS_ATTR = "telemetry.agent_log_events"
 AUDIENCE_ATTR = "orangecase.audience"
 AUDIENCE_AGENT = "agent"
-# In the log shapes the moment's own log event already reaches the agent.
-_AGENT_COPY_SHAPES = frozenset({MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_SPAN})
 _LOGGER_NAME = "joustmania.moments"
 
 # (provider, logger) for the last provider seen: get_logger once, not per moment.
@@ -91,7 +86,7 @@ def effective_moment_shape(value: object) -> str:
     that needs the log channel is ``span_event`` in a process without OTLP logging.
     """
     shape = value if isinstance(value, str) and value in MOMENT_SHAPES else MOMENT_SHAPE_SPAN_EVENT
-    if shape in _LOG_SHAPES and otel_logging.get_logger_provider() is None:
+    if shape == MOMENT_SHAPE_LOG_EVENT and otel_logging.get_logger_provider() is None:
         return MOMENT_SHAPE_SPAN_EVENT
     return shape
 
@@ -146,7 +141,6 @@ def record_moment(
     duration_s: float = 0.0,
     tracer: trace.Tracer | None = None,
     timestamp_ns: int | None = None,
-    agent_copy: bool = False,
 ) -> str:
     """Record moment ``name`` on ``parent_span`` in ``shape``; returns the shape actually sent.
 
@@ -156,28 +150,19 @@ def record_moment(
     point in time). ``timestamp_ns`` (epoch ns) is the record's own timestamp: the span
     event's, the moment span's start, the log record's; ``None`` takes the clock now
     (UC-100 BR-006: the ground truth passes its own read, so both are equal).
-    ``agent_copy``: in the ``span_event`` and ``span`` shapes also emit the log event the
-    ``log_event`` shape would send, marked for the agent (it does not change the return).
 
-    Never raises from the log emit or the moment span: on a failure the shape actually
-    sent is returned (``span_event`` for ``both``, ``""`` when nothing was sent).
+    Never raises from the log emit or the moment span: on a failure ``""`` is returned
+    (nothing was sent).
     """
     attrs = dict(attributes)
     if shape not in MOMENT_SHAPES:
         shape = MOMENT_SHAPE_SPAN_EVENT
-    moment_logger = _moment_logger() if shape in _LOG_SHAPES or agent_copy else None
-    if shape in _LOG_SHAPES and moment_logger is None:
+    moment_logger = _moment_logger() if shape == MOMENT_SHAPE_LOG_EVENT else None
+    if shape == MOMENT_SHAPE_LOG_EVENT and moment_logger is None:
         shape = MOMENT_SHAPE_SPAN_EVENT  # no log channel in this process (UC-100 A1)
-    if timestamp_ns is None and (shape == MOMENT_SHAPE_SPAN or moment_logger is not None):
-        timestamp_ns = time.time_ns()  # one clock read: the copy carries the moment's time
+    if timestamp_ns is None and shape == MOMENT_SHAPE_SPAN:
+        timestamp_ns = time.time_ns()  # one clock read for the span's start and end
 
-    sent = _record_primary(name, shape, parent_span, attrs, duration_s, tracer, timestamp_ns, moment_logger)
-    if agent_copy and shape in _AGENT_COPY_SHAPES and moment_logger is not None:
-        _emit(moment_logger, name, parent_span, {**attrs, AUDIENCE_ATTR: AUDIENCE_AGENT}, timestamp_ns)
-    return sent
-
-
-def _record_primary(name, shape, parent_span, attrs, duration_s, tracer, timestamp_ns, moment_logger) -> str:
     if shape == MOMENT_SHAPE_SPAN:
         try:
             span = (tracer or trace.get_tracer(__name__)).start_span(
@@ -192,10 +177,9 @@ def _record_primary(name, shape, parent_span, attrs, duration_s, tracer, timesta
             return ""
         return shape
 
-    if shape in (MOMENT_SHAPE_SPAN_EVENT, MOMENT_SHAPE_BOTH):
-        parent_span.add_event(name, attributes=attrs, timestamp=timestamp_ns)
-    if shape in _LOG_SHAPES and not _emit(moment_logger, name, parent_span, attrs, timestamp_ns):
-        return MOMENT_SHAPE_SPAN_EVENT if shape == MOMENT_SHAPE_BOTH else ""
+    if shape == MOMENT_SHAPE_LOG_EVENT:
+        return shape if _emit(moment_logger, name, parent_span, attrs, timestamp_ns) else ""
+    parent_span.add_event(name, attributes=attrs, timestamp=timestamp_ns)
     return shape
 
 

@@ -286,11 +286,10 @@ type decideRecord struct {
 	// Prediction (#2479, UC-040 A44, BR-034; prediction_hook.go): the decision's
 	// prediction, the context its baseline is taken from (nil = do not register),
 	// whether decision.predictions_enabled was off, and what registration returned.
-	prediction       *decide.Prediction
-	predictionCtx    *gamecontext.GameContext
-	predictionsOff   bool
-	predictionID     string
-	predictionMerged bool
+	prediction     *decide.Prediction
+	predictionCtx  *gamecontext.GameContext
+	predictionsOff bool
+	predictionID   string
 }
 
 // discardStale records a failed re-validation against the current context.
@@ -926,8 +925,8 @@ func (l *Loop) decideRemoteApply(ctx context.Context, snapshot flags.Snapshot, c
 	}
 	rec.routed = true
 	// #2479: the remote answer's prediction (lever default while no model states
-	// one), registered when the record ends: acted, or a counterfactual when held,
-	// blocked or discarded. Not when the game is gone: nothing could be scored.
+	// one), registered when the record ends, only if the decision acted. Not when
+	// the game is gone: nothing could be scored.
 	if ok && gameActive(current) {
 		rec.prediction, rec.predictionCtx = remotePrediction(rec.req, rec.resp, d, current), &current
 	}

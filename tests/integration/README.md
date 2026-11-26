@@ -165,7 +165,7 @@ against ONE real flagd (no compose stack) in
 - the `windows` preset ladder of the baseline (pacing_profile).
 
 Runtime writes go through the flag service (epic #1407), so their server-side
-shapes that need only the flag plane (per-player targeting, the rollout ladder,
+shapes that need only the flag plane (per-player targeting,
 shadow-only experiments, write propagation) are tested in the service tier
 (`tests/service/`, #1561); the intervention journeys that apply them to a live
 game stay here (`test_tc013_shadow_alongside_real.py`; the shared fixtures are in `helpers.py`).

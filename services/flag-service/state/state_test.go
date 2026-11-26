@@ -182,12 +182,12 @@ func TestStackOverlay_SubstitutesDefaultVariant(t *testing.T) {
 		f := newFixture(t, fixtureOpts{})
 		f.put(WriteRequest{Set: "agent", Flag: "decision.backend", Variant: "jev", Writer: "stage"})
 		f.put(WriteRequest{Set: "agent", Flag: "enabled", Variant: "on", Writer: "stage"})
-		f.put(WriteRequest{Set: "agent", Flag: "rollout_enabled", Variant: "on", Writer: "operator"})
+		f.put(WriteRequest{Set: "agent", Flag: "experiment_dynamic_enabled", Variant: "on", Writer: "operator"})
 		n, err := f.state.ClearWriter("agent", "stage")
 		if err != nil || n != 2 {
 			t.Fatalf("cleared %d (%v), want 2", n, err)
 		}
-		if f.snapshotFlag("rollout_enabled")["defaultVariant"] != "on" {
+		if f.snapshotFlag("experiment_dynamic_enabled")["defaultVariant"] != "on" {
 			t.Fatal("another writer's overlay was cleared")
 		}
 	})
@@ -285,7 +285,7 @@ func TestStackOverlay_SubstitutesDefaultVariant(t *testing.T) {
 
 // UC: UC-053 A5 BR-001 BR-002
 func TestPut_Rejections(t *testing.T) {
-	f := newFixture(t, fixtureOpts{served: []string{"system", "observability", "interventions", "agent", "game", "user", "controller"}})
+	f := newFixture(t, fixtureOpts{served: []string{"system", "observability", "interventions", "agent", "game", "controller"}})
 	f.register("game_a", "coord/1", "MOCK0001")
 	cases := []struct {
 		name   string
@@ -316,7 +316,7 @@ func TestPut_Rejections(t *testing.T) {
 		{"UC-053/A5 fraction outside the bounds", WriteRequest{Set: "controller", Flag: "bluetooth_backend", Variant: "rust", Scope: Scope{FractionPercent: intp(0)}}, http.StatusUnprocessableEntity, fserr.OutOfBounds},
 		{"UC-053/A5 serial not in the game", WriteRequest{Set: "interventions", Flag: "shield_seconds", Value: raw("5"), Scope: Scope{GameID: "game_a", Serial: "MOCK0099"}}, http.StatusUnprocessableEntity, fserr.SerialNotInGame},
 		{"UC-053/A6 game not registered", WriteRequest{Set: "interventions", Flag: "volume_override", Value: raw("0.5"), Scope: Scope{GameID: "game_zz"}}, http.StatusConflict, fserr.GameNotLive},
-		{"UC-053/A5 set still on its file source", WriteRequest{Set: "rollout", Flag: "current_controller_count", Variant: "one"}, http.StatusConflict, fserr.SetNotServed},
+		{"UC-053/A5 set still on its file source", WriteRequest{Set: "user", Flag: "play_audio", Variant: "off"}, http.StatusConflict, fserr.SetNotServed},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

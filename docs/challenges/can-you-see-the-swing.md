@@ -114,7 +114,7 @@ Template, one row per backend:
 - [UC-102](../use_cases/UC-102.md) See a Swing at Full Density
 - FR-223, NFR-022, FR-086 and NFR-029 in [requirements.md](../requirements.md)
 - [flags.md](../specs/flags.md) (`metrics_export_interval_ms`, `game_loop.update_frequency_hz`)
-- [telemetry.md](../specs/telemetry.md) (the game coordinator's metrics; §3.2 for the ground truth)
+- [telemetry.md](../specs/telemetry.md) (the game coordinator's metrics; appendix A for the ground truth)
 - [glossary](../glossary.md): booth challenge, gateway, backend (observability)
 - ["Where did it go?"](where-did-it-go.md) (UC-100) and ["Who saved them?"](who-saved-them.md) (UC-101)
 - Issue #2586, epic #2569

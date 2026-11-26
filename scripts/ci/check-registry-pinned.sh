@@ -10,7 +10,9 @@
 #
 # How: build the tagged registry.LoadFile from a git worktree at the release
 # tag (joustmania-v<IMAGE_TAG>) and run it on the checkout's registry.yaml and
-# flag baseline (services/flagd, which compose mounts at /etc/flagd). No docker.
+# flag baseline (services/flagd, which compose mounts at /etc/flagd), with the
+# baseline file list compose passes (FLAG_SERVICE_BASELINE_FILES, else the
+# release's default list). No docker.
 #
 # Usage: scripts/ci/check-registry-pinned.sh [registry.yaml]
 # Exit: 0 loads (or SKIP: no tag yet, but IMAGE_TAG is the release this checkout
@@ -21,6 +23,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REGISTRY="${1:-$ROOT/services/flag-service/registry.yaml}"
 BASELINE_DIR="$ROOT/services/flagd"
+BASELINE_FILES="$(sed -n 's/^[[:space:]]*- FLAG_SERVICE_BASELINE_FILES=\([^ #]*\).*/\1/p' "$ROOT/docker-compose.yml" 2>/dev/null | head -n1 || true)"
 
 IMAGE_TAG="$(sed -n 's/^IMAGE_TAG=\([^ #]*\).*/\1/p' "$ROOT/.env" | head -n1)"
 if [[ -z "$IMAGE_TAG" ]]; then
@@ -58,13 +61,18 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/joustmania/flag-service/baseline"
 	"github.com/joustmania/flag-service/registry"
 )
 
 func main() {
-	b, err := baseline.Load(os.Args[1], baseline.DefaultFiles)
+	files := baseline.DefaultFiles
+	if os.Args[3] != "" {
+		files = strings.Split(os.Args[3], ",")
+	}
+	b, err := baseline.Load(os.Args[1], files)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -82,7 +90,7 @@ GO
 (cd "$WORK/rel/services/flag-service" && go build -o "$WORK/registrycheck" ./zz_registrycheck) \
   || { echo "ERROR: could not build the registry check of $TAG" >&2; exit 2; }
 set +e
-"$WORK/registrycheck" "$BASELINE_DIR" "$REGISTRY"
+"$WORK/registrycheck" "$BASELINE_DIR" "$REGISTRY" "$BASELINE_FILES"
 rc=$?
 set -e
 if [[ $rc -eq 1 ]]; then

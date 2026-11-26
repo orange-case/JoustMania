@@ -9,13 +9,13 @@ import (
 	"github.com/joustmania/agent/gamesummary"
 )
 
-// retroPredictionOutcomes is a mixed game: a rules and a model prediction (one hit,
-// one miss, one counterfactual, one unscorable) and controls for two templates.
+// retroPredictionOutcomes is a mixed game: rules, model and lever-default
+// predictions (one hit, one miss, one unscorable) and controls for two templates.
 func retroPredictionOutcomes() []gamesummary.PredictionOutcome {
 	return []gamesummary.PredictionOutcome{
 		{ID: "p1", OffsetSeconds: 12, Backend: "rules", Source: "rules", Template: "survives", Scope: "target", Target: "AA:11", HorizonS: 15, P: 0.7, Rule: "R4", Acted: true, Outcome: "hit"},
 		{ID: "p2", OffsetSeconds: 40, Backend: "claude", Source: "model", Template: "no_elimination", HorizonS: 15, P: 0.9, Acted: true, Outcome: "miss"},
-		{ID: "p3", OffsetSeconds: 55, Backend: "claude", Source: "lever_default", Template: "activity_rises", Scope: "target", Target: "BB:22", HorizonS: 10, P: 0.6, Acted: false, Outcome: "unscorable", UnscorableReason: "game_ended"},
+		{ID: "p3", OffsetSeconds: 55, Backend: "claude", Source: "lever_default", Template: "activity_rises", Scope: "target", Target: "BB:22", HorizonS: 10, P: 0.6, Acted: true, Outcome: "unscorable", UnscorableReason: "game_ended"},
 		{ID: "c1", OffsetSeconds: 15, Backend: "rules", Source: "control", Template: "survives", Scope: "target", Target: "AA:11", HorizonS: 15, P: 0.5, Outcome: "hit"},
 		{ID: "c2", OffsetSeconds: 30, Backend: "rules", Source: "control", Template: "survives", Scope: "target", Target: "BB:22", HorizonS: 15, P: 0.5, Outcome: "miss"},
 		{ID: "c3", OffsetSeconds: 45, Backend: "rules", Source: "control", Template: "survives", Scope: "target", Target: "AA:11", HorizonS: 15, P: 0.5, Outcome: "hit"},

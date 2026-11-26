@@ -16,7 +16,7 @@ import (
 
 // prediction_uc040_test.go covers the decision side of #2479 (UC-040 A44, BR-034):
 // the fixed rules prediction table, the rule ids on the candidates, registration
-// (acted vs counterfactual), the flag, and that predictions never change what the
+// (acted decisions only), the flag, and that predictions never change what the
 // rules decide or the permission chain does.
 
 // testBook is a prediction book on clock whose timers never fire; its goroutines
@@ -234,10 +234,10 @@ func TestEvaluateDecide_ResponseCarriesRulesPrediction(t *testing.T) {
 }
 
 // UC: UC-040 A44 BR-034
-// TestRegisterPrediction_ActedAndCounterfactual: acted only for an applied
-// decision; held, blocked and gated-off decisions are counterfactuals; noops and
-// records without a context register nothing.
-func TestRegisterPrediction_ActedAndCounterfactual(t *testing.T) {
+// TestRegisterPrediction_ActedOnly: only an applied decision registers its
+// prediction; held, blocked, gated-off and discarded decisions, noops and records
+// without a context register nothing.
+func TestRegisterPrediction_ActedOnly(t *testing.T) {
 	clock := time.Unix(10_000, 0)
 	c := gameCtx(20, nil, map[string]testPlayer{"A": {active: true}, "B": {active: true}})
 	shield := decide.NewPrediction(decide.TemplateSurvives, 15, 0.7, decide.SourceRules, "R4", "A")
@@ -246,15 +246,15 @@ func TestRegisterPrediction_ActedAndCounterfactual(t *testing.T) {
 		name           string
 		rec            decideRecord
 		wantRegistered bool
-		wantActed      bool
 	}{
-		{"UC-040/A44 applied act is acted", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true, applied: true}, true, true},
-		{"UC-040/A44 blocked act is a counterfactual", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true, blocked: true}, true, false},
-		{"UC-040/A44 gated-off act is a counterfactual", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true}, true, false},
-		{"UC-040/A44 held is a counterfactual", decideRecord{outcome: DecideOutcomeHeld}, true, false},
-		{"UC-040/A44 discarded stale target_gone is a counterfactual", decideRecord{outcome: DecideOutcomeDiscarded, discardedReason: DiscardStale, discardedDetail: DiscardTargetGone}, true, false},
-		{"UC-040/A44 applied rules fallback is acted", decideRecord{outcome: DecideOutcomeFallback, permissionKnown: true, applied: true}, true, true},
-		{"UC-040/A44 noop registers nothing", decideRecord{outcome: DecideOutcomeNoop}, false, false},
+		{"UC-040/A44 applied act registers", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true, applied: true}, true},
+		{"UC-040/A44 blocked act registers nothing", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true, blocked: true}, false},
+		{"UC-040/A44 gated-off act registers nothing", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true}, false},
+		{"UC-040/A44 held registers nothing", decideRecord{outcome: DecideOutcomeHeld}, false},
+		{"UC-040/A44 discarded stale registers nothing", decideRecord{outcome: DecideOutcomeDiscarded, discardedReason: DiscardStale, discardedDetail: DiscardTargetGone}, false},
+		{"UC-040/A44 applied rules fallback registers", decideRecord{outcome: DecideOutcomeFallback, permissionKnown: true, applied: true}, true},
+		{"UC-040/A44 noop registers nothing", decideRecord{outcome: DecideOutcomeNoop}, false},
+
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := testBook(t, &clock)
@@ -267,14 +267,17 @@ func TestRegisterPrediction_ActedAndCounterfactual(t *testing.T) {
 				t.Fatalf("registered = %v, want %v", rec.predictionID != "", tc.wantRegistered)
 			}
 			if !tc.wantRegistered {
+				if b.Pending() != 0 {
+					t.Fatalf("pending = %d, want 0", b.Pending())
+				}
 				return
 			}
 			end := c
 			end.EndReason = gamecontext.EndReasonZero
 			b.OnGameEnd(end)
 			rs := b.Results(c.SessionID)
-			if len(rs) != 1 || rs[0].Acted != tc.wantActed || rs[0].Backend != "jev" {
-				t.Fatalf("results = %+v, want acted=%v", rs, tc.wantActed)
+			if len(rs) != 1 || !rs[0].Acted || rs[0].Backend != "jev" {
+				t.Fatalf("results = %+v, want one acted", rs)
 			}
 		})
 	}
@@ -325,8 +328,7 @@ func actedResults(t *testing.T, b *prediction.Book, c gamecontext.GameContext, s
 
 // UC: UC-040 A44 BR-034
 // TestPredictionActed_RulesPath: through OnEvaluate, an applied write registers
-// an acted prediction; a gated-off write and a blocked decision register a
-// counterfactual.
+// an acted prediction; a gated-off write and a blocked decision register none.
 func TestPredictionActed_RulesPath(t *testing.T) {
 	fx := decideFixtures()[2] // accelerate: R5 adjust_music_tempo wins
 	withoutTempo := []string{}
@@ -342,8 +344,8 @@ func TestPredictionActed_RulesPath(t *testing.T) {
 		want    bool
 	}{
 		{"UC-040/A44 applied write is acted", &capturingSink{}, allInterventions(), true},
-		{"UC-040/A44 gated-off write is a counterfactual", &gatedSink{gateOn: false}, allInterventions(), false},
-		{"UC-040/A44 blocked decision is a counterfactual", &capturingSink{}, withoutTempo, false},
+		{"UC-040/A44 gated-off write registers nothing", &gatedSink{gateOn: false}, allInterventions(), false},
+		{"UC-040/A44 blocked decision registers nothing", &capturingSink{}, withoutTempo, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clock := time.Unix(10_000, 0)
@@ -357,8 +359,14 @@ func TestPredictionActed_RulesPath(t *testing.T) {
 			l.SetPredictionBook(b)
 			l.OnEvaluate(context.Background(), fx.ctx, testTrigger())
 			rs := actedResults(t, b, fx.ctx, decide.SourceRules)
-			if len(rs) != 1 || rs[0].Prediction.Rule != "R5" || rs[0].Acted != tc.want {
-				t.Fatalf("rules results = %+v, want one R5 with acted=%v", rs, tc.want)
+			if !tc.want {
+				if len(rs) != 0 {
+					t.Fatalf("rules results = %+v, want none", rs)
+				}
+				return
+			}
+			if len(rs) != 1 || rs[0].Prediction.Rule != "R5" || !rs[0].Acted {
+				t.Fatalf("rules results = %+v, want one acted R5", rs)
 			}
 		})
 	}
@@ -367,7 +375,7 @@ func TestPredictionActed_RulesPath(t *testing.T) {
 // UC: UC-040 A44 BR-034
 // TestPredictionActed_RemotePath: through runDecideRemote and decideRemoteApply,
 // an applied remote write registers an acted lever-default prediction; a gated-off
-// write and a decision the live allow-list blocks register a counterfactual.
+// write and a decision the live allow-list blocks register none.
 func TestPredictionActed_RemotePath(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -376,8 +384,8 @@ func TestPredictionActed_RemotePath(t *testing.T) {
 		want   bool
 	}{
 		{"UC-040/A44 applied remote write is acted", false, false, true},
-		{"UC-040/A44 gated-off remote write is a counterfactual", true, false, false},
-		{"UC-040/A44 remote decision blocked at landing is a counterfactual", false, true, false},
+		{"UC-040/A44 gated-off remote write registers nothing", true, false, false},
+		{"UC-040/A44 remote decision blocked at landing registers nothing", false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.9, "A", 0.5, "shield"))
@@ -398,8 +406,14 @@ func TestPredictionActed_RemotePath(t *testing.T) {
 			close(be.release)
 			h.loop.AwaitInflight()
 			rs := actedResults(t, b, remoteContext(), decide.SourceLeverDefault)
-			if len(rs) != 1 || rs[0].Prediction.Template != decide.TemplateSurvives || rs[0].Backend != "claude" || rs[0].Acted != tc.want {
-				t.Fatalf("lever results = %+v, want one survives from claude with acted=%v", rs, tc.want)
+			if !tc.want {
+				if len(rs) != 0 {
+					t.Fatalf("lever results = %+v, want none", rs)
+				}
+				return
+			}
+			if len(rs) != 1 || rs[0].Prediction.Template != decide.TemplateSurvives || rs[0].Backend != "claude" || !rs[0].Acted {
+				t.Fatalf("lever results = %+v, want one acted survives from claude", rs)
 			}
 		})
 	}

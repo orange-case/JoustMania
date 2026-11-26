@@ -63,7 +63,6 @@ flags:
   - {set: agent, key: interventions_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: experiments_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: experiment_dynamic_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
-  - {set: agent, key: rollout_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: decision.backend, kind: overlay, scope: [stack], persist: true, bounds: {variants: [rules, claude, jev]}}
   - {set: agent, key: decision.claude.act_confidence_threshold, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.jev.act_confidence_threshold, kind: overlay, scope: [stack]}
@@ -204,7 +203,7 @@ flags:
   # agent shield longer, so the agent never writes it (C-034).
   - {set: game, key: shield.end_grace_seconds, kind: overlay, scope: [stack], bounds: {range: [0, 2]}}
 
-  # --- user, controller, rollout (flags.md §13.4) ------------------------------
+  # --- user, controller (flags.md §13.4) --------------------------------------
   - {set: user, key: current_game, kind: overlay, scope: [stack], persist: true}
   - {set: user, key: game_instructions, kind: overlay, scope: [stack], persist: true, bounds: {variants: ["on", "off"]}}
   - {set: user, key: audio_volume.master, kind: overlay, scope: [stack], persist: true, bounds: {variants: [mute, quiet, normal, loud, max]}}
@@ -212,10 +211,6 @@ flags:
   - {set: controller, key: bluetooth_backend, kind: overlay, scope: [stack, fraction], bounds: {fraction: [1, 100]}}
   # rust-hid's per-controller output rate cap (#2125, UC-002 BR-005): tunable on stage.
   - {set: controller, key: rust_hid.output_rate_hz, kind: overlay, scope: [stack], persist: true, bounds: {variants: [slow, normal, fast, max]}}
-  - {set: rollout, key: current_controller_count, kind: overlay, scope: [stack], bounds: {variants: [none, one, three, six, all]}}
-  - {set: rollout, key: target_backend, kind: overlay, scope: [stack]}
-  - {set: rollout, key: strategy, kind: overlay, scope: [stack]}
-  - {set: rollout, key: remediation_allowed, kind: overlay, scope: [stack]}
 
   # --- observability (flags.md §13.5) ------------------------------------------
   # The propagation probe: read by no service, written by the integration tests
@@ -224,7 +219,7 @@ flags:
   # The logging group of the env-to-flag migration (flags.md §15, #1788): operator-written, read by every service.
   - {set: observability, key: log_level, kind: overlay, scope: [stack]}
   - {set: observability, key: debug, kind: overlay, scope: [stack]}
-  # The shape of the death_warning moment (#2658, UC-100): span_event (default), span, log_event or both.
+  # The shape of the booth moments (#2658, UC-100; telemetry.md appendix A): span_event (default), span or log_event.
   - {set: observability, key: telemetry.moment_shape, kind: overlay, scope: [stack]}
-  # Agent-only log events (#2722, UC-100 BR-012): game.start/game.end and moment copies, marked for the agent.
+  # Agent-only log events (#2722, UC-100 BR-012): game.start, game.phase.start, game.end, marked for the agent.
   - {set: observability, key: telemetry.agent_log_events, kind: overlay, scope: [stack]}

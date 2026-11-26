@@ -232,33 +232,6 @@
       },
       "defaultVariant": "default"
     },
-    "fitness.bluetooth.max_event_gap_ms": {
-      "state": "ENABLED",
-      "variants": {
-        "default": 50,
-        "strict": 25,
-        "lenient": 100
-      },
-      "defaultVariant": "default"
-    },
-    "fitness.bluetooth.max_dropped_events_pct": {
-      "state": "ENABLED",
-      "variants": {
-        "default": 0.02,
-        "strict": 0.01,
-        "lenient": 0.05
-      },
-      "defaultVariant": "default"
-    },
-    "fitness.bluetooth.min_movement_update_hz": {
-      "state": "ENABLED",
-      "variants": {
-        "default": 10,
-        "strict": 20,
-        "lenient": 5
-      },
-      "defaultVariant": "default"
-    },
     "perception.zone_still_max": {
       "state": "ENABLED",
       "variants": {
@@ -724,14 +697,6 @@
       "defaultVariant": "default"
     },
     "interventions_enabled": {
-      "state": "ENABLED",
-      "variants": {
-        "off": false,
-        "on": true
-      },
-      "defaultVariant": "off"
-    },
-    "rollout_enabled": {
       "state": "ENABLED",
       "variants": {
         "off": false,

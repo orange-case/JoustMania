@@ -37,8 +37,6 @@ import (
 	"github.com/joustmania/agent/gamerunner"
 	"github.com/joustmania/agent/gamesummary"
 	"github.com/joustmania/agent/gamewindow"
-	"github.com/joustmania/agent/gate"
-	"github.com/joustmania/agent/infracontext"
 	"github.com/joustmania/agent/keysafe"
 	"github.com/joustmania/agent/llm"
 	"github.com/joustmania/agent/patterngame"
@@ -49,12 +47,6 @@ import (
 
 // probeInterval rate-limits the decision.probe_decisions demo probe.
 const probeInterval = 5 * time.Second
-
-// infraControllerTTL bounds how long a controller is retained in the
-// infrastructure observe path (#733) after it stops appearing in
-// controller.bluetooth_health spans. Health spans arrive at ~1Hz, so 5s ≈ five
-// missed windows before a controller is considered gone.
-const infraControllerTTL = 5 * time.Second
 
 // defaultServiceName is the agent's OTEL service name default. It MUST stay
 // identical everywhere it is used: the exported resource (otel.go) and the
@@ -139,20 +131,6 @@ func actionSink(gate actions.InterventionGate, writer *actions.Writer, logger *s
 	logger.Info("Agent intervention writes gated by LIVE interventions_enabled flag (#1213; default fail-closed off)",
 		"flag_service", getEnv("FLAG_SERVICE_URL", "http://flag-service:8070"))
 	return actions.NewGatedActionSink(gate, writer, logger)
-}
-
-// rolloutActuator returns the rollout write seam for the infra loop (#734), gated by
-// the LIVE rollout_enabled flag (#1213, migrated from AGENT_ROLLOUT_ENABLED). It
-// ALWAYS returns a non-nil GatedRolloutActuator wrapping the real RolloutWriter: the
-// gate is re-read on every SetControllerCount / DryRun against agentFlags, so
-// flipping rollout_enabled in flagd starts/stops applying with no restart, and a
-// flagd outage FAILS CLOSED (DefaultRolloutEnabled=false ⇒ dry-run: the loop
-// decides+spans the expansion but writes nothing). This REPLACES the old startup-time
-// env gate that selected RolloutWriter-or-DryRun ONCE (#1217).
-func rolloutActuator(rootCtx context.Context, gate actions.RolloutGate, logger *slog.Logger) decision.RolloutActuator {
-	logger.Info("Agent rollout expansion gated by LIVE rollout_enabled flag (#1213; default fail-closed dry-run)",
-		"flag_service", getEnv("FLAG_SERVICE_URL", "http://flag-service:8070"))
-	return actions.NewGatedRolloutActuator(rootCtx, gate, actions.NewRolloutWriterFromEnv(logger), logger)
 }
 
 // buildPromoter constructs the M7-8 code-improvement Promoter (#936) with the
@@ -325,32 +303,6 @@ func objectiveForFlag(reg *experiment.Registry, flagKey string) string {
 		}
 	}
 	return ""
-}
-
-// rolloutDwell reads the per-stage dwell from AGENT_ROLLOUT_DWELL_SECONDS,
-// falling back to decision.DefaultRolloutDwell.
-func rolloutDwell() time.Duration {
-	return secondsEnv("AGENT_ROLLOUT_DWELL_SECONDS", decision.DefaultRolloutDwell)
-}
-
-// rolloutCooldown reads the post-rollback cooldown from
-// AGENT_ROLLOUT_COOLDOWN_SECONDS, falling back to decision.DefaultRolloutCooldown.
-func rolloutCooldown() time.Duration {
-	return secondsEnv("AGENT_ROLLOUT_COOLDOWN_SECONDS", decision.DefaultRolloutCooldown)
-}
-
-// secondsEnv parses a positive integer "seconds" env var into a Duration,
-// returning fallback on an empty/invalid/non-positive value.
-func secondsEnv(key string, fallback time.Duration) time.Duration {
-	s := strings.TrimSpace(os.Getenv(key))
-	if s == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
-		return fallback
-	}
-	return time.Duration(n) * time.Second
 }
 
 // runShadowGame executes the env-triggered shadow game (#778): it sweeps
@@ -562,8 +514,6 @@ type components struct {
 	predictions     *prediction.Book
 	experimentFlags *experimentFlagLookup
 	loops           *decision.LoopSet
-	infraStore      *infracontext.Store
-	infraLoop       *decision.InfraLoop
 
 	retro     *decision.RetroCoordinator
 	summaries *gamesummary.Coordinator
@@ -597,7 +547,7 @@ type llmBudgetShare struct {
 // the gated action sink, the global LLM budget and the agent tuning.
 //
 // gameFlags is the one flag-service client (FLAG_SERVICE_URL, epic #1407): every
-// agent write (interventions, rollout, experiments, promotion) and every read of the
+// agent write (interventions, experiments, promotion) and every read of the
 // game flag set goes through it; nothing in the agent opens a flag file. The
 // flag-service clients are built in run(), the one known construction site (C-034).
 func newComponents(ctx context.Context, logger *slog.Logger, agentFlags *flags.Flags, lifecycleHolder *flags.LifecycleHolder, lifecycle flags.Lifecycle, gameFlags *flagservice.Client) *components {
@@ -689,8 +639,7 @@ func (c *components) buildTextBackends() {
 	c.window = gamewindow.NewStore()
 }
 
-// buildDecisionLoops builds the per-game decision LoopSet (#845 PR C) and the
-// infrastructure observe + rollout loop (#733/#734).
+// buildDecisionLoops builds the per-game decision LoopSet (#845 PR C).
 func (c *components) buildDecisionLoops() {
 	// Decision-backend registry (#1226, #1244): maps the decision.backend flag to a
 	// factory that builds the remote decide.Backend (claude / jev) from the
@@ -716,43 +665,6 @@ func (c *components) buildDecisionLoops() {
 	// The Book scores each ended game against its goal profile (#2479, §14.4).
 	c.predictions.SetGoalResolver(c.goalProfile)
 	c.loops = decision.NewLoopSet(c.newDecisionLoop)
-
-	// Infrastructure observe + rollout path (#733/#734, M3): a parallel store fed
-	// by the controller.bluetooth_health span on the same OTLP trace receiver. It
-	// honors the same self-ingestion skip as the game store. The InfraLoop runs the
-	// progressive-rollout expansion controller (#734): when Bluetooth fitness passes
-	// and the per-stage dwell has elapsed it advances current_controller_count one
-	// stage up the ladder, emitting an agent.infrastructure.decision span every
-	// active-rollout cycle.
-	c.infraStore = infracontext.NewStore(infraControllerTTL, nil)
-	c.infraStore.SetOwnService(resolveServiceName())
-	// Bluetooth fitness source (#735): backed DIRECTLY by the flags client, so the
-	// infra loop re-reads the live fitness.bluetooth.* thresholds on every observe
-	// cycle (~1Hz) — tunable live on stage with no restart, and in the lobby too
-	// (the game loop only publishes thresholds while a session is active, so it
-	// cannot keep the infra loop live on its own). On any evaluation error the
-	// accessor falls back to the flagd-schema defaults.
-	bluetoothFitness := decision.NewFlagBluetoothFitness(c.agentFlags)
-	// Rollout actuator (#734/#1213): a GatedRolloutActuator wrapping the real
-	// RolloutWriter — it flips current_controller_count on the flag service ONLY when the
-	// LIVE rollout_enabled flag is on, else it dry-runs (decides+spans but does not
-	// write). Gate read per SetControllerCount/DryRun against agentFlags, fail-closed
-	// (dry-run) on a flagd outage. ctx is the agent's long-lived context.
-	c.infraLoop = decision.NewInfraLoop(c.logger, rolloutDwell(), bluetoothFitness, rolloutActuator(c.ctx, c.agentFlags, c.logger))
-	// Auto-remediation gate (#736): remediation_allowed (rollout set) is evaluated
-	// through flagd like every other flag (#1411, R1). When false, fitness failures
-	// are RECOMMENDED only (span, no write). Default on any error is false
-	// (fail-closed). The dry-run actuator above also applies to rollback, so a
-	// disabled rollout records the rollback decision without writing.
-	c.infraLoop.SetRemediationSource(actions.NewRemediationReader(c.agentFlags))
-	// Post-rollback cooldown (#736): suppress re-expansion for this long after a
-	// rollback so fitness can recover before the loop climbs again.
-	c.infraLoop.SetCooldown(rolloutCooldown())
-	// Freshness gate (#734): evaluate the rollout only when ≥1 controller is
-	// reporting fresh Bluetooth health. Game-state-independent (lobby connects).
-	c.infraLoop.SetGate(func(snap infracontext.InfraContext, now time.Time) bool {
-		return gate.ShouldEvaluateInfra(snap, now, infraControllerTTL)
-	})
 }
 
 // newDecisionLoop is the per-game decision Loop factory (#845 PR C). Each game
@@ -1166,8 +1078,6 @@ func (c *components) buildPipeline(listenAddr, healthAddr string) *serverCompone
 	staleEnds := newGameEndStaleCounter(globalMeterProvider())
 	c.mux = gamecontext.NewMultiplexer(c.newStore(staleEnds))
 	c.mux.SetOwnService(c.ownService)
-	// #2658 slice 3: every moment record read, by moment, shape and outcome.
-	c.mux.SetMomentObserver(countMoments(newMomentsReceivedCounter(globalMeterProvider())))
 	// #2096 (UC-043 A17): the shield reads of a shadow arm game resolve its arm.
 	c.agentFlags.SetGameAttrs(gameAttrsFrom(c.mux))
 	// UC-046 A8: a pattern game is non-exact when any other game is live.
@@ -1176,8 +1086,7 @@ func (c *components) buildPipeline(listenAddr, healthAddr string) *serverCompone
 	pipe := newPipeline(c.mux, c.loops, c.lifecycle.PlayerTTL).
 		// Hot-reload the evaluate gate's freshness window in lockstep with the store
 		// eviction TTL (#927): both read lifecycle.player_ttl_seconds from the holder.
-		withPlayerTTLSource(c.lifecycleHolder.PlayerTTL).
-		withInfra(c.infraStore, c.infraLoop)
+		withPlayerTTLSource(c.lifecycleHolder.PlayerTTL)
 
 	// Shadow-game runner (#778): when AGENT_SHADOW_GAME=true, sweep any orphaned
 	// reserved controllers from a prior crashed run, then run ONE mock-only game

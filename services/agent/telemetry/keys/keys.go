@@ -210,9 +210,7 @@ const (
 // SpanInterventionEffect is the intervention-effect feedback span (#918): emitted
 // after a follow-up window (default DefaultEffectWindow) once per APPLIED (dispatched)
 // intervention, carrying the BEFORE/AFTER fitness-objective signals for that game and
-// their delta, attributed to the intervention id. It closes the game-path MEASUREMENT
-// loop — the infra path already has fitness->rollback, the game path had nothing
-// (#918). It is MEASUREMENT ONLY: it never reverts the intervention.
+// their delta, attributed to the intervention id (#918). It is MEASUREMENT ONLY: it never reverts the intervention.
 //
 // One span per evaluated fitness signal (or one aborted span), each a DIRECT remote
 // child of the causing agent.decision, backdated to dispatch time so a Jaeger trace
@@ -458,9 +456,8 @@ const (
 	// AttrPredictionBackend is the backend whose decision carried the prediction
 	// ("none" for a control); the same key as invoke_agent's decide.backend.
 	AttrPredictionBackend = "decide.backend"
-	// AttrPredictionActed is true when the decision passed the permission chain and
-	// its write was applied; false for held, blocked, gated-off and discarded
-	// decisions (counterfactuals) and for controls.
+	// AttrPredictionActed is true for a decision prediction (only acted decisions
+	// register one) and false for a control.
 	AttrPredictionActed = "prediction.acted"
 	// AttrPredictionOutcome is hit, miss or unscorable.
 	AttrPredictionOutcome = "prediction.outcome"
@@ -496,9 +493,6 @@ const (
 	AttrDecidePredictionP              = "decide.prediction.p"
 	AttrDecidePredictionSource         = "decide.prediction.source"
 	AttrDecidePredictionRule           = "decide.prediction.rule"
-	// AttrDecidePredictionMerged is true when an identical prediction was already
-	// pending: decide.prediction.id is that pending prediction's id.
-	AttrDecidePredictionMerged = "decide.prediction.merged"
 	// AttrDecidePredictionDroppedReason is why a model-stated prediction was
 	// dropped (missing, bad_option, bad_confidence, no_target, inconsistent; UC-040
 	// A45). Set on the accepted remote answer's invoke_agent span only.
