@@ -26,7 +26,7 @@ merge queue (their only gate) when the entry touches their paths (the `service_t
 | Claude (Anthropic Messages API) | fake (`AGENT_CLAUDE`: text backend; `AGENT_CLAUDE_DECIDE`: in-game decide backend, #1900) | `harness/fakes/claude.py`, in-process threaded server (`stack.fake_claude`: `script(retro=, proposal=, decide_mode=, intervention=, confidence=)`, `release()` for `decide_mode="hold"`, `requests(kind)` with kind `retro`/`proposal`/`decide`; a decide record carries `game_id`, `questions`, `intervention`, `held`; the answer is built from the prompt by `harness/fakes/decide_answer.py`); the stack writes the `inference.backend=claude` overlay (the flag wins over the env, #1810) before the agent starts, and the agent gets `ANTHROPIC_API_KEY` and `AGENT_INFERENCE_BASE_URL` = the fake, `AGENT_EXPERIMENT_DIR` in the workdir |
 | GitHub (REST API, issues and PRs) | fake (`Composition(fake_github=True)`, needs `agent`) | `harness/fakes/github.py`, in-process threaded server (`stack.fake_github`: `requests(kind)`, `html_url(kind, n)`); the agent gets the promoter env gate (`AGENT_CODE_IMPROVEMENT_ENABLED`, target `github`, a dummy `GITHUB_TOKEN` and `GITHUB_REPOSITORY`) with `GITHUB_API_URL` = the fake, so a promotion never reaches github.com (TC-011 promotion) |
 | Flagsmith (hosted, the flag service's Flagsmith link) | fake (`Composition(fake_flagsmith=True)`; `fake_flagsmith_preseed=True` creates every registry flag as a feature first) | `harness/fakes/flagsmith.py`, in-process threaded server, stateful like Flagsmith (`stack.fake_flagsmith`): environment document with `updated_at`, `Last-Modified` and 304; the link's pushes change it (`__future__` PATCH, identity overrides, identities, traits) with API-key audit rows; `person_sets` / `person_overrides` change it as a person; knobs `down`, `delay`, `refuse(feature, status, retry_after=, times=)`, `audit_rows`, `audit_status`, `versioning`, `identity_overrides_in_local_eval`; reads `pushes(feature)`, `env_value`, `override`, `identities`, `health_posts`; `reset_values()` between tests. The flag service gets FLAGSMITH_LINK=on, the fake's URLs and dummy keys, poll 5 s, timeout 1 s and the health webhook; every other composition runs with the link off. Journeys: `test_flagsmith_link.py`, `test_flagsmith_sync.py` (own CI job, #2592); fake self-tests `test_fake_flagsmith.py` |
-| rust-hid, python-hid, BlueZ | none | controller manager: `RUST_HID_*` / `PYTHON_HID_*` = `127.0.0.1:1`, dead `DBUS_SYSTEM_BUS_ADDRESS` |
+| rust-hid, BlueZ | none | controller manager: `RUST_HID_*` = `127.0.0.1:1`, dead `DBUS_SYSTEM_BUS_ADDRESS` |
 
 Python services run as subprocesses, not in-process: OpenFeature domains, the rate limiter and the OTel
 providers are module-global.
@@ -118,7 +118,7 @@ async def test_x(service_stack, flag_service):
   `Ownership`). A start removes containers whose owner pid is gone (same host) or that are older than
   30 min; a live parallel run's container (other worktree) is left alone.
 - The controller manager gets a dead `DBUS_SYSTEM_BUS_ADDRESS`, so it never touches the host's BlueZ, and
-  unreachable rust-hid / python-hid addresses, so it never drives real controllers even when a compose
+  an unreachable rust-hid address, so it never drives real controllers even when a compose
   stack on the same host publishes rust-hid on `127.0.0.1:50058` (`ServiceStack.service_envs`,
   `test_harness.py`).
 - Port clashes fail loudly: the Python services bind without `SO_REUSEPORT` (`lib.grpc_utils.get_server_options`),

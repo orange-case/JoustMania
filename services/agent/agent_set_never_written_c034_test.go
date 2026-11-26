@@ -222,7 +222,7 @@ var c034WriterRows = []c034Row{
 			switch {
 			case r.Method == http.MethodPut && r.Write != nil:
 				s := r.Write.Scope
-				if s.GameID != c034GameID || s.ExperimentID != "" || s.Arm != "" || s.GameKind != "" || s.FractionPercent != nil || r.Write.Persist {
+				if s.GameID != c034GameID || s.ExperimentID != "" || s.Arm != "" || s.GameKind != "" || r.Write.Persist {
 					return fmt.Sprintf("intervention PUT not game-scoped: %+v persist=%v", s, r.Write.Persist)
 				}
 			case r.Method == http.MethodPost && r.Event != nil:
@@ -271,7 +271,7 @@ var c034WriterRows = []c034Row{
 			switch {
 			case r.Method == http.MethodPut && r.Write != nil:
 				s := r.Write.Scope
-				if s.ExperimentID == "" || s.Arm != experiment.ArmExperimental || s.GameKind != "" || s.GameID != "" || s.Serial != "" || s.FractionPercent != nil || r.Write.Persist {
+				if s.ExperimentID == "" || s.Arm != experiment.ArmExperimental || s.GameKind != "" || s.GameID != "" || s.Serial != "" || r.Write.Persist {
 					return fmt.Sprintf("experiment PUT not experiment+arm scoped: %+v persist=%v", s, r.Write.Persist)
 				}
 			case r.Method == http.MethodDelete:

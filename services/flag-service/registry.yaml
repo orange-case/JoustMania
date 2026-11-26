@@ -6,7 +6,7 @@
 # restart of the flag service (C-033).
 #
 # kind:    state | level | grant | event | overlay
-# scope:   stack | game | game+serial | experiment+arm | real | fraction
+# scope:   stack | game | game+serial | experiment+arm | real
 # bounds:  (none)         every declared variant
 #          variants: [..] only these declared variants
 #          range: [lo, hi] (+ integer: true) a number within the range, inclusive
@@ -16,7 +16,6 @@
 #          payload: {field: rule} event payload; rules: serial, serial_or_empty,
 #                   serial_set (2 to 6 distinct serials of the game, comma-separated),
 #                   sound, "enum a|b", "float lo hi" (a plain decimal string)
-#          fraction: [lo, hi] fraction_percent range of a fraction write
 #          shape: true    an object with the keys and value kinds of the default variant
 # persist: true = an admin setting a write MAY persist with "persist": true
 # description: one line in game terms, at most 120 characters; required on every row
@@ -205,7 +204,6 @@ flags:
   - {set: user, key: game_instructions, kind: overlay, scope: [stack], persist: true, bounds: {variants: ["on", "off"]}}
   - {set: user, key: audio_volume.master, kind: overlay, scope: [stack], persist: true, bounds: {variants: [mute, quiet, normal, loud, max]}}
   - {set: user, key: play_audio, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
-  - {set: controller, key: bluetooth_backend, kind: overlay, scope: [stack, fraction], bounds: {fraction: [1, 100]}}
   # rust-hid's per-controller output rate cap (#2125, UC-002 BR-005): tunable on stage.
   - {set: controller, key: rust_hid.output_rate_hz, kind: overlay, scope: [stack], persist: true, bounds: {variants: [slow, normal, fast, max]}}
 

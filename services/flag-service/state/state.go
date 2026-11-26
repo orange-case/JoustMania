@@ -107,7 +107,6 @@ type value struct {
 	WrittenAt  time.Time
 	ExpiresAt  time.Time // zero: no TTL
 	Persisted  bool      // an admin value (the persisted layer)
-	Fraction   int       // fraction overlays: percent of serials
 }
 
 func (v *value) generated() bool { return v.Value != nil }
@@ -136,10 +135,9 @@ type flagState struct {
 	// admin is the persisted admin setting beneath it (D10, §10.1). A stage
 	// overlay therefore never erases the host's setting: clearing it shows the
 	// admin value again.
-	stack    *value
-	admin    *value
-	real     *value
-	fraction *value
+	stack *value
+	admin *value
+	real  *value
 	// games: game-scoped values, by game id.
 	games map[string]*value
 	// serials: game+serial values, by game id then serial.
@@ -387,7 +385,7 @@ func (s *State) Stats() Stats {
 		st.LiveGamesByKind[g.Kind]++
 	}
 	for _, f := range s.flags {
-		for _, v := range []*value{f.stack, f.admin, f.real, f.fraction} {
+		for _, v := range []*value{f.stack, f.admin, f.real} {
 			if v == nil {
 				continue
 			}

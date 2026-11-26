@@ -2,8 +2,7 @@
 
 Static checks over the compose files: ``docker-compose.yml`` and ``docker-compose.lite.yml``
 both start rust-hid without a profile and make the controller manager wait for it to be
-healthy; python-hid is opt-in only (the ``python-hid`` profile, an optional dependency) or
-absent. Hardware behaviour needs a Pi.
+healthy; no other HID backend service exists. Hardware behaviour needs a Pi.
 """
 
 from __future__ import annotations
@@ -36,14 +35,7 @@ def test_stack_starts_rust_hid_by_default(stack):
 
 @pytest.mark.uc("UC-002", br=["BR-003"])
 @pytest.mark.parametrize("stack", sorted(STACKS))
-def test_python_hid_is_opt_in(stack):
+def test_rust_hid_is_the_only_hid_backend(stack):
     services = _services(stack)
-    python_hid = services.get("python-hid")
-    if python_hid is None:
-        return
-    assert python_hid.get("profiles") == ["python-hid"]
-    dependency = services["controller-manager"]["depends_on"].get("python-hid")
-    if dependency is not None:
-        assert dependency.get("required") is False, (
-            "the controller manager must start without python-hid"
-        )
+    assert "python-hid" not in services
+    assert "python-hid" not in services["controller-manager"]["depends_on"]
