@@ -836,7 +836,7 @@ variant the coordinator refuses it `not_allowed`; `tests/contract/test_flagd_res
 
 Per-serial **grant** flags (`shield_seconds`, `toughness_boost_seconds`,
 `soft_penalty_action`) are one-shot per decision: every write gets a fresh variant from the
-flag service. The coordinator (`InterventionManager._evaluate_targeted_grant`) reads each
+flag service. The coordinator (`SpecEvaluator.evaluate_targeted_grant` in `intervention_evaluation.py`) reads each
 player's variant and value with evaluation details and dispatches one intervention per player
 whose variant or value changed during the game and is not neutral, with `target` = that serial.
 An error read never moves that player's last-seen grant. Two grants to one player in one pushed
@@ -851,7 +851,7 @@ No per-player entry outlives its game, so the agent prunes nothing
 ([UC-040 BR-016](../use_cases/UC-040.md#br-016-per-player-entries-live-only-as-long-as-their-game)).
 
 The coordinator re-checks independently before any handler runs
-(`InterventionManager._enforce_and_dispatch` → `_check_chain` in `interventions.py`): allow-list membership → mode capability deny matrix
+(`InterventionManager._enforce_and_dispatch` in `interventions.py` → `EnforcementChain.check` in `intervention_policy.py`): allow-list membership → mode capability deny matrix
 (`MODE_CAPABILITY_DENY` in `interventions.py`) → battery guard → global backstop. Its block reasons are
 `not_allowed`, `rate_limited`, `low_battery`, `mode_unsupported`, `no_game`, `already_charged` (a `grant_shield` to a player who holds a shield charge; the handler applies nothing and the backstop reservation is refunded; UC-040 A31, #1837), `shield_cap_reached` and `shield_cooldown` (a `grant_shield` refused by the coordinator's shield limits per player per game; nothing applied, reservation refunded; UC-040 A34, BR-022, #2044), `shield_pool_full` and `shield_budget_exhausted` (a hold-mode `grant_shield` refused because the player's energy pool is full or the game's shield budget is used up; nothing applied, reservation refunded, not counted against BR-022; UC-040 A37, #2096), `game_ending` (a `grant_shield` that lands once the game is ending: outcome latched, force-ended, or state ENDING / ENDED; nothing applied, no shield layer and no cue, reservation refunded; UC-040 A42 step 3, #2395), `revive_refused` (the mode refused a `revive_player`; nothing applied, reservation refunded; UC-040 A22, #1948), `eliminate_refused` (an `eliminate_player` that killed nobody: unknown or already-dead player, a kill in flight, or the mode declined it; nothing applied, reservation refunded; UC-040 A22, #1383), `experiment_override` (a `pacing_profile` in an experimental-arm game whose experiment sets `windows` to another value; the experiment's windows stay, reservation refunded; UC-043 BR-005, #1970), `group_refused:<reason>` (a `grant_group_shield` refused as a whole, nothing applied for any target, reservation refunded; `<reason>` is `disabled`, `real_game`, `bad_set`, `target_gone`, `low_battery`, `game_ending`, `cap_reached` (the per-game count), or the single grant's reason of the first refused target (`already_charged`, `shield_pool_full`, `shield_budget_exhausted`, `shield_cap_reached`, `shield_cooldown`); UC-040 A48, BR-033, #2467), plus
 `handler_error`, `game_loop_unavailable` and `game_loop_timeout` (the handler did not run on the game's own
