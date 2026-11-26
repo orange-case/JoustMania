@@ -183,7 +183,7 @@ One treatment of an experiment (`experimental`, `control`) with its running fitn
 
 ### VERDICT
 
-The conclusion of an experiment. Source: `services/agent/experiment/verdict.go`, `journal.Verdict`. Rules: [UC-043](use_cases/UC-043.md) step 5, FR-063.
+The conclusion of an experiment. Source: `services/agent/experiment/verdict.go`, `journal.Verdict`. Rules: [UC-043](use_cases/UC-043.md) step 5, FR-063. The journal records a verdict's outcome, delta, significance flag and reason; it does not store the effect size.
 
 ### PROMOTION
 
