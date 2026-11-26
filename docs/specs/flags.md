@@ -228,6 +228,9 @@ A flag changes at runtime **only** if it has a row here,
 only within its bounds and only in its scope. Every other flag of every set is the **read-only baseline**: it
 changes by a reviewed edit of the flag file and a restart of the flag service (C-033). The registry file
 `services/flag-service/registry.yaml` encodes this table; a change to one updates the other in the same PR.
+The flag service ignores a registry.yaml key it does not know and logs one WARN at start that names it, so the
+checkout's file can carry a key a newer release reads; a unit test parses the checkout's file strictly, so a
+misspelt key fails CI (#2802). Releases before #2802 refuse to start on an unknown key (#2403).
 
 **Writers** is the canonical place that says who writes each flag (the human surfaces: the menu for the operator pad,
 the operator and stage scripts, Flagsmith; the agent: `agent` for its game-scoped interventions, `agent
@@ -289,13 +292,12 @@ next start; clear it locally too (a `DELETE`, or the pad's reset) or set it in F
 **Failed save, kill switches (#2368, UC-053 A12):** when the state file cannot be saved (or was unreadable at
 start), a stack `PUT` or `DELETE` of a `yes` row is refused with `500 persist_failed` and nothing changes in
 memory, also for a stage script, which before #2803 wrote such a row in memory; with a state file unreadable at start that includes a `DELETE` with no persisted value in memory, because
-the file may still hold one (a `no` row cannot be in the file: its `DELETE` stays a plain `204`, uncounted). The exception covers the persisted kill-switch flags, a fixed set in the flag service's
-code (`registry.killSwitches`), not a registry.yaml attribute (released images parse the checkout's registry.yaml
-strictly). This list is its single source of truth, kept in sync by a test: `agent/interventions_allowed`. A safety
+the file may still hold one (a `no` row cannot be in the file: its `DELETE` stays a plain `204`, uncounted). The exception covers every kill switch of §13.6 whose row has persist `yes` (today only
+`interventions_allowed`). A safety
 stop must take effect now, so a write or clear of it applies in memory and answers `persisted: false` (`PUT`) or
 `204` with `X-Flag-Persisted: false` (`DELETE`), counted in `flagservice_admin_persist_errors_total` and not
 counted as persisted in `flagservice_overlays`; a restart brings back what the file holds (services.md §7.2). Only a
-row with persist `yes` can be in the set: `enabled` is a kill switch too, but its row is persist `no`, so a failed
+row with persist `yes` takes the exception: `enabled` is a kill switch too, but its row is persist `no`, so a failed
 save never affects it.
 
 **Stage beats and scripts on a `yes` row (#2803, replaces "persisted vs overlay" of #1682):** a stage beat
@@ -411,9 +413,6 @@ it writes; the coordinator's re-check (decide-contract §11) is unchanged.
 | `inference.timeout_seconds` | overlay | stack | int 30 to 120 | no | operator (§15, #1788) |
 | `decision.probe_decisions` | overlay | stack | `on`, `off` | no | operator (§15, #1810) |
 | `effect.window_seconds` | overlay | stack | 10 to 40 | no | operator (§15, #1788) |
-| `promotion.rewatch_interval_seconds` | overlay | stack | int 30 to 120 | no | operator (§15, #1788) |
-| `promotion.rewatch_timeout_seconds` | overlay | stack | int 1800 to 7200 | no | operator (§15, #1788) |
-| `promotion.revert_cooldown_seconds` | overlay | stack | int 300 to 1200 | no | operator (§15, #1788) |
 
 Every other `agent` flag (`fitness.*` apart from the one above, `perception.*`, `lifecycle.*`, the other
 `verdict_*`, `code_improvement.*`, `experiment.mock_archetype*`, the remaining `decision.*` timeouts and URLs) is
@@ -531,7 +530,7 @@ by a file edit and a restart. Several of their flags are read only at process st
 
 > Implemented: features and tags are created at start (#2591), the kill switches below applied first by the in side
 > (#2590, #2596), Flagsmith the source of truth once online: it wins every conflict, at a restart and at a reconnect, kill switches included, and stack-wide local changes made offline are discarded at the reconnect (#2621), [architecture/flagsmith-sync.md](../architecture/flagsmith-sync.md).
-> UC-054 and UC-055 are Tested (#2592; the kill-switch rows by `services/flag-service/flagsmith/killswitch_test.go` and the link unit tests; the service tier checks the same Flagsmith-wins rows on an integer flag, `tests/service/test_flagsmith_sync.py::test_conflict_table` and `tests/service/test_flagsmith_link.py::test_restart_takes_flagsmith_value`). No registry attribute is added: the link
+> UC-054 and UC-055 are Tested (#2592; the kill-switch set by `services/flag-service/registry/registry_test.go` (`TestKillSwitchSetMatchesFlagsMD`) and the link unit tests; the service tier checks the same Flagsmith-wins rows on an integer flag, `tests/service/test_flagsmith_sync.py::test_conflict_table` and `tests/service/test_flagsmith_link.py::test_restart_takes_flagsmith_value`). No registry attribute is added: the link
 > follows the rows above.
 
 **Which flags.** Every row of §13.1 to §13.4 (and the mutable `observability` rows of §13.5) is one Flagsmith
@@ -555,35 +554,25 @@ outage that was never changed offline is kept and, with no Flagsmith value, sent
 
 **Kill switches** (UC-054 BR-005, FR-210). Since #2621 Flagsmith wins a conflict for these flags like for every
 other flag, at a restart, on a live conflict and at a reconnect: once online, Flagsmith is the source of truth. The
-link applies them first in a round (before the write budget defers anything). The second column is informational
-only: it is how the agent reads "more restrictive" for each flag, and the link no longer merges by it.
+link applies them first in a round (before the write budget defers anything), logs each kill-switch value the start's
+reference step overwrites, and a persisted write of one that has persist `yes` applies even when the save fails (§13,
+"Failed save, kill switches"). The members are `agent/enabled`, `agent/interventions_allowed`, the agent gates
+`agent/interventions_enabled` and `agent/experiments_enabled`, and the agent-limiting flags of FR-152 that have a
+registry row: `agent/experiment_proposer_enabled`, `agent/llm.max_requests_per_minute` and
+`agent/decision.claude.max_requests_per_minute`.
 
-| Flag | More restrictive first (informational) |
-|---|---|
-| `agent/enabled` | `off`, then `on` |
-| `agent/interventions_allowed` | the variant whose allowed actions are a subset of the other's (`none` ⊂ `probe` ⊂ `ambient` ⊂ `standard` ⊂ `full` ⊂ `shadow_experimental`; `standard` ⊂ `standard_group`; `shadow_experimental` ⊂ `shadow_group`), computed from the declared action lists, `noop` counting as no action (equal action sets after dropping `noop` are ordered by their raw tokens, so `none` before `probe`); when neither contains the other (for example `standard_group` and `full`), the local value stays |
-| `agent/code_improvement.mode` | `issue`, then `autonomous`; an unknown value (the retired `pr` included) counts as `issue`, as the agent reads it |
-| `agent/llm.max_requests_per_minute` | the lower number; a value ≤ 0 means closed and counts as the lowest (`inherit` does not apply to it) |
-| `agent/decision.claude.max_requests_per_minute` | the lower number; `inherit` (-1) counts as the highest; any other negative value counts as 0, as in the agent |
-| `agent/experiment_proposer_enabled`, `agent/interventions_enabled`, `agent/experiments_enabled` | `off`, then `on` |
-| `agent/experiment_dynamic_max_concurrent` | the lower number; a value ≤ 0 resolves to the compiled default 3, as in the agent |
-| `agent/code_improvement.min_interval_seconds` | the higher number; a value ≤ 0 counts as the default 300 s, as the agent reads it |
-
-`code_improvement.*` and `experiment_dynamic_max_concurrent` have no row in the mutable-flag registry (§13.2) today,
-so they are not runtime-mutable and not Flagsmith features; their rules keep the table complete for when they get one.
-
-The agent normalises every value this way when it reads it.
-
-The table is the source of truth: `agent/enabled`, the registry kill switch `agent/interventions_allowed`
-(`registry.killSwitches`), the agent-limiting flags of FR-152, and the agent gates `interventions_enabled`
-and `experiments_enabled`; a test keeps the link's kill-switch set in sync with the table.
+This list is the one source of truth for kill-switch membership; the flag service holds the same set in
+`registry.killSwitches`, and `TestKillSwitchSetMatchesFlagsMD` keeps the two equal and fails a member without a
+registry row or an FR-152 flag with a row that is not a member. An FR-152 flag without a registry row
+(`code_improvement.*`, `experiment_dynamic_max_concurrent`) is read-only baseline and no Flagsmith feature, so it is
+no kill switch. How the agent reads each value is in its [catalog row](generated/flag-catalog.md#agent) and in §15.4.
 A change in Flagsmith is applied like any write, also when it loosens one; the agent never writes its own limits, and the env ceilings of C-034 still cap the agent-limiting flags, also a value from Flagsmith.
 
 **Values in Flagsmith** (architecture note §2.1): a declared variant is its name (string); an integer range is an
 integer; a float range, a `free string` and an object flag are strings (decimal text, the string, compact JSON).
 
 **Traceability:** FR-206, FR-208, FR-210, FR-214, FR-226, C-034, C-036 / UC-054, UC-055 /
-`services/flag-service/flagsmith/killswitch.go` (#2590, #2621: the set of kill switches, no order); `TestKillSwitchTableInSync` keeps it equal to this table.
+`services/flag-service/registry/registry.go` (`registry.killSwitches`); `TestKillSwitchSetMatchesFlagsMD` keeps it equal to the kill-switch list.
 
 ## 14. Ownership composition: invalidation and visibility
 
@@ -663,9 +652,6 @@ Rows of the env-to-flag migration (#1788, #1810, FR-150 to FR-152, C-034). Each 
 | `inference.effort` (`agent`) | `AGENT_INFERENCE_EFFORT` (removed, #1907) | string | `low`, `medium`, `high`, `xhigh`, `max` | `medium` (`inference.DefaultEffort`) | operator | flag, else default | Implemented (#1788) |
 | `inference.timeout_seconds` (`agent`) | `AGENT_INFERENCE_TIMEOUT_SECONDS` (removed, #1907) | int | `default`=120 (`inference.DefaultTimeout`), `short`=30 | `default` = 120 | operator | flag, else default | Implemented (#1788) |
 | `effect.window_seconds` (`agent`) | `AGENT_EFFECT_WINDOW_SECONDS` (removed, #1907) | float (a non-positive flag value falls to the default) | `default`=20 (`decision.DefaultEffectWindow`), `short`=10, `long`=40 | `default` = 20 | operator | flag, else default | Implemented (#1788) |
-| `promotion.rewatch_interval_seconds` (`agent`) | `AGENT_AUTONOMOUS_REWATCH_INTERVAL_SECONDS` (removed, #1907) | int | `short`=30, `default`=60 (`promote.DefaultRewatchInterval`), `long`=120 | `default` = 60 | operator | flag, else default | Implemented (#1788) |
-| `promotion.rewatch_timeout_seconds` (`agent`) | `AGENT_AUTONOMOUS_REWATCH_TIMEOUT_SECONDS` (removed, #1907) | int | `short`=1800, `default`=3600 (`promote.DefaultRewatchTimeout`), `long`=7200 | `default` = 3600 | operator | flag, else default | Implemented (#1788) |
-| `promotion.revert_cooldown_seconds` (`agent`) | `AGENT_AUTONOMOUS_REVERT_COOLDOWN_SECONDS` (removed, #1907) | int | `short`=300, `default`=600 (`promote.DefaultRevertCooldown`), `long`=1200 | `default` = 600 | operator | flag, else default | Implemented (#1788) |
 | `experiment_tick_seconds` (`agent`) | `AGENT_EXPERIMENT_TICK_SECONDS` (removed, #1907) | int | `fast`=10, `default`=30, `slow`=60 | `default` = 30 | operator | flag, else default | Implemented (#1044 made it a live flag; env removed in #1907). The first refill after start comes within 5 s (`firstTickCap`), then the live cadence |
 | `experiment_completed_grace_seconds` (`agent`) | `AGENT_EXPERIMENT_COMPLETED_GRACE_SECONDS` (removed, #1907) | int (0 = off) | `off`=0, `short`=30, `default`=60, `long`=120 | `default` = 60 | operator | flag, else default | Implemented (#1810; env removed in #1907) |
 | `experiment_dynamic_candidates` (`agent`) | `AGENT_EXPERIMENT_DYNAMIC_CANDIDATES` (removed, #1907) | string (comma-separated keys) | `all`="" | `all` (every tunable flag) | operator | flag, else default; the built-in denylist always filters it (UC-070 BR-008) | Implemented (#1907). A comma string read with `StringValue`, not a list flag, so the flagd list-flag trap does not apply |
@@ -677,7 +663,7 @@ Rows of the env-to-flag migration (#1788, #1810, FR-150 to FR-152, C-034). Each 
 
 ### 15.1 Registry entries (extends §13.2 and §13.5)
 
-Each key above is added to the mutable-flag registry as a stack-scoped `overlay`, `Persist` no (except `inference.backend`, which persists like `decision.backend`, #1682), with the bounds of its variants (seconds: int within the variants' declared range; `inference.model` a free string), writer: operator scripts and the integration fixtures. The agent writes none of them. The `agent` rows are in the registry (§13.2: `inference.timeout_seconds` int 30 to 120, `effect.window_seconds` 10 to 40, `promotion.rewatch_interval_seconds` int 30 to 120, `promotion.rewatch_timeout_seconds` int 1800 to 7200, `promotion.revert_cooldown_seconds` int 300 to 1200, `inference.model` free string, `inference.effort` its declared variants, `decision.probe_decisions` variants `on` / `off`); the `observability` rows (`log_level`, `debug`) are in the registry too (§13.5). #1810 adds `experiment_completed_grace_seconds` (int 0 to 600) and `experiment_proposer_enabled` (`on`, `off`); #1907 adds `experiment_dynamic_candidates` and `experiment_dynamic_denylist` (free strings), `experiment_dynamic_objective` (its variants); `experiment_tick_seconds` already had a row (int 1 to 1000).
+Each key above is added to the mutable-flag registry as a stack-scoped `overlay`, `Persist` no (except `inference.backend`, which persists like `decision.backend`, #1682), with the bounds of its variants (seconds: int within the variants' declared range; `inference.model` a free string), writer: operator scripts and the integration fixtures. The agent writes none of them. The `agent` rows are in the registry (§13.2: `inference.timeout_seconds` int 30 to 120, `effect.window_seconds` 10 to 40, `inference.model` free string, `inference.effort` its declared variants, `decision.probe_decisions` variants `on` / `off`); the `observability` rows (`log_level`, `debug`) are in the registry too (§13.5). #1810 adds `experiment_completed_grace_seconds` (int 0 to 600) and `experiment_proposer_enabled` (`on`, `off`); #1907 adds `experiment_dynamic_candidates` and `experiment_dynamic_denylist` (free strings), `experiment_dynamic_objective` (its variants); `experiment_tick_seconds` already had a row (int 1 to 1000).
 
 ### 15.2 Not migrated, and why (inventory 2026-10-20)
 
@@ -691,8 +677,7 @@ Each key above is added to the mutable-flag registry as a stack-scoped `overlay`
 | `FLAG_SERVICE_*` | The flag service cannot depend on itself. |
 | `LOG_LEVEL` of the flag service | The flag service serves the flag files to flagd and starts before it; it has no flag client, and reading its own store would make the log level depend on the component whose startup it must log. Stays env-only (not migrated, #1788). |
 | `FLAG_EVAL_STARTUP_GRACE_SECONDS` | Not migrated (#1788). The grace window suppresses the provider-not-ready fallback warnings and `flag_eval_errors_total` while flagd has not delivered its first sync; reading it from a flag would evaluate a flag inside the very failure path it silences (recursion through `record_flag_fallback`) and always be unresolved during the window. Stays env-only, default 15 s (`lib/flag_eval_visibility.py`). |
-| `AGENT_AUTONOMOUS_ENABLED`, `AGENT_CODE_IMPROVEMENT_ENABLED` | Limit the agent: stay env ceilings, no new flag (C-034; §15.4 (a), (b)). |
-| `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` | Limits the agent: an env ceiling only, no flag (C-034; §15.4 (g)). |
+| `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` | Limits the agent: an env ceiling only, no flag (C-034; §15.4 (a), (g)). The former `AGENT_AUTONOMOUS_ENABLED` and `AGENT_CODE_IMPROVEMENT_ENABLED` are removed: this list is the one autonomous ceiling, and issues need only the GitHub target (§15.4 (b)). |
 | `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` | Stays an env ceiling (§15.4 (e)). |
 | `AGENT_EXPERIMENT_PROPOSER_ENABLED` | Stays an env ceiling (§15.4 (d)). |
 | `AGENT_LLM_MAX_REQUESTS_PER_MINUTE` | Stays an env ceiling (§15.4 (c), NFR-011). |
@@ -708,14 +693,14 @@ Each key above is added to the mutable-flag registry as a stack-scoped `overlay`
 
 Every setting that limits the agent is an operator ceiling no agent write can loosen (C-034): the env var is the ceiling and the human-owned flag may only tighten it. The flags are operator-written (§13.2), never agent-written. Per setting:
 
-- **(a) Autonomous promotion** runs only when `AGENT_AUTONOMOUS_ENABLED` is true AND `code_improvement.mode` is `autonomous` AND `enabled` is on.
-- **(b) Issues.** Opening an issue needs `AGENT_CODE_IMPROVEMENT_ENABLED` true AND `enabled` on; `code_improvement.mode` (default `issue`) then selects issue or autonomous only within that ceiling.
+- **(a) Autonomous promotion** runs only when `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` validates at least one objective (g), its single env ceiling, AND `code_improvement.mode` is `autonomous` AND `enabled` is on. With no validated objective the agent builds no real-default writer, so autonomous is a recorded no-op whatever the mode flag says. `enabled` off stops every write and reverts every promotion (UC-043 A1). The agent never reverts a promotion on its own: a person reverts it (the pad, the flag service, Flagsmith); automatic rollback is a future platform goal (FR-065).
+- **(b) Issues.** Opening an issue needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY` (the issue target; no separate opt-in) AND `enabled` on; `code_improvement.mode` (default `issue`) then selects issue or autonomous.
 - **(c) Remote-call budget** = `min(AGENT_LLM_MAX_REQUESTS_PER_MINUTE, llm.max_requests_per_minute)` (NFR-011), shared by the decide path, the retro and the proposer. An in-game decide call on a paid backend (claude) also needs a slot under that backend's `decision.<backend>.max_requests_per_minute` in the same window: the cap can only tighten (`inherit` = no cap of its own, 0 or a negative value closes the backend, a value above the global cap does nothing). The jev backend, the retro and the proposer stay on the global budget only.
 - **(d) Proposer gate** (the M7-4 proposer) is open only when `AGENT_EXPERIMENT_PROPOSER_ENABLED` is true AND `experiment_proposer_enabled` is on. A missing flag or a lost sync reads false (closed), so a deployment with the env set and an `agent.json` without the flag has no proposer.
 - **(e) Concurrent-experiment budget** = `min(AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT, experiment_dynamic_max_concurrent)`, clamped to the shadow capacity. An unset, invalid or non-positive env is no ceiling (logged at WARN when set but not positive).
-- **(g) Validated objectives.** An autonomous promotion (a) also needs its experiment's objective in `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES`, the operator's attestation that the objective's shadow substrate meets the validity bar (UC-043 A23, FR-203): a comma list of `objective@release` entries (`balanced@0.14.0`). An entry counts only when its objective has a fitness function (`endurance`, `balanced`, `accelerate`) and its release equals the agent's `SERVICE_VERSION`, which must be a release (`X.Y.Z`; `latest`, `main`, `dev` or a sha never count). Unset or empty validates no objective; an empty objective is never validated; no flag can widen it. An autonomous promotion of any other objective is a recorded no-op `substrate_not_validated objective=<objective>`. Read once at startup; `code_improvement.mode` and `enabled` stay the runtime tighteners. Not passed through compose (D-A6).
+- **(g) Validated objectives.** An autonomous promotion (a) also needs its experiment's objective in `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES`, the operator's attestation that the objective's shadow substrate meets the validity bar (UC-043 A23, FR-203): a comma list of `objective@release` entries (`balanced@0.14.0`). An entry counts only when its objective has a fitness function (`endurance`, `balanced`, `accelerate`) and its release equals the agent's `SERVICE_VERSION`, which must be a release (`X.Y.Z`; `latest`, `main`, `dev` or a sha never count). Unset, empty or wholly rejected validates no objective and leaves autonomous off (a); an empty objective is never validated; no flag can widen it. An autonomous promotion of any other objective is a recorded no-op `substrate_not_validated objective=<objective>`. Read once at startup; `code_improvement.mode` and `enabled` stay the runtime tighteners. Not passed through compose (D-A6).
 
-**Unset env.** For the boolean gates unset is closed (false); for the budgets (c), (e) unset means no env ceiling and the flag governs.
+**Unset env.** For the gates (a), (b), (d), (g) unset is closed; for the budgets (c), (e) unset means no env ceiling and the flag governs.
 
 **Fail values.** A missing flag or a lost sync resolves each flag to its code default: `enabled` off, `code_improvement.mode` `issue`, `llm.max_requests_per_minute` 6 (not the lowest variant 3), `decision.claude.max_requests_per_minute` 30 (so the global 6 binds), `experiment_proposer_enabled` false, `experiment_dynamic_max_concurrent` 3. The boolean gates therefore fail closed and the budgets fall to their defaults, still capped by a set env value.
 

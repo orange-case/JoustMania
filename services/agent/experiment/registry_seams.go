@@ -141,7 +141,7 @@ const (
 const PromotionReasonShutdown = "shutdown"
 
 // promotionActed reports whether a promotion acted (applied, or applied and then
-// reverted by the watch); anything else, an unknown outcome included, did not.
+// reverted by the kill switch); anything else, an unknown outcome included, did not.
 func promotionActed(res PromotionResult) bool {
 	return res.Outcome == PromotionApplied || res.Outcome == PromotionReverted
 }

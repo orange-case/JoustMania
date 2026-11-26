@@ -34,7 +34,7 @@ processors:
 
 exporters:
   # Degrade, never stall (C-004, NFR-029): bounded retry and a queue bounded in
-  # bytes, like otlp/agent is bounded (NFR-024).
+  # bytes, like otlp_http/agent is bounded (NFR-024).
   #
   # - Unreachable gateway, or HTTP 429 / 502 / 503 / 504: a batch is retried for
   #   at most 5 min, then dropped. While batches wait, new ones go to the queue;

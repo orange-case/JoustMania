@@ -8,7 +8,7 @@ always tested at HEAD. ``go run`` would recompile on every start.
 
 The agent listens for OTLP/gRPC on an ephemeral port. The stack's ``OtlpSink``
 tees every trace and metrics export of the services to it (the collector's
-``otlp/agent`` exporter), and the agent exports its own spans and metrics back
+``otlp_http/agent`` exporter), and the agent exports its own spans and metrics back
 to the sink, where the tests read them (Jaeger's role in compose).
 """
 
@@ -121,9 +121,12 @@ class AgentProcess(ManagedProcess):
     ):
         self.listen_port = listen_port
         self.health_port = free_port()
+        self.otlp_http_port = free_port()
         env = {
             **base_env(),
             "AGENT_LISTEN_ADDR": f"127.0.0.1:{listen_port}",
+            # The OtlpSink tees over gRPC; a fixed :4318 would collide between stacks.
+            "AGENT_OTLP_HTTP_ADDR": f"127.0.0.1:{self.otlp_http_port}",
             "AGENT_HEALTH_ADDR": f"127.0.0.1:{self.health_port}",
             # The agent's in-process resolver syncs from flagd's sync port (compose: flagd:8015, #1713).
             "FLAGD_HOST": "127.0.0.1",

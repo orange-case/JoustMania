@@ -1,10 +1,8 @@
 package experiment
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -238,49 +236,6 @@ func TestRegistryLaterPromotionOrder(t *testing.T) {
 		}
 		if strings.Join(got, ",") != "applied,reverted" {
 			t.Fatalf("promotion events = %v, want [applied reverted]", got)
-		}
-	})
-}
-
-// UC: UC-043 A15
-func TestRehydrateWarnsAboutLegacyQueuedRevert(t *testing.T) {
-	ctx := context.Background()
-	t.Run("UC-043/A15 a revert an older agent queued is not run; Rehydrate logs one WARN", func(t *testing.T) {
-		root := t.TempDir()
-		spawner := &fakeSpawner{}
-		r := newTestRegistry(t, RegistryConfig{
-			Root: root, MaxShadowGames: 4, Spawner: spawner,
-			Verdict:  fakeVerdict{outcome: CohortOutcomePromote, concludeAtN: 2, alwaysReport: true},
-			Promoter: &fakePromoter{result: PromotionResult{Outcome: PromotionApplied, Reason: "revert deferred", RevertPending: true}}, Targeting: &fakeTargeting{},
-		})
-		id := startHold(t, r, "shield.energy_budget_seconds", 20.0)
-		r.AllocateAndSpawn(ctx)
-		for _, g := range append([]spawnCall(nil), spawner.calls...)[:2] {
-			if _, err := r.ConcludeGame(ctx, g.gameID, 0.7, 120); err != nil {
-				t.Fatal(err)
-			}
-		}
-		var logs bytes.Buffer
-		r2 := newTestRegistry(t, RegistryConfig{Root: root, MaxShadowGames: 4, Spawner: &fakeSpawner{}, Log: slog.New(slog.NewTextHandler(&logs, nil))})
-		if err := r2.Rehydrate([]string{id}); err != nil {
-			t.Fatal(err)
-		}
-		if n := strings.Count(logs.String(), "queued revert from an older agent was not run"); n != 1 {
-			t.Fatalf("WARNs = %d, want 1:\n%s", n, logs.String())
-		}
-	})
-}
-
-// UC: UC-043 A15
-func TestFinishRestoredWarnsAboutLegacyQueuedRevert(t *testing.T) {
-	t.Run("UC-043/A15 a promoting experiment whose promotion event has revert_pending logs one WARN", func(t *testing.T) {
-		h := crashAt(t, crashStage{promoting: true, promotion: &PromotionResult{Outcome: PromotionApplied, Reason: "revert deferred", RevertPending: true}})
-		h.rehydrate(t)
-		if n := strings.Count(h.logs.String(), "queued revert from an older agent was not run"); n != 1 {
-			t.Fatalf("WARNs = %d, want 1:\n%s", n, h.logs.String())
-		}
-		if st, _ := h.r.Status(h.id); st != StatusDone {
-			t.Fatalf("status = %q, want %q", st, StatusDone)
 		}
 	})
 }

@@ -46,11 +46,7 @@ func realOverlayWriterOf(t *testing.T, svc *fake.Service) string {
 
 func racingWriter(t *testing.T, svc *fake.Service, other string) *serviceRealDefaultWriter {
 	t.Helper()
-	snaps, err := newSnapStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return newServiceRealDefaultWriter(&racingService{Service: svc, writer: other}, snaps, discardLogger())
+	return newServiceRealDefaultWriter(&racingService{Service: svc, writer: other}, discardLogger())
 }
 
 // UC: UC-043 A18
@@ -59,7 +55,7 @@ func TestUC043_A18_CompareAndDeleteRevert(t *testing.T) {
 
 	t.Run("UC-043/A18 the revert DELETE carries if_writer=promotion", func(t *testing.T) {
 		svc := newPromotionService(t)
-		w := writerForTest(t, svc, t.TempDir())
+		w := writerForTest(t, svc)
 		if err := w.SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
 			t.Fatal(err)
 		}
@@ -77,7 +73,7 @@ func TestUC043_A18_CompareAndDeleteRevert(t *testing.T) {
 
 	t.Run("UC-043/A18 the revert leaves an overlay another writer set after the read and is dropped", func(t *testing.T) {
 		svc := newPromotionService(t)
-		if err := writerForTest(t, svc, t.TempDir()).SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
+		if err := writerForTest(t, svc).SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
 			t.Fatal(err)
 		}
 		w := racingWriter(t, svc, "operator")
@@ -88,18 +84,15 @@ func TestUC043_A18_CompareAndDeleteRevert(t *testing.T) {
 		if got := realOverlayWriterOf(t, svc); got != "operator" {
 			t.Fatalf("real overlay writer = %q after the revert, want operator (left in place)", got)
 		}
-		if _, ok := w.PersistedRevertTimes()[promotedFlag]; !ok {
-			t.Error("the cooldown was not stamped")
-		}
 	})
 
 	t.Run("UC-043/A18 the kill switch never removes an overlay another writer set after its read", func(t *testing.T) {
 		svc := newPromotionService(t)
-		if err := writerForTest(t, svc, t.TempDir()).SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
+		if err := writerForTest(t, svc).SetRealDefault(ctx, promotedFlag, 3.0); err != nil {
 			t.Fatal(err)
 		}
 		w := racingWriter(t, svc, "admin")
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, w, fakeWatcher{}, w)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, w, w)
 
 		got := p.RevertOnKillSwitch(ctx)
 

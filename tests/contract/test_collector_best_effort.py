@@ -31,8 +31,8 @@ def _parse_seconds(value: str) -> float:
 @pytest.mark.uc("UC-035", flow="A3")
 def test_agent_exporter_is_best_effort(collector):
     """UC-041 step 2: forwarding to the agent uses a 2 s timeout, no retries and a bounded queue."""
-    agent = collector["exporters"]["otlp/agent"]
-    assert agent["endpoint"] == "agent:4317"
+    agent = collector["exporters"]["otlp_http/agent"]
+    assert agent["endpoint"] == "http://agent:4318"
     assert _parse_seconds(agent["timeout"]) == 2
     assert agent["retry_on_failure"] == {"enabled": False}
     queue = agent["sending_queue"]
@@ -48,7 +48,7 @@ def test_agent_exporter_is_best_effort(collector):
 @pytest.mark.uc("UC-035", flow="A3")
 def test_agent_fan_out_is_two_seconds_no_retries_and_a_1000_item_queue(collector):
     """NFR-024: 2 s timeout, no retries and a 1000-item queue (the figures docs/requirements.md states)."""
-    agent = collector["exporters"]["otlp/agent"]
+    agent = collector["exporters"]["otlp_http/agent"]
     assert _parse_seconds(agent["timeout"]) == 2
     assert agent["retry_on_failure"]["enabled"] is False
     assert agent["sending_queue"]["queue_size"] == 1000
@@ -59,7 +59,7 @@ def test_agent_fan_out_is_two_seconds_no_retries_and_a_1000_item_queue(collector
 def test_agent_is_never_the_only_sink_of_a_pipeline(collector, pipeline):
     """UC-035 A3: traces still reach Jaeger and metrics VictoriaMetrics when the agent is down."""
     exporters = collector["service"]["pipelines"][pipeline]["exporters"]
-    assert "otlp/agent" in exporters
+    assert "otlp_http/agent" in exporters
     storage = {"traces": "otlp/jaeger", "metrics": "prometheus_remote_write"}[pipeline]
     assert storage in exporters
 

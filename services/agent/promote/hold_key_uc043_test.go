@@ -7,7 +7,7 @@ import (
 	"github.com/joustmania/agent/experiment"
 )
 
-// A hold sub-parameter is written and reverted at once: the game latches it at
+// A hold sub-parameter is written, and reverted by the kill switch, at once: the game latches it at
 // its start (UC-048 BR-011), so a real write never reaches a running game.
 
 const holdKey = "shield.energy_budget_seconds"
@@ -29,7 +29,7 @@ func holdEvidence() Evidence {
 func TestHoldKeyPromotion_WritesAndRevertsAtOnce(t *testing.T) {
 	t.Run("UC-043/A17 a hold-key promotion writes the real value at once", func(t *testing.T) {
 		realDef := &recordingRealDefault{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{}, &recordingReverter{})
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, &recordingReverter{})
 		res := p.Promote(context.Background(), holdProposal("exp-h1"), promoteVerdict, autoOn, holdEvidence())
 		if res.Outcome != OutcomeApplied {
 			t.Fatalf("outcome = %q (%s), want applied", res.Outcome, res.Reason)
@@ -40,7 +40,7 @@ func TestHoldKeyPromotion_WritesAndRevertsAtOnce(t *testing.T) {
 	})
 	t.Run("UC-043/A17 shield.activation is never written to real games", func(t *testing.T) {
 		realDef := &recordingRealDefault{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, fakeWatcher{}, &recordingReverter{})
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, realDef, &recordingReverter{})
 		prop := experiment.Proposal{FlagKey: experiment.HoldActivationKey, ExperimentID: "exp-h3", ExperimentalValue: experiment.HoldValue}
 		res := p.Promote(context.Background(), prop, promoteVerdict, autoOn, holdEvidence())
 		if res.Outcome != OutcomeDiscarded || res.Reason != ReasonNotRealPromotable {
@@ -50,15 +50,16 @@ func TestHoldKeyPromotion_WritesAndRevertsAtOnce(t *testing.T) {
 			t.Fatalf("SetRealDefault calls = %d, want 0", len(realDef.calls))
 		}
 	})
-	t.Run("UC-043/A17 a degraded hold-key promotion is reverted at once", func(t *testing.T) {
+	t.Run("UC-043/A17 the kill switch reverts a hold-key promotion at once", func(t *testing.T) {
 		rev := &recordingReverter{}
-		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, fakeWatcher{degraded: true}, rev)
+		p, _ := promoterWithRecorder(t, &recordingGitHub{}, &recordingRealDefault{}, rev)
 		res := p.Promote(context.Background(), holdProposal("exp-h2"), promoteVerdict, autoOn, holdEvidence())
-		if res.Outcome != OutcomeReverted {
-			t.Fatalf("outcome = %q (%s), want reverted", res.Outcome, res.Reason)
+		if res.Outcome != OutcomeApplied {
+			t.Fatalf("outcome = %q (%s), want applied", res.Outcome, res.Reason)
 		}
-		if rev.calls != 1 {
-			t.Fatalf("RevertRealDefault calls = %d, want 1", rev.calls)
+		got := p.RevertOnKillSwitch(context.Background())
+		if len(got) != 1 || got[0].Outcome != OutcomeReverted || rev.calls != 1 {
+			t.Fatalf("kill switch = %+v, reverts = %d, want one reverted at once", got, rev.calls)
 		}
 	})
 }

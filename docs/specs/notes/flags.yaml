@@ -13,7 +13,7 @@ agent:
     reload: live
     note: >-
       Minimum time between code-improvement proposals, checked at game end after the `enabled` and
-      `experiments_enabled` permit.
+      `experiments_enabled` permit. A value <= 0 counts as the default 300 s.
   code_improvement.mode:
     read_by: [agent]
     reload: live
@@ -330,7 +330,8 @@ agent:
     note: >-
       One shared per-minute LLM budget for decisions, the retro and the proposer; the enforced cap
       is the lower of this and the `AGENT_LLM_MAX_REQUESTS_PER_MINUTE` env ceiling (C-034). Claude
-      decide calls also need a slot under `decision.claude.max_requests_per_minute`.
+      decide calls also need a slot under `decision.claude.max_requests_per_minute`. A value <= 0
+      means closed: no remote call is admitted.
   objectives:
     read_by: [agent, game-coordinator]
     reload: live
@@ -469,21 +470,6 @@ agent:
       Consecutive movement readings (about one per second) that must reach
       `policy.shield_danger_ratio` before a danger shield. Clamped to 2 to 10, so one reading never
       triggers; invalid gives 3.
-  promotion.revert_cooldown_seconds:
-    read_by: [agent]
-    reload: live
-    note: >-
-      Cooldown after a revert before the same change is promoted again.
-  promotion.rewatch_interval_seconds:
-    read_by: [agent]
-    reload: live
-    note: >-
-      Interval between re-watches of a promoted change.
-  promotion.rewatch_timeout_seconds:
-    read_by: [agent]
-    reload: live
-    note: >-
-      How long a re-watch of a promoted change may run.
   verdict_effect_threshold:
     read_by: [agent]
     reload: live

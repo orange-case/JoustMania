@@ -16,7 +16,7 @@ event (``wait_log(event_name="player_death", attrs={...})``).
 
 Tee: ``OtlpSink(forward_to="127.0.0.1:<port>")`` forwards every trace and
 metrics export request unchanged to another OTLP/gRPC receiver (the agent's, as
-the collector's ``otlp/agent`` exporter does in its traces and metrics
+the collector's ``otlp_http/agent`` exporter does in its traces and metrics
 pipelines), and of each logs export request only the agent's own log events, as
 the collector's ``logs/agent`` pipeline with ``filter/agent_events`` does (C-001,
 #2722): records named ``game.start``, ``game.end`` or ``game.phase.start`` marked

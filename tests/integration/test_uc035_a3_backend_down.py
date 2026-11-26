@@ -1,9 +1,9 @@
 """UC-035 A3 / NFR-024: with the agent down, the collector still delivers (#1650).
 
 The collector fans traces and metrics out to Jaeger, VictoriaMetrics and the
-agent (``otlp/agent``, best effort: 2 s timeout, no retries, bounded queue).
+agent (``otlp_http/agent``, best effort: 2 s timeout, no retries, bounded queue).
 The agent is profile-gated and not started by default (only tc007 starts it,
-and removes it at teardown), so the collector's ``otlp/agent`` exporter points
+and removes it at teardown), so the collector's ``otlp_http/agent`` exporter points
 at an unreachable backend: exactly A3. If an earlier module left the agent running,
 the ``agent_down`` fixture stops it and restarts it at teardown, so the test
 holds either way. A headless mock game then runs and ends, and what the
