@@ -741,7 +741,7 @@ class BaseGameMode(
         self.start_time = None
         self.running = False
 
-        # The state each concern owns, set by its own mixin (#2633).
+        # The state each concern owns, set by its own mixin.
         self._init_stream_state()
         self._init_outcome_state()
         self._init_shield_state()
