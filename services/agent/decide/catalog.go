@@ -234,7 +234,7 @@ var Catalog = []Intervention{
 		Effect: "End the round now. Irreversible; the last player alive wins.",
 	},
 	{
-		// #2467 (UC-048 A13, BR-014): effect only, in both profiles, so the lever
+		// #2467 (UC-048 A13, BR-014): effect only, so the lever
 		// prescribes no purpose. Offered only while the group gate is open
 		// (decision/group.go), so no existing request or prompt changes.
 		Name:          IntvGrantGroupShield,
