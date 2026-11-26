@@ -2016,6 +2016,46 @@ class TestNonstopDefaultEnd:
 
         assert [e["seconds_remaining"] for e in events.get_events_of_type("time_announcement")] == [30, 10]
 
+    async def _clocked_loop(self, monkeypatch, step, force_end_at=None):
+        """Run the loop over 3 frames; the fake clock advances ``step`` s per frame."""
+        game, events, _ = await _loop_game(time_limit=180)
+        sounds = _record_sounds(game)
+        now = {"t": 1000.0}
+        monkeypatch.setattr(game_clock, "now", lambda: now["t"])
+        real_update = game._update_respawn_timers
+        frames = []
+
+        async def advance_then_update():
+            frames.append(True)
+            now["t"] += step
+            if len(frames) == force_end_at:
+                game.force_end("operator")
+            await real_update()
+
+        game._update_respawn_timers = advance_then_update
+        call = _FiniteFrameCall(frames=3)
+        game.controller_client = SimpleNamespace(StreamGameplayData=lambda: call)
+        await asyncio.wait_for(game._game_loop(), timeout=5)
+        return game, events, sounds
+
+    @pytest.mark.uc("UC-026", flow="main", steps=[3])
+    @pytest.mark.asyncio
+    async def test_the_game_loop_announces_the_mark_it_crosses_then_ends_at_the_limit(self, monkeypatch):
+        game, events, sounds = await self._clocked_loop(monkeypatch, step=85)  # 95 s, 10 s, then past the limit
+
+        assert [e["seconds_remaining"] for e in events.get_events_of_type("time_announcement")] == [10]
+        assert sounds == [Sound.VOX_ZOMBIE_TEN_SECONDS]
+        assert game._time_limit_reached
+
+    @pytest.mark.uc("UC-026", flow="A1", br=["BR-003"])
+    @pytest.mark.asyncio
+    async def test_a_force_end_in_the_frame_of_a_mark_announces_nothing(self, monkeypatch):
+        game, events, sounds = await self._clocked_loop(monkeypatch, step=85, force_end_at=2)
+
+        assert events.get_events_of_type("time_announcement") == []
+        assert sounds == []
+        assert not game._time_limit_reached
+
     @pytest.mark.uc("UC-026", flow="A1")
     @pytest.mark.asyncio
     async def test_an_unlimited_game_announces_nothing(self, monkeypatch):

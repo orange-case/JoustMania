@@ -254,7 +254,7 @@ class NonstopJoustGame(BaseGameMode):
 
         A mark at or above the limit would fire on the first frame, so it is skipped.
         """
-        if self.time_limit == 0 or not self.start_time or self._time_limit_reached:
+        if self.time_limit == 0 or not self.start_time or not self.running or self.game_ending():
             return
         remaining = self.time_limit - (game_clock.now() - self.start_time)
         if remaining <= 0:
