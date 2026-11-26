@@ -23,7 +23,7 @@ func chargeRulesCtx() gamecontext.GameContext {
 		"STRONG": {skill: fptr(0.9), active: true},
 	})
 	c.GameKind = gamecontext.GameKindReal
-	mode := shieldTriggerGameMode
+	mode := "FFA"
 	c.Session.GameMode = &mode
 	return c
 }

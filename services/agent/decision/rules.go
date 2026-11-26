@@ -78,12 +78,12 @@ type ObjectiveRules struct {
 	// Loop.ShieldGrants): read once per ranking, R4 keeps the candidate with the
 	// fewest agent shields this game. nil (every older test) counts 0 for everyone,
 	// so R4 keeps the weakest surviving candidate.
-	grantSource func() map[string]int
+	grantSource func(gamecontext.GameContext) map[string]int
 }
 
 // SetShieldGrantSource installs the shield-grant view (Loop.ShieldGrants). It is
 // called under the engine lock, so it must not call back into the engine.
-func (r *ObjectiveRules) SetShieldGrantSource(src func() map[string]int) {
+func (r *ObjectiveRules) SetShieldGrantSource(src func(gamecontext.GameContext) map[string]int) {
 	r.mu.Lock()
 	r.grantSource = src
 	r.mu.Unlock()
@@ -119,7 +119,7 @@ func (r *ObjectiveRules) SetChargedSource(src func() map[string]bool) {
 	})
 }
 
-// SetShieldSource installs the shield-ledger view (Loop.ShieldSerials) for the ranked
+// SetShieldSource installs the shield-gate view (Loop.ShieldSerials) for the ranked
 // game context. It is called under the engine lock, so it must not call back into the
 // engine.
 func (r *ObjectiveRules) SetShieldSource(src func(c gamecontext.GameContext) (charged, noShield map[string]bool)) {
@@ -350,7 +350,7 @@ func (r *ObjectiveRules) rankLocked(c gamecontext.GameContext, now time.Time, no
 	}
 	var grants map[string]int
 	if r.grantSource != nil {
-		grants = r.grantSource()
+		grants = r.grantSource(c)
 	}
 	return pickShieldCatchUp(ranked, c, grants), weights, fitEval
 }

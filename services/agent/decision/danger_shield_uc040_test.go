@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,7 +59,7 @@ func dangerTargets(c gamecontext.GameContext, fit FitnessThresholds) []string {
 	return out
 }
 
-// dangerLoop is a rules loop with the shield ledger wired into the engine as main.go
+// dangerLoop is a rules loop with the shield gate wired into the engine as main.go
 // does, the given policy, and a live fitness source (the loop publishes the
 // policy.shield_danger_* values into it every cycle).
 func dangerLoop(t *testing.T, pol flags.Policy) (*Loop, *capturingSink, *time.Time) {
@@ -79,11 +80,34 @@ func dangerLoop(t *testing.T, pol flags.Policy) (*Loop, *capturingSink, *time.Ti
 	return l, sink, &clock
 }
 
+// dangerCoords holds the fake coordinator of each danger loop across calls.
+var (
+	dangerCoordsMu sync.Mutex
+	dangerCoords   = map[*Loop]*fakeCoordinator{}
+)
+
 // runDangerCycles runs n cycles every step, each on a context whose readings are as
-// fresh as at the start (the telemetry keeps arriving).
+// fresh as at the start (the telemetry keeps arriving) and whose shield gate is what
+// the coordinator exports after the writes so far.
 func runDangerCycles(l *Loop, clock *time.Time, c gamecontext.GameContext, n int, step time.Duration) {
+	dangerCoordsMu.Lock()
+	coord := dangerCoords[l]
+	if coord == nil {
+		cooldown := time.Duration(l.Flags.Evaluate(context.Background()).Policy.ShieldCooldownSeconds) * time.Second
+		coord = &fakeCoordinator{cooldown: cooldown}
+		dangerCoords[l] = coord
+	}
+	dangerCoordsMu.Unlock()
+	sink, _ := l.Actions.(*capturingSink)
 	for i := 0; i < n; i++ {
-		runCycle(l, c)
+		cc := c
+		if sink != nil {
+			cc = coord.sync(c, sink, *clock)
+		}
+		runCycle(l, cc)
+		if sink != nil {
+			_ = coord.sync(c, sink, *clock)
+		}
 		*clock = clock.Add(step)
 	}
 }

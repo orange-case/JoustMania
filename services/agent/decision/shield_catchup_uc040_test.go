@@ -21,7 +21,7 @@ import (
 // candidates with the fewest agent shields in this game (UC-040 A41, BR-030) and the grant_shield length
 // from the shield_seconds "default" variant (UC-040 BR-029).
 
-// catchUpLoop is a rules loop with the shield ledger wired into the engine as main.go
+// catchUpLoop is a rules loop with the shield gate wired into the engine as main.go
 // does (no-shield filter and grant view), the limits off, on a controllable clock.
 func catchUpLoop(t *testing.T) (*Loop, *capturingSink, *time.Time) {
 	t.Helper()
@@ -204,7 +204,7 @@ func TestShieldCandidates_StrugglingPlayersOnly(t *testing.T) {
 		clock := time.Unix(10_000, 0)
 		r := newObjectiveRules(balancedRulesConfig(), balancedRulesConfig(), balancedRulesConfig(),
 			func() time.Time { return clock }, rand.New(rand.NewPCG(1, 2)))
-		r.SetShieldGrantSource(func() map[string]int { return map[string]int{"WEAK": 1} })
+		r.SetShieldGrantSource(func(gamecontext.GameContext) map[string]int { return map[string]int{"WEAK": 1} })
 		r.SetShieldSource(func(gamecontext.GameContext) (map[string]bool, map[string]bool) {
 			return nil, map[string]bool{"WEAK": true} // WEAK in the cooldown
 		})
@@ -236,9 +236,11 @@ func sortRanked(ranked []scoredCandidate) {
 func TestCatchUp_RulesRotateShields(t *testing.T) {
 	t.Run("UC-040/A41 BR-030 the rules keep shielding and spread the shields over the candidates, fewest first", func(t *testing.T) {
 		l, sink, clock := catchUpLoop(t)
+		var coord fakeCoordinator
 		c := catchUpCtx(gamecontext.GameKindReal)
 		for i := 0; i < 6; i++ {
 			runCycle(l, c)
+			c = coord.sync(c, sink, *clock)
 			*clock = clock.Add(5 * time.Second)
 		}
 		got := shieldWriteOrder(sink)
@@ -248,7 +250,7 @@ func TestCatchUp_RulesRotateShields(t *testing.T) {
 		if !equalStrings(got, want) {
 			t.Fatalf("shield writes = %v, want %v", got, want)
 		}
-		if grants := l.ShieldGrants(); grants["WEAK"] != 3 || grants["MID"] != 3 || grants["STRONG"] != 0 {
+		if grants := l.ShieldGrants(c); grants["WEAK"] != 3 || grants["MID"] != 3 || grants["STRONG"] != 0 {
 			t.Fatalf("ShieldGrants = %v, want WEAK 3 and MID 3", grants)
 		}
 	})
@@ -257,37 +259,22 @@ func TestCatchUp_RulesRotateShields(t *testing.T) {
 // UC: UC-040 A41 BR-030
 func TestCatchUp_ShadowGameCountsItsOwnGrants(t *testing.T) {
 	t.Run("UC-040/A41 BR-030 a shadow game's loop does not see the real game's grants, and a new game starts at 0", func(t *testing.T) {
-		real, realSink, _ := catchUpLoop(t)
+		real, realSink, realClock := catchUpLoop(t)
+		var realCoord fakeCoordinator
 		runCycle(real, catchUpCtx(gamecontext.GameKindReal))
+		_ = realCoord.sync(catchUpCtx(gamecontext.GameKindReal), realSink, *realClock)
 		if got := shieldWriteOrder(realSink); len(got) != 1 || got[0] != "WEAK" {
 			t.Fatalf("real game shield writes = %v, want [WEAK]", got)
 		}
-		shadow, shadowSink, _ := catchUpLoop(t)
+		shadow, shadowSink, shadowClock := catchUpLoop(t)
+		var shadowCoord fakeCoordinator
 		runCycle(shadow, catchUpCtx(gamecontext.GameKindShadow))
+		shadowCtx := shadowCoord.sync(catchUpCtx(gamecontext.GameKindShadow), shadowSink, *shadowClock)
 		if got := shieldWriteOrder(shadowSink); len(got) != 1 || got[0] != "WEAK" {
 			t.Fatalf("shadow game shield writes = %v, want [WEAK]: its rotation starts empty", got)
 		}
-		if g := shadow.ShieldGrants(); g["WEAK"] != 1 || len(g) != 1 {
+		if g := shadow.ShieldGrants(shadowCtx); g["WEAK"] != 1 || len(g) != 1 {
 			t.Fatalf("shadow ShieldGrants = %v, want only its own WEAK grant", g)
-		}
-	})
-}
-
-// UC: UC-040 A41 BR-030
-func TestCatchUp_GrantsCountInFlight(t *testing.T) {
-	t.Run("UC-040/A41 a grant in flight counts, a released one does not", func(t *testing.T) {
-		var cl chargeLedger
-		now := time.Unix(1, 0)
-		res, reason := cl.reserve("A", now, shieldRequest{seconds: 5 * time.Second})
-		if reason != "" {
-			t.Fatalf("reserve refused %q", reason)
-		}
-		if g := cl.grants(); g["A"] != 1 {
-			t.Fatalf("grants with A in flight = %v, want A 1", g)
-		}
-		cl.release("A", res.gen)
-		if g := cl.grants(); g != nil {
-			t.Fatalf("grants after release = %v, want none", g)
 		}
 	})
 }
@@ -306,25 +293,6 @@ func TestShieldSeconds_StampedFromTheSource(t *testing.T) {
 		}
 		if calls != 1 {
 			t.Fatalf("source calls = %d, want 1 (read at use time)", calls)
-		}
-	})
-	t.Run("UC-040/BR-029 BR-022 the cooldown runs from the stamped length", func(t *testing.T) {
-		// 3 s shield + 2 s margin + 15 s cooldown: refused at t0+19 s, allowed at t0+21 s
-		// (with the 5 s default it would still be refused until t0+22 s).
-		l, sink, clock, _ := limitLoop(t, 50, 0, 15, budgetShield("WEAK"))
-		l.SetShieldSecondsSource(func(context.Context) float64 { return 3 })
-		t0 := *clock
-		runCycle(l, chargeRulesCtx())
-		*clock = t0.Add(19 * time.Second)
-		if got := outcomeSummary(runCycle(l, chargeRulesCtx())); !equalStrings(got, []string{"grant_shield/WEAK:shield_cooldown"}) {
-			t.Fatalf("at t0+19 s outcomes = %v, want shield_cooldown", got)
-		}
-		*clock = t0.Add(21 * time.Second)
-		if got := outcomeSummary(runCycle(l, chargeRulesCtx())); !equalStrings(got, []string{"grant_shield/WEAK:dispatched"}) {
-			t.Fatalf("at t0+21 s outcomes = %v, want dispatched", got)
-		}
-		if n := shieldWritesTo(sink, "WEAK"); n != 2 {
-			t.Fatalf("writes = %d, want 2", n)
 		}
 	})
 	t.Run("UC-040/BR-029 a value the decision carries is kept and the source is not read", func(t *testing.T) {

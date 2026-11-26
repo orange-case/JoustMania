@@ -26,12 +26,12 @@ const HoldPoolFullMarginSeconds = 0.5
 
 // HoldShieldRefusal is the hold-mode check of a targeted grant_shield, in order:
 // shield_budget_exhausted when the budget left is below the minimum burst, then
-// shield_pool_full when energy + inFlight is at least min(cap, budget left) minus
+// shield_pool_full when energy is at least min(cap, budget left) minus
 // HoldPoolFullMarginSeconds. "" when neither applies. For an active shield only the
 // pool check is skipped (the energy gauge over-reads a draining pool); the budget
 // check stays, since a draining budget only falls, so refusing early is the safe
 // direction. It fails open ("") for every value it needs that is missing or not finite.
-func HoldShieldRefusal(energy, budgetLeft *float64, active bool, cap, minBurst *float64, inFlight float64) string {
+func HoldShieldRefusal(energy, budgetLeft *float64, active bool, cap, minBurst *float64) string {
 	if isFiniteSet(budgetLeft) && isFiniteSet(minBurst) && *budgetLeft < *minBurst {
 		return HoldRefusalBudgetExhausted
 	}
@@ -42,7 +42,7 @@ func HoldShieldRefusal(energy, budgetLeft *float64, active bool, cap, minBurst *
 	if isFiniteSet(budgetLeft) && *budgetLeft < full {
 		full = *budgetLeft
 	}
-	if *energy+inFlight >= full-HoldPoolFullMarginSeconds {
+	if *energy >= full-HoldPoolFullMarginSeconds {
 		return HoldRefusalPoolFull
 	}
 	return ""
@@ -54,7 +54,7 @@ func (s State) HoldRefusal(p PlayerState) string {
 	if s.ShieldActivation == "" || !p.Alive {
 		return ""
 	}
-	return HoldShieldRefusal(p.ShieldEnergyS, p.ShieldBudgetRemainingS, p.ShieldActive, s.ShieldEnergyMaxS, s.ShieldMinBurstS, 0)
+	return HoldShieldRefusal(p.ShieldEnergyS, p.ShieldBudgetRemainingS, p.ShieldActive, s.ShieldEnergyMaxS, s.ShieldMinBurstS)
 }
 
 func isFiniteSet(v *float64) bool { return v != nil && !math.IsNaN(*v) && !math.IsInf(*v, 0) }
@@ -69,7 +69,7 @@ func finitePtr(v *float64) *float64 {
 
 // applyHoldState fills the hold fields of st from c in a hold game; it does nothing
 // in any other game, so their state, wire and digest are unchanged.
-func applyHoldState(st *State, c gamecontext.GameContext, ann Annotations) {
+func applyHoldState(st *State, c gamecontext.GameContext) {
 	if !c.Session.IsShieldHold() {
 		return
 	}
@@ -87,10 +87,6 @@ func applyHoldState(st *State, c gamecontext.GameContext, ann Annotations) {
 			continue
 		}
 		if energy := finitePtr(src.ShieldEnergy); energy != nil {
-			*energy += ann.ShieldInFlight[p.Serial]
-			if st.ShieldEnergyMaxS != nil && *energy > *st.ShieldEnergyMaxS {
-				*energy = *st.ShieldEnergyMaxS
-			}
 			p.ShieldEnergyS = energy
 		}
 		p.ShieldBudgetRemainingS = finitePtr(src.ShieldBudgetRemaining)
