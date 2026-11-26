@@ -45,7 +45,7 @@ func budgetFlagFiles() []string {
 	}
 }
 
-// UC: UC-070 A4 BR-003
+// UC: UC-070 BR-003
 // NFR: NFR-011 NFR-015
 func TestBudgetVariants2518_DeclaredInBothFlagFiles(t *testing.T) {
 	for _, path := range budgetFlagFiles() {
@@ -57,7 +57,7 @@ func TestBudgetVariants2518_DeclaredInBothFlagFiles(t *testing.T) {
 		def := func(key string) any {
 			return variant(key, flags[key]["defaultVariant"].(string))
 		}
-		t.Run("UC-070/A4 "+path, func(t *testing.T) {
+		t.Run("UC-070/BR-003 "+path, func(t *testing.T) {
 			if got := variant(keyLLMMaxRequestsPerMin, "interactive"); got != float64(budgetVariantInteractive) {
 				t.Errorf("%s interactive = %v, want %d", keyLLMMaxRequestsPerMin, got, budgetVariantInteractive)
 			}
@@ -94,7 +94,7 @@ func TestBudgetVariants2518_DeclaredInBothFlagFiles(t *testing.T) {
 // flag-service overlay does (a defaultVariant substitution, flags.md §13) in a
 // copy of the shipped agent.json and resolves it through the flagd file resolver
 // and Flags.Evaluate: the snapshot carries 120 and 8.
-// UC: UC-070 A4 BR-003
+// UC: UC-070 BR-003
 func TestBudgetVariants2518_ResolveThroughFlagd(t *testing.T) {
 	path := budgetFlagFiles()[0]
 	raw, err := os.ReadFile(path)
@@ -128,7 +128,7 @@ func TestBudgetVariants2518_ResolveThroughFlagd(t *testing.T) {
 	t.Cleanup(func() { provider.Shutdown() })
 
 	snap := New(openfeature.NewClient(domain), nil).Evaluate(context.Background())
-	t.Run("UC-070/A4 interactive resolves to 120", func(t *testing.T) {
+	t.Run("UC-070/BR-003 interactive resolves to 120", func(t *testing.T) {
 		if got := snap.LLMGate.MaxRequestsPerMinute; got != budgetVariantInteractive {
 			t.Errorf("llm.max_requests_per_minute = %d, want %d", got, budgetVariantInteractive)
 		}

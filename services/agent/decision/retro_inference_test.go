@@ -62,7 +62,6 @@ func eventAttr(ev sdktrace.Event, key string) (string, bool) {
 // count, one retro.suggestion event per suggestion, parse_ok=true, a latency, and the
 // raw-response fingerprint.
 // UC: UC-042 main
-// UC: UC-070 main
 func TestRetro_CapturesConclusionOnSuccess(t *testing.T) {
 	resetRetroResponseRef()
 	reply := `{
@@ -307,7 +306,6 @@ func TestRetro_RootContextCancellationUnblocksInfer(t *testing.T) {
 // stays capture-only — the span ends synchronously, carries no conclusion, no
 // parse_ok, and reports no_backend_available.
 // UC: UC-042 A2
-// UC: UC-070 A5
 func TestRetro_CaptureOnlyWhenNoBackend(t *testing.T) {
 	resetRetroResponseRef()
 	rc, sr := recordingRetro(t, retroFlagSnapshot()) // no SetBackend -> nil backend
@@ -321,7 +319,7 @@ func TestRetro_CaptureOnlyWhenNoBackend(t *testing.T) {
 	}
 	span := spans[0]
 	if v, ok := attrValue(span, AttrInferenceUsed); !ok || v.AsString() != DefaultInference {
-		t.Errorf("inference.used = %q (present=%v), want %q (UC-070 A5 step 2)", v.AsString(), ok, DefaultInference)
+		t.Errorf("inference.used = %q (present=%v), want %q (UC-042 A2)", v.AsString(), ok, DefaultInference)
 	}
 	if v, ok := attrValue(span, AttrInferenceFallback); !ok || v.AsString() != FallbackNoBackend {
 		t.Errorf("fallback_reason = %q (present=%v), want %q", v.AsString(), ok, FallbackNoBackend)

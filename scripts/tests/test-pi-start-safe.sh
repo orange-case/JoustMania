@@ -17,7 +17,8 @@
 #  - without JOUSTMANIA_UNIT_REV (outdated unit) every start logs "unit outdated" and a failed
 #    start exits 0; with it a failed start exits non-zero
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-pi-start-safe.sh
-# UC: UC-060 main step 2 A5 Pre-1 Post-F-1
+# UC: UC-060 main step 2 Pre-1 Post-F-1
+# Spec: docs/specs/stage-host.md SH-1 SH-3
 # NFR: NFR-026
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"

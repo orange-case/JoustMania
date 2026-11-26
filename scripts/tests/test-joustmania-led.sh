@@ -18,8 +18,8 @@
 #    loses to starting and failed, comes back after them, and clearing it shows
 #    the state (or the board's trigger) again
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-joustmania-led.sh
-# UC: UC-060 BR-005 A1 A5 Post-S-4
-# UC: UC-061 A10 BR-011
+# UC: UC-060 main step 4
+# Spec: docs/specs/stage-host.md SH-8 SH-12
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hermetic.sh"
 
