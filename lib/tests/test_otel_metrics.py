@@ -1,5 +1,6 @@
 """Unit tests for the OTEL metrics wrapper library."""
 
+import ast
 import importlib.util
 import re
 import time
@@ -555,3 +556,107 @@ class TestHistogramExportedBuckets:
         target.observe(histogram.buckets[0])
 
         assert _exported_bounds(in_memory_reader, histogram.name) == histogram.buckets
+
+
+def _exported_unit(reader: InMemoryMetricReader, name: str) -> str:
+    data = reader.get_metrics_data()
+    for resource_metrics in data.resource_metrics:
+        for scope_metrics in resource_metrics.scope_metrics:
+            for metric in scope_metrics.metrics:
+                if metric.name == name:
+                    return metric.unit
+    raise AssertionError(f"metric {name} was not exported")
+
+
+def _record(metric: otel_metrics.LabeledMetric) -> None:
+    if isinstance(metric, otel_metrics.Counter):
+        metric.inc()
+    elif isinstance(metric, otel_metrics.Gauge):
+        metric.set(1.0)
+    else:
+        metric.observe(0.1)
+
+
+_WRAPPERS = [otel_metrics.Counter, otel_metrics.Gauge, otel_metrics.Histogram]
+
+
+class TestExportedUnit:
+    @pytest.mark.parametrize("wrapper", _WRAPPERS, ids=lambda w: w.__name__)
+    def test_unit_is_exported_after_init(self, in_memory_reader, wrapper):
+        metric = wrapper("test_after_init_seconds", "Test", unit="s")
+        _record(metric)
+
+        assert _exported_unit(in_memory_reader, "test_after_init_seconds") == "s"
+
+    @pytest.mark.parametrize("wrapper", _WRAPPERS, ids=lambda w: w.__name__)
+    def test_unit_survives_pending_init(self, in_memory_reader, wrapper):
+        otel_metrics._initialized = False
+        metric = wrapper("test_pending_unit", "Test", unit="{g}")
+        otel_metrics._initialized = True
+        _record(metric)
+
+        assert _exported_unit(in_memory_reader, "test_pending_unit") == "{g}"
+
+    @pytest.mark.parametrize("wrapper", _WRAPPERS, ids=lambda w: w.__name__)
+    def test_no_unit_exports_empty(self, in_memory_reader, wrapper):
+        _record(wrapper("test_no_unit", "Test"))
+
+        assert _exported_unit(in_memory_reader, "test_no_unit") == ""
+
+
+# otlptranslator v1.0.0 unit -> Prometheus suffix, for the units a metric here may declare.
+_PROM_UNIT_SUFFIX = {"s": "seconds", "By": "bytes"}
+_ANY_WRAPPER_IMPORT = re.compile(r"^from lib\.otel_metrics import .*\b(Counter|Gauge|Histogram)\b", re.MULTILINE)
+
+
+def _declared_units() -> list[tuple[str, str, str, str]]:
+    """(module, wrapper, metric name, unit) for every wrapper call with a unit= keyword,
+    read from the source so no service module has to be imported."""
+    declared = []
+    for top in ("lib", "services"):
+        for path in sorted((_REPO_ROOT / top).rglob("*.py")):
+            rel = path.relative_to(_REPO_ROOT)
+            if _SKIPPED_DIRS.intersection(rel.parts) or rel.as_posix() == "lib/otel_metrics.py":
+                continue
+            text = path.read_text(encoding="utf-8")
+            if not _ANY_WRAPPER_IMPORT.search(text):
+                continue
+            for node in ast.walk(ast.parse(text)):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                    continue
+                if node.func.id not in {"Counter", "Gauge", "Histogram"}:
+                    continue
+                for kw in node.keywords:
+                    if kw.arg == "unit":
+                        name = node.args[0]
+                        assert isinstance(name, ast.Constant) and isinstance(kw.value, ast.Constant), (
+                            f"{rel}:{node.lineno}: name and unit must be literals so this guard can check them"
+                        )
+                        declared.append((rel.as_posix(), node.func.id, name.value, kw.value.value))
+    return declared
+
+
+_DECLARED_UNITS = _declared_units()
+
+
+class TestDeclaredUnitsKeepPrometheusNames:
+    """prometheus_remote_write appends a unit's suffix unless the name already contains it
+    as a `_` token, and `_ratio` for a gauge with unit "1"; a renamed series breaks every
+    dashboard query, so each declared unit must leave the stored name as it is."""
+
+    def test_discovery_finds_declared_units(self):
+        found = {(name, unit) for _, _, name, unit in _DECLARED_UNITS}
+        assert {("grpc_client_request_duration_seconds", "s"), ("controller_accel_magnitude", "{g}")} <= found
+
+    @pytest.mark.parametrize(
+        ("module", "wrapper", "name", "unit"),
+        _DECLARED_UNITS,
+        ids=[f"{module}:{name}" for module, _, name, _ in _DECLARED_UNITS],
+    )
+    def test_unit_does_not_rename(self, module, wrapper, name, unit):
+        if unit == "" or (unit.startswith("{") and unit.endswith("}")):
+            return
+        assert not (wrapper == "Gauge" and unit == "1"), f"{name}: unit '1' on a gauge appends _ratio"
+        suffix = _PROM_UNIT_SUFFIX.get(unit)
+        assert suffix is not None, f"{name}: unit {unit!r} has no known suffix; check the name it exports"
+        assert suffix in name.split("_"), f"{name}: unit {unit!r} would append _{suffix}"

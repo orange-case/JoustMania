@@ -381,7 +381,7 @@ optional UCUM `unit`, exported as the OTLP unit). Units declared: `s` on every `
 (`controller_accel_magnitude`, `game_player_accel_magnitude`, `game_player_peak_accel`, `game_accel_distribution`) and
 `{g^2}` on `game_player_movement_variance` and `game_player_movement_variance_aggregate`; every other Python metric
 has none. The stored names do not change: prometheus_remote_write (`add_metric_suffixes` default) appends a unit's
-suffix only when the name does not already end in it (`s` = `_seconds`, `By` = `_bytes`), and appends nothing for a
+suffix only when the name does not already contain it as a `_`-separated token (`s` = `_seconds`, `By` = `_bytes`), and appends nothing for a
 `{annotation}` unit. A unit must keep that true: `1` on a gauge would add `_ratio`, `g` (gram) `_grams`, `ms` and
 `Hz` would rename `game_loop_jitter_ms` and the `*_hz` gauges, so those carry no unit. A `Histogram`'s `buckets` are passed to the SDK as explicit bucket boundaries, so each histogram exports
 exactly the buckets it declares (UC-035 BR-004). The number of unique Python metric names and definitions is

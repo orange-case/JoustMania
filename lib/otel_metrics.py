@@ -13,9 +13,9 @@ Usage:
     latency = Histogram("op_duration_seconds", "description", unit="s")
 
     # unit is UCUM. prometheus_remote_write appends the unit's suffix unless the
-    # name already ends in it ("s" -> _seconds, "By" -> _bytes) and adds _ratio
-    # to a gauge with unit "1"; a {annotation} unit adds nothing. Dashboards
-    # query the stored names, so a unit must never change them.
+    # name already contains it as a _ token ("s" -> _seconds, "By" -> _bytes),
+    # and _ratio to a gauge with unit "1"; a {annotation} unit adds nothing.
+    # Dashboards query the stored names, so a unit must never change them.
 
     # Initialize in server startup (service identity from env vars)
     init_metrics(export_interval_ms=100)
