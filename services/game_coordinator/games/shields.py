@@ -422,6 +422,8 @@ class ShieldMixin:
                 self.record_intervention(player.serial, types=SHIELD_INTERVENTION_TYPES)
                 applied.append((player, was_protected))
         self._agent_group_grants += 1
+        with contextlib.suppress(Exception):
+            metrics.shield_group_grants.labels(**self._game_state_labels()).set(self._agent_group_grants)
         logger.info(
             f"Group shield applied in {self.game_id}: {len(players)} players, {seconds:.1f}s, "
             f"{len(applied)} new ({self._agent_group_grants} of {max_per_game} group shields)"
@@ -590,6 +592,19 @@ class ShieldMixin:
         """Count an applied agent shield and remember its own end (UC-048 BR-007; never ``grace_until``)."""
         self._agent_shield_grants[serial] = self._agent_shield_grants.get(serial, 0) + 1
         self._agent_shield_last_end[serial] = now + seconds
+        _, cooldown = self._shield_limits()
+        until = game_clock.to_wall(now + seconds + cooldown) if cooldown > 0 else 0.0
+        self._publish_shield_gate(serial, grants=self._agent_shield_grants[serial], cooldown_until=until)
+
+    def _publish_shield_gate(self, serial: str, **stats: float) -> None:
+        """Set ``game_player_shield_gate`` stats of ``serial``: the agent filters its grants on them (UC-048 A4, A6).
+
+        The cooldown end is exported with the cooldown read at the grant; a later flag
+        change only makes the agent's view stale, and the coordinator still refuses.
+        """
+        with contextlib.suppress(Exception):
+            for stat, value in stats.items():
+                metrics.player_shield_gate.labels(serial=serial, game_id=self.game_id, stat=stat).set(round(value, 3))
 
     def _shield_protected(self, player: "Player", now: float) -> bool:
         """Whether any shield protection (grace / invincibility / toughness boost) is active."""
@@ -806,6 +821,7 @@ class ShieldMixin:
         """
         expiry = self._read_charge_expiry()
         player.shield_charge_seconds = seconds
+        self._publish_shield_gate(player.serial, charged=1)
         player.shield_charge_granted_at = now
         player.shield_charge_expires_at = now + expiry if expiry > 0 else 0.0
         identity = player_identity_attributes(player.serial, player.name)
@@ -885,6 +901,8 @@ class ShieldMixin:
         await self._activate_shield_charge(player, now)
 
     def _clear_shield_charge(self, player: "Player") -> None:
+        if player.shield_charge_seconds > 0:
+            self._publish_shield_gate(player.serial, charged=0)
         player.shield_charge_seconds = 0.0
         player.shield_charge_granted_at = 0.0
         player.shield_charge_expires_at = 0.0

@@ -57,6 +57,10 @@ const (
 	metricPlayerShieldBudgetLeft = "game_player_shield_budget_remaining_seconds"
 	metricPlayerShieldActive     = "game_player_shield_active"
 	metricPlayerShieldStats      = "game_player_shield_stats"
+	// The agent shield gate (UC-048 A4, A6, A13): per player by stat, and the
+	// game's group shields.
+	metricPlayerShieldGate  = "game_player_shield_gate"
+	metricShieldGroupGrants = "game_shield_group_grants"
 )
 
 // Attribute keys.
@@ -321,7 +325,20 @@ func (s *Store) applyDataPoint(name string, dp pmetric.NumberDataPoint) bool {
 			}
 		}
 
+	case metricPlayerShieldGate:
+		if serial, ok := serialOf(); ok {
+			if tv, ok := attrs.Get(attrStat); ok && tv.AsString() != "" {
+				s.adoptGame(labels)
+				s.SetShieldGate(serial, tv.AsString(), v)
+				return true
+			}
+		}
+
 	// --- session signals (no serial attr; carry game_id + game_kind) ---
+	case metricShieldGroupGrants:
+		s.adoptGame(labels)
+		s.SetShieldGroupGrants(int(v))
+		return true
 	case metricShieldActivationMode:
 		if v != 0 {
 			if mv, ok := attrs.Get(attrMode); ok && mv.AsString() != "" {
