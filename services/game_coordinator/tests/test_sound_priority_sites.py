@@ -20,12 +20,14 @@ CRITICAL_FUNCTIONS = {
     "_play_team_victory_sound",
     "_show_tie_cue",
     "_abort_on_mass_disconnect",
+    "_handle_stream_reconnection",
 }
 # (file, function, sound expression) of every line that must be CRITICAL today
 EXPECTED = {
     ("game_loop.py", "_countdown", "Sound.SFX_BEEP_LOUD"),
     ("game_loop.py", "_countdown", "Sound.SFX_START3"),
     ("game_loop.py", "_abort_on_mass_disconnect", "Sound.MENU_VOX_STATUS_CANCELLED"),
+    ("gameplay_stream.py", "_handle_stream_reconnection", "Sound.MENU_VOX_STATUS_CANCELLED"),
     ("teams_base.py", "_countdown", "Sound.SFX_BEEP_LOUD"),
     ("teams_base.py", "_countdown", "Sound.SFX_START3"),
     ("teams_base.py", "_play_team_victory_sound", "sound"),

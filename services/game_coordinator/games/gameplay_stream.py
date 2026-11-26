@@ -11,6 +11,7 @@ import grpc
 
 from lib.types import Sound
 from services.game_coordinator.games import base as _base
+from services.game_coordinator.games import sound_priority
 from services.game_coordinator.games.base import (
     DEAD_PLAYER_COLOR,
     logger,
@@ -357,7 +358,7 @@ class GameplayStreamMixin:
         """
         if attempt > max_attempts:
             logger.error(f"Gameplay stream failed after {max_attempts} reconnect attempts, ending game with no winner")
-            await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=3)
+            await self._play_sound(Sound.MENU_VOX_STATUS_CANCELLED, priority=sound_priority.CRITICAL)
             raise GameplayStreamLostError(f"gameplay_stream_lost: {error!r}") from error
 
         backoff = attempt * self._RECONNECT_BACKOFF_S  # Linear backoff: 1s, 2s, 3s
