@@ -760,6 +760,14 @@ class FeedbackManager(ShieldEffectsMixin, ControllerEffectsBase):
         await self._stop_identify_rumble(serial)
         return True
 
+    async def cancel_low_battery(self, serial: str) -> bool:
+        """End a running lobby low-battery blink (UC-002 BR-010: a game claims the controller)."""
+        active = self.active_effects.get(serial)
+        if active is None or active.effect_type != controller_manager_pb2.GAME_EFFECT_LOW_BATTERY:
+            return False
+        await self.cancel_effect(serial)
+        return True
+
     async def _stop_identify_rumble(self, serial: str) -> None:
         vibration = self.vibration_tasks.pop(serial, None)
         if vibration is not None:

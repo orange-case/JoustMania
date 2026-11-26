@@ -52,11 +52,14 @@ def make_real_servicer(writer_factory=None):
         patch("services.menu.menu_setup.AudioHelper", autospec=True),
         patch("services.menu.menu_setup.EventPublisher", autospec=True),
         patch("services.menu.menu_setup.ControllerEventLoop", autospec=True),
-        patch("services.menu.menu_setup.IdleMonitor", autospec=True),
+        patch("services.menu.menu_setup.IdleMonitor", autospec=True) as idle_monitor_cls,
     ):
         from services.menu.servicer import MenuServicer
 
-        return MenuServicer()
+        servicer = MenuServicer()
+        # The autospec class, so a test can check what build_menu constructed the monitor with.
+        servicer.idle_monitor_cls = idle_monitor_cls
+        return servicer
 
 
 async def cancel_background_tasks(servicer) -> None:

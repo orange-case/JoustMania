@@ -1,4 +1,4 @@
-"""The lobby's low-battery blink and the pad's LOW count (UC-002 A8, BR-009).
+"""The lobby's low-battery blink and the pad's LOW count (UC-002 A8, BR-010).
 
 The idle monitor starts and stops the warner, so it runs exactly while the lobby does.
 """

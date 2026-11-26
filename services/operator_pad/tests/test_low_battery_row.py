@@ -1,4 +1,4 @@
-"""The `START` page's read-only `LOW` row (UC-016 BR-006; UC-002 A8, BR-009)."""
+"""The `START` page's read-only `LOW` row (UC-016 BR-006; UC-002 A8, BR-010)."""
 
 import pytest
 
@@ -10,7 +10,7 @@ START = PAGES.index("START")
 
 
 @pytest.mark.uc("UC-016", br=["BR-006"])
-@pytest.mark.uc("UC-002", flow="A8", br=["BR-009"])
+@pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
 @pytest.mark.parametrize("version", [2, 3, 4])
 @pytest.mark.parametrize(
     ("status", "expected"),

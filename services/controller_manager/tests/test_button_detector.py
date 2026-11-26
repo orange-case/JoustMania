@@ -298,6 +298,38 @@ class TestButtonTransitionDetection:
         assert event.battery == 4
 
     @patch("services.controller_manager.button_detector.metrics")
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+    def test_an_empty_battery_is_reported_and_an_unread_one_is_not(self, _mock_metrics):
+        publisher = autospec_publisher()
+        detector = ButtonDetector(publisher)
+        detector._subscribers = {"sub1": autospec_queue()}
+        tracked = {"EMPTY": {"battery": 0}, "UNREAD": {}}
+        for serial in tracked:
+            detector.detect_transitions_from_state(serial, {}, tracked)
+        publisher.reset_mock()
+
+        for serial in tracked:
+            detector.detect_transitions_from_state(serial, {ButtonKey.MOVE: True}, tracked)
+
+        events = {c.args[1].serial: c.args[1] for c in publisher.publish_to_subscribers.call_args_list}
+        assert (events["EMPTY"].battery, events["EMPTY"].battery_reported) == (0, True)
+        assert events["UNREAD"].battery_reported is False
+
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+    def test_a_connect_with_a_read_battery_is_reported_and_a_disconnect_is_not(self):
+        publisher = autospec_publisher()
+        detector = ButtonDetector(publisher)
+        detector._subscribers = {"sub1": autospec_queue()}
+
+        detector.publish_connection_event("S", is_connect=True, battery=0)
+        connect = publisher.publish_to_subscribers.call_args.args[1]
+        detector.publish_connection_event("S", is_connect=False)
+        disconnect = publisher.publish_to_subscribers.call_args.args[1]
+
+        assert (connect.battery, connect.battery_reported) == (0, True)
+        assert disconnect.battery_reported is False
+
+    @patch("services.controller_manager.button_detector.metrics")
     def test_state_persists_after_transition(self, _mock_metrics):
         """Button state is updated after transition detection."""
         publisher = autospec_publisher()

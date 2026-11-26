@@ -111,6 +111,10 @@ def build_menu(servicer) -> None:
     servicer.idle_handler = IdleHandler()
     servicer.state_manager.register_handler(servicer.idle_handler)
 
+    servicer.low_battery_warner = LowBatteryWarner(
+        state_manager=servicer.state_manager,
+        send_effect=lambda serial, effect: servicer.led.send_game_effect(serial, effect),
+    )
     servicer.idle_monitor = IdleMonitor(
         state_manager=servicer.state_manager,
         get_idle_enabled=lambda: servicer.system_client.get_boolean_value("idle.enabled", True),
@@ -118,10 +122,7 @@ def build_menu(servicer) -> None:
         get_sentinel_count=lambda: servicer.system_client.get_integer_value("sentinel.count", 2),
         get_rotation_minutes=lambda: servicer.system_client.get_integer_value("sentinel.rotation_minutes", 5),
         get_sentinel_animation=lambda: read_sentinel_animation(servicer.system_client),
-        low_battery_warner=LowBatteryWarner(
-            state_manager=servicer.state_manager,
-            send_effect=lambda serial, effect: servicer.led.send_game_effect(serial, effect),
-        ),
+        low_battery_warner=servicer.low_battery_warner,
     )
 
     # Wire idle handler's wake callback to idle monitor

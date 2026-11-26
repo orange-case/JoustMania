@@ -174,7 +174,7 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-002", flow="A8", br=["BR-009"])
+@pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
 @pytest.mark.uc("UC-016", br=["BR-006"])
 async def test_status_counts_connected_controllers_with_a_low_battery(menu):
     menu.state_manager.controller_states = {
