@@ -99,6 +99,9 @@ class TargetingFlagClient:
 class AgentStub:
     """Agent-domain client: everything allowed, generous budget."""
 
+    def get_boolean_value(self, key, default, _ctx=None):
+        return True if key == "enabled" else default
+
     def get_integer_value(self, key, default, _ctx=None):
         if key == "policy.max_interventions_per_minute":
             return 50

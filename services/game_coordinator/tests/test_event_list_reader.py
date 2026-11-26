@@ -75,6 +75,9 @@ class PerGameFlagClient:
 
 
 class AgentStub:
+    def get_boolean_value(self, key, default, _ctx=None):
+        return True if key == "enabled" else default
+
     def get_integer_value(self, key, default, _ctx=None):
         return {"policy.coordinator_backstop_per_minute": 1000, "policy.battery_threshold": 0}.get(key, default)
 

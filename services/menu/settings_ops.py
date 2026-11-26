@@ -1,6 +1,6 @@
 """Settings core of the operator pad commands (#2050, UC-015).
 
-The pad's ``ProcessInput`` commands (services.md §3.1) land here: the force-start
+The pad's ``ProcessInput`` commands (services.md Â§3.1) land here: the force-start
 roster with ghost pruning (UC-014), the clamped setting step, the agent level
 ladder, the kill switch and resume of UC-015 BR-002 / BR-003, the backend write,
 and the voice tables. A refusal is an error code, not a log line.
@@ -31,10 +31,9 @@ from lib.flag_service_writer import (
 )
 from lib.setting_ladders import (
     AGENT_POLICY_LEVELS,
-    AGENT_RESUME_FALLBACK_LEVEL,
     AGENT_ROW_LADDERS,
     AGENT_ROW_OPTIONS,
-    AGENT_SAVED_LEVELS,
+    AGENT_STATE_LADDER,
     AUTOMATIC,
     AUTOMATIC_OPTIONS,
     BACKENDS,
@@ -57,6 +56,7 @@ from lib.types import Sound
 from lib.voice_prompts import (
     AGENT_LEVEL_VOICES,
     AGENT_SWITCH_VOICES,
+    AGENT_WATCHING_VOICE,
     AUTOMATIC_VOICE,
     FORCE_ALL_START_VOICES,
     INSTRUCTIONS_VOICES,
@@ -80,7 +80,7 @@ logger = logging.getLogger(__name__)
 AGENT_POLICY_FLAG = "interventions_allowed"
 # UC-015 BR-001: the pad also writes the kill switch and the write gate (in memory only) and the backend (persisted).
 AGENT_ENABLED_FLAG = "enabled"
-# UC-015 BR-003 (#2093): the agent's write gate (FR-051); only the resume writes it, in memory only.
+# UC-016 BR-012: the agent's write gate (FR-051); only the agent switch writes it, in memory only.
 AGENT_WRITE_GATE_FLAG = "interventions_enabled"
 DECISION_BACKEND_FLAG = "decision.backend"
 # UC-015 BR-018 (#2215): the shield mode the pad's K6 layer steps; a persisted admin value of the `game` set.
@@ -89,22 +89,19 @@ SHIELD_ACTIVATION_FLAG = "shield.activation"
 # Ladders (UC-015 BR-004, BR-019): one source with the pad's preview, lib/setting_ladders.py (#2106).
 DECISION_BACKENDS = tuple(BACKENDS)
 
-# --- Error codes (UC-015 BR-012, services.md §3.1) ------------------------------------------
+# --- Error codes (UC-015 BR-012, services.md Â§3.1) ------------------------------------------
 
 GAME_ACTIVE = "game_active"
 AT_LIMIT = "at_limit"
 FLAG_SERVICE_UNAVAILABLE = "flag_service_unavailable"
-PARTIAL_PREFIX = "partial:"
-FAILED = "failed"
 STALE = "stale"
 BAD_OPTION = "bad_option"
-# agent_switch reply when every write (or the no-op of UC-015 A9) succeeded.
 OK = "ok"
 
 
 def is_failure(error: str | None) -> bool:
     """A failed write (UC-015 A3): the error codes that get the failure cue (BR-009)."""
-    return bool(error) and (error in (FLAG_SERVICE_UNAVAILABLE, FAILED) or error.startswith(PARTIAL_PREFIX))
+    return error == FLAG_SERVICE_UNAVAILABLE
 
 
 # --- Voice tables ---------------------------------------------------------------------------
@@ -191,14 +188,14 @@ STEP_OPTIONS: dict[str, _Option] = {
 # UC-015 A1: refused with game_active while the game lifecycle is live.
 LOBBY_ONLY_OPTIONS = frozenset(name for name, opt in STEP_OPTIONS.items() if opt.lobby_only)
 DIRECTIONS = {"up": True, "down": False}
-AGENT_SWITCH_DIRECTIONS = ("stop", "resume")
+AGENT_SWITCH_DIRECTIONS = ("stop",)
 # UC-016 BR-014: `from` is required where a step or reset can raise what the agent may do or spend, so a
 # value changed under the hold never turns the change the pad judged into an unconfirmed raise.
 FROM_REQUIRED_OPTIONS = RAISE_LADDER_OPTIONS
 # The agent rows written in memory (writer `menu`, no persist field); `inference.backend` is persisted.
 AGENT_MEMORY_ROWS = frozenset({GOAL_OPTION, RATE_OPTION, GROUP_OPTION, EFFORT_OPTION, BRIEF_OPTION})
 
-# --- reset_setting (UC-016 A8, BR-013; services.md §3.1) ---------------------------------------
+# --- reset_setting (UC-016 A8, BR-013; services.md Â§3.1) ---------------------------------------
 
 # A reset of these clears the operator value, exactly as their `automatic` rung.
 RESET_AUTOMATIC_OPTIONS = ("sensitivity", "num_teams", SHIELD_ACTIVATION_FLAG)
@@ -231,13 +228,11 @@ RESETTABLE_OPTIONS = frozenset(
 RESET_LOBBY_ONLY_OPTIONS = frozenset(
     {"sensitivity", "num_teams", SHIELD_ACTIVATION_FLAG, "game_instructions", "force_all_start", GOAL_OPTION}
 )
-INTERVENTIONS_SWITCH_STATES = ("on", "off")
 # GetMenuStatus.pad_commands: what a pad may send this menu (an older menu answers unknown commands with success).
 PAD_CAPABILITIES = (
     "reset_setting",
     "reset_setting.from",
-    "interventions_switch",
-    "agent_switch.only_if_stopped",
+    "agent_state",
     "step_setting.from",
     "set_backend.from",
     "reset_setting.from:decision.backend",
@@ -251,26 +246,22 @@ def _layer_variant(view: dict, layer: str) -> str | None:
     return (value.get("variant") or None) if isinstance(value, dict) else None
 
 
-def _lower_level(saved: str, live: str) -> str:
-    """The lower of the saved and the live level by ladder rank; a live level off the ladder caps nothing."""
-    if live not in AGENT_POLICY_LEVELS or live == "none":
-        return saved
-    return min(saved, live, key=AGENT_POLICY_LEVELS.index)
+def agent_state_of(enabled: str | None, gate: str | None) -> str | None:
+    """UC-016 BR-011: `off` (enabled off), `watch` (gate off) or `on`; None when a flag is unreadable."""
+    if enabled == "off":
+        return "off"
+    if enabled != "on" or gate not in ("on", "off"):
+        return None
+    return "on" if gate == "on" else "watch"
 
 
-def reset_target(option: str, view: dict | None, enabled: str | None) -> str | None:
-    """What a reset of a RESET_DEFAULT_OPTIONS option puts in force (a stopped agent's level: saves); None = unknown.
+def reset_target(view: dict | None) -> str | None:
+    """What a reset of a RESET_DEFAULT_OPTIONS option puts in force; None = unknown.
 
     The one computation behind both `reset_setting` and `setting_defaults` (decision D2).
     """
     if view is None:
         return None
-    if option == "agent_level":
-        if enabled is None:
-            return None
-        if enabled != "on" or view.get("effective_default") == "none":
-            baseline = view.get("baseline_default")
-            return baseline if baseline in AGENT_SAVED_LEVELS else AGENT_RESUME_FALLBACK_LEVEL
     return (
         _layer_variant(view, "stack_overlay")
         or _layer_variant(view, "real_overlay")
@@ -278,7 +269,7 @@ def reset_target(option: str, view: dict | None, enabled: str | None) -> str | N
     )
 
 
-# --- The agent rows' canonical values (services.md §3.1, iteration 4) ------------------------------
+# --- The agent rows' canonical values (services.md Â§3.1, iteration 4) ------------------------------
 
 _MISSING = object()
 
@@ -351,7 +342,7 @@ def row_reset_target(option: str, view: dict | None) -> str | None:
     if view is None:
         return None
     if option == RETRO_BACKEND_OPTION:
-        return reset_target(option, view, None)
+        return reset_target(view)
     in_force = row_in_force(option, view)
     if not _menu_owns_stack(view) or in_force == BRIEF_CUSTOM:
         return in_force
@@ -380,7 +371,7 @@ class Result:
 
 
 class SettingsOps:
-    """The settings core; one instance per menu, so the saved agent level is menu memory (BR-003)."""
+    """The settings core; one instance per menu."""
 
     def __init__(
         self,
@@ -406,11 +397,7 @@ class SettingsOps:
         self._settings_lock = asyncio.Lock()
         # GetMenuStatus.agent_operator_brief_variant from the background read; None = unknown.
         self.brief_variant: str | None = None
-        # UC-015 BR-002 / BR-003: the level a resume restores; lost on a menu restart.
-        self.saved_agent_level: str | None = None
-        # The write gate the stop found (`off` when unreadable); the resume restores it. None = not remembered.
-        self.saved_agent_gate: str | None = None
-        # Serializes the kill, the resume and the ladder, so a saved level is never read half-written.
+        # Serializes the agent's read-then-write commands (the switch's `from` check, the ladder).
         self._agent_lock = asyncio.Lock()
         # UC-015 BR-018 (#2222): the operator's persisted value of each setting with an `automatic` rung as
         # last read from the flag service (`automatic` when none; a missing key = unknown), for
@@ -428,13 +415,6 @@ class SettingsOps:
     @property
     def state_manager(self) -> StateManager | None:
         return self._get_state_manager()
-
-    def _observe_agent(self, level: str | None, enabled: str | None) -> None:
-        """Running (enabled on, a level set) means any remembered stop is stale: forget it, so a later
-        resume can never restore a level or gate the agent left since (it falls back to ambient)."""
-        if enabled == "on" and level not in (None, "none"):
-            self.saved_agent_level = None
-            self.saved_agent_gate = None
 
     def _defaults_changed(self, option: str) -> None:
         """A write moved ``option``'s reset target: unknown until the next background read."""
@@ -539,14 +519,13 @@ class SettingsOps:
             return None
         return view.get("effective_default") if view else None
 
-    def _read_agent_state(self) -> tuple[str | None, str | None]:
-        """(level, enabled); either is None when unreadable. Blocking."""
+    def _read_agent_level(self) -> str | None:
+        """The level, None when unreadable. Blocking."""
         try:
-            level = self.current_agent_level()
+            return self.current_agent_level()
         except Exception as e:
             logger.warning(f"Reading agent/{AGENT_POLICY_FLAG} failed: {e}")
-            level = None
-        return level, self._agent_enabled()
+            return None
 
     @staticmethod
     def _write(writer, key: str, variant: str) -> bool:
@@ -613,25 +592,11 @@ class SettingsOps:
         return Result(current, new)
 
     async def _step_agent_level(self, forward: bool, steps: int, from_level: str | None = None) -> Result:
-        """The level ladder of BR-004; while the agent is stopped only the saved level moves (BR-003)."""
+        """The level ladder of BR-004: the live level, whatever `enabled` is (a tuning setting, not a kill)."""
         async with self._agent_change():
-            level, enabled = await asyncio.to_thread(self._read_agent_state)
-            if level is None or enabled is None:
-                # Fail closed in both directions: with the switch unreadable it is unknown whether
-                # the step moves the live level or the saved one, so nothing is written (BR-010).
+            level = await asyncio.to_thread(self._read_agent_level)
+            if level is None:
                 return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
-            # BR-002 "stopped": enabled off or level none; only the saved level moves (BR-003).
-            if enabled != "on" or level == "none":
-                old = self.saved_agent_level or AGENT_RESUME_FALLBACK_LEVEL
-                if from_level is not None and from_level != old:
-                    return Result(old, None, STALE)
-                new = _ladder_step("agent_level", AGENT_SAVED_LEVELS, old, forward, steps)
-                if new == old:
-                    return Result(old, old, AT_LIMIT)
-                self.saved_agent_level = new
-                return Result(old, new)
-
-            self._observe_agent(level, enabled)
             if from_level is not None and from_level != level:
                 return Result(level, None, STALE)
             new = _ladder_step("agent_level", AGENT_POLICY_LEVELS, level, forward, steps)
@@ -640,11 +605,6 @@ class SettingsOps:
             writer = self.state_manager.agent_settings_writer
             if not await asyncio.to_thread(self._write, writer, AGENT_POLICY_FLAG, new):
                 return Result(level, None, FLAG_SERVICE_UNAVAILABLE)
-            if new == "none" and level in AGENT_SAVED_LEVELS:
-                # BR-002 / BR-003: a step down to "none" stops the agent like the kill does, so a
-                # resume restores the level (and gate) it left.
-                self.saved_agent_level = level
-                self.saved_agent_gate = await asyncio.to_thread(self._gate_at_stop)
             return Result(level, new)
 
     # --- settings with an `automatic` rung (UC-015 step 9, BR-018, #2222) -----------------------
@@ -683,22 +643,16 @@ class SettingsOps:
             logger.warning(f"Reading {key} failed: {e}")
             return None
 
-    def _read_setting_defaults(self) -> tuple[dict[str, str], tuple[str | None, str | None]]:
-        """reset_target of every RESET_DEFAULT_OPTIONS option (an unknown one left out), and the agent's
-        (level, enabled) as read for it. Blocking."""
+    def _read_setting_defaults(self) -> dict[str, str]:
+        """reset_target of every RESET_DEFAULT_OPTIONS option (an unknown one left out). Blocking."""
         values = {}
-        agent: tuple[str | None, str | None] = (None, None)
         for option in RESET_DEFAULT_OPTIONS:
             if option in AGENT_ROW_OPTIONS:
                 continue  # `_read_agent_rows`
-            enabled = self._agent_enabled() if option == "agent_level" else None
-            view = self._default_view(option)
-            if option == "agent_level":
-                agent = (view.get("effective_default") if view else None, enabled)
-            target = reset_target(option, view, enabled)
+            target = reset_target(self._default_view(option))
             if target:
                 values[option] = target
-        return values, agent
+        return values
 
     def _read_agent_rows(self) -> tuple[dict[str, str], str | None]:
         """One read of the `agent` set for the agent rows: their reset targets (an unknown one left out) and
@@ -725,15 +679,14 @@ class SettingsOps:
         defaults_generation = self._defaults_generation
         self._operator_read_at = time.monotonic()
         values = await asyncio.to_thread(self._read_all_operators)
-        defaults, agent = await asyncio.to_thread(self._read_setting_defaults)
+        defaults = await asyncio.to_thread(self._read_setting_defaults)
         row_targets, brief = await asyncio.to_thread(self._read_agent_rows)
         if generation == self._operator_generation:
             self.operator_settings = values  # else a commit landed during the read: its value stands
         if defaults_generation == self._defaults_generation:
-            # Only when no agent command overlapped the read: a stop that landed meanwhile must keep its memory.
+            # Only when no agent command overlapped the read: its change may have moved a target.
             self.setting_defaults = {**defaults, **row_targets}
             self.brief_variant = brief
-            self._observe_agent(*agent)
 
     def pad_commands(self) -> list[str]:
         """GetMenuStatus.pad_commands: the commands, guard keys and agent-row options this menu takes."""
@@ -892,107 +845,47 @@ class SettingsOps:
                 return Result(current, None, FLAG_SERVICE_UNAVAILABLE)
             return Result(current, target)
 
-    # --- agent_switch (UC-015 step 6, A3, A9, BR-002, BR-003) --------------------------------
+    # --- agent_switch (UC-015 step 6, A3, A9, BR-002) ----------------------------------------
 
-    async def agent_switch(self, direction: str, only_if_stopped: bool = False) -> Result:
-        """Stop or resume the agent; ``error`` is ``ok``, ``partial:<key>``, ``failed``, ``stale`` or ``bad_option``.
-
-        ``only_if_stopped`` (resume only): refuse with ``stale``, nothing written, unless the agent is fully stopped.
-        """
+    async def agent_switch(self, direction: str) -> Result:
+        """The stop: `enabled` off and nothing else, never read first (idempotent, A9)."""
         if direction not in AGENT_SWITCH_DIRECTIONS:
             return Result(None, None, BAD_OPTION)
         async with self._agent_change():
-            if direction == "stop":
-                return await self._stop_agent()
-            return await self._resume_agent(only_if_stopped)
+            if not await asyncio.to_thread(self._write, self.agent_memory_writer, AGENT_ENABLED_FLAG, "off"):
+                return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
+            return Result(None, "off")
 
-    def _gate_at_stop(self) -> str:
-        """The write gate to remember at a stop: an unreadable gate counts as closed. Blocking."""
-        gate = self._agent_switch_flag(AGENT_WRITE_GATE_FLAG)
-        return gate if gate in ("on", "off") else "off"
+    # --- agent_state (UC-016 BR-012, BR-014; UC-015 BR-003) -----------------------------------
 
-    async def _stop_agent(self) -> Result:
-        level, enabled = await asyncio.to_thread(self._read_agent_state)
-        if enabled == "off" or level == "none":
-            # A9: already stopped; the saved level is not touched.
-            return Result("stopped", "stopped", OK)
-        self._observe_agent(level, enabled)
-        if level in AGENT_SAVED_LEVELS:
-            self.saved_agent_level = level
-        # BR-002 order: the level first (it blocks the agent at the coordinator gate and ends
-        # remote decide calls), then the kill switch. Both are attempted whatever the first did.
-        level_ok = await asyncio.to_thread(
-            self._write, self.state_manager.agent_settings_writer, AGENT_POLICY_FLAG, "none"
-        )
-        enabled_ok = await asyncio.to_thread(self._write, self.agent_memory_writer, AGENT_ENABLED_FLAG, "off")
-        # Read after the kill writes so the extra read never delays them; the stop does not write the gate.
-        self.saved_agent_gate = await asyncio.to_thread(self._gate_at_stop)
-        return Result(
-            "running", "stopped", _writes_result([(AGENT_POLICY_FLAG, level_ok), (AGENT_ENABLED_FLAG, enabled_ok)])
-        )
+    def _read_agent_switch_state(self) -> str | None:
+        """The switch state from the flag service, None when unreadable. Blocking."""
+        return agent_state_of(self._agent_enabled(), self._agent_switch_flag(AGENT_WRITE_GATE_FLAG))
 
-    async def _resume_agent(self, only_if_stopped: bool = False) -> Result:
-        level, enabled = await asyncio.to_thread(self._read_agent_state)
-        if enabled is None or (only_if_stopped and level is None):
-            return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
-        if level is None:
-            # The resume is the permissive direction: never enable an agent whose level is unknown.
-            return Result(None, None, FAILED)
-        if enabled == "on" and level != "none":
-            self._observe_agent(level, enabled)
-            if only_if_stopped:
-                return Result("running", "running", STALE)
-            # A9: already running only while the write gate is open too (BR-002, #2093); a closed or
-            # unreadable gate is opened (an unguarded caller of a not fully stopped agent, as before #2747).
-            gate = await asyncio.to_thread(self._agent_switch_flag, AGENT_WRITE_GATE_FLAG)
-            if gate == "on":
-                return Result("running", "running", OK)
-            return await self._resume_writes(None, "on")
-        # As at the stop, never more: the saved level (also over a level raised meanwhile) and the remembered
-        # gate (left as it stands when nothing is remembered, after a menu restart), each capped by what is
-        # live now, so a memory the agent has left since can only lower it.
-        target = _lower_level(self.saved_agent_level or AGENT_RESUME_FALLBACK_LEVEL, level)
-        gate = self.saved_agent_gate
-        if gate == "on" and await asyncio.to_thread(self._agent_switch_flag, AGENT_WRITE_GATE_FLAG) != "on":
-            gate = "off"
-        return await self._resume_writes(target, gate)
-
-    async def _resume_writes(self, level: str | None, gate: str | None) -> Result:
-        level_ok = gate_ok = None
-        # BR-003 order: the level, then the write gate, then enabled last, so enabled is never switched
-        # on before the gate. Every write is attempted whatever an earlier one did (A3).
-        if level is not None:
-            level_ok = await asyncio.to_thread(
-                self._write, self.state_manager.agent_settings_writer, AGENT_POLICY_FLAG, level
-            )
-        if gate is not None:
-            gate_ok = await asyncio.to_thread(self._write, self.agent_memory_writer, AGENT_WRITE_GATE_FLAG, gate)
-        enabled_ok = await asyncio.to_thread(self._write, self.agent_memory_writer, AGENT_ENABLED_FLAG, "on")
-        result = _writes_result(
-            [(AGENT_POLICY_FLAG, level_ok), (AGENT_WRITE_GATE_FLAG, gate_ok), (AGENT_ENABLED_FLAG, enabled_ok)]
-        )
-        if result == OK:
-            self.saved_agent_level = None
-            self.saved_agent_gate = None
-        return Result("stopped", "running", result)
-
-    # --- interventions_switch (UC-016 BR-012, BR-014) -----------------------------------------
-
-    async def interventions_switch(self, state: str) -> Result:
-        """Write the write gate in memory; never ``enabled`` or the level. ``stale`` for a fully stopped agent."""
-        if state not in INTERVENTIONS_SWITCH_STATES:
+    async def agent_state(self, state: str, from_state: str | None) -> Result:
+        """The `AGENT` row 1 switch: `off` is the stop; `watch` / `on` write the gate, then `enabled` on."""
+        if state not in AGENT_STATE_LADDER or from_state not in AGENT_STATE_LADDER:
             return Result(None, None, BAD_OPTION)
         async with self._agent_change():
-            level, enabled = await asyncio.to_thread(self._read_agent_state)
-            if level is None or enabled is None:
+            now = await asyncio.to_thread(self._read_agent_switch_state)
+            if now is None:
                 return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
-            if enabled != "on" or level == "none":
-                # Its resume restores the gate of the stop; a switch now would be overridden.
-                return Result(None, None, STALE)
-            self._observe_agent(level, enabled)
-            if not await asyncio.to_thread(self._write, self.agent_memory_writer, AGENT_WRITE_GATE_FLAG, state):
-                return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
-            return Result(None, state)
+            if now != from_state:
+                return Result(now, None, STALE)
+            if now == state:
+                return Result(now, state, OK)
+            writer = self.agent_memory_writer
+            if state == "off":
+                ok = await asyncio.to_thread(self._write, writer, AGENT_ENABLED_FLAG, "off")
+            else:
+                # The gate first, so `enabled` is never on before it (#2093); a failure stops here.
+                gate = "on" if state == "on" else "off"
+                ok = await asyncio.to_thread(self._write, writer, AGENT_WRITE_GATE_FLAG, gate)
+                if ok and now == "off":
+                    ok = await asyncio.to_thread(self._write, writer, AGENT_ENABLED_FLAG, "on")
+            if not ok:
+                return Result(now, None, FLAG_SERVICE_UNAVAILABLE)
+            return Result(now, state)
 
     # --- reset_setting (UC-016 A8, BR-013) ----------------------------------------------------
 
@@ -1027,7 +920,7 @@ class SettingsOps:
         """One clear of the operator's persisted value; ``from_value`` (decision.backend) must be the value in force,
         so a backend changed under the hold never turns a no-op into an unconfirmed free-to-paid reset (BR-014)."""
         view = await asyncio.to_thread(self._default_view, option)
-        target = reset_target(option, view, None)
+        target = reset_target(view)
         if target is None:
             return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
         if expect is not None and expect != target:
@@ -1048,8 +941,7 @@ class SettingsOps:
 
     async def _reset_agent_level(self, expect: str, from_level: str | None = None) -> Result:
         view = await asyncio.to_thread(self._default_view, "agent_level")
-        enabled = await asyncio.to_thread(self._agent_enabled)
-        target = reset_target("agent_level", view, enabled)
+        target = reset_target(view)
         if target is None:
             return Result(None, None, FLAG_SERVICE_UNAVAILABLE)
         if target not in AGENT_POLICY_LEVELS:
@@ -1057,24 +949,10 @@ class SettingsOps:
         if expect != target:
             return Result(None, None, STALE)
         level = view.get("effective_default")
-        stopped = enabled != "on" or level == "none"
-        base = (self.saved_agent_level or AGENT_RESUME_FALLBACK_LEVEL) if stopped else level
-        if from_level is not None and from_level != base:
+        if from_level is not None and from_level != level:
             # The level dropped (or rose) under the hold: what the pad judged a lowering may now be a raise.
             return Result(None, None, STALE)
-        if stopped:
-            # Stopped: only the saved level moves, so a reset never resumes (UC-015 BR-003).
-            old = self.saved_agent_level or AGENT_RESUME_FALLBACK_LEVEL
-            if old == target:
-                return Result(old, target, OK)
-            self.saved_agent_level = target
-            return Result(old, target)
-        self._observe_agent(level, enabled)
         result = await self._clear_admin("agent_level", view, target)
-        if result.error is None and target == "none" and level in AGENT_SAVED_LEVELS:
-            # As a ladder step down to none: the agent is now stopped, so a resume restores what it left.
-            self.saved_agent_level = level
-            self.saved_agent_gate = await asyncio.to_thread(self._gate_at_stop)
         return Result(level, result.new, result.error)
 
     async def _reset_automatic(self, option: str, expect: str | None) -> Result:
@@ -1167,16 +1045,28 @@ class SettingsOps:
                 voice = SHIELD_ACTIVATION_VOICES.get(variant)
                 if voice is not None:
                     await audio.play_voice(voice)
-            elif option == "interventions_switch":
-                voice = INTERVENTIONS_VOICES.get(variant)  # UC-016 BR-012, UC-031 BR-007
-                if voice is not None:
-                    await audio.play_voice(voice)
             elif option == "agent_switch":
                 voice = AGENT_SWITCH_VOICES.get(variant)
                 if voice is not None:
                     await audio.play_voice(voice)
         except Exception as e:
             logger.warning(f"Announcing {option}={variant} failed: {e}")
+
+    async def announce_agent_state(self, old: str | None, new: str) -> None:
+        """UC-016 BR-012: the stop's or the resume's line across `off`, "Interventions on/off" between the others."""
+        if new == "off":
+            voice = AGENT_SWITCH_VOICES["stop"]
+        elif old == "off":
+            voice = AGENT_SWITCH_VOICES["resume"] if new == "on" else AGENT_WATCHING_VOICE
+        else:
+            voice = INTERVENTIONS_VOICES["on" if new == "on" else "off"]
+        manager = self.state_manager
+        if manager is None:
+            return
+        try:
+            await manager.audio.play_voice(voice)
+        except Exception as e:
+            logger.warning(f"Announcing agent_state={new} failed: {e}")
 
     async def show_mode_on_lobby(self, game_mode: str) -> None:
         """UC-015 BR-015: a short pulse of the mode's colour on every CONNECTED or READY controller.
@@ -1233,18 +1123,3 @@ class SettingsOps:
             await manager.audio.play_sound(FAILURE_CUE_SOUND)
         except Exception as e:
             logger.warning(f"Failure cue failed: {e}")
-
-
-def _writes_result(writes: list[tuple[str, bool | None]]) -> str:
-    """UC-015 A3 result of ordered writes (None = not attempted).
-
-    ``ok`` when every attempted write succeeded, ``failed`` when none did, else
-    ``partial:<key>`` naming the first key in write order that failed.
-    """
-    attempted = [(key, ok) for key, ok in writes if ok is not None]
-    failed = [key for key, ok in attempted if not ok]
-    if not failed:
-        return OK
-    if len(failed) == len(attempted):
-        return FAILED
-    return PARTIAL_PREFIX + failed[0]

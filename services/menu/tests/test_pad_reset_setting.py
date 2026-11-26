@@ -8,13 +8,13 @@ value, real overlay, baseline).
 import pytest
 
 from lib.types import Sound
-from lib.voice_prompts import AGENT_LEVEL_VOICES, AUTOMATIC_VOICE, INSTRUCTIONS_VOICES
+from lib.voice_prompts import AUTOMATIC_VOICE, INSTRUCTIONS_VOICES
 from proto import menu_pb2
 from services.menu import settings_ops
 from services.menu.settings_ops import Result
 from services.menu.tests import test_pad_commands
 from services.menu.tests.test_menu_status import FLAGS, in_process_client
-from services.menu.tests.test_pad_commands import AGENT_LEVELS, BASELINE, failure_cues, live_lifecycle, pad
+from services.menu.tests.test_pad_commands import failure_cues, live_lifecycle, pad
 
 flags = test_pad_commands.flags
 servicer = test_pad_commands.servicer
@@ -259,12 +259,11 @@ async def test_a_reset_never_answers_success_with_an_empty_value(servicer, monke
     "command",
     [
         {"command": "agent_switch", "direction": "stop"},
-        {"command": "agent_switch", "direction": "resume"},
         {"command": "step_setting", "option": "agent_level", "direction": "down"},
         {"command": "reset_setting", "option": "agent_level", "expect": "standard"},
-        {"command": "interventions_switch", "state": "off"},
+        {"command": "agent_state", "state": "off", "from": "watch"},
     ],
-    ids=["stop", "resume", "level-step", "level-reset", "interventions-switch"],
+    ids=["stop", "level-step", "level-reset", "agent-switch"],
 )
 async def test_an_agent_command_makes_the_level_default_unknown(servicer, command):
     servicer.settings_ops.setting_defaults = {"agent_level": "standard", "game_instructions": "off"}
@@ -312,34 +311,17 @@ async def test_agent_level_reset_needs_expect(servicer, flags):
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
-@pytest.mark.uc("UC-015", br=["BR-003"])
-@pytest.mark.parametrize(("level", "enabled"), [("full", "off"), ("none", "on")])
-async def test_a_stopped_agents_reset_moves_only_the_saved_level(servicer, flags, level, enabled):
-    """Never clears, never resumes: the saved level becomes the baseline default (standard)."""
-    operator_set(flags, LEVEL, level)
-    flags.values[ENABLED] = enabled
-    servicer.settings_ops.saved_agent_level = "full"
+@pytest.mark.uc("UC-015", br=["BR-002", "BR-004"])
+async def test_a_stopped_agents_reset_clears_the_live_level_and_never_resumes(servicer, flags):
+    operator_set(flags, LEVEL, "full")
+    flags.values[ENABLED] = "off"
 
     reply = await pad(servicer, "reset_setting", option="agent_level", expect="standard")
 
-    assert (reply.success, reply.error, reply.value) == (True, "", "standard")
-    assert (flags.deletes, flags.puts) == ([], [])
-    assert servicer.settings_ops.saved_agent_level == "standard"
-    assert voices(servicer) == [AGENT_LEVEL_VOICES["standard"]]
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
-@pytest.mark.uc("UC-015", br=["BR-003"])
-async def test_a_stopped_agent_with_a_baseline_of_none_saves_ambient(servicer, flags, monkeypatch):
-    monkeypatch.setitem(BASELINE, LEVEL, (AGENT_LEVELS, "none"))
-    flags.values[ENABLED] = "off"
-    servicer.settings_ops.saved_agent_level = "full"
-
-    reply = await pad(servicer, "reset_setting", option="agent_level", expect="ambient")
-
-    assert (reply.success, reply.value) == (True, "ambient")
-    assert servicer.settings_ops.saved_agent_level == "ambient"
+    assert (reply.success, reply.value) == (True, "standard")
+    assert flags.deletes == [(*LEVEL, "persist=true")]
+    assert flags.puts == []
+    assert flags.values[ENABLED] == "off"
 
 
 @pytest.mark.asyncio
@@ -382,35 +364,6 @@ async def test_agent_level_reset_to_a_level_off_the_ladder_is_refused(servicer, 
     assert flags.deletes == []
 
 
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-016", flow="A3", br=["BR-013"])
-async def test_agent_level_reset_is_stale_when_the_agent_stopped_since_the_screen(servicer, flags):
-    """Shown NEW ambient (stack overlay, running); a stop since then makes the target the baseline."""
-    flags.admin[LEVEL] = "full"
-    flags.stack[LEVEL] = "ambient"
-    flags.values[LEVEL] = "ambient"
-    flags.values[ENABLED] = "off"
-
-    reply = await pad(servicer, "reset_setting", option="agent_level", expect="ambient")
-
-    assert (reply.success, reply.error) == (False, "stale")
-    assert servicer.settings_ops.saved_agent_level is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
-@pytest.mark.uc("UC-015", br=["BR-002", "BR-003"])
-async def test_agent_level_reset_down_to_none_saves_the_level_and_gate_it_left(servicer, flags, monkeypatch):
-    monkeypatch.setitem(BASELINE, LEVEL, (AGENT_LEVELS, "none"))
-    operator_set(flags, LEVEL, "full")
-    flags.values[GATE] = "on"
-
-    reply = await pad(servicer, "reset_setting", option="agent_level", expect="none")
-
-    assert (reply.success, reply.value) == (True, "none")
-    assert (servicer.settings_ops.saved_agent_level, servicer.settings_ops.saved_agent_gate) == ("full", "on")
-
-
 # --- setting_defaults (GetMenuStatus field 28) -----------------------------------------------------
 
 
@@ -423,7 +376,7 @@ async def test_agent_level_reset_down_to_none_saves_the_level_and_gate_it_left(s
         ({"admin": "full"}, "standard"),
         ({"admin": "full", "real": "ambient"}, "ambient"),
         ({"admin": "ambient", "stack": "full"}, "full"),
-        ({"enabled": "off", "admin": "full", "real": "ambient"}, "standard"),
+        ({"enabled": "off", "admin": "full", "real": "ambient"}, "ambient"),
     ],
     ids=["baseline", "admin", "real", "stack-masks-admin", "stopped"],
 )
@@ -454,7 +407,6 @@ async def test_setting_defaults_is_what_the_reset_puts_in_force(servicer, flags,
     ("failing", "missing"),
     [
         ({("agent", "decision.backend")}, {"decision.backend"}),
-        ({ENABLED}, {"agent_level"}),
         ({LEVEL}, {"agent_level"}),
     ],
 )
@@ -502,8 +454,7 @@ async def test_status_lists_the_pad_commands_this_menu_understands(servicer):
     assert list(reply.pad_commands) == [
         "reset_setting",
         "reset_setting.from",
-        "interventions_switch",
-        "agent_switch.only_if_stopped",
+        "agent_state",
         "step_setting.from",
         "set_backend.from",
         "reset_setting.from:decision.backend",
@@ -528,12 +479,13 @@ async def test_status_lists_the_pad_commands_this_menu_understands(servicer):
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A9", br=["BR-014"])
 @pytest.mark.parametrize(
-    ("enabled", "saved", "start", "direction"),
-    [("on", None, "standard", "up"), ("off", "full", "full", "down"), ("off", None, "ambient", "up")],
+    ("enabled", "direction"),
+    [("on", "up"), ("off", "down"), ("off", "up")],
 )
-async def test_level_step_from_the_shown_level_commits(servicer, flags, enabled, saved, start, direction):
+async def test_level_step_from_the_shown_level_commits(servicer, flags, enabled, direction):
+    """The live level is NOW whatever the agent's state (UC-015 BR-004)."""
     flags.values[ENABLED] = enabled
-    servicer.settings_ops.saved_agent_level = saved
+    start = "standard"
 
     reply = await pad(servicer, "step_setting", option="agent_level", direction=direction, **{"from": start})
 
@@ -542,16 +494,14 @@ async def test_level_step_from_the_shown_level_commits(servicer, flags, enabled,
 
 @pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A3", br=["BR-014"])
-@pytest.mark.parametrize(("enabled", "saved", "shown"), [("on", None, "ambient"), ("off", "full", "standard")])
-async def test_level_step_from_another_level_is_stale(servicer, flags, enabled, saved, shown):
+@pytest.mark.parametrize("enabled", ["on", "off"])
+async def test_level_step_from_another_level_is_stale(servicer, flags, enabled):
     flags.values[ENABLED] = enabled
-    servicer.settings_ops.saved_agent_level = saved
 
-    reply = await pad(servicer, "step_setting", option="agent_level", direction="up", **{"from": shown})
+    reply = await pad(servicer, "step_setting", option="agent_level", direction="up", **{"from": "ambient"})
 
     assert (reply.success, reply.error) == (False, "stale")
     assert flags.puts == []
-    assert servicer.settings_ops.saved_agent_level == saved
     assert Sound.SFX_BEEP_LOUD not in [c.args[0] for c in servicer.state_manager.audio.play_sound.await_args_list]
 
 
@@ -579,26 +529,13 @@ async def test_level_reset_whose_level_dropped_under_the_hold_is_stale(servicer,
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-016", flow="A3", br=["BR-013", "BR-014"])
-async def test_stopped_agent_level_reset_from_another_saved_level_is_stale(servicer, flags):
-    flags.values[ENABLED] = "off"
-    servicer.settings_ops.saved_agent_level = "ambient"
-
-    reply = await pad(servicer, "reset_setting", option="agent_level", expect="standard", **{"from": "full"})
-
-    assert (reply.success, reply.error) == (False, "stale")
-    assert servicer.settings_ops.saved_agent_level == "ambient"
-
-
-@pytest.mark.asyncio
 @pytest.mark.uc("UC-016", flow="A8", br=["BR-013", "BR-014"])
-@pytest.mark.parametrize(("enabled", "saved", "base"), [("on", None, "full"), ("off", "full", "full")])
-async def test_level_reset_from_the_level_it_replaces_commits(servicer, flags, enabled, saved, base):
+@pytest.mark.parametrize("enabled", ["on", "off"])
+async def test_level_reset_from_the_level_it_replaces_commits(servicer, flags, enabled):
     operator_set(flags, LEVEL, "full")
     flags.values[ENABLED] = enabled
-    servicer.settings_ops.saved_agent_level = saved
 
-    reply = await pad(servicer, "reset_setting", option="agent_level", expect="standard", **{"from": base})
+    reply = await pad(servicer, "reset_setting", option="agent_level", expect="standard", **{"from": "full"})
 
     assert (reply.success, reply.value) == (True, "standard")
 

@@ -1,4 +1,4 @@
-"""GetMenuStatus, lifecycle_generation and the force_start stale check (#2050, UC-015 A5, services.md §3.1).
+"""GetMenuStatus, lifecycle_generation and the pad's force_start (#2050, UC-015, services.md §3.1).
 
 A real MenuServicer (servicer_harness). The flag clients are in-process fakes that resolve from a
 dict; the flag-service writers are autospecs, so a test can prove the snapshot never calls them.
@@ -110,7 +110,7 @@ def held_lifecycle(servicer) -> asyncio.Event:
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5")
+@pytest.mark.uc("UC-015", br=["BR-013"])
 async def test_status_reports_every_field_from_memory_and_the_in_process_clients(menu):
     menu.state = menu_pb2.MenuState.RUNNING
     menu.current_selection = Games.Werewolf
@@ -119,8 +119,6 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         "b": ControllerState.READY,
         "c": ControllerState.CONNECTED,
     }
-    menu.settings_ops.saved_agent_level = "full"
-
     reply = await status(menu)
 
     assert reply == menu_pb2.GetMenuStatusResponse(
@@ -132,7 +130,6 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         connected_count=3,
         agent_enabled=True,
         agent_level="standard",
-        agent_saved_level="full",
         agent_backend="claude",
         sensitivity=3,
         num_teams=4,
@@ -149,8 +146,7 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
         pad_commands=[
             "reset_setting",
             "reset_setting.from",
-            "interventions_switch",
-            "agent_switch.only_if_stopped",
+            "agent_state",
             "step_setting.from",
             "set_backend.from",
             "reset_setting.from:decision.backend",
@@ -188,7 +184,7 @@ async def test_objectives_off_the_five_declared_variants_is_unknown(menu, varian
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5")
+@pytest.mark.uc("UC-015")
 async def test_status_empty_values_when_nothing_is_set_or_resolvable(menu):
     menu.agent_settings_client = in_process_client({})
     menu.user_prefs_client = in_process_client({})
@@ -221,7 +217,7 @@ def details_client(details: FlagEvaluationDetails, flag_key: str = "enabled"):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A10", br=["BR-013"])
+@pytest.mark.uc("UC-015", br=["BR-013"])
 @pytest.mark.parametrize(
     ("details", "expected"),
     [
@@ -264,7 +260,7 @@ async def test_status_agent_enabled_state_tells_unknown_from_off(menu, details, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A10", br=["BR-002", "BR-013"])
+@pytest.mark.uc("UC-015", br=["BR-013"])
 @pytest.mark.parametrize(
     ("details", "expected"),
     [
@@ -293,7 +289,7 @@ async def test_status_reports_the_write_gate_state(menu, details, expected):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5")
+@pytest.mark.uc("UC-015")
 @patch("services.menu.metrics.grpc_request_duration_seconds")
 @patch("services.menu.metrics.grpc_requests_total")
 async def test_status_records_the_grpc_request_metrics(requests_total, duration, menu):
@@ -306,7 +302,7 @@ async def test_status_records_the_grpc_request_metrics(requests_total, duration,
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5")
+@pytest.mark.uc("UC-015")
 @patch("services.menu.metrics.grpc_requests_total")
 async def test_status_counts_a_failed_read_as_an_error(requests_total, menu):
     menu.agent_settings_client.get_boolean_details.side_effect = RuntimeError("provider gone")
@@ -322,7 +318,7 @@ async def test_status_counts_a_failed_read_as_an_error(requests_total, menu):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5")
+@pytest.mark.uc("UC-015")
 async def test_generation_goes_up_on_start_and_on_lobby_restore(menu):
     release = held_lifecycle(menu)
     before = await status(menu)
@@ -341,7 +337,7 @@ async def test_generation_goes_up_on_start_and_on_lobby_restore(menu):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5")
+@pytest.mark.uc("UC-015")
 async def test_generation_changes_in_the_same_step_as_the_lifecycle(menu):
     """A read never pairs a lifecycle state with an older generation, even before any done callback ran."""
     release = held_lifecycle(menu)
@@ -358,7 +354,7 @@ async def test_generation_changes_in_the_same_step_as_the_lifecycle(menu):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5")
+@pytest.mark.uc("UC-015")
 async def test_generation_counts_a_lifecycle_cancelled_before_it_ran(menu):
     held_lifecycle(menu)
     await menu._start_game(serial="a", source="controller")
@@ -371,7 +367,7 @@ async def test_generation_counts_a_lifecycle_cancelled_before_it_ran(menu):
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5")
+@pytest.mark.uc("UC-015")
 async def test_generation_goes_up_on_the_reset_menu_restore(menu):
     """reset_menu cancels a stuck lifecycle and restores the lobby as a new lifecycle task (UC-010 BR-008)."""
     held_lifecycle(menu)
@@ -392,58 +388,12 @@ async def test_generation_goes_up_on_the_reset_menu_restore(menu):
     assert (reply.lifecycle_live, reply.lifecycle_generation) == (False, 4)
 
 
-# --- force_start expected_generation (A5 step 2) ------------------------------------------------
+# --- force_start, the pad's one start (step 2, BR-008) ------------------------------------------
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-012"])
-async def test_force_start_refuses_a_stale_generation(menu):
-    menu.state_manager.controller_states = {"a": ControllerState.READY, "b": ControllerState.READY}
-    state_before = menu.state
-    with live_roster({"a", "b"}), patch.object(menu, "_run_game_lifecycle", autospec=True) as lifecycle:
-        reply = await force_start(menu, expected_generation=2)
-
-    assert (reply.success, reply.error) == (False, "stale")
-    lifecycle.assert_not_called()
-    assert menu._game_lifecycle_task is None
-    assert menu.state == state_before
-    # Nothing changed: no game was requested.
-    assert "game_requested" not in [c.args[0] for c in menu.event_publisher.publish.await_args_list]
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-012"])
-@pytest.mark.parametrize("value", ["two", "1.0", " "])
-async def test_force_start_refuses_a_generation_that_is_not_an_integer(menu, value):
-    with patch.object(menu, "_run_game_lifecycle", autospec=True) as lifecycle:
-        reply = await force_start(menu, expected_generation=value)
-
-    assert (reply.success, reply.error) == (False, "stale")
-    lifecycle.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-008"])
-async def test_force_start_with_the_matching_generation_starts(menu):
-    release = held_lifecycle(menu)
-    await menu._start_game(serial="x", source="controller")
-    release.set()
-    await menu._game_lifecycle_task
-    generation = (await status(menu)).lifecycle_generation
-    menu.state_manager.controller_states = {"a": ControllerState.READY, "b": ControllerState.READY}
-
-    with live_roster({"a", "b"}), patch.object(menu, "_run_game_lifecycle", autospec=True) as lifecycle:
-        reply = await force_start(menu, expected_generation=generation)
-        await menu._game_lifecycle_task
-
-    assert generation == 2
-    assert (reply.success, reply.error) == (True, "")
-    lifecycle.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-008"])
-async def test_force_start_without_a_generation_skips_the_check(menu):
+@pytest.mark.uc("UC-015", flow="main", br=["BR-008"])
+async def test_force_start_starts_with_the_roster(menu):
     menu.state_manager.controller_states = {"a": ControllerState.READY, "b": ControllerState.READY}
     with live_roster({"a", "b"}), patch.object(menu, "_run_game_lifecycle", autospec=True) as lifecycle:
         reply = await force_start(menu)
@@ -451,28 +401,3 @@ async def test_force_start_without_a_generation_skips_the_check(menu):
 
     assert (reply.success, reply.error) == (True, "")
     lifecycle.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-012"])
-async def test_force_start_is_stale_when_a_game_came_and_went_during_the_roster_lookup(menu):
-    """A start and a lobby restore inside the roster lookup leave the lifecycle idle but the generation moved."""
-    menu.state_manager.controller_states = {"a": ControllerState.READY, "b": ControllerState.READY}
-
-    async def roster_lookup(_request, **_kwargs):
-        finished = asyncio.get_running_loop().create_future()
-        finished.set_result(None)
-        menu._game_lifecycle_task = finished
-        return controller_manager_pb2.GetConnectedControllersResponse(connected_serials=["a", "b"])
-
-    stub = create_autospec(controller_manager_pb2_grpc.ControllerManagerServiceStub, instance=True)
-    stub.GetConnectedControllers = AsyncMock(side_effect=roster_lookup)
-    with (
-        patch("proto.controller_manager_pb2_grpc.ControllerManagerServiceStub", return_value=stub),
-        patch.object(menu, "_run_game_lifecycle", autospec=True) as lifecycle,
-    ):
-        reply = await force_start(menu, expected_generation=0)
-
-    assert (reply.success, reply.error) == (False, "stale")
-    lifecycle.assert_not_called()
-    assert "game_requested" not in [c.args[0] for c in menu.event_publisher.publish.await_args_list]

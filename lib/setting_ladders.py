@@ -48,10 +48,8 @@ SHIELD_KNOB_LADDER: list[str] = [AUTOMATIC, *SHIELD_ACTIVATION_LADDER]
 
 # UC-015 BR-004 / BR-019: the intervention levels, most restrictive first; clamped, never wraps.
 AGENT_POLICY_LEVELS: list[str] = ["none", "ambient", "standard", "full"]
-# Levels a resume can restore (BR-002 saves a level only when it is not "none").
-AGENT_SAVED_LEVELS: list[str] = AGENT_POLICY_LEVELS[1:]
-# UC-015 BR-003: the resume level when no level is saved (never "full").
-AGENT_RESUME_FALLBACK_LEVEL = "ambient"
+# UC-016 BR-011, BR-012: the `AGENT` row 1 switch, least first (`off`: `enabled` off; `watch`: the gate off).
+AGENT_STATE_LADDER: list[str] = ["off", "watch", "on"]
 
 # UC-044 decision backends, in knob order (UC-015 BR-004; wraps, `WRAPPING`).
 BACKENDS: list[str] = ["rules", "claude", "openai", "jev"]
@@ -231,7 +229,6 @@ class _Status(Protocol):
     force_all_start: bool
     audio_volume_master: str
     agent_level: str
-    agent_saved_level: str
     agent_enabled_state: str
     agent_backend: str
     shield_activation: str
@@ -330,14 +327,9 @@ def preview_value(option: str, status: _Status | None, net_steps: int) -> Previe
             return UNKNOWN  # the pad refuses a step from an unknown backend
         new, at_limit = step_ladder(option, BACKENDS, status.agent_backend, net_steps)
         return Preview(new, at_limit)
-    # agent_level: UC-015 BR-002 / BR-003, as the menu's `_step_agent_level`.
-    level, enabled = status.agent_level, status.agent_enabled_state
-    if not level or enabled not in ("on", "off"):
-        return UNKNOWN  # the menu fails closed with these unreadable
-    if enabled != "on" or level == "none":
-        # Stopped: only the saved level moves, along the saved ladder.
-        saved = status.agent_saved_level or AGENT_RESUME_FALLBACK_LEVEL
-        new, at_limit = step_ladder(option, AGENT_SAVED_LEVELS, saved, net_steps)
-        return Preview(new, at_limit)
+    # agent_level: the live level whatever `enabled` is, as the menu's `_step_agent_level` (UC-015 BR-004).
+    level = status.agent_level
+    if not level:
+        return UNKNOWN  # the menu fails closed with it unreadable
     new, at_limit = step_ladder(option, AGENT_POLICY_LEVELS, level, net_steps)
     return Preview(new, at_limit)

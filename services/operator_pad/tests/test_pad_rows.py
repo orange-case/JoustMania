@@ -175,7 +175,7 @@ async def test_an_edit_from_an_unknown_or_off_ladder_now_is_refused(option, now)
 async def test_a_reset_whose_new_is_unknown_is_refused_on_every_row(binding):
     """B1: `setting_defaults` without the key (right after a write) never sends an unguarded reset."""
     defaults = {k: v for k, v in {**DEFAULTS, **BASELINES}.items() if k != binding.spec.option}
-    press = rs(defaults=defaults, agent_backend="rules", agent_saved_level="ambient")
+    press = rs(defaults=defaults, agent_backend="rules")
     for confirmed in (False, True):
         result, data, _ = await reset(binding.spec.option, press, confirmed=confirmed, binding=binding)
         assert (result, data) == (("reset_setting", "refused"), [])

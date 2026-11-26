@@ -52,6 +52,9 @@ def _serve_agent_overlays(stack, flag_service) -> None:
     """Allow grant_shield, pin the backstop budget, cooldown off; wait until flagd serves them."""
     flag_service.put("agent", "policy.coordinator_backstop_per_minute", value=RATE_LIMIT_BUDGET)
     flag_service.put("agent", "policy.shield_cooldown_seconds", value=0)
+    flag_service.put(
+        "agent", "enabled", variant="on"
+    )  # the coordinator applies nothing while the agent is stopped (UC-040 BR-004)
     flag_service.put("agent", "interventions_allowed", variant="standard")
     allowed = variant_value("agent", "interventions_allowed", "standard")
     with flagd_probe_client(stack, "agent") as client:

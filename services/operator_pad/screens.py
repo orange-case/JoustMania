@@ -73,7 +73,7 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
     "decision.backend": {"rules": "RULES", "claude": "CLAUDE", "openai": "OPENAI", "jev": "JEV"},
     "game_instructions": {"on": "ON", "off": "OFF"},
     "force_all_start": {"on": "ON", "off": "OFF"},
-    "interventions": {"on": "ON", "off": "OFF"},
+    "agent_state": {"off": "OFF", "watch": "WATCH", "on": "ON"},
     setting_ladders.GOAL_OPTION: {
         "endurance_focused": "ENDURANCE",
         "balanced_focused": "BALANCED",
@@ -145,7 +145,7 @@ SETTING_LABELS = {
     "game_instructions": "INSTRUCTIONS",
     "audio_volume.master": "VOLUME",
     "force_all_start": "FORCE ALL",
-    "interventions": "INTERVENTIONS",
+    "agent_state": "AGENT",
     setting_ladders.GOAL_OPTION: "GOAL",
     setting_ladders.RATE_OPTION: "RATE",
     setting_ladders.GROUP_OPTION: "GROUP",
@@ -168,7 +168,6 @@ RESULT_WORDS = {
     "menu_unavailable": NO_CONNECTION,
     "failed": FAILED_WORD,
     "flag_service_unavailable": FAILED_WORD,
-    "partial": FAILED_WORD,
     "cancelled": CANCELLED_WORD,
     "stale": CANCELLED_WORD,
 }

@@ -40,7 +40,6 @@ from services.menu.settings_ops import (
     RESET_LOBBY_ONLY_OPTIONS,
     RESETTABLE_OPTIONS,
     SHIELD_ACTIVATION_FLAG,
-    STALE,
     Result,
     is_failure,
 )
@@ -467,7 +466,6 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             agent_enabled_state=enabled_state,
             agent_interventions_enabled_state=_enabled_state(agent.get_boolean_details(AGENT_WRITE_GATE_FLAG, False)),
             agent_level=_variant(agent.get_string_details(AGENT_POLICY_FLAG, "")),
-            agent_saved_level=self.settings_ops.saved_agent_level or "",
             agent_backend=_variant(agent.get_string_details(DECISION_BACKEND_FLAG, "")),
             sensitivity=game.get_integer_value("sensitivity", 2),
             num_teams=game.get_integer_value("num_teams", 2),
@@ -581,7 +579,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             "agent_switch",
             "set_backend",
             "reset_setting",
-            "interventions_switch",
+            "agent_state",
         }
     )
 
@@ -594,7 +592,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         command = data.get("command", "")
         span.set_attribute("command", command)
         if command == "force_start":
-            result = await self._pad_force_start(data, span)
+            result = await self._pad_force_start(span)
         elif command == "step_setting":
             result = await self._pad_step_setting(data)
         elif command == "preview_setting":
@@ -603,17 +601,17 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             result = await self._pad_agent_switch(data)
         elif command == "reset_setting":
             result = await self._pad_reset_setting(data)
-        elif command == "interventions_switch":
-            result = await self.settings_ops.interventions_switch(data.get("state", ""))
+        elif command == "agent_state":
+            result = await self.settings_ops.agent_state(data.get("state", ""), data.get("from"))
             if result.error is None:
-                await self.settings_ops.announce("interventions_switch", result.new)
+                await self.settings_ops.announce_agent_state(result.old, result.new)
         else:
             result = await self.settings_ops.set_backend(data.get("backend", ""), data.get("from"))
         error = result.error or ""
-        # UC-016 BR-001: the committed value of a step, a backend write, a reset or the interventions switch.
-        named = command in ("step_setting", "set_backend", "reset_setting", "interventions_switch")
+        # UC-016 BR-001: the committed value of a step, a backend write, a reset or the agent switch.
+        named = command in ("step_setting", "set_backend", "reset_setting", "agent_state")
         value = (result.new or "") if error in ("", OK) and named else ""
-        if error in ("", OK) and not value and command in ("reset_setting", "interventions_switch"):
+        if error in ("", OK) and not value and command in ("reset_setting", "agent_state"):
             # A pad cannot tell an empty-valued success from an older menu's unknown-command success.
             logger.error(f"Pad command {command} succeeded without a value")
             error = FLAG_SERVICE_UNAVAILABLE
@@ -627,13 +625,10 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         return success, error, value if success else ""
 
     async def _pad_agent_switch(self, data: dict) -> Result:
-        """agent_switch; the guard ``only_if_stopped=1`` refuses a resume of an agent not fully stopped (stale)."""
+        """agent_switch: the stop (UC-015 BR-002); a ``direction`` other than ``stop`` is ``bad_option``."""
         direction = data.get("direction", "")
-        guard = data.get("only_if_stopped")
-        if guard is not None and guard != "1":
-            return Result(None, None, BAD_OPTION)
-        result = await self.settings_ops.agent_switch(direction, only_if_stopped=guard == "1")
-        if result.error == OK:
+        result = await self.settings_ops.agent_switch(direction)
+        if result.error is None:
             await self.settings_ops.announce("agent_switch", direction)
         return result
 
@@ -703,25 +698,14 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
         await self.settings_ops.show_mode_on_lobby(mode.name)
         return Result(None, mode.name)
 
-    async def _pad_force_start(self, data: dict, span) -> Result:
-        """force_start: UC-014 steps 3-5 with the live roster (UC-015 BR-008).
-
-        A non-empty ``expected_generation`` that differs from ``lifecycle_generation`` (or is not an
-        integer) is refused with ``stale`` before anything changes, and again after the roster lookup
-        (UC-015 A5).
-        """
-        expected = data.get("expected_generation", "")
-        if self._generation_stale(expected):
-            return Result(None, None, STALE)
+    async def _pad_force_start(self, span) -> Result:
+        """force_start: UC-014 steps 3-5 with the live roster (UC-015 BR-008), the pad's K8 tap."""
         if self._lifecycle_live():
             return Result(None, None, GAME_ACTIVE)
         controllers = await self.settings_ops.force_start_roster(span)
         if self._lifecycle_live():
             # A start won the race during the roster lookup (ready auto start, another caller).
             return Result(None, None, GAME_ACTIVE)
-        if self._generation_stale(expected):
-            # A game started and ended during the roster lookup: the lobby is back but not the one held.
-            return Result(None, None, STALE)
         previous_state = self.state
         self.set_menu_state(menu_pb2.MenuState.GAME_STARTING)
         await self.event_publisher.publish(
@@ -737,15 +721,6 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
                 self.set_menu_state(previous_state)
             return Result(None, None, GAME_ACTIVE)
         return Result(None, self.current_selection.name)
-
-    def _generation_stale(self, expected: str) -> bool:
-        """UC-015 A5: an ``expected_generation`` was sent and is not the current one (empty = no check)."""
-        if expected == "":
-            return False
-        try:
-            return int(expected) != self.lifecycle_generation
-        except ValueError:
-            return True
 
     async def _reject_web_start_mode(self, requested_mode: str, span) -> str:
         """Reject a web start_game naming an unknown or unimplemented mode (UC-011 BR-002).

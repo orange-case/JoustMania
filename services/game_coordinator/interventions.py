@@ -28,7 +28,7 @@ Design (from docs/research/722-intervention-surface.md §5/§6/§8/§9):
 - Enforcement chain, evaluated *before* any handler runs (defense in depth; the
   agent also self-checks in #726):
     1. allowed-membership   — type must be in ``interventions_allowed`` (agent
-       domain, default ``[]``)
+       domain, default ``[]``), and nothing while agent ``enabled`` is off
     2. weighted rate limit  — sliding 60s window, weighted cost per class. This
        is the GENEROUS GLOBAL BACKSTOP (#919), budget from
        ``policy.coordinator_backstop_per_minute``; the per-game budget is owned
@@ -2024,6 +2024,9 @@ class InterventionManager:
         if self._agent_client is None:
             return set()
         try:
+            # The human stop writes `enabled` alone (UC-040 BR-004): a stopped agent gets nothing applied.
+            if self._agent_client.get_boolean_value("enabled", False, EvaluationContext()) is not True:
+                return set()
             value = self._agent_client.get_string_value("interventions_allowed", "", EvaluationContext())
             if isinstance(value, str):
                 return {token.strip() for token in value.split(",") if token.strip()}

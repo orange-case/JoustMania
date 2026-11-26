@@ -201,9 +201,9 @@ async def test_no_status_at_the_press_is_silent():
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017", "BR-013"], steps=[5])
-async def test_an_unreadable_agent_switch_is_silent():
+async def test_an_unreadable_agent_level_is_silent():
     rig = Rig()
-    unknown = menu_pb2.GetMenuStatusResponse(agent_level="standard", agent_enabled_state="unknown")
+    unknown = menu_pb2.GetMenuStatusResponse(agent_level="", agent_enabled_state="on")
     rig.step(1, unknown, key="K3", option="agent_level", lobby_only=False)
     await rig.time.advance(0.6)
     assert rig.clips == []

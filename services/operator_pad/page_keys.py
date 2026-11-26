@@ -13,15 +13,14 @@ from dataclasses import dataclass
 from lib import setting_ladders
 from lib.setting_ladders import (
     AGENT_POLICY_LEVELS,
-    AGENT_RESUME_FALLBACK_LEVEL,
     AGENT_ROW_OPTIONS,
+    AGENT_STATE_LADDER,
     AUTOMATIC,
     BACKENDS,
     BRIEF_OPTION,
     EFFORT_OPTION,
     GOAL_OPTION,
     GROUP_OPTION,
-    ON_OFF_LADDER,
     PAID_BACKENDS,
     RATE_OPTION,
     RETRO_BACKEND_OPTION,
@@ -29,7 +28,7 @@ from lib.setting_ladders import (
 )
 from services.operator_pad.config import K1, K2, K3, K4, K6, K7
 from services.operator_pad.pages import PAGES, agent_row_value
-from services.operator_pad.state import AGENT_OFF, AGENT_ON, AGENT_WATCH, agent_state, pad_commands
+from services.operator_pad.state import AGENT_UNKNOWN, agent_state, pad_commands
 
 EDIT, RESET_ROLE = "edit", "reset"
 ROW_KEYS: dict[str, tuple[int, str]] = {
@@ -41,7 +40,7 @@ ROW_KEYS: dict[str, tuple[int, str]] = {
     K7: (2, RESET_ROLE),
 }
 
-INTERVENTIONS = "interventions"  # AGENT row 1: the write gate, `interventions_switch` (not a flag option)
+AGENT_STATE = "agent_state"  # AGENT row 1: the agent switch, `agent_state` (not a flag option)
 STEP, BACKEND, SWITCH = "step", "backend", "switch"
 AUTO, DEFAULT = "auto", "default"
 FALLBACK_PAGE = PAGES.index("HOME")  # BR-016
@@ -63,7 +62,7 @@ def reset_command(option: str) -> str:
 @dataclass(frozen=True)
 class RowSpec:
     option: str
-    edit: str  # STEP (`step_setting`), BACKEND (`set_backend`) or SWITCH (`interventions_switch`)
+    edit: str  # STEP (`step_setting`), BACKEND (`set_backend`) or SWITCH (`agent_state`)
     reset: str | None  # AUTO, DEFAULT or None (no reset key)
     lobby_only: bool
 
@@ -86,7 +85,7 @@ ROWS: dict[str, tuple[RowSpec | None, RowSpec | None, RowSpec | None]] = {
     ),
     "START": (_row("force_all_start", reset=DEFAULT), None, None),
     "AGENT": (
-        _row(INTERVENTIONS, edit=SWITCH, lobby_only=False),
+        _row(AGENT_STATE, edit=SWITCH, lobby_only=False),
         _row("agent_level", reset=DEFAULT, lobby_only=False),
         _row(GOAL_OPTION, reset=DEFAULT),
     ),
@@ -132,23 +131,21 @@ def rank(level: str | None) -> int | None:
     return AGENT_POLICY_LEVELS.index(level) if level in AGENT_POLICY_LEVELS else None
 
 
-def gate(status) -> str | None:
-    value = status.agent_interventions_enabled_state if status is not None else ""
-    return value if value in ON_OFF_LADDER else None
+def switch_state(status) -> str | None:
+    state = agent_state(status)
+    return None if state == AGENT_UNKNOWN else state
 
 
 def row_preview(option: str, status, steps: int) -> Preview:
-    """The value a release of ``steps`` commits; the interventions switch is a clamped two-state."""
+    """The value a release of ``steps`` commits; the agent switch is a clamped three-state."""
     if option in AGENT_ROW_OPTIONS and steps == 0:
         return Preview(agent_row_value(option, status))  # also `custom` or an off-ladder rate, as shown
-    if option != INTERVENTIONS:
+    if option != AGENT_STATE:
         return setting_ladders.preview_value(option, status, steps)
-    now = gate(status)
+    now = switch_state(status)
     if now is None:
-        if steps == 0:
-            return Preview(None)
-        return Preview("on" if steps > 0 else "off")  # ON is known whatever the gate was (BR-014)
-    new, at_limit = setting_ladders.clamp_step(ON_OFF_LADDER, now, steps)
+        return Preview(None)  # never stepped blind (BR-014)
+    new, at_limit = setting_ladders.clamp_step(AGENT_STATE_LADDER, now, steps)
     return Preview(new, at_limit)
 
 
@@ -195,21 +192,16 @@ def edit_plan(spec: RowSpec, status, steps: int) -> Plan:
         if rank(now) is None:
             return Plan(now, None, refused=True)  # BR-014: never confirmed blind
         return Plan(now, new, raises=(rank(new) or 0) > (rank(now) or 0))
-    if spec.option == INTERVENTIONS:
-        if agent_state(status) == AGENT_OFF:
-            return Plan(now, None, refused=True)  # BR-012: the resume restores the gate of the stop
-        return Plan(now, new, raises=new == "on" and now != "on")
+    if spec.option == AGENT_STATE:
+        if now is None or AGENT_STATE not in pad_commands(status):
+            return Plan(now, None, refused=True)  # BR-014: never confirmed blind; BR-011 "Menu too old"
+        return Plan(now, new, raises=AGENT_STATE_LADDER.index(new) > AGENT_STATE_LADDER.index(now))
     return Plan(now, new)
 
 
 def reset_base(status) -> str | None:
-    """The agent level a level reset replaces (BR-013): live for ON / WATCH, saved for OFF."""
-    state = agent_state(status)
-    if state in (AGENT_ON, AGENT_WATCH):
-        return status.agent_level
-    if state == AGENT_OFF:
-        return status.agent_saved_level or AGENT_RESUME_FALLBACK_LEVEL
-    return None
+    """The agent level a level reset replaces (BR-013): the live level, whatever the agent's state."""
+    return status.agent_level if status is not None and status.agent_level else None
 
 
 def default_of(option: str, status) -> str | None:

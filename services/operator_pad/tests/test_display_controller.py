@@ -128,11 +128,22 @@ async def test_result_with_no_value_shows_ok_never_the_prediction():
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"])
 async def test_a_k8_hold_shows_its_result_like_every_command():
+    """In the lobby the hold is refused: the tap is the one start."""
+    pad = Pad()
+    await pad.key(K8, PRESS)
+    await pad.key(K8, RELEASE, dt=1700)
+    assert pad.screen()[:3] == ["END GAME", "", "NOT POSSIBLE"]
+    assert pad.sent() == []
+
+
+@pytest.mark.uc("UC-016", flow="main", br=["BR-001"])
+async def test_a_k8_tap_shows_the_start_result():
     pad = Pad()
     pad.menu.ProcessInput.return_value = menu_pb2.ProcessInputResponse(success=True)  # force_start names no value
     await pad.key(K8, PRESS)
-    await pad.key(K8, RELEASE, dt=1700)
-    assert pad.screen()[:3] == ["FORCE START", "", "OK"]
+    await pad.key(K8, RELEASE, dt=100)
+    assert pad.screen()[:3] == ["START", "", "OK"]
+    assert pad.sent() == [{"command": "force_start"}]
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[4, 5])
@@ -213,15 +224,14 @@ async def test_release_ends_the_setting_screen_before_the_command_returns():
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-003"])
-@pytest.mark.uc("UC-015", flow="A5", br=["BR-013"])
 async def test_commands_use_press_and_release_reads_not_the_poll():
-    """BR-003: the polled status is for the screen only; the K4 hold judges its own two reads."""
+    """BR-003: the polled status is for the screen only; the K8 tap judges its own read."""
     pad = Pad()
     pad.model.note_status(lobby(lifecycle_live=True, lifecycle_generation=9), pad.model.read_token())
     pad.reader.fetch.return_value = lobby(lifecycle_generation=4)
     await pad.key(K8, PRESS)
-    await pad.key(K8, RELEASE, dt=1700)
-    assert pad.sent() == [{"command": "force_start", "expected_generation": "4"}]
+    await pad.key(K8, RELEASE, dt=100)
+    assert pad.sent() == [{"command": "force_start"}]
 
 
 @pytest.mark.uc("UC-016", flow="main", br=["BR-001"], steps=[6])
