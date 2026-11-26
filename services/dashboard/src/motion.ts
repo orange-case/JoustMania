@@ -55,16 +55,15 @@ export function accelDotOffset(accel: Axes): { x: number; y: number } {
   return { x: clamp(v.x), y: clamp(v.z) };
 }
 
-export type StatusView = { state: "admin" | "dead" | "alive"; text: string };
+export type StatusView = { state: "dead" | "alive"; text: string };
 
 /**
  * Status badge. The followed game's roster (`alive`) decides alive/dead (UC-070
- * BR-005). Without it the controller's team does: -1 = admin, > 0 = "Team n", and
- * 0 or omitted = alive (the controller manager always sends team 0, which proto3
+ * BR-005). Without it the controller's team does: > 0 = "Team n", anything else
+ * (0, omitted or negative) = alive (the controller manager always sends team 0, which proto3
  * JSON omits; 0 is not "dead"). #1604
  */
 export function statusView(team: number | undefined, alive?: boolean): StatusView {
   if (alive !== undefined) return alive ? { state: "alive", text: "Alive" } : { state: "dead", text: "Dead" };
-  if (team === -1) return { state: "admin", text: "Admin" };
   return { state: "alive", text: team !== undefined && team > 0 ? `Team ${team}` : "Alive" };
 }
