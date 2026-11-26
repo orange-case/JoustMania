@@ -65,6 +65,11 @@ class MenuServiceStub:
                 request_serializer=menu__pb2.GetMenuStatusRequest.SerializeToString,
                 response_deserializer=menu__pb2.GetMenuStatusResponse.FromString,
                 _registered_method=True)
+        self.WarnBluetoothRestart = channel.unary_unary(
+                '/joustmania.menu.MenuService/WarnBluetoothRestart',
+                request_serializer=menu__pb2.WarnBluetoothRestartRequest.SerializeToString,
+                response_deserializer=menu__pb2.WarnBluetoothRestartResponse.FromString,
+                _registered_method=True)
 
 
 class MenuServiceServicer:
@@ -113,6 +118,13 @@ class MenuServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def WarnBluetoothRestart(self, request, context):
+        """Warn the lobby before a planned bluetoothd restart (UC-001 BR-011, UC-002 A9, services.md §3.2)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_MenuServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -145,6 +157,11 @@ def add_MenuServiceServicer_to_server(servicer, server):
                     servicer.GetMenuStatus,
                     request_deserializer=menu__pb2.GetMenuStatusRequest.FromString,
                     response_serializer=menu__pb2.GetMenuStatusResponse.SerializeToString,
+            ),
+            'WarnBluetoothRestart': grpc.unary_unary_rpc_method_handler(
+                    servicer.WarnBluetoothRestart,
+                    request_deserializer=menu__pb2.WarnBluetoothRestartRequest.FromString,
+                    response_serializer=menu__pb2.WarnBluetoothRestartResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -310,6 +327,33 @@ class MenuService:
             '/joustmania.menu.MenuService/GetMenuStatus',
             menu__pb2.GetMenuStatusRequest.SerializeToString,
             menu__pb2.GetMenuStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WarnBluetoothRestart(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/joustmania.menu.MenuService/WarnBluetoothRestart',
+            menu__pb2.WarnBluetoothRestartRequest.SerializeToString,
+            menu__pb2.WarnBluetoothRestartResponse.FromString,
             options,
             channel_credentials,
             insecure,
