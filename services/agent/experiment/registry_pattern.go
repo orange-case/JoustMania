@@ -406,7 +406,9 @@ func (r *Registry) rerunPairLocked(e *entry, pairIndex int, reason string) {
 		note = notePairRerunStale
 	}
 	r.appendEvent(e.journal, journal.Event{Kind: journal.KindDecision, PairIndex: &pi, Note: note})
-	r.log.Info("experiment.pattern_pair_rerun", "experiment_id", e.id, "pair_index", pairIndex,
+	// The log event carries the note, so a preemption still logs
+	// experiment.pattern_pair_rerun_preempted (TC-013).
+	r.log.Info("experiment."+note, "experiment_id", e.id, "pair_index", pairIndex,
 		"rerun", e.pairReruns[pairIndex], "reason", reason)
 }
 
