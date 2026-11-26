@@ -32,7 +32,6 @@ const (
 	AttrExperimentStatus          = keys.AttrExperimentStatus
 	AttrExperimentTargetN         = keys.AttrExperimentTargetN
 	AttrExperimentThesis          = keys.AttrExperimentThesis
-	AttrExperimentsEnabled        = keys.AttrExperimentsEnabled
 	AttrFitnessEvaluated          = keys.AttrFitnessEvaluated
 	AttrGameDurationSeconds       = keys.AttrGameDurationSeconds
 	AttrGameEliminationCount      = keys.AttrGameEliminationCount
@@ -46,8 +45,6 @@ const (
 	AttrInferenceFallback         = keys.AttrInferenceFallback
 	AttrInferenceUsed             = keys.AttrInferenceUsed
 	AttrInterventionsAllowed      = keys.AttrInterventionsAllowed
-	AttrInterventionsEnabled      = keys.AttrInterventionsEnabled
-	AttrLLMEligibleGameKinds      = keys.AttrLLMEligibleGameKinds
 	AttrLLMInferError             = keys.AttrLLMInferError
 	AttrLLMRetroBytes             = keys.AttrLLMRetroBytes
 	AttrLLMRetroLatencyMs         = keys.AttrLLMRetroLatencyMs

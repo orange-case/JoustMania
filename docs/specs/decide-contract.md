@@ -1061,8 +1061,8 @@ nothing on, the game is released and re-run) to the registry, which holds them f
 only at the game's fitness fold (`ConcludeGame`); a game released without a fold (errored, preempted) or torn down adds nothing
 (`services/agent/prediction/book.go:Book.SetArmTallySink`, `services/agent/experiment/calibration.go:Registry.NotePredictions`,
 wired by `services/agent/gameend.go:wireArmCalibration`). The Book runs before the experiment hook in the game-end chain, so
-the game is still bound; a real game, a released or unknown game and an inconsistent tally are ignored. `experiment.progress`
-shows it on each `experiment.arm` event ([telemetry.md](telemetry.md)); a restart or rehydrate starts it empty.
+the game is still bound; a real game, a released or unknown game and an inconsistent tally are ignored. The experiment's
+progress snapshot shows it per arm (`GET /experiments/state`, [services.md §5](services.md#5-http-endpoints), #2809); a restart or rehydrate starts it empty.
 
 ### 14.4 Goal profiles
 

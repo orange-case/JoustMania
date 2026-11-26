@@ -1,19 +1,15 @@
-import { searchTracesSized, spanStartMs, spanTags, tagNumber, tagString } from "./jaeger.js";
+import { spanStartMs, spanTags, tagNumber, tagString } from "./jaeger.js";
 import type { JaegerTracesResponse } from "./jaeger.js";
 
 /**
  * Dashboard Agent tab: the game's goal profile and how far the game reached it
  * (#2479, #2498, UC-042 A12; decide-contract §14.4). The agent.game.summary span
- * carries summary.goal.profile / .source / .attainment, set at game end. The span is
- * its own root (or a child of agent.experiment), not part of the game's decide trace,
- * so it has its own small search.
+ * carries summary.goal.profile / .source / .attainment, set at game end; the agent's
+ * state answer (agentState.ts) carries the newest summaries.
  */
 
-/** Jaeger operation of the game summary span. */
+/** Name of the game summary span. */
 export const GAME_SUMMARY_OPERATION = "agent.game.summary";
-
-/** One game has one summary: the tag search asks for a couple of traces at most. */
-const GOAL_SEARCH_LIMIT = 2;
 
 /** Bound on the goals kept (a game is one entry). */
 const MAX_GOALS = 100;
@@ -75,20 +71,3 @@ export class GoalStore {
   }
 }
 
-/**
- * The summary of ONE game by game.id tag (UC-035 BR-011, like the flag-state fallback):
- * Jaeger returns whole traces. Since #2640 the summary sits in the game's own trace,
- * so a tag search returns that whole game trace (fetched once per followed game end);
- * a plain operation search could still pull whole experiment traces and be crowded
- * out by shadow games' summaries.
- */
-export async function fetchGoal(
-  gameId: string,
-  signal?: AbortSignal,
-): Promise<{ goals: GameGoal[]; bytes: number }> {
-  const { body, bytes } = await searchTracesSized(
-    { operation: GAME_SUMMARY_OPERATION, limit: GOAL_SEARCH_LIMIT, startMs: null, tags: { "game.id": gameId } },
-    signal,
-  );
-  return { goals: parseGoalSummaries(body), bytes };
-}

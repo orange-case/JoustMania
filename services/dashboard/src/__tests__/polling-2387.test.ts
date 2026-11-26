@@ -7,7 +7,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentView } from "../components/AgentView.js";
 import { ControllerGrid } from "../components/ControllerGrid.js";
-import { FlagFallbackPacer, FLAG_STATE_FALLBACK_REPEAT_MS, QueryWindow } from "../agent.js";
 import { unaryRpcError } from "../connect.js";
 import { controllerClient } from "../client.js";
 import { FALLBACK_CHOICES, loadModeChoicesWithRetry } from "../modes.js";
@@ -19,26 +18,6 @@ afterEach(() => {
 });
 
 describe("UC-035: main step 2, elapsed time on the monotonic clock (#2387)", () => {
-  it("UC-035/main the fallback pacer and decide window ignore a wall-clock jump", () => {
-    let mono = 1000;
-    vi.spyOn(performance, "now").mockImplementation(() => mono);
-    let wall = 1_700_000_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => wall);
-
-    const pacer = new FlagFallbackPacer();
-    const window = new QueryWindow();
-    expect(pacer.take("k")).toBe(true);
-    window.observe([{ tsMs: 5000 }]);
-
-    wall += 3_600_000; // NTP step on the Pi-fed laptop
-    mono += 1000;
-    expect(pacer.take("k")).toBe(false);
-    expect(window.startMs()).not.toBe(5001);
-
-    mono += FLAG_STATE_FALLBACK_REPEAT_MS;
-    expect(pacer.take("k")).toBe(true);
-  });
-
   it("UC-035/main the poller's slow-call test ignores a wall-clock jump", async () => {
     let wall = 1_700_000_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => wall);

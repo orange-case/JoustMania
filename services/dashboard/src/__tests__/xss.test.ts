@@ -82,7 +82,7 @@ describe("UC-035: XSS in the agent view (rationale, decide answers)", () => {
 
   it("UC-035/A3 an error message from the wire is text", () => {
     view.setError(IMG);
-    view.setJaegerError(IMG);
+    view.setPanelsError(IMG);
     view.setDecideError(IMG);
     for (const id of ["f", "g", "o", "d"]) expectInert(document.getElementById(id)!);
     expect(document.getElementById("d")!.textContent).toBe(IMG);

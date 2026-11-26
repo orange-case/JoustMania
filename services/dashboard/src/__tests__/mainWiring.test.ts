@@ -35,7 +35,7 @@ const html = readFileSync(join(__dirname, "..", "index.html"), "utf8");
 describe("UC-035: main.ts wiring", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("UC-035/main step 4 init wires Start to the menu and the Experiments tab to the experiment.progress search", async () => {
+  it("UC-035/main step 4 init wires Start to the menu and the Experiments tab to the agent's state", async () => {
     document.body.innerHTML = html.slice(html.indexOf("<body"), html.indexOf("</body>")).replace(/<(script|iframe)[\s\S]*?<\/\1>/g, "");
     const searches: string[] = [];
     vi.stubGlobal(
@@ -57,6 +57,6 @@ describe("UC-035: main.ts wiring", () => {
 
     (document.querySelector('.tab-btn[data-tab="experiments"]') as HTMLElement).click();
     expect(document.getElementById("tab-experiments")!.classList.contains("active")).toBe(true);
-    await vi.waitFor(() => expect(searches.some((u) => u.includes("experiment.progress"))).toBe(true));
+    await vi.waitFor(() => expect(searches.some((u) => u.endsWith("/experiments/state"))).toBe(true));
   });
 });

@@ -8,11 +8,10 @@ the wiring that only the full stack has:
 
 - game coordinator -> otel-collector -> agent (``otlp/agent`` fan-out, UC-041);
 - agent -> flag service -> flagd -> coordinator (the decision takes effect);
-- agent -> otel-collector -> Jaeger, read back through envoy the way the
-  dashboard's Agent tab reads it (Jaeger query API v3, ``GET /jaeger/api/v3/traces
-  ?query.serviceName=agent&query.operationName=invoke_agent%20joustmania-agent&query.searchDepth=5``, #2283,
-  ``services/dashboard/src/agentDecide.ts``
-  ``decideSearches`` / ``searchParams`` in ``jaeger.ts``; UC-035 step 3, decision feed only);
+- agent -> otel-collector -> Jaeger, read back through envoy (Jaeger query API v3,
+  ``GET /jaeger/api/v3/traces?query.serviceName=agent&query.operationName=invoke_agent%20joustmania-agent&query.searchDepth=5``,
+  #2283): the trace the dashboard's decision rows link to (the Agent tab itself
+  reads the agent's ``GET /experiments/state`` since #2809; UC-035 step 3);
 - the game's trace in Jaeger: the root span named after the mode, its phases,
   one span per player, and the agent's rules-path spans as remote children of
   the coordinator's ``game_cycle`` span, each ``agent.decision`` keeping its
@@ -22,7 +21,7 @@ the wiring that only the full stack has:
 The agent and envoy are profile-gated (``docker-compose.ci.yml``), so the
 module starts both into the running session project (``--no-deps``) and
 removes them at teardown. No browser:
-the tab's data source is its Jaeger query, and the feed fold below mirrors
+the decision rows link this Jaeger trace, and the feed fold below mirrors
 ``parseDecideTraces`` / ``decideRowFrom``.
 """
 

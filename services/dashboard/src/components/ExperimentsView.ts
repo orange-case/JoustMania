@@ -3,8 +3,8 @@
  *
  * Renders one card per cohort experiment with its arms, per-arm sample counts,
  * the fitness delta (experimental − control), and the current verdict. Data
- * comes from the newest experiment.progress span per experiment in Jaeger (see
- * ../experiments.ts, #2059); the view polls to update live during a shadow run.
+ * comes from the agent's progress snapshot per experiment (GET /experiments/state,
+ * ../experiments.ts); the view polls to update live during a shadow run.
  */
 import { renderFreshness } from "../freshness.js";
 import { html, setHtml, type SafeHtml } from "../html.js";
@@ -151,7 +151,7 @@ function renderTested(exp: ExperimentView): SafeHtml | "" {
         </div>`;
 }
 
-/** Link to the snapshot's trace in the embedded Jaeger (same host, UC-035 BR-001). */
+/** Link to the experiment's agent.experiment trace in Jaeger (same host, UC-035 BR-001). */
 function renderTraceLink(exp: ExperimentView): SafeHtml | "" {
   if (!exp.traceId) return "";
   return html`<a class="experiment-trace" href="/jaeger/trace/${encodeURIComponent(exp.traceId)}" target="_blank" rel="noopener">trace</a>`;
@@ -174,8 +174,8 @@ export interface NormalizedVerdict {
 }
 
 /**
- * The card's verdict label. A status of `done` is NOT a promotion: the span does
- * not say whether the dossier decision was promoted, reverted or deferred (#2291),
+ * The card's verdict label. A status of `done` is NOT a promotion: the snapshot does
+ * not say whether the dossier decision was promoted or reverted (#2291),
  * so a `done` without a promote outcome reads "Done".
  */
 export function normalizeVerdict(verdict: string, live: boolean, status = ""): NormalizedVerdict {

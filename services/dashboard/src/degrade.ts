@@ -1,36 +1,29 @@
 /**
- * What each panel does when its telemetry backend does not deliver (UC-035 A3
- * step 2, #2059). Three states, kept apart:
+ * What each panel does when its source does not deliver (UC-035 A3 step 2). Three
+ * states, kept apart:
  *
- *   Jaeger down     the search failed (transport error, timeout, non-2xx, or a
- *                   Jaeger `errors` array: JaegerUnavailableError). A panel that
- *                   has rendered keeps its data and goes stale; one that never
- *                   rendered names Jaeger.
- *   no data         Jaeger answered without matching spans: not an error. The
- *                   panel names the span it is waiting for; this is also what an
- *                   agent image without agent.flag_state / experiment.progress
- *                   (older than #2059) shows.
- *   agent or        Jaeger answers but no new spans arrive: rows stop growing and
- *   collector down  the freshness hint stays "updated" (UC-035 A3: "no new agent
- *                   rows"); with nothing ever received it is the no-data state.
+ *   agent down      the agent's state endpoint (decide feed, activity feed, flag
+ *                   panel, Experiments tab: AgentUnavailableError) did not answer.
+ *                   A panel that has rendered keeps its data and goes stale; one
+ *                   that never rendered names the agent.
+ *   no data         the agent answered without a flag state or experiment yet: not
+ *                   an error. The panel says what it is waiting for.
+ *   collector down  the agent receives no telemetry, so its state stops moving:
+ *                   rows stop growing, the freshness hint stays "updated".
  *
  * VictoriaMetrics down never fails a poll: Applied and Blocked show `n/a`.
- * Jaeger down with VictoriaMetrics up: the overlay renders, the Jaeger-fed
- * panels keep their data (stale) or name Jaeger, never the no-data hints.
  */
-import type { AgentView as AgentViewData, FlagPanel, InterventionOverlay } from "./agent.js";
+import type { AgentView as AgentViewData, InterventionOverlay } from "./agent.js";
 
-export const AGENT_JAEGER_DOWN = "Could not reach Jaeger for agent telemetry.";
-export const EXPERIMENTS_JAEGER_DOWN = "Could not reach Jaeger for experiment telemetry.";
-export const DECIDE_JAEGER_DOWN = "Could not reach Jaeger for invoke_agent spans.";
 
-/** No-data hints (Jaeger up, no matching spans yet). */
+export const EXPERIMENTS_AGENT_DOWN = "Could not reach the agent for its experiments (/experiments/state).";
+export const DECIDE_AGENT_DOWN = "Could not reach the agent for its decisions (/experiments/state).";
+
+/** No-data hints (the agent answered, nothing held yet). */
 export const FLAG_STATE_NO_DATA =
-  "No agent.flag_state spans in Jaeger yet. The effective flags appear once the agent evaluates a game " +
-  "(an agent image from before #2059 emits none).";
+  "No flag state yet. The effective flags appear once the agent evaluates a game.";
 export const EXPERIMENT_PROGRESS_NO_DATA =
-  "No experiment.progress spans in Jaeger yet. Experiments appear once the cohort framework starts one " +
-  "(an agent image from before #2059 emits none).";
+  "No experiments yet. They appear once the cohort framework starts one.";
 
 interface StaleCapable {
   rendered: boolean;
@@ -43,73 +36,45 @@ interface DecideCapable {
   setDecideError(message: string): void;
 }
 
-export function onAgentPollFailed(view: StaleCapable): void {
-  if (view.rendered) view.markStale();
-  else view.setError(AGENT_JAEGER_DOWN);
-}
 
 export function onExperimentsPollFailed(view: StaleCapable): void {
   if (view.rendered) view.markStale();
-  else view.setError(EXPERIMENTS_JAEGER_DOWN);
+  else view.setError(EXPERIMENTS_AGENT_DOWN);
 }
 
 export function onDecidePollFailed(view: DecideCapable): void {
-  if (!view.decideHasRendered) view.setDecideError(DECIDE_JAEGER_DOWN);
+  if (!view.decideHasRendered) view.setDecideError(DECIDE_AGENT_DOWN);
 }
 
 interface AgentPanelsCapable extends StaleCapable {
   render(view: AgentViewData): void;
   renderOverlay(overlay: InterventionOverlay): void;
-  setJaegerError(message: string): void;
+  setPanelsError(message: string): void;
+}
+
+/** What the feed and flag panel miss, null while the agent's state delivers. */
+export function agentPanelsDown(agentStateOk: boolean): string | null {
+  return agentStateOk ? null : DECIDE_AGENT_DOWN;
 }
 
 /**
- * Paint the Agent tab's feed, flag panel and overlay. `jaegerOk` is false while
- * the last Agent poll's Jaeger leg (the flag-state search) failed: the
- * overlay still renders, the Jaeger-fed panels keep their last data and go
- * stale, or name Jaeger when they never rendered (UC-035 A3 step 2).
+ * Paint the Agent tab's feed, flag panel and overlay. `down` (agentPanelsDown) is set
+ * while the last poll of the agent's state failed: the overlay still renders, the
+ * feed and flag panel keep their last data and go stale, or name the agent when they
+ * never rendered (UC-035 A3 step 2).
  */
 export function paintAgentPanels(
   view: AgentPanelsCapable,
   overlay: InterventionOverlay | null,
-  jaegerOk: boolean,
-  jaegerPanels: () => Pick<AgentViewData, "feed" | "flags">,
+  down: string | null,
+  panels: () => Pick<AgentViewData, "feed" | "flags">,
 ): void {
-  if (jaegerOk) {
-    if (overlay !== null) view.render({ ...jaegerPanels(), overlay });
+  if (down === null) {
+    if (overlay !== null) view.render({ ...panels(), overlay });
     return;
   }
   if (overlay !== null) view.renderOverlay(overlay);
   if (view.rendered) view.markStale();
-  else if (overlay !== null) view.setJaegerError(AGENT_JAEGER_DOWN);
-  else view.setError(AGENT_JAEGER_DOWN);
-}
-
-export type AgentPollResults = [
-  PromiseSettledResult<InterventionOverlay>,
-  PromiseSettledResult<FlagPanel[]>,
-];
-
-/**
- * Fold one settled Agent poll (VictoriaMetrics counts, flag-state search) into
- * the state. Returns the overlay to keep, whether the Jaeger leg succeeded and
- * the first failure (the poller backs off on it). `ran` names the Jaeger legs
- * this tick actually searched; a skipped leg is a resolved placeholder, not
- * evidence. `jaegerOk` is null when no leg ran, so the
- * caller keeps its previous verdict (a Jaeger outage must not clear on a tick
- * that never asked Jaeger).
- */
-export function settleAgentPoll(
-  [counts, flags]: AgentPollResults,
-  overlay: InterventionOverlay | null,
-  mergeFlags: (states: FlagPanel[]) => void,
-  ran: { flags: boolean },
-): { overlay: InterventionOverlay | null; jaegerOk: boolean | null; failed: PromiseRejectedResult | undefined } {
-  if (flags.status === "fulfilled") mergeFlags(flags.value);
-  const failed = [counts, flags].find((r): r is PromiseRejectedResult => r.status === "rejected");
-  return {
-    overlay: counts.status === "fulfilled" ? counts.value : overlay,
-    jaegerOk: ran.flags ? flags.status === "fulfilled" : null,
-    failed,
-  };
+  else if (overlay !== null) view.setPanelsError(down);
+  else view.setError(down);
 }
