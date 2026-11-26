@@ -363,6 +363,10 @@ class TeamsGameBase(BaseGameMode):
         self._latched_team = winning_team
         return True
 
+    def _latched_tie(self) -> bool:
+        """A tie was latched (no team left) and not overridden by a force-end before the latch."""
+        return self._win_latched and self._latched_team is None and self.game_outcome() != "force_ended"
+
     async def _check_win_condition(self) -> bool:
         """
         Check if a team has won.
@@ -599,6 +603,8 @@ class TeamsGameBase(BaseGameMode):
             await self._send_winner_rainbow_effects(winning_team_num)
             await self._play_team_victory_sound(winning_team_num)
             await self._wait_for_rainbow_effect()
+        elif self._latched_tie():
+            await self._show_tie_cue()
 
         self._end_surviving_player_spans(winning_team_num)
         await self._publish_player_analytics(winning_team_num)
