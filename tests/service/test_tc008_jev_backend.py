@@ -6,8 +6,8 @@ behind the ``fake`` variant of ``decision.jev.base_url`` and the agent's dummy `
 broken answer -> rules fallback), through Jev's two-stage round (the gate noul + intervention
 choice, then the details stage; decide-contract section 2 / 3.1). The fake's ``confidence`` is
 the gate's p_yes, which is the acting confidence of the round; jev's act threshold is its own
-(``decision.jev.act_confidence_threshold``, default 0.6), so 0.55 is a valid intervention
-answer below it.
+(``decision.jev.act_confidence_threshold``, default 0.6), and the gate opens at the same bar, so
+p_yes 0.55 is a noop round (decide-contract section 3.1).
 
 The Claude decide backend has its own file, ``test_tc008_claude_backend.py`` (#1900); its missing
 key (UC-044 A1) is in ``test_tc008_remote_backend_routing.py``.
@@ -37,7 +37,7 @@ pytestmark = pytest.mark.tier("service")
 
 SERVICE_COMPOSITION = AGENT_JEV
 
-JEV_HELD_CONFIDENCE = 0.55  # a valid intervention answer below jev's act threshold (0.6)
+JEV_BELOW_CONFIDENCE = 0.55  # a gate p_yes below jev's act threshold (0.6): the gate stays closed
 JEV_ACT_CONFIDENCE = 0.7  # acts only under jev's own threshold (0.6), would be held under the global one (0.8)
 JEV_THRESHOLD = 0.6
 JEV_MODEL = "jev-latest"  # the shipped decision.jev.model default
@@ -93,9 +93,8 @@ async def _act_round(stack, confidence: float) -> None:
             assert tags.get("decide.backend.requested") == "jev", tags
             assert tags.get("decide.fallback_reason", "") == "", tags
             assert abs(float(tags.get("decide.confidence")) - confidence) < 1e-9, tags
-            # jev's own threshold decided, not the global 0.8 (decision.jev.act_confidence_threshold).
+            # jev's own threshold decided, not claude's 0.8 (decision.jev.act_confidence_threshold).
             assert abs(float(tags.get("decide.act_confidence_threshold")) - JEV_THRESHOLD) < 1e-9, tags
-            assert tags.get("decide.act_confidence_threshold.source") == "jev", tags
             assert _jev_chats(stack, span), (
                 f"no jev chat span under invoke_agent: {[s.name for s in children(stack, span)]}"
             )
@@ -121,20 +120,21 @@ async def test_jev_high_confidence_acts(fresh_stack):
 @pytest.mark.uc("UC-044", flow="main", steps=[4], tc="TC-008")
 @pytest.mark.usefixtures("flag_service")
 async def test_jev_acts_under_its_own_threshold(fresh_stack):
-    """Jev, gate p_yes 0.7: above jev's act threshold (0.6) but below the global one (0.8) ->
-    decide.outcome=act with decide.act_confidence_threshold=0.6, source jev. Fails if the agent
-    ignores decision.jev.act_confidence_threshold and uses the global threshold."""
+    """Jev, gate p_yes 0.7: above jev's act threshold (0.6) but below claude's (0.8) ->
+    decide.outcome=act with decide.act_confidence_threshold=0.6. Fails if the agent ignores
+    decision.jev.act_confidence_threshold."""
     await _act_round(fresh_stack, JEV_ACT_CONFIDENCE)
 
 
 @pytest.mark.asyncio
-@pytest.mark.uc("UC-040", flow="A5", tc="TC-008")
+@pytest.mark.uc("UC-040", flow="A13", tc="TC-008")
+@pytest.mark.uc("UC-040", flow="A9", tc="TC-008")
 @pytest.mark.usefixtures("flag_service")
-async def test_jev_below_threshold_is_held(fresh_stack):
-    """Jev, gate p_yes 0.55 (below jev's 0.6 act threshold) -> decide.outcome=held: no
-    agent.decision, nothing written, nothing applied."""
+async def test_jev_below_threshold_is_noop(fresh_stack):
+    """Jev, gate p_yes 0.55 (below jev's 0.6 act threshold): the gate stays closed, so the round
+    is decide.outcome=noop, not held: no agent.decision, nothing written, nothing applied."""
     stack = fresh_stack
-    stack.fake_jev.script("valid", intervention=SCRIPTED_INTERVENTION, confidence=JEV_HELD_CONFIDENCE)
+    stack.fake_jev.script("valid", intervention=SCRIPTED_INTERVENTION, confidence=JEV_BELOW_CONFIDENCE)
     _configure(stack)
 
     game_client, channel = await get_game_client(stack)
@@ -145,12 +145,14 @@ async def test_jev_below_threshold_is_held(fresh_stack):
             await _wait_first_call(stack)
 
             span = await wait_decide_span(
-                stack, game_id, lambda t: t.get("decide.outcome") == "held", "decide.outcome=held"
+                stack, game_id, lambda t: t.get("decide.outcome") == "noop", "decide.outcome=noop"
             )
             tags = span.attributes
             assert tags.get("decide.backend") == "jev", tags
-            assert abs(float(tags.get("decide.confidence")) - JEV_HELD_CONFIDENCE) < 1e-9, tags
-            assert not children(stack, span, "agent.decision"), "a held answer must not reach runDecision"
+            # A noop's confidence is p(noop) = 1 - p_yes.
+            assert abs(float(tags.get("decide.confidence")) - (1 - JEV_BELOW_CONFIDENCE)) < 1e-9, tags
+            assert not children(stack, span, "agent.decision"), "a noop must not reach runDecision"
+            assert not any(c["stage"] == "details" for c in stack.fake_jev.requests()), "a closed gate asks no details"
 
             await assert_nothing_applied(collector, game_id)
             outcomes = {
@@ -158,7 +160,7 @@ async def test_jev_below_threshold_is_held(fresh_stack):
                 for s in decide_spans(stack, game_id)
                 if s.attributes.get("decide.backend") == "jev"
             }
-            assert outcomes == {"held"}, outcomes
+            assert outcomes == {"noop"}, outcomes
     finally:
         await channel.close()
 

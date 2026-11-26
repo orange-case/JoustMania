@@ -124,7 +124,7 @@ describe("UC-035: main step 3, parseDecideTraces — remote path", () => {
   it("discarded: reason recorded; truncated answers JSON yields blanks, not a throw", () => {
     const row = only(discardedFixture);
     expect(row.outcome).toBe("discarded");
-    expect(row.outcomeReason).toBe("game_ended");
+    expect(row.outcomeReason).toBe("stale: game_ended");
     expect(row.intervention).toBe("");
     expect(row.confidence).toBeCloseTo(0.93);
   });

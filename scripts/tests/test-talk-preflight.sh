@@ -143,8 +143,8 @@ flags = {
     "experiment_dynamic_enabled": f(onoff, "off"),
     "experiment_tick_seconds": f({"fast": 10, "default": 30, "slow": 60}, "default"),
     "decision.backend": f({"rules": "rules", "claude": "claude"}, "rules"),
-    "decision.act_confidence_threshold": f({"default": 0.8, "strict": 0.95}, "default"),
-    "decision.jev.act_confidence_threshold": f({"inherit": -1.0, "gate": 0.6, "strict": 0.95}, "gate"),
+    "decision.claude.act_confidence_threshold": f({"default": 0.8, "strict": 0.95}, "default"),
+    "decision.jev.act_confidence_threshold": f({"gate": 0.6, "default": 0.8, "strict": 0.95}, "gate"),
     "decision.capture_content": f(onoff, "on"),
     "decision.min_interval_ms": f({"default": 3000}, "default"),
     "decision.claude.model": f({"haiku": "h", "sonnet": "s"}, "haiku"),
@@ -222,12 +222,12 @@ check "missing connect-proxy skips the reachability check" "WARN  pairing daemon
 if has "${SECRET}"; then not_ok "key value never printed"; else ok "key value never printed"; fi
 
 # --- drift from the stage baseline -----------------------------------------
-fixture enabled=off decision.act_confidence_threshold=strict decision.jev.act_confidence_threshold=inherit policy.max_interventions_per_minute=default
+fixture enabled=off decision.claude.act_confidence_threshold=strict decision.jev.act_confidence_threshold=default policy.max_interventions_per_minute=default
 run_preflight
 if [[ "${RC}" -eq 1 ]]; then ok "drift exits 1"; else not_ok "drift exits 1 (rc=${RC})"; fi
 check "kill switch off fails" "FAIL  enabled = off (false), stage baseline is on"
-check "strict threshold fails" "FAIL  decision.act_confidence_threshold = strict (0.95), stage baseline is default"
-check "jev threshold inherit fails" "FAIL  decision.jev.act_confidence_threshold = inherit (-1.0), stage baseline is gate"
+check "strict threshold fails" "FAIL  decision.claude.act_confidence_threshold = strict (0.95), stage baseline is default"
+check "jev threshold default fails" "FAIL  decision.jev.act_confidence_threshold = default (0.8), stage baseline is gate"
 check "shipped intervention budget fails (#1326)" "FAIL  policy.max_interventions_per_minute = default (2), stage baseline is aggressive"
 check "unset env falls back to the stage flag" "PASS  LLM budget: llm.max_requests_per_minute = stage (30/min"
 if grep -qE '^(PUT|POST|DELETE) ' "${FAKE_FLAG_LOG}"; then not_ok "the pre-flight writes nothing"; else ok "the pre-flight writes nothing"; fi

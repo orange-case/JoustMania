@@ -210,7 +210,7 @@ func TestGoalCriterion(t *testing.T) {
 	})
 
 	t.Run("UC-042/A12 a caller's noul gets no goal sentence", func(t *testing.T) {
-		q := decide.Question{ID: "caller.noul", Kind: decide.KindNoul, Text: "Is it close?"}
+		q := decide.Question{ID: "caller.noul", Kind: kindNoul, Text: "Is it close?"}
 		jq, err := encodeQuestion(q, goalRequest(""), "")
 		if err != nil {
 			t.Fatal(err)

@@ -252,10 +252,9 @@ func TestRegisterPrediction_ActedAndCounterfactual(t *testing.T) {
 		{"UC-040/A44 blocked act is a counterfactual", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true, blocked: true}, true, false},
 		{"UC-040/A44 gated-off act is a counterfactual", decideRecord{outcome: DecideOutcomeAct, permissionKnown: true}, true, false},
 		{"UC-040/A44 held is a counterfactual", decideRecord{outcome: DecideOutcomeHeld}, true, false},
-		{"UC-040/A44 discarded target_gone is a counterfactual", decideRecord{outcome: DecideOutcomeDiscarded, discardedReason: DiscardTargetGone}, true, false},
+		{"UC-040/A44 discarded stale target_gone is a counterfactual", decideRecord{outcome: DecideOutcomeDiscarded, discardedReason: DiscardStale, discardedDetail: DiscardTargetGone}, true, false},
 		{"UC-040/A44 applied rules fallback is acted", decideRecord{outcome: DecideOutcomeFallback, permissionKnown: true, applied: true}, true, true},
 		{"UC-040/A44 noop registers nothing", decideRecord{outcome: DecideOutcomeNoop}, false, false},
-		{"UC-040/A44 invalid registers nothing", decideRecord{outcome: DecideOutcomeInvalid}, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := testBook(t, &clock)

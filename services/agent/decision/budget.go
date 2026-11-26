@@ -2,6 +2,7 @@ package decision
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/joustmania/agent/decide"
@@ -96,17 +97,21 @@ func objectiveDominant(weights map[string]float64, name string) bool {
 	return true
 }
 
-// refusalKey identifies a decision for A21's repeat check.
-func refusalKey(d Decision) string { return d.Intervention + "|" + d.TargetSerial }
-
-// repeatRefusal reports whether a rate_limit refusal of d repeats one already
-// reported in the current budget state (A21).
-func (l *Loop) repeatRefusal(d Decision, now time.Time) bool {
-	return !l.limiter.firstRefusal(refusalKey(d), now)
+// refusalKey identifies a refusal for A21's repeat check: the reason, the
+// intervention and its target or group set.
+func refusalKey(reason BlockReason, d Decision) string {
+	return string(reason) + "|" + d.Intervention + "|" + d.TargetSerial + "|" + strings.Join(d.TargetSerials, ",")
 }
 
-// recordRepeatRefusal records a repeated rate_limit (A21) or already_charged (A31)
-// refusal without spans, warning or timeline entry: the outcome stays in the cycle's
+// repeatRefusal reports whether this refusal of d repeats one already reported in
+// the game's current budget state (A21). One rule for every block reason: the
+// ledgers that refuse change only when something is admitted or the window moves.
+func (l *Loop) repeatRefusal(reason BlockReason, d Decision, now time.Time) bool {
+	return !l.limiter.firstRefusal(refusalKey(reason, d), now)
+}
+
+// recordRepeatRefusal records a repeated refusal (A21) without spans, warning or
+// timeline entry: the outcome stays in the cycle's
 // LayerState (so invoke_agent still reports decide.blocked) and in
 // agent_decisions_total, and a debug line names the repeat.
 func (l *Loop) recordRepeatRefusal(ctx context.Context, gameKind string, d Decision, cost float64, state *LayerState, reason BlockReason) {

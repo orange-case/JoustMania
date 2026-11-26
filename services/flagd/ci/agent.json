@@ -748,7 +748,7 @@
       },
       "defaultVariant": "rules"
     },
-    "decision.act_confidence_threshold": {
+    "decision.claude.act_confidence_threshold": {
       "state": "ENABLED",
       "variants": {
         "low": 0.5,
@@ -823,7 +823,6 @@
     "decision.jev.act_confidence_threshold": {
       "state": "ENABLED",
       "variants": {
-        "inherit": -1.0,
         "gate": 0.6,
         "default": 0.8,
         "strict": 0.95

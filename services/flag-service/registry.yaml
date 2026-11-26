@@ -65,7 +65,7 @@ flags:
   - {set: agent, key: experiment_dynamic_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: rollout_enabled, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: decision.backend, kind: overlay, scope: [stack], persist: true, bounds: {variants: [rules, claude, jev]}}
-  - {set: agent, key: decision.act_confidence_threshold, kind: overlay, scope: [stack]}
+  - {set: agent, key: decision.claude.act_confidence_threshold, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.jev.act_confidence_threshold, kind: overlay, scope: [stack]}
   - {set: agent, key: decision.capture_content, kind: overlay, scope: [stack], bounds: {variants: ["on", "off"]}}
   - {set: agent, key: decision.claude.model, kind: overlay, scope: [stack], persist: true}

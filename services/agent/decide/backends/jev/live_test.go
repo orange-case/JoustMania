@@ -100,7 +100,7 @@ func TestLiveDecide(t *testing.T) {
 	ex := rec.last()
 	t.Logf("noul: latency=%v %s", time.Since(start), usageLine(ex.response))
 	for _, a := range resp.Answers {
-		t.Logf("  %s: noul=%.3f confidence=%.3f", a.QuestionID, *a.Noul, a.Confidence)
+		t.Logf("  %s: noul=%.3f confidence=%.3f", a.QuestionID, a.Score, a.Confidence)
 	}
 	record(t, "request_noul.json", ex.request)
 	record(t, "response_noul.json", ex.response)
@@ -153,7 +153,7 @@ func TestLiveGate(t *testing.T) {
 		for _, a := range resp.Answers {
 			switch a.QuestionID {
 			case GateQuestionID:
-				pYes = a.Noul
+				pYes = &a.Score
 			case decide.QuestionFFAIntervention:
 				pick = a.Choice
 			}
@@ -268,10 +268,10 @@ func TestLiveOptionOrder(t *testing.T) {
 				}
 				iv, _ := resp.Find(decide.QuestionFFAIntervention)
 				gate, found := resp.Find(GateQuestionID)
-				if !found || gate.Noul == nil {
+				if !found {
 					t.Fatalf("%s %s: no gate answer", sc.name, order)
 				}
-				t.Logf("%s %s #%d: p_yes=%.2f choice=%s p(%s)=%.2f top=%v", sc.name, order, r+1, *gate.Noul, iv.Choice, moved, iv.Probabilities[moved], topProbabilities(iv.Probabilities, 3))
+				t.Logf("%s %s #%d: p_yes=%.2f choice=%s p(%s)=%.2f top=%v", sc.name, order, r+1, gate.Score, iv.Choice, moved, iv.Probabilities[moved], topProbabilities(iv.Probabilities, 3))
 			}
 		}
 	}

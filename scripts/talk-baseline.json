@@ -8,7 +8,7 @@
     "rollout_enabled": "off",
     "experiments_enabled": "off",
     "decision.backend": "rules",
-    "decision.act_confidence_threshold": "default",
+    "decision.claude.act_confidence_threshold": "default",
     "decision.jev.act_confidence_threshold": "gate",
     "decision.capture_content": "on",
     "decision.min_interval_ms": "default",

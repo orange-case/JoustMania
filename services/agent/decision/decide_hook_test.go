@@ -118,10 +118,7 @@ func rulesSnapshot() flags.Snapshot {
 		Enabled:              true,
 		InterventionsAllowed: allInterventions(),
 		Policy:               flags.Policy{MaxInterventionsPerMinute: 100},
-		Decision: flags.DecisionBackend{
-			Backend:                flags.DecisionBackendRules,
-			ActConfidenceThreshold: flags.DefaultDecisionActConfidenceThreshold,
-		},
+		Decision:             flags.DecisionBackend{Backend: flags.DecisionBackendRules},
 	}
 }
 
@@ -325,9 +322,8 @@ func remoteSnapshot(timeout time.Duration) flags.Snapshot {
 	s.InterventionsAllowed = []string{"noop", "grant_shield", "adjust_music_tempo", "play_audio_cue", "adjust_global_sensitivity"}
 	s.LLMGate = flags.LLMGate{EligibleGameKinds: []string{"real"}, MaxRequestsPerMinute: 100}
 	s.Decision = flags.DecisionBackend{
-		Backend:                flags.DecisionBackendClaude,
-		ActConfidenceThreshold: 0.8,
-		Claude:                 flags.RemoteBackendConfig{Model: "claude-haiku-4-5-20251001", Timeout: timeout},
+		Backend: flags.DecisionBackendClaude,
+		Claude:  flags.RemoteBackendConfig{Model: "claude-haiku-4-5-20251001", Timeout: timeout, ActConfidenceThreshold: 0.8},
 	}
 	return s
 }
@@ -491,30 +487,35 @@ func TestRemote_HeldBelowThreshold(t *testing.T) {
 	}
 }
 
-// UC: UC-040 A8 A9
-func TestRemote_NoopAndInvalid(t *testing.T) {
-	cases := []struct {
-		name, intervention, target, outcome, reason string
-	}{
-		{"UC-040/A9 noop", "noop", "none", DecideOutcomeNoop, ""},
-		{"UC-040/A8 noop with target", "noop", "A", DecideOutcomeInvalid, invalidNoopWithTarget},
-		{"UC-040/A8 player intervention without target", "grant_shield", "none", DecideOutcomeInvalid, invalidPlayerTargetMissing},
-		{"UC-040/A8 session intervention with target", "adjust_music_tempo", "B", DecideOutcomeInvalid, invalidSessionTargetedAtPlayer},
-	}
-	for _, tc := range cases {
+// UC: UC-040 A9
+func TestRemote_Noop(t *testing.T) {
+	t.Run("UC-040/A9 noop", func(t *testing.T) {
+		be := newFakeDecideBackend(ffaAnswer("noop", 0.95, "none", 0, "x"))
+		h := newRemoteHarness(t, remoteSnapshot(time.Second), be)
+		span := h.run(t)
+		if n := len(h.sink.decisions()); n != 0 {
+			t.Fatalf("applied %d decisions, want none", n)
+		}
+		if g := strAttr(t, span, AttrDecideOutcome); g != DecideOutcomeNoop {
+			t.Fatalf("outcome = %q, want noop", g)
+		}
+	})
+}
+
+// TestRemote_InconsistentAnswersFallBack: answers that do not fit together are an
+// invalid answer (decide-contract §4.3): the rules decide on the current context.
+// UC: UC-040 A8 A2
+func TestRemote_InconsistentAnswersFallBack(t *testing.T) {
+	for _, tc := range []struct{ name, intervention, target string }{
+		{"UC-040/A8 noop with target", "noop", "A"},
+		{"UC-040/A8 player intervention without target", "grant_shield", "none"},
+		{"UC-040/A8 session intervention with target", "adjust_music_tempo", "B"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			be := newFakeDecideBackend(ffaAnswer(tc.intervention, 0.95, tc.target, 0, "x"))
 			h := newRemoteHarness(t, remoteSnapshot(time.Second), be)
 			span := h.run(t)
-			if n := len(h.sink.decisions()); n != 0 {
-				t.Fatalf("applied %d decisions, want none", n)
-			}
-			if g := strAttr(t, span, AttrDecideOutcome); g != tc.outcome {
-				t.Fatalf("outcome = %q, want %q", g, tc.outcome)
-			}
-			if tc.reason != "" && strAttr(t, span, AttrDecideInvalidReason) != tc.reason {
-				t.Fatalf("invalid_reason = %q, want %q", strAttr(t, span, AttrDecideInvalidReason), tc.reason)
-			}
+			assertRulesFallback(t, h, span, DecideFallbackInvalidAnswer, DecideFallbackInvalidAnswer)
 		})
 	}
 }
@@ -728,7 +729,7 @@ func TestRemote_DiscardedWhenGameEnded(t *testing.T) {
 	close(be.release)
 	h.loop.AwaitInflight()
 	span := spansByName(h.sr.Ended(), SpanDecide)[0]
-	if strAttr(t, span, AttrDecideOutcome) != DecideOutcomeDiscarded || strAttr(t, span, AttrDecideDiscardedReason) != DiscardGameEnded {
+	if strAttr(t, span, AttrDecideOutcome) != DecideOutcomeDiscarded || strAttr(t, span, AttrDecideDiscardedReason) != DiscardStale || strAttr(t, span, AttrDecideDiscardedDetail) != DiscardGameEnded {
 		t.Fatal("an answer landing after the game ended must be discarded")
 	}
 	if len(h.sink.decisions()) != 0 {
@@ -741,7 +742,7 @@ func TestRemote_DiscardedWhenGameEnded(t *testing.T) {
 // UC: UC-040 main
 func TestMapAnswers_MagnitudeAndRationale(t *testing.T) {
 	resp, _ := ffaAnswer("adjust_global_sensitivity", 0.9, "none", 0.6, strings.Repeat("x", 400))(decide.Request{})
-	d, outcome, _ := mapAnswers(decide.Request{}, resp)
+	d, outcome := mapAnswers(decide.Request{}, resp)
 	if outcome != DecideOutcomeAct || d.Value != "2" || d.TargetSerial != "" {
 		t.Fatalf("got %+v %s, want adjust_global_sensitivity value 2 (rounded), session-scoped", d, outcome)
 	}
@@ -749,7 +750,7 @@ func TestMapAnswers_MagnitudeAndRationale(t *testing.T) {
 		t.Fatalf("reason runes = %d, want truncated to %d+...", n, maxRationaleRunes)
 	}
 	resp, _ = ffaAnswer("play_audio_cue", 0.9, "none", 0.6, "")(decide.Request{})
-	d, _, _ = mapAnswers(decide.Request{}, resp)
+	d, _ = mapAnswers(decide.Request{}, resp)
 	if d.Value != "" || d.Reason != "decided by claude" {
 		t.Fatalf("bounds-less intervention: %+v, want empty Value and a default reason", d)
 	}
@@ -897,13 +898,28 @@ func fireAndMutateSnapshot(t *testing.T, be *fakeDecideBackend, snap flags.Snaps
 	return h, ds[0]
 }
 
+// staleDetails are the decide.discarded_detail values of a stale discard.
+var staleDetails = map[string]bool{
+	DiscardStaleContext: true, DiscardGameEnded: true, DiscardTargetGone: true,
+	DiscardTargetStale: true, DiscardStateTooOld: true,
+}
+
+// assertDiscarded checks a discard with reason, or with reason stale and that
+// detail when reason is one of staleDetails.
 func assertDiscarded(t *testing.T, h remoteHarness, span sdktrace.ReadOnlySpan, reason string) {
 	t.Helper()
 	if g := strAttr(t, span, AttrDecideOutcome); g != DecideOutcomeDiscarded {
 		t.Fatalf("outcome = %q, want discarded", g)
 	}
-	if g := strAttr(t, span, AttrDecideDiscardedReason); g != reason {
-		t.Fatalf("discarded_reason = %q, want %q", g, reason)
+	want, detail := reason, ""
+	if staleDetails[reason] {
+		want, detail = DiscardStale, reason
+	}
+	if g := strAttr(t, span, AttrDecideDiscardedReason); g != want {
+		t.Fatalf("discarded_reason = %q, want %q", g, want)
+	}
+	if g, _ := attrValue(span, AttrDecideDiscardedDetail); g.AsString() != detail {
+		t.Fatalf("discarded_detail = %q, want %q", g.AsString(), detail)
 	}
 	if got := h.sink.decisions(); len(got) != 0 {
 		t.Fatalf("applied %+v, want nothing", got)
@@ -964,7 +980,7 @@ func TestRemote_AllowListAtLanding(t *testing.T) {
 func TestRemote_ThresholdRaisedMidFlight(t *testing.T) {
 	be := newFakeDecideBackend(ffaAnswer("grant_shield", 0.9, "A", 0.5, "x"))
 	h, span := fireAndMutate(t, be, time.Hour, func(h remoteHarness) {
-		h.flags.mutate(func(s *flags.Snapshot) { s.Decision.ActConfidenceThreshold = 0.95 })
+		h.flags.mutate(func(s *flags.Snapshot) { s.Decision.Claude.ActConfidenceThreshold = 0.95 })
 	})
 	if g := strAttr(t, span, AttrDecideOutcome); g != DecideOutcomeHeld {
 		t.Fatalf("outcome = %q, want held under the live strict threshold", g)
@@ -1220,7 +1236,7 @@ func TestRemote_BudgetExhaustedFallsBackToRules(t *testing.T) {
 // TestRemote_FallbackOnGoneContextDecidesNothing: a failed call falls back to the
 // rules engine for the CURRENT context; when that context is gone or the game has
 // ended by the time the call returns, nothing is decided and the span carries
-// outcome=fallback together with the discarded_reason (and the original
+// outcome=discarded, discarded_reason=stale with the detail (and the original
 // fallback_reason).
 // UC: UC-040 A2
 func TestRemote_FallbackOnGoneContextDecidesNothing(t *testing.T) {
@@ -1229,10 +1245,10 @@ func TestRemote_FallbackOnGoneContextDecidesNothing(t *testing.T) {
 		reason string
 		mutate func(h remoteHarness)
 	}{
-		{"UC-040/A2 context gone: fallback with stale_context", DiscardStaleContext, func(h remoteHarness) {
+		{"UC-040/A2 context gone: discarded stale, context_missing", DiscardStaleContext, func(h remoteHarness) {
 			h.provider.evict(remoteGameID)
 		}},
-		{"UC-040/A2 game ended: fallback with game_ended", DiscardGameEnded, func(h remoteHarness) {
+		{"UC-040/A2 game ended: discarded stale, game_ended", DiscardGameEnded, func(h remoteHarness) {
 			ended := remoteContext()
 			ended.Session.GameActive = boolPtr(false)
 			h.provider.set(remoteGameID, ended)
@@ -1246,9 +1262,10 @@ func TestRemote_FallbackOnGoneContextDecidesNothing(t *testing.T) {
 			h, span := fireAndMutate(t, be, time.Hour, tc.mutate)
 			for key, w := range map[string]string{
 				AttrDecideBackend:         RulesBackendName,
-				AttrDecideOutcome:         DecideOutcomeFallback,
+				AttrDecideOutcome:         DecideOutcomeDiscarded,
 				AttrDecideFallbackReason:  DecideFallbackError,
-				AttrDecideDiscardedReason: tc.reason,
+				AttrDecideDiscardedReason: DiscardStale,
+				AttrDecideDiscardedDetail: tc.reason,
 			} {
 				if g := strAttr(t, span, key); g != w {
 					t.Errorf("%s = %q, want %q", key, g, w)
@@ -1304,21 +1321,19 @@ func TestRemote_HeldNotDiscardedAfterGameEnded(t *testing.T) {
 	})
 }
 
-// TestMapAnswers_MissingInterventionIsInvalid: the fourth invalid_reason. A
-// response without an ffa.intervention answer maps to outcome=invalid with
-// missing_intervention_answer (TestRemote_NoopAndInvalid covers the other three
-// through the hook; decide.Validate rejects such a response before mapAnswers on
-// the remote path, so this unit is the backstop).
+// TestMapAnswers_MissingInterventionActsOnNothing: decide.Validate rejects a
+// response without an ffa.intervention answer before mapAnswers runs; as a
+// backstop mapAnswers maps it to noop, never to a decision.
 // UC: UC-040 A8
-func TestMapAnswers_MissingInterventionIsInvalid(t *testing.T) {
-	t.Run("UC-040/A8 missing ffa.intervention answer is invalid", func(t *testing.T) {
+func TestMapAnswers_MissingInterventionActsOnNothing(t *testing.T) {
+	t.Run("UC-040/A8 missing ffa.intervention answer decides nothing", func(t *testing.T) {
 		resp := decide.Response{Backend: "claude", Answers: []decide.Answer{
 			{QuestionID: decide.QuestionFFATarget, Choice: decide.TargetNone,
 				Probabilities: map[string]float64{decide.TargetNone: 1}, Confidence: 1},
 		}}
-		d, outcome, reason := mapAnswers(decide.Request{}, resp)
-		if outcome != DecideOutcomeInvalid || reason != invalidMissingIntervention {
-			t.Fatalf("mapAnswers = (%q, %q), want (invalid, %s)", outcome, reason, invalidMissingIntervention)
+		d, outcome := mapAnswers(decide.Request{}, resp)
+		if outcome != DecideOutcomeNoop {
+			t.Fatalf("mapAnswers outcome = %q, want noop", outcome)
 		}
 		if d.Intervention != "" || d.TargetSerial != "" {
 			t.Fatalf("decision = %+v, want none", d)

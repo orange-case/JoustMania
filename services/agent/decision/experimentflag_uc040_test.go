@@ -57,12 +57,12 @@ func TestExperimentFlag_LeverBlockedInBothArms(t *testing.T) {
 		t.Run("UC-040/A40 BR-028 set_pacing_profile in the "+arm+" arm of a windows experiment is blocked experiment_flag, no write, no budget", func(t *testing.T) {
 			l, sink, _, _ := budgetLoop(t, 100, pacing("calm"))
 			l.SetExperimentFlagSource(flagOf("windows"))
-			before := limiterEntries(l)
+			before := limiterEntries(l, l.nowOrDefault()())
 			expectOutcome(t, runCycle(l, experimentCtx(arm)), "set_pacing_profile/:experiment_flag")
 			if n := writesOfIntervention(sink, InterventionSetPacingProfile); n != 0 {
 				t.Fatalf("pacing writes = %d, want 0", n)
 			}
-			if after := limiterEntries(l); after != before {
+			if after := limiterEntries(l, l.nowOrDefault()()); after != before {
 				t.Fatalf("limiter entries %d -> %d: experiment_flag must not charge the budget", before, after)
 			}
 		})

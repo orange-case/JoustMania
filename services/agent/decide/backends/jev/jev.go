@@ -266,10 +266,10 @@ const (
 // noul (a gated stage 1), else nil.
 func gateAttributes(resp decide.Response) []attribute.KeyValue {
 	gate, ok := resp.Find(GateQuestionID)
-	if !ok || gate.Noul == nil {
+	if !ok {
 		return nil
 	}
-	out := []attribute.KeyValue{attribute.Float64(AttrGatePYes, *gate.Noul)}
+	out := []attribute.KeyValue{attribute.Float64(AttrGatePYes, gate.Score)}
 	if iv, ok := resp.Find(decide.QuestionFFAIntervention); ok {
 		out = append(out,
 			attribute.String(AttrStage1Choice, iv.Choice),

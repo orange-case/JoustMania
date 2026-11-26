@@ -138,7 +138,6 @@ export type DecideOutcome =
   | "act"
   | "held"
   | "noop"
-  | "invalid"
   | "fallback"
   | "discarded";
 
@@ -146,10 +145,16 @@ const KNOWN_OUTCOMES: ReadonlySet<string> = new Set([
   "act",
   "held",
   "noop",
-  "invalid",
   "fallback",
   "discarded",
 ]);
+
+/** decide.discarded_reason, plus the check a stale discard failed ("stale: target_gone"). */
+function discardedReason(tags: Map<string, unknown>): string {
+  const reason = tagString(tags, "decide.discarded_reason");
+  const detail = tagString(tags, "decide.discarded_detail");
+  return reason && detail ? `${reason}: ${detail}` : reason;
+}
 
 /** An agent.decision span linked to a decide row via the trace shape. */
 export interface LinkedDecision {
@@ -226,7 +231,7 @@ export interface DecideRow {
   threshold: number | null;
   /** decide.outcome; unknown values are passed through as "unknown". */
   outcome: DecideOutcome | "unknown";
-  /** decide.invalid_reason / decide.discarded_reason, whichever is set. */
+  /** decide.discarded_reason, with decide.discarded_detail after a colon when set. */
   outcomeReason: string;
   /** decide.rationale: untrusted model text. */
   rationale: string;
@@ -553,8 +558,7 @@ function decideRowFrom(
     confidence: tagNumber(tags, "decide.confidence"),
     threshold: tagNumber(tags, "decide.act_confidence_threshold"),
     outcome: KNOWN_OUTCOMES.has(rawOutcome) ? (rawOutcome as DecideOutcome) : "unknown",
-    outcomeReason:
-      tagString(tags, "decide.invalid_reason") || tagString(tags, "decide.discarded_reason"),
+    outcomeReason: discardedReason(tags),
     rationale: tagString(tags, "decide.rationale"),
     errorType: tagString(tags, "error.type"),
     gameId: tagString(tags, "game.id"),

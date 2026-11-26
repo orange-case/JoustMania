@@ -88,7 +88,7 @@ func TestFlagState_AttributeSet(t *testing.T) {
 	fl.snap.ExperimentsEnabled = true
 	fl.snap.LLMGate.EligibleGameKinds = []string{"real", "shadow"}
 	fl.snap.Policy = flags.Policy{BatteryThreshold: 2, MaxInterventionsPerMinute: 6}
-	fl.snap.Decision = flags.DecisionBackend{Backend: flags.DecisionBackendJev, ActConfidenceThreshold: 0.6}
+	fl.snap.Decision = flags.DecisionBackend{Backend: flags.DecisionBackendJev, Jev: flags.RemoteBackendConfig{ActConfidenceThreshold: 0.6}}
 	l.OnEvaluate(context.Background(), modeCtx("game_fs02", "FFA"), testTrigger())
 
 	spans := flagStateSpans(sr)

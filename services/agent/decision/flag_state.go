@@ -114,9 +114,13 @@ func flagStateAttributes(snapshot flags.Snapshot, c gamecontext.GameContext, mod
 	}
 	attrs = append(attrs, layerStateAttributes(&state)...)
 	attrs = append(attrs, attribute.Bool(AttrInterventionsEnabled, snapshot.InterventionsEnabled))
+	backend := requestedBackend(snapshot)
+	// The selected backend's own threshold; rules route nothing, so none.
+	if thr, ok := snapshot.Decision.ActThreshold(backend); ok {
+		attrs = append(attrs, attribute.Float64(AttrDecideActThreshold, thr))
+	}
 	return append(attrs,
-		attribute.String(AttrDecideBackendRequested, requestedBackend(snapshot)),
-		attribute.Float64(AttrDecideActThreshold, snapshot.Decision.ActConfidenceThreshold),
+		attribute.String(AttrDecideBackendRequested, backend),
 		attribute.Bool(AttrExperimentsEnabled, snapshot.ExperimentsEnabled),
 		attribute.String(AttrLLMEligibleGameKinds, strings.Join(snapshot.LLMGate.EligibleGameKinds, ",")),
 	)

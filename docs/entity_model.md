@@ -334,13 +334,13 @@ One agent decision cycle for a game: one evaluation, recorded on one `invoke_age
 | game_id | Game decided for | String | 17 | Not Null, Foreign Key (GAME_SESSION.game_id) |
 | backend_requested | `decision.backend` at fire time (`decide.backend.requested`); empty counts as `rules`, an unknown name is kept verbatim and decided by rules with `fallback_reason=unknown_backend` | String | 20 | Not Null, Values: rules, claude, jev, or an unknown name (for example the retired `openai`, #2788) |
 | backend | Backend that actually decided | String | 10 | Not Null, Values: rules, claude, jev |
-| outcome | Decide outcome | String | 10 | Not Null, Values: act, held, noop, invalid, fallback, discarded |
+| outcome | Decide outcome | String | 10 | Not Null, Values: act, held, noop, fallback, discarded |
 | fallback_reason | Why rules decided instead | String | 22 | Optional, Values: unknown_backend, backend_unavailable, async_not_wired, llm_not_eligible, llm_budget_exhausted, timeout, invalid_answer, error |
-| discarded_reason | Why a remote answer (valid, or under the kill switch also a failed or timed-out call) or its rules fallback was dropped | String | 16 | Optional, Values: stale_context, game_ended, target_gone, target_stale, state_too_old, kill_switch, backend_changed, shutdown |
+| discarded_reason | Why a remote answer (valid, or under the kill switch also a failed or timed-out call) or its rules fallback was dropped | String | 16 | Optional, Values: stale, kill_switch, backend_changed, shutdown |
+| discarded_detail | Which re-validation check a `stale` discard failed (`decide.discarded_detail`) | String | 15 | Optional, Values: context_missing, game_ended, target_gone, target_stale, state_too_old |
 | confidence | Routing confidence of `ffa.intervention` | Decimal | 4,3 | Optional, Min: 0, Max: 1 |
-| act_confidence_threshold | Effective threshold read at landing (the answering backend's own, else the global) | Decimal | 4,3 | Optional, Min: 0, Max: 1 |
-| act_confidence_threshold_source | Flag the threshold came from | String | 6 | Optional, Values: jev, global |
-| invalid_reason | Why an answer was invalid (`decide.invalid_reason`, UC-040 A8; cross-question consistency, [decide-contract §4.3](specs/decide-contract.md)); outcome `invalid` has no action and no fallback | String | 34 | Optional, Values: noop_with_target, player_intervention_without_target, session_intervention_with_target, missing_intervention_answer |
+| act_confidence_threshold | The answering backend's threshold (`decision.<backend>.act_confidence_threshold`) read at landing | Decimal | 4,3 | Optional, Min: 0, Max: 1 |
+
 | state_digest | SHA-256 of the canonical state | String | 64 | Not Null |
 | latency_ms | Decide latency | Integer | 6 | Not Null, Min: 0 |
 
@@ -373,7 +373,7 @@ A question in a decide request (`services/agent/decide/decide.go:64-74`, FFA set
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
 | question_id | Id, unique within a request | String | 30 | Primary Key, Values: ffa.intervention, ffa.target, ffa.magnitude |
-| kind | Question kind; `noul` (yes/no answered with P(yes)) shipped in PR #1261, supported by jev and rules only; no caller-level FFA question is a noul; the Jev backend asks the internal `jev.gate` noul every stage-1 round (decide-contract §3.1) | String | 6 | Not Null, Values: choice, score, noul |
+| kind | Question kind (Jev's gate noul is a detail of Jev's wire format, not a kind, decide-contract §3.1) | String | 6 | Not Null, Values: choice, score |
 | text | Prompt text for remote backends | String | 2000 | Not Null |
 | options | Choice options | String | 1000 | Optional |
 | range_min | Score lower bound | Decimal | 6,3 | Optional |
@@ -390,7 +390,6 @@ A backend's answer to one question (`decide.go:77-90`, validation `validate.go`)
 | choice | Chosen option (choice kind) | String | 60 | Optional |
 | probabilities | Option → probability, sum 1 ± 0.001, choice is the argmax | String | 2000 | Optional |
 | score | Value within the range (score kind) | Decimal | 6,3 | Optional |
-| noul | Probability of "yes" (noul kind only; confidence = \|2p − 1\| for jev, 0.5 at confidence 0 for rules) | Decimal | 4,3 | Optional, Min: 0, Max: 1 |
 | confidence | Confidence that acting is right | Decimal | 4,3 | Not Null, Min: 0, Max: 1 |
 
 ### INTERVENTION
