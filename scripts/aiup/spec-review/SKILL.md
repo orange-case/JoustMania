@@ -3,7 +3,7 @@ Vendored for JoustMania (#1263 pattern) from
   https://github.com/AI-Unified-Process/marketplace/blob/dc1d908725e01dd7d129bc7133c6ff209437b3c1/aiup-core/skills/spec-review/SKILL.md
 (aiup-core v3.10.0). Derived from the AI Unified Process Marketplace by Simon Martinelli
 (see scripts/aiup/NOTICE). The lint script path in this repo is scripts/aiup/spec-review/scripts/spec_lint.py; the
-baseline is scripts/aiup/spec-lint-baseline.json (not docs/.spec-lint-baseline.json): pass --baseline explicitly.
+Spec Gate runs it with --strict --no-baseline (#2799): JoustMania keeps no baseline, so every ERROR and WARN fails.
 -->
 
 ---

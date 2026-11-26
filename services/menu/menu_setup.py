@@ -13,7 +13,7 @@ from lib.telemetry import get_tracer
 from services.menu import metrics
 from services.menu.controller_events import ControllerEventLoop
 from services.menu.event_publisher import EventPublisher
-from services.menu.handlers import AdminModeHandler, ConnectedHandler, IdleHandler, ReadyHandler
+from services.menu.handlers import ConnectedHandler, IdleHandler, ReadyHandler
 from services.menu.idle_monitor import IdleMonitor, read_sentinel_animation
 from services.menu.settings_ops import SettingsOps
 from services.menu.state_manager import StateManager
@@ -43,11 +43,10 @@ def build_menu(servicer) -> None:
     init_flag_domain("game")
     init_flag_domain("user")
     init_flag_domain("system")
-    # The agent domain is read for the truthful admin display (#818) and
-    # written for the on-device agent kill-switch (#819).
+    # The agent domain is read for the pad's status and written for the on-device agent kill-switch (#819).
     init_flag_domain("agent")
 
-    # Admin settings and the menu selection are persisted admin values on the
+    # The pad's settings and the menu selection are persisted admin values on the
     # flag service (#1415, UC-053 A2): PUT /game|user/{flag} {"persist": true}.
     # The flag files are the read-only baseline (C-033).
     servicer.game_settings_writer = FlagServiceWriter("game")
@@ -55,7 +54,7 @@ def build_menu(servicer) -> None:
     # Agent policy writer for the on-device kill-switch (#819). The human
     # owns agent policy per docs/OWNERSHIP_MODEL.md §2/§6.2. The agent set is
     # served by the flag service (#1412): the kill switch is a persisted admin
-    # setting (PUT /agent/interventions_allowed {"persist": true}, FR-019, D10).
+    # setting (PUT /agent/interventions_allowed {"persist": true}, UC-015 BR-019, D10).
     servicer.agent_settings_writer = FlagServiceWriter("agent")
     # The operator pad's in-memory agent writes (#2050, #2093, UC-015 BR-001, UC-016 BR-012): agent/enabled,
     # agent/interventions_enabled and the in-memory agent rows have no persist in the registry (a persisted
@@ -66,8 +65,7 @@ def build_menu(servicer) -> None:
     servicer.game_settings_client = get_flag_client("game")
     servicer.user_prefs_client = get_flag_client("user")
     servicer.system_client = get_flag_client("system")
-    # Client for resolving effective (agent-override-aware) values for the
-    # admin display (#818) and the kill-switch level (#819).
+    # Client for the agent's switch, level and backend in GetMenuStatus (#819, #2050).
     servicer.agent_settings_client = get_flag_client("agent")
 
     # Utility classes
@@ -98,7 +96,7 @@ def build_menu(servicer) -> None:
     # Voice profile (flag menu_voice: gen_female or gen_male)
     servicer.voice_actor = DEFAULT_VOICE_ACTOR
 
-    # Settings core shared by admin mode and the operator pad commands (#2050, UC-015).
+    # Settings core of the operator pad commands (#2050, UC-015).
     servicer.settings_ops = SettingsOps(
         get_state_manager=lambda: servicer.state_manager,
         controller_channel=servicer.controller_channel,
@@ -107,16 +105,6 @@ def build_menu(servicer) -> None:
         agent_memory_writer=servicer.agent_memory_writer,
         lifecycle_live=lambda: servicer._lifecycle_live(),
     )
-
-    # Admin mode handler
-    servicer.admin_handler = AdminModeHandler(
-        controller_channel=servicer.controller_channel,
-        tracer=tracer,
-        callbacks=servicer,
-        metrics=metrics,
-        settings_ops=servicer.settings_ops,
-    )
-    servicer.state_manager.register_handler(servicer.admin_handler)
 
     # Idle handler and monitor
     servicer.idle_handler = IdleHandler()

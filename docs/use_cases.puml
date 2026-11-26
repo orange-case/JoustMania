@@ -21,11 +21,11 @@ rectangle "JoustMania" {
         usecase "UC-004\nIdentify a Controller" as UC004
         usecase "UC-005\nUnpair a Controller" as UC005
     }
-    package "Lobby, menu & admin" {
+    package "Lobby and menu" {
         usecase "UC-010\nReady Up and Start a Game" as UC010
         usecase "UC-011\nSelect the Game Mode" as UC011
-        usecase "UC-012\nConfigure Settings in Admin Mode" as UC012
-        usecase "UC-013\nStop the Agent from the Controller" as UC013
+        usecase "UC-012\nConfigure Settings in Admin Mode\n(Obsolete, #2819)" as UC012
+        usecase "UC-013\nStop the Agent from the Controller\n(Obsolete, #2819)" as UC013
         usecase "UC-014\nForce-Start a Game" as UC014
         usecase "UC-015\nOperate the Game with the Operator Pad" as UC015
         usecase "UC-016\nSee the Game State on the Operator Pad" as UC016
@@ -98,8 +98,6 @@ player --> UC030
 player --> UC031
 
 host --> UC011
-host --> UC012
-host --> UC013
 host --> UC014
 host --> UC015
 host --> UC016
@@ -200,10 +198,7 @@ UC040 ..> UC053 : <<include>>
 UC042 ..> UC043 : <<include>>
 UC044 ..> UC053 : <<include>>
 UC045 ..> UC053 : <<include>>
-UC013 ..> UC053 : <<include>>
 UC015 ..> UC011 : <<include>>
-UC015 ..> UC012 : <<include>>
-UC015 ..> UC013 : <<include>>
 UC015 ..> UC014 : <<include>>
 UC015 ..> UC027 : <<include>>
 UC015 ..> UC053 : <<include>>

@@ -8,7 +8,7 @@ section there instead of relying on memory; this file only holds the orientation
   observes via OTLP and acts only through flagd flags (plus shadow games); flagd serves flags to all services.
 - Streams (bidi): `StreamButtonEvents` (buttons + LEDs), `StreamGameplayData` (motion + effects).
   Server-stream: `StreamGameEvents`, `StreamMenuEvents`.
-- Menu controller states: CONNECTED (dim LED) → READY (bright LED), plus ADMIN and IDLE; disconnected
+- Menu controller states: CONNECTED (dim LED) → READY (bright LED), plus IDLE; disconnected
   controllers are removed. Game: IDLE → STARTING → RUNNING → ENDING → ENDED.
 - Motion: HID ≈ 1 kHz → controller-manager state loop fixed at 100 Hz → gameplay stream 60 Hz by flag
   (`game_loop.update_frequency_hz`, default 60, variants 15/30/60; 30 Hz only when a client requests no rate); no idle stream. EMA filtering and death thresholds

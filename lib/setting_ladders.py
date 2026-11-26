@@ -46,7 +46,7 @@ AUTOMATIC = "automatic"
 SHIELD_AUTOMATIC = AUTOMATIC
 SHIELD_KNOB_LADDER: list[str] = [AUTOMATIC, *SHIELD_ACTIVATION_LADDER]
 
-# UC-013 / UC-015 BR-004: the intervention levels, most restrictive first; clamped, never wraps.
+# UC-015 BR-004 / BR-019: the intervention levels, most restrictive first; clamped, never wraps.
 AGENT_POLICY_LEVELS: list[str] = ["none", "ambient", "standard", "full"]
 # Levels a resume can restore (BR-002 saves a level only when it is not "none").
 AGENT_SAVED_LEVELS: list[str] = AGENT_POLICY_LEVELS[1:]
