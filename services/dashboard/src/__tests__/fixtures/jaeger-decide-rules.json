@@ -93,17 +93,7 @@
             {
               "key": "decide.answers",
               "type": "string",
-              "value": "[{\"question_id\":\"ffa.intervention\",\"choice\":\"grant_shield\",\"probabilities\":{\"grant_shield\":0.7,\"noop\":0.3},\"score\":0,\"confidence\":0.7},{\"question_id\":\"ffa.target\",\"choice\":\"MOCK0002\",\"score\":0,\"confidence\":0.7}]"
-            },
-            {
-              "key": "decide.confidence",
-              "type": "float64",
-              "value": 0.7
-            },
-            {
-              "key": "decide.confidence.min",
-              "type": "float64",
-              "value": 0.7
+              "value": "[{\"question_id\":\"ffa.intervention\",\"choice\":\"grant_shield\",\"score\":0,\"confidence\":0},{\"question_id\":\"ffa.target\",\"choice\":\"MOCK0002\",\"score\":0,\"confidence\":0}]"
             },
             {
               "key": "decide.rationale",
