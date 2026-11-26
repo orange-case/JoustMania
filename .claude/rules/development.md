@@ -19,7 +19,7 @@ Exact contracts live in `docs/specs/` (services, flags, telemetry, decide contra
 1. Spec first: the mode's use case (UC-020..026 pattern) and requirements
 2. Create `services/game_coordinator/games/<mode>.py`, extend `BaseGameMode` or `TeamsGameBase`
 3. Add it to the `Games` enum in `lib/types.py` and to `_GAME_CLASSES` in `services/game_coordinator/game_factory.py` (`games/__init__.py` is empty; the menu's mode list derives from the enum)
-4. Override `get_game_name()`, `_kill_player_impl()`, `_check_win_condition()`; death thresholds come from `_compute_effective_thresholds()` in `games/base.py`
+4. Override `get_game_name()`, `_kill_player_impl()`, `_check_win_condition()`; death thresholds come from `_compute_effective_thresholds()` in `games/motion.py` (mixed into `BaseGameMode`)
 5. Optional: add config to `game_coordinator.proto`, update `GameFactory._extract_mode_config()` + `MenuServicer._build_game_config()`
 
 ## Service Layout
