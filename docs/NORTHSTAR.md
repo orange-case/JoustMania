@@ -42,7 +42,7 @@ Then we measure whether it finds the move on its own, in shadow experiments wher
 ## Data flywheel
 
 1. **Shadow games** are the main data source for experiments.
-2. **Real game spans calibrate the mocks** and anchor experiment verdicts
+2. **Real game spans calibrate the mocks**; an autonomous promotion is watched
    against recent real games.
 3. **Live outcomes become ground truth**, with automatic rollback on
    degradation.
