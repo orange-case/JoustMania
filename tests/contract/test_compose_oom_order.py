@@ -34,7 +34,9 @@ def _bash_array(name: str) -> set[str]:
     return set(m.group(1).split())
 
 
-GAME = _bash_array("JOUSTMANIA_GAME_SERVICES")
+# Not a game service for the start, but the operator's way out of a stuck game.
+EXTRA_PROTECTED = {"operator-pad"}
+GAME = _bash_array("JOUSTMANIA_GAME_SERVICES") | EXTRA_PROTECTED
 EXPENDABLE = _bash_array("JOUSTMANIA_OBS_SERVICES") | EXTRA_EXPENDABLE
 
 

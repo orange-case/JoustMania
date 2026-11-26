@@ -45,7 +45,7 @@
 # Resource Limits:
 # - Memory limits are per-container ceilings, not typical use; their sum is above the RAM of a 4 GB Pi by design
 # - CPU limits: 1.0 for real-time app services, 0.5 for standard services, 0.25 for lightweight
-# - oom_score_adj: -500 on game services, +500 on observability, agent and dashboard, so the
+# - oom_score_adj: -500 on game services and the operator pad, +500 on observability, agent and dashboard, so the
 #   kernel kills those first under host memory pressure (docs/specs/services.md §2, NFR-081)
 
 x-logging: &default-logging
@@ -610,6 +610,7 @@ services:
     networks:
       - joustmania
     restart: unless-stopped
+    oom_score_adj: -500
     deploy:
       resources:
         limits:

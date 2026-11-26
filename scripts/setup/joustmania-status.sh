@@ -20,12 +20,13 @@
 #     not need it, so it never changes the state)
 #   - docker not reachable (daemon down, user not in the docker group): FAIL,
 #     and the image and service checks are skipped
-#   - memory: MemAvailable, WARN below 512 MiB, FAIL below 256 MiB; disk: free
-#     space on the Docker data root, WARN below 2 GiB, FAIL below 512 MiB
-#     (NFR-081, #2914); a value that cannot be read is SKIP
+#   - memory: MemAvailable, WARN below 512 MiB (urgent below 256 MiB); disk:
+#     free space on the Docker data root, WARN below 2 GiB (urgent below
+#     512 MiB) (NFR-081, #2914); never FAIL: the game still runs, so low
+#     headroom is degraded; a value that cannot be read is SKIP
 # The last line is `state: ok|starting|degraded|failed`.
 # Exit: 0 ok, 1 starting or degraded (any WARN: an observability or agent
-# problem, a branch checkout), 2 failed (a game service down or its image
+# problem, a branch checkout, low memory or disk), 2 failed (a game service down or its image
 # missing, the unit failed, docker not reachable). While the unit is starting,
 # a game service that is not running yet is INFO and the state is `starting`.
 # An INFO `led:` line shows the ACT LED state (C-042) joustmania-led recorded,
@@ -197,8 +198,8 @@ fi
 
 # --- memory and disk headroom (NFR-081, #2914) ------------------------------
 MEMINFO="${JOUSTMANIA_MEMINFO:-/proc/meminfo}"
-MEM_WARN_MIB=512 MEM_FAIL_MIB=256
-DISK_WARN_MIB=2048 DISK_FAIL_MIB=512
+MEM_WARN_MIB=512 MEM_URGENT_MIB=256
+DISK_WARN_MIB=2048 DISK_URGENT_MIB=512
 memory_line() {
     local avail total relief
     avail="$(awk '$1 == "MemAvailable:" { print int($2 / 1024) }' "$MEMINFO" 2>/dev/null)"
@@ -210,8 +211,8 @@ memory_line() {
     local text="memory: $avail MiB available${total:+ of $total MiB}"
     # Nothing in the game depends on these two (BR-004), and they hold the most.
     relief="free memory without stopping the game: $SCRIPT_DIR/joustmania-compose.sh stop jaeger grafana"
-    if ((avail < MEM_FAIL_MIB)); then
-        report FAIL "$text, below $MEM_FAIL_MIB MiB: an OOM kill is close; $relief"
+    if ((avail < MEM_URGENT_MIB)); then
+        report WARN "$text, below $MEM_URGENT_MIB MiB: an OOM kill is close; $relief"
     elif ((avail < MEM_WARN_MIB)); then
         report WARN "$text, below $MEM_WARN_MIB MiB; $relief"
     else
@@ -231,8 +232,8 @@ disk_line() {
         return
     fi
     local text="disk: $free MiB free on the Docker data root ($root)"
-    if ((free < DISK_FAIL_MIB)); then
-        report FAIL "$text, below $DISK_FAIL_MIB MiB: containers cannot write logs or data; see what uses it: docker system df"
+    if ((free < DISK_URGENT_MIB)); then
+        report WARN "$text, below $DISK_URGENT_MIB MiB: containers cannot write logs or data; see what uses it: docker system df"
     elif ((free < DISK_WARN_MIB)); then
         report WARN "$text, below $DISK_WARN_MIB MiB; see what uses it: docker system df"
     else

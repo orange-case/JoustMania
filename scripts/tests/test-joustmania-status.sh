@@ -28,8 +28,8 @@
 #  - --led (ExecStartPost, #2027 PR 4): the unit still activating counts as
 #    started, the state (never `starting`) is written to led.request; a game
 #    service running whose health check is still starting is degraded (#2135)
-#  - memory and disk headroom (NFR-081, #2914): OK, WARN and FAIL at their
-#    thresholds with the relief named, the data root from docker info
+#  - memory and disk headroom (NFR-081, #2914): OK, WARN and the urgent WARN at
+#    their thresholds, never FAIL (degraded, the game runs), the relief named, the data root from docker info
 #    (/var/lib/docker when docker is down), SKIP when unreadable, and --led
 #    writes the state a low value gives
 # Runs as part of `make lint`, or directly: ./scripts/tests/test-joustmania-status.sh
@@ -421,11 +421,11 @@ set_mem 511
 expect mem-warn 1 degraded
 grep -qxF "WARN memory: 511 MiB available of 3792 MiB, below 512 MiB; $(relief)" "${CASE}/out.log" ||
   fail "mem-warn: line: $(grep memory "${CASE}/out.log")"
-make_case mem-fail
+make_case mem-urgent
 set_mem 255
-expect mem-fail 2 failed
-grep -qxF "FAIL memory: 255 MiB available of 3792 MiB, below 256 MiB: an OOM kill is close; $(relief)" "${CASE}/out.log" ||
-  fail "mem-fail: line: $(grep memory "${CASE}/out.log")"
+expect mem-urgent 1 degraded
+grep -qxF "WARN memory: 255 MiB available of 3792 MiB, below 256 MiB: an OOM kill is close; $(relief)" "${CASE}/out.log" ||
+  fail "mem-urgent: line: $(grep memory "${CASE}/out.log")"
 make_case mem-unreadable
 rm "${CASE}/meminfo"
 expect mem-unreadable 0 ok
@@ -435,11 +435,11 @@ echo $((2047 * 1024)) >"${CASE}/df-kb"
 expect disk-warn 1 degraded
 grep -qxF 'WARN disk: 2047 MiB free on the Docker data root (/srv/docker), below 2048 MiB; see what uses it: docker system df' "${CASE}/out.log" ||
   fail "disk-warn: line: $(grep disk "${CASE}/out.log")"
-make_case disk-fail
+make_case disk-urgent
 echo $((511 * 1024)) >"${CASE}/df-kb"
-expect disk-fail 2 failed
-grep -qxF 'FAIL disk: 511 MiB free on the Docker data root (/srv/docker), below 512 MiB: containers cannot write logs or data; see what uses it: docker system df' "${CASE}/out.log" ||
-  fail "disk-fail: line: $(grep disk "${CASE}/out.log")"
+expect disk-urgent 1 degraded
+grep -qxF 'WARN disk: 511 MiB free on the Docker data root (/srv/docker), below 512 MiB: containers cannot write logs or data; see what uses it: docker system df' "${CASE}/out.log" ||
+  fail "disk-urgent: line: $(grep disk "${CASE}/out.log")"
 make_case disk-unreadable
 : >"${CASE}/df-kb"
 expect disk-unreadable 0 ok
@@ -449,7 +449,7 @@ make_case disk-no-docker
 touch "${CASE}/info-fails"
 echo $((100 * 1024)) >"${CASE}/df-kb"
 expect disk-no-docker 2 failed
-grep -qF 'FAIL disk: 100 MiB free on the Docker data root (/var/lib/docker), below 512 MiB' "${CASE}/out.log" ||
+grep -qF 'WARN disk: 100 MiB free on the Docker data root (/var/lib/docker), below 512 MiB' "${CASE}/out.log" ||
   fail "disk-no-docker: line: $(grep disk "${CASE}/out.log")"
 # --led: low memory reaches the LED request
 make_case mem-led

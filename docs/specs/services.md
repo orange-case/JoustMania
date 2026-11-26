@@ -119,8 +119,8 @@ decide who dies when the host runs out of memory: the kernel's OOM killer does, 
 
 | Tier | `oom_score_adj` | Services (`docker-compose.yml`; `docker-compose.lite.yml` for those it has) |
 |---|---|---|
-| Game (kept longest) | `-500` | flag-service, flagd, controller-manager, rust-hid, pairing-daemon, game-coordinator, menu, audio (`JOUSTMANIA_GAME_SERVICES` in `scripts/setup/lib-joustmania.sh`) |
-| Neutral | unset (0) | envoy, connect-proxy, operator-pad |
+| Game (kept longest) | `-500` | flag-service, flagd, controller-manager, rust-hid, pairing-daemon, game-coordinator, menu, audio (`JOUSTMANIA_GAME_SERVICES` in `scripts/setup/lib-joustmania.sh`), and operator-pad: the operator's way out of a stuck game (UC-015) |
+| Neutral | unset (0) | envoy, connect-proxy |
 | Expendable (killed first) | `+500` | jaeger, victoria-metrics, grafana, otel-collector, agent (`JOUSTMANIA_OBS_SERVICES`), dashboard |
 
 - `+500` puts even a small expendable container ahead of any unprotected one; `-500` offsets a game container holding up
