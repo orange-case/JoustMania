@@ -17,8 +17,7 @@ func TestTuning_FlagWinsOverFallback(t *testing.T) {
 	ev := stubEvaluator{
 		strings: map[string]string{keyInferenceModel: "claude-sonnet-5-5", keyInferenceEffort: "high"},
 		ints: map[string]int64{
-			keyInferenceTimeoutSeconds: 30, keyRewatchIntervalSeconds: 15,
-			keyRewatchTimeoutSeconds: 900, keyRevertCooldownSeconds: 120,
+			keyInferenceTimeoutSeconds: 30,
 		},
 		floats: map[string]float64{keyEffectWindowSeconds: 12.5},
 	}
@@ -33,9 +32,6 @@ func TestTuning_FlagWinsOverFallback(t *testing.T) {
 		{"inference.effort", f.InferenceEffort(ctx, "low"), "high"},
 		{"inference.timeout_seconds", f.InferenceTimeout(ctx, fallback), 30 * time.Second},
 		{"effect.window_seconds", f.EffectWindow(ctx, fallback), 12500 * time.Millisecond},
-		{"promotion.rewatch_interval_seconds", f.RewatchInterval(ctx, fallback), 15 * time.Second},
-		{"promotion.rewatch_timeout_seconds", f.RewatchTimeout(ctx, fallback), 900 * time.Second},
-		{"promotion.revert_cooldown_seconds", f.RevertCooldown(ctx, fallback), 120 * time.Second},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
@@ -47,21 +43,20 @@ func TestTuning_FlagWinsOverFallback(t *testing.T) {
 func TestTuning_UnresolvableFlagUsesFallback(t *testing.T) {
 	down := errors.New("PROVIDER_NOT_READY")
 	errs := map[string]error{}
-	for _, k := range []string{keyInferenceModel, keyInferenceEffort, keyInferenceTimeoutSeconds, keyEffectWindowSeconds,
-		keyRewatchIntervalSeconds, keyRewatchTimeoutSeconds, keyRevertCooldownSeconds} {
+	for _, k := range []string{keyInferenceModel, keyInferenceEffort, keyInferenceTimeoutSeconds, keyEffectWindowSeconds} {
 		errs[k] = down
 	}
 	for name, ev := range map[string]stubEvaluator{
 		"flagd unreachable": {
 			strings: map[string]string{keyInferenceModel: "flag-model", keyInferenceEffort: "max"},
-			ints:    map[string]int64{keyInferenceTimeoutSeconds: 30, keyRewatchIntervalSeconds: 15, keyRewatchTimeoutSeconds: 900, keyRevertCooldownSeconds: 120},
+			ints:    map[string]int64{keyInferenceTimeoutSeconds: 30},
 			floats:  map[string]float64{keyEffectWindowSeconds: 12.5},
 			errs:    errs,
 		},
 		"flag missing": {},
 		"unusable values": {
 			strings: map[string]string{keyInferenceModel: "  ", keyInferenceEffort: ""},
-			ints:    map[string]int64{keyInferenceTimeoutSeconds: 0, keyRewatchIntervalSeconds: -1, keyRewatchTimeoutSeconds: 0, keyRevertCooldownSeconds: -5},
+			ints:    map[string]int64{keyInferenceTimeoutSeconds: 0},
 			floats:  map[string]float64{keyEffectWindowSeconds: 0},
 		},
 	} {
@@ -76,11 +71,8 @@ func TestTuning_UnresolvableFlagUsesFallback(t *testing.T) {
 				t.Errorf("inference.effort = %q, want the fallback", got)
 			}
 			for key, got := range map[string]time.Duration{
-				"inference.timeout_seconds":          f.InferenceTimeout(ctx, fb),
-				"effect.window_seconds":              f.EffectWindow(ctx, fb),
-				"promotion.rewatch_interval_seconds": f.RewatchInterval(ctx, fb),
-				"promotion.rewatch_timeout_seconds":  f.RewatchTimeout(ctx, fb),
-				"promotion.revert_cooldown_seconds":  f.RevertCooldown(ctx, fb),
+				"inference.timeout_seconds": f.InferenceTimeout(ctx, fb),
+				"effect.window_seconds":     f.EffectWindow(ctx, fb),
 			} {
 				if got != fb {
 					t.Errorf("%s = %v, want the fallback %v", key, got, fb)
@@ -91,19 +83,19 @@ func TestTuning_UnresolvableFlagUsesFallback(t *testing.T) {
 }
 
 func TestTuning_ReadAtUseTime(t *testing.T) {
-	ev := stubEvaluator{strings: map[string]string{keyInferenceModel: "model-a"}, ints: map[string]int64{keyRevertCooldownSeconds: 60}}
+	ev := stubEvaluator{strings: map[string]string{keyInferenceModel: "model-a"}, ints: map[string]int64{keyInferenceTimeoutSeconds: 60}}
 	f := New(ev, nil)
 	ctx := context.Background()
 	if got := f.InferenceModel(ctx, "env"); got != "model-a" {
 		t.Fatalf("first read = %q, want model-a", got)
 	}
 	ev.strings[keyInferenceModel] = "model-b" // flag changed mid-run
-	ev.ints[keyRevertCooldownSeconds] = 300
+	ev.ints[keyInferenceTimeoutSeconds] = 300
 	if got := f.InferenceModel(ctx, "env"); got != "model-b" {
 		t.Fatalf("second read = %q, want model-b (no caching)", got)
 	}
-	if got := f.RevertCooldown(ctx, time.Second); got != 300*time.Second {
-		t.Fatalf("cooldown = %v, want 300s (no caching)", got)
+	if got := f.InferenceTimeout(ctx, time.Second); got != 300*time.Second {
+		t.Fatalf("timeout = %v, want 300s (no caching)", got)
 	}
 }
 

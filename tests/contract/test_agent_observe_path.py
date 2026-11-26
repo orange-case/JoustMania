@@ -18,22 +18,36 @@ def collector():
 
 @pytest.mark.uc("UC-041", flow="main", cond=["Pre-1"])
 @pytest.mark.parametrize("pipeline", ["traces", "metrics"])
-def test_collector_fans_out_traces_and_metrics_to_the_agent_on_4317(
+def test_collector_fans_out_traces_and_metrics_to_the_agent_over_otlp_http(
     collector, pipeline
 ):
-    """UC-041 Pre-1: both pipelines export to otlp/agent, which targets agent:4317."""
-    assert collector["exporters"]["otlp/agent"]["endpoint"] == "agent:4317"
+    """UC-041 Pre-1, NFR-024: both pipelines export to otlp_http/agent, OTLP/HTTP protobuf to agent:4318."""
+    agent = collector["exporters"]["otlp_http/agent"]
+    assert agent["endpoint"] == "http://agent:4318"
+    assert agent["encoding"] == "proto"
     pipe = collector["service"]["pipelines"][pipeline]
-    assert "otlp/agent" in pipe["exporters"]
+    assert "otlp_http/agent" in pipe["exporters"]
     assert "otlp" in pipe["receivers"]
 
 
 @pytest.mark.uc("UC-041", flow="main", cond=["Pre-1"])
 def test_agent_service_listens_on_the_port_the_collector_targets():
-    """UC-041 Pre-1: the compose agent service listens on :4317."""
+    """UC-041 Pre-1: the compose agent service listens for OTLP/HTTP on :4318."""
     agent = ic.compose_services()["agent"]
-    assert "AGENT_LISTEN_ADDR=:4317" in agent["environment"]
-    assert "4317" in [str(p) for p in agent["expose"]]
+    assert "AGENT_OTLP_HTTP_ADDR=:4318" in agent["environment"]
+    assert "4318" in [str(p) for p in agent["expose"]]
+
+
+@pytest.mark.nfr("NFR-024")
+@pytest.mark.uc("UC-041", flow="A6", steps=[4])
+def test_no_agent_exporter_uses_otlp_grpc(collector):
+    """NFR-024, UC-041 A6 step 4: no pipeline reaches the agent over OTLP/gRPC, whose client backs
+    off re-resolving the agent per signal for minutes after the agent was absent (#2883)."""
+    for name, spec in collector["service"]["pipelines"].items():
+        for exporter in spec["exporters"]:
+            endpoint = str((collector["exporters"].get(exporter) or {}).get("endpoint", ""))
+            if "agent:" in endpoint:
+                assert exporter.split("/")[0] == "otlp_http", (name, exporter)
 
 
 @pytest.mark.uc("UC-041", flow="main", cond=["Post-F-1"])
@@ -55,10 +69,10 @@ def test_storage_exporters_are_independent_of_the_agent_exporter(
     """
     exporters = collector["exporters"]
     pipe_exporters = collector["service"]["pipelines"][pipeline]["exporters"]
-    assert storage in pipe_exporters and "otlp/agent" in pipe_exporters
-    assert storage != "otlp/agent"
+    assert storage in pipe_exporters and "otlp_http/agent" in pipe_exporters
+    assert storage != "otlp_http/agent"
 
-    agent = exporters["otlp/agent"]
+    agent = exporters["otlp_http/agent"]
     store = exporters[storage]
     assert "agent" not in store["endpoint"]
     assert agent["timeout"] == "2s"
@@ -88,13 +102,13 @@ def test_only_the_logs_agent_pipeline_sends_logs_to_the_agent(collector):
             "batch/agent_events",
             "resource",
         ],
-        "exporters": ["otlp/agent"],
+        "exporters": ["otlp_http/agent"],
     }
     assert pipelines["logs"]["exporters"] == ["debug"]
     to_agent = [
         name
         for name, p in pipelines.items()
-        if name.split("/")[0] == "logs" and "otlp/agent" in p["exporters"]
+        if name.split("/")[0] == "logs" and "otlp_http/agent" in p["exporters"]
     ]
     assert to_agent == ["logs/agent"]
     assert collector["processors"]["batch/agent_events"]["timeout"] == "1s"

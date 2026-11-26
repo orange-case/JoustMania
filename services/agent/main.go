@@ -51,12 +51,21 @@ const probeInterval = 5 * time.Second
 // defaultServiceName is the agent's OTEL service name default. It MUST stay
 // identical everywhere it is used: the exported resource (otel.go) and the
 // extractor self-skip (SetOwnService) rely on matching values to break the
-// otlp/agent self-ingestion loop.
+// otlp_http/agent self-ingestion loop.
 const defaultServiceName = "agent"
 
 // resolveServiceName resolves the agent's OTEL service name (env override or default).
 func resolveServiceName() string {
 	return getEnv("OTEL_SERVICE_NAME", defaultServiceName)
+}
+
+// otlpHTTPAddr is AGENT_OTLP_HTTP_ADDR, ":4318" when unset; set but empty turns
+// the OTLP/HTTP receiver off.
+func otlpHTTPAddr() string {
+	if v, ok := os.LookupEnv("AGENT_OTLP_HTTP_ADDR"); ok {
+		return v
+	}
+	return ":4318"
 }
 
 func getEnv(key, defaultValue string) string {
@@ -135,103 +144,47 @@ func actionSink(gate actions.InterventionGate, writer *actions.Writer, logger *s
 
 // buildPromoter constructs the M7-8 code-improvement Promoter (#936) with the
 // SAFETY RAIL applied at the one place it can be: this is the ONLY site where the
-// real, consequential clients (GitHub API, local git, real-default writer) are
-// ever built, each behind its explicit env gate. Everything else (tests, the
-// default path) gets the inert recording no-ops.
+// real, consequential clients (GitHub API, real-default writer) are ever built.
+// Everything else (tests, the default path) gets the inert recording no-ops.
 //
-// The real clients are built ONLY when AGENT_CODE_IMPROVEMENT_ENABLED=true AND the
-// per-path conditions hold (GitHub: GITHUB_TOKEN + GITHUB_REPOSITORY; autonomous
-// real-default: AGENT_AUTONOMOUS_ENABLED; the write goes to the flag service). Absent any condition,
-// the corresponding FromEnv constructor returns nil and NewPromoter substitutes the
-// inert no-op / leaves autonomous as a recorded no-op — fail-closed, never a silent
-// real action. The promotion mode is read LIVE per promotion (flags), so
-// flipping the mode flag takes effect on the next promotion with no restart.
+//   - GitHub (issue mode): built only with GITHUB_TOKEN + GITHUB_REPOSITORY.
+//   - Real-default WRITER (autonomous): wired only when
+//     AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES validates at least one objective, the
+//     single autonomous ceiling (UC-043 A23, FR-152 a, g). An unset, empty or wholly
+//     rejected list leaves autonomous a recorded no-op whatever the mode flag says.
+//   - Reverter: the same flag-service client, always wired, so the kill switch
+//     removes promotion overlays even after a restart with an emptied list.
 //
-// The default flag value is the SAFE one (mode=issue; see
-// services/flagd/agent.json + flags.DefaultPromotion*), so even a fully-enabled
-// agent only opens an issue until an operator deliberately flips the flags.
-//
-// NOTE on the live trigger: the propose→validate→PROMOTE pipeline that CALLS
-// Promote on a validated experiment is the documented follow-up (the proposer is
-// #931; the live validation stage is #964). buildPromoter wires the env-gated promotion SURFACE; the autonomous
-// watch+revert seams (Watcher/RealDefaultReverter) are nil until the live real-game
-// fitness source (promote.RealGameFitness, reading the #731 evaluator / gamewindow)
-// is wired.
-//
-// FAIL-CLOSED (#1016/#1057): the autonomous Watcher + RealDefaultReverter are now
-// LIVE-WIRED, but only when autonomous is safely enabled (the same env gate the
-// real-default writer uses) AND a real fitness source is available. When the gate is
-// off — the default — the Watcher stays nil, so autonomous REFUSES to apply (a hard
-// stop), NOT an unguarded real-default change. The live wiring:
-//   - RealGameFitness: reads recent REAL-game fitness from the #965 FitnessStore (the
-//     same finalized-per-game real fitness the recent-real baseline reads). Until real
-//     games populate the store it returns 0 samples ⇒ INSUFFICIENT ⇒ apply stays
-//     unverified + re-watched, never a false healthy keep.
-//   - RealDefaultReverter: the SAME concrete writer: a revert removes the promotion's
-//     real overlay in the flag service, which restores the pre-promotion state (#1065).
-//   - Rewatcher: a background poller that re-observes an insufficient-games apply as
-//     more real games complete (#1065 item 4).
-//   - Cooldown: a post-revert cooldown suppresses re-promotion thrash (#1065 item 3).
-func buildPromoter(rootCtx context.Context, store *experiment.FitnessStore, objResolver *promote.LateObjectiveResolver, tuning *agentTuning, logger *slog.Logger) *promote.Promoter {
+// The agent never reverts a promotion on its own: a person does, or the kill
+// switch (UC-043 step 7, A1). The mode is read LIVE per promotion and defaults to
+// issue (services/flagd/agent.json + flags.DefaultPromotion*).
+func buildPromoter(logger *slog.Logger) *promote.Promoter {
 	github, err := promote.NewGitHubClientFromEnv(logger)
 	if err != nil {
 		logger.Error("code_improvement GitHub client misconfigured; using inert no-op", "error", err)
 		github = nil // NewPromoter substitutes the recording no-op
 	}
-	realDef, err := promote.NewRealDefaultWriterFromEnv(logger)
-	if err != nil {
-		logger.Error("code_improvement real-default writer misconfigured; autonomous stays a no-op", "error", err)
-		realDef = nil
-	}
-
-	// FromEnv returns a typed-nil *concrete pointer when ungated; pass nil interfaces
-	// to NewPromoter so its nil checks substitute the no-ops (a typed-nil in an
-	// interface is non-nil and would defeat them).
+	// A typed-nil *concrete pointer in an interface is non-nil and would defeat
+	// NewPromoter's nil checks, so assign the interfaces only from non-nil values.
 	var ghIface promote.GitHubClient
 	if github != nil {
 		ghIface = github
 	}
-	// The real-default writer is ALSO the reverter (#1065): the same instance backs
-	// both seams.
+
+	validated := substrateBarFromEnv(logger)
+	service := promote.NewRealDefaultWriterFromEnv(logger)
 	var realDefIface promote.RealDefaultWriter
-	var reverterIface promote.RealDefaultReverter
-	if realDef != nil {
-		realDefIface = realDef
-		reverterIface = realDef
-	}
-
-	// LIVE WATCH (#1057/#1065): build the Watcher over the real fitness source ONLY
-	// when the real-default writer is present (the autonomous env gate is satisfied) AND a FitnessStore is available to read real-game
-	// fitness from. Otherwise leave the Watcher nil so autonomous FAILS CLOSED (refuses
-	// to apply) — never an unguarded real-default change.
-	var watcherIface promote.Watcher
-	var rewatcher promote.Rewatcher
-	if realDef != nil && store != nil {
-		fitnessSource := promote.NewStoreRealGameFitness(store, objResolver.Resolve)
-		watcher := promote.NewFitnessWatcher(fitnessSource, promote.DefaultWatchPolicy(), logger)
-		watcherIface = watcher
-		// Interval and timeout resolve at use time, per scheduled re-watch (#1788).
-		rewatcher = promote.NewPollingRewatcherFunc(rootCtx, tuning.RewatchInterval, tuning.RewatchTimeout, logger)
-		logger.Warn("code_improvement AUTONOMOUS watch+revert LIVE-WIRED (#1057/#1065): autonomous promotions are now a closed apply→watch→keep-or-revert loop")
+	if len(validated) > 0 {
+		realDefIface = service
+		logger.Warn("code_improvement AUTONOMOUS real-default writer ENABLED: autonomous promotions WILL change the REAL default for live players (flag service, in memory); a person reverts, or the kill switch",
+			"validated_objectives", promote.ValidatedObjectiveList(validated))
 	} else {
-		logger.Info("code_improvement autonomous watch NOT wired (autonomous env gate off or no fitness store); autonomous fails closed (#1016)")
+		logger.Info("code_improvement autonomous real-default writer NOT wired: no validated objective (AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES); autonomous stays a recorded no-op")
 	}
 
-	p := promote.NewPromoter(ghIface, realDefIface, watcherIface, reverterIface, nil, logger)
-	// The substrate validity bar (UC-043 A23, FR-152 g): set once, here, before the
-	// experiment loop starts. Unset env = no objective validated (fail closed).
-	p.SetSubstrateBar(substrateBarFromEnv(logger))
-	// The post-revert cooldown resolves at use time, per cooldown check (#1788).
-	p.SetCooldownSource(tuning.RevertCooldown)
-	// Seed the post-revert cooldown from the durable snapshot store (#1076 item 3) so
-	// thrash protection survives an agent restart. realDef carries the persisted revert
-	// timestamps; a nil writer (autonomous off) yields nothing to seed.
-	if realDef != nil {
-		p.SeedLastRevert(realDef.PersistedRevertTimes())
-	}
-	if rewatcher != nil {
-		p.SetRewatcher(rewatcher)
-	}
+	p := promote.NewPromoter(ghIface, realDefIface, service, nil, logger)
+	// Set once, here, before the experiment loop starts; writeTracked re-checks it.
+	p.SetSubstrateBar(validated)
 	return p
 }
 
@@ -248,25 +201,6 @@ func substrateBarFromEnv(logger *slog.Logger) map[string]bool {
 	logger.Info("code_improvement substrate validity bar (UC-043 A23): autonomous promotion only for these objectives",
 		"validated_objectives", promote.ValidatedObjectiveList(validated), "service_version", serviceVersion)
 	return validated
-}
-
-// objectiveForFlag resolves the fitness objective a promoted flag's experiment
-// serves by scanning the registry's LIVE experiments for one whose intent targets
-// flagKey (#1057). The autonomous Watcher uses this to read the right per-objective
-// recent-real fitness from the FitnessStore. Best-effort: a concluded/torn-down
-// experiment is gone from Live(), so this returns "" (any-objective) — a safe
-// degrade, since the watcher still observes a recent-real fitness trend, just
-// unfiltered by objective.
-func objectiveForFlag(reg *experiment.Registry, flagKey string) string {
-	if reg == nil || flagKey == "" {
-		return ""
-	}
-	for _, id := range reg.Live() {
-		if cv, ok := reg.CompactView(id); ok && cv.Intent.FlagKey == flagKey {
-			return cv.Intent.Objective
-		}
-	}
-	return ""
 }
 
 // runShadowGame executes the env-triggered shadow game (#778): it sweeps
@@ -431,6 +365,7 @@ func run() error {
 	c.buildPromotion()
 	c.buildExperimentStack()
 	server := c.buildPipeline(listenAddr, healthAddr)
+	server.otlpHTTPAddr = otlpHTTPAddr()
 
 	if err := server.run(ctx); err != nil {
 		slog.Error("gRPC server failed", "error", err)
@@ -491,7 +426,6 @@ type components struct {
 	proposeOnGameEnd func(gamecontext.GameContext)
 
 	fitnessStore *experiment.FitnessStore
-	objResolver  *promote.LateObjectiveResolver
 	promoter     *promote.Promoter
 	expLoop      *experimentLoop
 
@@ -935,10 +869,9 @@ func (c *components) buildProposer() {
 // no restart.
 func (c *components) buildPromotion() {
 	// FitnessStore (#965/#1017): the finalized-per-game fitness store. It is built HERE
-	// (hoisted out of buildExperimentLoop) so it can back BOTH the experiment loop's
-	// validation/anchor seams AND the autonomous Watcher's real-game fitness source
-	// (#1057). The experiment loop's onGameEnd Records into it; the Watcher reads
-	// recent REAL samples out of it.
+	// (hoisted out of buildExperimentLoop) so it backs both the experiment loop's
+	// validation/anchor seams and the retro's fitness lookup below. The experiment
+	// loop's onGameEnd Records into it.
 	c.fitnessStore = newFitnessStore()
 	// #1100: give the retro span access to a finished experiment game's RECORDED
 	// fitness, keyed by game_id, so an agent.llm.retro span carries experiment.fitness
@@ -955,17 +888,8 @@ func (c *components) buildPromotion() {
 		}
 		return s.Fitness, true
 	})
-	// objResolver maps a promoted flag → its experiment's objective for the Watcher's
-	// store reads. It is late-bound: the registry that knows the mapping is built in
-	// buildExperimentStack, so the resolver is SET there once the registry exists.
-	// Until then it resolves to "" (any-objective) — safe, just unfiltered.
-	c.objResolver = &promote.LateObjectiveResolver{}
-
-	c.promoter = buildPromoter(c.ctx, c.fitnessStore, c.objResolver, c.tuning, c.logger)
-	slog.Info("Code-improvement promotion surface enabled (#936, M7-8)",
-		"code_improvement_enabled", getEnv("AGENT_CODE_IMPROVEMENT_ENABLED", "false"),
-		"autonomous_enabled", getEnv("AGENT_AUTONOMOUS_ENABLED", "false"),
-	)
+	c.promoter = buildPromoter(c.logger)
+	slog.Info("Code-improvement promotion surface enabled (#936, M7-8)")
 }
 
 // buildExperimentStack assembles the M7 / #991 experiment cohort loop (epic #982).
@@ -989,14 +913,8 @@ func (c *components) buildExperimentStack() {
 	// Bind the spawner's background game-drive goroutines to the agent's root
 	// context so shutdown cancels in-flight shadow games (no goroutine leak).
 	expLoop.spawner.SetRootContext(c.ctx)
-	// Now the registry exists: install the flag→objective resolver the autonomous
-	// Watcher uses to read the right per-objective recent-real fitness (#1057). Until
-	// this point it resolved to "" (any-objective); from here it is precise.
 	if expLoop.registry != nil {
 		reg := expLoop.registry
-		c.objResolver.Set(func(flagKey string) string {
-			return objectiveForFlag(reg, flagKey)
-		})
 		// #1188: give the per-game retro + summary spans access to the experiment's
 		// long-lived agent.experiment ROOT span by experiment_id, so an
 		// EXPERIMENT-bound game's agent.llm.retro / agent.game.summary re-parent under
@@ -1008,7 +926,6 @@ func (c *components) buildExperimentStack() {
 		c.summaries.SetExperimentParent(reg.ExperimentSpanContext)
 		c.proposalSink.Set(expLoop.proposalSink())
 		installExperimentFlags(c.experimentFlags, reg)
-		wireArmCalibration(c.predictions, reg)
 	}
 }
 
@@ -1020,7 +937,7 @@ func (c *components) buildPipeline(listenAddr, healthAddr string) *serverCompone
 	// GameContext multiplexer (#845 PR B): one Store partition per game_id, plus the
 	// fallback partition "" for unlabeled signals (zero-regression — single-game
 	// mode collapses to exactly today's single-store behavior). The factory applies
-	// the lifecycle TTLs/clock, skips the agent's own telemetry (otlp/agent
+	// the lifecycle TTLs/clock, skips the agent's own telemetry (otlp_http/agent
 	// self-ingestion loop), and wires OnGameEnd per partition so the retrospective
 	// fires per game on the right partition's state. The per-game loop factory reads
 	// c.mux at call time.

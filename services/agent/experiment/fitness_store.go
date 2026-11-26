@@ -7,7 +7,7 @@ import (
 )
 
 // fitness_store.go is the FINALIZED-PER-GAME fitness store (#965, #1017). It
-// backs the autonomous Watcher's real-game fitness source.
+// backs the retro's fitness lookup (Get).
 //
 // THE #1017 GAP, precisely: shadow and real games already emit the SAME fitness
 // inputs through the SAME code path, and decision.EvaluateFitness is
@@ -72,16 +72,11 @@ type FitnessSample struct {
 	// At is when the sample finalized (Record time), used for recency ordering in
 	// RecentReal.
 	At time.Time
-	// StartedAt is when the game started (its "start" phase event). Zero when the
-	// start is unknown. RecentRealSince filters on it so the autonomous watch only
-	// counts real games that started after the promotion's write (UC-043 step 7,
-	// #1702).
-	StartedAt time.Time
 }
 
 // FitnessStore is a bounded, thread-safe, finalized-per-game fitness store keyed
 // by game_id (#965). Construct with NewFitnessStore; the experiment loop's
-// onGameEnd Records into it, and the Watcher reads it.
+// onGameEnd Records into it, and the retro reads it.
 type FitnessStore struct {
 	mu  sync.Mutex
 	cap int
@@ -194,28 +189,6 @@ func (s *FitnessStore) RecentReal(objective string, n int) []FitnessSample {
 		matches = matches[:n]
 	}
 	return matches
-}
-
-// RecentRealSince is RecentReal restricted to the games that started after since
-// (UC-043 step 7, #1702): the autonomous watch must judge only real games that ran
-// with the promoted default. A sample whose start is unknown (zero StartedAt) is
-// excluded, since nothing shows it ran after the write. Newest-first, up to n.
-func (s *FitnessStore) RecentRealSince(objective string, since time.Time, n int) []FitnessSample {
-	if n <= 0 {
-		return nil
-	}
-	all := s.RecentReal(objective, s.Len())
-	out := make([]FitnessSample, 0, n)
-	for _, sample := range all {
-		if sample.StartedAt.IsZero() || !sample.StartedAt.After(since) {
-			continue
-		}
-		out = append(out, sample)
-		if len(out) == n {
-			break
-		}
-	}
-	return out
 }
 
 // Len returns the number of finalized samples currently held (test/observability).

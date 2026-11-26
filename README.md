@@ -140,7 +140,7 @@ See [Mock Environment Guide](services/controller_manager/MOCK_ENVIRONMENT.md) fo
 | Envoy | 80 (host) | Reverse proxy and single entry point |
 | rust-hid | 50058 (loopback) | HID access and pairing; the default Bluetooth backend |
 | Pairing Daemon | 8002 (host network) | USB pairing loop, Bluetooth monitor, unpair |
-| Agent | 4317 (OTLP), 13134 (HTTP) | Go AI game master: observes via OTLP, acts only through flags |
+| Agent | 4318 / 4317 (OTLP HTTP / gRPC), 13134 (HTTP) | Go AI game master: observes via OTLP, acts only through flags |
 | Operator Pad | - | Optional (`operator-pad` compose profile): USB macro pad as a menu remote ([UC-015](docs/use_cases/UC-015.md)) |
 | Connect Proxy | 8080 (container-internal) | gRPC-web bridge |
 | flagd | 8015 | Feature flags (OpenFeature) |

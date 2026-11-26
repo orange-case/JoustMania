@@ -858,10 +858,8 @@ and `decide/backends/jev/contract_test.go` (only jev has a dedicated
 ## 14. Characteristics, predictions, goals
 
 > Status `Implemented` (FR-200, FR-201; not yet Verified, see the **Planned** line of UC-040). Delivered in slices, all on `main` (characteristics and rules predictions and the Book; the game summary, the
-> retro block and the dashboard Agent tab; model ask; goal profiles; jev's goal criterion and the
-> report-only arm calibration; the dashboard goal strip). The maintainer decisions of 2026-10-31: `activity` is the movement intensity relative to the
-> death threshold (always present, not the optional variance); noop predictions are not scored in v1; arm calibration is
-> report-only. Requirements: FR-200, FR-201. Rules: UC-040 A44, A45, BR-034.
+> retro block and the dashboard Agent tab; model ask; goal profiles; jev's goal criterion; the dashboard goal strip). The maintainer decisions of 2026-10-31: `activity` is the movement intensity relative to the
+> death threshold (always present, not the optional variance); noop predictions are not scored in v1. Requirements: FR-200, FR-201. Rules: UC-040 A44, A45, BR-034.
 
 The agent observes the game only through telemetry (OTel-only observation) and acts only through flags. One small set of
 **measurable characteristics** is the shared vocabulary of (a) predictions the agent makes about what its intervention
@@ -967,15 +965,8 @@ template's base rate; **lift = hit rate minus base rate**. A reported hit rate a
 rate and `game_kind`; the headline uses `acted=true` and real games, and shadow results are labelled "shadow calibration".
 
 **Calibration.** Brier score (p - y)^2 over scored (hit or miss) predictions, as a counter sum, so the rolling value is a
-PromQL ratio and no in-process rolling state exists ([telemetry.md §6](telemetry.md#6-metrics)). Per-experiment arm tallies are
-report-only: fed in memory, never journaled, never read by the verdict (UC-043 A21, BR-010). At game end the Book hands the
-game's ACTED decision predictions that scored hit or miss (counterfactuals, controls and unscorables never; a stale end hands
-nothing on, the game is released and re-run) to the registry, which holds them for the bound game and adds them to its arm
-only at the game's fitness fold (`ConcludeGame`); a game released without a fold (errored, preempted) or torn down adds nothing
-(`services/agent/prediction/book.go:Book.SetArmTallySink`, `services/agent/experiment/calibration.go:Registry.NotePredictions`,
-wired by `services/agent/gameend.go:wireArmCalibration`). The Book runs before the experiment hook in the game-end chain, so
-the game is still bound; a real game, a released or unknown game and an inconsistent tally are ignored. The experiment's
-progress snapshot shows it per arm (`GET /experiments/state`, [services.md §5](services.md#5-http-endpoints)); a restart or rehydrate starts it empty.
+PromQL ratio and no in-process rolling state exists ([telemetry.md §6](telemetry.md#6-metrics)). No per-experiment arm tally exists
+(UC-043 A21 is Obsolete): an experiment's verdict reads fitness only.
 
 ### 14.4 Goal profiles
 

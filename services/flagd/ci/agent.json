@@ -882,33 +882,6 @@
         "long": 40.0
       },
       "defaultVariant": "default"
-    },
-    "promotion.rewatch_interval_seconds": {
-      "state": "ENABLED",
-      "variants": {
-        "short": 30,
-        "default": 60,
-        "long": 120
-      },
-      "defaultVariant": "default"
-    },
-    "promotion.rewatch_timeout_seconds": {
-      "state": "ENABLED",
-      "variants": {
-        "short": 1800,
-        "default": 3600,
-        "long": 7200
-      },
-      "defaultVariant": "default"
-    },
-    "promotion.revert_cooldown_seconds": {
-      "state": "ENABLED",
-      "variants": {
-        "short": 300,
-        "default": 600,
-        "long": 1200
-      },
-      "defaultVariant": "default"
     }
   }
 }

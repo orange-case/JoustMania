@@ -194,7 +194,7 @@ type entry struct {
 
 	// promotionInFlight is set while the experiment's promotion runs and its own
 	// promotion event is not journaled yet; RecordPromotion holds later outcomes in
-	// laterPromotions until then (the re-watch may journal first).
+	// laterPromotions until then (the kill switch may journal first).
 	promotionInFlight bool
 	laterPromotions   []PromotionResult
 	// recommendOwner is the writer owning the real overlay when the experiment's
@@ -240,13 +240,6 @@ type entry struct {
 	patternGames      map[string]int
 	patternTimeouts   map[string]int
 	patternAgentEnded map[string]int
-	// calibration is the per-arm prediction tally (UC-043 A21, BR-010, #2498):
-	// in memory only, never journaled, never read by the verdict; a restart or a
-	// rehydrate starts it empty. pendingCalibration holds a bound game's tally
-	// (keyed by game id) until ConcludeGame folds the game's fitness; a released
-	// or torn-down game drops it, so only folded games count.
-	calibration        map[string]PredictionTally
-	pendingCalibration map[string]PredictionTally
 }
 
 // inFlight returns the experiment's current count of live (unconcluded) shadow
@@ -1412,9 +1405,6 @@ func (r *Registry) ConcludeGame(ctx context.Context, gameID string, fitness floa
 // journal. The caller holds r.mu; it does not lock.
 func (r *Registry) foldConcludedGameLocked(e *entry, gameID, arm string, fitness, durationS float64) *journal.Journal {
 	delete(e.games, gameID)
-	// UC-043 A21: the game's fitness is folded now, so its prediction tally joins
-	// the arm (report-only; the journal and the verdict never see it).
-	e.foldCalibrationLocked(gameID, arm)
 	// Recover the game's Common-Random-Numbers pair index (#1003) recorded at bind so
 	// the game_concluded event carries it — the journal's paired-difference fold
 	// (#1004) matches the two games of a pair by it. A bound game always has an entry;
@@ -1514,7 +1504,6 @@ func (r *Registry) ReleaseGame(gameID, reason string) bool {
 		return false // no bound slot freed (the bind, if any, frees it).
 	}
 	delete(e.games, gameID)
-	delete(e.pendingCalibration, gameID) // UC-043 A21: a released game is never folded
 	// Recover the pair index so the journal can drop a parked pending half whose
 	// partner is now gone (#1004 carried-over item 1): a released game that was the
 	// first-concluded half of an open pair must NEVER fold a fabricated difference.
@@ -1678,7 +1667,7 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 		return res
 	}
 	e.status = StatusPromoting
-	// A later outcome (re-watch, kill switch) journaled before this promotion's own
+	// A later outcome (kill switch) journaled before this promotion's own
 	// event waits until it, so the journal keeps their order.
 	e.promotionInFlight = true
 	// UC-043 BR-007 (#2042): write-ahead. The promoter acts only once the promoting
@@ -1756,26 +1745,6 @@ func (r *Registry) flushLaterPromotionsLocked(e *entry) {
 		})
 	}
 	e.laterPromotions = nil
-}
-
-// warnLegacyRevert logs one WARN when the experiment's last promotion event is a
-// hold-key revert an older agent queued (revert_pending): nothing runs it now
-// (UC-043 A15 step 3). Reads only the journal, so r.mu may or may not be held.
-func (r *Registry) warnLegacyRevert(id string, jrnl *journal.Journal) {
-	events, err := jrnl.Events()
-	if err != nil {
-		return
-	}
-	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Kind != journal.KindPromotion || events[i].Promotion == nil {
-			continue
-		}
-		if events[i].Promotion.RevertPending {
-			r.log.Warn("experiment: a queued revert from an older agent was not run; check the flag on the flag service (GET /{flagSetId}/{flagName}): a real overlay of a hold sub-parameter is cleared by the kill switch, and shield.activation has no real scope any more, so its value comes from the stack overlay (UC-043 A15)",
-				"experiment_id", id, "flag", jrnl.Intent().FlagKey)
-		}
-		return
-	}
 }
 
 // RecordPromotion journals a later outcome of an experiment's promotion (UC-043
@@ -1921,7 +1890,6 @@ func (r *Registry) teardown(ctx context.Context, id, flagKey string, terminal St
 	// (game_id → pair index) map; clear it too so no stale binding survives teardown.
 	e.games = make(map[string]string)
 	e.gamePairs = make(map[string]int)
-	e.pendingCalibration = nil
 	r.appendEvent(e.journal, journal.Event{
 		Kind:   journal.KindOutcome,
 		Status: string(terminal),
@@ -2008,7 +1976,6 @@ func (r *Registry) Rehydrate(ids []string) error {
 			st = StatusRunning
 		}
 		if st.IsTerminal() {
-			r.warnLegacyRevert(id, jrnl)
 			continue
 		}
 		e := &entry{
@@ -2072,7 +2039,6 @@ func (r *Registry) finishRestored(id string) {
 
 	ctx := context.Background()
 	if res, ok := r.journaledPromotion(id, jrnl); ok {
-		r.warnLegacyRevert(id, jrnl)
 		final := StatusDiscarded
 		if promotionActed(res) {
 			final = StatusDone
@@ -2098,7 +2064,7 @@ func (r *Registry) finishRestored(id string) {
 
 // journaledPromotion returns the first promotion event after the experiment's
 // last concluded decision: the result of its one promotion (later ones are
-// kill-switch or re-watch reverts of it). An unreadable log reports none.
+// kill-switch reverts of it). An unreadable log reports none.
 func (r *Registry) journaledPromotion(id string, jrnl *journal.Journal) (PromotionResult, bool) {
 	evs, err := jrnl.Events()
 	if err != nil {

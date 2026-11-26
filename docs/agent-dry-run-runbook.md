@@ -33,9 +33,9 @@ All gates are fail-closed in the baseline.
    promotions.
 2. `enabled` (agent set): the master kill switch, read every cycle. Off: the decision loop emits `agent.disabled`
    and running experiments are torn down with `kill-switch: agent disabled`.
-3. Promotion of a winner to the real default: the `code_improvement.*` flags plus the env gates
-   `AGENT_CODE_IMPROVEMENT_ENABLED=true` and `AGENT_AUTONOMOUS_ENABLED=true` (issue mode: `target=github` with
-   `GITHUB_TOKEN`, `GITHUB_REPOSITORY`). No compose file passes them, so a dry run records verdicts and no-op
+3. Promotion of a winner: the `code_improvement.*` flags plus the env settings: for autonomous mode a
+   validated objective in `AGENT_AUTONOMOUS_VALIDATED_OBJECTIVES` (UC-043 A23), for issue mode
+   `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. No compose file passes them, so a dry run records verdicts and no-op
    promotions only.
 
 Optional:
