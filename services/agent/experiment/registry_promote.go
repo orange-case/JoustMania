@@ -18,25 +18,43 @@ import (
 // Promoter is a promotion that could not act (discarded). A failed promotion never
 // blocks teardown.
 func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal) PromotionResult {
-	r.mu.Lock()
-	e := r.entries[id]
+	span, journalErr, refused, proceed := r.beginPromotion(id)
+	if !proceed {
+		return refused
+	}
+	res := r.runPromoter(ctx, id, jrnl, span, journalErr)
+	r.journalPromotionResult(id, res)
+	return res
+}
+
+// refusePromotionLocked is promote's validation step, called under r.mu: only a
+// registered, CONCLUDED experiment is promoted.
+func refusePromotionLocked(e *entry) (PromotionResult, bool) {
 	if e == nil {
-		r.mu.Unlock()
-		return PromotionResult{Outcome: PromotionDiscarded, Reason: "experiment no longer registered"}
+		return PromotionResult{Outcome: PromotionDiscarded, Reason: "experiment no longer registered"}, true
 	}
 	if e.status.IsTerminal() {
 		// AbortAll (kill switch, experiments_enabled off) won the race after the
 		// conclusion: the promotion does not act.
-		st := e.status
-		r.mu.Unlock()
-		return PromotionResult{Outcome: PromotionDiscarded, Reason: "experiment " + string(st) + " before promotion"}
+		return PromotionResult{Outcome: PromotionDiscarded, Reason: "experiment " + string(e.status) + " before promotion"}, true
 	}
 	if e.status != StatusConcluded {
 		// UC-043 BR-006 / BR-007 (#2042): only a concluded experiment is promoted, so
 		// one already promoting is never promoted a second time.
-		st := e.status
+		return PromotionResult{Outcome: PromotionDiscarded, Reason: "experiment " + string(e.status) + ", not concluded"}, true
+	}
+	return PromotionResult{}, false
+}
+
+// beginPromotion is promote's state-transition step, one r.mu section: the
+// experiment moves CONCLUDED → PROMOTING with its write-ahead decision journaled.
+// proceed is false when the promotion must not act; refused is then its result.
+func (r *Registry) beginPromotion(id string) (span trace.Span, journalErr error, refused PromotionResult, proceed bool) {
+	r.mu.Lock()
+	e := r.entries[id]
+	if res, refuse := refusePromotionLocked(e); refuse {
 		r.mu.Unlock()
-		return PromotionResult{Outcome: PromotionDiscarded, Reason: "experiment " + string(st) + ", not concluded"}
+		return nil, nil, res, false
 	}
 	if r.shuttingDown() {
 		// UC-043 A20 (#2332): a conclusion that lands after the graceful stop began
@@ -53,8 +71,17 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 		})
 		r.mu.Unlock()
 		r.log.Info("experiment.promotion_skipped_at_shutdown", "experiment_id", id)
-		return res
+		return nil, nil, res, false
 	}
+	span, journalErr = r.markPromotingLocked(e)
+	r.mu.Unlock()
+	return span, journalErr, PromotionResult{}, true
+}
+
+// markPromotingLocked sets PROMOTING and journals the write-ahead decision, under
+// r.mu. It returns the experiment's root span (the promote span's parent) and the
+// journal error that refuses the promotion, if any.
+func (r *Registry) markPromotingLocked(e *entry) (trace.Span, error) {
 	e.status = StatusPromoting
 	// A later outcome (re-watch, kill switch) journaled before this promotion's own
 	// event waits until it, so the journal keeps their order.
@@ -78,9 +105,12 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 	// terminal child with no change to the promote package. The span is captured under
 	// the lock (it is ended later, in teardown, after this returns). A nil span (tracer
 	// unwired) leaves ctx unchanged — graceful.
-	span := e.span
-	r.mu.Unlock()
+	return e.span, journalErr
+}
 
+// runPromoter is promote's action step, outside r.mu: the promoter runs under the
+// experiment's root span, unless the write-ahead decision could not be journaled.
+func (r *Registry) runPromoter(ctx context.Context, id string, jrnl *journal.Journal, span trace.Span, journalErr error) PromotionResult {
 	if span != nil {
 		ctx = trace.ContextWithSpan(ctx, span)
 	}
@@ -98,9 +128,13 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 		r.log.Warn("experiment.promote_failed", "experiment_id", id,
 			"outcome", res.Outcome, "reason", res.Reason)
 	}
+	return res
+}
 
-	// Journal the result whatever the experiment's status is now: an AbortAll that
-	// raced the promotion does not undo an issue, PR or real default it produced.
+// journalPromotionResult is promote's journal step, one r.mu section. Journal the
+// result whatever the experiment's status is now: an AbortAll that raced the
+// promotion does not undo an issue, PR or real default it produced.
+func (r *Registry) journalPromotionResult(id string, res PromotionResult) {
 	r.mu.Lock()
 	if e := r.entries[id]; e != nil {
 		promotion := res
@@ -116,7 +150,6 @@ func (r *Registry) promote(ctx context.Context, id string, jrnl *journal.Journal
 		r.flushLaterPromotionsLocked(e)
 	}
 	r.mu.Unlock()
-	return res
 }
 
 // flushLaterPromotionsLocked journals the later promotion outcomes RecordPromotion

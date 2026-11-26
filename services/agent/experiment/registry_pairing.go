@@ -100,6 +100,18 @@ type startedArm struct {
 // pair — including a sibling arm that already spawned a live game — so a half-pair
 // never enters the cohort statistics (the atomic-pair invariant).
 func (r *Registry) spawnPair(ctx context.Context, plan pairPlan) (bound int, stop bool) {
+	spawnCtx := r.pairSpawnContext(ctx, plan)
+	if err := r.reassertArmValue(ctx, plan.id); err != nil {
+		r.handleReassertFailure(ctx, plan, err)
+		return 0, true
+	}
+	return r.spawnArms(spawnCtx, plan)
+}
+
+// pairSpawnContext is spawnPair's telemetry step: the spawn ctx carries the
+// experiment's root span as the remote parent and, for a pattern pair, the
+// pattern spawn (with its flag digest).
+func (r *Registry) pairSpawnContext(ctx context.Context, plan pairPlan) context.Context {
 	// Spawn-traceparent propagation (#1182, epic #1181): carry this experiment's
 	// long-lived ROOT span context on the spawn ctx as a REMOTE parent. The
 	// spawner reads it off the ctx and (for an experiment-bound shadow game)
@@ -117,27 +129,36 @@ func (r *Registry) spawnPair(ctx context.Context, plan pairPlan) (bound int, sto
 		}
 		spawnCtx = WithPatternSpawn(spawnCtx, *plan.pattern)
 	}
-	if err := r.reassertArmValue(ctx, plan.id); err != nil {
-		r.rollbackPair(plan, 0, nil)
-		// #2362: a teardown began before or during the re-assert; it owns the
-		// experiment's end, so no discard and no retry here.
-		if errors.Is(err, errReassertTornDown) {
-			r.log.Debug("experiment.arm_value_reassert_torn_down", "experiment_id", plan.id, "error", err)
-			return 0, true
-		}
-		// UC-043 A10 step 3 (#2366): the gate refuses the flag as not experimentable
-		// (it left the experiment catalog, e.g. an experiment journaled before an
-		// upgrade and rehydrated after it). No retry can succeed, so end it discarded
-		// (journaled), which frees its slot and its flag; other errors retry next tick.
-		var rej *RejectError
-		if errors.As(err, &rej) && rej.Reason == ReasonNotExperimentable {
-			r.log.Warn("experiment.arm_value_not_experimentable", "experiment_id", plan.id, "error", err)
-			r.teardown(ctx, plan.id, r.flagKeyOf(plan.id), StatusDiscarded, string(ReasonNotExperimentable)+": "+rej.Detail)
-			return 0, true
-		}
-		r.log.Warn("experiment.arm_value_reassert_failed", "experiment_id", plan.id, "error", err)
-		return 0, true
+	return spawnCtx
+}
+
+// handleReassertFailure is spawnPair's failure step when the arm value could not
+// be re-asserted: the reserved pair is rolled back and, when the flag left the
+// experiment catalog, the experiment is torn down as discarded.
+func (r *Registry) handleReassertFailure(ctx context.Context, plan pairPlan, err error) {
+	r.rollbackPair(plan, 0, nil)
+	// #2362: a teardown began before or during the re-assert; it owns the
+	// experiment's end, so no discard and no retry here.
+	if errors.Is(err, errReassertTornDown) {
+		r.log.Debug("experiment.arm_value_reassert_torn_down", "experiment_id", plan.id, "error", err)
+		return
 	}
+	// UC-043 A10 step 3 (#2366): the gate refuses the flag as not experimentable
+	// (it left the experiment catalog, e.g. an experiment journaled before an
+	// upgrade and rehydrated after it). No retry can succeed, so end it discarded
+	// (journaled), which frees its slot and its flag; other errors retry next tick.
+	var rej *RejectError
+	if errors.As(err, &rej) && rej.Reason == ReasonNotExperimentable {
+		r.log.Warn("experiment.arm_value_not_experimentable", "experiment_id", plan.id, "error", err)
+		r.teardown(ctx, plan.id, r.flagKeyOf(plan.id), StatusDiscarded, string(ReasonNotExperimentable)+": "+rej.Detail)
+		return
+	}
+	r.log.Warn("experiment.arm_value_reassert_failed", "experiment_id", plan.id, "error", err)
+}
+
+// spawnArms is spawnPair's allocation step: each arm is spawned in order and
+// bound; a spawn error rolls the whole pair back (#1003).
+func (r *Registry) spawnArms(spawnCtx context.Context, plan pairPlan) (bound int, stop bool) {
 	var live []startedArm
 	for i, arm := range plan.arms {
 		gameID, err := r.spawner.Spawn(spawnCtx, plan.id, arm, plan.seed)
@@ -479,38 +500,57 @@ func (r *Registry) bindGame(id, gameID, arm string, pairIndex int, pattern *Patt
 	// is still running) and record a non-counting release for the audit trail, rather
 	// than resurrecting the experiment's in-flight set.
 	if e.status.IsTerminal() {
-		delete(r.releaseTombstones, gameID)
-		r.appendEvent(e.journal, journal.Event{
-			Kind:   journal.KindGameReleased,
-			GameID: gameID,
-			Arm:    arm,
-			Note:   "bind refused: experiment terminal at bind time (#1004)",
-		})
-		r.log.Warn("experiment.bind_refused_terminal (#1004)",
-			"experiment_id", id, "game_id", gameID, "arm", arm, "status", string(e.status))
+		r.refuseTerminalBindLocked(e, gameID, arm)
 		return false
 	}
 
 	// If the game already terminated before we could bind it, do NOT record the
 	// game_id — free the reservation slot instead and consume the tombstone.
 	if reason, tombstoned := r.releaseTombstones[gameID]; tombstoned {
-		delete(r.releaseTombstones, gameID)
-		r.dropOneReservationLocked(e, arm)
-		r.appendEvent(e.journal, journal.Event{
-			Kind:   journal.KindGameReleased,
-			GameID: gameID,
-			Arm:    arm,
-			Note:   reason,
-		})
-		// UC-046 BR-015: the pattern arm ended without a sample; its pair runs again.
-		r.rerunPairLocked(e, pairIndex, reason)
-		r.log.Warn("experiment.game_released_before_bind (#1014)",
-			"experiment_id", id, "game_id", gameID, "arm", arm, "reason", reason)
+		r.releaseBeforeBindLocked(e, gameID, arm, pairIndex, reason)
 		return false
 	}
 
 	// Replace the matching reservation placeholder (an arbitrary one for this arm)
 	// with the real game id. We find ANY reservation for this arm to convert.
+	r.assignGameLocked(e, gameID, arm, pairIndex, pattern)
+	return true
+}
+
+// refuseTerminalBindLocked is bindGame's terminal-status step, called under r.mu:
+// the game is not bound into a done experiment, only recorded as released (#1004).
+func (r *Registry) refuseTerminalBindLocked(e *entry, gameID, arm string) {
+	delete(r.releaseTombstones, gameID)
+	r.appendEvent(e.journal, journal.Event{
+		Kind:   journal.KindGameReleased,
+		GameID: gameID,
+		Arm:    arm,
+		Note:   "bind refused: experiment terminal at bind time (#1004)",
+	})
+	r.log.Warn("experiment.bind_refused_terminal (#1004)",
+		"experiment_id", e.id, "game_id", gameID, "arm", arm, "status", string(e.status))
+}
+
+// releaseBeforeBindLocked is bindGame's tombstone step, called under r.mu: the game
+// ended before it was bound, so its reservation is freed and its pair re-runs.
+func (r *Registry) releaseBeforeBindLocked(e *entry, gameID, arm string, pairIndex int, reason string) {
+	delete(r.releaseTombstones, gameID)
+	r.dropOneReservationLocked(e, arm)
+	r.appendEvent(e.journal, journal.Event{
+		Kind:   journal.KindGameReleased,
+		GameID: gameID,
+		Arm:    arm,
+		Note:   reason,
+	})
+	// UC-046 BR-015: the pattern arm ended without a sample; its pair runs again.
+	r.rerunPairLocked(e, pairIndex, reason)
+	r.log.Warn("experiment.game_released_before_bind (#1014)",
+		"experiment_id", e.id, "game_id", gameID, "arm", arm, "reason", reason)
+}
+
+// assignGameLocked is bindGame's state step, called under r.mu: a reservation for
+// the arm becomes the real game id, journaled and reported as progress.
+func (r *Registry) assignGameLocked(e *entry, gameID, arm string, pairIndex int, pattern *PatternSpawn) {
 	r.dropOneReservationLocked(e, arm)
 	e.games[gameID] = arm
 	e.gamePairs[gameID] = pairIndex
@@ -524,8 +564,7 @@ func (r *Registry) bindGame(id, gameID, arm string, pairIndex int, pattern *Patt
 	})
 	r.emitProgressLocked(e, ProgressTriggerGameAssigned, "", e.spanCtx) // #2059
 	r.log.Info("experiment.game_assigned",
-		"experiment_id", id, "game_id", gameID, "arm", arm, "pair_index", pairIndex)
-	return true
+		"experiment_id", e.id, "game_id", gameID, "arm", arm, "pair_index", pairIndex)
 }
 
 // dropOneReservationLocked deletes one reservation placeholder for the arm from the

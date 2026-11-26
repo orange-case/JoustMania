@@ -31,90 +31,112 @@ import (
 // restart semantics and keeps Rehydrate free of an event replay.
 func (r *Registry) Rehydrate(ids []string) error {
 	r.mu.Lock()
-	var lost, unstarted, unfinished []string
-	var errs []error
+	var b rehydrateBuckets
 	defer func() {
 		r.mu.Unlock()
-		// UC-046 BR-015: a pattern experiment whose pin cannot be restored is discarded.
-		for _, id := range lost {
-			r.teardown(context.Background(), id, r.flagKeyOf(id), StatusDiscarded, patterngame.DiscardPinLost)
-		}
-		// UC-043 A8 (#1700): a restored PROPOSED experiment never started (its start
-		// failed, or the agent stopped between declare and start) and nothing starts
-		// it again, so abort it rather than let it hold its flag and a budget slot.
-		for _, id := range unstarted {
-			r.teardown(context.Background(), id, r.flagKeyOf(id), StatusAborted, AbortReasonStartFailed)
-		}
-		// UC-043 A15 (#2042): a restored CONCLUDED or PROMOTING experiment is ended
-		// without a promotion; nothing else would ever finish it.
-		for _, id := range unfinished {
-			r.finishRestored(id)
-		}
+		r.endRestoredLeftovers(b)
 	}()
 	for _, id := range ids {
-		// #1731: an id this registry already holds was declared by this process
-		// (Declare registers it under r.mu together with its journal), never a
-		// leftover of a restart: leave it to its declarer.
-		if _, known := r.entries[id]; known {
-			continue
-		}
-		jrnl, err := journal.Load(r.root, id)
-		if err != nil {
-			// UC-043 A15 (#2042): one bad journal does not stop the restore of the
-			// others; every failure is logged and returned.
-			err = fmt.Errorf("registry: rehydrate %q: %w", id, err)
-			r.log.Error("experiment.rehydrate_failed", "experiment_id", id, "error", err)
-			errs = append(errs, err)
-			continue
-		}
-		view := jrnl.CompactView()
-		st := Status(view.Status)
-		if st == "" {
-			st = StatusRunning
-		}
-		if st.IsTerminal() {
-			r.warnLegacyRevert(id, jrnl)
-			continue
-		}
-		e := &entry{
-			id:        id,
-			journal:   jrnl,
-			status:    st,
-			flagKey:   view.Intent.FlagKey,
-			arms:      append([]string(nil), view.Intent.Arms...),
-			games:     make(map[string]string),
-			gamePairs: make(map[string]int),
-		}
-		if events, evErr := jrnl.Events(); evErr == nil {
-			e.recommendOwner = lastForeignOwner(events) // UC-043 A19
-		}
-		// #1188 RESTART DISCONTINUITY: a rehydrated experiment gets a BRAND-NEW root
-		// span with a fresh trace_id — the SpanContext is NOT persisted across the
-		// restart (the pre-restart trace is already closed and un-appendable). The new
-		// span outlives this rehydrated entry exactly like a freshly-Started one and is
-		// ended in teardown. Rehydrate is the only place a RUNNING entry is created
-		// WITHOUT going through Start, so the span must be started here too. A rehydrated
-		// PROPOSED entry also gets one; if Start later runs, startSpanLocked is a no-op
-		// (idempotent), so no double span.
-		r.startSpanLocked(e, jrnl.Intent())
-		r.entries[id] = e
-		if st == StatusProposed {
-			unstarted = append(unstarted, id)
-			continue
-		}
-		if st == StatusConcluded || st == StatusPromoting {
-			unfinished = append(unfinished, id)
-			continue
-		}
-		if r.patterns != nil && !r.restorePatternLocked(e) {
-			lost = append(lost, id)
-			continue
-		}
+		r.rehydrateOneLocked(id, &b)
+	}
+	return errors.Join(b.errs...)
+}
+
+// rehydrateBuckets collects, during Rehydrate's locked pass, the restored
+// experiments that must be ended once r.mu is released, and the load errors.
+type rehydrateBuckets struct {
+	lost, unstarted, unfinished []string
+	errs                        []error
+}
+
+// endRestoredLeftovers is Rehydrate's teardown step, outside r.mu: every restored
+// experiment that nothing would ever continue is ended.
+func (r *Registry) endRestoredLeftovers(b rehydrateBuckets) {
+	// UC-046 BR-015: a pattern experiment whose pin cannot be restored is discarded.
+	for _, id := range b.lost {
+		r.teardown(context.Background(), id, r.flagKeyOf(id), StatusDiscarded, patterngame.DiscardPinLost)
+	}
+	// UC-043 A8 (#1700): a restored PROPOSED experiment never started (its start
+	// failed, or the agent stopped between declare and start) and nothing starts
+	// it again, so abort it rather than let it hold its flag and a budget slot.
+	for _, id := range b.unstarted {
+		r.teardown(context.Background(), id, r.flagKeyOf(id), StatusAborted, AbortReasonStartFailed)
+	}
+	// UC-043 A15 (#2042): a restored CONCLUDED or PROMOTING experiment is ended
+	// without a promotion; nothing else would ever finish it.
+	for _, id := range b.unfinished {
+		r.finishRestored(id)
+	}
+}
+
+// rehydrateOneLocked restores one journal into r.entries, under r.mu, and sorts
+// the restored entry into the bucket that decides what happens to it next.
+func (r *Registry) rehydrateOneLocked(id string, b *rehydrateBuckets) {
+	// #1731: an id this registry already holds was declared by this process
+	// (Declare registers it under r.mu together with its journal), never a
+	// leftover of a restart: leave it to its declarer.
+	if _, known := r.entries[id]; known {
+		return
+	}
+	jrnl, err := journal.Load(r.root, id)
+	if err != nil {
+		// UC-043 A15 (#2042): one bad journal does not stop the restore of the
+		// others; every failure is logged and returned.
+		err = fmt.Errorf("registry: rehydrate %q: %w", id, err)
+		r.log.Error("experiment.rehydrate_failed", "experiment_id", id, "error", err)
+		b.errs = append(b.errs, err)
+		return
+	}
+	view := jrnl.CompactView()
+	st := Status(view.Status)
+	if st == "" {
+		st = StatusRunning
+	}
+	if st.IsTerminal() {
+		r.warnLegacyRevert(id, jrnl)
+		return
+	}
+	e := r.restoreEntryLocked(id, jrnl, view, st)
+	switch {
+	case st == StatusProposed:
+		b.unstarted = append(b.unstarted, id)
+	case st == StatusConcluded || st == StatusPromoting:
+		b.unfinished = append(b.unfinished, id)
+	case r.patterns != nil && !r.restorePatternLocked(e):
+		b.lost = append(b.lost, id)
+	default:
 		// #2059: once per restored experiment that stays live (the torn-down ones
 		// above emit their terminal snapshot instead).
 		r.emitProgressLocked(e, ProgressTriggerRehydrate, "", e.spanCtx)
 	}
-	return errors.Join(errs...)
+}
+
+// restoreEntryLocked builds the in-memory entry for a restored, non-terminal
+// journal, starts its root span and registers it, under r.mu.
+func (r *Registry) restoreEntryLocked(id string, jrnl *journal.Journal, view journal.CompactView, st Status) *entry {
+	e := &entry{
+		id:        id,
+		journal:   jrnl,
+		status:    st,
+		flagKey:   view.Intent.FlagKey,
+		arms:      append([]string(nil), view.Intent.Arms...),
+		games:     make(map[string]string),
+		gamePairs: make(map[string]int),
+	}
+	if events, evErr := jrnl.Events(); evErr == nil {
+		e.recommendOwner = lastForeignOwner(events) // UC-043 A19
+	}
+	// #1188 RESTART DISCONTINUITY: a rehydrated experiment gets a BRAND-NEW root
+	// span with a fresh trace_id — the SpanContext is NOT persisted across the
+	// restart (the pre-restart trace is already closed and un-appendable). The new
+	// span outlives this rehydrated entry exactly like a freshly-Started one and is
+	// ended in teardown. Rehydrate is the only place a RUNNING entry is created
+	// WITHOUT going through Start, so the span must be started here too. A rehydrated
+	// PROPOSED entry also gets one; if Start later runs, startSpanLocked is a no-op
+	// (idempotent), so no double span.
+	r.startSpanLocked(e, jrnl.Intent())
+	r.entries[id] = e
+	return e
 }
 
 // finishRestored ends an experiment restored as CONCLUDED or PROMOTING (UC-043

@@ -473,59 +473,9 @@ type RegistryConfig struct {
 // filesystem or rehydrate — call Rehydrate after construction to rebuild the live
 // set from the journal.
 func NewRegistry(cfg RegistryConfig) *Registry {
-	maxCap := cfg.MaxShadowGames
-	if maxCap <= 0 {
-		maxCap = DefaultMaxShadowGames
-	}
-	effectiveCap := cfg.EffectiveConcurrency
-	if effectiveCap <= 0 {
-		effectiveCap = DefaultEffectiveConcurrency
-	}
-	// The registry can never hold more in-flight than its capacity bookkeeping
-	// allows, so clamp the effective cap to maxCap (a misconfigured higher value
-	// would otherwise silently never bind).
-	if effectiveCap > maxCap {
-		effectiveCap = maxCap
-	}
-	// Termination budget (#1001): zero means "read the env default"; a negative
-	// config value is an explicit disable, normalized to 0 (the guard treats <= 0 as
-	// off).
-	maxGames := cfg.MaxGamesPerExperiment
-	switch {
-	case maxGames == 0:
-		maxGames = MaxGamesPerExperimentFromEnv()
-	case maxGames < 0:
-		maxGames = 0
-	}
-	// The env default may itself be non-positive (operator disabled it); normalize.
-	if maxGames < 0 {
-		maxGames = 0
-	}
-	// Min-N mirror (#1001): zero means the compiled default; negative disables
-	// min-N reconciliation (normalized to 0, so the inconclusive-past-target guard
-	// then keys off target_n alone).
-	minN := cfg.VerdictMinN
-	switch {
-	case minN == 0:
-		minN = DefaultMinNPerArm
-	case minN < 0:
-		minN = 0
-	}
-	clock := cfg.Clock
-	if clock == nil {
-		clock = func() time.Time { return time.Now().UTC() }
-	}
-	log := cfg.Log
-	if log == nil {
-		log = slog.Default()
-	}
-	tracer := cfg.Tracer
-	if tracer == nil {
-		// Default to the agent instrumentation scope (#1188). The global provider is a
-		// no-op until the agent configures OTEL, so this never emits spurious spans in a
-		// test that does not set up a provider.
-		tracer = otel.Tracer(experimentInstrumentationName)
-	}
+	maxCap, effectiveCap := registryCaps(cfg)
+	maxGames, minN := registryBudget(cfg)
+	clock, log, tracer := registryDefaults(cfg)
 	return &Registry{
 		root:              cfg.Root,
 		maxCap:            maxCap,
@@ -548,6 +498,77 @@ func NewRegistry(cfg RegistryConfig) *Registry {
 	}
 }
 
+// registryCaps is NewRegistry's capacity step: the hard shadow-game cap and the
+// effective concurrency, defaulted and clamped.
+func registryCaps(cfg RegistryConfig) (maxCap, effectiveCap int) {
+	maxCap = cfg.MaxShadowGames
+	if maxCap <= 0 {
+		maxCap = DefaultMaxShadowGames
+	}
+	effectiveCap = cfg.EffectiveConcurrency
+	if effectiveCap <= 0 {
+		effectiveCap = DefaultEffectiveConcurrency
+	}
+	// The registry can never hold more in-flight than its capacity bookkeeping
+	// allows, so clamp the effective cap to maxCap (a misconfigured higher value
+	// would otherwise silently never bind).
+	if effectiveCap > maxCap {
+		effectiveCap = maxCap
+	}
+	return maxCap, effectiveCap
+}
+
+// registryBudget is NewRegistry's budget step: the per-experiment games budget
+// (#1001) and the min-N mirror, normalized.
+func registryBudget(cfg RegistryConfig) (maxGames, minN int) {
+	// Termination budget (#1001): zero means "read the env default"; a negative
+	// config value is an explicit disable, normalized to 0 (the guard treats <= 0 as
+	// off).
+	maxGames = cfg.MaxGamesPerExperiment
+	switch {
+	case maxGames == 0:
+		maxGames = MaxGamesPerExperimentFromEnv()
+	case maxGames < 0:
+		maxGames = 0
+	}
+	// The env default may itself be non-positive (operator disabled it); normalize.
+	if maxGames < 0 {
+		maxGames = 0
+	}
+	// Min-N mirror (#1001): zero means the compiled default; negative disables
+	// min-N reconciliation (normalized to 0, so the inconclusive-past-target guard
+	// then keys off target_n alone).
+	minN = cfg.VerdictMinN
+	switch {
+	case minN == 0:
+		minN = DefaultMinNPerArm
+	case minN < 0:
+		minN = 0
+	}
+	return maxGames, minN
+}
+
+// registryDefaults is NewRegistry's seam-default step: the clock, logger and
+// tracer a config left nil.
+func registryDefaults(cfg RegistryConfig) (clock func() time.Time, log *slog.Logger, tracer trace.Tracer) {
+	clock = cfg.Clock
+	if clock == nil {
+		clock = func() time.Time { return time.Now().UTC() }
+	}
+	log = cfg.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	tracer = cfg.Tracer
+	if tracer == nil {
+		// Default to the agent instrumentation scope (#1188). The global provider is a
+		// no-op until the agent configures OTEL, so this never emits spurious spans in a
+		// test that does not set up a provider.
+		tracer = otel.Tracer(experimentInstrumentationName)
+	}
+	return clock, log, tracer
+}
+
 // experimentInstrumentationName scopes the registry's root-span tracer. It matches
 // the decision package's instrumentationName so every agent span shares one
 // instrumentation scope in Jaeger.
@@ -560,21 +581,8 @@ const experimentInstrumentationName = "github.com/joustmania/agent"
 // fails if the journal already has this id (re-mint collision is astronomically
 // unlikely; a real collision is surfaced, not silently clobbered).
 func (r *Registry) Declare(in Intent) (string, error) {
-	// UC-043 BR-002 (no chaos experiments).
-	// Fail-fast on a non-experimentable objective (#1015). chaos has no fitness
-	// function — every game on it would fold the worst-case 0 and the experiment
-	// would run its whole budget (up to the #1001 target) only to conclude
-	// inconclusive. Reject it at declaration so the wasted run never starts; the
-	// experimentable objectives (endurance/balanced/accelerate, and the empty
-	// objective which folds as balanced) pass through unchanged.
-	if !decision.IsExperimentable(in.Objective) {
-		return "", fmt.Errorf("registry: declare experiment: objective %q is not experimentable: no fitness function", in.Objective)
-	}
-	// UC-043 A17 step 1 (#2096): shield.activation is experimented on only toward
-	// hold, whoever declares it (the declarer forces it; a proposer cannot pick another
-	// value and experiment its way out of hold).
-	if err := checkHoldValue(in.FlagKey, in.ExperimentalValue); err != nil {
-		return "", fmt.Errorf("registry: declare experiment: %w", err)
+	if err := validateIntent(in); err != nil {
+		return "", err
 	}
 
 	arms := in.Arms
@@ -607,14 +615,7 @@ func (r *Registry) Declare(in Intent) (string, error) {
 	// records the effective value). This is the coherent semantic chosen for the
 	// issue: the lifecycle's "target reached" point is at least the verdict's min-N,
 	// so reaching target and reaching a conclusive-eligible sample coincide.
-	targetN := in.TargetNPerArm
-	if r.minN > 0 && targetN < r.minN {
-		if targetN > 0 {
-			r.log.Info("experiment.target_n_reconciled",
-				"experiment_id", id, "requested_target_n", targetN, "min_n", r.minN)
-		}
-		targetN = r.minN
-	}
+	targetN := r.reconcileTargetNLocked(id, in.TargetNPerArm)
 
 	jrnl, err := journal.Create(r.root, journal.Intent{
 		ExperimentID:      id,
@@ -630,6 +631,48 @@ func (r *Registry) Declare(in Intent) (string, error) {
 		return "", fmt.Errorf("registry: declare experiment: %w", err)
 	}
 
+	r.registerDeclaredLocked(id, jrnl, in, arms)
+	return id, nil
+}
+
+// validateIntent is Declare's validation step: it rejects an intent that can
+// never produce a useful experiment before any id is minted or journal written.
+func validateIntent(in Intent) error {
+	// UC-043 BR-002 (no chaos experiments).
+	// Fail-fast on a non-experimentable objective (#1015). chaos has no fitness
+	// function — every game on it would fold the worst-case 0 and the experiment
+	// would run its whole budget (up to the #1001 target) only to conclude
+	// inconclusive. Reject it at declaration so the wasted run never starts; the
+	// experimentable objectives (endurance/balanced/accelerate, and the empty
+	// objective which folds as balanced) pass through unchanged.
+	if !decision.IsExperimentable(in.Objective) {
+		return fmt.Errorf("registry: declare experiment: objective %q is not experimentable: no fitness function", in.Objective)
+	}
+	// UC-043 A17 step 1 (#2096): shield.activation is experimented on only toward
+	// hold, whoever declares it (the declarer forces it; a proposer cannot pick another
+	// value and experiment its way out of hold).
+	if err := checkHoldValue(in.FlagKey, in.ExperimentalValue); err != nil {
+		return fmt.Errorf("registry: declare experiment: %w", err)
+	}
+	return nil
+}
+
+// reconcileTargetNLocked is Declare's target_n step (#1001), called under r.mu: a
+// target_n below the verdict min-N is raised to it (and logged when one was asked).
+func (r *Registry) reconcileTargetNLocked(id string, targetN int) int {
+	if r.minN > 0 && targetN < r.minN {
+		if targetN > 0 {
+			r.log.Info("experiment.target_n_reconciled",
+				"experiment_id", id, "requested_target_n", targetN, "min_n", r.minN)
+		}
+		targetN = r.minN
+	}
+	return targetN
+}
+
+// registerDeclaredLocked is Declare's state step, called under r.mu: the PROPOSED
+// entry goes into r.entries and its decision event into the journal.
+func (r *Registry) registerDeclaredLocked(id string, jrnl *journal.Journal, in Intent, arms []string) {
 	r.entries[id] = &entry{
 		id:        id,
 		journal:   jrnl,
@@ -642,7 +685,6 @@ func (r *Registry) Declare(in Intent) (string, error) {
 	// Record the PROPOSED transition as a decision event for the audit trail.
 	r.recordDecision(jrnl, StatusProposed, "experiment declared")
 	r.log.Info("experiment.declared", "experiment_id", id, "flag_key", in.FlagKey, "objective", in.Objective)
-	return id, nil
 }
 
 // SetShutdownContext sets the context whose cancellation marks the start of the

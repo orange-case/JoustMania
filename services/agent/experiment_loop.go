@@ -345,12 +345,7 @@ func buildExperimentLoop(
 	// spawns/writes/promotes nothing). An unresolved experiments_enabled reads false
 	// (#1907: no env fallback).
 	expDefaults := experimentDefaults()
-
-	logger.Info("Experiment cohort loop constructed (#991/#1044) — gated LIVE by agent.json experiments_enabled",
-		"tick_default", expDefaults.Tick,
-		"completed_grace_default", expDefaults.CompletedGrace,
-		"max_shadow_games", experiment.DefaultMaxShadowGames,
-		"effective_concurrency_default", expDefaults.ShadowEffectiveConcurrency)
+	logExperimentLoopConstructed(logger, expDefaults)
 
 	targeting := newExperimentTargeting(gameFlags, logger)
 
@@ -376,8 +371,35 @@ func buildExperimentLoop(
 	wirePatternWindow(registry, spawner, window)
 	hold := newHoldPolicy(pinner)
 
+	loop := newExperimentLoopStruct(registry, spawner, flagsClient, fitnessStore, expDefaults, hold, gameFlags, logger)
+	wireExperimentLoop(loop, promoter, flagsClient, spawner, hold, logger)
+	return loop
+}
+
+// logExperimentLoopConstructed logs the compiled defaults the loop starts from
+// (#991/#1044); the live values are read per tick.
+func logExperimentLoopConstructed(logger *slog.Logger, expDefaults flags.ExperimentDefaults) {
+	logger.Info("Experiment cohort loop constructed (#991/#1044) — gated LIVE by agent.json experiments_enabled",
+		"tick_default", expDefaults.Tick,
+		"completed_grace_default", expDefaults.CompletedGrace,
+		"max_shadow_games", experiment.DefaultMaxShadowGames,
+		"effective_concurrency_default", expDefaults.ShadowEffectiveConcurrency)
+}
+
+// newExperimentLoopStruct assembles the experimentLoop value from the already-built
+// seams (buildExperimentLoop's allocation step).
+func newExperimentLoopStruct(
+	registry *experiment.Registry,
+	spawner *shadowSpawner,
+	flagsClient *flags.Flags,
+	fitnessStore *experiment.FitnessStore,
+	expDefaults flags.ExperimentDefaults,
+	hold *holdGate,
+	gameFlags experiment.FlagService,
+	logger *slog.Logger,
+) *experimentLoop {
 	thresholds := flagsFitnessSource{flags: flagsClient}
-	loop := &experimentLoop{
+	return &experimentLoop{
 		registry:     registry,
 		spawner:      spawner,
 		flags:        flagsClient,
@@ -396,6 +418,11 @@ func buildExperimentLoop(
 		// declareFromRetroIfEnabled. Backlog is bounded (DefaultMaxRetroBacklog).
 		proposer: experiment.NewThesisProposer(0),
 	}
+}
+
+// wireExperimentLoop connects the built loop back into its collaborators: the
+// promoter, the dynamic declarer's hold policy and the spawner's terminal callback.
+func wireExperimentLoop(loop *experimentLoop, promoter *promote.Promoter, flagsClient *flags.Flags, spawner *shadowSpawner, hold *holdGate, logger *slog.Logger) {
 	loop.wirePromoter(promoter, flagsClient, logger)
 	loop.dynamic.hold = hold
 	logger.Info("Dynamic experiment declarer constructed (#995/#1044) — gated LIVE by agent.json experiment_dynamic_enabled; settings are the experiment_dynamic_* flags, read per tick (#1907)")
@@ -404,7 +431,6 @@ func buildExperimentLoop(
 	// directly (independent of the telemetry game_active=0 path), so the
 	// effective_concurrency=1 loop can never deadlock on an errored game.
 	spawner.SetTerminalCallback(loop.onGameTerminal)
-	return loop
 }
 
 // newExperimentTargeting builds the TargetingWriter (#977): a Gate over a Writer
@@ -666,13 +692,29 @@ func (e *experimentLoop) tickInterval(ctx context.Context) time.Duration {
 // decision loop obeys. When enabled, it lazily runs the one-time rehydrate, the seed
 // (startup-gate inversion), applies the live caps, then allocates.
 func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
+	cfg, ok := e.allocationGatesOpen(ctx)
+	if !ok {
+		return
+	}
+	e.applyLiveCaps(cfg)
+	e.bootstrapAndDeclare(ctx, cfg)
+	if n := e.registry.AllocateAndSpawn(ctx); n > 0 {
+		e.log.Debug("experiment: spawned shadow games this tick", "count", n,
+			"in_flight", e.registry.TotalInFlight(), "capacity", e.registry.Capacity())
+	}
+}
+
+// allocationGatesOpen is allocateIfEnabled's gate step: it returns the live config and
+// whether both experiments_enabled and the kill switch are on. With either off it has
+// already run the matching teardown (promotion revert, AbortAll).
+func (e *experimentLoop) allocationGatesOpen(ctx context.Context) (flags.ExperimentConfig, bool) {
 	// #2323: a refill that arrives after shutdown began does nothing; run()'s own
 	// teardown aborts the live experiments ("agent shutdown"). The guard exists so
 	// refills, spawns and reverts stop once shutdown has begun. It does not make the
 	// flag read fail closed: the OpenFeature SDK and the flagd in-process provider
 	// ignore ctx when evaluating.
 	if ctx.Err() != nil {
-		return
+		return flags.ExperimentConfig{}, false
 	}
 	// UC-043 A1 / UC-045 step 5 (#1704): with the kill switch off (or failed closed)
 	// every tick reverts the autonomous promotions this agent run applied, whatever
@@ -689,14 +731,20 @@ func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 		if ids := e.registry.AbortAll(ctx, "experiments_enabled flag off"); len(ids) > 0 {
 			e.log.Warn("experiment: experiments_enabled flag off — aborted live experiments (#1044)", "count", len(ids))
 		}
-		return
+		return cfg, false
 	}
 	if !agentOn {
 		if ids := e.registry.AbortAll(ctx, "kill-switch: agent disabled"); len(ids) > 0 {
 			e.log.Warn("experiment: kill-switch active — aborted live experiments", "count", len(ids))
 		}
-		return
+		return cfg, false
 	}
+	return cfg, true
+}
+
+// applyLiveCaps is allocateIfEnabled's reconfigure step: the live runtime caps and
+// verdict floats are pushed to the registry before anything else on this tick.
+func (e *experimentLoop) applyLiveCaps(cfg flags.ExperimentConfig) {
 	// Apply the live runtime caps (#1044) before the bootstrap and the allocation so
 	// a hot-reloaded concurrency / games-budget / min-N takes effect on THIS tick. It
 	// runs BEFORE the seed (#1907): the seed Declare reconciles
@@ -710,6 +758,11 @@ func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 	// evaluations. Verdict-only (the registry reads none of them), so it is a separate
 	// forward to the verdict alongside Reconfigure.
 	e.registry.ReconfigureVerdictFloats(cfg.VerdictEffectThreshold, cfg.VerdictMinRawEffect, cfg.VerdictSDFloor, cfg.VerdictAnchorMargin)
+}
+
+// bootstrapAndDeclare is allocateIfEnabled's declaration step: the one-time
+// rehydrate, the seed, then the dynamic and retro-seeded declarers, in that order.
+func (e *experimentLoop) bootstrapAndDeclare(ctx context.Context, cfg flags.ExperimentConfig) {
 	// First enabled tick: run the deferred one-time rehydrate (the startup-gate
 	// inversion bootstrap, #1044).
 	e.ensureStarted()
@@ -730,10 +783,6 @@ func (e *experimentLoop) allocateIfEnabled(ctx context.Context) {
 	// experiment is the marginal one when both are enabled) and BEFORE AllocateAndSpawn
 	// (so a freshly-declared experiment accrues games this tick).
 	e.declareFromRetroIfEnabled(ctx, cfg)
-	if n := e.registry.AllocateAndSpawn(ctx); n > 0 {
-		e.log.Debug("experiment: spawned shadow games this tick", "count", n,
-			"in_flight", e.registry.TotalInFlight(), "capacity", e.registry.Capacity())
-	}
 }
 
 // promotionKillSwitch is the Promoter half the kill switch drives (#1704):

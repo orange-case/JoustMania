@@ -300,17 +300,43 @@ func (r *Registry) shouldGiveUp(s journal.Summary, targetN int) (string, bool) {
 // experiment, so only a live (proposed / running) experiment is concluded; a
 // later caller gets the current status (concluded, promoting or terminal) back.
 func (r *Registry) conclude(ctx context.Context, id string, verdict journal.Verdict) (Status, error) {
+	jrnl, flagKey, current, won := r.markConcluded(id, &verdict)
+	if !won {
+		return current, nil
+	}
+
+	r.log.Info("experiment.concluded", "experiment_id", id, "outcome", verdict.Outcome)
+
+	var promotion *PromotionResult
+	if verdict.Outcome == CohortOutcomePromote {
+		res := r.promote(ctx, id, jrnl)
+		promotion = &res
+	}
+
+	final := r.concludedFinalStatus(id, promotion)
+	r.teardown(ctx, id, flagKey, final, concludeNote(verdict, promotion))
+	// teardown never overwrites a terminal status, so report the one that holds.
+	if st, ok := r.Status(id); ok {
+		return st, nil
+	}
+	return final, nil
+}
+
+// markConcluded is conclude's state-transition step, one r.mu section: a live
+// experiment becomes CONCLUDED and its final verdict (with the pattern timeout
+// summary appended to verdict.Reason) is journaled. won is false when another
+// caller already ended it; current is then the status it holds.
+func (r *Registry) markConcluded(id string, verdict *journal.Verdict) (jrnl *journal.Journal, flagKey string, current Status, won bool) {
 	r.mu.Lock()
 	e := r.entries[id]
 	if e == nil || !e.status.IsLive() {
 		// Copy the status under the lock: the winning caller keeps writing it
 		// (promotion, teardown) after we unlock.
-		var current Status
 		if e != nil {
 			current = e.status
 		}
 		r.mu.Unlock()
-		return current, nil
+		return nil, "", current, false
 	}
 	e.status = StatusConcluded
 	// UC-046 BR-013: report pattern timeouts per arm with the conclusion.
@@ -323,7 +349,7 @@ func (r *Registry) conclude(ctx context.Context, id string, verdict journal.Verd
 	// The final verdict rides on the concluded decision (#2042): the journal
 	// summary, the promoter and a restart (UC-043 A15) read the verdict the
 	// experiment concluded on, also after a give-up or pattern-exhausted conclusion.
-	finalVerdict := verdict
+	finalVerdict := *verdict
 	r.appendEvent(e.journal, journal.Event{
 		Kind:    journal.KindDecision,
 		Status:  string(StatusConcluded),
@@ -331,23 +357,19 @@ func (r *Registry) conclude(ctx context.Context, id string, verdict journal.Verd
 		Verdict: &finalVerdict,
 	})
 	r.emitProgressLocked(e, ProgressTriggerConcluded, "", e.spanCtx) // #2059
-	jrnl := e.journal
-	flagKey := e.flagKey
+	jrnl = e.journal
+	flagKey = e.flagKey
 	r.mu.Unlock()
+	return jrnl, flagKey, StatusConcluded, true
+}
 
-	r.log.Info("experiment.concluded", "experiment_id", id, "outcome", verdict.Outcome)
-
-	var promotion *PromotionResult
-	if verdict.Outcome == CohortOutcomePromote {
-		res := r.promote(ctx, id, jrnl)
-		promotion = &res
-	}
-
-	// Terminal: DONE when the promotion acted, DISCARDED otherwise (#1701). A
-	// terminal status set while the promotion ran (AbortAll: kill switch or
-	// experiments_enabled off) is kept, never overwritten.
+// concludedFinalStatus is conclude's terminal-status step, one r.mu section.
+// Terminal: DONE when the promotion acted, DISCARDED otherwise (#1701). A
+// terminal status set while the promotion ran (AbortAll: kill switch or
+// experiments_enabled off) is kept, never overwritten.
+func (r *Registry) concludedFinalStatus(id string, promotion *PromotionResult) Status {
 	r.mu.Lock()
-	e = r.entries[id]
+	e := r.entries[id]
 	final := StatusDiscarded
 	switch {
 	case e != nil && e.status.IsTerminal():
@@ -356,7 +378,12 @@ func (r *Registry) conclude(ctx context.Context, id string, verdict journal.Verd
 		final = StatusDone
 	}
 	r.mu.Unlock()
+	return final
+}
 
+// concludeNote is the teardown note conclude journals: the verdict outcome and
+// reason, plus the promotion outcome when one ran.
+func concludeNote(verdict journal.Verdict, promotion *PromotionResult) string {
 	note := "experiment concluded: " + verdict.Outcome
 	if verdict.Reason != "" {
 		note += " (" + verdict.Reason + ")"
@@ -367,10 +394,5 @@ func (r *Registry) conclude(ctx context.Context, id string, verdict journal.Verd
 			note += ": " + promotion.Reason
 		}
 	}
-	r.teardown(ctx, id, flagKey, final, note)
-	// teardown never overwrites a terminal status, so report the one that holds.
-	if st, ok := r.Status(id); ok {
-		return st, nil
-	}
-	return final, nil
+	return note
 }
