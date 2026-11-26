@@ -66,7 +66,8 @@ func TestPatternGames_NoSpawnWhileExperimentsOff(t *testing.T) {
 	spawner := &patternRecordingSpawner{}
 
 	log := testLogger()
-	writer := experiment.NewWriter(newGameFileForLoop(t), log)
+	svc := newGameFileForLoop(t)
+	writer := experiment.NewWriter(svc, log)
 	targeting := experiment.NewGateTargetingWriter(experiment.NewGate(writer, nil, log), writer)
 	reg := experiment.NewRegistry(experiment.RegistryConfig{
 		Root: t.TempDir(), MaxShadowGames: 2, EffectiveConcurrency: 2, Spawner: spawner,
@@ -80,8 +81,9 @@ func TestPatternGames_NoSpawnWhileExperimentsOff(t *testing.T) {
 		expDefaults:     flags.ExperimentDefaults{Tick: 0, DynamicMaxConcurrent: defaultDynamicMaxConcurrent},
 		configOverride:  lc.get,
 		enabledOverride: func(context.Context) flags.EnabledState { return enabledState(true) },
+		dynamic:         newDynamicDeclarer(svc, nil),
 	}
-	lc.setSeed(testSeed("nonstop.respawn_seconds", 6.0, 50))
+	lc.setCandidates("sensitivity")
 	ctx := context.Background()
 
 	t.Run("UC-046/Pre-1 experiments off: no pattern is pinned and no game spawns", func(t *testing.T) {

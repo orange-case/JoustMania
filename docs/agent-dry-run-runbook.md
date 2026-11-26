@@ -1,7 +1,7 @@
 # Agent Dry-Run Runbook
 
 Runs the experiment cohort loop on mock controllers with the full local observability stack: the agent declares
-one seeded experiment and spawns its shadow games. Behaviour: [UC-043](use_cases/UC-043.md) (A16 is this
+one operator-named experiment and spawns its shadow games. Behaviour: [UC-043](use_cases/UC-043.md) (A16 is this
 enable step). Live interventions: [agent-act-runbook.md](agent-act-runbook.md).
 
 ## Start
@@ -20,10 +20,10 @@ docker compose -f docker-compose.yml -f docker-compose.override.yml \
   --profile agent --profile dashboard up -d
 ```
 
-`agent-dryrun-enable.sh on` sets, as in-memory `operator` overlays through the flag service, the `experiment_seed`
-flag to `windows_frantic` first, then `enabled` to `on` (arm writes need it, so the agent also writes the
-interventions the CI allow-list `ambient` permits) and `experiments_enabled` to `on`. Nothing is persisted:
-a flag-service restart or `down` drops them; `off` sets `enabled` to `off` and clears the other two. A plain `docker compose up` runs the release images pinned in `.env`,
+`agent-dryrun-enable.sh on` sets, as in-memory `operator` overlays through the flag service, `experiment_dynamic_candidates` to `windows_frantic` (the explicit candidate `windows=frantic`) and
+`experiment_dynamic_enabled` to `on` first, then `enabled` to `on` (arm writes need it, so the agent also writes the
+interventions the CI allow-list `ambient` permits) and `experiments_enabled` to `on`. Nothing is persisted: a
+flag-service restart or `down` drops them; `off` sets `enabled` to `off` and clears the other three. A plain `docker compose up` runs the release images pinned in `.env`,
 so use `make dry-run`.
 
 ## Gate chain
@@ -52,16 +52,15 @@ Optional:
 
 ```bash
 ./scripts/flags.sh set agent experiment_tick_seconds fast        # 10 s refill tick (default 30 s)
-./scripts/flags.sh set agent experiment_dynamic_enabled on       # keep declaring after the seed concludes
-./scripts/flags.sh set agent experiment_seed <variant>           # another reviewed seed variant
-./scripts/flags.sh get game <seed flag>                          # the experiment-arm overlay
+./scripts/flags.sh set agent experiment_dynamic_candidates all    # let the declarer rotate over every tunable flag
+./scripts/flags.sh get game windows                               # the experiment-arm overlay
 docker compose -f docker-compose.yml -f docker-compose.override.yml \
   -f docker-compose.ci.yml -f docker-compose.dry-run.yml logs -f agent
 ```
 
-A new seed is a new variant of `experiment_seed` in `services/flagd/agent.json` and `services/flagd/ci/agent.json`;
-the seeded flag must be in the experiment catalog ([flags.md §13.3](specs/flags.md#13-mutable-flag-registry)).
-To re-run the same seed: `off`, wait one tick, `on`.
+Another experiment: set `experiment_dynamic_candidates` to another `flag=variant` (free string, UC-043 BR-012);
+the flag must be in the experiment catalog ([flags.md §13.3](specs/flags.md#13-mutable-flag-registry)).
+The declarer declares it again each time the previous experiment on that flag ends.
 
 ## Verify
 

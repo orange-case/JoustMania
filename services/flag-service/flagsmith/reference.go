@@ -59,6 +59,7 @@ func (s *startup) writeReferences(ctx context.Context, jobs []referenceJob) erro
 	if len(jobs) == 0 {
 		return nil
 	}
+	defer s.reportStopOff(jobs)
 	var doc *EnvironmentDocument
 	_, _, err := s.pace.do(ctx, true, nil, func() (int, error) {
 		d, _, _, err := s.l.client.EnvironmentDocument(ctx, "")
@@ -293,6 +294,9 @@ func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue
 			return s.referenceFailed(ctx, j, rerr, false)
 		}
 		if !needsReference(cur, true, false, fv) {
+			if isStopKey(j.k) && cur.Enabled {
+				s.stopOn = true
+			}
 			if !cur.Enabled {
 				// Off and at the reference: Flagsmith applied the failed
 				// write (a timed-out PATCH), so the push ends ok. Turned on
@@ -307,6 +311,9 @@ func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue
 		}
 		werr = s.patchReference(sctx, j, fv)
 		if werr == nil {
+			if isStopKey(j.k) {
+				s.stopOn = true
+			}
 			end()
 			if old := fsText(cur.FeatureStateValue); isKillKey(j.k) && old != "" && old != fsText(fv.Value) {
 				// A kill switch value staged under the off toggle is not in
@@ -347,6 +354,20 @@ func (s *startup) writeReference(ctx context.Context, j referenceJob, fv FSValue
 		if serr := s.l.Sleep(ctx, wait); serr != nil {
 			end()
 			return false, serr
+		}
+	}
+}
+
+// reportStopOff says when the start created agent/enabled but could not
+// switch it on: the feature stays off, which reads as the stop.
+func (s *startup) reportStopOff(jobs []referenceJob) {
+	if s.stopOn {
+		return
+	}
+	for _, j := range jobs {
+		if isStopKey(j.k) && j.created {
+			s.l.Logger().Info("flagsmith: agent/enabled was created switched off and could not be switched on", "detail", "the stack reads off (the stop) until the feature is switched on in Flagsmith")
+			return
 		}
 	}
 }

@@ -129,11 +129,10 @@ that JoustFFA shadow games read, `0` strictest to `4` most lenient, default `2`)
 | known-bad | `sensitivity` 0 (ultra_slow, strictest) | shorter games, fitness down |
 
 **Shadow side.** Run one experiment per change against the baseline, `objective: endurance`,
-`target_n` of at least 8. The `experiment_seed` flag (UC-043 trigger) accepts only its declared
-variants (`off`, `windows_frantic`; [flags.md](specs/flags.md)), so a `sensitivity` seed variant has
-to be added to the flag file first, in a reviewed PR. The value is a flag-file change, not an
-ad-hoc write. Then turn the variant on the way `scripts/agent-dryrun-enable.sh` turns on
-`windows_frantic`. Read the per-arm mean fitness from the experiment's journal or the agent's
+`target_n` of at least 8. Name the change as the dynamic declarer's explicit candidate
+(`experiment_dynamic_candidates` = `sensitivity=<variant>`, UC-043 BR-012): the value must be a
+declared variant of the flag, so a new value is a flag-file change in a reviewed PR, not an ad-hoc
+write. Turn it on the way `scripts/agent-dryrun-enable.sh` turns on `windows=frantic`. Read the per-arm mean fitness from the experiment's journal or the agent's
 `GET /experiments/state` (its `experiments` entry).
 
 **Real side.** Run real games at each value: at least 8 games per value, the same player count

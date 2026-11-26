@@ -20,7 +20,7 @@ import (
 // The concurrent-experiment budget is min(env ceiling, flag), a non-positive flag
 // falls back to the compiled 3 (capped by the env), an env value <= 0 or invalid
 // is no ceiling, and the shadow capacity clamps the result.
-// UC: UC-042 A11 A3
+// UC: UC-042 A11
 func TestConcurrentBudget_EnvCeilingTable(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -134,59 +134,6 @@ func TestMaxGamesBudget_AppliedPerTick(t *testing.T) {
 	if got := loop.registry.MaxGames(); got != 30 {
 		t.Fatalf("registry games budget = %d after the flag write, want 30", got)
 	}
-}
-
-// The retro-seeded thesis proposer declares only when AGENT_EXPERIMENT_PROPOSER_ENABLED
-// is true AND experiment_proposer_enabled is on; a flag flip reaches the next tick.
-// UC: UC-042 A3 BR-002
-func TestRetroProposer_GateIsEnvAndFlag(t *testing.T) {
-	cases := []struct {
-		name     string
-		env      string
-		flagOn   bool
-		wantLive int
-	}{
-		{"UC-042/A3 env true, flag on declares", "true", true, 1},
-		{"UC-042/A3 env true, flag off declares nothing", "true", false, 0},
-		{"UC-042/A3 env unset, flag on declares nothing", "", true, 0},
-		{"UC-042/A3 env unset, flag off declares nothing", "", false, 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(envProposerEnabled, tc.env)
-			loop := proposerLoop(t)
-			loop.proposer.Record(experiment.RetroSuggestion{Reason: "room faded"})
-			cfg := dynCfg(5)
-			cfg.ProposerEnabled = tc.flagOn
-			loop.declareFromRetroIfEnabled(context.Background(), cfg)
-			if got := loop.registry.LiveCount(); got != tc.wantLive {
-				t.Fatalf("LiveCount = %d, want %d", got, tc.wantLive)
-			}
-		})
-	}
-
-	t.Run("UC-042/A3 a flag flip reaches the next tick", func(t *testing.T) {
-		t.Setenv(envProposerEnabled, "true")
-		loop := proposerLoop(t)
-		loop.proposer.Record(experiment.RetroSuggestion{Reason: "room faded"})
-		flagOn := false
-		loop.configOverride = func(context.Context) flags.ExperimentConfig {
-			cfg := dynCfg(5)
-			cfg.DynamicEnabled = false
-			cfg.ProposerEnabled = flagOn
-			return cfg
-		}
-		loop.enabledOverride = func(context.Context) flags.EnabledState { return enabledState(true) }
-		loop.allocateIfEnabled(context.Background())
-		if got := loop.registry.LiveCount(); got != 0 {
-			t.Fatalf("LiveCount = %d with the flag off, want 0", got)
-		}
-		flagOn = true
-		loop.allocateIfEnabled(context.Background())
-		if got := loop.registry.LiveCount(); got != 1 {
-			t.Fatalf("LiveCount = %d after the flag flip, want 1", got)
-		}
-	})
 }
 
 // The M7-4 proposer obeys the same proposer gate: with a real text backend and the

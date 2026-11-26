@@ -1,8 +1,8 @@
 """``make dry-run`` starts the demo stack as FR-090 says (UC-070 Pre-1).
 
 FR-090: one command starts the latest images with mock controllers and the agent;
-``scripts/agent-dryrun-enable.sh on`` then sets the ``experiment_seed`` flag and the
-fail-closed ``enabled`` / ``experiments_enabled`` flags (#1907: no seed env any more). Static checks over the Makefile recipe, the compose layers and the
+``scripts/agent-dryrun-enable.sh on`` then sets the dynamic declarer's explicit candidate and the
+fail-closed ``enabled`` / ``experiments_enabled`` flags (no seed env, no seed flag). Static checks over the Makefile recipe, the compose layers and the
 flagd CI baseline; ``make -n`` prints the recipe without running docker.
 """
 
@@ -119,9 +119,9 @@ def test_dry_run_uses_mock_controllers_from_the_ci_flag_baseline():
     assert backend["variants"][backend["defaultVariant"]] == "mock"
 
 
-@pytest.mark.uc("UC-070", br=["BR-007"])
-def test_dry_run_seeds_the_experiment_through_the_flag_not_the_env():
-    """#1907: the seed is the experiment_seed flag; no compose layer sets a seed or gate env."""
+@pytest.mark.uc("UC-043", flow="A16")
+def test_dry_run_names_the_experiment_through_a_flag_not_the_env():
+    """The experiment is a flag value; no compose layer sets a seed or gate env."""
     entries = _load_layer(DRY_RUN_FILE)["services"]["agent"].get("environment") or []
     base_env = ic.compose_services()["agent"]["environment"]
     for env in (entries, base_env):
@@ -148,23 +148,26 @@ def test_dry_run_seeds_the_experiment_through_the_flag_not_the_env():
     assert not readers, f"the agent still names a seed env var in {readers}"
 
 
-@pytest.mark.uc("UC-070", br=["BR-007"])
-def test_dryrun_enable_sets_a_declared_seed_variant_before_the_gates():
-    """FR-090: `agent-dryrun-enable.sh on` seeds the experiment, then opens the gates."""
+@pytest.mark.uc("UC-043", flow="A16", br=["BR-012"])
+def test_dryrun_enable_sets_a_declared_candidate_before_the_gates():
+    """FR-090: `agent-dryrun-enable.sh on` names the candidate, then opens the gates."""
     script = (REPO_ROOT / "scripts" / "agent-dryrun-enable.sh").read_text()
-    variant = re.search(r'^SEED_VARIANT="(\w+)"', script, re.MULTILINE)
-    assert variant, "agent-dryrun-enable.sh names no SEED_VARIANT"
-    seed = json.loads((CI_FLAGD_DIR / "agent.json").read_text())["flags"][
-        "experiment_seed"
+    variant = re.search(r'^CANDIDATE_VARIANT="(\w+)"', script, re.MULTILINE)
+    assert variant, "agent-dryrun-enable.sh names no CANDIDATE_VARIANT"
+    candidates = json.loads((CI_FLAGD_DIR / "agent.json").read_text())["flags"][
+        "experiment_dynamic_candidates"
     ]
-    value = seed["variants"].get(variant.group(1))
-    assert value, f"{variant.group(1)} is not a variant of experiment_seed"
-    assert (
-        value["flag"] in json.loads((CI_FLAGD_DIR / "game.json").read_text())["flags"]
+    value = candidates["variants"].get(variant.group(1))
+    assert value, (
+        f"{variant.group(1)} is not a variant of experiment_dynamic_candidates"
     )
+    key, _, game_variant = value.partition("=")
+    game = json.loads((CI_FLAGD_DIR / "game.json").read_text())["flags"]
+    assert game_variant in game[key]["variants"], f"{value} names no declared variant"
     on = script[script.index("  on)") : script.index("  off)")]
-    assert on.index("experiment_seed") < on.index(
-        "for flag in enabled experiments_enabled"
-    ), "on must write the seed before the gates"
+    assert on.index("experiment_dynamic_candidates") < on.index(
+        "for flag in experiment_dynamic_enabled enabled experiments_enabled"
+    ), "on must write the candidate before the gates"
     off = script[script.index("  off)") : script.index("  status)")]
-    assert "experiment_seed" in off, "off must clear the seed"
+    assert "experiment_dynamic_candidates" in off, "off must clear the candidate"
+    assert "experiment_dynamic_enabled" in off, "off must clear the declarer gate"

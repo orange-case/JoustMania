@@ -95,7 +95,7 @@ func (s *switchableEvaluator) ObjectValue(_ context.Context, k string, d any, _ 
 	return d, nil
 }
 
-// TestKillSwitch_AbortsRunningExperiment: both gates on, the seed experiment runs
+// TestKillSwitch_AbortsRunningExperiment: both gates on, a declared experiment runs
 // with shadow games in flight; the operator turns `enabled` off and the next
 // experiment tick aborts it and frees every shadow slot (experiments_enabled stays on).
 // UC: UC-045 main
@@ -168,13 +168,14 @@ func TestKillSwitch_ForceEndsPatternGames(t *testing.T) {
 		})
 		lc := &liveConfig{}
 		lc.set(flags.ExperimentConfig{Enabled: true, ShadowEffectiveConcurrency: 2})
-		lc.setSeed(testSeed("nonstop.respawn_seconds", 6.0, 50))
+		lc.setCandidates("sensitivity")
 		var mu sync.Mutex
 		agentEnabled := true
 		loop := &experimentLoop{
 			registry:       reg,
 			log:            log,
 			expDefaults:    flags.ExperimentDefaults{Tick: time.Hour, DynamicMaxConcurrent: defaultDynamicMaxConcurrent},
+			dynamic:        newDynamicDeclarer(svc, nil),
 			configOverride: lc.get,
 			enabledOverride: func(context.Context) flags.EnabledState {
 				mu.Lock()
@@ -223,7 +224,7 @@ func TestKillSwitch_ForceEndsPatternGames(t *testing.T) {
 
 // TestKillSwitch_FlagdUnreachableStopsExperimentLoop drives the REAL flags client
 // (no enabledOverride / configOverride seam): with flagd reachable both gates are on
-// and the seed experiment runs; once flagd is unreachable BOTH gates fail closed
+// and a declared experiment runs; once flagd is unreachable BOTH gates fail closed
 // (`enabled` and, since #1907, experiments_enabled, with no env fallback even when
 // the removed AGENT_EXPERIMENTS_ENABLED is set), so the next tick aborts the
 // experiment on either gate.
@@ -233,8 +234,7 @@ func TestKillSwitch_FlagdUnreachableStopsExperimentLoop(t *testing.T) {
 	loop, spawner, _ := loopForConfigTest(t, 8)
 	ev := &switchableEvaluator{
 		strings:  map[string]string{"enabled": "on"},
-		booleans: map[string]bool{"experiments_enabled": true},
-		objects:  map[string]any{"experiment_seed": testSeed("nonstop.respawn_seconds", 6.0, 50)},
+		booleans: map[string]bool{"experiments_enabled": true, "experiment_dynamic_enabled": true},
 	}
 	loop.flags = flags.New(ev, nil)
 	loop.configOverride = nil

@@ -582,7 +582,7 @@ discarded at it, §6). Cost: a persisted admin setting whose feature is off in F
 written twice at that start (the reference, then its overlay).
 
 **Not a change.** The pull reads `enabled=false` as no value whatever the value is (§4.2, §2.3), so a reference write
-never changes what the link reads from the document (except for `agent/enabled`, where `enabled=false` reads `off`, see the table above): it is never a change from Flagsmith, a conflict, an out-of-sync
+never changes what the link reads from the document (except for `agent/enabled`, where `enabled=false` reads `off`, see the table above; the switched-on reference the start writes for an `agent/enabled` it created reads back as the stack value `watch`, its baseline, and if that write fails the start logs it at INFO and the stack reads `off` until the feature is switched on): it is never a change from Flagsmith, a conflict, an out-of-sync
 key or a refusal, and no pull applies anything because of it. It does not touch `remote`, `pending`, `in_sync`,
 `refused` or the feature health, and it never changes a feature whose toggle is on at its re-read. A reference
 written as `enabled=false` also never touches another environment (no `initial_value`, §5.0) and no identity override.
