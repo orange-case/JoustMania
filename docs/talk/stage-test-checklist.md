@@ -127,7 +127,7 @@ A new version needs the images built by CI on main first.
 | ST-7.5 | Recovery: stack down with `start-limit-hit`: `sudo systemctl reset-failed joustmania && sudo systemctl start joustmania` | The stack comes up; try it only if the state occurs, otherwise just confirm the command is in your notes | UC-060 BR-006 | |
 | ST-7.6 | Recovery from a cut-off run: pull the power during an upgrade (only on a spare version) and then run `--status` and re-run the same command | `--status` WARNs `HEAD ... is neither recorded version` or `a rollback ... was cut off`; the re-run repairs the record or `--rollback` finishes the move; then `sudo systemctl restart joustmania` | UC-060 A2, A3, DEVELOPMENT.md | |
 | ST-7.7 | Git remote check | `git remote -v` shows an **HTTPS** remote (an SSH remote without a key blocks `git fetch --tags` in the upgrade, #2088 finding 3) | UC-060 A2 | |
-| ST-7.8 | Disk and memory | `df -h /` shows plenty free (123 GB free in #2088); `free -m` while the stack runs is inside the Pi memory budget | NFR-020 | |
+| ST-7.8 | Disk and memory | `df -h /` shows plenty free (123 GB free in #2088); `free -m` while the stack runs: note the available memory, no container OOM-killed (`docker inspect -f '{{.State.OOMKilled}}'`) | C-010 | |
 
 ## 8. Long session (30+ minutes on the power bank)
 
@@ -137,12 +137,12 @@ first readings at the start and the rest every 10 minutes.
 
 | Id | Action | Expected result | Verifies | Result |
 |---|---|---|---|---|
-| ST-8.1 | `vcgencmd get_throttled` at the start and every 10 min | `throttled=0x0` all session. Bit 0 (`0x1`) is undervoltage now, bit 1 (`0x2`) frequency capped, bit 2 (`0x4`) throttled, bit 3 (`0x8`) soft temperature limit; bits 16 to 19 (`0x10000`...) mean it happened since boot. Any non-zero value: note the bits, the power bank and the cable | NFR-020, C-011 | |
-| ST-8.2 | `vcgencmd measure_temp` and `vcgencmd measure_clock arm` every 10 min | Target (untested; no 75 C figure in #2088): under about 75 C at the end and the ARM clock stays at its maximum (2.4 GHz on a Pi 5); note the case and fan | NFR-020 | |
+| ST-8.1 | `vcgencmd get_throttled` at the start and every 10 min | `throttled=0x0` all session. Bit 0 (`0x1`) is undervoltage now, bit 1 (`0x2`) frequency capped, bit 2 (`0x4`) throttled, bit 3 (`0x8`) soft temperature limit; bits 16 to 19 (`0x10000`...) mean it happened since boot. Any non-zero value: note the bits, the power bank and the cable | C-010, C-011 | |
+| ST-8.2 | `vcgencmd measure_temp` and `vcgencmd measure_clock arm` every 10 min | Target (untested; no 75 C figure in #2088): under about 75 C at the end and the ARM clock stays at its maximum (2.4 GHz on a Pi 5); note the case and fan | C-010 | |
 | ST-8.3 | **Input lag p99** (query below) | p50 about 11 ms, p95 under about 112 ms, **p99 well under the #2088 baseline of 467 ms**; note the value per 10 min and whether the tail follows a power or Bluetooth event | NFR-004, NFR-002, UC-030 | |
 | ST-8.4 | **Dropped frames and frame consistency** (queries below) | The dropped-frame count stays small (the #2088 data: 4533 dropped frames across 44 games, 149 stream frame overruns, frame consistency average 96.7 %); record the per-game consistency and the increase over the session | NFR-002, UC-030 | |
 | ST-8.5 | Controllers over the session | `controller_disconnect_total` does not grow with the controllers in place; batteries on the cards drop by a plausible amount | UC-035 | |
-| ST-8.6 | Memory and containers at the end | Same 17 containers (18 with the `operator-pad` profile on), none unhealthy or restarted (`docker ps`, `docker inspect -f '{{.RestartCount}}'` on the services); `free -m` shows no growth trend | NFR-020 | |
+| ST-8.6 | Memory and containers at the end | Same 17 containers (18 with the `operator-pad` profile on), none unhealthy or restarted (`docker ps`, `docker inspect -f '{{.RestartCount}}'` on the services); `free -m` shows no growth trend | C-010 | |
 | ST-8.7 | Power bank: note the remaining charge at the start and the end | The session cost, so the venue run time can be planned; the bank holds the Pi plus the pad and the Bluetooth adapters without a throttled flag | C-011 | |
 
 ### Where to read the numbers

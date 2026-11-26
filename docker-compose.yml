@@ -43,7 +43,7 @@
 # - Local builds tag images with GHCR names for consistency
 #
 # Resource Limits:
-# - Total memory limits sum to about 4.2-4.3GB (NFR-020 notes the gap to the 4GB Pi); the limits are ceilings, not typical use
+# - Memory limits are per-container ceilings, not typical use; their sum is above the RAM of a 4 GB Pi by design
 # - CPU limits: 1.0 for real-time app services, 0.5 for standard services, 0.25 for lightweight
 
 x-logging: &default-logging

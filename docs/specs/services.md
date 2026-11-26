@@ -111,7 +111,7 @@ Outside the Pi path, `docker-compose.override.yml` adds the dev and test binding
 flag-service 8070 on loopback). Every other service is reachable only on
 `joustmania-network`, or through envoy's routes. Do not add a host port to the base file without a loopback bind and a reason in this table.
 
-**Traceability:** C-014, C-015, FR-085, NFR-020 / UC-035 / `docker-compose*.yml`, `services/envoy/envoy.yaml`, `services/*/server.py` / `tests/integration/conftest.py`, `tests/service/harness/stack.py`.
+**Traceability:** C-014, C-015, FR-085, C-010 / UC-035 / `docker-compose*.yml`, `services/envoy/envoy.yaml`, `services/*/server.py` / `tests/integration/conftest.py`, `tests/service/harness/stack.py`.
 
 ## 3. gRPC services
 
