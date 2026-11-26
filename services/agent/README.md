@@ -10,7 +10,7 @@ spans, metrics and its own lifecycle log events from the OTel Collector over OTL
 `GameContext`, gates on whether the context is worth acting on, and calls stub
 decision hooks that will eventually drive feature-flag changes.
 
-The Collector fans telemetry out to the Agent via an `otlp/agent` exporter wired
+The Collector fans telemetry out to the Agent via an `otlp_http/agent` exporter wired
 into the existing **traces** and **metrics** pipelines — the Agent receives the
 same signals as the rest of the observability stack, no new instrumentation
 required.
@@ -615,7 +615,7 @@ project.
 
 ### Self-ingestion safety
 
-The collector's `otlp/agent` exporter fans the **agent's own spans back to the
+The collector's `otlp_http/agent` exporter fans the **agent's own spans back to the
 agent**. Two layers prevent a feedback loop:
 
 1. Naturally: the agent's spans carry no recognized game signals, so extraction
@@ -914,7 +914,7 @@ decimal string) overrides the default.
 
 | Property | Value |
 |----------|-------|
-| **OTLP port** | 4317 |
+| **OTLP ports** | 4318 OTLP/HTTP (the collector's `otlp_http/agent`), 4317 OTLP gRPC |
 | **Health port** | 13134 |
 | **Health check** | `GET /healthz` |
 
@@ -1019,5 +1019,5 @@ docker run --rm --network joustmania \
 
 - [Intervention Surface research](../../docs/research/722-intervention-surface.md)
 - [Ownership Model](../../docs/OWNERSHIP_MODEL.md) -- human/agent settings arbitration & composition rules (#814/#820)
-- [OTel Collector config](../otel-collector/) -- defines the `otlp/agent` exporter
+- [OTel Collector config](../otel-collector/) -- defines the `otlp_http/agent` exporter
 - [Services spec](../../docs/specs/services.md)

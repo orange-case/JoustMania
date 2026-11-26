@@ -40,7 +40,7 @@ panic button.
 
 With `docker compose up`, the agent:
 
-- **Observes**: ingests spans + metrics over OTLP (`agent:4317`), accumulates a
+- **Observes**: ingests spans + metrics over OTLP (`agent:4318`, OTLP/HTTP from the collector), accumulates a
   `GameContext`, gates on whether a game is live with fresh data.
 - **Decides**: runs the objective-weighted rules engine each gated cycle,
   evaluating all four flag layers from flagd live.

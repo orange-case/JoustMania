@@ -51,12 +51,21 @@ const probeInterval = 5 * time.Second
 // defaultServiceName is the agent's OTEL service name default. It MUST stay
 // identical everywhere it is used: the exported resource (otel.go) and the
 // extractor self-skip (SetOwnService) rely on matching values to break the
-// otlp/agent self-ingestion loop.
+// otlp_http/agent self-ingestion loop.
 const defaultServiceName = "agent"
 
 // resolveServiceName resolves the agent's OTEL service name (env override or default).
 func resolveServiceName() string {
 	return getEnv("OTEL_SERVICE_NAME", defaultServiceName)
+}
+
+// otlpHTTPAddr is AGENT_OTLP_HTTP_ADDR, ":4318" when unset; set but empty turns
+// the OTLP/HTTP receiver off.
+func otlpHTTPAddr() string {
+	if v, ok := os.LookupEnv("AGENT_OTLP_HTTP_ADDR"); ok {
+		return v
+	}
+	return ":4318"
 }
 
 func getEnv(key, defaultValue string) string {
@@ -431,6 +440,7 @@ func run() error {
 	c.buildPromotion()
 	c.buildExperimentStack()
 	server := c.buildPipeline(listenAddr, healthAddr)
+	server.otlpHTTPAddr = otlpHTTPAddr()
 
 	if err := server.run(ctx); err != nil {
 		slog.Error("gRPC server failed", "error", err)
@@ -1024,7 +1034,7 @@ func (c *components) buildPipeline(listenAddr, healthAddr string) *serverCompone
 	// GameContext multiplexer (#845 PR B): one Store partition per game_id, plus the
 	// fallback partition "" for unlabeled signals (zero-regression — single-game
 	// mode collapses to exactly today's single-store behavior). The factory applies
-	// the lifecycle TTLs/clock, skips the agent's own telemetry (otlp/agent
+	// the lifecycle TTLs/clock, skips the agent's own telemetry (otlp_http/agent
 	// self-ingestion loop), and wires OnGameEnd per partition so the retrospective
 	// fires per game on the right partition's state. The per-game loop factory reads
 	// c.mux at call time.

@@ -25,6 +25,7 @@ import (
 //
 // Everything here is the part of main() that SPAWNS or STOPS goroutines:
 //   - the gRPC OTLP receiver (GracefulStop on shutdown),
+//   - the OTLP/HTTP receiver (Shutdown on shutdown),
 //   - the health HTTP server (Shutdown on shutdown),
 //   - the per-game decision LoopSet (AwaitInflight joins in-flight remote decide calls),
 //   - the GameContext multiplexer + its eviction ticker loop.
@@ -36,8 +37,10 @@ import (
 // reason about.
 type serverComponents struct {
 	listenAddr string
-	healthAddr string
-	logger     *slog.Logger
+	// otlpHTTPAddr is the OTLP/HTTP receiver the collector exports to; "" = off.
+	otlpHTTPAddr string
+	healthAddr   string
+	logger       *slog.Logger
 
 	pipe  *pipeline
 	mux   *gamecontext.Multiplexer
@@ -132,6 +135,12 @@ func (c *serverComponents) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Bound before the health server, so healthy means receiving on both transports.
+	otlpHTTP, otlpHTTPDone, err := c.startOTLPHTTPServer()
+	if err != nil {
+		_ = lis.Close()
+		return err
+	}
 
 	healthServer := c.startHealthServer()
 	stopEvict := c.startEvictionLoop(ctx)
@@ -171,6 +180,11 @@ func (c *serverComponents) run(ctx context.Context) error {
 		<-ctx.Done()
 		c.logger.Info("Shutdown requested, stopping servers...")
 		grpcServer.GracefulStop()
+		if otlpHTTP != nil {
+			httpCtx, cancelHTTP := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = otlpHTTP.Shutdown(httpCtx)
+			cancelHTTP()
+		}
 		c.loops.AwaitInflight()
 		// Join in-flight async retro inference goroutines (#1179) too: ctx (the agent
 		// root) is already cancelled, and each retro goroutine bridges root.Done() to its
@@ -207,7 +221,35 @@ func (c *serverComponents) run(ctx context.Context) error {
 	<-shutdownDone
 	<-stopEvict
 	<-expDone
+	<-otlpHTTPDone
 	return serveErr
+}
+
+// startOTLPHTTPServer binds the OTLP/HTTP receiver and serves it in its own
+// goroutine; the returned channel closes when that goroutine ends. With no
+// address it returns a nil server and a closed channel.
+func (c *serverComponents) startOTLPHTTPServer() (*http.Server, <-chan struct{}, error) {
+	done := make(chan struct{})
+	if c.otlpHTTPAddr == "" {
+		close(done)
+		return nil, done, nil
+	}
+	lis, err := net.Listen("tcp", c.otlpHTTPAddr)
+	if err != nil {
+		return nil, nil, err
+	}
+	srv := &http.Server{
+		Handler:           newOTLPHTTPHandler(c.pipe),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		defer close(done)
+		c.logger.Info("JoustMania Agent listening (OTLP/HTTP)", "addr", lis.Addr().String())
+		if err := srv.Serve(lis); err != nil && err != http.ErrServerClosed {
+			c.logger.Error("OTLP/HTTP server failed", "error", err)
+		}
+	}()
+	return srv, done, nil
 }
 
 // startHealthServer brings up the /healthz HTTP server in its own goroutine and

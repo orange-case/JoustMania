@@ -103,6 +103,7 @@ func newShutdownComponents(t *testing.T) *serverComponents {
 
 	return &serverComponents{
 		listenAddr:    freePort(t),
+		otlpHTTPAddr:  freePort(t),
 		healthAddr:    freePort(t),
 		logger:        logger,
 		pipe:          pipe,
