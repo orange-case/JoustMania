@@ -34,6 +34,7 @@ from test_nonstop import (  # noqa: E402
 from test_random_teams_formation import RecordingLog, _players  # noqa: E402
 
 from lib.types import GameEvent, Sound  # noqa: E402
+from services.game_coordinator import game_clock  # noqa: E402
 from services.game_coordinator.games import nonstop_joust as nonstop_mod  # noqa: E402
 from services.game_coordinator.games.base import GameState  # noqa: E402
 from services.game_coordinator.games.ffa import FFAGame  # noqa: E402
@@ -328,11 +329,27 @@ async def test_a_respawn_whose_led_write_fails_on_a_dying_call_still_counts():
     game.players[serial].alive = False
     game.gameplay_stream = _DyingCall()
 
-    with pytest.raises(grpc.aio.AioRpcError):
-        await game._respawn_player(serial)
+    assert await game._respawn_player(serial) is True
 
     assert game.players[serial].alive
     assert [e["serial"] for e in log.events.get_events_of_type("player_respawned")] == [serial]
+
+
+@pytest.mark.uc("UC-030", br=["BR-006"])
+@pytest.mark.uc("UC-101", br=["BR-001"])
+@pytest.mark.asyncio
+async def test_an_agent_revive_on_a_dying_call_is_recorded_with_its_grace():
+    game, _log = await _running_nonstop()
+    serial = next(iter(game.players))
+    game.players[serial].alive = False
+    game.gameplay_stream = _DyingCall()
+    recorded = []
+    game.record_intervention = lambda s, types=(): recorded.append((s, tuple(types)))
+
+    assert await game.revive_player(serial) is True
+
+    assert game.players[serial].grace_until > game_clock.now()
+    assert recorded == [(serial, ("revive_player",))]
 
 
 @pytest.mark.uc("UC-030", br=["BR-006"])

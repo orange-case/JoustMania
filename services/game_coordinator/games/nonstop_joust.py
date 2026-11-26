@@ -581,11 +581,12 @@ class NonstopJoustGame(BaseGameMode):
             # Check spawn protection expiration
             if player.spawn_protected and current_time >= player.spawn_protection_end:
                 player.spawn_protected = False
-                # Return to normal white color via stream
+                # Back to the player's own colour (UC-026 step 2)
+                r, g, b = player.color
                 base_color_cmd = controller_manager_pb2.GameplayStreamControl(
                     base_color=controller_manager_pb2.ControllerColorConfig(
                         serial=serial,
-                        color=controller_manager_pb2.RGB(r=255, g=255, b=255),  # White
+                        color=controller_manager_pb2.RGB(r=r, g=g, b=b),
                     )
                 )
                 await serialized_write(self.gameplay_stream, base_color_cmd)
@@ -675,8 +676,6 @@ class NonstopJoustGame(BaseGameMode):
         # Play respawn sound (Phase 29)
         await self._play_sound(Sound.SFX_JOIN, priority=2)
 
-        # Published before the LED write: a write that fails on a dying call goes to the
-        # reconnect, and the player is alive already (UC-030 BR-006).
         await self.event_publisher(
             "player_respawned",
             {
@@ -687,7 +686,8 @@ class NonstopJoustGame(BaseGameMode):
             },
         )
 
-        # White color during spawn protection via stream
+        # A write on a dying call is skipped: the respawn stands (an agent revive records it)
+        # and the reopened stream's config shows the protection colour (UC-030 BR-006).
         r, g, b = SPAWN_PROTECTION_COLOR
         base_color_cmd = controller_manager_pb2.GameplayStreamControl(
             base_color=controller_manager_pb2.ControllerColorConfig(
@@ -695,7 +695,7 @@ class NonstopJoustGame(BaseGameMode):
                 color=controller_manager_pb2.RGB(r=r, g=g, b=b),
             )
         )
-        await serialized_write(self.gameplay_stream, base_color_cmd)
+        await self._write_effect_guarded(base_color_cmd, "Respawn protection colour")
         return True
 
     async def _set_unique_colors(self):

@@ -747,8 +747,9 @@ class TestNonstopUpdateRespawnTimers:
         assert len(respawn_events) == 1
 
     @pytest.mark.asyncio
-    async def test_spawn_protection_expiry_restores_white(self, nonstop_game):
-        """Test that spawn protection expiry sends white color and clears flag."""
+    @pytest.mark.uc("UC-026", flow="main", steps=[2])
+    async def test_spawn_protection_expiry_restores_the_player_colour(self, nonstop_game):
+        """Spawn protection expiry sends the player's own colour and clears the flag."""
         game, mock_controller_manager, _ = nonstop_game
         stream = RecordingGameplayStream()
         game.gameplay_stream = stream
@@ -757,6 +758,7 @@ class TestNonstopUpdateRespawnTimers:
 
         serial = list(game.players.keys())[0]
         player = game.players[serial]
+        player.color = (10, 200, 30)  # its unique colour (_set_unique_colors)
 
         # Set player as alive with spawn protection that already expired
         player.alive = True
@@ -768,13 +770,10 @@ class TestNonstopUpdateRespawnTimers:
         # Spawn protection should be cleared
         assert player.spawn_protected is False
 
-        # Should have sent white color command
         color_msgs = [m for m in stream.messages if m.HasField("base_color")]
         assert len(color_msgs) >= 1
-        last_color = color_msgs[-1]
-        assert last_color.base_color.color.r == 255
-        assert last_color.base_color.color.g == 255
-        assert last_color.base_color.color.b == 255
+        last = color_msgs[-1].base_color.color
+        assert (last.r, last.g, last.b) == (10, 200, 30)
 
 
 class TestNonstopEndGameImpl:
