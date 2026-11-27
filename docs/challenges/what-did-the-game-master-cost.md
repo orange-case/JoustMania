@@ -101,7 +101,10 @@ A model not in the table is reported as *unpriced*, never guessed: add its row f
 - **Pricing a call:** the cached share of the input at the cache price, the rest of `input_tokens` at the input
   price, `output_tokens` (reasoning included) at the output price. Never add `cache_*` or `reasoning` on top.
 - **Cache writes** use the 5-minute price, the default cache lifetime. The agent's decide requests carry no
-  `cache_control`, so cache writes are expected to be 0.
+  `cache_control`, so cache writes are expected to be 0. They are read from `gen_ai.usage.cache_write.input_tokens`;
+  the claude chat spans carry the same value as `gen_ai.usage.cache_creation.input_tokens` during the transition
+  (#2729), and older images only that name, so the script reads the old name only when the new one is absent, never
+  both.
 - **Reasoning tokens:** the pricing page does not say how thinking is billed. TODO: confirm from a provider page
   that reasoning (thinking) tokens bill as output tokens; until then the table assumes it, as the agent's
   `output_tokens` include them.

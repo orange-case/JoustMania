@@ -39,7 +39,8 @@ def span(tid, sid, parent, name, attrs, events=(), start=0):
             "events": [{"name": n, "attributes": [{"key": k, "value": av(v)} for k, v in a.items()]}
                        for n, a in events]}
 
-def chat(tid, sid, parent, provider, model, inp, out, cr=0, cw=0, reason=0, conv=None, resp=None):
+def chat(tid, sid, parent, provider, model, inp, out, cr=0, cw=0, reason=0, conv=None, resp=None,
+         cw_old=0):
     a = {"gen_ai.operation.name": "chat", "gen_ai.provider.name": provider,
          "gen_ai.request.model": model, "gen_ai.usage.input_tokens": inp,
          "gen_ai.usage.output_tokens": out}
@@ -49,6 +50,8 @@ def chat(tid, sid, parent, provider, model, inp, out, cr=0, cw=0, reason=0, conv
         a["gen_ai.usage.cache_read.input_tokens"] = cr
     if cw:
         a["gen_ai.usage.cache_write.input_tokens"] = cw
+    if cw_old:  # the Go semconv v1.41.0 name (#2729)
+        a["gen_ai.usage.cache_creation.input_tokens"] = cw_old
     if reason:
         a["gen_ai.usage.reasoning.output_tokens"] = reason
     if conv:
@@ -100,7 +103,40 @@ doc = {"result": {"resourceSpans": [
      "scopeSpans": [{"spans": coordinator}]},
 ]}}
 json.dump(doc, open(sys.argv[1], "w"))
+
+# Cache writes. Game C: the decide span carries only cache_write (as the agent does), its chat
+# span both names (the transition), the retro's chat span only cache_creation (an older image).
+C = "game_cccccccccccc"
+cw = [
+    decide("t4", "d5", C, "real", {"input_tokens": 1000, "output_tokens": 0,
+                                    "cache_write.input_tokens": 400}, start=5),
+    chat("t4", "c61", "d5", "anthropic", "claude-haiku-4-5", 1000, 0, cw=400, cw_old=400,
+         resp="claude-haiku-4-5"),
+    span("t4", "r5", "root", "agent.llm.retro", {"game.id": C, "game.kind": "real"}),
+    chat("t4", "c71", "r5", "anthropic", "claude-opus-5-5", 200, 0, cw_old=200, conv=C,
+         resp="claude-opus-5-5"),
+]
+json.dump({"result": {"resourceSpans": [{"scopeSpans": [{"spans": cw}]}]}},
+          open(sys.argv[1].replace("traces.json", "traces-cw.json"), "w"))
 PY
+
+# --- cache writes at the cache-write price, read from either name, never both
+set +e
+python3 "${TOOL}" --prices "${PRICES}" --traces "${WORK}/traces-cw.json" --json >"${WORK}/cw.json"
+rc=$?
+set -e
+ok "cache-write fixture exits 0" "$([[ ${rc} == 0 ]]; echo $?)"
+cw_check() { # cw_check <name> <python expression over g, game C>
+  set +e
+  python3 -c "import json,sys; g=json.load(open('${WORK}/cw.json'))['q3_per_game']['game_cccccccccccc']; sys.exit(0 if ($2) else 1)"
+  local c=$?
+  set -e
+  ok "$1" "${c}"
+}
+cw_check "cache writes from both names counted once" "g['tokens']['cache_write'] == 600"
+cw_check "cache-write game adds up (decide span has only the new name)" "g['adds_up']"
+# haiku 600 x 1.00 + 400 x 1.25 = 1100; opus 200 x 5.00 = 1000 (plain input would be 1000 + 800)
+cw_check "cache writes priced at the cache-write price" "abs(g['money'] - 0.0021) < 1e-9"
 
 # --- file mode, every game: B does not add up -> exit 3
 set +e

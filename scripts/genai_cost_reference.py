@@ -41,6 +41,9 @@ TOKEN_KEYS = {
     "cache_write": "gen_ai.usage.cache_write.input_tokens",
     "reasoning": "gen_ai.usage.reasoning.output_tokens",
 }
+# The chat spans carry both names during the transition (#2729); older images only the old one.
+# Read the old one only when the new one is absent, never both.
+FALLBACK_KEYS = {"cache_write": "gen_ai.usage.cache_creation.input_tokens"}
 PER_MTOK = 1_000_000
 
 
@@ -191,7 +194,13 @@ def money(tokens: dict, row: dict) -> float:
 
 
 def _tokens(attrs: dict) -> dict:
-    return {k: int(attrs.get(key) or 0) for k, key in TOKEN_KEYS.items()}
+    out = {}
+    for k, key in TOKEN_KEYS.items():
+        v = attrs.get(key)
+        if v is None and k in FALLBACK_KEYS:
+            v = attrs.get(FALLBACK_KEYS[k])
+        out[k] = int(v or 0)
+    return out
 
 
 def _add(into: dict, tokens: dict) -> None:
