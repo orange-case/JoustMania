@@ -89,6 +89,8 @@ class TempoMixin:
         self._music_refusal_restarts = 0
         # The running check-and-restart task of the music loop (single flight).
         self._music_keeper: asyncio.Task | None = None
+        # The keeper's glide and a tick's glide may overlap; one at a time keeps the newer one last.
+        self._tempo_send_lock = asyncio.Lock()
         # Last volume the game sent, so a music restart plays at the same level.
         self._audio_volume: float | None = None
         # Rate limit for the failing-tick warning of _music_loop.
@@ -378,6 +380,10 @@ class TempoMixin:
 
         Returns ``accepted``, ``refused``, ``failed`` or ``skipped`` (no track).
         """
+        async with self._tempo_send_lock:
+            return await self._push_audio_locked(target, remaining, after_outage=after_outage)
+
+    async def _push_audio_locked(self, target: float, remaining: float, *, after_outage: bool) -> str:
         if not self.audio_client or self.music_track_id in (None, MUTED_TRACK_ID):
             self._audio_synced = True
             return "skipped"
@@ -603,6 +609,9 @@ class TempoMixin:
                     return
             else:
                 self._audio_down = False
+                if self.music_track_id == MUTED_TRACK_ID:
+                    # Nothing to glide; resending PlayMusic tells a restarted service a game runs.
+                    self._music_lost = True
         if self._music_lost:
             await self._restart_game_music()
 
