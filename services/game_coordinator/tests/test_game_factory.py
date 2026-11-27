@@ -141,6 +141,27 @@ class TestGameFactoryCreateGame:
         """NonStop resolves to a registered game class (not instantiated here)."""
         assert Games.from_name("NonStop") in _GAME_CLASSES
 
+    @pytest.mark.uc("UC-026", flow="main", steps=[3], br=["BR-006"])
+    def test_nonstop_without_config_defaults_to_three_minutes(self):
+        """A NonStop start without a NonstopConfig gets the 180 s default (#2952)."""
+        from proto import game_coordinator_pb2
+
+        assert GameFactory._extract_mode_config(Games.NonStop, None) == {"time_limit_seconds": 180}
+        bare = game_coordinator_pb2.StartGameConfig(game_name="NonStop")
+        assert GameFactory._extract_mode_config(Games.NonStop, bare) == {"time_limit_seconds": 180}
+        other = game_coordinator_pb2.StartGameConfig(game_name="NonStop", ffa_config=game_coordinator_pb2.FFAConfig())
+        assert GameFactory._extract_mode_config(Games.NonStop, other) == {"time_limit_seconds": 180}
+
+    @pytest.mark.uc("UC-026", flow="A1", br=["BR-006"])
+    def test_nonstop_explicit_zero_stays_unlimited(self):
+        """An explicit NonstopConfig 0 (agent shadow start) keeps the unlimited game."""
+        from proto import game_coordinator_pb2
+
+        config = game_coordinator_pb2.StartGameConfig(
+            game_name="NonStop", nonstop_config=game_coordinator_pb2.NonstopConfig(time_limit_seconds=0)
+        )
+        assert GameFactory._extract_mode_config(Games.NonStop, config) == {"time_limit_seconds": 0}
+
 
 class TestGameFactoryTeamGames:
     """Tests for team game creation."""

@@ -1067,7 +1067,7 @@ def build_start_config(
         config.zombie_config.CopyFrom(game_coordinator_pb2.ZombieConfig())
     elif game_name == "NonStop":
         config.nonstop_config.CopyFrom(
-            game_coordinator_pb2.NonstopConfig(time_limit_seconds=0)
+            game_coordinator_pb2.NonstopConfig(time_limit_seconds=180)
         )
     elif game_name == "Tournament":
         config.tournament_config.CopyFrom(

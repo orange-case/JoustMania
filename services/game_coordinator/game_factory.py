@@ -151,6 +151,10 @@ class GameFactory:
         Returns:
             Dict of mode-specific constructor arguments
         """
+        # proto3 int32 has no presence: only a set nonstop_config can ask for 0 = unlimited.
+        if game_mode is Games.NonStop and (config is None or config.WhichOneof("game_config") != "nonstop_config"):
+            return {"time_limit_seconds": nonstop_joust.DEFAULT_TIME_LIMIT_SECONDS}
+
         if config is None:
             return {}
 
