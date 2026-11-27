@@ -6,7 +6,7 @@
 FROM python:3.14-slim AS builder
 
 # uv >= 0.8 reads the lockfile (revision 3); keep near the uv CI runs (#2266)
-RUN pip install --no-cache-dir uv==0.11.6
+RUN pip install --no-cache-dir --only-binary :all: uv==0.11.6
 
 WORKDIR /app
 
@@ -22,11 +22,11 @@ RUN python -m compileall -q lib/
 
 COPY services/stowaway/pyproject.toml /app/services/stowaway/
 
-# #2266: third-party dependencies come from uv.lock, never from a fresh resolve; the
-# workspace packages then install editable with --no-deps.
-RUN uv export --frozen --no-dev --no-emit-workspace --package joustmania-stowaway -o /tmp/requirements.txt \
-    && uv pip install --system -r /tmp/requirements.txt \
-    && uv pip install --system --no-deps -e proto/ -e lib/ -e services/stowaway/
+# #2266: third-party dependencies come from uv.lock (hashed, wheels only), never from a fresh resolve.
+RUN uv export --frozen --no-dev --no-emit-workspace --package joustmania-stowaway -o /tmp/requirements.txt
+RUN uv pip install --system --require-hashes --only-binary :all: -r /tmp/requirements.txt
+# The workspace's own packages from this checkout (proto, lib, stowaway) must build; no third-party code runs.
+RUN uv pip install --system --no-deps -e proto/ -e lib/ -e services/stowaway/ # NOSONAR
 
 # Runtime stage - Chainguard python (glibc, Python 3.14), same digest as the other Python services.
 FROM cgr.dev/chainguard/python:latest@sha256:678e879909418cd070927d0ba1ed018be98d43929db2457c37b9b9764703678c

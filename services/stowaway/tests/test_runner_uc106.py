@@ -121,7 +121,8 @@ def test_no_flagd_needs_an_endpoint():
         parse(["run", "--no-flagd"])
     args = parse(["run", "--challenge", "swing-density", "--no-flagd", "--endpoint", "http://localhost:4317"])
     settings = settings_source(args).get()
-    assert settings.enabled and settings.challenge == "swing-density"
+    assert settings.enabled
+    assert settings.challenge == "swing-density"
 
 
 @pytest.mark.uc("UC-106", flow="main", steps=[1], br=["BR-007"])

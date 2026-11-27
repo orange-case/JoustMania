@@ -44,7 +44,9 @@ async def test_a_pattern_game_on_reserved_mock_controllers(spans):
     assert await asyncio.wait_for(task, 1.0) == STOP_GAME_END
 
     (added,) = mock.added
-    assert added.reserved and added.tag == TAG and added.archetype == ARCHETYPE
+    assert added.reserved
+    assert added.tag == TAG
+    assert added.archetype == ARCHETYPE
     assert json.loads(added.archetype_params) == ARCHETYPE_PARAMS
     start = gc.requests[0].start_config
     assert start.game_name == "JoustFFA"

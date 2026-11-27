@@ -82,6 +82,6 @@ class MatchTracker:
         if self._match is not None:
             self._match.ended.set()
         self._match = None
-        for task in list(self._tasks):
+        for task in self._tasks.copy():  # done callbacks shrink the set while we await
             with contextlib.suppress(Exception):
                 await task

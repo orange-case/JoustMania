@@ -58,15 +58,16 @@ BASE="${BASE:-origin/main}"
 
 # Per-package pytest invocation, verified against each pyproject (all seven
 # declare a `test` extra). Change a row here if a package's setup changes.
+UV_PYTEST="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
 declare -A PYTEST_CMD=(
-  [lib]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
-  [game_coordinator]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
-  [menu]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
-  [controller_manager]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
-  [audio]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
-  [pairing_daemon]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
-  [operator_pad]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
-  [stowaway]="uv run --extra test pytest -q --tb=short -p no:cacheprovider"
+  [lib]="$UV_PYTEST"
+  [game_coordinator]="$UV_PYTEST"
+  [menu]="$UV_PYTEST"
+  [controller_manager]="$UV_PYTEST"
+  [audio]="$UV_PYTEST"
+  [pairing_daemon]="$UV_PYTEST"
+  [operator_pad]="$UV_PYTEST"
+  [stowaway]="$UV_PYTEST"
 )
 PY_SERVICES=(game_coordinator menu controller_manager audio pairing_daemon operator_pad stowaway)
 
