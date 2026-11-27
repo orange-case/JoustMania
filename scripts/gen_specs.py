@@ -21,6 +21,7 @@ Sources:
     flag-catalog.md              services/flagd/*.json + services/flag-service/registry.yaml
                                  + notes/flags.yaml (readers, reload class, note; one per flag)
     flag-registry.md             services/flag-service/registry.yaml (row attributes, flags.md §13)
+    benchmark-schema.md / .json  docs/specs/telemetry.md appendix B (scripts/benchmark_schema.py, #2570)
 
 Committed files carry no count-style aggregates (#2152): a total such as "193
 flags" changes with every flag, RPC or metric any PR adds, so two such PRs
@@ -49,6 +50,8 @@ GENERATED = SPECS / "generated"
 NOTES = SPECS / "notes"
 
 sys.path.insert(0, str(REPO_ROOT / "tests" / "contract"))
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+import benchmark_schema as bs
 import telemetry_inventory as ti
 
 # Replaces every total in a committed file (#2152).
@@ -852,6 +855,26 @@ def flag_catalog() -> str:
 
 
 # --------------------------------------------------------------------------- #
+def _benchmark_schema() -> bs.Schema:
+    try:
+        return bs.load(REPO_ROOT)
+    except bs.SchemaError as err:
+        raise SpecSourceError(str(err)) from err
+
+
+def benchmark_schema_md() -> str:
+    return (
+        HEADER.format(sources=f"{bs.TELEMETRY_REL} appendix B")
+        + "\n"
+        + bs.render_markdown(_benchmark_schema())
+    )
+
+
+def benchmark_schema_json() -> str:
+    return bs.render_json(_benchmark_schema())
+
+
+# --------------------------------------------------------------------------- #
 GENERATORS = {
     "telemetry-metric-catalog.md": telemetry_metric_catalog,
     "grpc-rpcs.md": grpc_rpcs,
@@ -859,7 +882,12 @@ GENERATORS = {
     "flags-ci-diff.md": flags_ci_diff,
     "flag-catalog.md": flag_catalog,
     "flag-registry.md": flag_registry,
+    "benchmark-schema.md": benchmark_schema_md,
+    "benchmark-schema.json": benchmark_schema_json,
 }
+
+# Generated file types; a file of these types without a generator is stale.
+GENERATED_GLOBS = ("*.md", "*.json")
 
 
 def render_all() -> dict[Path, str]:
@@ -884,7 +912,7 @@ def stale_files(rendered: dict[Path, str]) -> list[tuple[Path, str]]:
             )
             out.append((path, diff))
     # A generated file without a generator is stale too.
-    for path in sorted(GENERATED.glob("*.md")):
+    for path in sorted(p for g in GENERATED_GLOBS for p in GENERATED.glob(g)):
         if path not in rendered:
             out.append(
                 (path, f"{path.relative_to(REPO_ROOT)}: no generator produces it\n")

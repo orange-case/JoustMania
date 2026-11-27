@@ -276,6 +276,11 @@ processors:
       - key: deployment.environment
         value: ${env:DEPLOYMENT_ENVIRONMENT:-development}
         action: insert
+      # Benchmark schema version (docs/specs/telemetry.md appendix B); the
+      # contract test fails when it differs from the spec.
+      - key: orangecase.schema_version
+        value: "1.0.0"
+        action: upsert
       # service.namespace is set per-service in the Python SDK:
       #   "joustmania" for game services (game-coordinator, menu, audio)
       #   "infrastructure" for platform services (controller-manager, pairing-daemon)

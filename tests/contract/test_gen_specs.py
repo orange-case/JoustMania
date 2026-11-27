@@ -200,7 +200,8 @@ def test_check_mode_reports_stale_and_orphan_files(tmp_repo, monkeypatch, capsys
 
 def test_committed_generated_files_have_a_generator():
     """Every file under docs/specs/generated/ is produced by gen_specs (no hand-written strays)."""
-    on_disk = {p.name for p in (ti.REPO_ROOT / "docs/specs/generated").glob("*.md")}
+    generated = ti.REPO_ROOT / "docs/specs/generated"
+    on_disk = {p.name for glob in g.GENERATED_GLOBS for p in generated.glob(glob)}
     assert on_disk == set(g.GENERATORS)
 
 
