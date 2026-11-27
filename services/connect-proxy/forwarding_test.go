@@ -532,6 +532,18 @@ func TestProxyWarnBluetoothRestart(t *testing.T) {
 		rig.otherBackendsUntouched(t, "menu")
 	})
 
+	t.Run("UC-001/BR-011 a browser request is refused and never reaches the menu", func(t *testing.T) {
+		rig := newProxyRig(t)
+		req := connect.NewRequest(&menupb.WarnBluetoothRestartRequest{})
+		req.Header().Set("Origin", "http://joustmania.local")
+		_, err := rig.menuClient.WarnBluetoothRestart(testCtx(t), req)
+		if connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Fatalf("want permission_denied, got %v", err)
+		}
+		rig.menu.log.none(t)
+		rig.otherBackendsUntouched(t, "")
+	})
+
 	t.Run("UC-001/BR-011 an older menu's unimplemented keeps its code", func(t *testing.T) {
 		rig := newProxyRig(t)
 		rig.menu.err = status.Error(codes.Unimplemented, "unknown method")

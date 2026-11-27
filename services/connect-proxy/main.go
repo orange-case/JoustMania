@@ -436,10 +436,14 @@ func (p *MenuProxy) GetMenuStatus(
 }
 
 // WarnBluetoothRestart forwards the pairing daemon's warning before a bluetoothd restart (UC-001 BR-011, services.md §3.2).
+// Browsers always send Origin on a POST and the daemon never does, so a LAN page cannot beep the lobby or hold its starts.
 func (p *MenuProxy) WarnBluetoothRestart(
 	ctx context.Context,
 	req *connect.Request[menupb.WarnBluetoothRestartRequest],
 ) (*connect.Response[menupb.WarnBluetoothRestartResponse], error) {
+	if req.Header().Get("Origin") != "" {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("WarnBluetoothRestart is for the pairing daemon only"))
+	}
 	resp, err := p.client.WarnBluetoothRestart(ctx, req.Msg)
 	if err != nil {
 		return nil, toConnectError(err)

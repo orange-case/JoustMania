@@ -8,7 +8,7 @@ import pytest_asyncio
 from lib.colors import Colors
 from lib.types import Sound
 from proto import controller_manager_pb2, menu_pb2
-from services.menu.bt_restart_warning import WARNING_LEAD_MS
+from services.menu.bt_restart_warning import HOLD_AFTER_CUE_WINDOW_SECONDS, START_HOLD_SECONDS, WARNING_LEAD_MS
 from services.menu.handlers.base import ControllerState
 from services.menu.tests.servicer_harness import cancel_background_tasks, make_real_servicer
 
@@ -134,3 +134,93 @@ async def test_a_failed_pulse_does_not_stop_the_others(menu):
 
     assert answer.warned is True
     assert pulsed(menu) == ["a", "b"]
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(menu):
+    fake = FakeClock()
+    menu.bt_restart_warner._clock = fake
+    return fake
+
+
+def rejected(servicer) -> list[dict]:
+    return [c.args[1] for c in servicer.event_publisher.publish.await_args_list if c.args[0] == "game_start_rejected"]
+
+
+@pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+async def test_the_last_check_after_the_cue_holds_starts_while_bluetoothd_restarts(menu, clock):
+    lobby(menu, {"a": ControllerState.READY, "b": ControllerState.READY})
+    await warn(menu)
+    clock.now += WARNING_LEAD_MS / 1000
+
+    await warn(menu, check_only=True)
+    clock.now += START_HOLD_SECONDS - 0.1
+    started = await menu.start_game("web", "web")
+
+    assert started is False
+    assert menu._game_lifecycle_task is None
+    assert rejected(menu) == [
+        {"game_name": menu.current_selection.name, "source": "web", "reason": "bluetooth_restart"}
+    ]
+    clock.now += 0.2
+    assert menu.bt_restart_warner.start_held() is False
+
+
+@pytest.mark.usefixtures("clock")
+@pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+async def test_a_held_ready_start_clears_the_ready_latch(menu):
+    lobby(menu, {"a": ControllerState.READY, "b": ControllerState.READY})
+    await warn(menu)
+    await warn(menu, check_only=True)
+    menu.ready_handler._game_start_in_progress = True
+
+    assert await menu._ready_start_game("a") is False
+    assert menu.ready_handler._game_start_in_progress is False
+
+
+@pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+async def test_a_check_without_a_cue_of_its_own_holds_nothing(menu, clock):
+    lobby(menu, {"a": ControllerState.READY})
+
+    await warn(menu, check_only=True)
+    assert menu.bt_restart_warner.start_held() is False
+
+    await warn(menu)
+    clock.now += HOLD_AFTER_CUE_WINDOW_SECONDS + 1
+    await warn(menu, check_only=True)
+    assert menu.bt_restart_warner.start_held() is False
+
+
+@pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+async def test_each_cue_allows_one_hold(menu, clock):
+    lobby(menu, {"a": ControllerState.READY})
+    await warn(menu)
+    await warn(menu, check_only=True)
+    clock.now += START_HOLD_SECONDS
+
+    await warn(menu, check_only=True)
+
+    assert menu.bt_restart_warner.start_held() is False
+
+
+@pytest.mark.usefixtures("clock")
+@pytest.mark.uc("UC-001", flow="A7", br=["BR-011"])
+async def test_a_check_that_reports_a_live_game_holds_nothing(menu):
+    lobby(menu, {"a": ControllerState.READY})
+    await warn(menu)
+    game = asyncio.get_running_loop().create_future()
+    menu._game_lifecycle_task = game
+    try:
+        await warn(menu, check_only=True)
+    finally:
+        game.cancel()
+
+    assert menu.bt_restart_warner.start_held() is False
