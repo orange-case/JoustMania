@@ -69,6 +69,11 @@ class FlippingStream:
         return _frame()
 
 
+@pytest.fixture(autouse=True)
+def sdk_enabled(monkeypatch):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)  # conftest disables the SDK; these are local providers
+
+
 @pytest.fixture
 def watched(monkeypatch):
     provider = InMemoryProvider({KEY: _flag("off")})
