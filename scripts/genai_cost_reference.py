@@ -123,7 +123,8 @@ def _get(base: tuple[str, str, str], query: dict, timeout: float = 60) -> dict |
     scheme, netloc, prefix = base
     url = urllib.parse.urlunsplit((scheme, netloc, prefix + TRACES_PATH, urllib.parse.urlencode(query), ""))
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:  # NOSONAR: operator CLI input, not a trust boundary
+        # Operator CLI input, not a trust boundary.
+        with urllib.request.urlopen(url, timeout=timeout) as r:  # NOSONAR
             return json.load(r)
     except urllib.error.HTTPError as e:
         if e.code == 404:  # "No traces found" is an empty answer
@@ -156,7 +157,8 @@ def fetch(base: tuple[str, str, str], start: float, end: float, game_ids: list[s
 
 
 def load_prices(path: str) -> dict:
-    with open(path, encoding="utf-8") as f:  # NOSONAR: operator CLI input, not a trust boundary
+    # Operator CLI input, not a trust boundary.
+    with open(path, encoding="utf-8") as f:  # NOSONAR
         table = json.load(f)
     for key in ("date", "source", "currency", "models"):
         if key not in table:
@@ -443,7 +445,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.traces:
             spans = []
             for path in a.traces:
-                with open(path, encoding="utf-8") as f:  # NOSONAR: operator CLI input, not a trust boundary
+                # Operator CLI input, not a trust boundary.
+                with open(path, encoding="utf-8") as f:  # NOSONAR
                     spans.extend(spans_from_doc(json.load(f)))
             spans = dedupe(spans)
         else:
