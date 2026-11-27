@@ -46,6 +46,7 @@ members = [
     "services/menu",
     "services/audio",
     "services/operator_pad",
+    "services/stowaway",
     "services/pairing_daemon",
     "tests/integration",
     "tests/service",

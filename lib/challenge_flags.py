@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 # Kept equal to services/agent/flags/challenge.go ChallengeFlagPrefixes (lib/tests checks it).
 CHALLENGE_FLAG_PREFIXES: tuple[str, ...] = ("challenge.", "stowaway.")
 
-# (domain, key, code default) evaluated once per gameplay frame of every running match. Empty
-# until a challenge serves its flag; the default's type picks the typed evaluation.
-WATCHED_CHALLENGE_FLAGS: tuple[tuple[str, str, object], ...] = ()
+# (domain, key, code default) evaluated once per gameplay frame of every running match; the
+# default's type picks the typed evaluation.
+WATCHED_CHALLENGE_FLAGS: tuple[tuple[str, str, object], ...] = (("observability", "stowaway.challenge", "none"),)
 
 EVENT_START = "orangecase.challenge.start"
 EVENT_END = "orangecase.challenge.end"

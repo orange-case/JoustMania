@@ -211,6 +211,7 @@ jobs:
           - dashboard
           - rust-hid
           - operator-pad
+          - stowaway
           - otel-collector
           - flag-service
           - agent

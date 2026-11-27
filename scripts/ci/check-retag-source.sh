@@ -67,6 +67,7 @@ case "$image" in
   dashboard) filter=dashboard ;;
   rust-hid) filter=rust ;;
   operator-pad) filter=operator_pad ;;
+  stowaway) filter=stowaway ;;
   otel-collector) filter=otel_collector ;;
   flag-service) filter=flag_service ;;
   agent) filter=agent ;;

@@ -39,7 +39,7 @@ The Go services (agent, connect-proxy, flag-service: `serviceInstanceID` in each
 
 Service identities (`OTEL_SERVICE_NAME` / namespace): `controller-manager-service`, `pairing-daemon`,
 `rust-hid`, `connect-proxy`, `agent` (namespace `infrastructure`); `game-coordinator-service`,
-`menu-service`, `audio-service` (namespace `joustmania`) (`docker-compose.yml`).
+`menu-service`, `audio-service`, `stowaway` (namespace `joustmania`) (`docker-compose.yml`).
 
 **Traceability:** C-001, FR-040, FR-080, FR-081, NFR-021 to NFR-024 / UC-035, UC-041 / `services/otel-collector/config.yaml`, `lib/telemetry.py`, `lib/otel_metrics.py` / `tests/service/test_otlp_sink.py` (OTLP export to a receiver); the collector-to-Jaeger hop is covered end to end by `tests/integration/test_tc002_ffa_game.py` (the game's root span reaches Jaeger, TC-002 validation 3), `tests/integration/test_uc035_a3_backend_down.py` (same, with the agent down) and `tests/integration/test_tc007_closed_loop_full_stack.py` (agent spans).
 
@@ -202,6 +202,22 @@ down loses the span, never the restart. There is no watchdog metric: a trip is r
 (`docker inspect`) are its record.
 
 **Traceability:** NFR-080 / UC-060 A8 / `lib/watchdog.py` / `lib/tests/test_watchdog.py`, `tests/service/test_uc060_a8_loop_watchdog.py`.
+
+### 3.5 stowaway
+
+Synthetic load of the Orange Case ([UC-106](../use_cases/UC-106.md), #2576). Service `stowaway` (namespace `joustmania`), compose profile `stowaway`. Its tracer and meter providers are its own (`services/stowaway/synthetic.py`): the resource of `lib/otel_resource.py` plus `orangecase.synthetic` = `true` (bool), OTLP gRPC to `OTEL_EXPORTER_OTLP_ENDPOINT` (compose `http://otel-collector:4317`), a batch span processor flushing every 500 ms with a queue of 16384 spans, metrics exported every 100 ms. The collector routes all of it as synthetic (§1.1). A match is the primary game's `game_started` event (§5): its `_traceparent` is the parent of the generator's `CONSUMER` span, so the span lands in the match trace (UC-035 BR-016). `stowaway` never reads `StreamGameplayData`.
+
+| Span / metric | Kind | When | Attributes | Source |
+|---|---|---|---|---|
+| `stowaway.padding` | CONSUMER, child of the `game_started` event's span | challenge `span-rounds`, one per match, until `stowaway.span_target` children were emitted, the match ends or a flag stops it | `orangecase.synthetic`, `game.id`, `orangecase.challenge.name` (`span-rounds`), `stowaway.mode`, `stowaway.intensity`, `stowaway.span_target`; at the end `stowaway.spans_emitted`, `stowaway.stop_reason` (`target`, `match_end`, `kill_switch`, `challenge_change`) | `services/stowaway/challenges.py` |
+| `stowaway.padding.span` | INTERNAL, child of `stowaway.padding` | the padding itself: 500 spans/s × `stowaway.intensity` (UC-103 BR-002) | `orangecase.synthetic`, `stowaway.padding.index` (0-based) | `services/stowaway/challenges.py` |
+| `stowaway.swing` | CONSUMER, child of the `game_started` event's span | challenge `swing-density`, one per match, while the gauge below runs | `orangecase.synthetic`, `game.id`, `orangecase.challenge.name` (`swing-density`), `stowaway.mode`, `stowaway.intensity`, `stowaway.swing.players`; at the end `stowaway.stop_reason` | `services/stowaway/challenges.py` |
+| `stowaway_swing_accel_magnitude{serial, game_id}` | observable gauge, unit `{g}` | challenge `swing-density`: one series per synthetic player (`stowaway-1` ... `stowaway-N`, N = 4 × intensity, at least 1), a swing to about 3 g every 3 s on a 1 g rest, exported every 100 ms; no value outside a match | resource `orangecase.synthetic` | `services/stowaway/challenges.py` |
+| `stowaway.players.game` | INTERNAL, root | players mode, one per pattern game it runs (UC-106 A2) | `orangecase.synthetic`, `game.id`, `stowaway.archetype`, `stowaway.stop_reason` (`game_end`, `real_match`, `kill_switch`, `error`) | `services/stowaway/players.py` |
+
+The pattern game's own spans and metrics are the game coordinator's and are not synthetic (FR-248). `stowaway` sends no logs over OTLP. There is no delivered-span count yet (FR-246, #2574).
+
+**Traceability:** FR-285, FR-225, FR-248 / UC-106, UC-103 BR-002 / `services/stowaway/` / `services/stowaway/tests/`.
 
 ## 4. Agent
 
@@ -745,7 +761,11 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | Key | Kind | On | Type | Challenges | Status | Source |
 |---|---|---|---|---|---|---|
 | `orangecase.schema_version` | resource | every OTLP signal, set by the collector | string | all | stable | `services/otel-collector/config.yaml` |
-| `orangecase.synthetic` | resource | synthetic telemetry (`stowaway`), also on its spans in a match trace; the collector keeps it from the agent and, unless `ORANGECASE_SYNTHETIC_IN_CASE=true`, from Jaeger and VictoriaMetrics; the agent drops it unless `ai.observe_synthetic` (§1.1, UC-041 BR-011) | bool | all | planned #2576 | `services/otel-collector/config.yaml` |
+| `orangecase.synthetic` | resource | synthetic telemetry (`stowaway`), also on its spans in a match trace; the collector keeps it from the agent and, unless `ORANGECASE_SYNTHETIC_IN_CASE=true`, from Jaeger and VictoriaMetrics; the agent drops it unless `ai.observe_synthetic` (§1.1, UC-041 BR-011) | bool | all | stable | `services/stowaway/synthetic.py` |
+| `stowaway.padding` | span | `CONSUMER` child of the match's `game_started` event span (§3.5) | | UC-103 | stable | `services/stowaway/challenges.py` |
+| `stowaway.padding.span` | span | child of `stowaway.padding`, the padding (§3.5) | | UC-103 | stable | `services/stowaway/challenges.py` |
+| `stowaway.swing` | span | `CONSUMER` child of the match's `game_started` event span (§3.5) | | UC-102 | stable | `services/stowaway/challenges.py` |
+| `stowaway_swing_accel_magnitude` | metric | gauge, every 100 ms per synthetic player during a match (§3.5) | double (g) | UC-102 | stable | `services/stowaway/challenges.py` |
 | `orangecase.challenge.start` | span_event | game root, when a challenge flag becomes active in the match | | all | stable | `lib/challenge_flags.py` |
 | `orangecase.challenge.end` | span_event | game root, when a challenge ends, switches or the match ends | | all | stable | `lib/challenge_flags.py` |
 | `orangecase.challenge.name` | attribute | `orangecase.challenge.start`, `orangecase.challenge.end` | string | all | stable | `lib/challenge_flags.py` |

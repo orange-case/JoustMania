@@ -466,6 +466,7 @@ READERS = frozenset(
         "rust-hid",
         "pairing-daemon",
         "operator-pad",
+        "stowaway",
         "flag-service",
         "lib",
     }
@@ -480,6 +481,7 @@ READER_SOURCES = {
     "rust-hid": ("services/rust-hid/src", ".rs"),
     "pairing-daemon": ("services/pairing_daemon", ".py"),
     "operator-pad": ("services/operator_pad", ".py"),
+    "stowaway": ("services/stowaway", ".py"),
     "flag-service": ("services/flag-service", ".go"),
     "lib": ("lib", ".py"),
 }

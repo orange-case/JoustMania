@@ -1187,6 +1187,43 @@ observability:
     note: >-
       Span batch export delay of every Python service; targetable per `service`. A change needs a
       restart.
+  stowaway.challenge:
+    read_by: [stowaway, lib]
+    reload: live
+    note: >-
+      The challenge whose synthetic load `stowaway` generates (UC-106 BR-006): `span-rounds` and
+      `swing-density` have generators, `cardinality-bomb`, `hostile-wifi` and `clock-skew` are
+      selectable but emit nothing yet. Read at each match start and every 200 ms while a generator
+      runs; a change ends the generator (`challenge_change`). A challenge flag (§1.4): the game
+      coordinator watches it every gameplay frame, so a flip shows on the match trace. An unknown
+      value reads as `none`. `stowaway run --challenge` overrides it.
+  stowaway.enabled:
+    read_by: [stowaway]
+    reload: live
+    note: >-
+      Kill switch of `stowaway` (UC-106 BR-003): read at most 200 ms old on every generator tick;
+      off stops all generation within 1 s without a restart. Fails closed: unreadable or not ready
+      reads off. Off by default, so a running `stowaway` container emits nothing.
+  stowaway.intensity:
+    read_by: [stowaway]
+    reload: live
+    note: >-
+      Multiplier of each generator's rate (500 padding spans/s, 4 swing players at 1.0), clamped
+      to [0, 4] (`INTENSITY_CEILING`, UC-106 BR-004) until the collector's CPU at maximum is measured
+      on the stage Pi (NFR-062). Traces' sampling is not this flag.
+  stowaway.mode:
+    read_by: [stowaway]
+    reload: live
+    note: >-
+      `telemetry` attaches synthetic telemetry to the live match, `players` runs a pattern game on
+      mock controllers while no real match runs (UC-106 A2), `both` does both and attaches the
+      telemetry to the pattern game. An unknown value reads as `telemetry`.
+  stowaway.span_target:
+    read_by: [stowaway]
+    reload: live
+    note: >-
+      Padding spans per match for `span-rounds`, the round of UC-103 BR-007 (10 k, 100 k, 1 M). Read
+      at each match start. `stowaway run --span-target` overrides it.
   telemetry.moment_shape:
     read_by: [lib]
     reload: per-game

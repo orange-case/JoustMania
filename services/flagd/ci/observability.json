@@ -66,6 +66,54 @@
       },
       "defaultVariant": "none"
     },
+    "stowaway.enabled": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
+    "stowaway.challenge": {
+      "state": "ENABLED",
+      "variants": {
+        "none": "none",
+        "span-rounds": "span-rounds",
+        "swing-density": "swing-density",
+        "cardinality-bomb": "cardinality-bomb",
+        "hostile-wifi": "hostile-wifi",
+        "clock-skew": "clock-skew"
+      },
+      "defaultVariant": "none"
+    },
+    "stowaway.mode": {
+      "state": "ENABLED",
+      "variants": {
+        "telemetry": "telemetry",
+        "players": "players",
+        "both": "both"
+      },
+      "defaultVariant": "telemetry"
+    },
+    "stowaway.intensity": {
+      "state": "ENABLED",
+      "variants": {
+        "low": 0.25,
+        "normal": 1.0,
+        "high": 2.0,
+        "max": 4.0
+      },
+      "defaultVariant": "normal"
+    },
+    "stowaway.span_target": {
+      "state": "ENABLED",
+      "variants": {
+        "10k": 10000,
+        "100k": 100000,
+        "1m": 1000000
+      },
+      "defaultVariant": "10k"
+    },
     "telemetry.moment_shape": {
       "state": "ENABLED",
       "variants": {

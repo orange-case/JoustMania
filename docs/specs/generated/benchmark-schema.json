@@ -1,7 +1,7 @@
 {
   "schema": "orangecase-telemetry",
   "version": "1.0.0",
-  "digest": "a63a1277b16833a97bb79aadec1be2af8a8cdbda9cb06a02c2bc57e9b1adf01e",
+  "digest": "b3b6c7377d6929e15602902915688cd2ca0f0fb623bcdcdcaf8065ddced01133",
   "source": "docs/specs/telemetry.md#appendix-b-benchmark-schema",
   "generated_by": "scripts/gen_specs.py (make specs); do not edit",
   "owned_namespaces": [
@@ -28,8 +28,47 @@
       "challenges": [
         "all"
       ],
-      "status": "planned",
-      "issue": 2576
+      "status": "stable"
+    },
+    {
+      "key": "stowaway.padding",
+      "kind": "span",
+      "on": "CONSUMER child of the match's game_started event span (\u00a73.5)",
+      "type": null,
+      "challenges": [
+        "UC-103"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "stowaway.padding.span",
+      "kind": "span",
+      "on": "child of stowaway.padding, the padding (\u00a73.5)",
+      "type": null,
+      "challenges": [
+        "UC-103"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "stowaway.swing",
+      "kind": "span",
+      "on": "CONSUMER child of the match's game_started event span (\u00a73.5)",
+      "type": null,
+      "challenges": [
+        "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "stowaway_swing_accel_magnitude",
+      "kind": "metric",
+      "on": "gauge, every 100 ms per synthetic player during a match (\u00a73.5)",
+      "type": "double (g)",
+      "challenges": [
+        "UC-102"
+      ],
+      "status": "stable"
     },
     {
       "key": "orangecase.challenge.start",

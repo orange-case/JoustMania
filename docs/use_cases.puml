@@ -78,6 +78,7 @@ rectangle "JoustMania" {
         usecase "UC-103\nFind How Deep a Backend Shows a Trace" as UC103
         usecase "UC-104\nGenerate the Game Dashboard with a Backend's Assistant" as UC104
         usecase "UC-105\nFind What the Game Master Cost" as UC105
+        usecase "UC-106\nRun Synthetic Load with stowaway" as UC106
     }
 }
 
@@ -171,6 +172,11 @@ UC105 --> gateway
 UC105 --> obsbackend
 UC105 ..> UC010 : <<include>>
 UC105 ..> UC044 : <<include>>
+presenter --> UC106
+operator --> UC106
+UC106 --> gateway
+UC103 ..> UC106 : <<include>>
+UC104 ..> UC106 : <<include>>
 presenter --> UC035
 agent --> UC070
 player --> UC070
