@@ -1,9 +1,6 @@
 package experiment
 
-import (
-	"sync"
-	"time"
-)
+import "sync"
 
 // fitness_store.go is the FINALIZED-PER-GAME fitness store (#965, #1017). It
 // backs the retro's fitness lookup (Get).
@@ -61,8 +58,6 @@ type FitnessSample struct {
 	// observations (#1017 §3 item 3). Optional — nil when the loop has no resolved
 	// snapshot to attach. Copied on Record so a caller cannot mutate stored state.
 	Config map[string]any
-	// At is when the sample finalized (Record time).
-	At time.Time
 }
 
 // FitnessStore is a bounded, thread-safe, finalized-per-game fitness store keyed
@@ -112,9 +107,6 @@ func sampleKey(gameID, objective string) string {
 func (s *FitnessStore) Record(sample FitnessSample) {
 	if sample.GameID == "" {
 		return
-	}
-	if sample.At.IsZero() {
-		sample.At = time.Now().UTC()
 	}
 	// Defensive copy so a later mutation of the caller's map cannot reach in.
 	sample.Config = copyConfig(sample.Config)
