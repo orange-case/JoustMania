@@ -1,7 +1,7 @@
 {
   "schema": "orangecase-telemetry",
   "version": "1.0.0",
-  "digest": "68e403eb7b0e695206dc165a18a168cfd650f215a52a87dd81c86f46c370872b",
+  "digest": "a63a1277b16833a97bb79aadec1be2af8a8cdbda9cb06a02c2bc57e9b1adf01e",
   "source": "docs/specs/telemetry.md#appendix-b-benchmark-schema",
   "generated_by": "scripts/gen_specs.py (make specs); do not edit",
   "owned_namespaces": [
@@ -23,7 +23,7 @@
     {
       "key": "orangecase.synthetic",
       "kind": "resource",
-      "on": "synthetic telemetry (stowaway); the collector keeps it from the agent",
+      "on": "synthetic telemetry (stowaway), also on its spans in a match trace; the collector keeps it from the agent and, unless ORANGECASE_SYNTHETIC_IN_CASE=true, from Jaeger and VictoriaMetrics; the agent drops it unless ai.observe_synthetic (\u00a71.1, UC-041 BR-011)",
       "type": "bool",
       "challenges": [
         "all"

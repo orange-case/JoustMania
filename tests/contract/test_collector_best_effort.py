@@ -56,12 +56,15 @@ def test_agent_fan_out_is_two_seconds_no_retries_and_a_1000_item_queue(collector
 
 @pytest.mark.uc("UC-035", flow="A3")
 @pytest.mark.parametrize("pipeline", ["traces", "metrics"])
-def test_agent_is_never_the_only_sink_of_a_pipeline(collector, pipeline):
-    """UC-035 A3: traces still reach Jaeger and metrics VictoriaMetrics when the agent is down."""
-    exporters = collector["service"]["pipelines"][pipeline]["exporters"]
-    assert "otlp_http/agent" in exporters
+def test_agent_is_never_the_only_sink_of_a_signal(collector, pipeline):
+    """UC-035 A3: traces still reach Jaeger and metrics VictoriaMetrics when the agent is down:
+    the agent's pipeline (`<signal>/agent`) has a storage twin on the same receiver."""
+    pipelines = collector["service"]["pipelines"]
+    agent = pipelines[f"{pipeline}/agent"]
+    assert agent["exporters"] == ["otlp_http/agent"]
     storage = {"traces": "otlp/jaeger", "metrics": "prometheus_remote_write"}[pipeline]
-    assert storage in exporters
+    assert storage in pipelines[pipeline]["exporters"]
+    assert pipelines[pipeline]["receivers"] == agent["receivers"]
 
 
 @pytest.mark.uc("UC-035", flow="A3")
@@ -182,6 +185,7 @@ def test_grpc_health_spans_are_dropped_before_the_traces_exporters(collector):
     )
     assert not _drops(conditions, {"rpc.service": "joustmania.game.v1.Health2"})
     assert not _drops(conditions, {})
-    processors = collector["service"]["pipelines"]["traces"]["processors"]
-    assert "filter/grpc_health" in processors
-    assert processors.index("memory_limiter") == 0
+    for pipeline in ("traces", "traces/agent"):
+        processors = collector["service"]["pipelines"][pipeline]["processors"]
+        assert "filter/grpc_health" in processors
+        assert processors.index("memory_limiter") == 0

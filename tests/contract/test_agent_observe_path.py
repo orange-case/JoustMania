@@ -17,11 +17,11 @@ def collector():
 
 
 @pytest.mark.uc("UC-041", flow="main", cond=["Pre-1"])
-@pytest.mark.parametrize("pipeline", ["traces", "metrics"])
+@pytest.mark.parametrize("pipeline", ["traces/agent", "metrics/agent"])
 def test_collector_fans_out_traces_and_metrics_to_the_agent_over_otlp_http(
     collector, pipeline
 ):
-    """UC-041 Pre-1, NFR-024: both pipelines export to otlp_http/agent, OTLP/HTTP protobuf to agent:4318."""
+    """UC-041 Pre-1, NFR-024: both agent pipelines export to otlp_http/agent, OTLP/HTTP protobuf to agent:4318."""
     agent = collector["exporters"]["otlp_http/agent"]
     assert agent["endpoint"] == "http://agent:4318"
     assert agent["encoding"] == "proto"
@@ -52,24 +52,31 @@ def test_no_agent_exporter_uses_otlp_grpc(collector):
 
 @pytest.mark.uc("UC-041", flow="main", cond=["Post-F-1"])
 @pytest.mark.parametrize(
-    ("pipeline", "storage"),
-    [("traces", "otlp/jaeger"), ("metrics", "prometheus_remote_write")],
+    ("pipeline", "agent_pipeline", "storage"),
+    [
+        ("traces", "traces/agent", "otlp/jaeger"),
+        ("metrics", "metrics/agent", "prometheus_remote_write"),
+    ],
 )
 def test_storage_exporters_are_independent_of_the_agent_exporter(
-    collector, pipeline, storage
+    collector, pipeline, agent_pipeline, storage
 ):
     """UC-041 Post-F-1 (static proxy): the storage exporters do not depend on the agent.
 
     A static config check, not a runtime test with the agent down. The storage
-    exporter is its own exporter in the same fan-out pipeline, targets its own
+    exporter is its own exporter in its own pipeline (the agent has a twin pipeline on the
+    same receiver since #2577), targets its own
     backend, and is the only one of the two that keeps the collector's default
     retries; the agent exporter is the only one that is best-effort (short
     timeout, no retries, bounded queue), so a dead agent costs at most its own
     timeout and drops (see also test_collector_best_effort.py).
     """
     exporters = collector["exporters"]
-    pipe_exporters = collector["service"]["pipelines"][pipeline]["exporters"]
-    assert storage in pipe_exporters and "otlp_http/agent" in pipe_exporters
+    pipelines = collector["service"]["pipelines"]
+    assert storage in pipelines[pipeline]["exporters"]
+    assert "otlp_http/agent" not in pipelines[pipeline]["exporters"]
+    assert pipelines[agent_pipeline]["exporters"] == ["otlp_http/agent"]
+    assert pipelines[pipeline]["receivers"] == pipelines[agent_pipeline]["receivers"]
     assert storage != "otlp_http/agent"
 
     agent = exporters["otlp_http/agent"]

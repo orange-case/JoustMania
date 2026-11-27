@@ -45,6 +45,9 @@ type pipeline struct {
 	// flags.LifecycleHolder.PlayerTTL (a lock-free atomic load). Nil keeps the static
 	// playerTTL, preserving the read-at-startup behavior in tests.
 	playerTTLSource func() time.Duration
+	// observeSynthetic is ai.observe_synthetic, read only for a batch that holds
+	// synthetic telemetry (UC-041 BR-011). Nil reads false: drop it.
+	observeSynthetic func(context.Context) bool
 
 	now func() time.Time
 }
@@ -64,6 +67,16 @@ func newPipeline(mux *gamecontext.Multiplexer, loops *decision.LoopSet, playerTT
 func (p *pipeline) withPlayerTTLSource(src func() time.Duration) *pipeline {
 	p.playerTTLSource = src
 	return p
+}
+
+// withObserveSynthetic installs the live ai.observe_synthetic source.
+func (p *pipeline) withObserveSynthetic(src func(context.Context) bool) *pipeline {
+	p.observeSynthetic = src
+	return p
+}
+
+func (p *pipeline) syntheticAllowed(ctx context.Context) bool {
+	return p.observeSynthetic != nil && p.observeSynthetic(ctx)
 }
 
 // effectivePlayerTTL returns the live player-TTL when a source is wired and
@@ -115,6 +128,9 @@ type traceReceiver struct {
 func (r *traceReceiver) Export(ctx context.Context, req ptraceotlp.ExportRequest) (ptraceotlp.ExportResponse, error) {
 	t0 := time.Now()
 	td := req.Traces()
+	if gamecontext.HasSyntheticSpans(td) && !r.pipe.syntheticAllowed(ctx) {
+		gamecontext.DropSyntheticSpans(td)
+	}
 	if ids := r.pipe.mux.ApplySpans(td); len(ids) > 0 {
 		r.pipe.signalUpdated(ctx, ids, decision.EvalTrigger{
 			Signal:     "traces",
@@ -134,7 +150,11 @@ type metricsReceiver struct {
 // Export ingests a batch of metrics.
 func (r *metricsReceiver) Export(ctx context.Context, req pmetricotlp.ExportRequest) (pmetricotlp.ExportResponse, error) {
 	t0 := time.Now()
-	if ids := r.pipe.mux.ApplyMetrics(req.Metrics()); len(ids) > 0 {
+	md := req.Metrics()
+	if gamecontext.HasSyntheticMetrics(md) && !r.pipe.syntheticAllowed(ctx) {
+		gamecontext.DropSyntheticMetrics(md)
+	}
+	if ids := r.pipe.mux.ApplyMetrics(md); len(ids) > 0 {
 		r.pipe.signalUpdated(ctx, ids, decision.EvalTrigger{
 			Signal:     "metrics",
 			RPCService: otlpMetricsService,
@@ -154,7 +174,11 @@ type logsReceiver struct {
 }
 
 // Export ingests a batch of log records.
-func (r *logsReceiver) Export(_ context.Context, req plogotlp.ExportRequest) (plogotlp.ExportResponse, error) {
-	r.pipe.mux.ApplyLogs(req.Logs())
+func (r *logsReceiver) Export(ctx context.Context, req plogotlp.ExportRequest) (plogotlp.ExportResponse, error) {
+	ld := req.Logs()
+	if gamecontext.HasSyntheticLogs(ld) && !r.pipe.syntheticAllowed(ctx) {
+		gamecontext.DropSyntheticLogs(ld)
+	}
+	r.pipe.mux.ApplyLogs(ld)
 	return plogotlp.NewExportResponse(), nil
 }

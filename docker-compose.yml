@@ -232,6 +232,8 @@ services:
     environment:
       - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
       - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
+      # UC-041 BR-011: synthetic telemetry into Jaeger / VictoriaMetrics (default off).
+      - ORANGECASE_SYNTHETIC_IN_CASE=${ORANGECASE_SYNTHETIC_IN_CASE:-false}
     volumes:
       - ./services/otel-collector/config.yaml:/etc/otel-collector-config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

@@ -751,3 +751,23 @@ func TestProposerGateAccessors(t *testing.T) {
 		}
 	})
 }
+
+// UC: UC-041 BR-011
+func TestObserveSynthetic(t *testing.T) {
+	ctx := context.Background()
+	t.Run("UC-041/BR-011 unresolved ai.observe_synthetic reads off", func(t *testing.T) {
+		if New(stubEvaluator{}, nil).ObserveSynthetic(ctx) {
+			t.Fatal("ObserveSynthetic = true, want false")
+		}
+		stub := stubEvaluator{errs: map[string]error{keyAIObserveSynthetic: errors.New("flagd down")}, booleans: map[string]bool{keyAIObserveSynthetic: true}}
+		if New(stub, nil).ObserveSynthetic(ctx) {
+			t.Fatal("ObserveSynthetic on error = true, want false")
+		}
+	})
+	t.Run("UC-041/BR-011 ai.observe_synthetic on reads on", func(t *testing.T) {
+		stub := stubEvaluator{booleans: map[string]bool{keyAIObserveSynthetic: true}}
+		if !New(stub, nil).ObserveSynthetic(ctx) {
+			t.Fatal("ObserveSynthetic = false, want true")
+		}
+	})
+}

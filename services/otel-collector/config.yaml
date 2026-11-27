@@ -262,6 +262,37 @@ processors:
       - log.event_name != "game.start" and log.event_name != "game.end" and log.event_name != "game.phase.start"
       - log.attributes["orangecase.audience"] != "agent"
       - resource.attributes["orangecase.synthetic"] == true or resource.attributes["orangecase.synthetic"] == "true"
+      - log.attributes["orangecase.synthetic"] == true or log.attributes["orangecase.synthetic"] == "true"
+
+  # Synthetic benchmark load (#2576) never reaches the agent (UC-041 BR-011,
+  # telemetry.md 1.1): marked with orangecase.synthetic, a bool or the string
+  # "true", on the resource or on the span / data point. Only the agent
+  # pipelines use it; the gateway pipelines have no synthetic filter.
+  filter/synthetic:
+    error_mode: ignore
+    trace_conditions:
+      - resource.attributes["orangecase.synthetic"] == true or resource.attributes["orangecase.synthetic"] == "true"
+      - span.attributes["orangecase.synthetic"] == true or span.attributes["orangecase.synthetic"] == "true"
+    metric_conditions:
+      - resource.attributes["orangecase.synthetic"] == true or resource.attributes["orangecase.synthetic"] == "true"
+      - datapoint.attributes["orangecase.synthetic"] == true or datapoint.attributes["orangecase.synthetic"] == "true"
+
+  # The same drop for Jaeger and VictoriaMetrics, unless the collector starts
+  # with ORANGECASE_SYNTHETIC_IN_CASE=true. Not a flag: the collector has no
+  # flag client, so the env value is substituted into each condition at start
+  # (flags.md 15.2).
+  filter/synthetic_in_case:
+    error_mode: ignore
+    trace_conditions:
+      - '"${env:ORANGECASE_SYNTHETIC_IN_CASE:-false}" != "true" and resource.attributes["orangecase.synthetic"] == true'
+      - '"${env:ORANGECASE_SYNTHETIC_IN_CASE:-false}" != "true" and resource.attributes["orangecase.synthetic"] == "true"'
+      - '"${env:ORANGECASE_SYNTHETIC_IN_CASE:-false}" != "true" and span.attributes["orangecase.synthetic"] == true'
+      - '"${env:ORANGECASE_SYNTHETIC_IN_CASE:-false}" != "true" and span.attributes["orangecase.synthetic"] == "true"'
+    metric_conditions:
+      - '"${env:ORANGECASE_SYNTHETIC_IN_CASE:-false}" != "true" and resource.attributes["orangecase.synthetic"] == true'
+      - '"${env:ORANGECASE_SYNTHETIC_IN_CASE:-false}" != "true" and resource.attributes["orangecase.synthetic"] == "true"'
+      - '"${env:ORANGECASE_SYNTHETIC_IN_CASE:-false}" != "true" and datapoint.attributes["orangecase.synthetic"] == true'
+      - '"${env:ORANGECASE_SYNTHETIC_IN_CASE:-false}" != "true" and datapoint.attributes["orangecase.synthetic"] == "true"'
 
   # Batch for the agent's log events: a phase start reaches it about 2 s after
   # the span opened (SDK up to 1 s + 1 s here), not the shared 5 s logs batch.
@@ -357,17 +388,24 @@ exporters:
 
 service:
   pipelines:
-    # Traces pipeline
+    # Traces pipeline. The agent gets its own twin (traces/agent) so synthetic
+    # telemetry can be dropped for it alone (UC-041 BR-011); a down agent still
+    # never touches Jaeger.
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, filter/grpc_health, batch/traces, resource]
-      exporters: [otlp/jaeger, otlp_http/agent, debug]
+      processors: [memory_limiter, filter/grpc_health, filter/synthetic_in_case, batch/traces, resource]
+      exporters: [otlp/jaeger, debug]
+
+    traces/agent:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/grpc_health, filter/synthetic, batch/traces, resource]
+      exporters: [otlp_http/agent]
 
     # invoke_agent spans -> span_metrics connector (#1427). Same receiver as
     # the traces pipeline (fan-out), so the filter never affects Jaeger.
     traces/span_metrics:
       receivers: [otlp]
-      processors: [memory_limiter, filter/agent_decide]
+      processors: [memory_limiter, filter/agent_decide, filter/synthetic_in_case]
       exporters: [span_metrics]
 
     # Span metrics -> VictoriaMetrics only (the agent does not ingest them).
@@ -376,12 +414,17 @@ service:
       processors: [memory_limiter, batch/fast, resource]
       exporters: [prometheus_remote_write]
 
-    # Metrics pipeline - uses fast batch processor for sub-second updates
-    # Fan-out to VictoriaMetrics (storage) and the agent
+    # Metrics pipeline - uses fast batch processor for sub-second updates.
+    # VictoriaMetrics here, the agent in its twin metrics/agent (as traces).
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, batch/fast, resource]
-      exporters: [prometheus_remote_write, otlp_http/agent]
+      processors: [memory_limiter, filter/synthetic_in_case, batch/fast, resource]
+      exporters: [prometheus_remote_write]
+
+    metrics/agent:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/synthetic, batch/fast, resource]
+      exporters: [otlp_http/agent]
 
     # Observability metrics — victoria-metrics, otel-collector
     metrics/observability:

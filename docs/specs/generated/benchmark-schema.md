@@ -13,7 +13,7 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | Key | Kind | On | Type | Challenges | Status |
 |---|---|---|---|---|---|
 | `orangecase.schema_version` | resource | every OTLP signal, set by the collector | string | all | stable |
-| `orangecase.synthetic` | resource | synthetic telemetry (`stowaway`); the collector keeps it from the agent | bool | all | planned #2576 |
+| `orangecase.synthetic` | resource | synthetic telemetry (`stowaway`), also on its spans in a match trace; the collector keeps it from the agent and, unless `ORANGECASE_SYNTHETIC_IN_CASE=true`, from Jaeger and VictoriaMetrics; the agent drops it unless `ai.observe_synthetic` (§1.1, UC-041 BR-011) | bool | all | planned #2576 |
 | `service.name` | resource | every signal | string | all | stable |
 | `service.namespace` | resource | every signal | string | all | stable |
 | `service.instance.id` | resource | every signal | string | all | stable |

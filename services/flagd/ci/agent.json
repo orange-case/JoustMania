@@ -3,6 +3,14 @@
     "flagSetId": "agent"
   },
   "flags": {
+    "ai.observe_synthetic": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
     "enabled": {
       "state": "ENABLED",
       "variants": {

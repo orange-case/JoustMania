@@ -95,7 +95,12 @@ interfaces. That is fine on a dev machine and wrong on the Pi, so the Pi wrapper
 By default no telemetry leaves the machine. `docker-compose.gateway.yml` makes the collector also send the
 game telemetry (the traces, metrics and logs the services push over OTLP) to one remote OpenTelemetry
 Collector, the gateway, which forwards it to the external backends. The gateway is deployed outside this
-repo. Jaeger, VictoriaMetrics and the agent keep receiving everything.
+repo. Jaeger, VictoriaMetrics and the agent keep receiving all game telemetry.
+
+Telemetry marked `orangecase.synthetic` (the benchmark load of #2576) always goes to the gateway, never to
+the agent, and reaches Jaeger and VictoriaMetrics only when the collector starts with
+`ORANGECASE_SYNTHETIC_IN_CASE=true` (default `false`; `.env.local`, then recreate the collector). See
+[telemetry.md §1.1](specs/telemetry.md#11-synthetic-telemetry-routing).
 
 | Variable | Value |
 |---|---|

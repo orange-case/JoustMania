@@ -953,7 +953,8 @@ func (c *components) buildPipeline(listenAddr, healthAddr string) *serverCompone
 	pipe := newPipeline(c.mux, c.loops, c.lifecycle.PlayerTTL).
 		// Hot-reload the evaluate gate's freshness window in lockstep with the store
 		// eviction TTL (#927): both read lifecycle.player_ttl_seconds from the holder.
-		withPlayerTTLSource(c.lifecycleHolder.PlayerTTL)
+		withPlayerTTLSource(c.lifecycleHolder.PlayerTTL).
+		withObserveSynthetic(c.agentFlags.ObserveSynthetic)
 
 	// Shadow-game runner (#778): when AGENT_SHADOW_GAME=true, sweep any orphaned
 	// reserved controllers from a prior crashed run, then run ONE mock-only game

@@ -10,6 +10,7 @@ File: [`services/flagd/agent.json`](../../../services/flagd/agent.json).
 
 | Key | Type | Variants | Default | Targeting | Runtime write | Reload | Read by | Note |
 |---|---|---|---|---|---|---|---|---|
+| `ai.observe_synthetic` | bool | `on`=true, `off`=false | `off` = false |  | none | live | agent | Lets the agent ingest telemetry marked `orangecase.synthetic` (benchmark load, #2576). Off drops it before any game context (UC-041 BR-011), the backup for a collector agent route opened by mistake; on also needs that route opened in the collector config. Read per batch, only when a batch holds a marked item; unresolved reads off. Human-owned, never written by the agent (C-034). |
 | `code_improvement.min_interval_seconds` | integer | `default`=300, `fast`=60, `slow`=900 | `default` = 300 |  | none | live | agent | Minimum time between code-improvement proposals, checked at game end after the `enabled` and `experiments_enabled` permit. A value <= 0 counts as the default 300 s. |
 | `code_improvement.mode` | string | `issue`="issue", `autonomous`="autonomous" | `issue` = "issue" |  | none | live | agent | What a promotion does: `issue` opens an issue only, `autonomous` applies the change. Read at each promotion; never defaults to `autonomous`. |
 | `decision.backend` | string | `rules`="rules", `claude`="claude", `jev`="jev" | `rules` = "rules" |  | overlay, stack; variants `rules`, `claude`, `jev`; persisted | live | agent | Which decision backend the agent uses: the local rules or a remote model. |

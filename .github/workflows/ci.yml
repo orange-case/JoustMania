@@ -927,8 +927,10 @@ jobs:
 
       - name: Pre-pull docker images (bounded retries, #2551)
         # A registry TLS flake ("bad record MAC") must not fail the job; images come from docker-compose.yml.
+        # The collector's image ref is interpolated in compose, so it is named here (its default,
+        # the one test_collector_synthetic_routing.py runs).
         timeout-minutes: 5
-        run: scripts/ci/docker-pull-retry.sh compose:envoy compose:flagd
+        run: scripts/ci/docker-pull-retry.sh compose:envoy compose:flagd ghcr.io/orange-case/joustmania/otel-collector:latest
 
       - name: Run telemetry contract tests
         # test_flagd_resolution.py, test_flagd_rpc_retry.py and test_fractional_bucketing.py (grpc + provider) run in the Flagd Contract job below.

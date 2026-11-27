@@ -108,6 +108,8 @@ Every flag of §3 to §10a, with its type, variants, default, targeting, runtime
 
 Catalog: [`agent`](generated/flag-catalog.md#agent). The agent's governor: the agent state (`enabled`: `off` / `watch` / `act`), actuation gates, allow-list, policy budgets, objectives and fitness thresholds, decision backend, experiment and verdict knobs, promotion, plus the `perception.*` analytics knobs that the game coordinator reads. Operator-owned (§2); the agent never writes the set (C-034). See [OWNERSHIP_MODEL.md](../OWNERSHIP_MODEL.md).
 
+`ai.observe_synthetic` (boolean, default `off`, read-only baseline: changed by a reviewed edit of `agent.json`, never by the agent, C-034): when off, the agent drops every resource, span, data point and log record marked `orangecase.synthetic` before its game contexts (UC-041 BR-011, [telemetry.md](telemetry.md) §4.4). It is the backup behind the collector, which never routes synthetic telemetry to the agent (telemetry.md §1.1); turning it on lets the agent see synthetic data only once the collector's agent route is opened too. The in-case backends' switch is the collector environment variable `ORANGECASE_SYNTHETIC_IN_CASE`, not a flag (§15.2).
+
 **Traceability:** FR-040 to FR-052, FR-056 to FR-066 / UC-015, UC-040 to UC-045 / `services/agent/flags/flags.go`, `services/agent/flags/decision_backend.go`, `services/game_coordinator/runtime_config.py`, `services/game_coordinator/interventions.py` / `services/agent/flags/*_test.go`, `tests/service/test_tc008_remote_backend_routing.py`, `tests/service/test_tc006_agent_blocked_by_host.py`, `tests/service/test_tc020_host_and_stage_flags.py`.
 
 ### 3.1 Pattern-game flags (UC-046)
@@ -693,6 +695,7 @@ Each key above is added to the mutable-flag registry as a stack-scoped `overlay`
 | `AGENT_EXPERIMENT_DYNAMIC_MAX_CONCURRENT` | Stays an env ceiling (§15.4 (e)). |
 | `AGENT_EXPERIMENT_PROPOSER_ENABLED` | Stays an env ceiling (§15.4 (d)). |
 | `AGENT_LLM_MAX_REQUESTS_PER_MINUTE` | Stays an env ceiling (§15.4 (c), NFR-011). |
+| `ORANGECASE_SYNTHETIC_IN_CASE` (otel-collector, `services/otel-collector/config.yaml` `filter/synthetic_in_case`, default `false`; UC-041 BR-011, #2577) | Not a flag: the collector has no flag client and reads it only as `${env:...}` at start, so a change needs a collector restart. `true` lets telemetry marked `orangecase.synthetic` into Jaeger and VictoriaMetrics; the agent route (`traces/agent`, `metrics/agent`, `logs/agent`) drops it whatever this says, and the gateway always gets it ([telemetry.md](telemetry.md) §1.1). The agent-side switch is the `agent` flag `ai.observe_synthetic` (§3). |
 
 ### 15.3 Resolved points
 
