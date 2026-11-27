@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import re
 import sys
@@ -38,7 +39,7 @@ _VERSION_RE = re.compile(r"^\*\*Schema version:\*\* `(\d+\.\d+\.\d+)`\s*$")
 _NAMESPACES_RE = re.compile(r"^\*\*Owned namespaces:\*\* (.+)$")
 _STATUS_RE = re.compile(r"^(stable|planned #\d+)$")
 _COLLECTOR_VERSION_RE = re.compile(
-    r"key:\s*orangecase\.schema_version\s*\n\s*value:\s*\"?([^\"\s]+)\"?"
+    r"key: orangecase\.schema_version\r?\n[ \t]*value: \"?([0-9.]+)"
 )
 _CODE_SUFFIXES = (".py", ".go", ".rs")
 _SKIP_PARTS = frozenset({"tests", "test", "testdata", "gen", "node_modules", "target"})
@@ -114,8 +115,7 @@ def _section(text: str) -> list[str]:
     return lines[start + 1 : end]
 
 
-def parse(text: str) -> Schema:
-    lines = _section(text)
+def _meta(lines: list[str]) -> tuple[str, tuple[str, ...]]:
     version = next((m[1] for l in lines if (m := _VERSION_RE.match(l))), None)
     if not version:
         raise SchemaError(
@@ -131,53 +131,65 @@ def parse(text: str) -> Schema:
         raise SchemaError(
             f"{TELEMETRY_REL} appendix B: owned namespaces must be written `ns.*`"
         )
+    return version, namespaces
 
+
+def _shape(lines: list[str]) -> str:
     try:
         s = lines.index(SHAPE_HEADING)
     except ValueError as err:
         raise SchemaError(f"{TELEMETRY_REL} appendix B: no '{SHAPE_HEADING}'") from err
-    shape_end = next(i for i in range(s + 1, len(lines)) if lines[i].startswith("### "))
-    shape = "\n".join(lines[s + 1 : shape_end]).strip()
+    end = next(i for i in range(s + 1, len(lines)) if lines[i].startswith("### "))
+    return "\n".join(lines[s + 1 : end]).strip()
 
+
+def _row(line: str) -> Row:
+    cells = _cells(line)
+    if len(cells) != len(COLUMNS):
+        raise SchemaError(
+            f"appendix B row has {len(cells)} cells, not {len(COLUMNS)}: {line}"
+        )
+    row = Row(
+        key=_unquote(cells[0]),
+        kind=cells[1],
+        on=cells[2],
+        type=cells[3],
+        challenges=cells[4],
+        status=cells[5],
+        source=_unquote(cells[6]),
+    )
+    if row.kind not in KINDS:
+        raise SchemaError(
+            f"appendix B `{row.key}`: kind '{row.kind}' is not one of {KINDS}"
+        )
+    if not _STATUS_RE.match(row.status):
+        raise SchemaError(
+            f"appendix B `{row.key}`: status '{row.status}' is not 'stable' or 'planned #N'"
+        )
+    return row
+
+
+def _rows(lines: list[str]) -> tuple[Row, ...]:
     header = next((i for i, l in enumerate(lines) if _cells(l) == COLUMNS), None)
     if header is None:
         raise SchemaError(
             f"{TELEMETRY_REL} appendix B: no table '| {' | '.join(COLUMNS)} |'"
         )
     rows: list[Row] = []
-    seen: set[tuple[str, str]] = set()
-    for line in lines[header + 2 :]:
-        if not line.startswith("|"):
-            break
-        cells = _cells(line)
-        if len(cells) != len(COLUMNS):
-            raise SchemaError(
-                f"appendix B row has {len(cells)} cells, not {len(COLUMNS)}: {line}"
-            )
-        row = Row(
-            key=_unquote(cells[0]),
-            kind=cells[1],
-            on=cells[2],
-            type=cells[3],
-            challenges=cells[4],
-            status=cells[5],
-            source=_unquote(cells[6]),
-        )
-        if row.kind not in KINDS:
-            raise SchemaError(
-                f"appendix B `{row.key}`: kind '{row.kind}' is not one of {KINDS}"
-            )
-        if not _STATUS_RE.match(row.status):
-            raise SchemaError(
-                f"appendix B `{row.key}`: status '{row.status}' is not 'stable' or 'planned #N'"
-            )
-        if (row.kind, row.key) in seen:
+    for line in itertools.takewhile(lambda l: l.startswith("|"), lines[header + 2 :]):
+        row = _row(line)
+        if any((r.kind, r.key) == (row.kind, row.key) for r in rows):
             raise SchemaError(f"appendix B lists {row.kind} `{row.key}` twice")
-        seen.add((row.kind, row.key))
         rows.append(row)
     if not rows:
         raise SchemaError(f"{TELEMETRY_REL} appendix B: the table has no rows")
-    return Schema(version, namespaces, shape, tuple(rows))
+    return tuple(rows)
+
+
+def parse(text: str) -> Schema:
+    lines = _section(text)
+    version, namespaces = _meta(lines)
+    return Schema(version, namespaces, _shape(lines), _rows(lines))
 
 
 def load(root: Path = REPO_ROOT) -> Schema:
@@ -278,23 +290,26 @@ def _token(key: str) -> re.Pattern[str]:
     return re.compile(r"(?<![\w.])" + re.escape(key) + r"(?![\w.])")
 
 
-def check(root: Path = REPO_ROOT, schema: Schema | None = None) -> list[str]:
-    """Every drift between the code and the schema, one message each."""
-    schema = schema or load(root)
-    errors: list[str] = []
-
-    collector = (root / COLLECTOR_REL).read_text(encoding="utf-8").replace("\r\n", "\n")
+def _version_errors(root: Path, schema: Schema) -> list[str]:
+    collector = (root / COLLECTOR_REL).read_text(encoding="utf-8")
     m = _COLLECTOR_VERSION_RE.search(collector)
     if not m:
-        errors.append(
+        return [
             f"{COLLECTOR_REL}: the resource processor sets no orangecase.schema_version"
-        )
-    elif m[1] != schema.version:
-        errors.append(
-            f"{COLLECTOR_REL}: orangecase.schema_version is {m[1]}, "
-            f"{TELEMETRY_REL} appendix B says {schema.version}"
-        )
+        ]
+    if m[1] != schema.version:
+        return [
+            (
+                f"{COLLECTOR_REL}: orangecase.schema_version is {m[1]}, "
+                f"{TELEMETRY_REL} appendix B says {schema.version}"
+            )
+        ]
+    return []
 
+
+def _listed_errors(root: Path, schema: Schema) -> list[str]:
+    """Rows whose source no longer contains the key (listed but not emitted)."""
+    errors = []
     for r in schema.rows:
         if r.source == NO_SOURCE:
             continue
@@ -307,24 +322,35 @@ def check(root: Path = REPO_ROOT, schema: Schema | None = None) -> list[str]:
             errors.append(
                 f"appendix B `{r.key}`: listed but not emitted: {r.source} has no literal {r.key!r}"
             )
+    return errors
 
-    listed = {r.key for r in schema.rows}
-    flags = _flag_keys(root)
-    owned = re.compile(
-        r"[\"']((?:"
-        + "|".join(re.escape(n.removesuffix("*")) for n in schema.namespaces)
-        + r")[A-Za-z0-9_.]+)[\"']"
-    )
+
+def _emitted_errors(root: Path, schema: Schema) -> list[str]:
+    """Owned-namespace literals in the code that no row lists (emitted but not listed)."""
+    known = {r.key for r in schema.rows} | _flag_keys(root)
+    prefixes = "|".join(re.escape(n.removesuffix("*")) for n in schema.namespaces)
+    owned = re.compile(r"[\"']((?:" + prefixes + r")[A-Za-z0-9_.]+)[\"']")
+    errors = []
     for rel, path in _code_files(root):
         text = path.read_text(encoding="utf-8", errors="ignore")
         for n, line in enumerate(text.splitlines(), 1):
-            for key in owned.findall(line):
-                if key not in listed and key not in flags and not key.endswith("."):
-                    errors.append(
-                        f"{rel.as_posix()}:{n}: `{key}` is in an owned namespace but not in "
-                        f"{TELEMETRY_REL} appendix B: add its row"
-                    )
+            errors += [
+                f"{rel.as_posix()}:{n}: `{key}` is in an owned namespace but not in "
+                f"{TELEMETRY_REL} appendix B: add its row"
+                for key in owned.findall(line)
+                if key not in known and not key.endswith(".")
+            ]
     return errors
+
+
+def check(root: Path = REPO_ROOT, schema: Schema | None = None) -> list[str]:
+    """Every drift between the code and the schema, one message each."""
+    schema = schema or load(root)
+    return (
+        _version_errors(root, schema)
+        + _listed_errors(root, schema)
+        + _emitted_errors(root, schema)
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
