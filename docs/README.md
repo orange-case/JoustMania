@@ -70,6 +70,7 @@ to 4 are the source of truth, and code and tests follow from them. Change the sp
 | [challenges/where-did-it-go.md](challenges/where-did-it-go.md) | Run the booth challenge "Where did it go?": set the moment shape, read the ground truth, record each backend's result (UC-100) |
 | [challenges/who-saved-them.md](challenges/who-saved-them.md) | Run the booth challenge "Who saved them?": join an agent decision to its effect on a player by the intervention id, read the intervention ground truth, record each backend's result (UC-101) |
 | [challenges/what-did-the-game-master-cost.md](challenges/what-did-the-game-master-cost.md) | Run the booth challenge "What did the game master cost?": the six spend questions, the token reference per game from the case's Jaeger (`scripts/genai_cost_reference.py`), the price table frozen on 2026-11-27, the result format (UC-105) |
+| [challenges/what-is-happening.md](challenges/what-is-happening.md) | Run the booth challenge "What is happening?": seed the backends with a `stowaway` pattern game and a real match, run prompt set `v1` in each backend's assistant, check the five panels against the case's own stores (UC-104) |
 | [challenges/can-you-see-the-swing.md](challenges/can-you-see-the-swing.md) | Run the booth challenge "Can you see the swing?": pick a death, read the player's 100 ms motion series in the case's VictoriaMetrics, record whether each backend keeps that density (UC-102) |
 
 Service READMEs (`services/*/README.md`) hold code-level detail; where they disagree with the specs, the

@@ -775,8 +775,8 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | `service.instance.id` | resource | every signal | string | all | stable | `lib/otel_resource.py` |
 | `host.name` | resource | every signal | string | all | stable | `lib/otel_resource.py` |
 | `deployment.environment` | resource | every signal | string | all | stable | `lib/otel_resource.py` |
-| `game.players` | span | child of the game root | | UC-100, UC-101 | stable | `services/game_coordinator/games/game_loop.py` |
-| `game.player` | span | one per player, child of `game.players` | | UC-100, UC-101 | stable | `services/game_coordinator/games/player_telemetry.py` |
+| `game.players` | span | child of the game root | | UC-100, UC-101, UC-104 | stable | `services/game_coordinator/games/game_loop.py` |
+| `game.player` | span | one per player, child of `game.players` | | UC-100, UC-101, UC-104 | stable | `services/game_coordinator/games/player_telemetry.py` |
 | `game.death_warning` | span | child of `game.player`, shape `span` | | UC-100 | stable | - |
 | `game.player_death` | span | child of `game.player`, shape `span` | | UC-100, UC-102 | stable | - |
 | `game.intervention` | span | child of `game.player`, shape `span` | | UC-101 | stable | - |
@@ -784,32 +784,36 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | `agent.intervention.effect` | span | child of `agent.decision` | | UC-101 | stable | `services/agent/telemetry/keys/keys.go` |
 | `flagservice.write` | span | flag service, one per write | | UC-101 | stable | `services/flag-service/telemetry/telemetry.go` |
 | `death_warning` | span_event | `game.player` in shape `span_event`; log `event_name` in shape `log_event` | | UC-100 | stable | `services/game_coordinator/games/motion.py` |
-| `player_death` | span_event | `game.player` in shape `span_event`; log `event_name` in shape `log_event` | | UC-100, UC-102 | stable | `services/game_coordinator/games/elimination.py` |
+| `player_death` | span_event | `game.player` in shape `span_event`; log `event_name` in shape `log_event` | | UC-100, UC-102, UC-104 | stable | `services/game_coordinator/games/elimination.py` |
 | `intervention` | span_event | `game.player` in shape `span_event`; log `event_name` in shape `log_event` | | UC-101 | stable | `services/game_coordinator/games/intervention_moment.py` |
 | `victory` | span_event | the winner's `game.player` | | UC-100 | stable | `services/game_coordinator/games/ffa.py` |
-| `challenge.ground_truth` | span_event | game root, one per player at a normal end | | UC-100, UC-102 | stable | `services/game_coordinator/games/ground_truth.py` |
+| `challenge.ground_truth` | span_event | game root, one per player at a normal end | | UC-100, UC-102, UC-104 | stable | `services/game_coordinator/games/ground_truth.py` |
 | `challenge.intervention_ground_truth` | span_event | game root, one per applied intervention at a normal end | | UC-101 | stable | `services/game_coordinator/games/ground_truth.py` |
 | `game.id` | attribute | game root, every moment | string | all | stable | `services/game_coordinator/game_session.py` |
 | `game.kind` | attribute | game root, every moment | string (`real`, `shadow`) | all | stable | `services/game_coordinator/game_session.py` |
 | `game.name` | attribute | game root | string | all | stable | `services/game_coordinator/game_session.py` |
-| `game.outcome` | attribute | game root, at game end | string | UC-100 | stable | `services/game_coordinator/games/outcome.py` |
-| `game.winner` | attribute | game root, outcome `winner` | string (serial) | UC-100 | stable | `services/game_coordinator/games/ffa.py` |
+| `game.outcome` | attribute | game root, at game end | string | UC-100, UC-104 | stable | `services/game_coordinator/games/outcome.py` |
+| `game.winner` | attribute | game root, outcome `winner` | string (serial) | UC-100, UC-104 | stable | `services/game_coordinator/games/ffa.py` |
 | `player.count` | attribute | game root | int | all | stable | `services/game_coordinator/game_session.py` |
 | `telemetry.moment_shape` | attribute | game root | string (`span_event`, `span`, `log_event`) | UC-100, UC-101 | stable | `lib/moments.py` |
-| `moment.id` | attribute | every moment; `challenge.intervention_ground_truth` | string (`<game.id>/<player.serial>/<n>`) | UC-100, UC-101 | stable | `lib/moments.py` |
+| `moment.id` | attribute | every moment; `challenge.intervention_ground_truth` | string (`<game.id>/<player.serial>/<n>`) | UC-100, UC-101, UC-104 | stable | `lib/moments.py` |
 | `player.serial` | attribute | `game.player`, every moment, ground truth | string | all | stable | `services/game_coordinator/games/base.py` |
 | `player.name` | attribute | `game.player`, every moment, ground truth (once known) | string | all | stable | `services/game_coordinator/games/base.py` |
-| `death.reason` | attribute | `player_death` | string (`motion`, `agent_intervention`) | UC-100, UC-102 | stable | `services/game_coordinator/games/elimination.py` |
-| `accel_magnitude` | attribute | `death_warning`, `player_death` | double (g) | UC-102 | stable | `services/game_coordinator/games/motion.py` |
+| `death.reason` | attribute | `player_death` | string (`motion`, `agent_intervention`) | UC-100, UC-102, UC-104 | stable | `services/game_coordinator/games/elimination.py` |
+| `accel_magnitude` | attribute | `death_warning`, `player_death` | double (g) | UC-102, UC-104 | stable | `services/game_coordinator/games/motion.py` |
 | `shield.activation` | attribute | `shield_feedback` on `game.player` | string (`trigger`) | UC-101 | stable | `services/game_coordinator/games/shields.py` |
 | `challenge.warning_times_ns` | attribute | `challenge.ground_truth` | int[] (epoch ns) | UC-100 | stable | `services/game_coordinator/games/ground_truth.py` |
-| `challenge.death_times_ns` | attribute | `challenge.ground_truth` | int[] (epoch ns) | UC-100, UC-102 | stable | `services/game_coordinator/games/ground_truth.py` |
+| `challenge.death_times_ns` | attribute | `challenge.ground_truth` | int[] (epoch ns) | UC-100, UC-102, UC-104 | stable | `services/game_coordinator/games/ground_truth.py` |
 | `challenge.applied_at_ns` | attribute | `challenge.intervention_ground_truth` | int (epoch ns) | UC-101 | stable | `services/game_coordinator/games/ground_truth.py` |
 | `challenge.first_death_at_ns` | attribute | `challenge.intervention_ground_truth` | int (epoch ns) | UC-101 | stable | `services/game_coordinator/games/ground_truth.py` |
 | `intervention.type` | attribute | `intervention`, `challenge.intervention_ground_truth`, `agent.intervention.effect` | string | UC-101 | stable | `services/game_coordinator/games/intervention_moment.py` |
 | `intervention.id` | attribute | `intervention`, `challenge.intervention_ground_truth`, `agent.intervention.effect` | string | UC-101 | stable | `services/game_coordinator/games/intervention_moment.py` |
 | `decision.intervention_id` | attribute | `agent.decision`, `flagservice.write` | string | UC-101 | stable | `services/agent/telemetry/keys/keys.go` |
 | `orangecase.audience` | attribute | log records meant for the agent only; never exported to a backend | string (`agent`) | none | stable | `lib/moments.py` |
-| `game_player_accel_magnitude` | metric | gauge, about every 100 ms per live player | double (g) | UC-102 | stable | `services/game_coordinator/metrics.py` |
-| `serial` | label | `game_player_accel_magnitude` | string | UC-102 | stable | `services/game_coordinator/metrics.py` |
-| `game_id` | label | `game_player_accel_magnitude` | string | UC-102 | stable | `services/game_coordinator/metrics.py` |
+| `game_player_accel_magnitude` | metric | gauge, about every 100 ms per live player | double (g) | UC-102, UC-104 | stable | `services/game_coordinator/metrics.py` |
+| `game_player_alive` | metric | gauge per player of a game, 1 alive, 0 after the death | int | UC-104 | stable | `services/game_coordinator/metrics.py` |
+| `game_player_elimination_order` | metric | gauge per player, set at a death that takes the player out (1 = first out), removed shortly after the game | int | UC-104 | stable | `services/game_coordinator/metrics.py` |
+| `game_effective_death_threshold` | metric | gauge per game, the death threshold after the tempo change, before per-player factors | double (g) | UC-104 | stable | `services/game_coordinator/metrics.py` |
+| `serial` | label | `game_player_accel_magnitude`, `game_player_alive`, `game_player_elimination_order` | string | UC-102, UC-104 | stable | `services/game_coordinator/metrics.py` |
+| `game_id` | label | `game_player_accel_magnitude`, `game_player_alive`, `game_player_elimination_order`, `game_effective_death_threshold` | string | UC-102, UC-104 | stable | `services/game_coordinator/metrics.py` |
+| `game_kind` | label | `game_effective_death_threshold` | string (`real`, `shadow`) | UC-104 | stable | `services/game_coordinator/metrics.py` |
