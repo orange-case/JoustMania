@@ -78,7 +78,10 @@ class _Flags:
         return self.challenge if key == "stowaway.challenge" else default
 
 
-async def _run_session(per_sample: bool, outcome: str = "winner", challenge: str = "none", flush=None):
+async def _run_session(
+    per_sample: bool, outcome: str = "winner", challenge: str = "none", flush=None, while_patched=None
+):
+    """Run one session; ``while_patched(run)`` runs before the patches end (the count thread uses them)."""
     session = _make_session()
     tracer = _tracer_mock()
     root = tracer.start_as_current_span.return_value.__enter__.return_value
@@ -102,11 +105,14 @@ async def _run_session(per_sample: bool, outcome: str = "winner", challenge: str
         started = time.monotonic()
         await session._run_game_loop_async()
         elapsed = time.monotonic() - started
-        if flush is None and session.span_count_thread is not None:
+        run = SimpleNamespace(
+            root=root, game=game, flags=flags, session=session, counts=counts, gauge=gauge, elapsed=elapsed
+        )
+        if while_patched is not None:
+            while_patched(run)
+        elif session.span_count_thread is not None:
             session.span_count_thread.join(5)
-    return SimpleNamespace(
-        root=root, game=game, flags=flags, session=session, counts=counts, gauge=gauge, elapsed=elapsed
-    )
+    return run
 
 
 @pytest.mark.asyncio
@@ -157,15 +163,17 @@ async def test_a_slow_flush_never_delays_the_game_end():
     release = threading.Event()
     flush = MagicMock(side_effect=lambda: release.wait(10))
 
-    run = await _run_session(True, flush=flush)
-    try:
-        assert run.elapsed < 1.0
-        assert run.session.span_count_thread.is_alive()  # still waiting on the flush
-        run.gauge.assert_not_called()
-    finally:
-        release.set()
-        run.session.span_count_thread.join(5)
-    run.gauge.assert_called_once_with("game_abc123", 0)
+    def check(run):
+        try:
+            assert run.elapsed < 1.0
+            assert run.session.span_count_thread.is_alive()  # still waiting on the flush
+            run.gauge.assert_not_called()
+        finally:
+            release.set()
+            run.session.span_count_thread.join(5)
+        run.gauge.assert_called_once_with("game_abc123", 0)
+
+    await _run_session(True, flush=flush, while_patched=check)
 
 
 @pytest.mark.uc("UC-103", flow="A1", br=["BR-003"])
