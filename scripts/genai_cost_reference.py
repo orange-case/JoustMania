@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -102,7 +104,36 @@ def dedupe(spans: list[dict]) -> list[dict]:
 # ------------------------------------------------------------------ Jaeger
 
 
-def _get(url: str, timeout: float = 60) -> dict | None:
+TRACES_PATH = "/api/v3/traces"
+REPO_ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+
+def jaeger_base(url: str) -> tuple[str, str, str]:
+    """(scheme, host, path prefix) of an http(s) Jaeger base; anything else is refused."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(f"--jaeger-url must be an http(s) URL with a host: {url!r}")
+    if parts.query or parts.fragment or parts.username or parts.password:
+        raise ValueError(f"--jaeger-url takes no query, fragment or credentials: {url!r}")
+    return parts.scheme, parts.netloc, parts.path.rstrip("/")
+
+
+def safe_path(path: str, allowed: list[str]) -> str:
+    """The resolved path, only when it sits under one of the allowed directories."""
+    real = os.path.realpath(path)
+    for root in allowed:
+        root = os.path.realpath(root)
+        try:
+            if os.path.commonpath([real, root]) == root:
+                return real
+        except ValueError:  # another drive on Windows
+            continue
+    raise ValueError(f"{path!r} is outside the allowed directories {allowed} (see --allow-dir)")
+
+
+def _get(base: tuple[str, str, str], query: dict, timeout: float = 60) -> dict | None:
+    scheme, netloc, prefix = base
+    url = urllib.parse.urlunsplit((scheme, netloc, prefix + TRACES_PATH, urllib.parse.urlencode(query), ""))
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             return json.load(r)
@@ -112,7 +143,7 @@ def _get(url: str, timeout: float = 60) -> dict | None:
         raise
 
 
-def fetch(base: str, start: float, end: float, game_ids: list[str], depth: int) -> list[dict]:
+def fetch(base: tuple[str, str, str], start: float, end: float, game_ids: list[str], depth: int) -> list[dict]:
     fmt = "%Y-%m-%dT%H:%M:%SZ"
     common = {
         "query.serviceName": AGENT_SERVICE,
@@ -127,7 +158,7 @@ def fetch(base: str, start: float, end: float, game_ids: list[str], depth: int) 
         queries.append(q)
     spans = []
     for q in queries:
-        doc = _get(base.rstrip("/") + "/api/v3/traces?" + urllib.parse.urlencode(q))
+        doc = _get(base, q)
         if doc:
             spans.extend(spans_from_doc(doc))
     return dedupe(spans)
@@ -136,8 +167,8 @@ def fetch(base: str, start: float, end: float, game_ids: list[str], depth: int) 
 # ------------------------------------------------------------------ prices
 
 
-def load_prices(path: str) -> dict:
-    with open(path, encoding="utf-8") as f:
+def load_prices(path: str, allowed: list[str]) -> dict:
+    with open(safe_path(path, allowed), encoding="utf-8") as f:
         table = json.load(f)
     for key in ("date", "source", "currency", "models"):
         if key not in table:
@@ -398,21 +429,28 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--game-id", action="append", default=[], help="a challenge game (repeat)")
     ap.add_argument("--search-depth", type=int, default=1000)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument(
+        "--allow-dir",
+        action="append",
+        default=[],
+        help="another directory --prices and --traces may read from (default: the repo and the temp dir)",
+    )
     a = ap.parse_args(argv)
     if bool(a.traces) == bool(a.jaeger_url):
         ap.error("give either --traces or --jaeger-url")
     if a.jaeger_url and (a.start is None or a.end is None):
         ap.error("--jaeger-url needs --start and --end")
     try:
-        table = load_prices(a.prices)
+        allowed = [REPO_ROOT, tempfile.gettempdir(), *a.allow_dir]
+        table = load_prices(a.prices, allowed)
         if a.traces:
             spans = []
             for path in a.traces:
-                with open(path, encoding="utf-8") as f:
+                with open(safe_path(path, allowed), encoding="utf-8") as f:
                     spans.extend(spans_from_doc(json.load(f)))
             spans = dedupe(spans)
         else:
-            spans = fetch(a.jaeger_url, a.start, a.end, a.game_id, a.search_depth)
+            spans = fetch(jaeger_base(a.jaeger_url), a.start, a.end, a.game_id, a.search_depth)
     except (OSError, ValueError, urllib.error.URLError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
