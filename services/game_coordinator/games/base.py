@@ -45,7 +45,9 @@ from lib.moments import (
     emit_agent_event,
     record_moment,  # noqa: F401  games/rubberband.py reads it as base.record_moment (tests patch it here)
 )
-from lib.telemetry import inject_trace_context  # noqa: F401  the split-out mixins read it as base.inject_trace_context (tests patch it here)
+from lib.telemetry import (
+    inject_trace_context,  # noqa: F401  the split-out mixins read it as base.inject_trace_context (tests patch it here)
+)
 from lib.types import GameEvent, Sensitivity, Sound
 from services.game_coordinator import game_clock, metrics
 from services.game_coordinator.games.analytics import PlayerAnalytics
@@ -793,6 +795,8 @@ class BaseGameMode(
         # not the Player (BR-003).
         self.moment_shape = MOMENT_SHAPE_SPAN_EVENT
         self._moment_sequence: dict[str, int] = {}
+        # UC-103 BR-001: set by the session from telemetry.per_sample_spans, read once per game.
+        self.per_sample_spans = False
         self.experiment_id = ""
         self.arm = ""
         # UC-046 BR-018 / UC-048 BR-004: set by the session for a shadow game

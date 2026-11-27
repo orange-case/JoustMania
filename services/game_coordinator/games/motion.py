@@ -17,6 +17,7 @@ from services.game_coordinator.games.base import (
     Player,
     logger,
 )
+from services.game_coordinator.games.sample_spans import record_sample_span
 from services.game_coordinator.stream_writes import serialized_write
 
 
@@ -247,6 +248,8 @@ class MotionMixin:
 
         # Record analytics (handles enabled check internally)
         self._record_player_analytics(player, serial, accel_mag, smoothed, effective_death)
+        if self.per_sample_spans and player.span is not None:
+            record_sample_span(_base.tracer, player.span, serial, self.game_id, accel_mag, smoothed, effective_death)
 
         # Death and warning checks (matches original JoustMania logic)
         # Key: warning is just feedback, NOT protection - player can die during warning!

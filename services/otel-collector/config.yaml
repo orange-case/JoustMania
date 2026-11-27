@@ -277,6 +277,14 @@ processors:
       - resource.attributes["orangecase.synthetic"] == true or resource.attributes["orangecase.synthetic"] == "true"
       - datapoint.attributes["orangecase.synthetic"] == true or datapoint.attributes["orangecase.synthetic"] == "true"
 
+  # The per-sample spans of "How deep can you go?" (about 60/s per player)
+  # would crowd the agent's bounded queue: only the agent's copy drops them
+  # (UC-103 BR-005, telemetry.md 3.2); Jaeger and the gateway keep them.
+  filter/agent_per_sample:
+    error_mode: ignore
+    trace_conditions:
+      - span.name == "game.player.sample"
+
   # The same drop for Jaeger and VictoriaMetrics, unless the collector starts
   # with ORANGECASE_SYNTHETIC_IN_CASE=true. Not a flag: the collector has no
   # flag client, so the env value is substituted into each condition at start
@@ -398,7 +406,7 @@ service:
 
     traces/agent:
       receivers: [otlp]
-      processors: [memory_limiter, filter/grpc_health, filter/synthetic, batch/traces, resource]
+      processors: [memory_limiter, filter/grpc_health, filter/synthetic, filter/agent_per_sample, batch/traces, resource]
       exporters: [otlp_http/agent]
 
     # invoke_agent spans -> span_metrics connector (#1427). Same receiver as

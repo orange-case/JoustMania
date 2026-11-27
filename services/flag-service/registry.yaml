@@ -215,6 +215,8 @@ flags:
   - {set: observability, key: debug, kind: overlay, scope: [stack]}
   # The shape of the booth moments (#2658, UC-100; telemetry.md appendix A): span_event (default), span or log_event.
   - {set: observability, key: telemetry.moment_shape, kind: overlay, scope: [stack]}
+  # One span per motion sample for "How deep can you go?" (#2574, UC-103 BR-001): off by default.
+  - {set: observability, key: telemetry.per_sample_spans, kind: overlay, scope: [stack]}
   # stowaway, the synthetic load of the Orange Case (#2576, UC-106): presenter / operator at the booth.
   - {set: observability, key: stowaway.enabled, kind: overlay, scope: [stack]}
   - {set: observability, key: stowaway.challenge, kind: overlay, scope: [stack]}

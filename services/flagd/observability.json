@@ -123,6 +123,14 @@
       },
       "defaultVariant": "span_event"
     },
+    "telemetry.per_sample_spans": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
     "log_level": {
       "state": "ENABLED",
       "variants": {

@@ -1,7 +1,7 @@
 {
   "schema": "orangecase-telemetry",
   "version": "1.0.0",
-  "digest": "74cc386e361b58514f18822758fa1750aa37bcf707ac2d9241d6de30d582a849",
+  "digest": "80e025e79168ddb4a79b53b8b7f6eaf090fa9231f9a38cacca2575af7d0d3bdc",
   "source": "docs/specs/telemetry.md#appendix-b-benchmark-schema",
   "generated_by": "scripts/gen_specs.py (make specs); do not edit",
   "owned_namespaces": [
@@ -67,6 +67,66 @@
       "type": "double (g)",
       "challenges": [
         "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "orangecase.span_count",
+      "kind": "span",
+      "on": "child of the game root (game coordinator) and of the game_started event span (stowaway), after the producer's spans of the game were exported (\u00a73.2, \u00a73.5)",
+      "type": null,
+      "challenges": [
+        "UC-103"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "orangecase.span_count.delivered",
+      "kind": "attribute",
+      "on": "orangecase.span_count: the producer's spans of this trace its exporter sent successfully",
+      "type": "int",
+      "challenges": [
+        "UC-103"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game_trace_spans_delivered",
+      "kind": "metric",
+      "on": "gauge {game_id}, the game coordinator's delivered count of a normally ended game (\u00a73.2)",
+      "type": "int",
+      "challenges": [
+        "UC-103"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "stowaway_trace_spans_delivered",
+      "kind": "metric",
+      "on": "gauge {game_id}, stowaway's delivered padding count of a match (\u00a73.5)",
+      "type": "int",
+      "challenges": [
+        "UC-103"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.player.sample",
+      "kind": "span",
+      "on": "one per processed motion sample, child of game.player, only with telemetry.per_sample_spans on; never sent to the agent (\u00a73.2)",
+      "type": null,
+      "challenges": [
+        "UC-103"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "telemetry.per_sample_spans",
+      "kind": "attribute",
+      "on": "game root",
+      "type": "bool",
+      "challenges": [
+        "UC-103"
       ],
       "status": "stable"
     },

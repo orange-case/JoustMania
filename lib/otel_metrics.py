@@ -61,6 +61,8 @@ _pending_metrics: list[LabeledMetric] = []
 # _pending_metrics, which init_metrics then initializes once the meter exists.
 _init_lock = RLock()
 _test_mode = False
+# Held so a provider kept out of the global is not collected.
+_provider: MeterProvider | None = None
 
 
 def disable_metrics_for_tests() -> None:
@@ -117,6 +119,7 @@ def _get_export_interval_ms(service_name: str) -> int:
 
 def init_metrics(
     export_interval_ms: int | None = None,
+    set_global: bool = True,
 ) -> metrics.Meter:
     """
     Initialize OpenTelemetry metrics with OTLP push exporter.
@@ -131,6 +134,8 @@ def init_metrics(
 
     Args:
         export_interval_ms: Override interval (ms). If None, reads from flagd.
+        set_global: False keeps the provider out of the OpenTelemetry global, for a process that
+            installs its own global provider (stowaway's synthetic one, telemetry.md §3.5).
 
     Returns:
         Configured meter instance.
@@ -140,7 +145,7 @@ def init_metrics(
         OTEL_SERVICE_NAMESPACE: Service namespace (default: "joustmania")
         OTEL_EXPORTER_OTLP_ENDPOINT: OTLP collector endpoint (default: http://otel-collector:4317)
     """
-    global _meter, _initialized, _export_interval_ms
+    global _meter, _initialized, _export_interval_ms, _provider
 
     with _init_lock:
         if _initialized:
@@ -165,9 +170,12 @@ def init_metrics(
         )
 
         provider = MeterProvider(resource=resource, metric_readers=[reader])
-        metrics.set_meter_provider(provider)
-
-        _meter = metrics.get_meter(service_name, "1.0.0")
+        if set_global:
+            metrics.set_meter_provider(provider)
+            _meter = metrics.get_meter(service_name, "1.0.0")
+        else:
+            _meter = provider.get_meter(service_name, "1.0.0")
+        _provider = provider
         _export_interval_ms = export_interval_ms
         _initialized = True
 

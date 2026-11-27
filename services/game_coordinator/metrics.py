@@ -305,6 +305,27 @@ game_loop_frames_dropped_total = Counter(
 
 # Controller analytics metrics (Phase XX - Analytics)
 # Real-time gauges (updated every ~1 second during gameplay)
+# FR-246, UC-103 BR-003: spans of a game's trace the coordinator exported, set once after a normal end.
+trace_spans_delivered = Gauge(
+    "game_trace_spans_delivered",
+    "Spans of the game's trace the game coordinator exported successfully (set after a normal game end)",
+    ["game_id"],
+)
+# The dashboard reads recent rounds; older games' series are removed.
+TRACE_SPANS_DELIVERED_KEEP = 20
+_trace_spans_delivered_games: list[str] = []
+_trace_spans_delivered_lock = threading.Lock()
+
+
+def set_trace_spans_delivered(game_id: str, delivered: int) -> None:
+    with _trace_spans_delivered_lock:
+        trace_spans_delivered.labels(game_id=game_id).set(delivered)
+        if game_id not in _trace_spans_delivered_games:
+            _trace_spans_delivered_games.append(game_id)
+        while len(_trace_spans_delivered_games) > TRACE_SPANS_DELIVERED_KEEP:
+            trace_spans_delivered.remove(_trace_spans_delivered_games.pop(0))
+
+
 player_accel_magnitude = Gauge(
     "game_player_accel_magnitude",
     "Current acceleration magnitude for player (g-force)",

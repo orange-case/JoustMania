@@ -1188,15 +1188,17 @@ observability:
       Span batch export delay of every Python service; targetable per `service`. A change needs a
       restart.
   stowaway.challenge:
-    read_by: [stowaway, lib]
+    read_by: [stowaway, lib, game-coordinator]
     reload: live
     note: >-
       The challenge whose synthetic load `stowaway` generates (UC-106 BR-006): `span-rounds` and
       `swing-density` have generators, `cardinality-bomb`, `hostile-wifi` and `clock-skew` are
       selectable but emit nothing yet. Read at each match start and every 200 ms while a generator
       runs; a change ends the generator (`challenge_change`). A challenge flag (§1.4): the game
-      coordinator watches it every gameplay frame, so a flip shows on the match trace. An unknown
-      value reads as `none`. `stowaway run --challenge` overrides it.
+      coordinator watches it every gameplay frame, so a flip shows on the match trace, and reads it
+      once when a game root starts: `span-rounds` makes the game a span round that takes the
+      delivered span count (UC-103 BR-003). An unknown value reads as `none`. `stowaway run
+      --challenge` overrides it.
   stowaway.enabled:
     read_by: [stowaway]
     reload: live
@@ -1231,3 +1233,11 @@ observability:
       How game moments (warning, death, intervention) are recorded, read by the game coordinator per
       game through `lib/moments.py` and held for the game (UC-100 BR-002). An unknown value reads as `span_event`; reset it after the booth (UC-100 step 9). It
       never changes what the agent reads (UC-041 BR-009).
+  telemetry.per_sample_spans:
+    read_by: [game-coordinator]
+    reload: per-game
+    note: >-
+      One span `game.player.sample` per processed motion sample of each alive player, a child of
+      the player's span (UC-103 BR-001, "How deep can you go?"). Read by the game coordinator once
+      per game when the game root starts and held for the game. Off by default; the collector keeps
+      these spans from the agent (telemetry.md §1). Reset it after the booth.
