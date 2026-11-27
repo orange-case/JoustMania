@@ -348,6 +348,10 @@ jobs:
             operator_pad:
               - *shared_python
               - 'services/operator_pad/**'
+            # #2576: stowaway (profile-gated image, built in docker-build-extra)
+            stowaway:
+              - *shared_python
+              - 'services/stowaway/**'
             connect_proxy:
               # Dockerfile buf-generates Go stubs from proto/ at build time
               - 'services/connect-proxy/**'
@@ -463,6 +467,7 @@ jobs:
           CH_AUDIO: ${{ steps.f.outputs.audio }}
           CH_PAIRING_DAEMON: ${{ steps.f.outputs.pairing_daemon }}
           CH_OPERATOR_PAD: ${{ steps.f.outputs.operator_pad }}
+          CH_STOWAWAY: ${{ steps.f.outputs.stowaway }}
           CH_CONNECT_PROXY: ${{ steps.f.outputs.connect_proxy }}
           CH_AGENT: ${{ steps.f.outputs.agent }}
           CH_FLAG_SERVICE: ${{ steps.f.outputs.flag_service }}
@@ -479,7 +484,7 @@ jobs:
           # service-checks matrix: changed Python services; all 6 on main push /
           # force (keeps full SonarCloud coverage on main)
           checks=()
-          for s in controller_manager game_coordinator menu audio pairing_daemon operator_pad; do
+          for s in controller_manager game_coordinator menu audio pairing_daemon operator_pad stowaway; do
             key="CH_${s^^}"
             if [ "$RUN_ALL_CHECKS" = "true" ] || [ "${!key}" = "true" ]; then checks+=("$s"); fi
           done
@@ -509,6 +514,7 @@ jobs:
           maybe_extra "$CH_DASHBOARD"      dashboard      services/dashboard/Dockerfile     . dashboard
           maybe_extra "$CH_RUST"           rust-hid       services/rust-hid/Dockerfile      . rust-hid
           maybe_extra "$CH_OPERATOR_PAD"   operator-pad   services/operator_pad/Dockerfile  . operator-pad
+          maybe_extra "$CH_STOWAWAY"       stowaway       services/stowaway/Dockerfile      . stowaway
           maybe_extra "$CH_OTEL_COLLECTOR" otel-collector images/otel-collector/Dockerfile  images/otel-collector otel-collector
           if [ "${#extra[@]}" -eq 0 ]; then
             echo "docker_extra=[]" >> "$GITHUB_OUTPUT"
@@ -516,7 +522,7 @@ jobs:
             echo "docker_extra=$(printf '%s\n' "${extra[@]}" | jq -sc .)" >> "$GITHUB_OUTPUT"
           fi
 
-          # retag matrix: the 12 release.yml images NOT built this run — on main
+          # retag matrix: the 13 release.yml images NOT built this run — on main
           # pushes they still need a :<sha> tag for release tagging
           retag=()
           maybe_retag() {
@@ -531,6 +537,7 @@ jobs:
           maybe_retag "$CH_DASHBOARD"          dashboard
           maybe_retag "$CH_RUST"               rust-hid
           maybe_retag "$CH_OPERATOR_PAD"       operator-pad
+          maybe_retag "$CH_STOWAWAY"           stowaway
           maybe_retag "$CH_OTEL_COLLECTOR"     otel-collector
           maybe_retag "$CH_FLAG_SERVICE"       flag-service
           maybe_retag "$CH_AGENT"              agent

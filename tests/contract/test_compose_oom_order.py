@@ -18,7 +18,7 @@ GAME_ADJ = -500
 EXPENDABLE_ADJ = 500
 # Not in JOUSTMANIA_OBS_SERVICES (the start does not phase it), but nothing in
 # the game needs it either.
-EXTRA_EXPENDABLE = {"dashboard"}
+EXTRA_EXPENDABLE = {"dashboard", "stowaway"}
 COMPOSE_FILES = ["docker-compose.yml", "docker-compose.lite.yml"]
 OVERLAYS = sorted(
     p.name

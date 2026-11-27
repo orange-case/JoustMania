@@ -13,7 +13,7 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | Key | Kind | On | Type | Challenges | Status |
 |---|---|---|---|---|---|
 | `orangecase.schema_version` | resource | every OTLP signal, set by the collector | string | all | stable |
-| `orangecase.synthetic` | resource | synthetic telemetry (`stowaway`), also on its spans in a match trace; the collector keeps it from the agent and, unless `ORANGECASE_SYNTHETIC_IN_CASE=true`, from Jaeger and VictoriaMetrics; the agent drops it unless `ai.observe_synthetic` (§1.1, UC-041 BR-011) | bool | all | planned #2576 |
+| `orangecase.synthetic` | resource | synthetic telemetry (`stowaway`), also on its spans in a match trace; the collector keeps it from the agent and, unless `ORANGECASE_SYNTHETIC_IN_CASE=true`, from Jaeger and VictoriaMetrics; the agent drops it unless `ai.observe_synthetic` (§1.1, UC-041 BR-011) | bool | all | stable |
 | `service.name` | resource | every signal | string | all | stable |
 | `service.namespace` | resource | every signal | string | all | stable |
 | `service.instance.id` | resource | every signal | string | all | stable |
@@ -24,6 +24,9 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 
 | Key | Kind | On | Type | Challenges | Status |
 |---|---|---|---|---|---|
+| `stowaway.padding` | span | `CONSUMER` child of the match's `game_started` event span (§3.5) |  | UC-103 | stable |
+| `stowaway.padding.span` | span | child of `stowaway.padding`, the padding (§3.5) |  | UC-103 | stable |
+| `stowaway.swing` | span | `CONSUMER` child of the match's `game_started` event span (§3.5) |  | UC-102 | stable |
 | `orangecase.challenge.start` | span_event | game root, when a challenge flag becomes active in the match |  | all | stable |
 | `orangecase.challenge.end` | span_event | game root, when a challenge ends, switches or the match ends |  | all | stable |
 | `game.players` | span | child of the game root |  | UC-100, UC-101 | stable |
@@ -73,6 +76,7 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 
 | Key | Kind | On | Type | Challenges | Status |
 |---|---|---|---|---|---|
+| `stowaway_swing_accel_magnitude` | metric | gauge, every 100 ms per synthetic player during a match (§3.5) | double (g) | UC-102 | stable |
 | `game_player_accel_magnitude` | metric | gauge, about every 100 ms per live player | double (g) | UC-102 | stable |
 | `serial` | label | `game_player_accel_magnitude` | string | UC-102 | stable |
 | `game_id` | label | `game_player_accel_magnitude` | string | UC-102 | stable |

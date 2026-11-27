@@ -29,6 +29,9 @@
 # drop-in Environment= wins over .env.local). INPUT_GID sets the host's input group GID [default: 996,
 # the stage Pi]; a stack without the profile behaves exactly as before.
 #
+# stowaway (UC-106, #2576): opt-in with the "stowaway" profile. STOWAWAY_CPUSET pins it
+# to cores of its own [default: 3, the Pi 5's last core].
+#
 # Host ports: only envoy's 80 is reachable from the network. flagd sync (8015),
 # OTLP (4317) and rust-hid (50058) are bound to 127.0.0.1 for the host-networked
 # pairing daemon. docker-compose.override.yml (auto-loaded by a bare
@@ -618,6 +621,50 @@ services:
         limits:
           memory: 128m
           cpus: '0.25'
+    logging: *default-logging
+
+  # stowaway (UC-106, #2576): synthetic load of the Orange Case. OPT-IN ONLY: starts
+  # with the `stowaway` profile, and even then emits nothing until the
+  # observability flag `stowaway.enabled` is on (kill switch, fail closed).
+  # One pipe: OTLP to the case's collector like every game service, marked
+  # orangecase.synthetic=true, so the collector keeps it from the agent and the
+  # in-case backends (telemetry.md §1.1). Never slows the game: one core of its
+  # own (STOWAWAY_CPUSET, default the Pi 5's last core), cpus 1.0, 256m, killed
+  # first under memory pressure. The command line:
+  #   docker compose --profile stowaway run --rm stowaway run --challenge span-rounds
+  stowaway:
+    profiles:
+      - stowaway
+    image: ${IMAGE_PREFIX:-ghcr.io/orange-case/joustmania}/stowaway:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/stowaway/Dockerfile
+    container_name: joustmania-stowaway
+    environment:
+      - OTEL_SERVICE_NAME=stowaway
+      - OTEL_SERVICE_NAMESPACE=joustmania
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_RESOURCE_ATTRIBUTES=host.name=${JOUSTMANIA_HOST:-joustmania}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
+      - SERVICE_VERSION=${IMAGE_TAG:-dev}
+      - FLAGD_HOST=flagd
+      - FLAGD_PORT=8015
+      - GAME_COORDINATOR_HOST=game-coordinator
+      - GAME_COORDINATOR_PORT=50053
+      - MOCK_CONTROLLER_ADDR=controller-manager:50062
+    depends_on:
+      flagd:
+        condition: service_started
+    networks:
+      - joustmania
+    restart: unless-stopped
+    oom_score_adj: 500
+    cpuset: "${STOWAWAY_CPUSET:-3}"
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '1.0'
     logging: *default-logging
 
   # VictoriaMetrics: the only metrics store (the Prometheus container was removed

@@ -30,12 +30,13 @@ expect() {
 }
 
 ALWAYS="lint spec-lint spec-touched"
-PY_ALL="py:game_coordinator py:menu py:controller_manager py:audio py:pairing_daemon py:operator_pad"
+PY_ALL="py:game_coordinator py:menu py:controller_manager py:audio py:pairing_daemon py:operator_pad py:stowaway"
 # Each case mirrors a `changes` filter in .github/workflows/ci.yml.
 expect "docs/CONTRIBUTING.md" "$ALWAYS"
 expect "services/menu/servicer.py" "$ALWAYS py:menu contract"
 expect "services/pairing_daemon/daemon.py services/operator_pad/x.py" "$ALWAYS py:pairing_daemon py:operator_pad contract"
 expect "services/operator_pad/gestures.py" "$ALWAYS py:operator_pad contract"
+expect "services/stowaway/challenges.py" "$ALWAYS py:stowaway contract"
 # lib: shared_python + lib + telemetry + flagd_contract
 expect "lib/feature_flags.py" "$ALWAYS py:lib $PY_ALL contract contract-flagd"
 # root pyproject.toml is shared_python only (not the lib filter)

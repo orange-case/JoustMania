@@ -59,6 +59,8 @@ CODE_ROOTS: dict[str, tuple[str, tuple[Path, ...]]] = {
     # #2050: profile-gated (operator-pad); INPUT_GID is a compose-only interpolation
     # (group_add), never read by the code, so it is not an env read here (flags.md §15.2)
     "operator-pad": ("python", (SERVICES / "operator_pad", LIB)),
+    # #2576: profile-gated (stowaway); STOWAWAY_CPUSET is a compose-only interpolation (cpuset)
+    "stowaway": ("python", (SERVICES / "stowaway", LIB)),
     "agent": ("go", (SERVICES / "agent",)),
     "flag-service": ("go", (SERVICES / "flag-service",)),
     "connect-proxy": ("go", (SERVICES / "connect-proxy",)),

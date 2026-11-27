@@ -15,6 +15,7 @@ members = [
     "joustmania-pairing-daemon",
     "joustmania-proto",
     "joustmania-service-tests",
+    "joustmania-stowaway",
 ]
 
 [[package]]
@@ -781,6 +782,38 @@ requires-dist = [
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
+
+[[package]]
+name = "joustmania-stowaway"
+version = "1.0.0"
+source = { editable = "services/stowaway" }
+dependencies = [
+    { name = "grpcio" },
+    { name = "joustmania-lib" },
+    { name = "joustmania-proto" },
+    { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-sdk" },
+]
+
+[package.optional-dependencies]
+test = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "grpcio", specifier = ">=1.85.0" },
+    { name = "joustmania-lib", editable = "lib" },
+    { name = "joustmania-proto", editable = "proto" },
+    { name = "opentelemetry-exporter-otlp", specifier = ">=1.28.0" },
+    { name = "opentelemetry-sdk", specifier = ">=1.28.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23.0" },
+    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=4.1.0" },
+]
+provides-extras = ["test"]
 
 [[package]]
 name = "miniaudio"
