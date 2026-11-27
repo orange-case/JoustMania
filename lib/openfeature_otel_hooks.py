@@ -48,6 +48,8 @@ from openfeature.hook import Hook, HookContext, HookHints
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Span
 
+from lib.challenge_flags import current_match, is_challenge_flag
+
 METER_NAME = "openfeature.hooks.opentelemetry"
 
 EVALUATION_ACTIVE = "feature_flag.evaluation_active_count"
@@ -156,6 +158,8 @@ class DedupingTracingHook(TracingHook):
     from the last one recorded on that span, so repeats are dropped while every transition
     (A -> B -> A included) is kept. The same holds for the exception event of a raising
     evaluation (keyed by exception type). Flags in :data:`SPAN_EVENT_SKIP_FLAGS` record nothing.
+    A challenge flag evaluated inside a match (:mod:`lib.challenge_flags`) records its evaluation
+    event when its outcome changed for the match instead, on whatever span is current.
     The state sits in a weak map keyed by the span (freed with it) and is capped at
     :data:`MAX_EVENTS_PER_SPAN` recorded events per span. Hot path: one weak-map get and one dict
     lookup; the lock is taken only the first time a span is seen. A race between two threads can
@@ -185,6 +189,13 @@ class DedupingTracingHook(TracingHook):
         return True
 
     def finally_after(self, hook_context: HookContext, details: FlagEvaluationDetails, hints: HookHints) -> None:
+        # Challenge flags dedupe per match, not per span (FR-255, flags.md §1.4).
+        if is_challenge_flag(details.flag_key):
+            match = current_match()
+            if match is not None:
+                if match.observe(details.flag_key, details.variant, details.value, details.reason == Reason.ERROR):
+                    super().finally_after(hook_context, details, hints)
+                return
         if self._should_record(details.flag_key, "eval", (details.variant, details.reason == Reason.ERROR)):
             super().finally_after(hook_context, details, hints)
 

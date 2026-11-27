@@ -1,7 +1,7 @@
 {
   "schema": "orangecase-telemetry",
   "version": "1.0.0",
-  "digest": "f4681c18c021dbfa5cae56cc9e2c19881fa7e24c31a2d2032a19ee0a20db8a9a",
+  "digest": "68e403eb7b0e695206dc165a18a168cfd650f215a52a87dd81c86f46c370872b",
   "source": "docs/specs/telemetry.md#appendix-b-benchmark-schema",
   "generated_by": "scripts/gen_specs.py (make specs); do not edit",
   "owned_namespaces": [
@@ -30,6 +30,46 @@
       ],
       "status": "planned",
       "issue": 2576
+    },
+    {
+      "key": "orangecase.challenge.start",
+      "kind": "span_event",
+      "on": "game root, when a challenge flag becomes active in the match",
+      "type": null,
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "orangecase.challenge.end",
+      "kind": "span_event",
+      "on": "game root, when a challenge ends, switches or the match ends",
+      "type": null,
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "orangecase.challenge.name",
+      "kind": "attribute",
+      "on": "orangecase.challenge.start, orangecase.challenge.end",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "orangecase.challenge.end_reason",
+      "kind": "attribute",
+      "on": "orangecase.challenge.end (flag_change, match_end)",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
     },
     {
       "key": "service.name",

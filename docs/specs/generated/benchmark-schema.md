@@ -24,6 +24,8 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 
 | Key | Kind | On | Type | Challenges | Status |
 |---|---|---|---|---|---|
+| `orangecase.challenge.start` | span_event | game root, when a challenge flag becomes active in the match |  | all | stable |
+| `orangecase.challenge.end` | span_event | game root, when a challenge ends, switches or the match ends |  | all | stable |
 | `game.players` | span | child of the game root |  | UC-100, UC-101 | stable |
 | `game.player` | span | one per player, child of `game.players` |  | UC-100, UC-101 | stable |
 | `game.death_warning` | span | child of `game.player`, shape `span` |  | UC-100 | stable |
@@ -43,6 +45,8 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 
 | Key | Kind | On | Type | Challenges | Status |
 |---|---|---|---|---|---|
+| `orangecase.challenge.name` | attribute | `orangecase.challenge.start`, `orangecase.challenge.end` | string | all | stable |
+| `orangecase.challenge.end_reason` | attribute | `orangecase.challenge.end` (`flag_change`, `match_end`) | string | all | stable |
 | `game.id` | attribute | game root, every moment | string | all | stable |
 | `game.kind` | attribute | game root, every moment | string (`real`, `shadow`) | all | stable |
 | `game.name` | attribute | game root | string | all | stable |
