@@ -233,6 +233,8 @@ jobs:
               - 'scripts/ci/**'
               - 'setup.sh'
               - 'scripts/talk-baseline.json'
+              # the GenAI cost reference test reads the frozen price table
+              - 'docs/challenges/*.json'
               # the script tests' fake flag service enforces the real registry
               - 'services/flag-service/registry.yaml'
               - 'scripts/tests/**'
