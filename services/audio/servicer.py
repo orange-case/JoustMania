@@ -863,12 +863,9 @@ class AudioServiceServicer(audio_pb2_grpc.AudioServiceServicer):
         # Resolve sound name/path to full path with voice selection
         resolved_path = self._resolve_sound_path(request.file_path)
 
-        # Extract sound name for span (e.g., "congratulations" from "Joust/vox/gen_female/congratulations.ogg")
-        sound_name = Path(resolved_path).stem
-
-        # Enrich the server span created by the gRPC interceptor
+        # The values are attributes, not part of the span name: a name per sound grows without bound.
         span = trace.get_current_span()
-        span.update_name(f"PlaySound:{sound_name}")
+        span.set_attribute("audio.sound", Path(resolved_path).stem)
         span.set_attribute("audio.file", resolved_path)
 
         # Check if audio is disabled via settings (read at use time, #1352)
@@ -894,12 +891,10 @@ class AudioServiceServicer(audio_pb2_grpc.AudioServiceServicer):
     async def PlayMusic(self, request, _context):
         """Play background music."""
 
-        # Extract music directory for span (e.g., "Joust" from "Joust/music/*.ogg")
         music_dir = request.file_pattern.split("/")[0] if "/" in request.file_pattern else "music"
 
-        # Enrich the server span created by the gRPC interceptor
         span = trace.get_current_span()
-        span.update_name(f"PlayMusic:{music_dir}")
+        span.set_attribute("audio.track", music_dir)
         span.set_attribute("audio.pattern", request.file_pattern)
 
         # Check if audio is disabled via settings (read at use time, #1352)
@@ -945,8 +940,7 @@ class AudioServiceServicer(audio_pb2_grpc.AudioServiceServicer):
     def ChangeTempo(self, request, _context):
         """Change music tempo."""
         span = trace.get_current_span()
-        span.update_name(f"ChangeTempo:{request.new_tempo:.1f}x")
-        span.set_attribute("audio.new_tempo", request.new_tempo)
+        span.set_attribute("audio.tempo", request.new_tempo)
         success = self.audio_manager.change_tempo(
             track_id=request.track_id,
             new_tempo=request.new_tempo,
@@ -957,7 +951,7 @@ class AudioServiceServicer(audio_pb2_grpc.AudioServiceServicer):
     def SetVolume(self, request, _context):
         """Set master volume."""
         span = trace.get_current_span()
-        span.update_name(f"SetVolume:{request.volume:.0%}")
+        span.set_attribute("audio.volume", request.volume)
         self._refresh_operator_gain()
         success = self.audio_manager.set_volume(request.volume)
         return audio_pb2.SetVolumeResponse(success=success, error="" if success else "Failed to set volume")
