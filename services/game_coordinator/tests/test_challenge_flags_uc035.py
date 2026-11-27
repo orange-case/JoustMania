@@ -20,7 +20,7 @@ from services.game_coordinator import game_clock
 from services.game_coordinator.games import game_loop as game_loop_mod
 from services.game_coordinator.games.base import Player
 from services.game_coordinator.games.ffa import FFAGame
-from services.game_coordinator.games.nonstop_joust import NonstopJoustGame
+from services.game_coordinator.games.nonstop_joust import NonstopJoustGame, NonstopPlayer
 from services.game_coordinator.tests.conftest import EventCollector, MockControllerManagerService
 
 DOMAIN = "challenge_uc035_test"
@@ -180,7 +180,7 @@ class _FrameCall:
         if self.delivered == self.remaining:
             raise StopAsyncIteration
         self.delivered += 1
-        return _frame()
+        return controller_manager_pb2.GameplayDataUpdate()  # no samples: only the loop runs
 
 
 @pytest.mark.asyncio
@@ -198,7 +198,7 @@ async def test_nonstop_polls_the_watched_flags_every_frame(monkeypatch):
     game.running = True
     game.start_time = game_clock.now()
     for serial in ("p0", "p1"):
-        game.players[serial] = Player(serial=serial, team=0, alive=True, color=(255, 0, 0))
+        game.players[serial] = NonstopPlayer(serial=serial, team=0, alive=True, color=(255, 0, 0))
     call = _FrameCall(frames=4)
     game.gameplay_stream = _FrameCall(frames=0)  # the countdown call NonStop replaces
     game.controller_client = SimpleNamespace(StreamGameplayData=lambda: call)
