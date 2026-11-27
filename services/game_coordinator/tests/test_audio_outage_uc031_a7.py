@@ -546,19 +546,71 @@ class SlowFirstGlide(RestartingAudio):
 @pytest.mark.usefixtures("clock")
 @pytest.mark.uc("UC-031", flow="A7", steps=[2], br=["BR-009"])
 async def test_a_glide_refused_during_the_outage_check_uses_no_refusal_restart():
-    """The service stays "down" until its check glide answers, so a tick glide refused meanwhile is not capped."""
+    """The service stays "down" until its check glide answers, so a tick glide sent meanwhile uses no restart."""
     audio = SlowFirstGlide()
     game = await started_game(audio, ScriptedProbe(PROBE_RECONNECTED))
     audio.restart()  # a restart the probe saw
     audio.hold = True
 
-    check = asyncio.get_running_loop().create_task(game._keep_music_alive())
+    loop = asyncio.get_running_loop()
+    check = loop.create_task(game._keep_music_alive())
     await asyncio.sleep(0)  # the check glide is in flight
     assert game._audio_down
-    await game._push_audio(1.0, 1.0)  # a tick glide, refused by the restarted service
+    tick_glide = loop.create_task(game._push_audio(1.0, 1.0))  # waits for the check glide
+    await asyncio.sleep(0)
     audio.release.set()
-    await check
+    await asyncio.gather(check, tick_glide)
 
     assert game._music_refusal_restarts == 0
     assert len(audio.of("PlayMusic")) == 2
     assert not game._audio_down
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("clock")
+@pytest.mark.uc("UC-031", flow="A7", steps=[2], br=["BR-005", "BR-009"])
+async def test_overlapping_glides_reach_the_service_in_send_order():
+    """The check's glide is slow; a tick's newer glide waits for it, so the newer target is applied last."""
+    audio = SlowFirstGlide()
+    game = await started_game(audio, ScriptedProbe())
+    audio.hold = True
+
+    loop = asyncio.get_running_loop()
+    check_glide = loop.create_task(game._push_audio(0.0, 1.0))
+    await asyncio.sleep(0)
+    game._intensity = IntensityRamp.hold(1.0, game_clock.now())  # a tick started a new segment meanwhile
+    tick_glide = loop.create_task(game._push_audio(1.0, 1.0))
+    await asyncio.sleep(0)
+    assert audio.tempos == []  # the tick's glide is not sent while the check's is open
+    audio.release.set()
+    assert await asyncio.gather(check_glide, tick_glide) == ["accepted", "accepted"]
+
+    assert audio.tempos == [("track-1", 1.0), ("track-1", 1.3)]
+
+
+class MutedAudio(RestartingAudio):
+    """``play_audio`` is off: PlayMusic answers ``muted`` (UC-031 A1)."""
+
+    async def PlayMusic(self, request):  # noqa: N802 - gRPC stub name
+        await super().PlayMusic(request)
+        return audio_pb2.PlayMusicResponse(track_id="muted", success=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-031", flow="A7", steps=[2], br=["BR-008", "BR-009"])
+@pytest.mark.uc("UC-031", flow="A1")
+async def test_a_muted_game_sends_its_music_start_again_after_an_audio_restart(clock):
+    """The restarted service is in the lobby phase; the muted game's PlayMusic sets it back to a game."""
+    audio = MutedAudio()
+    game = await started_game(audio, ScriptedProbe(PROBE_OK, PROBE_DOWN, PROBE_RECONNECTED))
+    assert game.music_track_id == "muted"
+
+    await tick(game, clock, 1.1)  # an OK check sends nothing
+    assert len(audio.of("PlayMusic")) == 1
+    await tick(game, clock, 2.0)  # down, then reconnected
+
+    assert len(audio.of("PlayMusic")) == 2
+    assert audio.of("ChangeTempo") == []
+    assert game.music_track_id == "muted"
+    assert not game._audio_down
+    assert not game._music_lost

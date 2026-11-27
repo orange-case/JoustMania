@@ -871,6 +871,57 @@ class TestInLobbyFlag:
         asyncio.run(mock_audio_servicer.StopMusic(audio_pb2.StopMusicRequest(), None))
         assert mock_audio_servicer.in_lobby is False
 
+    @staticmethod
+    async def _start_overtaken_by_stop(servicer, stop_first: bool):
+        """PlayMusic waits in _refresh_play_audio (the hardware opening); StopMusic runs before or during it."""
+        import asyncio
+
+        from proto import audio_pb2
+
+        waiting = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_refresh():
+            waiting.set()
+            await release.wait()
+
+        if stop_first:
+            await servicer.StopMusic(audio_pb2.StopMusicRequest(), None)
+        with (
+            patch.object(servicer, "_refresh_play_audio", new=slow_refresh),
+            patch.object(servicer.audio_manager, "play_music", return_value="track-1") as play,
+        ):
+            start = asyncio.create_task(
+                servicer.PlayMusic(audio_pb2.PlayMusicRequest(file_pattern="Joust/music/*.ogg", loop=True), None)
+            )
+            await waiting.wait()
+            if not stop_first:
+                await servicer.StopMusic(audio_pb2.StopMusicRequest(), None)
+            release.set()
+            response = await start
+        return response, play
+
+    @pytest.mark.uc("UC-031", flow="A7", steps=[2], br=["BR-008"])
+    def test_a_stop_while_the_music_start_waits_starts_nothing(self, mock_audio_servicer):
+        import asyncio
+
+        response, play = asyncio.run(self._start_overtaken_by_stop(mock_audio_servicer, stop_first=False))
+
+        assert not response.success
+        assert response.error == "stopped while starting"
+        play.assert_not_called()
+        assert mock_audio_servicer.in_lobby is False
+
+    @pytest.mark.uc("UC-031", flow="main", steps=[2], br=["BR-008"])
+    def test_a_stop_before_the_music_start_does_not_block_it(self, mock_audio_servicer):
+        import asyncio
+
+        response, play = asyncio.run(self._start_overtaken_by_stop(mock_audio_servicer, stop_first=True))
+
+        assert response.success
+        assert response.track_id == "track-1"
+        play.assert_called_once()
+
     def test_card_watch_busy_follows_phase(self, mock_audio_servicer):
         from services.audio.alsa_config import card_watch_busy
 

@@ -535,6 +535,8 @@ class AudioServiceServicer(audio_pb2_grpc.AudioServiceServicer):
         self.audio_manager = AudioManager(silent=not self.audio_enabled)
         # Lobby/game phase for the ALSA card watcher (UC-031 BR-008): True until a non-Menu track starts.
         self.in_lobby = True
+        # Bumped by every StopMusic: a PlayMusic that awaited across one must not start (UC-031 BR-008).
+        self._music_stops = 0
         # Voice profiles and partners from the voice manifest (UC-031 BR-007, #2107).
         self.voice_profiles = sound_catalog.load_voice_profiles(_PACKAGED_ASSETS)
         self._rejected_voices: set[str] = set()  # warned about already, once per value
@@ -900,7 +902,12 @@ class AudioServiceServicer(audio_pb2_grpc.AudioServiceServicer):
         # Check if audio is disabled via settings (read at use time, #1352)
         # The phase follows the request even when muted: the watcher must not restart mid-game.
         self.in_lobby = music_dir == "Menu"
+        stops_before = self._music_stops
         await self._refresh_play_audio()
+        # Opening the hardware can take seconds; a StopMusic handled during the await wins.
+        if self._music_stops != stops_before:  # NOSONAR
+            span.set_attribute("audio.stopped_while_starting", True)
+            return audio_pb2.PlayMusicResponse(track_id="", success=False, error="stopped while starting")
         self._refresh_operator_gain()
         if not self.audio_enabled:
             span.set_attribute("audio.muted", True)
@@ -931,6 +938,7 @@ class AudioServiceServicer(audio_pb2_grpc.AudioServiceServicer):
 
     async def StopMusic(self, request, _context):
         """Stop music track."""
+        self._music_stops += 1
         success = self.audio_manager.stop_music(request.track_id)
         # Any StopMusic leaves the lobby phase: the menu stops its music at game start, and the window until
         # the game's PlayMusic (or the winner line at game end) counts as a game (UC-031 BR-008).

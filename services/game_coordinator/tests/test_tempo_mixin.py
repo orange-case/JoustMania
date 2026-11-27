@@ -9,6 +9,7 @@ Guards the refactor seam, not the tempo behaviour (the UC-031 suites cover that)
 """
 
 import ast
+import asyncio
 import inspect
 import sys
 import textwrap
@@ -52,6 +53,15 @@ MOVED = (
     "tempo_intensity",
 )
 
+
+class _AnyLock:
+    def __eq__(self, other):
+        return isinstance(other, asyncio.Lock) and not other.locked()
+
+    def __repr__(self):
+        return "<unlocked asyncio.Lock>"
+
+
 # Every attribute _init_tempo_state sets, with its start value on a fresh game.
 TEMPO_STATE = {
     "tempo_ramp": None,
@@ -66,6 +76,7 @@ TEMPO_STATE = {
     "_audio_probe_at": 0.0,
     "_music_refusal_restarts": 0,
     "_music_keeper": None,
+    "_tempo_send_lock": _AnyLock(),
     "_audio_volume": None,
     "_tick_error_text": None,
     "_tick_error_logged_at": 0.0,

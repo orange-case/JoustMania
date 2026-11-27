@@ -89,6 +89,8 @@ class TempoMixin:
         self._music_refusal_restarts = 0
         # The running check-and-restart task of the music loop (single flight).
         self._music_keeper: asyncio.Task | None = None
+        # The keeper's glide and a tick's glide may overlap; one at a time keeps the newer one last.
+        self._tempo_send_lock = asyncio.Lock()
         # Last volume the game sent, so a music restart plays at the same level.
         self._audio_volume: float | None = None
         # Rate limit for the failing-tick warning of _music_loop.
@@ -378,6 +380,10 @@ class TempoMixin:
 
         Returns ``accepted``, ``refused``, ``failed`` or ``skipped`` (no track).
         """
+        async with self._tempo_send_lock:
+            return await self._push_audio_locked(target, remaining, after_outage=after_outage)
+
+    async def _push_audio_locked(self, target: float, remaining: float, *, after_outage: bool) -> str:
         if not self.audio_client or self.music_track_id in (None, MUTED_TRACK_ID):
             self._audio_synced = True
             return "skipped"
@@ -406,23 +412,23 @@ class TempoMixin:
         self._audio_retry_backoff = AUDIO_TEMPO_RETRY_MIN_SECONDS
         self._audio_synced = True
         if response is not None and not response.success:
-            track = self.music_track_id
-            self.music_track_id = None
-            outage = after_outage or self._audio_down
-            if outage or self._music_refusal_restarts < MUSIC_REFUSAL_RESTARTS_MAX:
-                if not outage:
-                    self._music_refusal_restarts += 1
-                self._music_lost = self._music_wanted
-                logger.warning(
-                    f"Audio refused tempo change for track {track} ({response.error}); starting the game music again"
-                )
-            else:
-                logger.warning(
-                    f"Audio refused tempo change for track {track} ({response.error}); "
-                    "no further tempo changes are sent for it"
-                )
+            self._on_tempo_refused(response.error, outage=after_outage or self._audio_down)
             return "refused"
         return "accepted"
+
+    def _on_tempo_refused(self, error: str, *, outage: bool) -> None:
+        """Drop the refused track; restart the music unless refusals outside an outage hit the cap."""
+        track = self.music_track_id
+        self.music_track_id = None
+        if outage or self._music_refusal_restarts < MUSIC_REFUSAL_RESTARTS_MAX:
+            if not outage:
+                self._music_refusal_restarts += 1
+            self._music_lost = self._music_wanted
+            logger.warning(f"Audio refused tempo change for track {track} ({error}); starting the game music again")
+        else:
+            logger.warning(
+                f"Audio refused tempo change for track {track} ({error}); no further tempo changes are sent for it"
+            )
 
     async def _apply_ramp_tempo(self, target_tempo: float) -> None:
         """Apply one interpolated step of an ``ease`` ramp_tempo curve (#1117).
@@ -603,6 +609,9 @@ class TempoMixin:
                     return
             else:
                 self._audio_down = False
+                if self.music_track_id == MUTED_TRACK_ID:
+                    # Nothing to glide; resending PlayMusic tells a restarted service a game runs.
+                    self._music_lost = True
         if self._music_lost:
             await self._restart_game_music()
 
