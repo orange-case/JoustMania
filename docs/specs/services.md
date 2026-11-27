@@ -23,6 +23,7 @@ flowchart LR
     gc --> cm
     gc --> audio
     pad[operator-pad] -. opt-in profile .-> menu & gc & audio
+    stw[stowaway] -. opt-in profile .-> gc & cm
     cm --> rhid[rust-hid]
     pd[pairing-daemon] --> rhid
     agent -->|shadow games| gc
@@ -30,7 +31,7 @@ flowchart LR
     services_all[all services] -->|OTLP| otel[otel-collector]
     otel -->|fan-out| agent
     otel --> obs
-    flagd[(flagd)] -.flags.-> cm & gc & menu & audio & pd & agent & rhid & pad
+    flagd[(flagd)] -.flags.-> cm & gc & menu & audio & pd & agent & rhid & pad & stw
     envoy -->|/flags/| fsvc[flag-service]
     fsvc -->|sync stream| flagd
     agent & menu & cproxy & gc -->|HTTP writes| fsvc
@@ -54,6 +55,7 @@ coordinator and the menu wait only for flagd); flagd waits for the flag service 
 | audio | Python | 50056 gRPC | 50056 via override | Music with tempo (separate process, soxr), 8 effect channels (miniaudio), ALSA | `services/audio/` |
 | agent | Go | 4318 OTLP/HTTP (receiver the collector exports to: `POST /v1/traces`, `/v1/metrics`, `/v1/logs`, protobuf, gzip or identity, 4 MiB per request); 4317 OTLP gRPC (same receivers, for direct producers such as the service-tier `OtlpSink` tee); 13134 HTTP `/healthz`, `/experiments`, `/experiments/state` | no | Observe via OTLP, decide, write interventions / experiment arms / promotions through the flag service, run experiments and promotion | `services/agent/` |
 | operator-pad | Python | none (a gRPC client of the menu, the game coordinator and the audio service) | no | Checked by hand on the Pi 5 with the real pad (UC-015, UC-016). Optional, `operator-pad` compose profile only (full stack; the lite stack has no pad), not privileged: a read-only bind mount of `/dev/input` (it protects the directory only, no mknod or unlink; the device nodes stay readable and writable through it, which the grab and the keyboard LEDs need), for the display of UC-016 the host's `/dev` bound read-only and not recursively at `/run/host-dev` (§3.1), the cgroup rule `c 13:* rw` (evdev nodes, also ones plugged in later) and, only through `docker-compose.operator-pad-hidraw.yml` with a known major, `c ${HIDRAW_MAJOR}:* rw` (hidraw, §3.1), `group_add` with the host's input GID (`INPUT_GID`, default 996, the stage Pi; host identity under C-035), no `/run/udev`; waits only for flagd. Reads a USB macro pad through evdev (exclusive grab, hotplug), turns key gestures into menu commands and force-end (UC-015); writes no flag itself. Its removal leaves every other service unchanged (FR-195) | `services/operator_pad/` |
+| stowaway | Python | none (a gRPC client of the game coordinator and the controller manager's mock control API, `controller-manager:50062`) | no | Synthetic load of the Orange Case ([UC-106](../use_cases/UC-106.md), #2576). Optional, `stowaway` compose profile only (full stack; the lite stack has no collector), with `cpus: 1.0`, `cpuset` `${STOWAWAY_CPUSET:-3}`, a 256 MiB memory limit and `oom_score_adj` +500; waits only for flagd. Follows the primary game's `StreamGameEvents` (never the gameplay stream) and attaches synthetic `CONSUMER` spans to the match trace, or runs a pattern game on reserved mock controllers while no real match runs; everything it emits carries `orangecase.synthetic=true` and goes to the case's collector (telemetry.md §3.5, §1.1). Switched by the `stowaway.*` flags (kill switch `stowaway.enabled`, fail closed); writes no flag. `stowaway run --challenge <name>` in its container is the command line (UC-106 BR-007). Its removal leaves every other service unchanged | `services/stowaway/` |
 | connect-proxy | Go | 8080 HTTP | no | Connect (browser) ↔ gRPC bridge | `services/connect-proxy/` |
 | dashboard | TypeScript | 8080 HTTP (static-web-server) | no | SPA: controllers, Agent, Experiments, Metrics, Traces tabs; follows the newest live shadow game when no real game is live (`ListGames`, `GetGameState`, `StreamGameEvents(game_id)`; UC-070 BR-005); mode selector from the menu's `ListGameModes` (UC-011 BR-002); reads VictoriaMetrics through envoy for the Agent tab's intervention counts, the stage settings strip's gauges (UC-035 BR-010) and, every 10 s, `controller_adapter_info` for the adapter on each controller card (UC-035 BR-009); reads the Agent tab's decide feed, goal and prediction strips and flag panel and the Experiments tab from the agent's read-only `GET /experiments/state` through envoy (§5); every row links its trace in Jaeger; opened as `/?view=stage` it shows only the full-screen stage view for the talk (UC-035 A8, BR-017: per-player acceleration, thresholds, outs and the agent's applied decisions with their rationale, from VictoriaMetrics and Jaeger, polled every second; `&replay=<url>` plays a recorded stage snapshot, `&record` saves one); opened as `/?latest=summary`, `/?latest=retro` or `/?latest=decide` it does not start but replaces itself with the Jaeger UI view of the newest `agent.game.summary`, `agent.llm.retro` or `invoke_agent joustmania-agent` span (`/jaeger/trace/<trace>?uiFind=<span>`, one v3 search of the newest 5 traces; the Jaeger search page for that operation when none is found or Jaeger is unreachable), the talk slides' deep link; calls `GetMenuStatus` for the stage settings strip (UC-035 BR-010), `StreamGameplayData`, `IdentifyController`, `ForceEndGame` and `ProcessInput` through connect-proxy | `services/dashboard/` |
 | envoy | config | 80 HTTP; 9901 admin | **80** | Single entry point / reverse proxy | `services/envoy/envoy.yaml` |
@@ -86,7 +88,7 @@ service cannot be scaled with `--scale`.
 
 | File | Kind | Adds or changes | Loaded by |
 |---|---|---|---|
-| `docker-compose.yml` | Base (full stack) | Every service of section 2; real hardware through rust-hid; the `operator-pad` service only under the `operator-pad` profile; loopback host ports below | Always (`-f`); the Pi runs it alone through `scripts/setup/joustmania-compose.sh` |
+| `docker-compose.yml` | Base (full stack) | Every service of section 2; real hardware through rust-hid; the `operator-pad` service only under the `operator-pad` profile, `stowaway` only under the `stowaway` profile; loopback host ports below | Always (`-f`); the Pi runs it alone through `scripts/setup/joustmania-compose.sh` |
 | `docker-compose.override.yml` | Dev and test ports | Publishes flagd 8013, flag-service `127.0.0.1:8070`, controller-manager 50052 and `127.0.0.1:50062` (mock control API, loopback only), game-coordinator 50053, menu 50054, audio 50056. Auto-loaded by a bare `docker compose`; the Pi path names `-f docker-compose.yml` so it never loads it | Bare `docker compose`, `make dev`, `make dry-run`, the integration suite |
 | `docker-compose.dev.yml` | Hot reload | Volume-mounts Python service source and `lib/`, `pull_policy: build` for flag-service, `pull_policy` for the collector (`COLLECTOR_PULL_POLICY`, default `always`); rust-hid source mounted read-only for reference (no hot reload) | `make dev`; the integration suite with `USE_DEV_MOUNTS=true` (`make test-dev`) |
 | `docker-compose.ci.yml` | No hardware | Audio without devices (`play_audio=off`), CI flag baseline `services/flagd/ci/` (`backend=mock`). Moves pairing-daemon and rust-hid to the `hardware` profile, the agent to `agent`, and connect-proxy, dashboard and envoy to `dashboard`, so none of them starts without that profile. Needs Compose 2.24+ (`!reset`) | `make up-mock` (with the base alone, no override), `make dry-run`, the integration suite |
@@ -95,7 +97,7 @@ service cannot be scaled with `--scale`.
 | `docker-compose.lite.yml` | Standalone Pi stack | Its own project file, not an overlay: no observability (no Jaeger, VictoriaMetrics, Grafana, collector) and no agent, about 2.7 GB less memory limit (Jaeger 1024m, collector 768m, VictoriaMetrics 256m, Grafana 512m, agent 128m); still flag-service, flagd, controller-manager, rust-hid, pairing-daemon (host network, as in the full stack), game-coordinator, menu, audio, connect-proxy, dashboard, envoy (UC-002 BR-003) | `docker compose -f docker-compose.lite.yml up -d` |
 
 Profiles merge across files: an overlay's `profiles` list is added to the base one, never replaced (operator-pad keeps `operator-pad`).
-With no profile active, the base file starts everything except operator-pad.
+With no profile active, the base file starts everything except operator-pad and stowaway.
 
 **Host ports are loopback-only unless they must be reachable.** In the production path (`docker-compose.yml` alone, or lite) the only
 port reachable from the venue network is envoy's **80**. Three ports are published on `127.0.0.1` only, because the host-networked
@@ -121,7 +123,7 @@ decide who dies when the host runs out of memory: the kernel's OOM killer does, 
 |---|---|---|
 | Game (kept longest) | `-500` | flag-service, flagd, controller-manager, rust-hid, pairing-daemon, game-coordinator, menu, audio (`JOUSTMANIA_GAME_SERVICES` in `scripts/setup/lib-joustmania.sh`), and operator-pad: the operator's way out of a stuck game (UC-015) |
 | Neutral | unset (0) | envoy, connect-proxy |
-| Expendable (killed first) | `+500` | jaeger, victoria-metrics, grafana, otel-collector, agent (`JOUSTMANIA_OBS_SERVICES`), dashboard |
+| Expendable (killed first) | `+500` | jaeger, victoria-metrics, grafana, otel-collector, agent (`JOUSTMANIA_OBS_SERVICES`), dashboard, stowaway |
 
 - `+500` puts even a small expendable container ahead of any unprotected one; `-500` offsets a game container holding up
   to half of RAM. Not `-1000`: a leaking game service can still be killed, rather than the host freezing.
