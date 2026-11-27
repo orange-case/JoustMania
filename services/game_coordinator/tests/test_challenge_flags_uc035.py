@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 from openfeature import api
@@ -16,8 +17,10 @@ from lib.challenge_flags import EVENT_END, EVENT_START, match_scope
 from lib.openfeature_otel_hooks import DedupingTracingHook
 from proto import controller_manager_pb2
 from services.game_coordinator import game_clock
+from services.game_coordinator.games import game_loop as game_loop_mod
 from services.game_coordinator.games.base import Player
 from services.game_coordinator.games.ffa import FFAGame
+from services.game_coordinator.games.nonstop_joust import NonstopJoustGame
 from services.game_coordinator.tests.conftest import EventCollector, MockControllerManagerService
 
 DOMAIN = "challenge_uc035_test"
@@ -155,3 +158,52 @@ async def test_a_poll_failure_never_reaches_the_game_loop(monkeypatch):
         game.gameplay_stream = FlippingStream(InMemoryProvider({}), root, frames=3)
         await game._game_loop()
     assert game.gameplay_stream.fetched == 3
+
+
+class _FrameCall:
+    """NonStop's own gameplay call: yields ``frames`` frames, counts what it delivered."""
+
+    def __init__(self, frames: int):
+        self.remaining = frames
+        self.delivered = 0
+
+    async def write(self, _message):
+        pass
+
+    def cancel(self):
+        return True
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.delivered == self.remaining:
+            raise StopAsyncIteration
+        self.delivered += 1
+        return _frame()
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-035", br=["BR-018"])
+async def test_nonstop_polls_the_watched_flags_every_frame(monkeypatch):
+    """Non-Stop runs its own _game_loop; it reads frames through the shared reader, so it polls too."""
+    polls = []
+    monkeypatch.setattr(game_loop_mod, "poll_watched_flags", lambda: polls.append(1))
+    game = NonstopJoustGame(
+        controller_manager_client=MockControllerManagerService(num_controllers=2),
+        event_publisher=EventCollector().publish,
+        audio_client=None,
+        game_id="test_uc035_nonstop",
+    )
+    game.running = True
+    game.start_time = game_clock.now()
+    for serial in ("p0", "p1"):
+        game.players[serial] = Player(serial=serial, team=0, alive=True, color=(255, 0, 0))
+    call = _FrameCall(frames=4)
+    game.gameplay_stream = _FrameCall(frames=0)  # the countdown call NonStop replaces
+    game.controller_client = SimpleNamespace(StreamGameplayData=lambda: call)
+
+    await game._game_loop()
+
+    assert call.delivered >= 1
+    assert len(polls) == call.delivered
