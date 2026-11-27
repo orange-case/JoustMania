@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.28.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.27.0...joustmania-v0.28.0) (2026-11-27)
+
+
+### Features
+
+* **booth:** "How deep can you go?" span rounds ([#2574](https://github.com/orange-case/JoustMania/issues/2574)) ([#2969](https://github.com/orange-case/JoustMania/issues/2969)) ([6b286b8](https://github.com/orange-case/JoustMania/commit/6b286b8f0807913481c7d640391e5ee04806a2d7))
+* **controller-manager,menu:** push battery levels every 30 s, not only on presses ([#2961](https://github.com/orange-case/JoustMania/issues/2961)) ([061cd84](https://github.com/orange-case/JoustMania/commit/061cd84c66387e500e5416a4a5ce195c2c9706c8))
+* **operator-pad:** pad voice lines in menu_voice, Non-Stop time-limit row ([#2940](https://github.com/orange-case/JoustMania/issues/2940)) ([#2965](https://github.com/orange-case/JoustMania/issues/2965)) ([f4726f2](https://github.com/orange-case/JoustMania/commit/f4726f2e27f653415f695c843a10f3953d499a4f))
+* **otel:** keep synthetic telemetry away from the agent and the in-case backends ([#2577](https://github.com/orange-case/JoustMania/issues/2577)) ([#2959](https://github.com/orange-case/JoustMania/issues/2959)) ([29761d4](https://github.com/orange-case/JoustMania/commit/29761d41b4f24137798bfcf8dcc2f837bc4dd1c6))
+* **stowaway:** synthetic load service and CLI ([#2576](https://github.com/orange-case/JoustMania/issues/2576)) ([#2966](https://github.com/orange-case/JoustMania/issues/2966)) ([8ee155d](https://github.com/orange-case/JoustMania/commit/8ee155dd1e32ed02d67faef881e2a8b9e0a539ca))
+* **telemetry:** mark challenge flag switches on the match trace ([#2572](https://github.com/orange-case/JoustMania/issues/2572)) ([#2957](https://github.com/orange-case/JoustMania/issues/2957)) ([cbc3b97](https://github.com/orange-case/JoustMania/commit/cbc3b975c79737aa6c4dd4046d725bb0f0939d27))
+* **telemetry:** publish a versioned benchmark attribute schema ([#2570](https://github.com/orange-case/JoustMania/issues/2570)) ([#2956](https://github.com/orange-case/JoustMania/issues/2956)) ([f74624d](https://github.com/orange-case/JoustMania/commit/f74624d29957340ca1430db3dec7995cfd044e7e))
+
+
+### Bug Fixes
+
+* **audio:** keep gRPC span names, move sound/track/tempo/volume into attributes ([#2960](https://github.com/orange-case/JoustMania/issues/2960)) ([199cc8b](https://github.com/orange-case/JoustMania/commit/199cc8b1266fcb4aa3ea54360e188f3354149764))
+* **audio:** music and tempo edge cases left after [#2928](https://github.com/orange-case/JoustMania/issues/2928) ([#2942](https://github.com/orange-case/JoustMania/issues/2942)) ([#2964](https://github.com/orange-case/JoustMania/issues/2964)) ([77cebfb](https://github.com/orange-case/JoustMania/commit/77cebfb35c01ef2be9be7a22293b4128f50944f4))
+* **controller-manager:** end client streams with UNAVAILABLE when shutdown starts ([#2948](https://github.com/orange-case/JoustMania/issues/2948)) ([ca31c69](https://github.com/orange-case/JoustMania/commit/ca31c69f4e43a1000d979352a527dc4686f94276))
+* **game-coordinator:** detect and recover a silent Non-Stop gameplay stream ([#2950](https://github.com/orange-case/JoustMania/issues/2950)) ([c3e7882](https://github.com/orange-case/JoustMania/commit/c3e7882d53dda97bc3b0c5a884dfff9d30b31179))
+* **game-coordinator:** Non-Stop defaults to the 3-minute limit without a menu config ([#2952](https://github.com/orange-case/JoustMania/issues/2952)) ([#2958](https://github.com/orange-case/JoustMania/issues/2958)) ([294881e](https://github.com/orange-case/JoustMania/commit/294881ebdade11eae824fb2d028f5b4d6ffd697f))
+* **menu:** boot and lifecycle edge cases after the boot lookup ([#2951](https://github.com/orange-case/JoustMania/issues/2951)) ([80c35a9](https://github.com/orange-case/JoustMania/commit/80c35a99334b34645df95e925899b8c0619d0864))
+* **pairing-daemon:** SIGTERM as PID 1, start hold around a Bluetooth restart ([#2941](https://github.com/orange-case/JoustMania/issues/2941)) ([#2962](https://github.com/orange-case/JoustMania/issues/2962)) ([2538633](https://github.com/orange-case/JoustMania/commit/2538633cd990699ed826b7b8be86d13a426c3aac))
+
+
+### Documentation
+
+* **challenges:** "What did the game master cost?" guide and spend reference ([#2718](https://github.com/orange-case/JoustMania/issues/2718)) ([#2955](https://github.com/orange-case/JoustMania/issues/2955)) ([8146abd](https://github.com/orange-case/JoustMania/commit/8146abd38642f5ef37d54e12a875ae60647c8928))
+* **challenges:** "What is happening?" guide and prompt set v1 ([#2585](https://github.com/orange-case/JoustMania/issues/2585)) ([#2968](https://github.com/orange-case/JoustMania/issues/2968)) ([afa143e](https://github.com/orange-case/JoustMania/commit/afa143ea78cfb333d962e49138128dfe1f77b2a9))
+* **challenges:** settle reasoning billing and Q6 after [#2572](https://github.com/orange-case/JoustMania/issues/2572) ([#2718](https://github.com/orange-case/JoustMania/issues/2718)) ([#2973](https://github.com/orange-case/JoustMania/issues/2973)) ([b65d354](https://github.com/orange-case/JoustMania/commit/b65d354e466be982974330569fbe90a2ba5b7d6a))
+* **spec:** reconcile use cases after the 0.27.0 hardening wave ([#2949](https://github.com/orange-case/JoustMania/issues/2949)) ([d72fe05](https://github.com/orange-case/JoustMania/commit/d72fe052b1f94b843f699b62786e56c19f747011))
+* **spec:** replace remaining path:line refs with path:Symbol ([#2632](https://github.com/orange-case/JoustMania/issues/2632)) ([#2970](https://github.com/orange-case/JoustMania/issues/2970)) ([c98c297](https://github.com/orange-case/JoustMania/commit/c98c29750d24c3d74745acd9c963899c17618525))
+
+
+### Tests
+
+* **controller-manager:** drive the stream-rate test on a fake clock ([#2967](https://github.com/orange-case/JoustMania/issues/2967)) ([84ba8ca](https://github.com/orange-case/JoustMania/commit/84ba8cab3832553fd736caf58c9ac1947b8e0ca2))
+* **telemetry:** pin stored metric names against unit suffixes ([#2630](https://github.com/orange-case/JoustMania/issues/2630)) ([#2971](https://github.com/orange-case/JoustMania/issues/2971)) ([86229b1](https://github.com/orange-case/JoustMania/commit/86229b1d102b5c18eceb8bdcd5112ff51b054a95))
+
+
+### Miscellaneous
+
+* **agent:** drop FitnessSample.At, align Non-Stop testdata default ([#2972](https://github.com/orange-case/JoustMania/issues/2972)) ([acb162b](https://github.com/orange-case/JoustMania/commit/acb162bffba092569c9a6cb91e1a93b167a09ba1))
+
 ## [0.27.0](https://github.com/orange-case/JoustMania/compare/joustmania-v0.26.0...joustmania-v0.27.0) (2026-11-26)
 
 
