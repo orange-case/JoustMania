@@ -152,20 +152,11 @@ set -e
 ok "a game that adds up exits 0" "$([[ ${rc} == 0 ]]; echo $?)"
 ok "text report names the game" "$(grep -q "${A} \[real\]" "${WORK}/a.txt"; echo $?)"
 
-# --- refused inputs exit 2 without reading or fetching
-OUTSIDE="$(mktemp -d -p "${HOME}")"
-cp "${WORK}/traces.json" "${OUTSIDE}/traces.json"
+# --- a non-http Jaeger URL is refused (exit 2) without a fetch
 set +e
-python3 "${TOOL}" --prices "${PRICES}" --traces "${OUTSIDE}/traces.json" >/dev/null 2>"${WORK}/err1"
-rc1=$?
-python3 "${TOOL}" --prices "${PRICES}" --traces "${OUTSIDE}/traces.json" --allow-dir "${OUTSIDE}" >/dev/null 2>&1
-rc2=$?
 python3 "${TOOL}" --prices "${PRICES}" --jaeger-url "file:///etc" --start 1 --end 2 >/dev/null 2>"${WORK}/err3"
 rc3=$?
 set -e
-rm -rf "${OUTSIDE}"
-ok "a traces file outside the allowed directories is refused" "$([[ ${rc1} == 2 ]] && grep -q 'outside the allowed' "${WORK}/err1"; echo $?)"
-ok "--allow-dir admits it" "$([[ ${rc2} == 3 ]]; echo $?)"
 ok "a non-http Jaeger URL is refused" "$([[ ${rc3} == 2 ]] && grep -q 'http(s) URL' "${WORK}/err3"; echo $?)"
 
 # --- Jaeger mode against a fake v3 query API: GET only, one window query + one per game id

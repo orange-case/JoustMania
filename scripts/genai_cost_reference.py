@@ -20,9 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -34,6 +32,7 @@ DECIDE_SPANS = ("invoke_agent joustmania-agent", "agent.decide")  # agent.decide
 RETRO_SPAN = "agent.llm.retro"
 DECISION_SPAN = "agent.decision"
 EVALUATION_EVENT = "gen_ai.evaluation.result"
+CONVERSATION_ID = "gen_ai.conversation.id"
 # gen_ai.usage.input_tokens already includes both cache counts and output_tokens the reasoning.
 TOKEN_KEYS = {
     "input": "gen_ai.usage.input_tokens",
@@ -105,7 +104,6 @@ def dedupe(spans: list[dict]) -> list[dict]:
 
 
 TRACES_PATH = "/api/v3/traces"
-REPO_ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 
 def jaeger_base(url: str) -> tuple[str, str, str]:
@@ -118,24 +116,11 @@ def jaeger_base(url: str) -> tuple[str, str, str]:
     return parts.scheme, parts.netloc, parts.path.rstrip("/")
 
 
-def safe_path(path: str, allowed: list[str]) -> str:
-    """The resolved path, only when it sits under one of the allowed directories."""
-    real = os.path.realpath(path)
-    for root in allowed:
-        root = os.path.realpath(root)
-        try:
-            if os.path.commonpath([real, root]) == root:
-                return real
-        except ValueError:  # another drive on Windows
-            continue
-    raise ValueError(f"{path!r} is outside the allowed directories {allowed} (see --allow-dir)")
-
-
 def _get(base: tuple[str, str, str], query: dict, timeout: float = 60) -> dict | None:
     scheme, netloc, prefix = base
     url = urllib.parse.urlunsplit((scheme, netloc, prefix + TRACES_PATH, urllib.parse.urlencode(query), ""))
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
+        with urllib.request.urlopen(url, timeout=timeout) as r:  # NOSONAR: operator CLI input, not a trust boundary
             return json.load(r)
     except urllib.error.HTTPError as e:
         if e.code == 404:  # "No traces found" is an empty answer
@@ -154,7 +139,7 @@ def fetch(base: tuple[str, str, str], start: float, end: float, game_ids: list[s
     queries = [dict(common)]  # the window: proposer calls and anything without a game id
     for gid in game_ids:
         q = dict(common)
-        q["query.attributes"] = json.dumps({"gen_ai.conversation.id": gid})
+        q["query.attributes"] = json.dumps({CONVERSATION_ID: gid})
         queries.append(q)
     spans = []
     for q in queries:
@@ -167,8 +152,8 @@ def fetch(base: tuple[str, str, str], start: float, end: float, game_ids: list[s
 # ------------------------------------------------------------------ prices
 
 
-def load_prices(path: str, allowed: list[str]) -> dict:
-    with open(safe_path(path, allowed), encoding="utf-8") as f:
+def load_prices(path: str) -> dict:
+    with open(path, encoding="utf-8") as f:  # NOSONAR: operator CLI input, not a trust boundary
         table = json.load(f)
     for key in ("date", "source", "currency", "models"):
         if key not in table:
@@ -215,7 +200,7 @@ def _add(into: dict, tokens: dict) -> None:
 
 
 def _empty() -> dict:
-    return {k: 0 for k in TOKEN_KEYS}
+    return dict.fromkeys(TOKEN_KEYS, 0)
 
 
 class Bucket:
@@ -257,89 +242,93 @@ def _decide_flags(decide: dict, decisions: list[dict]) -> list[str]:
     return subsets
 
 
-def reference(spans: list[dict], table: dict, game_ids: list[str] | None = None) -> dict:
-    by_id = {(s["trace"], s["id"]): s for s in spans}
-    children: dict[tuple, list[dict]] = defaultdict(list)
-    for s in spans:
-        if s["parent"]:
-            children[(s["trace"], s["parent"])].append(s)
+def _call(s: dict, by_id: dict, table: dict) -> dict | None:
+    """One model call with its caller, game, model and price; None for a span that is not one."""
+    a = s["attrs"]
+    if not s["name"].startswith("chat ") or a.get("gen_ai.operation.name", "chat") != "chat":
+        return None
+    parent = by_id.get((s["trace"], s["parent"]))
+    pname = parent["name"] if parent else None
+    if pname in DECIDE_SPANS:
+        caller, conv = "decide", parent["attrs"].get(CONVERSATION_ID)
+    elif pname == RETRO_SPAN:
+        caller, conv = "retro", a.get(CONVERSATION_ID)
+    else:
+        caller, conv = "proposer", None
+    kind = parent["attrs"].get("game.kind") if conv and parent else None
+    provider = a.get("gen_ai.provider.name")
+    # Price by the model that answered; a call without a response has none.
+    model = a.get("gen_ai.response.model") or a.get("gen_ai.request.model")
+    row = price_of(table, provider, model)
+    tokens = _tokens(a)
+    return {
+        "span": s,
+        "caller": caller,
+        "game": conv,
+        "kind": kind,
+        "provider": provider,
+        "model": model,
+        "tokens": tokens,
+        "money": None if row is None else money(tokens, row),
+        "decide": (parent["trace"], parent["id"]) if caller == "decide" else None,
+    }
 
-    calls = []
-    for s in spans:
-        if not s["name"].startswith("chat ") or s["attrs"].get("gen_ai.operation.name", "chat") != "chat":
-            continue
-        parent = by_id.get((s["trace"], s["parent"]))
-        if parent and parent["name"] in DECIDE_SPANS:
-            caller, conv = "decide", parent["attrs"].get("gen_ai.conversation.id")
-            kind = parent["attrs"].get("game.kind")
-        elif parent and parent["name"] == RETRO_SPAN:
-            caller, conv = "retro", s["attrs"].get("gen_ai.conversation.id")
-            kind = parent["attrs"].get("game.kind")
-        else:
-            caller, conv, kind = "proposer", None, None
-        a = s["attrs"]
-        provider = a.get("gen_ai.provider.name")
-        # Price by the model that answered; a call without a response has none.
-        model = a.get("gen_ai.response.model") or a.get("gen_ai.request.model")
-        row = price_of(table, provider, model)
-        tokens = _tokens(a)
-        calls.append(
-            {
-                "span": s,
-                "caller": caller,
-                "game": conv,
-                "kind": kind if conv else None,
-                "provider": provider,
-                "model": model,
-                "tokens": tokens,
-                "money": None if row is None else money(tokens, row),
-                "decide": (parent["trace"], parent["id"]) if caller == "decide" else None,
-            }
-        )
 
-    per_model: dict[str, Bucket] = defaultdict(Bucket)
-    per_caller: dict[str, Bucket] = defaultdict(Bucket)
-    per_kind: dict[str, Bucket] = defaultdict(Bucket)
-    per_game: dict[str, Bucket] = defaultdict(Bucket)
-    per_decide: dict[tuple, Bucket] = defaultdict(Bucket)
+def _group(calls: list[dict], key) -> dict:
+    out: dict = defaultdict(Bucket)
     for c in calls:
-        per_model[f"{c['provider']}/{c['model']}"].add(c)
-        per_caller[c["caller"]].add(c)
-        per_kind[c["kind"] or "none"].add(c)
-        if c["game"]:
-            per_game[c["game"]].add(c)
-        if c["decide"]:
-            per_decide[c["decide"]].add(c)
+        k = key(c)
+        if k:
+            out[k].add(c)
+    return out
 
-    # Cross-check (UC-105 A3): the game's tokens from its spans with the conversation id (decide
-    # totals + retro call) must equal the sum of its model calls.
+
+def _views(groups: dict) -> dict:
+    return {k: v.view() for k, v in sorted(groups.items())}
+
+
+def _conversation_tokens(decide_spans: list[dict], calls: list[dict]) -> dict:
+    """Per game, the tokens of its spans with the conversation id: decide totals plus retro call."""
     by_conv: dict[str, dict] = defaultdict(_empty)
-    decide_spans = [s for s in spans if s["name"] in DECIDE_SPANS]
     for s in decide_spans:
-        conv = s["attrs"].get("gen_ai.conversation.id")
+        conv = s["attrs"].get(CONVERSATION_ID)
         if conv:
             _add(by_conv[conv], _tokens(s["attrs"]))
     for c in calls:
         if c["caller"] == "retro" and c["game"]:
             _add(by_conv[c["game"]], c["tokens"])
+    return by_conv
 
+
+def _games(calls: list[dict], decide_spans: list[dict], game_ids: list[str] | None) -> dict:
+    per_game = _group(calls, lambda c: c["game"])
+    # Cross-check (UC-105 A3): the conversation-id tokens must equal the sum of the model calls.
+    by_conv = _conversation_tokens(decide_spans, calls)
     wanted = game_ids or sorted(set(per_game) | {g for g, t in by_conv.items() if any(t.values())})
     games = {}
     for gid in wanted:
         b = per_game.get(gid, Bucket())
         conv_tokens = by_conv.get(gid, _empty())
+        mine = [c for c in calls if c["game"] == gid]
         games[gid] = {
             **b.view(),
-            "kind": next((c["kind"] for c in calls if c["game"] == gid and c["kind"]), None),
+            "kind": next((c["kind"] for c in mine if c["kind"]), None),
             "by_caller": {
-                caller: _sum_view([c for c in calls if c["game"] == gid and c["caller"] == caller])
-                for caller in ("decide", "retro")
+                caller: _sum_view([c for c in mine if c["caller"] == caller]) for caller in ("decide", "retro")
             },
             "conversation_tokens": conv_tokens,
             "adds_up": conv_tokens == b.tokens,
             "has_model_call": b.calls > 0,
         }
+    return games
 
+
+def _decisions(spans: list[dict], decide_spans: list[dict], calls: list[dict]) -> tuple[list[dict], dict]:
+    children: dict[tuple, list[dict]] = defaultdict(list)
+    for s in spans:
+        if s["parent"] and s["name"] == DECISION_SPAN:
+            children[(s["trace"], s["parent"])].append(s)
+    per_decide = _group(calls, lambda c: c["decide"])
     decisions = []
     subsets: dict[str, Bucket] = defaultdict(Bucket)
     for s in sorted(decide_spans, key=lambda x: x["start"]):
@@ -347,29 +336,35 @@ def reference(spans: list[dict], table: dict, game_ids: list[str] | None = None)
         b = per_decide.get(key)
         if b is None:
             continue  # rules path: no model call, no tokens
-        kids = [k for k in children.get(key, []) if k["name"] == DECISION_SPAN]
-        flags = _decide_flags(s, kids)
+        flags = _decide_flags(s, children.get(key, []))
         decisions.append(
             {
                 "span_id": s["id"],
-                "game": s["attrs"].get("gen_ai.conversation.id"),
+                "game": s["attrs"].get(CONVERSATION_ID),
                 "start_ns": s["start"],
                 **b.view(),
                 "totals_on_span": _tokens(s["attrs"]),
                 "subsets": flags,
             }
         )
+        mine = [c for c in calls if c["decide"] == key]
         for f in flags:  # counted once per subset it falls into
-            for c in calls:
-                if c["decide"] == key:
-                    subsets[f].add(c)
+            for c in mine:
+                subsets[f].add(c)
+    return decisions, subsets
 
+
+def reference(spans: list[dict], table: dict, game_ids: list[str] | None = None) -> dict:
+    by_id = {(s["trace"], s["id"]): s for s in spans}
+    calls = [c for c in (_call(s, by_id, table) for s in spans) if c]
+    decide_spans = [s for s in spans if s["name"] in DECIDE_SPANS]
+    decisions, subsets = _decisions(spans, decide_spans, calls)
     return {
         "price_table": {"date": table["date"], "source": table["source"], "currency": table["currency"]},
-        "q1_per_model": {k: v.view() for k, v in sorted(per_model.items())},
-        "q2_per_caller": {k: v.view() for k, v in sorted(per_caller.items())},
-        "q2_per_game_kind": {k: v.view() for k, v in sorted(per_kind.items())},
-        "q3_per_game": games,
+        "q1_per_model": _views(_group(calls, lambda c: f"{c['provider']}/{c['model']}")),
+        "q2_per_caller": _views(_group(calls, lambda c: c["caller"])),
+        "q2_per_game_kind": _views(_group(calls, lambda c: c["kind"] or "none")),
+        "q3_per_game": _games(calls, decide_spans, game_ids),
         "q4_per_decision": decisions,
         "q4_subsets": {k: subsets[k].view() for k in ("changed_the_game", "held", "blocked")},
         "total": _sum_view(calls),
@@ -429,29 +424,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--game-id", action="append", default=[], help="a challenge game (repeat)")
     ap.add_argument("--search-depth", type=int, default=1000)
     ap.add_argument("--json", action="store_true")
-    ap.add_argument(
-        "--allow-dir",
-        action="append",
-        default=[],
-        help="another directory --prices and --traces may read from (default: the repo and the temp dir)",
-    )
     a = ap.parse_args(argv)
     if bool(a.traces) == bool(a.jaeger_url):
         ap.error("give either --traces or --jaeger-url")
     if a.jaeger_url and (a.start is None or a.end is None):
         ap.error("--jaeger-url needs --start and --end")
     try:
-        allowed = [REPO_ROOT, tempfile.gettempdir(), *a.allow_dir]
-        table = load_prices(a.prices, allowed)
+        table = load_prices(a.prices)
         if a.traces:
             spans = []
             for path in a.traces:
-                with open(safe_path(path, allowed), encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:  # NOSONAR: operator CLI input, not a trust boundary
                     spans.extend(spans_from_doc(json.load(f)))
             spans = dedupe(spans)
         else:
             spans = fetch(jaeger_base(a.jaeger_url), a.start, a.end, a.game_id, a.search_depth)
-    except (OSError, ValueError, urllib.error.URLError) as e:
+    except (OSError, ValueError) as e:  # URLError is an OSError
         print(f"error: {e}", file=sys.stderr)
         return 2
     ref = reference(spans, table, a.game_id or None)
