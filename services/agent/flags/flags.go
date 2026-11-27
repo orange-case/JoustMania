@@ -770,6 +770,15 @@ func (f *Flags) ExperimentsEnabled(ctx context.Context) bool {
 	return f.boolFlag(ctx, keyExperimentsEnabled, false)
 }
 
+// keyAIObserveSynthetic is human-owned, never written by the agent (C-034).
+const keyAIObserveSynthetic = "ai.observe_synthetic"
+
+// ObserveSynthetic resolves ai.observe_synthetic (UC-041 BR-011): whether the
+// agent ingests telemetry marked orangecase.synthetic. Unresolved reads false.
+func (f *Flags) ObserveSynthetic(ctx context.Context) bool {
+	return f.boolFlag(ctx, keyAIObserveSynthetic, false)
+}
+
 // stringFlag resolves a string flag, falling back to def on any error.
 func (f *Flags) stringFlag(ctx context.Context, key, def string) string {
 	v, err := f.client.StringValue(ctx, key, def, openfeature.EvaluationContext{})

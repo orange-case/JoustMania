@@ -8,6 +8,14 @@
 #          fail-closed reads, interactions, spec ids. Not variants, defaults or writers.
 
 agent:
+  ai.observe_synthetic:
+    read_by: [agent]
+    reload: live
+    note: >-
+      Lets the agent ingest telemetry marked `orangecase.synthetic` (benchmark load, #2576). Off drops
+      it before any game context (UC-041 BR-011), the backup for a collector agent route opened by
+      mistake; on also needs that route opened in the collector config. Read per batch, only when a
+      batch holds a marked item; unresolved reads off. Human-owned, never written by the agent (C-034).
   code_improvement.min_interval_seconds:
     read_by: [agent]
     reload: live

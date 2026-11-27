@@ -198,14 +198,19 @@ def test_gateway_pipeline_reuses_the_processors_of_its_in_case_twin(
 ):
     """The gateway gets the same data as the in-case backend: same processors, in the same
     order, memory limiter first and a batch processor of its own between it and the exporter.
-    `logs/gateway` adds only the agent-only filter, before its batch (UC-100 BR-012)."""
+    `logs/gateway` adds only the agent-only filter, before its batch (UC-100 BR-012). The
+    twin's in-case synthetic filter is the one processor the gateway leaves out: it always
+    gets synthetic telemetry (UC-041 BR-011)."""
     pipelines = merged["service"]["pipelines"]
     processors = pipelines[pipeline]["processors"]
+    twin_processors = [
+        p for p in pipelines[twin]["processors"] if p != "filter/synthetic_in_case"
+    ]
     if pipeline == "logs/gateway":
         assert processors.index(AGENT_ONLY) < processors.index("batch")
         processors = [p for p in processors if p != AGENT_ONLY]
     assert AGENT_ONLY not in processors
-    assert processors == pipelines[twin]["processors"]
+    assert processors == twin_processors
     assert processors[0] == "memory_limiter"
     assert [p for p in processors if p.split("/")[0] == "batch"], (
         "without a batch processor the gateway exporter's errors reach the receiver"
@@ -403,7 +408,7 @@ def test_an_unreachable_gateway_cannot_touch_the_in_case_pipelines_or_the_agent(
         for name, spec in base["service"]["pipelines"].items()
         if "otlp_http/agent" in spec["exporters"]
     }
-    assert {"traces", "metrics", "logs/agent"} <= agent_pipelines
+    assert {"traces/agent", "metrics/agent", "logs/agent"} <= agent_pipelines
     queue = merged["exporters"][EXPORTER]["sending_queue"]
     assert queue["enabled"] is True
     assert not queue.get("block_on_overflow"), (
