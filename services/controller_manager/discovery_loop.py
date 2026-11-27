@@ -211,8 +211,10 @@ class DiscoveryLoop:
         # LED batch cadence (Phase 72: separated from polling; own task since #1447)
         self._led_interval = 0.05  # 20 Hz
 
-        # Battery metrics refresh (Phase 39 / 70)
+        # Battery metrics refresh and battery-only events (Phase 39 / 70, UC-002 BR-010)
         self._battery_interval = 30.0
+        # serial -> level last sent as a battery-only event
+        self._pushed_battery: dict[str, int] = {}
 
         # Discovery check throttle: 1Hz is sufficient for detecting
         # connect/disconnect — no need to run at 100Hz polling rate
@@ -441,9 +443,23 @@ class DiscoveryLoop:
         await asyncio.to_thread(self.backend.update_all_leds)
 
     async def _battery_step(self) -> None:
-        """Refresh battery metrics (every 30 s; display/warnings live in the menu, Phase 70)."""
+        """Refresh battery metrics and push changed levels to the menu (every 30 s, UC-002 BR-010)."""
         self.monitoring.check_battery_levels(self.tracked_controllers)
         self.monitoring.last_battery_check = time.time()
+        self._push_battery_levels()
+
+    def _push_battery_levels(self) -> None:
+        """Send a battery-only event for each visible controller whose level changed since its last one."""
+        pushed: dict[str, int] = {}
+        for serial, info in list(self.tracked_controllers.items()):
+            if info.get(ControllerInfoKey.RESERVED, False) or ControllerInfoKey.BATTERY not in info:
+                continue
+            level = info[ControllerInfoKey.BATTERY]
+            pushed[serial] = level
+            if self._pushed_battery.get(serial) != level:
+                self.button_detector.publish_battery_event(serial, level, info.get(ControllerInfoKey.NAME, ""))
+        # Rebuilt each pass, so a dropped controller leaves no entry.
+        self._pushed_battery = pushed
 
     async def _health_step(self) -> None:
         """Emit the ~1 Hz bluetooth-health span + metrics (#732 M3)."""

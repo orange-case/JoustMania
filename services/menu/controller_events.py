@@ -31,6 +31,7 @@ BUTTON_TYPE_NAMES = {
 _EVENT_TYPE_NAMES = {
     controller_manager_pb2.EVENT_CONNECT: "connect",
     controller_manager_pb2.EVENT_DISCONNECT: "disconnect",
+    controller_manager_pb2.EVENT_BATTERY: "battery",
 }
 
 
@@ -315,6 +316,12 @@ class ControllerEventLoop:
             event: ButtonEvent from the stream
         """
         serial = event.serial
+
+        if event.event_type == controller_manager_pb2.EVENT_BATTERY:
+            # Not a press (no idle reset); a level for a serial the menu does not hold would never be cleared.
+            if serial in self._callbacks.get_connected_serials():
+                self._callbacks.update_battery(serial, event.battery)
+            return
 
         # A reported 0 is an empty battery (UC-002 BR-010); an older controller manager sends no marker,
         # and there 0 also means "not read".

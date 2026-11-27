@@ -166,6 +166,18 @@ class ButtonDetector:
             for event in events:
                 self.event_publisher.publish_to_subscribers(self._subscribers, event, "button")
 
+    def publish_battery_event(self, serial: str, battery: int, name: str = "") -> None:
+        """Publish a battery-only event (no button) to all button event subscribers (UC-002 BR-010)."""
+        event = controller_manager_pb2.ButtonEvent(
+            serial=serial,
+            timestamp=int(time.time() * 1000),
+            battery=battery,
+            battery_reported=True,
+            event_type=controller_manager_pb2.EVENT_BATTERY,
+            name=name,
+        )
+        self.event_publisher.publish_to_subscribers(self._subscribers, event, "battery")
+
     def publish_connection_event(
         self,
         serial: str,
