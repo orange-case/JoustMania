@@ -1,7 +1,7 @@
 {
   "schema": "orangecase-telemetry",
   "version": "1.0.0",
-  "digest": "b3b6c7377d6929e15602902915688cd2ca0f0fb623bcdcdcaf8065ddced01133",
+  "digest": "74cc386e361b58514f18822758fa1750aa37bcf707ac2d9241d6de30d582a849",
   "source": "docs/specs/telemetry.md#appendix-b-benchmark-schema",
   "generated_by": "scripts/gen_specs.py (make specs); do not edit",
   "owned_namespaces": [
@@ -167,7 +167,8 @@
       "type": null,
       "challenges": [
         "UC-100",
-        "UC-101"
+        "UC-101",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -178,7 +179,8 @@
       "type": null,
       "challenges": [
         "UC-100",
-        "UC-101"
+        "UC-101",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -260,7 +262,8 @@
       "type": null,
       "challenges": [
         "UC-100",
-        "UC-102"
+        "UC-102",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -291,7 +294,8 @@
       "type": null,
       "challenges": [
         "UC-100",
-        "UC-102"
+        "UC-102",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -341,7 +345,8 @@
       "on": "game root, at game end",
       "type": "string",
       "challenges": [
-        "UC-100"
+        "UC-100",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -351,7 +356,8 @@
       "on": "game root, outcome winner",
       "type": "string (serial)",
       "challenges": [
-        "UC-100"
+        "UC-100",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -383,7 +389,8 @@
       "type": "string (<game.id>/<player.serial>/<n>)",
       "challenges": [
         "UC-100",
-        "UC-101"
+        "UC-101",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -414,7 +421,8 @@
       "type": "string (motion, agent_intervention)",
       "challenges": [
         "UC-100",
-        "UC-102"
+        "UC-102",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -424,7 +432,8 @@
       "on": "death_warning, player_death",
       "type": "double (g)",
       "challenges": [
-        "UC-102"
+        "UC-102",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -455,7 +464,8 @@
       "type": "int[] (epoch ns)",
       "challenges": [
         "UC-100",
-        "UC-102"
+        "UC-102",
+        "UC-104"
       ],
       "status": "stable"
     },
@@ -525,27 +535,70 @@
       "on": "gauge, about every 100 ms per live player",
       "type": "double (g)",
       "challenges": [
-        "UC-102"
+        "UC-102",
+        "UC-104"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game_player_alive",
+      "kind": "metric",
+      "on": "gauge per player of a game, 1 alive, 0 after the death",
+      "type": "int",
+      "challenges": [
+        "UC-104"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game_player_elimination_order",
+      "kind": "metric",
+      "on": "gauge per player, set at a death that takes the player out (1 = first out), removed shortly after the game",
+      "type": "int",
+      "challenges": [
+        "UC-104"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game_effective_death_threshold",
+      "kind": "metric",
+      "on": "gauge per game, the death threshold after the tempo change, before per-player factors",
+      "type": "double (g)",
+      "challenges": [
+        "UC-104"
       ],
       "status": "stable"
     },
     {
       "key": "serial",
       "kind": "label",
-      "on": "game_player_accel_magnitude",
+      "on": "game_player_accel_magnitude, game_player_alive, game_player_elimination_order",
       "type": "string",
       "challenges": [
-        "UC-102"
+        "UC-102",
+        "UC-104"
       ],
       "status": "stable"
     },
     {
       "key": "game_id",
       "kind": "label",
-      "on": "game_player_accel_magnitude",
+      "on": "game_player_accel_magnitude, game_player_alive, game_player_elimination_order, game_effective_death_threshold",
       "type": "string",
       "challenges": [
-        "UC-102"
+        "UC-102",
+        "UC-104"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game_kind",
+      "kind": "label",
+      "on": "game_effective_death_threshold",
+      "type": "string (real, shadow)",
+      "challenges": [
+        "UC-104"
       ],
       "status": "stable"
     }

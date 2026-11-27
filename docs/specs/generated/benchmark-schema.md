@@ -29,8 +29,8 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | `stowaway.swing` | span | `CONSUMER` child of the match's `game_started` event span (§3.5) |  | UC-102 | stable |
 | `orangecase.challenge.start` | span_event | game root, when a challenge flag becomes active in the match |  | all | stable |
 | `orangecase.challenge.end` | span_event | game root, when a challenge ends, switches or the match ends |  | all | stable |
-| `game.players` | span | child of the game root |  | UC-100, UC-101 | stable |
-| `game.player` | span | one per player, child of `game.players` |  | UC-100, UC-101 | stable |
+| `game.players` | span | child of the game root |  | UC-100, UC-101, UC-104 | stable |
+| `game.player` | span | one per player, child of `game.players` |  | UC-100, UC-101, UC-104 | stable |
 | `game.death_warning` | span | child of `game.player`, shape `span` |  | UC-100 | stable |
 | `game.player_death` | span | child of `game.player`, shape `span` |  | UC-100, UC-102 | stable |
 | `game.intervention` | span | child of `game.player`, shape `span` |  | UC-101 | stable |
@@ -38,10 +38,10 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | `agent.intervention.effect` | span | child of `agent.decision` |  | UC-101 | stable |
 | `flagservice.write` | span | flag service, one per write |  | UC-101 | stable |
 | `death_warning` | span_event | `game.player` in shape `span_event`; log `event_name` in shape `log_event` |  | UC-100 | stable |
-| `player_death` | span_event | `game.player` in shape `span_event`; log `event_name` in shape `log_event` |  | UC-100, UC-102 | stable |
+| `player_death` | span_event | `game.player` in shape `span_event`; log `event_name` in shape `log_event` |  | UC-100, UC-102, UC-104 | stable |
 | `intervention` | span_event | `game.player` in shape `span_event`; log `event_name` in shape `log_event` |  | UC-101 | stable |
 | `victory` | span_event | the winner's `game.player` |  | UC-100 | stable |
-| `challenge.ground_truth` | span_event | game root, one per player at a normal end |  | UC-100, UC-102 | stable |
+| `challenge.ground_truth` | span_event | game root, one per player at a normal end |  | UC-100, UC-102, UC-104 | stable |
 | `challenge.intervention_ground_truth` | span_event | game root, one per applied intervention at a normal end |  | UC-101 | stable |
 
 ## Attributes
@@ -53,18 +53,18 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | `game.id` | attribute | game root, every moment | string | all | stable |
 | `game.kind` | attribute | game root, every moment | string (`real`, `shadow`) | all | stable |
 | `game.name` | attribute | game root | string | all | stable |
-| `game.outcome` | attribute | game root, at game end | string | UC-100 | stable |
-| `game.winner` | attribute | game root, outcome `winner` | string (serial) | UC-100 | stable |
+| `game.outcome` | attribute | game root, at game end | string | UC-100, UC-104 | stable |
+| `game.winner` | attribute | game root, outcome `winner` | string (serial) | UC-100, UC-104 | stable |
 | `player.count` | attribute | game root | int | all | stable |
 | `telemetry.moment_shape` | attribute | game root | string (`span_event`, `span`, `log_event`) | UC-100, UC-101 | stable |
-| `moment.id` | attribute | every moment; `challenge.intervention_ground_truth` | string (`<game.id>/<player.serial>/<n>`) | UC-100, UC-101 | stable |
+| `moment.id` | attribute | every moment; `challenge.intervention_ground_truth` | string (`<game.id>/<player.serial>/<n>`) | UC-100, UC-101, UC-104 | stable |
 | `player.serial` | attribute | `game.player`, every moment, ground truth | string | all | stable |
 | `player.name` | attribute | `game.player`, every moment, ground truth (once known) | string | all | stable |
-| `death.reason` | attribute | `player_death` | string (`motion`, `agent_intervention`) | UC-100, UC-102 | stable |
-| `accel_magnitude` | attribute | `death_warning`, `player_death` | double (g) | UC-102 | stable |
+| `death.reason` | attribute | `player_death` | string (`motion`, `agent_intervention`) | UC-100, UC-102, UC-104 | stable |
+| `accel_magnitude` | attribute | `death_warning`, `player_death` | double (g) | UC-102, UC-104 | stable |
 | `shield.activation` | attribute | `shield_feedback` on `game.player` | string (`trigger`) | UC-101 | stable |
 | `challenge.warning_times_ns` | attribute | `challenge.ground_truth` | int[] (epoch ns) | UC-100 | stable |
-| `challenge.death_times_ns` | attribute | `challenge.ground_truth` | int[] (epoch ns) | UC-100, UC-102 | stable |
+| `challenge.death_times_ns` | attribute | `challenge.ground_truth` | int[] (epoch ns) | UC-100, UC-102, UC-104 | stable |
 | `challenge.applied_at_ns` | attribute | `challenge.intervention_ground_truth` | int (epoch ns) | UC-101 | stable |
 | `challenge.first_death_at_ns` | attribute | `challenge.intervention_ground_truth` | int (epoch ns) | UC-101 | stable |
 | `intervention.type` | attribute | `intervention`, `challenge.intervention_ground_truth`, `agent.intervention.effect` | string | UC-101 | stable |
@@ -77,6 +77,10 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | Key | Kind | On | Type | Challenges | Status |
 |---|---|---|---|---|---|
 | `stowaway_swing_accel_magnitude` | metric | gauge, every 100 ms per synthetic player during a match (§3.5) | double (g) | UC-102 | stable |
-| `game_player_accel_magnitude` | metric | gauge, about every 100 ms per live player | double (g) | UC-102 | stable |
-| `serial` | label | `game_player_accel_magnitude` | string | UC-102 | stable |
-| `game_id` | label | `game_player_accel_magnitude` | string | UC-102 | stable |
+| `game_player_accel_magnitude` | metric | gauge, about every 100 ms per live player | double (g) | UC-102, UC-104 | stable |
+| `game_player_alive` | metric | gauge per player of a game, 1 alive, 0 after the death | int | UC-104 | stable |
+| `game_player_elimination_order` | metric | gauge per player, set at a death that takes the player out (1 = first out), removed shortly after the game | int | UC-104 | stable |
+| `game_effective_death_threshold` | metric | gauge per game, the death threshold after the tempo change, before per-player factors | double (g) | UC-104 | stable |
+| `serial` | label | `game_player_accel_magnitude`, `game_player_alive`, `game_player_elimination_order` | string | UC-102, UC-104 | stable |
+| `game_id` | label | `game_player_accel_magnitude`, `game_player_alive`, `game_player_elimination_order`, `game_effective_death_threshold` | string | UC-102, UC-104 | stable |
+| `game_kind` | label | `game_effective_death_threshold` | string (`real`, `shadow`) | UC-104 | stable |
