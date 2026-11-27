@@ -20,7 +20,7 @@ ATTR_DELIVERED = "orangecase.span_count.delivered"
 
 # A trace whose count is never taken (an aborted game) must not grow the table forever.
 MAX_WATCHED = 64
-FLUSH_TIMEOUT_MS = 10_000
+FLUSH_TIMEOUT_MS = 5_000
 
 
 class DeliveredSpans:

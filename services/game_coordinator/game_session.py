@@ -46,7 +46,7 @@ from services.game_coordinator import metrics
 from services.game_coordinator.event_bus import EventBus
 from services.game_coordinator.flag_readiness import SpanRecord, await_flag_providers_ready
 from services.game_coordinator.game_factory import GameFactory
-from services.game_coordinator.games.sample_spans import PER_SAMPLE_SPANS_ATTR, read_per_sample_spans
+from services.game_coordinator.games.sample_spans import PER_SAMPLE_SPANS_ATTR, counts_spans, read_per_sample_spans
 from services.game_coordinator.grpc_clients import GrpcClientManager
 
 logger = logging.getLogger(__name__)
@@ -186,6 +186,9 @@ class GameSession:
         # Per-session loop runs in its own thread with its own GrpcClientManager.
         self.clients = GrpcClientManager()
         self.game_thread: threading.Thread | None = None
+        # UC-103 BR-003: the trace whose delivered count this game takes, and the thread taking it.
+        self._counted_trace_id: int | None = None
+        self.span_count_thread: threading.Thread | None = None
         # The game thread's event loop, set when the thread starts. The clients
         # above belong to it, so intervention side effects are dispatched onto
         # it (UC-040 BR-018). None until the thread runs.
@@ -388,6 +391,7 @@ class GameSession:
         try:
             loop.run_until_complete(self._run_game_loop_async())
         finally:
+            self._discard_span_count()
             # Properly cleanup gRPC async resources before closing loop
             # This prevents BlockingIOError from gRPC's PollerCompletionQueue
             try:
@@ -507,8 +511,10 @@ class GameSession:
             game_span.set_attribute(MOMENT_SHAPE_ATTR, moment_shape)
             per_sample_spans = read_per_sample_spans()
             game_span.set_attribute(PER_SAMPLE_SPANS_ATTR, per_sample_spans)
-            # FR-246: count this trace's exported spans from the root on.
-            DELIVERED.watch(game_span.get_span_context().trace_id)
+            # FR-246: only a span round counts this trace's exported spans, from the root on.
+            if counts_spans(per_sample_spans):
+                self._counted_trace_id = game_span.get_span_context().trace_id
+                DELIVERED.watch(self._counted_trace_id)
             # FR-255: challenge flag changes dedupe per match; its challenges end on the root at the end.
             challenge_match = open_match(game_span)
 
@@ -705,18 +711,28 @@ class GameSession:
                 logger.info(f"Closed gRPC channels for game {self.game_id}")
 
         # The root has ended: only a normally ended game has a delivered count (UC-103 A1).
-        if session_outcome is None and completed_game_outcome(game) != OUTCOME_FORCE_ENDED:
-            await self._record_span_count(game_span)
-        else:
-            DELIVERED.take(game_span.get_span_context().trace_id)
-
-    async def _record_span_count(self, game_span: trace.Span) -> None:
-        """FR-246, UC-103 BR-003: the coordinator's delivered span count of the game's trace."""
-        trace_id = game_span.get_span_context().trace_id
-        if not DELIVERED.is_watching(trace_id):
+        trace_id, self._counted_trace_id = self._counted_trace_id, None
+        if trace_id is None:
             return
+        if session_outcome is None and completed_game_outcome(game) != OUTCOME_FORCE_ENDED:
+            self._start_span_count(game_span, trace_id)
+        else:
+            DELIVERED.take(trace_id)
+
+    def _start_span_count(self, game_span: trace.Span, trace_id: int) -> None:
+        """The flush may wait on a slow collector: its own thread, so the game thread ends now.
+
+        Not a task on the game loop: the loop is closed right after the game, cancelling it.
+        """
+        self.span_count_thread = threading.Thread(
+            target=self._record_span_count, args=(game_span, trace_id), daemon=True, name="span-count"
+        )
+        self.span_count_thread.start()
+
+    def _record_span_count(self, game_span: trace.Span, trace_id: int) -> None:
+        """FR-246, UC-103 BR-003: the coordinator's delivered span count of the game's trace."""
         try:
-            await asyncio.to_thread(flush_spans)
+            flush_spans()
         except Exception as e:
             logger.warning(f"Span flush before the delivered count of game {self.game_id} failed: {e}")
         delivered = DELIVERED.take(trace_id)
@@ -725,6 +741,12 @@ class GameSession:
         record_span_count(tracer, game_span, self.game_id, delivered)
         metrics.set_trace_spans_delivered(self.game_id, delivered)
         logger.info(f"Game {self.game_id}: {delivered} spans of its trace delivered")
+
+    def _discard_span_count(self) -> None:
+        """A game that returned before its end (no game, force-ended early) leaves no watched trace."""
+        trace_id, self._counted_trace_id = self._counted_trace_id, None
+        if trace_id is not None:
+            DELIVERED.take(trace_id)
 
     def _zero_lifecycle_gauges(self) -> None:
         """Set this game's game_active and game_active_players series to 0."""
