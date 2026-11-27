@@ -208,8 +208,9 @@ def test_agent_level_preview_with_the_level_unresolved_is_unknown(enabled):
 def test_pad_words_name_every_backend_and_every_preview_option():
     """#2106: K7 says the backend by name; every setting the pad announces or previews has a label."""
     assert list(voice_prompts.BACKEND_VOICES) == setting_ladders.BACKENDS
-    # The agent rows have no voice lines (#2755, D7): the pad shows them only.
-    spoken = setting_ladders.PREVIEW_OPTIONS - {"force_all_start"} - setting_ladders.AGENT_ROW_OPTIONS
+    # The agent rows and the time limit have no voice lines (#2755, D7; #2940): the pad shows them only.
+    silent = {"force_all_start", setting_ladders.TIME_LIMIT_OPTION}
+    spoken = setting_ladders.PREVIEW_OPTIONS - silent - setting_ladders.AGENT_ROW_OPTIONS
     assert spoken <= set(voice_prompts.LABEL_VOICES)
     assert voice_prompts.LIMIT_VOICES[True] != voice_prompts.LIMIT_VOICES[False]
     assert set(voice_prompts.LOCK_VOICES.values()).isdisjoint(voice_prompts.AGENT_SWITCH_VOICES.values())
