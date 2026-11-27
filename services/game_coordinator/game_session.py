@@ -34,6 +34,7 @@ from contextlib import suppress
 from opentelemetry import trace
 from opentelemetry.context import Context
 
+from lib.challenge_flags import close_match, open_match
 from lib.feature_flags import eval_game_kind, set_game_session_kind_context
 from lib.moments import MOMENT_SHAPE_ATTR, emit_agent_event, read_moment_shape
 from lib.otel_metrics import get_export_interval_ms
@@ -502,6 +503,8 @@ class GameSession:
             # the game, after the admission wait (a provider still not READY at the deadline gives span_event, A1).
             moment_shape = read_moment_shape()
             game_span.set_attribute(MOMENT_SHAPE_ATTR, moment_shape)
+            # FR-255: challenge flag changes dedupe per match; its challenges end on the root at the end.
+            challenge_match = open_match(game_span)
 
             # The built game (None until GameFactory created it) and the outcome the
             # session decides itself (error, or force_ended before the game was
@@ -621,6 +624,7 @@ class GameSession:
                 if getattr(game, "game_error_published", False) is not True:
                     await self.event_bus.publish("game_error", {"error": str(e)})
             finally:
+                close_match(challenge_match)
                 # Thread-safe state cleanup
                 with self._state_lock:
                     self.game_running = False

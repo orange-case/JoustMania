@@ -124,5 +124,8 @@ func newOTelHooks(provider metric.MeterProvider) ([]openfeature.Hook, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []openfeature.Hook{boundedVariantHook{Hook: metricsHook, active: active}, otelhooks.NewTracesHook()}, nil
+	return []openfeature.Hook{
+		boundedVariantHook{Hook: metricsHook, active: active},
+		newChallengeTracesHook(otelhooks.NewTracesHook()),
+	}, nil
 }

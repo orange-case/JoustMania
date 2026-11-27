@@ -14,6 +14,7 @@ from typing import Any
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 
+from lib.challenge_flags import poll_watched_flags
 from lib.types import GameEvent, Sound
 from services.game_coordinator import game_clock, metrics
 from services.game_coordinator.games import base as _base
@@ -476,6 +477,8 @@ class GameLoopMixin:
                             logger.info("Game running=False, breaking loop")
                             break
 
+                        # FR-255: a watched challenge flag's flip shows within this tick.
+                        poll_watched_flags()
                         if await handle_frame(loop, gameplay_update):
                             return
 
