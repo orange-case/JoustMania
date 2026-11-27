@@ -75,6 +75,7 @@ The totals (the number of names, of names without a consumer and of names never 
 | `game_shield_group_grants` | gauge | `game_kind`, `game_id` | game-coordinator | yes | agent |  |
 | `game_shield_hold_setting` | gauge | `setting`, `game_kind`, `game_id`, `experiment_id`, `arm` | game-coordinator | yes | agent |  |
 | `game_started_total` | counter | `mode`, `game_kind` | game-coordinator | yes | grafana |  |
+| `game_trace_spans_delivered` | gauge | `game_id` | game-coordinator | yes | grafana |  |
 | `grpc_client_errors_total` | counter | `service`, `method`, `code` | lib (`lib/grpc_metrics.py`) | yes | grafana | #1426; mid-stream errors and the HID adapters counted, a cancel by the caller is not; the Go agent and connect-proxy are not covered (telemetry.md §6) |
 | `grpc_client_request_duration_seconds` | histogram | `service`, `method` | lib (`lib/grpc_metrics.py`) | yes | grafana | #1426; a stream is timed once, at its end |
 | `menu_button_dispatch_seconds` | histogram | `event_type` | menu | yes | (none) | reader: tests/service/test_uc002_button_stream_reconnect.py |
@@ -87,3 +88,4 @@ The totals (the number of names, of names without a consumer and of names never 
 | `process_cpu_seconds_total` | counter | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon | yes (each service) | grafana |  |
 | `process_resident_memory_bytes` | gauge | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon | yes (each service) | grafana |  |
 | `process_threads` | gauge | (none) | audio, controller-manager, game-coordinator, menu, operator-pad, pairing-daemon | yes (each service) | grafana |  |
+| `stowaway_trace_spans_delivered` | gauge | `game_id` | stowaway | yes | grafana |  |

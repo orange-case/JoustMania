@@ -48,12 +48,15 @@ def settings_source(args: argparse.Namespace) -> SettingsSource:
 
 async def run(args: argparse.Namespace) -> None:
     from lib.grpc_utils import create_channel
+    from lib.otel_metrics import init_metrics
     from proto import controller_manager_mock_pb2_grpc, game_coordinator_pb2_grpc
     from services.stowaway.challenges import build_generators
     from services.stowaway.runner import Stowaway
     from services.stowaway.synthetic import init_providers
 
     tracer_provider, meter_provider = init_providers(args.endpoint)
+    # The delivered count is unmarked, so it reaches VictoriaMetrics (telemetry.md §3.5).
+    init_metrics(set_global=False)
     coordinator_addr = (
         f"{os.getenv('GAME_COORDINATOR_HOST', 'game-coordinator')}:{os.getenv('GAME_COORDINATOR_PORT', '50053')}"
     )

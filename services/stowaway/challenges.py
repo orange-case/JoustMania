@@ -14,6 +14,8 @@ from opentelemetry import metrics, trace
 from opentelemetry.trace import SpanKind
 
 from lib.challenge_flags import ATTR_NAME as ATTR_CHALLENGE_NAME
+from lib.span_count import DELIVERED, DeliveredSpans, flush_spans, record_span_count
+from services.stowaway import metrics as stowaway_metrics
 from services.stowaway.config import Settings, SettingsSource
 from services.stowaway.match import Match
 from services.stowaway.synthetic import SYNTHETIC_ATTR
@@ -33,6 +35,8 @@ SPAN_SWING = "stowaway.swing"
 METRIC_SWING = "stowaway_swing_accel_magnitude"
 
 PADDING_SPANS_PER_S = 500.0
+# Every round's target is reached this long into the match at the latest (UC-103 BR-002).
+PADDING_WINDOW_S = 100.0
 # A stalled loop must not turn into one huge burst.
 PADDING_MAX_BACKLOG_S = 0.5
 SWING_PLAYERS = 4
@@ -92,10 +96,41 @@ class SpanRounds:
 
     name = "span-rounds"
 
-    def __init__(self, tracer: trace.Tracer | None = None) -> None:
+    def __init__(
+        self,
+        tracer: trace.Tracer | None = None,
+        counts: DeliveredSpans = DELIVERED,
+        flush: Callable[[], object] = flush_spans,
+        on_count: Callable[[str, int], None] = stowaway_metrics.set_trace_spans_delivered,
+    ) -> None:
         self._tracer = tracer or trace.get_tracer("stowaway")
+        self._counts = counts
+        self._flush = flush
+        self._on_count = on_count
 
     async def run(self, run: Run) -> str:
+        trace_id = trace.get_current_span(run.match.context).get_span_context().trace_id
+        self._counts.watch(trace_id)
+        reason = await self._pad(run)
+        await self._record_count(run, trace_id)
+        return reason
+
+    async def _record_count(self, run: Run, trace_id: int) -> None:
+        """FR-246, UC-103 BR-003: stowaway's delivered count of the match trace, after a flush."""
+        if not self._counts.is_watching(trace_id):
+            return
+        try:
+            await asyncio.to_thread(self._flush)
+        except Exception as e:
+            logger.warning("stowaway: span flush before the delivered count failed: %s", e)
+        delivered = self._counts.take(trace_id)
+        if delivered is None:
+            return
+        record_span_count(self._tracer, run.match.context, run.match.game_id, delivered, {SYNTHETIC_ATTR: True})
+        self._on_count(run.match.game_id, delivered)
+        logger.info("stowaway: game %s, %d padding spans delivered", run.match.game_id, delivered)
+
+    async def _pad(self, run: Run) -> str:
         settings = run.current()
         target = settings.span_target
         attributes = _match_attributes(run, settings)
@@ -115,7 +150,7 @@ class SpanRounds:
                     reason = stop
                     break
                 now = run.clock()
-                rate = PADDING_SPANS_PER_S * run.current().intensity
+                rate = padding_rate(run.current().intensity, target)
                 backlog = min(backlog + (now - last) * rate, rate * PADDING_MAX_BACKLOG_S)
                 last = now
                 batch = min(int(backlog), target - emitted)
@@ -134,6 +169,11 @@ class SpanRounds:
             padding.set_attribute("stowaway.stop_reason", reason)
             padding.end()
         return reason
+
+
+def padding_rate(intensity: float, target: int) -> float:
+    """Spans per second: the intensity's rate, raised so the target is reached within the window."""
+    return max(PADDING_SPANS_PER_S * intensity, target / PADDING_WINDOW_S)
 
 
 def swing_value(t: float, slot: int) -> float:

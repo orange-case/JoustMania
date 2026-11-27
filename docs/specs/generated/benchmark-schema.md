@@ -27,6 +27,8 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | `stowaway.padding` | span | `CONSUMER` child of the match's `game_started` event span (§3.5) |  | UC-103 | stable |
 | `stowaway.padding.span` | span | child of `stowaway.padding`, the padding (§3.5) |  | UC-103 | stable |
 | `stowaway.swing` | span | `CONSUMER` child of the match's `game_started` event span (§3.5) |  | UC-102 | stable |
+| `orangecase.span_count` | span | child of the game root (game coordinator) and of the `game_started` event span (`stowaway`), after the producer's spans of the game were exported (§3.2, §3.5) |  | UC-103 | stable |
+| `game.player.sample` | span | one per processed motion sample, child of `game.player`, only with `telemetry.per_sample_spans` on; never sent to the agent (§3.2) |  | UC-103 | stable |
 | `orangecase.challenge.start` | span_event | game root, when a challenge flag becomes active in the match |  | all | stable |
 | `orangecase.challenge.end` | span_event | game root, when a challenge ends, switches or the match ends |  | all | stable |
 | `game.players` | span | child of the game root |  | UC-100, UC-101, UC-104 | stable |
@@ -48,6 +50,8 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 
 | Key | Kind | On | Type | Challenges | Status |
 |---|---|---|---|---|---|
+| `orangecase.span_count.delivered` | attribute | `orangecase.span_count`: the producer's spans of this trace its exporter sent successfully | int | UC-103 | stable |
+| `telemetry.per_sample_spans` | attribute | game root | bool | UC-103 | stable |
 | `orangecase.challenge.name` | attribute | `orangecase.challenge.start`, `orangecase.challenge.end` | string | all | stable |
 | `orangecase.challenge.end_reason` | attribute | `orangecase.challenge.end` (`flag_change`, `match_end`) | string | all | stable |
 | `game.id` | attribute | game root, every moment | string | all | stable |
@@ -77,6 +81,8 @@ One trace per game. The game root span (named after the mode, e.g. `Joust Free-f
 | Key | Kind | On | Type | Challenges | Status |
 |---|---|---|---|---|---|
 | `stowaway_swing_accel_magnitude` | metric | gauge, every 100 ms per synthetic player during a match (§3.5) | double (g) | UC-102 | stable |
+| `game_trace_spans_delivered` | metric | gauge `{game_id}`, the game coordinator's delivered count of a normally ended game (§3.2) | int | UC-103 | stable |
+| `stowaway_trace_spans_delivered` | metric | gauge `{game_id}`, `stowaway`'s delivered padding count of a match (§3.5) | int | UC-103 | stable |
 | `game_player_accel_magnitude` | metric | gauge, about every 100 ms per live player | double (g) | UC-102, UC-104 | stable |
 | `game_player_alive` | metric | gauge per player of a game, 1 alive, 0 after the death | int | UC-104 | stable |
 | `game_player_elimination_order` | metric | gauge per player, set at a death that takes the player out (1 = first out), removed shortly after the game | int | UC-104 | stable |

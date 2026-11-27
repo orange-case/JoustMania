@@ -2993,6 +2993,132 @@
       ],
       "title": "",
       "type": "state-timeline"
+    },
+    {
+      "type": "row",
+      "id": 38,
+      "title": "Span rounds (UC-103)",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 66
+      },
+      "panels": [
+        {
+          "type": "table",
+          "id": 39,
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 67
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "title": "Delivered Spans per Game",
+          "description": "UC-103 BR-003, FR-246: per normally ended game, the spans of its trace the game coordinator exported (game_trace_spans_delivered) and stowaway's padding (stowaway_trace_spans_delivered), each counted after a successful export, and their sum: the reference a backend's span count is compared against. The last 20 games per producer.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "decimals": 0,
+              "unit": "none",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "cellHeight": "sm",
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "game_id",
+                "desc": true
+              }
+            ],
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (game_id) (last_over_time(game_trace_spans_delivered[$__range]))",
+              "refId": "A",
+              "format": "table",
+              "instant": true,
+              "range": false
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (game_id) (last_over_time(stowaway_trace_spans_delivered[$__range]))",
+              "refId": "B",
+              "format": "table",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "calculateField",
+              "options": {
+                "mode": "reduceRow",
+                "reduce": {
+                  "include": [
+                    "Value #A",
+                    "Value #B"
+                  ],
+                  "reducer": "sum"
+                },
+                "alias": "Delivered (sum)",
+                "replaceFields": false
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "game_id": 0,
+                  "Value #A": 1,
+                  "Value #B": 2,
+                  "Delivered (sum)": 3
+                },
+                "renameByName": {
+                  "Value #A": "Game coordinator",
+                  "Value #B": "stowaway padding"
+                }
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "refresh": "5s",

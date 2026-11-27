@@ -27,6 +27,7 @@ from test_collector_gateway_overlay import GATEWAY_PIPELINES, OVERLAY_FILE, _mer
 
 AGENT_FILTER = "filter/synthetic"
 IN_CASE_FILTER = "filter/synthetic_in_case"
+PER_SAMPLE_FILTER = "filter/agent_per_sample"
 SWITCH = "ORANGECASE_SYNTHETIC_IN_CASE"
 AGENT_EXPORTER = "otlp_http/agent"
 IN_CASE_EXPORTERS = {"otlp/jaeger", "prometheus_remote_write", "span_metrics"}
@@ -150,13 +151,14 @@ def test_gateway_pipelines_always_carry_synthetic_telemetry(merged, pipeline):
 @pytest.mark.parametrize("signal", ["traces", "metrics"])
 def test_unmarked_telemetry_is_routed_as_before_the_split(collector, signal):
     """The agent twin runs the same processors as the storage pipeline, only the synthetic
-    filter differs, so unmarked data reaches the agent and the backends unchanged; together
+    filter (and the agent's per-sample span drop, UC-103 BR-005) differs, so unmarked data
+    reaches the agent and the backends unchanged; together
     they export to the same exporters the single pipeline did before #2577."""
     pipelines = collector["service"]["pipelines"]
     storage, agent = pipelines[signal], pipelines[f"{signal}/agent"]
     assert storage["receivers"] == agent["receivers"] == ["otlp"]
     assert [p for p in storage["processors"] if p != IN_CASE_FILTER] == [
-        p for p in agent["processors"] if p != AGENT_FILTER
+        p for p in agent["processors"] if p not in (AGENT_FILTER, PER_SAMPLE_FILTER)
     ]
     before = {
         "traces": ["otlp/jaeger", AGENT_EXPORTER, "debug"],

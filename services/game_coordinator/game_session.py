@@ -38,6 +38,7 @@ from lib.challenge_flags import close_match, open_match
 from lib.feature_flags import eval_game_kind, set_game_session_kind_context
 from lib.moments import MOMENT_SHAPE_ATTR, emit_agent_event, read_moment_shape
 from lib.otel_metrics import get_export_interval_ms
+from lib.span_count import DELIVERED, flush_spans, record_span_count
 from lib.telemetry import get_tracer
 from lib.types import NO_GAME_IN_PROGRESS, get_game_display_name
 from proto import game_coordinator_pb2
@@ -45,6 +46,7 @@ from services.game_coordinator import metrics
 from services.game_coordinator.event_bus import EventBus
 from services.game_coordinator.flag_readiness import SpanRecord, await_flag_providers_ready
 from services.game_coordinator.game_factory import GameFactory
+from services.game_coordinator.games.sample_spans import PER_SAMPLE_SPANS_ATTR, read_per_sample_spans
 from services.game_coordinator.grpc_clients import GrpcClientManager
 
 logger = logging.getLogger(__name__)
@@ -503,6 +505,10 @@ class GameSession:
             # the game, after the admission wait (a provider still not READY at the deadline gives span_event, A1).
             moment_shape = read_moment_shape()
             game_span.set_attribute(MOMENT_SHAPE_ATTR, moment_shape)
+            per_sample_spans = read_per_sample_spans()
+            game_span.set_attribute(PER_SAMPLE_SPANS_ATTR, per_sample_spans)
+            # FR-246: count this trace's exported spans from the root on.
+            DELIVERED.watch(game_span.get_span_context().trace_id)
             # FR-255: challenge flag changes dedupe per match; its challenges end on the root at the end.
             challenge_match = open_match(game_span)
 
@@ -564,6 +570,7 @@ class GameSession:
                 game.game_kind = self.game_kind
                 game.audio_health_client = self.clients.audio_health
                 game.moment_shape = moment_shape
+                game.per_sample_spans = per_sample_spans
                 # Thread experiment attribution onto the game so its in-loop
                 # set_game_transaction_context carries it for flag evaluation.
                 game.experiment_id = self.experiment_id
@@ -696,6 +703,28 @@ class GameSession:
                 # Cleanup channels
                 await self.clients.close()
                 logger.info(f"Closed gRPC channels for game {self.game_id}")
+
+        # The root has ended: only a normally ended game has a delivered count (UC-103 A1).
+        if session_outcome is None and completed_game_outcome(game) != OUTCOME_FORCE_ENDED:
+            await self._record_span_count(game_span)
+        else:
+            DELIVERED.take(game_span.get_span_context().trace_id)
+
+    async def _record_span_count(self, game_span: trace.Span) -> None:
+        """FR-246, UC-103 BR-003: the coordinator's delivered span count of the game's trace."""
+        trace_id = game_span.get_span_context().trace_id
+        if not DELIVERED.is_watching(trace_id):
+            return
+        try:
+            await asyncio.to_thread(flush_spans)
+        except Exception as e:
+            logger.warning(f"Span flush before the delivered count of game {self.game_id} failed: {e}")
+        delivered = DELIVERED.take(trace_id)
+        if delivered is None:
+            return
+        record_span_count(tracer, game_span, self.game_id, delivered)
+        metrics.set_trace_spans_delivered(self.game_id, delivered)
+        logger.info(f"Game {self.game_id}: {delivered} spans of its trace delivered")
 
     def _zero_lifecycle_gauges(self) -> None:
         """Set this game's game_active and game_active_players series to 0."""

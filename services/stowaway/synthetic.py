@@ -13,6 +13,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanProcessor
 
 from lib.otel_resource import get_otel_resource
+from lib.span_count import CountingSpanExporter
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def init_providers(
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
         span_processor = BatchSpanProcessor(
-            OTLPSpanExporter(endpoint=target, insecure=not target.startswith("https://")),
+            CountingSpanExporter(OTLPSpanExporter(endpoint=target, insecure=not target.startswith("https://"))),
             max_queue_size=SPAN_QUEUE,
             max_export_batch_size=SPAN_BATCH,
             schedule_delay_millis=SPAN_FLUSH_MS,
