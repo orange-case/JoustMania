@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from lib import setting_ladders
-from lib.setting_ladders import AGENT_POLICY_LEVELS, AUTOMATIC, SENSITIVITY_LADDER, VOLUME_LADDER
+from lib.setting_ladders import AGENT_POLICY_LEVELS, AUTOMATIC, SENSITIVITY_LADDER, TIME_LIMIT_OPTION, VOLUME_LADDER
 from services.operator_pad.screens import (
     BAR_EMPTY,
     BAR_FULL,
@@ -124,6 +124,10 @@ def page_rows(page: int, status, ctx: PageContext, version: int) -> list[tuple[s
         return [
             (label("FORCE ALL", "FORCE"), UNKNOWN if unknown else ("ON" if status.force_all_start else "OFF")),
             ("LOW", _low_battery_text(status)),
+            (
+                label("NS TIME", "TIME"),
+                value_text(TIME_LIMIT_OPTION, None if unknown else _time_limit(status), version),
+            ),
         ]
     if name == "AGENT":
         agent = agent_text(status)
@@ -146,6 +150,12 @@ def page_rows(page: int, status, ctx: PageContext, version: int) -> list[tuple[s
         (label("EFFORT", "EFF"), _row_value(setting_ladders.EFFORT_OPTION, status, version)),
         ("BRIEF", _row_value(setting_ladders.BRIEF_OPTION, status, version)),
     ]
+
+
+def _time_limit(status) -> str | None:
+    """START row 3: the variant in force; an older menu leaves it empty, so `?`."""
+    value = getattr(status, "nonstop_time_limit", "")
+    return value if value in setting_ladders.TIME_LIMIT_LADDER else None
 
 
 def _low_battery_text(status) -> str:

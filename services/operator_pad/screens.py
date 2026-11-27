@@ -73,6 +73,14 @@ SHORT_FORMS: dict[str, dict[str, str]] = {
     "decision.backend": {"rules": "RULES", "claude": "CLAUDE", "jev": "JEV"},
     "game_instructions": {"on": "ON", "off": "OFF"},
     "force_all_start": {"on": "ON", "off": "OFF"},
+    setting_ladders.TIME_LIMIT_OPTION: {
+        "one_min": "1 MIN",
+        "two_min": "2 MIN",
+        "three_min": "3 MIN",
+        "four_min": "4 MIN",
+        "five_min": "5 MIN",
+        "unlimited": "NO LIMIT",
+    },
     "agent_state": {"off": "OFF", "watch": "WATCH", "act": "ACT"},
     setting_ladders.GOAL_OPTION: {
         "endurance_focused": "ENDURANCE",
@@ -105,6 +113,7 @@ NOW_NEW_FORMS: dict[str, dict[str, str]] = {
         "mixed": "MIXED",
     },
     setting_ladders.BRIEF_OPTION: {"unkillable": "UNKILL", "protect_weakest": "PROTEC"},
+    setting_ladders.TIME_LIMIT_OPTION: {"unlimited": "NO LIM"},
 }
 
 # BR-006 mode table: the full name (`pretty_name` in capitals without a leading `JOUST `, at most 14
@@ -145,6 +154,7 @@ SETTING_LABELS = {
     "game_instructions": "INSTRUCTIONS",
     "audio_volume.master": "VOLUME",
     "force_all_start": "FORCE ALL",
+    setting_ladders.TIME_LIMIT_OPTION: "NS TIME",
     "agent_state": "AGENT",
     setting_ladders.GOAL_OPTION: "GOAL",
     setting_ladders.RATE_OPTION: "RATE",

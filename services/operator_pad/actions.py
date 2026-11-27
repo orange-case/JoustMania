@@ -466,6 +466,10 @@ class Actions:
                 await self._cues.limit(steps > 0)  # clamped at the end: nothing to send
                 return action, AT_LIMIT
             return action, await self._level_step(steps, plan.now, plan.raises, gesture.confirmed)
+        if option == setting_ladders.TIME_LIMIT_OPTION:
+            plan = page_keys.edit_plan(spec, press_status, steps)
+            if plan.refused:
+                return await self._refuse(action)  # BR-012: unknown NOW, or a menu without the option
         if option in setting_ladders.WRAPPING:
             # UC-016 BR-007: a whole turn of the wheel sends nothing; the menu's `ok` no-op stays the
             # backstop for a start the pad cannot read.
@@ -514,7 +518,7 @@ class Actions:
         row = spec.option in setting_ladders.AGENT_ROW_OPTIONS
         if level and RESET_FROM not in pad_commands(status):
             return await self._refuse(RESET_COMMAND)  # BR-014: the base must be checked
-        if row and page_keys.reset_command(spec.option) not in pad_commands(status):
+        if spec.option in page_keys.GATED_OPTIONS and page_keys.reset_command(spec.option) not in pad_commands(status):
             return await self._refuse(RESET_COMMAND)
         if (level or row or spec.edit == BACKEND) and press_status is None:
             return await self._refuse(RESET_COMMAND)  # BR-014: the raise is judged from the press read

@@ -6,7 +6,7 @@ steps so far. It computes the value the release would commit from the status rea
 
 - the label once, at the first step of the hold;
 - the value `operator_pad.preview_debounce_ms` after the last step, never before the label has
-  ended, in the audio clip group `pad_preview` (a new value stops the previous clip);
+  ended, in the voice group `menu_voice` (a new value replaces the previous clip, UC-016 BR-005);
 - no repeat of the value last spoken; a step that pushes past the end gives the limit word
   (paced by the cue player, BR-009);
 - silence with no status or a value the status does not tell (never a guess, BR-013);
@@ -42,15 +42,14 @@ from lib.voice_prompts import (
     NUM_TEAMS_VOICES,
     SENSITIVITY_VOICES,
     SHIELD_ACTIVATION_VOICES,
+    VOICE_GROUP,
 )
 from proto import menu_pb2
 from services.operator_pad.config import PadConfig
-from services.operator_pad.cues import ANNOUNCE_GROUP, CuePlayer
+from services.operator_pad.cues import CuePlayer
 
 logger = logging.getLogger(__name__)
 
-# The audio clip group of the preview (PlaySoundRequest.group / StopSoundRequest.group, #2107).
-PREVIEW_GROUP = "pad_preview"
 # The options whose preview also shows on the lobby LEDs (menu `preview_setting`, BR-017, BR-018).
 MODE_OPTION = "current_game"
 SHIELD_OPTION = setting_ladders.SHIELD_OPTION
@@ -184,7 +183,9 @@ class Previewer:
             self._leds.ended = True  # pulses still queued are dropped; one already sent is not cancelled
         leds = self._leds if self._restore_wanted(commit_steps) else None
         self._drop_hold()
-        self._stop(PREVIEW_GROUP)
+        if commit_steps == 0:
+            # A commit's voice line from the menu replaces the clip; a stop sent then could cut that line.
+            self._stop(VOICE_GROUP)
         if leds is not None:
             # After every pulse of the hold: decided on the mode the last one actually sent.
             self._queue_pulse(lambda: self._restore(leds))
@@ -251,7 +252,7 @@ class Previewer:
     def _start_hold(self, option: str, status, lobby_only: bool) -> None:
         # A tap announcement still playing stops: the preview never talks over it (BR-017, BR-011).
         self._cues.cancel_announcement()
-        self._stop(ANNOUNCE_GROUP)
+        self._stop(VOICE_GROUP)
         if status is None:
             self._silent = True  # no status at the press: silent, never a guess
             return
@@ -283,7 +284,7 @@ class Previewer:
         started = self._clock()
         if self._quiet():
             return  # UC-016 BR-005: the setting screen names the setting
-        seconds = await self._cues.voice(label, PREVIEW_GROUP)
+        seconds = await self._cues.voice(label)
         self._label_done_at = started + seconds
 
     async def _speak_after_debounce(self) -> None:
@@ -308,7 +309,7 @@ class Previewer:
         self._last_spoken = pending.value
         if self._quiet():
             return  # UC-016 BR-005: the setting screen shows the value; the LED pulse above still ran
-        await self._cues.voice(pending.sound, PREVIEW_GROUP)
+        await self._cues.voice(pending.sound)
 
     def _show_pending_mode(self) -> None:
         pending = self._pending

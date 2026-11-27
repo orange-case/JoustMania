@@ -131,6 +131,9 @@ message GetMenuStatusResponse {
   // Connected controllers (any state) whose battery is 20 % or less on the battery_to_pct scale. Absent = a menu
   // older than the field (unknown); 0 is a real count. UC-002 A8, BR-010; UC-016 BR-006.
   optional int32 low_battery_count = 30;
+  // game/nonstop.time_limit_seconds as its declared variant name (unlimited, one_min .. five_min); empty when
+  // unresolvable or a value with no declared variant. UC-016 BR-006, BR-012, #2940.
+  string nonstop_time_limit = 31;
 }
 
 // UC-001 BR-011, UC-002 A9, BR-011 (services.md §3.2)

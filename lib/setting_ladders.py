@@ -88,11 +88,16 @@ AGENT_ROW_OPTIONS = frozenset(AGENT_ROW_LADDERS)
 # UC-016 BR-014 (D3): a step up these ladders raises what the agent may do or spend.
 RAISE_LADDER_OPTIONS: frozenset[str] = frozenset({RATE_OPTION, GROUP_OPTION, RETRO_BACKEND_OPTION, EFFORT_OPTION})
 
+# UC-016 BR-012 (#2940): the START page's Non-Stop time limit; up = longer, so `unlimited` (0) comes last.
+TIME_LIMIT_OPTION = "nonstop.time_limit_seconds"
+TIME_LIMIT_LADDER: list[str] = ["one_min", "two_min", "three_min", "four_min", "five_min", "unlimited"]
+
 # Options of the menu's `step_setting` whose ladder is a flag's variants (`step_variant`), and the agent rows.
 FLAG_LADDERS: dict[str, list[str]] = {
     "sensitivity": SENSITIVITY_LADDER,
     "num_teams": TEAMS_LADDER,
     "force_all_start": ON_OFF_LADDER,
+    TIME_LIMIT_OPTION: TIME_LIMIT_LADDER,
     "game_instructions": ON_OFF_LADDER,
     "audio_volume.master": VOLUME_LADDER,
     **AGENT_ROW_LADDERS,
@@ -227,6 +232,7 @@ class _Status(Protocol):
     num_teams: int
     instructions: bool
     force_all_start: bool
+    nonstop_time_limit: str
     audio_volume_master: str
     agent_level: str
     agent_enabled_state: str
@@ -284,6 +290,9 @@ def _flag_variant(option: str, status: _Status) -> str | None:
         return "on" if status.force_all_start else "off"
     if option == "audio_volume.master":
         return status.audio_volume_master or None
+    if option == TIME_LIMIT_OPTION:
+        value = getattr(status, "nonstop_time_limit", "")  # absent from an older menu: unknown
+        return value if value in TIME_LIMIT_LADDER else None
     return None
 
 
