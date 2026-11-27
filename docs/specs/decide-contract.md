@@ -274,7 +274,7 @@ model-free summary such as
 `jev: adjust_player_sensitivity (gate p_yes=0.70; adjust_player_sensitivity p=0.38 among interventions) on MOCK0003 (p=0.89)`.
 
 API keys are read from the environment **once at startup** and never appear in
-flags or spans (`services/agent/decide_backends.go:40-54`; `services/agent/decision/decide_registry.go:16-18`).
+flags or spans (`services/agent/decide_backends.go:decideBackendEnv`; `services/agent/decision/decide_registry.go:DecideBackendFactory`).
 Changing a key needs an agent restart.
 
 ### 3.1 The Jev gate
@@ -616,13 +616,13 @@ the kill switch `enabled` and the shared LLM budget (NFR-011).
 | `decision.min_interval_ms` | 3000 ms (1500 / 10000; 0 disables) | per game, from admission (the previous call's start) | `services/agent/flags/decision_backend.go:DefaultDecisionMinIntervalMs`, `services/agent/decision/decide_hook.go:gateRemoteDecide` |
 | `decision.min_gap_after_answer_ms` | 1000 ms (off 0 / slow 3000) | per game, from when the previous call returned (an answer, a timeout or a failure), before the live flag re-read and any action write; set while the call still holds the in-flight slot, and a later discard does not move it. A call is admitted only when both this gap and `decision.min_interval_ms` have passed | `services/agent/flags/decision_backend.go:DefaultDecisionMinGapAfterAnswerMs`, `services/agent/decision/decide_hook.go:noteDecideEnded` |
 | `decision.max_state_age_ms` | 10000 ms (off 0 / tight 6000) | per answer that would act, read live at landing: older fire-time state → `discarded/stale`, detail `state_too_old` (§4.4). The default sits above the longest timeout (`patient` 8000 ms) so it only drops answers built on a state that was already stale at fire time | `services/agent/flags/decision_backend.go:DefaultDecisionMaxStateAgeMs`, `services/agent/decision/decide_hook.go:stateTooOld` |
-| `llm.max_requests_per_minute` | 6 (conservative 3 / aggressive 12 / `stage` 30 / operator-only `interactive` 120 and `frenzy` 600 for a cheap backend such as Jev: at the shipped cadence the per-game limits of NFR-012 bind first) | **global**, shared by in-game decisions, the retro and the proposer | `services/agent/flags/flags.go:43`; `services/agent/decision/llmbudget.go:ceilBudget`, `services/agent/decision/llmbudget.go:llmBudget` |
+| `llm.max_requests_per_minute` | 6 (conservative 3 / aggressive 12 / `stage` 30 / operator-only `interactive` 120 and `frenzy` 600 for a cheap backend such as Jev: at the shipped cadence the per-game limits of NFR-012 bind first) | **global**, shared by in-game decisions, the retro and the proposer | `services/agent/flags/flags.go:keyLLMMaxRequestsPerMin`; `services/agent/decision/llmbudget.go:ceilBudget`, `services/agent/decision/llmbudget.go:llmBudget` |
 | `AGENT_LLM_MAX_REQUESTS_PER_MINUTE` (env) | unset | read once at startup; a positive value is a ceiling: the cap is `min(env, flag)`, so a flag can only tighten it (C-034) | `services/agent/tuning.go:llmBudgetCeiling`, `services/agent/decision/llmbudget.go:ceilBudget` |
 | `llm.eligible_game_kinds` | `real` | which game kinds may call a remote backend; read by in-game decisions, the retro and the proposer | `services/agent/flags/flags.go:llmGate` |
 | `policy.max_interventions_per_minute` | 2, weighted (soft 0.5, medium 1, hard 2, unknown 1); admitted in rank order with a 1.0 reserve against nudges (§4.5); talk stage `aggressive` 4; operator-only `lively` 8 and `frenzy` 20, still under the coordinator backstop (`frenzy` with up to 3 games at the default 60; select its `generous` 120 for more) and the per-player shield caps | per game | `decision/ratelimit.go`, `decision/budget.go` |
 | `policy.coordinator_backstop_per_minute` | 60 | global, enforced in the game coordinator | `services/game_coordinator/interventions.py:DEFAULT_COORDINATOR_BACKSTOP_BUDGET`, `_refresh_budget` |
-| Rules engine cadence | evaluate ≤ 1/s, ≤ 2 decisions per evaluation | per game | `services/agent/decision/rules.go:15-26` |
-| Shared HTTP client backstop | 30 s | process | `services/agent/decide_backends.go:56-62` |
+| Rules engine cadence | evaluate ≤ 1/s, ≤ 2 decisions per evaluation | per game | `services/agent/decision/rules.go:evalInterval`, `services/agent/decision/rules.go:maxDecisionsPerEval` |
+| Shared HTTP client backstop | 30 s | process | `services/agent/decide_backends.go:decideHTTPTimeout` |
 
 **Budget fit at the stage baseline.** The stage keeps `decision.min_interval_ms` at its 3000 ms default
 and runs Claude with the `patient` timeout. One game asks at most once per `max(min_interval, call latency + gap)`,
@@ -654,9 +654,9 @@ throttled `agent.disabled` span (`services/agent/decision/decision.go:OnEvaluate
 ## 10. Live backend switch
 
 `decision.*` flags are evaluated on every cycle, never cached
-(`services/agent/flags/decision_backend.go:10-23`). The registry factory runs per remote call with
+(`services/agent/flags/decision_backend.go:Flags.DecisionBackend`). The registry factory runs per remote call with
 that cycle's snapshot, so model, base URL and timeout changes apply to the next call
-(`services/agent/decision/decide_registry.go:14-20`). Unknown names are kept verbatim on the span;
+(`services/agent/decision/decide_registry.go:DecideRegistry.Resolve`). Unknown names are kept verbatim on the span;
 an empty value means `rules`.
 
 `scripts/agent-backend.sh` sets stack overlays on the flag service (writer `stage`,
