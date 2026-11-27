@@ -412,23 +412,23 @@ class TempoMixin:
         self._audio_retry_backoff = AUDIO_TEMPO_RETRY_MIN_SECONDS
         self._audio_synced = True
         if response is not None and not response.success:
-            track = self.music_track_id
-            self.music_track_id = None
-            outage = after_outage or self._audio_down
-            if outage or self._music_refusal_restarts < MUSIC_REFUSAL_RESTARTS_MAX:
-                if not outage:
-                    self._music_refusal_restarts += 1
-                self._music_lost = self._music_wanted
-                logger.warning(
-                    f"Audio refused tempo change for track {track} ({response.error}); starting the game music again"
-                )
-            else:
-                logger.warning(
-                    f"Audio refused tempo change for track {track} ({response.error}); "
-                    "no further tempo changes are sent for it"
-                )
+            self._on_tempo_refused(response.error, outage=after_outage or self._audio_down)
             return "refused"
         return "accepted"
+
+    def _on_tempo_refused(self, error: str, *, outage: bool) -> None:
+        """Drop the refused track; restart the music unless refusals outside an outage hit the cap."""
+        track = self.music_track_id
+        self.music_track_id = None
+        if outage or self._music_refusal_restarts < MUSIC_REFUSAL_RESTARTS_MAX:
+            if not outage:
+                self._music_refusal_restarts += 1
+            self._music_lost = self._music_wanted
+            logger.warning(f"Audio refused tempo change for track {track} ({error}); starting the game music again")
+        else:
+            logger.warning(
+                f"Audio refused tempo change for track {track} ({error}); no further tempo changes are sent for it"
+            )
 
     async def _apply_ramp_tempo(self, target_tempo: float) -> None:
         """Apply one interpolated step of an ``ease`` ramp_tempo curve (#1117).

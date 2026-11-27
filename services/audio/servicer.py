@@ -904,8 +904,8 @@ class AudioServiceServicer(audio_pb2_grpc.AudioServiceServicer):
         self.in_lobby = music_dir == "Menu"
         stops_before = self._music_stops
         await self._refresh_play_audio()
-        if self._music_stops != stops_before:
-            # Opening the hardware can take seconds; a stop sent after this request wins.
+        # Opening the hardware can take seconds; a StopMusic handled during the await wins.
+        if self._music_stops != stops_before:  # NOSONAR
             span.set_attribute("audio.stopped_while_starting", True)
             return audio_pb2.PlayMusicResponse(track_id="", success=False, error="stopped while starting")
         self._refresh_operator_gain()
