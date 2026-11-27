@@ -120,6 +120,10 @@ class NonstopPlayer(Player):
     disconnected: bool = False
 
 
+# Default of the nonstop.time_limit_seconds flag; also applies to starts without a NonstopConfig (UC-026 BR-006).
+DEFAULT_TIME_LIMIT_SECONDS = 180
+
+
 class NonstopJoustGame(BaseGameMode):
     """
     Nonstop Joust game mode - endless respawn with scoring.
