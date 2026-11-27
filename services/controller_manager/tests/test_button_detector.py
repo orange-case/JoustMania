@@ -329,6 +329,19 @@ class TestButtonTransitionDetection:
         assert (connect.battery, connect.battery_reported) == (0, True)
         assert disconnect.battery_reported is False
 
+    @pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+    def test_a_battery_event_carries_a_reported_level_and_no_button(self):
+        publisher = autospec_publisher()
+        detector = ButtonDetector(publisher)
+        detector._subscribers = {"sub1": autospec_queue()}
+
+        detector.publish_battery_event("S", 0, name="Red")
+
+        event = publisher.publish_to_subscribers.call_args.args[1]
+        assert event.event_type == controller_manager_pb2.EVENT_BATTERY
+        assert (event.serial, event.battery, event.battery_reported, event.name) == ("S", 0, True, "Red")
+        assert not event.HasField("color")
+
     @patch("services.controller_manager.button_detector.metrics")
     def test_state_persists_after_transition(self, _mock_metrics):
         """Button state is updated after transition detection."""

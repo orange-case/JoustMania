@@ -104,6 +104,7 @@ enum ControllerEventType {
   EVENT_BUTTON = 0;      // Button press/release (default for backwards compatibility)
   EVENT_CONNECT = 1;     // Controller connected
   EVENT_DISCONNECT = 2;  // Controller disconnected
+  EVENT_BATTERY = 3;     // Battery level only, no button (UC-002 BR-010)
 }
 
 message ButtonEvent {

@@ -217,3 +217,40 @@ async def test_an_empty_battery_is_low_again_after_the_stream_reconnects(lobby):
     await events._dispatch_event(connect_event("a", 0, reported=True))
 
     assert low_battery_serials(menu.state_manager) == {"a"}
+
+
+def battery_event(serial: str, battery: int) -> controller_manager_pb2.ButtonEvent:
+    return controller_manager_pb2.ButtonEvent(
+        serial=serial,
+        battery=battery,
+        battery_reported=True,
+        event_type=controller_manager_pb2.EVENT_BATTERY,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+async def test_a_never_pressed_controller_warns_once_a_battery_event_reaches_the_threshold(lobby, monkeypatch):
+    menu, events = lobby
+    on_button = create_autospec(menu.on_button)
+    monkeypatch.setattr(menu, "on_button", on_button)
+    await events._dispatch_event(connect_event("a", 3, reported=True))
+    assert low_battery_serials(menu.state_manager) == set()
+
+    await events._dispatch_event(battery_event("a", 1))
+
+    assert low_battery_serials(menu.state_manager) == {"a"}
+    w, send = warner(menu.state_manager)
+    await w.tick()
+    assert [call.args for call in send.await_args_list] == [("a", LOW_BATTERY)]
+    on_button.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-002", flow="A8", br=["BR-010"])
+async def test_a_battery_event_for_a_controller_the_menu_does_not_hold_is_dropped(lobby):
+    menu, events = lobby
+
+    await events._dispatch_event(battery_event("stranger", 0))
+
+    assert menu.state_manager.battery_levels == {}
