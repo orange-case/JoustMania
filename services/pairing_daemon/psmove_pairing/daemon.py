@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import shutil
+import signal
 import time
 
 from opentelemetry import trace
@@ -152,8 +153,37 @@ class PairingDaemon:
             await asyncio.sleep(get_bt_monitor_interval())
 
     async def run(self) -> None:
-        """Main daemon loop with concurrent USB polling and Bluetooth monitoring."""
+        """Main daemon loop with concurrent USB polling and Bluetooth monitoring.
+
+        SIGTERM / SIGINT cancel it and it returns normally: as PID 1 the process has no default
+        SIGTERM action, so without a handler `docker stop` waits for SIGKILL (#2941).
+        """
         self.loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
+        stopping = False
+
+        def _stop(sig: signal.Signals) -> None:
+            nonlocal stopping
+            if not stopping:
+                stopping = True
+                logger.info(f"{sig.name} received; shutting down")
+                task.cancel()
+
+        # First, so a signal during the prerequisite checks or agent registration stops too
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            self.loop.add_signal_handler(sig, _stop, sig)
+        try:
+            await self._run()
+        except asyncio.CancelledError:
+            if not stopping:
+                raise
+            task.uncancel()
+            logger.info("PS Move Pairing Daemon stopped")
+        finally:
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                self.loop.remove_signal_handler(sig)
+
+    async def _run(self) -> None:
         logger.info("PS Move Pairing Daemon started")
         logger.info(f"  USB poll interval: {get_poll_interval()}s")
         logger.info(f"  Bluetooth monitor interval: {get_bt_monitor_interval()}s")

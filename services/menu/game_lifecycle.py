@@ -120,6 +120,16 @@ class GameLifecycleMixin:
         if self._lobby_restarting:
             await self.audio.play_sound(Sound.SFX_BEEP_LOUD)
 
+    async def _reject_start_before_bt_restart(self, serial: str, source: str, game_mode: Games | None) -> None:
+        """UC-001 BR-011: bluetoothd is about to drop every controller; the players ready up again after it."""
+        mode = game_mode if game_mode is not None else self.current_selection
+        logger.warning(f"Start from {serial} ({source}) refused: bluetoothd restarts now")
+        self.ready_handler.reset_game_start_flag()
+        await self.event_publisher.publish(
+            "game_start_rejected",
+            {"game_name": mode.name, "source": source, "reason": "bluetooth_restart"},
+        )
+
     async def _ready_start_game(self, serial: str) -> bool:
         """The lobby's ready auto start and READY trigger start (UC-010 step 4).
 
@@ -213,6 +223,9 @@ class GameLifecycleMixin:
         # A reset_menu recovery counts as live: between its cancel and its restore no task is live.
         if self._lifecycle_live() or self._recovery_running():
             await self._reject_start_while_active(serial, source, game_mode)
+            return False
+        if self.bt_restart_warner.start_held():
+            await self._reject_start_before_bt_restart(serial, source, game_mode)
             return False
 
         # Reset here, not in the task: a StartMenu can land before the task's first step.

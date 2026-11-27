@@ -198,6 +198,103 @@ class TestRun:
         daemon.usb_pairing.led_cue.close.assert_awaited_once()
 
 
+async def _run_until_signal(daemon, sig, when_started):
+    """Run daemon.run() with the loop's signal handlers captured, fire ``sig`` once ``when_started()``."""
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    handlers = {}
+    with (
+        patch.object(loop, "add_signal_handler", side_effect=lambda s, cb, *a: handlers.__setitem__(s, (cb, a))),
+        patch.object(loop, "remove_signal_handler", side_effect=lambda s: handlers.pop(s, None) is not None),
+    ):
+        task = asyncio.create_task(daemon.run())
+        for _ in range(200):
+            if sig in handlers and when_started():
+                break
+            await asyncio.sleep(0.01)
+        callback, args = handlers[sig]
+        callback(*args)
+        await asyncio.wait_for(task, timeout=2)
+    return handlers, task
+
+
+class TestSignalShutdown:
+    """#2941: the daemon is PID 1, which has no default SIGTERM action."""
+
+    @pytest.mark.parametrize("sig_name", ["SIGTERM", "SIGINT"])
+    @pytest.mark.uc("UC-001", flow="main", steps=[7], br=["BR-010"])
+    async def test_signal_stops_the_loops_and_returns(self, daemon, sig_name):
+        """A SIGTERM (docker stop) cancels both loops, ends the LED cues and run() returns normally."""
+        import asyncio
+        import signal
+
+        from psmove_pairing.usb_led import UsbLedCue
+
+        sig = getattr(signal, sig_name)
+        loops_running = asyncio.Event()
+
+        async def run_forever():
+            loops_running.set()
+            await asyncio.Event().wait()
+
+        daemon._usb_poll_loop = run_forever
+        daemon._bt_monitor_loop = run_forever
+        daemon.usb_pairing.led_cue = create_autospec(UsbLedCue, instance=True)
+
+        with (
+            patch.object(daemon, "validate_prerequisites", AsyncMock(return_value=True)),
+            patch("psmove_pairing.daemon.register_pairing_agent", AsyncMock()),
+        ):
+            handlers, task = await _run_until_signal(daemon, sig, loops_running.is_set)
+
+        daemon.usb_pairing.led_cue.close.assert_awaited_once()
+        assert handlers == {}, "the signal handlers are removed again"
+        assert task.cancelling() == 0
+
+    @pytest.mark.uc("UC-001", br=["BR-010"])
+    async def test_sigterm_during_boot_stops_before_the_loops(self, daemon):
+        """A SIGTERM while the pairing agent registers stops the daemon; the loops never start."""
+        import asyncio
+        import signal
+
+        registering = asyncio.Event()
+
+        async def slow_register():
+            registering.set()
+            await asyncio.Event().wait()
+
+        usb_loop = AsyncMock()
+        daemon._usb_poll_loop = usb_loop
+        with (
+            patch.object(daemon, "validate_prerequisites", AsyncMock(return_value=True)),
+            patch("psmove_pairing.daemon.register_pairing_agent", side_effect=slow_register),
+        ):
+            await _run_until_signal(daemon, signal.SIGTERM, registering.is_set)
+
+        usb_loop.assert_not_called()
+
+    async def test_cancel_without_a_signal_still_propagates(self, daemon):
+        """An outside cancel (no signal) is not swallowed."""
+        import asyncio
+
+        async def run_forever():
+            await asyncio.Event().wait()
+
+        daemon._usb_poll_loop = run_forever
+        daemon._bt_monitor_loop = run_forever
+        with (
+            patch.object(daemon, "validate_prerequisites", AsyncMock(return_value=True)),
+            patch("psmove_pairing.daemon.register_pairing_agent", AsyncMock()),
+            patch.object(daemon.usb_pairing.led_cue, "close", AsyncMock()),
+        ):
+            task = asyncio.create_task(daemon.run())
+            await asyncio.sleep(0.01)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+
 @pytest.mark.uc("UC-001", br=["BR-009"])
 def test_pairing_agent_answers_for_the_daemons_usb_pairings(daemon):
     from psmove_pairing.bluez_agent import agent
