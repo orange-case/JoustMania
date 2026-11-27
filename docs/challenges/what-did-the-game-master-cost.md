@@ -105,9 +105,10 @@ A model not in the table is reported as *unpriced*, never guessed: add its row f
   the claude chat spans carry the same value as `gen_ai.usage.cache_creation.input_tokens` during the transition
   (#2729), and older images only that name, so the script reads the old name only when the new one is absent, never
   both.
-- **Reasoning tokens:** the pricing page does not say how thinking is billed. TODO: confirm from a provider page
-  that reasoning (thinking) tokens bill as output tokens; until then the table assumes it, as the agent's
-  `output_tokens` include them.
+- **Reasoning tokens** bill as output tokens, the full thinking even when the response shows only a summary, and
+  `output_tokens` is the billed total that includes them (the *Pricing* section of
+  <https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost>, read 2026-11-27). So
+  `gen_ai.usage.reasoning.output_tokens` is a share of `output_tokens`, never priced on top.
 - **Long context:** the page charges no surcharge above 200K tokens for Sonnet 5.5 and Opus 5.5. It says nothing
   either way for Haiku 4.5. The agent's prompts are far below that.
 
@@ -124,7 +125,7 @@ the end of the last game's retro.
 | 3 | What did each of the challenge games cost? | Q3 per game | The metrics carry no game id: a backend that prices only from metrics cannot answer |
 | 4 | What did each decision cost, what did the interventions that changed the game cost, and what did the decisions cost that were held or blocked and had no effect? | Q4 decisions and subsets | *changed the game*: an `agent.decision` child with `decision.applied` true; *held*: event `gen_ai.evaluation.result` with `gen_ai.evaluation.score.label` = `fail` on the decide span; *blocked*: an `agent.decision` child with `decision.blocked` true. A decide span counts once per subset it falls into |
 | 5 | Are cache and reasoning tokens priced apart; is the price that of the answering model or the requested one; do refused, cut-off and failed calls count? | §4 rules | Answered by what the backend shows or documents. A refused or cut-off call keeps its billed tokens; a timeout or transport error has none (telemetry.md §4.2) |
-| 6 | Does the spend change at the switch, and does the backend show the switch next to the change? | Q1 before and after the switch time | The switch is on the decide spans as `decide.backend` and `gen_ai.request.model`. A span event at the moment of a flag change is #2572 (open); until it lands, record only whether the backend shows the step |
+| 6 | Does the spend change at the switch, and does the backend show the switch next to the change? | Q1 before and after the switch time | The switch is on the decide spans as `decide.backend` and `gen_ai.request.model`, and its time is the one noted at setup. The flag-change span events of #2572 (`orangecase.challenge.*`, FR-255) mark only `challenge.*` and `stowaway.*` flags, not `decision.backend` or its model keys, so record whether the backend shows the step and whether it ties it to the attribute change |
 
 ## 6. Checking an answer and the result format
 
@@ -151,8 +152,8 @@ Template, one row per backend (price table 2026-11-27):
 
 - **No external backend has been run yet.** The acceptance of #2718 asks for at least one, with the result recorded
   here. That needs the booth setup; until then this page has no result row.
-- **Question 6 on the trace** depends on #2572 (OpenFeature hook span event at a flag change).
-- **Reasoning token billing:** see the TODO in §4.
+- **Question 6 has no flag-change event for the decide backend switch** (see the question's note). Marking it would
+  need `decision.backend` treated as a challenge flag, or its own event; not decided.
 
 Stretch ideas from #2718, not part of UC-105 (BR-007), not implemented:
 
