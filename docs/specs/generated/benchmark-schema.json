@@ -1,0 +1,474 @@
+{
+  "schema": "orangecase-telemetry",
+  "version": "1.0.0",
+  "digest": "f4681c18c021dbfa5cae56cc9e2c19881fa7e24c31a2d2032a19ee0a20db8a9a",
+  "source": "docs/specs/telemetry.md#appendix-b-benchmark-schema",
+  "generated_by": "scripts/gen_specs.py (make specs); do not edit",
+  "owned_namespaces": [
+    "orangecase.*",
+    "challenge.*",
+    "moment.*"
+  ],
+  "entries": [
+    {
+      "key": "orangecase.schema_version",
+      "kind": "resource",
+      "on": "every OTLP signal, set by the collector",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "orangecase.synthetic",
+      "kind": "resource",
+      "on": "synthetic telemetry (stowaway); the collector keeps it from the agent",
+      "type": "bool",
+      "challenges": [
+        "all"
+      ],
+      "status": "planned",
+      "issue": 2576
+    },
+    {
+      "key": "service.name",
+      "kind": "resource",
+      "on": "every signal",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "service.namespace",
+      "kind": "resource",
+      "on": "every signal",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "service.instance.id",
+      "kind": "resource",
+      "on": "every signal",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "host.name",
+      "kind": "resource",
+      "on": "every signal",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "deployment.environment",
+      "kind": "resource",
+      "on": "every signal",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.players",
+      "kind": "span",
+      "on": "child of the game root",
+      "type": null,
+      "challenges": [
+        "UC-100",
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.player",
+      "kind": "span",
+      "on": "one per player, child of game.players",
+      "type": null,
+      "challenges": [
+        "UC-100",
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.death_warning",
+      "kind": "span",
+      "on": "child of game.player, shape span",
+      "type": null,
+      "challenges": [
+        "UC-100"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.player_death",
+      "kind": "span",
+      "on": "child of game.player, shape span",
+      "type": null,
+      "challenges": [
+        "UC-100",
+        "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.intervention",
+      "kind": "span",
+      "on": "child of game.player, shape span",
+      "type": null,
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "agent.decision",
+      "kind": "span",
+      "on": "agent trace",
+      "type": null,
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "agent.intervention.effect",
+      "kind": "span",
+      "on": "child of agent.decision",
+      "type": null,
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "flagservice.write",
+      "kind": "span",
+      "on": "flag service, one per write",
+      "type": null,
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "death_warning",
+      "kind": "span_event",
+      "on": "game.player in shape span_event; log event_name in shape log_event",
+      "type": null,
+      "challenges": [
+        "UC-100"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "player_death",
+      "kind": "span_event",
+      "on": "game.player in shape span_event; log event_name in shape log_event",
+      "type": null,
+      "challenges": [
+        "UC-100",
+        "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "intervention",
+      "kind": "span_event",
+      "on": "game.player in shape span_event; log event_name in shape log_event",
+      "type": null,
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "victory",
+      "kind": "span_event",
+      "on": "the winner's game.player",
+      "type": null,
+      "challenges": [
+        "UC-100"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "challenge.ground_truth",
+      "kind": "span_event",
+      "on": "game root, one per player at a normal end",
+      "type": null,
+      "challenges": [
+        "UC-100",
+        "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "challenge.intervention_ground_truth",
+      "kind": "span_event",
+      "on": "game root, one per applied intervention at a normal end",
+      "type": null,
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.id",
+      "kind": "attribute",
+      "on": "game root, every moment",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.kind",
+      "kind": "attribute",
+      "on": "game root, every moment",
+      "type": "string (real, shadow)",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.name",
+      "kind": "attribute",
+      "on": "game root",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.outcome",
+      "kind": "attribute",
+      "on": "game root, at game end",
+      "type": "string",
+      "challenges": [
+        "UC-100"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game.winner",
+      "kind": "attribute",
+      "on": "game root, outcome winner",
+      "type": "string (serial)",
+      "challenges": [
+        "UC-100"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "player.count",
+      "kind": "attribute",
+      "on": "game root",
+      "type": "int",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "telemetry.moment_shape",
+      "kind": "attribute",
+      "on": "game root",
+      "type": "string (span_event, span, log_event)",
+      "challenges": [
+        "UC-100",
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "moment.id",
+      "kind": "attribute",
+      "on": "every moment; challenge.intervention_ground_truth",
+      "type": "string (<game.id>/<player.serial>/<n>)",
+      "challenges": [
+        "UC-100",
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "player.serial",
+      "kind": "attribute",
+      "on": "game.player, every moment, ground truth",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "player.name",
+      "kind": "attribute",
+      "on": "game.player, every moment, ground truth (once known)",
+      "type": "string",
+      "challenges": [
+        "all"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "death.reason",
+      "kind": "attribute",
+      "on": "player_death",
+      "type": "string (motion, agent_intervention)",
+      "challenges": [
+        "UC-100",
+        "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "accel_magnitude",
+      "kind": "attribute",
+      "on": "death_warning, player_death",
+      "type": "double (g)",
+      "challenges": [
+        "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "shield.activation",
+      "kind": "attribute",
+      "on": "shield_feedback on game.player",
+      "type": "string (trigger)",
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "challenge.warning_times_ns",
+      "kind": "attribute",
+      "on": "challenge.ground_truth",
+      "type": "int[] (epoch ns)",
+      "challenges": [
+        "UC-100"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "challenge.death_times_ns",
+      "kind": "attribute",
+      "on": "challenge.ground_truth",
+      "type": "int[] (epoch ns)",
+      "challenges": [
+        "UC-100",
+        "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "challenge.applied_at_ns",
+      "kind": "attribute",
+      "on": "challenge.intervention_ground_truth",
+      "type": "int (epoch ns)",
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "challenge.first_death_at_ns",
+      "kind": "attribute",
+      "on": "challenge.intervention_ground_truth",
+      "type": "int (epoch ns)",
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "intervention.type",
+      "kind": "attribute",
+      "on": "intervention, challenge.intervention_ground_truth, agent.intervention.effect",
+      "type": "string",
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "intervention.id",
+      "kind": "attribute",
+      "on": "intervention, challenge.intervention_ground_truth, agent.intervention.effect",
+      "type": "string",
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "decision.intervention_id",
+      "kind": "attribute",
+      "on": "agent.decision, flagservice.write",
+      "type": "string",
+      "challenges": [
+        "UC-101"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "orangecase.audience",
+      "kind": "attribute",
+      "on": "log records meant for the agent only; never exported to a backend",
+      "type": "string (agent)",
+      "challenges": [
+        "none"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game_player_accel_magnitude",
+      "kind": "metric",
+      "on": "gauge, about every 100 ms per live player",
+      "type": "double (g)",
+      "challenges": [
+        "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "serial",
+      "kind": "label",
+      "on": "game_player_accel_magnitude",
+      "type": "string",
+      "challenges": [
+        "UC-102"
+      ],
+      "status": "stable"
+    },
+    {
+      "key": "game_id",
+      "kind": "label",
+      "on": "game_player_accel_magnitude",
+      "type": "string",
+      "challenges": [
+        "UC-102"
+      ],
+      "status": "stable"
+    }
+  ]
+}
