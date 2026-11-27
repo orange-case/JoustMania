@@ -9,7 +9,9 @@ stream may drain them; an observer frame in between must leave them for it.
 
 import asyncio
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import create_autospec, patch
 
 import pytest
@@ -158,12 +160,16 @@ def test_stream_rate(requested, game_stream, override, expected):
 
 
 async def _frame_intervals(servicer, config, frames: int = 6) -> list[float]:
-    """Run StreamGameplayData for a few frames and return the gaps between its sleeps."""
+    """Run StreamGameplayData for a few frames on a fake clock and return its last sleeps."""
     real_sleep = asyncio.sleep
     sleeps: list[float] = []
+    # Only sleeps advance the clock, so each sleep is exactly the frame interval (#2963).
+    clock = SimpleNamespace(now=1000.0)
+    fake_time = SimpleNamespace(monotonic=lambda: clock.now, time=time.time)
 
     async def fake_sleep(delay):
         sleeps.append(delay)
+        clock.now += delay
         await real_sleep(0)  # let the stream's config reader run
 
     async def requests():
@@ -172,13 +178,15 @@ async def _frame_intervals(servicer, config, frames: int = 6) -> list[float]:
 
     context = autospec_servicer_context()
     context.cancelled.return_value = False
-    with patch("services.controller_manager.servicer.asyncio.sleep", side_effect=fake_sleep):
+    with (
+        patch("services.controller_manager.servicer.asyncio.sleep", side_effect=fake_sleep),
+        patch("services.controller_manager.servicer.time", fake_time),
+    ):
         stream = servicer.StreamGameplayData(requests(), context)
         for _ in range(frames):
             await stream.__anext__()
         await stream.aclose()
-    # Sleeps follow a fixed schedule, so successive sleep times differ by one interval.
-    return [b - a for a, b in zip(sleeps[-3:], sleeps[-2:], strict=False)]
+    return sleeps[-2:]
 
 
 @pytest.mark.asyncio
@@ -200,5 +208,5 @@ async def test_stream_loop_applies_the_per_stream_rate(rig):
         observer = await _frame_intervals(servicer, observer_config)
         game = await _frame_intervals(servicer, game_config)
 
-    assert observer == pytest.approx([1 / 30, 1 / 30], abs=0.003)
-    assert game == pytest.approx([1 / 60, 1 / 60], abs=0.003)
+    assert observer == pytest.approx([1 / 30, 1 / 30], rel=1e-9)
+    assert game == pytest.approx([1 / 60, 1 / 60], rel=1e-9)
