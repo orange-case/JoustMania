@@ -553,6 +553,84 @@ class TestMutedSpanAttribute:
         assert "audio.muted" not in [c.args[0] for c in span.set_attribute.call_args_list]
 
 
+class TestServerSpanAttributes:
+    """Audio server spans keep the `{Service}/{Method}` name; request values are attributes (#2953)."""
+
+    @pytest.fixture
+    def servicer(self, mock_audio_servicer):
+        return mock_audio_servicer
+
+    @staticmethod
+    def _span():
+        from unittest.mock import create_autospec
+
+        from opentelemetry.trace import Span
+
+        return create_autospec(Span, instance=True)
+
+    @staticmethod
+    def _attrs(span):
+        return {c.args[0]: c.args[1] for c in span.set_attribute.call_args_list}
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-031", flow="main", steps=[4])
+    async def test_play_sound_records_sound_attribute(self, servicer, mock_grpc_context):
+        span = self._span()
+        servicer.audio_manager.play_sound = MagicMock(return_value=True)
+        with (
+            patch.object(servicer, "_refresh_play_audio", autospec=True),
+            patch("services.audio.servicer.trace.get_current_span", return_value=span),
+        ):
+            await servicer.PlaySound(audio_pb2.PlaySoundRequest(file_path="congratulations"), mock_grpc_context)
+
+        span.update_name.assert_not_called()
+        attrs = self._attrs(span)
+        assert attrs["audio.sound"] == "congratulations"
+        assert "congratulations" in attrs["audio.file"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.uc("UC-031", flow="main", steps=[1, 2])
+    @pytest.mark.parametrize(
+        ("pattern", "track"), [("Joust/music/*.ogg", "Joust"), ("Menu/music/*.ogg", "Menu"), ("*.ogg", "music")]
+    )
+    async def test_play_music_records_track_attribute(self, servicer, mock_grpc_context, pattern, track):
+        span = self._span()
+        servicer.audio_manager.play_music = MagicMock(return_value="track-1")
+        with (
+            patch.object(servicer, "_refresh_play_audio", autospec=True),
+            patch("services.audio.servicer.trace.get_current_span", return_value=span),
+        ):
+            await servicer.PlayMusic(audio_pb2.PlayMusicRequest(file_pattern=pattern, loop=True), mock_grpc_context)
+
+        span.update_name.assert_not_called()
+        attrs = self._attrs(span)
+        assert attrs["audio.track"] == track
+        assert attrs["audio.pattern"] == pattern
+
+    @pytest.mark.uc("UC-031", flow="A3", steps=[1])
+    def test_change_tempo_records_tempo_attribute(self, servicer, mock_grpc_context):
+        span = self._span()
+        servicer.audio_manager.change_tempo = MagicMock(return_value=True)
+        with patch("services.audio.servicer.trace.get_current_span", return_value=span):
+            servicer.ChangeTempo(
+                audio_pb2.ChangeTempoRequest(track_id="track-1", new_tempo=1.3, transition_duration=1.0),
+                mock_grpc_context,
+            )
+
+        span.update_name.assert_not_called()
+        assert self._attrs(span)["audio.tempo"] == pytest.approx(1.3)
+
+    @pytest.mark.uc("UC-031", flow="A3", steps=[1])
+    def test_set_volume_records_volume_attribute(self, servicer, mock_grpc_context):
+        span = self._span()
+        servicer.audio_manager.set_volume = MagicMock(return_value=True)
+        with patch("services.audio.servicer.trace.get_current_span", return_value=span):
+            servicer.SetVolume(audio_pb2.SetVolumeRequest(volume=0.65), mock_grpc_context)
+
+        span.update_name.assert_not_called()
+        assert self._attrs(span)["audio.volume"] == pytest.approx(0.65)
+
+
 class TestPlaySoundAllChannelsBusy:
     """UC-031 A2: with every effect channel busy, only a CRITICAL PlaySound steals a lower-priority one."""
 
