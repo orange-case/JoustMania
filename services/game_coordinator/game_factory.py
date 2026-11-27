@@ -140,6 +140,13 @@ class GameFactory:
         return game_class(**common_args, **mode_args)
 
     @staticmethod
+    def _nonstop_mode_config(config: Any | None) -> dict:
+        # proto3 int32 has no presence: only a set nonstop_config can ask for 0 = unlimited (UC-026 BR-006).
+        if config is None or config.WhichOneof("game_config") != "nonstop_config":
+            return {"time_limit_seconds": nonstop_joust.DEFAULT_TIME_LIMIT_SECONDS}
+        return {"time_limit_seconds": config.nonstop_config.time_limit_seconds}
+
+    @staticmethod
     def _extract_mode_config(game_mode: Games, config: Any | None) -> dict:
         """
         Extract mode-specific arguments from StartGameConfig oneof.
@@ -151,9 +158,8 @@ class GameFactory:
         Returns:
             Dict of mode-specific constructor arguments
         """
-        # proto3 int32 has no presence: only a set nonstop_config can ask for 0 = unlimited.
-        if game_mode is Games.NonStop and (config is None or config.WhichOneof("game_config") != "nonstop_config"):
-            return {"time_limit_seconds": nonstop_joust.DEFAULT_TIME_LIMIT_SECONDS}
+        if game_mode is Games.NonStop:
+            return GameFactory._nonstop_mode_config(config)
 
         if config is None:
             return {}
@@ -180,12 +186,6 @@ class GameFactory:
                 cfg = config.random_teams_config
                 return {
                     "num_teams": cfg.num_teams if cfg.num_teams > 0 else 2,
-                }
-
-            case Games.NonStop if which_config == "nonstop_config":
-                cfg = config.nonstop_config
-                return {
-                    "time_limit_seconds": cfg.time_limit_seconds,
                 }
 
             case Games.Tournament if which_config == "tournament_config":
