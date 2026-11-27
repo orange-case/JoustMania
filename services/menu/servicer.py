@@ -21,6 +21,8 @@ from lib.setting_ladders import (
     RATE_OPTION,
     RETRO_BACKEND_OPTION,
     SHIELD_KNOB_LADDER,
+    TIME_LIMIT_LADDER,
+    TIME_LIMIT_OPTION,
 )
 from lib.types import Games
 from proto import menu_pb2, menu_pb2_grpc
@@ -78,6 +80,12 @@ def _resolved(details) -> bool:
     if details.error_code is not None or details.reason == Reason.ERROR:
         return False
     return isinstance(details.variant, str) and details.variant not in ("", PASSED_IN_DEFAULT)
+
+
+def _time_limit(game) -> str:
+    """UC-016 BR-006: the time limit's declared variant, empty (unknown) for anything off the ladder."""
+    variant = _resolved_variant(lambda: game.get_integer_details(TIME_LIMIT_OPTION, 180))
+    return variant if variant in TIME_LIMIT_LADDER else ""
 
 
 def _resolved_variant(read) -> str:
@@ -469,6 +477,7 @@ class MenuServicer(GameLifecycleMixin, menu_pb2_grpc.MenuServiceServicer):
             num_teams=game.get_integer_value("num_teams", 2),
             instructions=bool(user.get_boolean_value("game_instructions", False)),
             force_all_start=bool(game.get_boolean_value("force_all_start", False)),
+            nonstop_time_limit=_time_limit(game),
             audio_volume_master=_variant(user.get_float_details("audio_volume.master", 1.0)),
             shield_activation=_variant(game.get_string_details(SHIELD_ACTIVATION_FLAG, "")),
             operator_settings=dict(self.settings_ops.operator_settings),

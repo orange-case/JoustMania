@@ -191,6 +191,7 @@ def test_the_agent_row_tables_are_explicit():
         "sensitivity",
         "num_teams",
         "force_all_start",
+        "nonstop.time_limit_seconds",
         "game_instructions",
         "audio_volume.master",
         "agent_level",
@@ -203,6 +204,7 @@ def test_the_agent_row_tables_are_explicit():
         "shield.activation",
         "game_instructions",
         "force_all_start",
+        "nonstop.time_limit_seconds",
         "agent_level",
         "decision.backend",
         *ROWS,
@@ -214,6 +216,7 @@ def test_the_agent_row_tables_are_explicit():
         "shield.activation",
         "game_instructions",
         "force_all_start",
+        "nonstop.time_limit_seconds",
         "objectives",
     } == settings_ops.RESET_LOBBY_ONLY_OPTIONS
     assert settings_ops.LOBBY_ONLY_OPTIONS & set(ROWS) == {GOAL}

@@ -27,6 +27,7 @@ from lib.voice_prompts import (  # noqa: F401 (re-exported for the action layer)
     LOCK_VOICES,
     NUM_TEAMS_VOICES,
     SENSITIVITY_VOICES,
+    VOICE_GROUP,
 )
 from proto import audio_pb2
 
@@ -52,9 +53,6 @@ FAILURE_CUE_GAP_SECONDS = 0.3
 # not an `operator` flag: it paces one fixed asset (about as long as the cue itself) and is nothing
 # an operator tunes per venue.
 LIMIT_CUE_MIN_GAP_SECONDS = 1.0
-# The audio clip group of the announcements (PlaySoundRequest.group, #2107): a new announcement's
-# label stops the clip of the previous one still playing, so two announcements never overlap.
-ANNOUNCE_GROUP = "pad_announce"
 
 # Lock directions (A6), labels and the tap announcements (UC-015 BR-011): the voice tables shared
 # with the menu, lib/voice_prompts.py (#2106).
@@ -96,8 +94,9 @@ class CuePlayer:
         duration = getattr(response, "duration_seconds", 0.0)
         return float(duration) if isinstance(duration, int | float) and duration > 0 else 0.0
 
-    async def voice(self, sound: Sound, group: str = "") -> float:
-        return await self.play(sound, VOICE_VOLUME, group)
+    async def voice(self, sound: Sound) -> float:
+        """A voice line, in the menu's VOICE_GROUP (UC-016 BR-005): it replaces any voice line still playing."""
+        return await self.play(sound, VOICE_VOLUME, VOICE_GROUP)
 
     async def refusal(self) -> None:
         if self.screen_shows():
@@ -142,18 +141,18 @@ class CuePlayer:
     async def lock(self, locked: bool) -> None:
         """ "Pad locked" / "Pad unlocked" (A6); a cue still to come never plays over it."""
         self.cancel_all()
-        # The announcement clip still playing stops (in the background), but the lock word plays with no
-        # group, so a later preview hold (which stops `pad_announce`, BR-017) can never cut it.
-        self._start(self.stop_group(ANNOUNCE_GROUP))
         if self.screen_shows():
-            return  # UC-016 BR-005: line 8 shows LOCKED
+            # UC-016 BR-005: line 8 shows LOCKED. Without a screen the lock word itself replaces the clip;
+            # a stop sent then could land after it and cut it.
+            self._start(self.stop_group(VOICE_GROUP))
+            return
         await self.voice(LOCK_VOICES[locked])
 
     async def announce(self, label: Sound | None, value: Sound | None) -> None:
         """BR-011: the label, then the value once the label has ended, in the background.
 
         The latest announcement wins: it cancels the previous one (whose value then never plays) and
-        its label stops the previous clip still playing (ANNOUNCE_GROUP).
+        its label replaces the previous clip still playing (VOICE_GROUP).
         """
         if self._announce_task is not None:
             self._announce_task.cancel()
@@ -176,7 +175,7 @@ class CuePlayer:
             logger.warning(f"Stopping pad clip group {group} failed: {e}")
 
     def cancel_announcement(self) -> None:
-        """Drop the tap announcement still to come (its value never plays); the caller stops ANNOUNCE_GROUP."""
+        """Drop the tap announcement still to come (its value never plays); the caller stops VOICE_GROUP."""
         if self._announce_task is not None:
             self._announce_task.cancel()
             self._announce_task = None
@@ -218,8 +217,8 @@ class CuePlayer:
     async def _announce_sequence(self, label: Sound | None, value: Sound | None) -> None:
         """Either may be None (UC-016 BR-016: the volume has no value line, `FORCE ALL` no label)."""
         if label is not None:
-            label_seconds = await self.voice(label, ANNOUNCE_GROUP)
+            label_seconds = await self.voice(label)
             if label_seconds > 0 and value is not None:
                 await self._sleep(label_seconds)
         if value is not None:
-            await self.voice(value, ANNOUNCE_GROUP)
+            await self.voice(value)

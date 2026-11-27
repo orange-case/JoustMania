@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from lib.types import Sound
+from lib.voice_prompts import VOICE_GROUP
 from proto import audio_pb2
-from services.operator_pad.cues import ANNOUNCE_GROUP, LIMIT_CUE_MIN_GAP_SECONDS, LIMIT_CUES, REFUSAL_CUE, CuePlayer
+from services.operator_pad.cues import LIMIT_CUE_MIN_GAP_SECONDS, LIMIT_CUES, REFUSAL_CUE, CuePlayer
 from services.operator_pad.tests.fakes import GatedSleep
 
 LIMIT_CUE = LIMIT_CUES[True]
@@ -155,7 +156,7 @@ async def test_the_latest_announcement_wins_and_the_previous_value_never_plays(s
         Sound.MENU_VOX_LABEL_TEAMS.value,
         Sound.MENU_VOX_ADMINOP_3.value,
     ]
-    assert {c.args[0].group for c in stub.PlaySound.await_args_list} == {ANNOUNCE_GROUP}
+    assert {c.args[0].group for c in stub.PlaySound.await_args_list} == {VOICE_GROUP}
 
 
 @pytest.mark.uc("UC-015", flow="A3", br=["BR-009"])
@@ -209,9 +210,50 @@ async def test_lock_drops_a_running_announcement_so_its_value_never_plays_over_i
     sleep.gate.set()
     await asyncio.wait_for(cues.drain(), 0.2)
     assert played(stub) == [Sound.MENU_VOX_LABEL_TEAMS.value, Sound.MENU_VOX_PAD_LOCKED.value]
-    stub.StopSound.assert_awaited_once()  # cuts the label clip too
-    assert stub.StopSound.await_args.args[0].group == ANNOUNCE_GROUP
-    assert stub.PlaySound.await_args_list[-1].args[0].group == ""  # a preview hold can never cut the lock word
+    # The lock word replaces the label clip in the voice group; a stop could land after it and cut it.
+    stub.StopSound.assert_not_awaited()
+    assert stub.PlaySound.await_args_list[-1].args[0].group == VOICE_GROUP
+
+
+@pytest.mark.uc("UC-016", flow="A1", br=["BR-005"])
+async def test_lock_with_the_screen_up_stops_the_voice_group_and_says_nothing(stub):
+    cues = CuePlayer(stub)
+    cues.screen_up = lambda: True
+    await asyncio.wait_for(cues.lock(True), 0.2)
+    await asyncio.wait_for(cues.drain(), 0.2)
+    stub.PlaySound.assert_not_awaited()
+    assert stub.StopSound.await_args.args[0].group == VOICE_GROUP
+
+
+@pytest.mark.uc("UC-016", flow="A1", br=["BR-005"])
+async def test_every_pad_voice_line_is_in_the_menu_voice_group_and_sounds_are_not(stub):
+    """#2940: a pad line and a menu line replace each other instead of overlapping."""
+    stub.PlaySound.return_value = audio_pb2.PlaySoundResponse(success=True, duration_seconds=0.0)
+    cues = CuePlayer(stub, sleep=AsyncMock())
+    await cues.refusal()
+    await cues.limit()
+    await cues.cancel()
+    await cues.lock(False)
+    await cues.announce(Sound.MENU_VOX_LABEL_TEAMS, Sound.MENU_VOX_ADMINOP_3)
+    await cues.failure()
+    await cues.unknown_key()
+    await cues.attention()
+    await cues.confirmed()
+    await asyncio.wait_for(cues.drain(), 0.2)
+    groups = {c.args[0].file_path: c.args[0].group for c in stub.PlaySound.await_args_list}
+    voices = [
+        REFUSAL_CUE,
+        LIMIT_CUE,
+        Sound.MENU_VOX_PAD_UNLOCKED,
+        Sound.MENU_VOX_LABEL_TEAMS,
+        Sound.MENU_VOX_ADMINOP_3,
+        Sound.MENU_VOX_STATUS_NO_CONNECTION,
+    ]
+    assert {groups[v.value] for v in voices} == {VOICE_GROUP}
+    assert {
+        groups[s.value] for s in (Sound.SFX_BEEP_LOUD, Sound.SFX_EXPLOSION_22, Sound.SFX_JOIN, Sound.SFX_SHIELD_UP)
+    } == {""}
+    assert VOICE_GROUP == "menu_voice"
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017"], steps=[5])
@@ -222,11 +264,11 @@ async def test_stop_group_stops_only_that_group_and_a_failure_is_logged_not_rais
 
     audio = create_autospec(AudioStubSpec, instance=True)
     player = CuePlayer(audio)
-    await player.stop_group("pad_preview")
+    await player.stop_group(VOICE_GROUP)
     (call,) = audio.StopSound.await_args_list
-    assert call.args[0].group == "pad_preview"
+    assert call.args[0].group == VOICE_GROUP
     audio.StopSound.side_effect = RuntimeError("audio down")
-    await player.stop_group("pad_preview")  # no raise
+    await player.stop_group(VOICE_GROUP)  # no raise
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017"], steps=[5])

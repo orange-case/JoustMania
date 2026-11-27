@@ -12,12 +12,15 @@ from unittest.mock import AsyncMock, create_autospec, patch
 
 import pytest
 import pytest_asyncio
+from openfeature.flag_evaluation import FlagEvaluationDetails, Reason
 from opentelemetry import trace
 
 from lib.flag_service_writer import FlagServiceWriter
+from lib.setting_ladders import TIME_LIMIT_OPTION
 from lib.types import Sound
 from proto import controller_manager_pb2, controller_manager_pb2_grpc, menu_pb2
 from services.menu import metrics as menu_metrics
+from services.menu import servicer as servicer_module
 from services.menu import settings_ops
 from services.menu.event_publisher import EventPublisher
 from services.menu.handlers.base import ControllerState
@@ -41,6 +44,10 @@ BASELINE = {
     ("game", "sensitivity"): ({"ultra_slow": 0, "slow": 1, "medium": 2, "fast": 3, "ultra_fast": 4}, "medium"),
     ("game", "num_teams"): ({"two": 2, "three": 3, "four": 4, "five": 5, "six": 6}, "two"),
     ("game", "force_all_start"): ({"on": True, "off": False}, "off"),
+    ("game", "nonstop.time_limit_seconds"): (
+        {"unlimited": 0, "one_min": 60, "two_min": 120, "three_min": 180, "four_min": 240, "five_min": 300},
+        "three_min",
+    ),
     # Listed in reverse: the commit ladder must come from the menu's `order`, not the listing (UC-015 BR-018).
     ("game", "shield.activation"): ({"hold": "hold", "trigger": "trigger", "instant": "instant"}, "trigger"),
     ("user", "game_instructions"): ({"on": True, "off": False}, "off"),
@@ -818,3 +825,87 @@ async def test_pad_commands_report_the_committed_value(servicer):
     assert (backend.success, backend.value) == (True, "claude")
     assert (stop.success, stop.value) == (True, "")  # agent_switch names no value (services.md §3.1)
     assert (limit.success, limit.error, limit.value) == (False, "at_limit", "")
+
+
+# --- The Non-Stop time limit row (UC-016 BR-006, BR-012, BR-013; #2940) --------------------------
+
+TIME_LIMIT_KEY = ("game", TIME_LIMIT_OPTION)
+
+
+class _GameClient:
+    def get_integer_details(self, flag_key, default):
+        raise NotImplementedError
+
+
+def game_client(details):
+    client = create_autospec(_GameClient, instance=True)
+    client.get_integer_details.return_value = details
+    return client
+
+
+@pytest.mark.uc("UC-016", br=["BR-006"])
+@pytest.mark.parametrize(
+    ("details", "expected"),
+    [
+        (
+            FlagEvaluationDetails(flag_key=TIME_LIMIT_OPTION, value=180, variant="three_min", reason=Reason.STATIC),
+            "three_min",
+        ),
+        (
+            FlagEvaluationDetails(flag_key=TIME_LIMIT_OPTION, value=0, variant="unlimited", reason=Reason.STATIC),
+            "unlimited",
+        ),
+        # A promotion's value without a declared variant, and a client that fell back to the default: unknown.
+        (FlagEvaluationDetails(flag_key=TIME_LIMIT_OPTION, value=90, variant="real", reason=Reason.STATIC), ""),
+        (FlagEvaluationDetails(flag_key=TIME_LIMIT_OPTION, value=180, variant=None, reason=Reason.DEFAULT), ""),
+    ],
+)
+def test_the_status_field_is_the_declared_variant_or_empty(details, expected):
+    assert servicer_module._time_limit(game_client(details)) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-012"])
+async def test_a_step_writes_the_next_rung_persisted_and_plays_no_voice(servicer, flags):
+    reply = await pad(servicer, "step_setting", option=TIME_LIMIT_OPTION, direction="up", steps=3)
+    assert (reply.success, reply.value) == (True, "unlimited")  # three_min -> four, five, then no limit
+    ((flag_set, key, body),) = flags.puts
+    assert ((flag_set, key), body["variant"], body.get("persist")) == (TIME_LIMIT_KEY, "unlimited", True)
+    servicer.state_manager.audio.play_voice.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A7", br=["BR-012"])
+async def test_a_step_past_no_limit_is_at_limit(servicer, flags):
+    flags.values[TIME_LIMIT_KEY] = "unlimited"
+    reply = await pad(servicer, "step_setting", option=TIME_LIMIT_OPTION, direction="up")
+    assert (reply.success, reply.error) == (False, "at_limit")
+    assert flags.puts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A4", br=["BR-011", "BR-012"])
+@pytest.mark.parametrize("command", ["step_setting", "reset_setting"])
+async def test_the_time_limit_is_lobby_only(servicer, flags, command):
+    live = live_lifecycle(servicer)
+    data = {"direction": "up"} if command == "step_setting" else {"expect": "three_min"}
+    reply = await pad(servicer, command, option=TIME_LIMIT_OPTION, **data)
+    assert (reply.success, reply.error) == (False, "game_active")
+    assert flags.puts == [] and flags.deletes == []
+    live.cancel()
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", flow="A8", br=["BR-013"])
+async def test_a_reset_clears_the_persisted_value_and_reports_the_default(servicer, flags):
+    flags.values[TIME_LIMIT_KEY] = flags.admin[TIME_LIMIT_KEY] = "five_min"
+    reply = await pad(servicer, "reset_setting", option=TIME_LIMIT_OPTION, expect="three_min")
+    assert (reply.success, reply.value) == (True, "three_min")
+    assert flags.deletes == [("game", TIME_LIMIT_OPTION, "persist=true")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.uc("UC-016", br=["BR-011", "BR-012"])
+async def test_the_menu_lists_the_time_limit_commands(servicer):
+    commands = servicer.settings_ops.pad_commands()
+    assert {f"step_setting:{TIME_LIMIT_OPTION}", f"reset_setting:{TIME_LIMIT_OPTION}"} <= set(commands)

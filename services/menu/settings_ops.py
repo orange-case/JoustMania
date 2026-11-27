@@ -49,6 +49,8 @@ from lib.setting_ladders import (
     RETRO_BACKEND_OPTION,
     SENSITIVITY_LADDER,
     SHIELD_KNOB_LADDER,
+    TIME_LIMIT_LADDER,
+    TIME_LIMIT_OPTION,
     knob_start,
     step_ladder,
 )
@@ -170,6 +172,7 @@ STEP_OPTIONS: dict[str, _Option] = {
     "sensitivity": _Option("game_settings_writer", order=KNOB_LADDERS["sensitivity"], lobby_only=True),
     "num_teams": _Option("game_settings_writer", order=KNOB_LADDERS["num_teams"], lobby_only=True),
     "force_all_start": _Option("game_settings_writer", order=["off", "on"], lobby_only=True),
+    TIME_LIMIT_OPTION: _Option("game_settings_writer", order=TIME_LIMIT_LADDER, lobby_only=True),
     "game_instructions": _Option("user_prefs_writer", order=["off", "on"], lobby_only=True),
     "audio_volume.master": _Option("user_prefs_writer"),
     "agent_level": _Option(None),
@@ -201,6 +204,7 @@ RESET_AUTOMATIC_OPTIONS = ("sensitivity", "num_teams", SHIELD_ACTIVATION_FLAG)
 RESET_DEFAULT_OPTIONS: dict[str, tuple[str, str]] = {
     "game_instructions": ("user_prefs_writer", "game_instructions"),
     "force_all_start": ("game_settings_writer", "force_all_start"),
+    TIME_LIMIT_OPTION: ("game_settings_writer", TIME_LIMIT_OPTION),
     "agent_level": ("agent_settings_writer", AGENT_POLICY_FLAG),
     "decision.backend": ("agent_settings_writer", DECISION_BACKEND_FLAG),
     RETRO_BACKEND_OPTION: ("agent_settings_writer", RETRO_BACKEND_OPTION),
@@ -213,6 +217,7 @@ RESETTABLE_OPTIONS = frozenset(
         SHIELD_ACTIVATION_FLAG,
         "game_instructions",
         "force_all_start",
+        TIME_LIMIT_OPTION,
         "agent_level",
         "decision.backend",
         GOAL_OPTION,
@@ -224,7 +229,15 @@ RESETTABLE_OPTIONS = frozenset(
     }
 )
 RESET_LOBBY_ONLY_OPTIONS = frozenset(
-    {"sensitivity", "num_teams", SHIELD_ACTIVATION_FLAG, "game_instructions", "force_all_start", GOAL_OPTION}
+    {
+        "sensitivity",
+        "num_teams",
+        SHIELD_ACTIVATION_FLAG,
+        "game_instructions",
+        "force_all_start",
+        TIME_LIMIT_OPTION,
+        GOAL_OPTION,
+    }
 )
 # GetMenuStatus.pad_commands: what a pad may send this menu (an older menu answers unknown commands with success).
 PAD_CAPABILITIES = (
@@ -234,6 +247,8 @@ PAD_CAPABILITIES = (
     "step_setting.from",
     "set_backend.from",
     "reset_setting.from:decision.backend",
+    f"step_setting:{TIME_LIMIT_OPTION}",
+    f"reset_setting:{TIME_LIMIT_OPTION}",
 )
 # Per-option strings (`step_setting:<option>`, `reset_setting:<option>`).
 AGENT_ROW_CAPABILITIES = {option: (f"step_setting:{option}", f"reset_setting:{option}") for option in AGENT_ROW_LADDERS}

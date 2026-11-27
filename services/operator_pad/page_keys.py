@@ -24,6 +24,7 @@ from lib.setting_ladders import (
     PAID_BACKENDS,
     RATE_OPTION,
     RETRO_BACKEND_OPTION,
+    TIME_LIMIT_OPTION,
     Preview,
 )
 from services.operator_pad.config import K1, K2, K3, K4, K6, K7
@@ -48,6 +49,11 @@ FALLBACK_PAGE = PAGES.index("HOME")  # BR-016
 # BR-014 D12: the guard keys a raising backend edit or reset needs (services.md §3.1 `pad_commands`).
 SET_BACKEND_FROM = "set_backend.from"
 RESET_BACKEND_FROM = "reset_setting.from:decision.backend"
+
+
+# Rows a menu must list (`step_setting:<option>`, `reset_setting:<option>`) before the pad sends them:
+# the agent rows and the time limit (#2940), which an older menu answers `bad_option`.
+GATED_OPTIONS = AGENT_ROW_OPTIONS | {TIME_LIMIT_OPTION}
 
 
 def step_command(option: str) -> str:
@@ -83,7 +89,7 @@ ROWS: dict[str, tuple[RowSpec | None, RowSpec | None, RowSpec | None]] = {
         _row("shield.activation", reset=AUTO),
         _row("game_instructions", reset=DEFAULT),
     ),
-    "START": (_row("force_all_start", reset=DEFAULT), None, None),
+    "START": (_row("force_all_start", reset=DEFAULT), None, _row(TIME_LIMIT_OPTION, reset=DEFAULT)),
     "AGENT": (
         _row(AGENT_STATE, edit=SWITCH, lobby_only=False),
         _row("agent_level", reset=DEFAULT, lobby_only=False),
@@ -192,6 +198,8 @@ def edit_plan(spec: RowSpec, status, steps: int) -> Plan:
         if rank(now) is None:
             return Plan(now, None, refused=True)  # BR-014: never confirmed blind
         return Plan(now, new, raises=(rank(new) or 0) > (rank(now) or 0))
+    if spec.option == TIME_LIMIT_OPTION and (now is None or step_command(spec.option) not in pad_commands(status)):
+        return Plan(now, None, refused=True)  # BR-012: never stepped blind; BR-011 "Menu too old"
     if spec.option == AGENT_STATE:
         if now is None or AGENT_STATE not in pad_commands(status):
             return Plan(now, None, refused=True)  # BR-014: never confirmed blind; BR-011 "Menu too old"
@@ -243,7 +251,9 @@ def _reset_plan(spec: RowSpec, status) -> Plan:
             return Plan(now, new, raises=raises, refused=True)  # no paid target unguarded, raise or not
         return Plan(now, new, raises=raises)
     if option != "agent_level":
-        return Plan(row_preview(option, status, 0).value, new, refused=new is None)
+        now = row_preview(option, status, 0).value
+        gated = option == TIME_LIMIT_OPTION and reset_command(option) not in pad_commands(status)
+        return Plan(now, new, refused=new is None or gated)
     base = reset_base(status)
     if rank(base) is None or rank(new) is None:
         return Plan(base, new, refused=True)  # BR-013, BR-014: unknown or off the ladder

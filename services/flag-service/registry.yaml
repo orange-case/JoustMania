@@ -139,7 +139,7 @@ flags:
   # may change (FR-138) and a promotion may set for real games (W5). Capacity,
   # lobby, team-structure and presentation flags are not in it.
   - {set: game, key: sensitivity, kind: overlay, scope: [stack, experiment+arm, real], latched: true, persist: true, description: "movement a player survives: 0 ultra_slow (strictest) to 4 ultra_fast (most lenient)"}
-  - {set: game, key: nonstop.time_limit_seconds, kind: overlay, scope: [real], latched: true, bounds: {range: [0, 600], integer: true}}
+  - {set: game, key: nonstop.time_limit_seconds, kind: overlay, scope: [stack, real], latched: true, persist: true, bounds: {range: [0, 600], integer: true}}
   - {set: game, key: invincibility_seconds, kind: overlay, scope: [real], latched: true, bounds: {range: [0, 10]}}
   - {set: game, key: fight_club.min_rounds, kind: overlay, scope: [real], latched: true, bounds: {range: [1, 30], integer: true}}
   - {set: game, key: werewolf.reveal_time_seconds, kind: overlay, scope: [real], latched: true, bounds: {range: [10, 90]}}

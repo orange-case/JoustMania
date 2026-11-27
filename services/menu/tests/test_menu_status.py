@@ -149,6 +149,8 @@ async def test_status_reports_every_field_from_memory_and_the_in_process_clients
             "step_setting.from",
             "set_backend.from",
             "reset_setting.from:decision.backend",
+            "step_setting:nonstop.time_limit_seconds",
+            "reset_setting:nonstop.time_limit_seconds",
             *[
                 f"{command}:{option}"
                 for option in (

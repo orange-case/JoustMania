@@ -84,6 +84,7 @@ ROW_LABELS = {
     "shield.activation": "SHIELD",
     "game_instructions": "INSTRUCTIONS",
     "force_all_start": "FORCE ALL",
+    "nonstop.time_limit_seconds": "NS TIME",
     page_keys.AGENT_STATE: "AGENT",
     "agent_level": "LEVEL",
     "decision.backend": "BACKEND",

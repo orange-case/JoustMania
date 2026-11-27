@@ -177,7 +177,7 @@ def test_v3_page_rows():
     st = status(agent_enabled=False, agent_enabled_state="off", agent_level="ambient")
     ctx = PageContext(locked=True, internet=NET_DOWN, version="0.24.0")
     assert page_rows(1, st, ctx, 3) == [("TEAMS", "AUTO"), ("SHIELD", "TRIGGER"), ("INSTRUCTIONS", "ON")]
-    assert page_rows(2, st, ctx, 3) == [("FORCE ALL", "OFF"), ("LOW", "?")]
+    assert page_rows(2, st, ctx, 3) == [("FORCE ALL", "OFF"), ("LOW", "?"), ("NS TIME", "?")]
     # A stopped agent keeps its known level (m3); the planned fields are `?` until the menu reports them.
     assert page_rows(3, st, ctx, 3) == [("AGENT", "OFF"), ("LEVEL", bar(2, 4)), ("GOAL", "?")]
     assert page_rows(4, st, ctx, 3) == [("BACKEND", "CLAUDE"), ("RATE", "?"), ("GROUP", "?")]

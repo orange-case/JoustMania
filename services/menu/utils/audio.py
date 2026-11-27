@@ -7,7 +7,7 @@ import grpc
 import grpc.aio
 
 from lib.types import Sound
-from lib.voice_prompts import GAME_MODE_VOICE
+from lib.voice_prompts import GAME_MODE_VOICE, VOICE_GROUP
 from services.menu.utils.detached import run_detached
 from services.menu.utils.settings import validate_mode_keys
 
@@ -25,8 +25,7 @@ DEFAULT_SOUND_VOLUME = 0.8
 DEFAULT_VOICE_VOLUME = 0.9
 DEFAULT_LOBBY_MUSIC_VOLUME = 0.4
 
-# Audio group of every menu voice line: a new line replaces the one still playing.
-MENU_VOICE_GROUP = "menu_voice"
+MENU_VOICE_GROUP = VOICE_GROUP
 
 
 def _read_volume(client, flag_name: str, default: float) -> float:

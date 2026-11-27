@@ -393,7 +393,13 @@ async def test_setting_defaults_is_what_the_reset_puts_in_force(servicer, flags,
     await servicer.settings_ops.refresh_operator_settings()
     defaults = (await status(servicer)).setting_defaults
 
-    assert set(defaults) == {"game_instructions", "force_all_start", "agent_level", "decision.backend"}
+    assert set(defaults) == {
+        "game_instructions",
+        "force_all_start",
+        "nonstop.time_limit_seconds",
+        "agent_level",
+        "decision.backend",
+    }
     assert (defaults["agent_level"], defaults["game_instructions"]) == (expected, "off")
     for option in ("agent_level", "game_instructions"):
         reply = await pad(servicer, "reset_setting", option=option, expect=defaults[option])
@@ -414,7 +420,8 @@ async def test_setting_defaults_drops_a_key_whose_read_failed(servicer, flags, f
     await servicer.settings_ops.refresh_operator_settings()
     defaults = (await status(servicer)).setting_defaults
 
-    assert set(defaults) == {"game_instructions", "force_all_start", "agent_level", "decision.backend"} - missing
+    expected = {"game_instructions", "force_all_start", "nonstop.time_limit_seconds", "agent_level", "decision.backend"}
+    assert set(defaults) == expected - missing
     assert all(defaults.values())
 
 
@@ -457,6 +464,8 @@ async def test_status_lists_the_pad_commands_this_menu_understands(servicer):
         "step_setting.from",
         "set_backend.from",
         "reset_setting.from:decision.backend",
+        "step_setting:nonstop.time_limit_seconds",
+        "reset_setting:nonstop.time_limit_seconds",
         *[
             f"{command}:{option}"
             for option in (

@@ -11,6 +11,10 @@ from __future__ import annotations
 
 from lib.types import Games, Sound
 
+# Audio clip group of every voice line of the menu and the operator pad (UC-016 BR-005): the newest
+# line replaces one still playing, so a pad line and a menu line never overlap.
+VOICE_GROUP = "menu_voice"
+
 # Voice line per sensitivity level index (0 = ultra_slow ... 4 = ultra_fast), as original JoustMania.
 SENSITIVITY_VOICES: list[Sound] = [
     Sound.MENU_VOX_SENSITIVITY_ULTRA_HIGH,  # ULTRA_SLOW (0)

@@ -10,16 +10,17 @@ import pytest
 
 from lib.setting_ladders import MODE_LADDER
 from lib.types import Sound
+from lib.voice_prompts import VOICE_GROUP
 from proto import audio_pb2, menu_pb2
 from services.operator_pad import page_keys
 from services.operator_pad import preview as preview_module
 from services.operator_pad.actions import Actions
 from services.operator_pad.config import DEFAULT_KEYMAP, PadConfig, Timings, parse_keymap
 from services.operator_pad.controller import PadController
-from services.operator_pad.cues import ANNOUNCE_GROUP, CuePlayer
+from services.operator_pad.cues import CuePlayer
 from services.operator_pad.gestures import LAYER, PRESS, RELEASE, Gesture
 from services.operator_pad.pages import PAGES
-from services.operator_pad.preview import PREVIEW_GROUP, Previewer
+from services.operator_pad.preview import Previewer
 from services.operator_pad.state import MenuStatusReader
 from services.operator_pad.tests.fakes import AudioStubSpec, CoordinatorStubSpec, MenuStubSpec
 
@@ -121,7 +122,7 @@ async def test_a_fast_spin_speaks_one_label_and_only_the_final_value():
         rig.step(net)
         await rig.time.advance(0.05)
     await rig.time.advance(1.0)
-    assert rig.clips == [(TEAMS, PREVIEW_GROUP), (NUMBER[6], PREVIEW_GROUP)]
+    assert rig.clips == [(TEAMS, VOICE_GROUP), (NUMBER[6], VOICE_GROUP)]
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017"], steps=[5])
@@ -131,10 +132,10 @@ async def test_slow_steps_speak_each_value_in_the_preview_group():
         rig.step(net)
         await rig.time.advance(0.6)
     assert rig.clips == [
-        (TEAMS, PREVIEW_GROUP),
-        (NUMBER[3], PREVIEW_GROUP),
-        (NUMBER[4], PREVIEW_GROUP),
-        (NUMBER[5], PREVIEW_GROUP),
+        (TEAMS, VOICE_GROUP),
+        (NUMBER[3], VOICE_GROUP),
+        (NUMBER[4], VOICE_GROUP),
+        (NUMBER[5], VOICE_GROUP),
     ]
 
 
@@ -241,7 +242,7 @@ async def test_end_hold_drops_the_waiting_value_and_stops_the_preview_group():
     rig.previewer.end_hold()
     await rig.time.advance(1.0)
     assert rig.files() == [TEAMS]
-    assert rig.stops == [ANNOUNCE_GROUP, PREVIEW_GROUP]
+    assert rig.stops == [VOICE_GROUP, VOICE_GROUP]
     assert rig.previewer.hold_key is None
 
 
@@ -299,8 +300,9 @@ async def test_no_command_is_sent_before_the_release_and_the_release_stops_the_p
         "direction": "up",
         "steps": "3",
     }
-    # BR-017: the preview group is stopped before the commit, so no preview clip plays over the menu's voice.
-    assert stops_at_commit == [[ANNOUNCE_GROUP, PREVIEW_GROUP]]
+    # BR-017: a committing release sends no stop (only the hold's start did): the menu's voice line replaces
+    # the preview clip in the shared group, and a late stop could cut that line (#2940).
+    assert stops_at_commit == [[VOICE_GROUP]]
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017", "BR-007"], steps=[5])
@@ -325,7 +327,7 @@ async def test_a_chord_ends_the_preview():
     await pad.on_code(CODE["K2"], PRESS, 100)  # a chord: the hold commits nothing, the preview stops
     await rig.time.advance(1.0)
     assert rig.files() == [TEAMS]
-    assert rig.stops == [ANNOUNCE_GROUP, PREVIEW_GROUP]
+    assert rig.stops == [VOICE_GROUP, VOICE_GROUP]
 
 
 @pytest.mark.uc("UC-015", flow="main", br=["BR-017"], steps=[5])
@@ -358,7 +360,7 @@ async def test_a_new_hold_cuts_a_tap_announcement_still_playing():
     rig.step(1)
     await rig.time.advance(1.0)
     assert Sound.MENU_VOX_SENSITIVITY_HIGH.value not in rig.files()
-    assert rig.stops[0] == ANNOUNCE_GROUP
+    assert rig.stops[0] == VOICE_GROUP
 
 
 @pytest.mark.uc("UC-015", flow="A4", br=["BR-017"])
